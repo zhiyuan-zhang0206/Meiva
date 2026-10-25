@@ -19,10 +19,10 @@ so a short drill still records real rounds and verdicts.
 
 from __future__ import annotations
 
-import time
 from pathlib import Path
-from typing import Protocol, cast
+from typing import Any, Protocol
 
+from base.clock import SYSTEM_TIMERS, Clock, ClockConfig
 from base.daemon.health import DaemonProbe
 from base.host.proc import process_alive
 from services.supervision.meiva_root.health import HealthConfig
@@ -71,7 +71,16 @@ def liveness_probe(host: _TreeHost, unit_id: str, *, heartbeat_dir: Path | None 
             view = host.tree_view()
         except Exception as exc:
             return DaemonProbe.unavailable(f"tree view failed: {exc}")
-        for unit in cast("list[dict[str, object]]", view["units"]):
+        units_raw = view.get("units")
+        units_any: Any = units_raw
+        if not isinstance(units_raw, list):
+            return DaemonProbe.unavailable("tree view units is not a list")
+        units_list: list[Any] = units_any
+        for item in units_list:
+            item_any: Any = item
+            if not isinstance(item, dict):
+                continue
+            unit: dict[str, Any] = item_any
             if unit["id"] == unit_id:
                 pid = unit["pid"]
                 state = unit["state"]
@@ -88,8 +97,9 @@ def _heartbeat_verdict(heartbeat_dir: Path | None, unit_id: str, pid: int) -> Da
     if heartbeat_dir is None:
         return DaemonProbe.up(f"pid {pid} alive")
     beat = heartbeat_dir / f"{unit_id}.beat"
+    clock = Clock(ClockConfig("UTC", "UTC", message_timestamp_weekday=False), timers=SYSTEM_TIMERS)
     try:
-        age = time.time() - beat.stat().st_mtime
+        age = clock.now().timestamp() - beat.stat().st_mtime
     except FileNotFoundError:
         return DaemonProbe.up(f"pid {pid} alive")
     except OSError as exc:

@@ -14,12 +14,62 @@ delivery and save does not become a second inbound.
 from __future__ import annotations
 
 import asyncio
-import time
-from typing import Any
+from typing import Any, Protocol
 
 import requests
 
+from base.clock import SYSTEM_TIMERS, Clock, ClockConfig
 from services.entrypoints.im_bridge.types import RetryableTransportError, raise_http_failure
+
+
+class FeishuRawResponse(Protocol):
+    @property
+    def status_code(self) -> int: ...
+
+
+class FeishuResponseData(Protocol):
+    @property
+    def items(self) -> list[Any] | None: ...
+
+
+class FeishuMessageResponse(Protocol):
+    @property
+    def raw(self) -> FeishuRawResponse | None: ...
+    @property
+    def code(self) -> int: ...
+    @property
+    def msg(self) -> str: ...
+    @property
+    def data(self) -> FeishuResponseData | None: ...
+
+    def success(self) -> bool: ...
+
+
+class FeishuMessageResource(Protocol):
+    def list(self, request: object, /) -> FeishuMessageResponse: ...
+    def create(self, request: object, /) -> FeishuMessageResponse: ...
+
+
+class FeishuImV1(Protocol):
+    @property
+    def message(self) -> FeishuMessageResource: ...
+
+
+class FeishuImNamespace(Protocol):
+    @property
+    def v1(self) -> FeishuImV1: ...
+
+
+class FeishuRestConfig(Protocol):
+    @property
+    def timeout(self) -> float | None: ...
+
+
+class FeishuRestClient(Protocol):
+    @property
+    def im(self) -> FeishuImNamespace: ...
+    @property
+    def _config(self) -> FeishuRestConfig: ...
 
 
 class FeishuListRejected(RuntimeError):  # noqa: N818 — reads as the outcome, like its log message "Feishu list rejected"
@@ -43,10 +93,11 @@ def idempotency_key(message_id: str | None) -> str | None:
 
 
 def now_ms() -> int:
-    return int(time.time() * 1000)
+    clock = Clock(ClockConfig("UTC", "UTC", message_timestamp_weekday=False), timers=SYSTEM_TIMERS)
+    return int(clock.now().timestamp() * 1000)
 
 
-def create_ms(item: Any) -> int | None:
+def create_ms(item: object) -> int | None:
     """A listed message's create time in epoch ms; None when absent/garbled."""
 
     try:
@@ -103,13 +154,13 @@ def pending_after(
     return fresh, stale
 
 
-async def list_chat(rest_client: Any, chat_id: str) -> list[Any]:
-    """The chat's newest page of messages (20), ascending; failed list calls raise."""
+# meiva:note
+# The chat's newest page of messages (20), ascending; failed list calls raise.
+async def list_chat(rest_client: FeishuRestClient, chat_id: str) -> list[Any]:
+    from lark_oapi.api.im.v1 import ListMessageRequest  # pyright: ignore[reportUnknownVariableType]
 
-    from lark_oapi.api.im.v1 import ListMessageRequest
-
-    request = (
-        ListMessageRequest.builder()
+    request: object = (
+        ListMessageRequest.builder()  # pyright: ignore[reportUnknownMemberType]
         .container_id_type("chat")
         .container_id(chat_id)
         .page_size(20)
@@ -117,7 +168,9 @@ async def list_chat(rest_client: Any, chat_id: str) -> list[Any]:
         .build()
     )
     try:
-        response = await asyncio.to_thread(rest_client.im.v1.message.list, request)
+        response: FeishuMessageResponse = await asyncio.to_thread(
+            rest_client.im.v1.message.list, request
+        )
     except (requests.exceptions.SSLError, requests.exceptions.ProxyError):
         raise
     except (requests.ConnectionError, requests.Timeout) as exc:

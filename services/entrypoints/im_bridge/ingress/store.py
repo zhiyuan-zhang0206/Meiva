@@ -1,16 +1,16 @@
 """Account-fenced Weixin source retention and native chat admission."""
 
 import json
+import time
 from collections.abc import Mapping
-from uuid import uuid4
+from uuid import NAMESPACE_OID, UUID, uuid5
 
 from psycopg import Connection, sql
 from psycopg.types.json import Jsonb
-from psycopg_pool import ConnectionPool
 
 from base import telemetry
 from base.agents.inbox.chat_delivery import insert_chat_inbound_in_transaction
-from base.db.transaction import write_transaction
+from base.db.transaction import ConnectionSource, write_transaction
 from services.entrypoints.im_bridge.ingress.types import (
     IngressBindingState,
     IngressIdentityConflictError,
@@ -54,10 +54,15 @@ def receipt_from_row(row: tuple[object, ...]) -> IngressReceipt:
 
 
 class WeixinIngressStore:
-    def __init__(self, pool: ConnectionPool | None) -> None:
-        self.pool = pool
+    def __init__(self, pool: ConnectionSource | None = None) -> None:
+        self.pool: ConnectionSource | None = pool
+        self._seq = 0
 
-    def require_pool(self) -> ConnectionPool:
+    def _next_uuid(self) -> UUID:
+        self._seq += 1
+        return uuid5(NAMESPACE_OID, f"weixin-{self._seq}-{time.perf_counter_ns()}")
+
+    def require_pool(self) -> ConnectionSource:
         if self.pool is None:
             raise RuntimeError("Weixin durable ingress requires the native database pool")
         return self.pool
@@ -75,7 +80,7 @@ class WeixinIngressStore:
     def initialize(self, namespace: str, account_id: str) -> PollBinding:
         if not namespace or not account_id:
             raise ValueError("Weixin poll requires a qualified namespace and account")
-        epoch = uuid4()
+        epoch = self._next_uuid()
         with write_transaction(self.require_pool()) as conn:
             conn.execute(
                 "INSERT INTO weixin_ingress_bindings(id,namespace,account_id,epoch) VALUES (1,%s,%s,%s) "
@@ -287,7 +292,7 @@ class WeixinIngressStore:
                     "UPDATE weixin_ingress_receipts SET status='claimed',attempt_id=%s "
                     "WHERE id=%s AND namespace=%s AND account_id=%s AND status='retained' AND EXISTS (SELECT 1 FROM weixin_ingress_cursors c WHERE c.namespace=weixin_ingress_receipts.namespace AND c.account_id=weixin_ingress_receipts.account_id AND c.state='active') RETURNING {}"
                 ).format(sql.SQL(_RECEIPT_COLUMNS)),
-                (uuid4(), receipt_id, binding.namespace, binding.account_id),
+                (self._next_uuid(), receipt_id, binding.namespace, binding.account_id),
             ).fetchone()
             return receipt_from_row(row) if row is not None else None
 

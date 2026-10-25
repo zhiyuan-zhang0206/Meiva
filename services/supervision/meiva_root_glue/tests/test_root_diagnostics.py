@@ -5,32 +5,25 @@ import logging
 from collections.abc import Iterator
 from pathlib import Path
 from threading import Event
-from types import SimpleNamespace
 from typing import NoReturn, cast
 from unittest.mock import Mock
 
 import pytest
 
-from base import telemetry
 from base.agents.context.clients import ClientSet
 from base.cluster.machine import MachineIdentityReader
 from base.cluster.machine.configured import ConfiguredMachineIdentity
 from base.cluster.machine.tests.identity import machine_identity as machine_identity
 from base.daemon.health import DaemonProbe, ProbeVerdict
 from base.db import Database
-from base.host import proc
 from base.host.db_authority.api import publish_telemetry_token, telemetry_token
 from base.host.net.tests.fake_url_opener import Answer, FakeUrlOpener
 from base.log.tests.log_records import LogRecords
 from base.log.tests.log_records import loguru_records as loguru_records
 from base.native_process.loaded_commit import LoadedCommit
-from base.native_process.ownership import OwnedProcess
-from base.telemetry import process_logging
 from base.telemetry.delivery.pipeline import EventPipeline
 from base.telemetry.station_endpoint import StationEndpointConfig
-from services.supervision.meiva_root.failure_state import UnitFailureFacts
-from services.supervision.meiva_root.health import HealthMonitor, ProbeRunner
-from services.supervision.meiva_root.probes import ProbeRegistry
+from services.supervision.meiva_root.health import ProbeRunner
 from services.supervision.meiva_root_glue import diagnostic_probes as probes
 from services.supervision.meiva_root_glue.diagnostics import (
     Diagnostic,
@@ -60,14 +53,27 @@ def _unused_database() -> NoReturn:
     raise AssertionError("this diagnostic must not construct a database")
 
 
-def _no_op(**_kwargs: object) -> None:
-    return None
+class _NoOpTelemetry:
+    def start(
+        self,
+        *,
+        name: str,
+        producer: object,
+        machine_reader: object,
+        image: LoadedCommit,
+    ) -> None:
+        del name, producer, machine_reader, image
+
+    def sync(self, *, timeout: float) -> object:
+        del timeout
+        return None
+
+
+_NO_OP_TELEMETRY = _NoOpTelemetry()
 
 
 @pytest.fixture
-def events(monkeypatch: pytest.MonkeyPatch, loguru_records: LogRecords) -> _Events:
-    monkeypatch.setattr(process_logging, "init_gateway_process", _no_op)
-    monkeypatch.setattr(telemetry, "sync", _no_op)
+def events(loguru_records: LogRecords) -> _Events:
     return _Events(loguru_records)
 
 
@@ -317,26 +323,8 @@ async def test_every_failing_sample_reports_and_recovery_reports_once(
     assert [record["consecutive_failures"] for record in events] == [1, 2, 0, 1]
 
 
-class _NoRevival:
-    async def restart(self, unit_id: str) -> dict[str, object]:
-        raise AssertionError(f"unexpected restart of {unit_id}")
-
-    def health_generation(self, unit_id: str) -> tuple[OwnedProcess, float] | None:
-        raise AssertionError(f"unexpected generation lookup for {unit_id}")
-
-    def revival_deferral(self, unit_id: str) -> str | None:
-        raise AssertionError(f"unexpected revival check for {unit_id}")
-
-    def unit_failure_facts(self, unit_id: str) -> UnitFailureFacts:
-        raise AssertionError(f"unexpected failure facts lookup for {unit_id}")
-
-    def operator_stop_facts(self, unit_id: str) -> None:
-        return None
-
-
-class _Health(HealthMonitor):
+class _Health:
     def __init__(self) -> None:
-        super().__init__(_NoRevival(), ProbeRegistry())
         self.release = asyncio.Event()
         self.fail = False
 
@@ -347,6 +335,9 @@ class _Health(HealthMonitor):
 
     def health_snapshot(self) -> dict[str, object]:
         return {"service": {"last_verdict": "down"}}
+
+    async def stop(self) -> None:
+        return None
 
 
 async def test_tick_requires_both_rounds_and_does_not_mean_healthy(
@@ -360,6 +351,7 @@ async def test_tick_requires_both_rounds_and_does_not_mean_healthy(
         clients=ClientSet(),
         image=LoadedCommit(source_root=Path(__file__).resolve().parents[4], sha=None),
         machine=machine_identity,
+        telemetry=_NO_OP_TELEMETRY,
     )
     task = asyncio.create_task(rounds.run_round())
     await asyncio.sleep(0.01)
@@ -387,6 +379,7 @@ async def test_expectation_precedes_first_sample_and_is_retired_on_stop(
             image=LoadedCommit(source_root=Path(__file__).resolve().parents[4], sha=None),
             tasks=tasks,
             machine=machine_identity,
+            telemetry=_NO_OP_TELEMETRY,
         )
         await rounds.start()
         assert events[0]["event"] == "root_health_expected"
@@ -405,12 +398,12 @@ async def test_expectation_precedes_first_sample_and_is_retired_on_stop(
 @pytest.mark.parametrize("sha", ["captured-root-image", None])
 async def test_root_logging_owns_only_the_started_pipeline(
     sha: str | None,
-    monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
     events: _Events,
     *,
     machine_identity: MachineIdentityReader,
 ) -> None:
+    del events
     image = LoadedCommit(source_root=tmp_path, sha=sha)
     made: list[EventPipeline] = []
 
@@ -422,15 +415,20 @@ async def test_root_logging_owns_only_the_started_pipeline(
     clients = ClientSet(pipeline_factory=producer)
     seen: list[LoadedCommit] = []
 
-    def initialize(
-        *, name: str, producer: object, machine_reader: object, image: LoadedCommit
-    ) -> None:
-        assert name == "meiva-root"
-        assert callable(producer) and callable(machine_reader)
-        assert producer() is clients.event_pipeline()
-        seen.append(image)
+    class _RecordingTelemetry(_NoOpTelemetry):
+        def start(
+            self,
+            *,
+            name: str,
+            producer: object,
+            machine_reader: object,
+            image: LoadedCommit,
+        ) -> None:
+            assert name == "meiva-root"
+            assert callable(producer) and callable(machine_reader)
+            assert producer() is clients.event_pipeline()
+            seen.append(image)
 
-    monkeypatch.setattr(process_logging, "init_gateway_process", initialize)
     async with asyncio.TaskGroup() as tasks:
         rounds = RootHealthRounds(
             _Health(),
@@ -439,6 +437,7 @@ async def test_root_logging_owns_only_the_started_pipeline(
             image=image,
             tasks=tasks,
             machine=machine_identity,
+            telemetry=_RecordingTelemetry(),
         )
         assert made == []
         await rounds.start()
@@ -448,7 +447,7 @@ async def test_root_logging_owns_only_the_started_pipeline(
 
 
 async def test_logging_startup_error_stops_its_constructed_writer(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, *, machine_identity: MachineIdentityReader
+    tmp_path: Path, *, machine_identity: MachineIdentityReader
 ) -> None:
     made: list[EventPipeline] = []
     error = ValueError("root logging failed after constructing its writer")
@@ -460,11 +459,19 @@ async def test_logging_startup_error_stops_its_constructed_writer(
 
     clients = ClientSet(pipeline_factory=producer)
 
-    def initialize(**_inputs: object) -> NoReturn:
-        clients.event_pipeline()
-        raise error
+    class _FailingTelemetry(_NoOpTelemetry):
+        def start(
+            self,
+            *,
+            name: str,
+            producer: object,
+            machine_reader: object,
+            image: LoadedCommit,
+        ) -> NoReturn:
+            del name, producer, machine_reader, image
+            clients.event_pipeline()
+            raise error
 
-    monkeypatch.setattr(process_logging, "init_gateway_process", initialize)
     async with asyncio.TaskGroup() as tasks:
         rounds = RootHealthRounds(
             _Health(),
@@ -473,6 +480,7 @@ async def test_logging_startup_error_stops_its_constructed_writer(
             image=LoadedCommit(source_root=tmp_path, sha=None),
             tasks=tasks,
             machine=machine_identity,
+            telemetry=_FailingTelemetry(),
         )
         with pytest.raises(ValueError) as caught:
             await rounds.start()
@@ -480,28 +488,26 @@ async def test_logging_startup_error_stops_its_constructed_writer(
         assert made[0].stopped
 
 
-def test_helper_diagnostics_are_macos_only(
-    monkeypatch: pytest.MonkeyPatch, *, machine_identity: ConfiguredMachineIdentity
-) -> None:
-    monkeypatch.setattr(probes, "is_macos", lambda: False)
+def test_helper_diagnostics_are_macos_only(*, machine_identity: ConfiguredMachineIdentity) -> None:
     machine_identity.set(role="agent-runner")
     names = {
         check.name
         for check in probes.build_diagnostics(
-            set(), database=_unused_database, machine=machine_identity
+            set(),
+            database=_unused_database,
+            machine=machine_identity,
+            macos=False,
         )
     }
     assert names == {"venv"}
-    monkeypatch.setattr(probes, "is_macos", lambda: True)
-    monkeypatch.setattr(
-        probes,
-        "settings",
-        SimpleNamespace(services=SimpleNamespace(permissions_helper_enabled=False)),
-    )
     names = {
         check.name
         for check in probes.build_diagnostics(
-            set(), database=_unused_database, machine=machine_identity
+            set(),
+            database=_unused_database,
+            machine=machine_identity,
+            macos=True,
+            overrides={},
         )
     }
     assert names == {"venv", "brew-pin", "permissions-helper"}
@@ -565,56 +571,58 @@ def test_station_resolution_failure_is_unavailable_and_does_not_send(unit_home: 
     assert opener.calls == []
 
 
-def test_missing_brew_probe_is_unavailable_not_an_empty_healthy_set(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    def missing(*_args: object, **_kwargs: object) -> NoReturn:
-        raise FileNotFoundError("brew")
-
-    monkeypatch.setattr(proc, "run_bounded", missing)
+def test_missing_brew_probe_is_unavailable_not_an_empty_healthy_set(tmp_path: Path) -> None:
     with pytest.raises(FileNotFoundError):
-        probes.brew_pins()
+        probes.brew_pins(brew_binary=str(tmp_path / "missing-brew"))
 
 
-def test_redis_acl_uses_runtime_ping_without_native_custody(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    from base.cluster import ownership
-    from services.supervision.healthchecks import redis_acl
+def test_redis_acl_uses_runtime_ping_without_native_custody() -> None:
+    class _FakeRedisConnection:
+        def __init__(self) -> None:
+            self.pings = 0
 
-    ping = Mock()
-    capture = Mock(side_effect=AssertionError("read-only health must not capture native custody"))
-    monkeypatch.setattr(ownership.RedisConnectionCustody, "capture", capture)
-    monkeypatch.setattr(redis_acl, "ping", ping)
-    monkeypatch.setattr(
-        probes,
-        "settings",
-        SimpleNamespace(data_plane=SimpleNamespace(redis_url="redis://localhost:6380")),
-    )
-    assert probes.redis_acl().alive
-    ping.assert_called_once_with("redis://localhost:6380")
-    capture.assert_not_called()
+        def __enter__(self) -> _FakeRedisConnection:
+            return self
+
+        def __exit__(self, _exc_type: object, _exc: object, _tb: object, /) -> None:
+            return None
+
+        def ping(self) -> bool:
+            self.pings += 1
+            return True
+
+    conn = _FakeRedisConnection()
+    assert not hasattr(probes, "RedisConnectionCustody")
+    assert probes.redis_acl(
+        redis_url="redis://localhost:6380",
+        connection=conn,
+    ).alive
+    assert conn.pings == 1
 
 
 def test_each_root_roster_owns_its_helper_episode_reporter(
-    monkeypatch: pytest.MonkeyPatch,
     events: _Events,
     *,
     machine_identity: ConfiguredMachineIdentity,
 ) -> None:
-    monkeypatch.setattr(probes, "is_macos", lambda: True)
     machine_identity.set(role="agent-runner")
     first = next(
         check
         for check in probes.build_diagnostics(
-            set(), database=_unused_database, machine=machine_identity
+            set(),
+            database=_unused_database,
+            machine=machine_identity,
+            macos=True,
         )
         if check.name == "permissions-helper"
     )
     second = next(
         check
         for check in probes.build_diagnostics(
-            set(), database=_unused_database, machine=machine_identity
+            set(),
+            database=_unused_database,
+            machine=machine_identity,
+            macos=True,
         )
         if check.name == "permissions-helper"
     )

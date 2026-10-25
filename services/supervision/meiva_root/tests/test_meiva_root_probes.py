@@ -17,7 +17,6 @@ from pathlib import Path
 import pytest
 
 from base.daemon.health import DaemonProbe
-from services.supervision.meiva_root import probes
 from services.supervision.meiva_root.probes import ProbeError, ProbeRegistry
 
 _PROBE_MODULE = """
@@ -127,18 +126,13 @@ def test_register_ref_missing_attribute_and_non_callable(
 
 def test_ref_resolution_is_cached(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     _write_probe_module(tmp_path, monkeypatch, "tmp_probe_cached")
-    calls: list[str] = []
-    real_resolve = probes.resolve_ref
-
-    def counting(ref: str) -> Callable[[], DaemonProbe]:
-        calls.append(ref)
-        return real_resolve(ref)
-
-    monkeypatch.setattr(probes, "resolve_ref", counting)
     registry = ProbeRegistry()
     registry.register_ref("alpha", "tmp_probe_cached:probe")
-    assert registry.resolve("alpha") is registry.resolve("alpha")
-    assert calls == ["tmp_probe_cached:probe"]
+    first = registry.resolve("alpha")
+    del sys.modules["tmp_probe_cached"]
+    (tmp_path / "tmp_probe_cached.py").unlink()
+    importlib.invalidate_caches()
+    assert registry.resolve("alpha") is first
 
 
 def test_failed_ref_resolution_retries_on_next_resolve(

@@ -5,7 +5,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
-import uuid
+import time
 from collections.abc import AsyncGenerator, Mapping
 from typing import Any, Literal
 
@@ -36,6 +36,11 @@ class GatewayClient:
         # The machine API token's Bearer (`gateway_auth_headers()`).
         self._auth_headers = dict(auth_headers)
         self._client: httpx.AsyncClient | None = None
+        self._op_seq = 0
+
+    def _next_key(self) -> str:
+        self._op_seq += 1
+        return f"gw-{self._op_seq}-{time.perf_counter_ns():x}"
 
     async def _http(self) -> httpx.AsyncClient:
         if self._client is None:
@@ -84,7 +89,7 @@ class GatewayClient:
         Idempotency-Key, so the server dedups even after a lost response. Once
         the retries are exhausted the error propagates; nothing is persisted
         or replayed later."""
-        key = idempotency_key or uuid.uuid4().hex
+        key = idempotency_key or self._next_key()
         headers = {**self._headers(), **keyed_headers(key)}
         for attempt, delay in enumerate(self._config.im_send_retry_delays, start=1):
             try:
@@ -137,7 +142,7 @@ class GatewayClient:
         config: dict[str, object] | None,
         idempotency_key: str | None = None,
     ) -> int:
-        key = uuid.uuid4().hex if idempotency_key is None else idempotency_key
+        key = self._next_key() if idempotency_key is None else idempotency_key
         client = await self._http()
         payload: dict[str, object] = {"spawner": "user"}
         if config:

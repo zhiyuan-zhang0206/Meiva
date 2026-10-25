@@ -4,7 +4,9 @@
 from __future__ import annotations
 
 import shlex
+from collections.abc import Mapping
 from functools import partial
+from pathlib import Path
 
 from base.cluster import frontend_service_cmd
 from base.cluster.dataplane.redis_bridge import (
@@ -12,8 +14,9 @@ from base.cluster.dataplane.redis_bridge import (
     RedisBridgeUnconfiguredError,
     redis_bridge_endpoint,
 )
-from base.config import settings
+from base.config import get_field
 from base.daemon.health import DaemonProbe, probe_home
+from base.host.net.url_secret import names_foreign_host
 from base.native_process.stop_timing import HOST_STOP_CEILING_S, OPS_STOP_CEILING_S
 from base.paths import meiva_home, otel_collector_binary, otel_collector_config
 from services.supervision.roster import plugin_services
@@ -53,8 +56,10 @@ def redis_bridge_command() -> tuple[str, str, int]:
     try:
         endpoint = redis_bridge_endpoint(
             meiva_home(),
-            machine_host=lambda: settings.general.machine_host.strip() or "localhost",
-            remote_data_plane=lambda: settings.data_plane.is_remote,
+            machine_host=lambda: str(get_field("machine_host")).strip() or "localhost",
+            remote_data_plane=lambda: names_foreign_host(
+                str(get_field("db_url")), str(get_field("redis_url"))
+            ),
         )
     except RedisBridgeUnconfiguredError:
         endpoint = None
@@ -82,7 +87,11 @@ def browser_probe() -> DaemonProbe:
 # Capture ports, URLs and memory-search inputs at roster construction. Root builds
 # this roster once at startup; persisted config changes require process restart.
 # The gateway, agent-runner and shared groups retain their concatenation order.
-def build_services() -> tuple[ServiceSpec, ...]:
+def build_services(
+    *,
+    plugins: tuple[ServiceSpec, ...] | None = None,
+    plugin_dirs: Mapping[str, Path] | None = None,
+) -> tuple[ServiceSpec, ...]:
 
     from services.agent_runner.exec_host import shutdown_budget as exec_host_budget
     from services.agent_runner.pty_sessions import shutdown_budget as pty_sessions_budget
@@ -98,6 +107,15 @@ def build_services() -> tuple[ServiceSpec, ...]:
     _fe_port = app_port()
     _fe_url = f"http://localhost:{_fe_port}"
     _bridge_cmd, _bridge_host, _bridge_port = redis_bridge_command()
+    gateway_health_url = str(get_field("gateway_health_url"))
+    gateway_shutdown_timeout_s = float(get_field("gateway_graceful_shutdown_timeout_seconds"))
+    memory_search_port = int(get_field("memory_search_port"))
+    memory_search_uri = str(get_field("memory_search_uri"))
+    embedding_backend = str(get_field("embedding_backend"))
+    gateway_port = int(get_field("gateway_port"))
+    browser_origin = str(get_field("browser_origin"))
+    browser_cdp_port = int(get_field("browser_cdp_port"))
+    telemetry_otlp_port = int(get_field("telemetry_otlp_port"))
 
     gateway_services = (
         ServiceSpec(
@@ -121,16 +139,13 @@ def build_services() -> tuple[ServiceSpec, ...]:
             # meiva:note
             # Gateway reload can fork a serving worker whose pid differs from the recorded
             # pidfile. Bind readiness to the answering home's HTTP identity instead.
-            curl_url=settings.services.gateway_health_url,
-            identity_probe=partial(probe_home, settings.services.gateway_health_url),
+            curl_url=gateway_health_url,
+            identity_probe=partial(probe_home, gateway_health_url),
             healthcheck_module="services.supervision.healthchecks.gateway",
             # meiva:note
             # Uvicorn drains requests before lifespan cleanup. Root's stop window must
             # cover both serving shutdown and the application's admitted work.
-            stop_ceiling_s=(
-                settings.gateway.gateway_graceful_shutdown_timeout_seconds
-                + _GATEWAY_LIFESPAN_ALLOWANCE_S
-            ),
+            stop_ceiling_s=(gateway_shutdown_timeout_s + _GATEWAY_LIFESPAN_ALLOWANCE_S),
         ),
         healthz_daemon(
             "im-bridge",
@@ -212,11 +227,11 @@ def build_services() -> tuple[ServiceSpec, ...]:
             # meiva:note
             # The numpy backend keeps an in-memory matrix and npz store. A Postgres
             # outage must not block the memory-search service that uses that backend.
-            tcp_port=settings.services.memory_search_port,
+            tcp_port=memory_search_port,
             identity_probe=partial(
                 memory_search_probe,
-                uri=settings.services.memory_search_uri,
-                embedding_name=settings.services.embedding_backend,
+                uri=memory_search_uri,
+                embedding_name=embedding_backend,
             ),
             healthcheck_module="services.supervision.healthchecks.memory_search",
         ),
@@ -227,8 +242,8 @@ def build_services() -> tuple[ServiceSpec, ...]:
             # and exec handover. Derive it here rather than duplicating a launch string.
             cmd=frontend_service_cmd(
                 _fe_port,
-                gateway_port=settings.gateway.gateway_port,
-                browser_origin=settings.gateway.browser_origin,
+                gateway_port=gateway_port,
+                browser_origin=browser_origin,
             ),
             capabilities=GATEWAY,
             requires_db=False,
@@ -312,7 +327,7 @@ def build_services() -> tuple[ServiceSpec, ...]:
             # meiva:note
             # Headed Chrome has no database dependency. Root must keep reviving it during
             # a database outage, when the browser may be needed for recovery.
-            curl_url=f"http://127.0.0.1:{settings.services.browser_cdp_port}/json/version",
+            curl_url=f"http://127.0.0.1:{browser_cdp_port}/json/version",
             identity_probe=browser_probe,
             healthcheck_module="services.supervision.healthchecks.browser",
         ),
@@ -384,7 +399,7 @@ def build_services() -> tuple[ServiceSpec, ...]:
             # meiva:note
             # The observer posts a valid empty OTLP ExportTraceServiceRequest: a listening
             # TCP port alone does not prove the collector protocol is ready.
-            tcp_port=settings.observability.telemetry_otlp_port,
+            tcp_port=telemetry_otlp_port,
             identity_probe=probe_collector,
             healthcheck_module="services.supervision.healthchecks.otel_collector",
         ),
@@ -418,6 +433,8 @@ def build_services() -> tuple[ServiceSpec, ...]:
     # meiva:note
     # Append plugin declarations after core groups. Session-name collisions fail
     # fast because root supervision and status derive their keys from the session.
-    plugin = plugin_services.plugin_services()
+    plugin = (
+        plugin_services.plugin_services(plugin_dirs=plugin_dirs) if plugins is None else plugins
+    )
     plugin_services.assert_unique_sessions(core, plugin)
     return core + plugin

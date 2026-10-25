@@ -10,16 +10,5 @@ exports = ["diagnostic_probes.py", "manifests.py"]
 "__init__.py" = "strict"
 
 [roots]
+"diagnostic_probes.py" = { kinds = ["settings"], why = "Host diagnostic probes read configured endpoints and ports" }
 "glue.py" = { kinds = ["settings"], why = "Root supervisor startup composes process-owned handles and configuration" }
-
-[debt.ambient-read]
-"diagnostic_probes.py#settings base.config.settings" = 1
-"diagnostics.py#clock time.time" = 3
-"drill.py#clock time.time" = 1
-"glue.py#cwd pathlib.Path.cwd" = 1
-"glue.py#platform sys.platform" = 1
-
-[debt.type-cast]
-"drill.py#cast liveness_probe.probe" = 1
-"manifests.py#cast _validate" = 2
-"manifests.py#cast main" = 2

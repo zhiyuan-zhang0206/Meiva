@@ -1,51 +1,83 @@
 """meiva-browser-mcp healthcheck — a probe returns a bool, never an exception."""
 
-import json
+import contextlib
 import logging
+import socket
+import tempfile
+import threading
+from collections.abc import Generator
 from pathlib import Path
 
 import pytest
 
 import services.supervision.healthchecks.browser_mcp as hc
+from base.paths import chrome_mcp_socket
 
 
-def test_alive_true_when_probe_answers(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
-    monkeypatch.setattr(hc, "browser_mcp_probe", lambda _home: True)  # pyright: ignore[reportUnknownArgumentType]
-    assert hc.is_alive(tmp_path) is True
+@contextlib.contextmanager
+def _socket_home(payload: bytes | None = None, *, refused: bool = False) -> Generator[Path]:
+    with tempfile.TemporaryDirectory(prefix="meiva-bmcp-", dir="/tmp") as directory:
+        home = Path(directory)
+        sock_path = chrome_mcp_socket(home, 9222)
+        sock_path.parent.mkdir(parents=True, exist_ok=True)
+        if payload is None and not refused:
+            yield home
+            return
+        server = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+        server.bind(str(sock_path))
+        server.listen(1)
+        if refused:
+            server.close()
+            yield home
+            return
+
+        def _serve() -> None:
+            try:
+                conn, _ = server.accept()
+                with conn:
+                    if conn.recv(4096) and payload is not None:
+                        conn.sendall(payload)
+            except OSError:
+                return
+
+        worker = threading.Thread(target=_serve, daemon=True)
+        worker.start()
+        try:
+            yield home
+        finally:
+            server.close()
+            worker.join(timeout=2)
+
+
+def test_alive_true_when_probe_answers() -> None:
+    with _socket_home(b'{"id":0,"ok":true}\n') as home:
+        assert hc.is_alive(home, port=9222) is True
 
 
 @pytest.mark.parametrize(
-    "exc",
+    ("payload", "refused"),
     [
-        ConnectionRefusedError("no listener"),
-        FileNotFoundError("socket absent"),
-        TimeoutError("daemon wedged"),
-        json.JSONDecodeError("bad", "", 0),
+        (None, True),
+        (None, False),
+        (b"", False),
+        (b"not-json\n", False),
     ],
-    ids=["refused", "no-socket", "timeout", "bad-json"],
+    ids=["refused", "no-socket", "eof", "bad-json"],
 )
-def test_alive_false_on_expected_probe_failures(
-    monkeypatch: pytest.MonkeyPatch, exc: Exception, tmp_path: Path
-) -> None:
+def test_alive_false_on_expected_probe_failures(payload: bytes | None, refused: bool) -> None:
     """The transport failures that mean "the daemon is down" stay quiet."""
-
-    def _boom(_home: Path) -> bool:
-        raise exc
-
-    monkeypatch.setattr(hc, "browser_mcp_probe", _boom)
-    assert hc.is_alive(tmp_path) is False
+    with _socket_home(payload, refused=refused) as home:
+        assert hc.is_alive(home, port=9222) is False
 
 
 def test_alive_false_on_any_unexpected_exception(
-    monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture, tmp_path: Path
+    caplog: pytest.LogCaptureFixture,
 ) -> None:
     """ANY unforeseen probe failure degrades to "dead",
     with a traceback so nothing is swallowed silently."""
-
-    def _boom(_home: Path) -> bool:
-        raise RuntimeError("something nobody predicted")
-
-    monkeypatch.setattr(hc, "browser_mcp_probe", _boom)
-    with caplog.at_level(logging.ERROR, logger="services.supervision.healthchecks.browser_mcp"):
-        assert hc.is_alive(tmp_path) is False
+    with (
+        _socket_home(b"[]\n") as home,
+        caplog.at_level(logging.ERROR, logger="services.supervision.healthchecks.browser_mcp"),
+    ):
+        assert hc.is_alive(home, port=9222) is False
     assert any("raised unexpectedly" in r.getMessage() for r in caplog.records)

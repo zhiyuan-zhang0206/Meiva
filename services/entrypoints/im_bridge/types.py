@@ -7,7 +7,7 @@ from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from enum import StrEnum
 from http import HTTPStatus
-from typing import Any, NoReturn, TypedDict
+from typing import Any, NoReturn, Protocol, TypedDict
 
 import httpx
 from pydantic import BaseModel, ConfigDict, Field
@@ -165,6 +165,53 @@ class ChatState:
     spawn_draft: SpawnDraft | None = None
 
 
+class NoticeBridgeOwner:
+    def initialize_poll(self) -> None:
+        raise NotImplementedError
+
+    async def poll_once(self) -> None:
+        raise NotImplementedError
+
+    async def handle_inbound(self, chat_id: str, text: str) -> str | None:
+        raise NotImplementedError
+
+    def clear_reply_target(
+        self, chat_id: str, agent_id: int, notice_id: int, *, account_id: str
+    ) -> bool:
+        raise NotImplementedError
+
+    async def resolve_frozen_reply(
+        self, agent_id: int, notice_id: int, text: str
+    ) -> dict[str, Any]:
+        raise NotImplementedError
+
+    async def handle_callback(
+        self, chat_id: str, data: str, *, account_id: str | None = None
+    ) -> str | None:
+        raise NotImplementedError
+
+    async def list_queue(self) -> str | None:
+        raise NotImplementedError
+
+    def cmd_notice(self, args: str) -> str:
+        raise NotImplementedError
+
+    def reply_context_held(self, chat_id: str, text: str, account_id: str) -> bool:
+        raise NotImplementedError
+
+    def reply_target(self, chat_id: str, text: str, *, account_id: str) -> tuple[int, int] | None:
+        raise NotImplementedError
+
+
+class PollCursorStore(Protocol):
+    def load_poll(self, channel: str) -> dict[str, tuple[str, int]]: ...
+    def save_poll(self, channel: str, chat_id: str, message_id: str, create_ms: int) -> None: ...
+
+
+class BridgeCore(Protocol):
+    async def handle_inbound(self, msg: InboundMessage, /) -> None: ...
+
+
 class IMAdapter(ABC):
     """Contract every IM channel adapter implements.
 
@@ -176,11 +223,11 @@ class IMAdapter(ABC):
     channel: str = ""
     selection_requires_account_proof: bool = False
     """Native account-bound selection must never bootstrap from legacy peer-only state."""
+    push_failures: int = 0
+    push_recovered_at: float | None = None
 
-    def __init__(self, core: Any) -> None:
-        # Any: adapters are also constructed with test doubles; the core
-        # contract (async handle_inbound / adapters dict) is duck-typed.
-        self.core = core
+    def __init__(self, core: BridgeCore | None = None) -> None:
+        self.core: Any = core
 
     @abstractmethod
     async def start(self, tasks: asyncio.TaskGroup) -> None:

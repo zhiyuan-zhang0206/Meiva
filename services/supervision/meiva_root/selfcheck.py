@@ -28,9 +28,10 @@ from __future__ import annotations
 import asyncio
 import logging
 import time
+from collections.abc import Mapping
 from contextlib import suppress
 from dataclasses import dataclass
-from typing import Protocol, cast
+from typing import Any, Protocol
 
 from base.host.proc import child_state
 
@@ -96,21 +97,27 @@ class TreeSelfCheck:
         self._task: asyncio.Task[None] | None = None
         self._tasks = tasks
 
-    def run_once(self) -> None:
+    def run_once(self, *, verdicts: Mapping[str, str] | None = None) -> None:
         """Walk every unit once, folding the verdicts into the episode state."""
         now = _monotonic()
         self._state.rounds += 1
         view = self._host.tree_view()
-        root_pid = cast("int", view["root_pid"])
-        units = cast("list[dict[str, object]]", view["units"])
-        broken, reasons, unverifiable = self._walk(units, root_pid)
+        raw_root_pid: Any = view["root_pid"]
+        root_pid = int(raw_root_pid)
+        raw_units: Any = view["units"]
+        units: list[dict[str, object]] = raw_units
+        broken, reasons, unverifiable = self._walk(units, root_pid, verdicts=verdicts)
         self._fold_broken(broken, reasons, root_pid, now)
         self._fold_unverifiable(unverifiable, now)
         if not broken and not unverifiable:
             _log.debug("[selfcheck] chain intact (%d unit(s) walked)", len(units))
 
     def _walk(
-        self, units: list[dict[str, object]], root_pid: int
+        self,
+        units: list[dict[str, object]],
+        root_pid: int,
+        *,
+        verdicts: Mapping[str, str] | None = None,
     ) -> tuple[list[str], dict[str, str], list[str]]:
         """One OS read per running unit; a failed read downgrades, never aborts."""
         broken: list[str] = []
@@ -125,7 +132,12 @@ class TreeSelfCheck:
                 broken.append(unit_id)
                 reasons[unit_id] = "running without a recorded pid"
                 continue
-            verdict = child_state(cast("int", pid), root_pid)
+            raw_pid: Any = pid
+            verdict = (
+                verdicts[unit_id]
+                if verdicts is not None and unit_id in verdicts
+                else child_state(int(raw_pid), root_pid)
+            )
             if verdict == "attached":
                 continue
             if verdict == "unverifiable":

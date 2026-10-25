@@ -36,8 +36,9 @@ from typing import assert_never
 
 from base.cluster.dataplane.redis_bridge import RedisBridgeUnconfiguredError, redis_bridge_endpoint
 from base.cluster.machine import MachineIdentityReader, MachineRoles
-from base.config import settings
+from base.config import get_field
 from base.host.env.registry import process_environment
+from base.host.net.url_secret import names_foreign_host
 from base.host.system.hostport import Host
 from base.host.system.probes import (
     browser_incapability,
@@ -73,23 +74,27 @@ from services.supervision.roster.service_spec import (
 # The one fact the gate of a core session reads, collected from the world: the settings
 # flag, the platform probe or the marker file the session's kind names. `gate_plan` judges it.
 def _gate_fact(
-    kind: GateKind, session: str, *, machine: MachineIdentityReader, host: Host
+    kind: GateKind,
+    session: str,
+    *,
+    machine: MachineIdentityReader,
+    host: Host,
 ) -> GateFact | None:
     match kind:
         case "flag":
             return FlagFact(enabled=_flag_enabled(session))
         case "browser":
-            enabled = settings.services.browser_enabled
+            enabled = bool(get_field("browser_enabled"))
             return BrowserFact(
                 enabled=enabled,
                 incapability=(
-                    browser_incapability(settings.services.chrome_binary, host=host)
+                    browser_incapability(str(get_field("chrome_binary")), host=host)
                     if enabled
                     else None
                 ),
             )
         case "computer-mcp":
-            helper_enabled = settings.services.permissions_helper_enabled
+            helper_enabled = bool(get_field("permissions_helper_enabled"))
             return ComputerFact(
                 helper_enabled=helper_enabled,
                 incapability=(
@@ -115,11 +120,11 @@ def _gate_fact(
 def _flag_enabled(session: str) -> bool:
     match session:
         case "heartbeat":
-            return settings.daemon.heartbeat_enabled
+            return bool(get_field("heartbeat_enabled"))
         case "delivery-watchdog":
-            return settings.daemon.delivery_watchdog_enabled
+            return bool(get_field("delivery_watchdog_enabled"))
         case "im-bridge":
-            return settings.services.im_bridge_enabled
+            return bool(get_field("im_bridge_enabled"))
         case _:
             raise ValueError(f"session {session!r} has no settings-flag gate")
 
@@ -152,7 +157,9 @@ def _bridge_fact(machine: MachineIdentityReader) -> BridgeFact:
         endpoint = redis_bridge_endpoint(
             meiva_home(),
             machine_host=machine.host,
-            remote_data_plane=lambda: settings.data_plane.is_remote,
+            remote_data_plane=lambda: names_foreign_host(
+                str(get_field("db_url")), str(get_field("redis_url"))
+            ),
         )
     except RedisBridgeUnconfiguredError as exc:
         return BridgeFact(unconfigured=str(exc), has_endpoint=False)
@@ -169,7 +176,12 @@ def _plugin_gate_reason(spec: ServiceSpec) -> str | None:
     return reason
 
 
-def gate_reason(spec: ServiceSpec, *, machine: MachineIdentityReader, host: Host) -> str | None:
+def gate_reason(
+    spec: ServiceSpec,
+    *,
+    machine: MachineIdentityReader,
+    host: Host,
+) -> str | None:
     """Why a service is config/capability-gated OUT of the start roster, or None if
     it will run. The single place the gate's *reason* is computed, so the start
     path (drops it), ``meiva start`` (logs it), and ``meiva status`` (shows it) stay
@@ -188,11 +200,18 @@ def gate_reason(spec: ServiceSpec, *, machine: MachineIdentityReader, host: Host
             )
             raise
     kind = gate_kind(spec.session)
-    return gate_reason_of(spec.session, _gate_fact(kind, spec.session, machine=machine, host=host))
+    return gate_reason_of(
+        spec.session,
+        _gate_fact(kind, spec.session, machine=machine, host=host),
+    )
 
 
 def services_for_capabilities_annotated(
-    roles: MachineRoles, *, machine: MachineIdentityReader, host: Host
+    roles: MachineRoles,
+    *,
+    machine: MachineIdentityReader,
+    host: Host,
+    services: tuple[ServiceSpec, ...] | None = None,
 ) -> tuple[tuple[ServiceSpec, str | None], ...]:
     """The union of services this host's capability set runs, each paired with its
     gate reason (None = will start, a string = gated out + why).
@@ -209,21 +228,26 @@ def services_for_capabilities_annotated(
     the roster. ``services_for_capabilities`` is the start-roster view that drops
     them.
     """
+    roster = build_services() if services is None else services
     return tuple(
-        (s, gate_reason(s, machine=machine, host=host))
-        for s in build_services()
-        if s.capabilities & roles
+        (s, gate_reason(s, machine=machine, host=host)) for s in roster if s.capabilities & roles
     )
 
 
 def services_for_capabilities(
-    roles: MachineRoles, *, machine: MachineIdentityReader, host: Host
+    roles: MachineRoles,
+    *,
+    machine: MachineIdentityReader,
+    host: Host,
+    services: tuple[ServiceSpec, ...] | None = None,
 ) -> tuple[ServiceSpec, ...]:
     """The start roster: the capability-union services that will actually launch
     (config/capability-gated ones dropped). ``services_for_capabilities_annotated``
     is the diagnostic view that keeps the gated-out services + their reason."""
     return tuple(
         s
-        for s, reason in services_for_capabilities_annotated(roles, machine=machine, host=host)
+        for s, reason in services_for_capabilities_annotated(
+            roles, machine=machine, host=host, services=services
+        )
         if reason is None
     )

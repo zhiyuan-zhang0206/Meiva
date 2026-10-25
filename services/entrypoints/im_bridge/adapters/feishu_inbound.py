@@ -8,7 +8,7 @@ from services.entrypoints.im_bridge.adapters import feishu_poll_cursor as cursor
 from services.entrypoints.im_bridge.types import InboundMessage
 
 
-def normalize_message(data: Any, seen_messages: Collection[str]) -> InboundMessage | None:
+def normalize_message(data: object, seen_messages: Collection[str]) -> InboundMessage | None:
     """Map a ``P2ImMessageReceiveV1`` (or duck-typed stand-in) to an
     InboundMessage; return None for events we do not bridge."""
     event = getattr(data, "event", None)
@@ -45,7 +45,7 @@ def normalize_message(data: Any, seen_messages: Collection[str]) -> InboundMessa
     )
 
 
-def normalize_card_action(data: Any) -> InboundMessage | None:
+def normalize_card_action(data: object) -> InboundMessage | None:
     action = getattr(data, "event", None)
     if action is None:
         return None
@@ -61,3 +61,46 @@ def normalize_card_action(data: Any) -> InboundMessage | None:
     if not key:
         return None
     return InboundMessage(channel="feishu", chat_id=open_id, text=key)
+
+
+# meiva:note
+# Extract the sender's open id from either the WS event shape or the ListMessage API shape.
+def sender_open_id(sender: object) -> str:
+    sender_id = getattr(sender, "sender_id", None)
+    open_id = getattr(sender_id, "open_id", "") if sender_id is not None else ""
+    if not open_id and getattr(sender, "id_type", "") == "open_id":
+        open_id = getattr(sender, "id", "")
+    return open_id
+
+
+# meiva:note
+# Map one listed message to an InboundMessage across both WS and ListMessage shapes.
+def normalize_poll_item(item: object, *, channel: str = "feishu") -> InboundMessage | None:
+    if not getattr(item, "message_id", ""):
+        return None
+    if getattr(item, "chat_type", "") not in ("", "p2p"):
+        return None
+    if getattr(item, "msg_type", "") != "text":
+        return None
+    sender = getattr(item, "sender", None)
+    if sender is None or getattr(sender, "sender_type", "") != "user":
+        return None
+    try:
+        raw_body = getattr(getattr(item, "body", None), "content", "") or "{}"
+        parsed: dict[str, Any] = json.loads(raw_body)
+        content = str(parsed.get("text", "")).strip()
+    except (TypeError, ValueError, AttributeError):
+        return None
+    if not content:
+        return None
+    open_id = sender_open_id(sender)
+    if not open_id:
+        return None
+    message_id = getattr(item, "message_id", None)
+    return InboundMessage(
+        channel=channel,
+        chat_id=open_id,
+        text=content,
+        message_id=message_id,
+        idempotency_key=cursors.idempotency_key(message_id),
+    )

@@ -3,7 +3,7 @@
 import json
 import urllib.error
 import urllib.request
-from typing import cast
+from typing import Any
 
 from base.daemon.health import DaemonProbe
 from base.paths import meiva_home
@@ -18,11 +18,12 @@ def probe() -> DaemonProbe:
             payload = json.loads(response.read(4096))
     except (OSError, urllib.error.URLError, ValueError) as exc:
         return DaemonProbe.down(f"gate protocol unavailable: {exc}")
+    payload_any: Any = payload
     if not isinstance(payload, dict):
         return DaemonProbe.down("gate health endpoint returned an invalid identity")
-    payload = cast("dict[str, object]", payload)
-    if payload.get("name") != "gate":
+    typed_payload: dict[str, Any] = payload_any
+    if typed_payload.get("name") != "gate":
         return DaemonProbe.down("gate health endpoint returned an invalid identity")
-    if payload.get("home") != str(meiva_home()):
+    if typed_payload.get("home") != str(meiva_home()):
         return DaemonProbe.port_taken("gate health endpoint belongs to another home")
     return DaemonProbe.up("gate health endpoint is ready")

@@ -11,8 +11,31 @@ Methods are synchronous (psycopg pool): async callers run them in a thread.
 
 from __future__ import annotations
 
+from collections.abc import Sequence
+from contextlib import AbstractContextManager
 from datetime import UTC, datetime
-from typing import Any, LiteralString, NamedTuple
+from typing import Any, LiteralString, NamedTuple, Protocol, Self
+
+from base.db.transaction import ConnectionSource
+
+
+class CursorLike(Protocol):
+    def __enter__(self) -> Self: ...
+    def __exit__(self, *exc: object) -> object: ...
+    def execute(
+        self, statement: LiteralString, params: tuple[Any, ...] | None = None
+    ) -> object: ...
+    def fetchall(self) -> Sequence[tuple[Any, ...]]: ...
+
+
+class CursorConnection(Protocol):
+    def cursor(self) -> CursorLike: ...
+
+
+class CursorPool(Protocol):
+    def connection(
+        self, timeout: float | None = None
+    ) -> AbstractContextManager[CursorConnection]: ...
 
 
 class PushWatermark(NamedTuple):
@@ -31,8 +54,8 @@ class PushWatermark(NamedTuple):
 
 
 class CursorStore:
-    def __init__(self, db_pool: Any = None) -> None:
-        self._pool = db_pool
+    def __init__(self, db_pool: ConnectionSource | CursorPool | None = None) -> None:
+        self._pool: Any = db_pool
 
     def load_push(self) -> dict[tuple[str, str, int], PushWatermark]:
         """{(channel, chat_id, agent_id): newest accepted item}, one per chat."""

@@ -8,27 +8,34 @@ import logging
 import time
 from contextlib import suppress
 from pathlib import Path
-from typing import Any
-from uuid import uuid4
+from typing import Any, Protocol
 
 from psycopg.errors import ConnectionDoesNotExist, ConnectionFailure
-from psycopg_pool import PoolTimeout
+from psycopg_pool import ConnectionPool, PoolTimeout
 
 from base.api_contracts.idempotency import keyed_headers
 from base.api_contracts.notice_question import parse_question, question_instructions
+from base.clock import SYSTEM_TIMERS, Clock, ClockConfig, Timers
 from base.db.transaction import write_transaction
 from base.events.notifications.catalog import core_catalog
 from base.events.notifications.policy import enabled_for
 from base.events.notifications.store import read_overrides_sync
 from services.entrypoints.im_bridge import copy
 from services.entrypoints.im_bridge.config import ImBridgeConfig
+from services.entrypoints.im_bridge.gateway_client import GatewayClient
 from services.entrypoints.im_bridge.notice_poll_store import NoticePollStore
+from services.entrypoints.im_bridge.outbound.store import IMOutboxStore
 from services.entrypoints.im_bridge.outbound.types import (
     OutboundIntent,
     OutboundSource,
     OutboundSourceKind,
 )
-from services.entrypoints.im_bridge.types import NETWORK_ERRORS, SendNotStartedError
+from services.entrypoints.im_bridge.types import (
+    NETWORK_ERRORS,
+    IMAdapter,
+    NoticeBridgeOwner,
+    SendNotStartedError,
+)
 
 _log = logging.getLogger("services.entrypoints.im_bridge.notice_bridge")
 
@@ -95,20 +102,44 @@ def _parse_filter_tokens(rest: list[str]) -> dict[str, Any]:
     return filters
 
 
-class NoticeBridge:
+class NoticeBridgeCore(Protocol):
+    adapters: dict[str, IMAdapter]
+    outbound_store: IMOutboxStore
+    gateway: GatewayClient
+    _switch_state: dict[str, int]
+
+
+class NoticeBridge(NoticeBridgeOwner):
     """Push fleet notices to the owner chat; own reply mode + filters."""
 
     def __init__(
-        self, core: Any, config: ImBridgeConfig, *, db_pool: Any = None, state_dir: Path
+        self,
+        core: NoticeBridgeCore,
+        config: ImBridgeConfig,
+        *,
+        db_pool: ConnectionPool | None = None,
+        state_dir: Path,
+        timers: Timers = SYSTEM_TIMERS,
     ) -> None:
         self._config = config
-        self.core = core
-        self.db_pool = db_pool
+        self.core: Any = core
+        self.db_pool: ConnectionPool | None = db_pool
         self._state_dir = state_dir
-        self.poll_store = NoticePollStore(core.outbound_store)
+        self._clock = Clock(
+            ClockConfig("UTC", "UTC", message_timestamp_weekday=False), timers=timers
+        )
+        self._op_seq = 0
+        self.poll_store = NoticePollStore(self.core.outbound_store)
         self._reply_modes: dict[str, dict[str, Any]] = {}  # chat_id -> mode
         self._filters: dict[str, Any] = {"min_priority": None, "agent": None}
         self._load_state()
+
+    def _now(self) -> float:
+        return self._clock.now().timestamp()
+
+    def _next_key(self) -> str:
+        self._op_seq += 1
+        return f"notice-{self._op_seq}-{time.perf_counter_ns():x}"
 
     # -- persistence -------------------------------------------------------
 
@@ -120,7 +151,7 @@ class NoticeBridge:
         if not isinstance(self._filters, dict):
             raise TypeError("notice filters must be an object")
 
-    def _save(self, name: str, value: Any) -> None:
+    def _save(self, name: str, value: dict[str, Any]) -> None:
         (self._state_dir / name).write_text(json.dumps(value))
 
     # -- gateway -----------------------------------------------------------
@@ -133,7 +164,7 @@ class NoticeBridge:
 
     def _keyed_headers(self) -> dict[str, str]:
         """Auth headers plus one fresh principal-v1 operation key for a resolve call."""
-        return {**self.core.gateway._headers(), **keyed_headers(str(uuid4()))}
+        return {**self.core.gateway._headers(), **keyed_headers(self._next_key())}
 
     async def _post(self, path: str, body: dict[str, Any]) -> None:
         g = self.core.gateway
@@ -148,6 +179,8 @@ class NoticeBridge:
 
     async def poll_once(self) -> None:
         """Accept normal notice decisions; the shared worker owns provider calls."""
+        if self.db_pool is None:
+            return
         try:
             await asyncio.to_thread(self.initialize_poll)
             notices = await asyncio.to_thread(self._unaccepted_notices)
@@ -234,6 +267,8 @@ class NoticeBridge:
 
         if limit is None:
             limit = self._config.notices_open_default_limit
+        if self.db_pool is None:
+            raise RuntimeError("notice bridge requires a database pool")
         with self.db_pool.connection() as conn, conn.cursor() as cur:
             cur.execute(
                 _SELECT_NOTICE + "JOIN im_bridge_notice_poll_state s ON s.singleton "
@@ -249,7 +284,8 @@ class NoticeBridge:
     def _open_notices(self, limit: int | None = None) -> list[dict[str, Any]]:
         if limit is None:
             limit = self._config.im_bridge_notice_open_limit
-
+        if self.db_pool is None:
+            raise RuntimeError("notice bridge requires a database pool")
         with write_transaction(self.db_pool) as conn, conn.cursor() as cur:
             cur.execute(
                 _SELECT_NOTICE
@@ -296,7 +332,7 @@ class NoticeBridge:
 
     async def _push(self, n: dict[str, Any], *, prefix: str | None = None) -> bool:
         """Deliver one notice; return True when it was sent."""
-        adapter = self.core.adapters.get("telegram")
+        adapter: Any = self.core.adapters.get("telegram")
         if adapter is None:
             return False
         text, buttons = self._render_notice(n, prefix)
@@ -348,13 +384,12 @@ class NoticeBridge:
         """Tap [Reply]: arm the reply window on this chat. A new tap replaces
         an older mode; expired modes are dropped first."""
         window_seconds = self._config.im_bridge_notice_reply_window_seconds
-        self._reply_modes = {
-            k: v for k, v in self._reply_modes.items() if time.time() <= v["expires_at"]
-        }
+        now = self._now()
+        self._reply_modes = {k: v for k, v in self._reply_modes.items() if now <= v["expires_at"]}
         self._reply_modes[str(chat_id)] = {
             "notice_id": int(notice_id),
             "agent_id": int(agent_id),
-            "expires_at": time.time() + window_seconds,
+            "expires_at": now + window_seconds,
             "account_id": account_id,
         }
         return (
@@ -398,7 +433,7 @@ class NoticeBridge:
         mode = self._reply_modes.get(str(chat_id))
         return bool(
             mode is not None
-            and time.time() <= mode["expires_at"]
+            and self._now() <= mode["expires_at"]
             and (not text.startswith("/") or text.startswith("/cancel"))
             and mode.get("account_id") != account_id
         )
@@ -408,7 +443,7 @@ class NoticeBridge:
         mode = self._reply_modes.get(str(chat_id))
         if (
             mode is None
-            or time.time() > mode["expires_at"]
+            or self._now() > mode["expires_at"]
             or mode.get("account_id") != account_id
             or (text.startswith("/") and not text.startswith("/cancel"))
         ):
@@ -450,7 +485,7 @@ class NoticeBridge:
         mode = self._reply_modes.get(str(chat_id))
         if mode is None:
             return None
-        if time.time() > mode["expires_at"]:
+        if self._now() > mode["expires_at"]:
             self._reply_modes.pop(str(chat_id), None)
             return None
         if text.startswith("/cancel"):

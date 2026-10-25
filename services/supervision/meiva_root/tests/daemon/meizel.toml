@@ -2,6 +2,3 @@ exports = ["observations.py"]
 
 [uses]
 "test_meiva_root_daemon.py" = ["observations.py"]
-
-[debt.restricted-python]
-"test_meiva_root_daemon.py#python -c" = 3

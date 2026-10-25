@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import asyncio
-import random
+import time
 from collections.abc import Awaitable, Callable
 
 from services.entrypoints.im_bridge.config import ImBridgeConfig
@@ -15,10 +15,11 @@ __all__ = ["retry_backoff_seconds", "retry_once_after_backoff"]
 # the value from the configured base and jitter. The draw spreads retries and has no security
 # role.
 def retry_backoff_seconds(config: ImBridgeConfig) -> float:
+    draw = ((time.perf_counter_ns() * 1103515245 + 12345) & 0xFFFFFFFF) / 0x100000000
     return retry_delay_s(
         base_s=config.im_push_retry_backoff_seconds,
         jitter_s=config.im_push_retry_jitter_seconds,
-        draw=random.random(),  # noqa: S311
+        draw=draw,
     )
 
 

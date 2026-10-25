@@ -3,33 +3,3 @@
 "test_healthcheck_gateway.py" = ["http_stub.py"]
 "test_healthcheck_lgtm.py" = ["loki_stub.py"]
 "test_healthcheck_memory_search.py" = ["http_stub.py"]
-
-[debt.first-party-patch]
-"test_healthcheck_browser_mcp.py#monkeypatch.setattr services.supervision.healthchecks.browser_mcp.browser_mcp_probe" = 3
-"test_healthcheck_browser_reach.py#monkeypatch.setattr services.supervision.healthchecks.browser_reach.canary_async" = 1
-"test_healthcheck_browser_reach.py#monkeypatch.setattr services.supervision.healthchecks.browser_reach.read_json" = 1
-"test_healthcheck_browser_reach.py#monkeypatch.setattr services.supervision.healthchecks.browser_reach.websockets.connect" = 1
-"test_healthcheck_gateway.py#monkeypatch.setattr base.config.settings.services.gateway_health_url" = 1
-"test_healthcheck_lgtm.py#monkeypatch.setattr base.config.settings.observability.telemetry_grafana_url" = 1
-"test_healthcheck_lgtm.py#monkeypatch.setattr base.config.settings.observability.telemetry_loki_url" = 1
-"test_healthcheck_lgtm.py#monkeypatch.setattr base.config.settings.observability.telemetry_prometheus_url" = 1
-"test_healthcheck_mcp_daemon.py#monkeypatch.setattr services.supervision.healthchecks.mcp_daemon.mcp_daemon_probe" = 3
-"test_healthcheck_permissions_helper.py#monkeypatch.setattr base.host.permissions_helper.client.connect" = 1
-"test_healthcheck_permissions_helper.py#monkeypatch.setattr base.native_process.root_control.client.peer_pid" = 1
-"test_healthcheck_permissions_helper.py#monkeypatch.setattr base.native_process.root_control.client.root_process" = 1
-"test_healthcheck_permissions_helper.py#monkeypatch.setattr services.supervision.healthchecks.permissions_helper.OwnedProcess.capture" = 1
-"test_healthcheck_permissions_helper.py#monkeypatch.setattr services.supervision.healthchecks.permissions_helper.helper_client" = 1
-"test_healthcheck_permissions_helper.py#monkeypatch.setattr services.supervision.healthchecks.permissions_helper.helper_parent" = 1
-"test_healthcheck_permissions_helper.py#monkeypatch.setattr services.supervision.healthchecks.permissions_helper.is_macos" = 3
-"test_healthcheck_permissions_helper.py#monkeypatch.setattr services.supervision.healthchecks.permissions_helper.parent_still_live" = 1
-"test_healthcheck_permissions_helper.py#monkeypatch.setattr services.supervision.healthchecks.permissions_helper.ping" = 4
-"test_healthcheck_permissions_helper.py#monkeypatch.setattr services.supervision.healthchecks.permissions_helper.psutil.Process" = 1
-"test_healthcheck_permissions_helper.py#monkeypatch.setattr services.supervision.healthchecks.permissions_helper.read_helper_job" = 4
-"test_protocol_probe.py#monkeypatch.setattr base.native_process.root_control.client.root_process" = 1
-"test_redis_acl_healthcheck.py#monkeypatch.setattr services.supervision.healthchecks.redis_acl.redis.Redis.from_url" = 2
-
-[debt.restricted-python]
-"test_protocol_probe.py#python -c" = 1
-
-[debt.third-party-patch]
-"test_protocol_probe.py#monkeypatch.setattr psutil.process_iter" = 1

@@ -3,7 +3,6 @@
 import asyncio
 import secrets
 from pathlib import Path
-from typing import Any
 
 import pytest
 
@@ -11,7 +10,7 @@ from services.entrypoints.im_bridge.adapters.feishu import FeishuAdapter
 from services.entrypoints.im_bridge.tests.adapters.test_feishu_adapter import (
     FakeCore,
     FakeWsClient,
-    PatchingAdapter,
+    build_patching_adapter,
     make_event,
 )
 from services.entrypoints.im_bridge.tests.slices import feishu_config
@@ -44,21 +43,9 @@ async def test_ws_callback_fault_fails_the_service_group_without_marking_seen(
     assert not adapter._seen_messages
 
 
-# meiva:note
-# Records the events its handler receives instead of forwarding them to the core.
-class _RecordingEvents(FeishuAdapter):
-    def __init__(self, *args: Any, **kwargs: Any) -> None:
-        super().__init__(*args, **kwargs)
-        self.handled: list[Any] = []
-
-    async def _handle_event(self, data: Any) -> None:
-        self.handled.append(data)
-
-
 async def test_ws_closing_rejects_queued_events_and_ends_owner_wait(state_dir: Path) -> None:
-    adapter = _RecordingEvents(
-        FakeCore(), feishu_config(), state_dir=state_dir, proxy_configured=False
-    )
+    core = FakeCore()
+    adapter = FeishuAdapter(core, feishu_config(), state_dir=state_dir, proxy_configured=False)
 
     async def lifecycle() -> None:
         async with asyncio.TaskGroup() as tasks:
@@ -67,12 +54,12 @@ async def test_ws_closing_rejects_queued_events_and_ends_owner_wait(state_dir: P
             adapter._ws_exit = adapter._main_loop.create_future()
             adapter._accepting_events = True
             tasks.create_task(adapter._observe_ws_exit(adapter._ws_exit))
-            adapter._on_im_message(make_event())
+            adapter._on_im_message(make_event(message_id="om_msg_1"))
             adapter.begin_shutdown()
-            adapter._on_im_message(make_event())
+            adapter._on_im_message(make_event(message_id="om_msg_2"))
             await asyncio.sleep(0)
         assert adapter._ws_exit is not None and adapter._ws_exit.cancelled()
-        assert len(adapter.handled) <= 1
+        assert len(core.received) <= 1
 
     await asyncio.wait_for(lifecycle(), timeout=2)
 
@@ -90,7 +77,7 @@ async def test_ws_worker_failure_reaches_the_same_service_owner(state_dir: Path)
             workers.append(threading.current_thread())
             raise fault
 
-    adapter = PatchingAdapter(
+    adapter = build_patching_adapter(
         FakeCore(),
         feishu_config(
             feishu_app_id="cli_x",
@@ -135,7 +122,7 @@ async def test_service_wait_stops_while_sdk_worker_stays_blocked(
             finally:
                 exited.set()
 
-    adapter = PatchingAdapter(
+    adapter = build_patching_adapter(
         FakeCore(),
         feishu_config(
             feishu_app_id="cli_x",
@@ -179,7 +166,7 @@ async def test_queued_ws_job_is_not_send_ready_and_shutdown_cancels_boot(state_d
     occupying = loop.run_in_executor(None, occupy)
     assert occupied.wait(1)
     client = FakeWsClient()
-    adapter = PatchingAdapter(
+    adapter = build_patching_adapter(
         FakeCore(),
         feishu_config(
             feishu_app_id="cli_x",

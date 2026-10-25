@@ -7,11 +7,11 @@ from typing import Any
 
 import pytest
 
+from base.clock import SYSTEM_TIMERS, Timers
 from base.daemon.health import DaemonProbe
 from base.log.tests.log_records import LogRecords
 from base.log.tests.log_records import loguru_records as loguru_records
 from base.native_process.ownership import OwnedProcess
-from services.supervision.meiva_root import health as health_mod
 from services.supervision.meiva_root.failure_state import (
     FailureKind,
     UnitFailureFacts,
@@ -110,19 +110,28 @@ class _Clock:
     def __init__(self) -> None:
         self.now = 1000.0
 
-    def __call__(self) -> float:
+    def monotonic(self) -> float:
         self.now += 0.02
         return self.now
 
+    def sleep(self, seconds: float) -> None:
+        self.now += seconds
+
+    async def asleep(self, seconds: float) -> None:
+        await asyncio.sleep(seconds)
+
 
 @pytest.fixture
-def clock(monkeypatch: pytest.MonkeyPatch) -> _Clock:
-    fake = _Clock()
-    monkeypatch.setattr(health_mod, "monotonic", fake)
-    return fake
+def clock() -> _Clock:
+    return _Clock()
 
 
-def _monitor(supervisor: _Supervisor, probe: Callable[[], DaemonProbe]) -> HealthMonitor:
+def _monitor(
+    supervisor: _Supervisor,
+    probe: Callable[[], DaemonProbe],
+    *,
+    timers: Timers = SYSTEM_TIMERS,
+) -> HealthMonitor:
     registry = ProbeRegistry()
     registry.register("svc", probe)
     values: dict[str, Any] = {
@@ -131,14 +140,14 @@ def _monitor(supervisor: _Supervisor, probe: Callable[[], DaemonProbe]) -> Healt
         "max_restart_attempts": 3,
         "restart_backoff_s": (0.0,),
     }
-    return HealthMonitor(supervisor, registry, config=HealthConfig(**values))
+    return HealthMonitor(supervisor, registry, config=HealthConfig(**values), timers=timers)
 
 
 async def test_exhausted_attempts_are_reported_every_round_then_clear_on_alive(
     clock: _Clock, recorder: _Recorder
 ) -> None:
     probe = _Cell(DaemonProbe.down("no"))
-    monitor = _monitor(_Supervisor(), probe)
+    monitor = _monitor(_Supervisor(), probe, timers=clock)
     await monitor.run_round()
     await monitor.run_round()
     assert recorder.events("root_unit_failure_state") == []
@@ -168,7 +177,7 @@ async def test_the_failure_state_signal_carries_the_named_port_holder(
             f"not this unit's daemon; {holder}"
         )
     )
-    monitor = _monitor(_Supervisor(), probe)
+    monitor = _monitor(_Supervisor(), probe, timers=clock)
     for _ in range(4):
         await monitor.run_round()
     state = recorder.events("root_unit_failure_state")[-1]
@@ -180,7 +189,7 @@ async def test_recorded_restart_failure_is_a_state_signal(
     clock: _Clock, recorder: _Recorder
 ) -> None:
     supervisor = _Supervisor()
-    monitor = _monitor(supervisor, _Cell(DaemonProbe.up("ok")))
+    monitor = _monitor(supervisor, _Cell(DaemonProbe.up("ok")), timers=clock)
     supervisor.facts = UnitFailureFacts(
         intent_running=True,
         restart_failed=_failure(RestartStage.DOWN, "stop refused"),
@@ -200,7 +209,7 @@ async def test_terminal_verdict_is_reported_every_round_at_warning(
     clock: _Clock, recorder: _Recorder
 ) -> None:
     probe = _Cell(DaemonProbe.port_taken("alien daemon"))
-    monitor = _monitor(_Supervisor(), probe)
+    monitor = _monitor(_Supervisor(), probe, timers=clock)
     await monitor.run_round()
     await monitor.run_round()
     reports = recorder.events("root_unit_not_revivable")
@@ -223,6 +232,7 @@ def _paced_monitor(
     *,
     database: Callable[[], DaemonProbe] | None = None,
     startup_grace_s: float = 0.0,
+    timers: Timers = SYSTEM_TIMERS,
 ) -> HealthMonitor:
     registry = ProbeRegistry()
     registry.register("svc", probe)
@@ -236,6 +246,7 @@ def _paced_monitor(
             restart_backoff_s=(60.0, 300.0, 900.0),
         ),
         db_recovery_probe=database,
+        timers=timers,
     )
 
 
@@ -254,7 +265,11 @@ async def test_a_recovery_grant_survives_a_startup_grace(clock: _Clock) -> None:
     database = _Cell(DaemonProbe.down("database unreachable"))
     supervisor = _Supervisor()
     monitor = _paced_monitor(
-        supervisor, _Cell(DaemonProbe.down("no")), database=database, startup_grace_s=180
+        supervisor,
+        _Cell(DaemonProbe.down("no")),
+        database=database,
+        startup_grace_s=180,
+        timers=clock,
     )
     await _spend_the_budget(monitor, clock)
     supervisor.generation = (OwnedProcess(43, 101.0, None), clock.now)
@@ -270,7 +285,7 @@ async def test_a_recovery_grant_survives_a_startup_grace(clock: _Clock) -> None:
 async def test_a_recovery_grant_survives_a_terminal_observation(clock: _Clock) -> None:
     database = _Cell(DaemonProbe.down("database unreachable"))
     unit = _Cell(DaemonProbe.down("no"))
-    monitor = _paced_monitor(_Supervisor(), unit, database=database)
+    monitor = _paced_monitor(_Supervisor(), unit, database=database, timers=clock)
     await _spend_the_budget(monitor, clock)
     unit.verdict = DaemonProbe.port_taken("alien daemon")
     database.verdict = DaemonProbe.up("database answered")
@@ -284,7 +299,9 @@ async def test_a_recovery_grant_survives_a_terminal_observation(clock: _Clock) -
 
 async def test_the_first_database_observation_grants_exactly_one_attempt(clock: _Clock) -> None:
     database = _Cell(DaemonProbe.up("database answered"))
-    monitor = _paced_monitor(_Supervisor(), _Cell(DaemonProbe.down("no")), database=database)
+    monitor = _paced_monitor(
+        _Supervisor(), _Cell(DaemonProbe.down("no")), database=database, timers=clock
+    )
     await _spend_the_budget(monitor, clock)
     clock.now += 60
     await monitor.run_round()
@@ -296,7 +313,7 @@ async def test_the_first_database_observation_grants_exactly_one_attempt(clock: 
 async def test_a_database_that_fails_again_withdraws_the_grant(clock: _Clock) -> None:
     database = _Cell(DaemonProbe.down("database unreachable"))
     unit = _Cell(DaemonProbe.down("no"))
-    monitor = _paced_monitor(_Supervisor(), unit, database=database)
+    monitor = _paced_monitor(_Supervisor(), unit, database=database, timers=clock)
     await _spend_the_budget(monitor, clock)
     unit.verdict = DaemonProbe.unavailable("inspection failed")
     database.verdict = DaemonProbe.up("database answered")
@@ -310,7 +327,9 @@ async def test_a_database_that_fails_again_withdraws_the_grant(clock: _Clock) ->
 
 
 async def test_a_raising_database_probe_never_releases_the_breaker(clock: _Clock) -> None:
-    monitor = _paced_monitor(_Supervisor(), _Cell(DaemonProbe.down("no")), database=_raising)
+    monitor = _paced_monitor(
+        _Supervisor(), _Cell(DaemonProbe.down("no")), database=_raising, timers=clock
+    )
     await _spend_the_budget(monitor, clock)
     for _ in range(3):
         clock.now += 60
@@ -322,7 +341,9 @@ async def test_a_raising_database_probe_never_releases_the_breaker(clock: _Clock
 async def test_a_held_down_unit_stops_the_database_dial(clock: _Clock) -> None:
     database = _Cell(DaemonProbe.down("database unreachable"))
     supervisor = _Supervisor()
-    monitor = _paced_monitor(supervisor, _Cell(DaemonProbe.down("no")), database=database)
+    monitor = _paced_monitor(
+        supervisor, _Cell(DaemonProbe.down("no")), database=database, timers=clock
+    )
     await _spend_the_budget(monitor, clock)
     supervisor.deferrals["svc"] = "held down"
     supervisor.facts = UnitFailureFacts(intent_running=False, restart_failed=None)
@@ -489,7 +510,7 @@ async def test_held_down_without_an_operator_record_stays_quiet(
     clock: _Clock, recorder: _Recorder
 ) -> None:
     supervisor = _Supervisor()
-    monitor = _monitor(supervisor, _Cell(DaemonProbe.down("no")))
+    monitor = _monitor(supervisor, _Cell(DaemonProbe.down("no")), timers=clock)
     supervisor.deferrals["svc"] = "held down"
     supervisor.facts = UnitFailureFacts(intent_running=False, restart_failed=None)
     for _ in range(3):
@@ -502,7 +523,7 @@ async def test_unattended_operator_stop_reports_once_then_again_for_a_new_stop(
 ) -> None:
     now = time.time()
     supervisor = _Supervisor()
-    monitor = _monitor(supervisor, _Cell(DaemonProbe.down("no")))
+    monitor = _monitor(supervisor, _Cell(DaemonProbe.down("no")), timers=clock)
     supervisor.deferrals["svc"] = "held down"
 
     supervisor.facts = UnitFailureFacts(

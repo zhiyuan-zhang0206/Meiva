@@ -10,8 +10,7 @@ from __future__ import annotations
 
 import logging
 import subprocess
-import sys
-from collections.abc import Callable, Mapping, Sequence
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 from types import MappingProxyType
@@ -30,9 +29,10 @@ from base.deploy.progress_timeout import (
 )
 from base.native_process.code_version import CodeVersion
 from base.native_process.loaded_commit import LoadedCommit
+from base.native_process.os_platform import Platform
 from base.telemetry import build_pipeline
 from services.supervision.meiva_root.health import HealthConfig, HealthMonitor, LeaseProbe
-from services.supervision.meiva_root.probes import Probe, ProbeError, ProbeRegistry
+from services.supervision.meiva_root.probes import Probe, ProbeError, ProbeRegistry, ProbeSource
 from services.supervision.meiva_root.selfcheck import SelfCheckConfig, TreeSelfCheck
 from services.supervision.meiva_root.wiring import WiringContext, WiringParticipant
 from services.supervision.meiva_root_glue.diagnostic_probes import (
@@ -41,6 +41,7 @@ from services.supervision.meiva_root_glue.diagnostic_probes import (
     live_lease_probe,
 )
 from services.supervision.meiva_root_glue.diagnostics import (
+    Diagnostic,
     DiagnosticMonitor,
     RootHealthRounds,
     RoundsInputs,
@@ -77,7 +78,7 @@ def agent_host_memory_caps(
     max_mb: int,
     swap_max_mb: int,
     platform: str,
-    scope_available: Callable[[int, int], bool],
+    scope_available: bool | None = None,
 ) -> dict[str, UnitMemoryCap]:
     if max_mb <= 0:
         return {}
@@ -88,7 +89,12 @@ def agent_host_memory_caps(
             max_mb,
         )
         return {}
-    if not scope_available(max_mb, swap_max_mb):
+    supported = (
+        _systemd_user_scope_available(max_mb, swap_max_mb)
+        if scope_available is None
+        else scope_available
+    )
+    if not supported:
         _log.warning(
             "agent-host memory cap configured (%d MiB) but this systemd cannot carry the "
             "scope attributes it needs; the unit runs unbounded rather than failing to start",
@@ -160,14 +166,22 @@ contract).
 """
 
 
-def build_wiring(context: WiringContext) -> list[WiringParticipant]:
+def build_wiring(
+    context: WiringContext,
+    *,
+    config: ConfigBoot | None = None,
+    diagnostics: Sequence[Diagnostic] | None = None,
+    diagnostic_overrides: Mapping[str, str | int | float | bool] | None = None,
+    services: Sequence[ProbeSource] | None = None,
+    static_probes: Mapping[str, str] = STATIC_PROBES,
+) -> list[WiringParticipant]:
     """The reference participant set: health monitor + tree self-check."""
     from base.host.runtime_interpreter import capture_loaded_runtime
     from base.paths import meiva_home
 
     home = meiva_home().resolve(strict=True)
     identity = capture_loaded_runtime()
-    if Path.cwd().resolve() != Path(identity.cwd):
+    if Path().resolve() != Path(identity.cwd):
         raise RuntimeError("root cwd differs from its loaded runtime")
     context.supervisor.bind_runtime(identity, home=home)
     # meiva:note
@@ -177,15 +191,15 @@ def build_wiring(context: WiringContext) -> list[WiringParticipant]:
     caps = agent_host_memory_caps(
         max_mb=settings.agent.agent_host_memory_max_mb,
         swap_max_mb=settings.agent.agent_host_memory_swap_max_mb,
-        platform=sys.platform,
-        scope_available=_systemd_user_scope_available,
+        platform=Platform.current().system,
     )
     context.supervisor.set_argv_transform(
         (lambda unit_id, argv: memory_scoped_argv(unit_id, argv, caps=caps)) if caps else None
     )
     image = LoadedCommit.capture(Path(identity.code_root))
-    config = ConfigBoot()
-    config.boot()
+    if config is None:
+        config = ConfigBoot()
+        config.boot()
     machine = ConfiguredMachineIdentity(config)
     version = CodeVersion(image)
     gate = ProcessDbGate(version=version.get, process="meiva-root")
@@ -203,8 +217,9 @@ def build_wiring(context: WiringContext) -> list[WiringParticipant]:
     )
     registry = ProbeRegistry()
     requested = {unit.id for unit in context.registry.units}
-    registry.register_specs(spec for spec in build_services() if spec.session in requested)
-    for unit_id, ref in STATIC_PROBES.items():
+    raw_specs: Sequence[ProbeSource] = build_services() if services is None else services
+    registry.register_specs(spec for spec in raw_specs if spec.session in requested)
+    for unit_id, ref in static_probes.items():
         registry.register_ref(unit_id, ref)
     missing = requested - set(registry.unit_ids())
     if missing:
@@ -215,6 +230,16 @@ def build_wiring(context: WiringContext) -> list[WiringParticipant]:
         else NON_CRITICAL_SERVICE_READY_TIMEOUT_S
         for unit_id in requested
     }
+    resolved_diagnostics = (
+        build_diagnostics(
+            requested,
+            database=database,
+            machine=machine,
+            overrides=diagnostic_overrides,
+        )
+        if diagnostics is None
+        else diagnostics
+    )
     return assemble(
         context,
         registry,
@@ -222,9 +247,7 @@ def build_wiring(context: WiringContext) -> list[WiringParticipant]:
         db_recovery_probe=database_recovery_probe(database),
         lease_probe=live_lease_probe(database, machine.name()),
         rounds=RoundsInputs(
-            diagnostics=DiagnosticMonitor(
-                build_diagnostics(requested, database=database, machine=machine)
-            ),
+            diagnostics=DiagnosticMonitor(resolved_diagnostics),
             clients=clients,
             image=image,
             machine=machine,
