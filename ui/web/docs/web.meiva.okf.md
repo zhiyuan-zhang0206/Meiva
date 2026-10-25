@@ -92,7 +92,9 @@ No prettier: there is no dependency, config, or CI gate for it, and the tree was
 never formatted to its defaults (553 of 611 files under `src/` differ from them).
 Style is held by eslint + tsc + vitest. `ui/web/.prettierignore` ignores `src/`
 so an ad-hoc `npx prettier --write` cannot rewrite the tree as a side effect of
-an unrelated change.
+an unrelated change. To check the premise before trusting it: `grep -c prettier
+ui/web/package.json` answers 0, and neither this package nor the repository root
+carries a `.prettierrc*` or `prettier.config.*`.
 
 ## Sub-concepts
 
