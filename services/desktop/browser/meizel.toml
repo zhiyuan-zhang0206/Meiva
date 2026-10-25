@@ -36,3 +36,12 @@ exports = ["mcp_daemon.py", "mcp_socket_bridge.py", "mcp_wrapper.py", "orphan.py
 "session.py#clock time.time" = 1
 "session_restore.py#clock datetime.datetime.now" = 2
 "session_restore.py#clock time.monotonic" = 4
+
+[debt.type-cast]
+"probe.py#cast cdp_unreachable" = 1
+"session_restore.py#cast _connect" = 1
+"session_restore.py#cast _extension_layout" = 2
+"session_restore.py#cast _extension_layout.<listcomp>" = 1
+"session_restore.py#cast _listed_urls" = 1
+"session_restore.py#cast read" = 4
+"session_restore.py#cast reapply" = 1

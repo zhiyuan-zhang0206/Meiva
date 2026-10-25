@@ -13,3 +13,8 @@ exports = ["bindings.py", "cache.py", "executed.py", "facts.py", "fixture_scopes
 
 [debt.ambient-read]
 "cache.py#pid os.getpid" = 1
+
+[debt.type-cast]
+"bindings.py#cast Scope._bind" = 1
+"cache.py#cast _load" = 2
+"fixture_scopes.py#cast declarations" = 1

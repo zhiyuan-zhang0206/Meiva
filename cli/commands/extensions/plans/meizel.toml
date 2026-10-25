@@ -8,3 +8,8 @@ exports = ["mcp_server_spec.py", "memory_search.py", "source_binding.py"]
 "mcp_server_spec.py" = "strict"
 "memory_search.py" = "strict"
 "source_binding.py" = "strict"
+
+[debt.type-cast]
+"mcp_server_spec.py#cast build_server_spec" = 1
+"mcp_server_spec.py#cast server_summary" = 2
+"memory_search.py#cast render_results" = 2

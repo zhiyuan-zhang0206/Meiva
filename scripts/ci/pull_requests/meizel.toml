@@ -23,3 +23,10 @@ exports = ["accounting.py", "classify_paths.py", "commands.py", "export_process.
 "pr_flow_export.py#clock datetime.datetime.now" = 1
 "pr_flow_export.py#home pathlib.Path.home" = 1
 "runs_export.py#clock datetime.datetime.now" = 1
+
+[debt.type-cast]
+"diagnose.py#cast _object_rows" = 1
+"diagnose.py#cast _object_rows.<listcomp>" = 1
+"diagnose.py#cast _pr_view" = 1
+"diagnose.py#cast _pull_head_ref" = 1
+"job_rerun.py#cast _response_rows" = 3

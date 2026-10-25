@@ -18,3 +18,8 @@ exports = ["diagnostic_probes.py", "manifests.py"]
 "drill.py#clock time.time" = 1
 "glue.py#cwd pathlib.Path.cwd" = 1
 "glue.py#platform sys.platform" = 1
+
+[debt.type-cast]
+"drill.py#cast liveness_probe.probe" = 1
+"manifests.py#cast _validate" = 2
+"manifests.py#cast main" = 2

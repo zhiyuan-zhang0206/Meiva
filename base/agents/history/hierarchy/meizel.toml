@@ -18,3 +18,7 @@ exports = ["build.py", "check_plan.py", "chunk_generate.py", "chunk_plan.py", "c
 "__init__.py" = "strict"
 "usage.py" = "strict"
 "check_plan.py" = "strict"
+
+[debt.type-cast]
+"chunk_plan.py#cast segment_requests" = 2
+"units.py#cast _reasoning_ms" = 1

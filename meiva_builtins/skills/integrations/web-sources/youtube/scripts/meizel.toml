@@ -7,3 +7,8 @@ exports = ["feed.py"]
 
 [debt.ambient-read]
 "yt_run.py#clock datetime.datetime.now" = 1
+
+[debt.type-cast]
+"yt_wire.py#cast _as_object" = 1
+"yt_wire.py#cast playlist_entries" = 1
+"yt_wire.py#cast video_meta" = 2

@@ -10,3 +10,7 @@ exports = ["catalog.py", "harness_onboarding.py", "hostfs.py", "transport.py"]
 [debt.ambient-read]
 "harness_onboarding.py#clock datetime.datetime.now" = 2
 "harness_onboarding.py#home pathlib.Path.home" = 1
+
+[debt.type-cast]
+"harness_onboarding.py#cast first_file" = 1
+"harness_onboarding.py#cast main" = 1

@@ -8,3 +8,6 @@ exports = ["webscrape.py"]
 [debt.ambient-read]
 "webscrape.py#clock datetime.datetime.now" = 1
 "webscrape.py#environ os.environ" = 1
+
+[debt.type-cast]
+"webscrape.py#cast _load_if_complete" = 1

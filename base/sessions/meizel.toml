@@ -27,3 +27,10 @@ exports = ["backend.py", "coding_session_owner.py", "coding_session_owner_record
 "posixproc.py#clock time.monotonic" = 2
 "posixproc.py#clock time.time" = 1
 "tool_capabilities.py#clock datetime.datetime.now" = 3
+
+[debt.type-cast]
+"coding_session_owner_record.py#cast <module>" = 1
+"coding_session_owner_record.py#cast _parse" = 1
+"record.py#cast SessionRecord.read" = 1
+"tool_capabilities.py#cast _from_cache" = 2
+"tool_capabilities.py#cast _read_cache" = 1

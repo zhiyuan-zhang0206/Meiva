@@ -12,3 +12,11 @@ exports = ["baseline_shards.py", "budgets", "imports", "lazy_modules.py", "local
 
 [debt.ambient-read]
 "cochange.py#clock datetime.datetime.now" = 1
+
+[debt.type-cast]
+"baseline_shards.py#cast parse_rules" = 3
+"locality.py#cast validate_entries" = 1
+"platform_lane_coverage.py#cast jobs" = 3
+"platform_lane_coverage.py#cast lanes" = 2
+"skip_sites.py#cast load" = 1
+"skip_sites.py#cast load.<dictcomp>" = 1

@@ -22,3 +22,11 @@ exports = ["agent_traceback.py", "child.py", "protocol.py"]
 "child.py#pid os.getpid" = 2
 "protocol.py#clock time.time" = 1
 "protocol.py#random uuid.uuid4" = 2
+
+[debt.type-cast]
+"child.py#cast pop_overlay_env" = 1
+"child.py#cast run_code" = 2
+"protocol.py#cast RequestPayload.agent_id" = 1
+"protocol.py#cast _read_json" = 1
+"protocol.py#cast read_request" = 1
+"protocol.py#cast read_result" = 3

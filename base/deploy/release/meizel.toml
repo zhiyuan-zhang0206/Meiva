@@ -26,5 +26,8 @@ exports = ["collector_artifact.py", "editable_install.py", "python_lock.py", "st
 "collector_artifact.py#base/host/net/ports.py" = 1
 "collector_artifact.py#base/host/net/resilience.py" = 1
 
+[debt.type-cast]
+"editable_install.py#cast _direct_url_is_allowed" = 2
+
 [debt.wide-params]
 "collector_artifact.py#def stream_download" = 1

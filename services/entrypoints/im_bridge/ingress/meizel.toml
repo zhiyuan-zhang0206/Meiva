@@ -44,3 +44,10 @@ exports = ["identity.py", "runtime.py", "store.py", "types.py"]
 "store.py#base/agents/inbox/chat_delivery.py" = 1
 "store.py#base/db/transaction.py" = 1
 "store.py#base/telemetry/__init__.py" = 3
+
+[debt.type-cast]
+"commands.py#cast execute_ingress_command" = 1
+"commands.py#cast notice_reply_verdict" = 1
+"commands.py#cast spawn_verdict" = 1
+"identity.py#cast poll_update_fields" = 2
+"identity.py#cast validate_message_items" = 1

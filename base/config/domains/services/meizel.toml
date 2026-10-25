@@ -3,3 +3,6 @@ exports = ["settings.py"]
 
 [uses]
 "settings.py" = ["health_ports_fields.py", "runtime.py"]
+
+[debt.type-cast]
+"settings.py#cast ServiceSettings._parse_str_list" = 1

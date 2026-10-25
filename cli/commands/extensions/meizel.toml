@@ -26,3 +26,12 @@ exports = ["external_skills.py", "materialize.py", "memory.py", "parsers", "plug
 "skill.py#clock datetime.datetime.now" = 4
 "skill_package.py#clock datetime.datetime.now" = 1
 "skills_sync.py#clock datetime.datetime.now" = 1
+
+[debt.type-cast]
+"external_skills.py#cast _abandon_transaction" = 1
+"external_skills.py#cast _activate" = 1
+"external_skills.py#cast _ledger_for" = 1
+"mcp.py#cast _auto_detect_mcp" = 1
+"mcp.py#cast _detect_module" = 1
+"mcp.py#cast _landed_env" = 1
+"mcp.py#cast _read_machine_config" = 1

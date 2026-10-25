@@ -21,3 +21,8 @@ exports = ["backends", "chunking.py", "config.py", "daemon.py", "embeddings", "m
 
 [debt.ambient-read]
 "patrol_status.py#clock time.time" = 1
+
+[debt.type-cast]
+"recall_regression.py#cast _case_of" = 2
+"recall_regression.py#cast _ranked_from" = 2
+"recall_regression.py#cast main" = 1

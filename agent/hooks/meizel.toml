@@ -18,3 +18,6 @@ exports = ["chunk_turn.py", "compact_anchor.py", "compact_events.py", "history_d
 "repair.py#clock datetime.datetime.now" = 1
 "security.py#clock datetime.datetime.now" = 1
 "understanding_chunks.py#clock time.monotonic" = 3
+
+[debt.type-cast]
+"repair.py#cast _is_synthetic_tool_result" = 1

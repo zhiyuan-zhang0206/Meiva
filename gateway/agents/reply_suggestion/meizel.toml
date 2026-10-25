@@ -13,3 +13,6 @@ exports = ["configuration.py", "router.py", "service.py", "tests"]
 "excerpt.py" = "strict"
 "plan.py" = "strict"
 "schemas.py" = "strict"
+
+[debt.type-cast]
+"service.py#cast _structured_reply" = 1

@@ -16,3 +16,6 @@ exports = ["agent_runtime.py", "plugin.py"]
 "agent_runtime.py#home pathlib.Path.home" = 1
 "plugin.py#clock datetime.datetime.now" = 1
 "plugin.py#home pathlib.Path.home" = 1
+
+[debt.type-cast]
+"plugin.py#cast _wrapped_read" = 1

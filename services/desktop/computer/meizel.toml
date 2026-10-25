@@ -27,3 +27,9 @@ exports = ["config.py", "execute.py", "input.py", "mcp_daemon.py", "mcp_wrapper.
 [debt.ambient-read]
 "screen.py#clock datetime.datetime.now" = 1
 "task_sessions.py#clock time.time" = 1
+
+[debt.type-cast]
+"ax_tools.py#cast _args" = 1
+"targets.py#cast AppTarget.parse" = 1
+"targets.py#cast CaptureFrame.parse" = 1
+"targets.py#cast _object" = 2

@@ -21,3 +21,16 @@ exports = ["delivery", "envelope.py", "external_caller.py", "guard.py", "identit
 
 [roots]
 "external_caller.py" = { kinds = ["environ"], why = "per-invocation external child profile, consumed by SDK identity bootstrap before Settings; caller provenance is not cluster config and must not enter its persisted Settings projection" }
+
+[debt.type-cast]
+"guard.py#cast _coerce.<listcomp>" = 1
+"guard.py#cast _contains_remove_all" = 1
+"guard.py#cast _is_delta" = 1
+"guard.py#cast guarded_delta_reducer" = 1
+"guard.py#cast validate_messages_mutation.<dictcomp>" = 1
+"guard.py#cast validate_rebuild.<dictcomp>" = 2
+"identity.py#cast normalize_stored_message_ids" = 1
+"inbound_images.py#cast inbound_image_urls" = 3
+"kwargs.py#cast read_meiva_kwargs" = 1
+"token_estimate.py#cast ai_message_texts" = 2
+"token_estimate.py#cast content_text" = 2

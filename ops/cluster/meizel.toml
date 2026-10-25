@@ -11,3 +11,6 @@ exports = ["operations.py", "rpc.py", "rpc_plans.py"]
 "rpc.py#random random.uniform" = 1
 "rpc.py#random uuid.uuid4" = 1
 "rpc.py#settings base.config.settings" = 1
+
+[debt.type-cast]
+"operations.py#cast agent_skill_view_inputs" = 4

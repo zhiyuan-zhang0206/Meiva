@@ -25,3 +25,11 @@ exports = ["delivery.py", "event_signals.py", "history.py", "host_transport.py",
 [debt.ambient-read]
 "__init__.py#random secrets.token_urlsafe" = 1
 "__init__.py#random uuid.uuid4" = 1
+
+[debt.type-cast]
+"event_log.py#cast append_source_event" = 1
+"event_log.py#cast locked_receipt_state" = 1
+"host_transport.py#cast _as_mapping" = 1
+"host_transport.py#cast read_antigravity_endpoint_file" = 1
+"status.py#cast <module>" = 1
+"status.py#cast parse_lease" = 1

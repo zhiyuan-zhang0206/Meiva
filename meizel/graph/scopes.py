@@ -18,9 +18,18 @@ __all__ = [
 class Scope:
     """Import origins and shadowing names of one function, class or module body."""
 
-    __slots__ = ("imports", "is_class", "parent", "shadowed", "stores", "values")
+    __slots__ = (
+        "_closure_override",
+        "imports",
+        "is_class",
+        "parent",
+        "shadowed",
+        "stores",
+        "values",
+    )
 
     def __init__(self, parent: Scope | None, *, is_class: bool = False) -> None:
+        self._closure_override: Scope | None = None
         self.parent = parent
         self.is_class = is_class
         self.imports: dict[str, str] = {}
@@ -56,10 +65,21 @@ class Scope:
         return None, False
 
     def closure_parent(self) -> Scope | None:
+        if self._closure_override is not None:
+            return self._closure_override
         scope: Scope | None = self
         while scope is not None and scope.is_class:
             scope = scope.parent
         return scope
+
+    def annotation_scope(self, parameters: Iterable[str]) -> Scope:
+        annotation = Scope(self)
+        closure = Scope(self.closure_parent())
+        names = set(parameters)
+        annotation.shadowed.update(names)
+        closure.shadowed.update(names)
+        annotation._closure_override = closure
+        return annotation
 
 
 def absolute_base(node: ast.ImportFrom, package: list[str]) -> str | None:
@@ -149,8 +169,10 @@ def collect_scope(
         kind = type(node)
         if kind is ast.Import or kind is ast.ImportFrom:
             _bind_import(scope, node, package)  # type: ignore[arg-type]
-        elif kind in {ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef}:
-            scope.shadowed.add(node.name)  # type: ignore[attr-defined]
+        elif isinstance(
+            node, ast.FunctionDef | ast.AsyncFunctionDef | ast.ClassDef | ast.TypeAlias
+        ):
+            _collect_definition(scope, node, None)
         elif kind is ast.Assign or kind is ast.AnnAssign:
             _assigned(scope, node)  # type: ignore[arg-type]
         elif kind is ast.AugAssign:
@@ -184,6 +206,19 @@ def _collect_compound(
             stack.extend(handler.body)
 
 
+def _collect_definition(
+    scope: Scope,
+    node: ast.FunctionDef | ast.AsyncFunctionDef | ast.ClassDef | ast.TypeAlias,
+    stack: list[ast.AST] | None,
+) -> None:
+    if isinstance(node, ast.TypeAlias):
+        bind_target(scope, node.name)
+        return
+    scope.shadowed.add(node.name)
+    if stack is not None:
+        stack.extend(_definition_header(node))
+
+
 def _definition_header(
     node: ast.FunctionDef | ast.AsyncFunctionDef | ast.ClassDef,
 ) -> Iterable[ast.AST]:
@@ -206,9 +241,8 @@ def _collect_everything(scope: Scope, body: Iterable[ast.AST], package: list[str
     stack = list(body)
     while stack:
         node = stack.pop()
-        if isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef | ast.ClassDef):
-            scope.shadowed.add(node.name)
-            stack.extend(_definition_header(node))
+        if isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef | ast.ClassDef | ast.TypeAlias):
+            _collect_definition(scope, node, stack)
             continue
         if isinstance(node, ast.Lambda):
             stack.extend(d for d in (*node.args.defaults, *node.args.kw_defaults) if d is not None)

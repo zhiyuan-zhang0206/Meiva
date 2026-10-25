@@ -23,3 +23,6 @@ exports = ["neighbors.py", "okf_graph.py", "router.py", "schemas.py"]
 "_plugin_metrics.py#clock datetime.datetime.now" = 1
 "neighbors.py#clock datetime.datetime.now" = 1
 "router.py#clock datetime.datetime.now" = 1
+
+[debt.type-cast]
+"_plugin_metrics.py#cast _execute_metric" = 1

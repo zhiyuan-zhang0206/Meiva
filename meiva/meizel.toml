@@ -25,3 +25,7 @@ exports = ["agents", "boot.py", "files.py", "gateway_client", "impersonation", "
 "files.py#home pathlib.Path.home" = 1
 "files.py#random uuid.uuid4" = 1
 "ui.py#clock time.monotonic" = 2
+
+[debt.type-cast]
+"security.py#cast deliver" = 1
+"ui.py#cast _error_detail" = 1
