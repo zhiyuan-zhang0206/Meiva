@@ -32,6 +32,8 @@ from base.host.system.hostport import Host
 from base.native_process.ownership import OwnedProcess
 
 SYSTEM_UNIT_DIR = Path("/etc/systemd/system")
+SYSTEMD_RUNTIME_DIR = Path("/run/systemd/system")
+PROC_ROOT = Path("/proc")
 
 # Bound startup only; a healthy resident root has no runtime deadline.
 START_TIMEOUT_S = 900
@@ -62,8 +64,8 @@ UNIT_NAME = "meiva-boot.service"
 """The one boot unit of the host: the host runs one cluster."""
 
 
-def unit_path() -> Path:
-    return SYSTEM_UNIT_DIR / UNIT_NAME
+def unit_path(unit_dir: Path = SYSTEM_UNIT_DIR) -> Path:
+    return unit_dir / UNIT_NAME
 
 
 def root_pid_path(home: Path) -> Path:
@@ -92,12 +94,12 @@ def _default_context(*, services: frozenset[str], host: Host) -> BootUnitContext
 # --- detection --------------------------------------------------------------
 
 
-def systemd_running(*, host: Host) -> bool:
+def systemd_running(*, host: Host, runtime_dir: Path = SYSTEMD_RUNTIME_DIR) -> bool:
     """True when this host runs systemd as its service manager."""
     return (
         host.platform.system == "linux"
         and host.which("systemctl") is not None
-        and Path("/run/systemd/system").is_dir()
+        and runtime_dir.is_dir()
     )
 
 
@@ -106,9 +108,9 @@ def systemctl(*args: str, timeout: float = 30.0, host: Host) -> subprocess.Compl
     return host.run(["systemctl", *args], capture_output=True, text=True, timeout=timeout)
 
 
-def unit_enabled(*, host: Host) -> bool:
+def unit_enabled(*, host: Host, runtime_dir: Path = SYSTEMD_RUNTIME_DIR) -> bool:
     """Whether the boot unit is installed and enabled."""
-    if not systemd_running(host=host):
+    if not systemd_running(host=host, runtime_dir=runtime_dir):
         return False
     return systemctl("is-enabled", UNIT_NAME, host=host).stdout.strip() == "enabled"
 
@@ -203,9 +205,9 @@ def render_unit(ctx: BootUnitContext) -> str:
     )
 
 
-def process_cgroup(pid: int) -> str:
+def process_cgroup(pid: int, *, proc_root: Path = PROC_ROOT) -> str:
     """Read the native systemd/unified cgroup, without process-name inference."""
-    rows = (Path("/proc") / str(pid) / "cgroup").read_text().splitlines()
+    rows = (proc_root / str(pid) / "cgroup").read_text().splitlines()
     for row in rows:
         hierarchy, controllers, path = row.split(":", 2)
         if hierarchy == "0" or "name=systemd" in controllers.split(","):
@@ -213,11 +215,12 @@ def process_cgroup(pid: int) -> str:
     raise RuntimeError(f"PID {pid} has no observable systemd cgroup")
 
 
-def in_boot_unit(*, host: Host) -> bool:
+def in_boot_unit(*, host: Host, proc_root: Path = PROC_ROOT, pid: int | None = None) -> bool:
     """Interactive start has no systemd readiness tail, even on Linux."""
     if host.platform.system != "linux":
         return False
-    return process_cgroup(os.getpid()) == f"/system.slice/{UNIT_NAME}"
+    target_pid = os.getpid() if pid is None else pid
+    return process_cgroup(target_pid, proc_root=proc_root) == f"/system.slice/{UNIT_NAME}"
 
 
 def manager_properties(*, host: Host) -> dict[str, str]:
@@ -232,7 +235,26 @@ def manager_properties(*, host: Host) -> dict[str, str]:
     return values
 
 
-def publish_root_ready(home: Path, root: OwnedProcess, *, host: Host) -> None:
+def verify_post_publication(
+    path: Path,
+    *,
+    live: bool,
+    cgroup: str,
+    expected_cgroup: str = f"/system.slice/{UNIT_NAME}",
+) -> None:
+    if not live or cgroup != expected_cgroup:
+        path.unlink(missing_ok=True)
+        raise RuntimeError("root changed birth or native custody during PID publication")
+
+
+def publish_root_ready(
+    home: Path,
+    root: OwnedProcess,
+    *,
+    host: Host,
+    proc_root: Path = PROC_ROOT,
+    control_pid: int | None = None,
+) -> None:
     """Publish the ready root; systemd adopts only after successful caller exit.
 
     Type=forking waits for this ordinary start process to exit before reading
@@ -240,15 +262,16 @@ def publish_root_ready(home: Path, root: OwnedProcess, *, host: Host) -> None:
     closure. Interactive start writes nothing. This hint never replaces the
     birth-bound root custody checked by the caller.
     """
-    if not in_boot_unit(host=host):
+    caller_pid = os.getpid() if control_pid is None else control_pid
+    if not in_boot_unit(host=host, proc_root=proc_root, pid=caller_pid):
         return
     expected = f"/system.slice/{UNIT_NAME}"
     before = manager_properties(host=host)
     if (
         not root.live()
-        or process_cgroup(root.pid) != expected
+        or process_cgroup(root.pid, proc_root=proc_root) != expected
         or before["ControlGroup"] != expected
-        or before["ControlPID"] != str(os.getpid())
+        or before["ControlPID"] != str(caller_pid)
         or before["MainPID"] != "0"
         or before["ActiveState"] != "activating"
     ):
@@ -256,9 +279,12 @@ def publish_root_ready(home: Path, root: OwnedProcess, *, host: Host) -> None:
     path = root_pid_path(home)
     path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
     write_text_atomic(path, f"{root.pid}\n", mode=0o600, sync_parent=True)
-    if not root.live() or process_cgroup(root.pid) != expected:
-        path.unlink()
-        raise RuntimeError("root changed birth or native custody during PID publication")
+    verify_post_publication(
+        path,
+        live=root.live(),
+        cgroup=process_cgroup(root.pid, proc_root=proc_root),
+        expected_cgroup=expected,
+    )
 
 
 # --- privileged steps -------------------------------------------------------
@@ -308,17 +334,22 @@ def _read_text(path: Path) -> str | None:
 
 
 def install(
-    *, services: frozenset[str], context: BootUnitContext | None = None, host: Host
+    *,
+    services: frozenset[str],
+    context: BootUnitContext | None = None,
+    host: Host,
+    unit_dir: Path = SYSTEM_UNIT_DIR,
+    runtime_dir: Path = SYSTEMD_RUNTIME_DIR,
 ) -> list[str]:
     """Register and enable the sole Linux boot route without recursive startup."""
-    if not systemd_running(host=host):
+    if not systemd_running(host=host, runtime_dir=runtime_dir):
         raise RuntimeError(
             "the boot unit needs a Linux host running systemd as its service manager"
         )
     ctx = context if context is not None else _default_context(services=services, host=host)
     steps: list[str] = []
 
-    destination = unit_path()
+    destination = unit_path(unit_dir)
     unit_content = render_unit(ctx)
     if _read_text(destination) != unit_content:
         fd, name = tempfile.mkstemp(prefix="meiva-boot-unit-", suffix=".service")
@@ -336,14 +367,19 @@ def install(
         _privileged_or_raise(["systemctl", "daemon-reload"], "systemctl daemon-reload", host=host)
         steps.append(f"installed system unit {destination}")
 
-    if not unit_enabled(host=host):
+    if not unit_enabled(host=host, runtime_dir=runtime_dir):
         _privileged_or_raise(["systemctl", "enable", UNIT_NAME], f"enable {UNIT_NAME}", host=host)
         steps.append(f"enabled {UNIT_NAME}")
     logger.info("boot unit ready for {}", ctx.home)
     return steps
 
 
-def uninstall(*, host: Host) -> list[str]:
+def uninstall(
+    *,
+    host: Host,
+    unit_dir: Path = SYSTEM_UNIT_DIR,
+    runtime_dir: Path = SYSTEMD_RUNTIME_DIR,
+) -> list[str]:
     """Remove the host's boot unit after a successful native stop.
 
     Safe when nothing is installed, and safe to call on non-systemd hosts (a
@@ -355,22 +391,22 @@ def uninstall(*, host: Host) -> list[str]:
         return []
     steps: list[str] = []
     name = UNIT_NAME
-    destination = unit_path()
+    destination = unit_path(unit_dir)
     if destination.exists():
         _privileged_or_raise(["systemctl", "disable", "--now", name], f"stop {name}", host=host)
         _privileged_or_raise(["rm", "-f", str(destination)], f"remove {destination}", host=host)
         _privileged_or_raise(["systemctl", "daemon-reload"], "systemctl daemon-reload", host=host)
         steps.append(f"removed {destination}")
-    if _failed_record(name, host=host):
+    if _failed_record(name, host=host, runtime_dir=runtime_dir):
         _privileged_or_raise(["systemctl", "reset-failed", name], f"reset-failed {name}", host=host)
         steps.append(f"cleared the failed record of {name}")
     return steps
 
 
-def _failed_record(name: str, *, host: Host) -> bool:
+def _failed_record(name: str, *, host: Host, runtime_dir: Path = SYSTEMD_RUNTIME_DIR) -> bool:
     """A failed unit outlives its removed file as a `not-found failed` record
     until reset; checked also when a previous removal left one behind."""
-    if not systemd_running(host=host):
+    if not systemd_running(host=host, runtime_dir=runtime_dir):
         return False
     result = systemctl("show", "--property=ActiveState", "--value", name, host=host)
     if result.returncode:

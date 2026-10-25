@@ -17,6 +17,7 @@ from base.host.system.tests.fake_commands import (
     fake_host,
 )
 from base.host.system.tests.fake_crontab import FakeCrontab
+from base.log.tests.log_records import LogRecords
 
 _UID = 501
 
@@ -44,18 +45,13 @@ def _linux(crontab: FakeCrontab) -> Host:
     )
 
 
-@pytest.fixture(autouse=True)
-def _configure_job(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
-    monkeypatch.setenv("HOME", str(tmp_path))
-
-
 def test_macos_reregistration_rewrites_and_reloads_idempotently(
     job_roots: JobRoots,
 ) -> None:
     commands, host = _launchctl()
 
     assert job.register_macos(roots=job_roots, host=host) == 0
-    plist = job.launchd_plist_path()
+    plist = job.launchd_plist_path(user_home=job_roots.user_home)
     first = plist.read_text(encoding="utf-8")
     assert job.register_macos(roots=job_roots, host=host) == 0
 
@@ -68,15 +64,15 @@ def test_macos_reregistration_rewrites_and_reloads_idempotently(
     ]
 
 
-def test_macos_unregister_removes_only_its_own_job() -> None:
-    target = job.launchd_plist_path()
+def test_macos_unregister_removes_only_its_own_job(tmp_path: Path) -> None:
+    target = job.launchd_plist_path(user_home=tmp_path)
     target.parent.mkdir(parents=True)
     target.write_text("<target-plist/>", encoding="utf-8")
     other = target.parent / "com.meiva.packages-refresh.plist"
     other.write_text("<other-plist/>", encoding="utf-8")
     commands, host = _launchctl()
 
-    assert job.unregister_macos(host=host) == 0
+    assert job.unregister_macos(host=host, user_home=tmp_path) == 0
 
     assert not target.exists()
     assert other.read_bytes() == b"<other-plist/>"
@@ -150,25 +146,21 @@ def test_linux_crontab_failures_and_empty_table(
 
 def test_macos_bootstrap_failure_and_repeated_unregister(
     job_roots: JobRoots,
-    monkeypatch: pytest.MonkeyPatch,
+    loguru_records: LogRecords,
 ) -> None:
-    errors: list[tuple[object, ...]] = []
-
-    def record_error(*args: object) -> None:
-        errors.append(args)
-
     commands, host = _launchctl(bootstrap=Reply(stderr="denied", returncode=1))
-    monkeypatch.setattr(job.logger, "error", record_error)
     assert job.register_macos(roots=job_roots, host=host) == 1
     assert [argv[1] for argv in commands.argvs if argv[1] != "print"] == ["bootout", "bootstrap"]
-    assert errors == [
-        ("launchctl bootstrap failed for {}: {}", "com.meiva.logs-maintenance", "denied")
-    ]
+    assert any(
+        r["level"].name == "ERROR"
+        and r["message"] == "launchctl bootstrap failed for com.meiva.logs-maintenance: denied"
+        for r in loguru_records
+    )
 
-    plist = job.launchd_plist_path()
+    plist = job.launchd_plist_path(user_home=job_roots.user_home)
     assert plist.exists()
-    assert job.unregister_macos(host=host) == 0
-    assert job.unregister_macos(host=host) == 0
+    assert job.unregister_macos(host=host, user_home=job_roots.user_home) == 0
+    assert job.unregister_macos(host=host, user_home=job_roots.user_home) == 0
     assert not plist.exists()
     assert [argv[1] for argv in commands.argvs if argv[1] != "print"] == [
         "bootout",

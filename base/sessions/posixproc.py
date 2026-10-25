@@ -33,11 +33,11 @@ it left running by enumerating these records.
 from __future__ import annotations
 
 import contextlib
-import os
 import signal
 import subprocess
 import sys
 import time
+from collections.abc import Iterable, Sequence
 from pathlib import Path
 
 import psutil
@@ -45,10 +45,12 @@ import psutil
 from base.log import logger
 from base.native_process.kernel_identity import pid_starttime_ticks
 from base.native_process.ownership import stable_create_time
+from base.native_process.process_control import SYSTEM_PROCESS_CONTROL, ProcessControl
 from base.paths import logs_dir, meiva_home, run_dir
 from base.sessions.record import SessionRecord
 
 __all__ = [
+    "build_session_record",
     "graceful_signal",
     "has_session",
     "kill_session",
@@ -83,14 +85,14 @@ _SPAWN_HELPER_TIMEOUT_S = 30.0
 _KILL_POLL_S = 0.05
 
 
-def _sessions_dir() -> Path:
-    d = run_dir(meiva_home()) / "sessions"
+def _sessions_dir(sessions_dir: Path | None = None) -> Path:
+    d = (run_dir(meiva_home()) / "sessions") if sessions_dir is None else sessions_dir
     d.mkdir(parents=True, exist_ok=True)
     return d
 
 
-def record_path(name: str) -> Path:
-    return _sessions_dir() / f"{name}.json"
+def record_path(name: str, *, sessions_dir: Path | None = None) -> Path:
+    return _sessions_dir(sessions_dir) / f"{name}.json"
 
 
 def session_log_path(name: str) -> Path:
@@ -98,8 +100,8 @@ def session_log_path(name: str) -> Path:
     return logs_dir() / f"{name}.out.log"
 
 
-def read_record(name: str) -> SessionRecord | None:
-    return SessionRecord.read(record_path(name))
+def read_record(name: str, *, sessions_dir: Path | None = None) -> SessionRecord | None:
+    return SessionRecord.read(record_path(name, sessions_dir=sessions_dir))
 
 
 def process_is_live(proc: psutil.Process) -> bool:
@@ -116,7 +118,12 @@ def process_is_live(proc: psutil.Process) -> bool:
         return False
 
 
-def process_for_record(rec: SessionRecord) -> psutil.Process | None:
+def process_for_record(
+    rec: SessionRecord,
+    *,
+    observed_starttime: int | None = None,
+    has_observed_starttime: bool = False,
+) -> psutil.Process | None:
     """Return the live psutil.Process named by `rec`, or None if it is gone or a
     different (recycled) process now holds the pid."""
     try:
@@ -124,7 +131,16 @@ def process_for_record(rec: SessionRecord) -> psutil.Process | None:
         if not process_is_live(proc):
             return None
         if rec.starttime is not None:
-            return proc if rec.identifies(rec.pid) is True else None
+            return (
+                proc
+                if rec.identifies(
+                    rec.pid,
+                    observed_starttime=observed_starttime,
+                    has_observed_starttime=has_observed_starttime,
+                )
+                is True
+                else None
+            )
         # Platforms without Linux's clock-stable `/proc/<pid>/stat` field 22
         # identify the process by its creation time within a tolerance.
         if abs(stable_create_time(proc) - rec.create_time) > _CREATE_TIME_TOLERANCE_S:
@@ -140,6 +156,38 @@ def has_session(name: str) -> bool:
     if rec is None:
         return False
     return process_for_record(rec) is not None
+
+
+def build_session_record(
+    child_pid: int,
+    *,
+    cmd: str | list[str],
+    cwd: Path,
+    started_at: float | None = None,
+    process_control: ProcessControl = SYSTEM_PROCESS_CONTROL,
+) -> SessionRecord:
+    try:
+        create_time = stable_create_time(psutil.Process(child_pid))
+    except psutil.NoSuchProcess:
+        # meiva:note
+        # A child that already exited frees its pid at its most reusable moment; stamping DEAD_CHILD_SENTINEL instead of time.time() prevents process_for_record from accepting the pid's next occupant.
+        create_time = DEAD_CHILD_SENTINEL
+        starttime = None
+    else:
+        starttime = pid_starttime_ticks(child_pid)
+    try:
+        pgid = process_control.getpgid(child_pid)
+    except (ProcessLookupError, OSError):
+        pgid = None
+    return SessionRecord(
+        pid=child_pid,
+        create_time=create_time,
+        cmd=cmd if isinstance(cmd, str) else " ".join(cmd),
+        cwd=str(cwd),
+        started_at=time.time() if started_at is None else started_at,
+        starttime=starttime,
+        pgid=pgid,
+    )
 
 
 def new_session(
@@ -207,38 +255,52 @@ def new_session(
             f"(exit {result.returncode}): stdout={result.stdout!r} stderr={result.stderr!r}"
         )
     child_pid = int(child_pid_str)
-
-    try:
-        create_time = stable_create_time(psutil.Process(child_pid))
-    except psutil.NoSuchProcess:
-        # The child already exited (instant failure). Record a sentinel that
-        # can never match a real process start time: a pid freed by an
-        # instantly-dead child is at its most reusable, and recording
-        # time.time() would make `process_for_record`'s create-time check
-        # accept the pid's next innocent occupant — a later kill_session
-        # could then SIGKILL an unrelated process tree (audit 2026-08-08 P2).
-        # The record still forms (the caller's readiness probe sees it die).
-        create_time = DEAD_CHILD_SENTINEL
-        starttime = None
-    else:
-        starttime = pid_starttime_ticks(child_pid)
-    try:
-        pgid = os.getpgid(child_pid)
-    except (ProcessLookupError, OSError):
-        pgid = None
-    SessionRecord(
-        pid=child_pid,
-        create_time=create_time,
-        cmd=cmd if isinstance(cmd, str) else " ".join(cmd),
-        cwd=str(cwd),
-        started_at=time.time(),
-        starttime=starttime,
-        pgid=pgid,
-    ).write(record_path(name))
+    build_session_record(child_pid, cmd=cmd, cwd=cwd).write(record_path(name))
     return True
 
 
-def graceful_signal(name: str, *, expected: SessionRecord | None = None) -> bool:
+def _recheck_expected_record(
+    name: str,
+    proc: psutil.Process,
+    expected: SessionRecord,
+    *,
+    sessions_dir: Path | None,
+    recheck_record: SessionRecord | None,
+    observed_ticks: Sequence[int | None] | None,
+    first_tick: int | None,
+    has_first_tick: bool,
+) -> bool:
+    if recheck_record is not None:
+        recheck_record.write(record_path(name, sessions_dir=sessions_dir))
+        latest: SessionRecord | None = recheck_record
+    else:
+        latest = read_record(name, sessions_dir=sessions_dir)
+    if latest != expected:
+        return False
+    if expected.starttime is not None:
+        has_second_tick = observed_ticks is not None and len(observed_ticks) >= 2
+        second_tick = (
+            observed_ticks[1] if has_second_tick and observed_ticks is not None else first_tick
+        )
+        return (
+            expected.identifies(
+                proc.pid,
+                observed_starttime=second_tick,
+                has_observed_starttime=has_first_tick or has_second_tick,
+            )
+            is True
+        )
+    return abs(stable_create_time(proc) - expected.create_time) <= _CREATE_TIME_TOLERANCE_S
+
+
+def graceful_signal(
+    name: str,
+    *,
+    expected: SessionRecord | None = None,
+    sessions_dir: Path | None = None,
+    recheck_record: SessionRecord | None = None,
+    observed_ticks: Sequence[int | None] | None = None,
+) -> bool:
     """Send the graceful-stop signal (SIGTERM) to the session's process without
     waiting or force-killing.
 
@@ -248,28 +310,30 @@ def graceful_signal(name: str, *, expected: SessionRecord | None = None) -> bool
     wait on all of them under one shared deadline before force-killing stragglers
     — so the teardown is O(slowest agent), not O(sum of agents).
     """
-    rec = read_record(name)
+    rec = read_record(name, sessions_dir=sessions_dir)
     if rec is None or (expected is not None and rec != expected):
         return False
-    proc = process_for_record(rec)
+    has_first_tick = observed_ticks is not None and len(observed_ticks) >= 1
+    first_tick = observed_ticks[0] if has_first_tick and observed_ticks is not None else None
+    proc = process_for_record(
+        rec,
+        observed_starttime=first_tick,
+        has_observed_starttime=has_first_tick,
+    )
     if proc is None:
         return False
     with contextlib.suppress(*_GONE):
-        if expected is not None:
-            if read_record(name) != expected:
-                return False
-            if expected.starttime is not None:
-                # A btime step can move the epoch birth of this same process. The
-                # recorded /proc ticks are authoritative, including this final
-                # check; unavailable or changed ticks must still refuse delivery.
-                if expected.identifies(proc.pid) is not True:
-                    return False
-            # Start-time fallback: keep the record-resolution tolerance — a
-            # reading may drift (whole-second wall-clock corrections), so a
-            # drifted reading must not refuse the process `process_for_record`
-            # just resolved.
-            elif abs(stable_create_time(proc) - expected.create_time) > _CREATE_TIME_TOLERANCE_S:
-                return False
+        if expected is not None and not _recheck_expected_record(
+            name,
+            proc,
+            expected,
+            sessions_dir=sessions_dir,
+            recheck_record=recheck_record,
+            observed_ticks=observed_ticks,
+            first_tick=first_tick,
+            has_first_tick=has_first_tick,
+        ):
+            return False
         # Signal only this captured process object, never resolve the name a
         # second time into a replacement target. psutil also guards PID reuse.
         proc.terminate()  # SIGTERM to the agent only; its finally closes its children
@@ -277,7 +341,11 @@ def graceful_signal(name: str, *, expected: SessionRecord | None = None) -> bool
     return False
 
 
-def _pgid_of(proc: psutil.Process) -> int | None:
+def _pgid_of(
+    proc: psutil.Process,
+    *,
+    process_control: ProcessControl = SYSTEM_PROCESS_CONTROL,
+) -> int | None:
     """The process group the session process lives in, or None when it is gone.
 
     ``base.native_process.reparent`` setsid()s the helper before forking, so the launched
@@ -285,11 +353,16 @@ def _pgid_of(proc: psutil.Process) -> int | None:
     shares one pgid (the helper's pid; the helper itself exits at once).
     psutil has no pgid accessor, so this reads it via ``os.getpgid``."""
     with contextlib.suppress(OSError):
-        return os.getpgid(proc.pid)
+        return process_control.getpgid(proc.pid)
     return None
 
 
-def _signal_group(pgid: int | None, sig: int) -> None:
+def _signal_group(
+    pgid: int | None,
+    sig: int,
+    *,
+    process_control: ProcessControl = SYSTEM_PROCESS_CONTROL,
+) -> None:
     """Send `sig` to every process in the group, or nothing when it is unknown.
 
     A group signal reaches children spawned after any psutil snapshot — the
@@ -300,10 +373,15 @@ def _signal_group(pgid: int | None, sig: int) -> None:
     if pgid is None or pgid <= 0:
         return
     with contextlib.suppress(OSError):
-        os.killpg(pgid, sig)
+        process_control.killpg(pgid, sig)
 
 
-def process_group_has_live_members(pgid: int | None) -> bool:
+def process_group_has_live_members(
+    pgid: int | None,
+    *,
+    process_control: ProcessControl = SYSTEM_PROCESS_CONTROL,
+    processes: Iterable[psutil.Process] | None = None,
+) -> bool:
     """Whether an observed non-zombie process belongs to numeric group `pgid`.
 
     None, a nonpositive group ID, or a gone/zombie-only group returns False.
@@ -319,21 +397,32 @@ def process_group_has_live_members(pgid: int | None) -> bool:
     if pgid is None or pgid <= 0:
         return False
     try:
-        os.killpg(pgid, 0)
+        process_control.killpg(pgid, 0)
     except ProcessLookupError:
         return False
     except OSError:  # noqa: S110 - macOS EPERM for a zombie-only group falls through to the member scan.
         pass
-    for process in psutil.process_iter():
+    candidates = psutil.process_iter() if processes is None else processes
+    for process in candidates:
         try:
-            if os.getpgid(process.pid) == pgid and process.status() != psutil.STATUS_ZOMBIE:
+            if (
+                process_control.getpgid(process.pid) == pgid
+                and process.status() != psutil.STATUS_ZOMBIE
+            ):
                 return True
         except (psutil.Error, ProcessLookupError):
             continue
     return False
 
 
-def terminate_tree(proc: psutil.Process, *, graceful: bool, timeout: float) -> bool:
+def terminate_tree(
+    proc: psutil.Process,
+    *,
+    graceful: bool,
+    timeout: float,
+    process_control: ProcessControl = SYSTEM_PROCESS_CONTROL,
+    wait_timeout: float = 5.0,
+) -> bool:
     """Terminate `proc` and its whole process group.
 
     The session process runs in its own process group (``base.native_process.reparent``
@@ -365,18 +454,18 @@ def terminate_tree(proc: psutil.Process, *, graceful: bool, timeout: float) -> b
     children: list[psutil.Process] = []
     with contextlib.suppress(*_GONE):
         children = proc.children(recursive=True)
-    pgid = _pgid_of(proc)
+    pgid = _pgid_of(proc, process_control=process_control)
     if graceful:
         # SIGTERM the whole group, not just the top process: a bash wrapper
         # delays its own SIGTERM until its foreground command ends, and a
         # command an unwound finally spawns mid-wait is not in any children
         # snapshot — only a group signal reaches both.
-        _signal_group(pgid, signal.SIGTERM)
+        _signal_group(pgid, signal.SIGTERM, process_control=process_control)
         deadline = time.monotonic() + timeout
         while time.monotonic() < deadline:
             if (
                 not process_is_live(proc)
-                and not process_group_has_live_members(pgid)
+                and not process_group_has_live_members(pgid, process_control=process_control)
                 and all(not process_is_live(c) for c in children)
             ):
                 return True
@@ -385,16 +474,24 @@ def terminate_tree(proc: psutil.Process, *, graceful: bool, timeout: float) -> b
     # spawned during the graceful wait dies here), then the pre-captured walk
     # for a descendant that left the group (a setsid'd worker) — the group
     # signal cannot reach it, and once the leader dies it reparents to init.
-    _signal_group(pgid, signal.SIGKILL)
+    _signal_group(pgid, signal.SIGKILL, process_control=process_control)
     for child in [*children, proc]:
         with contextlib.suppress(*_GONE):
-            child.kill()
-    with contextlib.suppress(*_GONE):
-        psutil.wait_procs([proc, *children], timeout=5)
+            process_control.kill(child.pid, signal.SIGKILL)
+    if wait_timeout > 0:
+        with contextlib.suppress(*_GONE):
+            psutil.wait_procs([proc, *children], timeout=wait_timeout)
     return False
 
 
-def kill_session(name: str, *, graceful: bool = False, timeout: float = 15.0) -> tuple[bool, str]:
+def kill_session(
+    name: str,
+    *,
+    graceful: bool = False,
+    timeout: float = 15.0,
+    process_control: ProcessControl = SYSTEM_PROCESS_CONTROL,
+    wait_timeout: float = 5.0,
+) -> tuple[bool, str]:
     """Stop the named session and forget it (force / graceful).
 
     Returns (ok, mode) with mode in {graceful, forced, noop}. `mode` reports what
@@ -413,7 +510,13 @@ def kill_session(name: str, *, graceful: bool = False, timeout: float = 15.0) ->
         return True, "noop"
     ended_on_signal = False
     try:
-        ended_on_signal = terminate_tree(proc, graceful=graceful, timeout=timeout)
+        ended_on_signal = terminate_tree(
+            proc,
+            graceful=graceful,
+            timeout=timeout,
+            process_control=process_control,
+            wait_timeout=wait_timeout,
+        )
     except Exception as exc:
         logger.warning("posixproc kill {name} hit {exc}", name=name, exc=exc)
     mode = "graceful" if ended_on_signal else "forced"

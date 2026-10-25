@@ -51,17 +51,13 @@ def test_get_backend_is_a_session_backend():
 def test_pty_child_virtual_env_projection(
     pty_service: PtyServiceProcess,
     unit_home: Path,
-    monkeypatch: pytest.MonkeyPatch,
     relative_cwd: str,
     projection: str,
     expected_venv: str | None,
 ) -> None:
-    from base import paths
-
     checkout = unit_home / "checkout"
     cwd = unit_home / relative_cwd
     cwd.mkdir(parents=True)
-    monkeypatch.setattr(paths, "repo_root", lambda: checkout)
     pty_service.stop()
     service = PtyServiceProcess(
         unit_home,
@@ -86,7 +82,9 @@ def test_pty_child_virtual_env_projection(
     try:
         if projection == "default":
             projected = forward_env_dict(
-                process_environment(), activate_venv=cwd_is_inside_checkout(cwd, checkout)
+                process_environment(),
+                activate_venv=cwd_is_inside_checkout(cwd, checkout),
+                venv=checkout / ".venv",
             )
             assert backend.new_session(name, "", cwd, env=projected)
         else:

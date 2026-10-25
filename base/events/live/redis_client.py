@@ -24,9 +24,14 @@ from redis.exceptions import ConnectionError as RedisConnectionError
 from redis.exceptions import TimeoutError as RedisTimeoutError
 
 from base.events.live.redis_resilience import (
+    DEFAULT_AUTH_RETRY_POLICY,
     HEALTH_CHECK_INTERVAL_S,
     SOCKET_CONNECT_TIMEOUT_S,
+    WARN_THROTTLE_S,
+    AuthRetryPolicy,
+    compute_auth_retry_delay,
     keepalive_options,
+    should_warn_publish_failure,
 )
 from base.host.net.predicates import is_ipv4_literal
 from base.log import logger
@@ -133,10 +138,10 @@ class TransportAwareAsyncConnection(aredis.Connection):
 # Keep retries bounded so a bad ACL cannot pin a gateway request or an agent
 # publisher forever; full jitter avoids a fleet of restarted processes striking
 # Redis again on the same exponential schedule.
-_AUTH_RETRY_INITIAL_DELAY_S = 0.5
-_AUTH_RETRY_DELAY_CAP_S = 10.0
-_AUTH_RETRY_WINDOW_S = 60.0
-_AUTH_RETRY_MAX_ATTEMPTS = 10
+_AUTH_RETRY_INITIAL_DELAY_S = DEFAULT_AUTH_RETRY_POLICY.initial_delay_s
+_AUTH_RETRY_DELAY_CAP_S = DEFAULT_AUTH_RETRY_POLICY.delay_cap_s
+_AUTH_RETRY_WINDOW_S = DEFAULT_AUTH_RETRY_POLICY.window_s
+_AUTH_RETRY_MAX_ATTEMPTS = DEFAULT_AUTH_RETRY_POLICY.max_attempts
 _AUTH_RETRY_ERRORS = (AuthenticationError, NoPermissionError)
 
 # The two indirections make the retry contract deterministic in unit tests
@@ -150,24 +155,30 @@ def auth_retry_jitter(delay_cap: float) -> float:
     return random.uniform(delay_cap / 2, delay_cap)  # noqa: S311 — scheduling jitter, not a secret
 
 
-def _next_auth_retry_delay(*, failure_count: int, waited_s: float, started_at: float) -> float:
+def _next_auth_retry_delay(
+    *,
+    failure_count: int,
+    waited_s: float,
+    started_at: float,
+    policy: AuthRetryPolicy = DEFAULT_AUTH_RETRY_POLICY,
+) -> float:
     """Choose the next jittered delay without exceeding the retry window."""
-    remaining_s = min(
-        _AUTH_RETRY_WINDOW_S - waited_s,
-        started_at + _AUTH_RETRY_WINDOW_S - time.monotonic(),
+    sample = 1.0 if policy.deterministic_jitter else auth_retry_jitter(2.0) - 1.0
+    return compute_auth_retry_delay(
+        failure_count=failure_count,
+        waited_s=waited_s,
+        elapsed_s=time.monotonic() - started_at,
+        jitter_sample=sample,
+        policy=policy,
     )
-    if remaining_s <= 0:
-        return 0.0
-    exponential_cap = min(
-        _AUTH_RETRY_INITIAL_DELAY_S * (2 ** (failure_count - 1)),
-        _AUTH_RETRY_DELAY_CAP_S,
-        remaining_s,
-    )
-    return max(0.0, min(auth_retry_jitter(exponential_cap), exponential_cap, remaining_s))
 
 
 async def retry_auth_failures_async[T](
-    operation: Callable[[], Awaitable[T]], *, attempt_timeout_s: float | None = None
+    operation: Callable[[], Awaitable[T]],
+    *,
+    attempt_timeout_s: float | None = None,
+    policy: AuthRetryPolicy = DEFAULT_AUTH_RETRY_POLICY,
+    recorded_delays: list[float] | None = None,
 ) -> T:
     """Run an async Redis operation with bounded retry for ACL transition errors.
 
@@ -188,18 +199,29 @@ async def retry_auth_failures_async[T](
             return await asyncio.wait_for(operation(), timeout=attempt_timeout_s)
         except _AUTH_RETRY_ERRORS:
             failure_count += 1
-            if failure_count >= _AUTH_RETRY_MAX_ATTEMPTS:
+            if failure_count >= policy.max_attempts:
                 raise
             delay_s = _next_auth_retry_delay(
-                failure_count=failure_count, waited_s=waited_s, started_at=started_at
+                failure_count=failure_count,
+                waited_s=waited_s,
+                started_at=started_at,
+                policy=policy,
             )
             if delay_s <= 0:
                 raise
-            await sleep_async(delay_s)
+            if recorded_delays is not None:
+                recorded_delays.append(delay_s)
+            if policy.sleep_scale > 0:
+                await sleep_async(delay_s * policy.sleep_scale)
             waited_s += delay_s
 
 
-def retry_auth_failures_sync[T](operation: Callable[[], T]) -> T:
+def retry_auth_failures_sync[T](
+    operation: Callable[[], T],
+    *,
+    policy: AuthRetryPolicy = DEFAULT_AUTH_RETRY_POLICY,
+    recorded_delays: list[float] | None = None,
+) -> T:
     """Synchronous counterpart of retry_auth_failures_async."""
     failure_count = 0
     waited_s = 0.0
@@ -209,19 +231,28 @@ def retry_auth_failures_sync[T](operation: Callable[[], T]) -> T:
             return operation()
         except _AUTH_RETRY_ERRORS:
             failure_count += 1
-            if failure_count >= _AUTH_RETRY_MAX_ATTEMPTS:
+            if failure_count >= policy.max_attempts:
                 raise
             delay_s = _next_auth_retry_delay(
-                failure_count=failure_count, waited_s=waited_s, started_at=started_at
+                failure_count=failure_count,
+                waited_s=waited_s,
+                started_at=started_at,
+                policy=policy,
             )
             if delay_s <= 0:
                 raise
-            sleep_sync(delay_s)
+            if recorded_delays is not None:
+                recorded_delays.append(delay_s)
+            if policy.sleep_scale > 0:
+                sleep_sync(delay_s * policy.sleep_scale)
             waited_s += delay_s
 
 
 class AuthRetryAsyncRedis(aredis.Redis):
     """Redis client whose ordinary async commands survive ACL re-affirmation."""
+
+    _auth_retry_policy: AuthRetryPolicy = DEFAULT_AUTH_RETRY_POLICY
+    _recorded_auth_delays: list[float] | None = None
 
     async def execute_command(self, *args: Any, auth_retry: bool = True, **options: Any) -> Any:
         async def _execute() -> Any:
@@ -232,11 +263,22 @@ class AuthRetryAsyncRedis(aredis.Redis):
                 ),
             )
 
-        return await retry_auth_failures_async(_execute) if auth_retry else await _execute()
+        return (
+            await retry_auth_failures_async(
+                _execute,
+                policy=self._auth_retry_policy,
+                recorded_delays=self._recorded_auth_delays,
+            )
+            if auth_retry
+            else await _execute()
+        )
 
 
 class AuthRetrySyncRedis(_redis_sync.Redis):
     """Redis client whose ordinary synchronous commands survive ACL re-affirmation."""
+
+    _auth_retry_policy: AuthRetryPolicy = DEFAULT_AUTH_RETRY_POLICY
+    _recorded_auth_delays: list[float] | None = None
 
     def execute_command(self, *args: Any, auth_retry: bool = True, **options: Any) -> Any:
         def _execute() -> Any:
@@ -247,17 +289,31 @@ class AuthRetrySyncRedis(_redis_sync.Redis):
                 ),
             )
 
-        return retry_auth_failures_sync(_execute) if auth_retry else _execute()
+        return (
+            retry_auth_failures_sync(
+                _execute,
+                policy=self._auth_retry_policy,
+                recorded_delays=self._recorded_auth_delays,
+            )
+            if auth_retry
+            else _execute()
+        )
 
 
-def open_async_redis(redis_url: str, *, decode_responses: bool = True) -> AuthRetryAsyncRedis:
+def open_async_redis(
+    redis_url: str,
+    *,
+    decode_responses: bool = True,
+    auth_retry_policy: AuthRetryPolicy = DEFAULT_AUTH_RETRY_POLICY,
+    recorded_auth_delays: list[float] | None = None,
+) -> AuthRetryAsyncRedis:
     """Open an async Redis client for a caller-owned connection lifecycle.
 
     Pub/sub subscribers use this rather than the per-loop shared publisher
     client because they own a socket per subscription, while ordinary commands
     still receive the same ACL-transition retry policy.
     """
-    return cast(
+    client = cast(
         AuthRetryAsyncRedis,
         AuthRetryAsyncRedis.from_url(  # pyright: ignore[reportUnknownMemberType] — redis-py types from_url's **kwargs as Unknown; the call is fully typed.
             redis_url,
@@ -266,6 +322,9 @@ def open_async_redis(redis_url: str, *, decode_responses: bool = True) -> AuthRe
             **RESILIENCE_KWARGS,
         ),
     )
+    client._auth_retry_policy = auth_retry_policy
+    client._recorded_auth_delays = recorded_auth_delays
+    return client
 
 
 # Rate-limit the NOPERM WARNING per (channel, error-type): a persistent ACL
@@ -273,11 +332,16 @@ def open_async_redis(redis_url: str, *, decode_responses: bool = True) -> AuthRe
 # log. First occurrence — and then at most once per `_WARN_THROTTLE_S` — logs
 # WARNING; suppressed repeats drop to DEBUG so the signal stays visible without
 # spamming. Keyed per channel so a genuinely new mis-scoped channel still surfaces.
-_WARN_THROTTLE_S = 60.0
+_WARN_THROTTLE_S = WARN_THROTTLE_S
 
 
 def _log_publish_failure(
-    exc: BaseException, *, channel: str, context: str, warn_last: dict[tuple[str, str], float]
+    exc: BaseException,
+    *,
+    channel: str,
+    context: str,
+    warn_last: dict[tuple[str, str], float],
+    now: float | None = None,
 ) -> None:
     """Log a known Redis/network publish failure after bounded recovery.
 
@@ -286,11 +350,14 @@ def _log_publish_failure(
     """
     tag = f" [{context}]" if context else ""
     if isinstance(exc, ResponseError):
-        key = (channel, type(exc).__name__)
-        now = time.monotonic()
-        last = warn_last.get(key)
-        if last is None or now - last >= _WARN_THROTTLE_S:
-            warn_last[key] = now
+        timestamp = time.monotonic() if now is None else now
+        if should_warn_publish_failure(
+            warn_last,
+            channel=channel,
+            error_type=type(exc).__name__,
+            now=timestamp,
+            throttle_s=_WARN_THROTTLE_S,
+        ):
             logger.warning(
                 "publish to {ch!r} rejected by redis ({exc!r}){tag} — the cluster "
                 "redis ACL user lacks this channel; the live event is dropped "
@@ -326,6 +393,9 @@ async def publish_via(
     warn_last: dict[tuple[str, str], float],
     attempt_timeout_s: float,
     context: str = "",
+    auth_retry_policy: AuthRetryPolicy = DEFAULT_AUTH_RETRY_POLICY,
+    recorded_delays: list[float] | None = None,
+    now: float | None = None,
 ) -> int | None:
     """Publish on the caller-owned client, recovering only known Redis/network errors.
 
@@ -345,9 +415,14 @@ async def publish_via(
                 channel, payload, auth_retry=False
             )
 
-        return await retry_auth_failures_async(_publish, attempt_timeout_s=attempt_timeout_s)
+        return await retry_auth_failures_async(
+            _publish,
+            attempt_timeout_s=attempt_timeout_s,
+            policy=auth_retry_policy,
+            recorded_delays=recorded_delays,
+        )
     except (ResponseError, RedisConnectionError, RedisTimeoutError, OSError, TimeoutError) as exc:
-        _log_publish_failure(exc, channel=channel, context=context, warn_last=warn_last)
+        _log_publish_failure(exc, channel=channel, context=context, warn_last=warn_last, now=now)
         return None
 
 
@@ -358,6 +433,9 @@ def publish_sync_via(
     *,
     warn_last: dict[tuple[str, str], float],
     context: str = "",
+    auth_retry_policy: AuthRetryPolicy = DEFAULT_AUTH_RETRY_POLICY,
+    recorded_delays: list[float] | None = None,
+    now: float | None = None,
 ) -> int | None:
     """`publish_best_effort_sync` on a one-off client from `open_client()`; shared by the handle
     (`EventBus.publish_best_effort_sync`) and the module-level shim."""
@@ -369,17 +447,27 @@ def publish_sync_via(
                 # redis-py types publish()'s **kwargs as Unknown; the call itself is fully typed.
                 return client.publish(channel, payload, auth_retry=False)  # pyright: ignore[reportUnknownMemberType]
 
-            return retry_auth_failures_sync(_publish)
+            return retry_auth_failures_sync(
+                _publish,
+                policy=auth_retry_policy,
+                recorded_delays=recorded_delays,
+            )
         finally:
             client.close()
     except (ResponseError, RedisConnectionError, RedisTimeoutError, OSError, TimeoutError) as exc:
-        _log_publish_failure(exc, channel=channel, context=context, warn_last=warn_last)
+        _log_publish_failure(exc, channel=channel, context=context, warn_last=warn_last, now=now)
         return None
 
 
-def open_sync_redis(redis_url: str, *, decode_responses: bool = False) -> AuthRetrySyncRedis:
+def open_sync_redis(
+    redis_url: str,
+    *,
+    decode_responses: bool = False,
+    auth_retry_policy: AuthRetryPolicy = DEFAULT_AUTH_RETRY_POLICY,
+    recorded_auth_delays: list[float] | None = None,
+) -> AuthRetrySyncRedis:
     """A new synchronous client on `redis_url` with the cluster's resilience settings."""
-    return cast(
+    client = cast(
         AuthRetrySyncRedis,
         AuthRetrySyncRedis.from_url(  # pyright: ignore[reportUnknownMemberType] — redis-py types from_url's **kwargs as Unknown; the call is fully typed.
             redis_url,
@@ -388,3 +476,6 @@ def open_sync_redis(redis_url: str, *, decode_responses: bool = False) -> AuthRe
             **RESILIENCE_KWARGS,
         ),
     )
+    client._auth_retry_policy = auth_retry_policy
+    client._recorded_auth_delays = recorded_auth_delays
+    return client

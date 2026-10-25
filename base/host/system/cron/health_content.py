@@ -40,3 +40,17 @@ def launchd_plist_content(
 </dict>
 </plist>
 """
+
+
+def own_probe_job_of(
+    own_labels: set[str],
+    *,
+    current_label: str | None,
+    ancestral_labels: frozenset[str] = frozenset(),
+) -> str | None:
+    if current_label is not None and current_label in own_labels:
+        return current_label
+    for candidate in sorted(own_labels):
+        if candidate in ancestral_labels:
+            return candidate
+    return None

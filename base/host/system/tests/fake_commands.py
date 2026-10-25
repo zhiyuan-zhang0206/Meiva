@@ -27,11 +27,14 @@ class Call:
     kwargs: Mapping[str, Any]
 
 
+ReplySpec = Reply | BaseException | Callable[[tuple[str, ...]], Reply]
+
+
 @dataclass
 class _Route:
     matches: Callable[[tuple[str, ...]], bool]
     label: str
-    replies: list[Reply | BaseException]
+    replies: list[ReplySpec]
     repeat: bool
 
 
@@ -80,7 +83,7 @@ class FakeCommands:
     def on(
         self,
         match: str | Sequence[str] | Callable[[tuple[str, ...]], bool],
-        *replies: Reply | BaseException,
+        *replies: ReplySpec,
         repeat: bool = False,
     ) -> None:
         if not replies:
@@ -92,7 +95,7 @@ class FakeCommands:
             matches, label = _starts_with(prefix), str(list(prefix))
         self._routes.append(_Route(matches, label, list(replies), repeat))
 
-    def _next_reply(self, command: tuple[str, ...]) -> Reply | BaseException:
+    def _next_reply(self, command: tuple[str, ...]) -> ReplySpec:
         route = next((r for r in self._routes if r.matches(command)), None)
         if route is None:
             raise AssertionError(f"unscripted command: {list(command)}")
@@ -116,6 +119,8 @@ class FakeCommands:
         reply = self._next_reply(command)
         if isinstance(reply, BaseException):
             raise reply
+        if callable(reply):
+            reply = reply(command)
         return _result(command, reply, capture_output=capture_output, popen_kwargs=popen_kwargs)
 
 

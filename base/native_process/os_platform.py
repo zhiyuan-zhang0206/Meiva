@@ -12,7 +12,7 @@ import re
 import subprocess
 import sys
 import time
-from collections.abc import Generator
+from collections.abc import Generator, Iterable, Mapping
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Literal
@@ -78,8 +78,13 @@ def launchd_job_label() -> str | None:
     return os.environ.get("XPC_SERVICE_NAME")
 
 
-def _launchd_print(label: str) -> subprocess.CompletedProcess[str] | None:
-    if not is_macos():
+def _launchd_print(
+    label: str,
+    *,
+    macos: bool | None = None,
+) -> subprocess.CompletedProcess[str] | None:
+    on_macos = is_macos() if macos is None else macos
+    if not on_macos:
         return None
     return subprocess.run(  # noqa: S603
         ["launchctl", "print", f"gui/{os.getuid()}/{label}"],
@@ -89,7 +94,14 @@ def _launchd_print(label: str) -> subprocess.CompletedProcess[str] | None:
     )
 
 
-def descends_from_launchd_job(label: str) -> bool:
+def descends_from_launchd_job(
+    label: str,
+    *,
+    macos: bool | None = None,
+    current_pid: int | None = None,
+    launchctl_print: tuple[int, str] | None = None,
+    parent_pids: Mapping[int, int | None] | None = None,
+) -> bool:
     """True when this process runs inside the live process tree of launchd job ``label``.
 
     The ownership boundary behind the self-reload guards (``base/host/system/cron``,
@@ -104,18 +116,27 @@ def descends_from_launchd_job(label: str) -> bool:
     process then), and whenever an ancestor cannot be read: callers proceed
     with a replacement unless ownership is PROVEN.
     """
-    result = _launchd_print(label)
-    if result is None or result.returncode != 0:
+    on_macos = is_macos() if macos is None else macos
+    if not on_macos:
         return False
-    match = re.search(r"(?m)^\s*pid = (\d+)\s*$", result.stdout)
+    if launchctl_print is not None:
+        returncode, stdout = launchctl_print
+    else:
+        result = _launchd_print(label, macos=on_macos)
+        if result is None:
+            return False
+        returncode, stdout = result.returncode, result.stdout
+    if returncode != 0:
+        return False
+    match = re.search(r"(?m)^\s*pid = (\d+)\s*$", stdout)
     if match is None:
         return False  # loaded but not running — it owns no live process
     job_pid = int(match.group(1))
-    pid = os.getpid()
+    pid = os.getpid() if current_pid is None else current_pid
     while pid > 1:  # bounded by reaching launchd (pid 1)
         if pid == job_pid:
             return True
-        parent = _parent_pid(pid)
+        parent = parent_pids.get(pid) if parent_pids is not None else _parent_pid(pid)
         if parent is None or parent == pid:
             return False
         pid = parent
@@ -152,7 +173,7 @@ def raise_fd_limit(desired: int) -> None:
         resource.setrlimit(resource.RLIMIT_NOFILE, (ceiling, hard))
 
 
-def pty_max() -> int | None:
+def pty_max(*, macos: bool | None = None) -> int | None:
     """The system-wide pseudo-terminal ceiling, or None where it does not bind.
 
     macOS caps the number of allocatable PTYs at `kern.tty.ptmx_max` (default
@@ -168,7 +189,8 @@ def pty_max() -> int | None:
     it is not a binding constraint here) and on any read failure — callers treat
     None as "no known PTY ceiling to check against".
     """
-    if not is_macos():
+    on_macos = is_macos() if macos is None else macos
+    if not on_macos:
         return None
     import ctypes
 
@@ -273,7 +295,7 @@ def crontab_lock() -> Generator[None]:
         yield
 
 
-def ensure_line_buffered_stdio() -> None:
+def ensure_line_buffered_stdio(*, streams: Iterable[object] | None = None) -> None:
     """Make this process's stdout line-buffered even when it is a pipe.
 
     Python line-buffers stdout only when it is a tty; into a pipe it uses an 8 KiB
@@ -296,7 +318,8 @@ def ensure_line_buffered_stdio() -> None:
 
     Idempotent; call once near process start (the CLI entry does).
     """
-    for stream in (sys.stdout, sys.stderr):
+    target_streams = (sys.stdout, sys.stderr) if streams is None else streams
+    for stream in target_streams:
         reconfigure = getattr(stream, "reconfigure", None)
         if reconfigure is not None:
             # A stream replaced by something without line_buffering support (pytest's
@@ -306,12 +329,13 @@ def ensure_line_buffered_stdio() -> None:
                 reconfigure(line_buffering=True)
 
 
-def primary_disk_path() -> str:
+def primary_disk_path(*, macos: bool | None = None) -> str:
     """The most meaningful filesystem path for this host's disk-usage sampling.
 
     macOS: the data volume (not the sealed system volume). Any other host: the
     root filesystem.
     """
-    if is_macos():
+    on_macos = is_macos() if macos is None else macos
+    if on_macos:
         return "/System/Volumes/Data"
     return "/"

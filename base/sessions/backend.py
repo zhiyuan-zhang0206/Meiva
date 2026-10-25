@@ -19,6 +19,22 @@ _log = logging.getLogger(__name__)
 
 
 class PosixProcSessionBackend(SessionBackend):
+    @staticmethod
+    def format_command(
+        cmd: str,
+        cwd: Path,
+        *,
+        login_shell: bool = True,
+        exec_cmd: bool = True,
+    ) -> str:
+        from base.sessions.env_forwarding import exec_into, venv_activation_prefix
+
+        if not login_shell:
+            return cmd
+        body = exec_into(cmd) if exec_cmd else cmd
+        inner = f"cd {cwd.as_posix()} && {venv_activation_prefix()}{body}"
+        return f"exec bash -lc {shlex.quote(inner)}"
+
     def has_session(self, name: str) -> bool:
         from base.sessions import posixproc
 
@@ -37,12 +53,7 @@ class PosixProcSessionBackend(SessionBackend):
         # meiva:note
         # Login-shell native sessions always exec the outer shell and exec the inner shell only when exec_cmd=True. They pass the caller's complete environment separately from argv. Without login_shell the command is forwarded unchanged.
         # meiva:link base/sessions/docs/session-backend.meiva.okf.md
-        from base.sessions.env_forwarding import exec_into, venv_activation_prefix
-
-        if login_shell:
-            body = exec_into(cmd) if exec_cmd else cmd
-            inner = f"cd {cwd.as_posix()} && {venv_activation_prefix()}{body}"
-            cmd = f"exec bash -lc {shlex.quote(inner)}"
+        cmd = self.format_command(cmd, cwd, login_shell=login_shell, exec_cmd=exec_cmd)
         from base.sessions import posixproc
 
         return posixproc.new_session(name, cmd, cwd, env=env)

@@ -13,16 +13,24 @@ import sys
 from functools import cache
 
 
+def require_pidfd_support(*, platform: str, has_symbols: bool) -> None:
+    if platform != "linux":
+        raise RuntimeError("process descriptors require Linux")
+    if not has_symbols:
+        raise RuntimeError("Linux process custody requires libc pidfd support")
+
+
 @cache
 def pidfd_libc() -> ctypes.CDLL:
-    if sys.platform != "linux":
-        raise RuntimeError("process descriptors require Linux")
+    platform = sys.platform
+    require_pidfd_support(platform=platform, has_symbols=True)
     libc = ctypes.CDLL(None, use_errno=True)
-    try:
-        opened = libc.pidfd_open
-        sent = libc.pidfd_send_signal
-    except AttributeError as exc:
-        raise RuntimeError("Linux process custody requires libc pidfd support") from exc
+    require_pidfd_support(
+        platform=platform,
+        has_symbols=hasattr(libc, "pidfd_open") and hasattr(libc, "pidfd_send_signal"),
+    )
+    opened = libc.pidfd_open
+    sent = libc.pidfd_send_signal
     opened.argtypes = [ctypes.c_int, ctypes.c_uint]
     opened.restype = ctypes.c_int
     sent.argtypes = [ctypes.c_int, ctypes.c_int, ctypes.c_void_p, ctypes.c_uint]
@@ -30,8 +38,10 @@ def pidfd_libc() -> ctypes.CDLL:
     return libc
 
 
-def open_process(pid: int) -> int:
+def open_process(pid: int, *, simulated_errno: int | None = None) -> int:
     """Return a non-inheritable descriptor; the caller owns its close."""
+    if simulated_errno is not None:
+        raise OSError(simulated_errno, f"pidfd_open({pid}): {os.strerror(simulated_errno)}")
     descriptor = pidfd_libc().pidfd_open(pid, 0)
     if descriptor < 0:
         code = ctypes.get_errno()
@@ -39,8 +49,12 @@ def open_process(pid: int) -> int:
     return descriptor
 
 
-def send_signal(descriptor: int, signum: int) -> None:
+def send_signal(descriptor: int, signum: int, *, simulated_errno: int | None = None) -> None:
     """Signal the retained task, preserving native errno for the custody owner."""
+    if simulated_errno is not None:
+        raise OSError(
+            simulated_errno, f"pidfd_send_signal({descriptor}): {os.strerror(simulated_errno)}"
+        )
     if pidfd_libc().pidfd_send_signal(descriptor, signum, None, 0) < 0:
         code = ctypes.get_errno()
         raise OSError(code, f"pidfd_send_signal({descriptor}): {os.strerror(code)}")

@@ -3,27 +3,10 @@ share one body."""
 
 from __future__ import annotations
 
-from typing import Any
-
-import pytest
+import redis.asyncio as aredis
 
 from base.config import settings
-from base.events.live import bus as bus_module
 from base.events.live.bus import EventBus, EventBusConfig
-
-
-class _Client:
-    def __init__(self, url: str) -> None:
-        self.url = url
-        self.published: list[tuple[str, str]] = []
-        self.closed = False
-
-    async def publish(self, channel: str, payload: str, *, auth_retry: bool = True) -> int:
-        self.published.append((channel, payload))
-        return 2
-
-    def close(self) -> None:
-        self.closed = True
 
 
 def _bus(url: str = "redis://secret@host:1/0", channel: str = "meiva:test") -> EventBus:
@@ -34,67 +17,70 @@ def test_config_hides_the_url_from_repr() -> None:
     assert "secret" not in repr(EventBusConfig(redis_url="redis://secret@h/0", events_channel="c"))
 
 
-def test_from_settings_reads_the_live_settings(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(settings.data_plane, "events_channel", "meiva:other")
-    assert EventBus.from_settings().channel == "meiva:other"
+def test_from_settings_reads_the_live_settings() -> None:
+    bus = EventBus.from_settings()
+    assert bus.channel == settings.data_plane.events_channel
+    assert bus._config.redis_url == settings.data_plane.redis_url
 
 
-async def test_the_async_client_is_shared_per_loop_and_dialed_with_the_handles_url(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    opened: list[str] = []
-
-    def open_client(url: str, *, decode_responses: bool = True) -> Any:
-        opened.append(url)
-        return _Client(url)
-
-    monkeypatch.setattr(bus_module, "open_async_redis", open_client)
-    handle = _bus("redis://one")
-    assert handle.async_redis() is handle.async_redis()
-    assert opened == ["redis://one"]
-    assert _bus("redis://two").async_redis() is not handle.async_redis()
+async def test_the_async_client_is_shared_per_loop_and_dialed_with_the_handles_url() -> None:
+    handle = _bus("redis://one:6379/0")
+    first = handle.async_redis()
+    second = handle.async_redis()
+    other = _bus("redis://two:6379/0").async_redis()
+    try:
+        # meiva:note
+        # redis.asyncio types connection_kwargs as an untyped dict on ConnectionPool.
+        assert first is second
+        assert first.connection_pool.connection_kwargs["host"] == "one"  # pyright: ignore[reportUnknownMemberType]
+        assert other is not first
+        assert other.connection_pool.connection_kwargs["host"] == "two"  # pyright: ignore[reportUnknownMemberType]
+    finally:
+        await first.aclose()
+        await other.aclose()
 
 
 async def test_publish_goes_to_the_events_channel_unless_another_is_named(
-    monkeypatch: pytest.MonkeyPatch,
+    redis_url: str,
 ) -> None:
-    client = _Client("x")
-
-    def open_client(_url: str, *, decode_responses: bool = True) -> Any:
-        return client
-
-    monkeypatch.setattr(bus_module, "open_async_redis", open_client)
-    handle = _bus(channel="meiva:events")
-
-    assert await handle.publish_best_effort("p1", context="t") == 2
-    assert await handle.publish_best_effort("p2", channel="meiva:page") == 2
-
-    assert client.published == [("meiva:events", "p1"), ("meiva:page", "p2")]
+    # meiva:note
+    # redis.asyncio leaves from_url and pubsub partially untyped.
+    handle = _bus(redis_url, channel="meiva:events:bus-test")
+    subscriber = aredis.Redis.from_url(redis_url, decode_responses=True)  # pyright: ignore[reportUnknownMemberType]
+    pubsub = subscriber.pubsub()  # pyright: ignore[reportUnknownMemberType]
+    await pubsub.subscribe("meiva:events:bus-test", "meiva:page:bus-test")
+    await pubsub.get_message(timeout=1.0)
+    await pubsub.get_message(timeout=1.0)
+    try:
+        assert await handle.publish_best_effort("p1", context="t") == 1
+        assert await handle.publish_best_effort("p2", channel="meiva:page:bus-test") == 1
+        msg1 = await pubsub.get_message(timeout=1.0, ignore_subscribe_messages=True)
+        msg2 = await pubsub.get_message(timeout=1.0, ignore_subscribe_messages=True)
+        assert msg1 is not None and (msg1["channel"], msg1["data"]) == (
+            "meiva:events:bus-test",
+            "p1",
+        )
+        assert msg2 is not None and (msg2["channel"], msg2["data"]) == (
+            "meiva:page:bus-test",
+            "p2",
+        )
+    finally:
+        await pubsub.aclose()
+        await subscriber.aclose()
+        await handle.async_redis().aclose()
 
 
 async def test_a_failed_publish_returns_none_and_never_raises(
-    monkeypatch: pytest.MonkeyPatch,
+    redis_access: None,
 ) -> None:
-    def refuse(*_a: object, **_k: object) -> Any:
-        raise ConnectionError("redis down")
+    del redis_access
+    handle = _bus("redis://127.0.0.1:1/0")
+    try:
+        assert await handle.publish_best_effort("p") is None
+    finally:
+        await handle.async_redis().aclose()
 
-    monkeypatch.setattr(bus_module, "open_async_redis", refuse)
-    assert await _bus().publish_best_effort("p") is None
 
-
-def test_sync_publish_uses_a_one_off_client_and_closes_it(monkeypatch: pytest.MonkeyPatch) -> None:
-    client = _Client("x")
-    sent: list[tuple[str, str]] = []
-    client.publish = lambda channel, payload, **_options: sent.append((channel, payload)) or 1  # type: ignore[assignment,method-assign]
-    urls: list[str] = []
-
-    def open_client(url: str, *, decode_responses: bool = False) -> Any:
-        urls.append(url)
-        return client
-
-    monkeypatch.setattr(bus_module, "open_sync_redis", open_client)
-
-    assert _bus("redis://sync", "meiva:e").publish_best_effort_sync("p", context="t") == 1
-    assert sent == [("meiva:e", "p")]
-    assert urls == ["redis://sync"]
-    assert client.closed
+def test_sync_publish_uses_a_one_off_client_and_closes_it(redis_url: str) -> None:
+    handle = _bus(redis_url, "meiva:e:sync-test")
+    assert handle.publish_best_effort_sync("p", context="t") == 0

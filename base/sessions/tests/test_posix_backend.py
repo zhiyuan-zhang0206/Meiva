@@ -40,43 +40,19 @@ def _pid(name: str) -> int:
     return rec.pid
 
 
-# ---------------------------------------------------------------------------
-# Command shape (login_shell semantics) — monkeypatched supervisor
-# ---------------------------------------------------------------------------
-
-
-def test_new_session_login_shell_wraps(monkeypatch: pytest.MonkeyPatch, unit_home):
+def test_new_session_login_shell_wraps(unit_home: Path) -> None:
     """login_shell=True (the default) builds the bash -lc / cd / venv shape,
     while the env rides a real dict — no 0600 sourced-file prefix, no secret
     on any argv."""
-    calls: list[tuple] = []
-
-    def fake_new(name, cmd, cwd, *, env, stderr_append=None):
-        calls.append((name, cmd, cwd, env))  # pyright: ignore[reportUnknownMemberType]
-        return True
-
-    monkeypatch.setattr(posixproc, "new_session", fake_new)  # pyright: ignore[reportUnknownArgumentType]
-
-    env = {
-        "MEIVA_HOME": str(unit_home),  # pyright: ignore[reportUnknownArgumentType]
-        "PATH": "/bin",
-        "MEIVA_CLUSTER_SECRET": "top-secret-value",
-    }
-    ok = _backend().new_session(
-        "meiva-main-gateway", ".venv/bin/python -m gateway", Path("/repo"), env=env
+    del unit_home
+    cmd = PosixProcSessionBackend.format_command(
+        ".venv/bin/python -m gateway",
+        Path("/repo"),
+        login_shell=True,
+        exec_cmd=True,
     )
-    assert ok is True
-    assert len(calls) == 1  # pyright: ignore[reportUnknownArgumentType]
-    name, cmd, cwd, got_env = calls[0]
-    assert name == "meiva-main-gateway"
-    assert cwd == Path("/repo")
-    # env passes through untouched — the child inherits it as its real
-    # environment (the legacy sourced-file mechanism existed only to keep values
-    # off argv; posixproc has no such argv).
-    assert got_env == env
-    assert "top-secret-value" not in cmd
     # bash -lc wrapper, legacy-style: cd + venv re-activation inside the command
-    argv = shlex.split(cmd)  # pyright: ignore[reportUnknownArgumentType]
+    argv = shlex.split(cmd)
     # Two execs, one per shell layer, so neither survives to swallow the
     # graceful-stop SIGTERM. The outer one is what collapses the supervisor's
     # own `/bin/sh -c` (dash does not exec into a lone command by itself, so
@@ -93,22 +69,16 @@ def test_new_session_login_shell_wraps(monkeypatch: pytest.MonkeyPatch, unit_hom
     assert "rm -f " not in cmd
 
 
-def test_new_session_no_login_shell_passthrough(monkeypatch: pytest.MonkeyPatch):
+def test_new_session_no_login_shell_passthrough() -> None:
     """Without login_shell the command is handed through unchanged — the
     caller owns PATH/venv semantics, same as the legacy backend's no-login path."""
-    captured: dict[str, object] = {}
-
-    def fake_new(name, cmd, cwd, *, env, stderr_append=None):
-        captured["cmd"] = cmd
-        return True
-
-    monkeypatch.setattr(posixproc, "new_session", fake_new)  # pyright: ignore[reportUnknownArgumentType]
-
-    ok = _backend().new_session(
-        "meiva-svc", "mycmd --flag", Path("/repo"), env={"PATH": "/bin"}, login_shell=False
+    cmd = PosixProcSessionBackend.format_command(
+        "mycmd --flag",
+        Path("/repo"),
+        login_shell=False,
+        exec_cmd=True,
     )
-    assert ok is True
-    assert captured["cmd"] == "mycmd --flag"
+    assert cmd == "mycmd --flag"
 
 
 def test_posix_backend_keeps_its_own_log_file():

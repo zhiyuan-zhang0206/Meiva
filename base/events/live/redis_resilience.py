@@ -19,9 +19,67 @@ spelling).
 from __future__ import annotations
 
 import socket
+from dataclasses import dataclass
 
 SOCKET_CONNECT_TIMEOUT_S = 5.0
 HEALTH_CHECK_INTERVAL_S = 30
+WARN_THROTTLE_S = 60.0
+
+
+@dataclass(frozen=True)
+class AuthRetryPolicy:
+    initial_delay_s: float = 0.5
+    delay_cap_s: float = 10.0
+    window_s: float = 60.0
+    max_attempts: int = 10
+    deterministic_jitter: bool = False
+    sleep_scale: float = 1.0
+
+
+DEFAULT_AUTH_RETRY_POLICY = AuthRetryPolicy()
+
+
+def compute_auth_retry_delay(
+    *,
+    failure_count: int,
+    waited_s: float,
+    elapsed_s: float,
+    jitter_sample: float,
+    policy: AuthRetryPolicy = DEFAULT_AUTH_RETRY_POLICY,
+) -> float:
+    remaining_s = min(
+        policy.window_s - waited_s,
+        policy.window_s - elapsed_s,
+    )
+    if remaining_s <= 0:
+        return 0.0
+    exponential_cap = min(
+        policy.initial_delay_s * (2 ** (failure_count - 1)),
+        policy.delay_cap_s,
+        remaining_s,
+    )
+    if policy.deterministic_jitter:
+        jittered = exponential_cap
+    else:
+        clamped = max(0.0, min(1.0, jitter_sample))
+        jittered = (exponential_cap / 2.0) * (1.0 + clamped)
+    return max(0.0, min(jittered, exponential_cap, remaining_s))
+
+
+def should_warn_publish_failure(
+    warn_last: dict[tuple[str, str], float],
+    *,
+    channel: str,
+    error_type: str,
+    now: float,
+    throttle_s: float = WARN_THROTTLE_S,
+) -> bool:
+    key = (channel, error_type)
+    last = warn_last.get(key)
+    if last is None or now - last >= throttle_s:
+        warn_last[key] = now
+        return True
+    return False
 
 
 def keepalive_options() -> dict[int, int]:

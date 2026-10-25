@@ -18,8 +18,8 @@ from base.host.system.job_readings import read_launchd_path, read_meiva_binary
 from base.host.system.job_values import JobPaths, JobRoots, plist_path
 
 
-def launchd_plist_path() -> Path:
-    return plist_path(content.LABEL, user_home=Path.home())
+def launchd_plist_path(*, user_home: Path | None = None) -> Path:
+    return plist_path(content.LABEL, user_home=Path.home() if user_home is None else user_home)
 
 
 def register_macos(*, roots: JobRoots, host: Host) -> int:
@@ -40,8 +40,10 @@ def register_macos(*, roots: JobRoots, host: Host) -> int:
     return 0
 
 
-def unregister_macos(*, host: Host) -> int:
-    retired = mechanics.remove_launchd_job(content.LABEL, launchd_plist_path(), host=host)
+def unregister_macos(*, host: Host, user_home: Path | None = None) -> int:
+    retired = mechanics.remove_launchd_job(
+        content.LABEL, launchd_plist_path(user_home=user_home), host=host
+    )
     return 0 if retired else 1
 
 
@@ -93,11 +95,11 @@ def register_logs_job(*, enabled: bool, roots: JobRoots, host: Host) -> None:
     )
 
 
-def unregister_logs_job(*, host: Host) -> None:
+def unregister_logs_job(*, host: Host, user_home: Path | None = None) -> None:
     if not mechanics.owns_os_jobs("logs-maintenance"):
         return
     mechanics.unregister_platform_job(
-        macos=lambda: unregister_macos(host=host),
+        macos=lambda: unregister_macos(host=host, user_home=user_home),
         linux=lambda: unregister_linux(host=host),
         host=host,
     )

@@ -275,13 +275,7 @@ def test_unreadable_firewall_is_not_reported_as_healthy(tmp_path: Path) -> None:
 # --- declarative manifest --------------------------------------------------
 
 
-def _stub_manifest(monkeypatch: pytest.MonkeyPatch, entries: tuple) -> None:
-    monkeypatch.setattr(fw, "FIREWALL_MANIFEST", entries)  # pyright: ignore[reportUnknownArgumentType]
-    monkeypatch.setattr(fw, "FIREWALL_LEGACY_FAMILY", ())
-
-
 def test_manifest_paths_resolves_globs_and_drops_absent(
-    monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
 ) -> None:
     """Version-stamped families resolve to whatever is installed; an absent
@@ -291,49 +285,59 @@ def test_manifest_paths_resolves_globs_and_drops_absent(
     (tmp_path / "pg" / "17.5.0" / "bin").mkdir(parents=True)
     (tmp_path / "pg" / "17.5.0" / "bin" / "postgres").write_text("#!/bin/sh\n")
     (tmp_path / "pg" / "18.0.0" / "bin").mkdir(parents=True)  # no binary inside
-    _stub_manifest(
-        monkeypatch,
-        (fw.ManifestEntry("pg", (f"{tmp_path}/pg/*/bin/postgres",), "Accept Postgres clients"),),
+    manifest = (
+        fw.ManifestEntry("pg", (f"{tmp_path}/pg/*/bin/postgres",), "Accept Postgres clients"),
     )
-    got = fw.manifest_paths(machine_name="test-machine", host=fake_host(), user_home=tmp_path)
+    got = fw.manifest_paths(
+        machine_name="test-machine",
+        host=fake_host(),
+        user_home=tmp_path,
+        manifest=manifest,
+    )
     assert [p.name for p in got] == ["postgres", "postgres"]
 
 
 def test_manifest_paths_filters_machine_scoped_entries(
-    monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
 ) -> None:
     """User-app entries apply only on the machine they name."""
     app = tmp_path / "app" / "bin" / "app"
     app.parent.mkdir(parents=True)
     app.write_text("#!/bin/sh\n")
-    _stub_manifest(
-        monkeypatch,
-        (fw.ManifestEntry("app", (str(app),), "Accept app clients", machine="machine-1"),),
+    manifest = (fw.ManifestEntry("app", (str(app),), "Accept app clients", machine="machine-1"),)
+    assert (
+        fw.manifest_paths(
+            machine_name="otherhost",
+            host=fake_host(),
+            user_home=tmp_path,
+            manifest=manifest,
+        )
+        == ()
     )
-    assert fw.manifest_paths(machine_name="otherhost", host=fake_host(), user_home=tmp_path) == ()
-    assert fw.manifest_paths(machine_name="machine-1", host=fake_host(), user_home=tmp_path) == (
-        app,
-    )
+    assert fw.manifest_paths(
+        machine_name="machine-1",
+        host=fake_host(),
+        user_home=tmp_path,
+        manifest=manifest,
+    ) == (app,)
 
 
-def test_manifest_paths_skips_config_shims(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+def test_manifest_paths_skips_config_shims(tmp_path: Path) -> None:
     """`python3.12-config` matches the `python3.*` glob but never listens."""
     (tmp_path / "bin").mkdir()
     real = tmp_path / "bin" / "python3.12"
     real.write_text("#!/bin/sh\n")
     (tmp_path / "bin" / "python3.12-config").write_text("#!/bin/sh\n")
-    _stub_manifest(
-        monkeypatch,
-        (fw.ManifestEntry("py", (f"{tmp_path}/bin/python3.*",), "Run Python listeners"),),
-    )
-    assert fw.manifest_paths(machine_name="test-machine", host=fake_host(), user_home=tmp_path) == (
-        real,
-    )
+    manifest = (fw.ManifestEntry("py", (f"{tmp_path}/bin/python3.*",), "Run Python listeners"),)
+    assert fw.manifest_paths(
+        machine_name="test-machine",
+        host=fake_host(),
+        user_home=tmp_path,
+        manifest=manifest,
+    ) == (real,)
 
 
 def test_observability_manifest_entries_resolve_installed_globs(
-    monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
 ) -> None:
     """A Grafana/Loki/otelcol install under the stable Meiva paths is discovered.
@@ -352,14 +356,18 @@ def test_observability_manifest_entries_resolve_installed_globs(
     ids = {"grafana", "loki", "otel collector"}
     entries = tuple(entry for entry in fw.FIREWALL_MANIFEST if entry.id in ids)
     assert {entry.id for entry in entries} == ids
-    _stub_manifest(monkeypatch, entries)
     assert set(paths).issubset(
-        fw.manifest_paths(machine_name="test-machine", host=fake_host(), user_home=tmp_path)
+        fw.manifest_paths(
+            machine_name="test-machine",
+            host=fake_host(),
+            user_home=tmp_path,
+            manifest=entries,
+        )
     )
 
 
 def test_stale_manifest_rules_only_touches_managed_absent_paths(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    tmp_path: Path,
 ) -> None:
     """Pruning retires a versioned path that moved on, but never a live path or
     an absent path outside the manifest family (Apple's own entries)."""
@@ -370,46 +378,37 @@ def test_stale_manifest_rules_only_touches_managed_absent_paths(
         "/opt/homebrew/Cellar/node/25.6.1/bin/node": True,  # stale, managed
         "/usr/sbin/syslogd": True,  # absent but unmanaged — Apple's
     }
-    _stub_manifest(
-        monkeypatch,
-        (
-            fw.ManifestEntry(
-                "node", ("/opt/homebrew/Cellar/node/*/bin/node",), "Serve frontend traffic"
-            ),
+    manifest = (
+        fw.ManifestEntry(
+            "node", ("/opt/homebrew/Cellar/node/*/bin/node",), "Serve frontend traffic"
         ),
     )
-    assert fw.stale_manifest_rules(rules, user_home=tmp_path) == (
-        Path("/opt/homebrew/Cellar/node/25.6.1/bin/node"),
-    )
+    assert fw.stale_manifest_rules(
+        rules, user_home=tmp_path, manifest=manifest, legacy_family=()
+    ) == (Path("/opt/homebrew/Cellar/node/25.6.1/bin/node"),)
 
 
-def test_stale_manifest_rules_covers_legacy_family(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-) -> None:
+def test_stale_manifest_rules_covers_legacy_family(tmp_path: Path) -> None:
     """The moved Android-SDK adb is retired by the legacy family glob."""
-    monkeypatch.setattr(fw, "FIREWALL_MANIFEST", ())
     stale_path = tmp_path / "retired-android-sdk/platform-tools/adb"
-    monkeypatch.setattr(fw, "FIREWALL_LEGACY_FAMILY", (str(stale_path),))
     rules = {str(stale_path): True}
-    assert fw.stale_manifest_rules(rules, user_home=tmp_path) == (stale_path,)
+    assert fw.stale_manifest_rules(
+        rules, user_home=tmp_path, manifest=(), legacy_family=(str(stale_path),)
+    ) == (stale_path,)
 
 
 def test_render_manifest_status_shows_entry_patterns_paths_and_states(
-    monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
 ) -> None:
     allow = _existing(tmp_path, "allowed")
     block = _existing(tmp_path, "blocked")
     missing = _existing(tmp_path, "missing")
     absent_pattern = str(tmp_path / "not-installed/*/daemon")
-    _stub_manifest(
-        monkeypatch,
-        (
-            fw.ManifestEntry(
-                "listeners",
-                (str(allow), str(block), str(missing), absent_pattern),
-                "Accept inbound test traffic",
-            ),
+    manifest = (
+        fw.ManifestEntry(
+            "listeners",
+            (str(allow), str(block), str(missing), absent_pattern),
+            "Accept inbound test traffic",
         ),
     )
     rendered = fw.render_manifest_status(
@@ -417,6 +416,7 @@ def test_render_manifest_status_shows_entry_patterns_paths_and_states(
         machine_name="test-machine",
         host=fake_host(),
         user_home=tmp_path,
+        manifest=manifest,
     )
     assert "listeners — Accept inbound test traffic" in rendered
     assert f"pattern: {allow}" in rendered
@@ -428,9 +428,7 @@ def test_render_manifest_status_shows_entry_patterns_paths_and_states(
     assert "Summary: 1 entries; 3 resolved paths (Allow 1, Block 1, Missing 1)" in rendered
 
 
-def test_missing_allow_rules_ignores_covered(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-) -> None:
+def test_missing_allow_rules_ignores_covered(tmp_path: Path) -> None:
     py = tmp_path / "python3.12"
     py.write_text("#!/bin/sh\n")
     rules = {str(py): True}
@@ -514,18 +512,13 @@ def _alf_daemon(daemon: _FakeAlf) -> Host:
     return fake_host(daemon, platform=DARWIN_ARM64, programs=_TOOLS)
 
 
-@pytest.fixture(autouse=True)
-def _no_verification_wait(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(fw, "VERIFY_RETRY_S", 0.0)
-
-
 def test_repair_allowlist_issues_both_verbs_per_binary(tmp_path: Path) -> None:
     """`--add` creates the rule; `--unblockapp` clears a Block state that `--add`
     alone would leave. Both are idempotent, so re-running is safe."""
     py = tmp_path / "python3.12"
     py.write_text("#!/bin/sh\n")
     daemon = _FakeAlf({})
-    repair = fw.repair_allowlist((py,), rules={}, host=_alf_daemon(daemon))
+    repair = fw.repair_allowlist((py,), rules={}, host=_alf_daemon(daemon), verify_retry_s=0.0)
     assert repair.allowed == (py,)
     assert repair.failed == ()
     assert daemon.mutations == [
@@ -537,7 +530,7 @@ def test_repair_allowlist_issues_both_verbs_per_binary(tmp_path: Path) -> None:
 def test_repair_falls_back_to_noninteractive_sudo_on_older_macos(tmp_path: Path) -> None:
     py = _existing(tmp_path, "python3.12")
     daemon = _FakeAlf({}, direct_rc=1)
-    repair = fw.repair_allowlist((py,), rules={}, host=_alf_daemon(daemon))
+    repair = fw.repair_allowlist((py,), rules={}, host=_alf_daemon(daemon), verify_retry_s=0.0)
     assert repair.allowed == (py,)
     assert repair.failed == ()
     assert daemon.mutations == [
@@ -559,7 +552,12 @@ def test_repair_reports_partial_failure(tmp_path: Path) -> None:
                 return 1, ""
             return super()._answer(cmd)
 
-    repair = fw.repair_allowlist((py,), rules={}, host=_alf_daemon(_RefusesUnblock({})))
+    repair = fw.repair_allowlist(
+        (py,),
+        rules={},
+        host=_alf_daemon(_RefusesUnblock({})),
+        verify_retry_s=0.0,
+    )
     assert repair.allowed == ()
     assert repair.failed == (py,)
 
@@ -570,7 +568,7 @@ def test_repair_reports_silent_noop_as_failed(tmp_path: Path) -> None:
     py = tmp_path / "python3.12"
     py.write_text("#!/bin/sh\n")
     daemon = _FakeAlf({}, drop_adds=True)
-    repair = fw.repair_allowlist((py,), rules={}, host=_alf_daemon(daemon))
+    repair = fw.repair_allowlist((py,), rules={}, host=_alf_daemon(daemon), verify_retry_s=0.0)
     assert repair.allowed == ()
     assert repair.failed == (py,)
     assert daemon.mutations == [
@@ -591,28 +589,27 @@ def test_repair_retries_verification_until_the_rule_appears(tmp_path: Path) -> N
     py = tmp_path / "python3.12"
     py.write_text("#!/bin/sh\n")
     daemon = _FakeAlf({}, lag_reads=2)
-    repair = fw.repair_allowlist((py,), rules={}, host=_alf_daemon(daemon))
+    repair = fw.repair_allowlist((py,), rules={}, host=_alf_daemon(daemon), verify_retry_s=0.0)
     assert repair.allowed == (py,)
     assert repair.failed == ()
     assert daemon.reads >= 3  # the retry loop is what made the repair succeed
 
 
-def test_prune_stale_rules_removes_managed_orphans(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-) -> None:
-    monkeypatch.setattr(
-        fw,
-        "FIREWALL_MANIFEST",
-        (
-            fw.ManifestEntry(
-                "node", ("/opt/homebrew/Cellar/node/*/bin/node",), "Serve frontend traffic"
-            ),
+def test_prune_stale_rules_removes_managed_orphans(tmp_path: Path) -> None:
+    manifest = (
+        fw.ManifestEntry(
+            "node", ("/opt/homebrew/Cellar/node/*/bin/node",), "Serve frontend traffic"
         ),
     )
-    monkeypatch.setattr(fw, "FIREWALL_LEGACY_FAMILY", ())
     stale = "/opt/homebrew/Cellar/node/25.6.1/bin/node"
     daemon = _FakeAlf({stale: True})
-    repair = fw.prune_stale_rules({stale: True}, host=_alf_daemon(daemon), user_home=tmp_path)
+    repair = fw.prune_stale_rules(
+        {stale: True},
+        host=_alf_daemon(daemon),
+        user_home=tmp_path,
+        manifest=manifest,
+        legacy_family=(),
+    )
     assert repair.removed == (Path(stale),)
     assert daemon.mutations == [[fw.SOCKETFILTERFW, "--remove", stale]]
     assert daemon.state == {}

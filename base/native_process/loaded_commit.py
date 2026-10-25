@@ -25,16 +25,23 @@ _SOURCE_ROOT = Path(__file__).resolve().parents[2]
 _GIT_TIMEOUT_S = 10
 
 
-def capture_commit(source_root: Path) -> str | None:
+def capture_commit(
+    source_root: Path,
+    *,
+    git_executable: str = "git",
+    timeout_s: float = _GIT_TIMEOUT_S,
+) -> str | None:
     """Read the source commit once at an explicit process entry point."""
+    # meiva:note
+    # git_executable defaults to the trusted "git" binary or an explicit test probe path.
     try:
-        result = subprocess.run(
-            ["git", "rev-parse", "HEAD"],
+        result = subprocess.run(  # noqa: S603
+            [git_executable, "rev-parse", "HEAD"],
             cwd=source_root,
             capture_output=True,
             text=True,
             check=False,
-            timeout=_GIT_TIMEOUT_S,
+            timeout=timeout_s,
         )
     except (OSError, subprocess.SubprocessError):
         return None
@@ -55,6 +62,15 @@ class LoadedCommit:
     sha: str | None
 
     @classmethod
-    def capture(cls, source_root: Path = _SOURCE_ROOT) -> LoadedCommit:
+    def capture(
+        cls,
+        source_root: Path = _SOURCE_ROOT,
+        *,
+        git_executable: str = "git",
+        timeout_s: float = _GIT_TIMEOUT_S,
+    ) -> LoadedCommit:
         """Capture at process startup; subsequent use never reads HEAD again."""
-        return cls(source_root=source_root, sha=capture_commit(source_root))
+        return cls(
+            source_root=source_root,
+            sha=capture_commit(source_root, git_executable=git_executable, timeout_s=timeout_s),
+        )

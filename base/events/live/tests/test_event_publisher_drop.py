@@ -5,7 +5,6 @@ import time
 from typing import Any
 from unittest.mock import AsyncMock, MagicMock
 
-import pytest
 from redis.exceptions import ConnectionError as RedisConnectionError
 
 from base.log.tests.log_records import LogRecords
@@ -62,15 +61,22 @@ def test_publish_error_emit_reports_sse_drop_event(loguru_records: LogRecords) -
 
 
 async def test_publish_error_detail_carries_the_class_and_message(
-    monkeypatch: pytest.MonkeyPatch, loguru_records: LogRecords
+    loguru_records: LogRecords,
 ) -> None:
-    async with asyncio.TaskGroup() as tasks:
+    class _BrokenPipeline:
+        def publish(self, *_args: object, **_kwargs: object) -> None: ...
 
-        def _boom(_batch: list[str]) -> None:
+        async def execute(self, *, raise_on_error: bool = False) -> list[object]:
+            del raise_on_error
             raise RedisConnectionError("no route to host")
 
-        pub = _publisher()
-        monkeypatch.setattr(pub, "_publish_batch", _boom)
+    async with asyncio.TaskGroup() as tasks:
+        redis = MagicMock()
+        redis.connection_pool.disconnect = AsyncMock()
+        redis.pipeline.return_value = _BrokenPipeline()
+        pub = AgentEventPublisher(
+            redis, "meiva:events", agent_id=42, maxsize=2, publish_timeout=0.1
+        )
         await pub.start(tasks)
         pub.emit("one")
         for _ in range(200):

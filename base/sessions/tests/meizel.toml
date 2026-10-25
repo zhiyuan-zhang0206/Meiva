@@ -5,41 +5,5 @@ exports = ["poll_until.py", "refuse_helper.py", "scripted_helper.py"]
 "test_poll_until.py" = ["poll_until.py"]
 "test_posix_backend.py" = ["poll_until.py"]
 "test_posixproc.py" = ["poll_until.py", "process_evidence.py"]
+"test_posixproc_liveness.py" = ["process_evidence.py"]
 "test_subreaper_contract.py" = ["subreaper_probe.py"]
-
-[debt.env-patch]
-"test_coding_session_owner.py#monkeypatch.setenv os.environ.MEIVA_HOME" = 1
-
-[debt.first-party-patch]
-"test_backend.py#monkeypatch.setattr base.paths.repo_root" = 1
-"test_coding_session_owner.py#monkeypatch.setattr base.sessions.coding_session_owner.Path" = 1
-"test_coding_session_owner.py#monkeypatch.setattr base.sessions.coding_session_owner.is_macos" = 2
-"test_coding_session_owner.py#monkeypatch.setattr base.sessions.coding_session_owner.private_socket_dir" = 3
-"test_env_forwarding.py#monkeypatch.setattr base.host.runtime_interpreter.runtime_venv" = 1
-"test_posix_backend.py#monkeypatch.setattr base.sessions.posixproc.new_session" = 2
-"test_posixproc.py#monkeypatch.setattr base.sessions.posixproc.os.killpg" = 1
-"test_posixproc.py#monkeypatch.setattr base.sessions.posixproc.psutil.Process" = 2
-"test_posixproc.py#monkeypatch.setattr base.sessions.posixproc.terminate_tree" = 4
-"test_posixproc_expected_signal.py#monkeypatch.setattr base.sessions.posixproc.read_record" = 1
-"test_posixproc_expected_signal.py#monkeypatch.setattr base.sessions.posixproc.record_path" = 1
-"test_posixproc_expected_signal.py#monkeypatch.setattr base.sessions.record.pid_starttime_ticks" = 1
-"test_posixproc_liveness.py#monkeypatch.setattr base.sessions.posixproc.os.getpgid" = 2
-"test_posixproc_liveness.py#monkeypatch.setattr base.sessions.posixproc.os.killpg" = 2
-"test_posixproc_liveness.py#monkeypatch.setattr base.sessions.posixproc.psutil.process_iter" = 2
-
-[debt.restricted-python]
-"test_posixproc.py#python -c" = 10
-"test_posixproc_expected_signal.py#python -c" = 2
-"test_posixproc_liveness.py#python -c" = 1
-
-[debt.test-subclass-override]
-"scripted_helper.py#subclass base.host.permissions_helper.client.PermissionsHelperClient.check_accessibility" = 1
-"scripted_helper.py#subclass base.host.permissions_helper.client.PermissionsHelperClient.check_screen_capture" = 1
-"scripted_helper.py#subclass base.host.permissions_helper.client.PermissionsHelperClient.ping" = 1
-"scripted_helper.py#subclass base.host.permissions_helper.client.PermissionsHelperClient.root_status" = 1
-"scripted_helper.py#subclass base.host.permissions_helper.client.PermissionsHelperClient.seed_root" = 1
-"scripted_helper.py#subclass base.host.permissions_helper.client.PermissionsHelperClient.shutdown_helper" = 1
-"scripted_helper.py#subclass base.host.permissions_helper.client.PermissionsHelperClient.stop_root" = 1
-
-[debt.unresolved-patch]
-"test_posixproc.py#monkeypatch.setattr psosx.INIT_BOOT_TIME" = 2

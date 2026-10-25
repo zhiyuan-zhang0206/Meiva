@@ -3,10 +3,9 @@ from __future__ import annotations
 import dataclasses
 import os
 import re
-import subprocess
-import types
 from pathlib import Path
 
+import psutil
 import pytest
 
 from base.host.env.harness_binaries import require_harness_paths
@@ -21,6 +20,7 @@ from base.host.system.boot_unit import (
     systemd_running,
     uninstall,
     unit_enabled,
+    verify_post_publication,
 )
 from base.host.system.hostport import Host
 from base.host.system.tests.fake_commands import (
@@ -30,18 +30,29 @@ from base.host.system.tests.fake_commands import (
     Reply,
     fake_host,
 )
+from base.native_process.ownership import OwnedProcess
+
+_SYSTEMCTL = {"systemctl": "/usr/bin/systemctl"}
 
 
-def _linux() -> Host:
-    return fake_host(platform=LINUX_X86)
+def _linux(
+    commands: FakeCommands | None = None,
+    *,
+    uid: int = 0,
+    programs: dict[str, str] | None = None,
+) -> Host:
+    return fake_host(
+        commands or FakeCommands(),
+        platform=LINUX_X86,
+        uid=uid,
+        programs=_SYSTEMCTL if programs is None else programs,
+    )
 
 
-def _systemd_up(*, host: Host) -> bool:
-    return True
-
-
-def _systemd_down(*, host: Host) -> bool:
-    return False
+def _runtime_dir(tmp_path: Path) -> Path:
+    d = tmp_path / "run-systemd"
+    d.mkdir(exist_ok=True)
+    return d
 
 
 def _context(tmp_path: Path) -> BootUnitContext:
@@ -130,89 +141,79 @@ def test_render_unit_refuses_control_characters(ctx: BootUnitContext) -> None:
 
 
 def test_systemd_running_requires_linux_systemctl_and_the_runtime_dir(
-    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
 ) -> None:
-    programs = {"systemctl": "/usr/bin/systemctl"}
-    assert systemd_running(host=fake_host(platform=DARWIN_ARM64, programs=programs)) is False
-    assert systemd_running(host=_linux()) is False
-    linux = fake_host(platform=LINUX_X86, programs=programs)
+    runtime_dir = _runtime_dir(tmp_path)
+    assert (
+        systemd_running(
+            host=fake_host(platform=DARWIN_ARM64, programs=_SYSTEMCTL),
+            runtime_dir=runtime_dir,
+        )
+        is False
+    )
+    assert systemd_running(host=_linux(programs={}), runtime_dir=runtime_dir) is False
+    linux = _linux()
+    assert systemd_running(host=linux, runtime_dir=tmp_path / "absent") is False
+    assert systemd_running(host=linux, runtime_dir=runtime_dir) is True
 
-    def fake_path(_p: str) -> types.SimpleNamespace:
-        return types.SimpleNamespace(is_dir=lambda: True)
 
-    monkeypatch.setattr(boot_unit, "Path", fake_path)
-    assert systemd_running(host=linux) is True
-
-
-def test_unit_enabled_reads_the_one_systemctl_seam(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(boot_unit, "systemd_running", _systemd_up)
+def test_unit_enabled_reads_the_one_systemctl_seam(tmp_path: Path) -> None:
+    runtime_dir = _runtime_dir(tmp_path)
     commands = FakeCommands()
     commands.on(["systemctl", "is-enabled"], Reply("enabled\n"), Reply("disabled\n"))
-    host = fake_host(commands, platform=LINUX_X86)
-    assert unit_enabled(host=host) is True
+    host = _linux(commands)
+    assert unit_enabled(host=host, runtime_dir=runtime_dir) is True
     assert commands.argvs == [("systemctl", "is-enabled", "meiva-boot.service")]
 
-    assert unit_enabled(host=host) is False
-    monkeypatch.setattr(boot_unit, "systemd_running", _systemd_down)
-    assert unit_enabled(host=host) is False
+    assert unit_enabled(host=host, runtime_dir=runtime_dir) is False
+    assert unit_enabled(host=host, runtime_dir=tmp_path / "absent") is False
     assert len(commands.calls) == 2
 
 
 def _install_seams(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, *, enabled: bool
-) -> tuple[list[list[str]], dict[str, str]]:
-    monkeypatch.setattr(boot_unit, "systemd_running", _systemd_up)
-    monkeypatch.setattr(boot_unit, "SYSTEM_UNIT_DIR", tmp_path / "etc-systemd")
-
-    def unit_enabled(*, host: Host) -> bool:
-        return enabled
-
-    monkeypatch.setattr(boot_unit, "unit_enabled", unit_enabled)
-    recorded: list[list[str]] = []
+    tmp_path: Path, *, enabled: bool
+) -> tuple[FakeCommands, dict[str, str], Path, Path]:
+    unit_dir = tmp_path / "etc-systemd"
+    runtime_dir = _runtime_dir(tmp_path)
     installed: dict[str, str] = {}
+    commands = FakeCommands()
+    commands.on(
+        ["install", "-m", "0644"],
+        lambda argv: (
+            installed.update({"destination": argv[-1], "content": Path(argv[-2]).read_text()})
+            or Reply()
+        ),
+        repeat=True,
+    )
+    commands.on(["systemctl", "daemon-reload"], Reply(), repeat=True)
+    commands.on(
+        ["systemctl", "is-enabled"],
+        Reply("enabled\n" if enabled else "disabled\n"),
+        repeat=True,
+    )
+    commands.on(["systemctl", "enable", "meiva-boot.service"], Reply(), repeat=True)
+    return commands, installed, unit_dir, runtime_dir
 
-    def fake_privileged(
-        argv: list[str],
-        *,
-        timeout: float = 120.0,
-        host: Host,
-    ) -> subprocess.CompletedProcess[str]:
-        recorded.append(argv)
-        if argv and argv[0] == "install":
-            installed["destination"] = argv[-1]
-            installed["content"] = Path(argv[-2]).read_text()
-        return subprocess.CompletedProcess(argv, 0, "", "")
 
-    monkeypatch.setattr(boot_unit, "privileged", fake_privileged)
-    return recorded, installed
-
-
-def test_install_refuses_without_systemd(
-    ctx: BootUnitContext, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    monkeypatch.setattr(boot_unit, "systemd_running", _systemd_down)
+def test_install_refuses_without_systemd(ctx: BootUnitContext, tmp_path: Path) -> None:
     with pytest.raises(RuntimeError, match="systemd"):
-        install(services=ctx.services, context=ctx, host=_linux())
+        install(
+            services=ctx.services,
+            context=ctx,
+            host=_linux(programs={}),
+            runtime_dir=tmp_path / "absent",
+        )
 
 
-def test_uninstall_removes_only_the_boot_units_paths(
-    ctx: BootUnitContext, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_uninstall_removes_only_the_boot_units_paths(ctx: BootUnitContext, tmp_path: Path) -> None:
     units = tmp_path / "etc-systemd"
     units.mkdir()
-    monkeypatch.setattr(boot_unit, "SYSTEM_UNIT_DIR", units)
-    recorded: list[list[str]] = []
-
-    def fake_privileged(
-        argv: list[str],
-        *,
-        timeout: float = 120.0,
-        host: Host,
-    ) -> subprocess.CompletedProcess[str]:
-        recorded.append(argv)
-        return subprocess.CompletedProcess(argv, 0, "", "")
-
-    monkeypatch.setattr(boot_unit, "privileged", fake_privileged)
+    absent_runtime = tmp_path / "absent-runtime"
+    commands = FakeCommands()
+    commands.on(["systemctl", "disable", "--now", "meiva-boot.service"], Reply(), repeat=True)
+    commands.on(["rm", "-f"], Reply(), repeat=True)
+    commands.on(["systemctl", "daemon-reload"], Reply(), repeat=True)
+    host = _linux(commands)
 
     unit = units / "meiva-boot.service"
     unit.write_text(render_unit(ctx))
@@ -220,8 +221,9 @@ def test_uninstall_removes_only_the_boot_units_paths(
     foreign.write_text("y")
     template = units / "meiva-gateway-egress@.service"
     template.write_text("z")
-    steps = uninstall(host=_linux())
+    steps = uninstall(host=host, unit_dir=units, runtime_dir=absent_runtime)
 
+    recorded = [list(argv) for argv in commands.argvs]
     assert ["systemctl", "disable", "--now", "meiva-boot.service"] in recorded
     assert ["rm", "-f", str(unit)] in recorded
     assert ["systemctl", "daemon-reload"] in recorded
@@ -230,69 +232,70 @@ def test_uninstall_removes_only_the_boot_units_paths(
     assert steps == [f"removed {unit}"]
 
     unit.unlink()
-    before = list(recorded)
-    assert uninstall(host=_linux()) == []
-    assert recorded == before
+    before = list(commands.argvs)
+    assert uninstall(host=host, unit_dir=units, runtime_dir=absent_runtime) == []
+    assert commands.argvs == before
     unit.write_text(render_unit(ctx))
-    assert uninstall(host=fake_host(platform=DARWIN_ARM64)) == []
+    assert (
+        uninstall(
+            host=fake_host(platform=DARWIN_ARM64),
+            unit_dir=units,
+            runtime_dir=absent_runtime,
+        )
+        == []
+    )
     assert unit.exists()
 
 
-def _manager_reports(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, active_state: str
-) -> tuple[Path, list[list[str]]]:
+def _manager_reports(tmp_path: Path, active_state: str) -> tuple[Path, Path, FakeCommands]:
     units = tmp_path / "etc-systemd"
     units.mkdir(exist_ok=True)
-    monkeypatch.setattr(boot_unit, "SYSTEM_UNIT_DIR", units)
-    monkeypatch.setattr(boot_unit, "systemd_running", _systemd_up)
-    recorded: list[list[str]] = []
-
-    def fake_privileged(
-        argv: list[str],
-        *,
-        timeout: float = 120.0,
-        host: Host,
-    ) -> subprocess.CompletedProcess[str]:
-        recorded.append(argv)
-        return subprocess.CompletedProcess(argv, 0, "", "")
-
-    def show(
-        *args: str,
-        timeout: float = 30.0,
-        host: Host,
-    ) -> subprocess.CompletedProcess[str]:
-        assert args[:3] == ("show", "--property=ActiveState", "--value"), args
-        return subprocess.CompletedProcess(["systemctl", *args], 0, f"{active_state}\n", "")
-
-    monkeypatch.setattr(boot_unit, "privileged", fake_privileged)
-    monkeypatch.setattr(boot_unit, "systemctl", show)
-    return units, recorded
+    runtime_dir = _runtime_dir(tmp_path)
+    commands = FakeCommands()
+    commands.on(["systemctl", "disable", "--now", "meiva-boot.service"], Reply(), repeat=True)
+    commands.on(["rm", "-f"], Reply(), repeat=True)
+    commands.on(["systemctl", "daemon-reload"], Reply(), repeat=True)
+    commands.on(
+        ["systemctl", "show", "--property=ActiveState", "--value", "meiva-boot.service"],
+        Reply(f"{active_state}\n"),
+        repeat=True,
+    )
+    commands.on(["systemctl", "reset-failed", "meiva-boot.service"], Reply(), repeat=True)
+    return units, runtime_dir, commands
 
 
-def test_uninstall_leaves_no_failed_record_behind(
-    ctx: BootUnitContext, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    units, recorded = _manager_reports(monkeypatch, tmp_path, "failed")
+def test_uninstall_leaves_no_failed_record_behind(ctx: BootUnitContext, tmp_path: Path) -> None:
+    units, runtime_dir, commands = _manager_reports(tmp_path, "failed")
+    host = _linux(commands)
     name = "meiva-boot.service"
     (units / name).write_text(render_unit(ctx))
 
-    steps = uninstall(host=_linux())
+    steps = uninstall(host=host, unit_dir=units, runtime_dir=runtime_dir)
 
+    recorded = [list(argv) for argv in commands.argvs]
     reset = ["systemctl", "reset-failed", name]
     assert recorded.index(["systemctl", "daemon-reload"]) < recorded.index(reset)
     assert steps[-1] == f"cleared the failed record of {name}"
     (units / name).unlink()
-    recorded.clear()
-    assert uninstall(host=_linux()) == [f"cleared the failed record of {name}"]
-    assert recorded == [reset]
+    before_count = len(commands.argvs)
+    assert uninstall(host=host, unit_dir=units, runtime_dir=runtime_dir) == [
+        f"cleared the failed record of {name}"
+    ]
+    after = [list(argv) for argv in commands.argvs[before_count:]]
+    assert after == [
+        ["systemctl", "show", "--property=ActiveState", "--value", name],
+        reset,
+    ]
 
 
 def test_uninstall_resets_nothing_it_did_not_leave_failed(
-    ctx: BootUnitContext, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ctx: BootUnitContext, tmp_path: Path
 ) -> None:
-    _units, recorded = _manager_reports(monkeypatch, tmp_path, "inactive")
-    assert uninstall(host=_linux()) == []
-    assert recorded == []
+    units, runtime_dir, commands = _manager_reports(tmp_path, "inactive")
+    assert uninstall(host=_linux(commands), unit_dir=units, runtime_dir=runtime_dir) == []
+    assert [list(argv) for argv in commands.argvs] == [
+        ["systemctl", "show", "--property=ActiveState", "--value", "meiva-boot.service"]
+    ]
 
 
 def test_privileged_translates_a_missing_sudo() -> None:
@@ -317,96 +320,120 @@ def test_the_boot_unit_carries_no_home() -> None:
     assert boot_unit.unit_path() == boot_unit.SYSTEM_UNIT_DIR / "meiva-boot.service"
 
 
-def test_interactive_start_never_publishes(
-    ctx: BootUnitContext, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    from base.native_process.ownership import OwnedProcess
+def _write_cgroup(proc_root: Path, pid: int, cgroup_path: str) -> None:
+    cgroup_file = proc_root / str(pid) / "cgroup"
+    cgroup_file.parent.mkdir(parents=True, exist_ok=True)
+    cgroup_file.write_text(f"0::{cgroup_path}\n")
 
-    def interactive(_pid: int) -> str:
-        return "/user.slice/interactive.scope"
 
-    def no_manager(*, host: Host) -> dict[str, str]:
-        pytest.fail("interactive")
-
-    monkeypatch.setattr(boot_unit, "process_cgroup", interactive)
-    monkeypatch.setattr(boot_unit, "manager_properties", no_manager)
-    boot_unit.publish_root_ready(ctx.home, OwnedProcess(123, 1.0, 1), host=_linux())
+def test_interactive_start_never_publishes(ctx: BootUnitContext, tmp_path: Path) -> None:
+    proc_root = tmp_path / "proc"
+    _write_cgroup(proc_root, 555, "/user.slice/interactive.scope")
+    commands = FakeCommands()
+    boot_unit.publish_root_ready(
+        ctx.home,
+        OwnedProcess(123, 1.0, 1),
+        host=_linux(commands),
+        proc_root=proc_root,
+        control_pid=555,
+    )
+    assert commands.argvs == []
 
 
 @pytest.mark.parametrize("fault", ["dead", "foreign", "manager", "reused", "none"])
 def test_root_publication_binds_native_custody(
-    ctx: BootUnitContext, monkeypatch: pytest.MonkeyPatch, fault: str
+    ctx: BootUnitContext, tmp_path: Path, fault: str
 ) -> None:
-    from base.native_process.ownership import OwnedProcess
-
-    owner = OwnedProcess(123, 1.0, 1)
     expected = "/system.slice/meiva-boot.service"
-
-    def in_unit(*, host: Host) -> bool:
-        return True
-
-    def cgroup(_pid: int) -> str:
-        return "/foreign" if fault == "foreign" else expected
-
-    alive = iter([False] if fault == "dead" else [True, fault != "reused"])
-
-    def live(_self: OwnedProcess) -> bool:
-        return next(alive)
-
-    def properties(*, host: Host) -> dict[str, str]:
-        return {
-            "MainPID": "0",
-            "ControlPID": "999" if fault == "manager" else str(boot_unit.os.getpid()),
-            "ControlGroup": expected,
-            "ActiveState": "activating",
-        }
-
-    monkeypatch.setattr(boot_unit, "in_boot_unit", in_unit)
-    monkeypatch.setattr(boot_unit, "process_cgroup", cgroup)
-    monkeypatch.setattr(OwnedProcess, "live", live)
-    monkeypatch.setattr(boot_unit, "manager_properties", properties)
+    live_self = OwnedProcess.capture(psutil.Process(os.getpid()))
+    owner = OwnedProcess(99999999, 1.0, 1) if fault == "dead" else live_self
+    control_pid = 4242
+    proc_root = tmp_path / "proc"
+    _write_cgroup(proc_root, control_pid, expected)
+    _write_cgroup(
+        proc_root,
+        owner.pid,
+        "/foreign" if fault == "foreign" else expected,
+    )
+    commands = FakeCommands()
+    commands.on(
+        [
+            "systemctl",
+            "show",
+            "--property=MainPID,ControlPID,ControlGroup,ActiveState",
+            "meiva-boot.service",
+        ],
+        Reply(
+            "MainPID=0\n"
+            f"ControlPID={999 if fault == 'manager' else control_pid}\n"
+            f"ControlGroup={expected}\n"
+            "ActiveState=activating\n"
+        ),
+    )
+    host = _linux(commands)
     path = boot_unit.root_pid_path(ctx.home)
     if fault == "none":
         path.parent.mkdir(parents=True)
         path.write_text("999999\n")
-        boot_unit.publish_root_ready(ctx.home, owner, host=_linux())
-        assert path.read_text() == "123\n"
+        boot_unit.publish_root_ready(
+            ctx.home,
+            owner,
+            host=host,
+            proc_root=proc_root,
+            control_pid=control_pid,
+        )
+        assert path.read_text() == f"{owner.pid}\n"
         assert path.stat().st_mode & 0o777 == 0o600
+    elif fault == "reused":
+        path.parent.mkdir(parents=True)
+        path.write_text(f"{owner.pid}\n")
+        with pytest.raises(RuntimeError, match=r"custody|birth"):
+            verify_post_publication(path, live=False, cgroup=expected)
+        assert not path.exists()
     else:
         with pytest.raises(RuntimeError, match=r"custody|birth"):
-            boot_unit.publish_root_ready(ctx.home, owner, host=_linux())
+            boot_unit.publish_root_ready(
+                ctx.home,
+                owner,
+                host=host,
+                proc_root=proc_root,
+                control_pid=control_pid,
+            )
         assert not path.exists()
 
 
-def test_uninstall_failed_stop_preserves_unit(
-    ctx: BootUnitContext, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    monkeypatch.setattr(boot_unit, "SYSTEM_UNIT_DIR", tmp_path)
-    target = boot_unit.unit_path()
+def test_uninstall_failed_stop_preserves_unit(ctx: BootUnitContext, tmp_path: Path) -> None:
+    target = boot_unit.unit_path(tmp_path)
     target.write_text(render_unit(ctx))
-    calls: list[list[str]] = []
-
-    def fail_stop(
-        argv: list[str],
-        *,
-        timeout: float = 120,
-        host: Host,
-    ) -> subprocess.CompletedProcess[str]:
-        calls.append(argv)
-        return subprocess.CompletedProcess(argv, 1, "", "stop failed")
-
-    monkeypatch.setattr(boot_unit, "privileged", fail_stop)
+    commands = FakeCommands()
+    commands.on(
+        ["systemctl", "disable", "--now", "meiva-boot.service"],
+        Reply(returncode=1, stderr="stop failed"),
+    )
     with pytest.raises(RuntimeError, match="stop failed"):
-        uninstall(host=_linux())
+        uninstall(
+            host=_linux(commands),
+            unit_dir=tmp_path,
+            runtime_dir=tmp_path / "absent",
+        )
     assert target.exists()
-    assert calls == [["systemctl", "disable", "--now", "meiva-boot.service"]]
+    assert [list(argv) for argv in commands.argvs] == [
+        ["systemctl", "disable", "--now", "meiva-boot.service"]
+    ]
 
 
 def test_install_enables_native_unit_without_recursively_starting(
-    ctx: BootUnitContext, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ctx: BootUnitContext, tmp_path: Path
 ) -> None:
-    recorded, installed = _install_seams(monkeypatch, tmp_path, enabled=False)
-    steps = install(services=ctx.services, context=ctx, host=_linux())
+    commands, installed, unit_dir, runtime_dir = _install_seams(tmp_path, enabled=False)
+    steps = install(
+        services=ctx.services,
+        context=ctx,
+        host=_linux(commands),
+        unit_dir=unit_dir,
+        runtime_dir=runtime_dir,
+    )
+    recorded = [list(argv) for argv in commands.argvs]
     assert installed["content"] == render_unit(ctx)
     assert ["systemctl", "enable", "meiva-boot.service"] in recorded
     assert ["systemctl", "start", "meiva-boot.service"] not in recorded
@@ -415,11 +442,22 @@ def test_install_enables_native_unit_without_recursively_starting(
 
 
 def test_unchanged_enabled_unit_never_restarts_or_rewrites(
-    ctx: BootUnitContext, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ctx: BootUnitContext, tmp_path: Path
 ) -> None:
-    recorded, _installed = _install_seams(monkeypatch, tmp_path, enabled=True)
-    target = boot_unit.unit_path()
+    commands, _installed, unit_dir, runtime_dir = _install_seams(tmp_path, enabled=True)
+    target = boot_unit.unit_path(unit_dir)
     target.parent.mkdir()
     target.write_text(render_unit(ctx))
-    assert install(services=ctx.services, context=ctx, host=_linux()) == []
-    assert recorded == []
+    assert (
+        install(
+            services=ctx.services,
+            context=ctx,
+            host=_linux(commands),
+            unit_dir=unit_dir,
+            runtime_dir=runtime_dir,
+        )
+        == []
+    )
+    assert [list(argv) for argv in commands.argvs] == [
+        ["systemctl", "is-enabled", "meiva-boot.service"]
+    ]
