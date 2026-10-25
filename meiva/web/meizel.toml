@@ -23,3 +23,10 @@ exports = ["configs.py", "deepseek_wire.py", "deps.py", "errors.py", "failures.p
 
 [debt.ambient-read]
 "transport.py#clock time.monotonic" = 1
+
+[debt.type-cast]
+"deepseek_wire.py#cast deepseek_page" = 2
+"deepseek_wire.py#cast deepseek_search_hits" = 1
+"failures.py#cast _provider_message" = 2
+"wire.py#cast brave_hits" = 1
+"wire.py#cast jina_page" = 1

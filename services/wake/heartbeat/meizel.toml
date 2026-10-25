@@ -16,3 +16,6 @@ exports = ["daemon.py", "selection.py", "station_probe.py"]
 [debt.ambient-read]
 "completion_digest.py#clock datetime.datetime.now" = 1
 "daemon.py#pid os.getpid" = 1
+
+[debt.type-cast]
+"liveness.py#cast _record_probe" = 1

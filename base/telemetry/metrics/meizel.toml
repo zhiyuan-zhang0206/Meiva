@@ -24,3 +24,13 @@ exports = ["aggregate.py", "aggregate_sql.py", "ci_runs_metrics.py", "core", "ev
 "aggregate.py#clock datetime.datetime.now" = 2
 "aggregate_sql.py#clock datetime.datetime.now" = 2
 "usage.py#clock datetime.datetime.now" = 1
+
+[debt.type-cast]
+"aggregate_sql.py#cast _Scope.run" = 1
+"aggregate_sql.py#cast _fix_events" = 1
+"aggregate_sql.py#cast _llm_position" = 1
+"grafana_dashboard.py#cast _merge" = 2
+"observed_metrics.py#cast _activity" = 2
+"observed_metrics.py#cast observe_row" = 1
+"observed_metrics.py#cast write_observations" = 1
+"usage.py#cast event_rows" = 1

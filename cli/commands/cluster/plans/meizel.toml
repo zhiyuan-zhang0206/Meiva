@@ -15,3 +15,6 @@ exports = ["db_authority_replies.py", "destroy_plan.py", "gateway_replies.py", "
 "service_probe_plan.py" = "strict"
 "unit_join_checks.py" = "strict"
 "unit_join_steps.py" = "strict"
+
+[debt.type-cast]
+"provider_verdicts.py#cast _cny_balance" = 3

@@ -17,3 +17,6 @@ exports = ["daemon.py", "settings.py", "worker.py"]
 "daemon.py#clock datetime.datetime.now" = 2
 "daemon.py#clock time.time" = 1
 "daemon.py#pid os.getpid" = 1
+
+[debt.type-cast]
+"recovery_drill.py#cast _parse_success_marker" = 1

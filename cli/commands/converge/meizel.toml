@@ -22,3 +22,6 @@ exports = ["brew_pin.py", "firewall.py", "firewall_command.py", "frontend_env.py
 "ownership_preflight.py#clock datetime.datetime.now" = 1
 "ownership_preflight.py#pid os.getgid" = 1
 "redis_bridge.py#clock time.monotonic" = 2
+
+[debt.type-cast]
+"incomplete.py#cast read_incomplete" = 1

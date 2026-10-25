@@ -19,3 +19,7 @@ exports = ["attachment.py", "registration.py", "store.py"]
 
 [debt.ambient-read]
 "attachment.py#pid os.getpid" = 1
+
+[debt.type-cast]
+"attachment.py#cast _RegistrationCodec.encode_plugin_delta" = 1
+"registration.py#cast decode_registration" = 1

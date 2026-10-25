@@ -27,5 +27,12 @@ exports = ["transport.py"]
 "transport.py#import signal" = 1
 "transport.py#os.killpg" = 1
 
+[debt.type-cast]
+"transport.py#cast AcpConnection._answer_permission" = 2
+"transport.py#cast AcpConnection._answer_server_request" = 1
+"transport.py#cast AcpConnection._dispatch" = 3
+"transport.py#cast AcpConnection._read_loop" = 1
+"transport.py#cast AcpConnection.notifications" = 1
+
 [debt.wide-params]
 "transport.py#def __init__" = 1

@@ -28,6 +28,7 @@ from meizel.graph.model import (
     PurityItem,
     Restricted,
     Sources,
+    TypeCastSite,
 )
 from meizel.graph.universe import Universe
 from meizel.language import fixtures, purity, typescript
@@ -40,6 +41,7 @@ from meizel.language.bindings import (
 from meizel.language.input_mutations import InputListAppend, input_list_appends
 from meizel.language.mounts import mount_facts
 from meizel.language.restricted import EXTERNAL_FORMS, const_str
+from meizel.lint_common import is_test_path
 
 __all__ = [
     "EXTERNAL_FORMS",
@@ -128,6 +130,14 @@ _LEAVES = frozenset(
 )
 
 
+_COMPREHENSION_NAMES = {
+    ast.ListComp: "<listcomp>",
+    ast.SetComp: "<setcomp>",
+    ast.DictComp: "<dictcomp>",
+    ast.GeneratorExp: "<genexpr>",
+}
+
+
 @dataclass(frozen=True, slots=True)
 class FileScan:
     path: str
@@ -141,6 +151,7 @@ class FileScan:
     enum_subsets: list[EnumSubsetUse] = field(default_factory=list[EnumSubsetUse])
     input_appends: list[InputListAppend] = field(default_factory=list[InputListAppend])
     ambient: list[Acquisition] = field(default_factory=list[Acquisition])
+    type_casts: list[TypeCastSite] = field(default_factory=list[TypeCastSite])
 
 
 class Scanner(AmbientAccess):
@@ -150,6 +161,9 @@ class Scanner(AmbientAccess):
         super().__init__(universe, path, tree, walrus=walrus, sources=sources)
         self.fixture_state = fixtures.FixtureState()
         self.fn_depth = 0
+        self.qualnames: list[str] = []
+        self.type_casts: list[TypeCastSite] = []
+        self.records_type_casts = not (self.test_file or is_test_path(path))
         self.owned_functions = unambiguous_function_lines(tree)
         self.fixture_requester: ast.FunctionDef | ast.AsyncFunctionDef | None = None
         self.input_appends: list[InputListAppend] = []
@@ -167,6 +181,7 @@ class Scanner(AmbientAccess):
             ast.FunctionDef: self.visit_function,
             ast.AsyncFunctionDef: self.visit_function,
             ast.ClassDef: self.visit_class_def,
+            ast.TypeAlias: self.visit_type_alias,
             ast.Lambda: self.visit_lambda,
             ast.ListComp: self.visit_comprehension,
             ast.SetComp: self.visit_comprehension,
@@ -197,6 +212,7 @@ class Scanner(AmbientAccess):
             enum_subsets=self.purity_state.finalize_subsets(),
             input_appends=self.input_appends,
             ambient=self.ambient.items,
+            type_casts=self.type_casts,
         )
 
     def visit_compare(self, node: ast.Compare) -> None:
@@ -269,11 +285,15 @@ class Scanner(AmbientAccess):
             self.visit(deco)
         for default in (*args.defaults, *(d for d in args.kw_defaults if d is not None)):
             self.visit(default)
+        outer = self.scope
+        annotation = outer.annotation_scope(parameter.name for parameter in node.type_params)
+        self.scope = annotation
         for arg in (*args.posonlyargs, *args.args, *args.kwonlyargs, args.vararg, args.kwarg):
             if arg is not None and arg.annotation is not None:
                 self.visit(arg.annotation)
         if node.returns is not None:
             self.visit(node.returns)
+        self.scope = outer
         fixtures.record_function(
             self.fixture_state,
             node,
@@ -287,13 +307,15 @@ class Scanner(AmbientAccess):
             node,
             top_level=self.fn_depth == 0 and not self.scope.is_class,
         )
-        inner = Scope(self.scope.closure_parent())
+        inner = Scope(annotation.closure_parent())
         collect_scope(inner, node.body, self.package, walrus=self.walrus)
         self.observe_input_parameters(node, inner)
         inner.shadowed.update(parameter_names(args))
         self.fn_depth += 1
         self.ambient.enter(node)
+        self.qualnames.append(node.name)
         self.enter(inner, node.body)
+        self.qualnames.pop()
         self.ambient.leave()
         self.fn_depth -= 1
         self.fixture_requester = previous_requester
@@ -312,14 +334,30 @@ class Scanner(AmbientAccess):
 
     def visit_class_def(self, node: ast.ClassDef) -> None:
         previous_requester, self.fixture_requester = self.fixture_requester, None
+        outer = self.scope
+        for decorator in node.decorator_list:
+            self.visit(decorator)
+        annotation = outer.annotation_scope(parameter.name for parameter in node.type_params)
+        self.scope = annotation
         self.record_test_subclass(node)
-        for outer in (*node.decorator_list, *node.bases, *node.keywords):
-            self.visit(outer)
+        for expression in (*node.bases, *node.keywords):
+            self.visit(expression)
+        self.scope = outer
         purity.record_class(self.purity_state, node, self.dotted)
-        inner = Scope(self.scope, is_class=True)
+        inner = Scope(annotation.closure_parent(), is_class=True)
         collect_scope(inner, node.body, self.package, walrus=self.walrus)
+        self.qualnames.append(node.name)
         self.enter(inner, node.body)
+        self.qualnames.pop()
         self.fixture_requester = previous_requester
+
+    def visit_type_alias(self, node: ast.TypeAlias) -> None:
+        outer = self.scope
+        self.scope = outer.annotation_scope(parameter.name for parameter in node.type_params)
+        for parameter in node.type_params:
+            self.visit(parameter)
+        self.visit(node.value)
+        self.scope = outer
 
     def visit_lambda(self, node: ast.Lambda) -> None:
         for default in (*node.args.defaults, *(d for d in node.args.kw_defaults if d is not None)):
@@ -328,7 +366,9 @@ class Scanner(AmbientAccess):
         collect_scope(inner, [node.body], self.package, walrus=self.walrus)
         inner.shadowed.update(parameter_names(node.args))
         outer, self.scope = self.scope, inner
+        self.qualnames.append("<lambda>")
         self.visit(node.body)
+        self.qualnames.pop()
         self.scope = outer
 
     def visit_comprehension(
@@ -339,6 +379,7 @@ class Scanner(AmbientAccess):
         for generator in node.generators:
             bind_target(inner, generator.target)
         outer, self.scope = self.scope, inner
+        self.qualnames.append(_COMPREHENSION_NAMES[type(node)])
         for index, generator in enumerate(node.generators):
             if index:
                 self.visit(generator.iter)
@@ -350,6 +391,7 @@ class Scanner(AmbientAccess):
             self.visit(node.value)
         else:
             self.visit(node.elt)
+        self.qualnames.pop()
         self.scope = outer
 
     def enter(self, inner: Scope, body: list[ast.stmt]) -> None:
@@ -413,6 +455,10 @@ class Scanner(AmbientAccess):
 
     def visit_call(self, node: ast.Call) -> None:
         callee = self.dotted(node.func)
+        if self.records_type_casts and callee == "typing.cast":
+            self.type_casts.append(
+                TypeCastSite(node.lineno, node.col_offset, ".".join(self.qualnames) or "<module>")
+            )
         if self.records_ambient:
             self.ambient.called(callee, node)
         self.patch_forms(node, callee)

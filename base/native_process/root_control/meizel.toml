@@ -16,3 +16,12 @@ exports = ["client.py", "instance_lock.py", "ipc.py"]
 "client.py#platform socket.gethostname" = 1
 "client.py#platform sys.platform" = 3
 "instance_lock.py#pid os.getpid" = 1
+
+[debt.type-cast]
+"client.py#cast native_identity" = 1
+"client.py#cast root_process" = 1
+"client.py#cast validate_status_peer" = 1
+"ipc.py#cast _decode_object" = 1
+"ipc.py#cast _parse_caller" = 1
+"ipc.py#cast _texts" = 2
+"ipc.py#cast parse_status_response" = 3

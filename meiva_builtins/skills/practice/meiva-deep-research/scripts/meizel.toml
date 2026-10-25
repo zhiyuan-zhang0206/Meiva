@@ -1,1 +1,9 @@
 exports = ["audit_research.py"]
+
+[debt.type-cast]
+"audit_research.py#cast _check_claims" = 1
+"audit_research.py#cast _check_learnings" = 2
+"audit_research.py#cast _check_question_plan" = 3
+"audit_research.py#cast _check_sources" = 1
+"audit_research.py#cast _load" = 1
+"audit_research.py#cast _object_rows" = 1

@@ -25,3 +25,8 @@ exports = ["config.py", "fleet_gateway.py", "fleet_leases.py", "schedules.py", "
 "fleet_gateway.py#random uuid.uuid4" = 1
 "schedules.py#random uuid.uuid4" = 1
 "schedules_verify.py#clock datetime.datetime.now" = 1
+
+[debt.type-cast]
+"config.py#cast _audit_touches_key" = 3
+"config.py#cast _field_extra" = 1
+"config.py#cast _print_audit_record" = 3

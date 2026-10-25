@@ -32,3 +32,14 @@ exports = ["admin", "agent_pins.py", "base.py", "config_registry.py", "domains",
 
 [debt.impure-edge]
 "base.py#base/paths/home.py" = 1
+
+[debt.type-cast]
+"__init__.py#cast <module>" = 1
+"_full.py#cast cast_profile" = 1
+"_lite.py#cast ConfigBoot.complete_read_model" = 1
+"_lite.py#cast ConfigBoot.prepare" = 1
+"_lite.py#cast ConfigBoot.read_process_environment" = 1
+"config_registry.py#cast build_registry" = 2
+"config_registry.py#cast field_lifecycle" = 1
+"config_registry.py#cast schema_extra" = 1
+"runtime_config.py#cast env_value_text" = 1

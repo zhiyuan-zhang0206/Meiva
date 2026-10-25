@@ -21,3 +21,7 @@ exports = ["direct_url.py", "pg_admin.py", "pg_foreground.py", "pg_runtime.py", 
 "runtime_binaries.py#platform platform.system" = 2
 "walg_binary.py#platform platform.machine" = 1
 "walg_binary.py#platform platform.system" = 1
+
+[debt.type-cast]
+"pg_foreground.py#cast stop_foreground_postgres" = 1
+"pg_tools.py#cast _read_lock_body" = 1

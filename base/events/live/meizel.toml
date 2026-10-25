@@ -20,3 +20,12 @@ exports = ["announce.py", "bus.py", "coalescer.py", "projection.py", "publisher.
 "bus.py#settings base.config.settings" = 1
 "redis_client.py#random random.uniform" = 1
 "redis_listener.py#settings base.config.settings" = 1
+
+[debt.type-cast]
+"redis_client.py#cast AuthRetryAsyncRedis.execute_command._execute" = 1
+"redis_client.py#cast AuthRetrySyncRedis.execute_command._execute" = 1
+"redis_client.py#cast PinnedIPv4Connection._connect" = 1
+"redis_client.py#cast open_async_redis" = 1
+"redis_client.py#cast open_sync_redis" = 1
+"redis_listener.py#cast RedisInboundListener._consume_one" = 1
+"redis_listener.py#cast RedisInboundListener._open_and_subscribe" = 1

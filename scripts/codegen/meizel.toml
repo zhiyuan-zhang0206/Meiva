@@ -6,3 +6,9 @@ exports = ["build_okf_data.py", "dump_openapi.py", "gen_config_lite_table.py", "
 [debt.ambient-read]
 "build_android_release.py#clock datetime.datetime.now" = 1
 "serve_okf_viz.py#platform socket.gethostname" = 1
+
+[debt.type-cast]
+"gen_config_lite_table.py#cast _collect.<listcomp>" = 2
+"gen_config_lite_table.py#cast _lite_row" = 1
+"gen_config_lite_table.py#cast _sensitive_fields.<listcomp>" = 1
+"gen_pyright_test_environments.py#cast _toml_value" = 1

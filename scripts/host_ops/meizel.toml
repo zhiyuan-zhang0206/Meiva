@@ -22,3 +22,6 @@ exports = ["check_worktree_remove.py", "onboarding"]
 "host_memory_sample.py#home pathlib.Path.home" = 1
 "host_memory_sample.py#pid os.getuid" = 1
 "update_schedule_script.py#db base.db.Database.from_settings" = 1
+
+[debt.type-cast]
+"guard_editable_venv.py#cast _direct_url_violations" = 2

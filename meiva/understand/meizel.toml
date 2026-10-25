@@ -14,3 +14,8 @@ exports = ["answer.py", "calls.py", "errors.py", "outputs.py", "plans.py", "wiri
 
 [debt.ambient-read]
 "answer.py#clock datetime.datetime.now" = 1
+
+[debt.type-cast]
+"answer.py#cast _save_result" = 2
+"answer.py#cast run.<lambda>" = 3
+"plans.py#cast normalize" = 4

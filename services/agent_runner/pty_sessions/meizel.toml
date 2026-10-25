@@ -15,3 +15,7 @@ exports = ["daemon.py", "ledger.py", "shutdown_budget.py"]
 "service.py#pid os.getpid" = 1
 "service.py#random uuid.uuid4" = 1
 "session.py#clock time.monotonic" = 2
+
+[debt.type-cast]
+"ledger.py#cast read" = 1
+"service.py#cast _child_env" = 1

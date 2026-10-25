@@ -24,3 +24,14 @@ exports = ["archive.py", "check.py", "config.py", "probe.py", "restore.py", "sta
 "probe.py#clock datetime.datetime.now" = 1
 "restore.py#clock time.monotonic" = 2
 "tick.py#clock datetime.datetime.now" = 1
+
+[debt.type-cast]
+"backups.py#cast parse_backups" = 2
+"config.py#cast read_config" = 1
+"gaps.py#cast load_recorded_gaps" = 1
+"gaps.py#cast load_recorded_gaps.<genexpr>" = 1
+"state.py#cast _section" = 1
+"state.py#cast _timestamps_to_json" = 1
+"state.py#cast from_json" = 1
+"verify.py#cast _missing_lost" = 2
+"verify.py#cast parse_verdict" = 3

@@ -16,3 +16,6 @@ exports = ["background.py", "background_plan.py", "coding_tools", "log_ring.py",
 
 [debt.ambient-read]
 "__init__.py#home pathlib.Path.home" = 1
+
+[debt.type-cast]
+"sessions.py#cast open_sessions" = 1

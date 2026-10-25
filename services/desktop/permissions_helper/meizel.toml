@@ -22,3 +22,8 @@ exports = ["launchd_job.py", "lifecycle.py", "onboarding.py", "signing_identity.
 "onboarding.py#platform sys.platform" = 1
 "onboarding.py#random uuid.uuid4" = 2
 "signing_identity.py#random secrets.token_urlsafe" = 1
+
+[debt.type-cast]
+"activation_plan.py#cast is_foreign_label_job" = 1
+"build_state.py#cast read_build_state" = 1
+"launchd_job.py#cast retirement_plist" = 3

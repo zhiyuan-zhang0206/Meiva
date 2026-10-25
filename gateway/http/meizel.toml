@@ -9,3 +9,6 @@ exports = ["auth", "config.py", "disconnect.py", "middleware", "model_catalog.py
 
 [debt.ambient-read]
 "config.py#home pathlib.Path.home" = 1
+
+[debt.type-cast]
+"model_catalog.py#cast request_default_model" = 1

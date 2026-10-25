@@ -23,3 +23,6 @@ exports = ["bootstrap.py", "harness_probe.py", "harness_rows.py", "machine_pause
 "router.py#clock datetime.datetime.now" = 1
 "server.py#pid os.getpid" = 1
 "status.py#clock datetime.datetime.now" = 3
+
+[debt.type-cast]
+"status.py#cast _plugin_stat_rows.<listcomp>" = 1

@@ -26,3 +26,6 @@ exports = ["bringup.py", "cluster_instance.py", "completion.py", "config.py", "h
 "pgbouncer.py#clock time.monotonic" = 2
 "stop_waits.py#clock time.monotonic" = 1
 "walg.py#clock datetime.datetime.now" = 1
+
+[debt.type-cast]
+"maintenance_stop.py#cast _redis_command" = 1

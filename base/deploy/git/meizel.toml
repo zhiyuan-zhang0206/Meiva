@@ -11,3 +11,6 @@ exports = ["check_git_hooks.py", "cluster_drift.py", "github_pr.py", "memory_rep
 "check_git_hooks.py#cwd pathlib.Path.cwd" = 1
 "check_git_hooks.py#home pathlib.Path.home" = 1
 "worktree_guard.py#pid os.getpid" = 1
+
+[debt.type-cast]
+"worktree_guard.py#cast _process_anchors" = 1

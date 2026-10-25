@@ -3,3 +3,6 @@ exports = ["anthropic_thinking.py", "openai_reasoning.py", "stop.py"]
 
 [uses]
 "tests" = ["anthropic_thinking.py", "openai_reasoning.py"]
+
+[debt.type-cast]
+"openai_reasoning.py#cast ReasoningContentChatModel._convert_chunk_to_generation_chunk" = 1

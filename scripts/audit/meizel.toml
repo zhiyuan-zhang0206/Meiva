@@ -29,3 +29,8 @@ purity = "strict-to-be"
 "impact_census.py#scripts/ci/test_impact.py" = 1
 "impact_census.py#scripts/ci/test_selector.py" = 1
 "schema_drift.py#base/config/__init__.py" = 1
+
+[debt.type-cast]
+"branch_protection.py#cast _list" = 1
+"branch_protection.py#cast _mapping" = 2
+"branch_protection.py#cast _string_set" = 1

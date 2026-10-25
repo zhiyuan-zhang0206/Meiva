@@ -20,3 +20,7 @@ exports = ["feishu.py", "feishu_poll_cursor.py", "feishu_ws_proxy.py", "run_plan
 
 [debt.third-party-patch]
 "feishu_ws_proxy.py#setattr lark_oapi.ws.client._ws_connect_kwargs" = 1
+
+[debt.type-cast]
+"telegram.py#cast TelegramAdapter._send_message" = 2
+"weixin.py#cast WeixinAdapter._post" = 1

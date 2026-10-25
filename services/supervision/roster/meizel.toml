@@ -21,3 +21,6 @@ exports = ["__main__.py", "composition.py", "healthz.py", "plugin_services.py", 
 [debt.ambient-read]
 "composition.py#settings base.config.settings" = 1
 "spec.py#settings base.config.settings" = 1
+
+[debt.type-cast]
+"plugin_services.py#cast _declared_plugin_services" = 2

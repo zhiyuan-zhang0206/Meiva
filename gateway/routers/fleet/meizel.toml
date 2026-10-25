@@ -5,3 +5,6 @@ exports = ["fleet_graph.py", "fleet_tokens.py"]
 
 [debt.ambient-read]
 "fleet_graph.py#clock datetime.datetime.now" = 3
+
+[debt.type-cast]
+"fleet_tokens.py#cast agent_tokens" = 1

@@ -15,3 +15,12 @@ exports = ["handoff_rules.py", "mapping.py", "session.py", "tests", "transport.p
 "mapping.py#home pathlib.Path.home" = 1
 "session.py#clock datetime.datetime.now" = 2
 "session.py#random uuid.uuid4" = 1
+
+[debt.type-cast]
+"mapping.py#cast _mapping" = 1
+"mapping.py#cast _read_transcript_rows" = 1
+"mapping.py#cast _transcript_tool_args" = 1
+"mapping.py#cast parse_result" = 1
+"session.py#cast AgySession._handle" = 1
+"session.py#cast AgySession._handle_result" = 1
+"transport.py#cast AgyTransport._pump_stdout" = 1

@@ -48,3 +48,10 @@ exports = ["auth.py", "tests", "transport.py"]
 "config.py#base/host/env/harness_binaries.py" = 1
 "session.py#base/lm/harness/process.py" = 1
 "session.py#base/lm/harness/registry.py" = 1
+
+[debt.type-cast]
+"mapping.py#cast _arguments" = 1
+"mapping.py#cast _changes" = 1
+"mapping.py#cast _paths" = 1
+"mapping.py#cast _reasoning" = 1
+"transport.py#cast as_object" = 1
