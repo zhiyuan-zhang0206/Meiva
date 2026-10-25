@@ -101,7 +101,12 @@ def ensure_pg_runtime(
     pgvector_artifacts: Mapping[str, tuple[str, str]] | None = None,
     open_url: UrlOpener | None = None,
 ) -> None:
-    if not runtime_binaries.vendored_pg_supported(system=system, machine=machine):
+    supported = (
+        runtime_binaries.vendored_pg_supported()
+        if (system, machine) == (None, None)
+        else runtime_binaries.vendored_pg_supported(system=system, machine=machine)
+    )
+    if not supported:
         server = installed_server(platform_bin_dir=platform_bin_dir, path_env=path_env)
         if server is None:
             raise RuntimeError(

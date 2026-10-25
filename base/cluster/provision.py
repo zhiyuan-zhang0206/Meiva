@@ -23,7 +23,8 @@ from collections.abc import Collection, Mapping, Sequence
 from pathlib import Path
 from typing import assert_never
 
-from base.cluster.authority.provision_plan import (
+from base.cluster.checkpoint_schema import CheckpointSchema, PostgresCheckpointSchema
+from base.cluster.dataplane.provision_plan import (
     CHECKPOINT_SCHEMA_MEIVA_MIGRATIONS,
     CHECKPOINT_SCHEMA_UPSTREAM_BASELINE_VERSION,
     CheckpointDependencyDriftError,
@@ -36,7 +37,6 @@ from base.cluster.authority.provision_plan import (
     verify_checkpoint_dependency_pinned,
     verify_checkpoint_schema_versions,
 )
-from base.cluster.checkpoint_schema import CheckpointSchema, PostgresCheckpointSchema
 from base.cluster.derive import swap_db
 from base.log import logger
 

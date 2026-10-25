@@ -1,4 +1,4 @@
-exports = ["direct_url.py", "pg_admin.py", "pg_foreground.py", "pg_runtime.py", "pg_stall_watchdog.py", "pg_throwaway_base.py", "pg_tools.py", "pooler.py", "redis_bridge.py", "runtime_binaries.py", "walg_binary.py"]
+exports = ["direct_url.py", "pg_admin.py", "pg_foreground.py", "pg_runtime.py", "pg_stall_watchdog.py", "pg_throwaway_base.py", "pg_tools.py", "pooler.py", "provision_plan.py", "redis_bridge.py", "runtime_binaries.py", "walg_binary.py"]
 
 [uses]
 "pg_foreground.py" = ["pg_plan.py"]
@@ -12,6 +12,7 @@ exports = ["direct_url.py", "pg_admin.py", "pg_foreground.py", "pg_runtime.py", 
 [purity]
 "__init__.py" = "strict"
 "pg_plan.py" = "strict"
+"provision_plan.py" = "strict"
 
 [debt.ambient-read]
 "pg_foreground.py#clock time.monotonic" = 2
