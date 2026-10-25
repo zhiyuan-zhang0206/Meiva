@@ -15,7 +15,7 @@ import secrets
 from dataclasses import asdict, dataclass, replace
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any, cast
+from typing import Any, TypeGuard
 
 from dotenv import dotenv_values
 
@@ -59,6 +59,18 @@ class IdentityInput:
     config_digest: str | None = None
 
 
+def _is_any_dict(value: object) -> TypeGuard[dict[str, Any]]:
+    return isinstance(value, dict)
+
+
+def _is_raw_dict(value: object) -> TypeGuard[dict[object, object]]:
+    return isinstance(value, dict)
+
+
+def _is_object_list(value: object) -> TypeGuard[list[object]]:
+    return isinstance(value, list)
+
+
 def _write(path: Path, data: dict[str, Any]) -> None:
     ensure_private_file(path)
     write_text_atomic(path, json.dumps(data, sort_keys=True) + "\n", mode=0o600, sync_parent=True)
@@ -69,11 +81,10 @@ def read_intent(home: Path) -> dict[str, Any] | None:
     if not path.exists():
         return None
     ensure_private_file(path)
-    data = json.loads(path.read_text())
+    data: object = json.loads(path.read_text())
     required = {"version", "home", "checkout", "roles", "config_digest", "phase", "record", "env"}
-    if not isinstance(data, dict):
+    if not _is_any_dict(data):
         raise TypeError("invalid start identity shape")
-    data = cast("dict[str, Any]", data)
     if set(data) != required:
         raise RuntimeError(
             f"invalid start identity shape: unexpected keys {sorted(set(data) - required)}, "
@@ -91,10 +102,15 @@ def _validate_intent_fields(data: dict[str, Any], home: Path) -> None:
     if not isinstance(data["checkout"], str) or not Path(data["checkout"]).is_absolute():
         raise RuntimeError("invalid start checkout")
     raw_roles = data["roles"]
-    if not isinstance(raw_roles, list):
+    if not _is_object_list(raw_roles):
         raise TypeError("invalid start capabilities")
-    roles = cast("list[Any]", raw_roles)
-    if not roles or any(r not in _CAPS for r in roles) or roles != sorted(set(roles)):
+    roles = [role for role in raw_roles if isinstance(role, str)]
+    if (
+        not raw_roles
+        or len(roles) != len(raw_roles)
+        or any(r not in _CAPS for r in roles)
+        or roles != sorted(set(roles))
+    ):
         raise RuntimeError("invalid start capabilities")
     _validate_intent_environment(data)
     _validate_intent_record(data["record"], home, gateway="gateway" in roles)
@@ -102,9 +118,9 @@ def _validate_intent_fields(data: dict[str, Any], home: Path) -> None:
 
 def _validate_intent_environment(data: dict[str, Any]) -> None:
     raw = data["env"]
-    if not isinstance(raw, dict):
+    if not _is_raw_dict(raw):
         raise TypeError("invalid start environment")
-    env = cast("dict[Any, Any]", raw)
+    env = raw
     if any(not isinstance(k, str) or not isinstance(v, str) for k, v in env.items()):
         raise RuntimeError("invalid start environment")
     digest = data["config_digest"]
@@ -116,20 +132,20 @@ def _validate_intent_environment(data: dict[str, Any]) -> None:
         raise RuntimeError("invalid first-start config digest")
 
 
-def _validate_intent_record(raw: Any, home: Path, *, gateway: bool) -> None:
+def _validate_intent_record(raw: object, home: Path, *, gateway: bool) -> None:
     if not gateway:
         if raw is not None:
             raise RuntimeError("remote unit cannot claim a gateway reservation")
         return
-    if not isinstance(raw, dict):
+    if not _is_any_dict(raw):
         raise TypeError("invalid start reservation")
-    rec = cast("dict[str, Any]", raw)
+    rec = raw
     if rec.get("gateway_home") != str(home):
         raise RuntimeError("start reservation belongs to another home")
     raw_ports = rec.get("ports")
-    if not isinstance(raw_ports, dict):
+    if not _is_any_dict(raw_ports):
         raise TypeError("invalid start port reservation")
-    ports = cast("dict[str, Any]", raw_ports)
+    ports = raw_ports
     if set(ports) != set(cluster.FIXED_PORTS):
         raise RuntimeError(
             "invalid start port reservation: slots differ from the fixed port table "
@@ -158,7 +174,7 @@ def needs_provision(home: Path) -> bool:
 
 def _new_record(inputs: IdentityInput) -> cluster.ClusterRecord:
     ports = cluster.new_home_ports()
-    if inputs.occupied_ports.intersection(cast("dict[str, int]", ports).values()):
+    if inputs.occupied_ports.intersection(port for port in ports.values() if isinstance(port, int)):
         raise RuntimeError("the home's ports are already occupied")
     return cluster.ClusterRecord(
         ports=ports,

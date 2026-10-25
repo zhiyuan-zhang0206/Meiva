@@ -252,9 +252,10 @@ def h_schedules_verify(args: argparse.Namespace) -> int:
             source = RowsFromGateway(gateway_access_from_boot(args.runtime.config))
         except Exception as exc:
             source = GatewayUnresolved(type(exc).__name__, str(exc))
+    clock = Clock.from_settings()
     return cmd_schedules_verify(
         source=source,
         notify=not args.no_notify,
-        now=datetime.now(Clock.from_settings().zone()),
+        now=clock.now().astimezone(clock.zone()),
         producer=args.producer,
     )

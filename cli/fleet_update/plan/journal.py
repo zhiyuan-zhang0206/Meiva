@@ -8,7 +8,11 @@ from __future__ import annotations
 
 import json
 from dataclasses import dataclass
-from typing import cast
+from typing import TypeGuard
+
+
+def _is_object_dict(value: object) -> TypeGuard[dict[str, object]]:
+    return isinstance(value, dict)
 
 
 @dataclass(frozen=True)
@@ -32,12 +36,12 @@ def parse_journal(text: str) -> Journal | None:
         parsed: object = json.loads(text)
     except ValueError:
         return None
-    if not isinstance(parsed, dict):
+    if not _is_object_dict(parsed):
         return None
-    record = cast("dict[str, object]", parsed)
+    record = parsed
     operation = record.get("operation")
     result = record.get("result")
-    rc = cast("dict[str, object]", result).get("rc") if isinstance(result, dict) else None
+    rc = result.get("rc") if _is_object_dict(result) else None
     return Journal(
         operation=operation if isinstance(operation, str) else None,
         complete=record.get("complete") is True,

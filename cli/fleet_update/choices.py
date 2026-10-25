@@ -15,7 +15,7 @@ import sys
 import tempfile
 from collections.abc import Callable, Mapping
 from pathlib import Path
-from typing import Any
+from typing import TypeGuard
 
 # meiva:note
 # The checkout this module runs from: the operator's code, which lists the services a stop can
@@ -132,14 +132,21 @@ def _parser() -> argparse.ArgumentParser:
     return parser
 
 
-def _value(args: argparse.Namespace, flag: str) -> Any:
+def _is_object_list(value: object) -> TypeGuard[list[object]]:
+    return isinstance(value, list)
+
+
+def _value(args: argparse.Namespace, flag: str) -> object:
     return getattr(args, flag[2:].replace("-", "_"))
 
 
 def _value_problems(args: argparse.Namespace, scope: str) -> list[str]:
     problems: list[str] = []
     for flag, kind in _HALF_VALUES[scope]:
-        if (value := _value(args, flag)) is None or (kind in (int, float) and value <= 0):
+        value = _value(args, flag)
+        if value is None or (
+            kind in (int, float) and isinstance(value, (int, float)) and value <= 0
+        ):
             problems.append(flag if value is None else f"{flag} {value}: not a number > 0")
     return problems
 
@@ -162,7 +169,9 @@ def _missing_choices(args: argparse.Namespace, env: Mapping[str, str]) -> list[s
 
 def forwarded_flags(args: argparse.Namespace, chosen: str) -> list[str]:
     if chosen in _NAMED:
-        return [f"{chosen} {shlex.quote(name)}" for name in _value(args, chosen)]
+        values = _value(args, chosen)
+        items = values if _is_object_list(values) else []
+        return [f"{chosen} {shlex.quote(str(name))}" for name in items]
     return [chosen]
 
 

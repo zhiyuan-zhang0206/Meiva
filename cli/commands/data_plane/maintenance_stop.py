@@ -19,7 +19,6 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
-import os
 import socket
 import subprocess
 import sys
@@ -27,7 +26,7 @@ import time
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from pathlib import Path
-from typing import assert_never, cast
+from typing import assert_never
 
 import psutil
 from redis.asyncio import Redis
@@ -40,6 +39,7 @@ from base.cluster import ownership
 from base.cluster import postgres as owned_postgres
 from base.cluster.dataplane import pooler as pooler_files
 from base.host.db_authority.delivery import read_pooler_admin
+from base.host.system.hostport import Host
 from base.log import logger
 from base.native_process.ownership import OwnedProcess, capture_tree
 from base.telemetry import EventPipeline
@@ -111,7 +111,7 @@ def _locator(process: psutil.Process, name: str) -> str | None:
 # read is not a candidate; one whose uid or attributing path cannot be read is reported as that.
 def look_at(process: psutil.Process, name: str) -> SeenProcess:
     try:
-        if process.uids().real != os.getuid():
+        if process.uids().real != Host.system().uid:
             return SeenProcess(process.pid, name, other_user=True, exiting=False, locator=None)
         exiting = process.status() in (psutil.STATUS_ZOMBIE, psutil.STATUS_DEAD)
     except psutil.AccessDenied:
@@ -184,11 +184,8 @@ def report_pooler_clients(identity: OwnedProcess, *, home: Path) -> str | None:
 # meiva:note
 # One Redis command bound by the stop's deadline. redis-py's command stubs are partially unknown;
 # the pyright directive says only that.
-async def _redis_command(client: Redis, deadline: float, *args: str) -> object:
-    return cast(
-        "object",
-        await asyncio.wait_for(client.execute_command(*args), remaining(deadline)),  # pyright: ignore[reportUnknownMemberType, reportUnknownArgumentType]
-    )
+async def _redis_command(client: Redis, deadline: float, *args: str) -> None:
+    await asyncio.wait_for(client.execute_command(*args), remaining(deadline))  # pyright: ignore[reportUnknownMemberType, reportUnknownArgumentType]
 
 
 # meiva:note

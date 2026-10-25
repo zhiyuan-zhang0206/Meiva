@@ -7,6 +7,7 @@ from dataclasses import replace
 from pathlib import Path
 
 import pytest
+from pydantic import ValidationError
 
 from base.cluster.machine.configured import ConfiguredMachineIdentity
 from base.config import ConfigBoot
@@ -151,16 +152,17 @@ def test_steps_read_their_context_owner_and_later_overlay(
 
 
 def test_context_read_failure_keeps_the_original_error(ctx: ConvergeCtx) -> None:
-    error = RuntimeError("context configuration is unavailable")
-
-    class FailedBoot(ConfigBoot):
-        def read_process_environment(self) -> None:
-            raise error
-
-    failing = replace(ctx, config=FailedBoot())
-    with pytest.raises(RuntimeError) as caught:
+    broken = ConfigBoot(
+        environment={
+            "MEIVA_HOME": str(ctx.meiva_home),
+            "MEIVA_CONFIG_FETCH": "skip",
+            "MEIVA_BROWSER_ENABLED": "not-a-boolean",
+        }
+    )
+    broken.prepare()
+    failing = replace(ctx, config=broken)
+    with pytest.raises(ValidationError, match="MEIVA_BROWSER_ENABLED"):
         cv.ensure_browser(failing)
-    assert caught.value is error
 
 
 def test_step_registered_agent_runner_only() -> None:

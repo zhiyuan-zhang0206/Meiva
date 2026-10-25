@@ -50,7 +50,7 @@ import tomllib
 from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, cast
+from typing import Any, TypeGuard
 
 from base.host.system.hostport import Host
 from cli.commands.extensions._pkg_source import AcquiredSource, SourcePathNotFoundError
@@ -68,6 +68,10 @@ def _machine_config_file() -> Path:
     return machine_config_path()
 
 
+def _is_any_dict(value: object) -> TypeGuard[dict[str, Any]]:
+    return isinstance(value, dict)
+
+
 def _read_machine_config(path: Path) -> dict[str, Any]:
     """Read `$MEIVA_HOME/mcp.json` as a dict ({} when absent).
 
@@ -76,11 +80,11 @@ def _read_machine_config(path: Path) -> dict[str, Any]:
     """
     if not path.is_file():
         return {}
-    data = json.loads(path.read_text(encoding="utf-8"))
-    if not isinstance(data, dict):
+    data: object = json.loads(path.read_text(encoding="utf-8"))
+    if not _is_any_dict(data):
         # ValueError (not TypeError): malformed config file content, surfaced to the user.
-        raise ValueError(f"{path} is not a JSON object (got {type(data).__name__})")  # noqa: TRY004
-    return cast(dict[str, Any], data)
+        raise ValueError(f"{path} is not a JSON object (got {type(data).__name__})")
+    return data
 
 
 def _write_machine_config(path: Path, data: dict[str, Any]) -> None:
@@ -303,8 +307,8 @@ def _landed_env(dest: Path, name: str) -> dict[str, str]:
         return {}
     servers = read_servers(mcp_json)
     env = servers.get(name, {}).get("env")
-    if isinstance(env, dict):
-        return dict(cast(dict[str, Any], env))
+    if _is_any_dict(env):
+        return dict(env)
     return {}
 
 
@@ -392,11 +396,14 @@ def _register_mcp(
     written (R5): the later `upgrade` path compares the on-disk tree against
     `installed_hash` to report local edits before replacing the copy.
     """
-    from datetime import UTC, datetime
-
+    from base.clock import SYSTEM_TIMERS, Clock, ClockConfig
     from base.packages.extensions import install_registry
 
-    now = datetime.now(UTC).isoformat(timespec="seconds")
+    now = (
+        Clock(ClockConfig("UTC", None, message_timestamp_weekday=False), timers=SYSTEM_TIMERS)
+        .now()
+        .isoformat(timespec="seconds")
+    )
     install_registry.register(
         install_registry.InstalledPackage(
             name=name,
@@ -467,8 +474,8 @@ def _detect_module(pkg_dir: Path, project: dict[str, Any], fallback_name: str) -
 
     # 2. [project.scripts] first entry -> module part before ':'
     scripts = project.get("scripts")
-    if isinstance(scripts, dict) and scripts:
-        first_value = next(iter(cast(dict[str, Any], scripts).values()))
+    if _is_any_dict(scripts) and scripts:
+        first_value = next(iter(scripts.values()))
         if isinstance(first_value, str) and ":" in first_value:
             module = first_value.split(":", 1)[0].strip()
             if module:
@@ -510,9 +517,8 @@ def _auto_detect_mcp(pkg_dir: Path) -> tuple[str, dict[str, Any]]:
         raise ValueError(f"cannot parse pyproject.toml: {e}") from e
 
     project = data.get("project")
-    if not isinstance(project, dict):
-        raise ValueError("pyproject.toml [project] section is missing or not a table")  # noqa: TRY004
-    project = cast(dict[str, Any], project)
+    if not _is_any_dict(project):
+        raise ValueError("pyproject.toml [project] section is missing or not a table")
     raw_name = project.get("name", "")
     if not raw_name:
         raise ValueError("pyproject.toml [project] has no 'name' field")
@@ -755,9 +761,13 @@ def cmd_mcp_upgrade(name: str, *, uv: UvBuild) -> int:
             print(f"[meiva mcp upgrade] uv sync failed: {e}", file=sys.stderr)
             return 1
 
-        from datetime import UTC, datetime
+        from base.clock import SYSTEM_TIMERS, Clock, ClockConfig
 
-        pkg.updated_at = datetime.now(UTC).isoformat(timespec="seconds")
+        pkg.updated_at = (
+            Clock(ClockConfig("UTC", None, message_timestamp_weekday=False), timers=SYSTEM_TIMERS)
+            .now()
+            .isoformat(timespec="seconds")
+        )
         pkg.installed_hash = install_registry.tree_hash(dest)
         install_registry.register(pkg)
         print(f"[meiva mcp upgrade] re-fetched '{name}' from {pkg.source}.")

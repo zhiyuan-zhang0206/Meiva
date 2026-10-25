@@ -12,6 +12,7 @@ import time
 from dataclasses import dataclass
 from pathlib import Path
 
+from base.clock import SYSTEM_TIMERS
 from base.cluster import port_preflight
 from base.host.private_storage import write_private_bytes
 from base.native_process.os_platform import LockTimeoutError, file_lock
@@ -111,10 +112,10 @@ class OwnedPooler:
 
     def _wait(self, deadline: float) -> bool:
         while self.identity.live():
-            delay = poll_delay(time_left(deadline, time.monotonic()), _POLL_INTERVAL_S)
+            delay = poll_delay(time_left(deadline, SYSTEM_TIMERS.monotonic()), _POLL_INTERVAL_S)
             if delay is None:
                 return False
-            time.sleep(delay)
+            SYSTEM_TIMERS.sleep(delay)
         return True
 
     # meiva:note

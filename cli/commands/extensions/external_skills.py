@@ -12,7 +12,7 @@ import sys
 import uuid
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, cast
+from typing import Any
 
 from base.host.system.hostport import Host
 from base.native_process.os_platform import LockTimeoutError, file_lock
@@ -193,7 +193,7 @@ def _abandon_transaction(
     skill_name: str = SKILL_NAME,
 ) -> bool:
     """Move every remaining residue pointer to durable cleanup state."""
-    transaction = cast(dict[str, Any] | None, ledger["transaction"])
+    transaction: dict[str, Any] | None = ledger["transaction"]
     if transaction is None:
         return True
     generation_id = transaction["generation_id"]
@@ -278,7 +278,7 @@ def _activate(
     skills_root: Path,
     target: Path,
 ) -> str:
-    transaction = cast(dict[str, Any], ledger["transaction"])
+    transaction: dict[str, Any] = ledger["transaction"]
     generation_id = transaction["generation_id"]
     stage = transaction_path(skills_root, "stage", generation_id, skill_name=target.name)
     previous = transaction_path(skills_root, "previous", generation_id, skill_name=target.name)
@@ -372,19 +372,17 @@ def _ledger_for(ledger_path: Path, client_key: str, target: Path) -> dict[str, A
     if ledger is None:
         if exists(target):
             raise ClientConflictError("unmanaged target was preserved")
-        ledger = cast(
-            dict[str, Any],
-            {
-                "client": client_key,
-                "format": FORMAT,
-                "garbage": [],
-                "installation_id": uuid.uuid4().hex,
-                "installed": None,
-                "retained": [],
-                "transaction": None,
-            },
-        )
-        write_ledger(ledger_path, ledger)
+        fresh: dict[str, Any] = {
+            "client": client_key,
+            "format": FORMAT,
+            "garbage": [],
+            "installation_id": uuid.uuid4().hex,
+            "installed": None,
+            "retained": [],
+            "transaction": None,
+        }
+        write_ledger(ledger_path, fresh)
+        return fresh
     return ledger
 
 

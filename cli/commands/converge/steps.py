@@ -54,13 +54,26 @@ def ensure_meiva_home_dirs(ctx: ConvergeCtx) -> None:
     ensure_private_file(marker)
 
 
-def ensure_pg_binaries_step(ctx: ConvergeCtx) -> None:
+def ensure_pg_binaries_step(
+    ctx: ConvergeCtx,
+    *,
+    system: str | None = None,
+    machine: str | None = None,
+    platform_bin_dir: Path | None = None,
+    path_env: str | None = None,
+) -> None:
     """Prepare the selected PostgreSQL 17 runtime and its pgvector extension."""
     if ctx.read_config().view.data_plane.is_remote:
         return
     from base.cluster.dataplane.pg_runtime import ensure_pg_runtime
 
-    ensure_pg_runtime()
+    ensure_pg_runtime(
+        home=ctx.meiva_home,
+        system=system,
+        machine=machine,
+        platform_bin_dir=platform_bin_dir,
+        path_env=path_env,
+    )
 
 
 # meiva:note

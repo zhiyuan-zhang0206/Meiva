@@ -10,7 +10,7 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 from dataclasses import dataclass
-from typing import cast
+from typing import TypeGuard
 
 from cli.commands.observability.plans.lgtm.dashboard_plan import (
     DASHBOARD_FOLDER,
@@ -36,13 +36,21 @@ class GrafanaReply:
     payload: object
 
 
+def _is_object_dict(value: object) -> TypeGuard[dict[str, object]]:
+    return isinstance(value, dict)
+
+
+def _is_object_list(value: object) -> TypeGuard[list[object]]:
+    return isinstance(value, list)
+
+
 def _object(value: object) -> dict[str, object]:
-    return cast("dict[str, object]", value) if isinstance(value, dict) else {}
+    return value if _is_object_dict(value) else {}
 
 
 def _objects(value: object) -> list[dict[str, object]]:
-    items = cast("list[object]", value) if isinstance(value, list) else []
-    return [cast("dict[str, object]", item) for item in items if isinstance(item, dict)]
+    items = value if _is_object_list(value) else []
+    return [item for item in items if _is_object_dict(item)]
 
 
 # meiva:note

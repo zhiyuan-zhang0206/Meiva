@@ -2,16 +2,18 @@ from __future__ import annotations
 
 import argparse
 import json
+from collections.abc import Mapping
 from datetime import UTC, datetime
+from pathlib import Path
 from typing import Any
 
 import pytest
 
 from base.host.permissions_helper.grants import checklist, gate
 from base.host.permissions_helper.grants.catalog import PING_KEYS, PREFLIGHT_SERVICES, Grant
-from base.host.permissions_helper.grants.probe import ProbeResult
+from base.host.permissions_helper.grants.probe import ProbeResult, RequestGrantsResult
 from cli.commands import permissions as cmd
-from services.desktop.permissions_helper.onboarding import GateService
+from services.desktop.permissions_helper.onboarding import GateHost
 
 NOW = datetime(2026, 10, 17, 9, 0, tzinfo=UTC)
 
@@ -37,62 +39,113 @@ def _args(**kwargs: Any) -> argparse.Namespace:
     return argparse.Namespace(**base)
 
 
-class FakeService(GateService):
-    def __init__(self, report: gate.GateReport, *, restart: str = "") -> None:
-        self._report = report
-        self._restart = restart
-        self.calls: list[tuple[str, dict[str, object]]] = []
+class FakeHelper:
+    def __init__(self, **overrides: Grant) -> None:
+        self._codes = dict.fromkeys(PREFLIGHT_SERVICES, 0)
+        self._booleans = dict.fromkeys(PING_KEYS, True)
+        for item_id, grant in overrides.items():
+            item = gate.item_for(item_id)
+            if item.ping_key:
+                self._booleans[item.ping_key] = grant is Grant.GRANTED
+            code = {Grant.GRANTED: 0, Grant.DENIED: 1, Grant.NOT_DETERMINED: 2}[grant]
+            for service in item.services:
+                self._codes[service] = code
+        self.requests = 0
 
-    def check(self) -> gate.GateReport:
-        self.calls.append(("check", {}))
-        return self._report
+    def ping(self) -> Mapping[str, object]:
+        return {
+            "pong": True,
+            "request_grants_v1": True,
+            **self._booleans,
+        }
 
-    def onboard(self, **kwargs: object) -> gate.GateReport:
-        self.calls.append(("onboard", kwargs))
-        return self._report
+    def request_grants(self) -> RequestGrantsResult:
+        self.requests += 1
+        self._codes = dict.fromkeys(PREFLIGHT_SERVICES, 0)
+        self._booleans = dict.fromkeys(PING_KEYS, True)
+        return {
+            "screen_recording": True,
+            "accessibility": True,
+        }
 
-    def defer(self) -> None:
-        self.calls.append(("defer", {}))
+    def spawn_process(
+        self,
+        name: str,
+        argv: list[str],
+        env: dict[str, str],
+        cwd: str,
+        stdout: str,
+        stderr: str,
+    ) -> Mapping[str, object]:
+        services = json.loads(argv[2])
+        Path(argv[3]).write_text(
+            json.dumps({service: {"code": self._codes[service]} for service in services})
+        )
+        return {"pid": 1, "reused": False}
 
-    def restart_helper(self) -> str:
-        self.calls.append(("restart_helper", {}))
-        return self._restart
+
+def _host(tmp_path: Path, **overrides: Grant) -> tuple[GateHost, FakeHelper]:
+    helper = FakeHelper(**overrides)
+    seat = GateHost(
+        client=helper,
+        env={},
+        workdir=tmp_path / "scratch",
+        home=tmp_path,
+        record_path=tmp_path / gate.RECORD_NAME,
+        platform="darwin",
+    )
+    return seat, helper
 
 
 def test_status_exits_nonzero_while_something_is_missing(
+    tmp_path: Path,
     capsys: pytest.CaptureFixture[str],
 ) -> None:
-    service = FakeService(_report(**{"screen-recording": Grant.DENIED}))
-    assert cmd.run(_args(), service) == 1
+    seat, _ = _host(tmp_path, **{"screen-recording": Grant.DENIED})
+    assert cmd.run(_args(), seat, now=NOW) == 1
     assert "Screen Recording" in capsys.readouterr().out
 
 
-def test_status_exits_zero_on_a_complete_host(capsys: pytest.CaptureFixture[str]) -> None:
-    assert cmd.run(_args(), FakeService(_report())) == 0
+def test_status_exits_zero_on_a_complete_host(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    seat, _ = _host(tmp_path)
+    assert cmd.run(_args(), seat, now=NOW) == 0
     assert "Every required authorization is granted." in capsys.readouterr().out
 
 
-def test_json_output_is_the_checklist_payload(capsys: pytest.CaptureFixture[str]) -> None:
+def test_json_output_is_the_checklist_payload(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
     report = _report(**{"desktop-folder": Grant.NOT_DETERMINED})
-    cmd.run(_args(json=True), FakeService(report))
+    seat, _ = _host(tmp_path, **{"desktop-folder": Grant.NOT_DETERMINED})
+    cmd.run(_args(json=True), seat, now=NOW)
     payload = json.loads(capsys.readouterr().out)
     assert payload == checklist.payload(report)
     assert payload["required_missing"] == 1
 
 
-def test_the_cli_onboard_is_the_manual_pass(capsys: pytest.CaptureFixture[str]) -> None:
-    service = FakeService(_report())
-    assert cmd.run(_args(permissions_cmd="onboard"), service) == 0
-    assert service.calls[0][0] == "onboard"
-    assert service.calls[0][1]["automatic"] is False
+def test_the_cli_onboard_is_the_manual_pass(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    seat, helper = _host(tmp_path, **{"screen-recording": Grant.DENIED})
+    assert cmd.run(_args(permissions_cmd="onboard"), seat, now=NOW) == 0
+    assert helper.requests == 1
+    assert "Every required authorization is granted." in capsys.readouterr().out
 
 
-def test_defer_says_plainly_that_nothing_was_granted(capsys: pytest.CaptureFixture[str]) -> None:
-    assert cmd.run(_args(permissions_cmd="defer"), FakeService(_report())) == 0
+def test_defer_says_plainly_that_nothing_was_granted(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    seat, _ = _host(tmp_path)
+    assert cmd.run(_args(permissions_cmd="defer"), seat, now=NOW) == 0
     assert "Nothing is granted by this" in capsys.readouterr().out
 
 
 def test_restart_helper_prints_the_operator_sentence(capsys: pytest.CaptureFixture[str]) -> None:
-    service = FakeService(_report(), restart="restarted the permissions helper")
-    assert cmd.run(_args(permissions_cmd="restart-helper"), service) == 0
-    assert "restarted" in capsys.readouterr().out
+    assert cmd.run(_args(permissions_cmd="restart-helper")) == 0
+    assert "meiva stop" in capsys.readouterr().out

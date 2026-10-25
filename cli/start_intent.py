@@ -78,14 +78,21 @@ def admitted_home(home: Path) -> Generator[None]:
 # Do what a start that exited with `result` owes the boot unit (`plan_after_start`).
 #
 # The imports are lazy: they run after the lifecycle, when runtime Settings exist.
-def finish_start(result: int, *, helper: HelperFactory | None, host: Host, home: Path) -> None:
+def finish_start(
+    result: int,
+    *,
+    helper: HelperFactory | None,
+    host: Host,
+    home: Path,
+    proc_root: Path = Path("/proc"),
+) -> None:
     step = plan_after_start(result)
     if step is None:
         return
     from cli.commands.lifecycle.root_driver import complete_boot_start
 
     try:
-        complete_boot_start(helper=helper, host=host, home=home)
+        complete_boot_start(helper=helper, host=host, home=home, proc_root=proc_root)
     except (RuntimeError, OSError, TimeoutError):
         from base.deploy.lifecycle.start_serving import clear_serving
 

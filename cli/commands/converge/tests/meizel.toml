@@ -2,14 +2,3 @@ exports = ["external_skills.py"]
 
 [uses]
 "test_packages_job_converge.py" = ["child_packages_job_gate.py"]
-
-[debt.first-party-patch]
-"test_pg_runtime_converge.py#monkeypatch.setattr base.cluster.dataplane.pg_runtime.ensure_pg_runtime" = 2
-"test_pg_runtime_converge.py#monkeypatch.setattr base.cluster.dataplane.pg_runtime.shutil.which" = 1
-"test_pg_runtime_converge.py#monkeypatch.setattr base.cluster.dataplane.runtime_binaries.ensure_pg_binaries" = 1
-"test_pg_runtime_converge.py#monkeypatch.setattr base.cluster.dataplane.runtime_binaries.ensure_pgvector" = 1
-"test_pg_runtime_converge.py#monkeypatch.setattr base.cluster.dataplane.runtime_binaries.vendored_pg_bin_dir" = 1
-"test_pg_runtime_converge.py#monkeypatch.setattr base.cluster.dataplane.runtime_binaries.vendored_pg_supported" = 1
-
-[debt.unresolved-patch]
-"test_pg_runtime_converge.py#monkeypatch.setattr type(pg_runtime.get_backend()).pg_binary_path" = 1

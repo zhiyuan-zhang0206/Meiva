@@ -7,11 +7,9 @@ import os
 import socket
 import subprocess
 import sys
-from collections.abc import Iterator
 from dataclasses import replace
 from pathlib import Path
 from typing import Any
-from unittest.mock import patch
 from urllib.parse import urlsplit
 
 import pytest
@@ -20,11 +18,10 @@ from dotenv import dotenv_values
 from base import cluster
 from base.deploy.lifecycle import start_serving
 from base.host.net.tests.local_http import closed_port_url
+from base.host.system.tests.fake_commands import LINUX_X86, fake_host
 from cli import init_intent, start_intent
 from cli import start_identity as identity
 from cli.commands.cluster.tests.gateway_server import Reply, serving
-from cli.commands.lifecycle import root_driver
-from cli.database.runtime import CommandRuntime
 from cli.database.tests.cli_tests import operator_database as operator_database
 from cli.database.tests.command_inputs import command_runtime as command_runtime
 from cli.start_runtime import HomeSite
@@ -37,13 +34,6 @@ from cli.tests.bootstrap.init_identity import (
 )
 
 _ADMITTED_HOME = Path(__file__).with_name("child_admitted_home.py")
-
-
-@pytest.fixture(autouse=True)
-def _isolate_start_environment() -> Iterator[None]:
-    """Real start clears derived keys; that process-local effect ends with its test."""
-    with patch.dict(os.environ):
-        yield
 
 
 @pytest.fixture
@@ -636,26 +626,26 @@ def test_failed_boot_publication_clears_serving_and_refuses_success(
     inputs: identity.IdentityInput,
     site: HomeSite,
     caller: CallerHost,
-    monkeypatch: pytest.MonkeyPatch,
-    command_runtime: CommandRuntime,
+    tmp_path: Path,
 ) -> None:
     prepare_init_identity(_single_box(), site, caller)
-
-    def fail(**_kw: object) -> None:
-        raise RuntimeError("manager refused native custody")
-
-    # meiva:note
-    # The boot unit's manager is the one fault a real resource cannot produce here: the
-    # hand-off asks the process's own systemd cgroup.
-    monkeypatch.setattr(root_driver, "complete_boot_start", fail)
-    with start_intent.admitted_home(inputs.home):
-        start_serving.begin_start(inputs.home)
-        assert start_serving.state_path(inputs.home).exists()
-        with pytest.raises(RuntimeError, match="refused native custody"):
-            start_intent.finish_start(0, helper=None, host=command_runtime.host, home=inputs.home)
-        assert not start_serving.state_path(inputs.home).exists(), (
-            "the start no longer reads as serving"
+    proc = tmp_path / "proc"
+    cgroup = proc / str(os.getpid()) / "cgroup"
+    cgroup.parent.mkdir(parents=True)
+    cgroup.write_text("0::/system.slice/meiva-boot.service\n")
+    start_serving.begin_start(inputs.home)
+    assert start_serving.state_path(inputs.home).exists()
+    with pytest.raises(RuntimeError, match="unobservable root"):
+        start_intent.finish_start(
+            0,
+            helper=None,
+            host=fake_host(platform=LINUX_X86),
+            home=inputs.home,
+            proc_root=proc,
         )
+    assert not start_serving.state_path(inputs.home).exists(), (
+        "the start no longer reads as serving"
+    )
 
 
 def _initialized_gateway_home(inputs: identity.IdentityInput) -> Path:

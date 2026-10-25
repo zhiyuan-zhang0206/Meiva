@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import json
 from dataclasses import dataclass
-from typing import cast
+from typing import TypeGuard
 
 __all__ = ["NativeBirth", "intent_names", "native_birth", "render_intent"]
 
@@ -44,6 +44,10 @@ def _number(value: object) -> bool:
     return type(value) in (int, float)
 
 
+def _is_object_dict(value: object) -> TypeGuard[dict[str, object]]:
+    return isinstance(value, dict)
+
+
 # meiva:note
 # Whether the intent file's text names exactly `birth`.
 #
@@ -55,7 +59,7 @@ def intent_names(text: str, birth: NativeBirth) -> bool:
         raw: object = json.loads(text)
     except ValueError:
         raise RuntimeError(_REFUSAL) from None
-    value = cast("dict[str, object]", raw) if isinstance(raw, dict) else None
+    value = raw if _is_object_dict(raw) else None
     if value is None or sorted(value) != sorted(_KEYS) or type(value["pid"]) is not int:
         raise RuntimeError(_REFUSAL)
     recorded_birth, recorded_ticks = value["birth"], value["starttime"]

@@ -9,7 +9,7 @@ from typing import Any
 import pytest
 
 from base.agents.context.clients import DatabaseFactory
-from base.cluster.dataplane import pg_runtime, runtime_binaries
+from base.cluster.dataplane import pg_runtime
 from base.cluster.machine.configured import ConfiguredMachineIdentity
 from base.config import ConfigBoot
 from base.host.system.tests.fake_commands import fake_host
@@ -24,7 +24,7 @@ from cli.database.tests.command_inputs import command_runtime as command_runtime
 
 
 @pytest.fixture
-def installed(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
+def installed(tmp_path: Path) -> Path:
     bindir = tmp_path / "pg17" / "bin"
     bindir.mkdir(parents=True)
     extension = bindir.parent / "share" / "extension"
@@ -47,26 +47,6 @@ def installed(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
         tool = bindir / name
         tool.write_text(body)
         tool.chmod(0o700)
-    monkeypatch.setattr(runtime_binaries, "vendored_pg_bin_dir", lambda: None)
-    monkeypatch.setattr(runtime_binaries, "vendored_pg_supported", lambda: False)
-
-    def installed_tool(name: str) -> Path:
-        return bindir / name
-
-    def no_path_tool(_name: str) -> None:
-        return None
-
-    def as_method(_self: object, name: str) -> Path:
-        return installed_tool(name)
-
-    monkeypatch.setattr(type(pg_runtime.get_backend()), "pg_binary_path", as_method)
-    monkeypatch.setattr(pg_runtime.shutil, "which", no_path_tool)
-
-    def forbid_download() -> Path:
-        pytest.fail("An installed runtime must not trigger vendored downloads")
-
-    monkeypatch.setattr(runtime_binaries, "ensure_pg_binaries", forbid_download)
-    monkeypatch.setattr(runtime_binaries, "ensure_pgvector", forbid_download)
     return bindir
 
 
@@ -93,26 +73,33 @@ def test_start_converge_accepts_installed_pg17_where_no_artifact_exists(
             ),
             services=frozenset(),
             timers=command_runtime.timers,
-        )
+        ),
+        system="FreeBSD",
+        machine="riscv64",
+        platform_bin_dir=installed,
+        path_env="",
     )
-    assert pg_runtime.pg_tool("postgres") == installed / "postgres"
+    assert (
+        pg_runtime.pg_tool(
+            "postgres",
+            home=installed.parent,
+            platform_bin_dir=installed,
+            path_env="",
+        )
+        == installed / "postgres"
+    )
 
 
 def test_remote_managed_gateway_does_not_require_local_server_or_extension(
     tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
     operator_database: Callable[[], Any],
     operator_pipeline: Callable[[], EventPipeline],
     *,
     command_runtime: CommandRuntime,
 ) -> None:
-    def forbidden() -> None:
-        pytest.fail("Remote-managed storage must not prepare a local server runtime")
-
     config = command_runtime.config
     config.set_field("db_url", "postgresql://test:test@192.0.2.10:5433/meiva")
     config.set_field("redis_url", "redis://127.0.0.1:6380/0")
-    monkeypatch.setattr(pg_runtime, "ensure_pg_runtime", forbidden)
     ensure_pg_binaries_step(
         ConvergeCtx(
             tmp_path,
@@ -127,20 +114,22 @@ def test_remote_managed_gateway_does_not_require_local_server_or_extension(
             session=UserSession(user_home=tmp_path, login_shell="/bin/zsh", interactive=False),
             services=frozenset(),
             timers=command_runtime.timers,
-        )
+        ),
+        system="FreeBSD",
+        machine="riscv64",
+        platform_bin_dir=tmp_path / "missing",
+        path_env="",
     )
 
 
 def test_pg_admission_uses_each_owners_live_remote_verdict(
     tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
     operator_database: DatabaseFactory,
     operator_pipeline: Callable[[], EventPipeline],
     *,
     command_runtime: CommandRuntime,
 ) -> None:
-    calls: list[str] = []
-    monkeypatch.setattr(pg_runtime, "ensure_pg_runtime", lambda: calls.append("local"))
+    missing = tmp_path / "missing"
     local, remote = ConfigBoot(), ConfigBoot()
     contexts: list[ConvergeCtx] = []
     for config, host in ((local, "127.0.0.1"), (remote, "192.0.2.10")):
@@ -162,12 +151,36 @@ def test_pg_admission_uses_each_owners_live_remote_verdict(
                 timers=command_runtime.timers,
             )
         )
-    ensure_pg_binaries_step(contexts[0])
-    ensure_pg_binaries_step(contexts[1])
-    assert calls == ["local"]
+    with pytest.raises(RuntimeError, match="no vendored Postgres"):
+        ensure_pg_binaries_step(
+            contexts[0],
+            system="FreeBSD",
+            machine="riscv64",
+            platform_bin_dir=missing,
+            path_env="",
+        )
+    ensure_pg_binaries_step(
+        contexts[1],
+        system="FreeBSD",
+        machine="riscv64",
+        platform_bin_dir=missing,
+        path_env="",
+    )
 
     local.set_field("db_url", "postgresql://test:test@192.0.2.10:5433/meiva")
     remote.set_field("db_url", "postgresql://test:test@127.0.0.1:5433/meiva")
-    ensure_pg_binaries_step(contexts[0])
-    ensure_pg_binaries_step(contexts[1])
-    assert calls == ["local", "local"]
+    ensure_pg_binaries_step(
+        contexts[0],
+        system="FreeBSD",
+        machine="riscv64",
+        platform_bin_dir=missing,
+        path_env="",
+    )
+    with pytest.raises(RuntimeError, match="no vendored Postgres"):
+        ensure_pg_binaries_step(
+            contexts[1],
+            system="FreeBSD",
+            machine="riscv64",
+            platform_bin_dir=missing,
+            path_env="",
+        )

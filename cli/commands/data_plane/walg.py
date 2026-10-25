@@ -5,9 +5,13 @@ from __future__ import annotations
 
 import sys
 from collections.abc import Callable
-from datetime import UTC, datetime
+from contextlib import AbstractContextManager
 from pathlib import Path
+from typing import Any
 
+import psycopg
+
+from base.clock import SYSTEM_TIMERS, Clock, ClockConfig
 from base.cluster.dataplane import walg_binary
 from base.cluster.dataplane.pg_throwaway_base import ThrowawayConfig, configured_base
 from base.config import ConfigBoot
@@ -53,7 +57,10 @@ def cmd_walg_check(plane: DataPlaneConfig) -> int:
 # meiva:note
 # One output line with a UTC timestamp: the OS job's output is appended to a log file.
 def _stamped(line: str) -> None:
-    print(f"{datetime.now(UTC):%Y-%m-%dT%H:%M:%SZ} {line}", flush=True)
+    now = Clock(
+        ClockConfig("UTC", None, message_timestamp_weekday=False), timers=SYSTEM_TIMERS
+    ).now()
+    print(f"{now:%Y-%m-%dT%H:%M:%SZ} {line}", flush=True)
 
 
 # meiva:note
@@ -245,12 +252,15 @@ def cmd_walg_status(plane: DataPlaneConfig) -> int:
 # A retained postmaster is only reloaded, so it keeps the launch arguments of its previous
 # start: `archive_mode` and the archive command take effect at the next new launch. A warning,
 # not a failure: the health probe is the alert.
-def warn_archive_inactive(walg_config_file: Path | None) -> None:
+def warn_archive_inactive_on(
+    walg_config_file: Path | None,
+    admin: AbstractContextManager[psycopg.Connection[Any]],
+) -> None:
     expected = expected_archive(path=walg_config_file)
     if expected is None:
         return
     try:
-        with probe.admin_connection() as conn:
+        with admin as conn:
             state = probe.read_archiver_state(conn)
     except Exception as exc:
         print(f"  ! WAL archiving state not read ({type(exc).__name__}: {exc})", file=sys.stderr)
@@ -262,3 +272,9 @@ def warn_archive_inactive(walg_config_file: Path | None) -> None:
             "`meiva stop` and `meiva start` (each with its explicit choices; see their `--help`) to activate it",
             file=sys.stderr,
         )
+
+
+def warn_archive_inactive(walg_config_file: Path | None) -> None:
+    if expected_archive(path=walg_config_file) is None:
+        return
+    warn_archive_inactive_on(walg_config_file, probe.admin_connection())

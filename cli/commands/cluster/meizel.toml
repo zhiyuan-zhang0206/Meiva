@@ -11,6 +11,3 @@ exports = ["control.py", "cron.py", "health.py", "home.py", "plans", "tests", "u
 
 [purity]
 "__init__.py" = "strict"
-
-[debt.type-cast]
-"_provider_guard.py#cast fetch_balance" = 1

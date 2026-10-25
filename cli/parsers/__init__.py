@@ -23,7 +23,7 @@ from __future__ import annotations
 
 import argparse
 import subprocess
-from typing import cast
+from typing import TypeGuard
 
 from cli.commands.agents.impersonation_parsers import add_impersonation_parser
 from cli.commands.agents.parsers import add_agents_parser
@@ -111,6 +111,12 @@ def parse_args(
     return build_parser(retained_children=retained_children).parse_args(argv)
 
 
+def _is_subparsers_action(
+    action: argparse.Action,
+) -> TypeGuard[argparse._SubParsersAction[argparse.ArgumentParser]]:
+    return isinstance(action, argparse._SubParsersAction)
+
+
 def command_options() -> dict[tuple[str, ...], set[str]]:
     # meiva:note
     # Long options accepted at each command path, including the `meiva` root. Aliases have their
@@ -129,9 +135,6 @@ def command_options() -> dict[tuple[str, ...], set[str]]:
             if option.startswith("--")
         }
         for action in parser._actions:
-            if isinstance(action, argparse._SubParsersAction):
-                subcommands = cast("argparse._SubParsersAction[argparse.ArgumentParser]", action)
-                pending.extend(
-                    ((*path, name), child) for name, child in subcommands.choices.items()
-                )
+            if _is_subparsers_action(action):
+                pending.extend(((*path, name), child) for name, child in action.choices.items())
     return by_path

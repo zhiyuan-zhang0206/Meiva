@@ -24,8 +24,3 @@ exports = ["__init__.py", "browser.py", "choices.py", "closure_plan.py", "eviden
 "render.py" = "strict"
 "restart_plan.py" = "strict"
 "steps.py" = "strict"
-
-[debt.ambient-read]
-"execute.py#clock datetime.datetime.now" = 1
-"shell_sessions.py#clock datetime.datetime.now" = 1
-"shell_sessions.py#clock time.monotonic" = 1

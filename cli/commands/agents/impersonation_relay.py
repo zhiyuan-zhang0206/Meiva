@@ -20,7 +20,7 @@ import subprocess
 import sys
 from collections.abc import Coroutine
 from dataclasses import dataclass
-from datetime import UTC, datetime
+from datetime import datetime
 from typing import Any, TextIO, assert_never
 from uuid import UUID
 
@@ -38,6 +38,7 @@ from base.agents.impersonation.delivery import reserve_delivery
 from base.agents.impersonation.history import resolve
 from base.agents.impersonation.status import OPEN, ImpersonationStatus
 from base.agents.impersonation.terminal_notices import notice_text
+from base.clock import SYSTEM_TIMERS, Clock, ClockConfig
 from base.cluster.machine import MachineIdentityReader
 from base.db import Database
 from base.events.live.bus import EventBus
@@ -193,7 +194,10 @@ def announce_end(snapshot: InboxSnapshot, ref: LeaseRef, adapter: RelayAdapter) 
 
 
 def _clock() -> ClockReading:
-    return ClockReading(monotonic_now=asyncio.get_running_loop().time(), wall_now=datetime.now(UTC))
+    wall_now = Clock(
+        ClockConfig("UTC", None, message_timestamp_weekday=False), timers=SYSTEM_TIMERS
+    ).now()
+    return ClockReading(monotonic_now=asyncio.get_running_loop().time(), wall_now=wall_now)
 
 
 # meiva:note

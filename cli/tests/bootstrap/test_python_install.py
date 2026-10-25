@@ -22,8 +22,7 @@ def python_mirror(tmp_path: Path) -> Iterator[PythonMirror]:
     yield from build_python_mirror(tmp_path)
 
 
-def _settings(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> tuple[Path, dict[str, str]]:
-    monkeypatch.setattr(_python_index.sys, "platform", "linux")
+def _settings(tmp_path: Path) -> tuple[Path, dict[str, str]]:
     repo = tmp_path / "repo"
     repo.mkdir()
     env = {"HOME": str(tmp_path / "home"), "XDG_CONFIG_DIRS": str(tmp_path / "global")}
@@ -37,62 +36,58 @@ def _pip_file(env: dict[str, str], content: str) -> Path:
     return path
 
 
-def test_machine_pip_index_is_reused_without_rewriting_config(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    repo, env = _settings(tmp_path, monkeypatch)
+def test_machine_pip_index_is_reused_without_rewriting_config(tmp_path: Path) -> None:
+    repo, env = _settings(tmp_path)
     path = _pip_file(env, "[global]\nindex-url = https://mirror.example/simple\n")
     original = path.read_bytes()
-    assert _python_index.python_index(repo, env) == "https://mirror.example/simple"
+    assert (
+        _python_index.python_index(repo, env, platform="linux") == "https://mirror.example/simple"
+    )
     assert path.read_bytes() == original
 
 
-def test_uv_profile_and_pip_environment_precede_pip_machine_file(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    repo, env = _settings(tmp_path, monkeypatch)
+def test_uv_profile_and_pip_environment_precede_pip_machine_file(tmp_path: Path) -> None:
+    repo, env = _settings(tmp_path)
     _pip_file(env, "[global]\nindex-url = https://machine.example/simple\n")
     env["PIP_INDEX_URL"] = "https://pip-env.example/simple"
-    assert _python_index.python_index(repo, env) == env["PIP_INDEX_URL"]
+    assert _python_index.python_index(repo, env, platform="linux") == env["PIP_INDEX_URL"]
     env["UV_DEFAULT_INDEX"] = "https://pypi.org/simple"
-    assert _python_index.python_index(repo, env) == "https://pypi.org/simple"
+    assert _python_index.python_index(repo, env, platform="linux") == "https://pypi.org/simple"
 
 
-def test_native_uv_config_precedes_pip_config(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    repo, env = _settings(tmp_path, monkeypatch)
+def test_native_uv_config_precedes_pip_config(tmp_path: Path) -> None:
+    repo, env = _settings(tmp_path)
     _pip_file(env, "[global]\nindex-url = https://pip.example/simple\n")
     path = Path(env["HOME"]) / ".config/uv/uv.toml"
     path.parent.mkdir(parents=True)
     path.write_text('[[index]]\nurl = "https://uv.example/simple"\ndefault = true\n')
-    assert _python_index.python_index(repo, env) == "https://uv.example/simple"
+    assert _python_index.python_index(repo, env, platform="linux") == "https://uv.example/simple"
 
 
-def test_pip_command_section_and_explicit_file_precedence(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    repo, env = _settings(tmp_path, monkeypatch)
+def test_pip_command_section_and_explicit_file_precedence(tmp_path: Path) -> None:
+    repo, env = _settings(tmp_path)
     _pip_file(env, "[install]\nindex-url = https://user.example/simple\n")
     explicit = tmp_path / "pip.conf"
     explicit.write_text("[global]\nindex-url = https://explicit.example/simple\n")
     env["PIP_CONFIG_FILE"] = str(explicit)
-    assert _python_index.python_index(repo, env) == "https://explicit.example/simple"
+    assert (
+        _python_index.python_index(repo, env, platform="linux") == "https://explicit.example/simple"
+    )
     explicit.write_text(
         "[global]\nindex-url = https://global.example/simple\n[install]\nindex-url = https://install.example/simple\n"
     )
-    assert _python_index.python_index(repo, env) == "https://install.example/simple"
+    assert (
+        _python_index.python_index(repo, env, platform="linux") == "https://install.example/simple"
+    )
     env["PIP_CONFIG_FILE"] = _python_index.os.devnull
-    assert _python_index.python_index(repo, env) == "https://pypi.org/simple"
+    assert _python_index.python_index(repo, env, platform="linux") == "https://pypi.org/simple"
 
 
-def test_multiple_indexes_fail_without_disclosing_values(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    repo, env = _settings(tmp_path, monkeypatch)
+def test_multiple_indexes_fail_without_disclosing_values(tmp_path: Path) -> None:
+    repo, env = _settings(tmp_path)
     env["UV_INDEX"] = "https://user:sentinel-secret@private.example/simple"
     with pytest.raises(ValueError) as caught:
-        _python_index.python_index(repo, env)
+        _python_index.python_index(repo, env, platform="linux")
     assert "sentinel-secret" not in str(caught.value)
 
 
@@ -126,12 +121,12 @@ def _assert_installs_precompile(calls: list[list[str]], *, expected: int) -> Non
 
 @pytest.mark.parametrize("mirror_host", [True, False])
 def test_environment_creation_names_the_checkout_python_pin(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, mirror_host: bool
+    tmp_path: Path, mirror_host: bool
 ) -> None:
     from cli import python_install
     from cli.tests.bootstrap._python_install_fixture import ROOT
 
-    repo, env = _settings(tmp_path, monkeypatch)
+    repo, env = _settings(tmp_path)
     declared = (ROOT / ".python-version").read_text().strip()
     (repo / ".python-version").write_text(f"{declared}\n")
     (repo / "uv.lock").write_text(
@@ -141,13 +136,16 @@ def test_environment_creation_names_the_checkout_python_pin(
     config.parent.mkdir(parents=True)
     if mirror_host:
         config.write_text('[[index]]\nurl = "https://mirror.example/simple"\ndefault = true\n')
-    for key in list(os.environ):
-        if key.startswith(("UV_", "PIP_")) or key == "VIRTUAL_ENV":
-            monkeypatch.delenv(key)
-    for key, value in env.items():
-        monkeypatch.setenv(key, value)
-    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "xdg"))
-    monkeypatch.setenv("PIP_CONFIG_FILE", os.devnull)
+    clean_env = {
+        **{
+            key: value
+            for key, value in os.environ.items()
+            if not key.startswith(("UV_", "PIP_")) and key != "VIRTUAL_ENV"
+        },
+        **env,
+        "XDG_CONFIG_HOME": str(tmp_path / "xdg"),
+        "PIP_CONFIG_FILE": os.devnull,
+    }
     calls: list[list[str]] = []
 
     def record(
@@ -156,7 +154,7 @@ def test_environment_creation_names_the_checkout_python_pin(
         calls.append(argv)
         return 0
 
-    assert python_install.install(repo, run=record) == 0
+    assert python_install.install(repo, run=record, environment=clean_env) == 0
     # --no-config hides .python-version from uv; the creating step must carry it.
     [created] = [argv for argv in calls if argv[1] in {"sync", "venv"}]
     assert created[1] == ("venv" if mirror_host else "sync")
@@ -433,22 +431,20 @@ def test_existing_mirror_profile_is_read_without_overriding_environment(
     assert (python_mirror.repo / "uv.lock").read_bytes() == python_mirror.lock
 
 
-def test_disabled_no_index_settings_do_not_override_a_configured_index(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    repo, env = _settings(tmp_path, monkeypatch)
+def test_disabled_no_index_settings_do_not_override_a_configured_index(tmp_path: Path) -> None:
+    repo, env = _settings(tmp_path)
     _pip_file(env, "[global]\nindex-url = https://mirror.example/simple\nno-index = false\n")
     env.update(UV_NO_INDEX="false", PIP_NO_INDEX="0")
-    assert _python_index.python_index(repo, env) == "https://mirror.example/simple"
+    assert (
+        _python_index.python_index(repo, env, platform="linux") == "https://mirror.example/simple"
+    )
 
 
-def test_malformed_pip_file_error_does_not_disclose_content(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    repo, env = _settings(tmp_path, monkeypatch)
+def test_malformed_pip_file_error_does_not_disclose_content(tmp_path: Path) -> None:
+    repo, env = _settings(tmp_path)
     _pip_file(env, "index-url=https://user:sentinel-secret@private.example/simple\n")
     with pytest.raises(ValueError) as caught:
-        _python_index.python_index(repo, env)
+        _python_index.python_index(repo, env, platform="linux")
     assert "sentinel-secret" not in str(caught.value)
 
 

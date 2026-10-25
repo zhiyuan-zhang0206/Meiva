@@ -16,12 +16,11 @@
 from __future__ import annotations
 
 import sys
-import time
-from datetime import UTC, datetime
 from pathlib import Path
 from typing import assert_never
 
 from base.agents.context.clients import DatabaseFactory
+from base.clock import SYSTEM_TIMERS, Clock, ClockConfig
 from base.events.live.bus import EventBus, event_bus_config_from_config
 from base.native_process.process_control import SYSTEM_PROCESS_CONTROL
 from base.paths import run_dir
@@ -160,14 +159,14 @@ def await_no_shell_sessions(home: Path, until: float, stage: str) -> None:
         left = live_shell_sessions(home)
         if not left:
             return
-        delay = poll_delay(time_left(until, time.monotonic()), _SETTLE_POLL_S)
+        delay = poll_delay(time_left(until, SYSTEM_TIMERS.monotonic()), _SETTLE_POLL_S)
         if delay is None:
             raise StopIncompleteError(
                 f"shell-session closure incomplete — shell sessions still present after the "
                 f"closure ended every session it captured: {left}",
                 stage=stage,
             )
-        time.sleep(delay)
+        SYSTEM_TIMERS.sleep(delay)
 
 
 # meiva:note
@@ -192,7 +191,11 @@ def _write_close_notices(
         closed,
         reason=reason,
         local_machine=command.machine.name(),
-        closed_at=datetime.now(UTC).isoformat(),
+        closed_at=Clock(
+            ClockConfig("UTC", None, message_timestamp_weekday=False), timers=command.timers
+        )
+        .now()
+        .isoformat(),
     )
     if not notices:
         return
@@ -242,7 +245,7 @@ def settle_closure(
             case FailShells():
                 raise _shell_sessions_incomplete(outcome, step, "shell-sessions")
             case AwaitNoSessions():
-                until = settle_until(deadline, time.monotonic(), SHELL_SESSION_KILL_WAIT_S)
+                until = settle_until(deadline, SYSTEM_TIMERS.monotonic(), SHELL_SESSION_KILL_WAIT_S)
                 await_no_shell_sessions(command.home, until, "shell-sessions")
             case _:
                 assert_never(step)
@@ -266,7 +269,7 @@ def close_shell_sessions(
     command: CommandRuntime,
     cleanup_wait_s: float,
 ) -> None:
-    grace_s = closure_grace_s(deadline - time.monotonic(), cleanup_wait_s)
+    grace_s = closure_grace_s(deadline - SYSTEM_TIMERS.monotonic(), cleanup_wait_s)
     outcome, reason = run_closure(command.home, grace_s, SHELL_SESSION_KILL_WAIT_S)
     settle_closure(
         outcome,

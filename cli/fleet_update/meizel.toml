@@ -15,11 +15,4 @@ exports = ["__init__.py", "__main__.py", "choices.py", "fleet_gate.py", "fleet_v
 "oneshot.py" = "strict"
 
 [roots]
-"__main__.py" = { kinds = ["environ"], why = "The executable composition root reads the caller environment once and passes it explicitly to main and the command shells" }
-
-[debt.ambient-read]
-"__main__.py#clock datetime.datetime.now" = 1
-"fleet_verify.py#clock time.monotonic" = 2
-
-[debt.any-collaborator]
-"choices.py#any _value.return" = 1
+"__main__.py" = { kinds = ["clock", "environ"], why = "The executable composition root reads the caller environment and invocation timestamp once and passes them explicitly to main and the command shells" }

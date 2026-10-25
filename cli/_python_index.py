@@ -75,11 +75,13 @@ def _uv_index(repo: Path, env: Mapping[str, str], home: Path) -> str | None:
     return _uv_config_index(user) or _uv_config_index(system)
 
 
-def _pip_paths(repo: Path, env: Mapping[str, str], home: Path) -> list[Path]:
+def _pip_paths(
+    repo: Path, env: Mapping[str, str], home: Path, *, platform: str = sys.platform
+) -> list[Path]:
     explicit = env.get("PIP_CONFIG_FILE")
     if explicit and Path(explicit) == Path(os.devnull):
         return []
-    if sys.platform == "darwin":
+    if platform == "darwin":
         name = "pip.conf"
         global_paths = [Path("/Library/Application Support/pip/pip.conf")]
         user_dir = home / "Library" / "Application Support" / "pip"
@@ -102,7 +104,9 @@ def _pip_paths(repo: Path, env: Mapping[str, str], home: Path) -> list[Path]:
     )
 
 
-def _pip_index(repo: Path, env: Mapping[str, str], home: Path) -> str | None:
+def _pip_index(
+    repo: Path, env: Mapping[str, str], home: Path, *, platform: str = sys.platform
+) -> str | None:
     if env.get("PIP_EXTRA_INDEX_URL") or _enabled(env.get("PIP_NO_INDEX")):
         raise ValueError(
             "Locked installs require one Python index; PIP_EXTRA_INDEX_URL/PIP_NO_INDEX are unsupported"
@@ -111,7 +115,7 @@ def _pip_index(repo: Path, env: Mapping[str, str], home: Path) -> str | None:
         return env["PIP_INDEX_URL"]
     config = configparser.RawConfigParser()
     try:
-        config.read(_pip_paths(repo, env, home))
+        config.read(_pip_paths(repo, env, home, platform=platform))
     except configparser.Error:
         raise ValueError("Cannot parse the machine pip configuration") from None
     for section in ("install", "global"):
@@ -126,7 +130,7 @@ def _pip_index(repo: Path, env: Mapping[str, str], home: Path) -> str | None:
     )
 
 
-def python_index(repo: Path, env: Mapping[str, str]) -> str:
+def python_index(repo: Path, env: Mapping[str, str], *, platform: str = sys.platform) -> str:
     """Use explicit uv settings, then pip settings, then canonical PyPI.
 
     An install's explicit mirror profile already supplies UV_DEFAULT_INDEX.
@@ -138,5 +142,8 @@ def python_index(repo: Path, env: Mapping[str, str]) -> str:
     home = Path(env.get("HOME", str(Path.home())))
     value = env.get("UV_DEFAULT_INDEX") or env.get("UV_INDEX_URL")
     return _checked_index(
-        value or _uv_index(repo, env, home) or _pip_index(repo, env, home) or PYPI_INDEX
+        value
+        or _uv_index(repo, env, home)
+        or _pip_index(repo, env, home, platform=platform)
+        or PYPI_INDEX
     )

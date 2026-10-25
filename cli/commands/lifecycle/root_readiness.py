@@ -2,10 +2,10 @@
 
 from __future__ import annotations
 
-import time
 from pathlib import Path
 from typing import assert_never
 
+from base.clock import SYSTEM_TIMERS
 from base.deploy import start_trace
 from base.log import logger
 from base.native_process.root_control.client import RootClient
@@ -73,12 +73,12 @@ def wait_for_service_tree(
 ) -> ReadinessWait:
     client = root_driver.root_client(home)
     by_session = {spec.session: spec for spec in roster}
-    started_at = time.monotonic()
+    started_at = SYSTEM_TIMERS.monotonic()
     recorded: set[str] = set()
     while True:
         units, verdicts = _fresh_round(client, roster)
         observed = observe_readiness(list(by_session), units, verdicts, frozenset(recorded))
-        elapsed_s = time.monotonic() - started_at
+        elapsed_s = SYSTEM_TIMERS.monotonic() - started_at
         for session in observed.newly_ready:
             recorded.add(session)
             start_trace.record_service_ready(session, elapsed_s)
@@ -95,7 +95,7 @@ def wait_for_service_tree(
         unmet = unmet_step(elapsed_s=elapsed_s, timeout_s=timeout_s, interval_s=poll_interval_s)
         match unmet:
             case Retry(after_s):
-                time.sleep(after_s)
+                SYSTEM_TIMERS.sleep(after_s)
             case Expired():
                 return result
             case _:

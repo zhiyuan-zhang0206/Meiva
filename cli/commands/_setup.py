@@ -15,7 +15,7 @@ from __future__ import annotations
 
 from collections.abc import Callable
 from dataclasses import dataclass
-from typing import NotRequired, TypedDict, cast
+from typing import NotRequired, TypedDict
 
 from base.config import ConfigBoot
 
@@ -161,15 +161,16 @@ def collect_setup_values(
     """
     caps = {cap.capability for cap in _CAPABILITIES if _resolve_capability(cap, config)}
     if not caps:
+        # meiva:note
         # No capability resolved: the only missing items are the serve flags;
         # every value field is unresolved, so the caller's `missing` check returns
-        # before reading any (the empty dict never surfaces a required key).
-        return cast(SetupValues, {}), list(_CAPABILITIES)
+        # before reading any.
+        return SetupValues(machine_role="", machine_name="", gateway_url=""), list(_CAPABILITIES)
 
     # The derived comma-string is what callers print / pass downstream as the
     # resolved `machine_role`. A field applies when any of its `roles` is a
     # capability this host carries.
-    resolved: dict[str, str] = {"machine_role": ",".join(sorted(caps))}
+    values: dict[str, str] = {}
     missing: list[SetupField | _Capability] = []
     for field in _SETUP_FIELDS:
         if not (caps & set(field.roles)):
@@ -179,10 +180,17 @@ def collect_setup_values(
             if not field.optional:
                 missing.append(field)
         else:
-            resolved[field.name] = value
-    # Built with dynamic `field.name` keys (a TypedDict rejects a non-literal item
-    # write); every key IS a SetupValues field by _SETUP_FIELDS construction.
-    return cast(SetupValues, resolved), missing
+            values[field.name] = value
+    resolved: SetupValues = {
+        "machine_role": ",".join(sorted(caps)),
+        "machine_name": values.get("machine_name", ""),
+        "gateway_url": values.get("gateway_url", ""),
+    }
+    if "machine_description" in values:
+        resolved["machine_description"] = values["machine_description"]
+    if "memory_remote" in values:
+        resolved["memory_remote"] = values["memory_remote"]
+    return resolved, missing
 
 
 def missing_setup_message(missing: list[SetupField | _Capability]) -> str:
