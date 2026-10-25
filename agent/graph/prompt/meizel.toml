@@ -20,3 +20,6 @@ exports = ["capabilities.py", "compaction.py", "context_notes.py", "conversation
 [debt.ambient-read]
 "context_notes.py#clock datetime.datetime.now" = 4
 "context_notes.py#home pathlib.Path.home" = 1
+
+[debt.any-collaborator]
+"system_prompt.py#any _resolved.return" = 1

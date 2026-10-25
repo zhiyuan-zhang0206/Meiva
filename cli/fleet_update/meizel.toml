@@ -20,3 +20,6 @@ exports = ["__init__.py", "__main__.py", "choices.py", "fleet_gate.py", "fleet_v
 [debt.ambient-read]
 "__main__.py#clock datetime.datetime.now" = 1
 "fleet_verify.py#clock time.monotonic" = 2
+
+[debt.any-collaborator]
+"choices.py#any _value.return" = 1

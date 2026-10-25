@@ -31,6 +31,10 @@ exports = ["__main__.py", "commands", "database", "fleet_update", "parsers", "st
 "start_identity.py#clock datetime.datetime.now" = 1
 "start_identity.py#random secrets.token_urlsafe" = 3
 
+[debt.any-collaborator]
+"fleet_alert_silence.py#any _call.return" = 1
+"start_identity.py#any _validate_intent_record.raw" = 1
+
 [debt.type-cast]
 "main.py#cast bind_init_inputs" = 1
 "start_identity.py#cast _new_record" = 1

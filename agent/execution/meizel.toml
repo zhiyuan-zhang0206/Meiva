@@ -23,6 +23,15 @@ exports = ["agent_traceback.py", "child.py", "protocol.py"]
 "protocol.py#clock time.time" = 1
 "protocol.py#random uuid.uuid4" = 2
 
+[debt.any-collaborator]
+"child.py#any _LazyStateSlot.__getattr__.return" = 1
+"child.py#any _LazyStateSlot.__setattr__.value" = 1
+"child.py#any _Sdk.state" = 1
+"child.py#any run_child.read_agent_default.return" = 1
+"protocol.py#any _serde.return" = 1
+"protocol.py#any dumps_typed.obj" = 1
+"protocol.py#any loads_typed.return" = 1
+
 [debt.type-cast]
 "child.py#cast pop_overlay_env" = 1
 "child.py#cast run_code" = 2

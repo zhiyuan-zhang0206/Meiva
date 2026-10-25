@@ -23,3 +23,6 @@ exports = ["metrics.py"]
 "inherit.py#clock datetime.datetime.now" = 1
 "notes.py#clock datetime.datetime.now" = 2
 "pool_ops.py#environ os.environ" = 1
+
+[debt.any-collaborator]
+"written_notes.py#any _state_handle.return" = 1

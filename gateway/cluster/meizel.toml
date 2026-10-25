@@ -24,5 +24,8 @@ exports = ["bootstrap.py", "harness_probe.py", "harness_rows.py", "machine_pause
 "server.py#pid os.getpid" = 1
 "status.py#clock datetime.datetime.now" = 3
 
+[debt.any-collaborator]
+"server.py#any serve_kwargs.app" = 1
+
 [debt.type-cast]
 "status.py#cast _plugin_stat_rows.<listcomp>" = 1

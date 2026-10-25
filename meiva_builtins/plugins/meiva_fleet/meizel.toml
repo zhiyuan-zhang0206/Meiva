@@ -19,5 +19,8 @@ exports = ["default_config.py", "inspector.py", "metrics.py", "plugin.py", "task
 "plugin.py#random uuid.uuid4" = 2
 "task_registry.py#bus base.events.live.bus.EventBus.from_settings" = 2
 
+[debt.any-collaborator]
+"plugin.py#any _raise_as_value_error.resp" = 1
+
 [debt.type-cast]
 "task_registry.py#cast commit_update" = 1

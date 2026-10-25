@@ -18,3 +18,16 @@ exports = ["telemetry_otlp.py", "telemetry_otlp_defer.py", "telemetry_otlp_expor
 "telemetry_otlp.py#settings base.config.settings" = 2
 "telemetry_otlp_logs.py#clock time.time_ns" = 1
 "telemetry_otlp_metrics.py#random uuid.uuid4" = 1
+
+[debt.any-collaborator]
+"telemetry_otlp.py#any OtlpBackend._instrument.return" = 1
+"telemetry_otlp.py#any _emit_backend_event.attributes" = 1
+"telemetry_otlp.py#any metrics_resource.return" = 1
+"telemetry_otlp_gauges.py#any observable_gauge_callback.gauge_lock" = 1
+"telemetry_otlp_gauges.py#any observable_gauge_callback.observe._options" = 1
+"telemetry_otlp_gauges.py#any observable_gauge_callback.return" = 1
+"telemetry_otlp_gauges.py#any record_gauge.gauge_lock" = 1
+"telemetry_otlp_logs.py#any emit_log_record.logs" = 1
+"telemetry_otlp_metrics.py#any EventDimensionResourceExporter.__init__.exporter" = 1
+"telemetry_otlp_metrics.py#any EventDimensionResourceExporter.export.return" = 1
+"telemetry_otlp_metrics.py#any metrics_resource.return" = 1

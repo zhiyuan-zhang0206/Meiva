@@ -6,9 +6,10 @@ import contextlib
 import datetime
 import logging
 import sys
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from pathlib import Path
-from typing import Any
+from types import FrameType
+from typing import Protocol, TextIO
 
 from loguru import logger
 
@@ -54,7 +55,7 @@ class StdlibInterceptHandler(logging.Handler):
             # sys._getframe then raises ValueError (handled: the record is
             # logged without the stack walk).
             try:
-                frame: Any = sys._getframe(6)
+                frame: FrameType | None = sys._getframe(6)
             except ValueError:
                 frame = None
             depth = 6
@@ -198,7 +199,11 @@ HUMAN_FORMAT = (
 )
 
 
-def add_sink(sink: Any, /, **kwargs: Any) -> int:
+def add_sink(
+    sink: TextIO | Path | Callable[..., None] | logging.Handler | str,
+    /,
+    **kwargs: object,
+) -> int:
     """`logger.add(sink, ...)` with `diagnose` forced off.
 
     Every loguru sink in this codebase is registered through this helper; its
@@ -224,7 +229,8 @@ def add_sink(sink: Any, /, **kwargs: Any) -> int:
             "diagnose=True is forbidden on log sinks: it renders local variable "
             "values (including secrets) into exception output"
         )
-    return logger.add(sink, diagnose=False, **kwargs)
+    add: Callable[..., int] = logger.add
+    return add(sink, diagnose=False, **kwargs)
 
 
 FILE_SINK_SIZE_LIMIT = 100 * 1024 * 1024
@@ -234,8 +240,13 @@ def _file_ctime(path: Path) -> float:
     return path.stat().st_ctime
 
 
+class _LogMessage(Protocol):
+    @property
+    def record(self) -> Mapping[str, datetime.datetime]: ...
+
+
 def rotate_by_size_or_day(
-    message: Any, file: Any, *, ctime_of: Callable[[Path], float] = _file_ctime
+    message: _LogMessage, file: TextIO, *, ctime_of: Callable[[Path], float] = _file_ctime
 ) -> bool:
     """Rotation predicate for the JSONL file sink (Task #434): rotate when
     the file crosses the 100 MB ceiling OR when the message's date moves past

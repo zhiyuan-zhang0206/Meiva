@@ -25,6 +25,14 @@ exports = ["aggregate.py", "aggregate_sql.py", "ci_runs_metrics.py", "core", "ev
 "aggregate_sql.py#clock datetime.datetime.now" = 2
 "usage.py#clock datetime.datetime.now" = 1
 
+[debt.any-collaborator]
+"aggregate_sql.py#any _Scope.run.return" = 1
+"observed_metrics.py#any _count.value" = 1
+"observed_metrics.py#any _number.value" = 1
+"observed_metrics.py#any _truth.value" = 1
+"usage.py#any event_rows.conn" = 1
+"usage.py#any ledger_rows.conn" = 1
+
 [debt.type-cast]
 "aggregate_sql.py#cast _Scope.run" = 1
 "aggregate_sql.py#cast _fix_events" = 1

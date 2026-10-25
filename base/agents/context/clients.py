@@ -3,17 +3,24 @@ from __future__ import annotations
 
 import threading
 from collections.abc import Callable, Mapping
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, Protocol
 
 from base.log import logger
 
 __all__ = ["ClientSet", "DatabaseFactory", "DatabaseHandle", "LazyConnection"]
 
 if TYPE_CHECKING:
+    import contextlib
+
     import httpx
     import psycopg
 
     from base.db import Database
+    from base.telemetry.delivery.pipeline import EventPipeline
+    from base.telemetry.delivery.receipts import DrainResult
+
+    class _ExecutedCursor(Protocol):
+        def fetchone(self) -> tuple[Any, ...]: ...
 
 
 type DatabaseHandle = Database
@@ -68,8 +75,24 @@ class LazyConnection:
         if conn is not None:
             conn.close()  # type: ignore[attr-defined]
 
-    def __getattr__(self, attr: str) -> Any:
+    def __getattr__(self, attr: str) -> object:
         return getattr(self._get(), attr)
+
+    if TYPE_CHECKING:
+
+        def cursor(self, *args: object, **kwargs: object) -> psycopg.Cursor[Any]: ...
+
+        def transaction(
+            self, *args: object, **kwargs: object
+        ) -> contextlib.AbstractContextManager[psycopg.Transaction]: ...
+
+        def execute(self, *args: object, **kwargs: object) -> _ExecutedCursor: ...
+
+        def get(self, name: str) -> object: ...
+
+        def set(self, name: str, value: str, *args: object, **kwargs: object) -> object: ...
+
+        def ping(self, *args: object, **kwargs: object) -> object: ...
 
     def __repr__(self) -> str:
         if self._conn is None:
@@ -182,7 +205,7 @@ class ClientSet:
                 self._made[factory] = self._factories.get(factory, factory)()
             return self._made[factory]  # type: ignore[return-value]
 
-    def event_pipeline(self) -> Any:
+    def event_pipeline(self) -> EventPipeline:
         """Construct this owner's event writer only when its producer needs enqueue.
 
         A constructed writer is returned without taking the set lock. This is the
@@ -201,7 +224,7 @@ class ClientSet:
                 self._event_pipeline = self._pipeline_factory()
             return self._event_pipeline
 
-    def sync_events(self, timeout: float = 5.0) -> Any:
+    def sync_events(self, timeout: float = 5.0) -> DrainResult:
         """Observe this owner's constructed writer without creating one during flush."""
         from base.telemetry.delivery.receipts import DrainPhase, DrainResult, DrainStatus
 

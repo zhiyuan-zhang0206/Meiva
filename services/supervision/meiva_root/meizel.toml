@@ -33,6 +33,9 @@ exports = ["__main__.py", "failure_state.py", "health.py", "inputs.py", "manifes
 "supervisor.py#clock time.time" = 5
 "supervisor.py#pid os.getpid" = 1
 
+[debt.any-collaborator]
+"supervisor.py#any Supervisor._launch.options" = 1
+
 [debt.type-cast]
 "inputs.py#cast InputSeal.from_mapping" = 2
 "inputs.py#cast parse_inputs" = 1
