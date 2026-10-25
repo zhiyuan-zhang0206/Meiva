@@ -3,6 +3,7 @@ exports = [
     "command_runtime_child.py",
     "launcher_context_child.py",
     "service_readiness_guard.py",
+    "start_refusal_child.py",
 ]
 
 [debt.restricted-python]

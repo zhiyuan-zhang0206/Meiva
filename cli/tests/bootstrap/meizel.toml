@@ -1,4 +1,5 @@
 exports = [
+    "child_admitted_home.py",
     "child_first_start.py",
     "child_main_dispatch.py",
     "child_telemetry_exit.py",

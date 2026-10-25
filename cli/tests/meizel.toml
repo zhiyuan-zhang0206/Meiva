@@ -8,6 +8,7 @@ exports = ["bootstrap", "guards"]
 "test_main_log_init.py" = ["bootstrap"]
 "test_main_telemetry_exit.py" = ["bootstrap"]
 "test_unit_capability_cli.py" = ["bootstrap"]
+"test_start_gate.py" = ["bootstrap/child_admitted_home.py", "guards/start_refusal_child.py"]
 
 [debt.env-patch]
 "test_lite_verbs.py#monkeypatch.delenv os.environ.MEIVA_API_TOKEN" = 2
@@ -27,7 +28,6 @@ exports = ["bootstrap", "guards"]
 "test_plugin_scaffold.py#monkeypatch.setenv os.environ.MEIVA_HOME" = 1
 "test_pty_commands.py#monkeypatch.delenv os.environ.MEIVA_CONFIG_FETCH" = 1
 "test_pty_commands.py#monkeypatch.setenv os.environ.MEIVA_HOME" = 1
-"test_start_gate.py#patch.dict os.environ" = 1
 
 [debt.first-party-patch]
 "test_lite_verbs.py#monkeypatch.setattr base.host.db_authority.unit.consume_unit" = 2
