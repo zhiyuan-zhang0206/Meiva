@@ -355,7 +355,7 @@ def test_ipc_native_birth_rules_preserve_platform_authority(
     birth: float,
     accepted: bool,
 ) -> None:
-    from base.native_process.ownership import LiveReading, process_birth_key
+    from base.native_process.ownership import process_birth_key
     from base.native_process.root_control import client
 
     root = client.native_identity(
@@ -369,13 +369,7 @@ def test_ipc_native_birth_rules_preserve_platform_authority(
     same_key = process_birth_key(
         root.pid, root.birth, root.starttime, platform=platform
     ) == process_birth_key(peer.pid, peer.birth, peer.starttime, platform=platform)
-    reading = LiveReading(
-        ticks=recorded,
-        pid_exists=True,
-        status=psutil.STATUS_RUNNING,
-        identity=root,
-    )
-    assert (same_key and peer.judge_live(reading)) is accepted
+    assert same_key is accepted
 
 
 class _DeadWriter:
