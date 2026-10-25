@@ -90,9 +90,10 @@ class FakeRestClient:
         self.created: list[Any] = []
         self.fail = False
         self.list_responses: list[SimpleNamespace] = []
+        self._config: Any = SimpleNamespace(timeout=0.0)
 
     @property
-    def im(self) -> SimpleNamespace:
+    def im(self) -> Any:
         return SimpleNamespace(
             v1=SimpleNamespace(message=SimpleNamespace(create=self._create, list=self._list))
         )

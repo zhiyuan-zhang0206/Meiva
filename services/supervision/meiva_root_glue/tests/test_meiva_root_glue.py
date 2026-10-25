@@ -7,7 +7,6 @@ import os
 import sys
 import time
 import types
-from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, cast
@@ -15,12 +14,8 @@ from typing import Any, cast
 import pytest
 
 from base.cluster.dataplane.direct_url import ClusterDirectUrl
-from base.cluster.machine import MachineIdentityReader
 from base.config.tests.configuration import snapshot_process_config
 from base.daemon.health import DaemonProbe
-from base.db import Database
-from base.db.code_version_gate import ProcessDbGate
-from base.db.config import DbConfig
 from services.supervision.meiva_root.health import HealthMonitor
 from services.supervision.meiva_root.manifest import (
     ROOT_ID,
@@ -32,7 +27,8 @@ from services.supervision.meiva_root.probes import Probe, ProbeError
 from services.supervision.meiva_root.supervisor import Supervisor
 from services.supervision.meiva_root.wiring import WiringContext
 from services.supervision.meiva_root_glue import drill, glue
-from services.supervision.meiva_root_glue.diagnostics import Diagnostic, RootHealthRounds
+from services.supervision.meiva_root_glue.diagnostic_probes import StationProbe
+from services.supervision.meiva_root_glue.diagnostics import RootHealthRounds
 
 _SLEEPER = ["/bin/sleep", "60"]
 
@@ -67,16 +63,6 @@ def _context(tmp_path: Path, registry: UnitRegistry) -> WiringContext:
     )
 
 
-def _empty_diagnostics(
-    _requested: set[str],
-    *,
-    database: Callable[[], Database],
-    machine: MachineIdentityReader,
-) -> list[Diagnostic]:
-    del database, machine
-    return []
-
-
 async def test_reference_wiring_registers_gated_specs(tmp_path: Path) -> None:
     registry = _registry(("svc-a",))
     context = _context(tmp_path, registry)
@@ -87,9 +73,9 @@ async def test_reference_wiring_registers_gated_specs(tmp_path: Path) -> None:
     )
     participants = glue.build_wiring(
         context,
-        boot_factory=snapshot_process_config,
-        diagnostics_builder=_empty_diagnostics,
-        services_builder=lambda: specs,
+        config=snapshot_process_config(),
+        diagnostics=(),
+        services=specs,
     )
     await context.supervisor.start()
     try:
@@ -119,9 +105,9 @@ async def test_static_probe_seam_resolves_lazily(
     monkeypatch.setitem(sys.modules, "wiring_fixture_probe", module)
     participants = glue.build_wiring(
         context,
-        boot_factory=snapshot_process_config,
-        diagnostics_builder=_empty_diagnostics,
-        services_builder=lambda: (),
+        config=snapshot_process_config(),
+        diagnostics=(),
+        services=(),
         static_probes={"svc-host": "wiring_fixture_probe:probe"},
     )
     await context.supervisor.start()
@@ -140,9 +126,9 @@ async def test_unresolvable_static_probe_yields_no_verdict(tmp_path: Path) -> No
     context = _context(tmp_path, registry)
     participants = glue.build_wiring(
         context,
-        boot_factory=snapshot_process_config,
-        diagnostics_builder=_empty_diagnostics,
-        services_builder=lambda: (),
+        config=snapshot_process_config(),
+        diagnostics=(),
+        services=(),
         static_probes={"svc-host": "no_such_probe_module:probe"},
     )
     await context.supervisor.start()
@@ -250,9 +236,9 @@ def test_reference_wiring_refuses_unobserved_manifest_unit(tmp_path: Path) -> No
     with pytest.raises(ProbeError, match="lack readiness probes: svc-a"):
         glue.build_wiring(
             context,
-            boot_factory=snapshot_process_config,
-            diagnostics_builder=_empty_diagnostics,
-            services_builder=lambda: (),
+            config=snapshot_process_config(),
+            diagnostics=(),
+            services=(),
         )
 
 
@@ -270,9 +256,9 @@ async def test_glue_uses_shared_readiness_tiers_for_native_startup(
     )
     rounds = glue.build_wiring(
         context,
-        boot_factory=snapshot_process_config,
-        diagnostics_builder=_empty_diagnostics,
-        services_builder=lambda: specs,
+        config=snapshot_process_config(),
+        diagnostics=(),
+        services=specs,
     )[0]
     await context.supervisor.start()
     try:
@@ -311,41 +297,32 @@ def test_static_probe_references_are_read_only() -> None:
 
 async def test_reference_station_and_writer_share_one_entry_gate(
     tmp_path: Path,
-    database: Database,
 ) -> None:
-    gates: list[ProcessDbGate] = []
-
-    readers: list[Callable[[], str]] = []
-    machines: list[MachineIdentityReader] = []
-
-    def make_database(
-        config: DbConfig, *, gate: ProcessDbGate, direct_url: ClusterDirectUrl
-    ) -> Database:
-        del config
-        gates.append(gate)
-        readers.append(direct_url.local_host)
-        return database
-
-    def diagnostics(
-        _requested: set[str], *, database: Callable[[], Database], machine: MachineIdentityReader
-    ) -> list[Diagnostic]:
-        machines.append(machine)
-        assert database() is database_handle
-        assert database() is database_handle
-        return []
-
-    database_handle = database
+    boot = snapshot_process_config()
+    boot.set_field("machine_serve_gateway", True)
     rounds = glue.build_wiring(
         _context(tmp_path, _registry(())),
-        boot_factory=snapshot_process_config,
-        database_builder=make_database,
-        diagnostics_builder=diagnostics,
-        services_builder=lambda: (),
+        config=boot,
+        diagnostic_overrides={
+            "db_url": "postgresql://remote.invalid/meiva",
+            "redis_url": "redis://remote.invalid:6379/0",
+            "observability_url": "http://station.invalid",
+            "observability_otlp_port": 4325,
+        },
+        services=(),
     )[0]
     assert isinstance(rounds, RootHealthRounds)
-    assert len(gates) == 2 and gates[0] is gates[1]
-    assert len(machines) == 1
-    assert readers == [machines[0].host, machines[0].host]
+    station_check = next(
+        check for check in rounds._diagnostics._checks if check.name == "observatory-station"
+    )
+    station = cast("StationProbe", station_check.probe.__self__)
+    writer_db = rounds._clients.database()
+    station_db = station._database()
+    assert writer_db._gate is station_db._gate
+    assert isinstance(writer_db._direct_url, ClusterDirectUrl)
+    assert isinstance(station_db._direct_url, ClusterDirectUrl)
+    assert writer_db._direct_url.local_host == rounds._machine.host
+    assert station_db._direct_url.local_host == rounds._machine.host
     await rounds.stop()
 
 
@@ -360,7 +337,7 @@ def test_agent_host_cap_is_off_by_default() -> None:
             max_mb=0,
             swap_max_mb=0,
             platform="linux",
-            scope_available=lambda _max_mb, _swap_mb: True,
+            scope_available=True,
         )
         == {}
     )
@@ -372,7 +349,7 @@ def test_agent_host_cap_declines_where_cgroups_do_not_exist() -> None:
             max_mb=18432,
             swap_max_mb=0,
             platform="darwin",
-            scope_available=lambda _max_mb, _swap_mb: True,
+            scope_available=True,
         )
         == {}
     )
@@ -384,7 +361,7 @@ def test_agent_host_cap_declines_when_systemd_cannot_scope() -> None:
             max_mb=18432,
             swap_max_mb=0,
             platform="linux",
-            scope_available=lambda _max_mb, _swap_mb: False,
+            scope_available=False,
         )
         == {}
     )
@@ -395,7 +372,7 @@ def test_agent_host_cap_applies_when_every_precondition_holds() -> None:
         max_mb=18432,
         swap_max_mb=0,
         platform="linux",
-        scope_available=lambda _max_mb, _swap_mb: True,
+        scope_available=True,
     )
     assert caps == {"agent-host": glue.UnitMemoryCap(max_mb=18432, swap_max_mb=0)}
 

@@ -16,4 +16,6 @@ exports = ["__main__.py", "composition.py", "healthz.py", "plugin_services.py", 
 "gate_plan.py" = "strict"
 
 [roots]
+"composition.py" = ["settings"]
 "healthz.py" = ["endpoints"]
+"spec.py" = ["settings"]

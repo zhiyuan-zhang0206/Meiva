@@ -13,7 +13,7 @@ import time
 import urllib.error
 import urllib.parse
 import urllib.request
-from collections.abc import Callable
+from collections.abc import Mapping
 from http.client import HTTPException, HTTPResponse
 from pathlib import Path
 from typing import Any, assert_never
@@ -54,16 +54,22 @@ _WRITE_PROBE_END_LAG_SECONDS = 1
 _WRITE_PROBE_RETRY_BACKOFF_SECONDS = (1, 2)
 
 
+def _setting(name: str, overrides: Mapping[str, str | int] | None = None) -> str | int:
+    if overrides is not None and name in overrides:
+        return overrides[name]
+    return get_field(name)
+
+
 # meiva:note
 # Wildcard bind addresses resolve to loopback for local readiness probes.
-def _backend_urls(read_field: Callable[[str], str | int] = get_field) -> dict[str, str]:
+def _backend_urls(overrides: Mapping[str, str | int] | None = None) -> dict[str, str]:
     ports = {
-        "loki": int(read_field("lgtm_loki_port")),
-        "prometheus": int(read_field("lgtm_prometheus_port")),
-        "grafana": int(read_field("lgtm_grafana_port")),
+        "loki": int(_setting("lgtm_loki_port", overrides)),
+        "prometheus": int(_setting("lgtm_prometheus_port", overrides)),
+        "grafana": int(_setting("lgtm_grafana_port", overrides)),
     }
-    grafana_host = str(read_field("lgtm_grafana_listen_host"))
-    listen_host = str(read_field("lgtm_listen_host"))
+    grafana_host = str(_setting("lgtm_grafana_listen_host", overrides))
+    listen_host = str(_setting("lgtm_listen_host", overrides))
     urls: dict[str, str] = {}
     for name, port in ports.items():
         host = grafana_host if name == "grafana" else listen_host
@@ -77,7 +83,7 @@ def _backend_urls(read_field: Callable[[str], str | int] = get_field) -> dict[st
 
 
 def readiness_probes(
-    *, read_field: Callable[[str], str | int] = get_field
+    *, overrides: Mapping[str, str | int] | None = None
 ) -> tuple[tuple[str, str], ...]:
     """Probe this home's native bind settings, independent of remote query URLs.
 
@@ -85,7 +91,7 @@ def readiness_probes(
     """
     from base.telemetry.lgtm_local import BACKENDS, HEALTH_PATHS
 
-    urls = _backend_urls(read_field)
+    urls = _backend_urls(overrides)
     return tuple((name, f"{urls[name]}{HEALTH_PATHS[name]}") for name in BACKENDS)
 
 
@@ -117,11 +123,11 @@ def is_lgtm_host(home: Path, *, roles: MachineRoles | None) -> bool:
 
 
 def protocol_readiness(
-    name: str, *, read_field: Callable[[str], str | int] = get_field
+    name: str, *, overrides: Mapping[str, str | int] | None = None
 ) -> DaemonProbe:
     from base.telemetry.lgtm_local import HEALTH_PATHS
 
-    return readiness_at(name, _backend_urls(read_field)[name] + HEALTH_PATHS[name])
+    return readiness_at(name, _backend_urls(overrides)[name] + HEALTH_PATHS[name])
 
 
 # meiva:note
@@ -145,12 +151,12 @@ def readiness_at(name: str, url: str) -> DaemonProbe:
     )
 
 
-def probe_backend(name: str, *, read_field: Callable[[str], str | int] = get_field) -> DaemonProbe:
+def probe_backend(name: str, *, overrides: Mapping[str, str | int] | None = None) -> DaemonProbe:
     """Observe the configured backend readiness protocol."""
-    port = urllib.parse.urlsplit(_backend_urls(read_field)[name]).port
+    port = urllib.parse.urlsplit(_backend_urls(overrides)[name]).port
     if port is None:
         return DaemonProbe.unavailable("backend has no explicit local port")
-    return protocol_readiness(name, read_field=read_field)
+    return protocol_readiness(name, overrides=overrides)
 
 
 # meiva:note

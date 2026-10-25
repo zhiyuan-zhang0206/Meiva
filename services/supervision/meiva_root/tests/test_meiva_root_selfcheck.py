@@ -150,13 +150,10 @@ def test_unverifiable_is_separated_from_broken(
 ) -> None:
     caplog.set_level(logging.DEBUG, logger="services.supervision.meiva_root.selfcheck")
 
-    def fake_child_state(pid: int, parent_pid: int) -> str:
-        return "unverifiable"
-
     host = _StubHost([{"id": "svc", "state": "running", "pid": 12345}])
-    check = TreeSelfCheck(host, state_reader=fake_child_state)
+    check = TreeSelfCheck(host)
 
-    check.run_once()
+    check.run_once(verdicts={"svc": "unverifiable"})
     chain = _chain(check)
     assert chain["broken"] is False
     assert chain["unverifiable_units"] == ["svc"]
@@ -165,7 +162,7 @@ def test_unverifiable_is_separated_from_broken(
     warnings = [r for r in caplog.records if "cannot verify" in str(r.message)]
     assert len(warnings) == 1
 
-    check.run_once()
+    check.run_once(verdicts={"svc": "unverifiable"})
     warnings = [r for r in caplog.records if "cannot verify" in str(r.message)]
     assert len(warnings) == 1
 

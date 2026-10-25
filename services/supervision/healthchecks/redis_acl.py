@@ -1,28 +1,32 @@
 """Bounded Redis runtime-credential protocol probe; no recovery authority."""
 
-from collections.abc import Callable
-from typing import Any
+from __future__ import annotations
+
+from typing import Any, Protocol
 
 import redis
 
-_TIMEOUT_S = 3.0
+TIMEOUT_S = 3.0
 
 
-def _default_from_url(url: str, *, socket_connect_timeout: float, socket_timeout: float) -> object:
-    redis_cls: Any = redis.Redis
-    return redis_cls.from_url(
-        url,
-        socket_connect_timeout=socket_connect_timeout,
-        socket_timeout=socket_timeout,
-    )
+class RedisPingConnection(Protocol):
+    def __enter__(self) -> RedisPingConnection: ...
+
+    def __exit__(self, exc_type: object, exc: object, tb: object, /) -> object: ...
+
+    def ping(self) -> object: ...
 
 
-def ping(
-    cluster_url: str,
-    *,
-    from_url: Callable[..., object] = _default_from_url,
-) -> None:
+def ping(cluster_url: str, *, connection: RedisPingConnection | None = None) -> None:
     """PING redis as the cluster identity; raises on auth failure or dead server."""
-    conn: Any = from_url(cluster_url, socket_connect_timeout=_TIMEOUT_S, socket_timeout=_TIMEOUT_S)
-    with conn as r:
+    if connection is not None:
+        with connection as r:
+            r.ping()
+        return
+    redis_cls: Any = redis.Redis
+    with redis_cls.from_url(
+        cluster_url,
+        socket_connect_timeout=TIMEOUT_S,
+        socket_timeout=TIMEOUT_S,
+    ) as r:
         r.ping()

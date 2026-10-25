@@ -14,7 +14,7 @@ delivery and save does not become a second inbound.
 from __future__ import annotations
 
 import asyncio
-from typing import Any
+from typing import Any, Protocol
 
 import requests
 
@@ -22,49 +22,54 @@ from base.clock import SYSTEM_TIMERS, Clock, ClockConfig
 from services.entrypoints.im_bridge.types import RetryableTransportError, raise_http_failure
 
 
-class FeishuRawResponse:
-    status_code: int
+class FeishuRawResponse(Protocol):
+    @property
+    def status_code(self) -> int: ...
 
 
-class FeishuResponseData:
-    items: list[Any] | None
-    chat_id: str
-    message_id: str
+class FeishuResponseData(Protocol):
+    @property
+    def items(self) -> list[Any] | None: ...
 
 
-class FeishuMessageResponse:
-    raw: FeishuRawResponse | None
-    code: int
-    msg: str
-    data: FeishuResponseData | None
+class FeishuMessageResponse(Protocol):
+    @property
+    def raw(self) -> FeishuRawResponse | None: ...
+    @property
+    def code(self) -> int: ...
+    @property
+    def msg(self) -> str: ...
+    @property
+    def data(self) -> FeishuResponseData | None: ...
 
-    def success(self) -> bool:
-        raise NotImplementedError
-
-
-class FeishuMessageResource:
-    def list(self, request: object) -> FeishuMessageResponse:
-        raise NotImplementedError
-
-    def create(self, request: object) -> FeishuMessageResponse:
-        raise NotImplementedError
+    def success(self) -> bool: ...
 
 
-class FeishuImV1:
-    message: FeishuMessageResource
+class FeishuMessageResource(Protocol):
+    def list(self, request: object, /) -> FeishuMessageResponse: ...
+    def create(self, request: object, /) -> FeishuMessageResponse: ...
 
 
-class FeishuImNamespace:
-    v1: FeishuImV1
+class FeishuImV1(Protocol):
+    @property
+    def message(self) -> FeishuMessageResource: ...
 
 
-class FeishuRestConfig:
-    timeout: float
+class FeishuImNamespace(Protocol):
+    @property
+    def v1(self) -> FeishuImV1: ...
 
 
-class FeishuRestClient:
-    im: FeishuImNamespace
-    _config: FeishuRestConfig
+class FeishuRestConfig(Protocol):
+    @property
+    def timeout(self) -> float | None: ...
+
+
+class FeishuRestClient(Protocol):
+    @property
+    def im(self) -> FeishuImNamespace: ...
+    @property
+    def _config(self) -> FeishuRestConfig: ...
 
 
 class FeishuListRejected(RuntimeError):  # noqa: N818 — reads as the outcome, like its log message "Feishu list rejected"
@@ -151,11 +156,9 @@ def pending_after(
 
 # meiva:note
 # The chat's newest page of messages (20), ascending; failed list calls raise.
-async def list_chat(rest_client: FeishuRestClient | object, chat_id: str) -> list[Any]:
+async def list_chat(rest_client: FeishuRestClient, chat_id: str) -> list[Any]:
     from lark_oapi.api.im.v1 import ListMessageRequest  # pyright: ignore[reportUnknownVariableType]
 
-    rest_any: Any = rest_client
-    client_ref: FeishuRestClient = rest_any
     request: object = (
         ListMessageRequest.builder()  # pyright: ignore[reportUnknownMemberType]
         .container_id_type("chat")
@@ -165,7 +168,9 @@ async def list_chat(rest_client: FeishuRestClient | object, chat_id: str) -> lis
         .build()
     )
     try:
-        response = await asyncio.to_thread(client_ref.im.v1.message.list, request)
+        response: FeishuMessageResponse = await asyncio.to_thread(
+            rest_client.im.v1.message.list, request
+        )
     except (requests.exceptions.SSLError, requests.exceptions.ProxyError):
         raise
     except (requests.ConnectionError, requests.Timeout) as exc:

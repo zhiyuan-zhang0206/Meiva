@@ -1,5 +1,14 @@
 exports = ["browser_reach.py", "frontend.py", "gate.py", "lgtm.py", "memory_search.py", "otel_collector.py", "permissions_helper.py", "prod_venv.py", "protocol_probe.py", "redis_acl.py", "redis_bridge.py"]
 
+[roots]
+"browser.py" = ["settings"]
+"browser_mcp.py" = ["settings"]
+"frontend.py" = ["settings"]
+"gateway.py" = ["settings"]
+"lgtm.py" = ["settings"]
+"otel_collector.py" = ["settings"]
+"protocol_probe.py" = ["settings"]
+
 [uses]
 "frontend.py" = ["plans"]
 "lgtm.py" = ["plans"]

@@ -4,7 +4,7 @@
 from __future__ import annotations
 
 import shlex
-from collections.abc import Callable, Mapping
+from collections.abc import Mapping
 from functools import partial
 from pathlib import Path
 
@@ -22,8 +22,6 @@ from base.paths import meiva_home, otel_collector_binary, otel_collector_config
 from services.supervision.roster import plugin_services
 from services.supervision.roster.healthz import healthz_daemon
 from services.supervision.roster.service_spec import AGENT_RUNNER, BOTH, GATEWAY, ServiceSpec
-
-FieldReader = Callable[[str], str | int | float | bool]
 
 # meiva:note
 # After uvicorn drains connections, gateway lifespan cleanup still joins admitted
@@ -54,13 +52,13 @@ def redis_bridge_launch(endpoint: RedisBridgeEndpoint | None) -> tuple[str, str,
 # meiva:note
 # Observe the relay endpoint when the roster is built. The required-relay gate
 # reports an unconfigured home; its declaration still carries the bare command.
-def redis_bridge_command(*, read_field: FieldReader = get_field) -> tuple[str, str, int]:
+def redis_bridge_command() -> tuple[str, str, int]:
     try:
         endpoint = redis_bridge_endpoint(
             meiva_home(),
-            machine_host=lambda: str(read_field("machine_host")).strip() or "localhost",
+            machine_host=lambda: str(get_field("machine_host")).strip() or "localhost",
             remote_data_plane=lambda: names_foreign_host(
-                str(read_field("db_url")), str(read_field("redis_url"))
+                str(get_field("db_url")), str(get_field("redis_url"))
             ),
         )
     except RedisBridgeUnconfiguredError:
@@ -91,7 +89,6 @@ def browser_probe() -> DaemonProbe:
 # The gateway, agent-runner and shared groups retain their concatenation order.
 def build_services(
     *,
-    read_field: FieldReader = get_field,
     plugins: tuple[ServiceSpec, ...] | None = None,
     plugin_dirs: Mapping[str, Path] | None = None,
 ) -> tuple[ServiceSpec, ...]:
@@ -109,16 +106,16 @@ def build_services(
     probe_protocol_service = partial(probe_protocol, home=meiva_home())
     _fe_port = app_port()
     _fe_url = f"http://localhost:{_fe_port}"
-    _bridge_cmd, _bridge_host, _bridge_port = redis_bridge_command(read_field=read_field)
-    gateway_health_url = str(read_field("gateway_health_url"))
-    gateway_shutdown_timeout_s = float(read_field("gateway_graceful_shutdown_timeout_seconds"))
-    memory_search_port = int(read_field("memory_search_port"))
-    memory_search_uri = str(read_field("memory_search_uri"))
-    embedding_backend = str(read_field("embedding_backend"))
-    gateway_port = int(read_field("gateway_port"))
-    browser_origin = str(read_field("browser_origin"))
-    browser_cdp_port = int(read_field("browser_cdp_port"))
-    telemetry_otlp_port = int(read_field("telemetry_otlp_port"))
+    _bridge_cmd, _bridge_host, _bridge_port = redis_bridge_command()
+    gateway_health_url = str(get_field("gateway_health_url"))
+    gateway_shutdown_timeout_s = float(get_field("gateway_graceful_shutdown_timeout_seconds"))
+    memory_search_port = int(get_field("memory_search_port"))
+    memory_search_uri = str(get_field("memory_search_uri"))
+    embedding_backend = str(get_field("embedding_backend"))
+    gateway_port = int(get_field("gateway_port"))
+    browser_origin = str(get_field("browser_origin"))
+    browser_cdp_port = int(get_field("browser_cdp_port"))
+    telemetry_otlp_port = int(get_field("telemetry_otlp_port"))
 
     gateway_services = (
         ServiceSpec(

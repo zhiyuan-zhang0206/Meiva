@@ -7,7 +7,7 @@ from contextlib import suppress
 from pathlib import Path
 from threading import Event
 from time import monotonic
-from typing import cast
+from typing import Any, cast
 
 import pytest
 
@@ -16,13 +16,14 @@ from base.native_process.root_control.instance_lock import (
     acquire_instance_lock,
     release_instance_lock,
 )
+from base.native_process.tests.fake_process_control import FakeProcessControl
 from services.supervision.meiva_root.daemon import finish
 from services.supervision.meiva_root.health import HealthMonitor, ProbeRunner
 from services.supervision.meiva_root.manifest import RestartPolicy, UnitManifest, UnitRegistry
 from services.supervision.meiva_root.probes import ProbeRegistry
 from services.supervision.meiva_root.server import ControlServer
 from services.supervision.meiva_root.supervisor import Supervisor, SupervisorConfig
-from services.supervision.meiva_root.unit_records import Generation, UnitRuntime
+from services.supervision.meiva_root.unit_records import Generation
 
 _CHILD = Path(__file__).with_name("child_unit.py")
 
@@ -154,6 +155,33 @@ async def test_waiting_probe_caller_receives_original_unknown_error() -> None:
             assert caught is error
 
 
+class _DelegatingProcess:
+    def __init__(self, proc: asyncio.subprocess.Process) -> None:
+        self._proc = proc
+
+    @property
+    def pid(self) -> int:
+        return self._proc.pid
+
+    @property
+    def returncode(self) -> int | None:
+        return self._proc.returncode
+
+    def kill(self) -> None:
+        self._proc.kill()
+
+    def terminate(self) -> None:
+        self._proc.terminate()
+
+    def send_signal(self, sig: int) -> None:
+        self._proc.send_signal(sig)
+
+
+async def _exec_child(*argv: str, **options: object) -> asyncio.subprocess.Process:
+    options_any: Any = options
+    return await asyncio.create_subprocess_exec(*argv, **options_any)
+
+
 async def test_cross_generation_watch_errors_are_visible_and_collected_without_peer_cancel(
     tmp_path: Path,
     caplog: pytest.LogCaptureFixture,
@@ -161,19 +189,25 @@ async def test_cross_generation_watch_errors_are_visible_and_collected_without_p
     unit = UnitManifest(
         "worker", (sys.executable, str(_CHILD), "noop"), RestartPolicy.ALWAYS, "root"
     )
-    owner_ref: list[Supervisor] = []
     errors = [RuntimeError("first generation"), RuntimeError("second generation")]
     watched = 0
 
-    async def fail_after_reap(runtime: UnitRuntime, generation: Generation) -> None:
-        nonlocal watched
-        error = errors[watched]
-        watched += 1
-        await owner_ref[0]._watch(runtime, generation)
-        raise error
+    class _PostReapErrorProcess(_DelegatingProcess):
+        async def wait(self) -> int:
+            nonlocal watched
+            error = errors[watched]
+            watched += 1
+            await self._proc.wait()
+            raise error
 
-    owner = Supervisor(UnitRegistry([unit]), run_dir=tmp_path, watch_fn=fail_after_reap)
-    owner_ref.append(owner)
+    async def spawn_with_post_reap_error(
+        *argv: str, **options: object
+    ) -> asyncio.subprocess.Process:
+        proc = await _exec_child(*argv, **options)
+        wrapped: Any = _PostReapErrorProcess(proc)
+        return wrapped
+
+    owner = Supervisor(UnitRegistry([unit]), run_dir=tmp_path, spawn=spawn_with_post_reap_error)
     caplog.set_level(logging.ERROR)
     peer_release = asyncio.Event()
     async with asyncio.TaskGroup() as participants:
@@ -214,15 +248,23 @@ async def test_failed_watch_never_certifies_an_unreaped_live_child(
         "root",
     )
     error = RuntimeError("wait implementation failed")
+    real_procs: list[asyncio.subprocess.Process] = []
 
-    async def broken_watch(_runtime: UnitRuntime, _generation: Generation) -> None:
-        raise error
+    class _BrokenWaitProcess(_DelegatingProcess):
+        async def wait(self) -> int:
+            raise error
+
+    async def spawn_broken_wait(*argv: str, **options: object) -> asyncio.subprocess.Process:
+        proc = await _exec_child(*argv, **options)
+        real_procs.append(proc)
+        wrapped: Any = _BrokenWaitProcess(proc)
+        return wrapped
 
     owner = Supervisor(
         UnitRegistry([unit]),
         run_dir=tmp_path,
         config=SupervisorConfig(stop_timeout_s=0.02, stop_kill_reap_s=0.1),
-        watch_fn=broken_watch,
+        spawn=spawn_broken_wait,
     )
     await owner.start()
     generation = owner._units["worker"].generation
@@ -239,9 +281,10 @@ async def test_failed_watch_never_certifies_an_unreaped_live_child(
         assert error in _leaves(caught.value)
         assert not generation.exited.is_set()
     finally:
-        if generation.proc.returncode is None:
-            generation.proc.kill()
-        await generation.proc.wait()
+        for proc in real_procs:
+            if proc.returncode is None:
+                proc.kill()
+            await proc.wait()
 
 
 async def test_shutdown_closes_supervisor_birth_admission(tmp_path: Path) -> None:
@@ -288,16 +331,24 @@ async def test_refused_child_keeps_real_reap_and_late_error_at_original_owner(
         RestartPolicy.ALWAYS,
         "root",
     )
-    owner_ref: list[Supervisor] = []
     error = RuntimeError("late reap bookkeeping failed")
 
-    async def fail_after_reap(runtime: UnitRuntime, generation: Generation) -> None:
-        await owner_ref[0]._watch(runtime, generation)
-        raise error
+    class _LateErrorProcess(_DelegatingProcess):
+        def __init__(self, proc: asyncio.subprocess.Process) -> None:
+            super().__init__(proc)
+            self._raised = False
 
-    def never_signal(_identity: object, *, force: bool = False) -> bool:
-        del force
-        return False
+        async def wait(self) -> int:
+            rc = await self._proc.wait()
+            if not self._raised:
+                self._raised = True
+                raise error
+            return rc
+
+    async def spawn_late_error(*argv: str, **options: object) -> asyncio.subprocess.Process:
+        proc = await _exec_child(*argv, **options)
+        wrapped: Any = _LateErrorProcess(proc)
+        return wrapped
 
     owner = Supervisor(
         UnitRegistry([unit]),
@@ -307,10 +358,9 @@ async def test_refused_child_keeps_real_reap_and_late_error_at_original_owner(
             stop_kill_reap_s=0.1,
             watch_join_timeout_s=0.02,
         ),
-        signal_owned=never_signal,
-        watch_fn=fail_after_reap,
+        spawn=spawn_late_error,
+        process_control=FakeProcessControl(),
     )
-    owner_ref.append(owner)
     caplog.set_level(logging.ERROR)
     await owner.start()
     generation = owner._units["worker"].generation
@@ -348,27 +398,31 @@ async def test_watch_join_has_independent_bound_when_completed_child_watch_resis
     unit = UnitManifest(
         "worker", (sys.executable, str(_CHILD), "noop"), RestartPolicy.ALWAYS, "root"
     )
-    owner_ref: list[Supervisor] = []
     release, entered = asyncio.Event(), asyncio.Event()
     error = RuntimeError("late cancel-resistant watch failure")
 
-    async def resistant(runtime: UnitRuntime, generation: Generation) -> None:
-        await owner_ref[0]._watch(runtime, generation)
-        entered.set()
-        while not release.is_set():
-            try:
-                await release.wait()
-            except asyncio.CancelledError:
-                continue
-        raise error
+    class _ResistantProcess(_DelegatingProcess):
+        async def wait(self) -> int:
+            await self._proc.wait()
+            entered.set()
+            while not release.is_set():
+                try:
+                    await release.wait()
+                except asyncio.CancelledError:
+                    continue
+            raise error
+
+    async def spawn_resistant(*argv: str, **options: object) -> asyncio.subprocess.Process:
+        proc = await _exec_child(*argv, **options)
+        wrapped: Any = _ResistantProcess(proc)
+        return wrapped
 
     owner = Supervisor(
         UnitRegistry([unit]),
         run_dir=tmp_path,
         config=SupervisorConfig(watch_join_timeout_s=0.02),
-        watch_fn=resistant,
+        spawn=spawn_resistant,
     )
-    owner_ref.append(owner)
     await owner.start()
     wait_entered = asyncio.create_task(entered.wait())
     stopped: asyncio.Task[None] | None = None

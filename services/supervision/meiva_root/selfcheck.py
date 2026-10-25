@@ -28,7 +28,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import time
-from collections.abc import Callable
+from collections.abc import Mapping
 from contextlib import suppress
 from dataclasses import dataclass
 from typing import Any, Protocol
@@ -90,16 +90,14 @@ class TreeSelfCheck:
         *,
         config: SelfCheckConfig | None = None,
         tasks: asyncio.TaskGroup | None = None,
-        state_reader: Callable[[int, int], str] = child_state,
     ) -> None:
         self._host = host
         self._config = config if config is not None else SelfCheckConfig()
         self._state = _ChainState()
         self._task: asyncio.Task[None] | None = None
         self._tasks = tasks
-        self._state_reader = state_reader
 
-    def run_once(self) -> None:
+    def run_once(self, *, verdicts: Mapping[str, str] | None = None) -> None:
         """Walk every unit once, folding the verdicts into the episode state."""
         now = _monotonic()
         self._state.rounds += 1
@@ -108,14 +106,18 @@ class TreeSelfCheck:
         root_pid = int(raw_root_pid)
         raw_units: Any = view["units"]
         units: list[dict[str, object]] = raw_units
-        broken, reasons, unverifiable = self._walk(units, root_pid)
+        broken, reasons, unverifiable = self._walk(units, root_pid, verdicts=verdicts)
         self._fold_broken(broken, reasons, root_pid, now)
         self._fold_unverifiable(unverifiable, now)
         if not broken and not unverifiable:
             _log.debug("[selfcheck] chain intact (%d unit(s) walked)", len(units))
 
     def _walk(
-        self, units: list[dict[str, object]], root_pid: int
+        self,
+        units: list[dict[str, object]],
+        root_pid: int,
+        *,
+        verdicts: Mapping[str, str] | None = None,
     ) -> tuple[list[str], dict[str, str], list[str]]:
         """One OS read per running unit; a failed read downgrades, never aborts."""
         broken: list[str] = []
@@ -131,7 +133,11 @@ class TreeSelfCheck:
                 reasons[unit_id] = "running without a recorded pid"
                 continue
             raw_pid: Any = pid
-            verdict = self._state_reader(int(raw_pid), root_pid)
+            verdict = (
+                verdicts[unit_id]
+                if verdicts is not None and unit_id in verdicts
+                else child_state(int(raw_pid), root_pid)
+            )
             if verdict == "attached":
                 continue
             if verdict == "unverifiable":

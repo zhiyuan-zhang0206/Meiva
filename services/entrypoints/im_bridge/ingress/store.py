@@ -3,12 +3,10 @@
 import json
 import time
 from collections.abc import Mapping
-from typing import Any
 from uuid import NAMESPACE_OID, UUID, uuid5
 
 from psycopg import Connection, sql
 from psycopg.types.json import Jsonb
-from psycopg_pool import ConnectionPool
 
 from base import telemetry
 from base.agents.inbox.chat_delivery import insert_chat_inbound_in_transaction
@@ -56,9 +54,8 @@ def receipt_from_row(row: tuple[object, ...]) -> IngressReceipt:
 
 
 class WeixinIngressStore:
-    def __init__(self, pool: ConnectionPool | ConnectionSource | object = None) -> None:
-        pool_any: Any = pool
-        self.pool: ConnectionSource | None = pool_any
+    def __init__(self, pool: ConnectionSource | None = None) -> None:
+        self.pool: ConnectionSource | None = pool
         self._seq = 0
 
     def _next_uuid(self) -> UUID:

@@ -10,4 +10,5 @@ exports = ["diagnostic_probes.py", "manifests.py"]
 "__init__.py" = "strict"
 
 [roots]
+"diagnostic_probes.py" = { kinds = ["settings"], why = "Host diagnostic probes read configured endpoints and ports" }
 "glue.py" = { kinds = ["settings"], why = "Root supervisor startup composes process-owned handles and configuration" }

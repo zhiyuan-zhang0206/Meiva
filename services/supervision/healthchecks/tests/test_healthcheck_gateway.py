@@ -113,4 +113,4 @@ def test_probe_survives_a_malformed_response(caplog: pytest.LogCaptureFixture) -
 def test_probe_reads_the_gateway_health_url_when_it_runs() -> None:
     """The URL is read per probe, not captured when the module imports."""
     with HttpStub(body=_own_health_body()) as gateway:
-        assert hc.gateway_probe(read_url=lambda _name: gateway.url).alive is True
+        assert hc.gateway_probe(url=gateway.url).alive is True

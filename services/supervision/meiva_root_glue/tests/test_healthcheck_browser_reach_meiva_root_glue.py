@@ -18,26 +18,14 @@ from services.supervision.meiva_root_glue import diagnostic_probes as probes
 def test_canary_distinguishes_browser_failure_from_unknown(
     outcome: str, host_ok: bool, expected: str
 ) -> None:
-    def _fake_probe_browser() -> DaemonProbe:
-        return DaemonProbe.up("owned")
-
-    def _fake_canary(_port: int, _url: str, _timeout_s: float) -> hc.CanaryResult:
-        return hc.CanaryResult(outcome, "browser evidence")
-
-    def _fake_host_probe(_url: str, _timeout_s: float) -> hc.HostResult:
-        return hc.HostResult(host_ok, "host evidence")
-
-    fields: dict[str, str | int | float | bool] = {
-        "gateway_health_url": "https://example.invalid/health",
-        "browser_cdp_port": 9222,
-        "browser_reach_timeout_s": 1,
-    }
     assert (
         probes.browser_reach(
-            read_field=lambda name: fields[name],
-            browser_probe=_fake_probe_browser,
-            canary_fn=_fake_canary,
-            host_probe_fn=_fake_host_probe,
+            url="https://example.invalid/health",
+            port=9222,
+            timeout_s=1.0,
+            browser_verdict=DaemonProbe.up("owned"),
+            canary_result=hc.CanaryResult(outcome, "browser evidence"),
+            host_result=hc.HostResult(host_ok, "host evidence"),
         ).verdict.value
         == expected
     )
