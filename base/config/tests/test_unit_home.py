@@ -4,7 +4,7 @@ from pathlib import Path
 
 from base.config import Settings
 from base.config.base import unit_home as resolve_unit_home
-from base.paths.home import resolve_meiva_home
+from base.paths.home import home_from_env, resolve_meiva_home
 
 
 def test_unit_home_follows_meiva_home(unit_home: Path) -> None:
@@ -13,6 +13,7 @@ def test_unit_home_follows_meiva_home(unit_home: Path) -> None:
 
 def test_unit_home_defaults_to_home_meiva() -> None:
     assert resolve_unit_home() == resolve_meiva_home()
+    assert home_from_env({}, user_home=Path("/srv/home")) == Path("/srv/home/.meiva")
 
 
 def test_pidfile_fields_rooted_under_unit_home() -> None:
