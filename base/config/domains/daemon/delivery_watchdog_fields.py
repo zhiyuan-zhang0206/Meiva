@@ -68,3 +68,27 @@ class DeliveryWatchdogFields:
             "scope": "cluster-pinned",
         },
     )
+
+    delivery_watchdog_stranded_wake_cooldown_seconds: float = Field(
+        default=300.0,
+        alias="MEIVA_DELIVERY_WATCHDOG_STRANDED_WAKE_COOLDOWN_SECONDS",
+        description="Stranded-wake cooldown (seconds): at most one retry of the delivery auto-resurrect per terminated owner per window, stamped durably on agents_meta.wake_suppressed_until before the attempt. 300s matches the crash-resurrect backoff: a wake either claims the stranded row within seconds, or the owner is unstartable and a tighter cadence only multiplies failed launch attempts.",
+        json_schema_extra={
+            "restart_required": "all",
+            "writable": True,
+            "sensitive": False,
+            "scope": "cluster-pinned",
+        },
+    )
+
+    delivery_watchdog_stranded_wake_max_per_round: int = Field(
+        default=2,
+        alias="MEIVA_DELIVERY_WATCHDOG_STRANDED_WAKE_MAX_PER_ROUND",
+        description="Stranded-wake per-round cap (owners): how many terminated owners one scan round may wake. Each wake is one launch RPC to the owner's home machine, so a fleet-wide wave of dead owners drains over rounds instead of as a burst; two per 30s round stays far inside the launch capacity while clearing a normal backlog in one round.",
+        json_schema_extra={
+            "restart_required": "all",
+            "writable": True,
+            "sensitive": False,
+            "scope": "cluster-pinned",
+        },
+    )

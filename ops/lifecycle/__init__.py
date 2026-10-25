@@ -314,10 +314,12 @@ def _read_resurrect_facts(
 #     Fresh chat can wake a terminated agent after a fix. Background heartbeat and other
 #     automatic triggers stop after a permanent provider rejection. System chat notices
 #     cannot resurrect, including old hosted-turn recovery markers. The home CAS verifies
-#     the pending input is newer than termination and above the force fence. No watchdog
-#     retries a failed attempt. Unknown errors reach the sender; known placement and
-#     refusal conditions are logged with the input queued. A new message or explicit
-#     operator resurrection can try again later.
+#     the pending input against the shared kill-command fence
+#     (`TRIGGER_AFTER_KILL_COMMAND`). This call itself does not retry a failed attempt:
+#     unknown errors reach the sender, known placement and refusal conditions are logged
+#     with the input queued, and the delivery watchdog's stranded-wake fallback retries
+#     the same wake on its own cooldown until the dead-letter bound. A new message or
+#     explicit operator resurrection can also try again.
 #
 #     The trigger kind is canonicalized before any database read. A live agent then ends the
 #     call after its one status read. For a terminated agent the shell

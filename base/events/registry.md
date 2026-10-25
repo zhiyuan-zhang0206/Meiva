@@ -133,6 +133,7 @@ above (or when its name is unregistered); otherwise it stays in the JSONL mirror
 | `pty_transcript` | a pty session's transcript append failed (full disk, closed fd); the session keeps running with an incomplete transcript | anomaly | — | — | events | — |
 | `status_change` | agent status transition — both telemetry (loguru) and audit (audit_events) sides emit this name | noise | from, to, unapplied_handoff_receipt | — | events | — |
 | `inbound_consumed_unknown` | a claimed inbound was consumed without knowing whether its work ran (host crash / aborted turn); the row is marked in its payload and is never redelivered — this event is the only record of what was lost | anomaly | inbound_id, kind, age_s, content_preview | — | events | ✓ |
+| `delivery_stranded_wake` | a message reached a terminated owner with no live consumer and the delivery fallback woke it: the delivery-time auto-resurrect did not run because the message committed while the owner still read running | anomaly | inbound_id, kind | — | events | ✓ |
 | `delivery_stalled` | delivery backlog | anomaly | inbound_id, age_s | — | events | ✓ |
 | `exec` | execute_code succeeded | observation | body, ok, duration_seconds | — | events | ✓ |
 | `exec_failed` | execute_code failed | anomaly | exc_type, body | — | events | ✓ |

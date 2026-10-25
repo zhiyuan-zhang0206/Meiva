@@ -83,6 +83,9 @@ def test_entry_retains_one_gate_for_work_and_lazy_log_database(
         runtime: Path,
         database: Callable[[], Database],
         image: LoadedCommit,
+        # meiva:note
+        # Only an entry that composes a bus or a clock takes the machine identity.
+        machine: object | None = None,
     ) -> None:
         assert runtime == pipeline.call_args.kwargs["home"] / "run"
         received.append(database)
@@ -131,6 +134,7 @@ def test_work_failure_keeps_the_original_exception_and_exit_status(
         runtime: Path,
         database: Callable[[], Database],
         image: LoadedCommit,
+        machine: object | None = None,
     ) -> None:
         raise failure
 

@@ -1,11 +1,11 @@
-exports = ["daemon.py", "dead_letter.py"]
+exports = ["daemon.py", "dead_letter.py", "stranded_wake.py"]
 
 [uses]
-"daemon.py" = ["dead_letter.py"]
-"tests" = ["daemon.py"]
+"daemon.py" = ["dead_letter.py", "stranded_wake.py"]
+"tests" = ["daemon.py", "stranded_wake.py"]
 
 [purity]
 "__init__.py" = "strict"
 
 [roots]
-"daemon.py" = { kinds = ["settings"], why = "Service or operator process entry boots configuration before composing its resources" }
+"daemon.py" = { kinds = ["bus", "settings"], why = "Service or operator process entry boots configuration before composing its resources" }

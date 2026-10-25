@@ -8,8 +8,6 @@ alert semantics (a row that flips pending -> claimed -> pending re-alerts).
 from __future__ import annotations
 
 import time
-from collections.abc import Iterator
-from pathlib import Path
 
 import psycopg
 import pytest
@@ -35,23 +33,6 @@ _DISPATCH_THRESHOLD_S = 1.0
 _MAX_DISPATCH_COUNT = 5
 _DISPATCH_BACKOFF_STEPS_S = [5.0, 30.0, 120.0, 300.0]
 _HOST_STALENESS_S = 120.0
-
-
-@pytest.fixture
-def event_pipeline(
-    database: Database, machine_identity: MachineIdentityReader, unit_home: Path
-) -> Iterator[telemetry.EventPipeline]:
-    """Own the process writer used by the service operation and mirror barrier."""
-    pipeline = telemetry.build_pipeline(
-        database=lambda: database, machine=machine_identity, home=unit_home
-    )
-    try:
-        telemetry.init_telemetry(
-            process="test-wake-service", pipeline=pipeline, machine_reader=machine_identity.name
-        )
-        yield pipeline
-    finally:
-        pipeline.stop(timeout=2)
 
 
 @pytest.fixture

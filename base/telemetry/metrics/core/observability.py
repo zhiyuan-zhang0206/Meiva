@@ -16,7 +16,7 @@ from base.telemetry.metrics.logql import (
     event_count,
     harness_source_filter,
 )
-from base.telemetry.metrics.plugin_metrics import MetricSpec
+from base.telemetry.metrics.plugin_metrics import MetricSpec, ThresholdStep
 
 PACK_MODULES: tuple[ModuleType, ...] = (exec_envelope, frontend)
 
@@ -648,6 +648,37 @@ def core_metrics() -> list[MetricSpec]:
             section="Fleet",
             order=2,
             field_defaults={"color": {"mode": "palette-classic"}},
+            width=6,
+            output=["grafana"],
+        )
+    )
+
+    specs.append(
+        MetricSpec(
+            name="meiva_obs_delivery_stranded_wake_count",
+            title="Stranded wake",
+            time_basis="window",
+            description=(
+                "Windowed delivery_stranded_wake total — how many times the delivery "
+                "watchdog's stranded-wake fallback woke a terminated owner for work its "
+                "dying incarnation never claimed. Each occurrence is one message delivery "
+                "could not wake (it landed while the owner was still alive) and that no "
+                "consumer claimed; event_name='delivery_stranded_wake', "
+                "category='telemetry'."
+            ),
+            event_name="delivery_stranded_wake",
+            category="telemetry",
+            unit="short",
+            panel="stat",
+            query_type="logql",
+            query=event_count(
+                "category={category}", "$__range", matchers="event_name={event_name}"
+            ),
+            target_names=["stranded wake"],
+            panel_id=53,
+            section="Fleet",
+            order=3,
+            thresholds=[ThresholdStep(color="orange", value=1)],
             width=6,
             output=["grafana"],
         )

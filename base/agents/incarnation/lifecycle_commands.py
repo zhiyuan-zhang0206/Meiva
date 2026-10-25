@@ -27,6 +27,32 @@ def is_system_notice_source(source: str, payload: Mapping[str, object] | None) -
 
 
 # meiva:note
+# The wake-trigger fence of a terminated owner, as one SQL predicate.
+#
+# A trigger must be newer than every kill command the owner received, so work
+# queued before a kill cannot reverse it — including a repeated force on an
+# already terminated row, which changes no status but appends a command.
+#
+# The second half decides whether work that arrived before the death may wake the
+# owner at all, and the death's own mark answers it: only a death a command ended
+# (`termination_source = 'user'`) admits it, because a commanded death spends time
+# between the kill decision and the process's last write, and a peer's message that
+# lands in that window is work the dying incarnation never claimed. An involuntary
+# death — crash, failed launch — never wakes for leftover work at any age; that is
+# the no-replay boundary. An unmarked row (NULL, legacy) fails closed.
+#
+# Correlated against `m` and the unaliased `agents_meta` row, exactly like
+# `SYSTEM_NOTICE_SOURCE`.
+# meiva:link docs/decisions/agents/lifecycle/2026-07-21-crash-auto-resurrect.md
+TRIGGER_AFTER_KILL_COMMAND: LiteralString = (
+    "m.id > COALESCE((SELECT max(t.id) FROM inbound_messages t "
+    "WHERE t.agent_id = agents_meta.id AND t.kind = 'terminate'), 0) "
+    "AND (m.created_at > agents_meta.status_changed_at "
+    "     OR agents_meta.termination_source = 'user')"
+)
+
+
+# meiva:note
 # A terminate command may carry `{"kill_all_shell_sessions": true}` in its
 # payload: every shell session of the agent on its home machine (watchers
 # included) is killed with a graceful termination, right before it commits

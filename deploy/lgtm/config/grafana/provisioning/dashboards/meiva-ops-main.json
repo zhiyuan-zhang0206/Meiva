@@ -3988,6 +3988,71 @@
     "type": "loki",
     "uid": "loki"
    },
+   "description": "Windowed delivery_stranded_wake total \u2014 how many times the delivery watchdog's stranded-wake fallback woke a terminated owner for work its dying incarnation never claimed. Each occurrence is one message delivery could not wake (it landed while the owner was still alive) and that no consumer claimed; event_name='delivery_stranded_wake', category='telemetry'.",
+   "fieldConfig": {
+    "defaults": {
+     "color": {
+      "fixedColor": "blue",
+      "mode": "fixed"
+     },
+     "thresholds": {
+      "mode": "absolute",
+      "steps": [
+       {
+        "color": "green",
+        "value": null
+       },
+       {
+        "color": "orange",
+        "value": 1.0
+       }
+      ]
+     },
+     "unit": "short"
+    }
+   },
+   "gridPos": {
+    "h": 4,
+    "w": 6,
+    "x": 6,
+    "y": 170
+   },
+   "id": 53,
+   "options": {
+    "colorMode": "value",
+    "graphMode": "area",
+    "justifyMode": "auto",
+    "orientation": "auto",
+    "reduceOptions": {
+     "calcs": [
+      "last"
+     ],
+     "fields": "",
+     "values": false
+    },
+    "textMode": "auto"
+   },
+   "targets": [
+    {
+     "datasource": {
+      "type": "loki",
+      "uid": "loki"
+     },
+     "editorMode": "code",
+     "expr": "sum(count_over_time({service_name=\"unknown_service\", event_name=\"delivery_stranded_wake\"} | json | category=\"telemetry\" [$__range]))",
+     "legendFormat": "stranded wake",
+     "queryType": "instant",
+     "refId": "A"
+    }
+   ],
+   "title": "Stranded wake (window)",
+   "type": "stat"
+  },
+  {
+   "datasource": {
+    "type": "loki",
+    "uid": "loki"
+   },
    "description": "Window totals by stall-age bucket \u2014 explicit exception to the per-minute basis (categorized counts, not rates).",
    "fieldConfig": {
     "defaults": {
@@ -4023,7 +4088,7 @@
    "gridPos": {
     "h": 7,
     "w": 12,
-    "x": 6,
+    "x": 12,
     "y": 170
    },
    "id": 9,
