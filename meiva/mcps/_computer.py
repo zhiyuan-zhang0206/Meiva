@@ -14,25 +14,11 @@ from __future__ import annotations
 import asyncio
 import json
 from contextlib import AsyncExitStack, suppress
-from typing import Any, Protocol
+from typing import Any
+
+from mcp.types import CallToolResult, ListToolsResult, Tool
 
 from base.host.net.resilience import Policy, aretry
-
-
-class _ToolItem(Protocol):
-    name: str
-    description: str | None
-
-
-class ToolListResult(Protocol):
-    tools: list[_ToolItem]
-
-
-class ToolCallResult(Protocol):
-    content: list[Any]
-    is_error: bool | None
-    structured_content: dict[str, Any] | None
-
 
 # Snapshot results stay small (PNG metadata), but keep the same generous line
 # cap as the browser direct-dial so a future inline-image tier fits.
@@ -110,21 +96,15 @@ class ComputerLineSession:
             raise RuntimeError(resp.get("error", "computer-mcp daemon error"))
         return resp["result"]
 
-    async def list_tools(self) -> ToolListResult:
-        from mcp import types
-
+    async def list_tools(self) -> ListToolsResult:
         result: Any = await self._request({"method": "list_tools"}, with_agent=False)
-        out: Any = types.ListToolsResult(tools=[types.Tool.model_validate(t) for t in result])
-        return out
+        return ListToolsResult(tools=[Tool.model_validate(t) for t in result])
 
-    async def call_tool(self, name: str, args: dict[str, Any]) -> ToolCallResult:
-        from mcp import types
-
+    async def call_tool(self, name: str, args: dict[str, Any]) -> CallToolResult:
         result: Any = await self._request(
             {"method": "call_tool", "tool": name, "args": args}, with_agent=True
         )
-        out: Any = types.CallToolResult.model_validate(result)
-        return out
+        return CallToolResult.model_validate(result)
 
 
 async def _close_writer(writer: asyncio.StreamWriter) -> None:

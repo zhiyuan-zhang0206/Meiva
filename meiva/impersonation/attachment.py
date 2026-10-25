@@ -23,6 +23,7 @@ from uuid import uuid4
 from base.agents.context import MeivaContext
 from base.agents.context.clients import ClientSet, DatabaseFactory
 from base.agents.context.external_attachment import ExternalAttachment
+from base.agents.context.external_attachment.state_schema import BaseAgentState
 from base.agents.context.identity import AgentIdentity, ExternalLease
 from base.agents.impersonation import merge_plugin_delta, require_active
 from base.agents.impersonation.manifest import (
@@ -41,6 +42,7 @@ from base.config.service_read import ConfigAuthority
 from base.host.env.agent_slices import PluginConfigView
 from base.native_process.ownership import process_metadata
 from base.packages.plugins.config_view import resolve_agent_plugin_pins
+from base.telemetry import Event
 from meiva.boot import (
     BorrowedBoot,
     ExternalBoot,
@@ -85,10 +87,10 @@ class _Codec:
 
     def load_snapshot(
         self, agent_id: int
-    ) -> tuple[object, Mapping[str, Any] | None, Mapping[str, Any] | None]:
+    ) -> tuple[BaseAgentState, Mapping[str, Any] | None, Mapping[str, Any] | None]:
         return plugin_state_codec().load_snapshot(agent_id, database=self._attachment._database())
 
-    def plugin_state_schema(self, state: object) -> object:
+    def plugin_state_schema(self, state: BaseAgentState) -> object:
         del state
         return plugin_state_codec().plugin_state_schema
 
@@ -101,7 +103,7 @@ class _Codec:
     def decode_plugin_delta(self, encoded: dict[str, str], state_cls: type[Any]) -> dict[str, Any]:
         return plugin_state_codec().decode_plugin_delta(encoded, state_cls)
 
-    def apply_plugin_delta(self, state: object, delta: Mapping[str, Any]) -> None:
+    def apply_plugin_delta(self, state: BaseAgentState, delta: Mapping[str, Any]) -> None:
         plugin_state_codec().apply_plugin_delta(state, delta)
 
 
@@ -190,12 +192,14 @@ class Attachment(ExternalAttachment):
             case _:
                 assert_never(boot)
 
-    def _applied_version(self, state: object, lease: Mapping[str, Any]) -> int:
-        receipt: Mapping[str, Any] = getattr(state, "impersonation_applied", {})
+    def _applied_version(self, state: BaseAgentState, lease: Mapping[str, Any]) -> int:
+        receipt = state.impersonation_applied
+        lease_id = receipt.get("lease_id")
+        version = receipt.get("version", 0)
         return applied_version(
             lease["applied_version"],
-            receipt.get("lease_id"),
-            receipt.get("version", 0),
+            lease_id if isinstance(lease_id, str) else None,
+            version if isinstance(version, int) and not isinstance(version, bool) else 0,
             self.lease_id,
         )
 
@@ -212,7 +216,7 @@ class Attachment(ExternalAttachment):
             ),
         )
 
-    def _set_state(self, state: object) -> None:
+    def _set_state(self, state: BaseAgentState) -> None:
         process_context.set_state(state)
         process_context.set_state_update({})
 
@@ -251,9 +255,8 @@ class Attachment(ExternalAttachment):
             case _:
                 assert_never(boot)
 
-    def capture_local_event(self, event: object) -> object:
-        payload: Any = event
-        return capture_local_event(payload, gate=self._event_gate)
+    def capture_local_event(self, event: Event) -> Event:
+        return capture_local_event(event, gate=self._event_gate)
 
     def _lease(self) -> dict[str, Any]:
         return require_active(self._database(), self.lease_id, local_machine=self._machine.name())

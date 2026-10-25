@@ -13,10 +13,10 @@ import types
 from pathlib import Path
 from typing import Any
 
-from meiva.mcps import _tools
-from meiva.mcps._browser import (
+from base.agents.lifecycle import (
     release_agent_chrome_pages as release_agent_chrome_pages,
 )
+from meiva.mcps import _tools
 from meiva.mcps._clients import McpClients
 from meiva.mcps.config import (
     MCPCallError as MCPCallError,

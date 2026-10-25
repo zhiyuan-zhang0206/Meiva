@@ -13,7 +13,6 @@ from __future__ import annotations
 
 from collections.abc import Sequence
 from dataclasses import replace
-from typing import Any, Literal, overload
 
 from base.api_contracts.caller_identity import CallerIdentity
 from base.clock import Clock
@@ -50,10 +49,9 @@ from .installation import EventPipelines, SamplingPolicyOwner, installed
 # caller names its own; a first load has nothing to carry, so it refuses to run without an owner.
 # ``external_caller`` is the opt-in external tool profile its root read from the process once;
 # none means the process declared no external caller.
-@overload
 def load_extensions(
     *,
-    surface: Literal[False] = False,
+    surface: bool = False,
     report: Reporter | None = None,
     catalog: ModelCatalog | None = None,
     provider_keys: ProviderKeys | None = None,
@@ -64,39 +62,7 @@ def load_extensions(
     external_caller: CallerIdentity | None = None,
     disabled_entries: Sequence[str] = (),
     validate_state: StateGate | None = None,
-) -> LoadedExtensions: ...
-
-
-@overload
-def load_extensions(
-    *,
-    surface: bool,
-    report: Reporter | None = None,
-    catalog: ModelCatalog | None = None,
-    provider_keys: ProviderKeys | None = None,
-    authority: ConfigAuthority | None = None,
-    sampling: SamplingPolicyOwner | None = None,
-    clock: Clock | None = None,
-    clients: EventPipelines | None = None,
-    external_caller: CallerIdentity | None = None,
-    disabled_entries: Sequence[str] = (),
-    validate_state: StateGate | None = None,
-) -> LoadedExtensions: ...
-
-
-def load_extensions(**options: object) -> LoadedExtensions:
-    opts: dict[str, Any] = options
-    surface: bool = opts.get("surface", False)
-    report: Reporter | None = opts.get("report")
-    catalog: ModelCatalog | None = opts.get("catalog")
-    provider_keys: ProviderKeys | None = opts.get("provider_keys")
-    authority: ConfigAuthority | None = opts.get("authority")
-    sampling: SamplingPolicyOwner | None = opts.get("sampling")
-    clock: Clock | None = opts.get("clock")
-    clients: EventPipelines | None = opts.get("clients")
-    external_caller: CallerIdentity | None = opts.get("external_caller")
-    disabled_entries: Sequence[str] = opts.get("disabled_entries", ())
-    validate_state: StateGate | None = opts.get("validate_state")
+) -> LoadedExtensions:
     previous = installed() if not surface else None
     if previous is not None:
         if sampling is None:

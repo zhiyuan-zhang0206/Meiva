@@ -73,3 +73,7 @@ exports = ["agent_identity.py", "attachment_transport.py", "batch.py", "discover
 
 [debt.wide-exports]
 "meizel.toml#exports" = 1
+
+[debt.wide-params]
+"extensions.py#def load_extensions" = 1
+"install.py#def install" = 1

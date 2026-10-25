@@ -14,7 +14,7 @@ import enum as _enum
 import inspect
 from collections.abc import Callable
 from pathlib import Path
-from types import SimpleNamespace
+from types import ModuleType, SimpleNamespace
 from typing import Any
 
 from base.api_contracts.agent_contract import Harness
@@ -372,15 +372,15 @@ def _search_meiva_for_binding(target: object) -> str | None:
     return None
 
 
-def _find_agent_visible_binding(mod: object, mod_name: str, target: object) -> str | None:
+def _find_agent_visible_binding(
+    mod: ModuleType | SimpleNamespace, mod_name: str, target: object
+) -> str | None:
     """Search one namespace's agent-visible bindings for `target` identity.
 
     The submodule prefix prefers the namespace's `_qualname` (plugin
     namespaces register that) so the heading reflects the agent-facing name
     rather than the internal module path."""
-    members: dict[str, Any] = (
-        vars(mod) if isinstance(mod, SimpleNamespace) else getattr(mod, "__dict__", {})
-    )
+    members: dict[str, Any] = vars(mod)
     for attr_name in agent_visible_names(mod):
         attr_value = members.get(attr_name)
         if attr_value is target and (inspect.isroutine(attr_value) or inspect.isclass(attr_value)):

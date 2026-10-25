@@ -33,7 +33,8 @@ from typing import Any
 import httpx2
 from loguru import logger
 from mcp.client.auth import AuthorizationCodeResult
-from mcp.shared.auth import OAuthClientInformationFull, OAuthToken
+from mcp.client.auth.oauth2 import OAuthContext
+from mcp.shared.auth import OAuthClientInformationFull, OAuthMetadata, OAuthToken
 from pydantic import AnyUrl
 
 from base.paths import meiva_home
@@ -86,9 +87,8 @@ class FileTokenStorage:
         return OAuthToken.model_validate(data) if data else None
 
     async def set_tokens(self, tokens: OAuthToken) -> None:
-        tok: Any = tokens
         data = self._read()
-        data["tokens"] = tok.model_dump(mode="json") if tok is not None else None
+        data["tokens"] = tokens.model_dump(mode="json")
         self._write(data)
 
     async def get_client_info(self) -> OAuthClientInformationFull | None:
@@ -96,9 +96,8 @@ class FileTokenStorage:
         return OAuthClientInformationFull.model_validate(data) if data else None
 
     async def set_client_info(self, client_info: OAuthClientInformationFull) -> None:
-        info: Any = client_info
         data = self._read()
-        data["client_info"] = info.model_dump(mode="json") if info is not None else None
+        data["client_info"] = client_info.model_dump(mode="json")
         self._write(data)
 
 
@@ -240,13 +239,13 @@ def _install_issuer_normalization() -> None:
     _oauth2.validate_metadata_issuer = normalized_validate_issuer  # type: ignore[attr-defined]
 
 
-def normalized_validate_issuer(oauth_metadata: object, expected_issuer: str) -> None:
+def normalized_validate_issuer(oauth_metadata: OAuthMetadata, expected_issuer: str) -> None:
     from mcp.client.auth.exceptions import OAuthFlowError
 
-    meta: Any = oauth_metadata
-    if normalize_issuer(str(meta.issuer)) != normalize_issuer(expected_issuer):
+    if normalize_issuer(str(oauth_metadata.issuer)) != normalize_issuer(expected_issuer):
         raise OAuthFlowError(
-            f"Authorization server metadata issuer mismatch: {meta.issuer} != {expected_issuer}"
+            f"Authorization server metadata issuer mismatch: "
+            f"{oauth_metadata.issuer} != {expected_issuer}"
         )
 
 
@@ -271,15 +270,14 @@ def install_token_auth_basic_shim() -> None:
     original = _oauth2.OAuthContext.prepare_token_auth
 
     def _patched(
-        self: object, data: dict[str, str], headers: dict[str, str] | None = None
+        self: OAuthContext, data: dict[str, str], headers: dict[str, str] | None = None
     ) -> tuple[dict[str, str], dict[str, str]]:
-        ctx: Any = self
-        data, headers = original(ctx, data, headers)
-        info = ctx.client_info
+        data, headers = original(self, data, headers)
+        info = self.client_info
         if (
             info is not None
             and getattr(info, "token_endpoint_auth_method", None) == "client_secret_basic"
-            and getattr(info, "client_secret", None)
+            and info.client_secret
         ):
             data.pop("client_id", None)
         return data, headers
