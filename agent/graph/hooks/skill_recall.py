@@ -124,6 +124,7 @@ class SkillRecallHook(Hook):
                     keys=runtime.context.require_provider_keys(),
                     agent_id=agent_id_from_config(config),
                     peer_turn=not tail_has_skill_recall_inbound(state.messages),
+                    created_at=runtime.context.require_clock().now(),
                 ),
                 timeout=deadline,
             )

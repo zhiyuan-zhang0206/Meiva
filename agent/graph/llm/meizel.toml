@@ -15,4 +15,3 @@ exports = ["goto.py", "node.py", "tests"]
 
 [debt.ambient-read]
 "_retry.py#random random.uniform" = 1
-"node.py#clock time.time" = 4

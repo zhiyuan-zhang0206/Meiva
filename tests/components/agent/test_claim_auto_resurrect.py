@@ -10,7 +10,6 @@ from langgraph.graph import END
 from langgraph.runtime import Runtime
 from psycopg_pool import AsyncConnectionPool
 
-import meiva
 from agent.graph import claim_node
 from agent.graph.claim.tests.claim_support import insert_inbound_kind, make_runtime, thread_config
 from agent.state import AgentState
@@ -23,6 +22,7 @@ from base.db import Database
 from base.db.code_version_gate import ProcessDbGate
 from base.events.live.bus import EventBus
 from base.lm.catalog import ModelCatalog
+from base.native_process.runtime_incarnation import RuntimeIncarnation
 
 
 @pytest.fixture
@@ -35,7 +35,7 @@ async def running_agent(
     config_authority: ConfigAuthority,
     database_gate: ProcessDbGate,
     machine_identity: MachineIdentityReader,
-):
+) -> Callable[[], tuple[int, RuntimeIncarnation]]:
     """Admit a real hosted owner and bind it throughout each dispatch test."""
     from uuid import uuid4
 
@@ -55,15 +55,13 @@ async def running_agent(
         db=database,
     )
     assert incarnation is not None
-    meiva.context = replace(meiva.context, original_incarnation=incarnation)
-    yield lambda: agent_id
+    return lambda: (agent_id, incarnation)
 
 
 async def test_claim_auto_resurrect_chat_batch_wakes_and_keeps_chat(
-    running_agent: Callable[[], int],
+    running_agent: Callable[[], tuple[int, RuntimeIncarnation]],
     db_conn: psycopg.Connection,
     aops_pool: AsyncConnectionPool,
-    monkeypatch: pytest.MonkeyPatch,
     database: Database,
     event_bus: EventBus,
     *,
@@ -79,20 +77,23 @@ async def test_claim_auto_resurrect_chat_batch_wakes_and_keeps_chat(
     from agent.ownership.hosted import admit_hosted_runtime, apply_hosted_lifecycle
     from ops.agents.wake import resurrect_agent
 
-    tid = running_agent()
+    tid, old = running_agent()
     stop = insert_inbound_kind(db_conn, tid, "", "terminate", source="user")
     assert (
         await claim_node(
             AgentState(messages=[SystemMessage(content="sys")]),
-            make_runtime(ops_pool=aops_pool, database_gate=database_gate),
+            Runtime(
+                context=replace(
+                    make_runtime(ops_pool=aops_pool, database_gate=database_gate).context,
+                    original_incarnation=old,
+                )
+            ),
             thread_config(
                 tid,
             ),
         )
     ).goto == END
 
-    old = meiva.context.original_incarnation
-    assert old is not None
     applied = await apply_hosted_lifecycle(aops_pool, old, resume_turn=False)
     assert applied is not None and applied.kind == "terminate"
     assert db_conn.execute(

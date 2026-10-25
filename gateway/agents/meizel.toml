@@ -18,9 +18,3 @@ exports = ["creation.py", "eval_guard.py", "history", "inbound_provenance.py", "
 [debt.ambient-read]
 "creation.py#clock datetime.datetime.now" = 2
 "launch_retry.py#random uuid.uuid4" = 1
-
-[debt.any-collaborator]
-"eval_guard.py#any caller_eval_isolation.pool" = 1
-
-[debt.type-cast]
-"creation.py#cast create_and_launch_agent" = 1

@@ -1,6 +1,6 @@
+import asyncio
 import io
 import sys
-from contextlib import contextmanager
 from dataclasses import replace
 from typing import Any, cast
 from unittest.mock import MagicMock
@@ -617,7 +617,6 @@ async def test_running_relay_delivers_termination_once_without_reserving_input(
 async def test_resurrection_timestamp_follows_notes_even_in_an_older_transaction(
     db_conn: psycopg.Connection,
     aops_pool: AsyncConnectionPool,
-    monkeypatch: pytest.MonkeyPatch,
     database: Database,
     event_bus: EventBus,
     *,
@@ -625,7 +624,6 @@ async def test_resurrection_timestamp_follows_notes_even_in_an_older_transaction
     database_gate: ProcessDbGate,
     machine_identity: MachineIdentityReader,
 ) -> None:
-
     local_machine = machine_identity.name()
     owner, _session = await _termination_session(
         db_conn,
@@ -634,25 +632,29 @@ async def test_resurrection_timestamp_follows_notes_even_in_an_older_transaction
         database_gate=database_gate,
         local_machine=local_machine,
     )
-    started = db_conn.execute("SELECT transaction_timestamp()").fetchone()
-    assert started is not None
     with pool(max_size=1, gate=database_gate) as other, other.connection() as conn:
+        conn.execute(
+            "SELECT 1 FROM agents_meta WHERE id=%s FOR NO KEY UPDATE",
+            (owner.agent_id,),
+        )
+        resurrect_task = asyncio.create_task(
+            asyncio.to_thread(
+                resurrect_agent,
+                database,
+                event_bus,
+                owner.agent_id,
+                resurrected_by="user",
+                prompt="Continue",
+            )
+        )
+        while db_conn.execute("SELECT 1 FROM pg_locks WHERE NOT granted").fetchone() is None:
+            db_conn.rollback()
+            assert not resurrect_task.done()
+            await asyncio.sleep(0.01)
+        db_conn.rollback()
         conn.execute("UPDATE agents_meta SET status='terminated' WHERE id=%s", (owner.agent_id,))
-    notices = _native_notices(db_conn, owner.agent_id)
-    assert notices[0][4] > started[0]
-
-    @contextmanager
-    def earlier_transaction(_self: Database):
-        yield db_conn
-
-    monkeypatch.setattr(Database, "write_transaction", earlier_transaction)
-    resurrect_agent(
-        database,
-        event_bus,
-        owner.agent_id,
-        resurrected_by="user",
-        prompt="Continue",
-    )
+        conn.commit()
+        await asyncio.wait_for(resurrect_task, timeout=15)
     ordered = db_conn.execute(
         "SELECT kind,payload->>'note_tag' FROM inbound_messages "
         "WHERE agent_id=%s ORDER BY created_at,id",

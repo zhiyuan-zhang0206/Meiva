@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import time
-from typing import Any, TypedDict, cast
+from typing import Any, TypedDict, TypeGuard
 
 from langchain_core.messages import AIMessage
 
@@ -84,10 +84,22 @@ class _StructuredReply(TypedDict):
     parsing_error: BaseException | None
 
 
+def _is_raw_dict(value: object) -> TypeGuard[dict[object, object]]:
+    return isinstance(value, dict)
+
+
 def _structured_reply(reply: object) -> _StructuredReply:
-    if not isinstance(reply, dict) or not {"raw", "parsed", "parsing_error"} <= reply.keys():
+    if not _is_raw_dict(reply):
         raise TypeError("a structured call with include_raw=True returns raw/parsed/error")
-    return cast(_StructuredReply, reply)
+    raw = reply.get("raw")
+    parsing_error = reply.get("parsing_error")
+    if (
+        not isinstance(raw, AIMessage)
+        or "parsed" not in reply
+        or (parsing_error is not None and not isinstance(parsing_error, BaseException))
+    ):
+        raise TypeError("a structured call with include_raw=True returns raw/parsed/error")
+    return {"raw": raw, "parsed": reply["parsed"], "parsing_error": parsing_error}
 
 
 # meiva:note

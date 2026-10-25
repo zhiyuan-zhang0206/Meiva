@@ -517,12 +517,13 @@ def test_single_connection_receiver_releases_pool_across_http(
         post(client, agent).json()["batch_id"],
         local_machine=machine_identity.name(),
     )
-    remote_dir = tmp_path / "single-native" / f"MeivaAgent-{agent}"
-
-    def directory(_id: int, **_kwargs: Any) -> Path:
-        return remote_dir
-
-    monkeypatch.setattr(receiver, "agent_upload_dir", directory)
+    config = receiver.ReceiverConfig(
+        unit=request.target,
+        user_home=tmp_path / "single-native",
+        access=client.app.state.gateway_access,
+        quota_bytes=client.app.state.gateway_config.max_agent_upload_bytes,
+        quota_files=client.app.state.gateway_config.max_agent_upload_files,
+    )
     with client.app.state.db.pool(min_size=1, max_size=1) as pool:
 
         def get(url: str, **_kwargs: Any):
@@ -538,7 +539,7 @@ def test_single_connection_receiver_releases_pool_across_http(
             )
 
         monkeypatch.setattr(receiver, "http_get", get)
-        proof = receiver.receive(pool, request, local_machine=machine_identity.name())
+        proof = receiver.copy_batch(pool, request, config)
     assert (Path(proof.directory) / request.manifest.objects[0].name).read_bytes() == b"bytes"
 
 

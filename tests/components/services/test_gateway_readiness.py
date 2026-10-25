@@ -3,7 +3,6 @@ from typing import Any
 from unittest.mock import MagicMock
 from uuid import uuid4
 
-import pytest
 from psycopg_pool import PoolTimeout
 
 from base import config
@@ -36,15 +35,7 @@ def test_gateway_health_reports_a_database_failure(gateway_data_plane: None) -> 
         assert "PoolTimeout" in response.text
 
 
-def _authenticated(monkeypatch: pytest.MonkeyPatch) -> str:
-    secret = uuid4().hex
-    monkeypatch.setattr(settings.data_plane, "cluster_secret", secret)
-    monkeypatch.setattr("base.paths.meiva_home", resolve_meiva_home)
-    return secret
-
-
 def test_a_runners_first_join_reaches_the_gateway(
-    monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
     unit_home: Path,
     served_gateway_home: Any,
@@ -55,7 +46,7 @@ def test_a_runners_first_join_reaches_the_gateway(
     from base.host.db_authority import unit
     from cli.commands.cluster import unit_join
 
-    secret = _authenticated(monkeypatch)
+    secret = uuid4().hex
     runner_login = served_gateway_home.roles.runner
     grant_runner_login(
         db_url, owner="meiva_citest", login=runner_login.name, password=runner_login.password
@@ -84,7 +75,7 @@ def test_a_runners_first_join_reaches_the_gateway(
     )
     bundle = tmp_path / "mini.bundle"
     bundle.write_bytes(issued.envelope)
-    with gateway_test_client() as client, serve_asgi(client.app) as gateway:
+    with gateway_test_client(cluster_secret=secret) as client, serve_asgi(client.app) as gateway:
         unit_join.join_gateway(
             {"MEIVA_GATEWAY_URL": gateway, "MEIVA_MACHINE_NAME": "mini"},
             runner,

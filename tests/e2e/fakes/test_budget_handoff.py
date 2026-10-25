@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import shutil
 import subprocess
 import sys
 from datetime import UTC, datetime
@@ -12,6 +13,7 @@ import pytest
 
 from base.lm.pricing import cost_usd
 from base.packages.plugin_providers import build_model_catalog
+from base.paths.tests.homes import point_home
 from base.sessions.tests.poll_until import poll_until
 from tests.e2e.fakes.scenarios import budget_handoff
 
@@ -25,11 +27,11 @@ _WRITER = Path(__file__).with_name("child_budget_writer.py")
 def test_readers_keep_the_previous_snapshot_until_publication(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, transition: str, writes: int
 ) -> None:
-    def scenario_root(_kind: str) -> Path:
-        return tmp_path
-
-    monkeypatch.setattr(budget_handoff, "scratch_root", scenario_root)
-    (tmp_path / "owner").write_text("1")
+    point_home(monkeypatch, tmp_path / transition.replace(" ", "-"))
+    root = budget_handoff.scratch_root("budget")
+    shutil.rmtree(root, ignore_errors=True)
+    root.mkdir(parents=True, exist_ok=True)
+    (root / "owner").write_text("1")
     initial = {
         "status": "running",
         "goal_met": False,
@@ -37,7 +39,7 @@ def test_readers_keep_the_previous_snapshot_until_publication(
         "remaining": ["unfinished unit"],
         "peers": [],
     }
-    state = tmp_path / "1.json"
+    state = root / "1.json"
     state.write_text(json.dumps(initial))
     code = (
         budget_handoff.pause_code(1, 1)
@@ -45,7 +47,7 @@ def test_readers_keep_the_previous_snapshot_until_publication(
         else budget_handoff.prepare_code(transition, 1)
     )
     process = subprocess.Popen(  # noqa: S603 — fixed interpreter and generated fixture code
-        [sys.executable, str(_WRITER), str(tmp_path), code],
+        [sys.executable, str(_WRITER), str(root), code],
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
         text=True,
@@ -53,18 +55,18 @@ def test_readers_keep_the_previous_snapshot_until_publication(
     try:
         for index in range(1, writes + 1):
             poll_until(
-                lambda index=index: ((tmp_path / f"ready-{index}").exists(), process.poll()),
+                lambda index=index: ((root / f"ready-{index}").exists(), process.poll()),
                 timeout=10,
                 interval=0.01,
                 what="writer opens its unpublished snapshot",
             )
             assert json.loads(state.read_text()) == json.loads(
-                (tmp_path / f"previous-{index}").read_text()
+                (root / f"previous-{index}").read_text()
             )
-            (tmp_path / f"release-{index}").touch()
+            (root / f"release-{index}").touch()
     finally:
         for index in range(1, writes + 1):
-            (tmp_path / f"release-{index}").touch()
+            (root / f"release-{index}").touch()
         try:
             stdout, stderr = process.communicate(timeout=15)
         except subprocess.TimeoutExpired:

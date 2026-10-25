@@ -1,13 +1,11 @@
-import os
 from collections.abc import Callable
 from pathlib import Path
 from typing import Any
-from unittest.mock import patch
 
 import pytest
 import yaml
 
-from base import config, paths
+from base import config
 from base.cluster.machine.configured import ConfiguredMachineIdentity
 from base.config.domains.observability.settings import ObservabilitySettings
 from base.config.service_read import ConfigAuthority
@@ -47,15 +45,18 @@ def test_bootstrap_routes_to_gateway_with_distinct_local_listener(
         "MEIVA_GATEWAY_OTLP_ENDPOINT=http://stale.invalid:1\n"
     )
     point_home(monkeypatch, tmp_path)
-    monkeypatch.setattr(paths, "meiva_home", lambda: tmp_path)
-    owner = config.ConfigBoot()
-    with patch.dict(os.environ, {"MEIVA_HOME": str(tmp_path)}):
-        owner.ensure_eager()
+    owner = config.ConfigBoot(
+        environment={
+            "MEIVA_HOME": str(tmp_path),
+            "MEIVA_CONFIG_FETCH": "skip",
+        }
+    )
+    owner.ensure_eager()
     owner.set_field("machine_host", "10.0.0.10")
     owner.set_field("db_url", config.settings.data_plane.db_url)
     owner.set_field("telemetry_otlp_port", gateway_port)
     owner.set_field("cluster_secret", "relay-test-token")
-    with gateway_test_client(boot=owner) as client:
+    with gateway_test_client(home=tmp_path, boot=owner) as client:
         assert without_credentials(client).get("/api/bootstrap").status_code == 401
         response = client.get(
             "/api/bootstrap", headers={"Authorization": "Bearer relay-test-token"}
@@ -146,8 +147,7 @@ def test_local_otlp_config_stays_host_owned(config_authority: ConfigAuthority) -
     assert metadata["gateway_otlp_endpoint"].writable is False
 
 
-def test_explicit_local_collector_endpoint_is_preserved(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.delitem(os.environ, "MEIVA_TELEMETRY_OTLP_ENDPOINT", raising=False)
+def test_explicit_local_collector_endpoint_is_preserved() -> None:
     local = ObservabilitySettings.model_validate({"MEIVA_TELEMETRY_OTLP_PORT": 4319})
     assert local.telemetry_otlp_endpoint == "http://127.0.0.1:4319"
     explicit = ObservabilitySettings.model_validate(

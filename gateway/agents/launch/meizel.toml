@@ -8,6 +8,3 @@ exports = ["fork_plan.py", "forward.py", "launch_plan.py", "launch_state.py", "l
 "launch_plan.py" = "strict"
 "launch_state.py" = "strict"
 "lifecycle_plan.py" = "strict"
-
-[debt.type-cast]
-"fork_plan.py#cast _skill_list" = 1

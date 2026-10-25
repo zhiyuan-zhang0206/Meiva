@@ -493,7 +493,10 @@ async def _exec_single_call(
         merged_attach = merge_attachments(state.attach, envelope_attachments)
         update["attach"] = merged_attach
         attach_msg = build_attach_message(
-            merged_attach, _attach_model(ctx), catalog=ctx.require_catalog()
+            merged_attach,
+            _attach_model(ctx),
+            catalog=ctx.require_catalog(),
+            created_at=ctx.require_clock().now(),
         )
         if attach_msg is not None:
             state_messages_update.append(attach_msg)
