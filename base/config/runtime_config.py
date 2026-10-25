@@ -32,7 +32,7 @@ from __future__ import annotations
 
 import logging
 from pathlib import Path
-from typing import Any, cast, get_origin
+from typing import Any, get_origin
 
 from dotenv import set_key, unset_key
 
@@ -69,7 +69,7 @@ def env_set_field_names(env_path: Path) -> set[str]:
     return {name for name, alias in _field_alias_map().items() if alias in present}
 
 
-def env_value_text(value: Any) -> str:
+def env_value_text(value: object) -> str:
     """Render a config value as the `.env` text pydantic-settings will parse back.
 
     The single source for the env-string form, shared by the `.env` writer and the
@@ -78,9 +78,11 @@ def env_value_text(value: Any) -> str:
     if isinstance(value, bool):
         return "true" if value else "false"
     if isinstance(value, (list, tuple)):
+        # meiva:note
         # NoDecode comma-list fields (e.g. skills_to_inject) read .env as "a,b" and
         # split on comma; write the same shape so a list value round-trips cleanly.
-        return ",".join(str(item) for item in cast("list[Any] | tuple[Any, ...]", value))
+        items: list[object] = list(value)  # pyright: ignore[reportUnknownArgumentType]
+        return ",".join(str(item) for item in items)
     return str(value)
 
 

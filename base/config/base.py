@@ -49,7 +49,7 @@ class EnvSettings(BaseSettings):
         class DeliveredSettings(model):
             @classmethod
             def settings_customise_sources(
-                cls, settings_cls: type[BaseSettings], **_sources: Any
+                cls, settings_cls: type[BaseSettings], **_sources: object
             ) -> tuple[EnvSettingsSource]:
                 source = EnvSettingsSource(settings_cls)
                 source.env_vars = {

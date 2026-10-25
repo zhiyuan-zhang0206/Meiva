@@ -8,18 +8,9 @@ exports = ["candidate.py", "editing.py", "metadata.py"]
 "__init__.py" = "strict"
 "editing.py" = "strict"
 
-[debt.any-collaborator]
-"candidate.py#any _candidate_payload.source" = 1
-"candidate.py#any _candidate_validation_model.CandidateValidationModel.settings_customise_sources.sources" = 1
-"metadata.py#any ConfigFieldMeta.__init__.current_value" = 1
-"metadata.py#any ConfigFieldMeta.__init__.default_value" = 1
-
 [debt.impure-edge]
 "candidate.py#base/config/config_registry.py" = 1
 "candidate.py#base/config/service_read.py" = 1
 "candidate.py#base/host/env/dotenv_file.py" = 3
 "metadata.py#base/config/config_registry.py" = 1
 "metadata.py#base/config/service_read.py" = 1
-
-[debt.wide-params]
-"metadata.py#def __init__" = 1

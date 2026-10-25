@@ -47,14 +47,14 @@ def test_two_authorities_read_their_own_files_and_boot_models(tmp_path: Path) ->
     assert two.current_field_values()["trace_enabled"] is True
 
 
-def test_fresh_reads_preserve_boot_snapshot_and_path(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_fresh_reads_preserve_boot_snapshot_and_path(tmp_path: Path) -> None:
     path = tmp_path / ".env"
+    other_home = tmp_path / "another-home"
+    other_home.mkdir()
+    (other_home / ".env").write_text(f"{field_alias('trace_enabled')}=banana\n")
     authority = _authority(path)
     initial = authority.flat_dump()["trace_enabled"]
     path.write_text(f"{field_alias('trace_enabled')}={'false' if initial else 'true'}\n")
-    monkeypatch.setenv("MEIVA_HOME", str(tmp_path / "another-home"))
 
     assert authority.current_field_values()["trace_enabled"] is not initial
     assert authority.flat_dump()["trace_enabled"] is initial
@@ -111,21 +111,15 @@ def test_domain_validation_keeps_cross_field_invariants(tmp_path: Path) -> None:
         authority.current_field_values()
 
 
-def test_valid_file_values_do_not_read_later_ambient_values(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_valid_file_values_do_not_read_later_ambient_values(tmp_path: Path) -> None:
     path = tmp_path / ".env"
     authority = _authority(path)
     path.write_text("MEIVA_IM_DISABLED_ADAPTERS=weixin,feishu\n")
-    monkeypatch.setitem(os.environ, "MEIVA_IM_SEND_RETRY_DELAYS", "banana")
 
     assert authority.current_field_values()["im_disabled_adapters"] == ["weixin", "feishu"]
 
 
-def test_agent_owner_file_uses_explicit_runner_projection(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    monkeypatch.setenv("HOME", str(tmp_path))
+def test_agent_owner_file_uses_explicit_runner_projection(tmp_path: Path) -> None:
     home = tmp_path / ".meiva"
     home.mkdir()
     path = home / ".env"
@@ -134,8 +128,6 @@ def test_agent_owner_file_uses_explicit_runner_projection(
     runtime = complete.model_copy(update={"profile": "agent"})
     authority = ConfigAuthority(runtime=runtime, all_domains=complete, env_path=path)
     path.write_text("MEIVA_DB_URL=postgresql://meiva@127.0.0.1:5433/meiva\n")
-    monkeypatch.setitem(os.environ, "MEIVA_PROCESS_PROFILE", "agent")
-    monkeypatch.setenv("MEIVA_HOME", str(home))
 
     assert authority.current_field_values()["db_url"] == runtime.data_plane.db_url
     path.write_text("MEIVA_DB_URL=postgresql://[::1\n")
@@ -143,10 +135,7 @@ def test_agent_owner_file_uses_explicit_runner_projection(
         authority.current_field_values()
 
 
-def test_agent_projection_does_not_hide_another_invalid_field(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    monkeypatch.setenv("HOME", str(tmp_path))
+def test_agent_projection_does_not_hide_another_invalid_field(tmp_path: Path) -> None:
     home = tmp_path / ".meiva"
     home.mkdir()
     path = home / ".env"
@@ -157,8 +146,6 @@ def test_agent_projection_does_not_hide_another_invalid_field(
     path.write_text(
         "MEIVA_DB_URL=postgresql://meiva@127.0.0.1:5433/meiva\nMEIVA_DB_POOL_MAX_SIZE=banana\n"
     )
-    monkeypatch.setitem(os.environ, "MEIVA_PROCESS_PROFILE", "agent")
-    monkeypatch.setenv("MEIVA_HOME", str(home))
 
     with pytest.raises(ValidationError):
         authority.current_field_values()

@@ -4,10 +4,8 @@
 
 from __future__ import annotations
 
-import os
 from dataclasses import fields
 from typing import Any, cast
-from unittest.mock import patch
 
 import pytest
 
@@ -111,12 +109,18 @@ def test_the_overlay_wins_over_the_birth_config() -> None:
     assert slices.memory.memory_inherit_depth == 4
 
 
-def test_a_live_default_edit_reaches_the_next_resolution(monkeypatch: pytest.MonkeyPatch) -> None:
-    before = AgentSlices.resolve(default_reader=_default_reader)
-    monkeypatch.setattr(
-        settings.agent, "history_dump_keep", before.history_dump.history_dump_keep + 3
-    )
-    after = AgentSlices.resolve(default_reader=_default_reader)
+def test_a_live_default_edit_reaches_the_next_resolution() -> None:
+    owner = ConfigBoot()
+    owner.set_field("history_dump_keep", settings.agent.history_dump_keep)
+
+    def read_owner(domain: str, name: str) -> Any:
+        if domain == "agent" and name == "history_dump_keep":
+            return owner.view.agent.history_dump_keep
+        return getattr(getattr(settings, domain), name)
+
+    before = AgentSlices.resolve(default_reader=read_owner)
+    owner.set_field("history_dump_keep", before.history_dump.history_dump_keep + 3)
+    after = AgentSlices.resolve(default_reader=read_owner)
     assert after.history_dump.history_dump_keep == before.history_dump.history_dump_keep + 3
     assert before.history_dump.history_dump_keep != after.history_dump.history_dump_keep
 
@@ -156,34 +160,33 @@ def test_overrides_from_pins_reads_only_the_pins() -> None:
 
 
 def test_two_owner_defaults_keep_resolved_slices_frozen_and_unsliced_reads_live() -> None:
-    with patch.dict(os.environ):
-        first, second = ConfigBoot(), ConfigBoot()
-        first.set_field("llm_model", "first-model")
-        second.set_field("llm_model", "second-model")
-        first.set_field("history_dump_keep", 4)
-        second.set_field("history_dump_keep", 8)
-        first.set_field("exec_timeout_seconds", 101.0)
-        second.set_field("exec_timeout_seconds", 202.0)
+    first, second = ConfigBoot(), ConfigBoot()
+    first.set_field("llm_model", "first-model")
+    second.set_field("llm_model", "second-model")
+    first.set_field("history_dump_keep", 4)
+    second.set_field("history_dump_keep", 8)
+    first.set_field("exec_timeout_seconds", 101.0)
+    second.set_field("exec_timeout_seconds", 202.0)
 
-        def one(domain: str, field: str) -> Any:
-            return getattr(getattr(first.view, domain), field)
+    def one(domain: str, field: str) -> Any:
+        return getattr(getattr(first.view, domain), field)
 
-        def two(domain: str, field: str) -> Any:
-            return getattr(getattr(second.view, domain), field)
+    def two(domain: str, field: str) -> Any:
+        return getattr(getattr(second.view, domain), field)
 
-        a = AgentSlices.resolve(default_reader=one)
-        b = AgentSlices.resolve(default_reader=two)
-        pinned = AgentSlices.resolve({"exec_timeout_seconds": 303.0}, default_reader=one)
-        assert (a.brain.llm_model, b.brain.llm_model) == ("first-model", "second-model")
-        assert (a.history_dump.history_dump_keep, b.history_dump.history_dump_keep) == (4, 8)
-        first.set_field("history_dump_keep", 12)
-        first.set_field("exec_timeout_seconds", 404.0)
-        assert a.history_dump.history_dump_keep == 4
-        assert AgentSlices.resolve(default_reader=one).history_dump.history_dump_keep == 12
-        assert a.read("sandbox", "exec_timeout_seconds") == 404.0
-        assert b.read("sandbox", "exec_timeout_seconds") == 202.0
-        assert pinned.read("sandbox", "exec_timeout_seconds") == 303.0
-        assert agent_setting("exec_timeout_seconds", default_reader=one) == 404.0
+    a = AgentSlices.resolve(default_reader=one)
+    b = AgentSlices.resolve(default_reader=two)
+    pinned = AgentSlices.resolve({"exec_timeout_seconds": 303.0}, default_reader=one)
+    assert (a.brain.llm_model, b.brain.llm_model) == ("first-model", "second-model")
+    assert (a.history_dump.history_dump_keep, b.history_dump.history_dump_keep) == (4, 8)
+    first.set_field("history_dump_keep", 12)
+    first.set_field("exec_timeout_seconds", 404.0)
+    assert a.history_dump.history_dump_keep == 4
+    assert AgentSlices.resolve(default_reader=one).history_dump.history_dump_keep == 12
+    assert a.read("sandbox", "exec_timeout_seconds") == 404.0
+    assert b.read("sandbox", "exec_timeout_seconds") == 202.0
+    assert pinned.read("sandbox", "exec_timeout_seconds") == 303.0
+    assert agent_setting("exec_timeout_seconds", default_reader=one) == 404.0
 
 
 def test_fully_pinned_reads_never_call_the_default_reader() -> None:

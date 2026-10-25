@@ -288,7 +288,7 @@ def per_agent_field_names() -> set[str]:
 # ``settings`` view (the boot-path index carries the timezone fields).
 
 
-def cluster_tz_name() -> str | None:
+def cluster_tz_name(owner: ConfigBoot | None = None) -> str | None:
     """The authoritative cluster timezone name, or ``None`` when this process
     holds none.
 
@@ -300,12 +300,16 @@ def cluster_tz_name() -> str | None:
     maintenance verb running while the gateway is down. This is the single
     authority check — callers must not re-implement the probe.
     """
+    if owner is not None:
+        if not owner.field_explicitly_set("timezone"):
+            return None
+        return owner.view.general.timezone
     if not _lite.field_explicitly_set("timezone"):
         return None
     return settings.general.timezone
 
 
-def host_tz_name() -> str:
+def host_tz_name(localtime_path: str = "/etc/localtime") -> str:
     """This host's IANA timezone name, for paths that need an explicit name
     but have no authoritative cluster timezone (settings-lite cron).
 
@@ -315,7 +319,7 @@ def host_tz_name() -> str:
     the cluster clock is authoritative whenever it exists.
     """
     try:
-        target = os.path.realpath("/etc/localtime")
+        target = os.path.realpath(localtime_path)
     except OSError:
         return "UTC"
     marker = "/zoneinfo/"
@@ -324,7 +328,7 @@ def host_tz_name() -> str:
     return "UTC"
 
 
-def apply_cluster_timezone() -> None:
+def apply_cluster_timezone(owner: ConfigBoot | None = None) -> None:
     """Apply the cluster timezone to this process's wall clock.
 
     Sets ``os.environ["TZ"]`` and calls ``time.tzset()`` when the process
@@ -344,7 +348,7 @@ def apply_cluster_timezone() -> None:
     """
     from base.host.env.dotenv_boot import apply_process_timezone
 
-    apply_process_timezone(cluster_tz_name())
+    apply_process_timezone(cluster_tz_name(owner))
 
 
 # ── The stable `settings` object ──
