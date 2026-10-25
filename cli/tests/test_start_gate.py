@@ -3,31 +3,19 @@
 
 from __future__ import annotations
 
-import os
-from collections.abc import Callable, Iterator
-from dataclasses import replace
+import json
+import sys
+from collections.abc import Callable
 from pathlib import Path
-from unittest.mock import patch
 
 import pytest
 
+from base.host.proc import run_bounded
 from base.native_process.os_platform import file_lock
-from cli import start_identity, start_intent
-from cli.database import OperatorDatabaseFactory, operator_event_pipeline
-from cli.database.runtime import CommandRuntime
-from cli.database.tests.cli_tests import operator_database as operator_database
-from cli.database.tests.command_inputs import command_runtime as command_runtime
-from cli.parsers import build_parser
-from cli.start_runtime import HomeSite
+from cli import start_identity
+from cli.tests.guards.start_refusal_child import SINK_SENTINEL
 
 _GATEWAY = {"gateway", "agent-runner"}
-
-
-@pytest.fixture(autouse=True)
-def _isolate_environment() -> Iterator[None]:
-    """A real start prunes derived keys from the process; that ends with the test."""
-    with patch.dict(os.environ):
-        yield
 
 
 @pytest.fixture
@@ -50,8 +38,61 @@ def _home(tmp_path: Path, tools: str, roles: set[str], **extra: str) -> Path:
     return home
 
 
-def _site(home: Path, tmp_path: Path) -> HomeSite:
-    return HomeSite(home, tmp_path / "checkout")
+# meiva:note
+# Entering a home rewrites the child's environment, leaving this pytest worker untouched.
+def _admit_in_child(home: Path, tmp_path: Path) -> None:
+    user_home = tmp_path / "user"
+    user_home.mkdir()
+    child = run_bounded(
+        [sys.executable, "-I", "-B", "-m", "cli.tests.bootstrap.child_admitted_home", str(home)],
+        cwd=user_home,
+        env={
+            "HOME": str(user_home),
+            "MEIVA_HOME": str(tmp_path / "foreign-home"),
+            "MEIVA_CONFIG_FETCH": "skip",
+            "PATH": "/usr/bin:/bin",
+            "MEIVA_DB_URL": "postgresql://foreign@foreign.invalid/foreign",
+            "MEIVA_DB_GENERATION": "42",
+        },
+        capture_output=True,
+        text=True,
+        timeout=10,
+    )
+    assert child.returncode == 0, child.stderr
+
+
+# meiva:note
+# Refusal must precede real logging; unusable configuration also fences off a valid start.
+def _run_start_in_child(home: Path, checkout: Path, tmp_path: Path) -> tuple[int, str]:
+    user_home = tmp_path / "user"
+    user_home.mkdir()
+    child = run_bounded(
+        [
+            sys.executable,
+            "-I",
+            "-B",
+            "-m",
+            "cli.tests.guards.start_refusal_child",
+            str(home),
+            str(checkout),
+        ],
+        cwd=user_home,
+        env={
+            "HOME": str(user_home),
+            "MEIVA_HOME": str(home),
+            "MEIVA_CONFIG_FETCH": "skip",
+            "MEIVA_PROCESS_PROFILE": "not-a-profile",
+            "PATH": "/usr/bin:/bin",
+        },
+        capture_output=True,
+        text=True,
+        timeout=10,
+    )
+    assert child.returncode == 0, child.stderr
+    assert SINK_SENTINEL not in child.stderr, "a refused start opened a real stderr sink"
+    assert not (home / "logs").exists()
+    code: int = json.loads(child.stdout)["code"]
+    return code, child.stderr
 
 
 # meiva:note
@@ -78,29 +119,14 @@ def test_a_missing_home_is_refused_and_nothing_is_made(tmp_path: Path) -> None:
 
 def test_start_reports_a_refusal_on_stderr_opens_no_sink_and_makes_nothing(
     tmp_path: Path,
-    capsys: pytest.CaptureFixture[str],
-    cli_log_sinks: list[str],
-    operator_database: OperatorDatabaseFactory,
-    command_runtime: CommandRuntime,
 ) -> None:
     home = tmp_path / "never-initialized"
-    producer = operator_event_pipeline(
-        operator_database, machine=command_runtime.machine, home=home
-    )
-    args = build_parser().parse_args(["start", "--all-services"])
-    args.runtime = replace(command_runtime, home=home)
 
-    rc = start_intent.run_start(
-        args,
-        _site(home, tmp_path),
-        retained_children=[],
-        database_factory=operator_database,
-        producer=producer,
-    )
+    rc, error = _run_start_in_child(home, tmp_path / "checkout", tmp_path)
 
     assert rc == 1
-    assert "meiva start: " in capsys.readouterr().err
-    assert cli_log_sinks == [], "sinks build Settings: a refused home never gets them"
+    assert "meiva start: " in error
+    assert "run `meiva init` first" in error
     assert not home.exists()
 
 
@@ -110,29 +136,17 @@ def test_start_reports_a_refusal_on_stderr_opens_no_sink_and_makes_nothing(
 def test_a_start_from_a_checkout_that_did_not_load_the_code_is_refused_before_any_sink(
     tmp_path: Path,
     tools: str,
-    capsys: pytest.CaptureFixture[str],
-    cli_log_sinks: list[str],
-    operator_database: OperatorDatabaseFactory,
-    command_runtime: CommandRuntime,
 ) -> None:
     home = _home(tmp_path, tools, _GATEWAY)
-    producer = operator_event_pipeline(
-        operator_database, machine=command_runtime.machine, home=home
-    )
-    args = build_parser().parse_args(["start", "--all-services"])
-    args.runtime = replace(command_runtime, home=home)
+    before = _bytes(home)
+    entries = {path.name for path in home.iterdir()} | {"start-intent.lock"}
 
-    rc = start_intent.run_start(
-        args,
-        _site(home, tmp_path),
-        retained_children=[],
-        database_factory=operator_database,
-        producer=producer,
-    )
+    rc, error = _run_start_in_child(home, tmp_path / "checkout", tmp_path)
 
     assert rc == 1
-    assert "differs from its loaded canonical checkout" in capsys.readouterr().err
-    assert cli_log_sinks == []
+    assert "differs from its loaded canonical checkout" in error
+    assert _bytes(home) == before
+    assert {path.name for path in home.iterdir()} == entries
     with file_lock(home / "start-intent.lock", timeout_s=0.05):
         pass
 
@@ -169,8 +183,7 @@ def test_an_initialized_home_is_admitted_and_left_as_it_was(
     start_identity.mark_phase(home, phase)
     before = _bytes(home)
 
-    with start_intent.admitted_home(home):
-        pass
+    _admit_in_child(home, tmp_path)
 
     assert _bytes(home) == before
 
@@ -182,8 +195,7 @@ def test_an_initialized_home_is_admitted_and_left_as_it_was(
 def test_start_never_joins_a_gateway(tmp_path: Path, tools: str) -> None:
     home = _home(tmp_path, tools, {"agent-runner"}, MEIVA_GATEWAY_URL="http://127.0.0.1:1")
 
-    with start_intent.admitted_home(home):
-        pass
+    _admit_in_child(home, tmp_path)
 
 
 def _rewrite_env(home: Path, edit: Callable[[list[str]], list[str]]) -> None:
