@@ -33,6 +33,7 @@ class TestLoadManifest:
             "memory-arbiter": "product",
             "model-update-tracker": "product",
             "db-write-stall-watch": "operator",
+            "qa-keepalive": "operator",
         }
         assert {name for name, s in by_name.items() if s.default_enabled} == {
             "c9-daily-report",

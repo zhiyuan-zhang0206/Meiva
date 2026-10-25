@@ -7,6 +7,7 @@
 "jobs" = ["plans"]
 "memory-steward-schedule.py" = ["jobs", "plans"]
 "model-update-tracker-schedule.py" = ["jobs", "plans"]
+"qa-keepalive-schedule.py" = ["jobs"]
 "self-evolution-daily-schedule.py" = ["jobs", "plans"]
 "self-evolution-weekly-schedule.py" = ["jobs", "plans"]
 "tests" = ["agent_status_guard.py", "debt-sweep-daily-schedule.py", "jobs", "plans"]
@@ -21,6 +22,7 @@
 "dev-ci-metrics-schedule.py" = { kinds = ["environ"], why = "Schedule process entry reads its report recipient and scheduler identity before constructing the CI metrics job" }
 "memory-steward-schedule.py" = { kinds = ["environ"], why = "Schedule process entry reads its scheduler identity before composing the memory maintenance loop" }
 "model-update-tracker-schedule.py" = { kinds = ["environ"], why = "Schedule process entry reads its subprocess environment, report recipient and scheduler identity before constructing ModelTracker" }
+"qa-keepalive-schedule.py" = { kinds = ["environ", "clock"], why = "Schedule process entry reads the site values (health URL, probed host, owner) and supplies the keeper with a clock, so every round is a function of one instant" }
 "self-evolution-daily-schedule.py" = { kinds = ["environ"], why = "Schedule process entry reads its report recipient and scheduler identity before constructing DailyScan" }
 "self-evolution-weekly-schedule.py" = { kinds = ["environ"], why = "Schedule process entry reads its event API environment and scheduler identity before composing the weekly job" }
 
