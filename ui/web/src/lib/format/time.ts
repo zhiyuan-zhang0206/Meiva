@@ -154,7 +154,7 @@ export interface FormatUpcomingOptions {
 // meiva:link ui/web/src/lib/format/docs/time.meiva.okf.md
 export function formatUpcoming(
   iso: string | Date,
-  now: Date = new Date(),
+  now: Date,
   opts: FormatUpcomingOptions = {},
 ): string {
   const target = new Date(iso);

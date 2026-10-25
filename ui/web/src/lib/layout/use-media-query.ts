@@ -2,6 +2,12 @@
 
 import { useCallback, useSyncExternalStore } from "react";
 
+export interface MediaQueryListLike {
+  readonly matches: boolean;
+  addEventListener: (type: "change", listener: () => void) => void;
+  removeEventListener: (type: "change", listener: () => void) => void;
+}
+
 /** Stable server snapshot — queried during SSR and the hydrating render. */
 const serverSnapshot = () => false;
 
@@ -20,15 +26,26 @@ const serverSnapshot = () => false;
  * passive flush, which is a painted wrong frame whenever a commit and the
  * flush straddle a rendering pass.
  */
-export function useMediaQuery(query: string): boolean {
+export function useMediaQuery(
+  query: string,
+  matchMediaImpl?: (query: string) => MediaQueryListLike,
+): boolean {
+  const resolveMatchMedia = useCallback(
+    (q: string): MediaQueryListLike =>
+      matchMediaImpl ? matchMediaImpl(q) : window.matchMedia(q),
+    [matchMediaImpl],
+  );
   const subscribe = useCallback(
     (onStoreChange: () => void) => {
-      const mql = window.matchMedia(query);
+      const mql = resolveMatchMedia(query);
       mql.addEventListener("change", onStoreChange);
       return () => mql.removeEventListener("change", onStoreChange);
     },
-    [query],
+    [query, resolveMatchMedia],
   );
-  const getSnapshot = useCallback(() => window.matchMedia(query).matches, [query]);
+  const getSnapshot = useCallback(
+    () => resolveMatchMedia(query).matches,
+    [query, resolveMatchMedia],
+  );
   return useSyncExternalStore(subscribe, getSnapshot, serverSnapshot);
 }

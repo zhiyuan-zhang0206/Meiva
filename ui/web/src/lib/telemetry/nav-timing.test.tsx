@@ -5,19 +5,25 @@
 // stuck. The fallback is the floor under a navigation that never commits.
 // meiva:link ui/web/src/docs/frontend-state/frontend-state.meiva.okf.md
 
+// meiva:note
+// @vitest-environment happy-dom
+
 import { render } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-let pathname = "/";
-vi.mock("next/navigation", () => ({ usePathname: () => pathname }));
+import {
+  formatNavTiming,
+  markNavIntent,
+  navTimingTestControl,
+  setNavFallbackMs,
+  useNavTimingReport,
+} from "./nav-timing";
+import { telemetryTestControl } from "./telemetry";
 
 const tracked: { element: string; key?: string; value?: unknown; page?: string }[] = [];
 
-import { formatNavTiming, markNavIntent, setNavFallbackMs, useNavTimingReport } from "./nav-timing";
-import { telemetryTestControl } from "./telemetry";
-
-function Reporter() {
-  useNavTimingReport();
+function Reporter({ pathname }: { pathname: string }) {
+  useNavTimingReport(pathname);
   return null;
 }
 
@@ -31,20 +37,21 @@ describe("nav timing", () => {
   beforeEach(() => {
     tracked.length = 0;
     frames.length = 0;
-    pathname = "/";
     telemetryTestControl.intercept({
       onTrack: (element, opts = {}) =>
         tracked.push({ element, key: opts.key, value: opts.value, page: opts.page }),
     });
-    vi.stubGlobal("requestAnimationFrame", (cb: FrameRequestCallback) => {
-      frames.push(cb);
-      return frames.length;
+    navTimingTestControl.setFrameScheduler({
+      requestAnimationFrame: (cb: FrameRequestCallback) => {
+        frames.push(cb);
+        return frames.length;
+      },
+      cancelAnimationFrame: () => undefined,
     });
-    vi.stubGlobal("cancelAnimationFrame", () => undefined);
   });
   afterEach(() => {
+    navTimingTestControl.setFrameScheduler(null);
     telemetryTestControl.reset();
-    vi.unstubAllGlobals();
   });
 
   it("formats the three numbers as one bounded scalar", () => {
@@ -52,17 +59,15 @@ describe("nav timing", () => {
   });
 
   it("reports nothing when no click stamped an intent", () => {
-    const { rerender } = render(<Reporter />);
-    pathname = "/control";
-    rerender(<Reporter />);
+    const { rerender } = render(<Reporter pathname="/" />);
+    rerender(<Reporter pathname="/control" />);
     expect(tracked).toEqual([]);
   });
 
   it("reports click-to-commit, click-to-paint and the longest task", async () => {
-    const { rerender } = render(<Reporter />);
+    const { rerender } = render(<Reporter pathname="/" />);
     markNavIntent();
-    pathname = "/control";
-    rerender(<Reporter />);
+    rerender(<Reporter pathname="/control" />);
     flushFrame();
     flushFrame();
     await new Promise((resolve) => setTimeout(resolve, 600));

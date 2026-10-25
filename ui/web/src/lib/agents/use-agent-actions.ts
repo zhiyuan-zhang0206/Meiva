@@ -1,7 +1,5 @@
 "use client";
 
-import { newOperationKey } from "../transport/operation-key";
-
 // Lifecycle mutations keep server state authoritative. Acceptance updates only
 // pending UI; lifecycle hints and explicit repair read the resulting roster.
 
@@ -9,13 +7,14 @@ import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { useTranslations } from "next-intl";
 import { useCallback, useEffect, useMemo, useState } from "react";
 
-import { ApiError, api } from "../transport/api";
-import type { Harness } from "../contracts/models";
 import { errMsg } from "../contracts/errors";
-import { AGENTS_QUERY_KEY, AGENT_DETAIL_QUERY_KEY } from "../fold/agents";
-import { track } from "../telemetry/telemetry";
+import type { Harness } from "../contracts/models";
+import type { AgentRoster, AgentRow, SpawnAgentRequest } from "../contracts/types";
+import { AGENT_DETAIL_QUERY_KEY, AGENTS_QUERY_KEY } from "../fold/agents";
 import { useStore } from "../state/store";
-import type { AgentRow, AgentRoster } from "../contracts/types";
+import { track } from "../telemetry/telemetry";
+import { ApiError, api } from "../transport/api";
+import { useApi } from "../transport/transport-context";
 
 export type PendingAction = "restarting" | "terminating" | "resurrecting" | "compacting" | "expiring";
 
@@ -31,10 +30,43 @@ export interface AgentActions {
   compact: (id: number) => Promise<void>;
 }
 
+function buildSpawnPayload(
+  machine?: string,
+  model?: string,
+  reasoning_effort?: string,
+  harness?: Harness,
+): SpawnAgentRequest {
+  return {
+    ...(machine !== undefined ? { machine } : {}),
+    ...(harness !== undefined ? { harness } : {}),
+    ...(model !== undefined || reasoning_effort !== undefined
+      ? {
+          config: {
+            ...(model !== undefined ? { llm_model: model } : {}),
+            ...(reasoning_effort !== undefined ? { reasoning_effort } : {}),
+          },
+        }
+      : {}),
+  };
+}
+
+function buildForkPayload(
+  sourceId: number,
+  machine: string,
+  prompt?: string,
+): SpawnAgentRequest {
+  return {
+    fork_from: sourceId,
+    machine,
+    ...(prompt !== undefined ? { prompt, prompt_source: "user" } : {}),
+  };
+}
+
 export function useAgentActions(
   showError: (msg: string) => void,
   agents: readonly AgentRow[],
 ): AgentActions {
+  const client = useApi(api);
   const queryClient = useQueryClient();
   const t = useTranslations("agentRow");
   const setActiveId = useStore((s) => s.setActiveId);
@@ -60,18 +92,10 @@ export function useAgentActions(
       harness?: Harness;
       operationKey: string;
     }) =>
-      api.spawnAgent({
-        ...(machine !== undefined ? { machine } : {}),
-        ...(harness !== undefined ? { harness } : {}),
-        ...(model !== undefined || reasoning_effort !== undefined
-          ? {
-              config: {
-                ...(model !== undefined ? { llm_model: model } : {}),
-                ...(reasoning_effort !== undefined ? { reasoning_effort } : {}),
-              },
-            }
-          : {}),
-      }, operationKey),
+      client.spawnAgent(
+        buildSpawnPayload(machine, model, reasoning_effort, harness),
+        operationKey,
+      ),
     onSuccess: () => { track("spawn"); },
     onError: (e: unknown) => {
       if (e instanceof ApiError && e.agentId !== undefined) {
@@ -93,8 +117,13 @@ export function useAgentActions(
     // id (the button should not appear for a non-existent agent) —
     // throw directly so the onError path showErrors instead of
     // silently masking the real bug.
-    mutationFn: async ({ body, operationKey }: { body: Promise<Parameters<typeof api.spawnAgent>[0]>; operationKey: string }) =>
-      api.spawnAgent(await body, operationKey),
+    mutationFn: async ({
+      body,
+      operationKey,
+    }: {
+      body: Promise<Parameters<typeof client.spawnAgent>[0]>;
+      operationKey: string;
+    }) => client.spawnAgent(await body, operationKey),
     onSuccess: () => { track("fork"); },
     onError: (e: unknown) => {
       if (e instanceof ApiError && e.agentId !== undefined) {
@@ -110,7 +139,7 @@ export function useAgentActions(
 
   const terminateMutation = useMutation({
     mutationFn: ({ id, force }: { id: number; force: boolean }) =>
-      api.terminateAgent(id, force),
+      client.terminateAgent(id, force),
     onSuccess: (data) => {
       // Acceptance is not observed exit; lifecycle rows remain read-model-owned.
       const messages = {
@@ -133,7 +162,7 @@ export function useAgentActions(
 
   const forceExpireMutation = useMutation({
     mutationFn: ({ id, sessionId }: { id: number; sessionId: number }) =>
-      api.forceExpireImpersonation(id, sessionId),
+      client.forceExpireImpersonation(id, sessionId),
     onSuccess: (result, { id }) => {
       useStore.getState().showToast(t(result.status === "expired" ? "forceExpireDone" : "forceExpireNotOpen"));
       void queryClient.invalidateQueries({ queryKey: AGENTS_QUERY_KEY });
@@ -143,20 +172,20 @@ export function useAgentActions(
   });
 
   const restartMutation = useMutation({
-    mutationFn: (id: number) => api.restartAgent(id),
+    mutationFn: (id: number) => client.restartAgent(id),
     onSuccess: () => track("restart"),
     onError: (e: unknown) => showError(`Restart failed: ${errMsg(e)}`),
   });
 
   const resurrectMutation = useMutation({
     mutationFn: ({ id, prompt }: { id: number; prompt?: string }) =>
-      api.resurrectAgent(id, prompt),
+      client.resurrectAgent(id, prompt),
     onSuccess: (_data, { id }) => { track("resurrect"); void queryClient.invalidateQueries({ queryKey: AGENTS_QUERY_KEY }); void queryClient.invalidateQueries({ queryKey: [...AGENT_DETAIL_QUERY_KEY, id] }); },
     onError: (e: unknown) => showError(`Resurrect failed: ${errMsg(e)}`),
   });
 
   const compactMutation = useMutation({
-    mutationFn: ({ id }: { id: number }) => api.compact(id),
+    mutationFn: ({ id }: { id: number }) => client.compact(id),
     onSuccess: () => track("compact"),
     onError: (e: unknown) => showError(`Compact failed: ${errMsg(e)}`),
   });
@@ -164,8 +193,6 @@ export function useAgentActions(
   // -- Derive pending state from mutation state, exposed to components --
 
   const pendingActions = useMemo<Record<number, PendingAction>>(() => {
-    // isPending discriminates the mutation-result union — variables is
-    // guaranteed present on the pending arm, no null check needed.
     const out: Record<number, PendingAction> = {};
     if (terminateMutation.isPending) {
       out[terminateMutation.variables.id] = "terminating";
@@ -237,12 +264,6 @@ export function useAgentActions(
   }, [agents]);
 
   // Placeholder count = in-flight phase + post-resolve phase.
-  //   - in-flight: the spawn POST is unresolved. Show one placeholder
-  //     UNLESS this spawn's row already arrived through repair — a row outside
-  //     spawnBaselineRef means the real idling row is already in cache,
-  //     so the placeholder must yield rather than render a second row.
-  //   - post-resolve: id is known, held in pendingSpawnIds until its
-  //     card arrives or its post-acceptance read finishes.
   const pendingSpawnCount = useMemo(() => {
     let inFlight = 0;
     if (spawnMutation.isPending) {
@@ -256,10 +277,6 @@ export function useAgentActions(
 
   const markSpawnPending = useCallback(
     async (id: number) => {
-      // If repair already read the spawned row before the HTTP response,
-      // the card is in the cache and we don't need a placeholder at all.
-      // Skipping the add here also keeps the agents-change useEffect from
-      // having to chase ids that were already resolved.
       const already = (
         queryClient.getQueryData<AgentRoster>(AGENTS_QUERY_KEY)?.agents ?? []
       ).some((a) => a.agent_id === id);
@@ -271,9 +288,6 @@ export function useAgentActions(
         return next;
       });
       try {
-        // Start after acceptance. A short-lived agent may already be terminated
-        // and absent from the live tree; completion, not membership, ends the
-        // placeholder. Errors remain visible through the roster query.
         await queryClient.invalidateQueries({ queryKey: AGENTS_QUERY_KEY });
       } finally {
         setPendingSpawnIds((prev) => {
@@ -288,9 +302,6 @@ export function useAgentActions(
 
   const spawn = useCallback(
     async (machine?: string, model?: string, reasoning_effort?: string, harness?: Harness): Promise<number | null> => {
-      // Snapshot current ids so the in-flight placeholder can detect when
-      // this spawn's row arrives through repair (which beats the HTTP
-      // response) and yield to it instead of double-rendering.
       setSpawnBaseline(
         new Set(
           (queryClient.getQueryData<AgentRoster>(AGENTS_QUERY_KEY)?.agents ?? []).map(
@@ -299,7 +310,13 @@ export function useAgentActions(
         ),
       );
       try {
-        const { id } = await spawnMutation.mutateAsync({ machine, model, reasoning_effort, harness, operationKey: newOperationKey() });
+        const { id } = await spawnMutation.mutateAsync({
+          machine,
+          model,
+          reasoning_effort,
+          harness,
+          operationKey: client.newOperationKey(),
+        });
         setActiveId(id);
         await markSpawnPending(id);
         return id;
@@ -307,7 +324,7 @@ export function useAgentActions(
         return null;
       }
     },
-    [spawnMutation, setActiveId, markSpawnPending, queryClient],
+    [spawnMutation, setActiveId, markSpawnPending, queryClient, client],
   );
 
   const fork = useCallback(
@@ -315,15 +332,16 @@ export function useAgentActions(
       try {
         // The one placement lookup belongs to the action, not each attempt.
         const body = (async () => {
-          const source = queryClient.getQueryData<AgentRow>([...AGENT_DETAIL_QUERY_KEY, sourceId]) ??
-            queryClient.getQueryData<AgentRoster>(AGENTS_QUERY_KEY)?.agents.find((agent) => agent.agent_id === sourceId) ?? await api.getAgent(sourceId);
-          return {
-            fork_from: sourceId,
-            machine: source.machine,
-            ...(prompt !== undefined ? { prompt, prompt_source: "user" } : {}),
-          };
+          const source =
+            queryClient.getQueryData<AgentRow>([...AGENT_DETAIL_QUERY_KEY, sourceId]) ??
+            queryClient.getQueryData<AgentRoster>(AGENTS_QUERY_KEY)?.agents.find((agent) => agent.agent_id === sourceId) ??
+            await client.getAgent(sourceId);
+          return buildForkPayload(sourceId, source.machine, prompt);
         })();
-        const { id } = await forkMutation.mutateAsync({ body, operationKey: newOperationKey() });
+        const { id } = await forkMutation.mutateAsync({
+          body,
+          operationKey: client.newOperationKey(),
+        });
         setActiveId(id);
         await markSpawnPending(id);
         return id;
@@ -331,29 +349,23 @@ export function useAgentActions(
         return null;
       }
     },
-    [forkMutation, setActiveId, markSpawnPending, queryClient],
+    [forkMutation, setActiveId, markSpawnPending, queryClient, client],
   );
 
   const terminate = useCallback(
     async (id: number, force = false) => {
-      // Task #837 (user ruling): terminating the currently SELECTED agent
-      // auto-switches to the nearest adjacent alive agent — the user never
-      // sits on a row that is about to die. Neighbor order: next in list
-      // order, wrapping around to the front when the terminated agent was
-      // last. Skipping terminated candidates keeps a multi-kill session
-      // landing on a live row.
       const prev = useStore.getState().activeId;
       if (prev === id) {
         const list =
           queryClient.getQueryData<AgentRoster>(AGENTS_QUERY_KEY)?.agents ?? [];
         const idx = list.findIndex((a) => a.agent_id === id);
-        const neighbors = [...list.slice(idx + 1), ...list.slice(0, idx)];
+        const neighbors = [
+          ...list.slice(idx + 1),
+          ...list.slice(0, idx),
+        ];
         const next = neighbors.find((a) => a.status !== "terminated");
         if (next) setActiveId(next.agent_id);
       }
-      // mutateAsync throws on onError; catch here because the error
-      // toast is already handled in onError; the caller does not need
-      // to know about it.
       try {
         await terminateMutation.mutateAsync({ id, force });
       } catch {

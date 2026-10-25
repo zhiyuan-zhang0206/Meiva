@@ -1,7 +1,15 @@
+// meiva:note
+// @vitest-environment happy-dom
+
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { telemetryTestControl, type TelemetryElement, type TrackOptions } from "./telemetry";
-import { initWebVitals, webVitalsResetForTest } from "./web-vitals";
+import {
+  initWebVitals,
+  webVitalsResetForTest,
+  webVitalsSetRuntimeForTest,
+  type PerformanceObserverConstructorLike,
+} from "./web-vitals";
 
 const track = vi.fn<(element: TelemetryElement, opts?: TrackOptions) => void>();
 const flushTelemetry = vi.fn<() => void>();
@@ -29,7 +37,10 @@ function installPerformanceObserver(supportedEntryTypes: string[]) {
     }
   }
 
-  vi.stubGlobal("PerformanceObserver", MockPerformanceObserver);
+  webVitalsSetRuntimeForTest({
+    observerConstructor:
+      MockPerformanceObserver as unknown as PerformanceObserverConstructorLike,
+  });
 }
 
 function observerFor(type: string): MockObserver {
@@ -91,8 +102,8 @@ beforeEach(() => {
 
 afterEach(() => {
   webVitalsResetForTest();
+  webVitalsSetRuntimeForTest(null);
   telemetryTestControl.reset();
-  vi.unstubAllGlobals();
   vi.restoreAllMocks();
 });
 
@@ -253,9 +264,8 @@ describe("initWebVitals", () => {
 
   it("is a no-op during SSR", () => {
     webVitalsResetForTest();
-    vi.stubGlobal("window", undefined);
 
-    initWebVitals();
+    initWebVitals({ hasWindow: false });
 
     expect(observers).toHaveLength(0);
   });

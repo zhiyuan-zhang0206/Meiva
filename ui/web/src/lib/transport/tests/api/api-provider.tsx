@@ -26,7 +26,13 @@ export function cacheOnlyApi(): Api {
 // The public test door shares the existing gateway fixtures without exposing
 // the production gateway implementation to hook and component modules.
 export { startGateway, type GatewayReply, type TestGateway } from "../../gateway/tests/gateway-server";
-export { httpRig, noUpload, type HttpRig } from "../../gateway/tests/http-rig";
+export {
+  httpRig,
+  keysWithoutRandomUUID,
+  noUpload,
+  sequentialKeys,
+  type HttpRig,
+} from "../../gateway/tests/http-rig";
 export { realNetwork } from "../../gateway/tests/real-network";
 export { UncancellableFetch } from "./uncancellable-fetch";
 

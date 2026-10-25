@@ -1,10 +1,18 @@
+// meiva:note
+// @vitest-environment happy-dom
+
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import {
   telemetryTestControl,
   track,
 } from "./telemetry";
-import { initWebVitals, webVitalsResetForTest } from "./web-vitals";
+import {
+  initWebVitals,
+  webVitalsResetForTest,
+  webVitalsSetRuntimeForTest,
+  type PerformanceObserverConstructorLike,
+} from "./web-vitals";
 
 interface MockObserver {
   callback: PerformanceObserverCallback;
@@ -38,7 +46,10 @@ function installPerformanceObserver(): void {
     }
   }
 
-  vi.stubGlobal("PerformanceObserver", MockPerformanceObserver);
+  webVitalsSetRuntimeForTest({
+    observerConstructor:
+      MockPerformanceObserver as unknown as PerformanceObserverConstructorLike,
+  });
 }
 
 function emit(type: string, entries: PerformanceEntry[]): void {
@@ -72,8 +83,8 @@ beforeEach(() => {
 
 afterEach(() => {
   webVitalsResetForTest();
+  webVitalsSetRuntimeForTest(null);
   telemetryTestControl.reset();
-  vi.unstubAllGlobals();
   vi.restoreAllMocks();
 });
 

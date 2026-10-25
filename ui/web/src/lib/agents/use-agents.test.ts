@@ -1,19 +1,31 @@
+// meiva:note
+// @vitest-environment happy-dom
+
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { act, cleanup, renderHook, waitFor } from "@testing-library/react";
+import { NextIntlClientProvider } from "next-intl";
 import React from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { api } from "../transport/api";
+import type { Api } from "../transport/api";
+import { cacheOnlyApi } from "../transport/tests/api/api-provider";
+import { ApiProvider } from "../transport/transport-context";
 import { useStore } from "../state/store";
 import type { AgentRow, AgentRoster } from "../contracts/types";
 import { AGENTS_QUERY_KEY, useAgents } from "./use-agents";
 import { AGENT_DETAIL_QUERY_KEY } from "../fold/agents";
-vi.mock("../transport/api", async (importOriginal) => ({
-  ...await importOriginal<Record<string, unknown>>(),
-  api: {
-    getAgentRoster: vi.fn(), getAgent: vi.fn(), listAgents: vi.fn(), spawnAgent: vi.fn(),
-    terminateAgent: vi.fn(), forceExpireImpersonation: vi.fn(), restartAgent: vi.fn(), resurrectAgent: vi.fn(), compact: vi.fn(),
-  },
-}));
+
+const api: Api = {
+  ...cacheOnlyApi(),
+  getAgentRoster: vi.fn(),
+  getAgent: vi.fn(),
+  listAgents: vi.fn(),
+  spawnAgent: vi.fn(),
+  terminateAgent: vi.fn(),
+  forceExpireImpersonation: vi.fn(),
+  restartAgent: vi.fn(),
+  resurrectAgent: vi.fn(),
+  compact: vi.fn(),
+};
 function row(agent_id: number, status: AgentRow["status"] = "idling"): AgentRow {
   return { agent_id, status, harness: "meiva", label: `Test #${agent_id}`, spawner: "user", fork_source_agent_id: null,
     spawned_at: "2026-05-10T00:00:00Z",
@@ -25,8 +37,24 @@ const MOCK_AGENTS = [row(1, "running"), row(2)];
 const ACTIVE_ID_KEY = "meiva.active.agent_id";
 let _qc: QueryClient;
 const noop = () => undefined;
+const MESSAGES = {
+  agentRow: {
+    forceExpireDone: "Takeover session ended",
+    forceExpireNotOpen: "That takeover session is no longer open.",
+    forceExpireFailed: "Could not end takeover session",
+    launchFailedCreated: "Agent #{id} was created, but launch failed. Select it to retry.",
+  },
+};
 function wrapper({ children }: { children: React.ReactNode }) {
-  return React.createElement(QueryClientProvider, { client: _qc }, children);
+  return React.createElement(NextIntlClientProvider, {
+    locale: "en",
+    messages: MESSAGES,
+    children: React.createElement(
+      ApiProvider,
+      { api },
+      React.createElement(QueryClientProvider, { client: _qc }, children),
+    ),
+  });
 }
 function setUrlSearch(search: string) {
   const url = new URL(window.location.href); url.search = search; window.history.replaceState(null, "", url);

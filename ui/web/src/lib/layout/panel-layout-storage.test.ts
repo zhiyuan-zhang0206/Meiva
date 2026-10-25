@@ -1,4 +1,7 @@
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+// meiva:note
+// @vitest-environment happy-dom
+
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 import { panelLayoutStorage } from "./panel-layout-storage";
 
@@ -28,14 +31,8 @@ describe("panelLayoutStorage", () => {
     const boom = () => {
       throw new Error("storage unavailable");
     };
-    vi.spyOn(Storage.prototype, "getItem").mockImplementation(boom);
-    vi.spyOn(Storage.prototype, "setItem").mockImplementation(boom);
-    try {
-      const storage = panelLayoutStorage();
-      expect(storage.getItem(KEY)).toBeNull();
-      expect(() => storage.setItem(KEY, "{}")).not.toThrow();
-    } finally {
-      vi.restoreAllMocks();
-    }
+    const storage = panelLayoutStorage({ getItem: boom, setItem: boom });
+    expect(storage.getItem(KEY)).toBeNull();
+    expect(() => storage.setItem(KEY, "{}")).not.toThrow();
   });
 });
