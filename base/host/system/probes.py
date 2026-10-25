@@ -6,14 +6,15 @@ from pathlib import Path
 from base.host.system.hostport import Host
 
 MACOS_CHROME = "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"
+_MACOS_CHROME_PATH = Path(MACOS_CHROME)
 _LINUX_CHROME_NAMES = ("google-chrome", "google-chrome-stable")
 NPX_INCAPABILITY_REASON = "no npx (install Node.js for chrome-devtools-mcp)"
 
 
-def platform_chrome_binary(*, host: Host) -> str | None:
+def platform_chrome_binary(*, host: Host, macos_chrome: Path = _MACOS_CHROME_PATH) -> str | None:
     """Resolve a platform-default Chrome binary without reading Settings."""
     if host.platform.system == "darwin":
-        return MACOS_CHROME if Path(MACOS_CHROME).exists() else None
+        return str(macos_chrome) if macos_chrome.exists() else None
     for name in _LINUX_CHROME_NAMES:
         found = host.which(name)
         if found:
@@ -21,7 +22,12 @@ def platform_chrome_binary(*, host: Host) -> str | None:
     return None
 
 
-def resolve_chrome_binary(configured_chrome: str | None, *, host: Host) -> str | None:
+def resolve_chrome_binary(
+    configured_chrome: str | None,
+    *,
+    host: Host,
+    macos_chrome: Path = _MACOS_CHROME_PATH,
+) -> str | None:
     """Resolve a Chrome binary path for this host, or None if none is found.
 
     Resolution order:
@@ -32,7 +38,18 @@ def resolve_chrome_binary(configured_chrome: str | None, *, host: Host) -> str |
     """
     if configured_chrome:
         return configured_chrome
-    return platform_chrome_binary(host=host)
+    return platform_chrome_binary(host=host, macos_chrome=macos_chrome)
+
+
+def has_display_vars(
+    *,
+    system: str,
+    display: str | None,
+    wayland_display: str | None,
+) -> bool:
+    if system == "darwin":
+        return True
+    return bool(display or wayland_display)
 
 
 def display_available(*, host: Host) -> bool:
@@ -47,12 +64,35 @@ def display_available(*, host: Host) -> bool:
 
     ``Platform`` admits only macOS and Linux, so there is no other case.
     """
-    if host.platform.system == "darwin":
-        return True
-    return bool(os.environ.get("DISPLAY") or os.environ.get("WAYLAND_DISPLAY"))
+    return has_display_vars(
+        system=host.platform.system,
+        display=os.environ.get("DISPLAY"),
+        wayland_display=os.environ.get("WAYLAND_DISPLAY"),
+    )
 
 
-def browser_incapability(configured_chrome: str | None, *, host: Host) -> str | None:
+def decide_browser_incapability(
+    *,
+    has_display: bool,
+    chrome_binary: str | None,
+    npx_binary: str | None,
+) -> str | None:
+    if not has_display:
+        return "no display (headless server)"
+    if chrome_binary is None:
+        return "no Chrome (install it or set MEIVA_CHROME_BINARY)"
+    if npx_binary is None:
+        return NPX_INCAPABILITY_REASON
+    return None
+
+
+def browser_incapability(
+    configured_chrome: str | None,
+    *,
+    host: Host,
+    has_display: bool | None = None,
+    macos_chrome: Path = _MACOS_CHROME_PATH,
+) -> str | None:
     """Return why this host cannot run a headed Chrome, or None if it can.
 
     The single source of truth for the three-prong capability check (display +
@@ -65,23 +105,38 @@ def browser_incapability(configured_chrome: str | None, *, host: Host) -> str | 
     ``services.desktop.browser.daemon.assert_browser_capable()`` (the raising preflight)
     both derive from this, so the capability logic lives in exactly one place.
     """
-    if not display_available(host=host):
-        return "no display (headless server)"
-    if resolve_chrome_binary(configured_chrome, host=host) is None:
-        return "no Chrome (install it or set MEIVA_CHROME_BINARY)"
-    if host.which("npx") is None:
-        return NPX_INCAPABILITY_REASON
-    return None
+    effective_display = display_available(host=host) if has_display is None else has_display
+    return decide_browser_incapability(
+        has_display=effective_display,
+        chrome_binary=resolve_chrome_binary(
+            configured_chrome, host=host, macos_chrome=macos_chrome
+        ),
+        npx_binary=host.which("npx"),
+    )
 
 
-def browser_capable(configured_chrome: str | None, *, host: Host) -> bool:
+def browser_capable(
+    configured_chrome: str | None,
+    *,
+    host: Host,
+    has_display: bool | None = None,
+    macos_chrome: Path = _MACOS_CHROME_PATH,
+) -> bool:
     """Return True if this host can run a headed Chrome (display + binary + npx).
 
     Thin bool wrapper over ``browser_incapability()`` for the gates that only
     need yes/no (the service roster's start decision, the host-config validator).
     Callers that want to show or log *why* call ``browser_incapability()``.
     """
-    return browser_incapability(configured_chrome, host=host) is None
+    return (
+        browser_incapability(
+            configured_chrome,
+            host=host,
+            has_display=has_display,
+            macos_chrome=macos_chrome,
+        )
+        is None
+    )
 
 
 def permissions_helper_incapability(*, host: Host) -> str | None:

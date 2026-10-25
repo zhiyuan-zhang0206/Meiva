@@ -45,22 +45,21 @@ class _Redis:
         self.closed = True
 
 
-def _client(monkeypatch: pytest.MonkeyPatch, redis: _Redis) -> None:
-    def from_url(url: str, **kwargs: object) -> _Redis:
-        return redis
-
-    monkeypatch.setattr(redis_listener.aredis.Redis, "from_url", from_url)
-
-
 @pytest.mark.parametrize("eager", [False, True])
 async def test_cancelling_open_wait_cancels_child_without_waiting_for_rollback(
-    monkeypatch: pytest.MonkeyPatch,
     eager: bool,
 ) -> None:
     pubsub = _PubSub()
     redis = _Redis(pubsub)
-    _client(monkeypatch, redis)
-    listener = redis_listener.RedisInboundListener("redis://unused", 7001)
+
+    def _factory(_url: str, **_kw: object) -> _Redis:
+        return redis
+
+    listener = redis_listener.RedisInboundListener(
+        "redis://unused",
+        7001,
+        redis_factory=_factory,
+    )
     parent = asyncio.create_task(listener.ensure_listening() if eager else listener.wait_one(30))
     try:
         await pubsub.entered.wait()
@@ -83,14 +82,19 @@ async def test_cancelling_open_wait_cancels_child_without_waiting_for_rollback(
     assert redis.closed
 
 
-async def test_cancelling_parent_after_open_completes_preserves_listener_handles(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
+async def test_cancelling_parent_after_open_completes_preserves_listener_handles() -> None:
     pubsub = _PubSub()
     redis = _Redis(pubsub)
     redis.close_release.set()
-    _client(monkeypatch, redis)
-    listener = redis_listener.RedisInboundListener("redis://unused", 7002)
+
+    def _factory(_url: str, **_kw: object) -> _Redis:
+        return redis
+
+    listener = redis_listener.RedisInboundListener(
+        "redis://unused",
+        7002,
+        redis_factory=_factory,
+    )
     parent = asyncio.create_task(listener.wait_one(30))
     pubsub.parent = parent
     try:

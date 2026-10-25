@@ -18,11 +18,7 @@ from base.sessions import env_forwarding
 
 
 @pytest.mark.parametrize("runtime", ["runtime", "project #1/runtime"])
-def test_managed_service_path_preserves_tools_across_callers(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, runtime: str
-) -> None:
-    from base.host import runtime_interpreter
-
+def test_managed_service_path_preserves_tools_across_callers(tmp_path: Path, runtime: str) -> None:
     venv = tmp_path / runtime
     bindir = venv / env_forwarding.get_backend().venv_bin_dir_name()
     tools = tmp_path / "admitted-tools"
@@ -30,13 +26,12 @@ def test_managed_service_path_preserves_tools_across_callers(
     command = tools / "meiva-proof"
     command.write_bytes(b"proof")
     command.chmod(0o700)
-    monkeypatch.setattr(runtime_interpreter, "runtime_venv", lambda: venv)
     admitted = os.pathsep.join((str(tools), str(bindir), str(tools)))
     interactive = env_forwarding.managed_service_env(
-        admitted, environ={"PATH": str(tmp_path / "interactive")}
+        admitted, environ={"PATH": str(tmp_path / "interactive")}, venv=venv
     )
     manager = env_forwarding.managed_service_env(
-        admitted, environ={"PATH": str(tmp_path / "manager")}
+        admitted, environ={"PATH": str(tmp_path / "manager")}, venv=venv
     )
     assert interactive == manager
     assert manager["PATH"].split(os.pathsep)[:2] == [str(bindir), str(tools)]
@@ -44,7 +39,7 @@ def test_managed_service_path_preserves_tools_across_callers(
     assert manager["MEIVA_SERVICE_PATH"] == str(tools)
     assert shutil.which(command.name, path=manager["PATH"]) == str(command)
     changed = env_forwarding.managed_service_env(
-        str(tmp_path / "changed"), environ={"PATH": str(tmp_path / "manager")}
+        str(tmp_path / "changed"), environ={"PATH": str(tmp_path / "manager")}, venv=venv
     )
     assert changed != manager
 

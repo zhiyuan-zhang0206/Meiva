@@ -11,7 +11,7 @@ from __future__ import annotations
 
 import os
 import sys
-from collections.abc import Iterable
+from collections.abc import Iterable, Sequence
 from dataclasses import dataclass
 from typing import Any, cast
 
@@ -63,11 +63,14 @@ def stable_create_time(process: psutil.Process) -> float:
     return process.create_time()
 
 
-def _start_ticks(pid: int) -> int | None:
-    ticks = pid_starttime_ticks(pid)
+def _validate_start_ticks(pid: int, ticks: int | None) -> int | None:
     if ticks is not None and (type(ticks) is not int or ticks <= 0):
         raise RuntimeError(f"invalid Linux start ticks for PID {pid}")
     return ticks
+
+
+def _start_ticks(pid: int) -> int | None:
+    return _validate_start_ticks(pid, pid_starttime_ticks(pid))
 
 
 # meiva:note
@@ -89,31 +92,53 @@ class OwnedProcess:
     starttime: int | None
 
     @classmethod
-    def capture(cls, process: psutil.Process) -> OwnedProcess:
+    def capture(
+        cls,
+        process: psutil.Process,
+        *,
+        platform: str | None = None,
+        observed_ticks: Sequence[int | None] | None = None,
+    ) -> OwnedProcess:
         """Sample the PID's current native birth; lineage needs separate evidence."""
-        ticks = _start_ticks(process.pid)
+        sys_platform = sys.platform if platform is None else platform
+        first_raw: int | None = None
+        if observed_ticks is not None:
+            first_raw = observed_ticks[0] if len(observed_ticks) >= 1 else None
+            ticks = _validate_start_ticks(process.pid, first_raw)
+        else:
+            ticks = _start_ticks(process.pid)
         identity = cls(process.pid, stable_create_time(process), ticks)
-        if sys.platform == "linux" and identity.starttime is None:
+        if sys_platform == "linux" and identity.starttime is None:
             if not psutil.pid_exists(process.pid):
                 raise psutil.NoSuchProcess(process.pid)
             raise RuntimeError(f"cannot capture Linux start ticks for PID {process.pid}")
         if ticks is not None:
-            after = _start_ticks(process.pid)
+            if observed_ticks is not None:
+                second_raw = observed_ticks[1] if len(observed_ticks) >= 2 else first_raw
+                after = _validate_start_ticks(process.pid, second_raw)
+            else:
+                after = _start_ticks(process.pid)
             if after is None and psutil.pid_exists(process.pid):
                 raise RuntimeError(f"cannot finish Linux start ticks capture for PID {process.pid}")
             if after != ticks:
                 raise psutil.NoSuchProcess(process.pid, msg="process changed during native capture")
         return identity
 
-    def birth_key(self) -> tuple[int, str, int | float]:
+    def birth_key(self, *, platform: str | None = None) -> tuple[int, str, int | float]:
         """Index independently observed births without altering receipt equality."""
-        return process_birth_key(self.pid, self.birth, self.starttime, platform=sys.platform)
+        return process_birth_key(
+            self.pid,
+            self.birth,
+            self.starttime,
+            platform=sys.platform if platform is None else platform,
+        )
 
-    def same_birth(self, other: OwnedProcess) -> bool:
+    def same_birth(self, other: OwnedProcess, *, platform: str | None = None) -> bool:
         """Compare captured native identities without a wall-clock fallback for ticks."""
-        if sys.platform == "linux" and (self.starttime is None or other.starttime is None):
+        sys_platform = sys.platform if platform is None else platform
+        if sys_platform == "linux" and (self.starttime is None or other.starttime is None):
             return False
-        return self.birth_key() == other.birth_key()
+        return self.birth_key(platform=sys_platform) == other.birth_key(platform=sys_platform)
 
     def birth_matches(self, process: psutil.Process) -> bool:
         """Whether a fresh observation still identifies this captured birth."""
@@ -144,19 +169,29 @@ class OwnedProcess:
     # Look at this record's pid once: the start ticks as read (Linux), whether the pid is still in
     # the process table, its status, and, where the record carries no ticks, the identity the
     # process has now. None when there is no such process. `judge_live` decides from the reading.
-    def read_live(self) -> LiveReading | None:
+    def read_live(
+        self,
+        *,
+        platform: str | None = None,
+        observed_ticks: Sequence[int | None] | None = None,
+    ) -> LiveReading | None:
+        sys_platform = sys.platform if platform is None else platform
         try:
             process = psutil.Process(self.pid)
             if self.starttime is None:
-                if sys.platform == "linux":
+                if sys_platform == "linux":
                     raise RuntimeError(f"missing Linux start ticks for PID {self.pid}")
                 return LiveReading(
                     ticks=None,
                     pid_exists=True,
                     status=process.status(),
-                    identity=OwnedProcess.capture(process),
+                    identity=OwnedProcess.capture(process, platform=sys_platform),
                 )
-            observed = _start_ticks(self.pid)
+            if observed_ticks is not None:
+                raw = observed_ticks[0] if len(observed_ticks) >= 1 else None
+                observed = _validate_start_ticks(self.pid, raw)
+            else:
+                observed = _start_ticks(self.pid)
             # meiva:note
             # Existence is asked only when the read found nothing.
             exists = observed is not None or psutil.pid_exists(self.pid)
@@ -180,8 +215,13 @@ class OwnedProcess:
 
     # meiva:note
     # Whether the pid still is this recorded process.
-    def live(self) -> bool:
-        return self.judge_live(self.read_live())
+    def live(
+        self,
+        *,
+        platform: str | None = None,
+        observed_ticks: Sequence[int | None] | None = None,
+    ) -> bool:
+        return self.judge_live(self.read_live(platform=platform, observed_ticks=observed_ticks))
 
     def send_signal(self, signum: int) -> bool:
         """Signal this birth, retaining the Linux process object through delivery.
@@ -196,7 +236,7 @@ class OwnedProcess:
             if sys.platform == "linux":
                 descriptor = pidfd.open_process(self.pid)
             process = psutil.Process(self.pid)
-            if not self.same_birth(OwnedProcess.capture(process)):
+            if not self.birth_matches(process):
                 raise RuntimeError(f"native identity changed before signal: {self.pid}")
             if descriptor is not None:
                 pidfd.send_signal(descriptor, signum)
@@ -246,12 +286,20 @@ def is_descendant(identity: OwnedProcess, ancestor: OwnedProcess) -> bool:
         return False
 
 
-def capture_tree(identity: OwnedProcess) -> set[OwnedProcess]:
+def capture_tree(
+    identity: OwnedProcess,
+    *,
+    candidate_children: Sequence[psutil.Process] | None = None,
+) -> set[OwnedProcess]:
     """Capture only generation- and ancestry-validated members of this tree."""
     if not identity.live():
         return set()
     try:
-        children = psutil.Process(identity.pid).children(recursive=True)
+        children = (
+            psutil.Process(identity.pid).children(recursive=True)
+            if candidate_children is None
+            else candidate_children
+        )
         captured = {identity}
         for child in children:
             try:
@@ -276,11 +324,16 @@ def capture_tree(identity: OwnedProcess) -> set[OwnedProcess]:
         return {identity}
 
 
-def retain_processes(retained: set[OwnedProcess], observed: Iterable[OwnedProcess]) -> None:
+def retain_processes(
+    retained: set[OwnedProcess],
+    observed: Iterable[OwnedProcess],
+    *,
+    platform: str | None = None,
+) -> None:
     """Add new native births, preserving the original receipt for every known one."""
-    keys = {identity.birth_key() for identity in retained}
+    keys = {identity.birth_key(platform=platform) for identity in retained}
     for identity in observed:
-        key = identity.birth_key()
+        key = identity.birth_key(platform=platform)
         if key not in keys:
             retained.add(identity)
             keys.add(key)
@@ -302,6 +355,55 @@ def leader_owns_pids(leader: OwnedProcess, pids: set[int]) -> bool:
     return bool(owned & pids)
 
 
+def format_process_node_facts(
+    *,
+    pid: int,
+    name: str,
+    executable: str,
+    created_at: float,
+    starttime: int | None,
+    boot_id: str | None,
+    parent_pid: int,
+    cmdline: Sequence[str] = (),
+) -> dict[str, object]:
+    facts: dict[str, object] = {
+        "pid": pid,
+        "name": name,
+        "executable": executable,
+        "created_at": created_at,
+        "starttime": starttime,
+        "boot_id": boot_id,
+        "parent_pid": parent_pid,
+    }
+    if name == "node" and len(cmdline) > 1:
+        # meiva:note
+        # A Node controller (DeepSeek Harness) is identified by its script, not its interpreter; only argv[1] is recorded.
+        facts["script"] = cmdline[1]
+    return facts
+
+
+def assemble_process_metadata(
+    *,
+    pid: int,
+    nodes: Sequence[dict[str, object]],
+    codex_home: str | None = None,
+    observation_error: str | None = None,
+) -> dict[str, object]:
+    result: dict[str, object] = {"pid": pid, "ancestors": []}
+    if codex_home:
+        result["codex_home"] = codex_home
+    ancestors: list[dict[str, object]] = []
+    for depth, facts in enumerate(nodes):
+        if depth == 0:
+            result.update(facts)
+        else:
+            ancestors.append(facts)
+    result["ancestors"] = ancestors
+    if observation_error is not None:
+        result["observation_error"] = observation_error
+    return result
+
+
 def process_metadata() -> dict[str, Any]:
     """Observed process facts for one caller, standardized for attestation.
 
@@ -310,39 +412,38 @@ def process_metadata() -> dict[str, Any]:
     walk is bounded and records what it could observe instead of failing: a
     permission gap on an ancestor path must not lose the facts below it.
     """
-    result: dict[str, Any] = {"pid": os.getpid(), "ancestors": []}
     # env-ok: inherited provider routing context, never an executor identity assertion
     codex_home = os.environ.get("CODEX_HOME")
-    if codex_home:
-        result["codex_home"] = codex_home
+    nodes: list[dict[str, object]] = []
+    observation_error: str | None = None
     process = psutil.Process()
-    for depth in range(8):
+    for _depth in range(8):
         try:
             identity = OwnedProcess.capture(process)
-            facts = {
-                "pid": process.pid,
-                "name": process.name(),
-                "executable": process.exe(),
-                "created_at": identity.birth,
-                "starttime": identity.starttime,
-                "boot_id": native_boot_id(),
-                "parent_pid": process.ppid(),
-            }
-            if facts["name"] == "node":
-                # A Node controller (DeepSeek Harness) is identified by its
-                # script, not its interpreter; only argv[1] is recorded.
-                argv = process.cmdline()
-                if len(argv) > 1:
-                    facts["script"] = argv[1]
-            if depth == 0:
-                result.update(facts)
-            else:
-                result["ancestors"].append(facts)
+            name = process.name()
+            cmdline = process.cmdline() if name == "node" else ()
+            nodes.append(
+                format_process_node_facts(
+                    pid=process.pid,
+                    name=name,
+                    executable=process.exe(),
+                    created_at=identity.birth,
+                    starttime=identity.starttime,
+                    boot_id=native_boot_id(),
+                    parent_pid=process.ppid(),
+                    cmdline=cmdline,
+                )
+            )
             parent = process.parent()
             if parent is None:
                 break
             process = parent
         except (psutil.NoSuchProcess, psutil.AccessDenied) as exc:
-            result["observation_error"] = type(exc).__name__
+            observation_error = type(exc).__name__
             break
-    return result
+    return assemble_process_metadata(
+        pid=os.getpid(),
+        nodes=nodes,
+        codex_home=codex_home,
+        observation_error=observation_error,
+    )

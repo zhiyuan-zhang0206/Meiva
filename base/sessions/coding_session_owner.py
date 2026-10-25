@@ -103,7 +103,19 @@ class CodingSessionSocketError(RuntimeError):
     """No private, short-enough directory is available for an app-server socket."""
 
 
-def private_socket_dir(*, base: Path | None = None) -> Path:
+def default_socket_root(*, macos: bool | None = None) -> Path:
+    # meiva:note
+    # Unix domain socket paths must stay within sun_path (~104 bytes); private_socket_dir enforces 0700 uid-owned subdirectories under this short root.
+    on_macos = is_macos() if macos is None else macos
+    return Path("/private/tmp" if on_macos else "/tmp")  # noqa: S108
+
+
+def sun_path_limit(*, macos: bool | None = None) -> int:
+    on_macos = is_macos() if macos is None else macos
+    return 104 if on_macos else 108
+
+
+def private_socket_dir(*, base: Path | None = None, macos: bool | None = None) -> Path:
     """``<short tmp>/meiva-<uid>``: a real directory this user owns, mode 0700.
 
     A world-writable parent lets anyone pre-create the name, so a directory
@@ -111,7 +123,7 @@ def private_socket_dir(*, base: Path | None = None) -> Path:
     """
     # macOS /tmp is a symlink; codex requires a real directory path.
     if base is None:
-        base = Path("/private/tmp" if is_macos() else "/tmp")  # noqa: S108 — the per-user dir below is checked: real, ours, 0700
+        base = default_socket_root(macos=macos)
     uid = os.getuid()
     directory = base / f"meiva-{uid}"
     with contextlib.suppress(FileExistsError):
@@ -127,7 +139,14 @@ def private_socket_dir(*, base: Path | None = None) -> Path:
     return directory
 
 
-def codex_app_server_socket(key: CodingSessionKey, generation: str) -> Path:
+def codex_app_server_socket(
+    key: CodingSessionKey,
+    generation: str,
+    *,
+    socket_dir: Path | None = None,
+    base: Path | None = None,
+    macos: bool | None = None,
+) -> Path:
     """Private host-local unix socket for a generation's shared Codex app server.
 
     The socket lives in a short per-user directory (``/private/tmp/meiva-<uid>``
@@ -141,10 +160,11 @@ def codex_app_server_socket(key: CodingSessionKey, generation: str) -> Path:
     A path that would still not fit ``sun_path`` fails here, before any launch.
     """
     name = f"codex-app-server.{key_digest(key)[:12]}-{generation.replace('-', '')[:8]}.sock"
-    path = private_socket_dir() / name
+    directory = socket_dir if socket_dir is not None else private_socket_dir(base=base, macos=macos)
+    path = directory / name
     size = len(os.fsencode(path))
     # sockaddr_un.sun_path includes its terminating NUL: 104 bytes on macOS, 108 on Linux.
-    sun_path_bytes = 104 if is_macos() else 108
+    sun_path_bytes = sun_path_limit(macos=macos)
     if size >= sun_path_bytes:
         raise CodingSessionSocketError(
             f"Codex app-server socket path {path} is {size} bytes; unix sockets on this "

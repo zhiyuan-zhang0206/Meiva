@@ -1,7 +1,5 @@
 from pathlib import Path
 
-import pytest
-
 import base.host.system.probes as pp
 from base.host.system.hostport import Host
 from base.host.system.tests.fake_commands import (
@@ -18,29 +16,10 @@ def _linux(programs: dict[str, str] | None = None) -> Host:
     return fake_host(platform=LINUX_X86, programs=programs)
 
 
-def _display(monkeypatch: pytest.MonkeyPatch, *, on: bool) -> None:
-    """Give the process an X display, or take every display variable away."""
-    if on:
-        monkeypatch.setenv("DISPLAY", ":0")
-    else:
-        monkeypatch.delenv("DISPLAY", raising=False)
-        monkeypatch.delenv("WAYLAND_DISPLAY", raising=False)
-
-
-def _desktop_linux(monkeypatch: pytest.MonkeyPatch, programs: dict[str, str] | None = None) -> Host:
-    """A Linux host with a display, Chrome and npx unless `programs` says otherwise."""
-    _display(monkeypatch, on=True)
+def _desktop_linux(programs: dict[str, str] | None = None) -> Host:
     return _linux(
         {"google-chrome": _CHROME, "npx": _NPX} if programs is None else programs,
     )
-
-
-def _path_exists(_self: Path) -> bool:
-    return True
-
-
-def _path_missing(_self: Path) -> bool:
-    return False
 
 
 # ─── resolve_chrome_binary ───────────────────────────────────────────────
@@ -53,15 +32,21 @@ def test_resolve_uses_explicit_override(tmp_path: Path) -> None:
     assert pp.resolve_chrome_binary(str(fake), host=fake_host(platform=DARWIN_ARM64)) == str(fake)
 
 
-def test_resolve_macos_default(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(pp.Path, "exists", _path_exists)  # pyright: ignore[reportUnknownArgumentType]
+def test_resolve_macos_default(tmp_path: Path) -> None:
+    macos_chrome = tmp_path / "Google Chrome"
+    macos_chrome.write_text("#!/bin/sh\n")
     host = fake_host(platform=DARWIN_ARM64)
-    assert pp.resolve_chrome_binary(None, host=host) == pp.MACOS_CHROME
+    assert pp.resolve_chrome_binary(None, host=host, macos_chrome=macos_chrome) == str(macos_chrome)
 
 
-def test_resolve_returns_none_when_missing(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(pp.Path, "exists", _path_missing)  # pyright: ignore[reportUnknownArgumentType]
-    assert pp.resolve_chrome_binary(None, host=fake_host(platform=DARWIN_ARM64)) is None
+def test_resolve_returns_none_when_missing(tmp_path: Path) -> None:
+    macos_chrome = tmp_path / "absent-chrome"
+    assert (
+        pp.resolve_chrome_binary(
+            None, host=fake_host(platform=DARWIN_ARM64), macos_chrome=macos_chrome
+        )
+        is None
+    )
 
 
 def test_resolve_linux_uses_which() -> None:
@@ -85,63 +70,62 @@ def test_display_true_on_macos() -> None:
     assert pp.display_available(host=fake_host(platform=DARWIN_ARM64)) is True
 
 
-def test_display_linux_requires_env(monkeypatch: pytest.MonkeyPatch) -> None:
-    host = _linux()
-    _display(monkeypatch, on=False)
-    assert pp.display_available(host=host) is False
-    _display(monkeypatch, on=True)
-    assert pp.display_available(host=host) is True
-    monkeypatch.delenv("DISPLAY", raising=False)
-    monkeypatch.setenv("WAYLAND_DISPLAY", "wayland-0")
-    assert pp.display_available(host=host) is True
+def test_display_linux_requires_env() -> None:
+    assert pp.has_display_vars(system="linux", display=None, wayland_display=None) is False
+    assert pp.has_display_vars(system="linux", display="", wayland_display="") is False
+    assert pp.has_display_vars(system="linux", display=":0", wayland_display=None) is True
+    assert pp.has_display_vars(system="linux", display=None, wayland_display="wayland-0") is True
+    assert pp.has_display_vars(system="darwin", display=None, wayland_display=None) is True
 
 
 # ─── browser_incapability / browser_capable ──────────────────────────────
 
 
-def test_incapability_none_when_all_present(monkeypatch: pytest.MonkeyPatch) -> None:
-    host = _desktop_linux(monkeypatch)
-    assert pp.browser_incapability(None, host=host) is None
-    assert pp.browser_capable(None, host=host) is True
+def test_incapability_none_when_all_present() -> None:
+    host = _desktop_linux()
+    assert pp.browser_incapability(None, host=host, has_display=True) is None
+    assert pp.browser_capable(None, host=host, has_display=True) is True
 
 
-def test_incapability_accepts_a_configured_chrome_without_one_on_the_path(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    host = _desktop_linux(monkeypatch, {"npx": _NPX})
-    assert pp.browser_incapability("/opt/my-chrome", host=host) is None
+def test_incapability_accepts_a_configured_chrome_without_one_on_the_path() -> None:
+    host = _desktop_linux({"npx": _NPX})
+    assert pp.browser_incapability("/opt/my-chrome", host=host, has_display=True) is None
 
 
-def test_incapability_no_display(monkeypatch: pytest.MonkeyPatch) -> None:
-    host = _desktop_linux(monkeypatch)
-    _display(monkeypatch, on=False)
-    assert pp.browser_incapability(None, host=host) == "no display (headless server)"
-    assert pp.browser_capable(None, host=host) is False
-
-
-def test_incapability_no_chrome(monkeypatch: pytest.MonkeyPatch) -> None:
-    host = _desktop_linux(monkeypatch, {"npx": _NPX})
+def test_incapability_no_display() -> None:
+    host = _desktop_linux()
     assert (
-        pp.browser_incapability(None, host=host)
+        pp.browser_incapability(None, host=host, has_display=False)
+        == "no display (headless server)"
+    )
+    assert pp.browser_capable(None, host=host, has_display=False) is False
+
+
+def test_incapability_no_chrome() -> None:
+    host = _desktop_linux({"npx": _NPX})
+    assert (
+        pp.browser_incapability(None, host=host, has_display=True)
         == "no Chrome (install it or set MEIVA_CHROME_BINARY)"
     )
-    assert pp.browser_capable(None, host=host) is False
+    assert pp.browser_capable(None, host=host, has_display=True) is False
 
 
-def test_incapability_no_npx(monkeypatch: pytest.MonkeyPatch) -> None:
-    host = _desktop_linux(monkeypatch, {"google-chrome": _CHROME})
+def test_incapability_no_npx() -> None:
+    host = _desktop_linux({"google-chrome": _CHROME})
     assert (
-        pp.browser_incapability(None, host=host)
+        pp.browser_incapability(None, host=host, has_display=True)
         == "no npx (install Node.js for chrome-devtools-mcp)"
     )
-    assert pp.browser_capable(None, host=host) is False
+    assert pp.browser_capable(None, host=host, has_display=True) is False
 
 
-def test_incapability_checks_display_first(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_incapability_checks_display_first() -> None:
     """Order is display -> Chrome -> npx; the first missing prong wins, so a fully
     bare host reports the display reason (not a misleading Chrome/npx one)."""
-    _display(monkeypatch, on=False)
-    assert pp.browser_incapability(None, host=_linux()) == "no display (headless server)"
+    assert (
+        pp.browser_incapability(None, host=_linux(), has_display=False)
+        == "no display (headless server)"
+    )
 
 
 def test_npx_incapability_reason_is_exported_once() -> None:

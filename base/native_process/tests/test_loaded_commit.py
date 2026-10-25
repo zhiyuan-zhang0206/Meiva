@@ -7,28 +7,13 @@ cache that same captured SHA, with honest unknowns and bounded Git failures.
 
 from __future__ import annotations
 
+import shutil
 import subprocess
 from pathlib import Path
 
 import pytest
 
 from base.native_process import code_version, loaded_commit
-
-_GIT_ENV_KEYS = (
-    "GIT_DIR",
-    "GIT_WORK_TREE",
-    "GIT_INDEX_FILE",
-    "GIT_OBJECT_DIRECTORY",
-    "GIT_COMMON_DIR",
-    "GIT_CEILING_DIRECTORIES",
-)
-
-
-@pytest.fixture(autouse=True)
-def _isolated_code_version(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Keep Git free of the ambient repository variables a hook sets."""
-    for key in _GIT_ENV_KEYS:
-        monkeypatch.delenv(key, raising=False)
 
 
 def test_image_is_none_before_capture() -> None:
@@ -40,14 +25,10 @@ def test_image_is_none_before_capture() -> None:
     assert loaded_commit.LoadedCommit(Path.cwd(), None).sha is None
 
 
-def test_image_never_shells_out(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_image_never_shells_out(tmp_path: Path) -> None:
     """Even with Git available and a moved checkout, an unknown fact stays silent."""
-
-    def _explode(*_args: object, **_kwargs: object) -> None:
-        raise AssertionError("sha must not resolve Git")
-
-    monkeypatch.setattr(subprocess, "run", _explode)
-    assert loaded_commit.LoadedCommit(Path.cwd(), None).sha is None
+    repo = _repo_with_commits(tmp_path / "repo", 1)
+    assert loaded_commit.LoadedCommit(repo, None).sha is None
 
 
 def test_capture_captures_this_trees_head() -> None:
@@ -65,56 +46,51 @@ def test_capture_captures_this_trees_head() -> None:
 
 
 def test_capture_keeps_the_first_answer_when_the_checkout_moves(
-    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
 ) -> None:
     """Independent entry captures observe their own source generation.
 
     A later entry can load B while the first entry retains its immutable A fact."""
-    shas = iter(["aaaaaaa1111", "bbbbbbb2222"])
-
-    def _fake_run(*_args: object, **_kwargs: object) -> subprocess.CompletedProcess[str]:
-        return subprocess.CompletedProcess(
-            args=[], returncode=0, stdout=next(shas) + "\n", stderr=""
-        )
-
-    monkeypatch.setattr(subprocess, "run", _fake_run)
-    first = loaded_commit.LoadedCommit.capture()
-    second = loaded_commit.LoadedCommit.capture()
-    assert first.sha == "aaaaaaa1111"
-    assert second.sha == "bbbbbbb2222"
-    assert first.sha == "aaaaaaa1111"
+    repo = _repo_with_commits(tmp_path / "repo", 1)
+    first = loaded_commit.LoadedCommit.capture(repo)
+    _git(repo, "commit", "--allow-empty", "-m", "second")
+    second = loaded_commit.LoadedCommit.capture(repo)
+    assert first.sha is not None and second.sha is not None
+    assert first.sha != second.sha
+    assert first.sha == _git(repo, "rev-parse", "HEAD~1")
+    assert second.sha == _git(repo, "rev-parse", "HEAD")
 
 
-def test_capture_is_none_outside_a_git_checkout(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_capture_is_none_outside_a_git_checkout(tmp_path: Path) -> None:
     """A tarball / installed-package deploy has no commit; that is unknown, not
     a crash, and not a guess."""
-
-    def _fake_run(*_args: object, **_kwargs: object) -> subprocess.CompletedProcess[str]:
-        return subprocess.CompletedProcess(args=[], returncode=128, stdout="", stderr="not a repo")
-
-    monkeypatch.setattr(subprocess, "run", _fake_run)
-    assert loaded_commit.LoadedCommit.capture().sha is None
-    assert loaded_commit.LoadedCommit(Path.cwd(), None).sha is None
+    bare = tmp_path / "not-a-repo"
+    bare.mkdir()
+    assert loaded_commit.LoadedCommit.capture(bare).sha is None
+    assert loaded_commit.LoadedCommit(bare, None).sha is None
 
 
-def test_capture_survives_a_missing_git_binary(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_capture_survives_a_missing_git_binary(tmp_path: Path) -> None:
     """Capturing a commit is bookkeeping; it must never take a daemon down."""
+    assert (
+        loaded_commit.LoadedCommit.capture(
+            tmp_path, git_executable=str(tmp_path / "no-such-git")
+        ).sha
+        is None
+    )
 
-    def _fake_run(*_args: object, **_kwargs: object) -> subprocess.CompletedProcess[str]:
-        raise FileNotFoundError("git")
 
-    monkeypatch.setattr(subprocess, "run", _fake_run)
-    assert loaded_commit.LoadedCommit.capture().sha is None
-
-
-def test_capture_survives_a_hung_git(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_capture_survives_a_hung_git(tmp_path: Path) -> None:
     """The capture is bounded — a wedged git cannot stall a daemon's boot."""
-
-    def _fake_run(*_args: object, **_kwargs: object) -> subprocess.CompletedProcess[str]:
-        raise subprocess.TimeoutExpired(cmd="git", timeout=10)
-
-    monkeypatch.setattr(subprocess, "run", _fake_run)
-    assert loaded_commit.LoadedCommit.capture().sha is None
+    slow_git = tmp_path / "slow-git"
+    slow_git.write_text("#!/bin/sh\nsleep 5\n", encoding="utf-8")
+    slow_git.chmod(0o700)
+    assert (
+        loaded_commit.LoadedCommit.capture(
+            tmp_path, git_executable=str(slow_git), timeout_s=0.05
+        ).sha
+        is None
+    )
 
 
 def _git(repo: Path, *args: str) -> str:
@@ -188,27 +164,20 @@ def test_an_unresolvable_revision_fails_fast(tmp_path: Path) -> None:
         code_version.first_parent_count(repo, "no-such-revision")
 
 
-def test_image_counts_from_the_frozen_commit_and_caches(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_image_counts_from_the_frozen_commit_and_caches(tmp_path: Path) -> None:
     """The version answers for the commit the process loaded (`capture()`), asked of
     this module's own tree, and one version owner asks Git once."""
-    asked: list[tuple[Path, str]] = []
-
-    def fake_count(repo: Path, rev: str = "HEAD") -> int:
-        asked.append((repo, rev))
-        return 41
-
-    image = loaded_commit.LoadedCommit(Path.cwd(), "abc123")
+    repo = _repo_with_commits(tmp_path / "repo", 3)
+    image = loaded_commit.LoadedCommit.capture(repo)
     version = code_version.CodeVersion(image)
-    monkeypatch.setattr(code_version, "first_parent_count", fake_count)
+    _git(repo, "commit", "--allow-empty", "-m", "fourth after capture")
 
-    assert version.get() == 41
-    assert version.get() == 41
-    assert asked == [(image.source_root, "abc123")]
+    assert version.get() == 3
+    shutil.rmtree(repo / ".git")
+    assert version.get() == 3
 
 
-def test_image_without_a_git_checkout_fails_fast_and_is_not_zero(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
+def test_image_without_a_git_checkout_fails_fast_and_is_not_zero() -> None:
     image = loaded_commit.LoadedCommit(Path.cwd(), None)
     with pytest.raises(code_version.CodeVersionError, match="loaded commit"):
         code_version.CodeVersion(image).get()

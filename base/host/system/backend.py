@@ -109,8 +109,15 @@ class LinuxPlatformBackend(PlatformBackend):
 # ---------------------------------------------------------------------------
 
 
+def backend_for_system(system: str) -> PlatformBackend:
+    if system == "darwin":
+        return MacPlatformBackend()
+    if system == "linux":
+        return LinuxPlatformBackend()
+    raise RuntimeError("unsupported host platform for OS jobs")
+
+
 def get_backend() -> PlatformBackend:
     """Return the platform-appropriate ``PlatformBackend`` (stateless: built per call)."""
-    if not (is_macos() or is_linux()):
-        raise RuntimeError("unsupported host platform for OS jobs")
-    return MacPlatformBackend() if is_macos() else LinuxPlatformBackend()
+    system = "darwin" if is_macos() else "linux" if is_linux() else ""
+    return backend_for_system(system)

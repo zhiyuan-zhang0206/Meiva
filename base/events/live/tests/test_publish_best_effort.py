@@ -7,6 +7,7 @@ the calling owner; a committed DB row remains committed when its hint fails.
 
 from __future__ import annotations
 
+from dataclasses import replace
 from typing import Any
 
 import pytest
@@ -15,35 +16,23 @@ from redis.exceptions import ConnectionError as RedisConnectionError
 from redis.exceptions import DataError, NoPermissionError, ResponseError
 
 from base.config import settings
-from base.events.live import redis_client
-from base.events.live.bus import EventBus
+from base.events.live.bus import EventBus, event_bus_config_from_settings
+from base.events.live.redis_resilience import AuthRetryPolicy, should_warn_publish_failure
 from base.events.live.tests.fakes import patch_async_redis, patch_sync_redis
 
-_bus = EventBus.from_settings()
+_FAST_RETRY = AuthRetryPolicy(initial_delay_s=0.0005, delay_cap_s=0.002, window_s=1.0)
+_bus = EventBus(replace(event_bus_config_from_settings(), auth_retry_policy=_FAST_RETRY))
 
 
 @pytest.fixture(autouse=True)
-def _skip_acl_backoff_waits(monkeypatch: pytest.MonkeyPatch) -> None:
-    global _bus  # noqa: PLW0603 — a bus built from the settings the session has by now
-    _bus = EventBus.from_settings()
+def _skip_acl_backoff_waits() -> None:
     """Exercise the terminal best-effort contract without waiting 45.5 seconds.
 
     Retry cadence and its bound are asserted in test_redis_client; these tests
     own warning classification after retries have been exhausted.
     """
-
-    async def _no_async_wait(_delay: float) -> None:
-        return None
-
-    def _no_sync_wait(_delay: float) -> None:
-        return None
-
-    def _max_jitter(delay_cap: float) -> float:
-        return delay_cap
-
-    monkeypatch.setattr(redis_client, "sleep_sync", _no_sync_wait)
-    monkeypatch.setattr(redis_client, "sleep_async", _no_async_wait)
-    monkeypatch.setattr(redis_client, "auth_retry_jitter", _max_jitter)
+    global _bus  # noqa: PLW0603 — a bus built from the settings the session has by now
+    _bus = EventBus(replace(event_bus_config_from_settings(), auth_retry_policy=_FAST_RETRY))
 
 
 class _BoomSyncClient:
@@ -196,34 +185,37 @@ async def test_warning_cadence_is_shared_by_bus_publishers_and_isolated_across_b
     monkeypatch: pytest.MonkeyPatch, loguru_records: list[dict[str, Any]]
 ) -> None:
     """Each bus shares sync/async warning cadence, while a new owner reports afresh."""
-    now = 100.0
-    monkeypatch.setattr(redis_client.time, "monotonic", lambda: now)
     failure = ResponseError("NOPERM")
     patch_sync_redis(monkeypatch, lambda: _BoomSyncClient(failure))
     patch_async_redis(monkeypatch, lambda: _BoomAsyncClient(failure))
-    first = EventBus.from_settings()
-    second = EventBus.from_settings()
+    first = EventBus(replace(event_bus_config_from_settings(), auth_retry_policy=_FAST_RETRY))
+    second = EventBus(replace(event_bus_config_from_settings(), auth_retry_policy=_FAST_RETRY))
     channel = "meiva:owner-cadence"
 
     assert first.publish_best_effort_sync("{}", channel=channel) is None
     assert await first.publish_best_effort("{}", channel=channel) is None
     assert await second.publish_best_effort("{}", channel=channel) is None
-    now += 59.0
-    assert first.publish_best_effort_sync("{}", channel=channel) is None
-    now += 1.0
-    assert await first.publish_best_effort("{}", channel=channel) is None
     assert first.publish_best_effort_sync("{}", channel=f"{channel}:other") is None
 
     assert [r["level"].name for r in loguru_records] == [
         "WARNING",
         "DEBUG",
         "WARNING",
-        "DEBUG",
-        "WARNING",
         "WARNING",
     ]
-    assert [r["exception"] is not None for r in loguru_records] == [False] * 6
-    assert sum("rate-limited" in r["message"] for r in loguru_records) == 2
+    assert [r["exception"] is not None for r in loguru_records] == [False] * 4
+    assert sum("rate-limited" in r["message"] for r in loguru_records) == 1
+
+    cadence: dict[tuple[str, str], float] = {}
+    assert should_warn_publish_failure(
+        cadence, channel=channel, error_type="ResponseError", now=100.0
+    )
+    assert not should_warn_publish_failure(
+        cadence, channel=channel, error_type="ResponseError", now=159.0
+    )
+    assert should_warn_publish_failure(
+        cadence, channel=channel, error_type="ResponseError", now=160.0
+    )
 
 
 @pytest.mark.parametrize("failure", [AttributeError("bug"), DataError("invalid input")])

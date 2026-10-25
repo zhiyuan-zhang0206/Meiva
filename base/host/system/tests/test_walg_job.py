@@ -3,14 +3,12 @@
 from __future__ import annotations
 
 import shlex
-from collections.abc import Callable
 from dataclasses import replace
 from pathlib import Path
 
 import pytest
 
 from base.host.system import walg_job as job
-from base.host.system.cron import mechanics
 from base.host.system.hostport import Host
 from base.host.system.job_values import JobRoots
 from base.host.system.tests.fake_commands import (
@@ -21,6 +19,7 @@ from base.host.system.tests.fake_commands import (
     fake_host,
 )
 from base.host.system.tests.fake_crontab import FakeCrontab
+from base.log.tests.log_records import LogRecords
 
 _UID = 501
 
@@ -46,25 +45,13 @@ def _linux(crontab: FakeCrontab) -> Host:
     )
 
 
-def _recorder(calls: list[str], label: str) -> Callable[..., None]:
-    def record(*_args: object, **_kwargs: object) -> None:
-        calls.append(label)
-
-    return record
-
-
-@pytest.fixture(autouse=True)
-def _configure_job(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
-    monkeypatch.setenv("HOME", str(tmp_path))
-
-
 def test_macos_reregistration_rewrites_and_reloads_idempotently(
     job_roots: JobRoots,
 ) -> None:
     commands, host = _launchctl()
 
     assert job.register_macos(roots=job_roots, backup_hour=3, host=host) == 0
-    plist = job.launchd_plist_path()
+    plist = job.launchd_plist_path(user_home=job_roots.user_home)
     first = plist.read_text(encoding="utf-8")
     assert job.register_macos(roots=job_roots, backup_hour=3, host=host) == 0
 
@@ -82,10 +69,13 @@ def test_macos_unregister_removes_the_plist_and_is_repeatable(
 ) -> None:
     commands, host = _launchctl()
     assert job.register_macos(roots=job_roots, backup_hour=3, host=host) == 0
-    plist = job.launchd_plist_path()
+    plist = job.launchd_plist_path(user_home=job_roots.user_home)
     assert plist.exists()
 
-    assert (job.unregister_macos(host=host), job.unregister_macos(host=host)) == (0, 0)
+    assert (
+        job.unregister_macos(host=host, user_home=job_roots.user_home),
+        job.unregister_macos(host=host, user_home=job_roots.user_home),
+    ) == (0, 0)
 
     assert not plist.exists()
     assert [argv[1] for argv in commands.argvs if argv[1] != "print"][-2:] == ["bootout", "bootout"]
@@ -138,40 +128,40 @@ def test_linux_unregister_removes_the_line_and_keeps_the_rest() -> None:
 
 
 def test_register_skips_when_os_jobs_are_disabled(
-    job_roots: JobRoots, monkeypatch: pytest.MonkeyPatch
+    job_roots: JobRoots, loguru_records: LogRecords
 ) -> None:
-    skipped: list[str] = []
-    monkeypatch.setattr(mechanics, "skip_os_job", skipped.append)
-
-    def no_platform(*_a: object, **_k: object) -> None:
-        raise AssertionError("the platform must not be touched with OS jobs off")
-
-    monkeypatch.setattr(mechanics, "register_platform_job", no_platform)
-
+    commands = FakeCommands()
     job.register_walg_job(
         roots=job_roots,
         enabled=False,
         backup_hour=None,
-        host=fake_host(),
+        host=fake_host(commands, platform=DARWIN_ARM64),
     )
-
-    assert skipped == ["WAL-G tick"]
+    assert commands.argvs == []
+    assert any(
+        "OS jobs disabled (MEIVA_OS_JOBS_ENABLED=false) — not registering WAL-G tick"
+        in r["message"]
+        for r in loguru_records
+    )
 
 
 def test_register_and_unregister_delegate_in_the_default_home(
-    job_roots: JobRoots, default_home: Path, monkeypatch: pytest.MonkeyPatch
+    job_roots: JobRoots, default_home: Path
 ) -> None:
-    calls: list[str] = []
-
-    monkeypatch.setattr(mechanics, "register_platform_job", _recorder(calls, "register"))
-    monkeypatch.setattr(mechanics, "unregister_platform_job", _recorder(calls, "unregister"))
+    commands, host = _launchctl()
 
     job.register_walg_job(
         roots=replace(job_roots, home=default_home / ".meiva", user_home=default_home),
         enabled=True,
         backup_hour=3,
-        host=fake_host(),
+        host=host,
     )
-    job.unregister_walg_job(host=fake_host())
-
-    assert calls == ["register", "unregister"]
+    plist = job.launchd_plist_path(user_home=default_home)
+    assert plist.exists()
+    job.unregister_walg_job(host=host, user_home=default_home)
+    assert not plist.exists()
+    assert [argv[1] for argv in commands.argvs if argv[1] != "print"] == [
+        "bootout",
+        "bootstrap",
+        "bootout",
+    ]

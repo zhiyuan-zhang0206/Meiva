@@ -25,6 +25,14 @@ def inherited_process_env(overrides: Mapping[str, str] | None = None) -> dict[st
 _DAEMON_ENV_NAMES = frozenset({"PATH", "HOME", "USER", "LOGNAME", "TMPDIR", "TZ", "LANG"})
 
 
+def filter_daemon_env(environ: Mapping[str, str]) -> dict[str, str]:
+    return {
+        name: value
+        for name, value in environ.items()
+        if name in _DAEMON_ENV_NAMES or name.startswith("LC_")
+    }
+
+
 def daemon_process_env() -> dict[str, str]:
     """The environment of a long-lived data-plane daemon (PgBouncer, Redis, and
     the Postgres postmaster through `base.cluster.dataplane.pg_tools.pg_start_env`).
@@ -34,8 +42,4 @@ def daemon_process_env() -> dict[str, str]:
     generation and its API token into this process's environment, and a daemon
     would otherwise keep them until it restarts.
     """
-    return {
-        name: value
-        for name, value in os.environ.items()
-        if name in _DAEMON_ENV_NAMES or name.startswith("LC_")
-    }
+    return filter_daemon_env(os.environ)

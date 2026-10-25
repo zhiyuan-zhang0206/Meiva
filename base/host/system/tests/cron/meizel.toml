@@ -3,13 +3,3 @@ exports = []
 [uses]
 "test_content.py" = ["child_definition.py"]
 "test_scheduler.py" = ["child_definition.py"]
-
-[debt.env-patch]
-"test_scheduler.py#monkeypatch.setenv os.environ.HOME" = 2
-"test_scheduler.py#monkeypatch.setenv os.environ.XPC_SERVICE_NAME" = 4
-
-[debt.first-party-patch]
-"test_scheduler.py#monkeypatch.setattr base.host.system.cron.health_job.descends_from_launchd_job" = 3
-"test_scheduler.py#monkeypatch.setattr base.host.system.cron.health_job.register_macos" = 1
-"test_scheduler.py#monkeypatch.setattr base.host.system.cron.mechanics.meiva_binary_path" = 4
-"test_scheduler.py#monkeypatch.setattr base.paths.repo_root" = 3

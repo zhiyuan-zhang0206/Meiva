@@ -6,7 +6,7 @@ import pytest
 from base.host.proc import CommandRunner
 from base.host.system import logs_job, packages_job, pr_flow_job, walg_job
 from base.host.system.boot_autostart import registration as autostart
-from base.host.system.cron import health_job, mechanics
+from base.host.system.cron import health_job
 from base.host.system.job_values import JobRoots
 from base.host.system.packages_content import RefreshSchedule
 from base.host.system.tests.fake_commands import (
@@ -17,13 +17,6 @@ from base.host.system.tests.fake_commands import (
     fake_host,
 )
 from base.host.system.tests.fake_crontab import FakeCrontab
-
-
-def _refuse(message: str) -> Callable[..., None]:
-    def refuse(*_args: object, **_kwargs: object) -> None:
-        pytest.fail(message)
-
-    return refuse
 
 
 @pytest.mark.parametrize("enabled", [False, True])
@@ -40,17 +33,17 @@ def test_packages_gates_stop_at_the_switch_then_the_home(tmp_path: Path, enabled
 
 def test_packages_refresh_gate_follows_home_and_precedes_platform(
     default_home: Path,
-    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    monkeypatch.setattr(mechanics, "register_platform_job", _refuse("platform registrar reached"))
+    commands = FakeCommands()
     packages_job.register_packages_job(
         roots=JobRoots(
             home=default_home / ".meiva", repo=Path("/isolated"), user_home=default_home
         ),
         enabled=True,
         schedule=RefreshSchedule(refresh_enabled=False, tick_seconds=900),
-        host=fake_host(),
+        host=fake_host(commands, platform=DARWIN_ARM64),
     )
+    assert commands.argvs == []
 
 
 def test_a_non_default_home_does_not_need_either_jobs_policy(
@@ -93,10 +86,6 @@ def test_a_registration_with_jobs_on_needs_the_policy_the_root_read(
         )
 
 
-def _isolate_jobs(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
-    monkeypatch.setenv("HOME", str(tmp_path))
-
-
 def _assert_definitions(kind: str, platform: str, first: str, second: str) -> None:
     if kind == "packages":
         assert (
@@ -115,12 +104,10 @@ def _assert_definitions(kind: str, platform: str, first: str, second: str) -> No
 @pytest.mark.parametrize("platform", ["mac", "linux"])
 @pytest.mark.parametrize("kind", ["packages", "walg"])
 def test_real_platform_job_definition_follows_the_value_given(
-    monkeypatch: pytest.MonkeyPatch,
-    tmp_path: Path,
+    default_home: Path,
     platform: str,
     kind: str,
 ) -> None:
-    _isolate_jobs(monkeypatch, tmp_path)
     crontab = FakeCrontab()
     launchctl = FakeCommands()
     launchctl.on("launchctl", Reply(), repeat=True)
@@ -139,7 +126,9 @@ def test_real_platform_job_definition_follows_the_value_given(
         if kind == "packages":
             packages_job.register_packages_job(
                 roots=JobRoots(
-                    home=tmp_path / ".meiva", repo=Path("/isolated"), user_home=tmp_path
+                    home=default_home / ".meiva",
+                    repo=Path("/isolated"),
+                    user_home=default_home,
                 ),
                 enabled=True,
                 schedule=RefreshSchedule(refresh_enabled=True, tick_seconds=values[owner]),
@@ -148,7 +137,9 @@ def test_real_platform_job_definition_follows_the_value_given(
         else:
             walg_job.register_walg_job(
                 roots=JobRoots(
-                    home=tmp_path / ".meiva", repo=Path("/isolated"), user_home=tmp_path
+                    home=default_home / ".meiva",
+                    repo=Path("/isolated"),
+                    user_home=default_home,
                 ),
                 enabled=True,
                 backup_hour=values[owner],
@@ -157,7 +148,7 @@ def test_real_platform_job_definition_follows_the_value_given(
         if platform == "linux":
             return crontab.writes[-1]
         label = "packages-refresh" if kind == "packages" else "walg"
-        return (tmp_path / "Library" / "LaunchAgents" / f"com.meiva.{label}.plist").read_text()
+        return (default_home / "Library" / "LaunchAgents" / f"com.meiva.{label}.plist").read_text()
 
     first = register("first")
     second = register("second")
@@ -177,17 +168,19 @@ def test_real_platform_job_definition_follows_the_value_given(
     ],
 )
 def test_every_registrar_stops_at_the_switch_before_the_home(
-    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
     register: Callable[..., None],
 ) -> None:
-    def owns(_kind: str) -> bool:
-        pytest.fail("home reached")
-
-    monkeypatch.setattr(mechanics, "owns_os_jobs", owns)
+    loop = tmp_path / "self-loop"
+    loop.symlink_to(loop)
     if register is autostart.register_autostart:
-        register(services=frozenset({"gateway"}), enabled=False, host=fake_host())
+        register(services=frozenset({"gateway"}), enabled=False, host=fake_host(), home=loop)
+        with pytest.raises(RuntimeError, match="Symlink loop"):
+            register(services=frozenset({"gateway"}), enabled=True, host=fake_host(), home=loop)
     else:
-        register(enabled=False, host=fake_host())
+        register(enabled=False, host=fake_host(), home=loop)
+        with pytest.raises(RuntimeError, match="Symlink loop"):
+            register(enabled=True, host=fake_host(), home=loop)
 
 
 @pytest.mark.parametrize("kind", ["logs", "packages", "pr-flow", "walg"])
