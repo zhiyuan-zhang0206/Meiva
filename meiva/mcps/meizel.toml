@@ -1,7 +1,7 @@
 exports = ["config.py", "tests"]
 
 [uses]
-"__init__.py" = ["_browser.py", "_clients.py", "_tools.py", "config.py"]
+"__init__.py" = ["_clients.py", "_tools.py", "config.py"]
 "_clients.py" = ["_remote.py", "config.py"]
 "_daemon.py" = ["_browser.py", "_computer.py", "_guards.py", "_oauth.py", "_plan.py", "_policy.py", "_startup.py", "_wire.py", "config.py"]
 "_guards.py" = ["_startup.py"]
@@ -15,55 +15,11 @@ exports = ["config.py", "tests"]
 "_startup.py" = "strict"
 "_wire.py" = "strict"
 
-[debt.ambient-read]
-"_daemon.py#settings base.config.settings" = 1
-"_guards.py#pid os.getpid" = 1
-"_remote.py#clock time.time" = 2
-"_tools.py#clock time.time" = 2
-
-[debt.any-collaborator]
-"__init__.py#any __getattr__.return" = 1
-"_browser.py#any BrowserLineSession._request.return" = 1
-"_browser.py#any BrowserLineSession.call_tool.return" = 1
-"_browser.py#any BrowserLineSession.list_tools.return" = 1
-"_computer.py#any ComputerLineSession._request.return" = 1
-"_computer.py#any ComputerLineSession.call_tool.return" = 1
-"_computer.py#any ComputerLineSession.list_tools.return" = 1
-"_daemon.py#any Scope.buckets_for.shared" = 1
-"_daemon.py#any SerialSession.__init__.session" = 1
-"_daemon.py#any SerialSession.call_tool.return" = 1
-"_daemon.py#any SerialSession.list_tools.return" = 1
-"_daemon.py#any _dispatch_request.method" = 1
-"_daemon.py#any _dispatch_request.req_id" = 1
-"_daemon.py#any _handle_call_tool.req_id" = 1
-"_daemon.py#any _handle_list_tools.req_id" = 1
-"_daemon.py#any get_session.return" = 1
-"_daemon.py#any shared_kind.return" = 1
-"_oauth.py#any CallbackServer.wait_for_callback.return" = 1
-"_oauth.py#any FileTokenStorage.get_client_info.return" = 1
-"_oauth.py#any FileTokenStorage.get_tokens.return" = 1
-"_oauth.py#any FileTokenStorage.set_client_info.client_info" = 1
-"_oauth.py#any FileTokenStorage.set_tokens.tokens" = 1
-"_oauth.py#any install_token_auth_basic_shim._patched.self" = 1
-"_oauth.py#any normalized_validate_issuer.oauth_metadata" = 1
-"_oauth.py#any oauth_http_client._callback_handler.return" = 1
-"_oauth.py#any oauth_http_client.return" = 1
-"_remote.py#any RemoteMCPClient._request.return" = 1
-"_tools.py#any ServerProxy.__getattr__.return" = 1
-"_tools.py#any ServerProxy.raw.args" = 1
-"_tools.py#any call_raw.args" = 1
-"_tools.py#any call_text.args" = 1
-"_tools.py#any make_tool_callable.call.kwargs" = 1
-"_tools.py#any make_tool_callable.return" = 1
+[roots]
+"__init__.py" = { kinds = ["clock"], why = "The meiva.mcps SDK facade (_source) reads the wall-clock timestamp once when constructing a ServerProxy's ToolSource for DiskCache TTL evaluation" }
+"_daemon.py" = { kinds = ["pid", "settings"], why = "daemon_config_from_process() is the MCP daemon process entry point composition root, reading settings and process PID once at startup" }
 
 [debt.third-party-patch]
 "_oauth.py#assignment mcp.client.auth.oauth2.OAuthContext.prepare_token_auth" = 1
 "_oauth.py#assignment mcp.client.auth.oauth2.validate_metadata_issuer" = 1
 "_oauth.py#assignment mcp.client.auth.utils.validate_metadata_issuer" = 1
-
-[debt.type-cast]
-"_oauth.py#cast FileTokenStorage._read" = 1
-"_plan.py#cast _string_map" = 2
-"_plan.py#cast _strings" = 2
-"_tools.py#cast cached_tools" = 3
-"_tools.py#cast schema_to_signature" = 2

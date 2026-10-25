@@ -28,9 +28,13 @@ import json
 import os
 import webbrowser
 from contextlib import suppress
-from typing import Any, cast
+from typing import Any
 
+import httpx2
 from loguru import logger
+from mcp.client.auth import AuthorizationCodeResult
+from mcp.client.auth.oauth2 import OAuthContext
+from mcp.shared.auth import OAuthClientInformationFull, OAuthMetadata, OAuthToken
 from pydantic import AnyUrl
 
 from base.paths import meiva_home
@@ -63,7 +67,8 @@ class FileTokenStorage:
             return {}
         try:
             data = json.loads(self._path.read_text(encoding="utf-8"))
-            return cast(dict[str, Any], data) if isinstance(data, dict) else {}
+            raw: Any = data
+            return raw if isinstance(data, dict) else {}
         except (json.JSONDecodeError, OSError):
             return {}
 
@@ -77,28 +82,22 @@ class FileTokenStorage:
         with os.fdopen(fd, "w", encoding="utf-8") as f:
             f.write(json.dumps(data, ensure_ascii=False, indent=2))
 
-    async def get_tokens(self) -> Any:
-        from mcp.shared.auth import OAuthToken
-
+    async def get_tokens(self) -> OAuthToken | None:
         data = self._read().get("tokens")
         return OAuthToken.model_validate(data) if data else None
 
-    async def set_tokens(self, tokens: Any) -> None:
+    async def set_tokens(self, tokens: OAuthToken) -> None:
         data = self._read()
-        data["tokens"] = tokens.model_dump(mode="json") if tokens is not None else None
+        data["tokens"] = tokens.model_dump(mode="json")
         self._write(data)
 
-    async def get_client_info(self) -> Any:
-        from mcp.shared.auth import OAuthClientInformationFull
-
+    async def get_client_info(self) -> OAuthClientInformationFull | None:
         data = self._read().get("client_info")
         return OAuthClientInformationFull.model_validate(data) if data else None
 
-    async def set_client_info(self, client_info: Any) -> None:
+    async def set_client_info(self, client_info: OAuthClientInformationFull) -> None:
         data = self._read()
-        data["client_info"] = (
-            client_info.model_dump(mode="json") if client_info is not None else None
-        )
+        data["client_info"] = client_info.model_dump(mode="json")
         self._write(data)
 
 
@@ -112,16 +111,14 @@ class CallbackServer:
 
     def __init__(self, port: int = OAUTH_CALLBACK_PORT) -> None:
         self.port = port
-        self._result: asyncio.Future[Any] | None = None
+        self._result: asyncio.Future[AuthorizationCodeResult] | None = None
 
-    async def wait_for_callback(self) -> Any:
+    async def wait_for_callback(self) -> AuthorizationCodeResult:
         """Start serving on the loopback port and await one callback.
 
         Raises:
             OSError: the port is already bound (another process owns it).
         """
-        from mcp.client.auth import AuthorizationCodeResult
-
         self._result = asyncio.get_running_loop().create_future()
 
         async def _handle(reader: asyncio.StreamReader, writer: asyncio.StreamWriter) -> None:
@@ -242,7 +239,7 @@ def _install_issuer_normalization() -> None:
     _oauth2.validate_metadata_issuer = normalized_validate_issuer  # type: ignore[attr-defined]
 
 
-def normalized_validate_issuer(oauth_metadata: Any, expected_issuer: str) -> None:
+def normalized_validate_issuer(oauth_metadata: OAuthMetadata, expected_issuer: str) -> None:
     from mcp.client.auth.exceptions import OAuthFlowError
 
     if normalize_issuer(str(oauth_metadata.issuer)) != normalize_issuer(expected_issuer):
@@ -273,14 +270,14 @@ def install_token_auth_basic_shim() -> None:
     original = _oauth2.OAuthContext.prepare_token_auth
 
     def _patched(
-        self: Any, data: dict[str, str], headers: dict[str, str] | None = None
+        self: OAuthContext, data: dict[str, str], headers: dict[str, str] | None = None
     ) -> tuple[dict[str, str], dict[str, str]]:
         data, headers = original(self, data, headers)
         info = self.client_info
         if (
             info is not None
             and getattr(info, "token_endpoint_auth_method", None) == "client_secret_basic"
-            and getattr(info, "client_secret", None)
+            and info.client_secret
         ):
             data.pop("client_id", None)
         return data, headers
@@ -288,7 +285,9 @@ def install_token_auth_basic_shim() -> None:
     _oauth2.OAuthContext.prepare_token_auth = _patched  # type: ignore[attr-defined]
 
 
-async def oauth_http_client(url: str, server: str, locks: dict[str, asyncio.Lock]) -> Any:
+async def oauth_http_client(
+    url: str, server: str, locks: dict[str, asyncio.Lock]
+) -> httpx2.AsyncClient:
     """Build an httpx2.AsyncClient whose auth is the MCP OAuth provider.
 
     Serialized per server: while one connection is running the authorization
@@ -317,7 +316,7 @@ async def oauth_http_client(url: str, server: str, locks: dict[str, asyncio.Lock
         async def _redirect_handler(auth_url: str) -> None:
             await _open_browser(auth_url)
 
-        async def _callback_handler() -> Any:
+        async def _callback_handler() -> AuthorizationCodeResult:
             return await callback.wait_for_callback()
 
         provider = OAuthClientProvider(

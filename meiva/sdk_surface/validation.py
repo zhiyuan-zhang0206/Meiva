@@ -19,7 +19,7 @@ validates its own arguments instead:
 
 from __future__ import annotations
 
-from typing import Literal, cast, overload
+from typing import Any, Literal, overload
 
 from . import STATE_KEY, UPDATE_KEY, ContextOutsideProcessError, meiva_module
 
@@ -87,20 +87,18 @@ def coerce_str[T](
         raise TypeError(f"{name} must be a string, got None")
     if isinstance(value, str):
         return value
-    type_name = type(cast(object, value)).__name__
-    if isinstance(value, (list, tuple)):
-        seq = cast(tuple[object, ...], value)
-        if len(seq) == 1 and isinstance(seq[0], str):
-            return cast(T, seq[0])
+    raw: Any = value
+    type_name = type(raw).__name__
+    if isinstance(value, (list, tuple)) and len(raw) == 1 and isinstance(raw[0], str):
+        unwrapped: Any = raw[0]
+        return unwrapped
     if allow_types and isinstance(value, allow_types):
-        if isinstance(value, (list, tuple)):
-            seq = cast(tuple[object, ...], value)
-            if not all(isinstance(part, dict) for part in seq):
-                raise TypeError(
-                    f"{name} must be a string or a list of dicts, got a "
-                    f"{type_name} of {type(seq[0]).__name__} elements"
-                )
-        return cast(T, value)
+        if isinstance(value, (list, tuple)) and not all(isinstance(part, dict) for part in raw):
+            raise TypeError(
+                f"{name} must be a string or a list of dicts, got a "
+                f"{type_name} of {type(raw[0]).__name__} elements"
+            )
+        return raw
     raise TypeError(f"{name} must be a string, got {type_name}")
 
 

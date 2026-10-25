@@ -9,7 +9,7 @@ process resource; the default database factory refuses it before a connection ca
 """
 
 from collections.abc import Mapping
-from typing import Any, Literal, Protocol, cast, overload
+from typing import Any, Literal, Protocol, overload
 
 from base.agents.context.clients import DatabaseHandle
 from base.clock import Clock
@@ -60,7 +60,7 @@ def model_overrides() -> ModelOverrides:
 # point and the next meiva DB op picks it up.
 
 
-def __getattr__(name: str) -> Any:
+def __getattr__(name: str) -> str:
     if name == "DB_URL":
         return settings.data_plane.db_url
     if name == "REDIS_URL":
@@ -115,11 +115,10 @@ class _PluginConfigReader(Protocol):
 def attached_agent_view() -> tuple[Mapping[str, object], _PluginConfigReader] | None:
     context = process_context.ambient_context()
     lease = None if context is None or context.identity is None else context.identity.lease
-    return (
-        None
-        if lease is None
-        else cast("tuple[Mapping[str, object], _PluginConfigReader] | None", lease.config())
-    )
+    if lease is None:
+        return None
+    view: Any = lease.config()
+    return view
 
 
 @overload
