@@ -15,7 +15,7 @@ import time
 from collections.abc import Callable, Mapping
 from pathlib import Path
 from threading import RLock, get_ident
-from typing import Any, cast
+from typing import Any, Protocol
 
 from base.config.config_registry import DOMAIN_ATTRS
 from base.config.lite_parse import parse_field
@@ -46,7 +46,7 @@ from base.host.env.dotenv_boot import (
 from base.host.env.process_profile import (
     MEIVA_PROCESS_PROFILE_ENV,
     ProcessProfile,
-    profile_unknown_error,
+    parse_process_profile,
 )
 from base.paths.home import home_from_env, resolve_meiva_home
 
@@ -75,7 +75,15 @@ BUILD_WAIT_TIMEOUT_SECONDS = 30.0
 _LITE_REDIS_URL = "redis://config-lite@127.0.0.1:1/0"
 
 
-def _default_value(owner: ConfigBoot, name: str, default_kind: str, literal: Any) -> Any:
+class _InstalledBundle(Protocol):
+    @property
+    def settings(self) -> object: ...
+
+    @property
+    def exports(self) -> Mapping[str, object]: ...
+
+
+def _default_value(owner: ConfigBoot, name: str, default_kind: str, literal: object) -> object:
     """The field's default, per the named default kind recorded in the table."""
     if default_kind == "literal":
         return literal
@@ -123,7 +131,7 @@ class _DomainView:
             raise AttributeError(build_window_message(f"settings.{domain}.{name}"))
         return getattr(getattr(self._owner._current_settings(), domain), name)
 
-    def __setattr__(self, name: str, value: Any) -> None:
+    def __setattr__(self, name: str, value: object) -> None:
         domain = object.__getattribute__(self, "_domain")
         if self._owner.mode != _FULL:
             self._owner.upgrade(f"settings.{domain}.{name} assignment")
@@ -183,7 +191,7 @@ class _SettingsView:
             raise AttributeError(build_window_message(f"settings.{name}"))
         return getattr(self._owner._current_settings(), name)
 
-    def __setattr__(self, name: str, value: Any) -> None:
+    def __setattr__(self, name: str, value: object) -> None:
         if self._owner.mode != _FULL:
             self._owner.upgrade(f"settings.{name} assignment")
         setattr(self._owner._current_settings(), name, value)
@@ -203,14 +211,16 @@ class ConfigBuildWaitTimeoutError(AttributeError):
     """
 
 
-def _build_wait_timeout_message(target: str) -> str:
+def _build_wait_timeout_message(
+    target: str, timeout_seconds: float = BUILD_WAIT_TIMEOUT_SECONDS
+) -> str:
     return (
         f"config boot-lite: {target} is not readable yet: the in-flight eager config "
-        f"build exceeded the {BUILD_WAIT_TIMEOUT_SECONDS:g}s wait bound; retry shortly"
+        f"build exceeded the {timeout_seconds:g}s wait bound; retry shortly"
     )
 
 
-def _require_local_fields() -> None:
+def _require_local_fields(env: Mapping[str, str]) -> None:
     """W1: a local-source unit fails fast when a required field has no value.
 
     A field with no default (the data-plane URLs) is filled from the unit's
@@ -220,9 +230,7 @@ def _require_local_fields() -> None:
     runner's values arrive from the gateway fetch (validated after it), and
     skip/bare processes get placeholders.
     """
-    missing = [
-        name for name in sorted(REQUIRED_FIELDS) if os.environ.get(FIELD_ALIASES[name]) is None
-    ]
+    missing = [name for name in sorted(REQUIRED_FIELDS) if env.get(FIELD_ALIASES[name]) is None]
     if missing:
         named = ", ".join(f"{FIELD_ALIASES[name]} ({name})" for name in missing)
         raise ValueError(
@@ -232,12 +240,12 @@ def _require_local_fields() -> None:
         )
 
 
-def _plant_placeholders() -> None:
+def _plant_placeholders(env: dict[str, str] | os._Environ[str]) -> None:
     """Plant never-dialed placeholders for the required data-plane URLs so a
     construction succeeds without a gateway fetch. A value already in env/.env
     is left alone — the placeholder only fills the nothing-at-all case."""
-    os.environ.setdefault("MEIVA_DB_URL", PLACEHOLDER_DB_URL)
-    os.environ.setdefault("MEIVA_REDIS_URL", _LITE_REDIS_URL)
+    env.setdefault("MEIVA_DB_URL", PLACEHOLDER_DB_URL)
+    env.setdefault("MEIVA_REDIS_URL", _LITE_REDIS_URL)
 
 
 def _log_upgrade(reason: str) -> None:
@@ -275,13 +283,19 @@ class ConfigBoot:
         "upgrading",
         "upgrading_thread",
         "view",
+        "wait_timeout_seconds",
     )
 
-    def __init__(self) -> None:
+    def __init__(
+        self,
+        *,
+        environment: dict[str, str] | None = None,
+        wait_timeout_seconds: float | None = None,
+    ) -> None:
         self._lock = RLock()
         self.view = _SettingsView(self)
         self.env_boot: EnvBootResult | None = None
-        self.environment: dict[str, str] | None = None
+        self.environment: dict[str, str] | None = environment
         self.mode = _LITE
         self.reason: str | None = None
         self.upgrades = 0
@@ -293,6 +307,7 @@ class ConfigBoot:
         self.pending: dict[str, Any] = {}
         # This owner's constructed model, set by _install().
         self.settings: Any = None
+        self.wait_timeout_seconds: float | None = wait_timeout_seconds
 
     def _current_settings(self) -> Any:
         return self.settings
@@ -337,14 +352,13 @@ class ConfigBoot:
                     load_meiva_env(os.environ, home=resolve_meiva_home())
             environment = dict(os.environ)
             profile = environment.get(MEIVA_PROCESS_PROFILE_ENV)
-            if profile is not None and profile not in PROCESS_PROFILES:
-                raise profile_unknown_error(profile)
+            parsed_profile = None if profile is None else parse_process_profile(profile)
             for _name, row in LITE_FIELDS.items():
                 raw = environment.get(row[1])
                 if raw is not None:
                     parse_field(_name, row[1], row[2], row[5], raw)
             self.environment = environment
-            self.profile = cast(ProcessProfile, profile)
+            self.profile = parsed_profile
             self.env_boot = read_database_delivery(
                 environment, home=home_from_env(environment, user_home=Path.home())
             )
@@ -354,11 +368,9 @@ class ConfigBoot:
         """Build the SDK's complete read surface from this same delivery."""
         from base.config._full import Settings, build
 
-        if self.environment is None:
+        if self.environment is None or self.env_boot is None:
             return Settings(profile=None)
-        return build(
-            env_boot=cast(EnvBootResult, self.env_boot), environment=self.environment
-        ).settings
+        return build(env_boot=self.env_boot, environment=self.environment).settings
 
     def refresh_data_plane_settings(self) -> None:
         """Refresh only this owner's data-plane slice at the existing call point."""
@@ -369,7 +381,7 @@ class ConfigBoot:
         self.upgrade("refresh_data_plane_settings()")
         refresh_data_plane_settings(self._current_settings())
 
-    def resolve(self, name: str) -> Any:
+    def resolve(self, name: str) -> object:
         """Resolve one `LITE_FIELDS` entry: pending override > env > default."""
         self.prepare()
         if name in self.pending:
@@ -421,7 +433,7 @@ class ConfigBoot:
         self.upgrade(f"get_field({name!r})")
         return getattr(getattr(self._current_settings(), domain), name)
 
-    def set_field(self, name: str, value: Any) -> None:
+    def set_field(self, name: str, value: object) -> None:
         """Set a field on this owner; existing views/readers see the same model.
 
         Used by the per-agent config overlay at process boot.
@@ -465,20 +477,25 @@ class ConfigBoot:
             # Latched first: a re-entrant read during step 4 (cluster_tz_name reads
             # through the view) must not prepare again.
             self.prepared = True
-            home = resolve_meiva_home()
-            self.env_boot = load_meiva_env(os.environ, home=home)
-            profile = os.environ.get(MEIVA_PROCESS_PROFILE_ENV)
-            if profile is not None and profile not in PROCESS_PROFILES:
-                raise profile_unknown_error(profile)
-            self.profile = cast(ProcessProfile, profile)
-            self._apply_source_decision(home)
+            target_env = os.environ if self.environment is None else self.environment
+            home = (
+                resolve_meiva_home()
+                if self.environment is None or "MEIVA_HOME" not in self.environment
+                else Path(self.environment["MEIVA_HOME"])
+            )
+            self.env_boot = load_meiva_env(target_env, home=home)
+            profile = target_env.get(MEIVA_PROCESS_PROFILE_ENV)
+            self.profile = None if profile is None else parse_process_profile(profile)
+            self._apply_source_decision(home, target_env)
             for name, row in LITE_FIELDS.items():
-                raw = os.environ.get(row[1])
+                raw = target_env.get(row[1])
                 if raw is not None:
                     parse_field(name, row[1], row[2], row[5], raw)
             self._apply_cluster_timezone()
 
-    def _apply_source_decision(self, home: Path) -> None:
+    def _apply_source_decision(
+        self, home: Path, target_env: dict[str, str] | os._Environ[str]
+    ) -> None:
         """The eager boot's source decision, minus the construction it guarded.
 
         `_plant_placeholders` keeps the eager boot's env side effect (the
@@ -487,16 +504,16 @@ class ConfigBoot:
         from base.host.env.dotenv_file import env_file_path, read_env_aliases
 
         env_file = read_env_aliases(env_file_path(home))
-        if config_source_is_local(os.environ, env_file=env_file):
-            _require_local_fields()
-        elif os.environ.get(CONFIG_FETCH_ENV) == CONFIG_FETCH_SKIP:
-            _plant_placeholders()
-        elif should_fetch_from_gateway(os.environ, env_file=env_file):
+        if config_source_is_local(target_env, env_file=env_file):
+            _require_local_fields(target_env)
+        elif target_env.get(CONFIG_FETCH_ENV) == CONFIG_FETCH_SKIP:
+            _plant_placeholders(target_env)
+        elif should_fetch_from_gateway(target_env, env_file=env_file):
             self.env_boot = inject_config_from_gateway(
-                os.environ, home=home, now=time.time(), tuning=BootstrapFetch()
+                target_env, home=home, now=time.time(), tuning=BootstrapFetch()
             )
         else:
-            _plant_placeholders()
+            _plant_placeholders(target_env)
 
     def upgrade(self, reason: str) -> Any:
         """Build this owner's eager chain once.
@@ -536,7 +553,7 @@ class ConfigBoot:
         _log_upgrade(reason)
         return self.settings
 
-    def _install(self, bundle: Any, reason: str) -> None:
+    def _install(self, bundle: _InstalledBundle, reason: str) -> None:
         self.settings = bundle.settings
         self.mode = _FULL
         self.prepared = True
@@ -553,8 +570,13 @@ class ConfigBoot:
         itself so the real error surfaces. On expiry the read raises the
         retryable ConfigBuildWaitTimeoutError -- the other thread's build keeps running
         and installs when it finishes, so a retry is the right move."""
-        if not self._lock.acquire(timeout=BUILD_WAIT_TIMEOUT_SECONDS):
-            raise ConfigBuildWaitTimeoutError(_build_wait_timeout_message(reason))
+        timeout = (
+            BUILD_WAIT_TIMEOUT_SECONDS
+            if self.wait_timeout_seconds is None
+            else self.wait_timeout_seconds
+        )
+        if not self._lock.acquire(timeout=timeout):
+            raise ConfigBuildWaitTimeoutError(_build_wait_timeout_message(reason, timeout))
         try:
             if self.mode != _FULL:
                 self.upgrade(reason)
@@ -603,16 +625,17 @@ class ConfigBoot:
         exactly the fault it exists to repair (#3621 / 405 ruling). A caller that
         needs the eager chain regardless, such as the test session, calls
         `ensure_eager()` instead of relying on the flag."""
-        if os.environ.get("MEIVA_HARNESS_HANDLE"):
-            for key in [k for k, v in os.environ.items() if k.startswith("MEIVA_") and v == ""]:
-                os.environ.pop(key, None)
-        mode = os.environ.get(BOOT_MODE_ENV)
+        target_env = os.environ if self.environment is None else self.environment
+        if target_env.get("MEIVA_HARNESS_HANDLE"):
+            for key in [k for k, v in target_env.items() if k.startswith("MEIVA_") and v == ""]:
+                target_env.pop(key, None)
+        mode = target_env.get(BOOT_MODE_ENV)
         if mode is not None and mode != BOOT_MODE_EAGER:
             raise ValueError(
                 f"{BOOT_MODE_ENV}={mode!r} is not a known boot mode; must be {BOOT_MODE_EAGER!r} "
                 f"or unset (the unset default is the lazy boot-lite chain)"
             )
-        if os.environ.get(CONFIG_FETCH_ENV) == CONFIG_FETCH_SKIP:
+        if target_env.get(CONFIG_FETCH_ENV) == CONFIG_FETCH_SKIP:
             # skip wins over eager: a settings-lite maintenance verb must stay
             # repairable (a broken .env must not be able to block the tool that
             # fixes it), even when the operator's rollback flag sits in the unit
@@ -657,7 +680,7 @@ class _LegacyConfigBoot(ConfigBoot):
     def _apply_cluster_timezone(self) -> None:
         self._apply_timezone()
 
-    def _install(self, bundle: Any, reason: str) -> None:
+    def _install(self, bundle: _InstalledBundle, reason: str) -> None:
         self._facade.update(bundle.exports)
         self._facade["settings"] = bundle.settings
         super()._install(bundle, reason)
@@ -667,7 +690,7 @@ class _LegacyConfigBoot(ConfigBoot):
 _state = _LegacyConfigBoot()
 
 
-def resolve(name: str) -> Any:
+def resolve(name: str) -> object:
     return _state.resolve(name)
 
 
@@ -679,7 +702,7 @@ def get_field(name: str) -> Any:
     return _state.get_field(name)
 
 
-def set_field(name: str, value: Any) -> None:
+def set_field(name: str, value: object) -> None:
     _state.set_field(name, value)
 
 
@@ -687,7 +710,7 @@ def prepare() -> None:
     _state.prepare()
 
 
-def upgrade(reason: str) -> Any:
+def upgrade(reason: str) -> object:
     return _state.upgrade(reason)
 
 
@@ -723,3 +746,7 @@ def settings_view() -> _SettingsView:
 
 def refresh_data_plane_settings() -> None:
     _state.refresh_data_plane_settings()
+
+
+def set_wait_timeout(seconds: float) -> None:
+    _state.wait_timeout_seconds = seconds

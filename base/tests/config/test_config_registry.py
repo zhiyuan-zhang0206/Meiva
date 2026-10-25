@@ -128,7 +128,7 @@ def test_capability_assignment_is_pinned_for_load_bearing_fields(
         assert cap[name] == want, f"{name}: capability drifted to {cap[name]!r} (want {want!r})"
 
 
-def test_build_registry_rejects_bad_capability(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_build_registry_rejects_bad_capability() -> None:
     """A typo'd capability can never reach prod boot. `build_registry` runs at
     import and raises on a bad resolved capability (a field override or, here, a
     domain default), so the whole process fails fast rather than silently
@@ -136,19 +136,10 @@ def test_build_registry_rejects_bad_capability(monkeypatch: pytest.MonkeyPatch) 
     all-fields-valid test above only proves the current tree is clean)."""
     from base.config import config_registry
 
-    # The registry builds lazily on first use and memoizes; patch the module
-    # (not the config re-export) and clear the cache so the typo is exercised.
-    monkeypatch.setattr(
-        config_registry,
-        "DOMAIN_MODELS",
-        (("telegram", "Telegram", "TelegramSettings", "gatway"),),  # typo'd default
-    )
-    config_registry.build_registry.cache_clear()
-    try:
-        with pytest.raises(RuntimeError, match="capability='gatway'"):
-            config_registry.build_registry()
-    finally:
-        config_registry.build_registry.cache_clear()
+    with pytest.raises(RuntimeError, match="capability='gatway'"):
+        config_registry.validate_domain_models(
+            (("telegram", "Telegram", "TelegramSettings", "gatway"),)
+        )
 
 
 def test_identity_fields_are_read_only() -> None:
@@ -216,15 +207,15 @@ def test_offsite_backup_cluster_pinned_fields_are_never_bootstrap_served() -> No
 
 
 @pytest.mark.usefixtures("served_gateway_home")
-def test_bootstrap_distributes_a_behavior_knob(
-    monkeypatch: pytest.MonkeyPatch, authority: ConfigAuthority
-) -> None:
+def test_bootstrap_distributes_a_behavior_knob(authority: ConfigAuthority) -> None:
     """A non-default agent-behavior knob is now distributed to agent-runners."""
     from base import config as cfg
 
     authority.env_path.write_text(f"MEIVA_DB_URL={cfg.settings.data_plane.db_url}\n")
-    monkeypatch.setattr(cfg.settings.sandbox, "exec_timeout_seconds", 123.0)
-    values = authority.bootstrap_config_values(provider_key_envs=(), plugin_cluster_config="")
+    runtime = cfg.settings.model_copy(deep=True)
+    runtime.sandbox.exec_timeout_seconds = 123.0
+    local_authority = ConfigAuthority(runtime, runtime, authority.env_path)
+    values = local_authority.bootstrap_config_values(provider_key_envs=(), plugin_cluster_config="")
     assert values["MEIVA_EXEC_TIMEOUT_SECONDS"] == "123.0"
 
 

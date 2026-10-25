@@ -9,18 +9,19 @@ from __future__ import annotations
 
 import os
 import time
-from collections.abc import Callable, Generator
+from collections.abc import Generator
+from pathlib import Path
 from zoneinfo import ZoneInfo
 
 import pytest
 
-from base.clock import Clock
+from base.clock import SYSTEM_TIMERS, Clock, ClockConfig
 from base.config import (
+    ConfigBoot,
     apply_cluster_timezone,
+    cluster_tz_name,
     host_tz_name,
-    settings,
 )
-from base.config.domains.general import GeneralSettings
 
 
 @pytest.fixture(autouse=True)
@@ -45,97 +46,84 @@ def _restore_process_tz() -> Generator[None, None, None]:
     time.tzset()
 
 
-def _set_cluster_tz(monkeypatch: pytest.MonkeyPatch, name: str) -> None:
-    """Make ``settings.general.timezone`` authoritative for this test.
-
-    ``Clock.from_settings().zone()`` treats the field as authoritative only when it was
-    explicitly set at Settings build (``model_fields_set``), and pydantic's
-    ``model_fields_set`` is a read-only property — so the test swaps in a
-    freshly constructed ``GeneralSettings`` whose fields-set carries the
-    timezone. ``model_construct`` skips env reads and validation, which is
-    exactly the isolated shape a unit test wants. This is the test-side
-    equivalent of a process that booted with MEIVA_TIMEZONE in its env / .env /
-    bootstrap.
-    """
-    monkeypatch.setattr(settings, "general", GeneralSettings.model_construct(timezone=name))
+def _clock_for(owner: ConfigBoot) -> Clock:
+    return Clock(
+        ClockConfig(
+            timezone=owner.view.general.timezone,
+            authoritative_timezone=cluster_tz_name(owner),
+            message_timestamp_weekday=owner.view.general.message_timestamp_weekday,
+        ),
+        timers=SYSTEM_TIMERS,
+    )
 
 
-def _clear_cluster_tz(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Make ``settings.general.timezone`` non-authoritative (settings-lite)."""
-    monkeypatch.setattr(settings, "general", GeneralSettings.model_construct())
+def test_cluster_tz_returns_zoneinfo_when_authoritative() -> None:
+    owner = ConfigBoot(
+        environment={"MEIVA_CONFIG_FETCH": "skip", "MEIVA_TIMEZONE": "Asia/Shanghai"}
+    )
+    assert _clock_for(owner).zone() == ZoneInfo("Asia/Shanghai")
 
 
-def test_cluster_tz_returns_zoneinfo_when_authoritative(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    _set_cluster_tz(monkeypatch, "Asia/Shanghai")
-    assert Clock.from_settings().zone() == ZoneInfo("Asia/Shanghai")
+def test_cluster_tz_none_without_authoritative_value() -> None:
+    owner = ConfigBoot(environment={"MEIVA_CONFIG_FETCH": "skip"})
+    assert _clock_for(owner).zone() is None
 
 
-def test_cluster_tz_none_without_authoritative_value(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    _clear_cluster_tz(monkeypatch)
-    assert Clock.from_settings().zone() is None
-
-
-def test_cluster_tz_none_for_invalid_name(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_cluster_tz_none_for_invalid_name() -> None:
     """Belt and braces: Settings already fails fast on a bad IANA name at
     construction, but a display path must degrade to the host zone rather
     than crash if one ever slips through."""
-    _set_cluster_tz(monkeypatch, "Not/AZone")
-    assert Clock.from_settings().zone() is None
+    owner = ConfigBoot(environment={"MEIVA_CONFIG_FETCH": "skip"})
+    owner.set_field("timezone", "Not/AZone")
+    assert _clock_for(owner).zone() is None
 
 
-def test_apply_sets_tz_and_rezones_posix(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_apply_sets_tz_and_rezones_posix() -> None:
     """With an authoritative MEIVA_TIMEZONE, the process wall clock follows the
     cluster zone: os.environ["TZ"] is set and time.localtime() re-resolves to
     it (tm_gmtoff is the observable)."""
-    _set_cluster_tz(monkeypatch, "Asia/Shanghai")
-    monkeypatch.delenv("TZ", raising=False)
-    apply_cluster_timezone()
+    owner = ConfigBoot(
+        environment={"MEIVA_CONFIG_FETCH": "skip", "MEIVA_TIMEZONE": "Asia/Shanghai"}
+    )
+    apply_cluster_timezone(owner)
     assert os.environ["TZ"] == "Asia/Shanghai"
     assert time.localtime().tm_gmtoff == 8 * 3600
 
 
-def test_apply_noop_without_authoritative_value(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
+def test_apply_noop_without_authoritative_value() -> None:
     """A process without an authoritative value is left untouched — forcing
     the field default (America/Los_Angeles) onto a settings-lite maintenance
     verb or a bare checkout would be wrong."""
-    _clear_cluster_tz(monkeypatch)
-    monkeypatch.delenv("TZ", raising=False)
-    apply_cluster_timezone()
-    assert "TZ" not in os.environ
+    owner = ConfigBoot(environment={"MEIVA_CONFIG_FETCH": "skip"})
+    before = os.environ.get("TZ")
+    apply_cluster_timezone(owner)
+    assert os.environ.get("TZ") == before
 
 
-def _realpath_to(target: str) -> Callable[[str], str]:
-    """A fake os.path.realpath that maps /etc/localtime to ``target``."""
-
-    def realpath(path: str) -> str:
-        return target if path == "/etc/localtime" else path
-
-    return realpath
-
-
-def test_host_tz_name_resolves_zoneinfo_symlink(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_host_tz_name_resolves_zoneinfo_symlink(tmp_path: Path) -> None:
     """/etc/localtime -> /usr/share/zoneinfo/Asia/Shanghai resolves to the
     IANA name."""
+    zone_file = tmp_path / "usr" / "share" / "zoneinfo" / "Asia" / "Shanghai"
+    zone_file.parent.mkdir(parents=True)
+    zone_file.write_bytes(b"")
+    link = tmp_path / "localtime"
+    link.symlink_to(zone_file)
+    assert host_tz_name(str(link)) == "Asia/Shanghai"
 
-    monkeypatch.setattr("os.path.realpath", _realpath_to("/usr/share/zoneinfo/Asia/Shanghai"))
-    assert host_tz_name() == "Asia/Shanghai"
 
-
-def test_host_tz_name_falls_back_to_utc(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_host_tz_name_falls_back_to_utc(tmp_path: Path) -> None:
     """No zoneinfo symlink or an unreadable link yields UTC."""
+    broken_loop = tmp_path / "loop"
+    broken_loop.symlink_to(broken_loop)
+    assert host_tz_name(str(broken_loop)) == "UTC"
 
-    def _raise(path: str) -> str:
-        raise OSError("no such file")
+    var_zone = tmp_path / "var" / "db" / "timezone" / "zoneinfo" / "Asia" / "Shanghai"
+    var_zone.parent.mkdir(parents=True)
+    var_zone.write_bytes(b"")
+    var_link = tmp_path / "var-localtime"
+    var_link.symlink_to(var_zone)
+    assert host_tz_name(str(var_link)) == "Asia/Shanghai"
 
-    monkeypatch.setattr("os.path.realpath", _raise)
-    assert host_tz_name() == "UTC"
-    monkeypatch.setattr("os.path.realpath", _realpath_to("/var/db/timezone/zoneinfo/Asia/Shanghai"))
-    assert host_tz_name() == "Asia/Shanghai"
-    monkeypatch.setattr("os.path.realpath", _realpath_to("/etc/localtime"))
-    assert host_tz_name() == "UTC"
+    plain_file = tmp_path / "plain-localtime"
+    plain_file.write_bytes(b"")
+    assert host_tz_name(str(plain_file)) == "UTC"

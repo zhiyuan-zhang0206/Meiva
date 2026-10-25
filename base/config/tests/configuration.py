@@ -2,7 +2,6 @@ import os
 from collections.abc import Callable
 from dataclasses import fields
 from typing import Any
-from unittest.mock import patch
 
 from base.config import ConfigBoot, field_domain, field_names, get_field, settings
 from base.host.env.agent_slices import ModelOverrides
@@ -15,9 +14,9 @@ def snapshot_process_config() -> ConfigBoot:
         domain: set(getattr(settings, domain).model_fields_set)
         for domain in {field_domain(name) for name in values}
     }
-    owner = ConfigBoot()
-    with patch.dict(os.environ):
-        model = owner.ensure_eager()
+    owner = ConfigBoot(environment=dict(os.environ))
+    model = owner.ensure_eager()
+    owner.environment = None
     owner.env_boot = authority
     model.env_boot = authority
     for name, value in values.items():

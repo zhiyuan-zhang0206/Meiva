@@ -8,8 +8,6 @@ from zoneinfo import ZoneInfo
 import pytest
 
 import base.host.private_storage
-from base.config import settings
-from base.config.domains.general import GeneralSettings
 from base.host.env.dotenv_file import (
     ENV_BACKUP_KEEP,
     remove_env,
@@ -97,19 +95,13 @@ _HOST_ZONE = "Pacific/Kiritimati"
 _DECOY_CLUSTER_ZONE = "Etc/GMT+12"
 
 
-def test_snapshot_filename_stamps_the_host_clock(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_snapshot_filename_stamps_the_host_clock(tmp_path: Path) -> None:
+    from base.config import ConfigBoot, apply_cluster_timezone
 
     original_tz = os.environ.get("TZ")
     try:
-        monkeypatch.setenv("TZ", _HOST_ZONE)
-        time.tzset()
-        monkeypatch.setattr(
-            settings,
-            "general",
-            GeneralSettings.model_construct(timezone=_DECOY_CLUSTER_ZONE),
-        )
+        owner = ConfigBoot(environment={"MEIVA_CONFIG_FETCH": "skip", "MEIVA_TIMEZONE": _HOST_ZONE})
+        apply_cluster_timezone(owner)
         env = tmp_path / ".env"
         env.write_text("SECRET=abc\n")
         before = datetime.now().astimezone()

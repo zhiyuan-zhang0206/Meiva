@@ -22,6 +22,7 @@ from typing import Any
 from dotenv import dotenv_values
 from pydantic import ValidationError
 from pydantic_core import ErrorDetails, PydanticUndefined
+from pydantic_settings import BaseSettings, PydanticBaseSettingsSource
 
 from base.config.config_registry import FIELD_INFOS, field_alias, field_domain
 from base.config.service_read import domain_model_classes
@@ -108,7 +109,7 @@ def _env_aliases(payload: bytes) -> dict[str, str]:
 
 def _candidate_payload(
     model: type[Any],
-    source: Any,
+    source: BaseSettings,
     aliases: dict[str, str],
     updates: dict[str, object],
     removals: set[str],
@@ -215,8 +216,8 @@ def _candidate_validation_model(model: type[Any]) -> type[Any]:
         def settings_customise_sources(
             cls,
             _settings_cls: type[Any],
-            **sources: Any,
-        ) -> tuple[Any, ...]:
+            **sources: PydanticBaseSettingsSource,
+        ) -> tuple[PydanticBaseSettingsSource, ...]:
             return (sources["init_settings"],)
 
     return CandidateValidationModel

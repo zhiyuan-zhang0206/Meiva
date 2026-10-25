@@ -16,7 +16,7 @@ from __future__ import annotations
 
 import os
 from dataclasses import dataclass
-from typing import Any, cast
+from typing import Any, Never
 
 from pydantic import BaseModel, Field
 
@@ -44,8 +44,13 @@ from base.config.profiles import (
     PROFILE_UNSET,
     profile_domain_error,
 )
+from base.config.service_read import ConfigAuthority
 from base.host.env.dotenv_boot import EnvBootResult
-from base.host.env.process_profile import ProcessProfile, profile_unknown_error
+from base.host.env.process_profile import (
+    ProcessProfile,
+    parse_process_profile,
+    profile_unknown_error,
+)
 
 
 class Settings(BaseModel):
@@ -90,7 +95,12 @@ class Settings(BaseModel):
     walg: WalgSettings = Field(default_factory=WalgSettings)
     general: GeneralSettings = Field(default_factory=GeneralSettings)
 
-    def __init__(self, *, profile: str | None = PROFILE_UNSET, **data: Any) -> None:
+    def __init__(
+        self,
+        *,
+        profile: str | None = PROFILE_UNSET,
+        **data: object,
+    ) -> None:
         """Construct the aggregate for `profile`.
 
         `profile` defaults to the process's MEIVA_PROCESS_PROFILE env marker; an
@@ -110,7 +120,7 @@ class Settings(BaseModel):
                 if attr not in allowed:
                     vars(self).pop(attr, None)
 
-    def __getattr__(self, name: str) -> Any:
+    def __getattr__(self, name: str) -> Never:
         # A missing attribute on this aggregate is either a typo or — on a
         # profile-limited instance — a domain the process profile deliberately
         # does not construct (fail-fast: a cross-profile read used to silently
@@ -140,7 +150,7 @@ class Settings(BaseModel):
 def cast_profile(profile: str) -> ProcessProfile:
     """Narrow a validated profile name for the PROCESS_PROFILES lookup (the
     name was checked against the dict at construction)."""
-    return cast("ProcessProfile", profile)
+    return parse_process_profile(profile)
 
 
 # The class MOVED into this module (the boot-lite split), but its public
@@ -153,7 +163,7 @@ class FullBundle:
     """What an upgrade installs: the constructed singleton plus every name the
     facade publishes only in full mode (Settings, FIELD_REFS, the re-exports)."""
 
-    settings: Any
+    settings: Settings
     exports: dict[str, Any]
 
 
@@ -242,12 +252,12 @@ def _bootstrap_fields() -> tuple[str, ...]:
     )
 
 
-def flat_dump(authority: Any, mode: str = "python") -> dict[str, Any]:
+def flat_dump(authority: ConfigAuthority, mode: str = "python") -> dict[str, Any]:
     """Flat boot values from an explicitly supplied configuration authority."""
     return authority.flat_dump(mode=mode)
 
 
-def refresh_data_plane_settings(settings: Any) -> None:
+def refresh_data_plane_settings(settings: Settings) -> None:
     """Re-read the unit's `.env` and rebuild `settings.data_plane` in place.
 
     A long-lived process (the rollout orchestrator) builds its Settings
