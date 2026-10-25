@@ -30,3 +30,11 @@ exports = ["__main__.py", "commands", "database", "fleet_update", "parsers", "st
 "python_install.py#environ os.environ" = 1
 "start_identity.py#clock datetime.datetime.now" = 1
 "start_identity.py#random secrets.token_urlsafe" = 3
+
+[debt.type-cast]
+"main.py#cast bind_init_inputs" = 1
+"start_identity.py#cast _new_record" = 1
+"start_identity.py#cast _validate_intent_environment" = 1
+"start_identity.py#cast _validate_intent_fields" = 1
+"start_identity.py#cast _validate_intent_record" = 2
+"start_identity.py#cast read_intent" = 1

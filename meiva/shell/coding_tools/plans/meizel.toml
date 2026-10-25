@@ -11,3 +11,7 @@ exports = ["claude_launch.py", "claude_screen.py", "codex_screen.py", "first_run
 "launch_request.py" = "strict"
 "lineage.py" = "strict"
 "pacing.py" = "strict"
+
+[debt.type-cast]
+"first_run.py#cast _parsed" = 1
+"first_run.py#cast plan_trust" = 2

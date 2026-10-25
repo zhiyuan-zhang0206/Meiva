@@ -18,3 +18,6 @@ exports = ["skill_index.py", "skill_proxies.py"]
 "__init__.py#base/packages/extensions/install_registry.py" = 1
 "__init__.py#base/paths/__init__.py" = 1
 "__init__.py#base/telemetry/audit_events.py" = 1
+
+[debt.type-cast]
+"__init__.py#cast _note_skill_read" = 1

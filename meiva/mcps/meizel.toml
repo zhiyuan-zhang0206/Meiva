@@ -25,3 +25,10 @@ exports = ["config.py", "tests"]
 "_oauth.py#assignment mcp.client.auth.oauth2.OAuthContext.prepare_token_auth" = 1
 "_oauth.py#assignment mcp.client.auth.oauth2.validate_metadata_issuer" = 1
 "_oauth.py#assignment mcp.client.auth.utils.validate_metadata_issuer" = 1
+
+[debt.type-cast]
+"_oauth.py#cast FileTokenStorage._read" = 1
+"_plan.py#cast _string_map" = 2
+"_plan.py#cast _strings" = 2
+"_tools.py#cast cached_tools" = 3
+"_tools.py#cast schema_to_signature" = 2

@@ -16,3 +16,7 @@ exports = ["audit.py", "catalog.py", "notices.py", "outbox.py", "policy.py", "pu
 [debt.ambient-read]
 "audit.py#clock datetime.datetime.now" = 1
 "publish.py#clock datetime.datetime.now" = 1
+
+[debt.type-cast]
+"catalog.py#cast category_from_manifest" = 1
+"store.py#cast parse_overrides" = 1

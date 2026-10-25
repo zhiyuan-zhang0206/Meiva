@@ -674,6 +674,13 @@ why.
 - A class bundling several callables is a dependency bag (form 2 or 4 replaces it). A table
   of pure functions, such as a step table or a validator table, is not.
 
+Production `typing.cast` calls are a recorded `type-cast` ratchet: validate or
+narrow a value at its boundary rather than asserting its type. Meizel resolves
+the callable's import identity, and existing calls may only retain their recorded
+count. See [type assertion ratchet](../../meizel/docs/checker/type-cast.meiva.okf.md)
+for source scope and baseline boundaries. This does not ban legitimate `object`
+raw inputs or introduce a general prohibition on every `Any` annotation.
+
 ### Diff hints
 
 A commit that adds one of the shapes above, or an unmediated clock, environment or

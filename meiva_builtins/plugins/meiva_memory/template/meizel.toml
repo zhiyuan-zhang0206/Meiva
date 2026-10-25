@@ -2,3 +2,13 @@ exports = ["validate.py"]
 
 [debt.ambient-read]
 "validate.py#environ os.environ" = 1
+
+[debt.type-cast]
+"validate.py#cast _check_generated" = 1
+"validate.py#cast _check_tags" = 1
+"validate.py#cast _frontmatter_problem" = 1
+"validate.py#cast _misplaced_project_note" = 1
+"validate.py#cast _misread_frontmatter_keys" = 1
+"validate.py#cast _note_frontmatter_title" = 1
+"validate.py#cast _single_note_tag_errors" = 1
+"validate.py#cast validate_type_tag" = 1

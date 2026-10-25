@@ -71,6 +71,19 @@ exports = ["agent_identity.py", "attachment_transport.py", "batch.py", "discover
 "wraps.py#base/log/__init__.py" = 1
 "wraps.py#base/packages/plugins/activation.py" = 2
 
+[debt.type-cast]
+"attachment_transport.py#cast format_signature" = 1
+"attachment_transport.py#cast record_media" = 1
+"discovery.py#cast _static_agent_surface" = 1
+"help.py#cast _variant_text" = 1
+"installation.py#cast slot" = 1
+"metering.py#cast make_mcp_recorder" = 1
+"metering.py#cast make_recorder" = 2
+"process_context.py#cast unbind_context" = 1
+"settings.py#cast attached_agent_view" = 1
+"validation.py#cast coerce_str" = 5
+"wraps.py#cast apply_wrap.async_chained" = 1
+
 [debt.wide-exports]
 "meizel.toml#exports" = 1
 

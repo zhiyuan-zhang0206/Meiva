@@ -24,3 +24,6 @@ exports = ["agents", "cluster", "converge", "data_plane", "duration.py", "extens
 [debt.ambient-read]
 "_repo.py#clock time.monotonic" = 2
 "_repo.py#endpoints base.daemon.endpoints.ServiceEndpoints.from_settings" = 1
+
+[debt.type-cast]
+"_setup.py#cast collect_setup_values" = 2

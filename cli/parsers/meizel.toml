@@ -6,3 +6,6 @@ exports = ["cluster.py", "harness.py", "host.py", "logs.py", "permissions.py", "
 
 [debt.ambient-read]
 "logs.py#clock datetime.datetime.now" = 2
+
+[debt.type-cast]
+"__init__.py#cast command_options" = 1

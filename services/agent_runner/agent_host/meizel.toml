@@ -29,3 +29,7 @@ exports = ["daemon.py", "held_settle.py", "host.py", "invocation", "lifecycle", 
 "exec_memory_guard.py#pid os.getpid" = 1
 "health_routes.py#pid os.getpid" = 1
 "host.py#random uuid.uuid4" = 1
+
+[debt.type-cast]
+"daemon.py#cast build_checkpointer" = 1
+"dispatcher.py#cast InboundWakeDispatcher.run" = 1

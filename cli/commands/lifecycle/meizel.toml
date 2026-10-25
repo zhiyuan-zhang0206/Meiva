@@ -17,3 +17,7 @@ exports = ["converge_host.py", "lgtm_toggle.py", "root_driver.py", "start", "sta
 [debt.ambient-read]
 "root_driver.py#clock time.monotonic" = 6
 "root_readiness.py#clock time.monotonic" = 2
+
+[debt.type-cast]
+"root_driver.py#cast unit_digests" = 1
+"stand_down.py#cast read" = 1

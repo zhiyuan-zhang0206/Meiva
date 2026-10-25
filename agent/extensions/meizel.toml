@@ -2,3 +2,6 @@ exports = ["catalog.py"]
 
 [purity]
 "__init__.py" = "strict"
+
+[debt.type-cast]
+"catalog.py#cast _declared_identifiers" = 1

@@ -32,3 +32,19 @@ exports = ["__main__.py", "failure_state.py", "health.py", "inputs.py", "manifes
 "left_behind.py#clock time.time" = 1
 "supervisor.py#clock time.time" = 5
 "supervisor.py#pid os.getpid" = 1
+
+[debt.type-cast]
+"inputs.py#cast InputSeal.from_mapping" = 2
+"inputs.py#cast parse_inputs" = 1
+"intent_store.py#cast _decode" = 1
+"intent_store.py#cast _decode_caller" = 6
+"intent_store.py#cast _decode_failure" = 1
+"intent_store.py#cast caller_facts" = 6
+"manifest.py#cast _parse_environment" = 2
+"manifest.py#cast _parse_exec" = 1
+"manifest.py#cast load_manifests" = 3
+"probes.py#cast resolve_ref" = 1
+"selfcheck.py#cast TreeSelfCheck._walk" = 1
+"selfcheck.py#cast TreeSelfCheck.run_once" = 2
+"unit_ledger.py#cast read" = 1
+"wiring.py#cast load_wiring" = 1

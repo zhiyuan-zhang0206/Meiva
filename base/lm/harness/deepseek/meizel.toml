@@ -52,5 +52,12 @@
 "session.py#base/lm/harness/registry.py" = 1
 "types.py#base/lm/harness/process.py" = 1
 
+[debt.type-cast]
+"mapping.py#cast _content_text" = 3
+"mapping.py#cast _text_of" = 1
+"mapping.py#cast _tool_use" = 1
+"session.py#cast DeepSeekSession._dispatch" = 1
+"usage.py#cast _parse" = 3
+
 [debt.wide-params]
 "session.py#def __init__" = 1

@@ -2,3 +2,10 @@ exports = ["logger_add_diagnose.py", "loguru_format.py", "no_emoji.py", "time_bo
 
 [uses]
 "tests" = ["logger_add_diagnose.py", "loguru_format.py", "no_emoji.py", "no_silent_failures.py", "time_bomb.py", "zombie_pyright_ignores.py"]
+
+[debt.type-cast]
+"zombie_pyright_ignores.py#cast _as_mapping" = 2
+"zombie_pyright_ignores.py#cast _diagnostic_level" = 1
+"zombie_pyright_ignores.py#cast load_tier_config" = 1
+"zombie_pyright_ignores.py#cast main" = 2
+"zombie_pyright_ignores.py#cast pyright_errors" = 1

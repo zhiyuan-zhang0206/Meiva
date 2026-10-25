@@ -9,3 +9,6 @@ exports = ["agent_usage.py"]
 [debt.ambient-read]
 "agent_usage.py#clock datetime.datetime.now" = 1
 "watch_idle.py#settings base.config.settings" = 1
+
+[debt.type-cast]
+"watch_idle.py#cast watch" = 1

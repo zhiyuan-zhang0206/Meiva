@@ -17,3 +17,16 @@
 "evaluate.py#clock datetime.datetime.now" = 2
 "evaluate.py#random uuid.uuid4" = 1
 "mine.py#clock datetime.datetime.now" = 1
+
+[debt.type-cast]
+"aggregate.py#cast measured_mean" = 1
+"calibrate.py#cast load_cases" = 1
+"evaluate.py#cast assemble_report" = 1
+"evaluate.py#cast assemble_report.<listcomp>" = 1
+"label.py#cast label" = 1
+"record.py#cast _msg_text" = 2
+"record.py#cast task_prompt_of" = 2
+"record_inputs.py#cast event_facts" = 3
+"scan_report.py#cast alert_verdict.<listcomp>" = 1
+"scan_report.py#cast render.<listcomp>" = 1
+"window_records.py#cast group_by_agent" = 3

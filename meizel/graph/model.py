@@ -23,6 +23,7 @@ __all__ = [
     "PurityItem",
     "Restricted",
     "Sources",
+    "TypeCastSite",
     "stdlib_kind",
 ]
 
@@ -71,6 +72,7 @@ class Code(StrEnum):
     MISSING_PATCH_TARGET = "missing-patch-target"
     PATCH_RAISING_FALSE = "patch-raising-false"
     TEST_SUBCLASS_OVERRIDE = "test-subclass-override"
+    TYPE_CAST = "type-cast"
     AMBIENT_READ = "ambient-read"
     STALE_ROOT = "stale-root"
     IMPURE_EDGE = "impure-edge"
@@ -208,6 +210,13 @@ class Patch:
     target: str
     code: Code
     imported: bool = False
+
+
+@dataclass(frozen=True, slots=True)
+class TypeCastSite:
+    line: int
+    column: int
+    qualname: str
 
 
 # meiva:note

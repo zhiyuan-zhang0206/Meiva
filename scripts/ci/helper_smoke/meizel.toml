@@ -13,3 +13,7 @@
 "f12.py#clock time.time" = 2
 "support.py#clock time.monotonic" = 2
 "support.py#pid os.getuid" = 1
+
+[debt.type-cast]
+"cli.py#cast main.helper_root_status" = 1
+"support.py#cast root_call" = 1

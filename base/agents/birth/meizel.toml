@@ -11,3 +11,11 @@ exports = ["creation_identity.py", "harness.py", "spawn.py", "transaction.py"]
 "harness.py#clock datetime.datetime.now" = 1
 "harness.py#home pathlib.Path.home" = 1
 "transaction.py#random uuid.uuid4" = 1
+
+[debt.type-cast]
+"harness.py#cast _answered_claude" = 1
+"harness.py#cast _codex_login" = 1
+"harness.py#cast _has_value" = 1
+"harness.py#cast _kimi_config_login" = 2
+"harness.py#cast _kimi_credentials_file_login" = 1
+"harness.py#cast _nested" = 2

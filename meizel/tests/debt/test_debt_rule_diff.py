@@ -344,3 +344,46 @@ def test_rule_comparison_refreshes_policy_after_validating_the_old_snapshot(
         if line.startswith("impure-call")
     )
     assert row[1:] == ["0", "1", "1", "+1", "+0"]
+
+
+def test_type_cast_rule_baseline_uses_existing_application_content(
+    make_repo: RepoFactory, capsys: pytest.CaptureFixture[str]
+) -> None:
+    root = base_repo(
+        make_repo,
+        {"app/casts.py": "from typing import cast\ndef f(): return cast(int, value)\n"},
+    )
+    rule_change(root)
+    record(root)
+    capsys.readouterr()
+    assert diff(root) == 0
+    out = capsys.readouterr().out
+    assert "type-cast" in out
+    assert "no content growth" in out
+
+
+@pytest.mark.parametrize("new_path", ["app/casts.py", "app/new_casts.py"])
+def test_type_cast_rule_cannot_trade_an_old_group_for_new_content(
+    make_repo: RepoFactory, capsys: pytest.CaptureFixture[str], new_path: str
+) -> None:
+    root = base_repo(
+        make_repo,
+        {"app/casts.py": "from typing import cast\ndef f(): return cast(int, value)\n"},
+    )
+    rule_change(root)
+    record(root)
+    write(
+        root,
+        {
+            "app/casts.py": "",
+            new_path: "from typing import cast\ndef g(): return cast(int, value)\n",
+        },
+    )
+    assert run(root, "debt", "prune") == 0
+    record(root)
+    capsys.readouterr()
+    assert diff(root) == 1
+    out = capsys.readouterr()
+    assert "cast g" in out.out
+    assert "1 recorded, 0 found" in out.out
+    assert "grew" in out.err

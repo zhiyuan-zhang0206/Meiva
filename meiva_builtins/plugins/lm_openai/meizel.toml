@@ -3,3 +3,8 @@
 
 [purity]
 "plugin.py" = "strict"
+
+[debt.type-cast]
+"decision.py#cast _array" = 1
+"decision.py#cast _input_tokens" = 1
+"decision.py#cast _object" = 1

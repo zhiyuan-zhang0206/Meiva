@@ -17,3 +17,6 @@ exports = ["artifact", "dump.py", "layout.py", "restore_drill.py", "scheduler", 
 [roots]
 "dump.py" = { kinds = ["settings"], why = "Service or operator process entry boots configuration before composing its resources" }
 "restore_drill.py" = { kinds = ["settings"], why = "Service or operator process entry boots configuration before composing its resources" }
+
+[debt.type-cast]
+"dump.py#cast run_locked_backup" = 1
