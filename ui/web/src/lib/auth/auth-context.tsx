@@ -22,6 +22,7 @@ import {
   registerSseRuntime,
   setSessionInvalidHandler,
 } from "../transport/sse-lifecycle";
+import { useApi } from "../transport/transport-context";
 
 export { notifySessionInvalid, setSessionInvalidHandler };
 
@@ -44,6 +45,7 @@ interface AuthState {
 const AuthContext = createContext<AuthState | null>(null);
 
 export function AuthProvider({ children }: { children: ReactNode }) {
+  const client = useApi(api);
   const [status, setStatus] = useState<AuthStatus>("loading");
 
   useEffect(() => {
@@ -62,7 +64,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       ? import("./login-ticket").then((m) => m.redeemTicketFromLocation())
       : Promise.resolve();
     redeemed
-      .then(() => api.checkAuth())
+      .then(() => client.checkAuth())
       .then((res) => {
         if (!cancelled) setStatus(res.authenticated ? "authenticated" : "unauthenticated");
       })
@@ -72,12 +74,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [client]);
 
   const login = useCallback(
     async (username: string, password: string): Promise<LoginResult> => {
       try {
-        await api.login(username, password);
+        await client.login(username, password);
         setStatus("authenticated");
         return "ok";
       } catch (e) {
@@ -97,16 +99,16 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         return "network-error";
       }
     },
-    [],
+    [client],
   );
 
   const logout = useCallback(async () => {
     try {
-      await api.logout();
+      await client.logout();
     } finally {
       setStatus("unauthenticated");
     }
-  }, []);
+  }, [client]);
 
   return (
     <AuthContext.Provider value={{ status, login, logout }}>

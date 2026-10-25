@@ -4,18 +4,4 @@ exports = ["context-panel-open.ts", "reference-url.ts", "use-to-user.ts"]
 "context-panel-open.test.ts" = ["context-panel-open.ts"]
 
 [purity]
-"." = "strict-to-be"
 "reference-url.ts" = "strict"
-
-[debt.impure-call]
-"context-panel-open.ts#readContextPanelOpen#localStorage" = 1
-"context-panel-open.ts#useContextPanelOpen#useSyncExternalStore" = 1
-"context-panel-open.ts#writeContextPanelOpen#localStorage" = 1
-"use-to-user.ts#useToUser#useQuery" = 1
-
-[debt.stdlib-patch]
-"context-panel-open.test.ts#vi.spyOn Storage.prototype.getItem" = 1
-"context-panel-open.test.ts#vi.spyOn Storage.prototype.setItem" = 1
-
-[debt.unfrozen-value]
-"context-panel-open.ts#listeners" = 1

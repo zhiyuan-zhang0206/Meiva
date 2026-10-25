@@ -17,29 +17,13 @@ import {
   useAlertsSection,
 } from "./use-alerts";
 import type { Alert, AlertsResponse } from "../contracts/types";
+import type { Api } from "../transport/api";
 import { StreamHub } from "../transport/stream/stream-hub";
 import { startGateway, type TestGateway } from "../transport/tests/api/api-provider";
 import { gatewayRig, type HttpRig } from "../transport/tests/api/api-provider";
 import { FakeNetwork, FakeTab, READY, type FakeEventSource } from "../transport/stream/tests/fake-stream";
 import { ScriptedAuth } from "../transport/stream/tests/scripted-auth";
 import { ApiProvider, StreamHubProvider } from "../transport/transport-context";
-
-// meiva:note
-// AuthProvider and the user-settings read behind the merged-channel switch still
-// import the module-level gateway client, so those two calls are the only ones
-// answered here: the session probe is the test's ScriptedAuth, the settings are
-// the defaults. Every alerts read goes through the real factory and loopback gateway.
-const unmigrated = vi.hoisted(() => ({
-  checkAuth: (): Promise<{ authenticated: boolean }> =>
-    Promise.reject(new Error("the test did not install a session probe")),
-}));
-vi.mock("../transport/api", () => ({
-  API_BASE: "",
-  api: {
-    checkAuth: () => unmigrated.checkAuth(),
-    getSettings: () => Promise.resolve({ settings: [] }),
-  },
-}));
 
 function row(overrides: Partial<Alert> = {}): Alert {
   return {
@@ -121,10 +105,15 @@ function readerWrapper() {
 
 function alertsWrapper() {
   const queryClient = newQueryClient();
+  const client: Api = {
+    ...rig.api,
+    checkAuth: () => auth.checkAuth(),
+    getSettings: () => Promise.resolve({ settings: [] }),
+  };
   return function Wrapper({ children }: { children: ReactNode }) {
     return (
       <QueryClientProvider client={queryClient}>
-        <ApiProvider api={rig.api}>
+        <ApiProvider api={client}>
           <StreamHubProvider hub={hub}>
             <AuthProvider>
               <AlertsProvider>{children}</AlertsProvider>
@@ -160,7 +149,6 @@ beforeEach(async () => {
     ? { kind: "json", body: snapshot }
     : { kind: "text", status: 404, body: "unexpected route" });
   rig = gatewayRig(gateway);
-  unmigrated.checkAuth = auth.checkAuth;
   installTab("legacy");
   defineVisibility("visible");
 });

@@ -1,9 +1,13 @@
 // meiva:note
 // @vitest-environment happy-dom
 
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
-import { readContextPanelOpen, useContextPanelOpen } from "./context-panel-open";
+import {
+  readContextPanelOpen,
+  setContextPanelStorageForTest,
+  useContextPanelOpen,
+} from "./context-panel-open";
 import { act, renderHook } from "@testing-library/react";
 
 const KEY = "meiva.home.contextPanelOpen";
@@ -11,7 +15,11 @@ const KEY = "meiva.home.contextPanelOpen";
 describe("context panel open/closed is per device", () => {
   beforeEach(() => {
     localStorage.clear();
-    vi.restoreAllMocks();
+    setContextPanelStorageForTest(undefined);
+  });
+
+  afterEach(() => {
+    setContextPanelStorageForTest(undefined);
   });
 
   it("defaults to open when nothing is stored", () => {
@@ -29,11 +37,13 @@ describe("context panel open/closed is per device", () => {
   });
 
   it("still opens and closes when storage throws", () => {
-    vi.spyOn(Storage.prototype, "getItem").mockImplementation(() => {
-      throw new Error("blocked");
-    });
-    vi.spyOn(Storage.prototype, "setItem").mockImplementation(() => {
-      throw new Error("blocked");
+    setContextPanelStorageForTest({
+      getItem: () => {
+        throw new Error("blocked");
+      },
+      setItem: () => {
+        throw new Error("blocked");
+      },
     });
     expect(readContextPanelOpen()).toBe(true);
     const { result } = renderHook(() => useContextPanelOpen());

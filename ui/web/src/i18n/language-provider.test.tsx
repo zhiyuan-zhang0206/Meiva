@@ -8,27 +8,50 @@
 // display.language re-renders consumers immediately — the same path the
 // production optimistic update takes.
 
-import { act, cleanup, render, screen } from "@testing-library/react";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { act, cleanup, render, screen, waitFor } from "@testing-library/react";
 import { useTranslations } from "next-intl";
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { USER_SETTING_DEFAULTS } from "@/lib/contracts/types";
+import { SETTINGS_QUERY_KEY } from "@/lib/state/use-user-settings";
+import type { Api } from "@/lib/transport/api";
+import { ApiProvider } from "@/lib/transport/transport-context";
+import { LanguageProvider } from "./language-provider";
 
-// Restore the real next-intl for this file (setup's double is per-file; the
-// re-mock below replaces it).
-vi.mock("next-intl", async (importOriginal) => {
-  // eslint-disable-next-line @typescript-eslint/consistent-type-imports -- dynamic import type in mock factory
-  const actual = await importOriginal<typeof import("next-intl")>();
-  return actual;
+const defaultSettings = (): Record<string, unknown> => ({
+  ...USER_SETTING_DEFAULTS,
 });
 
-vi.mock("@/lib/state/use-user-settings", () =>
-  import("@/test-support/user-settings-mock"),
-);
+const cacheOnlyApi = (): Api =>
+  new Proxy({} as Api, {
+    get(_target, prop: string) {
+      throw new Error(`unexpected Api.${prop} call in cache-seeded test`);
+    },
+  });
 
-import {
-  resetMockSettings,
-  setMockSetting,
-} from "@/test-support/user-settings-mock";
-import { LanguageProvider } from "./language-provider";
+let queryClient: QueryClient;
+
+function setCachedSetting(key: string, value: unknown): void {
+  queryClient.setQueryData<Record<string, unknown>>(
+    SETTINGS_QUERY_KEY,
+    (old: Record<string, unknown> | undefined) => ({
+      ...(old ?? defaultSettings()),
+      [key]: value,
+    }),
+  );
+}
+
+function renderWithProviders() {
+  return render(
+    <QueryClientProvider client={queryClient}>
+      <ApiProvider api={cacheOnlyApi()}>
+        <LanguageProvider>
+          <Probe />
+        </LanguageProvider>
+      </ApiProvider>
+    </QueryClientProvider>,
+  );
+}
 
 // A consumer that reads a key from the "spawn" namespace — renders the
 // English string when locale=en, the Chinese string when locale=zh.
@@ -43,49 +66,47 @@ afterEach(() => {
 });
 
 beforeEach(() => {
-  resetMockSettings();
+  queryClient = new QueryClient({
+    defaultOptions: { queries: { retry: false, staleTime: Infinity } },
+  });
+  queryClient.setQueryData<Record<string, unknown>>(SETTINGS_QUERY_KEY, defaultSettings());
 });
 
 describe("LanguageProvider", () => {
   it("defaults to English when the language setting is absent", () => {
-    render(
-      <LanguageProvider>
-        <Probe />
-      </LanguageProvider>,
-    );
+    renderWithProviders();
     expect(screen.getByText("Spawn agent")).toBeTruthy();
     expect(document.documentElement.lang).toBe("en");
   });
 
   it("renders the Chinese catalog when display.language=zh and syncs <html lang>", () => {
-    resetMockSettings({ "display.language": "zh" });
-    render(
-      <LanguageProvider>
-        <Probe />
-      </LanguageProvider>,
-    );
+    setCachedSetting("display.language", "zh");
+    renderWithProviders();
     expect(screen.getByText("\u521b\u5efa agent")).toBeTruthy();
     expect(document.documentElement.lang).toBe("zh-CN");
   });
 
-  it("switches locale live when the setting changes", () => {
-    const { rerender } = render(
-      <LanguageProvider>
-        <Probe />
-      </LanguageProvider>,
-    );
+  it("switches locale live when the setting changes", async () => {
+    const { rerender } = renderWithProviders();
     expect(screen.getByText("Spawn agent")).toBeTruthy();
 
-    // Simulate the settings optimistic update landing (setMockSetting flips
-    // the shared store and emits). act() wraps the store emit so the
-    // useSyncExternalStore update commits before the assertions.
     act(() => {
-      setMockSetting("display.language", "zh");
+      setCachedSetting("display.language", "zh");
     });
 
-    expect(screen.getByText("\u521b\u5efa agent")).toBeTruthy();
+    await waitFor(() => {
+      expect(screen.getByText("\u521b\u5efa agent")).toBeTruthy();
+    });
     expect(document.documentElement.lang).toBe("zh-CN");
-    rerender(<LanguageProvider><Probe /></LanguageProvider>);
+    rerender(
+      <QueryClientProvider client={queryClient}>
+        <ApiProvider api={cacheOnlyApi()}>
+          <LanguageProvider>
+            <Probe />
+          </LanguageProvider>
+        </ApiProvider>
+      </QueryClientProvider>,
+    );
     expect(screen.getByText("\u521b\u5efa agent")).toBeTruthy();
   });
 });

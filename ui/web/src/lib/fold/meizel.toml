@@ -12,7 +12,6 @@ exports = ["agents.ts", "notices.ts", "owner.ts", "timeline.ts"]
 "timeline.ts" = ["item-id.ts"]
 
 [purity]
-"." = "strict-to-be"
 "agents.ts" = "strict"
 "graph.ts" = "strict"
 "index.ts" = "strict"
@@ -21,11 +20,3 @@ exports = ["agents.ts", "notices.ts", "owner.ts", "timeline.ts"]
 "tasks.ts" = "strict"
 "timeline.ts" = "strict"
 "types.ts" = "strict"
-
-[debt.impure-call]
-"owner.ts#useFoldOwner#console.error" = 1
-"owner.ts#useFoldOwner#useEffect" = 1
-"owner.ts#useFoldOwner#useQueryClient" = 1
-"owner.ts#useFoldOwner#useRef" = 1
-"repair.ts#createQueryRepairScheduler#clearTimeout" = 1
-"repair.ts#createQueryRepairScheduler#setTimeout" = 1

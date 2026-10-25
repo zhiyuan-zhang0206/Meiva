@@ -1,3 +1,1 @@
 exports = ["api", "stream", "suite"]
-
-purity = "strict"
