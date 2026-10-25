@@ -16,7 +16,7 @@ import json
 import logging
 import signal
 import sys
-from collections.abc import Callable
+from collections.abc import Callable, Coroutine
 from dataclasses import dataclass, field
 from functools import partial
 from pathlib import Path
@@ -192,7 +192,7 @@ def adapter_inputs(config: ConfigBoot, *, state_dir: Path) -> AdapterInputs:
 
 # meiva:note
 # One static import per channel: a disabled adapter's module is never imported.
-def _adapter_class(name: str) -> Any:
+def _adapter_class(name: str) -> type[IMAdapter]:
     if name == "telegram":
         from services.entrypoints.im_bridge.adapters import telegram
 
@@ -208,8 +208,8 @@ def _adapter_class(name: str) -> Any:
     raise ValueError(f"unknown im_bridge adapter {name!r}")
 
 
-def _build_adapter(name: str, core: Any, inputs: AdapterInputs) -> IMAdapter:
-    cls = _adapter_class(name)
+def _build_adapter(name: str, core: IMBridgeCore, inputs: AdapterInputs) -> IMAdapter:
+    cls: Any = _adapter_class(name)
     if name == "telegram":
         return cls(core, inputs.telegram, state_dir=inputs.state_dir)
     if name == "weixin":
@@ -227,7 +227,7 @@ def _build_adapter(name: str, core: Any, inputs: AdapterInputs) -> IMAdapter:
 # meiva:note
 # Compose the configured adapters and register them with the core; invalid configuration or
 # imports fail startup.
-def load_adapters(core: Any, plan: AdapterPlan, inputs: AdapterInputs) -> list[IMAdapter]:
+def load_adapters(core: IMBridgeCore, plan: AdapterPlan, inputs: AdapterInputs) -> list[IMAdapter]:
     for name in plan.disabled:
         _log.info("im_bridge: adapter %s disabled by config (MEIVA_IM_DISABLED_ADAPTERS)", name)
     loaded: list[IMAdapter] = []
@@ -252,7 +252,7 @@ async def liveness_loop(liveness: Liveness, *, interval_s: float) -> None:
         await asyncio.sleep(interval_s)
 
 
-async def notice_loop(core: Any, *, interval_s: float) -> None:
+async def notice_loop(core: IMBridgeCore, *, interval_s: float) -> None:
     """Poll the gateway for new fleet notices and push them to the owner
     chat (Task #884). Cursor + filter persist across restarts."""
 
@@ -262,7 +262,7 @@ async def notice_loop(core: Any, *, interval_s: float) -> None:
 
 
 async def timeline_outbound_loop(
-    core: Any, alerts: AlertOutboundBridge, *, interval_s: float
+    core: IMBridgeCore, alerts: AlertOutboundBridge, *, interval_s: float
 ) -> None:
     """One service-owned dispatcher and periodic committed-tail wakeup."""
     while True:
@@ -279,7 +279,9 @@ async def timeline_outbound_loop(
         await asyncio.sleep(interval_s)
 
 
-async def handle_send(core: Any) -> Any:
+async def handle_send(
+    core: IMBridgeCore | object,
+) -> Callable[[bytes], Coroutine[Any, Any, tuple[int, bytes, str]]]:
     """Route handler for the daemon's ``POST /send`` RPC (ops-alerts fan-out).
 
     Body: ``{"text": str}`` — fanned out to every loaded adapter's owner chat
@@ -290,6 +292,8 @@ async def handle_send(core: Any) -> Any:
     of 200 — the caller (base/telemetry/alerts/__init__.py) keys ``notified_at`` off the status
     code, and a fake 200 would stamp a message that never reached the user.
     """
+    core_any: Any = core
+    core_ref: IMBridgeCore = core_any
 
     async def handle(body: bytes) -> tuple[int, bytes, str]:
         try:
@@ -299,7 +303,7 @@ async def handle_send(core: Any) -> Any:
         text = payload.get("text")
         if not isinstance(text, str) or not text.strip():
             return 400, b'{"error": "text (non-empty string) required"}', "application/json"
-        results = await core.notify_user(text)
+        results = await core_ref.notify_user(text)
         delivered = any(v == "ok" for v in results.values())
         if not delivered:
             # Nothing reached the user — report failure so the caller does not
@@ -311,7 +315,7 @@ async def handle_send(core: Any) -> Any:
     return handle
 
 
-def _begin_shutdown(adapters: list[Any]) -> list[BaseException]:
+def _begin_shutdown(adapters: list[IMAdapter]) -> list[BaseException]:
     errors: list[BaseException] = []
     for adapter in adapters:
         try:

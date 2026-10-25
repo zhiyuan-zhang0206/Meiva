@@ -17,7 +17,7 @@ import json
 import logging
 from dataclasses import dataclass
 from pathlib import Path
-from typing import cast
+from typing import Any
 
 from base.native_process.ownership import OwnedProcess
 
@@ -87,11 +87,12 @@ def read(run_dir: Path, unit_id: str) -> GenerationRecord | None:
         _log.warning("unit %s: discarding unreadable spawn record %s (%s)", unit_id, path, exc)
         clear(run_dir, unit_id)
         return None
+    raw_any: Any = raw
     if not isinstance(raw, dict):
         _log.warning("unit %s: discarding a spawn record with an unexpected shape", unit_id)
         clear(run_dir, unit_id)
         return None
-    fields = cast("dict[str, object]", raw)
+    fields: dict[str, Any] = raw_any
     if set(fields) != set(_RECORD_FIELDS):
         _log.warning("unit %s: discarding a spawn record with an unexpected shape", unit_id)
         clear(run_dir, unit_id)

@@ -14,13 +14,14 @@ import pytest
 
 from base.log.tests.log_records import LogRecords
 from base.log.tests.log_records import loguru_records as loguru_records
-from services.supervision.meiva_root import selfcheck as selfcheck_mod
 from services.supervision.meiva_root.manifest import RestartPolicy, UnitManifest, UnitRegistry
 from services.supervision.meiva_root.selfcheck import (
     SelfCheckConfig,
     TreeSelfCheck,
 )
 from services.supervision.meiva_root.supervisor import Supervisor
+
+_CHILD = Path(__file__).with_name("child_unit.py")
 
 
 class _Recorder:
@@ -54,7 +55,9 @@ def _broken_unit(unit_id: str) -> dict[str, object]:
 
 
 def _spawn_sleeper() -> subprocess.Popen[bytes]:
-    return subprocess.Popen([sys.executable, "-c", "import time; time.sleep(30)"])
+    # meiva:note
+    # Spawn a fixed sleeper helper process for tree-selfcheck tests.
+    return subprocess.Popen([sys.executable, str(_CHILD), "sleep"])  # noqa: S603
 
 
 def _chain(check: TreeSelfCheck) -> dict[str, object]:
@@ -143,16 +146,15 @@ def test_detached_process_is_broken(recorder: _Recorder) -> None:
 
 
 def test_unverifiable_is_separated_from_broken(
-    monkeypatch: pytest.MonkeyPatch, recorder: _Recorder, caplog: pytest.LogCaptureFixture
+    recorder: _Recorder, caplog: pytest.LogCaptureFixture
 ) -> None:
     caplog.set_level(logging.DEBUG, logger="services.supervision.meiva_root.selfcheck")
 
     def fake_child_state(pid: int, parent_pid: int) -> str:
         return "unverifiable"
 
-    monkeypatch.setattr(selfcheck_mod, "child_state", fake_child_state)
     host = _StubHost([{"id": "svc", "state": "running", "pid": 12345}])
-    check = TreeSelfCheck(host)
+    check = TreeSelfCheck(host, state_reader=fake_child_state)
 
     check.run_once()
     chain = _chain(check)
@@ -191,7 +193,7 @@ async def test_loop_start_stop() -> None:
         await check.stop()
 
 
-_SLEEP_FOREVER = [sys.executable, "-c", "import time; time.sleep(60)"]
+_SLEEP_FOREVER = [sys.executable, str(_CHILD), "sleep"]
 
 StartFactory = Callable[..., Awaitable[Supervisor]]
 

@@ -9,13 +9,14 @@ from __future__ import annotations
 import asyncio
 import logging
 import os
-from collections.abc import Awaitable, Callable, Sequence
+from collections.abc import Awaitable, Callable, Coroutine, Sequence
 from pathlib import Path
-from time import monotonic, time
+from time import monotonic
 from typing import Any, Protocol
 
 import psutil
 
+from base.clock import SYSTEM_TIMERS, Clock, ClockConfig
 from base.host.exit_codes import CODE_BEHIND_MINIMUM_EXIT_CODE
 from base.host.runtime_interpreter import LoadedRuntimeIdentity
 from base.native_process.child_env import inherited_process_env
@@ -42,20 +43,20 @@ from services.supervision.meiva_root.intent_store import (
     merge_record_for_boot,
 )
 from services.supervision.meiva_root.left_behind import LeftBehindMixin
-from services.supervision.meiva_root.manifest import (
-    RestartPolicy,
-    UnitRegistry,
-    UnknownUnitError,
-)
+from services.supervision.meiva_root.manifest import RestartPolicy, UnitRegistry, UnknownUnitError
 from services.supervision.meiva_root.stopping import StoppingMixin, SupervisorConfig
 from services.supervision.meiva_root.unit_ledger import GenerationRecord
 from services.supervision.meiva_root.unit_records import Generation, UnitRuntime
 
 _log = logging.getLogger(__name__)
-
 # meiva:note
 # A refused wrapper is refused in milliseconds; losing the cap beats a restart loop.
 REWRITE_STARTUP_WINDOW_S = 10.0
+
+
+def _wall_time() -> float:
+    cfg = ClockConfig("UTC", "UTC", message_timestamp_weekday=False)
+    return Clock(cfg, timers=SYSTEM_TIMERS).now().timestamp()
 
 
 class HealthSource(Protocol):
@@ -93,6 +94,10 @@ class Supervisor(LeftBehindMixin, StoppingMixin):
         run_dir: Path,
         config: SupervisorConfig | None = None,
         spawn: ChildSpawn | None = None,
+        signal_owned: Callable[..., bool] | None = None,
+        stop_unit_fn: Callable[..., Awaitable[None]] | None = None,
+        watch_fn: Callable[[UnitRuntime, Generation], Coroutine[object, object, None]]
+        | None = None,
     ) -> None:
         self._registry = registry
         # meiva:note
@@ -102,6 +107,9 @@ class Supervisor(LeftBehindMixin, StoppingMixin):
         self._run_dir = run_dir
         self._log_dir = run_dir / "logs"
         self._config = config if config is not None else SupervisorConfig()
+        self._signal_owned_fn = self._signal_owned if signal_owned is None else signal_owned
+        self._stop_unit_override = stop_unit_fn
+        self._watch_override = watch_fn
         # meiva:note
         # Opaque launch rewriting from the assembly; None launches the manifest as written.
         self._argv_transform: ArgvTransform | None = None
@@ -181,10 +189,7 @@ class Supervisor(LeftBehindMixin, StoppingMixin):
             for unit_id in self._registry.all_stop_order():
                 runtime = self._units[unit_id]
                 self._set_intent(
-                    runtime,
-                    UnitIntent.STOPPED,
-                    IntentSource.SELF,
-                    caller=runtime.intent_caller,
+                    runtime, UnitIntent.STOPPED, IntentSource.SELF, caller=runtime.intent_caller
                 )
                 try:
                     await self._stop_unit(runtime, escalate=False)
@@ -422,7 +427,7 @@ class Supervisor(LeftBehindMixin, StoppingMixin):
             }
             for runtime in self._units.values()
         ]
-        return {"root_pid": os.getpid(), "units": units}
+        return {"root_pid": psutil.Process().pid, "units": units}
 
     def health_generation(self, unit_id: str) -> tuple[OwnedProcess, float] | None:
         """The retained native generation and its monotonic launch time."""
@@ -506,20 +511,14 @@ class Supervisor(LeftBehindMixin, StoppingMixin):
         # meiva:note
         # Stamp the intent's age where the intent is set: a stop's age is what
         # decides whether it still counts as a deliberate, owned action (#5611).
-        runtime.intent_since = time()
+        runtime.intent_since = _wall_time()
         self._write_record(runtime)
 
     def _write_record(self, runtime: UnitRuntime) -> None:
-        intent_store.write(
-            self._run_dir,
-            runtime.manifest.id,
-            IntentRecord(
-                runtime.intent,
-                runtime.intent_source,
-                runtime.restart_failed,
-                runtime.intent_caller,
-            ),
+        record = IntentRecord(
+            runtime.intent, runtime.intent_source, runtime.restart_failed, runtime.intent_caller
         )
+        intent_store.write(self._run_dir, runtime.manifest.id, record)
 
     def _boot_intent(self, runtime: UnitRuntime) -> None:
         """Merge this unit's stored record into a fresh root generation."""
@@ -531,12 +530,12 @@ class Supervisor(LeftBehindMixin, StoppingMixin):
         runtime.intent_source = merged.source
         runtime.restart_failed = merged.restart_failed
         runtime.intent_caller = None if record is None else record.caller
-        runtime.intent_since = time() if record is None else record.updated_at
-        if record is None or (
-            record.intent,
-            record.source,
-            record.restart_failed,
-        ) != (merged.intent, merged.source, merged.restart_failed):
+        runtime.intent_since = _wall_time() if record is None else record.updated_at
+        if record is None or (record.intent, record.source, record.restart_failed) != (
+            merged.intent,
+            merged.source,
+            merged.restart_failed,
+        ):
             self._write_record(runtime)
 
     def _record_restart_failure(
@@ -544,7 +543,7 @@ class Supervisor(LeftBehindMixin, StoppingMixin):
     ) -> None:
         """Record one member's failed replacement half; store first, then signal."""
         previous = runtime.restart_failed
-        since = previous.since if previous is not None else time()
+        since = previous.since if previous is not None else _wall_time()
         failure = RestartFailure(stage=stage, since=since, detail=detail)
         runtime.restart_failed = failure
         self._write_record(runtime)
@@ -588,7 +587,7 @@ class Supervisor(LeftBehindMixin, StoppingMixin):
                 "{failed_for_s:.0f}s",
                 event="root_restart_cleared",
                 unit=runtime.manifest.id,
-                failed_for_s=max(0.0, time() - failure.since),
+                failed_for_s=max(0.0, _wall_time() - failure.since),
             )
         except Exception:
             _log.exception("unit %s: restart-cleared event fan-out failed", runtime.manifest.id)
@@ -678,17 +677,16 @@ class Supervisor(LeftBehindMixin, StoppingMixin):
         # live process nobody recorded.
         # meiva:link services/supervision/meiva_root/docs/meiva_root.meiva.okf.md
         if identity is not None:
-            unit_ledger.write(
-                self._run_dir,
-                manifest.id,
-                GenerationRecord(
-                    identity=identity,
-                    generation=generation.seq,
-                    manifest_digest=manifest.digest(),
-                    started_at=time(),
-                ),
+            record = GenerationRecord(
+                identity, generation.seq, manifest.digest(), started_at=_wall_time()
             )
-        watch = asyncio.create_task(self._watch(runtime, generation))
+            unit_ledger.write(self._run_dir, manifest.id, record)
+        watch_coro = (
+            self._watch(runtime, generation)
+            if self._watch_override is None
+            else self._watch_override(runtime, generation)
+        )
+        watch = asyncio.create_task(watch_coro)
         self._retain_watch(watch, generation)
         runtime.watch_task = watch
         _log.info(
@@ -699,19 +697,20 @@ class Supervisor(LeftBehindMixin, StoppingMixin):
         )
 
     async def _launch(
-        self, launcher: ChildSpawn, argv: Sequence[str], plain: Sequence[str], **options: Any
+        self, launcher: ChildSpawn, argv: Sequence[str], plain: Sequence[str], **options: object
     ) -> asyncio.subprocess.Process:
+        launch_opts: Any = options
         if list(argv) == list(plain):
-            return await launcher(*plain, **options)
+            return await launcher(*plain, **launch_opts)
         try:
-            return await launcher(*argv, **options)
+            return await launcher(*argv, **launch_opts)
         except OSError as exc:
             _log.warning(
                 "the rewritten launch never started (%s); memory cap not applied, "
                 "the unit runs unbounded",
                 exc,
             )
-            return await launcher(*plain, **options)
+            return await launcher(*plain, **launch_opts)
 
     async def _watch(self, runtime: UnitRuntime, generation: Generation) -> None:
         """Reap one direct child and make an unexpected exit eligible for replacement."""

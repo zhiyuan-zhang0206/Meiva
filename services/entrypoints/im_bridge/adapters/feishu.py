@@ -21,12 +21,15 @@ from services.entrypoints.im_bridge.adapters import feishu_poll_cursor as cursor
 from services.entrypoints.im_bridge.adapters.feishu_inbound import (
     normalize_card_action,
     normalize_message,
+    normalize_poll_item,
+    sender_open_id,
 )
 from services.entrypoints.im_bridge.adapters.feishu_ws_proxy import allow_env_proxy_for_ws
 from services.entrypoints.im_bridge.config import FeishuCredentialsConfig
 from services.entrypoints.im_bridge.state import load_switch_state
 from services.entrypoints.im_bridge.types import (
     NETWORK_ERRORS,
+    BridgeCore,
     HTTPFailure,
     IMAdapter,
     InboundMessage,
@@ -41,6 +44,14 @@ from services.entrypoints.im_bridge.types import (
 
 # Feishu caps a text message around 30KB of characters; segment conservatively.
 MAX_SEGMENT_CHARS = 8000
+
+
+class FeishuWsClient:
+    def start(self) -> None:
+        raise NotImplementedError
+
+    async def _disconnect(self) -> None:
+        raise NotImplementedError
 
 
 def backoff_delay(interval: float, failures: int) -> float:
@@ -66,11 +77,13 @@ class FeishuAdapter(IMAdapter):
 
     def __init__(
         self,
-        core: Any,
+        core: BridgeCore | object,
         config: FeishuCredentialsConfig,
         *,
         state_dir: Path,
         proxy_configured: bool,
+        ws_client: FeishuWsClient | object = None,
+        rest_client: cursors.FeishuRestClient | object = None,
     ) -> None:
         super().__init__(core)
         self._config = config
@@ -86,8 +99,8 @@ class FeishuAdapter(IMAdapter):
         self._tasks: asyncio.TaskGroup | None = None
         self._ws_exit: asyncio.Future[None] | None = None
         self._accepting_events = False
-        self._ws_client: Any = None
-        self._rest_client: Any = None
+        self._ws_client: Any = ws_client
+        self._rest_client: Any = rest_client
         # Initialized here (not only in _normalize) so send_to_owner before the
         # first inbound p2p — e.g. right after a daemon restart — fails with the
         # clear "no known user chat" error instead of an AttributeError.
@@ -96,7 +109,7 @@ class FeishuAdapter(IMAdapter):
         # im.message.receive_v1 for this app (2026-09-01 diagnosis), so p2p
         # messages are picked up by polling ListMessage instead. Chats are
         # discovered from outbound send responses and/or the bootstrap config.
-        self._poll_task: asyncio.Task[Any] | None = None
+        self._poll_task: asyncio.Task[None] | None = None
         self._sent_chat_ids: dict[str, str] = {}  # open_id -> p2p chat id (from sends)
         self._poll_chats: set[str] = set()
         self._poll_cursor: dict[str, str] = {}  # chat_id -> last delivered message_id
@@ -212,7 +225,9 @@ class FeishuAdapter(IMAdapter):
         if self._accepting_events and self._ws_exit is not None and not self._ws_exit.done():
             self._ws_exit.set_exception(error)
 
-    def _spawn_event(self, handler: Callable[[Any], Coroutine[Any, Any, None]], data: Any) -> None:
+    def _spawn_event(
+        self, handler: Callable[[object], Coroutine[Any, Any, None]], data: object
+    ) -> None:
         tasks = self._tasks
         if not self._accepting_events or tasks is None:
             return
@@ -253,8 +268,10 @@ class FeishuAdapter(IMAdapter):
 
     # -- lark construction (lazy; the first import binds the SDK's loop) -----
 
-    def _build_ws_client(self) -> Any:
+    def _build_ws_client(self) -> FeishuWsClient:
         """Build the long-connection client + event handler (ws thread only)."""
+        if self._ws_client is not None:
+            return self._ws_client
         import lark_oapi as lark  # pyright: ignore[reportUnknownVariableType]
 
         handler: Any = lark.EventDispatcherHandler.builder(  # pyright: ignore[reportUnknownMemberType]
@@ -278,7 +295,7 @@ class FeishuAdapter(IMAdapter):
         )
         return client
 
-    def _build_rest_client(self) -> Any:
+    def _build_rest_client(self) -> cursors.FeishuRestClient:
         """Build the REST client used for sending (worker thread)."""
         import lark_oapi as lark  # pyright: ignore[reportUnknownVariableType]
 
@@ -291,14 +308,14 @@ class FeishuAdapter(IMAdapter):
 
     # -- inbound -------------------------------------------------------------
 
-    def _on_im_message(self, data: Any) -> None:
+    def _on_im_message(self, data: object) -> None:
         """SDK event-handler callback (ws thread) — dispatch on the main loop."""
         main_loop = self._main_loop
         if main_loop is None or main_loop.is_closed():
             return
         main_loop.call_soon_threadsafe(self._spawn_event, self._handle_event, data)
 
-    def _on_card_action(self, data: Any) -> None:
+    def _on_card_action(self, data: object) -> None:
         """Card button callback (ws thread) — the button's value.key is the
         command; feed it through core as a text message from the operator."""
         main_loop = self._main_loop
@@ -306,13 +323,13 @@ class FeishuAdapter(IMAdapter):
             return
         main_loop.call_soon_threadsafe(self._spawn_event, self._handle_card_action, data)
 
-    async def _handle_card_action(self, data: Any) -> None:
+    async def _handle_card_action(self, data: object) -> None:
         message = normalize_card_action(data)
         if message is not None:
             self._last_open_id = message.chat_id
             await self.core.handle_inbound(message)
 
-    async def _handle_event(self, data: Any) -> None:
+    async def _handle_event(self, data: object) -> None:
         message = normalize_message(data, self._seen_messages)
         if message is None:
             return
@@ -530,58 +547,14 @@ class FeishuAdapter(IMAdapter):
         return last
 
     @staticmethod
-    def _sender_open_id(sender: Any) -> str:
-        """Extract the sender's open id from either response shape: the WS
-        event shape (``sender.sender_id.open_id``) or the ListMessage API
-        shape (open id on ``sender.id`` with ``id_type=open_id``)."""
-        sender_id = getattr(sender, "sender_id", None)
-        open_id = getattr(sender_id, "open_id", "") if sender_id is not None else ""
-        if not open_id and getattr(sender, "id_type", "") == "open_id":
-            open_id = getattr(sender, "id", "")
-        return open_id
+    def _sender_open_id(sender: object) -> str:
+        return sender_open_id(sender)
 
-    def _normalize_poll_item(self, item: Any) -> InboundMessage | None:
-        """Map one listed message to an InboundMessage (same contract as the
-        WS event path: p2p text from a user, never our own sends).
-
-        Accepts both response shapes: the WS event shape (``chat_type`` +
-        ``sender.sender_id.open_id``) and the ListMessage API shape (no
-        ``chat_type`` — the polled chat is a resolved p2p chat by
-        construction — and the open id on ``sender.id`` with
-        ``id_type=open_id``).
-        """
-        if not getattr(item, "message_id", ""):
-            return None
-        # ListMessage responses carry no chat_type; absence means p2p.
-        if getattr(item, "chat_type", "") not in ("", "p2p"):
-            return None
-        if getattr(item, "msg_type", "") != "text":
-            return None
-        sender = getattr(item, "sender", None)
-        if sender is None or getattr(sender, "sender_type", "") != "user":
-            return None
-        content = ""
-        try:
-            content = (
-                json.loads(getattr(getattr(item, "body", None), "content", "") or "{}")
-                .get("text", "")
-                .strip()
-            )
-        except (TypeError, ValueError):
-            return None
-        if not content:
-            return None
-        open_id = self._sender_open_id(sender)
-        if not open_id:
-            return None
-        self._last_open_id = open_id
-        return InboundMessage(
-            channel=self.channel,
-            chat_id=open_id,
-            text=content,
-            message_id=getattr(item, "message_id", None),
-            idempotency_key=cursors.idempotency_key(getattr(item, "message_id", None)),
-        )
+    def _normalize_poll_item(self, item: object) -> InboundMessage | None:
+        msg = normalize_poll_item(item, channel=self.channel)
+        if msg is not None:
+            self._last_open_id = msg.chat_id
+        return msg
 
     async def outbound_account_id(self) -> str:
         if not self._config.feishu_app_id or not self._config.feishu_app_secret:
@@ -676,7 +649,9 @@ class FeishuAdapter(IMAdapter):
             raise NotImplementedError("feishu: no known user chat yet")
         await self.send(self._last_open_id, text)
 
-    def _create_message(self, client: Any, request: Any) -> Any:
+    def _create_message(
+        self, client: cursors.FeishuRestClient, request: object
+    ) -> cursors.FeishuMessageResponse:
         """Classify the actual provider request without concealing SDK/schema failures."""
         try:
             response = client.im.v1.message.create(request)
@@ -693,7 +668,11 @@ class FeishuAdapter(IMAdapter):
         return response
 
     def _send_card(
-        self, client: Any, chat_id: str, text: str, buttons: list[tuple[str, str]]
+        self,
+        client: cursors.FeishuRestClient,
+        chat_id: str,
+        text: str,
+        buttons: list[tuple[str, str]],
     ) -> None:
         """Send an interactive card whose buttons carry the callback values.
 
@@ -748,7 +727,7 @@ class FeishuAdapter(IMAdapter):
     # Remember the p2p chat a confirmed send resolved, and log the delivery-count line (task
     # #4250: one per API-confirmed send). Returns the resolved chat id, "" when the response
     # carries none.
-    def _record_send(self, chat_id: str, data: Any) -> str:
+    def _record_send(self, chat_id: str, data: object) -> str:
         resolved = getattr(data, "chat_id", "") if data is not None else ""
         if resolved:
             self._sent_chat_ids[chat_id] = resolved
@@ -756,7 +735,7 @@ class FeishuAdapter(IMAdapter):
         logger.info("feishu send ok chat_id={} message_id={}", chat_id, message_id)
         return resolved
 
-    def _send_one(self, client: Any, chat_id: str, text: str) -> str:
+    def _send_one(self, client: cursors.FeishuRestClient, chat_id: str, text: str) -> str:
         """Send one text segment; returns the p2p chat id from the response
         ("" when the response does not carry one)."""
         from lark_oapi.api.im.v1 import (  # pyright: ignore[reportUnknownVariableType]

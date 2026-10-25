@@ -18,8 +18,8 @@ no delivered push on record reports ``PUSH_HEALTH_NEVER_SENT``.
 from __future__ import annotations
 
 import asyncio
-from datetime import UTC, datetime
 
+from base.clock import SYSTEM_TIMERS, Clock, ClockConfig
 from base.log import logger
 from services.entrypoints.im_bridge.config import ImBridgeConfig
 from services.entrypoints.im_bridge.outbound.store import IMOutboxStore
@@ -37,7 +37,9 @@ async def emit_push_health_once(store: IMOutboxStore, config: ImBridgeConfig) ->
     snapshot = await asyncio.to_thread(
         store.push_health_snapshot, tuple(config.im_push_health_channels)
     )
-    now = datetime.now(UTC)
+    now = Clock(
+        ClockConfig("UTC", "UTC", message_timestamp_weekday=False), timers=SYSTEM_TIMERS
+    ).now()
     for channel in config.im_push_health_channels:
         pending, last_ok = snapshot.get(channel, (0, None))
         if last_ok is None:

@@ -47,7 +47,7 @@ import shlex
 import sys
 from collections.abc import Iterable, Mapping, Sequence
 from pathlib import Path
-from typing import cast, get_args
+from typing import Any, get_args
 
 from base.cluster.machine import MachineRole
 from base.native_process.stop_timing import STOP_MARGIN_S
@@ -122,9 +122,10 @@ def build_units(
     capabilities: Iterable[str],
     repo_root: Path,
     environments: Mapping[str, dict[str, str]] | None = None,
+    plugin_dirs: Mapping[str, Path] | None = None,
 ) -> list[dict[str, object]]:
     """K2 unit rows for every spec whose capabilities intersect `capabilities`."""
-    chosen = tuple(build_services()) if specs is None else tuple(specs)
+    chosen = tuple(build_services(plugin_dirs=plugin_dirs)) if specs is None else tuple(specs)
     caps = _validated_capabilities(capabilities)
     units: list[dict[str, object]] = []
     for spec in sorted(chosen, key=lambda spec: spec.session != STOPS_FIRST):
@@ -147,17 +148,17 @@ def build_units(
 def _validate(manifest: Mapping[str, object]) -> UnitRegistry:
     """Run the manifest validators in memory, before anything touches disk."""
     units_raw = manifest["units"]
+    units_any: Any = units_raw
     if not isinstance(units_raw, list):
         raise ManifestError("generated manifest: 'units' must be a list")
+    units_list: list[Any] = units_any
     parsed: list[UnitManifest] = []
-    for index, item in enumerate(cast("list[object]", units_raw)):
+    for index, item in enumerate(units_list):
+        item_any: Any = item
         if not isinstance(item, dict):
             raise ManifestError(f"generated manifest: units[{index}] must be an object")
-        parsed.append(
-            UnitManifest.from_mapping(
-                cast("dict[str, object]", item), origin=f"generated units[{index}]"
-            )
-        )
+        typed_item: dict[str, Any] = item_any
+        parsed.append(UnitManifest.from_mapping(typed_item, origin=f"generated units[{index}]"))
     return UnitRegistry(parsed)
 
 
@@ -252,8 +253,13 @@ def main(argv: Sequence[str] | None = None) -> int:
     except ManifestError as exc:
         sys.stderr.write(f"error: {exc}\n")
         return 1
-    manifest = cast("dict[str, object]", json.loads(path.read_text(encoding="utf-8")))
-    sys.stdout.write(f"wrote {len(cast('list[object]', manifest['units']))} unit(s) to {path}\n")
+    raw_manifest = json.loads(path.read_text(encoding="utf-8"))
+    raw_any: Any = raw_manifest
+    units_raw: object = raw_any["units"] if isinstance(raw_manifest, dict) else []
+    units_any: Any = units_raw
+    units_list: list[Any] = units_any if isinstance(units_raw, list) else []
+    count = len(units_list)
+    sys.stdout.write(f"wrote {count} unit(s) to {path}\n")
     return 0
 
 

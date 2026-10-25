@@ -12,7 +12,6 @@ from typing import cast
 import pytest
 
 from base.daemon.health import DaemonProbe
-from base.native_process.ownership import OwnedProcess
 from base.native_process.root_control.instance_lock import (
     acquire_instance_lock,
     release_instance_lock,
@@ -24,6 +23,8 @@ from services.supervision.meiva_root.probes import ProbeRegistry
 from services.supervision.meiva_root.server import ControlServer
 from services.supervision.meiva_root.supervisor import Supervisor, SupervisorConfig
 from services.supervision.meiva_root.unit_records import Generation, UnitRuntime
+
+_CHILD = Path(__file__).with_name("child_unit.py")
 
 
 class WorkerFailure(BaseException):
@@ -155,12 +156,12 @@ async def test_waiting_probe_caller_receives_original_unknown_error() -> None:
 
 async def test_cross_generation_watch_errors_are_visible_and_collected_without_peer_cancel(
     tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
     caplog: pytest.LogCaptureFixture,
 ) -> None:
-    unit = UnitManifest("worker", (sys.executable, "-c", "pass"), RestartPolicy.ALWAYS, "root")
-    owner = Supervisor(UnitRegistry([unit]), run_dir=tmp_path)
-    original = owner._watch
+    unit = UnitManifest(
+        "worker", (sys.executable, str(_CHILD), "noop"), RestartPolicy.ALWAYS, "root"
+    )
+    owner_ref: list[Supervisor] = []
     errors = [RuntimeError("first generation"), RuntimeError("second generation")]
     watched = 0
 
@@ -168,10 +169,11 @@ async def test_cross_generation_watch_errors_are_visible_and_collected_without_p
         nonlocal watched
         error = errors[watched]
         watched += 1
-        await original(runtime, generation)
+        await owner_ref[0]._watch(runtime, generation)
         raise error
 
-    monkeypatch.setattr(owner, "_watch", fail_after_reap)
+    owner = Supervisor(UnitRegistry([unit]), run_dir=tmp_path, watch_fn=fail_after_reap)
+    owner_ref.append(owner)
     caplog.set_level(logging.ERROR)
     peer_release = asyncio.Event()
     async with asyncio.TaskGroup() as participants:
@@ -202,37 +204,26 @@ async def test_cross_generation_watch_errors_are_visible_and_collected_without_p
             peer_release.set()
 
 
-class _NeverSignal(Supervisor):
-    # meiva:note
-    # A supervisor whose leader identity never matches: it never signals.
-    @staticmethod
-    def _signal_owned(identity: OwnedProcess, *, force: bool) -> bool:  # noqa: ARG004
-        # meiva:note
-        # The override keeps the parent signature, so both parameters stay unused.
-        return False
-
-
 async def test_failed_watch_never_certifies_an_unreaped_live_child(
     tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     unit = UnitManifest(
         "worker",
-        (sys.executable, "-c", "import time; time.sleep(60)"),
+        (sys.executable, str(_CHILD), "sleep"),
         RestartPolicy.ALWAYS,
         "root",
-    )
-    owner = Supervisor(
-        UnitRegistry([unit]),
-        run_dir=tmp_path,
-        config=SupervisorConfig(stop_timeout_s=0.02, stop_kill_reap_s=0.1),
     )
     error = RuntimeError("wait implementation failed")
 
     async def broken_watch(_runtime: UnitRuntime, _generation: Generation) -> None:
         raise error
 
-    monkeypatch.setattr(owner, "_watch", broken_watch)
+    owner = Supervisor(
+        UnitRegistry([unit]),
+        run_dir=tmp_path,
+        config=SupervisorConfig(stop_timeout_s=0.02, stop_kill_reap_s=0.1),
+        watch_fn=broken_watch,
+    )
     await owner.start()
     generation = owner._units["worker"].generation
     assert generation is not None
@@ -254,7 +245,9 @@ async def test_failed_watch_never_certifies_an_unreaped_live_child(
 
 
 async def test_shutdown_closes_supervisor_birth_admission(tmp_path: Path) -> None:
-    unit = UnitManifest("worker", (sys.executable, "-c", "pass"), RestartPolicy.ALWAYS, "root")
+    unit = UnitManifest(
+        "worker", (sys.executable, str(_CHILD), "noop"), RestartPolicy.ALWAYS, "root"
+    )
     owner = Supervisor(UnitRegistry([unit]), run_dir=tmp_path)
     await owner.start()
     await owner.shutdown()
@@ -286,16 +279,27 @@ async def test_health_stop_closes_even_unobserved_unit_admission(tmp_path: Path)
 
 async def test_refused_child_keeps_real_reap_and_late_error_at_original_owner(
     tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
     caplog: pytest.LogCaptureFixture,
 ) -> None:
     ready = tmp_path / "ready"
-    code = (
-        "import pathlib,signal,time; signal.signal(signal.SIGTERM,signal.SIG_IGN); "
-        f"pathlib.Path({str(ready)!r}).touch(); time.sleep(60)"
+    unit = UnitManifest(
+        "worker",
+        (sys.executable, str(_CHILD), "ignore_term", str(ready)),
+        RestartPolicy.ALWAYS,
+        "root",
     )
-    unit = UnitManifest("worker", (sys.executable, "-c", code), RestartPolicy.ALWAYS, "root")
-    owner = _NeverSignal(
+    owner_ref: list[Supervisor] = []
+    error = RuntimeError("late reap bookkeeping failed")
+
+    async def fail_after_reap(runtime: UnitRuntime, generation: Generation) -> None:
+        await owner_ref[0]._watch(runtime, generation)
+        raise error
+
+    def never_signal(_identity: object, *, force: bool = False) -> bool:
+        del force
+        return False
+
+    owner = Supervisor(
         UnitRegistry([unit]),
         run_dir=tmp_path,
         config=SupervisorConfig(
@@ -303,15 +307,10 @@ async def test_refused_child_keeps_real_reap_and_late_error_at_original_owner(
             stop_kill_reap_s=0.1,
             watch_join_timeout_s=0.02,
         ),
+        signal_owned=never_signal,
+        watch_fn=fail_after_reap,
     )
-    original = owner._watch
-    error = RuntimeError("late reap bookkeeping failed")
-
-    async def fail_after_reap(runtime: UnitRuntime, generation: Generation) -> None:
-        await original(runtime, generation)
-        raise error
-
-    monkeypatch.setattr(owner, "_watch", fail_after_reap)
+    owner_ref.append(owner)
     caplog.set_level(logging.ERROR)
     await owner.start()
     generation = owner._units["worker"].generation
@@ -345,18 +344,16 @@ async def test_refused_child_keeps_real_reap_and_late_error_at_original_owner(
 
 async def test_watch_join_has_independent_bound_when_completed_child_watch_resists_cancel(
     tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    unit = UnitManifest("worker", (sys.executable, "-c", "pass"), RestartPolicy.ALWAYS, "root")
-    owner = Supervisor(
-        UnitRegistry([unit]), run_dir=tmp_path, config=SupervisorConfig(watch_join_timeout_s=0.02)
+    unit = UnitManifest(
+        "worker", (sys.executable, str(_CHILD), "noop"), RestartPolicy.ALWAYS, "root"
     )
-    original = owner._watch
+    owner_ref: list[Supervisor] = []
     release, entered = asyncio.Event(), asyncio.Event()
     error = RuntimeError("late cancel-resistant watch failure")
 
     async def resistant(runtime: UnitRuntime, generation: Generation) -> None:
-        await original(runtime, generation)
+        await owner_ref[0]._watch(runtime, generation)
         entered.set()
         while not release.is_set():
             try:
@@ -365,7 +362,13 @@ async def test_watch_join_has_independent_bound_when_completed_child_watch_resis
                 continue
         raise error
 
-    monkeypatch.setattr(owner, "_watch", resistant)
+    owner = Supervisor(
+        UnitRegistry([unit]),
+        run_dir=tmp_path,
+        config=SupervisorConfig(watch_join_timeout_s=0.02),
+        watch_fn=resistant,
+    )
+    owner_ref.append(owner)
     await owner.start()
     wait_entered = asyncio.create_task(entered.wait())
     stopped: asyncio.Task[None] | None = None

@@ -16,8 +16,10 @@ from collections.abc import Callable, Sequence
 from contextlib import suppress
 from dataclasses import dataclass
 from threading import Event, Lock
+from typing import Any
 
 from base.agents.context.clients import ClientSet
+from base.clock import SYSTEM_TIMERS, Clock, ClockConfig
 from base.cluster.machine import MachineIdentityReader
 from base.daemon.health import DaemonProbe, ProbeVerdict
 from base.native_process.loaded_commit import LoadedCommit
@@ -25,6 +27,38 @@ from base.paths import meiva_home
 from services.supervision.meiva_root.health import HealthMonitor, ProbeRunner
 
 _log = logging.getLogger(__name__)
+
+
+def _wall_time() -> float:
+    return (
+        Clock(ClockConfig("UTC", "UTC", message_timestamp_weekday=False), timers=SYSTEM_TIMERS)
+        .now()
+        .timestamp()
+    )
+
+
+def _default_init_logging(
+    *,
+    name: str,
+    producer: object,
+    machine_reader: Callable[[], str],
+    image: LoadedCommit,
+) -> None:
+    from base.telemetry.process_logging import init_gateway_process
+
+    typed_producer: Any = producer
+    init_gateway_process(
+        name=name,
+        producer=typed_producer,
+        machine_reader=machine_reader,
+        image=image,
+    )
+
+
+def _default_sync_telemetry(*, timeout: float) -> object:
+    from base import telemetry
+
+    return telemetry.sync(timeout=timeout)
 
 
 @dataclass(frozen=True, slots=True)
@@ -101,7 +135,7 @@ class DiagnosticMonitor:
             with self._report_admission:
                 report_closed.set()
         state.result = result
-        state.sampled_at = time.time()
+        state.sampled_at = _wall_time()
         recovered = result.alive and state.failures > 0
         state.failures = state.failures + 1 if not result.alive else 0
         self._report_sample(check, state, result, recovered=recovered)
@@ -200,7 +234,7 @@ class RootHealthRounds:
 
     def __init__(
         self,
-        health: HealthMonitor,
+        health: HealthMonitor | object,
         diagnostics: DiagnosticMonitor,
         *,
         clients: ClientSet,
@@ -208,12 +242,14 @@ class RootHealthRounds:
         machine: MachineIdentityReader,
         interval_s: float = 60.0,
         tasks: asyncio.TaskGroup | None = None,
+        init_logging: Callable[..., None] = _default_init_logging,
+        sync_telemetry: Callable[..., object] = _default_sync_telemetry,
     ) -> None:
         if interval_s <= 0:
             raise ValueError("root health interval must be positive")
         self._home = str(meiva_home().resolve())
         self._home_id = hashlib.sha256(self._home.encode()).hexdigest()
-        self._health = health
+        self._health: Any = health
         self._diagnostics = diagnostics
         self._clients = clients
         self._image = image
@@ -221,6 +257,8 @@ class RootHealthRounds:
         self._interval_s = interval_s
         self._task: asyncio.Task[None] | None = None
         self._tasks = tasks
+        self._init_logging = init_logging
+        self._sync_telemetry = sync_telemetry
         self._expected_since: float | None = None
         self._last_completed: float | None = None
 
@@ -240,7 +278,7 @@ class RootHealthRounds:
         await asyncio.gather(self._health.run_round(), self._diagnostics.run_round())
         from base.log import logger
 
-        self._last_completed = time.time()
+        self._last_completed = _wall_time()
         logger.info(
             "root completed a health observation round",
             event="root_health_tick",
@@ -255,10 +293,9 @@ class RootHealthRounds:
         if self._tasks is None:
             raise RuntimeError("root health rounds require the participant task group")
         from base.log import logger
-        from base.telemetry.process_logging import init_gateway_process
 
         try:
-            init_gateway_process(
+            self._init_logging(
                 name="meiva-root",
                 producer=self._clients.event_pipeline,
                 machine_reader=self._machine.name,
@@ -270,7 +307,7 @@ class RootHealthRounds:
             except BaseException as cleanup:
                 primary.add_note(f"root pipeline startup cleanup failed: {cleanup!r}")
             raise
-        self._expected_since = time.time()
+        self._expected_since = _wall_time()
         logger.info(
             "root health rounds expected",
             event="root_health_expected",
@@ -312,10 +349,8 @@ class RootHealthRounds:
                 expected_since_timestamp_seconds=0.0,
             )
             self._expected_since = None
-            from base import telemetry
-
             try:
-                await asyncio.to_thread(telemetry.sync, timeout=2)
+                await asyncio.to_thread(self._sync_telemetry, timeout=2)
             except BaseException as exc:
                 failures.append(exc)
         try:

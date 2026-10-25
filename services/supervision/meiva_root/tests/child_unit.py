@@ -9,7 +9,30 @@ from base.host.exit_codes import CODE_BEHIND_MINIMUM_EXIT_CODE
 
 
 def _sleep() -> None:
-    time.sleep(60)
+    time.sleep(300)
+
+
+def _noop() -> None:
+    return
+
+
+def _read_stdin_byte() -> None:
+    sys.stdin.buffer.read(1)
+
+
+def _hold_group_member(pgid: str, reap: str) -> None:
+    # meiva:note
+    # Spawn a fixed test child scenario in the target process group.
+    member = subprocess.Popen(  # noqa: S603
+        [sys.executable, str(pathlib.Path(__file__)), "sleep"],
+        process_group=int(pgid),
+    )
+    sys.stdout.write(f"{member.pid}\n")
+    sys.stdout.flush()
+    path = pathlib.Path(reap)
+    while not path.exists():
+        time.sleep(0.01)
+    member.wait()
 
 
 def _write_environment(output: str, name: str) -> None:
@@ -31,7 +54,9 @@ def _read_config(output: str, value: str) -> None:
 
 
 def _spawn_child(child_file: str) -> None:
-    child = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(60)"])
+    # meiva:note
+    # Spawn a fixed test child scenario in the same process group.
+    child = subprocess.Popen([sys.executable, str(pathlib.Path(__file__)), "sleep"])  # noqa: S603
     pathlib.Path(child_file).write_text(str(child.pid))
     time.sleep(60)
 
@@ -88,6 +113,9 @@ def _code_gate_exit(marker: str) -> None:
 
 _SCENARIOS = {
     "sleep": _sleep,
+    "noop": _noop,
+    "read_stdin_byte": _read_stdin_byte,
+    "hold_group_member": _hold_group_member,
     "write_environment": _write_environment,
     "ignore_term": _ignore_term,
     "read_config": _read_config,

@@ -4,7 +4,9 @@ import asyncio
 import json
 import sys
 from contextlib import suppress
+from pathlib import Path
 from threading import Event, Thread, current_thread
+from threading import enumerate as enumerate_threads
 from time import monotonic
 
 import pytest
@@ -186,26 +188,11 @@ async def test_stopped_diagnostic_reports_live_worker_and_closes_admission() -> 
 
 
 async def test_process_exits_with_honestly_unfinished_native_observation() -> None:
-    code = """
-import asyncio,json,threading
-from base.daemon.health import DaemonProbe
-from services.supervision.meiva_root_glue.diagnostics import Diagnostic,DiagnosticMonitor
-release = threading.Event()
-def blocked():
-    release.wait(60)
-    return DaemonProbe.up('late green')
-async def run():
-    monitor = DiagnosticMonitor([Diagnostic('blocked',blocked,timeout_s=.01)])
-    await monitor.run_round()
-    await monitor.stop()
-    print(json.dumps({'unfinished':monitor.unfinished_probes,'live_workers':sum(t.name == 'root-probe' for t in threading.enumerate())}))
-asyncio.run(run())
-"""
+    repo_root = Path(__file__).resolve().parents[4]
     child = await asyncio.create_subprocess_exec(
         sys.executable,
-        "-I",
-        "-c",
-        code,
+        str(Path(__file__)),
+        env={"PYTHONPATH": str(repo_root)},
         stdout=asyncio.subprocess.PIPE,
         stderr=asyncio.subprocess.PIPE,
     )
@@ -220,3 +207,30 @@ asyncio.run(run())
         if child.returncode is None:
             child.kill()
         await output
+
+
+def _run_child_probe() -> None:
+    release = Event()
+
+    def blocked() -> DaemonProbe:
+        release.wait(60)
+        return DaemonProbe.up("late green")
+
+    async def run() -> None:
+        monitor = DiagnosticMonitor([Diagnostic("blocked", blocked, timeout_s=0.01)])
+        await monitor.run_round()
+        await monitor.stop()
+        payload = json.dumps(
+            {
+                "unfinished": monitor.unfinished_probes,
+                "live_workers": sum(t.name == "root-probe" for t in enumerate_threads()),
+            }
+        )
+        sys.stdout.write(payload + "\n")
+        sys.stdout.flush()
+
+    asyncio.run(run())
+
+
+if __name__ == "__main__":
+    _run_child_probe()

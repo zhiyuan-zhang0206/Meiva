@@ -12,13 +12,16 @@ from __future__ import annotations
 
 import importlib.util
 import sys
+from collections.abc import Mapping
 from pathlib import Path
-from typing import cast
+from typing import Any
 
 from services.supervision.roster.service_spec import ServiceSpec
 
 
-def plugin_services() -> tuple[ServiceSpec, ...]:
+def plugin_services(
+    plugin_dirs: Mapping[str, Path] | None = None,
+) -> tuple[ServiceSpec, ...]:
     """The services contributed by the plugins PRESENT on this machine.
 
     Discovery, not import-of-known-plugins: `base.packages.plugins.enable_config` enumerates the
@@ -51,8 +54,9 @@ def plugin_services() -> tuple[ServiceSpec, ...]:
     from base.packages.plugins import load_report
     from base.packages.plugins.enable_config import installed_plugin_dirs
 
+    discovered = installed_plugin_dirs() if plugin_dirs is None else plugin_dirs
     specs: list[ServiceSpec] = []
-    for name, plugin_dir in sorted(installed_plugin_dirs().items()):
+    for name, plugin_dir in sorted(discovered.items()):
         services_py = plugin_dir / "services.py"
         if not services_py.exists():
             continue
@@ -73,12 +77,18 @@ def _declared_plugin_services(name: str, module: object) -> tuple[ServiceSpec, .
     if not callable(declare):
         raise PluginServiceError(f"plugin {name!r} services.py must define callable services()")
     declared = declare()
+    declared_any: Any = declared
     if not isinstance(declared, tuple):
         raise PluginServiceError(f"plugin {name!r} services() must return tuple[ServiceSpec, ...]")
-    members = cast(tuple[object, ...], declared)
-    if not all(isinstance(item, ServiceSpec) for item in members):
-        raise PluginServiceError(f"plugin {name!r} services() must return tuple[ServiceSpec, ...]")
-    return cast(tuple[ServiceSpec, ...], members)
+    declared_items: tuple[Any, ...] = declared_any
+    specs: list[ServiceSpec] = []
+    for item in declared_items:
+        if not isinstance(item, ServiceSpec):
+            raise PluginServiceError(
+                f"plugin {name!r} services() must return tuple[ServiceSpec, ...]"
+            )
+        specs.append(item)
+    return tuple(specs)
 
 
 def load_plugin_module(name: str, services_py: Path) -> object:

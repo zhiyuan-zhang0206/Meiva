@@ -1,4 +1,5 @@
 import json
+from collections.abc import Callable, Mapping
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
@@ -7,11 +8,10 @@ from services.supervision.healthchecks import browser_reach as hc
 
 
 def _wire_cdp(
-    monkeypatch: pytest.MonkeyPatch,
     *,
     fetch_outcome: str = "ok",
     hidden_supported: bool = True,
-) -> tuple[AsyncMock, AsyncMock, MagicMock]:
+) -> tuple[AsyncMock, AsyncMock, MagicMock, Callable[[str, float], Mapping[str, object]]]:
     browser = AsyncMock()
     browser.__aenter__.return_value = browser
     page = AsyncMock()
@@ -31,13 +31,11 @@ def _wire_cdp(
             {"id": 2, "result": {"result": {"value": fetch_outcome}}}
         )
     connect = MagicMock(side_effect=[browser, page])
-    monkeypatch.setattr(hc.websockets, "connect", connect)
 
     def version(_url: str, _timeout: float) -> dict[str, object]:
         return {"webSocketDebuggerUrl": "ws://127.0.0.1:9222/devtools/browser/test"}
 
-    monkeypatch.setattr(hc, "read_json", version)
-    return browser, page, connect
+    return browser, page, connect, version
 
 
 @pytest.mark.parametrize(
@@ -45,11 +43,20 @@ def _wire_cdp(
     [("ok", "ok"), ("error:TypeError", "error"), ("timeout", "timeout")],
 )
 def test_canary_uses_hidden_shared_context_and_closes_after_fetch(
-    monkeypatch: pytest.MonkeyPatch, fetch_outcome: str, expected: str
+    fetch_outcome: str, expected: str
 ) -> None:
-    browser, page, _connect = _wire_cdp(monkeypatch, fetch_outcome=fetch_outcome)
+    browser, page, connect, version = _wire_cdp(fetch_outcome=fetch_outcome)
 
-    assert hc.canary(9222, "https://example.invalid/health", 1).outcome == expected
+    assert (
+        hc.canary(
+            9222,
+            "https://example.invalid/health",
+            1,
+            json_reader=version,
+            connect_ws=connect,
+        ).outcome
+        == expected
+    )
 
     create, close = [json.loads(call.args[0]) for call in browser.send.await_args_list]
     assert create["method"] == "Target.createTarget"
@@ -63,12 +70,16 @@ def test_canary_uses_hidden_shared_context_and_closes_after_fetch(
     assert 'fetch("https://example.invalid/health"' in evaluate["params"]["expression"]
 
 
-def test_canary_rejected_hidden_target_never_falls_back_to_visible_tab(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    browser, page, connect = _wire_cdp(monkeypatch, hidden_supported=False)
+def test_canary_rejected_hidden_target_never_falls_back_to_visible_tab() -> None:
+    browser, page, connect, version = _wire_cdp(hidden_supported=False)
 
-    result = hc.canary(9222, "https://example.invalid/health", 1)
+    result = hc.canary(
+        9222,
+        "https://example.invalid/health",
+        1,
+        json_reader=version,
+        connect_ws=connect,
+    )
 
     assert result.outcome == "skip"
     assert "Hidden targets are unsupported" in result.detail
@@ -79,11 +90,13 @@ def test_canary_rejected_hidden_target_never_falls_back_to_visible_tab(
     page.send.assert_not_awaited()
 
 
-def test_canary_unexpected_failure_is_not_reachability_success(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    async def fail(_port: int, _url: str, _timeout_s: float) -> hc.CanaryResult:
+def test_canary_unexpected_failure_is_not_reachability_success() -> None:
+    async def fail(
+        _port: int,
+        _url: str,
+        _timeout_s: float,
+        **_kwargs: object,
+    ) -> hc.CanaryResult:
         raise RuntimeError("CDP failed")
 
-    monkeypatch.setattr(hc, "canary_async", fail)
-    assert hc.canary(9222, "https://example.invalid/", 1).outcome == "skip"
+    assert hc.canary(9222, "https://example.invalid/", 1, run_canary=fail).outcome == "skip"

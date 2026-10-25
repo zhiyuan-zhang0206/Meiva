@@ -319,31 +319,24 @@ async def test_serving_reads_bound_runtime_from_native_peer(
 
 @pytest.mark.parametrize("recorded,captured", [(None, None), (None, 50), (50, None)])
 def test_linux_ipc_requires_both_observed_tick_identities(
-    monkeypatch: pytest.MonkeyPatch, recorded: int | None, captured: int | None
+    recorded: int | None, captured: int | None
 ) -> None:
-    from types import SimpleNamespace
-
+    from base.native_process.ownership import process_birth_key
     from base.native_process.root_control import client
 
-    monkeypatch.setattr(client, "sys", SimpleNamespace(platform="linux"))
-
-    def unexpected_liveness(_self: OwnedProcess) -> bool:
-        pytest.fail("missing Linux ticks reached timestamp-based liveness")
-
-    monkeypatch.setattr(OwnedProcess, "live", unexpected_liveness)
-    response = encode(
-        ok_response(
-            {
-                "root": {
-                    "pid": 42,
-                    "create_time": 123.0,
-                    "starttime": recorded,
-                }
-            }
-        )
+    root = client.native_identity(
+        {
+            "pid": 42,
+            "create_time": 123.0,
+            "starttime": recorded,
+        }
     )
-    with pytest.raises(RootClientError, match="requires observed Linux start ticks"):
-        client.validate_status_peer(response, OwnedProcess(42, 123.0, captured))
+    peer = OwnedProcess(42, 123.0, captured)
+    with pytest.raises(RuntimeError, match="missing Linux start ticks"):
+        _ = (
+            process_birth_key(root.pid, root.birth, root.starttime, platform="linux"),
+            process_birth_key(peer.pid, peer.birth, peer.starttime, platform="linux"),
+        )
 
 
 @pytest.mark.parametrize(
@@ -356,42 +349,33 @@ def test_linux_ipc_requires_both_observed_tick_identities(
     ],
 )
 def test_ipc_native_birth_rules_preserve_platform_authority(
-    monkeypatch: pytest.MonkeyPatch,
     platform: str,
     recorded: int | None,
     captured: int | None,
     birth: float,
     accepted: bool,
 ) -> None:
-    from types import SimpleNamespace
-
-    from base.native_process import ownership
+    from base.native_process.ownership import LiveReading, process_birth_key
     from base.native_process.root_control import client
 
-    monkeypatch.setattr(client, "sys", SimpleNamespace(platform=platform))
-    monkeypatch.setattr(ownership, "sys", SimpleNamespace(platform=platform))
-
-    def alive(_self: OwnedProcess) -> bool:
-        return True
-
-    monkeypatch.setattr(OwnedProcess, "live", alive)
-    response = encode(
-        ok_response(
-            {
-                "root": {
-                    "pid": 42,
-                    "create_time": birth,
-                    "starttime": recorded,
-                }
-            }
-        )
+    root = client.native_identity(
+        {
+            "pid": 42,
+            "create_time": birth,
+            "starttime": recorded,
+        }
     )
     peer = OwnedProcess(42, 123.0, captured)
-    if accepted:
-        client.validate_status_peer(response, peer)
-    else:
-        with pytest.raises(RootClientError, match="exact native IPC peer"):
-            client.validate_status_peer(response, peer)
+    same_key = process_birth_key(
+        root.pid, root.birth, root.starttime, platform=platform
+    ) == process_birth_key(peer.pid, peer.birth, peer.starttime, platform=platform)
+    reading = LiveReading(
+        ticks=recorded,
+        pid_exists=True,
+        status=psutil.STATUS_RUNNING,
+        identity=root,
+    )
+    assert (same_key and peer.judge_live(reading)) is accepted
 
 
 class _DeadWriter:

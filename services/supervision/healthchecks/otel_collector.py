@@ -1,11 +1,12 @@
 """Read-only health probes for otel collector; the root supervisor owns recovery."""
 
 import urllib.request
+from collections.abc import Callable
 from http.client import HTTPException
 from pathlib import Path
 
 from base.cluster.machine import MachineIdentityReader, MachineRoleMissing
-from base.config import settings
+from base.config import get_field
 from base.daemon.health import DaemonProbe
 from base.telemetry.observability import (
     collector_allowed_for_home,
@@ -65,8 +66,8 @@ def probe_collector_at(otlp_port: int) -> DaemonProbe:
 # meiva:note
 # The registry's zero-argument probe: this unit's local OTLP port, read when the probe runs
 # (a remote or stale producer export override cannot redirect local liveness).
-def probe_collector() -> DaemonProbe:
-    return probe_collector_at(settings.observability.telemetry_otlp_port)
+def probe_collector(*, read_port: Callable[[str], int] = get_field) -> DaemonProbe:
+    return probe_collector_at(int(read_port("telemetry_otlp_port")))
 
 
 # meiva:note

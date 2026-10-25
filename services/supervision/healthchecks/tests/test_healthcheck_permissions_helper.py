@@ -9,7 +9,6 @@ from typing import cast
 
 import pytest
 
-import base.native_process.root_control.client as root_control_client
 from base.host.permissions_helper import client
 from base.log.tests.log_records import LogRecords
 from base.log.tests.log_records import loguru_records as loguru_records
@@ -70,11 +69,6 @@ _RUNNING_JOB = """gui/501/com.meiva.test.f5-lwcr-stub = {
 }"""
 
 
-@pytest.fixture(autouse=True)
-def _macos_probe(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(hc, "is_macos", lambda: True)
-
-
 class _Recorder:
     """The structured log calls so far, as their field dictionaries (read from `loguru_records`)."""
 
@@ -119,17 +113,15 @@ class _FakeSocket:
         self.closed = True
 
 
-def test_ping_uses_short_timeout_and_helper_wire_protocol(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-) -> None:
+def test_ping_uses_short_timeout_and_helper_wire_protocol(tmp_path: Path) -> None:
     sock = _FakeSocket(
         b'{"id":0,"ok":true,"result":{"pong":true,"pid":42,"preflight_screen":true,"ax_trusted":true}}\n'
     )
     paths: list[str] = []
 
-    def connect(path: str) -> _FakeSocket:
+    def connect(path: str) -> socket.socket:
         paths.append(path)
-        return sock
+        return cast(socket.socket, sock)
 
     def _fake_helper_parent(_sock: socket.socket) -> tuple[OwnedProcess, OwnedProcess]:
         return cast(OwnedProcess, object()), cast(OwnedProcess, object())
@@ -138,12 +130,13 @@ def test_ping_uses_short_timeout_and_helper_wire_protocol(
         return pid == 42
 
     socket_path = tmp_path / "helper.sock"
-    monkeypatch.setattr(client, "connect", connect)
-    monkeypatch.setattr(hc, "helper_client", lambda: client.PermissionsHelperClient(socket_path))
-    monkeypatch.setattr(hc, "helper_parent", _fake_helper_parent)
-    monkeypatch.setattr(hc, "parent_still_live", _fake_parent_still_live)
 
-    assert hc.ping()
+    assert hc.ping(
+        connect_fn=connect,
+        sock_path_fn=lambda: str(socket_path),
+        parent_fn=_fake_helper_parent,
+        live_fn=_fake_parent_still_live,
+    )
     assert paths == [str(socket_path)]
     assert sock.timeout == 3.0
     assert json.loads(sock.sent) == {"id": 0, "method": "ping"}
@@ -209,75 +202,79 @@ def test_reporting_is_episode_gated_without_repair(recorder: _Recorder) -> None:
     assert not hasattr(hc, "main")
 
 
-def test_probe_alive_and_classified_down(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(hc, "ping", lambda: True)
-    assert hc.probe().alive
+def test_probe_alive_and_classified_down() -> None:
+    assert hc.probe(macos_fn=lambda: True, ping_fn=lambda: True).alive
 
-    monkeypatch.setattr(hc, "ping", _unhealthy_ping)
-    monkeypatch.setattr(hc, "read_helper_job", lambda: _STUCK_JOB)
-    verdict = hc.probe()
+    verdict = hc.probe(
+        macos_fn=lambda: True,
+        ping_fn=_unhealthy_ping,
+        read_job_fn=lambda: _STUCK_JOB,
+    )
     assert not verdict.alive
     assert "lwcr-stuck" in verdict.detail
     assert "needs LWCR update" in verdict.detail
 
-    monkeypatch.setattr(hc, "read_helper_job", lambda: None)
-    assert hc.probe().detail.startswith(hc.ABSENT)
+    assert hc.probe(
+        macos_fn=lambda: True,
+        ping_fn=_unhealthy_ping,
+        read_job_fn=lambda: None,
+    ).detail.startswith(hc.ABSENT)
 
 
-def test_probe_is_total_and_non_macos_is_up(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(hc, "is_macos", lambda: False)
-    assert hc.probe().alive
-
-    monkeypatch.setattr(hc, "is_macos", lambda: True)
-    monkeypatch.setattr(hc, "ping", _unhealthy_ping)
+def test_probe_is_total_and_non_macos_is_up() -> None:
+    assert hc.probe(macos_fn=lambda: False).alive
 
     def broken_read() -> str | None:
         raise RuntimeError("boom")
 
-    monkeypatch.setattr(hc, "read_helper_job", broken_read)
-    verdict = hc.probe()  # never raises
+    verdict = hc.probe(
+        macos_fn=lambda: True,
+        ping_fn=_unhealthy_ping,
+        read_job_fn=broken_read,
+    )  # never raises
     assert not verdict.alive
     assert "probe error" in verdict.detail
 
 
-def test_unverifiable_helper_parent_never_reports_protocol_health(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    def missing_parent():
+def test_unverifiable_helper_parent_never_reports_protocol_health() -> None:
+    def missing_parent() -> bool:
         raise hc.ParentEvidenceError("root parent is not observable")
 
-    monkeypatch.setattr(hc, "ping", missing_parent)
-    monkeypatch.setattr(hc, "read_helper_job", lambda: _RUNNING_JOB)
-    assert hc.probe().verdict.value == "unavailable"
+    assert (
+        hc.probe(
+            macos_fn=lambda: True,
+            ping_fn=missing_parent,
+            read_job_fn=lambda: _RUNNING_JOB,
+        ).verdict.value
+        == "unavailable"
+    )
 
 
-def test_connected_helper_peer_must_be_root_native_parent(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
+def test_connected_helper_peer_must_be_root_native_parent() -> None:
     from types import SimpleNamespace
 
     import psutil
 
-    from base.native_process.root_control import client as root_client
+    root = cast(OwnedProcess, SimpleNamespace(pid=10, live=lambda: True))
+    parent = cast(OwnedProcess, SimpleNamespace(pid=20, live=lambda: True))
 
-    root = SimpleNamespace(pid=10, live=lambda: True)
-    parent = SimpleNamespace(pid=20, live=lambda: True)
+    def _fake_parent_of(_pid: int) -> psutil.Process:
+        return cast(psutil.Process, object())
 
-    def _fake_process(_pid: int | None) -> SimpleNamespace:
-        return SimpleNamespace(parent=object)
-
-    def _fake_capture(_process: psutil.Process) -> SimpleNamespace:
+    def _fake_capture(_process: psutil.Process) -> OwnedProcess:
         return parent
 
     def _fake_peer_pid(_sock: socket.socket) -> int:
         return 30
 
-    monkeypatch.setattr(root_client, "root_process", lambda **_kwargs: root)  # pyright: ignore[reportUnknownArgumentType]
-    monkeypatch.setattr(hc.psutil, "Process", _fake_process)
-    monkeypatch.setattr(hc.OwnedProcess, "capture", _fake_capture)
-    monkeypatch.setattr(root_control_client, "peer_pid", _fake_peer_pid)
     with pytest.raises(hc.ParentEvidenceError, match="not the captured root parent"):
-        hc.helper_parent(cast(socket.socket, object()))
+        hc.helper_parent(
+            cast(socket.socket, object()),
+            read_root=lambda: root,
+            parent_of=_fake_parent_of,
+            capture_owner=_fake_capture,
+            read_peer_pid=_fake_peer_pid,
+        )
 
 
 def test_episode_reporting_memory_is_local_to_each_diagnostic(recorder: _Recorder) -> None:

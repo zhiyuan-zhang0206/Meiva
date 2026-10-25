@@ -11,13 +11,14 @@ from __future__ import annotations
 import argparse
 import asyncio
 import logging
-import os
 import signal
 import sys
 from collections.abc import Callable, Sequence
 from contextlib import suppress
 from dataclasses import dataclass, field
 from pathlib import Path
+
+import psutil
 
 from base.host.exit_codes import HELPER_CHAIN_BROKEN_EXIT_CODE
 from base.log import logger
@@ -85,7 +86,7 @@ class HelperChainWatch:
             if reading.retire:
                 self._retire(
                     evidence_line(
-                        root_pid=os.getpid(),
+                        root_pid=psutil.Process().pid,
                         marker=helper_marker_pid(),
                         broken_rounds=broken_rounds,
                     )

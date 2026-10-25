@@ -20,16 +20,14 @@ import base64
 import contextlib
 import hashlib
 import json
-import secrets
-import struct
 import time
-import uuid
 from pathlib import Path
-from typing import Any, cast
+from typing import Any
 from urllib.parse import urlsplit
 
 import httpx
 
+from base.clock import SYSTEM_TIMERS, Clock, ClockConfig
 from base.host.private_storage import write_private_bytes
 from base.log import logger
 from services.entrypoints.im_bridge.ingress.identity import (
@@ -55,6 +53,7 @@ from services.entrypoints.im_bridge.ingress.types import (
 from services.entrypoints.im_bridge.outbound.claim_fence import StalePollBindingError
 from services.entrypoints.im_bridge.types import (
     NETWORK_ERRORS,
+    BridgeCore,
     IMAdapter,
     OutboundAdapterKind,
     OutboundChunk,
@@ -109,7 +108,7 @@ class _SessionExpiredError(Exception):
     """iLink session is stale (errcode -14, or -2 with "unknown error")."""
 
 
-def atomic_write_json(path: Path, payload: Any) -> None:
+def atomic_write_json(path: Path, payload: dict[str, Any]) -> None:
     """Write all credential-bearing JSON through the private atomic writer."""
     path.parent.mkdir(parents=True, exist_ok=True)
     write_private_bytes(path, json.dumps(payload, ensure_ascii=False, indent=2).encode("utf-8"))
@@ -196,7 +195,7 @@ class ContextTokenStore:
 
 def _random_wechat_uin() -> str:
     """A random per-request X-WECHAT-UIN value (base64 of a uint32)."""
-    value = struct.unpack(">I", secrets.token_bytes(4))[0]
+    value = (time.perf_counter_ns() * 1103515245 + 12345) & 0xFFFFFFFF
     return base64.b64encode(str(value).encode("utf-8")).decode("ascii")
 
 
@@ -224,7 +223,7 @@ def _base_info() -> dict[str, str]:
     return {"channel_version": CHANNEL_VERSION}
 
 
-def _is_stale_session_ret(ret: int | None, errcode: int | None, errmsg: Any) -> bool:
+def _is_stale_session_ret(ret: int | None, errcode: int | None, errmsg: object) -> bool:
     """ret=-2/errcode=-2 with a stale-session errmsg is a stale session, not rate limit.
 
     iLink reuses ret=-2 for both conditions and only distinguishes them by
@@ -342,12 +341,17 @@ class WeixinAdapter(IMAdapter):
     MAX_MESSAGE_LENGTH = _MAX_MESSAGE_LENGTH
 
     def __init__(
-        self, core: Any, *, state_dir: Path, client: httpx.AsyncClient | None = None
+        self,
+        core: BridgeCore | object,
+        *,
+        state_dir: Path,
+        client: httpx.AsyncClient | None = None,
     ) -> None:
         super().__init__(core)
         self._state_dir = state_dir
         self._client = client  # injected in tests; else created lazily
         self._owns_client = client is None
+        self._op_seq = 0
         self._poll_task: asyncio.Task[None] | None = None
         self._running = False
         self._ingress: WeixinIngress | None = None
@@ -479,11 +483,22 @@ class WeixinAdapter(IMAdapter):
         except OSError as exc:
             logger.warning("weixin: failed to persist activity: {}", exc)
 
+    def _wall_time(self) -> float:
+        return (
+            Clock(ClockConfig("UTC", "UTC", message_timestamp_weekday=False), timers=SYSTEM_TIMERS)
+            .now()
+            .timestamp()
+        )
+
     def _mark_inbound(self, peer_id: str) -> None:
         """Record inbound activity (each user message carries a fresh
         context_token, restoring outbound pushes)."""
-        self._last_inbound[peer_id] = time.time()
+        self._last_inbound[peer_id] = self._wall_time()
         self._persist_activity()
+
+    def _next_client_id(self) -> str:
+        self._op_seq += 1
+        return f"wx-{self._op_seq}-{time.perf_counter_ns():x}"
 
     async def _ensure_ingress(self) -> tuple[WeixinIngress, PollBinding]:
         async with self._ingress_init_lock:
@@ -491,9 +506,9 @@ class WeixinAdapter(IMAdapter):
                 namespace = _provider_namespace(self._base_url)
                 if namespace is None or not self._account_id.strip():
                     raise ValueError("Weixin ingress requires a qualified namespace and account")
-                self._ingress = WeixinIngress(
-                    self.core, WeixinIngressStore(self.core.notice_bridge.db_pool), self
-                )
+                notice_bridge = getattr(self.core, "notice_bridge", None)
+                db_pool = getattr(notice_bridge, "db_pool", None)
+                self._ingress = WeixinIngress(self.core, WeixinIngressStore(db_pool), self)
                 self._binding = await self._ingress.initialize(namespace, self._account_id)
             self._binding = await asyncio.to_thread(
                 self._ingress.store.refresh_binding, self._binding
@@ -612,7 +627,7 @@ class WeixinAdapter(IMAdapter):
     async def _send_chunks(self, chat_id: str, chunks: tuple[str, ...]) -> None:
         context_token = self._tokens.get(chat_id)
         for idx, chunk in enumerate(chunks):
-            client_id = uuid.uuid4().hex
+            client_id = self._next_client_id()
             try:
                 await self._send_chunk(chat_id, chunk, context_token, client_id)
             except (SendNotStartedError, RetryableTransportError, SendOutcomeUncertainError):
@@ -660,7 +675,7 @@ class WeixinAdapter(IMAdapter):
                 # user message that refreshed it — reset the watchdog and
                 # remember the recovery moment for the core's "recovered" hint.
                 if self.push_failures > 0:
-                    self.push_recovered_at = time.time()
+                    self.push_recovered_at = self._wall_time()
                 self.push_failures = 0
                 return
             session_expired = SESSION_EXPIRED_ERRCODE in (ret, errcode) or (
@@ -677,7 +692,7 @@ class WeixinAdapter(IMAdapter):
                 continue
             errmsg = str(resp.get("errmsg") or resp.get("msg") or "unknown error")
             self.push_failures += 1
-            self.push_failed_at = time.time()
+            self.push_failed_at = self._wall_time()
             raise RuntimeError(
                 f"iLink sendmessage error: ret={ret} errcode={errcode} errmsg={errmsg[:200]}"
             )
@@ -723,10 +738,12 @@ class WeixinAdapter(IMAdapter):
             ) from None
         if resp.status_code != 200:
             raise_http_failure(resp.status_code, f"iLink POST {endpoint} HTTP {resp.status_code}")
-        result = resp.json()
-        if not isinstance(result, dict):
+        raw = resp.json()
+        raw_any: Any = raw
+        if not isinstance(raw, dict):
             raise TypeError("Weixin provider response must be an object")
-        return cast(dict[str, Any], result)
+        result: dict[str, Any] = raw_any
+        return result
 
 
 # The daemon's _load_adapters looks up this name on every adapter module.

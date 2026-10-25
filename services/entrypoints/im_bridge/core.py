@@ -5,12 +5,15 @@ from __future__ import annotations
 import asyncio
 import logging
 import time
-import uuid
 from dataclasses import dataclass
 from functools import partial
 from pathlib import Path
 from typing import Any, Literal
 
+from psycopg_pool import ConnectionPool
+
+from base.clock import SYSTEM_TIMERS, Timers
+from base.db.transaction import ConnectionSource
 from services.entrypoints.im_bridge import copy, notice_bridge, push_watchdog
 from services.entrypoints.im_bridge.config import ImBridgeConfig
 from services.entrypoints.im_bridge.cursor_store import CursorStore, PushWatermark
@@ -37,6 +40,7 @@ from services.entrypoints.im_bridge.timeline_acceptance import truncate as _trun
 from services.entrypoints.im_bridge.types import (
     NETWORK_ERRORS,
     AgentRow,
+    BridgeCore,
     ChatState,
     IMAdapter,
     InboundMessage,
@@ -90,28 +94,37 @@ class TypingCadence:
 DEFAULT_TYPING = TypingCadence()
 
 
-class IMBridgeCore(SpawnMenuMixin):
+class IMBridgeCore(
+    SpawnMenuMixin,
+    BridgeCore,
+):
     """Owns per-channel chat state, command routing, and subscription pushes."""
 
     def __init__(
         self,
         config: ImBridgeConfig,
         gateway: GatewayClient,
-        db_pool: Any = None,
+        db_pool: ConnectionPool | ConnectionSource | object = None,
         *,
         tasks: asyncio.TaskGroup,
         state_dir: Path,
         typing: TypingCadence = DEFAULT_TYPING,
+        timers: Timers = SYSTEM_TIMERS,
+        subscribe_timeline: bool = True,
     ) -> None:
         self._tasks = tasks
         self.config = config
         self.gateway = gateway
         self._state_dir = state_dir
         self._typing = typing
+        self._timers = timers
+        self._subscribe_timeline = subscribe_timeline
+        self.ensured: list[int | None] = []
+        self._op_seq = 0
         self.cursor_store = CursorStore(db_pool)
         self.outbound_store = IMOutboxStore(db_pool)
-        self.notice_bridge = notice_bridge.NoticeBridge(
-            self, config, db_pool=db_pool, state_dir=state_dir
+        self.notice_bridge: notice_bridge.NoticeBridge = notice_bridge.NoticeBridge(
+            self, config, db_pool=db_pool, state_dir=state_dir, timers=timers
         )
         self.adapters: dict[str, IMAdapter] = {}
         self.outbound_worker = IMOutboxWorker(self.outbound_store, self.adapters, config=config)
@@ -124,6 +137,10 @@ class IMBridgeCore(SpawnMenuMixin):
 
         self._switch_state = load_switch_state(state_dir)
         self._disabled_channels: set[str] = set(config.im_disabled_adapters)
+
+    def _next_replay_id(self) -> str:
+        self._op_seq += 1
+        return f"replay-{self._op_seq}-{time.perf_counter_ns():x}"
 
     async def stop(self) -> None:
         """Cancel service-owned loops before closing their adapters and database."""
@@ -219,7 +236,7 @@ class IMBridgeCore(SpawnMenuMixin):
                 state,
                 text,
                 msg.idempotency_key,
-                replay_id=msg.idempotency_key or msg.message_id or uuid.uuid4().hex,
+                replay_id=msg.idempotency_key or msg.message_id or self._next_replay_id(),
             )
         else:
             try:
@@ -380,7 +397,7 @@ class IMBridgeCore(SpawnMenuMixin):
             # user ruling: /switch without an id is an error — the picker
             # lives on /list's tap-to-switch card, not here
             return Reply(copy.SWITCH_USAGE)
-        replay_id = replay_id or uuid.uuid4().hex
+        replay_id = replay_id or self._next_replay_id()
         account = await selection_account(self, state, selection_admission)
         recovered = await asyncio.to_thread(
             self.outbound_store.lookup_replay,
@@ -535,7 +552,8 @@ class IMBridgeCore(SpawnMenuMixin):
         """Show the platform's native \"typing\" indicator while the agent
         works: a background task refreshes it until the reply arrives (or a
         timeout), then the first pushed agent reply stops it."""
-
+        if self._typing.max_s <= 0:
+            return
         adapter = self.adapters.get(state.channel)
         if adapter is None or not adapter.can_type:
             return
@@ -548,16 +566,16 @@ class IMBridgeCore(SpawnMenuMixin):
     async def _typing_loop(
         self, key: tuple[str, str], state: ChatState, adapter: IMAdapter
     ) -> None:
-        deadline = time.monotonic() + self._typing.max_s
+        deadline = self._timers.monotonic() + self._typing.max_s
         try:
-            while time.monotonic() < deadline:
+            while self._timers.monotonic() < deadline:
                 try:
                     await adapter.typing(state.chat_id)
                 except NETWORK_ERRORS:
                     # cosmetic feature — a failing indicator gives up quietly
                     _log.warning("typing failed channel=%s chat=%s", state.channel, state.chat_id)
                     return
-                await asyncio.sleep(self._typing.interval_s)
+                await self._timers.asleep(self._typing.interval_s)
         finally:
             self._typing_tasks.pop(key, None)
 
@@ -599,6 +617,9 @@ class IMBridgeCore(SpawnMenuMixin):
     def _ensure_subscription(
         self, state: ChatState, prev_agent: int | None = None, *, catch_up: bool = False
     ) -> None:
+        self.ensured.append(state.current_agent_id)
+        if not self._subscribe_timeline:
+            return
         if state.channel in self._disabled_channels:
             return  # channel disabled (MEIVA_IM_DISABLED_ADAPTERS): no pushes
         key = (state.channel, state.chat_id)

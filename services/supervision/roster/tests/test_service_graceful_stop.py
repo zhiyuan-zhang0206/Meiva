@@ -186,21 +186,25 @@ def test_exec_into_rejects_a_compound_command_that_never_execs():
         exec_into("npm run build && npm run start")
 
 
-def test_orchestration_session_keeps_its_wrapper_shell(monkeypatch: pytest.MonkeyPatch, unit_home):
+def test_orchestration_session_keeps_its_wrapper_shell(tmp_path: Path, unit_home):
     del unit_home
-    seen: list[str] = []
-
-    def _fake_new(_name: str, cmd: str, _cwd: Path, **_kw: object) -> bool:
-        seen.append(cmd)
-        return True
-
-    monkeypatch.setattr(posixproc, "new_session", _fake_new)
+    started, marker = tmp_path / "started", tmp_path / "clean"
+    log = tmp_path / "log"
+    script = tmp_path / "daemon.py"
+    script.write_text(_DAEMON.format(started=str(started), marker=str(marker)))
     backend = PosixProcSessionBackend()
-    pipeline = "update-command | tee -a log"
-    assert backend.new_session("meiva-updater", pipeline, Path("/repo"), env={}, exec_cmd=False)
-    assert seen[0].endswith(f"&& {pipeline}'")
-    assert f"exec {pipeline}" not in seen[0]
-    assert seen[0].startswith("exec bash -lc ")
+    pipeline = f"{sys.executable} {script} | tee -a {log}"
+    assert backend.new_session(
+        "meiva-test-orch", pipeline, tmp_path, env=dict(os.environ), exec_cmd=False
+    )
+    try:
+        assert _wait_for(started), "orchestration pipeline never started"
+        proc = _recorded("meiva-test-orch")
+        cmdline = " ".join(proc.cmdline())
+        assert pipeline in cmdline
+        assert f"exec {pipeline}" not in cmdline
+    finally:
+        posixproc.kill_session("meiva-test-orch", graceful=False)
 
 
 def test_every_service_spec_command_is_exec_safe():

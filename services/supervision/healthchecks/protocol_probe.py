@@ -4,8 +4,10 @@ from __future__ import annotations
 
 import json
 import socket
+from collections.abc import Callable
 from pathlib import Path
 
+from base.config import get_field
 from base.daemon.health import DaemonProbe
 
 
@@ -28,8 +30,9 @@ def ping(path: Path | str) -> DaemonProbe:
         return DaemonProbe.up("Unix endpoint answered ping")
 
 
-def _observe(service: str, home: Path) -> DaemonProbe:
-    from base.config import settings
+def _observe(
+    service: str, home: Path, *, read_port: Callable[[str], int] = get_field
+) -> DaemonProbe:
     from base.paths import (
         chrome_mcp_socket,
         computer_mcp_socket,
@@ -40,7 +43,7 @@ def _observe(service: str, home: Path) -> DaemonProbe:
     from base.sessions.pty.paths import service_socket_path
 
     sockets = {
-        "browser-mcp": lambda: chrome_mcp_socket(home, settings.services.browser_cdp_port),
+        "browser-mcp": lambda: chrome_mcp_socket(home, int(read_port("browser_cdp_port"))),
         "computer-mcp": lambda: computer_mcp_socket(home),
         "exec-host": lambda: exec_host_socket_path(run_dir(home)),
         "mcp-daemon": lambda: mcp_daemon_shared_socket(home),
@@ -55,9 +58,9 @@ def _observe(service: str, home: Path) -> DaemonProbe:
     raise ValueError(f"unsupported protocol probe: {service}")
 
 
-def probe(service: str, *, home: Path) -> DaemonProbe:
+def probe(service: str, *, home: Path, read_port: Callable[[str], int] = get_field) -> DaemonProbe:
     """Observe the endpoint of `service` in `home` through its application protocol."""
     try:
-        return _observe(service, home)
+        return _observe(service, home, read_port=read_port)
     except (OSError, json.JSONDecodeError, KeyError, TypeError) as exc:
         return DaemonProbe.down(f"protocol probe failed: {exc}")
