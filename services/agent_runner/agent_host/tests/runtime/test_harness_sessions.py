@@ -8,6 +8,7 @@ import pytest
 
 from base.api_contracts.agent_contract import Harness
 from base.lm.harness import HarnessTurn, RegistrationStore
+from base.lm.harness.acp.transport import AcpConnection
 from base.log.tests.log_records import LogRecords
 from services.agent_runner.agent_host.runtime import AgentRuntime, HarnessSessions
 
@@ -202,4 +203,62 @@ async def test_the_builtin_meiva_loop_never_records_a_zero(tmp_path: Path) -> No
         await owner.aclose()
         assert recorder.writes == [], "no CLI child exists, so nothing may be recorded as 0"
     finally:
+        await owner.aclose()
+
+
+# meiva:note
+# The adapter layer is where "we record the exit status" can still be wrong while the
+# recording layer is right, so this drives a real child process — a stub script that
+# exits 3 — through the production transport, then through the real `_close`, and
+# asserts the recorded value is that status rather than NULL (task #5616).
+class TransportBackedEngine:
+    def __init__(self, connection: AcpConnection) -> None:
+        self.harness = Harness.KIMI_CODE
+        self.model = None
+        self._connection = connection
+        self.closed = False
+
+    async def run_turn(self, text: str, *, key: str, on_event: object = None) -> HarnessTurn:
+        raise AssertionError("this engine is never asked for a turn")
+
+    async def interrupt(self) -> object:
+        raise AssertionError("this engine is never interrupted")
+
+    async def close(self, *, reason: str = "closed") -> None:
+        await self._connection.close(reason=reason)
+        self.closed = True
+
+    @property
+    def exit_code(self) -> int | None:
+        return self._connection.returncode
+
+
+async def test_a_real_child_exit_status_reaches_the_recorder(tmp_path: Path) -> None:
+    stub = tmp_path / "stub-cli"
+    stub.write_text("#!/bin/sh\nexit 3\n")
+    stub.chmod(0o755)
+    connection = AcpConnection([str(stub)], cwd=str(tmp_path), environ={})
+    await connection.start()
+    recorder = ExitRecorder()
+    owner = HarnessSessions(RegistrationStore(tmp_path), record_exit=recorder)
+    await owner.start()
+    try:
+        owner.retire(44, runtime(TransportBackedEngine(connection)))
+        await owner.join(44)
+        assert recorder.writes == [(44, 3)]
+    finally:
+        await owner.aclose()
+
+
+async def test_a_running_session_records_nothing(tmp_path: Path) -> None:
+    recorder = ExitRecorder()
+    engine = ClosingEngine(exit_code=7)
+    owner = HarnessSessions(RegistrationStore(tmp_path), record_exit=recorder)
+    await owner.start()
+    try:
+        owner.retire(45, runtime(engine))
+        await engine.started.wait()
+        assert recorder.writes == []
+    finally:
+        engine.release.set()
         await owner.aclose()
