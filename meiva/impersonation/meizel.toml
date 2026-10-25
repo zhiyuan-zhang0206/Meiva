@@ -16,6 +16,22 @@ exports = ["admission.py", "attachment.py"]
 [debt.ambient-read]
 "attachment.py#random uuid.uuid4" = 1
 
+[debt.any-collaborator]
+"__init__.py#any _Attachment._event_gate" = 1
+"__init__.py#any _Attachment.native_snapshot.return" = 1
+"attachment.py#any Attachment._applied_version.state" = 1
+"attachment.py#any Attachment._set_state.state" = 1
+"attachment.py#any Attachment._state_update.return" = 1
+"attachment.py#any Attachment._telemetry_clients.return" = 1
+"attachment.py#any Attachment.capture_local_event.event" = 1
+"attachment.py#any Attachment.capture_local_event.return" = 1
+"attachment.py#any _Codec.apply_plugin_delta.delta" = 1
+"attachment.py#any _Codec.apply_plugin_delta.state" = 1
+"attachment.py#any _Codec.decode_plugin_delta.return" = 1
+"attachment.py#any _Codec.load_snapshot.return" = 1
+"attachment.py#any _Codec.plugin_state_schema.return" = 1
+"attachment.py#any _Codec.plugin_state_schema.state" = 1
+
 [debt.impure-call]
 "attachment.py#uuid.uuid4" = 1
 

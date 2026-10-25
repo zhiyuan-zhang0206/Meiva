@@ -11,6 +11,7 @@ __all__ = [
     "SEEDABLE_GENERATORS",
     "Acquisition",
     "AmbientKind",
+    "AnyCollaboratorSite",
     "Code",
     "DebtKey",
     "Diagnostic",
@@ -73,6 +74,7 @@ class Code(StrEnum):
     PATCH_RAISING_FALSE = "patch-raising-false"
     TEST_SUBCLASS_OVERRIDE = "test-subclass-override"
     TYPE_CAST = "type-cast"
+    ANY_COLLABORATOR = "any-collaborator"
     TYPE_CHECKING = "type-checking"
     AMBIENT_READ = "ambient-read"
     STALE_ROOT = "stale-root"
@@ -218,6 +220,15 @@ class TypeCastSite:
     line: int
     column: int
     qualname: str
+
+
+@dataclass(frozen=True, slots=True)
+class AnyCollaboratorSite:
+    line: int
+    column: int
+    qualname: str
+    slot: str
+    role: str
 
 
 # meiva:note

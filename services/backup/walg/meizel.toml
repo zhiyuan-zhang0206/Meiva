@@ -25,6 +25,10 @@ exports = ["archive.py", "check.py", "config.py", "probe.py", "restore.py", "sta
 "restore.py#clock time.monotonic" = 2
 "tick.py#clock datetime.datetime.now" = 1
 
+[debt.any-collaborator]
+"runner.py#any run_walg.return" = 1
+"state.py#any update_state.sections" = 1
+
 [debt.type-cast]
 "backups.py#cast parse_backups" = 2
 "config.py#cast read_config" = 1

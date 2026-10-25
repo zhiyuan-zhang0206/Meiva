@@ -17,6 +17,32 @@ exports = ["checkpoint.py", "checkpoint_copy.py", "checkpoint_postgres_walks.py"
 "checkpoint_serializer.py" = "strict"
 "closing_request.py" = "strict"
 
+[debt.any-collaborator]
+"checkpoint.py#any attach_trace_to_checkpoint.pool" = 1
+"checkpoint_postgres_walks.py#any _resets_messages.value" = 1
+"checkpoint_serializer.py#any CheckpointSerializer.loads_typed.return" = 1
+"delta_read_compat.py#any _fast_append.state" = 1
+"delta_read_compat.py#any _install_recovery_invalidation.aput.args" = 1
+"delta_read_compat.py#any _install_recovery_invalidation.aput.kwargs" = 1
+"delta_read_compat.py#any _install_recovery_invalidation.aput.return" = 1
+"delta_read_compat.py#any _install_recovery_invalidation.aput_writes.args" = 1
+"delta_read_compat.py#any _install_recovery_invalidation.aput_writes.kwargs" = 1
+"delta_read_compat.py#any _install_recovery_invalidation.aput_writes.return" = 1
+"delta_read_compat.py#any fold_messages.return" = 1
+"delta_read_compat.py#any fold_messages.state" = 1
+"delta_read_compat.py#any wrap_history_identity_reads.alist_tuples.args" = 1
+"delta_read_compat.py#any wrap_history_identity_reads.alist_tuples.kwargs" = 1
+"delta_read_compat.py#any wrap_history_identity_reads.list_tuples.args" = 1
+"delta_read_compat.py#any wrap_history_identity_reads.list_tuples.kwargs" = 1
+"delta_read_compat.py#any wrap_saver_reads_with_delta_reconstruction.aget_tuple.config" = 1
+"delta_read_compat.py#any wrap_saver_reads_with_delta_reconstruction.aget_tuple.return" = 1
+"delta_read_compat.py#any wrap_saver_reads_with_delta_reconstruction.get_tuple.config" = 1
+"delta_read_compat.py#any wrap_saver_reads_with_delta_reconstruction.get_tuple.return" = 1
+"timeline.py#any _content_block_item.reasoning_ms_by_block" = 1
+"timeline.py#any _exec_output_item.exec_ms" = 1
+"timeline.py#any _system_note_item.note_tag" = 1
+"timeline.py#any _tool_call_items.code_ms_by_block" = 1
+
 [debt.type-cast]
 "checkpoint.py#cast _message_count_from_blob_header" = 1
 "checkpoint.py#cast _reconstructed_message_count" = 2

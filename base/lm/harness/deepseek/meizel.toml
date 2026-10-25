@@ -17,6 +17,9 @@
 [debt.ambient-read]
 "session.py#clock time.perf_counter" = 2
 
+[debt.any-collaborator]
+"usage.py#any _int.value" = 1
+
 [debt.impure-call]
 "session.py#async def _begin" = 1
 "session.py#async def _configure" = 1

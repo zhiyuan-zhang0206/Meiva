@@ -14,3 +14,9 @@ exports = ["loss.py", "mirror.py", "pipeline.py", "receipts.py", "reporting.py",
 "mirror.py#clock datetime.datetime.now" = 2
 "pipeline.py#clock datetime.datetime.now" = 1
 "state.py#platform socket.gethostname" = 2
+
+[debt.any-collaborator]
+"reporting.py#any report_no_pipeline.extra" = 1
+"serialization.py#any event_line.event" = 1
+"serialization.py#any event_line_digest.event" = 1
+"serialization.py#any event_payload.event" = 1

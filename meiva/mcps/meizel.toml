@@ -21,6 +21,41 @@ exports = ["config.py", "tests"]
 "_remote.py#clock time.time" = 2
 "_tools.py#clock time.time" = 2
 
+[debt.any-collaborator]
+"__init__.py#any __getattr__.return" = 1
+"_browser.py#any BrowserLineSession._request.return" = 1
+"_browser.py#any BrowserLineSession.call_tool.return" = 1
+"_browser.py#any BrowserLineSession.list_tools.return" = 1
+"_computer.py#any ComputerLineSession._request.return" = 1
+"_computer.py#any ComputerLineSession.call_tool.return" = 1
+"_computer.py#any ComputerLineSession.list_tools.return" = 1
+"_daemon.py#any Scope.buckets_for.shared" = 1
+"_daemon.py#any SerialSession.__init__.session" = 1
+"_daemon.py#any SerialSession.call_tool.return" = 1
+"_daemon.py#any SerialSession.list_tools.return" = 1
+"_daemon.py#any _dispatch_request.method" = 1
+"_daemon.py#any _dispatch_request.req_id" = 1
+"_daemon.py#any _handle_call_tool.req_id" = 1
+"_daemon.py#any _handle_list_tools.req_id" = 1
+"_daemon.py#any get_session.return" = 1
+"_daemon.py#any shared_kind.return" = 1
+"_oauth.py#any CallbackServer.wait_for_callback.return" = 1
+"_oauth.py#any FileTokenStorage.get_client_info.return" = 1
+"_oauth.py#any FileTokenStorage.get_tokens.return" = 1
+"_oauth.py#any FileTokenStorage.set_client_info.client_info" = 1
+"_oauth.py#any FileTokenStorage.set_tokens.tokens" = 1
+"_oauth.py#any install_token_auth_basic_shim._patched.self" = 1
+"_oauth.py#any normalized_validate_issuer.oauth_metadata" = 1
+"_oauth.py#any oauth_http_client._callback_handler.return" = 1
+"_oauth.py#any oauth_http_client.return" = 1
+"_remote.py#any RemoteMCPClient._request.return" = 1
+"_tools.py#any ServerProxy.__getattr__.return" = 1
+"_tools.py#any ServerProxy.raw.args" = 1
+"_tools.py#any call_raw.args" = 1
+"_tools.py#any call_text.args" = 1
+"_tools.py#any make_tool_callable.call.kwargs" = 1
+"_tools.py#any make_tool_callable.return" = 1
+
 [debt.third-party-patch]
 "_oauth.py#assignment mcp.client.auth.oauth2.OAuthContext.prepare_token_auth" = 1
 "_oauth.py#assignment mcp.client.auth.oauth2.validate_metadata_issuer" = 1

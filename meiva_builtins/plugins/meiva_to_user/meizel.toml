@@ -10,3 +10,6 @@
 
 [debt.ambient-read]
 "agent_runtime.py#clock datetime.datetime.now" = 1
+
+[debt.any-collaborator]
+"written.py#any _state_handle.return" = 1

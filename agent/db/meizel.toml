@@ -1,5 +1,9 @@
 [uses]
 "tests" = ["__init__.py"]
 
+[debt.any-collaborator]
+"__init__.py#any LoggingConnectionPool.__init__.args" = 1
+"__init__.py#any LoggingConnectionPool.__init__.kwargs" = 1
+
 [debt.type-cast]
 "__init__.py#cast enqueue_fatal_provider_report_to_nearest_alive_ancestor" = 2

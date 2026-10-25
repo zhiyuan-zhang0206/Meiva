@@ -3,6 +3,10 @@ exports = ["endpoint.py"]
 [purity]
 "__init__.py" = "strict"
 
+[debt.any-collaborator]
+"endpoint.py#any mcp_gateway._gateway.receive" = 1
+"endpoint.py#any mcp_gateway._gateway.send" = 1
+
 [debt.type-cast]
 "endpoint.py#cast _call_api" = 1
 "endpoint.py#cast _register_tools" = 1

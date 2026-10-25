@@ -16,6 +16,11 @@ exports = ["daemon.py", "ledger.py", "shutdown_budget.py"]
 "service.py#random uuid.uuid4" = 1
 "session.py#clock time.monotonic" = 2
 
+[debt.any-collaborator]
+"session.py#any PtySession._feed_screen.screen" = 1
+"session.py#any PtySession.live_screen.return" = 1
+"session.py#any PtySession.screen.return" = 1
+
 [debt.type-cast]
 "ledger.py#cast read" = 1
 "service.py#cast _child_env" = 1

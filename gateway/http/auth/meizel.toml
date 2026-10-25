@@ -15,3 +15,7 @@ exports = ["rejection_log.py", "request_principal.py", "router.py", "session_sto
 "request_principal.py#random secrets.token_hex" = 1
 "router.py#clock time.time" = 5
 "session_store.py#clock datetime.datetime.now" = 1
+
+[debt.any-collaborator]
+"request_principal.py#any current_session_fact.sessions" = 1
+"router.py#any _sessions_that_authenticate.pool" = 1

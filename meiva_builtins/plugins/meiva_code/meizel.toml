@@ -17,5 +17,10 @@ exports = ["agent_runtime.py", "plugin.py"]
 "plugin.py#clock datetime.datetime.now" = 1
 "plugin.py#home pathlib.Path.home" = 1
 
+[debt.any-collaborator]
+"_state_access.py#any _handle.return" = 1
+"_state_access.py#any read_state.return" = 1
+"plugin.py#any wrapped_serve.return" = 1
+
 [debt.type-cast]
 "plugin.py#cast _wrapped_read" = 1

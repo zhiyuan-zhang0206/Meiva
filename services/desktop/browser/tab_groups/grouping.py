@@ -66,10 +66,11 @@ from __future__ import annotations
 import asyncio
 import itertools
 import json
+from collections.abc import Iterator
 from pathlib import Path
-from typing import Any
 
 import websockets
+from websockets.asyncio.client import ClientConnection
 
 from base.log import logger
 from services.desktop.browser.session import cdp_call, http_json
@@ -138,7 +139,7 @@ def shipped_worker() -> str:
     return _worker_file()
 
 
-async def _live_worker(ws: Any, ids: Any, extension_id: str) -> str | None:
+async def _live_worker(ws: ClientConnection, ids: Iterator[int], extension_id: str) -> str | None:
     """The target id of this checkout's worker file running in ``extension_id``, if any."""
     url = f"chrome-extension://{extension_id}/{_worker_file()}"
     infos = (await cdp_call(ws, ids, "Target.getTargets", {}))["targetInfos"]
@@ -154,7 +155,7 @@ class _WorkerAbsentError(RuntimeError):
     pass
 
 
-async def _worker_session(ws: Any, ids: Any, *, load: bool = True) -> str:
+async def _worker_session(ws: ClientConnection, ids: Iterator[int], *, load: bool = True) -> str:
     # meiva:note
     # Attach to the extension's service worker, loading the extension if needed.
     #
@@ -191,7 +192,7 @@ async def _worker_session(ws: Any, ids: Any, *, load: bool = True) -> str:
     return session_id
 
 
-async def _await_worker_script(ws: Any, ids: Any, session_id: str) -> None:
+async def _await_worker_script(ws: ClientConnection, ids: Iterator[int], session_id: str) -> None:
     """Wait until the worker's script has defined ``meivaGroup``.
 
     The worker's CDP target can be attachable a moment before its script has

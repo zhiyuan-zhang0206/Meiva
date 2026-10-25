@@ -17,6 +17,13 @@ exports = ["update_model_pricing.py"]
 [debt.ambient-read]
 "update_model_pricing.py#clock datetime.datetime.now" = 2
 
+[debt.any-collaborator]
+"check_model_updates.py#any PinnedIPHTTPSAdapter.__init__.args" = 1
+"check_model_updates.py#any PinnedIPHTTPSAdapter.__init__.kwargs" = 1
+"check_model_updates.py#any PinnedIPHTTPSAdapter.init_poolmanager.pool_kwargs" = 1
+"check_model_updates.py#any _PinnedIPConnectionPool._new_conn.return" = 1
+"plugin_price_source.py#any _literal.return" = 1
+
 [debt.type-cast]
 "check_model_updates.py#cast _PinnedIPConnectionPool" = 1
 "check_model_updates.py#cast _PinnedIPConnectionPool._new_conn" = 1

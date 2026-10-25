@@ -11,3 +11,13 @@
 "onboard-helper-grants.py#platform sys.platform" = 1
 "request_grants_evidence.py#clock datetime.datetime.now" = 1
 "request_grants_evidence.py#platform sys.platform" = 1
+
+[debt.any-collaborator]
+"onboard-helper-grants.py#any _apple_event_grants.client" = 1
+"onboard-helper-grants.py#any _fill_pending_grants.client" = 1
+"onboard-helper-grants.py#any _folder_grants.client" = 1
+"onboard-helper-grants.py#any helper_client.return" = 1
+"onboard-helper-grants.py#any preflight_matrix.client" = 1
+"onboard-helper-grants.py#any reap_child.client" = 1
+"onboard-helper-grants.py#any spawn_child.client" = 1
+"onboard-helper-grants.py#any wait_for_item.client" = 1

@@ -9,6 +9,12 @@ exports = ["tests", "transport.py"]
 "." = "strict-to-be"
 "__init__.py" = "strict"
 
+[debt.any-collaborator]
+"transport.py#any AcpConnection._answer_error.request_id" = 1
+"transport.py#any AcpConnection._answer_permission.request_id" = 1
+"transport.py#any AcpConnection._spawn.coro" = 1
+"transport.py#any AcpRpcError.__init__.data" = 1
+
 [debt.impure-call]
 "transport.py#async def _answer_error" = 1
 "transport.py#async def _answer_permission" = 1

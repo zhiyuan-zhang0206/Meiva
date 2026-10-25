@@ -74,7 +74,14 @@ PURITY_CODES = (
 # The code of an ambient read: the key of an entry is `file#kind target`.
 AMBIENT_CODES = (Code.AMBIENT_READ,)
 _FILE_CODES = frozenset(
-    {Code.RESTRICTED, Code.TYPE_CAST, *PATCH_CODES, *PURITY_CODES, *AMBIENT_CODES}
+    {
+        Code.RESTRICTED,
+        Code.TYPE_CAST,
+        Code.ANY_COLLABORATOR,
+        *PATCH_CODES,
+        *PURITY_CODES,
+        *AMBIENT_CODES,
+    }
 )
 DEBTABLE = _EDGE_CODES | _FILE_CODES
 TABLE_KEY = "debt"

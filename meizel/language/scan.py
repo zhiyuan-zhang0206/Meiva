@@ -19,6 +19,7 @@ from meizel.graph.imports import (
 )
 from meizel.graph.model import (
     Acquisition,
+    AnyCollaboratorSite,
     EnumSubsetUse,
     Fact,
     FactKind,
@@ -153,6 +154,7 @@ class FileScan:
     input_appends: list[InputListAppend] = field(default_factory=list[InputListAppend])
     ambient: list[Acquisition] = field(default_factory=list[Acquisition])
     type_casts: list[TypeCastSite] = field(default_factory=list[TypeCastSite])
+    any_collaborators: list[AnyCollaboratorSite] = field(default_factory=list[AnyCollaboratorSite])
     type_checking: tuple[int, ...] = ()
 
 
@@ -165,6 +167,7 @@ class Scanner(AmbientAccess):
         self.fn_depth = 0
         self.qualnames: list[str] = []
         self.type_casts: list[TypeCastSite] = []
+        self.any_collaborators: list[AnyCollaboratorSite] = []
         self.type_checking: list[int] = []
         self.records_type_casts = not (self.test_file or is_test_path(path))
         self.owned_functions = unambiguous_function_lines(tree)
@@ -217,6 +220,7 @@ class Scanner(AmbientAccess):
             input_appends=self.input_appends,
             ambient=self.ambient.items,
             type_casts=self.type_casts,
+            any_collaborators=self.any_collaborators,
             type_checking=tuple(self.type_checking),
         )
 
@@ -300,13 +304,7 @@ class Scanner(AmbientAccess):
             self.visit(default)
         outer = self.scope
         annotation = outer.annotation_scope(node.type_params)
-        self.scope = annotation
-        for arg in (*args.posonlyargs, *args.args, *args.kwonlyargs, args.vararg, args.kwarg):
-            if arg is not None and arg.annotation is not None:
-                self.visit(arg.annotation)
-        if node.returns is not None:
-            self.visit(node.returns)
-        self.scope = outer
+        self.visit_function_annotations(node, annotation)
         fixtures.record_function(
             self.fixture_state,
             node,
@@ -332,6 +330,41 @@ class Scanner(AmbientAccess):
         self.ambient.leave()
         self.fn_depth -= 1
         self.fixture_requester = previous_requester
+
+    def visit_function_annotations(
+        self, node: ast.FunctionDef | ast.AsyncFunctionDef, annotation: Scope
+    ) -> None:
+        outer, self.scope = self.scope, annotation
+        qualname = ".".join([*self.qualnames, node.name])
+        args = node.args
+        for arg in (*args.posonlyargs, *args.args, args.vararg, *args.kwonlyargs, args.kwarg):
+            if arg is not None and arg.annotation is not None:
+                self.record_any_collaborator(arg.annotation, qualname, arg.arg, "parameter")
+                self.visit(arg.annotation)
+        if node.returns is not None:
+            self.record_any_collaborator(node.returns, qualname, "return", "return")
+            self.visit(node.returns)
+        self.scope = outer
+
+    def _is_direct_typing_any(self, expr: ast.expr) -> bool:
+        if isinstance(expr, ast.Name | ast.Attribute):
+            return self.dotted(expr) == "typing.Any"
+        if isinstance(expr, ast.Constant) and isinstance(expr.value, str):
+            try:
+                parsed = ast.parse(expr.value, mode="eval").body
+            except (SyntaxError, ValueError):
+                return False
+            if isinstance(parsed, ast.Name | ast.Attribute):
+                return self.dotted(parsed) == "typing.Any"
+        return False
+
+    def record_any_collaborator(
+        self, expr: ast.expr | None, qualname: str, slot: str, role: str
+    ) -> None:
+        if self.records_type_casts and expr is not None and self._is_direct_typing_any(expr):
+            self.any_collaborators.append(
+                AnyCollaboratorSite(expr.lineno, expr.col_offset, qualname, slot, role)
+            )
 
     def observe_input_parameters(
         self, node: ast.FunctionDef | ast.AsyncFunctionDef, inner: Scope
@@ -442,6 +475,14 @@ class Scanner(AmbientAccess):
             self.stores([node.target], node.lineno, "assignment")
             if isinstance(node, ast.AnnAssign):
                 purity.record_assign(self.purity_state, node, self.dotted)
+        if (
+            isinstance(node, ast.AnnAssign)
+            and self.scope.is_class
+            and isinstance(node.target, ast.Name)
+        ):
+            self.record_any_collaborator(
+                node.annotation, ".".join(self.qualnames), node.target.id, "class-field"
+            )
         self.children(node)
 
     # --- attribute writes ----------------------------------------------------------

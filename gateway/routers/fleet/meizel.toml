@@ -6,5 +6,11 @@ exports = ["fleet_graph.py", "fleet_tokens.py"]
 [debt.ambient-read]
 "fleet_graph.py#clock datetime.datetime.now" = 3
 
+[debt.any-collaborator]
+"fleet_graph.py#any _fetch_pg_graph.pool" = 1
+"fleet_graph.py#any _finalize_graph_response.pool" = 1
+"fleet_tokens.py#any agent_tokens.add.agent" = 1
+"fleet_tokens.py#any agent_tokens.conn" = 1
+
 [debt.type-cast]
 "fleet_tokens.py#cast agent_tokens" = 1

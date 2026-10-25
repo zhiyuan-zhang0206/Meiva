@@ -119,7 +119,7 @@ def set_cluster_default_model(cur: psycopg.Cursor, model: str, *, updated_by: st
     )
 
 
-def _json_safe(value: Any) -> Any:
+def _json_safe(value: object) -> object:
     """Coerce a config value into something JSONB can hold. Only Path needs it
     today; the coercion is here so a future Path-typed frozen field cannot
     silently serialize as a repr."""

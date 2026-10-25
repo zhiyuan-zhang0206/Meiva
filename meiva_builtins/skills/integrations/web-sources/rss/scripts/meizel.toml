@@ -11,6 +11,9 @@ exports = ["feed.py"]
 "feed.py#clock datetime.datetime.now" = 1
 "feed.py#clock time.time" = 1
 
+[debt.any-collaborator]
+"rss_post.py#any _entry.raw" = 1
+
 [debt.type-cast]
 "feed.py#cast _read_post" = 1
 "rss_post.py#cast parse_feed" = 1
