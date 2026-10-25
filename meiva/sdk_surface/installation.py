@@ -16,7 +16,7 @@ from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field
 from pathlib import Path
 from types import MappingProxyType, ModuleType
-from typing import Any, Protocol, cast
+from typing import Any, Protocol
 
 from pydantic import BaseModel
 
@@ -71,7 +71,7 @@ class MemberAdded:
 @dataclass(frozen=True)
 class WrapAdded:
     layer: WrapLayer
-    parent: Any
+    parent: object
     attr: str
     chained: Callable[..., Any]
     original: Callable[..., Any]
@@ -96,7 +96,7 @@ type Reversal = NamespaceAdded | MemberAdded | WrapAdded | ProviderAdded | Confi
 # pipeline. A `base.agents.context.clients.ClientSet` satisfies it; naming only the capability
 # keeps this module free of the client stack's imports.
 class EventPipelines(Protocol):
-    def event_pipeline(self) -> Any: ...
+    def event_pipeline(self) -> object: ...
 
 
 # meiva:note
@@ -188,7 +188,8 @@ LOADING = Loading()
 
 def slot() -> Installation | Loading | None:
     """The raw holder value: an `Installation`, a `Loading` marker, or None."""
-    return cast(Installation | Loading | None, getattr(meiva_module(), SLOT, None))
+    value = getattr(meiva_module(), SLOT, None)
+    return value if isinstance(value, (Installation, Loading)) else None
 
 
 def installed() -> Installation | None:

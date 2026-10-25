@@ -25,6 +25,7 @@ class DaemonConfig:
     home: Path
     project_root: Path
     browser_cdp_port: int
+    pid: int = 0
     socket_probe_timeout_seconds: float = 1.0
     retry: RetryPolicy = field(default_factory=RetryPolicy)
 

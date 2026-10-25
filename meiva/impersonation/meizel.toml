@@ -11,26 +11,7 @@ exports = ["admission.py", "attachment.py"]
 "admission.py" = "strict"
 
 [roots]
-"attachment.py" = { kinds = ["settings"], why = "External controller attachment owns process bootstrap when no SDK context is bound" }
-
-[debt.ambient-read]
-"attachment.py#random uuid.uuid4" = 1
-
-[debt.any-collaborator]
-"__init__.py#any _Attachment._event_gate" = 1
-"__init__.py#any _Attachment.native_snapshot.return" = 1
-"attachment.py#any Attachment._applied_version.state" = 1
-"attachment.py#any Attachment._set_state.state" = 1
-"attachment.py#any Attachment._state_update.return" = 1
-"attachment.py#any Attachment._telemetry_clients.return" = 1
-"attachment.py#any Attachment.capture_local_event.event" = 1
-"attachment.py#any Attachment.capture_local_event.return" = 1
-"attachment.py#any _Codec.apply_plugin_delta.delta" = 1
-"attachment.py#any _Codec.apply_plugin_delta.state" = 1
-"attachment.py#any _Codec.decode_plugin_delta.return" = 1
-"attachment.py#any _Codec.load_snapshot.return" = 1
-"attachment.py#any _Codec.plugin_state_schema.return" = 1
-"attachment.py#any _Codec.plugin_state_schema.state" = 1
+"attachment.py" = { kinds = ["random", "settings"], why = "External controller attachment owns process bootstrap and session UUID generation when no SDK context is bound" }
 
 [debt.impure-call]
 "attachment.py#uuid.uuid4" = 1
@@ -39,8 +20,8 @@ exports = ["admission.py", "attachment.py"]
 "attachment.py#base/agents/context/__init__.py" = 1
 "attachment.py#base/agents/context/clients.py" = 1
 "attachment.py#base/agents/context/external_attachment/__init__.py" = 1
-"attachment.py#base/agents/impersonation/__init__.py" = 3
-"attachment.py#base/agents/impersonation/manifest.py" = 4
+"attachment.py#base/agents/impersonation/__init__.py" = 1
+"attachment.py#base/agents/impersonation/manifest.py" = 1
 "attachment.py#base/agents/impersonation/sessions.py" = 1
 "attachment.py#base/config/__init__.py" = 1
 "attachment.py#base/config/agent_pins.py" = 1
@@ -49,8 +30,3 @@ exports = ["admission.py", "attachment.py"]
 "attachment.py#base/native_process/ownership.py" = 1
 "attachment.py#base/packages/plugins/config_view.py" = 1
 "attachment.py#meiva/boot.py" = 1
-
-[debt.type-cast]
-"attachment.py#cast Attachment._prepare" = 1
-"attachment.py#cast Attachment._seal_wait_seconds" = 1
-"attachment.py#cast _Codec.encode_plugin_delta" = 1

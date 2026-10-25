@@ -15,9 +15,10 @@ import inspect
 from collections.abc import Callable
 from pathlib import Path
 from types import SimpleNamespace
-from typing import Any, cast
+from typing import Any
 
 from base.api_contracts.agent_contract import Harness
+from base.lm.catalog import ModelCatalog
 from meiva.sdk_surface import meiva_module, process_context
 
 from .attachment_transport import format_signature as format_signature
@@ -95,18 +96,19 @@ def doc_variants[T](**texts: str) -> Callable[[T], T]:
     return attach
 
 
-def _variant_text(obj: Any, style: str | None) -> str | None:
+def _variant_text(obj: object, style: str | None) -> str | None:
     if not style:
         return None
     holder: dict[str, Any] = getattr(obj, "__dict__", {})
     texts = holder.get(VARIANT_ATTR)
+    mapping: Any = texts
     if not isinstance(texts, dict):
         return None
-    text = cast("dict[str, str]", texts).get(style)
-    return text if text else None
+    text = mapping.get(style)
+    return text if isinstance(text, str) and text else None
 
 
-def _doc_for(obj: Any, own_doc: str | None, render: "_Render") -> str | None:
+def _doc_for(obj: object, own_doc: str | None, render: "_Render") -> str | None:
     if (
         inspect.ismodule(obj)
         and getattr(obj, "__name__", None) == "meiva.self"
@@ -136,7 +138,7 @@ class ModelHelpProfile:
         cls,
         model: str,
         *,
-        catalog: Any,
+        catalog: ModelCatalog,
         harness: Harness = Harness.MEIVA,
     ) -> "ModelHelpProfile":
         from meiva.sdk_surface.attachment_transport import media_gated_members
@@ -231,7 +233,7 @@ def is_meiva_target(obj: object) -> bool:
     return _search_meiva_for_binding(obj) is not None
 
 
-def _is_meiva_module_name(name: Any) -> bool:
+def _is_meiva_module_name(name: object) -> bool:
     return isinstance(name, str) and (name == "meiva" or name.startswith("meiva."))
 
 
@@ -241,7 +243,7 @@ class HelpRouter:
     def __init__(self, original_help: Callable[..., Any]) -> None:
         self._original_help = original_help
 
-    def __call__(self, *args: Any, **kwds: Any) -> Any:
+    def __call__(self, *args: object, **kwds: object) -> object:
         if not args or kwds:
             return self._original_help(*args, **kwds)
         for index, target in enumerate(args):
@@ -263,7 +265,7 @@ class HelpRouter:
 # see in source — same shape as training distribution.
 
 
-def _print_target(target: Any, render: _Render = _DEFAULT_RENDER) -> None:
+def _print_target(target: object, render: _Render = _DEFAULT_RENDER) -> None:
     fqn = _resolve_fqn(target)
     heading = f"{'#' * _heading_depth(fqn)} {fqn}"
     body = _target_body(target, fqn, render)
@@ -273,7 +275,7 @@ def _print_target(target: Any, render: _Render = _DEFAULT_RENDER) -> None:
         print(heading)
 
 
-def _target_body(target: Any, fqn: str, render: _Render = _DEFAULT_RENDER) -> str:
+def _target_body(target: object, fqn: str, render: _Render = _DEFAULT_RENDER) -> str:
     """Render the body under the heading for a help() target."""
     if is_container(target):
         # A top-level module target (the root `meiva`, heading depth 1) shows its
@@ -303,7 +305,7 @@ def _heading_depth(fqn: str) -> int:
     return fqn.count(".") + 1
 
 
-def _resolve_fqn(target: Any) -> str:
+def _resolve_fqn(target: object) -> str:
     """Resolve a target's FQN for the heading: `meiva` / `meiva.X` / `meiva.X.y`.
 
     For container targets (modules / SimpleNamespace plugin namespaces), the
@@ -325,7 +327,7 @@ def _resolve_fqn(target: Any) -> str:
     return repr(target)
 
 
-def _container_fqn(target: Any) -> str:
+def _container_fqn(target: object) -> str:
     """FQN of a container target: `_qualname` when present (plugin namespaces
     register it), else `__name__`, else `?`."""
     qn = getattr(target, "_qualname", None)
@@ -335,7 +337,7 @@ def _container_fqn(target: Any) -> str:
     return name if isinstance(name, str) else "?"
 
 
-def _element_fqn(target: Any) -> str:
+def _element_fqn(target: object) -> str:
     """FQN of a function target.
 
     A wrapped function whose `__module__` points back at its wrapping plugin
@@ -351,7 +353,7 @@ def _element_fqn(target: Any) -> str:
     return f"{mod_name}.{fn_name}" if mod_name else fn_name
 
 
-def _search_meiva_for_binding(target: Any) -> str | None:
+def _search_meiva_for_binding(target: object) -> str | None:
     """Search agent-visible `meiva.*` namespaces for a binding that IS `target`.
 
     Returns the `meiva.<sub>.<attr>` form; submodule prefix prefers the
@@ -370,13 +372,15 @@ def _search_meiva_for_binding(target: Any) -> str | None:
     return None
 
 
-def _find_agent_visible_binding(mod: Any, mod_name: str, target: Any) -> str | None:
+def _find_agent_visible_binding(mod: object, mod_name: str, target: object) -> str | None:
     """Search one namespace's agent-visible bindings for `target` identity.
 
     The submodule prefix prefers the namespace's `_qualname` (plugin
     namespaces register that) so the heading reflects the agent-facing name
     rather than the internal module path."""
-    members = vars(mod) if isinstance(mod, SimpleNamespace) else mod.__dict__
+    members: dict[str, Any] = (
+        vars(mod) if isinstance(mod, SimpleNamespace) else getattr(mod, "__dict__", {})
+    )
     for attr_name in agent_visible_names(mod):
         attr_value = members.get(attr_name)
         if attr_value is target and (inspect.isroutine(attr_value) or inspect.isclass(attr_value)):
@@ -386,7 +390,7 @@ def _find_agent_visible_binding(mod: Any, mod_name: str, target: Any) -> str | N
 
 
 def _format_module_stub(
-    mod: Any, *, include_own_doc: bool = True, render: _Render = _DEFAULT_RENDER
+    mod: object, *, include_own_doc: bool = True, render: _Render = _DEFAULT_RENDER
 ) -> str:
     # Module → Python source stub: optional own docstring + each child as a
     # source-form entry. Children dispatch by kind:
@@ -414,7 +418,9 @@ def _format_module_stub(
     return "\n\n".join(pieces)
 
 
-def _skill_aware_children(mod: Any, render: _Render = _DEFAULT_RENDER) -> list[tuple[str, Any]]:
+def _skill_aware_children(
+    mod: object, render: _Render = _DEFAULT_RENDER
+) -> list[tuple[str, object]]:
     """`children(mod)`, with a skills container's walk kept index-safe.
 
     Listing the children of `meiva.skills` (or of a skill namespace node) resolves
@@ -431,14 +437,15 @@ def _skill_aware_children(mod: Any, render: _Render = _DEFAULT_RENDER) -> list[t
     return children(mod, hidden_members=render.hidden_members)
 
 
-def _format_child(name: str, child: Any, render: _Render = _DEFAULT_RENDER) -> str:
+def _format_child(name: str, child: object, render: _Render = _DEFAULT_RENDER) -> str:
     formatter = _child_formatter(child)
     if formatter is None:
         return f"# {name}: {type(child).__name__}"
     if formatter is _format_class_stub:
         # The class formatter is the one that reads the render parameters
         # (compact classes; the recursion into nested members).
-        return _format_class_stub(name, child, render)
+        cls: Any = child
+        return _format_class_stub(name, cls, render)
     if formatter is _format_function_stub or formatter is _format_submodule_ref:
         # meiva:note
         # Both read the render's `doc_style` to pick a declared variant.
@@ -446,7 +453,7 @@ def _format_child(name: str, child: Any, render: _Render = _DEFAULT_RENDER) -> s
     return formatter(name, child)
 
 
-def _child_formatter(child: Any) -> Callable[..., str] | None:
+def _child_formatter(child: object) -> Callable[..., str] | None:
     """Pick the stub formatter for a child entry by its kind, or None for
     an unrenderable value (falls back to a comment line)."""
     if is_skill_object(child):
@@ -464,7 +471,7 @@ def _child_formatter(child: Any) -> Callable[..., str] | None:
     return None
 
 
-def _format_function_stub(name: str, fn: Any, render: _Render = _DEFAULT_RENDER) -> str:
+def _format_function_stub(name: str, fn: object, render: _Render = _DEFAULT_RENDER) -> str:
     sig = format_signature(fn)
     doc = _doc_for(fn, inspect.getdoc(fn), render)
     if not doc:
@@ -472,7 +479,7 @@ def _format_function_stub(name: str, fn: Any, render: _Render = _DEFAULT_RENDER)
     return f"def {name}{sig}:\n{format_docstring(doc, indent='    ')}"
 
 
-def _format_submodule_ref(name: str, mod: Any, render: _Render = _DEFAULT_RENDER) -> str:
+def _format_submodule_ref(name: str, mod: object, render: _Render = _DEFAULT_RENDER) -> str:
     """Submodule child: `from . import name` + module's full docstring as orphan."""
     lines = [f"from . import {name}"]
     doc = _doc_for(mod, inspect.getdoc(mod), render)
@@ -481,7 +488,7 @@ def _format_submodule_ref(name: str, mod: Any, render: _Render = _DEFAULT_RENDER
     return "\n".join(lines)
 
 
-def _format_skill_child(name: str, child: Any) -> str:
+def _format_skill_child(name: str, child: object) -> str:
     """Skill child: a Markdown heading at the child's own FQN depth (the same
     depth rule every other heading follows), description as the body below.
 
@@ -581,14 +588,19 @@ def _class_doc_parts(name: str, cls: type, render: _Render = _DEFAULT_RENDER) ->
     # "Name(field: type, ...)" — pure signature noise, not documentation.
     if _is_synthesized_dataclass_doc(name, cls, own_doc):
         return []
-    if not own_doc:
+    if not isinstance(own_doc, str) or not own_doc:
         return []
     return [format_docstring(inspect.cleandoc(own_doc), indent="    ")]
 
 
-def _is_synthesized_dataclass_doc(name: str, cls: type, own_doc: Any) -> bool:
+def _is_synthesized_dataclass_doc(name: str, cls: type, own_doc: object) -> bool:
     """True when `own_doc` is the auto-synthesized dataclass signature doc."""
-    return bool(own_doc) and _dataclasses.is_dataclass(cls) and own_doc.startswith(f"{name}(")
+    return (
+        isinstance(own_doc, str)
+        and bool(own_doc)
+        and _dataclasses.is_dataclass(cls)
+        and own_doc.startswith(f"{name}(")
+    )
 
 
 def _format_class_members(cls: type, render: _Render = _DEFAULT_RENDER) -> list[str]:
@@ -607,7 +619,7 @@ def _indent(text: str, prefix: str) -> str:
     return "\n".join(f"{prefix}{line}" if line else "" for line in text.split("\n"))
 
 
-def _resolve_const_name(const: Any) -> str:
+def _resolve_const_name(const: object) -> str:
     """Best-effort name for a standalone documented-const target."""
     name = getattr(const, "__qualname__", None) or getattr(const, "__name__", None)
     return name if isinstance(name, str) else "value"

@@ -8,7 +8,7 @@
 
 import inspect
 from types import SimpleNamespace
-from typing import Any, cast
+from typing import Any
 
 # meiva:note
 # Class attribute set on every type `const()` mints; `is_documented_const` reads it.
@@ -77,6 +77,6 @@ def const[T](value: T, doc: str) -> T:
             _DOCUMENTED_MARKER: True,
         },
     )
-    instance = cls(value)
+    instance: Any = cls(value)
     instance.__doc__ = doc
-    return cast(T, instance)
+    return instance

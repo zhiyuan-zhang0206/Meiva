@@ -10,12 +10,12 @@ from __future__ import annotations
 import inspect
 import json
 import keyword
-import time
 import types
+from collections.abc import Callable
 from contextlib import suppress
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, cast
+from typing import Any
 
 from base.agents.context.identity import AgentIdentity
 from meiva.mcps._clients import McpClients
@@ -45,14 +45,15 @@ class ToolSource:
     timeout_seconds: float
     cache: DiskCache
     identity: AgentIdentity | None
+    now: float = 0.0
 
 
 # meiva:note
 # The cached tool list of `document` (the parsed cache file), or None when the entry is unusable: not an object, no usable `cached_at`, older than `ttl_s` at `now`, or a `tools` field that is not a list of objects. Missing fields of a tool fill with empty values.
 def cached_tools(document: object, *, now: float, ttl_s: float) -> list[ToolInfo] | None:
+    data: Any = document
     if not isinstance(document, dict):
         return None
-    data = cast(dict[str, Any], document)
     cached_at = data.get("cached_at")
     if cached_at is None:
         return None
@@ -63,13 +64,14 @@ def cached_tools(document: object, *, now: float, ttl_s: float) -> list[ToolInfo
     if age > ttl_s:
         return None
     tools = data.get("tools")
+    items: Any = tools
     if not isinstance(tools, list):
         return None
     result: list[ToolInfo] = []
-    for t in cast(list[object], tools):
+    for t in items:
+        item: Any = t
         if not isinstance(t, dict):
             return None
-        item = cast(dict[str, Any], t)
         result.append(
             {
                 "name": item.get("name", ""),
@@ -91,7 +93,7 @@ class DiskCache:
         self.directory.mkdir(parents=True, exist_ok=True)
         return self.directory / f"{server}.json"
 
-    def read(self, server: str) -> list[ToolInfo] | None:
+    def read(self, server: str, *, now: float = 0.0) -> list[ToolInfo] | None:
         """Read disk cache for server tools. Returns None if expired or missing."""
         path = self._path(server)
         if not path.is_file():
@@ -100,14 +102,14 @@ class DiskCache:
             data = json.loads(path.read_text(encoding="utf-8"))
         except (json.JSONDecodeError, OSError):
             return None
-        return cached_tools(data, now=time.time(), ttl_s=self.ttl_s)
+        return cached_tools(data, now=now, ttl_s=self.ttl_s)
 
-    def write(self, server: str, tools: list[ToolInfo]) -> None:
+    def write(self, server: str, tools: list[ToolInfo], *, now: float = 0.0) -> None:
         """Write tool list to disk cache. Best-effort: errors are silently ignored."""
         path = self._path(server)
         data = {
             "tools": tools,
-            "cached_at": time.time(),
+            "cached_at": now,
         }
         with suppress(OSError):
             path.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
@@ -128,15 +130,15 @@ def list_tools(source: ToolSource, server: str) -> list[ToolInfo]:
             server, timeout_seconds=source.timeout_seconds, agent_id=agent_id
         )
     except (MCPConnectError, OSError):
-        cached = source.cache.read(server)
+        cached = source.cache.read(server, now=source.now)
         if cached is None:
             raise
         return cached
-    source.cache.write(server, tools)
+    source.cache.write(server, tools, now=source.now)
     return tools
 
 
-def call_raw(source: ToolSource, server: str, tool: str, **args: Any) -> dict[str, Any]:
+def call_raw(source: ToolSource, server: str, tool: str, **args: object) -> dict[str, Any]:
     """Call through the daemon once; an unknown result is never replayed."""
     agent_id = resolve_agent_id(source.identity)
     return source.remote.call_tool(
@@ -144,7 +146,7 @@ def call_raw(source: ToolSource, server: str, tool: str, **args: Any) -> dict[st
     )
 
 
-def call_text(source: ToolSource, server: str, tool: str, **args: Any) -> str:
+def call_text(source: ToolSource, server: str, tool: str, **args: object) -> str:
     """Call tool, join text content blocks into one str.
 
     isError=True → raise MCPCallError. An empty text join is returned as "" when
@@ -217,7 +219,7 @@ class ServerProxy(types.ModuleType):
         """Get tool name list — prefer disk cache, fall back to _load_tools()."""
         if self._tools_cache is not None:
             return sorted(self._tools_cache.keys())
-        cached = self._source.cache.read(self._server)
+        cached = self._source.cache.read(self._server, now=self._source.now)
         if cached is not None:
             self._tools_cache = {t["name"]: t for t in cached}
             return sorted(self._tools_cache.keys())
@@ -229,7 +231,7 @@ class ServerProxy(types.ModuleType):
             self._tools_cache = {t["name"]: t for t in tools}
         return self._tools_cache
 
-    def __getattr__(self, name: str) -> Any:
+    def __getattr__(self, name: str) -> Callable[..., str]:
         # ModuleType.__getattr__ is only called on ordinary lookup failure;
         # _server / _tools_cache are set in __init__ and go through instance
         # __dict__, not reaching here
@@ -240,7 +242,7 @@ class ServerProxy(types.ModuleType):
     def __dir__(self) -> list[str]:
         return sorted([*self._load_tool_names(), "raw"])
 
-    def raw(self, tool: str, **args: Any) -> dict[str, Any]:
+    def raw(self, tool: str, **args: object) -> dict[str, Any]:
         """Call a tool and return the full result for non-text outputs: a dict
         with `content` (list of blocks), `isError`, `structuredContent`."""
         return call_raw(self._source, self._server, tool, **args)
@@ -257,14 +259,16 @@ JSON_PRIMITIVE: dict[str, type] = {
 }
 
 
-def make_tool_callable(source: ToolSource, server: str, tool: str, info: ToolInfo | None) -> Any:
+def make_tool_callable(
+    source: ToolSource, server: str, tool: str, info: ToolInfo | None
+) -> Callable[..., str]:
     """Return a sync callable wrapping the tool; `__doc__` contains description + input_schema.
 
     When info=None (tool name not in cache), still returns a callable —
     the MCP server itself rejects bad names; the error info is more reliable.
     """
 
-    def call(**kwargs: Any) -> str:
+    def call(**kwargs: object) -> str:
         return call_text(source, server, tool, **kwargs)
 
     call.__name__ = tool
@@ -296,9 +300,9 @@ def schema_to_signature(schema: dict[str, Any]) -> inspect.Signature | None:
     type or a missing field still fails at the server, not here (fail-fast).
     """
     props = schema.get("properties")
+    props_dict: Any = props
     if not isinstance(props, dict) or not props:
         return None
-    props_dict = cast(dict[str, Any], props)
     # An MCP tool parameter name can be a non-identifier (hyphen, leading digit)
     # or a Python keyword (`from`, `class`); inspect.Parameter rejects or
     # mis-renders those. Fall back to (**kwargs) — the JSON schema in the
@@ -310,9 +314,8 @@ def schema_to_signature(schema: dict[str, Any]) -> inspect.Signature | None:
     required = set(schema.get("required") or [])
     params: list[inspect.Parameter] = []
     for name, pschema in props_dict.items():
-        ptype: object = (
-            cast(dict[str, Any], pschema).get("type") if isinstance(pschema, dict) else None
-        )
+        pschema_dict: Any = pschema
+        ptype: object = pschema_dict.get("type") if isinstance(pschema, dict) else None
         ann = JSON_PRIMITIVE.get(ptype, Any) if isinstance(ptype, str) else Any
         default = inspect.Parameter.empty if name in required else None
         params.append(
