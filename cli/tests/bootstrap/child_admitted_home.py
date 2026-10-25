@@ -12,6 +12,7 @@ import os
 import sys
 from pathlib import Path
 
+from base.host.db_authority.delivery import GENERATION_ENV
 from base.native_process.os_platform import LockTimeoutError, file_lock
 from cli.start_intent import admitted_home
 
@@ -22,6 +23,7 @@ assert "MEIVA_DB_URL" in os.environ, "the child must inherit another home's logi
 with admitted_home(home):
     assert os.environ["MEIVA_HOME"] == str(home)
     assert "MEIVA_DB_URL" not in os.environ, "another home's login is not this home's"
+    assert GENERATION_ENV not in os.environ, "the foreign login and generation leave together"
     with (
         contextlib.suppress(LockTimeoutError),
         file_lock(home / "start-intent.lock", timeout_s=0.05),
