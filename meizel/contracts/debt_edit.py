@@ -14,8 +14,9 @@ from meizel.contracts.ledger import tally
 from meizel.contracts.manifest import Manifest, manifest_path
 from meizel.graph.graphs import feedback_edges, unneeded_back_edges
 from meizel.graph.model import Code, Diagnostic, MeizelError
+from meizel.graph.universe import EditPlan, GitRepo
 
-__all__ = ["prune", "record", "write_baseline"]
+__all__ = ["plan_baseline_write", "prune", "record", "write_baseline"]
 
 
 def _within(path: str, targets: list[str]) -> bool:
@@ -33,23 +34,27 @@ def _copy(table: DebtTable) -> DebtTable:
     return {code: dict(rows) for code, rows in table.items()}
 
 
-def write_baseline(root: Path, owner: str, table: DebtTable) -> str | None:
-    """Rewrite the `[debt]` tables of `owner`'s manifest; the path written, or None if unchanged."""
-    path = root / manifest_path(owner)
-    before = path.read_text(encoding="utf-8") if path.exists() else ""
+def plan_baseline_write(
+    root: Path, owner: str, before: str, table: DebtTable
+) -> tuple[EditPlan, str | None]:
+    rel = manifest_path(owner)
+    path = root / rel
     after = set_debt(before, table)
     if after == before:
-        return None
+        return EditPlan(), None
     if tomllib.loads(after).get(TABLE_KEY, {}) != {c.value: r for c, r in table.items() if r}:
-        raise MeizelError(
-            f"{manifest_path(owner)}: the [debt] tables cannot be rewritten; edit by hand"
-        )
+        raise MeizelError(f"{rel}: the [debt] tables cannot be rewritten; edit by hand")
     if after.strip():
-        path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text(after, encoding="utf-8")
-    else:
-        path.unlink()
-    return manifest_path(owner)
+        return EditPlan(writes={path: after}), rel
+    return EditPlan(deletes=(path,)), rel
+
+
+def write_baseline(root: Path, owner: str, table: DebtTable) -> str | None:
+    """Rewrite the `[debt]` tables of `owner`'s manifest; the path written, or None if unchanged."""
+    before = GitRepo(root).load_text(manifest_path(owner), default="")
+    plan, changed = plan_baseline_write(root, owner, before, table)
+    plan.apply()
+    return changed
 
 
 def _new_back_edges(manifest: Manifest) -> set[tuple[str, str]]:

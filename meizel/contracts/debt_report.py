@@ -7,9 +7,9 @@ in about a second. Rule changes use the separate regeneration in `debt_rules`.
 from __future__ import annotations
 
 import json
-import subprocess
 import tomllib
 from collections import Counter
+from collections.abc import Mapping
 from pathlib import Path
 from typing import Any, TypeGuard
 
@@ -23,7 +23,7 @@ from meizel.contracts.debt import (
 from meizel.contracts.debt_sites import target_under
 from meizel.contracts.manifest import manifest_path
 from meizel.graph.model import Code, MeizelError
-from meizel.graph.universe import MANIFEST, Universe, load_universe, parent_of
+from meizel.graph.universe import MANIFEST, GitRepo, Universe, load_universe, parent_of
 
 __all__ = [
     "Baselines",
@@ -50,12 +50,13 @@ def _parse(text: str, where: str) -> DebtTable:
     return table
 
 
-def read_baselines(universe: Universe) -> Baselines:
+def read_baselines(universe: Universe, texts: Mapping[str, str] | None = None) -> Baselines:
     """The recorded debt of every directory of the working tree that has any."""
     found: Baselines = {}
     for directory in sorted(universe.manifest_dirs):
         path = manifest_path(directory)
-        table = _parse((universe.root / path).read_text(encoding="utf-8"), path)
+        raw = texts[path] if texts is not None and path in texts else universe.load_text(path)
+        table = _parse(raw, path)
         if table:
             found[directory] = table
     return found
@@ -139,15 +140,6 @@ def summarize(root: Path, *, as_json: bool) -> str:
     return json.dumps(data, indent=2, sort_keys=True) if as_json else _text(data)
 
 
-def _git(root: Path, *args: str, stdin: bytes | None = None) -> bytes:
-    result = subprocess.run(  # noqa: S603 - fixed argv
-        ["git", "-C", str(root), *args], input=stdin, capture_output=True, check=False
-    )
-    if result.returncode != 0:
-        raise MeizelError(f"git {args[0]} failed: {result.stderr.decode(errors='replace').strip()}")
-    return result.stdout
-
-
 def _is_raw_dict(value: object) -> TypeGuard[dict[object, object]]:
     return isinstance(value, dict)
 
@@ -179,13 +171,14 @@ def _manifest_texts_at(root: Path, ref: str) -> list[str]:
     """The text of every `meizel.toml` at a git ref."""
     if ref.startswith("-"):
         raise MeizelError(f"{ref}: not a git ref")
-    listing = _git(root, "ls-tree", "-r", "-z", "--name-only", ref).decode().split("\0")
+    repo = GitRepo(root)
+    listing = repo.run_bytes("ls-tree", "-r", "-z", "--name-only", ref).decode().split("\0")
     paths = [p for p in listing if p.rsplit("/", 1)[-1] == MANIFEST]
     texts: list[str] = []
     if not paths:
         return texts
     request = "".join(f"{ref}:{p}\n" for p in paths).encode()
-    stream = _git(root, "cat-file", "--batch", stdin=request)
+    stream = repo.run_bytes("cat-file", "--batch", stdin=request)
     position = 0
     for path in paths:
         end = stream.index(b"\n", position)
@@ -212,7 +205,9 @@ def changed_under(root: Path, ref: str, pathspecs: list[str]) -> list[str]:
     """
     if ref.startswith("-"):
         raise MeizelError(f"{ref}: not a git ref")
-    listing = _git(root, "diff", "--name-only", "--no-renames", "-z", ref, "--", *pathspecs)
+    listing = GitRepo(root).run_bytes(
+        "diff", "--name-only", "--no-renames", "-z", ref, "--", *pathspecs
+    )
     return [p for p in listing.decode().split("\0") if p]
 
 

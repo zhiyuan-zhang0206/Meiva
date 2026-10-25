@@ -210,8 +210,9 @@ class _Reader:
             seen.add(name)
         return tuple(dict.fromkeys(value))
 
-    def exists(self, relative: str) -> bool:
-        """A tracked file or directory below this one, named by a normalised relative path."""
+    # meiva:note
+    # A tracked file or directory below this one, named by a normalised relative path.
+    def is_tracked(self, relative: str) -> bool:
         full = f"{self.directory}/{relative}" if self.directory else relative
         parts = relative.split("/")
         clean = bool(relative) and all(part not in {"", ".", ".."} for part in parts)
@@ -222,7 +223,7 @@ class _Reader:
         )
 
     def child(self, name: str, where: str, line: int, *, deep: bool = False) -> bool:
-        if name in self.children or (deep and self.exists(name)):
+        if name in self.children or (deep and self.is_tracked(name)):
             return True
         self.report(
             line,
@@ -539,12 +540,14 @@ class _Reader:
             )
 
 
-def load_manifests(universe: Universe) -> tuple[dict[str, Manifest], list[Diagnostic]]:
+def load_manifests(
+    universe: Universe, texts: Mapping[str, str] | None = None
+) -> tuple[dict[str, Manifest], list[Diagnostic]]:
     manifests: dict[str, Manifest] = {}
     diagnostics: list[Diagnostic] = []
     for directory in sorted(universe.manifest_dirs):
         path = manifest_path(directory)
-        text = (universe.root / path).read_text(encoding="utf-8")
+        text = texts[path] if texts is not None and path in texts else universe.load_text(path)
         reader = _Reader(universe, directory, text.splitlines())
         try:
             document = tomllib.loads(text)

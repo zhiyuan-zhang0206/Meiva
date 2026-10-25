@@ -1,16 +1,5 @@
 exports = ["analysis.py", "cli.py", "enumerations.py", "sync.py"]
-
-[purity]
-"." = "strict-to-be"
-"analysis.py" = "strict"
-"cli.py" = "strict"
-"debt.py" = "strict"
-"debt_sites.py" = "strict"
-"debt_symbol.py" = "strict"
-"explain.py" = "strict"
-"ledger.py" = "strict"
-"manifest_text.py" = "strict"
-"rule.py" = "strict"
+purity = "strict"
 
 [roots]
 "cli.py" = { kinds = ["cwd"], why = "CLI composition root captures the working directory once for repository and relative-path inputs" }
@@ -33,40 +22,3 @@ exports = ["analysis.py", "cli.py", "enumerations.py", "sync.py"]
 "policy.py" = ["manifest.py"]
 "rule.py" = ["debt.py", "manifest.py", "policy.py"]
 "sync.py" = ["analysis.py", "debt_edit.py", "declare.py", "manifest.py", "manifest_text.py"]
-
-[debt.impure-call]
-"bootstrap.py#Path.mkdir" = 2
-"bootstrap.py#Path.write_text" = 2
-"debt_carry.py#Path.exists" = 1
-"debt_carry.py#Path.read_bytes" = 2
-"debt_carry.py#import subprocess" = 1
-"debt_edit.py#Path.exists" = 1
-"debt_edit.py#Path.mkdir" = 1
-"debt_edit.py#Path.read_text" = 1
-"debt_edit.py#Path.unlink" = 1
-"debt_edit.py#Path.write_text" = 1
-"debt_report.py#Path.read_text" = 1
-"debt_report.py#import subprocess" = 1
-"debt_rules.py#Path.is_file" = 3
-"debt_rules.py#Path.mkdir" = 1
-"debt_rules.py#Path.read_text" = 1
-"debt_rules.py#Path.unlink" = 1
-"debt_rules.py#Path.write_text" = 1
-"debt_rules.py#import shutil" = 1
-"debt_rules.py#import subprocess" = 1
-"debt_rules.py#import tempfile" = 1
-"declare.py#Path.exists" = 1
-"declare.py#Path.mkdir" = 1
-"declare.py#Path.read_text" = 1
-"declare.py#Path.write_text" = 1
-"declare.py#import subprocess" = 1
-"enumerations.py#Path.read_text" = 4
-"enumerations.py#Path.write_text" = 1
-"enumerations.py#import subprocess" = 1
-"manifest.py#Path.exists" = 1
-"manifest.py#Path.read_text" = 1
-"policy.py#Path.read_text" = 1
-"policy.py#import subprocess" = 1
-"sync.py#Path.read_text" = 1
-"sync.py#Path.unlink" = 1
-"sync.py#Path.write_text" = 1

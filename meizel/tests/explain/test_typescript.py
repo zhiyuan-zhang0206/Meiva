@@ -8,11 +8,52 @@ import copy
 import json
 import subprocess
 from pathlib import Path
-from typing import cast
+from typing import TypeGuard
 
 import pytest
 
 from meizel.contracts.cli import main
+
+
+def _is_raw_dict(value: object) -> TypeGuard[dict[object, object]]:
+    return isinstance(value, dict)
+
+
+def _is_table(value: object) -> TypeGuard[dict[str, object]]:
+    return _is_raw_dict(value) and all(isinstance(k, str) for k in value)
+
+
+def _is_str_dict(value: object) -> TypeGuard[dict[str, str]]:
+    return _is_table(value) and all(isinstance(v, str) for v in value.values())
+
+
+def _is_object_list(value: object) -> TypeGuard[list[object]]:
+    return isinstance(value, list)
+
+
+def _as_table(value: object) -> dict[str, object]:
+    assert _is_table(value)
+    return value
+
+
+def _as_str_dict(value: object) -> dict[str, str]:
+    assert _is_str_dict(value)
+    return value
+
+
+def _as_object_list(value: object) -> list[object]:
+    assert _is_object_list(value)
+    return value
+
+
+def _as_table_list(value: object) -> list[dict[str, object]]:
+    items = _as_object_list(value)
+    return [_as_table(item) for item in items]
+
+
+def _as_str(value: object) -> str:
+    assert isinstance(value, str)
+    return value
 
 
 @pytest.fixture(scope="module")
@@ -21,9 +62,7 @@ def receipt(tmp_path_factory: pytest.TempPathFactory) -> tuple[Path, Path, set[s
     # Fixed git and producer commands own only this temporary source receipt.
     # meiva:link meizel/docs/checker/typescript-evidence.meiva.okf.md
     root = tmp_path_factory.mktemp("ts-source-index")
-    material = cast(
-        "dict[str, str]", json.loads(Path(__file__).with_name("material.json").read_text())
-    )
+    material = _as_str_dict(json.loads(Path(__file__).with_name("material.json").read_text()))
     files: set[str] = set()
     for name, source in material.items():
         relative = f"ui/web/src/lib/{name}.ts"
@@ -50,23 +89,23 @@ def receipt(tmp_path_factory: pytest.TempPathFactory) -> tuple[Path, Path, set[s
 
 def test_fixed_six_source_receipt(receipt: tuple[Path, Path, set[str]]) -> None:
     _, index, _ = receipt
-    payload = cast("dict[str, object]", json.loads(index.read_text()))
-    sources = cast("list[dict[str, object]]", payload["sources"])
-    by_name = {Path(cast("str", source["path"])).stem: source for source in sources}
+    payload = _as_table(json.loads(index.read_text()))
+    sources = _as_table_list(payload["sources"])
+    by_name = {Path(_as_str(source["path"])).stem: source for source in sources}
     assert len(by_name) == 6
     for name in ("direct-map", "nested-map", "frozen-set"):
-        [allocation] = cast("list[dict[str, object]]", by_name[name]["observations"])
+        [allocation] = _as_table_list(by_name[name]["observations"])
         assert allocation["kind"] == "module-allocation"
         assert allocation["declarations"]
-    [nested] = cast("list[dict[str, object]]", by_name["nested-map"]["observations"])
+    [nested] = _as_table_list(by_name["nested-map"]["observations"])
     assert nested["properties"] == ["cache"]
-    [frozen] = cast("list[dict[str, object]]", by_name["frozen-set"]["observations"])
+    [frozen] = _as_table_list(by_name["frozen-set"]["observations"])
     assert frozen["frozen_surface"] and frozen["freeze_receiver"] and frozen["freeze_callee"]
     for name in ("fresh-local", "rebound-map", "unknown-factory"):
-        observations = cast("list[dict[str, object]]", by_name[name]["observations"])
+        observations = _as_table_list(by_name[name]["observations"])
         assert all(item["kind"] == "unknown" for item in observations)
-    rebound = cast("list[dict[str, object]]", by_name["rebound-map"]["observations"])[-1]
-    assert "source-shadowed" in cast("str", rebound["reason"])
+    rebound = _as_table_list(by_name["rebound-map"]["observations"])[-1]
+    assert "source-shadowed" in _as_str(rebound["reason"])
 
 
 def test_loader_refuses_invalid_identity_and_source_sets(
@@ -75,7 +114,7 @@ def test_loader_refuses_invalid_identity_and_source_sets(
     capsys: pytest.CaptureFixture[str],
 ) -> None:
     root, index, _ = receipt
-    original = cast("dict[str, object]", json.loads(index.read_text()))
+    original = _as_table(json.loads(index.read_text()))
     invalid: list[dict[str, object]] = []
     for field, value in (("version", 2), ("version", True), ("root", "/another-repository")):
         changed = copy.deepcopy(original)
@@ -83,14 +122,14 @@ def test_loader_refuses_invalid_identity_and_source_sets(
         invalid.append(changed)
     for field in ("sources", "dependencies"):
         changed = copy.deepcopy(original)
-        entries = cast("list[dict[str, object]]", changed[field])
+        entries = _as_table_list(changed[field])
         entries[0]["sha256"] = "0" * 64
         invalid.append(changed)
         missing = copy.deepcopy(original)
-        cast("list[object]", missing[field]).pop(0)
+        _as_object_list(missing[field]).pop(0)
         invalid.append(missing)
     wrong_path = copy.deepcopy(original)
-    cast("list[dict[str, object]]", wrong_path["sources"])[0]["path"] = "../escape.ts"
+    _as_table_list(wrong_path["sources"])[0]["path"] = "../escape.ts"
     invalid.append(wrong_path)
     for payload in invalid:
         bad = tmp_path / "bad.json"
@@ -196,9 +235,9 @@ def test_frozen_holder_keeps_collection_surface_and_literal_path_separate(
         capture_output=True,
         text=True,
     )
-    payload = cast("dict[str, object]", json.loads(result.stdout))
-    [receipt] = cast("list[dict[str, object]]", payload["sources"])
-    holder, direct = cast("list[dict[str, object]]", receipt["observations"])
+    payload = _as_table(json.loads(result.stdout))
+    [receipt] = _as_table_list(payload["sources"])
+    holder, direct = _as_table_list(receipt["observations"])
     assert holder["properties"] == ["a.b"]
     assert holder["frozen_surface"] is False
     assert holder["freeze_receiver"] == holder["freeze_callee"] == []
