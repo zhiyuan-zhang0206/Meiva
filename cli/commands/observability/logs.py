@@ -58,16 +58,28 @@ class RetentionFailure:
     error: OSError
 
 
+# meiva:note
+# The supervisor names two of its own logs without the `meiva-` prefix and with an
+# underscore: `agent_host.log` (the per-turn agent runtime, whose 49 MB files are the
+# main evidence for a failed turn) and `meiva-root.log` (the root supervisor that
+# starts every unit). Neither matches the `agent-` prefix, so both fell to `other` and
+# were deleted after three days -- the retention window that evidence is read from
+# was silently the shortest one. Their rotated copies arrive here as `agent_host` and
+# `meiva-root`, while `meiva-root.out.log` is stripped to `root`, so all three names
+# must answer the same question.
+# meiva:link cli/commands/observability/docs/log-maintenance.md
 def _service_family(service: str) -> str:
     if service.startswith("gateway"):
         return "gateway"
     if service == "ops" or service.startswith(("ops-", "ops_")):
         return "ops"
+    if service in {"root", "meiva-root"}:
+        return "ops"
     if service.endswith(("-watchdog", "_watchdog")):
         return "watchdog"
     if _AGENT_SHELL_SERVICE.match(service):
         return "shell"
-    if service.startswith("agent-"):
+    if service == "agent_host" or service.startswith("agent-"):
         return "agent"
     return "other"
 
