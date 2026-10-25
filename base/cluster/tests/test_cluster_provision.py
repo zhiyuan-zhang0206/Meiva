@@ -10,14 +10,14 @@ import pytest
 from psycopg import sql
 
 from base.cluster import drop_database, provision_database
-from base.cluster.authority.provision_plan import (
+from base.cluster.checkpoint_schema import PostgresCheckpointSchema
+from base.cluster.dataplane.pg_admin import owner_conninfo
+from base.cluster.dataplane.provision_plan import (
     CHECKPOINT_SCHEMA_MEIVA_MIGRATIONS,
     expected_checkpoint_schema_versions,
     plan_checkpoint_schema,
     plan_pgvector_extension,
 )
-from base.cluster.checkpoint_schema import PostgresCheckpointSchema
-from base.cluster.dataplane.pg_admin import owner_conninfo
 from base.cluster.derive import swap_db
 from base.cluster.provision import ensure_checkpoint_schema, ensure_pgvector_extension
 from base.config import settings

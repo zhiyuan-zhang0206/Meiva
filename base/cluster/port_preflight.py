@@ -136,22 +136,13 @@ def verify_listener_custody(
 ) -> frozenset[int]:
     listeners = frozenset(listener_pids)
     if not has_identity:
-        if listeners:
-            raise RuntimeError(f"port {port} has listener(s) without a native launch receipt")
-        if required:
-            raise RuntimeError(f"no native launch receipt owns port {port}")
-        return frozenset()
-    if not owner_live:
-        if listeners:
-            raise RuntimeError(f"port {port} has listener(s) after the native owner exited")
-        if required:
-            raise RuntimeError(f"native owner for port {port} is not live")
-        return frozenset()
-    for pid in listeners:
-        if pid not in owned_pids:
-            raise RuntimeError(f"listener pid {pid} on port {port} does not belong to native owner")
+        if listeners or required:
+            raise RuntimeError(f"no owned data-plane process for listener :{port}")
+        return listeners
     if required and not listeners:
-        raise RuntimeError(f"native owner has no listener on port {port}")
+        raise RuntimeError(f"recorded data-plane process has no listener :{port}; custody retained")
+    if not owner_live or not listeners <= set(owned_pids):
+        raise RuntimeError(f"data-plane listener :{port} does not belong to the recorded process")
     return listeners
 
 

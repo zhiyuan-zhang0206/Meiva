@@ -82,7 +82,7 @@ def pg_tool(
         return bin_dir / name
     from base.cluster.dataplane.runtime_binaries import vendored_pg_bin_dir
 
-    vendored = vendored_pg_bin_dir(home=home)
+    vendored = vendored_pg_bin_dir() if home is None else vendored_pg_bin_dir(home=home)
     if vendored is not None and (vendored / name).exists():
         return vendored / name
     if platform_bin_dir is not None:
