@@ -11,7 +11,7 @@ from typing import Any, cast
 import pytest
 
 from base.clock import SYSTEM_TIMERS
-from base.cluster.machine import MachineIdentity
+from base.cluster.machine import MachineIdentityReader
 from base.config import ConfigBoot
 from base.host.system.tests.fake_commands import fake_host
 from base.sessions.tests.refuse_helper import refuse_helper
@@ -45,7 +45,7 @@ def _world(
     *,
     operator_database: OperatorDatabaseFactory,
     producer: Callable[[], EventPipeline],
-    command_config_machine: tuple[ConfigBoot, MachineIdentity],
+    command_config_machine: tuple[ConfigBoot, MachineIdentityReader],
 ) -> tuple[Path, Path, ConvergeCtx]:
     config, machine = command_config_machine
     repo = tmp_path / "repo"
@@ -122,7 +122,7 @@ def test_interrupted_stage_publication_is_reported_and_never_resumed(
     operator_database: OperatorDatabaseFactory,
     operator_pipeline: Callable[[], EventPipeline],
     *,
-    command_config_machine: tuple[ConfigBoot, MachineIdentity],
+    command_config_machine: tuple[ConfigBoot, MachineIdentityReader],
 ) -> None:
     source, client, context = _world(
         tmp_path,
@@ -164,7 +164,7 @@ def test_interrupted_target_claim_is_reported_and_leaves_a_late_target_alone(
     operator_database: OperatorDatabaseFactory,
     operator_pipeline: Callable[[], EventPipeline],
     *,
-    command_config_machine: tuple[ConfigBoot, MachineIdentity],
+    command_config_machine: tuple[ConfigBoot, MachineIdentityReader],
 ) -> None:
     source, client, context = _world(
         tmp_path,
@@ -231,7 +231,7 @@ def test_cleanup_root_claim_restores_tree_modified_before_private_isolation(
     operator_database: OperatorDatabaseFactory,
     operator_pipeline: Callable[[], EventPipeline],
     *,
-    command_config_machine: tuple[ConfigBoot, MachineIdentity],
+    command_config_machine: tuple[ConfigBoot, MachineIdentityReader],
 ) -> None:
     source, client, context = _world(
         tmp_path,
@@ -275,7 +275,7 @@ def test_restart_reconciles_cleanup_claim_before_post_write(
     operator_database: OperatorDatabaseFactory,
     operator_pipeline: Callable[[], EventPipeline],
     *,
-    command_config_machine: tuple[ConfigBoot, MachineIdentity],
+    command_config_machine: tuple[ConfigBoot, MachineIdentityReader],
 ) -> None:
     source, client, context = _world(
         tmp_path,
@@ -330,7 +330,7 @@ def test_restart_does_not_adopt_ambiguous_per_file_claim(
     operator_database: OperatorDatabaseFactory,
     operator_pipeline: Callable[[], EventPipeline],
     *,
-    command_config_machine: tuple[ConfigBoot, MachineIdentity],
+    command_config_machine: tuple[ConfigBoot, MachineIdentityReader],
 ) -> None:
     source, client, context = _world(
         tmp_path,
@@ -364,7 +364,7 @@ def test_preexisting_per_file_quarantine_is_preserved_without_adoption(
     operator_database: OperatorDatabaseFactory,
     operator_pipeline: Callable[[], EventPipeline],
     *,
-    command_config_machine: tuple[ConfigBoot, MachineIdentity],
+    command_config_machine: tuple[ConfigBoot, MachineIdentityReader],
 ) -> None:
     source, client, context = _world(
         tmp_path,
@@ -397,7 +397,7 @@ def test_per_file_claim_failure_is_terminal_after_private_root_claim(
     operator_database: OperatorDatabaseFactory,
     operator_pipeline: Callable[[], EventPipeline],
     *,
-    command_config_machine: tuple[ConfigBoot, MachineIdentity],
+    command_config_machine: tuple[ConfigBoot, MachineIdentityReader],
 ) -> None:
     source, client, context = _world(
         tmp_path,
@@ -472,7 +472,7 @@ def test_converge_terminally_records_post_verification_replacement(
     operator_database: OperatorDatabaseFactory,
     operator_pipeline: Callable[[], EventPipeline],
     *,
-    command_config_machine: tuple[ConfigBoot, MachineIdentity],
+    command_config_machine: tuple[ConfigBoot, MachineIdentityReader],
 ) -> None:
     source, client, context = _world(
         tmp_path,
@@ -518,7 +518,7 @@ def test_linked_external_roots_are_rejected_without_following(
     operator_database: OperatorDatabaseFactory,
     operator_pipeline: Callable[[], EventPipeline],
     *,
-    command_config_machine: tuple[ConfigBoot, MachineIdentity],
+    command_config_machine: tuple[ConfigBoot, MachineIdentityReader],
 ) -> None:
     repo = tmp_path / "repo"
     skill_source(repo)
@@ -553,7 +553,7 @@ def test_linked_host_home_is_rejected_without_inspection(
     operator_database: OperatorDatabaseFactory,
     operator_pipeline: Callable[[], EventPipeline],
     *,
-    command_config_machine: tuple[ConfigBoot, MachineIdentity],
+    command_config_machine: tuple[ConfigBoot, MachineIdentityReader],
 ) -> None:
     repo = tmp_path / "repo"
     skill_source(repo)
@@ -583,7 +583,7 @@ def test_source_tree_link_is_fatal_before_copy(
     operator_database: OperatorDatabaseFactory,
     operator_pipeline: Callable[[], EventPipeline],
     *,
-    command_config_machine: tuple[ConfigBoot, MachineIdentity],
+    command_config_machine: tuple[ConfigBoot, MachineIdentityReader],
 ) -> None:
     repo = tmp_path / "repo"
     source = skill_source(repo)
@@ -611,7 +611,7 @@ def test_source_path_component_link_is_fatal_before_copy(
     operator_database: OperatorDatabaseFactory,
     operator_pipeline: Callable[[], EventPipeline],
     *,
-    command_config_machine: tuple[ConfigBoot, MachineIdentity],
+    command_config_machine: tuple[ConfigBoot, MachineIdentityReader],
 ) -> None:
     repo = tmp_path / "repo"
     actual_agents = tmp_path / "actual-agents"
@@ -645,7 +645,7 @@ def test_cleanup_retains_private_residue_without_path_unlink(
     operator_database: OperatorDatabaseFactory,
     operator_pipeline: Callable[[], EventPipeline],
     *,
-    command_config_machine: tuple[ConfigBoot, MachineIdentity],
+    command_config_machine: tuple[ConfigBoot, MachineIdentityReader],
 ) -> None:
     repo = tmp_path / "repo"
     source = skill_source(repo)

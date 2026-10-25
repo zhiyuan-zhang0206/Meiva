@@ -3,7 +3,7 @@ import pytest
 
 import base.db
 from base.api_contracts.idempotency import keyed_headers
-from base.cluster.machine import MachineIdentity
+from base.cluster.machine import MachineIdentityReader
 from base.cluster.machine.tests.identity import machine_identity as machine_identity
 from base.db.code_version_gate import ProcessDbGate
 from gateway.schedules import router
@@ -16,7 +16,7 @@ def test_failed_receipt_commit_rolls_back_restart_revision_and_queue(
     db_conn: psycopg.Connection,
     *,
     database_gate: ProcessDbGate,
-    machine_identity: MachineIdentity,
+    machine_identity: MachineIdentityReader,
 ) -> None:
     with schedule_client(machine=machine_identity) as client:
         sid = client.post("/api/schedules", json={"name": "rollback", "script": "pass"}).json()[
@@ -37,7 +37,10 @@ def test_failed_receipt_commit_rolls_back_restart_revision_and_queue(
 
 
 def test_receipt_replays_after_schedule_deletion(
-    gateway_data_plane: None, db_conn: psycopg.Connection, *, machine_identity: MachineIdentity
+    gateway_data_plane: None,
+    db_conn: psycopg.Connection,
+    *,
+    machine_identity: MachineIdentityReader,
 ) -> None:
     with schedule_client(machine=machine_identity) as client:
         sid = client.post("/api/schedules", json={"name": "deleted", "script": "pass"}).json()["id"]
@@ -55,7 +58,7 @@ def test_delete_cleanup_enqueue_failure_preserves_schedule(
     db_conn: psycopg.Connection,
     *,
     database_gate: ProcessDbGate,
-    machine_identity: MachineIdentity,
+    machine_identity: MachineIdentityReader,
 ) -> None:
     with schedule_client(machine=machine_identity) as client:
         sid = client.post(

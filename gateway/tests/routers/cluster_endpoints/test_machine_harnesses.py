@@ -8,7 +8,7 @@ from fastapi import HTTPException
 
 from base.agents.birth.harness import LAUNCHABLE_HARNESSES
 from base.api_contracts.agent_contract import Harness
-from base.cluster.machine import MachineIdentity
+from base.cluster.machine import MachineIdentityReader
 from base.cluster.machine.tests.identity import MachineIdentitySetter
 from base.db import Database
 from gateway.cluster.harness_probe import probe_harnesses
@@ -58,7 +58,7 @@ async def test_a_remote_machine_answers_from_its_own_runner(
     database: Database,
     set_machine_identity: MachineIdentitySetter,
 ) -> None:
-    local: MachineIdentity = set_machine_identity(role="gateway", name="gw-only")
+    local: MachineIdentityReader = set_machine_identity(role="gateway", name="gw-only")
 
     with runner_ops(db_conn, REMOTE, {"harness_probe": completed(_WIRE)}):
         probed = await probe_harnesses(REMOTE, db=database, local_machine=local)
@@ -71,7 +71,7 @@ async def test_a_remote_machine_answers_from_its_own_runner(
 async def test_unknown_machine_is_404(
     database: Database, set_machine_identity: MachineIdentitySetter
 ) -> None:
-    local: MachineIdentity = set_machine_identity(role="gateway", name="gw-only")
+    local: MachineIdentityReader = set_machine_identity(role="gateway", name="gw-only")
     with pytest.raises(HTTPException) as raised:
         await probe_harnesses("ghost-host", db=database, local_machine=local)
     assert raised.value.status_code == 404
@@ -84,7 +84,7 @@ async def test_a_remote_box_without_a_runner_cannot_report(
     database: Database,
     set_machine_identity: MachineIdentitySetter,
 ) -> None:
-    local: MachineIdentity = set_machine_identity(role="gateway", name="gw-only")
+    local: MachineIdentityReader = set_machine_identity(role="gateway", name="gw-only")
     answer = {"harness_probe": completed(_WIRE)}
     with (
         runner_ops(db_conn, REMOTE, answer, roles=("gateway",)),
@@ -104,7 +104,7 @@ async def test_a_remote_box_without_a_runner_cannot_report(
 async def test_this_box_without_a_runner_refuses(
     set_machine_identity: MachineIdentitySetter, database: Database, db_conn: psycopg.Connection
 ) -> None:
-    local: MachineIdentity = set_machine_identity(role="gateway", name="gw-only")
+    local: MachineIdentityReader = set_machine_identity(role="gateway", name="gw-only")
     answer = {"harness_probe": completed(_WIRE)}
 
     with (
@@ -121,7 +121,7 @@ async def test_this_box_without_a_runner_refuses(
 # was stored rather than re-reading the box.
 # meiva:link base/agents/docs/harness/harness.meiva.okf.md
 def test_route_serves_the_cached_rows(set_machine_identity: MachineIdentitySetter) -> None:
-    machine: MachineIdentity = set_machine_identity(role="gateway", name="gw-only")
+    machine: MachineIdentityReader = set_machine_identity(role="gateway", name="gw-only")
     seeded = availability_rows(
         HarnessProbeResult(
             machine="gw-only",
@@ -151,7 +151,7 @@ def test_route_serves_the_cached_rows(set_machine_identity: MachineIdentitySette
 def test_route_refuses_a_machine_that_cannot_run_agents(
     set_machine_identity: MachineIdentitySetter,
 ) -> None:
-    machine: MachineIdentity = set_machine_identity(role="gateway", name="gw-only")
+    machine: MachineIdentityReader = set_machine_identity(role="gateway", name="gw-only")
     with gateway_test_client(machine=machine) as client:
         resp = client.get("/api/cluster/machines/gw-only/harnesses")
     assert resp.status_code == 503, resp.text
@@ -161,7 +161,7 @@ def test_route_refuses_a_machine_that_cannot_run_agents(
 def test_route_404s_an_unknown_machine(
     set_machine_identity: MachineIdentitySetter,
 ) -> None:
-    machine: MachineIdentity = set_machine_identity(role="gateway", name="gw-only")
+    machine: MachineIdentityReader = set_machine_identity(role="gateway", name="gw-only")
     with gateway_test_client(machine=machine) as client:
         resp = client.get("/api/cluster/machines/ghost-host/harnesses")
     assert resp.status_code == 404, resp.text

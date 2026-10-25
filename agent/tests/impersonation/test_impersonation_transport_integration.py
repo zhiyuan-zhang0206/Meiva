@@ -33,7 +33,7 @@ from base.agents.context.clients import ClientSet
 from base.agents.impersonation import delivery
 from base.agents.inbox.insert import insert_inbound_message
 from base.agents.observation.relay_supervision import RelaySupervision
-from base.cluster.machine import MachineIdentity
+from base.cluster.machine import MachineIdentityReader
 from base.config.service_read import ConfigAuthority
 from base.db import Database
 from base.db.code_version_gate import ProcessDbGate
@@ -52,7 +52,7 @@ async def test_transport_fault_keeps_native_parked_until_actual_lease_end(
     config_authority: ConfigAuthority,
     handoff_clients: ClientSet,
     database_gate: ProcessDbGate,
-    machine_identity: MachineIdentity,
+    machine_identity: MachineIdentityReader,
 ) -> None:
     graph, saver, ctx, config, reset, owner, requested, model_calls = await prepare_graph(
         db_conn,
@@ -126,7 +126,7 @@ async def test_successor_ends_the_takeover_and_resumes_preserved_pending_input(
     config_authority: ConfigAuthority,
     handoff_clients: ClientSet,
     database_gate: ProcessDbGate,
-    machine_identity: MachineIdentity,
+    machine_identity: MachineIdentityReader,
 ) -> None:
     graph, saver, ctx, config, reset, owner, requested, model_calls = await prepare_graph(
         db_conn,
@@ -218,7 +218,7 @@ async def test_late_ack_after_delivery_budget_exhaustion_keeps_native_parked(
     config_authority: ConfigAuthority,
     handoff_clients: ClientSet,
     database_gate: ProcessDbGate,
-    machine_identity: MachineIdentity,
+    machine_identity: MachineIdentityReader,
 ) -> None:
     graph, saver, ctx, config, reset, owner, requested, model_calls = await prepare_graph(
         db_conn,
@@ -330,7 +330,7 @@ async def test_end_note_resumes_an_empty_queue(
     config_authority: ConfigAuthority,
     handoff_clients: ClientSet,
     database_gate: ProcessDbGate,
-    machine_identity: MachineIdentity,
+    machine_identity: MachineIdentityReader,
 ) -> None:
     graph, saver, ctx, config, reset, owner, requested, model_calls = await prepare_graph(
         db_conn,
@@ -411,7 +411,7 @@ async def test_acknowledged_but_unfinished_input_reaches_the_resumed_native(
     config_authority: ConfigAuthority,
     handoff_clients: ClientSet,
     database_gate: ProcessDbGate,
-    machine_identity: MachineIdentity,
+    machine_identity: MachineIdentityReader,
 ) -> None:
     graph, saver, ctx, config, reset, owner, requested, model_calls = await prepare_graph(
         db_conn,

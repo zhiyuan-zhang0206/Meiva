@@ -13,7 +13,7 @@ from pathlib import Path
 
 import pytest
 
-from base.cluster.machine import MachineIdentity
+from base.cluster.machine import MachineIdentityReader
 from base.packages.extensions import install_registry as reg
 from cli.commands.extensions.mcp import UvBuild, cmd_mcp_install, cmd_mcp_upgrade
 from cli.commands.extensions.plugins import cmd_plugins_install
@@ -193,7 +193,7 @@ def test_plugins_install_refuses_invalid_manifest_before_detection(
     tmp_path: Path,
     capsys: pytest.CaptureFixture,
     *,
-    command_machine: MachineIdentity,
+    command_machine: MachineIdentityReader,
 ) -> None:
     pkg = tmp_path / "pkg"
     pkg.mkdir()
@@ -220,7 +220,7 @@ def test_plugins_install_accepts_manifest_with_valid_engines(
     tmp_path: Path,
     capsys: pytest.CaptureFixture,
     *,
-    command_machine: MachineIdentity,
+    command_machine: MachineIdentityReader,
 ) -> None:
     """A valid manifest alone does not make an otherwise-unrecognized package
     installable — the legacy detection still decides the payload kind."""
@@ -246,7 +246,7 @@ def test_skill_install_refuses_invalid_manifest_before_discovery(
     tmp_path: Path,
     capsys: pytest.CaptureFixture,
     *,
-    command_machine: MachineIdentity,
+    command_machine: MachineIdentityReader,
 ) -> None:
     pkg = tmp_path / "skills-src"
     pkg.mkdir()
@@ -271,7 +271,7 @@ def test_skill_install_valid_manifest_proceeds(
     unit_home: Path,
     tmp_path: Path,
     *,
-    command_machine: MachineIdentity,
+    command_machine: MachineIdentityReader,
 ) -> None:
     pkg = tmp_path / "skills-src"
     pkg.mkdir()

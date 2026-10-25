@@ -25,7 +25,7 @@ from base.agents.messages.envelope import validate_source
 from base.agents.messages.timestamp_policy import TimestampPolicy
 from base.api_contracts.idempotency import keyed_headers
 from base.clock import Clock
-from base.cluster.machine import MachineIdentity
+from base.cluster.machine import MachineIdentityReader
 from base.cluster.machine.tests.identity import machine_identity as machine_identity
 from base.config import settings
 from base.db import Database, create_agent
@@ -65,7 +65,7 @@ async def _admit(
 # meiva:note
 # Post a message through a real gateway app with the cluster credential on.
 @contextlib.contextmanager
-def authenticated_gateway(*, machine: MachineIdentity) -> Generator[TestClient]:
+def authenticated_gateway(*, machine: MachineIdentityReader) -> Generator[TestClient]:
     with gateway_test_client(machine=machine, cluster_secret=_SECRET) as client:
         yield client
 
@@ -107,7 +107,7 @@ async def test_cli_send_as_user_reaches_the_agent_as_a_plain_user_message(
     aops_pool: AsyncConnectionPool,
     database: Database,
     *,
-    machine_identity: MachineIdentity,
+    machine_identity: MachineIdentityReader,
 ) -> None:
     incarnation = await _admit(db_conn, aops_pool, database)
     with authenticated_gateway(machine=machine_identity) as client:
@@ -123,7 +123,7 @@ async def test_cli_send_as_external_agent_reaches_the_agent_as_that_agent(
     aops_pool: AsyncConnectionPool,
     database: Database,
     *,
-    machine_identity: MachineIdentity,
+    machine_identity: MachineIdentityReader,
 ) -> None:
     incarnation = await _admit(db_conn, aops_pool, database)
     with authenticated_gateway(machine=machine_identity) as client:
@@ -143,7 +143,7 @@ async def test_a_system_sourced_chat_reaches_the_agent_as_a_system_note(
     aops_pool: AsyncConnectionPool,
     database: Database,
     *,
-    machine_identity: MachineIdentity,
+    machine_identity: MachineIdentityReader,
 ) -> None:
     # meiva:note
     # The upload delivery writes its file list as `system:upload`. The agent reads it enclosed
@@ -166,7 +166,7 @@ async def test_external_agent_message_is_listed_with_its_source_for_the_timeline
     aops_pool: AsyncConnectionPool,
     database: Database,
     *,
-    machine_identity: MachineIdentity,
+    machine_identity: MachineIdentityReader,
 ) -> None:
     incarnation = await _admit(db_conn, aops_pool, database)
     with authenticated_gateway(machine=machine_identity) as client:
@@ -193,7 +193,7 @@ def test_gateway_rejects_a_malformed_declaration_before_any_insert(
     db_conn: psycopg.Connection,
     source: str,
     *,
-    machine_identity: MachineIdentity,
+    machine_identity: MachineIdentityReader,
 ) -> None:
     agent_id = create_agent(db_conn)
     db_conn.execute(
@@ -220,7 +220,7 @@ async def test_an_unauthenticated_external_agent_declaration_is_refused(
     aops_pool: AsyncConnectionPool,
     database: Database,
     *,
-    machine_identity: MachineIdentity,
+    machine_identity: MachineIdentityReader,
 ) -> None:
     incarnation = await _admit(db_conn, aops_pool, database)
     with authenticated_gateway(machine=machine_identity) as client:

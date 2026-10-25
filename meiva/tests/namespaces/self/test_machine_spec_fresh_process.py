@@ -19,8 +19,17 @@ _PROBE = Path(__file__).with_name("machine_probe.py")
 # meiva:note
 # The probe runs a fixed argv from this file; `sys.executable` is the test's own
 # interpreter, so the subprocess call carries no shell and no caller input.
-def test_a_machine_read_in_a_fresh_process_loads_no_plugins_and_no_database_stack() -> None:
-    env = {key: value for key, value in os.environ.items() if key != "MEIVA_AGENT_ID"}
+def test_a_machine_read_in_a_fresh_process_loads_no_plugins_and_no_database_stack(
+    tmp_path: Path,
+) -> None:
+    (tmp_path / ".env").write_bytes(b"\xff")
+    env = {
+        key: value
+        for key, value in os.environ.items()
+        if key not in {"MEIVA_AGENT_ID", "MEIVA_CONFIG_BOOT"}
+    }
+    env["MEIVA_HOME"] = str(tmp_path)
+    env["MEIVA_CONFIG_FETCH"] = "skip"
     proc = subprocess.run(  # noqa: S603
         [sys.executable, "-I", "-B", "-X", "utf8", str(_PROBE), str(_REPO_ROOT)],
         cwd=_REPO_ROOT,
@@ -36,6 +45,7 @@ def test_a_machine_read_in_a_fresh_process_loads_no_plugins_and_no_database_stac
 
     assert report == {
         "spec": ["explicit", "owned"],
+        "config_prepared": False,
         "load_attempted": False,
         "installed": False,
         "db_stack_loaded": False,

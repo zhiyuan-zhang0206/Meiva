@@ -8,7 +8,7 @@ from psycopg.types.json import Jsonb
 from psycopg_pool import ConnectionPool
 
 from base.agents.tests.units import spawn_agent
-from base.cluster.machine import MachineIdentity
+from base.cluster.machine import MachineIdentityReader
 from base.config import settings
 from base.config.service_read import ConfigAuthority
 from base.db.code_version_gate import ProcessDbGate
@@ -36,7 +36,7 @@ def make_idle(
     model_catalog: ModelCatalog,
     config_authority: ConfigAuthority,
     database_gate: ProcessDbGate,
-    local_machine: MachineIdentity,
+    local_machine: MachineIdentityReader,
 ) -> int:
     if last_active_s_ago is None:
         last_active_s_ago = status_changed_s_ago
@@ -76,7 +76,7 @@ def lease(
     delta_version: int = 0,
     applied_version: int = 0,
     handoff_applied: bool = False,
-    local_machine: MachineIdentity,
+    local_machine: MachineIdentityReader,
 ) -> None:
     with db.cursor() as cur:
         cur.execute(

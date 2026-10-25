@@ -26,7 +26,7 @@ import numpy as np
 import pytest
 from fastapi import FastAPI
 
-from base.cluster.machine import MachineIdentity
+from base.cluster.machine import MachineIdentityReader
 from base.host.db_authority.api import AcceptanceCache
 from base.lm.catalog import ModelCatalog
 from base.lm.catalog.provider_keys import ProviderKeys
@@ -202,7 +202,7 @@ class SearchRig:
     service: SearchService
     judge: Judge
     embedder: FakeEmbedder
-    machine: MachineIdentity
+    machine: MachineIdentityReader
     catalog: ModelCatalog
     fields: dict[str, Any] = field(default_factory=dict)
 
@@ -263,7 +263,9 @@ def asgi_client(app: FastAPI) -> httpx.AsyncClient:
 
 @pytest.fixture
 def rig(
-    monkeypatch: pytest.MonkeyPatch, model_catalog: ModelCatalog, machine_identity: MachineIdentity
+    monkeypatch: pytest.MonkeyPatch,
+    model_catalog: ModelCatalog,
+    machine_identity: MachineIdentityReader,
 ) -> Generator[SearchRig]:
     service = SearchService()
     judge = Judge()

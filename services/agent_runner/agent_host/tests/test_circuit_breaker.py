@@ -23,7 +23,7 @@ from agent.turn.runloop import _handle_fatal_llm_error
 from base.agents.context import MeivaContext
 from base.agents.tests.units import spawn_agent
 from base.clock import Clock
-from base.cluster.machine import MachineIdentity
+from base.cluster.machine import MachineIdentityReader
 from base.cluster.machine.tests.identity import machine_identity as machine_identity
 from base.config.service_read import ConfigAuthority
 from base.config.tests.configuration import defaults
@@ -142,7 +142,7 @@ async def test_permanent_provider_error_reports_metadata_to_nearest_alive_ancest
     model_catalog: ModelCatalog,
     config_authority: ConfigAuthority,
     database_gate: ProcessDbGate,
-    machine_identity: MachineIdentity,
+    machine_identity: MachineIdentityReader,
 ) -> None:
     """A blocked descendant reports only metadata through immutable SPAWN lineage.
 
@@ -246,7 +246,7 @@ async def test_context_overflow_halts_background_wakes_and_reports_to_an_ancesto
     model_catalog: ModelCatalog,
     config_authority: ConfigAuthority,
     database_gate: ProcessDbGate,
-    machine_identity: MachineIdentity,
+    machine_identity: MachineIdentityReader,
 ) -> None:
     """A permanent overflow rejection also halts unattended retries."""
     ancestor_id = spawn_agent(
@@ -350,7 +350,7 @@ async def test_heartbeat_while_breaker_open_parks(
     config_authority: ConfigAuthority,
     reason: str,
     database_gate: ProcessDbGate,
-    machine_identity: MachineIdentity,
+    machine_identity: MachineIdentityReader,
 ) -> None:
     """Every permanent rejection blocks background model requests: the heartbeat is
     consumed without a note and parks at claim — no LLM call, no compact, no
@@ -390,7 +390,7 @@ async def test_chat_cobatched_with_open_breaker_heartbeat_reaches_llm(
     model_catalog: ModelCatalog,
     config_authority: ConfigAuthority,
     database_gate: ProcessDbGate,
-    machine_identity: MachineIdentity,
+    machine_identity: MachineIdentityReader,
 ) -> None:
     """A parked heartbeat must not bury a same-batch chat in either FIFO order."""
     tid = spawn_agent(
@@ -431,7 +431,7 @@ async def test_claim_parks_idle_while_breaker_open(
     config_authority: ConfigAuthority,
     reason: str,
     database_gate: ProcessDbGate,
-    machine_identity: MachineIdentity,
+    machine_identity: MachineIdentityReader,
 ) -> None:
     """The claim no-batch branch parks every open breaker: a
     self-initiated continue-loop (the next graph invocation after the turn
@@ -465,7 +465,7 @@ async def test_claim_does_not_park_while_breaker_closed(
     model_catalog: ModelCatalog,
     config_authority: ConfigAuthority,
     database_gate: ProcessDbGate,
-    machine_identity: MachineIdentity,
+    machine_identity: MachineIdentityReader,
 ) -> None:
     """Control: with the breaker closed the same no-batch state routes to the
     LLM as before (the continue-working path)."""
@@ -496,7 +496,7 @@ async def test_heartbeat_normal_when_breaker_closed(
     model_catalog: ModelCatalog,
     config_authority: ConfigAuthority,
     database_gate: ProcessDbGate,
-    machine_identity: MachineIdentity,
+    machine_identity: MachineIdentityReader,
 ) -> None:
     """Breaker closed: the heartbeat check-in note is appended and the wake
     routes to the LLM as before — the gate only exists while the breaker is

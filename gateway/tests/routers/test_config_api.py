@@ -22,7 +22,7 @@ from typing import Any
 import psycopg
 import pytest
 
-from base.cluster.machine import MachineIdentity
+from base.cluster.machine import MachineIdentityReader
 from base.cluster.machine.tests.identity import machine_identity as machine_identity
 from base.config import runtime_config
 from base.config.service_read import ConfigAuthority
@@ -106,7 +106,7 @@ def test_config_fields_expose_capability() -> None:
 
 
 def test_get_config_exposes_target_machine_capabilities(
-    *, machine_identity: MachineIdentity
+    *, machine_identity: MachineIdentityReader
 ) -> None:
     """GET self carries the gateway's own capability set (machine_role()) so the
     panel can pick which capability sections a remote view renders. Only valid
@@ -307,7 +307,7 @@ def test_get_remote_failed_503(db_conn: psycopg.Connection) -> None:
 # outage (the old behavior). The listener registered here replaces the in-process
 # ops route the `gateway_local_runner` fixture serves for the local machine.
 def test_get_local_unreachable_503_no_in_process_fallback(
-    db_conn: psycopg.Connection, *, machine_identity: MachineIdentity
+    db_conn: psycopg.Connection, *, machine_identity: MachineIdentityReader
 ) -> None:
     with (
         runner_ops(
@@ -631,7 +631,7 @@ def test_get_self_raw_overrides_exposes_writable_host_field_not_readonly(
 
 
 def test_put_explicit_self_edits_remote_writable_host_toggle(
-    clean_overrides: Path, *, machine_identity: MachineIdentity
+    clean_overrides: Path, *, machine_identity: MachineIdentityReader
 ) -> None:
     """On a dual-role box, `?machine=<self>` is a host view (remote_writable gate),
     NOT the Cluster view — so a gateway-capability host toggle that is
@@ -696,7 +696,7 @@ def test_fleet_cluster_write_goes_only_to_owned_image(clean_overrides: Path) -> 
 
 
 def test_remote_host_fleet_toggle_respects_owned_image_and_policy(
-    *, config_authority: ConfigAuthority, machine_identity: MachineIdentity
+    *, config_authority: ConfigAuthority, machine_identity: MachineIdentityReader
 ) -> None:
     from base.packages.plugins.config_registration import disk_image_path, read_config_image
     from meiva_builtins.plugins.meiva_fleet.default_config import FleetConfig

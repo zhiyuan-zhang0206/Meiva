@@ -13,8 +13,8 @@ from base.agents.context.identity import AgentIdentity, ExternalLease
 from base.api_contracts.agent_contract import Harness
 from base.clock import SYSTEM_TIMERS, Clock
 from base.clock.configuration import clock_config_from_boot
-from base.cluster.machine import MachineIdentity
-from base.cluster.machine.boot import machine_from_boot
+from base.cluster.machine import MachineIdentityReader
+from base.cluster.machine.configured import ConfiguredMachineIdentity
 from base.config.tests.configuration import snapshot_process_config
 from base.native_process.runtime_incarnation import RuntimeIncarnation
 from base.native_process.turn_identity import HostedServiceResources, HostedTurnResources
@@ -36,14 +36,14 @@ async def hosted_resources() -> AsyncGenerator[HostedTurnResources]:
 # Clients over a snapshot of the process configuration, for a pinned agent whose test supplied none.
 def snapshot_clients() -> ClientSet:
     config = snapshot_process_config()
-    return derived_clients(config, machine_from_boot(config))
+    return derived_clients(config, ConfiguredMachineIdentity(config))
 
 
 # meiva:note
 # Clients over a snapshot of the process configuration whose database is the factory the test holds.
 def snapshot_clients_over(database: DatabaseFactory) -> ClientSet:
     config = snapshot_process_config()
-    return clients_over(config, machine_from_boot(config), database)
+    return clients_over(config, ConfiguredMachineIdentity(config), database)
 
 
 def pin_agent(
@@ -55,7 +55,7 @@ def pin_agent(
     incarnation: RuntimeIncarnation | None = None,
     clock_factory: Callable[[], Clock] | None = None,
     clients: ClientSet | None = None,
-    machine: MachineIdentity | None = None,
+    machine: MachineIdentityReader | None = None,
     harness: Harness = Harness.MEIVA,
 ) -> None:
     bound = getattr(meiva, "context", None)
@@ -91,7 +91,7 @@ def exec_context(
     resources: HostedTurnResources | None = None,
 ) -> MeivaContext:
     config = snapshot_process_config()
-    machine = machine_from_boot(config)
+    machine = ConfiguredMachineIdentity(config)
     return MeivaContext(
         identity=AgentIdentity(agent_id=agent_id, owns_loop=True, actor=actor),
         original_incarnation=incarnation,

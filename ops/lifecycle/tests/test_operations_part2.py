@@ -8,7 +8,7 @@ import psycopg
 import pytest
 from psycopg_pool import ConnectionPool
 
-from base.cluster.machine import MachineIdentity
+from base.cluster.machine import MachineIdentityReader
 from base.config import settings
 from base.config.service_read import ConfigAuthority
 from base.db import Database
@@ -93,7 +93,7 @@ async def test_launch_agent_op_hosted_validation_failure_preserves_its_row(
     db_pool: ConnectionPool,
     database: Database,
     event_bus: EventBus,
-    machine_identity: MachineIdentity,
+    machine_identity: MachineIdentityReader,
     model_catalog: ModelCatalog,
     config_authority: ConfigAuthority,
 ) -> None:

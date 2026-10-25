@@ -7,7 +7,7 @@ from __future__ import annotations
 import psycopg
 import pytest
 
-from base.cluster.machine import MachineIdentity
+from base.cluster.machine import MachineIdentityReader
 from base.cluster.machine.tests.identity import MachineIdentitySetter
 from base.cluster.machines import register_self
 from base.db import Database
@@ -35,7 +35,7 @@ def truncate_machines(db_conn: psycopg.Connection) -> None:
 def test_a_pure_gateway_reports_startup_once_a_stop_has_begun(
     set_machine_identity: MachineIdentitySetter,
 ) -> None:
-    machine: MachineIdentity = set_machine_identity(role="gateway", name="test-mc")
+    machine: MachineIdentityReader = set_machine_identity(role="gateway", name="test-mc")
     with gateway_test_client(machine=machine) as client:
         serving = client.get("/api/cluster/status").json()
         start_serving.clear_serving(resolve_meiva_home())

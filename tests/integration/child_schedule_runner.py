@@ -84,7 +84,7 @@ def completion_during_stall(schedule_id: int) -> None:
     from functools import partial
 
     from base.agents.context.clients import ClientSet
-    from base.cluster.machine.boot import machine_from_boot
+    from base.cluster.machine.configured import ConfiguredMachineIdentity
     from base.config import ConfigBoot
     from base.daemon.schedules.inputs import ScheduleInputs
     from base.paths import meiva_home
@@ -95,7 +95,7 @@ def completion_during_stall(schedule_id: int) -> None:
     _preload_plugins()
     config = ConfigBoot()
     config.read_process_environment()
-    machine = machine_from_boot(config)
+    machine = ConfiguredMachineIdentity(config)
     database, image = _database()
     clients = ClientSet(
         database=lambda: database,

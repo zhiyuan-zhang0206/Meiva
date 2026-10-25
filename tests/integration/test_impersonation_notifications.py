@@ -27,7 +27,7 @@ from base.agents.impersonation.tests.impersonation_support import recorded_tree
 from base.agents.messages.timestamp_policy import TimestampSource
 from base.api_contracts.caller_identity import CallerIdentity
 from base.clock import Clock
-from base.cluster.machine import MachineIdentity
+from base.cluster.machine import MachineIdentityReader
 from base.cluster.machine.tests.identity import machine_identity as machine_identity
 from base.config.service_read import ConfigAuthority
 from base.config.tests.configuration import defaults
@@ -51,7 +51,7 @@ def test_reminder_commands_are_bare_meiva(
     *,
     config_authority: ConfigAuthority,
     database_gate: ProcessDbGate,
-    machine_identity: MachineIdentity,
+    machine_identity: MachineIdentityReader,
 ) -> None:
     local_machine = machine_identity.name()
     agent_id = create_agent(db_conn)
@@ -116,7 +116,7 @@ def test_request_rejects_a_malformed_invoked_python(
     event_bus: EventBus,
     *,
     config_authority: ConfigAuthority,
-    machine_identity: MachineIdentity,
+    machine_identity: MachineIdentityReader,
 ) -> None:
     local_machine = machine_identity.name()
     agent_id = create_agent(db_conn)
@@ -262,7 +262,7 @@ async def test_termination_notices_precede_resurrection_in_native_claim(
     *,
     config_authority: ConfigAuthority,
     database_gate: ProcessDbGate,
-    machine_identity: MachineIdentity,
+    machine_identity: MachineIdentityReader,
 ) -> None:
     local_machine = machine_identity.name()
     owner, session = await _termination_session(
@@ -373,7 +373,7 @@ async def test_termination_closes_automatic_preparation_and_dismisses_reminders(
     *,
     config_authority: ConfigAuthority,
     database_gate: ProcessDbGate,
-    machine_identity: MachineIdentity,
+    machine_identity: MachineIdentityReader,
 ) -> None:
     local_machine = machine_identity.name()
     owner, session = await _termination_session(
@@ -409,7 +409,7 @@ async def test_termination_notice_rollback_and_repeated_status_writes(
     *,
     config_authority: ConfigAuthority,
     database_gate: ProcessDbGate,
-    machine_identity: MachineIdentity,
+    machine_identity: MachineIdentityReader,
 ) -> None:
     local_machine = machine_identity.name()
     owner, session = await _termination_session(
@@ -438,7 +438,7 @@ async def test_restart_and_termination_without_a_lease_add_no_notices(
     *,
     config_authority: ConfigAuthority,
     database_gate: ProcessDbGate,
-    machine_identity: MachineIdentity,
+    machine_identity: MachineIdentityReader,
 ) -> None:
     local_machine = machine_identity.name()
     owner, session = await _termination_session(
@@ -489,7 +489,7 @@ async def test_terminal_relay_start_delivers_interruption_best_effort(
     *,
     config_authority: ConfigAuthority,
     database_gate: ProcessDbGate,
-    machine_identity: MachineIdentity,
+    machine_identity: MachineIdentityReader,
 ) -> None:
     local_machine = machine_identity.name()
     from cli.parsers import build_parser
@@ -562,7 +562,7 @@ async def test_running_relay_delivers_termination_once_without_reserving_input(
     *,
     config_authority: ConfigAuthority,
     database_gate: ProcessDbGate,
-    machine_identity: MachineIdentity,
+    machine_identity: MachineIdentityReader,
 ) -> None:
     import asyncio
 
@@ -623,7 +623,7 @@ async def test_resurrection_timestamp_follows_notes_even_in_an_older_transaction
     *,
     config_authority: ConfigAuthority,
     database_gate: ProcessDbGate,
-    machine_identity: MachineIdentity,
+    machine_identity: MachineIdentityReader,
 ) -> None:
 
     local_machine = machine_identity.name()

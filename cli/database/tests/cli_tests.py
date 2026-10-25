@@ -10,7 +10,7 @@ from collections.abc import Callable, Generator
 
 import pytest
 
-from base.cluster.machine import MachineIdentity
+from base.cluster.machine import MachineIdentityReader
 from base.cluster.machine.tests.identity import as_machine as as_machine
 from base.paths import meiva_home
 from base.sessions.pty.tests.pty_reaper import pty_reaper as pty_reaper
@@ -51,7 +51,7 @@ def operator_pipeline(
 
 
 @pytest.fixture
-def installed_machine_identity(command_runtime: CommandRuntime) -> MachineIdentity:
+def installed_machine_identity(command_runtime: CommandRuntime) -> MachineIdentityReader:
     """Give this case's explicit owner the provenance of an installed unit."""
     command_runtime.machine.set(name="unit-test-machine")
     return command_runtime.machine

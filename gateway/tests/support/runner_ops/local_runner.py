@@ -31,7 +31,7 @@ from typing import Any, cast
 import psycopg
 from psycopg_pool import ConnectionPool
 
-from base.cluster.machine import MachineIdentity
+from base.cluster.machine import MachineIdentityReader
 from base.config.service_read import ConfigAuthority
 from base.daemon.health import start_health_server, stop_health_server
 from base.db import Database
@@ -95,7 +95,7 @@ async def _serve(
     database: Database,
     authority: ConfigAuthority,
     catalog: ModelCatalog,
-    machine: MachineIdentity,
+    machine: MachineIdentityReader,
     host: Host,
     image: LoadedCommit,
 ) -> _Daemon:
@@ -185,7 +185,7 @@ def local_runner(
     database: Database,
     authority: ConfigAuthority,
     catalog: ModelCatalog,
-    machine: MachineIdentity,
+    machine: MachineIdentityReader,
     host: Host,
     image: LoadedCommit,
 ) -> Generator[RunnerOps]:

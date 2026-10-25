@@ -17,7 +17,7 @@ from agent.graph.tests.test_llm_helpers import make_runtime as _llm_make_runtime
 from base.agents.context import MeivaContext
 from base.agents.tests.units import spawn_agent
 from base.clock import Clock
-from base.cluster.machine import MachineIdentity
+from base.cluster.machine import MachineIdentityReader
 from base.cluster.machine.tests.identity import machine_identity as machine_identity
 from base.config.service_read import ConfigAuthority
 from base.config.tests.configuration import defaults
@@ -119,7 +119,7 @@ async def test_first_permanent_rejection_trips_the_recovery_breaker(
     config_authority: ConfigAuthority,
     *,
     database_gate: ProcessDbGate,
-    machine_identity: MachineIdentity,
+    machine_identity: MachineIdentityReader,
 ) -> None:
     """One permanent rejection halts background recovery and reports the cause."""
     ancestor_id, child_id = spawn_child_under_idling_ancestor(
@@ -171,7 +171,7 @@ async def test_transient_rejection_does_not_count_or_trip(
     model_catalog: ModelCatalog,
     config_authority: ConfigAuthority,
     database_gate: ProcessDbGate,
-    machine_identity: MachineIdentity,
+    machine_identity: MachineIdentityReader,
 ) -> None:
     """Only the PERMANENT class counts: a configured-fatal/transient rejection
     aborts the turn but never arms the recovery breaker."""
@@ -208,7 +208,7 @@ async def test_completed_turn_resets_the_streak_and_clears_the_marker(
     model_catalog: ModelCatalog,
     config_authority: ConfigAuthority,
     database_gate: ProcessDbGate,
-    machine_identity: MachineIdentity,
+    machine_identity: MachineIdentityReader,
 ) -> None:
     """The completed-turn UPDATE is the single reset: it clears the corpse
     marker, the recovery-breaker streak, and the recorded reject reason

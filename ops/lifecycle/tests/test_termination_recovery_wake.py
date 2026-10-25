@@ -12,7 +12,7 @@ from psycopg_pool import ConnectionPool
 
 from base.agents.birth.spawn import create_agent_row
 from base.agents.messages.inbound import InboundKind
-from base.cluster.machine import MachineIdentity
+from base.cluster.machine import MachineIdentityReader
 from base.config import settings
 from base.config.service_read import ConfigAuthority
 from base.db import Database
@@ -45,7 +45,7 @@ def agent_id(
     event_bus: EventBus,
     *,
     config_authority: ConfigAuthority,
-    machine_identity: MachineIdentity,
+    machine_identity: MachineIdentityReader,
 ) -> int:
     """A never-admitted agent: it has no runtime identity to resurrect from."""
     new_id, _, _, _ = create_agent_row(
@@ -85,7 +85,7 @@ def test_a_chat_queued_before_the_fence_cannot_resurrect(
     database: Database,
     event_bus: EventBus,
     *,
-    machine_identity: MachineIdentity,
+    machine_identity: MachineIdentityReader,
 ) -> None:
     """Why the wake follows the terminate command instead of preceding it: work
     older than a force cannot reverse that force."""
@@ -165,7 +165,7 @@ def test_a_resurrection_records_its_audit_fact(
     database: Database,
     event_bus: EventBus,
     *,
-    machine_identity: MachineIdentity,
+    machine_identity: MachineIdentityReader,
 ) -> None:
     termination.force_terminate_transaction(agent_id, db_pool, source="system")
     row = db_conn.execute(

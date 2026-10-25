@@ -15,7 +15,8 @@ import dataclasses
 import getpass
 
 from base.cluster.authority.monitor import MONITOR_MAP, MONITOR_ROLE
-from base.cluster.machine import MachineIdentity
+from base.cluster.machine import MachineIdentityReader
+from base.cluster.machine.configured import ConfiguredMachineIdentity
 from cli.commands.data_plane import cluster_instance as instance
 from cli.commands.data_plane.cluster_instance import StartTuning
 from cli.commands.data_plane.instance.pg_plan import PgIdentity, pg_hba_body, pg_ident_body
@@ -30,7 +31,7 @@ _IDENTITY = PgIdentity(
 )
 
 
-def _start(cluster: NativeCluster, machine: MachineIdentity) -> int:
+def _start(cluster: NativeCluster, machine: MachineIdentityReader) -> int:
     return instance.start_pg(
         cluster.plane,
         cluster.pg_port,
@@ -42,7 +43,7 @@ def _start(cluster: NativeCluster, machine: MachineIdentity) -> int:
 
 
 def test_a_single_box_start_writes_the_loopback_only_hba_and_the_monitor_map(
-    native_cluster: NativeCluster, command_machine: MachineIdentity
+    native_cluster: NativeCluster, command_machine: ConfiguredMachineIdentity
 ) -> None:
     command_machine.set(host="localhost")
 
@@ -57,7 +58,7 @@ def test_a_single_box_start_writes_the_loopback_only_hba_and_the_monitor_map(
 
 
 def test_trusted_cidrs_reach_the_hba_the_start_writes(
-    native_cluster: NativeCluster, command_machine: MachineIdentity
+    native_cluster: NativeCluster, command_machine: ConfiguredMachineIdentity
 ) -> None:
     command_machine.set(host="localhost")
     plane = dataclasses.replace(native_cluster.plane, trusted_cidrs="10.0.0.0/8")

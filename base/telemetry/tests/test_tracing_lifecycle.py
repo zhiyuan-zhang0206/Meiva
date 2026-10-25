@@ -1,11 +1,14 @@
 from __future__ import annotations
 
+import os
 import threading
 from pathlib import Path
 
 import pytest
 
-from base.cluster.machine import MachineIdentity
+from base.cluster.machine.configured import ConfiguredMachineIdentity
+from base.config import ConfigBoot
+from base.paths.tests.homes import point_home
 from base.telemetry import tracing
 from base.telemetry.otlp.trace_readiness import TraceReadiness
 from base.telemetry.otlp.trace_workers import CollectorRetry, TraceArm
@@ -73,21 +76,26 @@ def test_retry_unknown_error_retains_identity() -> None:
     assert raised.value is failure
 
 
-def test_trace_identity_defect_fails_before_sdk_admission(tmp_path: Path) -> None:
+def test_trace_identity_defect_fails_before_sdk_admission(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
     readiness = TraceReadiness()
     facts = machine_identity()
-
-    def invalid() -> str:
-        raise RuntimeError("invalid machine reader")
-
-    machine = MachineIdentity(
-        name=invalid,
-        role=facts.role,
-        host=facts.host,
-        description=facts.description,
-    )
-    with pytest.raises(RuntimeError, match="invalid machine reader"):
-        tracing.start_arm_thread(trace_config(), machine, tmp_path, readiness=readiness)
+    loop_home = tmp_path / "loop_home"
+    loop_home.symlink_to(loop_home)
+    try:
+        with monkeypatch.context() as m:
+            for key, value in list(os.environ.items()):
+                m.setenv(key, value)
+            point_home(m, loop_home)
+            with pytest.raises(RuntimeError, match="Symlink loop"):
+                ConfiguredMachineIdentity(ConfigBoot()).name()
+            machine = ConfiguredMachineIdentity(ConfigBoot())
+            machine.set(role=facts.role(), host=facts.host(), description=facts.description())
+            with pytest.raises(RuntimeError, match="Symlink loop"):
+                tracing.start_arm_thread(trace_config(), machine, tmp_path, readiness=readiness)
+    finally:
+        loop_home.unlink(missing_ok=True)
     assert not readiness.resolved
     assert readiness.read(timeout=0).first_timeout is False
 

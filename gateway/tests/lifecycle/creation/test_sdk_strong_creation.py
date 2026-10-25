@@ -14,7 +14,7 @@ from fastapi.testclient import TestClient
 import meiva
 import meiva.agents
 from base.api_contracts.agent_contract import GatewayUnavailable
-from base.cluster.machine import MachineIdentity
+from base.cluster.machine.configured import ConfiguredMachineIdentity
 from base.cluster.machine.tests.identity import machine_identity as machine_identity
 from base.host.net.tests.retry_waits import retry_waits as retry_waits
 from gateway.agents import router as agent_router
@@ -164,7 +164,7 @@ def test_changed_sdk_context_same_principal_key_conflicts(
     client: TestClient,
     db_conn: psycopg.Connection,
     wire: AppTransport,
-    machine_identity: MachineIdentity,
+    machine_identity: ConfiguredMachineIdentity,
 ) -> None:
     machine_identity.set(name="local-test")
     original = meiva.agents.spawn(prompt="same raw inputs", idempotency_key="context")

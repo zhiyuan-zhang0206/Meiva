@@ -19,7 +19,7 @@ import pytest
 
 from base.agents.birth.spawn import create_agent_row
 from base.agents.model.birth_config import set_cluster_default_model
-from base.cluster.machine import MachineIdentity
+from base.cluster.machine import MachineIdentityReader
 from base.cluster.machine.tests.identity import machine_identity as machine_identity
 from base.config import frozen_field_names
 from base.config.service_read import ConfigAuthority
@@ -36,7 +36,7 @@ def _spawn_agent(
     config_authority: ConfigAuthority,
     model_catalog: ModelCatalog,
     database_gate: ProcessDbGate,
-    local_machine: MachineIdentity,
+    local_machine: MachineIdentityReader,
     **kw: Any,
 ) -> int:
     """Test setup helper — the #1236 split collapsed for setup: create_agent_row
@@ -91,7 +91,7 @@ class TestSpawnStamping:
         config_authority: ConfigAuthority,
         model_catalog: ModelCatalog,
         database_gate: ProcessDbGate,
-        machine_identity: MachineIdentity,
+        machine_identity: MachineIdentityReader,
     ) -> None:
         agent_id = _spawn_agent(
             spawner="test",
@@ -110,7 +110,7 @@ class TestSpawnStamping:
         config_authority: ConfigAuthority,
         model_catalog: ModelCatalog,
         database_gate: ProcessDbGate,
-        machine_identity: MachineIdentity,
+        machine_identity: MachineIdentityReader,
     ) -> None:
         agent_id = _spawn_agent(
             spawner="test",
@@ -132,7 +132,7 @@ class TestSpawnStamping:
         config_authority: ConfigAuthority,
         model_catalog: ModelCatalog,
         database_gate: ProcessDbGate,
-        machine_identity: MachineIdentity,
+        machine_identity: MachineIdentityReader,
     ) -> None:
         with db_conn.cursor() as cur:
             set_cluster_default_model(cur, "claude-sonnet-5", updated_by="test")
@@ -154,7 +154,7 @@ class TestSpawnStamping:
         config_authority: ConfigAuthority,
         model_catalog: ModelCatalog,
         database_gate: ProcessDbGate,
-        machine_identity: MachineIdentity,
+        machine_identity: MachineIdentityReader,
     ) -> None:
         """The whole point of the feature, end to end."""
         agent_id = _spawn_agent(
@@ -184,7 +184,7 @@ class TestReplayOnWake:
         config_authority: ConfigAuthority,
         model_catalog: ModelCatalog,
         database_gate: ProcessDbGate,
-        machine_identity: MachineIdentity,
+        machine_identity: MachineIdentityReader,
     ) -> None:
         from ops.agents.wake import resurrect_agent
 
@@ -223,7 +223,7 @@ class TestForkInheritance:
         config_authority: ConfigAuthority,
         model_catalog: ModelCatalog,
         database_gate: ProcessDbGate,
-        machine_identity: MachineIdentity,
+        machine_identity: MachineIdentityReader,
     ) -> None:
         parent = _spawn_agent(
             spawner="test",
@@ -255,7 +255,7 @@ class TestForkInheritance:
         config_authority: ConfigAuthority,
         model_catalog: ModelCatalog,
         database_gate: ProcessDbGate,
-        machine_identity: MachineIdentity,
+        machine_identity: MachineIdentityReader,
     ) -> None:
         """A pre-column agent (or one the migration backfill skipped) has NULL. Its
         fork must still come out fully stamped rather than inherit the hole."""

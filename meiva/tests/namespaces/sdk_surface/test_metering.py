@@ -36,7 +36,7 @@ from base.agents.sdk.tests.sampling_owners import (
     sampling_owner_failing_to_read,
 )
 from base.api_contracts.caller_identity import CallerIdentity
-from base.cluster.machine import MachineIdentity
+from base.cluster.machine import MachineFacts
 from base.packages.plugin_config_images import DiskPluginConfigImages
 from base.packages.plugins.extensions import (
     ExtensionRegistry,
@@ -214,12 +214,7 @@ def test_instrument_targets_does_not_evaluate_raising_dynamic_member() -> None:
     child (rc=1)."""
     import base.cluster.machine
 
-    def _raise() -> str:
-        raise base.cluster.machine.MachineNameMissing("machine name not set")
-
-    machine = MachineIdentity(
-        name=_raise, role=frozenset, host=lambda: "", description=lambda: None
-    )
+    machine = MachineFacts.of(name="", role=(), host="", description=None)
     prior = process_context.unbind_context()
     process_context.bind_context(MeivaContext(machine=machine))
     try:
@@ -539,12 +534,8 @@ async def test_awaited_calls_retain_their_entry_identity(
         entered.set()
         await release.wait()
 
-    first_machine = MachineIdentity(
-        name=lambda: "first", role=frozenset, host=lambda: "", description=lambda: None
-    )
-    second_machine = MachineIdentity(
-        name=lambda: "second", role=frozenset, host=lambda: "", description=lambda: None
-    )
+    first_machine = MachineFacts.of(name="first", role=frozenset(), host="", description=None)
+    second_machine = MachineFacts.of(name="second", role=frozenset(), host="", description=None)
     clients = ClientSet(pipeline_factory=emitted_events.producer)
     pin_agent(41, machine=first_machine, clients=clients)
     first_tally = SdkCallTally()

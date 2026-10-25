@@ -15,7 +15,7 @@ import pytest
 
 from base.agents import impersonation as leases
 from base.agents.impersonation.status import ImpersonationStatus
-from base.cluster.machine import MachineIdentity
+from base.cluster.machine import MachineIdentityReader
 from base.cluster.machine.tests.identity import machine_identity as machine_identity
 from base.db import Database
 from base.events.live.bus import EventBus
@@ -141,7 +141,7 @@ async def test_real_relay_uses_snapshotted_config_across_restart(
     event_bus: EventBus,
     redis_url: str,
     *,
-    machine_identity: MachineIdentity,
+    machine_identity: MachineIdentityReader,
 ) -> None:
     lease, _, mid = active
     world = World(

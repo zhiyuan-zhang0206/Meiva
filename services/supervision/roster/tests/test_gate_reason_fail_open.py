@@ -5,7 +5,7 @@ from typing import Any
 
 import pytest
 
-from base.cluster.machine import MachineIdentity
+from base.cluster.machine import MachineIdentityReader
 from base.cluster.machine.tests.identity import machine_identity as machine_identity
 from base.host.system.tests.fake_commands import fake_host
 from services.supervision.roster.spec import ServiceSpec, gate_reason
@@ -23,7 +23,7 @@ def _spec_with_gate(gate: Callable[[], str | None] | None) -> ServiceSpec:
 
 def test_gate_reason_reports_and_propagates_raising_gate(
     loguru_records: list[dict[str, Any]],
-    machine_identity: MachineIdentity,
+    machine_identity: MachineIdentityReader,
 ) -> None:
     def _boom() -> str | None:
         raise RuntimeError("gate exploded")
@@ -34,7 +34,9 @@ def test_gate_reason_reports_and_propagates_raising_gate(
     assert any("faulty-gate" in m and "roster evaluation aborted" in m for m in errors), errors
 
 
-def test_gate_reason_passes_through_normal_gate_result(machine_identity: MachineIdentity) -> None:
+def test_gate_reason_passes_through_normal_gate_result(
+    machine_identity: MachineIdentityReader,
+) -> None:
     def _gated() -> str | None:
         return "disabled (test)"
 

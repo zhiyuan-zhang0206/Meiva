@@ -6,7 +6,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 import base.db
-from base.cluster.machine import MachineIdentity
+from base.cluster.machine import MachineIdentityReader
 from base.cluster.machine.tests.identity import machine_identity as machine_identity
 from base.db.code_version_gate import ProcessDbGate
 from gateway.schedules import router
@@ -33,7 +33,7 @@ def test_same_value_edit_preserves_version_timestamp_and_queue(
     db_conn: psycopg.Connection,
     fields: dict[str, object],
     *,
-    machine_identity: MachineIdentity,
+    machine_identity: MachineIdentityReader,
 ) -> None:
     with schedule_client(machine=machine_identity) as client:
         sid = _create(client)
@@ -57,7 +57,7 @@ def test_concurrent_identical_edits_append_one_version(
     db_conn: psycopg.Connection,
     *,
     database_gate: ProcessDbGate,
-    machine_identity: MachineIdentity,
+    machine_identity: MachineIdentityReader,
 ) -> None:
     with schedule_client(machine=machine_identity) as client:
         sid = _create(client)
@@ -82,7 +82,7 @@ def test_enqueue_failure_rolls_back_config_and_version(
     db_conn: psycopg.Connection,
     *,
     database_gate: ProcessDbGate,
-    machine_identity: MachineIdentity,
+    machine_identity: MachineIdentityReader,
 ) -> None:
     with schedule_client(machine=machine_identity) as client:
         sid = _create(client)
@@ -105,7 +105,7 @@ def test_convergence_work_is_committed_before_the_response_waits_for_it(
     gateway_data_plane: None,
     db_conn: psycopg.Connection,
     *,
-    machine_identity: MachineIdentity,
+    machine_identity: MachineIdentityReader,
 ) -> None:
     with (
         schedule_client(machine=machine_identity, wait_s=3.0) as client,
@@ -140,7 +140,7 @@ def test_repeated_enabled_choice_does_not_enqueue(
     enabled: bool,
     action: str,
     *,
-    machine_identity: MachineIdentity,
+    machine_identity: MachineIdentityReader,
 ) -> None:
     with schedule_client(machine=machine_identity) as client:
         sid = client.post(
@@ -157,7 +157,7 @@ def test_explicit_start_preserves_terminal_rerun(
     db_conn: psycopg.Connection,
     status: str,
     *,
-    machine_identity: MachineIdentity,
+    machine_identity: MachineIdentityReader,
 ) -> None:
     with schedule_client(machine=machine_identity) as client:
         sid = _create(client)

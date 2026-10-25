@@ -10,7 +10,7 @@ from base.agents.context import MeivaContext
 from base.agents.context.identity import AgentIdentity
 from base.clock import SYSTEM_TIMERS, Clock
 from base.clock.configuration import clock_config_from_boot
-from base.cluster.machine import MachineIdentity
+from base.cluster.machine import MachineIdentityReader
 from base.cluster.machine.tests.identity import machine_identity as machine_identity
 from base.config import ConfigBoot
 from meiva.boot import derived_clients
@@ -22,7 +22,7 @@ __all__ = ["sdk_environment", "sdk_identity", "sdk_metering"]
 
 @pytest.fixture
 def sdk_environment(
-    process_config: ConfigBoot, machine_identity: MachineIdentity
+    process_config: ConfigBoot, machine_identity: MachineIdentityReader
 ) -> Iterator[MeivaContext]:
     """Own one SDK root for this test; repinning borrows its clients and machine.
 

@@ -9,7 +9,7 @@ import psycopg
 import pytest
 from fastapi.testclient import TestClient
 
-from base.cluster.machine import MachineIdentity
+from base.cluster.machine import MachineIdentityReader
 from base.cluster.machine.tests.identity import machine_identity as machine_identity
 from base.config import Settings
 from base.config.service_read import ConfigAuthority
@@ -28,7 +28,7 @@ def spawn_agent(
     *,
     config_authority: ConfigAuthority,
     database_gate: ProcessDbGate,
-    local_machine: MachineIdentity,
+    local_machine: MachineIdentityReader,
 ) -> int:
     """Setup helper — a row for the SDK's self identity (Task #1236 split: the
     row is created by create_agent_row; nothing launches, these tests only need
@@ -55,7 +55,7 @@ def sdk_via_gateway(
     sdk_model_owner: None,
     gateway_local_runner: RunnerOps,
     *,
-    machine_identity: MachineIdentity,
+    machine_identity: MachineIdentityReader,
 ) -> Generator[TestClient]:
     """SDK <-> gateway path in-process: the SDK's gateway client is the test client of a real app.
 
@@ -83,7 +83,7 @@ def sdk_via_gateway(
 def self_agent(
     config_authority: ConfigAuthority,
     database_gate: ProcessDbGate,
-    machine_identity: MachineIdentity,
+    machine_identity: MachineIdentityReader,
 ) -> int:
     """The SDK caller's own agent: a committed row on the local machine, pinned as its identity."""
     agent_id = spawn_agent(

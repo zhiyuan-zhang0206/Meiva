@@ -15,7 +15,7 @@ from agent.state import AgentState, CircuitState
 from base.agents.context import MeivaContext
 from base.agents.tests.units import spawn_agent
 from base.clock import Clock
-from base.cluster.machine import MachineIdentity
+from base.cluster.machine import MachineIdentityReader
 from base.cluster.machine.tests.identity import machine_identity as machine_identity
 from base.config.service_read import ConfigAuthority
 from base.config.tests.configuration import defaults
@@ -59,7 +59,7 @@ async def test_host_persists_provider_failure_before_releasing_turn(
     model_catalog: ModelCatalog,
     config_authority: ConfigAuthority,
     database_gate: ProcessDbGate,
-    machine_identity: MachineIdentity,
+    machine_identity: MachineIdentityReader,
 ) -> None:
     """A real graph failure is flushed to PG; a fresh reader sees its breaker."""
     async with hosted_scope(expected_error=FatalProviderError) as resources:

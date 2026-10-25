@@ -5,7 +5,7 @@ from pathlib import Path
 
 import meiva.mcps as mcps_mod
 from base.agents.context import MeivaContext
-from base.cluster.machine.boot import machine_from_boot
+from base.cluster.machine.configured import ConfiguredMachineIdentity
 from base.config import ConfigBoot
 from base.config.tests.configuration import snapshot_process_config
 from meiva.boot import derived_clients
@@ -18,7 +18,7 @@ from meiva.sdk_surface import process_context
 def context_with_timeout(timeout: float) -> tuple[MeivaContext, ConfigBoot]:
     config = snapshot_process_config()
     config.set_field("mcp_connect_timeout_seconds", timeout)
-    return MeivaContext(clients=derived_clients(config, machine_from_boot(config))), config
+    return MeivaContext(clients=derived_clients(config, ConfiguredMachineIdentity(config))), config
 
 
 def sdk_timeout(context: MeivaContext) -> float:
@@ -65,7 +65,7 @@ def test_sdk_clients_read_their_own_timeout_once_and_rebuild_after_close(
 # Building the client set builds no MCP client and reads no setting: the timeout is read when the first MCP call asks for the clients, so a value set between the two is the one the clients hold.
 def test_mcp_client_construction_waits_for_the_first_call_to_read_configuration() -> None:
     config = snapshot_process_config()
-    clients = derived_clients(config, machine_from_boot(config))
+    clients = derived_clients(config, ConfiguredMachineIdentity(config))
     assert not clients._made
 
     config.set_field("mcp_connect_timeout_seconds", 3.5)

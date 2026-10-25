@@ -15,7 +15,7 @@ from pathlib import Path
 import pytest
 
 from base import telemetry
-from base.cluster.machine import MachineIdentity
+from base.cluster.machine import MachineIdentityReader
 from base.host.env import port_lease
 from base.log.tests.log_records import LogRecords, loguru_records
 from base.native_process.loaded_commit import LoadedCommit
@@ -166,11 +166,11 @@ def test_a_clean_writer_stop_reports_nothing(loguru_records: LogRecords) -> None
 
 
 def test_the_database_factory_shares_one_gate_between_opens() -> None:
-    from base.cluster.machine.boot import machine_from_boot
+    from base.cluster.machine.configured import ConfiguredMachineIdentity
     from base.config import ConfigBoot
 
     config = ConfigBoot()
-    machine: MachineIdentity = machine_from_boot(config)
+    machine: MachineIdentityReader = ConfiguredMachineIdentity(config)
     factory = daemon.gate_database(image=LoadedCommit.capture(), machine=machine, config=config)
     first, second = factory(), factory()
     assert first is not second

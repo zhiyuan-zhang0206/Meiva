@@ -2,7 +2,7 @@ import psycopg
 from psycopg_pool import ConnectionPool
 
 from base.agents.birth.spawn import create_agent_row
-from base.cluster.machine import MachineIdentity
+from base.cluster.machine import MachineIdentityReader
 from base.config import settings
 from base.config.service_read import ConfigAuthority
 from base.db import PG_KEEPALIVE_KWARGS, Database
@@ -18,7 +18,7 @@ def terminated(
     config_authority: ConfigAuthority,
     model_catalog: ModelCatalog,
     database_gate: ProcessDbGate,
-    machine_identity: MachineIdentity,
+    machine_identity: MachineIdentityReader,
 ) -> int:
     aid, _, _, _ = create_agent_row(
         Database.from_settings(gate=database_gate),

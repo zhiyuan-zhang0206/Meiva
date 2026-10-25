@@ -6,7 +6,7 @@ from psycopg.conninfo import conninfo_to_dict
 
 from base.cluster.dataplane import pooler
 from base.cluster.dataplane.pg_throwaway_base import ThrowawayConfig
-from base.cluster.machine import MachineIdentity
+from base.cluster.machine import MachineIdentityReader
 from base.cluster.machine.tests.identity import machine_identity as machine_identity
 from base.deploy.tests.containers import postgres
 from base.deploy.tests.pgbouncer import (
@@ -21,7 +21,10 @@ pytestmark = pytest.mark.skipif(
 
 
 def test_lists_the_open_clients_and_leaves_out_the_console(
-    *, postgres_access: None, machine_identity: MachineIdentity, throwaway_config: ThrowawayConfig
+    *,
+    postgres_access: None,
+    machine_identity: MachineIdentityReader,
+    throwaway_config: ThrowawayConfig,
 ) -> None:
     with (
         postgres(config=throwaway_config, machine_name=machine_identity.name) as pg_url,
@@ -48,7 +51,10 @@ def test_lists_the_open_clients_and_leaves_out_the_console(
 
 
 def test_an_unreadable_console_raises_instead_of_reading_as_no_clients(
-    *, postgres_access: None, machine_identity: MachineIdentity, throwaway_config: ThrowawayConfig
+    *,
+    postgres_access: None,
+    machine_identity: MachineIdentityReader,
+    throwaway_config: ThrowawayConfig,
 ) -> None:
     with (
         postgres(config=throwaway_config, machine_name=machine_identity.name) as pg_url,

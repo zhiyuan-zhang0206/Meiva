@@ -5,7 +5,7 @@ from typing import Any
 import pytest
 
 from base.cluster.dataplane.direct_url import ClusterDirectUrl
-from base.cluster.machine import MachineIdentity
+from base.cluster.machine import MachineIdentityReader
 from base.config import ConfigBoot
 from base.db import Database
 from base.db.code_version_gate import ProcessDbGate
@@ -40,7 +40,7 @@ def test_entry_keeps_the_config_owner_and_captured_image(
     gates: list[ProcessDbGate] = []
     slices: list[DbConfig] = []
     reads: list[tuple[Path, str]] = []
-    factories: list[tuple[Callable[[], Database], MachineIdentity]] = []
+    factories: list[tuple[Callable[[], Database], MachineIdentityReader]] = []
     readers: list[Callable[[], str]] = []
     pipeline = object()
 
@@ -64,7 +64,9 @@ def test_entry_keeps_the_config_owner_and_captured_image(
         assert self is boot
         stages.append("boot")
 
-    def build(*, database: Callable[[], Database], machine: MachineIdentity, home: Path) -> object:
+    def build(
+        *, database: Callable[[], Database], machine: MachineIdentityReader, home: Path
+    ) -> object:
         stages.append("producer")
         assert gates == []
         factories.append((database, machine))

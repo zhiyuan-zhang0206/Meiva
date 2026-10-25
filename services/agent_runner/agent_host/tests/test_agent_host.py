@@ -6,7 +6,7 @@ import psycopg
 import pytest
 
 import meiva
-from base.cluster.machine import MachineIdentity
+from base.cluster.machine import MachineIdentityReader
 from base.cluster.machine.tests.identity import machine_identity as machine_identity
 from meiva.tests.fixtures.pin_agent import pin_agent, pin_no_identity
 from services.agent_runner.agent_host.tests.host_policy import assert_sdk_context
@@ -93,7 +93,7 @@ class TestConcurrentAgentIsolation:
         self,
         wired: Build,
         sdk_bound: bool,
-        machine_identity: MachineIdentity,
+        machine_identity: MachineIdentityReader,
     ) -> None:
         if sdk_bound:
             pin_agent(999)

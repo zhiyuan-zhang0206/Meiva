@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from base.cluster.machine import MachineIdentity
+from base.cluster.machine import MachineIdentityReader
 from base.cluster.machine.tests.identity import machine_identity as machine_identity
 from base.host.system.tests.fake_commands import fake_host
 from services.agent_runner.exec_host import shutdown_budget
@@ -11,7 +11,9 @@ def _spec() -> service_spec.ServiceSpec:
     return next(s for s in composition.build_services() if s.session == "exec-host")
 
 
-def test_only_an_agent_runner_host_runs_exec_host(*, machine_identity: MachineIdentity) -> None:
+def test_only_an_agent_runner_host_runs_exec_host(
+    *, machine_identity: MachineIdentityReader
+) -> None:
     declared = _spec()
     assert declared.capabilities == frozenset({"agent-runner"})
     runner_started = {

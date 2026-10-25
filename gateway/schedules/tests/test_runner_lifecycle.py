@@ -12,7 +12,7 @@ import threading
 
 import psycopg
 
-from base.cluster.machine import MachineIdentity
+from base.cluster.machine import MachineIdentityReader
 from base.cluster.machine.tests.identity import machine_identity as machine_identity
 from base.db import Database
 from base.db.code_version_gate import ProcessDbGate
@@ -34,7 +34,7 @@ def test_closing_a_guard_that_never_stalled_ends_its_thread(database_gate: Proce
 
 
 def test_a_finished_run_leaves_no_guard_thread(
-    db_conn: psycopg.Connection, unit_home: object, *, machine_identity: MachineIdentity
+    db_conn: psycopg.Connection, unit_home: object, *, machine_identity: MachineIdentityReader
 ) -> None:
     row = db_conn.execute(
         "INSERT INTO schedules (name, script, command, enabled, status) "

@@ -17,7 +17,7 @@ from pathlib import Path
 import psycopg
 import pytest
 
-from base.cluster.machine import MachineIdentity
+from base.cluster.machine import MachineIdentityReader
 from cli.commands.data_plane import bringup, cluster_instance, completion
 from cli.commands.data_plane.config import DataPlaneConfig
 from cli.commands.data_plane.tests.data_plane_records import (
@@ -51,7 +51,7 @@ def memory_table(db_url: str) -> Iterator[str]:
 
 
 def _start_instance(
-    cluster: NativeCluster, machine: MachineIdentity, factory: OperatorDatabaseFactory
+    cluster: NativeCluster, machine: MachineIdentityReader, factory: OperatorDatabaseFactory
 ) -> None:
     cluster.born()
     rc = bringup.ensure_gateway_data_plane(
@@ -84,7 +84,7 @@ def _admin(cluster: NativeCluster, database: str) -> psycopg.Connection[tuple[ob
 # allow; the first half runs on the shards whose Postgres carries pgvector.
 def test_a_born_home_gets_the_extension_its_postgres_carries_and_the_checkpoint_schema(
     native_cluster: NativeCluster,
-    command_machine: MachineIdentity,
+    command_machine: MachineIdentityReader,
     operator_database: OperatorDatabaseFactory,
 ) -> None:
     _start_instance(native_cluster, command_machine, operator_database)
@@ -105,7 +105,7 @@ def test_a_born_home_gets_the_extension_its_postgres_carries_and_the_checkpoint_
 
 def test_a_second_preparation_of_the_same_home_is_a_no_op(
     native_cluster: NativeCluster,
-    command_machine: MachineIdentity,
+    command_machine: MachineIdentityReader,
     operator_database: OperatorDatabaseFactory,
 ) -> None:
     _start_instance(native_cluster, command_machine, operator_database)
@@ -115,7 +115,7 @@ def test_a_second_preparation_of_the_same_home_is_a_no_op(
 
 def test_a_home_past_its_first_start_prepares_no_schema(
     native_cluster: NativeCluster,
-    command_machine: MachineIdentity,
+    command_machine: MachineIdentityReader,
     operator_database: OperatorDatabaseFactory,
 ) -> None:
     _start_instance(native_cluster, command_machine, operator_database)
@@ -145,7 +145,7 @@ def test_a_home_with_no_start_intent_prepares_no_schema(native_cluster: NativeCl
 # always authenticated: nothing converts it, and nothing is dialled first.
 def test_a_release_readiness_refuses_a_home_without_a_ledger_before_any_dial(
     native_cluster: NativeCluster,
-    command_machine: MachineIdentity,
+    command_machine: MachineIdentityReader,
     operator_database: OperatorDatabaseFactory,
 ) -> None:
     native_cluster.born()

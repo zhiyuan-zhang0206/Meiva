@@ -3,8 +3,7 @@ from typing import Any
 
 from base.agents.messages.timestamp_policy import TimestampSource
 from base.clock import Clock
-from base.cluster.machine import MachineIdentity
-from base.cluster.machine.boot import machine_from_boot
+from base.cluster.machine.configured import ConfiguredMachineIdentity
 from base.config import settings
 from base.config.tests.configuration import defaults, snapshot_process_config
 from base.native_process.stop_timing import CANCEL_UNWIND_TIMEOUT_S
@@ -42,8 +41,8 @@ def configured_policy(**changes: Any) -> HostPolicy:
     )
 
 
-def configured_machine(*, name: str | None = None) -> MachineIdentity:
-    machine = machine_from_boot(snapshot_process_config())
+def configured_machine(*, name: str | None = None) -> ConfiguredMachineIdentity:
+    machine = ConfiguredMachineIdentity(snapshot_process_config())
     if name is not None:
         machine.set(name=name)
     return machine

@@ -20,7 +20,7 @@ import psycopg
 import pytest
 from psycopg.conninfo import conninfo_to_dict
 
-from base.cluster.machine import MachineIdentity
+from base.cluster.machine import MachineIdentityReader
 from base.cluster.machine.tests.identity import machine_identity as machine_identity
 from base.config import ConfigBoot
 from base.db import Database
@@ -54,7 +54,7 @@ def _application_name(database: Database) -> str:
 
 
 def test_the_scheduler_log_database_carries_the_process_gate_and_reads_its_owner_when_built(
-    db_url: str, database_gate: ProcessDbGate, machine_identity: MachineIdentity
+    db_url: str, database_gate: ProcessDbGate, machine_identity: MachineIdentityReader
 ) -> None:
     config = _config(db_url)
 
@@ -68,7 +68,7 @@ def test_the_scheduler_log_database_carries_the_process_gate_and_reads_its_owner
 
 
 def test_every_worker_handle_shares_one_gate_and_the_scratch_url_replaces_only_the_dial(
-    db_url: str, database_gate: ProcessDbGate, machine_identity: MachineIdentity
+    db_url: str, database_gate: ProcessDbGate, machine_identity: MachineIdentityReader
 ) -> None:
     config = _config(_refused(db_url))
 
@@ -81,7 +81,7 @@ def test_every_worker_handle_shares_one_gate_and_the_scratch_url_replaces_only_t
 
 
 def test_a_scratch_handle_reads_the_owners_ssl_policy_when_it_is_built(
-    db_url: str, database_gate: ProcessDbGate, machine_identity: MachineIdentity
+    db_url: str, database_gate: ProcessDbGate, machine_identity: MachineIdentityReader
 ) -> None:
     config = _config(db_url)
     config.view.data_plane.db_sslmode = "verify-full"

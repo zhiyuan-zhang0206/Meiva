@@ -19,8 +19,7 @@ from urllib.parse import unquote, urlsplit
 
 import pytest
 
-from base.cluster.machine import MachineIdentity
-from base.cluster.machine.boot import machine_from_boot
+from base.cluster.machine.configured import ConfiguredMachineIdentity
 from base.config import DataPlaneSettings, settings
 from base.config.domains.storage import data_plane
 from base.config.domains.storage.data_plane import self_machine_host
@@ -450,14 +449,16 @@ class TestPinIpv4Hostaddr:
 
 @pytest.mark.usefixtures("_restore_machine_env")
 class TestSelfMachineHostParity:
-    """`self_machine_host` is a leaf duplicate of `MachineIdentity.host`
-    (the config sub-model cannot import base.cluster.machine — circular), so pin its
-    precedence (env MEIVA_MACHINE_HOST > localhost) to the real resolver: each source case
-    asserts both return the same value, so a future drift in either side fails here."""
+    # meiva:note
+    # `self_machine_host` is a leaf duplicate of `ConfiguredMachineIdentity.host`
+    # (the config sub-model cannot import base.cluster.machine — circular), so pin its
+    # precedence (env MEIVA_MACHINE_HOST > localhost) to the real resolver: each source case
+    # asserts both return the same value, so a future drift in either side fails here.
+    # meiva:link base/cluster/machine/docs/machine.meiva.okf.md
 
     def _pin(
         self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path, *, env: str | None
-    ) -> MachineIdentity:
+    ) -> ConfiguredMachineIdentity:
         # The two resolvers read different surfaces of the same sources:
         # self_machine_host reads os.environ at construction time; reachable_host
         # reads the settings singleton (machine_host / meiva_home fields). Pin both
@@ -469,7 +470,7 @@ class TestSelfMachineHostParity:
         else:
             os.environ["MEIVA_MACHINE_HOST"] = env
             monkeypatch.setattr(settings.general, "machine_host", env)
-        return machine_from_boot(snapshot_process_config())
+        return ConfiguredMachineIdentity(snapshot_process_config())
 
     def test_env_wins(self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
         identity = self._pin(monkeypatch, tmp_path, env="gw.env-host")

@@ -24,7 +24,7 @@ import pytest
 from loguru import logger as _global_logger
 
 from base import telemetry
-from base.cluster.machine import MachineIdentity
+from base.cluster.machine import MachineIdentityReader
 from base.cluster.machine.tests.identity import machine_identity as machine_identity
 from base.db import Database
 from base.paths import meiva_home
@@ -34,7 +34,7 @@ from base.telemetry.process_logging import add_event_sink, event_sink
 
 
 @pytest.fixture
-def sink_logger(database: Database, machine_identity: MachineIdentity):
+def sink_logger(database: Database, machine_identity: MachineIdentityReader):
     """Register the loguru -> emitter adapter + bind agent_id, cleanup after yield.
 
     The adapter enqueues (non-blocking); tests flush via `_last_event`. bind

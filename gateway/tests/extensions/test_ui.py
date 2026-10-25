@@ -26,7 +26,8 @@ import pytest
 
 import meiva
 from base.agents.tests.units import spawn_agent
-from base.cluster.machine import MachineIdentity
+from base.cluster.machine import MachineIdentityReader
+from base.cluster.machine.configured import ConfiguredMachineIdentity
 from base.cluster.machine.tests.identity import machine_identity as machine_identity
 from base.config.service_read import ConfigAuthority
 from base.db.code_version_gate import ProcessDbGate
@@ -43,7 +44,9 @@ _HOST = "127.0.0.1"  # loopback — the single-box posture the SDK registers (au
 
 
 @pytest.fixture(autouse=True)
-def _sdk_via_inprocess_gateway(monkeypatch: pytest.MonkeyPatch, machine_identity: MachineIdentity):
+def _sdk_via_inprocess_gateway(
+    monkeypatch: pytest.MonkeyPatch, machine_identity: ConfiguredMachineIdentity
+):
 
     machine_identity.set(host=_HOST)
     with (
@@ -60,7 +63,7 @@ def _sdk_via_inprocess_gateway(monkeypatch: pytest.MonkeyPatch, machine_identity
 # the production ready timeout (60s+), and a test about the timeout cannot wait that long
 # (needs meiva: the ready timeout as a value of the process context).
 def _use_page_host(
-    monkeypatch: pytest.MonkeyPatch, *, local_machine: MachineIdentity, ready_timeout_s: float
+    monkeypatch: pytest.MonkeyPatch, *, local_machine: MachineIdentityReader, ready_timeout_s: float
 ) -> None:
 
     def build() -> meiva.ui.PageHost:
@@ -171,7 +174,7 @@ class TestShow:
         model_catalog: ModelCatalog,
         config_authority: ConfigAuthority,
         database_gate: ProcessDbGate,
-        machine_identity: MachineIdentity,
+        machine_identity: MachineIdentityReader,
     ) -> None:
         pin_agent(
             spawn_agent(
@@ -201,7 +204,7 @@ class TestShow:
         model_catalog: ModelCatalog,
         config_authority: ConfigAuthority,
         database_gate: ProcessDbGate,
-        machine_identity: MachineIdentity,
+        machine_identity: MachineIdentityReader,
     ) -> None:
         """Single page per agent: re-showing auto-closes the old page. The
         agent's own row is never a port conflict for itself, even unchanged."""
@@ -228,7 +231,7 @@ class TestShow:
         model_catalog: ModelCatalog,
         config_authority: ConfigAuthority,
         database_gate: ProcessDbGate,
-        machine_identity: MachineIdentity,
+        machine_identity: MachineIdentityReader,
     ) -> None:
         """The caller's explicit port is what lands in the registry and the page."""
         pin_agent(
@@ -256,7 +259,7 @@ class TestShow:
         model_catalog: ModelCatalog,
         config_authority: ConfigAuthority,
         database_gate: ProcessDbGate,
-        machine_identity: MachineIdentity,
+        machine_identity: MachineIdentityReader,
     ) -> None:
         pin_agent(
             spawn_agent(
@@ -277,7 +280,7 @@ class TestShow:
         model_catalog: ModelCatalog,
         config_authority: ConfigAuthority,
         database_gate: ProcessDbGate,
-        machine_identity: MachineIdentity,
+        machine_identity: MachineIdentityReader,
     ) -> None:
         """No per-agent reserved port: a missing port is rejected, with the
         rule spelled out, instead of falling back to a computed value."""
@@ -300,7 +303,7 @@ class TestShow:
         model_catalog: ModelCatalog,
         config_authority: ConfigAuthority,
         database_gate: ProcessDbGate,
-        machine_identity: MachineIdentity,
+        machine_identity: MachineIdentityReader,
     ) -> None:
         """Privileged and out-of-range ports fail at the SDK boundary."""
         pin_agent(
@@ -323,7 +326,7 @@ class TestShow:
         model_catalog: ModelCatalog,
         config_authority: ConfigAuthority,
         database_gate: ProcessDbGate,
-        machine_identity: MachineIdentity,
+        machine_identity: MachineIdentityReader,
     ) -> None:
         agent_id = spawn_agent(
             catalog=model_catalog,
@@ -343,7 +346,7 @@ class TestShow:
         model_catalog: ModelCatalog,
         config_authority: ConfigAuthority,
         database_gate: ProcessDbGate,
-        machine_identity: MachineIdentity,
+        machine_identity: MachineIdentityReader,
     ) -> None:
         agent_id = spawn_agent(
             catalog=model_catalog,
@@ -369,7 +372,7 @@ def test_page_apis_reject_invalid_ttl(
     model_catalog: ModelCatalog,
     config_authority: ConfigAuthority,
     database_gate: ProcessDbGate,
-    machine_identity: MachineIdentity,
+    machine_identity: MachineIdentityReader,
 ) -> None:
     pin_agent(
         spawn_agent(
@@ -395,7 +398,7 @@ class TestClose:
         model_catalog: ModelCatalog,
         config_authority: ConfigAuthority,
         database_gate: ProcessDbGate,
-        machine_identity: MachineIdentity,
+        machine_identity: MachineIdentityReader,
     ) -> None:
         pin_agent(
             spawn_agent(
@@ -416,7 +419,7 @@ class TestClose:
         model_catalog: ModelCatalog,
         config_authority: ConfigAuthority,
         database_gate: ProcessDbGate,
-        machine_identity: MachineIdentity,
+        machine_identity: MachineIdentityReader,
     ) -> None:
         pin_agent(
             spawn_agent(
@@ -436,7 +439,7 @@ class TestServe:
     spawned by the SDK anymore (R3 door ③)."""
 
     @pytest.fixture(autouse=True)
-    def _loopback_identity(self, machine_identity: MachineIdentity):
+    def _loopback_identity(self, machine_identity: ConfiguredMachineIdentity):
         """serve() polls reachable_host() — pin it to loopback so the stub
         server can actually bind it."""
         machine_identity.set(host="127.0.0.1")
@@ -450,7 +453,7 @@ class TestServe:
         model_catalog: ModelCatalog,
         config_authority: ConfigAuthority,
         database_gate: ProcessDbGate,
-        machine_identity: MachineIdentity,
+        machine_identity: MachineIdentityReader,
     ) -> None:
         pin_agent(
             spawn_agent(
@@ -478,7 +481,7 @@ class TestServe:
         model_catalog: ModelCatalog,
         config_authority: ConfigAuthority,
         database_gate: ProcessDbGate,
-        machine_identity: MachineIdentity,
+        machine_identity: MachineIdentityReader,
     ) -> None:
         agent_id = spawn_agent(
             catalog=model_catalog,
@@ -500,7 +503,7 @@ class TestServe:
         model_catalog: ModelCatalog,
         config_authority: ConfigAuthority,
         database_gate: ProcessDbGate,
-        machine_identity: MachineIdentity,
+        machine_identity: MachineIdentityReader,
     ) -> None:
         """serve() polls until the daemon's server answers (stub starts late)."""
         pin_agent(
@@ -525,7 +528,7 @@ class TestServe:
         model_catalog: ModelCatalog,
         config_authority: ConfigAuthority,
         database_gate: ProcessDbGate,
-        machine_identity: MachineIdentity,
+        machine_identity: MachineIdentityReader,
     ) -> None:
         """A free port the daemon never binds -> serve() raises after the wait
         window (the page row stays registered; the daemon keeps retrying)."""
@@ -557,7 +560,7 @@ class TestServe:
         model_catalog: ModelCatalog,
         config_authority: ConfigAuthority,
         database_gate: ProcessDbGate,
-        machine_identity: MachineIdentity,
+        machine_identity: MachineIdentityReader,
     ) -> None:
         """No per-agent reserved port: a missing port is rejected before any
         gateway or filesystem work, with the rule spelled out."""
@@ -582,7 +585,7 @@ class TestServe:
         model_catalog: ModelCatalog,
         config_authority: ConfigAuthority,
         database_gate: ProcessDbGate,
-        machine_identity: MachineIdentity,
+        machine_identity: MachineIdentityReader,
     ) -> None:
         """A non-page listener on the port fails serve() before anything is
         registered — the daemon can never displace it."""
@@ -613,7 +616,7 @@ class TestServe:
         model_catalog: ModelCatalog,
         config_authority: ConfigAuthority,
         database_gate: ProcessDbGate,
-        machine_identity: MachineIdentity,
+        machine_identity: MachineIdentityReader,
     ) -> None:
         """An HTTP server that is not a page server (no `ok:` /health) is the
         same foreign occupant — refused, not silently registered."""
@@ -644,7 +647,7 @@ class TestServe:
         model_catalog: ModelCatalog,
         config_authority: ConfigAuthority,
         database_gate: ProcessDbGate,
-        machine_identity: MachineIdentity,
+        machine_identity: MachineIdentityReader,
     ) -> None:
         """Registry conflict: another agent's live page owns the port — the
         error names the occupying page, and nothing is registered."""
@@ -681,7 +684,7 @@ class TestServe:
         model_catalog: ModelCatalog,
         config_authority: ConfigAuthority,
         database_gate: ProcessDbGate,
-        machine_identity: MachineIdentity,
+        machine_identity: MachineIdentityReader,
     ) -> None:
         """A refused serve() (port taken by another agent) must not close the
         agent's own current page."""
@@ -720,7 +723,7 @@ class TestServe:
         model_catalog: ModelCatalog,
         config_authority: ConfigAuthority,
         database_gate: ProcessDbGate,
-        machine_identity: MachineIdentity,
+        machine_identity: MachineIdentityReader,
     ) -> None:
         """The agent's own page on the port is not a foreign occupant: even
         with its (wedged) server still bound, serve() replaces it — the
@@ -763,7 +766,7 @@ class TestServe:
         model_catalog: ModelCatalog,
         config_authority: ConfigAuthority,
         database_gate: ProcessDbGate,
-        machine_identity: MachineIdentity,
+        machine_identity: MachineIdentityReader,
     ) -> None:
         pin_agent(
             spawn_agent(

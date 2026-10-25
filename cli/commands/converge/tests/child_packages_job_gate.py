@@ -7,7 +7,7 @@ import json
 from pathlib import Path
 
 from base.clock.tests.manual_timers import ManualTimers
-from base.cluster.machine.boot import machine_from_boot
+from base.cluster.machine.configured import ConfiguredMachineIdentity
 from base.config import ConfigBoot
 from base.host.system.tests.fake_commands import fake_host
 from base.host.system.tests.fake_crontab import FakeCrontab
@@ -26,7 +26,7 @@ from cli.database.runtime import UserSession
 def main() -> None:
     config = ConfigBoot()
     config.read_process_environment()
-    machine = machine_from_boot(config)
+    machine = ConfiguredMachineIdentity(config)
     crontab = FakeCrontab()
     host = fake_host(crontab, programs={"crontab": "/usr/bin/crontab"})
     database = operator_database_factory(

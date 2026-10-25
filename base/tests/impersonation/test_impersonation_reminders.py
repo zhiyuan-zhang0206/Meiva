@@ -4,7 +4,7 @@ import psycopg
 import pytest
 
 from base.agents import impersonation as leases
-from base.cluster.machine import MachineIdentity
+from base.cluster.machine import MachineIdentityReader
 from base.cluster.machine.tests.identity import machine_identity as machine_identity
 from base.config.service_read import ConfigAuthority
 from base.db import Database
@@ -20,7 +20,7 @@ def test_reminder_is_inserted_once_per_lease_and_wakes(
     *,
     config_authority: ConfigAuthority,
     database_gate: ProcessDbGate,
-    machine_identity: MachineIdentity,
+    machine_identity: MachineIdentityReader,
 ) -> None:
     from base.agents.impersonation.maintenance import remind_expiring_impersonations
     from base.db import pool
@@ -61,7 +61,7 @@ def test_reminder_ack_suppresses_further_reminders(
     *,
     config_authority: ConfigAuthority,
     database_gate: ProcessDbGate,
-    machine_identity: MachineIdentity,
+    machine_identity: MachineIdentityReader,
 ) -> None:
     local_machine = machine_identity.name()
     from base.agents.impersonation.maintenance import remind_expiring_impersonations
@@ -116,7 +116,7 @@ def test_reminder_skips_leases_outside_the_window(
     *,
     config_authority: ConfigAuthority,
     database_gate: ProcessDbGate,
-    machine_identity: MachineIdentity,
+    machine_identity: MachineIdentityReader,
 ) -> None:
     from base.agents.impersonation.maintenance import remind_expiring_impersonations
     from base.db import pool
@@ -149,7 +149,7 @@ def test_release_dismisses_its_pending_reminder(
     *,
     config_authority: ConfigAuthority,
     database_gate: ProcessDbGate,
-    machine_identity: MachineIdentity,
+    machine_identity: MachineIdentityReader,
 ) -> None:
     local_machine = machine_identity.name()
     from base.agents.impersonation.maintenance import remind_expiring_impersonations
@@ -190,7 +190,7 @@ def test_expiry_dismisses_its_pending_reminder(
     *,
     config_authority: ConfigAuthority,
     database_gate: ProcessDbGate,
-    machine_identity: MachineIdentity,
+    machine_identity: MachineIdentityReader,
 ) -> None:
     from base.agents.impersonation import maintenance as maintenance
     from base.db import pool
@@ -247,7 +247,7 @@ def test_reminder_window_tracks_current_ttl(
     *,
     config_authority: ConfigAuthority,
     database_gate: ProcessDbGate,
-    machine_identity: MachineIdentity,
+    machine_identity: MachineIdentityReader,
 ) -> None:
     from base.agents.impersonation.maintenance import remind_expiring_impersonations
     from base.db import pool
@@ -275,7 +275,7 @@ def test_renewal_recomputes_window_and_allows_a_new_reminder(
     *,
     config_authority: ConfigAuthority,
     database_gate: ProcessDbGate,
-    machine_identity: MachineIdentity,
+    machine_identity: MachineIdentityReader,
 ) -> None:
     local_machine = machine_identity.name()
     from base.agents.impersonation.maintenance import remind_expiring_impersonations

@@ -7,7 +7,7 @@ import psycopg
 import pytest
 from fastapi.testclient import TestClient
 
-from base.cluster.machine import MachineIdentity
+from base.cluster.machine.configured import ConfiguredMachineIdentity
 from base.config.tests.configuration import snapshot_process_config
 from base.host.system.tests.fake_commands import fake_host
 from gateway.tests.auth.gateway_config import GatewayTestClient, gateway_test_app
@@ -19,7 +19,7 @@ __all__ = ["gateway_unit", "sdk_via_gateway"]
 def gateway_unit(
     gateway_data_plane: None,
     db_conn: psycopg.Connection,
-    machine_identity: MachineIdentity,
+    machine_identity: ConfiguredMachineIdentity,
 ) -> Iterator[TestClient]:
     """The gateway unit (gateway): owns the test DB/config, runs the
     in-process gateway app, role='gateway'.

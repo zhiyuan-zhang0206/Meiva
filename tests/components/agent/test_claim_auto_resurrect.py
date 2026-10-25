@@ -16,7 +16,7 @@ from agent.graph.claim.tests.claim_support import insert_inbound_kind, make_runt
 from agent.state import AgentState
 from base.agents.inbox.insert import insert_inbound_message
 from base.agents.tests.units import spawn_agent
-from base.cluster.machine import MachineIdentity
+from base.cluster.machine import MachineIdentityReader
 from base.cluster.machine.tests.identity import machine_identity as machine_identity
 from base.config.service_read import ConfigAuthority
 from base.db import Database
@@ -34,7 +34,7 @@ async def running_agent(
     model_catalog: ModelCatalog,
     config_authority: ConfigAuthority,
     database_gate: ProcessDbGate,
-    machine_identity: MachineIdentity,
+    machine_identity: MachineIdentityReader,
 ):
     """Admit a real hosted owner and bind it throughout each dispatch test."""
     from uuid import uuid4
@@ -70,7 +70,7 @@ async def test_claim_auto_resurrect_chat_batch_wakes_and_keeps_chat(
     model_catalog: ModelCatalog,
     config_authority: ConfigAuthority,
     database_gate: ProcessDbGate,
-    machine_identity: MachineIdentity,
+    machine_identity: MachineIdentityReader,
 ):
     """A settled prior command, not marker recency, protects the real successor."""
 

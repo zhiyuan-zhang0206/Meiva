@@ -140,7 +140,7 @@ class Sim:
             return 0
         if '"head=$(git rev-parse HEAD)"' in command:
             return self._reported(alias, host, emit)
-        if "machine_from_boot(ConfigBoot()).name()" in command:
+        if "ConfiguredMachineIdentity(ConfigBoot()).name()" in command:
             emit.append(self.s["names"][alias])
             return 0
         if " - roster" in command:

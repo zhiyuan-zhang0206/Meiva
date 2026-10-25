@@ -12,7 +12,7 @@ import psycopg
 from psycopg_pool import AsyncConnectionPool
 
 from agent.ownership.hosted import admit_hosted_runtime
-from base.cluster.machine import MachineIdentity
+from base.cluster.machine import MachineIdentityReader
 from base.cluster.machine.tests.identity import machine_identity as machine_identity
 from base.db import Database, create_agent
 
@@ -21,7 +21,7 @@ async def test_an_idle_agent_with_a_departed_owner_is_readmitted_by_a_new_owner(
     db_conn: psycopg.Connection[Any],
     aops_pool: AsyncConnectionPool[Any],
     database: Database,
-    machine_identity: MachineIdentity,
+    machine_identity: MachineIdentityReader,
 ) -> None:
     agent = create_agent(db_conn)
     old_owner, old_generation = uuid4(), uuid4()

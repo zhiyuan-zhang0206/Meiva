@@ -12,7 +12,7 @@ from agent.ownership.hosted import admit_hosted_runtime
 from base.agents import impersonation as leases
 from base.agents.impersonation.tests.impersonation_support import recorded_tree
 from base.api_contracts.caller_identity import CallerIdentity
-from base.cluster.machine import MachineIdentity
+from base.cluster.machine import MachineIdentityReader
 from base.cluster.machine.tests.identity import machine_identity as machine_identity
 from base.config.service_read import ConfigAuthority
 from base.db import Database, create_agent
@@ -37,7 +37,7 @@ async def test_replacement_host_admission_ends_the_takeover_without_respawning_i
     config_authority: ConfigAuthority,
     *,
     database_gate: ProcessDbGate,
-    machine_identity: MachineIdentity,
+    machine_identity: MachineIdentityReader,
 ) -> None:
     from services.agent_runner.agent_host.host import AgentHost
 
@@ -131,7 +131,7 @@ async def test_restarted_host_settles_the_ended_takeover_without_an_external_mes
     config_authority: ConfigAuthority,
     *,
     database_gate: ProcessDbGate,
-    machine_identity: MachineIdentity,
+    machine_identity: MachineIdentityReader,
 ) -> None:
     from services.agent_runner.agent_host.host import AgentHost
 
@@ -230,7 +230,7 @@ async def test_lease_controls_settle_the_handoff_of_a_dead_relays_lease(
     config_authority: ConfigAuthority,
     *,
     database_gate: ProcessDbGate,
-    machine_identity: MachineIdentity,
+    machine_identity: MachineIdentityReader,
 ) -> None:
     from base.agents.observation.relay_supervision import RelayChild
     from services.agent_runner.agent_host.host import AgentHost
@@ -387,7 +387,7 @@ async def test_restart_command_settles_the_ended_takeover_before_releasing_the_i
     config_authority: ConfigAuthority,
     *,
     database_gate: ProcessDbGate,
-    machine_identity: MachineIdentity,
+    machine_identity: MachineIdentityReader,
 ) -> None:
     machine = machine_identity.name()
     agent_id, lease_id = await _takeover_in_progress(
@@ -452,7 +452,7 @@ async def test_terminate_command_settles_the_ended_takeover_before_the_agent_goe
     config_authority: ConfigAuthority,
     *,
     database_gate: ProcessDbGate,
-    machine_identity: MachineIdentity,
+    machine_identity: MachineIdentityReader,
 ) -> None:
     machine = machine_identity.name()
     agent_id, lease_id = await _takeover_in_progress(

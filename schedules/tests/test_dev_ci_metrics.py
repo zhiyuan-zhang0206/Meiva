@@ -21,7 +21,7 @@ import pytest
 
 from base.agents.context import MeivaContext
 from base.clock import SYSTEM_TIMERS
-from base.cluster.machine import MachineIdentity
+from base.cluster.machine import MachineIdentityReader
 from base.db import Database
 from base.host.proc import run_bounded
 from base.telemetry.tests.capture.event_capture import EmittedEvents
@@ -217,7 +217,7 @@ def test_an_unreadable_listing_is_logged_and_the_next_workflow_is_still_checked(
 
 def test_a_quiet_collection_reports_the_previous_day_and_emits_the_snapshot(
     database: Database,
-    machine_identity: MachineIdentity,
+    machine_identity: MachineIdentityReader,
     emitted_events: EmittedEvents,
     sdk_environment: MeivaContext,
     tmp_path: Path,
@@ -237,7 +237,7 @@ def test_a_quiet_collection_reports_the_previous_day_and_emits_the_snapshot(
 
 def test_a_failing_exporter_wakes_the_p0_lead_with_the_failure(
     database: Database,
-    machine_identity: MachineIdentity,
+    machine_identity: MachineIdentityReader,
     emitted_events: EmittedEvents,
     sdk_environment: MeivaContext,
     tmp_path: Path,

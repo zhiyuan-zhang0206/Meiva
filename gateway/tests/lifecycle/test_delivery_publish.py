@@ -21,7 +21,8 @@ from psycopg_pool import ConnectionPool
 
 from base.agents.inbox.chat_delivery import ChatInboundCommittedError
 from base.api_contracts.agent_contract import AgentStatus
-from base.cluster.machine import MachineIdentity
+from base.cluster.machine import MachineFacts, MachineIdentityReader
+from base.cluster.machine.configured import ConfiguredMachineIdentity
 from base.cluster.machine.tests.identity import machine_identity as machine_identity
 from base.config import settings
 from base.config.service_read import ConfigAuthority
@@ -87,8 +88,8 @@ def _bus(redis_url: str) -> EventBus:
 # terminated agent homed here is resurrected by the real op.
 @pytest.fixture
 def local_home(
-    machine_identity: MachineIdentity, gateway_local_runner: RunnerOps
-) -> MachineIdentity:
+    machine_identity: ConfiguredMachineIdentity, gateway_local_runner: RunnerOps
+) -> ConfiguredMachineIdentity:
     machine_identity.set(role="agent-runner")
     return machine_identity
 
@@ -102,11 +103,11 @@ def peer_home(
     config_authority: ConfigAuthority,
     model_catalog: ModelCatalog,
 ) -> Generator[str]:
-    peer = MachineIdentity(
-        name=lambda: "peer-home",
-        role=lambda: frozenset({"agent-runner"}),
-        host=lambda: "localhost",
-        description=lambda: None,
+    peer = MachineFacts.of(
+        name="peer-home",
+        role=frozenset({"agent-runner"}),
+        host="localhost",
+        description=None,
     )
     with local_runner(
         db_conn,
@@ -127,7 +128,7 @@ async def test_deliver_survives_publish_failure(
     db_conn: psycopg.Connection,
     database_gate: ProcessDbGate,
     *,
-    machine_identity: MachineIdentity,
+    machine_identity: MachineIdentityReader,
 ) -> None:
     tid = _seed_agent(db_conn, "idling", machine=machine_identity.name())
 
@@ -158,7 +159,7 @@ async def test_unknown_publish_error_exposes_committed_delivery(
     database_gate: ProcessDbGate,
     step: str,
     *,
-    machine_identity: MachineIdentity,
+    machine_identity: MachineIdentityReader,
 ) -> None:
     tid = _seed_agent(db_conn, "idling", machine=machine_identity.name())
     db = Database.from_settings(gate=database_gate)
@@ -198,7 +199,7 @@ async def test_deliver_wakes_a_terminated_agent_with_the_inserted_chat_as_guard(
     db_conn: psycopg.Connection,
     database_gate: ProcessDbGate,
     event_bus: EventBus,
-    local_home: MachineIdentity,
+    local_home: MachineIdentityReader,
 ) -> None:
     tid = _seed_agent(db_conn, "terminated", machine=local_home.name())
 
@@ -228,7 +229,7 @@ async def test_retried_client_message_resurrects_terminated_agent_once(
     db_conn: psycopg.Connection,
     database_gate: ProcessDbGate,
     event_bus: EventBus,
-    local_home: MachineIdentity,
+    local_home: MachineIdentityReader,
 ) -> None:
     tid = _seed_agent(db_conn, "terminated", machine=local_home.name())
 
@@ -260,7 +261,7 @@ async def test_fresh_peer_message_wakes_owner_despite_previous_suppression(
     event_bus: EventBus,
     peer_home: str,
     *,
-    machine_identity: MachineIdentity,
+    machine_identity: MachineIdentityReader,
 ) -> None:
     tid = _seed_agent(db_conn, "terminated", machine=peer_home, suppressed=True)
 
@@ -300,7 +301,7 @@ async def test_concurrent_same_key_terminated_delivery_has_one_resurrect_effect(
     db_conn: psycopg.Connection,
     database_gate: ProcessDbGate,
     event_bus: EventBus,
-    local_home: MachineIdentity,
+    local_home: MachineIdentityReader,
 ) -> None:
     tid = _seed_agent(db_conn, "terminated", machine=local_home.name())
 
@@ -332,7 +333,7 @@ async def test_badge_publish_happens_after_commit(
     database_gate: ProcessDbGate,
     event_bus: EventBus,
     *,
-    machine_identity: MachineIdentity,
+    machine_identity: MachineIdentityReader,
 ) -> None:
     tid = _seed_agent(db_conn, "idling", machine=machine_identity.name())
 
@@ -378,7 +379,7 @@ async def test_cancelled_caller_leaves_the_committed_chat_and_reconciles_same_re
     database_gate: ProcessDbGate,
     event_bus: EventBus,
     *,
-    machine_identity: MachineIdentity,
+    machine_identity: MachineIdentityReader,
 ) -> None:
     tid = _seed_agent(db_conn, "terminated", machine="slow-home")
     wake_arrived = threading.Event()

@@ -1,6 +1,6 @@
 from typing import Any
 
-from base.cluster.machine import MachineIdentity
+from base.cluster.machine import MachineIdentityReader
 from base.config.service_read import ConfigAuthority
 from base.db import Database
 from base.db.code_version_gate import ProcessDbGate
@@ -12,7 +12,7 @@ __all__ = ["spawn_agent"]
 
 def spawn_agent(
     *,
-    machine: MachineIdentity,
+    machine: MachineIdentityReader,
     catalog: ModelCatalog,
     authority: ConfigAuthority,
     database_gate: ProcessDbGate,

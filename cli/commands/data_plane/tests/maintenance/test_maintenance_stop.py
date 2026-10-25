@@ -26,7 +26,7 @@ from redis.asyncio import Redis as AsyncRedis
 
 from base.cluster import ownership
 from base.cluster import postgres as owned_postgres
-from base.cluster.machine import MachineIdentity
+from base.cluster.machine import MachineIdentityReader
 from base.native_process.ownership import OwnedProcess
 from base.telemetry import EventPipeline
 from base.telemetry.tests.capture.event_capture import EmittedEvents
@@ -210,7 +210,7 @@ def test_a_replaced_postmaster_identity_fails_the_leg_and_leaves_postgres_runnin
     postgres_access: None,
     redis_access: None,
     unit_home: Path,
-    command_machine: MachineIdentity,
+    command_machine: MachineIdentityReader,
     data_plane_config: DataPlaneConfig,
     emitted_events: EmittedEvents,
 ) -> None:
@@ -258,7 +258,7 @@ def test_the_stop_ends_a_whole_local_data_plane_in_order(
     postgres_access: None,
     redis_access: None,
     unit_home: Path,
-    command_machine: MachineIdentity,
+    command_machine: MachineIdentityReader,
     data_plane_config: DataPlaneConfig,
     operator_pipeline: Callable[[], EventPipeline],
 ) -> None:

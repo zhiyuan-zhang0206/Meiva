@@ -21,7 +21,7 @@ from agent.turn.runloop import PendingTurnFailure, publish_turn_failure
 from base.agents.context import MeivaContext
 from base.agents.recovery.breaker import admit_pending_wake
 from base.agents.tests.units import spawn_agent
-from base.cluster.machine import MachineIdentity
+from base.cluster.machine import MachineIdentityReader
 from base.cluster.machine.tests.identity import machine_identity as machine_identity
 from base.config.service_read import ConfigAuthority
 from base.db import Database
@@ -80,7 +80,7 @@ async def _admit(
     catalog: ModelCatalog,
     authority: ConfigAuthority,
     database_gate: ProcessDbGate,
-    local_machine: MachineIdentity,
+    local_machine: MachineIdentityReader,
 ) -> RuntimeIncarnation:
     agent_id = spawn_agent(
         catalog=catalog, authority=authority, database_gate=database_gate, machine=local_machine
@@ -101,7 +101,7 @@ async def test_error_visible_after_cutoff_allows_immediate_new_chat(
     model_catalog: ModelCatalog,
     config_authority: ConfigAuthority,
     database_gate: ProcessDbGate,
-    machine_identity: MachineIdentity,
+    machine_identity: MachineIdentityReader,
 ) -> None:
     incarnation = await _admit(
         db_conn,
@@ -242,7 +242,7 @@ async def test_unproven_settlement_never_publishes_retry_instructions(
     model_catalog: ModelCatalog,
     config_authority: ConfigAuthority,
     database_gate: ProcessDbGate,
-    machine_identity: MachineIdentity,
+    machine_identity: MachineIdentityReader,
     loguru_records: list[dict[str, object]],
 ) -> None:
     incarnation = await _admit(
@@ -289,7 +289,7 @@ async def test_publication_failure_is_observable_and_never_repeated(
     model_catalog: ModelCatalog,
     config_authority: ConfigAuthority,
     database_gate: ProcessDbGate,
-    machine_identity: MachineIdentity,
+    machine_identity: MachineIdentityReader,
     loguru_records: list[dict[str, object]],
 ) -> None:
     incarnation = await _admit(

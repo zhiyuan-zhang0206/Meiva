@@ -20,7 +20,6 @@ from urllib.parse import urlsplit
 import pytest
 from pydantic import ValidationError
 
-from base.cluster.machine import MachineIdentity, roles_from_flags
 from base.host.tests.short_tmp import short_tmp as short_tmp
 from base.paths import meiva_home, root_manifests_path
 from cli.commands import probe
@@ -181,18 +180,14 @@ def test_the_report_ends_with_the_release_and_the_gateways_own_view(
 def test_an_unresolved_role_lists_every_service_ungated(
     status: _Status, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    unresolved = MachineIdentity(
-        name=lambda: "unit-test-machine",
-        role=lambda: roles_from_flags(
-            serve_gateway=False, serve_agent_runner=False, serve_observability_station=False
-        ),
-        host=lambda: "localhost",
-        description=lambda: None,
-    )
-    command = dataclasses.replace(status.command, machine=unresolved)
+    status.command.config.set_field("machine_serve_gateway", False)
+    status.command.config.set_field("machine_serve_agent_runner", False)
+    status.command.config.set_field("machine_serve_observability_station", False)
+    status.command.machine.reset()
+    status.command.machine.set(name="unit-test-machine", host="localhost", description=None)
 
     capsys.readouterr()
-    assert cmd_status(database_factory=status.database_factory, command=command) == 0
+    assert cmd_status(database_factory=status.database_factory, command=status.command) == 0
     out = capsys.readouterr().out
 
     assert "roles = unknown" in out

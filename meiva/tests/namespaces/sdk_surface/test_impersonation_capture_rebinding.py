@@ -25,7 +25,7 @@ from base.agents.sdk.tests.sampling_owners import fixed_sampling_owner
 from base.agents.tests.capture_inputs import capture_rows, capture_state, open_capture, sdk_event
 from base.agents.tests.capture_inputs import lease as lease
 from base.agents.tests.capture_inputs import owner as owner
-from base.cluster.machine import MachineIdentity
+from base.cluster.machine import MachineIdentityReader
 from base.cluster.machine.tests.identity import machine_identity as machine_identity
 from base.db import Database
 from base.db.code_version_gate import ProcessDbGate
@@ -179,7 +179,7 @@ def test_known_capture_database_outage_retains_the_failed_receipt_recovery(
     monkeypatch: pytest.MonkeyPatch,
     database_gate: ProcessDbGate,
     *,
-    machine_identity: MachineIdentity,
+    machine_identity: MachineIdentityReader,
 ) -> None:
     local_machine = machine_identity.name()
     participant = open_capture(

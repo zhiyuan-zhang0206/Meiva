@@ -20,7 +20,7 @@ from psycopg.rows import TupleRow
 from psycopg_pool import ConnectionPool
 
 from base.agents.observation.evidence import AvailabilityReason
-from base.cluster.machine import MachineIdentity
+from base.cluster.machine import MachineIdentityReader
 from base.cluster.machine.tests.identity import MachineIdentitySetter
 from base.db import Database
 from base.db.code_version_gate import ProcessDbGate
@@ -41,7 +41,7 @@ from ops.rpc_schemas import LaunchAgentRequest
 
 
 @pytest.fixture
-def _force_local_machine(set_machine_identity: MachineIdentitySetter) -> MachineIdentity:
+def _force_local_machine(set_machine_identity: MachineIdentitySetter) -> MachineIdentityReader:
     """Sets this unit's identity at the source via set_machine_identity so every
     machine_name() / machine_role() call site sees role=agent-runner, name='local-test'."""
     return set_machine_identity(role="agent-runner", name="local-test")
@@ -49,7 +49,7 @@ def _force_local_machine(set_machine_identity: MachineIdentitySetter) -> Machine
 
 class TestRouting:
     def test_machine_eq_local_forwards_to_local_target(
-        self, _force_local_machine: MachineIdentity, db_conn: psycopg.Connection
+        self, _force_local_machine: MachineIdentityReader, db_conn: psycopg.Connection
     ) -> None:
         """body.machine == local → spawn is HTTP-uniform: still forwarded, with
         target == local (the co-located runner's ops server over localhost)."""
@@ -71,7 +71,7 @@ class TestRouting:
         assert resp.json()["observed_at"]
 
     def test_machine_none_forwards_to_local_target(
-        self, _force_local_machine: MachineIdentity, db_conn: psycopg.Connection
+        self, _force_local_machine: MachineIdentityReader, db_conn: psycopg.Connection
     ) -> None:
         """body.machine absent → equivalent to local; still forwarded, target == local."""
         with (
@@ -104,7 +104,7 @@ class TestRouting:
         )
 
     def test_paused_target_409_no_forward(
-        self, _force_local_machine: MachineIdentity, db_conn: psycopg.Connection
+        self, _force_local_machine: MachineIdentityReader, db_conn: psycopg.Connection
     ) -> None:
         """A spawn targeting a PAUSED machine (operator `meiva cluster pause`) is
         refused with 409 + reason='machine_paused' before any forward — the
@@ -124,7 +124,7 @@ class TestRouting:
     # meiva:note
     # body.machine != local → the launch op reaches that machine, body passthrough.
     def test_machine_neq_local_forwards(
-        self, _force_local_machine: MachineIdentity, db_conn: psycopg.Connection
+        self, _force_local_machine: MachineIdentityReader, db_conn: psycopg.Connection
     ) -> None:
         with (
             runner_ops(db_conn, "remote-mac", {"spawn-launch": launched}) as runner,
@@ -147,7 +147,7 @@ class TestRouting:
         assert launch.idempotency_key.startswith("spawn-launch:remote-mac:")
 
     def test_machine_not_registered_propagates_404(
-        self, _force_local_machine: MachineIdentity, db_conn: psycopg.Connection
+        self, _force_local_machine: MachineIdentityReader, db_conn: psycopg.Connection
     ) -> None:
         """A target not in the machines table → the pre-dispatch lookup_role raises
         MachineNotRegistered → the app's MeivaAgentError handler emits 404 + reason
@@ -166,7 +166,7 @@ class TestRouting:
     # meiva:note
     # A post-commit forward error returns 502 with the committed identity.
     def test_unreachable_runner_names_committed_agent(
-        self, _force_local_machine: MachineIdentity, db_conn: psycopg.Connection
+        self, _force_local_machine: MachineIdentityReader, db_conn: psycopg.Connection
     ) -> None:
         with (
             runner_ops(db_conn, "remote-mac", {"spawn-launch": refused(404, "gone")}),
@@ -179,7 +179,7 @@ class TestRouting:
         assert resp.json()["state"]["availability"]["reason"] == "launch_unreachable"
 
     def test_mismatched_runner_receipt_cannot_replace_committed_id(
-        self, _force_local_machine: MachineIdentity, db_conn: psycopg.Connection
+        self, _force_local_machine: MachineIdentityReader, db_conn: psycopg.Connection
     ) -> None:
         with (
             runner_ops(

@@ -12,7 +12,7 @@ from pathlib import Path
 
 import pytest
 
-from base.cluster.machine.boot import machine_from_boot
+from base.cluster.machine.configured import ConfiguredMachineIdentity
 from base.config import ConfigBoot
 from base.paths.tests.homes import unit_home as unit_home
 from cli.commands.converge import walg as converge_walg_module
@@ -99,7 +99,7 @@ def _walg_ctx(
         meiva_home=home,
         roles=frozenset({"gateway"}),
         config=config,
-        machine=machine_from_boot(config),
+        machine=ConfiguredMachineIdentity(config),
     )
 
 

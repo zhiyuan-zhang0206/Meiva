@@ -7,7 +7,7 @@ import pytest
 
 from base.clock.tests.manual_timers import ManualTimers
 from base.cluster.dataplane.direct_url import ClusterDirectUrl
-from base.cluster.machine import MachineIdentity
+from base.cluster.machine import MachineIdentityReader
 from base.config import ConfigBoot
 from base.db import Database
 from base.db.code_version_gate import ProcessDbGate
@@ -55,7 +55,7 @@ def test_writer_uses_one_captured_gate_and_is_joined(
         return Database(db_config_from_settings(), gate=gate, direct_url=direct_url)
 
     def build(
-        *, database: Callable[[], Database], machine: MachineIdentity, home: Path
+        *, database: Callable[[], Database], machine: MachineIdentityReader, home: Path
     ) -> EventPipeline:
         assert machine.name() == "export-owner"
         assert home == tmp_path
@@ -94,7 +94,7 @@ def test_body_error_preserves_the_original_writer_error_during_close(
     pipeline = EventPipeline(writer=write, batch_size=1)
 
     def build(
-        *, database: Callable[[], Database], machine: MachineIdentity, home: Path
+        *, database: Callable[[], Database], machine: MachineIdentityReader, home: Path
     ) -> EventPipeline:
         assert callable(database)
         return pipeline
@@ -163,7 +163,7 @@ def test_export_entry_captures_before_fetch_or_borrows_the_supplied_writer(
         return subprocess.CompletedProcess(argv, 0, "[]", "")
 
     def build(
-        *, database: Callable[[], Database], machine: MachineIdentity, home: Path
+        *, database: Callable[[], Database], machine: MachineIdentityReader, home: Path
     ) -> EventPipeline:
         assert not borrowed and callable(database)
         calls.append("build")

@@ -1,11 +1,11 @@
 from base.api_contracts.agent_contract import Harness
-from base.cluster.machine import MachineIdentity
+from base.cluster.machine import MachineIdentityReader
 from base.cluster.machine.tests.identity import machine_identity as machine_identity
 from gateway.schemas.models import ModelsResponse
 from gateway.tests.auth.gateway_config import gateway_test_client
 
 
-def get_models(*, local_machine: MachineIdentity) -> ModelsResponse:
+def get_models(*, local_machine: MachineIdentityReader) -> ModelsResponse:
     with gateway_test_client(machine=local_machine) as client:
         response = client.get("/api/models")
     assert response.status_code == 200, response.text
@@ -13,7 +13,7 @@ def get_models(*, local_machine: MachineIdentity) -> ModelsResponse:
 
 
 def test_fast_services_have_separate_picker_prices_and_tps(
-    *, gateway_data_plane: None, machine_identity: MachineIdentity
+    *, gateway_data_plane: None, machine_identity: MachineIdentityReader
 ) -> None:
     catalog = get_models(local_machine=machine_identity)
     standard = catalog.models["gpt-5.6-sol"]
@@ -34,7 +34,7 @@ def test_fast_services_have_separate_picker_prices_and_tps(
 
 
 def test_picker_exposes_declared_fast_relationships(
-    *, gateway_data_plane: None, machine_identity: MachineIdentity
+    *, gateway_data_plane: None, machine_identity: MachineIdentityReader
 ) -> None:
     catalog = get_models(local_machine=machine_identity)
     assert catalog.models["gpt-5.6-sol-fast"].fast_of == "gpt-5.6-sol"
@@ -44,7 +44,7 @@ def test_picker_exposes_declared_fast_relationships(
 
 
 def test_picker_exposes_served_service_cache_write_rates(
-    *, gateway_data_plane: None, machine_identity: MachineIdentity
+    *, gateway_data_plane: None, machine_identity: MachineIdentityReader
 ) -> None:
     catalog = get_models(local_machine=machine_identity)
     standard = catalog.models["claude-opus-5-5"].pricing
@@ -55,7 +55,7 @@ def test_picker_exposes_served_service_cache_write_rates(
 
 
 def test_picker_publishes_each_models_harnesses(
-    *, gateway_data_plane: None, machine_identity: MachineIdentity
+    *, gateway_data_plane: None, machine_identity: MachineIdentityReader
 ) -> None:
     catalog = get_models(local_machine=machine_identity)
     assert catalog.models["claude-sonnet-5-5"].harnesses == [Harness.MEIVA, Harness.CLAUDE_CODE]

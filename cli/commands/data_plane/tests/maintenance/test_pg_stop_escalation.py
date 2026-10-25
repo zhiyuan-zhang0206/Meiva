@@ -22,7 +22,7 @@ import pytest
 from base.cluster import ownership
 from base.cluster import postgres as pg
 from base.cluster.dataplane.pg_admin import pg_admin_url
-from base.cluster.machine import MachineIdentity
+from base.cluster.machine import MachineIdentityReader
 from base.native_process.ownership import capture_tree
 from base.telemetry.tests.capture.event_capture import EmittedEvents
 from base.telemetry.tests.capture.event_capture import emitted_events as emitted_events
@@ -83,7 +83,7 @@ def _start_with_hung_archive(
     port: int,
     home: Path,
     retained: list[subprocess.Popen[bytes]],
-    machine: MachineIdentity,
+    machine: MachineIdentityReader,
 ) -> None:
     data = instance.ensure_pg_data(home, os_user=getpass.getuser())
     with (data / "postgresql.auto.conf").open("a") as settings:
@@ -101,7 +101,7 @@ def test_a_hung_archive_command_ends_in_an_immediate_shutdown_inside_the_budget(
     unit_home: Path,
     emitted_events: EmittedEvents,
     *,
-    command_machine: MachineIdentity,
+    command_machine: MachineIdentityReader,
     data_plane_config: DataPlaneConfig,
 ) -> None:
     port, private = _private_plane(data_plane_config)

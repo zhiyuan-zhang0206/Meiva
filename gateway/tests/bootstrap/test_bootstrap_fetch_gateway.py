@@ -6,7 +6,7 @@ from urllib.parse import urlsplit
 import pytest
 
 from base import config
-from base.cluster.machine import MachineIdentity
+from base.cluster.machine import MachineIdentityReader
 from base.cluster.machine.tests.identity import machine_identity as machine_identity
 from base.config.domains.storage.data_plane import self_machine_host
 from base.host.env import bootstrap
@@ -26,7 +26,7 @@ def test_fetch_bootstrap_config_against_live_endpoint(
     monkeypatch: pytest.MonkeyPatch,
     served_gateway_home: Any,
     *,
-    machine_identity: MachineIdentity,
+    machine_identity: MachineIdentityReader,
 ) -> None:
     # An authenticated gateway: the runner presents its delivered machine API
     # token (the active generation's runner token), never the human secret.

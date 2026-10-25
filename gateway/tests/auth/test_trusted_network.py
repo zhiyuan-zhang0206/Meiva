@@ -10,7 +10,7 @@ from fastapi import Depends, HTTPException, Request
 from pydantic import ValidationError
 from starlette.testclient import TestClient
 
-from base.cluster.machine import MachineIdentity
+from base.cluster.machine import MachineIdentityReader
 from base.cluster.machine.tests.identity import machine_identity as machine_identity
 from base.config.domains.gateway import GatewaySettings
 from base.host.net.auth import bearer_header, cookie_name
@@ -41,7 +41,7 @@ def probe(request: Request) -> dict[str, str | None]:
 
 @contextmanager
 def served(
-    human_auth: Literal["required", "trusted_network"] | None, machine: MachineIdentity
+    human_auth: Literal["required", "trusted_network"] | None, machine: MachineIdentityReader
 ) -> Generator[TestClient]:
     with gateway_test_process(machine=machine) as process:
         config = replace(
@@ -65,14 +65,14 @@ def served(
 
 
 def test_required_mode_still_refuses_an_anonymous_request(
-    *, machine_identity: MachineIdentity
+    *, machine_identity: MachineIdentityReader
 ) -> None:
     with served("required", machine_identity) as client:
         assert client.get("/api/probe", headers=DECLARED).status_code == 401
 
 
 def test_trusted_network_serves_an_anonymous_request_as_the_administrator(
-    *, machine_identity: MachineIdentity
+    *, machine_identity: MachineIdentityReader
 ) -> None:
     with served("trusted_network", machine_identity) as client:
         response = client.get("/api/probe", headers=DECLARED)
@@ -82,7 +82,7 @@ def test_trusted_network_serves_an_anonymous_request_as_the_administrator(
 
 
 def test_a_bearer_keeps_its_own_fact_in_trusted_network_mode(
-    *, machine_identity: MachineIdentity
+    *, machine_identity: MachineIdentityReader
 ) -> None:
     with served("trusted_network", machine_identity) as client:
         response = client.get("/api/probe", headers={**DECLARED, **bearer_header(CLUSTER_KEY)})
@@ -94,7 +94,7 @@ def test_a_bearer_keeps_its_own_fact_in_trusted_network_mode(
     "authorization", ["Bearer wrong-secret", "Bearer machine-token-revoked", "Basic abc", ""]
 )
 def test_an_invalid_authorization_header_stays_a_401(
-    authorization: str, *, machine_identity: MachineIdentity
+    authorization: str, *, machine_identity: MachineIdentityReader
 ) -> None:
     with served("trusted_network", machine_identity) as client:
         response = client.get("/api/probe", headers={**DECLARED, "Authorization": authorization})
@@ -103,7 +103,7 @@ def test_an_invalid_authorization_header_stays_a_401(
 
 
 def test_an_invalid_session_cookie_still_falls_through_to_the_anonymous_path(
-    *, machine_identity: MachineIdentity
+    *, machine_identity: MachineIdentityReader
 ) -> None:
     with served("trusted_network", machine_identity) as client:
         response = client.get(
@@ -113,7 +113,9 @@ def test_an_invalid_session_cookie_still_falls_through_to_the_anonymous_path(
     assert response.json()["fact"] == TRUSTED_NETWORK_FACT
 
 
-def test_a_foreign_origin_cannot_post_anonymously(*, machine_identity: MachineIdentity) -> None:
+def test_a_foreign_origin_cannot_post_anonymously(
+    *, machine_identity: MachineIdentityReader
+) -> None:
     with served("trusted_network", machine_identity) as client:
         foreign = client.post("/api/probe", headers={**DECLARED, "Origin": "https://evil.example"})
         allowed = client.post("/api/probe", headers={**DECLARED, "Origin": ALLOWED_ORIGIN})
@@ -124,7 +126,7 @@ def test_a_foreign_origin_cannot_post_anonymously(*, machine_identity: MachineId
 
 @pytest.mark.parametrize("host", ["rebind.attacker.example", "rebind.attacker.example:8000"])
 def test_an_unknown_host_is_refused_anonymously(
-    host: str, *, machine_identity: MachineIdentity
+    host: str, *, machine_identity: MachineIdentityReader
 ) -> None:
     with served("trusted_network", machine_identity) as client:
         assert client.get("/api/probe", headers={"Host": host}).status_code == 403
@@ -134,14 +136,14 @@ def test_an_unknown_host_is_refused_anonymously(
     "host", ["10.0.0.5:8000", "localhost:8000", "127.0.0.1", "[::1]:8000", "LOCALHOST"]
 )
 def test_declared_and_loopback_hosts_are_served_anonymously(
-    host: str, *, machine_identity: MachineIdentity
+    host: str, *, machine_identity: MachineIdentityReader
 ) -> None:
     with served("trusted_network", machine_identity) as client:
         assert client.get("/api/probe", headers={"Host": host}).status_code == 200
 
 
 def test_an_unknown_host_does_not_affect_a_credentialed_request(
-    *, machine_identity: MachineIdentity
+    *, machine_identity: MachineIdentityReader
 ) -> None:
     with served("trusted_network", machine_identity) as client:
         response = client.get(
@@ -152,7 +154,7 @@ def test_an_unknown_host_does_not_affect_a_credentialed_request(
 
 
 def test_a_human_only_route_accepts_the_anonymous_trusted_network_request(
-    *, machine_identity: MachineIdentity
+    *, machine_identity: MachineIdentityReader
 ) -> None:
     with served("trusted_network", machine_identity) as client:
         assert client.get("/api/probe-human", headers=DECLARED).status_code == 200
@@ -171,7 +173,7 @@ def test_auth_check_reports_what_the_middleware_would_admit(
     host: str,
     authenticated: bool,
     *,
-    machine_identity: MachineIdentity,
+    machine_identity: MachineIdentityReader,
 ) -> None:
     with served(human_auth, machine_identity) as client:
         response = client.get("/api/auth/check", headers={"Host": host})
@@ -208,7 +210,7 @@ def test_human_auth_defaults_to_trusted_network_and_rejects_unknown_values() -> 
 
 
 def test_default_policy_skips_login_and_serves_the_api(
-    *, machine_identity: MachineIdentity
+    *, machine_identity: MachineIdentityReader
 ) -> None:
     with served(None, machine_identity) as client:
         check = client.get("/api/auth/check", headers=DECLARED)

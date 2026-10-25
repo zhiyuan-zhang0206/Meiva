@@ -19,7 +19,8 @@ from redis.backoff import NoBackoff
 from redis.retry import Retry
 
 from base.cluster import port_preflight
-from base.cluster.machine import MachineIdentity
+from base.cluster.machine import MachineIdentityReader
+from base.cluster.machine.configured import ConfiguredMachineIdentity
 from base.deploy.tests.containers import redis_server
 from cli.commands.data_plane import cluster_instance as instance
 from cli.commands.data_plane.cluster_instance import StartTuning
@@ -49,7 +50,7 @@ _UNASSIGNED = "192.0.2.1"
 
 def _start(
     cluster: NativeCluster,
-    machine: MachineIdentity,
+    machine: MachineIdentityReader,
     *,
     plane: DataPlaneConfig | None = None,
     runtime: str = RUNTIME_PASSWORD,
@@ -68,7 +69,7 @@ def _start(
 
 
 def test_a_fresh_start_serves_only_authenticated_clients(
-    native_cluster: NativeCluster, command_machine: MachineIdentity
+    native_cluster: NativeCluster, command_machine: MachineIdentityReader
 ) -> None:
     assert _start(native_cluster, command_machine) == 0
     port = native_cluster.redis_port
@@ -86,7 +87,7 @@ def test_a_fresh_start_serves_only_authenticated_clients(
 
 
 def test_the_admin_password_lives_in_a_private_conf_and_persistence_is_scheduled(
-    native_cluster: NativeCluster, command_machine: MachineIdentity
+    native_cluster: NativeCluster, command_machine: MachineIdentityReader
 ) -> None:
     assert _start(native_cluster, command_machine) == 0
     conf = native_cluster.home / "redis" / "redis.conf"
@@ -103,7 +104,7 @@ def test_the_admin_password_lives_in_a_private_conf_and_persistence_is_scheduled
 # meiva:note
 # A journal retry repairs the config after an old-password false-down probe.
 def test_a_running_redis_repairs_a_stale_conf_and_stays_up(
-    native_cluster: NativeCluster, command_machine: MachineIdentity
+    native_cluster: NativeCluster, command_machine: MachineIdentityReader
 ) -> None:
     assert _start(native_cluster, command_machine) == 0
     conf = native_cluster.home / "redis" / "redis.conf"
@@ -120,7 +121,7 @@ def test_a_running_redis_repairs_a_stale_conf_and_stays_up(
     ("admin", "runtime"), [("", ""), ("", RUNTIME_PASSWORD), (ADMIN_PASSWORD, "")]
 )
 def test_missing_credentials_refuse_before_any_effect(
-    native_cluster: NativeCluster, command_machine: MachineIdentity, admin: str, runtime: str
+    native_cluster: NativeCluster, command_machine: MachineIdentityReader, admin: str, runtime: str
 ) -> None:
     plane = dataclasses.replace(native_cluster.plane, redis_admin_password=admin)
 
@@ -136,7 +137,7 @@ def test_missing_credentials_refuse_before_any_effect(
 # process (the test home is in its environment as `MEIVA_HOME`); the daemon it spawns keeps none of
 # them.
 def test_the_daemon_inherits_no_meiva_authority(
-    native_cluster: NativeCluster, command_machine: MachineIdentity
+    native_cluster: NativeCluster, command_machine: MachineIdentityReader
 ) -> None:
     assert _start(native_cluster, command_machine) == 0
     with redis.Redis(
@@ -151,7 +152,7 @@ def test_the_daemon_inherits_no_meiva_authority(
 @pytest.mark.requires_host("linux")
 def test_linux_redis_refuses_to_start_when_the_declared_reach_never_appears(
     native_cluster: NativeCluster,
-    command_machine: MachineIdentity,
+    command_machine: ConfiguredMachineIdentity,
     capsys: pytest.CaptureFixture[str],
 ) -> None:
     command_machine.set(host=_UNASSIGNED)
@@ -169,7 +170,7 @@ def test_linux_redis_refuses_to_start_when_the_declared_reach_never_appears(
 def test_a_foreign_redis_keeps_its_acl_and_config(
     redis_access: None,
     tmp_path: Path,
-    command_machine: MachineIdentity,
+    command_machine: MachineIdentityReader,
     data_plane_config: DataPlaneConfig,
 ) -> None:
     config = tmp_path / "redis" / "redis.conf"

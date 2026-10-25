@@ -8,13 +8,13 @@ from dataclasses import replace
 import pytest
 from psycopg_pool import ConnectionPool
 
-from base.cluster.machine import MachineIdentity
+from base.cluster.machine import MachineIdentityReader
 from ops.env_audit import read_env_write_records
 from services.agent_runner.agent_ops.tests.ops_support import Ops, config_write
 
 
 async def test_config_read_reports_this_machine(
-    ops: Ops, machine_identity: MachineIdentity
+    ops: Ops, machine_identity: MachineIdentityReader
 ) -> None:
     status, result = await ops.dispatch("config_read", {})
 
@@ -84,7 +84,7 @@ async def test_config_audit_read_rejects_out_of_range_last(ops: Ops) -> None:
 
 
 async def test_status_probe_serializes_this_machines_status(
-    ops: Ops, machine_identity: MachineIdentity
+    ops: Ops, machine_identity: MachineIdentityReader
 ) -> None:
     status, result = await ops.dispatch("status_probe", {})
 
@@ -95,7 +95,7 @@ async def test_status_probe_serializes_this_machines_status(
 
 
 async def test_status_probe_completes_degraded_when_its_pool_cannot_serve(
-    ops: Ops, machine_identity: MachineIdentity
+    ops: Ops, machine_identity: MachineIdentityReader
 ) -> None:
     closed: ConnectionPool = ConnectionPool(open=False)
 
@@ -110,7 +110,7 @@ async def test_status_probe_completes_degraded_when_its_pool_cannot_serve(
 
 
 async def test_inventory_read_reports_this_machine(
-    ops: Ops, machine_identity: MachineIdentity
+    ops: Ops, machine_identity: MachineIdentityReader
 ) -> None:
     status, result = await ops.dispatch("inventory_read", {})
 

@@ -5,7 +5,7 @@ from pathlib import Path
 
 import pytest
 
-from base.cluster.machine import MachineIdentity
+from base.cluster.machine import MachineIdentityReader
 from base.cluster.machine.tests.identity import machine_identity as machine_identity
 from base.config import settings
 from base.config.tests.configuration import snapshot_process_config
@@ -55,7 +55,7 @@ def test_process_exit_does_not_become_model_unavailable(failure: BaseException) 
 
 
 def test_zero_provider_keeps_management_available(
-    provider_plugin: Callable[..., None], *, machine_identity: MachineIdentity
+    provider_plugin: Callable[..., None], *, machine_identity: MachineIdentityReader
 ) -> None:
     del provider_plugin
     for name in discover_plugins():
@@ -79,7 +79,7 @@ def broken_provider(provider_plugin: Callable[..., None]) -> tuple[Path, str]:
 
 @pytest.mark.usefixtures("served_gateway_home", "broken_provider")
 def test_broken_provider_keeps_auth_and_management_available(
-    *, machine_identity: MachineIdentity
+    *, machine_identity: MachineIdentityReader
 ) -> None:
     boot = snapshot_process_config()
     credential = settings.data_plane.cluster_secret
@@ -100,7 +100,7 @@ def test_broken_provider_keeps_auth_and_management_available(
 
 @pytest.mark.usefixtures("served_gateway_home")
 def test_provider_repair_restores_catalog_after_safe_failure(
-    broken_provider: tuple[Path, str], *, machine_identity: MachineIdentity
+    broken_provider: tuple[Path, str], *, machine_identity: MachineIdentityReader
 ) -> None:
     provider_path, valid_provider = broken_provider
     boot = snapshot_process_config()

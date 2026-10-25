@@ -16,7 +16,7 @@ from typing import Any
 import psycopg
 import pytest
 
-from base.cluster.machine import MachineIdentity
+from base.cluster.machine import MachineIdentityReader
 from base.cluster.machine.tests.identity import MachineIdentitySetter
 from base.deploy.lifecycle.tests.serving_root import serving_root as serving_root
 from gateway.cluster.status import StatusCache
@@ -42,7 +42,7 @@ def truncate_machines(db_conn: psycopg.Connection) -> None:
 
 
 @pytest.fixture
-def stub_machine_identity(set_machine_identity: MachineIdentitySetter) -> MachineIdentity:
+def stub_machine_identity(set_machine_identity: MachineIdentitySetter) -> MachineIdentityReader:
     """Set this unit's identity (gateway, name 'cloud-test') at the source
     so every machine_name() / machine_role() call site resolves it without
     per-module patching."""
@@ -136,7 +136,7 @@ class TestClusterPanel:
     # meiva:note
     # current_* fields reflect local machine perspective.
     def test_current_machine_role_paused_from_local(
-        self, serving_gate: None, stub_machine_identity: MachineIdentity
+        self, serving_gate: None, stub_machine_identity: MachineIdentityReader
     ) -> None:
         with gateway_test_client(machine=stub_machine_identity) as client:
             r = client.get("/api/status")
@@ -157,7 +157,7 @@ class TestClusterPanel:
     # A serving gate that has not opened (a start in flight, a stop begun) shows in the cluster
     # sub-section as `current_paused`.
     def test_current_paused_true_while_the_gate_is_not_serving(
-        self, stub_machine_identity: MachineIdentity
+        self, stub_machine_identity: MachineIdentityReader
     ) -> None:
         with gateway_test_client(machine=stub_machine_identity) as client:
             r = client.get("/api/status")
@@ -170,7 +170,7 @@ class TestClusterPanel:
         self,
         db_conn: psycopg.Connection,
         serving_gate: None,
-        stub_machine_identity: MachineIdentity,
+        stub_machine_identity: MachineIdentityReader,
     ) -> None:
         _insert_machine(
             db_conn, "cloud-test", "https://meiva.example.com", "gateway", "central node"
@@ -197,7 +197,7 @@ class TestClusterPanel:
         self,
         db_conn: psycopg.Connection,
         serving_gate: None,
-        stub_machine_identity: MachineIdentity,
+        stub_machine_identity: MachineIdentityReader,
     ) -> None:
         _insert_machine(db_conn, "station-a", None, "observability-station")
         answer = _probe_answer("combo")
@@ -228,7 +228,7 @@ class TestClusterPanel:
         self,
         db_conn: psycopg.Connection,
         serving_gate: None,
-        stub_machine_identity: MachineIdentity,
+        stub_machine_identity: MachineIdentityReader,
     ) -> None:
         _insert_machine(db_conn, "runner-test", None, "agent-runner")
 
@@ -244,14 +244,14 @@ class TestClusterPanel:
         # NULL → ""
         assert machines[0]["gateway_url"] == ""
 
-    def test_empty_machines_table(self, stub_machine_identity: MachineIdentity) -> None:
+    def test_empty_machines_table(self, stub_machine_identity: MachineIdentityReader) -> None:
         with gateway_test_client(machine=stub_machine_identity) as client:
             r = client.get("/api/status")
         assert r.status_code == 200
         assert r.json()["cluster"]["machines"] == []
 
     def test_response_cache_reuses_remote_probe(
-        self, db_conn: psycopg.Connection, stub_machine_identity: MachineIdentity
+        self, db_conn: psycopg.Connection, stub_machine_identity: MachineIdentityReader
     ) -> None:
         with (
             runner_ops(db_conn, "runner-test", {"status_probe": _numbered_probes("runner-test")}),
@@ -265,7 +265,7 @@ class TestClusterPanel:
         assert (_shell_count(first), _shell_count(second)) == (1, 1)
 
     def test_response_cache_ttl_zero_reprobes(
-        self, db_conn: psycopg.Connection, stub_machine_identity: MachineIdentity
+        self, db_conn: psycopg.Connection, stub_machine_identity: MachineIdentityReader
     ) -> None:
         with (
             runner_ops(db_conn, "runner-test", {"status_probe": _numbered_probes("runner-test")}),
@@ -283,7 +283,7 @@ class TestClusterPanel:
     # A transport reset recovered by the roster's retry is cached as the
     # successful final verdict, not as a transient offline row.
     def test_response_cache_keeps_retry_recovered_result(
-        self, db_conn: psycopg.Connection, stub_machine_identity: MachineIdentity
+        self, db_conn: psycopg.Connection, stub_machine_identity: MachineIdentityReader
     ) -> None:
         answers = iter([refused(503, "connection reset"), _probe_answer("runner-test")])
 
@@ -312,7 +312,7 @@ class TestPanelCarriesNoFrozenPin:
         self,
         db_conn: psycopg.Connection,
         tmp_path: Path,
-        stub_machine_identity: MachineIdentity,
+        stub_machine_identity: MachineIdentityReader,
     ) -> None:
         source = tmp_path / "source"
         source.mkdir()

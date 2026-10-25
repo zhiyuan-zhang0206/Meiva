@@ -14,7 +14,7 @@ from base.agents import impersonation as leases
 from base.agents.impersonation import host_transport, relay, terminal_notices
 from base.agents.impersonation.tests.impersonation_support import recorded_tree
 from base.api_contracts.caller_identity import CallerIdentity
-from base.cluster.machine import MachineIdentity
+from base.cluster.machine import MachineIdentityReader
 from base.cluster.machine.tests.identity import machine_identity as machine_identity
 from base.config.service_read import ConfigAuthority
 from base.db import Database, create_agent
@@ -29,7 +29,7 @@ def active(
     event_bus: EventBus,
     *,
     config_authority: ConfigAuthority,
-    machine_identity: MachineIdentity,
+    machine_identity: MachineIdentityReader,
 ) -> tuple[dict[str, Any], RuntimeIncarnation]:
     local_machine = machine_identity.name()
     aid = create_agent(db_conn)
@@ -86,7 +86,7 @@ def test_generation_claim_is_single_winner_and_stale_token_loses_authority(
     database: Database,
     event_bus: EventBus,
     *,
-    machine_identity: MachineIdentity,
+    machine_identity: MachineIdentityReader,
 ) -> None:
     session, owner = active
     tokens = ["first-private-token", "second-private-token"]
@@ -122,7 +122,7 @@ def test_ended_notice_is_submitted_once_to_the_recorded_destination(
     database: Database,
     event_bus: EventBus,
     *,
-    machine_identity: MachineIdentity,
+    machine_identity: MachineIdentityReader,
 ) -> None:
     session, _ = active
     end(database, event_bus, session, local_machine=machine_identity.name())
@@ -143,7 +143,7 @@ def test_ended_notice_failure_is_reported_and_leaves_no_retry_state(
     event_bus: EventBus,
     db_conn: psycopg.Connection,
     *,
-    machine_identity: MachineIdentity,
+    machine_identity: MachineIdentityReader,
 ) -> None:
     session, _ = active
     end(database, event_bus, session, local_machine=machine_identity.name())
@@ -166,7 +166,7 @@ def test_controller_session_destination_gets_no_host_submission(
     event_bus: EventBus,
     db_conn: psycopg.Connection,
     *,
-    machine_identity: MachineIdentity,
+    machine_identity: MachineIdentityReader,
 ) -> None:
     session, _ = active
     db_conn.execute(
@@ -187,7 +187,7 @@ def test_old_notice_keeps_destination_after_replacement_takeover(
     event_bus: EventBus,
     db_conn: psycopg.Connection,
     *,
-    machine_identity: MachineIdentity,
+    machine_identity: MachineIdentityReader,
     config_authority: ConfigAuthority,
 ) -> None:
     session, owner = active
@@ -251,7 +251,7 @@ def test_terminated_agent_notice_names_the_termination(
     database: Database,
     db_conn: psycopg.Connection,
     *,
-    machine_identity: MachineIdentity,
+    machine_identity: MachineIdentityReader,
 ) -> None:
     session, owner = active
     db_conn.execute("UPDATE agents_meta SET status='terminated' WHERE id=%s", (owner.agent_id,))
@@ -269,7 +269,7 @@ def test_already_terminal_insert_is_not_historically_backfilled(
     event_bus: EventBus,
     db_conn: psycopg.Connection,
     *,
-    machine_identity: MachineIdentity,
+    machine_identity: MachineIdentityReader,
 ) -> None:
     session, owner = active
     end(database, event_bus, session, local_machine=machine_identity.name())
@@ -298,7 +298,7 @@ def test_ended_antigravity_notice_uses_the_endpoint_the_request_recorded(
     db_conn: psycopg.Connection,
     tmp_path: Path,
     *,
-    machine_identity: MachineIdentity,
+    machine_identity: MachineIdentityReader,
 ) -> None:
     from functools import partial
     from http.server import BaseHTTPRequestHandler, HTTPServer
@@ -362,7 +362,7 @@ def test_ended_antigravity_notice_without_a_record_names_the_record_it_looked_fo
     db_conn: psycopg.Connection,
     tmp_path: Path,
     *,
-    machine_identity: MachineIdentity,
+    machine_identity: MachineIdentityReader,
 ) -> None:
     session, _ = active
     thread_id = str(uuid4())

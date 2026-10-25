@@ -14,7 +14,8 @@ from pathlib import Path
 
 import pytest
 
-from base.cluster.machine import MachineIdentity
+from base.cluster.machine import MachineIdentityReader
+from base.cluster.machine.configured import ConfiguredMachineIdentity
 from cli.commands.data_plane import cluster_instance as instance
 from cli.commands.data_plane.config import DataPlaneConfig
 from cli.database.tests.command_inputs import command_machine as command_machine
@@ -40,7 +41,7 @@ def _bound(argv: list[str]) -> list[str]:
 
 
 def test_macos_binds_loopback_alone_even_when_the_machine_declares_an_address(
-    plane: DataPlaneConfig, command_machine: MachineIdentity, tmp_path: Path
+    plane: DataPlaneConfig, command_machine: ConfiguredMachineIdentity, tmp_path: Path
 ) -> None:
     command_machine.set(host=_REACHABLE)
 
@@ -50,7 +51,7 @@ def test_macos_binds_loopback_alone_even_when_the_machine_declares_an_address(
 
 
 def test_another_platform_binds_the_declared_address_beside_loopback(
-    plane: DataPlaneConfig, command_machine: MachineIdentity, tmp_path: Path
+    plane: DataPlaneConfig, command_machine: ConfiguredMachineIdentity, tmp_path: Path
 ) -> None:
     command_machine.set(host=_REACHABLE)
 
@@ -60,7 +61,7 @@ def test_another_platform_binds_the_declared_address_beside_loopback(
 
 
 def test_a_single_box_binds_loopback_on_either_platform(
-    plane: DataPlaneConfig, command_machine: MachineIdentity, tmp_path: Path
+    plane: DataPlaneConfig, command_machine: ConfiguredMachineIdentity, tmp_path: Path
 ) -> None:
     command_machine.set(host="localhost")
     for macos in (True, False):
@@ -70,7 +71,7 @@ def test_a_single_box_binds_loopback_on_either_platform(
 
 
 def test_the_command_line_names_the_configured_server_port_and_data_directory(
-    plane: DataPlaneConfig, command_machine: MachineIdentity, tmp_path: Path
+    plane: DataPlaneConfig, command_machine: MachineIdentityReader, tmp_path: Path
 ) -> None:
     argv = instance.redis_launch_argv(plane, 6391, tmp_path, command_machine, macos=False)
 

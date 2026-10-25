@@ -6,7 +6,7 @@ import psycopg
 import pytest
 from fastapi.testclient import TestClient
 
-from base.cluster.machine import MachineIdentity
+from base.cluster.machine import MachineIdentityReader
 from base.cluster.machine.tests.identity import machine_identity as machine_identity
 from base.host.net.auth import bearer_header, cookie_name
 from base.packages.plugin_providers import build_model_catalog
@@ -32,19 +32,19 @@ from gateway.tests.bootstrap.test_auth import patch_secret as patch_secret
 # ── Unauthenticated requests get 401 ──────────────────────────────────
 
 
-def test_api_agents_rejects_no_auth(*, machine_identity: MachineIdentity) -> None:
+def test_api_agents_rejects_no_auth(*, machine_identity: MachineIdentityReader) -> None:
     with anonymous_gateway_client(machine=machine_identity) as client:
         resp = client.get("/api/agents")
     assert resp.status_code == 401
 
 
-def test_api_status_rejects_no_auth(*, machine_identity: MachineIdentity) -> None:
+def test_api_status_rejects_no_auth(*, machine_identity: MachineIdentityReader) -> None:
     with anonymous_gateway_client(machine=machine_identity) as client:
         resp = client.get("/api/status")
     assert resp.status_code == 401
 
 
-def test_api_bootstrap_rejects_no_auth(*, machine_identity: MachineIdentity) -> None:
+def test_api_bootstrap_rejects_no_auth(*, machine_identity: MachineIdentityReader) -> None:
     with anonymous_gateway_client(machine=machine_identity) as client:
         resp = client.get("/api/bootstrap")
     assert resp.status_code == 401
@@ -53,7 +53,9 @@ def test_api_bootstrap_rejects_no_auth(*, machine_identity: MachineIdentity) -> 
 # ── CORS preflight is exempt from auth ────────────────────────────────
 
 
-def test_cors_preflight_on_protected_route_not_401(*, machine_identity: MachineIdentity) -> None:
+def test_cors_preflight_on_protected_route_not_401(
+    *, machine_identity: MachineIdentityReader
+) -> None:
     """A browser CORS preflight (OPTIONS) carries no credentials by spec, so
     it can never pass the cookie/Bearer check. The auth middleware must let it
     fall through to CORSMiddleware; otherwise the preflight 401s, never gets
@@ -102,7 +104,7 @@ def test_cors_preflight_login_from_gateway_frontend_origin_passes() -> None:
 
 
 def test_cookie_authenticated_post_allows_gateway_frontend_origin(
-    *, machine_identity: MachineIdentity
+    *, machine_identity: MachineIdentityReader
 ) -> None:
     """A cookie-authenticated state-changing POST from the Gate UI's origin —
     gateway host, frontend port — must pass the exact-origin check, not 403.
@@ -132,7 +134,7 @@ def test_cookie_authenticated_post_allows_gateway_frontend_origin(
 
 
 def test_cors_preflight_disallowed_origin_has_no_allow_origin_header(
-    *, machine_identity: MachineIdentity
+    *, machine_identity: MachineIdentityReader
 ) -> None:
     with anonymous_gateway_client(machine=machine_identity) as client:
         resp = client.options(
@@ -147,7 +149,9 @@ def test_cors_preflight_disallowed_origin_has_no_allow_origin_header(
     assert "access-control-allow-origin" not in resp.headers
 
 
-def test_unauthorized_response_carries_cors_headers(*, machine_identity: MachineIdentity) -> None:
+def test_unauthorized_response_carries_cors_headers(
+    *, machine_identity: MachineIdentityReader
+) -> None:
     """A 401 short-circuited by the auth middleware still carries the CORS
     headers — CORSMiddleware is the OUTERMOST middleware, so a browser caller
     sees the real 401 instead of "Failed to fetch" (#187)."""
@@ -178,14 +182,14 @@ def test_cors_headers_omit_disallowed_origin() -> None:
 # ── Bearer token works ────────────────────────────────────────────────
 
 
-def test_api_agents_accepts_bearer(*, machine_identity: MachineIdentity) -> None:
+def test_api_agents_accepts_bearer(*, machine_identity: MachineIdentityReader) -> None:
     with anonymous_gateway_client(machine=machine_identity) as client:
         resp = client.get("/api/agents", headers=auth())
     assert resp.status_code == 200
 
 
 @pytest.mark.usefixtures("served_gateway_home")
-def test_api_bootstrap_accepts_bearer(*, machine_identity: MachineIdentity) -> None:
+def test_api_bootstrap_accepts_bearer(*, machine_identity: MachineIdentityReader) -> None:
     with anonymous_gateway_client(machine=machine_identity) as client:
         resp = client.get("/api/bootstrap", headers=auth())
     assert resp.status_code == 200
@@ -194,7 +198,7 @@ def test_api_bootstrap_accepts_bearer(*, machine_identity: MachineIdentity) -> N
 # ── X-Cluster-Secret header is rejected ────────────────────────────────
 
 
-def test_api_agents_rejects_x_cluster_secret(*, machine_identity: MachineIdentity) -> None:
+def test_api_agents_rejects_x_cluster_secret(*, machine_identity: MachineIdentityReader) -> None:
     with anonymous_gateway_client(machine=machine_identity) as client:
         resp = client.get("/api/agents", headers={"X-Cluster-Secret": SECRET})
     assert resp.status_code == 401
@@ -203,21 +207,21 @@ def test_api_agents_rejects_x_cluster_secret(*, machine_identity: MachineIdentit
 # ── Session cookie works on protected routes ──────────────────────────
 
 
-def test_api_agents_accepts_valid_cookie(*, machine_identity: MachineIdentity) -> None:
+def test_api_agents_accepts_valid_cookie(*, machine_identity: MachineIdentityReader) -> None:
     with anonymous_gateway_client(machine=machine_identity) as client:
         token = login(client)
         resp = client.get("/api/agents", headers=session_cookie(token))
     assert resp.status_code == 200
 
 
-def test_api_agents_rejects_invalid_cookie(*, machine_identity: MachineIdentity) -> None:
+def test_api_agents_rejects_invalid_cookie(*, machine_identity: MachineIdentityReader) -> None:
     with anonymous_gateway_client(machine=machine_identity) as client:
         resp = client.get("/api/agents", headers=session_cookie("bad-token"))
     assert resp.status_code == 401
 
 
 def test_cookie_authenticated_post_rejects_disallowed_origin(
-    *, machine_identity: MachineIdentity
+    *, machine_identity: MachineIdentityReader
 ) -> None:
     with anonymous_gateway_client(
         machine=machine_identity,
@@ -239,7 +243,7 @@ def test_cookie_authenticated_post_rejects_disallowed_origin(
 
 
 def test_bearer_authenticated_post_allows_disallowed_origin(
-    *, machine_identity: MachineIdentity
+    *, machine_identity: MachineIdentityReader
 ) -> None:
     with anonymous_gateway_client(
         machine=machine_identity,
@@ -258,7 +262,7 @@ def test_bearer_authenticated_post_allows_disallowed_origin(
 
 
 def test_cookie_authenticated_post_allows_gateway_own_origin(
-    *, machine_identity: MachineIdentity
+    *, machine_identity: MachineIdentityReader
 ) -> None:
     """The gateway's own origin — the one a browser page served from the
     gateway (Grafana proxy included) sends on same-origin POSTs — must pass
@@ -290,7 +294,7 @@ def test_cookie_authenticated_post_allows_gateway_own_origin(
 
 
 def test_cookie_authenticated_post_allows_missing_origin(
-    *, machine_identity: MachineIdentity
+    *, machine_identity: MachineIdentityReader
 ) -> None:
     with anonymous_gateway_client(
         machine=machine_identity,
@@ -307,7 +311,7 @@ def test_cookie_authenticated_post_allows_missing_origin(
 
 
 def test_legacy_self_contained_hmac_cookie_is_rejected(
-    *, machine_identity: MachineIdentity
+    *, machine_identity: MachineIdentityReader
 ) -> None:
     with anonymous_gateway_client(machine=machine_identity) as client:
         resp = client.get(
@@ -317,7 +321,9 @@ def test_legacy_self_contained_hmac_cookie_is_rejected(
     assert resp.status_code == 401
 
 
-def test_revoke_endpoint_invalidates_another_session(*, machine_identity: MachineIdentity) -> None:
+def test_revoke_endpoint_invalidates_another_session(
+    *, machine_identity: MachineIdentityReader
+) -> None:
     with anonymous_gateway_client(machine=machine_identity) as client:
         first = login(client)
         client.cookies.clear()
@@ -336,7 +342,9 @@ def test_revoke_endpoint_invalidates_another_session(*, machine_identity: Machin
     assert [session["id"] for session in listed.json()] == [first]
 
 
-def test_revoke_endpoint_refuses_current_session(*, machine_identity: MachineIdentity) -> None:
+def test_revoke_endpoint_refuses_current_session(
+    *, machine_identity: MachineIdentityReader
+) -> None:
     with anonymous_gateway_client(machine=machine_identity) as client:
         current = login(client)
         response = client.post(f"/api/auth/sessions/{current}/revoke")
@@ -350,7 +358,7 @@ def test_revoke_endpoint_refuses_current_session(*, machine_identity: MachineIde
 
 
 def test_revoke_endpoint_returns_404_for_missing_or_revoked_session(
-    *, machine_identity: MachineIdentity
+    *, machine_identity: MachineIdentityReader
 ) -> None:
     with anonymous_gateway_client(machine=machine_identity) as client:
         current = login(client)
@@ -369,7 +377,7 @@ def test_revoke_endpoint_returns_404_for_missing_or_revoked_session(
 
 
 def test_middleware_touches_session_at_most_once_per_minute(
-    db_conn: psycopg.Connection, *, machine_identity: MachineIdentity
+    db_conn: psycopg.Connection, *, machine_identity: MachineIdentityReader
 ) -> None:
     with anonymous_gateway_client(machine=machine_identity) as client:
         token = login(client)
@@ -409,7 +417,7 @@ def test_middleware_touches_session_at_most_once_per_minute(
 # ── Wrong secret gets 401 ─────────────────────────────────────────────
 
 
-def test_api_agents_rejects_wrong_bearer_secret(*, machine_identity: MachineIdentity) -> None:
+def test_api_agents_rejects_wrong_bearer_secret(*, machine_identity: MachineIdentityReader) -> None:
     with anonymous_gateway_client(machine=machine_identity) as client:
         resp = client.get("/api/agents", headers=bearer_header("wrong-secret"))
     assert resp.status_code == 401
@@ -418,7 +426,7 @@ def test_api_agents_rejects_wrong_bearer_secret(*, machine_identity: MachineIden
 # ── A blank secret authenticates nobody ────────────────────────────────
 
 
-def test_blank_secret_rejects_every_caller(*, machine_identity: MachineIdentity) -> None:
+def test_blank_secret_rejects_every_caller(*, machine_identity: MachineIdentityReader) -> None:
     """There is no open posture: a gateway whose secret is blank (the process refuses
     to start in that state, `require_cluster_secret`) still never admits a caller on
     a blank bearer, and a blank secret never verifies as one."""
@@ -554,7 +562,7 @@ def _assert_session_cookie_isolation(
 
 
 def test_two_apps_isolate_gateway_config_across_auth_cors_mcp_and_webhooks(
-    *, machine_identity: MachineIdentity
+    *, machine_identity: MachineIdentityReader
 ) -> None:
     """Two assembled apps with distinct GatewayConfig snapshots isolate all 6 fields."""
     config_alpha = gateway_test_config(

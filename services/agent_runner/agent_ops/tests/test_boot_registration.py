@@ -11,7 +11,7 @@ import psycopg
 import pytest
 
 from base.cluster import machines
-from base.cluster.machine import MachineIdentity
+from base.cluster.machine.configured import ConfiguredMachineIdentity
 from base.config.tests.configuration import snapshot_process_config
 from base.db import Database
 from services.agent_runner.agent_ops import boot
@@ -36,7 +36,7 @@ def _machines_table_missing(conn: psycopg.Connection) -> Generator[None]:
 # accepts is the write-generation matrix in
 # tests/components/lifecycle/db_authority/test_api_tokens.py.
 def test_ops_binds_all_interfaces_only_for_a_declared_reachable_address(
-    machine_identity: MachineIdentity,
+    machine_identity: ConfiguredMachineIdentity,
 ) -> None:
     machine_identity.set(host="10.0.0.5")
     # meiva:note
@@ -53,7 +53,7 @@ def test_ops_binds_all_interfaces_only_for_a_declared_reachable_address(
 # `meiva start` did.
 def test_register_boot_announces_this_unit_up_at_its_dial_url(
     db_conn: psycopg.Connection,
-    machine_identity: MachineIdentity,
+    machine_identity: ConfiguredMachineIdentity,
     ops_database: Callable[[], Database],
 ) -> None:
     machine_identity.set(name="runner-a", role="agent-runner", host="10.0.0.2", description=None)
@@ -75,7 +75,7 @@ def test_register_boot_announces_this_unit_up_at_its_dial_url(
 # take the host dark for the gateway — the outage this call exists to prevent.
 def test_register_boot_failure_does_not_stop_the_daemon(
     db_conn: psycopg.Connection,
-    machine_identity: MachineIdentity,
+    machine_identity: ConfiguredMachineIdentity,
     caplog: pytest.LogCaptureFixture,
     ops_database: Callable[[], Database],
 ) -> None:
@@ -105,7 +105,7 @@ def test_register_boot_failure_does_not_stop_the_daemon(
 # Registering at the daemon's own boot reconciles both.
 def test_register_boot_unstops_a_host_that_came_back(
     db_conn: psycopg.Connection,
-    machine_identity: MachineIdentity,
+    machine_identity: ConfiguredMachineIdentity,
     ops_database: Callable[[], Database],
 ) -> None:
     config = snapshot_process_config()

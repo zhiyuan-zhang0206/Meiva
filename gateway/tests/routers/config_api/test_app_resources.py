@@ -6,14 +6,13 @@ from collections.abc import Generator
 from contextlib import contextmanager
 from pathlib import Path
 
-from base.cluster.machine import MachineIdentity
-from base.cluster.machine.boot import machine_from_boot
+from base.cluster.machine.configured import ConfiguredMachineIdentity
 from base.config.tests.configuration import snapshot_process_config
 from gateway.tests.auth.gateway_config import GatewayTestClient, gateway_test_client
 
 
-def _machine(name: str) -> MachineIdentity:
-    machine = machine_from_boot(snapshot_process_config())
+def _machine(name: str) -> ConfiguredMachineIdentity:
+    machine = ConfiguredMachineIdentity(snapshot_process_config())
     machine.set(role="gateway", name=name)
     return machine
 

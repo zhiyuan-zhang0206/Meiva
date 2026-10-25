@@ -29,7 +29,7 @@ from base.agents.impersonation.tests.impersonation_support import recorded_tree
 from base.agents.observation.relay_supervision import RelaySupervision
 from base.api_contracts.caller_identity import CallerIdentity
 from base.clock import SYSTEM_TIMERS, Clock, ClockConfig
-from base.cluster.machine import MachineIdentity
+from base.cluster.machine import MachineIdentityReader
 from base.config.service_read import ConfigAuthority
 from base.config.tests.configuration import defaults
 from base.db import Database, create_agent
@@ -70,7 +70,7 @@ class Cluster:
     database: Database
     event_bus: EventBus
     authority: ConfigAuthority
-    machine: MachineIdentity
+    machine: MachineIdentityReader
 
     @property
     def local_machine(self) -> str:
@@ -245,7 +245,7 @@ def cluster(
     database: Database,
     event_bus: EventBus,
     config_authority: ConfigAuthority,
-    machine_identity: MachineIdentity,
+    machine_identity: MachineIdentityReader,
 ) -> Cluster:
     return Cluster(db_conn, database, event_bus, config_authority, machine_identity)
 

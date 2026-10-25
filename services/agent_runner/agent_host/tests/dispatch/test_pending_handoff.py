@@ -15,7 +15,7 @@ from base.agents.history.delta_read_compat import wrap_saver_reads_with_delta_re
 from base.agents.messages.timestamp_policy import TimestampSource
 from base.agents.observation.relay_supervision import RelaySupervision
 from base.clock import SYSTEM_TIMERS, Clock, ClockConfig
-from base.cluster.machine import MachineIdentity
+from base.cluster.machine import MachineIdentityReader
 from base.db import Database, create_agent
 from base.db.code_version_gate import ProcessDbGate
 from base.events.live.bus import EventBus
@@ -77,7 +77,7 @@ async def test_the_scan_wake_settles_the_receipt_it_selected_the_row_for(
     model_catalog: ModelCatalog,
     *,
     database_gate: ProcessDbGate,
-    machine_identity: MachineIdentity,
+    machine_identity: MachineIdentityReader,
 ) -> None:
     agent_id = create_agent(db_conn)
     db_conn.execute(

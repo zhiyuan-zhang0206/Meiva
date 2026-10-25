@@ -12,7 +12,7 @@ from base.agents.impersonation import sessions as sessions
 from base.agents.impersonation.tests.impersonation_support import recorded_tree
 from base.agents.messages.timestamp_policy import TimestampPolicy
 from base.clock import Clock
-from base.cluster.machine import MachineIdentity
+from base.cluster.machine import MachineIdentityReader
 from base.cluster.machine.tests.identity import machine_identity as machine_identity
 from base.config import settings
 from base.config.service_read import ConfigAuthority
@@ -31,7 +31,7 @@ def owner(
     db_conn: psycopg.Connection[Any],
     config_authority: ConfigAuthority,
     *,
-    machine_identity: MachineIdentity,
+    machine_identity: MachineIdentityReader,
 ) -> RuntimeIncarnation:
     """Bind the authority home before recording this machine's native owner."""
     agent_id = create_agent(db_conn)
@@ -104,7 +104,7 @@ def test_timeline_pages_inside_a_session_using_existing_numeric_cursors(
     *,
     config_authority: ConfigAuthority,
     database_gate: ProcessDbGate,
-    machine_identity: MachineIdentity,
+    machine_identity: MachineIdentityReader,
 ) -> None:
     from agent.impersonation_handoff import note_stamp, start_update
     from base.agents.history.timeline import build_timeline_items

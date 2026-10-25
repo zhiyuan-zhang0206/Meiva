@@ -12,8 +12,8 @@ from threading import Event
 
 import pytest
 
-from base.cluster.machine import MachineIdentity, MachineNameMissing
-from base.cluster.machine.boot import machine_from_boot
+from base.cluster.machine import MachineNameMissing
+from base.cluster.machine.configured import ConfiguredMachineIdentity
 from base.cluster.machine.tests.identity import machine_identity as machine_identity
 from base.config import ConfigBoot, get_field, set_field
 from base.config.tests.configuration import snapshot_process_config
@@ -46,7 +46,7 @@ def memory_configuration(process_config: ConfigBoot, unit_home: Path) -> Iterato
 
 @pytest.mark.parametrize("roles", ["agent-runner", "gateway,agent-runner"])
 def test_existing_runner_mismatch_preserves_authored_work(
-    machine_identity: MachineIdentity, roles: str
+    machine_identity: ConfiguredMachineIdentity, roles: str
 ) -> None:
     machine_identity.set(role=roles, name="runner")
     target = memory_dir()
@@ -60,7 +60,7 @@ def test_existing_runner_mismatch_preserves_authored_work(
 
 
 def test_existing_authoring_checkout_does_not_bootstrap_or_need_a_remote(
-    machine_identity: MachineIdentity,
+    machine_identity: ConfiguredMachineIdentity,
 ) -> None:
     machine_identity.set(role="agent-runner", name="runner")
     set_field("gateway_url", "")
@@ -79,7 +79,7 @@ def test_existing_authoring_checkout_does_not_bootstrap_or_need_a_remote(
 
 @pytest.mark.parametrize("roles", ["gateway", "gateway,agent-runner"])
 def test_gateway_capable_without_remote_initializes_the_actual_checkouts(
-    machine_identity: MachineIdentity, roles: str
+    machine_identity: ConfiguredMachineIdentity, roles: str
 ) -> None:
     machine_identity.set(role=roles, name="runner")
     set_field("gateway_url", "")
@@ -100,7 +100,7 @@ def test_gateway_capable_without_remote_initializes_the_actual_checkouts(
 def test_gateway_only_does_not_require_a_machine_name() -> None:
     config = snapshot_process_config()
     config.set_field("machine_name", "")
-    machine_identity = machine_from_boot(config)
+    machine_identity = ConfiguredMachineIdentity(config)
     machine_identity.set(role="gateway")
     with pytest.raises(MachineNameMissing):
         machine_identity.name()
@@ -109,7 +109,7 @@ def test_gateway_only_does_not_require_a_machine_name() -> None:
 
 
 def test_keep_local_runner_creates_without_gateway_access(
-    machine_identity: MachineIdentity,
+    machine_identity: ConfiguredMachineIdentity,
 ) -> None:
     machine_identity.set(role="agent-runner", name="runner")
     set_field("memory_keep_local", True)
@@ -122,7 +122,7 @@ def test_keep_local_runner_creates_without_gateway_access(
 
 
 def test_keep_local_strips_all_remotes_and_switches_gateway_to_main(
-    machine_identity: MachineIdentity,
+    machine_identity: ConfiguredMachineIdentity,
 ) -> None:
     machine_identity.set(role="gateway", name="cloud")
     target = memory_dir()
@@ -138,7 +138,7 @@ def test_keep_local_strips_all_remotes_and_switches_gateway_to_main(
 
 def test_split_runner_without_remote_bootstraps_a_real_gateway_bundle(
     tmp_path: Path,
-    machine_identity: MachineIdentity,
+    machine_identity: ConfiguredMachineIdentity,
 ) -> None:
     machine_identity.set(role="agent-runner", name="runner")
     head, bundle = make_bundle(tmp_path / "source")
@@ -157,7 +157,7 @@ def test_split_runner_without_remote_bootstraps_a_real_gateway_bundle(
 
 
 def test_split_runner_bootstrap_failure_is_not_an_empty_pool(
-    machine_identity: MachineIdentity,
+    machine_identity: ConfiguredMachineIdentity,
 ) -> None:
     machine_identity.set(role="agent-runner", name="runner")
     with pool_server(PoolResponse(b"unavailable", status=502)) as url:
@@ -171,7 +171,7 @@ def test_split_runner_bootstrap_failure_is_not_an_empty_pool(
 def test_scaffold_keeps_captured_target_and_next_invocation_recaptures(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
-    machine_identity: MachineIdentity,
+    machine_identity: ConfiguredMachineIdentity,
 ) -> None:
     machine_identity.set(role="agent-runner", name="runner")
     first = memory_dir()
@@ -224,7 +224,7 @@ def _assert_stage_checkouts(
 def test_combined_targets_and_gateway_stage_inputs_are_captured_at_their_boundaries(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
-    machine_identity: MachineIdentity,
+    machine_identity: ConfiguredMachineIdentity,
     next_keep_local: bool,
 ) -> None:
     machine_identity.set(role="gateway,agent-runner", name="runner")
@@ -266,7 +266,7 @@ def test_combined_targets_and_gateway_stage_inputs_are_captured_at_their_boundar
 
 
 def test_existing_broken_checkout_preserves_the_git_exception(
-    machine_identity: MachineIdentity,
+    machine_identity: ConfiguredMachineIdentity,
 ) -> None:
     machine_identity.set(role="agent-runner", name="runner")
     (memory_dir() / ".git").mkdir(parents=True)
@@ -275,7 +275,7 @@ def test_existing_broken_checkout_preserves_the_git_exception(
 
 
 def test_fresh_clone_git_failure_is_classified(
-    machine_identity: MachineIdentity, tmp_path: Path
+    machine_identity: ConfiguredMachineIdentity, tmp_path: Path
 ) -> None:
     machine_identity.set(role="agent-runner", name="runner")
     set_field("memory_remote", str(tmp_path / "not-a-repository"))

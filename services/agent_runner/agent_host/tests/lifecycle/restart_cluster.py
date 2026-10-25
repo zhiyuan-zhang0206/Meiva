@@ -22,7 +22,7 @@ from agent.graph import build_graph
 from base.agents.context.clients import ClientSet
 from base.agents.inbox.insert import insert_inbound_message
 from base.agents.tests.units import spawn_agent
-from base.cluster.machine import MachineIdentity
+from base.cluster.machine import MachineIdentityReader
 from base.config.service_read import ConfigAuthority
 from base.db import Database
 from base.db.code_version_gate import ProcessDbGate
@@ -91,7 +91,7 @@ class Cluster:
     catalog: ModelCatalog
     authority: ConfigAuthority
     gate: ProcessDbGate
-    machine: MachineIdentity
+    machine: MachineIdentityReader
 
     def spawn(
         self, *, chat: str | None, steps: list[scripted_model.Step] | None = None
@@ -201,7 +201,7 @@ def cluster(
     model_catalog: ModelCatalog,
     config_authority: ConfigAuthority,
     database_gate: ProcessDbGate,
-    machine_identity: MachineIdentity,
+    machine_identity: MachineIdentityReader,
 ) -> Cluster:
     return Cluster(
         db_conn,

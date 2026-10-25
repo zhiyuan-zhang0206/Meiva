@@ -26,7 +26,7 @@ from psycopg import sql
 from psycopg_pool import ConnectionPool
 
 from base.cluster.dataplane.direct_url import ClusterDirectUrl
-from base.cluster.machine import MachineIdentity
+from base.cluster.machine import MachineIdentityReader
 from base.cluster.machine.tests.identity import machine_identity as machine_identity
 from base.config import ConfigBoot, settings
 from base.db import Database
@@ -182,7 +182,7 @@ def test_window_follows_cluster_timezone() -> None:
 # gives the same answer at every hour (CI used to hit the 05:00-08:00 PDT window daily and dial the
 # DB). The gate itself is locked by test_window_boundaries.
 def test_run_skips_outside_window(
-    process_config: ConfigBoot, cluster_tz: str, *, machine_identity: MachineIdentity
+    process_config: ConfigBoot, cluster_tz: str, *, machine_identity: MachineIdentityReader
 ) -> None:
     result = run_blob_vacuum(
         events_maintenance_db(process_config, local_machine=machine_identity),

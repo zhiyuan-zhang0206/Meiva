@@ -13,8 +13,8 @@ from fastapi.testclient import TestClient
 
 from base import paths
 from base.api_contracts.idempotency import PRINCIPAL_SCOPE, SCOPE_HEADER
-from base.cluster.machine import MachineIdentity
-from base.cluster.machine.boot import machine_from_boot
+from base.cluster.machine import MachineIdentityReader
+from base.cluster.machine.configured import ConfiguredMachineIdentity
 from base.config import ConfigBoot
 from base.config.tests.configuration import snapshot_process_config
 from base.host.system.tests.fake_commands import fake_host
@@ -98,7 +98,7 @@ def _resolve_boot(
 def gateway_test_process(
     *,
     home: Path | None = None,
-    machine: MachineIdentity | None = None,
+    machine: MachineIdentityReader | None = None,
     config: ConfigBoot | None = None,
     fields: Mapping[str, Any] | None = None,
     process: GatewayProcess | None = None,
@@ -106,7 +106,9 @@ def gateway_test_process(
     owned = process is None
     if owned:
         resolved_config = _resolve_boot(config, fields)
-        resolved_machine = machine_from_boot(resolved_config) if machine is None else machine
+        resolved_machine = (
+            ConfiguredMachineIdentity(resolved_config) if machine is None else machine
+        )
         process = GatewayProcess(
             home=paths.meiva_home() if home is None else home,
             config=resolved_config,
@@ -126,7 +128,7 @@ def gateway_test_app(
     config: GatewayConfig | None = None,
     boot: ConfigBoot | None = None,
     fields: Mapping[str, Any] | None = None,
-    machine: MachineIdentity | None = None,
+    machine: MachineIdentityReader | None = None,
     process_ownership: Literal["borrowed", "owned"] | None = None,
     cluster_secret: str | None = None,
     session_cookie_secure: bool | None = None,
@@ -134,7 +136,7 @@ def gateway_test_app(
 ) -> FastAPI:
     if process is None:
         resolved_boot = _resolve_boot(boot, fields)
-        resolved_machine = machine_from_boot(resolved_boot) if machine is None else machine
+        resolved_machine = ConfiguredMachineIdentity(resolved_boot) if machine is None else machine
         process = GatewayProcess(
             home=paths.meiva_home() if home is None else home,
             config=resolved_boot,
@@ -194,7 +196,7 @@ def gateway_test_client(
     application: FastAPI | None = None,
     *,
     home: Path | None = None,
-    machine: MachineIdentity | None = None,
+    machine: MachineIdentityReader | None = None,
     config: GatewayConfig | None = None,
     boot: ConfigBoot | None = None,
     fields: Mapping[str, Any] | None = None,

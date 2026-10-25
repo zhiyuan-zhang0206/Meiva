@@ -20,7 +20,7 @@ from base.agents.upload_delivery.models import (
     UploadDeliveryConflictError,
     current_unit,
 )
-from base.cluster.machine import MachineIdentity
+from base.cluster.machine import MachineIdentityReader
 from base.cluster.machine.tests.identity import machine_identity as machine_identity
 from gateway.tests.auth.gateway_config import (
     GatewayTestClient,
@@ -42,7 +42,7 @@ def uploaded_agent(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
     *,
-    machine_identity: MachineIdentity,
+    machine_identity: MachineIdentityReader,
 ) -> Iterator[tuple[GatewayTestClient, int]]:
     # meiva:note
     # The native receiver (`ops.upload_delivery.receive`) reads `Path.home()` itself, so the one
@@ -101,7 +101,7 @@ CLAIM_SECONDS = 300.0
 
 # meiva:note
 # A recovery worker on the gateway's resources, driven by the test one round at a time.
-def recovery_for(client: GatewayTestClient, machine: MachineIdentity) -> UploadRecovery:
+def recovery_for(client: GatewayTestClient, machine: MachineIdentityReader) -> UploadRecovery:
     return UploadRecovery(
         client.app.state.db_pool,
         client.app.state.db,
@@ -158,7 +158,7 @@ def test_lost_response_replay_retains_original_notification_after_deletion(
     uploaded_agent: tuple[GatewayTestClient, int],
     db_conn: psycopg.Connection[Any],
     *,
-    machine_identity: MachineIdentity,
+    machine_identity: MachineIdentityReader,
 ):
     client, agent = uploaded_agent
     response = post(client, agent)
@@ -214,7 +214,7 @@ def test_source_fsync_loss_and_concurrent_recovery_use_one_identity(
     uploaded_agent: tuple[GatewayTestClient, int],
     db_conn: psycopg.Connection[Any],
     *,
-    machine_identity: MachineIdentity,
+    machine_identity: MachineIdentityReader,
 ):
     client, agent = uploaded_agent
     # meiva:note
@@ -248,7 +248,7 @@ def test_placement_or_bad_proof_rejected_before_inbound(
     uploaded_agent: tuple[GatewayTestClient, int],
     db_conn: psycopg.Connection[Any],
     *,
-    machine_identity: MachineIdentity,
+    machine_identity: MachineIdentityReader,
 ):
     client, agent = uploaded_agent
     first = post(client, agent).json()
@@ -278,7 +278,7 @@ def test_receiver_same_physical_root_different_home_counts_once_and_verifies_rea
     db_conn: psycopg.Connection[Any],
     monkeypatch: pytest.MonkeyPatch,
     *,
-    machine_identity: MachineIdentity,
+    machine_identity: MachineIdentityReader,
 ):
     client, agent = uploaded_agent
     first = post(client, agent).json()
@@ -321,7 +321,7 @@ def test_receiver_wrong_actual_unit_cannot_overwrite_nested_final(
     uploaded_agent: tuple[GatewayTestClient, int],
     monkeypatch: pytest.MonkeyPatch,
     *,
-    machine_identity: MachineIdentity,
+    machine_identity: MachineIdentityReader,
 ):
     client, agent = uploaded_agent
     first = post(client, agent).json()
@@ -377,7 +377,7 @@ def test_completed_receipt_rejects_different_immutable_intent(
     uploaded_agent: tuple[GatewayTestClient, int],
     changed: str,
     *,
-    machine_identity: MachineIdentity,
+    machine_identity: MachineIdentityReader,
 ):
     client, agent = uploaded_agent
     batch = post(client, agent).json()["batch_id"]
@@ -439,7 +439,7 @@ def test_guarded_routes_reject_invalid_agent_paths_before_native_effects(
 def test_due_claims_a_batch_once(
     uploaded_agent: tuple[GatewayTestClient, int],
     *,
-    machine_identity: MachineIdentity,
+    machine_identity: MachineIdentityReader,
 ):
     client, agent = uploaded_agent
     response = post(client, agent)

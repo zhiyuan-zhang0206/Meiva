@@ -13,8 +13,8 @@ import pytest
 
 from base import paths
 from base.agents.context.clients import ClientSet
-from base.cluster.machine import MachineIdentity
-from base.cluster.machine.boot import machine_from_boot
+from base.cluster.machine import MachineIdentityReader
+from base.cluster.machine.configured import ConfiguredMachineIdentity
 from base.cluster.machine.tests.identity import machine_identity as machine_identity
 from base.config import ConfigBoot
 from base.config.service_read import ConfigAuthority
@@ -55,7 +55,7 @@ _NEVER_READ = {
 }
 
 
-def test_gateway_owner_construction_is_cold(*, machine_identity: MachineIdentity) -> None:
+def test_gateway_owner_construction_is_cold(*, machine_identity: MachineIdentityReader) -> None:
     config = ConfigBoot()
     process = GatewayProcess(
         home=meiva_home(),
@@ -73,7 +73,7 @@ def test_gateway_owner_construction_is_cold(*, machine_identity: MachineIdentity
 # meiva:note
 # Every handle the process builds names the connections it opens after the entry's image.
 def test_gateway_handles_retain_the_same_entry_gate(
-    db_conn: psycopg.Connection, *, machine_identity: MachineIdentity
+    db_conn: psycopg.Connection, *, machine_identity: MachineIdentityReader
 ) -> None:
     process = GatewayProcess(
         home=meiva_home(),
@@ -103,7 +103,9 @@ class _FailsToStop:
         raise RuntimeError("writer close failed")
 
 
-def test_gateway_cleanup_preserves_a_startup_primary(*, machine_identity: MachineIdentity) -> None:
+def test_gateway_cleanup_preserves_a_startup_primary(
+    *, machine_identity: MachineIdentityReader
+) -> None:
     primary = ValueError("startup failed")
     process = GatewayProcess(
         home=meiva_home(),
@@ -172,7 +174,7 @@ def test_gateway_first_load_image_does_not_follow_a_checkout_move(tmp_path: Path
 # meiva:note
 # The health route reports the commit the entry captured, not the checkout's HEAD.
 def test_asgi_health_keeps_its_explicit_entry_image(
-    tmp_path: Path, database: Database, *, machine_identity: MachineIdentity
+    tmp_path: Path, database: Database, *, machine_identity: MachineIdentityReader
 ) -> None:
     # meiva:note
     # the throwaway data plane the process dials
@@ -265,7 +267,7 @@ def _rooted_app(home: Path) -> Any:
         home=home,
         config=boot,
         image=LOADED_IMAGE,
-        machine=machine_from_boot(boot),
+        machine=ConfiguredMachineIdentity(boot),
         host=fake_host(),
     )
     return gateway_app.create_app(

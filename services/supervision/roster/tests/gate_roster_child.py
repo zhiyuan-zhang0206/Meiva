@@ -9,7 +9,7 @@ from __future__ import annotations
 import json
 import sys
 
-from base.cluster.machine.boot import machine_from_boot
+from base.cluster.machine.configured import ConfiguredMachineIdentity
 from base.config import ConfigBoot
 from base.host.system.tests.fake_commands import fake_host
 from services.supervision.roster import spec
@@ -18,7 +18,7 @@ from services.supervision.roster import spec
 def main(roles_csv: str) -> None:
     config = ConfigBoot()
     config.read_process_environment()
-    machine = machine_from_boot(config)
+    machine = ConfiguredMachineIdentity(config)
     machine.set(role=roles_csv)
     rows = spec.services_for_capabilities_annotated(
         frozenset(roles_csv.split(",")), machine=machine, host=fake_host()

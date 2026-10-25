@@ -4,7 +4,7 @@ from base import cluster
 from base.cluster.dataplane.direct_url import ClusterDirectUrl
 from base.cluster.dataplane.pg_stall_watchdog import StallWatchdogConfig, stall_guard
 from base.cluster.dataplane.pg_throwaway_base import ThrowawayConfig, configured_base
-from base.cluster.machine.boot import machine_from_boot
+from base.cluster.machine.configured import ConfiguredMachineIdentity
 from base.config import set_field, settings
 from base.config.tests.configuration import snapshot_process_config
 from base.db import Database
@@ -35,6 +35,7 @@ __all__ = [
     "SCOPE_FILE",
     "ClusterDirectUrl",
     "CodeVersion",
+    "ConfiguredMachineIdentity",
     "Database",
     "EventBus",
     "LoadedCommit",
@@ -50,7 +51,6 @@ __all__ = [
     "containers",
     "discover_scopes",
     "health_port_env_aliases",
-    "machine_from_boot",
     "modules_by_path",
     "port_lease",
     "postgres",

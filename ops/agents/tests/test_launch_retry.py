@@ -11,7 +11,7 @@ from psycopg_pool import ConnectionPool
 
 from base.agents.birth.spawn import create_agent_row
 from base.api_contracts.launch_retry import RetryLaunchRequest
-from base.cluster.machine import MachineIdentity
+from base.cluster.machine import MachineIdentityReader
 from base.cluster.machine.tests.identity import machine_identity as machine_identity
 from base.config.service_read import ConfigAuthority
 from base.db import Database
@@ -24,7 +24,7 @@ def _prior_attempt(
     database: Database,
     event_bus: EventBus,
     config_authority: ConfigAuthority,
-    machine_identity: MachineIdentity,
+    machine_identity: MachineIdentityReader,
 ) -> tuple[int, UUID]:
     agent_id, _birth, _prompt, attempt = create_agent_row(
         database,
@@ -47,7 +47,7 @@ def test_the_supplied_attempt_commits_once_and_a_replay_returns_the_first(
     event_bus: EventBus,
     *,
     config_authority: ConfigAuthority,
-    machine_identity: MachineIdentity,
+    machine_identity: MachineIdentityReader,
 ) -> None:
     agent_id, prior = _prior_attempt(database, event_bus, config_authority, machine_identity)
     body = RetryLaunchRequest(expected_prior_attempt_id=prior)
@@ -77,7 +77,7 @@ def test_a_stale_observed_attempt_conflicts_without_moving_the_pointer(
     event_bus: EventBus,
     *,
     config_authority: ConfigAuthority,
-    machine_identity: MachineIdentity,
+    machine_identity: MachineIdentityReader,
 ) -> None:
     agent_id, prior = _prior_attempt(database, event_bus, config_authority, machine_identity)
     body = RetryLaunchRequest(expected_prior_attempt_id=uuid4())

@@ -10,7 +10,7 @@ import psutil
 import pytest
 
 from base.cluster import port_preflight
-from base.cluster.machine import MachineIdentity
+from base.cluster.machine.configured import ConfiguredMachineIdentity
 from base.cluster.machine.tests.identity import machine_identity as machine_identity
 from base.config import settings
 from base.host import proc
@@ -286,7 +286,7 @@ def test_bind_addrs_adds_nothing_for_a_loopback_reachable_host(
     monkeypatch: pytest.MonkeyPatch,
     host: str,
     *,
-    machine_identity: MachineIdentity,
+    machine_identity: ConfiguredMachineIdentity,
 ) -> None:
     """A single box names itself by any loopback alias; none of them is a second address
     to bind, so it binds loopback alone — whatever its cluster secret (every cluster
@@ -300,7 +300,7 @@ def test_bind_addrs_adds_nothing_for_a_loopback_reachable_host(
 def test_bind_addrs_includes_the_declared_reachable_address(
     monkeypatch: pytest.MonkeyPatch,
     *,
-    machine_identity: MachineIdentity,
+    machine_identity: ConfiguredMachineIdentity,
 ) -> None:
     """A declared private-network address (`MEIVA_MACHINE_HOST`) joins loopback: the
     posture a secret-bearing cluster has always had when its operator declared one."""
@@ -311,7 +311,7 @@ def test_bind_addrs_includes_the_declared_reachable_address(
 
 
 def test_bind_addrs_ignores_the_ambient_cluster_secret(
-    monkeypatch: pytest.MonkeyPatch, *, machine_identity: MachineIdentity
+    monkeypatch: pytest.MonkeyPatch, *, machine_identity: ConfiguredMachineIdentity
 ) -> None:
     """Reach follows the declared address alone: neither a present nor an inherited
     foreign secret opens the LAN of a box that declares none."""

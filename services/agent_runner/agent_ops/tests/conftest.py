@@ -8,7 +8,7 @@ import pytest
 from psycopg_pool import ConnectionPool
 
 from base.agents.tests.units import spawn_agent
-from base.cluster.machine import MachineIdentity
+from base.cluster.machine import MachineIdentityReader
 from base.cluster.machine.tests.identity import machine_identity as machine_identity
 from base.config.service_read import ConfigAuthority
 from base.config.tests.config_authority import config_authority as config_authority
@@ -60,7 +60,7 @@ def ops(
     config_authority: ConfigAuthority,
     ops_database: Callable[[], Database],
     ops_image: LoadedCommit,
-    machine_identity: MachineIdentity,
+    machine_identity: MachineIdentityReader,
 ) -> Iterator[Ops]:
     """The ops daemon's request path over the test's Postgres, Redis and home."""
     pool: ConnectionPool = ConnectionPool(db_url, min_size=1, max_size=4, open=True)
@@ -85,7 +85,7 @@ def agent_id(
     model_catalog: ModelCatalog,
     config_authority: ConfigAuthority,
     database_gate: ProcessDbGate,
-    machine_identity: MachineIdentity,
+    machine_identity: MachineIdentityReader,
 ) -> int:
     """A real agent row born on this test machine."""
     return spawn_agent(

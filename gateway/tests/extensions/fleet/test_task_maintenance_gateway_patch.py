@@ -10,7 +10,7 @@ from uuid import uuid4
 import psycopg
 
 from base.api_contracts.idempotency import keyed_headers
-from base.cluster.machine import MachineIdentity
+from base.cluster.machine import MachineIdentityReader
 from gateway.tests.auth.gateway_config import gateway_test_client
 
 _TASK_TITLE = count(1)
@@ -64,7 +64,7 @@ def _make_task(
 
 
 def test_gateway_patch_clears_escalation_marker(
-    db_conn: psycopg.Connection, machine_identity: MachineIdentity
+    db_conn: psycopg.Connection, machine_identity: MachineIdentityReader
 ) -> None:
     """The gateway update() path clears the marker with the reminder counters —
     the same reset as the SDK path (test_update_resets_reminder_count)."""

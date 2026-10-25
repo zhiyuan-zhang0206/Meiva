@@ -12,7 +12,7 @@ from base.agents.observation.evidence import (
 from base.agents.observation.roster import AgentCard, select_roster
 from base.agents.observation.snapshot import select_one
 from base.agents.tests.units import spawn_agent
-from base.cluster.machine import MachineIdentity
+from base.cluster.machine import MachineIdentityReader
 from base.cluster.machine.tests.identity import machine_identity as machine_identity
 from base.config import settings
 from base.config.service_read import ConfigAuthority
@@ -30,7 +30,7 @@ def test_snapshot_retains_the_machine_probe_clock(
     model_catalog: ModelCatalog,
     config_authority: ConfigAuthority,
     database_gate: ProcessDbGate,
-    machine_identity: MachineIdentity,
+    machine_identity: MachineIdentityReader,
 ) -> None:
     aid = spawn_agent(
         spawner="user",
@@ -146,7 +146,7 @@ def test_launch_failure_projects_on_card_and_detail(
     model_catalog: ModelCatalog,
     config_authority: ConfigAuthority,
     database_gate: ProcessDbGate,
-    machine_identity: MachineIdentity,
+    machine_identity: MachineIdentityReader,
 ) -> None:
     aid = spawn_agent(
         spawner="user",

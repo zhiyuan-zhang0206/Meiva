@@ -30,7 +30,7 @@ from websockets.sync.server import Server, ServerConnection, unix_serve
 
 from base.agents.impersonation import host_transport as codex_app_server
 from base.agents.impersonation.terminal_notices import send_ended_notice
-from base.cluster.machine import MachineIdentity
+from base.cluster.machine import MachineIdentityReader
 from base.cluster.machine.tests.identity import machine_identity as machine_identity
 from base.db import Database, create_agent
 
@@ -275,7 +275,7 @@ def test_ended_lease_reaches_actual_codex_host_without_a_relay(
     database: Database,
     db_conn: psycopg.Connection,
     *,
-    machine_identity: MachineIdentity,
+    machine_identity: MachineIdentityReader,
 ) -> None:
     local_machine = machine_identity.name()
     from uuid import uuid4

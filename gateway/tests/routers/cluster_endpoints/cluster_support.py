@@ -13,7 +13,7 @@ import psycopg
 import pytest
 from psycopg.types.json import Jsonb
 
-from base.cluster.machine import MachineIdentity
+from base.cluster.machine import MachineIdentityReader
 from base.config.service_read import ConfigAuthority
 from base.db import Database
 from base.db.code_version_gate import ProcessDbGate
@@ -34,7 +34,7 @@ from services.supervision.meiva_root.server import ControlServer
 # The gateway-process facts one roster read needs, with a fresh mismatch log.
 def roster_env(
     database: Database,
-    machine: MachineIdentity,
+    machine: MachineIdentityReader,
     *,
     home: Path,
     probe_timeout_s: float = 8.0,
@@ -113,7 +113,7 @@ def seed_agent_on_machine(
     model_catalog: ModelCatalog,
     config_authority: ConfigAuthority,
     database_gate: ProcessDbGate,
-    machine_identity: MachineIdentity,
+    machine_identity: MachineIdentityReader,
 ) -> int:
     # meiva:note
     # One live agent row homed on `machine`.

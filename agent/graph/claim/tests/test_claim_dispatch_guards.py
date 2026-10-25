@@ -16,7 +16,7 @@ from agent.graph.claim.tests.claim_support import (
 from agent.state import AgentState
 from base.agents.inbox.insert import insert_inbound_message
 from base.agents.tests.units import spawn_agent
-from base.cluster.machine import MachineIdentity
+from base.cluster.machine import MachineIdentityReader
 from base.cluster.machine.tests.identity import machine_identity as machine_identity
 from base.config.service_read import ConfigAuthority
 from base.db import Database
@@ -37,7 +37,7 @@ async def test_claim_unknown_kind_raises(
     model_catalog: ModelCatalog,
     config_authority: ConfigAuthority,
     database_gate: ProcessDbGate,
-    machine_identity: MachineIdentity,
+    machine_identity: MachineIdentityReader,
 ):
     tid = spawn_agent(
         catalog=model_catalog,
@@ -67,7 +67,7 @@ async def test_claim_terminate_vetoed_by_pending_inbound_after_claim(
     model_catalog: ModelCatalog,
     config_authority: ConfigAuthority,
     database_gate: ProcessDbGate,
-    machine_identity: MachineIdentity,
+    machine_identity: MachineIdentityReader,
 ):
     tid = spawn_agent(
         catalog=model_catalog,
@@ -125,7 +125,7 @@ async def test_claim_same_batch_newer_chat_vetoes_the_terminate(
     model_catalog: ModelCatalog,
     config_authority: ConfigAuthority,
     database_gate: ProcessDbGate,
-    machine_identity: MachineIdentity,
+    machine_identity: MachineIdentityReader,
 ):
     tid = spawn_agent(
         catalog=model_catalog,
@@ -161,7 +161,7 @@ async def test_claim_drops_compact_and_user_restart_for_external_harness(
     model_catalog: ModelCatalog,
     config_authority: ConfigAuthority,
     database_gate: ProcessDbGate,
-    machine_identity: MachineIdentity,
+    machine_identity: MachineIdentityReader,
 ):
     from dataclasses import replace
 

@@ -22,7 +22,7 @@ from agent.tests.impersonation.lease_support import Cluster, idle_graph, native_
 from agent.tests.impersonation.lease_support import cluster as cluster
 from base.agents.impersonation.status import ImpersonationStatus
 from base.agents.observation.relay_supervision import RelaySupervision
-from base.cluster.machine import MachineIdentity
+from base.cluster.machine import MachineIdentityReader
 from base.config.service_read import ConfigAuthority
 from base.db import Database
 from base.db.code_version_gate import ProcessDbGate
@@ -269,7 +269,7 @@ async def test_successor_admission_ends_a_stale_accepted_lease(
     model_catalog: ModelCatalog,
     config_authority: ConfigAuthority,
     database_gate: ProcessDbGate,
-    machine_identity: MachineIdentity,
+    machine_identity: MachineIdentityReader,
 ) -> None:
     from agent.ownership.hosted import admit_hosted_runtime
     from base.agents import impersonation as leases

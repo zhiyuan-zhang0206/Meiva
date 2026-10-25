@@ -7,7 +7,7 @@ from pathlib import Path
 import psycopg
 import pytest
 
-from base.cluster.machine import MachineIdentity
+from base.cluster.machine import MachineIdentityReader
 from base.cluster.machine.tests.identity import machine_identity as machine_identity
 from gateway.schedules.tests.db_faults import failing_write
 from gateway.schedules.tests.runner_inputs import run_schedule as run
@@ -44,7 +44,7 @@ def _status_and_error(conn: psycopg.Connection, sid: int) -> tuple[str, str | No
 
 
 def test_run_materializes_and_executes_and_binds_actor(
-    db_conn: psycopg.Connection, unit_home: Path, *, machine_identity: MachineIdentity
+    db_conn: psycopg.Connection, unit_home: Path, *, machine_identity: MachineIdentityReader
 ) -> None:
     marker = unit_home / "ran.txt"
     script = f"import meiva.sdk_surface.agent_identity, pathlib\npathlib.Path({str(marker)!r}).write_text(meiva.sdk_surface.agent_identity.require_actor())\n"
@@ -58,7 +58,7 @@ def test_run_materializes_and_executes_and_binds_actor(
 
 
 def test_run_marks_completed_on_clean_py_exit(
-    db_conn: psycopg.Connection, unit_home: Path, *, machine_identity: MachineIdentity
+    db_conn: psycopg.Connection, unit_home: Path, *, machine_identity: MachineIdentityReader
 ) -> None:
     sid = _insert_schedule(db_conn, script="x = 1 + 1\n")
 
@@ -71,7 +71,7 @@ def test_run_marks_completed_on_clean_py_exit(
 
 
 def test_run_marks_completed_on_clean_subprocess_exit(
-    db_conn: psycopg.Connection, unit_home: Path, *, machine_identity: MachineIdentity
+    db_conn: psycopg.Connection, unit_home: Path, *, machine_identity: MachineIdentityReader
 ) -> None:
     sid = _insert_schedule(db_conn, script="exit 0\n", command="bash run.sh")
 
@@ -83,7 +83,7 @@ def test_run_marks_completed_on_clean_subprocess_exit(
 
 
 def test_run_captures_crash_to_last_error(
-    db_conn: psycopg.Connection, unit_home: Path, *, machine_identity: MachineIdentity
+    db_conn: psycopg.Connection, unit_home: Path, *, machine_identity: MachineIdentityReader
 ) -> None:
     sid = _insert_schedule(db_conn, script="raise RuntimeError('boom-42')\n")
 
@@ -96,7 +96,7 @@ def test_run_captures_crash_to_last_error(
 
 
 def test_run_nonzero_subprocess_is_not_completed(
-    db_conn: psycopg.Connection, unit_home: Path, *, machine_identity: MachineIdentity
+    db_conn: psycopg.Connection, unit_home: Path, *, machine_identity: MachineIdentityReader
 ) -> None:
     sid = _insert_schedule(db_conn, script="exit 3\n", command="bash run.sh")
 
@@ -118,7 +118,7 @@ def _runs(conn: psycopg.Connection, sid: int) -> list[tuple[bool | None, str | N
 
 
 def test_run_records_clean_py_exit(
-    db_conn: psycopg.Connection, unit_home: Path, *, machine_identity: MachineIdentity
+    db_conn: psycopg.Connection, unit_home: Path, *, machine_identity: MachineIdentityReader
 ) -> None:
     sid = _insert_schedule(db_conn, script="x = 1 + 1\n")
 
@@ -127,7 +127,7 @@ def test_run_records_clean_py_exit(
 
 
 def test_run_records_crash(
-    db_conn: psycopg.Connection, unit_home: Path, *, machine_identity: MachineIdentity
+    db_conn: psycopg.Connection, unit_home: Path, *, machine_identity: MachineIdentityReader
 ) -> None:
     sid = _insert_schedule(db_conn, script="raise RuntimeError('x' * 5000 + 'the-end')\n")
 
@@ -138,7 +138,7 @@ def test_run_records_crash(
 
 
 def test_run_records_nonzero_command(
-    db_conn: psycopg.Connection, unit_home: Path, *, machine_identity: MachineIdentity
+    db_conn: psycopg.Connection, unit_home: Path, *, machine_identity: MachineIdentityReader
 ) -> None:
     sid = _insert_schedule(db_conn, script="exit 3\n", command="bash run.sh")
 
@@ -147,7 +147,7 @@ def test_run_records_nonzero_command(
 
 
 def test_run_records_py_sys_exit_zero(
-    db_conn: psycopg.Connection, unit_home: Path, *, machine_identity: MachineIdentity
+    db_conn: psycopg.Connection, unit_home: Path, *, machine_identity: MachineIdentityReader
 ) -> None:
     sid = _insert_schedule(db_conn, script="raise SystemExit(0)\n")
 
@@ -159,7 +159,7 @@ def test_run_records_py_sys_exit_zero(
 
 
 def test_run_records_py_sys_exit_nonzero(
-    db_conn: psycopg.Connection, unit_home: Path, *, machine_identity: MachineIdentity
+    db_conn: psycopg.Connection, unit_home: Path, *, machine_identity: MachineIdentityReader
 ) -> None:
     sid = _insert_schedule(db_conn, script="raise SystemExit(3)\n")
 
@@ -171,7 +171,7 @@ def test_run_records_py_sys_exit_nonzero(
 
 
 def test_agent_status_guard_failure_is_visible_in_schedule_records(
-    db_conn: psycopg.Connection, unit_home: Path, *, machine_identity: MachineIdentity
+    db_conn: psycopg.Connection, unit_home: Path, *, machine_identity: MachineIdentityReader
 ) -> None:
     script = """
 from schedules.agent_status_guard import ensure_agent_status_members
@@ -208,7 +208,7 @@ def test_run_records_py_sys_exit_message(
     exit_expr: str,
     expected_note: str,
     *,
-    machine_identity: MachineIdentity,
+    machine_identity: MachineIdentityReader,
 ) -> None:
     sid = _insert_schedule(db_conn, script=f"raise SystemExit({exit_expr})\n")
 
@@ -230,7 +230,7 @@ def test_run_records_py_sys_exit_bool(
     expected_rc: int,
     expected_rows: list[tuple[bool | None, str | None]],
     *,
-    machine_identity: MachineIdentity,
+    machine_identity: MachineIdentityReader,
 ) -> None:
     sid = _insert_schedule(db_conn, script=f"raise SystemExit({exit_expr})\n")
 
@@ -239,7 +239,7 @@ def test_run_records_py_sys_exit_bool(
 
 
 def test_run_records_stall_timeout(
-    db_conn: psycopg.Connection, unit_home: Path, *, machine_identity: MachineIdentity
+    db_conn: psycopg.Connection, unit_home: Path, *, machine_identity: MachineIdentityReader
 ) -> None:
     sid = _insert_schedule(db_conn, script="sleep 60\n", command="bash run.sh")
 
@@ -248,7 +248,7 @@ def test_run_records_stall_timeout(
 
 
 def test_run_skips_disabled_schedule(
-    db_conn: psycopg.Connection, unit_home: Path, *, machine_identity: MachineIdentity
+    db_conn: psycopg.Connection, unit_home: Path, *, machine_identity: MachineIdentityReader
 ) -> None:
     sid = _insert_schedule(db_conn, script="raise RuntimeError('should not run')\n", enabled=False)
     assert run(sid, machine=machine_identity) == 0
@@ -261,7 +261,7 @@ def test_run_skips_disabled_schedule(
 
 
 def test_run_hands_py_script_a_clean_argv(
-    db_conn: psycopg.Connection, unit_home: Path, *, machine_identity: MachineIdentity
+    db_conn: psycopg.Connection, unit_home: Path, *, machine_identity: MachineIdentityReader
 ) -> None:
     runner_argv = sys.argv
     marker = unit_home / "argv.json"
@@ -279,7 +279,7 @@ def test_run_hands_py_script_a_clean_argv(
 
 
 def test_run_record_failure_does_not_break_the_run(
-    db_conn: psycopg.Connection, unit_home: Path, *, machine_identity: MachineIdentity
+    db_conn: psycopg.Connection, unit_home: Path, *, machine_identity: MachineIdentityReader
 ) -> None:
     sid = _insert_schedule(db_conn, script="x = 1\n")
 
@@ -292,7 +292,7 @@ def test_run_record_failure_does_not_break_the_run(
 
 
 def test_run_completed_marker_failure_keeps_run_row_honest(
-    db_conn: psycopg.Connection, unit_home: Path, *, machine_identity: MachineIdentity
+    db_conn: psycopg.Connection, unit_home: Path, *, machine_identity: MachineIdentityReader
 ) -> None:
     sid = _insert_schedule(db_conn, script="x = 1\n")
 
@@ -324,7 +324,7 @@ def test_script_filename(command: str, expected: str) -> None:
 
 
 def test_run_hung_subprocess_times_out_and_records_error(
-    db_conn: psycopg.Connection, unit_home: Path, *, machine_identity: MachineIdentity
+    db_conn: psycopg.Connection, unit_home: Path, *, machine_identity: MachineIdentityReader
 ) -> None:
     sid = _insert_schedule(db_conn, script="sleep 60\n", command="bash run.sh")
 

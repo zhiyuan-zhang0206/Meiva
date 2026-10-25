@@ -25,7 +25,8 @@ import cli.commands.converge.firewall as cfw
 import cli.commands.converge.firewall_command as firewall_cmd
 import cli.commands.lifecycle.converge_host as cv
 from base.cluster.dataplane import runtime_binaries as rb
-from base.cluster.machine import MachineIdentity
+from base.cluster.machine import MachineIdentityReader
+from base.cluster.machine.configured import ConfiguredMachineIdentity
 from base.host.system import macos_firewall as fw
 from base.host.system.hostport import Host
 from base.host.system.tests.fake_commands import DARWIN_ARM64, LINUX_X86, fake_host
@@ -163,6 +164,7 @@ def _daemon(
 def _firewall_ctx(
     ctx: ConvergeCtx, daemon: AlfDaemon, *, roles: frozenset[str] | None, home: Path
 ) -> ConvergeCtx:
+    assert isinstance(ctx.machine, ConfiguredMachineIdentity)
     ctx.machine.set(host=_OFF_BOX)
     return replace(ctx, host=_host_with(daemon), roles=roles, meiva_home=home)
 
@@ -312,6 +314,7 @@ def test_quiet_on_every_host_that_cannot_have_the_defect(
     if cannot_have_the_defect == "not-macos":
         host = replace(host, host=fake_host(daemon, platform=LINUX_X86))
     if cannot_have_the_defect == "loopback-only":
+        assert isinstance(host.machine, ConfiguredMachineIdentity)
         host.machine.set(host="127.0.0.1")
 
     cfw.ensure_firewall_allowlist(host)
@@ -456,7 +459,9 @@ def test_an_unconfigured_unit_audits_the_interpreter_alone(
 
 # meiva:note
 # The machine (off-box) and the mac whose firewall is `daemon`, as the verbs take them.
-def _verb_host(command_runtime: CommandRuntime, daemon: AlfDaemon) -> tuple[MachineIdentity, Host]:
+def _verb_host(
+    command_runtime: CommandRuntime, daemon: AlfDaemon
+) -> tuple[MachineIdentityReader, Host]:
     command_runtime.machine.set(host=_OFF_BOX)
     return command_runtime.machine, _host_with(daemon)
 

@@ -17,7 +17,7 @@ import psycopg
 import pytest
 from psycopg import sql
 
-from base.cluster.machine import MachineIdentity
+from base.cluster.machine import MachineIdentityReader
 from cli.commands.data_plane import bringup, cluster_instance
 from cli.commands.data_plane.config import DataPlaneConfig
 from cli.commands.data_plane.tests.data_plane_records import (
@@ -43,7 +43,7 @@ _LOGIN = "status_probe"
 _LOGIN_PASSWORD = "status-probe-password"  # noqa: S105
 
 
-def _start_storage(cluster: NativeCluster, machine: MachineIdentity) -> None:
+def _start_storage(cluster: NativeCluster, machine: MachineIdentityReader) -> None:
     rc = cluster_instance.ensure_cluster_storage(
         cluster.plane,
         home=cluster.home,
@@ -80,7 +80,7 @@ def _dial(cluster: NativeCluster, password: str) -> str:
 
 def test_a_running_plane_whose_login_answers_is_green(
     native_cluster: NativeCluster,
-    command_machine: MachineIdentity,
+    command_machine: MachineIdentityReader,
     operator_database: OperatorDatabaseFactory,
     capsys: pytest.CaptureFixture[str],
 ) -> None:
@@ -103,7 +103,7 @@ def test_a_running_plane_whose_login_answers_is_green(
 # what tells.
 def test_a_server_that_refuses_the_delivered_login_is_never_a_green_tick(
     native_cluster: NativeCluster,
-    command_machine: MachineIdentity,
+    command_machine: MachineIdentityReader,
     operator_database: OperatorDatabaseFactory,
     capsys: pytest.CaptureFixture[str],
 ) -> None:

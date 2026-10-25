@@ -8,7 +8,7 @@ from typing import Any, cast
 import pytest
 
 from base.clock import SYSTEM_TIMERS, Clock, Timers
-from base.cluster.machine import MachineIdentity
+from base.cluster.machine import MachineIdentityReader
 from base.cluster.machine.tests.identity import machine_identity as machine_identity
 from base.config import ConfigBoot
 from base.daemon.loop_health import LivenessGroup, LoopProgress
@@ -25,7 +25,7 @@ def _patch_run(
     events: list[str],
     seen: dict[str, object],
     *,
-    machine_identity: MachineIdentity,
+    machine_identity: MachineIdentityReader,
 ) -> None:
     class _Pool:
         def close(self) -> None:
@@ -74,7 +74,7 @@ def test_every_loop_gets_its_own_progress_tracker(
     *,
     process_config: ConfigBoot,
     tmp_path: Path,
-    machine_identity: MachineIdentity,
+    machine_identity: MachineIdentityReader,
 ) -> None:
     received: dict[str, LoopProgress] = {}
 
@@ -120,7 +120,7 @@ def test_a_crashing_loop_cancels_its_siblings_and_ends_the_service(
     *,
     process_config: ConfigBoot,
     tmp_path: Path,
-    machine_identity: MachineIdentity,
+    machine_identity: MachineIdentityReader,
 ) -> None:
     cancelled: list[str] = []
     events: list[str] = []

@@ -24,7 +24,7 @@ from agent.tests.claim.claim_status_support import (
 from agent.tests.claim.claim_status_support import running_agent as running_agent
 from base.agents.inbox.insert import insert_inbound_message
 from base.agents.tests.units import spawn_agent
-from base.cluster.machine import MachineIdentity
+from base.cluster.machine import MachineIdentityReader
 from base.cluster.machine.tests.identity import machine_identity as machine_identity
 from base.config.service_read import ConfigAuthority
 from base.db import Database
@@ -42,7 +42,7 @@ async def test_claim_system_note_kind_appends_system_note_and_continues(
     model_catalog: ModelCatalog,
     config_authority: ConfigAuthority,
     database_gate: ProcessDbGate,
-    machine_identity: MachineIdentity,
+    machine_identity: MachineIdentityReader,
 ):
     """system_note inbound (task assign/update/reminder delivery) → claim appends
     a system note (NoteTag 'task') + goto BEFORE_LLM — never a chat peer message."""
@@ -99,7 +99,7 @@ async def test_claim_co_batched_task_notes_preserve_task_links(
     model_catalog: ModelCatalog,
     config_authority: ConfigAuthority,
     database_gate: ProcessDbGate,
-    machine_identity: MachineIdentity,
+    machine_identity: MachineIdentityReader,
 ):
     """Co-batched task notes retain their independent timeline links."""
     tid = spawn_agent(
@@ -141,7 +141,7 @@ async def test_claim_system_note_unknown_tag_fails_loud(
     model_catalog: ModelCatalog,
     config_authority: ConfigAuthority,
     database_gate: ProcessDbGate,
-    machine_identity: MachineIdentity,
+    machine_identity: MachineIdentityReader,
 ):
     """A system_note inbound carrying a non-NoteTag payload fails loud — a
     writer bug must not silently render as the wrong timeline chip."""
@@ -175,7 +175,7 @@ async def test_claim_restart_while_idle_commits_halted_true(
     aops_pool: AsyncConnectionPool,
     *,
     database_gate: ProcessDbGate,
-    machine_identity: MachineIdentity,
+    machine_identity: MachineIdentityReader,
 ):
     """external restart hits idle agent (halted=True) → committed halted=True,
     carrying 'no in-flight work before restart' across the restart boundary for the new process to read."""
@@ -203,7 +203,7 @@ async def test_claim_restart_self_source_commits_halted_false(
     source: str,
     *,
     database_gate: ProcessDbGate,
-    machine_identity: MachineIdentity,
+    machine_identity: MachineIdentityReader,
 ):
     """agent-initiated restart (meiva.self.restart) → even if the exec path
     set halted to True (turn-end semantics), committed halted must be False — agent has in-flight
@@ -232,7 +232,7 @@ async def test_claim_restart_preserves_chat_for_successor(
     event_bus: EventBus,
     *,
     database_gate: ProcessDbGate,
-    machine_identity: MachineIdentity,
+    machine_identity: MachineIdentityReader,
 ):
     """Only the accepted lifecycle command dispatches; chat remains durable pending work."""
     tid = running_agent()
@@ -269,7 +269,7 @@ async def test_claim_restart_kind_does_not_publish_committed(
     live_events: LiveEvents,
     *,
     database_gate: ProcessDbGate,
-    machine_identity: MachineIdentity,
+    machine_identity: MachineIdentityReader,
 ) -> None:
     """restart kind does not publish InboundCommitted (appends no message and no chat
     inbound id enters committed list)."""

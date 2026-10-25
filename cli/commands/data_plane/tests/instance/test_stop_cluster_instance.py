@@ -19,7 +19,7 @@ import pytest
 
 from base.cluster import ownership
 from base.cluster.dataplane.pg_tools import pg_tool
-from base.cluster.machine import MachineIdentity
+from base.cluster.machine import MachineIdentityReader
 from base.telemetry import EventPipeline
 from cli.commands.data_plane import bringup, cluster_instance
 from cli.commands.data_plane.config import DataPlaneConfig
@@ -45,7 +45,7 @@ from cli.database.tests.command_inputs import command_machine as command_machine
 from cli.database.tests.command_inputs import command_runtime as command_runtime
 
 
-def _start(cluster: NativeCluster, machine: MachineIdentity) -> None:
+def _start(cluster: NativeCluster, machine: MachineIdentityReader) -> None:
     rc = cluster_instance.ensure_cluster_storage(
         cluster.plane,
         home=cluster.home,
@@ -78,7 +78,7 @@ def _answers(cluster: NativeCluster) -> tuple[bool, bool]:
 
 def test_stop_takes_both_services_down_and_closes_postgres_custody(
     native_cluster: NativeCluster,
-    command_machine: MachineIdentity,
+    command_machine: MachineIdentityReader,
     operator_pipeline: Callable[[], EventPipeline],
     capsys: pytest.CaptureFixture[str],
 ) -> None:
@@ -98,7 +98,7 @@ def test_stop_takes_both_services_down_and_closes_postgres_custody(
 
 def test_the_data_survives_a_stop_on_disk(
     native_cluster: NativeCluster,
-    command_machine: MachineIdentity,
+    command_machine: MachineIdentityReader,
     operator_pipeline: Callable[[], EventPipeline],
 ) -> None:
     _start(native_cluster, command_machine)
@@ -121,7 +121,7 @@ def test_stopping_a_plane_that_is_not_running_is_a_clean_no_op(
 # The exit status of `shutdown` proves nothing; Redis that still answers fails the stop.
 def test_a_redis_that_the_admin_cannot_shut_down_is_a_failed_stop(
     native_cluster: NativeCluster,
-    command_machine: MachineIdentity,
+    command_machine: MachineIdentityReader,
     operator_pipeline: Callable[[], EventPipeline],
     capsys: pytest.CaptureFixture[str],
 ) -> None:
@@ -219,7 +219,7 @@ def test_a_remote_plane_stops_nothing_and_says_so(
 # P2).
 def test_a_local_instance_left_behind_by_a_switch_to_remote_is_named_and_not_touched(
     native_cluster: NativeCluster,
-    command_machine: MachineIdentity,
+    command_machine: MachineIdentityReader,
     operator_pipeline: Callable[[], EventPipeline],
     capsys: pytest.CaptureFixture[str],
 ) -> None:

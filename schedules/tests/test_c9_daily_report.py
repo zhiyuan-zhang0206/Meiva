@@ -18,7 +18,7 @@ import psycopg
 import pytest
 
 from base.agents.context import MeivaContext
-from base.cluster.machine import MachineIdentity
+from base.cluster.machine import MachineIdentityReader
 from base.daemon.schedules.inputs import ScheduleInputs
 from base.db import Database
 from base.host.system.tests.fake_commands import FakeCommands, Reply, fake_host
@@ -193,7 +193,7 @@ def test_the_slots_window_is_reconciled_into_the_ledger(tmp_path: Path) -> None:
 def test_a_failed_reconciliation_wakes_the_p0_lead_and_the_claim_stays(
     db_conn: psycopg.Connection,
     database: Database,
-    machine_identity: MachineIdentity,
+    machine_identity: MachineIdentityReader,
     emitted_events: EmittedEvents,
     sdk_environment: MeivaContext,
     tmp_path: Path,
