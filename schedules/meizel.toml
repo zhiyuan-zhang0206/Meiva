@@ -13,7 +13,7 @@
 "trace-ship-tempo-schedule.py" = ["jobs", "plans"]
 "sched-dry-import-weekly-schedule.py" = ["jobs", "plans"]
 "log-cred-mask-monthly-schedule.py" = ["jobs", "plans"]
-"tests" = ["debt-sweep-daily-schedule.py", "jobs", "plans"]
+"tests" = ["debt-sweep-daily-schedule.py", "jobs", "log-cred-mask-monthly-schedule.py", "plans"]
 
 
 [roots]
