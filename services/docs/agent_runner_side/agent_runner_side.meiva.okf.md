@@ -31,11 +31,12 @@ Source of truth = services in `services/supervision/roster/composition.py` `buil
 ## Notes
 The permissions helper is the macOS root ancestor and remains outside `build_services()`. Root diagnostics observes its protocol without repair authority; Linux has no helper ancestor.
 
-The hosted runner beats local liveness, renews database ownership, then publishes
-its 60-second Redis turn-progress snapshot. That best-effort `SET`
-has a three-second operation deadline: a stalled response is cancelled and logged
-at WARNING so subsequent ownership renewals continue. The shared Redis client's
-long-lived pub/sub reads remain unbounded; shutdown cancellation still propagates.
+The hosted runner (`agent_host/host_beat.py`) beats local liveness,
+renews database ownership, then publishes its 60-second Redis turn-progress
+snapshot. That best-effort `SET` has a three-second operation deadline: a stalled
+response is cancelled and logged at WARNING so subsequent ownership renewals
+continue. The shared Redis client's long-lived pub/sub reads remain unbounded;
+shutdown cancellation still propagates.
 
 A service-entered `TaskGroup` owns the ownership heartbeat from before boot
 settlement until after scheduler drain. Its completion retains an unknown error

@@ -7,7 +7,7 @@ import json
 import sys
 
 from services.agent_runner.agent_host.scheduling import wake_screening
-from services.agent_runner.agent_host.stored_config import StoredConfig
+from services.agent_runner.agent_host.scheduling.stored_config import StoredConfig
 
 observers = (
     "services.agent_runner.agent_host.runtime",

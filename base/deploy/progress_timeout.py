@@ -34,7 +34,7 @@ NO_PROGRESS_TIMEOUT_S = 360.0
 
 # meiva:note
 # How often the agent host beats: the one ownership beat of
-# `services/agent_runner/agent_host/daemon.py` (`_beat_forever`), which reports
+# `services/agent_runner/agent_host/host_beat.py` (`beat_forever`), which reports
 # liveness and reaps crash corpses, sleeping exactly this long between rounds and
 # using this constant as its step, so the lattice checks the beat that actually runs.
 AGENT_HOST_BEAT_INTERVAL_S = 15.0
