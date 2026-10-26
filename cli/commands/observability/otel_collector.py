@@ -399,7 +399,7 @@ def ensure_otel_collector_step(ctx: ConvergeCtx) -> None:
         machine=ctx.machine,
         timers=ctx.timers,
         open_url=SYSTEM_URL_OPENER,
-        tag=collector_artifact.platform_tag(),
+        tag=collector_artifact.platform_tag_for(platform.system, platform.machine),
         platform_label=f"{platform.system} {platform.machine}",
     )
 

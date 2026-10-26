@@ -9,10 +9,6 @@ exports = ["collector_artifact.py", "editable_install.py", "python_lock.py", "st
 "python_lock.py" = "strict"
 "start_inputs.py" = "strict-to-be"
 
-[debt.ambient-read]
-"collector_artifact.py#platform platform.machine" = 1
-"collector_artifact.py#platform platform.system" = 1
-
 [debt.impure-call]
 "collector_artifact.py#Path.chmod" = 1
 "collector_artifact.py#Path.open" = 1
