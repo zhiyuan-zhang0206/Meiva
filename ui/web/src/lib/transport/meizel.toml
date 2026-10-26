@@ -1,10 +1,11 @@
 exports = ["api-base.ts", "api.ts", "gateway-origin.ts", "operation-key.ts", "sse-lifecycle.ts", "stream", "system-transport.ts", "tests", "transport-context.tsx", "useEventStream.tsx"]
 
 [uses]
-"api-base.ts" = ["gateway-origin.ts"]
+"api-base.ts" = ["gateway-origin.ts", "public-env.ts"]
 "api.ts" = ["api-base.ts", "gateway", "system-transport.ts"]
 "gateway" = ["transport.ts"]
 "operation-key.ts" = ["gateway", "system-transport.ts"]
+"public-env.ts" = ["gateway-origin.ts"]
 "sse-frames.test.ts" = ["sse-frames.ts"]
 "sse-lifecycle.ts" = ["stream", "transport.ts"]
 "stream" = ["transport.ts"]
@@ -20,8 +21,6 @@ exports = ["api-base.ts", "api.ts", "gateway-origin.ts", "operation-key.ts", "ss
 "sse-frames.ts" = "strict"
 "transport.ts" = "strict"
 
-[debt.ambient-read]
-"api-base.ts#environ process.env" = 3
-"system-transport.ts#clock Date.now" = 1
-"system-transport.ts#random crypto.getRandomValues" = 1
-"system-transport.ts#random crypto.randomUUID" = 1
+[roots]
+"public-env.ts" = { kinds = ["environ"], why = "Next inlines process.env.NEXT_PUBLIC_* only where the literal expression is written in source, so the console's build-time public configuration is read here once and handed to everything else as a value" }
+"system-transport.ts" = { kinds = ["clock", "random"], why = "the system implementations of the transport ports (wall clock, tab id and operation-key entropy) are built here once; the transports and the stream hub take them as values" }
