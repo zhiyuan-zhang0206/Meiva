@@ -24,8 +24,12 @@ from pydantic import ValidationError
 from pydantic_core import ErrorDetails, PydanticUndefined
 from pydantic_settings import BaseSettings, PydanticBaseSettingsSource
 
-from base.config.config_registry import FIELD_INFOS, field_alias, field_domain
-from base.config.service_read import domain_model_classes
+from base.config.config_registry import (
+    FIELD_INFOS,
+    domain_model_classes,
+    field_alias,
+    field_domain,
+)
 from base.host.env.dotenv_file import capture_env_bytes, process_env_file
 
 __all__ = [
