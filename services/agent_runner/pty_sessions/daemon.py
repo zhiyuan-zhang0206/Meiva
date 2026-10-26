@@ -56,20 +56,21 @@ def main() -> int:
         colorize=False,
     )
     _raise_nofile_limit()
-    run = run_dir(meiva_home())
+    home = meiva_home()
+    run = run_dir(home)
     try:
         # One service per home, for as long as this process lives: a second start must
         # neither sweep the live service's sessions nor take over its socket.
         with file_lock(lock_path(run), timeout_s=0):
-            return _run(run)
+            return _run(run, home)
     except LockTimeoutError:
         logger.error("another pty-sessions service holds {lock}", lock=lock_path(run))
         return 1
 
 
-def _run(run: Path) -> int:
+def _run(run: Path, home: Path) -> int:
     service = PtyService(
-        home=meiva_home(),
+        home=home,
         process_control=SYSTEM_PROCESS_CONTROL,
         pid=os.getpid(),
         host_generation=uuid.uuid4().hex,

@@ -313,7 +313,13 @@ class PtyService:
                 pid, create_time, session.SHELL_COMMAND, cwd, self._now(), starttime, generation
             )
             created = session.PtySession(
-                name, pid, master, cols, rows, record, transcript_path(logs_dir(), name)
+                name,
+                pid,
+                master,
+                cols,
+                rows,
+                record,
+                transcript_path(logs_dir(home=self._home), name),
             )
         except BaseException:
             # The shell exists but no session owns it: end it rather than orphan it.
