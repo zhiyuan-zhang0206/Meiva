@@ -270,8 +270,8 @@ def page_server_occupants() -> list[Occupant]:
 # meiva:note
 # One listing of the live pty sessions' records: the page server asks the pty service of its own
 # home, and a reconcile pass lists once instead of asking per row (the 2026-08-28 incident).
-def live_session_records() -> dict[str, SessionRecord]:
-    return pty_client.live_sessions(socket_path=service_socket_path(run_dir(meiva_home())))
+def live_session_records(home: Path) -> dict[str, SessionRecord]:
+    return pty_client.live_sessions(socket_path=service_socket_path(run_dir(home)))
 
 
 # meiva:note
@@ -303,10 +303,12 @@ def _kill_page_session(backend: SessionBackend, handle: ServerHandle) -> None:
     backend.kill_session(handle.session_name)
 
 
-def _reclaim_occupants(wanted_ports: Collection[int], page_shells: dict[int, PageKey]) -> None:
+def _reclaim_occupants(
+    wanted_ports: Collection[int], page_shells: dict[int, PageKey], home: Path
+) -> None:
     """Kill detached/orphan servers while preserving live page shells."""
     verdicts = occupant_plan.reclaim_plan(
-        page_server_occupants(), page_shells, wanted_ports, str(meiva_home())
+        page_server_occupants(), page_shells, wanted_ports, str(home)
     )
     for verdict in verdicts:
         occupant = verdict.occupant
@@ -419,9 +421,10 @@ def reconcile_rows(
     host: str,
     bus: EventBus,
     backend: SessionBackend,
+    home: Path,
 ) -> None:
     wanted = {(row.agent_id, row.name): row for row in rows}
-    live_names = set(live_session_records())
+    live_names = set(live_session_records(home))
     for key in stale_handles(wanted, managed):
         handle = managed.pop(key)
         _kill_page_session(backend, handle)
@@ -440,8 +443,8 @@ def reconcile_rows(
         close_failed_page(pool, row, bus)
         _kill_page_session(backend, handle)
         del managed[key]
-    live_pids = {name: record.pid for name, record in live_session_records().items()}
-    _reclaim_occupants({row.port for row in rows}, shell_pids(wanted, live_pids))
+    live_pids = {name: record.pid for name, record in live_session_records(home).items()}
+    _reclaim_occupants({row.port for row in rows}, shell_pids(wanted, live_pids), home)
 
 
 def reconcile_once(
@@ -450,9 +453,10 @@ def reconcile_once(
     host: str,
     bus: EventBus,
     backend: SessionBackend,
+    home: Path,
 ) -> None:
     """Start fresh registrations once, adopt live sessions, and close failed links."""
-    reconcile_rows(pool, managed, open_rows(pool, host), host, bus, backend)
+    reconcile_rows(pool, managed, open_rows(pool, host), host, bus, backend, home)
 
 
 async def reconcile_loop(
@@ -462,6 +466,7 @@ async def reconcile_loop(
     bus: EventBus,
     *,
     local_machine: MachineIdentityReader,
+    home: Path,
 ) -> None:
     """Run page-shell reconciliation at the configured poll interval."""
     host = local_machine.host()
@@ -476,7 +481,7 @@ async def reconcile_loop(
         liveness.beat()
         try:
             await asyncio.sleep(config.page_server_poll_interval_seconds)
-            await asyncio.to_thread(reconcile_once, pool, managed, host, bus, backend)
+            await asyncio.to_thread(reconcile_once, pool, managed, host, bus, backend, home)
         except asyncio.CancelledError:
             raise
         except psycopg.ProgrammingError:
@@ -497,6 +502,7 @@ async def run(
     database: Callable[[], Database],
     image: LoadedCommit,
     local_machine: MachineIdentityReader,
+    home: Path,
 ) -> None:
     """Start the daemon and keep its health endpoint alive while it reconciles."""
     if resources.is_running(process_config, runtime=runtime):
@@ -524,7 +530,9 @@ async def run(
         # its sibling and ends the process, and the supervisor restarts it.
         async with asyncio.TaskGroup() as loops:
             loops.create_task(
-                reconcile_loop(pool, reconcile_progress, config, bus, local_machine=local_machine)
+                reconcile_loop(
+                    pool, reconcile_progress, config, bus, local_machine=local_machine, home=home
+                )
             )
             loops.create_task(
                 dead_pages.dead_pages_loop(
@@ -545,7 +553,8 @@ def main() -> None:
     machine_config = ConfigBoot()
     machine_config.boot()
     machine = ConfiguredMachineIdentity(machine_config)
-    process_home = meiva_home().resolve()
+    home = meiva_home()
+    process_home = home.resolve()
     assert_schema_current(machine_config.view.data_plane.db_url)
     version = CodeVersion(image)
     gate = ProcessDbGate(version=version.get, process="page_server", exempt=False)
@@ -581,6 +590,7 @@ def main() -> None:
                 database=database,
                 image=image,
                 local_machine=machine,
+                home=home,
             )
         )
     except KeyboardInterrupt:
