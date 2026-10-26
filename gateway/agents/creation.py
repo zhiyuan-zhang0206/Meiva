@@ -19,6 +19,7 @@ from base.agents.labels import spawn_prompt_with_label
 from base.agents.observation import snapshot as snapshot_module
 from base.agents.observation.evidence import AgentAvailability, AvailabilityReason
 from base.api_contracts.agent_contract import AgentNotFound, ForkConfigChangeNotAllowed
+from base.clock import Clock
 from base.cluster.machines import is_paused, lookup_role
 from base.config.service_read import ConfigAuthority
 from base.db import Database
@@ -37,7 +38,6 @@ from gateway.http.auth.request_principal import (
     PrincipalScopeError,
     request_key,
 )
-from gateway.http.config import utc_now
 from ops.lifecycle.launch import spawn_prechecks_blocking
 from ops.rpc_schemas import LaunchAgentRequest, SpawnAgentRequest, SpawnedAgent
 
@@ -68,6 +68,7 @@ async def create_and_launch_agent(
     catalog: ModelCatalog,
     authority: ConfigAuthority,
     creation_key: str,
+    clock: Clock,
     creation_identity: dict[str, object] | None = None,
 ) -> SpawnedAgent:
     """Gateway-side spawn (Task #1236 follow-up): preflight -> create the agent
@@ -103,6 +104,7 @@ async def create_and_launch_agent(
             existing,
             catalog=catalog,
             default_model=default_model,
+            clock=clock,
         )
     keys = await asyncio.to_thread(process_provider_keys, catalog)
     tail_skills, model_receipt = await asyncio.to_thread(
@@ -156,6 +158,7 @@ async def create_and_launch_agent(
             committed,
             catalog=catalog,
             default_model=default_model,
+            clock=clock,
         )
     target, birth_config, launch_attempt_id = (
         committed.machine,
@@ -177,7 +180,7 @@ async def create_and_launch_agent(
         pool, db, bus, target, launch, catalog=catalog, default_model=default_model
     )
     return await _accepted_launch_receipt(
-        pool, spawned, model_receipt, catalog=catalog, default_model=default_model
+        pool, spawned, model_receipt, catalog=catalog, default_model=default_model, clock=clock
     )
 
 
@@ -189,6 +192,7 @@ async def recover_launch(
     *,
     catalog: ModelCatalog,
     default_model: str,
+    clock: Clock,
 ) -> SpawnedAgent:
     """Recover only an unadmitted birth; a completed incarnation is never revived."""
     if not existing.launch_pending:
@@ -208,7 +212,7 @@ async def recover_launch(
         default_model=default_model,
     )
     return await _accepted_launch_receipt(
-        pool, spawned, None, catalog=catalog, default_model=default_model
+        pool, spawned, None, catalog=catalog, default_model=default_model, clock=clock
     )
 
 
@@ -339,9 +343,15 @@ async def _accepted_launch_receipt(
     *,
     catalog: ModelCatalog,
     default_model: str,
+    clock: Clock,
 ) -> SpawnedAgent:
     observed = await asyncio.to_thread(
-        creation_availability, pool, spawned.id, catalog=catalog, default_model=default_model
+        creation_availability,
+        pool,
+        spawned.id,
+        catalog=catalog,
+        default_model=default_model,
+        clock=clock,
     )
     return launch_state.accepted_launch(spawned, observed, normalization)
 
@@ -459,6 +469,7 @@ def creation_availability(
     *,
     catalog: ModelCatalog,
     default_model: str,
+    clock: Clock,
 ) -> AgentAvailability:
     try:
         with pool.connection() as conn:
@@ -472,8 +483,8 @@ def creation_availability(
             type(exc).__name__,
             exc,
         )
-        return AgentAvailability(reason=AvailabilityReason.UNKNOWN, observed_at=utc_now())
+        return AgentAvailability(reason=AvailabilityReason.UNKNOWN, observed_at=clock.now())
     if snap is None or snap.availability is None:
         logger.warning("created agent {} unavailable for receipt read", agent_id)
-        return AgentAvailability(reason=AvailabilityReason.UNKNOWN, observed_at=utc_now())
+        return AgentAvailability(reason=AvailabilityReason.UNKNOWN, observed_at=clock.now())
     return snap.availability

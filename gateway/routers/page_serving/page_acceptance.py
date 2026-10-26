@@ -11,6 +11,7 @@ from psycopg.types.json import Jsonb
 from psycopg_pool import ConnectionPool
 
 from base.api_contracts.agent_contract import AgentStatus
+from base.clock import Clock
 from base.db.transaction import write_transaction
 from gateway.http.auth.request_principal import (
     PRINCIPAL_SCOPE,
@@ -19,7 +20,6 @@ from gateway.http.auth.request_principal import (
     PrincipalScopeError,
     principal_key,
 )
-from gateway.http.config import utc_now
 from gateway.routers.page_serving import page_target
 from gateway.schemas import PageRegisterRequest
 from ops.pages import (
@@ -108,6 +108,7 @@ def register(
     absolute_base: str,
     host_cache: page_target.PageHostCache,
     default_ttl_seconds: float,
+    clock: Clock,
 ) -> PageAcceptance:
     try:
         with write_transaction(pool) as conn:
@@ -131,7 +132,7 @@ def register(
                 ttl_seconds=(
                     body.ttl_seconds if body.ttl_seconds is not None else round(default_ttl_seconds)
                 ),
-                now=utc_now(),
+                now=clock.now(),
             )
             record = record.model_copy(update={"url": absolute_base + record.url})
             finish_receipt(conn, key, digest, record)

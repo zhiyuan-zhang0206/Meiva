@@ -29,7 +29,6 @@ from psycopg_pool import ConnectionPool
 
 from base.events.reads import audit_rows
 from base.events.reads.audit_rows import LINEAGE_EVENT_NAMES
-from gateway.http.config import utc_now
 
 # Bound on the tie read, below the route's client timeouts.
 _TIE_READ_STATEMENT_TIMEOUT_MS = 8_000
@@ -202,13 +201,13 @@ def compute(
     max_depth: int,
     limit: int,
     db_pool: ConnectionPool[Any],
+    now: datetime,
     k: float = 0.5,
     gamma: float = 0.5,
 ) -> tuple[list[tuple[int, int, float]], list[tuple[int, int, float]]]:
     """(neighbors, ancestors) for `root` — lists of (agent_id, depth, score)
     rows; neighbors strongest first, ancestors nearest first, with the
     immutable spawn-chain read."""
-    now = utc_now()
     weights = _weights(_fetch_edge_counts(db_pool), k=k, now=now)
     parents = _fetch_born_spawner_parents(db_pool, root=root)
     return (

@@ -14,6 +14,7 @@ import pytest
 
 import gateway.cluster.status as status_mod
 from base.api_contracts.status import MachineStatus
+from base.clock import SYSTEM_TIMERS, Clock, ClockConfig
 from base.cluster.machine import MachineIdentityReader
 from base.cluster.machine.tests.identity import machine_identity as machine_identity
 from base.db import Database
@@ -46,6 +47,9 @@ def _env(
         home=home,
         machine=machine,
         probe_timeout_s=8.0,
+        clock=Clock(
+            ClockConfig("UTC", None, message_timestamp_weekday=False), timers=SYSTEM_TIMERS
+        ),
     )
 
 

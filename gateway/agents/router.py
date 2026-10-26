@@ -18,6 +18,7 @@ from base.telemetry.audit_events import prepare_event_log, record_audit
 from gateway.agents.creation import create_and_launch_agent, scoped_creation_key
 from gateway.agents.schemas import AgentRow, LabelPatchRequest
 from gateway.http.auth.request_principal import PRINCIPAL_SCOPE, SCOPE_HEADER
+from gateway.http.config import gateway_clock
 from gateway.http.model_catalog import (
     catalog_for_observation,
     request_default_model,
@@ -197,6 +198,7 @@ async def post_guarded_agents(
             catalog=require_model_catalog(request),
             authority=request.app.state.config_authority,
             creation_key=key,
+            clock=gateway_clock(request),
         )
     except CreationConflictError as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
