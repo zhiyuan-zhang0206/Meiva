@@ -66,7 +66,7 @@ Builds the metric registry in process — ENABLED shipped plugins' `metrics.py` 
 the rendered query, evaluates LogQL templates on `telemetry_events` / `audit_events` (`gateway/inspect/_event_metrics.py`) and SQL read-only over Postgres —
 see `base/telemetry/metrics/plugin_metrics.py` + the `deploy/lgtm` dashboards README.
 Which plugins are enabled is read once per request (`_plugin_faces.enabled_plugin_names`, from the machine's plugin config) and
-handed to the loader as a set of names; the loader and the per-agent execution (`metrics_for_agent(pool, agent_id, registry=...)`) take values.
+handed to the loader as a set of names; the loader and the per-agent execution (`metrics_for_agent(pool, agent_id, registry=..., clock=...)`) take values.
 
 ## Plugin inspector-widget surface (`/inspect/widgets`, task #2909)
 
