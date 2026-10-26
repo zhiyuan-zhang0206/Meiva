@@ -5,11 +5,14 @@ from __future__ import annotations
 import asyncio
 import json
 from contextlib import suppress
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import cast
 
 import pytest
 
+from base.clock import Clock, ClockConfig
+from base.clock.tests.manual_timers import ManualTimers
 from base.db import Database
 from base.db.code_version_gate import ProcessDbGate
 from base.host.permissions_helper.client import PermissionsHelperError
@@ -19,7 +22,7 @@ from base.paths import logs_dir
 
 from ... import mcp_daemon as daemon_mod
 from ...protocol import Response
-from ..slices import AuditLog, FakeOcr, computer_use_config, short_sock_dir
+from ..slices import AuditLog, FakeOcr, computer_use_config, short_sock_dir, system_clock
 from ..test_computer_mcp_daemon import (
     SHORT_SESSION,
     FakeHelper,
@@ -233,6 +236,23 @@ async def test_audit_emitted_on_success(
     assert ev["payload"]["app"] == "Finder"
 
 
+async def test_session_start_stamps_the_wall_time_of_the_first_action(
+    fake_helper: FakeHelper, audit_log: list, *, database_gate: ProcessDbGate
+) -> None:
+    wall_start = datetime(2026, 3, 4, 5, 6, 7, tzinfo=UTC)
+    timers = ManualTimers(start=123456.0, wall_start=wall_start)
+    clock = Clock(
+        ClockConfig("UTC", "UTC", message_timestamp_weekday=False), timers=timers, now=timers.now
+    )
+    d = computer_daemon(database_gate=database_gate, helper=fake_helper, clock=clock)
+
+    await call(d, "click", {"x": 1, "y": 2, "task_id": 42})
+
+    start = audit_log[0]
+    assert start["event_type"] == "computer_session_start"
+    assert start["payload"]["first_action_at"] == wall_start.isoformat()
+
+
 async def test_audit_emitted_on_error(
     fake_helper: FakeHelper, audit_log: list, *, database_gate: ProcessDbGate
 ) -> None:
@@ -389,7 +409,9 @@ async def test_run_raises_stream_limit_for_large_snapshots(
 ) -> None:
     d, sock, cleanup = short_sock_dir()
     server = asyncio.create_task(
-        daemon_mod.run(sock=str(sock), database=lambda: database, helper=FakeHelper())
+        daemon_mod.run(
+            sock=str(sock), database=lambda: database, helper=FakeHelper(), clock=system_clock()
+        )
     )
     try:
         while not sock.exists():
@@ -443,7 +465,11 @@ async def test_shutdown_cancels_active_clients(database: Database) -> None:
     d, sock, cleanup = short_sock_dir()
     try:
         daemon = daemon_mod.ComputerMcpDaemon(
-            computer_use_config(), database, sock=str(sock), helper=FakeHelper()
+            computer_use_config(),
+            database,
+            sock=str(sock),
+            helper=FakeHelper(),
+            clock=system_clock(),
         )
         # A client handler that never returns unless cancelled — the persistent
         # SDK connection equivalent (a real client sits in handle()'s readline).

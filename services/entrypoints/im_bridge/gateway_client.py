@@ -5,9 +5,9 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
-import time
-from collections.abc import AsyncGenerator, Mapping
+from collections.abc import AsyncGenerator, Callable, Mapping
 from typing import Any, Literal
+from uuid import UUID
 
 import httpx
 
@@ -29,18 +29,19 @@ class GatewayClient:
     """REST + SSE client for the Meiva gateway (the Post Gateway)."""
 
     def __init__(
-        self, config: ImBridgeConfig, *, gateway_url: str, auth_headers: Mapping[str, str]
+        self,
+        config: ImBridgeConfig,
+        *,
+        gateway_url: str,
+        auth_headers: Mapping[str, str],
+        new_id: Callable[[], UUID],
     ) -> None:
         self._config = config
         self._base = gateway_url.rstrip("/")
         # The machine API token's Bearer (`gateway_auth_headers()`).
         self._auth_headers = dict(auth_headers)
         self._client: httpx.AsyncClient | None = None
-        self._op_seq = 0
-
-    def _next_key(self) -> str:
-        self._op_seq += 1
-        return f"gw-{self._op_seq}-{time.perf_counter_ns():x}"
+        self._new_id = new_id
 
     async def _http(self) -> httpx.AsyncClient:
         if self._client is None:
@@ -89,7 +90,7 @@ class GatewayClient:
         Idempotency-Key, so the server dedups even after a lost response. Once
         the retries are exhausted the error propagates; nothing is persisted
         or replayed later."""
-        key = idempotency_key or self._next_key()
+        key = idempotency_key or self._new_id().hex
         headers = {**self._headers(), **keyed_headers(key)}
         for attempt, delay in enumerate(self._config.im_send_retry_delays, start=1):
             try:
@@ -142,7 +143,7 @@ class GatewayClient:
         config: dict[str, object] | None,
         idempotency_key: str | None = None,
     ) -> int:
-        key = self._next_key() if idempotency_key is None else idempotency_key
+        key = self._new_id().hex if idempotency_key is None else idempotency_key
         client = await self._http()
         payload: dict[str, object] = {"spawner": "user"}
         if config:

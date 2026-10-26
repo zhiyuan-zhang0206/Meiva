@@ -1,10 +1,13 @@
 from __future__ import annotations
 
+import random
 from collections.abc import Mapping
 from dataclasses import replace
 from functools import cache
 from typing import Any
+from uuid import uuid4
 
+from base.clock import SYSTEM_TIMERS, Clock, ClockConfig
 from base.config.tests.configuration import snapshot_process_config
 from services.entrypoints.im_bridge import daemon
 from services.entrypoints.im_bridge.config import (
@@ -18,6 +21,8 @@ __all__ = [
     "feishu_config",
     "gateway_client",
     "im_bridge_config",
+    "seeded_rng",
+    "system_clock",
     "telegram_config",
 ]
 
@@ -61,4 +66,18 @@ def gateway_client(
         config or im_bridge_config(),
         gateway_url="http://localhost:8000",
         auth_headers=auth_headers or {},
+        new_id=uuid4,
     )
+
+
+# meiva:note
+# The real wall clock and timers, as the daemon builds them: a test that does not steer time
+# passes this, one that does builds a `Clock` over `ManualTimers`.
+def system_clock() -> Clock:
+    return Clock(ClockConfig("UTC", "UTC", message_timestamp_weekday=False), timers=SYSTEM_TIMERS)
+
+
+# meiva:note
+# A generator with a fixed seed, so a test that draws from it sees the same values every run.
+def seeded_rng(seed: int = 0) -> random.Random:
+    return random.Random(seed)  # noqa: S311

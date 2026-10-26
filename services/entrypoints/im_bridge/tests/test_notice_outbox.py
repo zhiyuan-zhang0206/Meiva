@@ -4,6 +4,7 @@ import asyncio
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from typing import Any
+from uuid import uuid4
 
 import httpx
 import psycopg
@@ -19,7 +20,7 @@ from base.db.code_version_gate import ProcessDbGate
 from base.lm.catalog import ModelCatalog
 from services.entrypoints.im_bridge.core import IMBridgeCore
 from services.entrypoints.im_bridge.outbound.types import NoticePollImportReason
-from services.entrypoints.im_bridge.tests.slices import im_bridge_config
+from services.entrypoints.im_bridge.tests.slices import im_bridge_config, seeded_rng, system_clock
 from services.entrypoints.im_bridge.tests.support import failing_insert
 from services.entrypoints.im_bridge.tests.test_im_bridge_core import FakeGateway
 from services.entrypoints.im_bridge.tests.test_timeline_outbox import RecordingAdapter
@@ -63,6 +64,9 @@ def make_core(
         db_pool=pool,
         tasks=asyncio.TaskGroup(),
         state_dir=state_dir,
+        clock=system_clock(),
+        rng=seeded_rng(),
+        new_id=uuid4,
     )
     adapter = NoticeAdapter()
     core.register(adapter)

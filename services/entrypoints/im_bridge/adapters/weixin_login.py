@@ -140,7 +140,7 @@ async def qr_login(
     state_dir: Path,
     timeout_seconds: int = 480,
     client: httpx.AsyncClient | None = None,
-    timers: Timers = SYSTEM_TIMERS,
+    timers: Timers,
 ) -> dict[str, Any] | None:
     """Run the interactive iLink QR login; persist credentials on success."""
     owns_client = client is None
@@ -192,7 +192,7 @@ def main(argv: list[str] | None = None) -> int:
     )
     args = parser.parse_args(argv)
     if args.login:
-        creds = asyncio.run(qr_login(state_dir=state_dir_of(meiva_home())))
+        creds = asyncio.run(qr_login(state_dir=state_dir_of(meiva_home()), timers=SYSTEM_TIMERS))
         return 0 if creds else 1
     parser.print_help()
     return 1

@@ -1,10 +1,9 @@
 """IM intents share atomic acceptance with their timeline or notice producer."""
 
-import time
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from datetime import datetime
 from typing import Any
-from uuid import NAMESPACE_OID, UUID, uuid5
+from uuid import UUID
 
 from psycopg import Connection
 from psycopg.types.json import Jsonb
@@ -50,13 +49,9 @@ def _enforce_claim_fence(conn: Connection, fence: ClaimFence) -> None:
 
 
 class IMOutboxStore:
-    def __init__(self, pool: ConnectionSource | None = None) -> None:
+    def __init__(self, pool: ConnectionSource | None = None, *, new_id: Callable[[], UUID]) -> None:
         self.pool: ConnectionSource | None = pool
-        self._seq = 0
-
-    def _next_uuid(self) -> UUID:
-        self._seq += 1
-        return uuid5(NAMESPACE_OID, f"outbox-{self._seq}-{time.perf_counter_ns()}")
+        self._new_id = new_id
 
     def _pool(self) -> ConnectionSource:
         if self.pool is None:
@@ -557,7 +552,7 @@ class IMOutboxStore:
             ).fetchone()
             if row is None:
                 return None
-            attempt = self._next_uuid()
+            attempt = self._new_id()
             conn.execute(
                 "UPDATE im_bridge_outbound_intents SET status='sending', attempt_id=%s, started_at=now(), "
                 "outcome_reason='send_result_unconfirmed' WHERE id=%s AND status='queued'",

@@ -18,7 +18,12 @@ from services.desktop.computer import ax_gap
 from services.desktop.computer.ax_gap import Frame, VisualBox
 from services.desktop.computer.errors import ComputerUseError
 from services.desktop.computer.mcp_daemon import ComputerMcpDaemon
-from services.desktop.computer.tests.slices import FakeDesktopHelper, FakeOcr, computer_use_config
+from services.desktop.computer.tests.slices import (
+    FakeDesktopHelper,
+    FakeOcr,
+    computer_use_config,
+    system_clock,
+)
 
 WINDOW = (0.0, 0.0, 1000.0, 800.0)
 
@@ -154,7 +159,9 @@ async def test_include_ocr_gap_appends_only_the_text_the_tree_misses(
     fake_ax: FakeAxHelper, gap: FakeOcr, database: Database
 ) -> None:
     out = await call(
-        ComputerMcpDaemon(computer_use_config(), database, sock="/x.sock", helper=fake_ax),
+        ComputerMcpDaemon(
+            computer_use_config(), database, sock="/x.sock", helper=fake_ax, clock=system_clock()
+        ),
         "ax_tree",
         {"include_ocr_gap": True},
     )
@@ -169,7 +176,9 @@ async def test_ocr_failure_is_soft_the_tree_is_still_returned(
 ) -> None:
     FakeOcr(error="swiftc not found on PATH")
     out = await call(
-        ComputerMcpDaemon(computer_use_config(), database, sock="/x.sock", helper=fake_ax),
+        ComputerMcpDaemon(
+            computer_use_config(), database, sock="/x.sock", helper=fake_ax, clock=system_clock()
+        ),
         "ax_tree",
         {"include_ocr_gap": True},
     )
@@ -183,7 +192,13 @@ async def test_the_gap_needs_a_whole_window_read(
 ) -> None:
     with pytest.raises(ComputerUseError, match="drop scope"):
         await call(
-            ComputerMcpDaemon(computer_use_config(), database, sock="/x.sock", helper=fake_ax),
+            ComputerMcpDaemon(
+                computer_use_config(),
+                database,
+                sock="/x.sock",
+                helper=fake_ax,
+                clock=system_clock(),
+            ),
             "ax_tree",
             {"include_ocr_gap": True, "scope": "e1"},
         )
@@ -192,7 +207,9 @@ async def test_the_gap_needs_a_whole_window_read(
 async def test_enable_ax_reaches_the_helper_and_defaults_on(
     fake_ax: FakeAxHelper, database: Database
 ) -> None:
-    daemon = ComputerMcpDaemon(computer_use_config(), database, sock="/x.sock", helper=fake_ax)
+    daemon = ComputerMcpDaemon(
+        computer_use_config(), database, sock="/x.sock", helper=fake_ax, clock=system_clock()
+    )
     await call(daemon, "ax_tree")
     assert fake_ax.calls[-1][1]["enable_ax"] is True
     await call(daemon, "ax_tree", {"enable_ax": False})
@@ -202,7 +219,9 @@ async def test_enable_ax_reaches_the_helper_and_defaults_on(
 async def test_a_px_press_clicks_the_text_center_in_logical_points(
     fake_ax: FakeAxHelper, gap: FakeOcr, clicks: FakeAxHelper, database: Database
 ) -> None:
-    daemon = ComputerMcpDaemon(computer_use_config(), database, sock="/x.sock", helper=fake_ax)
+    daemon = ComputerMcpDaemon(
+        computer_use_config(), database, sock="/x.sock", helper=fake_ax, clock=system_clock()
+    )
     await call(daemon, "ax_tree", {"include_ocr_gap": True})
     out = await call(daemon, "ax_act", {"id": "px:1", "action": "press"})
     assert clicks.clicks == [(320.0, 205.0)]
@@ -231,7 +250,9 @@ async def test_px_elements_only_press_and_only_the_latest_ones(
     args: dict[str, Any],
     database: Database,
 ) -> None:
-    daemon = ComputerMcpDaemon(computer_use_config(), database, sock="/x.sock", helper=fake_ax)
+    daemon = ComputerMcpDaemon(
+        computer_use_config(), database, sock="/x.sock", helper=fake_ax, clock=system_clock()
+    )
     await call(daemon, "ax_tree", {"include_ocr_gap": True})
     with pytest.raises(ComputerUseError):
         await call(daemon, "ax_act", args)
@@ -241,7 +262,9 @@ async def test_px_elements_only_press_and_only_the_latest_ones(
 async def test_a_later_ax_tree_without_the_gap_retires_the_px_ids(
     fake_ax: FakeAxHelper, gap: FakeOcr, clicks: FakeAxHelper, database: Database
 ) -> None:
-    daemon = ComputerMcpDaemon(computer_use_config(), database, sock="/x.sock", helper=fake_ax)
+    daemon = ComputerMcpDaemon(
+        computer_use_config(), database, sock="/x.sock", helper=fake_ax, clock=system_clock()
+    )
     await call(daemon, "ax_tree", {"include_ocr_gap": True})
     await call(daemon, "ax_tree")
     with pytest.raises(ComputerUseError, match="unknown visual element px:1"):

@@ -2,6 +2,7 @@
 
 import asyncio
 from pathlib import Path
+from uuid import uuid4
 
 import psycopg
 import pytest
@@ -11,6 +12,7 @@ from services.entrypoints.im_bridge.ingress.store import WeixinIngressStore
 from services.entrypoints.im_bridge.ingress.types import IngressStatus
 from services.entrypoints.im_bridge.outbound.claim_fence import StalePollBindingError
 from services.entrypoints.im_bridge.tests.adapters.weixin_native import NativeWeixin, message
+from services.entrypoints.im_bridge.tests.slices import seeded_rng, system_clock
 from services.entrypoints.im_bridge.tests.support import failing_update, held_table_lock
 
 
@@ -22,9 +24,16 @@ async def replace_account(native: NativeWeixin, account_id: str) -> WeixinAdapte
         user_id="owner",
         base_url="https://provider.example",
     )
-    adapter = WeixinAdapter(native.core, state_dir=native.state_dir, client=native.adapter._http)
+    adapter = WeixinAdapter(
+        native.core,
+        state_dir=native.state_dir,
+        client=native.adapter._http,
+        clock=system_clock(),
+        new_id=uuid4,
+        rng=seeded_rng(),
+    )
     native.core.register(adapter)
-    store = WeixinIngressStore(native.pool)
+    store = WeixinIngressStore(native.pool, new_id=uuid4)
     store.initialize("https://provider.example", account_id)
     return adapter
 
@@ -159,6 +168,9 @@ async def test_committed_command_then_completion_failure_recovers_uncertain_with
         native_weixin.core,
         state_dir=native_weixin.state_dir,
         client=native_weixin.adapter._http,
+        clock=system_clock(),
+        new_id=uuid4,
+        rng=seeded_rng(),
     )
     native_weixin.core.register(replacement)
     recovered = await replacement._handle_message(payload)
@@ -203,7 +215,7 @@ async def test_superseded_poll_waiting_for_provider_cannot_admit_or_checkpoint(
         native_weixin.adapter._client = http
         old = asyncio.create_task(native_weixin.adapter._poll_once("", 35000))
         await entered.wait()
-        store = WeixinIngressStore(native_weixin.pool)
+        store = WeixinIngressStore(native_weixin.pool, new_id=uuid4)
         store.initialize("https://provider.example", "replacement-account")
         release.set()
         with pytest.raises(StalePollBindingError):
@@ -238,6 +250,9 @@ async def test_unclaimed_source_is_rejected_at_restart_and_never_dispatched_late
         native_weixin.core,
         state_dir=native_weixin.state_dir,
         client=native_weixin.adapter._http,
+        clock=system_clock(),
+        new_id=uuid4,
+        rng=seeded_rng(),
     )
     native_weixin.core.register(replacement)
     native_weixin.provider_responses.append(

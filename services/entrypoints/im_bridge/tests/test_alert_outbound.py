@@ -70,7 +70,9 @@ def bridge(
     pool: ConnectionPool, *adapters: AlertAdapter, enabled: bool = True
 ) -> AlertOutboundBridge:
     return AlertOutboundBridge(
-        IMOutboxStore(pool), {adapter.channel: adapter for adapter in adapters}, enabled=enabled
+        IMOutboxStore(pool, new_id=uuid4),
+        {adapter.channel: adapter for adapter in adapters},
+        enabled=enabled,
     )
 
 

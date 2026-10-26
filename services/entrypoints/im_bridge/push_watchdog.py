@@ -16,9 +16,9 @@ own message, so:
 from __future__ import annotations
 
 import logging
+import random
 from typing import Protocol
 
-from base.clock import SYSTEM_TIMERS, Clock, ClockConfig
 from base.log import logger
 from services.entrypoints.im_bridge import copy
 from services.entrypoints.im_bridge.config import ImBridgeConfig
@@ -68,6 +68,8 @@ async def send_with_retry(
     chat_id: str,
     reply: Reply,
     adapter: WatchdogAdapter,
+    *,
+    rng: random.Random,
 ) -> None:
     """Retry only an adapter-proven unstarted send, never an ambiguous prefix."""
 
@@ -81,7 +83,7 @@ async def send_with_retry(
         # boundary proof permits retrying the entire logical message.
         _log.warning("send failed channel=%s chat=%s: %r — retrying once", channel, chat_id, exc)
         try:
-            await retry_once_after_backoff(attempt, core.config)
+            await retry_once_after_backoff(attempt, core.config, rng=rng)
         except (SendNotStartedError, SendOutcomeUncertainError):
             _log.exception("send retry failed channel=%s chat=%s", channel, chat_id)
             logger.warning(
@@ -100,7 +102,7 @@ async def send_with_retry(
         )
 
 
-async def hint_recovered(core: WatchdogCore, msg: InboundMessage) -> None:
+async def hint_recovered(core: WatchdogCore, msg: InboundMessage, *, now: float) -> None:
     """Right after a weixin push failure, the user's own message carries a
     fresh context_token and the first send succeeds — tell them the link is
     back."""
@@ -109,11 +111,7 @@ async def hint_recovered(core: WatchdogCore, msg: InboundMessage) -> None:
     adapter = core.adapters.get("weixin")
     if adapter is None:
         return
-    clock = Clock(ClockConfig("UTC", "UTC", message_timestamp_weekday=False), timers=SYSTEM_TIMERS)
-    if not recovered_hint_due(
-        recovered_at=adapter.push_recovered_at,
-        now=clock.now().timestamp(),
-    ):
+    if not recovered_hint_due(recovered_at=adapter.push_recovered_at, now=now):
         return
 
     try:

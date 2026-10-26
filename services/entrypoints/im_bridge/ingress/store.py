@@ -1,9 +1,8 @@
 """Account-fenced Weixin source retention and native chat admission."""
 
 import json
-import time
-from collections.abc import Mapping
-from uuid import NAMESPACE_OID, UUID, uuid5
+from collections.abc import Callable, Mapping
+from uuid import UUID
 
 from psycopg import Connection, sql
 from psycopg.types.json import Jsonb
@@ -54,13 +53,9 @@ def receipt_from_row(row: tuple[object, ...]) -> IngressReceipt:
 
 
 class WeixinIngressStore:
-    def __init__(self, pool: ConnectionSource | None = None) -> None:
+    def __init__(self, pool: ConnectionSource | None = None, *, new_id: Callable[[], UUID]) -> None:
         self.pool: ConnectionSource | None = pool
-        self._seq = 0
-
-    def _next_uuid(self) -> UUID:
-        self._seq += 1
-        return uuid5(NAMESPACE_OID, f"weixin-{self._seq}-{time.perf_counter_ns()}")
+        self._new_id = new_id
 
     def require_pool(self) -> ConnectionSource:
         if self.pool is None:
@@ -80,7 +75,7 @@ class WeixinIngressStore:
     def initialize(self, namespace: str, account_id: str) -> PollBinding:
         if not namespace or not account_id:
             raise ValueError("Weixin poll requires a qualified namespace and account")
-        epoch = self._next_uuid()
+        epoch = self._new_id()
         with write_transaction(self.require_pool()) as conn:
             conn.execute(
                 "INSERT INTO weixin_ingress_bindings(id,namespace,account_id,epoch) VALUES (1,%s,%s,%s) "
@@ -292,7 +287,7 @@ class WeixinIngressStore:
                     "UPDATE weixin_ingress_receipts SET status='claimed',attempt_id=%s "
                     "WHERE id=%s AND namespace=%s AND account_id=%s AND status='retained' AND EXISTS (SELECT 1 FROM weixin_ingress_cursors c WHERE c.namespace=weixin_ingress_receipts.namespace AND c.account_id=weixin_ingress_receipts.account_id AND c.state='active') RETURNING {}"
                 ).format(sql.SQL(_RECEIPT_COLUMNS)),
-                (self._next_uuid(), receipt_id, binding.namespace, binding.account_id),
+                (self._new_id(), receipt_id, binding.namespace, binding.account_id),
             ).fetchone()
             return receipt_from_row(row) if row is not None else None
 

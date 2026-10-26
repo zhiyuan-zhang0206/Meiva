@@ -1,4 +1,5 @@
 import asyncio
+import random
 from collections.abc import Awaitable
 
 from base.log import logger
@@ -58,10 +59,12 @@ class IMOutboxWorker:
         adapters: dict[str, IMAdapter],
         *,
         config: ImBridgeConfig,
+        rng: random.Random,
     ) -> None:
         self.store = store
         self.adapters = adapters
         self._config = config
+        self._rng = rng
         self._serial = asyncio.Lock()
 
     async def run_once(self) -> None:
@@ -115,7 +118,7 @@ class IMOutboxWorker:
         except SendNotStartedError:
             logger.warning("IM outbound send proved no effect intent={}; retrying once", intent_id)
             try:
-                await retry_once_after_backoff(send_once, self._config)
+                await retry_once_after_backoff(send_once, self._config, rng=self._rng)
             except SendNotStartedError:
                 logger.warning("IM outbound send proved no effect after retry intent={}", intent_id)
                 return OutboundStatus.FAILED, "adapter_proved_no_effect", None

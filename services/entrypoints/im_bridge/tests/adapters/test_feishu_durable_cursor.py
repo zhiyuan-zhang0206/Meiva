@@ -23,7 +23,7 @@ from base.config import settings
 from base.sessions.tests.poll_until import poll_until_async
 from services.entrypoints.im_bridge.adapters.feishu import FeishuAdapter
 from services.entrypoints.im_bridge.cursor_store import CursorStore
-from services.entrypoints.im_bridge.tests.slices import feishu_config
+from services.entrypoints.im_bridge.tests.slices import feishu_config, system_clock
 from services.entrypoints.im_bridge.tests.support import owned_tasks
 from services.entrypoints.im_bridge.types import InboundMessage, RetryableTransportError
 
@@ -90,6 +90,7 @@ def _adapter(rest: _Rest, store: CursorStore, state_dir: Path) -> FeishuAdapter:
         state_dir=state_dir,
         proxy_configured=False,
         cursor_store=store,
+        clock=system_clock(),
     )
     adapter._rest_client = rest
     return adapter

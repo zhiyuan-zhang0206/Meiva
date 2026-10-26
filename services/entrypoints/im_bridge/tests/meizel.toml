@@ -2,7 +2,7 @@ exports = ["adapters", "conftest.py", "slices.py"]
 
 [uses]
 "adapters" = ["slices.py", "support.py", "test_notice_outbox.py"]
-"im_bridge_core" = ["slices.py", "support.py", "test_im_bridge_core.py"]
+"im_bridge_core" = ["slices.py", "support.py", "test_im_bridge_core.py", "test_timeline_outbox.py"]
 "test_alert_outbound.py" = ["support.py", "test_timeline_outbox.py"]
 "test_im_bridge_core.py" = ["slices.py", "support.py"]
 "test_im_bridge_daemon.py" = ["slices.py", "support.py", "test_im_bridge_core.py"]

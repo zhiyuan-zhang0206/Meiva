@@ -3,6 +3,7 @@
 from collections.abc import AsyncIterator
 from dataclasses import dataclass
 from pathlib import Path
+from uuid import uuid4
 
 import httpx
 import psycopg
@@ -14,7 +15,7 @@ from services.entrypoints.im_bridge.adapters.weixin import WeixinAdapter, save_a
 from services.entrypoints.im_bridge.core import IMBridgeCore, TypingCadence
 from services.entrypoints.im_bridge.gateway_client import GatewayClient
 from services.entrypoints.im_bridge.ingress.store import WeixinIngressStore
-from services.entrypoints.im_bridge.tests.slices import im_bridge_config
+from services.entrypoints.im_bridge.tests.slices import im_bridge_config, seeded_rng, system_clock
 from services.entrypoints.im_bridge.tests.support import owned_tasks
 
 
@@ -90,7 +91,9 @@ async def native_weixin(
             ) as gateway_http,
             httpx.AsyncClient(transport=httpx.MockTransport(provider)) as provider_http,
         ):
-            client = GatewayClient(config, gateway_url="http://isolated-gateway", auth_headers={})
+            client = GatewayClient(
+                config, gateway_url="http://isolated-gateway", auth_headers={}, new_id=uuid4
+            )
             client._client = gateway_http
             core = IMBridgeCore(
                 config,
@@ -100,11 +103,21 @@ async def native_weixin(
                 state_dir=state_dir,
                 typing=TypingCadence(max_s=0.0),
                 subscribe_timeline=False,
+                clock=system_clock(),
+                new_id=uuid4,
+                rng=seeded_rng(),
             )
-            adapter = WeixinAdapter(core, state_dir=state_dir, client=provider_http)
+            adapter = WeixinAdapter(
+                core,
+                state_dir=state_dir,
+                client=provider_http,
+                clock=system_clock(),
+                new_id=uuid4,
+                rng=seeded_rng(),
+            )
             core.register(adapter)
 
-            store = WeixinIngressStore(pool)
+            store = WeixinIngressStore(pool, new_id=uuid4)
             binding = store.initialize("https://provider.example", "bot-id")
             store.checkpoint(binding, "", "", provider_empty=True)
             state = core._get_or_create_state("weixin", "peer-1")

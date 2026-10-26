@@ -16,7 +16,7 @@ from base.host.permissions_helper.client import PermissionsHelperClient
 
 from ..computer.config import ComputerUseConfig
 from ..computer.mcp_daemon import ComputerMcpDaemon
-from ..computer.tests.slices import AuditLog
+from ..computer.tests.slices import AuditLog, system_clock
 
 
 class RequestLog(list[dict[str, Any]]):
@@ -64,6 +64,7 @@ def desktop(database: Database) -> Iterator[Desktop]:
             database,
             sock="/unused.sock",
             helper=PermissionsHelperClient(path),
+            clock=system_clock(),
         )
         with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as listener:
             listener.bind(str(path))
