@@ -293,7 +293,7 @@ ALLOWED: dict[str, tuple[Category, str]] = {
     ),
     "tests/components/schedules/test_goal_watch_filter.py": (
         "contract",
-        "tests the watch_idle reference snippets of the meiva-goal, long-running-agent and meiva-fleet skills",
+        "tests the watch_idle reference snippet that the meiva-goal skill shares with the long-running-agent and meiva-fleet skills",
     ),
     "tests/contracts/test_lint_contextvars_allowlist.py": (
         "contract",

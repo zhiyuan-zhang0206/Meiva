@@ -91,15 +91,13 @@ def _h_plugins_upgrade(args: argparse.Namespace) -> int:
 
 
 def _h_skill_update(args: argparse.Namespace) -> int:
-    from base.config import ConfigBoot
     from cli.commands.extensions.skill import cmd_skill_update
     from cli.commands.extensions.skills_sync import source_binding
+    from cli.database.runtime import delivered_config
 
-    config = ConfigBoot()
-    config.read_process_environment()
     return cmd_skill_update(
         args.names,
-        config=config,
+        config=delivered_config(args.runtime.config),
         repo=args.runtime.checkout,
         binding=source_binding(
             args.runtime.session.user_home, args.runtime.config.process_environment()

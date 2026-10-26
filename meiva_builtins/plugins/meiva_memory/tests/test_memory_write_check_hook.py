@@ -4,6 +4,7 @@ import json
 import time
 from collections.abc import Iterator
 from dataclasses import replace
+from datetime import UTC, datetime
 from pathlib import Path
 from threading import Event
 from typing import Any
@@ -22,6 +23,8 @@ from base.agents.context.clients import ClientSet
 from base.agents.context.gateway_client.memory_search import MemorySearchResult
 from base.agents.context.gateway_client.transport import GatewayTransportInputs
 from base.agents.context.identity import AgentIdentity
+from base.clock import Clock, ClockConfig
+from base.clock.tests.manual_timers import ManualTimers
 from base.config import settings
 from base.host.env.agent_slices import AgentSlices
 from base.log.tests.log_records import LogRecords
@@ -36,6 +39,14 @@ _GOOD = (
     "title: Retry rule\ndescription: Retries above three make the outage worse\n"
     "tags: [type/feedback]\n---\nThe service rate-limits above three retries.\n"
 )
+
+
+_NOW = datetime(2026, 3, 4, 5, 6, 7, tzinfo=UTC)
+
+
+def _clock() -> Clock:
+    timers = ManualTimers(wall_start=_NOW)
+    return Clock(ClockConfig("UTC", "UTC", False), timers=timers, now=timers.now)
 
 
 def _default_reader(domain: str, field: str) -> Any:
@@ -136,6 +147,7 @@ def runtime(search: _MemoryGateway, model_catalog: Any) -> Iterator[Runtime[Meiv
         agent=AgentSlices.resolve(default_reader=_default_reader),
         catalog=model_catalog,
         clients=clients,
+        clock_factory=_clock,
     )
     try:
         yield Runtime(context=context)
@@ -219,6 +231,7 @@ async def test_a_probable_duplicate_is_named_with_its_probability(
 
     [note] = _reminders(result)
     assert read_meiva_kwargs(note).get("meiva_note_tag") == NoteTag.MEMORY_WRITE_CHECK.value
+    assert read_meiva_kwargs(note).get("meiva_created_at") == _NOW.isoformat()
     text = str(note.content)
     assert str(pool / "new/retry.md") in text
     assert f"{pool / 'old/retry-rule.md'} (probability 0.91; it holds: Retry limits)" in text

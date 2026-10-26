@@ -33,7 +33,7 @@ the target is definitively gone. Use stable paths and refresh copied state befor
 checking it. Make a failed wake send visible (log it and exit non-zero) when a
 lost wake would leave the task unattended.
 
-The bundled `scripts/watch_idle.py` is a reference body for an idle-agent wait.
+The meiva-goal skill's `scripts/watch_idle.py` (`meiva.skills.meiva_goal.path`) is a reference body for an idle-agent wait.
 Read it only when implementing that wait; it uses authoritative status checks
 and exits 2 when its wake send fails. Do not start a duplicate monitor.
 

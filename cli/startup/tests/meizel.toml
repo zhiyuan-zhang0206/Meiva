@@ -1,5 +1,7 @@
+exports = ["birth_facts.py"]
+
 [uses]
 "test_log_sinks.py" = []
 "test_outcome.py" = []
-"test_service_path.py" = []
+"test_service_path.py" = ["birth_facts.py"]
 "test_settings_failure.py" = []

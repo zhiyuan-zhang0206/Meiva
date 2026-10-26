@@ -15,8 +15,8 @@ from __future__ import annotations
 
 import argparse
 import getpass
-import os
 import sys
+from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, TypeGuard
@@ -38,13 +38,24 @@ _HTTP_TIMEOUT_S = 15.0
 _GATEWAY_URL_KEYS = ("MEIVA_GATEWAY_URL",)
 
 
-def _home_gateway_base() -> str | None:
+# meiva:note
+# What the settings-free paths of `meiva config` read about the process they run in, taken once by
+# the handler from the command's runtime: the launch environment and the home whose `.env` is this
+# unit's own. A broken `.env` is exactly the case the `--local` repair path exists for, so none of
+# these verbs constructs `Settings` to learn them.
+@dataclass(frozen=True)
+class ConfigProcess:
+    environ: Mapping[str, str]
+    home: Path
+
+
+def _home_gateway_base(process: ConfigProcess) -> str | None:
     """This process's home gateway identity: the home `.env` aliases
     (`MEIVA_GATEWAY_URL`, recorded by `meiva init`). None when the home carries no
     identity yet (before `meiva init`)."""
     from base.host.env import dotenv_file
 
-    aliases = dotenv_file.read_env_aliases(dotenv_file.process_env_file())
+    aliases = dotenv_file.read_env_aliases(dotenv_file.env_file_path(process.home))
     for key in _GATEWAY_URL_KEYS:
         gateway_url = aliases.get(key, "").strip()
         if gateway_url:
@@ -52,17 +63,17 @@ def _home_gateway_base() -> str | None:
     return None
 
 
-def gateway_base() -> str:
+def gateway_base(process: ConfigProcess) -> str:
     """Resolve the configured gateway without constructing ``Settings``.
 
     Explicit env wins (deliberate cross-cluster intent). Otherwise the
     home's own gateway identity wins. A home with no identity yet gets a
     refusal with guidance instead of a silent fallback."""
     for key in _GATEWAY_URL_KEYS:
-        gateway_url = os.environ.get(key, "").strip()
+        gateway_url = process.environ.get(key, "").strip()
         if gateway_url:
             return gateway_url.rstrip("/")
-    home_base = _home_gateway_base()
+    home_base = _home_gateway_base(process)
     if home_base is not None:
         return home_base
     raise ConfigError(
@@ -72,7 +83,7 @@ def gateway_base() -> str:
     )
 
 
-def _guard_gateway_write(target: str) -> None:
+def _guard_gateway_write(target: str, process: ConfigProcess) -> None:
     """Refuse gateway config writes whose target is not this process's home.
 
     The 2026-09-01 ruling: config changes go through the official path AND are
@@ -81,7 +92,7 @@ def _guard_gateway_write(target: str) -> None:
     any gateway config, and an explicit env override that contradicts the home's
     own gateway identity is refused — a foreign-home write must never be one
     innocuous command away (2026-09-07 incident)."""
-    home_base = _home_gateway_base()
+    home_base = _home_gateway_base(process)
     if home_base is None:
         raise ConfigError(
             "refusing to write gateway config: this home carries no gateway "
@@ -95,7 +106,7 @@ def _guard_gateway_write(target: str) -> None:
         )
 
 
-def _auth_headers() -> dict[str, str]:
+def _auth_headers(process: ConfigProcess) -> dict[str, str]:
     """This unit's bearer, read without constructing Settings.
 
     A delivered machine API token first (the boot pass gives an admitted
@@ -105,10 +116,9 @@ def _auth_headers() -> dict[str, str]:
     """
     from base.host.env import dotenv_file
     from base.host.net.auth import bearer_header, delivered_token
-    from base.paths.home import resolve_meiva_home
 
-    home = resolve_meiva_home()
-    bearer = delivered_token(os.environ) or os.environ.get("MEIVA_CLUSTER_SECRET")
+    home = process.home
+    bearer = delivered_token(process.environ) or process.environ.get("MEIVA_CLUSTER_SECRET")
     if bearer is None:
         bearer = dotenv_file.read_env_aliases(dotenv_file.env_file_path(home)).get(
             "MEIVA_CLUSTER_SECRET", ""
@@ -120,47 +130,49 @@ def _auth_headers() -> dict[str, str]:
     return bearer_header(bearer) if bearer else {}
 
 
-def get_config(machine: str | None) -> ConfigView:
+def get_config(machine: str | None, process: ConfigProcess) -> ConfigView:
     from base.host.net.http_dial import get as dial_get
 
     params = {"machine": machine} if machine else None
     resp = dial_get(
-        f"{gateway_base()}/api/config",
+        f"{gateway_base(process)}/api/config",
         params=params,
         timeout=_HTTP_TIMEOUT_S,
-        headers=_auth_headers(),
+        headers=_auth_headers(process),
     )
     resp.raise_for_status()
     return ConfigView.model_validate(resp.json())
 
 
-def get_config_audit(machine: str | None, last: int) -> ConfigAuditView:
+def get_config_audit(machine: str | None, last: int, process: ConfigProcess) -> ConfigAuditView:
     from base.host.net.http_dial import get as dial_get
 
     params: dict[str, str] = {"last": str(last)}
     if machine:
         params["machine"] = machine
     resp = dial_get(
-        f"{gateway_base()}/api/config/audit",
+        f"{gateway_base(process)}/api/config/audit",
         params=params,
         timeout=_HTTP_TIMEOUT_S,
-        headers=_auth_headers(),
+        headers=_auth_headers(process),
     )
     resp.raise_for_status()
     return ConfigAuditView.model_validate(resp.json())
 
 
-def put_config(body: dict[str, Any], machine: str | None) -> ConfigWriteResult:
+def put_config(
+    body: dict[str, Any], machine: str | None, process: ConfigProcess
+) -> ConfigWriteResult:
     from base.host.net.http_dial import put as dial_put
 
-    _guard_gateway_write(gateway_base())
+    _guard_gateway_write(gateway_base(process), process)
     params = {"machine": machine} if machine else None
     resp = dial_put(
-        f"{gateway_base()}/api/config",
+        f"{gateway_base(process)}/api/config",
         json=body,
         params=params,
         timeout=_HTTP_TIMEOUT_S,
-        headers=_auth_headers(),
+        headers=_auth_headers(process),
     )
     if resp.status_code == 400:
         # The gateway rejects unknown / read-only fields with a 400 + detail.
@@ -247,20 +259,22 @@ def _resolve_local_field(key: str, index: dict[str, _LocalConfigField]) -> _Loca
     return field
 
 
-def _config_source_is_local() -> bool:
+def _config_source_is_local(process: ConfigProcess) -> bool:
     from base.host.env.bootstrap import config_source_is_local
-    from base.host.env.dotenv_file import process_env_file, read_env_aliases
+    from base.host.env.dotenv_file import env_file_path, read_env_aliases
 
-    return config_source_is_local(os.environ, env_file=read_env_aliases(process_env_file()))
+    return config_source_is_local(
+        process.environ, env_file=read_env_aliases(env_file_path(process.home))
+    )
 
 
-def _check_local_writable(field: _LocalConfigField) -> None:
+def _check_local_writable(field: _LocalConfigField, process: ConfigProcess) -> None:
     if not field.writable:
         raise ConfigError(f"{field.env_var} is read-only")
     if field.scope == "host":
         return
     if field.scope in ("cluster-pinned", "cluster-default"):
-        if _config_source_is_local():
+        if _config_source_is_local(process):
             return
         raise ConfigError(
             f"{field.env_var} is cluster config fetched from the gateway on this unit; "
@@ -283,10 +297,10 @@ def _reject_local_machine(machine: str | None, verb: str) -> int | None:
     return 1
 
 
-def _local_get(key: str | None) -> int:
+def _local_get(key: str | None, process: ConfigProcess) -> int:
     from base.host.env import dotenv_file
 
-    aliases = dotenv_file.read_env_aliases(dotenv_file.process_env_file())
+    aliases = dotenv_file.read_env_aliases(dotenv_file.env_file_path(process.home))
     fields = _local_fields()
     if key is not None:
         try:
@@ -410,7 +424,12 @@ def _print_audit_record(record: dict[str, object]) -> None:
 
 
 def cmd_config_audit(
-    last: int, key: str | None, machine: str | None, *, identity: MachineIdentityReader
+    last: int,
+    key: str | None,
+    machine: str | None,
+    *,
+    identity: MachineIdentityReader,
+    process: ConfigProcess,
 ) -> int:
     """`meiva config audit [--last N] [--key K] [--machine M]` — the `.env` write trail.
 
@@ -424,17 +443,17 @@ def cmd_config_audit(
         print("[meiva config audit] --last must be between 1 and 200", file=sys.stderr)
         return 1
     if machine is None:
-        from base.host.env.dotenv_file import process_env_file
+        from base.host.env.dotenv_file import env_file_path
 
         records = [
             {**record, "machine": identity.name()}
-            for record in read_env_write_records(last, process_env_file())
+            for record in read_env_write_records(last, env_file_path(process.home))
         ]
     else:
         import httpx
 
         try:
-            records = get_config_audit(machine, last).records
+            records = get_config_audit(machine, last, process).records
         except ConfigError as e:
             print(f"[meiva config audit] {e}", file=sys.stderr)
             return 1
@@ -451,15 +470,17 @@ def cmd_config_audit(
     return 0
 
 
-def cmd_config_get(key: str | None, machine: str | None, *, local: bool = False) -> int:
+def cmd_config_get(
+    key: str | None, machine: str | None, *, process: ConfigProcess, local: bool = False
+) -> int:
     """`meiva config get [KEY] [--machine M] [--local]` — print config values."""
     if local:
         rejected = _reject_local_machine(machine, "get")
-        return rejected if rejected is not None else _local_get(key)
+        return rejected if rejected is not None else _local_get(key, process)
     import httpx
 
     try:
-        view = get_config(machine)
+        view = get_config(machine, process)
     except ConfigError as e:
         print(f"[meiva config get] {e}", file=sys.stderr)
         return 1
@@ -524,7 +545,7 @@ def _build_delta(
 
 
 def _build_local_patch(
-    pairs: dict[str, str] | None, unset_keys: list[str] | None
+    pairs: dict[str, str] | None, unset_keys: list[str] | None, process: ConfigProcess
 ) -> tuple[dict[str, object], set[str], list[_LocalConfigField]]:
     """Resolve, gate, and coerce one direct `.env` patch before validation."""
     from base.config.admin.editing import coerce_config_scalar
@@ -535,7 +556,7 @@ def _build_local_patch(
     changed: list[_LocalConfigField] = []
     for key, raw in (pairs or {}).items():
         field = _resolve_local_field(key, index)
-        _check_local_writable(field)
+        _check_local_writable(field, process)
         try:
             writes[field.name] = coerce_config_scalar(field.field_type, raw, field.choices)
         except (TypeError, ValueError):
@@ -543,21 +564,24 @@ def _build_local_patch(
         changed.append(field)
     for key in unset_keys or []:
         field = _resolve_local_field(key, index)
-        _check_local_writable(field)
+        _check_local_writable(field, process)
         removals.add(field.name)
         changed.append(field)
     return writes, removals, changed
 
 
 def _edit_local_config(
-    pairs: dict[str, str] | None, unset_keys: list[str] | None, verb: str
+    pairs: dict[str, str] | None,
+    unset_keys: list[str] | None,
+    verb: str,
+    process: ConfigProcess,
 ) -> int:
     """Validate and persist one local `.env` patch without booting Settings."""
     from base.config.admin.candidate import validate_env_patch_for_write
     from base.config.runtime_config import write_fields
 
     try:
-        writes, removals, changed = _build_local_patch(pairs, unset_keys)
+        writes, removals, changed = _build_local_patch(pairs, unset_keys, process)
     except ConfigError as e:
         print(f"[meiva config {verb}] {e}", file=sys.stderr)
         return 1
@@ -589,7 +613,11 @@ def _edit_local_config(
 
 
 def _edit_config(
-    pairs: dict[str, Any] | None, unset_keys: list[str] | None, machine: str | None, verb: str
+    pairs: dict[str, Any] | None,
+    unset_keys: list[str] | None,
+    machine: str | None,
+    verb: str,
+    process: ConfigProcess,
 ) -> int:
     """Shared set/unset path: GET config (to resolve key aliases + gate read-only),
     build the merge patch, PUT it.
@@ -599,7 +627,7 @@ def _edit_config(
     import httpx
 
     try:
-        view = get_config(machine)
+        view = get_config(machine, process)
     except ConfigError as e:
         print(f"[meiva config {verb}] {e}", file=sys.stderr)
         return 1
@@ -614,7 +642,7 @@ def _edit_config(
         return 1
 
     try:
-        result = put_config(body, machine)
+        result = put_config(body, machine, process)
     except ConfigError as e:
         print(f"[meiva config {verb}] {e}", file=sys.stderr)
         return 1
@@ -634,7 +662,9 @@ def _edit_config(
     return 0
 
 
-def cmd_config_set(assignments: list[str], machine: str | None, *, local: bool = False) -> int:
+def cmd_config_set(
+    assignments: list[str], machine: str | None, *, process: ConfigProcess, local: bool = False
+) -> int:
     """`meiva config set KEY=VALUE [KEY=VALUE ...] [--machine M] [--local]`."""
     pairs: dict[str, str] = {}
     for item in assignments:
@@ -645,34 +675,55 @@ def cmd_config_set(assignments: list[str], machine: str | None, *, local: bool =
         pairs[key.strip()] = value
     if local:
         rejected = _reject_local_machine(machine, "set")
-        return rejected if rejected is not None else _edit_local_config(pairs, None, "set")
-    return _edit_config(pairs, None, machine, "set")
+        return rejected if rejected is not None else _edit_local_config(pairs, None, "set", process)
+    return _edit_config(pairs, None, machine, "set", process)
 
 
-def cmd_config_unset(keys: list[str], machine: str | None, *, local: bool = False) -> int:
+def cmd_config_unset(
+    keys: list[str], machine: str | None, *, process: ConfigProcess, local: bool = False
+) -> int:
     """`meiva config unset KEY [KEY ...] [--machine M] [--local]` — revert fields."""
     if local:
         rejected = _reject_local_machine(machine, "unset")
-        return rejected if rejected is not None else _edit_local_config(None, keys, "unset")
-    return _edit_config(None, keys, machine, "unset")
+        return (
+            rejected if rejected is not None else _edit_local_config(None, keys, "unset", process)
+        )
+    return _edit_config(None, keys, machine, "unset", process)
 
 
 # argparse handlers (co-located with the commands; wired by the cli/parsers tree)
 
 
+def _process(args: argparse.Namespace) -> ConfigProcess:
+    return ConfigProcess(environ=args.runtime.config.process_environment(), home=args.runtime.home)
+
+
 def h_config_get(args: argparse.Namespace) -> int:
-    return cmd_config_get(key=args.key, machine=args.machine, local=args.local)
+    return cmd_config_get(
+        key=args.key, machine=args.machine, process=_process(args), local=args.local
+    )
 
 
 def h_config_set(args: argparse.Namespace) -> int:
-    return cmd_config_set(assignments=args.assignments, machine=args.machine, local=args.local)
+    return cmd_config_set(
+        assignments=args.assignments,
+        machine=args.machine,
+        process=_process(args),
+        local=args.local,
+    )
 
 
 def h_config_unset(args: argparse.Namespace) -> int:
-    return cmd_config_unset(keys=args.keys, machine=args.machine, local=args.local)
+    return cmd_config_unset(
+        keys=args.keys, machine=args.machine, process=_process(args), local=args.local
+    )
 
 
 def h_config_audit(args: argparse.Namespace) -> int:
     return cmd_config_audit(
-        last=args.last, key=args.key, machine=args.machine, identity=args.runtime.machine
+        last=args.last,
+        key=args.key,
+        machine=args.machine,
+        identity=args.runtime.machine,
+        process=_process(args),
     )

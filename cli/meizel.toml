@@ -2,13 +2,14 @@ exports = ["__main__.py", "commands", "database", "fleet_update", "main.py", "pa
 
 [uses]
 "__main__.py" = ["main.py"]
-"commands" = ["database", "start_identity.py", "start_runtime.py"]
+"commands" = ["database", "start_identity.py", "start_runtime.py", "startup"]
 "conftest.py" = ["commands", "tests"]
 "fleet_update" = ["main.py"]
 "init_intent.py" = ["commands", "start_identity.py", "start_runtime.py", "startup"]
 "main.py" = ["database", "parsers", "preflight.py", "start_identity.py", "start_runtime.py", "startup"]
 "parsers" = ["commands", "database", "init_intent.py", "start_intent.py", "start_runtime.py"]
 "python_install.py" = ["_python_index.py"]
+"start_identity.py" = ["startup"]
 "start_intent.py" = ["commands", "database", "start_identity.py", "start_runtime.py", "startup"]
 "tests" = ["__init__.py", "__main__.py", "_python_index.py", "commands", "database", "fleet_alert_silence.py", "fleet_update", "init_intent.py", "main.py", "parsers", "preflight.py", "python_install.py", "start_identity.py", "start_intent.py", "start_runtime.py", "startup"]
 
@@ -16,12 +17,9 @@ exports = ["__main__.py", "commands", "database", "fleet_update", "main.py", "pa
 "__init__.py" = "strict"
 
 [roots]
-"_python_index.py" = { kinds = ["home", "platform"], why = "Pre-venv stdlib bootstrap resolves host platform and user home before third-party libraries exist" }
 "fleet_alert_silence.py" = { kinds = ["clock", "settings"], why = "Standalone SSH entrypoint shipped to the gateway over stdin reads its own clock and settings" }
-"init_intent.py" = { kinds = ["platform"], why = "Init wizard captures the local host name as the default machine identity" }
-"main.py" = { kinds = ["environ", "pid"], why = "CLI bootstrap sets config/profile/log routing before importing Settings or command modules, and hands the start timing recorder this process's pid." }
-"python_install.py" = { kinds = ["cwd", "environ"], why = "Pre-venv stdlib bootstrap inspects working directory and environment before launching uv" }
-"start_identity.py" = { kinds = ["clock", "random"], why = "First-boot identity provisioning mints fresh cluster/api secrets and records initial timestamps" }
+"main.py" = { kinds = ["clock", "environ", "pid", "platform", "random"], why = "CLI bootstrap sets config/profile/log routing before importing Settings or command modules, hands the start timing recorder this process's pid, and reads the instant, host names and fresh secrets `meiva init` is handed." }
+"python_install.py" = { kinds = ["cwd", "environ", "home", "platform"], why = "Pre-venv stdlib bootstrap inspects working directory, environment, user home and platform before launching uv" }
 "start_intent.py" = { kinds = ["environ"], why = "Identity bootstrap precedes Settings: read the birth inputs and pin the resolved home before config imports." }
 
 [debt.ambient-read]

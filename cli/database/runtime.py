@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import os
 import sys
+import uuid
+from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 from typing import TextIO
@@ -16,7 +18,11 @@ from base.host.system.hostport import Host
 from base.paths import repo_root
 from base.sessions.helperproc import helper_for
 
-__all__ = ["CommandRuntime", "Terminal", "UserSession"]
+__all__ = ["CommandRuntime", "NewId", "Terminal", "UserSession", "delivered_config", "mint_id"]
+
+# meiva:note
+# A source of fresh identifiers (see `mint_id`): each call answers a new one.
+type NewId = Callable[[], str]
 
 
 # meiva:note
@@ -68,6 +74,26 @@ class Terminal:
         return cls(sys.stdin, sys.stdout, sys.stderr)
 
 
+# meiva:note
+# The configuration owner with this process's startup delivery captured, once.
+#
+# An owner that was not prepared yet captures the delivery the process already made at startup
+# instead of delivering it a second time (a second gateway fetch on a pure runner); a prepared
+# owner already holds it. A command that hands its owner to code that reads configuration calls
+# this at the verb's door.
+def delivered_config(config: ConfigBoot) -> ConfigBoot:
+    if not config.prepared:
+        config.read_process_environment()
+    return config
+
+
+# meiva:note
+# A fresh random identifier: 32 lowercase hexadecimal characters, the digits of a version 4 UUID.
+# `CommandRuntime.create` is the one place the command line chooses it as its `new_id`.
+def mint_id() -> str:
+    return uuid.uuid4().hex
+
+
 @dataclass(frozen=True)
 class CommandRuntime:
     """Keep one lazy identity through dispatch and embedded lifecycle legs."""
@@ -92,6 +118,11 @@ class CommandRuntime:
     # other process facts. The entry's checkout gate has already accepted it for `home`.
     checkout: Path
     terminal: Terminal
+    # meiva:note
+    # Mints a fresh identifier: the idempotency key of a gateway request, the name of a new
+    # record. A command asks its runtime for each identifier it needs, so a test hands in the
+    # sequence it wants.
+    new_id: NewId
 
     # meiva:note
     # Construct without reading configuration, identity or network inputs, but for the invoking
@@ -99,7 +130,8 @@ class CommandRuntime:
     # resolved home the entry settled on; it is neither created nor checked here.
     #
     # This is the one place the real permissions-helper factory, the real host, the real
-    # timers, the real user session, the real checkout and the real terminal are chosen: the
+    # timers, the real user session, the real checkout, the real terminal and the real identifier
+    # source are chosen: the
     # helper (for the host's platform) only builds a client and reads the helper's port when a
     # macOS code path asks for one, and the host only answers when a step asks it to find or run
     # something.
@@ -117,4 +149,5 @@ class CommandRuntime:
             timers=SYSTEM_TIMERS,
             checkout=repo_root(),
             terminal=Terminal.current(),
+            new_id=mint_id,
         )

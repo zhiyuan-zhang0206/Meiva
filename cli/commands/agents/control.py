@@ -11,7 +11,6 @@ import os
 import sys
 from pathlib import Path
 from typing import Any
-from uuid import uuid4
 
 import httpx
 from pydantic import BaseModel
@@ -163,10 +162,17 @@ def cmd_agents_send(
     tail_file: str | None = None,
     *,
     completion: bool = False,
+    idempotency_key: str,
 ) -> int:
     source = _explicit_send_source(source)
     status = send_agent_message(
-        access, agent_id, content, source=source, tail_file=tail_file, completion=completion
+        access,
+        agent_id,
+        content,
+        source=source,
+        tail_file=tail_file,
+        completion=completion,
+        idempotency_key=idempotency_key,
     )
     print(f"  ✓ agent {agent_id} send: {status}")
     return 0
@@ -227,10 +233,11 @@ def send_agent_message(
     source: str,
     tail_file: str | None = None,
     completion: bool = False,
+    idempotency_key: str,
 ) -> str:
     if tail_file is not None:
         content = _with_tail(content, tail_file)
-    headers = {**gateway_auth_headers(access), **keyed_headers(str(uuid4()))}
+    headers = {**gateway_auth_headers(access), **keyed_headers(idempotency_key)}
     body = {
         "content": content,
         "source": source,
