@@ -31,13 +31,15 @@ STATIC = (
     / "static"
 )
 
+_UNUSED_HOME = Path("/unused-gate-home")
+
 
 def test_login_template_carries_explicit_browser_entry() -> None:
     gate = Gate(
         gateway_base="http://192.0.2.2:20016",
         app_base="http://127.0.0.1:20031",
         static_dir=STATIC,
-        config=GateConfig(),
+        config=GateConfig(home=_UNUSED_HOME),
         browser_origin="https://console.example",
     )
     assert "/*__BROWSER_ORIGIN__*/" not in gate.login_page
@@ -199,7 +201,7 @@ def servers(unit_home: Path, probe_timeout_s: float) -> Iterator[Servers]:
         gateway_base=f"http://127.0.0.1:{gw.server_port}",
         app_base=f"http://127.0.0.1:{app.server_port}",
         static_dir=STATIC,
-        config=GateConfig(probe_timeout_s=probe_timeout_s),
+        config=GateConfig(home=unit_home, probe_timeout_s=probe_timeout_s),
     )
     gate_server = GateServer(("127.0.0.1", 0), gate)
     for s in (gw, app, gate_server):
@@ -721,7 +723,7 @@ def _ticket_gate() -> Gate:
         gateway_base="http://localhost:8000",
         app_base="http://127.0.0.1:20031",
         static_dir=STATIC,
-        config=GateConfig(),
+        config=GateConfig(home=_UNUSED_HOME),
     )
 
 

@@ -272,7 +272,7 @@ class ComputerMcpDaemon:
         self,
         config: ComputerUseConfig,
         db: Database,
-        sock: str | None = None,
+        sock: str,
         *,
         helper: DesktopHelper,
         clock: Clock,
@@ -280,7 +280,7 @@ class ComputerMcpDaemon:
         self._db = db
         self._helper = helper
         self._clock = clock
-        self._sock = sock or str(computer_mcp_socket(meiva_home()))
+        self._sock = sock
         # Last legacy pointer position in PHYSICAL pixels, retained for diagnostics.
         # Scroll without x/y reads the actual native cursor.
         self._pointer: tuple[float, float] | None = None
@@ -623,7 +623,7 @@ def tracked_client(
 
 
 async def run(
-    sock: str | None = None,
+    sock: str,
     *,
     database: Callable[[], Database],
     helper: DesktopHelper,
@@ -705,7 +705,8 @@ def main() -> None:
     machine_config = ConfigBoot()
     machine_config.boot()
     entry = prepare_entry(image, machine_config)
-    process_home = meiva_home().resolve()
+    home = meiva_home()
+    process_home = home.resolve()
 
     def database() -> Database:
         return Database.from_settings(
@@ -722,6 +723,7 @@ def main() -> None:
     )
     asyncio.run(
         run(
+            str(computer_mcp_socket(home)),
             database=database,
             helper=helper_client(),
             clock=Clock(clock_config_from_boot(machine_config), timers=SYSTEM_TIMERS),
