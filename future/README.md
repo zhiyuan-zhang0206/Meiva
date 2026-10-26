@@ -30,6 +30,7 @@ lives with the current agent documentation; these rows track its remaining work.
 
 | File | What's left |
 |------|------|
+| [SDK event bus generator](infra/engineering/sdk-bus-context-generator.md) | `bus()` still takes its generator from the installed sampling owner; move it to `MeivaContext.rng` once every context root fills it, then drop `settings.py` from `[roots]` |
 | [Retry consumer contracts](infra/engineering/retry-consumer-contracts.md) | Audit TypeError recovery in the Redis loop; preserve its wait, cancellation and durable recheck semantics |
 | [Agent-runner as server](infra/lifecycle/agent-runner-as-server.md) | Implemented as the sole runtime; remaining question is host fault isolation |
 | [Vendored data-plane binaries](infra/data/vendored-data-plane-binaries.md) | **Redis leg only** — Postgres vendoring landed (`base/cluster/dataplane/runtime_binaries.py`), redis still comes from brew/apt. Also the single home for slice 3 of the doc below |
