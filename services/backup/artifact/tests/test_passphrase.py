@@ -20,9 +20,9 @@ def test_a_minted_passphrase_is_64_lowercase_hex_characters_of_256_bits() -> Non
     assert all(re.fullmatch(r"[0-9a-f]{64}", draw) for draw in draws)
     assert len(set(draws)) == len(draws)
     # meiva:note
-    # A 128-bit draw padded to 64 digits would never exceed 128 bits; 256 random bits
-    # exceed it except with probability 2**-128 per draw.
-    assert any(int(draw, 16).bit_length() > 128 for draw in draws)
+    # A narrower draw padded to 64 digits stays below 250 bits; 256 random bits exceed 250 bits
+    # except with probability 2**-6 per draw, so eight draws all missing is 2**-48.
+    assert any(int(draw, 16).bit_length() > 250 for draw in draws)
 
 
 def test_birth_pins_the_value_it_is_given(tmp_path: Path) -> None:
