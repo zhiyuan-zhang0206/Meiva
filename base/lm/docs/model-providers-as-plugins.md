@@ -157,7 +157,7 @@ registers a chat-model price, `pricing.py` removes the overlapping archive row
 from its in-memory runtime catalog view and uses the plugin's complete lattice.
 Both declarations pass through the same parser and selection code; the archive
 remains available for independent equivalence tests and bot reconciliation.
-`load_archive` reads `pricing_catalog_archive.json`.
+`base.lm.pricing.archive.load_archive` reads `pricing_catalog_archive.json` and `CatalogBuilder` takes the parsed archive.
 Runtime never scrapes a pricing page.
 
 Future effective boundaries stay explicit in both the archive and generated

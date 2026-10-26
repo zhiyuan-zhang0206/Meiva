@@ -25,6 +25,7 @@ from base.lm.factory import (
     provider_key_of_model,
     validate_model_launch,
 )
+from base.lm.pricing.archive import load_archive
 from base.lm.provider_api import PriceRates, ProviderBinding, ProviderContribution
 from base.lm.registry import ModelSpec, ModelTuning
 from base.packages.plugin_providers import build_model_catalog
@@ -176,7 +177,7 @@ def _install(
     pricing: dict[str, PriceRates],
     builder: CatalogBuilder | None = None,
 ) -> CatalogBuilder:
-    builder = builder or CatalogBuilder()
+    builder = builder or CatalogBuilder(load_archive())
     builder.install("test", ProviderContribution(binding, models, pricing))
     return builder
 
@@ -658,7 +659,7 @@ def test_model_validation_failure_leaves_the_builder_retryable() -> None:
         source_checked_at="2026-08-22",
     )
     invalid = ModelSpec(provider="testp", spawnable=True)
-    builder = CatalogBuilder()
+    builder = CatalogBuilder(load_archive())
 
     with pytest.raises(provider_api.ProviderRegistrationError, match="missing registry facts"):
         _install(binding, models={"testp-1": invalid}, pricing={"testp-1": price}, builder=builder)

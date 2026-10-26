@@ -33,7 +33,7 @@ from base.lm.catalog.provider_contract import (
     ProviderRegistrationError,
 )
 from base.lm.compat.stop import StopSpec
-from base.lm.pricing import ModelPrice, PriceBook, load_archive, plugin_model_price
+from base.lm.pricing import ModelPrice, PriceBook, plugin_model_price
 from base.lm.registry import ModelSpec, validate_models, validate_spec
 
 
@@ -166,7 +166,7 @@ def _check_prefix(
 class CatalogBuilder:
     """Accumulates provider declarations; `build()` validates and freezes them."""
 
-    def __init__(self) -> None:
+    def __init__(self, archive: Mapping[str, ModelPrice]) -> None:
         self._models: dict[str, ModelSpec] = {}
         self._bindings: dict[str, ProviderBinding] = {}
         self._stops: dict[str, StopSpec] = {}
@@ -175,7 +175,7 @@ class CatalogBuilder:
         self._decision_providers: dict[str, DecisionProviderContribution] = {}
         self._chat_prefix_owner: dict[str, str] = {}
         self._decision_prefix_owner: dict[str, str] = {}
-        self._archive = load_archive()
+        self._archive = archive
 
     @property
     def has_bindings(self) -> bool:
