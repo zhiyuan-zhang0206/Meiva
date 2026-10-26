@@ -27,7 +27,7 @@ from agent.impersonation import protect_native_hooks, settle_checkpoint
 from agent.impersonation_handoff import flush_checkpoint
 from agent.ownership.hosted import admit_hosted_runtime
 from agent.takeover.relay import RelayWait, TakeoverHost
-from agent.tests.impersonation.lease_support import relay_program, throttled_saver
+from agent.tests.impersonation.lease_support import fixed_clock, relay_program, throttled_saver
 from base.agents import impersonation as leases
 from base.agents.context import MeivaContext
 from base.agents.context.clients import ClientSet
@@ -109,6 +109,7 @@ def takeover_host(tmp_path: Path, machine: MachineIdentityReader) -> TakeoverHos
         relay_program=relay_program(tmp_path / "relay", "exit:9"),
         wait=RelayWait(timeout_s=5.0, poll_s=0.05),
         rng=_rng(),
+        clock=fixed_clock(),
     )
 
 
@@ -430,6 +431,7 @@ async def stop_takeover_with_lost_relay(
         owner.agent_id,
         relays,
         incarnation=owner,
+        clock=fixed_clock(),
     )
     return "the bound relay stopped heartbeating"
 

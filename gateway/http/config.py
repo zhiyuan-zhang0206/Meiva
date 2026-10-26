@@ -435,8 +435,11 @@ def gateway_config(request: Request) -> GatewayConfig:
     return request.app.state.gateway_config
 
 
+# meiva:note
+# The clock the gateway app was built with: its configured timezone over the system timers. The
+# app root builds it once beside the config, so a handler asks for time instead of creating a clock.
 def gateway_clock(request: Request) -> Clock:
-    return Clock(gateway_config(request).clock, timers=SYSTEM_TIMERS)
+    return request.app.state.clock
 
 
 def utc_now() -> datetime:
