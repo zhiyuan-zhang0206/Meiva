@@ -17,6 +17,7 @@ import pytest
 from psycopg_pool import ConnectionPool
 
 import base.db
+from base.clock import SYSTEM_TIMERS
 from base.cluster import session_name
 from base.db.code_version_gate import ProcessDbGate
 from base.deploy.lifecycle import start_serving
@@ -133,7 +134,8 @@ async def test_the_api_side_queues_one_row_and_waits_until_it_is_consumed(
 
     task = asyncio.create_task(consumer())
     await asyncio.wait_for(
-        session_control.request_sync(pool, 11, wait_s=8.0, poll_s=0.05), timeout=10
+        session_control.request_sync(pool, 11, wait_s=8.0, poll_s=0.05, timers=SYSTEM_TIMERS),
+        timeout=10,
     )
     await task
 
@@ -145,7 +147,7 @@ async def test_the_api_side_gives_up_waiting_when_no_service_consumes(
     db_conn: psycopg.Connection, pool: ConnectionPool, caplog: pytest.LogCaptureFixture
 ) -> None:
     with caplog.at_level(logging.WARNING, logger=session_control.__name__):
-        await session_control.request_sync(pool, 12, wait_s=0.3, poll_s=0.05)
+        await session_control.request_sync(pool, 12, wait_s=0.3, poll_s=0.05, timers=SYSTEM_TIMERS)
 
     assert _queued(db_conn) == [12]
     assert "not consumed" in caplog.text

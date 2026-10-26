@@ -19,6 +19,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import ShellMonitorPage from "@/app/shell/[agentId]/[sessionId]/page";
 import { USER_SETTING_DEFAULTS, type ShellCapture } from "@/lib/contracts/types";
 import { SETTINGS_QUERY_KEY } from "@/lib/state/use-user-settings";
+import { WallClockProvider } from "@/lib/transport/transport-context";
 import { resetMockSettings } from "@/test-support/user-settings-mock";
 
 notifyManager.setScheduler((cb) => {
@@ -72,7 +73,9 @@ function render() {
   qc.setQueryData(SETTINGS_QUERY_KEY, { ...USER_SETTING_DEFAULTS, ...storedSettings });
   return rtlRender(
     <QueryClientProvider client={qc}>
-      <ShellMonitorPage />
+      <WallClockProvider wallNow={() => Date.now()}>
+        <ShellMonitorPage />
+      </WallClockProvider>
     </QueryClientProvider>,
   );
 }
@@ -225,7 +228,9 @@ describe("ShellMonitorPage", () => {
 
     rtlRender(
       <QueryClientProvider client={qc}>
-        <ShellMonitorPage />
+        <WallClockProvider wallNow={() => Date.now()}>
+          <ShellMonitorPage />
+        </WallClockProvider>
       </QueryClientProvider>,
     );
 
@@ -366,7 +371,9 @@ describe("ShellMonitorPage terminal theme", () => {
     nav.params = { agentId: "NaN", sessionId: "NaN" };
     rtlRender(
       <QueryClientProvider client={qc}>
-        <ShellMonitorPage />
+        <WallClockProvider wallNow={() => Date.now()}>
+          <ShellMonitorPage />
+        </WallClockProvider>
       </QueryClientProvider>,
     );
 
@@ -389,7 +396,9 @@ describe("ShellMonitorPage terminal theme", () => {
 
     rtlRender(
       <QueryClientProvider client={qc}>
-        <ShellMonitorPage />
+        <WallClockProvider wallNow={() => Date.now()}>
+          <ShellMonitorPage />
+        </WallClockProvider>
       </QueryClientProvider>,
     );
 

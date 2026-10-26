@@ -109,6 +109,7 @@ def takeover_host(tmp_path: Path, machine: MachineIdentityReader) -> TakeoverHos
         relay_program=relay_program(tmp_path / "relay", "exit:9"),
         wait=RelayWait(timeout_s=5.0, poll_s=0.05),
         rng=_rng(),
+        clock=Clock.from_settings(),
     )
 
 
@@ -430,6 +431,7 @@ async def stop_takeover_with_lost_relay(
         owner.agent_id,
         relays,
         incarnation=owner,
+        clock=Clock.from_settings(),
     )
     return "the bound relay stopped heartbeating"
 

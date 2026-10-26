@@ -21,7 +21,7 @@ import type {
 import { useStore } from "@/lib/state/store";
 import { realNetwork, startGateway, type TestGateway } from "@/lib/transport/tests/api/api-provider";
 import { gatewayRig, type HttpRig } from "@/lib/transport/tests/api/api-provider";
-import { ApiProvider } from "@/lib/transport/transport-context";
+import { ApiProvider, WallClockProvider } from "@/lib/transport/transport-context";
 
 const SETTINGS_QUERY_KEY = ["user-settings"] as const;
 
@@ -78,7 +78,9 @@ export function inspectorPageReads() {
 export function QueryClientProvider({ client, children }: { client: QueryClient; children: ReactNode }) {
   return (
     <TanstackQueryClientProvider client={client}>
-      <ApiProvider api={pageRig.api}>{children}</ApiProvider>
+      <WallClockProvider wallNow={() => Date.now()}>
+        <ApiProvider api={pageRig.api}>{children}</ApiProvider>
+      </WallClockProvider>
     </TanstackQueryClientProvider>
   );
 }
