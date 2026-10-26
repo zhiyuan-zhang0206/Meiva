@@ -28,6 +28,7 @@ from cli.start_runtime import HomeSite
 from cli.startup.service_path import CallerHost
 from cli.startup.tests.birth_facts import (
     BIRTH_NOW,
+    MINTED_BACKUP_PASSPHRASE,
     MINTED_CLUSTER_SECRET,
     MINTED_REDIS_ADMIN_PASSWORD,
     MINTED_REDIS_PASSWORD,
@@ -109,7 +110,7 @@ def test_an_initialized_home_is_refused_again_and_keeps_its_bytes(
         with pytest.raises(RuntimeError, match=rf"already initialized \(phase {phase}\)"):
             identity.prepare_identity(inputs)
         with pytest.raises(RuntimeError, match="already initialized"):
-            identity.resume_claim(inputs.home)
+            identity.resume_claim(inputs.home, backup_passphrase=MINTED_BACKUP_PASSPHRASE)
         if phase == "configured":
             assert [(p.read_bytes(), p.stat().st_mtime_ns) for p in paths] == before
     assert dotenv_values(paths[0]) == env
@@ -127,10 +128,11 @@ def test_a_gateway_birth_pins_a_minted_logical_backup_passphrase(
     with pytest.raises(OSError):
         identity.prepare_identity(inputs)
     minted = passphrase.pinned(inputs.home)
-    assert minted is not None and minted != passphrase.derive("")
+    assert minted == MINTED_BACKUP_PASSPHRASE and minted != passphrase.derive("")
     assert passphrase.pin_path(inputs.home).stat().st_mode & 0o777 == 0o600
     repair_env_publication(inputs.home)
-    identity.resume_claim(inputs.home)
+    retry = MINTED_BACKUP_PASSPHRASE[::-1]
+    identity.resume_claim(inputs.home, backup_passphrase=retry)
     assert dotenv_values(inputs.home / ".env")["MEIVA_CLUSTER_SECRET"]
     assert passphrase.resolve(inputs.home) == minted
 
@@ -184,7 +186,7 @@ def test_crash_after_intent_before_env_resumes_same_claim(inputs: identity.Ident
     pending = identity.read_intent(inputs.home)
     assert pending is not None and pending["phase"] == "claiming"
     repair_env_publication(inputs.home)
-    identity.resume_claim(inputs.home)
+    identity.resume_claim(inputs.home, backup_passphrase=MINTED_BACKUP_PASSPHRASE)
     assert cluster.get_record(inputs.home) == cluster.ClusterRecord(**pending["record"])
     assert dict(dotenv_values(inputs.home / ".env")) == pending["env"]
 
@@ -525,7 +527,7 @@ def test_corrupt_foreign_reservation_never_publishes(inputs: identity.IdentityIn
     path.write_text(json.dumps(data))
     before = (inputs.home / ".env").read_bytes()
     with pytest.raises(RuntimeError, match="another home"):
-        identity.resume_claim(inputs.home)
+        identity.resume_claim(inputs.home, backup_passphrase=MINTED_BACKUP_PASSPHRASE)
     assert (inputs.home / ".env").read_bytes() == before
 
 

@@ -139,11 +139,13 @@ def _opt_into_lite_config(args_in: list[str]) -> None:
 # `--ssl-cert-file` is pinned into the process before dispatch because the gateway join that
 # follows dials with it.
 def bind_init_inputs(args: argparse.Namespace) -> None:
+    import random
     import secrets
     from datetime import UTC, datetime
 
     from base import cluster
     from cli.startup.service_path import BirthFacts, CallerHost
+    from services.backup.artifact import passphrase
 
     table = cluster.new_home_ports()
     args.caller_host = CallerHost(
@@ -160,6 +162,7 @@ def bind_init_inputs(args: argparse.Namespace) -> None:
             cluster_secret=secrets.token_urlsafe(32),
             redis_admin_password=secrets.token_urlsafe(32),
             redis_password=secrets.token_urlsafe(32),
+            backup_passphrase=passphrase.mint(random.SystemRandom()),
         ),
         transport_key=args.transport_key,
     )

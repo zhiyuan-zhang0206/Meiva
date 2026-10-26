@@ -7,6 +7,7 @@ from cli.startup.service_path import BirthFacts
 
 __all__ = [
     "BIRTH_NOW",
+    "MINTED_BACKUP_PASSPHRASE",
     "MINTED_CLUSTER_SECRET",
     "MINTED_REDIS_ADMIN_PASSWORD",
     "MINTED_REDIS_PASSWORD",
@@ -26,6 +27,7 @@ def _minted(label: str) -> str:
 MINTED_CLUSTER_SECRET = _minted("cluster")
 MINTED_REDIS_ADMIN_PASSWORD = _minted("redis-admin")
 MINTED_REDIS_PASSWORD = _minted("redis")
+MINTED_BACKUP_PASSPHRASE = _minted("backup-passphrase")
 
 
 # meiva:note
@@ -36,4 +38,5 @@ def birth_facts() -> BirthFacts:
         cluster_secret=MINTED_CLUSTER_SECRET,
         redis_admin_password=MINTED_REDIS_ADMIN_PASSWORD,
         redis_password=MINTED_REDIS_PASSWORD,
+        backup_passphrase=MINTED_BACKUP_PASSPHRASE,
     )
