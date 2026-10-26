@@ -81,10 +81,13 @@ def test_unit_boot_preserves_single_index_precedence_across_aliases(
         unit.write_text(f"{higher_key}=https://pypi.org/simple\n")
     before = unit.read_bytes(), mirror.read_bytes()
     dotenv_boot.load_meiva_env(env, home=tmp_path)
-    assert python_index(tmp_path, env) == "https://pypi.org/simple"
+    assert (
+        python_index(tmp_path, env, user_home=tmp_path, platform="linux")
+        == "https://pypi.org/simple"
+    )
     assert (unit.read_bytes(), mirror.read_bytes()) == before
     env["UV_INDEX"] = "https://additional.example/simple"
     dotenv_boot.load_meiva_env(env, home=tmp_path)
     assert env["UV_INDEX"] == "https://additional.example/simple"
     with pytest.raises(ValueError, match="one default Python index"):
-        python_index(tmp_path, env)
+        python_index(tmp_path, env, user_home=tmp_path, platform="linux")

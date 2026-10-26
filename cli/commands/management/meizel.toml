@@ -16,13 +16,8 @@ exports = ["config.py", "fleet_gateway.py", "fleet_leases.py", "schedules.py", "
 
 [roots]
 "schedule_verify_child.py" = { kinds = ["cwd"], why = "Schedule verification process entry captures its repository working directory and passes it to call-site analysis" }
-"config.py" = { kinds = ["environ"], why = "the settings-free repair path (meiva config --local) reads MEIVA_GATEWAY_URL / MEIVA_CLUSTER_SECRET from the raw env/.env WITHOUT constructing Settings — a broken .env is exactly the scenario it repairs, and constructing Settings would fail first" }
-
 "fleet_gateway.py" = { kinds = ["random", "settings"], why = "CLI command composition root boots configuration before assembling command inputs and mints a fresh smoke-test idempotency key" }
-"schedules.py" = { kinds = ["random"], why = "Mints per-request idempotency UUIDs for schedule mutation calls" }
 
 [debt.ambient-read]
-"config.py#home base.paths.home.resolve_meiva_home" = 1
 "fleet_leases.py#home base.paths.home.resolve_meiva_home" = 1
-"schedules.py#settings base.cluster.machine.ambient.gateway_access_from_settings" = 2
 "schedules_verify_read_rows.py#home base.paths.home.resolve_meiva_home" = 1

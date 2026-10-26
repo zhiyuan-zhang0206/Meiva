@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import stat
-from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
@@ -32,7 +31,7 @@ class _InjectCwdNotesAfterExecHook(Hook):
     async def __call__(
         self,
         state: AgentState,
-        _runtime: object,
+        runtime: Runtime[MeivaContext],
         _config: object,
         /,
     ) -> dict[str, Any] | None:
@@ -46,7 +45,7 @@ class _InjectCwdNotesAfterExecHook(Hook):
                 system_note_message(
                     content=current.cwd_note,
                     tag=NoteTag.CONTEXT,
-                    created_at=datetime.now(UTC),
+                    created_at=runtime.context.require_clock().now(),
                 )
             )
             update["cwd_note"] = None
@@ -58,7 +57,7 @@ class _InjectCwdNotesAfterExecHook(Hook):
                     system_note_message(
                         content=current.project_skills_note,
                         tag=NoteTag.PROJECT_SKILLS,
-                        created_at=datetime.now(UTC),
+                        created_at=runtime.context.require_clock().now(),
                     )
                 )
                 update["project_skills_seen_compact"] = compact_v
