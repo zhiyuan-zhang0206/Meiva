@@ -2,9 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import os
-import time
-from collections.abc import Callable, Generator
-from contextlib import contextmanager
+from collections.abc import Callable
 from typing import Any
 
 import pytest
@@ -48,45 +46,30 @@ def _dump_pending_chains(stderr_fd: int, nodeid: str, timeout: float) -> None:
         data = data[os.write(stderr_fd, data) :]
 
 
-@contextmanager
-def probe_window(nodeid: str, timeout: float, stderr_fd: int) -> Generator[None]:
+# meiva:note
+# The event-loop factory of one test under a faulthandler deadline: a loop that schedules the chain
+# dump `DUMP_MARGIN_SECONDS` before the deadline, on the loop itself. pytest-asyncio builds the
+# loops of its tests through this factory (`pytest_asyncio_loop_factories`), so nothing in asyncio
+# is replaced; a loop a test builds for itself (`asyncio.run`) is not covered. Without a deadline
+# the factory is the plain `asyncio.new_event_loop`.
+def probing_loop_factory(
+    nodeid: str, timeout: float, stderr_fd: int
+) -> Callable[[], asyncio.AbstractEventLoop]:
     if timeout <= 0.0:
-        yield
-        return
-    start = time.monotonic()
-    handles: list[asyncio.TimerHandle] = []
-    original_events = asyncio.events.new_event_loop
-    original_top = asyncio.new_event_loop
+        return asyncio.new_event_loop
 
-    def probing_factory(
-        original: Callable[[], asyncio.AbstractEventLoop],
-    ) -> Callable[[], asyncio.AbstractEventLoop]:
-        def factory() -> asyncio.AbstractEventLoop:
-            loop = original()
-            delay = max(
-                timeout - DUMP_MARGIN_SECONDS - (time.monotonic() - start), _MIN_DELAY_SECONDS
-            )
-            handles.append(loop.call_later(delay, _dump_pending_chains, stderr_fd, nodeid, timeout))
-            return loop
+    def factory() -> asyncio.AbstractEventLoop:
+        loop = asyncio.new_event_loop()
+        delay = max(timeout - DUMP_MARGIN_SECONDS, _MIN_DELAY_SECONDS)
+        loop.call_later(delay, _dump_pending_chains, stderr_fd, nodeid, timeout)
+        return loop
 
-        return factory
-
-    asyncio.events.new_event_loop = probing_factory(original_events)
-    asyncio.new_event_loop = probing_factory(original_top)
-    try:
-        yield
-    finally:
-        asyncio.events.new_event_loop = original_events
-        asyncio.new_event_loop = original_top
-        for handle in handles:
-            handle.cancel()
+    return factory
 
 
-@pytest.hookimpl(wrapper=True, trylast=True)
-def pytest_runtest_protocol(item: pytest.Item) -> Generator[None, object, object]:
-    timeout = faulthandler_timeout(item.config)
-    if timeout <= 0.0:
-        return (yield)
-    stderr_fd = item.config.stash[fault_handler_stderr_fd_key]
-    with probe_window(item.nodeid, timeout, stderr_fd):
-        return (yield)
+def pytest_asyncio_loop_factories(
+    config: pytest.Config, item: pytest.Item
+) -> dict[str, Callable[[], asyncio.AbstractEventLoop]]:
+    timeout = faulthandler_timeout(config)
+    stderr_fd = config.stash[fault_handler_stderr_fd_key] if timeout > 0.0 else -1
+    return {"stall-probe": probing_loop_factory(item.nodeid, timeout, stderr_fd)}
