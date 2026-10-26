@@ -19,7 +19,7 @@ from __future__ import annotations
 import logging
 from pathlib import Path
 
-from base.clock import SYSTEM_TIMERS, Clock, ClockConfig, Timers
+from base.clock import Clock
 from base.log import logger
 from base.native_process.ownership import OwnedProcess
 from base.native_process.root_control.ipc import UnitState
@@ -42,6 +42,7 @@ class LeftBehindMixin(StoppingMixin):
 
     _run_dir: Path
     _config: SupervisorConfig
+    _clock: Clock
 
     # meiva:note
     # Stop this unit's recorded previous generation before spawning a new one;
@@ -97,26 +98,16 @@ class LeftBehindMixin(StoppingMixin):
 
     # meiva:note
     # Poll a non-child process until its recorded birth is gone or time runs out.
-    @staticmethod
-    async def _await_gone(
-        identity: OwnedProcess,
-        timeout_s: float,
-        *,
-        timers: Timers = SYSTEM_TIMERS,
-    ) -> bool:
-        deadline = timers.monotonic() + timeout_s
+    async def _await_gone(self, identity: OwnedProcess, timeout_s: float) -> bool:
+        deadline = self._clock.monotonic() + timeout_s
         while True:
             if not identity.live():
                 return True
-            if timers.monotonic() >= deadline:
+            if self._clock.monotonic() >= deadline:
                 return False
-            await timers.asleep(READY_POLL_S)
+            await self._clock.asleep(READY_POLL_S)
 
-    @staticmethod
-    def _emit_left_behind(runtime: UnitRuntime, record: GenerationRecord) -> None:
-        clock = Clock(
-            ClockConfig("UTC", "UTC", message_timestamp_weekday=False), timers=SYSTEM_TIMERS
-        )
+    def _emit_left_behind(self, runtime: UnitRuntime, record: GenerationRecord) -> None:
         try:
             logger.warning(
                 "unit {unit}: generation {generation} (pid {pid}) outlived its root "
@@ -125,7 +116,7 @@ class LeftBehindMixin(StoppingMixin):
                 unit=runtime.manifest.id,
                 generation=record.generation,
                 pid=record.identity.pid,
-                left_behind_s=max(0.0, clock.now().timestamp() - record.started_at),
+                left_behind_s=max(0.0, self._clock.now().timestamp() - record.started_at),
             )
         except Exception:
             _log.exception("unit %s: left-behind event fan-out failed", runtime.manifest.id)

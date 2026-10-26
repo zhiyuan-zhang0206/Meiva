@@ -19,7 +19,7 @@ from services.supervision.meiva_root.helper_chain_plan import (
 )
 
 _CHILD = Path(__file__)
-_REPO = Path(__file__).resolve().parents[4]
+_REPO = Path(__file__).resolve().parents[5]
 _NOT_AN_ANCESTOR = "2000000000"
 
 
@@ -114,6 +114,7 @@ async def main(run_for_s: float, confirm_rounds: int) -> None:
         retire=retired.append,
         stop=stop,
         config=HelperChainConfig(interval_s=0.01, confirm_rounds=confirm_rounds),
+        root_pid=os.getpid(),
     )
     task = asyncio.create_task(watch.run())
     await asyncio.sleep(run_for_s)

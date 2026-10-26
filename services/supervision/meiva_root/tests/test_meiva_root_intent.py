@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import os
 import sys
 from pathlib import Path
 from typing import Any, cast
@@ -25,6 +26,7 @@ from services.supervision.meiva_root.intent_store import (
 )
 from services.supervision.meiva_root.manifest import RestartPolicy, UnitManifest, UnitRegistry
 from services.supervision.meiva_root.supervisor import Supervisor, SupervisorConfig
+from services.supervision.meiva_root.tests.slices import system_clock
 
 _CHILD = Path(__file__).with_name("child_unit.py")
 _SLEEP_FOREVER = ("sleep",)
@@ -72,6 +74,8 @@ def _supervisor(
         run_dir=run_dir,
         config=SupervisorConfig(stop_timeout_s=0.2),
         process_control=process_control,
+        clock=system_clock(),
+        root_pid=os.getpid(),
     )
 
 
@@ -111,22 +115,30 @@ def test_boot_merge_rules() -> None:
         True,
     )
     failure = RestartFailure(RestartStage.UP, 1234.5, "boom")
-    merged = merge_record_for_boot(IntentRecord(UnitIntent.STOPPED, IntentSource.OPERATOR, None))
+    merged = merge_record_for_boot(
+        IntentRecord(UnitIntent.STOPPED, IntentSource.OPERATOR, None, updated_at=1.0)
+    )
     assert (merged.intent, merged.source, merged.start) == (
         UnitIntent.STOPPED,
         IntentSource.OPERATOR,
         False,
     )
     assert merged.note is not None
-    merged = merge_record_for_boot(IntentRecord(UnitIntent.STOPPED, IntentSource.SELECTION, None))
+    merged = merge_record_for_boot(
+        IntentRecord(UnitIntent.STOPPED, IntentSource.SELECTION, None, updated_at=1.0)
+    )
     assert (merged.intent, merged.start) == (UnitIntent.STOPPED, False)
-    merged = merge_record_for_boot(IntentRecord(UnitIntent.STOPPED, IntentSource.SELF, None))
+    merged = merge_record_for_boot(
+        IntentRecord(UnitIntent.STOPPED, IntentSource.SELF, None, updated_at=1.0)
+    )
     assert (merged.intent, merged.source, merged.start) == (
         UnitIntent.RUNNING,
         IntentSource.SELECTION,
         True,
     )
-    merged = merge_record_for_boot(IntentRecord(UnitIntent.RUNNING, IntentSource.OPERATOR, failure))
+    merged = merge_record_for_boot(
+        IntentRecord(UnitIntent.RUNNING, IntentSource.OPERATOR, failure, updated_at=1.0)
+    )
     assert (merged.intent, merged.source, merged.restart_failed, merged.start) == (
         UnitIntent.RUNNING,
         IntentSource.OPERATOR,
@@ -141,6 +153,7 @@ def test_record_round_trip_and_corruption(tmp_path: Path) -> None:
         UnitIntent.RUNNING,
         IntentSource.OPERATOR,
         RestartFailure(RestartStage.DOWN, 99.5, "stop refused"),
+        updated_at=1.0,
     )
     intent_store.write(tmp_path, "svc", record)
     _assert_same_record(intent_store.read(tmp_path, "svc"), record)
@@ -157,7 +170,9 @@ async def test_boot_holds_an_explicit_stored_stop(
 ) -> None:
     caplog.set_level(logging.INFO, logger="services.supervision.meiva_root.supervisor")
     intent_store.write(
-        tmp_path, "svc", IntentRecord(UnitIntent.STOPPED, IntentSource.OPERATOR, None)
+        tmp_path,
+        "svc",
+        IntentRecord(UnitIntent.STOPPED, IntentSource.OPERATOR, None, updated_at=1.0),
     )
     owner = _supervisor(tmp_path, [_unit(*_SLEEP_FOREVER)])
     await owner.start()
@@ -177,7 +192,9 @@ async def test_boot_holds_an_explicit_stored_stop(
 
 async def test_boot_holds_a_stored_selection_stop(tmp_path: Path) -> None:
     intent_store.write(
-        tmp_path, "svc", IntentRecord(UnitIntent.STOPPED, IntentSource.SELECTION, None)
+        tmp_path,
+        "svc",
+        IntentRecord(UnitIntent.STOPPED, IntentSource.SELECTION, None, updated_at=1.0),
     )
     owner = _supervisor(tmp_path, [_unit(*_SLEEP_FOREVER)])
     await owner.start()
@@ -207,7 +224,7 @@ async def test_boot_supersedes_a_stored_root_stop(tmp_path: Path) -> None:
         assert (entry["intent"], entry["state"]) == ("running", "running")
         _assert_same_record(
             intent_store.read(tmp_path, "svc"),
-            IntentRecord(UnitIntent.RUNNING, IntentSource.SELECTION, None),
+            IntentRecord(UnitIntent.RUNNING, IntentSource.SELECTION, None, updated_at=1.0),
         )
     finally:
         await second.shutdown()
@@ -271,7 +288,7 @@ async def test_restart_up_half_failure_retry_replaces_and_clears(
         assert owner._units["svc"].restart_count == 1
         _assert_same_record(
             intent_store.read(tmp_path, "svc"),
-            IntentRecord(UnitIntent.RUNNING, IntentSource.SELECTION, None),
+            IntentRecord(UnitIntent.RUNNING, IntentSource.SELECTION, None, updated_at=1.0),
         )
         assert pc.signals == []
         assert len(recorder.events("root_restart_failed")) == 1
@@ -292,6 +309,8 @@ async def test_restart_down_abort_records_stage_down_and_retry_settles(
         run_dir=tmp_path,
         config=SupervisorConfig(stop_timeout_s=0.4, stop_kill_reap_s=0.1),
         process_control=FakeProcessControl(),
+        clock=system_clock(),
+        root_pid=os.getpid(),
     )
     await owner.start()
     try:
@@ -348,7 +367,7 @@ async def test_boot_carries_recorded_failure_until_a_generation_proves_it_gone(
         assert len(recorder.events("root_restart_cleared")) == 1
         _assert_same_record(
             intent_store.read(tmp_path, "svc"),
-            IntentRecord(UnitIntent.RUNNING, IntentSource.SELECTION, None),
+            IntentRecord(UnitIntent.RUNNING, IntentSource.SELECTION, None, updated_at=1.0),
         )
     finally:
         await second.shutdown()
@@ -382,7 +401,9 @@ def _assert_same_record(actual: IntentRecord | None, expected: IntentRecord) -> 
 
 
 def test_a_caller_round_trips_and_a_legacy_record_still_reads(tmp_path: Path) -> None:
-    record = IntentRecord(UnitIntent.STOPPED, IntentSource.OPERATOR, None, _caller())
+    record = IntentRecord(
+        UnitIntent.STOPPED, IntentSource.OPERATOR, None, _caller(), updated_at=1.0
+    )
     intent_store.write(tmp_path, "svc", record)
     _assert_same_record(intent_store.read(tmp_path, "svc"), record)
 
@@ -394,7 +415,9 @@ def test_a_caller_round_trips_and_a_legacy_record_still_reads(tmp_path: Path) ->
     assert legacy is not None and legacy.caller is None
 
     intent_store.write(
-        tmp_path, "svc", IntentRecord(UnitIntent.STOPPED, IntentSource.OPERATOR, None)
+        tmp_path,
+        "svc",
+        IntentRecord(UnitIntent.STOPPED, IntentSource.OPERATOR, None, updated_at=1.0),
     )
     assert "caller" not in path.read_text()
 

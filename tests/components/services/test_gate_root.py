@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import os
 import socket
 import sys
 import time
@@ -11,6 +12,7 @@ from typing import cast
 
 import psutil
 
+from base.clock import SYSTEM_TIMERS, Clock, ClockConfig
 from base.config import get_field, set_field
 from base.daemon.health import DaemonProbe
 from base.daemon.http_transport import start_daemon_http
@@ -71,7 +73,13 @@ async def test_gate_native_child_readiness_restart_and_stop(short_tmp: Path) -> 
         (("MEIVA_TELEMETRY_OTLP_ENABLED", "false"),),
     )
     owner = Supervisor(
-        UnitRegistry([unit]), run_dir=run_dir, config=SupervisorConfig(stop_timeout_s=3)
+        UnitRegistry([unit]),
+        run_dir=run_dir,
+        config=SupervisorConfig(stop_timeout_s=3),
+        clock=Clock(
+            ClockConfig("UTC", "UTC", message_timestamp_weekday=False), timers=SYSTEM_TIMERS
+        ),
+        root_pid=os.getpid(),
     )
     server = ControlServer(run_dir / "meiva-root.sock", owner.dispatch)
     await server.start()

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 import sys
 import types
 from collections.abc import Callable
@@ -10,6 +11,7 @@ import pytest
 
 from services.supervision.meiva_root.manifest import UnitRegistry
 from services.supervision.meiva_root.supervisor import Supervisor
+from services.supervision.meiva_root.tests.slices import system_clock
 from services.supervision.meiva_root.wiring import (
     WiringContext,
     WiringError,
@@ -22,10 +24,13 @@ from services.supervision.meiva_root.wiring import (
 def _context(tmp_path: Path) -> WiringContext:
     registry = UnitRegistry([])
     return WiringContext(
-        supervisor=Supervisor(registry, run_dir=tmp_path),
+        supervisor=Supervisor(
+            registry, run_dir=tmp_path, clock=system_clock(), root_pid=os.getpid()
+        ),
         registry=registry,
         run_dir=tmp_path,
         log_dir=tmp_path / "logs",
+        clock=system_clock(),
     )
 
 

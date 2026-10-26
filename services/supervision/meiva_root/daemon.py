@@ -11,6 +11,7 @@ from __future__ import annotations
 import argparse
 import asyncio
 import logging
+import os
 import signal
 import sys
 from collections.abc import Callable, Sequence
@@ -18,8 +19,7 @@ from contextlib import suppress
 from dataclasses import dataclass, field
 from pathlib import Path
 
-import psutil
-
+from base.clock import SYSTEM_TIMERS, Clock, ClockConfig
 from base.host.exit_codes import HELPER_CHAIN_BROKEN_EXIT_CODE
 from base.log import logger
 from base.native_process.root_control.instance_lock import (
@@ -69,15 +69,17 @@ class HelperChainWatch:
         retire: Callable[[str], None],
         stop: asyncio.Event,
         config: HelperChainConfig,
+        root_pid: int,
     ) -> None:
         self._retire = retire
         self._stop = stop
         self._config = config
+        self._root_pid = root_pid
 
     async def run(self) -> None:
         broken_rounds = 0
         while not self._stop.is_set():
-            root_pid = psutil.Process().pid
+            root_pid = self._root_pid
             reading = observe_round(
                 broken_rounds=broken_rounds,
                 intact=parent_chain_intact(root_pid),
@@ -188,12 +190,18 @@ async def run(options: DaemonOptions) -> int:
     lock_fd = acquire_instance_lock(options.run_dir)
     async with asyncio.TaskGroup() as participant_tasks:
         log_dir = options.run_dir / "logs"
-        supervisor = Supervisor(registry, run_dir=options.run_dir)
+        clock = Clock(
+            ClockConfig("UTC", "UTC", message_timestamp_weekday=False), timers=SYSTEM_TIMERS
+        )
+        supervisor = Supervisor(
+            registry, run_dir=options.run_dir, clock=clock, root_pid=os.getpid()
+        )
         context = WiringContext(
             supervisor=supervisor,
             registry=registry,
             run_dir=options.run_dir,
             log_dir=log_dir,
+            clock=clock,
             participant_tasks=participant_tasks,
         )
         # Fail-fast, before any tree state exists: a broken wiring reference must
@@ -252,7 +260,10 @@ async def run(options: DaemonOptions) -> int:
             )
             participant_tasks.create_task(
                 HelperChainWatch(
-                    retire=retirement.retire, stop=stop, config=options.helper_chain
+                    retire=retirement.retire,
+                    stop=stop,
+                    config=options.helper_chain,
+                    root_pid=supervisor.root_pid,
                 ).run()
             )
             await stop.wait()

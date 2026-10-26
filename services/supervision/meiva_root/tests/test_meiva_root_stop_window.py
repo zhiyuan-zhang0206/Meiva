@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import os
 import sys
 from pathlib import Path
 from time import monotonic
@@ -17,6 +18,7 @@ from services.supervision.meiva_root.manifest import RestartPolicy, UnitManifest
 from services.supervision.meiva_root.server import ControlServer
 from services.supervision.meiva_root.stopping import UnitStopTimeoutError, signal_owned
 from services.supervision.meiva_root.supervisor import Supervisor, SupervisorConfig
+from services.supervision.meiva_root.tests.slices import system_clock
 
 _DEFAULT_WINDOW_S = 0.2
 
@@ -41,6 +43,8 @@ def root(
         UnitRegistry([unit]),
         run_dir=run_dir,
         config=SupervisorConfig(stop_timeout_s=default_window_s),
+        clock=system_clock(),
+        root_pid=os.getpid(),
     )
 
 
@@ -113,7 +117,13 @@ async def test_window_expiry_kills_once_and_reports_it(tmp_path: Path, recorder:
         "root",
         stop_timeout_s=0.6,
     )
-    owner = Supervisor(UnitRegistry([unit]), run_dir=tmp_path, config=SupervisorConfig())
+    owner = Supervisor(
+        UnitRegistry([unit]),
+        run_dir=tmp_path,
+        config=SupervisorConfig(),
+        clock=system_clock(),
+        root_pid=os.getpid(),
+    )
     await owner.start()
     await wait_file(ready)
     pid = cast("list[dict[str, Any]]", (await owner.status())["units"])[0]["pid"]
@@ -190,7 +200,9 @@ async def test_down_over_the_control_socket_succeeds_for_a_unit_closing_past_ten
         "root",
         stop_timeout_s=20.0,
     )
-    owner = Supervisor(UnitRegistry([unit]), run_dir=short_tmp)
+    owner = Supervisor(
+        UnitRegistry([unit]), run_dir=short_tmp, clock=system_clock(), root_pid=os.getpid()
+    )
     server = ControlServer(short_tmp / "meiva-root.sock", owner.dispatch)
     await server.start()
     try:

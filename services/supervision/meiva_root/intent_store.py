@@ -23,12 +23,10 @@ from __future__ import annotations
 import json
 import logging
 from collections.abc import Mapping
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from enum import StrEnum
 from pathlib import Path
 from typing import Any
-
-from base.clock import SYSTEM_TIMERS, Clock, ClockConfig
 
 _log = logging.getLogger(__name__)
 
@@ -135,10 +133,10 @@ class IntentRecord:
     restart_failed: RestartFailure | None
     caller: CallerFacts | None = None
     # meiva:note
-    # When this record was written (epoch seconds); 0.0 means "now". Persisted so
+    # When this record was written (epoch seconds), stamped by its writer. Persisted so
     # a stop's age survives a root restart: an operator stop that nobody revisits
     # must be able to say how long it has been held.
-    updated_at: float = 0.0
+    updated_at: float = field(kw_only=True)
 
 
 @dataclass(frozen=True, slots=True)
@@ -241,14 +239,13 @@ def read(run_dir: Path, unit: str) -> IntentRecord | None:
 
 def _encode(record: IntentRecord) -> str:
     failure = record.restart_failed
-    clock = Clock(ClockConfig("UTC", "UTC", message_timestamp_weekday=False), timers=SYSTEM_TIMERS)
     body: dict[str, object] = {
         "intent": record.intent.value,
         "source": record.source.value,
         "restart_failed": None
         if failure is None
         else {"stage": failure.stage.value, "since": failure.since, "detail": failure.detail},
-        "updated_at": record.updated_at or clock.now().timestamp(),
+        "updated_at": record.updated_at,
     }
     if record.caller is not None:
         body["caller"] = _encode_caller(record.caller)
@@ -270,7 +267,7 @@ def _decode(raw: object) -> IntentRecord:
         source,
         _decode_failure(values["restart_failed"]),
         _decode_caller(values.get("caller")),
-        _decode_epoch(values["updated_at"], "updated_at"),
+        updated_at=_decode_epoch(values["updated_at"], "updated_at"),
     )
 
 
