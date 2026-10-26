@@ -22,6 +22,7 @@ import signal
 import time
 from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor
+from pathlib import Path
 from typing import Any, assert_never
 
 import psycopg
@@ -444,6 +445,7 @@ async def serve_ops_daemon(
     config: ConfigBoot,
     host: Host,
     rng: random.Random,
+    home: Path,
 ) -> None:
     from base.deploy.schema.migrations import assert_schema_current
 
@@ -452,13 +454,13 @@ async def serve_ops_daemon(
     authority = ConfigAuthority(
         runtime=runtime,
         all_domains=runtime if runtime.profile is None else config.complete_read_model(),
-        env_path=paths.meiva_home() / ".env",
+        env_path=home / ".env",
     )
 
     active_ops: ActiveOps = {}
     requests: in_flight.RequestTokens = set()
     workers: in_flight.WorkerFutures = set()
-    runtime_dir = paths.run_dir(paths.meiva_home())
+    runtime_dir = paths.run_dir(home)
     if boot.is_running(config, runtime=runtime_dir):
         _log.info(
             "meiva-ops pidfile %s indicates another instance is alive — exiting",
@@ -545,12 +547,14 @@ async def serve_ops_daemon(
             config=config,
             machine=local_machine,
             ops_port=endpoint.health_port,
-            home=paths.meiva_home(),
+            home=home,
         )
         _, bus = boot.ops_handles(database=database, authority=authority, rng=rng)
         try:
             async with server, asyncio.TaskGroup() as background:
-                watcher = background.create_task(watch_to_user(paths.workspaces_root(), bus))
+                watcher = background.create_task(
+                    watch_to_user(paths.workspaces_root(home=home), bus)
+                )
                 try:
                     await in_flight.serve_until_sigterm(server, requests=requests, workers=workers)
                 finally:
@@ -567,6 +571,7 @@ async def serve_ops_daemon(
 def main(*, argv: list[str] | None = None) -> None:
     argparse.ArgumentParser(description=__doc__).parse_args(argv)
     image = LoadedCommit.capture()
+    home = paths.meiva_home()
     config = ConfigBoot()
     config.boot()
     config.ensure_eager()
@@ -584,7 +589,7 @@ def main(*, argv: list[str] | None = None) -> None:
     clients = ClientSet(
         database=database,
         pipeline_factory=lambda: build_pipeline(
-            database=database, machine=machine, home=paths.meiva_home().resolve()
+            database=database, machine=machine, home=home.resolve()
         ),
     )
     code = 0
@@ -605,6 +610,7 @@ def main(*, argv: list[str] | None = None) -> None:
                     config=config,
                     host=Host.system(),
                     rng=_new_rng(),
+                    home=home,
                 )
             )
         except KeyboardInterrupt as interrupted:
