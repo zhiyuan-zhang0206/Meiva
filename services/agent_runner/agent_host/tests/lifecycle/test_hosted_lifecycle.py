@@ -1,4 +1,8 @@
 import asyncio
+import socket
+import threading
+from collections.abc import Generator
+from contextlib import contextmanager
 from dataclasses import replace
 from types import SimpleNamespace
 from typing import Any
@@ -24,8 +28,9 @@ from base.host.env.agent_slices import AgentSlices
 from base.lm.catalog import ModelCatalog
 from base.native_process.runtime_incarnation import RuntimeIncarnation
 from base.packages.composer_commands import CommandCatalog
-from base.paths import meiva_home
-from ops import cluster_status
+from base.paths import meiva_home, run_dir
+from base.sessions.pty import protocol
+from base.sessions.pty.paths import service_socket_path
 from services.agent_runner.agent_host.host import AgentHost
 from services.agent_runner.agent_host.lifecycle.shells import apply_lifecycle_command
 from services.agent_runner.agent_host.tests.host_policy import (
@@ -330,21 +335,57 @@ def terminate_command(
     return row[0]
 
 
-def _record_kills(
-    monkeypatch: pytest.MonkeyPatch, *, fail: bool = False
-) -> list[tuple[int, str | None]]:
+@contextmanager
+def _record_kills(agent_id: int, *, fail: bool = False) -> Generator[list[tuple[int, str | None]]]:
     calls: list[tuple[int, str | None]] = []
+    sock_path = service_socket_path(run_dir(meiva_home()))
+    sock_path.parent.mkdir(parents=True, exist_ok=True)
+    sock_path.unlink(missing_ok=True)
+    server = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+    server.bind(str(sock_path))
+    server.listen(4)
+    server.settimeout(0.05)
+    stop = threading.Event()
 
-    def _kill(agent_id: int, *, before_session_index: int) -> list[int]:
-        with psycopg.connect(settings.data_plane.db_url, autocommit=True) as conn:
-            row = conn.execute("SELECT status FROM agents_meta WHERE id=%s", (agent_id,)).fetchone()
-        calls.append((agent_id, None if row is None else row[0]))
-        if fail:
-            raise RuntimeError("failed to kill shell session(s) [4]")
-        return [4]
+    def _serve() -> None:
+        while not stop.is_set():
+            try:
+                conn, _ = server.accept()
+            except TimeoutError:
+                continue
+            except OSError:
+                break
+            with conn:
+                line = protocol.read_line(conn, limit=65536)
+                if line is None:
+                    continue
+                req = protocol.decode_object(line)
+                with psycopg.connect(settings.data_plane.db_url, autocommit=True) as db:
+                    row = db.execute(
+                        "SELECT status FROM agents_meta WHERE id=%s", (agent_id,)
+                    ).fetchone()
+                calls.append((agent_id, None if row is None else row[0]))
+                reply: dict[str, Any]
+                if fail:
+                    reply = {
+                        "id": req["id"],
+                        "ok": False,
+                        "code": 1,
+                        "error": "failed to kill shell session(s) [4]",
+                    }
+                else:
+                    reply = {"id": req["id"], "ok": True, "data": {"sessions": []}}
+                conn.sendall(protocol.encode(reply))
 
-    monkeypatch.setattr(cluster_status, "kill_agent_shells", _kill)
-    return calls
+    thread = threading.Thread(target=_serve, daemon=True)
+    thread.start()
+    try:
+        yield calls
+    finally:
+        stop.set()
+        server.close()
+        thread.join(timeout=2)
+        sock_path.unlink(missing_ok=True)
 
 
 async def _run_terminating_turn(
@@ -400,7 +441,6 @@ async def test_hosted_terminate_kills_requested_shell_sessions_after_commit(
     redis_url: str,
     db_conn: psycopg.Connection,
     aops_pool: AsyncConnectionPool,
-    monkeypatch: pytest.MonkeyPatch,
     requested: bool,
     model_catalog: ModelCatalog,
     *,
@@ -409,15 +449,15 @@ async def test_hosted_terminate_kills_requested_shell_sessions_after_commit(
     agent_id = agent_row(db_conn)
     owner = await admit_owner(aops_pool, agent_id, database_gate=database_gate)
     terminate_command(db_conn, agent_id, kill=requested)
-    kills = _record_kills(monkeypatch)
-    await claim_inbound_batch(aops_pool, agent_id, incarnation=owner)
-    await _run_terminating_turn(
-        aops_pool,
-        agent_id,
-        incarnation=owner,
-        model_catalog=model_catalog,
-        database_gate=database_gate,
-    )
+    with _record_kills(agent_id) as kills:
+        await claim_inbound_batch(aops_pool, agent_id, incarnation=owner)
+        await _run_terminating_turn(
+            aops_pool,
+            agent_id,
+            incarnation=owner,
+            model_catalog=model_catalog,
+            database_gate=database_gate,
+        )
     assert kills == ([(agent_id, "terminated")] if requested else [])
     assert db_conn.execute(
         "SELECT status FROM agents_meta WHERE id=%s", (agent_id,)
@@ -428,7 +468,6 @@ async def test_hosted_self_terminate_honors_a_queued_kill_request(
     redis_url: str,
     db_conn: psycopg.Connection,
     aops_pool: AsyncConnectionPool,
-    monkeypatch: pytest.MonkeyPatch,
     model_catalog: ModelCatalog,
     *,
     database_gate: ProcessDbGate,
@@ -437,17 +476,17 @@ async def test_hosted_self_terminate_honors_a_queued_kill_request(
     owner = await admit_owner(aops_pool, agent_id, database_gate=database_gate)
     own = terminate_command(db_conn, agent_id, source="self")
     terminate_command(db_conn, agent_id, kill=True)
-    kills = _record_kills(monkeypatch)
-    assert [
-        row.id for row in await claim_inbound_batch(aops_pool, agent_id, incarnation=owner)
-    ] == [own]
-    await _run_terminating_turn(
-        aops_pool,
-        agent_id,
-        incarnation=owner,
-        model_catalog=model_catalog,
-        database_gate=database_gate,
-    )
+    with _record_kills(agent_id) as kills:
+        assert [
+            row.id for row in await claim_inbound_batch(aops_pool, agent_id, incarnation=owner)
+        ] == [own]
+        await _run_terminating_turn(
+            aops_pool,
+            agent_id,
+            incarnation=owner,
+            model_catalog=model_catalog,
+            database_gate=database_gate,
+        )
     assert kills == [(agent_id, "terminated")]
 
 
@@ -455,7 +494,6 @@ async def test_hosted_failed_kill_still_applies_the_termination(
     redis_url: str,
     db_conn: psycopg.Connection,
     aops_pool: AsyncConnectionPool,
-    monkeypatch: pytest.MonkeyPatch,
     loguru_records: list[dict[str, Any]],
     model_catalog: ModelCatalog,
     *,
@@ -464,15 +502,15 @@ async def test_hosted_failed_kill_still_applies_the_termination(
     agent_id = agent_row(db_conn)
     owner = await admit_owner(aops_pool, agent_id, database_gate=database_gate)
     terminate_command(db_conn, agent_id, kill=True)
-    kills = _record_kills(monkeypatch, fail=True)
-    await claim_inbound_batch(aops_pool, agent_id, incarnation=owner)
-    await _run_terminating_turn(
-        aops_pool,
-        agent_id,
-        incarnation=owner,
-        model_catalog=model_catalog,
-        database_gate=database_gate,
-    )
+    with _record_kills(agent_id, fail=True) as kills:
+        await claim_inbound_batch(aops_pool, agent_id, incarnation=owner)
+        await _run_terminating_turn(
+            aops_pool,
+            agent_id,
+            incarnation=owner,
+            model_catalog=model_catalog,
+            database_gate=database_gate,
+        )
     assert kills == [(agent_id, "terminated")]
     assert db_conn.execute(
         "SELECT status FROM agents_meta WHERE id=%s", (agent_id,)

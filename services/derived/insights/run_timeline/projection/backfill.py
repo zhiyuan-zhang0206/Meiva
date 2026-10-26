@@ -3,6 +3,8 @@ from __future__ import annotations
 
 import argparse
 
+from loguru import logger
+
 from base.agents.history.checkpoint_segment import read_checkpoint_segment
 from base.agents.messages.timestamp_policy import TimestampSource
 from base.clock import SYSTEM_TIMERS, Clock
@@ -11,7 +13,6 @@ from base.config import ConfigBoot
 from base.db import Database
 from base.db.code_version_gate import ProcessDbGate
 from base.db.config import db_config_from_boot
-from base.log import logger
 from base.native_process.code_version import CodeVersion
 from base.native_process.loaded_commit import LoadedCommit
 from services.derived.insights.run_timeline.projection.jobs import index_next

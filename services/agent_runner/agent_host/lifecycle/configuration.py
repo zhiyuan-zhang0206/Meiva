@@ -88,7 +88,6 @@ def load_installation(
     load_extensions: Callable[..., object],
 ) -> Installation:
     from base.agents.sdk.call_policy import process_sampling_owner
-    from base.config import Settings
     from base.config.service_read import ConfigAuthority
     from base.lm.factory import process_provider_keys
     from base.packages.plugin_providers import build_model_catalog
@@ -99,7 +98,7 @@ def load_installation(
         authority = ConfigAuthority(runtime=config.view, all_domains=config.view, env_path=env_path)
     else:
         authority = ConfigAuthority.deferred(
-            runtime=config.view, build_all_domains=lambda: Settings(profile=None), env_path=env_path
+            runtime=config.view, build_all_domains=config.complete_read_model, env_path=env_path
         )
     catalog = build_model_catalog()
     load_extensions(

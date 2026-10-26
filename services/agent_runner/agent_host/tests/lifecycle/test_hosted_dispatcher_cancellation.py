@@ -16,10 +16,12 @@ import contextlib
 from collections.abc import AsyncIterator
 from typing import Any
 
+import psycopg
 import pytest
 import pytest_asyncio
 from psycopg_pool import AsyncConnectionPool
 
+from base.db import Database
 from base.events.live.bus import EventBus
 from services.agent_runner.agent_host.dispatcher import InboundWakeDispatcher
 
@@ -45,40 +47,50 @@ class _IdleScheduler:
         return None
 
 
+# meiva:note
+# Park the pool's first connection check so a cancel lands inside it.
+#
+# The parked call is cancelled; whether the pool propagates that cancellation
+# (psycopg_pool >= 3.3.2) or a boundary swallow would strand the task
+# (<= 3.3.1), the dispatcher must still unwind. Later checks pass through to
+# the real check so the pool stays usable.
 @pytest_asyncio.fixture
 async def blocked_first_check(
-    aops_pool: AsyncConnectionPool, monkeypatch: pytest.MonkeyPatch
-) -> AsyncIterator[asyncio.Event]:
-    """Park the pool's first connection check so a cancel lands inside it.
-
-    The parked call is cancelled; whether the pool propagates that cancellation
-    (psycopg_pool >= 3.3.2) or a boundary swallow would strand the task
-    (<= 3.3.1), the dispatcher must still unwind. Later checks pass through to
-    the real method so the pool stays usable.
-    """
-    real = AsyncConnectionPool._check_connection
+    database: Database,
+) -> AsyncIterator[tuple[AsyncConnectionPool, asyncio.Event]]:
     in_check = asyncio.Event()
     calls = 0
 
-    async def gated(self: AsyncConnectionPool[Any], conn: Any) -> None:
-        nonlocal calls
-        calls += 1
-        if calls == 1:
-            in_check.set()
-            await asyncio.Event().wait()
-        await real(self, conn)
+    def build_pool(conninfo: str, **kwargs: Any) -> AsyncConnectionPool[psycopg.AsyncConnection]:
+        real_check = kwargs["check"]
 
-    monkeypatch.setattr(AsyncConnectionPool, "_check_connection", gated)
-    yield in_check
+        async def gated(conn: psycopg.AsyncConnection) -> None:
+            nonlocal calls
+            calls += 1
+            if calls == 1:
+                in_check.set()
+                await asyncio.Event().wait()
+            await real_check(conn)
+
+        kwargs["check"] = gated
+        return AsyncConnectionPool(conninfo, **kwargs)
+
+    pool = database.async_pool(build_pool, min_size=1, max_size=2, timeout=5)
+    await pool.open()
+    try:
+        yield pool, in_check
+    finally:
+        await pool.close()
 
 
 async def test_cancelled_dispatcher_unwinds_after_a_swallowed_pool_check_cancel(
     redis_url: str,
-    aops_pool: AsyncConnectionPool,
-    blocked_first_check: asyncio.Event,
+    blocked_first_check: tuple[AsyncConnectionPool, asyncio.Event],
 ) -> None:
+    pool, first_check = blocked_first_check
+
     async def pending() -> list[int]:
-        async with aops_pool.connection():
+        async with pool.connection():
             return []
 
     dispatcher = InboundWakeDispatcher(
@@ -90,7 +102,7 @@ async def test_cancelled_dispatcher_unwinds_after_a_swallowed_pool_check_cancel(
     )
     task = asyncio.create_task(dispatcher.run())
     try:
-        await asyncio.wait_for(blocked_first_check.wait(), 5)
+        await asyncio.wait_for(first_check.wait(), 5)
         task.cancel()
         done, _ = await asyncio.wait({task}, timeout=10)
         if task not in done:
