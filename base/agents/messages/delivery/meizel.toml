@@ -1,6 +1,9 @@
 purity = "strict-to-be"
 exports = ["retry.py"]
 
+[debt.any-collaborator]
+"retry.py#any GatewayResponse.json.return" = 1
+
 [debt.impure-call]
 "retry.py#import httpx" = 1
 "retry.py#import psycopg" = 1
