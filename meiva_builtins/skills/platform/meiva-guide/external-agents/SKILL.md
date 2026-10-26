@@ -114,6 +114,11 @@ references carry the launch variants, auth traps and headless notes:
 - [Google Antigravity (`agy`)](references/antigravity.md)
 - [DeepSeek Harness (`dsh`)](references/deepseek_harness.md)
 
+The spawn picker prints one word — `unavailable` — for three different states.
+When someone asks why a harness they use is greyed out, the states, the
+self-check order and the false alarms are in
+[why a harness shows unavailable](references/harness-availability.md).
+
 A host that runs `meiva start` also copies this guide and `impersonator-guide`
 into the global skill directory of each external agent surface it finds — CLIs and,
 where a desktop app documents one, its skill directory — so a spawned session can
