@@ -18,6 +18,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TypeGuard
 
+from base.clock import SYSTEM_TIMERS, Clock, ClockConfig
 from base.host.proc import run_bounded
 from base.log import logger
 from base.paths import meiva_home
@@ -258,7 +259,14 @@ def probe_tool(
 ) -> Probe:
     runner = run or _default_run
     target = store or cache_path()
-    reference = now or dt.datetime.now(dt.UTC)
+    reference = (
+        now
+        if now is not None
+        else Clock(
+            ClockConfig("UTC", None, message_timestamp_weekday=False),
+            timers=SYSTEM_TIMERS,
+        ).now()
+    ).astimezone(dt.UTC)
     resolved = _resolve(spec)
     if resolved is None:
         return Probe(

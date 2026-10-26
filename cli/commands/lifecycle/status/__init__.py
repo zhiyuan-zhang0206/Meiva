@@ -37,6 +37,7 @@ from base.config import ConfigBoot
 from base.deploy.git import cluster_drift
 from base.host.env.registry import process_environment
 from base.host.resource_sample import resource_sample
+from base.native_process.os_platform import primary_disk_path
 from base.paths import root_manifests_path
 from cli.commands._repo import roles_or_none
 from cli.commands.cluster.control import fetch_gateway_cluster_status
@@ -213,7 +214,7 @@ def _print_service_rows(
 # and a host without psutil must still get the service table and the views below it.
 def _read_host_resources() -> HostReading | HostReadingFailed:
     try:
-        sample = resource_sample()
+        sample = resource_sample(ts=0.0, disk_path=primary_disk_path())
     # meiva:note
     # psutil may be absent; the rest of status still prints
     except Exception as exc:

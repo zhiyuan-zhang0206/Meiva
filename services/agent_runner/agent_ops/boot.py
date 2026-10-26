@@ -23,8 +23,9 @@ import psycopg
 from psycopg.rows import TupleRow
 from psycopg_pool import ConnectionPool
 
-from base.cluster.machine import MachineIdentityReader, daemon_acceptance
+from base.cluster.machine import MachineIdentityReader
 from base.cluster.machine.ambient import gateway_access_from_settings
+from base.cluster.machine.configured import daemon_acceptance
 from base.cluster.port_preflight import serves_off_box
 from base.config import ConfigBoot
 from base.config.service_read import ConfigAuthority
