@@ -17,7 +17,6 @@ exports = ["conftest.py", "fakes", "process_support.py", "visual"]
 
 [debt.env-patch]
 "conftest.py#monkeypatch.setenv os.environ.MEIVA_HOME" = 1
-"test_fixture_dependencies.py#monkeypatch.setenv os.environ.PYTHONPATH" = 2
 
 [debt.first-party-patch]
 "_credentials.py#assignment base.config.settings.data_plane.cluster_secret" = 2
