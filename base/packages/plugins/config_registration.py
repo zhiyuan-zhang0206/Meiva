@@ -142,10 +142,7 @@ def merge_disk_image_schema(owner: ConfigImage) -> tuple[set[str], set[str]]:
     if not added and not removed:
         return set(), set()
 
-    from base.packages.plugin_config_images import (
-        image_revision,
-        write_config_image,
-    )
+    from base.packages.plugin_config_images import image_revision, write_config_image
 
     write_config_image(
         owner,
@@ -308,8 +305,6 @@ def _validate_framework_overlay_ranges(updates: dict[str, object]) -> None:
 def validate_config_overlay_shape(
     overlay: dict[str, object], configs: Mapping[str, BaseModel] | None = None
 ) -> None:
-    from base.config.service_read import domain_model_classes
-
     targets = resolve_overlay_targets(overlay, configs)
     grouped: dict[str | None, dict[str, object]] = {}
     for key, (plugin, field) in targets.items():
@@ -318,12 +313,15 @@ def validate_config_overlay_shape(
     for plugin, updates in grouped.items():
         try:
             if plugin is None:
+                from base.config.config_registry import domain_model_classes
+
                 _, _, domain_of = _framework_field_tables()
                 by_domain: dict[str, dict[str, object]] = {}
                 for f, v in updates.items():
                     by_domain.setdefault(domain_of(f), {})[f] = v
+                models = domain_model_classes()
                 for dom, upd in by_domain.items():
-                    cls = domain_model_classes()[dom]
+                    cls = models[dom]
                     sub = cls()
                     cls.model_validate({**sub.model_dump(), **upd})
             else:

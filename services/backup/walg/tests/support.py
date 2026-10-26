@@ -134,6 +134,7 @@ def make_sandbox(
     binary.chmod(0o755)
 
     point_home(monkeypatch, home)
+    # meiva:note
     # The fake is not the pinned build; everything else (path, argv, config) is real.
     monkeypatch.setattr(walg_binary, "installed_problem", lambda: None)
     sandbox = Sandbox(home, store_dir, config_file, key_file, enabled)

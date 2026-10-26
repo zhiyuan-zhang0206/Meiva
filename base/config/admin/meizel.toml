@@ -7,8 +7,7 @@ exports = ["candidate.py", "editing.py", "metadata.py"]
 "." = "strict-to-be"
 "__init__.py" = "strict"
 "editing.py" = "strict"
+"metadata.py" = "strict"
 
 [debt.impure-edge]
-"candidate.py#base/config/service_read.py" = 1
 "candidate.py#base/host/env/dotenv_file.py" = 1
-"metadata.py#base/config/service_read.py" = 1

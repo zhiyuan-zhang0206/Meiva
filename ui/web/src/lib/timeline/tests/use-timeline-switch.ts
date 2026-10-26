@@ -82,7 +82,10 @@ describe("useTimeline agentId switch", () => {
       { initialProps: { tid: 1 }, wrapper },
     );
 
-    await waitFor(() => expect(result.current.items).toEqual([]));
+    await waitFor(() => {
+      expect(result.current.isLoading).toBe(false);
+      expect(result.current.items).toEqual([]);
+    });
 
     pushEvent({ role: "chat_start", item_id: "5.0", agent_id: 1 });
 

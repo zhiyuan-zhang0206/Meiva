@@ -56,8 +56,9 @@ def service_socket_path(run: Path) -> Path:
     return fallback_dir() / f"{digest[:12]}.sock"
 
 
+# meiva:note
+# Where a socket too long for its home lives: ``/tmp/meiva-pty-<uid>`` (owner-only).
 def fallback_dir() -> Path:
-    """Where a socket too long for its home lives: ``/tmp/meiva-pty-<uid>`` (owner-only)."""
     return Path("/tmp") / f"meiva-pty-{os.getuid()}"  # noqa: S108 — a fixed, uid-keyed, owner-only directory: every process of the user must compute the same path
 
 

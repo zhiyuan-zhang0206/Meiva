@@ -1,13 +1,24 @@
-"""Hosted incarnation admission and settlement, replacing status-only writes."""
+# meiva:note
+# Hosted incarnation admission and settlement, replacing status-only writes.
 
 import asyncio
-from dataclasses import dataclass
 from uuid import UUID
 
 from loguru import logger
 
 from agent.ownership.lifecycle_plan import (
-    LifecycleKind,
+    AppliedLifecycle as AppliedLifecycle,
+)
+from agent.ownership.lifecycle_plan import (
+    LifecycleKind as LifecycleKind,
+)
+from agent.ownership.lifecycle_plan import (
+    TurnFatalStamp as TurnFatalStamp,
+)
+from agent.ownership.lifecycle_plan import (
+    TurnSettlement as TurnSettlement,
+)
+from agent.ownership.lifecycle_plan import (
     lifecycle_kind,
     resume_note,
     shell_cutoff,
@@ -21,17 +32,6 @@ from base.events.live.bus import EventBus
 from base.native_process.runtime_incarnation import RuntimeIncarnation
 from base.telemetry import Event, emit_prepared
 from base.telemetry.audit_events import prepare_event_log, record_audit_async
-
-
-# meiva:note
-# What a committed lifecycle command leaves to do after the commit. `shell_cutoff` is the
-# exclusive shell-ID bound of the terminate's requested shell cleanup, or None when no
-# closed terminate asked for it.
-@dataclass(frozen=True)
-class AppliedLifecycle:
-    kind: LifecycleKind
-    agent_id: int
-    shell_cutoff: int | None
 
 
 # meiva:note
@@ -247,27 +247,20 @@ async def settle_hosted_runtime(
     return changed
 
 
-@dataclass(frozen=True)
-class TurnFatalStamp:
-    """One crash's stamp outcome: `applied` is the CAS result."""
-
-    applied: bool
-
-
+# meiva:note
+# Mark this incarnation's row crash-dead after the hosted runner saw the
+# turn die (fatal LLM class or an unclassified exception).
+#
+# COALESCE keeps the FIRST death since the last completed LLM turn: a corpse
+# re-woken by heartbeats keeps re-crashing, and re-stamping each time would
+# restart the reap grace forever — the reaper would never fire. Recovery
+# clears the mark (a completed LLM turn, or the resurrect transition), so the
+# next crash re-arms it fresh.
+#
+# Best-effort and settle-independent: a settlement blocked by unsettled
+# resources must not lose the death evidence (the 5858 corpse settled 3m52s
+# after its last turn ended; the stamp landed regardless).
 async def stamp_turn_fatal(pool: AsyncPool, incarnation: RuntimeIncarnation) -> TurnFatalStamp:
-    """Mark this incarnation's row crash-dead after the hosted runner saw the
-    turn die (fatal LLM class or an unclassified exception).
-
-    COALESCE keeps the FIRST death since the last completed LLM turn: a corpse
-    re-woken by heartbeats keeps re-crashing, and re-stamping each time would
-    restart the reap grace forever — the reaper would never fire. Recovery
-    clears the mark (a completed LLM turn, or the resurrect transition), so the
-    next crash re-arms it fresh.
-
-    Best-effort and settle-independent: a settlement blocked by unsettled
-    resources must not lose the death evidence (the 5858 corpse settled 3m52s
-    after its last turn ended; the stamp landed regardless).
-    """
     async with async_write_transaction(pool) as conn:
         cur = await conn.execute(
             "UPDATE agents_meta SET last_turn_fatal_at = "
@@ -286,17 +279,16 @@ async def stamp_turn_fatal(pool: AsyncPool, incarnation: RuntimeIncarnation) -> 
     return TurnFatalStamp(applied=applied)
 
 
-@dataclass(frozen=True)
-class TurnSettlement:
-    """The settle boundary's facts about one closed turn: `stamp` is the crash
-    stamp (None when the turn did not crash or its stamp failed), and `settled`
-    says the settle wrote the row idling, gated on fully discharged turn
-    resources."""
-
-    stamp: TurnFatalStamp | None
-    settled: bool
-
-
+# meiva:note
+# Close one hosted turn: stamp the corpse marker first, then settle.
+#
+# The stamp is best-effort and independent of settlement (which may be
+# blocked by unsettled resources): the death evidence must land even when
+# the idling write could not. It must also run BEFORE the settle — its CAS
+# matches `status='running'`, so a settled row would refuse the stamp.
+#
+# Returns both halves to the settlement boundary: the crash stamp and
+# whether the settle reached idling.
 async def settle_and_stamp_turn(
     pool: AsyncPool,
     incarnation: RuntimeIncarnation,
@@ -305,16 +297,6 @@ async def settle_and_stamp_turn(
     exited: bool,
     crashed: bool,
 ) -> TurnSettlement:
-    """Close one hosted turn: stamp the corpse marker first, then settle.
-
-    The stamp is best-effort and independent of settlement (which may be
-    blocked by unsettled resources): the death evidence must land even when
-    the idling write could not. It must also run BEFORE the settle — its CAS
-    matches `status='running'`, so a settled row would refuse the stamp.
-
-    Returns both halves to the settlement boundary: the crash stamp and
-    whether the settle reached idling.
-    """
     close = turn_close(exited=exited, crashed=crashed)
     stamp: TurnFatalStamp | None = None
     if close.stamp_fatal:

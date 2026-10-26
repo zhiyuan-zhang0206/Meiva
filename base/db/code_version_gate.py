@@ -100,30 +100,31 @@ def _raise_minimum(db: _Dialer, version: int) -> int:
     return minimum
 
 
+# meiva:note
+# One process's minimum-read budget, shared by every database handle.
+#
+# The entry point supplies its captured-code reader and gate posture. Config
+# refreshes, connection rebuilds and independent pools retain this same owner.
+# Due/read observation intentionally remains two-phase: concurrent first
+# restores may both read the minimum, as they did with the process timestamp.
 class ProcessDbGate:
-    """One process's minimum-read budget, shared by every database handle.
-
-    The entry point supplies its captured-code reader and gate posture. Config
-    refreshes, connection rebuilds and independent pools retain this same owner.
-    Due/read observation intentionally remains two-phase: concurrent first
-    restores may both read the minimum, as they did with the process timestamp.
-    """
-
     def __init__(self, *, version: Callable[[], int], process: str, exempt: bool = False) -> None:
         self._version = version
         self._process = process
         self._exempt = exempt
         self._last_read_at: float | None = None
 
+    # meiva:note
+    # Whether this process should read the minimum in its restore SQL.
     def min_read_due(self) -> bool:
-        """Whether this process should read the minimum in its restore SQL."""
         if self._exempt:
             return False
         seen = self._last_read_at
         return seen is None or time.monotonic() - seen >= MIN_REFRESH_INTERVAL_S
 
+    # meiva:note
+    # Retain this read's time and hard-refuse the actual loaded version.
     def observe_minimum(self, minimum: int) -> None:
-        """Retain this read's time and hard-refuse the actual loaded version."""
         self._last_read_at = time.monotonic()
         version = self._version()
         if version < minimum:

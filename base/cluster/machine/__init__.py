@@ -57,25 +57,25 @@ __all__ = [
 ]
 
 
+# meiva:note
+# SHA-256 digests of the bearers a gateway-side daemon's authenticated endpoint accepts.
+# The acceptor's half of `gateway_bearer(access)`: the daemons that take calls from the
+# gateway (the ops server, im_bridge's `/send`) accept machine API tokens, never the
+# human cluster secret.
+#
+# The gateway dials with its gateway-class token and a runner-class process of the unit with its
+# runner token, so a daemon accepts exactly its write generation's two tokens. A remote unit
+# takes the gateway token digest its installed capability carries plus its own runner token's:
+# it never holds the gateway token or the human secret. The gateway home takes the active
+# generation's two tokens (none while no generation is active: fail closed).
+#
+# The one place the human secret is still accepted is a remote-managed data plane
+# (`access.remote_plane`): it keeps no write generations and issues no token, so
+# its gateway-local services present, and its daemons accept, the human secret. That branch
+# is the exception to "outside the gateway, the CLI and the root, no component holds the
+# cluster secret" (docs/decisions/data/security/2026-10-03-cluster-secret-contraction.md); the live
+# deployment's data plane is local, and this branch only runs when `is_remote`.
 def daemon_acceptance(access: GatewayAccess) -> frozenset[str]:
-    """SHA-256 digests of the bearers a gateway-side daemon's authenticated endpoint accepts.
-    The acceptor's half of `gateway_bearer(access)`: the daemons that
-    take calls from the gateway (the ops server, im_bridge's `/send`) accept machine API tokens,
-    never the human cluster secret.
-
-    The gateway dials with its gateway-class token and a runner-class process of the unit with its
-    runner token, so a daemon accepts exactly its write generation's two tokens. A remote unit
-    takes the gateway token digest its installed capability carries plus its own runner token's:
-    it never holds the gateway token or the human secret. The gateway home takes the active
-    generation's two tokens (none while no generation is active: fail closed).
-
-    The one place the human secret is still accepted is a remote-managed data plane
-    (`access.remote_plane`): it keeps no write generations and issues no token, so
-    its gateway-local services present, and its daemons accept, the human secret. That branch
-    is the exception to "outside the gateway, the CLI and the root, no component holds the
-    cluster secret" (docs/decisions/data/security/2026-10-03-cluster-secret-contraction.md); the live
-    deployment's data plane is local, and this branch only runs when `is_remote`.
-    """
     from base.host.db_authority.api import acceptance, token_digest
     from base.host.db_authority.unit import load_unit_capability
     from base.paths import meiva_home

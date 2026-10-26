@@ -14,7 +14,6 @@ from __future__ import annotations
 import threading
 from collections.abc import Callable, Iterable
 from dataclasses import dataclass
-from functools import lru_cache
 from pathlib import Path
 from typing import Any, Literal, Protocol, overload
 from urllib.parse import urlsplit
@@ -22,7 +21,13 @@ from urllib.parse import urlsplit
 from dotenv import dotenv_values
 from pydantic import SecretStr
 
-from base.config.config_registry import DOMAIN_MODELS, field_alias, fields, schema_extra
+from base.config.config_registry import (
+    DOMAIN_MODELS,
+    domain_model_classes,
+    field_alias,
+    fields,
+    schema_extra,
+)
 from base.host.env.config_lite_table import FIELD_DOMAINS
 from base.host.net.url_secret import credential_free, url_with_host
 
@@ -30,7 +35,6 @@ __all__ = [
     "ConfigAuthority",
     "bootstrap_config_values",
     "current_field_values",
-    "domain_model_classes",
     "served_db_endpoint",
 ]
 
@@ -228,8 +232,9 @@ class ConfigAuthority:
                 pending.setdefault(ref.domain, {})[name] = aliases[alias]
             else:
                 out[name] = self.service_field_value(name)
+        models = domain_model_classes()
         for domain, file_values in pending.items():
-            model = domain_model_classes()[domain]
+            model = models[domain]
             payload: dict[str, Any] = {
                 name: self.service_field_value(name) for name in model.model_fields
             }
@@ -345,52 +350,6 @@ def _serve_reachable_data_plane_hosts(out: dict[str, str], reachable: str) -> No
         host = urlsplit(value).hostname or ""
         if host and is_loopback_host(host):
             out[alias] = url_with_host(value, reachable)
-
-
-@lru_cache(maxsize=1)
-def domain_model_classes() -> dict[str, type[Any]]:
-    """Resolve registry class metadata without constructing any Settings."""
-    from base.config.domains.agent.settings import AgentSettings
-    from base.config.domains.channels.feishu import FeishuSettings
-    from base.config.domains.channels.telegram import TelegramSettings
-    from base.config.domains.daemon.settings import DaemonSettings
-    from base.config.domains.display import DisplaySettings
-    from base.config.domains.gateway import GatewaySettings
-    from base.config.domains.general import GeneralSettings
-    from base.config.domains.lm import LmSettings
-    from base.config.domains.observability.alerts import AlertsSettings
-    from base.config.domains.observability.settings import ObservabilitySettings
-    from base.config.domains.packages import PackagesSettings
-    from base.config.domains.sandbox import SandboxSettings
-    from base.config.domains.services.settings import ServiceSettings
-    from base.config.domains.storage.data_plane import DataPlaneSettings
-    from base.config.domains.storage.walg import WalgSettings
-    from base.config.domains.to_user import ToUserSettings
-    from base.config.domains.web import WebSettings
-
-    classes: dict[str, type[Any]] = {
-        "LmSettings": LmSettings,
-        "SandboxSettings": SandboxSettings,
-        "AgentSettings": AgentSettings,
-        "WebSettings": WebSettings,
-        "ToUserSettings": ToUserSettings,
-        "GatewaySettings": GatewaySettings,
-        "DaemonSettings": DaemonSettings,
-        "AlertsSettings": AlertsSettings,
-        "DataPlaneSettings": DataPlaneSettings,
-        "ServiceSettings": ServiceSettings,
-        "ObservabilitySettings": ObservabilitySettings,
-        "DisplaySettings": DisplaySettings,
-        "PackagesSettings": PackagesSettings,
-        "FeishuSettings": FeishuSettings,
-        "TelegramSettings": TelegramSettings,
-        "WalgSettings": WalgSettings,
-        "GeneralSettings": GeneralSettings,
-    }
-    return {
-        attr: classes[model] if isinstance(model, str) else classes[attr]
-        for attr, _label, model, _capability in DOMAIN_MODELS
-    }
 
 
 def current_field_values(authority: ConfigAuthority) -> dict[str, Any]:

@@ -132,6 +132,19 @@ def _model_classes() -> dict[str, Any]:
     }
 
 
+# meiva:note
+# Resolve registry class metadata without constructing any Settings.
+def _domain_model_classes() -> dict[str, type[Any]]:
+    classes = _model_classes()
+    return {
+        attr: classes[model] if isinstance(model, str) else classes[attr]
+        for attr, _label, model, _capability in DOMAIN_MODELS
+    }
+
+
+domain_model_classes = _domain_model_classes
+
+
 def validate_domain_models(
     domain_models: tuple[tuple[str, str, str | type[object] | _DomainModelLike, str], ...],
 ) -> dict[str, _FieldRef]:

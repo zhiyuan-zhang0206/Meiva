@@ -1,7 +1,9 @@
 exports = ["corpse_reap.py", "hosted.py", "inbound.py", "tests"]
 
 [uses]
+"corpse_reap.py" = ["lifecycle_plan.py"]
 "hosted.py" = ["lifecycle_plan.py"]
+"inbound.py" = ["lifecycle_plan.py"]
 "tests" = ["corpse_reap.py", "hosted.py", "lifecycle_plan.py"]
 
 [purity]

@@ -31,10 +31,11 @@ def _utc_now() -> datetime:
     return datetime.now(UTC)
 
 
+# meiva:note
+# Preserve the affected process identity and mark actual data loss as error.
 def loss_event(
     event: Event, count: int, queue_name: str, *, dropped_at: datetime | None = None
 ) -> Event:
-    """Preserve the affected process identity and mark actual data loss as error."""
     now = _utc_now()
     return replace(
         event,

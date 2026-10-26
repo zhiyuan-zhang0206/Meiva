@@ -314,8 +314,9 @@ async def probe_agent_runner(env: RosterEnv, row: RosterRowSpec) -> MachineStatu
     return _render_answer(env, row, result, observed_at=None)
 
 
+# meiva:note
+# One live resource reading for the gateway's own machine (no status_snapshot call).
 def _local_resource_sample() -> ResourceSample | None:
-    """One live resource reading for the gateway's own machine (no status_snapshot call)."""
     import psutil
 
     from base.host.resource_sample import resource_sample

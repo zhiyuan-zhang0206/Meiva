@@ -381,7 +381,7 @@ class _ReaderFacts(ast.NodeVisitor):
         if field in self.fields:
             valid = self.fields[field] == domain
         else:
-            from base.config.service_read import domain_model_classes
+            from base.config.config_registry import domain_model_classes
 
             owner = domain_model_classes().get(domain)
             valid = owner is not None and hasattr(owner, field)

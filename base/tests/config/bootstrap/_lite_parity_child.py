@@ -6,7 +6,7 @@ import sys
 from typing import Any
 
 from base.config import ConfigBoot
-from base.config.service_read import domain_model_classes
+from base.config.config_registry import domain_model_classes
 from base.host.env.config_lite_table import FIELD_DOMAINS
 
 MODELS = domain_model_classes()

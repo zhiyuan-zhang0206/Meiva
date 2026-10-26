@@ -21,17 +21,16 @@ def live(identity: OwnedProcess) -> bool:
     return identity.live()
 
 
+# meiva:note
+# Signal each known group once, while its recorded member still verifies.
+# The caller's own group is never signaled as a batch: only the recorded birth is signaled.
+# Process disappearance is normal; other OS errors propagate.
 def signal(
     identities: Iterable[OwnedProcess],
     signum: int,
     *,
     process_control: ProcessControl,
 ) -> None:
-    """Signal each known group once, while its recorded member still verifies.
-
-    The caller's own group is never signaled as a batch: only the recorded birth
-    is signaled. Process disappearance is normal; other OS errors propagate.
-    """
     sent: set[int] = set()
     own_group = os.getpgrp()
     for identity in identities:

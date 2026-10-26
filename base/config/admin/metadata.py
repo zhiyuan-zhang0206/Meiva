@@ -17,18 +17,19 @@ from __future__ import annotations
 from collections.abc import Mapping, Sequence
 from dataclasses import KW_ONLY, dataclass
 from pathlib import Path
+from typing import Any, Protocol
 
 from pydantic.fields import FieldInfo
 from pydantic_core import PydanticUndefined
 
 from base.config.config_registry import (
     Capability,
+    domain_model_classes,
     field_alias,
     field_editor_type,
     fields,
     schema_extra,
 )
-from base.config.service_read import ConfigAuthority, domain_model_classes
 
 # Stand-in a sensitive field carries in `raw_overrides` instead of its cleartext
 # value: the panel/CLI round-trips it unchanged on a full-replace PUT, and the
@@ -39,6 +40,12 @@ CONFIG_UNCHANGED_SENTINEL = "__meiva_unchanged__"
 
 type _ConfigFieldValue = str | int | float | bool | list[str] | list[float] | None
 type _ConfigChoices = list[str] | None
+
+
+class ConfigMetadataAuthority(Protocol):
+    def current_field_values(self) -> Mapping[str, Any]: ...
+
+    def read_env_aliases(self) -> Mapping[str, str]: ...
 
 
 @dataclass(frozen=True)
@@ -69,15 +76,16 @@ class ConfigFieldMeta:
     owner: str | None = None
 
 
-def get_config_metadata(*, authority: ConfigAuthority) -> list[ConfigFieldMeta]:
+def get_config_metadata(*, authority: ConfigMetadataAuthority) -> list[ConfigFieldMeta]:
     """Walk every core sub-model's fields and extract the metadata the frontend needs.
 
     Plugin-owned fields are not core: `base.packages.plugin_config_admin`
     composes them on top (`panel_metadata`)."""
     values = authority.current_field_values()
     result: list[ConfigFieldMeta] = []
+    models = domain_model_classes()
     for name, ref in fields().items():
-        field_info: FieldInfo = domain_model_classes()[ref.domain].model_fields[name]
+        field_info: FieldInfo = models[ref.domain].model_fields[name]
         extra = schema_extra(field_info)
         type_name, choices = field_editor_type(field_info.annotation)
 
@@ -137,7 +145,7 @@ def get_config_metadata(*, authority: ConfigAuthority) -> list[ConfigFieldMeta]:
 # `plugin_values` present in their images (`config_admin.panel_overrides` does).
 def env_override_values(
     *,
-    authority: ConfigAuthority,
+    authority: ConfigMetadataAuthority,
     local: bool = False,
     plugin_metadata: Sequence[ConfigFieldMeta] = (),
     plugin_values: Mapping[str, object] | None = None,
