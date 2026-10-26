@@ -36,7 +36,8 @@ _SCHEDULED_WORKFLOWS = (
 
 
 if __name__ == "__main__":
-    with open_schedule_entry(globals().get("MEIVA_SCHEDULE_INPUTS")) as inputs:
+    home = resolve_meiva_home()
+    with open_schedule_entry(globals().get("MEIVA_SCHEDULE_INPUTS"), home=home) as inputs:
         schedule = CronSchedule((Trigger(CRON),), timezone=cluster_timezone())
         job = CiMetrics(
             tz=schedule.timezone,
@@ -47,7 +48,7 @@ if __name__ == "__main__":
                 os.environ.get(_REPORT_AGENT_ENV),
             ),
             watched=_SCHEDULED_WORKFLOWS,
-            state_dir=resolve_meiva_home() / "state" / "ci-runs",
+            state_dir=home / "state" / "ci-runs",
             run_process=subprocess.run,
             timers=SYSTEM_TIMERS,
         )

@@ -25,6 +25,7 @@ import os
 import subprocess
 import sys
 from datetime import UTC, datetime
+from functools import partial
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
@@ -54,15 +55,15 @@ SWEEP_TIMEOUT_S = 3600
 # meiva:note
 # The sweep is addressed relative to the runtime home of the host that runs this schedule, so the
 # same stored text works on whichever machine owns the schedule manager.
-def _sweep_path() -> Path:
-    return resolve_meiva_home() / SWEEP_RELATIVE
+def _sweep_path(home: Path) -> Path:
+    return home / SWEEP_RELATIVE
 
 
 # meiva:note
 # Append one run's lines; a log that cannot be written is stderr noise, never a failed sweep.
-def _log(lines: list[str]) -> None:
+def _log(lines: list[str], *, home: Path) -> None:
     try:
-        with (logs_dir() / LOG_NAME).open("a", encoding="utf-8") as handle:
+        with (logs_dir(home=home) / LOG_NAME).open("a", encoding="utf-8") as handle:
             for line in lines:
                 handle.write(line + "\n")
     except OSError as exc:
@@ -88,8 +89,8 @@ def _notify(message: str) -> None:
 # So a fire first confirms the tool is where this file says it is: on a host without it the run ends
 # as one explicit rc=2 line naming the missing path, never as a silent retry of a command that
 # cannot succeed, and never as a green "nothing to check".
-def _missing_tool() -> str | None:
-    path = _sweep_path()
+def _missing_tool(home: Path) -> str | None:
+    path = _sweep_path(home)
     return None if path.is_file() else "no credential scanner at %s on this machine" % path
 
 
@@ -97,15 +98,15 @@ def _missing_tool() -> str | None:
 # One sweep: run the tool as a child under this interpreter, keep the last lines of its output as
 # the run's evidence, and treat every failure to run it as rc=2. The red path reports the sweep's
 # own tail plus ours, so the wake carries why the sweep said no.
-def run_sweep(*, notify: bool = True) -> tuple[int, list[str]]:
+def run_sweep(*, home: Path, notify: bool = True) -> tuple[int, list[str]]:
     stamp = datetime.now(ZoneInfo(cluster_timezone())).isoformat(timespec="seconds")
-    missing = _missing_tool()
+    missing = _missing_tool(home)
     if missing is not None:
         rc, tail, err = 2, [], missing
     else:
         try:
             proc = subprocess.run(
-                [sys.executable, str(_sweep_path())],
+                [sys.executable, str(_sweep_path(home))],
                 capture_output=True,
                 text=True,
                 timeout=SWEEP_TIMEOUT_S,
@@ -117,17 +118,17 @@ def run_sweep(*, notify: bool = True) -> tuple[int, list[str]]:
             rc = proc.returncode
             tail = (proc.stdout or "").strip().splitlines()[-7:]
             err = (proc.stderr or "").strip()[-200:].replace("\n", " ")
-    lines = ["RESULT ts=%s rc=%s sweep=%s" % (stamp, rc, _sweep_path().name)]
+    lines = ["RESULT ts=%s rc=%s sweep=%s" % (stamp, rc, _sweep_path(home).name)]
     lines.extend(tail)
     if err:
         lines.append("ERR " + err)
-    _log(lines)
+    _log(lines, home=home)
     if rc != 0 and notify:
         message = "[log-cred-mask] rc=%s (ts=%s)\n%s\nlog: %s" % (
             rc,
             stamp,
             "\n".join(tail[-5:] + ([err] if err else [])),
-            logs_dir() / LOG_NAME,
+            logs_dir(home=home) / LOG_NAME,
         )
         try:
             meiva.ensure_plugins_loaded()
@@ -159,8 +160,8 @@ def run_sweep(*, notify: bool = True) -> tuple[int, list[str]]:
     return rc, lines
 
 
-def _fire(_slot: datetime, message: str | None) -> None:
-    rc, lines = run_sweep(notify=True)
+def _fire(_slot: datetime, message: str | None, *, home: Path) -> None:
+    rc, lines = run_sweep(home=home, notify=True)
     print("[log-cred-mask-monthly] %s (rc=%s)" % (message, rc))
     for ln in lines[:8]:
         print("[log-cred-mask-monthly] " + ln)
@@ -170,8 +171,8 @@ def _fire(_slot: datetime, message: str | None) -> None:
 # The next-fire line is an observation point, not decoration: `run_loop` never prints when it will
 # fire next, this schedule is monthly and silent when green, so without the line there is no way to
 # tell "computed correctly and waiting" from "computed wrongly and will never fire".
-def main() -> None:
-    with open_schedule_entry(globals().get("MEIVA_SCHEDULE_INPUTS")) as inputs:
+def main(home: Path) -> None:
+    with open_schedule_entry(globals().get("MEIVA_SCHEDULE_INPUTS"), home=home) as inputs:
         print(
             "[log-cred-mask-monthly] next fire %s (cron %s)"
             % (
@@ -186,15 +187,16 @@ def main() -> None:
                 timezone=cluster_timezone(),
                 timing=LoopTiming(),
             ),
-            _fire,
+            partial(_fire, home=home),
             schedule_id=parse_schedule_id(os.environ.get("MEIVA_SCHEDULE_ID")),
             started_at=datetime.now(UTC),
         )
 
 
 if __name__ == "__main__":
+    _home = resolve_meiva_home()
     if "--once" in sys.argv:
-        _rc, _lines = run_sweep(notify="--no-notify" not in sys.argv)
+        _rc, _lines = run_sweep(home=_home, notify="--no-notify" not in sys.argv)
         for _ln in _lines:
             print(_ln)
         sys.exit(_rc)
@@ -204,4 +206,4 @@ if __name__ == "__main__":
             file=sys.stderr,
         )
         sys.exit(2)
-    main()
+    main(_home)

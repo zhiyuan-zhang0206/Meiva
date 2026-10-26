@@ -5,6 +5,7 @@ from datetime import UTC, datetime
 from functools import partial
 
 from base.host.system.hostport import Host
+from base.paths.home import resolve_meiva_home
 from schedules.jobs.c9_report import C9Report, report_day
 from schedules.jobs.catchup import cluster_timezone
 from schedules.jobs.entry import open_schedule_entry
@@ -18,7 +19,8 @@ _REPORT_LABEL = "Meiva \u8d1f\u8d23\u4eba"
 
 
 if __name__ == "__main__":
-    with open_schedule_entry(globals().get("MEIVA_SCHEDULE_INPUTS")) as inputs:
+    home = resolve_meiva_home()
+    with open_schedule_entry(globals().get("MEIVA_SCHEDULE_INPUTS"), home=home) as inputs:
         from scripts.ci.pull_requests import accounting
 
         schedule = CronSchedule((Trigger(CRON),), timezone=cluster_timezone())
