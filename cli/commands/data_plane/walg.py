@@ -47,8 +47,8 @@ def walg_throwaway(config: ConfigBoot) -> ThrowawayConfig:
 
 # meiva:note
 # Run the pre-flight steps; the exit code is non-zero when any step failed.
-def cmd_walg_check(plane: DataPlaneConfig) -> int:
-    steps = check.run_check(path=plane.walg_config_file)
+def cmd_walg_check(plane: DataPlaneConfig, *, token: str) -> int:
+    steps = check.run_check(path=plane.walg_config_file, token=token)
     for step in steps:
         print(f"  {'✓' if step.ok else '✗'} {step.name}: {step.detail}")
     return 0 if all(step.ok for step in steps) else 1

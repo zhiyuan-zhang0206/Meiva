@@ -15,7 +15,6 @@ takes that full name. Nothing printed here contains a credential or key value.
 
 from __future__ import annotations
 
-import hashlib
 import tempfile
 from contextlib import AbstractContextManager
 from dataclasses import dataclass, field
@@ -41,8 +40,7 @@ class Step:
     ok: bool = field(default=True, kw_only=True)
 
 
-def _storage_round_trip(*, path: Path | None) -> str:
-    token = hashlib.sha256(str(path).encode()).hexdigest()[:32]
+def _storage_round_trip(*, path: Path | None, token: str) -> str:
     remote = f"{_CHECK_DIR}/{token}.txt"
     stored = f"{remote}.lz4"
     payload = f"meiva walg check {token}\n".encode()
@@ -97,10 +95,14 @@ def _postgres_facts(
     )
 
 
-def run_check(*, path: Path | None) -> list[Step]:
-    """Run the checks in order, stopping at the first failure; the last step is the verdict."""
+# meiva:note
+# Run the checks in order, stopping at the first failure; the last step is the verdict. `token` names
+# the object the storage round trip writes; the caller draws a fresh one per run, so two runs (or a
+# run and a leftover of an earlier one) never address the same object.
+def run_check(*, path: Path | None, token: str) -> list[Step]:
     return run_check_on(
         path=path,
+        token=token,
         binary_problem=walg_binary.installed_problem(),
         admin=probe.admin_connection(),
     )
@@ -112,6 +114,7 @@ def run_check(*, path: Path | None) -> list[Step]:
 def run_check_on(
     *,
     path: Path | None,
+    token: str,
     binary_problem: str | None,
     admin: AbstractContextManager[psycopg.Connection[Any]],
 ) -> list[Step]:
@@ -144,7 +147,7 @@ def run_check_on(
     )
 
     try:
-        steps.append(Step("storage", _storage_round_trip(path=path)))
+        steps.append(Step("storage", _storage_round_trip(path=path, token=token)))
     except WalgCommandError as exc:
         return [*steps, Step("storage", str(exc), ok=False)]
 
