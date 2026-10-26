@@ -32,8 +32,14 @@ Follow the user's authorized scope.
 
 ## Code and documentation boundaries
 
+- [Code placement, purity and dependency flow](docs/conventions/architecture/code-placement-and-purity.md)
+  explains where new or refactored code belongs (`"strict"` pure core vs. effect
+  shell vs. `[roots]` composition root), where ports and fakes live, and how to
+  split modules without creating `meizel` debt.
 - [Python conventions](docs/conventions/python-conventions.md) own coding and
-  structure rules: import direction, file/directory and function budgets.
+  structure rules: import direction, file/directory and function budgets, and
+  [dependency injection without test patching](docs/conventions/python-conventions.md#tests-do-not-patch-production-takes-what-a-test-needs-to-control)
+  ([data in, decisions out](docs/conventions/python-conventions.md#data-in-decisions-out-the-forms-in-order)).
 - [Import layering](docs/conventions/import-layering.md) explains the layering the
   `meizel.toml` manifests state; [technology selection](docs/conventions/technology-selection.md)
   explains dependency choices.
@@ -52,6 +58,8 @@ Follow the user's authorized scope.
 |---|---|
 | Set up development | [Development setup](docs/conventions/dev-setup.md) |
 | Refresh a checkout's venv after a lock change | [Development setup](docs/conventions/dev-setup.md#refreshing-a-venv-after-a-lock-change) |
+| Decide where code, types, ports or fakes belong | [Code placement, purity and dependency flow](docs/conventions/architecture/code-placement-and-purity.md) |
+| Inject dependencies or remove test monkeypatches | [Data in, decisions out](docs/conventions/python-conventions.md#data-in-decisions-out-the-forms-in-order) |
 | Run relevant tests | [Testing](docs/conventions/testing.md) |
 | Review this contribution | [review-contribution](.agents/skills/review-contribution/SKILL.md) |
 | Change the database | [Migration guide](db/docs/migrations.md) |

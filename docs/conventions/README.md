@@ -6,7 +6,7 @@ behavior and domain contracts remain in component-local `docs/` and the
 [OKF graph](../index.meiva.okf.md).
 
 - [Philosophy](philosophy.md) and [technology selection](technology-selection.md)
-- [Python conventions](python-conventions.md) and [import layering](import-layering.md)
+- [Code placement, purity and dependency flow](architecture/code-placement-and-purity.md), [Python conventions](python-conventions.md) and [import layering](import-layering.md)
 - [Development setup](dev-setup.md) and [testing](testing.md)
 - [Documentation maintenance](doc-maintenance.md) and [SDK docstrings](sdk-docstring-discipline.md)
 - [Technical-debt inspection](engineering/tech-debt.md) and [automated-check boundary](engineering/lint-vs-sweeper.md)
