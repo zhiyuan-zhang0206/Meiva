@@ -13,7 +13,6 @@ exports = ["code_version_gate.py", "config.py", "connections.py", "test_db_guard
 
 [debt.ambient-read]
 "config.py#settings base.config.settings" = 1
-"connections.py#settings base.config.settings" = 2
 "handle.py#db base.db.connections.connect" = 1
 
 [debt.any-collaborator]

@@ -6,10 +6,10 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import NamedTuple, Protocol, Self, TypedDict
 
-from base.config import settings
 from base.host.runtime_interpreter import external_plugin_read_root
 from base.log import logger
 from base.packages.docs.frontmatter import FrontmatterError, parse_frontmatter
+from base.packages.plugins.flags import FlagDomainUnavailable, read_declared_flag
 from base.packages.skills import scan_tree
 from base.packages.skills.names import display_name, match_key
 from base.packages.skills.tree import Skill, flatten, identifier, target
@@ -25,14 +25,15 @@ def load_skill_names(provider_roots: Sequence[Path] = ()) -> list[Skill]:
 
 # meiva:link base/packages/docs/composer-commands.meiva.okf.md
 def _commands_enabled() -> bool:
-    if settings.has_domain("agent"):
-        return settings.agent.commands_enabled
-    from base.host.env.dotenv_file import process_env_file, read_env_aliases
+    try:
+        return bool(read_declared_flag("agent.commands_enabled", ("agent.commands_enabled",)))
+    except FlagDomainUnavailable:
+        from base.host.env.dotenv_file import process_env_file, read_env_aliases
 
-    value = read_env_aliases(process_env_file()).get("MEIVA_COMMANDS_ENABLED")
-    if value is None:
-        return True
-    return value.strip().lower() in {"1", "true", "yes", "on"}
+        value = read_env_aliases(process_env_file()).get("MEIVA_COMMANDS_ENABLED")
+        if value is None:
+            return True
+        return value.strip().lower() in {"1", "true", "yes", "on"}
 
 
 # meiva:link base/packages/docs/composer-commands.meiva.okf.md

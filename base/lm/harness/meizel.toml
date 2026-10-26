@@ -3,7 +3,7 @@ exports = ["acp", "antigravity", "bridge.py", "claude", "codex", "deepseek", "en
 [uses]
 "__init__.py" = ["bridge.py", "engine.py", "events.py", "handoff.py", "registration.py", "registry.py"]
 "antigravity" = ["base_session.py", "events.py", "handoff.py", "process.py", "registry.py"]
-"base_session.py" = ["events.py", "handoff.py", "process.py", "registry.py"]
+"base_session.py" = ["events.py", "handoff.py", "process.py", "registration.py", "registry.py"]
 "bridge.py" = ["engine.py", "events.py", "handoff.py", "registration.py", "registry.py"]
 "claude" = ["__init__.py", "base_session.py", "events.py", "handoff.py", "process.py", "registry.py"]
 "codex" = ["base_session.py", "events.py", "handoff.py", "process.py", "registry.py"]
@@ -23,9 +23,7 @@ exports = ["acp", "antigravity", "bridge.py", "claude", "codex", "deepseek", "en
 "handoff.py" = "strict"
 
 [debt.ambient-read]
-"base_session.py#clock datetime.datetime.now" = 1
 "base_session.py#random uuid.uuid4" = 1
-"bridge.py#clock datetime.datetime.now" = 1
 "bridge.py#pid os.getpid" = 1
 "bridge.py#random secrets.token_urlsafe" = 1
 "registration.py#clock datetime.datetime.now" = 1

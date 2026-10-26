@@ -27,8 +27,8 @@ from typing import Any
 
 from psycopg_pool import ConnectionPool
 
-from base.config import settings
 from base.db import Database
+from base.packages.plugins.flags import read_declared_flag
 
 # The status vocabulary. There is deliberately no "empty": a card with no row
 # IS the empty state, and a second spelling of it would be a second fact.
@@ -117,7 +117,14 @@ def upsert(
     card = _text(id, "id", limit=MAX_ID_CHARS)
     shown = _text(value, "value", limit=MAX_VALUE_CHARS)
     if detail is not None:
-        cap = settings.display.plugin_stats_max_detail_chars if detail_cap is None else detail_cap
+        if detail_cap is None:
+            raw_cap = read_declared_flag(
+                "display.plugin_stats_max_detail_chars",
+                ("display.plugin_stats_max_detail_chars",),
+            )
+            cap = raw_cap if isinstance(raw_cap, int) and not isinstance(raw_cap, bool) else 500
+        else:
+            cap = detail_cap
         detail = _text(detail, "detail", limit=cap)
     if status not in STATUSES:
         raise ValueError(f"plugin_stats status: {status!r} is not one of {', '.join(STATUSES)}")

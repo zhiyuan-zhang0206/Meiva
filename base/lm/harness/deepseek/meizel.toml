@@ -27,7 +27,7 @@
 "session.py#async def permission_decision" = 1
 "session.py#async def start" = 1
 "session.py#import signal" = 1
-"usage.py#Path.is_file" = 2
+"usage.py#Path.is_file" = 1
 "usage.py#Path.open" = 1
 "usage.py#Path.read_bytes" = 1
 "usage.py#import subprocess" = 1

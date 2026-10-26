@@ -4,7 +4,7 @@ from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from base.host.env.harness_binaries import resolve_harness_binary
+from base.host.env.harness_binaries import resolve_harness_binary, resolve_user_home
 
 DEFAULT_MODEL = "kimi-k3.1-pro"
 # meiva:note
@@ -89,7 +89,7 @@ class KimiConfig:
         if configured:
             return Path(configured)
         home = env.get("HOME")
-        return (Path(home) if home else Path.home()) / ".kimi-code"
+        return resolve_user_home(Path(home) if home else None) / ".kimi-code"
 
     def with_cwd(self, cwd: Path) -> KimiConfig:
         return KimiConfig(

@@ -13,6 +13,7 @@ exports = ["activation.py", "config_face.py", "config_registration.py", "config_
 "loading" = ["config_face.py", "enable_config.py", "extensions.py", "gate.py", "load_report.py", "manifest.py"]
 "manifest.py" = ["surface"]
 "pyproject_mirror.py" = ["manifest.py"]
+"surface" = ["flags.py"]
 "tests" = ["config_registration.py", "config_view.py", "data_registry.py", "enable_config.py", "extensions.py", "flags.py", "gate.py", "load_report.py", "loading", "manifest.py", "mcp_enabled.py", "plugin_errors.py", "pyproject_mirror.py", "surface"]
 
 [external]

@@ -19,8 +19,8 @@ def git_root(start: Path) -> Path | None:
     """The nearest ancestor of `start` (itself included, when a directory) that is a git
     repository root, or None. Resolved by walking up for `.git`, so nothing is cached and a repo
     created mid-session (`git init`, a clone landing in a watched dir) surfaces immediately."""
-    cwd = (start if start.is_dir() else start.parent).resolve()
-    return next((d for d in (cwd, *cwd.parents) if _is_git_root(d)), None)
+    resolved = start.resolve()
+    return next((d for d in (resolved, *resolved.parents) if _is_git_root(d)), None)
 
 
 def project_skill_roots(cwd: Path) -> list[Path]:

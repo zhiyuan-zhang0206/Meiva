@@ -83,6 +83,10 @@ def handle_digest(handle: str) -> str:
     return hashlib.sha256(handle.encode("utf-8")).hexdigest()
 
 
+def current_utc() -> datetime:
+    return datetime.now(UTC)
+
+
 # meiva:note
 # `$MEIVA_HOME/harness/registrations/<agent_id>.json`, owned by the bridge: it writes
 # the line when the session is created, refreshes it when the session id lands, and
@@ -160,7 +164,7 @@ class RegistrationStore:
         return True
 
     def sweep(self, *, now: datetime | None = None) -> list[int]:
-        moment = now or datetime.now(UTC)
+        moment = now or current_utc()
         removed: list[int] = []
         for path in sorted(self._root.glob("*.json")):
             try:

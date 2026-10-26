@@ -87,6 +87,10 @@ class CodingSessionGenerationChangedError(RuntimeError):
     """A launcher's generation ended (or was reclaimed) before it could publish."""
 
 
+def _utc_now(now: dt.datetime | None = None) -> dt.datetime:
+    return (now or dt.datetime.now(dt.UTC)).astimezone(dt.UTC)
+
+
 def launch_is_stale(
     owner: CodingSessionOwner,
     *,
@@ -95,7 +99,7 @@ def launch_is_stale(
     """Return whether a claimant died before publishing its active handle."""
     if owner.status != CodingSessionStatus.LAUNCHING or owner.created_at is None:
         return False
-    timestamp = (now or dt.datetime.now(dt.UTC)).astimezone(dt.UTC)
+    timestamp = _utc_now(now)
     return timestamp - owner.created_at >= _UNPUBLISHED_CLAIM_WINDOW
 
 
@@ -328,7 +332,7 @@ def launch_generation(
         raise ValueError("ttl_seconds must be greater than zero and at most one day")
     if (tasks_file is None) != (work_file is None):
         raise ValueError("task and work files are given together, or neither for a takeover")
-    timestamp = (now or dt.datetime.now(dt.UTC)).astimezone(dt.UTC)
+    timestamp = _utc_now(now)
     with file_lock(lock_path(key), timeout_s=_LOCK_TIMEOUT_S):
         _reclaim_siblings_unlocked(
             key,
@@ -456,7 +460,7 @@ def terminate_generation(
         terminal = replace(
             current,
             status=CodingSessionStatus.TERMINAL,
-            terminalized_at=(now or dt.datetime.now(dt.UTC)).astimezone(dt.UTC),
+            terminalized_at=_utc_now(now),
             terminal_reason=reason,
         )
         write_unlocked(terminal, writer=writer)
