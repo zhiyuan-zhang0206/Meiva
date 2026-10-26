@@ -30,6 +30,7 @@ from services.supervision.meiva_root_glue.diagnostics import (
     DiagnosticMonitor,
     RootHealthRounds,
 )
+from services.supervision.meiva_root_glue.tests.slices import probe_config, system_clock
 
 
 class _Events:
@@ -148,7 +149,8 @@ async def test_slow_diagnostic_cannot_block_peer_or_duplicate_itself(
         [
             Diagnostic("blocked", blocked, interval_s=0.001, timeout_s=0.01),
             Diagnostic("peer", lambda: DaemonProbe.down("observed failure"), interval_s=0.001),
-        ]
+        ],
+        clock=system_clock(),
     )
     try:
         before = _entry(monitor.health_snapshot(), "diagnostic:blocked")
@@ -176,7 +178,8 @@ async def test_reporting_never_races_a_settling_worker(caplog: pytest.LogCapture
 
     reported: list[DaemonProbe] = []
     monitor = DiagnosticMonitor(
-        [Diagnostic("held", probe, interval_s=0.001, timeout_s=5.0, report=reported.append)]
+        [Diagnostic("held", probe, interval_s=0.001, timeout_s=5.0, report=reported.append)],
+        clock=system_clock(),
     )
     runner = monitor._states["held"].runner
     caplog.set_level(logging.ERROR, logger="services.supervision.meiva_root_glue.diagnostics")
@@ -226,7 +229,8 @@ async def test_a_hanging_report_retains_its_check_worker_without_overlap() -> No
         [
             Diagnostic("held", probe, interval_s=0.001, timeout_s=0.05, report=report),
             Diagnostic("peer", lambda: DaemonProbe.up("ok"), interval_s=0.001),
-        ]
+        ],
+        clock=system_clock(),
     )
     try:
         await monitor.run_round()
@@ -261,7 +265,8 @@ async def test_a_report_exception_keeps_the_fresh_sample(
                 interval_s=0.001,
                 report=broken_report,
             )
-        ]
+        ],
+        clock=system_clock(),
     )
     caplog.set_level(logging.ERROR, logger="services.supervision.meiva_root_glue.diagnostics")
     await monitor.run_round()
@@ -285,7 +290,8 @@ async def test_unknown_never_resolves_station_alert_but_extends_the_streak(
                 interval_s=0.001,
                 report=reported.append,
             )
-        ]
+        ],
+        clock=system_clock(),
     )
     await monitor.run_round()
     assert [record["consecutive_failures"] for record in events] == [1]
@@ -305,7 +311,9 @@ async def test_every_failing_sample_reports_and_recovery_reports_once(
     events: _Events,
 ) -> None:
     current = DaemonProbe.unavailable("host stalled")
-    monitor = DiagnosticMonitor([Diagnostic("canary", lambda: current, interval_s=0.001)])
+    monitor = DiagnosticMonitor(
+        [Diagnostic("canary", lambda: current, interval_s=0.001)], clock=system_clock()
+    )
     for _ in range(2):
         await monitor.run_round()
         await asyncio.sleep(0.002)
@@ -344,7 +352,9 @@ async def test_tick_requires_both_rounds_and_does_not_mean_healthy(
     events: _Events, *, machine_identity: MachineIdentityReader
 ) -> None:
     health = _Health()
-    diagnostics = DiagnosticMonitor([Diagnostic("failed", lambda: DaemonProbe.down("failed"))])
+    diagnostics = DiagnosticMonitor(
+        [Diagnostic("failed", lambda: DaemonProbe.down("failed"))], clock=system_clock()
+    )
     rounds = RootHealthRounds(
         health,
         diagnostics,
@@ -352,6 +362,8 @@ async def test_tick_requires_both_rounds_and_does_not_mean_healthy(
         image=LoadedCommit(source_root=Path(__file__).resolve().parents[4], sha=None),
         machine=machine_identity,
         telemetry=_NO_OP_TELEMETRY,
+        clock=system_clock(),
+        home=Path("/unused"),
     )
     task = asyncio.create_task(rounds.run_round())
     await asyncio.sleep(0.01)
@@ -374,12 +386,14 @@ async def test_expectation_precedes_first_sample_and_is_retired_on_stop(
         health = _Health()
         rounds = RootHealthRounds(
             health,
-            DiagnosticMonitor([]),
+            DiagnosticMonitor([], clock=system_clock()),
             clients=ClientSet(),
             image=LoadedCommit(source_root=Path(__file__).resolve().parents[4], sha=None),
             tasks=tasks,
             machine=machine_identity,
             telemetry=_NO_OP_TELEMETRY,
+            clock=system_clock(),
+            home=Path("/unused"),
         )
         await rounds.start()
         assert events[0]["event"] == "root_health_expected"
@@ -432,12 +446,14 @@ async def test_root_logging_owns_only_the_started_pipeline(
     async with asyncio.TaskGroup() as tasks:
         rounds = RootHealthRounds(
             _Health(),
-            DiagnosticMonitor([]),
+            DiagnosticMonitor([], clock=system_clock()),
             clients=clients,
             image=image,
             tasks=tasks,
             machine=machine_identity,
             telemetry=_RecordingTelemetry(),
+            clock=system_clock(),
+            home=Path("/unused"),
         )
         assert made == []
         await rounds.start()
@@ -475,12 +491,14 @@ async def test_logging_startup_error_stops_its_constructed_writer(
     async with asyncio.TaskGroup() as tasks:
         rounds = RootHealthRounds(
             _Health(),
-            DiagnosticMonitor([]),
+            DiagnosticMonitor([], clock=system_clock()),
             clients=clients,
             image=LoadedCommit(source_root=tmp_path, sha=None),
             tasks=tasks,
             machine=machine_identity,
             telemetry=_FailingTelemetry(),
+            clock=system_clock(),
+            home=Path("/unused"),
         )
         with pytest.raises(ValueError) as caught:
             await rounds.start()
@@ -497,6 +515,8 @@ def test_helper_diagnostics_are_macos_only(*, machine_identity: ConfiguredMachin
             database=_unused_database,
             machine=machine_identity,
             macos=False,
+            clock=system_clock(),
+            config=probe_config(),
         )
     }
     assert names == {"venv"}
@@ -507,7 +527,8 @@ def test_helper_diagnostics_are_macos_only(*, machine_identity: ConfiguredMachin
             database=_unused_database,
             machine=machine_identity,
             macos=True,
-            overrides={},
+            clock=system_clock(),
+            config=probe_config(),
         )
     }
     assert names == {"venv", "brew-pin", "permissions-helper"}
@@ -613,6 +634,8 @@ def test_each_root_roster_owns_its_helper_episode_reporter(
             database=_unused_database,
             machine=machine_identity,
             macos=True,
+            clock=system_clock(),
+            config=probe_config(),
         )
         if check.name == "permissions-helper"
     )
@@ -623,6 +646,8 @@ def test_each_root_roster_owns_its_helper_episode_reporter(
             database=_unused_database,
             machine=machine_identity,
             macos=True,
+            clock=system_clock(),
+            config=probe_config(),
         )
         if check.name == "permissions-helper"
     )
@@ -747,13 +772,6 @@ def test_task_telemetry_is_unavailable_when_the_record_cannot_be_read() -> None:
 def test_the_reminder_record_is_observed_on_the_gateway_only(
     *, machine_identity: ConfiguredMachineIdentity
 ) -> None:
-    overrides = {
-        "redis_url": "redis://localhost:6380",
-        "db_url": "postgresql://localhost/meiva_main",
-        "pgbouncer_enabled": False,
-        "observability_url": "",
-    }
-
     def roster(role: str) -> dict[str, Diagnostic]:
         machine_identity.set(role=role)
         return {
@@ -762,8 +780,9 @@ def test_the_reminder_record_is_observed_on_the_gateway_only(
                 set(),
                 database=_unused_database,
                 machine=machine_identity,
-                overrides=overrides,
                 macos=False,
+                clock=system_clock(),
+                config=probe_config(),
             )
         }
 

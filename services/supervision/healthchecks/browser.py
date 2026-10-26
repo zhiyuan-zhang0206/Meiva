@@ -1,11 +1,13 @@
 """Identity probe for the browser owned by the root supervisor."""
 
-from base.config import get_field
+from pathlib import Path
+
 from base.daemon.health import DaemonProbe
 from services.desktop.browser.probe import probe_browser
 
 
-def _probe(*, port: int | None = None) -> DaemonProbe:
-    """Report browser protocol health and ownership without changing processes."""
-    resolved_port = int(get_field("browser_cdp_port")) if port is None else port
-    return probe_browser(resolved_port)
+# meiva:note
+# Report browser protocol health and ownership on CDP `port` for the Chrome profile `profile`
+# without changing processes.
+def browser_probe(port: int, profile: Path) -> DaemonProbe:
+    return probe_browser(port, profile)

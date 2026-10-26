@@ -13,6 +13,7 @@ import pytest
 
 from base.daemon.health import DaemonProbe
 from services.supervision.meiva_root_glue.diagnostics import Diagnostic, DiagnosticMonitor
+from services.supervision.meiva_root_glue.tests.slices import system_clock
 
 
 async def _eventually(event: Event) -> None:
@@ -44,7 +45,8 @@ async def test_probe_deadline_discards_late_report_and_allows_a_fresh_round(
         return late
 
     monitor = DiagnosticMonitor(
-        [Diagnostic("held", probe, interval_s=0.001, timeout_s=0.01, report=reported.append)]
+        [Diagnostic("held", probe, interval_s=0.001, timeout_s=0.01, report=reported.append)],
+        clock=system_clock(),
     )
     try:
         await monitor.run_round()
@@ -72,7 +74,9 @@ async def test_stop_closes_reporting_before_the_probe_deadline() -> None:
         release.wait(3)
         return DaemonProbe.up("late green")
 
-    monitor = DiagnosticMonitor([Diagnostic("held", probe, timeout_s=5, report=reported.append)])
+    monitor = DiagnosticMonitor(
+        [Diagnostic("held", probe, timeout_s=5, report=reported.append)], clock=system_clock()
+    )
     round_task = asyncio.create_task(monitor.run_round())
     try:
         await _eventually(entered)
@@ -102,7 +106,8 @@ async def test_cancelled_round_closes_reporting_without_stopping_the_monitor() -
         return DaemonProbe.down("abandoned failure")
 
     monitor = DiagnosticMonitor(
-        [Diagnostic("held", probe, interval_s=0.001, timeout_s=5, report=reported.append)]
+        [Diagnostic("held", probe, interval_s=0.001, timeout_s=5, report=reported.append)],
+        clock=system_clock(),
     )
     round_task = asyncio.create_task(monitor.run_round())
     try:
@@ -136,7 +141,8 @@ async def test_stop_keeps_an_admitted_report_in_its_worker_without_waiting_for_i
         completed.append(result)
 
     monitor = DiagnosticMonitor(
-        [Diagnostic("held", lambda: DaemonProbe.up("fresh sample"), timeout_s=5, report=report)]
+        [Diagnostic("held", lambda: DaemonProbe.up("fresh sample"), timeout_s=5, report=report)],
+        clock=system_clock(),
     )
     round_task = asyncio.create_task(monitor.run_round())
     try:
@@ -169,7 +175,9 @@ async def test_stopped_diagnostic_reports_live_worker_and_closes_admission() -> 
         finally:
             completed.set()
 
-    monitor = DiagnosticMonitor([Diagnostic("blocked", blocked, timeout_s=0.01)])
+    monitor = DiagnosticMonitor(
+        [Diagnostic("blocked", blocked, timeout_s=0.01)], clock=system_clock()
+    )
     await monitor.run_round()
     try:
         stopped = asyncio.create_task(monitor.stop())
@@ -217,7 +225,9 @@ def _run_child_probe() -> None:
         return DaemonProbe.up("late green")
 
     async def run() -> None:
-        monitor = DiagnosticMonitor([Diagnostic("blocked", blocked, timeout_s=0.01)])
+        monitor = DiagnosticMonitor(
+            [Diagnostic("blocked", blocked, timeout_s=0.01)], clock=system_clock()
+        )
         await monitor.run_round()
         await monitor.stop()
         payload = json.dumps(
