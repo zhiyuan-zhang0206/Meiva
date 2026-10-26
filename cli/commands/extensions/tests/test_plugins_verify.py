@@ -18,6 +18,8 @@ from base.packages.plugins.enable_config import (
 from base.telemetry.tests.capture.event_capture import EmittedEvents
 from base.telemetry.tests.capture.event_capture import emitted_events as emitted_events
 from cli.commands.extensions.plugins_inspect import cmd_plugins_verify
+from meiva.sdk_surface.install import uninstall
+from meiva.sdk_surface.installation import installed
 
 _PLUGIN_MODULE_PREFIXES = ("meiva_builtins.plugins.", "plugins.")
 
@@ -86,6 +88,21 @@ def test_loadable_plugins_are_green(capsys: pytest.CaptureFixture[str]) -> None:
     assert cmd_plugins_verify(rng=seeded_rng()) == 0
 
     assert "RESULT enabled=1 failed=0 rc=0" in capsys.readouterr().out
+
+
+def test_verify_installs_the_sampling_owner_over_the_generator_it_was_given() -> None:
+    _plugin("good", "LOADED = True\n")
+    _enable("good")
+    rng = seeded_rng(5)
+
+    assert cmd_plugins_verify(rng=rng) == 0
+
+    try:
+        installation = installed()
+        assert installation is not None
+        assert installation.sampling.rng is rng
+    finally:
+        uninstall()
 
 
 def test_a_plugin_using_a_deleted_framework_api_is_red_and_the_rest_still_count(

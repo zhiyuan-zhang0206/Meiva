@@ -6,7 +6,10 @@ from pathlib import Path
 
 import pytest
 
+from base.clock.tests.seeded_rng import seeded_rng
 from base.host.proc import run_bounded
+from base.paths.tests.homes import unit_home as unit_home
+from meiva.boot import process_sampling_owner
 
 _CHILD = Path(__file__).with_name("child_sampling_atexit.py")
 _UNINSTALLED_CHILD = Path(__file__).with_name("child_sampling_atexit_uninstalled.py")
@@ -76,3 +79,13 @@ def test_full_reload_does_not_register_a_service_owners_cleanup(unit_home: Path)
     assert result.stdout.strip() == "open"
     plugins = json.loads((unit_home / "plugins_config.json").read_text())["plugins"]
     assert plugins and all(not entry["enabled"] for entry in plugins.values())
+
+
+def test_the_boot_wrapper_keeps_the_generator_its_root_gave_it(unit_home: Path) -> None:
+    rng = seeded_rng(4)
+
+    owner = process_sampling_owner(rng)
+    try:
+        assert owner.rng is rng
+    finally:
+        owner.close()

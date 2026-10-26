@@ -84,9 +84,16 @@ class SamplingPolicyLike(Protocol):
 # value in [0, 1) that the owner of the policy drew from its random generator for this call, so
 # each call is kept with probability 1/every whatever the other call sites do.
 def keep_sample(every: int, draw: float) -> bool:
+    check_ratio(every)
+    return every == 1 or draw < 1.0 / every
+
+
+# meiva:note
+# A sample ratio is 1 in a positive count; anything else fails where it is decided, before any
+# draw is spent on it.
+def check_ratio(every: int) -> None:
     if every < 1:
         raise ValueError(f"a sample ratio is 1 in a positive count: {every!r}")
-    return every == 1 or draw < 1.0 / every
 
 
 # meiva:note
@@ -101,6 +108,7 @@ class InertSamplingPolicy:
         self.worker: SamplingWorkerLike | None = None
 
     def should_sample(self, every: int) -> bool:
+        check_ratio(every)
         if every > 1:
             raise RuntimeError("an inert sampling policy never samples")
         return True
@@ -132,6 +140,7 @@ __all__ = [
     "SamplingPolicy",
     "SamplingPolicyLike",
     "SamplingSource",
+    "check_ratio",
     "keep_sample",
     "policy_from_aliases",
 ]
