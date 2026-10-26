@@ -40,10 +40,10 @@ export function loadMarkdownMath(): Promise<MarkdownMath> {
   return promise;
 }
 
-export function __resetMarkdownMathForTests(): void {
+export function resetMarkdownMathForTests(): void {
   mathState.mathPromise = null;
 }
 
-export function __setMarkdownMathImportForTests(loader: (() => Promise<MarkdownMath>) | null): void {
+export function setMarkdownMathImportForTests(loader: (() => Promise<MarkdownMath>) | null): void {
   mathState.importMath = loader ?? defaultImport;
 }

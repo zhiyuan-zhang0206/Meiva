@@ -27,7 +27,7 @@ function lastDelimiterRun(value: string): DelimiterRun | undefined {
     return undefined;
   }
 
-  const marker = value[end] as "*" | "_";
+  const marker: "*" | "_" = value[end] === "*" ? "*" : "_";
   let start = end;
   while (start > 0 && value[start - 1] === marker) {
     start -= 1;

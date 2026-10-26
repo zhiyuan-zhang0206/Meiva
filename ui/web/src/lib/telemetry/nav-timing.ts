@@ -40,13 +40,23 @@ export { formatNavTiming } from "./nav-timing-plan";
 
 const SETTLE_MS = 400;
 
-const state = {
+const state: {
+  metrics: ReturnType<typeof createNavTimingMetrics>;
+  frameLoop: number;
+  observer: PerformanceObserver | null;
+  resources: PerformanceObserver | null;
+  fallbackTimer: ReturnType<typeof setTimeout> | null;
+} = {
   metrics: createNavTimingMetrics(),
   frameLoop: 0,
-  observer: null as PerformanceObserver | null,
-  resources: null as PerformanceObserver | null,
-  fallbackTimer: null as ReturnType<typeof setTimeout> | null,
+  observer: null,
+  resources: null,
+  fallbackTimer: null,
 };
+
+function isResourceTimingEntry(entry: PerformanceEntry): entry is PerformanceResourceTiming {
+  return "requestStart" in entry && typeof entry.requestStart === "number";
+}
 
 function countFrames(): void {
   state.frameLoop = requestAnimationFrame(() => {
@@ -76,7 +86,8 @@ function startWatching(): void {
     }
     if (state.resources === null) {
       state.resources = new PerformanceObserver((list) => {
-        for (const entry of list.getEntries() as PerformanceResourceTiming[]) {
+        for (const entry of list.getEntries()) {
+          if (!isResourceTimingEntry(entry)) continue;
           recordResourceEntry(
             state.metrics,
             entry.name,

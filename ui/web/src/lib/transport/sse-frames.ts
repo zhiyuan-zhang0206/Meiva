@@ -13,6 +13,18 @@ export type SystemFrame =
 // all-events stream) keeps its object members and drops the rest instead of
 // casting corrupt members into SystemEvents.
 // meiva:link ui/web/src/docs/frontend-data-flow/frontend-data-flow.meiva.okf.md
+function isHeartbeatPayload(item: unknown): boolean {
+  return typeof item === "object" && item !== null && "role" in item && item.role === "heartbeat";
+}
+
+function isSystemEventObject(item: unknown): item is SystemEvent {
+  return typeof item === "object" && item !== null;
+}
+
+function asSingleSystemEvent(_item: unknown): _item is SystemEvent {
+  return true;
+}
+
 export function classifySystemFrame(raw: string): SystemFrame {
   let parsed: unknown;
   try {
@@ -22,17 +34,17 @@ export function classifySystemFrame(raw: string): SystemFrame {
   }
   if (Array.isArray(parsed)) {
     const events: SystemEvent[] = [];
-    for (const item of parsed as unknown[]) {
-      if (typeof item !== "object" || item === null) continue;
-      if ((item as { role?: unknown }).role === "heartbeat") continue;
-      events.push(item as SystemEvent);
+    for (const item of parsed) {
+      if (!isSystemEventObject(item)) continue;
+      if (isHeartbeatPayload(item)) continue;
+      events.push(item);
     }
     return { kind: "events", events };
   }
-  if (typeof parsed === "object" && parsed !== null && (parsed as { role?: unknown }).role === "heartbeat") {
+  if (isHeartbeatPayload(parsed)) {
     return { kind: "heartbeat" };
   }
-  return { kind: "events", events: [parsed as SystemEvent] };
+  return { kind: "events", events: asSingleSystemEvent(parsed) ? [parsed] : [] };
 }
 
 export function selectedAgentEvents(events: SystemEvent[], activeId: number | null): SystemEvent[] {

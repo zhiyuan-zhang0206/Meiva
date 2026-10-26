@@ -81,6 +81,10 @@ function withoutDroppedRows(wire: NoticesFeedWire): NoticesFeedWire {
   };
 }
 
+function initialResolvedCursor(): ResolvedCursor | undefined {
+  return undefined;
+}
+
 export function useNotices(): NoticesFeed {
   const api = useApi();
   const feedQuery = useQuery({
@@ -94,7 +98,7 @@ export function useNotices(): NoticesFeed {
   const resolvedQuery = useInfiniteQuery({
     queryKey: NOTICES_RESOLVED_QUERY_KEY,
     queryFn: ({ pageParam }) => api.getNotices({ ...pageParam }),
-    initialPageParam: undefined as ResolvedCursor | undefined,
+    initialPageParam: initialResolvedCursor(),
     // The endpoint returns next_cursor in wire shape (snake_case); the api
     // layer expects camelCase params, so translate here. None = end.
     getNextPageParam: (lastPage): ResolvedCursor | undefined =>

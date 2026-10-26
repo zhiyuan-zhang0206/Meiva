@@ -58,21 +58,34 @@ export function consumeLcpEntries(
   }
 }
 
+function isLayoutShiftEntry(entry: PerformanceEntry): entry is LayoutShiftEntryLike {
+  return (
+    "hadRecentInput" in entry &&
+    typeof entry.hadRecentInput === "boolean" &&
+    "value" in entry &&
+    typeof entry.value === "number"
+  );
+}
+
+function isInteractionTimingEntry(entry: PerformanceEntry): entry is InteractionTimingEntryLike {
+  return "interactionId" in entry;
+}
+
 export function consumeLayoutShiftAndEventEntries(
   metrics: WebVitalsMetricsState,
   kind: "layout-shift" | "event",
   entries: readonly PerformanceEntry[],
 ): void {
   if (kind === "layout-shift") {
-    for (const candidate of entries as readonly LayoutShiftEntryLike[]) {
-      if (!candidate.hadRecentInput) {
+    for (const candidate of entries) {
+      if (isLayoutShiftEntry(candidate) && !candidate.hadRecentInput) {
         metrics.cumulativeLayoutShift += candidate.value;
       }
     }
     return;
   }
-  for (const candidate of entries as readonly InteractionTimingEntryLike[]) {
-    if (typeof candidate.interactionId !== "number" || candidate.interactionId <= 0) {
+  for (const candidate of entries) {
+    if (!isInteractionTimingEntry(candidate) || typeof candidate.interactionId !== "number" || candidate.interactionId <= 0) {
       continue;
     }
     metrics.interactionToNextPaint = Math.max(

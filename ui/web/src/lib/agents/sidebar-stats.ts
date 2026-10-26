@@ -18,16 +18,19 @@ export const STATS_WINDOW_LABELS: Record<StatsWindowHours, string> = {
 };
 export const STATS_WINDOW_DEFAULT: StatsWindowHours = 24;
 
+function isStatsWindowHours(value: unknown): value is StatsWindowHours {
+  return typeof value === "number" && STATS_WINDOWS.some((w) => w === value);
+}
+
 export function useStatsWindow(): {
   windowHours: StatsWindowHours;
   setWindowHours: (h: StatsWindowHours) => void;
 } {
   const { settings, setSetting } = useUserSettings();
   const raw = settings["display.stats_window_hours"];
-  const windowHours: StatsWindowHours =
-    typeof raw === "number" && (STATS_WINDOWS as readonly number[]).includes(raw)
-      ? (raw as StatsWindowHours)
-      : STATS_WINDOW_DEFAULT;
+  const windowHours: StatsWindowHours = isStatsWindowHours(raw)
+    ? raw
+    : STATS_WINDOW_DEFAULT;
   const setWindowHours = useCallback(
     (h: StatsWindowHours) => setSetting("display.stats_window_hours", h),
     [setSetting],

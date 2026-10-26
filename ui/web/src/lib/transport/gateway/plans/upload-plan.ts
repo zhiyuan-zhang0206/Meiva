@@ -36,7 +36,7 @@ function failureDetail(status: number, responseText: string): string {
   let detail = `HTTP ${status}`;
   try {
     const error: unknown = JSON.parse(responseText);
-    if (error && typeof error === "object" && "detail" in error && typeof error.detail === "string") {
+    if (error && typeof error === "object" && "detail" in error && typeof error.detail === "string" && error.detail) {
       detail = error.detail;
     }
   } catch {
@@ -47,20 +47,17 @@ function failureDetail(status: number, responseText: string): string {
 
 const UNCONFIRMED = "Upload source acceptance is unconfirmed";
 
-export function confirmUploadAcceptance(
-  status: number,
-  responseText: string,
+function isConfirmedUploadAcceptance(
+  accepted: unknown,
   agentId: number,
   plan: UploadBatchPlan,
-): DeliveredUploadAcceptance {
-  if (status !== 202) throw new Error(failureDetail(status, responseText));
-  const accepted: unknown = JSON.parse(responseText);
+): accepted is DeliveredUploadAcceptance {
   if (!accepted || typeof accepted !== "object" || !("batch_id" in accepted) ||
     typeof accepted.batch_id !== "string" || !/^[0-9a-f]{32}$/.test(accepted.batch_id) ||
     !("agent_id" in accepted) || accepted.agent_id !== agentId ||
     !("status_url" in accepted) || accepted.status_url !== `${plan.path}/${accepted.batch_id}` ||
     !("files" in accepted) || !Array.isArray(accepted.files) || accepted.files.length !== plan.submitted.length) {
-    throw new Error(UNCONFIRMED);
+    return false;
   }
   for (const [ordinal, value] of accepted.files.entries()) {
     const item: unknown = value;
@@ -71,20 +68,37 @@ export function confirmUploadAcceptance(
       !("name" in item) || typeof item.name !== "string" ||
       item.name.split(".", 1)[0] !== `${accepted.batch_id}-${ordinal}` ||
       !("content_type" in item) || item.content_type !== plan.submitted[ordinal].contentType) {
-      throw new Error(UNCONFIRMED);
+      return false;
     }
   }
-  return accepted as DeliveredUploadAcceptance;
+  return true;
+}
+
+function isUploadedBatch(value: unknown): value is UploadedBatch {
+  return typeof value === "object" && value !== null && "files" in value && Array.isArray(value.files);
+}
+
+export function confirmUploadAcceptance(
+  status: number,
+  responseText: string,
+  agentId: number,
+  plan: UploadBatchPlan,
+): DeliveredUploadAcceptance {
+  if (status !== 202) throw new Error(failureDetail(status, responseText));
+  const accepted: unknown = JSON.parse(responseText);
+  if (!isConfirmedUploadAcceptance(accepted, agentId, plan)) {
+    throw new Error(UNCONFIRMED);
+  }
+  return accepted;
 }
 
 export function legacyUploadResult(status: number, responseText: string): UploadedBatch {
-  if (status >= 200 && status < 300) return JSON.parse(responseText) as UploadedBatch;
-  let message = `HTTP ${status}`;
-  try {
-    const err = JSON.parse(responseText) as { detail?: string };
-    if (err.detail) message = err.detail;
-  } catch { message = `HTTP ${status}`; }
-  throw new Error(message);
+  if (status >= 200 && status < 300) {
+    const parsed: unknown = JSON.parse(responseText);
+    if (!isUploadedBatch(parsed)) throw new Error(UNCONFIRMED);
+    return parsed;
+  }
+  throw new Error(failureDetail(status, responseText));
 }
 
 export function uploadPercent(progress: { lengthComputable: boolean; loaded: number; total: number }): number | null {
