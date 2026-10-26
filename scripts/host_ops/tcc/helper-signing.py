@@ -43,10 +43,13 @@ DESCRIPTION = (
 # swap. A new session survives the teardown, and its log is the only evidence
 # left on the host -- `$MEIVA_HOME/logs`, where a recovery session looks -- so the
 # path is printed before anything else happens.
-def _detach(argv: list[str]) -> int:
+def _detach(argv: list[str], cluster_home: Path) -> int:
     from base.paths import logs_dir
 
-    log = logs_dir() / f"helper-signing-{datetime.now(UTC).strftime('%Y%m%dT%H%M%SZ')}.log"
+    log = (
+        logs_dir(home=cluster_home)
+        / f"helper-signing-{datetime.now(UTC).strftime('%Y%m%dT%H%M%SZ')}.log"
+    )
     pid = os.fork()
     if pid:
         print(f"detached as pid {pid}; log: {log}")
@@ -77,7 +80,7 @@ def _codesign(*args: str, app: Path) -> str:
 # meiva:note
 # Report the identity, the installed helper and the requirement it carries; reads
 # `security find-identity` for this home's keychain only.
-def status() -> int:
+def status(cluster_home: Path) -> int:
     from services.desktop.permissions_helper import signing_identity
 
     keychain = signing_identity.keychain_path()
@@ -92,7 +95,7 @@ def status() -> int:
     print((identities.stdout or "").strip() or "(no identities)")
     from base.paths import permissions_helper_app_dir
 
-    app = permissions_helper_app_dir() / "MeivaPermissionsHelper.app"
+    app = permissions_helper_app_dir(home=cluster_home) / "MeivaPermissionsHelper.app"
     if not app.exists():
         print(f"installed helper: absent ({app})")
         return 0
@@ -109,13 +112,13 @@ def status() -> int:
     return 0
 
 
-def provision() -> int:
+def provision(cluster_home: Path) -> int:
     from services.desktop.permissions_helper import lifecycle, signing_identity
 
     signing_identity.ensure(lifecycle.run_tool, create=True)
     print(f"signing identity ready: {signing_identity.keychain_path()}")
     print(f"record: {signing_identity.readme_path()}")
-    return status()
+    return status(cluster_home)
 
 
 def export(path: str) -> int:
@@ -145,7 +148,7 @@ def export(path: str) -> int:
     return 0
 
 
-def import_identity(path: str, *, password_file: str | None) -> int:
+def import_identity(path: str, *, password_file: str | None, cluster_home: Path) -> int:
     from services.desktop.permissions_helper import lifecycle, signing_identity
 
     archive = Path(path).expanduser().resolve()
@@ -190,14 +193,14 @@ def import_identity(path: str, *, password_file: str | None) -> int:
     )
     signing_identity.require(lifecycle.run_tool)
     print(f"imported the identity into {keychain}")
-    return status()
+    return status(cluster_home)
 
 
-def switch(*, start: bool, now: datetime) -> int:
+def switch(*, cluster_home: Path, start: bool, now: datetime) -> int:
     from base.paths import permissions_helper_app_dir
     from services.desktop.permissions_helper import lifecycle, signing_identity
 
-    home = permissions_helper_app_dir()
+    home = permissions_helper_app_dir(home=cluster_home)
     app = home / "MeivaPermissionsHelper.app"
     state = home / "build-state.json"
     backup = home / f"backup-{now.strftime('%Y%m%dT%H%M%SZ')}"
@@ -283,12 +286,12 @@ def _restore(backup: Path, home: Path, app: Path, before_dr: str) -> None:
 # This host's helper facts, one `key=value` per line, for a caller that compares machines
 # without importing this package: a wave gate reads them as opaque strings, and only this
 # module decides what "stale", "loaded" and the certificate root mean.
-def facts() -> int:
+def facts(cluster_home: Path) -> int:
     from base.paths import permissions_helper_app_dir
     from services.desktop.permissions_helper import lifecycle
     from services.desktop.permissions_helper.lifecycle import PermissionsHelperBuildError
 
-    home = permissions_helper_app_dir()
+    home = permissions_helper_app_dir(home=cluster_home)
     app = home / "MeivaPermissionsHelper.app"
     try:
         expected = lifecycle.source_content_hash()
@@ -338,17 +341,24 @@ def main(argv: list[str]) -> int:
         help="re-run this command in its own session, so the switch survives the runtime it stops",
     )
     args = parser.parse_args(argv)
+    from base.paths.home import resolve_meiva_home
+
+    cluster_home = resolve_meiva_home()
     if args.detach:
-        return _detach(sys.argv[1:])
+        return _detach(sys.argv[1:], cluster_home)
     if args.command in {"import", "export"} and not args.path:
         parser.error(f"{args.command} needs a PKCS#12 path")
     return {
-        "status": status,
-        "facts": facts,
-        "provision": provision,
-        "switch": lambda: switch(start=args.start, now=datetime.now(UTC)),
+        "status": lambda: status(cluster_home),
+        "facts": lambda: facts(cluster_home),
+        "provision": lambda: provision(cluster_home),
+        "switch": lambda: switch(
+            cluster_home=cluster_home, start=args.start, now=datetime.now(UTC)
+        ),
         "export": lambda: export(args.path or ""),
-        "import": lambda: import_identity((args.path or ""), password_file=args.password_file),
+        "import": lambda: import_identity(
+            (args.path or ""), password_file=args.password_file, cluster_home=cluster_home
+        ),
     }[args.command]()
 
 
