@@ -109,7 +109,7 @@ pytest_plugins = [
     "tests.fixtures.path_scopes",
     # Stall forensics (task #3513: the asyncio probe under `-o faulthandler_timeout=N`)
     # and the split-directory collection guard — see each docstring.
-    "tests._asyncio_stall_probe",
+    "tests.asyncio_stall_probe",
     "tests.fixtures.collection_guard",
     "tests.fixtures.host_platform",
     "pytester",

@@ -38,7 +38,7 @@ from base.paths import run_dir
 
 
 def current_pid() -> int:
-    return os.getpid()
+    return psutil.Process().pid
 
 
 _current_pid = current_pid

@@ -8,11 +8,7 @@ exports = ["http.py", "types.py"]
 "." = "strict-to-be"
 "__init__.py" = "strict"
 
-[debt.any-collaborator]
-"types.py#any AsyncTransport.handle_async_request.request" = 1
-
 [debt.impure-call]
 "http.py#async def post_json" = 1
 "http.py#import httpx" = 1
 "types.py#async def decide" = 1
-"types.py#async def handle_async_request" = 1

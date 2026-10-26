@@ -15,17 +15,5 @@ exports = ["conftest.py", "fakes", "process_support.py", "visual"]
 [loads]
 "process_support.py" = ["services/agent_runner"]
 
-[debt.env-patch]
-"conftest.py#monkeypatch.setenv os.environ.MEIVA_HOME" = 1
-
-[debt.first-party-patch]
-"_credentials.py#assignment base.config.settings.data_plane.cluster_secret" = 2
-"conftest.py#assignment base.config.settings.data_plane.db_url" = 2
-"conftest.py#assignment base.config.settings.data_plane.events_channel" = 2
-"conftest.py#assignment base.config.settings.data_plane.redis_url" = 2
-
-[debt.stdlib-patch]
-"process_support.py#assignment sys.argv" = 1
-
 [debt.third-party-patch]
 "_credentials.py#monkeypatch.setattr httpx.Client.send" = 1

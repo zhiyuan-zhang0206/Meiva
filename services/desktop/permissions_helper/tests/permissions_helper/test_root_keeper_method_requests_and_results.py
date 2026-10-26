@@ -206,7 +206,7 @@ def test_gui_ops_wire_requests(fake_helper) -> None:
     ]
 
 
-def test_incapability_branch_ordering(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_incapability_branch_ordering() -> None:
     # Drive every branch explicitly (a macOS host with the tools it has, then a Linux one) so a
     # reordered or dropped prong is caught whatever machine the test runs on.
     from base.host.system import probes as pp
@@ -214,8 +214,8 @@ def test_incapability_branch_ordering(monkeypatch: pytest.MonkeyPatch) -> None:
     def mac(programs: dict[str, str]) -> Host:
         return fake_host(platform=DARWIN_ARM64, programs=programs)
 
-    def reason(host: Host) -> str:
-        r = pp.permissions_helper_incapability(host=host)
+    def reason(host: Host, *, has_display: bool = True) -> str:
+        r = pp.permissions_helper_incapability(host=host, has_display=has_display)
         assert r is not None
         return r
 
@@ -224,12 +224,7 @@ def test_incapability_branch_ordering(monkeypatch: pytest.MonkeyPatch) -> None:
     assert pp.permissions_helper_incapability(host=mac(present)) is None
     assert "no swiftc" in reason(mac({}))
     assert "no codesign" in reason(mac({"swiftc": "/usr/bin/swiftc"}))
-
-    def fake_display_available(*, host: Host) -> bool:
-        return False
-
-    monkeypatch.setattr(pp, "display_available", fake_display_available)
-    assert "no display" in reason(mac(present))
+    assert "no display" in reason(mac(present), has_display=False)
 
     assert "macOS only" in reason(fake_host(platform=LINUX_X86))
 

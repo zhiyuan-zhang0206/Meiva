@@ -14,6 +14,8 @@ def test_service_reads_stay_full_when_singleton_domain_excluded(tmp_path: Path) 
     real = config.settings
 
     class _GatewayProfileLimited:
+        profile: str | None = None
+
         def has_domain(self, name: str) -> bool:
             return name not in ("agent", "sandbox", "web") and real.has_domain(name)
 

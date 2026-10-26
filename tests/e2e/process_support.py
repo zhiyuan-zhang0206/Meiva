@@ -775,7 +775,7 @@ def fixture_entrypoint() -> None:
 
     gate, module, *arguments = sys.argv[1:]
     inject_fixture_gate(Path(gate))
-    sys.argv = [module, *arguments]
+    sys.argv[:] = [module, *arguments]
     runpy.run_module(module, run_name="__main__", alter_sys=True)
 
 

@@ -10,6 +10,7 @@ from base.agents.history.hierarchy.rebuild import IDLE_WAIT_SECONDS, checks_idle
 from base.config import ConfigBoot
 from base.db import Database
 from services.agent_runner.understanding.group_consumer import (
+    MIN_CHECK_OPEN,
     GroupingModels,
     run_group_checks,
 )
@@ -25,6 +26,7 @@ async def run_rebuild(
     *,
     config: ConfigBoot,
     executor: Executor | None = None,
+    min_check_open: int = MIN_CHECK_OPEN,
 ) -> int:
     # meiva:note
     # Rebuild the agent's upper levels from its level-1 nodes; the number of leaves replayed.
@@ -40,6 +42,13 @@ async def run_rebuild(
     leaf_ends = await lift_upper(pool, agent_id)
     for end in leaf_ends:
         await run_group_checks(
-            pool, db, models, agent_id, config=config, executor=executor, upto=end
+            pool,
+            db,
+            models,
+            agent_id,
+            config=config,
+            executor=executor,
+            upto=end,
+            min_check_open=min_check_open,
         )
     return len(leaf_ends)

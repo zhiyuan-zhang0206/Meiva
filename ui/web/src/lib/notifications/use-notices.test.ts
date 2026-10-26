@@ -311,9 +311,10 @@ describe("dropOpenNotices (Task #1814)", () => {
     await waitFor(() => expect(openIds()).toEqual([7]));
     await waitFor(() => expect(queryClient.isFetching()).toBe(0));
 
+    vi.useFakeTimers();
     dropOpenNotices(queryClient, [7]);
-    vi.useFakeTimers({ toFake: ["Date"] });
-    vi.setSystemTime(Date.now() + 20_000);
+    vi.advanceTimersByTime(20_000);
+    vi.useRealTimers();
     await queryClient.refetchQueries({ queryKey: NOTICES_QUERY_KEY });
     // Past the 15s bound the guard releases: a resolve that never landed
     // server-side cannot hide an open row forever.

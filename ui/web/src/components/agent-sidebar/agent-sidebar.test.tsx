@@ -95,8 +95,8 @@ vi.mock("@/lib/plugins/plugin-stats", async () => {
   const actual = await vi.importActual<typeof PluginStatsModule>("@/lib/plugins/plugin-stats");
   return {
     ...actual,
-    usePluginStatCards: (values: PluginStat[] | undefined) =>
-      actual.buildPluginStatCards(state.pluginStatDeclarations, values),
+    usePluginStatCards: (values: PluginStat[] | undefined, now: Date) =>
+      actual.buildPluginStatCards(state.pluginStatDeclarations, values, now),
   };
 });
 

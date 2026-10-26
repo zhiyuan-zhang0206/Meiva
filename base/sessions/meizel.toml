@@ -19,7 +19,6 @@ exports = ["backend.py", "coding_session_owner.py", "coding_session_owner_record
 "coding_session_owner.py#clock datetime.datetime.now" = 1
 "coding_session_owner.py#pid os.getuid" = 1
 "coding_session_owner.py#random uuid.uuid4" = 1
-"helper_chain_guard.py#pid os.getpid" = 1
 "helperproc.py#settings base.config.settings" = 1
 "record.py#clock time.time" = 1
 "tool_capabilities.py#clock datetime.datetime.now" = 1

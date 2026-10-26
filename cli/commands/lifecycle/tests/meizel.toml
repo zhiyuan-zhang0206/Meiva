@@ -1,4 +1,4 @@
-exports = ["converge_host", "startup", "stop"]
+exports = ["converge_host", "start_storage", "startup", "stop"]
 
 [uses]
 "status" = ["scripted_root.py", "startup"]

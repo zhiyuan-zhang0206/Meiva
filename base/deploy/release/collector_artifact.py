@@ -72,8 +72,9 @@ class DownloadLimits:
 
 
 class DownloadProgress:
-    def __init__(self, received: int = 0) -> None:
+    def __init__(self, received: int = 0, *, deadline: float = 0.0) -> None:
         self.received = received
+        self.deadline = deadline
 
     def add(self, count: int) -> None:
         self.received += count
@@ -87,11 +88,10 @@ def stream_download(
     open_url: UrlOpener,
     timers: Timers,
     limits: DownloadLimits,
-    deadline: float,
     progress: DownloadProgress,
 ) -> None:
     def _remaining() -> float:
-        return deadline - timers.monotonic()
+        return progress.deadline - timers.monotonic()
 
     def _elapsed() -> float:
         return limits.total_budget_s - _remaining()
@@ -173,7 +173,7 @@ def download_with_retry(
     def _download_once() -> None:
         nonlocal attempt, progress
         attempt += 1
-        progress = DownloadProgress()
+        progress = DownloadProgress(deadline=deadline)
         try:
             stream_download(
                 url,
@@ -181,7 +181,6 @@ def download_with_retry(
                 open_url=open_url,
                 timers=timers,
                 limits=limits,
-                deadline=deadline,
                 progress=progress,
             )
         except Exception as exc:  # URLError / TimeoutError / OSError

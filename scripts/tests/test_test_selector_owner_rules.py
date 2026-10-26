@@ -361,7 +361,7 @@ def test_the_real_root_conftest_plugins_are_global() -> None:
     for path in (
         "conftest.py",
         "tests/fixtures/env_bootstrap.py",
-        "tests/_asyncio_stall_probe.py",
+        "tests/asyncio_stall_probe.py",
     ):
         assert test_selector.classify_path(path, checkout) is PathClass.GLOBAL, path
     assert (

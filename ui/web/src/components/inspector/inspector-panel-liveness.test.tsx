@@ -198,7 +198,7 @@ describe("InspectorPanel birth (cell in the merged Liveness section, Task #1195)
     render(<InspectorPanel agentId={1} />);
     await waitFor(() => expect(screen.getByText("Birth")).toBeTruthy());
     expect(
-      screen.getByText(`${formatRelative(spawned)}, ${formatAbsolute(spawned)}`),
+      screen.getByText(`${formatRelative(spawned, new Date())}, ${formatAbsolute(spawned)}`),
     ).toBeTruthy();
   });
 });

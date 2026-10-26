@@ -1,14 +1,8 @@
-"""The CI stall probe really dumps asyncio chains before faulthandler does.
-
-Task #3513: the backend shards stalled silently and the faulthandler thread
-dumps could not name the stuck test. `tests/_asyncio_stall_probe.py` exists to
-close that gap. This meta-test proves the instrument is wired into the session,
-fires inside a real pytest run under `-o faulthandler_timeout=N` with the chain
-dump landing BEFORE the thread dump, and stays inert — nothing patched —
-without a deadline. A probe that silently stopped arming would leave the next
-stall as blind as the ones that motivated it; treat a red here as a blocking
-regression of the forensics, not as a flaky meta-test.
-"""
+# meiva:note
+# The CI stall probe dumps asyncio chains before faulthandler does.
+# This meta-test proves tests/asyncio_stall_probe.py is wired into the session,
+# fires inside a real pytest run under -o faulthandler_timeout=N with the chain
+# dump landing BEFORE the thread dump, and stays inert without a deadline.
 
 from __future__ import annotations
 
@@ -23,7 +17,7 @@ from typing import cast
 
 import pytest
 
-from tests import _asyncio_stall_probe as probe
+from tests import asyncio_stall_probe as probe
 
 _REPO_ROOT = Path(__file__).resolve().parents[2]
 
@@ -141,8 +135,8 @@ def test_probe_window_cancels_its_timers_at_exit() -> None:
 
 
 def test_the_probe_hook_is_wired_into_this_session(pytestconfig: pytest.Config) -> None:
-    assert pytestconfig.pluginmanager.hasplugin("tests._asyncio_stall_probe"), (
-        "the repo-root conftest.py no longer loads tests/_asyncio_stall_probe via pytest_plugins"
+    assert pytestconfig.pluginmanager.hasplugin("tests.asyncio_stall_probe"), (
+        "the repo-root conftest.py no longer loads tests/asyncio_stall_probe via pytest_plugins"
     )
     impls = pytestconfig.hook.pytest_runtest_protocol.get_hookimpls()
     wired = [
@@ -168,7 +162,7 @@ def test_the_probe_dumps_before_faulthandler_in_a_real_pytest_run(tmp_path: Path
             "-p",
             "no:cacheprovider",
             "-p",
-            "tests._asyncio_stall_probe",
+            "tests.asyncio_stall_probe",
             "-o",
             "asyncio_mode=auto",
             "-o",

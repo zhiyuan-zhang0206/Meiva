@@ -33,6 +33,7 @@
 
 from __future__ import annotations
 
+import dis
 import faulthandler
 import os
 import runpy
@@ -244,39 +245,6 @@ def record_run_end(database: Database, run_id: int | None, *, ok: bool, note: st
         logger.exception("schedule run-record end failed (run {})", run_id)
 
 
-_ORIGINAL_SLEEP = time.sleep
-
-
-def patch_park_detection() -> None:
-    """Wrap ``time.sleep`` so the stall guard can see a deliberate park.
-
-    ``time.sleep`` is a C builtin: the deepest *Python* frame of a main thread
-    blocked inside it is the caller of sleep — a stable frame, exactly like a
-    stall. The wrapper is named ``sleep`` (a ``_PARK_FRAME_NAMES`` member), so
-    a main thread parked in it reads as parked, while a thread stuck in any
-    other call still reads as stalled. Semantics are unchanged — the wrapper
-    just forwards to the original."""
-
-    def sleep(delay: float) -> None:
-        _ORIGINAL_SLEEP(delay)
-
-    time.sleep = sleep
-
-
-def restore_park_detection() -> None:
-    """Undo ``patch_park_detection``: put the stdlib ``time.sleep`` back.
-
-    The wrapper exists only for the stall guard's judgment window; leaving it
-    installed past the guard's stop swaps `time.sleep` for a Python function
-    process-wide in this runner (the runner is its own process — one schedule
-    per `python -m services.wake.schedule_manager.runner <id>` session — but a
-    ``.py`` schedule script runs in-process here, so the swap would leak into
-    the rest of its run), which a later ``assert time.sleep is _REAL_SLEEP``
-    guard in the test suite trips on. Idempotent and safe to call without a
-    patch."""
-    time.sleep = _ORIGINAL_SLEEP
-
-
 def stall_action(
     database: Database,
     schedule_id: int,
@@ -312,11 +280,38 @@ def stall_action(
         os._exit(1)  # hard exit; the manager records the process loss
 
 
+# meiva:note
+# Read the callee name of the call instruction at f_lasti so a C call like time.sleep reports its target without wrapping stdlib functions.
+def _called_name(frame: FrameType) -> str:
+    instructions = list(dis.get_instructions(frame.f_code))
+    call = next(
+        (
+            ins
+            for ins in instructions
+            if ins.offset == frame.f_lasti and ins.opname in ("CALL", "CALL_FUNCTION_EX")
+        ),
+        None,
+    )
+    if call is None or call.positions is None:
+        return ""
+    target = (call.positions.lineno, call.positions.col_offset)
+    loads = [
+        ins.argval
+        for ins in instructions
+        if ins.offset < call.offset
+        and ins.positions is not None
+        and (ins.positions.lineno, ins.positions.col_offset) == target
+        and ins.opname.startswith("LOAD_")
+        and isinstance(ins.argval, str)
+    ]
+    return loads[-1] if loads else ""
+
+
 def _frame_facts(frame: FrameType) -> Frame:
     parent = frame.f_back
     return Frame(
         filename=frame.f_code.co_filename,
-        function=frame.f_code.co_name,
+        function="sleep" if _called_name(frame) == "sleep" else frame.f_code.co_name,
         parent_filename=None if parent is None else parent.f_code.co_filename,
         parent_function=None if parent is None else parent.f_code.co_name,
     )
@@ -426,7 +421,6 @@ def run_python_script(
     # (2026-08-03 self-evolution miss). Started before plugin loading
     # so an import hang is covered too. Stopped before _mark_completed
     # so a clean return cannot be overtaken by a spurious kill.
-    patch_park_detection()
     guard = StallGuard(root.database, schedule_id, run_id, policy=root.policy, pid=root.pid)
     # The gateway launches this runner as `python -m services.wake.schedule_manager.runner
     # <id>`, so sys.argv carries the schedule id. The script must not
@@ -461,7 +455,6 @@ def run_python_script(
             # its original error and already reported it immediately.
             logger.opt(exception=True).error("Schedule {} guard close failed", schedule_id)
         finally:
-            restore_park_detection()
             if guard.action_started:
                 # A real stall won admission before script completion.
                 # Never mark it completed, even if cleanup exhausted

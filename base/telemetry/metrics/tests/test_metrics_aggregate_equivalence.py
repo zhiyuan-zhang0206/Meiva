@@ -42,9 +42,11 @@ def _run_aggregate(
     since_compact: bool = False,
 ) -> tuple[str, dict[str, Any], dict[int, Any]]:
     """Run the aggregate path and return (text, data, per-agent rollups)."""
-    agg = fetch_aggregate(stream.db, days, agent, since_compact=since_compact, now=stream.now)
-    text, data = build_report_from_aggregate(agg, days, agent, since_compact=since_compact)
-    _total, roll = fetch_agent_rollups(stream.db, days, since_compact=since_compact, now=stream.now)
+    agg = fetch_aggregate(stream.db, days, agent, now=stream.now, since_compact=since_compact)
+    text, data = build_report_from_aggregate(
+        agg, days, agent, now=stream.now, since_compact=since_compact
+    )
+    _total, roll = fetch_agent_rollups(stream.db, days, now=stream.now, since_compact=since_compact)
     return text, data, roll
 
 

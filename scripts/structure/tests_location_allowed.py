@@ -265,7 +265,7 @@ ALLOWED: dict[str, tuple[Category, str]] = {
     ),
     "tests/harness/test_asyncio_stall_probe.py": (
         "contract",
-        "tests the CI stall probe, tests/_asyncio_stall_probe.py",
+        "tests the CI stall probe, tests/asyncio_stall_probe.py",
     ),
     "tests/harness/test_ci_rerun_workflow.py": (
         "contract",

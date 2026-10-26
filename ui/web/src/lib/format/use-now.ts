@@ -8,10 +8,13 @@ import { useEffect, useState } from "react";
 // system of its own. The tick lives in the component that renders those
 // values, so an unmounted surface (a closed panel, a navigated-away page)
 // leaves no interval running.
-export function useNow(intervalMs: number): Date {
-  const [now, setNow] = useState(() => new Date());
+export function useNow(intervalMs: number, initialNow: Date): Date {
+  const [now, setNow] = useState(initialNow);
   useEffect(() => {
-    const id = setInterval(() => setNow(new Date()), intervalMs);
+    const id = setInterval(
+      () => setNow((prev) => new Date(prev.getTime() + intervalMs)),
+      intervalMs,
+    );
     return () => clearInterval(id);
   }, [intervalMs]);
   return now;

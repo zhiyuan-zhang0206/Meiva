@@ -18,7 +18,7 @@ envelope and boot events are not outcomes.
 
 from __future__ import annotations
 
-from datetime import UTC, datetime, timedelta
+from datetime import datetime, timedelta
 from typing import Any, NamedTuple
 
 import psycopg
@@ -310,20 +310,16 @@ def _per_agent_counters(
     return per_agent
 
 
-def _utc_now() -> datetime:
-    return datetime.now(UTC)
-
-
 def read_window(
     conn: psycopg.Connection[Any],
     days: int,
     agent_id: int | None,
     *,
+    now: datetime,
     since_compact: bool = False,
-    now: datetime | None = None,
 ) -> dict[str, Any]:
     """Every aggregate of the metrics window, as plain Python values."""
-    end = now or _utc_now()
+    end = now
     start = end - timedelta(days=days)
     cutoffs = _cutoffs(conn, start, end, agent_id) if since_compact else {}
     scope = _Scope(start, end, agent_id, cutoffs)
@@ -370,11 +366,11 @@ def read_agent_window(
     conn: psycopg.Connection[Any],
     days: int,
     *,
+    now: datetime,
     since_compact: bool = False,
-    now: datetime | None = None,
 ) -> dict[str, Any]:
     """The per-agent counters and `llm_usage` sums of the window, for `/api/metrics/agents`."""
-    end = now or _utc_now()
+    end = now
     start = end - timedelta(days=days)
     cutoffs = _cutoffs(conn, start, end, None) if since_compact else {}
     scope = _Scope(start, end, None, cutoffs)

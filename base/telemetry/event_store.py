@@ -25,7 +25,6 @@ import re
 import threading
 import time
 from collections.abc import Sequence
-from datetime import UTC, datetime
 from typing import Any, LiteralString, TypeGuard
 
 import psycopg
@@ -170,23 +169,22 @@ def store_events(db: Database, events: Sequence[Event], *, now: float | None = N
     if not records:
         return
     current_time = time.monotonic() if now is None else now
+    month = (events[-1].ts.year, events[-1].ts.month)
     with _lock:
         if _disabled or current_time < retry_at:
             return
         try:
-            write(db, records)
+            write(db, records, month=month)
         except Exception as exc:
             _failed(exc, len(records), now=current_time)
         else:
             failures = 0
 
 
-def write(db: Database, records: list[dict[str, Any]]) -> None:
+def write(db: Database, records: list[dict[str, Any]], *, month: tuple[int, int]) -> None:
     global _ensured_month  # noqa: PLW0603
     from base.db.transaction import write_transaction
 
-    today = datetime.now(UTC)
-    month = (today.year, today.month)
     with write_transaction(_open_pool(db), timeout=_POOL_TIMEOUT_S) as conn:
         conn.execute(f"SET LOCAL statement_timeout = '{_STATEMENT_TIMEOUT}'")
         conn.execute(f"SET LOCAL lock_timeout = '{_LOCK_TIMEOUT}'")

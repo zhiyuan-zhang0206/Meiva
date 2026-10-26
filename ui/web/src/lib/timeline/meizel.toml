@@ -23,5 +23,4 @@ exports = ["timeline-colors.ts", "timeline-store.ts", "timeline-width.ts", "time
 "timeline.ts" = "strict"
 
 [debt.ambient-read]
-"use-throttled-streaming.ts#clock Date.now" = 3
-"use-timeline.ts#clock Date.now" = 5
+"use-timeline.ts#clock Date.now" = 3

@@ -145,7 +145,7 @@ export function NoticeListRow({
             >
               {t("decision")}
             </span>
-            {createdAt && <span>{formatRelativeTime(createdAt)}</span>}
+            {createdAt && <span>{formatRelativeTime(createdAt, new Date())}</span>}
             {blocking && <span className="text-destructive">{t("blocking")}</span>}
           </span>
         </span>
@@ -176,7 +176,7 @@ export function AgentContextHeader({
         <AgentStatusDot status={agentStatus} />
         <span className={cn("truncate text-xs text-muted-foreground", MIN_W_0)}>
           {agentLabel}
-          {createdAt ? ` · ${formatRelativeTime(createdAt)}` : ""}
+          {createdAt ? ` · ${formatRelativeTime(createdAt, new Date())}` : ""}
         </span>
         {agentPage && (
           <AgentPageLink page={agentPage} showLabel className={cn("ml-auto text-[10px]", MIN_W_0)} />

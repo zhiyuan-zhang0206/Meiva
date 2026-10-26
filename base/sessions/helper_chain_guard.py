@@ -2,8 +2,8 @@
 
 from __future__ import annotations
 
-import os
-from collections.abc import Callable
+from collections.abc import Mapping
+from types import MappingProxyType
 
 import psutil
 
@@ -37,18 +37,17 @@ def helper_marker_pid() -> str | None:
     return inherited_process_env().get(HELPER_PID_ENV)
 
 
-def parent_chain_intact(read_ppid: Callable[[int], int | None] = _read_ppid) -> bool:
-    """Whether this process is still anchored to the helper that spawned it.
-
-    Processes not spawned by the helper carry no marker and are left alone.
-    A malformed injected marker is treated as a broken chain rather than
-    silently disabling the guard. A marked process is intact while the
-    helper appears anywhere on its ancestor chain — the direct child the
-    helper spawned, and every descendant of it (the root supervisor, a
-    child daemon) — within `_MAX_ANCESTOR_HOPS` ppid hops; a link that
-    cannot be read (an intermediate process is gone) breaks the chain.
-    `read_ppid` is the link reader; tests pass one that feeds a synthetic chain.
-    """
+# meiva:note
+# Whether this process is still anchored to the helper that spawned it.
+# Processes not spawned by the helper carry no marker and are left alone.
+# A malformed injected marker is treated as a broken chain rather than
+# silently disabling the guard. A marked process is intact while the
+# helper appears anywhere on its ancestor chain — the direct child the
+# helper spawned, and every descendant of it (the root supervisor, a
+# child daemon) — within `_MAX_ANCESTOR_HOPS` ppid hops; a link that
+# cannot be read (an intermediate process is gone) breaks the chain.
+# `ppids` overrides the process table when tests feed a synthetic chain.
+def parent_chain_intact(pid: int, ppids: Mapping[int, int] = MappingProxyType({})) -> bool:
     raw_helper_pid = helper_marker_pid()
     if raw_helper_pid is None:
         return True
@@ -58,13 +57,12 @@ def parent_chain_intact(read_ppid: Callable[[int], int | None] = _read_ppid) -> 
         return False
     if helper_pid <= 0:
         return False
-    return _helper_on_ancestor_chain(helper_pid, read_ppid)
+    return _helper_on_ancestor_chain(pid, helper_pid, ppids)
 
 
-def _helper_on_ancestor_chain(helper_pid: int, read_ppid: Callable[[int], int | None]) -> bool:
-    pid = os.getpid()
+def _helper_on_ancestor_chain(pid: int, helper_pid: int, ppids: Mapping[int, int]) -> bool:
     for _ in range(_MAX_ANCESTOR_HOPS):
-        ppid = read_ppid(pid)
+        ppid = ppids.get(pid) if ppids else _read_ppid(pid)
         if ppid is None:
             return False
         if ppid == helper_pid:

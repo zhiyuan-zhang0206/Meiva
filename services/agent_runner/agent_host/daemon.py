@@ -127,7 +127,7 @@ _pidfile = pidfile_path
 
 
 def _claim_pidfile() -> None:
-    if _is_running():
+    if is_running():
         host_log.info("[agent-host] daemon already running (pidfile=%s), exiting", _pidfile())
         sys.exit(1)
     if not acquire_pidfile(_pidfile(), _MODULE):
@@ -470,9 +470,9 @@ async def close_process_owners(
         primary.add_note(f"Host process cleanup also failed: {secondary!r}")
 
 
-def _is_running() -> bool:
-    """Whether a host is already running. Pid-reuse-safe: a live pid whose argv
-    does not name this module is a recycled pid, not an instance."""
+# meiva:note
+# Whether a host is already running; a live pid whose argv does not name this module is recycled.
+def is_running() -> bool:
     return pidfile_holds_daemon(_pidfile(), _MODULE)
 
 
@@ -589,10 +589,14 @@ async def run(
     on_clients_owned: Callable[[], None] | None = None,
 ) -> None:
     """Boot the host and serve wakes in the order documented by this module."""
-    assert_clock_lattice(clock_values())
+    assert_clock_lattice(
+        clock_values(
+            config.view.daemon.wedged_agent_inbound_age_seconds,
+            config.view.sandbox.exec_node_timeout_seconds,
+        )
+    )
     instance_lock = take_instance_lock(home)
     _claim_pidfile()
-
     from agent.graph import build_graph  # pyright: ignore[reportUnknownVariableType]
     from agent.process_boot import init_process_scope, land_cluster_extensions, process_trace_config
 
@@ -637,9 +641,6 @@ async def run(
             home=home,
             runtime_owner=uuid4(),
         )
-        # The clock reader is injected, not imported by the scheduler: it owns no
-        # pool, and this keeps the uncancellable-turn report able to say how long
-        # a stuck agent has really been silent.
         scheduler = TurnScheduler(
             host.run_turn,
             activity_clock=host.last_active_at,
@@ -713,13 +714,14 @@ async def run(
 
 
 def require_helper_parent_chain() -> None:
-    if parent_chain_intact():
+    pid = os.getpid()
+    if parent_chain_intact(pid):
         return
     logger.warning(
         "[agent-host] permissions helper parent chain broken, self-terminating for helper respawn",
         event="helper_chain_broken",
         process="agent_host",
-        detail=f"agent host pid {os.getpid()} is no longer under the permissions helper "
+        detail=f"agent host pid {pid} is no longer under the permissions helper "
         f"that spawned it (marker pid {helper_marker_pid() or 'absent'})",
     )
     os._exit(HELPER_CHAIN_BROKEN_EXIT_CODE)
@@ -739,9 +741,7 @@ def main() -> None:
 
     def database() -> Database:
         return Database(
-            db_config_from_boot(config),
-            gate=gate,
-            direct_url=ClusterDirectUrl(machine.host),
+            db_config_from_boot(config), gate=gate, direct_url=ClusterDirectUrl(machine.host)
         )
 
     clients = clients_over(config, machine, database)

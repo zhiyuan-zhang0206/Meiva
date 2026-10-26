@@ -56,6 +56,7 @@ from base.lm.catalog import ModelCatalog
 from base.log import logger
 
 __all__ = [
+    "MIN_CHECK_OPEN",
     "GroupingModels",
     "check_threshold",
     "run_blocking",
@@ -108,7 +109,7 @@ def group_model(
 MIN_CHECK_OPEN = 6
 
 
-def check_threshold(level: int, *, config: ConfigBoot) -> int:
+def check_threshold(level: int, *, config: ConfigBoot, min_check_open: int = MIN_CHECK_OPEN) -> int:
     # meiva:note
     # New open nodes that make `level` due: the base cadence divided by the decay once per level
     # above the first (rounded), never below `MIN_CHECK_OPEN` (60, 20, 7, 6, ... by default).
@@ -119,7 +120,7 @@ def check_threshold(level: int, *, config: ConfigBoot) -> int:
         level,
         check_open=config.view.agent.understanding_group_check_open,
         check_decay=config.view.agent.understanding_group_check_decay,
-        minimum=MIN_CHECK_OPEN,
+        minimum=min_check_open,
     )
 
 
@@ -133,6 +134,7 @@ def generate(
     agent_id: int,
     *,
     config: ConfigBoot,
+    min_check_open: int = MIN_CHECK_OPEN,
 ) -> list[Group]:
     # meiva:note
     # Blocking: one grouping conversation; every provider call is appended to `calls`.
@@ -146,7 +148,8 @@ def generate(
         clock=Clock(clock_config_from_boot(config), timers=SYSTEM_TIMERS),
         # meiva:note
         # The brake on an open set that keeps growing: past three checks' worth of this level, close one.
-        must_close=len(nodes) >= 3 * check_threshold(level, config=config),
+        must_close=len(nodes)
+        >= 3 * check_threshold(level, config=config, min_check_open=min_check_open),
         on_call=calls.append,
     )
 
@@ -161,12 +164,13 @@ async def _check_level(
     upto: int | None = None,
     *,
     config: ConfigBoot,
+    min_check_open: int = MIN_CHECK_OPEN,
 ) -> bool:
     # meiva:note
     # Check one level if it is due; whether it closed at least one group.
     nodes = await load_open_nodes(pool, agent_id, level, upto=upto)
     last = min(await load_last_checked(pool, agent_id, level), len(nodes))
-    if len(nodes) < last + check_threshold(level, config=config):
+    if len(nodes) < last + check_threshold(level, config=config, min_check_open=min_check_open):
         return False
     if not await claim_check(pool, agent_id, level):
         return False
@@ -180,7 +184,7 @@ async def _check_level(
         nodes = await load_open_nodes(pool, agent_id, level, upto=upto)
         if len(nodes) < min(
             await load_last_checked(pool, agent_id, level), len(nodes)
-        ) + check_threshold(level, config=config):
+        ) + check_threshold(level, config=config, min_check_open=min_check_open):
             return False
         model, overrides = await asyncio.to_thread(
             group_model, db, agent_id, catalog=models.catalog, config=config
@@ -197,6 +201,7 @@ async def _check_level(
                 calls,
                 agent_id,
                 config=config,
+                min_check_open=min_check_open,
             )
         except GenerateError as exc:
             telemetry.emit(
@@ -235,6 +240,7 @@ async def run_group_checks(
     config: ConfigBoot,
     executor: Executor | None = None,
     upto: int | None = None,
+    min_check_open: int = MIN_CHECK_OPEN,
 ) -> None:
     # meiva:note
     # Walk up the agent's levels from 1, checking each that is due; never raises.
@@ -246,7 +252,15 @@ async def run_group_checks(
     try:
         level = 1
         while level <= MAX_LEVEL and await _check_level(
-            pool, db, models, agent_id, level, executor, upto, config=config
+            pool,
+            db,
+            models,
+            agent_id,
+            level,
+            executor,
+            upto,
+            config=config,
+            min_check_open=min_check_open,
         ):
             level += 1
     except Exception:

@@ -41,12 +41,10 @@ def install_code_surface(
 # A copy of `authority` whose models carry `fields` (configuration field name to value): the
 # configuration an SDK process would have booted with, without touching the process settings.
 def authority_with(authority: ConfigAuthority, **fields: Any) -> ConfigAuthority:
-    complete = authority.all_domains.model_copy(deep=True)
-    runtime = (
-        complete
-        if authority.runtime is authority.all_domains
-        else authority.runtime.model_copy(deep=True)
-    )
+    all_domains: Any = authority.all_domains
+    runtime_model: Any = authority.runtime
+    complete: Any = all_domains.model_copy(deep=True)
+    runtime: Any = complete if runtime_model is all_domains else runtime_model.model_copy(deep=True)
     for name, value in fields.items():
         domain = FIELD_DOMAINS[name]
         for model in (complete, runtime):

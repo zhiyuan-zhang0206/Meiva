@@ -47,7 +47,10 @@ export function systemStreamTransport(): StreamTransport {
       return document;
     },
     wallNow: () => Date.now(),
-    newTabId: () => `${Date.now()}-${Math.random().toString(36).slice(2)}`,
+    newTabId: () =>
+      Array.from(systemKeySource().getRandomValues(new Uint8Array(8)), (b) =>
+        b.toString(16).padStart(2, "0"),
+      ).join(""),
     diagnostics: {
       warn: (message) => {
         console.warn(message);

@@ -50,7 +50,7 @@ from playwright.sync_api import Browser, BrowserContext, Page, Playwright, sync_
 
 from base.api_contracts.agent_contract import AgentStatus
 from base.cluster.authority.tests.runner_logins import runner_projection
-from base.config import settings
+from base.config import set_field, settings
 from tests.e2e._credentials import (
     current_credentials,
     forget_credentials,
@@ -182,15 +182,15 @@ def e2e_process_env(provisioned_db: str, provisioned_redis: str) -> Iterator[Non
         settings.data_plane.redis_url,
     )
     prev_env = {k: os.environ.get(k) for k in _env_keys}
-    settings.data_plane.db_url, settings.data_plane.redis_url = (
-        provisioned_db,
-        provisioned_redis,
+    _ = (
+        set_field("db_url", provisioned_db),
+        set_field("redis_url", provisioned_redis),
+        set_field("events_channel", f"meiva:events:e2e:{_E2E_SUFFIX}"),
     )
     os.environ["MEIVA_DB_URL"] = provisioned_db
     os.environ["MEIVA_REDIS_URL"] = provisioned_redis
     apply_e2e_seq_offset()
 
-    settings.data_plane.events_channel = f"meiva:events:e2e:{_E2E_SUFFIX}"
     os.environ["MEIVA_EVENTS_CHANNEL"] = settings.data_plane.events_channel
     # Diagnostic: the e2e model is instant (MEIVA_LLM_OVERRIDE), so any node that
     # sits longer than this is a real stall, not inference. Spawned agents
@@ -289,11 +289,11 @@ def e2e_process_env(provisioned_db: str, provisioned_redis: str) -> Iterator[Non
             sweep_stale_e2e_processes(
                 include_own=True, receipt_path=_LOG_DIR / f"cleanup-{_E2E_SUFFIX}.jsonl"
             )
-        (
-            settings.data_plane.events_channel,
-            settings.data_plane.db_url,
-            settings.data_plane.redis_url,
-        ) = previous
+        _ = (
+            set_field("events_channel", previous[0]),
+            set_field("db_url", previous[1]),
+            set_field("redis_url", previous[2]),
+        )
         forget_credentials()
         for k, v in prev_env.items():
             if v is None:
@@ -474,7 +474,7 @@ def scenario_env(e2e_process_env: None, request: pytest.FixtureRequest) -> Itera
 
 
 @pytest.fixture
-def gateway_proc(scenario_env: None, monkeypatch: pytest.MonkeyPatch) -> Iterator[str]:
+def gateway_proc(scenario_env: None) -> Iterator[str]:
     """gateway uvicorn (kernel-assigned port, see `_ports.py`)——inherits current os.environ (including MEIVA_LLM_OVERRIDE).
 
     function-scoped rather than session: each test restarts gateway to pick up new scenario env.
@@ -487,7 +487,6 @@ def gateway_proc(scenario_env: None, monkeypatch: pytest.MonkeyPatch) -> Iterato
 
     # This direct-process fixture gate lives in the private E2E home.
     # It grants no production root custody or local birth evidence.
-    monkeypatch.setenv("MEIVA_HOME", str(_MEIVA_HOME))
     fixture_gate = _MEIVA_HOME / "e2e-serving"
     fixture_gate.unlink(missing_ok=True)
     generation = str(fixture_gate)
@@ -506,6 +505,7 @@ def gateway_proc(scenario_env: None, monkeypatch: pytest.MonkeyPatch) -> Iterato
     ]
     log_path = _LOG_DIR / f"gateway-{_E2E_SUFFIX}.log"
     env = os.environ.copy()
+    env["MEIVA_HOME"] = str(_MEIVA_HOME)
     # Construct the same gateway profile that production starts.
     env["MEIVA_PROCESS_PROFILE"] = "gateway"
     env.update(current_credentials().service_env("gateway"))

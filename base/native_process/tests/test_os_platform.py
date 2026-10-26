@@ -110,6 +110,7 @@ class TestLaunchdOwnership:
     ) -> bool:
         return descends_from_launchd_job(
             "com.x",
+            uid=501,
             macos=True,
             current_pid=500,
             launchctl_print=(print_rc, print_out),
@@ -117,7 +118,7 @@ class TestLaunchdOwnership:
         )
 
     def test_off_macos_is_never_owned(self) -> None:
-        assert descends_from_launchd_job("com.x", macos=False) is False
+        assert descends_from_launchd_job("com.x", uid=501, macos=False) is False
 
     def test_unloaded_job_owns_no_process(self) -> None:
         assert self._check(print_rc=113, print_out="Could not find service", ps={}) is False

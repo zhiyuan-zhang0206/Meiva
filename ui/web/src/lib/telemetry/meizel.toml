@@ -17,6 +17,4 @@ exports = ["nav-timing.ts", "telemetry-page-view.tsx", "telemetry.ts"]
 "web-vitals-plan.ts" = "strict"
 
 [debt.ambient-read]
-"telemetry.ts#clock Date.now" = 3
-"telemetry.ts#random Math.random" = 1
-"telemetry.ts#random crypto.randomUUID" = 1
+"telemetry.ts#clock Date.now" = 2

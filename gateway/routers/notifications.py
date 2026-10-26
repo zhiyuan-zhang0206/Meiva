@@ -202,6 +202,11 @@ async def get_notifications(
     )
 
 
+def _audit_clock_inputs(tz: str | None, now: datetime | None) -> tuple[str, datetime]:
+    clock = Clock.from_settings()
+    return tz or clock.timezone, now or clock.now()
+
+
 # meiva:note
 # A read-only replay of the producers over a window, run server-side so the
 # operator CLI and any other client see the same answer: the candidates come from
@@ -222,6 +227,7 @@ async def get_notification_audit(
 ) -> NotificationAuditResponse:
     if now is not None and now.tzinfo is None:
         raise HTTPException(status_code=422, detail="now needs a UTC offset")
+    tz_name, audit_now = _audit_clock_inputs(tz, now)
     pool = request.app.state.db_pool
     catalog = await asyncio.to_thread(declared_categories)
     try:
@@ -231,8 +237,8 @@ async def get_notification_audit(
             catalog=catalog,
             days=days,
             category=category,
-            tz_name=tz or Clock.from_settings().timezone,
-            now=now,
+            tz_name=tz_name,
+            now=audit_now,
             simulate=simulate or (),
             explain=explain,
         )

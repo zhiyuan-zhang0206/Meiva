@@ -9,7 +9,3 @@ exports = ["git", "lifecycle", "progress_timeout.py", "release", "schedule_timin
 "__init__.py" = "strict"
 "progress_timeout.py" = "strict"
 "schedule_timing.py" = "strict"
-
-[debt.ambient-read]
-"start_trace.py#pid os.getpid" = 1
-"timing.py#settings base.config.settings" = 1

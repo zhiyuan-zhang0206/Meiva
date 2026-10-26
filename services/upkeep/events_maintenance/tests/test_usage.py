@@ -37,7 +37,7 @@ def rows(
                 ]
             return usage.event_rows(conn, dict.fromkeys(agent_ids, start), datetime.now(UTC))
         result, tails = usage.ledger_rows(conn, agent_ids)
-        result.extend(usage.event_rows(conn, tails, None))
+        result.extend(usage.event_rows(conn, tails, datetime.now(UTC)))
         return result
 
 

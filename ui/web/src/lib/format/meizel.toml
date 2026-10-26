@@ -18,7 +18,3 @@ exports = ["clipboard.ts", "display-limits.ts", "format-number.ts", "format-pric
 "inbound-source.ts" = "strict"
 "item-summary.ts" = "strict"
 "utils.ts" = "strict"
-
-[debt.ambient-read]
-"time.ts#clock Date" = 1
-"use-now.ts#clock Date" = 2

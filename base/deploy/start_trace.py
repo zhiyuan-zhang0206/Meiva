@@ -6,7 +6,6 @@
 from __future__ import annotations
 
 import json
-import os
 import time
 from collections.abc import Generator, Mapping
 from contextlib import AbstractContextManager, contextmanager
@@ -98,7 +97,7 @@ class StartTrace:
             target = home / "logs" / "start-timing"
             target.mkdir(parents=True, exist_ok=True)
             stamp = time.strftime("%Y%m%dT%H%M%SZ", time.gmtime())
-            path = target / f"{stamp}-{os.getpid()}.json"
+            path = target / f"{stamp}-{time.monotonic_ns()}.json"
             path.write_text(json.dumps(self.payload(), indent=2) + "\n")
             return path
         except OSError:

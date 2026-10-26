@@ -45,7 +45,7 @@ afterEach(() => {
 
 describe("OpenNoticeDetail — timestamp", () => {
   const createdAt = "2026-06-14T12:00:00Z";
-  const timestamp = `${formatRelative(createdAt)}, ${formatAbsolute(createdAt)}`;
+  const timestamp = `${formatRelative(createdAt, new Date())}, ${formatAbsolute(createdAt)}`;
 
   it("hides the created time by default", () => {
     render(<OpenNoticeDetail agentId={7} notice={ntc({ created_at: createdAt })} />);
@@ -68,7 +68,7 @@ describe("OpenNoticeDetail — timestamp", () => {
   it("shows expiry time when expire_at is present", () => {
     const expireAt = "2026-06-15T12:00:00Z";
     render(<OpenNoticeDetail agentId={7} notice={ntc({ expire_at: expireAt })} />);
-    expect(screen.getByText(new RegExp(formatRelative(expireAt)))).toBeTruthy();
+    expect(screen.getByText(new RegExp(formatRelative(expireAt, new Date())))).toBeTruthy();
   });
 });
 

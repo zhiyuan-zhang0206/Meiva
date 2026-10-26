@@ -295,7 +295,9 @@ def cmd_agents_restart(
         )
     else:
         try:
-            config_overlay = json.loads(config_json)
+            config_overlay: dict[str, object] | list[object] | str | int | float | bool | None = (
+                json.loads(config_json)
+            )
         except json.JSONDecodeError as exc:
             print(f"invalid config JSON: {exc}", file=sys.stderr)
             return 1

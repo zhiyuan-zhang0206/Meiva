@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from collections.abc import Callable, Generator
 from pathlib import Path
+from typing import Any
 from urllib.parse import urlsplit
 
 import pytest
@@ -132,7 +133,8 @@ def test_bootstrap_keeps_modeled_alias_after_reachable_host_rewrite(
 
     provider_plugin(key_env="MEIVA_DB_URL")
     _write_bootstrap_env(plugin_env, "MEIVA_DB_URL=postgresql://meiva:pw@127.0.0.1:5433/meiva\n")
-    bootstrap_authority.runtime.general.machine_host = "10.0.0.3"
+    runtime: Any = bootstrap_authority.runtime
+    runtime.general.machine_host = "10.0.0.3"
 
     assert (
         urlsplit(

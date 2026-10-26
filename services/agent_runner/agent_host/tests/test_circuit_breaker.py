@@ -19,7 +19,7 @@ from agent.graph.claim.tests.claim_support import (
 )
 from agent.graph.llm_errors import FatalLLMStreamError, FatalProviderError
 from agent.state import AgentState, CircuitState
-from agent.turn.runloop import _handle_fatal_llm_error
+from agent.turn.runloop import handle_fatal_llm_error
 from base.agents.context import MeivaContext
 from base.agents.tests.units import spawn_agent
 from base.clock import Clock
@@ -44,8 +44,6 @@ from services.agent_runner.agent_host.tests.circuit_breaker.provider_failures im
     LONG_SUMMARY,
 )
 
-# ── breaker open (runloop `_handle_fatal_llm_error`) ──
-
 
 async def test_fatal_provider_error_opens_circuit_breaker(
     loguru_records, *, database_gate: ProcessDbGate
@@ -60,7 +58,7 @@ async def test_fatal_provider_error_opens_circuit_breaker(
         status=400,
         context_overflow=True,
     )
-    update = await _handle_fatal_llm_error(
+    update = await handle_fatal_llm_error(
         exc, breaker_ctx(database_gate=database_gate), agent_id=42, circuit=None
     )
 
@@ -84,7 +82,7 @@ async def test_fatal_provider_error_billing_reason(*, database_gate: ProcessDbGa
         provider="anthropic",
         status=402,
     )
-    update = await _handle_fatal_llm_error(
+    update = await handle_fatal_llm_error(
         exc, breaker_ctx(database_gate=database_gate), agent_id=42, circuit=None
     )
 
@@ -121,7 +119,7 @@ async def test_fatal_provider_error_emits_blocked_recovery_details(
         status=400,
     )
 
-    await _handle_fatal_llm_error(exc, ctx, agent_id=42, circuit=None)
+    await handle_fatal_llm_error(exc, ctx, agent_id=42, circuit=None)
 
     emitted = json.loads(publisher.payloads[-1])
     assert emitted["role"] == "error"
@@ -197,7 +195,7 @@ async def test_permanent_provider_error_reports_metadata_to_nearest_alive_ancest
         status=400,
     )
     occurred_at = datetime(2026, 9, 3, 8, 0, tzinfo=UTC)
-    await _handle_fatal_llm_error(
+    await handle_fatal_llm_error(
         exc,
         MeivaContext(
             ops_pool=aops_pool,
@@ -270,7 +268,7 @@ async def test_context_overflow_halts_background_wakes_and_reports_to_an_ancesto
         )
     db_conn.commit()
 
-    await _handle_fatal_llm_error(
+    await handle_fatal_llm_error(
         FatalProviderError(
             "provider context window exceeded",
             error_class="permanent",
@@ -304,7 +302,7 @@ async def test_fatal_llm_stream_error_does_not_open_breaker(
     """FatalLLMStreamError (retry cap) is not a permanent provider rejection —
     it only halts the turn; the breaker stays untouched."""
     exc = FatalLLMStreamError("retry cap exhausted")
-    update = await _handle_fatal_llm_error(
+    update = await handle_fatal_llm_error(
         exc, breaker_ctx(database_gate=database_gate), agent_id=42, circuit=None
     )
 
@@ -325,7 +323,7 @@ async def test_fatal_provider_error_does_not_reopen_already_open_breaker(
     )
     opened_at = "2026-08-29T00:00:00+00:00"
 
-    update = await _handle_fatal_llm_error(
+    update = await handle_fatal_llm_error(
         exc,
         breaker_ctx(database_gate=database_gate),
         agent_id=42,

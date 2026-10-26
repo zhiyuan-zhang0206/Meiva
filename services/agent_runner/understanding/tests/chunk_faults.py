@@ -18,7 +18,6 @@ from base.clock import SYSTEM_TIMERS, Clock
 from base.clock.configuration import clock_config_from_boot
 from base.config import ConfigBoot
 from base.db import Database
-from base.host.env.agent_slices import ModelOverrides
 from base.lm.catalog import ModelCatalog
 from services.agent_runner.understanding import chunk_consumer as loop
 from services.agent_runner.understanding.tests.consumer_helpers import consumer_config, lm_wiring
@@ -39,7 +38,8 @@ def chunk_result(
 
 @pytest.fixture
 def chunk_timestamps() -> TimestampPolicy:
-    """The fault rig's timestamp value, captured before its worker threads start."""
+    # meiva:note
+    # The fault rig's timestamp value, captured before its worker threads start.
     config = consumer_config()
     return TimestampPolicy.from_clock(
         Clock(clock_config_from_boot(config), timers=SYSTEM_TIMERS),
@@ -53,13 +53,12 @@ def chunk_seams(
 ) -> dict[str, Any]:
     seen: dict[str, Any] = {"described": []}
 
-    def target(*_args: object, **_kwargs: object) -> tuple[str, ModelOverrides]:
-        return "deepseek-flash", ModelOverrides.from_pins(None)
-
-    monkeypatch.setattr(loop, "agent_model_target", target)
-
-    def segments(_db: Database, _agent_id: int, _boundary: str | None) -> tuple[FullHistory, None]:
-        return seen.get("history", inbound_history()), None
+    def segments(
+        _db: Database, _agent_id: int, _boundary: str | None
+    ) -> tuple[FullHistory, int | None]:
+        if "segments_error" in seen:
+            raise seen["segments_error"]
+        return seen.get("history", inbound_history()), seen.get("closing_segment")
 
     monkeypatch.setattr(loop, "load_segments", segments)
 
@@ -69,7 +68,7 @@ def chunk_seams(
         _overrides: object,
         located: LocatedChunk,
         _tools: object,
-        _calls: list[ChunkCall],
+        calls: list[ChunkCall],
         _agent_id: int,
         **kw: object,
     ) -> ChunkResult:
@@ -84,6 +83,9 @@ def chunk_seams(
             actual.view.general.message_timestamp_weekday,
             actual.view.general.message_timestamps,
         )
+        calls.extend(seen.get("calls", ()))
+        if "error" in seen:
+            raise seen["error"]
         seen["described"].append(located)
         seen["kw"] = kw
         return (
@@ -96,11 +98,20 @@ def chunk_seams(
     return seen
 
 
-async def run_rounds(pool: AsyncConnectionPool, count: int, *, model_catalog: ModelCatalog) -> None:
+async def run_rounds(
+    pool: AsyncConnectionPool,
+    count: int,
+    *,
+    model_catalog: ModelCatalog,
+    model: str = "deepseek-flash",
+) -> None:
     # meiva:note
     # `count` times: claim at most one job and finish it (the loop's claim, one step at a time).
+    config = consumer_config()
+    config.set_field("llm_model", model)
+    config.set_field("hierarchy_model", model)
     for _ in range(count):
         async with asyncio.TaskGroup() as tg:
             await loop.Consumer(
-                pool, MagicMock(), [], **lm_wiring(model_catalog), config=consumer_config()
+                pool, MagicMock(), [], **lm_wiring(model_catalog), config=config
             ).claim(tg)

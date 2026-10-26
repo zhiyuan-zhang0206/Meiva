@@ -258,12 +258,11 @@ export function useTimeline(
       if (ev.role === "token_usage") return;
       if (startsTurn(ev)) noteTurnStart(ev.agent_id);
 
+      const apply = () => processSseEvent(ev, Date.now());
       if (isStreamingDelta(ev)) {
-        timelineRuntime.runTransition(() => {
-          processSseEvent(ev, Date.now());
-        });
+        timelineRuntime.runTransition(apply);
       } else {
-        processSseEvent(ev, Date.now());
+        apply();
       }
       trackCompactForInvalidation(ev);
     },
@@ -419,14 +418,13 @@ export function useTimeline(
     const prev = prevAgentRef.current;
     prevAgentRef.current = { id: agentId, status: agentStatus };
     if (agentId === null || agentStatus === undefined || agentStatus === "running") return;
-    if (prev.id === agentId && prev.status === "running") {
-      useTimelineStore.getState().settleTurn(Date.now());
-      void queryClient.invalidateQueries({ queryKey: ["timeline", agentId] });
-      return;
-    }
     const st = useTimelineStore.getState();
-    if (!st.turnActive && hasUnsettledClock(st.items)) {
+    const transitionedFromRunning = prev.id === agentId && prev.status === "running";
+    if (transitionedFromRunning || (!st.turnActive && hasUnsettledClock(st.items))) {
       st.settleTurn(Date.now());
+      if (transitionedFromRunning) {
+        void queryClient.invalidateQueries({ queryKey: ["timeline", agentId] });
+      }
     }
   }, [agentId, agentStatus, queryClient]);
 

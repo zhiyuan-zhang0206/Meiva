@@ -126,7 +126,7 @@ async def test_boot_before_host_closes_writer_even_if_it_failed_and_still_closes
     pidfile = ServiceEndpoints.from_settings().of("agent_host").pidfile
     pidfile.parent.mkdir(parents=True, exist_ok=True)
     pidfile.write_text("999999999\n", encoding="utf-8")
-    assert not daemon._is_running()
+    assert not daemon.is_running()
     try:
         clients.event_pipeline().enqueue(event())
         with pytest.raises(TypeError):
