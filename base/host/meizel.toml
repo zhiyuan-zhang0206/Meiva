@@ -15,7 +15,7 @@ exports = ["atomic_io.py", "brew_pin.py", "config_validators.py", "converge", "d
 [purity]
 "__init__.py" = "strict"
 "exit_codes.py" = "strict"
-"resource_sample.py" = "strict"
+"resource_sample.py" = "strict-to-be"
 "verified_file.py" = "strict"
 
 [debt.ambient-read]

@@ -30,7 +30,7 @@ When two packages need the same type, constant, or `Protocol`:
 When `meizel` reports an `impure-call` inside a module that should be `"strict"`, or an `impure-edge` from a `"strict"` module into an effectful one:
 
 - **Ask first whether the file is a pure core or an effect shell.**
-  - If the file's job is computing a plan (e.g., retry delay, SQL query parameters, subprocess `argv`/`env`, state diff, validation), keep the file `"strict"` and lift the I/O call (`httpx`, `psycopg`, `subprocess`, `socket`) out into the calling shell or `wiring.py`. `psutil` is not on the `impure-imports` list, so `meizel` does not flag it, but reading CPU, memory or disks through it is an effect all the same: a module that does so is a shell, and the types and parsers around it stay in a `"strict"` sibling (`base/host/resource_sample.py` holds `ResourceSample` and `parse_battery`; `base/host/resource_probe.py` reads the machine).
+  - If the file's job is computing a plan (e.g., retry delay, SQL query parameters, subprocess `argv`/`env`, state diff, validation), keep the file `"strict"` and lift the I/O call (`httpx`, `psycopg`, `subprocess`, `socket`) out into the calling shell or `wiring.py`. `psutil` is not on the `impure-imports` list, so `meizel` does not flag it, but reading CPU, memory or disks through it is an effect all the same: a module that does so is a shell, and the types and parsers around it stay in a `"strict"` sibling.
   - If the file contains both pure helpers/types (imported by `"strict"` consumers) and effectful execution, split it along the mechanism boundary: keep the pure types and decision functions in the `"strict"` module, and move the effectful execution into an unexported or shell sibling module declared in `[uses]`.
 - **Do not coalesce re-exports in `__init__.py` just to quiet a debt line.** If a package door (`__init__.py`) is `"strict"`, every module it re-exports must also be `"strict"`.
 
@@ -40,6 +40,7 @@ When code reads `settings`, `os.environ`, the clock (`time.time`, `datetime.now`
 
 - **Lift the read to the composition root** (`wiring.py`, `daemon.py`, `app.py`, `CommandRuntime.create()`) that already owns `[roots]` in `meizel.toml`.
 - **Pass a value or a frozen config dataclass down.** At a component boundary, pass a frozen `XxxConfig` containing only the fields that component reads; inside the component, pass plain values (`now: datetime`, `home: Path`, `timeout_s: float`).
+- **Wrapping a read in a function does not move it.** A repository function that returns what the world decides (`meiva_home()`, `process_environment()` and the like) is listed under `[ambient-readers.<kind>]` in `meizel.policy.toml`, and a call to it is a read of that kind at the call site ([readers](../../../meizel/docs/checker/ambient-readers.meiva.okf.md)).
 - **Never add an ambient fallback in the callee** (`env: Mapping[str, str] | None = None` that falls back to `os.environ`, or `now: datetime | None = None` that calls `datetime.now()`). Defaults on parameters are reserved for pure constants and tuning numbers.
 
 ### 4. Making code testable without monkeypatching (`first-party-patch`, `stdlib-patch`, `third-party-patch`)

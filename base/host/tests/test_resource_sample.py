@@ -1,41 +1,54 @@
 from __future__ import annotations
 
+import psutil
 import pytest
 
-from base.host.resource_sample import ResourceSample, parse_battery
+from base.host.resource_sample import (
+    CPU_INTERVAL_S,
+    ResourceSample,
+    battery_sample,
+    parse_battery,
+    resource_sample,
+)
 
 
 class TestResourceSample:
+    def test_returns_a_self_consistent_reading(self) -> None:
+        s = resource_sample()
+        assert isinstance(s, ResourceSample)
+        assert s.cpu_pct >= 0.0
+        assert 0.0 <= s.mem_pct <= 100.0
+        assert 0.0 <= s.disk_pct <= 100.0
+        assert s.mem_used_gb <= s.mem_total_gb
+        assert s.disk_used_gb <= s.disk_total_gb
+        assert s.mem_total_gb > 0
+
+    def test_cpu_is_measured_not_inherited(self) -> None:
+        intervals: list[float | None] = []
+
+        def spy(interval: float | None = None) -> float:
+            intervals.append(interval)
+            return psutil.cpu_percent(interval=interval)
+
+        first = resource_sample(cpu_percent=spy)
+        second = resource_sample(cpu_percent=spy)
+        assert intervals == [CPU_INTERVAL_S, CPU_INTERVAL_S]
+        assert second.ts >= first.ts
+
     def test_is_frozen(self) -> None:
-        s = ResourceSample(
-            ts=100.0,
-            cpu_pct=1.0,
-            mem_used_gb=1.0,
-            mem_total_gb=2.0,
-            mem_pct=50.0,
-            disk_used_gb=1.0,
-            disk_total_gb=2.0,
-            disk_pct=50.0,
-        )
+        s = resource_sample()
         with pytest.raises(Exception, match="frozen"):
-            s.cpu_pct = 2.0
+            s.cpu_pct = 1.0
 
-    def test_the_battery_fields_default_to_unknown(self) -> None:
-        s = ResourceSample(
-            ts=100.0,
-            cpu_pct=1.0,
-            mem_used_gb=1.0,
-            mem_total_gb=2.0,
-            mem_pct=50.0,
-            disk_used_gb=1.0,
-            disk_total_gb=2.0,
-            disk_pct=50.0,
-        )
-        assert (s.battery_percent, s.battery_power, s.battery_charging) == (None, None, None)
-        assert s.battery_remaining_min is None
+    def test_propagates_psutil_failure(self) -> None:
+        def _fail(_interval: float) -> float:
+            raise RuntimeError("no psutil")
+
+        with pytest.raises(RuntimeError, match="no psutil"):
+            resource_sample(cpu_percent=_fail)
 
 
-class TestParseBattery:
+class TestBatterySample:
     PMSET_CHARGING = (
         "Now drawing from 'AC Power'\n"
         " -InternalBattery-0 (id=26607715)\t80%; charging; 1:03 remaining present: true\n"
@@ -87,3 +100,21 @@ class TestParseBattery:
 
     def test_desktop_reports_nothing(self) -> None:
         assert parse_battery(self.PMSET_DESKTOP) == {}
+
+    def test_off_macos_reports_nothing(self) -> None:
+        assert battery_sample(platform="linux") == {}
+
+    def test_read_failure_degrades_to_no_fields(self) -> None:
+        import subprocess
+
+        def _raise_timeout(*_a: object, **_k: object) -> subprocess.CompletedProcess[str]:
+            raise subprocess.TimeoutExpired("pmset", 2)
+
+        assert battery_sample(platform="darwin", run=_raise_timeout) == {}
+
+    def test_sample_carries_battery_fields(self) -> None:
+        s = resource_sample(battery_fn=lambda: parse_battery(self.PMSET_CHARGING))
+        assert s.battery_percent == 80
+        assert s.battery_power == "ac"
+        assert s.battery_charging is True
+        assert s.battery_remaining_min == 63

@@ -282,10 +282,9 @@ def test_a_snapshot_with_an_unreachable_database_still_answers_but_claims_no_rea
 
 
 def test_the_resource_sample_is_the_hosts_own_reading() -> None:
-    sample = read_resource_sample(ts=1234.5)
+    sample = read_resource_sample()
 
     assert sample is not None
-    assert sample.ts == 1234.5
     assert sample.mem_total_gb > 0
     assert sample.disk_total_gb > 0
     assert 0.0 <= sample.cpu_pct <= 100.0
