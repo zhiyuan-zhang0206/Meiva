@@ -11,6 +11,7 @@ from pathlib import Path
 from base import paths
 from base.packages.plugins.enable_config import discover_plugin_dirs, write_local
 from cli import parsers
+from cli.database.runtime import CommandRuntime
 from meiva.sdk_surface.installation import installed
 
 
@@ -40,6 +41,7 @@ def main(name: str) -> None:
         }
     )
     args = parsers.parse_args(["plugins", "inspect", name], retained_children=[])
+    args.runtime = CommandRuntime.create(paths.meiva_home())
     rc = args.func(args)
     current = installed()
     assert current is not None

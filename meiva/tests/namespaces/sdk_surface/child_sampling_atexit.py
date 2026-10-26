@@ -11,6 +11,7 @@ import meiva  # noqa: F401  # pyright: ignore[reportUnusedImport] (importing the
 from base.agents.sdk import call_policy
 from base.agents.sdk.call_policy import SamplingPolicyOwner
 from base.agents.sdk.tests.sampling_owners import sampling_owner_failing_to_read
+from base.clock.tests.seeded_rng import seeded_rng
 from base.packages.plugin_config_images import DiskPluginConfigImages
 from base.packages.plugins import enable_config
 from base.packages.plugins.extensions import ExtensionRegistry
@@ -47,9 +48,9 @@ match mode:
         atexit.register(owner.close)
         owner.refresh()
     case Mode.SERVICE_RELOAD:
-        owner = call_policy.process_sampling_owner()
+        owner = call_policy.process_sampling_owner(seeded_rng())
     case Mode.INSTALL | Mode.RELOAD | Mode.RELOAD_EXPLICIT | Mode.FAILED_RELOAD:
-        owner = process_sampling_owner()
+        owner = process_sampling_owner(seeded_rng())
     case _:
         assert_never(mode)
 owners.append(owner)

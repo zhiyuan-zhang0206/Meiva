@@ -31,6 +31,7 @@ import asyncio
 import contextlib
 import logging
 import os
+import random
 import signal
 import sys
 from collections.abc import Awaitable, Callable, Collection, Coroutine, Iterable
@@ -440,6 +441,13 @@ async def serve_host_lifecycle(
         host_log.info("[agent-host] daemon stopped")
 
 
+# meiva:note
+# The host process's random generator, built once per run for its sampling owner. Sampling is not a
+# secret, so it is a plain `random.Random`.
+def _new_rng() -> random.Random:
+    return random.Random()  # noqa: S311
+
+
 async def run(
     *,
     config: ConfigBoot,
@@ -461,6 +469,7 @@ async def run(
     from agent.graph import build_graph  # pyright: ignore[reportUnknownVariableType]
     from agent.process_boot import init_process_scope, land_cluster_extensions, process_trace_config
 
+    rng = _new_rng()
     workload_pool, control_pool, bus, db = boot_handles(database(), config)
     liveness = Liveness(_LIVENESS_TIMEOUT_S)
     installation: Installation | None = None
@@ -476,7 +485,7 @@ async def run(
         if clients is None:
             clients = clients_over(config, machine, lambda: db)
         installation = load_installation(
-            config, clients=clients, load_extensions=_state_gated_loader()
+            config, clients=clients, load_extensions=_state_gated_loader(), rng=rng
         )
         checkpointer = await build_checkpointer(
             workload_pool,

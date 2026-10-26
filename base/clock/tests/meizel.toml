@@ -1,4 +1,4 @@
-exports = ["fakes.py", "manual_timers.py"]
+exports = ["fakes.py", "manual_timers.py", "seeded_rng.py"]
 
 [uses]
 "test_cold_import.py" = ["child_cold_import.py"]

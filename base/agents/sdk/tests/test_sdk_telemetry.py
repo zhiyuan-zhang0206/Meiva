@@ -17,7 +17,7 @@ import httpx
 import pytest
 from pydantic import ValidationError
 
-from base.agents.sdk import call_policy
+from base.agents.sdk import call_policy, keep_sample
 from base.agents.sdk import telemetry as sdk_usage_telemetry
 from base.agents.sdk.call_policy import SamplingPolicy
 from base.agents.sdk.tally import SdkCallTally
@@ -27,6 +27,7 @@ from base.agents.sdk.tests.sampling_owners import (
     sampling_owner_failing_to_read,
     sampling_owner_serving,
 )
+from base.clock.tests.seeded_rng import seeded_rng
 from base.host.net.tests.local_http import serve_json
 from base.telemetry.tests.capture.event_capture import EmittedEvents
 from base.telemetry.tests.capture.event_capture import emitted_events as emitted_events
@@ -293,7 +294,10 @@ def test_live_sampling_keeps_tally_complete(
         SamplingPolicy(sampling_enabled=True, sample_every=10), tmp_path / "sampled.env"
     )
     tally = SdkCallTally()
-    for _ in range(10):
+    reference = seeded_rng()
+    sampled = sum(keep_sample(10, reference.random()) for _ in range(40))
+    assert sampled > 0
+    for _ in range(40):
         sdk_usage_telemetry.run_metered(
             "files.read",
             lambda: None,
@@ -314,8 +318,8 @@ def test_live_sampling_keeps_tally_complete(
             SamplingPolicy(sampling_enabled=False, sample_every=10), tmp_path / "unsampled.env"
         ),
     )
-    assert [event.attributes["sample_rate"] for event in emitted_events] == [10, 1]
-    assert tally.snapshot() == {"files.read": 11}
+    assert [event.attributes["sample_rate"] for event in emitted_events] == [10] * sampled + [1]
+    assert tally.snapshot() == {"files.read": 41}
 
 
 def _invalid_policy_owner(

@@ -23,6 +23,7 @@ from __future__ import annotations
 
 import atexit
 import os
+import random
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass, replace
 from pathlib import Path
@@ -119,8 +120,8 @@ def _gateway(url: str, *, config: ConfigBoot) -> GatewayHandle:
 # child, a script, a command-line inventory). It closes at interpreter exit: finite cleanup, not a
 # guarantee of a nonzero exit or of delivery after a hard exit. `uninstall` unregisters the close of
 # the installation that retains the owner, so a removed surface leaves no callback behind.
-def process_sampling_owner() -> SamplingPolicyOwner:
-    owner = call_policy.process_sampling_owner()
+def process_sampling_owner(rng: random.Random) -> SamplingPolicyOwner:
+    owner = call_policy.process_sampling_owner(rng)
     atexit.register(owner.close)
     return owner
 
@@ -432,6 +433,13 @@ class LoadInputs:
     validate_state: StateGate | None
 
 
+# meiva:note
+# The random generator of an SDK process, built once per load for the sampling owner. Sampling is
+# not a secret, so it is a plain `random.Random`.
+def _new_rng() -> random.Random:
+    return random.Random()  # noqa: S311
+
+
 def _load_inputs(
     *,
     surface: bool,
@@ -460,7 +468,7 @@ def _load_inputs(
     else:
         clock = Clock(clock_config_from_boot(config), timers=SYSTEM_TIMERS)
     catalog = build_model_catalog()
-    sampling = process_sampling_owner()
+    sampling = process_sampling_owner(_new_rng())
     return LoadInputs(
         surface=surface,
         disabled=disabled,

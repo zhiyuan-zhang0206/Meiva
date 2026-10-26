@@ -53,7 +53,7 @@ and cancellation. The execution owner supplies its complete unsampled tally thro
 `MeivaContext.sdk_calls`; calls and ordinary threads share that owner explicitly.
 
 `MEIVA_SDK_CALL_SAMPLING_ENABLED=false` is the default (every call). When enabled,
-`MEIVA_SDK_CALL_SAMPLE_EVERY=N` sets inclusion probability 1/N, with N >= 1. These
+`MEIVA_SDK_CALL_SAMPLE_EVERY=N` sets inclusion probability 1/N (an independent draw per call from the process root's generator), with N >= 1. These
 cluster fields use the existing config API/CLI. Processes start with their boot
 policy and refresh active-call policy snapshots in the background every five
 seconds from local `.env` on gateways and unenrolled tools, or the existing

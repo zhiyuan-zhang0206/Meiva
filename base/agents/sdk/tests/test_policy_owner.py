@@ -9,6 +9,7 @@ import pytest
 
 from base.agents.sdk.call_policy import SamplingPolicy, SamplingPolicyOwner, SamplingSource
 from base.agents.sdk.tests.sampling_owners import gateway_sampling_owner
+from base.clock.tests.seeded_rng import seeded_rng
 from base.host.net.tests.local_http import serve_json
 
 
@@ -71,6 +72,7 @@ def test_stop_collects_refresh_boundary_failure(tmp_path: Path) -> None:
         source=SamplingSource(
             env=_InterruptedEnv(), env_path=tmp_path / ".env", refresh_seconds=0.0
         ),
+        rng=seeded_rng(),
     )
     with contextlib.suppress(KeyboardInterrupt):
         owner.read()

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+import random
 import sys
 from dataclasses import dataclass
 from pathlib import Path
@@ -17,6 +18,13 @@ from base.paths import repo_root
 from base.sessions.helperproc import helper_for
 
 __all__ = ["CommandRuntime", "Terminal", "UserSession"]
+
+
+# meiva:note
+# The invocation's random generator. Jitter and sampling are not secrets, so it is a plain
+# `random.Random`, built once per command here and handed down through `CommandRuntime.rng`.
+def _new_rng() -> random.Random:
+    return random.Random()  # noqa: S311
 
 
 # meiva:note
@@ -88,6 +96,11 @@ class CommandRuntime:
     session: UserSession
     timers: Timers
     # meiva:note
+    # The one random generator of this invocation. Jitter and sampling that no secret rides on
+    # draw from it (`random.Random`, not `SystemRandom`); a command hands it down to the owners it
+    # builds and never makes a second one.
+    rng: random.Random
+    # meiva:note
     # The checkout whose code runs this invocation (`base.paths.repo_root`), chosen here with the
     # other process facts. The entry's checkout gate has already accepted it for `home`.
     checkout: Path
@@ -115,6 +128,7 @@ class CommandRuntime:
             host=host,
             session=UserSession.current(),
             timers=SYSTEM_TIMERS,
+            rng=_new_rng(),
             checkout=repo_root(),
             terminal=Terminal.current(),
         )
