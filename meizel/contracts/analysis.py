@@ -11,6 +11,7 @@ from pathlib import Path
 
 from meizel.contracts.ambient_read import (
     ambient_diagnostics,
+    in_scope,
     reader_problems,
     sources_from,
     stale_readers,
@@ -19,7 +20,7 @@ from meizel.contracts.ambient_read import (
 from meizel.contracts.debt import file_key, set_debt
 from meizel.contracts.enumerations import check as check_roles
 from meizel.contracts.ledger import debts_in, reconcile
-from meizel.contracts.manifest import Manifest, load_manifests, manifest_path
+from meizel.contracts.manifest import Manifest, effective_purity, load_manifests, manifest_path
 from meizel.contracts.policy import POLICY, Policy, load_policy, render_policy
 from meizel.contracts.policy import check as check_policy
 from meizel.contracts.rule import (
@@ -463,6 +464,52 @@ def _type_cast_diagnostics(scans: Iterable[FileScan]) -> list[Diagnostic]:
     ]
 
 
+_WRAPPER_HINTS = (
+    "why: a private function that is only `return time.monotonic()` hides the clock read from the "
+    "rule on functions that wait and is a seam only a patch can reach; the module never hands it "
+    "on, so nothing can inject the clock",
+    "instead: take the clock as a required `Timers` parameter (or `now: float`) from the root, and "
+    "delete the wrapper; one the module passes on as a default or an argument is an injection point",
+    "see: meizel/docs/checker/fake-entropy.meiva.okf.md",
+)
+_ENTROPY_HINTS = (
+    "why: a monotonic or perf-counter reading, an object address and a process-local counter are "
+    "not entropy: two processes started together draw the same value, a restart repeats it and an "
+    "address is reused; and because they are neither the wall clock nor a random call they hide a "
+    "read of randomness from `ambient-read`",
+    "instead: entropy has one carrier, the process's `random.Random`: pass it down from the "
+    "composition root and mint identifiers with `new_uuid(rng)`; keep an interval clock for "
+    "durations (`end - start`); a module's clock is a required `Timers` parameter, not a private "
+    "wrapper",
+    "see: meizel/docs/checker/fake-entropy.meiva.okf.md",
+)
+
+
+# meiva:note
+# A reading spent as identity or randomness, or a private wrapper over an interval clock. It is
+# recordable debt like an ambient read, except in a strict file.
+def _entropy_diagnostics(
+    scans: Iterable[FileScan], manifests: dict[str, Manifest]
+) -> list[Diagnostic]:
+    found: list[Diagnostic] = []
+    for scan in scans:
+        if not scan.entropy or not in_scope(scan.path, manifests):
+            continue
+        owner = scan.path.rpartition("/")[0]
+        strict = effective_purity(scan.path, manifests) == "strict"
+        for site in scan.entropy:
+            reading, _, context = site.what.partition(" in ")
+            what = (
+                f"`{site.what.split()[-1]}` wraps an interval clock that nothing injects"
+                if site.what.startswith("interval-wrapper")
+                else f"`{reading}` is spent as identity or randomness ({context})"
+            )
+            debt = None if strict else DebtKey(owner, file_key(owner, scan.path, site.what))
+            hints = _WRAPPER_HINTS if site.what.startswith("interval-wrapper") else _ENTROPY_HINTS
+            found.append(Diagnostic(scan.path, site.line, Code.FAKE_ENTROPY, what, hints, debt))
+    return found
+
+
 def _any_collaborator_diagnostics(scans: Iterable[FileScan]) -> list[Diagnostic]:
     return [
         Diagnostic(
@@ -541,6 +588,7 @@ def diagnose(scan: FileScan, manifests: dict[str, Manifest], *, policy: Policy) 
     found.extend(_source_diagnostics([scan], loaders, externals))
     found.extend(_patch_diagnostics([scan]))
     found.extend(ambient_diagnostics([scan], manifests))
+    found.extend(_entropy_diagnostics([scan], manifests))
     found.extend(_type_cast_diagnostics([scan]))
     found.extend(_any_collaborator_diagnostics([scan]))
     found.extend(_type_checking_diagnostics([scan], manifests, policy))
@@ -589,6 +637,7 @@ def analyze(
     diagnostics.extend(_source_diagnostics(judged_scans, loaders, externals))
     diagnostics.extend(_patch_diagnostics(judged_scans))
     diagnostics.extend(ambient_diagnostics(judged_scans, manifests))
+    diagnostics.extend(_entropy_diagnostics(judged_scans, manifests))
     diagnostics.extend(_type_cast_diagnostics(judged_scans))
     diagnostics.extend(_any_collaborator_diagnostics(judged_scans))
     diagnostics.extend(_type_checking_diagnostics(judged_scans, manifests, policy))
