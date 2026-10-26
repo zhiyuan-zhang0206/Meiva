@@ -320,13 +320,15 @@ def test_provision_creates_builtins(
     out = capsys.readouterr().out
     assert "self-evolution-weekly" in out
     assert "memory-arbiter" in out
-    assert "trace-ship-tempo" not in out
+    assert "trace-ship-tempo" in out
+    assert "not-a-builtin-schedule" not in out
     with db_conn.cursor() as cur:
         cur.execute("SELECT name, enabled FROM schedules ORDER BY name")
         rows = dict(cur.fetchall())
     assert rows["self-evolution-weekly"] is True
     assert rows["memory-arbiter"] is True
-    assert "trace-ship-tempo" not in rows
+    assert rows["trace-ship-tempo"] is True
+    assert "not-a-builtin-schedule" not in rows
 
     assert _sched.cmd_schedules_provision(database_factory=operator_database) == 0
     assert "(all built-in schedules already present and current)" in capsys.readouterr().out
