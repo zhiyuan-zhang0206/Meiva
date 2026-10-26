@@ -9,8 +9,7 @@ exports = ["daemon.py", "service.py", "shutdown_budget.py"]
 "shutdown_budget.py" = "strict"
 
 [roots]
-"daemon.py" = { kinds = ["cwd", "pid", "settings"], why = "The exec-host process entry boots configuration before composing its service resources" }
+"daemon.py" = { kinds = ["cwd", "home", "pid", "settings"], why = "The exec-host process entry boots configuration and reads the home it runs under before composing its service resources" }
 
 [debt.ambient-read]
 "daemon.py#environ base.native_process.child_env.inherited_process_env" = 1
-"daemon.py#home base.paths.meiva_home" = 1

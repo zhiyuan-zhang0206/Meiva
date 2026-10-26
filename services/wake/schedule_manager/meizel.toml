@@ -24,9 +24,5 @@ exports = ["blocked_streak.py", "daemon.py", "engine.py", "host_restart.py", "la
 "stall_policy.py" = "strict"
 
 [roots]
-"daemon.py" = { kinds = ["settings"], why = "Service or operator process entry boots configuration before composing its resources" }
-"runner.py" = { kinds = ["pid", "settings"], why = "Service or operator process entry boots configuration before composing its resources" }
-
-[debt.ambient-read]
-"daemon.py#home base.paths.meiva_home" = 1
-"runner.py#home base.paths.meiva_home" = 1
+"daemon.py" = { kinds = ["home", "settings"], why = "Service process entry boots configuration and reads the home it runs under before composing its resources" }
+"runner.py" = { kinds = ["home", "pid", "settings"], why = "Schedule runner process entry boots configuration and reads its pid and the home it runs under before composing its resources" }
