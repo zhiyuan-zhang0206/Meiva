@@ -1,6 +1,6 @@
 # meiva:link meiva/tests/fixtures/docs/sdk-composition.meiva.okf.md
 
-from collections.abc import Iterator
+from collections.abc import Generator, Iterator
 from types import ModuleType
 
 import pytest
@@ -8,6 +8,7 @@ import pytest
 import meiva
 from base.agents.context import MeivaContext
 from base.agents.context.identity import AgentIdentity
+from base.agents.sdk.tests.sampling_owners import fixed_sampling_owner
 from base.clock import SYSTEM_TIMERS, Clock
 from base.clock.configuration import clock_config_from_boot
 from base.cluster.machine import MachineIdentityReader
@@ -15,9 +16,10 @@ from base.cluster.machine.tests.identity import machine_identity as machine_iden
 from base.config import ConfigBoot
 from meiva.boot import derived_clients
 from meiva.sdk_surface import metering, process_context
-from meiva.sdk_surface.installation import installed
+from meiva.sdk_surface.installation import Installation, installed
+from meiva.sdk_surface.tests.installation_holder import held_installation
 
-__all__ = ["sdk_environment", "sdk_identity", "sdk_metering"]
+__all__ = ["sdk_environment", "sdk_identity", "sdk_metering", "sdk_root"]
 
 
 @pytest.fixture
@@ -65,3 +67,13 @@ def sdk_metering(sdk_environment: MeivaContext) -> Iterator[None]:
     current = installed()
     if current is not None and current.metered:
         metering.uninstall(current.metered)
+
+
+# meiva:note
+# A bare SDK installation over a fixed sampling owner, for a test that pins an agent without
+# installing a surface but reaches `meiva.sdk_surface.settings.bus()`: the SDK's event bus draws
+# its retry jitter from the generator the installation's sampling owner carries.
+@pytest.fixture
+def sdk_root() -> Generator[Installation]:
+    with held_installation(Installation.bare(sampling=fixed_sampling_owner())) as installation:
+        yield installation

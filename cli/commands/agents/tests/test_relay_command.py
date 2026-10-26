@@ -81,7 +81,11 @@ def test_the_relay_command_runs_a_claude_relay_to_the_leases_expiry(
     code = cmd_relay(
         _relay_args(lease),
         inputs=RelayInputs(
-            lease["relay_token"], redis_url, codex_home=None, stdout=stdout, rng=seeded_rng()
+            token=lease["relay_token"],
+            redis_url=redis_url,
+            codex_home=None,
+            stdout=stdout,
+            rng=seeded_rng(),
         ),
         database_factory=operator_database,
         machine=machine_identity,
@@ -111,7 +115,11 @@ def test_the_relay_command_reports_a_host_that_refuses_to_be_steered(
         code = cmd_relay(
             _relay_args(lease, provider="codex", thread_id=str(THREAD), codex_remote=host.endpoint),
             inputs=RelayInputs(
-                lease["relay_token"], redis_url, codex_home=None, stdout=stdout, rng=seeded_rng()
+                token=lease["relay_token"],
+                redis_url=redis_url,
+                codex_home=None,
+                stdout=stdout,
+                rng=seeded_rng(),
             ),
             database_factory=operator_database,
             machine=machine_identity,
@@ -144,7 +152,11 @@ def test_unresolvable_destination_exits_before_any_lease_work(
             antigravity_endpoint_file=str(absent),
         ),
         inputs=RelayInputs(
-            lease["relay_token"], redis_url, codex_home=None, stdout=stdout, rng=seeded_rng()
+            token=lease["relay_token"],
+            redis_url=redis_url,
+            codex_home=None,
+            stdout=stdout,
+            rng=seeded_rng(),
         ),
         database_factory=operator_database,
         machine=machine_identity,
@@ -168,7 +180,11 @@ def test_agent_mismatch_refuses_inbox_before_subscription(
     code = cmd_relay(
         _relay_args(lease, agent_id=lease["agent_id"] + 1),
         inputs=RelayInputs(
-            lease["relay_token"], redis_url, codex_home=None, stdout=stdout, rng=seeded_rng()
+            token=lease["relay_token"],
+            redis_url=redis_url,
+            codex_home=None,
+            stdout=stdout,
+            rng=seeded_rng(),
         ),
         database_factory=operator_database,
         machine=machine_identity,
@@ -189,7 +205,11 @@ def test_the_relay_command_refuses_a_credential_the_lease_did_not_mint(
     code = cmd_relay(
         _relay_args(lease),
         inputs=RelayInputs(
-            UNMINTED, redis_url, codex_home=None, stdout=io.StringIO(), rng=seeded_rng()
+            token=UNMINTED,
+            redis_url=redis_url,
+            codex_home=None,
+            stdout=io.StringIO(),
+            rng=seeded_rng(),
         ),
         database_factory=operator_database,
         machine=machine_identity,

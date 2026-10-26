@@ -536,7 +536,13 @@ async def test_terminal_relay_start_delivers_interruption_best_effort(
     result = await asyncio.to_thread(
         relay.cmd_relay,
         args,
-        inputs=relay.RelayInputs(session["relay_token"], redis_url, None, transport, seeded_rng()),
+        inputs=relay.RelayInputs(
+            token=session["relay_token"],
+            redis_url=redis_url,
+            codex_home=None,
+            stdout=transport,
+            rng=seeded_rng(),
+        ),
         database_factory=lambda: database,
         machine=machine_identity,
     )

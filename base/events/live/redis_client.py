@@ -27,7 +27,6 @@ from base.events.live.redis_resilience import (
     SOCKET_CONNECT_TIMEOUT_S,
     WARN_THROTTLE_S,
     AuthRetry,
-    compute_auth_retry_delay,
     keepalive_options,
     should_warn_publish_failure,
 )
@@ -130,31 +129,20 @@ class TransportAwareAsyncConnection(aredis.Connection):
         return not (transport is not None and transport.is_closing())
 
 
+# meiva:note
 # Redis accepts TCP connections before the per-cluster ACL user is re-affirmed
 # after a fresh start. Retrying auth failures through the normal redis-py retry
 # path does not work: that retry intentionally only covers transport failures.
 # Keep retries bounded so a bad ACL cannot pin a gateway request or an agent
-# publisher forever; full jitter avoids a fleet of restarted processes striking
-# Redis again on the same exponential schedule.
+# publisher forever; each wait is jittered (half the exponential cap plus a drawn share of
+# the other half) so a fleet of restarted processes does not strike Redis again on the
+# same exponential schedule.
 _AUTH_RETRY_ERRORS = (AuthenticationError, NoPermissionError)
 
 # The two indirections make the retry contract deterministic in unit tests
 # without making real callers choose a scheduler or clock implementation.
 sleep_sync = time.sleep
 sleep_async = asyncio.sleep
-
-
-def _next_auth_retry_delay(
-    *, failure_count: int, waited_s: float, started_at: float, auth_retry: AuthRetry
-) -> float:
-    """Choose the next jittered delay without exceeding the retry window."""
-    return compute_auth_retry_delay(
-        failure_count=failure_count,
-        waited_s=waited_s,
-        elapsed_s=time.monotonic() - started_at,
-        jitter_sample=auth_retry.draw(),
-        policy=auth_retry.policy,
-    )
 
 
 async def retry_auth_failures_async[T](
@@ -184,11 +172,10 @@ async def retry_auth_failures_async[T](
             failure_count += 1
             if failure_count >= auth_retry.policy.max_attempts:
                 raise
-            delay_s = _next_auth_retry_delay(
+            delay_s = auth_retry.next_delay(
                 failure_count=failure_count,
                 waited_s=waited_s,
-                started_at=started_at,
-                auth_retry=auth_retry,
+                elapsed_s=time.monotonic() - started_at,
             )
             if delay_s <= 0:
                 raise
@@ -208,11 +195,10 @@ def retry_auth_failures_sync[T](operation: Callable[[], T], *, auth_retry: AuthR
             failure_count += 1
             if failure_count >= auth_retry.policy.max_attempts:
                 raise
-            delay_s = _next_auth_retry_delay(
+            delay_s = auth_retry.next_delay(
                 failure_count=failure_count,
                 waited_s=waited_s,
-                started_at=started_at,
-                auth_retry=auth_retry,
+                elapsed_s=time.monotonic() - started_at,
             )
             if delay_s <= 0:
                 raise

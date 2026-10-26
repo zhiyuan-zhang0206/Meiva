@@ -18,6 +18,12 @@ from meiva_builtins.plugins.meiva_fleet.tests.task_registry.seeds import (
 )
 from meiva_builtins.plugins.meiva_fleet.tests.task_registry.seeds import seed_agent
 
+# meiva:note
+# These tests drive the fleet task registry, whose board refreshes publish through the SDK's event
+# bus; it needs the generator the SDK root carries, so each runs under the bare installation
+# `sdk_root` holds.
+pytestmark = pytest.mark.usefixtures("sdk_root")
+
 
 class TestTasksEntries:
     def test_create_title_unwraps(
