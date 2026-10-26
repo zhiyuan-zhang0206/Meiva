@@ -29,6 +29,7 @@ import pytest
 from base import paths
 from base.agents.sdk.tests.sampling_owners import fixed_sampling_owner
 from base.config.service_read import ConfigAuthority
+from base.lm.pricing.archive import load_archive
 from base.packages.plugins.enable_config import write_local
 
 # Every dotted name a plugin module can be registered under.
@@ -244,7 +245,7 @@ def test_the_loader_retains_the_roots_explicit_owners(
     from meiva.sdk_surface.extensions import load_extensions
     from meiva.sdk_surface.installation import installed
 
-    catalog = CatalogBuilder().build()
+    catalog = CatalogBuilder(load_archive()).build()
     _write_plugin(paths.plugins_dir(home=unit_home), "good", "LOADED = True\n")
     _write_enabled({"good": {"enabled": True}})
     sampling = fixed_sampling_owner()

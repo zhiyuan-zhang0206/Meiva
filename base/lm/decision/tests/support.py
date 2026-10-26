@@ -6,6 +6,7 @@ from collections.abc import Callable, Mapping
 
 from base.lm.catalog import CatalogBuilder, ModelCatalog
 from base.lm.catalog.provider_keys import ProviderKeys
+from base.lm.pricing.archive import load_archive
 from base.lm.provider_api import (
     Decision,
     DecisionBinding,
@@ -65,6 +66,6 @@ def provider(
 
 
 def catalog_with(binding: DecisionBinding, **kwargs: object) -> ModelCatalog:
-    builder = CatalogBuilder()
+    builder = CatalogBuilder(load_archive())
     builder.install_decision("fake_plugin", provider(binding, **kwargs))  # pyright: ignore[reportArgumentType]
     return builder.build()

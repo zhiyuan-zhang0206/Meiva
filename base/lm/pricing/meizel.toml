@@ -1,12 +1,10 @@
-exports = ["cache_writes.py", "catalog.py"]
+exports = ["archive.py", "cache_writes.py", "catalog.py"]
 
 [uses]
 "__init__.py" = ["catalog.py"]
+"archive.py" = ["__init__.py"]
 
 [purity]
-"__init__.py" = "strict-to-be"
+"__init__.py" = "strict"
 "cache_writes.py" = "strict"
 "catalog.py" = "strict"
-
-[debt.impure-call]
-"__init__.py#pkgutil.get_data" = 1
