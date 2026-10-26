@@ -8,6 +8,7 @@ from pathlib import Path
 
 import pytest
 
+from base.clock import SYSTEM_TIMERS
 from base.host.env.registry import process_environment
 from base.sessions.backend import (
     PosixProcSessionBackend,
@@ -23,17 +24,17 @@ from base.sessions.pty.tests.pty_service import pty_service as pty_service
 
 
 def test_get_backend_returns_platform_appropriate_backend():
-    assert isinstance(get_backend(), PosixProcSessionBackend)
+    assert isinstance(get_backend(timers=SYSTEM_TIMERS), PosixProcSessionBackend)
 
 
 def test_get_shell_backend_returns_platform_appropriate_backend():
     shell = get_shell_backend()
     assert isinstance(shell, PtySessionBackend)
-    assert not isinstance(get_backend(), PtySessionBackend)
+    assert not isinstance(get_backend(timers=SYSTEM_TIMERS), PtySessionBackend)
 
 
 def test_get_backend_is_a_session_backend():
-    backend = get_backend()
+    backend = get_backend(timers=SYSTEM_TIMERS)
     assert isinstance(backend, SessionBackend)
 
 

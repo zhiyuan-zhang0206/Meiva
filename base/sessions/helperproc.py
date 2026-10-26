@@ -11,11 +11,11 @@ from __future__ import annotations
 import contextlib
 import os
 import signal
-import time
 from pathlib import Path
 
 import psutil
 
+from base.clock import Timers
 from base.host.permissions_helper.client import (
     HelperFactory,
     PermissionsHelperClient,
@@ -176,17 +176,13 @@ def spawn_via_helper(
     return result["pid"]
 
 
-def _monotonic() -> float:
-    return time.monotonic()
-
-
-def _wait_until_dead(process: psutil.Process, timeout: float) -> bool:
+def _wait_until_dead(process: psutil.Process, timeout: float, timers: Timers) -> bool:
     """Wait at most ``timeout`` for the captured process identity to stop."""
     if not _process_is_live(process):
         return True
-    deadline = _monotonic() + timeout
-    while _monotonic() < deadline:
-        time.sleep(_KILL_POLL_S)
+    deadline = timers.monotonic() + timeout
+    while timers.monotonic() < deadline:
+        timers.sleep(_KILL_POLL_S)
         if not _process_is_live(process):
             return True
     return not _process_is_live(process)
@@ -195,10 +191,11 @@ def _wait_until_dead(process: psutil.Process, timeout: float) -> bool:
 class HelperProcSessionBackend(SessionBackend):
     """Named sessions whose processes are direct children of the macOS helper."""
 
-    def __init__(self, client_factory: HelperFactory) -> None:
+    def __init__(self, client_factory: HelperFactory, timers: Timers) -> None:
         # A factory, not a client: only a spawn dials the helper, and a process that merely
         # lists sessions (the gateway) must not read the helper port to build one.
         self._client_factory = client_factory
+        self._timers = timers
 
     def has_session(self, name: str) -> bool:
         record = _read_record(name)
@@ -288,13 +285,15 @@ class HelperProcSessionBackend(SessionBackend):
         if graceful:
             with contextlib.suppress(*_GONE):
                 os.kill(record.pid, signal.SIGTERM)
-            ended_gracefully = _wait_until_dead(process, timeout)
+            ended_gracefully = _wait_until_dead(process, timeout, self._timers)
         if not ended_gracefully:
             with contextlib.suppress(*_GONE):
                 os.kill(record.pid, signal.SIGKILL)
         mode = "graceful" if ended_gracefully else "forced"
 
-        if not ended_gracefully and not _wait_until_dead(process, _KILL_CONFIRM_TIMEOUT_S):
+        if not ended_gracefully and not _wait_until_dead(
+            process, _KILL_CONFIRM_TIMEOUT_S, self._timers
+        ):
             logger.error(
                 "helperproc kill {name}: pid {pid} is still running after the kill — leaving "
                 "its session record in place so the survivor stays visible",

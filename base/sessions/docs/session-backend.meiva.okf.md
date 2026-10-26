@@ -10,10 +10,11 @@ tags: [base, process, supervision]
 `base/sessions/protocol.py:SessionBackend` defines the named-session interface.
 `base/sessions/backend.py` provides two entry points:
 
-- `get_backend()` selects `PosixProcSessionBackend` or the configured macOS
-  permissions-helper backend. Surviving pause probes and cold-maintenance
-  consumers use this native named-session interface. Current root-supervised
-  service custody is separate.
+- `get_backend(timers=...)` selects `PosixProcSessionBackend` or the configured macOS
+  permissions-helper backend. The caller's `Timers` drive their graceful-stop waits
+  (`posixproc.kill_session` takes the same required `timers`). Surviving pause probes
+  and cold-maintenance consumers use this native named-session interface. Current
+  root-supervised service custody is separate.
 - `get_shell_backend()` selects `PtySessionBackend` for interactive agent shells,
   watchers and their session consumers. The pty-sessions service owns these
   shells, so agent exits and agent-host restarts do not end them; stopping the
