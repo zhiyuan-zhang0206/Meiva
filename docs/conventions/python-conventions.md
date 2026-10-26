@@ -136,6 +136,28 @@ What this means for common edits:
   function defined in that same module) — `cli.main` is not a handler
   registry; its tests patch the parser module before `build_parser()` runs.
 
+### Self-describing signatures and local contract tests
+
+A public signature is the semantic contract of its locality unit:
+
+- **Encode units, coordinate systems and semantics in the signature.** Name
+  parameters and fields for what they mean and the unit they carry (`backoff_ms`
+  vs `backoff_s`, `timeout_s`, `max_bytes`, or a dedicated `NamedTuple` / frozen
+  dataclass / `StrEnum`), rather than passing bare primitives whose meaning lives
+  only in prose.
+- **A semantic change is a signature change.** When the unit, ordering, error
+  domain or invariant of a public function, method or type changes (for example,
+  milliseconds to seconds), change its parameter name, function name or type annotation
+  (`backoff_ms` -> `backoff_s`) so callers fail immediately in type checking and import
+  selection rather than silently running with the old assumption.
+- **Lock behavior in the owning package's unit tests.** Each package's
+  `<pkg>/**/tests/` locks the behavioral semantics of its exported functions and
+  types. Consumer tests verify their own logic against the collaborator's contract
+  or `base/` port fake instead of re-testing collaborator internals. When a `strict`,
+  debt-free module changes only its internal implementation and keeps its public AST
+  interface unchanged, PR test selection cuts off transitive cross-package consumer
+  and e2e propagation at that boundary ([backend test selection](engineering/test-selection.md#interface-early-cutoff-for-strict-modules)).
+
 ## Ambient state: inject what is read to decide
 
 Inject what is read to decide; write-only facades (a logger, a meter, a tracer) may

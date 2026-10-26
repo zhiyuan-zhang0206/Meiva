@@ -12,9 +12,9 @@ import tomllib
 from collections import deque
 from collections.abc import Generator, Iterable, Iterator
 from contextlib import contextmanager
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from pathlib import Path
-from typing import cast
+from typing import Protocol, cast
 
 from meizel.allowances import POLICY, Policy, parse
 from meizel.contracts.sync import prepare_policy_snapshot
@@ -44,9 +44,12 @@ class Impact:
     tests_by_input: dict[str, set[str]]
     unknown: tuple[Unknown, ...]
     members: dict[Fact, set[str]] = field(default_factory=dict)
+    cutoff: frozenset[str] = frozenset()
 
     def runtime_tests(self, path: str) -> set[str]:
         # meiva:link docs/conventions/engineering/test-selection.md
+        if path in self.cutoff:
+            return set()
         tests = {
             test
             for parent in (Path(path), *Path(path).parents)
@@ -391,3 +394,370 @@ def unknown_diagnostics(items: Iterable[Unknown], *, tree: str) -> tuple[str, ..
     return tuple(
         f"{tree}:{item.path}:{item.line}: {item.reason}: {item.expression}" for item in items
     )
+
+
+_BOUNDARY_KEYS = ("exports", "loads", "external", "state", "roots")
+
+
+def _is_private_name(name: str) -> bool:
+    return name.startswith("_") and not (name.startswith("__") and name.endswith("__"))
+
+
+def _manifest_doc(root: Path, directory: str) -> dict[str, object] | None:
+    path = (root / directory / "meizel.toml") if directory else (root / "meizel.toml")
+    if not path.is_file():
+        return None
+    try:
+        return tomllib.loads(path.read_text(encoding="utf-8"))
+    except (OSError, tomllib.TOMLDecodeError):
+        return None
+
+
+def _purity_from_doc(doc: dict[str, object], child: str) -> str | None:
+    purity = doc.get("purity")
+    if isinstance(purity, str):
+        return purity
+    if not isinstance(purity, dict):
+        return None
+    table = cast(dict[str, object], purity)
+    child_mode = table.get(child)
+    if isinstance(child_mode, str):
+        return child_mode
+    default_mode = table.get(".")
+    return default_mode if isinstance(default_mode, str) else None
+
+
+def effective_file_purity(root: Path, path: str) -> str:
+    directory = path.rpartition("/")[0]
+    while True:
+        rel = path[len(directory) + 1 :] if directory else path
+        child = rel.split("/", 1)[0]
+        doc = _manifest_doc(root, directory)
+        if doc is not None:
+            resolved = _purity_from_doc(doc, child)
+            if resolved is not None:
+                return resolved
+        if not directory:
+            return "none"
+        directory = directory.rpartition("/")[0]
+
+
+def _debt_mentions_target(key: str, rel: str, child: str) -> bool:
+    base = key.split("#", 1)[0].strip()
+    if " -> " in base:
+        src, dst = (part.strip() for part in base.split(" -> ", 1))
+        return src in (rel, child) or dst in (rel, child)
+    return base in (rel, child)
+
+
+def _doc_has_target_debt(doc: dict[str, object], rel: str, child: str) -> bool:
+    debt = doc.get("debt")
+    if not isinstance(debt, dict):
+        return False
+    for table in cast(dict[str, object], debt).values():
+        if isinstance(table, dict) and any(
+            _debt_mentions_target(str(k), rel, child) for k in cast(dict[object, object], table)
+        ):
+            return True
+    return False
+
+
+def file_has_no_recorded_debt(root: Path, path: str) -> bool:
+    directory = path.rpartition("/")[0]
+    while True:
+        rel = path[len(directory) + 1 :] if directory else path
+        child = rel.split("/", 1)[0]
+        doc = _manifest_doc(root, directory)
+        if doc is not None and _doc_has_target_debt(doc, rel, child):
+            return False
+        if not directory:
+            return True
+        directory = directory.rpartition("/")[0]
+
+
+def _manifest_boundary_unchanged(base_root: Path, head_root: Path, path: str) -> bool:
+    directory = path.rpartition("/")[0]
+    old_doc = _manifest_doc(base_root, directory) or {}
+    new_doc = _manifest_doc(head_root, directory) or {}
+    return all(old_doc.get(key) == new_doc.get(key) for key in _BOUNDARY_KEYS)
+
+
+def _is_docstring(body: list[ast.stmt], index: int) -> bool:
+    return (
+        index == 0
+        and isinstance(body[0], ast.Expr)
+        and isinstance(body[0].value, ast.Constant)
+        and isinstance(body[0].value.value, str)
+    )
+
+
+def _node_names(nodes: Iterable[ast.AST | None]) -> set[str]:
+    return {
+        child.id
+        for node in nodes
+        if node is not None
+        for child in ast.walk(node)
+        if isinstance(child, ast.Name)
+    }
+
+
+def _func_signature(
+    node: ast.FunctionDef | ast.AsyncFunctionDef, referenced: set[str]
+) -> tuple[object, ...]:
+    referenced.update(
+        _node_names([*node.decorator_list, *node.type_params, node.args, node.returns])
+    )
+    return (
+        "func",
+        type(node).__name__,
+        node.name,
+        tuple(ast.unparse(d) for d in node.decorator_list),
+        tuple(ast.unparse(tp) for tp in node.type_params),
+        ast.unparse(node.args),
+        ast.unparse(node.returns) if node.returns is not None else None,
+    )
+
+
+def _exported_list_values(node: ast.expr | None) -> set[str]:
+    if not isinstance(node, (ast.List, ast.Tuple)):
+        return set()
+    return {
+        elt.value
+        for elt in node.elts
+        if isinstance(elt, ast.Constant) and isinstance(elt.value, str)
+    }
+
+
+def _ann_assign_signature(node: ast.AnnAssign, referenced: set[str]) -> tuple[object, ...] | str:
+    if not isinstance(node.target, ast.Name):
+        return "invalid"
+    if _is_private_name(node.target.id):
+        return "private"
+    referenced.update(_node_names([node.annotation, node.value]))
+    if node.target.id in ("__all__", "__all_for_meiva__"):
+        referenced.update(_exported_list_values(node.value))
+    return (
+        "ann_assign",
+        node.target.id,
+        ast.unparse(node.annotation),
+        ast.unparse(node.value) if node.value is not None else None,
+    )
+
+
+def _plain_assign_signature(node: ast.Assign, referenced: set[str]) -> tuple[object, ...] | str:
+    if not all(isinstance(target, ast.Name) for target in node.targets):
+        return "invalid"
+    names = tuple(cast(ast.Name, target).id for target in node.targets)
+    public = tuple(name for name in names if not _is_private_name(name))
+    if not public:
+        return "private"
+    if len(public) != len(names):
+        return "invalid"
+    referenced.update(_node_names([node.value]))
+    if "__all__" in public or "__all_for_meiva__" in public:
+        referenced.update(_exported_list_values(node.value))
+    return ("assign", public, ast.unparse(node.value))
+
+
+def _assign_signature(
+    node: ast.Assign | ast.AnnAssign | ast.TypeAlias, referenced: set[str]
+) -> tuple[object, ...] | str:
+    if isinstance(node, ast.TypeAlias):
+        if _is_private_name(node.name.id):
+            return "private"
+        referenced.update(_node_names([*node.type_params, node.value]))
+        return (
+            "type_alias",
+            node.name.id,
+            tuple(ast.unparse(tp) for tp in node.type_params),
+            ast.unparse(node.value),
+        )
+    if isinstance(node, ast.AnnAssign):
+        return _ann_assign_signature(node, referenced)
+    return _plain_assign_signature(node, referenced)
+
+
+def _class_signature(node: ast.ClassDef, referenced: set[str]) -> tuple[object, ...] | None:
+    members = _scope_definitions(node.body, referenced, allow_imports=False)
+    if members is None:
+        return None
+    referenced.update(
+        _node_names([*node.decorator_list, *node.type_params, *node.bases, *node.keywords])
+    )
+    return (
+        "class",
+        node.name,
+        tuple(ast.unparse(d) for d in node.decorator_list),
+        tuple(ast.unparse(tp) for tp in node.type_params),
+        tuple(ast.unparse(b) for b in node.bases),
+        tuple(ast.unparse(k) for k in node.keywords),
+        members,
+    )
+
+
+def _scope_definitions(
+    body: list[ast.stmt], referenced: set[str], *, allow_imports: bool
+) -> tuple[object, ...] | None:
+    items: list[object] = []
+    for index, stmt in enumerate(body):
+        if _is_docstring(body, index) or isinstance(stmt, ast.Pass):
+            continue
+        if allow_imports and isinstance(stmt, (ast.Import, ast.ImportFrom)):
+            continue
+        if isinstance(stmt, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            if not _is_private_name(stmt.name):
+                items.append(_func_signature(stmt, referenced))
+        elif isinstance(stmt, ast.ClassDef):
+            if not _is_private_name(stmt.name):
+                sig = _class_signature(stmt, referenced)
+                if sig is None:
+                    return None
+                items.append(sig)
+        elif isinstance(stmt, (ast.Assign, ast.AnnAssign, ast.TypeAlias)):
+            sig = _assign_signature(stmt, referenced)
+            if sig == "invalid":
+                return None
+            if isinstance(sig, tuple):
+                items.append(sig)
+        else:
+            return None
+    return tuple(items)
+
+
+def _record_alias(
+    bound: str,
+    target: str,
+    alias: ast.alias,
+    bindings: dict[str, str],
+    reexports: set[tuple[str, str]],
+) -> None:
+    if _is_private_name(bound):
+        return
+    bindings[bound] = target
+    if alias.asname == alias.name:
+        reexports.add((bound, target))
+
+
+def _import_bindings(
+    tree: ast.Module,
+) -> tuple[dict[str, str], frozenset[tuple[str, str]]] | None:
+    bindings: dict[str, str] = {}
+    reexports: set[tuple[str, str]] = set()
+    for stmt in tree.body:
+        if isinstance(stmt, ast.Import):
+            for alias in stmt.names:
+                _record_alias(
+                    alias.asname or alias.name.split(".", 1)[0],
+                    alias.name,
+                    alias,
+                    bindings,
+                    reexports,
+                )
+        elif isinstance(stmt, ast.ImportFrom):
+            if any(alias.name == "*" for alias in stmt.names):
+                return None
+            prefix = "." * stmt.level + (stmt.module or "")
+            for alias in stmt.names:
+                _record_alias(
+                    alias.asname or alias.name, f"{prefix}:{alias.name}", alias, bindings, reexports
+                )
+    return bindings, frozenset(reexports)
+
+
+def _module_interface_fingerprint(
+    tree: ast.Module, *, is_package_init: bool
+) -> tuple[object, ...] | None:
+    referenced: set[str] = set()
+    defs = _scope_definitions(tree.body, referenced, allow_imports=True)
+    imports = _import_bindings(tree)
+    if defs is None or imports is None:
+        return None
+    bindings, reexports = imports
+    if is_package_init:
+        interface_imports = tuple(sorted(bindings.items()))
+    else:
+        used = {(name, bindings[name]) for name in referenced if name in bindings} | set(reexports)
+        interface_imports = tuple(sorted(used))
+    if not defs and not interface_imports:
+        return None
+    return (defs, interface_imports)
+
+
+def public_interface_unchanged(base_root: Path, head_root: Path, path: str) -> bool:
+    base_file, head_file = base_root / path, head_root / path
+    if not (path.endswith(".py") and base_file.is_file() and head_file.is_file()):
+        return False
+    if (
+        effective_file_purity(base_root, path) != "strict"
+        or effective_file_purity(head_root, path) != "strict"
+        or not file_has_no_recorded_debt(base_root, path)
+        or not file_has_no_recorded_debt(head_root, path)
+        or not _manifest_boundary_unchanged(base_root, head_root, path)
+    ):
+        return False
+    try:
+        base_tree = ast.parse(base_file.read_text(encoding="utf-8"), filename=path)
+        head_tree = ast.parse(head_file.read_text(encoding="utf-8"), filename=path)
+    except (OSError, SyntaxError, ValueError):
+        return False
+    is_init = path.endswith("/__init__.py")
+    base_fp = _module_interface_fingerprint(base_tree, is_package_init=is_init)
+    head_fp = _module_interface_fingerprint(head_tree, is_package_init=is_init)
+    return base_fp is not None and base_fp == head_fp
+
+
+def package_local_tests(
+    path: str, test_dirs: frozenset[str], collectable: frozenset[str]
+) -> set[str]:
+    directory = path.rpartition("/")[0]
+    while directory:
+        tests_dir = directory if directory.rpartition("/")[2] == "tests" else f"{directory}/tests"
+        if tests_dir in test_dirs:
+            return {test for test in collectable if test.startswith(f"{tests_dir}/")}
+        directory = directory.rpartition("/")[0]
+    return set()
+
+
+class _CheckoutScope(Protocol):
+    @property
+    def repo_root(self) -> Path: ...
+    @property
+    def test_dirs(self) -> frozenset[str]: ...
+    @property
+    def collectable(self) -> frozenset[str]: ...
+
+
+def qualifies_for_interface_cutoff(
+    path: str,
+    *,
+    base: _CheckoutScope,
+    head: _CheckoutScope,
+    base_impact: Impact,
+    head_impact: Impact,
+) -> bool:
+    if "tests" in path.split("/")[:-1] or Path(path).name == "conftest.py":
+        return False
+    head_local = package_local_tests(path, head.test_dirs, head.collectable)
+    base_local = package_local_tests(path, base.test_dirs, base.collectable)
+    if not (head_local & head_impact.runtime_tests(path)) or not (
+        base_local & base_impact.runtime_tests(path)
+    ):
+        return False
+    return public_interface_unchanged(base.repo_root, head.repo_root, path)
+
+
+def apply_interface_cutoff(
+    package_paths: Iterable[str],
+    base: _CheckoutScope,
+    head: _CheckoutScope,
+    base_impact: Impact,
+    head_impact: Impact,
+) -> tuple[Impact, Impact]:
+    cutoff = frozenset(
+        path
+        for path in package_paths
+        if qualifies_for_interface_cutoff(
+            path, base=base, head=head, base_impact=base_impact, head_impact=head_impact
+        )
+    )
+    return replace(base_impact, cutoff=cutoff), replace(head_impact, cutoff=cutoff)

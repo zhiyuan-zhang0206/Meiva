@@ -294,9 +294,11 @@ jobs:
         run: |
           SCOPE_TMP="$(mktemp -d "${TMPDIR:-/tmp}/meiva-e2e-scope.XXXXXX")"
           trap 'rm -rf "$SCOPE_TMP"' EXIT
-          git diff --name-only "$(git merge-base "$BASE_SHA" HEAD)"...HEAD > "$SCOPE_TMP/changed.txt"
+          BASE_MERGE="$(git merge-base "$BASE_SHA" HEAD)"
+          git diff --name-only "$BASE_MERGE"...HEAD > "$SCOPE_TMP/changed.txt"
           python3 scripts/ci/e2e_scope.py \
             --changed-files "$SCOPE_TMP/changed.txt" \
+            --base-ref "$BASE_MERGE" \
             --event pull_request \
             --head-ref "$HEAD_REF" \
             --mode "$MODE" \

@@ -38,14 +38,22 @@ from meizel.roles import packages  # noqa: E402 - standalone script
 
 # The packages that carry their own `tests` directories: the application packages and the
 # repository's own tooling (not `tests`, `ui`, the schedule templates or the demos).
-PACKAGES = (*packages("application"), *packages("tooling"))
+APPLICATION_PACKAGES = packages("application")
+TOOLING_PACKAGES = packages("tooling")
+PACKAGES = (*APPLICATION_PACKAGES, *TOOLING_PACKAGES)
 _PACKAGE_UNIT_TEST = re.compile(rf"(?:{'|'.join(PACKAGES)})/(?:[^/]+/)*tests/(?:[^/]+/)*[^/]+\.py")
+_TOOLING_PYTHON = re.compile(rf"(?:{'|'.join(TOOLING_PACKAGES)})/(?:[^/]+/)*[^/]+\.py")
+_APPLICATION_PYTHON = re.compile(rf"(?:{'|'.join(APPLICATION_PACKAGES)})/(?:[^/]+/)*[^/]+\.py")
 _QUEUE_PREFIXES = ("trunk-merge/", "trunk-temp/")
 
 
 def is_package_unit_test(path: str) -> bool:
     """Whether a repo-relative path is a Python file under a package-internal `tests` directory."""
     return _PACKAGE_UNIT_TEST.fullmatch(path) is not None
+
+
+def is_tooling_python(path: str) -> bool:
+    return _TOOLING_PYTHON.fullmatch(path) is not None
 
 
 # Calls that import by name or by path. A literal module name is resolved like an import
@@ -168,13 +176,54 @@ def e2e_reached_unit_tests(root: Path) -> frozenset[str] | None:
                     relative = candidate.as_posix()
                     if not (root / candidate).is_file():
                         continue
-                    if is_package_unit_test(relative):
+                    if is_package_unit_test(relative) or is_tooling_python(relative):
                         reached.add(relative)
-                    if is_package_unit_test(relative) or relative.startswith("tests/"):
+                    if (
+                        is_package_unit_test(relative)
+                        or is_tooling_python(relative)
+                        or relative.startswith("tests/")
+                    ):
                         pending.append(root / candidate)
     except _NotUnderstoodError:
         return None
     return frozenset(reached)
+
+
+def interface_unchanged_paths(
+    changed: list[str], *, repo_root: Path, base_ref: str | None = None
+) -> frozenset[str]:
+    if base_ref is None or not changed:
+        return frozenset()
+    candidates = [
+        path for path in changed if not is_package_unit_test(path) and not is_tooling_python(path)
+    ]
+    if not candidates or not all(_APPLICATION_PYTHON.fullmatch(path) for path in candidates):
+        return frozenset()
+    from scripts.ci.test_impact import (
+        base_checkout,
+        build_impact,
+        qualifies_for_interface_cutoff,
+    )
+    from scripts.ci.test_selector import PathClass, classify_path, load_checkout
+
+    head = load_checkout(repo_root)
+    head_impact = build_impact(head.repo_root, head.collectable)
+    with base_checkout(head.repo_root, base_ref) as base_root:
+        base = load_checkout(base_root)
+        base_impact = build_impact(base_root, base.collectable & head.collectable)
+        return frozenset(
+            path
+            for path in candidates
+            if classify_path(path, head) is PathClass.PACKAGE
+            and classify_path(path, base) is PathClass.PACKAGE
+            and qualifies_for_interface_cutoff(
+                path,
+                base=base,
+                head=head,
+                base_impact=base_impact,
+                head_impact=head_impact,
+            )
+        )
 
 
 def skips_e2e(
@@ -185,6 +234,7 @@ def skips_e2e(
     decision: str,
     changed: list[str],
     reached: frozenset[str] | None = frozenset(),
+    interface_unchanged: frozenset[str] = frozenset(),
 ) -> bool:
     """The whole rule: see the module docstring. `reached` is `e2e_reached_unit_tests`;
     `None` (the walk could not understand something) never skips."""
@@ -194,7 +244,10 @@ def skips_e2e(
         and mode == "enforce"
         and decision == "SELECTED"
         and bool(changed)
-        and all(is_package_unit_test(path) for path in changed)
+        and all(
+            is_package_unit_test(path) or is_tooling_python(path) or path in interface_unchanged
+            for path in changed
+        )
         and reached is not None
         and reached.isdisjoint(changed)
     )
@@ -208,15 +261,21 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--head-ref", default="")
     parser.add_argument("--mode", default="")
     parser.add_argument("--decision", default="")
+    parser.add_argument("--base-ref", default=None)
+    parser.add_argument("--repo-root", type=Path, default=_REPOSITORY_ROOT)
     args = parser.parse_args(argv)
     changed = [line.strip() for line in args.changed_files.read_text().splitlines() if line.strip()]
+    repo_root = args.repo_root.resolve()
     skip = skips_e2e(
         event=args.event,
         head_ref=args.head_ref,
         mode=args.mode,
         decision=args.decision,
         changed=changed,
-        reached=e2e_reached_unit_tests(_REPOSITORY_ROOT),
+        reached=e2e_reached_unit_tests(repo_root),
+        interface_unchanged=interface_unchanged_paths(
+            changed, repo_root=repo_root, base_ref=args.base_ref
+        ),
     )
     print(f"skip={str(skip).lower()}")
     return 0
