@@ -14,12 +14,12 @@ from __future__ import annotations
 
 import asyncio
 import logging
-import time
 from typing import Any
 
 from psycopg import Connection
 from psycopg_pool import ConnectionPool
 
+from base.clock import SYSTEM_TIMERS
 from base.cluster import session_name
 from base.db.transaction import write_transaction
 from base.sessions.protocol import SessionBackend
@@ -60,8 +60,8 @@ def _is_queued_blocking(pool: ConnectionPool[Any], schedule_id: int) -> bool:
 async def wait_consumed(
     pool: ConnectionPool[Any], schedule_id: int, *, wait_s: float, poll_s: float
 ) -> None:
-    deadline = time.monotonic() + wait_s
-    while time.monotonic() < deadline:
+    deadline = SYSTEM_TIMERS.monotonic() + wait_s
+    while SYSTEM_TIMERS.monotonic() < deadline:
         if not await asyncio.to_thread(_is_queued_blocking, pool, schedule_id):
             return
         await asyncio.sleep(poll_s)

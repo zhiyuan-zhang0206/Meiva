@@ -10,7 +10,6 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from datetime import UTC, datetime
 from typing import Annotated
 
 from fastapi import APIRouter, HTTPException, Query, Request
@@ -34,7 +33,7 @@ from gateway.cluster.schemas import AgentMachineRow, HarnessAvailability, Machin
 from gateway.cluster.status import RosterEnv, gather_cluster_status, read_local_facts, roster_env
 from gateway.events import telemetry_rows
 from gateway.events.schemas import AgentEventRow, AgentEventsResponse
-from gateway.http.config import gateway_config
+from gateway.http.config import gateway_config, utc_now
 from ops.cluster import operations as _ops
 from ops.cluster_status import ClusterStatus
 
@@ -206,7 +205,7 @@ def get_cluster_admin_events(
                 limit=limit,
             ),
             default_limit=gateway_config(request).display.cluster_events_default_limit,
-            now=datetime.now(UTC),
+            now=utc_now(),
         )
     except AdminEventsError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc

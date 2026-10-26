@@ -11,7 +11,6 @@ table, under a statement timeout (503 on timeout).
 
 from __future__ import annotations
 
-from datetime import UTC, datetime
 from typing import Annotated
 
 import psycopg
@@ -23,7 +22,7 @@ from base.telemetry.metrics.aggregate import (
     fetch_aggregate,
 )
 from gateway.events.schemas import AgentMetricsItem, AgentMetricsReport, MetricsMeta, MetricsReport
-from gateway.http.config import gateway_config
+from gateway.http.config import gateway_config, utc_now
 
 router = APIRouter()
 
@@ -101,7 +100,7 @@ def get_metrics_agents(
     meta = MetricsMeta(
         window_days=days,
         agent_filter=None,
-        generated_at=datetime.now(UTC).isoformat(),
+        generated_at=utc_now().isoformat(),
         total_events=total_events,
         distinct_agents=len(rollups),
         since_compact=since_compact,

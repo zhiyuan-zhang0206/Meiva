@@ -5,11 +5,8 @@
 "test_backup_owner.py#patch.dict os.environ" = 1
 
 [debt.first-party-patch]
-"test_api_tokens.py#monkeypatch.setattr base.config.settings.data_plane.cluster_secret" = 4
+"test_api_tokens.py#monkeypatch.setattr base.config.settings.data_plane.cluster_secret" = 2
 "test_backup_owner.py#monkeypatch.setattr base.config.settings.data_plane.db_url" = 1
 
 [debt.stdlib-patch]
 "test_backup_owner.py#monkeypatch.setattr subprocess.run" = 1
-
-[debt.unresolved-patch]
-"test_api_tokens.py#monkeypatch.setattr type(settings.data_plane).is_remote" = 1

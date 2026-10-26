@@ -17,7 +17,7 @@ import threading
 import time
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
-from datetime import UTC, datetime
+from datetime import datetime
 from pathlib import Path
 from typing import Annotated, Any
 
@@ -63,7 +63,7 @@ from gateway.cluster.schemas import (
     StatsTokens,
     SystemStatus,
 )
-from gateway.http.config import GatewayConfig, gateway_config
+from gateway.http.config import GatewayConfig, gateway_config, utc_now
 from gateway.schemas.stats import StatsWindowHours, window_delta
 from ops.cluster import rpc as cluster_rpc
 from ops.cluster_status import ClusterStatus, check_pidfile, serving_gate_reason
@@ -125,7 +125,7 @@ def _compute_stats_dashboard(
 ) -> StatsDashboard:
     """Assemble the payload from one pooled connection."""
     cluster = cluster_label()
-    now = datetime.now(UTC)
+    now = utc_now()
     window_start = now - window_delta(hours)
     with pool.connection() as conn:
         stats_events.set_statement_timeout(conn, config.stats_statement_timeout_ms)
@@ -160,7 +160,7 @@ def _compute_stats_dashboard(
         alert_classes_active=sum(row.dismissal_id is None for row in alert_classes),
         alert_classes_dismissed=sum(row.dismissal_id is not None for row in alert_classes),
         plugin_stats=_plugin_stat_rows(pool),
-        as_of=datetime.now(UTC),
+        as_of=utc_now(),
     )
 
 
@@ -380,7 +380,7 @@ async def _execute(env: RosterEnv, step: RosterStep) -> MachineStatus:
 async def gather_cluster_status(
     env: RosterEnv, rows: Sequence[RosterRowSpec], snapshots: Mapping[str, Snapshot] | None
 ) -> list[MachineStatus]:
-    steps = plan_roster(rows, env.machine.name(), snapshots, now=datetime.now(UTC))
+    steps = plan_roster(rows, env.machine.name(), snapshots, now=utc_now())
     machines = await asyncio.gather(*(_execute(env, step) for step in steps))
     return sorted(machines, key=lambda m: m.name)
 

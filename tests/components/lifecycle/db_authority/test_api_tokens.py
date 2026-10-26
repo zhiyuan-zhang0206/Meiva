@@ -15,6 +15,7 @@ import asyncio
 import hashlib
 import json
 from collections.abc import Callable
+from dataclasses import replace
 from pathlib import Path
 from typing import Any
 
@@ -27,6 +28,7 @@ from base.cluster.machine import (
     GatewayApiTokenMissing,
     MachineIdentityReader,
     MachineRole,
+    daemon_acceptance,
     gateway_auth_headers,
 )
 from base.cluster.machine.configured import ConfiguredMachineIdentity
@@ -419,16 +421,14 @@ def test_ops_bind_follows_the_declared_reachable_address(
     assert ops_boot.ops_bind_host(machine=machine_identity) == bind
 
 
-def test_ops_without_a_secret_or_capability_refuses_to_serve(
-    gateway: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    monkeypatch.setattr(settings.data_plane, "cluster_secret", "")
+def test_ops_without_a_secret_or_capability_refuses_to_serve(gateway: Path) -> None:
+    _ = gateway
     with pytest.raises(ClusterSecretMissingError):
-        ops_boot.ops_acceptance()
+        daemon_acceptance(_access(secret="", token=None))
     # A remote-managed plane keeps no generations: its gateway presents the human secret.
-    monkeypatch.setattr(settings.data_plane, "cluster_secret", _HUMAN)
-    monkeypatch.setattr(type(settings.data_plane), "is_remote", property(lambda _self: True))
-    assert ops_boot.ops_acceptance() == frozenset({api.token_digest(_HUMAN)})
+    assert daemon_acceptance(
+        replace(_access(secret=_HUMAN, token=None), remote_plane=True)
+    ) == frozenset({api.token_digest(_HUMAN)})
 
 
 @pytest.fixture

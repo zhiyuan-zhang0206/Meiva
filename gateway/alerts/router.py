@@ -32,7 +32,7 @@ Auth split by consumer:
 from __future__ import annotations
 
 import logging
-from datetime import UTC, datetime, timedelta
+from datetime import timedelta
 from typing import Any
 
 from fastapi import APIRouter, HTTPException, Query, Request
@@ -57,7 +57,7 @@ from gateway.alerts.schemas import (
 from gateway.events.sse import event_stream
 from gateway.events.sse_frames import SseCadence
 from gateway.http.auth.webhook import authenticate_webhook
-from gateway.http.config import gateway_config
+from gateway.http.config import gateway_config, utc_now
 from ops.alerts import ALERTS_CHANNEL, AlertRow, AlertSeverity, AlertStatus, publish_alert_rows
 
 router = APIRouter()
@@ -213,7 +213,7 @@ def list_alerts(
     effective_limit = (
         limit if limit is not None else gateway_config(request).display.alerts_default_limit
     )
-    since = datetime.now(UTC) - _WINDOWS[window]
+    since = utc_now() - _WINDOWS[window]
     params: list[Any] = [since]
     # Live problems never age out. The window limits recovery history, including
     # long-running incidents that ended recently.

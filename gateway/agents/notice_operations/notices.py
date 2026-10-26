@@ -7,7 +7,7 @@ from __future__ import annotations
 import asyncio
 import logging
 from collections.abc import Callable
-from datetime import UTC, datetime
+from datetime import datetime
 from typing import Annotated, Any, TypeGuard
 
 import psycopg
@@ -42,7 +42,7 @@ from gateway.agents.schemas import (
     ResolveNoticeIn,
 )
 from gateway.http.auth.request_principal import PrincipalScopeError, request_key
-from gateway.http.config import gateway_config
+from gateway.http.config import gateway_config, utc_now
 from ops import lifecycle as _ops
 from ops.agents import get_agent_status
 
@@ -268,7 +268,7 @@ async def post_notice_resolve(
                     detail=f"notice {notice_id} does not exist for agent {agent_id}",
                 )
             title, require_response, resolved_at, raw_question, expire_at, created_at = row
-            if raw_question is not None and question_expired(expire_at, now=datetime.now(UTC)):
+            if raw_question is not None and question_expired(expire_at, now=utc_now()):
                 raise HTTPException(status_code=409, detail="this question has expired")
             resolved_answer = resolution_answer(body, raw_question)
             reply = resolved_answer.reply
@@ -276,7 +276,7 @@ async def post_notice_resolve(
                 _ACTION_RESOLUTION[action],
                 require_response=bool(require_response),
                 created_at=created_at,
-                now=datetime.now(UTC),
+                now=utc_now(),
                 replied=reply is not None or resolved_answer.answer is not None,
             )
             if resolved_at is not None:
@@ -443,7 +443,7 @@ async def post_notice_create(
                 )
             final_expire_at = notice_expiry(
                 body.expire_at,
-                now=datetime.now(UTC),
+                now=utc_now(),
                 ttl_limit_seconds=gateway_config(request).notice_ttl_limit_seconds,
             )
 
@@ -691,6 +691,6 @@ def validate_creation_state(conn: psycopg.Connection, body: NoticeCreateIn) -> N
             cur.execute("SELECT 1 FROM agent_tasks WHERE id = %s", (body.task_id,))
             if cur.fetchone() is None:
                 raise HTTPException(status_code=422, detail=f"task {body.task_id} does not exist")
-    problem = past_expiry_problem(body.expire_at, now=datetime.now(UTC))
+    problem = past_expiry_problem(body.expire_at, now=utc_now())
     if problem is not None:
         raise HTTPException(status_code=422, detail=problem)

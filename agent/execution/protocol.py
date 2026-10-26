@@ -14,6 +14,7 @@ from pathlib import Path
 from typing import Any, Literal, TypeGuard
 
 from agent.execution.result_kind import RESULT_KINDS, ResultKind
+from base.clock import SYSTEM_TIMERS, Clock, ClockConfig
 from base.host.atomic_io import write_bytes_atomic
 from base.log import logger
 from base.native_process.runtime_incarnation import RuntimeIncarnation
@@ -112,7 +113,12 @@ def _agent_dir(exec_dir: Path, agent_id: int | None) -> Path:
 
 
 def _prune_stale(agent_dir: Path) -> None:
-    cutoff = time.time() - STALE_FILE_AGE_S
+    cutoff = (
+        Clock(ClockConfig("UTC", None, message_timestamp_weekday=False), timers=SYSTEM_TIMERS)
+        .now()
+        .timestamp()
+        - STALE_FILE_AGE_S
+    )
     for path in (*agent_dir.glob("*.json"), *agent_dir.glob(".*.tmp")):
         if path.name.startswith("req-"):
             continue

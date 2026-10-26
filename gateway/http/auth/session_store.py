@@ -11,12 +11,13 @@ from __future__ import annotations
 from collections import OrderedDict
 from collections.abc import Collection
 from contextlib import suppress
-from datetime import UTC, datetime, timedelta
+from datetime import datetime, timedelta
 from typing import Any
 
 from psycopg.rows import dict_row
 from psycopg_pool import ConnectionPool
 
+from base.clock import SYSTEM_TIMERS, Clock, ClockConfig
 from base.db.transaction import write_transaction
 from base.host.net.auth import new_session_id
 
@@ -25,7 +26,9 @@ _SESSION_CACHE_MAX_ENTRIES = 4096
 
 
 def _now() -> datetime:
-    return datetime.now(UTC)
+    return Clock(
+        ClockConfig("UTC", None, message_timestamp_weekday=False), timers=SYSTEM_TIMERS
+    ).now()
 
 
 def minted_session_id(mint: str) -> str:

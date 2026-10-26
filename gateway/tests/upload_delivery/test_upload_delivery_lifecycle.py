@@ -368,7 +368,6 @@ async def test_cancelled_shutdown_wait_still_drains_actual_native_writer(
 def test_actual_gateway_lifespan_recovers_one_chat_without_ops_process(
     db_conn: psycopg.Connection[Any],
     tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
     machine_identity: MachineIdentityReader,
 ):
     import time
@@ -376,9 +375,6 @@ def test_actual_gateway_lifespan_recovers_one_chat_without_ops_process(
     from gateway.tests.events.test_notices_endpoint import seed_agent
     from gateway.tests.upload_delivery.test_upload_delivery_recovery import SECRET
 
-    # meiva:note
-    # needs ops: the native receiver reads `Path.home()` itself.
-    monkeypatch.setattr(Path, "home", lambda: tmp_path)
     unit = source.current_unit(local_machine=machine_identity.name())
     agent = seed_agent(db_conn)
     db_conn.execute(

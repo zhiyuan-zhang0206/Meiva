@@ -9,7 +9,7 @@ from agent.graph.exec._output_pipe import ExecOutputPipe
 from agent.graph.exec._stream import StreamingTextIO
 
 
-def pipe(stream: StreamingTextIO | None = None) -> tuple[ExecOutputPipe, int]:
+def pipe(stream: Any = None) -> tuple[ExecOutputPipe, int]:
     source, destination = os.pipe()
     process: Any = SimpleNamespace(stdout=os.fdopen(source, "rb"))
     return ExecOutputPipe(process, stream or StreamingTextIO(max_chars=64)), destination
@@ -53,11 +53,11 @@ async def test_readiness_drains_output_between_invocation_poll_beats() -> None:
 async def test_readiness_error_is_returned_to_the_actual_tail_owner() -> None:
     original = RuntimeError("stream failed")
 
-    class FailingStream(StreamingTextIO):
+    class FailingStream:
         def write(self, s: str) -> int:
             raise original
 
-    reader, destination = pipe(FailingStream(max_chars=64))
+    reader, destination = pipe(FailingStream())
     reader.watch()
     try:
         os.write(destination, b"error")

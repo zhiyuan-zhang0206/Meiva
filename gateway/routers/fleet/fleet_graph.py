@@ -23,7 +23,7 @@
 
 from __future__ import annotations
 
-from datetime import UTC, datetime
+from datetime import datetime
 from typing import Annotated, Any, LiteralString, NamedTuple
 
 from fastapi import APIRouter, Query, Request
@@ -34,7 +34,7 @@ from redis.exceptions import RedisError
 from base.events.live.bus import EventBus
 from base.events.reads import audit_rows
 from base.log import logger
-from gateway.http.config import gateway_config
+from gateway.http.config import gateway_config, utc_now
 from gateway.lgtm.telemetry_staleness import TelemetryStaleness
 from gateway.routers.fleet.fleet_tokens import AgentTokens, agent_tokens
 from gateway.schemas import FleetGraphEdge, FleetGraphNode, FleetGraphResponse
@@ -85,7 +85,7 @@ def _finalize_graph_response(
     edges: list[FleetGraphEdge],
 ) -> FleetGraphResponse:
     try:
-        telemetry_stale = staleness.check_and_report(pool, now=datetime.now(UTC))
+        telemetry_stale = staleness.check_and_report(pool, now=utc_now())
     except Exception:
         logger.opt(exception=True).warning(
             "fleet_graph telemetry staleness guard raised; reporting telemetry_stale=False"
@@ -96,7 +96,7 @@ def _finalize_graph_response(
         nodes=nodes,
         edges=edges,
         telemetry_stale=telemetry_stale,
-        snapshot_at=datetime.now(UTC),
+        snapshot_at=utc_now(),
     )
     # meiva:note
     # Heartbeat lag is observability health, not a reason to discard an
@@ -231,7 +231,7 @@ def get_fleet_graph(
         decay_lambda = float(gateway_config(request).display.fleet_graph_decay_lambda)
     decay_lambda = round(decay_lambda, 2)
 
-    now = datetime.now(UTC)
+    now = utc_now()
     not_terminated: LiteralString = "" if include_terminated else "WHERE a.status != 'terminated'"
     win_start = now - window_delta(hours) if hours is not None else None
 

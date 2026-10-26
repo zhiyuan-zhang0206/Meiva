@@ -4,7 +4,6 @@
 import hashlib
 import json
 from dataclasses import dataclass
-from datetime import UTC, datetime
 
 from fastapi import Header, HTTPException, Request
 from psycopg import Connection
@@ -20,6 +19,7 @@ from gateway.http.auth.request_principal import (
     PrincipalScopeError,
     principal_key,
 )
+from gateway.http.config import utc_now
 from gateway.routers.page_serving import page_target
 from gateway.schemas import PageRegisterRequest
 from ops.pages import (
@@ -131,7 +131,7 @@ def register(
                 ttl_seconds=(
                     body.ttl_seconds if body.ttl_seconds is not None else round(default_ttl_seconds)
                 ),
-                now=datetime.now(UTC),
+                now=utc_now(),
             )
             record = record.model_copy(update={"url": absolute_base + record.url})
             finish_receipt(conn, key, digest, record)
