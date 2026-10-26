@@ -9,6 +9,7 @@ import tarfile
 import tempfile
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Literal, assert_never
 
 from base.clock import Timers
 from base.host.net.ports import UrlOpener
@@ -48,11 +49,15 @@ _ARCH = {"arm64": "arm64", "aarch64": "arm64", "x86_64": "amd64", "amd64": "amd6
 # darwin_arm64 / darwin_amd64 / linux_amd64 / linux_arm64. Anything else (linux_386, ...) has no
 # pinned binary: the sidecar is skipped and OTLP export auto-disables at the agent preflight.
 # It decides from its two arguments and reads nothing.
-def platform_tag_for(system: str, machine: str) -> str | None:
+def platform_tag_for(system: Literal["darwin", "linux"], machine: str) -> str | None:
     arch = _ARCH.get(machine.lower())
-    if arch is None or system not in ("darwin", "linux"):
+    if arch is None:
         return None
-    return f"{system}_{arch}"
+    match system:
+        case "darwin" | "linux":
+            return f"{system}_{arch}"
+        case _:
+            assert_never(system)
 
 
 BINARY_NAME = "otelcol-contrib"

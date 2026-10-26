@@ -41,6 +41,16 @@ def _verify(plist: Path) -> None:
     assert values["StandardErrorPath"] == values["StandardOutPath"]
 
 
+def _roots():
+    from base.host.system.job_values import JobRoots
+
+    return JobRoots(
+        home=Path.home() / ".meiva",
+        repo=Path(__file__).resolve().parents[5],
+        user_home=Path.home(),
+    )
+
+
 def _external(*, fails: bool) -> None:
     from base.host.system.cron import health_job
     from base.host.system.tests.fake_commands import DARWIN_ARM64, FakeCommands, Reply, fake_host
@@ -54,7 +64,7 @@ def _external(*, fails: bool) -> None:
     )
     host = fake_host(commands, platform=DARWIN_ARM64, programs={"brew": "/safe/bin/brew"}, uid=501)
     plist = Path.home() / "Library/LaunchAgents/com.meiva.health-probe.plist"
-    assert health_job.register_macos(300, host=host) == (1 if fails else 0)
+    assert health_job.register_macos(300, host=host, roots=_roots()) == (1 if fails else 0)
     _verify(plist)
     assert commands.argvs == [
         ("launchctl", "bootout", "gui/501/com.meiva.health-probe"),
@@ -63,7 +73,7 @@ def _external(*, fails: bool) -> None:
     if not fails:
         os.utime(plist, ns=(1_000_000_000, 1_000_000_000))
         previous = plist.stat().st_mtime_ns
-        assert health_job.register_macos(300, host=host) == 0
+        assert health_job.register_macos(300, host=host, roots=_roots()) == 0
         assert plist.stat().st_mtime_ns != previous
         assert [argv[1] for argv in commands.argvs] == ["bootout", "bootstrap"] * 2
         _verify(plist)
@@ -76,7 +86,7 @@ def _deferred() -> None:
 
     commands = FakeCommands()
     host = fake_host(commands, platform=DARWIN_ARM64)
-    assert health_job.register_macos(300, host=host) == 0
+    assert health_job.register_macos(300, host=host, roots=_roots()) == 0
     assert not (Path.home() / "Library").exists()
     assert not (Path.home() / ".meiva").exists()
     assert commands.argvs == []

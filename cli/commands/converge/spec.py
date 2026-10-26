@@ -17,6 +17,7 @@ from base.cluster.machine import MachineIdentityReader, MachineRole, MachineRole
 from base.config import ConfigBoot
 from base.host.permissions_helper.client import HelperFactory
 from base.host.system.hostport import Host
+from base.host.system.job_values import JobRoots
 from base.telemetry import EventPipeline
 from cli.database.runtime import UserSession
 
@@ -45,6 +46,12 @@ class ConvergeCtx:
     session: UserSession
     timers: Timers
     services: frozenset[str]
+
+    # meiva:note
+    # The home, checkout and account home every OS job of this converge is anchored to.
+    @property
+    def job_roots(self) -> JobRoots:
+        return JobRoots(home=self.meiva_home, repo=self.repo, user_home=self.session.user_home)
 
     def require_helper(self) -> HelperFactory:
         """The permissions-helper factory, for a step that only runs where a helper exists."""

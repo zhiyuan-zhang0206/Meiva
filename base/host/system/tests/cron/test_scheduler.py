@@ -7,9 +7,9 @@ from pathlib import Path
 
 import pytest
 
-from base.host.env.harness_binaries import require_harness_paths
-from base.host.system.cron import health_job, mechanics
+from base.host.system.cron import health_job
 from base.host.system.hostport import Host
+from base.host.system.job_values import JobRoots
 from base.host.system.tests.fake_commands import (
     DARWIN_ARM64,
     LINUX_X86,
@@ -28,6 +28,14 @@ def fake_home(tmp_path: Path) -> Path:
     return tmp_path
 
 
+def _roots(user_home: Path, *, repo: Path | None = None) -> JobRoots:
+    return JobRoots(
+        home=user_home / ".meiva",
+        repo=user_home / "checkout" if repo is None else repo,
+        user_home=user_home,
+    )
+
+
 def _plant_plist(fake_home: Path, label: str) -> Path:
     agents = fake_home / "Library" / "LaunchAgents"
     agents.mkdir(parents=True, exist_ok=True)
@@ -36,16 +44,18 @@ def _plant_plist(fake_home: Path, label: str) -> Path:
     return p
 
 
-def _assert_probe_plist(plist: Path, *, interval_s: int = 300) -> None:
+def _assert_probe_plist(plist: Path, *, roots: JobRoots, interval_s: int = 300) -> None:
     values = plistlib.loads(plist.read_bytes())
     assert values["Label"] == "com.meiva.health-probe"
     assert values["ProgramArguments"] == [
-        str(Path(__file__).resolve().parents[5] / ".venv/bin/meiva"),
+        str(roots.repo / ".venv/bin/meiva"),
         "cluster",
         "health-probe",
     ]
     assert values["StartInterval"] == interval_s
     assert values["RunAtLoad"] is False
+    assert values["EnvironmentVariables"]["MEIVA_HOME"] == str(roots.home)
+    assert values["StandardOutPath"] == str(roots.home / "logs" / "health-probe.log")
 
 
 _NOT_LOADED = Reply(returncode=113, stderr="Could not find service")
@@ -70,7 +80,7 @@ def test_register_macos_never_reloads_its_own_launchd_job(
         health_job.register_macos(
             300,
             host=host,
-            user_home=fake_home,
+            roots=_roots(fake_home),
             current_label=label,
             ancestral_labels=frozenset(),
         )
@@ -91,13 +101,13 @@ def test_register_macos_still_reloads_from_another_launchd_job(
         health_job.register_macos(
             300,
             host=host,
-            user_home=fake_home,
+            roots=_roots(fake_home),
             current_label="com.meiva.autostart",
             ancestral_labels=frozenset(),
         )
         == 0
     )
-    _assert_probe_plist(plist)
+    _assert_probe_plist(plist, roots=_roots(fake_home))
     assert [argv[1] for argv in commands.argvs] == ["bootout", "bootstrap"]
 
 
@@ -130,7 +140,7 @@ def test_register_linux_aborts_when_crontab_read_fails(
 ) -> None:
     commands, host = _crontab(read_rc=1, read_error="permission denied")
 
-    assert health_job.register_linux(300, host=host, repo=tmp_path) == 1
+    assert health_job.register_linux(300, host=host, roots=_roots(tmp_path)) == 1
     assert "avoid clobbering" in capsys.readouterr().err
     assert _written(commands) is None
 
@@ -138,72 +148,35 @@ def test_register_linux_aborts_when_crontab_read_fails(
 def test_register_linux_treats_no_crontab_as_empty(tmp_path: Path) -> None:
     commands, host = _crontab(read_rc=1, read_error="no crontab for u")
 
-    assert health_job.register_linux(300, host=host, repo=tmp_path) == 0
+    assert health_job.register_linux(300, host=host, roots=_roots(tmp_path)) == 0
     assert "health-probe" in str(_written(commands))
-
-
-def test_launchd_path_env_includes_brew_bin() -> None:
-    path = mechanics.launchd_path_env(
-        host=fake_host(programs={"brew": "/opt/homebrew/bin/brew"}),
-        meiva_binary="/Users/x/.local/bin/meiva",
-    )
-    assert "/opt/homebrew/bin" in path
-    assert "/Users/x/.local/bin" in path
-    assert "/usr/bin" in path
-
-
-def test_launchd_path_env_falls_back_without_brew() -> None:
-    path = mechanics.launchd_path_env(
-        host=fake_host(),
-        meiva_binary="/Users/x/.local/bin/meiva",
-    )
-    assert "/opt/homebrew/bin" in path
-    assert "/usr/local/bin" in path
-
-
-# meiva:note
-# The runner's launchd job starts every harness, and `claude` / `agy` install into the
-# user-local bins; a job that reaches only the venv's own dir and brew cannot start them
-# (#5491). Pin the user dirs even when `meiva` itself lives under the brew prefix.
-def test_launchd_path_env_reaches_the_user_install_dirs() -> None:
-    entries = mechanics.launchd_path_env(host=fake_host()).split(":")
-
-    assert str(Path.home() / ".local/bin") in entries
-    assert str(Path.home() / ".npm-global/bin") in entries
-
-
-# meiva:note
-# The producer contract: whatever this job writes must itself pass the check every unit
-# PATH has to pass, so a future edit that narrows the list fails here rather than at the
-# first harness spawn (#5495).
-# meiva:link base/lm/harness/docs/harness.meiva.okf.md
-def test_the_launchd_path_passes_the_unit_check() -> None:
-    path = mechanics.launchd_path_env(host=fake_host(programs={"brew": "/opt/homebrew/bin/brew"}))
-
-    assert require_harness_paths(path, what="the launchd job PATH") == path
-
-
-def test_launchd_path_env_deduplicates() -> None:
-    host = fake_host(programs={"brew": "/opt/homebrew/bin/brew"})
-    assert (
-        mechanics.launchd_path_env(
-            host=host,
-            meiva_binary="/opt/homebrew/bin/meiva",
-        )
-        .split(":")
-        .count("/opt/homebrew/bin")
-        == 1
-    )
 
 
 def test_register_linux_stamps_the_fixed_marker(tmp_path: Path) -> None:
     commands, host = _crontab()
 
-    assert health_job.register_linux(300, host=host, repo=tmp_path) == 0
+    assert health_job.register_linux(300, host=host, roots=_roots(tmp_path)) == 0
     (line,) = str(_written(commands)).splitlines()
     assert line.endswith("cluster health-probe # meiva-health-probe")
     assert "--auto-rollback" not in line
     assert "--threshold" not in line
+
+
+# meiva:note
+# The crontab line names the checkout's own binary and pins the cluster's home for that one
+# command, so a job registered by cluster X can never run cluster Y's `meiva` against Y's home.
+def test_register_linux_pins_the_roots_home_and_the_checkouts_binary(tmp_path: Path) -> None:
+    roots = _roots(tmp_path / "account")
+    binary = roots.repo / ".venv" / "bin" / "meiva"
+    binary.parent.mkdir(parents=True)
+    binary.touch()
+    commands, host = _crontab()
+
+    assert health_job.register_linux(300, host=host, roots=roots) == 0
+
+    assert str(_written(commands)).splitlines() == [
+        f"*/5 * * * * MEIVA_HOME={roots.home} {binary} cluster health-probe # meiva-health-probe"
+    ]
 
 
 def test_register_linux_keeps_unrelated_lines_and_reports_success(
@@ -214,7 +187,7 @@ def test_register_linux_keeps_unrelated_lines_and_reports_success(
     )
     commands, host = _crontab(f"0 3 * * * backup\n{other_job}\n")
 
-    assert health_job.register_linux(300, host=host, repo=tmp_path) == 0
+    assert health_job.register_linux(300, host=host, roots=_roots(tmp_path)) == 0
     assert capsys.readouterr() == (
         "  . crontab entry added (every 5 min)\n",
         "",
@@ -255,14 +228,19 @@ def test_register_linux_failure_messages_and_rc(
         write_error=write_error,
     )
 
-    assert health_job.register_linux(300, host=host, repo=tmp_path) == 1
+    assert health_job.register_linux(300, host=host, roots=_roots(tmp_path)) == 1
     captured = capsys.readouterr()
     assert (captured.out, captured.err) == (expected_out, expected_err)
     assert (_written(commands) is not None) == (read_rc == 0)
 
 
-def test_register_linux_missing_crontab_message_and_rc(capsys: pytest.CaptureFixture[str]) -> None:
-    assert health_job.register_linux(300, host=fake_host(platform=LINUX_X86)) == 0
+def test_register_linux_missing_crontab_message_and_rc(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    assert (
+        health_job.register_linux(300, host=fake_host(platform=LINUX_X86), roots=_roots(tmp_path))
+        == 0
+    )
     assert capsys.readouterr() == (
         "  ! health probe cron: crontab not installed on this host (skipping); cluster runs without a health-probe cron\n",
         "",
@@ -347,8 +325,11 @@ def test_register_refused_for_worktree_checkout_against_prod_home(
     health_job.register_os_cron(
         enabled=True,
         host=host,
-        repo=default_home / "Meiva" / ".worktrees" / "r4",
-        user_home=default_home,
+        roots=JobRoots(
+            home=prod_home,
+            repo=default_home / "Meiva" / ".worktrees" / "r4",
+            user_home=default_home,
+        ),
         ancestral_labels=frozenset(),
     )
 
@@ -362,16 +343,14 @@ def test_register_allowed_from_the_homes_own_source_checkout(
     (prod_home / "source").mkdir(parents=True)
     commands, host = _launchctl()
 
-    health_job.register_os_cron(
-        enabled=True,
-        host=host,
-        repo=prod_home / "source",
-        user_home=default_home,
-        ancestral_labels=frozenset(),
-    )
+    roots = JobRoots(home=prod_home, repo=prod_home / "source", user_home=default_home)
+    health_job.register_os_cron(enabled=True, host=host, roots=roots, ancestral_labels=frozenset())
 
     assert [argv[1] for argv in commands.argvs] == ["bootout", "bootstrap"]
-    _assert_probe_plist(default_home / "Library" / "LaunchAgents" / "com.meiva.health-probe.plist")
+    _assert_probe_plist(
+        default_home / "Library" / "LaunchAgents" / "com.meiva.health-probe.plist",
+        roots=roots,
+    )
 
 
 def test_register_allowed_for_a_default_home_without_source(
@@ -379,16 +358,15 @@ def test_register_allowed_for_a_default_home_without_source(
 ) -> None:
     commands, host = _launchctl()
 
-    health_job.register_os_cron(
-        enabled=True,
-        host=host,
-        repo=default_home / "dev-src",
-        user_home=default_home,
-        ancestral_labels=frozenset(),
+    roots = JobRoots(
+        home=default_home / ".meiva", repo=default_home / "dev-src", user_home=default_home
     )
+    health_job.register_os_cron(enabled=True, host=host, roots=roots, ancestral_labels=frozenset())
 
     assert [argv[1] for argv in commands.argvs] == ["bootout", "bootstrap"]
-    _assert_probe_plist(default_home / "Library" / "LaunchAgents" / "com.meiva.health-probe.plist")
+    _assert_probe_plist(
+        default_home / "Library" / "LaunchAgents" / "com.meiva.health-probe.plist", roots=roots
+    )
 
 
 def test_register_macos_defers_when_ancestry_proves_the_job(
@@ -403,7 +381,7 @@ def test_register_macos_defers_when_ancestry_proves_the_job(
         health_job.register_macos(
             300,
             host=host,
-            user_home=fake_home,
+            roots=_roots(fake_home),
             current_label="0",
             ancestral_labels=frozenset({label}),
         )
@@ -424,13 +402,13 @@ def test_register_macos_reloads_when_env_reads_zero_but_tree_is_external(
         health_job.register_macos(
             300,
             host=host,
-            user_home=fake_home,
+            roots=_roots(fake_home),
             current_label="0",
             ancestral_labels=frozenset(),
         )
         == 0
     )
-    _assert_probe_plist(plist)
+    _assert_probe_plist(plist, roots=_roots(fake_home))
     assert [argv[1] for argv in commands.argvs] == ["bootout", "bootstrap"]
 
 

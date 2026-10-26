@@ -12,9 +12,7 @@ exports = ["boot.py", "daemon.py", "dispatch_sync.py", "in_flight.py", "tests"]
 "ops_plan.py" = "strict"
 
 [roots]
-"daemon.py" = { kinds = ["random", "settings"], why = "Service or operator process entry boots configuration and builds the random generator its event bus draws retry jitter from" }
+"daemon.py" = { kinds = ["home", "random", "settings"], why = "Service or operator process entry boots configuration, reads the home it runs under and builds the random generator its event bus draws retry jitter from" }
 
 [debt.ambient-read]
 "boot.py#settings base.cluster.machine.ambient.gateway_access_from_settings" = 1
-"daemon.py#home base.paths.meiva_home" = 4
-"daemon.py#home base.paths.workspaces_root" = 1

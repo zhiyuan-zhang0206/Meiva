@@ -253,7 +253,11 @@ def _healthz(port: int) -> dict[str, Any]:
 
 
 async def _serve(
-    database: Database, config: ConfigBoot, runtime: Path, machine: MachineIdentityReader
+    database: Database,
+    config: ConfigBoot,
+    runtime: Path,
+    machine: MachineIdentityReader,
+    home: Path,
 ) -> None:
     await daemon.run(
         process_config=config,
@@ -261,6 +265,7 @@ async def _serve(
         database=lambda: database,
         image=LoadedCommit(Path("/page-server-tests"), None),
         local_machine=machine,
+        home=home,
     )
 
 
@@ -281,7 +286,9 @@ async def test_each_loop_gets_its_own_progress_tracker(
 ) -> None:
     runtime = tmp_path / "run"
     port = resources.endpoint(process_config, runtime=runtime).health_port
-    service = asyncio.create_task(_serve(database, process_config, runtime, machine_identity))
+    service = asyncio.create_task(
+        _serve(database, process_config, runtime, machine_identity, tmp_path)
+    )
     try:
         loops = await _loops_reported(port)
     finally:
@@ -308,7 +315,9 @@ async def test_a_crashing_reconcile_loop_cancels_its_sibling_and_ends_the_servic
     db_conn.commit()
     try:
         with pytest.raises(ExceptionGroup) as raised:
-            await asyncio.wait_for(_serve(database, process_config, runtime, machine_identity), 30)
+            await asyncio.wait_for(
+                _serve(database, process_config, runtime, machine_identity, tmp_path), 30
+            )
     finally:
         db_conn.rollback()
         db_conn.execute("ALTER TABLE agent_pages RENAME COLUMN session_name_hidden TO session_name")
@@ -342,7 +351,9 @@ async def test_a_crashing_dead_page_loop_cancels_its_sibling_and_ends_the_servic
     runtime = tmp_path / "run"
 
     with refusing_show_page_close(db_conn), pytest.raises(ExceptionGroup) as raised:
-        await asyncio.wait_for(_serve(database, process_config, runtime, machine_identity), 30)
+        await asyncio.wait_for(
+            _serve(database, process_config, runtime, machine_identity, tmp_path), 30
+        )
 
     assert [type(exc).__name__ for exc in raised.value.exceptions] == ["RaiseException"]
     assert not (runtime / "page_server.pid").exists()

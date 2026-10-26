@@ -21,6 +21,8 @@ from base.cluster.dataplane.pg_admin import pg_socket_path
 from base.deploy.release import collector_artifact
 from base.host.db_authority.unit import telemetry_bearer
 from base.host.env.dotenv_boot import PLACEHOLDER_DB_URL
+from base.host.system.tests.fake_commands import fake_host
+from base.native_process.os_platform import Platform
 from base.paths import otel_collector_config, otel_collector_dir
 from cli.commands.observability import otel_collector as oc
 from cli.commands.observability.inputs import collector_settings_from_boot
@@ -157,6 +159,32 @@ def test_a_platform_without_a_pinned_collector_warns_and_installs_nothing(
     assert "no pinned otelcol-contrib for this platform (Linux i686)" in captured.err
     assert captured.out == ""
     assert not otel_collector_dir(collector_unit.home).exists()
+
+
+# meiva:note
+# The converge step takes the asset tag from the platform of the host it was handed, not from the
+# process running the test: with the pinned binary already installed, a platform the release has
+# an asset for installs nothing and says nothing, and one it has none for warns with that
+# platform's label.
+@pytest.mark.parametrize(
+    ("machine", "warned"), [("aarch64", False), ("arm64", False), ("riscv64", True)]
+)
+def test_the_step_takes_the_asset_tag_from_the_hosts_platform(
+    collector_unit: CollectorUnit,
+    capsys: pytest.CaptureFixture[str],
+    machine: str,
+    warned: bool,
+) -> None:
+    collector_unit.install_pinned_binary()
+    ctx = dataclasses.replace(
+        collector_unit.converge_ctx(None),
+        host=fake_host(platform=Platform("linux", machine, "/usr/bin/python3")),
+    )
+
+    oc.ensure_otel_collector_step(ctx)
+
+    err = capsys.readouterr().err
+    assert ("no pinned otelcol-contrib for this platform (linux " + machine + ")" in err) is warned
 
 
 @pytest.mark.parametrize(

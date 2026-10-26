@@ -20,12 +20,7 @@ rather than leaving the cluster silently unsupervised.
 
 from __future__ import annotations
 
-from base.host.system.job_values import JobRoots
 from cli.commands.converge.spec import ConvergeCtx
-
-
-def _job_roots(ctx: ConvergeCtx) -> JobRoots:
-    return JobRoots(home=ctx.meiva_home, repo=ctx.repo, user_home=ctx.session.user_home)
 
 
 def ensure_health_probe_cron(ctx: ConvergeCtx) -> None:
@@ -38,7 +33,11 @@ def ensure_health_probe_cron(ctx: ConvergeCtx) -> None:
     # that runs before the gateway process starts. Idempotent.
     from base.host.system.cron.health_job import register_os_cron
 
-    register_os_cron(enabled=ctx.read_config().view.general.os_jobs_enabled, host=ctx.host)
+    register_os_cron(
+        enabled=ctx.read_config().view.general.os_jobs_enabled,
+        host=ctx.host,
+        roots=ctx.job_roots,
+    )
     # On failure the exception propagates so converge fails fast.
 
 
@@ -47,7 +46,7 @@ def ensure_logs_maintenance(ctx: ConvergeCtx) -> None:
     from base.host.system.logs_job import register_logs_job
 
     register_logs_job(
-        enabled=ctx.read_config().view.general.os_jobs_enabled, roots=_job_roots(ctx), host=ctx.host
+        enabled=ctx.read_config().view.general.os_jobs_enabled, roots=ctx.job_roots, host=ctx.host
     )
 
 
@@ -62,7 +61,7 @@ def ensure_packages_refresh_job(ctx: ConvergeCtx) -> None:
 
     view = ctx.read_config().view
     jobs_enabled = view.general.os_jobs_enabled
-    if jobs_enabled and not mechanics.owns_os_job_home("packages refresh", home=ctx.meiva_home):
+    if jobs_enabled and not mechanics.owns_os_job_home("packages refresh", roots=ctx.job_roots):
         return
     refresh_enabled = view.packages.refresh_enabled if jobs_enabled else False
     register_packages_job(
@@ -73,7 +72,7 @@ def ensure_packages_refresh_job(ctx: ConvergeCtx) -> None:
         )
         if jobs_enabled
         else None,
-        roots=_job_roots(ctx),
+        roots=ctx.job_roots,
         host=ctx.host,
     )
     # A registration failure propagates so converge fails fast.
@@ -93,23 +92,24 @@ def ensure_pr_flow_job(ctx: ConvergeCtx) -> None:
     register_pr_flow_job(
         enabled=ctx.read_config().view.general.os_jobs_enabled,
         production=production_identity(machine=ctx.machine, home=ctx.meiva_home),
-        roots=_job_roots(ctx),
+        roots=ctx.job_roots,
         host=ctx.host,
     )
 
 
+# meiva:note
+# Keep the daily WAL-G tick registered exactly while WAL-G is switched on.
+#
+# Key set: register (idempotent). Key unset: remove a job a previous
+# configuration left behind, so turning WAL-G off leaves no schedule that runs
+# a command which now does nothing. Both directions only act in the default
+# home (`owns_os_job_home`), and registration is a no-op where
+# `MEIVA_OS_JOBS_ENABLED` is off. Delegates to `base.host.system.walg_job`.
 def ensure_walg_job(ctx: ConvergeCtx) -> None:
-    """Keep the daily WAL-G tick registered exactly while WAL-G is switched on.
-
-    Key set: register (idempotent). Key unset: remove a job a previous
-    configuration left behind, so turning WAL-G off leaves no schedule that runs
-    a command which now does nothing. Both directions only act in the default
-    home (`owns_os_jobs`), and registration is a no-op where
-    `MEIVA_OS_JOBS_ENABLED` is off. Delegates to `base.host.system.walg_job`."""
     from base.host.system.cron import mechanics
     from base.host.system.walg_job import register_walg_job, unregister_walg_job
 
-    if not mechanics.owns_os_job_home("WAL-G tick", home=ctx.meiva_home):
+    if not mechanics.owns_os_job_home("WAL-G tick", roots=ctx.job_roots):
         return
     if ctx.read_config().view.walg.walg_config_file is not None:
         view = ctx.read_config().view
@@ -117,11 +117,11 @@ def ensure_walg_job(ctx: ConvergeCtx) -> None:
         register_walg_job(
             enabled=jobs_enabled,
             backup_hour=view.services.backup_hour if jobs_enabled else None,
-            roots=_job_roots(ctx),
+            roots=ctx.job_roots,
             host=ctx.host,
         )
     else:
-        unregister_walg_job(host=ctx.host)
+        unregister_walg_job(host=ctx.host, roots=ctx.job_roots)
 
 
 def ensure_cluster_autostart(ctx: ConvergeCtx) -> None:
@@ -141,5 +141,6 @@ def ensure_cluster_autostart(ctx: ConvergeCtx) -> None:
         services=ctx.services,
         enabled=ctx.read_config().view.general.os_jobs_enabled,
         host=ctx.host,
+        roots=ctx.job_roots,
     )
     # On failure the exception propagates so converge fails fast.
