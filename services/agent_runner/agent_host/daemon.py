@@ -32,6 +32,7 @@ import contextlib
 import logging
 import os
 import random
+import secrets
 import signal
 import sys
 from collections.abc import Awaitable, Callable, Collection, Coroutine, Iterable
@@ -467,10 +468,12 @@ async def run(
     instance_lock = take_instance_lock(home)
     _claim_pidfile()
     from agent.graph import build_graph  # pyright: ignore[reportUnknownVariableType]
+    from agent.graph.exec.process import read_parent_facts
     from agent.process_boot import init_process_scope, land_cluster_extensions, process_trace_config
 
     rng = _new_rng()
     workload_pool, control_pool, bus, db = boot_handles(database(), config)
+    secure_rng = secrets.SystemRandom()
     liveness = Liveness(_LIVENESS_TIMEOUT_S)
     installation: Installation | None = None
     host: AgentHost | None = None
@@ -497,12 +500,14 @@ async def run(
             pool=workload_pool,
             control_pool=control_pool,
             checkpointer=checkpointer,
-            graph=build_graph(checkpointer, installation.registry),
+            graph=build_graph(
+                checkpointer, installation.registry, parent=read_parent_facts(), rng=secure_rng
+            ),
             machine=machine,
             bus=bus,
             db=db,
             catalog=installation.require_catalog(),
-            policy=host_policy(config, keys=installation.require_provider_keys()),
+            policy=host_policy(config, keys=installation.require_provider_keys(), rng=secure_rng),
             handoff_stamping=stamping,
             clients=clients,
             extensions=installation.registry,

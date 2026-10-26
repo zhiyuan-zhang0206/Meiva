@@ -6,6 +6,7 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import random
 import sys
 import tempfile
 from collections.abc import AsyncGenerator, Callable, Generator, Mapping
@@ -33,6 +34,13 @@ from base.paths.tests.homes import point_home
 from base.sessions.exec_host import protocol
 from base.sessions.exec_host.paths import service_socket_path
 from meiva.tests.fixtures.pin_agent import exec_context
+
+
+# meiva:note
+# A fresh seeded generator for each use, so no test sees another's draws.
+def _rng() -> random.Random:
+    return random.Random(0)  # noqa: S311
+
 
 _ROOT = Path(__file__).resolve().parents[4]
 _AGENT_ID = 424242
@@ -76,7 +84,7 @@ async def _paused_exec(home: Path, directory: Path) -> AsyncGenerator[ActiveExec
         agent=AgentSlices.resolve(default_reader=defaults(sandbox__exec_timeout_seconds=90)),
     )
     cancel = asyncio.Event()
-    process = SubprocessExecProcess(read_parent_facts())
+    process = SubprocessExecProcess(read_parent_facts(), rng=_rng())
     task = asyncio.ensure_future(
         process.run(
             code,
