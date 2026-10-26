@@ -11,10 +11,10 @@ from __future__ import annotations
 
 import asyncio
 from dataclasses import dataclass
-from datetime import datetime, tzinfo
 from pathlib import Path
 from typing import Any
 
+from base.clock import Clock
 from base.host.env.agent_slices import ModelOverrides
 from base.lm import factory
 from base.lm.call import invoke_text
@@ -60,11 +60,12 @@ class RetryPolicy:
 
 
 # meiva:note
-# Where answers are saved and the zone their timestamps use; absent outside an agent process.
+# Where answers are saved and the clock whose zone their timestamps use; absent outside an agent
+# process.
 @dataclass(frozen=True)
 class OutputSite:
     directory: Path
-    zone: tzinfo
+    clock: Clock
 
 
 # meiva:note
@@ -236,7 +237,7 @@ def _save_result(deps: UnderstandDeps, target: TargetSpec, result: str) -> None:
         target.prompt,
         result,
         outputs.result_source(path_strs),
-        datetime.now(site.zone),
+        site.clock.now().astimezone(site.clock.explicit_zone()),
     )
     site.directory.mkdir(parents=True, exist_ok=True)
     (site.directory / saved.name).write_text(saved.content, encoding="utf-8")

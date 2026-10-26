@@ -11,6 +11,5 @@ exports = ["antigravity.py", "claude.py", "codex.py", "plans"]
 "tests" = ["__init__.py", "_claude_checks.py", "_common.py", "_first_run.py", "antigravity.py", "claude.py", "codex.py", "plans"]
 
 [roots]
-"__init__.py" = { kinds = ["clock"], why = "require_lineage stamps the dispatch provenance block with the current UTC timestamp at CLI launch entry" }
 "_common.py" = { kinds = ["home"], why = "launch_site() resolves the operator's Path.home() for Claude and Codex user-level config files" }
 "claude.py" = { kinds = ["random"], why = "launch() mints a fresh UUID for a new Claude Code session when --resume is not given" }

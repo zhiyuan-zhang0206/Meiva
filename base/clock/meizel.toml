@@ -1,12 +1,14 @@
-exports = ["configuration.py", "tests"]
+exports = ["configuration.py", "ids.py", "tests"]
 
 [purity]
 "__init__.py" = "strict-to-be"
 "configuration.py" = "strict"
+"ids.py" = "strict"
 
 [uses]
 "configuration.py" = ["__init__.py"]
-"tests" = ["__init__.py", "configuration.py"]
+"ids.py" = []
+"tests" = ["__init__.py", "configuration.py", "ids.py"]
 
 [debt.ambient-read]
 "__init__.py#clock datetime.datetime.now" = 1

@@ -4,9 +4,23 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from datetime import datetime
 from pathlib import Path
 
-__all__ = ["CallerHost", "ServicePathChoice", "choose_service_path"]
+__all__ = ["BirthFacts", "CallerHost", "ServicePathChoice", "choose_service_path"]
+
+
+# meiva:note
+# What a home's birth needs that only the process entry can choose: the instant it is born and
+# the secrets minted for a gateway unit (the cluster's human secret unless the operator gave
+# one, and the two Redis logins). The entry mints them once per `meiva init`; they stay out of
+# every repr.
+@dataclass(frozen=True)
+class BirthFacts:
+    now: datetime
+    cluster_secret: str = field(repr=False)
+    redis_admin_password: str = field(repr=False)
+    redis_password: str = field(repr=False)
 
 
 # meiva:note
@@ -14,6 +28,9 @@ __all__ = ["CallerHost", "ServicePathChoice", "choose_service_path"]
 #
 # The entry reads these once; nothing below it reads the environment or probes a port.
 # `occupied_ports` are those of the fixed port table that something already holds.
+# `local_names` are the host names and interface addresses by which this host is known, in
+# lowercase; a remote data-plane config that names one of them is refused. `birth` is what the
+# home's birth takes from the entry.
 # `transport_key` is the key the operator exported to open a database-capability bundle, already
 # taken out of the environment (empty when none was exported); only a join that carries a
 # bundle reads it. It is a secret, so it stays out of the repr.
@@ -24,6 +41,8 @@ class CallerHost:
     virtual_env: str | None
     prefix_venv: str | None
     occupied_ports: frozenset[int]
+    local_names: frozenset[str]
+    birth: BirthFacts
     transport_key: str = field(default="", repr=False)
 
 

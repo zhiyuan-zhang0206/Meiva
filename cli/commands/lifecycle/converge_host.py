@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import sys
 from collections.abc import Callable
+from datetime import datetime
 from pathlib import Path
 from typing import assert_never
 
@@ -240,7 +241,6 @@ def ensure_github_pr(ctx: ConvergeCtx) -> None:
         roles=ctx.roles, keep_local=general.memory_keep_local, require_pr=general.require_github_pr
     ):
         return
-    from base.config import settings
     from base.deploy.git.github_pr import (
         github_auth_blocker,
         github_permission_blocker,
@@ -251,7 +251,7 @@ def ensure_github_pr(ctx: ConvergeCtx) -> None:
     reason = github_auth_blocker(host=ctx.host)
     if reason is not None:
         raise RuntimeError(github_pr_failure(reason))
-    remote = memory_remote(settings.general.memory_remote)
+    remote = memory_remote(general.memory_remote)
     reason = github_permission_blocker(host=ctx.host, slug=memory_repo_slug(remote))
     if reason is not None:
         raise RuntimeError(github_pr_failure(reason))
@@ -568,6 +568,7 @@ def converge_host(
         producer=producer,
         helper=command.helper,
         timers=command.timers,
+        clock=command.clock,
         host=command.host,
         session=command.session,
     )
@@ -624,7 +625,11 @@ def run_converge(ctx: ConvergeCtx, steps: tuple[ConvergeStep, ...], *, prod_inst
         # converge), so the marker is the only durable trace of an unapplied step.
         # meiva:link cli/commands/converge/docs/converge-incomplete.meiva.okf.md
         record_incomplete(
-            ctx.meiva_home, step=failed_step, error=str(exc), prod_install=prod_install
+            ctx.meiva_home,
+            step=failed_step,
+            error=str(exc),
+            prod_install=prod_install,
+            now=ctx.clock.now(),
         )
         raise
     if prod_install:
@@ -635,10 +640,12 @@ def run_converge(ctx: ConvergeCtx, steps: tuple[ConvergeStep, ...], *, prod_inst
 # Only the host's prod install owns the marker: a dev cluster's converge must
 # never clear or set the prod home's record.
 # meiva:link cli/commands/converge/docs/converge-incomplete.meiva.okf.md
-def record_incomplete(meiva_home: Path, *, step: str, error: str, prod_install: bool) -> None:
+def record_incomplete(
+    meiva_home: Path, *, step: str, error: str, prod_install: bool, now: datetime
+) -> None:
     if not prod_install:
         return
-    record_incomplete_marker(meiva_home, step=step, error=error)
+    record_incomplete_marker(meiva_home, step=step, error=error, now=now)
 
 
 def selected_service_names(

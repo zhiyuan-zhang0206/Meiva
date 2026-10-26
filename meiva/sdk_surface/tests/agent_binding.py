@@ -5,7 +5,7 @@ Tests of `meiva.shell`, `meiva.skills` and `meiva.mcps` cannot import the `meiva
 bind a context that carries that identity and no live clients, and put the previous binding back.
 """
 
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
 from typing import Protocol
 
 import pytest
@@ -13,15 +13,22 @@ import pytest
 from base.agents.context import MeivaContext
 from base.agents.context.clients import ClientSet
 from base.agents.context.identity import AgentIdentity
+from base.clock import Clock
 from meiva.sdk_surface import process_context
 
 __all__ = ["BindAgent", "bound_agent", "no_agent"]
 
 
+# meiva:note
+# Bind a context acting as `agent_id`, carrying `clients` and `clock_factory` when given.
 class BindAgent(Protocol):
-    """Bind a context acting as `agent_id`, carrying `clients` when given."""
-
-    def __call__(self, agent_id: int, *, clients: ClientSet | None = None) -> None: ...
+    def __call__(
+        self,
+        agent_id: int,
+        *,
+        clients: ClientSet | None = None,
+        clock_factory: Callable[[], Clock] | None = None,
+    ) -> None: ...
 
 
 @pytest.fixture
@@ -29,12 +36,17 @@ def bound_agent() -> Iterator[BindAgent]:
     """Bind a context acting as the given agent; the previous binding returns after the test."""
     previous = process_context.unbind_context()
 
-    def bind(agent_id: int, *, clients: ClientSet | None = None) -> None:
+    def bind(
+        agent_id: int,
+        *,
+        clients: ClientSet | None = None,
+        clock_factory: Callable[[], Clock] | None = None,
+    ) -> None:
         identity = AgentIdentity(agent_id=agent_id, owns_loop=True)
         process_context.bind_context(
-            MeivaContext(identity=identity)
+            MeivaContext(identity=identity, clock_factory=clock_factory)
             if clients is None
-            else MeivaContext(identity=identity, clients=clients)
+            else MeivaContext(identity=identity, clients=clients, clock_factory=clock_factory)
         )
 
     try:

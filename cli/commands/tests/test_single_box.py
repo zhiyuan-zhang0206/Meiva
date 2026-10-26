@@ -64,6 +64,7 @@ from cli.database import (
 from cli.database.runtime import CommandRuntime
 from cli.database.tests.cli_tests import operator_database as operator_database
 from cli.database.tests.command_inputs import command_runtime as command_runtime
+from cli.startup.tests.birth_facts import birth_facts
 from services.backup.artifact import passphrase
 
 pytestmark = pytest.mark.skipif(
@@ -175,6 +176,7 @@ def _configure(
             frozenset({"gateway", "agent-runner"}),
             {},
             occupied_ports=frozenset(),
+            birth=birth_facts(),
         ),
     )
     assert values["MEIVA_CLUSTER_SECRET"]
