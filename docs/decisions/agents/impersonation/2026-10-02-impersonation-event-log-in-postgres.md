@@ -83,9 +83,13 @@ change, and the consumer reads the table directly instead of a broker.
 - New automatic leases are log-native. Manual leases stay out of scope, and no
   earlier lease is converted or replayed.
 - Not covered, and documented as such: a controller hard-crashing between a call's
-  effect and its row leaves the lease pending, not self-healing; SDK sampling still
-  happens before capture, so a sampled-out call exists in no log; a shared runner
-  credential can still forge entries, as before.
+  effect and its row loses that row, and no reader can recover it. The lease does not
+  stay pending for it: past `MEIVA_IMPERSONATION_EVENT_ABANDON_GRACE_SECONDS` the
+  reaper seals a receipt its controller never sealed and records
+  `event_source_abandoned` (source key, open time, row count, reason) in that log, so
+  the log completes with a declared gap instead of an unbounded one. SDK sampling
+  still happens before capture, so a sampled-out call exists in no log; a shared
+  runner credential can still forge entries, as before.
 - The per-event write already existed as the identity-ledger insert, so database
   load is unchanged in kind.
 

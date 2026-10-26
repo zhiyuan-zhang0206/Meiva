@@ -49,6 +49,7 @@ from psycopg_pool import ConnectionPool
 from base import telemetry
 from base.agents.impersonation.maintenance import (
     reap_impersonations,
+    reclaim_abandoned_event_logs,
     remind_expiring_impersonations,
     signal_incomplete_event_logs,
 )
@@ -282,6 +283,11 @@ async def sweep_round(
     reminded = await asyncio.to_thread(remind_expiring_impersonations, pool, db, bus)
     progress.beat()
     impersonations = await asyncio.to_thread(reap_impersonations, pool, db, bus)
+    abandoned = await asyncio.to_thread(
+        reclaim_abandoned_event_logs,
+        pool,
+        grace_seconds=config.impersonation_event_abandon_grace_s,
+    )
     await asyncio.to_thread(signal_incomplete_event_logs, pool)
     progress.beat()
     pages = await asyncio.to_thread(reap_expired_pages_blocking, pool, db, bus)
@@ -302,16 +308,18 @@ async def sweep_round(
         await lifecycle.publish_notice_resolved(bus, agent_id, nid, facts=details)
     progress.beat()
     pruned_fire_log = await _slow_phases(pool, config)
-    if pages or sessions or impersonations or notices or reminded or pruned_fire_log:
+    if pages or sessions or impersonations or notices or reminded or pruned_fire_log or abandoned:
         _log.info(
             "[ttl-reaper] reclaimed %d page(s), %d web session(s), %d impersonation(s), "
             "%d notice(s); reminded %d impersonation lease(s); "
+            "sealed %d abandoned impersonation event source(s); "
             "pruned %d schedule fire-log row(s)",
             len(pages),
             sessions,
             impersonations,
             len(notices),
             reminded,
+            abandoned,
             pruned_fire_log,
         )
 
