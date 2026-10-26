@@ -27,7 +27,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { ApiError } from "../transport/api";
-import { ApiProvider } from "../transport/transport-context";
+import { ApiProvider, WallClockProvider } from "../transport/transport-context";
 import { startGateway, type GatewayReply, type TestGateway } from "../transport/tests/api/api-provider";
 import { gatewayRig, httpRig, noUpload, type HttpRig } from "../transport/tests/api/api-provider";
 import { realNetwork } from "../transport/tests/api/api-provider";
@@ -195,7 +195,10 @@ let gateway: TestGateway = {
 let rig: HttpRig;
 
 function Gateway({ children }: { children: React.ReactNode }) {
-  return React.createElement(ApiProvider, { api: rig.api, children });
+  return React.createElement(WallClockProvider, {
+    wallNow: () => Date.now(),
+    children: React.createElement(ApiProvider, { api: rig.api, children }),
+  });
 }
 
 let queryClient = new QueryClient({
