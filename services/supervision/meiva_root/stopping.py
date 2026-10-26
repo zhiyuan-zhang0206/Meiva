@@ -11,6 +11,7 @@ import math
 import os
 import signal
 from dataclasses import dataclass
+from pathlib import Path
 from time import monotonic
 
 from base.deploy.progress_timeout import STOP_KILL_REAP_S
@@ -19,6 +20,16 @@ from base.native_process.ownership import OwnedProcess
 from base.native_process.process_control import SYSTEM_PROCESS_CONTROL, ProcessControl
 from base.native_process.root_control.ipc import UnitState
 from services.supervision.meiva_root.unit_records import Generation, UnitRuntime
+
+# meiva:note
+# A unit's stdout file is the only record of why it died, and it grows for as long as
+# the unit lives: `agent-host/output.log` reached 58 MB while nothing rotated it, because
+# the file stays open with O_APPEND for the whole generation. Rotation at spawn (the one
+# moment nothing holds the file) keeps the reason a unit restarted instead of overwriting
+# it. Both numbers are policy on `SupervisorConfig`, kept here with their reason rather
+# than inline at the call: 50 MB per file, 3 rotated generations.
+UNIT_LOG_MAX_BYTES = 50 * 1024 * 1024
+UNIT_LOG_BACKUPS = 3
 
 
 class UnitStopTimeoutError(RuntimeError):
@@ -45,7 +56,14 @@ class SupervisorConfig:
     watch_join_timeout_s: float = 0.2
     """Independent bounded observation of retained generation watchers at shutdown."""
 
+    unit_log_max_bytes: int = UNIT_LOG_MAX_BYTES
+    unit_log_backups: int = UNIT_LOG_BACKUPS
+
     def __post_init__(self) -> None:
+        if self.unit_log_max_bytes <= 0:
+            raise ValueError("unit_log_max_bytes must be positive")
+        if self.unit_log_backups < 1:
+            raise ValueError("unit_log_backups must be at least 1")
         if not math.isfinite(self.stop_timeout_s) or self.stop_timeout_s <= 0:
             raise ValueError("stop_timeout_s must be finite and positive")
         if not math.isfinite(self.watch_join_timeout_s) or self.watch_join_timeout_s < 0:
@@ -222,3 +240,29 @@ class StoppingMixin:
             force=force,
             process_control=self._process_control,
         )
+
+
+# meiva:note
+# Rotation happens at spawn, the one moment no process holds the file: a generation that
+# restarts keeps the previous file as `output.log.1` instead of appending to the same
+# blob forever. It must never block a unit from starting -- a filesystem error is logged
+# and the unit launches into the existing file, because a missing log is cheaper than a
+# missing service.
+def rotate_unit_log(log_path: Path, *, max_bytes: int, backups: int) -> bool:
+    try:
+        if log_path.stat().st_size < max_bytes:
+            return False
+    except FileNotFoundError:
+        return False
+    try:
+        oldest = log_path.with_name(f"{log_path.name}.{backups}")
+        oldest.unlink(missing_ok=True)
+        for index in range(backups - 1, 0, -1):
+            source = log_path.with_name(f"{log_path.name}.{index}")
+            if source.exists():
+                source.replace(log_path.with_name(f"{log_path.name}.{index + 1}"))
+        log_path.replace(log_path.with_name(f"{log_path.name}.1"))
+    except OSError as exc:
+        logger.warning("unit log rotation skipped for {}: {}", log_path, exc)
+        return False
+    return True
