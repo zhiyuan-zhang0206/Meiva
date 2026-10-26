@@ -146,7 +146,7 @@ def test_validate_local_state_warns_without_mutating_profile(tmp_path: Path) -> 
     profile = tmp_path / "profile"
     profile.mkdir()
     before = sorted(profile.iterdir())
-    warning = bp.validate_local_state(profile)
+    warning = bp.validate_local_state(profile, now=1_000.0)
     assert warning is not None
     assert "missing" in warning
     assert sorted(profile.iterdir()) == before
@@ -157,7 +157,7 @@ def test_validate_local_state_accepts_readable_regular_file(tmp_path: Path) -> N
     profile.mkdir()
     state = profile / "Local State"
     state.write_text("{}")
-    assert bp.validate_local_state(profile) is None
+    assert bp.validate_local_state(profile, now=state.stat().st_mtime) is None
 
 
 def test_validate_local_state_warns_when_mtime_is_unexpectedly_future_dated(
@@ -167,9 +167,10 @@ def test_validate_local_state_warns_when_mtime_is_unexpectedly_future_dated(
     profile.mkdir()
     state = profile / "Local State"
     state.write_text("{}")
-    future = state.stat().st_mtime + 600.0
+    now = state.stat().st_mtime
+    future = now + 600.0
     os.utime(state, (future, future))
-    warning = bp.validate_local_state(profile)
+    warning = bp.validate_local_state(profile, now=now)
     assert warning is not None
     assert "mtime" in warning
 

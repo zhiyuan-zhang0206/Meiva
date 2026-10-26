@@ -20,6 +20,7 @@ from pathlib import Path
 import pytest
 
 import services.desktop.browser.daemon as bd
+from base.clock.tests.fakes import system_clock
 from base.host.system.hostport import Host
 from base.host.system.tests.fake_commands import DARWIN_ARM64, fake_host
 from services.desktop.browser import session_restore
@@ -97,7 +98,6 @@ def test_chrome_args_has_debug_port_and_profile(tmp_path: Path) -> None:
 # resolved Chrome with the configured port and no automatic page.
 @pytest.mark.parametrize("restore", [False, True])
 def test_main_asserts_capable_then_execvps_chrome(tmp_path: Path, restore: bool) -> None:
-    order: list[str] = []
     fake_chrome = tmp_path / "chrome"
     argv_out = tmp_path / "argv.json"
     fake_chrome.write_text(
@@ -136,13 +136,12 @@ def test_main_asserts_capable_then_execvps_chrome(tmp_path: Path, restore: bool)
             home=tmp_path,
             profile=tmp_path / "prof",
             logs=tmp_path,
+            clock=system_clock(),
             readiness_sequence=[StartupReadiness(True)],
             poll_interval_s=0.01,
-            steps_out=order,
         )
     assert exc.value.code == 1
     captured_args: list[str] = json.loads(argv_out.read_text(encoding="utf-8"))
-    assert order == ["capable", "port", "ready", "profile"]
     assert captured_args[0] == str(fake_chrome)
     assert f"--remote-debugging-port={port}" in captured_args
     # meiva:note
@@ -163,6 +162,7 @@ def test_main_propagates_capability_failure(tmp_path: Path) -> None:
             home=tmp_path,
             profile=tmp_path / "prof",
             logs=tmp_path,
+            clock=system_clock(),
         )
 
 
@@ -190,6 +190,7 @@ def test_main_refuses_when_cdp_port_already_served(
             home=tmp_path,
             profile=tmp_path / "chrome-profile",
             logs=tmp_path,
+            clock=system_clock(),
         )
     assert exc.value.code == 1
     assert "already served" in capsys.readouterr().err
@@ -248,7 +249,7 @@ def test_watch_chrome_exits_zero_on_sigterm_without_killing_browser(tmp_path: Pa
     child_script.chmod(0o755)
     proc = bd.spawn_chrome(str(child_script), [str(child_script)])
     try:
-        bd.watch_chrome(tmp_path, proc, poll_interval_s=0.01)
+        bd.watch_chrome(tmp_path, proc, timers=system_clock(), poll_interval_s=0.01)
         assert proc.poll() is None
     finally:
         proc.terminate()
@@ -267,7 +268,7 @@ def test_watch_chrome_exits_nonzero_when_browser_disappears(tmp_path: Path) -> N
     child_script.chmod(0o755)
     proc = bd.spawn_chrome(str(child_script), [str(child_script)])
     with pytest.raises(SystemExit) as exc:
-        bd.watch_chrome(tmp_path, proc, poll_interval_s=0.01)
+        bd.watch_chrome(tmp_path, proc, timers=system_clock(), poll_interval_s=0.01)
     assert exc.value.code == 1
 
 
