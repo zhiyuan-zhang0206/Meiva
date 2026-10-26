@@ -93,7 +93,6 @@ from tests.fixtures import provisioning
 )
 def test_full_run_guard_decision(
     tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
     root_parts: tuple[str, ...],
     args: list[str],
     env: dict[str, str],
@@ -101,13 +100,12 @@ def test_full_run_guard_decision(
     blocked: bool,
 ) -> None:
     home = tmp_path / "home"
-    monkeypatch.setattr(Path, "home", lambda: home)
     rootpath = home.joinpath(*root_parts)
     invocation_dir = rootpath if cwd is None else home.joinpath(*cwd)
     selected_file = rootpath / "tests/components/meiva/test_x.py"
     selected_file.parent.mkdir(parents=True)
     selected_file.touch()
 
-    message = provisioning.full_run_guard_message(rootpath, args, env, invocation_dir)
+    message = provisioning.full_run_guard_message(rootpath, args, env, invocation_dir, home=home)
 
     assert (message is not None) is blocked

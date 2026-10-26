@@ -12,11 +12,14 @@ def test_direct_unit_does_not_request_e2e_process_environment(
 
 
 def test_missing_frontend_skips_only_its_fixture_consumers(
-    pytester: pytest.Pytester, monkeypatch: pytest.MonkeyPatch
+    pytester: pytest.Pytester,
 ) -> None:
-    monkeypatch.setenv("PYTHONPATH", str(Path(__file__).resolve().parents[2]))
+    repo_root = str(Path(__file__).resolve().parents[2])
     pytester.makeconftest(
-        """
+        f"""
+        import sys
+        sys.path.insert(0, {repo_root!r})
+
         pytest_plugins = ["tests.fixtures.env_bootstrap", "tests.fixtures.leak_guard"]
 
         def pytest_collection_modifyitems(session, config, items):
@@ -58,11 +61,14 @@ def test_missing_frontend_skips_only_its_fixture_consumers(
 
 
 def test_browser_contexts_need_no_minted_credentials(
-    pytester: pytest.Pytester, monkeypatch: pytest.MonkeyPatch
+    pytester: pytest.Pytester,
 ) -> None:
-    monkeypatch.setenv("PYTHONPATH", str(Path(__file__).resolve().parents[2]))
+    repo_root = str(Path(__file__).resolve().parents[2])
     pytester.makeconftest(
-        """
+        f"""
+        import sys
+        sys.path.insert(0, {repo_root!r})
+
         pytest_plugins = [
             "tests.fixtures.env_bootstrap",
             "tests.fixtures.leak_guard",
