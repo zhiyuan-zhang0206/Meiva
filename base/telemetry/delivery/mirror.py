@@ -57,6 +57,12 @@ def prune_jsonl_mirror(
 
     resolved_dir = logs_dir() if target_dir is None else target_dir
     cutoff = (_utc_now() - timedelta(days=retention_days)).strftime("%Y%m%d")
+    # meiva:note
+    # Only plain `.jsonl` matches here, and that is deliberate: an older day may be
+    # stored compressed as `events-YYYYMMDD.jsonl.zst` (recipe and recovery steps in
+    # `~/.meiva/logs/README-events-compression.md`). A compressed day is out of THIS
+    # retention — pruning cannot bound it — so it is removed by hand, not by age.
+    #
     # `.rollup.jsonl` is the retired filtered tier; leftovers age out with the full mirror.
     for path in (
         *resolved_dir.glob("events-????????.jsonl"),

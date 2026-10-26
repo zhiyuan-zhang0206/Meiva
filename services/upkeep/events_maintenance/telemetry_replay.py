@@ -67,6 +67,12 @@ def replay_file(conn: Connection, path: Path, *, deadline: float, host: str) -> 
 def recover_telemetry_events(conn: Connection, *, logs: Path, host: str) -> int:
     deadline = time.monotonic() + _PASS_SECONDS
     inserted = 0
+    # meiva:note
+    # Only plain `.jsonl` is replayable, because only plain `.jsonl` is matched here. A day
+    # older than the plaintext window lives as `events-YYYYMMDD.jsonl.zst` and is invisible
+    # to this pass; decompress it into a scratch directory first (never into `logs/`), replay
+    # from there, and leave the compressed file in place. Recipe:
+    # `~/.meiva/logs/README-events-compression.md`.
     for path in sorted(logs.glob("events-????????.jsonl"), reverse=True):
         if time.monotonic() >= deadline:
             break
