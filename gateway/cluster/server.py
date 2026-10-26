@@ -11,6 +11,7 @@ import socket
 import sys
 from collections.abc import Callable
 from contextlib import suppress
+from pathlib import Path
 from typing import Any
 
 import uvicorn
@@ -25,7 +26,6 @@ from base.deploy.schema.migrations import assert_schema_current
 from base.host.net.auth import require_cluster_secret
 from base.host.system.hostport import Host
 from base.native_process.os_platform import raise_fd_limit
-from base.paths import meiva_home
 from base.telemetry.process_logging import init_gateway_process
 from gateway.cluster.process_boot import LOADED_IMAGE, GatewayProcess
 from gateway.cluster.serve_plan import ServePlan, serve_plan
@@ -76,7 +76,7 @@ def serve(kwargs: dict[str, Any]) -> None:
 # The builder borrows this entry's process. Development reload creates its
 # owned app in the new worker through the environment factory. The caller
 # boots `config`; the decisions that follow are `serve_plan`'s.
-def main(*, config: ConfigBoot, build_app: Callable[[GatewayProcess], FastAPI]) -> None:
+def main(*, home: Path, config: ConfigBoot, build_app: Callable[[GatewayProcess], FastAPI]) -> None:
     machine = ConfiguredMachineIdentity(config)
     plan = serve_plan(
         serves_gateway="gateway" in machine.role(),
@@ -110,7 +110,7 @@ def main(*, config: ConfigBoot, build_app: Callable[[GatewayProcess], FastAPI]) 
     raise_fd_limit(65536)
 
     process = GatewayProcess(
-        home=meiva_home(), config=config, image=LOADED_IMAGE, machine=machine, host=Host.system()
+        home=home, config=config, image=LOADED_IMAGE, machine=machine, host=Host.system()
     )
     with process.lifetime():
         _serve_process(process, plan, build_app)
