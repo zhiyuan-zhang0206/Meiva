@@ -24,6 +24,7 @@ from psycopg import sql
 
 from base.agents.history.checkpoint import CheckpointReadError
 from base.agents.history.hierarchy.sessions import SessionBoundaryError
+from base.clock import SYSTEM_TIMERS, Clock
 from base.config import settings
 from base.config.service_read import ConfigAuthority
 from base.config.tests.configuration import snapshot_process_config
@@ -33,6 +34,7 @@ from base.lm.pricing import PriceBook, PriceRates, plugin_model_price
 from base.packages.plugin_providers import build_model_catalog
 from gateway.agents.history import understanding as module
 from gateway.agents.history.configuration import timeline_read, understanding_read
+from gateway.http.config import GatewayConfig
 from gateway.tests.auth.gateway_config import (
     GatewayTestClient,
     gateway_test_client,
@@ -489,6 +491,10 @@ def test_an_agent_without_history_has_no_sessions(db_conn: psycopg.Connection) -
     assert resp.status_code == 422
 
 
+def _clock(config: GatewayConfig) -> Clock:
+    return Clock(config.clock, timers=SYSTEM_TIMERS)
+
+
 # meiva:note
 # A history read takes its values from the config of the gateway that serves it: two gateways
 # stay independent.
@@ -513,12 +519,15 @@ def test_each_gateway_reads_its_own_config() -> None:
         Path("/nonexistent/gateway.env"),
     )
 
-    assert (timeline_read(first).default_limit, timeline_read(second).default_limit) == (11, 29)
     assert (
-        timeline_read(first).rendering.timestamps_enabled,
-        timeline_read(second).rendering.timestamps_enabled,
+        timeline_read(first, _clock(first)).default_limit,
+        timeline_read(second, _clock(second)).default_limit,
+    ) == (11, 29)
+    assert (
+        timeline_read(first, _clock(first)).rendering.timestamps_enabled,
+        timeline_read(second, _clock(second)).rendering.timestamps_enabled,
     ) == (False, True)
     assert (
-        understanding_read(first, authority).default_model,
-        understanding_read(second, authority).default_model,
+        understanding_read(first, authority, _clock(first)).default_model,
+        understanding_read(second, authority, _clock(second)).default_model,
     ) == ("first-model", "second-model")

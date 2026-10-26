@@ -23,7 +23,6 @@ may fail the agent's turn.
 
 from __future__ import annotations
 
-import asyncio
 from datetime import datetime
 from typing import Any
 
@@ -34,7 +33,7 @@ from agent.state import AgentState
 from agent.state_channels import CompactState
 from base import telemetry
 from base.agents.history.hierarchy.chunks import chunk_threshold, enqueue_chunk
-from base.clock import SYSTEM_TIMERS
+from base.clock import Timers
 from base.host.env.agent_slices import AgentSlices
 from base.lm.catalog import ModelCatalog
 from base.log import logger
@@ -136,6 +135,7 @@ async def await_snapshot(
     agent_id: int,
     *,
     understanding_enabled: bool,
+    timers: Timers,
     wait: SnapshotWait = DEFAULT_SNAPSHOT_WAIT,
 ) -> None:
     """Wait (bounded) until the newest checkpoint of the agent is at least as new as the `state`'s
@@ -156,19 +156,19 @@ async def await_snapshot(
     if pool is None or not messages or not understanding_enabled:
         return
     last = read_time(messages[-1])
-    started = SYSTEM_TIMERS.monotonic()
+    started = timers.monotonic()
     while last is not None:
         try:
             newest = await newest_checkpoint_ts(pool, agent_id)
         except Exception:
             logger.opt(exception=True).warning("snapshot check failed for agent {}", agent_id)
             return
-        verdict = snapshot_verdict(newest, last, SYSTEM_TIMERS.monotonic() - started, wait)
+        verdict = snapshot_verdict(newest, last, timers.monotonic() - started, wait)
         if verdict == "caught_up":
             return
         if verdict == "give_up":
             break
-        await asyncio.sleep(wait.poll_seconds)
+        await timers.asleep(wait.poll_seconds)
     logger.warning(
         "compaction of agent {agent} stamps its boundary before the checkpoint is known to hold "
         "the last message {message}",
@@ -180,6 +180,6 @@ async def await_snapshot(
         "understanding_snapshot_lag",
         attributes={
             "agent_id": agent_id,
-            "waited_seconds": round(SYSTEM_TIMERS.monotonic() - started, 1),
+            "waited_seconds": round(timers.monotonic() - started, 1),
         },
     )

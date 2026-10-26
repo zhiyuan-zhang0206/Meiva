@@ -23,13 +23,14 @@ import type {
   ShellInfo,
 } from "@/lib/contracts/types";
 import { formatRelative, formatUptime } from "@/lib/format/time";
-import { useNow } from "@/lib/format/use-now";
+import { useNow } from "@/lib/format/now/use-now";
 import { useTimeFormat } from "@/lib/format/use-time-format";
 import { cn } from "@/lib/format/utils";
 import { harnessLabel } from "@/lib/harness/harness";
 import { inspectLiveQueryKey } from "@/lib/inspector/inspector-queries";
 import { fleetNoticeHref } from "@/lib/inspector/inspector-widgets";
 import { FLEX, FLEX_1, FLEX_COL, MIN_W_0 } from "@/lib/layout/layout";
+import { useWallNow } from "@/lib/transport/transport-context";
 
 import { formatInterval } from "./inspector-cost-section";
 
@@ -98,7 +99,7 @@ export function NoticeReplySection({
 
 export function ShellsSection({ inspect }: { inspect: AgentInspectLive }) {
   const { shells } = inspect;
-  const now = useNow(1_000, new Date());
+  const now = useNow(1_000, useWallNow());
   const t = useTranslations("inspector");
   if (inspect.shells_available === true && shells.length === 0) return null;
 
@@ -229,7 +230,7 @@ export function LivenessSection({ inspect }: { inspect: AgentInspectLive }) {
   const offline = state === "offline";
   const t = useTranslations("inspector");
   const tStatus = useTranslations("agentRow");
-  const now = useNow(1_000, new Date());
+  const now = useNow(1_000, useWallNow());
   const { formatAbsolute, formatUpcoming } = useTimeFormat();
   const next = nextHeartbeatCell(heartbeat, { pending: t("pending"), due: t("due") }, now, formatUpcoming);
   const lastPause = heartbeat.last_pause;

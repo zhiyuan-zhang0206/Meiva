@@ -107,6 +107,7 @@ async def _compact_outcome(
         state,
         closing=closing_of(summary_text),
         understanding_enabled=ctx.require_agent().read("agent", "understanding_enabled"),
+        timers=ctx.require_clock(),
     )
     if st.committed_chat_ids:
         await defer_chats_to_pending(

@@ -102,7 +102,7 @@ async def _settle_attempts(
                 activate_accepted=False,
                 incarnation=incarnation,
                 timestamps=held.timestamps,
-                host=process_host(held.machine, rng=held.rng),
+                host=process_host(held.machine, rng=held.rng, clock=held.timestamps.clock),
             )
         except ImpersonationError:
             raise
@@ -119,7 +119,7 @@ async def _settle_attempts(
                 delay_s=delay,
                 error_class=type(error).__name__,
             )
-            await asyncio.sleep(delay)
+            await held.timestamps.clock.asleep(delay)
             delay *= 3
         else:
             await clear_turn_fatal(held.pool, incarnation)
