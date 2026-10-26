@@ -11,7 +11,7 @@ from base.agents.messages.timestamp_policy import TimestampSource
 from base.clock import SYSTEM_TIMERS, Clock
 from base.clock.configuration import clock_config_from_boot
 from base.cluster.machine import MachineIdentityReader
-from base.config import ConfigBoot
+from base.config import ConfigBoot, settings
 from base.host.env.registry import child_env
 from base.lm.catalog.provider_keys import ProviderKeys
 from base.native_process.loaded_commit import LoadedCommit
@@ -132,3 +132,13 @@ def initialize_logging(
         except BaseException as secondary:
             primary.add_note(f"Host logging cleanup also failed: {secondary!r}")
         raise
+
+
+# meiva:note
+# The smallest exec footprint the memory guard kills for, in bytes.
+#
+# Configuration, read here in the process bootstrap and handed to the guard: a guard that
+# read settings itself could not be tested with a floor and would answer differently on
+# another machine.
+def relief_floor_bytes() -> int:
+    return settings.agent.exec_memory_guard_floor_mb * 1024 * 1024

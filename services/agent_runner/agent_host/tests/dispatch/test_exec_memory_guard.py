@@ -57,7 +57,7 @@ def _guard(source: _Source, domains: list[ExecDomain], killed: list[ExecDomain])
         killed.append(domain)
         domains.remove(domain)
 
-    return ExecMemoryGuard(source, domains=lambda: list(domains), kill=kill)
+    return ExecMemoryGuard(source, domains=lambda: list(domains), floor_bytes=_GIB, kill=kill)
 
 
 @pytest.mark.parametrize("level", ["normal", "warning"])
@@ -68,6 +68,7 @@ def test_below_critical_never_touches_an_exec(tmp_path: Path, level: PressureLev
     guard = ExecMemoryGuard(
         _Source(level),
         domains=lambda: called.append("listed") or domains,
+        floor_bytes=_GIB,
         kill=killed.append,
     )
     assert guard.check_once() is None
@@ -98,7 +99,7 @@ def test_critical_kills_only_the_largest_and_records_why(tmp_path: Path) -> None
 
 def test_equal_footprints_break_the_tie_by_pid(tmp_path: Path) -> None:
     killed: list[ExecDomain] = []
-    first, second = _domain(tmp_path, 10, 1.0), _domain(tmp_path, 20, 1.0)
+    first, second = _domain(tmp_path, 10, 2.0), _domain(tmp_path, 20, 2.0)
     _guard(_Source("critical"), [first, second], killed).check_once()
     assert killed == [second]
 
@@ -147,6 +148,66 @@ def test_kill_emits_the_registered_event_with_agent_footprint_and_pressure(
     assert extra["footprint_bytes"] == 2 * _GIB
     assert extra["running"] == 1
     assert extra["pressure"] == "critical"
+
+
+def test_a_domain_exactly_at_the_floor_is_left_alone(tmp_path: Path) -> None:
+    killed: list[ExecDomain] = []
+    at_floor = _domain(tmp_path, 10, 1.0)
+    assert _guard(_Source("critical"), [at_floor], killed).check_once() is None
+    assert killed == []
+    assert read_notice(at_floor.result_path) is None
+
+
+def test_a_domain_just_above_the_floor_is_killed(tmp_path: Path) -> None:
+    killed: list[ExecDomain] = []
+    above = _domain(tmp_path, 10, 1.0 + 1 / 1024)
+    assert _guard(_Source("critical"), [above], killed).check_once() == above
+    assert killed == [above]
+
+
+def test_critical_below_the_floor_reports_the_skip_and_kills_nothing(tmp_path: Path) -> None:
+    records: list[Any] = []
+    sink = logger.add(lambda message: records.append(message.record))
+    killed: list[ExecDomain] = []
+    try:
+        _guard(_Source("critical"), [_domain(tmp_path, 10, 0.1)], killed).check_once()
+    finally:
+        logger.remove(sink)
+    assert killed == []
+    [record] = [row for row in records if row["extra"].get("event") == "exec_memory_guard_skipped"]
+    extra = record["extra"]
+    assert record["level"].name == "INFO"
+    assert extra["agent_id"] == 7
+    assert extra["footprint_bytes"] == int(0.1 * _GIB)
+    assert extra["floor_bytes"] == _GIB
+    assert extra["running"] == 1
+    assert extra["pressure"] == "critical"
+    assert isinstance(extra["free_swap_bytes"], int)
+
+
+def test_many_small_execs_under_critical_pressure_do_nothing(tmp_path: Path) -> None:
+    killed: list[ExecDomain] = []
+    domains = [_domain(tmp_path, pid, 0.2) for pid in (10, 11, 12)]
+    guard = _guard(_Source("critical"), domains, killed)
+    assert guard.check_once() is None
+    assert killed == []
+    assert [domain.pid for domain in domains] == [10, 11, 12]
+
+
+def test_the_same_skip_is_reported_once_per_episode(tmp_path: Path) -> None:
+    records: list[Any] = []
+    sink = logger.add(lambda message: records.append(message.record))
+    domains = [_domain(tmp_path, 10, 0.1)]
+    guard = _guard(_Source("critical", "critical", "normal", "critical"), domains, [])
+    try:
+        guard.check_once()
+        guard.check_once()
+        guard.check_once()
+        guard.check_once()
+    finally:
+        logger.remove(sink)
+    skips = [row for row in records if row["extra"].get("event") == "exec_memory_guard_skipped"]
+    assert len(skips) == 2
 
 
 def test_the_notice_is_consumed_by_the_run_that_reads_it(tmp_path: Path) -> None:
@@ -234,7 +295,9 @@ async def test_a_real_exec_is_killed_with_its_reason_and_the_host_keeps_serving(
     )
     from services.agent_runner.agent_host.exec_memory_guard import find_exec_domains
 
-    guard = ExecMemoryGuard(source, domains=lambda: find_exec_domains(os.getpid(), source))
+    guard = ExecMemoryGuard(
+        source, domains=lambda: find_exec_domains(os.getpid(), source), floor_bytes=1
+    )
     descendant_pid: int | None = None
     run = asyncio.create_task(_run(tmp_path, code, database_gate=database_gate))
     try:

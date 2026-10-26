@@ -102,6 +102,7 @@ from .lifecycle.configuration import (
     initialize_logging,
     load_installation,
     pool_bounds,
+    relief_floor_bytes,
 )
 from .lifecycle.graceful_exit import OwedRestart, serve_until_exit, write_exit_restart
 from .lifecycle.instance import release_instance_lock, take_instance_lock
@@ -369,7 +370,7 @@ def background_loops(
             plugins_root, interval_s=PLUGINS_POLL_INTERVAL_S
         ),
         "stdout_log_rotate": rotate_stdout_log_forever(),
-        "exec_memory_guard": run_memory_guard_forever(host_log, host_pid=os.getpid()),
+        "exec_memory_guard": run_memory_guard_forever(host_log, os.getpid(), relief_floor_bytes()),
         "understanding_chunks": understanding_loop_forever(
             control_pool,
             db,

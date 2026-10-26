@@ -145,6 +145,7 @@ above (or when its name is unregistered); otherwise it stays in the JSONL mirror
 | `exec_node_timeout` | node-level timeout | anomaly | — | — | events | ✓ |
 | `exec_subprocess_killed` | exec child survived the signal grace period and was SIGKILLed | anomaly | pid, grace | — | events | ✓ |
 | `exec_memory_guard_killed` | the host memory guard killed the largest exec process domain at critical system memory pressure | anomaly | agent_id, pid, footprint_bytes, running, pressure | — | events | — |
+| `exec_memory_guard_skipped` | the host memory guard found critical pressure but the largest exec sat at or below the relief floor, so it killed nothing | observation | agent_id, pid, footprint_bytes, floor_bytes, running, pressure, free_swap_bytes | — | events | — |
 | `code` | LLM generated code block | noise | body, ok, duration_seconds | — | events | ✓ |
 | `text` | LLM text output | noise | — | — | events | — |
 | `syntax_fix` | syntax repair executed | noise | fixes | — | events | ✓ |
