@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import shutil
 from collections.abc import Callable, Mapping
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from functools import partial
 from pathlib import Path
 from urllib.parse import urlsplit
@@ -48,12 +48,13 @@ from services.supervision.meiva_root_glue.diagnostics import Diagnostic
 # meiva:note
 # The settings the host diagnostics decide on, read once by the root that builds them
 # (`glue.build_wiring`) and frozen: a probe never reads configuration while it runs. `loki_url` is
-# the local Loki base URL with a wildcard bind already resolved to loopback.
+# the local Loki base URL with a wildcard bind already resolved to loopback. The two URLs and the
+# environment can carry credentials, so they stay out of the repr.
 @dataclass(frozen=True)
 class ProbeConfig:
     home: Path
-    redis_url: str
-    db_url: str
+    redis_url: str = field(repr=False)
+    db_url: str = field(repr=False)
     pgbouncer_enabled: bool
     observability_url: str
     observability_otlp_port: int
@@ -63,7 +64,7 @@ class ProbeConfig:
     browser_reach_timeout_s: float
     browser_reach_probe_interval_s: float
     loki_url: str
-    environment: Mapping[str, str]
+    environment: Mapping[str, str] = field(repr=False)
 
 
 def brew_pins(
@@ -87,7 +88,7 @@ def brew_pins(
 def venv(*, environment: Mapping[str, str]) -> DaemonProbe:
     from services.supervision.healthchecks import prod_venv
 
-    uv = shutil.which("uv")
+    uv = shutil.which("uv", path=environment.get("PATH", ""))
     if uv is None:
         return DaemonProbe.unavailable("uv unavailable: dependency consistency was not measured")
     # meiva:note
@@ -110,8 +111,7 @@ def redis_acl(
 ) -> DaemonProbe:
     from base.cluster import ownership
 
-    resolved_url = redis_url
-    port = ownership.redis_port_of(resolved_url)
+    port = ownership.redis_port_of(redis_url)
     if port is None:
         return DaemonProbe.unavailable("no explicit local Redis endpoint")
 
@@ -119,7 +119,7 @@ def redis_acl(
         from redis.exceptions import RedisError
 
         try:
-            _default_redis_ping(resolved_url, connection=connection)
+            _default_redis_ping(redis_url, connection=connection)
         except RedisError as exc:
             return DaemonProbe.down(f"native Redis runtime ACL PING failed: {type(exc).__name__}")
         return DaemonProbe.up("Redis runtime ACL authenticated and answered PING")
@@ -163,14 +163,13 @@ def pgbouncer(
     from base.host.db_authority.delivery import POOLER_ADMIN
     from base.host.db_authority.model import AuthorityRefusedError
 
-    resolved_home = home
-    resolved_record = _default_get_record(resolved_home) if record is None else record
+    resolved_record = _default_get_record(home) if record is None else record
     if resolved_record is None:
         return DaemonProbe.unavailable("no registry record for the local pooler")
     port = resolved_record.ports["pgbouncer"]
     if admin_password is None:
         try:
-            resolved_password = _default_pooler_admin_password(resolved_home)
+            resolved_password = _default_pooler_admin_password(home)
         except AuthorityRefusedError as exc:
             return DaemonProbe.unavailable(f"no pooler admin credential: {exc}")
     else:
@@ -207,8 +206,6 @@ def browser_reach(
     resolved_url = url.strip()
     if not resolved_url:
         return DaemonProbe.unavailable("gateway reachability URL is not configured")
-    resolved_port = port
-    resolved_timeout_s = timeout_s
 
     def protocol() -> DaemonProbe:
         browser = (
@@ -217,7 +214,7 @@ def browser_reach(
         if not browser.alive:
             return DaemonProbe.unavailable(f"browser canary prerequisite failed: {browser.detail}")
         canary = (
-            _default_canary(resolved_port, resolved_url, resolved_timeout_s)
+            _default_canary(port, resolved_url, timeout_s)
             if canary_result is None
             else canary_result
         )
@@ -225,11 +222,7 @@ def browser_reach(
             return DaemonProbe.unavailable(canary.detail)
         if canary.outcome == "ok":
             return DaemonProbe.up(canary.detail)
-        host = (
-            _default_host_probe(resolved_url, resolved_timeout_s)
-            if host_result is None
-            else host_result
-        )
+        host = _default_host_probe(resolved_url, timeout_s) if host_result is None else host_result
         detail = f"browser={canary.detail}; host={host.detail}"
         if not host.ok:
             return DaemonProbe.unavailable(f"host baseline also failed: {detail}")
