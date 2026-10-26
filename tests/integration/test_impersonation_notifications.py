@@ -3,6 +3,7 @@ import io
 import random
 import sys
 from dataclasses import replace
+from pathlib import Path
 from typing import Any, cast
 from unittest.mock import MagicMock
 from uuid import UUID, uuid4
@@ -540,6 +541,7 @@ async def test_terminal_relay_start_delivers_interruption_best_effort(
             token=session["relay_token"],
             redis_url=redis_url,
             codex_home=None,
+            user_home=Path("/nonexistent-relay-user-home"),
             antigravity_server=None,
             stdout=transport,
             rng=seeded_rng(),

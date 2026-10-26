@@ -104,13 +104,14 @@ def _antigravity_server(
 # meiva:note
 # The Codex app-server endpoint for `remote`, with the local daemon's socket resolved the way
 # `codex` resolves it from CODEX_HOME. `codex_home` is that variable as the invocation saw it
-# (None when unset), so the lookup never reads the process environment itself.
-def codex_endpoint(remote: str | None, *, codex_home: str | None) -> str:
+# (None when unset) and `user_home` the account home the invocation's session recorded, so the
+# lookup reads neither the process environment nor `~` itself.
+def codex_endpoint(remote: str | None, *, codex_home: str | None, user_home: Path) -> str:
     env = {} if codex_home is None else {"CODEX_HOME": codex_home}
     return resolve_codex_endpoint(
         remote,
-        default_endpoint=default_control_endpoint(env=env),
-        default_socket=str(default_control_socket(env=env)),
+        default_endpoint=default_control_endpoint(env=env, user_home=user_home),
+        default_socket=str(default_control_socket(env=env, user_home=user_home)),
     )
 
 
@@ -121,6 +122,7 @@ def bind_adapter(
     destination: RelayDestination,
     *,
     codex_home: str | None,
+    user_home: Path,
     antigravity_server: AntigravityServer | None,
     stdout: TextIO,
 ) -> RelayAdapter:
@@ -130,7 +132,9 @@ def bind_adapter(
         case DshSession():
             return DshStdout(stdout)
         case CodexThread(thread_id=thread_id, remote=remote):
-            return CodexSteer(thread_id, codex_endpoint(remote, codex_home=codex_home))
+            return CodexSteer(
+                thread_id, codex_endpoint(remote, codex_home=codex_home, user_home=user_home)
+            )
         case AntigravityConversation(thread_id=thread_id, endpoint_record=record):
             return AntigravitySend(
                 thread_id, _antigravity_server(thread_id, record, injected=antigravity_server)

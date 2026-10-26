@@ -253,7 +253,9 @@ def _request(
     endpoint = plan.codex_remote
     match plan.handoff:
         case Handoff.CODEX:
-            endpoint = codex_endpoint(endpoint, codex_home=env.codex_home)
+            endpoint = codex_endpoint(
+                endpoint, codex_home=env.codex_home, user_home=args.runtime.session.user_home
+            )
         case Handoff.ANTIGRAVITY:
             _record_antigravity_endpoint(
                 plan,

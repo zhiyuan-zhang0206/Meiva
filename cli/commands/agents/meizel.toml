@@ -19,6 +19,3 @@ exports = ["cleanup_after.py", "computer.py", "control.py", "impersonation.py", 
 "impersonation.py" = { kinds = ["bus"], why = "builds the event bus from the process settings in the two commands that publish a session request" }
 "impersonation_relay.py" = { kinds = ["bus"], why = "builds the relay's event bus from the process settings, next to a database factory its caller passes in" }
 "notices.py" = { kinds = ["random"], why = "draws the idempotency key of a notice resolve call with uuid4" }
-
-[debt.ambient-read]
-"impersonation_adapters.py#environ base.agents.impersonation.host_transport.default_control_socket" = 1
