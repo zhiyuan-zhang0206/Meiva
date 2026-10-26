@@ -20,7 +20,6 @@ from dataclasses import dataclass
 
 import base.deploy.progress_timeout as deploy
 import base.native_process.stop_timing as stop
-from base.config import settings
 from base.deploy.schedule_timing import SCHEDULE_STALL_ALERT_AFTER_S
 from base.host.db_authority import unit
 
@@ -39,6 +38,8 @@ from base.host.db_authority import unit
 # not a single settings field, so stated here as the constant the wedged default
 # was rounded up from (wedged.py: "exec timeout is 1200s + LLM retry budget
 # ~770s ≈ 2000s, rounded up for margin").
+WEDGED_AGE_SEC = 2400.0
+EXEC_NODE_TIMEOUT_S = 1200.0
 LLM_RETRY_BUDGET_ESTIMATE_S = 770.0
 
 
@@ -161,12 +162,12 @@ CLOCKS: dict[str, Clock] = {
     # --- wedged family ---
     "WEDGED_AGE_SEC": Clock(
         "wedged",
-        lambda: settings.daemon.wedged_agent_inbound_age_seconds,
+        WEDGED_AGE_SEC,
         "running-agent age of an unconsumed pending inbound that presumes an agent wedged",
     ),
     "EXEC_NODE_TIMEOUT_S": Clock(
         "wedged",
-        lambda: settings.sandbox.exec_node_timeout_seconds,
+        EXEC_NODE_TIMEOUT_S,
         "graph-level exec node timeout (wedged derivation component)",
     ),
     "LLM_RETRY_BUDGET_ESTIMATE_S": Clock(
@@ -321,8 +322,14 @@ CONSTRAINTS: list[Constraint] = [
 ]
 
 
-def clock_values() -> dict[str, float]:
-    return {name: clock.get() for name, clock in CLOCKS.items()}
+def clock_values(
+    wedged_age_sec: float = WEDGED_AGE_SEC,
+    exec_node_timeout_s: float = EXEC_NODE_TIMEOUT_S,
+) -> dict[str, float]:
+    values = {name: clock.get() for name, clock in CLOCKS.items()}
+    values["WEDGED_AGE_SEC"] = float(wedged_age_sec)
+    values["EXEC_NODE_TIMEOUT_S"] = float(exec_node_timeout_s)
+    return values
 
 
 # meiva:note

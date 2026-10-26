@@ -277,7 +277,13 @@ async def _apply_provider_failure(
     )
 
 
-async def _handle_fatal_llm_error(
+# meiva:note
+# Abort the turn, report the error, and wait for new input.
+# A permanent provider rejection also persists a halt for background wakes and
+# opens the checkpoint heartbeat circuit. A fresh explicit chat may retry after
+# the underlying cause is fixed; original code execution is not resumed.
+# emit_reports=False computes state without repeating notifications.
+async def handle_fatal_llm_error(
     exc: FatalLLMStreamError | FatalProviderError,
     ctx: MeivaContext,
     agent_id: int,
@@ -287,20 +293,10 @@ async def _handle_fatal_llm_error(
     emit_reports: bool = True,
     deferred: list[Error] | None = None,
 ) -> dict[str, object]:
-    """Abort the turn, report the error, and wait for new input.
-
-    A permanent provider rejection also persists a halt for background wakes and
-    opens the checkpoint heartbeat circuit. A fresh explicit chat may retry after
-    the underlying cause is fixed; original code execution is not resumed.
-    ``emit_reports=False`` computes state without repeating notifications.
-    """
     logger.opt(exception=True).error(
         "LLM turn aborted (retry cap exhausted or provider rejected) — "
         "agent stays alive and idles for next inbound",
         event="llm_turn_aborted",
-        # FatalProviderError carries the classifier's structured triple;
-        # FatalLLMStreamError does not (getattr -> None) — keeps the abort
-        # event queryable by error_class / provider / status either way.
         error_class=getattr(exc, "error_class", None),
         provider=getattr(exc, "provider", None),
         status=getattr(exc, "status", None),
@@ -328,10 +324,9 @@ async def _handle_fatal_llm_error(
             recovery=provider_recovery(reason) if reason is not None else None,
             deferred=deferred,
         )
-    # halted=True so the claim node actually waits for the next inbound
-    # instead of re-entering the LLM with the same messages and hitting the
-    # same fatal error in an infinite loop (agent #1581 incident — DeepSeek
-    # stream stall with 616 messages).
+    # meiva:note
+    # halted=True so the claim node waits for the next inbound instead of re-entering
+    # the LLM with the same messages in an infinite loop.
     input_update: dict[str, object] = {"halted": True}
     if isinstance(exc, FatalProviderError):
         assert reason is not None  # noqa: S101
@@ -429,7 +424,7 @@ async def settle_turn_failure(
             )
             pending.prepared_update = {"halted": True}
         else:
-            pending.prepared_update = await _handle_fatal_llm_error(
+            pending.prepared_update = await handle_fatal_llm_error(
                 exc,
                 ctx,
                 agent_id,

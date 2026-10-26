@@ -7,7 +7,7 @@ History uses descending-ID keyset pages; no implicit list-all operation exists.
 
 from __future__ import annotations
 
-from datetime import UTC, datetime
+from datetime import datetime
 from typing import Any, Literal
 
 import psycopg
@@ -153,7 +153,23 @@ LIVE_SQL = sql.SQL("""
 """).format(columns=sql.SQL(_CARD_COLUMNS), source=sql.SQL(_CARD_FROM))
 
 
-def _card(data: dict[str, Any], *, catalog: ModelCatalog | None, default_model: str) -> AgentCard:
+# meiva:note
+# Read the current UTC timestamp from the database session.
+def _db_now(cur: psycopg.Cursor[Any]) -> datetime:
+    cur.execute("SELECT clock_timestamp()")
+    row = cur.fetchone()
+    if row is None or not isinstance(row[0], datetime):
+        raise RuntimeError("clock_timestamp() did not return a timestamp")
+    return row[0]
+
+
+def _card(
+    data: dict[str, Any],
+    *,
+    catalog: ModelCatalog | None,
+    default_model: str,
+    now: datetime,
+) -> AgentCard:
     data["supports_vision"] = agent_supports_vision(
         data.pop("config_overlay"),
         data.pop("birth_config"),
@@ -172,7 +188,7 @@ def _card(data: dict[str, Any], *, catalog: ModelCatalog | None, default_model: 
         host_online=host_online,
         probe_at=probe_at,
         admission_at=datetime.fromisoformat(admission_at) if admission_at else None,
-        now=datetime.now(UTC),
+        now=now,
         launch_failure=(
             launch_failure_reason,
             datetime.fromisoformat(launch_failure_at) if launch_failure_at else None,
@@ -189,12 +205,15 @@ def select_roster(
 ) -> AgentRoster:
     """Read live cards and their ancestor closure from the same database snapshot."""
     with conn.cursor() as cur:
+        now = _db_now(cur)
         cur.execute(LIVE_SQL)
         row = cur.fetchone()
     if row is None:
         raise RuntimeError("roster aggregate did not return a row")
     return AgentRoster(
-        agents=[_card(data, catalog=catalog, default_model=default_model) for data in row[0]],
+        agents=[
+            _card(data, catalog=catalog, default_model=default_model, now=now) for data in row[0]
+        ],
         ancestors=[AgentLineage.model_validate(data) for data in row[1]],
     )
 
@@ -253,9 +272,12 @@ def list_directory(
         source=sql.SQL(_CARD_FROM),
     )
     with conn.cursor() as cur:
+        now = _db_now(cur)
         cur.execute(statement, params)
         rows = cur.fetchall()
-    agents = [_card(row[0], catalog=catalog, default_model=default_model) for row in rows[:limit]]
+    agents = [
+        _card(row[0], catalog=catalog, default_model=default_model, now=now) for row in rows[:limit]
+    ]
     return AgentDirectoryPage(
         agents=agents,
         next_cursor=agents[-1].agent_id if len(rows) > limit else None,

@@ -141,7 +141,7 @@ export default function AlertsSection() {
                 </TableCell>
                 <TableCell className="hidden lg:table-cell">
                   <span className="tabular-nums" title={formatAbsolute(a.starts_at)}>
-                    {formatRelativeTime(a.starts_at)}
+                    {formatRelativeTime(a.starts_at, new Date())}
                   </span>
                 </TableCell>
                 <TableCell className="hidden tabular-nums text-muted-foreground lg:table-cell">

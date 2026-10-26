@@ -13,7 +13,7 @@ from __future__ import annotations
 from collections import Counter
 from collections.abc import Iterable
 from dataclasses import dataclass
-from datetime import UTC, datetime
+from datetime import datetime
 from typing import Any
 
 import psycopg
@@ -163,8 +163,8 @@ def fetch_aggregate(
     days: int,
     agent_id: int | None,
     *,
+    now: datetime,
     since_compact: bool = False,
-    now: datetime | None = None,
 ) -> EventAggregate:
     """Windowed aggregate over `telemetry_events` — the gateway + CLI entry point.
 
@@ -172,7 +172,7 @@ def fetch_aggregate(
     since_compact (each agent's rows narrowed to at-or-after its latest compact halt; service rows
     always kept).
     """
-    data = read_window(conn, days, agent_id, since_compact=since_compact, now=now)
+    data = read_window(conn, days, agent_id, now=now, since_compact=since_compact)
     raw: dict[int | None, dict[str, Any]] = data["per_agent"]
     rows = list(raw.values())
     lengths = data["lengths"]
@@ -206,24 +206,20 @@ def fetch_aggregate(
     )
 
 
-def _utc_now() -> datetime:
-    return datetime.now(UTC)
-
-
 def fetch_agent_rollups(
     conn: psycopg.Connection[Any],
     days: int,
     *,
+    now: datetime,
     since_compact: bool = False,
-    now: datetime | None = None,
 ) -> tuple[int, dict[int, dict[str, Any]]]:
     """`(total_events, per-agent headline counters)` of the window, for `/api/metrics/agents`.
 
     Runs only the statements that endpoint needs: the per-agent counters and the `llm_usage` sums.
     """
-    data = read_agent_window(conn, days, since_compact=since_compact, now=now)
+    data = read_agent_window(conn, days, now=now, since_compact=since_compact)
     raw: dict[int | None, dict[str, Any]] = data["per_agent"]
-    per_agent = _per_agent_aggs(raw, _utc_now())
+    per_agent = _per_agent_aggs(raw, now)
     total = sum(int(r["events"]) for r in raw.values())
     return total, agent_rollups(
         per_agent, _llm_by_agent(data["llm_per_agent"]), data["llm_costs"], data["llm_cache_input"]
@@ -403,6 +399,7 @@ def build_report_from_aggregate(
     days: int,
     agent_id: int | None,
     *,
+    now: datetime,
     since_compact: bool = False,
 ) -> tuple[str, dict[str, Any]]:
     """Assemble the same text + data `build_report` produces, from an
@@ -413,7 +410,7 @@ def build_report_from_aggregate(
     names = [s.name for s in sections]
     if len(names) != len(set(names)):
         raise ValueError(f"duplicate metric section names would clobber the JSON: {names}")
-    generated_at = _utc_now().isoformat()
+    generated_at = now.isoformat()
     meta: dict[str, Any] = {
         "window_days": days,
         "agent_filter": agent_id,

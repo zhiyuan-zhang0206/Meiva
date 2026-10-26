@@ -9,7 +9,7 @@ import httpx
 import psycopg
 import pytest
 
-from base.agents.impersonation._store import token_hash
+from base.agents.impersonation import token_hash
 from base.agents.impersonation.delivery import reserve_delivery
 from base.agents.impersonation.relay import relay_get, relay_inbox
 from base.agents.impersonation.wake import publish_inbound_wake

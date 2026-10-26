@@ -2,7 +2,6 @@
 
 import hashlib
 import json
-import uuid
 from datetime import datetime
 from pathlib import Path, PurePosixPath
 from typing import Literal, Self
@@ -125,8 +124,16 @@ def current_unit(
     return UnitIdentity(machine=local_machine, home=str(meiva_home().resolve()))
 
 
-def make_manifest(agent_id: int, names: list[str], batch: list[tuple[str, bytes, str]]) -> Manifest:
-    batch_id = uuid.uuid4().hex
+def make_manifest(
+    agent_id: int,
+    names: list[str],
+    batch: list[tuple[str, bytes, str]],
+    *,
+    key: str = "",
+) -> Manifest:
+    batch_id = hashlib.sha256(
+        f"{agent_id}:{key}:{request_hash(names, batch)}".encode()
+    ).hexdigest()[:32]
     objects: list[Object] = []
     for ordinal, (name, (_, contents, content_type)) in enumerate(zip(names, batch, strict=True)):
         suffix = Path(name.replace("\\", "/")).suffix

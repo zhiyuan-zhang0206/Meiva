@@ -91,6 +91,18 @@ async def _release_roundtrip(sock: str, agent_id: int) -> bool:
 
 
 # meiva:note
+# Locate the unit home's active chrome MCP socket under `<home>/run/`, or default to 9222 when absent.
+def _chrome_socket(home: Path) -> Path:
+    from base.paths import chrome_mcp_socket, run_dir
+
+    try:
+        matches = sorted(run_dir(home).glob("chrome-mcp.*.sock"))
+    except OSError:
+        matches = []
+    return matches[0] if matches else chrome_mcp_socket(home, 9222)
+
+
+# meiva:note
 # Best-effort: ask the browser-mcp service of `home` to close this agent's pages.
 #
 # Called after an agent's termination commits so a terminated worker does not
@@ -103,17 +115,10 @@ async def _release_roundtrip(sock: str, agent_id: int) -> bool:
 # the service's page TTL sweep (24h by default).
 async def release_agent_chrome_pages(agent_id: int, home: Path) -> bool:
     try:
-        from base.config import settings
-        from base.paths import chrome_mcp_socket
-
-        if settings.has_domain("services"):
-            return await asyncio.wait_for(
-                _release_roundtrip(
-                    str(chrome_mcp_socket(home, settings.services.browser_cdp_port)), agent_id
-                ),
-                timeout=_RELEASE_TIMEOUT_S,
-            )
-        return False
+        return await asyncio.wait_for(
+            _release_roundtrip(str(_chrome_socket(home)), agent_id),
+            timeout=_RELEASE_TIMEOUT_S,
+        )
     except (OSError, TimeoutError):
         return False
 

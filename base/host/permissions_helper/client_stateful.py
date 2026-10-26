@@ -7,7 +7,7 @@ error: the clipboard text may be a secret, and a held button must be traceable b
 
 from __future__ import annotations
 
-from typing import Any
+from typing import Literal, overload
 
 from .wire import (
     ClipboardReadResult,
@@ -24,7 +24,24 @@ class StatefulCalls:
     They sit apart only to keep the client module within the file budget: each one rides the
     client's own `call` and `require_capability`."""
 
-    def call(self, method: str, **args: object) -> Any:
+    @overload
+    def call(self, method: Literal["mouse_down"], **args: object) -> MouseDownResult: ...
+
+    @overload
+    def call(self, method: Literal["mouse_up"], **args: object) -> MouseUpResult: ...
+
+    @overload
+    def call(
+        self, method: Literal["mouse_release_all"], **args: object
+    ) -> MouseReleaseAllResult: ...
+
+    @overload
+    def call(self, method: Literal["clipboard_read"], **args: object) -> ClipboardReadResult: ...
+
+    @overload
+    def call(self, method: Literal["clipboard_write"], **args: object) -> ClipboardWriteResult: ...
+
+    def call(self, method: str, **args: object) -> object:
         raise NotImplementedError
 
     def require_capability(self, capability: str, use: str) -> None:

@@ -7,7 +7,7 @@ Directory cards and the live tree have their own bounded read contract in
 from __future__ import annotations
 
 from collections.abc import Mapping
-from datetime import UTC, datetime
+from datetime import datetime
 from typing import Any, TypeGuard
 from uuid import UUID
 
@@ -225,8 +225,22 @@ def _model_of_pins(pins: dict[str, Any], *, catalog: ModelCatalog, default_model
     return resolve_available_model(pins.get("llm_model") or default_model, models=catalog.models)
 
 
+# meiva:note
+# Read the current UTC timestamp from the database session.
+def _db_now(cur: psycopg.Cursor[Any]) -> datetime:
+    cur.execute("SELECT clock_timestamp()")
+    row = cur.fetchone()
+    if row is None or not isinstance(row[0], datetime):
+        raise RuntimeError("clock_timestamp() did not return a timestamp")
+    return row[0]
+
+
 def _row_to_snapshot(
-    row: tuple[Any, ...], *, catalog: ModelCatalog | None, default_model: str
+    row: tuple[Any, ...],
+    *,
+    catalog: ModelCatalog | None,
+    default_model: str,
+    now: datetime,
 ) -> AgentSnapshot:
     supports_vision = agent_supports_vision(
         row[15], row[21], catalog=catalog, default_model=default_model
@@ -257,7 +271,7 @@ def _row_to_snapshot(
                 host_online=row[17],
                 probe_at=row[16],
                 admission_at=row[18],
-                now=datetime.now(UTC),
+                now=now,
                 launch_failure=(row[19], row[20]),
             ),
         }
@@ -273,12 +287,17 @@ def select_one(
 ) -> AgentSnapshot | None:
     """Look up a single agent's snapshot; returns None when the row does not exist."""
     with conn.cursor() as cur:
+        now = _db_now(cur)
         cur.execute(
             f"SELECT {_FULL_COLS} {_FROM} WHERE a.id = %s {_GROUP}",
             (agent_id,),
         )
         row = cur.fetchone()
-    return _row_to_snapshot(row, catalog=catalog, default_model=default_model) if row else None
+    return (
+        _row_to_snapshot(row, catalog=catalog, default_model=default_model, now=now)
+        if row
+        else None
+    )
 
 
 def agent_model_target(

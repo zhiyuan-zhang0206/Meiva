@@ -9,13 +9,11 @@
 
 from __future__ import annotations
 
-from collections.abc import Callable
 from datetime import UTC, datetime, timedelta
 from typing import Any
 from unittest.mock import MagicMock
 
 import pytest
-from langchain_core.messages import AIMessage
 from psycopg_pool import AsyncConnectionPool
 
 from base.agents.history.hierarchy.chunks import (
@@ -27,14 +25,14 @@ from base.agents.history.hierarchy.chunks import (
     finish_job,
     write_group_nodes,
 )
-from base.agents.history.hierarchy.group import Group, GroupCall, OpenNode
+from base.agents.history.hierarchy.group import Group
 from base.agents.history.hierarchy.rebuild import (
     claim_rebuild,
     finish_rebuild,
     rebuild_pending,
     release_rebuild,
 )
-from base.config import settings
+from base.config import ConfigBoot
 from base.config.service_read import ConfigAuthority
 from base.db import Database
 from base.lm.catalog import ModelCatalog
@@ -43,7 +41,10 @@ from base.telemetry.tests.capture.event_capture import EmittedEvents
 from services.agent_runner.understanding import chunk_consumer as loop
 from services.agent_runner.understanding import group_consumer as gc
 from services.agent_runner.understanding.rebuild import run_rebuild
-from services.agent_runner.understanding.tests.consumer_helpers import consumer_config
+from services.agent_runner.understanding.tests.consumer_helpers import (
+    GroupModels,
+    consumer_config,
+)
 
 AGENT = 7
 
@@ -86,33 +87,24 @@ async def _enqueue_rebuild(pool: AsyncConnectionPool, agent: int = AGENT) -> int
 
 
 @pytest.fixture
-def _groups(monkeypatch: pytest.MonkeyPatch, model_catalog: ModelCatalog) -> list[list[int]]:
-    """Grouping checks of five open nodes (no decay), closing the first three; each ask is recorded."""
-    monkeypatch.setattr(settings.agent, "understanding_group_check_open", 5)
-    monkeypatch.setattr(settings.agent, "understanding_group_check_decay", 1)
-    monkeypatch.setattr(settings.agent, "understanding_group_model", "deepseek-flash")
-    monkeypatch.setattr(gc, "MIN_CHECK_OPEN", 1)
-    asked: list[list[int]] = []
+def config() -> ConfigBoot:
+    return consumer_config()
 
-    def generate(
-        _llm: object,
-        nodes: list[OpenNode],
-        *,
-        model: str,
-        catalog: ModelCatalog,
-        agent_id: int,
-        on_call: Callable[[GroupCall], None] | None = None,
-        **_kw: object,
-    ) -> list[Group]:
-        assert catalog is model_catalog
-        assert agent_id == AGENT
-        assert on_call is not None
-        asked.append([n.id for n in nodes])
-        on_call(GroupCall(0, model, "prompt", AIMessage(content="r"), 5.0, None, None))
-        return [Group(nodes[0].id, nodes[2].id, f"group of {nodes[0].id}")]
 
-    monkeypatch.setattr(gc, "generate_groups", generate)
-    return asked
+@pytest.fixture
+def _groups(config: ConfigBoot, model_catalog: ModelCatalog) -> dict[str, Any]:
+    # meiva:note
+    # Grouping checks of five open nodes (no decay), closing the first three; each ask is recorded.
+    config.set_field("understanding_group_check_open", 5)
+    config.set_field("understanding_group_check_decay", 1)
+    config.set_field("understanding_group_model", "deepseek-flash")
+    config.set_field("understanding_group_corrections", 0)
+    state: dict[str, Any] = {
+        "asked": [],
+        "reply": lambda nodes: [Group(nodes[0][0], nodes[2][0], f"group of {nodes[0][0]}")],
+    }
+    state["models"] = GroupModels(model_catalog, state)
+    return state
 
 
 async def _tree(pool: AsyncConnectionPool) -> list[tuple[Any, ...]]:
@@ -125,7 +117,7 @@ async def _tree(pool: AsyncConnectionPool) -> list[tuple[Any, ...]]:
 
 
 async def test_the_rebuild_replays_leaves_in_order_and_replaces_the_old_upper_levels(
-    aops_pool: AsyncConnectionPool, _groups: list[list[int]], *, model_catalog: ModelCatalog
+    aops_pool: AsyncConnectionPool, _groups: dict[str, Any], *, config: ConfigBoot
 ) -> None:
     leaves = [await _leaf(aops_pool, i) for i in range(12)]
     stale = await _leaf(aops_pool, 50, depth=2)
@@ -142,9 +134,10 @@ async def test_the_rebuild_replays_leaves_in_order_and_replaces_the_old_upper_le
         await run_rebuild(
             aops_pool,
             MagicMock(),
-            MagicMock(catalog=model_catalog),
+            _groups["models"],
             AGENT,
-            config=consumer_config(),
+            config=config,
+            min_check_open=1,
         )
         == 12
     )
@@ -152,7 +145,7 @@ async def test_the_rebuild_replays_leaves_in_order_and_replaces_the_old_upper_le
     # meiva:note
     # Each check saw only the leaves that had "landed" by then (the replay horizon), though all
     # twelve exist: the first five; then, with two left open and five more arrived, seven.
-    assert _groups == [leaves[:5], leaves[3:10]]
+    assert _groups["asked"] == [leaves[:5], leaves[3:10]]
     # meiva:note
     # Non-overlapping parents whose range is their children's: three leaves each.
     assert await _tree(aops_pool) == [(2, 0, 29, 3), (2, 30, 59, 3)]
@@ -171,22 +164,22 @@ async def test_the_rebuild_replays_leaves_in_order_and_replaces_the_old_upper_le
 
 
 async def test_rebuilding_twice_gives_the_same_tree(
-    aops_pool: AsyncConnectionPool, _groups: list[list[int]], *, model_catalog: ModelCatalog
+    aops_pool: AsyncConnectionPool, _groups: dict[str, Any], *, config: ConfigBoot
 ) -> None:
     for i in range(12):
         await _leaf(aops_pool, i)
     await run_rebuild(
-        aops_pool, MagicMock(), MagicMock(catalog=model_catalog), AGENT, config=consumer_config()
+        aops_pool, MagicMock(), _groups["models"], AGENT, config=config, min_check_open=1
     )
     once = await _tree(aops_pool)
     await run_rebuild(
-        aops_pool, MagicMock(), MagicMock(catalog=model_catalog), AGENT, config=consumer_config()
+        aops_pool, MagicMock(), _groups["models"], AGENT, config=config, min_check_open=1
     )
     assert await _tree(aops_pool) == once and len(once) == 2
 
 
 async def test_a_rebuild_touches_only_its_own_agent(
-    aops_pool: AsyncConnectionPool, _groups: list[list[int]], *, model_catalog: ModelCatalog
+    aops_pool: AsyncConnectionPool, _groups: dict[str, Any], *, config: ConfigBoot
 ) -> None:
     for i in range(6):
         await _leaf(aops_pool, i)
@@ -198,7 +191,7 @@ async def test_a_rebuild_touches_only_its_own_agent(
         " 'm', 'group-0.1', 'p', 1) RETURNING id",
     )
     await run_rebuild(
-        aops_pool, MagicMock(), MagicMock(catalog=model_catalog), AGENT, config=consumer_config()
+        aops_pool, MagicMock(), _groups["models"], AGENT, config=config, min_check_open=1
     )
     assert await _rows(aops_pool, "SELECT 1 FROM understanding_nodes WHERE id = %s", other[0][0])
 
@@ -268,20 +261,12 @@ async def test_a_rebuild_handed_back_waits_out_the_spacing_and_one_rebuild_runs_
 
 async def test_the_consumer_runs_a_claimed_rebuild_and_settles_it(
     aops_pool: AsyncConnectionPool,
-    monkeypatch: pytest.MonkeyPatch,
     *,
     config_authority: ConfigAuthority,
     model_catalog: ModelCatalog,
 ) -> None:
-    ran: list[int] = []
-
-    async def fake_rebuild(
-        _pool: object, _db: object, _models: object, agent: int, **_kw: object
-    ) -> int:
-        ran.append(agent)
-        return 7
-
-    monkeypatch.setattr(loop, "run_rebuild", fake_rebuild)
+    for i in range(7):
+        await _leaf(aops_pool, i)
     rebuild_id = await _enqueue_rebuild(aops_pool)
     await loop.Consumer(
         aops_pool,
@@ -289,10 +274,9 @@ async def test_the_consumer_runs_a_claimed_rebuild_and_settles_it(
         [],
         catalog=model_catalog,
         keys=inert_keys(model_catalog),
-        llm_override=config_authority.runtime.lm.llm_override,
+        llm_override=config_authority.service_field_value("llm_override"),
         config=consumer_config(),
     ).run_until_idle()
-    assert ran == [AGENT]
     assert await _rows(
         aops_pool, "SELECT status, leaves FROM understanding_rebuilds WHERE id = %s", rebuild_id
     ) == [("done", 7)]
@@ -317,7 +301,7 @@ async def test_a_failing_rebuild_is_retried_then_failed(
         [],
         catalog=model_catalog,
         keys=inert_keys(model_catalog),
-        llm_override=config_authority.runtime.lm.llm_override,
+        llm_override=config_authority.service_field_value("llm_override"),
         config=consumer_config(),
     )
     for attempt in (1, 2, 3):
@@ -360,17 +344,17 @@ async def _open_before_parented(pool: AsyncConnectionPool) -> list[tuple[Any, ..
 
 async def test_a_leaf_landing_before_a_grouped_one_is_reported_and_only_a_queued_rebuild_closes_it(
     aops_pool: AsyncConnectionPool,
-    _groups: list[list[int]],
+    _groups: dict[str, Any],
     emitted_events: EmittedEvents,
     *,
-    model_catalog: ModelCatalog,
+    config: ConfigBoot,
 ) -> None:
     # meiva:note
     # The later segment lands first and is grouped; the earlier one arrives afterwards.
     for i in range(5, 10):
         await _land(aops_pool, i)
     await gc.run_group_checks(
-        aops_pool, MagicMock(), MagicMock(catalog=model_catalog), AGENT, config=consumer_config()
+        aops_pool, MagicMock(), _groups["models"], AGENT, config=config, min_check_open=1
     )
     # meiva:note
     # in order so far
@@ -389,26 +373,27 @@ async def test_a_leaf_landing_before_a_grouped_one_is_reported_and_only_a_queued
 
     await _rows(aops_pool, "INSERT INTO understanding_rebuilds (agent_id) VALUES (%s)", AGENT)
     await run_rebuild(
-        aops_pool, MagicMock(), MagicMock(catalog=model_catalog), AGENT, config=consumer_config()
+        aops_pool, MagicMock(), _groups["models"], AGENT, config=config, min_check_open=1
     )
     assert await _open_before_parented(aops_pool) == []
 
 
 async def test_leaves_landing_in_order_queue_no_rebuild(
     aops_pool: AsyncConnectionPool,
-    _groups: list[list[int]],
+    _groups: dict[str, Any],
     emitted_events: EmittedEvents,
     *,
-    model_catalog: ModelCatalog,
+    config: ConfigBoot,
 ) -> None:
     for i in range(10):
         await _land(aops_pool, i)
         await gc.run_group_checks(
             aops_pool,
             MagicMock(),
-            MagicMock(catalog=model_catalog),
+            _groups["models"],
             AGENT,
-            config=consumer_config(),
+            config=config,
+            min_check_open=1,
         )
     assert await _rows(aops_pool, "SELECT 1 FROM understanding_rebuilds") == []
     # meiva:note

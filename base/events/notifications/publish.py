@@ -3,7 +3,7 @@ from __future__ import annotations
 import logging
 from collections.abc import Mapping
 from dataclasses import dataclass
-from datetime import UTC, datetime
+from datetime import datetime
 from typing import Any, Protocol
 
 import psycopg
@@ -52,18 +52,15 @@ def _record(
     dedupe_key: str | None,
     agent_id: int,
     overrides: dict[str, bool] | None,
-    now: datetime | None,
-    inputs: tuple[dict[str, bool], datetime | None],
+    inputs: tuple[dict[str, bool], datetime | None, datetime],
     catalog: Mapping[str, NotificationCategory] | None = None,
 ) -> tuple[NotificationCategory, tuple[Any, ...]] | None:
     declared = category(category_id, catalog)
     if not subject.strip():
         raise ValueError(f"notification {declared.id} needs a subject")
-    stored_overrides, last = inputs
+    stored_overrides, last, now = inputs
     switches = stored_overrides if overrides is None else overrides
-    decision = decide(
-        declared, overrides=switches, last_same_key_at=last, now=now or datetime.now(UTC)
-    )
+    decision = decide(declared, overrides=switches, last_same_key_at=last, now=now)
     if not decision.deliver:
         _log.debug("notification %s suppressed: %s", declared.id, decision.reason)
         return None
@@ -96,7 +93,6 @@ def deliver_in_transaction(
     dedupe_key: str | None = None,
     agent_id: int = 0,
     overrides: dict[str, bool] | None = None,
-    now: datetime | None = None,
     catalog: Mapping[str, NotificationCategory] | None = None,
 ) -> NotificationRecord | None:
     declared = category(category_id, catalog)
@@ -109,7 +105,6 @@ def deliver_in_transaction(
         dedupe_key=dedupe_key,
         agent_id=agent_id,
         overrides=overrides,
-        now=now,
         inputs=inputs,
         catalog=catalog,
     )
@@ -137,7 +132,6 @@ def deliver_sync(
     dedupe_key: str | None = None,
     agent_id: int = 0,
     overrides: dict[str, bool] | None = None,
-    now: datetime | None = None,
     catalog: Mapping[str, NotificationCategory] | None = None,
 ) -> NotificationRecord | None:
     with write_transaction(pool) as conn:
@@ -150,7 +144,6 @@ def deliver_sync(
             dedupe_key=dedupe_key,
             agent_id=agent_id,
             overrides=overrides,
-            now=now,
             catalog=catalog,
         )
 

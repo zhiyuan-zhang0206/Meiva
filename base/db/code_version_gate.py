@@ -129,6 +129,12 @@ class ProcessDbGate:
         if version < minimum:
             _refuse(version, minimum, process=self._process)
 
+    # meiva:note
+    # Shift the recorded read timestamp backward so tests can advance the refresh window without patching `time`.
+    def age_last_read(self, seconds: float) -> None:
+        if self._last_read_at is not None:
+            self._last_read_at -= seconds
+
     def application_name(self) -> str:
         """Name the process image; an exempt CLI never resolves a Git version."""
         if self._exempt:

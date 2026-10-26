@@ -197,7 +197,7 @@ const dateFormat: DateFormat = rawDateFormat === "absolute" || rawDateFormat ===
   const timeIso = timeMode === "spawned" ? agent.spawned_at : agent.last_active_at;
   const absTime = dateFormat === "absolute"
     ? formatShort(timeIso)
-    : formatRelativeTime(timeIso);
+    : formatRelativeTime(timeIso, new Date());
   const indentPx = depth * INDENT;
 
   const submit = () => {

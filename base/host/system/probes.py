@@ -139,13 +139,13 @@ def browser_capable(
     )
 
 
-def permissions_helper_incapability(*, host: Host) -> str | None:
+def permissions_helper_incapability(*, host: Host, has_display: bool = True) -> str | None:
     if host.platform.system == "darwin":
         if host.which("swiftc") is None:
             return "no swiftc (install the Xcode command line tools)"
         if host.which("codesign") is None:
             return "no codesign (install the Xcode command line tools)"
-        if not display_available(host=host):
+        if not (has_display and display_available(host=host)):
             return "no display (the permissions helper drives an on-screen desktop)"
         return None
     return "macOS only (permissions helper drives the desktop)"

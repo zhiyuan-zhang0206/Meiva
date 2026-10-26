@@ -64,7 +64,7 @@ _EPOCH = datetime(2000, 1, 1, tzinfo=UTC)
 
 
 def event_rows(
-    conn: psycopg.Connection[Any], tails: dict[int, datetime], until: datetime | None
+    conn: psycopg.Connection[Any], tails: dict[int, datetime], until: datetime
 ) -> list[_Row]:
     """The `llm_usage` rows of `telemetry_events` from each agent's tail start to `until`."""
     if not tails:
@@ -72,7 +72,7 @@ def event_rows(
     agent_ids = sorted(tails)
     rows = conn.execute(
         _EVENT_SQL.encode(),
-        (agent_ids, [tails[a] for a in agent_ids], until or datetime.now(tz=UTC)),
+        (agent_ids, [tails[a] for a in agent_ids], until),
     ).fetchall()
     return [
         (

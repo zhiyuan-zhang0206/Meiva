@@ -117,7 +117,7 @@ export function formatUptime(seconds: number): string {
 // meiva:link ui/web/src/lib/format/docs/time.meiva.okf.md
 export function formatRelative(
   iso: string,
-  now: Date = new Date(),
+  now: Date,
   { capitalize = false }: { capitalize?: boolean } = {},
 ): string {
   const t = new Date(iso).getTime();

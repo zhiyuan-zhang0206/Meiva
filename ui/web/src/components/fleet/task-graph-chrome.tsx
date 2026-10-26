@@ -94,14 +94,14 @@ export function TaskHoverCard({
         <MetaRow label={t("meta.createdBy")}>{creator}</MetaRow>
         <MetaRow label={t("meta.parent")}>{parentTitle ?? "—"}</MetaRow>
         <MetaRow label={t("meta.reminder")}>{reminder}</MetaRow>
-        <MetaRow label={t("meta.created")}>{formatRelative(task.created_at, undefined, { capitalize: true })}</MetaRow>
-        <MetaRow label={t("meta.updated")}>{formatRelative(task.updated_at, undefined, { capitalize: true })}</MetaRow>
+        <MetaRow label={t("meta.created")}>{formatRelative(task.created_at, new Date(), { capitalize: true })}</MetaRow>
+        <MetaRow label={t("meta.updated")}>{formatRelative(task.updated_at, new Date(), { capitalize: true })}</MetaRow>
       </div>
 
       {task.reminder_count > 0 || task.last_reminded_at != null ? (
         <p className="mt-1.5 text-[10px] text-muted-foreground/70">
           {t("reminders", { count: task.reminder_count })}
-          {task.last_reminded_at != null ? ` · ${t("lastReminder", { time: formatRelative(task.last_reminded_at) })}` : ""}
+          {task.last_reminded_at != null ? ` · ${t("lastReminder", { time: formatRelative(task.last_reminded_at, new Date()) })}` : ""}
         </p>
       ) : null}
 

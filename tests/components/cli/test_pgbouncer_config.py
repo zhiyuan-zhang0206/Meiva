@@ -10,18 +10,26 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
-from unittest.mock import MagicMock, call
 
 import pytest
+from psycopg.conninfo import conninfo_to_dict
 
+from base.cluster import provision_database
 from base.cluster.dataplane.direct_url import ClusterDirectUrl
+from base.cluster.dataplane.pg_admin import owner_conninfo, pg_admin_url
 from base.cluster.machine import MachineIdentityReader
 from base.cluster.machine.configured import ConfiguredMachineIdentity
 from base.cluster.machine.tests.identity import machine_identity as machine_identity
-from base.config import settings
 from base.db import Database, DbConfig, connections
 from base.db.code_version_gate import ProcessDbGate
+from base.host.net.url_secret import url_with_port
 from cli.commands.data_plane import pgbouncer
+from cli.commands.data_plane.tests.data_plane_records import data_plane_config as data_plane_config
+from cli.commands.lifecycle.tests.start_storage.owned_postgres import (
+    owned_pg as owned_pg,
+)
+from cli.database.tests.command_inputs import command_runtime as command_runtime
+from tests.path_scoped.cli_tests import operator_database as operator_database
 
 
 def _shape(machine: MachineIdentityReader, db_name: str) -> pgbouncer.PoolerShape:
@@ -139,41 +147,48 @@ def test_render_ini_binds_loopback_never_all_interfaces(
 
 @pytest.mark.parametrize("remote", [False, True])
 def test_backup_defaults_to_a_direct_dump_source(
-    monkeypatch: pytest.MonkeyPatch, remote: bool
+    owned_pg: int, unit_home: Path, database_gate: ProcessDbGate, remote: bool
 ) -> None:
     """The explicit plane reader selects either provider or local owner authority."""
     from services.backup import dump as backup
 
-    database = MagicMock(spec=Database)
-    database.direct_url.return_value = "postgresql://provider:5432/meiva"
-    authority = MagicMock()
-    authority.verified_conninfo.return_value = "host=/owner/socket dbname=meiva"
-    local_owner = MagicMock(return_value=authority)
-    monkeypatch.setattr(backup, "local_owner_authority", local_owner)
+    provision_database(
+        "meiva", base_admin_url=pg_admin_url(owned_pg), expected_data_dir=unit_home / "pg"
+    )
+    plane_url = f"postgresql://meiva@127.0.0.1:{owned_pg}/meiva"
+    database = Database(
+        DbConfig(
+            db_url=plane_url,
+            db_sslmode="disable",
+            db_pool_min_size=1,
+            db_pool_max_size=2,
+            pgbouncer_enabled=True,
+        ),
+        gate=database_gate,
+        direct_url=lambda _cfg: connections.DirectResolution(
+            url="postgresql://provider:5432/meiva", is_direct=True
+        ),
+    )
 
-    result = backup.dump_source(database, is_remote=remote, plane_url=settings.data_plane.db_url)
+    result = backup.dump_source(database, is_remote=remote, plane_url=plane_url)
 
     if remote:
         assert result == "postgresql://provider:5432/meiva"
-        database.direct_url.assert_called_once_with()
-        local_owner.assert_not_called()
     else:
-        assert result == "host=/owner/socket dbname=meiva"
-        local_owner.assert_called_once_with(settings.data_plane.db_url, remote_plane=False)
-        authority.verified_conninfo.assert_called_once_with()
-        database.direct_url.assert_not_called()
+        assert result == owner_conninfo(pg_admin_url(owned_pg), database="meiva", owner="meiva")
 
 
 @pytest.mark.parametrize("direct", [False, True])
 def test_base_db_connect_and_pool_dial_one_url_with_direct_escape(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, direct: bool
+    tmp_path: Path, db_url: str, database_gate: ProcessDbGate, direct: bool
 ) -> None:
     """Dial the access URL or its recorded direct port with pooling-safe policy."""
     import base.db
-    from base.db import connections
 
+    real_port = int(str(conninfo_to_dict(db_url)["port"]))
+    configured_url = url_with_port(db_url, 1) if direct else db_url
     config = DbConfig(
-        db_url="postgresql://user:password@127.0.0.1:6433/meiva",
+        db_url=configured_url,
         db_sslmode="disable",
         db_pool_min_size=1,
         db_pool_max_size=2,
@@ -183,70 +198,50 @@ def test_base_db_connect_and_pool_dial_one_url_with_direct_escape(
         json.dumps(
             {
                 "record": {
-                    "ports": {"pgbouncer": 6433, "postgres": 5433},
+                    "ports": {
+                        "pgbouncer": 1 if direct else real_port,
+                        "postgres": real_port if direct else 1,
+                    },
                     "gateway_home": str(tmp_path),
                     "created_at": "2026-01-01T00:00:00Z",
                 }
             }
         )
     )
-    gate = MagicMock(spec=ProcessDbGate)
-    gate.application_name.return_value = "pgbouncer-contract-test"
-    gate.min_read_due.return_value = False
-    conn = MagicMock()
-    dial = MagicMock(return_value=conn)
-    make_pool = MagicMock()
-    monkeypatch.setattr(connections.psycopg, "connect", dial)
-    monkeypatch.setattr(connections, "ConnectionPool", make_pool)
-    expected_url = config.db_url.replace(":6433/", ":5433/") if direct else config.db_url
-
     resolver = ClusterDirectUrl(lambda: "127.0.0.1", home=tmp_path)
 
-    assert base.db.connect(config=config, gate=gate, direct=direct, direct_url=resolver) is conn
-    assert dial.call_args.args == (expected_url,)
-    assert dial.call_args.kwargs["prepare_threshold"] is None
+    with base.db.connect(
+        config=config, gate=database_gate, direct=direct, direct_url=resolver
+    ) as conn:
+        assert conn.info.port == real_port
+        assert conn.prepare_threshold is None
+        row = conn.execute(
+            "SELECT current_setting('statement_timeout'), current_setting('application_name')"
+        ).fetchone()
+        assert row == ("1min", "" if direct else database_gate.application_name())
+
+    db_pool = base.db.pool(config=config, gate=database_gate, direct=direct, direct_url=resolver)
+    db_pool.open()
+    try:
+        with db_pool.connection() as conn:
+            assert conn.info.port == real_port
+            assert conn.prepare_threshold is None
+            row = conn.execute(
+                "SELECT current_setting('statement_timeout'), current_setting('application_name')"
+            ).fetchone()
+            assert row == ("1min", "" if direct else database_gate.application_name())
+    finally:
+        db_pool.close()
+
     if direct:
-        conn.execute.assert_not_called()
-    else:
-        _assert_session_reset(conn)
-
-    base.db.pool(config=config, gate=gate, direct=direct, direct_url=resolver)
-    assert make_pool.call_args.args == (expected_url,)
-    _assert_pool_hooks(make_pool, conn, direct=direct)
-
-    if direct:
-        dial.reset_mock()
-        base.db.connect(config=config, gate=gate, direct=True, unbounded=True, direct_url=resolver)
-        assert dial.call_args.args == (expected_url,)
-        assert "options" not in dial.call_args.kwargs
-        assert dial.call_args.kwargs["prepare_threshold"] is None
-
-
-def _assert_pool_hooks(make_pool: MagicMock, conn: MagicMock, *, direct: bool) -> None:
-    """Pooled configure/check share the restore contract; direct owners bypass it."""
-    policy = make_pool.call_args.kwargs
-    assert policy["kwargs"]["prepare_threshold"] is None
-    if direct:
-        assert policy["configure"] is None
-        assert policy["check"] is None
-    else:
-        assert policy["configure"] is policy["check"]
-        for hook in (policy["configure"], policy["check"]):
-            conn.reset_mock()
-            hook(conn)
-            _assert_session_reset(conn)
-
-
-# meiva:note
-# A dial and both pool hooks scrub, budget and reapply the statement ceiling.
-def _assert_session_reset(conn: MagicMock) -> None:
-    statement, _budget_ms = connections.restore_budget_statement()
-    assert conn.execute.call_args_list == [
-        call(statement, prepare=False),
-        call(
-            "SELECT set_config('statement_timeout', '60000', false), "
-            "set_config('application_name', %s, false)",
-            ("pgbouncer-contract-test",),
-        ),
-    ]
-    conn.commit.assert_called_once_with()
+        with base.db.connect(
+            config=config,
+            gate=database_gate,
+            direct=True,
+            unbounded=True,
+            direct_url=resolver,
+        ) as conn:
+            assert conn.info.port == real_port
+            assert conn.prepare_threshold is None
+            row = conn.execute("SELECT current_setting('statement_timeout')").fetchone()
+            assert row == ("0",)

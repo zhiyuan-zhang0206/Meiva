@@ -11,10 +11,22 @@ from base.agents.context import MeivaContext
 from base.deploy.release import editable_install
 from base.paths import exec_run_dir, meiva_home
 
-from ._child_boundary import ParentFacts
-from ._result import ExecResult
+from ._child_boundary import ParentFacts, result_from_payload
+from ._result import ExecCrashed, ExecDone, ExecResult
 from ._stream import ExecOutputChunkPublisher
 from ._subprocess import run_in_subprocess
+
+__all__ = [
+    "ExecCrashed",
+    "ExecDone",
+    "ExecProcess",
+    "ExecResult",
+    "ParentFacts",
+    "SubprocessExecProcess",
+    "read_parent_facts",
+    "result_from_payload",
+    "run_in_subprocess",
+]
 
 
 class ExecProcess(Protocol):

@@ -6,7 +6,7 @@ description: Await-chain capture before the existing faulthandler deadline.
 
 # Async test stall diagnostics
 
-`tests/_asyncio_stall_probe.py` walks `cr_await` and `ag_await` because a thread
+`tests/asyncio_stall_probe.py` walks `cr_await` and `ag_await` because a thread
 stack or suspended task's outer frame cannot name every nested await. It writes
 to pytest's faulthandler stash descriptor, duplicated before fd capture. Writing
 to captured fd 2 can hide the diagnostic if the test is killed before playback.

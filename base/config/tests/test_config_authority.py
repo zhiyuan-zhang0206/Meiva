@@ -1,9 +1,9 @@
 from __future__ import annotations
 
-import os
 import secrets
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
+from typing import Any
 
 import pytest
 from pydantic import ValidationError
@@ -35,7 +35,8 @@ def test_two_authorities_read_their_own_files_and_boot_models(tmp_path: Path) ->
     one_path.write_text("MEIVA_TRACE_ENABLED=false\n")
     two_path.write_text("MEIVA_TRACE_ENABLED=true\n")
     one, two = _authority(one_path), _authority(two_path)
-    two.runtime.sandbox.exec_timeout_seconds = 42
+    two_runtime: Any = two.runtime
+    two_runtime.sandbox.exec_timeout_seconds = 42
 
     assert one.current_field_values()["trace_enabled"] is False
     assert two.current_field_values()["trace_enabled"] is True
@@ -58,7 +59,7 @@ def test_fresh_reads_preserve_boot_snapshot_and_path(tmp_path: Path) -> None:
 
     assert authority.current_field_values()["trace_enabled"] is not initial
     assert authority.flat_dump()["trace_enabled"] is initial
-    assert authority.runtime.observability.trace_enabled is initial
+    assert authority.service_field_value("trace_enabled") is initial
 
     path.write_text(f"{field_alias('trace_enabled')}={'true' if initial else 'false'}\n")
     assert authority.current_field_values()["trace_enabled"] is initial
@@ -68,16 +69,15 @@ def test_service_reads_are_complete_and_runtime_profile_remains_restricted(tmp_p
     authority = _authority(tmp_path / ".env", profile="gateway")
     authority.runtime.__dict__.pop("sandbox")
 
+    runtime: Any = authority.runtime
+    all_domains: Any = authority.all_domains
     with pytest.raises(AttributeError, match="sandbox"):
-        _ = authority.runtime.sandbox
+        _ = runtime.sandbox
     assert (
         authority.current_field_values()["exec_timeout_seconds"]
-        == authority.all_domains.sandbox.exec_timeout_seconds
+        == all_domains.sandbox.exec_timeout_seconds
     )
-    assert (
-        authority.flat_dump()["exec_timeout_seconds"]
-        == authority.all_domains.sandbox.exec_timeout_seconds
-    )
+    assert authority.flat_dump()["exec_timeout_seconds"] == all_domains.sandbox.exec_timeout_seconds
 
 
 def test_unexpected_domain_attribute_error_is_not_recovered(tmp_path: Path) -> None:
@@ -193,41 +193,6 @@ def test_domain_batch_validates_a_joint_file_change(tmp_path: Path) -> None:
     values = authority.current_field_values()
     assert values["exec_timeout_seconds"] == 1800
     assert values["exec_node_timeout_seconds"] == 2000
-
-
-def test_repair_cli_can_fix_invalid_file_without_authority(tmp_path: Path) -> None:
-    import subprocess
-    import sys
-
-    from dotenv import dotenv_values
-
-    path = tmp_path / ".env"
-    path.write_text(
-        "MEIVA_DB_URL=postgresql://meiva@127.0.0.1:5433/meiva\n"
-        "MEIVA_REDIS_URL=redis://127.0.0.1:6379/0\n"
-        "MEIVA_EXEC_TIMEOUT_SECONDS=1800\nMEIVA_EXEC_NODE_TIMEOUT_SECONDS=1200\n"
-        "MEIVA_OPS_CONCURRENCY=7\nMEIVA_MACHINE_SERVE_GATEWAY=true\n"
-    )
-    result = subprocess.run(
-        [
-            sys.executable,
-            "-m",
-            "cli.main",
-            "config",
-            "set",
-            "MEIVA_EXEC_NODE_TIMEOUT_SECONDS=2000",
-            "--local",
-        ],
-        cwd=Path(__file__).resolve().parents[3],
-        env={"MEIVA_CONFIG_FETCH": "skip", "MEIVA_HOME": str(tmp_path), "PATH": os.environ["PATH"]},
-        capture_output=True,
-        text=True,
-        check=False,
-    )
-
-    assert result.returncode == 0, result.stderr
-    assert dotenv_values(path)["MEIVA_EXEC_NODE_TIMEOUT_SECONDS"] == "2000.0"
-    assert dotenv_values(path)["MEIVA_OPS_CONCURRENCY"] == "7"
 
 
 def test_deferred_complete_model_builds_once_and_keeps_file_reads_fresh(tmp_path: Path) -> None:

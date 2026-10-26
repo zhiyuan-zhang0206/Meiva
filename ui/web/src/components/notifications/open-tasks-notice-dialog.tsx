@@ -50,7 +50,7 @@ export function OpenTasksNoticeDialog({ notice, onClose }: OpenTasksNoticeDialog
               <span className="shrink-0">{`#${task.id} |`}</span>
               <span className={cn("truncate", MIN_W_0)}>{task.title}</span>
               <span className="shrink-0">
-                {`| ${statusLabel} | ${formatRelativeTime(task.updated_at)}`}
+                {`| ${statusLabel} | ${formatRelativeTime(task.updated_at, new Date())}`}
               </span>
             </li>
           ))}

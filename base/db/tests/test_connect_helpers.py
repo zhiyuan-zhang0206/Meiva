@@ -19,7 +19,6 @@ import logging
 import os
 import subprocess
 import sys
-import types
 from collections.abc import Iterator
 from pathlib import Path
 from typing import Any, NoReturn
@@ -134,27 +133,18 @@ def process_gate(_gated_process: list[int]) -> gate.ProcessDbGate:
 pytestmark = pytest.mark.usefixtures("_gated_process")
 
 
-def _clock(monkeypatch: pytest.MonkeyPatch) -> list[float]:
-    """Replace the gate's clock with a list-backed one the test advances."""
-    now = [1000.0]
-    monkeypatch.setattr(gate, "time", types.SimpleNamespace(monotonic=lambda: now[0]))
-    return now
-
-
 # ── the read schedule ────────────────────────────────────────────────────────
 
 
 def test_the_first_borrow_reads_and_the_next_thirty_seconds_do_not(
     process_gate: gate.ProcessDbGate,
-    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    now = _clock(monkeypatch)
     assert process_gate.min_read_due() is True
     process_gate.observe_minimum(0)
     assert process_gate.min_read_due() is False
-    now[0] += gate.MIN_REFRESH_INTERVAL_S - 0.1
+    process_gate.age_last_read(gate.MIN_REFRESH_INTERVAL_S - 5.0)
     assert process_gate.min_read_due() is False
-    now[0] += 0.1
+    process_gate.age_last_read(5.0)
     assert process_gate.min_read_due() is True
 
 
@@ -260,17 +250,15 @@ class _FakeConn:
 
 def test_the_restore_reads_the_minimum_at_most_every_interval(
     process_gate: gate.ProcessDbGate,
-    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Two statements per borrow, always; the second is the plain statement ceiling
     except on the borrow that also reads the minimum."""
-    now = _clock(monkeypatch)
     conn = _FakeConn(minimum=0)
     restore: Any = connections.restore_pooled_session
 
     restore(conn, gate=process_gate)
     restore(conn, gate=process_gate)
-    now[0] += gate.MIN_REFRESH_INTERVAL_S
+    process_gate.age_last_read(gate.MIN_REFRESH_INTERVAL_S)
     restore(conn, gate=process_gate)
 
     name = (process_gate.application_name(),)
@@ -327,15 +315,14 @@ class _FakeAsyncConn(_FakeConn):
 
 
 async def test_the_async_restore_follows_the_same_schedule_and_verdict(
-    process_gate: gate.ProcessDbGate, monkeypatch: pytest.MonkeyPatch, _gated_process: list[int]
+    process_gate: gate.ProcessDbGate, _gated_process: list[int]
 ) -> None:
-    now = _clock(monkeypatch)
     conn = _FakeAsyncConn(minimum=0)
     restore: Any = connections.restore_pooled_session_async
 
     await restore(conn, gate=process_gate)
     await restore(conn, gate=process_gate)
-    now[0] += gate.MIN_REFRESH_INTERVAL_S
+    process_gate.age_last_read(gate.MIN_REFRESH_INTERVAL_S)
     await restore(conn, gate=process_gate)
 
     name = (process_gate.application_name(),)
@@ -352,7 +339,7 @@ async def test_the_async_restore_follows_the_same_schedule_and_verdict(
     ]
 
     conn.minimum = _VERSION + 1
-    now[0] += gate.MIN_REFRESH_INTERVAL_S
+    process_gate.age_last_read(gate.MIN_REFRESH_INTERVAL_S)
     with pytest.raises(_Exited):
         await restore(conn, gate=process_gate)
     assert _gated_process == [CODE_BEHIND_MINIMUM_EXIT_CODE]
@@ -500,11 +487,9 @@ def test_a_dict_row_pool_borrows_through_the_gate(
 
 async def test_the_async_restore_reads_the_stored_minimum(
     process_gate: gate.ProcessDbGate,
-    monkeypatch: pytest.MonkeyPatch,
     stored_minimum: int,
     _gated_process: list[int],
 ) -> None:
-    now = _clock(monkeypatch)
     _set_minimum(_VERSION)
     restore: Any = connections.restore_pooled_session_async
     async with await psycopg.AsyncConnection.connect(settings.data_plane.db_url) as aconn:
@@ -516,7 +501,7 @@ async def test_the_async_restore_reads_the_stored_minimum(
 
     _set_minimum(_VERSION + 1)
     assert process_gate.min_read_due() is False  # the read above is still fresh
-    now[0] += gate.MIN_REFRESH_INTERVAL_S
+    process_gate.age_last_read(gate.MIN_REFRESH_INTERVAL_S)
     assert process_gate.min_read_due() is True
     async with await psycopg.AsyncConnection.connect(settings.data_plane.db_url) as aconn:
         with pytest.raises(_Exited):
@@ -551,11 +536,9 @@ def test_an_exempt_process_dials_as_the_cli_without_a_version(
 
 
 def test_independent_handles_and_async_restore_share_one_process_budget(
-    monkeypatch: pytest.MonkeyPatch,
     stored_minimum: int,
     _gated_process: list[int],
 ) -> None:
-    now = _clock(monkeypatch)
     owner = gate.ProcessDbGate(version=lambda: _VERSION, process="test-process")
     _set_minimum(_VERSION)
     first = Database.from_settings(gate=owner)
@@ -564,7 +547,7 @@ def test_independent_handles_and_async_restore_share_one_process_budget(
         row = conn.execute("SHOW application_name").fetchone()
         assert row is not None and row[0] == f"meiva:test-process:v{_VERSION}"
     _set_minimum(_VERSION + 1)
-    now[0] += 29.9
+    owner.age_last_read(25.0)
     with second.connect() as conn:
         row = conn.execute("SHOW application_name").fetchone()
         assert row is not None and row[0] == f"meiva:test-process:v{_VERSION}"
@@ -573,20 +556,18 @@ def test_independent_handles_and_async_restore_share_one_process_budget(
         row = conn.execute("SHOW application_name").fetchone()
         assert row is not None and row[0] == f"meiva:test-process:v{_VERSION}"
     assert _gated_process == []
-    now[0] += 0.1
+    owner.age_last_read(5.0)
     with pytest.raises(_Exited):
         first.connect()
     assert _gated_process == [CODE_BEHIND_MINIMUM_EXIT_CODE]
 
 
 async def test_sync_and_async_pool_callbacks_retain_the_same_gate(
-    monkeypatch: pytest.MonkeyPatch,
     stored_minimum: int,
     _gated_process: list[int],
 ) -> None:
     from psycopg_pool import AsyncConnectionPool
 
-    now = _clock(monkeypatch)
     owner = gate.ProcessDbGate(version=lambda: _VERSION, process="test-process")
     _set_minimum(_VERSION)
     first = Database.from_settings(gate=owner).pool(min_size=1, max_size=1)
@@ -598,7 +579,7 @@ async def test_sync_and_async_pool_callbacks_retain_the_same_gate(
         with first.connection() as conn:
             row = conn.execute("SHOW application_name").fetchone()
             assert row is not None and row[0] == f"meiva:test-process:v{_VERSION}"
-        now[0] += 30
+        owner.age_last_read(30.0)
         async with second.connection() as aconn:
             cur = await aconn.execute("SHOW application_name")
             row = await cur.fetchone()
@@ -608,7 +589,7 @@ async def test_sync_and_async_pool_callbacks_retain_the_same_gate(
             row = conn.execute("SHOW application_name").fetchone()
             assert row is not None and row[0] == f"meiva:test-process:v{_VERSION}"
         assert _gated_process == []
-        now[0] += 30
+        owner.age_last_read(30.0)
         with pytest.raises(_Exited), first.connection():
             pass
         assert _gated_process == [CODE_BEHIND_MINIMUM_EXIT_CODE]

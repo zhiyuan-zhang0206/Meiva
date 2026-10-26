@@ -11,7 +11,7 @@ from psycopg_pool import AsyncConnectionPool
 
 from agent.graph.llm_errors import FatalProviderError
 from agent.state import AgentState, CircuitState
-from agent.turn.runloop import _handle_fatal_llm_error
+from agent.turn.runloop import handle_fatal_llm_error
 from base.agents.context import MeivaContext
 from base.agents.tests.units import spawn_agent
 from base.clock import Clock
@@ -82,7 +82,7 @@ async def reject_turn(
     exc: FatalProviderError | None = None,
     database_gate: ProcessDbGate,
 ) -> None:
-    await _handle_fatal_llm_error(
+    await handle_fatal_llm_error(
         exc if exc is not None else permanent_rejection(),
         MeivaContext(
             ops_pool=aops_pool,

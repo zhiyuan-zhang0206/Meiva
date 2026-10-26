@@ -34,7 +34,7 @@ from cli.database.tests.command_inputs import command_runtime as command_runtime
 # meiva:note
 # Run one converge of the operator skill.
 #
-# The tests below that patch the bridge (`rename_no_replace`, `stage_copy`, `verify_marker`,
+# The tests below that patch the bridge (`rename_no_replace`, `stage_copy`,
 # `materialize_source_snapshot`, `uuid4`) reproduce an intruder acting INSIDE one converge, between
 # a check and the effect it guards: a state built before the converge cannot, because the converge
 # re-checks everything at its start. The crash and cleanup scenarios that a built state can
@@ -283,16 +283,8 @@ def test_late_target_during_verification_restore_is_not_replaced_or_disowned(
     target = target_path(client, tmp_path)
     installed_before = read_ledger(context)["installed"]
     (source / "SKILL.md").write_text("operator v2\n")
-    original_verify = bridge.verify_marker
     original_rename = bridge.rename_no_replace
     late_target = False
-
-    def reject_claimed_previous(
-        root: Path, installation_id: str, generation_id: str, *, skill_name: str = SKILL
-    ) -> None:
-        if ".meiva-previous-" in root.name:
-            raise bridge.ClientConflictError("claimed copy changed")
-        original_verify(root, installation_id, generation_id, skill_name=skill_name)
 
     def collide_with_restore(source_path: Path, destination: Path) -> None:
         nonlocal late_target
@@ -301,8 +293,9 @@ def test_late_target_during_verification_restore_is_not_replaced_or_disowned(
             destination.mkdir()
             (destination / "user.txt").write_text("late user target\n")
         original_rename(source_path, destination)
+        if source_path == target and ".meiva-previous-" in destination.name:
+            (destination / ".meiva-managed.json").unlink()
 
-    monkeypatch.setattr(bridge, "verify_marker", reject_claimed_previous)
     monkeypatch.setattr(bridge, "rename_no_replace", collide_with_restore)
 
     _converge(context, host_home=client.parent)
@@ -587,7 +580,6 @@ def test_external_filesystem_failure_is_label_only_and_fail_soft(
 
 def test_cleanup_failure_after_activation_is_retried_without_rollback(
     tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
     operator_database: OperatorDatabaseFactory,
     operator_pipeline: Callable[[], EventPipeline],
@@ -607,19 +599,23 @@ def test_cleanup_failure_after_activation_is_retried_without_rollback(
     _converge(context, host_home=client.parent)
     target = target_path(client, tmp_path)
     (source / "SKILL.md").write_text("operator v2\n")
-    original_rename = bridge.rename_no_replace
-    failed = False
-
-    def fail_previous_once(source_path: Path, destination: Path) -> None:
-        nonlocal failed
-        if f".{SKILL}.meiva-previous-" in source_path.name and not failed:
-            failed = True
-            raise PermissionError("cleanup denied")
-        original_rename(source_path, destination)
-
-    monkeypatch.setattr(bridge, "rename_no_replace", fail_previous_once)
-    _converge(context, host_home=client.parent)
-    monkeypatch.setattr(bridge, "rename_no_replace", original_rename)
+    site = killed.Site(
+        skills_root=client / "skills",
+        ledger_path=context.meiva_home / "configs" / "external-agent-skills" / "codex.json",
+        client_key="codex",
+        skill=SKILL,
+        source=source,
+    )
+    ledger = killed.stage(site)
+    previous = killed.claim_target(site, ledger)
+    killed.record_claim(site, ledger)
+    killed.land_stage(site, ledger)
+    killed.commit(site, ledger, previous)
+    (client / "skills").chmod(0o500)
+    try:
+        _converge(context, host_home=client.parent)
+    finally:
+        (client / "skills").chmod(0o700)
     _converge(context, host_home=client.parent)
     assert (target / "SKILL.md").read_text() == "operator v2\n"
     assert list(target.parent.glob(f".{SKILL}.meiva-*")) == []
@@ -706,7 +702,6 @@ def test_partial_stage_copy_remains_tracked_until_cleanup_finishes(
 
     monkeypatch.setattr(bridge, "materialize_source_snapshot", fail_after_one_entry)
     _converge(context, host_home=client.parent)
-    monkeypatch.setattr(bridge, "materialize_source_snapshot", original_materialize)
 
     _converge(context, host_home=client.parent)
     _converge(context, host_home=client.parent)

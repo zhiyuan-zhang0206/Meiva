@@ -108,9 +108,10 @@ def _caller_chain() -> set[int]:
     protected by the pty-records arm. A transient gap in the chain (a parent
     reaped mid-walk) must not fail the scan.
     """
-    chain = {os.getpid()}
+    proc = psutil.Process()
+    chain = {proc.pid}
     with contextlib.suppress(psutil.NoSuchProcess, psutil.AccessDenied):
-        chain.update(parent.pid for parent in psutil.Process().parents())
+        chain.update(parent.pid for parent in proc.parents())
     return chain
 
 

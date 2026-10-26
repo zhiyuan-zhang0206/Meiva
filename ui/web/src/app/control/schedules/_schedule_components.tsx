@@ -93,7 +93,7 @@ export function ScheduleRow({
           {schedule.description ?? "—"}
         </TableCell>
         <TableCell className="text-xs text-muted-foreground">
-          {formatRelative(schedule.updated_at, undefined, { capitalize: true })}
+          {formatRelative(schedule.updated_at, new Date(), { capitalize: true })}
         </TableCell>
         <TableCell>
           <div className={cn("items-center gap-0.5", FLEX)}>
@@ -262,7 +262,7 @@ function ScheduleDetail({
               <ul className="mt-1 space-y-0.5 text-muted-foreground">
                 {runs.data.map((r) => (
                   <li key={r.id}>
-                    {formatRelative(r.ran_at, undefined, { capitalize: true })} · {r.ok === null ? "…" : r.ok ? "✓" : "✗"}
+                    {formatRelative(r.ran_at, new Date(), { capitalize: true })} · {r.ok === null ? "…" : r.ok ? "✓" : "✗"}
                     {r.note ? ` · ${r.note}` : ""}
                   </li>
                 ))}

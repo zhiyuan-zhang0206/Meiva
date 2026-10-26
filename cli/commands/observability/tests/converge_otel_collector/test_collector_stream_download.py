@@ -32,8 +32,9 @@ def _stream(url: str, dest: Path, limits: artifact.DownloadLimits) -> None:
         timers=SYSTEM_TIMERS,
         open_url=SYSTEM_URL_OPENER,
         limits=limits,
-        deadline=SYSTEM_TIMERS.monotonic() + limits.total_budget_s,
-        progress=artifact.DownloadProgress(),
+        progress=artifact.DownloadProgress(
+            deadline=SYSTEM_TIMERS.monotonic() + limits.total_budget_s
+        ),
     )
 
 
