@@ -9,5 +9,4 @@ exports = ["host_support.py", "hosted_resources.py", "shutdown", "test_resource_
 "test_settlement_reconciles.py" = ["host_support.py"]
 
 [debt.first-party-patch]
-"test_boot_extension_materialize.py#monkeypatch.setattr base.db.connect" = 1
 "test_boot_extension_materialize.py#monkeypatch.setattr base.telemetry.tracing.initialize_tracing" = 1

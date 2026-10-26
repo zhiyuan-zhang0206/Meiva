@@ -249,6 +249,11 @@ class OwnedProcess:
         """
         if not self.live():
             return False
+        return self.signal_pinned(signum)
+
+    # meiva:note
+    # Pin and signal this PID after a liveness check, refusing if its birth changed.
+    def signal_pinned(self, signum: int) -> bool:
         descriptor: int | None = None
         try:
             if _sys_platform() == "linux":

@@ -5,6 +5,7 @@ import subprocess
 import sys
 import threading
 import traceback
+from collections.abc import Iterator, Mapping
 from pathlib import Path
 from typing import Any
 
@@ -123,15 +124,10 @@ def test_enrolled_process_reads_gateway_policy(tmp_path: Path) -> None:
 
 
 @pytest.mark.parametrize("outage", ["refused", "timeout", "hangup", "rate_limited"])
-def test_expected_fetch_failure_retains_the_valid_snapshot(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, outage: str
-) -> None:
+def test_expected_fetch_failure_retains_the_valid_snapshot(tmp_path: Path, outage: str) -> None:
     from base.telemetry import emitter
 
-    def initialize(*_args: Any, **_kwargs: Any) -> None:
-        pytest.fail("a sampling fetch failure must not initialize an event pipeline")
-
-    monkeypatch.setattr(emitter, "init_telemetry", initialize)
+    was_bound = emitter.pipeline_bound()
     snapshot = SamplingPolicy(sampling_enabled=True, sample_every=5)
     env_path = tmp_path / ".env"
     if outage == "refused":
@@ -149,6 +145,7 @@ def test_expected_fetch_failure_retains_the_valid_snapshot(
         with serve_json({}, status=429) as gateway:
             cache = gateway_sampling_owner(gateway.url, env_path, initial=snapshot)
             cache.refresh()
+    assert emitter.pipeline_bound() is was_bound
     assert cache.read() is snapshot
 
 
@@ -259,10 +256,22 @@ def test_refresh_dependency_import_failure_reaches_the_caller(
 
 
 def test_invalid_refresh_dependency_classification_reaches_the_caller(
-    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
 ) -> None:
-    cache = fixed_sampling_owner()
-    monkeypatch.delattr(httpx, "HTTPStatusError")
+    class BrokenEnv(Mapping[str, str]):
+        def __getitem__(self, key: str) -> str:
+            raise AttributeError("HTTPStatusError")
+
+        def __iter__(self) -> Iterator[str]:
+            return iter(())
+
+        def __len__(self) -> int:
+            return 0
+
+    cache = call_policy.SamplingPolicyOwner(
+        initial=SamplingPolicy(),
+        source=SamplingSource(env=BrokenEnv(), env_path=tmp_path / ".env"),
+    )
     cache.refresh()
     with pytest.raises(AttributeError, match="HTTPStatusError"):
         cache.read()

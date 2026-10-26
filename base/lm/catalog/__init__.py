@@ -215,19 +215,7 @@ class CatalogBuilder:
                 raise ProviderRegistrationError(str(exc)) from exc
         try:
             new_prices = {
-                model_id: plugin_model_price(
-                    model_id,
-                    cache_miss=price.cache_miss,
-                    cache_hit=price.cache_hit,
-                    output=price.output,
-                    source_url=price.source_url,
-                    source_checked_at=price.source_checked_at,
-                    vendor=price.vendor,
-                    periods=price.periods,
-                    cache_write_5m=price.cache_write_5m,
-                    cache_write_1h=price.cache_write_1h,
-                    plugin=plugin,
-                )
+                model_id: plugin_model_price(model_id, price, plugin=plugin)
                 for model_id, price in pricing.items()
             }
         except ValueError as exc:
@@ -274,19 +262,7 @@ class CatalogBuilder:
                 )
         try:
             new_prices = {
-                model_id: plugin_model_price(
-                    model_id,
-                    cache_miss=price.cache_miss,
-                    cache_hit=price.cache_hit,
-                    output=price.output,
-                    source_url=price.source_url,
-                    source_checked_at=price.source_checked_at,
-                    vendor=price.vendor,
-                    periods=price.periods,
-                    cache_write_5m=price.cache_write_5m,
-                    cache_write_1h=price.cache_write_1h,
-                    plugin=plugin,
-                )
+                model_id: plugin_model_price(model_id, price, plugin=plugin)
                 for model_id, price in contribution.pricing.items()
             }
         except ValueError as exc:

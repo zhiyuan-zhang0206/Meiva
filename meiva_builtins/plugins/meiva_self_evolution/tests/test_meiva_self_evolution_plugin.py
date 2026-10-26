@@ -10,6 +10,7 @@ from agent.graph.hooks.compact import compact_reminder
 from agent.state import AgentState
 from base.agents.context import MeivaContext
 from base.agents.context.identity import AgentIdentity
+from base.clock import Clock
 from base.config.tests.configuration import defaults
 from base.host.env.agent_slices import AgentSlices
 from base.packages.plugin_providers import build_model_catalog
@@ -36,6 +37,7 @@ def _runtime(slices: AgentSlices) -> Runtime[MeivaContext]:
             agent=slices,
             catalog=build_model_catalog(),
             extensions=ExtensionRegistry((("meiva_self_evolution", agent_runtime.contribute()),)),
+            clock_factory=Clock.from_settings,
         )
     )
 

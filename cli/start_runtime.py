@@ -51,7 +51,9 @@ class StartRuntime:
     # its identity. Raises `LoadedRuntimeError` (a `ValueError`) when it is not.
     @classmethod
     def admit(cls, checkout: Path) -> StartRuntime:
-        loaded = runtime_interpreter.verify_loaded_source(checkout)
+        loaded = runtime_interpreter.verify_loaded_source(
+            checkout, loaded=runtime_interpreter.loaded_runtime()
+        )
         return cls(checkout, checkout, Path(sys.executable).absolute(), loaded)
 
     # meiva:note

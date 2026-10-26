@@ -34,7 +34,7 @@ import logging
 import os
 import signal
 import sys
-from collections.abc import Callable, Collection, Coroutine, Iterable
+from collections.abc import Awaitable, Callable, Collection, Coroutine, Iterable
 from functools import partial
 from pathlib import Path
 from uuid import uuid4
@@ -69,11 +69,7 @@ from base.cluster.machine import MachineIdentityReader
 from base.cluster.machine.configured import ConfiguredMachineIdentity
 from base.config import ConfigBoot
 from base.daemon.endpoints import ServiceEndpoint, ServiceEndpoints
-from base.daemon.health import (
-    Liveness,
-    start_health_server,
-    stop_health_server,
-)
+from base.daemon.health import Liveness, start_health_server, stop_health_server
 from base.daemon.shutdown import cancel_and_drain, install_graceful_shutdown
 from base.db import Database
 from base.db.code_version_gate import ProcessDbGate
@@ -107,7 +103,7 @@ from .lifecycle.configuration import (
     load_installation,
     pool_bounds,
 )
-from .lifecycle.graceful_exit import serve_until_exit, write_exit_restart
+from .lifecycle.graceful_exit import OwedRestart, serve_until_exit, write_exit_restart
 from .lifecycle.instance import release_instance_lock, take_instance_lock
 from .pooled_checkpoint import PooledPostgresSaver
 from .pools import build_control_pool, build_shared_pool
@@ -123,8 +119,11 @@ def _endpoint() -> ServiceEndpoint:
     return ServiceEndpoints.from_settings().of("agent_host")
 
 
-def _pidfile() -> Path:
+def pidfile_path() -> Path:
     return _endpoint().pidfile
+
+
+_pidfile = pidfile_path
 
 
 def _claim_pidfile() -> None:
@@ -284,11 +283,7 @@ async def beat_forever(
         else:
             beat_failures = 0
         published = await publish_turn_progress_heartbeat(
-            bus,
-            machine,
-            scheduler.active_agents,
-            host.turn_progress,
-            timeout_s=publish_timeout_s,
+            bus, machine, scheduler.active_agents, host.turn_progress, timeout_s=publish_timeout_s
         )
         if published and not heartbeat_ok:
             host_log.warning("[agent-host] turn-progress heartbeat publish recovered")
@@ -312,27 +307,6 @@ async def ownership_beat_completion(
         liveness, host, scheduler, machine, bus, read_alert_seconds=read_alert_seconds
     )
     return None
-
-
-async def _start_ownership_beat(
-    liveness: Liveness,
-    host: AgentHost,
-    scheduler: TurnScheduler,
-    machine: str,
-    bus: EventBus,
-    *,
-    read_alert_seconds: Callable[[], float],
-) -> tuple[asyncio.TaskGroup, asyncio.Task[Exception | None]]:
-    """Enter the service-owned heartbeat group before boot settlement starts."""
-    tasks = asyncio.TaskGroup()
-    await tasks.__aenter__()
-    beat = tasks.create_task(
-        ownership_beat_completion(
-            liveness, host, scheduler, machine, bus, read_alert_seconds=read_alert_seconds
-        ),
-        name="host-ownership-heartbeat",
-    )
-    return tasks, beat
 
 
 async def stop_ownership_beat(beat: asyncio.Task[Exception | None] | None) -> None:
@@ -521,33 +495,22 @@ def boot_handles(
     return build_shared_pool(db, bounds), build_control_pool(db, bounds), bus, db
 
 
-async def _dispatch_host(
-    host: AgentHost,
-    scheduler: TurnScheduler,
-    control_pool: AsyncConnectionPool[psycopg.AsyncConnection],
-    db: Database,
-    bus: EventBus,
-    *,
-    installation: Installation,
-    config: ConfigBoot,
-    plugins_root: Path,
+# meiva:note
+# Run dispatcher siblings, joined before the owned heartbeat and turn drain.
+async def run_dispatcher_group(
+    loops: dict[str, Coroutine[object, object, None]],
+    dispatch: Coroutine[object, object, None],
 ) -> None:
-    """Run dispatcher siblings, joined before the owned heartbeat and turn drain."""
-    async with asyncio.TaskGroup() as background:
-        for name, loop in background_loops(
-            control_pool, db, installation=installation, config=config, plugins_root=plugins_root
-        ).items():
-            background.create_task(loop, name=name)
-        await InboundWakeDispatcher(
-            bus,
-            scheduler,
-            pending_scan=host.pending_inbound_wakes,
-            scan_interval_s=float(config.view.agent.db_notify_wait_timeout_seconds),
-            subscription_read_timeout_s=float(config.view.agent.db_notify_wait_timeout_seconds),
-        ).run()
-        # The dispatcher runs until cancelled; a return would leave the
-        # group waiting on loops that never end, hanging the stop.
-        raise RuntimeError("wake dispatcher exited without cancellation")
+    try:
+        async with asyncio.TaskGroup() as background:
+            for name, loop in loops.items():
+                background.create_task(loop, name=name)
+            await dispatch
+            # meiva:note
+            # The dispatcher runs until cancelled; a return would leave the group waiting on loops that never end.
+            raise RuntimeError("wake dispatcher exited without cancellation")
+    finally:
+        dispatch.close()
 
 
 def _state_gated_loader() -> Callable[..., object]:
@@ -556,6 +519,64 @@ def _state_gated_loader() -> Callable[..., object]:
     from meiva.sdk_surface.extensions import load_extensions
 
     return partial(load_extensions, validate_state=plugin_state_schema)
+
+
+# meiva:note
+# Enter the service-owned heartbeat group, settle boot, open health and serve until exit.
+async def serve_host_lifecycle(
+    host: AgentHost,
+    scheduler: TurnScheduler,
+    workload_pool: AsyncConnectionPool[psycopg.AsyncConnection],
+    control_pool: AsyncConnectionPool[psycopg.AsyncConnection],
+    installation: Installation,
+    *,
+    beat_coro: Coroutine[object, object, Exception | None],
+    settle_coro: Coroutine[object, object, Collection[int]],
+    open_health: Coroutine[object, object, asyncio.Server],
+    serve_dispatch: Coroutine[object, object, None],
+    write_restart: Callable[[int], Awaitable[OwedRestart]],
+    clients: ClientSet | None = None,
+    instance_lock: int | None = None,
+) -> None:
+    beat: asyncio.Task[Exception | None] | None = None
+    beat_tasks: asyncio.TaskGroup | None = None
+    health: asyncio.Server | None = None
+    try:
+        beat_tasks = asyncio.TaskGroup()
+        await beat_tasks.__aenter__()
+        beat = beat_tasks.create_task(beat_coro, name="host-ownership-heartbeat")
+        settled = await settle_coro
+        logger.info("hosted boot settle: settled {n} stale running row(s)", n=len(settled))
+        health = await open_health
+        logger.info("hosted agent-runner started", event="host_started")
+        try:
+            await serve_until_exit(
+                serve_dispatch,
+                turns=scheduler,
+                progress=host.turn_progress,
+                write_restart=write_restart,
+            )
+        finally:
+            try:
+                await _close_host_runtime(host, scheduler, beat, beat_tasks)
+            finally:
+                beat = beat_tasks = None
+    finally:
+        for coro in (beat_coro, settle_coro, open_health, serve_dispatch):
+            coro.close()
+        await close_process_owners(
+            host,
+            workload_pool,
+            control_pool,
+            installation,
+            health,
+            beat,
+            beat_tasks,
+            clients=clients,
+            instance_lock=instance_lock,
+            primary=sys.exception(),
+        )
+        host_log.info("[agent-host] daemon stopped")
 
 
 async def run(
@@ -573,18 +594,13 @@ async def run(
     _claim_pidfile()
 
     from agent.graph import build_graph  # pyright: ignore[reportUnknownVariableType]
-    from agent.process_boot import (
-        init_process_scope,
-        land_cluster_extensions,
-        process_trace_config,
-    )
+    from agent.process_boot import init_process_scope, land_cluster_extensions, process_trace_config
 
     workload_pool, control_pool, bus, db = boot_handles(database(), config)
     liveness = Liveness(_LIVENESS_TIMEOUT_S)
-    beat: asyncio.Task[Exception | None] | None = None
-    beat_tasks: asyncio.TaskGroup | None = None
-    health, installation = None, None
+    installation: Installation | None = None
     host: AgentHost | None = None
+    handed_off = False
     try:
         if on_clients_owned is not None:
             on_clients_owned()
@@ -631,83 +647,69 @@ async def run(
             clock=stamping.clock,
         )
         host.bind_wake(scheduler.wake)
-        # The service owns the group across boot settle and turn drain. The
-        # heartbeat's retained completion is raised only at the existing join.
-        beat_tasks, beat = await _start_ownership_beat(
-            liveness,
+        endpoint = _endpoint()
+        wait_s = float(config.view.agent.db_notify_wait_timeout_seconds)
+        handed_off = True
+        await serve_host_lifecycle(
             host,
             scheduler,
-            local_machine,
-            bus,
-            read_alert_seconds=lambda: config.view.daemon.host_admission_wait_alert_seconds,
-        )
-        settled = await settle_running_rows_at_start(control_pool, local_machine)
-        logger.info("hosted boot settle: settled {n} stale running row(s)", n=len(settled))
-
-        endpoint = _endpoint()
-        health = await start_health_server(
-            "agent_host",
-            endpoint.health_port,
-            image=process_context.loaded_code_image(),
-            liveness=liveness,
-            extra_routes={
-                ("GET", "/stats"): stats_route(host, scheduler, pid=os.getpid()),
-                ("POST", "/cancel-turn"): cancel_turn_route(scheduler),
-            },
-        )
-        logger.info(
-            "hosted agent-runner started on :{port} "
-            "(max concurrent turns {bound}, database pools {workload}/{control})",
-            event="host_started",
-            port=endpoint.health_port,
-            bound=config.view.daemon.host_max_concurrent_turns or "unlimited",
-            workload=workload_pool.max_size,
-            control=control_pool.max_size,
-        )
-        # One TaskGroup owns the loops beside the dispatcher: a loop that
-        # raises cancels the dispatcher and its siblings, and the exception
-        # leaves `run` so the process exits for `meiva-root` to restart it. The
-        # group exits, every loop joined, before the runtime drains turns.
-        # meiva:note
-        # A SIGTERM cancels the group the same way, then drains turns at their
-        # restart before the runtime cancels whatever is left.
-        # meiva:link services/agent_runner/agent_host/lifecycle/docs/graceful-exit.meiva.okf.md
-        try:
-            await serve_until_exit(
-                _dispatch_host(
-                    host,
-                    scheduler,
+            workload_pool,
+            control_pool,
+            installation,
+            beat_coro=ownership_beat_completion(
+                liveness,
+                host,
+                scheduler,
+                local_machine,
+                bus,
+                read_alert_seconds=lambda: config.view.daemon.host_admission_wait_alert_seconds,
+            ),
+            settle_coro=settle_running_rows_at_start(control_pool, local_machine),
+            open_health=start_health_server(
+                "agent_host",
+                endpoint.health_port,
+                image=process_context.loaded_code_image(),
+                liveness=liveness,
+                extra_routes={
+                    ("GET", "/stats"): stats_route(host, scheduler, pid=os.getpid()),
+                    ("POST", "/cancel-turn"): cancel_turn_route(scheduler),
+                },
+            ),
+            serve_dispatch=run_dispatcher_group(
+                background_loops(
                     control_pool,
                     db,
-                    bus,
                     installation=installation,
                     config=config,
                     plugins_root=external_plugin_read_root(),
                 ),
-                turns=scheduler,
-                progress=host.turn_progress,
-                write_restart=partial(write_exit_restart, db, bus),
-            )
-        finally:
-            try:
-                await _close_host_runtime(host, scheduler, beat, beat_tasks)
-            finally:
-                beat = None  # Runtime cleanup attempted its join even when another stage failed.
-                beat_tasks = None
-    finally:
-        await close_process_owners(
-            host,
-            workload_pool,
-            control_pool,
-            installation,
-            health,
-            beat,
-            beat_tasks,
+                InboundWakeDispatcher(
+                    bus,
+                    scheduler,
+                    pending_scan=host.pending_inbound_wakes,
+                    scan_interval_s=wait_s,
+                    subscription_read_timeout_s=wait_s,
+                ).run(),
+            ),
+            write_restart=partial(write_exit_restart, db, bus),
             clients=clients,
             instance_lock=instance_lock,
-            primary=sys.exception(),
         )
-        host_log.info("[agent-host] daemon stopped")
+    finally:
+        if not handed_off:
+            await close_process_owners(
+                host,
+                workload_pool,
+                control_pool,
+                installation,
+                None,
+                None,
+                None,
+                clients=clients,
+                instance_lock=instance_lock,
+                primary=sys.exception(),
+            )
+            host_log.info("[agent-host] daemon stopped")
 
 
 def require_helper_parent_chain() -> None:

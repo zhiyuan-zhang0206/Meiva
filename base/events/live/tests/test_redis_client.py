@@ -500,7 +500,7 @@ def _reset_acl_log() -> None:
 def _acl_denied_attempts(user: str, command: str) -> int:
     admin = mod.open_sync_redis(settings.data_plane.redis_url, decode_responses=True)
     try:
-        entries: list[dict[str, str | int]] = admin.execute_command("ACL", "LOG")
+        entries: Any = admin.execute_command("ACL", "LOG")
     finally:
         admin.close()
     total = 0

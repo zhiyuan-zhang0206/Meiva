@@ -16,6 +16,3 @@ exports = ["bringup.py", "cluster_instance.py", "completion.py", "config.py", "h
 [purity]
 "__init__.py" = "strict"
 "stop_budget.py" = "strict"
-
-[roots]
-"completion.py" = { kinds = ["environ"], why = "Publishes adopted gateway database login into process environment for subsequent start phases" }

@@ -6,7 +6,6 @@ exports = ["fakes.py", "lost_ack.py", "swallowed_cancel.py"]
 "test_swallowed_cancel.py" = ["swallowed_cancel.py"]
 
 [debt.first-party-patch]
-"fakes.py#monkeypatch.setattr base.db.Database" = 1
 "test_connect_helpers.py#monkeypatch.setattr base.db.code_version_gate.time" = 1
 "test_database_handle.py#monkeypatch.setattr base.db.connections.psycopg.connect" = 1
 

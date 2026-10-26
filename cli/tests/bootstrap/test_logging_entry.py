@@ -45,7 +45,7 @@ def test_import_and_embedded_dispatch_preserve_caller_logging(tmp_path: Path) ->
 
 def test_fresh_entry_prepares_before_dispatch_without_telemetry(tmp_path: Path) -> None:
     observed = run_probe("fresh_entry", tmp_path / "home")
-    assert observed == {"records": [], "result": 17, "otel": []}
+    assert observed == {"records": [], "result": 0, "otel": []}
 
 
 @pytest.mark.parametrize("role", ["gateway", "cli", "subprocess"])

@@ -6,6 +6,3 @@ exports = []
 "test_load_report.py" = ["plugin_boundary.py"]
 "test_service_config_snapshot.py" = ["plugin_boundary.py", "plugin_boundary_child.py"]
 "test_config_boot_race.py" = ["config_boot_child.py"]
-
-[debt.first-party-patch]
-"test_load_report.py#monkeypatch.setattr base.telemetry.emit" = 1

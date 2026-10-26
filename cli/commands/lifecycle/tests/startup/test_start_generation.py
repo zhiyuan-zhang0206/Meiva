@@ -88,7 +88,7 @@ def test_generation_binds_configuration_omitted_from_transport(tmp_path: Path) -
 
 
 def test_loaded_source_identity_is_explicit_and_changes_with_source(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    tmp_path: Path,
 ) -> None:
     from base.host import runtime_interpreter
 
@@ -111,20 +111,16 @@ def test_loaded_source_identity_is_explicit_and_changes_with_source(
         ],
         check=True,
     )
-    monkeypatch.setattr(
-        runtime_interpreter,
-        "loaded_runtime",
-        lambda: (tmp_path / ".venv", tmp_path / "python", tmp_path, False),
-    )
-    before = runtime_interpreter.verify_loaded_source(tmp_path)
+    loaded = (tmp_path / ".venv", tmp_path / "python", tmp_path, False)
+    before = runtime_interpreter.verify_loaded_source(tmp_path, loaded=loaded)
     assert before.kind == "source" and before.code_root == str(tmp_path)
     assert before.source_digest and before.artifact_digest is None
     member.write_text("value = 2\n")
-    assert runtime_interpreter.verify_loaded_source(tmp_path) != before
+    assert runtime_interpreter.verify_loaded_source(tmp_path, loaded=loaded) != before
     other = tmp_path / "foreign"
     other.mkdir()
     with pytest.raises(ValueError, match="canonical checkout"):
-        runtime_interpreter.verify_loaded_source(other)
+        runtime_interpreter.verify_loaded_source(other, loaded=loaded)
 
 
 def test_loaded_verifier_imports_without_settings() -> None:

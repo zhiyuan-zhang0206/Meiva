@@ -15,18 +15,14 @@ import signal
 import subprocess
 import sys
 from asyncio.constants import THREAD_JOIN_TIMEOUT
-from functools import partial
+from collections.abc import Coroutine
 from pathlib import Path
 from typing import Any, cast
-from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from base.agents.sdk.call_policy import SamplingPolicyOwner
-from base.cluster.machine import MachineFacts
+from base.agents.observation.turn_progress import TurnProgress
 from base.cluster.machine.tests.identity import machine_identity as machine_identity
-from base.config import ConfigBoot
-from base.db import Database
 from base.db.code_version_gate import ProcessDbGate
 from base.host.tests.daemon_shutdown import (
     EXIT_BOUND_S,
@@ -36,11 +32,7 @@ from base.host.tests.daemon_shutdown import (
 from base.native_process.code_version import CodeVersion
 from base.native_process.loaded_commit import LoadedCommit
 from base.telemetry import process_name
-from meiva.sdk_surface.installation import Installation
-
-
-def _note_pidfile_removed(events: list[str], _path: object) -> None:
-    events.append("pidfile_removed")
+from services.agent_runner.agent_host.lifecycle.graceful_exit import OwedRestart
 
 
 def _describe(exc: BaseException) -> str:
@@ -52,7 +44,7 @@ def _describe(exc: BaseException) -> str:
 
 async def _beat_for_shutdown(
     events: list[str], failure: str, *_args: object, **_kwargs: object
-) -> None:
+) -> Exception | None:
     try:
         events.append("beat_started")
         if failure in {"heartbeat", "heartbeat_boot"}:
@@ -61,6 +53,7 @@ async def _beat_for_shutdown(
         await asyncio.Event().wait()
     finally:
         events.append("beat_stopped")
+    return None
 
 
 async def _dispatch_for_shutdown(events: list[str], failure: str) -> None:
@@ -84,12 +77,6 @@ async def _sigterm_and_keep_serving() -> None:
     await asyncio.Event().wait()
 
 
-def _shutdown_config() -> ConfigBoot:
-    config = ConfigBoot()
-    config.boot()
-    return config
-
-
 def _assert_boot_primary(exc: BaseException, failure: str) -> None:
     if failure == "heartbeat_boot":
         assert isinstance(exc, asyncio.CancelledError)
@@ -100,8 +87,8 @@ def exercise_shutdown(failure: str, home: Path) -> None:
     """Run real signal/asyncio unwinding in a disposable child interpreter."""
     image = LoadedCommit.capture()
     version = CodeVersion(image)
-    database_gate = ProcessDbGate(version=version.get, process=process_name(), exempt=False)
-    _run_shutdown(failure, database_gate=database_gate, home=home)
+    _ = ProcessDbGate(version=version.get, process=process_name(), exempt=False)
+    _run_shutdown(failure, home=home)
 
 
 async def _install_plugin_soon(root: Path) -> None:
@@ -110,9 +97,96 @@ async def _install_plugin_soon(root: Path) -> None:
     (root / "alpha" / "plugin.py").write_text("x = 1\n", encoding="utf-8")
 
 
-def _run_shutdown(failure: str, *, database_gate: ProcessDbGate, home: Path) -> None:
+async def _settle_for_shutdown(events: list[str], failure: str) -> list[int]:
+    if failure == "heartbeat_boot":
+        for _ in range(4):
+            await asyncio.sleep(0)
+        events.append("boot_continued")
+        raise ValueError("boot settlement stopped independently")
+    await asyncio.sleep(0)
+    assert "beat_started" in events
+    events.append("boot_settled")
+    return []
+
+
+class _SamplingRecorder:
+    def __init__(self, events: list[str]) -> None:
+        self._events = events
+
+    def close(self) -> bool:
+        self._events.append("sampling_stopped")
+        return True
+
+
+class _InstallationHandle:
+    def __init__(self, events: list[str]) -> None:
+        self.sampling = _SamplingRecorder(events)
+
+
+class _PoolRecorder:
+    def __init__(self, events: list[str], *, pidfile: Path, record_close: bool) -> None:
+        self._events = events
+        self._pidfile = pidfile
+        self._record_close = record_close
+
+    async def close(self) -> None:
+        assert self._pidfile.exists()
+        if self._record_close:
+            await asyncio.sleep(0)
+            self._events.append("pools_closed")
+
+
+class _HealthRecorder:
+    def __init__(self, events: list[str]) -> None:
+        self._events = events
+
+    def close(self) -> None:
+        return None
+
+    async def wait_closed(self) -> None:
+        await asyncio.sleep(0)
+        self._events.append("health_closed")
+
+
+class _HostRecorder:
+    def __init__(self, events: list[str]) -> None:
+        self._events = events
+        self.resources_joined = True
+        self.turn_progress = TurnProgress()
+
+    async def aclose(self, *, resource_deadline: float | None = None) -> None:
+        _ = resource_deadline
+        await asyncio.sleep(0)
+        self._events.append("owner_released")
+
+
+class _SchedulerRecorder:
+    def __init__(self, events: list[str]) -> None:
+        self._events = events
+
+    def task_for(self, agent_id: int) -> asyncio.Task[None] | None:
+        _ = agent_id
+        return None
+
+    def stop_admission(self) -> frozenset[int]:
+        return frozenset()
+
+    async def aclose(self) -> None:
+        await asyncio.sleep(0)
+        self._events.append("turns_drained")
+
+
+async def _noop_restart(agent_id: int) -> OwedRestart:
+    _ = agent_id
+    return OwedRestart(0, written=False)
+
+
+async def _open_health_recorder(events: list[str]) -> asyncio.Server:
+    return cast(asyncio.Server, _HealthRecorder(events))
+
+
+def _run_shutdown(failure: str, *, home: Path) -> None:
     """Run real signal/asyncio unwinding in a disposable child interpreter."""
-    from agent import graph, process_boot
     from services.agent_runner.agent_host import daemon
 
     events: list[str] = []
@@ -120,8 +194,6 @@ def _run_shutdown(failure: str, *, database_gate: ProcessDbGate, home: Path) -> 
     async def record(name: str, **_kwargs: object) -> None:
         await asyncio.sleep(0)
         events.append(name)
-
-    beat = partial(_beat_for_shutdown, events, failure)
 
     async def background(*_args: object) -> None:
         try:
@@ -135,22 +207,7 @@ def _run_shutdown(failure: str, *, database_gate: ProcessDbGate, home: Path) -> 
             await _sigterm_and_keep_serving()
         raise ValueError("background failed")
 
-    dispatch = partial(_dispatch_for_shutdown, events, failure)
-
-    async def settle(*_args: object, **_kwargs: object) -> list[int]:
-        if failure == "heartbeat_boot":
-            for _ in range(4):
-                await asyncio.sleep(0)
-            events.append("boot_continued")
-            raise ValueError("boot settlement stopped independently")
-        await asyncio.sleep(0)
-        assert "beat_started" in events
-        events.append("boot_settled")
-        return []
-
-    def loops(
-        *_args: Any, installation: Installation, config: ConfigBoot, plugins_root: Path
-    ) -> dict[str, Any]:
+    def loops(plugins_root: Path) -> dict[str, Coroutine[object, object, None]]:
         if failure == "plugin":
             # meiva:note
             # The watcher sees a plugin appear under its directory and raises the restart signal.
@@ -162,73 +219,48 @@ def _run_shutdown(failure: str, *, database_gate: ProcessDbGate, home: Path) -> 
         failing = {} if failure in {"dispatcher_returns", "heartbeat"} else {"failed": fail()}
         return {**failing, "sibling": background()}
 
-    host = MagicMock(aclose=partial(record, "owner_released"))
-    scheduler = MagicMock(aclose=partial(record, "turns_drained"))
-    workload, control = MagicMock(), MagicMock()
+    async def serve_dispatch(plugins_root: Path) -> None:
+        await daemon.run_dispatcher_group(
+            loops(plugins_root),
+            _dispatch_for_shutdown(events, failure),
+        )
 
-    async def close_pools(*_args: object) -> None:
-        await record("pools_closed")
-
-    async def close_health(*_args: object) -> None:
-        await record("health_closed")
-
-    def close_sampling(owner: SamplingPolicyOwner) -> bool:
-        events.append("sampling_stopped")
-        return owner.stop()
-
-    with (
-        patch.object(SamplingPolicyOwner, "close", close_sampling),
-        patch.multiple(
-            process_boot,
-            init_process_scope=MagicMock(),
-            land_cluster_extensions=MagicMock(),
-        ),
-        patch.object(graph, "build_graph", return_value=MagicMock()),
-        patch.multiple(
-            daemon,
-            acquire_pidfile=MagicMock(return_value=True),
-            remove_pidfile=MagicMock(side_effect=partial(_note_pidfile_removed, events)),
-            build_shared_pool=MagicMock(return_value=workload),
-            build_control_pool=MagicMock(return_value=control),
-            open_host_pools=AsyncMock(),
-            close_host_pools=close_pools,
-            build_checkpointer=AsyncMock(),
-            AgentHost=MagicMock(return_value=host),
-            TurnScheduler=MagicMock(return_value=scheduler),
-            beat_forever=beat,
-            settle_running_rows_at_start=settle,
-            start_health_server=AsyncMock(return_value=object()),
-            stop_health_server=close_health,
-            background_loops=loops,
-            rotate_stdout_log_forever=background,
-            InboundWakeDispatcher=MagicMock(return_value=MagicMock(run=dispatch)),
-        ),
-    ):
-        daemon.install_graceful_shutdown("agent_host_test")
+    pidfile = daemon.pidfile_path()
+    assert daemon.acquire_pidfile(pidfile, "services.agent_runner.agent_host.daemon")
+    workload = _PoolRecorder(events, pidfile=pidfile, record_close=True)
+    control = _PoolRecorder(events, pidfile=pidfile, record_close=False)
+    installation = _InstallationHandle(events)
+    host = _HostRecorder(events)
+    scheduler = _SchedulerRecorder(events)
+    daemon.install_graceful_shutdown("agent_host_test")
+    try:
         try:
-            machine = MachineFacts.of(
-                name="shutdown-test",
-                role=frozenset({"agent-runner"}),
-                host="localhost",
-                description=None,
-            )
             asyncio.run(
-                daemon.run(
-                    config=_shutdown_config(),
-                    database=lambda: Database.from_settings(gate=database_gate),
-                    machine=machine,
-                    home=home,
+                daemon.serve_host_lifecycle(
+                    cast(Any, host),
+                    cast(Any, scheduler),
+                    cast(Any, workload),
+                    cast(Any, control),
+                    cast(Any, installation),
+                    beat_coro=_beat_for_shutdown(events, failure),
+                    settle_coro=_settle_for_shutdown(events, failure),
+                    open_health=_open_health_recorder(events),
+                    serve_dispatch=serve_dispatch(home / "plugins"),
+                    write_restart=_noop_restart,
                 )
             )
-        except (
-            KeyboardInterrupt,
-            asyncio.CancelledError,
-            ExceptionGroup,
-            RuntimeError,
-            ValueError,
-        ) as exc:
-            _assert_boot_primary(exc, failure)
-            events.append(_describe(exc))
+        finally:
+            if not pidfile.exists():
+                events.append("pidfile_removed")
+    except (
+        KeyboardInterrupt,
+        asyncio.CancelledError,
+        ExceptionGroup,
+        RuntimeError,
+        ValueError,
+    ) as exc:
+        _assert_boot_primary(exc, failure)
+        events.append(_describe(exc))
     print(json.dumps(events))  # noqa: T201 -- child result protocol
 
 

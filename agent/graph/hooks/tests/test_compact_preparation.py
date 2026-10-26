@@ -13,6 +13,7 @@ from agent.hooks import Hook, make_hook_runner
 from agent.messages import inbound_message
 from agent.state import AgentState, CompactState
 from base.agents.context import MeivaContext
+from base.clock import Clock
 from base.config.tests.configuration import defaults
 from base.host.env.agent_slices import AgentSlices
 from base.lm.catalog import ModelCatalog
@@ -36,6 +37,7 @@ def _runtime(
             ),
             catalog=build_model_catalog(),
             extensions=extensions,
+            clock_factory=Clock.from_settings,
         )
     )
 

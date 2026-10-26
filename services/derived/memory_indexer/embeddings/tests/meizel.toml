@@ -4,10 +4,3 @@ exports = ["test_embeddings.py"]
 "test_embeddings.py" = ["billing_child.py"]
 "embeddings" = ["test_embeddings.py"]
 "test_explicit_inputs.py" = ["test_embeddings.py"]
-
-[debt.first-party-patch]
-"test_embeddings.py#monkeypatch.setattr base.lm.usage.log_usage_fields" = 2
-"test_embeddings.py#monkeypatch.setattr services.derived.memory_indexer.embeddings.gemini.post_attempt_once" = 1
-
-[debt.third-party-patch]
-"test_embeddings.py#monkeypatch.setattr httpx.AsyncClient" = 5

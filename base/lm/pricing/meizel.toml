@@ -1,4 +1,4 @@
-exports = ["cache_writes.py"]
+exports = ["cache_writes.py", "catalog.py"]
 
 [uses]
 "__init__.py" = ["catalog.py"]
@@ -14,8 +14,3 @@ exports = ["cache_writes.py"]
 [debt.impure-call]
 "__init__.py#Path.read_text" = 1
 "__init__.py#datetime.now" = 1
-
-[debt.wide-params]
-"__init__.py#def cost_usd" = 1
-"__init__.py#def plugin_model_price" = 1
-"__init__.py#def quote" = 1

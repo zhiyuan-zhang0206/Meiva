@@ -10,12 +10,14 @@ Covers `agent/hooks/repair.py`: the shared helper and the before_llm hook, which
 is the only repair pass (there is no boot-time pass).
 """
 
+from datetime import UTC, datetime
 from typing import Any, cast
 
 import pytest
 from langchain_core.messages import AIMessage, AnyMessage, HumanMessage, ToolMessage
 from langchain_core.messages.modifier import RemoveMessage
 from langgraph.graph.message import REMOVE_ALL_MESSAGES, add_messages
+from langgraph.runtime import Runtime
 
 from agent.graph.hooks.framework import framework_hooks
 from agent.hooks import repair as repair_module
@@ -25,7 +27,12 @@ from agent.hooks.repair import (
     repair_dangling_tool_pairing,
     unpaired_tool_calls,
 )
+from base.agents.context import MeivaContext
 from base.agents.messages.kwargs import ExecStatus
+from base.clock import Clock
+
+_CREATED_AT = datetime(2026, 10, 1, tzinfo=UTC)
+_RUNTIME = Runtime(context=MeivaContext(clock_factory=Clock.from_settings))
 
 
 def _ai_tool_use(*ids: str) -> AIMessage:
@@ -57,20 +64,23 @@ def _interrupted_tool_result(tool_call_id: str, message_id: str) -> ToolMessage:
 
 
 def test_no_repair_for_empty_history() -> None:
-    assert dangling_tool_pairing_repairs([]) == []
+    assert dangling_tool_pairing_repairs([], created_at=_CREATED_AT) == []
 
 
 def test_no_repair_when_tail_is_paired_tool_message() -> None:
     msgs = [_ai_tool_use("c1"), ToolMessage(content="out", tool_call_id="c1")]
-    assert dangling_tool_pairing_repairs(msgs) == []
+    assert dangling_tool_pairing_repairs(msgs, created_at=_CREATED_AT) == []
 
 
 def test_no_repair_when_tail_is_human() -> None:
-    assert dangling_tool_pairing_repairs([HumanMessage(content="hi")]) == []
+    assert dangling_tool_pairing_repairs([HumanMessage(content="hi")], created_at=_CREATED_AT) == []
 
 
 def test_no_repair_when_ai_has_no_tool_calls() -> None:
-    assert dangling_tool_pairing_repairs([AIMessage(content="just text")]) == []
+    assert (
+        dangling_tool_pairing_repairs([AIMessage(content="just text")], created_at=_CREATED_AT)
+        == []
+    )
 
 
 def test_interleaved_result_is_valid_no_repair() -> None:
@@ -81,7 +91,7 @@ def test_interleaved_result_is_valid_no_repair() -> None:
         ToolMessage(content="out", tool_call_id="c1"),
     ]
     assert redundant_tool_results(messages) == []
-    assert dangling_tool_pairing_repairs(messages) == []
+    assert dangling_tool_pairing_repairs(messages, created_at=_CREATED_AT) == []
 
 
 def test_repair_tolerates_empty_tool_call_id_and_drops_other_orphan() -> None:
@@ -97,7 +107,7 @@ def test_repair_tolerates_empty_tool_call_id_and_drops_other_orphan() -> None:
     orphan = ToolMessage(content="stale", tool_call_id="other", id="t-orphan")
     messages: list[AnyMessage] = [empty_id_use, empty_id_result, orphan]
 
-    repairs = dangling_tool_pairing_repairs(messages)
+    repairs = dangling_tool_pairing_repairs(messages, created_at=_CREATED_AT)
 
     assert redundant_tool_results(messages) == [2]
     rebuilt = _full_rebuild(repairs)
@@ -115,7 +125,7 @@ def test_duplicate_results_drop_all_but_tail_real() -> None:
     real = ToolMessage(content="real output", tool_call_id="c1", id="t-real")
     messages: list[AnyMessage] = [use, synthetic, later, real]
 
-    repairs = dangling_tool_pairing_repairs(messages)
+    repairs = dangling_tool_pairing_repairs(messages, created_at=_CREATED_AT)
 
     assert repairs
     rebuilt = _full_rebuild(repairs)
@@ -130,9 +140,9 @@ def test_duplicate_results_drop_a_synthetic_after_a_real() -> None:
     """Synthetic content loses to a real result even when it is positioned later."""
     use = _ai_tool_use("c1")
     real = ToolMessage(content="real output", tool_call_id="c1", id="t-real")
-    synthetic = _full_rebuild(dangling_tool_pairing_repairs([use]))[-1]
+    synthetic = _full_rebuild(dangling_tool_pairing_repairs([use], created_at=_CREATED_AT))[-1]
 
-    repairs = dangling_tool_pairing_repairs([use, real, synthetic])
+    repairs = dangling_tool_pairing_repairs([use, real, synthetic], created_at=_CREATED_AT)
 
     assert repairs
     assert _full_rebuild(repairs) == [use, real]
@@ -144,7 +154,7 @@ def test_double_real_results_keep_last() -> None:
     first = ToolMessage(content="first output", tool_call_id="c1", id="t-first")
     last = ToolMessage(content="last output", tool_call_id="c1", id="t-last")
 
-    repairs = dangling_tool_pairing_repairs([use, first, last])
+    repairs = dangling_tool_pairing_repairs([use, first, last], created_at=_CREATED_AT)
 
     assert repairs
     assert _full_rebuild(repairs) == [use, last]
@@ -155,7 +165,7 @@ def test_synthetic_only_result_is_kept() -> None:
     use = _ai_tool_use("c1")
     synthetic = _interrupted_tool_result("c1", "t-synthetic")
 
-    assert dangling_tool_pairing_repairs([use, synthetic]) == []
+    assert dangling_tool_pairing_repairs([use, synthetic], created_at=_CREATED_AT) == []
 
 
 def test_duplicate_synthetic_results_keep_last() -> None:
@@ -164,7 +174,7 @@ def test_duplicate_synthetic_results_keep_last() -> None:
     first = _interrupted_tool_result("c1", "t-first")
     last = _interrupted_tool_result("c1", "t-last")
 
-    repairs = dangling_tool_pairing_repairs([use, first, last])
+    repairs = dangling_tool_pairing_repairs([use, first, last], created_at=_CREATED_AT)
 
     assert repairs
     assert _full_rebuild(repairs) == [use, last]
@@ -172,7 +182,7 @@ def test_duplicate_synthetic_results_keep_last() -> None:
 
 def test_repairs_single_dangling_tool_use_at_tail() -> None:
     original = _ai_tool_use("call_abc")
-    rebuilt = _full_rebuild(dangling_tool_pairing_repairs([original]))
+    rebuilt = _full_rebuild(dangling_tool_pairing_repairs([original], created_at=_CREATED_AT))
     assert rebuilt[0] is original
     assert isinstance(rebuilt[1], ToolMessage)
     assert rebuilt[1].tool_call_id == "call_abc"
@@ -181,7 +191,7 @@ def test_repairs_single_dangling_tool_use_at_tail() -> None:
 
 def test_repairs_every_dangling_tool_call_at_tail() -> None:
     original = _ai_tool_use("c1", "c2")
-    rebuilt = _full_rebuild(dangling_tool_pairing_repairs([original]))
+    rebuilt = _full_rebuild(dangling_tool_pairing_repairs([original], created_at=_CREATED_AT))
     assert rebuilt[0] is original
     assert [r.tool_call_id for r in rebuilt[1:]] == ["c1", "c2"]
 
@@ -189,7 +199,9 @@ def test_repairs_every_dangling_tool_call_at_tail() -> None:
 def test_partially_paired_tail_appends_only_missing() -> None:
     original = _ai_tool_use("c1", "c2")
     existing = ToolMessage(content="out", tool_call_id="c1")
-    rebuilt = _full_rebuild(dangling_tool_pairing_repairs([original, existing]))
+    rebuilt = _full_rebuild(
+        dangling_tool_pairing_repairs([original, existing], created_at=_CREATED_AT)
+    )
     assert rebuilt[:2] == [original, existing]
     assert rebuilt[0] is original
     assert rebuilt[1] is existing
@@ -205,7 +217,7 @@ def test_buried_dangling_rebuilds_with_inserted_tool_result() -> None:
         HumanMessage(content="[system] You have been restarted by yourself"),
         HumanMessage(content="[system] Task #26 has not been updated in 1.6h"),
     ]
-    repairs = dangling_tool_pairing_repairs(msgs)
+    repairs = dangling_tool_pairing_repairs(msgs, created_at=_CREATED_AT)
     rebuilt = _full_rebuild(repairs)
     assert len(rebuilt) == len(msgs) + 1
     # synthetic tool_result lands immediately after the dangling AIMessage
@@ -221,7 +233,7 @@ def test_buried_partial_pairing_inserts_after_existing_tool_run() -> None:
         ToolMessage(content="out", tool_call_id="c1"),
         HumanMessage(content="later chat"),
     ]
-    repairs = dangling_tool_pairing_repairs(msgs)
+    repairs = dangling_tool_pairing_repairs(msgs, created_at=_CREATED_AT)
     rebuilt = _full_rebuild(repairs)
     # synthetic c2 result inserted after the existing ToolMessage run, before the chat
     assert [type(m).__name__ for m in rebuilt] == [
@@ -246,7 +258,7 @@ def test_rebuild_applies_through_real_add_messages_reducer() -> None:
     msgs[1].id = "a1"
     merged = cast(
         "list[AnyMessage]",
-        add_messages(msgs, dangling_tool_pairing_repairs(msgs)),  # type: ignore[arg-type]
+        add_messages(msgs, dangling_tool_pairing_repairs(msgs, created_at=_CREATED_AT)),  # type: ignore[arg-type]
     )
     assert [type(m).__name__ for m in merged] == [
         "HumanMessage",
@@ -268,7 +280,7 @@ def test_orphan_tool_result_at_tail_rebuilds_and_drops_it_through_reducer() -> N
     orphan = ToolMessage(content="stale output", tool_call_id="orphan", id="t1")
     messages: list[AnyMessage] = [prefix, thinking, orphan]
 
-    repairs = dangling_tool_pairing_repairs(messages)
+    repairs = dangling_tool_pairing_repairs(messages, created_at=_CREATED_AT)
     rebuilt = _full_rebuild(repairs)
     assert rebuilt == [prefix, thinking]
     assert rebuilt[0] is prefix
@@ -292,7 +304,7 @@ def test_orphan_tool_result_buried_in_5333_shape_is_dropped() -> None:
         ToolMessage(content="lost result", tool_call_id="KaN9", id="t1"),
     ]
 
-    repairs = dangling_tool_pairing_repairs(messages)
+    repairs = dangling_tool_pairing_repairs(messages, created_at=_CREATED_AT)
     rebuilt = _full_rebuild(repairs)
     assert rebuilt == messages[:-1]
     assert all(actual is expected for actual, expected in zip(rebuilt, messages[:-1], strict=True))
@@ -306,7 +318,7 @@ def test_orphan_and_dangling_tool_use_are_repaired_in_one_atomic_rebuild() -> No
     later = HumanMessage(content="now restart", id="h1")
     messages: list[AnyMessage] = [use, orphan, later]
 
-    repairs = dangling_tool_pairing_repairs(messages)
+    repairs = dangling_tool_pairing_repairs(messages, created_at=_CREATED_AT)
     rebuilt = _full_rebuild(repairs)
     assert rebuilt[0] is use
     assert isinstance(rebuilt[1], ToolMessage)
@@ -328,7 +340,7 @@ def test_5333_kill_mid_exec_repair_converges_after_one_rebuild() -> None:
     use.id = "a1"
     messages: list[AnyMessage] = [restart, use]
 
-    repairs = dangling_tool_pairing_repairs(messages)
+    repairs = dangling_tool_pairing_repairs(messages, created_at=_CREATED_AT)
     rebuilt = _full_rebuild(repairs)
     assert rebuilt[0] is restart
     assert rebuilt[1] is use
@@ -338,7 +350,7 @@ def test_5333_kill_mid_exec_repair_converges_after_one_rebuild() -> None:
     merged = cast("list[AnyMessage]", add_messages(messages, repairs))  # type: ignore[arg-type]
     assert unpaired_tool_calls(merged) == []
     assert repair_module.redundant_tool_results(merged) == []
-    assert dangling_tool_pairing_repairs(merged) == []
+    assert dangling_tool_pairing_repairs(merged, created_at=_CREATED_AT) == []
 
 
 def test_multiple_buried_danglings_all_repaired() -> None:
@@ -348,7 +360,7 @@ def test_multiple_buried_danglings_all_repaired() -> None:
         _ai_tool_use("c2"),
         HumanMessage(content="buried twice"),
     ]
-    repairs = dangling_tool_pairing_repairs(msgs)
+    repairs = dangling_tool_pairing_repairs(msgs, created_at=_CREATED_AT)
     rebuilt = _full_rebuild(repairs)
     assert [getattr(m, "tool_call_id", None) for m in rebuilt] == [
         None,
@@ -373,17 +385,17 @@ _CONFIG = {"configurable": {"thread_id": "236"}}
 
 
 async def _run_hook(state: _FakeState) -> dict[str, Any] | None:
-    return await repair_dangling_tool_pairing(state, None, _CONFIG)  # type: ignore[arg-type]
+    return await repair_dangling_tool_pairing(state, _RUNTIME, _CONFIG)  # type: ignore[arg-type]
 
 
 async def test_hook_returns_none_when_history_valid() -> None:
     state = _FakeState([_ai_tool_use("c1"), ToolMessage(content="o", tool_call_id="c1")])
-    assert await repair_dangling_tool_pairing(state, None, _CONFIG) is None  # type: ignore[arg-type]
+    assert await repair_dangling_tool_pairing(state, _RUNTIME, _CONFIG) is None  # type: ignore[arg-type]
 
 
 async def test_hook_returns_messages_update_for_buried_dangling() -> None:
     state = _FakeState([_ai_tool_use("c1"), HumanMessage(content="buried")])
-    update = await repair_dangling_tool_pairing(state, None, _CONFIG)  # type: ignore[arg-type]
+    update = await repair_dangling_tool_pairing(state, _RUNTIME, _CONFIG)  # type: ignore[arg-type]
     assert update is not None and set(update) == {"messages", "pending_exec_notes"}  # pyright: ignore[reportUnknownArgumentType]
     assert isinstance(update["messages"][0], RemoveMessage)
 
@@ -439,5 +451,5 @@ async def test_repair_hook_drains_notes_when_tool_pairing_already_complete() -> 
     state = _FakeState([_ai_tool_use("c1"), ToolMessage(content="done", tool_call_id="c1")])
     note = HumanMessage(content="deferred context")
     state.pending_exec_notes = [note]
-    update = await repair_dangling_tool_pairing(state, None, _CONFIG)  # type: ignore[arg-type]
+    update = await repair_dangling_tool_pairing(state, _RUNTIME, _CONFIG)  # type: ignore[arg-type]
     assert update == {"messages": [note], "pending_exec_notes": []}

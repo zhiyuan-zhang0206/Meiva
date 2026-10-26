@@ -3,6 +3,4 @@
 
 [debt.first-party-patch]
 "test_helperproc.py#monkeypatch.setattr base.config.settings" = 1
-"test_helperproc.py#monkeypatch.setattr base.config.settings.services.permissions_helper_enabled" = 1
-"test_helperproc.py#monkeypatch.setattr base.config.settings.services.permissions_helper_spawn" = 1
 "test_helperproc.py#monkeypatch.setattr base.sessions.backend.is_macos" = 2

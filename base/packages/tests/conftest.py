@@ -1,5 +1,6 @@
 from base.cluster.machine.tests.identity import as_machine as as_machine
 from base.config.tests.config_authority import config_authority as config_authority
+from base.host.net.tests.retry_waits import retry_waits as retry_waits
 from base.packages.tests.model_catalog import add_bindings as add_bindings
 from base.packages.tests.model_catalog import add_models as add_models
 from base.packages.tests.model_catalog import model_catalog as model_catalog

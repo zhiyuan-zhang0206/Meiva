@@ -4,17 +4,78 @@ import math
 from collections.abc import Mapping
 from dataclasses import dataclass, field
 from datetime import UTC, date, datetime, time
-from typing import Any, Protocol
+from decimal import Decimal
+from typing import Any, NamedTuple, Protocol
 
 __all__ = [
+    "CacheTokens",
     "CostQuote",
     "ModelPrice",
+    "PricePeriod",
+    "PriceRates",
+    "PriceTier",
+    "PriceWindow",
     "Rates",
     "model_vendor",
     "parse_catalog",
     "plugin_price_provenance",
     "rates_at",
 ]
+
+
+@dataclass(frozen=True, slots=True)
+class CacheTokens:
+    read: int = 0
+    write_5m: int = 0
+    write_1h: int = 0
+
+
+# meiva:note
+# One recurring UTC rate override within a token tier.
+class PriceWindow(NamedTuple):
+    start: str
+    end: str
+    cache_miss: str | Decimal
+    cache_hit: str | Decimal
+    output: str | Decimal
+    cache_write_5m: str | Decimal | None = None
+    cache_write_1h: str | Decimal | None = None
+
+
+# meiva:note
+# One gapless input-token band and its optional daily overrides.
+class PriceTier(NamedTuple):
+    input_tokens_min: int
+    input_tokens_max: int | None
+    cache_miss: str | Decimal
+    cache_hit: str | Decimal
+    output: str | Decimal
+    windows: tuple[PriceWindow, ...] = ()
+    cache_write_5m: str | Decimal | None = None
+    cache_write_1h: str | Decimal | None = None
+
+
+# meiva:note
+# One half-open effective interval containing all input-token tiers.
+class PricePeriod(NamedTuple):
+    effective_from: str | None
+    effective_until: str | None
+    tiers: tuple[PriceTier, ...]
+
+
+# meiva:note
+# One model's complete price and vendor declaration (USD per 1M tokens).
+@dataclass(frozen=True)
+class PriceRates:
+    cache_miss: float
+    cache_hit: float
+    output: float
+    source_url: str
+    source_checked_at: str
+    vendor: str | None = None
+    periods: tuple[PricePeriod, ...] = ()
+    cache_write_5m: float | None = field(default=None, kw_only=True)
+    cache_write_1h: float | None = field(default=None, kw_only=True)
 
 
 # meiva:note

@@ -11,6 +11,7 @@ from agent.hooks import Hook, make_hook_runner
 from agent.hooks.repair import repair_dangling_tool_pairing, unpaired_tool_calls
 from agent.state import BaseAgentState, PluginStateHandle, build_agent_state, guarded_add_messages
 from base.agents.context import MeivaContext
+from base.clock import Clock
 from base.config.tests.configuration import defaults
 from base.host.env.agent_slices import AgentSlices
 from base.packages.plugins.extensions import ExtensionRegistry, HookPoint, PluginContributions
@@ -79,7 +80,12 @@ async def test_repair_preserves_the_plugin_note_and_state_across_turns() -> None
         if hook is notice or hook is repair_dangling_tool_pairing
     ]
     run = make_hook_runner("before_llm", "llm", hooks)
-    runtime = Runtime(context=MeivaContext(agent=AgentSlices.resolve(default_reader=defaults())))
+    runtime = Runtime(
+        context=MeivaContext(
+            agent=AgentSlices.resolve(default_reader=defaults()),
+            clock_factory=Clock.from_settings,
+        )
+    )
     config: RunnableConfig = {"configurable": {"thread_id": "1"}}
 
     command = await run(state, runtime, config)

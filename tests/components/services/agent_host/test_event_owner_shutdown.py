@@ -7,21 +7,21 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from agent import process_boot
 from base.agents.context.clients import ClientSet
-from base.cluster.machine import MachineFacts, MachineIdentityReader
+from base.cluster.machine import MachineFacts
 from base.cluster.machine.configured import ConfiguredMachineIdentity
 from base.cluster.machine.tests.identity import machine_identity as machine_identity
 from base.config import ConfigBoot
+from base.daemon.endpoints import ServiceEndpoints
 from base.db import Database
 from base.db.code_version_gate import ProcessDbGate
 from base.events.live.bus import EventBus
 from base.lm.catalog import ModelCatalog
 from base.packages.composer_commands import CommandCatalog
 from base.paths import meiva_home
+from base.paths.tests.homes import unit_home as unit_home
 from base.telemetry.delivery.pipeline import EventPipeline
 from base.telemetry.delivery.receipts import Event
-from base.telemetry.otlp.trace_config import TraceConfig
 from services.agent_runner.agent_host import daemon
 from services.agent_runner.agent_host.host import AgentHost
 from services.agent_runner.agent_host.tests.host_policy import configured_policy, handoff_timestamps
@@ -44,9 +44,25 @@ def event() -> Event:
     )
 
 
+class _RecordingPool:
+    def __init__(self, name: str, closed: list[str]) -> None:
+        self.name = name
+        self._closed = closed
+
+    async def close(self) -> None:
+        self._closed.append(self.name)
+
+
+class _PoolFactoryDb:
+    def __init__(self, closed: list[str]) -> None:
+        self._closed = closed
+
+    def async_pool(self, _cls: object, *, pool_name: str, **_kwargs: object) -> _RecordingPool:
+        return _RecordingPool(pool_name, self._closed)
+
+
 @pytest.mark.parametrize("native_failure", [False, True])
 async def test_host_release_runs_and_first_original_failure_remains_primary(
-    monkeypatch: pytest.MonkeyPatch,
     model_catalog: ModelCatalog,
     native_failure: bool,
     database_gate: ProcessDbGate,
@@ -96,8 +112,9 @@ async def test_host_release_runs_and_first_original_failure_remains_primary(
 
 
 async def test_boot_before_host_closes_writer_even_if_it_failed_and_still_closes_pools(
-    monkeypatch: pytest.MonkeyPatch,
+    unit_home: Path,
 ) -> None:
+    del unit_home
     original = TypeError("boot writer failed")
 
     def writer(batch: list[Event]) -> None:
@@ -105,16 +122,11 @@ async def test_boot_before_host_closes_writer_even_if_it_failed_and_still_closes
 
     pipe = EventPipeline(writer=writer, batch_size=1)
     clients = ClientSet(pipeline_factory=lambda: pipe)
-    events: list[str] = []
-
-    async def close_pools(*_args: object) -> None:
-        events.append("pools")
-
-    def remove_pidfile(_path: object) -> None:
-        events.append("pidfile")
-
-    monkeypatch.setattr(daemon, "close_host_pools", close_pools)
-    monkeypatch.setattr(daemon, "remove_pidfile", remove_pidfile)
+    closed_pools: list[str] = []
+    pidfile = ServiceEndpoints.from_settings().of("agent_host").pidfile
+    pidfile.parent.mkdir(parents=True, exist_ok=True)
+    pidfile.write_text("999999999\n", encoding="utf-8")
+    assert not daemon._is_running()
     try:
         clients.event_pipeline().enqueue(event())
         with pytest.raises(TypeError):
@@ -122,8 +134,8 @@ async def test_boot_before_host_closes_writer_even_if_it_failed_and_still_closes
         with pytest.raises(TypeError) as observed:
             await daemon.close_process_owners(
                 None,
-                cast(Any, object()),
-                cast(Any, object()),
+                cast(Any, _RecordingPool("agent-host", closed_pools)),
+                cast(Any, _RecordingPool("agent-host-control", closed_pools)),
                 None,
                 None,
                 None,
@@ -131,7 +143,8 @@ async def test_boot_before_host_closes_writer_even_if_it_failed_and_still_closes
                 clients=clients,
             )
         assert observed.value is original
-        assert events == ["pools", "pidfile"]
+        assert closed_pools == ["agent-host-control", "agent-host"]
+        assert not pidfile.exists()
         assert clients.event_pipeline() is pipe
     finally:
         with pytest.raises(TypeError):
@@ -139,15 +152,12 @@ async def test_boot_before_host_closes_writer_even_if_it_failed_and_still_closes
 
 
 async def test_boot_primary_survives_a_failed_constructed_writer_cleanup(
-    monkeypatch: pytest.MonkeyPatch,
-    database: Database,
     unit_home: Path,
 ) -> None:
-    from meiva.sdk_surface.installation import Installation
-
     boot_error = ValueError("original plugin bootstrap defect")
     writer_error = TypeError("boot event writer defect")
-    events: list[str] = []
+    closed_pools: list[str] = []
+    pidfile = ServiceEndpoints.from_settings().of("agent_host").pidfile
 
     def writer(batch: list[Event]) -> None:
         raise writer_error
@@ -155,47 +165,13 @@ async def test_boot_primary_survives_a_failed_constructed_writer_cleanup(
     pipe = EventPipeline(writer=writer, batch_size=1)
     clients = ClientSet(pipeline_factory=lambda: pipe)
 
-    def boot_handles(
-        _database: Database, _config: ConfigBoot
-    ) -> tuple[Any, Any, EventBus, Database]:
-        return object(), object(), EventBus.from_settings(), database
-
-    def load_plugins(_config: ConfigBoot, **_kwargs: Any) -> Installation:
+    def fail_during_boot() -> None:
+        assert pidfile.exists()
         clients.event_pipeline().enqueue(event())
         with pytest.raises(TypeError):
             clients.sync_events(timeout=1)
         raise boot_error
 
-    async def open_pools(*_args: object) -> None:
-        pass
-
-    async def close_pools(*_args: object) -> None:
-        events.append("pools")
-
-    def no_op(*_args: object) -> None:
-        pass
-
-    def initialize_process_scope(
-        *, machine: MachineIdentityReader, home: Path, trace: TraceConfig
-    ) -> None:
-        assert home == unit_home
-
-    def acquire(*_args: object) -> bool:
-        return True
-
-    def remove_pidfile(_path: object) -> None:
-        events.append("pidfile")
-
-    monkeypatch.setattr(daemon, "assert_clock_lattice", no_op)
-    monkeypatch.setattr(daemon, "_is_running", lambda: False)
-    monkeypatch.setattr(daemon, "acquire_pidfile", acquire)
-    monkeypatch.setattr(daemon, "boot_handles", boot_handles)
-    monkeypatch.setattr(daemon, "open_host_pools", open_pools)
-    monkeypatch.setattr(daemon, "close_host_pools", close_pools)
-    monkeypatch.setattr(daemon, "load_installation", load_plugins)
-    monkeypatch.setattr(daemon, "remove_pidfile", remove_pidfile)
-    monkeypatch.setattr(process_boot, "init_process_scope", initialize_process_scope)
-    monkeypatch.setattr(process_boot, "land_cluster_extensions", no_op)
     machine = MachineFacts.of(
         name="test-box",
         role=frozenset({"agent-runner"}),
@@ -208,14 +184,16 @@ async def test_boot_primary_survives_a_failed_constructed_writer_cleanup(
         with pytest.raises(ValueError) as observed:
             await daemon.run(
                 config=config,
-                database=lambda: database,
+                database=lambda: cast(Database, _PoolFactoryDb(closed_pools)),
                 machine=machine,
                 home=unit_home,
                 clients=clients,
+                on_clients_owned=fail_during_boot,
             )
         assert observed.value is boot_error
         assert any(str(writer_error) in note for note in boot_error.__notes__)
-        assert events == ["pools", "pidfile"]
+        assert closed_pools == ["agent-host-control", "agent-host"]
+        assert not pidfile.exists()
     finally:
         with pytest.raises(TypeError):
             pipe.stop(timeout=1)

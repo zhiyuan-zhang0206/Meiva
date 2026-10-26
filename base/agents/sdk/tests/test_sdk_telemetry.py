@@ -8,7 +8,6 @@ from __future__ import annotations
 
 import asyncio
 import os
-import random
 import subprocess
 import sys
 from pathlib import Path
@@ -18,7 +17,6 @@ import httpx
 import pytest
 from pydantic import ValidationError
 
-from base import telemetry
 from base.agents.sdk import call_policy
 from base.agents.sdk import telemetry as sdk_usage_telemetry
 from base.agents.sdk.call_policy import SamplingPolicy
@@ -233,18 +231,19 @@ def test_emit_omits_detail_when_empty(
 
 
 def test_emit_does_not_classify_transport_errors_or_retry(
-    monkeypatch: pytest.MonkeyPatch, sampling_owner: call_policy.SamplingPolicyOwner
+    sampling_owner: call_policy.SamplingPolicyOwner,
 ) -> None:
     failure = httpx.TimeoutException("not a transport owned by the SDK emitter")
     attempts: list[str] = []
 
-    def fail(*_args: Any, **_kwargs: Any) -> None:
+    def fail() -> str:
         attempts.append("emit")
         raise failure
 
-    monkeypatch.setattr(telemetry, "emit", fail)
     with pytest.raises(httpx.TimeoutException) as raised:
-        sdk_usage_telemetry.emit("ns.fn", identity={}, sampling_owner=sampling_owner)
+        sdk_usage_telemetry.emit(
+            "ns.fn", identity={}, sampling_owner=sampling_owner, machine_reader=fail
+        )
     assert raised.value is failure
     assert attempts == ["emit"]
 
@@ -287,16 +286,9 @@ def test_explicit_owner_collects_full_tally_per_fn(
 
 
 def test_live_sampling_keeps_tally_complete(
-    monkeypatch: pytest.MonkeyPatch,
     emitted_events: EmittedEvents,
     tmp_path: Path,
 ) -> None:
-    selected = iter(range(10))
-
-    def sample(_every: int) -> int:
-        return next(selected)
-
-    monkeypatch.setattr(random, "randrange", sample)
     sampling_owner = sampling_owner_serving(
         SamplingPolicy(sampling_enabled=True, sample_every=10), tmp_path / "sampled.env"
     )

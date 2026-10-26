@@ -5,7 +5,7 @@ exports = ["goto.py", "node.py", "tests"]
 "_retry.py" = ["_backoff.py"]
 "_stream.py" = ["_deadlines.py"]
 "node.py" = ["_backoff.py", "_cancel.py", "_chunk.py", "_retry.py", "_stream.py", "goto.py"]
-"tests" = ["_backoff.py", "_cancel.py", "_chunk.py", "_deadlines.py", "_retry.py", "_stream.py", "node.py"]
+"tests" = ["_backoff.py", "_chunk.py", "_deadlines.py", "_retry.py", "_stream.py", "node.py"]
 
 [purity]
 "__init__.py" = "strict"

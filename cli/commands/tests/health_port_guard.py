@@ -2,34 +2,23 @@
 
 import pytest
 
-from cli.commands import probe
+from base.host.env import port_lease
 
 __all__ = ["guard_health_port_gate"]
 
 
 @pytest.fixture
-def guard_health_port_gate(request: pytest.FixtureRequest, monkeypatch: pytest.MonkeyPatch) -> None:
-    """Autouse safety net: `meiva start`'s pre-bind health-port gate finds nothing.
+def guard_health_port_gate(request: pytest.FixtureRequest) -> None:
+    """Autouse safety net: `meiva start`'s pre-bind health-port gate probes leased ports.
 
     The gate dials this unit's daemon `/healthz` ports before launching (issue
-    #977). It does NOT reach the prod defaults (the health ports of the fixed table): the env block in
-    `tests.fixtures.env_bootstrap` already pins every health port to a `_free_port()`, so an
-    un-stubbed gate dials this session's own kernel-assigned ports and the suite is
-    green with prod live. This fixture buys the weaker, residual property.
-
-    `_free_port()` releases the port before anything binds it — the same race
-    `base/deploy/tests/containers.py` accepts for pg/redis. Nothing in a test run ever binds
-    these particular ports, so the window is the whole session, and an unrelated
-    process that grabs one and answers 2xx on `/healthz` would be read as
-    PORT_TAKEN: a start test failing for a reason no test caused. Rare, but the
-    stub costs one line and removes the flake source entirely.
+    #977). `tests.fixtures.env_bootstrap` leases every health port in the
+    dedicated test band (`base.host.env.port_lease`), so the real gate dials this
+    session's own leased ports and never touches production defaults or ephemeral
+    OS ports.
 
     Opt out with `@pytest.mark.real_health_port_gate` when the gate itself is the
     subject (cli/commands/lifecycle/tests/startup/test_start_health_port_gate.py)."""
     if "real_health_port_gate" in request.keywords:
         return
-
-    def no_occupied_ports(*_args: object, **_kwargs: object) -> tuple[()]:
-        return ()
-
-    monkeypatch.setattr(probe, "occupied_health_ports", no_occupied_ports)
+    assert port_lease.leased_ports()

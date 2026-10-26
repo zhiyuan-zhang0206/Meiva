@@ -10,7 +10,7 @@ from pathlib import Path
 import pytest
 
 from base.daemon import shutdown
-from base.host import exit_codes as hard_exit_module
+from base.host.proc import run_bounded
 from base.log.tests.log_records import LogRecords
 from base.sessions.tests.poll_until import poll_until
 from services.supervision.meiva_root.manifest import RestartPolicy, UnitManifest, UnitRegistry
@@ -51,54 +51,36 @@ def test_cancel_and_drain_runs_cleanup_and_returns_only_ordinary_failures() -> N
         runner.close()
 
 
-def test_hard_exit_flushes_sinks_in_order_before_exiting(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    from loguru import logger as loguru_logger
-
-    calls: list[str] = []
-
-    class _Stream:
-        def __init__(self, name: str) -> None:
-            self.name = name
-
-        def flush(self) -> None:
-            calls.append(self.name)
-
-    def exit_process(code: int) -> None:
-        calls.append(f"exit:{code}")
-        raise SystemExit(code)
-
-    monkeypatch.setattr(loguru_logger, "remove", lambda: calls.append("loguru"))
-    monkeypatch.setattr(hard_exit_module.logging, "shutdown", lambda: calls.append("logging"))
-    monkeypatch.setattr(hard_exit_module.sys, "stdout", _Stream("stdout"))
-    monkeypatch.setattr(hard_exit_module.sys, "stderr", _Stream("stderr"))
-    monkeypatch.setattr(hard_exit_module.os, "_exit", exit_process)
-    with pytest.raises(SystemExit) as stopped:
-        hard_exit_module.hard_exit(7)
-    assert stopped.value.code == 7
-    assert calls == ["loguru", "logging", "stdout", "stderr", "exit:7"]
+def test_hard_exit_flushes_sinks_in_order_before_exiting(unit_home: Path) -> None:
+    env = dict(os.environ)
+    env.update(MEIVA_HOME=str(unit_home), MEIVA_CONFIG_FETCH="skip")
+    result = run_bounded(
+        [sys.executable, str(_CHILD), "--hard-exit-order"],
+        cwd=Path(__file__).resolve().parents[3],
+        env=env,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+        text=True,
+        timeout=20,
+    )
+    assert result.returncode == 7
+    assert result.stdout.splitlines() == ["loguru", "logging", "stdout", "stderr"]
 
 
-def test_hard_exit_reports_a_failed_step_on_stderr_and_still_exits(
-    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
-) -> None:
-    from loguru import logger as loguru_logger
-
-    def broken_remove() -> None:
-        raise RuntimeError("sink close failed")
-
-    def exit_process(code: int) -> None:
-        raise SystemExit(code)
-
-    monkeypatch.setattr(loguru_logger, "remove", broken_remove)
-    monkeypatch.setattr(hard_exit_module.os, "_exit", exit_process)
-    with pytest.raises(SystemExit) as stopped:
-        hard_exit_module.hard_exit(3)
-    assert stopped.value.code == 3
-    err = capsys.readouterr().err
-    assert "closing the loguru sinks failed" in err
-    assert "sink close failed" in err
+def test_hard_exit_reports_a_failed_step_on_stderr_and_still_exits(unit_home: Path) -> None:
+    env = dict(os.environ)
+    env.update(MEIVA_HOME=str(unit_home), MEIVA_CONFIG_FETCH="skip")
+    result = run_bounded(
+        [sys.executable, str(_CHILD), "--hard-exit-broken"],
+        cwd=Path(__file__).resolve().parents[3],
+        env=env,
+        capture_output=True,
+        text=True,
+        timeout=20,
+    )
+    assert result.returncode == 3
+    assert "closing the loguru sinks failed" in result.stderr
+    assert "sink close failed" in result.stderr
 
 
 def test_shutdown_line_logs_a_registered_event(loguru_records: LogRecords) -> None:

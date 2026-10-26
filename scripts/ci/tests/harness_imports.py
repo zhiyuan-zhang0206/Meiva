@@ -5,7 +5,7 @@ from base.cluster.dataplane.direct_url import ClusterDirectUrl
 from base.cluster.dataplane.pg_stall_watchdog import StallWatchdogConfig, stall_guard
 from base.cluster.dataplane.pg_throwaway_base import ThrowawayConfig, configured_base
 from base.cluster.machine.configured import ConfiguredMachineIdentity
-from base.config import set_field, settings
+from base.config import get_field, set_field, settings
 from base.config.tests.configuration import snapshot_process_config
 from base.db import Database
 from base.db.code_version_gate import ProcessDbGate
@@ -50,6 +50,7 @@ __all__ = [
     "configured_base",
     "containers",
     "discover_scopes",
+    "get_field",
     "health_port_env_aliases",
     "modules_by_path",
     "port_lease",

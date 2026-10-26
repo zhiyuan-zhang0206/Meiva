@@ -51,6 +51,8 @@ from typing import Any
 
 import pytest
 
+from base.host.proc import run_bounded
+
 _SCRIPTS_DIR = Path(__file__).parents[2] / ".agents" / "skills" / "inspect-a-trace" / "scripts"
 
 
@@ -286,45 +288,56 @@ def test_mirror_dir_uses_resolve_meiva_home() -> None:
 # --- _cluster_secret: the machine token, then the explicit env var, then the home's .env ---
 
 
-@pytest.fixture(autouse=True)
-def _no_inherited_api_token(monkeypatch: pytest.MonkeyPatch) -> None:
-    """A launched process's machine token outranks every other bearer; keep
-    one inherited from the test runner's environment out of these cases."""
-    monkeypatch.delitem(os.environ, "MEIVA_API_TOKEN", raising=False)
+def _run_rt_subcommand(args: list[str], env_overrides: dict[str, str]) -> str:
+    env = {
+        k: v for k, v in os.environ.items() if k not in {"MEIVA_API_TOKEN", "MEIVA_CLUSTER_SECRET"}
+    }
+    env |= env_overrides
+    res = run_bounded(
+        [sys.executable, __file__, *args],
+        capture_output=True,
+        text=True,
+        env=env,
+        timeout=30,
+    )
+    res.check_returncode()
+    return res.stdout
 
 
-def test_cluster_secret_prefers_explicit_env(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    monkeypatch.setitem(os.environ, "MEIVA_CLUSTER_SECRET", "explicit-secret")
+def test_cluster_secret_prefers_explicit_env(tmp_path: Path) -> None:
     home = tmp_path / "home"
     home.mkdir()
     (home / ".env").write_text("MEIVA_CLUSTER_SECRET=file-secret\n")
 
-    assert rt._cluster_secret(home) == "explicit-secret"
+    out = _run_rt_subcommand(
+        ["cluster-secret", str(home)],
+        {"MEIVA_CLUSTER_SECRET": "explicit-secret"},
+    )
+    assert json.loads(out) == "explicit-secret"
 
 
-def test_cluster_secret_reads_the_homes_env_file(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    monkeypatch.delitem(os.environ, "MEIVA_CLUSTER_SECRET", raising=False)
+def test_cluster_secret_reads_the_homes_env_file(tmp_path: Path) -> None:
     home = tmp_path / "dev-cluster-home"
     home.mkdir()
     (home / ".env").write_text("MEIVA_CLUSTER_SECRET=dev-cluster-secret\n")
 
-    assert rt._cluster_secret(home) == "dev-cluster-secret"
+    out = _run_rt_subcommand(["cluster-secret", str(home)], {})
+    assert json.loads(out) == "dev-cluster-secret"
 
 
-def test_cluster_secret_prefers_the_machine_api_token(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    monkeypatch.setitem(os.environ, "MEIVA_API_TOKEN", "machine-token")
-    monkeypatch.setitem(os.environ, "MEIVA_CLUSTER_SECRET", "explicit-secret")
+def test_cluster_secret_prefers_the_machine_api_token(tmp_path: Path) -> None:
     home = tmp_path / "home"
     home.mkdir()
     (home / ".env").write_text("MEIVA_CLUSTER_SECRET=file-secret\n")
 
-    assert rt._cluster_secret(home) == "machine-token"
+    out = _run_rt_subcommand(
+        ["cluster-secret", str(home)],
+        {
+            "MEIVA_API_TOKEN": "machine-token",
+            "MEIVA_CLUSTER_SECRET": "explicit-secret",
+        },
+    )
+    assert json.loads(out) == "machine-token"
 
 
 # --- _gateway_get: the bearer comes from the resolved home ---
@@ -358,30 +371,27 @@ def _serve_gateway() -> Generator[tuple[str, list[str | None]]]:
         server.server_close()
 
 
-def test_gateway_get_sends_the_explicit_secret(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    monkeypatch.setitem(os.environ, "MEIVA_CLUSTER_SECRET", "explicit-secret")
+def test_gateway_get_sends_the_explicit_secret() -> None:
     with _serve_gateway() as (base_url, seen_auth):
-        result = rt._gateway_get(base_url, "/api/events")
+        out = _run_rt_subcommand(
+            ["gateway-get", base_url, "/api/events"],
+            {"MEIVA_CLUSTER_SECRET": "explicit-secret"},
+        )
 
-    assert result == {"ok": True}
+    assert json.loads(out) == {"ok": True}
     assert seen_auth == ["Bearer explicit-secret"]
 
 
-def test_gateway_get_uses_the_homes_env_file_secret(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    monkeypatch.delitem(os.environ, "MEIVA_CLUSTER_SECRET", raising=False)
+def test_gateway_get_uses_the_homes_env_file_secret() -> None:
     env_file = rt.resolve_meiva_home() / ".env"
     env_file.write_text("MEIVA_CLUSTER_SECRET=dev-cluster-secret\n")
     try:
         with _serve_gateway() as (base_url, seen_auth):
-            result = rt._gateway_get(base_url, "/api/events")
+            out = _run_rt_subcommand(["gateway-get", base_url, "/api/events"], {})
     finally:
         env_file.unlink(missing_ok=True)
 
-    assert result == {"ok": True}
+    assert json.loads(out) == {"ok": True}
     assert seen_auth == ["Bearer dev-cluster-secret"]
 
 
@@ -494,3 +504,13 @@ def test_source_root_refuses_when_explicit_meiva_home_has_no_source(tmp_path: Pa
     assert res.returncode == 1
     assert "RUNTIMEERROR:" in res.stdout
     assert str(home / "source") in res.stdout
+
+
+if __name__ == "__main__":
+    mode = sys.argv[1]
+    if mode == "cluster-secret":
+        sys.stdout.write(json.dumps(rt._cluster_secret(Path(sys.argv[2]))))
+    elif mode == "gateway-get":
+        sys.stdout.write(json.dumps(rt._gateway_get(sys.argv[2], sys.argv[3])))
+    else:
+        raise ValueError(f"unknown mode: {mode!r}")

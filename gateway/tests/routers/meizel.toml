@@ -7,5 +7,4 @@ exports = ["alerts_api", "cluster_endpoints", "test_tasks_router.py"]
 "test_task_patch_receipts.py" = ["test_tasks_router.py"]
 
 [debt.first-party-patch]
-"test_config_api.py#monkeypatch.setattr base.host.config_validators.browser_capable" = 1
 "test_config_api.py#monkeypatch.setattr base.host.config_validators.display_available" = 1

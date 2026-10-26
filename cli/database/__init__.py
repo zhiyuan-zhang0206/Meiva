@@ -137,6 +137,8 @@ class OperatorEventPipeline:
         self._flush_interval_s = flush_interval_s
         self._database_factory = database_factory
         self._pipeline: EventPipeline | None = None
+        self._attach_process_logging = True
+        self.log_sinks: list[str] = []
 
     # meiva:note
     # Bind an already-built `EventPipeline` to this command owner.
@@ -151,6 +153,23 @@ class OperatorEventPipeline:
     ) -> OperatorEventPipeline:
         owner = cls(database_factory, machine=machine, home=home)
         owner._pipeline = pipeline
+        owner._attach_process_logging = False
+        return owner
+
+    # meiva:note
+    # Record `initialize_logging` sink names into `log_sinks` without opening process-wide sinks.
+    @classmethod
+    def recording(
+        cls,
+        database_factory: OperatorDatabaseFactory,
+        *,
+        machine: MachineIdentityReader,
+        home: Path,
+        log_sinks: list[str],
+    ) -> OperatorEventPipeline:
+        owner = cls(database_factory, machine=machine, home=home)
+        owner._attach_process_logging = False
+        owner.log_sinks = log_sinks
         return owner
 
     def __call__(self) -> EventPipeline:
@@ -167,6 +186,9 @@ class OperatorEventPipeline:
 
     def initialize_logging(self, name: str) -> None:
         """Bind logging to this command's lazy writer and identity reader."""
+        self.log_sinks.append(name)
+        if not self._attach_process_logging:
+            return
         from base.telemetry.process_logging import init_cli_process
 
         init_cli_process(name=name, producer=self, machine_reader=self._machine.name)

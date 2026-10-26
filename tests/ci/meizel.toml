@@ -3,18 +3,3 @@
 
 [external]
 "test_structure_codegen.py" = "executes the selector script embedded in the CI workflow"
-
-[debt.env-patch]
-"test_structure_codegen.py#patch.dict os.environ" = 1
-
-[debt.restricted-python]
-"test_structure_codegen.py#string patch target" = 1
-
-[debt.stdlib-patch]
-"test_leak_guard_cost.py#monkeypatch.setattr signal.getsignal" = 1
-"test_structure_codegen.py#patch subprocess.check_output" = 1
-"test_structure_codegen.py#patch.dict sys.modules" = 1
-"test_structure_codegen.py#patch.object pathlib.Path.open" = 1
-
-[debt.third-party-patch]
-"test_structure_codegen.py#patch yaml.safe_load" = 2

@@ -213,9 +213,15 @@ def connect(path: str) -> socket.socket:
     raise PermissionsHelperError(f"permissions helper not reachable at {path}: {last}")
 
 
-def _exchange(s: socket.socket, method: str, req: dict[str, object]) -> dict[str, Any]:
+def _exchange(
+    s: socket.socket,
+    method: str,
+    req: dict[str, object],
+    *,
+    call_timeout_s: float = CALL_TIMEOUT_S,
+) -> dict[str, Any]:
     """Send one request line on a connected socket, read one reply, close it."""
-    s.settimeout(CALL_TIMEOUT_S)
+    s.settimeout(call_timeout_s)
     try:
         s.sendall((json.dumps(req) + "\n").encode())
         buf = bytearray()
@@ -228,7 +234,7 @@ def _exchange(s: socket.socket, method: str, req: dict[str, object]) -> dict[str
                 raise PermissionsHelperError("permissions helper response exceeded line limit")
     except TimeoutError as e:
         raise PermissionsHelperError(
-            f"permissions helper did not respond to {method!r} within {CALL_TIMEOUT_S}s"
+            f"permissions helper did not respond to {method!r} within {call_timeout_s}s"
         ) from e
     finally:
         s.close()
@@ -280,8 +286,9 @@ class PermissionsHelperClient(StatefulCalls):
     decides which helper a caller talks to, and every call below dials that one.
     """
 
-    def __init__(self, sock_path: str | Path) -> None:
+    def __init__(self, sock_path: str | Path, *, call_timeout_s: float = CALL_TIMEOUT_S) -> None:
         self._sock_path = Path(sock_path)
+        self._call_timeout_s = call_timeout_s
 
     @property
     def sock_path(self) -> Path:
@@ -290,7 +297,9 @@ class PermissionsHelperClient(StatefulCalls):
     def call(self, method: str, **args: object) -> Any:
         """One JSON-line request/response over this helper's Unix socket."""
         req = {"id": 1, "method": method, **args}  # one request per fresh connection
-        return _exchange(connect(str(self._sock_path)), method, req)
+        return _exchange(
+            connect(str(self._sock_path)), method, req, call_timeout_s=self._call_timeout_s
+        )
 
     def ping(self) -> PingResult:
         """Report the helper's liveness and whether it holds the desktop grants."""

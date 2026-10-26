@@ -16,7 +16,6 @@ from __future__ import annotations
 import contextlib
 import getpass
 import json
-import os
 import shutil
 import subprocess
 from collections.abc import Callable, Iterator
@@ -81,6 +80,7 @@ class Born:
     record: cluster.ClusterRecord
     values: dict[str, str]
     plane: DataPlaneConfig
+    process_env: dict[str, str] = field(default_factory=dict)
     retained_children: list[subprocess.Popen[bytes]] = field(default_factory=list)
 
     @property
@@ -194,16 +194,13 @@ def _configure(
         events_channel=values["MEIVA_EVENTS_CHANNEL"],
         pgbouncer_enabled=True,
     )
-    # The start process adopts its delivered login into os.environ; the raw-env
-    # seam restores the suite's own values at teardown.
-    monkeypatch.setitem(os.environ, "MEIVA_DB_URL", values["MEIVA_DB_URL"])
-    # The birth adopts the delivered generation next. `delitem(raising=False)` on an absent
-    # key records nothing, so register the key (setitem) before removing it: teardown then
-    # deletes whatever the birth assigned.
-    monkeypatch.setitem(os.environ, delivery.GENERATION_ENV, "")
-    monkeypatch.delitem(os.environ, delivery.GENERATION_ENV)
-
-    return Born(home=home, record=record, values=values, plane=plane)
+    return Born(
+        home=home,
+        record=record,
+        values=values,
+        plane=plane,
+        process_env=dict(values),
+    )
 
 
 # meiva:note
@@ -260,7 +257,7 @@ def _birth(
     completion.complete_gateway_data_plane(
         born.plane,
         home=born.home,
-        environment=os.environ,
+        environment=born.process_env,
         database_factory=operator_database,
         machine=command_runtime.machine,
         macos=command_runtime.host.platform.system == "darwin",
@@ -332,7 +329,8 @@ def test_fresh_birth_mints_generation_zero_behind_nologin_owner(
         )
     # The start process adopted the delivered gateway login for its own dials.
     assert operator_database.db_url() == born.dsn("gateway")
-    assert os.environ[delivery.GENERATION_ENV] == "0"
+    assert born.process_env["MEIVA_DB_URL"] == born.dsn("gateway")
+    assert born.process_env[delivery.GENERATION_ENV] == "0"
     assert json.loads((born.home / "start-intent.json").read_text())["phase"] == "provisioned"
 
 
@@ -453,7 +451,7 @@ def test_unchanged_userlist_reloads_without_restart(
     completion.complete_gateway_data_plane(
         born.plane,
         home=born.home,
-        environment=os.environ,
+        environment=born.process_env,
         database_factory=operator_database,
         machine=command_runtime.machine,
         macos=command_runtime.host.platform.system == "darwin",
@@ -476,7 +474,7 @@ def test_ordinary_start_refuses_a_stray_group_member_and_leaves_it_untouched(
         completion.complete_gateway_data_plane(
             born.plane,
             home=born.home,
-            environment=os.environ,
+            environment=born.process_env,
             database_factory=operator_database,
             machine=command_runtime.machine,
             macos=command_runtime.host.platform.system == "darwin",
@@ -501,7 +499,7 @@ def test_ordinary_start_holds_on_an_invariant_violation(
         completion.complete_gateway_data_plane(
             born.plane,
             home=born.home,
-            environment=os.environ,
+            environment=born.process_env,
             database_factory=operator_database,
             machine=command_runtime.machine,
             macos=command_runtime.host.platform.system == "darwin",
@@ -535,7 +533,7 @@ def test_ordinary_start_refuses_a_home_without_a_ledger_before_any_effect(
         completion.complete_gateway_data_plane(
             configured.plane,
             home=configured.home,
-            environment=os.environ,
+            environment=configured.process_env,
             database_factory=operator_database,
             machine=command_runtime.machine,
             macos=command_runtime.host.platform.system == "darwin",
@@ -561,7 +559,7 @@ def test_interrupted_birth_retries_to_the_same_generation(
         (InAdminSession((BirthGeneration(), EnsurePooler())),),
         configured.plane,
         home=configured.home,
-        environment=os.environ,
+        environment=configured.process_env,
         database_factory=operator_database,
         machine=command_runtime.machine,
         macos=macos,
@@ -573,7 +571,7 @@ def test_interrupted_birth_retries_to_the_same_generation(
     completion.complete_gateway_data_plane(
         configured.plane,
         home=configured.home,
-        environment=os.environ,
+        environment=configured.process_env,
         database_factory=operator_database,
         machine=command_runtime.machine,
         macos=macos,

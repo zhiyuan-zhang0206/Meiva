@@ -12,7 +12,7 @@ from __future__ import annotations
 import os
 import sys
 import time
-from collections.abc import Callable, Mapping
+from collections.abc import Callable, Mapping, MutableMapping
 from pathlib import Path
 from threading import RLock, get_ident
 from typing import Any, Protocol
@@ -324,7 +324,7 @@ class ConfigBoot:
     # meiva:note
     # The launch environment this owner reads: the captured delivery of a read-only
     # attachment, else the live `os.environ` of a booting process.
-    def process_environment(self) -> Mapping[str, str]:
+    def process_environment(self) -> MutableMapping[str, str]:
         return os.environ if self.environment is None else self.environment
 
     # meiva:note

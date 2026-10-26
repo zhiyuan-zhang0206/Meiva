@@ -13,6 +13,7 @@ import os
 import subprocess
 import sys
 import time
+from collections.abc import Sequence
 from pathlib import Path
 
 import psutil
@@ -149,24 +150,34 @@ def test_a_keeper_that_holds_a_root_without_ipc_is_not_stopped_blind(short_tmp: 
 
 @pytest.mark.parametrize("loaded", [False, True])
 def test_unusable_helper_socket_requires_positive_native_absence(
-    monkeypatch: pytest.MonkeyPatch, short_tmp: Path, loaded: bool
+    short_tmp: Path, loaded: bool
 ) -> None:
     # meiva:note
     # launchd's answer is the one fact no local resource can produce: whether the helper job is
     # loaded. `retirement_query` is that answer.
-    from services.desktop.permissions_helper import launchd_job
+    def runner(
+        cmd: Sequence[str],
+        /,
+        *,
+        timeout: float,
+        capture_output: bool = True,
+    ) -> subprocess.CompletedProcess[bytes]:
+        del timeout, capture_output
+        if loaded:
+            return subprocess.CompletedProcess(cmd, 0, b"state = spawn scheduled\n", b"")
+        return subprocess.CompletedProcess(cmd, 113, b"", b"Could not find service")
 
-    def query(_target: str, _deadline: float) -> str | None:
-        return "state = spawn scheduled" if loaded else None
-
-    monkeypatch.setattr(launchd_job, "retirement_query", query)
     unavailable = serve(ScriptedHelper(root_status=PermissionsHelperError("AF_UNIX path too long")))
 
     if loaded:
         with pytest.raises(driver.RootDriverError, match="custody is unavailable"):
-            driver.stop_dormant_helper_root(float("inf"), helper=unavailable, home=short_tmp)
+            driver.stop_dormant_helper_root(
+                float("inf"), helper=unavailable, home=short_tmp, runner=runner
+            )
     else:
-        driver.stop_dormant_helper_root(float("inf"), helper=unavailable, home=short_tmp)
+        driver.stop_dormant_helper_root(
+            float("inf"), helper=unavailable, home=short_tmp, runner=runner
+        )
 
 
 # meiva:note

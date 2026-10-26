@@ -20,6 +20,8 @@ from __future__ import annotations
 from collections.abc import Callable
 from dataclasses import dataclass
 
+import httpx
+
 from base.lm.catalog import ModelCatalog
 from services.derived.memory_indexer.embeddings import gemini
 from services.derived.memory_indexer.embeddings.base import EmbeddingProvider
@@ -35,14 +37,14 @@ class EmbeddingDescriptor:
 
 
 _ProviderEntry = tuple[
-    Callable[[ModelCatalog, float, str | None], EmbeddingProvider],
+    Callable[[ModelCatalog, float, str | None, httpx.AsyncBaseTransport | None], EmbeddingProvider],
     Callable[[float], float],
     EmbeddingDescriptor,
 ]
 PROVIDERS: dict[str, _ProviderEntry] = {
     gemini.GeminiEmbeddingProvider.name: (
-        lambda catalog, timeout_s, api_key: gemini.GeminiEmbeddingProvider(
-            catalog, timeout_s=timeout_s, api_key=api_key
+        lambda catalog, timeout_s, api_key, transport=None: gemini.GeminiEmbeddingProvider(
+            catalog, timeout_s=timeout_s, api_key=api_key, transport=transport
         ),
         gemini.worst_case_batch_seconds,
         EmbeddingDescriptor(
@@ -66,10 +68,15 @@ def _provider_entry(name: str) -> _ProviderEntry:
 # Construct the provider `name` selects (the root read it from `MEIVA_EMBEDDING_BACKEND`);
 # unknown names fail fast.
 def get_provider(
-    name: str, *, catalog: ModelCatalog, timeout_s: float, api_key: str | None
+    name: str,
+    *,
+    catalog: ModelCatalog,
+    timeout_s: float,
+    api_key: str | None,
+    transport: httpx.AsyncBaseTransport | None = None,
 ) -> EmbeddingProvider:
     ctor, _, _ = _provider_entry(name)
-    return ctor(catalog, timeout_s, api_key)
+    return ctor(catalog, timeout_s, api_key, transport)
 
 
 def worst_case_batch_seconds(name: str, *, timeout_seconds: float) -> float:

@@ -13,7 +13,7 @@ from langchain_core.messages import AIMessage
 
 from base.lm.catalog import ModelCatalog
 from base.lm.content import message_addl_kwargs
-from base.lm.pricing import CostQuote, quote, tally_tokens
+from base.lm.pricing import CacheTokens, CostQuote, quote, tally_tokens
 from base.lm.pricing.cache_writes import cache_write_tokens
 from base.lm.provider_api import InferenceSpeed
 from base.log import logger
@@ -50,24 +50,46 @@ def _metered_cache_read(usage: Mapping[str, Any], cached: int) -> int | None:
     )
 
 
+@dataclass(frozen=True, slots=True)
+class UsageOptions:
+    latency_ms: float | None = None
+    decode_ms: float | None = None
+    priced_at: datetime | None = None
+    source: str | None = None
+    for_agent_id: int | None = None
+    attribution: str | None = None
+    stamp_message: bool = False
+
+
+_DEFAULT_USAGE_OPTIONS = UsageOptions()
+
+
+@dataclass(frozen=True, slots=True)
+class UsageFields:
+    tok_in: int
+    tok_out: int = 0
+    tok_cached: int | None = None
+    cache_write_5m: int = 0
+    cache_write_1h: int = 0
+    tok_reasoning: int = 0
+    latency_ms: float | None = None
+    source: str | None = None
+    for_agent_id: int | None = None
+    calls: int = 1
+
+
 def log_usage_from_message(
     msg: AIMessage,
     model: str,
     *,
-    latency_ms: float | None = None,
-    decode_ms: float | None = None,
-    priced_at: datetime | None = None,
     usage_kind: str = "agent",
-    source: str | None = None,
-    for_agent_id: int | None = None,
-    attribution: str | None = None,
-    stamp_message: bool = False,
+    options: UsageOptions = _DEFAULT_USAGE_OPTIONS,
     catalog: ModelCatalog,
 ) -> tuple[int, float] | None:
     # meiva:note
     # Log one completed LangChain message's token usage and price snapshot.
     #
-    # `stamp_message` also writes the logged figures onto `msg.additional_kwargs["meiva_usage"]`
+    # `options.stamp_message` also writes the logged figures onto `msg.additional_kwargs["meiva_usage"]`
     # (`MeivaUsage`): the one `quote` result feeds the event and the message alike.
 
     # meiva:note
@@ -105,38 +127,29 @@ def log_usage_from_message(
             cache_write_5m=write_5m,
             cache_write_1h=write_1h,
             reasoning=reasoning,
-            latency_ms=latency_ms,
-            decode_ms=decode_ms,
-            priced_at=priced_at,
+            latency_ms=options.latency_ms,
+            decode_ms=options.decode_ms,
+            priced_at=options.priced_at,
             usage_kind=usage_kind,
-            source=source,
-            for_agent_id=for_agent_id,
-            attribution=attribution,
+            source=options.source,
+            for_agent_id=options.for_agent_id,
+            attribution=options.attribution,
             emit_billing="input_tokens" in usage_metadata and "output_tokens" in usage_metadata,
             requested_model=model,
             catalog=catalog,
         ),
         record_out=record,
     )
-    if stamp_message:
+    if options.stamp_message:
         message_addl_kwargs(msg)["meiva_usage"] = record
     return logged
 
 
 def log_usage_fields(
     model: str,
+    fields: UsageFields,
     *,
-    tok_in: int,
-    tok_out: int,
-    tok_cached: int | None = None,
-    cache_write_5m: int = 0,
-    cache_write_1h: int = 0,
-    tok_reasoning: int = 0,
-    latency_ms: float | None = None,
     usage_kind: str,
-    source: str | None = None,
-    for_agent_id: int | None = None,
-    calls: int = 1,
     catalog: ModelCatalog,
 ) -> tuple[int, float]:
     # meiva:note
@@ -144,17 +157,17 @@ def log_usage_fields(
     return _log_usage(
         _UsageEvent(
             model=model,
-            in_total=tok_in,
-            out_total=tok_out,
-            cache_read=tok_cached,
-            cache_write_5m=cache_write_5m,
-            cache_write_1h=cache_write_1h,
-            reasoning=tok_reasoning,
-            latency_ms=latency_ms,
+            in_total=fields.tok_in,
+            out_total=fields.tok_out,
+            cache_read=fields.tok_cached,
+            cache_write_5m=fields.cache_write_5m,
+            cache_write_1h=fields.cache_write_1h,
+            reasoning=fields.tok_reasoning,
+            latency_ms=fields.latency_ms,
             usage_kind=usage_kind,
-            source=source,
-            for_agent_id=for_agent_id,
-            calls=calls,
+            source=fields.source,
+            for_agent_id=fields.for_agent_id,
+            calls=fields.calls,
             catalog=catalog,
         )
     )
@@ -241,10 +254,12 @@ def _log_usage(
         event.model,
         event.in_total,
         event.out_total,
-        event.cache_read,
+        CacheTokens(
+            read=0 if event.cache_read is None else event.cache_read,
+            write_5m=event.cache_write_5m,
+            write_1h=event.cache_write_1h,
+        ),
         at=event.priced_at,
-        cache_write_5m=event.cache_write_5m,
-        cache_write_1h=event.cache_write_1h,
         prices=event.catalog.prices,
     )
     if priced is not None:
@@ -456,9 +471,11 @@ def emit_billing_from_message(
             model,
             tok_in,
             tok_out,
-            tok_cached,
-            cache_write_5m=write_5m,
-            cache_write_1h=write_1h,
+            CacheTokens(
+                read=0 if tok_cached is None else tok_cached,
+                write_5m=write_5m,
+                write_1h=write_1h,
+            ),
             prices=catalog.prices,
         )
         emit_billing_event(

@@ -35,6 +35,7 @@ from base.deploy.progress_timeout import CRITICAL_SERVICE_SESSIONS
 from base.host.atomic_io import write_text_atomic
 from base.host.env.registry import process_environment
 from base.host.permissions_helper.client import HelperFactory, PermissionsHelperError
+from base.host.proc import run_bounded
 from base.host.system.hostport import Host
 from base.native_process.ownership import OwnedProcess
 from base.native_process.root_control import instance_lock
@@ -82,6 +83,7 @@ from cli.commands.lifecycle.root_control.snapshot import (
 )
 from cli.database.lifecycle_audit import record_lifecycle_request
 from cli.start_runtime import StartRuntime
+from services.desktop.permissions_helper.launchd_job import BoundedRunner
 from services.supervision.roster import service_spec
 from services.supervision.roster.service_spec import ServiceSpec
 
@@ -684,7 +686,13 @@ def root_tree_selection(home: Path) -> dict[str, str]:
     return {session_name(unit_id): unit_id for unit_id in root_units(snapshot)}
 
 
-def stop_dormant_helper_root(deadline: float, *, helper: HelperFactory | None, home: Path) -> None:
+def stop_dormant_helper_root(
+    deadline: float,
+    *,
+    helper: HelperFactory | None,
+    home: Path,
+    runner: BoundedRunner = run_bounded,
+) -> None:
     """Revoke a pending keeper restart even when no root IPC is serving."""
     if helper is None:
         return
@@ -698,7 +706,7 @@ def stop_dormant_helper_root(deadline: float, *, helper: HelperFactory | None, h
         keeper = helper().root_status()
     except PermissionsHelperError as exc:
         target = f"{helper_job_domain()}/{helper_job_label()}"
-        if retirement_query(target, deadline) is None:
+        if retirement_query(target, deadline, runner=runner) is None:
             return
         raise RootDriverError(
             "loaded helper custody is unavailable; stop remains incomplete"

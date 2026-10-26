@@ -11,6 +11,3 @@ exports = ["start_harness.py"]
 "test_start_generation.py" = ["child_loaded_verifier_import.py"]
 "test_start_health_port_gate.py" = ["start_harness.py"]
 "test_start_live_path.py" = ["start_harness.py"]
-
-[debt.first-party-patch]
-"test_start_generation.py#monkeypatch.setattr base.host.runtime_interpreter.loaded_runtime" = 1

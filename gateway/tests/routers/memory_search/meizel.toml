@@ -3,10 +3,3 @@
 "test_memory_pool.py" = ["search_support.py"]
 "test_memory_search.py" = ["search_support.py"]
 "test_search_budget.py" = ["search_support.py"]
-
-[debt.first-party-patch]
-"search_support.py#monkeypatch.setattr services.derived.memory_indexer.rerank.ask_relevance" = 1
-"test_memory_search.py#monkeypatch.setattr base.lm.usage.log_usage_fields" = 1
-
-[debt.third-party-patch]
-"test_memory_search.py#monkeypatch.setattr httpx.AsyncClient" = 1

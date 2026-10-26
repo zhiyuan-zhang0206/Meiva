@@ -25,6 +25,7 @@ import pytest
 from dotenv import dotenv_values
 
 from base import paths
+from base.cluster.dataplane.runtime_binaries import vendored_pg_dir
 from base.config import settings
 from base.paths.tests.homes import point_home
 from scripts.data_plane_ops import rotate_cluster_secret as rotate
@@ -109,34 +110,36 @@ def test_a_born_homes_rotation_keeps_its_minted_passphrase(born: Path) -> None:
 
 
 @pytest.fixture
-def backups(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, db_url: str) -> Callable[[], Path]:
+def backups(tmp_path: Path, db_url: str) -> Callable[[], Path]:
     """Take one logical backup of this process's home through `run_backup`
     (real openssl encryption)."""
     _ = db_url
     directory = tmp_path / "backups-db"
-    fake_dump = tmp_path / "pg_dump"
-    fake_dump.write_text(
-        f"#!{sys.executable}\n"
-        "from pathlib import Path\n"
-        "import sys\n"
-        "Path(sys.argv[sys.argv.index('--file') + 1]).write_bytes(b'PGDMP fake dump')\n",
-        encoding="utf-8",
-    )
-    fake_dump.chmod(0o700)
-    real_pg_tool = backup.pg_tool
-
-    def pg_tool(name: str) -> Path:
-        return fake_dump if name == "pg_dump" else real_pg_tool(name)
-
-    monkeypatch.setattr(backup, "pg_tool", pg_tool)
     stamps = iter(range(1, 60))
 
     def take() -> Path:
+        current_home = paths.meiva_home()
+        bin_dir = vendored_pg_dir(current_home) / "bin"
+        bin_dir.mkdir(parents=True, exist_ok=True)
+        initdb = bin_dir / "initdb"
+        if not initdb.exists():
+            initdb.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
+            initdb.chmod(0o755)
+        fake_dump = bin_dir / "pg_dump"
+        if not fake_dump.exists():
+            fake_dump.write_text(
+                f"#!{sys.executable}\n"
+                "from pathlib import Path\n"
+                "import sys\n"
+                "Path(sys.argv[sys.argv.index('--file') + 1]).write_bytes(b'PGDMP fake dump')\n",
+                encoding="utf-8",
+            )
+            fake_dump.chmod(0o755)
         now = datetime(2026, 9, 27, 3, next(stamps), tzinfo=UTC)
         staging = directory / f"stage-{now.minute}"
         return backup.run_backup(
             now,
-            tree=BackupTree(paths.meiva_home()),
+            tree=BackupTree(current_home),
             db_url="dbname=meiva",
             keep=settings.services.backup_keep,
             offsite_target=None,

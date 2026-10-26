@@ -19,7 +19,6 @@ from langchain_core.messages import AIMessage
 
 from base.config.tests.configuration import model_overrides
 from base.host.env.agent_slices import ModelOverrides
-from base.lm import call
 from base.lm.call import answer_text, extract_text, invoke_text
 from base.lm.catalog import ModelCatalog
 from base.lm.catalog.provider_keys import ProviderKeys
@@ -311,25 +310,12 @@ def test_answer_text_build_failure_uses_build_error_when_given(
 # ─── invoke_text retry ────────────────────────────────────────────────────
 
 
-def _no_jitter(delay: float) -> float:
-    """Stand-in for `jittered` where `invoke_response` imported it: waits equal the backoff."""
-    return delay
-
-
-def _capture_retry_sleeps(monkeypatch: pytest.MonkeyPatch) -> list[float]:
-    sleeps: list[float] = []
-    monkeypatch.setattr("time.sleep", sleeps.append)
-    monkeypatch.setattr(call, "jittered", _no_jitter)
-    return sleeps
-
-
 def test_invoke_text_retries_transient_then_succeeds(
-    monkeypatch: pytest.MonkeyPatch, *, model_catalog: ModelCatalog
+    retry_waits: list[float], *, model_catalog: ModelCatalog
 ) -> None:
     """A TRANSIENT provider failure (transport class) is retried when
     `retry_attempts` allows, and a later success returns normally."""
 
-    _capture_retry_sleeps(monkeypatch)
     calls = {"n": 0}
 
     class _Flaky:
@@ -346,19 +332,19 @@ def test_invoke_text_retries_transient_then_succeeds(
         error_type=ValueError,
         retry_attempts=2,
         retry_delay_seconds=0.0,
+        retry_jitter="none",
         catalog=model_catalog,
     )
     assert out == "answer"
     assert calls["n"] == 2
+    assert retry_waits == [0.0]
 
 
 def test_invoke_text_retry_exhausted_raises_error_type(
-    monkeypatch: pytest.MonkeyPatch, *, model_catalog: ModelCatalog
+    retry_waits: list[float], *, model_catalog: ModelCatalog
 ) -> None:
     """A failure that persists past the retry budget raises the caller's
     error type with the attempt count in the message."""
-
-    _capture_retry_sleeps(monkeypatch)
 
     class _Always:
         def invoke(self, messages: list[Any]) -> Any:
@@ -372,17 +358,17 @@ def test_invoke_text_retry_exhausted_raises_error_type(
             error_type=ValueError,
             retry_attempts=1,
             retry_delay_seconds=0.0,
+            retry_jitter="none",
             catalog=model_catalog,
         )
+    assert retry_waits == [0.0]
 
 
 def test_invoke_text_retry_uses_exponential_backoff(
-    monkeypatch: pytest.MonkeyPatch, *, model_catalog: ModelCatalog
+    retry_waits: list[float], *, model_catalog: ModelCatalog
 ) -> None:
     """Retry waits double per attempt (base 2 → 4 → 8…) capped at
     retry_max_delay_seconds, plus jitter; the base itself is not re-added."""
-
-    sleeps = _capture_retry_sleeps(monkeypatch)
 
     class _Always:
         def invoke(self, messages: list[Any]) -> Any:
@@ -397,17 +383,16 @@ def test_invoke_text_retry_uses_exponential_backoff(
             retry_attempts=3,
             retry_delay_seconds=2.0,
             retry_max_delay_seconds=30.0,
+            retry_jitter="none",
             catalog=model_catalog,
         )
-    assert sleeps == [2.0, 4.0, 8.0]
+    assert retry_waits == [2.0, 4.0, 8.0]
 
 
 def test_invoke_text_retry_backoff_capped(
-    monkeypatch: pytest.MonkeyPatch, *, model_catalog: ModelCatalog
+    retry_waits: list[float], *, model_catalog: ModelCatalog
 ) -> None:
     """The exponential sequence stops growing at retry_max_delay_seconds."""
-
-    sleeps = _capture_retry_sleeps(monkeypatch)
 
     class _Always:
         def invoke(self, messages: list[Any]) -> Any:
@@ -422,9 +407,10 @@ def test_invoke_text_retry_backoff_capped(
             retry_attempts=4,
             retry_delay_seconds=2.0,
             retry_max_delay_seconds=5.0,
+            retry_jitter="none",
             catalog=model_catalog,
         )
-    assert sleeps == [2.0, 4.0, 5.0, 5.0]
+    assert retry_waits == [2.0, 4.0, 5.0, 5.0]
 
 
 class _RetryAfterLLM:
@@ -444,11 +430,10 @@ class _RetryAfterLLM:
 
 
 def test_invoke_text_retry_respects_retry_after(
-    monkeypatch: pytest.MonkeyPatch, *, model_catalog: ModelCatalog
+    retry_waits: list[float], *, model_catalog: ModelCatalog
 ) -> None:
     """A provider Retry-After header longer than the backoff wins (capped at
     120s), plus jitter — mirroring the SDKs' own header reading at our layer."""
-    sleeps = _capture_retry_sleeps(monkeypatch)
 
     with pytest.raises(ValueError, match="429"):
         invoke_text(
@@ -458,18 +443,18 @@ def test_invoke_text_retry_respects_retry_after(
             error_type=ValueError,
             retry_attempts=2,
             retry_delay_seconds=2.0,
+            retry_jitter="none",
             catalog=model_catalog,
         )
     # attempt 1 backoff would be 2s, but Retry-After 45 wins; attempt 2 too.
-    assert sleeps == [45.0, 45.0]
+    assert retry_waits == [45.0, 45.0]
 
 
 def test_invoke_text_retry_after_capped_at_120(
-    monkeypatch: pytest.MonkeyPatch, *, model_catalog: ModelCatalog
+    retry_waits: list[float], *, model_catalog: ModelCatalog
 ) -> None:
     """A Retry-After above 120s is ignored (treated as absent) — the backoff
     sequence applies instead."""
-    sleeps = _capture_retry_sleeps(monkeypatch)
 
     with pytest.raises(ValueError, match="429"):
         invoke_text(
@@ -479,16 +464,16 @@ def test_invoke_text_retry_after_capped_at_120(
             error_type=ValueError,
             retry_attempts=2,
             retry_delay_seconds=2.0,
+            retry_jitter="none",
             catalog=model_catalog,
         )
-    assert sleeps == [2.0, 4.0]  # Retry-After 300 ignored
+    assert retry_waits == [2.0, 4.0]  # Retry-After 300 ignored
 
 
 def test_invoke_text_retry_after_ms_header(
-    monkeypatch: pytest.MonkeyPatch, *, model_catalog: ModelCatalog
+    retry_waits: list[float], *, model_catalog: ModelCatalog
 ) -> None:
     """`retry-after-ms` (the SDKs' non-standard precision header) is honored."""
-    sleeps = _capture_retry_sleeps(monkeypatch)
 
     with pytest.raises(ValueError, match="429"):
         invoke_text(
@@ -498,9 +483,10 @@ def test_invoke_text_retry_after_ms_header(
             error_type=ValueError,
             retry_attempts=1,
             retry_delay_seconds=2.0,
+            retry_jitter="none",
             catalog=model_catalog,
         )
-    assert sleeps == [7.0]  # 7000ms → 7s, longer than the 2s backoff
+    assert retry_waits == [7.0]  # 7000ms → 7s, longer than the 2s backoff
 
 
 def test_invoke_text_does_not_retry_permanent(*, model_catalog: ModelCatalog) -> None:

@@ -51,7 +51,11 @@ def _markers_only(messages: list[BaseMessage]) -> list[BaseMessage]:
 def _cancel_outcome(ctx: MeivaContext, agent_id: int, st: BatchState) -> _Outcome:
     if st.compact_payload is not None and st.compact_payload[2] is not None:
         emit_compact_finished(
-            ctx.event_publisher, agent_id, st.compact_payload[2], status=CompactionStatus.REPLACED
+            ctx.event_publisher,
+            agent_id,
+            st.compact_payload[2],
+            finished_at=ctx.require_clock().now(),
+            status=CompactionStatus.REPLACED,
         )
     if st.committed_chat_ids:
         return _Outcome(
@@ -88,9 +92,14 @@ async def _compact_outcome(
         compact_kind=compact_kind,
         compact=state.compact,
     )
+    now = ctx.require_clock().now()
     ctx.event_publisher.emit(CompactDone(agent_id=agent_id).model_dump_json())
     emit_compact_finished(
-        ctx.event_publisher, agent_id, compact_run_id, status=CompactionStatus.SUCCESS
+        ctx.event_publisher,
+        agent_id,
+        compact_run_id,
+        finished_at=now,
+        status=CompactionStatus.SUCCESS,
     )
     await stamp_compact_boundary(
         ctx.ops_pool,
@@ -107,7 +116,6 @@ async def _compact_outcome(
         st.committed_chat_ids = []
     await finalize_claimed_inbounds(ctx.ops_pool, agent_id, incarnation=ctx.original_incarnation)
     halted = st.restart_preserves_idle and not st.committed_chat_ids
-    now = ctx.require_clock().now()
     dump_path = dump_history(
         state.messages,
         workspace_dir(agent_id),

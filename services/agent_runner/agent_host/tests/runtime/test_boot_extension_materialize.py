@@ -63,16 +63,14 @@ def test_boot_lands_a_skill_this_machine_never_installed(
     ) == (src / "SKILL.md").read_text(encoding="utf-8")
 
 
-def test_an_unreadable_registry_does_not_stop_the_boot(
-    unit_home: Path, monkeypatch: pytest.MonkeyPatch, database: Database
-) -> None:
+def test_an_unreadable_registry_does_not_stop_the_boot(unit_home: Path, database: Database) -> None:
+    import dataclasses
 
-    def _refuse(**_kwargs: object) -> psycopg.Connection:
-        raise psycopg.errors.InsufficientPrivilege("permission denied for table extensions")
-
-    monkeypatch.setattr(db, "connect", _refuse)
-
-    land_cluster_extensions(database)
+    unreachable = Database(
+        dataclasses.replace(database._config, db_url="postgresql://127.0.0.1:1/meiva"),
+        gate=database._gate,
+    )
+    land_cluster_extensions(unreachable)
 
     assert not (unit_home / "skills").exists()
 
