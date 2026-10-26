@@ -21,6 +21,7 @@ import httpx
 from base.clock import SYSTEM_TIMERS, Timers
 from base.cluster.machine import GatewayAccess, gateway_auth_headers
 from base.cluster.machine.ambient import gateway_access_from_settings
+from base.cluster.machine.boot import gateway_access_from_boot
 from base.cluster.machines import (
     MachineGatewayUrlMissing,
     MachineNotRegistered,
@@ -28,7 +29,7 @@ from base.cluster.machines import (
 from base.cluster.machines import (
     lookup as lookup_machine_url,
 )
-from base.config import settings
+from base.config import ConfigBoot, settings
 from base.db import Database
 from ops.cluster.rpc_plans import (
     JITTER_HIGH,
@@ -137,6 +138,23 @@ class RpcClient:
     def system(cls) -> Self:
         return cls(
             config=rpc_config_from_settings(), access=_access_from_settings, timers=SYSTEM_TIMERS
+        )
+
+    # meiva:note
+    # The client a root builds from its own configuration: the dispatch budget from the
+    # `gateway` fields, and the gateway access read from `config` on every attempt (a credential
+    # refreshed between attempts is the one presented). The root hands in `timers`; nothing here
+    # reads a process singleton.
+    @classmethod
+    def from_boot(cls, config: ConfigBoot, *, timers: Timers) -> Self:
+        gateway = config.view.gateway
+        return cls(
+            config=RpcConfig(
+                timeout_seconds=gateway.cluster_rpc_timeout_seconds,
+                max_retries=gateway.cluster_rpc_max_retries,
+            ),
+            access=lambda: gateway_access_from_boot(config),
+            timers=timers,
         )
 
     async def _dispatch_once(
