@@ -12,12 +12,14 @@ from typing import Any, Literal
 import psutil
 import pytest
 
+from base.clock import SYSTEM_TIMERS
 from base.deploy.lifecycle import status_journal
 from base.native_process.ownership import OwnedProcess
 from base.sessions.pty import closure
 from base.sessions.pty.survivor_role import SurvivorRole
 from base.sessions.record import SessionRecord
 from cli.commands.data_plane import maintenance_stop_report as report
+from cli.commands.data_plane.stop_waits import Deadline
 from cli.commands.lifecycle.stop import report as stop_report
 from cli.commands.lifecycle.stop import shell_sessions as shells
 from cli.commands.lifecycle.tests.stop.stop_support import (
@@ -47,7 +49,7 @@ def settle(
     shells.settle_closure(
         outcome,
         pty_close_notices.STOP_REASON,
-        deadline=time.monotonic() + window_s,
+        deadline=Deadline.after(window_s, SYSTEM_TIMERS),
         direct_db=False,
         database_factory=database_factory,
         command=runtime,

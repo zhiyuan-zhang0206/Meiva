@@ -30,7 +30,7 @@ import psutil
 
 from base import cluster
 from base.agents.context.clients import DatabaseFactory
-from base.clock import SYSTEM_TIMERS
+from base.clock import Timers
 from base.cluster import ownership
 from base.cluster import postgres as owned_postgres
 from base.cluster.checkpoint_schema import PostgresCheckpointSchema
@@ -108,6 +108,7 @@ def ensure_gateway_data_plane(
     retained_children: list[subprocess.Popen[bytes]] | None,
     database_factory: DatabaseFactory,
     machine: MachineIdentityReader,
+    timers: Timers,
 ) -> int:
     if retained_children is None and not config.is_remote:
         raise ValueError("PostgreSQL launch requires its caller-owned child retention")
@@ -141,6 +142,7 @@ def ensure_gateway_data_plane(
                 retained_children=retained_children,
                 machine=machine,
                 macos=macos,
+                timers=timers,
             )
         case _:
             assert_never(admission)
@@ -476,6 +478,7 @@ def stop_cluster_instance(
     macos: bool,
     retained_children: list[subprocess.Popen[bytes]] | None = None,
     producer: Callable[[], EventPipeline],
+    timers: Timers,
 ) -> int:
     if config.is_remote:
         print(stop_plan.remote_stop_notice(url_host(config.db_url)))
@@ -493,14 +496,14 @@ def stop_cluster_instance(
                 # meiva:note
                 # Stop the pooler first (best-effort, no-op if it was never enabled) so clients
                 # are disconnected before Postgres goes down.
-                pgbouncer.stop_pgbouncer()
+                pgbouncer.stop_pgbouncer(timers=timers)
             case stop_plan.StopPostgres():
                 escalation = owned_postgres.stop(
                     instance.pg_data_dir(home),
                     immediate_wait=PROCESS_CLEANUP_WAIT_S,
                     kill_wait=PROCESS_KILL_WAIT_S,
                     retained_children=retained_children,
-                    timers=SYSTEM_TIMERS,
+                    timers=timers,
                 )
                 if escalation is not None:
                     report_postgres_stop_escalation(escalation, producer=producer)

@@ -27,7 +27,7 @@ from base.host.proc import hosting_exec_domain
 from base.sessions.hosting import hosting_supervised_session
 from base.sessions.pty.paths import SERVICE_UNIT
 from cli.commands.data_plane.stop_budget import require_valid_timeout
-from cli.commands.data_plane.stop_waits import deadline_after
+from cli.commands.data_plane.stop_waits import Deadline
 from cli.commands.lifecycle import root_driver
 from cli.commands.lifecycle.stop.admission import CONFIRM_PROMPT, confirmed, hosted_stop_refusal
 from cli.commands.lifecycle.stop.choices import (
@@ -149,7 +149,7 @@ def _run_force(
     env: StopEnvironment,
     retained_children: list[subprocess.Popen[bytes]] | None,
 ) -> int:
-    run = StopRun(deadline_after(request.timeout), [])
+    run = StopRun(Deadline.after(request.timeout, env.command.timers), [])
     try:
         execute_plan(plan, env, run, retained_children, timed=False)
     except DataPlaneStopError as exc:
@@ -164,9 +164,9 @@ def _run_normal(
     env: StopEnvironment,
     retained_children: list[subprocess.Popen[bytes]] | None,
 ) -> int:
-    deadline = deadline_after(request.timeout)
+    deadline = Deadline.after(request.timeout, env.command.timers)
     home = env.command.home
-    owns_journal = begin(home, "stop", pid=env.command.pid, deadline=deadline)
+    owns_journal = begin(home, "stop", pid=env.command.pid, deadline=deadline.at)
     # meiva:note
     # Per-phase accounting: a failed stop names each phase and how much of the shared budget it
     # consumed, so the operator sees WHERE the budget went, never a bare timeout (#2045).

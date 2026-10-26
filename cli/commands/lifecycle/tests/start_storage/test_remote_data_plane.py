@@ -19,6 +19,7 @@ from pathlib import Path
 
 import pytest
 
+from base.clock import SYSTEM_TIMERS
 from cli.commands.data_plane import bringup
 from cli.commands.data_plane.config import DataPlaneConfig
 from cli.commands.data_plane.tests.data_plane_records import data_plane_config as data_plane_config
@@ -72,6 +73,7 @@ def test_start_remote_skips_local_instance_and_probes(
         database_factory=operator_database,
         machine=command_runtime.machine,
         macos=command_runtime.host.platform.system == "darwin",
+        timers=SYSTEM_TIMERS,
     )
 
     assert rc == 0
@@ -100,6 +102,7 @@ def test_start_remote_unreachable_fails_fast_with_dial_detail(
         database_factory=operator_database,
         machine=command_runtime.machine,
         macos=command_runtime.host.platform.system == "darwin",
+        timers=SYSTEM_TIMERS,
     )
 
     assert rc == 1
@@ -130,6 +133,7 @@ def test_start_remote_redis_unreachable_fails_after_the_database_answers(
         database_factory=operator_database,
         machine=command_runtime.machine,
         macos=command_runtime.host.platform.system == "darwin",
+        timers=SYSTEM_TIMERS,
     )
 
     assert rc == 1

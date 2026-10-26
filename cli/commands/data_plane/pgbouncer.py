@@ -41,7 +41,6 @@ from __future__ import annotations
 import shutil
 import signal
 import sys
-import time
 from collections.abc import Mapping
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -49,7 +48,7 @@ from typing import Literal, assert_never
 
 import psutil
 
-from base.clock import SYSTEM_TIMERS
+from base.clock import Timers
 from base.cluster import ownership, port_preflight
 from base.cluster.dataplane import pooler as pooler_files
 from base.cluster.machine import MachineIdentityReader
@@ -135,6 +134,7 @@ class PoolerSpec:
     daemon_env: Mapping[str, str] = field(repr=False)
     macos: bool
     bind_wait_s: float
+    timers: Timers
     stop_wait_s: float = RESTART_STOP_WAIT_S
     ready_wait_s: float = READY_WAIT_S
 
@@ -256,12 +256,12 @@ def running_pid() -> int | None:
     return None
 
 
-def _accepting_pooler(listen_port: int) -> OwnedPooler | None:
+def _accepting_pooler(listen_port: int, timers: Timers) -> OwnedPooler | None:
     owner = ownership.pooler(pooler_files.ini_path(), pooler_files.pidfile_path())
     if owner is None:
         port_preflight.require_listener(None, listen_port, required=False)
         return None
-    custodian = OwnedPooler(owner, listen_port, pooler_files.ini_path())
+    custodian = OwnedPooler(owner, listen_port, pooler_files.ini_path(), timers)
     custodian.require_accepting()
     return custodian
 
@@ -325,13 +325,13 @@ def _launch(run: _Run) -> int:
     # meiva:note
     # `-d` daemonizes and returns at once; wait for the admin console to authenticate. The
     # caller proves each delivered login's pooled backend.
-    deadline = SYSTEM_TIMERS.monotonic() + spec.ready_wait_s
+    deadline = spec.timers.monotonic() + spec.ready_wait_s
     while not pooler_files.admin_reachable(spec.shape.listen_port, spec.admin_password):
-        left = deadline - SYSTEM_TIMERS.monotonic()
+        left = deadline - spec.timers.monotonic()
         if left <= 0:
             print(text.not_ready(), file=sys.stderr)
             return 1
-        SYSTEM_TIMERS.sleep(min(_READY_POLL_S, left))
+        spec.timers.sleep(min(_READY_POLL_S, left))
     machine = spec.shape.machine
     if not pooler_files.pgbouncer_public_listener_reachable(
         spec.shape.listen_port, POOLER_ADMIN, machine=machine
@@ -359,7 +359,9 @@ def _perform(step: PoolerStep, run: _Run) -> int:
         case Reload():
             return _reload(run)
         case AwaitReachableBind(context):
-            if not wait_for_reachable_bind(host=text.host, timeout_s=spec.bind_wait_s):
+            if not wait_for_reachable_bind(
+                host=text.host, timeout_s=spec.bind_wait_s, timers=spec.timers
+            ):
                 print(text.bind_missing(context), file=sys.stderr)
                 return 1
         case AnnounceChangedRestart():
@@ -368,7 +370,7 @@ def _perform(step: PoolerStep, run: _Run) -> int:
             print(text.degraded_restart(), file=sys.stderr)
         case StopRunning():
             custodian = run.running()
-            if not custodian.stop(deadline=time.monotonic() + spec.stop_wait_s):
+            if not custodian.stop(deadline=spec.timers.monotonic() + spec.stop_wait_s):
                 print(text.stop_survived(custodian.identity.pid), file=sys.stderr)
                 return 1
         case Launch():
@@ -399,7 +401,7 @@ def ensure_pgbouncer(spec: PoolerSpec) -> int:
     if not binary_installed(spec.binary):
         print(not_installed_error(spec.binary, _install_hint(macos=spec.macos)), file=sys.stderr)
         return 1
-    custodian = _accepting_pooler(shape.listen_port)
+    custodian = _accepting_pooler(shape.listen_port, spec.timers)
     public = custodian is not None and pooler_files.pgbouncer_public_listener_reachable(
         shape.listen_port, POOLER_ADMIN, machine=shape.machine
     )
@@ -431,15 +433,15 @@ PoolerStop = Literal["not-running", "stopped", "forced"]
 # only a caller that owns an already-quiescent, already-revoked data plane passes it. Returns
 # how the stop ended: no pooler of this home was running, the safe shutdown completed, or force
 # escalated.
-def stop_pgbouncer(*, force: bool = False) -> PoolerStop:
+def stop_pgbouncer(*, timers: Timers, force: bool = False) -> PoolerStop:
     pid = running_pid()
     if pid is None:
         return "not-running"
     owner = ownership.pooler(pooler_files.ini_path(), pooler_files.pidfile_path())
     if owner is None:
         return "not-running"
-    custodian = OwnedPooler.from_config(owner, pooler_files.ini_path())
-    deadline = time.monotonic() + RESTART_STOP_WAIT_S
+    custodian = OwnedPooler.from_config(owner, pooler_files.ini_path(), timers)
+    deadline = timers.monotonic() + RESTART_STOP_WAIT_S
     try:
         if custodian.stop(deadline=deadline):
             return "stopped"

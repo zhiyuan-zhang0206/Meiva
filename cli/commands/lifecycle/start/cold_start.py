@@ -123,6 +123,7 @@ def _run_step(
                 retained_children=retained_children,
                 database_factory=cold.database_factory,
                 machine=command.machine,
+                timers=command.timers,
             )
         case ColdStep.GATEWAY_SCHEMA:
             bringup.prepare_gateway_schema(cold.plane, home=command.home)
@@ -140,6 +141,7 @@ def _run_step(
                 database_factory=cold.database_factory,
                 machine=command.machine,
                 macos=command.host.platform.system == "darwin",
+                timers=command.timers,
             )
             return 0
         case ColdStep.SCHEMA_CHECK:

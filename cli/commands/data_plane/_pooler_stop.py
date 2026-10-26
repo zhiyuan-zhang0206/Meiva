@@ -8,11 +8,10 @@
 from __future__ import annotations
 
 import signal
-import time
 from dataclasses import dataclass
 from pathlib import Path
 
-from base.clock import SYSTEM_TIMERS
+from base.clock import Timers
 from base.cluster import port_preflight
 from base.host.private_storage import write_private_bytes
 from base.native_process.os_platform import LockTimeoutError, file_lock
@@ -44,10 +43,11 @@ class OwnedPooler:
     identity: OwnedProcess
     port: int
     config: Path
+    timers: Timers
 
     @classmethod
-    def from_config(cls, identity: OwnedProcess, config: Path) -> OwnedPooler:
-        return cls(identity, listen_port(config.read_text()), config)
+    def from_config(cls, identity: OwnedProcess, config: Path, timers: Timers) -> OwnedPooler:
+        return cls(identity, listen_port(config.read_text()), config, timers)
 
     def _stop_requested(self) -> bool:
         try:
@@ -87,7 +87,7 @@ class OwnedPooler:
     # check and the delivery raises inside `send_signal`. The "native birth changed before signal"
     # error this stop used to raise covered the gone case too, which is now a finished stop.
     def _request_stop(self, deadline: float) -> None:
-        budget = time_left(deadline, time.monotonic())
+        budget = time_left(deadline, self.timers.monotonic())
         if budget is None:
             raise TimeoutError("PgBouncer stop deadline expired; custody retained")
         with file_lock(self.config.with_name("stop-intent.lock"), timeout_s=budget):
@@ -106,16 +106,16 @@ class OwnedPooler:
                     render_intent(_birth(self.identity)).encode(),
                 )
             if listeners and not requested:
-                if time_left(deadline, time.monotonic()) is None:
+                if time_left(deadline, self.timers.monotonic()) is None:
                     raise TimeoutError("PgBouncer stop deadline expired; custody retained")
                 self.identity.send_signal(signal.SIGINT)
 
     def _wait(self, deadline: float) -> bool:
         while self.identity.live():
-            delay = poll_delay(time_left(deadline, SYSTEM_TIMERS.monotonic()), _POLL_INTERVAL_S)
+            delay = poll_delay(time_left(deadline, self.timers.monotonic()), _POLL_INTERVAL_S)
             if delay is None:
                 return False
-            SYSTEM_TIMERS.sleep(delay)
+            self.timers.sleep(delay)
         return True
 
     # meiva:note
@@ -138,4 +138,4 @@ class OwnedPooler:
         if not self.identity.live() or self._listeners() is None:
             return True
         self.identity.send_signal(signal.SIGKILL)
-        return self._wait(time.monotonic() + _KILL_SETTLE_S)
+        return self._wait(self.timers.monotonic() + _KILL_SETTLE_S)

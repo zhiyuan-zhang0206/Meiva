@@ -9,7 +9,7 @@ import sys
 import psutil
 
 from base.native_process.ownership import OwnedProcess, capture_tree, retain_processes
-from cli.commands.data_plane.stop_waits import wait_for_exit
+from cli.commands.data_plane.stop_waits import Deadline, wait_for_exit
 from cli.database.runtime import CommandRuntime
 
 
@@ -29,7 +29,7 @@ def record_browser_session(command: CommandRuntime) -> None:
         print(f"  {line}")
 
 
-def stop_browser(deadline: float) -> None:
+def stop_browser(deadline: Deadline) -> None:
     from services.desktop.browser.orphan import find_cluster_chrome
 
     trees: set[OwnedProcess] = set()

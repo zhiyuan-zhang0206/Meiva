@@ -17,6 +17,7 @@ from pathlib import Path
 import psycopg
 import pytest
 
+from base.clock import SYSTEM_TIMERS
 from base.cluster.machine import MachineIdentityReader
 from cli.commands.data_plane import bringup, cluster_instance, completion
 from cli.commands.data_plane.config import DataPlaneConfig
@@ -61,6 +62,7 @@ def _start_instance(
         database_factory=factory,
         machine=machine,
         macos=NATIVE_TEST_MACOS,
+        timers=SYSTEM_TIMERS,
     )
     assert rc == 0
 
@@ -160,6 +162,7 @@ def test_a_release_readiness_refuses_a_home_without_a_ledger_before_any_dial(
             database_factory=operator_database,
             machine=command_machine,
             macos=NATIVE_TEST_MACOS,
+            timers=SYSTEM_TIMERS,
         )
 
 

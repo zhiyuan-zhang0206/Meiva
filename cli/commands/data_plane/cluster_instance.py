@@ -51,7 +51,7 @@ from typing import assert_never
 
 import psycopg
 
-from base.clock import SYSTEM_TIMERS
+from base.clock import Timers
 from base.cluster import ensure_cluster_redis_acl, ownership, port_preflight
 from base.cluster import postgres as owned_postgres
 from base.cluster.authority.monitor import MONITOR_MAP, MONITOR_ROLE
@@ -191,27 +191,27 @@ def addr_assigned(addr: str) -> bool:
 # Returns True immediately on a loopback-only (single-box) host — loopback is always present.
 # Returns False on timeout so the caller fails fast with a clear message instead of the
 # daemon dying on an un-bindable address.
-def wait_for_reachable_bind(*, host: str, timeout_s: float) -> bool:
+def wait_for_reachable_bind(*, host: str, timeout_s: float, timers: Timers) -> bool:
     if host in port_preflight.LOOPBACK_ALIASES:
         return True
-    started = SYSTEM_TIMERS.monotonic()
+    started = timers.monotonic()
     while True:
         verdict = wait_verdict(
             satisfied=addr_assigned(host),
-            elapsed_s=SYSTEM_TIMERS.monotonic() - started,
+            elapsed_s=timers.monotonic() - started,
             timeout_s=timeout_s,
         )
         if verdict is Wait.DONE:
             return True
         if verdict is Wait.EXPIRED:
             return False
-        SYSTEM_TIMERS.sleep(_BIND_WAIT_INTERVAL_S)
+        timers.sleep(_BIND_WAIT_INTERVAL_S)
 
 
 # meiva:note
 # Wait for `host` to be assigned to an interface; print why and say no when it never appears.
-def _await_bind(service: str, host: str, tuning: StartTuning) -> bool:
-    if wait_for_reachable_bind(host=host, timeout_s=tuning.bind_wait_s):
+def _await_bind(service: str, host: str, tuning: StartTuning, timers: Timers) -> bool:
+    if wait_for_reachable_bind(host=host, timeout_s=tuning.bind_wait_s, timers=timers):
         return True
     print(pg_plan.bind_refusal(service, host, int(tuning.bind_wait_s)), file=sys.stderr)
     return False
@@ -236,12 +236,14 @@ def _identity() -> pg_plan.PgIdentity:
 # A password-less dial as a role name that cannot exist must be asked for a password over
 # loopback TCP and over the owner-only socket (`pg_plan.hba_dial_verdict`). Bounded; raises
 # RuntimeError naming each path that did not demand a password.
-def require_authenticated_hba(pg_port: int, dial_host: str, *, socket_dir: Path) -> None:
+def require_authenticated_hba(
+    pg_port: int, dial_host: str, *, socket_dir: Path, timers: Timers
+) -> None:
     probe = f"meiva_hba_probe_{pg_port}"
     # meiva:note
     # A path that never exists: no ~/.pgpass entry can answer the challenge.
     passfile = str(socket_dir / "no-passfile")
-    started = SYSTEM_TIMERS.monotonic()
+    started = timers.monotonic()
     while True:
         unproven: list[str] = []
         for host in (dial_host, str(socket_dir)):
@@ -263,7 +265,7 @@ def require_authenticated_hba(pg_port: int, dial_host: str, *, socket_dir: Path)
                 unproven.append(reason)
         verdict = wait_verdict(
             satisfied=not unproven,
-            elapsed_s=SYSTEM_TIMERS.monotonic() - started,
+            elapsed_s=timers.monotonic() - started,
             timeout_s=_HBA_PROOF_TIMEOUT_S,
         )
         if verdict is Wait.DONE:
@@ -273,7 +275,7 @@ def require_authenticated_hba(pg_port: int, dial_host: str, *, socket_dir: Path)
                 "postgres does not enforce password authentication after its pg_hba "
                 "rewrite: " + "; ".join(unproven)
             )
-        SYSTEM_TIMERS.sleep(_HBA_PROOF_INTERVAL_S)
+        timers.sleep(_HBA_PROOF_INTERVAL_S)
 
 
 # meiva:note
@@ -344,6 +346,7 @@ def _launch_postmaster(
     retained_children: list[subprocess.Popen[bytes]],
     owner: OwnedProcess | None,
     tuning: StartTuning,
+    timers: Timers,
 ) -> None:
     data = pg_data_dir(home)
     pg_isready = str(pg_tool("pg_isready"))
@@ -369,7 +372,7 @@ def _launch_postmaster(
         timeout=tuning.pg_start_s,
         expected=owner,
         retained_children=retained_children,
-        timers=SYSTEM_TIMERS,
+        timers=timers,
     )
 
 
@@ -386,6 +389,7 @@ def start_pg(
     home: Path,
     retained_children: list[subprocess.Popen[bytes]],
     machine: MachineIdentityReader,
+    timers: Timers,
     tuning: StartTuning = PRODUCTION_TUNING,
 ) -> int:
     data = pg_data_dir(home)
@@ -404,7 +408,7 @@ def start_pg(
                 )
                 (data / "pg_hba.conf").write_text(hba)
             case pg_plan.AwaitReachableBind(host=host):
-                if not _await_bind("postgres", host, tuning):
+                if not _await_bind("postgres", host, tuning, timers):
                     return 1
             case pg_plan.LaunchPostmaster():
                 _launch_postmaster(
@@ -416,10 +420,13 @@ def start_pg(
                     retained_children=retained_children,
                     owner=owner,
                     tuning=tuning,
+                    timers=timers,
                 )
             case pg_plan.ProveAuthentication():
                 ownership.require_postgres(data, pg_port)
-                require_authenticated_hba(pg_port, dial_host, socket_dir=pg_socket_dir(home))
+                require_authenticated_hba(
+                    pg_port, dial_host, socket_dir=pg_socket_dir(home), timers=timers
+                )
                 print(
                     f"  ✓ postgres ready ({dial_host}:{pg_port}, password authentication enforced)"
                 )
@@ -479,6 +486,7 @@ class _RedisStart:
     home: Path
     machine: MachineIdentityReader
     tuning: StartTuning
+    timers: Timers
     macos: bool
     redis_cli: str
     dial_host: str
@@ -503,7 +511,7 @@ class _RedisStart:
             case redis_plan.RequireFreePort():
                 port_preflight.require_listener(None, self.redis_port, required=False)
             case redis_plan.AwaitReachableBind(host=host):
-                return 0 if _await_bind("redis", host, self.tuning) else 1
+                return 0 if _await_bind("redis", host, self.tuning, self.timers) else 1
             case redis_plan.PrepareDataDir():
                 self.data.mkdir(parents=True, exist_ok=True)
             case redis_plan.LaunchServer():
@@ -522,7 +530,7 @@ class _RedisStart:
 
     def _await_ready(self) -> int:
         admin = self.config.redis_admin_password
-        if _await_redis(self.redis_cli, admin, self.redis_port, self.dial_host):
+        if _await_redis(self.redis_cli, admin, self.redis_port, self.dial_host, self.timers):
             return 0
         print(f"  ✗ redis did not become ready on :{self.redis_port}", file=sys.stderr)
         return 1
@@ -542,6 +550,7 @@ def start_redis(
     home: Path,
     machine: MachineIdentityReader,
     macos: bool,
+    timers: Timers,
     tuning: StartTuning = PRODUCTION_TUNING,
 ) -> int:
     redis_plan.require_redis_credentials(config.redis_admin_password, runtime_password)
@@ -556,6 +565,7 @@ def start_redis(
         home=home,
         machine=machine,
         tuning=tuning,
+        timers=timers,
         macos=macos,
         redis_cli=redis_cli,
         dial_host=dial_host,
@@ -627,19 +637,21 @@ def _launch_redis(
 
 # meiva:note
 # `redis-server --daemonize` returns at once; poll until the port answers PING.
-def _await_redis(redis_cli: str, admin: str, redis_port: int, dial_host: str) -> bool:
-    started = SYSTEM_TIMERS.monotonic()
+def _await_redis(
+    redis_cli: str, admin: str, redis_port: int, dial_host: str, timers: Timers
+) -> bool:
+    started = timers.monotonic()
     while True:
         verdict = wait_verdict(
             satisfied=redis_running(redis_cli, admin, redis_port, dial_host),
-            elapsed_s=SYSTEM_TIMERS.monotonic() - started,
+            elapsed_s=timers.monotonic() - started,
             timeout_s=_REDIS_READY_TIMEOUT_S,
         )
         if verdict is Wait.DONE:
             return True
         if verdict is Wait.EXPIRED:
             return False
-        SYSTEM_TIMERS.sleep(_REDIS_READY_INTERVAL_S)
+        timers.sleep(_REDIS_READY_INTERVAL_S)
 
 
 # meiva:note
@@ -693,14 +705,29 @@ def ensure_cluster_storage(
     retained_children: list[subprocess.Popen[bytes]],
     machine: MachineIdentityReader,
     macos: bool,
+    timers: Timers,
 ) -> int:
     require_storage_credentials(config.redis_admin_password, redis_password)
     print(f"\n→ per-cluster data plane (pg :{pg_port}, redis :{redis_port})")
-    rc = start_pg(config, pg_port, home=home, retained_children=retained_children, machine=machine)
+    rc = start_pg(
+        config,
+        pg_port,
+        home=home,
+        retained_children=retained_children,
+        machine=machine,
+        timers=timers,
+    )
     if rc != 0:
         return rc
     return start_redis(
-        config, redis_port, redis_password, redis_user, home=home, machine=machine, macos=macos
+        config,
+        redis_port,
+        redis_password,
+        redis_user,
+        home=home,
+        machine=machine,
+        macos=macos,
+        timers=timers,
     )
 
 

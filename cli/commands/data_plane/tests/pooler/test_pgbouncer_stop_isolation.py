@@ -16,6 +16,7 @@ from pathlib import Path
 
 import pytest
 
+from base.clock import SYSTEM_TIMERS
 from cli.commands.data_plane import pgbouncer as pooler
 from cli.commands.data_plane.tests.native_processes import running_pooler
 
@@ -35,7 +36,7 @@ def test_stop_does_not_signal_a_recycled_pid(
 ) -> None:
     pidfile = _write_pidfile(unit_home, os.getpid())
 
-    assert pooler.stop_pgbouncer() == "not-running"
+    assert pooler.stop_pgbouncer(timers=SYSTEM_TIMERS) == "not-running"
 
     assert not pidfile.exists(), "the stale pidfile must be repaired, not re-read next time"
     assert f"pid {os.getpid()}, which is not this home's pooler" in capsys.readouterr().err
@@ -64,7 +65,7 @@ def test_stop_signals_this_homes_own_pooler(unit_home: Path, relative_ini: bool)
         assert pooler.pid_is_our_pooler(running.pid)
         assert pooler.running_pid() == running.pid
 
-        assert pooler.stop_pgbouncer() == "stopped"
+        assert pooler.stop_pgbouncer(timers=SYSTEM_TIMERS) == "stopped"
 
         assert not running.identity.live()
 
@@ -83,7 +84,7 @@ def test_a_sibling_home_sharing_a_path_prefix_is_not_ours(
         pidfile = _write_pidfile(unit_home, theirs.pid)
 
         assert not pooler.pid_is_our_pooler(theirs.pid)
-        assert pooler.stop_pgbouncer() == "not-running"
+        assert pooler.stop_pgbouncer(timers=SYSTEM_TIMERS) == "not-running"
 
         assert not pidfile.exists()
         assert theirs.identity.live(), "the sibling's pooler was not signalled"

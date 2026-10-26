@@ -31,6 +31,7 @@ import psutil
 import psycopg
 import pytest
 
+from base.clock import SYSTEM_TIMERS
 from base.native_process.ownership import OwnedProcess
 from base.sessions.pty import client, closure
 from base.sessions.pty.paths import ledger_path
@@ -42,6 +43,7 @@ from base.sessions.pty.tests.pty_service import service_run, service_socket
 from base.sessions.pty.tests.pty_shells import new, wait_for
 from base.telemetry import EventPipeline
 from cli.commands.data_plane.maintenance_stop_report import StopIncompleteError
+from cli.commands.data_plane.stop_waits import Deadline
 from cli.commands.lifecycle.stop import do_stop
 from cli.commands.lifecycle.stop import shell_sessions as shells
 from cli.commands.lifecycle.tests.stop.stop_support import (
@@ -93,7 +95,7 @@ def settle(
     shells.settle_closure(
         outcome,
         pty_close_notices.STOP_REASON,
-        deadline=time.monotonic() + window_s,
+        deadline=Deadline.after(window_s, SYSTEM_TIMERS),
         direct_db=False,
         database_factory=database_factory,
         command=runtime,
@@ -327,7 +329,9 @@ def test_a_shell_session_left_after_the_closure_fails_the_stop_in_its_own_words(
     ledger.write(ledger_path(service_run()), [closure.Target(name, identity_of(proc))])
 
     with pytest.raises(StopIncompleteError) as excinfo:
-        shells.await_no_shell_sessions(home, time.monotonic(), "shell-sessions")
+        shells.await_no_shell_sessions(
+            home, time.monotonic(), "shell-sessions", timers=SYSTEM_TIMERS
+        )
     message = str(excinfo.value)
     assert name in message
     assert "will not kill" not in message
@@ -347,7 +351,7 @@ def test_a_shell_session_that_clears_within_the_stop_deadline_does_not_fail_the_
     assert shells.live_shell_sessions(home) == [name]
     started = time.monotonic()
     try:
-        shells.await_no_shell_sessions(home, started + 10, "shell-sessions")
+        shells.await_no_shell_sessions(home, started + 10, "shell-sessions", timers=SYSTEM_TIMERS)
     finally:
         tearing_down.wait(timeout=10)
     assert 0.4 <= time.monotonic() - started < 5, "it waited for the session to leave the table"
@@ -407,7 +411,7 @@ def test_a_stop_without_the_service_closes_the_leftovers_its_ledger_names(
     assert shells.live_shell_sessions(home) == [name]
 
     shells.close_shell_sessions(
-        time.monotonic() + 10,
+        Deadline.after(10, SYSTEM_TIMERS),
         direct_db=False,
         database_factory=operator_database,
         command=stop_runtime,
@@ -435,7 +439,7 @@ def test_a_stop_without_the_service_tells_owners_the_service_crashed_not_that_it
     )
 
     shells.close_shell_sessions(
-        time.monotonic() + 15,
+        Deadline.after(15, SYSTEM_TIMERS),
         direct_db=False,
         database_factory=operator_database,
         command=stop_runtime,
@@ -519,7 +523,7 @@ def test_operational_shell_session_close_failure_is_not_best_effort_success(
             shells.force_close_shell_sessions(stop_runtime.home)
         else:
             shells.close_shell_sessions(
-                time.monotonic() + 1,
+                Deadline.after(1, SYSTEM_TIMERS),
                 direct_db=False,
                 database_factory=operator_database,
                 command=stop_runtime,

@@ -20,6 +20,7 @@ from pathlib import Path
 import psutil
 import pytest
 
+from base.clock import SYSTEM_TIMERS
 from base.cluster import ownership
 from base.cluster.dataplane import pooler as base_pooler
 from base.native_process.ownership import OwnedProcess
@@ -30,7 +31,7 @@ from base.sessions.pty.tests.pty_shells import new as new_session
 from base.telemetry import EventPipeline
 from cli.commands.data_plane import maintenance_stop as plane
 from cli.commands.data_plane.config import DataPlaneConfig, data_plane_config_from_boot
-from cli.commands.data_plane.stop_waits import deadline_after, wait_for_exit
+from cli.commands.data_plane.stop_waits import Deadline, wait_for_exit
 from cli.commands.lifecycle.stop import shell_sessions as stop
 from cli.commands.lifecycle.tests.stop.stop_support import Launcher, PtyServiceProcess
 from cli.commands.lifecycle.tests.stop.stop_support import home as home
@@ -62,7 +63,7 @@ def local_plane(command_runtime: CommandRuntime) -> DataPlaneConfig:
 def stop_plane(
     config: DataPlaneConfig, timeout: float, producer: Callable[[], EventPipeline], home: Path
 ) -> tuple[str, ...]:
-    return plane.stop(config, timeout, home=home, producer=producer).stopped
+    return plane.stop(config, timeout, home=home, producer=producer, timers=SYSTEM_TIMERS).stopped
 
 
 # meiva:note
@@ -120,7 +121,7 @@ def test_a_wait_returns_as_soon_as_the_tracked_process_has_exited() -> None:
     identity = OwnedProcess.capture(psutil.Process(child.pid))
     try:
         started = time.monotonic()
-        wait_for_exit({identity}, deadline_after(10))
+        wait_for_exit({identity}, Deadline.after(10, SYSTEM_TIMERS))
         assert 0.2 <= time.monotonic() - started < 5
     finally:
         child.wait(timeout=10)
@@ -132,7 +133,7 @@ def test_a_wait_that_outlives_its_deadline_names_the_survivors() -> None:
     identity = OwnedProcess.capture(psutil.Process(child.pid))
     try:
         with pytest.raises(TimeoutError, match=rf"did not exit: \[{child.pid}\]"):
-            wait_for_exit({identity}, deadline_after(0.2))
+            wait_for_exit({identity}, Deadline.after(0.2, SYSTEM_TIMERS))
         assert identity.live(), "a wait never signals what it waits for"
     finally:
         child.kill()
@@ -148,7 +149,7 @@ def test_a_leader_that_exits_without_closing_its_children_does_not_end_the_wait(
     leader = subprocess.Popen([sys.executable, str(CHILD), "sleep", "0.3", "1.2"])
     identity = OwnedProcess.capture(psutil.Process(leader.pid))
     started = time.monotonic()
-    wait_for_exit({identity}, deadline_after(10))
+    wait_for_exit({identity}, Deadline.after(10, SYSTEM_TIMERS))
     assert time.monotonic() - started >= 0.9, "the child outlived its leader and held the wait"
     leader.wait(timeout=10)
 
@@ -296,7 +297,7 @@ def test_a_dead_service_with_only_a_known_job_does_not_block_shell_session_closu
     with pytest.raises(client.ServiceDownError):
         client.request("list", socket_path=service_socket())
     stop.require_no_shell_sessions(home)
-    stop.await_no_shell_sessions(home, time.monotonic(), "shell-sessions")
+    stop.await_no_shell_sessions(home, time.monotonic(), "shell-sessions", timers=SYSTEM_TIMERS)
     assert job.poll() is None, "fixture teardown, not shell-session-presence probing, owns this job"
     assert not journal.exists()
 
@@ -369,7 +370,7 @@ def running_pooler(home: Path) -> Generator[Pooler]:
             # The missing-pidfile refusal test deletes the daemon's publication. Retain the
             # captured native birth for cleanup instead of looking it up again by PID.
             identity.send_signal(signal.SIGKILL)
-            wait_for_exit({identity}, deadline_after(5))
+            wait_for_exit({identity}, Deadline.after(5, SYSTEM_TIMERS))
 
 
 def test_real_pgbouncer_normal_exit_and_identity_cleanup(
@@ -381,7 +382,7 @@ def test_real_pgbouncer_normal_exit_and_identity_cleanup(
 
     with running_pooler(home) as pooler:
         config = replace(local_plane, redis_url=f"redis://127.0.0.1:{free_port()}")
-        stopped = plane.stop(config, 3, home=home, producer=operator_pipeline)
+        stopped = plane.stop(config, 3, home=home, producer=operator_pipeline, timers=SYSTEM_TIMERS)
         assert stopped.stopped == ("pgbouncer",)
         assert not pooler.identity.live()
         assert not (pooler.directory / "pgbouncer.pid").exists()
@@ -419,7 +420,9 @@ def test_real_pgbouncer_stop_does_not_wait_for_idle_client(
             # Connected and idle from here on: the stop must not wait for this.
             assert connected.execute("SHOW VERSION").fetchone() is not None
             started = time.monotonic()
-            stopped = plane.stop(config, 5, home=home, producer=operator_pipeline)
+            stopped = plane.stop(
+                config, 5, home=home, producer=operator_pipeline, timers=SYSTEM_TIMERS
+            )
         assert stopped.stopped == ("pgbouncer",)
         assert time.monotonic() - started < 4
         assert not pooler.identity.live()
@@ -453,7 +456,7 @@ def test_missing_pooler_pidfile_does_not_mean_the_process_is_gone(
         # Keep the regression experiment itself from leaking the daemon when cleanup breaks.
         if identity is not None:
             identity.send_signal(signal.SIGKILL)
-            wait_for_exit({identity}, deadline_after(5))
+            wait_for_exit({identity}, Deadline.after(5, SYSTEM_TIMERS))
 
 
 def _wait_pidfile(timeout: float = 5.0) -> int:

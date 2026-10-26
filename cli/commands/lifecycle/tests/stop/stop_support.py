@@ -31,6 +31,7 @@ import psycopg
 import pytest
 
 from base.agents.context.clients import DatabaseFactory
+from base.clock import SYSTEM_TIMERS
 from base.native_process.kernel_identity import pid_starttime_ticks
 from base.native_process.ownership import OwnedProcess
 from base.sessions.posixproc import process_group_has_live_members
@@ -77,7 +78,7 @@ def stop_runtime(command_runtime: CommandRuntime, home: Path) -> CommandRuntime:
 
     command_runtime.machine.set(role="agent-runner")
     command_runtime.config.set_field("browser_cdp_port", free_port())
-    return replace(command_runtime, home=home, helper=None)
+    return replace(command_runtime, home=home, helper=None, timers=SYSTEM_TIMERS)
 
 
 REDIS_ADMIN_AUTH = "stop-test-redis-admin"

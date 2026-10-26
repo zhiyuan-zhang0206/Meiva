@@ -20,6 +20,7 @@ import psycopg
 import pytest
 
 from base.clock import SYSTEM_TIMERS
+from base.clock.tests.manual_timers import ManualTimers
 from base.cluster import ownership
 from base.cluster import postgres as pg
 from base.cluster.dataplane.pg_admin import pg_admin_url
@@ -30,7 +31,7 @@ from base.telemetry.tests.capture.event_capture import emitted_events as emitted
 from cli.commands.data_plane import cluster_instance as instance
 from cli.commands.data_plane import maintenance_stop as plane
 from cli.commands.data_plane.config import DataPlaneConfig
-from cli.commands.data_plane.stop_waits import StopLegs, remaining
+from cli.commands.data_plane.stop_waits import Deadline, StopLegs
 from cli.database.tests.command_inputs import command_machine as command_machine
 from cli.database.tests.command_inputs import command_runtime as command_runtime
 
@@ -92,7 +93,14 @@ def _start_with_hung_archive(
         settings.write(f"archive_command = 'sleep {HUNG_SECONDS}'\n")
         settings.write("archive_timeout = '1s'\n")
     assert (
-        instance.start_pg(private, port, home=home, retained_children=retained, machine=machine)
+        instance.start_pg(
+            private,
+            port,
+            home=home,
+            retained_children=retained,
+            machine=machine,
+            timers=SYSTEM_TIMERS,
+        )
         == 0
     )
 
@@ -125,6 +133,7 @@ def test_a_hung_archive_command_ends_in_an_immediate_shutdown_inside_the_budget(
             retained_children=retained,
             producer=emitted_events.producer,
             legs=StopLegs(cleanup_wait_s=1.0, kill_wait_s=1.0),
+            timers=SYSTEM_TIMERS,
         )
         elapsed = time.monotonic() - started
 
@@ -158,5 +167,6 @@ def test_a_hung_archive_command_ends_in_an_immediate_shutdown_inside_the_budget(
 # time; it neither starts a shutdown nor relies on a busy host to spend the budget.
 @pytest.mark.parametrize("offset", [0.0, -1.0])
 def test_an_exhausted_stop_budget_refuses_admission(offset: float) -> None:
+    timers = ManualTimers()
     with pytest.raises(TimeoutError, match="stop deadline expired"):
-        remaining(time.monotonic() + offset)
+        Deadline(timers.monotonic() + offset, timers).remaining()

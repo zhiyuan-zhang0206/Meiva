@@ -125,7 +125,9 @@ def test_no_unit_goes_down_before_the_agent_host_has_exited(short_tmp: Path) -> 
     ]
 
     with scripted_root(short_tmp, rows) as root:
-        driver.down_units(order, deadline=time.monotonic() + 30, force=False, home=short_tmp)
+        driver.down_units(
+            order, deadline=time.monotonic() + 30, force=False, home=short_tmp, timers=SYSTEM_TIMERS
+        )
 
     names = [name for name, _ in root.events]
     assert names[:2] == ["down agent-host", "exited agent-host"]
@@ -138,6 +140,12 @@ def test_a_stop_whose_deadline_has_passed_takes_nothing_down(short_tmp: Path) ->
         scripted_root(short_tmp, [UnitRow("gateway")]) as root,
         pytest.raises(driver.RootDriverError, match="deadline expired; custody retained"),
     ):
-        driver.down_units(["gateway"], deadline=time.monotonic() - 1, force=False, home=short_tmp)
+        driver.down_units(
+            ["gateway"],
+            deadline=time.monotonic() - 1,
+            force=False,
+            home=short_tmp,
+            timers=SYSTEM_TIMERS,
+        )
 
     assert root.units["gateway"].state == "running"
