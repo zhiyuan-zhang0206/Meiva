@@ -4,6 +4,7 @@ import math
 import time
 from collections.abc import Callable
 
+from base.telemetry.delivery.defer_plan import ChildDeferPlan
 from base.telemetry.delivery.pipeline import EventPipeline
 from base.telemetry.delivery.receipts import DrainResult, DrainStatus, Event
 from base.telemetry.otlp.telemetry_otlp import OtlpBackend, default_exporter, remaining_time
@@ -45,8 +46,8 @@ class ExportingEventPipeline(EventPipeline):
         self._exports_finished = result.status is DrainStatus.COMPLETED
         return result
 
-    def defer_exports(self) -> None:
-        self._exporter.defer_until_exit()
+    def defer_exports(self, plan: ChildDeferPlan) -> None:
+        self._exporter.defer_until_exit(plan)
 
     def finalize_exports(self) -> None:
         self._exporter.finalize()

@@ -14,9 +14,16 @@ from typing import Any
 
 import pytest
 
+from base.telemetry.delivery.defer_plan import (
+    CHILD_DEFER_MAX_AGE_DEFAULT_S,
+    ChildDeferPlan,
+    child_defer_plan,
+    parse_defer_flag,
+    parse_defer_seconds,
+)
 from base.telemetry.delivery.receipts import Event
 from base.telemetry.otlp import telemetry_otlp
-from base.telemetry.otlp.plans import parse_defer_flag, parse_defer_seconds
+from base.telemetry.tests.otlp.test_telemetry_otlp import CHILD_DEFER
 
 _AGENT = 8902
 
@@ -61,7 +68,6 @@ def _make_backend(*, queue_maxsize: int = 8) -> tuple[Any, Any, Any]:
         enabled=lambda: True,
         providers=(logger_provider, metric_provider),
         queue_maxsize=queue_maxsize,
-        defer_enabled=True,
     )
     return backend, log_exporter, metric_reader
 
@@ -91,7 +97,7 @@ def otlp_backend() -> Any:
 @pytest.fixture
 def deferred_backend(otlp_backend: Any) -> Any:
     backend, log_exporter, metric_reader = otlp_backend
-    backend.defer_until_exit()
+    backend.defer_until_exit(CHILD_DEFER)
     assert backend._deferral.is_active()  # pyright: ignore[reportUnknownMemberType]
     return backend, log_exporter, metric_reader
 
@@ -143,7 +149,7 @@ def test_finalize_completes_hold_and_replays_metrics_once(deferred_backend: Any)
 def test_saturation_goes_live_once() -> None:
     backend, log_exporter, _ = _make_backend(queue_maxsize=4)
     try:
-        backend.defer_until_exit()
+        backend.defer_until_exit(CHILD_DEFER)
         backend.export_batch([_event() for _ in range(4)])
         assert backend._deferral.is_active()  # pyright: ignore[reportUnknownMemberType]
         assert backend._worker is None
@@ -160,7 +166,7 @@ def test_saturation_goes_live_once() -> None:
 def test_max_age_clock_goes_live(otlp_backend: Any) -> None:
     assert parse_defer_seconds("0.15", default=30.0) == 0.15
     backend, log_exporter, _ = otlp_backend
-    backend.defer_until_exit(max_age_s=0.15)
+    backend.defer_until_exit(ChildDeferPlan(enabled=True, max_age_s=0.15))
     backend.export_batch([_event()])
 
     deadline = time.monotonic() + 5.0
@@ -187,7 +193,7 @@ def test_empty_hold_finalize_skips_bringup(deferred_backend: Any) -> None:
 def test_explicit_backend_arms_and_completes(otlp_backend: Any) -> None:
     backend, log_exporter, _ = otlp_backend
 
-    backend.defer_until_exit()
+    backend.defer_until_exit(CHILD_DEFER)
     assert backend.deferred_state() is True
     backend.export_batch([_event()])
     assert backend._queue.qsize() == 1  # pyright: ignore[reportUnknownMemberType]
@@ -203,7 +209,7 @@ def test_flag_off_disables_defer(otlp_backend: Any) -> None:
     assert parse_defer_flag("0", default=True) is False
     backend, log_exporter, _ = otlp_backend
 
-    backend.defer_until_exit(enabled=False)
+    backend.defer_until_exit(ChildDeferPlan(enabled=False, max_age_s=CHILD_DEFER_MAX_AGE_DEFAULT_S))
 
     assert not backend._deferral.is_active()  # pyright: ignore[reportUnknownMemberType]
     backend.export_batch([_event()])
@@ -211,11 +217,11 @@ def test_flag_off_disables_defer(otlp_backend: Any) -> None:
     assert len(log_exporter.get_finished_logs()) == 1
 
 
+# meiva:note
+# The plan a child builds from its raw environment mirrors the declared Settings defaults
+# (one home per fact — the child cannot import the config module).
 def test_env_defaults_locked_to_settings_fields() -> None:
-    """The env-direct fallback mirrors the declared Settings defaults (one home
-    per fact — `base/telemetry/otlp/telemetry_otlp_defer` cannot import the config module)."""
     from base.config import settings
-    from base.telemetry.otlp.telemetry_otlp_defer import CHILD_DEFER_MAX_AGE_DEFAULT_S
 
     fields = type(settings.observability).model_fields
     assert fields["telemetry_otlp_child_defer"].default is True
@@ -263,10 +269,8 @@ def test_invalid_eligibility_preserves_deferred_records_and_propagates() -> None
     def invalid() -> bool:
         raise error
 
-    backend = telemetry_otlp.OtlpBackend(
-        export_allowed=invalid, enabled=lambda: True, defer_enabled=True
-    )
-    backend.defer_until_exit()
+    backend = telemetry_otlp.OtlpBackend(export_allowed=invalid, enabled=lambda: True)
+    backend.defer_until_exit(CHILD_DEFER)
     backend.export_batch([_event()])
     try:
         with pytest.raises(MachineRoleInvalid) as raised:
@@ -277,3 +281,41 @@ def test_invalid_eligibility_preserves_deferred_records_and_propagates() -> None
     finally:
         with pytest.raises(MachineRoleInvalid):
             backend.shutdown()
+
+
+@pytest.mark.parametrize(
+    ("environ", "expected"),
+    [
+        ({}, ChildDeferPlan(enabled=True, max_age_s=CHILD_DEFER_MAX_AGE_DEFAULT_S)),
+        (
+            {"MEIVA_TELEMETRY_OTLP_CHILD_DEFER": "off"},
+            ChildDeferPlan(enabled=False, max_age_s=CHILD_DEFER_MAX_AGE_DEFAULT_S),
+        ),
+        (
+            {"MEIVA_TELEMETRY_OTLP_CHILD_DEFER": "garbage"},
+            ChildDeferPlan(enabled=True, max_age_s=CHILD_DEFER_MAX_AGE_DEFAULT_S),
+        ),
+        (
+            {"MEIVA_TELEMETRY_OTLP_CHILD_DEFER_MAX_AGE_S": "0.15"},
+            ChildDeferPlan(enabled=True, max_age_s=0.15),
+        ),
+        (
+            {"MEIVA_TELEMETRY_OTLP_CHILD_DEFER_MAX_AGE_S": "0"},
+            ChildDeferPlan(enabled=True, max_age_s=CHILD_DEFER_MAX_AGE_DEFAULT_S),
+        ),
+        (
+            {"MEIVA_TELEMETRY_OTLP_CHILD_DEFER_MAX_AGE_S": "nan"},
+            ChildDeferPlan(enabled=True, max_age_s=CHILD_DEFER_MAX_AGE_DEFAULT_S),
+        ),
+    ],
+)
+def test_child_defer_plan_is_read_from_the_environment_it_is_given(
+    environ: dict[str, str], expected: ChildDeferPlan
+) -> None:
+    assert child_defer_plan(environ) == expected
+
+
+@pytest.mark.parametrize("max_age_s", [0.0, -1.0, float("inf"), float("nan")])
+def test_child_defer_plan_rejects_an_unusable_max_age(max_age_s: float) -> None:
+    with pytest.raises(ValueError, match="max age"):
+        ChildDeferPlan(enabled=True, max_age_s=max_age_s)

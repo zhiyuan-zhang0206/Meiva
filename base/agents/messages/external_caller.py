@@ -7,18 +7,16 @@ environment was inherited.
 
 from __future__ import annotations
 
-import os
 import shlex
 from collections.abc import Mapping
 
 from base.api_contracts.caller_identity import CallerIdentity
 
 
-def external_caller(*, env: Mapping[str, str] | None = None) -> CallerIdentity | None:
-    """Read a strictly validated explicit external profile, or no opt-in."""
-    # env-ok: external subprocess provenance handoff, not cluster configuration
-    source_env = os.environ if env is None else env
-    raw = source_env.get("MEIVA_CALLER_IDENTITY")
+# meiva:note
+# Read a strictly validated explicit external profile from `env`, or no opt-in.
+def external_caller(*, env: Mapping[str, str]) -> CallerIdentity | None:
+    raw = env.get("MEIVA_CALLER_IDENTITY")
     if raw is None:
         return None
     return CallerIdentity.model_validate_json(raw)

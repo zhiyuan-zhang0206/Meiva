@@ -15,6 +15,8 @@ from base.db import Database
 from base.db.code_version_gate import ProcessDbGate
 from base.packages.extensions import registry as reg
 from base.telemetry.otlp.trace_config import TraceConfig
+from base.telemetry.otlp.trace_readiness import TraceReadiness
+from base.telemetry.tests.capture.trace_state import reset_tracing_state
 
 _SKILL_MD = """---
 name: {name}
@@ -87,8 +89,6 @@ def test_the_hosted_daemon_lands_them_once_per_process() -> None:
 def test_process_scope_passes_its_machine_and_home_without_reading_identity(
     unit_home: Path,
 ) -> None:
-    from base.telemetry import tracing
-
     (unit_home / ".env").write_bytes(b"\xff")
     config = ConfigBoot()
     machine = ConfiguredMachineIdentity(config)
@@ -101,8 +101,12 @@ def test_process_scope_passes_its_machine_and_home_without_reading_identity(
         disk_watermark=0.0,
         endpoint_explicit=True,
     )
-    tracing.reset_tracing_state()
-    init_process_scope(machine=machine, home=unit_home, trace=trace)
+    reset_tracing_state()
+    environ: dict[str, str] = {}
+    init_process_scope(
+        machine=machine, home=unit_home, trace=trace, environ=environ, readiness=TraceReadiness()
+    )
+    assert environ == {"TRACELOOP_TRACE_CONTENT": "false"}
     assert not config.prepared
     assert (unit_home / "traces").is_dir()
     with pytest.raises(UnicodeDecodeError):

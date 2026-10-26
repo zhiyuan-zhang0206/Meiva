@@ -23,9 +23,11 @@ Usage::
 from __future__ import annotations
 
 import argparse
+import os
 import sys
 from pathlib import Path
 
+from base.agents.impersonation.host_transport import antigravity_server_from_environment
 from meiva.shell.coding_tools import (
     add_capability_arguments,
     add_lineage_arguments,
@@ -114,14 +116,15 @@ def main(argv: list[str]) -> int:
     parser = _build_parser()
     args = parser.parse_args(argv)
     _validate_args(parser, args)
+    antigravity_server = antigravity_server_from_environment(os.environ)
 
     if args.send is not None:
         content = sys.stdin.read() if args.message == "-" else args.message
-        return antigravity.send(args.send, content)
+        return antigravity.send(args.send, content, antigravity_server=antigravity_server)
     if args.status is not None:
-        return antigravity.status(args.status)
+        return antigravity.status(args.status, antigravity_server=antigravity_server)
     if args.stop is not None:
-        return antigravity.stop(args.stop)
+        return antigravity.stop(args.stop, antigravity_server=antigravity_server)
 
     workspace = antigravity.resolve_dir(args.workspace)
     tasks_file = None
@@ -145,6 +148,7 @@ def main(argv: list[str]) -> int:
         prompt=prompt,
         provenance=provenance,
         skill_dir=_SKILL_DIR,
+        antigravity_server=antigravity_server,
     )
 
 

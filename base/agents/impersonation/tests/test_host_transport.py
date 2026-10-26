@@ -242,32 +242,15 @@ def test_default_control_endpoint_follows_codex_home(tmp_path: Path) -> None:
     assert codex_app_server.default_control_endpoint(env=env) == f"unix://{sock}"
 
 
-def test_live_submit_treats_a_bare_unix_endpoint_as_the_default_socket(
-    short_socket: Path,
-) -> None:
-    """A bare ``unix://`` resolves through ``default_control_socket()``.
-
-    Its CODEX_HOME mapping stays covered by
-    ``test_default_control_endpoint_follows_codex_home``; the bind goes through
-    the short-socket fixture like every other test that starts a fake server.
-    """
-
-    def short_default_socket() -> Path:
-        return short_socket
-
-    server = FakeAppServer()
-    server.start(short_socket)
-    try:
-        reason = codex_app_server.live_submit(
-            str(THREAD_ID),
-            "hi",
-            endpoint="unix://",
-            timeout=3.0,
-            default_socket=short_default_socket,
-        )
-    finally:
-        server.stop()
-    assert reason is None
+# meiva:note
+# A bare ``unix://`` names the default control socket, which depends on the caller's
+# ``CODEX_HOME``; the caller resolves it first (``default_control_endpoint``, covered by
+# ``test_default_control_endpoint_follows_codex_home``), so the transport refuses it.
+def test_live_submit_leaves_a_bare_unix_endpoint_to_its_caller_to_resolve() -> None:
+    reason = codex_app_server.live_submit(str(THREAD_ID), "hi", endpoint="unix://", timeout=1.0)
+    assert reason is not None
+    assert "bare unix://" in reason
+    assert "default_control_endpoint" in reason
 
 
 def test_ended_lease_reaches_actual_codex_host_without_a_relay(
@@ -402,16 +385,40 @@ def test_antigravity_endpoint_prefers_the_host_environment(tmp_path: Path) -> No
     injected = codex_app_server.resolve_antigravity_endpoint(
         str(THREAD_ID),
         home=tmp_path,
-        environment={
-            "ANTIGRAVITY_LS_ADDRESS": "127.0.0.1:2",
-            "ANTIGRAVITY_CSRF_TOKEN": "injected",
-        },
+        antigravity_server=codex_app_server.antigravity_server_from_environment(
+            {
+                "ANTIGRAVITY_LS_ADDRESS": "127.0.0.1:2",
+                "ANTIGRAVITY_CSRF_TOKEN": "injected",
+            }
+        ),
         scan=_no_scan,
     )
     injected_csrf = "injected"
     assert injected == codex_app_server.AntigravityServer(
         address="127.0.0.1:2", csrf_token=injected_csrf
     )
+
+
+_PARSED_CSRF = "tok"
+
+
+@pytest.mark.parametrize(
+    ("environment", "expected"),
+    [
+        (
+            {"ANTIGRAVITY_LS_ADDRESS": " 127.0.0.1:2 ", "ANTIGRAVITY_CSRF_TOKEN": " tok\n"},
+            codex_app_server.AntigravityServer(address="127.0.0.1:2", csrf_token=_PARSED_CSRF),
+        ),
+        ({"ANTIGRAVITY_LS_ADDRESS": "127.0.0.1:2"}, None),
+        ({"ANTIGRAVITY_CSRF_TOKEN": "tok"}, None),
+        ({"ANTIGRAVITY_LS_ADDRESS": "  ", "ANTIGRAVITY_CSRF_TOKEN": "tok"}, None),
+        ({}, None),
+    ],
+)
+def test_the_host_injected_endpoint_needs_both_variables(
+    environment: dict[str, str], expected: codex_app_server.AntigravityServer | None
+) -> None:
+    assert codex_app_server.antigravity_server_from_environment(environment) == expected
 
 
 def test_antigravity_endpoint_record_serves_a_process_without_the_host_environment(
@@ -421,7 +428,7 @@ def test_antigravity_endpoint_record_serves_a_process_without_the_host_environme
     recorded = codex_app_server.AntigravityServer(address="127.0.0.1:3", csrf_token=recorded_csrf)
     codex_app_server.write_antigravity_endpoint(recorded, thread_id=str(THREAD_ID), home=tmp_path)
     resolved = codex_app_server.resolve_antigravity_endpoint(
-        str(THREAD_ID), home=tmp_path, environment={}, scan=_no_scan
+        str(THREAD_ID), home=tmp_path, antigravity_server=None, scan=_no_scan
     )
     assert resolved == recorded
 
@@ -433,7 +440,7 @@ def test_antigravity_endpoint_failure_names_the_record_it_looked_for(tmp_path: P
     path = codex_app_server.antigravity_endpoint_path(str(THREAD_ID), home=tmp_path)
     with pytest.raises(RuntimeError) as failure:
         codex_app_server.resolve_antigravity_endpoint(
-            str(THREAD_ID), home=tmp_path, environment={}, scan=no_server
+            str(THREAD_ID), home=tmp_path, antigravity_server=None, scan=no_server
         )
     assert str(path) in str(failure.value)
     assert "request records it" in str(failure.value)

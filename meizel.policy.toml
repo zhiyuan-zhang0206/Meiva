@@ -392,8 +392,8 @@ rule-inputs = [
 "TYPESAFE_API_KEY" = "read live by meiva_builtins/plugins/lm_typesafe"
 
 [no-os-environ.live-read-vars]
-"MEIVA_TELEMETRY_OTLP_CHILD_DEFER" = "read live by base/telemetry/otlp/telemetry_otlp_defer.py"
-"MEIVA_TELEMETRY_OTLP_CHILD_DEFER_MAX_AGE_S" = "read live by base/telemetry/otlp/telemetry_otlp_defer.py"
+"MEIVA_TELEMETRY_OTLP_CHILD_DEFER" = "read live by agent/execution/child.py (the delivery plan is parsed in base/telemetry/delivery/defer_plan.py)"
+"MEIVA_TELEMETRY_OTLP_CHILD_DEFER_MAX_AGE_S" = "read live by agent/execution/child.py (the delivery plan is parsed in base/telemetry/delivery/defer_plan.py)"
 
 [no-os-environ.files]
 "cli/tests/bootstrap/test_start_identity.py" = "Exercises the settings-free birth boundary; environment is the actual input before Settings exists."

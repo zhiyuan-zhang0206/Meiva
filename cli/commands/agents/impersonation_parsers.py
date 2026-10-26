@@ -61,6 +61,7 @@ def _h_impersonate(args: argparse.Namespace) -> int:
 
 
 def _h_impersonate_relay(args: argparse.Namespace) -> int:
+    from base.agents.impersonation.host_transport import antigravity_server_from_environment
     from cli.commands.agents.impersonation import ImpersonationEnv, relay_token
     from cli.commands.agents.impersonation_relay import RelayInputs, cmd_relay
     from cli.commands.agents.relay.destination import relay_spec_problem
@@ -83,6 +84,9 @@ def _h_impersonate_relay(args: argparse.Namespace) -> int:
         token=token,
         redis_url=args.runtime.config.view.data_plane.redis_url,
         codex_home=env.codex_home,
+        antigravity_server=antigravity_server_from_environment(
+            args.runtime.config.process_environment()
+        ),
         stdout=args.runtime.terminal.stdout,
         rng=args.runtime.rng,
     )

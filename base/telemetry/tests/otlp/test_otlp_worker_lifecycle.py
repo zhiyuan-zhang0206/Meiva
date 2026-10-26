@@ -14,7 +14,7 @@ from base.log.tests.log_records import LogRecords
 from base.log.tests.log_records import loguru_records as loguru_records
 from base.telemetry.delivery.receipts import DrainPhase, DrainResult, DrainStatus, Event
 from base.telemetry.otlp import telemetry_otlp, telemetry_otlp_exporting
-from base.telemetry.tests.otlp.test_telemetry_otlp import otlp_test_event
+from base.telemetry.tests.otlp.test_telemetry_otlp import CHILD_DEFER, otlp_test_event
 
 
 class _Instrument:
@@ -121,7 +121,6 @@ def _backend(
     metrics: _Provider | None = None,
     enabled: Callable[[], bool] = lambda: True,
     queue_maxsize: int = 4096,
-    defer_enabled: bool = True,
 ) -> tuple[telemetry_otlp.OtlpBackend, _Provider, _Provider]:
     resolved_logs = _Provider() if logs is None else logs
     resolved_metrics = _Provider() if metrics is None else metrics
@@ -130,7 +129,6 @@ def _backend(
         enabled=enabled,
         providers=(resolved_logs, resolved_metrics),
         queue_maxsize=queue_maxsize,
-        defer_enabled=defer_enabled,
     )
     return backend, resolved_logs, resolved_metrics
 
@@ -292,7 +290,7 @@ def test_shutdown_replays_deferred_metrics_before_logs_once() -> None:
     )
     metrics = _Provider(on_metric=lambda v: calls.append(("metric", int(v))))
     backend, _, _ = _backend(logs=logs, metrics=metrics)
-    backend.defer_until_exit()
+    backend.defer_until_exit(CHILD_DEFER)
     backend.export_batch(
         [otlp_test_event(attributes={"in_total": 1}), otlp_test_event(attributes={"in_total": 2})]
     )
@@ -313,7 +311,7 @@ def test_disabled_nonempty_deferred_shutdown_does_not_start_sdk() -> None:
     backend, logs, metrics = _backend(
         logs=_Provider(on_emit=delivered.append), enabled=enabled_at_bringup
     )
-    backend.defer_until_exit()
+    backend.defer_until_exit(CHILD_DEFER)
     backend.export_batch([otlp_test_event()])
     assert reads == []
     result = backend.shutdown()
@@ -337,7 +335,7 @@ def test_enabled_nonempty_deferred_shutdown_reads_flag_only_at_bringup() -> None
         ),
         enabled=enabled_at_bringup,
     )
-    backend.defer_until_exit()
+    backend.defer_until_exit(CHILD_DEFER)
     backend.export_batch([otlp_test_event(attributes={"seq": 7})])
     assert reads == [] and backend.shutdown().status is DrainStatus.COMPLETED
     assert (
@@ -415,7 +413,7 @@ def test_deferral_completion_in_flight_cannot_close_providers_under_replay() -> 
     )
     metrics = _Provider(on_get_meter=get_meter)
     backend, _, _ = _backend(logs=logs, metrics=metrics)
-    backend.defer_until_exit()
+    backend.defer_until_exit(CHILD_DEFER)
     event = otlp_test_event(attributes={"in_total": 5})
     backend.export_batch([event])
     caller = threading.Thread(target=backend.finalize)
@@ -537,7 +535,7 @@ def test_unknown_failed_attempt_still_closes_deferred_admission_and_clock() -> N
         raise error
 
     backend, _, _ = _backend(metrics=_Provider(on_get_meter=fail_meter))
-    backend.defer_until_exit()
+    backend.defer_until_exit(CHILD_DEFER)
     backend.export_batch([otlp_test_event()])
     worker = backend._get_worker()
     assert worker is not None
@@ -780,7 +778,7 @@ def test_close_time_gate_fault_raises_after_the_finite_observation() -> None:
         return True
 
     backend, _, _ = _backend(logs=logs, metrics=metrics, enabled=enabled_gate)
-    backend.defer_until_exit()
+    backend.defer_until_exit(CHILD_DEFER)
     backend.export_batch([otlp_test_event()])
     assert backend._deferral.is_active()
     assert backend._ensure()

@@ -338,9 +338,7 @@ def test_ended_antigravity_notice_uses_the_endpoint_the_request_recorded(
         reason = terminal_notices.send_ended_notice(
             database,
             session["id"],
-            resolve_antigravity=partial(
-                host_transport.resolve_antigravity_endpoint, home=tmp_path, environment={}
-            ),
+            resolve_antigravity=partial(host_transport.resolve_antigravity_endpoint, home=tmp_path),
         )
     finally:
         httpd.shutdown()
@@ -374,7 +372,10 @@ def test_ended_antigravity_notice_without_a_record_names_the_record_it_looked_fo
     db_conn.commit()
     path = host_transport.antigravity_endpoint_path(thread_id, home=tmp_path)
 
-    def missing(_thread_id: str) -> "host_transport.AntigravityServer":
+    def missing(
+        _thread_id: str, *, antigravity_server: "host_transport.AntigravityServer | None"
+    ) -> "host_transport.AntigravityServer":
+        assert antigravity_server is None
         raise RuntimeError(f"No Antigravity endpoint record exists at {path}")
 
     end(database, event_bus, session, local_machine=machine_identity.name())
