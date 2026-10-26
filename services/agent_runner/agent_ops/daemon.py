@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import random
 import sys
 
 from base.clock import SYSTEM_TIMERS
@@ -75,6 +76,13 @@ DISPATCH_RETRY_BACKOFF_S = 0.5
 ActiveOps = dict[str, tuple[str, float]]
 
 
+# meiva:note
+# The process's random generator, built once at its entry for the event bus's retry jitter. Jitter
+# is not a secret, so it is a plain `random.Random`.
+def _new_rng() -> random.Random:
+    return random.Random()  # noqa: S311
+
+
 async def run_arm(
     kind: str,
     payload: dict[str, Any],
@@ -88,6 +96,7 @@ async def run_arm(
     image: LoadedCommit,
     local_machine: MachineIdentityReader,
     host: Host,
+    rng: random.Random,
 ) -> tuple[OpStatus, dict[str, object]]:
 
     loop = asyncio.get_running_loop()
@@ -106,6 +115,7 @@ async def run_arm(
                 image=image,
                 local_machine=local_machine,
                 host=host,
+                rng=rng,
             ),
         )
         in_flight.track_worker(future, workers=workers)
@@ -125,13 +135,14 @@ def _dispatch_in_thread(
     image: LoadedCommit,
     local_machine: MachineIdentityReader,
     host: Host,
+    rng: random.Random,
 ) -> tuple[OpStatus, dict[str, object]]:
 
     return dispatch_sync(
         kind,
         payload,
         pool=pool,
-        db=boot.ops_handles(database=database, authority=authority)[0],
+        db=boot.ops_handles(database=database, authority=authority, rng=rng)[0],
         authority=authority,
         image=image,
         local_machine=local_machine,
@@ -153,6 +164,7 @@ async def dispatch(
     image: LoadedCommit,
     local_machine: MachineIdentityReader,
     host: Host,
+    rng: random.Random,
 ) -> tuple[OpStatus, dict[str, object]]:
 
     if not is_op_kind(kind):
@@ -161,7 +173,7 @@ async def dispatch(
     try:
         match kind:
             case "spawn-launch":
-                db, bus = boot.ops_handles(database=database, authority=authority)
+                db, bus = boot.ops_handles(database=database, authority=authority, rng=rng)
                 spawned = await lifecycle.launch_agent_op(
                     db,
                     bus,
@@ -176,7 +188,7 @@ async def dispatch(
             case "launch-reconcile":
                 from ops.lifecycle.launch_reconcile import reconcile_launch_op
 
-                db, bus = boot.ops_handles(database=database, authority=authority)
+                db, bus = boot.ops_handles(database=database, authority=authority, rng=rng)
                 result = await reconcile_launch_op(
                     db,
                     bus,
@@ -187,7 +199,7 @@ async def dispatch(
                 return OpStatus.COMPLETED, result.model_dump(mode="json")
             case "lifecycle":
                 lc = LifecyclePayload.model_validate(payload)
-                db, bus = boot.ops_handles(database=database, authority=authority)
+                db, bus = boot.ops_handles(database=database, authority=authority, rng=rng)
                 resp = await lifecycle.lifecycle_op(
                     db,
                     bus,
@@ -212,6 +224,7 @@ async def dispatch(
                     image=image,
                     local_machine=local_machine,
                     host=host,
+                    rng=rng,
                 )
     except (
         MeivaAgentError,
@@ -238,6 +251,7 @@ async def dispatch_idempotent(
     image: LoadedCommit,
     local_machine: MachineIdentityReader,
     host: Host,
+    rng: random.Random,
     dedup_wait_attempts: int = DEDUP_WAIT_ATTEMPTS,
     dedup_wait_step_s: float = DEDUP_WAIT_STEP_S,
     retry_backoff_s: float = DISPATCH_RETRY_BACKOFF_S,
@@ -262,6 +276,7 @@ async def dispatch_idempotent(
                 image=image,
                 local_machine=local_machine,
                 host=host,
+                rng=rng,
                 dedup_wait_attempts=dedup_wait_attempts,
                 dedup_wait_step_s=dedup_wait_step_s,
             )
@@ -292,6 +307,7 @@ async def dispatch_idempotent_pass(
     image: LoadedCommit,
     local_machine: MachineIdentityReader,
     host: Host,
+    rng: random.Random,
     dedup_wait_attempts: int = DEDUP_WAIT_ATTEMPTS,
     dedup_wait_step_s: float = DEDUP_WAIT_STEP_S,
 ) -> tuple[OpStatus, dict[str, object]]:
@@ -319,6 +335,7 @@ async def dispatch_idempotent_pass(
             image=image,
             local_machine=local_machine,
             host=host,
+            rng=rng,
         )
         status = OpStatus(status)
         with write_transaction(pool) as conn, conn.cursor() as cur:
@@ -365,6 +382,7 @@ async def ops_route(
     image: LoadedCommit,
     local_machine: MachineIdentityReader,
     host: Host,
+    rng: random.Random,
 ) -> tuple[int, bytes, str]:
 
     request = ops_plan.read_request(body)
@@ -393,6 +411,7 @@ async def ops_route(
                         image=image,
                         local_machine=local_machine,
                         host=host,
+                        rng=rng,
                     )
                 else:
                     status, result = await dispatch(
@@ -408,6 +427,7 @@ async def ops_route(
                         image=image,
                         local_machine=local_machine,
                         host=host,
+                        rng=rng,
                     )
             except Exception as exc:
                 _log.exception("dispatch refused or crashed for kind=%s", envelope.kind)
@@ -423,6 +443,7 @@ async def serve_ops_daemon(
     local_machine: MachineIdentityReader,
     config: ConfigBoot,
     host: Host,
+    rng: random.Random,
 ) -> None:
     from base.deploy.schema.migrations import assert_schema_current
 
@@ -491,6 +512,7 @@ async def serve_ops_daemon(
                     pool=pool,
                     local_machine=local_machine,
                     host=host,
+                    rng=rng,
                 ),
                 ("POST", "/to-user/resource"): functools.partial(
                     resource_route,
@@ -525,7 +547,7 @@ async def serve_ops_daemon(
             ops_port=endpoint.health_port,
             home=paths.meiva_home(),
         )
-        _, bus = boot.ops_handles(database=database, authority=authority)
+        _, bus = boot.ops_handles(database=database, authority=authority, rng=rng)
         try:
             async with server, asyncio.TaskGroup() as background:
                 watcher = background.create_task(watch_to_user(paths.workspaces_root(), bus))
@@ -582,6 +604,7 @@ def main(*, argv: list[str] | None = None) -> None:
                     local_machine=machine,
                     config=config,
                     host=Host.system(),
+                    rng=_new_rng(),
                 )
             )
         except KeyboardInterrupt as interrupted:

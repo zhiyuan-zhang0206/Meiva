@@ -34,7 +34,8 @@ from typing import Literal
 
 from loguru import logger
 
-from base.clock import SYSTEM_TIMERS, Timers
+from base.clock import SYSTEM_TIMERS, Clock, Timers
+from base.clock.configuration import clock_config_from_boot
 from base.config import ConfigBoot
 from base.host.system.hostport import Host
 from base.host.system.probes import browser_incapability, resolve_chrome_binary
@@ -166,8 +167,8 @@ def watch_chrome(
     profile: Path,
     proc: subprocess.Popen[bytes] | None = None,
     *,
+    timers: Timers,
     poll_interval_s: float = _WATCH_POLL_S,
-    timers: Timers = SYSTEM_TIMERS,
 ) -> None:
     stopping = False
 
@@ -212,21 +213,16 @@ def run_browser_daemon(
     home: Path,
     profile: Path,
     logs: Path,
+    clock: Clock,
     readiness_sequence: Iterable[macos_readiness.StartupReadiness] = (),
-    timers: Timers = SYSTEM_TIMERS,
     poll_interval_s: float = _WATCH_POLL_S,
-    steps_out: list[str] | None = None,
 ) -> None:
     # meiva:note
     # Fail loud BEFORE the log redirect so the reason is visible in the
     # session log — this also guards healthcheck-triggered respawns, not just the first
     # launch (the converge preflight only runs at `meiva start`).
     assert_browser_capable(host=host, chrome_binary=chrome_binary)
-    if steps_out is not None:
-        steps_out.append("capable")
     reachable = cdp_reachable(cdp_port)
-    if steps_out is not None:
-        steps_out.append("port")
     holder = our_chrome_holds_port(cdp_port, profile) if reachable else None
     healthy = (cdp_unreachable(cdp_port).reason is None) if holder is not None else False
     occupancy = plan_port_occupancy(
@@ -240,7 +236,7 @@ def run_browser_daemon(
             holder,
             cdp_port,
         )
-        watch_chrome(profile, None, poll_interval_s=poll_interval_s, timers=timers)
+        watch_chrome(profile, None, timers=clock, poll_interval_s=poll_interval_s)
         return
     if occupancy == "refuse":
         # meiva:note
@@ -275,13 +271,10 @@ def run_browser_daemon(
     # the matching marker lets the healthcheck report degraded state without
     # killing and respawning this deliberate wait.
     macos_readiness.wait_for_browser_startup_readiness(
-        timers=timers, readiness_sequence=readiness_sequence
+        timers=clock, readiness_sequence=readiness_sequence
     )
-    if steps_out is not None:
-        steps_out.append("ready")
-        steps_out.append("profile")
     profile.mkdir(parents=True, exist_ok=True)
-    local_state_warning = browser_profile.validate_local_state(profile)
+    local_state_warning = browser_profile.validate_local_state(profile, now=clock.now().timestamp())
     if local_state_warning is not None:
         logger.warning("meiva-browser: Local State validation warning: {}", local_state_warning)
     proc = spawn_chrome(
@@ -289,7 +282,7 @@ def run_browser_daemon(
         chrome_args(binary, cdp_port, profile, restore_last_session=should_restore),
         log_path=logs / "browser.log",
     )
-    watch_chrome(profile, proc, poll_interval_s=poll_interval_s, timers=timers)
+    watch_chrome(profile, proc, timers=clock, poll_interval_s=poll_interval_s)
 
 
 def main() -> None:
@@ -302,6 +295,7 @@ def main() -> None:
         home=meiva_home(),
         profile=profile_dir(),
         logs=logs_dir(),
+        clock=Clock(clock_config_from_boot(config), timers=SYSTEM_TIMERS),
     )
 
 

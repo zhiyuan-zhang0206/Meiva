@@ -98,11 +98,18 @@ class _EventBus(Protocol):
     ) -> int | None: ...
 
 
+# meiva:note
+# The live event bus, as this process's settings name it, drawing its retry jitter from the
+# random generator the installed SDK root gave its sampling owner. A process whose root installed
+# none fails explicitly rather than building a second generator.
 def bus() -> _EventBus:
-    """The live event bus, as this process's settings name it."""
     from base.events.live.bus import EventBus
 
-    return EventBus.from_settings()
+    installation = installed()
+    rng = None if installation is None else installation.sampling.rng
+    if rng is None:
+        raise RuntimeError("the SDK installation carries no random generator")
+    return EventBus.from_settings(rng=rng)
 
 
 class _PluginConfigReader(Protocol):

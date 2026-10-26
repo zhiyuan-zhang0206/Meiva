@@ -2,7 +2,7 @@
 
 import { QueryCache, QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { ThemeProvider } from "next-themes";
-import { useState } from "react";
+import { useCallback, useState } from "react";
 
 import { AppConnectionBanner } from "@/components/connection/app-connection-banner";
 import { OpenTasksNoticeHost } from "@/components/notifications/open-tasks-notice";
@@ -15,7 +15,7 @@ import { API_BASE, ApiError, api } from "@/lib/transport/api";
 import { NonceProvider } from "@/lib/auth/nonce-context";
 import { StreamHub } from "@/lib/transport/stream/stream-hub";
 import { systemStreamTransport } from "@/lib/transport/system-transport";
-import { ApiProvider, StreamHubProvider } from "@/lib/transport/transport-context";
+import { ApiProvider, StreamHubProvider, WallClockProvider } from "@/lib/transport/transport-context";
 import { EventStreamProvider } from "@/lib/transport/useEventStream";
 import { setNavFallbackMs, useNavTimingReport } from "@/lib/telemetry/nav-timing";
 import { useUserSettings } from "@/lib/state/use-user-settings";
@@ -96,9 +96,11 @@ export function createQueryClient(): QueryClient {
 }
 
 function RootContexts({ children, nonce }: { children: React.ReactNode; nonce?: string }) {
+  const [transport] = useState(() => systemStreamTransport());
+  const wallNow = useCallback(() => transport.wallNow(), [transport]);
   const [hub] = useState(
     () => new StreamHub(
-      systemStreamTransport(),
+      transport,
       { checkAuth: () => api.checkAuth(), sessionInvalid: notifySessionInvalid },
       API_BASE,
     ),
@@ -106,7 +108,9 @@ function RootContexts({ children, nonce }: { children: React.ReactNode; nonce?: 
   return (
     <ApiProvider api={api}>
       <StreamHubProvider hub={hub}>
-        <NonceProvider value={nonce}>{children}</NonceProvider>
+        <WallClockProvider wallNow={wallNow}>
+          <NonceProvider value={nonce}>{children}</NonceProvider>
+        </WallClockProvider>
       </StreamHubProvider>
     </ApiProvider>
   );

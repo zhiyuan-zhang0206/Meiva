@@ -13,6 +13,7 @@ from redis.exceptions import ConnectionError as RedisConnectionError
 
 from base.agents.context import MeivaContext
 from base.events.live.publisher import AgentEventPublisher
+from base.events.live.tests.rng import seeded_auth_retry
 from base.native_process.runtime_incarnation import RuntimeIncarnation
 
 from ...invocation import driver
@@ -100,7 +101,9 @@ async def test_unknown_worker_error_reaches_invocation_owner(
 ) -> None:
     error = error_type("publisher defect")
     redis = _Redis(fault, error)
-    publisher = AgentEventPublisher(cast(aredis.Redis, redis), "events", agent_id=42)
+    publisher = AgentEventPublisher(
+        cast(aredis.Redis, redis), "events", agent_id=42, auth_retry=seeded_auth_retry()
+    )
     cancelled = asyncio.Event()
     release = asyncio.Event()
 
@@ -132,7 +135,9 @@ async def test_invocation_failure_and_worker_cleanup_failure_are_both_visible(
     primary = KeyError("invocation defect")
     worker = ValueError("publisher defect during drain")
     redis = _Redis("cleanup", worker)
-    publisher = AgentEventPublisher(cast(aredis.Redis, redis), "events", agent_id=42)
+    publisher = AgentEventPublisher(
+        cast(aredis.Redis, redis), "events", agent_id=42, auth_retry=seeded_auth_retry()
+    )
 
     async def invoke(_agent: int, _ctx: MeivaContext) -> TurnOutcome:
         publisher.emit("event")
@@ -167,6 +172,7 @@ async def test_invocation_exit_joins_worker_with_bounded_drain(
         agent_id=42,
         publish_timeout=10,
         drain_timeout=0.05,
+        auth_retry=seeded_auth_retry(),
     )
     release = asyncio.Event()
 
@@ -203,7 +209,9 @@ async def test_known_transport_error_recovers_without_interrupting_invocation(
     error: Exception,
 ) -> None:
     redis = _Redis("transport", error)
-    publisher = AgentEventPublisher(cast(aredis.Redis, redis), "events", agent_id=42)
+    publisher = AgentEventPublisher(
+        cast(aredis.Redis, redis), "events", agent_id=42, auth_retry=seeded_auth_retry()
+    )
 
     async def invoke(_agent: int, _ctx: MeivaContext) -> TurnOutcome:
         publisher.emit("first")
@@ -223,8 +231,12 @@ async def test_parallel_invocations_keep_their_event_identity_and_queues(
     first = _Redis("normal", ResponseError("unused"))
     second = _Redis("normal", ResponseError("unused"))
     publishers = [
-        AgentEventPublisher(cast(aredis.Redis, first), "first", agent_id=1),
-        AgentEventPublisher(cast(aredis.Redis, second), "second", agent_id=2),
+        AgentEventPublisher(
+            cast(aredis.Redis, first), "first", agent_id=1, auth_retry=seeded_auth_retry()
+        ),
+        AgentEventPublisher(
+            cast(aredis.Redis, second), "second", agent_id=2, auth_retry=seeded_auth_retry()
+        ),
     ]
 
     async def invoke(_agent: int, ctx: MeivaContext) -> TurnOutcome:
@@ -245,7 +257,9 @@ async def test_invocation_failure_keeps_its_original_type_without_worker_failure
 ) -> None:
     primary = RuntimeError("turn defect")
     redis = _Redis("normal", ValueError("unused worker defect"))
-    publisher = AgentEventPublisher(cast(aredis.Redis, redis), "events", agent_id=42)
+    publisher = AgentEventPublisher(
+        cast(aredis.Redis, redis), "events", agent_id=42, auth_retry=seeded_auth_retry()
+    )
 
     async def invoke(_agent: int, _ctx: MeivaContext) -> TurnOutcome:
         publisher.emit("event")

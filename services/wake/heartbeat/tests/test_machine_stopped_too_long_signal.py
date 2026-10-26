@@ -6,6 +6,7 @@ import psycopg
 import pytest
 from psycopg_pool import ConnectionPool
 
+from base.clock.tests.seeded_rng import seeded_rng
 from base.db import Database
 from base.db.code_version_gate import ProcessDbGate
 from base.events.contract import payload_keys
@@ -171,7 +172,7 @@ class TestStoppedTooLongSignal:
             run_liveness_pass(
                 Database.from_settings(gate=database_gate),
                 pool,
-                EventBus.from_settings(),
+                EventBus.from_settings(rng=seeded_rng()),
                 probe=FakeProbe({"forgotten": False}),
                 config=LivenessConfig(8.0),
             )

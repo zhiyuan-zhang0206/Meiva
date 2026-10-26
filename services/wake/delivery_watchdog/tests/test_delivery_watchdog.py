@@ -15,6 +15,7 @@ from psycopg_pool import ConnectionPool
 
 from base import telemetry
 from base.agents.inbox.insert import insert_inbound_message
+from base.clock.tests.seeded_rng import seeded_rng
 from base.cluster.machine import MachineIdentityReader
 from base.cluster.machine.tests.identity import machine_identity as machine_identity
 from base.config import settings
@@ -134,7 +135,7 @@ def _insert_old_inbound(
         agent_id,
         "stale",
         source=source,
-        bus=EventBus.from_settings(),
+        bus=EventBus.from_settings(rng=seeded_rng()),
         database=Database.from_settings(gate=database_gate),
     )
     with db.cursor() as cur:

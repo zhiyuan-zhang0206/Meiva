@@ -8,6 +8,7 @@ import psycopg
 from base.agents import impersonation as leases
 from base.agents.impersonation.tests.impersonation_support import recorded_tree
 from base.api_contracts.caller_identity import CallerIdentity
+from base.clock.tests.seeded_rng import seeded_rng
 from base.config.service_read import ConfigAuthority
 from base.db import Database, create_agent
 from base.db.code_version_gate import ProcessDbGate
@@ -31,7 +32,10 @@ def create_native_owner(conn: psycopg.Connection, *, local_machine: str) -> Runt
 
 def native_status(owner: RuntimeIncarnation, *, database_gate: ProcessDbGate) -> dict[str, Any]:
     result = leases.native_status(
-        Database.from_settings(gate=database_gate), EventBus.from_settings(), owner.agent_id, owner
+        Database.from_settings(gate=database_gate),
+        EventBus.from_settings(rng=seeded_rng()),
+        owner.agent_id,
+        owner,
     )
     assert result is not None
     return result
@@ -51,7 +55,7 @@ def request_controller(
         kwargs["relay_thread_id"] = thread or str(uuid4())
     return leases.request(
         Database.from_settings(gate=database_gate),
-        EventBus.from_settings(),
+        EventBus.from_settings(rng=seeded_rng()),
         owner.agent_id,
         caller=CallerIdentity(kind="external_agent", subject="codex", instance="test"),
         ttl_seconds=300,
@@ -78,7 +82,7 @@ def accept_controller(
     )
     leases.prepare(
         Database.from_settings(gate=database_gate),
-        EventBus.from_settings(),
+        EventBus.from_settings(rng=seeded_rng()),
         lease["id"],
         owner.agent_id,
         owner,
@@ -86,6 +90,9 @@ def accept_controller(
         local_machine=local_machine,
     )
     leases.activate(
-        Database.from_settings(gate=database_gate), EventBus.from_settings(), lease["id"], owner
+        Database.from_settings(gate=database_gate),
+        EventBus.from_settings(rng=seeded_rng()),
+        lease["id"],
+        owner,
     )
     return lease

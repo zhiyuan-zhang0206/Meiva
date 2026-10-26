@@ -7,6 +7,7 @@ import pytest
 from psycopg.types.json import Jsonb
 from psycopg_pool import ConnectionPool
 
+from base.clock.tests.seeded_rng import seeded_rng
 from base.db import Database
 from base.db.code_version_gate import ProcessDbGate
 from base.events.contract import payload_keys
@@ -37,7 +38,7 @@ class TestMachineProbeFailedSignal:
         await run_liveness_pass(
             Database.from_settings(gate=database_gate),
             pool,
-            EventBus.from_settings(),
+            EventBus.from_settings(rng=seeded_rng()),
             probe=probe,
             config=LivenessConfig(8.0),
         )

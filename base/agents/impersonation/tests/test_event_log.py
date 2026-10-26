@@ -24,6 +24,7 @@ from base.agents.impersonation.manifest import (
 )
 from base.agents.impersonation.status import pending_reason
 from base.agents.impersonation.tests import test_history as history_cases
+from base.clock.tests.seeded_rng import seeded_rng
 from base.cluster.machine import MachineIdentityReader
 from base.cluster.machine.tests.identity import machine_identity as machine_identity
 from base.config.service_read import ConfigAuthority
@@ -124,7 +125,7 @@ def _expire(
     assert (
         leases.get(
             Database.from_settings(gate=database_gate),
-            EventBus.from_settings(),
+            EventBus.from_settings(rng=seeded_rng()),
             str(lease["id"]),
             local_machine=local_machine,
         )["status"]

@@ -14,6 +14,7 @@ construct a process gate or discover a process image.
 from __future__ import annotations
 
 import logging
+import random
 import sys
 from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor
@@ -139,14 +140,15 @@ def ops_acceptance() -> frozenset[str]:
 
 
 def ops_handles(
-    *, database: Callable[[], Database], authority: ConfigAuthority
+    *, database: Callable[[], Database], authority: ConfigAuthority, rng: random.Random
 ) -> tuple[Database, EventBus]:
     """The cluster handles every in-process lifecycle op works with, as this root's authority names them."""
     return database(), EventBus(
         EventBusConfig(
             redis_url=authority.service_field_value("redis_url"),
             events_channel=authority.service_field_value("events_channel"),
-        )
+        ),
+        rng=rng,
     )
 
 

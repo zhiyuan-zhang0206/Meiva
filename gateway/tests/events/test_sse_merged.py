@@ -11,6 +11,7 @@ import pytest
 import redis as sync_redis
 from fastapi import HTTPException, Request
 
+from base.clock.tests.seeded_rng import seeded_rng
 from base.config import settings
 from base.db import create_agent
 from base.events.live.bus import EventBus, EventBusConfig
@@ -96,7 +97,7 @@ async def _collect(
 ) -> Collected:
     req = FakeRequest()
     gen = merged_event_stream(
-        EventBus.from_settings(),
+        EventBus.from_settings(rng=seeded_rng()),
         cast(Request, req),
         channels=parse_channels(",".join(channels)),
         agent_filter=agent_filter,
@@ -280,7 +281,10 @@ def test_a_failed_source_flags_only_the_channels_it_serves() -> None:
 
 
 def test_merged_stream_with_an_unreachable_redis_answers_every_channel_with_an_error() -> None:
-    bus = EventBus(EventBusConfig(redis_url=refused_redis_url(), events_channel="meiva:events"))
+    bus = EventBus(
+        EventBusConfig(redis_url=refused_redis_url(), events_channel="meiva:events"),
+        rng=seeded_rng(),
+    )
 
     async def run() -> list[bytes]:
         gen = merged_event_stream(

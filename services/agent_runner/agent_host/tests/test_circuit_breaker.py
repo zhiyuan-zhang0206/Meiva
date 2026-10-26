@@ -23,6 +23,7 @@ from agent.turn.runloop import handle_fatal_llm_error
 from base.agents.context import MeivaContext
 from base.agents.tests.units import spawn_agent
 from base.clock import Clock
+from base.clock.tests.seeded_rng import seeded_rng
 from base.cluster.machine import MachineIdentityReader
 from base.cluster.machine.tests.identity import machine_identity as machine_identity
 from base.config.service_read import ConfigAuthority
@@ -107,7 +108,7 @@ async def test_fatal_provider_error_emits_blocked_recovery_details(
         event_publisher=cast(AgentEventPublisher, publisher),
         agent=AgentSlices.resolve(default_reader=defaults()),
         db=Database.from_settings(gate=database_gate),
-        bus=EventBus.from_settings(),
+        bus=EventBus.from_settings(rng=seeded_rng()),
         catalog=build_model_catalog(),
         clock_factory=Clock.from_settings,
         commands=CommandCatalog.system(skills=list),
@@ -203,7 +204,7 @@ async def test_permanent_provider_error_reports_metadata_to_nearest_alive_ancest
             event_publisher=MagicMock(),
             agent=AgentSlices.resolve({"llm_model": "deepseek-flash"}, default_reader=defaults()),
             db=Database.from_settings(gate=database_gate),
-            bus=EventBus.from_settings(),
+            bus=EventBus.from_settings(rng=seeded_rng()),
             catalog=model_catalog,
             clock_factory=Clock.from_settings,
             commands=CommandCatalog.system(skills=list),
@@ -282,7 +283,7 @@ async def test_context_overflow_halts_background_wakes_and_reports_to_an_ancesto
             event_publisher=MagicMock(),
             agent=AgentSlices.resolve(default_reader=defaults()),
             db=Database.from_settings(gate=database_gate),
-            bus=EventBus.from_settings(),
+            bus=EventBus.from_settings(rng=seeded_rng()),
             catalog=model_catalog,
             clock_factory=Clock.from_settings,
             commands=CommandCatalog.system(skills=list),

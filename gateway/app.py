@@ -16,6 +16,7 @@ from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from base import paths, telemetry
 from base.api_contracts.agent_contract import MeivaAgentError
+from base.clock import SYSTEM_TIMERS, Clock
 from base.cluster.machine.boot import gateway_access_from_boot
 from base.cluster.machine.configured import ConfiguredMachineIdentity
 from base.cluster.rate_limit import LoginRateLimitConfig, LoginRateLimiter
@@ -230,7 +231,10 @@ async def lifespan(
                     "administrator. Keep MEIVA_MACHINE_HOST on a trusted private network address."
                 )
             app.state.db = process.database()
-            app.state.bus = EventBus(event_bus_config_from_config(process.config))
+            app.state.bus = EventBus(
+                event_bus_config_from_config(process.config),
+                rng=app.state.gateway_config.rng,
+            )
             db_pool = app.state.db.pool(max_size=app.state.gateway_config.db_pool_max_size)
             app.state.db_pool = db_pool
             releases.callback(db_pool.close)
@@ -363,6 +367,7 @@ async def _cookie_session(request: Request, secret: str) -> tuple[str, str] | No
         cookie_token,
         secret,
         home=request.app.state.gateway_process.home,
+        now=request.app.state.clock.now(),
         cache=request.app.state.machine_token_acceptance,
     )
     return None if fact is None else (cookie_token, fact)
@@ -485,6 +490,7 @@ def create_app(
         openapi_url=None,
     )
     app.state.gateway_config = config
+    app.state.clock = Clock(config.clock, timers=SYSTEM_TIMERS)
     app.state.catalog = catalog
     if isinstance(catalog, ModelCatalog):
         app.state.memory_embedder = memory_router.build_embedder(config.memory_search, catalog)

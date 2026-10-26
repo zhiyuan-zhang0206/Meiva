@@ -17,6 +17,7 @@ from agent.ownership.tests.ownership_support import (
     agent_row,
     insert_lifecycle_command,
 )
+from base.clock.tests.seeded_rng import seeded_rng
 from base.config import settings
 from base.db.code_version_gate import ProcessDbGate
 from base.events.live.bus import EventBus, EventBusConfig
@@ -197,7 +198,8 @@ async def hung_redis_publication() -> AsyncGenerator[tuple[EventBus, asyncio.Eve
                 redis_url=f"redis://127.0.0.1:{port}",
                 events_channel="test",
                 publish_attempt_timeout_s=60.0,
-            )
+            ),
+            rng=seeded_rng(),
         )
         yield bus, asked
     finally:

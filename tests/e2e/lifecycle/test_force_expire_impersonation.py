@@ -13,6 +13,7 @@ from base.agents.impersonation import token_hash
 from base.agents.impersonation.delivery import reserve_delivery
 from base.agents.impersonation.relay import relay_get, relay_inbox
 from base.agents.impersonation.wake import publish_inbound_wake
+from base.clock.tests.seeded_rng import seeded_rng
 from base.cluster.machine import validate_machine_name
 from base.config import settings
 from base.db import Database
@@ -52,11 +53,11 @@ def _seed_active_lease(
         session_id = session_row[0]
     publish_inbound_wake(
         Database.from_settings(gate=database_gate),
-        EventBus.from_settings(),
+        EventBus.from_settings(rng=seeded_rng()),
         agent_id,
         "impersonation",
     )
-    bus = EventBus.from_settings()
+    bus = EventBus.from_settings(rng=seeded_rng())
     publish_impersonation_changed_sync(bus, agent_id)
     publish_agent_updated_sync(bus, agent_id)
     return lease_id, session_id
@@ -73,7 +74,10 @@ def _exhaust_delivery_budget(
     request = "Please keep this unanswered request when the external session ends."
     env.page.fill('[data-testid="composer-input"]', request)
     env.page.click('[data-testid="composer-send"]')
-    db, bus = Database.from_settings(gate=database_gate), EventBus.from_settings()
+    db, bus = (
+        Database.from_settings(gate=database_gate),
+        EventBus.from_settings(rng=seeded_rng()),
+    )
     handle = str(lease_id)
     pending: list[int] = []
 

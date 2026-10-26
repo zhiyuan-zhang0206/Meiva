@@ -19,6 +19,7 @@ from agent.ownership.hosted import admit_hosted_runtime, settle_hosted_runtime
 from agent.ownership.tests.ownership_support import admit_owner, agent_row, insert_lifecycle_command
 from base.agents.context import MeivaContext
 from base.clock import Clock
+from base.clock.tests.seeded_rng import seeded_rng
 from base.config import settings
 from base.config.tests.configuration import defaults
 from base.db import Database
@@ -117,7 +118,7 @@ async def test_hosted_applies_only_after_continuation_returns(
             checkpointer=Mock(),
             graph=_graph_blocked_until_released(kind, entered, release),
             machine=configured_machine(name="claim-test"),
-            bus=EventBus.from_settings(),
+            bus=EventBus.from_settings(rng=seeded_rng()),
             db=Database.from_settings(gate=database_gate),
             catalog=model_catalog,
             commands=CommandCatalog.system(skills=list),
@@ -137,7 +138,7 @@ async def test_hosted_applies_only_after_continuation_returns(
                         ops_pool=aops_pool,
                         agent=AgentSlices.resolve(default_reader=defaults()),
                         db=Database.from_settings(gate=database_gate),
-                        bus=EventBus.from_settings(),
+                        bus=EventBus.from_settings(rng=seeded_rng()),
                         catalog=model_catalog,
                         clock_factory=Clock.from_settings,
                     ),
@@ -197,7 +198,7 @@ async def test_hosted_terminate_crash_leaves_no_half_applied_command(
             checkpointer=Mock(),
             graph=graph,
             machine=configured_machine(name="claim-test"),
-            bus=EventBus.from_settings(),
+            bus=EventBus.from_settings(rng=seeded_rng()),
             db=Database.from_settings(gate=database_gate),
             catalog=model_catalog,
             commands=CommandCatalog.system(skills=list),
@@ -242,7 +243,7 @@ async def test_hosted_terminate_crash_leaves_no_half_applied_command(
                             ops_pool=aops_pool,
                             agent=AgentSlices.resolve(default_reader=defaults()),
                             db=Database.from_settings(gate=database_gate),
-                            bus=EventBus.from_settings(),
+                            bus=EventBus.from_settings(rng=seeded_rng()),
                             catalog=model_catalog,
                             clock_factory=Clock.from_settings,
                         ),
@@ -269,7 +270,7 @@ async def test_hosted_terminate_crash_leaves_no_half_applied_command(
                         ops_pool=aops_pool,
                         agent=AgentSlices.resolve(default_reader=defaults()),
                         db=Database.from_settings(gate=database_gate),
-                        bus=EventBus.from_settings(),
+                        bus=EventBus.from_settings(rng=seeded_rng()),
                         catalog=model_catalog,
                         clock_factory=Clock.from_settings,
                     ),
@@ -311,7 +312,7 @@ async def test_pending_wake_scan_finds_a_claimed_command_without_pending_rows(
         checkpointer=Mock(),
         graph=Mock(),
         machine=configured_machine(name="claim-test"),
-        bus=EventBus.from_settings(),
+        bus=EventBus.from_settings(rng=seeded_rng()),
         db=Database.from_settings(gate=database_gate),
         catalog=model_catalog,
         commands=CommandCatalog.system(skills=list),
@@ -415,7 +416,7 @@ async def _run_terminating_turn(
             checkpointer=Mock(),
             graph=graph,
             machine=configured_machine(name="claim-test"),
-            bus=EventBus.from_settings(),
+            bus=EventBus.from_settings(rng=seeded_rng()),
             db=Database.from_settings(gate=database_gate),
             catalog=model_catalog,
             commands=CommandCatalog.system(skills=list),
@@ -429,7 +430,7 @@ async def _run_terminating_turn(
                 ops_pool=aops_pool,
                 agent=AgentSlices.resolve(default_reader=defaults()),
                 db=Database.from_settings(gate=database_gate),
-                bus=EventBus.from_settings(),
+                bus=EventBus.from_settings(rng=seeded_rng()),
                 catalog=model_catalog,
                 clock_factory=Clock.from_settings,
             ),

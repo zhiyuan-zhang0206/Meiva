@@ -340,7 +340,7 @@ def is_running() -> bool:
 
 
 def boot_handles(
-    db: Database, config: ConfigBoot
+    db: Database, config: ConfigBoot, rng: random.Random
 ) -> tuple[
     AsyncConnectionPool[psycopg.AsyncConnection],
     AsyncConnectionPool[psycopg.AsyncConnection],
@@ -352,7 +352,8 @@ def boot_handles(
         EventBusConfig(
             redis_url=config.view.data_plane.redis_url,
             events_channel=config.view.data_plane.events_channel,
-        )
+        ),
+        rng=rng,
     )
     bounds = pool_bounds(config)
     return build_shared_pool(db, bounds), build_control_pool(db, bounds), bus, db
@@ -472,7 +473,7 @@ async def run(
     from agent.process_boot import init_process_scope, land_cluster_extensions, process_trace_config
 
     rng = _new_rng()
-    workload_pool, control_pool, bus, db = boot_handles(database(), config)
+    workload_pool, control_pool, bus, db = boot_handles(database(), config, rng)
     secure_rng = secrets.SystemRandom()
     liveness = Liveness(_LIVENESS_TIMEOUT_S)
     installation: Installation | None = None

@@ -19,6 +19,7 @@ import psycopg
 import pytest
 import redis as sync_redis
 
+from base.clock.tests.seeded_rng import seeded_rng
 from base.config import settings
 from base.db import create_agent
 from base.events.live.bus import EventBus
@@ -72,7 +73,7 @@ async def _collect_frames(
     """
     req = FakeRequest()
     gen = event_stream(  # type: ignore[arg-type]
-        EventBus.from_settings(),
+        EventBus.from_settings(rng=seeded_rng()),
         agent_id,
         req,  # type: ignore[arg-type]
         channel=channel,
@@ -386,7 +387,7 @@ def test_busy_channel_still_emits_keepalive_comments(
 
     req = FakeRequest()
     gen = event_stream(  # type: ignore[arg-type]
-        EventBus.from_settings(),
+        EventBus.from_settings(rng=seeded_rng()),
         tid,
         req,  # type: ignore[arg-type]
         poll_s=POLL_S,
@@ -429,7 +430,7 @@ def test_a_redis_that_drops_the_subscriber_ends_the_stream_with_an_error_frame(
     async def _drive() -> list[bytes]:
         req = FakeRequest()
         gen = event_stream(
-            EventBus.from_settings(),
+            EventBus.from_settings(rng=seeded_rng()),
             4242,
             # meiva:note
             # FakeRequest stands in for the ASGI request: the stream only asks it whether the client left.
