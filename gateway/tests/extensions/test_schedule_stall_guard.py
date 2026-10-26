@@ -153,11 +153,8 @@ def _held_child(capture_output: bool) -> Generator[tuple[subprocess.Popen[bytes]
         with subprocess.Popen(  # noqa: S603
             [
                 sys.executable,
-                "-c",
-                "import socket, sys\n"
-                "with socket.socket(fileno=int(sys.argv[1])) as latch:\n"
-                "    latch.sendall(b'R')\n"
-                "    assert latch.recv(1) == b''\n",
+                __file__,
+                "latch",
                 str(child_latch.fileno()),
             ],
             pass_fds=(child_latch.fileno(),),
@@ -224,8 +221,8 @@ def test_subprocess_spawn_is_observed(database_gate: ProcessDbGate) -> None:
         time.sleep(0.5)
 
     with _samples(database_gate, patch_sleep=True) as seen:
-        subprocess.run(
-            [sys.executable, "-c", "pass"],
+        subprocess.run(  # noqa: S603
+            [sys.executable, __file__, "noop"],
             capture_output=True,
             timeout=2,
             preexec_fn=slow_spawn,
@@ -258,7 +255,7 @@ def test_subprocess_argument_conversion_is_observed(database_gate: ProcessDbGate
                 # meiva:note
                 # test PathLike always resolves to sys.executable.
                 subprocess.run(  # noqa: S603
-                    [SlowExecutable(), "-c", "pass"],
+                    [SlowExecutable(), __file__, "noop"],
                     capture_output=True,
                     timeout=2,
                     check=True,
@@ -274,8 +271,8 @@ def test_subprocess_argument_conversion_is_observed(database_gate: ProcessDbGate
 def test_subprocess_stdin_flush_is_observed(database_gate: ProcessDbGate) -> None:
     import os
 
-    with subprocess.Popen(
-        [sys.executable, "-c", "import time; time.sleep(2)"],
+    with subprocess.Popen(  # noqa: S603
+        [sys.executable, __file__, "sleep"],
         stdin=subprocess.PIPE,
         stdout=subprocess.PIPE,
         bufsize=8192,
@@ -332,7 +329,7 @@ def test_a_selector_in_argument_conversion_is_observed(database_gate: ProcessDbG
                 # meiva:note
                 # test PathLike always resolves to sys.executable.
                 subprocess.run(  # noqa: S603
-                    [SlowExecutable(), "-c", "pass"],
+                    [SlowExecutable(), __file__, "noop"],
                     capture_output=True,
                     timeout=2,
                     check=True,
@@ -341,3 +338,21 @@ def test_a_selector_in_argument_conversion_is_observed(database_gate: ProcessDbG
                 wake.cancel()
                 wake.join()
     assert _stood_on(seen, "select"), "stall guard ignored a selector in argument conversion"
+
+
+def _child_main() -> None:
+    mode = sys.argv[1]
+    if mode == "latch":
+        with socket.socket(fileno=int(sys.argv[2])) as latch:
+            latch.sendall(b"R")
+            assert latch.recv(1) == b""
+    elif mode == "noop":
+        return
+    elif mode == "sleep":
+        time.sleep(2)
+    else:
+        raise ValueError(f"unknown child mode {mode!r}")
+
+
+if __name__ == "__main__":
+    _child_main()

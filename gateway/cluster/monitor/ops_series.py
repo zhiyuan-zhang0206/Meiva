@@ -31,6 +31,7 @@ from base.events.contract import (
     family_events,
 )
 from base.telemetry.metrics.event_sql import numeric
+from gateway.http.config import utc_now
 
 # meiva:note
 # Window -> (seconds, bucket seconds). Bucket count per window is fixed:
@@ -262,7 +263,7 @@ def _restart_series(conn: psycopg.Connection[Any], window: _Window) -> dict[str,
 # dict — meta + the three groups — ready for `OpsMonitorReport(**data)`.
 def fetch_ops_series(conn: psycopg.Connection[Any], window: str) -> dict[str, Any]:
     window_s, bucket_s = WINDOWS[window]
-    anchor = datetime.now(UTC)
+    anchor = utc_now()
     bucket_starts = bucket_start_times(anchor, window_s, bucket_s)
     grid = _Window(bucket_starts, bucket_s)
     return {

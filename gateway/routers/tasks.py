@@ -9,7 +9,7 @@ any child remains in progress.
 from __future__ import annotations
 
 import asyncio
-from datetime import UTC, datetime, timedelta
+from datetime import datetime, timedelta
 from typing import Any, Literal, overload
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Query, Request
@@ -32,6 +32,7 @@ from base.agents.tasks.rules import first_open_child, is_closed, open_title_hold
 from base.db.transaction import write_transaction
 from gateway.agents.eval_guard import deny_isolated_result_read
 from gateway.http.auth.request_principal import PrincipalScopeError, request_key
+from gateway.http.config import utc_now
 from gateway.routers.receipts.task import existing_task_receipt, save_task_receipt
 from gateway.schemas.tasks import (
     TaskGraphRow,
@@ -171,7 +172,7 @@ def _windowed_tasks(
     toggle-hidden parents the same way). done/cancelled tasks outside the
     window with no kept descendant are omitted. Order preserved.
     """
-    cutoff = datetime.now(UTC) - _TASK_WINDOWS[window]
+    cutoff = utc_now() - _TASK_WINDOWS[window]
     kept: set[int] = set()
     for t in tasks:
         if (

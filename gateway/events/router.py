@@ -36,7 +36,7 @@ from __future__ import annotations
 from collections.abc import Generator
 from contextlib import contextmanager
 from dataclasses import asdict
-from datetime import UTC, datetime
+from datetime import datetime
 from typing import Annotated, Any
 
 import psycopg
@@ -54,7 +54,7 @@ from gateway.events.events_plan import (
     plan_events,
 )
 from gateway.events.schemas import EventRow, EventsMeta, EventsResponse
-from gateway.http.config import GatewayConfig, gateway_config
+from gateway.http.config import GatewayConfig, gateway_config, utc_now
 
 router = APIRouter()
 
@@ -186,7 +186,7 @@ def get_events(
     `window_from` is always set — the default 24h lower bound when the
     request named none. An empty window returns `items: []`.
     """
-    now = datetime.now(UTC)
+    now = utc_now()
     try:
         plan = plan_events(
             EventsRequest(

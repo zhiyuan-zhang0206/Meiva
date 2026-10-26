@@ -24,7 +24,6 @@ may fail the agent's turn.
 from __future__ import annotations
 
 import asyncio
-import time
 from datetime import datetime
 from typing import Any
 
@@ -35,6 +34,7 @@ from agent.state import AgentState
 from agent.state_channels import CompactState
 from base import telemetry
 from base.agents.history.hierarchy.chunks import chunk_threshold, enqueue_chunk
+from base.clock import SYSTEM_TIMERS
 from base.host.env.agent_slices import AgentSlices
 from base.lm.catalog import ModelCatalog
 from base.log import logger
@@ -156,14 +156,14 @@ async def await_snapshot(
     if pool is None or not messages or not understanding_enabled:
         return
     last = read_time(messages[-1])
-    started = time.monotonic()
+    started = SYSTEM_TIMERS.monotonic()
     while last is not None:
         try:
             newest = await newest_checkpoint_ts(pool, agent_id)
         except Exception:
             logger.opt(exception=True).warning("snapshot check failed for agent {}", agent_id)
             return
-        verdict = snapshot_verdict(newest, last, time.monotonic() - started, wait)
+        verdict = snapshot_verdict(newest, last, SYSTEM_TIMERS.monotonic() - started, wait)
         if verdict == "caught_up":
             return
         if verdict == "give_up":
@@ -178,5 +178,8 @@ async def await_snapshot(
     telemetry.emit(
         "telemetry",
         "understanding_snapshot_lag",
-        attributes={"agent_id": agent_id, "waited_seconds": round(time.monotonic() - started, 1)},
+        attributes={
+            "agent_id": agent_id,
+            "waited_seconds": round(SYSTEM_TIMERS.monotonic() - started, 1),
+        },
     )

@@ -9,5 +9,5 @@ exports = ["batches.py", "router.py"]
 "__init__.py" = "strict"
 "upload_plan.py" = "strict"
 
-[debt.ambient-read]
-"batches.py#random uuid.uuid4" = 2
+[roots]
+"batches.py" = { kinds = ["random"], why = "claim_batch and publish_files mint fresh UUIDs for upload batch identity and private staging directories" }

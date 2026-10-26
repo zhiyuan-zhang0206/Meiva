@@ -17,9 +17,3 @@ exports = ["neighbors.py", "okf_graph.py", "router.py", "schemas.py"]
 "__init__.py" = "strict"
 "_coverage.py" = "strict"
 "_heartbeat.py" = "strict"
-
-[debt.ambient-read]
-"_metrics.py#clock datetime.datetime.now" = 1
-"_plugin_metrics.py#clock datetime.datetime.now" = 1
-"neighbors.py#clock datetime.datetime.now" = 1
-"router.py#clock datetime.datetime.now" = 1

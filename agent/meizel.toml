@@ -20,9 +20,5 @@ exports = ["db", "execution", "extensions", "graph", "hooks", "impersonation.py"
 "state_channels.py" = "strict"
 
 [roots]
+"impersonation.py" = { kinds = ["random"], why = "_establish_spawned_relay mints a per-session relay token" }
 "process_boot.py" = { kinds = ["environ"], why = "boot sets os.environ[\"MEIVA_AGENT_ID\"] so child processes inherit the agent identity; the env forward must run before child spawn and cannot route through Settings (the same forward agent/loop.py previously owned)" }
-
-[debt.ambient-read]
-"impersonation.py#clock datetime.datetime.now" = 2
-"impersonation.py#clock time.monotonic" = 4
-"impersonation.py#random secrets.token_urlsafe" = 1

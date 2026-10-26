@@ -5,7 +5,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import time as time_mod
-from datetime import UTC, datetime, timedelta
+from datetime import datetime, timedelta
 from typing import Annotated, Any
 
 from fastapi import APIRouter, HTTPException, Query, Request
@@ -16,7 +16,7 @@ from psycopg_pool import ConnectionPool, PoolTimeout
 
 from base.api_contracts.agent_contract import AgentNotFound
 from base.db import Database
-from gateway.http.config import gateway_config
+from gateway.http.config import gateway_config, utc_now
 from gateway.inspect import _metrics, _plugin_metrics, _plugin_widgets, neighbors
 from gateway.inspect._cache import InspectCacheFullError, InspectQueryCache
 from gateway.inspect._heartbeat import HeartbeatCadence, HeartbeatState
@@ -57,7 +57,7 @@ def _heartbeat_last_pause(pool: ConnectionPool[Any], agent_id: int) -> Heartbeat
             "SELECT created_at, duration_s FROM heartbeat_pause_log "
             "WHERE agent_id = %s AND created_at >= %s "
             "ORDER BY created_at DESC, id DESC LIMIT 1",
-            (agent_id, datetime.now(tz=UTC) - _HEARTBEAT_PAUSE_LOOKBACK),
+            (agent_id, utc_now() - _HEARTBEAT_PAUSE_LOOKBACK),
         )
         row = cur.fetchone()
     return HeartbeatLastPause(at=row[0], duration_s=row[1]) if row is not None else None

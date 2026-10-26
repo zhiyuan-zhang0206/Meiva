@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from datetime import datetime
 from pathlib import Path
 from typing import Literal, get_args, get_type_hints
 from urllib.parse import urlsplit
@@ -14,7 +15,7 @@ from base.agents.upload_delivery.paths import (
     MAX_AGENT_UPLOAD_FILES,
     MAX_UPLOAD_BYTES,
 )
-from base.clock import ClockConfig
+from base.clock import SYSTEM_TIMERS, Clock, ClockConfig
 from base.clock.configuration import clock_config_from_boot
 from base.cluster.machine.configured import ConfiguredMachineIdentity
 from base.config import ConfigBoot
@@ -419,3 +420,13 @@ def placeholder_config() -> GatewayConfig:
 # from.
 def gateway_config(request: Request) -> GatewayConfig:
     return request.app.state.gateway_config
+
+
+def gateway_clock(request: Request) -> Clock:
+    return Clock(gateway_config(request).clock, timers=SYSTEM_TIMERS)
+
+
+def utc_now() -> datetime:
+    return Clock(
+        ClockConfig("UTC", None, message_timestamp_weekday=False), timers=SYSTEM_TIMERS
+    ).now()

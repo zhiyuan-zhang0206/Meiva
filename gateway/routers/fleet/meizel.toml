@@ -2,6 +2,3 @@ exports = ["fleet_graph.py", "fleet_tokens.py"]
 
 [uses]
 "fleet_graph.py" = ["fleet_tokens.py"]
-
-[debt.ambient-read]
-"fleet_graph.py#clock datetime.datetime.now" = 3
