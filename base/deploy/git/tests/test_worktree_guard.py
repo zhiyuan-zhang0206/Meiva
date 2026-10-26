@@ -69,6 +69,51 @@ def test_live_process_cwd_anchor_reported(tmp_path: Path) -> None:
         child.wait()
 
 
+# meiva:note
+# The scan skips the invoker's own process (and its group), not the process that happens to run
+# the scan: a child anchored under the target is reported to a stranger and not to the child.
+def test_the_invoker_given_to_the_scan_is_the_one_it_skips(tmp_path: Path) -> None:
+    target = tmp_path / "worktrees" / "wt-under-test"
+    target.mkdir(parents=True)
+    child = subprocess.Popen(["sleep", "30"], cwd=target, start_new_session=True)
+    try:
+        as_stranger = find_live_anchors(target, run=tmp_path / "nope", invoker=_invoker())
+        as_the_child = find_live_anchors(
+            target, run=tmp_path / "nope", invoker=Invoker(pid=child.pid, pgid=child.pid)
+        )
+    finally:
+        child.kill()
+        child.wait()
+
+    assert any(f"process {child.pid} " in hit for hit in as_stranger)
+    assert not any(f"process {child.pid} " in hit for hit in as_the_child)
+
+
+# meiva:note
+# The two skips are independent: the invoker's pid chain and its process group. Each case
+# anchors a child in its own session (so its group is its pid) and gives the scan an invoker
+# that matches the child by exactly one of the two, so a scan that dropped either branch fails.
+@pytest.mark.parametrize("matched_by", ["pid-chain", "process-group"])
+def test_the_scan_skips_the_invokers_chain_and_group_independently(
+    tmp_path: Path, matched_by: str
+) -> None:
+    target = tmp_path / "worktrees" / "wt-under-test"
+    target.mkdir(parents=True)
+    child = subprocess.Popen(["sleep", "30"], cwd=target, start_new_session=True)
+    try:
+        invoker = (
+            Invoker(pid=child.pid, pgid=os.getpgrp())
+            if matched_by == "pid-chain"
+            else Invoker(pid=os.getpid(), pgid=child.pid)
+        )
+        hits = find_live_anchors(target, run=tmp_path / "nope", invoker=invoker)
+    finally:
+        child.kill()
+        child.wait()
+
+    assert not any(f"process {child.pid} " in hit for hit in hits)
+
+
 def _case_alias(path: Path) -> Path | None:
     text = str(path)
     for i, ch in enumerate(text):

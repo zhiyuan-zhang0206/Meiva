@@ -84,25 +84,24 @@ def test_is_prod_install_needs_the_default_home_and_a_non_worktree_checkout(tmp_
 _RUNNER = frozenset({"agent-runner"})
 _GATEWAY = frozenset({"gateway"})
 
+_DERIVED = [
+    (paths.plugins_dir, "plugins"),
+    (paths.logs_dir, "logs"),
+    (paths.permissions_helper_app_dir, "helper"),
+    (paths.memory_dir, "memory"),
+    (partial(paths.gateway_memory_dir, roles=_RUNNER), "gateway/memory"),
+    (partial(paths.gateway_memory_dir, roles=_GATEWAY), "memory"),
+    (paths.workspaces_root, "workspaces"),
+    (partial(paths.workspace_dir, 7), "workspaces/7"),
+    (partial(paths.workspace_dir_readonly, 8), "workspaces/8"),
+    (paths.harness_sessions_dir, "harness/sessions"),
+    (paths.harness_registrations_dir, "harness/registrations"),
+]
+
 
 # meiva:note
 # Each helper derives its directory from the home it is handed.
-@pytest.mark.parametrize(
-    ("derive", "relative"),
-    [
-        (partial(paths.plugins_dir), "plugins"),
-        (partial(paths.logs_dir), "logs"),
-        (partial(paths.permissions_helper_app_dir), "helper"),
-        (partial(paths.memory_dir), "memory"),
-        (partial(paths.gateway_memory_dir, roles=_RUNNER), "gateway/memory"),
-        (partial(paths.gateway_memory_dir, roles=_GATEWAY), "memory"),
-        (partial(paths.workspaces_root), "workspaces"),
-        (partial(paths.workspace_dir, 7), "workspaces/7"),
-        (partial(paths.workspace_dir_readonly, 8), "workspaces/8"),
-        (partial(paths.harness_sessions_dir), "harness/sessions"),
-        (partial(paths.harness_registrations_dir), "harness/registrations"),
-    ],
-)
+@pytest.mark.parametrize(("derive", "relative"), _DERIVED)
 def test_path_helpers_derive_from_an_explicit_home(
     derive: Callable[..., Path], relative: str, tmp_path_factory: pytest.TempPathFactory
 ):
@@ -112,13 +111,24 @@ def test_path_helpers_derive_from_an_explicit_home(
 
 
 # meiva:note
+# The keyword form and the zero-argument form answer the same path when the ambient home is the
+# one handed in.
+@pytest.mark.parametrize(("derive", "relative"), _DERIVED)
+def test_the_keyword_form_equals_the_zero_argument_form_for_the_ambient_home(
+    derive: Callable[..., Path], relative: str, unit_home: Path
+):
+    assert derive(home=unit_home) == derive() == unit_home / relative
+
+
+# meiva:note
 # An explicit home is created owner-only like `meiva_home()` creates the ambient one, the helpers
-# that create their directory still do, the read-only one does not, and the ambient home stays
-# untouched.
-def test_an_explicit_home_is_created_owner_only_and_the_ambient_home_is_left_alone(
+# that create their directory still do, the read-only one does not, and the ambient home is not
+# read: its mode stays what the test set, where `meiva_home()` would have repaired it to 0700.
+def test_an_explicit_home_is_created_owner_only_and_the_ambient_home_is_not_read(
     unit_home: Path, tmp_path_factory: pytest.TempPathFactory
 ):
     other = tmp_path_factory.mktemp("elsewhere") / "home"
+    unit_home.chmod(0o755)
 
     paths.workspace_dir(7, home=other)
     paths.plugins_dir(home=other)
@@ -128,4 +138,21 @@ def test_an_explicit_home_is_created_owner_only_and_the_ambient_home_is_left_alo
     assert (other / "plugins").is_dir()
     assert (other / "workspaces" / "7").is_dir()
     assert not (other / "workspaces" / "8").exists()
+    assert unit_home.stat().st_mode & 0o777 == 0o755
     assert list(unit_home.iterdir()) == []
+
+
+@pytest.mark.parametrize(("derive", "relative"), _DERIVED)
+def test_a_relative_home_is_refused_before_anything_is_created(
+    derive: Callable[..., Path],
+    relative: str,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    monkeypatch.chdir(tmp_path)
+    refused = Path("never-created-relative-home-for-test")
+
+    with pytest.raises(ValueError, match="absolute"):
+        derive(home=refused)
+
+    assert list(tmp_path.iterdir()) == []

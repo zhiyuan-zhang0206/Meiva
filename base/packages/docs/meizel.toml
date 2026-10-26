@@ -3,14 +3,11 @@ exports = ["frontmatter.py", "notes.py", "okf_graph.py", "pages_copy.py"]
 [uses]
 "notes.py" = ["frontmatter.py"]
 "okf_graph.py" = ["frontmatter.py", "notes.py"]
-"tests" = ["frontmatter.py", "notes.py"]
+"tests" = ["frontmatter.py", "notes.py", "okf_graph.py"]
 
 [purity]
 "." = "strict"
 "__init__.py" = "strict"
 "frontmatter.py" = "strict"
-"notes.py" = "strict-to-be"
+"notes.py" = "strict"
 "pages_copy.py" = "strict"
-
-[debt.impure-call]
-"notes.py#Path.resolve" = 1

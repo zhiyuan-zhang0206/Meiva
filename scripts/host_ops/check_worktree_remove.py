@@ -33,6 +33,7 @@ EXIT_MISSING_DEPENDENCY = 3
 
 try:
     from base.deploy.git.worktree_guard import Invoker, find_live_anchors
+    from base.paths import run_dir
     from base.paths.home import resolve_meiva_home
 except ModuleNotFoundError as error:
     print(
@@ -54,7 +55,7 @@ def main() -> int:
     target = Path(sys.argv[1])
     hits = find_live_anchors(
         target,
-        run=resolve_meiva_home() / "run",
+        run=run_dir(resolve_meiva_home()),
         invoker=Invoker(pid=os.getpid(), pgid=os.getpgrp()),
     )
     if hits:
