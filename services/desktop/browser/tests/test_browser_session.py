@@ -249,7 +249,7 @@ async def test_gateway_session_login_returns_server_cookie() -> None:
     name, value, expires = await sess.gateway_session_login(stack.gateway_url, SECRET, now=NOW)
 
     assert (name, value) == ("meiva_session", "opaque-session")
-    assert expires > 0
+    assert expires == NOW + 86_400
     url, body, headers = stack.login_calls[0]
     assert (url, body) == (f"{stack.gateway_url}/api/auth/login", {"password": SECRET})
     # the managed-browser marker lets the sessions list label this row
@@ -300,7 +300,7 @@ async def test_inject_sets_cookie_with_login_flags() -> None:
     assert params["httpOnly"] is True
     assert params["sameSite"] == "Lax"
     assert params["value"] == "opaque-session"
-    assert isinstance(params["expires"], int) and params["expires"] > 0
+    assert params["expires"] == NOW + 86_400
 
 
 async def test_inject_raises_when_browser_rejects_cookie() -> None:
@@ -357,6 +357,7 @@ async def test_inject_once_injects_with_settings() -> None:
     await keeper.inject_once()
     assert len(stack.login_calls) == 1
     assert len(stack.page_sent) == 1
+    assert stack.page_sent[0]["params"]["expires"] == NOW + 86_400
 
 
 def test_session_params_present_the_delivered_runner_token() -> None:

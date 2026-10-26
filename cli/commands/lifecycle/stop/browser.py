@@ -5,10 +5,10 @@ from __future__ import annotations
 
 import signal
 import sys
+from datetime import datetime
 
 import psutil
 
-from base.clock import Clock, ClockConfig
 from base.native_process.ownership import OwnedProcess, capture_tree, retain_processes
 from cli.commands.data_plane.stop_waits import wait_for_exit
 from cli.database.runtime import CommandRuntime
@@ -19,7 +19,7 @@ from cli.database.runtime import CommandRuntime
 # Called before the services phase: that phase is what signals the `meiva-browser`
 # session, so waiting for the stop's own `browser` phase would find Chrome already gone.
 # meiva:link services/desktop/browser/docs/browser-session-restore.meiva.okf.md
-def record_browser_session(command: CommandRuntime) -> None:
+def record_browser_session(command: CommandRuntime, *, now: datetime) -> None:
     from services.desktop.browser import session_restore
 
     line = session_restore.record_for_stop(
@@ -27,9 +27,7 @@ def record_browser_session(command: CommandRuntime) -> None:
         chrome=session_restore.CdpChrome(
             command.config.view.services.browser_cdp_port, timers=command.timers
         ),
-        now=Clock(
-            ClockConfig("UTC", None, message_timestamp_weekday=False), timers=command.timers
-        ).now(),
+        now=now,
     )
     if line is not None:
         print(f"  {line}")
