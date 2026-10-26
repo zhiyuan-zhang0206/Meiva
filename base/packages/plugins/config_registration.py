@@ -142,10 +142,7 @@ def merge_disk_image_schema(owner: ConfigImage) -> tuple[set[str], set[str]]:
     if not added and not removed:
         return set(), set()
 
-    from base.packages.plugin_config_images import (
-        image_revision,
-        write_config_image,
-    )
+    from base.packages.plugin_config_images import image_revision, write_config_image
 
     write_config_image(
         owner,
@@ -304,12 +301,53 @@ def _validate_framework_overlay_ranges(updates: dict[str, object]) -> None:
             raise InvalidConfigOverlay(f"overlay key {field!r} {error}")
 
 
+# meiva:note
+# Resolve the sub-model class for a core configuration domain without importing service_read.
+def _domain_model_class(domain: str) -> type[BaseModel]:
+    from base.config.domains.agent.settings import AgentSettings
+    from base.config.domains.channels.feishu import FeishuSettings
+    from base.config.domains.channels.telegram import TelegramSettings
+    from base.config.domains.daemon.settings import DaemonSettings
+    from base.config.domains.display import DisplaySettings
+    from base.config.domains.gateway import GatewaySettings
+    from base.config.domains.general import GeneralSettings
+    from base.config.domains.lm import LmSettings
+    from base.config.domains.observability.alerts import AlertsSettings
+    from base.config.domains.observability.settings import ObservabilitySettings
+    from base.config.domains.packages import PackagesSettings
+    from base.config.domains.sandbox import SandboxSettings
+    from base.config.domains.services.settings import ServiceSettings
+    from base.config.domains.storage.data_plane import DataPlaneSettings
+    from base.config.domains.storage.walg import WalgSettings
+    from base.config.domains.to_user import ToUserSettings
+    from base.config.domains.web import WebSettings
+
+    classes: dict[str, type[BaseModel]] = {
+        "agent": AgentSettings,
+        "alerts": AlertsSettings,
+        "daemon": DaemonSettings,
+        "data_plane": DataPlaneSettings,
+        "display": DisplaySettings,
+        "feishu": FeishuSettings,
+        "gateway": GatewaySettings,
+        "general": GeneralSettings,
+        "lm": LmSettings,
+        "observability": ObservabilitySettings,
+        "packages": PackagesSettings,
+        "sandbox": SandboxSettings,
+        "services": ServiceSettings,
+        "telegram": TelegramSettings,
+        "to_user": ToUserSettings,
+        "walg": WalgSettings,
+        "web": WebSettings,
+    }
+    return classes[domain]
+
+
 # meiva:link base/packages/plugins/docs/plugin-config/plugin-config.meiva.okf.md
 def validate_config_overlay_shape(
     overlay: dict[str, object], configs: Mapping[str, BaseModel] | None = None
 ) -> None:
-    from base.config.service_read import domain_model_classes
-
     targets = resolve_overlay_targets(overlay, configs)
     grouped: dict[str | None, dict[str, object]] = {}
     for key, (plugin, field) in targets.items():
@@ -323,7 +361,7 @@ def validate_config_overlay_shape(
                 for f, v in updates.items():
                     by_domain.setdefault(domain_of(f), {})[f] = v
                 for dom, upd in by_domain.items():
-                    cls = domain_model_classes()[dom]
+                    cls = _domain_model_class(dom)
                     sub = cls()
                     cls.model_validate({**sub.model_dump(), **upd})
             else:

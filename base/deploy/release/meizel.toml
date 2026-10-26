@@ -15,9 +15,7 @@ exports = ["collector_artifact.py", "editable_install.py", "python_lock.py", "st
 
 [debt.impure-call]
 "collector_artifact.py#Path.open" = 1
-"collector_artifact.py#Path.read_bytes" = 1
 "collector_artifact.py#Path.write_text" = 1
-"collector_artifact.py#import shutil" = 1
 "collector_artifact.py#import tempfile" = 1
 "editable_install.py#Path.exists" = 1
 "editable_install.py#Path.read_text" = 1

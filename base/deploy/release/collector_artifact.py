@@ -2,9 +2,9 @@
 
 from __future__ import annotations
 
+import copy
 import hashlib
 import platform
-import shutil
 import sys
 import tarfile
 import tempfile
@@ -75,9 +75,17 @@ class DownloadProgress:
     def __init__(self, received: int = 0, *, deadline: float = 0.0) -> None:
         self.received = received
         self.deadline = deadline
+        self._hasher = hashlib.sha256()
 
     def add(self, count: int) -> None:
         self.received += count
+
+    def record(self, chunk: bytes) -> None:
+        self.received += len(chunk)
+        self._hasher.update(chunk)
+
+    def hexdigest(self) -> str:
+        return self._hasher.hexdigest()
 
 
 # meiva:link base/deploy/release/docs/collector-artifact.meiva.okf.md
@@ -123,7 +131,7 @@ def stream_download(
             if not chunk:
                 break
             fh.write(chunk)
-            progress.add(len(chunk))
+            progress.record(chunk)
             elapsed = _elapsed()
             if elapsed - last_beat >= limits.progress_interval_s:
                 pct = f" ({progress.received * 100 // total}%)" if total else ""
@@ -153,7 +161,7 @@ def _download_policy(limits: DownloadLimits) -> Policy:
 # meiva:link base/deploy/release/docs/collector-artifact.meiva.okf.md
 def download_with_retry(
     url: str, tarball: Path, *, open_url: UrlOpener, timers: Timers, limits: DownloadLimits
-) -> None:
+) -> str:
     started = timers.monotonic()
     deadline = started + limits.total_budget_s
     attempt = 0
@@ -170,7 +178,7 @@ def download_with_retry(
         if remaining > 0:
             timers.sleep(min(seconds, remaining))
 
-    def _download_once() -> None:
+    def _download_once() -> str:
         nonlocal attempt, progress
         attempt += 1
         progress = DownloadProgress(deadline=deadline)
@@ -192,9 +200,10 @@ def download_with_retry(
                 error=True,
             )
             raise
+        return progress.hexdigest()
 
     try:
-        retry(_download_policy(limits), sleep=_wait)(_download_once)
+        return retry(_download_policy(limits), sleep=_wait)(_download_once)
     except Exception as exc:
         raise RuntimeError(
             f"failed to download otel-collector from {url} after {attempt} attempt(s) "
@@ -204,17 +213,17 @@ def download_with_retry(
         ) from exc
 
 
+# meiva:note
+# Download + SHA256-verify + extract the pinned tarball into dest_dir.
 def download_and_verify(
     tag: str, dest_dir: Path, *, open_url: UrlOpener, timers: Timers, limits: DownloadLimits
 ) -> None:
-    """Download + SHA256-verify + extract the pinned tarball into dest_dir."""
     url = _DOWNLOAD_URL.format(version=OTELCOL_CONTRIB_VERSION, tag=tag)
     expected = _OTELCOL_CONTRIB_SHA256[tag]
     with tempfile.TemporaryDirectory() as tmp:
         tarball = Path(tmp) / "otelcol-contrib.tar.gz"
         _report(f"  · otel-collector: downloading {url}")
-        download_with_retry(url, tarball, timers=timers, open_url=open_url, limits=limits)
-        digest = hashlib.sha256(tarball.read_bytes()).hexdigest()
+        digest = download_with_retry(url, tarball, timers=timers, open_url=open_url, limits=limits)
         if digest != expected:
             raise RuntimeError(
                 f"otelcol-contrib {OTELCOL_CONTRIB_VERSION} {tag} SHA256 mismatch: "
@@ -224,10 +233,10 @@ def download_and_verify(
             members = [m for m in tf.getmembers() if m.name.endswith(binary_name())]
             if not members:
                 raise RuntimeError(f"otelcol-contrib tarball has no {binary_name()} member")
-            tf.extract(members[0], path=tmp)
-        extracted = Path(tmp) / members[0].name
+            member = copy.copy(members[0])
+            member.name = binary_name()
+            tf.extract(member, path=dest_dir, filter="data")
         dest = dest_dir / binary_name()
-        shutil.move(str(extracted), dest)
         dest.chmod(0o755)
     (dest_dir / VERSION_MARKER).write_text(OTELCOL_CONTRIB_VERSION + "\n", encoding="utf-8")
 
