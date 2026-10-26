@@ -54,6 +54,40 @@ def test_process_logging_opens_each_sink_once(
     _assert_process_events(result["events"], role, filename, service_started)
 
 
+# meiva:note
+# The file follows the home the entry hands in, not the process's ambient home: the child's
+# `MEIVA_HOME` is one directory and the entry names another, and only the named one gets a log.
+@pytest.mark.parametrize(
+    ("role", "filename"),
+    [
+        ("subprocess", "agent-17.log"),
+        ("cli", "cli-watchdog-update.log"),
+        ("gateway", "restarter.log"),
+        ("default-gateway", "gateway.log"),
+    ],
+)
+def test_the_log_file_follows_the_home_the_entry_hands_in(
+    tmp_path: Path, role: str, filename: str
+) -> None:
+    ambient = tmp_path / "ambient"
+    ambient.mkdir()
+    explicit = tmp_path / "explicit"
+    explicit.mkdir()
+
+    child = run_bounded(
+        [sys.executable, "-I", str(_PROCESS_LOGGING), role, str(explicit)],
+        env={**os.environ, "MEIVA_HOME": str(ambient), "MEIVA_CONFIG_FETCH": "skip"},
+        capture_output=True,
+        text=True,
+        timeout=30,
+    )
+
+    assert child.returncode == 0, child.stderr
+    assert set(json.loads(child.stdout)["files"]) == {filename}
+    assert (explicit / "logs" / filename).is_file()
+    assert list((ambient / "logs").glob("*.log")) == []
+
+
 def _assert_process_events(
     events: list[dict[str, Any]], role: str, filename: str, service_started: bool
 ) -> None:
