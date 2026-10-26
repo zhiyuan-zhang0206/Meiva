@@ -76,7 +76,9 @@ def test_an_identical_live_generation_is_reused_and_the_start_serves(
     assert run.serving_published
     assert gateway.requests, "a pure runner probes its gateway before launching"
     assert ("up", "pty-sessions") not in root.calls, "a running unit is not launched again"
-    assert _entries_besides_the_lifecycle_lock(run.home) == ["run"], "nothing converged"
+    assert _entries_besides_the_lifecycle_lock(run.home) == ["run", "running_sha"], (
+        "nothing converged beyond the start's own bookmark"
+    )
     out = capsys.readouterr().out
     assert "roles = agent-runner, machine = start-test" in out
     assert "probe gateway" in out
