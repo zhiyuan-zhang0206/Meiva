@@ -22,6 +22,7 @@ message native.
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from typing import Any
 
 from langchain_core.messages import UsageMetadata
@@ -50,46 +51,33 @@ def _canonical_block(block: ContentBlock) -> ContentBlock:
     return out
 
 
-def to_canonical_reasoning(content: str | list[Any]) -> str | list[str | ContentBlock]:
-    """Normalize provider-native reasoning blocks to the canonical `thinking`
-    shape.
-
-    `content` is an AIMessage(Chunk).content: a string (returned unchanged) or
-    a list of blocks (returns a new list — reasoning blocks normalized, every
-    other element, dict or str, passed through unchanged). The input is never
-    mutated; the stored message stays provider-native.
-    """
+# meiva:note
+# Normalize provider-native reasoning blocks to the canonical `thinking`
+# shape.
+#
+# `content` is an AIMessage(Chunk).content: a string (returned unchanged) or
+# a list of blocks (returns a new list — reasoning blocks normalized, every
+# other element, dict or str, passed through unchanged). The input is never
+# mutated; the stored message stays provider-native.
+def to_canonical_reasoning(content: str | Sequence[object]) -> str | list[object]:
     if not isinstance(content, list):
-        return content
+        return content if isinstance(content, str) else list(content)
     return [_canonical_block(b) if isinstance(b, dict) else b for b in content_blocks(content)]
 
 
+# meiva:note
+# Extract reasoning token count from usage_metadata, with content fallback.
+#
+# Primary: read `output_token_details.reasoning` (Anthropic/DeepSeek via
+# ThinkingTokensChatAnthropic) or `output_token_details.reasoning_tokens`
+# (OpenAI). If neither is present, fall back to estimating from the visible
+# thinking content.
 def extract_reasoning_tokens(
     usage_metadata: UsageMetadata | None,
     *,
-    content: str | list[Any] | None = None,
+    content: str | Sequence[object] | None = None,
     total_reasoning_chars: int = 0,
 ) -> int:
-    """Extract reasoning token count from usage_metadata, with content fallback.
-
-    Primary: read ``output_token_details.reasoning`` (Anthropic/DeepSeek via
-    ThinkingTokensChatAnthropic) or ``output_token_details.reasoning_tokens``
-    (OpenAI). If neither is present, fall back to estimating from the visible
-    thinking content.
-
-    Args:
-        usage_metadata: The AIMessage's usage_metadata dict (or None).
-        content: The message's content — a list of content blocks or a
-            string. Used as a fallback to count thinking-block characters.
-        total_reasoning_chars: Pre-counted total chars of streamed thinking
-            text (from RedisStreamHandler). More accurate than scanning
-            content, because the handler sees every fragment before any
-            truncation. Takes precedence over content scanning.
-
-    Returns:
-        Non-negative integer reasoning token count.
-    """
-    # Primary: extract from usage_metadata.output_token_details
     if usage_metadata:
         raw_details: Any = usage_metadata.get("output_token_details") or {}
         details: dict[str, int] = raw_details
@@ -101,22 +89,19 @@ def extract_reasoning_tokens(
         if from_details:
             return int(from_details)
 
-        # Fallback: usage_metadata is present (LLM call happened) but
-        # output_token_details is absent. Estimate from thinking content.
         reasoning_chars = total_reasoning_chars
         if reasoning_chars == 0 and content is not None:
             reasoning_chars = count_thinking_chars(content)
         if reasoning_chars > 0:
-            # Rough token estimate: English ~4 chars/token, CJK ~1.5 chars/token.
-            # A mixed ratio of 3 chars/token is a reasonable default.
             return max(1, reasoning_chars // 3)
     return 0
 
 
-def count_thinking_chars(content: str | list[Any]) -> int:
-    """Count total characters in thinking/reasoning blocks of a message content."""
+# meiva:note
+# Count total characters in thinking/reasoning blocks of a message content.
+def count_thinking_chars(content: str | Sequence[object]) -> int:
     if isinstance(content, str):
-        return 0  # string content has no block-type metadata
+        return 0
     total = 0
     for block in content_blocks(content):
         if not isinstance(block, dict):
@@ -125,7 +110,6 @@ def count_thinking_chars(content: str | list[Any]) -> int:
         if btype == "thinking":
             total += len(block.get("thinking") or "")
         elif btype == "reasoning":
-            # OpenAI Responses reasoning block: text in summary[].text
             for part in block.get("summary") or []:
                 if isinstance(part, dict):
                     total += len(part.get("text") or "")

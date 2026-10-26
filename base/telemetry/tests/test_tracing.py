@@ -200,7 +200,7 @@ def warned_fields(records: LogRecords) -> list[dict[str, Any]]:
 
 
 def stub_traceloop_init(monkeypatch: pytest.MonkeyPatch, init_fn: Callable[..., None]) -> None:
-    monkeypatch.setattr("traceloop.sdk.Traceloop.init", init_fn)
+    monkeypatch.setitem(tracing_mod.state, "traceloop_init", init_fn)
 
 
 def test_enabled_inits_traceloop_with_otlp_exporter(

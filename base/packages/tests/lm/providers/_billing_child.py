@@ -35,17 +35,19 @@ def schema(tracer: BillingRuntime) -> None:
     # losing its original start time, or opening a span without closing it.
     #
     # meiva:link base/packages/tests/lm/docs/contracts.meiva.okf.md
-    from base.lm.usage import emit_billing_event
+    from base.lm.usage import BillingSpan, emit_billing_event
 
     emit_billing_event(
-        vendor="deepseek",
-        model="deepseek-v4-pro",
-        tok_in=1000,
-        tok_out=100,
-        tok_cached=800,
-        cost_usd=0.0003476,
-        usage_kind="agent",
-        start_time_ns=123456,
+        BillingSpan(
+            vendor="deepseek",
+            model="deepseek-v4-pro",
+            tok_in=1000,
+            tok_out=100,
+            tok_cached=800,
+            cost_usd=0.0003476,
+            usage_kind="agent",
+            start_time_ns=123456,
+        )
     )
     assert len(tracer.spans) == 1
     span = tracer.spans[0]

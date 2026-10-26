@@ -6,24 +6,18 @@ exports = ["__init__.py", "metering.py"]
 "metering.py" = ["__init__.py"]
 
 [debt.ambient-read]
-"__init__.py#clock datetime.datetime.now" = 1
 "__init__.py#clock time.time_ns" = 1
 
 [debt.impure-call]
-"__init__.py#datetime.now" = 1
 "metering.py#time.monotonic" = 1
 
 [debt.impure-edge]
 "__init__.py#base/lm/provider_api.py" = 1
-"__init__.py#base/lm/reasoning.py" = 1
 "__init__.py#base/log/__init__.py" = 1
 "__init__.py#base/telemetry/__init__.py" = 1
-"__init__.py#base/telemetry/otlp/trace_readiness.py" = 1
 "metering.py#base/log/__init__.py" = 1
 "metering.py#base/telemetry/__init__.py" = 1
 
 [debt.wide-params]
-"__init__.py#def emit_billing_event" = 1
-"__init__.py#def emit_billing_from_message" = 1
 "__init__.py#def log_usage_fields" = 1
 "__init__.py#def log_usage_from_message" = 1

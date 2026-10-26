@@ -14,6 +14,3 @@ exports = ["capture"]
 "test_tracing.py" = ["capture", "otlp"]
 "test_tracing_lifecycle.py" = ["capture", "otlp", "test_tracing.py"]
 "tracing" = ["capture", "otlp", "test_tracing.py"]
-
-[debt.third-party-patch]
-"test_tracing.py#monkeypatch.setattr traceloop.sdk.Traceloop.init" = 1

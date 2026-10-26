@@ -12,7 +12,7 @@ from opentelemetry.sdk.trace import Span, SpanProcessor, TracerProvider
 
 from base.cluster.machine import MachineFacts
 from base.config import settings
-from base.lm.usage import emit_billing_event
+from base.lm.usage import BillingSpan, emit_billing_event
 from base.paths import meiva_home
 from base.telemetry import tracing
 from base.telemetry.otlp.trace_config import TraceConfig
@@ -30,12 +30,14 @@ def disabled() -> None:
     assert not PROCESS_RECORDING.ready
     assert not isinstance(trace.get_tracer_provider(), TracerProvider)
     emit_billing_event(
-        vendor="deepseek",
-        model="deepseek-v4-pro",
-        tok_in=1,
-        tok_out=1,
-        cost_usd=0.0,
-        usage_kind="chat",
+        BillingSpan(
+            vendor="deepseek",
+            model="deepseek-v4-pro",
+            tok_in=1,
+            tok_out=1,
+            cost_usd=0.0,
+            usage_kind="chat",
+        )
     )
 
 
@@ -65,12 +67,14 @@ def failing(tracer: BillingRuntime) -> None:
     try:
         assert (
             emit_billing_event(
-                vendor="deepseek",
-                model="deepseek-v4-pro",
-                tok_in=1,
-                tok_out=1,
-                cost_usd=0.0,
-                usage_kind="chat",
+                BillingSpan(
+                    vendor="deepseek",
+                    model="deepseek-v4-pro",
+                    tok_in=1,
+                    tok_out=1,
+                    cost_usd=0.0,
+                    usage_kind="chat",
+                )
             )
             is None
         )
