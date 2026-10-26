@@ -120,7 +120,7 @@ def test_snapshot_ignores_the_start_bookmark(
 ) -> None:
     set_machine_identity(role="agent-runner", name="runner-a")
     head = prod_source_checkout(unit_home)
-    running_sha.set(head)
+    running_sha.set(unit_home, head)
 
     snap = _snapshot(
         database,
