@@ -1,14 +1,18 @@
+from uuid import UUID
+
 import pytest
 
 from agent.ownership.lifecycle_plan import (
     ResumeNote,
     TurnClose,
     lifecycle_kind,
+    owns_inbound_row,
     resume_note,
     shell_cutoff,
     turn_close,
 )
 from base.agents.messages.lifecycle_text import restart_resume_note
+from base.native_process.runtime_incarnation import RuntimeIncarnation
 
 
 @pytest.mark.parametrize("kind", ["restart", "terminate"])
@@ -55,3 +59,17 @@ def test_closing_a_turn_stamps_a_crash_and_settles_unless_the_host_is_exiting(
     exited: bool, crashed: bool, expected: TurnClose
 ) -> None:
     assert turn_close(exited=exited, crashed=crashed) == expected
+
+
+def test_owns_inbound_row_requires_matching_incarnation_or_unowned_row() -> None:
+    generation = UUID(int=1)
+    owner = UUID(int=2)
+    incarnation = RuntimeIncarnation(agent_id=7, generation=generation, owner=owner)
+
+    assert not owns_inbound_row(None, incarnation=None)
+    assert owns_inbound_row((None, None, "idling"), incarnation=None)
+    assert not owns_inbound_row((generation, owner, "running"), incarnation=None)
+    assert owns_inbound_row((generation, owner, "running"), incarnation=incarnation)
+    assert owns_inbound_row((generation, owner, "idling"), incarnation=incarnation)
+    assert not owns_inbound_row((generation, owner, "terminated"), incarnation=incarnation)
+    assert not owns_inbound_row((UUID(int=3), owner, "running"), incarnation=incarnation)

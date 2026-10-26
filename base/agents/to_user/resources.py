@@ -102,8 +102,8 @@ def resource_descriptions(document: Path, content: str) -> dict[str, ToUserResou
     return result
 
 
-def read_regular_file(path: Path, limit: int) -> tuple[bytes, os.stat_result]:
-
+def read_regular_file(path: Path, limit: int | None = None) -> tuple[bytes, os.stat_result]:
+    effective_limit = settings.to_user.max_document_bytes if limit is None else limit
     directory = os.open(path.parent, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
     try:
         fd = os.open(path.name, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK, dir_fd=directory)
@@ -113,11 +113,11 @@ def read_regular_file(path: Path, limit: int) -> tuple[bytes, os.stat_result]:
         info = os.fstat(stream.fileno())
         if not stat.S_ISREG(info.st_mode):
             raise ValueError("To user references must be regular files")
-        if info.st_size > limit:
-            raise ValueError(f"To user file exceeds the {limit} byte limit")
-        raw = stream.read(limit + 1)
-        if len(raw) > limit:
-            raise ValueError(f"To user file exceeds the {limit} byte limit")
+        if info.st_size > effective_limit:
+            raise ValueError(f"To user file exceeds the {effective_limit} byte limit")
+        raw = stream.read(effective_limit + 1)
+        if len(raw) > effective_limit:
+            raise ValueError(f"To user file exceeds the {effective_limit} byte limit")
     return raw, info
 
 

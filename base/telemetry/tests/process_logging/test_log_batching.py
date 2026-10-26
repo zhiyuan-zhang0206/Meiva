@@ -317,7 +317,8 @@ def test_sync_reports_timeout_when_drain_thread_wedged() -> None:
 def test_delayed_loss_summary_preserves_actual_drop_time() -> None:
     from datetime import timedelta
 
-    dropped_at = datetime.now(UTC) - timedelta(minutes=10)
-    report = loss.loss_event(_event(1), 3, "emitter", dropped_at=dropped_at)
+    sample = _event(1)
+    dropped_at = sample.ts - timedelta(minutes=10)
+    report = loss.loss_event(sample, 3, "emitter", dropped_at=dropped_at)
     assert report.attributes["last_dropped_at"] == dropped_at.timestamp()
     assert report.ts > dropped_at

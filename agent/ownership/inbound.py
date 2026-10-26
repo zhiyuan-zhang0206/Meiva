@@ -1,11 +1,14 @@
-"""Serialize queue mutation with the admitted consumer's runtime authority."""
+# meiva:note
+# Serialize queue mutation with the admitted consumer's runtime authority.
 
+from agent.ownership.lifecycle_plan import (
+    RuntimeOwnershipLostError as RuntimeOwnershipLostError,
+)
+from agent.ownership.lifecycle_plan import (
+    owns_inbound_row,
+)
 from base.db.protocols import AsyncConnectionLike
 from base.native_process.runtime_incarnation import RuntimeIncarnation
-
-
-class RuntimeOwnershipLostError(RuntimeError):
-    """The caller must stop without changing a replacement runtime's state."""
 
 
 # meiva:note
@@ -25,15 +28,6 @@ async def lock_inbound_owner(
         (agent_id,),
     )
     row = await cursor.fetchone()
-    if row is not None:
-        generation, owner, status = row
-        if incarnation is None:
-            if generation is None and owner is None:
-                return
-        elif (
-            generation == incarnation.generation
-            and owner == incarnation.owner
-            and status in ("running", "idling")
-        ):
-            return
+    if owns_inbound_row(row, incarnation=incarnation):
+        return
     raise RuntimeOwnershipLostError(f"agent {agent_id} no longer owns its runtime row")

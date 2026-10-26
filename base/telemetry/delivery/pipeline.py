@@ -14,6 +14,7 @@ import threading
 import time
 import traceback
 from collections.abc import Callable
+from dataclasses import replace
 
 from base.telemetry.delivery.receipts import (
     DrainPhase,
@@ -182,8 +183,9 @@ class EventPipeline:
     def record_export_loss(self, report: Event) -> None:
         """Writer-only pipelines have no independent exporter loss metric."""
 
+    # meiva:note
+    # Write loss summaries directly; a saturated queue cannot shed its own alarm.
     def _flush(self, batch: list[Event]) -> None:
-        """Write loss summaries directly; a saturated queue cannot shed its own alarm."""
         with self._dropped_lock:
             n = self.dropped
             self.dropped = 0
@@ -192,7 +194,8 @@ class EventPipeline:
         if n and example is not None:
             from base.telemetry.delivery.loss import loss_event
 
-            batch = [*batch, loss_event(example, n, "emitter", dropped_at=example.ts)]
+            flush_event = replace(example, ts=batch[-1].ts) if batch else example
+            batch = [*batch, loss_event(flush_event, n, "emitter", dropped_at=example.ts)]
         if not batch:
             return
         self._writer(batch)

@@ -10,7 +10,6 @@ sink registration — and the two entry points that compose them (`init_gateway_
 from __future__ import annotations
 
 import itertools
-import os
 import traceback as _traceback
 from collections.abc import Callable
 from functools import partial
@@ -278,6 +277,25 @@ def add_event_sink(
 _event_sink_id: int | None = None
 
 
+# meiva:note
+# Called once at a gateway-style process startup — the gateway itself
+# and every long-running service daemon (agent-host / watchdog / labeler /
+# memory_indexer / heartbeat / task_maintenance / ops). stderr (human) +
+# file (`<name>.log`) + unified event pipeline. Rows have
+# agent_id NULL (extra agent_id sentinel `-`).
+#
+# `name` picks the per-daemon log file AND the process dimension of every
+# event the daemon emits. Each daemon writes its own `<name>.log` so its
+# logs — including an uncaught-exception traceback logged at the daemon's
+# top-level except — are isolated and postmortem-able. A single shared
+# gateway.log mixed every daemon by pid and made "which daemon died and
+# why" hard to reconstruct.
+#
+# Idempotent — repeat in the same process silent-skips. When the
+# watchdog daemon runs healthchecks reusing this function, the
+# init call chain becomes "daemon init -> healthcheck main ->
+# init" nested; the guard ensures subsequent calls are no-ops and
+# do not accumulate sinks leading to fd leak.
 def init_gateway_process(
     name: str = "gateway",
     *,
@@ -285,26 +303,6 @@ def init_gateway_process(
     machine_reader: Callable[[], str],
     image: LoadedImage,
 ) -> None:
-    """Called once at a gateway-style process startup — the gateway itself
-    and every long-running service daemon (agent-host / watchdog / labeler /
-    memory_indexer / heartbeat / task_maintenance / ops). stderr (human) +
-    file (`<name>.log`) + unified event pipeline. Rows have
-    agent_id NULL (extra agent_id sentinel `-`).
-
-    `name` picks the per-daemon log file AND the process dimension of every
-    event the daemon emits. Each daemon writes its own `<name>.log` so its
-    logs — including an uncaught-exception traceback logged at the daemon's
-    top-level except — are isolated and postmortem-able. A single shared
-    gateway.log mixed every daemon by pid and made "which daemon died and
-    why" hard to reconstruct.
-
-    Idempotent — repeat in the same process silent-skips. When the
-    watchdog daemon runs healthchecks reusing this function, the
-    init call chain becomes "daemon init -> healthcheck main ->
-    init" nested; the guard ensures subsequent calls are no-ops and
-    do not accumulate sinks leading to fd leak.
-    """
-
     def announce() -> None:
         # One structured `service_started` agent_event per gateway-style process
         # boot — the ops monitor panel's restart-count source. This function is
@@ -313,11 +311,10 @@ def init_gateway_process(
         # a healthcheck that revives a dead service via Popen gives the revived
         # service its own boot row. `name` is the log-file name passed in (the
         # daemon's identity), pid/sha/host disambiguate restarts on the same box.
-        logger.info(
-            "service started: {name} (pid={pid}, sha={sha}, host={host})",
+        logger.patch(lambda r: r["extra"].setdefault("pid", r["process"].id)).info(
+            "service started: {name} (pid={extra[pid]}, sha={sha}, host={host})",
             event="service_started",
             name=name,
-            pid=os.getpid(),
             sha=image.sha,
             host=machine_reader(),
         )
