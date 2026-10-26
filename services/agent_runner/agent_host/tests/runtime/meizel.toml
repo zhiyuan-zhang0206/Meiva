@@ -11,9 +11,3 @@ exports = ["host_support.py", "hosted_resources.py", "shutdown", "test_resource_
 [debt.first-party-patch]
 "test_boot_extension_materialize.py#monkeypatch.setattr base.db.connect" = 1
 "test_boot_extension_materialize.py#monkeypatch.setattr base.telemetry.tracing.initialize_tracing" = 1
-"test_resource_join.py#assignment base.deploy.schema.migrations.assert_schema_current" = 1
-"test_resource_join.py#monkeypatch.setattr services.agent_runner.agent_host.daemon.close_host_pools" = 2
-"test_resource_join.py#monkeypatch.setattr services.agent_runner.agent_host.daemon.remove_pidfile" = 1
-
-[debt.unresolved-patch]
-"test_resource_join.py#monkeypatch.setattr host._clients.close" = 1

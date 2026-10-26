@@ -9,17 +9,21 @@ MEIVA_OBSERVABILITY_URL configured the check is a no-op.
 
 from __future__ import annotations
 
-from collections.abc import Callable
 from pathlib import Path
 from typing import Any
-from unittest.mock import Mock
 
+import psycopg
 import pytest
+from psycopg.conninfo import conninfo_to_dict
 
 import base.db
+from base.cluster.dataplane.direct_url import ClusterDirectUrl
+from base.cluster.machine import MachineIdentityReader
+from base.cluster.machine.tests.identity import machine_identity as machine_identity
 from base.config.tests.configuration import snapshot_process_config
 from base.db import Database
 from base.db.code_version_gate import ProcessDbGate
+from base.db.config import db_config_from_boot
 from base.host.db_authority.api import (
     publish_telemetry_token,
     read_telemetry_token,
@@ -27,17 +31,22 @@ from base.host.db_authority.api import (
     telemetry_token_path,
 )
 from base.host.net.tests.fake_url_opener import Answer, FakeUrlOpener
-from base.native_process import code_version
-from base.native_process.loaded_commit import LoadedCommit
-from base.paths import meiva_home
-from base.telemetry.station_endpoint import StationEndpointConfig, StationTarget
+from base.telemetry.delivery.receipts import DrainStatus
+from base.telemetry.pipeline_build import build_pipeline
+from base.telemetry.station_endpoint import StationEndpointConfig
 from services.wake.heartbeat import station_probe as hc
 
 
-@pytest.fixture
-def _log_boundary(monkeypatch: pytest.MonkeyPatch, unit_home: Path) -> None:
-    monkeypatch.setattr(hc, "init_gateway_process", Mock())
-    monkeypatch.setattr(hc, "build_pipeline", Mock(return_value=object()))
+def _refused(db_url: str) -> str:
+    parts = conninfo_to_dict(db_url)
+    return f"postgresql://{parts['user']}@127.0.0.1:1/{parts['dbname']}"
+
+
+def _application_name(database: Database) -> str:
+    with database.connect() as conn:
+        row = conn.execute("SHOW application_name").fetchone()
+    assert row is not None
+    return str(row[0])
 
 
 @pytest.fixture(autouse=True)
@@ -72,16 +81,21 @@ def _insert_station_unit(
         conn.commit()
 
 
-@pytest.mark.usefixtures("_log_boundary")
-def test_main_is_noop_without_remote_observatory(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_main_is_noop_without_remote_observatory(unit_home: Path) -> None:
     process_config = snapshot_process_config()
     process_config.set_field("observability_url", "")
-    create = Mock(side_effect=AssertionError("a no-op probe must not open its work database"))
-    monkeypatch.setattr(hc.Database, "from_settings", create)
+
+    def fail_database() -> Database:
+        raise AssertionError("a no-op probe must not open its work database")
+
     opener = FakeUrlOpener()
-    hc.main(process_config=process_config, open_url=opener)
+    hc.run(
+        process_config=process_config,
+        database=fail_database,
+        home=unit_home,
+        open_url=opener,
+    )
     assert opener.calls == []
-    create.assert_not_called()
 
 
 def test_resolve_target_uses_advertised_machine_units_url(
@@ -138,12 +152,15 @@ def test_resolve_target_skips_hybrid_gateway_station_units(
 
 @pytest.mark.parametrize("observability_url", ["", "http://station.invalid:3100"])
 def test_resolve_target_none_without_valid_observability_url(observability_url: str) -> None:
-    create = Mock(side_effect=AssertionError("an unconfigured probe must not open its database"))
+    def fail_database() -> Database:
+        raise AssertionError("an unconfigured probe must not open its database")
+
     assert (
-        hc.resolve_target(database=create, config=StationEndpointConfig(observability_url, 4318))
+        hc.resolve_target(
+            database=fail_database, config=StationEndpointConfig(observability_url, 4318)
+        )
         is None
     )
-    create.assert_not_called()
 
 
 @pytest.mark.parametrize("status", [200, 202, 204])
@@ -192,22 +209,34 @@ def test_station_answers_without_a_published_token_warns_and_skips(
     assert any("no published telemetry token" in record["message"] for record in loguru_records)
 
 
-@pytest.mark.usefixtures("_log_boundary")
+# meiva:note
+# End-to-end: with a registered station, run() runs clean on a healthy probe and
+# fails open on a failing one.
 def test_main_probes_advertised_station_and_does_not_raise(
+    unit_home: Path,
     probe_token: str,
+    database: Database,
     loguru_records: list[dict[str, Any]],
     *,
     database_gate: ProcessDbGate,
 ) -> None:
-    """End-to-end: with a registered station, main() runs clean on a healthy
-    probe and fails open on a failing one."""
     process_config = snapshot_process_config()
     process_config.set_field("observability_url", "http://10.0.0.9")
     _insert_station_unit(database_gate=database_gate)
     opener = FakeUrlOpener()
     opener.on("http://10.0.0.9:4318", Answer(), Answer(status=503))
-    hc.main(process_config=process_config, open_url=opener)
-    hc.main(process_config=process_config, open_url=opener)  # must not raise
+    hc.run(
+        process_config=process_config,
+        database=lambda: database,
+        home=unit_home,
+        open_url=opener,
+    )
+    hc.run(
+        process_config=process_config,
+        database=lambda: database,
+        home=unit_home,
+        open_url=opener,
+    )
     assert opener.urls == ["http://10.0.0.9:4318/v1/traces"] * 2
     assert all(call.headers["Authorization"] == f"Bearer {probe_token}" for call in opener.calls)
 
@@ -215,8 +244,13 @@ def test_main_probes_advertised_station_and_does_not_raise(
         "did not answer a bearer OTLP probe" in r["message"] for r in loguru_records
     )
     assert failed_observations == 1
-    telemetry_token_path(meiva_home()).unlink()
-    hc.main(process_config=process_config, open_url=opener)
+    telemetry_token_path(unit_home).unlink()
+    hc.run(
+        process_config=process_config,
+        database=lambda: database,
+        home=unit_home,
+        open_url=opener,
+    )
     assert len(opener.calls) == 2
     assert any("no published telemetry token" in record["message"] for record in loguru_records)
     assert (
@@ -226,62 +260,60 @@ def test_main_probes_advertised_station_and_does_not_raise(
 
 
 def test_main_shares_one_captured_gate_with_the_probe_and_log_factory(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, probe_token: str
+    db_url: str,
+    unit_home: Path,
+    probe_token: str,
+    *,
+    database_gate: ProcessDbGate,
+    machine_identity: MachineIdentityReader,
 ) -> None:
     process_config = snapshot_process_config()
-    process_config.set_field("observability_url", "http://station.invalid")
+    process_config.view.data_plane.db_url = db_url
+    process_config.set_field("observability_url", "http://10.0.0.9")
     process_config.set_field("observability_otlp_port", 44318)
-    image = LoadedCommit(tmp_path, "captured-before-checkout-moved")
-    capture = Mock(return_value=image)
-    count = Mock(return_value=7)
-    create = Mock(return_value=Mock(spec=Database))
-    target = StationTarget(url="http://station.invalid:4318", advertised=True)
-    received: list[object] = []
+    _insert_station_unit(url="http://10.0.0.9:44318", database_gate=database_gate)
 
-    def resolve(
-        *, database: Callable[[], Database], config: StationEndpointConfig
-    ) -> StationTarget:
-        assert config == StationEndpointConfig("http://station.invalid", 44318)
-        received.append(database)
-        database()
-        return target
+    def database() -> Database:
+        return Database(
+            db_config_from_boot(process_config),
+            gate=database_gate,
+            direct_url=ClusterDirectUrl(machine_identity.host),
+        )
 
-    logging = Mock()
-    pipeline = Mock(return_value=object())
-    monkeypatch.setattr(LoadedCommit, "capture", capture)
-    monkeypatch.setattr(code_version, "first_parent_count", count)
-    monkeypatch.setattr(hc.Database, "from_settings", create)
-    monkeypatch.setattr(hc, "resolve_target", resolve)
-    monkeypatch.setattr(hc, "build_pipeline", pipeline)
-    monkeypatch.setattr(hc, "init_gateway_process", logging)
-    opener = FakeUrlOpener()
-    opener.on(target.url, Answer())
-    hc.main(process_config=process_config, open_url=opener)
-    assert len(opener.calls) == 1
-    assert opener.calls[0].headers["Authorization"] == f"Bearer {probe_token}"
+    pipeline = build_pipeline(database=database, machine=machine_identity, home=unit_home)
+    try:
+        assert _application_name(database()) == database_gate.application_name()
+        opener = FakeUrlOpener()
+        opener.on("http://10.0.0.9:44318", Answer())
+        hc.run(
+            process_config=process_config,
+            database=database,
+            home=unit_home,
+            open_url=opener,
+        )
+        assert len(opener.calls) == 1
+        assert opener.calls[0].headers["Authorization"] == f"Bearer {probe_token}"
+    finally:
+        drain = pipeline.stop(timeout=2)
+    assert drain.status is DrainStatus.COMPLETED
 
-    capture.assert_called_once_with()
-    count.assert_not_called()
-    factory = pipeline.call_args.kwargs["database"]
-    assert received == [factory]
-    assert logging.call_args.kwargs["image"] is image
-    assert logging.call_args.kwargs["producer"]() is pipeline.return_value
-    factory()
-    gates = [call.kwargs["gate"] for call in create.call_args_list]
-    assert len(gates) == 2 and gates[0] is gates[1]
-    assert isinstance(gates[0], ProcessDbGate)
-    assert gates[0].application_name() == "meiva:station:v7"
-    count.assert_called_once_with(tmp_path, image.sha)
-    gates[0].observe_minimum(7)
-    assert not gates[0].min_read_due()
+    process_config.view.data_plane.db_url = _refused(db_url)
+    with pytest.raises(psycopg.OperationalError):
+        database().connect()
 
 
 def test_station_lookup_keeps_the_original_fail_open_boundary() -> None:
-    create = Mock(side_effect=RuntimeError("original database failure"))
+    calls = 0
+
+    def fail_database() -> Database:
+        nonlocal calls
+        calls += 1
+        raise RuntimeError("original database failure")
+
     assert (
         hc.resolve_target(
-            database=create, config=StationEndpointConfig("http://station.invalid", 4318)
+            database=fail_database, config=StationEndpointConfig("http://station.invalid", 4318)
         )
         is None
     )
-    create.assert_called_once_with()
+    assert calls == 1
