@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import contextlib
 import math
+import random
 import threading
 from collections.abc import Generator, Mapping
 from contextlib import AbstractContextManager
@@ -58,6 +59,12 @@ class SamplingWorkerLike(Protocol):
 class SamplingPolicyLike(Protocol):
     stopped: bool
 
+    # meiva:note
+    # The process root's random generator the policy draws from, or None for a policy that
+    # never samples. The SDK's event bus draws its retry jitter from the same one.
+    @property
+    def rng(self) -> random.Random | None: ...
+
     @property
     def worker(self) -> SamplingWorkerLike | None: ...
 
@@ -88,6 +95,7 @@ class InertSamplingPolicy:
     def __init__(self) -> None:
         self.value = SamplingPolicy()
         self.stopped = False
+        self.rng: random.Random | None = None
         self.worker: SamplingWorkerLike | None = None
 
     def should_sample(self, every: int) -> bool:

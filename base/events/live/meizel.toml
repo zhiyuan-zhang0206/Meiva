@@ -1,4 +1,4 @@
-exports = ["announce.py", "bus.py", "coalescer.py", "projection.py", "publisher.py", "redis_client.py", "redis_listener.py", "tests"]
+exports = ["announce.py", "bus.py", "coalescer.py", "projection.py", "publisher.py", "redis_client.py", "redis_listener.py", "redis_resilience.py", "tests"]
 
 [uses]
 "announce.py" = ["bus.py", "projection.py"]
