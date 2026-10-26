@@ -85,6 +85,7 @@ def _h_impersonate_relay(args: argparse.Namespace) -> int:
         token=token,
         redis_url=args.runtime.config.view.data_plane.redis_url,
         codex_home=env.codex_home,
+        user_home=args.runtime.session.user_home,
         antigravity_server=antigravity_server_from_environment(
             args.runtime.config.process_environment()
         ),
