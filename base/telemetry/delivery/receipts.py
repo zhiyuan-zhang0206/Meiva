@@ -4,9 +4,11 @@ from __future__ import annotations
 
 import threading
 from dataclasses import dataclass, field
-from datetime import datetime
 from enum import StrEnum
-from typing import Any, Literal
+
+from base.api_contracts.agent_contract import Category as Category
+from base.api_contracts.agent_contract import Event as Event
+from base.api_contracts.agent_contract import Level as Level
 
 
 class DrainStatus(StrEnum):
@@ -42,27 +44,3 @@ class SyncReceipt:
     """One FIFO barrier, acknowledged only after preceding writes succeed."""
 
     done: threading.Event = field(default_factory=threading.Event)
-
-
-Category = Literal["audit", "telemetry", "log"]
-Level = Literal["debug", "info", "warning", "error", "critical"]
-
-
-@dataclass(frozen=True)
-class Event:
-    """One event in the unified stream — OTel LogRecord semantics (events = logs
-    with names), the shape the event stream carries."""
-
-    ts: datetime
-    trace_id: str | None
-    span_id: str | None
-    agent_id: int | None
-    machine: str
-    cluster: str
-    process: str
-    category: Category
-    event_name: str
-    level: Level
-    source: str
-    target_agent_id: int | None
-    attributes: dict[str, Any] = field(default_factory=dict[str, Any])
