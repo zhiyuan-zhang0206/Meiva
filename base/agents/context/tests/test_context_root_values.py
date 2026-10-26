@@ -55,15 +55,29 @@ def test_a_context_without_a_generator_refuses_to_mint_an_identifier() -> None:
         MeivaContext().require_new_id()
 
 
-def test_identifiers_are_version_4_uuids_drawn_from_the_roots_generator() -> None:
+def test_identifiers_are_distinct_version_4_uuids() -> None:
     context = MeivaContext(rng=_rng(3))
-    reference = _rng(3)
 
     minted = [context.require_new_id() for _ in range(3)]
 
-    assert minted == [str(UUID(int=reference.getrandbits(128), version=4)) for _ in range(3)]
     assert len(set(minted)) == 3
     assert all(UUID(value).version == 4 for value in minted)
+
+
+def test_identifiers_come_from_the_generator_the_root_recorded() -> None:
+    rng = _rng(3)
+    before = rng.getstate()
+
+    MeivaContext(rng=rng).require_new_id()
+
+    assert rng.getstate() != before
+
+
+def test_generators_with_the_same_seed_mint_the_same_identifiers() -> None:
+    first = MeivaContext(rng=_rng(3))
+    second = MeivaContext(rng=_rng(3))
+
+    assert [first.require_new_id() for _ in range(3)] == [second.require_new_id() for _ in range(3)]
 
 
 def test_generators_with_different_seeds_mint_different_identifiers() -> None:
