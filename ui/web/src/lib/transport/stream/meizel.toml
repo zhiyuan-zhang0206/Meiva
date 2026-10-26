@@ -11,3 +11,7 @@ exports = ["sse-plan.ts", "sse-share.ts", "stream-hub.ts", "tests"]
 
 [purity]
 "." = "strict"
+
+[debt.type-cast]
+"share-plan.ts#cast parseMergedFrame" = 1
+"sse-share.ts#cast ProfileSseTransport.receive" = 1

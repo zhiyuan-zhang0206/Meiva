@@ -58,6 +58,7 @@ def _dependencies(index: Index, tool: Path) -> dict[str, str]:
     expected = {
         _LOCK,
         _PACKAGE,
+        "meizel/language/typescript_compiler/compiler.mjs",
         f"{_COMPILER}typescript.js",
         *(p for p in tracked_files(tool) if p.startswith(_ADAPTER) and p.endswith(".mjs")),
     }

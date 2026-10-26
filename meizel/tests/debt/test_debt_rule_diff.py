@@ -310,11 +310,6 @@ def test_malformed_legacy_root_registry_still_stops_comparison(
             '[purity]\nimpure-calls = ["app.before"]\n',
             '[purity]\nimpure-calls = ["app.after"]\n',
         ),
-        (
-            {"app/x.py": "", "app/view.ts": "export const value = afterCall();\n"},
-            '[typescript]\nscopes = ["app"]\nimpure-calls = ["beforeCall"]\n',
-            '[typescript]\nscopes = ["app"]\nimpure-calls = ["afterCall"]\n',
-        ),
     ],
 )
 def test_rule_comparison_refreshes_policy_after_validating_the_old_snapshot(

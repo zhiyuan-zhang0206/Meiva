@@ -11,7 +11,7 @@ import { QueryClient } from "@tanstack/react-query";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 import type { PageRow, SystemEvent } from "../contracts/types";
-import { startGateway, type GatewayReply, type TestGateway } from "../transport/tests/api/api-provider";
+import { realNetwork, startGateway, type GatewayReply, type TestGateway } from "../transport/tests/api/api-provider";
 import { gatewayRig } from "../transport/tests/api/api-provider";
 import { eventStreamHarness, type EventStreamHarness } from "../transport/tests/stream/event-stream-harness";
 import { useAgentPages } from "./use-agent-pages";
@@ -80,7 +80,7 @@ beforeEach(async () => {
   rows = [];
   held = [];
   queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
-  gateway = await startGateway((request) => {
+  gateway = await startGateway(realNetwork.createServer, (request) => {
     const match = /^\/api\/agents\/(\d+)\/pages$/.exec(request.path);
     if (match === null) return { kind: "text", status: 404, body: "unexpected route" };
     const response = held.shift();

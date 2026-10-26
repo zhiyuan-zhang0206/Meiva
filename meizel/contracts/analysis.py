@@ -27,7 +27,14 @@ from meizel.contracts.rule import (
 from meizel.graph.model import Code, DebtKey, Diagnostic, Fact, FactKind, Patch, Sources
 from meizel.graph.universe import Universe, load_universe
 from meizel.language.fixtures import FixtureIndex, fixture_facts
-from meizel.language.scan import EXTERNAL_FORMS, FileScan, mount_facts, scan_file
+from meizel.language.scan import (
+    EXTERNAL_FORMS,
+    FileScan,
+    mount_facts,
+    scan_file,
+    scan_typescript_files,
+    typescript_files,
+)
 from meizel.roles import select_packages
 
 __all__ = [
@@ -75,6 +82,20 @@ class Analysis:
     stale_externals: list[tuple[str, str]] = field(default_factory=list[tuple[str, str]])
     stale_exports: list[tuple[str, str]] = field(default_factory=list[tuple[str, str]])
 
+    def language_counts(self) -> dict[str, int]:
+        return {
+            "python_ast": sum(path.endswith(".py") for path in self.scans),
+            "typescript_compiler_ast": sum(not path.endswith(".py") for path in self.scans),
+        }
+
+    def coverage_line(self) -> str:
+        counts = self.language_counts()
+        return (
+            f"meizel: analyzed {counts['python_ast']} Python files (stdlib AST), "
+            f"{counts['typescript_compiler_ast']} TypeScript files (compiler AST); "
+            "selection and rule coverage follow repository policy"
+        )
+
     def ok_line(self) -> str:
         debts = debts_in(self.manifests)
         scope = "" if self.changed is None else f"{len(self.changed)} changed paths, "
@@ -92,11 +113,8 @@ class Analysis:
         )
 
 
-def _all_source_files(universe: Universe) -> tuple[str, ...]:
-    policy, _ = load_policy(universe)
-    scopes = (*policy.names("typescript", "scopes"), *policy.names("typescript", "import-sources"))
-    exts = policy.names("typescript", "extensions") or (".ts", ".tsx")
-    return universe.source_files(scopes, exts)
+def _all_source_files(universe: Universe, policy: Policy) -> tuple[str, ...]:
+    return (*universe.python_files, *typescript_files(universe, policy))
 
 
 def _init_worker(universe: Universe, sources: Sources) -> None:
@@ -113,16 +131,23 @@ def scan_all(
     sources: Sources,
     jobs: int | None = None,
     paths: Sequence[str] | None = None,
+    *,
+    policy: Policy,
 ) -> dict[str, FileScan]:
-    paths = _all_source_files(universe) if paths is None else paths
+    selected = _all_source_files(universe, policy) if paths is None else paths
+    ts_paths = [p for p in selected if not p.endswith(".py")]
+    scans = scan_typescript_files(universe, ts_paths, sources, policy)
+    paths = [p for p in selected if p.endswith(".py")]
     workers = jobs if jobs is not None else min(os.cpu_count() or 1, 8)
     if workers <= 1 or len(paths) < _PARALLEL_FROM:
-        return {p: scan_file(universe, p, sources) for p in paths}
+        scans.update((p, scan_file(universe, p, sources)) for p in paths)
+        return scans
     with ProcessPoolExecutor(
         workers, initializer=_init_worker, initargs=(universe, sources)
     ) as pool:
-        scans = pool.map(_scan_in_worker, paths, chunksize=max(1, len(paths) // (workers * 8)))
-        return {scan.path: scan for scan in scans}
+        scanned = pool.map(_scan_in_worker, paths, chunksize=max(1, len(paths) // (workers * 8)))
+        scans.update((scan.path, scan) for scan in scanned)
+    return scans
 
 
 def _load_facts(manifests: dict[str, Manifest]) -> list[Fact]:
@@ -187,14 +212,18 @@ def _source_diagnostics(
                 Diagnostic(
                     scan.path,
                     item.line,
-                    Code.RESTRICTED,
-                    f"{form} is outside the restricted Python subset",
+                    Code.RESTRICTED if scan.path.endswith(".py") else Code.UNRESOLVED_IMPORT,
+                    f"{form} is outside the restricted Python subset"
+                    if scan.path.endswith(".py")
+                    else f"{form} has no declared TypeScript load targets",
                     (
                         "use a static import, and inject a collaborator instead of patching it; a file that genuinely "
                         f"owns a dynamic load declares it under [loads] in {manifest_path(scan.path.rpartition('/')[0])}; "
                         "a file that runs code from outside the repository declares it under [external] with a reason",
                     ),
-                    DebtKey(owner, file_key(owner, scan.path, form)),
+                    DebtKey(owner, file_key(owner, scan.path, form))
+                    if scan.path.endswith(".py")
+                    else None,
                 )
             )
     return found
@@ -368,11 +397,13 @@ def _stale_diagnostics(
 
 
 def _scan_changed(
-    universe: Universe, sources: Sources, changed: Collection[str], jobs: int | None
+    universe: Universe, sources: Sources, changed: Collection[str], jobs: int | None, policy: Policy
 ) -> dict[str, FileScan]:
     """The changed Python files, plus what resolving their fixture requests needs."""
-    wanted = {p for p in _all_source_files(universe) if p in changed or p.endswith("conftest.py")}
-    scans = scan_all(universe, sources, jobs, sorted(wanted))
+    wanted = {
+        p for p in _all_source_files(universe, policy) if p in changed or p.endswith("conftest.py")
+    }
+    scans = scan_all(universe, sources, jobs, sorted(wanted), policy=policy)
     while True:
         modules = (
             universe.resolve_module(n) for s in scans.values() for n, _ in s.fixtures.plugins
@@ -380,7 +411,7 @@ def _scan_changed(
         more = sorted({m.file for m in modules if m is not None and m.file and m.file not in scans})
         if not more:
             return scans
-        scans.update(scan_all(universe, sources, jobs, more))
+        scans.update(scan_all(universe, sources, jobs, more, policy=policy))
 
 
 def _distinct(diagnostics: list[Diagnostic]) -> list[Diagnostic]:
@@ -410,9 +441,9 @@ def _type_cast_diagnostics(scans: Iterable[FileScan]) -> list[Diagnostic]:
             scan.path,
             site.line,
             Code.TYPE_CAST,
-            f"typing.cast call in {site.qualname} at byte column {site.column}",
+            f"{'typing.cast call' if scan.path.endswith('.py') else 'TypeScript type assertion'} in {site.qualname} at byte column {site.column}",
             (
-                "why: typing.cast asserts a type without validating the value",
+                "why: a type assertion does not validate the value",
                 "instead: validate or narrow the value at its boundary",
                 "see: meizel/docs/checker/type-cast.meiva.okf.md",
             ),
@@ -432,10 +463,10 @@ def _any_collaborator_diagnostics(scans: Iterable[FileScan]) -> list[Diagnostic]
             scan.path,
             site.line,
             Code.ANY_COLLABORATOR,
-            f"typing.Any {site.role} annotation on {site.qualname}.{site.slot} at byte column {site.column}",
+            f"{'typing.Any' if scan.path.endswith('.py') else 'any'} {site.role} annotation on {site.qualname}.{site.slot} at byte column {site.column}",
             (
-                "why: typing.Any disables static type checking across collaborator boundaries",
-                "instead: annotate the concrete collaborator type, Protocol, or object",
+                "why: an unrestricted Any type disables checking across collaborator boundaries",
+                "instead: use a concrete collaborator type, an interface, or a checked unknown value",
                 "see: meizel/docs/checker/any-collaborator.meiva.okf.md",
             ),
             DebtKey(
@@ -532,9 +563,9 @@ def analyze(
     scope = None if changed is None else frozenset(changed)
     sources = sources_from(manifests, policy)
     scans = (
-        scan_all(universe, sources, jobs)
+        scan_all(universe, sources, jobs, policy=policy)
         if scope is None
-        else _scan_changed(universe, sources, scope, jobs)
+        else _scan_changed(universe, sources, scope, jobs, policy)
     )
     judged = sorted(scans if scope is None else scope & scans.keys())
     judged_scans = [scans[p] for p in judged]

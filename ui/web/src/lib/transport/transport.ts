@@ -9,7 +9,7 @@ export interface KeySource {
 export type UploadRequest = Pick<
   XMLHttpRequest,
   "open" | "setRequestHeader" | "send" | "status" | "responseText" | "withCredentials" | "onload" | "onerror"
-> & { upload: Pick<XMLHttpRequestUpload, "onprogress"> };
+> & { upload: Pick<XMLHttpRequestUpload, "addEventListener"> };
 
 // meiva:note
 // Gateway HTTP as the shells see it: one request, the monotonic clock that times

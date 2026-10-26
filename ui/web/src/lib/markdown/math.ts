@@ -12,17 +12,15 @@ export interface MarkdownMath {
   rehype: PluggableList;
 }
 
-const defaultImport = async (): Promise<MarkdownMath> => {
-  const [remarkMath, rehypeKatex] = await Promise.all([
+const defaultImport = (): Promise<MarkdownMath> =>
+  Promise.all([
     import("remark-math"),
     import("rehype-katex"),
     import("katex/dist/katex.min.css"),
-  ]);
-  return {
+  ]).then(([remarkMath, rehypeKatex]) => ({
     remark: [remarkMath.default, remarkDisplayMathRecovery, remarkMathProseGuard],
     rehype: [[rehypeKatex.default, { throwOnError: false }]],
-  };
-};
+  }));
 
 const mathState: {
   importMath: () => Promise<MarkdownMath>;

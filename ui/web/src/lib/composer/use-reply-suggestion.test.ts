@@ -7,7 +7,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { BackendTimelineItem, ReplySuggestionResponse } from "../contracts/types";
 import { ApiProvider } from "../transport/transport-context";
-import { startGateway, type GatewayReply, type TestGateway } from "../transport/tests/api/api-provider";
+import { realNetwork, startGateway, type GatewayReply, type TestGateway } from "../transport/tests/api/api-provider";
 import { gatewayRig, httpRig, noUpload, type HttpRig } from "../transport/tests/api/api-provider";
 import { UncancellableFetch } from "../transport/tests/api/api-provider";
 import { systemKeySource } from "../transport/system-transport";
@@ -70,7 +70,7 @@ async function settle(response: ReplySuggestionResponse, index = pending.length 
 
 beforeEach(async () => {
   pending = [];
-  gateway = await startGateway((request) => {
+  gateway = await startGateway(realNetwork.createServer, (request) => {
     const match = /^\/api\/agents\/(\d+)\/reply-suggestion$/.exec(request.path);
     if (match === null) return { kind: "text", status: 404, body: "unexpected route" };
     const signal = rig.sent.findLast((sent) => sent.url === `${gateway.origin}${request.path}`)?.init.signal;

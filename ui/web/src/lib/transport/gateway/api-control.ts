@@ -60,10 +60,9 @@ import { STATS_REQUEST_TIMEOUT_MS } from "./plans";
 export function createControlApi(http: Http) {
   const { send: f, ok, jsonTimed: jsonWithTimeout, newOperationKey } = http;
 
-  const draftAgent = async (path: string, body: unknown, operationKey: string): Promise<GuideDraftResponse> => {
-    const response = await f(path, keyedJson(body, operationKey));
-    return confirmDraftReceipt(response.status, await ok<unknown>(response));
-  };
+  const draftAgent = (path: string, body: unknown, operationKey: string): Promise<GuideDraftResponse> =>
+    Promise.resolve().then(() => f(path, keyedJson(body, operationKey)))
+      .then((response) => http.decoded(response, confirmDraftReceipt));
 
   return {
     terminateAgent: (agentId: number, force = false): Promise<TerminateAgentResponse> => {
@@ -95,12 +94,7 @@ export function createControlApi(http: Http) {
     },
 
     patchAgentLabel: (agentId: number, label: string): Promise<void> => {
-      return f(`/api/agents/${agentId}`, patchJson({ label })).then(async (res) => {
-        if (!res.ok) {
-          const text = await res.text().catch(() => "");
-          throw new Error(`HTTP ${res.status}: ${text || res.statusText}`);
-        }
-      });
+      return f(`/api/agents/${agentId}`, patchJson({ label })).then(http.accepted);
     },
 
     getToUser: (agentId: number, signal?: AbortSignal, references: string[] = []): Promise<ToUserDocument> => {
@@ -202,32 +196,24 @@ export function createControlApi(http: Http) {
       return f("/api/cluster/status").then(ok<ClusterStatus>);
     },
 
-    async putConfig(
+    putConfig(
       body: Record<string, unknown>,
       machine?: string,
     ): Promise<ConfigWriteResult> {
-      const res = await f(configPath(machine), putJson(body));
-      if (!res.ok) {
-        const text = await res.text().catch(() => "");
-        throw new Error(`HTTP ${res.status}: ${text || res.statusText}`);
-      }
-      return res.json() as Promise<ConfigWriteResult>;
+      return Promise.resolve().then(() => f(configPath(machine), putJson(body)))
+        .then(http.rawJson<ConfigWriteResult>);
     },
 
     getInventory: (): Promise<InventoryAggregate> => {
       return f("/api/inventory").then(ok<InventoryAggregate>);
     },
 
-    async putInventory(
+    putInventory(
       body: { plugins?: Record<string, boolean>; mcp_servers?: Record<string, boolean> },
       machine: string,
     ): Promise<InventoryWriteResult> {
-      const res = await f(inventoryPath(machine), putJson(body));
-      if (!res.ok) {
-        const text = await res.text().catch(() => "");
-        throw new Error(`HTTP ${res.status}: ${text || res.statusText}`);
-      }
-      return res.json() as Promise<InventoryWriteResult>;
+      return Promise.resolve().then(() => f(inventoryPath(machine), putJson(body)))
+        .then(http.rawJson<InventoryWriteResult>);
     },
 
     getSkills: (): Promise<SkillsView> => {

@@ -5,15 +5,11 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import {createHash} from 'node:crypto';
-import {createRequire} from 'node:module';
 import {fileURLToPath} from 'node:url';
 import {sourceEvidence} from './extract.mjs';
+import {ts, compiler, tool} from '../../language/typescript_compiler/compiler.mjs';
 
 const entry = fileURLToPath(import.meta.url);
-const tool = path.resolve(path.dirname(entry),'../../..');
-const require = createRequire(path.join(tool,'ui/web/package.json'));
-const ts = require('typescript');
-const compiler = fs.realpathSync(require.resolve('typescript'));
 const libraryRoot = path.dirname(compiler);
 const digest = data => createHash('sha256').update(data).digest('hex');
 const text = file => new TextDecoder('utf-8',{fatal:true,ignoreBOM:true}).decode(fs.readFileSync(file));
@@ -22,10 +18,6 @@ const inside = (root,file) => file === root || file.startsWith(root+path.sep);
 function main(args) {
   if (args[0] !== '--repo' || !args[1] || args.length < 3) throw new Error('Usage: node producer.mjs --repo ROOT FILE.ts [FILE.tsx ...]');
   const root = fs.realpathSync(args[1]);
-  if (compiler !== fs.realpathSync(path.join(tool,'ui/web/node_modules/typescript/lib/typescript.js'))) throw new Error('unexpected compiler import path');
-  const lock = JSON.parse(text(path.join(tool,'ui/web/package-lock.json')));
-  const installed = JSON.parse(text(path.join(tool,'ui/web/node_modules/typescript/package.json')));
-  if (ts.version !== installed.version || ts.version !== lock.packages['node_modules/typescript'].version) throw new Error('compiler differs from locked installation');
   const files = new Map();
   for (const relative of args.slice(2)) {
     if (relative.includes('\\') || path.posix.isAbsolute(relative) || path.posix.normalize(relative) !== relative || relative.split('/').includes('..') || !/\.tsx?$/.test(relative) || relative.endsWith('.d.ts')) throw new Error(`invalid source path: ${relative}`);
@@ -44,7 +36,7 @@ function main(args) {
     return content;
   };
   for (const name of fs.readdirSync(path.dirname(entry)).filter(n=>n.endsWith('.mjs')).sort()) record(path.join(path.dirname(entry),name));
-  for (const relative of ['ui/web/package-lock.json','ui/web/node_modules/typescript/package.json','ui/web/node_modules/typescript/lib/typescript.js']) record(path.join(tool,relative));
+  for (const relative of ['meizel/language/typescript_compiler/compiler.mjs','ui/web/package-lock.json','ui/web/node_modules/typescript/package.json','ui/web/node_modules/typescript/lib/typescript.js']) record(path.join(tool,relative));
   host.getSourceFile = (file,version) => {
     const normalized = path.resolve(file);
     const supplied = files.get(normalized);

@@ -11,7 +11,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import { useDebouncedSetting, useUserSettings } from "./use-user-settings";
 import {
   gatewayRig,
-  startGateway,
+  realNetwork, startGateway,
   type GatewayReply,
   type TestGateway,
 } from "../transport/tests/api/api-provider";
@@ -33,7 +33,7 @@ async function setupSettingsGateway(
     onPut?: (key: string, value: unknown) => GatewayReply | Promise<GatewayReply>;
   } = {},
 ) {
-  const gateway = await startGateway(async (request) => {
+  const gateway = await startGateway(realNetwork.createServer, async (request) => {
     if (request.method === "GET" && request.path === "/api/settings") {
       if (handler.onGet) return handler.onGet();
       return { kind: "json", body: { settings: [] } };

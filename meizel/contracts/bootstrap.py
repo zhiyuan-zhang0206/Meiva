@@ -28,7 +28,21 @@ def is_test_path(path: str) -> bool:
         or name.startswith("test_")
         or name == "conftest.py"
         or name.endswith(
-            ("_test.py", ".test.ts", ".test.tsx", ".spec.ts", ".spec.tsx", "-mock.ts", "-mock.tsx")
+            (
+                "_test.py",
+                ".test.ts",
+                ".test.tsx",
+                ".spec.ts",
+                ".spec.tsx",
+                "-mock.ts",
+                "-mock.tsx",
+                ".test.mts",
+                ".test.cts",
+                ".spec.mts",
+                ".spec.cts",
+                "-mock.mts",
+                "-mock.cts",
+            )
         )
     )
 
@@ -150,6 +164,10 @@ def _build_report(analysis: Analysis) -> dict[str, Any]:
     cyclic_production = [d for d, r in directories.items() if r["production_components"]]
     return {
         "summary": {
+            "source_files_by_backend": analysis.language_counts(),
+            "directories_with_typescript_files": len(
+                {parent_of(p) for p in universe.typescript_files}
+            ),
             "directories_with_python_files": len(python_dirs),
             "directories_containing_python_anywhere": len(above_python),
             "directories_with_local_edges": len(directories),

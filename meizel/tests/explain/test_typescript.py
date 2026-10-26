@@ -206,11 +206,11 @@ def test_parse_failure_is_unavailable_instead_of_empty_safe(
                 str(index),
             ]
         )
-        == 0
+        == 2
     )
-    shown = capsys.readouterr().out
-    assert "TS source evidence: unavailable" in shown
-    assert "unanalysed behavior remains unknown" in shown
+    payload = json.loads(result.stdout)
+    assert payload["sources"][0]["status"] == "unavailable"
+    assert "TypeScript compiler failed" in capsys.readouterr().err
 
 
 def test_frozen_holder_keeps_collection_surface_and_literal_path_separate(

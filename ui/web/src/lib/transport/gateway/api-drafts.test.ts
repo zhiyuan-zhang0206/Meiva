@@ -22,7 +22,7 @@ let rig: HttpRig;
 
 beforeEach(async () => {
   answer = { kind: "json", body: { agent_id: 42 } };
-  gateway = await startGateway(() => answer);
+  gateway = await startGateway(realNetwork.createServer, () => answer);
   rig = httpRig({
     base: gateway.origin,
     fetch: realNetwork.fetch,
