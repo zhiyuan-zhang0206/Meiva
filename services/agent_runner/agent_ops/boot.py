@@ -23,9 +23,8 @@ import psycopg
 from psycopg.rows import TupleRow
 from psycopg_pool import ConnectionPool
 
-from base.cluster.machine import MachineIdentityReader
+from base.cluster.machine import MachineIdentityReader, daemon_acceptance
 from base.cluster.machine.ambient import gateway_access_from_settings
-from base.cluster.machine.configured import daemon_acceptance
 from base.cluster.port_preflight import serves_off_box
 from base.config import ConfigBoot
 from base.config.service_read import ConfigAuthority
@@ -132,7 +131,7 @@ def ops_bind_host(*, machine: MachineIdentityReader) -> str:
 
 # meiva:note
 # SHA-256 digests of the bearers /ops accepts: the daemon acceptance of
-# `base.cluster.machine.configured.daemon_acceptance` (the gateway dials /ops with its
+# `base.cluster.machine.daemon_acceptance` (the gateway dials /ops with its
 # gateway-class machine API token, a runner-class process of the unit with its runner token).
 def ops_acceptance() -> frozenset[str]:
     access = gateway_access_from_settings()  # ambient: S

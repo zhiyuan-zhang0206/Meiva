@@ -36,6 +36,7 @@ from base.cluster.machine.boot import gateway_access_from_boot
 from base.config import ConfigBoot
 from base.deploy.git import cluster_drift
 from base.host.env.registry import process_environment
+from base.host.resource_sample import resource_sample
 from base.paths import root_manifests_path
 from cli.commands._repo import roles_or_none
 from cli.commands.cluster.control import fetch_gateway_cluster_status
@@ -80,8 +81,7 @@ from cli.commands.lifecycle.status.roster import RosterEntry, ServiceTable
 from cli.commands.observability.lgtm import is_lgtm_host, lgtm_roles, print_lgtm_status
 from cli.commands.probe import print_service_row
 from cli.database.runtime import CommandRuntime
-from ops.cluster_status import ClusterStatus, cluster_now
-from ops.cluster_status.resource_probe import host_resource_sample
+from ops.cluster_status import ClusterStatus
 from services.supervision.meiva_root_glue.manifests import launched_services
 from services.supervision.roster.composition import build_services
 from services.supervision.roster.service_spec import ServiceSpec
@@ -213,7 +213,7 @@ def _print_service_rows(
 # and a host without psutil must still get the service table and the views below it.
 def _read_host_resources() -> HostReading | HostReadingFailed:
     try:
-        sample = host_resource_sample(ts=cluster_now().timestamp())
+        sample = resource_sample()
     # meiva:note
     # psutil may be absent; the rest of status still prints
     except Exception as exc:

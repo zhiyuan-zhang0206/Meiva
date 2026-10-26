@@ -32,7 +32,7 @@ from base.deploy.git.cluster_drift import checkout_head_sha
 from base.deploy.lifecycle import start_serving
 from base.host.env.registry import process_environment
 from base.host.proc import process_alive
-from base.host.resource_sample import ResourceSample
+from base.host.resource_sample import ResourceSample, resource_sample
 from base.native_process.loaded_commit import LoadedCommit
 from base.paths import resolve_meiva_home
 from base.sessions.backend import get_backend, get_shell_backend
@@ -51,7 +51,6 @@ from ops.cluster_status.report import (
 from ops.cluster_status.report import (
     serving_gate_reason as serving_gate_reason,
 )
-from ops.cluster_status.resource_probe import host_resource_sample
 from ops.cluster_status.schema_mismatch import status as schema_mismatch_status
 from ops.cluster_status.sessions import (
     ShellNotFoundError as ShellNotFoundError,
@@ -150,9 +149,9 @@ def read_db_snapshot(
 
 # meiva:note
 # One live resource sample, degraded to None on any psutil failure.
-def read_resource_sample(*, ts: float) -> ResourceSample | None:
+def read_resource_sample() -> ResourceSample | None:
     try:
-        return host_resource_sample(ts=ts)
+        return resource_sample()
     except Exception:  # psutil may not be installed; degrade gracefully
         _log.warning("resource_sample failed (psutil missing?)", exc_info=True)
         return None
@@ -193,16 +192,15 @@ def status_snapshot(
         else None
     )
     supervisor_online = _supervisor_online(home)
-    now = cluster_now()
     sessions = collect_sessions(
-        service_backend=get_backend(), shell_backend=get_shell_backend(), now=now
+        service_backend=get_backend(), shell_backend=get_shell_backend(), now=cluster_now()
     )
     # meiva:note
     # The live one-shot resource sample blocks for its CPU interval. Run it in parallel with
     # the central-DB reads so snapshot latency pays the slower of those independent
     # operations, not their sum.
     with ThreadPoolExecutor(max_workers=1) as executor:
-        resource_future = executor.submit(read_resource_sample, ts=now.timestamp())
+        resource_future = executor.submit(read_resource_sample)
         db_snapshot = read_db_snapshot(db, pool, machine_name=machine_name, count_agents=runner)
         resource = resource_future.result()
     return assemble_status(
