@@ -485,7 +485,7 @@ class HealthMonitor:
     # dependency probe stays idle for the whole stop window.
     async def _loop(self) -> None:
         while True:
-            await asyncio.sleep(self._config.interval_s)
+            await self._clock.asleep(self._config.interval_s)
             await self.run_round()
 
     # ── one unit ─────────────────────────────────────────────────────────────
