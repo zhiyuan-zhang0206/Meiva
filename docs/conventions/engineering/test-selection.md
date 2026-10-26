@@ -155,8 +155,32 @@ nearest `tests` directory that holds at least one collectable test owns it, and
 every collectable test below that directory is the package's test set. The
 directory itself counts when the path is already inside a `tests` directory,
 otherwise a `tests` directory beside an ancestor counts. A path with no nearer
-owner falls back to the top-level tests/ directory. A file's transitive runtime
-consumers are always added to its package tests.
+owner falls back to the top-level tests/ directory. Unless interface early cutoff
+applies (below), a file's transitive runtime consumers are added to its package tests.
+
+### Interface early cutoff for strict modules
+
+When `--base-ref` is provided, a changed `PACKAGE` Python source file cuts off
+transitive cross-package consumer propagation and selects only its owning package's
+internal tests (plus the pinned tree-scan gates) when all of these hold in both
+base and head:
+
+- the file has effective `purity = "strict"` in `meizel.toml`, carries no recorded
+  `[debt.*]` entry in any ancestor `meizel.toml`, and its directory's manifest boundary
+  declarations (`exports`, `loads`, `external`, `state`, `roots`) are unchanged;
+- its public AST interface fingerprint (`scripts.ci.test_impact.public_interface_unchanged`)
+  is unchanged: every public function, class, public or dunder method, public field,
+  module-level public constant or type alias, `__all__` / `__all_for_meiva__`, and
+  imported symbol referenced by a public signature or re-export is identical, with no
+  top-level control flow;
+- its owning package has a package-local `<pkg>/**/tests/` directory (not the top-level
+  `tests/` fallback) and at least one collectable test in that package reaches the file
+  in the runtime import graph.
+
+Any change to a public parameter name (`backoff_ms` to `backoff_s`), annotation,
+default value, return type, decorator, class field, public constant or re-export
+changes the fingerprint and runs the full transitive consumer closure. The Trunk
+merge queue always runs the full suite before landing.
 
 CI passes the committed merge-base through `--base-ref`. Selection reads both base
 and head with the same fact collector and resolver, then intersects the resulting tests
@@ -323,7 +347,7 @@ input consumers from the same impact graph, using these functions for estimated
 minutes. Census estimates describe static coupling; they are not measured CI
 execution times or proof that a selected subset is faster.
 
-## Skipping e2e for unit-test-only changes
+## Skipping e2e for unit-test-only, tooling and interface-unchanged changes
 
 e2e is the integration net for product behavior and normally runs whenever either side
 changed. `classify change` sets `skip_e2e` from `scripts/ci/e2e_scope.py`, and the four e2e
@@ -332,13 +356,20 @@ skipped, which counts as satisfied for the required checks, only when all of the
 
 - the event is a pull request and not a Trunk queue branch (the queue always runs everything);
 - test selection is enforced and its decision is SELECTED;
-- every changed path is a Python file under a package-internal `tests` directory
-  (`<agent|meiva|meiva_builtins|base|cli|gateway|meizel|ops|scripts|services>/**/tests/**/*.py`).
+- every changed path is one of:
+  - a Python file under a package-internal `tests` directory
+    (`<agent|meiva|meiva_builtins|base|cli|gateway|meizel|ops|scripts|services>/**/tests/**/*.py`),
+  - a Python file under a repository `tooling` package (`<meizel|scripts>/**/*.py`), which
+    the root `meizel.toml` forbids `application` packages from importing, or
+  - a `strict`, debt-free `PACKAGE` Python module whose public AST interface is unchanged
+    against `--base-ref` and that is reached by its owning package's local unit tests
+    (`interface_cutoff_paths`);
+- none of the changed paths is reached by the e2e suite's own import closure.
 
-There is no other input: top-level `tests/` (which e2e imports from), manifests, data files
-and product code all keep e2e. An empty output, as after a selector failure, also keeps it.
-`scripts/ci/tests/test_e2e_scope.py` pins the rule, the wiring and the premise that e2e
-imports nothing from a package-internal tests directory.
+Top-level `tests/` (which e2e imports from), manifests, data files and product code whose
+public interface changed all keep e2e. An empty output, as after a selector failure, also
+keeps it. `scripts/ci/tests/test_e2e_scope.py` pins the rule, the wiring, the root manifest
+isolation of `tooling` packages, and the e2e import reachability walk.
 
 ## Selection modes and artifacts
 

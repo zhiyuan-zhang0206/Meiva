@@ -29,6 +29,7 @@ every time:
 | DB schema | range compatibility (`<=`) | strict equality, raises both directions |
 | Cluster version | cross-version compatibility matrix | (proposed) commit-level pinning |
 | Model output | parser fallback / `or {}` / `case _:` | let it crash, feed the error back |
+| Module boundary | implicit semantics + transitive integration re-run on internal edits | self-describing signature + local unit tests lock semantics |
 
 ## Corollaries
 
@@ -75,6 +76,16 @@ every time:
    second spelling for the same capability costs the model a choice and the
    prompt a sentence explaining it. Keep one entry per capability; see
    [when a public SDK entry earns its place](python-conventions.md#when-a-public-sdk-entry-earns-its-place).
+
+8. **A signature is the semantic contract; local unit tests lock the implementation.**
+   Public names, parameters and types encode their own units and semantics: changing
+   milliseconds to seconds changes the signature (`backoff_ms` to `backoff_s`, or a
+   distinct type) so every caller breaks at check time instead of silently
+   misinterpreting a number. A package's own `<pkg>/**/tests/` lock its behavioral
+   contract, while consumers test against the explicit interface. Because a semantic
+   change is a signature change, an internal edit inside a `strict` locality boundary
+   whose public interface is unchanged is proved locally by its own unit tests
+   ([self-describing signatures](python-conventions.md#self-describing-signatures-and-local-contract-tests)).
 
 In one line: every design choice asks *"can a stronger invariant make this
 problem not exist?"* Strong model + strong invariants = the least scaffolding.

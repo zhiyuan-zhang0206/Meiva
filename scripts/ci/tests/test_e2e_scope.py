@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import ast
+import tomllib
 from pathlib import Path
 from typing import Any, cast
 
@@ -253,3 +254,36 @@ def test_every_e2e_job_and_the_aggregator_honor_the_flag() -> None:
         assert "needs.classify.outputs.skip_e2e != 'true'" in jobs[name]["if"], name
     gated = {name for name, job in jobs.items() if "skip_e2e" in str(job.get("if", ""))}
     assert gated == {"e2e-shard", "e2e-hosted", "e2e-env-guard", "e2e"}
+
+
+def test_unreached_tooling_python_files_skip_e2e_while_reached_ones_keep_it() -> None:
+    reached = e2e_scope.e2e_reached_unit_tests(_REPO_ROOT)
+    assert reached is not None
+    assert "scripts/verify/scripted_reply.py" in reached
+    assert "meizel/contracts/rule.py" not in reached
+    assert _skip(
+        changed=["meizel/contracts/rule.py", "scripts/ci/test_selector.py"], reached=reached
+    )
+    assert not _skip(changed=["scripts/verify/scripted_reply.py"], reached=reached)
+
+
+def test_no_application_package_uses_a_tooling_package_in_root_manifest() -> None:
+    root_manifest = tomllib.loads((_REPO_ROOT / "meizel.toml").read_text(encoding="utf-8"))
+    uses = cast("dict[str, list[str]]", root_manifest.get("uses", {}))
+    tooling = set(e2e_scope.TOOLING_PACKAGES)
+    for app_pkg in e2e_scope.APPLICATION_PACKAGES:
+        targets = {target.split("/", 1)[0] for target in uses.get(app_pkg, [])}
+        assert targets.isdisjoint(tooling), (
+            f"{app_pkg} must not depend on tooling: {targets & tooling}"
+        )
+
+
+def test_interface_unchanged_strict_application_module_skips_e2e() -> None:
+    assert _skip(
+        changed=["base/lm/retry.py"],
+        interface_unchanged=frozenset({"base/lm/retry.py"}),
+    )
+    assert not _skip(
+        changed=["base/lm/retry.py"],
+        interface_unchanged=frozenset(),
+    )

@@ -25,6 +25,7 @@ from base.deploy.git.repo_change import (  # noqa: E402 - direct script entry ne
 from meizel.roles import all_packages, pytest_test_hosts  # noqa: E402 - standalone script
 from scripts.ci.test_impact import (  # noqa: E402 - standalone script
     Impact,
+    apply_interface_cutoff,
     base_checkout,
     blocking_gaps,
     build_impact,
@@ -550,7 +551,6 @@ def _runtime_candidates(
         unknown_diagnostics(blocking_gaps(impact, data_changed=data_changed), tree="head")
     )
     tainted = unbounded_tests(impact, data_changed=data_changed)
-    selected = _owner_tests(classes, checkout, impact)
     if base_ref is not None:
         with base_checkout(checkout.repo_root, base_ref) as base_root:
             base = load_checkout(base_root)
@@ -565,7 +565,17 @@ def _runtime_candidates(
             old_forced = _forced_full(old_classes, full_estimate)
             if old_forced is not None:
                 return old_forced
-            selected.update(_owner_tests(old_classes, base, old_impact))
+            pkg_paths = (
+                p
+                for p, k in classes.items()
+                if k is PathClass.PACKAGE and old_classes.get(p) is PathClass.PACKAGE
+            )
+            old_impact, impact = apply_interface_cutoff(
+                pkg_paths, base, checkout, old_impact, impact
+            )
+            selected = _owner_tests(classes, checkout, impact) | _owner_tests(
+                old_classes, base, old_impact
+            )
             for path, tests_for_path in old_impact.tests_by_input.items():
                 reverse_map.setdefault(path, set()).update(tests_for_path & checkout.collectable)
     elif any(kind is PathClass.DELETED for kind in classes.values()):
@@ -589,6 +599,8 @@ def _runtime_candidates(
                 )
             ),
         )
+    else:
+        selected = _owner_tests(classes, checkout, impact)
     return selected | tainted, len(reverse_map), tuple(sorted(set(diagnostics)))
 
 
