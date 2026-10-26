@@ -1,7 +1,8 @@
-"""meiva-browser-mcp healthcheck — a probe returns a bool, never an exception."""
+# meiva:note
+# meiva-browser-mcp healthcheck probe: an answer is a bool, a transport failure raises.
 
 import contextlib
-import logging
+import json
 import socket
 import tempfile
 import threading
@@ -49,35 +50,32 @@ def _socket_home(payload: bytes | None = None, *, refused: bool = False) -> Gene
             worker.join(timeout=2)
 
 
-def test_alive_true_when_probe_answers() -> None:
+def test_probe_true_when_the_daemon_answers_ok() -> None:
     with _socket_home(b'{"id":0,"ok":true}\n') as home:
-        assert hc.is_alive(home, port=9222) is True
+        assert hc.browser_mcp_probe(home, port=9222) is True
+
+
+def test_probe_false_when_the_daemon_answers_not_ok() -> None:
+    with _socket_home(b'{"id":0,"ok":false,"error":"busy"}\n') as home:
+        assert hc.browser_mcp_probe(home, port=9222) is False
+
+
+def test_probe_false_when_the_connection_closes_without_an_answer() -> None:
+    with _socket_home(b"") as home:
+        assert hc.browser_mcp_probe(home, port=9222) is False
 
 
 @pytest.mark.parametrize(
-    ("payload", "refused"),
+    ("payload", "refused", "error"),
     [
-        (None, True),
-        (None, False),
-        (b"", False),
-        (b"not-json\n", False),
+        (None, True, ConnectionRefusedError),
+        (None, False, FileNotFoundError),
+        (b"not-json\n", False, json.JSONDecodeError),
     ],
-    ids=["refused", "no-socket", "eof", "bad-json"],
+    ids=["refused", "no-socket", "bad-json"],
 )
-def test_alive_false_on_expected_probe_failures(payload: bytes | None, refused: bool) -> None:
-    """The transport failures that mean "the daemon is down" stay quiet."""
-    with _socket_home(payload, refused=refused) as home:
-        assert hc.is_alive(home, port=9222) is False
-
-
-def test_alive_false_on_any_unexpected_exception(
-    caplog: pytest.LogCaptureFixture,
+def test_probe_raises_the_transport_failure_for_the_caller_to_judge(
+    payload: bytes | None, refused: bool, error: type[Exception]
 ) -> None:
-    """ANY unforeseen probe failure degrades to "dead",
-    with a traceback so nothing is swallowed silently."""
-    with (
-        _socket_home(b"[]\n") as home,
-        caplog.at_level(logging.ERROR, logger="services.supervision.healthchecks.browser_mcp"),
-    ):
-        assert hc.is_alive(home, port=9222) is False
-    assert any("raised unexpectedly" in r.getMessage() for r in caplog.records)
+    with _socket_home(payload, refused=refused) as home, pytest.raises(error):
+        hc.browser_mcp_probe(home, port=9222)

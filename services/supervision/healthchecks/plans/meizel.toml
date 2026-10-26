@@ -1,8 +1,7 @@
-exports = ["collector_metrics.py", "frontend_plan.py", "lgtm_plan.py"]
+exports = ["collector_metrics.py", "lgtm_plan.py"]
 
 [purity]
 "collector_metrics.py" = "strict"
-"frontend_plan.py" = "strict"
 "lgtm_plan.py" = "strict"
 
 [uses]

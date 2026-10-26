@@ -6,7 +6,6 @@ import json
 import socket
 from pathlib import Path
 
-from base.config import get_field
 from base.daemon.health import DaemonProbe
 
 
@@ -29,7 +28,7 @@ def ping(path: Path | str) -> DaemonProbe:
         return DaemonProbe.up("Unix endpoint answered ping")
 
 
-def _observe(service: str, home: Path, *, browser_cdp_port: int | None = None) -> DaemonProbe:
+def _observe(service: str, home: Path, *, browser_cdp_port: int) -> DaemonProbe:
     from base.paths import (
         chrome_mcp_socket,
         computer_mcp_socket,
@@ -40,10 +39,7 @@ def _observe(service: str, home: Path, *, browser_cdp_port: int | None = None) -
     from base.sessions.pty.paths import service_socket_path
 
     sockets = {
-        "browser-mcp": lambda: chrome_mcp_socket(
-            home,
-            int(get_field("browser_cdp_port")) if browser_cdp_port is None else browser_cdp_port,
-        ),
+        "browser-mcp": lambda: chrome_mcp_socket(home, browser_cdp_port),
         "computer-mcp": lambda: computer_mcp_socket(home),
         "exec-host": lambda: exec_host_socket_path(run_dir(home)),
         "mcp-daemon": lambda: mcp_daemon_shared_socket(home),
@@ -58,7 +54,7 @@ def _observe(service: str, home: Path, *, browser_cdp_port: int | None = None) -
     raise ValueError(f"unsupported protocol probe: {service}")
 
 
-def probe(service: str, *, home: Path, browser_cdp_port: int | None = None) -> DaemonProbe:
+def probe(service: str, *, home: Path, browser_cdp_port: int) -> DaemonProbe:
     """Observe the endpoint of `service` in `home` through its application protocol."""
     try:
         return _observe(service, home, browser_cdp_port=browser_cdp_port)

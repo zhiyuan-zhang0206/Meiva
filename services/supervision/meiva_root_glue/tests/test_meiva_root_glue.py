@@ -29,6 +29,7 @@ from services.supervision.meiva_root.wiring import WiringContext
 from services.supervision.meiva_root_glue import drill, glue
 from services.supervision.meiva_root_glue.diagnostic_probes import StationProbe
 from services.supervision.meiva_root_glue.diagnostics import RootHealthRounds
+from services.supervision.meiva_root_glue.tests.slices import probe_config
 
 _SLEEPER = ["/bin/sleep", "60"]
 
@@ -303,12 +304,12 @@ async def test_reference_station_and_writer_share_one_entry_gate(
     rounds = glue.build_wiring(
         _context(tmp_path, _registry(())),
         config=boot,
-        diagnostic_overrides={
-            "db_url": "postgresql://remote.invalid/meiva",
-            "redis_url": "redis://remote.invalid:6379/0",
-            "observability_url": "http://station.invalid",
-            "observability_otlp_port": 4325,
-        },
+        probe_config=probe_config(
+            db_url="postgresql://remote.invalid/meiva",
+            redis_url="redis://remote.invalid:6379/0",
+            observability_url="http://station.invalid",
+            observability_otlp_port=4325,
+        ),
         services=(),
     )[0]
     assert isinstance(rounds, RootHealthRounds)

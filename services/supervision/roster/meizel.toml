@@ -21,6 +21,6 @@ exports = ["__main__.py", "composition.py", "healthz.py", "plugin_services.py", 
 "spec.py" = { kinds = ["settings"], why = "reads the enablement settings (browser, helper, heartbeat and others) that gate each roster entry when its spec is asked" }
 
 [debt.ambient-read]
-"composition.py#home base.paths.meiva_home" = 7
+"composition.py#home base.paths.meiva_home" = 1
 "spec.py#environ base.host.env.registry.process_environment" = 1
 "spec.py#home base.paths.meiva_home" = 3
