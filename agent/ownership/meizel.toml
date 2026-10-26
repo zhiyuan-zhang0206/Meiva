@@ -26,7 +26,7 @@ exports = ["corpse_reap.py", "hosted.py", "inbound.py", "tests"]
 [debt.impure-edge]
 "corpse_reap.py#base/db/transaction.py" = 1
 "corpse_reap.py#base/log/__init__.py" = 1
-"corpse_reap.py#base/telemetry/__init__.py" = 3
+"corpse_reap.py#base/telemetry/__init__.py" = 1
 "corpse_reap.py#base/telemetry/audit_events.py" = 1
 "hosted.py#base/agents/impersonation/replacement.py" = 1
 "hosted.py#base/agents/impersonation/terminal_notices.py" = 1
@@ -36,5 +36,5 @@ exports = ["corpse_reap.py", "hosted.py", "inbound.py", "tests"]
 "hosted.py#base/events/live/announce.py" = 1
 "hosted.py#base/events/live/bus.py" = 1
 "hosted.py#base/log/__init__.py" = 1
-"hosted.py#base/telemetry/__init__.py" = 4
+"hosted.py#base/telemetry/__init__.py" = 1
 "hosted.py#base/telemetry/audit_events.py" = 1

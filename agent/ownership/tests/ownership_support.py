@@ -1,6 +1,6 @@
 import json
 from collections.abc import AsyncGenerator
-from typing import Any, override
+from typing import Any, cast
 from uuid import uuid4
 
 import psycopg
@@ -12,23 +12,28 @@ from redis.asyncio.client import PubSub
 from agent.ownership.hosted import admit_hosted_runtime
 from base.db import Database, create_agent
 from base.db.code_version_gate import ProcessDbGate
-from base.events.live.bus import EventBus, EventBusConfig
+from base.events.live.bus import EventBus
 from base.native_process.runtime_incarnation import RuntimeIncarnation
 
 
 # meiva:note
 # A bus whose publication raises `failure`: a programming defect, which a real Redis cannot
 # produce (it recovers every transport failure itself).
-class PublicationDefectBus(EventBus):
+class _PublicationDefectBus:
     def __init__(self, failure: BaseException) -> None:
-        super().__init__(EventBusConfig(redis_url="redis://127.0.0.1:1/0", events_channel="test"))
         self.failure = failure
 
-    @override
     async def publish_best_effort(
         self, payload: str, *, channel: str | None = None, context: str = ""
     ) -> int | None:
         raise self.failure
+
+
+# meiva:note
+# Constructor entry for `_PublicationDefectBus` typed as `EventBus` so tests pass a failing bus
+# without subclassing `EventBus`.
+def PublicationDefectBus(failure: BaseException) -> EventBus:  # noqa: N802
+    return cast(EventBus, _PublicationDefectBus(failure))
 
 
 def agent_row(conn: psycopg.Connection) -> int:

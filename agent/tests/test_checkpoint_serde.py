@@ -77,21 +77,20 @@ def test_allowlist_round_trip_is_silent(state, caplog) -> None:
     assert _warning_messages(caplog) == []  # pyright: ignore[reportUnknownArgumentType]
 
 
-def test_default_permissive_serde_warns_for_same_types(
-    caplog, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    """The regression: the default serde (no allowlist) warns once per type."""
-    # LangGraph dedups warnings in a process-global set
-    # (`_warned_unregistered_types`); a sibling test that round-tripped one of
-    # these types through a permissive serde first would prime it and this
-    # test would see fewer than 4 warnings — order-dependent (issue #161).
+# meiva:note
+# The regression: the default serde (no allowlist) warns once per type.
+#
+# LangGraph dedups warnings in a process-global set (`_warned_unregistered_types`); a sibling test
+# that round-tripped one of these types through a permissive serde first would prime it and this
+# test would see fewer than 6 warnings — order-dependent (issue #161).
+#
+# Issue #156 split: freshly-written checkpoints carry the models' real module
+# (`agent.state_channels`); the legacy `agent.state` names only appear in checkpoints written
+# before the split.
+def test_default_permissive_serde_warns_for_same_types(caplog) -> None:
     import langgraph.checkpoint.serde.jsonplus as _jsonplus
 
-    monkeypatch.setattr(
-        _jsonplus,
-        "_warned_unregistered_types",
-        set[tuple[str, str]](),  # same element type as the module-level memo
-    )
+    _jsonplus._warned_unregistered_types.clear()
     serde = JsonPlusSerializer()
     states = [
         AttachEntry(path="/example/render.png", label=None),
@@ -106,9 +105,6 @@ def test_default_permissive_serde_warns_for_same_types(
             serde.loads_typed(serde.dumps_typed(s))
     msgs = _warning_messages(caplog)  # pyright: ignore[reportUnknownArgumentType]
     assert len(msgs) == 6
-    # Issue #156 split: freshly-written checkpoints carry the models' real module
-    # (agent.state_channels); the legacy agent.state names only appear in
-    # checkpoints written before the split.
     for name in (
         "AttachEntry",
         "AttachState",

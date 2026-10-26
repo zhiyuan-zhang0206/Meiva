@@ -10,6 +10,3 @@ exports = ["agent_tests.py", "claim", "impersonation", "scripted_model.py"]
 "plugins" = ["agent_tests.py"]
 "state_slot" = ["agent_tests.py", "test_state_slot.py"]
 "test_compact.py" = ["scripted_model.py"]
-
-[debt.third-party-patch]
-"test_checkpoint_serde.py#monkeypatch.setattr langgraph.checkpoint.serde.jsonplus._warned_unregistered_types" = 1

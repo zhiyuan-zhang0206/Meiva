@@ -176,26 +176,23 @@ def test_install_namespace_conflict_with_getattr_served_attr_raises(installer: _
         installer.namespace("DB_URL", _make_module("x"))
 
 
+# meiva:note
+# MEIVA_SDK_DISABLE swaps sys.modules['meiva.<name>'] for a disabled-module sentinel at import
+# time (before plugin load); the install must not clobber it — the namespace stays disabled
+# (framework-owned, not overridable) and the sentinel keeps raising its legible error for
+# downstream `meiva.code.anything` access.
 def test_install_namespace_refuses_disabled_sentinel(installer: _Installer):
-    """MEIVA_SDK_DISABLE swaps sys.modules['meiva.<name>'] for a disabled-module
-    sentinel at import time (before plugin load); the install must not
-    clobber it — the namespace stays disabled (framework-owned, not
-    overridable) and the sentinel keeps raising its legible error."""
-    from unittest.mock import patch
-
     from meiva.sdk_surface import sdk_disable
 
-    with patch.dict(sys.modules):
-        sdk_disable.apply_entries(["code"])
-        sentinel = sys.modules["meiva.code"]
-        assert isinstance(sentinel, sdk_disable.DisabledSDKModule)
-        with pytest.raises(meiva.FrameworkNamespaceConflictError, match="MEIVA_SDK_DISABLE"):
-            installer.namespace("code", _make_module("code"))
-        # The sentinel survives: the namespace stays disabled for downstream
-        # `meiva.code.anything` access.
-        assert sys.modules["meiva.code"] is sentinel
-        assert not hasattr(meiva, "code")
-        assert "code" not in meiva.__all_for_meiva__
+    sdk_disable.apply_entries(["code"])
+    sentinel = sys.modules["meiva.code"]
+    installer.applied.append(NamespaceAdded("code", sentinel, False))
+    assert isinstance(sentinel, sdk_disable.DisabledSDKModule)
+    with pytest.raises(meiva.FrameworkNamespaceConflictError, match="MEIVA_SDK_DISABLE"):
+        installer.namespace("code", _make_module("code"))
+    assert sys.modules["meiva.code"] is sentinel
+    assert not hasattr(meiva, "code")
+    assert "code" not in meiva.__all_for_meiva__
 
 
 def test_install_namespace_case_sensitive_check(installer: _Installer):

@@ -26,6 +26,7 @@ from dotenv import dotenv_values
 
 from base import paths
 from base.config import settings
+from base.paths.tests.homes import point_home
 from scripts.data_plane_ops import rotate_cluster_secret as rotate
 from services.backup import dump as backup
 from services.backup.artifact import passphrase
@@ -40,8 +41,7 @@ def _home(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, secret: str) -> Path:
     path.mkdir(mode=0o700)
     (path / ".env").write_text(f"MEIVA_CLUSTER_SECRET={secret}\n")
     (path / ".env").chmod(0o600)
-    monkeypatch.setattr(paths, "meiva_home", lambda: path)
-    monkeypatch.setattr(settings.data_plane, "cluster_secret", secret)
+    point_home(monkeypatch, path)
     return path
 
 
@@ -167,14 +167,12 @@ def _decrypts_with(artifact: Path, key: str) -> bool:
 
 
 def test_rotating_the_secret_never_changes_the_backup_key(
-    born: Path, backups: Callable[[], Path], monkeypatch: pytest.MonkeyPatch
+    born: Path, backups: Callable[[], Path]
 ) -> None:
     before = backups()
     assert _restored(before) == b"PGDMP fake dump"
     for _ in range(2):
         rotate.advance(born, None, lambda _rotation: None)
-        # The restarted gateway runs with the new secret.
-        monkeypatch.setattr(settings.data_plane, "cluster_secret", _secret(born))
         assert _restored(before) == _restored(backups()) == b"PGDMP fake dump"
 
 

@@ -14,7 +14,6 @@ from agent.ownership.lifecycle_plan import (
     shell_cutoff,
     turn_close,
 )
-from base import telemetry
 from base.agents.impersonation.replacement import end_for_replacement
 from base.db import Database
 from base.db.transaction import async_write_transaction
@@ -22,6 +21,7 @@ from base.events.live.announce import publish_agent_updated
 from base.events.live.bus import EventBus
 from base.log import logger
 from base.native_process.runtime_incarnation import RuntimeIncarnation
+from base.telemetry import Event, emit_prepared
 from base.telemetry.audit_events import prepare_event_log, record_audit_async
 
 
@@ -152,7 +152,7 @@ async def admit_hosted_runtime(
 
     if not await admit_pending_wake(pool, agent_id):
         return None
-    recorded: list[telemetry.Event] = []
+    recorded: list[Event] = []
     async with async_write_transaction(pool) as conn:
         claimed = await (
             await conn.execute(
@@ -187,7 +187,7 @@ async def admit_hosted_runtime(
         )
         recorded.append(await record_audit_async(conn, admitted_event))
     for event in recorded:
-        telemetry.emit_prepared(event)
+        emit_prepared(event)
     if ended_lease is not None:
         # meiva:note
         # This admission is what ended the lease, so this process is the host that
@@ -243,7 +243,7 @@ async def settle_hosted_runtime(
             else None
         )
     if settled_event is not None:
-        telemetry.emit_prepared(settled_event)
+        emit_prepared(settled_event)
     if changed:
         await publish_agent_updated(bus, incarnation.agent_id)
     return changed

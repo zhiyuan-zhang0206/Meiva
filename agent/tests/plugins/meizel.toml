@@ -4,6 +4,3 @@
 [debt.first-party-patch]
 "test_plugin_catalog.py#monkeypatch.setattr base.paths.repo_plugins_dir" = 1
 "test_plugin_load_containment.py#monkeypatch.setattr base.paths.repo_plugins_dir" = 1
-
-[debt.stdlib-patch]
-"test_register_namespace.py#patch.dict sys.modules" = 1

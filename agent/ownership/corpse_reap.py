@@ -6,10 +6,10 @@ from typing import NamedTuple
 
 from psycopg_pool import AsyncConnectionPool
 
-from base import telemetry
 from base.db.transaction import async_write_transaction
 from base.deploy.progress_timeout import CORPSE_REAP_GRACE_S
 from base.log import logger
+from base.telemetry import Event, emit_prepared
 from base.telemetry.audit_events import prepare_event_log, record_audit_async
 
 
@@ -57,7 +57,7 @@ async def reap_crash_corpses(
             )
         ).fetchall()
         reaped: list[ReapedCorpse] = []
-        recorded: list[telemetry.Event] = []
+        recorded: list[Event] = []
         for agent_id, handoff_unapplied in rows:
             # meiva:note
             # A reaped row that still owed a handoff receipt is a different failure from an
@@ -83,7 +83,7 @@ async def reap_crash_corpses(
                 )
             )
     for event in recorded:
-        telemetry.emit_prepared(event)
+        emit_prepared(event)
     if reaped:
         logger.info(
             "corpse reaper: terminated {n} crash-dead row(s)",
