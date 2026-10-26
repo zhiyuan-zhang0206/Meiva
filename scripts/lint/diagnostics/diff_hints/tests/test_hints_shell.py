@@ -8,6 +8,7 @@ import pytest
 
 HINTS = Path(__file__).resolve().parents[1] / "hints.py"
 LOCATOR = "def inputs(request):\n    return request.app.state.thing\n"
+ROOT_TABLE = '[roots]\n"x.py" = { kinds = ["settings"], why = "process entry" }\n'
 
 
 # meiva:note
@@ -217,17 +218,10 @@ def test_a_narrative_line_that_starts_with_the_key_does_not_wedge_the_push(repo:
     assert "outside the trailer block" in done.stderr
 
 
-@pytest.mark.parametrize(
-    "table",
-    [
-        '[roots]\n"x.py" = ["settings"]\n',
-        '[roots]\n"x.py" = { kinds = ["settings"], why = "process entry" }\n',
-    ],
-)
-def test_the_commit_hint_reads_roots_from_the_index(repo: Path, table: str) -> None:
+def test_the_commit_hint_reads_roots_from_the_index(repo: Path) -> None:
     (repo / "cli" / "x.py").write_text(LOCATOR, encoding="utf-8")
     manifest = repo / "cli" / "meizel.toml"
-    manifest.write_text(table, encoding="utf-8")
+    manifest.write_text(ROOT_TABLE, encoding="utf-8")
     git(repo, "add", "cli/x.py", "cli/meizel.toml")
     manifest.write_text("", encoding="utf-8")
     done = run(repo, "commit-msg", message_file(repo, "Declare the process entry\n"))
@@ -239,7 +233,7 @@ def test_an_unstaged_root_does_not_answer_a_staged_read(repo: Path) -> None:
     manifest = repo / "cli" / "meizel.toml"
     manifest.write_text("", encoding="utf-8")
     git(repo, "add", "cli/x.py", "cli/meizel.toml")
-    manifest.write_text('[roots]\n"x.py" = ["settings"]\n', encoding="utf-8")
+    manifest.write_text(ROOT_TABLE, encoding="utf-8")
     done = run(repo, "commit-msg", message_file(repo, "Fetch application inputs\n"))
     assert done.returncode == 1
     assert "hint service-locator" in done.stderr
@@ -248,7 +242,7 @@ def test_an_unstaged_root_does_not_answer_a_staged_read(repo: Path) -> None:
 def test_the_branch_hint_uses_roots_at_the_head_revision(repo: Path) -> None:
     (repo / "cli" / "x.py").write_text(LOCATOR, encoding="utf-8")
     manifest = repo / "cli" / "meizel.toml"
-    manifest.write_text('[roots]\n"x.py" = ["settings"]\n', encoding="utf-8")
+    manifest.write_text(ROOT_TABLE, encoding="utf-8")
     commit(repo, "Declare the process entry")
     manifest.write_text("", encoding="utf-8")
     done = run(repo, "branch")
@@ -258,8 +252,56 @@ def test_the_branch_hint_uses_roots_at_the_head_revision(repo: Path) -> None:
 def test_an_unknown_root_kind_fails_the_hint_explicitly(repo: Path) -> None:
     stage_locator(repo)
     manifest = repo / "cli" / "meizel.toml"
-    manifest.write_text('[roots]\n"x.py" = ["typo"]\n', encoding="utf-8")
+    manifest.write_text(
+        '[roots]\n"x.py" = { kinds = ["typo"], why = "process entry" }\n', encoding="utf-8"
+    )
     git(repo, "add", "cli/meizel.toml")
     done = run(repo, "commit-msg", message_file(repo, "Invalid root\n"))
     assert done.returncode == 2
     assert "typo" in done.stderr
+
+
+def test_a_list_of_root_kinds_fails_the_hint_explicitly(repo: Path) -> None:
+    stage_locator(repo)
+    manifest = repo / "cli" / "meizel.toml"
+    manifest.write_text('[roots]\n"x.py" = ["settings"]\n', encoding="utf-8")
+    git(repo, "add", "cli/meizel.toml")
+    done = run(repo, "commit-msg", message_file(repo, "A bare list of kinds\n"))
+    assert done.returncode == 2
+    assert "must be a table with kinds and why" in done.stderr
+
+
+# meiva:note
+# A root `cli/home.py` imported by `importers` modules, some of which are roots themselves.
+def declare_root(repo: Path, importers: int, *, as_roots: tuple[str, ...] = ()) -> None:
+    (repo / "cli" / "home.py").write_text("VALUE = 1\n", encoding="utf-8")
+    table = '[roots]\n"home.py" = { kinds = ["home"], why = "reads the home" }\n'
+    for name in as_roots:
+        table += f'"{name}.py" = {{ kinds = ["home"], why = "an entry" }}\n'
+    (repo / "cli" / "meizel.toml").write_text(table, encoding="utf-8")
+    for index in range(importers):
+        (repo / "cli" / f"user{index}.py").write_text(
+            "from cli.home import VALUE\n", encoding="utf-8"
+        )
+    commit(repo, "A root and its importers")
+    (repo / "cli" / "home.py").write_text("VALUE = 2\n", encoding="utf-8")
+    git(repo, "add", "cli/home.py")
+
+
+def test_a_root_imported_by_three_modules_that_are_not_roots_is_asked_about(repo: Path) -> None:
+    declare_root(repo, 3)
+    done = run(repo, "commit-msg", message_file(repo, "Change the root\n"))
+    assert done.returncode == 1
+    assert "cli/home.py:1: hint root-middle-layer" in done.stderr
+    assert "imported by 3 production modules" in done.stderr
+
+
+def test_a_root_with_fewer_importers_or_importers_that_are_roots_is_not(repo: Path) -> None:
+    declare_root(repo, 3, as_roots=("user0",))
+    assert run(repo, "commit-msg", message_file(repo, "Change the root\n")).returncode == 0
+
+
+def test_the_answer_to_the_middle_layer_question_is_a_trailer(repo: Path) -> None:
+    declare_root(repo, 4)
+    message = "Change the root\n\nHint-Ack: root-middle-layer cli/home.py -- the process wiring, built once\n"
+    assert run(repo, "commit-msg", message_file(repo, message)).returncode == 0

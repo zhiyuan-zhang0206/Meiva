@@ -8,7 +8,3 @@ exports = ["asyncio_stall_probe.py", "components", "e2e", "fixtures", "path_scop
 "harness" = ["_os_jobs.py", "asyncio_stall_probe.py", "components", "e2e", "fixtures"]
 "integration" = ["path_scoped"]
 "scripts" = ["path_scoped"]
-
-[debt.stdlib-patch]
-"asyncio_stall_probe.py#assignment asyncio.events.new_event_loop" = 2
-"asyncio_stall_probe.py#assignment asyncio.new_event_loop" = 2

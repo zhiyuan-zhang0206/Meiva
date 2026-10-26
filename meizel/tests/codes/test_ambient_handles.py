@@ -140,7 +140,7 @@ def test_a_handle_root_exempts_its_own_kind_and_keeps_the_other_handles_visible(
                 "db = Database.from_settings()\nbus = EventBus.from_settings()\n"
                 "endpoints = ServiceEndpoints.from_settings()\n"
             ),
-            "app/meizel.toml": f'[roots]\n"mod.py" = ["{root_kind}"]\n',
+            "app/meizel.toml": f'[roots]\n"mod.py" = {{ kinds = ["{root_kind}"], why = "reads it" }}\n',
         }
     )
     targets = [

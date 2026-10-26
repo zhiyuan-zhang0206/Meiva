@@ -79,57 +79,51 @@ def test_awaiter_chain_lines_walk_to_the_innermost_await() -> None:
         loop.close()
 
 
-def test_probe_window_without_a_deadline_patches_nothing() -> None:
+def test_the_loop_factory_without_a_deadline_is_the_plain_one() -> None:
     with tempfile.TemporaryFile() as sink:
-        events_original = asyncio.events.new_event_loop
-        top_original = asyncio.new_event_loop
-        with probe.probe_window("tests/synthetic.py::test_x", 0.0, sink.fileno()):
-            assert asyncio.events.new_event_loop is events_original
-            assert asyncio.new_event_loop is top_original
-        assert asyncio.events.new_event_loop is events_original
-        assert asyncio.new_event_loop is top_original
+        factory = probe.probing_loop_factory("tests/synthetic.py::test_x", 0.0, sink.fileno())
+    assert factory is asyncio.new_event_loop
 
 
-def test_probe_window_dumps_pending_chains_when_the_deadline_nears() -> None:
+def test_the_loop_factory_dumps_pending_chains_when_the_deadline_nears() -> None:
     timeout = probe.DUMP_MARGIN_SECONDS + 0.1
     with tempfile.TemporaryFile() as sink:
-        events_original = asyncio.events.new_event_loop
-        top_original = asyncio.new_event_loop
-        with probe.probe_window("tests/synthetic.py::test_hangs", timeout, sink.fileno()):
-            assert asyncio.events.new_event_loop is not events_original
-            assert asyncio.new_event_loop is not top_original
-            loop = asyncio.new_event_loop()
-            try:
-                # meiva:note
-                # Bounded wait: the timer is due 0.1s after the loop's creation,
-                # so a handful of iterations are enough even on a loaded runner.
-                deadline = time.monotonic() + 10.0
-                while time.monotonic() < deadline and os.fstat(sink.fileno()).st_size == 0:
-                    loop.run_until_complete(asyncio.sleep(0.02))
-            finally:
-                loop.close()
+        factory = probe.probing_loop_factory(
+            "tests/synthetic.py::test_hangs", timeout, sink.fileno()
+        )
+        loop = factory()
+        try:
+            # meiva:note
+            # Bounded wait: the timer is due 0.1s after the loop's creation,
+            # so a handful of iterations are enough even on a loaded runner.
+            deadline = time.monotonic() + 10.0
+            while time.monotonic() < deadline and os.fstat(sink.fileno()).st_size == 0:
+                loop.run_until_complete(asyncio.sleep(0.02))
+        finally:
+            loop.close()
         sink.seek(0)
         dumped = sink.read().decode()
     assert "tests/synthetic.py::test_hangs" in dumped, dumped
     assert "--- task " in dumped, dumped
     assert " in sleep" in dumped, dumped
-    assert asyncio.events.new_event_loop is events_original
-    assert asyncio.new_event_loop is top_original
 
 
-def test_probe_window_cancels_its_timers_at_exit() -> None:
+def test_a_loop_closed_before_its_deadline_never_dumps() -> None:
     timeout = probe.DUMP_MARGIN_SECONDS + 0.1
     with tempfile.TemporaryFile() as sink:
-        with probe.probe_window("tests/synthetic.py::test_healthy", timeout, sink.fileno()):
-            loop = asyncio.new_event_loop()
+        loop = probe.probing_loop_factory(
+            "tests/synthetic.py::test_healthy", timeout, sink.fileno()
+        )()
+        loop.close()
         # meiva:note
-        # The window is gone and the loop never ran inside it. Letting the loop
-        # run past the timer's due time must not dump: `_pytest.faulthandler`
-        # gives its own dump the same cancel-at-test-end lifetime.
+        # The probed loop is gone and never ran. A second loop running past the due time must not
+        # dump: the timer belonged to the first, which `_pytest.faulthandler` mirrors by giving
+        # its own dump the lifetime of the test.
+        other = asyncio.new_event_loop()
         try:
-            loop.run_until_complete(asyncio.sleep(0.2))
+            other.run_until_complete(asyncio.sleep(0.2))
         finally:
-            loop.close()
+            other.close()
         sink.seek(0)
         assert sink.read() == b""
 
@@ -138,13 +132,11 @@ def test_the_probe_hook_is_wired_into_this_session(pytestconfig: pytest.Config) 
     assert pytestconfig.pluginmanager.hasplugin("tests.asyncio_stall_probe"), (
         "the repo-root conftest.py no longer loads tests/asyncio_stall_probe via pytest_plugins"
     )
-    impls = pytestconfig.hook.pytest_runtest_protocol.get_hookimpls()
+    impls = pytestconfig.hook.pytest_asyncio_loop_factories.get_hookimpls()
     wired = [
-        impl.function
-        for impl in impls
-        if impl.function is probe.pytest_runtest_protocol and impl.wrapper
+        impl.function for impl in impls if impl.function is probe.pytest_asyncio_loop_factories
     ]
-    assert wired, "the stall-probe protocol wrapper is not registered in this session"
+    assert wired, "the stall-probe loop factory hook is not registered in this session"
 
 
 def test_the_probe_dumps_before_faulthandler_in_a_real_pytest_run(tmp_path: Path) -> None:
