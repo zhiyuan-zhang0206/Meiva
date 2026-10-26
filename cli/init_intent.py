@@ -77,26 +77,17 @@ def config_values(args: argparse.Namespace, home: Path) -> tuple[dict[str, str],
     return {k: v for k, v in values.items() if v is not None}, hashlib.sha256(content).hexdigest()
 
 
-def _validate_remote_inputs(values: dict[str, str], roles: frozenset[str]) -> None:
+def _validate_remote_inputs(
+    values: dict[str, str], roles: frozenset[str], local_names: frozenset[str]
+) -> None:
     if "MEIVA_DB_URL" not in values:
         return
     if "gateway" not in roles:
         raise ValueError("remote data-plane configuration belongs to a gateway unit")
     endpoints = _remote_endpoints(values)
-    local = local_addresses(values.get("MEIVA_MACHINE_HOST", ""))
+    local = {*local_names, values.get("MEIVA_MACHINE_HOST", "").lower()}
     for endpoint in endpoints:
         _require_foreign_endpoint(endpoint, local)
-
-
-def local_addresses(machine_host: str) -> set[str]:
-    import socket
-
-    import psutil
-
-    local = {socket.gethostname().lower(), socket.getfqdn().lower(), machine_host.lower()}
-    for addresses in psutil.net_if_addrs().values():
-        local.update(a.address.split("%", 1)[0].lower() for a in addresses)
-    return local
 
 
 def _remote_endpoints(values: dict[str, str]) -> tuple[SplitResult, SplitResult]:
@@ -171,7 +162,7 @@ def _inputs(args: argparse.Namespace, site: HomeSite, caller: CallerHost) -> Ide
     values["MEIVA_SERVICE_PATH"] = service_path(values, site, caller)
     _apply_identity_options(args, stored, values, site.checkout)
     if config.get("MEIVA_DB_URL"):
-        _validate_remote_inputs(values, roles)
+        _validate_remote_inputs(values, roles, caller.local_names)
     if "gateway" not in roles:
         if not values.get("MEIVA_GATEWAY_URL"):
             raise ValueError("a remote unit's init requires --gateway-url")
@@ -187,6 +178,7 @@ def _inputs(args: argparse.Namespace, site: HomeSite, caller: CallerHost) -> Ide
         roles,
         values,
         occupied_ports=caller.occupied_ports,
+        birth=caller.birth,
         config_digest=digest,
     )
 

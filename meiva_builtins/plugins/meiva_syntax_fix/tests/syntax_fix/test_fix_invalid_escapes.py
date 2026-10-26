@@ -37,6 +37,7 @@ from meiva_builtins.plugins.meiva_syntax_fix.tests.hook_support import (
     REPAIRS_UNTERMINATED_STRING,
     UNAVAILABLE,
     make_runtime,
+    manual_clock,
 )
 from meiva_builtins.plugins.meiva_syntax_fix.tests.test_syntax_fix import is_broken
 
@@ -367,6 +368,7 @@ class TestLlmRepairSyntax:
             keys=inert_keys(model_catalog),
             overrides=model_overrides(),
             llm_override=llm_override,
+            clock=manual_clock(),
         )
 
     async def test_returns_repaired_text(self, model_catalog: ModelCatalog):
