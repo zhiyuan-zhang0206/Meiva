@@ -24,7 +24,8 @@ from base.lm.harness.events import (
     TextDelta,
     TurnCompleted,
 )
-from base.lm.pricing import PriceBook, load_archive
+from base.lm.pricing import PriceBook
+from base.lm.pricing.archive import load_archive
 
 
 def permission_request(

@@ -8,6 +8,7 @@ from base.lm.catalog.decide.types import DecisionModelSpec, UnknownDecisionModel
 from base.lm.decision.call import decide
 from base.lm.decision.tests.support import MODEL, FakeBinding, provider
 from base.lm.factory import build_chat_model, validate_model_config
+from base.lm.pricing.archive import load_archive
 from base.lm.provider_api import (
     PriceRates,
     ProviderBinding,
@@ -42,7 +43,7 @@ def _chat_contribution(prefix: str, model_id: str) -> ProviderContribution:
 
 
 def _catalog() -> ModelCatalog:
-    builder = CatalogBuilder()
+    builder = CatalogBuilder(load_archive())
     builder.install("chat_plugin", _chat_contribution("chat-", "chat-1"))
     builder.install_decision("fake_plugin", provider(FakeBinding({})))
     return builder.build()
@@ -96,7 +97,7 @@ async def test_the_decision_path_rejects_a_chat_id() -> None:
 def test_prefix_collisions_across_plugins_are_rejected_in_both_orders(
     chat_prefix: str, decision_prefix: str
 ) -> None:
-    chat_first = CatalogBuilder()
+    chat_first = CatalogBuilder(load_archive())
     chat_first.install("chat_plugin", _chat_contribution(chat_prefix, f"{chat_prefix}1"))
     with pytest.raises(ProviderRegistrationError, match="share one prefix namespace"):
         chat_first.install_decision(
@@ -108,7 +109,7 @@ def test_prefix_collisions_across_plugins_are_rejected_in_both_orders(
             ),
         )
 
-    decision_first = CatalogBuilder()
+    decision_first = CatalogBuilder(load_archive())
     decision_first.install_decision(
         "other_plugin",
         provider(
@@ -122,7 +123,7 @@ def test_prefix_collisions_across_plugins_are_rejected_in_both_orders(
 
 
 def test_one_plugin_may_hold_a_chat_and_a_decision_provider_under_one_prefix() -> None:
-    builder = CatalogBuilder()
+    builder = CatalogBuilder(load_archive())
     builder.install("vendor", _chat_contribution("same-", "same-1"))
     builder.install_decision(
         "vendor",
@@ -140,7 +141,7 @@ def test_one_plugin_may_hold_a_chat_and_a_decision_provider_under_one_prefix() -
 
 
 def test_decision_prefixes_collide_with_each_other() -> None:
-    builder = CatalogBuilder()
+    builder = CatalogBuilder(load_archive())
     builder.install_decision(
         "one",
         provider(
@@ -159,7 +160,7 @@ def test_decision_prefixes_collide_with_each_other() -> None:
 
 
 def test_a_decision_id_may_not_reuse_a_chat_id_in_either_order() -> None:
-    chat_first = CatalogBuilder()
+    chat_first = CatalogBuilder(load_archive())
     chat_first.install("vendor", _chat_contribution("same-", "same-1"))
     with pytest.raises(ProviderRegistrationError, match="also a chat model id"):
         chat_first.install_decision(
@@ -171,7 +172,7 @@ def test_a_decision_id_may_not_reuse_a_chat_id_in_either_order() -> None:
             ),
         )
 
-    decision_first = CatalogBuilder()
+    decision_first = CatalogBuilder(load_archive())
     decision_first.install_decision(
         "vendor",
         provider(
@@ -185,7 +186,7 @@ def test_a_decision_id_may_not_reuse_a_chat_id_in_either_order() -> None:
 
 
 def test_every_decision_model_needs_a_price_and_the_prefix() -> None:
-    builder = CatalogBuilder()
+    builder = CatalogBuilder(load_archive())
     unpriced = provider(FakeBinding({}))
     with pytest.raises(ProviderRegistrationError, match="exactly one price"):
         builder.install_decision(
