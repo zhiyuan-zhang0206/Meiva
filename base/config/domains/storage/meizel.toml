@@ -8,9 +8,6 @@ exports = ["data_plane.py", "walg.py"]
 [roots]
 "data_plane.py" = { kinds = ["environ"], why = "self_machine_host reads MEIVA_MACHINE_HOST at sub-model construction time — the settings singleton does not exist yet, sibling sub-models are unreachable, and base.cluster.machine imports settings (circular)" }
 
-[debt.ambient-read]
-"data_plane.py#home pathlib.Path.home" = 1
-
 [debt.impure-call]
 "data_plane.py#import urllib" = 1
 "data_plane.py#os.environ" = 2

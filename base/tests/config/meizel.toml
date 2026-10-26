@@ -3,8 +3,3 @@
 "test_config_env_values.py" = ["_config_child.py"]
 "test_config_fetch_source.py" = ["_config_child.py"]
 "test_home_resolution.py" = ["_config_child.py"]
-
-[debt.env-patch]
-"test_home_resolution.py#monkeypatch.delenv os.environ.MEIVA_HOME" = 1
-"test_home_resolution.py#monkeypatch.setenv os.environ.HOME" = 1
-"test_home_resolution.py#monkeypatch.setenv os.environ.MEIVA_HOME" = 3
