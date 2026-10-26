@@ -12,6 +12,7 @@ import os
 import time
 from collections.abc import Callable
 from dataclasses import replace
+from datetime import UTC, datetime
 from pathlib import Path
 from threading import Event, Thread
 from typing import NoReturn
@@ -377,5 +378,5 @@ def test_a_browser_that_is_not_there_costs_a_stop_nothing(
     browser.stop_browser(time.monotonic() + 5)
     browser.reap_cluster_chrome()
     assert capsys.readouterr().out == ""
-    browser.record_browser_session(stop_runtime)
+    browser.record_browser_session(stop_runtime, now=datetime(2026, 10, 22, tzinfo=UTC))
     assert "nothing to record (no browser answered)" in capsys.readouterr().out

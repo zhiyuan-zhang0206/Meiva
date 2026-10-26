@@ -17,7 +17,8 @@ from pathlib import Path
 from typing import TextIO, assert_never
 
 from base.agents.context.clients import DatabaseFactory
-from base.clock import Clock, ClockConfig
+from base.clock import Clock
+from base.clock.configuration import clock_config_from_boot
 from base.deploy.lifecycle import start_serving
 from base.deploy.lifecycle.status_journal import phase as journal_phase
 from base.telemetry import EventPipeline
@@ -133,19 +134,14 @@ def _perform(
     retained_children: list[subprocess.Popen[bytes]] | None,
 ) -> StopOutcome | None:
     command = env.command
+    clock = Clock(clock_config_from_boot(command.config), timers=command.timers)
     match step:
         case ClearServing():
             start_serving.clear_serving(command.home)
         case Announce(window):
-            announce_stopping(
-                command,
-                window,
-                now=Clock(
-                    ClockConfig("UTC", None, message_timestamp_weekday=False), timers=command.timers
-                ).now(),
-            )
+            announce_stopping(command, window, now=clock.now())
         case RecordBrowserSession():
-            browser.record_browser_session(command)
+            browser.record_browser_session(command, now=clock.now())
         case StopServices(preserve, force, _phase):
             root_driver.stop_root_service_tree(
                 preserve=preserve,

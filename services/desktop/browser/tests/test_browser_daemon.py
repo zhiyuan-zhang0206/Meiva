@@ -20,6 +20,7 @@ from pathlib import Path
 import pytest
 
 import services.desktop.browser.daemon as bd
+from base.clock import Clock, ClockConfig
 from base.clock.tests.fakes import system_clock
 from base.host.system.hostport import Host
 from base.host.system.tests.fake_commands import DARWIN_ARM64, fake_host
@@ -150,6 +151,48 @@ def test_main_asserts_capable_then_execvps_chrome(tmp_path: Path, restore: bool)
     # meiva:note
     # Even a gateway host with an app port must leave Chrome's first page alone.
     assert len([arg for arg in captured_args if not arg.startswith("--")]) == 1
+
+
+# meiva:note
+# The macOS readiness wait runs before anything is written for the browser: the profile directory
+# does not exist while the daemon is still waiting for the GUI login session.
+def test_the_readiness_wait_precedes_the_profile_directory(tmp_path: Path) -> None:
+    profile = tmp_path / "prof"
+    fake_chrome = tmp_path / "chrome"
+    fake_chrome.write_text(f"#!{sys.executable}\n", encoding="utf-8")
+    fake_chrome.chmod(0o755)
+
+    class ProfileWatchingTimers:
+        def __init__(self) -> None:
+            self.profile_existed_at_each_sleep: list[bool] = []
+
+        def monotonic(self) -> float:
+            return 0.0
+
+        def sleep(self, seconds: float) -> None:
+            self.profile_existed_at_each_sleep.append(profile.exists())
+
+        async def asleep(self, seconds: float) -> None:
+            self.sleep(seconds)
+
+    timers = ProfileWatchingTimers()
+    clock = Clock(ClockConfig("UTC", "UTC", message_timestamp_weekday=False), timers=timers)
+    with pytest.raises(SystemExit):
+        bd.run_browser_daemon(
+            host=_capable_host(fake_chrome),
+            cdp_port=_closed_port(),
+            chrome_binary=str(fake_chrome),
+            home=tmp_path,
+            profile=profile,
+            logs=tmp_path,
+            clock=clock,
+            readiness_sequence=[
+                StartupReadiness(False, "no GUI login session"),
+                StartupReadiness(True),
+            ],
+        )
+    assert timers.profile_existed_at_each_sleep[0] is False
+    assert profile.is_dir()
 
 
 def test_main_propagates_capability_failure(tmp_path: Path) -> None:

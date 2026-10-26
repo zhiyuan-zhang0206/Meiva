@@ -702,6 +702,8 @@ class BrowserMcpEntryWiring:
     gate: ProcessDbGate
     browser_cdp_port: int
     default_ttl_seconds: float
+    clock: Clock
+    gateway_access: GatewayAccess
 
     def db_config(self) -> DbConfig:
         return db_config_from_boot(self.config)
@@ -739,6 +741,8 @@ def build_entry_wiring(
         gate=gate,
         browser_cdp_port=config.view.services.browser_cdp_port,
         default_ttl_seconds=float(config.view.daemon.chrome_page_default_ttl_seconds),
+        clock=Clock(clock_config_from_boot(config), timers=SYSTEM_TIMERS),
+        gateway_access=gateway_access_from_boot(config),
     )
 
 
@@ -766,8 +770,8 @@ def main() -> None:
             home=wiring.process_home,
             browser_cdp_port=wiring.browser_cdp_port,
             connect_timeout_reader=lambda: config.view.sandbox.mcp_connect_timeout_seconds,
-            clock=Clock(clock_config_from_boot(config), timers=SYSTEM_TIMERS),
-            gateway_access=gateway_access_from_boot(config),
+            clock=wiring.clock,
+            gateway_access=wiring.gateway_access,
             default_ttl_seconds=wiring.default_ttl_seconds,
         )
     )
