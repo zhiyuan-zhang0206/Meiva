@@ -18,7 +18,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Generator, MutableMapping
+from collections.abc import Generator, Mapping, MutableMapping
 from contextlib import contextmanager
 from dataclasses import dataclass, replace
 from functools import partial
@@ -40,7 +40,7 @@ from base.host.db_authority import ledger, model
 from base.host.db_authority.model import Generation
 from base.host.env.dotenv_file import env_file_path, read_env_aliases
 from base.host.net.url_secret import url_with_userinfo
-from base.native_process.child_env import daemon_process_env
+from base.native_process.child_env import filter_daemon_env
 from cli.commands.converge.health_preflight import probe_postgres, probe_redis
 from cli.commands.data_plane import cluster_instance as instance
 from cli.commands.data_plane import pgbouncer
@@ -100,6 +100,7 @@ def ensure_pooler(
     machine: MachineIdentityReader,
     macos: bool,
     timers: Timers,
+    environ: Mapping[str, str],
 ) -> None:
     if not config.pgbouncer_enabled:
         return
@@ -115,7 +116,7 @@ def ensure_pooler(
         userlist=db_delivery_files.render_userlist(home, generation),
         admin_password=db_delivery_files.read_pooler_admin(home).password,
         binary=pooler.pgbouncer_bin(),
-        daemon_env=daemon_process_env(),
+        daemon_env=filter_daemon_env(environ),
         macos=macos,
         bind_wait_s=instance.BIND_WAIT_TIMEOUT_S,
         timers=timers,
@@ -337,6 +338,7 @@ class _Completion:
                     machine=self.machine,
                     macos=self.macos,
                     timers=self.timers,
+                    environ=self.environment,
                 )
                 return stage
             case ProveLogins():

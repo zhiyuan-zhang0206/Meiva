@@ -185,6 +185,7 @@ def _perform(
                         retained_children=retained_children,
                         producer=env.producer,
                         timers=command.timers,
+                        environ=command.config.process_environment(),
                     )
                 )
                 if failure is not None:

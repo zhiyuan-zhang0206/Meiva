@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 from pathlib import Path
 from urllib.parse import urlsplit
 
@@ -84,6 +85,7 @@ def test_a_bundle_whose_login_cannot_be_proven_never_installs(
         machine=command_runtime.machine,
         macos=command_runtime.host.platform.system == "darwin",
         timers=SYSTEM_TIMERS,
+        environ=os.environ,
     )
     installed = unit.install_bundle(
         runner,

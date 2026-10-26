@@ -14,6 +14,7 @@
 from __future__ import annotations
 
 import dataclasses
+import os
 import socket
 from pathlib import Path
 
@@ -74,6 +75,7 @@ def test_start_remote_skips_local_instance_and_probes(
         machine=command_runtime.machine,
         macos=command_runtime.host.platform.system == "darwin",
         timers=SYSTEM_TIMERS,
+        environ=os.environ,
     )
 
     assert rc == 0
@@ -103,6 +105,7 @@ def test_start_remote_unreachable_fails_fast_with_dial_detail(
         machine=command_runtime.machine,
         macos=command_runtime.host.platform.system == "darwin",
         timers=SYSTEM_TIMERS,
+        environ=os.environ,
     )
 
     assert rc == 1
@@ -134,6 +137,7 @@ def test_start_remote_redis_unreachable_fails_after_the_database_answers(
         machine=command_runtime.machine,
         macos=command_runtime.host.platform.system == "darwin",
         timers=SYSTEM_TIMERS,
+        environ=os.environ,
     )
 
     assert rc == 1

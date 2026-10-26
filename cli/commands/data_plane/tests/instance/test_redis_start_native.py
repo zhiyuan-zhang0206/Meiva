@@ -8,6 +8,7 @@
 from __future__ import annotations
 
 import dataclasses
+import os
 from pathlib import Path
 from typing import cast
 from urllib.parse import urlsplit
@@ -67,6 +68,7 @@ def _start(
         tuning=StartTuning(bind_wait_s=bind_wait_s),
         macos=NATIVE_TEST_MACOS,
         timers=SYSTEM_TIMERS,
+        environ=os.environ,
     )
 
 
@@ -197,6 +199,7 @@ def test_a_foreign_redis_keeps_its_acl_and_config(
                 tuning=StartTuning(bind_wait_s=0.0),
                 macos=NATIVE_TEST_MACOS,
                 timers=SYSTEM_TIMERS,
+                environ=os.environ,
             )
             assert rc == 1
             assert redis_command(client, "ACL", "LIST") == before
