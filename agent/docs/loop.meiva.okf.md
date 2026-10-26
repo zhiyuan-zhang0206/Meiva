@@ -40,7 +40,8 @@ fresh-input invocation. A later generation never reconstructs an interrupted tur
 
 ## Entry points
 
-- `services/agent_runner/agent_host/daemon.py` — startup, health and finite DB renewal.
+- `services/agent_runner/agent_host/daemon.py` — startup, serving and shutdown wiring.
+- `services/agent_runner/agent_host/host_beat.py` — the host beat: liveness, corpse reaping, turn-progress publication and finite DB renewal.
 - `services/agent_runner/agent_host/dispatcher.py` — wake scheduling and single-flight.
 - `services/agent_runner/agent_host/host.py` — admission, one-shot work and settlement.
 - `services/agent_runner/agent_host/invocation/__init__.py` — completed-invocation settlement and lifecycle apply.

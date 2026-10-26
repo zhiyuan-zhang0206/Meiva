@@ -1,5 +1,8 @@
-exports = ["admission.py", "pending_wakes.py", "turn_gates.py", "wake_screening.py"]
+exports = ["admission.py", "pending_wakes.py", "stored_config.py", "turn_gates.py", "wake_screening.py"]
 
 [purity]
 "__init__.py" = "strict"
 "turn_gates.py" = "strict"
+
+[uses]
+"wake_screening.py" = ["stored_config.py"]

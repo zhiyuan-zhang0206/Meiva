@@ -455,7 +455,7 @@ EVENTS: dict[str, EventSpec] = {
         tier="anomaly",
         site=(
             "services/supervision/meiva_root/daemon.py:RootRetirement.retire; "
-            "services/agent_runner/agent_host/daemon.py:require_helper_parent_chain"
+            "services/agent_runner/agent_host/host_beat.py:require_helper_parent_chain"
         ),
     ),
     "root_restart_failed": telemetry_event(
