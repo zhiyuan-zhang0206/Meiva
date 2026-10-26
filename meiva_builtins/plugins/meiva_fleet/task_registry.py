@@ -235,13 +235,12 @@ def publish_creation(committed: TaskPublication | None) -> None:
     # meiva:note
     # Deferred imports keep the psycopg stack off plugin autoload (task #3816).
     from base import telemetry
-    from base.events.live import announce, bus
+    from base.events.live import announce
+    from meiva.sdk_surface import settings as sdk_settings
 
     for event in publication_events(committed):
         telemetry.emit_prepared(event)
-    announce.publish_task_created_sync(
-        bus.EventBus.from_settings(), committed.actor, committed.task_id
-    )
+    announce.publish_task_created_sync(sdk_settings.bus(), committed.actor, committed.task_id)
 
 
 def create_and_assign(
@@ -545,13 +544,12 @@ def publish_update(committed: TaskPublication | None) -> None:
     # meiva:note
     # Deferred imports keep the psycopg stack off plugin autoload (task #3816).
     from base import telemetry
-    from base.events.live import announce, bus
+    from base.events.live import announce
+    from meiva.sdk_surface import settings as sdk_settings
 
     for event in publication_events(committed):
         telemetry.emit_prepared(event)
-    announce.publish_task_updated_sync(
-        bus.EventBus.from_settings(), committed.actor, committed.task_id
-    )
+    announce.publish_task_updated_sync(sdk_settings.bus(), committed.actor, committed.task_id)
     if committed.closed_title is not None:
         _log_closed(committed.actor, committed.task_id, committed.closed_title)
 

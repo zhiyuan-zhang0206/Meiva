@@ -18,6 +18,7 @@ spelling).
 
 from __future__ import annotations
 
+import random
 import socket
 from dataclasses import dataclass
 
@@ -35,6 +36,23 @@ class AuthRetryPolicy:
 
 
 DEFAULT_AUTH_RETRY_POLICY = AuthRetryPolicy()
+
+
+# meiva:note
+# The ACL-transition retry a client or a publisher runs: the schedule's tuning values and the
+# jitter source that spreads a restarted fleet's retries. The process root builds one random
+# generator and hands it to the bus; scheduling jitter is not a secret, so the generator is a
+# plain `random.Random`.
+class AuthRetry:
+    def __init__(self, policy: AuthRetryPolicy, *, rng: random.Random) -> None:
+        self.policy = policy
+        self._rng = rng
+
+    # meiva:note
+    # The next jitter sample, in [0, 1): `compute_auth_retry_delay` places the delay between half
+    # the exponential cap and the cap by it.
+    def draw(self) -> float:
+        return self._rng.random()
 
 
 def compute_auth_retry_delay(
@@ -59,31 +77,6 @@ def compute_auth_retry_delay(
     clamped = max(0.0, min(1.0, jitter_sample))
     jittered = (exponential_cap / 2.0) * (1.0 + clamped)
     return max(0.0, min(jittered, exponential_cap, remaining_s))
-
-
-def plan_auth_retry_delays(
-    *,
-    failures: int,
-    jitter_sample: float = 1.0,
-    policy: AuthRetryPolicy = DEFAULT_AUTH_RETRY_POLICY,
-) -> list[float]:
-    delays: list[float] = []
-    waited_s = 0.0
-    for failure_count in range(1, failures + 1):
-        if failure_count >= policy.max_attempts:
-            break
-        delay_s = compute_auth_retry_delay(
-            failure_count=failure_count,
-            waited_s=waited_s,
-            elapsed_s=waited_s,
-            jitter_sample=jitter_sample,
-            policy=policy,
-        )
-        if delay_s <= 0:
-            break
-        delays.append(delay_s)
-        waited_s += delay_s
-    return delays
 
 
 def should_warn_publish_failure(
