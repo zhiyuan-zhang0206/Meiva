@@ -2,6 +2,3 @@
 "memory_indexer" = ["search_service.py", "store_backend.py", "test_memory_indexer.py"]
 "test_memory_indexer.py" = ["store_backend.py"]
 "test_numpy_backend_memory_search.py" = ["search_service.py"]
-
-[debt.first-party-patch]
-"test_memory_indexer.py#monkeypatch.setattr base.daemon.health.time" = 3

@@ -23,9 +23,6 @@ from services.derived.memory_indexer.embeddings.tests.test_embeddings import (
     embedding_server,
 )
 from services.derived.memory_indexer.embeddings.tests.test_embeddings import (
-    pytestmark as pytestmark,
-)
-from services.derived.memory_indexer.embeddings.tests.test_embeddings import (
     trickle_server as trickle_server,
 )
 
@@ -57,18 +54,13 @@ def test_factory_unknown_backend_fails_fast(model_catalog: ModelCatalog) -> None
 @pytest.mark.parametrize("mode", ["sync", "async"])
 @pytest.mark.parametrize("attempts", [1, 3])
 def test_embed_trickle_total_deadline(
-    monkeypatch: pytest.MonkeyPatch,
     trickle_server: tuple[str, list[float]],
     mode: str,
     attempts: int,
     model_catalog: ModelCatalog,
 ) -> None:
-    from base.host.net import resilience
-
     endpoint, requests = trickle_server
     timeout = 0.25
-    monkeypatch.setattr(resilience, "retry_sleep", time.sleep)
-    monkeypatch.setattr(resilience, "retry_asleep", asyncio.sleep)
     policy = Policy(
         max_attempts=attempts,
         backoff=ExponentialBackoff(base=0.001, factor=1, cap=0.001),
@@ -108,16 +100,11 @@ def test_embed_trickle_total_deadline(
 @pytest.mark.parametrize("mode", ["sync", "async"])
 @pytest.mark.parametrize("attempts", [1, 3])
 def test_embed_compressed_trickle_deadline(
-    monkeypatch: pytest.MonkeyPatch,
     attempts: int,
     mode: str,
     model_catalog: ModelCatalog,
 ) -> None:
-    from base.host.net import resilience
-
     timeout = 0.2
-    monkeypatch.setattr(resilience, "retry_sleep", time.sleep)
-    monkeypatch.setattr(resilience, "retry_asleep", asyncio.sleep)
     policy = Policy(
         max_attempts=attempts,
         backoff=ExponentialBackoff(base=0.001, factor=1, cap=0.001),
@@ -159,7 +146,6 @@ def test_embed_compressed_trickle_deadline(
 @pytest.mark.parametrize("framing", ["extension", "trailer"])
 @pytest.mark.parametrize("attempts", [1, 3])
 def test_embed_framing_drip_deadline(
-    monkeypatch: pytest.MonkeyPatch,
     mode: str,
     framing: str,
     attempts: int,
@@ -168,8 +154,6 @@ def test_embed_framing_drip_deadline(
     from base.host.net import resilience
 
     timeout = 0.2
-    monkeypatch.setattr(resilience, "retry_sleep", time.sleep)
-    monkeypatch.setattr(resilience, "retry_asleep", asyncio.sleep)
     classified: list[Exception] = []
 
     def classify(exc: Exception) -> bool:

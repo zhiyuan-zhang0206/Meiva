@@ -18,12 +18,11 @@ from __future__ import annotations
 import time
 from collections.abc import Callable, Sequence
 from pathlib import Path
-from types import SimpleNamespace
+from typing import cast
 
 import numpy as np
 import pytest
 
-from base.daemon import health
 from base.daemon.health import Liveness
 from base.packages.plugin_providers import build_model_catalog
 from services.derived.memory_indexer import config, daemon
@@ -373,13 +372,30 @@ class _RecordingBackend(MemorySearchBackend):
             self.rows[path, kind, idx] = (mtime, hash_, FINGERPRINT)
 
 
-def test_process_paths_beats_per_embed_batch(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, *, watched_root: Path
-) -> None:
+class _ManualLiveness:
+    def __init__(self, timeout_s: float, monotonic: Callable[[], float]) -> None:
+        self._timeout_s = timeout_s
+        self._monotonic = monotonic
+        self._last = monotonic()
+
+    def beat(self) -> None:
+        self._last = self._monotonic()
+
+    def stale_for(self) -> float:
+        return self._monotonic() - self._last
+
+    def is_alive(self) -> bool:
+        return self.stale_for() <= self._timeout_s
+
+
+def _manual_liveness(timeout_s: float, monotonic: Callable[[], float]) -> Liveness:
+    return cast(Liveness, _ManualLiveness(timeout_s, monotonic))
+
+
+def test_process_paths_beats_per_embed_batch(tmp_path: Path, *, watched_root: Path) -> None:
     """Every batch gets its own beat, even when their total exceeds the ceiling."""
     now = 0.0
-    monkeypatch.setattr(health, "time", SimpleNamespace(monotonic=lambda: now))
-    liveness = Liveness(liveness_timeout())
+    liveness = _manual_liveness(liveness_timeout(), lambda: now)
     batch_duration = 100.0
     indexer_config = MemoryIndexerConfig(batch_size=2)
     paths: set[Path] = set()
@@ -411,14 +427,12 @@ def test_process_paths_beats_per_embed_batch(
 @pytest.mark.parametrize("fail_last_batch", [False, True])
 def test_process_paths_beats_during_commit(
     tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
     fail_last_batch: bool,
     watched_root: Path,
 ) -> None:
     """The final embed, cleanup and upsert cannot share a beat-free interval."""
     now = 0.0
-    monkeypatch.setattr(health, "time", SimpleNamespace(monotonic=lambda: now))
-    liveness = Liveness(liveness_timeout())
+    liveness = _manual_liveness(liveness_timeout(), lambda: now)
     durations = {"delete_stale_rows": 5.0, "upsert_many": 300.0}
 
     def spend(op: str) -> None:
@@ -456,13 +470,10 @@ def test_process_paths_beats_during_commit(
     assert backend.calls == ["delete_stale_rows", "upsert_many"]
 
 
-def test_process_paths_beats_per_delete(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, *, watched_root: Path
-) -> None:
+def test_process_paths_beats_per_delete(tmp_path: Path, *, watched_root: Path) -> None:
     """A delete-only drain batch may exceed the ceiling while each delete is timely."""
     now = 0.0
-    monkeypatch.setattr(health, "time", SimpleNamespace(monotonic=lambda: now))
-    liveness = Liveness(liveness_timeout())
+    liveness = _manual_liveness(liveness_timeout(), lambda: now)
 
     def spend(op: str) -> None:
         nonlocal now

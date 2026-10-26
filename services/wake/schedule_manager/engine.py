@@ -435,8 +435,8 @@ def run_python_script(
     # afterwards (2026-09-22: the daily debt sweep's argparse rejected the
     # leaked id and exited 2 on every launch, tripping the crash breaker
     # before its first fire).
-    runner_argv = sys.argv
-    sys.argv = [str(script_path)]
+    runner_argv = sys.argv[:]
+    sys.argv[:] = [str(script_path)]
     try:
         boot.ensure_plugins_loaded(
             config=root.plugins.config,
@@ -449,7 +449,7 @@ def run_python_script(
             init_globals={"MEIVA_SCHEDULE_INPUTS": root.inputs},
         )
     finally:
-        sys.argv = runner_argv
+        sys.argv[:] = runner_argv
         primary = sys.exc_info()[1]
         try:
             guard.close()

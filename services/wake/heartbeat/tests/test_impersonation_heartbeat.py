@@ -248,20 +248,29 @@ def test_sdk_attachment_can_pause_heartbeat(
     redis_url: str,
     pool: ConnectionPool,
     db_conn: psycopg.Connection,
-    monkeypatch: pytest.MonkeyPatch,
+    database: Database,
     config_authority: ConfigAuthority,
-    model_installation: Installation,
+    sdk_model_owner: Installation,
     *,
     database_gate: ProcessDbGate,
     machine_identity: MachineIdentityReader,
 ):
+    from typing import TypeGuard
+
+    from langgraph.checkpoint.base import empty_checkpoint
+    from langgraph.checkpoint.postgres import PostgresSaver
+    from psycopg import Connection
+    from psycopg.rows import DictRow, dict_row
+
     import meiva
     from base.agents.context.external_attachment import plugin_state_codec
-    from base.agents.context.external_attachment.state_schema import BaseAgentState
     from meiva import impersonation
     from meiva.tests.fixtures.pin_agent import pin_agent
 
-    monkeypatch.setattr(meiva, "__plugin_installation__", model_installation, raising=False)
+    def _as_dict_row_conn(value: object) -> TypeGuard[Connection[DictRow]]:
+        return isinstance(value, Connection)
+
+    _ = sdk_model_owner
 
     lease = active_lease(
         db_conn,
@@ -271,13 +280,16 @@ def test_sdk_attachment_can_pause_heartbeat(
     )
     pin_agent(None)
 
-    def snapshot(
-        _agent_id: int, *, database: Database
-    ) -> tuple[BaseAgentState, dict[str, Any], None]:
-        assert isinstance(database, Database)
-        return BaseAgentState(), {}, None
-
-    monkeypatch.setattr(plugin_state_codec, "load_snapshot", snapshot)
+    with database.connect(autocommit=True) as conn:
+        assert _as_dict_row_conn(conn)
+        conn.row_factory = dict_row
+        saver = PostgresSaver(conn=conn, serde=plugin_state_codec.serializer())
+        saver.put(
+            {"configurable": {"thread_id": str(lease["agent_id"]), "checkpoint_ns": ""}},
+            empty_checkpoint(),
+            {"source": "input", "step": 0, "parents": {}},
+            {},
+        )
     with impersonation.attach(lease["id"]):
         meiva.self.pause_heartbeat(1800)
     assert lease["agent_id"] not in selected(pool)
