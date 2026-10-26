@@ -12,6 +12,7 @@ from base.events.notifications.audit import run_audit
 from base.events.notifications.publish import announce_sync, deliver_sync
 from base.events.notifications.store import latest_id_sync, read_overrides_sync, recent_sync
 from gateway.extensions.notification_categories import declared_categories
+from gateway.http.config import gateway_clock
 
 router = APIRouter()
 
@@ -202,8 +203,7 @@ async def get_notifications(
     )
 
 
-def _audit_clock_inputs(tz: str | None, now: datetime | None) -> tuple[str, datetime]:
-    clock = Clock.from_settings()
+def _audit_clock_inputs(tz: str | None, now: datetime | None, clock: Clock) -> tuple[str, datetime]:
     return tz or clock.timezone, now or clock.now()
 
 
@@ -227,7 +227,7 @@ async def get_notification_audit(
 ) -> NotificationAuditResponse:
     if now is not None and now.tzinfo is None:
         raise HTTPException(status_code=422, detail="now needs a UTC offset")
-    tz_name, audit_now = _audit_clock_inputs(tz, now)
+    tz_name, audit_now = _audit_clock_inputs(tz, now, gateway_clock(request))
     pool = request.app.state.db_pool
     catalog = await asyncio.to_thread(declared_categories)
     try:

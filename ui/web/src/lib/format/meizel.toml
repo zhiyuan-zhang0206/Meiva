@@ -1,4 +1,4 @@
-exports = ["clipboard.ts", "display-limits.ts", "format-number.ts", "format-price.ts", "inbound-source.ts", "interaction-timing.ts", "item-summary.ts", "time.ts", "use-now.ts", "use-time-format.ts", "utils.ts"]
+exports = ["clipboard.ts", "display-limits.ts", "format-number.ts", "format-price.ts", "inbound-source.ts", "interaction-timing.ts", "item-summary.ts", "time.ts", "now", "use-time-format.ts", "utils.ts"]
 
 [uses]
 "display-limits.test.ts" = ["display-limits.ts"]

@@ -19,7 +19,7 @@ from fastapi import APIRouter, HTTPException, Request
 from psycopg_pool import ConnectionPool
 
 from base.agents.tasks.notes import task_note_line
-from base.clock import SYSTEM_TIMERS, Clock
+from base.clock import Clock
 from base.cluster import machines
 from base.db import Database
 from base.db.transaction import write_transaction
@@ -27,7 +27,7 @@ from base.events.live.bus import EventBus
 from base.log import logger
 from gateway.agents.launch import forward
 from gateway.cluster.schemas import MachinePauseRequest, MachinePauseResponse, MachineResumeResponse
-from gateway.http.config import gateway_config
+from gateway.http.config import gateway_clock
 from ops.lifecycle import force_mark_terminated
 
 router = APIRouter()
@@ -183,7 +183,7 @@ async def pause_cluster_machine(
         machines.pause(request.app.state.db, name, reason=req.reason)
         exists, paused_at, pause_reason = await asyncio.to_thread(_read_machine_row, pool, name)
 
-    clock = Clock(gateway_config(request).clock, timers=SYSTEM_TIMERS)
+    clock = gateway_clock(request)
     reassigned = await asyncio.to_thread(_drain_tasks_blocking, pool, name, clock)
 
     agent_rows = await asyncio.to_thread(_list_agent_rows_for_pause_blocking, pool, name)

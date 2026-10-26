@@ -14,6 +14,7 @@ import random
 import re
 from contextlib import suppress
 from dataclasses import dataclass
+from datetime import datetime
 from pathlib import Path
 from typing import Literal
 
@@ -222,6 +223,7 @@ def current_session_fact(
     secret: str,
     *,
     home: Path,
+    now: datetime,
     cache: AcceptanceCache | None = None,
 ) -> str | None:
     """The credential fact of a valid session whose minting credential is
@@ -231,7 +233,7 @@ def current_session_fact(
     if mint is None:
         return None
     mints = session_mints(keys, secret, home=home, cache=cache)
-    if not sessions.is_valid(session_id, admitted=mints):
+    if not sessions.is_valid(session_id, admitted=mints, now=now):
         return None
     return mints[mint]
 

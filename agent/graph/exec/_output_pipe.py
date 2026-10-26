@@ -9,7 +9,7 @@ import os
 import select
 import subprocess
 
-from base.clock import SYSTEM_TIMERS
+from base.clock import Timers
 
 from ._stream import StreamingTextIO
 
@@ -17,12 +17,15 @@ from ._stream import StreamingTextIO
 class ExecOutputPipe:
     """One merged output pipe; EOF, rather than a timed wait, settles it."""
 
-    def __init__(self, proc: subprocess.Popen[bytes], stream: StreamingTextIO) -> None:
+    def __init__(
+        self, proc: subprocess.Popen[bytes], stream: StreamingTextIO, timers: Timers
+    ) -> None:
         if proc.stdout is None:
             raise RuntimeError("exec child has no output pipe")
         self.stdout = proc.stdout
         self.descriptor = self.stdout.fileno()
         self.stream = stream
+        self.timers = timers
         self.closed = False
         self.error: BaseException | None = None
         self.loop: asyncio.AbstractEventLoop | None = None
@@ -69,20 +72,20 @@ class ExecOutputPipe:
 
     async def finish(self, timeout: float) -> None:
         """Pump the bounded tail; a retained writer remains explicitly unresolved."""
-        deadline = SYSTEM_TIMERS.monotonic() + timeout
+        deadline = self.timers.monotonic() + timeout
         self.pump()
         while not self.closed:
             self.pump()
-            if self.closed or SYSTEM_TIMERS.monotonic() >= deadline:
+            if self.closed or self.timers.monotonic() >= deadline:
                 return
-            await asyncio.sleep(min(0.01, max(0, deadline - SYSTEM_TIMERS.monotonic())))
+            await self.timers.asleep(min(0.01, max(0, deadline - self.timers.monotonic())))
 
     def finish_now(self, timeout: float) -> None:
         """Bounded synchronous tail for Runner-wide cancellation of async owners."""
-        deadline = SYSTEM_TIMERS.monotonic() + timeout
+        deadline = self.timers.monotonic() + timeout
         self.pump()
         while not self.closed:
             self.pump()
-            if self.closed or SYSTEM_TIMERS.monotonic() >= deadline:
+            if self.closed or self.timers.monotonic() >= deadline:
                 return
-            select.select([self.stdout], [], [], max(0, deadline - SYSTEM_TIMERS.monotonic()))
+            select.select([self.stdout], [], [], max(0, deadline - self.timers.monotonic()))
