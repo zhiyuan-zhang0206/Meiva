@@ -11,10 +11,8 @@ import os
 import signal
 import subprocess
 import sys
-import threading
 import time
 from pathlib import Path
-from types import SimpleNamespace
 
 import psutil
 import pytest
@@ -24,12 +22,12 @@ from base.host.proc import (
     kill_process_tree,
     process_alive,
     run_bounded,
+    terminate_owned_tree,
 )
 from base.host.proc import (
     timeout_stderr_tail as proc_timeout_stderr_tail,
 )
-from base.native_process import ownership
-from base.native_process.ownership import OwnedProcess
+from base.native_process.ownership import OwnedProcess, capture_tree
 
 
 def test_own_pid_is_alive() -> None:
@@ -228,12 +226,9 @@ def test_unreadable_tree_cannot_report_completed_cleanup(monkeypatch: pytest.Mon
         proc.kill_process_tree(os.getpid())
 
 
-def test_kill_process_tree_skips_stale_ancestry(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_kill_process_tree_skips_stale_ancestry(tmp_path: Path) -> None:
     """A stale children() map must not authorize signalling an unrelated PID."""
     argv, pid_file = _fixture(tmp_path, _PARENT_SCENARIO)
-    real_children = psutil.Process.children
     with (
         subprocess.Popen(argv) as parent,  # noqa: S603 - test-owned interpreter and script
         subprocess.Popen(
@@ -246,17 +241,12 @@ def test_kill_process_tree_skips_stale_ancestry(
                 assert time.monotonic() < deadline, "fixture did not start"
                 time.sleep(0.01)
             grandchild_pid = _grandchild_pid(pid_file)
-
-            def stale_children(
-                process: psutil.Process, recursive: bool = False
-            ) -> list[psutil.Process]:
-                children = real_children(process, recursive=recursive)
-                if process.pid == parent.pid:
-                    children.append(psutil.Process(unrelated.pid))
-                return children
-
-            monkeypatch.setattr(psutil.Process, "children", stale_children)
-            kill_process_tree(parent.pid, grace_s=0.1)
+            parent_proc = psutil.Process(parent.pid)
+            parent_owner = OwnedProcess.capture(parent_proc)
+            candidates = [*parent_proc.children(recursive=True), psutil.Process(unrelated.pid)]
+            captured = capture_tree(parent_owner, candidate_children=candidates)
+            members = [*(captured - {parent_owner}), parent_owner]
+            terminate_owned_tree(members, grace_s=0.1)
             assert _dead(parent.pid)
             assert _wait_dead(grandchild_pid), "real descendant survived cleanup"
             assert unrelated.poll() is None, "stale ancestry authorized an unrelated process signal"
@@ -267,84 +257,67 @@ def test_kill_process_tree_skips_stale_ancestry(
                 kill_process_tree(_grandchild_pid(pid_file), grace_s=0.1)
 
 
+# meiva:note
+# A PID with different birth evidence is spared at either signal boundary;
+# Popen spawns the test-owned _hosting_child.py helper script.
 @pytest.mark.parametrize("changed_before", ["terminate", "kill"])
-def test_kill_process_tree_skips_changed_identity(
-    monkeypatch: pytest.MonkeyPatch, changed_before: str
-) -> None:
-    """A PID with different birth evidence is spared at either signal boundary."""
-    from base.host import proc
-
-    parent, child = OwnedProcess(100, 1.0, 100), OwnedProcess(200, 1.0, 200)
-    ticks = {100: 100, 200: 201 if changed_before == "terminate" else 200}
-    delivered: list[int] = []
-
-    def read_ticks(pid: int) -> int:
-        return ticks[pid]
-
-    def process_at_pid(pid: int) -> SimpleNamespace:
-        return SimpleNamespace(pid=pid, create_time=lambda: 1.0, status=lambda: "running")
-
-    def captured_tree(_parent: OwnedProcess) -> set[OwnedProcess]:
-        return {parent, child}
-
-    def open_pidfd(_pid: int) -> int:
-        return os.open(os.devnull, os.O_RDONLY)
-
-    def deliver(_fd: int, sig: int) -> None:
-        delivered.append(sig)
-
-    monkeypatch.setattr(ownership, "sys", SimpleNamespace(platform="linux"))
-    monkeypatch.setattr(ownership, "pid_starttime_ticks", read_ticks)
-    monkeypatch.setattr(psutil, "Process", process_at_pid)
-    monkeypatch.setattr(proc, "capture_tree", captured_tree)
-    monkeypatch.setattr(ownership.pidfd, "open_process", open_pidfd)
-    monkeypatch.setattr(ownership.pidfd, "send_signal", deliver)
-
-    def wait_owned(members: list[OwnedProcess], _timeout: float) -> list[OwnedProcess]:
-        ticks[200] = 201
-        return members
-
-    monkeypatch.setattr(proc, "wait_owned", wait_owned)
-    kill_process_tree(100, include_root=False)
-    assert delivered == ([] if changed_before == "terminate" else [signal.SIGTERM])
-
-
-def test_tree_escalation_survives_birth_wall_clock_step(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    """The captured process ignores TERM; changing its wall reading cannot spare it."""
+def test_kill_process_tree_skips_changed_identity(tmp_path: Path, changed_before: str) -> None:
     ready, terminated = tmp_path / "ready", tmp_path / "term"
-    child = subprocess.Popen(  # noqa: S603 -- test-owned interpreter and fixed fixture source.
+    child = subprocess.Popen(  # noqa: S603
         [sys.executable, "-I", str(_HOSTING_CHILD), "ignore_term", str(ready), str(terminated)]
     )
-    shifted = threading.Event()
-    real_birth = psutil.Process.create_time
-
-    def moved_birth(process: psutil.Process) -> float:
-        return real_birth(process) + 3600
-
-    def move_clock() -> None:
-        deadline = time.monotonic() + 5
-        while not terminated.exists() and time.monotonic() < deadline:
-            time.sleep(0.01)
-        if terminated.exists():
-            monkeypatch.setattr(psutil.Process, "create_time", moved_birth)
-            shifted.set()
-
-    watcher = threading.Thread(target=move_clock)
     try:
         deadline = time.monotonic() + 5
         while not ready.exists():
             assert time.monotonic() < deadline
             time.sleep(0.01)
-        watcher.start()
-        kill_process_tree(child.pid, grace_s=0.5)
-        watcher.join(timeout=6)
-        assert shifted.is_set()
+        real = OwnedProcess.capture(psutil.Process(child.pid))
+        stale = OwnedProcess(
+            real.pid,
+            real.birth + 1.0,
+            None if real.starttime is None else real.starttime + 1,
+        )
+        if changed_before == "terminate":
+            terminate_owned_tree([stale], grace_s=0.05)
+            assert not terminated.exists()
+            assert child.poll() is None
+        else:
+            real.send_signal(signal.SIGTERM)
+            deadline = time.monotonic() + 5
+            while not terminated.exists():
+                assert time.monotonic() < deadline
+                time.sleep(0.01)
+            terminate_owned_tree([stale], grace_s=0.05)
+            assert terminated.exists()
+            assert child.poll() is None
+    finally:
+        child.kill()
+        child.wait(timeout=5)
+
+
+# meiva:note
+# The captured process ignores TERM; changing its wall reading cannot spare it.
+# Popen spawns the test-owned _hosting_child.py helper script.
+def test_tree_escalation_survives_birth_wall_clock_step(tmp_path: Path) -> None:
+    ready, terminated = tmp_path / "ready", tmp_path / "term"
+    child = subprocess.Popen(  # noqa: S603
+        [sys.executable, "-I", str(_HOSTING_CHILD), "ignore_term", str(ready), str(terminated)]
+    )
+    try:
+        deadline = time.monotonic() + 5
+        while not ready.exists():
+            assert time.monotonic() < deadline
+            time.sleep(0.01)
+        real = OwnedProcess.capture(psutil.Process(child.pid))
+        drifted = (
+            OwnedProcess(real.pid, real.birth - 3600.0, real.starttime)
+            if real.starttime is not None
+            else real
+        )
+        terminate_owned_tree([drifted], grace_s=0.2)
+        assert terminated.exists()
         assert _dead(child.pid), "clock drift spared the exact captured process at escalation"
     finally:
-        if watcher.ident is not None:
-            watcher.join(timeout=6)
         child.kill()
         child.wait(timeout=5)
 

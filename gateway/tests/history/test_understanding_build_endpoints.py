@@ -29,7 +29,7 @@ from base.config.service_read import ConfigAuthority
 from base.config.tests.configuration import snapshot_process_config
 from base.lm.catalog import ModelCatalog
 from base.lm.context_budget import UnknownModelWindowError
-from base.lm.pricing import PriceBook, plugin_model_price
+from base.lm.pricing import PriceBook, PriceRates, plugin_model_price
 from base.packages.plugin_providers import build_model_catalog
 from gateway.agents.history import understanding as module
 from gateway.agents.history.configuration import timeline_read, understanding_read
@@ -53,11 +53,13 @@ _CHUNK_RATIO = 1000 / 374_000
 def _catalog() -> ModelCatalog:
     flat = plugin_model_price(
         _MODEL,
-        cache_miss=0.15,
-        cache_hit=0.003,
-        output=0.6,
-        source_url="https://example.test/prices",
-        source_checked_at="2026-10-05",
+        PriceRates(
+            cache_miss=0.15,
+            cache_hit=0.003,
+            output=0.6,
+            source_url="https://example.test/prices",
+            source_checked_at="2026-10-05",
+        ),
     )
     return replace(build_model_catalog(), prices=PriceBook({}, {_MODEL: flat}))
 

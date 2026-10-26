@@ -1,6 +1,6 @@
 __description__ = "Auto-compact history when token count exceeds threshold"
 
-from datetime import UTC, datetime
+from datetime import datetime
 from typing import Any
 
 from langchain_core.language_models.chat_models import BaseChatModel
@@ -312,7 +312,14 @@ async def auto_compact_for_llm(
     )
     agent_id = agent_id_from_config(config)
     publisher = runtime.context.event_publisher
-    compact_run_id = emit_compact_started(publisher, agent_id, mode=CompactionMode.AUTO)
+    started_at = runtime.context.require_clock().now()
+    compact_run_id = emit_compact_started(
+        publisher,
+        agent_id,
+        compact_id=f"auto-{state.compact.version}-{started_at.isoformat()}",
+        started_at=started_at,
+        mode=CompactionMode.AUTO,
+    )
 
     try:
         async with subscribe_interrupt(
@@ -331,12 +338,24 @@ async def auto_compact_for_llm(
                 interrupted,
             )
     except ModelInterruptedError as interrupt:
-        emit_compact_finished(publisher, agent_id, compact_run_id, status=CompactionStatus.REPLACED)
+        emit_compact_finished(
+            publisher,
+            agent_id,
+            compact_run_id,
+            finished_at=runtime.context.require_clock().now(),
+            status=CompactionStatus.REPLACED,
+        )
         if publisher is not None:
             publisher.emit(Cancelled(agent_id=agent_id).model_dump_json())
         return {**interrupt_halt(interrupt.reason), "goto": CLAIM}
     except BaseException:
-        emit_compact_finished(publisher, agent_id, compact_run_id, status=CompactionStatus.FAILURE)
+        emit_compact_finished(
+            publisher,
+            agent_id,
+            compact_run_id,
+            finished_at=runtime.context.require_clock().now(),
+            status=CompactionStatus.FAILURE,
+        )
         raise
 
     logger.info(
@@ -402,7 +421,9 @@ async def auto_compact_for_llm(
         ),
     )
     transition["compact"] = state.compact.next_segment()
-    emit_compact_finished(publisher, agent_id, compact_run_id, status=CompactionStatus.SUCCESS)
+    emit_compact_finished(
+        publisher, agent_id, compact_run_id, finished_at=now, status=CompactionStatus.SUCCESS
+    )
     return transition
 
 
@@ -481,6 +502,7 @@ def compact_reminder_update(
     *,
     catalog: ModelCatalog,
     extensions: ExtensionRegistry,
+    now: datetime,
 ) -> dict[str, Any] | None:
     occupancy = _context_occupancy(state.messages)
     if (
@@ -512,7 +534,7 @@ def compact_reminder_update(
             system_note_message(
                 content=_reminder_content(agent, catalog=catalog, extensions=extensions),
                 tag=NoteTag.COMPACT_REMINDER,
-                created_at=datetime.now(UTC),
+                created_at=now,
             )
         ],
         "compact": compact.model_copy(
@@ -536,7 +558,11 @@ class _CompactReminderHook(Hook):
         ):
             return None
         return compact_reminder_update(
-            state, agent, catalog=catalog, extensions=runtime.context.plugin_registry()
+            state,
+            agent,
+            catalog=catalog,
+            extensions=runtime.context.plugin_registry(),
+            now=runtime.context.require_clock().now(),
         )
 
 

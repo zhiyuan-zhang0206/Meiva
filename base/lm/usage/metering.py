@@ -20,7 +20,7 @@ from langchain_core.messages import AIMessage, BaseMessage
 from langchain_core.outputs import LLMResult
 
 from base.lm.catalog import ModelCatalog
-from base.lm.usage import log_usage_from_message
+from base.lm.usage import UsageOptions, log_usage_from_message
 from base.log import logger
 from base.telemetry import ambient_agent_id, report_sink_failure
 
@@ -98,11 +98,13 @@ class LlmUsageMeter(BaseCallbackHandler):
                 message,
                 self._model,
                 catalog=self._catalog,
-                latency_ms=latency_ms,
                 usage_kind=DIRECT_USAGE_KIND,
-                for_agent_id=agent_id,
-                attribution="process" if agent_id is not None else "unattributed",
-                stamp_message=True,
+                options=UsageOptions(
+                    latency_ms=latency_ms,
+                    for_agent_id=agent_id,
+                    attribution="process" if agent_id is not None else "unattributed",
+                    stamp_message=True,
+                ),
             )
         except Exception as exc:
             self._report_failure(exc)

@@ -55,7 +55,7 @@ from base.lm.harness.process import (
     snapshot,
     wait_gone,
 )
-from base.lm.pricing import PriceBook, quote
+from base.lm.pricing import CacheTokens, PriceBook, quote
 
 # meiva:note
 # One session is one `kimi acp` connection with a single in-flight prompt,
@@ -475,8 +475,10 @@ class KimiSession(BaseHarnessSession[KimiConfig]):
             model,
             usage.input_tokens,
             usage.output_tokens,
-            usage.cache_read_input_tokens,
-            cache_write_5m=usage.cache_creation_input_tokens,
+            CacheTokens(
+                read=usage.cache_read_input_tokens,
+                write_5m=usage.cache_creation_input_tokens,
+            ),
             prices=self._prices,
         )
         return None if quoted is None else quoted.cost_usd

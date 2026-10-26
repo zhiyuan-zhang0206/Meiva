@@ -9,22 +9,26 @@
 from __future__ import annotations
 
 import asyncio
+import json
+from dataclasses import replace
+from datetime import datetime
 from pathlib import Path
 from typing import Any
 
-import httpx
 import pytest
 from fastapi import Request
 from pydantic import SecretStr
 
 from base.config import settings
-from base.lm import usage
+from base.host.net.tests.local_http import serve_asgi
+from base.lm.pricing import Rates
 from gateway.routers.memory_api import memory
 from gateway.schemas import MemorySearchRequest
 from gateway.tests.auth.gateway_config import gateway_test_client
 from gateway.tests.routers.memory_search.search_support import SearchRig, hit
 from gateway.tests.routers.memory_search.search_support import rig as rig
 from services.derived.memory_indexer.embeddings.base import EmbeddingAPIError
+from services.derived.memory_indexer.embeddings.gemini import DIM, GeminiEmbeddingProvider
 
 
 # meiva:note
@@ -309,41 +313,88 @@ class TestRequestValidation:
         assert resp.status_code == 422
 
 
-# meiva:note
-# The usage test drives the real Gemini provider: the endpoint is a module constant of the
-# provider, so the HTTP client and the usage meter are the two retained patches (needs services:
-# the endpoint as a provider value).
+class _FailingPriceLookup:
+    def __init__(
+        self,
+        catalog: object,
+        seen: list[object],
+        failure: Exception,
+    ) -> None:
+        self._catalog = catalog
+        self._seen = seen
+        self._failure = failure
+
+    def vendor(self, model: str) -> str | None:
+        del model
+        return None
+
+    def provenance(self, model: str) -> tuple[str, str] | None:
+        del model
+        return None
+
+    def rates_at(
+        self,
+        model: str,
+        at: datetime | None,
+        input_tokens: int | None,
+    ) -> Rates | None:
+        del model, at, input_tokens
+        self._seen.append(self._catalog)
+        raise self._failure
+
+
 @pytest.mark.parametrize("error_type", [RuntimeError, TypeError])
 async def test_query_usage_failure_propagates_without_network_replay(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, rig: SearchRig, error_type: type[Exception]
+    tmp_path: Path, rig: SearchRig, error_type: type[Exception]
 ) -> None:
-    from services.derived.memory_indexer.embeddings.gemini import DIM
-    from services.derived.memory_indexer.embeddings.tests.test_embeddings import AsyncClient
-
     rig.embedder.real = True
     rig.configure(gemini_api_key=SecretStr("test-key"))
     app = rig.asgi_app(tmp_path, permits=1)
-    fake = AsyncClient(vectors=[[1.0] * DIM], prompt_token_count=123)
-    monkeypatch.setattr(httpx, "AsyncClient", fake)
     failure = error_type("accounting invariant failed")
     seen: list[object] = []
+    lookup = _FailingPriceLookup(rig.catalog, seen, failure)
+    prices_any: Any = lookup
+    embed_catalog = replace(rig.catalog, prices=prices_any)
+    lookup._catalog = embed_catalog
+    payload = json.dumps(
+        {
+            "embeddings": [{"values": [1.0] * DIM}],
+            "usageMetadata": {"promptTokenCount": 123},
+        }
+    ).encode()
+    calls: list[int] = []
 
-    def fail_usage(*, catalog: object, **_kwargs: object) -> None:
-        seen.append(catalog)
-        raise failure
-
-    monkeypatch.setattr(usage, "log_usage_fields", fail_usage)
+    async def embed_endpoint(scope: Any, receive: Any, send: Any) -> None:
+        del scope
+        while (await receive()).get("more_body", False):
+            pass
+        calls.append(1)
+        await send(
+            {
+                "type": "http.response.start",
+                "status": 200,
+                "headers": [(b"content-type", b"application/json")],
+            }
+        )
+        await send({"type": "http.response.body", "body": payload})
 
     async def stays_connected() -> dict[str, str]:
         await asyncio.Event().wait()
         raise AssertionError("unreachable")
 
-    request = Request({"type": "http", "app": app}, stays_connected)
-    with pytest.raises(error_type) as caught:
-        await memory.post_memory_search(
-            request, MemorySearchRequest(query="hello", k=1, purpose="search")
+    with serve_asgi(embed_endpoint) as url:
+        app.state.memory_embedder = GeminiEmbeddingProvider(
+            embed_catalog,
+            timeout_s=app.state.gateway_config.memory_search.embedding_timeout,
+            api_key="test-key",
+            endpoint=url,
         )
+        request = Request({"type": "http", "app": app}, stays_connected)
+        with pytest.raises(error_type) as caught:
+            await memory.post_memory_search(
+                request, MemorySearchRequest(query="hello", k=1, purpose="search")
+            )
+        assert len(calls) == 1
     assert caught.value is failure
-    assert seen == [rig.catalog]
-    assert fake.call_count == 1
+    assert seen == [embed_catalog]
     assert app.state.memory_search_gate._value == 1

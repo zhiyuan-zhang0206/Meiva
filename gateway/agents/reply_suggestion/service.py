@@ -19,7 +19,7 @@ from base.lm.decision.call import decide
 from base.lm.effort import ReasoningEffort
 from base.lm.errors import ErrorClass, classify_error, normalize_provider_transport_error
 from base.lm.factory import build_chat_model
-from base.lm.usage import log_usage_from_message
+from base.lm.usage import UsageOptions, log_usage_from_message
 from base.log import logger
 from gateway.agents.history.timeline import load_current_timeline_items
 from gateway.agents.reply_suggestion.cache import CACHE_ENTRIES, SuggestionCache
@@ -232,8 +232,10 @@ class ReplySuggestionService:
             response["raw"],
             policy.model,
             usage_kind=DRAFT_USAGE_KIND,
-            latency_ms=(time.monotonic() - started) * 1000,
-            for_agent_id=agent_id,
+            options=UsageOptions(
+                latency_ms=(time.monotonic() - started) * 1000,
+                for_agent_id=agent_id,
+            ),
             catalog=catalog,
         )
         stop, _ = classify_stop(response["raw"], stops=catalog.stops)

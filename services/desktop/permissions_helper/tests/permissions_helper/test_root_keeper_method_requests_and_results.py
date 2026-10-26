@@ -261,15 +261,13 @@ def test_truncated_response_raises(fake_helper) -> None:
         PermissionsHelperClient(fake_helper(raw=raw)).ping()  # pyright: ignore[reportUnknownArgumentType]
 
 
-def test_call_timeout_raises(fake_helper, monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(client, "CALL_TIMEOUT_S", 0.2)
-
+def test_call_timeout_raises(fake_helper: Callable[..., Path]) -> None:
     def raw(conn: socket.socket) -> None:
         read_line(conn)
         time.sleep(1.0)  # accept, never reply
 
     with pytest.raises(PermissionsHelperError, match="did not respond"):
-        PermissionsHelperClient(fake_helper(raw=raw)).ping()  # pyright: ignore[reportUnknownArgumentType]
+        PermissionsHelperClient(fake_helper(raw=raw), call_timeout_s=0.2).ping()
 
 
 def test_line_limit_guard(fake_helper) -> None:

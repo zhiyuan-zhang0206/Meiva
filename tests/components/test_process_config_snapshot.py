@@ -2,7 +2,7 @@ import pytest
 
 from base.clock import SYSTEM_TIMERS, Clock
 from base.clock.configuration import clock_config_from_boot
-from base.config import field_names, get_field, settings
+from base.config import field_names, get_field, set_field, settings
 from base.config.tests.configuration import snapshot_process_config
 from gateway.http.config import gateway_config_from_boot
 from tests.fixtures.gateway_config import gateway_test_app
@@ -15,7 +15,7 @@ def test_session_snapshot_preserves_timezone_origin(explicit: bool) -> None:
     original_fields = set(settings.general.model_fields_set)
     timezone = "Asia/Tokyo" if explicit else "America/Los_Angeles"
     try:
-        settings.general.timezone = timezone
+        set_field("timezone", timezone)
         if not explicit:
             settings.general.model_fields_set.discard("timezone")
         owner = snapshot_process_config()
@@ -29,7 +29,7 @@ def test_session_snapshot_preserves_timezone_origin(explicit: bool) -> None:
             original_fields | {"timezone"} if explicit else original_fields - {"timezone"}
         )
     finally:
-        settings.general.timezone = original_value
+        set_field("timezone", original_value)
         settings.general.model_fields_set.clear()
         settings.general.model_fields_set.update(original_fields)
 
@@ -40,7 +40,7 @@ def test_gateway_snapshot_preserves_all_values_and_timezone_origin(explicit: boo
     original_fields = set(settings.general.model_fields_set)
     timezone = "Asia/Tokyo" if explicit else "America/Los_Angeles"
     try:
-        settings.general.timezone = timezone
+        set_field("timezone", timezone)
         if not explicit:
             settings.general.model_fields_set.discard("timezone")
         values = {name: get_field(name) for name in field_names()}
@@ -57,6 +57,6 @@ def test_gateway_snapshot_preserves_all_values_and_timezone_origin(explicit: boo
             original_fields | {"timezone"} if explicit else original_fields - {"timezone"}
         )
     finally:
-        settings.general.timezone = original_value
+        set_field("timezone", original_value)
         settings.general.model_fields_set.clear()
         settings.general.model_fields_set.update(original_fields)

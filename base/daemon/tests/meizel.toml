@@ -5,6 +5,3 @@ exports = ["fakes.py", "health_support.py"]
 "test_health.py" = ["_health_helpers.py", "health_support.py"]
 "test_health_probe.py" = ["_health_helpers.py", "health_support.py", "probe_resources.py"]
 "test_http_transport.py" = ["_transport_import_child.py"]
-
-[debt.first-party-patch]
-"fakes.py#monkeypatch.setattr base.daemon.endpoints.ServiceEndpoints.from_settings" = 1

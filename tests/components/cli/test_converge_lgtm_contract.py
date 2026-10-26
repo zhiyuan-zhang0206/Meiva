@@ -7,7 +7,6 @@ from __future__ import annotations
 from collections.abc import Callable
 from pathlib import Path
 
-import pytest
 import yaml
 
 from base import config
@@ -56,7 +55,6 @@ def _render_configs(
 
 
 def test_native_backend_listen_hosts_are_settings_rendered_with_loopback_defaults(
-    monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
     operator_pipeline: Callable[[], EventPipeline],
     *,
@@ -95,25 +93,29 @@ def test_native_backend_listen_hosts_are_settings_rendered_with_loopback_default
     # meiva:note
     # The Prometheus unit's argv is `base.telemetry.lgtm_local.service_argv`, which reads the
     # process-wide listen host instead of taking it as a value; it is pinned here for the argv only.
-    monkeypatch.setattr(config.settings.observability, "lgtm_listen_host", "127.0.0.1")
-    prometheus_argv = service_argv(home, "prometheus")
-    assert "--web.listen-address=127.0.0.1:9090" in prometheus_argv
+    prior_host = config.get_field("lgtm_listen_host")
+    try:
+        config.set_field("lgtm_listen_host", "127.0.0.1")
+        prometheus_argv = service_argv(home, "prometheus")
+        assert "--web.listen-address=127.0.0.1:9090" in prometheus_argv
 
-    # A non-loopback setting flows through to the rendered listeners.
-    _render_configs(
-        repo,
-        native_dir,
-        home,
-        settings=lgtm_settings(observability=observability(lgtm_listen_host="10.0.0.5")),
-        producer=operator_pipeline,
-        machine=command_machine,
-    )
-    rendered_loki = (native_dir / "config/loki.yaml").read_text(encoding="utf-8")
-    assert "http_listen_address: 10.0.0.5" in rendered_loki
-    assert "grpc_listen_address: 10.0.0.5" in rendered_loki
-    monkeypatch.setattr(config.settings.observability, "lgtm_listen_host", "10.0.0.5")
-    prometheus_argv = service_argv(home, "prometheus")
-    assert "--web.listen-address=10.0.0.5:9090" in prometheus_argv
+        # A non-loopback setting flows through to the rendered listeners.
+        _render_configs(
+            repo,
+            native_dir,
+            home,
+            settings=lgtm_settings(observability=observability(lgtm_listen_host="10.0.0.5")),
+            producer=operator_pipeline,
+            machine=command_machine,
+        )
+        rendered_loki = (native_dir / "config/loki.yaml").read_text(encoding="utf-8")
+        assert "http_listen_address: 10.0.0.5" in rendered_loki
+        assert "grpc_listen_address: 10.0.0.5" in rendered_loki
+        config.set_field("lgtm_listen_host", "10.0.0.5")
+        prometheus_argv = service_argv(home, "prometheus")
+        assert "--web.listen-address=10.0.0.5:9090" in prometheus_argv
+    finally:
+        config.set_field("lgtm_listen_host", prior_host)
 
 
 def _assert_rendered_provisioning(

@@ -64,7 +64,7 @@ from base.lm.harness import (
     ReasoningDelta as BridgeReasoningDelta,
 )
 from base.lm.harness.engine import HarnessTurn, TurnEngine
-from base.lm.usage import log_usage_fields
+from base.lm.usage import UsageFields, log_usage_fields
 from base.log import logger
 
 HarnessGoto = Literal["claim"]
@@ -764,18 +764,16 @@ def log_turn_usage(ctx: MeivaContext, agent_id: int, model: str | None, turn: Ha
     )
     try:
         for step_usage, calls in entries:
-            log_usage_fields(
-                pricing_model,
+            fields = UsageFields(
                 tok_in=step_usage.input_tokens,
                 tok_out=step_usage.output_tokens,
                 tok_cached=step_usage.cache_read_input_tokens or None,
                 cache_write_5m=step_usage.cache_creation_input_tokens,
-                usage_kind="agent",
                 source=ctx.harness.value,
                 for_agent_id=agent_id,
                 calls=calls,
-                catalog=catalog,
             )
+            log_usage_fields(pricing_model, fields, usage_kind="agent", catalog=catalog)
     except Exception as error:
         # meiva:note
         # A bill that cannot be priced is a hole in an accounting row; the reply it

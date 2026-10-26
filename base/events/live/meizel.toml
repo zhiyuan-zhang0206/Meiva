@@ -18,9 +18,4 @@ exports = ["announce.py", "bus.py", "coalescer.py", "projection.py", "publisher.
 
 [debt.ambient-read]
 "bus.py#settings base.config.settings" = 1
-"redis_client.py#random random.uniform" = 1
 "redis_listener.py#settings base.config.settings" = 1
-
-[debt.any-collaborator]
-"redis_client.py#any AuthRetryAsyncRedis.execute_command.return" = 1
-"redis_client.py#any AuthRetrySyncRedis.execute_command.return" = 1

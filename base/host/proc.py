@@ -29,7 +29,7 @@ import psutil
 
 from base.native_process.ownership import OwnedProcess, capture_tree
 
-__all__ = ["CommandRunner", "run_bounded"]
+__all__ = ["CommandRunner", "run_bounded", "terminate_owned_tree"]
 
 # psutil exceptions that mean "the process is already gone / not ours to touch" —
 # expected during a teardown, not an error: between enumerating a tree and
@@ -252,13 +252,22 @@ def kill_process_tree(
     except psutil.NoSuchProcess:
         return
 
+    terminate_owned_tree(members, grace_s=grace_s)
+
+
+# meiva:note
+# Terminate captured tree `members`, wait up to `grace_s`, then hard-kill survivors.
+def terminate_owned_tree(
+    members: Sequence[OwnedProcess], *, grace_s: float = _TERMINATE_GRACE_S
+) -> None:
     for identity in members:
+        # meiva:note
         # A member that exited between enumeration and this line is the normal
         # case, not a failure — that race is the whole reason the set is
         # snapshotted rather than re-walked.
         with contextlib.suppress(*_GONE):
             identity.send_signal(signal.SIGTERM)
-    alive = wait_owned(members, grace_s)
+    alive = wait_owned(list(members), grace_s)
     if not alive:
         return
     for identity in alive:

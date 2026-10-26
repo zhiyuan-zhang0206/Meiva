@@ -1,2 +1,0 @@
-[debt.first-party-patch]
-"test_pooler_stop.py#monkeypatch.setattr base.cluster.port_preflight.strict_listeners_on" = 1

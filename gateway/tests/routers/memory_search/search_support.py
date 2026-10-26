@@ -14,9 +14,9 @@ import asyncio
 import json
 import threading
 import time
-from collections.abc import Generator
+from collections.abc import Generator, Mapping
 from contextlib import contextmanager
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import Any, Literal, cast
@@ -29,6 +29,14 @@ from fastapi import FastAPI
 from base.cluster.machine import MachineIdentityReader
 from base.host.db_authority.api import AcceptanceCache
 from base.lm.catalog import ModelCatalog
+from base.lm.catalog.decide.types import (
+    FALSE,
+    TRUE,
+    Decision,
+    DecisionBuildContext,
+    DecisionResult,
+    Question,
+)
 from base.lm.catalog.provider_keys import ProviderKeys
 from gateway.http.config import GatewayConfig
 from gateway.routers.memory_api import memory as memory_router
@@ -39,7 +47,6 @@ from gateway.tests.auth.gateway_config import (
     gateway_test_client,
     gateway_test_config,
 )
-from services.derived.memory_indexer import rerank
 from services.derived.memory_indexer.backends.base import ChunkHit
 from services.derived.memory_indexer.embeddings.base import EmbeddingProvider
 
@@ -195,6 +202,48 @@ class Judge:
         return next((p for marker, p in self.rules.items() if marker in state), 0.5)
 
 
+class _JudgeBinding:
+    def __init__(self, judge: Judge, ctx: DecisionBuildContext, catalog: ModelCatalog) -> None:
+        self._judge = judge
+        self._ctx = ctx
+        self._catalog = catalog
+
+    async def decide(self, state: str, questions: Mapping[str, Question]) -> DecisionResult:
+        question = questions["relevant"]
+        prob = await self._judge(
+            self._ctx.model,
+            state,
+            question,
+            catalog=self._catalog,
+            keys=self._ctx.keys,
+            usage_kind="memory_rerank",
+        )
+        return DecisionResult(
+            decisions={
+                "relevant": Decision(
+                    top=TRUE if prob >= 0.5 else FALSE,
+                    probabilities={TRUE: prob, FALSE: round(1.0 - prob, 6)},
+                )
+            },
+            input_tokens=10,
+        )
+
+
+def _catalog_with_judge(catalog: ModelCatalog, judge: Judge) -> ModelCatalog:
+    def build(ctx: DecisionBuildContext) -> _JudgeBinding:
+        return _JudgeBinding(judge, ctx, catalog)
+
+    providers = {
+        prefix: replace(
+            provider,
+            key_env="MEIVA_HOME",
+            build=build,
+        )
+        for prefix, provider in catalog.decision_providers.items()
+    }
+    return replace(catalog, decision_providers=providers)
+
+
 # meiva:note
 # The service, the two fakes and the configuration every app built by the rig carries.
 @dataclass
@@ -219,6 +268,7 @@ class SearchRig:
             config=None if root is None else memory_config(root, **self.fields),
             fields=self.fields,
         ) as client:
+            client.app.state.catalog = self.catalog
             client.app.state.memory_embedder = self.embedder_for(client.app.state.gateway_config)
             yield client
 
@@ -263,21 +313,19 @@ def asgi_client(app: FastAPI) -> httpx.AsyncClient:
 
 @pytest.fixture
 def rig(
-    monkeypatch: pytest.MonkeyPatch,
     model_catalog: ModelCatalog,
     machine_identity: MachineIdentityReader,
 ) -> Generator[SearchRig]:
     service = SearchService()
     judge = Judge()
     embedder = FakeEmbedder()
-    monkeypatch.setattr(rerank, "ask_relevance", judge)
     try:
         yield SearchRig(
             service=service,
             judge=judge,
             embedder=embedder,
             machine=machine_identity,
-            catalog=model_catalog,
+            catalog=_catalog_with_judge(model_catalog, judge),
             fields={"memory_search_uri": service.url, "memory_search_backend": "numpy"},
         )
     finally:

@@ -27,7 +27,7 @@ from base.lm.harness.kimi import (
 )
 from base.lm.harness.kimi.tests.support import AGENT_PID, start
 from base.lm.harness.kimi.usage import session_log_dir
-from base.lm.pricing import PriceBook, load_archive, plugin_model_price
+from base.lm.pricing import PriceBook, PriceRates, load_archive, plugin_model_price
 
 
 def permission_request(
@@ -221,14 +221,16 @@ async def test_a_priced_session_reports_turn_and_cumulative_cost(tmp_path: Path)
         {
             DEFAULT_MODEL: plugin_model_price(
                 DEFAULT_MODEL,
-                cache_miss=0.60,
-                cache_hit=0.15,
-                output=2.50,
-                cache_write_5m=0.60,
-                cache_write_1h=1.20,
-                source_url="https://platform.moonshot.ai/docs/pricing/chat",
-                source_checked_at="2026-09-20",
-                vendor="moonshot",
+                PriceRates(
+                    cache_miss=0.60,
+                    cache_hit=0.15,
+                    output=2.50,
+                    cache_write_5m=0.60,
+                    cache_write_1h=1.20,
+                    source_url="https://platform.moonshot.ai/docs/pricing/chat",
+                    source_checked_at="2026-09-20",
+                    vendor="moonshot",
+                ),
                 plugin="test",
             )
         },

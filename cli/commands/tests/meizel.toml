@@ -3,11 +3,3 @@ exports = ["health_port_guard.py", "test_single_box.py"]
 [uses]
 "test_service_probe_ports.py" = ["roster_probe_child.py"]
 "test_unit_capability_commands.py" = ["test_single_box.py"]
-
-[debt.env-patch]
-"test_single_box.py#monkeypatch.delitem os.environ" = 1
-"test_single_box.py#monkeypatch.setitem os.environ" = 1
-"test_single_box.py#monkeypatch.setitem os.environ.MEIVA_DB_URL" = 1
-
-[debt.first-party-patch]
-"health_port_guard.py#monkeypatch.setattr cli.commands.probe.occupied_health_ports" = 1

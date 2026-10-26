@@ -53,7 +53,7 @@
 # even when cancellation damage and the compaction threshold occur together.
 
 from collections.abc import Sequence
-from datetime import UTC, datetime
+from datetime import datetime
 from typing import Any
 
 from langchain_core.messages import AIMessage, AnyMessage, ToolMessage
@@ -147,18 +147,21 @@ def redundant_tool_results(messages: Sequence[AnyMessage]) -> list[int]:
     return sorted(redundant_indices)
 
 
-def _synthetic_tool_result(tool_call_id: str) -> ToolMessage:
+def _synthetic_tool_result(tool_call_id: str, *, created_at: datetime) -> ToolMessage:
     return exec_output_message(
         content=INTERRUPTED_TOOL_RESULT,
         tool_call_id=tool_call_id,
         status=ExecStatus.UNKNOWN,
         body_start=0,
-        created_at=datetime.now(UTC),
+        created_at=created_at,
     )
 
 
 def dangling_tool_pairing_repairs(
-    messages: Sequence[AnyMessage], *, pending_notes: Sequence[AnyMessage] = ()
+    messages: Sequence[AnyMessage],
+    *,
+    created_at: datetime,
+    pending_notes: Sequence[AnyMessage] = (),
 ) -> list[Any]:
     """Return one full rebuild enforcing exactly one result per tool_call id.
 
@@ -180,7 +183,7 @@ def dangling_tool_pairing_repairs(
         j = i + 1
         while j < len(survivors) and isinstance(survivors[j], ToolMessage):
             j += 1
-        inserts[j - 1] = [_synthetic_tool_result(t) for t in ids]
+        inserts[j - 1] = [_synthetic_tool_result(t, created_at=created_at) for t in ids]
     rebuilt: list[Any] = [RemoveMessage(id=REMOVE_ALL_MESSAGES)]
     for k, m in enumerate(survivors):
         rebuilt.append(m)
@@ -198,12 +201,14 @@ class _RepairDanglingToolPairingHook(Hook):
     async def __call__(
         self,
         state: _state.AgentState,
-        _runtime: Runtime[MeivaContext],
+        runtime: Runtime[MeivaContext],
         config: RunnableConfig,
         /,
     ) -> dict[str, Any] | None:
         repairs = dangling_tool_pairing_repairs(
-            state.messages, pending_notes=state.pending_exec_notes
+            state.messages,
+            created_at=runtime.context.require_clock().now(),
+            pending_notes=state.pending_exec_notes,
         )
         if not repairs:
             return None

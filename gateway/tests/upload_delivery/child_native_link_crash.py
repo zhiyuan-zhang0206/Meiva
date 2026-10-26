@@ -4,15 +4,28 @@ from pathlib import Path
 
 from base.host import private_storage
 
-original = private_storage.os.link
 
+class _CrashPath(Path):
+    stage: str = ""
+    linked: bool = False
 
-def crash(source: str, target: str) -> None:
-    if sys.argv[2] == "after-link":
-        original(source, target)
-    os._exit(73)
+    def with_name(self, name: str) -> Path:
+        return Path(super().__fspath__()).with_name(name)
+
+    def __fspath__(self) -> str:
+        if self.stage == "before-link":
+            os._exit(73)
+        self.linked = True
+        return super().__fspath__()
+
+    @property
+    def parent(self) -> Path:
+        if self.linked:
+            os._exit(73)
+        return Path(super().__fspath__()).parent
 
 
 if __name__ == "__main__":
-    private_storage.os.link = crash
-    private_storage.create_private_bytes(Path(sys.argv[1]), b"bytes")
+    target = _CrashPath(sys.argv[1])
+    target.stage = sys.argv[2]
+    private_storage.create_private_bytes(target, b"bytes")

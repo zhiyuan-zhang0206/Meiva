@@ -3,7 +3,7 @@
 
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, cast
 from unittest.mock import MagicMock
 
 import psycopg
@@ -12,6 +12,7 @@ from psycopg_pool import AsyncConnectionPool
 
 from agent.graph import llm_node
 from agent.graph.llm_errors import FatalProviderError, LlmLedger
+from agent.graph.tests.cancel_fixture import CancelPool, InterruptEvent
 from agent.graph.tests.test_llm_helpers import CONFIG as _LLM_CONFIG
 from agent.graph.tests.test_llm_helpers import make_runtime as _llm_make_runtime
 from base.agents.context import MeivaContext
@@ -73,7 +74,10 @@ async def test_llm_node_closes_circuit_on_success(
 
 
 async def test_llm_node_cancel_does_not_close_circuit(
-    hosted_resources: HostedTurnResources, fake_cancel_event, *, database_gate: ProcessDbGate
+    hosted_resources: HostedTurnResources,
+    fake_cancel_event: InterruptEvent,
+    *,
+    database_gate: ProcessDbGate,
 ) -> None:
     """The cancel path discards the partial generation — no stream completed,
     so the breaker must stay open (closing it without a healed call would
@@ -90,7 +94,7 @@ async def test_llm_node_cancel_does_not_close_circuit(
 
     async def _trigger() -> None:
         await asyncio.sleep(0.05)
-        fake_cancel_event.set()  # pyright: ignore[reportUnknownMemberType]
+        fake_cancel_event.set()
 
     trigger = asyncio.create_task(_trigger())
     cmd = await llm_node(
@@ -100,6 +104,7 @@ async def test_llm_node_cancel_does_not_close_circuit(
             llm=fake_llm,
             event_publisher=MagicMock(),
             database_gate=database_gate,
+            ops_pool=cast(Any, CancelPool(fake_cancel_event)),
         ),
         _LLM_CONFIG,
         ledger=LlmLedger(),

@@ -39,14 +39,18 @@ def test_alias_scan_does_not_trigger_the_mcps_servers_probe(
     from base.agents.impersonation import wake
 
     calls: list[str] = []
-    real_servers = meiva.mcps.servers
+    target_code = meiva.mcps.servers.__code__
 
-    def _spy() -> list[str]:
-        calls.append("servers")
-        return real_servers()
+    def _profile(frame: object, event: str, _arg: object) -> None:
+        if event == "call" and getattr(frame, "f_code", None) is target_code:
+            calls.append("servers")
 
-    monkeypatch.setattr(meiva.mcps, "servers", _spy)
-    stub_everywhere(monkeypatch, wake, "publish_inbound_wake", _stub)
+    previous = sys.getprofile()
+    sys.setprofile(_profile)
+    try:
+        stub_everywhere(monkeypatch, wake, "publish_inbound_wake", _stub)
+    finally:
+        sys.setprofile(previous)
 
     assert calls == []
 

@@ -81,14 +81,14 @@ async def generate_label_async(
         )
         return False
 
-    from base.lm.usage import log_usage_from_message
+    from base.lm.usage import UsageOptions, log_usage_from_message
 
     log_usage_from_message(
         response,
         catalog=catalog,
         model=config.labeler_model,
         usage_kind="batch",
-        for_agent_id=agent_id,
+        options=UsageOptions(for_agent_id=agent_id),
     )
     judgment = label_rules.judge(message_content(response), config.labeler_max_chars)
     if isinstance(judgment, label_rules.Empty):

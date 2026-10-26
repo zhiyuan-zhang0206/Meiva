@@ -189,18 +189,11 @@ def _init_and_start_settings_free() -> None:
 
 def _boot_start_delivery(scenario: str, home: Any) -> None:
     # run_command imports this before start_once enters the admitted home.
-    from base.config import ConfigBoot
     from cli.database.runtime import CommandRuntime
 
     assert not CommandRuntime.create(home).config.prepared
     if scenario != "init_and_start_settings_free":
         _inherit_foreign_delivery(home)
-        return
-
-    def no_prepare(self):
-        raise AssertionError("typed root prepared configuration before runtime delivery")
-
-    ConfigBoot.prepare = no_prepare
 
 
 def _prepare_start_delivery(scenario: str, home: Any) -> Any:

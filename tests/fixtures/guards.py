@@ -53,7 +53,7 @@ def suite_is_not_inside_an_exec_domain(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 @pytest.fixture(autouse=True)
-def _otlp_export_off(monkeypatch: pytest.MonkeyPatch) -> None:
+def _otlp_export_off(request: pytest.FixtureRequest) -> None:
     """Keep the test session hermetic: the OTLP dual-write (base.telemetry ->
     base.telemetry.otlp.telemetry_otlp, default ON since the 2026-08-11 stack decision) would
     otherwise fire real OTLP/HTTP requests at 127.0.0.1:4318 from every
@@ -64,10 +64,17 @@ def _otlp_export_off(monkeypatch: pytest.MonkeyPatch) -> None:
     if module is not None and "Settings" in vars(module):
         from tests.fixtures.env_bootstrap import permissions_helper_port
 
-        monkeypatch.setattr(module.settings.observability, "telemetry_otlp_enabled", False)
-        monkeypatch.setattr(
-            module.settings.services, "permissions_helper_port", permissions_helper_port
-        )
+        previous_otlp = module.get_field("telemetry_otlp_enabled")
+        previous_port = module.get_field("permissions_helper_port")
+        module.set_field("telemetry_otlp_enabled", False)
+        module.set_field("permissions_helper_port", permissions_helper_port)
+
+        def restore() -> None:
+            if isinstance(getattr(module, "settings", None), module.Settings):
+                module.set_field("telemetry_otlp_enabled", previous_otlp)
+                module.set_field("permissions_helper_port", previous_port)
+
+        request.addfinalizer(restore)
 
 
 @pytest.fixture(autouse=True)

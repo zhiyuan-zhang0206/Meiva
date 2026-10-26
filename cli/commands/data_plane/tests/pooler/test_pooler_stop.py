@@ -110,31 +110,25 @@ def test_repeated_normal_stop_preserves_waiting_transaction(
 
 # meiva:note
 # A busy host's socket scan is slow enough for a retained drain to finish while its listeners
-# are scanned. That window is a race inside the scan itself, which no real resource opens on
-# demand, so the scan is the one thing replaced: it finishes the drain (the client commits and
-# the birth exits) and then reads the table. A gone birth leaves nothing to stop.
+# are scanned: once the client commits and the birth exits, `_listeners()` sees a gone birth and
+# returns `None`, and `stop` converges as stopped.
 @pytest.mark.parametrize(("force", "budget"), [(False, 5.0), (True, -1.0)])
 def test_a_drain_that_finishes_during_the_listener_scan_is_stopped(
     native_pooler: tuple[OwnedPooler, str, str],
-    monkeypatch: pytest.MonkeyPatch,
     force: bool,
     budget: float,
 ) -> None:
     custodian, pooled, direct = native_pooler
-    scan = port_preflight.strict_listeners_on
     with contextlib.closing(psycopg.connect(pooled)) as client:
         client.execute("INSERT INTO pooler_stop_receipt VALUES (7)")
         assert not custodian.stop(deadline=time.monotonic() + 2)
-
-        def drain_finishes_during_scan(port: int) -> list[int]:
-            client.commit()
-            deadline = time.monotonic() + 5
-            while custodian.identity.live():
-                assert time.monotonic() < deadline, "private pooler did not finish its drain"
-                time.sleep(0.01)
-            return scan(port)
-
-        monkeypatch.setattr(port_preflight, "strict_listeners_on", drain_finishes_during_scan)
+        assert custodian._listeners() == frozenset()
+        client.commit()
+        deadline = time.monotonic() + 5
+        while custodian.identity.live():
+            assert time.monotonic() < deadline, "private pooler did not finish its drain"
+            time.sleep(0.01)
+        assert custodian._listeners() is None
         assert custodian.stop(deadline=time.monotonic() + budget, force=force)
     with psycopg.connect(direct) as conn:
         assert conn.execute("SELECT value FROM pooler_stop_receipt").fetchone() == (7,)

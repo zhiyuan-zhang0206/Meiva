@@ -8,7 +8,3 @@
 "test_root_signals.py" = ["_stand_in_root.py", "snapshots.py"]
 "test_snapshot.py" = []
 "test_start_names_its_requester.py" = ["support.py"]
-
-[debt.first-party-patch]
-"test_root_driver.py#monkeypatch.setattr services.desktop.permissions_helper.launchd_job.retirement_query" = 1
-"test_root_signals.py#monkeypatch.setattr base.native_process.ownership.OwnedProcess.live" = 1

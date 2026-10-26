@@ -14,7 +14,7 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import json
-from collections.abc import Callable
+from collections.abc import Callable, Iterator
 from dataclasses import replace
 from pathlib import Path
 from typing import Any
@@ -32,7 +32,7 @@ from base.cluster.machine import (
     gateway_auth_headers,
 )
 from base.cluster.machine.configured import ConfiguredMachineIdentity
-from base.config import settings
+from base.config import get_field, set_field, settings
 from base.daemon.http_transport import start_daemon_http
 from base.host.db_authority import api, delivery, ledger, model, unit
 from base.host.net.auth import ClusterSecretMissingError, bearer_header, cookie_name
@@ -64,7 +64,7 @@ def _unadmit(home: Path) -> None:
 @pytest.fixture
 def gateway(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, seed_write_generation: Callable[[Path], Any]
-) -> Path:
+) -> Iterator[Path]:
     """A gateway home with an active generation 0, as this process's home, with
     its human secret set."""
     home = (tmp_path / "gateway").resolve()
@@ -75,8 +75,12 @@ def gateway(
         f"MEIVA_DB_URL={settings.data_plane.db_url}\nMEIVA_REDIS_URL={settings.data_plane.redis_url}\n"
     )
     point_home(monkeypatch, home)
-    monkeypatch.setattr(settings.data_plane, "cluster_secret", _HUMAN)
-    return home
+    prior_secret = get_field("cluster_secret")
+    set_field("cluster_secret", _HUMAN)
+    try:
+        yield home
+    finally:
+        set_field("cluster_secret", prior_secret)
 
 
 def _bearer(token: str) -> str:
@@ -432,7 +436,7 @@ def test_ops_without_a_secret_or_capability_refuses_to_serve(gateway: Path) -> N
 
 
 @pytest.fixture
-def runner_home(tmp_path: Path, gateway: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
+def runner_home(tmp_path: Path, gateway: Path, monkeypatch: pytest.MonkeyPatch) -> Iterator[Path]:
     """A remote unit home holding an API-bearing capability, as this process's
     home; it holds no human secret."""
     home = (tmp_path / "runner").resolve()
@@ -452,8 +456,12 @@ def runner_home(tmp_path: Path, gateway: Path, monkeypatch: pytest.MonkeyPatch) 
         probe=lambda _dsn: None,
     )
     point_home(monkeypatch, home)
-    monkeypatch.setattr(settings.data_plane, "cluster_secret", "")
-    return home
+    prior_secret = get_field("cluster_secret")
+    set_field("cluster_secret", "")
+    try:
+        yield home
+    finally:
+        set_field("cluster_secret", prior_secret)
 
 
 def test_the_unit_capability_carries_the_api_admission(gateway: Path, runner_home: Path) -> None:

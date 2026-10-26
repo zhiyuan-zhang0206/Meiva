@@ -8,10 +8,10 @@ from langchain_core.messages import AIMessage
 
 from base.lm import pricing
 from base.lm.catalog import ModelCatalog
-from base.lm.pricing import cost_usd, plugin_model_price, quote
+from base.lm.pricing import CacheTokens, PriceRates, cost_usd, plugin_model_price, quote
 from base.lm.pricing.cache_writes import cache_write_tokens
 from base.lm.provider_api import PricePeriod, PriceTier
-from base.lm.usage import log_usage_from_message
+from base.lm.usage import UsageOptions, log_usage_from_message
 
 
 @pytest.fixture
@@ -39,9 +39,7 @@ def test_mixed_ttl_usage_from_pinned_sdk_prices_each_input_token_once(
         "claude-opus-5-5",
         1_000,
         50,
-        200,
-        cache_write_5m=writes[0],
-        cache_write_1h=writes[1],
+        CacheTokens(read=200, write_5m=writes[0], write_1h=writes[1]),
         prices=prices,
     )
     assert priced is not None
@@ -50,7 +48,11 @@ def test_mixed_ttl_usage_from_pinned_sdk_prices_each_input_token_once(
     )
     assert (
         cost_usd(
-            "claude-opus-5-5", 1_000, 50, 200, cache_write_5m=300, cache_write_1h=400, prices=prices
+            "claude-opus-5-5",
+            1_000,
+            50,
+            CacheTokens(read=200, write_5m=300, write_1h=400),
+            prices=prices,
         )
         == priced.cost_usd
     )
@@ -111,15 +113,13 @@ def test_quote_rejects_writes_exceeding_total_input(
             "claude-opus-5-5",
             1_000,
             50,
-            200,
-            cache_write_5m=five,
-            cache_write_1h=hour,
+            CacheTokens(read=200, write_5m=five, write_1h=hour),
             prices=prices,
         )
 
 
 def test_reported_writes_without_declared_rates_remain_unpriced(prices: pricing.PriceBook) -> None:
-    assert quote("gpt-6.1-sol", 100, 10, 0, cache_write_5m=100, prices=prices) is None
+    assert quote("gpt-6.1-sol", 100, 10, CacheTokens(write_5m=100), prices=prices) is None
 
 
 @pytest.mark.parametrize("rate", [-1.0, float("nan"), float("inf")])
@@ -127,13 +127,15 @@ def test_invalid_flat_write_rate_is_rejected_even_with_periods(rate: float) -> N
     with pytest.raises(ValueError, match="finite and non-negative"):
         plugin_model_price(
             "fixture",
-            cache_miss=4,
-            cache_hit=0.2,
-            output=20,
-            cache_write_5m=rate,
-            source_url="https://example.com/pricing",
-            source_checked_at="2026-10-08",
-            periods=(PricePeriod(None, None, (PriceTier(0, None, "4", "0.2", "20"),)),),
+            PriceRates(
+                cache_miss=4,
+                cache_hit=0.2,
+                output=20,
+                cache_write_5m=rate,
+                source_url="https://example.com/pricing",
+                source_checked_at="2026-10-08",
+                periods=(PricePeriod(None, None, (PriceTier(0, None, "4", "0.2", "20"),)),),
+            ),
         )
 
 
@@ -159,7 +161,7 @@ def test_usage_snapshot_prices_cache_writes_at_actual_served_speed(
     result = log_usage_from_message(
         message,
         "claude-opus-5-5-fast",
-        priced_at=datetime(2026, 10, 8, tzinfo=UTC),
+        options=UsageOptions(priced_at=datetime(2026, 10, 8, tzinfo=UTC)),
         catalog=model_catalog,
     )
     assert result is not None
@@ -194,9 +196,7 @@ def test_moonshot_k3_series_cache_write_tokens_are_priced(
         model,
         40_206,
         356,
-        38_400,
-        cache_write_5m=1_536,
-        cache_write_1h=100,
+        CacheTokens(read=38_400, write_5m=1_536, write_1h=100),
         prices=prices,
     )
     assert priced is not None

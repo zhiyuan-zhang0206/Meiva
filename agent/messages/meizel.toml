@@ -6,6 +6,7 @@ exports = ["guard.py"]
 
 [purity]
 "." = "strict-to-be"
+"guard.py" = "strict"
 "tail.py" = "strict"
 
 [debt.ambient-read]
@@ -14,9 +15,5 @@ exports = ["guard.py"]
 [debt.impure-call]
 "__init__.py#datetime.now" = 1
 
-[debt.impure-edge]
-"guard.py#base/agents/messages/guard.py" = 1
-
 [debt.wide-params]
 "__init__.py#def exec_output_message" = 1
-"__init__.py#def inbound_message" = 1

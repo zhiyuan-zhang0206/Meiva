@@ -18,8 +18,7 @@
 
 from __future__ import annotations
 
-import os
-from collections.abc import Generator, Mapping
+from collections.abc import Generator, MutableMapping
 from contextlib import contextmanager
 from dataclasses import dataclass, replace
 from functools import partial
@@ -141,12 +140,16 @@ def prove_generation_logins(home: Path, generation: Generation, endpoint: str) -
 # inherit it) and through the operator's database factory, which every later handle and the
 # command's event writer dial through.
 def adopt_gateway_login(
-    home: Path, endpoint: str, *, database_factory: OperatorDatabaseFactory
+    home: Path,
+    endpoint: str,
+    *,
+    environment: MutableMapping[str, str],
+    database_factory: OperatorDatabaseFactory,
 ) -> None:
     grant = db_delivery_files.write_grant(home, "gateway")
     dsn = grant.dsn(endpoint)
-    os.environ["MEIVA_DB_URL"] = dsn
-    os.environ[db_delivery_files.GENERATION_ENV] = str(grant.number)
+    environment["MEIVA_DB_URL"] = dsn
+    environment[db_delivery_files.GENERATION_ENV] = str(grant.number)
     database_factory.adopt_login(dsn)
 
 
@@ -216,13 +219,13 @@ class _Stage:
 
 
 # meiva:note
-# What every step of one completion reads and never changes. `local` is None on a remote plane,
-# whose steps touch no database of this home.
-@dataclass(frozen=True)
+# The completion runner and the resources its steps read or update (`environment`,
+# `database_factory`). `local` is None on a remote plane, whose steps touch no database of this home.
+@dataclass(slots=True)
 class _Completion:
     config: DataPlaneConfig
     home: Path
-    environment: Mapping[str, str]
+    environment: MutableMapping[str, str]
     database_factory: OperatorDatabaseFactory
     machine: MachineIdentityReader
     macos: bool
@@ -347,6 +350,7 @@ class _Completion:
                 adopt_gateway_login(
                     self.home.resolve(),
                     self._plane().endpoint,
+                    environment=self.environment,
                     database_factory=self.database_factory,
                 )
             case ReportAdmitted():
@@ -382,7 +386,7 @@ def execute_completion(
     config: DataPlaneConfig,
     *,
     home: Path,
-    environment: Mapping[str, str],
+    environment: MutableMapping[str, str],
     database_factory: OperatorDatabaseFactory,
     machine: MachineIdentityReader,
     macos: bool,
@@ -423,7 +427,7 @@ def complete_gateway_data_plane(
     config: DataPlaneConfig,
     *,
     home: Path,
-    environment: Mapping[str, str],
+    environment: MutableMapping[str, str],
     refresh_schema: bool = True,
     database_factory: OperatorDatabaseFactory,
     machine: MachineIdentityReader,

@@ -123,7 +123,9 @@ def test_only_the_verbs_that_bring_a_unit_up_open_sinks_before_dispatch(
             argv,
             declared=tmp_path,
             checkout=_REPO_ROOT,
-            producer_factory=operator_producer,
+            producer_factory=lambda db, machine, home: OperatorEventPipeline.recording(
+                db, machine=machine, home=home, log_sinks=cli_log_sinks
+            ),
             open_database=open_operator_database,
         )
         == 0
@@ -150,7 +152,9 @@ def test_a_settings_failure_while_opening_sinks_keeps_its_actionable_message(
             ["restart"],
             declared=tmp_path,
             checkout=_REPO_ROOT,
-            producer_factory=operator_producer,
+            producer_factory=lambda db, machine, home: OperatorEventPipeline.recording(
+                db, machine=machine, home=home, log_sinks=cli_log_sinks
+            ),
             open_database=open_operator_database,
         )
         == 1
@@ -249,12 +253,14 @@ def test_logging_and_dispatch_borrow_the_same_operator_factory(
         homes.append(home)
         pipeline = telemetry.EventPipeline(writer=lambda _batch: None)
         pipelines.append(pipeline)
-        return OperatorEventPipeline.wrapping(
+        owner = OperatorEventPipeline.wrapping(
             pipeline,
             database_factory=database_factory,
             machine=machine,
             home=home,
         )
+        owner.log_sinks = cli_log_sinks
+        return owner
 
     def dispatch(args: argparse.Namespace) -> int:
         assert args.database_factory is factories[-1]

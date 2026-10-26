@@ -1,10 +1,11 @@
+import sys
 from pathlib import Path
 from typing import Any
 
 import pytest
 
 from base.config import settings
-from base.db import Database, connections
+from base.db import Database
 from base.db.code_version_gate import ProcessDbGate
 from base.native_process import code_version
 from base.native_process.loaded_commit import LoadedCommit
@@ -14,7 +15,6 @@ from base.telemetry import process_name
 def test_gate_is_lazy_and_shared_by_native_builders(
     db_url: str,
     request: pytest.FixtureRequest,
-    monkeypatch: pytest.MonkeyPatch,
     database_version: code_version.CodeVersion,
     pytestconfig: pytest.Config,
 ) -> None:
@@ -22,28 +22,32 @@ def test_gate_is_lazy_and_shared_by_native_builders(
     assert original.source_root == pytestconfig.rootpath
     version = database_version.get()
 
-    def unexpected_read(*_args: Any, **_kwargs: Any) -> Any:
-        raise AssertionError("native session already owns its captured version")
+    forbidden_codes = {
+        LoadedCommit.capture.__code__,
+        code_version.first_parent_count.__code__,
+    }
+    calls: list[str] = []
 
-    monkeypatch.setattr(LoadedCommit, "capture", unexpected_read)
-    monkeypatch.setattr(code_version, "first_parent_count", unexpected_read)
+    def profile(frame: Any, event: str, _arg: Any) -> None:
+        if event == "call" and frame.f_code in forbidden_codes:
+            calls.append(frame.f_code.co_name)
+
     owner: ProcessDbGate = request.getfixturevalue("database_gate")
     assert owner.min_read_due()
     handles = [Database.from_settings(gate=owner), request.getfixturevalue("database")]
-    seen: list[ProcessDbGate] = []
-
-    def connect(*, config: Any, gate: ProcessDbGate, **_kwargs: Any) -> Any:
-        assert config.db_url == settings.data_plane.db_url
-        assert gate.application_name() == f"meiva:pytest:v{version}"
-        if gate.min_read_due():
-            gate.observe_minimum(version)
-        seen.append(gate)
-        return object()
-
-    monkeypatch.setattr(connections, "connect", connect)
-    for handle in handles:
-        handle.connect()
-    assert seen == [owner, owner]
+    previous = sys.getprofile()
+    sys.setprofile(profile)
+    try:
+        for handle in handles:
+            assert handle._config.db_url == settings.data_plane.db_url
+            with handle.connect() as conn, conn.cursor() as cur:
+                cur.execute("SELECT current_setting('application_name')")
+                row = cur.fetchone()
+                assert row is not None
+                assert row[0] == f"meiva:pytest:v{version}"
+    finally:
+        sys.setprofile(previous)
+    assert calls == []
     assert not owner.min_read_due()
     assert database_version.loaded is original
 

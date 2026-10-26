@@ -162,14 +162,13 @@ def _emit_billing(body: dict[str, Any], *, catalog: ModelCatalog) -> None:
     propagate to the operation owner after the successful network request;
     this stage never retries that request.
     """
-    from base.lm.usage import log_usage_fields
+    from base.lm.usage import UsageFields, log_usage_fields
 
     usage: dict[str, Any] = body.get("usageMetadata") or {}
     tok_in = int(usage.get("promptTokenCount") or 0)
     log_usage_fields(
         model=MODEL_ID,
-        tok_in=tok_in,
-        tok_out=0,
+        fields=UsageFields(tok_in=tok_in, tok_out=0),
         usage_kind="embedding",
         catalog=catalog,
     )
@@ -224,6 +223,7 @@ def embed(
     api_key: str | None,
     endpoint: str = ENDPOINT,
     policy: Policy = EMBED_POLICY,
+    transport: httpx.AsyncBaseTransport | None = None,
 ) -> np.ndarray:
     """Single batched `batchEmbedContents` call with retry; returns
     (N, DIM) float32. Raises after retries.
@@ -248,7 +248,7 @@ def embed(
     payload = _payload(texts, task_type)
 
     async def _attempt() -> dict[str, Any]:
-        async with httpx.AsyncClient(timeout=timeout_s) as client:
+        async with httpx.AsyncClient(timeout=timeout_s, transport=transport) as client:
             return await post_attempt_once(client, endpoint, timeout_s, headers, payload)
 
     def _call() -> dict[str, Any]:
@@ -284,6 +284,7 @@ async def embed_async(
     api_key: str | None,
     endpoint: str = ENDPOINT,
     policy: Policy = EMBED_POLICY,
+    transport: httpx.AsyncBaseTransport | None = None,
 ) -> np.ndarray:
     """Async twin of ``embed`` — native non-blocking I/O over
     ``httpx.AsyncClient`` with ``asyncio.sleep`` backoff. Same timeout /
@@ -297,7 +298,7 @@ async def embed_async(
     headers = {"x-goog-api-key": _api_key(api_key)}
     payload = _payload(texts, task_type)
     try:
-        client = httpx.AsyncClient(timeout=timeout_s)
+        client = httpx.AsyncClient(timeout=timeout_s, transport=transport)
     except httpx.HTTPError as exc:
         # Only a modelled transport failure becomes EmbeddingAPIError;
         # invalid local setup and programming errors retain their identity.
@@ -343,11 +344,13 @@ class GeminiEmbeddingProvider:
         timeout_s: float,
         api_key: str | None,
         endpoint: str = ENDPOINT,
+        transport: httpx.AsyncBaseTransport | None = None,
     ) -> None:
         self._catalog = catalog
         self._timeout_s = timeout_s
         self._api_key = api_key
         self._endpoint = endpoint
+        self._transport = transport
 
     def embed_batch(self, texts: list[str]) -> np.ndarray:
         """Batch embed markdown file contents for indexing. (N, DIM) float32."""
@@ -358,6 +361,7 @@ class GeminiEmbeddingProvider:
             timeout_s=self._timeout_s,
             api_key=self._api_key,
             endpoint=self._endpoint,
+            transport=self._transport,
         )
 
     def embed_query(self, text: str) -> np.ndarray:
@@ -370,6 +374,7 @@ class GeminiEmbeddingProvider:
             api_key=self._api_key,
             endpoint=self._endpoint,
             policy=QUERY_EMBED_POLICY,
+            transport=self._transport,
         )[0]
 
     async def embed_query_async(self, text: str) -> np.ndarray:
@@ -383,5 +388,6 @@ class GeminiEmbeddingProvider:
                 api_key=self._api_key,
                 endpoint=self._endpoint,
                 policy=QUERY_EMBED_POLICY,
+                transport=self._transport,
             )
         )[0]

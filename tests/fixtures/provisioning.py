@@ -260,9 +260,11 @@ def _clean_db(
 ) -> Iterator[None]:
     import psycopg
 
-    from base.config import settings
+    from base.config import get_field, set_field, settings
 
-    monkeypatch.setattr(settings.data_plane, "db_url", provisioned_db)
+    previous_db_url = get_field("db_url")
+    set_field("db_url", provisioned_db)
+    request.addfinalizer(functools.partial(set_field, "db_url", previous_db_url))
     monkeypatch.setitem(os.environ, "MEIVA_DB_URL", provisioned_db)
     env_file = TEST_MEIVA_HOME / ".env"
     previous_file = env_file.read_text()
@@ -299,9 +301,11 @@ def _clean_redis(
 ) -> Iterator[None]:
     import redis
 
-    from base.config import settings
+    from base.config import get_field, set_field
 
-    monkeypatch.setattr(settings.data_plane, "redis_url", provisioned_redis)
+    previous_redis_url = get_field("redis_url")
+    set_field("redis_url", provisioned_redis)
+    request.addfinalizer(functools.partial(set_field, "redis_url", previous_redis_url))
     monkeypatch.setitem(os.environ, "MEIVA_REDIS_URL", provisioned_redis)
     env_file = TEST_MEIVA_HOME / ".env"
     previous_file = env_file.read_text()

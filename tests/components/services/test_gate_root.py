@@ -10,10 +10,10 @@ from pathlib import Path
 from typing import cast
 
 import psutil
-import pytest
 
-from base.config import settings
+from base.config import get_field, set_field
 from base.daemon.health import DaemonProbe
+from base.daemon.http_transport import start_daemon_http
 from base.native_process.ownership import OwnedProcess
 from base.native_process.root_control.client import RootClient, native_identity
 from base.paths import root_run_dir
@@ -52,13 +52,12 @@ async def _ready(probe: Callable[[], DaemonProbe]) -> DaemonProbe:
     raise AssertionError(f"Gate never became ready: {result.detail}")
 
 
-async def test_gate_native_child_readiness_restart_and_stop(
-    short_tmp: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
+async def test_gate_native_child_readiness_restart_and_stop(short_tmp: Path) -> None:
     with socket.socket() as reservation:
         reservation.bind(("127.0.0.1", 0))
         port = reservation.getsockname()[1]
-    monkeypatch.setattr(settings.services, "frontend_healthcheck_url", f"http://127.0.0.1:{port}")
+    prior_url = get_field("frontend_healthcheck_url")
+    set_field("frontend_healthcheck_url", f"http://127.0.0.1:{port}")
     run_dir = root_run_dir(short_tmp)
     spec = next(spec for spec in build_services() if spec.session == "gate")
     assert spec.identity_probe is not None
@@ -98,18 +97,33 @@ async def test_gate_native_child_readiness_restart_and_stop(
             result = await asyncio.to_thread(spec.identity_probe)
             assert result.verdict.value == "down", result.detail
     finally:
-        await owner.shutdown()
-        await server.close()
+        try:
+            await owner.shutdown()
+            await server.close()
+        finally:
+            set_field("frontend_healthcheck_url", prior_url)
 
 
-def test_gate_protocol_rejects_another_homes_payload(monkeypatch: pytest.MonkeyPatch) -> None:
-    import io
+async def test_gate_protocol_rejects_another_homes_payload() -> None:
+    async def foreign_health(_body: bytes) -> tuple[int, bytes, str]:
+        return 200, b'{"name":"gate","home":"/foreign"}', "application/json"
 
-    def response(*_args: object, **_kwargs: object) -> io.BytesIO:
-        return io.BytesIO(b'{"name":"gate","home":"/foreign"}')
-
-    monkeypatch.setattr(gate.urllib.request, "urlopen", response)
-    assert gate.probe().verdict.value == "port-taken"
+    foreign = await start_daemon_http(
+        host="127.0.0.1",
+        port=0,
+        health_response=lambda: (200, b"{}"),
+        extra_routes={("GET", "/__meiva/healthz"): foreign_health},
+    )
+    port = foreign.sockets[0].getsockname()[1]
+    prior_url = get_field("frontend_healthcheck_url")
+    set_field("frontend_healthcheck_url", f"http://127.0.0.1:{port}")
+    try:
+        verdict = await asyncio.to_thread(gate.probe)
+        assert verdict.verdict.value == "port-taken"
+    finally:
+        set_field("frontend_healthcheck_url", prior_url)
+        foreign.close()
+        await foreign.wait_closed()
 
 
 def test_gate_health_is_independent_of_auth_and_application(servers: Servers) -> None:
@@ -117,7 +131,8 @@ def test_gate_health_is_independent_of_auth_and_application(servers: Servers) ->
 
     from base.paths import meiva_home
 
-    FakeGateway.down = True
+    servers["gw"].shutdown()
+    servers["app"].shutdown()
     status, body, headers = gate_request(servers["gate"] + "/__meiva/healthz")
     assert status == 200
     assert headers["Cache-Control"] == "no-store"

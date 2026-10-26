@@ -126,10 +126,8 @@ def test_inbound_without_a_queue_row_carries_no_inbound_id_and_keeps_its_message
         inbound_id=None,
         body_start=0,
         created_at=datetime(2026, 10, 13, tzinfo=UTC),
-        message_id="request-1",
     )
     kwargs = read_meiva_kwargs(msg)
-    assert msg.id == "request-1"
     assert "meiva_inbound_id" not in kwargs
     assert kwargs.get("meiva_created_at") == "2026-10-13T00:00:00+00:00"
     assert "meiva_picked_up_at" in kwargs

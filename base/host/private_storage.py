@@ -65,10 +65,10 @@ _NODE_MODULES_DIRNAME = "node_modules"
 _SUMMARY_EXAMPLE_LIMIT = 3
 
 
+# meiva:note
+# Per-tree tally of the nodes converge skipped, for the summary warning.
 @dataclass(slots=True)
-class _SkipReport:
-    """Per-tree tally of the nodes converge skipped, for the summary warning."""
-
+class SkipReport:
     symlinks: list[Path] = field(default_factory=list[Path])
     foreign_owned: list[Path] = field(default_factory=list[Path])
     non_regular: list[Path] = field(default_factory=list[Path])
@@ -78,8 +78,9 @@ class _SkipReport:
     def total(self) -> int:
         return len(self.symlinks) + len(self.foreign_owned) + len(self.non_regular)
 
+    # meiva:note
+    # The first few skipped paths, each tagged with its reason.
     def examples(self) -> str:
-        """The first few skipped paths, each tagged with its reason."""
         tagged = (
             [(path, "symlink") for path in self.symlinks]
             + [(path, "foreign-owned") for path in self.foreign_owned]
@@ -106,8 +107,13 @@ def converge_private_tree(path: Path, *, euid: int | None = None) -> Path:
     triage). `node_modules` subtrees are not descended at all; the directory
     itself is still converged like any other child.
     """
-    skips = _SkipReport()
+    skips = SkipReport()
     _converge_tree(path, skips, euid=euid)
+    report_skips(path, skips)
+    return path
+
+
+def report_skips(path: Path, skips: SkipReport) -> None:
     if skips.total:
         logger.warning(
             "private storage convergence skipped {n} node(s) under {path} "
@@ -122,10 +128,9 @@ def converge_private_tree(path: Path, *, euid: int | None = None) -> Path:
             node_modules=skips.node_modules_dirs,
             examples=skips.examples(),
         )
-    return path
 
 
-def _converge_tree(path: Path, skips: _SkipReport, *, euid: int | None = None) -> None:
+def _converge_tree(path: Path, skips: SkipReport, *, euid: int | None = None) -> None:
     try:
         current = path.lstat()
     except FileNotFoundError:
@@ -138,35 +143,39 @@ def _converge_tree(path: Path, skips: _SkipReport, *, euid: int | None = None) -
         return
     ensure_private_dir(path, euid=euid)
     for child in path.iterdir():
-        current = child.lstat()
-        if stat.S_ISLNK(current.st_mode):
-            # Workspace trees can link tooling outside MEIVA_HOME; private-tree
-            # convergence must not recurse into or alter those targets.
-            logger.debug("private storage convergence skipped symlink {path}", path=child)
-            skips.symlinks.append(child)
-            continue
-        if is_foreign_owned(current, euid=euid):
-            logger.debug(
-                "private storage convergence skipped foreign-owned path {path}", path=child
-            )
-            skips.foreign_owned.append(child)
-            continue
-        if stat.S_ISDIR(current.st_mode):
-            if child.name == _NODE_MODULES_DIRNAME:
-                ensure_private_dir(child, euid=euid)
-                skips.node_modules_dirs += 1
-                continue
-            _converge_tree(child, skips, euid=euid)
-            continue
-        if not stat.S_ISREG(current.st_mode):
-            # Unix sockets and FIFOs are live-service plumbing, not storage:
-            # there is no permission converge could repair, and raising over a
-            # dead workspace socket aborted the whole converge — and with it
-            # the updater and the host (macmini 2026-09-12). Skip like symlinks.
-            logger.debug("private storage convergence skipped non-regular file {path}", path=child)
-            skips.non_regular.append(child)
-            continue
-        ensure_private_file(child)
+        converge_child(child, skips, euid=euid)
+
+
+def converge_child(child: Path, skips: SkipReport, *, euid: int | None = None) -> None:
+    current = child.lstat()
+    if stat.S_ISLNK(current.st_mode):
+        # meiva:note
+        # Workspace trees can link tooling outside MEIVA_HOME; private-tree
+        # convergence must not recurse into or alter those targets.
+        logger.debug("private storage convergence skipped symlink {path}", path=child)
+        skips.symlinks.append(child)
+        return
+    if is_foreign_owned(current, euid=euid):
+        logger.debug("private storage convergence skipped foreign-owned path {path}", path=child)
+        skips.foreign_owned.append(child)
+        return
+    if stat.S_ISDIR(current.st_mode):
+        if child.name == _NODE_MODULES_DIRNAME:
+            ensure_private_dir(child, euid=euid)
+            skips.node_modules_dirs += 1
+            return
+        _converge_tree(child, skips, euid=euid)
+        return
+    if not stat.S_ISREG(current.st_mode):
+        # meiva:note
+        # Unix sockets and FIFOs are live-service plumbing, not storage:
+        # there is no permission converge could repair, and raising over a
+        # dead workspace socket aborted the whole converge — and with it
+        # the updater and the host (macmini 2026-09-12). Skip like symlinks.
+        logger.debug("private storage convergence skipped non-regular file {path}", path=child)
+        skips.non_regular.append(child)
+        return
+    ensure_private_file(child)
 
 
 def private_tree_root_problem(path: Path) -> str | None:

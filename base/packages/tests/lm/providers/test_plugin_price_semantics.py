@@ -7,7 +7,15 @@ from typing import Any, cast
 
 from base.lm import pricing
 from base.lm.catalog import ModelCatalog
-from base.lm.pricing import CostQuote, Rates, parse_catalog, quote, rates_at
+from base.lm.pricing import (
+    CacheTokens,
+    CostQuote,
+    PriceRates,
+    Rates,
+    parse_catalog,
+    quote,
+    rates_at,
+)
 
 _ARCHIVE_PATH = Path(__file__).resolve().parents[5] / "base/lm/pricing/pricing_catalog_archive.json"
 _HISTORICAL = datetime(2026, 8, 1, tzinfo=UTC)
@@ -90,12 +98,14 @@ def test_flat_plugin_price_remains_an_unbounded_compatibility_shortcut() -> None
     model = "fixture-flat-price"
     price = pricing.plugin_model_price(
         model,
-        cache_miss=1.0,
-        cache_hit=0.1,
-        output=3.0,
-        source_url="https://example.com/pricing",
-        source_checked_at="2026-09-05",
-        vendor="fixture",
+        PriceRates(
+            cache_miss=1.0,
+            cache_hit=0.1,
+            output=3.0,
+            source_url="https://example.com/pricing",
+            source_checked_at="2026-09-05",
+            vendor="fixture",
+        ),
         plugin="fixture",
     )
     book = pricing.PriceBook({}, {model: price})
@@ -127,9 +137,7 @@ def test_haiku_5_5_whole_request_price_boundary_includes_cached_input(
             "claude-haiku-5-5",
             total,
             1_000,
-            80_000,
+            CacheTokens(read=80_000, write_5m=5_000, write_1h=5_000),
             at=_FUTURE,
-            cache_write_5m=5_000,
-            cache_write_1h=5_000,
             prices=model_catalog.prices,
         ) == CostQuote(cost_usd=expected, rates=rates)

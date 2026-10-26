@@ -1,8 +1,2 @@
 [loads]
 "test_inspect_a_trace_fetch.py" = [".agents/skills/inspect-a-trace/scripts"]
-
-[debt.env-patch]
-"test_inspect_a_trace_fetch.py#monkeypatch.delitem os.environ.MEIVA_API_TOKEN" = 1
-"test_inspect_a_trace_fetch.py#monkeypatch.delitem os.environ.MEIVA_CLUSTER_SECRET" = 2
-"test_inspect_a_trace_fetch.py#monkeypatch.setitem os.environ.MEIVA_API_TOKEN" = 1
-"test_inspect_a_trace_fetch.py#monkeypatch.setitem os.environ.MEIVA_CLUSTER_SECRET" = 3

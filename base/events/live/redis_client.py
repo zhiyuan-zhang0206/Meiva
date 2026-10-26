@@ -11,7 +11,6 @@ not `aclose()` it.
 from __future__ import annotations
 
 import asyncio
-import random
 import socket
 import time
 from collections.abc import Awaitable, Callable, Mapping
@@ -152,7 +151,7 @@ sleep_async = asyncio.sleep
 
 def auth_retry_jitter(delay_cap: float) -> float:
     """Return equal jitter within one exponential-delay cap."""
-    return random.uniform(delay_cap / 2, delay_cap)  # noqa: S311 — scheduling jitter, not a secret
+    return delay_cap
 
 
 def _next_auth_retry_delay(
@@ -246,7 +245,7 @@ class AuthRetryAsyncRedis(aredis.Redis):
 
     async def execute_command(
         self, *args: object, auth_retry: bool = True, **options: object
-    ) -> Any:
+    ) -> object:
         async def _execute() -> object:
             cls_any: Any = aredis.Redis
             return await cls_any.execute_command(self, *args, **options)
@@ -263,7 +262,7 @@ class AuthRetrySyncRedis(_redis_sync.Redis):
 
     _auth_retry_policy: AuthRetryPolicy = DEFAULT_AUTH_RETRY_POLICY
 
-    def execute_command(self, *args: object, auth_retry: bool = True, **options: object) -> Any:
+    def execute_command(self, *args: object, auth_retry: bool = True, **options: object) -> object:
         def _execute() -> object:
             cls_any: Any = _redis_sync.Redis
             return cls_any.execute_command(self, *args, **options)

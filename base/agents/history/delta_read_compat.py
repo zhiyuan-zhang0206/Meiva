@@ -293,7 +293,8 @@ def fold_messages(
         return fast
     result: Any = [] if state is MISSING else normalize_stored_message_ids(state)
     for group in groups:
-        result = add_messages(result, normalize_stored_message_ids(group))
+        normalized: Any = normalize_stored_message_ids(group)
+        result = add_messages(result, normalized)
     return result
 
 

@@ -337,7 +337,8 @@ async def test_claim_fork_kind_appends_identity_marker_and_continues(
     ]
     lifecycle = msgs[0]
     merged = guarded_add_messages(
-        [SystemMessage(content="sys"), HumanMessage(content="inherited")], msgs
+        [SystemMessage(content="sys"), HumanMessage(content="inherited")],
+        cast(list[BaseMessage], msgs),
     )
     assert [m.content for m in merged[:2]] == ["sys", "inherited"]  # pyright: ignore[reportUnknownMemberType]
     assert isinstance(lifecycle, HumanMessage)

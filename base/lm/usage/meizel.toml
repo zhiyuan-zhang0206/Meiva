@@ -17,7 +17,3 @@ exports = ["__init__.py", "metering.py"]
 "__init__.py#base/telemetry/__init__.py" = 1
 "metering.py#base/log/__init__.py" = 1
 "metering.py#base/telemetry/__init__.py" = 1
-
-[debt.wide-params]
-"__init__.py#def log_usage_fields" = 1
-"__init__.py#def log_usage_from_message" = 1

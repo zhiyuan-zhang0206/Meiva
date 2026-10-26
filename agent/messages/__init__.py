@@ -99,7 +99,6 @@ def inbound_message(
     body_start: int,
     created_at: datetime | None = None,
     image_urls: list[str] | None = None,
-    message_id: str | None = None,
 ) -> HumanMessage:
     # meiva:link agent/messages/docs/message-format.meiva.okf.md
     kwargs: dict[str, object] = {
@@ -117,7 +116,6 @@ def inbound_message(
         content if isinstance(content, str) else [dict(item) for item in content]
     )
     return HumanMessage(
-        id=message_id,
         content=normalized_content,
         additional_kwargs=_stamp_created_at(_stamp_picked_up(kwargs), created_at),
     )

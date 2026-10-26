@@ -221,7 +221,7 @@ def _try_pure_append(
 # meiva:note
 # Validate and apply a message delta to committed history or an intermediate delta.
 # meiva:link agent/messages/docs/messages.meiva.okf.md
-def guarded_add_messages(current: Any, delta: Any) -> list[AnyMessage]:
+def guarded_add_messages(current: object, delta: object) -> list[AnyMessage]:
     if _is_delta(current):
         return add_messages(current, delta)  # pyright: ignore[reportArgumentType, reportReturnType]
     fast = _try_pure_append(current, delta)

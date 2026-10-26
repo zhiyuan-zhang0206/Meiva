@@ -1,4 +1,6 @@
 import json
+import sys
+from collections.abc import Iterator
 from pathlib import Path
 
 import pytest
@@ -13,12 +15,23 @@ from base.packages.plugins.loading.registry import declarations
 from base.packages.plugins.manifest import ManifestError
 from meiva.sdk_surface.extensions import load_extensions
 
+_PLUGIN_MODULE_PREFIXES = ("meiva_builtins.plugins.", "plugins.")
+
 
 @pytest.fixture(autouse=True)
-def _isolate_paths(unit_home: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
-    repo = tmp_path / "repo_plugins"
-    repo.mkdir()
-    monkeypatch.setattr(paths, "repo_plugins_dir", lambda: repo)
+def _isolate_paths(unit_home: Path) -> None:
+    del unit_home
+
+
+@pytest.fixture(autouse=True)
+def _restore_plugin_modules() -> Iterator[None]:
+    before = {k: v for k, v in sys.modules.items() if k.startswith(_PLUGIN_MODULE_PREFIXES)}
+    yield
+    for key in [
+        k for k in sys.modules if k.startswith(_PLUGIN_MODULE_PREFIXES) and k not in before
+    ]:
+        del sys.modules[key]
+    sys.modules.update(before)
 
 
 _DEMO_PLUGIN = '''
@@ -84,7 +97,7 @@ def _demo_manifest(name: str, *, runtime: bool) -> str:
 def _write_plugin(
     name: str, body: str, *, manifest: str | None = None, runtime: str | None = None
 ) -> Path:
-    plugin_dir = paths.repo_plugins_dir() / name
+    plugin_dir = paths.plugins_dir() / name
     plugin_dir.mkdir(parents=True, exist_ok=True)
     (plugin_dir / "plugin.py").write_text(body)
     if runtime is not None:
@@ -96,7 +109,18 @@ def _write_plugin(
 
 
 def _enable(**plugins: bool) -> None:
-    write_local({"plugins": {name: {"enabled": on} for name, on in plugins.items()}})
+    write_local(
+        {
+            "plugins": {
+                **{
+                    p.name: {"enabled": False}
+                    for p in paths.repo_plugins_dir().iterdir()
+                    if p.is_dir() and not p.name.startswith(".") and (p / "plugin.py").exists()
+                },
+                **{name: {"enabled": on} for name, on in plugins.items()},
+            }
+        }
+    )
 
 
 def test_every_surface_entry_point_renders_its_live_signature():

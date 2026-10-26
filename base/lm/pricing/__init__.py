@@ -79,8 +79,13 @@ from types import MappingProxyType
 from typing import TYPE_CHECKING, Any
 
 from base.lm.pricing.catalog import (
+    CacheTokens,
     CostQuote,
     ModelPrice,
+    PricePeriod,
+    PriceRates,
+    PriceTier,
+    PriceWindow,
     Rates,
     model_vendor,
     parse_catalog,
@@ -92,9 +97,14 @@ if TYPE_CHECKING:
     from langchain_core.messages import AnyMessage
 
 __all__ = [
+    "CacheTokens",
     "CostQuote",
     "ModelPrice",
     "PriceBook",
+    "PricePeriod",
+    "PriceRates",
+    "PriceTier",
+    "PriceWindow",
     "Rates",
     "cost_usd",
     "load_archive",
@@ -116,46 +126,38 @@ def load_archive() -> dict[str, ModelPrice]:
 
 def plugin_model_price(
     model: str,
+    price: PriceRates,
     *,
-    cache_miss: float,
-    cache_hit: float,
-    output: float,
-    source_url: str,
-    source_checked_at: str,
-    vendor: str | None = None,
-    periods: Sequence[object] = (),
-    cache_write_5m: float | None = None,
-    cache_write_1h: float | None = None,
     plugin: str = "<unknown>",
 ) -> ModelPrice:
-    if not source_url.startswith("https://"):
+    if not price.source_url.startswith("https://"):
         raise ValueError(
-            f"provider plugin {plugin!r}: source_url must be HTTPS, got {source_url!r}"
+            f"provider plugin {plugin!r}: source_url must be HTTPS, got {price.source_url!r}"
         )
     try:
-        checked_at = date.fromisoformat(source_checked_at)
+        checked_at = date.fromisoformat(price.source_checked_at)
     except ValueError as e:
         raise ValueError(
             f"provider plugin {plugin!r}: source_checked_at must be YYYY-MM-DD, "
-            f"got {source_checked_at!r}"
+            f"got {price.source_checked_at!r}"
         ) from e
-    if checked_at.isoformat() != source_checked_at:
+    if checked_at.isoformat() != price.source_checked_at:
         raise ValueError(
             f"provider plugin {plugin!r}: source_checked_at must be YYYY-MM-DD, "
-            f"got {source_checked_at!r}"
+            f"got {price.source_checked_at!r}"
         )
     for name, value in (
-        ("cache_miss", cache_miss),
-        ("cache_hit", cache_hit),
-        ("output", output),
-        ("cache_write_5m", cache_write_5m),
-        ("cache_write_1h", cache_write_1h),
+        ("cache_miss", price.cache_miss),
+        ("cache_hit", price.cache_hit),
+        ("output", price.output),
+        ("cache_write_5m", price.cache_write_5m),
+        ("cache_write_1h", price.cache_write_1h),
     ):
         if value is not None and (not math.isfinite(value) or value < 0):
             raise ValueError(
                 f"provider plugin {plugin!r}: {model!r} price {name} must be finite and non-negative"
             )
-    periods_any: Any = periods
+    periods_any: Any = price.periods
     raw_periods: list[dict[str, Any]] = (
         [
             {
@@ -202,11 +204,11 @@ def plugin_model_price(
                         "input_tokens_min": 0,
                         "input_tokens_max": None,
                         "rates": {
-                            "input": cache_miss,
-                            "cache_read": cache_hit,
-                            "output": output,
-                            "cache_write_5m": cache_write_5m,
-                            "cache_write_1h": cache_write_1h,
+                            "input": price.cache_miss,
+                            "cache_read": price.cache_hit,
+                            "output": price.output,
+                            "cache_write_5m": price.cache_write_5m,
+                            "cache_write_1h": price.cache_write_1h,
                         },
                         "utc_daily_overrides": [],
                     }
@@ -216,8 +218,8 @@ def plugin_model_price(
     )
     return ModelPrice.from_raw_periods(
         model,
-        vendor=vendor,
-        source_url=source_url,
+        vendor=price.vendor,
+        source_url=price.source_url,
         source_checked_at=checked_at,
         periods=raw_periods,
     )
@@ -281,11 +283,9 @@ def quote(
     model: str,
     tok_in: int | None,
     tok_out: int | None,
-    tok_cached: int | None = None,
+    tok_cached: int | CacheTokens | None = None,
     *,
     at: datetime | None = None,
-    cache_write_5m: int = 0,
-    cache_write_1h: int = 0,
     prices: PriceBook,
 ) -> CostQuote | None:
     """Price one call, with cache reads/writes included in total input.
@@ -296,7 +296,14 @@ def quote(
     """
     if tok_in is None or tok_out is None:
         return None
-    cache_read = 0 if tok_cached is None else tok_cached
+    if isinstance(tok_cached, CacheTokens):
+        cache_read = tok_cached.read
+        cache_write_5m = tok_cached.write_5m
+        cache_write_1h = tok_cached.write_1h
+    else:
+        cache_read = 0 if tok_cached is None else tok_cached
+        cache_write_5m = 0
+        cache_write_1h = 0
     if (
         min(tok_in, tok_out, cache_read, cache_write_5m, cache_write_1h) < 0
         or cache_read + cache_write_5m + cache_write_1h > tok_in
@@ -324,11 +331,9 @@ def cost_usd(
     model: str,
     tok_in: int | None,
     tok_out: int | None,
-    tok_cached: int | None = None,
+    tok_cached: int | CacheTokens | None = None,
     *,
     at: datetime | None = None,
-    cache_write_5m: int = 0,
-    cache_write_1h: int = 0,
     prices: PriceBook,
 ) -> float | None:
     """Compatibility wrapper returning only ``quote(...).cost_usd``.
@@ -343,8 +348,6 @@ def cost_usd(
         tok_out,
         tok_cached,
         at=at,
-        cache_write_5m=cache_write_5m,
-        cache_write_1h=cache_write_1h,
         prices=prices,
     )
     return priced.cost_usd if priced is not None else None

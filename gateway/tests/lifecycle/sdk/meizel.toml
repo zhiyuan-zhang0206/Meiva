@@ -1,5 +1,2 @@
 [external]
 "test_external_integration_agent.py" = "loads a built-in skill script by path to test it; skill content is discovered, core does not depend on it"
-
-[debt.first-party-patch]
-"test_external_integration_agent.py#monkeypatch.setattr base.packages.plugins.loading.registry.build_registry" = 1

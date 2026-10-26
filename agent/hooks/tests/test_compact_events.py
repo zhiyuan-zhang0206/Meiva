@@ -73,7 +73,12 @@ def test_raw_event_domain_rejects_unknown_values(role: str, field: str, invalid:
 
 
 def test_absent_publisher_does_not_start_a_live_run() -> None:
-    assert emit_compact_started(None, 7, mode=CompactionMode.REQUEST) is None
+    assert (
+        emit_compact_started(
+            None, 7, compact_id="run1", started_at=_STARTED_AT, mode=CompactionMode.REQUEST
+        )
+        is None
+    )
 
 
 def test_a_finish_without_a_run_id_has_nothing_to_close() -> None:

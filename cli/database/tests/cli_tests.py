@@ -6,7 +6,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Callable, Generator
+from collections.abc import Generator
 
 import pytest
 
@@ -14,7 +14,6 @@ from base.cluster.machine import MachineIdentityReader
 from base.cluster.machine.tests.identity import as_machine as as_machine
 from base.paths import meiva_home
 from base.sessions.pty.tests.pty_reaper import pty_reaper as pty_reaper
-from base.telemetry import EventPipeline, process_logging
 from cli.database import (
     OperatorDatabaseFactory,
     OperatorEventPipeline,
@@ -57,15 +56,7 @@ def installed_machine_identity(command_runtime: CommandRuntime) -> MachineIdenti
     return command_runtime.machine
 
 
-@pytest.fixture(autouse=True)
-def cli_log_sinks(monkeypatch: pytest.MonkeyPatch) -> list[str]:
+@pytest.fixture
+def cli_log_sinks() -> list[str]:
     """In-process dispatch opens no real loguru sinks; the names asked for are recorded."""
-    opened: list[str] = []
-
-    def record(
-        *, name: str, producer: Callable[[], EventPipeline], machine_reader: Callable[[], str]
-    ) -> None:
-        opened.append(name)
-
-    monkeypatch.setattr(process_logging, "init_cli_process", record)
-    return opened
+    return []

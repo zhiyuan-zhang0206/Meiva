@@ -5,15 +5,3 @@ exports = ["sampling_owners.py"]
 "test_policy_owner.py" = ["sampling_owners.py"]
 "test_sdk_emission_failures.py" = ["sampling_owners.py"]
 "test_sdk_telemetry.py" = ["_sdk_cold_child.py", "sampling_owners.py"]
-
-[debt.first-party-patch]
-"test_call_policy.py#monkeypatch.setattr base.telemetry.emitter.init_telemetry" = 1
-"test_sdk_emission_failures.py#monkeypatch.setattr base.agents.sdk.telemetry.emit" = 1
-"test_sdk_emission_failures.py#monkeypatch.setattr base.telemetry.emit" = 2
-"test_sdk_telemetry.py#monkeypatch.setattr base.telemetry.emit" = 1
-
-[debt.stdlib-patch]
-"test_sdk_telemetry.py#monkeypatch.setattr random.randrange" = 1
-
-[debt.third-party-patch]
-"test_call_policy.py#monkeypatch.delattr httpx.HTTPStatusError" = 1

@@ -704,11 +704,13 @@ def test_plugin_price_validation(cache_miss: float, source_checked_at: str, erro
     with pytest.raises(ValueError, match=error):
         pricing.plugin_model_price(
             "invalid-plugin-price",
-            cache_miss=cache_miss,
-            cache_hit=0.1,
-            output=3.0,
-            source_url="https://example.com/pricing",
-            source_checked_at=source_checked_at,
+            PriceRates(
+                cache_miss=cache_miss,
+                cache_hit=0.1,
+                output=3.0,
+                source_url="https://example.com/pricing",
+                source_checked_at=source_checked_at,
+            ),
         )
 
 

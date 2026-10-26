@@ -195,7 +195,11 @@ def _close_superseded_compact(ctx: MeivaContext, agent_id: int, st: BatchState) 
     prior = st.compact_payload
     if prior is not None and prior[2] is not None:
         emit_compact_finished(
-            ctx.event_publisher, agent_id, prior[2], status=CompactionStatus.REPLACED
+            ctx.event_publisher,
+            agent_id,
+            prior[2],
+            finished_at=ctx.require_clock().now(),
+            status=CompactionStatus.REPLACED,
         )
 
 
@@ -221,7 +225,7 @@ async def _handle_compact_request(
     ctx: MeivaContext,
     agent_id: int,
     state: _state.AgentState,
-    _item: ClaimedInbound,
+    item: ClaimedInbound,
     st: BatchState,
 ) -> None:
     """COMPACT_REQUEST: run Compaction LLM to generate summary.
@@ -252,7 +256,11 @@ async def _handle_compact_request(
     # applied, so its live block closes as `replaced` before this run starts.
     _close_superseded_compact(ctx, agent_id, st)
     compact_run_id = emit_compact_started(
-        ctx.event_publisher, agent_id, mode=CompactionMode.REQUEST
+        ctx.event_publisher,
+        agent_id,
+        compact_id=f"request-{item.id}",
+        started_at=ctx.require_clock().now(),
+        mode=CompactionMode.REQUEST,
     )
     # The compaction LLM call can fail (provider error, empty output). Retry
     # like the auto path (COMPACT_MAX_ATTEMPTS); when every attempt fails,
@@ -282,7 +290,11 @@ async def _handle_compact_request(
             )
     else:
         emit_compact_finished(
-            ctx.event_publisher, agent_id, compact_run_id, status=CompactionStatus.FAILURE
+            ctx.event_publisher,
+            agent_id,
+            compact_run_id,
+            finished_at=ctx.require_clock().now(),
+            status=CompactionStatus.FAILURE,
         )
         raise CompactionFailedError(
             f"Compaction LLM produced no usable summary across {COMPACT_MAX_ATTEMPTS}"

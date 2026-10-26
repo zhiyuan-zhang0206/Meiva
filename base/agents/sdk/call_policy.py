@@ -139,6 +139,14 @@ class SamplingPolicyOwner:
         self.error: tuple[Exception, TracebackType | None] | None = None
         self.worker: _Refresh | None = None
         self.stopped = False
+        self.calls = 0
+
+    def should_sample(self, every: int) -> bool:
+        if every <= 1:
+            return True
+        with self.lock:
+            self.calls += 1
+            return self.calls % every == 0
 
     def read(self) -> SamplingPolicy:
         with self.lock:
