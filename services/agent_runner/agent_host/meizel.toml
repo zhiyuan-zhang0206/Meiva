@@ -19,7 +19,7 @@ exports = ["daemon.py", "held_settle.py", "host.py", "host_beat.py", "invocation
 "__init__.py" = "strict"
 
 [roots]
-"daemon.py" = ["endpoints", "pid", "random"]
+"daemon.py" = { kinds = ["endpoints", "pid", "random"], why = "process entry point of the agent host: builds the service endpoints from the settings, reads its pid and draws the boot uuid4" }
 
 [debt.ambient-read]
 "daemon.py#environ base.native_process.child_env.inherited_process_env" = 1

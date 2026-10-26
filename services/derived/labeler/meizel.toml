@@ -11,7 +11,7 @@ exports = ["daemon.py", "labeler.py", "tests"]
 "label_rules.py" = "strict"
 
 [roots]
-"daemon.py" = ["settings"]
+"daemon.py" = { kinds = ["settings"], why = "process entry point of the labeler daemon: builds ConfigBoot from the process environment" }
 
 [debt.ambient-read]
 "daemon.py#home base.paths.meiva_home" = 1
