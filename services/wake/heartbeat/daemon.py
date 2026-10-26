@@ -33,7 +33,7 @@ from psycopg_pool import ConnectionPool
 
 from base import telemetry
 from base.agents.impersonation.wake import publish_inbound_wake
-from base.clock import Clock
+from base.clock import Clock, Timers
 from base.cluster.dataplane.direct_url import ClusterDirectUrl
 from base.cluster.machine import MachineIdentityReader
 from base.cluster.machine.configured import ConfiguredMachineIdentity
@@ -57,7 +57,7 @@ from ops.cluster import rpc as cluster_rpc
 from services.pidfile import acquire_pidfile, pidfile_holds_daemon, remove_pidfile
 from services.wake.heartbeat import JITTER_SPAN_S, completion_digest
 from services.wake.heartbeat.liveness import LivenessConfig, run_liveness_pass
-from services.wake.heartbeat.loops import dispatch_loop, liveness_loop
+from services.wake.heartbeat.loops import DispatchRound, LivenessRound, dispatch_loop, liveness_loop
 from services.wake.heartbeat.selection import select_idle_agents_needing_heartbeat
 
 _log = logging.getLogger("services.wake.heartbeat.daemon")
@@ -547,6 +547,23 @@ class AgentLivenessRound:
         )
 
 
+async def run_loops(
+    dispatcher: DispatchRound,
+    liveness_round: LivenessRound,
+    digest_round: completion_digest.DigestRound,
+    liveness: LivenessGroup,
+    *,
+    timers: Timers,
+) -> None:
+    dispatch_progress = liveness.register("dispatch", _LIVENESS_TIMEOUT_S)
+    liveness_progress = liveness.register("liveness", _LIVENESS_TIMEOUT_S)
+    digest_progress = liveness.register("completion_digest", _DIGEST_LIVENESS_TIMEOUT_S)
+    async with asyncio.TaskGroup() as loops:
+        loops.create_task(dispatch_loop(dispatcher, dispatch_progress, timers=timers))
+        loops.create_task(liveness_loop(liveness_round, liveness_progress, timers=timers))
+        loops.create_task(completion_digest.completion_digest_loop(digest_round, digest_progress))
+
+
 async def run(
     *,
     process_config: ConfigBoot,
@@ -569,9 +586,6 @@ async def run(
     _log.info("[heartbeat] pidfile written: %s", _pidfile(process_config, runtime=runtime))
 
     liveness = LivenessGroup(timers=clock)
-    dispatch_progress = liveness.register("dispatch", _LIVENESS_TIMEOUT_S)
-    liveness_progress = liveness.register("liveness", _LIVENESS_TIMEOUT_S)
-    digest_progress = liveness.register("completion_digest", _DIGEST_LIVENESS_TIMEOUT_S)
     endpoint = _endpoint(process_config, runtime=runtime)
     health = await start_health_server(
         "heartbeat", endpoint.health_port, liveness=liveness, image=image
@@ -588,29 +602,27 @@ async def run(
         # stalled probe fan-out (bounded by _PROBE_TIMEOUT_S) can never delay a
         # check-in; the completion digest is a third. A loop that raises cancels
         # its siblings and ends the process, and the supervisor restarts it.
-        async with asyncio.TaskGroup() as loops:
-            dispatcher = HeartbeatDispatch(
-                pool,
-                db,
-                bus,
-                config=DispatchConfig(
-                    settings.daemon.heartbeat_idle_threshold_seconds,
-                    settings.daemon.heartbeat_interval_seconds,
-                ),
-                clock=clock,
-            )
-            loops.create_task(dispatch_loop(dispatcher, dispatch_progress, timers=clock))
-            loops.create_task(
-                liveness_loop(AgentLivenessRound(db, pool, bus), liveness_progress, timers=clock)
-            )
-            loops.create_task(
-                completion_digest.completion_digest_loop(
-                    completion_digest.CompletionDigestRound(
-                        pool, db, bus, machine, clock, completion_digest.DigestConfig()
-                    ),
-                    digest_progress,
-                )
-            )
+        dispatcher = HeartbeatDispatch(
+            pool,
+            db,
+            bus,
+            config=DispatchConfig(
+                settings.daemon.heartbeat_idle_threshold_seconds,
+                settings.daemon.heartbeat_interval_seconds,
+            ),
+            clock=clock,
+        )
+        liveness_round = AgentLivenessRound(db, pool, bus)
+        digest_round = completion_digest.CompletionDigestRound(
+            pool, db, bus, machine, clock, completion_digest.DigestConfig()
+        )
+        await run_loops(
+            dispatcher,
+            liveness_round,
+            digest_round,
+            liveness,
+            timers=clock,
+        )
     finally:
         pool.close()
         await stop_health_server(health)

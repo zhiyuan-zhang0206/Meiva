@@ -2,7 +2,3 @@ exports = ["resurrection_support.py"]
 
 [uses]
 "test_resurrection_admission.py" = ["resurrection_support.py"]
-
-[debt.first-party-patch]
-"test_resurrection_admission.py#monkeypatch.setattr ops.agents.wake.publish_inbound_wake" = 1
-"test_resurrection_admission.py#monkeypatch.setattr ops.cluster.rpc.dispatch_to_machine" = 1

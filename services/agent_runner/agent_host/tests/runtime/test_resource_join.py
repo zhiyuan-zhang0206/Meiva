@@ -12,12 +12,14 @@ from typing import Any, cast
 from unittest.mock import MagicMock
 
 import httpx
+import psycopg
 import pytest
 
 from base.agents.context.clients import ClientSet
 from base.agents.sdk.tests.sampling_owners import gateway_sampling_owner
 from base.cluster.machine import MachineIdentityReader
 from base.config import ConfigBoot
+from base.daemon.endpoints import ServiceEndpoints
 from base.db import Database
 from base.db.code_version_gate import ProcessDbGate
 from base.events.live.bus import EventBus
@@ -35,32 +37,65 @@ from services.agent_runner.agent_host.tests.host_policy import (
 )
 
 
+class _PoolRecorder:
+    def __init__(
+        self,
+        events: list[str],
+        label: str,
+        *,
+        worker_thread: Any = None,
+        pidfile: Path | None = None,
+    ) -> None:
+        self._events = events
+        self._label = label
+        self._worker_thread = worker_thread
+        self._pidfile = pidfile
+
+    async def close(self) -> None:
+        if self._worker_thread is not None:
+            assert not self._worker_thread.is_alive()
+        if self._pidfile is not None:
+            assert self._pidfile.exists()
+        self._events.append(self._label)
+
+
+class _ClientRecorder:
+    def __init__(self, events: list[str] | None = None, *, marker: Path | None = None) -> None:
+        self._events = events
+        self._marker = marker
+
+    def close(self) -> None:
+        if self._events is not None:
+            self._events.append("clients")
+        if self._marker is not None:
+            self._marker.touch()
+
+
 async def test_sampling_failure_is_collected_before_pools_and_pidfile_cleanup(
-    monkeypatch: pytest.MonkeyPatch, model_installation: Installation, tmp_path: Path
+    model_installation: Installation, tmp_path: Path, unit_home: Path
 ) -> None:
+    _ = unit_home
     with serve_json({}, status=500) as gateway:
         sampling = gateway_sampling_owner(gateway.url, tmp_path / ".env")
         sampling.read()
         assert gateway.arrived.wait(2)
         worker = sampling.worker
         assert worker is not None and worker.completed.wait(5)
+    pidfile = ServiceEndpoints.from_settings().of("agent_host").pidfile
+    pidfile.parent.mkdir(parents=True, exist_ok=True)
+    pidfile.write_text("123\n")
     events: list[str] = []
-
-    async def close_pools(*_args: object) -> None:
-        assert not worker.thread.is_alive()
-        events.append("pools")
-
-    monkeypatch.setattr(daemon, "close_host_pools", close_pools)
-
-    def remove_pidfile(_path: object) -> None:
-        events.append("pidfile")
-
-    monkeypatch.setattr(daemon, "remove_pidfile", remove_pidfile)
+    workload_pool = _PoolRecorder(
+        events, "workload_pool", worker_thread=worker.thread, pidfile=pidfile
+    )
+    control_pool = _PoolRecorder(
+        events, "control_pool", worker_thread=worker.thread, pidfile=pidfile
+    )
     with pytest.raises(httpx.HTTPStatusError) as caught:
         await daemon.close_process_owners(
             None,
-            cast(Any, object()),
-            cast(Any, object()),
+            cast(Any, workload_pool),
+            cast(Any, control_pool),
             replace(model_installation, sampling=sampling),
             None,
             None,
@@ -68,12 +103,16 @@ async def test_sampling_failure_is_collected_before_pools_and_pidfile_cleanup(
         )
     assert sampling.error is not None
     assert isinstance(caught.value, httpx.HTTPStatusError) and caught.value is sampling.error[0]
-    assert events == ["pools", "pidfile"]
+    assert events == ["control_pool", "workload_pool"]
+    assert not pidfile.exists()
 
 
 async def test_original_error_joins_before_clients_and_pools_close(
-    monkeypatch: pytest.MonkeyPatch, model_catalog: ModelCatalog, *, database_gate: ProcessDbGate
+    model_catalog: ModelCatalog, *, database_gate: ProcessDbGate
 ) -> None:
+    events: list[str] = []
+    clients = ClientSet()
+    clients.get(lambda: _ClientRecorder(events))
     host = AgentHost(
         handoff_stamping=handoff_timestamps(),
         home=meiva_home(),
@@ -85,34 +124,26 @@ async def test_original_error_joins_before_clients_and_pools_close(
         catalog=model_catalog,
         bus=EventBus.from_settings(),
         db=Database.from_settings(gate=database_gate),
+        clients=clients,
         commands=CommandCatalog.system(skills=list),
     )
     scope = await host._resource_service.turn()
     failure = ValueError("original late resource error")
     host._resource_service.record_failure(scope, failure, name="original")
-    events: list[str] = []
-    monkeypatch.setattr(host._clients, "close", lambda: events.append("clients"))
-
-    async def close_pools(*_args: object) -> None:
-        events.append("pools")
-
-    monkeypatch.setattr(daemon, "close_host_pools", close_pools)
     with pytest.raises(ValueError) as observed:
         await host.aclose()
     assert observed.value is failure
     assert host.resources_joined
-    await daemon.close_joined_host_pools(host, cast(Any, object()), cast(Any, object()))
-    assert events == ["clients", "pools"]
+    await daemon.close_joined_host_pools(
+        host,
+        cast(Any, _PoolRecorder(events, "workload_pool")),
+        cast(Any, _PoolRecorder(events, "control_pool")),
+    )
+    assert events == ["clients", "control_pool", "workload_pool"]
 
 
 def exercise_unfinished_main() -> None:
     """Production main's existing hard exit must skip a still-owned async task."""
-    from base.deploy.schema import migrations
-
-    def schema_gate(*_args: object) -> None:
-        pass
-
-    migrations.assert_schema_current = schema_gate
 
     async def run(
         *,
@@ -123,8 +154,11 @@ def exercise_unfinished_main() -> None:
         clients: ClientSet,
         on_clients_owned: Callable[[], None],
     ) -> None:
+        _ = (config, machine)
         assert home == Path(os.environ["MEIVA_HOME"])
         on_clients_owned()
+        marker = Path(os.environ["RESOURCE_JOIN_MARKER"])
+        clients.get(lambda: _ClientRecorder(marker=marker.with_suffix(".clients")))
         host = AgentHost(
             handoff_stamping=handoff_timestamps(),
             home=meiva_home(),
@@ -139,9 +173,6 @@ def exercise_unfinished_main() -> None:
             clients=clients,
             commands=CommandCatalog.system(skills=list),
         )
-        marker = Path(os.environ["RESOURCE_JOIN_MARKER"])
-        patch = pytest.MonkeyPatch()
-        patch.setattr(host._clients, "close", lambda: marker.with_suffix(".clients").touch())
         service = host._resource_service
         await service.turn()
         entered = asyncio.Event()
@@ -166,11 +197,18 @@ def exercise_unfinished_main() -> None:
     daemon.main()
 
 
-def test_unfinished_actual_task_reaches_existing_hard_exit(tmp_path: Path) -> None:
+def test_unfinished_actual_task_reaches_existing_hard_exit(
+    tmp_path: Path, db_conn: psycopg.Connection
+) -> None:
+    _ = db_conn
     marker = tmp_path / "join.txt"
     home = tmp_path / "home"
     home.mkdir()
-    (home / ".env").write_text("MEIVA_MACHINE_NAME=resource-join-test\n")
+    (home / ".env").write_text(
+        f"MEIVA_MACHINE_NAME=resource-join-test\n"
+        f"MEIVA_DB_URL={os.environ['MEIVA_DB_URL']}\n"
+        f"MEIVA_REDIS_URL={os.environ['MEIVA_REDIS_URL']}\n"
+    )
     env = os.environ.copy()
     env.update(
         MEIVA_HOME=str(home),

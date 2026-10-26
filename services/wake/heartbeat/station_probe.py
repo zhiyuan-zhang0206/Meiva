@@ -34,12 +34,14 @@ from __future__ import annotations
 import urllib.error
 import urllib.request
 from collections.abc import Callable
+from pathlib import Path
 
 from base.cluster.dataplane.direct_url import ClusterDirectUrl
 from base.cluster.machine.configured import ConfiguredMachineIdentity
 from base.config import ConfigBoot
 from base.db import Database
 from base.db.code_version_gate import ProcessDbGate
+from base.db.config import db_config_from_boot
 from base.host.db_authority.api import read_telemetry_token
 from base.host.net.ports import SYSTEM_URL_OPENER, UrlOpener
 from base.log import logger
@@ -129,6 +131,29 @@ def station_answers(url: str, *, token: str | None, open_url: UrlOpener) -> bool
         return False
 
 
+def run(
+    *,
+    process_config: ConfigBoot,
+    database: Callable[[], Database],
+    home: Path,
+    open_url: UrlOpener,
+) -> None:
+    config = StationEndpointConfig(
+        observability_url=process_config.view.observability.observability_url,
+        otlp_port=process_config.view.observability.observability_otlp_port,
+    )
+    target = resolve_target(database=database, config=config)
+    if target is None:
+        return
+    ok = station_answers(target.url, token=read_telemetry_token(home), open_url=open_url)
+    if ok is False:
+        logger.bind(_no_emitter=True, component="station-healthcheck").warning(
+            "station probe: {} did not answer a bearer OTLP probe — "
+            "fail-open: local business is unaffected",
+            target.url,
+        )
+
+
 def main(*, process_config: ConfigBoot, open_url: UrlOpener) -> None:
     image = LoadedCommit.capture()
     process_config.boot()
@@ -138,7 +163,8 @@ def main(*, process_config: ConfigBoot, open_url: UrlOpener) -> None:
     gate = ProcessDbGate(version=version.get, process="station")
 
     def database() -> Database:
-        return Database.from_settings(
+        return Database(
+            db_config_from_boot(process_config),
             gate=gate,
             direct_url=ClusterDirectUrl(machine.host),
         )
@@ -150,20 +176,12 @@ def main(*, process_config: ConfigBoot, open_url: UrlOpener) -> None:
         machine_reader=machine.name,
         image=image,
     )
-    config = StationEndpointConfig(
-        observability_url=process_config.view.observability.observability_url,
-        otlp_port=process_config.view.observability.observability_otlp_port,
+    run(
+        process_config=process_config,
+        database=database,
+        home=process_home,
+        open_url=open_url,
     )
-    target = resolve_target(database=database, config=config)
-    if target is None:
-        return  # no remote observatory configured — nothing to probe here
-    ok = station_answers(target.url, token=read_telemetry_token(process_home), open_url=open_url)
-    if ok is False:
-        logger.bind(_no_emitter=True, component="station-healthcheck").warning(
-            "station probe: {} did not answer a bearer OTLP probe — "
-            "fail-open: local business is unaffected",
-            target.url,
-        )
 
 
 if __name__ == "__main__":

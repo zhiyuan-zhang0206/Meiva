@@ -5,9 +5,3 @@ exports = ["recovery_admission.py", "resurrection", "test_hosted_lifecycle.py"]
 "test_graceful_exit.py" = ["child_graceful_exit.py", "restart_cluster.py", "scripted_model.py"]
 "test_restart_resume.py" = ["restart_cluster.py", "scripted_model.py"]
 "test_hosted_backlog_recovery.py" = ["recovery_admission.py"]
-
-[debt.first-party-patch]
-"test_hosted_lifecycle.py#monkeypatch.setattr ops.cluster_status.kill_agent_shells" = 1
-
-[debt.third-party-patch]
-"test_hosted_dispatcher_cancellation.py#monkeypatch.setattr psycopg_pool.AsyncConnectionPool._check_connection" = 1

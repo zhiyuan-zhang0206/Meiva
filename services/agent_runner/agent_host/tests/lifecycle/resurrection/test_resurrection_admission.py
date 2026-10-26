@@ -12,16 +12,17 @@ from base.agents.birth.spawn import create_agent_row
 from base.agents.inbox.insert import insert_inbound_message
 from base.agents.messages.inbound import InboundKind
 from base.api_contracts.agent_contract import ResurrectError
+from base.cluster import redis_channel_prefix
 from base.cluster.machine import MachineIdentityReader
 from base.config.service_read import ConfigAuthority
 from base.db import Database
 from base.db.code_version_gate import ProcessDbGate
 from base.events.live.bus import EventBus
+from base.host.net.tests.local_http import serve_asgi
 from base.lm.catalog import ModelCatalog
 from base.native_process.runtime_incarnation import RuntimeIncarnation
 from ops import lifecycle
 from ops.agents import wake
-from ops.cluster import rpc as cluster_rpc
 from ops.cluster.rpc import ClusterOpFailed
 from services.agent_runner.agent_host.tests.lifecycle.resurrection.resurrection_support import (
     force,
@@ -30,15 +31,44 @@ from services.agent_runner.agent_host.tests.lifecycle.resurrection.resurrection_
 )
 
 
+class _WakeCapture:
+    def __init__(self, pubsub: Any) -> None:
+        self._pubsub = pubsub
+        self._items: list[tuple[int, str]] = []
+
+    def _drain(self) -> None:
+        while True:
+            raw: dict[str, Any] | None = self._pubsub.get_message(timeout=0.05)
+            if raw is None:
+                break
+            if raw.get("type") != "pmessage":
+                continue
+            channel = raw["channel"]
+            channel_str = channel.decode() if isinstance(channel, bytes) else str(channel)
+            data = raw["data"]
+            payload = data.decode() if isinstance(data, bytes) else str(data)
+            self._items.append((int(channel_str.rpartition(":")[2]), payload))
+
+    def clear(self) -> None:
+        self._drain()
+        self._items.clear()
+
+    def drained(self) -> list[tuple[int, str]]:
+        self._drain()
+        return list(self._items)
+
+
 @pytest.fixture(autouse=True)
-def wakes(monkeypatch: pytest.MonkeyPatch) -> Iterator[list[tuple[int, str]]]:
-    captured: list[tuple[int, str]] = []
-
-    def _record(_db: object, _bus: object, agent_id: int, payload: str) -> None:
-        captured.append((agent_id, payload))
-
-    monkeypatch.setattr(wake, "publish_inbound_wake", _record)
-    yield captured
+def wakes(event_bus: EventBus) -> Iterator[_WakeCapture]:
+    redis_client: Any = event_bus.sync_redis()
+    pubsub = redis_client.pubsub()
+    pubsub.psubscribe(f"{redis_channel_prefix(event_bus.channel)}:inbound:*")
+    assert pubsub.get_message(timeout=1.0) is not None
+    try:
+        yield _WakeCapture(pubsub)
+    finally:
+        pubsub.close()
+        redis_client.close()
 
 
 def _identity(db: psycopg.Connection, aid: int) -> tuple[Any, Any]:
@@ -54,7 +84,7 @@ def _identity(db: psycopg.Connection, aid: int) -> tuple[Any, Any]:
 async def test_terminated_row_resurrects_unowned_and_admits_a_fresh_generation(
     db_conn: psycopg.Connection,
     aops_pool: AsyncConnectionPool,
-    wakes: list[tuple[int, str]],
+    wakes: _WakeCapture,
     guarded: bool,
     database: Database,
     event_bus: EventBus,
@@ -77,6 +107,7 @@ async def test_terminated_row_resurrects_unowned_and_admits_a_fresh_generation(
         else None
     )
     db_conn.commit()
+    wakes.clear()
 
     wake.resurrect_agent(
         database,
@@ -89,7 +120,7 @@ async def test_terminated_row_resurrects_unowned_and_admits_a_fresh_generation(
 
     assert status(db_conn, aid) == "idling"
     assert _identity(db_conn, aid) == (None, None)
-    assert wakes == [(aid, "0")]
+    assert wakes.drained() == [(aid, "0")]
     incarnation = await admit_hosted_runtime(
         aops_pool, aid, machine_identity.name(), uuid4(), db=database
     )
@@ -156,7 +187,6 @@ def test_trigger_must_be_newer_than_every_terminate_command(
 
 async def test_unknown_auto_resurrect_failure_propagates(
     db_conn: psycopg.Connection,
-    monkeypatch: pytest.MonkeyPatch,
     loguru_records: list[dict[str, Any]],
     database: Database,
     event_bus: EventBus,
@@ -178,19 +208,39 @@ async def test_unknown_auto_resurrect_failure_propagates(
     )
     db_conn.commit()
 
-    async def _failed(*_a: object, **_kw: object) -> dict[str, Any]:
-        raise ClusterOpFailed({"error": "launch failed on the home machine"})
-
-    monkeypatch.setattr(cluster_rpc, "dispatch_to_machine", _failed)
-    with pytest.raises(ClusterOpFailed):
-        await lifecycle.resurrect_if_terminated(
-            Database.from_settings(gate=database_gate),
-            event_bus,
-            aid,
-            trigger_inbound_id=trigger,
-            trigger_inbound_kind=InboundKind.CHAT,
-            local_machine=machine_identity.name(),
+    async def failed_ops(scope: Any, receive: Any, send: Any) -> None:
+        del scope
+        await receive()
+        await send(
+            {
+                "type": "http.response.start",
+                "status": 200,
+                "headers": [(b"content-type", b"application/json")],
+            }
         )
+        await send(
+            {
+                "type": "http.response.body",
+                "body": b'{"status":"failed","result":{"error":"launch failed on the home machine"}}',
+            }
+        )
+
+    with serve_asgi(failed_ops) as ops_url:
+        db_conn.execute(
+            "INSERT INTO machines (name, gateway_url) VALUES (%s, %s) "
+            "ON CONFLICT (name) DO UPDATE SET gateway_url = EXCLUDED.gateway_url",
+            (machine_identity.name(), ops_url),
+        )
+        db_conn.commit()
+        with pytest.raises(ClusterOpFailed):
+            await lifecycle.resurrect_if_terminated(
+                Database.from_settings(gate=database_gate),
+                event_bus,
+                aid,
+                trigger_inbound_id=trigger,
+                trigger_inbound_kind=InboundKind.CHAT,
+                local_machine=machine_identity.name(),
+            )
     assert not any(r["extra"].get("event") == "auto_resurrect_failed" for r in loguru_records)
     assert db_conn.execute(
         "SELECT status FROM inbound_messages WHERE id=%s", (trigger,)
@@ -334,7 +384,7 @@ async def restarted(
 async def test_a_row_this_runtime_left_and_ended_unowned_resurrects(
     db_conn: psycopg.Connection,
     aops_pool: AsyncConnectionPool,
-    wakes: list[tuple[int, str]],
+    wakes: _WakeCapture,
     arrange: _Arrange,
     guarded: bool,
     database: Database,
@@ -374,7 +424,7 @@ async def test_a_row_this_runtime_left_and_ended_unowned_resurrects(
     )
 
     assert _unowned_idle(db_conn, aid)
-    assert wakes == [(aid, "0")]
+    assert wakes.drained() == [(aid, "0")]
     assert await admit_hosted_incarnation(
         aops_pool, aid, database_gate=database_gate, machine_identity=machine_identity
     )

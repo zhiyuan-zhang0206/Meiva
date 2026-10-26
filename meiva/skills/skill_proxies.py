@@ -10,13 +10,30 @@ from __future__ import annotations
 
 import types
 from collections.abc import Callable
-from typing import Any
 
 from base.packages.skills.tree import NS, Leaf, Skill
 
 __all__ = ["Consume", "LazySkillDoc", "Namespace", "SkillProxy", "consumed_text", "node_to_obj"]
 
 type Consume = Callable[[Skill], str]
+
+
+class _LazyDocDescriptor:
+    def __init__(self, class_doc: str | None = None) -> None:
+        self._class_doc = class_doc
+
+    def __get__(
+        self, instance: LazySkillDoc | None, owner: type[LazySkillDoc] | None = None
+    ) -> str | None:
+        del owner
+        if instance is None:
+            return self._class_doc
+        if instance._doc is None:
+            return instance._load_skill_doc()
+        return instance._doc
+
+    def __set__(self, instance: LazySkillDoc, value: str | None) -> None:
+        instance._doc = value
 
 
 class LazySkillDoc:
@@ -27,24 +44,18 @@ class LazySkillDoc:
     body (index-only nodes set it eagerly in `__init__` and never hit the
     lazy path) and `self._info` to the `Skill` metadata.
 
-    The hook is `__getattribute__` rather than a `__doc__` property: every
-    class body auto-assigns its own docstring to `__doc__`, so a base-class
-    property named `__doc__` is always shadowed by the subclass's own
-    (None-typed) class attribute. The override returns `Any` — the standard
-    typing escape hatch for dynamic proxy objects whose attributes are only
-    known at runtime."""
+    Each subclass receives a `_LazyDocDescriptor` on `__doc__` via
+    `__init_subclass__`: every class body auto-assigns its own docstring to
+    `__doc__`, so a base-class property named `__doc__` would be shadowed by
+    the subclass's own class attribute."""
 
     _info: Skill
     _consume: Consume
     _doc: str | None = None
 
-    def __getattribute__(self, name: str) -> Any:
-        if name == "__doc__":
-            doc = super().__getattribute__("_doc")
-            if doc is None:
-                doc = super().__getattribute__("_load_skill_doc")()
-            return doc
-        return super().__getattribute__(name)
+    def __init_subclass__(cls, **kwargs: object) -> None:
+        super().__init_subclass__(**kwargs)
+        type.__setattr__(cls, "__doc__", _LazyDocDescriptor(cls.__doc__))
 
     def _load_skill_doc(self) -> str:
         """Read the SKILL.md body, record the `skill_invoked` attribution, and
