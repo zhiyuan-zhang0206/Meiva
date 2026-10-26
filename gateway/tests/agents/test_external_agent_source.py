@@ -19,7 +19,7 @@ from fastapi.testclient import TestClient
 from psycopg_pool import AsyncConnectionPool
 
 from agent.db import claim_inbound_batch
-from agent.graph.claim._chat_inbound import build_chat_inbound
+from agent.graph.claim import build_chat_inbound
 from agent.ownership.hosted import admit_hosted_runtime, settle_hosted_runtime
 from base.agents.messages.envelope import validate_source
 from base.agents.messages.timestamp_policy import TimestampPolicy

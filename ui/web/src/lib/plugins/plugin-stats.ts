@@ -1,7 +1,5 @@
 "use client";
 
-import { useMemo } from "react";
-
 import type { PluginStat, UiStatContribution } from "../contracts/types";
 import {
   buildPluginStatCardsAt,
@@ -21,15 +19,18 @@ export {
 export function buildPluginStatCards(
   declarations: UiStatContribution[] | undefined,
   values: PluginStat[] | undefined,
-  now: Date = new Date(),
+  now: Date,
 ): PluginStatCard[] {
   return buildPluginStatCardsAt(declarations, values, now.getTime());
 }
 
 /** The panel's view of the plugin cards: declarations joined with the values
  *  the dashboard response carried. */
-export function usePluginStatCards(values: PluginStat[] | undefined): PluginStatCard[] {
+export function usePluginStatCards(
+  values: PluginStat[] | undefined,
+  now: Date,
+): PluginStatCard[] {
   const { contributions } = useUiContributions();
   const declarations = contributions?.stats;
-  return useMemo(() => buildPluginStatCards(declarations, values), [declarations, values]);
+  return buildPluginStatCards(declarations, values, now);
 }

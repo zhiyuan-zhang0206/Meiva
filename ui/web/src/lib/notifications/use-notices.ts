@@ -52,7 +52,7 @@ export interface NoticesFeed {
  *  server resolve lands (task #3272). The deadline bounds how long a drop
  *  can hide a row when no confirmation ever arrives. */
 const tombstoneState = {
-  deadlines: new Map<number, number>(), // id -> deadline (ms epoch)
+  timers: new Map<number, ReturnType<typeof setTimeout>>(),
 };
 // KEEP (task #3696 exception inventory): the deadline gives one confirmation
 // round trip (SSE resolve + refetch) room to land — 15s covers that several
@@ -63,21 +63,20 @@ const TOMBSTONE_MS = 15_000;
  *  that no longer lists an id proves the server resolved it — retire that
  *  tombstone; the deadline retires any tombstone no confirmation reaches. */
 function withoutDroppedRows(wire: NoticesFeedWire): NoticesFeedWire {
-  const { deadlines } = tombstoneState;
-  if (deadlines.size === 0) return wire;
-  const now = Date.now();
-  for (const [id, deadline] of deadlines) {
-    if (deadline <= now) deadlines.delete(id);
-  }
+  const { timers } = tombstoneState;
+  if (timers.size === 0) return wire;
   const listed = new Set([...wire.open.map((n) => n.id), ...wire.awaiting.map((n) => n.id)]);
-  for (const id of [...deadlines.keys()]) {
-    if (!listed.has(id)) deadlines.delete(id);
+  for (const [id, timer] of [...timers.entries()]) {
+    if (!listed.has(id)) {
+      clearTimeout(timer);
+      timers.delete(id);
+    }
   }
-  if (deadlines.size === 0) return wire;
+  if (timers.size === 0) return wire;
   return {
     ...wire,
-    open: wire.open.filter((n) => !deadlines.has(n.id)),
-    awaiting: wire.awaiting.filter((n) => !deadlines.has(n.id)),
+    open: wire.open.filter((n) => !timers.has(n.id)),
+    awaiting: wire.awaiting.filter((n) => !timers.has(n.id)),
   };
 }
 
@@ -140,8 +139,16 @@ export function dropOpenNotices(queryClient: QueryClient, noticeIds: number[]): 
   // after this point (e.g. an SSE invalidation inside the resolve window)
   // still returns the pre-resolve snapshot, and would revive the rows for
   // the seconds until the resolve lands without this guard (task #3272).
-  const deadline = Date.now() + TOMBSTONE_MS;
-  for (const id of noticeIds) tombstoneState.deadlines.set(id, deadline);
+  for (const id of noticeIds) {
+    const existing = tombstoneState.timers.get(id);
+    if (existing !== undefined) clearTimeout(existing);
+    tombstoneState.timers.set(
+      id,
+      setTimeout(() => {
+        tombstoneState.timers.delete(id);
+      }, TOMBSTONE_MS),
+    );
+  }
   // Cancel the in-flight open-queue refetch first: its snapshot predates this
   // drop, and letting it land would resurrect the just-resolved row until the
   // next SSE-driven refetch corrects it — visible as the row bouncing back
@@ -160,5 +167,6 @@ export function dropOpenNotices(queryClient: QueryClient, noticeIds: number[]): 
 }
 
 export function dropTombstonesResetForTest(): void {
-  tombstoneState.deadlines.clear();
+  for (const timer of tombstoneState.timers.values()) clearTimeout(timer);
+  tombstoneState.timers.clear();
 }

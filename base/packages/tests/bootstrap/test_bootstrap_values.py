@@ -92,7 +92,8 @@ def test_bootstrap_serves_explicit_set_to_empty(
     got the default skill index back and crashed on the disabled meiva.skills
     (issue #948)."""
     serve_generation(tmp_path)
-    bootstrap_authority.runtime.agent.skills_to_inject_into_system_prompt = []
+    runtime: Any = bootstrap_authority.runtime
+    runtime.agent.skills_to_inject_into_system_prompt = []
 
     vals = config.bootstrap_config_values(
         bootstrap_authority,
@@ -110,7 +111,8 @@ def test_bootstrap_still_skips_none(
     """None (no value at all) stays unserved — env text can't express it; the
     recipient falls back to the field default. Distinct from set-to-empty."""
     serve_generation(tmp_path)
-    bootstrap_authority.runtime.observability.trace_retention_days = None
+    runtime: Any = bootstrap_authority.runtime
+    runtime.observability.trace_retention_days = None
 
     vals = config.bootstrap_config_values(
         bootstrap_authority,
@@ -206,7 +208,8 @@ def test_bootstrap_serves_reachable_host_for_loopback_urls(
     from urllib.parse import urlsplit
 
     serve_generation(tmp_path)
-    bootstrap_authority.runtime.general.machine_host = "10.0.0.3"
+    runtime: Any = bootstrap_authority.runtime
+    runtime.general.machine_host = "10.0.0.3"
 
     db = str(config.settings.data_plane.db_url)
     redis = str(config.settings.data_plane.redis_url)
@@ -234,7 +237,8 @@ def test_bootstrap_keeps_loopback_when_gateway_is_single_box(
     URLs as-is — there is no remote runner to reach it, and swapping to
     `localhost` would be a no-op."""
     serve_generation(tmp_path)
-    bootstrap_authority.runtime.general.machine_host = "localhost"
+    runtime: Any = bootstrap_authority.runtime
+    runtime.general.machine_host = "localhost"
 
     vals = config.bootstrap_config_values(
         bootstrap_authority,
@@ -256,8 +260,9 @@ def test_bootstrap_keeps_existing_reachable_url_host(
     """A .env URL that already names the reachable host (prod's historical
     hand-set URLs) passes through verbatim — no rewrite of a non-loopback host."""
     serve_generation(tmp_path)
-    bootstrap_authority.runtime.general.machine_host = "10.0.0.3"
-    dp = bootstrap_authority.runtime.data_plane
+    runtime: Any = bootstrap_authority.runtime
+    runtime.general.machine_host = "10.0.0.3"
+    dp = runtime.data_plane
     # parts-built, scanner-safe (same convention as cli/commands/converge/tests/test_converge.py)
     host_url = f"postgresql://meiva_main:{'sek'}@10.0.0.2:5433/meiva_main"
     dp.db_url = host_url

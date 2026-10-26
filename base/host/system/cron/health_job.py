@@ -25,6 +25,7 @@ def _launchd_plist_path(user_home: Path | None = None) -> Path:
 def _own_probe_job_of(
     own_labels: set[str],
     *,
+    uid: int,
     current_label: str | None = None,
     ancestral_labels: frozenset[str] | None = None,
 ) -> str | None:
@@ -45,7 +46,7 @@ def _own_probe_job_of(
             ancestral_labels=ancestral_labels,
         )
     for candidate in sorted(own_labels):
-        if descends_from_launchd_job(candidate):
+        if descends_from_launchd_job(candidate, uid=uid):
             return candidate
     return None
 
@@ -77,6 +78,7 @@ def register_macos(
     # is the proof; see the linked health-job custody contract.
     own_job = _own_probe_job_of(
         {label},
+        uid=host.uid,
         current_label=current_label,
         ancestral_labels=ancestral_labels,
     )

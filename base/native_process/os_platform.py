@@ -87,13 +87,14 @@ def launchd_job_label() -> str | None:
 def _launchd_print(
     label: str,
     *,
+    uid: int,
     macos: bool | None = None,
 ) -> subprocess.CompletedProcess[str] | None:
     on_macos = is_macos() if macos is None else macos
     if not on_macos:
         return None
     return subprocess.run(  # noqa: S603
-        ["launchctl", "print", f"gui/{os.getuid()}/{label}"],
+        ["launchctl", "print", f"gui/{uid}/{label}"],
         capture_output=True,
         text=True,
         check=False,
@@ -103,6 +104,7 @@ def _launchd_print(
 def descends_from_launchd_job(
     label: str,
     *,
+    uid: int,
     macos: bool | None = None,
     current_pid: int | None = None,
     launchctl_print: tuple[int, str] | None = None,
@@ -128,7 +130,7 @@ def descends_from_launchd_job(
     if launchctl_print is not None:
         returncode, stdout = launchctl_print
     else:
-        result = _launchd_print(label, macos=on_macos)
+        result = _launchd_print(label, uid=uid, macos=on_macos)
         if result is None:
             return False
         returncode, stdout = result.returncode, result.stdout
@@ -234,6 +236,10 @@ def _take_nonblocking(fd: int) -> bool:
     return True
 
 
+def _monotonic() -> float:
+    return time.monotonic()
+
+
 @contextlib.contextmanager
 def _bounded_file_lock(path: Path, timeout_s: float) -> Generator[None]:
     """`file_lock`'s bounded mode — poll non-blocking take until deadline."""
@@ -241,7 +247,7 @@ def _bounded_file_lock(path: Path, timeout_s: float) -> Generator[None]:
     try:
         deadline: float | None = None
         while not _take_nonblocking(fd):
-            now = time.monotonic()
+            now = _monotonic()
             if deadline is None:
                 deadline = now + timeout_s
             if now >= deadline:

@@ -300,7 +300,6 @@ def test_graceful_delivery_refuses_a_birth_beyond_the_tolerance(
     ],
 )
 def test_backend_route_matrix(
-    monkeypatch: pytest.MonkeyPatch,
     is_macos: bool,
     enabled: bool,
     spawn: bool,
@@ -309,34 +308,35 @@ def test_backend_route_matrix(
     from base.config import get_field, set_field
     from base.sessions import backend as session_backend
 
-    monkeypatch.setattr(session_backend, "is_macos", lambda: is_macos)
-    prior_enabled = get_field("permissions_helper_enabled")
-    prior_spawn = get_field("permissions_helper_spawn")
+    previous_enabled = get_field("permissions_helper_enabled")
+    previous_spawn = get_field("permissions_helper_spawn")
     set_field("permissions_helper_enabled", enabled)
     set_field("permissions_helper_spawn", spawn)
     try:
-        backend = session_backend.get_backend()
+        backend = session_backend.get_backend(macos=is_macos)
     finally:
-        set_field("permissions_helper_enabled", prior_enabled)
-        set_field("permissions_helper_spawn", prior_spawn)
+        set_field("permissions_helper_enabled", previous_enabled)
+        set_field("permissions_helper_spawn", previous_spawn)
     assert type(backend).__name__ == expected
 
 
-def test_backend_route_fails_closed_when_settings_are_unreadable(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    import base.config
+def test_backend_route_fails_closed_when_settings_are_unreadable() -> None:
+    from base.config import get_field, set_field
     from base.sessions import backend as session_backend
 
-    class BrokenSettings:
-        @property
-        def services(self) -> object:
+    # meiva:note
+    # Raise on truthiness evaluation so helper_spawn_enabled hits its fail-closed exception path without patching base.config.settings.
+    class _UnreadableFlag:
+        def __bool__(self) -> bool:
             raise RuntimeError("unreadable")
 
-    monkeypatch.setattr(session_backend, "is_macos", lambda: True)
-    monkeypatch.setattr(base.config, "settings", BrokenSettings())
-
-    assert type(session_backend.get_backend()).__name__ == "PosixProcSessionBackend"
+    previous_enabled = get_field("permissions_helper_enabled")
+    set_field("permissions_helper_enabled", _UnreadableFlag())
+    try:
+        backend = session_backend.get_backend(macos=True)
+    finally:
+        set_field("permissions_helper_enabled", previous_enabled)
+    assert type(backend).__name__ == "PosixProcSessionBackend"
 
 
 def test_permissions_helper_spawn_defaults_off() -> None:
@@ -479,8 +479,9 @@ def _child_main() -> None:
         time.sleep(60)
     elif mode == "parent-chain":
         spec = json.loads(sys.argv[2])
-        links = {os.getpid() if k == "self" else int(k): int(v) for k, v in spec.items()}
-        sys.stdout.write("1" if parent_chain_intact(links.get) else "0")
+        pid = os.getpid()
+        links = {pid if k == "self" else int(k): int(v) for k, v in spec.items()}
+        sys.stdout.write("1" if parent_chain_intact(pid, links) else "0")
     elif mode == "require-parent-chain":
         from services.agent_runner.agent_host import daemon
 

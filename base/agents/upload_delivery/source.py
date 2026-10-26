@@ -91,7 +91,7 @@ def _claim(
         found = _lookup(conn, key, fingerprint)
         if found is not None:
             return found
-        manifest = make_manifest(agent_id, names, batch)
+        manifest = make_manifest(agent_id, names, batch, key=key)
         target = target_unit(conn, agent_id)
         storage.check_quota(
             conn,

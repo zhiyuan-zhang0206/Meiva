@@ -9,9 +9,9 @@ distribution and never generates text. It is deliberately separate from chat mod
 from __future__ import annotations
 
 import math
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass
-from typing import Any, Protocol
+from typing import Protocol
 
 from base.lm.catalog.provider_keys import ProviderKeys
 
@@ -172,7 +172,8 @@ class AsyncTransport(Protocol):
     contract loads on the exec-child boot path, which must not load the connection stack.
     """
 
-    async def handle_async_request(self, request: Any) -> object: ...
+    @property
+    def handle_async_request(self) -> Callable[..., object]: ...
 
 
 class DecisionBinding(Protocol):

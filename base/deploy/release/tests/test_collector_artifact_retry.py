@@ -267,8 +267,9 @@ def test_a_body_that_closes_after_the_deadline_is_not_a_success(tmp_path: Path) 
             open_url=_ObservedOpener(),
             timers=SYSTEM_TIMERS,
             limits=limits,
-            deadline=SYSTEM_TIMERS.monotonic() + limits.total_budget_s,
-            progress=artifact.DownloadProgress(),
+            progress=artifact.DownloadProgress(
+                deadline=SYSTEM_TIMERS.monotonic() + limits.total_budget_s
+            ),
         )
     assert dest.stat().st_size == drip.body_len
     assert drip.bytes_sent == drip.body_len
@@ -343,8 +344,7 @@ def test_the_progress_heartbeat_follows_the_configured_interval(
         open_url=_open,
         timers=timers,
         limits=limits,
-        deadline=timers.monotonic() + limits.total_budget_s,
-        progress=artifact.DownloadProgress(),
+        progress=artifact.DownloadProgress(deadline=timers.monotonic() + limits.total_budget_s),
     )
     assert dest.read_bytes() == body
     out = capsys.readouterr().out

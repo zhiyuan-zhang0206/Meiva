@@ -152,7 +152,7 @@ export function ResolvedDetail({
         <div className="mt-4 border-t border-border pt-3">
           <div className="text-[10px] font-medium uppercase tracking-wide text-muted-foreground/70">
             {label}
-            {notice.resolved_at ? ` · ${formatRelativeTime(notice.resolved_at)}` : ""}
+            {notice.resolved_at ? ` · ${formatRelativeTime(notice.resolved_at, new Date())}` : ""}
           </div>
           {notice.question ? (
             <div className="mt-3"><NoticeQuestionSummary question={notice.question} answer={notice.answer} /></div>

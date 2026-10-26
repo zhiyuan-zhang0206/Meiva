@@ -1,6 +1,1 @@
 exports = ["test_pgbouncer_wire.py"]
-
-[debt.first-party-patch]
-"test_pgbouncer_config.py#monkeypatch.setattr base.db.connections.ConnectionPool" = 1
-"test_pgbouncer_config.py#monkeypatch.setattr base.db.connections.psycopg.connect" = 1
-"test_pgbouncer_config.py#monkeypatch.setattr services.backup.dump.local_owner_authority" = 1

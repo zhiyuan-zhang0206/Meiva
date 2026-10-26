@@ -190,7 +190,7 @@ def transport_for_url(url: str) -> httpx.HTTPTransport | None:
     return PinnedIPv4Transport() if is_ipv4_literal(host) else None
 
 
-def get(url: str, **kwargs: typing.Any) -> httpx.Response:
+def get(url: str, **kwargs: object) -> httpx.Response:
     """`httpx.get` for a cluster-internal dial: pins an IPv4-literal `url`
     host, otherwise identical — literally `httpx.get` for a hostname target
     (including test suites that `monkeypatch.setattr("httpx.get", ...)`;
@@ -200,44 +200,49 @@ def get(url: str, **kwargs: typing.Any) -> httpx.Response:
     caller needing a Client-construction-level kwarg (`verify` / `proxy` /
     `trust_env`) should build its own
     `httpx.Client(transport=transport_for_url(url), ...)` instead."""
+    call_kwargs: dict[str, typing.Any] = kwargs
     transport = transport_for_url(url)
     if transport is None:
-        return httpx.get(url, **kwargs)
+        return httpx.get(url, **call_kwargs)
     with httpx.Client(transport=transport) as client:
-        return client.get(url, **kwargs)
+        return client.get(url, **call_kwargs)
 
 
-def post(url: str, **kwargs: typing.Any) -> httpx.Response:
+def post(url: str, **kwargs: object) -> httpx.Response:
     """`httpx.post` for a cluster-internal dial. See `get`."""
+    call_kwargs: dict[str, typing.Any] = kwargs
     transport = transport_for_url(url)
     if transport is None:
-        return httpx.post(url, **kwargs)
+        return httpx.post(url, **call_kwargs)
     with httpx.Client(transport=transport) as client:
-        return client.post(url, **kwargs)
+        return client.post(url, **call_kwargs)
 
 
-def put(url: str, **kwargs: typing.Any) -> httpx.Response:
+def put(url: str, **kwargs: object) -> httpx.Response:
     """`httpx.put` for a cluster-internal dial. See `get`."""
+    call_kwargs: dict[str, typing.Any] = kwargs
     transport = transport_for_url(url)
     if transport is None:
-        return httpx.put(url, **kwargs)
+        return httpx.put(url, **call_kwargs)
     with httpx.Client(transport=transport) as client:
-        return client.put(url, **kwargs)
+        return client.put(url, **call_kwargs)
 
 
-def patch(url: str, **kwargs: typing.Any) -> httpx.Response:
+def patch(url: str, **kwargs: object) -> httpx.Response:
     """`httpx.patch` for a cluster-internal dial. See `get`."""
+    call_kwargs: dict[str, typing.Any] = kwargs
     transport = transport_for_url(url)
     if transport is None:
-        return httpx.patch(url, **kwargs)
+        return httpx.patch(url, **call_kwargs)
     with httpx.Client(transport=transport) as client:
-        return client.patch(url, **kwargs)
+        return client.patch(url, **call_kwargs)
 
 
-def delete(url: str, **kwargs: typing.Any) -> httpx.Response:
+def delete(url: str, **kwargs: object) -> httpx.Response:
     """`httpx.delete` for a cluster-internal dial. See `get`."""
+    call_kwargs: dict[str, typing.Any] = kwargs
     transport = transport_for_url(url)
     if transport is None:
-        return httpx.delete(url, **kwargs)
+        return httpx.delete(url, **call_kwargs)
     with httpx.Client(transport=transport) as client:
-        return client.delete(url, **kwargs)
+        return client.delete(url, **call_kwargs)

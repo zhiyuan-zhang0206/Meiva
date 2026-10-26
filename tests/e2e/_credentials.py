@@ -33,7 +33,7 @@ import httpx
 import pytest
 from playwright.sync_api import Browser, BrowserContext
 
-from base.config import settings
+from base.config import set_field, settings
 from base.host.db_authority.tests.generation import seed_active_generation
 from base.host.net.auth import API_TOKEN_ENV, bearer_header
 from tests.e2e._ports import GATEWAY_URL
@@ -75,7 +75,7 @@ def mint_credentials(home: Path) -> E2ECredentials:
         gateway_token=tokens.gateway,
         runner_token=tokens.runner,
     )
-    settings.data_plane.cluster_secret = _current.secret
+    set_field("cluster_secret", _current.secret)
     return _current
 
 
@@ -87,7 +87,7 @@ def current_credentials() -> E2ECredentials:
 
 def forget_credentials() -> None:
     global _current  # noqa: PLW0603
-    settings.data_plane.cluster_secret = _previous_secret
+    set_field("cluster_secret", _previous_secret)
     _current = None
 
 

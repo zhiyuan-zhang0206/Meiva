@@ -1,3 +1,5 @@
+exports = ["owned_postgres.py"]
+
 [uses]
 "test_gateway_cold_start.py" = ["_gateway_cold_start_child.py"]
 "test_pg_owner_authority.py" = ["owned_postgres.py"]

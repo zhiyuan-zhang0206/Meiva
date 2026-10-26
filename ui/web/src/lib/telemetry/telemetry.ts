@@ -20,6 +20,7 @@
 // browser session without carrying identity.
 
 import { API_BASE, registerTransportTelemetry } from "../transport/api-base";
+import { newOperationKey } from "../transport/operation-key";
 import {
   createTelemetryBufferState,
   recordTrackEvent,
@@ -48,20 +49,10 @@ const runtimeState: {
   fetchImpl: undefined,
 };
 
-function newSessionId(): string {
-  if (typeof crypto !== "undefined" && "randomUUID" in crypto) {
-    return crypto.randomUUID();
-  }
-  // Non-secure-context fallback (plain-HTTP private network): randomUUID is
-  // secure-context-only; uniqueness is all that matters here.
-  const rnd = () => Math.random().toString(16).slice(2);
-  return `${Date.now().toString(16)}-${rnd()}${rnd()}`;
-}
-
 function flush(): void {
   const { bufferState } = runtimeState;
   if (!bufferState.enabled || bufferState.buffer.length === 0) return;
-  if (bufferState.sessionId === "") bufferState.sessionId = newSessionId();
+  if (bufferState.sessionId === "") bufferState.sessionId = newOperationKey();
   const batch = takeFlushBatch(bufferState, bufferState.sessionId, Date.now(), API_BASE);
   if (batch === null) return;
   // Beacon first: it survives pagehide/unload and needs no response. When
@@ -179,7 +170,7 @@ function __telemetryBufferSize(): number {
 /** Per-tab session id (minted lazily) — tests only. */
 function __telemetrySessionId(): string {
   if (runtimeState.bufferState.sessionId === "") {
-    runtimeState.bufferState.sessionId = newSessionId();
+    runtimeState.bufferState.sessionId = newOperationKey();
   }
   return runtimeState.bufferState.sessionId;
 }

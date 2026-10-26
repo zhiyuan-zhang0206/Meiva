@@ -77,16 +77,17 @@ class HelperChainWatch:
     async def run(self) -> None:
         broken_rounds = 0
         while not self._stop.is_set():
+            root_pid = psutil.Process().pid
             reading = observe_round(
                 broken_rounds=broken_rounds,
-                intact=parent_chain_intact(),
+                intact=parent_chain_intact(root_pid),
                 confirm_rounds=self._config.confirm_rounds,
             )
             broken_rounds = reading.broken_rounds
             if reading.retire:
                 self._retire(
                     evidence_line(
-                        root_pid=psutil.Process().pid,
+                        root_pid=root_pid,
                         marker=helper_marker_pid(),
                         broken_rounds=broken_rounds,
                     )

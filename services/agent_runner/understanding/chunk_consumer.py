@@ -410,10 +410,12 @@ class Consumer:
         keys: ProviderKeys,
         llm_override: str,
         config: ConfigBoot,
+        poll_seconds: float = POLL_SECONDS,
     ) -> None:
         self.pool, self.db, self.tools, self.replay = pool, db, tools, replay
         self.models = ModelCache(catalog, keys, llm_override)
         self.config = config
+        self.poll_seconds = poll_seconds
         self.in_flight = 0
         # meiva:note
         # set whenever a job ends
@@ -617,7 +619,7 @@ class Consumer:
                 if not self.in_flight:
                     if self.replay is None or not await self._live_jobs(self.replay.agent_id):
                         return
-                    await asyncio.sleep(POLL_SECONDS)
+                    await asyncio.sleep(self.poll_seconds)
                     continue
                 self.finished.clear()
                 await self.finished.wait()
@@ -628,7 +630,7 @@ class Consumer:
             while True:
                 try:
                     now = time.monotonic()
-                    if now - last_sample >= POLL_SECONDS:
+                    if now - last_sample >= self.poll_seconds:
                         last_sample = now
                         await self.emit_backlog()
                     while await self.claim(tg):
@@ -637,7 +639,7 @@ class Consumer:
                     logger.opt(exception=True).warning("understanding consumer poll failed")
                 self.finished.clear()
                 with contextlib.suppress(TimeoutError):
-                    await asyncio.wait_for(self.finished.wait(), POLL_SECONDS)
+                    await asyncio.wait_for(self.finished.wait(), self.poll_seconds)
 
 
 async def replay_jobs(
@@ -674,6 +676,7 @@ async def understanding_loop_forever(
     keys: ProviderKeys,
     llm_override: str,
     config: ConfigBoot,
+    poll_seconds: float = POLL_SECONDS,
 ) -> None:
     # meiva:note
     # Consume the chunk queue for the host's whole life; returns at once when the feature is off.
@@ -685,5 +688,12 @@ async def understanding_loop_forever(
         logger.info("[agent-host] understanding consumer idle — MEIVA_UNDERSTANDING_ENABLED is off")
         return
     await Consumer(
-        pool, db, tools, catalog=catalog, keys=keys, llm_override=llm_override, config=config
+        pool,
+        db,
+        tools,
+        catalog=catalog,
+        keys=keys,
+        llm_override=llm_override,
+        config=config,
+        poll_seconds=poll_seconds,
     ).run_forever()

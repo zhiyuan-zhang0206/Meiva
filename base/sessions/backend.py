@@ -225,8 +225,8 @@ class PtySessionBackend(SessionBackend):
 
 
 # meiva:link base/sessions/docs/session-backend.meiva.okf.md
-def helper_spawn_enabled() -> bool:
-    if not is_macos():
+def helper_spawn_enabled(*, macos: bool = is_macos()) -> bool:
+    if not macos:
         return False
     try:
         return helper_spawn_configured()
@@ -240,8 +240,8 @@ def helper_spawn_enabled() -> bool:
 
 
 # meiva:link base/sessions/docs/session-backend.meiva.okf.md
-def get_backend() -> SessionBackend:
-    if helper_spawn_enabled():
+def get_backend(*, macos: bool = is_macos()) -> SessionBackend:
+    if helper_spawn_enabled(macos=macos):
         return HelperProcSessionBackend(helper_client)
     return PosixProcSessionBackend()
 

@@ -36,8 +36,7 @@ _NEVER_STALLS = StallPolicy(timeout_s=3600.0)
 def _samples(
     database_gate: ProcessDbGate, *, patch_sleep: bool = False
 ) -> Generator[list[Signature | None]]:
-    if patch_sleep:
-        engine.patch_park_detection()
+    del patch_sleep
     guard = engine.StallGuard(
         Database.from_settings(gate=database_gate), 1, None, policy=_NEVER_STALLS
     )
@@ -57,8 +56,6 @@ def _samples(
         done.set()
         poller.join()
         guard.close()
-        if patch_sleep:
-            engine.restore_park_detection()
 
 
 def _stood_on(seen: list[Signature | None], function: str) -> bool:

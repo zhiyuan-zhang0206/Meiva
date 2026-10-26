@@ -10,7 +10,7 @@ from __future__ import annotations
 from collections import Counter
 from collections.abc import Callable, Iterable, Mapping, Sequence
 from dataclasses import dataclass, field
-from datetime import UTC, date, datetime, timedelta, tzinfo
+from datetime import date, datetime, timedelta, tzinfo
 from typing import Any
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
@@ -274,12 +274,11 @@ class Window:
     label: str
 
 
-def window_for(*, days: int, tz_name: str, now: datetime | None) -> Window:
+def window_for(*, days: int, tz_name: str, now: datetime) -> Window:
     if days < 1:
         raise ValueError("days must be at least 1")
     tz, label = _zone(tz_name)
-    end = now or datetime.now(UTC)
-    return Window(start=end - timedelta(days=days), end=end, days=days, tz=tz, label=label)
+    return Window(start=now - timedelta(days=days), end=now, days=days, tz=tz, label=label)
 
 
 def _selection(
@@ -420,7 +419,7 @@ def run_audit(
     days: int,
     category: str | None,
     tz_name: str,
-    now: datetime | None,
+    now: datetime,
     simulate: Sequence[str],
     explain: bool,
 ) -> dict[str, Any]:

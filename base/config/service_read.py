@@ -39,6 +39,10 @@ class _ProfiledModel(Protocol):
     def profile(self) -> str | None: ...
 
 
+class _RuntimeModel(_ProfiledModel, Protocol):
+    def has_domain(self, name: str) -> bool: ...
+
+
 def _validate_complete_model(model: _ProfiledModel) -> None:
     if model.profile is not None:
         raise ValueError("ConfigAuthority requires a profile-independent read model")
@@ -47,11 +51,11 @@ def _validate_complete_model(model: _ProfiledModel) -> None:
 class _DeferredReadModel:
     """Memoize a supplied complete model only after successful construction."""
 
-    profile = None
+    profile: str | None = None
 
-    def __init__(self, build: Callable[[], Any]) -> None:
-        self._build: Callable[[], Any] | None = build
-        self._model: Any = None
+    def __init__(self, build: Callable[[], _ProfiledModel]) -> None:
+        self._build: Callable[[], _ProfiledModel] | None = build
+        self._model: _ProfiledModel | None = None
         self._lock = threading.Lock()
 
     def __getattr__(self, name: str) -> object:
@@ -74,8 +78,8 @@ class ConfigAuthority:
     do not mutate either model and are never memoized.
     """
 
-    runtime: Any
-    all_domains: Any
+    runtime: _RuntimeModel
+    all_domains: _ProfiledModel
     env_path: Path
 
     def __post_init__(self) -> None:
@@ -85,7 +89,11 @@ class ConfigAuthority:
 
     @classmethod
     def deferred(
-        cls, *, runtime: _ProfiledModel, build_all_domains: Callable[[], Any], env_path: Path
+        cls,
+        *,
+        runtime: _RuntimeModel,
+        build_all_domains: Callable[[], _ProfiledModel],
+        env_path: Path,
     ) -> ConfigAuthority:
         """Retain a root's complete-model factory without forcing a lite process to upgrade.
 
@@ -158,11 +166,11 @@ class ConfigAuthority:
         raw = payload["db_url"]
         payload["db_url"] = project_service_db_url(
             payload["db_url"],
-            self.runtime.data_plane.db_url,
+            self.service_field_value("db_url"),
             profile=self.runtime.profile,
             home=self.env_path.parent,
             cluster_secret=payload["cluster_secret"],
-            machine_host=self.runtime.general.machine_host,
+            machine_host=self.service_field_value("machine_host"),
         )
         if payload["db_url"] != raw:
             from base.log import logger

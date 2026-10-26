@@ -98,7 +98,7 @@ export function NoticeReplySection({
 
 export function ShellsSection({ inspect }: { inspect: AgentInspectLive }) {
   const { shells } = inspect;
-  const now = useNow(1_000);
+  const now = useNow(1_000, new Date());
   const t = useTranslations("inspector");
   if (inspect.shells_available === true && shells.length === 0) return null;
 
@@ -229,7 +229,7 @@ export function LivenessSection({ inspect }: { inspect: AgentInspectLive }) {
   const offline = state === "offline";
   const t = useTranslations("inspector");
   const tStatus = useTranslations("agentRow");
-  const now = useNow(1_000);
+  const now = useNow(1_000, new Date());
   const { formatAbsolute, formatUpcoming } = useTimeFormat();
   const next = nextHeartbeatCell(heartbeat, { pending: t("pending"), due: t("due") }, now, formatUpcoming);
   const lastPause = heartbeat.last_pause;
@@ -242,14 +242,14 @@ export function LivenessSection({ inspect }: { inspect: AgentInspectLive }) {
         <Metric
           className="col-span-2"
           label={t("metricBirth")}
-          value={`${formatRelative(spawned_at, undefined, { capitalize: true })}, ${formatAbsolute(spawned_at)}`}
+          value={`${formatRelative(spawned_at, now, { capitalize: true })}, ${formatAbsolute(spawned_at)}`}
         />
         <Metric label={t("metricNextHeartbeat")} value={next} />
         <Metric
           label={t("metricLastPause")}
           value={
             lastPause
-              ? `${formatRelative(lastPause.at, undefined, { capitalize: true })} · ${formatInterval(Math.round(lastPause.duration_s))}`
+              ? `${formatRelative(lastPause.at, now, { capitalize: true })} · ${formatInterval(Math.round(lastPause.duration_s))}`
               : t("neverPaused")
           }
         />

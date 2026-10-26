@@ -61,7 +61,7 @@ export function StatsCards({
   onRetry: () => void;
 }) {
   const t = useTranslations("sidebar");
-  const pluginCards = usePluginStatCards(stats?.plugin_stats);
+  const pluginCards = usePluginStatCards(stats?.plugin_stats, new Date());
   const errMsg = error ? formatErrMsg(error) : null;
   const failedWithoutData = errMsg !== null && stats === undefined;
   const firstLoad = stats === undefined && error === null && fetching;
@@ -253,7 +253,7 @@ export function StatsCards({
 // the age itself rides the tooltip.
 function PluginStatCard({ card }: { card: PluginStatCardModel }) {
   const t = useTranslations("sidebar");
-  const age = card.updatedAt !== null ? formatRelativeTime(card.updatedAt) : null;
+  const age = card.updatedAt !== null ? formatRelativeTime(card.updatedAt, new Date()) : null;
   const title =
     card.value === null
       ? t("pluginStatNoData")

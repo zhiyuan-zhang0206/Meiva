@@ -51,13 +51,14 @@ def get_metrics(
     before); audit events are excluded."""
     if days is None:
         days = int(gateway_config(request).display.metrics_default_window_days)
+    now = utc_now()
     try:
         with request.app.state.db_pool.connection() as conn:
             conn.execute(_READ_TIMEOUT)
-            agg = fetch_aggregate(conn, days, agent, since_compact=since_compact)
+            agg = fetch_aggregate(conn, days, agent, now=now, since_compact=since_compact)
     except psycopg.errors.QueryCanceled as exc:
         raise HTTPException(status_code=503, detail="metrics read timed out; retry") from exc
-    _, data = build_report_from_aggregate(agg, days, agent, since_compact=since_compact)
+    _, data = build_report_from_aggregate(agg, days, agent, now=now, since_compact=since_compact)
     return MetricsReport(**data)
 
 
@@ -79,10 +80,13 @@ def get_metrics_agents(
     processes), the W9-widened scope documented on `get_metrics`."""
     if days is None:
         days = int(gateway_config(request).display.metrics_default_window_days)
+    now = utc_now()
     try:
         with request.app.state.db_pool.connection() as conn:
             conn.execute(_READ_TIMEOUT)
-            total_events, rollups = fetch_agent_rollups(conn, days, since_compact=since_compact)
+            total_events, rollups = fetch_agent_rollups(
+                conn, days, now=now, since_compact=since_compact
+            )
             labels: dict[int, str | None] = {}
             if rollups:
                 rows = conn.execute(
@@ -100,7 +104,7 @@ def get_metrics_agents(
     meta = MetricsMeta(
         window_days=days,
         agent_filter=None,
-        generated_at=utc_now().isoformat(),
+        generated_at=now.isoformat(),
         total_events=total_events,
         distinct_agents=len(rollups),
         since_compact=since_compact,

@@ -11,7 +11,7 @@ from psycopg_pool import AsyncConnectionPool
 
 from agent.graph.llm_errors import FatalProviderError
 from agent.ownership.hosted import admit_hosted_runtime
-from agent.turn.runloop import _handle_fatal_llm_error
+from agent.turn.runloop import handle_fatal_llm_error
 from base.agents.context import MeivaContext
 from base.agents.tests.units import spawn_agent
 from base.clock import Clock
@@ -53,7 +53,7 @@ def _context(pool: AsyncConnectionPool, *, database_gate: ProcessDbGate) -> Meiv
 async def _reject(
     pool: AsyncConnectionPool, agent_id: int, *, database_gate: ProcessDbGate
 ) -> None:
-    await _handle_fatal_llm_error(
+    await handle_fatal_llm_error(
         _permanent_rejection(),
         _context(pool, database_gate=database_gate),
         agent_id=agent_id,

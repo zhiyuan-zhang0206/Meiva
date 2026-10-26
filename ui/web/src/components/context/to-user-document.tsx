@@ -105,7 +105,7 @@ export function ToUserDocumentView({ agentId, document, failed, pending, refresh
         <span className="shrink-0 whitespace-nowrap">{inspecting ? tInspector("title") : t("sharedContext")}</span>
         {inspecting ? null : (
           <div data-testid="document-status" className={cn("shrink-0 items-center gap-1.5", FLEX)}>
-            {current?.modified_at && <span className="whitespace-nowrap">{t("updated", { time: formatRelative(current.modified_at) })}</span>}
+            {current?.modified_at && <span className="whitespace-nowrap">{t("updated", { time: formatRelative(current.modified_at, new Date()) })}</span>}
             <button title={t("refresh")} aria-label={t("refresh")} onClick={() => { if (references.length) void linked.refetch(); else refresh(); }} disabled={loading} className="rounded p-1 hover:bg-accent disabled:opacity-50">
               <RefreshCw className="size-3.5" />
             </button>

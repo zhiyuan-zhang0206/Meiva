@@ -86,7 +86,7 @@ describe("InspectorPanel", () => {
     expect(screen.getByText("Blocking")).toBeTruthy();
     expect(screen.queryByText("Needs your answer")).toBeNull();
     expect(
-      screen.getByText(`${formatRelative(createdAt)}, ${formatAbsolute(createdAt)}`),
+      screen.getByText(`${formatRelative(createdAt, new Date())}, ${formatAbsolute(createdAt)}`),
     ).toBeTruthy();
     expect(screen.getByText("Approve deploy?")).toBeTruthy();
     expect(screen.getByText("Can we push to prod?")).toBeTruthy();

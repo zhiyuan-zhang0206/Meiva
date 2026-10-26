@@ -31,10 +31,9 @@ from base.agents.history.hierarchy.chunks import (
 from base.agents.history.hierarchy.generate import GenerateError
 from base.agents.history.hierarchy.leaf_groups import UnitGroup
 from base.agents.messages.timestamp_policy import TimestampPolicy
-from base.config import ConfigBoot, settings
+from base.config import ConfigBoot
 from base.host.env.agent_slices import ModelOverrides
 from base.lm.catalog import ModelCatalog
-from base.lm.catalog.provider_keys import ProviderKeys
 from base.telemetry.tests.capture.event_capture import EmittedEvents
 from services.agent_runner.understanding import chunk_consumer as loop
 from services.agent_runner.understanding.tests.chunk_faults import chunk_result, run_rounds
@@ -43,12 +42,12 @@ from services.agent_runner.understanding.tests.chunk_faults import (
     chunk_timestamps as chunk_timestamps,
 )
 from services.agent_runner.understanding.tests.consumer_helpers import (
+    GroupModels,
     consumer_config,
     lm_wiring,
 )
 from services.agent_runner.understanding.tests.consumer_history import (
     call_receipts,
-    inbound_history,
     job_spans,
     job_statuses,
     notes_history,
@@ -98,17 +97,13 @@ async def test_drifted_indices_fail_the_job_with_an_event(
 async def test_a_database_blink_fails_the_job_with_an_event_and_is_not_retried(
     model_catalog: ModelCatalog,
     aops_pool: AsyncConnectionPool,
-    monkeypatch: pytest.MonkeyPatch,
+    chunk_seams: dict,
     emitted_events: EmittedEvents,
 ) -> None:
     # meiva:note
     # A chunk is attempted once: a database error ends it as failed (and reported), it does not
     # go back to the queue.
-
-    def blink(*_a: object) -> object:
-        raise psycopg.OperationalError("the database closed the connection")
-
-    monkeypatch.setattr(loop, "load_segments", blink)
+    chunk_seams["segments_error"] = psycopg.OperationalError("the database closed the connection")
     await enqueue_chunk(aops_pool, 5, compact_version=0, chunk=Chunk(1, 3), end_msg_id="m1")
     await run_rounds(aops_pool, 2, model_catalog=model_catalog)
     [(status, attempts, error)] = await job_statuses(aops_pool)
@@ -186,31 +181,36 @@ async def test_existing_nodes_in_the_middle_leave_a_gap_that_is_reported_not_dro
 
 
 async def test_a_cancelled_job_is_failed_and_reported_not_put_back(
+    chunk_timestamps: TimestampPolicy,
     model_catalog: ModelCatalog,
     aops_pool: AsyncConnectionPool,
-    monkeypatch: pytest.MonkeyPatch,
+    chunk_seams: dict,
     emitted_events: EmittedEvents,
 ) -> None:
     # meiva:note
     # The host stops while a job runs (a rollout): the job ends failed at once, so it neither
     # holds its agent's queue for the 60-minute lease nor runs a second time.
-    started = asyncio.Event()
+    started = threading.Event()
+    release = threading.Event()
 
-    async def hang(*_a: object, **_k: object) -> loop.Outcome:
+    def hang(located: LocatedChunk) -> ChunkResult:
         started.set()
-        await asyncio.sleep(3600)
-        return loop.Outcome("done")
+        release.wait(10)
+        return chunk_result(located, timeline_inputs=chunk_timestamps)
 
-    monkeypatch.setattr(loop, "run_job", hang)
+    chunk_seams["answer"] = hang
     await enqueue_chunk(aops_pool, 5, compact_version=0, chunk=Chunk(1, 3), end_msg_id="m1")
     consumer = loop.Consumer(
         aops_pool, MagicMock(), [], **lm_wiring(model_catalog), config=consumer_config()
     )
     task = asyncio.create_task(consumer.run_until_idle())
-    await asyncio.wait_for(started.wait(), 10)
-    task.cancel()
-    with pytest.raises(asyncio.CancelledError):
-        await task
+    try:
+        assert await asyncio.to_thread(started.wait, 10)
+        task.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await task
+    finally:
+        release.set()
     [(status, attempts, error)] = await job_statuses(aops_pool)
     assert (status, attempts, error) == ("failed", 1, "host stopping")
     assert emitted_events.names() == ["understanding_chunk_failed"]
@@ -268,7 +268,6 @@ async def test_a_job_that_never_becomes_describable_is_given_up_on_by_age(
 async def test_a_closing_chunk_past_its_snapshot_describes_what_exists_and_reports_the_rest(
     model_catalog: ModelCatalog,
     aops_pool: AsyncConnectionPool,
-    monkeypatch: pytest.MonkeyPatch,
     chunk_seams: dict,
     emitted_events: EmittedEvents,
 ) -> None:
@@ -276,7 +275,7 @@ async def test_a_closing_chunk_past_its_snapshot_describes_what_exists_and_repor
     # The boundary snapshot of segment 0 holds fewer messages than the closing chunk's end (the
     # checkpoint of the segment's last super-step was still in flight at compaction). The part the
     # snapshot holds is described and written; the missing request indices are in the event.
-    monkeypatch.setattr(loop, "load_segments", lambda *_a: (inbound_history(), 0))
+    chunk_seams["closing_segment"] = 0
     await enqueue_chunk(
         aops_pool,
         5,
@@ -298,14 +297,10 @@ async def test_a_closing_chunk_past_its_snapshot_describes_what_exists_and_repor
 async def test_generation_error_fails_on_the_first_attempt_with_an_event(
     model_catalog: ModelCatalog,
     aops_pool: AsyncConnectionPool,
-    monkeypatch: pytest.MonkeyPatch,
+    chunk_seams: dict,
     emitted_events: EmittedEvents,
 ) -> None:
-
-    def boom(*_a: object, **_k: object) -> str:
-        raise GenerateError("provider down")
-
-    monkeypatch.setattr(loop, "describe", boom)
+    chunk_seams["error"] = GenerateError("provider down")
     await enqueue_chunk(aops_pool, 5, compact_version=0, chunk=Chunk(1, 3), end_msg_id="m1")
     await run_rounds(aops_pool, 1, model_catalog=model_catalog)
     [(status, attempts, error)] = await job_statuses(aops_pool)
@@ -344,16 +339,10 @@ async def test_a_claimer_that_died_fails_its_job_and_frees_the_agents_queue(
 async def test_gemini_chunk_is_described_with_its_original_prefix(
     model_catalog: ModelCatalog,
     aops_pool: AsyncConnectionPool,
-    monkeypatch: pytest.MonkeyPatch,
     chunk_seams: dict,
 ) -> None:
-    monkeypatch.setattr(
-        loop,
-        "agent_model_target",
-        lambda *_a, **_kw: ("gemini-3.8-flash", ModelOverrides.from_pins(None)),
-    )
     await enqueue_chunk(aops_pool, 5, compact_version=0, chunk=Chunk(1, 3), end_msg_id="m1")
-    await run_rounds(aops_pool, 1, model_catalog=model_catalog)
+    await run_rounds(aops_pool, 1, model_catalog=model_catalog, model="gemini-3.8-flash")
     assert await job_statuses(aops_pool) == [("done", 1, None)]
     assert await written_nodes(aops_pool) == [(5, 1, 0, 1, "what happened")]
     located = chunk_seams["described"][0]
@@ -364,14 +353,10 @@ async def test_gemini_chunk_is_described_with_its_original_prefix(
 async def test_checkpoint_read_failure_fails_the_job(
     model_catalog: ModelCatalog,
     aops_pool: AsyncConnectionPool,
-    monkeypatch: pytest.MonkeyPatch,
+    chunk_seams: dict,
     emitted_events: EmittedEvents,
 ) -> None:
-
-    def fail(*_a: object) -> None:
-        raise CheckpointReadError("db blip")
-
-    monkeypatch.setattr(loop, "load_segments", fail)
+    chunk_seams["segments_error"] = CheckpointReadError("db blip")
     await enqueue_chunk(aops_pool, 5, compact_version=0, chunk=Chunk(1, 3), end_msg_id="m1")
     await run_rounds(aops_pool, 1, model_catalog=model_catalog)
     [(status, _, error)] = await job_statuses(aops_pool)
@@ -379,53 +364,59 @@ async def test_checkpoint_read_failure_fails_the_job(
 
 
 async def test_loop_is_idle_when_the_feature_is_off(
-    model_catalog: ModelCatalog, monkeypatch: pytest.MonkeyPatch
+    model_catalog: ModelCatalog,
 ) -> None:
-    monkeypatch.setattr(settings.agent, "understanding_enabled", False)
+    config = consumer_config()
+    config.set_field("understanding_enabled", False)
     # meiva:note
     # returns at once
     await loop.understanding_loop_forever(
-        MagicMock(), MagicMock(), [], **lm_wiring(model_catalog), config=consumer_config()
+        MagicMock(), MagicMock(), [], **lm_wiring(model_catalog), config=config
     )
 
 
 def test_generation_models_are_reused_and_never_closed(
-    model_catalog: ModelCatalog, monkeypatch: pytest.MonkeyPatch
+    model_catalog: ModelCatalog,
 ) -> None:
-    built: list[MagicMock] = []
+    from dataclasses import replace
+
+    from base.lm.provider_api import BuildContext, ProviderBinding
+
+    built: list[tuple[MagicMock, BuildContext]] = []
     closed: list[str] = []
 
-    def build(
-        model: str,
-        params: object,
-        overrides: object,
-        *,
-        catalog: ModelCatalog,
-        keys: ProviderKeys,
-        llm_override: str,
-        thinking_off: bool,
-    ) -> MagicMock:
-        assert catalog is model_catalog and llm_override == ""
-        built.append(llm := MagicMock(name=model, close=lambda: closed.append(model)))
-        llm.thinking_off, llm.params = thinking_off, params
+    def build(ctx: BuildContext) -> MagicMock:
+        llm = MagicMock(name=ctx.model, close=lambda: closed.append(ctx.model))
+        built.append((llm, ctx))
         return llm
 
-    monkeypatch.setattr(loop, "build_generation_llm", build)
-    models = loop.ModelCache(**lm_wiring(model_catalog))
+    binding = ProviderBinding(
+        prefix="deepseek-",
+        display_name="Local SDK transport",
+        key_env="DEEPSEEK_API_KEY",
+        build=build,
+        effort_levels=("high", "max"),
+        provider_key="openai",
+    )
+    catalog = replace(model_catalog, bindings={**model_catalog.bindings, "deepseek-": binding})
+    models = loop.ModelCache(**lm_wiring(catalog))
     none = ModelOverrides.from_pins(None)
-    first = models.get("m", none)
-    assert first is built[0] and models.get("m", none) is first
-    assert models.get("other", none) is not first
+    first = models.get("deepseek-flash", none)
+    assert first is built[0][0] and models.get("deepseek-flash", none) is first
+    assert models.get("deepseek-reasoner", none) is not first
     assert len(built) == 2 and closed == []
     # meiva:note
     # the grouping reasoning knob: empty leaves the model's tier alone, `off` disables
     # thinking, anything else is the effort asked; each is its own cached model.
-    off, high = models.get("m", none, "off"), models.get("m", none, "high")
-    assert off is built[2] and high is built[3]
+    off, high = (
+        models.get("deepseek-flash", none, "off"),
+        models.get("deepseek-flash", none, "high"),
+    )
+    assert off is built[2][0] and high is built[3][0]
     assert off is not first and high is not first and off is not high
-    assert built[0].thinking_off is False and built[0].params is None
-    assert built[2].thinking_off is True and built[2].params is None
-    assert built[3].thinking_off is False and built[3].params.reasoning_effort == "high"
+    assert built[0][1].thinking is None
+    assert built[2][1].thinking == {"type": "disabled"}
+    assert built[3][1].thinking is None and built[3][1].resolved_effort == "high"
 
 
 def _call(round_: int, response: AIMessage | None, error: str | None = None) -> ChunkCall:
@@ -442,25 +433,16 @@ def _call(round_: int, response: AIMessage | None, error: str | None = None) -> 
 
 
 async def test_raw_calls_are_persisted_for_a_done_job(
-    chunk_timestamps: TimestampPolicy,
     model_catalog: ModelCatalog,
     aops_pool: AsyncConnectionPool,
     chunk_seams: dict,
-    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     reply = AIMessage(
         content=[{"type": "thinking", "thinking": "hm"}, {"type": "text", "text": "what"}],
         usage_metadata={"input_tokens": 9, "output_tokens": 2, "total_tokens": 11},
         response_metadata={"stop_reason": "end_turn"},
     )
-
-    def describe(*args: object, **_k: object) -> ChunkResult:
-        calls, located = args[5], args[3]
-        assert isinstance(calls, list) and isinstance(located, LocatedChunk)
-        calls.append(_call(0, reply))
-        return chunk_result(located, timeline_inputs=chunk_timestamps)
-
-    monkeypatch.setattr(loop, "describe", describe)
+    chunk_seams["calls"] = [_call(0, reply)]
     await enqueue_chunk(aops_pool, 5, compact_version=0, chunk=Chunk(1, 3), end_msg_id="m1")
     await run_rounds(aops_pool, 1, model_catalog=model_catalog)
     [row] = await call_receipts(aops_pool)
@@ -476,17 +458,11 @@ async def test_raw_calls_are_persisted_for_a_done_job(
 async def test_a_failed_call_is_recorded_and_the_job_fails(
     model_catalog: ModelCatalog,
     aops_pool: AsyncConnectionPool,
-    monkeypatch: pytest.MonkeyPatch,
+    chunk_seams: dict,
     emitted_events: EmittedEvents,
 ) -> None:
-
-    def boom(*args: object, **_k: object) -> str:
-        calls = args[5]
-        assert isinstance(calls, list)
-        calls.append(_call(0, None, "provider down"))
-        raise GenerateError("provider down")
-
-    monkeypatch.setattr(loop, "describe", boom)
+    chunk_seams["calls"] = [_call(0, None, "provider down")]
+    chunk_seams["error"] = GenerateError("provider down")
     await enqueue_chunk(aops_pool, 5, compact_version=0, chunk=Chunk(1, 3), end_msg_id="m1")
     await run_rounds(aops_pool, 1, model_catalog=model_catalog)
     [row] = await call_receipts(aops_pool)
@@ -495,24 +471,12 @@ async def test_a_failed_call_is_recorded_and_the_job_fails(
 
 
 async def test_a_record_write_failure_emits_an_event_and_spares_the_job(
-    chunk_timestamps: TimestampPolicy,
     model_catalog: ModelCatalog,
     aops_pool: AsyncConnectionPool,
     chunk_seams: dict,
-    monkeypatch: pytest.MonkeyPatch,
     emitted_events: EmittedEvents,
 ) -> None:
-    from base.agents.history.hierarchy import chunks
-
-    monkeypatch.setattr(chunks, "INSERT_CALL_SQL", "INSERT INTO no_such_table VALUES (1)")
-
-    def describe(*args: object, **_k: object) -> ChunkResult:
-        calls, located = args[5], args[3]
-        assert isinstance(calls, list) and isinstance(located, LocatedChunk)
-        calls.append(_call(0, AIMessage(content="x")))
-        return chunk_result(located, timeline_inputs=chunk_timestamps)
-
-    monkeypatch.setattr(loop, "describe", describe)
+    chunk_seams["calls"] = [_call(2**40, AIMessage(content="x"))]
     await enqueue_chunk(aops_pool, 5, compact_version=0, chunk=Chunk(1, 3), end_msg_id="m1")
     await run_rounds(aops_pool, 1, model_catalog=model_catalog)
     assert emitted_events.names() == ["understanding_call_record_failed"]
@@ -564,12 +528,11 @@ async def test_each_chunk_starts_at_its_own_start_whatever_the_previous_one_did(
 
 
 async def test_a_refused_grouping_fails_the_job_at_once_without_nodes(
-    model_catalog: ModelCatalog, aops_pool: AsyncConnectionPool, monkeypatch: pytest.MonkeyPatch
+    model_catalog: ModelCatalog, aops_pool: AsyncConnectionPool, chunk_seams: dict
 ) -> None:
-    def refused(*_a: object, **_k: object) -> str:
-        raise GenerateError("grouping reply refused after 2 correction(s): no <groups>")
-
-    monkeypatch.setattr(loop, "describe", refused)
+    chunk_seams["error"] = GenerateError(
+        "grouping reply refused after 2 correction(s): no <groups>"
+    )
     await enqueue_chunk(aops_pool, 5, compact_version=0, chunk=Chunk(1, 3), end_msg_id="m1")
     await run_rounds(aops_pool, 1, model_catalog=model_catalog)
     [(status, attempts, error)] = await job_statuses(aops_pool)
@@ -578,19 +541,48 @@ async def test_a_refused_grouping_fails_the_job_at_once_without_nodes(
 
 
 async def test_a_done_job_is_followed_by_the_upper_level_checks(
-    model_catalog: ModelCatalog, aops_pool: AsyncConnectionPool, monkeypatch: pytest.MonkeyPatch
+    model_catalog: ModelCatalog, aops_pool: AsyncConnectionPool
 ) -> None:
-    asked: list[int] = []
+    # meiva:note
+    # `GroupModels` satisfies `InvocableLlm` for `run_group_checks` without a real SDK client.
+    from dataclasses import replace
 
-    async def standalone(
-        _pool: object, _db: object, _models: object, agent_id: int, **_kw: object
-    ) -> None:
-        asked.append(agent_id)
+    from base.lm.provider_api import ProviderBinding
 
-    monkeypatch.setattr(loop, "run_group_checks", standalone)
+    state: dict[str, object] = {}
+    group_models = GroupModels(model_catalog, state)
+    binding = ProviderBinding(
+        prefix="deepseek-",
+        display_name="Local SDK transport",
+        key_env="DEEPSEEK_API_KEY",
+        build=lambda _ctx: group_models,  # pyright: ignore[reportArgumentType]
+        effort_levels=("high", "max"),
+        provider_key="openai",
+    )
+    catalog = replace(model_catalog, bindings={**model_catalog.bindings, "deepseek-": binding})
+    async with aops_pool.connection() as conn:
+        await conn.execute(
+            "INSERT INTO understanding_nodes (agent_id, depth, span_start, span_end, start_ts,"
+            " end_ts, segment_key, text, text_hash, input_hash, children_count, model,"
+            " engine_version, prompt_version, schema_version)"
+            " SELECT 5, 1, i*10, i*10+9, '2026-10-05T00:00Z'::timestamptz,"
+            " '2026-10-05T00:30Z'::timestamptz, 'k', 'leaf', 'h', 'i', 0, 'm',"
+            " 'chunk-0.2', 'p', 1 FROM generate_series(1, 5) AS i"
+        )
+    config = consumer_config()
+    config.set_field("understanding_group_model", "deepseek-flash")
+    config.set_field("understanding_group_check_open", 6)
+    config.set_field("understanding_group_check_decay", 1)
+    config.set_field("understanding_group_corrections", 0)
     await enqueue_chunk(aops_pool, 5, compact_version=0, chunk=Chunk(1, 3), end_msg_id="m1")
-    await run_rounds(aops_pool, 1, model_catalog=model_catalog)
-    assert asked == [5]
+    await loop.Consumer(
+        aops_pool, MagicMock(), [], **lm_wiring(catalog), config=config
+    ).run_until_idle()
+    async with aops_pool.connection() as conn:
+        rows = await (
+            await conn.execute("SELECT agent_id, last_checked_open FROM understanding_group_state")
+        ).fetchall()
+    assert rows == [(5, 6)]
 
 
 async def _enqueue_ends(pool: AsyncConnectionPool, agent: int, *ends: str) -> None:
@@ -731,15 +723,20 @@ async def test_the_backlog_event_carries_in_flight(
 
 
 async def test_the_forever_loop_works_the_queue_and_stops_cleanly_on_cancel(
-    model_catalog: ModelCatalog, aops_pool: AsyncConnectionPool, monkeypatch: pytest.MonkeyPatch
+    model_catalog: ModelCatalog, aops_pool: AsyncConnectionPool
 ) -> None:
-    monkeypatch.setattr(settings.agent, "understanding_enabled", True)
-    monkeypatch.setattr(loop, "POLL_SECONDS", 0.05)
+    config = consumer_config()
+    config.set_field("understanding_enabled", True)
     for agent in (1, 2, 3):
         await _enqueue_ends(aops_pool, agent, "m1")
     task = asyncio.create_task(
         loop.understanding_loop_forever(
-            aops_pool, MagicMock(), [], **lm_wiring(model_catalog), config=consumer_config()
+            aops_pool,
+            MagicMock(),
+            [],
+            **lm_wiring(model_catalog),
+            config=config,
+            poll_seconds=0.05,
         )
     )
     for _ in range(100):
@@ -758,14 +755,7 @@ async def test_a_replay_describes_one_agents_segments_together_and_skips_the_upp
     model_catalog: ModelCatalog,
     aops_pool: AsyncConnectionPool,
     chunk_seams: dict,
-    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    asked: list[int] = []
-
-    async def standalone(*_a: object, **_k: object) -> None:
-        asked.append(1)
-
-    monkeypatch.setattr(loop, "run_group_checks", standalone)
     # meiva:note
     # passes only when both segments are in flight
     both = threading.Barrier(2, timeout=10)
@@ -775,16 +765,27 @@ async def test_a_replay_describes_one_agents_segments_together_and_skips_the_upp
         return chunk_result(located, timeline_inputs=chunk_timestamps)
 
     chunk_seams["answer"] = answer
+    async with aops_pool.connection() as conn:
+        await conn.execute(
+            "INSERT INTO understanding_nodes (agent_id, depth, span_start, span_end, start_ts,"
+            " end_ts, segment_key, text, text_hash, input_hash, children_count, model,"
+            " engine_version, prompt_version, schema_version)"
+            " SELECT 1, 1, i*10, i*10+9, '2026-10-05T00:00Z'::timestamptz,"
+            " '2026-10-05T00:30Z'::timestamptz, 'k', 'leaf', 'h', 'i', 0, 'm',"
+            " 'chunk-0.2', 'p', 1 FROM generate_series(1, 5) AS i"
+        )
     for segment in (0, 1):
         await enqueue_chunk(
             aops_pool, 1, compact_version=segment, chunk=Chunk(1, 3), end_msg_id="m1"
         )
     await enqueue_chunk(aops_pool, 2, compact_version=0, chunk=Chunk(1, 3), end_msg_id="m1")
-    await loop.replay_jobs(
-        aops_pool, MagicMock(), [], 1, **lm_wiring(model_catalog), config=consumer_config()
-    )
+    config = consumer_config()
+    config.set_field("understanding_group_check_open", 6)
+    await loop.replay_jobs(aops_pool, MagicMock(), [], 1, **lm_wiring(model_catalog), config=config)
     assert [s for s, *_ in await job_statuses(aops_pool)] == ["done", "done", "pending"]
-    assert asked == []
+    async with aops_pool.connection() as conn:
+        rows = await (await conn.execute("SELECT 1 FROM understanding_group_state")).fetchall()
+    assert rows == []
 
 
 async def test_a_chunk_of_only_framework_notes_is_skipped_without_a_call(

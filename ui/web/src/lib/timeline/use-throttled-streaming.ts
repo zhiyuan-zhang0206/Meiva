@@ -22,7 +22,8 @@ export function useThrottledStreaming(
   intervalMs: number,
 ): string {
   const [shown, setShown] = useState(value);
-  const lastFlushRef = useRef(0);
+  const coolingRef = useRef(false);
+  const pendingRef = useRef(false);
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   // Latest value for the trailing-edge timer to read (avoids a stale
   // closure capturing the value at schedule time). Written in the effect,
@@ -36,24 +37,33 @@ export function useThrottledStreaming(
         clearTimeout(timerRef.current);
         timerRef.current = null;
       }
+      coolingRef.current = false;
+      pendingRef.current = false;
       // Settle: render the final value in full immediately.
       // eslint-disable-next-line react-hooks/set-state-in-effect -- throttle settle
       setShown(value);
       return;
     }
-    const elapsed = Date.now() - lastFlushRef.current;
-    if (elapsed >= intervalMs) {
-      lastFlushRef.current = Date.now();
+    const startCooldown = () => {
+      coolingRef.current = true;
+      timerRef.current = setTimeout(() => {
+        timerRef.current = null;
+        if (pendingRef.current) {
+          pendingRef.current = false;
+          setShown(valueRef.current);
+          startCooldown();
+        } else {
+          coolingRef.current = false;
+        }
+      }, intervalMs);
+    };
+    if (!coolingRef.current) {
+      pendingRef.current = false;
       setShown(value);
+      startCooldown();
       return;
     }
-    // A burst arrived within the window: schedule one trailing flush that
-    // reads the latest value. ??= keeps a single in-flight timer.
-    timerRef.current ??= setTimeout(() => {
-      timerRef.current = null;
-      lastFlushRef.current = Date.now();
-      setShown(valueRef.current);
-    }, intervalMs - elapsed);
+    pendingRef.current = true;
   }, [value, live, intervalMs]);
 
   useEffect(

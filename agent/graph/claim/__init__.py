@@ -6,6 +6,7 @@ from __future__ import annotations
 # jumps to a compaction's parked destination — so it is exported here rather than
 # reached for through `_routing`.
 # meiva:link agent/graph/docs/harness-turn.meiva.okf.md
+from ._chat_inbound import build_chat_inbound
 from ._routing import route_target
 
-__all__ = ["route_target"]
+__all__ = ["build_chat_inbound", "route_target"]

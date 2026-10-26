@@ -14,13 +14,10 @@ from __future__ import annotations
 import getpass
 import os
 import shutil
-import subprocess
-from collections.abc import Callable, Generator
+from collections.abc import Generator
 from dataclasses import replace
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any, cast
-from unittest.mock import patch
 
 import psycopg
 import pytest
@@ -32,10 +29,10 @@ from psycopg.conninfo import conninfo_to_dict
 from base.cluster.dataplane import pooler
 from base.cluster.dataplane.pg_admin import pg_socket_dir
 from base.cluster.dataplane.pg_throwaway_base import ThrowawayConfig
-from base.config import ConfigBoot, settings
+from base.config import ConfigBoot, get_field, set_field
 from base.db import Database
 from base.db.code_version_gate import ProcessDbGate
-from base.db.config import db_config_from_settings
+from base.db.config import db_config_from_boot
 from base.host.db_authority import delivery
 from base.host.net.url_secret import url_with_port
 from base.native_process.code_version import CodeVersion
@@ -55,24 +52,18 @@ pytestmark = pytest.mark.skipif(
 )
 
 
-@pytest.fixture(autouse=True)
-def config_boot_environment() -> Generator[None]:
-    """Restore process delivery from the maintenance operation's boot."""
-    with patch.dict(os.environ):
-        yield
-
-
 @pytest.fixture
-def maintenance(born: Born, monkeypatch: pytest.MonkeyPatch) -> Born:
+def maintenance(born: Born) -> Generator[Born]:
     """The born home, seen by a process that holds no write-generation login."""
     endpoint = born.endpoint()
     assert conninfo_to_dict(endpoint).get("password") is None
-    monkeypatch.setattr(settings.data_plane, "db_url", endpoint)
-    monkeypatch.setitem(os.environ, "MEIVA_DB_URL", endpoint)
-    monkeypatch.delitem(os.environ, delivery.GENERATION_ENV, raising=False)
-    monkeypatch.delenv("MEIVA_DB_ADMIN_PASSWORD", raising=False)
     assert "MEIVA_DB_ADMIN_PASSWORD" not in (born.home / ".env").read_text()
-    return born
+    previous = get_field("db_url")
+    set_field("db_url", endpoint)
+    try:
+        yield born
+    finally:
+        set_field("db_url", previous)
 
 
 def _seed_conversation(born: Born) -> int:
@@ -109,39 +100,39 @@ def _assert_owner_dial(conninfo: str) -> None:
 def test_scheduled_backup_dumps_as_the_owner_and_restores(
     maintenance: Born,
     tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
     throwaway_config: ThrowawayConfig,
 ) -> None:
-    from services.backup import restore_drill
+    from services.backup import dump, restore_drill
+    from services.backup.dump import pg_dump_env
     from services.backup.scheduler import worker
 
     agent_id = _seed_conversation(maintenance)
-    dumps: list[tuple[list[str], dict[str, str] | None]] = []
-    real = cast("Callable[..., subprocess.CompletedProcess[bytes]]", subprocess.run)
-
-    # Without a progress sink the backup runs each stage as exactly `subprocess.run`, so this
-    # is what the dump child is spawned with.
-    def spy(argv: list[str], **kwargs: Any) -> subprocess.CompletedProcess[bytes]:
-        if str(argv[0]).endswith("pg_dump"):
-            dumps.append((argv, kwargs.get("env")))
-        return real(argv, **kwargs)
-
-    monkeypatch.setattr(subprocess, "run", spy)
     work = tmp_path / "work"
     work.mkdir(mode=0o700)
     # The scheduled worker's own operation, then the controller's publication.
-    config = ConfigBoot()
+    env = {
+        key: value
+        for key, value in os.environ.items()
+        if key not in (delivery.GENERATION_ENV, "MEIVA_DB_ADMIN_PASSWORD")
+    } | {"MEIVA_DB_URL": maintenance.endpoint()}
+    config = ConfigBoot(environment=env)
     version = CodeVersion(LoadedCommit.capture())
     gate = ProcessDbGate(version=version.get, process="backup-test")
 
     def database() -> Database:
-        return Database.from_settings(gate=gate)
+        return Database(db_config_from_boot(config), gate=gate)
 
     def database_for_url(url: str) -> Database:
-        return Database(replace(db_config_from_settings(), db_url=url), gate=gate)
+        return Database(replace(db_config_from_boot(config), db_url=url), gate=gate)
 
     tree = BackupTree(maintenance.home)
     settings = DumpSettings.read(config)
+    source = dump.dump_source(
+        database(), is_remote=settings.is_remote, plane_url=settings.plane_url
+    )
+    conninfo, password = dump.passwordless_conninfo(source)
+    _assert_owner_dial(conninfo)
+    assert pg_dump_env(password) == {}  # no PGPASSWORD: the dial carries no credential at all
     result = worker.execute(
         {"kind": "dump", "now": datetime.now(UTC).isoformat()},
         work,
@@ -158,9 +149,6 @@ def test_scheduled_backup_dumps_as_the_owner_and_restores(
     )
 
     assert artifact.parent == maintenance.home / "backups" / "db"
-    ((argv, env),) = dumps
-    _assert_owner_dial(argv[argv.index("--dbname") + 1])
-    assert env == {}  # no PGPASSWORD: the dial carries no credential at all
 
     scratch = tmp_path / "scratch"
     scratch.mkdir(mode=0o700)

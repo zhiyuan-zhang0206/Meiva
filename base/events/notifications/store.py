@@ -11,6 +11,7 @@ from base.db.transaction import write_transaction
 SETTINGS_KEY = "notifications.categories"
 
 _SELECT_OVERRIDES = "SELECT value FROM user_settings WHERE key = %s"
+_SELECT_INPUT_BASE = "SELECT (SELECT value FROM user_settings WHERE key = %s), now()"
 _SELECT_LAST_KEYED = (
     "SELECT created_at FROM notification_events "
     "WHERE category = %s AND dedupe_key = %s ORDER BY created_at DESC LIMIT 1"
@@ -74,16 +75,18 @@ def _last(row: tuple[Any, ...] | None) -> datetime | None:
 
 def read_inputs(
     conn: psycopg.Connection, *, category: str, dedupe_key: str | None
-) -> tuple[dict[str, bool], datetime | None]:
-    overrides = parse_overrides(
-        (conn.execute(_SELECT_OVERRIDES, (SETTINGS_KEY,)).fetchone() or (None,))[0]
-    )
+) -> tuple[dict[str, bool], datetime | None, datetime]:
+    base_row = conn.execute(_SELECT_INPUT_BASE, (SETTINGS_KEY,)).fetchone()
+    if base_row is None:
+        raise RuntimeError("notification input query returned no row")
+    raw_overrides, now = base_row
+    overrides = parse_overrides(raw_overrides)
     last = (
         None
         if dedupe_key is None
         else _last(conn.execute(_SELECT_LAST_KEYED, (category, dedupe_key)).fetchone())
     )
-    return overrides, last
+    return overrides, last, now
 
 
 def insert(conn: psycopg.Connection, params: tuple[Any, ...]) -> int:

@@ -199,10 +199,11 @@ function ServicesPanel({ data }: { data: ClusterPanel }) {
 function GatewayCard({ m, currentMachine }: { m: MachineStatus; currentMachine: string }) {
   const t = useTranslations("insights.status");
   const health = healthVerdict(m);
+  const now = new Date();
   const upSince = m.online
-    ? formatRelative(m.up_since_at)
+    ? formatRelative(m.up_since_at, now)
     : m.stopped_at != null
-      ? t("stoppedAt", { time: formatRelative(m.stopped_at) })
+      ? t("stoppedAt", { time: formatRelative(m.stopped_at, now) })
       : "—";
   return (
     <div className="rounded-md border border-border" data-testid={`gateway-card-${m.name}`}>
@@ -279,9 +280,9 @@ function AgentRunnersCard({ runners }: { runners: MachineStatus[] }) {
               <TableCell className="tabular-nums">{m.agent_count}</TableCell>
               <TableCell className="text-xs text-muted-foreground">
                 {m.online
-                  ? formatRelative(m.up_since_at)
+                  ? formatRelative(m.up_since_at, new Date())
                   : m.stopped_at != null
-                    ? t("stoppedAt", { time: formatRelative(m.stopped_at) })
+                    ? t("stoppedAt", { time: formatRelative(m.stopped_at, new Date()) })
                     : "—"}
               </TableCell>
             </TableRow>

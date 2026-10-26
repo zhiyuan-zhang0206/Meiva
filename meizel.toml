@@ -12,7 +12,7 @@
 "scripts" = ["agent", "meiva", "base", "cli", "gateway", "meizel", "ops", "services"]
 "services" = ["meiva", "base", "ops"]
 "services/agent_runner/exec_host/tests/test_startup_preserves_exec.py" = ["agent/execution/protocol.py", "agent/graph/exec/process.py"]
-"services/agent_runner/agent_host" = ["agent/db/__init__.py", "agent/graph/__init__.py", "agent/graph/claim/node.py", "agent/graph/claim/tests", "agent/graph/exec/_child_boundary.py", "agent/graph/exec/_result.py", "agent/graph/exec/_subprocess.py", "agent/graph/hooks/compact.py", "agent/graph/llm/node.py", "agent/graph/llm_errors.py", "agent/graph/node_log/__init__.py", "agent/graph/tests/cancel_fixture.py", "agent/graph/tests/test_llm_helpers.py", "agent/impersonation.py", "agent/impersonation_handoff.py", "agent/llm/__init__.py", "agent/messages/__init__.py", "agent/messages/guard.py", "agent/ownership/corpse_reap.py", "agent/ownership/hosted.py", "agent/ownership/inbound.py", "agent/ownership/tests/ownership_support.py", "agent/process_boot.py", "agent/startup/__init__.py", "agent/state.py", "agent/tests/agent_tests.py", "agent/tests/claim/test_inbound_ownership.py", "agent/turn/runloop.py", "agent/turn/trace_checkpoint.py", "base/lm/harness/bridge.py"]
+"services/agent_runner/agent_host" = ["agent/db/__init__.py", "agent/graph/__init__.py", "agent/graph/claim/node.py", "agent/graph/claim/tests", "agent/graph/exec/process.py", "agent/graph/hooks/compact.py", "agent/graph/llm/node.py", "agent/graph/llm_errors.py", "agent/graph/node_log/__init__.py", "agent/graph/tests/cancel_fixture.py", "agent/graph/tests/test_llm_helpers.py", "agent/impersonation.py", "agent/impersonation_handoff.py", "agent/llm/__init__.py", "agent/messages/__init__.py", "agent/messages/guard.py", "agent/ownership/corpse_reap.py", "agent/ownership/hosted.py", "agent/ownership/inbound.py", "agent/ownership/tests/ownership_support.py", "agent/process_boot.py", "agent/startup/__init__.py", "agent/state.py", "agent/tests/agent_tests.py", "agent/tests/claim/test_inbound_ownership.py", "agent/turn/runloop.py", "agent/turn/trace_checkpoint.py", "base/lm/harness/bridge.py"]
 "tests" = [".agents", "agent", "meiva", "meiva_builtins", "base", "cli", "gateway", "meizel", "ops", "scripts", "services", "ui"]
 [roles]
 # The shipped packages: the wheel, the framework scans.
@@ -27,21 +27,5 @@ tests = ["tests"]
 # The user interface; its Python is a build helper.
 frontend = ["ui"]
 
-[debt.private-module]
-"conftest.py -> tests/_asyncio_stall_probe.py" = 1
-"gateway/tests/agents/test_external_agent_source.py -> agent/graph/claim/_chat_inbound.py" = 1
-"services/agent_runner/agent_host/tests/dispatch/test_exec_memory_guard.py -> agent/graph/exec/_child_boundary.py" = 1
-"services/agent_runner/agent_host/tests/dispatch/test_exec_memory_guard.py -> agent/graph/exec/_result.py" = 1
-"services/agent_runner/agent_host/tests/dispatch/test_exec_memory_guard.py -> agent/graph/exec/_subprocess.py" = 1
-"tests/e2e/lifecycle/test_force_expire_impersonation.py -> base/agents/impersonation/_store.py" = 1
-
-[debt.private-name]
-"services/agent_runner/agent_host/recovery/tests/test_recovery_outcome_tracebacks.py -> agent/turn/runloop.py#_handle_fatal_llm_error" = 1
-"services/agent_runner/agent_host/tests/circuit_breaker/helpers.py -> agent/turn/runloop.py#_handle_fatal_llm_error" = 1
-"services/agent_runner/agent_host/tests/test_circuit_breaker.py -> agent/turn/runloop.py#_handle_fatal_llm_error" = 1
-"services/agent_runner/agent_host/tests/test_circuit_breaker_audit.py -> agent/turn/runloop.py#_handle_fatal_llm_error" = 1
-"tests/components/services/agent_host/test_event_owner_shutdown.py -> services/agent_runner/agent_host/daemon.py#_is_running" = 1
-
 [debt.undeclared-edge]
-"base/config/tests/test_config_authority.py -> cli/main.py" = 1
 "base/sessions/pty/tests/pty_service.py -> services/agent_runner/pty_sessions/daemon.py" = 1

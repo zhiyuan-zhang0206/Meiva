@@ -7,6 +7,3 @@ exports = ["models.py", "paths.py", "source.py", "storage.py"]
 
 [purity]
 "__init__.py" = "strict"
-
-[debt.ambient-read]
-"models.py#random uuid.uuid4" = 1

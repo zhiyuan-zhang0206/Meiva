@@ -11,11 +11,10 @@
 "test_skills_sync.py" = ["support"]
 
 [debt.first-party-patch]
-"test_external_skills_adversarial.py#monkeypatch.setattr cli.commands.extensions.external_skills.materialize_source_snapshot" = 2
-"test_external_skills_adversarial.py#monkeypatch.setattr cli.commands.extensions.external_skills.rename_no_replace" = 6
+"test_external_skills_adversarial.py#monkeypatch.setattr cli.commands.extensions.external_skills.materialize_source_snapshot" = 1
+"test_external_skills_adversarial.py#monkeypatch.setattr cli.commands.extensions.external_skills.rename_no_replace" = 4
 "test_external_skills_adversarial.py#monkeypatch.setattr cli.commands.extensions.external_skills.stage_copy" = 2
 "test_external_skills_adversarial.py#monkeypatch.setattr cli.commands.extensions.external_skills.uuid.uuid4" = 1
-"test_external_skills_adversarial.py#monkeypatch.setattr cli.commands.extensions.external_skills.verify_marker" = 1
 
 [debt.unresolved-patch]
 "test_external_skills.py#monkeypatch.setattr module.rename_no_replace" = 1
