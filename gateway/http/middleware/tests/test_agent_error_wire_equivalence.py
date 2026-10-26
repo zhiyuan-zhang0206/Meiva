@@ -17,6 +17,7 @@ auto-parametrizes and won't miss coverage.
 from __future__ import annotations
 
 import json
+import random
 
 import httpx
 import pytest
@@ -29,7 +30,15 @@ from base.api_contracts.agent_contract import (
     AgentLaunchFailed,
     MeivaAgentError,
 )
+from gateway.http.middleware.error_envelope import request_trace_middleware
 from gateway.http.middleware.error_handlers import meiva_agent_error_handler
+
+
+# meiva:note
+# A fresh seeded generator for each use, so no test sees another's draws.
+def _rng() -> random.Random:
+    return random.Random(0)  # noqa: S311
+
 
 # Untyped fixtures and helper calls throughout: the call-site rules stay at warning for this file.
 # pyright: reportUnknownMemberType = warning
@@ -44,6 +53,7 @@ from gateway.http.middleware.error_handlers import meiva_agent_error_handler
 def test_handler_emits_expected_wire(reason, cls):
     """Server-side: handler encodes the full envelope plus SDK wire reason."""
     app = FastAPI()
+    app.middleware("http")(request_trace_middleware(_rng()))
     # FastAPI's add_exception_handler second parameter is typed as ExceptionHandler
     # (Exception input); our handler input is an MeivaAgentError subtype — pyright
     # considers it invariant-narrowed and disallows it. Runtime dispatch uses the registered

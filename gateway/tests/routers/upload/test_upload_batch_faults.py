@@ -23,7 +23,14 @@ _ITEMS: list[UploadItem] = [("a.png", b"aaa", "image/png"), ("b.png", b"bbb", "i
 _NAMES = ["a.png", "b.png"]
 
 
-def _save(pool: ConnectionPool, directory: Path, *, local_machine: str) -> UploadedBatch:
+def _save(
+    pool: ConnectionPool,
+    directory: Path,
+    *,
+    local_machine: str,
+    batch_id: str = "a" * 32,
+    staging_id: str = "b" * 32,
+) -> UploadedBatch:
     return upload_batches.save_keyed_batch(
         pool,
         "crash",
@@ -31,6 +38,8 @@ def _save(pool: ConnectionPool, directory: Path, *, local_machine: str) -> Uploa
         directory,
         _ITEMS,
         _NAMES,
+        batch_id=batch_id,
+        staging_id=staging_id,
         max_bytes=6,
         max_files=2,
         local_machine=local_machine,
@@ -83,6 +92,18 @@ def test_hard_death_recovers_fixed_objects(
     assert len([p for p in batch_target.iterdir() if p.is_file()]) == 2
 
 
+def test_a_new_batch_is_named_by_the_id_it_is_given(
+    db_conn: psycopg.Connection, batch_target: Path, *, machine_identity: MachineIdentityReader
+) -> None:
+    batch_id = "c" * 32
+    with ConnectionPool[psycopg.Connection](db_conn.info.dsn, min_size=1, max_size=2) as pool:
+        receipt = _save(
+            pool, batch_target, local_machine=machine_identity.name(), batch_id=batch_id
+        )
+    assert all(batch_id in Path(file.path).name for file in receipt.files)
+    assert not (batch_target / ".batch-staging" / ("b" * 32)).exists()
+
+
 # meiva:note
 # A writer that outlives its database connection holds its manifest and keeps publishing.
 #
@@ -99,6 +120,7 @@ def test_disconnected_writer_can_finish_after_recovery_without_overwriting(
             batch_target,
             _ITEMS,
             _NAMES,
+            batch_id="0" * 32,
             max_bytes=6,
             max_files=2,
             local_machine=machine_identity.name(),
@@ -107,7 +129,7 @@ def test_disconnected_writer_can_finish_after_recovery_without_overwriting(
         finals = {
             path.name: path.stat().st_ino for path in batch_target.iterdir() if path.is_file()
         }
-        upload_batches.publish_files(batch_target, old_writer.manifest, _ITEMS)
+        upload_batches.publish_files(batch_target, old_writer.manifest, _ITEMS, staging_id="1" * 32)
         assert _save(pool, batch_target, local_machine=machine_identity.name()) == recovered
     assert {
         path.name: path.stat().st_ino for path in batch_target.iterdir() if path.is_file()

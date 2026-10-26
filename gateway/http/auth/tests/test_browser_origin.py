@@ -1,4 +1,6 @@
+import random
 import shlex
+from pathlib import Path
 
 import pytest
 from pydantic import ValidationError
@@ -8,6 +10,21 @@ from base.config import ConfigBoot
 from base.config.domains.gateway import GatewaySettings
 from gateway.http.config import GatewayConfig, gateway_config_from_boot
 from gateway.http.middleware.cors import cors_allowed_origins, session_cookie_secure
+
+
+# meiva:note
+# A fresh seeded generator for each use, so no test sees another's draws.
+def _rng() -> random.Random:
+    return random.Random(0)  # noqa: S311
+
+
+def _config(owner: ConfigBoot) -> GatewayConfig:
+    return gateway_config_from_boot(
+        owner,
+        user_home=Path("/nonexistent/browser-origin-home"),
+        memory_root=Path("/nonexistent/browser-origin-memory"),
+        rng=_rng(),
+    )
 
 
 @pytest.mark.parametrize(
@@ -47,7 +64,7 @@ def test_build_and_cors_use_entry_without_changing_gateway() -> None:
         "NEXT_PUBLIC_GATEWAY_PORT": "8800",
         "NEXT_PUBLIC_BROWSER_ORIGIN": "https://console.example",
     }
-    cfg = gateway_config_from_boot(owner)
+    cfg = _config(owner)
     assert "https://console.example" in cfg.allowed_origins
     assert "http://192.0.2.2:8800" in cfg.allowed_origins
     assert owner.view.gateway.gateway_url == "http://192.0.2.2:8800"
@@ -58,7 +75,7 @@ def test_explicit_cors_remains_authoritative() -> None:
     owner.set_field("browser_origin", "https://console.example")
     owner.set_field("app_port", 18069)
     owner.set_field("cors_allowed_origins", ["https://other.example"])
-    assert gateway_config_from_boot(owner).allowed_origins == ("https://other.example",)
+    assert _config(owner).allowed_origins == ("https://other.example",)
     assert cors_allowed_origins(
         explicit=["https://other.example"],
         frontend_healthcheck_url="http://localhost:18055",
@@ -93,7 +110,7 @@ def test_https_cookie_policy_preserves_direct_http() -> None:
     owner.set_field("browser_origin", "https://console.example")
     owner.set_field("gateway_url", "http://192.0.2.2:8800")
     owner.set_field("session_cookie_secure", None)
-    cfg = gateway_config_from_boot(owner)
+    cfg = _config(owner)
     assert not cfg.session_cookie_secure
     assert session_cookie_secure(
         "https://console.example/api/auth/login",
@@ -131,7 +148,7 @@ def test_gateway_config_normalizes_origins_and_hides_cluster_secret_in_repr() ->
     owner = ConfigBoot()
     owner.set_field("cluster_secret", "top-secret-token")
     owner.set_field("cors_allowed_origins", ["https://one.example", "http://two.example:3000"])
-    cfg = gateway_config_from_boot(owner)
+    cfg = _config(owner)
     assert isinstance(cfg, GatewayConfig)
     assert cfg.allowed_origins == ("https://one.example", "http://two.example:3000")
     assert "top-secret-token" not in repr(cfg)

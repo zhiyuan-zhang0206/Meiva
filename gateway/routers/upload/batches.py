@@ -8,7 +8,6 @@ that continue after their database connection has died.
 import hashlib
 import os
 import shutil
-import uuid
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -97,6 +96,7 @@ def _lookup(conn: Connection[Any], key: str, fingerprint: str) -> Claim | None:
 
 # meiva:note
 # Commit the receiving identity and reserve its quota, or return the one already there.
+# `batch_id` names the objects of a new identity and is unused when the key already has one.
 def claim_batch(
     pool: ConnectionPool,
     key: str,
@@ -105,6 +105,7 @@ def claim_batch(
     batch: list[UploadItem],
     names: list[str],
     *,
+    batch_id: str,
     max_bytes: int,
     max_files: int,
     local_machine: str,
@@ -117,7 +118,7 @@ def claim_batch(
             return found
         if not agent_exists(conn, agent_id):
             raise AgentNotFound(agent_id)
-        manifest = plan_manifest(batch, names, uuid.uuid4().hex)
+        manifest = plan_manifest(batch, names, batch_id)
         if isinstance(manifest, SuffixRefusal):
             raise HTTPException(
                 422, "upload suffix cannot be represented in an immutable object URL"
@@ -157,9 +158,13 @@ def _fsync_directory(directory: Path) -> None:
         os.close(fd)
 
 
-def publish_files(directory: Path, manifest: list[dict[str, Any]], batch: list[UploadItem]) -> None:
+# meiva:note
+# `staging_id` names this attempt's private staging directory; two attempts never share one.
+def publish_files(
+    directory: Path, manifest: list[dict[str, Any]], batch: list[UploadItem], *, staging_id: str
+) -> None:
     """Publish without replacing or removing any final name, even on failure."""
-    staging = ensure_private_dir(directory / ".batch-staging" / uuid.uuid4().hex)
+    staging = ensure_private_dir(directory / ".batch-staging" / staging_id)
     try:
         for ordinal, (item, (_, contents, _)) in enumerate(zip(manifest, batch, strict=True)):
             temporary = staging / str(ordinal)
@@ -177,6 +182,9 @@ def publish_files(directory: Path, manifest: list[dict[str, Any]], batch: list[U
         shutil.rmtree(staging)
 
 
+# meiva:note
+# `batch_id` names the objects of a new claim and `staging_id` this attempt's staging directory; the
+# caller draws both.
 def save_keyed_batch(
     pool: ConnectionPool,
     key: str,
@@ -185,6 +193,8 @@ def save_keyed_batch(
     batch: list[UploadItem],
     names: list[str],
     *,
+    batch_id: str,
+    staging_id: str,
     max_bytes: int,
     max_files: int,
     local_machine: str,
@@ -197,6 +207,7 @@ def save_keyed_batch(
         directory,
         batch,
         names,
+        batch_id=batch_id,
         max_bytes=max_bytes,
         max_files=max_files,
         local_machine=local_machine,
@@ -210,7 +221,7 @@ def save_keyed_batch(
         if found.receipt is not None:
             return UploadedBatch.model_validate(found.receipt)
         ensure_private_dir(directory)
-        publish_files(directory, found.manifest, batch)
+        publish_files(directory, found.manifest, batch, staging_id=staging_id)
         receipt = UploadedBatch(
             files=[
                 UploadedFile(

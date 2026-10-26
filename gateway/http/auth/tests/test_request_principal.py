@@ -1,11 +1,17 @@
+import random
+import stat
+from pathlib import Path
+
 import pytest
 from starlette.requests import Request
 
 from gateway.http.auth.request_principal import (
     AuthPrincipal,
     PrincipalScopeError,
+    SessionKeys,
     principal_key,
     request_key,
+    session_key_path,
 )
 
 
@@ -91,3 +97,30 @@ def test_maximum_length_key_is_accepted() -> None:
     assert request_key(
         _request(principal=principal), key, method="POST", path="/api/a"
     ) == principal_key(principal, "POST", "/api/a", key)
+
+
+# meiva:note
+# A seeded generator gives the draw a test expects a name.
+def _seeded(seed: int) -> random.Random:
+    return random.Random(seed)  # noqa: S311
+
+
+def test_the_first_login_draws_the_session_key_from_the_generator_it_was_given(
+    tmp_path: Path,
+) -> None:
+    key = SessionKeys(_seeded(3)).key(tmp_path, create=True)
+    assert key == _seeded(3).randbytes(32)
+    stored = session_key_path(tmp_path)
+    assert stored.read_text() == key.hex() + "\n"
+    assert stat.S_IMODE(stored.stat().st_mode) == 0o600
+
+
+def test_an_existing_session_key_is_read_and_never_drawn_again(tmp_path: Path) -> None:
+    first = SessionKeys(_seeded(3)).key(tmp_path, create=True)
+    again = SessionKeys(_seeded(4)).key(tmp_path, create=True)
+    assert again == first
+
+
+def test_no_session_key_is_made_unless_a_login_asks_for_one(tmp_path: Path) -> None:
+    assert SessionKeys(_seeded(3)).key(tmp_path, create=False) is None
+    assert not session_key_path(tmp_path).exists()

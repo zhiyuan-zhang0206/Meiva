@@ -8,6 +8,3 @@ exports = ["batches.py", "router.py"]
 [purity]
 "__init__.py" = "strict"
 "upload_plan.py" = "strict"
-
-[roots]
-"batches.py" = { kinds = ["random"], why = "claim_batch and publish_files mint fresh UUIDs for upload batch identity and private staging directories" }

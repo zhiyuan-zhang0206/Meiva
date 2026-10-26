@@ -10,8 +10,8 @@ from __future__ import annotations
 
 import hashlib
 import hmac
+import random
 import re
-import secrets
 from contextlib import suppress
 from dataclasses import dataclass
 from pathlib import Path
@@ -91,8 +91,12 @@ class SessionKeys:
     file is re-read and re-validated.
     """
 
-    def __init__(self) -> None:
+    # meiva:note
+    # `rng` is where a first login draws the session key from; the root hands in a
+    # cryptographically secure generator.
+    def __init__(self, rng: random.Random) -> None:
         self._cache: dict[Path, tuple[tuple[int, int, int], bytes]] = {}
+        self._rng = rng
 
     def key(self, home: Path, *, create: bool) -> bytes | None:
         """The session-mint MAC key: minted once, at the first login.
@@ -106,7 +110,7 @@ class SessionKeys:
         path = session_key_path(home)
         if create and not path.exists():
             with suppress(FileExistsError):
-                create_private_bytes(path, (secrets.token_hex(32) + "\n").encode())
+                create_private_bytes(path, (self._rng.randbytes(32).hex() + "\n").encode())
         try:
             info = path.lstat()
         except FileNotFoundError:

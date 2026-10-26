@@ -16,8 +16,8 @@ from typing import Any
 import psycopg
 
 from base.config.tests.configuration import snapshot_process_config
-from gateway.http.config import GatewayConfig, gateway_config_from_boot
-from gateway.tests.auth.gateway_config import gateway_test_client
+from gateway.http.config import GatewayConfig
+from gateway.tests.auth.gateway_config import gateway_config_of, gateway_test_client
 from gateway.tests.events.event_rows import audit_event, telemetry_event
 
 
@@ -118,7 +118,7 @@ def _telemetry_store_locked(db_url: str) -> Generator[None]:
 
 def test_a_read_that_exceeds_its_statement_timeout_is_503(db_url: str) -> None:
     config: GatewayConfig = replace(
-        gateway_config_from_boot(snapshot_process_config()),
+        gateway_config_of(snapshot_process_config()),
         human_auth="required",
         events_read_timeout_ms=150,
     )

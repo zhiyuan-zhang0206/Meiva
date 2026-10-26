@@ -150,7 +150,7 @@ def _app_from_environment() -> None:
 
     first = gateway_app.create_app_from_environment()
     second = gateway_app.create_app_from_environment()
-    expected = gateway_app.gateway_config_from_boot(ConfigBoot())
+    expected = gateway_app.process_config(ConfigBoot())
     sys.stdout.write(
         json.dumps(
             {
