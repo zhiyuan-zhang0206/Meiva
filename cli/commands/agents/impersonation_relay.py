@@ -16,7 +16,6 @@ from __future__ import annotations
 import argparse
 import asyncio
 import contextlib
-import random
 import subprocess
 import sys
 from collections.abc import Coroutine
@@ -423,8 +422,7 @@ async def _serve(
 # What the handler read for one relay: the scoped credential from the channel the operator
 # chose, the Redis address of the invocation's configuration, CODEX_HOME as the shell saw it,
 # the Antigravity endpoint its environment named (if any), the stdout a controller session reads
-# the relay's pushes from, and the invocation's random source (the bus's authentication-retry
-# jitter draws from it).
+# the relay's pushes from, and the invocation's event bus.
 @dataclass(frozen=True)
 class RelayInputs:
     token: str
@@ -432,7 +430,7 @@ class RelayInputs:
     codex_home: str | None
     antigravity_server: AntigravityServer | None
     stdout: TextIO
-    rng: random.Random
+    bus: EventBus
 
 
 # meiva:note
@@ -467,7 +465,7 @@ def cmd_relay(
         )
         local_machine = machine.name()
         db = database_factory()
-        bus = EventBus.from_settings(rng=inputs.rng)
+        bus = inputs.bus
         if args.lease_id is None:
             lease_id = UUID(
                 str(resolve(db, args.agent_id, args.session_id, local_machine=local_machine)["id"])

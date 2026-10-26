@@ -11,25 +11,21 @@ import sys
 
 
 def _h_packages_status(args: argparse.Namespace) -> int:
-    from base.config import ConfigBoot
     from cli.commands.extensions.packages import cmd_packages_status
+    from cli.database.runtime import delivered_config
 
-    config = ConfigBoot()
-    config.read_process_environment()
-
-    return cmd_packages_status(config=config, json_output=args.json_output)
+    return cmd_packages_status(
+        config=delivered_config(args.runtime.config), json_output=args.json_output
+    )
 
 
 def _h_packages_refresh(args: argparse.Namespace) -> int:
     from base.clock import Clock, ClockConfig
-    from base.config import ConfigBoot
     from cli.commands.extensions.packages import cmd_packages_refresh
-
-    config = ConfigBoot()
-    config.read_process_environment()
+    from cli.database.runtime import delivered_config
 
     return cmd_packages_refresh(
-        config=config,
+        config=delivered_config(args.runtime.config),
         repo=args.runtime.checkout,
         now=Clock(
             ClockConfig("UTC", None, message_timestamp_weekday=False), timers=args.runtime.timers
@@ -59,8 +55,8 @@ def _duration(value: str) -> str:
 
 
 def _h_packages_policy(args: argparse.Namespace) -> int:
-    from base.config import ConfigBoot
     from cli.commands.extensions.packages import cmd_packages_policy
+    from cli.database.runtime import delivered_config
 
     if args.update_mode is None and args.check_every is None:
         print(
@@ -68,10 +64,11 @@ def _h_packages_policy(args: argparse.Namespace) -> int:
             file=sys.stderr,
         )
         return 2
-    config = ConfigBoot()
-    config.read_process_environment()
     return cmd_packages_policy(
-        args.name, config=config, update_mode=args.update_mode, check_every=args.check_every
+        args.name,
+        config=delivered_config(args.runtime.config),
+        update_mode=args.update_mode,
+        check_every=args.check_every,
     )
 
 

@@ -29,15 +29,21 @@ def direct(mode: str) -> int:
     from cli.commands.management import schedules
 
     if mode == "schedules-xor-none":
-        return schedules.cmd_schedules_create("n", None, None, None, None)
+        return schedules.cmd_schedules_create(
+            _access(), "n", None, None, None, None, idempotency_key="key"
+        )
     if mode == "schedules-xor-both":
-        return schedules.cmd_schedules_create("n", "print(1)", "s.py", None, None)
+        return schedules.cmd_schedules_create(
+            _access(), "n", "print(1)", "s.py", None, None, idempotency_key="key"
+        )
     if mode == "schedules-update-empty":
-        return schedules.cmd_schedules_update("7", None, None, None, None, None, enabled=None)
+        return schedules.cmd_schedules_update(
+            _access(), "7", None, None, None, None, None, enabled=None, idempotency_key="key"
+        )
     if mode == "restart-invalid-config":
         return control.cmd_agents_restart(_access(), 9, '["not", "an", "object"]')
     if mode == "send-missing-source":
-        return control.cmd_agents_send(_access(), 42, "hello", None)
+        return control.cmd_agents_send(_access(), 42, "hello", None, idempotency_key="key")
     if mode in {"send-handler-missing", "send-handler-invalid"}:
         return parsers.h_agents_send(
             argparse.Namespace(

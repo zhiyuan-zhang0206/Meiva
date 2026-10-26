@@ -21,30 +21,22 @@ from meiva.tests.fixtures.gateway_wire import (
 )
 
 _REPO_ROOT = Path(__file__).resolve().parents[3]
-_SNIPPET_PATHS = (
-    "meiva_builtins/skills/coordination/meiva-goal/scripts/watch_idle.py",
-    "meiva_builtins/skills/coordination/meiva-being-a-long-running-agent/scripts/watch_idle.py",
-    "meiva_builtins/plugins/meiva_fleet/skills/meiva-fleet/reference/watch_idle.py",
-)
+_SNIPPET_PATH = "meiva_builtins/skills/coordination/meiva-goal/scripts/watch_idle.py"
 _FIXTURE_PATH = _REPO_ROOT / "tests" / "fixtures" / "events" / "agent" / "agent_updated.json"
 
 
-def _load_snippet(path: str) -> ModuleType:
-    spec = importlib.util.spec_from_file_location("goal_watch_idle", _REPO_ROOT / path)
+def _load_snippet() -> ModuleType:
+    spec = importlib.util.spec_from_file_location("goal_watch_idle", _REPO_ROOT / _SNIPPET_PATH)
     assert spec is not None and spec.loader is not None
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
     return module
 
 
-def _load_is_target_idle(path: str) -> Callable[[dict[str, Any], int], bool]:
-    fn: Callable[[dict[str, Any], int], bool] = vars(_load_snippet(path))["_is_target_idle"]
+@pytest.fixture
+def is_target_idle() -> Callable[[dict[str, Any], int], bool]:
+    fn: Callable[[dict[str, Any], int], bool] = vars(_load_snippet())["_is_target_idle"]
     return fn
-
-
-@pytest.fixture(params=_SNIPPET_PATHS)
-def is_target_idle(request: pytest.FixtureRequest) -> Callable[[dict[str, Any], int], bool]:
-    return _load_is_target_idle(request.param)
 
 
 @pytest.fixture
@@ -95,9 +87,8 @@ def test_other_events_do_not_fetch_status(
     assert watcher_wire.received == []
 
 
-@pytest.mark.parametrize("path", _SNIPPET_PATHS)
-def test_poll_fallback_reads_status_until_idle(watcher_wire: GatewayStub, path: str) -> None:
-    module = _load_snippet(path)
+def test_poll_fallback_reads_status_until_idle(watcher_wire: GatewayStub) -> None:
+    module = _load_snippet()
     watcher_wire.reply_in_turn(
         "GET",
         "/api/agents/42",

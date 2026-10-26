@@ -240,7 +240,6 @@ def ensure_github_pr(ctx: ConvergeCtx) -> None:
         roles=ctx.roles, keep_local=general.memory_keep_local, require_pr=general.require_github_pr
     ):
         return
-    from base.config import settings
     from base.deploy.git.github_pr import (
         github_auth_blocker,
         github_permission_blocker,
@@ -251,7 +250,7 @@ def ensure_github_pr(ctx: ConvergeCtx) -> None:
     reason = github_auth_blocker(host=ctx.host)
     if reason is not None:
         raise RuntimeError(github_pr_failure(reason))
-    remote = memory_remote(settings.general.memory_remote)
+    remote = memory_remote(general.memory_remote)
     reason = github_permission_blocker(host=ctx.host, slug=memory_repo_slug(remote))
     if reason is not None:
         raise RuntimeError(github_pr_failure(reason))

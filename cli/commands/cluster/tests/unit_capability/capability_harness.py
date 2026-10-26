@@ -24,6 +24,7 @@ from base.host.net.tests.local_http import closed_port_url
 from base.host.net.url_secret import credential_free
 from cli import start_identity
 from cli.commands.cluster.tests.gateway_server import Reply
+from cli.startup.tests.birth_facts import birth_facts
 
 __all__ = [
     "BOOTSTRAP",
@@ -155,6 +156,7 @@ def initialized_runner(
                 "MEIVA_SERVICE_PATH": str(root / "tools"),
             },
             occupied_ports=frozenset(),
+            birth=birth_facts(),
         )
     )
     return home
