@@ -12,6 +12,7 @@ from agent.turn.runloop import handle_fatal_llm_error
 from base.agents.context import MeivaContext
 from base.agents.tests.units import spawn_agent
 from base.clock import Clock
+from base.clock.tests.seeded_rng import seeded_rng
 from base.cluster.machine import MachineIdentityReader
 from base.cluster.machine.tests.identity import machine_identity as machine_identity
 from base.config.service_read import ConfigAuthority
@@ -63,7 +64,7 @@ async def test_the_breaker_open_event_is_recorded_in_audit_events(
             event_publisher=MagicMock(),
             agent=AgentSlices.resolve(default_reader=defaults()),
             db=Database.from_settings(gate=database_gate),
-            bus=EventBus.from_settings(),
+            bus=EventBus.from_settings(rng=seeded_rng()),
             catalog=build_model_catalog(),
             clock_factory=Clock.from_settings,
         ),
@@ -117,7 +118,7 @@ async def test_a_failed_audit_write_is_reported_and_does_not_undo_the_open_break
                 event_publisher=MagicMock(),
                 agent=AgentSlices.resolve(default_reader=defaults()),
                 db=Database.from_settings(gate=database_gate),
-                bus=EventBus.from_settings(),
+                bus=EventBus.from_settings(rng=seeded_rng()),
                 catalog=build_model_catalog(),
                 clock_factory=Clock.from_settings,
             ),

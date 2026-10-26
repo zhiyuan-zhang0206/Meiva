@@ -1,8 +1,11 @@
-exports = ["fakes.py", "live_capture.py"]
+exports = ["fakes.py", "live_capture.py", "rng.py"]
 
 [uses]
+"live_capture.py" = ["rng.py"]
+"test_event_publisher_drop.py" = ["rng.py"]
 "test_publish_best_effort.py" = ["fakes.py"]
-"test_redis_client.py" = ["fakes.py"]
+"test_publisher.py" = ["rng.py"]
+"test_redis_client.py" = ["fakes.py", "rng.py"]
 
 [debt.first-party-patch]
 "fakes.py#monkeypatch.setattr base.events.live.bus.EventBus.async_redis" = 1

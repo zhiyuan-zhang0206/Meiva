@@ -6,6 +6,7 @@ from collections.abc import Callable
 from contextlib import suppress
 from typing import cast
 
+from base.clock.tests.seeded_rng import seeded_rng
 from base.events.live.bus import EventBus
 from services.agent_runner.agent_host.dispatcher import InboundWakeDispatcher, TurnScheduler
 from services.agent_runner.agent_host.scheduling.admission import TurnAdmission
@@ -269,7 +270,9 @@ class TestSchedulerIntegration:
         async def _pending() -> list[int]:
             return [2, 3]
 
-        disp = InboundWakeDispatcher(EventBus.from_settings(), fresh, pending_scan=_pending)
+        disp = InboundWakeDispatcher(
+            EventBus.from_settings(rng=seeded_rng()), fresh, pending_scan=_pending
+        )
         try:
             await disp.scan_once()
             await _until(lambda: sorted(served) == [1, 2, 3])

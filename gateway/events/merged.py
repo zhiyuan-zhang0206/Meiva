@@ -22,6 +22,7 @@ from base import telemetry
 from base.events.live.bus import EventBus
 from base.events.live.projection import EVENT_ADAPTER, GLOBAL_ROLES
 from base.events.live.redis_client import AuthRetryAsyncRedis, retry_auth_failures_async
+from base.events.live.redis_resilience import AuthRetry
 from gateway.events.sse import (
     REDIS_ACL_ERRORS,
     REDIS_IO_ERRORS,
@@ -207,6 +208,7 @@ async def _drain(
     flush_interval: float,
     queues: dict[Channel, ChannelQueue],
     agent_filter: set[int] | None,
+    auth_retry: AuthRetry,
 ) -> bool:
     if stopping.is_stopping() or await request.is_disconnected():
         return True
@@ -216,7 +218,9 @@ async def _drain(
         if remaining <= 0:
             break
         poll = min(remaining, 0.1)
-        msg = await retry_auth_failures_async(lambda poll=poll: get_pubsub_message(pubsub, poll))
+        msg = await retry_auth_failures_async(
+            lambda poll=poll: get_pubsub_message(pubsub, poll), auth_retry=auth_retry
+        )
         if msg is None:
             break
         payload = msg["data"]
@@ -247,7 +251,9 @@ async def attach_sources(
     errors: dict[Channel, str] = {}
     for source, served in sources:
         try:
-            await retry_auth_failures_async(lambda source=source: pubsub.subscribe(source))
+            await retry_auth_failures_async(
+                lambda source=source: pubsub.subscribe(source), auth_retry=bus.auth_retry
+            )
         except REDIS_IO_ERRORS + REDIS_ACL_ERRORS as exc:
             _log.warning("sse merged subscribe failed: source=%s %r", source, exc)
             errors.update(subscribe_errors(served, exc))
@@ -339,7 +345,9 @@ async def merged_event_stream(
         last_comment = last_data_frame
         while True:
             try:
-                disconnected = await _drain(pubsub, request, flush_interval, queues, agent_filter)
+                disconnected = await _drain(
+                    pubsub, request, flush_interval, queues, agent_filter, bus.auth_retry
+                )
             except REDIS_IO_ERRORS + REDIS_ACL_ERRORS as exc:
                 _log.warning("sse merged pubsub read failed: %r", exc)
                 message = f"event stream interrupted: {type(exc).__name__}"

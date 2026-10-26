@@ -31,6 +31,7 @@ from typing import Any, cast
 import psycopg
 from psycopg_pool import ConnectionPool
 
+from base.clock.tests.seeded_rng import seeded_rng
 from base.cluster.machine import MachineIdentityReader
 from base.config.service_read import ConfigAuthority
 from base.daemon.health import start_health_server, stop_health_server
@@ -117,6 +118,7 @@ async def _serve(
         image=image,
         local_machine=machine,
         host=host,
+        rng=seeded_rng(),
     )
 
     async def recorded(body: bytes) -> tuple[int, bytes, str]:

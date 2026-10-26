@@ -39,6 +39,7 @@ from base.agents.messages.timestamp_policy import TimestampSource
 from base.agents.observation.relay_supervision import RelaySupervision
 from base.api_contracts.caller_identity import CallerIdentity
 from base.clock import SYSTEM_TIMERS, Clock, ClockConfig
+from base.clock.tests.seeded_rng import seeded_rng
 from base.cluster import inbound_channel
 from base.cluster.machine import MachineIdentityReader
 from base.config.service_read import ConfigAuthority
@@ -204,7 +205,7 @@ async def prepare_graph(
     assert owner is not None
     requested = leases.request(
         Database.from_settings(gate=database_gate),
-        EventBus.from_settings(),
+        EventBus.from_settings(rng=seeded_rng()),
         agent_id,
         caller=CallerIdentity(kind="external_agent", subject="codex"),
         process_metadata=recorded_tree(),
@@ -249,7 +250,7 @@ async def prepare_graph(
         event_publisher=MagicMock(),
         agent=AgentSlices.resolve(default_reader=defaults()),
         db=Database.from_settings(gate=database_gate),
-        bus=EventBus.from_settings(),
+        bus=EventBus.from_settings(rng=seeded_rng()),
         clients=clients,
         identity=AgentIdentity(agent_id=agent_id, owns_loop=True),
         original_incarnation=owner,

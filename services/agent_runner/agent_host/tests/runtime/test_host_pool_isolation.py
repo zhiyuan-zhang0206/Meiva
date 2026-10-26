@@ -5,6 +5,7 @@ import asyncio
 import pytest
 from psycopg_pool import AsyncConnectionPool
 
+from base.clock.tests.seeded_rng import seeded_rng
 from base.config.tests.configuration import snapshot_process_config
 from base.db import Database
 from services.agent_runner.agent_host.daemon import boot_handles
@@ -46,7 +47,7 @@ class TestPoolIsolation:
         config.set_field("host_db_pool_max_size", 12)
         config.set_field("host_control_pool_max_size", 3)
 
-        workload_pool, control_pool, _, _ = boot_handles(database, config)
+        workload_pool, control_pool, _, _ = boot_handles(database, config, seeded_rng())
 
         assert workload_pool is not control_pool
         assert workload_pool.max_size == 12

@@ -3,6 +3,7 @@ from __future__ import annotations
 from dataclasses import replace
 from typing import Any
 
+from base.clock.tests.seeded_rng import seeded_rng
 from base.db import Database
 from base.db.code_version_gate import ProcessDbGate
 from base.events.live.bus import EventBus, EventBusConfig
@@ -60,4 +61,6 @@ async def generate(
 # meiva:note
 # An event bus configured with an invalid scheme so publish raises an unrecovered ValueError.
 def failing_bus() -> EventBus:
-    return EventBus(EventBusConfig(redis_url="invalid://", events_channel="meiva:events"))
+    return EventBus(
+        EventBusConfig(redis_url="invalid://", events_channel="meiva:events"), rng=seeded_rng()
+    )

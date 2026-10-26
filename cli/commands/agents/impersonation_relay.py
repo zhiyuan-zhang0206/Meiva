@@ -16,6 +16,7 @@ from __future__ import annotations
 import argparse
 import asyncio
 import contextlib
+import random
 import subprocess
 import sys
 from collections.abc import Coroutine
@@ -420,13 +421,15 @@ async def _serve(
 # meiva:note
 # What the handler read for one relay: the scoped credential from the channel the operator
 # chose, the Redis address of the invocation's configuration, CODEX_HOME as the shell saw it,
-# and the stdout a controller session reads the relay's pushes from.
+# the stdout a controller session reads the relay's pushes from, and the invocation's random
+# source (the bus's authentication-retry jitter draws from it).
 @dataclass(frozen=True)
 class RelayInputs:
     token: str
     redis_url: str
     codex_home: str | None
     stdout: TextIO
+    rng: random.Random
 
 
 # meiva:note
@@ -456,7 +459,7 @@ def cmd_relay(
         adapter = bind_adapter(destination, codex_home=inputs.codex_home, stdout=inputs.stdout)
         local_machine = machine.name()
         db = database_factory()
-        bus = EventBus.from_settings()
+        bus = EventBus.from_settings(rng=inputs.rng)
         if args.lease_id is None:
             lease_id = UUID(
                 str(resolve(db, args.agent_id, args.session_id, local_machine=local_machine)["id"])

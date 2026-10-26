@@ -8,6 +8,7 @@ from unittest.mock import MagicMock
 import pytest
 
 from base.agents.context.clients import ClientSet
+from base.clock.tests.seeded_rng import seeded_rng
 from base.cluster.machine import MachineFacts
 from base.cluster.machine.configured import ConfiguredMachineIdentity
 from base.cluster.machine.tests.identity import machine_identity as machine_identity
@@ -87,7 +88,7 @@ async def test_host_release_runs_and_first_original_failure_remains_primary(
         machine=machine_identity,
         catalog=model_catalog,
         clients=clients,
-        bus=EventBus.from_settings(),
+        bus=EventBus.from_settings(rng=seeded_rng()),
         db=Database.from_settings(gate=database_gate),
         commands=CommandCatalog.system(skills=list),
     )

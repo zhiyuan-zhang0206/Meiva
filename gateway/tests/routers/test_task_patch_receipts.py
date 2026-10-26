@@ -7,6 +7,7 @@ import pytest
 
 from base.agents.tasks.priority import Priority
 from base.api_contracts.idempotency import keyed_headers
+from base.clock.tests.seeded_rng import seeded_rng
 from base.events.live.bus import EventBus, EventBusConfig
 from gateway.routers import tasks
 from gateway.schemas.tasks import TaskUpdateRequest
@@ -60,7 +61,8 @@ def test_lost_response_replay_preserves_new_owner_and_reminder_window(
         # A bus whose Redis URL names no scheme raises when the wake publishes, after the
         # patch and its receipt have committed: the response is lost, the receipt is kept.
         broken_bus = EventBus(
-            EventBusConfig(redis_url="no-scheme", events_channel=working_bus.channel)
+            EventBusConfig(redis_url="no-scheme", events_channel=working_bus.channel),
+            rng=seeded_rng(),
         )
         client.app.state.bus = broken_bus
         assert (

@@ -3,6 +3,7 @@ from pathlib import Path
 
 import pytest
 
+from base.clock.tests.seeded_rng import seeded_rng
 from base.config import ConfigBoot
 from base.config.service_read import ConfigAuthority
 from base.config.tests.configuration import snapshot_process_config
@@ -22,7 +23,9 @@ def test_pool_and_bus_read_the_same_live_owner(database: Database, tmp_path: Pat
 
     config.set_field("ops_concurrency", 3)
     config.set_field("events_channel", "first-owned-channel")
-    first_db, first_bus = boot.ops_handles(database=owned_database, authority=authority)
+    first_db, first_bus = boot.ops_handles(
+        database=owned_database, authority=authority, rng=seeded_rng()
+    )
     first_pool = boot.open_db_pool(database=owned_database, authority=authority)
     try:
         assert first_db is database
@@ -30,7 +33,9 @@ def test_pool_and_bus_read_the_same_live_owner(database: Database, tmp_path: Pat
         assert first_pool.max_size == 5
         config.set_field("ops_concurrency", 5)
         config.set_field("events_channel", "second-owned-channel")
-        second_db, second_bus = boot.ops_handles(database=owned_database, authority=authority)
+        second_db, second_bus = boot.ops_handles(
+            database=owned_database, authority=authority, rng=seeded_rng()
+        )
         second_pool = boot.open_db_pool(database=owned_database, authority=authority)
         try:
             assert second_db is database

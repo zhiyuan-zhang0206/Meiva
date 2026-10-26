@@ -84,6 +84,7 @@ def _h_impersonate_relay(args: argparse.Namespace) -> int:
         redis_url=args.runtime.config.view.data_plane.redis_url,
         codex_home=env.codex_home,
         stdout=args.runtime.terminal.stdout,
+        rng=args.runtime.rng,
     )
     return cmd_relay(
         args,

@@ -21,6 +21,7 @@ from agent.graph._callbacks import RedisStreamHandler
 from base.agents.context import MeivaContext
 from base.agents.observation.turn_progress import TurnProgress
 from base.clock import Clock
+from base.clock.tests.seeded_rng import seeded_rng
 from base.config.tests.configuration import defaults
 from base.db import Database
 from base.db.code_version_gate import ProcessDbGate
@@ -123,7 +124,7 @@ def llm_runtime(
             event_publisher=event_publisher or sink_publisher(),
             agent=AgentSlices.resolve(pins, default_reader=defaults()),
             db=Database.from_settings(gate=database_gate),
-            bus=EventBus.from_settings(),
+            bus=EventBus.from_settings(rng=seeded_rng()),
             catalog=model_catalog,
             clock_factory=Clock.from_settings,
         )
@@ -137,7 +138,9 @@ async def published_payloads(
     event_bus: EventBus,
 ) -> AsyncGenerator[tuple[AgentEventPublisher, list[str]]]:
     payloads: list[str] = []
-    publisher = AgentEventPublisher(event_bus.async_redis(), event_bus.channel, agent_id=1)
+    publisher = AgentEventPublisher(
+        event_bus.async_redis(), event_bus.channel, agent_id=1, auth_retry=event_bus.auth_retry
+    )
     async with (
         event_bus.open_async_redis() as client,
         PubSub(client.connection_pool) as subscription,

@@ -20,6 +20,7 @@ from psycopg_pool import ConnectionPool
 
 from base.api_contracts.agent_contract import ShellKillMode
 from base.clock import SYSTEM_TIMERS
+from base.clock.tests.seeded_rng import seeded_rng
 from base.daemon.loop_health import LoopProgress
 from base.db import Database, create_agent
 from base.db.code_version_gate import ProcessDbGate
@@ -55,7 +56,7 @@ async def _reap(
     return await reap_expired_shells(
         pool,
         Database.from_settings(gate=database_gate),
-        bus or EventBus.from_settings(),
+        bus or EventBus.from_settings(rng=seeded_rng()),
         _progress(),
         config or reaper_config(),
     )

@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+from base.clock.tests.seeded_rng import seeded_rng
 from base.events.live.bus import EventBus, EventBusConfig
 
 __all__ = ["unpublishable_bus"]
@@ -16,5 +17,6 @@ __all__ = ["unpublishable_bus"]
 # a process lost between commit and announce does.
 def unpublishable_bus() -> EventBus:
     return EventBus(
-        EventBusConfig(redis_url="redis://[unpublishable", events_channel="unpublished")
+        EventBusConfig(redis_url="redis://[unpublishable", events_channel="unpublished"),
+        rng=seeded_rng(),
     )
