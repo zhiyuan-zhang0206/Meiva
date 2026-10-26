@@ -37,6 +37,7 @@ from __future__ import annotations
 
 from collections.abc import Callable
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import TYPE_CHECKING, Any, Protocol, Self
 
 from base.agents.context.clients import ClientSet, LazyConnection
@@ -154,6 +155,34 @@ class MeivaContext:
         if self.clock_factory is None:
             raise RuntimeError("this MeivaContext carries no clock factory")
         return self.clock_factory()
+
+    # meiva:note
+    # The invoking user's home directory, which the root fills when it builds the context
+    # (`meiva/boot.py` for an SDK process, the agent host's root for a hosted agent). Code that
+    # needs it asks `require_user_home()` instead of reading `Path.home()` itself.
+    user_home: Path | None = None
+
+    # meiva:note
+    # The identifier source of this process: each call returns a fresh unique string. The root
+    # fills it when it builds the context, with the generator it owns; code that mints an
+    # identifier asks `require_new_id()` instead of calling `uuid4()` itself.
+    new_id: Callable[[], str] | None = None
+
+    # meiva:note
+    # Read the user home the root recorded; a partial context fails at first use, with no fallback
+    # to the process's own home.
+    def require_user_home(self) -> Path:
+        if self.user_home is None:
+            raise RuntimeError("this MeivaContext carries no user home")
+        return self.user_home
+
+    # meiva:note
+    # Mint a fresh identifier from the root's source; a partial context fails at first use, with
+    # no fallback to a local generator.
+    def require_new_id(self) -> str:
+        if self.new_id is None:
+            raise RuntimeError("this MeivaContext carries no identifier source")
+        return self.new_id()
 
     # meiva:note
     # The message-timestamp policy of the unit of work that asks: this owner's clock and the
