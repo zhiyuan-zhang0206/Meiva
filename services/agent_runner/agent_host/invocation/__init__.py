@@ -85,7 +85,9 @@ async def settle_handoff_before_invocation(
             activate_accepted=False,
             incarnation=ctx.original_incarnation,
             timestamps=settlement.timestamps,
-            host=process_host(settlement.local_machine, rng=settlement.rng),
+            host=process_host(
+                settlement.local_machine, rng=settlement.rng, clock=settlement.timestamps.clock
+            ),
         )
         if not fresh_input or ctx.original_incarnation is None:
             return False
@@ -164,7 +166,11 @@ async def finish_completed_invocation(
                 hooks.settlement.relays,
                 incarnation=ctx.original_incarnation,
                 timestamps=hooks.settlement.timestamps,
-                host=process_host(hooks.settlement.local_machine, rng=hooks.settlement.rng),
+                host=process_host(
+                    hooks.settlement.local_machine,
+                    rng=hooks.settlement.rng,
+                    clock=hooks.settlement.timestamps.clock,
+                ),
             )
         return TurnOutcome(exited=False, crashed=False)
     return None

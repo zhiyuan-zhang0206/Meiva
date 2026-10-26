@@ -35,7 +35,9 @@ prefix that starts a relay is a value on `TakeoverHost`, read once by the host.
 Each supervision pass is `supervision_step`: a pure plan over the host's child
 handle (exit, age) and the lease (phase, heartbeat freshness, credential age).
 The activation wait is a loop of `relay_poll` verdicts; its timeout and poll
-interval are fields of `RelayWait` on `TakeoverHost`.
+interval are fields of `RelayWait` on `TakeoverHost`, and every wait and elapsed-time read of
+the relay (the activation wait, the supervision loop) runs on the host's `clock`, so a test can
+drive them with a manual one.
 The native gate supplies its machine name to relay authentication at the
 existing boundaries, after partial-context and resource-closure guards.
 

@@ -89,12 +89,10 @@ from typing import Any
 
 import psutil
 
-from base.config import settings
 from base.daemon.health import DaemonProbe
 
 from . import macos_readiness
 from .orphan import find_cluster_chrome, is_cluster_chrome
-from .profile import profile_dir
 
 _log = logging.getLogger("services.desktop.browser.probe")
 
@@ -320,7 +318,7 @@ def classify_probe_exception(exc: Exception) -> DaemonProbe:
     return DaemonProbe.down(f"probe raised {type(exc).__name__}: {exc}")
 
 
-def probe_browser(port: int | None = None, profile: Path | None = None) -> DaemonProbe:
+def probe_browser(port: int, profile: Path) -> DaemonProbe:
     """Probe the shared headed browser and verify the Chrome answering is ours,
     ALWAYS returning a verdict.
 
@@ -466,7 +464,7 @@ def decide_browser_probe(
     )
 
 
-def _probe_browser(port: int | None, profile: Path | None) -> DaemonProbe:
+def _probe_browser(port: int, profile: Path) -> DaemonProbe:
     """CDP answers on this cluster's port AND a Chrome on this cluster's profile is
     the process listening there.
 
@@ -489,30 +487,27 @@ def _probe_browser(port: int | None, profile: Path | None) -> DaemonProbe:
       crash loop once every 60s. An operator has to free the port.
     - **both hold** → `ALIVE`, with the pid in the detail.
     """
-    resolved_port = settings.services.browser_cdp_port if port is None else port
-    resolved_profile = profile_dir() if profile is None else profile
-
-    answer = cdp_unreachable(resolved_port)
+    answer = cdp_unreachable(port)
     if answer.reason is not None and not answer.answered:
         return decide_browser_probe(
-            resolved_port,
-            resolved_profile,
+            port,
+            profile,
             answer=answer,
             found=(),
             listening={},
             wait_reason=macos_readiness.degraded_wait_reason(),
         )
 
-    found = find_cluster_chrome(resolved_profile)
-    holder = listener_pid(resolved_port)
+    found = find_cluster_chrome(profile)
+    holder = listener_pid(port)
     holder_facts = (
         process_facts(holder) if holder is not None and holder not in found else ("", None)
     )
-    listening = {pid: listens_on(pid, resolved_port) for pid in found}
+    listening = {pid: listens_on(pid, port) for pid in found}
     wait_reason = macos_readiness.degraded_wait_reason() if answer.reason is not None else None
     return decide_browser_probe(
-        resolved_port,
-        resolved_profile,
+        port,
+        profile,
         answer=answer,
         found=found,
         listening=listening,

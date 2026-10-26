@@ -13,6 +13,8 @@ from agent.hooks.understanding_chunks import await_snapshot, due_chunk_update, e
 from agent.state import AgentState
 from agent.state_channels import CompactState
 from base.agents.history.hierarchy.chunks import chunk_threshold
+from base.clock import SYSTEM_TIMERS
+from base.clock.tests.manual_timers import ManualTimers
 from base.config.tests.configuration import defaults
 from base.host.env.agent_slices import AgentSlices
 from base.lm.catalog import ModelCatalog
@@ -265,6 +267,7 @@ async def test_the_boundary_waits_for_a_checkpoint_as_new_as_the_states_last_mes
             _AGENT,
             understanding_enabled=True,
             wait=SnapshotWait(wait_seconds=30.0, poll_seconds=0.01),
+            timers=SYSTEM_TIMERS,
         )
     )
     await asyncio.sleep(0.1)
@@ -280,13 +283,23 @@ async def test_a_snapshot_that_never_catches_up_is_stamped_anyway_with_an_event(
     aops_pool: AsyncConnectionPool, emitted_events: EmittedEvents
 ) -> None:
     await _checkpoint(aops_pool, "c1", 5)
+    timers = ManualTimers()
 
     await await_snapshot(
-        aops_pool, _state(_stamped(10)), _AGENT, understanding_enabled=True, wait=_QUICK
+        aops_pool,
+        _state(_stamped(10)),
+        _AGENT,
+        understanding_enabled=True,
+        wait=_QUICK,
+        timers=timers,
     )
 
     assert emitted_events.names() == ["understanding_snapshot_lag"]
-    assert emitted_events.attributes("understanding_snapshot_lag")[0]["agent_id"] == _AGENT
+    lag = emitted_events.attributes("understanding_snapshot_lag")[0]
+    assert lag["agent_id"] == _AGENT
+    assert lag["waited_seconds"] == _QUICK.wait_seconds
+    assert set(timers.sleeps) == {_QUICK.poll_seconds}
+    assert timers.monotonic() >= _QUICK.wait_seconds
 
 
 # meiva:note
@@ -306,7 +319,12 @@ async def test_an_inbound_last_message_is_compared_by_the_time_the_model_read_it
     )
 
     await await_snapshot(
-        aops_pool, _state(inbound), _AGENT, understanding_enabled=True, wait=_QUICK
+        aops_pool,
+        _state(inbound),
+        _AGENT,
+        understanding_enabled=True,
+        wait=_QUICK,
+        timers=SYSTEM_TIMERS,
     )
 
     assert emitted_events.names() == ["understanding_snapshot_lag"]
@@ -332,6 +350,7 @@ async def test_a_last_message_without_a_usable_time_is_not_waved_through_or_an_e
         _AGENT,
         understanding_enabled=True,
         wait=SnapshotWait(wait_seconds=30.0, poll_seconds=0.01),
+        timers=SYSTEM_TIMERS,
     )
 
     assert emitted_events.names() == ["understanding_snapshot_lag"]
@@ -341,11 +360,23 @@ async def test_nothing_is_waited_for_when_understanding_is_off_or_there_is_nothi
     aops_pool: AsyncConnectionPool, emitted_events: EmittedEvents
 ) -> None:
     await await_snapshot(
-        aops_pool, _state(_stamped(10)), _AGENT, understanding_enabled=False, wait=_QUICK
+        aops_pool,
+        _state(_stamped(10)),
+        _AGENT,
+        understanding_enabled=False,
+        wait=_QUICK,
+        timers=SYSTEM_TIMERS,
     )
-    await await_snapshot(aops_pool, None, _AGENT, understanding_enabled=True, wait=_QUICK)
     await await_snapshot(
-        None, _state(_stamped(10)), _AGENT, understanding_enabled=True, wait=_QUICK
+        aops_pool, None, _AGENT, understanding_enabled=True, wait=_QUICK, timers=SYSTEM_TIMERS
+    )
+    await await_snapshot(
+        None,
+        _state(_stamped(10)),
+        _AGENT,
+        understanding_enabled=True,
+        wait=_QUICK,
+        timers=SYSTEM_TIMERS,
     )
 
     assert emitted_events.names() == []

@@ -12,7 +12,6 @@ import base64
 import contextlib
 import random
 import sys
-import time
 from collections.abc import Awaitable, Callable
 from datetime import datetime
 from pathlib import Path
@@ -81,7 +80,7 @@ from base.agents.messages.timestamp_policy import TimestampSource
 from base.agents.observation.relay_supervision import RelayChild, RelaySupervision, relay_exited
 from base.agents.observation.relay_supervision import heartbeat_fresh as _heartbeat_fresh
 from base.agents.observation.relay_supervision import terminate_relay as terminate_relay
-from base.clock import SYSTEM_TIMERS, Clock, ClockConfig
+from base.clock import Clock
 from base.db import Database
 from base.db.protocols import DatabaseLike
 from base.db.transaction import async_write_transaction
@@ -93,12 +92,13 @@ from base.paths import workspaces_root
 RELAY_WAIT = RelayWait()
 
 
-def process_host(local_machine: str, *, rng: random.Random) -> TakeoverHost:
+def process_host(local_machine: str, *, rng: random.Random, clock: Clock) -> TakeoverHost:
     return TakeoverHost(
         local_machine=local_machine,
         workspaces_root=workspaces_root(),
         relay_program=(str(Path(sys.executable).with_name("meiva")),),
         rng=rng,
+        clock=clock,
     )
 
 
@@ -176,7 +176,9 @@ async def claim_gate(
     incarnation = ctx.original_incarnation
     db, bus = ctx.require_db(), ctx.require_bus()
     session = await native_status(db, bus, agent_id, incarnation=incarnation)
-    await supervise_relay(db, bus, session, agent_id, ctx.relays, incarnation=incarnation)
+    await supervise_relay(
+        db, bus, session, agent_id, ctx.relays, incarnation=incarnation, clock=ctx.require_clock()
+    )
     verdict = gate_verdict(lease_phase(session))
     if verdict is GateVerdict.PROCEED:
         return None
@@ -420,15 +422,6 @@ async def settle_checkpoint(
 # ── Bound relay process: establishment, supervision, teardown ─────────────────
 
 
-def _fresh(heartbeat: datetime | None) -> bool:
-    return _heartbeat_fresh(
-        heartbeat,
-        now=Clock(
-            ClockConfig("UTC", None, message_timestamp_weekday=False), timers=SYSTEM_TIMERS
-        ).now(),
-    )
-
-
 def establish_relay(
     db: DatabaseLike,
     bus: EventBus,
@@ -449,7 +442,7 @@ def establish_relay(
     """
     route = relay_route(session["relay_provider"], session_providers=SESSION_RELAY_PROVIDERS)
     if route is RelayRoute.SESSION:
-        return _await_session_relay(db, bus, session, incarnation, host.wait)
+        return _await_session_relay(db, bus, session, incarnation, host)
     if route is RelayRoute.UNBOUND:
         return _roll_back_relay_failure(db, bus, session, incarnation, UNBOUND_REASON)
     return _establish_spawned_relay(db, bus, session, incarnation, relays, host)
@@ -460,16 +453,17 @@ def _await_session_relay(
     bus: EventBus,
     session: dict[str, Any],
     incarnation: RuntimeIncarnation,
-    wait: RelayWait,
+    host: TakeoverHost,
 ) -> bool:
     """claude / dsh: the relay runs in the controller's own session; require a fresh heartbeat."""
-    started = SYSTEM_TIMERS.monotonic()
+    clock, wait = host.clock, host.wait
+    started = clock.monotonic()
     phase = lease_phase(session)
     while True:
         poll = relay_poll(
             phase,
-            heartbeat_fresh=_fresh(session["relay_heartbeat_at"]),
-            waited_s=SYSTEM_TIMERS.monotonic() - started,
+            heartbeat_fresh=_heartbeat_fresh(session["relay_heartbeat_at"], now=clock.now()),
+            waited_s=clock.monotonic() - started,
             wait=wait,
         )
         if poll is Poll.READY:
@@ -480,7 +474,7 @@ def _await_session_relay(
             return _roll_back_relay_failure(
                 db, bus, session, incarnation, SESSION_RELAY_DOWN_REASON
             )
-        time.sleep(wait.poll_s)
+        clock.sleep(wait.poll_s)
         latest = read_status(db, bus, incarnation.agent_id, incarnation)
         if latest is None or latest["id"] != session["id"]:
             phase = None
@@ -539,7 +533,7 @@ def _establish_spawned_relay(
         session["id"],
         spawn_relay(host.relay_program, binding, token=relay_token),
         relay_token,
-        SYSTEM_TIMERS.monotonic(),
+        host.clock.monotonic(),
         minted["relay_generation"],
     )
     relays.children[incarnation.agent_id] = child
@@ -555,7 +549,8 @@ def _await_spawned_relay(
     child: RelayChild,
     host: TakeoverHost,
 ) -> bool:
-    started = SYSTEM_TIMERS.monotonic()
+    clock = host.clock
+    started = clock.monotonic()
     while True:
         failure = startup_failure(session["relay_provider"], child.process.poll())
         if failure is not None:
@@ -571,8 +566,8 @@ def _await_spawned_relay(
             )
         poll = relay_poll(
             lease_phase(latest),
-            heartbeat_fresh=_fresh(latest["relay_heartbeat_at"]),
-            waited_s=SYSTEM_TIMERS.monotonic() - started,
+            heartbeat_fresh=_heartbeat_fresh(latest["relay_heartbeat_at"], now=clock.now()),
+            waited_s=clock.monotonic() - started,
             wait=host.wait,
         )
         if poll is Poll.READY:
@@ -583,7 +578,7 @@ def _await_spawned_relay(
             terminate_relay(child)
             relays.children.pop(incarnation.agent_id, None)
             return _roll_back_relay_failure(db, bus, session, incarnation, NOT_READY_REASON)
-        time.sleep(host.wait.poll_s)
+        clock.sleep(host.wait.poll_s)
 
 
 def _roll_back_relay_failure(
@@ -628,9 +623,9 @@ async def supervise_relay(
     relays: RelaySupervision,
     *,
     incarnation: RuntimeIncarnation | None,
+    clock: Clock,
 ) -> None:
     child = relays.children.get(agent_id)
-    clock = Clock(ClockConfig("UTC", None, message_timestamp_weekday=False), timers=SYSTEM_TIMERS)
     now, monotonic = clock.now(), clock.monotonic()
     step = supervision_step(
         None

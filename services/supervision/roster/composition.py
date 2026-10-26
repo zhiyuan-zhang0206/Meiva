@@ -15,7 +15,7 @@ from base.cluster.dataplane.redis_bridge import (
     redis_bridge_endpoint,
 )
 from base.config import get_field
-from base.daemon.health import DaemonProbe, probe_home
+from base.daemon.health import DaemonProbe
 from base.host.net.url_secret import names_foreign_host
 from base.native_process.stop_timing import HOST_STOP_CEILING_S, OPS_STOP_CEILING_S
 from base.paths import meiva_home, otel_collector_binary, otel_collector_config
@@ -52,10 +52,10 @@ def redis_bridge_launch(endpoint: RedisBridgeEndpoint | None) -> tuple[str, str,
 # meiva:note
 # Observe the relay endpoint when the roster is built. The required-relay gate
 # reports an unconfigured home; its declaration still carries the bare command.
-def redis_bridge_command() -> tuple[str, str, int]:
+def redis_bridge_command(home: Path) -> tuple[str, str, int]:
     try:
         endpoint = redis_bridge_endpoint(
-            meiva_home(),
+            home,
             machine_host=lambda: str(get_field("machine_host")).strip() or "localhost",
             remote_data_plane=lambda: names_foreign_host(
                 str(get_field("db_url")), str(get_field("redis_url"))
@@ -67,20 +67,22 @@ def redis_bridge_command() -> tuple[str, str, int]:
 
 
 # meiva:note
-# Import the frontend's application HTTP observer only when its probe runs.
-def _frontend_probe() -> DaemonProbe:
-    from services.supervision.healthchecks.frontend import probe_frontend
+# Import the frontend's application HTTP observer only when its probe runs; `port` is the
+# application port the roster resolved when it was built.
+def frontend_probe(port: int) -> DaemonProbe:
+    from services.supervision.healthchecks.frontend import probe_frontend_at
 
-    return probe_frontend()
+    return probe_frontend_at(port)
 
 
 # meiva:note
 # Import the headed browser's profile-and-listener observer only when it runs.
-# The browser domain owns those identity facts; the roster does not restate them.
-def browser_probe() -> DaemonProbe:
-    from services.desktop.browser.probe import probe_browser
+# The browser domain owns those identity facts; the roster does not restate them. `port` is
+# the CDP port and the Chrome profile directory the roster resolved when it was built.
+def browser_probe(port: int, profile: Path) -> DaemonProbe:
+    from services.supervision.healthchecks.browser import browser_probe as observe
 
-    return probe_browser()
+    return observe(port, profile)
 
 
 # meiva:note
@@ -96,17 +98,19 @@ def build_services(
     from services.agent_runner.exec_host import shutdown_budget as exec_host_budget
     from services.agent_runner.pty_sessions import shutdown_budget as pty_sessions_budget
     from services.desktop.browser import shutdown_budget as browser_mcp_budget
+    from services.desktop.browser.profile import profile_dir
     from services.entrypoints.gate.daemon import app_port, entry_port
     from services.supervision.healthchecks.gate import probe as probe_gate
+    from services.supervision.healthchecks.gateway import gateway_probe_at
     from services.supervision.healthchecks.memory_search import memory_search_probe
-    from services.supervision.healthchecks.otel_collector import probe_collector
+    from services.supervision.healthchecks.otel_collector import probe_collector_at
     from services.supervision.healthchecks.protocol_probe import probe as probe_protocol
     from services.supervision.healthchecks.redis_bridge import probe_relay
 
-    probe_protocol_service = partial(probe_protocol, home=meiva_home())
+    home = meiva_home()
     _fe_port = app_port()
     _fe_url = f"http://localhost:{_fe_port}"
-    _bridge_cmd, _bridge_host, _bridge_port = redis_bridge_command()
+    _bridge_cmd, _bridge_host, _bridge_port = redis_bridge_command(home)
     gateway_health_url = str(get_field("gateway_health_url"))
     gateway_shutdown_timeout_s = float(get_field("gateway_graceful_shutdown_timeout_seconds"))
     memory_search_port = int(get_field("memory_search_port"))
@@ -115,7 +119,9 @@ def build_services(
     gateway_port = int(get_field("gateway_port"))
     browser_origin = str(get_field("browser_origin"))
     browser_cdp_port = int(get_field("browser_cdp_port"))
+    browser_profile = profile_dir()
     telemetry_otlp_port = int(get_field("telemetry_otlp_port"))
+    probe_protocol_service = partial(probe_protocol, home=home, browser_cdp_port=browser_cdp_port)
 
     gateway_services = (
         ServiceSpec(
@@ -140,7 +146,7 @@ def build_services(
             # Gateway reload can fork a serving worker whose pid differs from the recorded
             # pidfile. Bind readiness to the answering home's HTTP identity instead.
             curl_url=gateway_health_url,
-            identity_probe=partial(probe_home, gateway_health_url),
+            identity_probe=partial(gateway_probe_at, gateway_health_url),
             healthcheck_module="services.supervision.healthchecks.gateway",
             # meiva:note
             # Uvicorn drains requests before lifespan cleanup. Root's stop window must
@@ -251,7 +257,7 @@ def build_services(
             # Next.js reaches data through the gateway HTTP API. It can remain up during
             # a database outage to show that outage to the operator.
             curl_url=_fe_url,
-            identity_probe=_frontend_probe,
+            identity_probe=partial(frontend_probe, _fe_port),
             healthcheck_module="services.supervision.healthchecks.frontend",
         ),
         healthz_daemon(
@@ -328,7 +334,7 @@ def build_services(
             # Headed Chrome has no database dependency. Root must keep reviving it during
             # a database outage, when the browser may be needed for recovery.
             curl_url=f"http://127.0.0.1:{browser_cdp_port}/json/version",
-            identity_probe=browser_probe,
+            identity_probe=partial(browser_probe, browser_cdp_port, browser_profile),
             healthcheck_module="services.supervision.healthchecks.browser",
         ),
         # meiva:note
@@ -388,19 +394,19 @@ def build_services(
             session="otel-collector",
             cmd=shlex.join(
                 [
-                    str(otel_collector_binary(meiva_home())),
+                    str(otel_collector_binary(home)),
                     "--config",
-                    str(otel_collector_config(meiva_home())),
+                    str(otel_collector_config(home)),
                 ]
             ),
-            config_inputs=(otel_collector_config(meiva_home()),),
+            config_inputs=(otel_collector_config(home),),
             capabilities=BOTH,
             requires_db=False,
             # meiva:note
             # The observer posts a valid empty OTLP ExportTraceServiceRequest: a listening
             # TCP port alone does not prove the collector protocol is ready.
             tcp_port=telemetry_otlp_port,
-            identity_probe=probe_collector,
+            identity_probe=partial(probe_collector_at, telemetry_otlp_port),
             healthcheck_module="services.supervision.healthchecks.otel_collector",
         ),
     )
@@ -418,12 +424,12 @@ def build_services(
     observability_services = tuple(
         ServiceSpec(
             session=name,
-            cmd=shlex.join(service_argv(meiva_home(), name)),
-            config_inputs=service_input_paths(meiva_home(), name),
+            cmd=shlex.join(service_argv(home, name)),
+            config_inputs=service_input_paths(home, name),
             capabilities=frozenset({"gateway", "agent-runner", "observability-station"}),
             requires_db=False,
             curl_url=urls[name] + HEALTH_PATHS[name],
-            identity_probe=partial(probe_backend, name),
+            identity_probe=partial(probe_backend, name, urls=urls),
             healthcheck_module="services.supervision.healthchecks.lgtm",
         )
         for name in BACKENDS

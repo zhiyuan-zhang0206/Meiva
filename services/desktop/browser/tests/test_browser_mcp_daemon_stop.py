@@ -18,7 +18,9 @@ from typing import Any, cast
 import psutil
 import pytest
 
+from base.clock.tests.fakes import system_clock
 from base.paths import chrome_mcp_socket
+from services.desktop.browser.tests.test_browser_mcp_daemon_tab_groups import WedgedChrome
 
 
 @pytest.fixture
@@ -304,7 +306,7 @@ async def _run_with_fakes(
     stop: asyncio.Event,
     *,
     wedged_stack: bool = False,
-    daemon_out: list[Any] | None = None,
+    browser_cdp_port: int = 9222,
 ) -> tuple[asyncio.Task[None], Any]:
     from contextlib import AsyncExitStack
 
@@ -320,7 +322,10 @@ async def _run_with_fakes(
             return type("R", (), {"tools": []})()
 
         async def call_tool(self, *_a: object, **_k: object) -> Any:
-            return types.CallToolResult(content=[], is_error=False)
+            return types.CallToolResult(
+                content=[types.TextContent(type="text", text="1: https://a.example/ [selected]")],
+                is_error=False,
+            )
 
     class TrackedStack:
         def __init__(self) -> None:
@@ -335,11 +340,11 @@ async def _run_with_fakes(
     task = asyncio.create_task(
         serve_with_upstream(
             home=home,
-            browser_cdp_port=9222,
+            browser_cdp_port=browser_cdp_port,
             stop=stop,
             upstream=cast(ClientSession, FakeSession()),
             current_stack=cast(AsyncExitStack, stack),
-            daemon_out=daemon_out,
+            clock=system_clock(),
         )
     )
     await asyncio.sleep(0.3)
@@ -383,17 +388,27 @@ def test_stopping_the_daemon_drops_in_flight_tab_groupings(
     home: Path,
 ) -> None:
     async def scenario() -> None:
-        stop = asyncio.Event()
-        daemons: list[Any] = []
-        task, _stack = await _run_with_fakes(home, stop, daemon_out=daemons)
-        assert len(daemons) == 1
-        groups = daemons[0].tab_groups
-        in_flight = groups._task_group.create_task(asyncio.Event().wait())
-        groups._tasks.add(in_flight)
-        in_flight.add_done_callback(groups._settled)
-        assert not in_flight.done()
-        stop.set()
-        await asyncio.wait_for(task, timeout=20)
-        assert in_flight.cancelled()
+        async with WedgedChrome() as chrome:
+            stop = asyncio.Event()
+            task, _stack = await _run_with_fakes(home, stop, browser_cdp_port=chrome.port)
+            reader, writer = await asyncio.open_unix_connection(
+                str(chrome_mcp_socket(home, chrome.port))
+            )
+            request = {
+                "id": 1,
+                "method": "call_tool",
+                "tool": "new_page",
+                "args": {"url": "https://a.example/"},
+                "agent_id": 7,
+            }
+            writer.write(json.dumps(request).encode() + b"\n")
+            await writer.drain()
+            await asyncio.wait_for(reader.readline(), timeout=5)
+            in_flight = [t for t in asyncio.all_tasks() if t.get_name() == "tab-group-agent-7"]
+            assert len(in_flight) == 1 and not in_flight[0].done()
+            stop.set()
+            await asyncio.wait_for(task, timeout=20)
+            assert in_flight[0].cancelled()
+            writer.close()
 
     asyncio.run(scenario())
