@@ -4,11 +4,11 @@ from __future__ import annotations
 from collections.abc import Sequence
 from dataclasses import dataclass
 from datetime import datetime
-from typing import Protocol
 
 from base.agents.history.timeline import TimelineItem, build_timeline_items
 from base.agents.messages.timestamp_policy import TimestampPolicy
 from services.derived.insights.run_timeline.history import HistoryView
+from services.derived.insights.run_timeline.projection.model import Segment
 from services.derived.insights.run_timeline.schemas import (
     RunTimelineMessage,
     RunTimelineMessagePart,
@@ -31,15 +31,6 @@ _PART_KIND: dict[str, RunTimelinePartKind] = {
     "inbound_chat": "inbound",
     "attach": "attach",
 }
-
-
-class SpanSegment(Protocol):
-    @property
-    def message_start(self) -> int: ...
-    @property
-    def message_end(self) -> int: ...
-    @property
-    def offset(self) -> int: ...
 
 
 @dataclass(frozen=True)
@@ -80,7 +71,7 @@ def _message(
 
 
 def slice_messages(
-    spans: Sequence[tuple[SpanSegment, HistoryView]],
+    spans: Sequence[tuple[Segment, HistoryView]],
     spec: MessageSliceSpec,
 ) -> RunTimelineMessages:
     out: list[RunTimelineMessage] = []

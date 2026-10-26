@@ -22,8 +22,8 @@ from base.db.protocols import AsyncPool, DatabaseLike
 from base.events.live.bus import EventBus
 from services.agent_runner.agent_host import TurnOutcome
 from services.agent_runner.agent_host.db_recovery import database_phase
-from services.agent_runner.agent_host.invocation.checkpoints import (
-    TurnCheckpoints,
+from services.agent_runner.agent_host.invocation.checkpoints import TurnCheckpoints
+from services.agent_runner.agent_host.invocation.completion_decisions import (
     lifecycle_return_requested,
     restart_resumes_turn,
     should_wake_resumed,

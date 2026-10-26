@@ -109,7 +109,7 @@ def test_agent_profile_domains() -> None:
 
 def test_keys_of_the_retired_stack_are_inert() -> None:
     from base import config
-    from base.config.service_read import domain_model_classes
+    from base.config.config_registry import domain_model_classes
 
     retired_env = {
         "MEIVA_DB_URL": "postgresql://meiva@127.0.0.1:5433/meiva",

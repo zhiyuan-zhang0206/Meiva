@@ -10,7 +10,7 @@ Every component separates **pure decisions**, **effect execution**, and **proces
 
 | Role | `meizel.toml` declaration | What belongs here | What is forbidden here |
 |---|---|---|---|
-| **Pure core** | `purity = "strict"` (directory or per-file under `[purity]`) | Frozen dataclasses, Pydantic `BaseModel`s, `StrEnum`s, narrow `Protocol`s, parsers, state transitions, and pure functions that take values and return a decision or plan | Importing effectful libraries (`psycopg`, `httpx`, `redis`, `subprocess`, `psutil`, `socket`), reading ambient process state (`settings`, `os.environ`, `time`, `uuid4`, `Path.home`), or importing any non-`strict` first-party module (`impure-edge`) |
+| **Pure core** | `purity = "strict"` (directory or per-file under `[purity]`) | Frozen dataclasses, Pydantic `BaseModel`s, `StrEnum`s, narrow `Protocol`s, parsers, state transitions, and pure functions that take values and return a decision or plan | Importing a library on the `impure-imports` list of `meizel.policy.toml` (`psycopg`, `httpx`, `redis`, `subprocess`, `socket`, `shutil`, `tempfile` and the rest of that list), reading ambient process state (`settings`, `os.environ`, `time`, `uuid4`, `Path.home`), or importing any non-`strict` first-party module (`impure-edge`) |
 | **Effect shell** | Default (`"none"`, or `"strict-to-be"` while a directory is migrating) | Loops, handlers, and I/O adapters that execute a plan produced by a `"strict"` module using explicitly passed handles (`Database`, `SyncPool`, `AsyncPool`, `httpx` client, `run_bounded`) | Reading ambient process state (`ambient-read`), constructing its own default clients (`client: Client = Client()`), or burying testable branching inside I/O |
 | **Composition root** | Listed under `[roots]` with `kinds = [...]` and `why = "..."` | Process entrypoints (`daemon.py`, `app.py`), CLI `CommandRuntime.create()`, and `wiring.py` modules that read the environment once, build frozen configs and concrete port/client handles, and pass them down | Business branching that a unit test needs to steer without starting the full process |
 
@@ -20,17 +20,17 @@ Every component separates **pure decisions**, **effect execution**, and **proces
 
 When two packages need the same type, constant, or `Protocol`:
 
-- **Cross-layer contracts (`base`, `meiva`, `agent`, `gateway`, `cli`, `services`)** belong in `base/api_contracts/` (which is `"strict"`) or the lowest `base/<domain>/` package that both consumers may import under [import layering](../import-layering.md).
+- **Cross-layer contracts (`base`, `meiva`, `agent`, `gateway`, `cli`, `services`)** belong in `base/api_contracts/` (a `"strict-to-be"` directory in which most files, but not every one, are individually `"strict"`; check `[purity]` before relying on a file) or the lowest `base/<domain>/` package that both consumers may import under [import layering](../import-layering.md).
 - **Never import upward** or duplicate an enum/schema across layers.
 - **Keep type-owning modules `"strict"`.** If a shared `Protocol`, `StrEnum`, or dataclass currently sits in a file that also performs I/O (or whose package `__init__.py` eagerly imports storage/network modules), move the pure types into a `"strict"` module (`contracts.py`, `models.py`, `protocols.py`, or `base/api_contracts/`) and re-export them at the old path if existing callers still import from there.
-- **Avoid `Any` on collaborator boundaries.** Type `Protocol` parameters, return values, and class fields with concrete `"strict"` types or `object` when the consumer only forwards the value ([`any-collaborator`](../../../meizel/docs/checker/any-collaborator.meiva.okf.md)). Note that `if TYPE_CHECKING:` is banned repository-wide (`[type-checking]`): import the real type from its lightweight `"strict"` owner.
+- **Avoid `Any` on collaborator boundaries.** Type `Protocol` parameters, return values, and class fields with concrete `"strict"` types or `object` when the consumer only forwards the value ([`any-collaborator`](../../../meizel/docs/checker/any-collaborator.meiva.okf.md)). Note that `if TYPE_CHECKING:` is banned except for the reviewed entries in `[type-checking.files]` of `meizel.policy.toml`: import the real type from its lightweight `"strict"` owner.
 
 ### 2. Pure decision logic vs. effect execution (`impure-call` and `impure-edge`)
 
 When `meizel` reports an `impure-call` inside a module that should be `"strict"`, or an `impure-edge` from a `"strict"` module into an effectful one:
 
 - **Ask first whether the file is a pure core or an effect shell.**
-  - If the file's job is computing a plan (e.g., retry delay, SQL query parameters, subprocess `argv`/`env`, state diff, validation), keep the file `"strict"` and lift the I/O call (`httpx`, `psycopg`, `subprocess`, `psutil`, `socket`) out into the calling shell or `wiring.py`.
+  - If the file's job is computing a plan (e.g., retry delay, SQL query parameters, subprocess `argv`/`env`, state diff, validation), keep the file `"strict"` and lift the I/O call (`httpx`, `psycopg`, `subprocess`, `socket`) out into the calling shell or `wiring.py`. `psutil` is not on the `impure-imports` list, so `meizel` does not flag it, but reading CPU, memory or disks through it is an effect all the same: a module that does so is a shell, and the types and parsers around it stay in a `"strict"` sibling (`base/host/resource_sample.py` holds `ResourceSample` and `parse_battery`; `base/host/resource_probe.py` reads the machine).
   - If the file contains both pure helpers/types (imported by `"strict"` consumers) and effectful execution, split it along the mechanism boundary: keep the pure types and decision functions in the `"strict"` module, and move the effectful execution into an unexported or shell sibling module declared in `[uses]`.
 - **Do not coalesce re-exports in `__init__.py` just to quiet a debt line.** If a package door (`__init__.py`) is `"strict"`, every module it re-exports must also be `"strict"`.
 
@@ -50,7 +50,7 @@ Tests never mutate module attributes, instance dictionaries, or environment vari
 2. **Call the pure decision function directly** and assert on the returned plan instead of spying on mock calls (`assert_called_once_with`).
 3. **Run the shell against a real local resource** (throwaway Postgres/Redis fixture, `tmp_path`, local socket/listener on port `0`, small child script).
 4. **Inject a narrow `Protocol` port** only when a long-lived interactive protocol is the subject or when a test must trigger a fault that no real local resource can produce:
-   - Define the `Protocol` in `base/` (for cross-package ports such as `Clock`/`Timers` in `base/clock`, `UrlOpener` in `base/host/net/ports.py`, `Host` in `base/host/system/hostport.py`, `ProcessControl` in `base/native_process/process_control.py`, `SyncPool`/`AsyncPool` in `base/db/protocols.py`) or in the owning module when strictly local.
+   - Define the `Protocol` in `base/` (for cross-package ports such as `Clock`/`Timers` in `base/clock`, `UrlOpener` in `base/host/net/ports.py`, `Host` in `base/host/system/hostport.py`, `ProcessControl` in `base/native_process/process_control.py`, `SyncPool`/`AsyncPool` in `base/db/protocols.py`). Ports are defined in `base/`; a component above `base` does not define one ([python conventions](../python-conventions.md#data-in-decisions-out-the-forms-in-order)).
    - Place the reusable `FakeXxx` in the `tests/` directory of the package that defines the port, and export it in that `tests/meizel.toml`.
    - **Never introduce disguised patch seams**: no mutable class/module holder attributes (`_Holder.bound = ...`), no `object.__setattr__` or `self.__dict__[...]` mutation after construction, and no armed fault flags on production classes.
 
