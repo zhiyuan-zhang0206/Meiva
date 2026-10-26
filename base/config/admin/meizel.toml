@@ -11,6 +11,6 @@ exports = ["candidate.py", "editing.py", "metadata.py"]
 [debt.impure-edge]
 "candidate.py#base/config/config_registry.py" = 1
 "candidate.py#base/config/service_read.py" = 1
-"candidate.py#base/host/env/dotenv_file.py" = 3
+"candidate.py#base/host/env/dotenv_file.py" = 1
 "metadata.py#base/config/config_registry.py" = 1
 "metadata.py#base/config/service_read.py" = 1

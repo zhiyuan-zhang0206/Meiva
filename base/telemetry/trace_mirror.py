@@ -19,7 +19,6 @@ from __future__ import annotations
 import gzip
 import re
 import shutil
-import time
 from datetime import UTC, date, datetime, timedelta
 from pathlib import Path
 
@@ -63,6 +62,10 @@ _MIRROR_ROTATED_RE = re.compile(
 _MIRROR_CUT_RE = re.compile(r"^spans\.cut-(\d{8})\.jsonl(?:\.gz)?$")
 
 
+def _now_utc() -> datetime:
+    return datetime.now(UTC)
+
+
 def mirror_day(path: Path) -> date | None:
     """Day stamp of a mirror file from its name; None when it carries none.
 
@@ -103,7 +106,7 @@ def prune_old_mirror(retention_days: int, *, traces_dir: Path) -> None:
     """
     if retention_days <= 0:
         return
-    cutoff = (datetime.now(UTC) - timedelta(days=retention_days)).date()
+    cutoff = (_now_utc() - timedelta(days=retention_days)).date()
     removed = 0
     # `.jsonl.gz` included: the gzip pass renames old segments, and retention
     # must still reach them (their day stamp parses from the name).
@@ -147,7 +150,7 @@ def gzip_old_mirror(grace_seconds: int = 60, *, traces_dir: Path) -> int:
     collector's live fan-out). A negative grace compresses regardless of
     mtime (tests).
     """
-    cutoff = time.time() - grace_seconds
+    cutoff = _now_utc().timestamp() - grace_seconds
     compressed = 0
     for path in traces_dir.glob("spans*.jsonl*"):
         if path.name == "spans.jsonl" or path.name.endswith(".gz"):

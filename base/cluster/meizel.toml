@@ -20,5 +20,4 @@ exports = ["authority", "checkpoint_schema.py", "dataplane", "derive.py", "front
 "transport_encryption.py" = "strict"
 
 [debt.ambient-read]
-"postgres.py#clock time.monotonic" = 4
 "postgres.py#pid os.getuid" = 1

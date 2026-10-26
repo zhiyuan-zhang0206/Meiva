@@ -298,6 +298,12 @@ def _post_semantics(path: str, *, idempotent: bool | None) -> Idempotency:
     return Idempotency.IDEMPOTENT if idempotent else Idempotency.NON_IDEMPOTENT
 
 
+def _idempotency_headers(*, keyed: bool, idempotency_key: str | None) -> dict[str, str] | None:
+    if not keyed:
+        return None
+    return keyed_headers(_uuid.uuid4().hex if idempotency_key is None else idempotency_key)
+
+
 def post(
     path: str,
     json: dict[str, Any] | None = None,
@@ -364,11 +370,7 @@ def post(
     retryable = semantics is Idempotency.IDEMPOTENT or keyed
     # One key per logical call — every retry of this call shares it, so the
     # server can dedup the retries against the original.
-    headers = (
-        keyed_headers(_uuid.uuid4().hex if idempotency_key is None else idempotency_key)
-        if keyed
-        else None
-    )
+    headers = _idempotency_headers(keyed=keyed, idempotency_key=idempotency_key)
 
     retries = request_max_retries(context) if max_retries is None else max_retries
     return _request_with_retry(
@@ -428,11 +430,7 @@ def patch(
     """
     semantics = contracts.idempotency_for("PATCH", path)
     keyed = semantics is Idempotency.AT_LEAST_ONCE_WITH_KEY
-    headers = (
-        keyed_headers(_uuid.uuid4().hex if idempotency_key is None else idempotency_key)
-        if keyed
-        else None
-    )
+    headers = _idempotency_headers(keyed=keyed, idempotency_key=idempotency_key)
     return _request_with_retry(
         lambda: gateway_http(context).patch(path, json=json or {}, headers=headers),
         request_max_retries(context),

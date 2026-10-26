@@ -22,6 +22,7 @@ from base.host.env.harness_binaries import (
     HARNESS_BIN_DIRS,
     harness_child_path,
     locate_harness_binary,
+    resolve_user_home,
 )
 
 DEFAULT_HARNESS = Harness.MEIVA
@@ -592,7 +593,7 @@ def probe_local_harnesses(
     bin_dirs: Sequence[str] | None = None,
     cli_runner: CliRunner = subprocess.run,
 ) -> list[HarnessProbe]:
-    resolved_home = Path.home() if home is None else home
+    resolved_home = resolve_user_home(home)
     resolved_bin_dirs = HARNESS_BIN_DIRS if bin_dirs is None else bin_dirs
     rows: list[HarnessProbe] = []
     for harness in Harness:

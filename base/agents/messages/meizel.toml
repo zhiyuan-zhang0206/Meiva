@@ -26,4 +26,3 @@ exports = ["delivery", "envelope.py", "external_caller.py", "guard.py", "identit
 "guard.py#any guarded_add_messages.current" = 1
 "guard.py#any guarded_add_messages.delta" = 1
 "identity.py#any normalize_stored_message_ids.return" = 1
-"identity.py#any normalize_stored_message_ids.value" = 1

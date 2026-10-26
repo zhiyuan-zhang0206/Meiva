@@ -17,14 +17,13 @@ from __future__ import annotations
 
 import re
 import subprocess
-import sys
 import time
 from collections.abc import Callable
 from typing import Literal, TypedDict
 
 from pydantic import BaseModel, ConfigDict
 
-from base.native_process.os_platform import primary_disk_path
+from base.native_process.os_platform import is_macos, primary_disk_path
 
 # psutil's non-blocking cpu_percent reports the average since the PREVIOUS call
 # in the same process, which is meaningless for a stateless one-shot: the first
@@ -112,7 +111,8 @@ def battery_sample(
     Swallows failures by design: the sample degrades to None fields, it does
     not fail the probe (unlike the psutil reads, which propagate).
     """
-    if (platform if platform is not None else sys.platform) != "darwin":
+    on_macos = is_macos() if platform is None else platform == "darwin"
+    if not on_macos:
         return {}
     try:
         out = run(

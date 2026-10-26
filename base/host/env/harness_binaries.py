@@ -9,6 +9,8 @@ import shutil
 from collections.abc import Mapping, Sequence
 from pathlib import Path
 
+from base.paths.home import user_home
+
 # meiva:note
 # The directories a harness CLI is installed into outside PATH: user-local installs and
 # the two system prefixes. A harness child cannot rely on PATH alone — the runner that
@@ -38,7 +40,7 @@ class HarnessBinaryNotFoundError(FileNotFoundError):
 
 
 def resolve_user_home(home: Path | None = None) -> Path:
-    return Path.home() if home is None else home
+    return user_home() if home is None else home
 
 
 # meiva:note

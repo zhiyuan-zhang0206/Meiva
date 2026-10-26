@@ -26,8 +26,7 @@ from pydantic_settings import BaseSettings, PydanticBaseSettingsSource
 
 from base.config.config_registry import FIELD_INFOS, field_alias, field_domain
 from base.config.service_read import domain_model_classes
-from base.host.env import dotenv_file
-from base.host.env.dotenv_file import capture_env_bytes
+from base.host.env.dotenv_file import capture_env_bytes, process_env_file
 
 __all__ = [
     "EnvPatchValidation",
@@ -73,7 +72,7 @@ def validate_env_patch_for_write(
     neither crash nor reject this candidate. Fields absent from the fresh file
     retain their boot-time environment value or Pydantic default.
     """
-    env_path = dotenv_file.process_env_file() if path is None else path
+    env_path = process_env_file() if path is None else path
     if not updates and not removals:
         return EnvPatchValidation([], {}, _env_digest(capture_env_bytes(env_path)))
 

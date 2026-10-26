@@ -21,7 +21,8 @@ import pytest
 
 from base import config, paths
 from base.config.base import unit_home
-from base.paths.home import home_from_env, resolve_meiva_home
+from base.paths.home import home_from_env
+from base.paths.tests.homes import point_home
 
 _REPO = Path(__file__).resolve().parents[3]
 _CHILD = Path(__file__).with_name("_config_child.py")
@@ -71,28 +72,45 @@ def test_a_relative_home_is_refused(user_home: Path, raw: str) -> None:
         home_from_env({"MEIVA_HOME": raw}, user_home=user_home)
 
 
-@pytest.fixture
-def fake_home(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
-    """The ambient binding's inputs: HOME under a temporary directory, MEIVA_HOME unset."""
-    home = tmp_path / "ambient-user"
-    home.mkdir()
-    monkeypatch.setenv("HOME", str(home))
-    monkeypatch.delenv("MEIVA_HOME", raising=False)
-    return home
+# meiva:note
+# Spawns `_config_child.py` with a fixed argument vector and controlled environment to test
+# `resolve_meiva_home()` without mutating the test runner's `os.environ`.
+def test_the_ambient_binding_reads_the_process_environment(tmp_path: Path) -> None:
+    fake_home = tmp_path / "ambient-user"
+    fake_home.mkdir()
+    base_env = {k: v for k, v in os.environ.items() if k != "MEIVA_HOME"}
+    base_env["HOME"] = str(fake_home)
+    unset = subprocess.run(  # noqa: S603
+        [sys.executable, str(_CHILD), "resolve_meiva_home"],
+        cwd=_REPO,
+        env=base_env,
+        capture_output=True,
+        text=True,
+        timeout=60,
+        check=False,
+    )
+    assert unset.returncode == 0, unset.stderr
+    assert unset.stdout.strip() == str(fake_home / ".meiva")
+    tilde = subprocess.run(  # noqa: S603
+        [sys.executable, str(_CHILD), "resolve_meiva_home"],
+        cwd=_REPO,
+        env={**base_env, "MEIVA_HOME": "~/.meiva-x"},
+        capture_output=True,
+        text=True,
+        timeout=60,
+        check=False,
+    )
+    assert tilde.returncode == 0, tilde.stderr
+    assert tilde.stdout.strip() == str(fake_home / ".meiva-x")
 
 
-def test_the_ambient_binding_reads_the_process_environment(
-    fake_home: Path, monkeypatch: pytest.MonkeyPatch
+def test_meiva_home_door_creates_the_default_home_under_the_fake_home(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    assert resolve_meiva_home() == fake_home / ".meiva"
-    monkeypatch.setenv("MEIVA_HOME", "~/.meiva-x")
-    assert resolve_meiva_home() == fake_home / ".meiva-x"
-
-
-def test_meiva_home_door_creates_the_default_home_under_the_fake_home(fake_home: Path) -> None:
-    assert not (fake_home / ".meiva").exists()
-    assert paths.meiva_home() == fake_home / ".meiva"
-    assert (fake_home / ".meiva").is_dir()
+    target = point_home(monkeypatch, tmp_path / "ambient-user" / ".meiva")
+    assert not target.exists()
+    assert paths.meiva_home() == target
+    assert target.is_dir()
 
 
 def test_a_fresh_interpreter_with_no_variable_resolves_to_dot_meiva(tmp_path: Path) -> None:
@@ -141,9 +159,9 @@ def test_every_consumer_follows_the_variable_after_import(
     """Modules are imported; the variable changes afterwards, twice; each call
     answers for the home named at that moment."""
     first, second = tmp_path / "first", tmp_path / "second"
-    monkeypatch.setenv("MEIVA_HOME", str(first))
+    point_home(monkeypatch, first)
     assert consumer() == first / relative, name
-    monkeypatch.setenv("MEIVA_HOME", str(second))
+    point_home(monkeypatch, second)
     assert consumer() == second / relative, name
 
 

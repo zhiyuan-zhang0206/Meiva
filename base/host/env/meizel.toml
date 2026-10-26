@@ -23,7 +23,6 @@ exports = ["agent_env.py", "agent_slices.py", "boot_policy.py", "bootstrap.py", 
 
 [debt.ambient-read]
 "dotenv_file.py#clock datetime.datetime.now" = 1
-"harness_binaries.py#home pathlib.Path.home" = 1
 "port_lease.py#pid os.getpid" = 1
 "port_lease.py#pid os.getuid" = 1
 "port_lease.py#random secrets.randbelow" = 1
