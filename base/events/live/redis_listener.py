@@ -34,7 +34,7 @@ import redis.asyncio as aredis
 from redis.asyncio.client import PubSub as _RedisPubSub
 
 from base.cluster import inbound_channel
-from base.events.live.bus import event_bus_config_from_settings
+from base.config import settings
 from base.events.live.redis_client import TransportAwareAsyncConnection
 from base.events.live.redis_resilience import (
     HEALTH_CHECK_INTERVAL_S,
@@ -126,9 +126,7 @@ class RedisInboundListener:
         # partially unknown under strict pyright.
         self._redis_factory: Callable[..., aredis.Redis] = redis_factory or aredis.Redis.from_url  # pyright: ignore[reportUnknownMemberType]
         channel_source = (
-            event_bus_config_from_settings().events_channel
-            if events_channel is None
-            else events_channel
+            settings.data_plane.events_channel if events_channel is None else events_channel
         )
         self._channel = inbound_channel(agent_id, channel_source)  # ambient: B2
         self._redis: aredis.Redis | None = None

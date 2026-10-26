@@ -2,9 +2,9 @@
 
 from __future__ import annotations
 
-import copy
 import hashlib
 import platform
+import shutil
 import sys
 import tarfile
 import tempfile
@@ -58,8 +58,7 @@ def platform_tag() -> str | None:
     return None
 
 
-def binary_name() -> str:
-    return "otelcol-contrib"
+BINARY_NAME = "otelcol-contrib"
 
 
 @dataclass(frozen=True)
@@ -76,9 +75,6 @@ class DownloadProgress:
         self.received = received
         self.deadline = deadline
         self._hasher = hashlib.sha256()
-
-    def add(self, count: int) -> None:
-        self.received += count
 
     def record(self, chunk: bytes) -> None:
         self.received += len(chunk)
@@ -214,7 +210,7 @@ def download_with_retry(
 
 
 # meiva:note
-# Download + SHA256-verify + extract the pinned tarball into dest_dir.
+# Download + SHA256-verify + install the pinned tarball's binary into dest_dir.
 def download_and_verify(
     tag: str, dest_dir: Path, *, open_url: UrlOpener, timers: Timers, limits: DownloadLimits
 ) -> None:
@@ -229,16 +225,27 @@ def download_and_verify(
                 f"otelcol-contrib {OTELCOL_CONTRIB_VERSION} {tag} SHA256 mismatch: "
                 f"got {digest}, expected {expected} — refusing to install"
             )
-        with tarfile.open(tarball) as tf:
-            members = [m for m in tf.getmembers() if m.name.endswith(binary_name())]
-            if not members:
-                raise RuntimeError(f"otelcol-contrib tarball has no {binary_name()} member")
-            member = copy.copy(members[0])
-            member.name = binary_name()
-            tf.extract(member, path=dest_dir, filter="data")
-        dest = dest_dir / binary_name()
-        dest.chmod(0o755)
+        install_binary(tarball, dest_dir)
     (dest_dir / VERSION_MARKER).write_text(OTELCOL_CONTRIB_VERSION + "\n", encoding="utf-8")
+
+
+# meiva:note
+# Put the collector binary of `tarball` at `dest_dir/otelcol-contrib`, mode 0755.
+# The binary is extracted into a staging directory inside `dest_dir` (the same filesystem, so
+# the final move is a rename) and renamed over the destination in one step. An upgrade replaces
+# the directory entry and never writes into the old file, which may be a running collector
+# (Linux refuses to write to an executable in use, macOS would truncate it), and a failure
+# part-way leaves the previous binary untouched.
+def install_binary(tarball: Path, dest_dir: Path) -> None:
+    with tarfile.open(tarball) as tf:
+        members = [m for m in tf.getmembers() if m.name.endswith(BINARY_NAME)]
+        if not members:
+            raise RuntimeError(f"otelcol-contrib tarball has no {BINARY_NAME} member")
+        with tempfile.TemporaryDirectory(dir=dest_dir) as staging:
+            tf.extract(members[0], path=staging, filter="data")
+            staged = Path(staging) / members[0].name
+            staged.chmod(0o755)
+            shutil.move(staged, dest_dir / BINARY_NAME)
 
 
 def _report(message: str, *, error: bool = False) -> None:

@@ -17,7 +17,6 @@
 from __future__ import annotations
 
 import logging
-import subprocess
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime
 from pathlib import Path
@@ -33,9 +32,8 @@ from base.deploy.git.cluster_drift import checkout_head_sha
 from base.deploy.lifecycle import start_serving
 from base.host.env.registry import process_environment
 from base.host.proc import process_alive
-from base.host.resource_sample import ResourceSample, battery_sample, resource_sample
+from base.host.resource_sample import ResourceSample
 from base.native_process.loaded_commit import LoadedCommit
-from base.native_process.os_platform import is_macos, primary_disk_path
 from base.paths import resolve_meiva_home
 from base.sessions.backend import get_backend, get_shell_backend
 from ops.cluster_status.model import (
@@ -53,6 +51,7 @@ from ops.cluster_status.report import (
 from ops.cluster_status.report import (
     serving_gate_reason as serving_gate_reason,
 )
+from ops.cluster_status.resource_probe import host_resource_sample
 from ops.cluster_status.schema_mismatch import status as schema_mismatch_status
 from ops.cluster_status.sessions import (
     ShellNotFoundError as ShellNotFoundError,
@@ -151,15 +150,9 @@ def read_db_snapshot(
 
 # meiva:note
 # One live resource sample, degraded to None on any psutil failure.
-def read_resource_sample(*, ts: float | None = None) -> ResourceSample | None:
-    sample_ts = cluster_now().timestamp() if ts is None else ts
-    platform = "darwin" if is_macos() else "other"
+def read_resource_sample(*, ts: float) -> ResourceSample | None:
     try:
-        return resource_sample(
-            ts=sample_ts,
-            disk_path=primary_disk_path(),
-            battery_fn=lambda: battery_sample(platform=platform, run=subprocess.run),
-        )
+        return host_resource_sample(ts=ts)
     except Exception:  # psutil may not be installed; degrade gracefully
         _log.warning("resource_sample failed (psutil missing?)", exc_info=True)
         return None

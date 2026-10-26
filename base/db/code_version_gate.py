@@ -59,13 +59,7 @@ def has_log_sink() -> bool:
     return bool(getattr(core, "handlers", None))
 
 
-def _refuse(
-    version: int,
-    minimum: int,
-    *,
-    process: str,
-    on_exit: Callable[[int], NoReturn] = hard_exit,
-) -> NoReturn:
+def _refuse(version: int, minimum: int, *, process: str) -> NoReturn:
     fields = {
         "service": process,
         "version": version,
@@ -77,7 +71,7 @@ def _refuse(
         # A process that dials before it opens its sinks would otherwise exit
         # without a word: loguru discards a record no handler receives.
         sys.stderr.write(_REFUSAL.format(**fields) + "\n")
-    on_exit(CODE_BEHIND_MINIMUM_EXIT_CODE)
+    hard_exit(CODE_BEHIND_MINIMUM_EXIT_CODE)
 
 
 class _Dialer(Protocol):
@@ -114,18 +108,10 @@ def _raise_minimum(db: _Dialer, version: int) -> int:
 # Due/read observation intentionally remains two-phase: concurrent first
 # restores may both read the minimum, as they did with the process timestamp.
 class ProcessDbGate:
-    def __init__(
-        self,
-        *,
-        version: Callable[[], int],
-        process: str,
-        exempt: bool = False,
-        on_exit: Callable[[int], NoReturn] = hard_exit,
-    ) -> None:
+    def __init__(self, *, version: Callable[[], int], process: str, exempt: bool = False) -> None:
         self._version = version
         self._process = process
         self._exempt = exempt
-        self._on_exit = on_exit
         self._last_read_at: float | None = None
 
     # meiva:note
@@ -142,7 +128,7 @@ class ProcessDbGate:
         self._last_read_at = time.monotonic()
         version = self._version()
         if version < minimum:
-            _refuse(version, minimum, process=self._process, on_exit=self._on_exit)
+            _refuse(version, minimum, process=self._process)
 
     # meiva:note
     # Shift the recorded read timestamp backward so tests can advance the refresh window without patching `time`.

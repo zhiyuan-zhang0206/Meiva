@@ -14,7 +14,6 @@ import threading
 import time
 import traceback
 from collections.abc import Callable
-from dataclasses import replace
 
 from base.telemetry.delivery.receipts import (
     DrainPhase,
@@ -194,8 +193,7 @@ class EventPipeline:
         if n and example is not None:
             from base.telemetry.delivery.loss import loss_event
 
-            flush_event = replace(example, ts=batch[-1].ts) if batch else example
-            batch = [*batch, loss_event(flush_event, n, "emitter", dropped_at=example.ts)]
+            batch = [*batch, loss_event(example, n, "emitter", dropped_at=example.ts)]
         if not batch:
             return
         self._writer(batch)

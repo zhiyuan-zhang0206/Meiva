@@ -522,7 +522,6 @@ def connect(
     config: DbConfig | None = None,
     gate: ProcessDbGate,
     direct_url: DirectUrlResolver | None = None,
-    dial: Callable[..., psycopg.Connection[Any]] = psycopg.connect,
 ) -> psycopg.Connection:
     from base.config.domains.storage.data_plane import sslmode_for_url
 
@@ -532,7 +531,7 @@ def connect(
         refusal=cfg.db_authority_refusal,
     )
     sslmode = sslmode_for_url(url, cfg.db_sslmode)
-    conn = dial(
+    conn = psycopg.connect(
         url,
         autocommit=autocommit,
         prepare_threshold=None,
@@ -588,14 +587,13 @@ def connect_url(
     autocommit: bool = False,
     unbounded: bool = False,
     connect_timeout: int = PG_KEEPALIVE_KWARGS["connect_timeout"],
-    dial: Callable[..., psycopg.Connection[Any]] = psycopg.connect,
 ) -> psycopg.Connection:
     _refuse_placeholder(url)
     transport: dict[str, Any] = {
         **_transport_kwargs(url, unbounded=unbounded),
         "connect_timeout": connect_timeout,
     }
-    return dial(url, autocommit=autocommit, prepare_threshold=None, **transport)
+    return psycopg.connect(url, autocommit=autocommit, prepare_threshold=None, **transport)
 
 
 def _transport_kwargs(url: str, *, unbounded: bool) -> dict[str, Any]:

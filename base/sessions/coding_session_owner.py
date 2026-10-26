@@ -25,10 +25,8 @@ from collections.abc import Callable
 from dataclasses import replace
 from pathlib import Path
 
-from base.clock import SYSTEM_TIMERS, Clock, ClockConfig
 from base.host.atomic_io import AtomicWriter
 from base.native_process.os_platform import file_lock, is_macos
-from base.native_process.root_control.client import current_uid
 from base.sessions.coding_session_owner_record import (
     CodingSessionKey,
     CodingSessionOwner,
@@ -90,15 +88,7 @@ class CodingSessionGenerationChangedError(RuntimeError):
 
 
 def _utc_now(now: dt.datetime | None = None) -> dt.datetime:
-    current = (
-        now
-        if now is not None
-        else Clock(
-            ClockConfig("UTC", None, message_timestamp_weekday=False),
-            timers=SYSTEM_TIMERS,
-        ).now()
-    )
-    return current.astimezone(dt.UTC)
+    return (now or dt.datetime.now(dt.UTC)).astimezone(dt.UTC)
 
 
 def launch_is_stale(
@@ -132,23 +122,18 @@ def sun_path_limit(*, macos: bool | None = None) -> int:
 # meiva:note
 # ``<short tmp>/meiva-<uid>``: a real directory this user owns, mode 0700.
 # A world-writable parent lets anyone pre-create the name, so a directory that is a symlink or belongs to another user is refused.
-def private_socket_dir(
-    *,
-    base: Path | None = None,
-    macos: bool | None = None,
-    uid: int | None = None,
-) -> Path:
+def private_socket_dir(*, base: Path | None = None, macos: bool | None = None) -> Path:
     # macOS /tmp is a symlink; codex requires a real directory path.
     if base is None:
         base = default_socket_root(macos=macos)
-    owner_uid = current_uid() if uid is None else uid
-    directory = base / f"meiva-{owner_uid}"
+    uid = os.getuid()
+    directory = base / f"meiva-{uid}"
     with contextlib.suppress(FileExistsError):
         directory.mkdir(mode=0o700)
     info = directory.lstat()
-    if not stat.S_ISDIR(info.st_mode) or info.st_uid != owner_uid:
+    if not stat.S_ISDIR(info.st_mode) or info.st_uid != uid:
         raise CodingSessionSocketError(
-            f"{directory} is not a directory owned by uid {owner_uid}; refusing to put a "
+            f"{directory} is not a directory owned by uid {uid}; refusing to put a "
             "Codex app-server socket there (remove it, or it was created by someone else)"
         )
     if stat.S_IMODE(info.st_mode) & 0o077:
@@ -167,14 +152,9 @@ def codex_app_server_socket(
     socket_dir: Path | None = None,
     base: Path | None = None,
     macos: bool | None = None,
-    uid: int | None = None,
 ) -> Path:
     name = f"codex-app-server.{key_digest(key)[:12]}-{generation.replace('-', '')[:8]}.sock"
-    directory = (
-        socket_dir
-        if socket_dir is not None
-        else private_socket_dir(base=base, macos=macos, uid=uid)
-    )
+    directory = socket_dir if socket_dir is not None else private_socket_dir(base=base, macos=macos)
     path = directory / name
     size = len(os.fsencode(path))
     # sockaddr_un.sun_path includes its terminating NUL: 104 bytes on macOS, 108 on Linux.

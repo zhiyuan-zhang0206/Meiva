@@ -1,12 +1,12 @@
-exports = ["schema_mismatch.py"]
+exports = ["resource_probe.py", "schema_mismatch.py"]
 
 [uses]
-"__init__.py" = ["model.py", "report.py", "schema_mismatch.py", "sessions.py"]
+"__init__.py" = ["model.py", "report.py", "resource_probe.py", "schema_mismatch.py", "sessions.py"]
 "report.py" = ["model.py"]
 "schema_mismatch.py" = ["model.py"]
 "sessions.py" = ["listing.py", "model.py", "shell_plans.py"]
 "shell_plans.py" = ["model.py"]
-"tests" = ["__init__.py", "listing.py", "model.py", "report.py", "sessions.py", "shell_plans.py"]
+"tests" = ["__init__.py", "listing.py", "model.py", "report.py", "resource_probe.py", "sessions.py", "shell_plans.py"]
 
 [purity]
 "listing.py" = "strict"
