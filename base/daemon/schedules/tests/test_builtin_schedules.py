@@ -32,6 +32,7 @@ class TestLoadManifest:
             "self-evolution-daily": "product",
             "memory-arbiter": "product",
             "model-update-tracker": "product",
+            "trace-ship-tempo": "product",
             "db-write-stall-watch": "operator",
             "qa-keepalive": "operator",
         }
@@ -44,6 +45,7 @@ class TestLoadManifest:
             "self-evolution-daily",
             "memory-arbiter",
             "model-update-tracker",
+            "trace-ship-tempo",
         }
 
     def test_unknown_class_fails_fast(self, tmp_path: Path) -> None:
