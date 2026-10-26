@@ -67,6 +67,14 @@
       "command": "python dev-ci-metrics-schedule.py"
     },
     {
+      "name": "trace-ship-tempo",
+      "class": "product",
+      "default_enabled": true,
+      "description": "Every five minutes, ship the local OTel trace mirror to the local Tempo viewer: incremental by a per-file watermark so a run sends only new lines, idempotent by span id so a missed window is caught up on the next run, and best-effort so an unreachable viewer never ends the schedule.",
+      "script": "trace-ship-tempo-schedule.py",
+      "command": "python trace-ship-tempo-schedule.py"
+    },
+    {
       "name": "db-write-stall-watch",
       "class": "operator",
       "default_enabled": false,
