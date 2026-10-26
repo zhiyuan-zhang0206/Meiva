@@ -20,13 +20,6 @@ exports = ["api-base.ts", "api.ts", "gateway-origin.ts", "operation-key.ts", "ss
 "sse-frames.ts" = "strict"
 "transport.ts" = "strict"
 
-[debt.ambient-read]
-"api-base.ts#environ process.env" = 3
-"system-transport.ts#clock Date.now" = 2
-"system-transport.ts#random Math.random" = 1
-"system-transport.ts#random crypto.getRandomValues" = 1
-"system-transport.ts#random crypto.randomUUID" = 1
-
-[debt.type-cast]
-"sse-frames.ts#cast classifySystemFrame" = 5
-"system-transport.ts#cast usableLocks" = 1
+[roots]
+"api-base.ts" = { kinds = ["environ"], why = "reads Next.js NEXT_PUBLIC_* compile-time environment variables for gateway origin and telemetry flags" }
+"system-transport.ts" = { kinds = ["clock", "random"], why = "browser system-transport composition root supplying wall clock, monotonic clock, and Web Crypto / random tab IDs" }

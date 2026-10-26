@@ -320,7 +320,7 @@ export interface ResolvedColorClasses {
 export type TimelineColors = Record<ColorSlotId, ResolvedColorClasses>;
 
 export function isColorFamily(v: unknown): v is ColorFamily {
-  return typeof v === "string" && (COLOR_FAMILIES as readonly string[]).includes(v);
+  return typeof v === "string" && COLOR_FAMILIES.some((family) => family === v);
 }
 
 // Last resolution, keyed by the signature of the values it read. The hook
@@ -343,6 +343,18 @@ function colorSignature(settings: Record<string, unknown>): string {
   }).join("|");
 }
 
+function resolveColorSlot(settings: Record<string, unknown>, id: ColorSlotId): ResolvedColorClasses {
+  const spec = TIMELINE_COLOR_ITEMS[id];
+  const raw = settings[spec.key];
+  const family: ColorFamily = isColorFamily(raw) ? raw : spec.default;
+  const classes = CLASSES[family];
+  return {
+    border: classes[spec.border],
+    bg: spec.bg ? classes[spec.bg] : null,
+    text: spec.text ? classes[spec.text] : null,
+  };
+}
+
 /** Resolve every slot's classes from the settings map. Values that are not a
  *  known family (hand-edited DB row, older value shape) fall back to the
  *  slot's default — the UI can never render an unstyled border because of a
@@ -353,17 +365,23 @@ export function resolveTimelineColors(settings: Record<string, unknown>): Timeli
   if (resolutionCache.last !== null && resolutionCache.last.signature === signature) {
     return resolutionCache.last.colors;
   }
-  const out = {} as Record<ColorSlotId, ResolvedColorClasses>;
-  for (const id of COLOR_SLOT_IDS) {
-    const spec = TIMELINE_COLOR_ITEMS[id];
-    const family = isColorFamily(settings[spec.key]) ? (settings[spec.key] as ColorFamily) : spec.default;
-    const classes = CLASSES[family];
-    out[id] = {
-      border: classes[spec.border],
-      bg: spec.bg ? classes[spec.bg] : null,
-      text: spec.text ? classes[spec.text] : null,
-    };
-  }
+  const out: TimelineColors = {
+    memory: resolveColorSlot(settings, "memory"),
+    note: resolveColorSlot(settings, "note"),
+    attach: resolveColorSlot(settings, "attach"),
+    agent_chat: resolveColorSlot(settings, "agent_chat"),
+    agent_code: resolveColorSlot(settings, "agent_code"),
+    code_output: resolveColorSlot(settings, "code_output"),
+    system_prompt: resolveColorSlot(settings, "system_prompt"),
+    reasoning: resolveColorSlot(settings, "reasoning"),
+    inbound_human: resolveColorSlot(settings, "inbound_human"),
+    inbound_agent: resolveColorSlot(settings, "inbound_agent"),
+    inbound_system: resolveColorSlot(settings, "inbound_system"),
+    lifecycle_terminate: resolveColorSlot(settings, "lifecycle_terminate"),
+    lifecycle_restart: resolveColorSlot(settings, "lifecycle_restart"),
+    lifecycle_resurrect: resolveColorSlot(settings, "lifecycle_resurrect"),
+    lifecycle_fork: resolveColorSlot(settings, "lifecycle_fork"),
+  };
   resolutionCache.last = { signature, colors: out };
   return out;
 }

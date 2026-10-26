@@ -10,6 +10,3 @@ exports = ["sse-merge.ts", "store.ts", "use-user-settings.ts", "user-settings-mo
 [purity]
 "sse-merge-plan.ts" = "strict"
 "user-settings-plan.ts" = "strict"
-
-[debt.type-cast]
-"use-user-settings.ts#cast useDebouncedSetting" = 1

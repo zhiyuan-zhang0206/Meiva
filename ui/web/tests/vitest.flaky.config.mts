@@ -15,7 +15,21 @@ import path from "node:path";
 
 import { defineConfig } from "vitest/config";
 
+const nextIntlShim = path.resolve(import.meta.dirname, "../src/test-support/next-intl-shim.ts");
+
 export default defineConfig({
+  plugins: [
+    {
+      name: "next-intl-test-shim",
+      enforce: "pre",
+      resolveId(source, importer) {
+        if (source === "next-intl" && !importer?.endsWith("next-intl-shim.ts")) {
+          return nextIntlShim;
+        }
+        return null;
+      },
+    },
+  ],
   resolve: {
     alias: { "@": path.resolve(import.meta.dirname, "../src") },
   },

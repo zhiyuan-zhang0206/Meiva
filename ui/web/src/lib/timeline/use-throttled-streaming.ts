@@ -2,6 +2,8 @@
 
 import { useEffect, useRef, useState } from "react";
 
+import { systemWallNowMs } from "../transport/system-transport";
+
 // While `live` is true, returns `value` updated at most once per
 // `intervalMs` (leading edge fires immediately, trailing edge catches the
 // final chunk of a burst). When `live` is false, returns the latest
@@ -20,6 +22,7 @@ export function useThrottledStreaming(
   value: string,
   live: boolean,
   intervalMs: number,
+  nowMs: () => number = systemWallNowMs,
 ): string {
   const [shown, setShown] = useState(value);
   const lastFlushRef = useRef(0);
@@ -41,9 +44,9 @@ export function useThrottledStreaming(
       setShown(value);
       return;
     }
-    const elapsed = Date.now() - lastFlushRef.current;
+    const elapsed = nowMs() - lastFlushRef.current;
     if (elapsed >= intervalMs) {
-      lastFlushRef.current = Date.now();
+      lastFlushRef.current = nowMs();
       setShown(value);
       return;
     }
@@ -51,10 +54,10 @@ export function useThrottledStreaming(
     // reads the latest value. ??= keeps a single in-flight timer.
     timerRef.current ??= setTimeout(() => {
       timerRef.current = null;
-      lastFlushRef.current = Date.now();
+      lastFlushRef.current = nowMs();
       setShown(valueRef.current);
     }, intervalMs - elapsed);
-  }, [value, live, intervalMs]);
+  }, [value, live, intervalMs, nowMs]);
 
   useEffect(
     () => () => {

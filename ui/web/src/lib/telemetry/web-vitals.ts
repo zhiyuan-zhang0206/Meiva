@@ -23,13 +23,20 @@ interface MetricObserver {
   consume: (entries: PerformanceEntry[], observer: PerformanceObserver) => void;
 }
 
-const state = {
+const state: {
+  initialized: boolean;
+  finalized: boolean;
+  observers: MetricObserver[];
+  metrics: ReturnType<typeof createWebVitalsMetricsState>;
+  cleanupFinalizers: (() => void) | null;
+  testRuntime: WebVitalsRuntime | null;
+} = {
   initialized: false,
   finalized: false,
-  observers: [] as MetricObserver[],
+  observers: [],
   metrics: createWebVitalsMetricsState(),
-  cleanupFinalizers: null as (() => void) | null,
-  testRuntime: null as WebVitalsRuntime | null,
+  cleanupFinalizers: null,
+  testRuntime: null,
 };
 
 function reportMetric(key: "fcp" | "lcp" | "cls" | "inp", value: number | string): void {

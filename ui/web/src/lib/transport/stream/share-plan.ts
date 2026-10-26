@@ -54,12 +54,16 @@ export function parseMergedFrame(raw: string): MergedFrame | null {
     return null;
   }
   if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) return null;
-  const frame = parsed as { ch?: unknown; events?: unknown; dropped?: unknown; error?: unknown };
-  if (typeof frame.ch !== "string") return null;
-  const ch = LOGICAL_CHANNEL[frame.ch];
+  if (!("ch" in parsed) || typeof parsed.ch !== "string") return null;
+  const ch = LOGICAL_CHANNEL[parsed.ch];
   if (ch === undefined) return null;
-  if (typeof frame.error === "string") return { ch, events: [], dropped: 0, error: frame.error };
-  if (!Array.isArray(frame.events)) return null;
-  const dropped = typeof frame.dropped === "number" && frame.dropped > 0 ? frame.dropped : 0;
-  return { ch, events: frame.events, dropped };
+  if ("error" in parsed && typeof parsed.error === "string") {
+    return { ch, events: [], dropped: 0, error: parsed.error };
+  }
+  if (!("events" in parsed) || !Array.isArray(parsed.events)) return null;
+  const dropped =
+    "dropped" in parsed && typeof parsed.dropped === "number" && parsed.dropped > 0
+      ? parsed.dropped
+      : 0;
+  return { ch, events: parsed.events, dropped };
 }

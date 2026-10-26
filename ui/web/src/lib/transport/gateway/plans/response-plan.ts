@@ -1,5 +1,24 @@
 import type { GuideDraftResponse } from "../../../contracts/types";
 
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function isLaunchState(
+  value: unknown,
+): value is NonNullable<ApiError["launchState"]> {
+  return isRecord(value) && typeof value.status === "string";
+}
+
+function isGuideDraftResponse(value: unknown): value is GuideDraftResponse {
+  return (
+    isRecord(value) &&
+    typeof value.agent_id === "number" &&
+    Number.isSafeInteger(value.agent_id) &&
+    value.agent_id > 0
+  );
+}
+
 export class ApiError extends Error {
   status: number;
   agentId?: number;
@@ -18,8 +37,8 @@ export class ApiError extends Error {
     if (body?.reason === "agent_launch_failed" && typeof body.agent_id === "number") {
       this.agentId = body.agent_id;
       if (typeof body.retry_launch_path === "string") this.retryLaunchPath = body.retry_launch_path;
-      if (body.state && typeof body.state === "object") {
-        this.launchState = body.state as ApiError["launchState"];
+      if (isLaunchState(body.state)) {
+        this.launchState = body.state;
       }
     }
   }
@@ -30,8 +49,8 @@ export class ApiError extends Error {
 // shown, so the operator reads the server's complaint rather than a JSON dump.
 // meiva:link ui/web/src/docs/frontend-state/api-requests.meiva.okf.md
 function validationMessage(entry: unknown): string | null {
-  if (typeof entry !== "object" || entry === null) return null;
-  const msg = (entry as { msg?: unknown }).msg;
+  if (!isRecord(entry)) return null;
+  const msg = entry.msg;
   return typeof msg === "string" ? msg : null;
 }
 
@@ -43,7 +62,7 @@ function serverMessage(status: number, body: Record<string, unknown> | undefined
   const parts: string[] = [];
   if (typeof detail === "string") parts.push(detail);
   else if (Array.isArray(detail)) {
-    for (const entry of detail as unknown[]) {
+    for (const entry of detail) {
       const msg = validationMessage(entry);
       if (msg !== null) parts.push(msg);
     }
@@ -57,20 +76,18 @@ export function errorFromResponse(status: number, text: string): ApiError {
   let body: Record<string, unknown> | undefined;
   try {
     const parsed: unknown = JSON.parse(text);
-    if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
-      body = parsed as Record<string, unknown>;
+    if (isRecord(parsed)) {
+      body = parsed;
     }
   } catch { body = undefined; }
   return new ApiError(status, serverMessage(status, body, text), body);
 }
 
 export function confirmDraftReceipt(status: number, accepted: unknown): GuideDraftResponse {
-  if (status !== 200 || !accepted || typeof accepted !== "object" ||
-    !("agent_id" in accepted) || typeof accepted.agent_id !== "number" ||
-    !Number.isSafeInteger(accepted.agent_id) || accepted.agent_id <= 0) {
+  if (status !== 200 || !isGuideDraftResponse(accepted)) {
     throw new Error("Draft agent acceptance is unconfirmed");
   }
-  return accepted as GuideDraftResponse;
+  return accepted;
 }
 
 export function isAmbiguousDeliveryError(error: unknown): boolean {

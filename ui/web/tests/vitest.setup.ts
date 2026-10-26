@@ -11,7 +11,7 @@
 
 /* eslint-disable @typescript-eslint/no-empty-function -- observer teardown methods are intentional no-ops in the stub */
 
-import { afterEach, vi } from "vitest";
+import { afterEach } from "vitest";
 import { cleanup } from "@testing-library/react";
 
 // RTL auto-cleanup registers itself only when `afterEach` exists on
@@ -165,70 +165,3 @@ function GuardedEventSource(target: string | URL): never {
   throw networkGuardError("EventSource", String(target));
 }
 globalThis.EventSource = GuardedEventSource as unknown as typeof EventSource;
-
-// -- next-intl test double ---------------------------------------------------
-//
-// Components render with useTranslations() under test but no real
-// NextIntlClientProvider is mounted (tests render components directly). Mock
-// useTranslations to read the canonical messages/en catalog — the same strings
-// the production English UI renders — so existing assertions on English copy
-// keep passing unchanged, and new i18n'd components need no provider wrapper.
-// Interpolation ({name}) is substituted so t("key", {n: 2}) behaves like the
-// real ICU path for the simple cases this suite exercises. The real
-// NextIntlClientProvider / useLocale / etc. are preserved; tests that need the
-// real bridge (language-provider.test.tsx) re-mock next-intl to the original.
-vi.mock("next-intl", async (importOriginal) => {
-  // eslint-disable-next-line @typescript-eslint/consistent-type-imports -- test double
-  const actual = await importOriginal<typeof import("next-intl")>();
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any, @typescript-eslint/no-unsafe-assignment -- test double
-  const en = (await import("../messages/en")).default as any;
-
-  // Resolve a dotted path ("control.sections.guide") against the messages
-  // tree; missing segments fall back to the raw key so a typo surfaces as the
-  // key itself (visible in a failed assertion) instead of silently.
-  const lookup = (obj: unknown, path: string): unknown =>
-    path.split(".").reduce<unknown>(
-      (acc, seg) =>
-        acc && typeof acc === "object"
-          ? (acc as Record<string, unknown>)[seg]
-          : undefined,
-      obj,
-    );
-
-  const useActualTranslations = actual.useTranslations as (
-    namespace?: string,
-  ) => ReturnType<typeof actual.useTranslations>;
-
-  const fallbackTranslations = (namespace?: string) => {
-    const t = (key: string, values?: Record<string, string | number>): string => {
-      const full = namespace ? `${namespace}.${key}` : key;
-      const found = lookup(en, full);
-      let s = typeof found === "string" ? found : key;
-      if (values) {
-        s = s.replace(
-          /\{(\w+), plural, one \{([^{}]*)\} other \{([^{}]*)\}\}/g,
-          (_match, name: string, one: string, other: string) => {
-            const value = values[name];
-            return (Number(value) === 1 ? one : other).replaceAll("#", String(value));
-          },
-        );
-        for (const [k, v] of Object.entries(values)) {
-          s = s.replaceAll(`{${k}}`, String(v));
-        }
-      }
-      return s;
-    };
-    return t as ReturnType<typeof actual.useTranslations>;
-  };
-
-  return {
-    ...actual,
-    useTranslations: (namespace?: string) => {
-      try {
-        return useActualTranslations(namespace);
-      } catch {
-        return fallbackTranslations(namespace);
-      }
-    },
-  };
-});
