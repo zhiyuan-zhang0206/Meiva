@@ -19,8 +19,8 @@ from base.lm.attach.constants import (
     ATTACH_MEDIA_MIME,
 )
 from base.lm.catalog import ModelCatalog
-from base.lm.factory import attach_modalities_for_model
-from base.lm.provider_api import AttachPolicy
+from base.lm.catalog.provider_contract import AttachPolicy
+from base.lm.registry import attach_modalities_for_model
 from base.lm.system_note import wrap_system_note
 
 # Keep the notice bare: attachments persist in the message history, so any

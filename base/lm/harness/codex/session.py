@@ -127,8 +127,21 @@ class CodexSession(BaseHarnessSession[CodexConfig]):
         await self._transport.start()
         await self._enter_tasks()
         self._started = True
-        await self._initialize()
-        await self._open_thread(self._resolve_resume(resume))
+        await self._transport.request(
+            "initialize",
+            {
+                "clientInfo": {"name": _CLIENT_NAME, "version": _CLIENT_VERSION},
+                "capabilities": {},
+            },
+            timeout=self.config.startup_timeout_seconds,
+        )
+        await self._transport.notify("initialized")
+        resolved_resume = self._resolve_resume(resume)
+        method, params = self._open_thread_request(resolved_resume)
+        result = await self._transport.request(
+            method, params, timeout=self.config.startup_timeout_seconds
+        )
+        self._record_opened_thread(result, resolved_resume)
         self._bind()
         self._inject_handoff(handoff)
 
@@ -208,17 +221,30 @@ class CodexSession(BaseHarnessSession[CodexConfig]):
             cli_alive=self._probe.is_alive(pid),
         )
 
-    async def _initialize(self) -> None:
-        info = {
-            "clientInfo": {"name": _CLIENT_NAME, "version": _CLIENT_VERSION},
-            "capabilities": {},
+    # meiva:note
+    # Build the JSON-RPC method and payload to resume or start the app-server thread.
+    def _open_thread_request(self, resume: str | None) -> tuple[str, dict[str, object]]:
+        if resume:
+            return ("thread/resume", {"threadId": resume})
+        params: dict[str, object] = {
+            "cwd": str(self.config.cwd),
+            "approvalPolicy": self.config.approval_policy,
+            "sandbox": self.config.sandbox,
+            "config": {"shell_environment_policy": {"inherit": "all"}},
         }
-        await self._transport.request(
-            "initialize", info, timeout=self.config.startup_timeout_seconds
-        )
-        await self._transport.notify("initialized")
+        if self.config.model:
+            params["model"] = self.config.model
+        return ("thread/start", params)
 
-    def _emit_session_started(self, result: JsonObject, thread: JsonObject) -> None:
+    # meiva:note
+    # Record the opened thread identity and emit `SessionStarted`.
+    def _record_opened_thread(self, result: JsonObject, resume: str | None) -> None:
+        thread = as_object(result.get("thread"))
+        if resume:
+            self._session_id = str(thread.get("id") or resume)
+            self._resumed_existing = True
+        else:
+            self._session_id = str(thread.get("id") or "")
         self._model = (
             as_text(result.get("model")) or as_text(thread.get("model")) or self.config.model
         )
@@ -228,33 +254,6 @@ class CodexSession(BaseHarnessSession[CodexConfig]):
                 session_id=self._session_id or "", model=self._model, cwd=cwd, turn_id=None
             )
         )
-
-    async def _open_thread(self, resume: str | None) -> None:
-        if resume:
-            result = await self._transport.request(
-                "thread/resume",
-                {"threadId": resume},
-                timeout=self.config.startup_timeout_seconds,
-            )
-            thread = as_object(result.get("thread"))
-            self._session_id = str(thread.get("id") or resume)
-            self._resumed_existing = True
-            self._emit_session_started(result, thread)
-            return
-        params: dict[str, object] = {
-            "cwd": str(self.config.cwd),
-            "approvalPolicy": self.config.approval_policy,
-            "sandbox": self.config.sandbox,
-            "config": {"shell_environment_policy": {"inherit": "all"}},
-        }
-        if self.config.model:
-            params["model"] = self.config.model
-        result = await self._transport.request(
-            "thread/start", params, timeout=self.config.startup_timeout_seconds
-        )
-        thread = as_object(result.get("thread"))
-        self._session_id = str(thread.get("id") or "")
-        self._emit_session_started(result, thread)
 
     async def _begin(self, ticket: TurnTicket) -> None:
         ticket.started_at = self._monotonic()
@@ -403,7 +402,7 @@ class CodexSession(BaseHarnessSession[CodexConfig]):
         )
         self._complete(ticket, outcome)
 
-    async def _on_request(self, method: str, params: JsonObject) -> dict[str, object]:
+    def _on_request(self, method: str, params: JsonObject) -> dict[str, object]:
         decision = self.config.approval_decision
         if method in _INTERRUPT_METHODS and decision == "decline" and self._active is not None:
             self._active.denials.append(approval_denial(method, params))

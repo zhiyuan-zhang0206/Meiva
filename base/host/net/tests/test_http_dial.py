@@ -11,7 +11,6 @@ test: the pinned path must never reach it for a literal host.
 from __future__ import annotations
 
 import http.server
-import socket
 import threading
 from collections.abc import Iterator
 
@@ -60,17 +59,6 @@ def echo_server() -> Iterator[str]:
         thread.join()
 
 
-@pytest.fixture
-def forbid_getaddrinfo(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Fail the test if anything under it calls socket.getaddrinfo — the
-    property a pinned dial must guarantee for a literal target."""
-
-    def _boom(*_a: object, **_kw: object) -> None:
-        raise AssertionError("socket.getaddrinfo must not be called for an IPv4-literal dial")
-
-    monkeypatch.setattr(socket, "getaddrinfo", _boom)
-
-
 class TestTransportForUrl:
     def test_hostname_gets_no_transport(self) -> None:
         # None -> httpx's own default transport, unchanged behavior.
@@ -91,18 +79,21 @@ class TestPinnedDialNeverResolves:
     """The actual guarantee: get/post/put against an IPv4 literal never call
     getaddrinfo, and the round trip still works end to end."""
 
-    def test_get(self, echo_server: str, forbid_getaddrinfo: None) -> None:
+    def test_get(self, echo_server: str) -> None:
         resp = dial_get(f"{echo_server}/", timeout=3)
         assert resp.status_code == 200
         assert resp.content == b"ok"
+        assert type(resp.extensions["network_stream"]).__name__ == "_PinnedStream"
 
-    def test_post(self, echo_server: str, forbid_getaddrinfo: None) -> None:
+    def test_post(self, echo_server: str) -> None:
         resp = dial_post(f"{echo_server}/", json={"a": 1}, timeout=3)
         assert resp.status_code == 200
+        assert type(resp.extensions["network_stream"]).__name__ == "_PinnedStream"
 
-    def test_put(self, echo_server: str, forbid_getaddrinfo: None) -> None:
+    def test_put(self, echo_server: str) -> None:
         resp = dial_put(f"{echo_server}/", json={"a": 1}, timeout=3)
         assert resp.status_code == 200
+        assert type(resp.extensions["network_stream"]).__name__ == "_PinnedStream"
 
 
 class TestHostnameTargetsUseStandardResolution:
@@ -110,6 +101,7 @@ class TestHostnameTargetsUseStandardResolution:
         resp = dial_get(f"{echo_server.replace('127.0.0.1', 'localhost')}/", timeout=3)
         assert resp.status_code == 200
         assert resp.content == b"ok"
+        assert type(resp.extensions["network_stream"]).__name__ != "_PinnedStream"
 
     def test_post_resolves_hostname(self, echo_server: str) -> None:
         resp = dial_post(

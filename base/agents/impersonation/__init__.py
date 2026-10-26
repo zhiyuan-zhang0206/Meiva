@@ -46,6 +46,7 @@ from base.api_contracts.agent_contract import AgentStatus
 from base.api_contracts.caller_identity import CallerIdentity
 from base.config.service_read import ConfigAuthority
 from base.db import Database
+from base.db.protocols import DatabaseLike
 from base.events.live.bus import EventBus
 from base.events.live.projection import Cancelled
 from base.native_process.runtime_incarnation import RuntimeIncarnation
@@ -307,7 +308,7 @@ def prepare(
 
 
 def activate(
-    db: Database, bus: EventBus, lease_id: str, incarnation: RuntimeIncarnation
+    db: DatabaseLike, bus: EventBus, lease_id: str, incarnation: RuntimeIncarnation
 ) -> dict[str, Any]:
     """Called only after native exec drains AND its checkpoint flush completes."""
     with db.write_transaction() as conn:
@@ -350,7 +351,7 @@ def activate(
 
 
 def native_status(
-    db: Database, bus: EventBus, agent_id: int, incarnation: RuntimeIncarnation
+    db: DatabaseLike, bus: EventBus, agent_id: int, incarnation: RuntimeIncarnation
 ) -> dict[str, Any] | None:
     if incarnation.agent_id != agent_id:
         raise ImpersonationError("Native status belongs to a different agent")
@@ -596,7 +597,7 @@ def merge_plugin_delta(
 
 
 def mark_plugin_applied(
-    db: Database, lease_id: str, version: int, incarnation: RuntimeIncarnation
+    db: DatabaseLike, lease_id: str, version: int, incarnation: RuntimeIncarnation
 ) -> None:
     """Receipt follows a durable checkpoint containing the same lease/version."""
     with db.write_transaction() as conn:

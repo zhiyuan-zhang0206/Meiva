@@ -76,6 +76,12 @@ from base.host.env.dotenv_boot import enter_scratch_home
 if __name__ == "__main__":
     enter_scratch_home()
 
+from base.deploy.schema.migration_history import (
+    PRE_RESET_SET,
+    RESET_ANCHOR,
+    SEP2026_PRE_RESET_SET,
+    V010_PRE_RESET_SET,
+)
 from base.deploy.schema.migrations import (
     BASELINE_NAME,
     FILENAME_RE,
@@ -728,14 +734,19 @@ def _check_merged_migrations_immutable(
     if result.returncode != 0:
         return [f"cannot read migrations/ at {base}: {result.stderr.strip()}"]
     current = {entry.name: entry for entry in migrations_dir.rglob("*.sql")}
+    folded = PRE_RESET_SET | SEP2026_PRE_RESET_SET | V010_PRE_RESET_SET
+    has_reset_anchor = f"{RESET_ANCHOR}.sql" in current
     errors: list[str] = []
     for record in result.stdout.split("\0"):
         metadata, separator, old_path = record.partition("\t")
         name = Path(old_path).name
-        if not separator or FILENAME_RE.match(name) is None:
+        match = FILENAME_RE.match(name) if separator else None
+        if match is None:
             continue
         path = current.get(name)
         if path is None:
+            if has_reset_anchor and match.group(1) in folded:
+                continue
             verb = "deleted or renamed"
         else:
             digest = _git("hash-object", str(path), repo_root=repo_root)

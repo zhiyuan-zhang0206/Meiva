@@ -4,8 +4,7 @@ import asyncio
 from dataclasses import dataclass
 from uuid import UUID
 
-from psycopg.types.json import Jsonb
-from psycopg_pool import AsyncConnectionPool
+from loguru import logger
 
 from agent.ownership.lifecycle_plan import (
     LifecycleKind,
@@ -15,11 +14,10 @@ from agent.ownership.lifecycle_plan import (
     turn_close,
 )
 from base.agents.impersonation.replacement import end_for_replacement
-from base.db import Database
+from base.db.protocols import AsyncPool, DatabaseLike
 from base.db.transaction import async_write_transaction
 from base.events.live.announce import publish_agent_updated
 from base.events.live.bus import EventBus
-from base.log import logger
 from base.native_process.runtime_incarnation import RuntimeIncarnation
 from base.telemetry import Event, emit_prepared
 from base.telemetry.audit_events import prepare_event_log, record_audit_async
@@ -63,7 +61,7 @@ class AppliedLifecycle:
 #     rolling back the durable death. A crash or a session created after this cutoff
 #     can leave live sessions for operators.
 async def apply_hosted_lifecycle(
-    pool: AsyncConnectionPool,
+    pool: AsyncPool,
     incarnation: RuntimeIncarnation,
     *,
     resume_turn: bool,
@@ -109,12 +107,12 @@ async def apply_hosted_lifecycle(
             if note is not None:
                 await conn.execute(
                     "INSERT INTO inbound_messages(agent_id,content,kind,source,payload) "
-                    "VALUES(%s,%s,'system_note',%s,%s)",
+                    "VALUES(%s,%s,'system_note',%s,jsonb_build_object('note_tag',%s::text))",
                     (
                         incarnation.agent_id,
                         note.content,
                         note.source,
-                        Jsonb({"note_tag": note.note_tag}),
+                        note.note_tag,
                     ),
                 )
         else:
@@ -141,12 +139,12 @@ async def apply_hosted_lifecycle(
 #     that cleared the identity, starts a new incarnation. A host that is exiting
 #     refuses new turns in process (`stop_admission`), not here.
 async def admit_hosted_runtime(
-    pool: AsyncConnectionPool,
+    pool: AsyncPool,
     agent_id: int,
     machine: str,
     owner: UUID,
     *,
-    db: Database,
+    db: DatabaseLike,
 ) -> RuntimeIncarnation | None:
     from base.agents.recovery.breaker import admit_pending_wake
 
@@ -212,7 +210,7 @@ async def admit_hosted_runtime(
 # or an open circuit breaker) leaves it for the reaper. Writing it here would
 # only relabel a crash-dead row healthy.
 async def settle_hosted_runtime(
-    pool: AsyncConnectionPool,
+    pool: AsyncPool,
     incarnation: RuntimeIncarnation,
     *,
     bus: EventBus,
@@ -256,9 +254,7 @@ class TurnFatalStamp:
     applied: bool
 
 
-async def stamp_turn_fatal(
-    pool: AsyncConnectionPool, incarnation: RuntimeIncarnation
-) -> TurnFatalStamp:
+async def stamp_turn_fatal(pool: AsyncPool, incarnation: RuntimeIncarnation) -> TurnFatalStamp:
     """Mark this incarnation's row crash-dead after the hosted runner saw the
     turn die (fatal LLM class or an unclassified exception).
 
@@ -302,7 +298,7 @@ class TurnSettlement:
 
 
 async def settle_and_stamp_turn(
-    pool: AsyncConnectionPool,
+    pool: AsyncPool,
     incarnation: RuntimeIncarnation,
     *,
     bus: EventBus,
@@ -345,7 +341,7 @@ async def settle_and_stamp_turn(
 # Host start: this machine's `running` rows belong to a host that no longer exists
 # (one host per machine and home), so each becomes idling. The next wake admits
 # it under the new boot. This is the only place a stale row is settled.
-async def settle_running_rows_at_start(pool: AsyncConnectionPool, machine: str) -> list[int]:
+async def settle_running_rows_at_start(pool: AsyncPool, machine: str) -> list[int]:
     async with async_write_transaction(pool) as conn:
         rows = await (
             await conn.execute(

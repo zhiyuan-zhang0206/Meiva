@@ -2,8 +2,41 @@
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from dataclasses import dataclass, field
 from threading import Lock
+
+from pydantic import BaseModel
+
+from base.agents.messages.kwargs import MeivaMsgType, read_meiva_kwargs
+
+
+# meiva:note
+# Per-method SDK call count recorded on an agent_code block's exec_output ToolMessage.
+class SdkCall(BaseModel):
+    method: str
+    count: int
+
+
+# meiva:note
+# Extracts recorded runtime SDK call tallies per tool_call_id from exec_output ToolMessages in messages[start:].
+def sdk_calls_by_tool_call_id(
+    messages: Sequence[object], start: int = 0
+) -> dict[str, list[SdkCall]]:
+    from langchain_core.messages import ToolMessage
+
+    out: dict[str, list[SdkCall]] = {}
+    for msg in messages[start:]:
+        if not isinstance(msg, ToolMessage):
+            continue
+        kwargs = read_meiva_kwargs(msg)
+        if kwargs.get("meiva_msg_type") != MeivaMsgType.EXEC_OUTPUT:
+            continue
+        calls = kwargs.get("sdk_calls")
+        if calls is None:
+            continue
+        out[msg.tool_call_id] = [SdkCall.model_validate(entry) for entry in calls]
+    return out
 
 
 @dataclass(frozen=True)

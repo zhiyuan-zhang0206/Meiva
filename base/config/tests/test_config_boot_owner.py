@@ -5,13 +5,12 @@ import sys
 from collections.abc import Iterator
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
-from threading import Event, get_ident
+from threading import Event
 
 import pytest
 
 import base.config as facade
 from base.config import ConfigBoot, ConfigBuildWaitTimeoutError, _full
-from base.host.env.dotenv_boot import EnvBootResult
 from base.host.proc import run_bounded
 
 _CHILD = Path(__file__).with_name("_boot_owner_child.py")
@@ -166,26 +165,17 @@ def test_profile_rejection_remains_lazy_and_instance_local(tmp_path: Path) -> No
     assert not limited.is_full()
 
 
-def test_owner_build_gate_is_bounded_and_does_not_block_another_owner(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
+def test_owner_build_gate_is_bounded_and_does_not_block_another_owner() -> None:
     blocked = ConfigBoot(wait_timeout_seconds=0.05)
     independent = ConfigBoot()
     entered, release = Event(), Event()
-    builder_id: list[int] = []
-    build = _full.build
-
-    def controlled_build(*, env_boot: EnvBootResult) -> _full.FullBundle:
-        if get_ident() in builder_id:
-            entered.set()
-            assert release.wait(5)
-        return build(env_boot=env_boot)
 
     def blocked_build():
-        builder_id.append(get_ident())
-        return blocked.ensure_eager()
+        with blocked.in_flight_build():
+            entered.set()
+            assert release.wait(5)
+            return blocked.ensure_eager()
 
-    monkeypatch.setattr(_full, "build", controlled_build)
     with ThreadPoolExecutor(max_workers=1) as pool:
         task = pool.submit(blocked_build)
         try:
@@ -201,30 +191,27 @@ def test_owner_build_gate_is_bounded_and_does_not_block_another_owner(
     assert callable(blocked.view.model_dump)
 
 
-def test_same_thread_build_reads_lite_without_recursive_build_and_retries_failure(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
+def test_same_thread_build_reads_lite_without_recursive_build_and_retries_failure() -> None:
     owner = ConfigBoot()
     owner.set_field("llm_model", "pending-model")
-    build = _full.build
     calls = 0
 
-    def failing_then_successful_build(*, env_boot: EnvBootResult) -> _full.FullBundle:
+    def attempt_build() -> None:
         nonlocal calls
-        calls += 1
-        assert owner.view.lm.llm_model == "pending-model"
-        with pytest.raises(AttributeError, match="in flight"):
-            _ = owner.view.model_dump
-        if calls == 1:
-            raise ValueError("injected build failure")
-        return build(env_boot=env_boot)
+        with owner.in_flight_build():
+            calls += 1
+            assert owner.view.lm.llm_model == "pending-model"
+            with pytest.raises(AttributeError, match="in flight"):
+                _ = owner.view.model_dump
+            if calls == 1:
+                raise ValueError("injected build failure")
+            owner.ensure_eager()
 
-    monkeypatch.setattr(_full, "build", failing_then_successful_build)
     with pytest.raises(ValueError, match="injected build failure"):
-        owner.ensure_eager()
+        attempt_build()
     assert not owner.is_full()
     assert owner.boot_state()["pending_count"] == 1
-    owner.ensure_eager()
+    attempt_build()
     assert owner.view.lm.llm_model == "pending-model"
     assert calls == 2
     assert owner.boot_state()["pending_count"] == 0

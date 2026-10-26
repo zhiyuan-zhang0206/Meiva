@@ -45,6 +45,10 @@ class ModelTuning:
     prompt_invest_future_enabled: bool | None = None
     prompt_memory_behavior_enabled: bool | None = None
 
+    @staticmethod
+    def field_names() -> tuple[str, ...]:
+        return tuple(f.name for f in dataclass_fields(ModelTuning))
+
 
 DEFAULT_TUNING = ModelTuning(
     auto_compact_fraction=0.4,
@@ -110,21 +114,114 @@ class ModelSpec:
     sdk_doc_style: str | None = None
     tuning: ModelTuning = field(default_factory=ModelTuning)
 
+    # meiva:note
+    # Every harness that can run this model, built-in runtime first: `meiva` runs every
+    # spawnable model, so only the external claims are declared, and their order follows the
+    # Harness enum rather than the order a plugin listed them in.
+    # meiva:link base/agents/docs/harness/harness-models.meiva.okf.md
+    def harnesses(self) -> tuple[Harness, ...]:
+        return (
+            Harness.MEIVA,
+            *(
+                harness
+                for harness in Harness
+                if harness is not Harness.MEIVA and harness in self.external_harnesses
+            ),
+        )
 
-# meiva:note
-# Every harness that can run this model, built-in runtime first: `meiva` runs every
-# spawnable model, so only the external claims are declared, and their order follows the
-# Harness enum rather than the order a plugin listed them in.
-# meiva:link base/agents/docs/harness/harness-models.meiva.okf.md
-def harnesses_for(spec: ModelSpec) -> tuple[Harness, ...]:
-    return (
-        Harness.MEIVA,
-        *(
-            harness
-            for harness in Harness
-            if harness is not Harness.MEIVA and harness in spec.external_harnesses
-        ),
-    )
+    @staticmethod
+    def validate_spec(
+        model_id: str,
+        spec: ModelSpec,
+        *,
+        anthropic_protocol: bool,
+        prices: PriceBook,
+        pending_price_models: Collection[str] = (),
+    ) -> None:
+        _validate_sdk_help(spec, model_id)
+        _validate_external_harnesses(spec, model_id)
+        if spec.attach_modalities is not None and not spec.attach_modalities <= spec.media_types:
+            raise RuntimeError(
+                f"model {model_id!r} declares attach_modalities "
+                f"{sorted(spec.attach_modalities)} that are not in its media_types "
+                f"{sorted(spec.media_types)} — attach rides the same message "
+                f"pipeline, so it cannot accept a modality the endpoint cannot receive"
+            )
+        if not spec.spawnable:
+            return
+        missing = [
+            fact
+            for fact in ("context_window", "knowledge_cutoff", "effort_levels")
+            if getattr(spec, fact) is None
+        ]
+        if missing:
+            raise RuntimeError(
+                f"spawnable model {model_id!r} is missing registry facts {missing} — "
+                "fill them in its ModelSpec"
+            )
+        if (
+            model_id not in pending_price_models
+            and prices.rates_at(model_id, input_tokens=0) is None
+        ):
+            raise RuntimeError(
+                f"spawnable model {model_id!r} has no current price — a catalog-priced "
+                "model needs an archive entry; a plugin model needs a price in its "
+                "register() call"
+            )
+        if not spec.tuning.reasoning_effort:
+            raise RuntimeError(
+                f"spawnable model {model_id!r} has no concrete reasoning_effort default — "
+                f"pin one in its ModelTuning ('' provider-default is not displayable "
+                f"in the spawn picker)"
+            )
+        levels = spec.effort_levels or ()
+        if spec.tuning.reasoning_effort not in levels:
+            raise RuntimeError(
+                f"spawnable model {model_id!r} has reasoning_effort default "
+                f"{spec.tuning.reasoning_effort!r} outside its effort_levels {levels!r} — "
+                f"pin the default to one of the model's own rungs (the spawn picker "
+                f"cannot render it otherwise)"
+            )
+        if anthropic_protocol and spec.max_output_tokens is None:
+            raise RuntimeError(
+                f"spawnable model {model_id!r} needs max_output_tokens — "
+                f"the anthropic-protocol bindings must pin the output cap explicitly"
+            )
+
+    @staticmethod
+    def validate_models(
+        models: Mapping[str, ModelSpec],
+        *,
+        prices: PriceBook,
+        anthropic_protocol_by_model: Mapping[str, bool] | None = None,
+    ) -> None:
+        for tuning_field in dataclass_fields(ModelTuning):
+            if getattr(DEFAULT_TUNING, tuning_field.name) is None:
+                raise RuntimeError(
+                    f"DEFAULT_TUNING.{tuning_field.name} is None — the shared-default floor "
+                    f"must be fully populated (it is the last resort of resolve_setting)"
+                )
+        for model_id, spec in models.items():
+            ModelSpec.validate_spec(
+                model_id,
+                spec,
+                anthropic_protocol=(
+                    False
+                    if anthropic_protocol_by_model is None
+                    else anthropic_protocol_by_model[model_id]
+                ),
+                prices=prices,
+            )
+        _validate_supersession_links(models)
+        _validate_supersession_chains(models)
+        _validate_unavailable_fallbacks(models)
+        _validate_fast_links(models)
+
+
+harnesses_for = ModelSpec.harnesses
+validate_spec = ModelSpec.validate_spec
+validate_models = ModelSpec.validate_models
+tuning_field_names = ModelTuning.field_names
 
 
 def media_types_for_model(
@@ -184,91 +281,6 @@ def _validate_external_harnesses(spec: ModelSpec, model_id: str) -> None:
             f"Harness enum {[harness.value for harness in Harness]} — a harness nothing can "
             "run is refused, never dropped"
         )
-
-
-def validate_spec(
-    model_id: str,
-    spec: ModelSpec,
-    *,
-    anthropic_protocol: bool,
-    prices: PriceBook,
-    pending_price_models: Collection[str] = (),
-) -> None:
-    _validate_sdk_help(spec, model_id)
-    _validate_external_harnesses(spec, model_id)
-    if spec.attach_modalities is not None and not spec.attach_modalities <= spec.media_types:
-        raise RuntimeError(
-            f"model {model_id!r} declares attach_modalities "
-            f"{sorted(spec.attach_modalities)} that are not in its media_types "
-            f"{sorted(spec.media_types)} — attach rides the same message "
-            f"pipeline, so it cannot accept a modality the endpoint cannot receive"
-        )
-    if not spec.spawnable:
-        return
-    missing = [
-        fact
-        for fact in ("context_window", "knowledge_cutoff", "effort_levels")
-        if getattr(spec, fact) is None
-    ]
-    if missing:
-        raise RuntimeError(
-            f"spawnable model {model_id!r} is missing registry facts {missing} — "
-            "fill them in its ModelSpec"
-        )
-    if model_id not in pending_price_models and prices.rates_at(model_id, input_tokens=0) is None:
-        raise RuntimeError(
-            f"spawnable model {model_id!r} has no current price — a catalog-priced "
-            "model needs an archive entry; a plugin model needs a price in its "
-            "register() call"
-        )
-    if not spec.tuning.reasoning_effort:
-        raise RuntimeError(
-            f"spawnable model {model_id!r} has no concrete reasoning_effort default — "
-            f"pin one in its ModelTuning ('' provider-default is not displayable "
-            f"in the spawn picker)"
-        )
-    levels = spec.effort_levels or ()
-    if spec.tuning.reasoning_effort not in levels:
-        raise RuntimeError(
-            f"spawnable model {model_id!r} has reasoning_effort default "
-            f"{spec.tuning.reasoning_effort!r} outside its effort_levels {levels!r} — "
-            f"pin the default to one of the model's own rungs (the spawn picker "
-            f"cannot render it otherwise)"
-        )
-    if anthropic_protocol and spec.max_output_tokens is None:
-        raise RuntimeError(
-            f"spawnable model {model_id!r} needs max_output_tokens — "
-            f"the anthropic-protocol bindings must pin the output cap explicitly"
-        )
-
-
-def validate_models(
-    models: Mapping[str, ModelSpec],
-    *,
-    prices: PriceBook,
-    anthropic_protocol_by_model: Mapping[str, bool] | None = None,
-) -> None:
-    for tuning_field in dataclass_fields(ModelTuning):
-        if getattr(DEFAULT_TUNING, tuning_field.name) is None:
-            raise RuntimeError(
-                f"DEFAULT_TUNING.{tuning_field.name} is None — the shared-default floor "
-                f"must be fully populated (it is the last resort of resolve_setting)"
-            )
-    for model_id, spec in models.items():
-        validate_spec(
-            model_id,
-            spec,
-            anthropic_protocol=(
-                False
-                if anthropic_protocol_by_model is None
-                else anthropic_protocol_by_model[model_id]
-            ),
-            prices=prices,
-        )
-    _validate_supersession_links(models)
-    _validate_supersession_chains(models)
-    _validate_unavailable_fallbacks(models)
-    _validate_fast_links(models)
 
 
 def _validate_fast_links(models: Mapping[str, ModelSpec]) -> None:
@@ -393,10 +405,6 @@ class ResolvedSetting[SettingT]:
     shared_default: SettingValue
     model_default: SettingValue
     explicit_value: SettingValue
-
-
-def tuning_field_names() -> tuple[str, ...]:
-    return tuple(f.name for f in dataclass_fields(ModelTuning))
 
 
 @overload

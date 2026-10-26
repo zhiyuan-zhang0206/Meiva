@@ -57,23 +57,15 @@ def _sdk_via_inprocess_gateway(
 
 
 # meiva:note
-# `meiva.ui` calls run against a page host with a short ready timeout.
-#
-# Retained patch: `meiva.ui.page_host()` builds its page host from the process context with
-# the production ready timeout (60s+), and a test about the timeout cannot wait that long
-# (needs meiva: the ready timeout as a value of the process context).
-def _use_page_host(
-    monkeypatch: pytest.MonkeyPatch, *, local_machine: MachineIdentityReader, ready_timeout_s: float
-) -> None:
-
-    def build() -> meiva.ui.PageHost:
-        return meiva.ui.PageHost(
-            host=local_machine.host(),
-            agent_id=agent_identity.require_agent_id(),
-            ready_timeout_s=ready_timeout_s,
-        )
-
-    monkeypatch.setattr(ui, "page_host", build)
+# A page host for the current agent with a custom ready timeout.
+def _page_host(
+    *, local_machine: MachineIdentityReader, ready_timeout_s: float
+) -> meiva.ui.PageHost:
+    return meiva.ui.PageHost(
+        host=local_machine.host(),
+        agent_id=agent_identity.require_agent_id(),
+        ready_timeout_s=ready_timeout_s,
+    )
 
 
 # meiva:note
@@ -523,7 +515,6 @@ class TestServe:
         self,
         db_conn: psycopg.Connection,
         tmp_path: Path,
-        monkeypatch: pytest.MonkeyPatch,
         *,
         model_catalog: ModelCatalog,
         config_authority: ConfigAuthority,
@@ -543,10 +534,10 @@ class TestServe:
             )
         )
         (tmp_path / "index.html").write_text("<h1>x</h1>", encoding="utf-8")
-        _use_page_host(monkeypatch, ready_timeout_s=0.5, local_machine=machine_identity)
+        host = _page_host(ready_timeout_s=0.5, local_machine=machine_identity)
         free = _free_port()
         with pytest.raises(ui_mod.PageError, match="did not come up"):
-            meiva.ui.serve(str(tmp_path), "nod", port=free)
+            host.serve(ui.serve_request(str(tmp_path), "nod", free, None, None))
         db_conn.rollback()
         # The declaration is durable even when the server is not up yet.
         assert _open_pages(db_conn, agent_identity.require_agent_id()) == [
@@ -718,7 +709,6 @@ class TestServe:
         self,
         db_conn: psycopg.Connection,
         tmp_path: Path,
-        monkeypatch: pytest.MonkeyPatch,
         *,
         model_catalog: ModelCatalog,
         config_authority: ConfigAuthority,
@@ -739,11 +729,11 @@ class TestServe:
             )
         )
         (tmp_path / "index.html").write_text("<h1>x</h1>", encoding="utf-8")
-        _use_page_host(monkeypatch, ready_timeout_s=0.5, local_machine=machine_identity)
+        host = _page_host(ready_timeout_s=0.5, local_machine=machine_identity)
         with _SilentServer("127.0.0.1") as silent:
             meiva.ui.show("wedged", silent.port)
             with pytest.raises(ui_mod.PageError, match="did not come up"):
-                meiva.ui.serve(str(tmp_path), "wedged2", port=silent.port)
+                host.serve(ui.serve_request(str(tmp_path), "wedged2", silent.port, None, None))
         db_conn.rollback()
         # The replacement row was registered; only the (stub) server never came up.
         assert [r[0] for r in _open_pages(db_conn, agent_identity.require_agent_id())] == [

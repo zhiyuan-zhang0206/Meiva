@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import inspect
 import re as _re
+import stat
 from pathlib import Path
 from typing import Any
 
@@ -90,7 +91,14 @@ def plan_media(
     path = coerce_str(path, "path", allow_types=(Path,))
     label = coerce_str(label, "label", allow_none=True)
     resolved = resolve_in(base, Path(path).expanduser()).resolve()
-    is_file = resolved.is_file()
+    try:
+        st = resolved.stat()
+    except OSError:
+        is_file = False
+        size = 0
+    else:
+        is_file = stat.S_ISREG(st.st_mode)
+        size = st.st_size if is_file else 0
     refused = refusal(
         AttachFacts(
             model=model,
@@ -100,7 +108,7 @@ def plan_media(
             resolved_path=str(resolved),
             is_file=is_file,
             suffix=resolved.suffix,
-            size=resolved.stat().st_size if is_file else 0,
+            size=size,
             label=label,
         )
     )

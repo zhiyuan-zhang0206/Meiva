@@ -24,7 +24,6 @@ from __future__ import annotations
 import ast
 import posixpath
 import re
-import subprocess
 from bisect import bisect_left, bisect_right
 from collections.abc import Callable, Iterable, Iterator, Sequence
 from dataclasses import dataclass
@@ -168,13 +167,10 @@ class Matcher:
 
 def load_repo(root: Path) -> Repo:
     """Read every tracked (and unignored untracked) text file once."""
-    listing = subprocess.check_output(
-        ["git", "ls-files", "-z", "--cached", "--others", "--exclude-standard"], cwd=root
-    )
     texts: dict[str, str] = {}
-    for name in listing.decode().split("\0"):
+    for name in lint_common.tracked_files(root, include_untracked=True):
         path = root / name
-        if not name or name in _GENERATED or path.is_symlink():
+        if name in _GENERATED or path.is_symlink():
             continue
         text = lint_common.read_utf8_text(path)
         if text is not None:

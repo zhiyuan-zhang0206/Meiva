@@ -1,6 +1,3 @@
 [uses]
 "test_upload_delivery_faults.py" = ["test_upload_delivery_recovery.py"]
 "test_upload_delivery_lifecycle.py" = ["child_native_link_crash.py", "test_upload_delivery_recovery.py"]
-
-[debt.stdlib-patch]
-"test_upload_delivery_recovery.py#monkeypatch.setattr pathlib.Path.home" = 1

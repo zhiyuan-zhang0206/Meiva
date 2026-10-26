@@ -219,7 +219,7 @@ def claim_throwaway_lock(instance_dir: Path, port: int) -> Registration:
     claim = instance_dir / CLAIM_LOCK_NAME
     fd = os.open(claim, os.O_RDWR | os.O_CREAT | os.O_TRUNC, 0o600)
     fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
-    os.write(fd, json.dumps({"owner_pid": os.getpid(), "port": port}).encode())
+    os.write(fd, json.dumps({"port": port}).encode())
     return Registration(fd, claim)
 
 
@@ -258,11 +258,9 @@ def resolved_throwaway_dir(instance_dir: Path, *, config: ThrowawayConfig) -> Pa
     return resolved
 
 
+# meiva:note
+# The owner.lock body this module writes: diagnostics + allocation registry.
 class _OwnerRecord(TypedDict):
-    """The owner.lock body this module writes: diagnostics only (`port` doubles as
-    the allocation registry)."""
-
-    owner_pid: int
     port: int
 
 
@@ -292,7 +290,7 @@ def _owner_detail(fd: int) -> str:
     if rec is None:
         return ""
     with contextlib.suppress(KeyError):
-        return f" (owner pid {rec['owner_pid']}, port {rec['port']})"
+        return f" (port {rec['port']})"
     return ""
 
 

@@ -62,24 +62,12 @@ _USAGE_KIND = "web_fetch_injection_check"
 _USAGE_SOURCE = "web.fetch"
 
 
-async def _chunk_probability(
-    model: str, chunk: str, *, catalog: ModelCatalog, keys: ProviderKeys, for_agent_id: int | None
-) -> float:
-    from base.lm.decision.call import decide  # deferred: keep import meiva off the LM stack
-
-    decisions = await decide(
-        model,
-        chunk,
-        {_QUESTION_ID: QUESTION},
-        catalog=catalog,
-        keys=keys,
-        usage_kind=_USAGE_KIND,
-        source=_USAGE_SOURCE,
-        for_agent_id=for_agent_id,
-    )
-    return decisions[_QUESTION_ID].probability("true")
-
-
+# meiva:note
+# Probability that `text` addresses an AI reader: the maximum over its chunks.
+#
+# `None` when no chunk produced an answer. A chunk whose request fails is logged, not
+# raised, so one failed chunk cannot hide a verdict another chunk reached. `decide` is
+# imported on call so importing `meiva` stays off the LM stack.
 async def page_probability(
     model: str,
     text: str,
@@ -89,34 +77,44 @@ async def page_probability(
     url: str,
     for_agent_id: int | None,
 ) -> float | None:
-    """Probability that `text` addresses an AI reader: the maximum over its chunks.
+    from base.lm.decision.call import decide
 
-    `None` when no chunk produced an answer. A chunk whose request fails is logged, not
-    raised, so one failed chunk cannot hide a verdict another chunk reached.
-    """
     spec = catalog.decision_models[model]
     budget = spec.context_window - estimate_tokens(question_text(QUESTION)) - _CHUNK_MARGIN_TOKENS
     chunks = [c for c in split_for_model(text, budget) if c.strip()]
-
-    async def run(chunk: str) -> float | None:
-        try:
-            return await _chunk_probability(
-                model, chunk, catalog=catalog, keys=keys, for_agent_id=for_agent_id
+    outcomes = await asyncio.gather(
+        *(
+            decide(
+                model,
+                chunk,
+                {_QUESTION_ID: QUESTION},
+                catalog=catalog,
+                keys=keys,
+                usage_kind=_USAGE_KIND,
+                source=_USAGE_SOURCE,
+                for_agent_id=for_agent_id,
             )
-        except DecisionError as exc:
+            for chunk in chunks
+        ),
+        return_exceptions=True,
+    )
+    answers: list[float] = []
+    for outcome in outcomes:
+        if isinstance(outcome, DecisionError):
             logger.warning(
                 "web.fetch injection check failed for {}: {}: {}; the page is returned "
                 "without a verdict",
                 url,
-                type(exc).__name__,
-                exc,
+                type(outcome).__name__,
+                outcome,
                 event="web_fetch_injection_check_failed",
                 model=model,
-                error_type=type(exc).__name__,
+                error_type=type(outcome).__name__,
             )
-            return None
-
-    answers = [a for a in await asyncio.gather(*(run(chunk) for chunk in chunks)) if a is not None]
+        elif isinstance(outcome, BaseException):
+            raise outcome
+        else:
+            answers.append(outcome[_QUESTION_ID].probability("true"))
     return max(answers) if answers else None
 
 

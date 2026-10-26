@@ -27,8 +27,3 @@ exports = ["boot_autostart", "backend.py", "boot_policy.py", "boot_unit.py", "cr
 
 [roots]
 "probes.py" = { kinds = ["environ"], why = "display_available reads DISPLAY/WAYLAND_DISPLAY to detect X11/Wayland; these are OS display-server vars, not meiva runtime config; no Settings field models them. Single source of truth shared by the browser daemon / MCP loader / host-config validators" }
-
-[debt.ambient-read]
-"boot_unit.py#pid os.getpid" = 1
-"hostport.py#pid os.getuid" = 1
-"macos_firewall.py#platform socket.gethostname" = 1

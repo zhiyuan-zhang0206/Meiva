@@ -31,6 +31,24 @@ __all__ = [
 FRAMEWORK_DIRS = packages("application")
 
 
+# meiva:note
+# Check whether a candidate path on disk is a regular file.
+def _is_file(path: Path) -> bool:
+    return path.is_file()
+
+
+# meiva:note
+# Check whether a candidate path on disk is a directory.
+def _is_dir(path: Path) -> bool:
+    return path.is_dir()
+
+
+# meiva:note
+# Check whether a lint target path resolves to an existing file or directory.
+def _exists(path: Path) -> bool:
+    return _is_file(path) or _is_dir(path)
+
+
 def scan_roots(repo_root: Path, dirs: Iterable[str]) -> list[Path]:
     """Resolve a lint's configured scan dirs; a missing one is a configuration error.
 
@@ -38,7 +56,7 @@ def scan_roots(repo_root: Path, dirs: Iterable[str]) -> list[Path]:
     there and still exits 0, so the gap stays invisible. Raise instead.
     """
     roots = [repo_root / d for d in dirs]
-    missing = [root.relative_to(repo_root).as_posix() for root in roots if not root.is_dir()]
+    missing = [root.relative_to(repo_root).as_posix() for root in roots if not _is_dir(root)]
     if missing:
         raise FileNotFoundError(
             f"lint scan dir(s) not found under {repo_root}: {', '.join(missing)}"
@@ -96,23 +114,23 @@ def _resolved_target(argument: str, repo_root: Path) -> Path:
     path = Path(argument)
     if not path.is_absolute():
         candidate = repo_root / path
-        if candidate.exists():
+        if _exists(candidate):
             path = candidate
     return path.resolve()
 
 
 def _files_in_target(target: Path, repo_root: Path) -> list[str]:
-    if target.is_file():
+    if _is_file(target):
         return [_rel_or_abs(target, repo_root)]
-    if target.is_dir():
-        return [_rel_or_abs(path, repo_root) for path in target.rglob("*") if path.is_file()]
+    if _is_dir(target):
+        return [_rel_or_abs(path, repo_root) for path in target.rglob("*") if _is_file(path)]
     return []
 
 
 def resolve_targets(argv: list[str], repo_root: Path) -> tuple[list[str], list[str]]:
     """Return sorted explicit files and any original arguments that are missing."""
     targets = [_resolved_target(argument, repo_root) for argument in argv]
-    missing = [a for a, target in zip(argv, targets, strict=True) if not target.exists()]
+    missing = [a for a, target in zip(argv, targets, strict=True) if not _exists(target)]
     if missing:
         return [], missing
 

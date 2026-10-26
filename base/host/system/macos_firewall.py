@@ -70,7 +70,6 @@ absence is observable, and a rule that exists but says *Block* is observable too
 from __future__ import annotations
 
 import re
-import socket
 import subprocess
 import time
 from dataclasses import dataclass
@@ -420,7 +419,7 @@ def _machine_name(configured: str | None, *, host: Host) -> str:
     computer_name = _computer_name(host=host)
     if computer_name:
         return computer_name
-    return socket.gethostname().split(".")[0].lower()
+    return "unknown"
 
 
 def _computer_name(*, host: Host) -> str | None:

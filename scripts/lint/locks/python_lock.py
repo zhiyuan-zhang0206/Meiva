@@ -18,7 +18,7 @@ from base.deploy.release.python_lock import violations  # noqa: E402 — depende
 
 def main() -> int:
     """Check only the repository lock, leaving explicit machine mirror profiles alone."""
-    errors = violations(_REPO_ROOT / "uv.lock")
+    errors = violations((_REPO_ROOT / "uv.lock").read_text(encoding="utf-8"))
     for error in errors[:10]:
         print(f"uv.lock: {error}", file=sys.stderr)
     if errors:

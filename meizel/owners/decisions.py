@@ -12,6 +12,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 from meizel import allowances
+from meizel.lint_common import read_utf8_text
 
 __all__ = [
     "DECISIONS",
@@ -178,5 +179,5 @@ def missing_allowlist_errors(
         f"{path}:1: stale {name} allowlist entry — the module no longer exists; {_UNLIST}"
         for name, decision in active.items()
         for path in sorted(decision.allowed)
-        if not (repo_root / path).is_file()
+        if read_utf8_text(repo_root / path) is None
     ]

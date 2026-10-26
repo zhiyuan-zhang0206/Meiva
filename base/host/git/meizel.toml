@@ -14,10 +14,7 @@ exports = ["gitenv.py", "host_version.py"]
 
 [debt.impure-call]
 "gitenv.py#os.environ" = 1
-"host_version.py#Path.is_file" = 1
 "host_version.py#Path.read_text" = 1
-"host_version.py#import subprocess" = 1
 
 [debt.impure-edge]
 "host_version.py#base/host/proc.py" = 1
-"host_version.py#base/paths/__init__.py" = 1

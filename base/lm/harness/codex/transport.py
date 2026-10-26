@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import inspect
 import json
 import os
 from collections.abc import Awaitable, Callable, Coroutine, Mapping, Sequence
@@ -12,7 +13,7 @@ type JsonValue = (
 )
 JsonObject = dict[str, Any]
 RequestParams = Mapping[str, Any]
-RequestHandler = Callable[[str, JsonObject], Awaitable[JsonObject]]
+RequestHandler = Callable[[str, JsonObject], JsonObject | Awaitable[JsonObject]]
 NotificationHandler = Callable[[str, JsonObject], None]
 ClosedHandler = Callable[[str], None]
 
@@ -57,15 +58,15 @@ class AppServerTransport(Protocol):
 
     def on_closed(self, handler: ClosedHandler | None) -> None: ...
 
-    async def start(self) -> None: ...
+    def start(self) -> Awaitable[None]: ...
 
-    async def request(
+    def request(
         self, method: str, params: RequestParams, *, timeout: float | None = None
-    ) -> JsonObject: ...
+    ) -> Awaitable[JsonObject]: ...
 
-    async def notify(self, method: str, params: RequestParams | None = None) -> None: ...
+    def notify(self, method: str, params: RequestParams | None = None) -> Awaitable[None]: ...
 
-    async def close(self) -> None: ...
+    def close(self) -> Awaitable[None]: ...
 
 
 def as_object(value: JsonValue) -> JsonObject:
@@ -208,7 +209,11 @@ class StdioAppServer:
                 process.kill()
                 with contextlib.suppress(ProcessLookupError):
                     await process.wait()
-        await self._cancel_children()
+        children = [task for task in self._children if not task.done()]
+        for task in children:
+            task.cancel()
+        if children:
+            await asyncio.gather(*children, return_exceptions=True)
         if self._tasks_entered:
             self._tasks_entered = False
             try:
@@ -254,8 +259,36 @@ class StdioAppServer:
         if not message:
             return
         if "id" in message and "method" in message:
-            await self._answer(message)
+            request_id = message.get("id")
+            method = as_text(message.get("method")) or ""
+            params = as_object(message.get("params"))
+            handler = self._request_handler
+            if handler is None:
+                await self._write(
+                    {
+                        "jsonrpc": "2.0",
+                        "id": request_id,
+                        "error": {"code": -32601, "message": "no handler"},
+                    }
+                )
+                return
+            try:
+                reply = handler(method, params)
+                result = await reply if inspect.isawaitable(reply) else reply
+            except Exception as exc:
+                await self._write(
+                    {
+                        "jsonrpc": "2.0",
+                        "id": request_id,
+                        "error": {"code": -32603, "message": str(exc)},
+                    }
+                )
+                return
+            await self._write({"jsonrpc": "2.0", "id": request_id, "result": result})
             return
+        self._dispatch_non_request(message)
+
+    def _dispatch_non_request(self, message: dict[str, Any]) -> None:
         if "id" in message:
             reply_id = as_int(message.get("id"))
             future = self._pending.get(reply_id) if reply_id is not None else None
@@ -266,29 +299,6 @@ class StdioAppServer:
         handler = self._notification_handler
         if method is not None and handler is not None:
             handler(method, as_object(message.get("params")))
-
-    async def _answer(self, message: JsonObject) -> None:
-        request_id = message.get("id")
-        method = as_text(message.get("method")) or ""
-        params = as_object(message.get("params"))
-        handler = self._request_handler
-        if handler is None:
-            await self._write(
-                {
-                    "jsonrpc": "2.0",
-                    "id": request_id,
-                    "error": {"code": -32601, "message": "no handler"},
-                }
-            )
-            return
-        try:
-            result = await handler(method, params)
-        except Exception as exc:
-            await self._write(
-                {"jsonrpc": "2.0", "id": request_id, "error": {"code": -32603, "message": str(exc)}}
-            )
-            return
-        await self._write({"jsonrpc": "2.0", "id": request_id, "result": result})
 
     def _spawn(self, coro: Coroutine[object, object, None]) -> asyncio.Task[None]:
         task = self._tasks.create_task(coro)
@@ -303,13 +313,6 @@ class StdioAppServer:
         error = task.exception()
         if error is not None:
             self._shutdown(f"app-server stream failed: {error}")
-
-    async def _cancel_children(self) -> None:
-        children = [task for task in self._children if not task.done()]
-        for task in children:
-            task.cancel()
-        if children:
-            await asyncio.gather(*children, return_exceptions=True)
 
     def _shutdown(self, reason: str) -> None:
         if self._closed:

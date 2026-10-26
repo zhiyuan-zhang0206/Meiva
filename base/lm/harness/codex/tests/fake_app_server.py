@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import inspect
 from collections.abc import Callable
 from typing import Any, Protocol
 
@@ -117,7 +118,8 @@ class FakeAppServer:
 
     async def ask(self, method: str, params: JsonObject) -> JsonObject:
         assert self._request_handler is not None, "session registered no request handler"
-        return await self._request_handler(method, params)
+        reply = self._request_handler(method, params)
+        return await reply if inspect.isawaitable(reply) else reply
 
     def emit(self, method: str, params: JsonObject) -> None:
         assert self._notification_handler is not None, "session registered no notification handler"

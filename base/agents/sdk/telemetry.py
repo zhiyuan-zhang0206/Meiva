@@ -10,22 +10,12 @@ from __future__ import annotations
 
 import contextlib
 import time
-from collections.abc import Awaitable, Callable, Generator, Mapping, Sequence
-from typing import TYPE_CHECKING, Any
+from collections.abc import Awaitable, Callable, Generator, Mapping
+from typing import Any
 
-from pydantic import BaseModel
-
-if TYPE_CHECKING:
-    # Annotation-only (`sdk_calls_by_tool_call_id`); the runtime isinstance
-    # imports ToolMessage at its call site. This module loads on the exec-child
-    # boot path (`_run_code`), which must stay off the LangChain message stack
-    # (task #3633; `_TYPE_CHECKING_ALLOWED`).
-    from langchain_core.messages import BaseMessage
-
-from base.agents.messages.kwargs import MeivaMsgType, read_meiva_kwargs
 from base.agents.sdk.call_policy import SamplingPolicy, SamplingPolicyOwner
 from base.agents.sdk.capture import SdkCaptureOwner
-from base.agents.sdk.tally import SdkCallTally
+from base.agents.sdk.tally import SdkCall, SdkCallTally, sdk_calls_by_tool_call_id
 from base.api_contracts.agent_contract import SdkCaptureAdmission
 
 # Event name written to events for each public SDK entry.
@@ -177,14 +167,6 @@ async def run_metered_async[ResultT](
 # ── the wire-side counts: entry model + materialization + read-back ───────────
 
 
-class SdkCall(BaseModel):
-    """One SDK method's call count in an agent_code block, e.g.
-    ``SdkCall(method="files.read", count=3)`` for ``meiva.files.read(...)`` x3."""
-
-    method: str
-    count: int
-
-
 def tally_entries(tally: Mapping[str, int]) -> list[dict[str, Any]]:
     """Materialize a recording tally as the wire list that rides the exec result:
     ``[{"method": "<ns>.<fn>", "count": N}, ...]``, sorted by descending count then
@@ -195,30 +177,12 @@ def tally_entries(tally: Mapping[str, int]) -> list[dict[str, Any]]:
     return entries
 
 
-def sdk_calls_by_tool_call_id(
-    messages: Sequence[BaseMessage], start: int = 0
-) -> dict[str, list[SdkCall]]:
-    """Map each exec_output ToolMessage's ``tool_call_id`` to its block's SDK calls.
-
-    The counts are the runtime tally ``agent/graph/exec/node.py`` wrote to the message's
-    ``additional_kwargs["sdk_calls"]`` — what the code really executed, never a scan
-    of its text. Only ``messages[start:]`` is scanned (the rendered span): a tool
-    call's metadata rides the ToolMessage that follows it, so nothing outside the
-    span can enrich an item rendered from it. A message without the field (pre-tally
-    history) stays absent from the map; a block that ran with zero SDK calls maps to
-    ``[]`` — a real zero the UI must not confuse with "not yet known".
-    """
-    from langchain_core.messages import ToolMessage
-
-    out: dict[str, list[SdkCall]] = {}
-    for msg in messages[start:]:
-        if not isinstance(msg, ToolMessage):
-            continue
-        kwargs = read_meiva_kwargs(msg)
-        if kwargs.get("meiva_msg_type") != MeivaMsgType.EXEC_OUTPUT:
-            continue
-        calls = kwargs.get("sdk_calls")
-        if calls is None:
-            continue
-        out[msg.tool_call_id] = [SdkCall.model_validate(entry) for entry in calls]
-    return out
+__all__ = [
+    "SDK_CALL_EVENT",
+    "SdkCall",
+    "emit",
+    "run_metered",
+    "run_metered_async",
+    "sdk_calls_by_tool_call_id",
+    "tally_entries",
+]

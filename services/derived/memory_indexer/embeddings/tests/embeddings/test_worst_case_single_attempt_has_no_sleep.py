@@ -1,10 +1,9 @@
 from __future__ import annotations
 
 import asyncio
-import socket
 import threading
 import time
-from typing import Any
+from typing import override
 
 import httpx
 import numpy as np
@@ -283,22 +282,23 @@ def test_embed_slow_error_body_preserves_status(
         assert not status_error.response.is_stream_consumed
 
 
-def test_sync_embed_slow_resolver_deadline(
-    monkeypatch: pytest.MonkeyPatch, model_catalog: ModelCatalog
-) -> None:
-    real_getaddrinfo = socket.getaddrinfo
+def test_sync_embed_slow_resolver_deadline(model_catalog: ModelCatalog) -> None:
     finished = threading.Event()
-    resolver_calls: list[object] = []
+    resolver_calls: list[str] = []
 
-    def slow_getaddrinfo(host: object, *args: Any, **kwargs: Any) -> Any:
+    def slow_resolve(host: str) -> None:
         resolver_calls.append(host)
         try:
             time.sleep(0.5)
-            return real_getaddrinfo("127.0.0.1", *args, **kwargs)
         finally:
             finished.set()
 
-    monkeypatch.setattr(socket, "getaddrinfo", slow_getaddrinfo)
+    class _SlowResolverTransport(httpx.AsyncBaseTransport):
+        @override
+        async def handle_async_request(self, request: httpx.Request) -> httpx.Response:
+            await asyncio.get_running_loop().run_in_executor(None, slow_resolve, request.url.host)
+            return httpx.Response(200)
+
     with embedding_server(drip=False) as (endpoint, requests):
         started = time.monotonic()
         try:
@@ -311,10 +311,11 @@ def test_sync_embed_slow_resolver_deadline(
                     policy=Policy(max_attempts=1),
                     timeout_s=0.1,
                     api_key=API_KEY,
+                    transport=_SlowResolverTransport(),
                 )
             elapsed = time.monotonic() - started
             assert isinstance(error.value.__cause__, httpx.ReadTimeout)
-            assert len(resolver_calls) == 1
+            assert resolver_calls == ["resolver.test"]
             assert not requests
             assert 0.1 <= elapsed < 0.3
             assert not finished.is_set()

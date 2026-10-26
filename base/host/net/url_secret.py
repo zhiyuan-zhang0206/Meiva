@@ -12,7 +12,7 @@ the identifier is chosen (`base.cluster.DATA_PLANE_IDENTITY`).
 from __future__ import annotations
 
 import re
-from urllib.parse import parse_qsl, quote, unquote, urlencode, urlsplit, urlunsplit
+from urllib.parse import parse_qs, parse_qsl, quote, unquote, urlencode, urlsplit, urlunsplit
 
 from base.host.net.predicates import is_loopback_host
 
@@ -125,6 +125,18 @@ def url_host(url: str, fallback: str = "127.0.0.1") -> str:
     guard still matches the placeholder URL byte-for-byte.
     """
     return urlsplit(url).hostname or fallback
+
+
+# meiva:note
+# The username a URL carries, or empty when absent.
+def url_username(url: str) -> str:
+    return urlsplit(url).username or ""
+
+
+# meiva:note
+# Whether `url`'s query string carries a non-blank `key` parameter.
+def url_has_query_param(url: str, key: str) -> bool:
+    return key in parse_qs(urlsplit(url).query)
 
 
 def names_foreign_host(*urls: str) -> bool:

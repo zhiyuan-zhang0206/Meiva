@@ -1,13 +1,8 @@
-purity = "strict-to-be"
 exports = ["directory_budget.py", "limits.py"]
+
+[purity]
+"." = "strict"
 
 [uses]
 "limits.py" = ["directory_budget.py"]
 "tests" = ["directory_budget.py", "limits.py"]
-
-[debt.impure-call]
-"directory_budget.py#Path.is_dir" = 1
-"limits.py#Path.is_dir" = 2
-"limits.py#Path.is_file" = 2
-"limits.py#Path.read_text" = 1
-"limits.py#import subprocess" = 1

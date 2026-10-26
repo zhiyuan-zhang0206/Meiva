@@ -22,4 +22,3 @@ exports = ["models.py", "stats.py", "tasks.py", "uploads.py"]
 
 [debt.impure-edge]
 "models.py#base/agents/model/birth_config.py" = 1
-"models.py#base/lm/registry.py" = 1

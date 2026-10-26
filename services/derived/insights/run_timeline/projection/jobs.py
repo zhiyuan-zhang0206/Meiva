@@ -10,7 +10,7 @@ from typing import Literal
 
 from base.agents.history.checkpoint import FullHistory
 from base.agents.messages.timestamp_policy import TimestampSource
-from base.db import Database
+from base.db.protocols import DatabaseLike
 from base.db.transaction import write_transaction
 from services.derived.insights.run_timeline.projection.derive import project_segment
 from services.derived.insights.run_timeline.projection.source import next_boundary
@@ -19,12 +19,12 @@ from services.derived.insights.run_timeline.projection.store import last_segment
 _log = logging.getLogger(__name__)
 
 
-def index_next(
-    db: Database,
+def index_next[DbT: DatabaseLike](
+    db: DbT,
     agent_id: int,
     *,
     timestamps: TimestampSource,
-    read_segment: Callable[[Database, int, str], FullHistory],
+    read_segment: Callable[[DbT, int, str], FullHistory],
 ) -> bool:
     pool = db.pool(min_size=1, max_size=1)
     try:

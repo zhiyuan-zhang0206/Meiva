@@ -24,14 +24,14 @@ from base.agents.impersonation.status import (
 )
 from base.agents.impersonation.wake import wake_agent
 from base.api_contracts.caller_identity import caller_payload
-from base.db import Database
+from base.db.protocols import DatabaseLike
 from base.events.live.bus import EventBus
 from base.log import logger
 from base.native_process.runtime_incarnation import RuntimeIncarnation
 
 
 def relay_get(
-    db: Database,
+    db: DatabaseLike,
     bus: EventBus,
     lease_id: str,
     relay_token: str,
@@ -55,7 +55,7 @@ def relay_get(
 
 
 def relay_inbox(
-    db: Database,
+    db: DatabaseLike,
     lease_id: str,
     relay_token: str,
     *,
@@ -97,7 +97,7 @@ def relay_inbox(
 
 
 def relay_heartbeat(
-    db: Database,
+    db: DatabaseLike,
     lease_id: str,
     relay_token: str,
     *,
@@ -120,7 +120,7 @@ def relay_heartbeat(
 
 
 def provision_relay(
-    db: Database,
+    db: DatabaseLike,
     lease_id: str,
     incarnation: RuntimeIncarnation,
     relay_token: str,
@@ -159,7 +159,7 @@ def provision_relay(
 
 
 def record_degradation(
-    db: Database, lease_id: str, incarnation: RuntimeIncarnation, reason: str
+    db: DatabaseLike, lease_id: str, incarnation: RuntimeIncarnation, reason: str
 ) -> None:
     """Record the last observed degradation and its time, not a current health verdict."""
     with db.write_transaction() as conn:
@@ -175,7 +175,7 @@ def record_degradation(
 
 
 def fail_acceptance(
-    db: Database, bus: EventBus, lease_id: str, incarnation: RuntimeIncarnation, reason: str
+    db: DatabaseLike, bus: EventBus, lease_id: str, incarnation: RuntimeIncarnation, reason: str
 ) -> dict[str, Any]:
     """Relay establishment failed: the takeover does not stand.
 
@@ -230,7 +230,7 @@ def fail_acceptance(
     return result
 
 
-def record_relay_failure(db: Database, lease_id: str, incarnation: RuntimeIncarnation) -> bool:
+def record_relay_failure(db: DatabaseLike, lease_id: str, incarnation: RuntimeIncarnation) -> bool:
     """Rate-limited durable stamp that relay supervision noticed a stale relay."""
     with db.write_transaction() as conn:
         require_native(conn, incarnation)
@@ -260,7 +260,7 @@ def aborted_detail(reason: object) -> str | None:
 
 
 def abort_lease(
-    db: Database, bus: EventBus, lease_id: str, incarnation: RuntimeIncarnation, detail: str
+    db: DatabaseLike, bus: EventBus, lease_id: str, incarnation: RuntimeIncarnation, detail: str
 ) -> dict[str, Any] | None:
     # meiva:note
     # Stop a takeover after confirmed executor death, like a TTL expiry.
@@ -306,7 +306,7 @@ def abort_lease(
 
 
 def stamp_relay_failure(
-    db: Database,
+    db: DatabaseLike,
     session: dict[str, Any],
     agent_id: int,
     *,

@@ -1,7 +1,6 @@
 """Serialize queue mutation with the admitted consumer's runtime authority."""
 
-import psycopg
-
+from base.db.protocols import AsyncConnectionLike
 from base.native_process.runtime_incarnation import RuntimeIncarnation
 
 
@@ -16,7 +15,7 @@ class RuntimeOwnershipLostError(RuntimeError):
 # owned row never does: the caller must hold the row's exact generation and
 # owner. The lock serializes admission with claiming.
 async def lock_inbound_owner(
-    conn: psycopg.AsyncConnection, agent_id: int, *, incarnation: RuntimeIncarnation | None
+    conn: AsyncConnectionLike, agent_id: int, *, incarnation: RuntimeIncarnation | None
 ) -> None:
     if incarnation is not None:
         incarnation.require_agent(agent_id)

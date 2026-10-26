@@ -38,6 +38,7 @@ a yes/no install question. The two tables overlap on hidden-text patterns only.
 from __future__ import annotations
 
 import re
+import stat
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Literal
@@ -326,16 +327,22 @@ _NOTICE: tuple[Rule, ...] = (
 )
 
 
-def _iter_files(root: Path) -> list[Path]:
+def _iter_files(root: Path) -> list[tuple[Path, int]]:
     """Every file under `root` worth scanning, sorted, skipping VCS/build junk."""
-    out: list[Path] = []
+    out: list[tuple[Path, int]] = []
     for p in sorted(root.rglob("*")):
-        if not p.is_file() or p.is_symlink():
+        if p.is_symlink():
+            continue
+        try:
+            st = p.stat()
+        except OSError:
+            continue
+        if not stat.S_ISREG(st.st_mode):
             continue
         rel = p.relative_to(root)
         if any(part in _SKIP_DIRS for part in rel.parts):
             continue
-        out.append(p)
+        out.append((p, st.st_size))
     return out
 
 
@@ -525,9 +532,8 @@ def scan_package(root: Path) -> list[Finding]:
     Reads each file as UTF-8; a file that is not decodable text, or is too large
     to be instructions, yields its own notice rather than being skipped."""
     findings: list[Finding] = []
-    for p in _iter_files(root):
+    for p, size in _iter_files(root):
         rel = p.relative_to(root).as_posix()
-        size = p.stat().st_size
         if size > _MAX_SCAN_BYTES:
             findings.append(
                 Finding(

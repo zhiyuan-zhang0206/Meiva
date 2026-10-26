@@ -47,10 +47,10 @@ _CONST_NAME = re.compile(r"^_?[A-Z][A-Z0-9_]*$")
 def _parse_registered_clocks() -> frozenset[str]:
     names: set[str] = set()
     for rel in FAMILY_MODULES:
-        path = _REPO_ROOT / rel
-        if not path.is_file():
+        source = lint_common.read_utf8_text(_REPO_ROOT / rel)
+        if source is None:
             continue
-        tree = ast.parse(path.read_text(encoding="utf-8"))
+        tree = ast.parse(source)
         for node in tree.body:
             if not isinstance(node, (ast.Assign, ast.AnnAssign)):
                 continue
@@ -222,9 +222,12 @@ def scan_file(
     registered_clocks: frozenset[str] = REGISTERED_CLOCKS,
 ) -> list[str]:
     rel = _rel_path(path, _root(repo_root))
+    source = lint_common.read_utf8_text(path)
+    if source is None:
+        return []
     try:
-        tree = ast.parse(path.read_text(encoding="utf-8"))
-    except (OSError, UnicodeDecodeError, SyntaxError):
+        tree = ast.parse(source)
+    except SyntaxError:
         return []  # unreadable entry (dangling symlink / non-UTF-8), or a syntax error the compiler owns
     errors: list[str] = []
     exempt = INDEPENDENT_CLOCKS if independent is None else independent
@@ -269,18 +272,18 @@ def stale_allowlist_entries(
     exempt = INDEPENDENT_CLOCKS if independent is None else independent
     errors: list[str] = []
     for rel in family_modules:
-        if not (root / rel).is_file():
+        if lint_common.read_utf8_text(root / rel) is None:
             errors.append(f"{rel}: stale FAMILY_MODULES entry — the file no longer exists")
     for rel, name in exempt:
-        path = root / rel
-        if not path.is_file():
+        source = lint_common.read_utf8_text(root / rel)
+        if source is None:
             errors.append(
                 f"{rel}: stale INDEPENDENT_CLOCKS entry {name} — the file no longer exists"
             )
             continue
         try:
-            tree = ast.parse(path.read_text(encoding="utf-8"))
-        except (OSError, UnicodeDecodeError, SyntaxError):
+            tree = ast.parse(source)
+        except SyntaxError:
             continue  # unreadable or a syntax error the compiler owns: cannot judge
         if name.islower():
             if name not in {bound for bound, _ in literal_bindings(tree)}:
@@ -306,16 +309,14 @@ def _scan(
     root = _root(repo_root)
     errors: list[str] = []
     for path in paths:
-        if path.is_dir():
-            for p in sorted(path.rglob("*.py")):
-                rel = _rel_path(p, root)
-                if any(pat.search(rel) for pat in _TEST_PATTERNS):
-                    continue
-                if scope is not None and rel not in scope:
-                    continue
-                errors.extend(scan_file(p, repo_root=root, registered_clocks=registered_clocks))
-        elif path.suffix == ".py":
-            errors.extend(scan_file(path, repo_root=root, registered_clocks=registered_clocks))
+        candidates = sorted(path.rglob("*.py")) or ([path] if path.suffix == ".py" else [])
+        for p in candidates:
+            rel = _rel_path(p, root)
+            if any(pat.search(rel) for pat in _TEST_PATTERNS):
+                continue
+            if scope is not None and rel not in scope:
+                continue
+            errors.extend(scan_file(p, repo_root=root, registered_clocks=registered_clocks))
     return errors
 
 
@@ -343,11 +344,13 @@ def main(
     argv = list(sys.argv[1:] if argv is None else argv)
     argv, only = lint_common.split_only(argv)
     if argv:
-        missing = [arg for arg in argv if not Path(arg).exists()]
+        resolved, missing = lint_common.resolve_targets(argv, root)
         if missing:
             print(f"error: target path(s) not found: {', '.join(missing)}", file=sys.stderr)
             return 1
-    paths = [Path(a).resolve() for a in argv] if argv else lint_common.scan_roots(root, SCAN_DIRS)
+        paths = [root / entry for entry in resolved if entry.endswith(".py")]
+    else:
+        paths = lint_common.scan_roots(root, SCAN_DIRS)
     # `--only` (the commit hook) judges the changed files under the default scope; the
     # lattice's own family modules are inputs: editing one re-judges every file.
     scope = lint_common.changed_scope(only, root, inputs=family_modules)

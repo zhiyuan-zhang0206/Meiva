@@ -436,14 +436,17 @@ def test_down_file_is_rejected(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) 
 
 
 def _merged_repo(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    *,
+    stem: str = f"{_TS}_add-foo",
 ) -> tuple[_BoundMigrationsLint, Path]:
     """A real git repo whose HEAD commit stands for main; the lint compares the
     working tree against it. Returns (lint_module, migrations_dir)."""
     import subprocess
 
     lint, d = _lint(monkeypatch, tmp_path, stub_base=False)
-    (d / f"{_TS}_add-foo.sql").write_text("SELECT 1;")
+    (d / f"{stem}.sql").write_text("SELECT 1;")
     for args in (
         ["init", "--initial-branch=main"],
         ["add", "-A"],
@@ -465,6 +468,20 @@ def test_merged_migration_delete_fails(monkeypatch: pytest.MonkeyPatch, tmp_path
     lint, d = _merged_repo(monkeypatch, tmp_path)
     (d / f"{_TS}_add-foo.sql").unlink()
     assert lint.main("HEAD") == 1
+
+
+def test_folded_reset_migration_delete_passes_only_with_reset_anchor(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    from base.deploy.schema.migration_history import PRE_RESET_SET, RESET_ANCHOR
+
+    folded_stem = sorted(PRE_RESET_SET)[0]
+    lint, d = _merged_repo(monkeypatch, tmp_path, stem=folded_stem)
+    (d / f"{folded_stem}.sql").unlink()
+    assert lint.main("HEAD") == 1
+
+    (d / f"{RESET_ANCHOR}.sql").write_text("-- reset anchor\n")
+    assert lint.main("HEAD") == 0
 
 
 def test_merged_migration_rename_fails(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:

@@ -10,7 +10,7 @@ from typing import Any
 
 from base.agents.impersonation import host_transport
 from base.agents.impersonation.host_transport import AntigravityServer
-from base.db import Database
+from base.db.protocols import DatabaseLike
 
 # meiva:note
 # The failure reason names the record path it looked for, so the event field must
@@ -41,7 +41,7 @@ def notice_text(snapshot: dict[str, Any]) -> str:
 # comes from the record its request wrote on this host, never from a process scan.
 # meiva:link docs/conventions/agents/agent-impersonation-hosts.md
 def send_ended_notice(
-    db: Database,
+    db: DatabaseLike,
     lease_id: str,
     *,
     resolve_antigravity: Callable[..., AntigravityServer] = (
@@ -91,7 +91,7 @@ def send_ended_notice(
 # ended here or not at all. A failure is an event rather than a return value
 # because every caller is a host loop with no one to return to.
 # meiva:link docs/conventions/agents/agent-impersonation-hosts.md
-def deliver_ended_notice(db: Database, agent_id: int, lease_id: str) -> None:
+def deliver_ended_notice(db: DatabaseLike, agent_id: int, lease_id: str) -> None:
     from base.log import logger
 
     error = send_ended_notice(db, lease_id)

@@ -82,6 +82,7 @@ from base.agents.observation.relay_supervision import heartbeat_fresh as _heartb
 from base.agents.observation.relay_supervision import terminate_relay as terminate_relay
 from base.clock import SYSTEM_TIMERS, Clock, ClockConfig
 from base.db import Database
+from base.db.protocols import DatabaseLike
 from base.db.transaction import async_write_transaction
 from base.events.live.bus import EventBus
 from base.log import logger
@@ -128,7 +129,7 @@ def lease_phase(session: dict[str, Any] | None) -> LeasePhase | None:
 
 
 async def native_status(
-    db: Database, bus: EventBus, agent_id: int, *, incarnation: RuntimeIncarnation | None
+    db: DatabaseLike, bus: EventBus, agent_id: int, *, incarnation: RuntimeIncarnation | None
 ) -> dict[str, Any] | None:
     """Read authoritative lease state only for an admitted native runtime."""
     if incarnation is None:
@@ -226,7 +227,7 @@ def protect_native_hooks(
 
 async def _activate_accepted(
     graph: _handoff.AgentGraph,
-    db: Database,
+    db: DatabaseLike,
     bus: EventBus,
     session: dict[str, Any],
     incarnation: RuntimeIncarnation,
@@ -251,7 +252,7 @@ async def _activate_accepted(
 # Apply each unapplied plugin delta exactly once, recording its receipt.
 async def apply_plugin_deltas(
     graph: _handoff.AgentGraph,
-    db: Database,
+    db: DatabaseLike,
     session: dict[str, Any],
     agent_id: int,
     incarnation: RuntimeIncarnation,
@@ -364,7 +365,7 @@ def handoff_owed(session: dict[str, Any] | None) -> bool:
 
 async def settle_checkpoint(
     graph: _handoff.AgentGraph,
-    db: Database,
+    db: DatabaseLike,
     bus: EventBus,
     agent_id: int,
     relays: RelaySupervision,
@@ -420,7 +421,7 @@ def _fresh(heartbeat: datetime | None) -> bool:
 
 
 def establish_relay(
-    db: Database,
+    db: DatabaseLike,
     bus: EventBus,
     session: dict[str, Any],
     incarnation: RuntimeIncarnation,
@@ -446,7 +447,7 @@ def establish_relay(
 
 
 def _await_session_relay(
-    db: Database,
+    db: DatabaseLike,
     bus: EventBus,
     session: dict[str, Any],
     incarnation: RuntimeIncarnation,
@@ -479,7 +480,7 @@ def _await_session_relay(
 
 
 def _establish_spawned_relay(
-    db: Database,
+    db: DatabaseLike,
     bus: EventBus,
     session: dict[str, Any],
     incarnation: RuntimeIncarnation,
@@ -537,7 +538,7 @@ def _establish_spawned_relay(
 
 
 def _await_spawned_relay(
-    db: Database,
+    db: DatabaseLike,
     bus: EventBus,
     session: dict[str, Any],
     incarnation: RuntimeIncarnation,
@@ -577,7 +578,7 @@ def _await_spawned_relay(
 
 
 def _roll_back_relay_failure(
-    db: Database,
+    db: DatabaseLike,
     bus: EventBus,
     session: dict[str, Any],
     incarnation: RuntimeIncarnation,

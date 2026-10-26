@@ -1,12 +1,11 @@
 from __future__ import annotations
 
 from concurrent.futures import ThreadPoolExecutor
-from typing import Any
 
 import pytest
 from fastapi import HTTPException
-from psycopg import Connection
 
+from base.db.protocols import SyncConnection
 from services.derived.insights.run_timeline.projection.reader import TimelineReader
 from services.derived.insights.run_timeline.projection.source import Source, capture_source
 from services.derived.insights.run_timeline.tests.test_projection import AGENT, World, messages
@@ -80,7 +79,7 @@ def test_recent_head_check_cannot_revive_an_absolutely_expired_snapshot(world: W
 def test_head_check_cannot_restore_bookkeeping_for_an_evicted_snapshot(
     world: World,
 ) -> None:
-    def evict_during_capture(conn: Connection[Any], agent_id: int) -> Source:
+    def evict_during_capture(conn: SyncConnection, agent_id: int) -> Source:
         source = capture_source(conn, agent_id)
         if agent_id == 1 and world.clock > 0:
             for other_agent in [*range(2, 17), 18]:

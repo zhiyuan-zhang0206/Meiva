@@ -2520,30 +2520,10 @@ CREATE TABLE schema_migrations (
 -- Seed: stamp the squashed baseline (this file IS the baseline). A fresh DB is
 -- "already at the baseline"; `apply_pending_migrations` then applies only the
 -- post-baseline files in migrations/ that are not folded below.
-INSERT INTO schema_migrations (name) VALUES ('20261014T023838_notice-questions') ON CONFLICT DO NOTHING;
 INSERT INTO schema_migrations (name) VALUES ('00000000T000000_baseline');
 
--- Strict post-baseline deltas retained from concurrent upstream work.
-INSERT INTO schema_migrations (name) VALUES ('20260922T053200_impersonation-delivery-budget');
-INSERT INTO schema_migrations (name) VALUES ('20260922T075826_impersonation-delivery-config');
-
--- Current reset anchor: the previous 101 migration names are folded above.
-INSERT INTO schema_migrations (name) VALUES ('20260923T031516_schema-baseline');
-INSERT INTO schema_migrations (name) VALUES ('20260923T175411_agent-creation-availability');
-INSERT INTO schema_migrations (name) VALUES ('20260923T195300_agent-launch-failure');
-INSERT INTO schema_migrations (name) VALUES ('20260923T205208_impersonation-event-manifest');
-INSERT INTO schema_migrations (name) VALUES ('20260924T070003_hierarchy-worker-breaker');
-INSERT INTO schema_migrations (name) VALUES ('20260924T071500_hierarchy-jobs-runner-grant');
-INSERT INTO schema_migrations (name) VALUES ('20260924T150840_impersonation-receipt-lock-door');
-INSERT INTO schema_migrations (name) VALUES ('20260924T193804_task-escalation-marker');
-INSERT INTO schema_migrations (name) VALUES ('20260926T135638_impersonation-dsh-relay');
-INSERT INTO schema_migrations (name) VALUES ('20261002T044224_audit-events');
-INSERT INTO schema_migrations (name) VALUES ('20261002T153217_telemetry-events');
--- Rewrites last_admission_outcome, which this baseline no longer has; the baseline already holds its result.
-INSERT INTO schema_migrations (name) VALUES ('20261001T055130_retire-restarting-and-publication-deferred');
--- Alter and comment the per-host posture table, which this baseline no longer has; the baseline already holds the rest of their result.
-INSERT INTO schema_migrations (name) VALUES ('20261001T055030_drop-retired-deploy-and-watcher-storage');
-INSERT INTO schema_migrations (name) VALUES ('20261017T120000_meiva-rename');
+-- Current reset anchor: the previous 93 migration names are folded into this schema.
+INSERT INTO schema_migrations (name) VALUES ('20261026T091500_schema-baseline');
 
 CREATE OR REPLACE FUNCTION mark_impersonation_terminal_notice() RETURNS trigger AS $$
 BEGIN
@@ -2573,11 +2553,6 @@ BEGIN
     END IF;
 END $$;
 
-INSERT INTO schema_migrations (name) VALUES ('20261005T095252_separate-impersonation-transport-lifecycle');
-INSERT INTO schema_migrations (name) VALUES ('20261006T181011_completion-notice-events-stop-outcome');
-INSERT INTO schema_migrations (name) VALUES ('20261007T113552_completion-notice-events-drop-outcome');
-
-INSERT INTO schema_migrations (name) VALUES ('20261007T103034_agent-creation-identity');
 -- Domain receipts never expire into fresh notice effects.
 CREATE TABLE notice_operation_receipts (
     path TEXT NOT NULL,
@@ -2587,8 +2562,6 @@ CREATE TABLE notice_operation_receipts (
     created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
     PRIMARY KEY (path, operation_key)
 );
-
-INSERT INTO schema_migrations (name) VALUES ('20261007T103457_notice-operation-receipts');
 
 -- Acceptance snapshots survive queue retention without pinning its rows.
 CREATE TABLE agent_control_receipts (
@@ -2608,8 +2581,6 @@ CREATE TABLE agent_control_receipts (
 COMMENT ON TABLE agent_control_receipts IS
     'Immutable cancel/compact acceptance snapshots, not execution receipts or a queue; no expiry or foreign key may turn a retained retry into fresh work or pin queue retention.';
 
-INSERT INTO schema_migrations (name) VALUES ('20261007T172200_agent-control-acceptance');
-
 CREATE TABLE agent_upload_batches (
     operation_key text PRIMARY KEY,
     agent_id bigint NOT NULL,
@@ -2625,8 +2596,6 @@ CREATE INDEX agent_upload_batches_receiving_agent_idx
 COMMENT ON TABLE agent_upload_batches IS
     'Silent upload identities; receiving manifests reserve quota without expiry, ready receipts replay acceptance.';
 
-INSERT INTO schema_migrations (name) VALUES ('20261007T181501_silent-upload-batches');
-
 CREATE TABLE task_patch_receipts (
     path TEXT NOT NULL,
     operation_key TEXT NOT NULL CHECK (length(operation_key) BETWEEN 1 AND 128),
@@ -2639,7 +2608,6 @@ CREATE TABLE task_patch_receipts (
 COMMENT ON TABLE task_patch_receipts IS
     'Immutable task PATCH acceptance snapshots; retained independently of tasks and notifications.';
 
-INSERT INTO schema_migrations (name) VALUES ('20261007T181608_task-patch-receipts');
 CREATE TABLE task_update_receipts (
     actor_agent_id BIGINT NOT NULL CHECK (actor_agent_id > 0),
     task_id BIGINT NOT NULL CHECK (task_id > 0),
@@ -2652,8 +2620,6 @@ CREATE TABLE task_update_receipts (
 COMMENT ON TABLE task_update_receipts IS
     'Immutable SDK task update/log commit tombstones; agent provenance scope, not authentication or notification execution receipts.';
 
-INSERT INTO schema_migrations (name) VALUES ('20261007T183849_task-update-receipts');
-
 CREATE TABLE task_creation_receipts (
     actor_agent_id BIGINT NOT NULL CHECK (actor_agent_id > 0),
     operation_key TEXT NOT NULL CHECK (length(operation_key) BETWEEN 1 AND 128),
@@ -2662,10 +2628,6 @@ CREATE TABLE task_creation_receipts (
     accepted_at TIMESTAMPTZ NOT NULL DEFAULT now(),
     PRIMARY KEY (actor_agent_id, operation_key)
 );
-
-INSERT INTO schema_migrations (name) VALUES ('20261007T190652_task-creation-receipts');
-INSERT INTO schema_migrations (name) VALUES ('20261007T181301_im-timeline-outbox');
-INSERT INTO schema_migrations (name) VALUES ('20261007T202446_alert-notification-shadow-facts');
 
 CREATE TABLE task_assignment_receipts (
     operation_key TEXT PRIMARY KEY CHECK (char_length(operation_key) BETWEEN 1 AND 128),
@@ -2687,8 +2649,6 @@ CREATE TABLE task_assignment_receipts (
 );
 COMMENT ON TABLE task_assignment_receipts IS
     'Immutable principal-scoped compound acceptance tombstones; no FK or automatic expiry.';
-
-INSERT INTO schema_migrations (name) VALUES ('20261007T201556_task-assignment-receipts');
 
 CREATE TABLE im_bridge_notice_poll_state (
     singleton BOOLEAN PRIMARY KEY DEFAULT TRUE CHECK (singleton),
@@ -2712,7 +2672,6 @@ CREATE TABLE im_bridge_notice_acceptances (
 COMMENT ON TABLE im_bridge_notice_acceptances IS
     'Normal-poll notice source receipts with immutable destination/rendering or deliberate filter decision. No foreign-key pin or expiry; explicit listing is a separate producer.';
 
-INSERT INTO schema_migrations (name) VALUES ('20261007T194939_im-notice-poll-acceptance');
 CREATE TABLE agent_launch_retry_receipts (
     operation_key text PRIMARY KEY,
     agent_id bigint NOT NULL,
@@ -2726,8 +2685,6 @@ CREATE TABLE agent_launch_retry_receipts (
 COMMENT ON TABLE agent_launch_retry_receipts IS
 'Immutable guarded retry-launch intents; retain after target deletion, no TTL.';
 
-INSERT INTO schema_migrations (name) VALUES ('20261008T021500_agent-launch-retry-receipts');
-
 -- Historical page acceptance survives registry/agent cleanup.
 CREATE TABLE page_operation_receipts (
     operation_key text PRIMARY KEY,
@@ -2735,7 +2692,6 @@ CREATE TABLE page_operation_receipts (
     acceptance jsonb NOT NULL,
     accepted_at timestamptz NOT NULL DEFAULT now()
 );
-INSERT INTO schema_migrations (name) VALUES ('20261007T205013_page-operation-receipts');
 
 CREATE TABLE im_bridge_alert_acceptances (
     group_id BIGINT PRIMARY KEY CHECK (group_id > 0),
@@ -2749,8 +2705,6 @@ COMMENT ON TABLE im_bridge_alert_acceptances IS
 
 COMMENT ON COLUMN alerts.notified_revision IS
     'Native revision completed by at least one real SENT channel; legacy notified_at never populates this fact.';
-INSERT INTO schema_migrations (name) VALUES ('20261007T211550_native-alert-outbound');
-INSERT INTO schema_migrations (name) VALUES ('20261007T221349_mcp-credential-creation-receipts');
 CREATE TABLE weixin_ingress_bindings (
     id integer PRIMARY KEY CHECK (id = 1),
     namespace text NOT NULL CHECK (length(namespace) > 0),
@@ -2796,9 +2750,6 @@ CREATE TABLE weixin_ingress_receipts (
 CREATE INDEX weixin_ingress_pending ON weixin_ingress_receipts(namespace,account_id,id)
     WHERE status IN ('retained','claimed');
 
-INSERT INTO schema_migrations (name) VALUES ('20261007T213541_weixin-durable-ingress');
-
-INSERT INTO schema_migrations (name) VALUES ('20261007T221732_native-work-cancel');
 CREATE TABLE upload_delivery_batches (
     batch_id text PRIMARY KEY CHECK (batch_id ~ '^[0-9a-f]{32}$'),
     operation_key text NOT NULL UNIQUE,
@@ -2837,7 +2788,6 @@ CREATE TABLE upload_delivery_copies (
 COMMENT ON TABLE upload_delivery_batches IS 'Retained source acceptance, physical receiving quota and original inbound outcome; no TTL or mutable target FK.';
 COMMENT ON TABLE upload_delivery_copies IS 'Retained immutable copy intent and physical-root reservation; MEIVA_HOME is target identity, not quota partition.';
 
-INSERT INTO schema_migrations (name) VALUES ('20261007T225057_upload-delivery-recovery');
 -- Only new guarded drafts opt in; no guessed backfill of mutable birth history.
 CREATE TABLE agent_creation_snapshots (
     creation_key TEXT PRIMARY KEY,
@@ -2852,10 +2802,6 @@ CREATE TABLE agent_creation_snapshots (
     prompt_source TEXT,
     accepted_at TIMESTAMPTZ NOT NULL DEFAULT clock_timestamp()
 );
-INSERT INTO schema_migrations (name) VALUES ('20261008T000137_guarded-draft-birth-snapshots');
-INSERT INTO schema_migrations (name) VALUES ('20261008T003901_native-active-restart');
-
-INSERT INTO schema_migrations (name) VALUES ('20261008T060000_guarded-manual-compact');
 
 -- Reproducible read models; source checkpoint rows and blobs stay untouched.
 CREATE TABLE IF NOT EXISTS run_timeline_segments (
@@ -2978,5 +2924,3 @@ BEGIN
         GRANT USAGE, SELECT ON SEQUENCE notification_events_id_seq TO meiva_runner;
     END IF;
 END $$;
-
-INSERT INTO schema_migrations (name) VALUES ('20261018T142500_telemetry-owner-inference');

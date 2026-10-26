@@ -4,11 +4,11 @@ from __future__ import annotations
 
 from typing import NamedTuple
 
-from psycopg_pool import AsyncConnectionPool
+from loguru import logger
 
+from base.db.protocols import AsyncPool
 from base.db.transaction import async_write_transaction
 from base.deploy.progress_timeout import CORPSE_REAP_GRACE_S
-from base.log import logger
 from base.telemetry import Event, emit_prepared
 from base.telemetry.audit_events import prepare_event_log, record_audit_async
 
@@ -37,7 +37,7 @@ class ReapedCorpse(NamedTuple):
 # a corpse marked under a predecessor boot is reaped like any other, and
 # there is one host per machine.
 async def reap_crash_corpses(
-    pool: AsyncConnectionPool,
+    pool: AsyncPool,
     machine: str,
 ) -> list[ReapedCorpse]:
     async with async_write_transaction(pool) as conn:

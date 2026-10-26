@@ -10,14 +10,10 @@ exports = ["tests", "transport.py"]
 "__init__.py" = "strict"
 
 [debt.impure-call]
-"transport.py#async def _answer_error" = 1
-"transport.py#async def _answer_permission" = 1
 "transport.py#async def _answer_server_request" = 1
-"transport.py#async def _close_tasks" = 1
 "transport.py#async def _dispatch" = 1
 "transport.py#async def _read_loop" = 1
 "transport.py#async def _read_stderr" = 1
-"transport.py#async def _terminate" = 1
 "transport.py#async def _write" = 1
 "transport.py#async def close" = 1
 "transport.py#async def notifications" = 1

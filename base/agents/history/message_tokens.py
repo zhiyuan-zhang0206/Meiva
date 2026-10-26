@@ -46,10 +46,10 @@ from typing import Literal
 
 from langchain_core.messages import AIMessage, BaseMessage, SystemMessage
 
-from base.agents.history.checkpoint import FullHistory
-from base.agents.history.closing_request import ClosingRequest
+from base.agents.history.closing_request import ClosingRequest, FullHistory
 from base.agents.messages.token_estimate import (
     ai_message_texts,
+    apportion,
     estimate_message_tokens,
     estimate_text_tokens,
 )
@@ -94,6 +94,23 @@ class SegmentTokens:
     last_input_tokens: int | None
     switches: tuple[ModelSwitch, ...] = ()
 
+    # meiva:note
+    # Re-splits prefix tokens before the latest model switch up to body index upto so the request context sums to the new model's input.
+    def context_through(
+        self, head: SystemMessage | None, body: Sequence[BaseMessage], upto: int
+    ) -> tuple[MessageTokens | None, list[MessageTokens]]:
+        records = list(self.messages[:upto])
+        head_rec = self.head
+        switch = next((sw for sw in reversed(self.switches) if sw.idx <= upto), None)
+        if switch is None:
+            return head_rec, records
+        shares = _prefix_shares(head, body, switch.idx, switch.input_tokens)
+        if head is not None:
+            head_rec = MessageTokens(shares.pop(0), None, "estimated")
+        for i, share in enumerate(shares):
+            records[i] = MessageTokens(share, records[i].generation_tokens, "estimated")
+        return head_rec, records
+
 
 @dataclass(frozen=True)
 class TokenTotal:
@@ -130,6 +147,20 @@ class PartTokens:
     tokens: int
     source: TokenSource
 
+    # meiva:note
+    # Divides total tokens among named text parts proportionally to estimated text weight while conserving total.
+    @classmethod
+    def split(
+        cls, texts: Mapping[str, str], total: int, total_source: TokenSource
+    ) -> dict[str, PartTokens]:
+        if len(texts) == 1:
+            return {name: cls(total, total_source) for name in texts}
+        weights = [round(estimate_text_tokens(t) * _WEIGHT_SCALE) for t in texts.values()]
+        return {
+            name: cls(share, "estimated")
+            for name, share in zip(texts, apportion(weights, total), strict=True)
+        }
+
 
 @dataclass(frozen=True)
 class SegmentSummary:
@@ -149,35 +180,6 @@ class SegmentSummary:
     exact_fraction: float
 
 
-def apportion(weights: Sequence[int], total: int) -> list[int]:
-    """Split `total` across `weights` proportionally, summing exactly (largest
-    remainder); all-zero weights split evenly."""
-    if not weights:
-        return []
-    basis = list(weights) if sum(weights) > 0 else [1] * len(weights)
-    denom = sum(basis)
-    shares = [total * w // denom for w in basis]
-    by_remainder = sorted(range(len(basis)), key=lambda i: -(total * basis[i] % denom))
-    for i in by_remainder[: total - sum(shares)]:
-        shares[i] += 1
-    return shares
-
-
-def split_parts(
-    texts: Mapping[str, str], total: int, total_source: TokenSource
-) -> dict[str, PartTokens]:
-    """Divide `total` tokens among named text parts by the fitted estimate,
-    summing exactly. Parts of one message are never measured individually, so
-    each is `estimated`; a lone part keeps `total_source`."""
-    if len(texts) == 1:
-        return {name: PartTokens(total, total_source) for name in texts}
-    weights = [round(estimate_text_tokens(t) * _WEIGHT_SCALE) for t in texts.values()]
-    return {
-        name: PartTokens(share, "estimated")
-        for name, share in zip(texts, apportion(weights, total), strict=True)
-    }
-
-
 def ai_message_parts(msg: AIMessage, record: MessageTokens) -> dict[str, PartTokens]:
     """An AIMessage's reasoning / output / tool_call split of its `record` (which must be in
     context). Only non-empty parts share the tokens; an empty part is 0, and a message with a
@@ -189,7 +191,7 @@ def ai_message_parts(msg: AIMessage, record: MessageTokens) -> dict[str, PartTok
     present = {kind: text for kind, text in texts.items() if text}
     if not present:
         present = {"output": ""}
-    shared = split_parts(present, record.context_tokens, record.source)
+    shared = PartTokens.split(present, record.context_tokens, record.source)
     return {kind: shared.get(kind, PartTokens(0, record.source)) for kind in texts}
 
 
@@ -365,28 +367,6 @@ def segment_tokens(
     return SegmentTokens(head_rec, tuple(out), last_input, switches)
 
 
-def context_through(
-    head: SystemMessage | None, body: Sequence[BaseMessage], segment: SegmentTokens, upto: int
-) -> tuple[MessageTokens | None, list[MessageTokens]]:
-    """The head and body[:upto] as the context of the request at body index `upto`.
-
-    Values are the ones each message was read with, except that a model switch inside the
-    span re-splits everything before the last switch by the estimator against that request's
-    whole-context input (the new tokenizer's total), marked estimated; messages from the
-    switch on keep their own values, so the context still sums to the request's input."""
-    records = list(segment.messages[:upto])
-    head_rec = segment.head
-    switch = next((sw for sw in reversed(segment.switches) if sw.idx <= upto), None)
-    if switch is None:
-        return head_rec, records
-    shares = _prefix_shares(head, body, switch.idx, switch.input_tokens)
-    if head is not None:
-        head_rec = MessageTokens(shares.pop(0), None, "estimated")
-    for i, share in enumerate(shares):
-        records[i] = MessageTokens(share, records[i].generation_tokens, "estimated")
-    return head_rec, records
-
-
 def history_segment_tokens(history: FullHistory) -> tuple[SegmentTokens, ...]:
     """`segment_tokens` for every segment of a stitched history, in order; a sealed segment's
     closing request (`history.segment_closings`) anchors its tail."""
@@ -419,8 +399,9 @@ def history_message_tokens(
     return [head] * lead + [m for seg in computed for m in seg.messages]
 
 
-def summarize_segment(segment: SegmentTokens) -> SegmentSummary:
-    """Totals of one segment for list / gauge views."""
+# meiva:note
+# Totals of one segment for list / gauge views.
+def _summarize_segment(segment: SegmentTokens) -> SegmentSummary:
     records = ([segment.head] if segment.head is not None else []) + list(segment.messages)
     tokens: dict[TokenSource, int] = dict.fromkeys(_SOURCES, 0)
     counts: dict[TokenSource, int] = dict.fromkeys(_SOURCES, 0)
@@ -448,4 +429,4 @@ def summarize_segment(segment: SegmentTokens) -> SegmentSummary:
 
 def summarize_segments(history: FullHistory) -> tuple[SegmentSummary, ...]:
     """Per-segment totals of a stitched history."""
-    return tuple(summarize_segment(s) for s in history_segment_tokens(history))
+    return tuple(_summarize_segment(s) for s in history_segment_tokens(history))

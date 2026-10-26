@@ -12,7 +12,8 @@ from __future__ import annotations
 import os
 import sys
 import time
-from collections.abc import Callable, Mapping, MutableMapping
+from collections.abc import Callable, Generator, Mapping, MutableMapping
+from contextlib import AbstractContextManager, contextmanager
 from pathlib import Path
 from threading import RLock, get_ident
 from typing import Any, Protocol
@@ -526,6 +527,20 @@ class ConfigBoot:
         else:
             _plant_placeholders(target_env)
 
+    # meiva:note
+    # Hold the upgrade lock with this thread marked as the in-flight builder.
+    @contextmanager
+    def in_flight_build(self) -> Generator[None]:
+        with self._lock:
+            self.prepare()
+            self.upgrading = True
+            self.upgrading_thread = get_ident()
+            try:
+                yield
+            finally:
+                self.upgrading = False
+                self.upgrading_thread = None
+
     def upgrade(self, reason: str) -> EagerSettings:
         """Build this owner's eager chain once.
 
@@ -538,10 +553,7 @@ class ConfigBoot:
         with self._lock:
             if self.mode == _FULL:
                 return self.settings
-            self.prepare()
-            self.upgrading = True
-            self.upgrading_thread = get_ident()
-            try:
+            with self.in_flight_build():
                 from base.config._full import build
 
                 env_boot = self.env_boot
@@ -558,9 +570,6 @@ class ConfigBoot:
                 for name, value in tuple(self.pending.items()):
                     setattr(getattr(self.settings, FIELD_DOMAINS[name]), name, value)
                 self.pending.clear()
-            finally:
-                self.upgrading = False
-                self.upgrading_thread = None
         _log_upgrade(reason)
         return self.settings
 
@@ -761,3 +770,9 @@ def refresh_data_plane_settings() -> None:
 
 def set_wait_timeout(seconds: float) -> None:
     _state.wait_timeout_seconds = seconds
+
+
+# meiva:note
+# Enter the legacy owner's in-flight build window on the current thread.
+def in_flight_build() -> AbstractContextManager[None]:
+    return _state.in_flight_build()

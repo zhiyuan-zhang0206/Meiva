@@ -95,6 +95,16 @@ def _type_checking_ids(tree: ast.Module) -> set[int]:
     return ids
 
 
+# meiva:note
+# Whether a sibling module exists as a `.py` file or package `__init__.py` in `d`.
+def _sibling_kind(d: Path, first: str, *, dotted: bool) -> str | None:
+    if lint_common.read_utf8_text(d / f"{first}.py") is not None:
+        return None if dotted else "file"
+    if lint_common.read_utf8_text(d / first / "__init__.py") is not None:
+        return "pkg"
+    return None
+
+
 def _sibling_targets(stmt: ast.Import | ast.ImportFrom, d: Path) -> list[tuple[str, str]]:
     """Same-dir modules the statement could resolve to: (first_component, kind).
 
@@ -102,21 +112,16 @@ def _sibling_targets(stmt: ast.Import | ast.ImportFrom, d: Path) -> list[tuple[s
     excluded — a file cannot be a package, so the import resolves elsewhere.
     """
     out: list[tuple[str, str]] = []
-    if isinstance(stmt, ast.Import):
-        for name in stmt.names:
-            first = name.name.split(".")[0]
-            if (d / f"{first}.py").is_file():
-                if "." not in name.name:  # bare `import sibling` binds the sibling file
-                    out.append((first, "file"))
-            elif (d / first / "__init__.py").is_file():
-                out.append((first, "pkg"))
-    elif stmt.module is not None:
-        first = stmt.module.split(".")[0]
-        if (d / f"{first}.py").is_file():
-            if "." not in stmt.module:  # `from sibling import X`
-                out.append((first, "file"))
-        elif (d / first / "__init__.py").is_file():
-            out.append((first, "pkg"))
+    names = (
+        [alias.name for alias in stmt.names]
+        if isinstance(stmt, ast.Import)
+        else ([stmt.module] if stmt.module is not None else [])
+    )
+    for module_name in names:
+        first = module_name.split(".")[0]
+        kind = _sibling_kind(d, first, dotted="." in module_name)
+        if kind is not None:
+            out.append((first, kind))
     return out
 
 
@@ -139,10 +144,12 @@ def _nested_blocks(stmt: ast.stmt) -> list[list[ast.stmt]] | None:
 def scan_file(path: Path, *, root: Path | None = None) -> list[str]:
     """Return one error string per unguarded sibling import in a script-mode file."""
     repo_root = _REPO_ROOT if root is None else root
+    src = lint_common.read_utf8_text(path)
+    if src is None:
+        return []
     try:
-        src = path.read_text(encoding="utf-8", errors="replace")
         tree = ast.parse(src)
-    except (OSError, SyntaxError):
+    except SyntaxError:
         return []
     if not _is_script_mode(tree, src):
         return []
@@ -214,41 +221,47 @@ def _excluded(parts: tuple[str, ...]) -> bool:
     return any(part in _EXCLUDED_DIRS for part in parts)
 
 
-def _iter_py_files(roots: list[Path]) -> list[Path]:
-    files: list[Path] = []
-    for root in roots:
-        if root.is_file() and root.suffix == ".py":
-            files.append(root)
-        elif root.is_dir():
-            files.extend(p for p in root.rglob("*.py") if not _excluded(p.relative_to(root).parts))
-    return files
-
-
+# meiva:note
+# Every `.py` under the targets, or just the changed files a full walk would reach.
+# The walk skips vendored/generated directories; the changed-files path applies the same
+# rule without walking them.
 def _files_to_scan(
-    targets: list[Path], scope: frozenset[str] | None, *, root: Path = _REPO_ROOT
+    resolved: list[str],
+    targets: list[Path],
+    scope: frozenset[str] | None,
+    *,
+    root: Path = _REPO_ROOT,
 ) -> list[Path]:
-    """Every `.py` under the targets, or just the changed files a full walk would reach.
-
-    The walk skips vendored/generated directories; the changed-files path applies the same
-    rule without walking them.
-    """
+    if targets:
+        return [
+            path
+            for entry in resolved
+            if entry.endswith(".py")
+            and (path := root / entry)
+            and not any(
+                _excluded(path.relative_to(t).parts) for t in targets if path.is_relative_to(t)
+            )
+        ]
     if scope is None:
-        return _iter_py_files(targets)
+        return [p for p in root.rglob("*.py") if not _excluded(p.relative_to(root).parts)]
     return [root / rel for rel in scope if rel.endswith(".py") and not _excluded(Path(rel).parts)]
 
 
 def main(argv: list[str] | None = None, *, repo_root: Path = _REPO_ROOT) -> int:
     argv = argv if argv is not None else sys.argv[1:]
     argv, only = lint_common.split_only(argv)
+    resolved: list[str] = []
     if argv:
-        missing = [arg for arg in argv if not Path(arg).exists()]
+        resolved, missing = lint_common.resolve_targets(argv, repo_root)
         if missing:
             print(f"error: target path(s) not found: {', '.join(missing)}", file=sys.stderr)
             return 1
-    targets = [Path(a).resolve() for a in argv] if argv else [repo_root]
+    targets = [Path(a).resolve() for a in argv]
     total = 0
     for path in sorted(
-        _files_to_scan(targets, lint_common.changed_scope(only, repo_root), root=repo_root)
+        _files_to_scan(
+            resolved, targets, lint_common.changed_scope(only, repo_root), root=repo_root
+        )
     ):
         rel = (
             path.relative_to(repo_root).as_posix()

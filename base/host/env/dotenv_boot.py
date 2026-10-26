@@ -45,6 +45,7 @@ from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 from dotenv import dotenv_values
 from dotenv.variables import parse_variables
 
+from base.host.env.boot_policy import PLACEHOLDER_DB_URL
 from base.host.env.bootstrap import (
     LAUNCHER_PROFILE_ENV_KEY,
     EnvBootResult,
@@ -68,13 +69,6 @@ __all__ = [
     "skip_config_fetch",
     "watcher_runner_env",
 ]
-
-# Planted as MEIVA_DB_URL when a boot has no cluster connection facts (the lite
-# boot's placeholders, `base/config/_lite.py`). A syntactically valid URL that
-# can never reach a real database (port 1 on loopback), so a stray connection
-# fails loudly instead of silently hitting a database a host `.env` points at.
-# base/db.connect() detects it and raises an actionable error.
-PLACEHOLDER_DB_URL = "postgresql://no-cluster@127.0.0.1:1/run-meiva-start-first"
 
 # See `_is_launcher_runner_projection`.
 _RUNNER_LOGIN = re.compile(r"meiva_runner|meiva_g(?:0|[1-9][0-9]*)_runner")

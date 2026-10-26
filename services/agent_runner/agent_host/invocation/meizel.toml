@@ -8,7 +8,6 @@ exports = ["checkpoints.py", "driver.py"]
 "__init__.py#async def finish_completed_invocation" = 1
 "__init__.py#async def finish_pending_failure" = 1
 "__init__.py#async def settle_handoff_before_invocation" = 1
-"__init__.py#import psycopg_pool" = 1
 "driver.py#async def drive_context" = 1
 
 [debt.impure-edge]
@@ -19,7 +18,6 @@ exports = ["checkpoints.py", "driver.py"]
 "__init__.py#agent/turn/trace_checkpoint.py" = 1
 "__init__.py#base/agents/context/__init__.py" = 1
 "__init__.py#base/agents/observation/relay_supervision.py" = 1
-"__init__.py#base/db/__init__.py" = 1
 "__init__.py#base/events/live/bus.py" = 1
 "__init__.py#services/agent_runner/agent_host/db_recovery.py" = 1
 "__init__.py#services/agent_runner/agent_host/lifecycle/shells.py" = 1

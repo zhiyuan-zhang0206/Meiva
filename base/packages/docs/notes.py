@@ -17,7 +17,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, TypeGuard
 
-from base.log import logger
+from loguru import logger
+
 from base.packages.docs.frontmatter import parse_frontmatter_typed
 
 _MD_LINK_RE = re.compile(r"\[([^\]]+)\]\(([^)]+)\)")

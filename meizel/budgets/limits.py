@@ -2,10 +2,11 @@
 
 from __future__ import annotations
 
-import subprocess
 from pathlib import Path
 
 from meizel.budgets import directory_budget
+from meizel.graph.universe import GitRepo
+from meizel.lint_common import read_utf8_text
 
 __all__ = ["DIRECTORY_CEILING", "HARD_CEILING", "budget_files", "check"]
 
@@ -31,25 +32,26 @@ def budget_files(
     files: set[Path] = set()
     visited: set[Path] = set()
 
-    def visit(directory: Path) -> None:
-        if directory in visited:
+    def visit(candidate: Path) -> None:
+        if candidate in visited:
             return
-        visited.add(directory)
-        for entry in directory_budget.entries(directory):
-            if entry.is_dir():
-                visit(entry)
-            elif entry.is_file() and entry.suffix == ".py":
-                files.add(entry)
+        visited.add(candidate)
+        try:
+            children = directory_budget.entries(candidate)
+        except NotADirectoryError:
+            if candidate.suffix == ".py":
+                files.add(candidate)
+            return
+        except OSError:
+            return
+        for entry in children:
+            visit(entry)
 
     for target in targets:
         for scope in (repo_root / name for name in structure_dirs):
             selected = directory_budget.selected_under(target, scope, repo_root)
-            if selected is None:
-                continue
-            if selected.is_dir():
+            if selected is not None:
                 visit(selected)
-            elif selected.is_file() and selected.suffix == ".py":
-                files.add(selected)
     return files
 
 
@@ -63,20 +65,16 @@ def check(
     files = budget_files(targets, repo_root, structure_dirs)
     errors: list[str] = []
     for path in sorted(files):
-        try:
-            count = len(path.read_text(encoding="utf-8").splitlines())
-        except (OSError, UnicodeDecodeError):
+        text = read_utf8_text(path)
+        if text is None:
             continue  # Preserve the shared lint contract for unreadable members.
+        count = len(text.splitlines())
         name = path.relative_to(repo_root).as_posix()
         if count > HARD_CEILING:
             errors.append(
                 f"{name}:{count}: file is {count} lines, over the {HARD_CEILING}-line hard ceiling — {_FILE_CEILING_GUIDANCE}"
             )
-    listing = subprocess.run(  # noqa: S603 — local git query, no shell
-        ["git", "-C", str(repo_root), "ls-files", "-z"], capture_output=True, text=True, check=False
-    )
-    listing.check_returncode()
-    children = directory_budget.tracked_children(listing.stdout)
+    children = directory_budget.tracked_children(GitRepo(repo_root).run_text("ls-files", "-z"))
     for name in sorted(
         directory_budget.selected_directories(children, directory_targets, repo_root)
     ):

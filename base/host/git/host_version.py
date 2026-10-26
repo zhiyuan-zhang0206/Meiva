@@ -20,7 +20,6 @@ Fallback chain: git-derived date -> `[project].version` from `pyproject.toml`
 from __future__ import annotations
 
 import re
-import subprocess
 import tomllib
 from dataclasses import dataclass
 from functools import total_ordering
@@ -28,10 +27,15 @@ from pathlib import Path
 from typing import Any
 
 from base.host.git.gitenv import git_env
-from base.host.proc import run_bounded
-from base.paths import repo_root as _repo_root
+from base.host.proc import SubprocessError, run_bounded
 
 _GIT_TIMEOUT_S = 10.0
+
+
+# meiva:note
+# Repository root derived from this module's path (`base/host/git/host_version.py`).
+def _repo_root() -> Path:
+    return Path(__file__).resolve().parents[3]
 
 
 class HostVersionError(RuntimeError):
@@ -98,10 +102,12 @@ def host_version_from_repo(repo: Path) -> str:
     """The Meiva version this checkout carries (`[project].version` in its
     pyproject.toml) — the host version `engines.meiva` is checked against."""
     pyproject = repo / "pyproject.toml"
-    if not pyproject.is_file():
-        raise HostVersionError(f"cannot determine host version: no pyproject.toml in {repo}")
     try:
-        data: dict[str, Any] = tomllib.loads(pyproject.read_text(encoding="utf-8"))
+        raw = pyproject.read_text(encoding="utf-8")
+    except OSError as e:
+        raise HostVersionError(f"cannot determine host version: no pyproject.toml in {repo}") from e
+    try:
+        data: dict[str, Any] = tomllib.loads(raw)
     except tomllib.TOMLDecodeError as e:
         raise HostVersionError(f"cannot determine host version: {e}") from e
     project: dict[str, Any] | None = data.get("project")
@@ -123,7 +129,7 @@ def _derived(repo: Path) -> tuple[str, str] | None:
             env=git_env(),
             timeout=_GIT_TIMEOUT_S,
         )
-    except (OSError, subprocess.SubprocessError):
+    except (OSError, SubprocessError):
         return None
     if result.returncode != 0:
         return None

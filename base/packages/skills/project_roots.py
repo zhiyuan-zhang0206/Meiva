@@ -7,12 +7,18 @@ skill view, so it lives below both.
 from pathlib import Path
 
 
+# meiva:note
+# Return whether `path` is an existing regular file.
+def _is_file(path: Path) -> bool:
+    return path.is_file()
+
+
 def _is_git_root(directory: Path) -> bool:
     """Whether `directory` holds a git repository or worktree: a `.git` file (linked worktree,
     submodule) or a `.git` directory with a `HEAD`. An empty or foreign `.git` is skipped, as git
     itself keeps looking upward past it."""
     dotgit = directory / ".git"
-    return dotgit.is_file() or (dotgit / "HEAD").exists()
+    return _is_file(dotgit) or _is_file(dotgit / "HEAD")
 
 
 def git_root(start: Path) -> Path | None:

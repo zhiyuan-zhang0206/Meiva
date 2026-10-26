@@ -626,7 +626,7 @@ def scan_tree(
 
 def _read_source(universe: Universe, path: str) -> bytes:
     try:
-        return (universe.root / path).read_bytes()
+        return universe.load_bytes(path)
     except (OSError, ValueError) as error:
         raise MeizelError(f"{path}: cannot read: {error}") from error
 

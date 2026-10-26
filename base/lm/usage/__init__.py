@@ -12,10 +12,10 @@ from typing import Any
 from langchain_core.messages import AIMessage
 
 from base.lm.catalog import ModelCatalog
+from base.lm.catalog.provider_contract import InferenceSpeed
 from base.lm.content import message_addl_kwargs
 from base.lm.pricing import CacheTokens, CostQuote, quote, tally_tokens
 from base.lm.pricing.cache_writes import cache_write_tokens
-from base.lm.provider_api import InferenceSpeed
 from base.log import logger
 from base.telemetry import ambient_agent_id, report_sink_failure
 

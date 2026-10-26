@@ -158,8 +158,17 @@ def _regular_file_stat(
     return st if st is not None and stat.S_ISREG(st.st_mode) else None
 
 
-def _folders_in(root: Path) -> list[Path] | None:
-    folders = [p for p in (root, *root.rglob("*")) if p.is_dir()]
+def _folders_in(
+    root: Path, stat_of: Callable[[Path], os.stat_result | None]
+) -> list[tuple[Path, int]] | None:
+    folders: list[tuple[Path, int]] = []
+    for p in sorted({root, *root.rglob("*")}):
+        try:
+            st = stat_of(p)
+        except OSError:
+            continue
+        if st is not None and stat.S_ISDIR(st.st_mode):
+            folders.append((p, st.st_mtime_ns))
     return folders or None
 
 
@@ -209,19 +218,12 @@ def _scan_root(
     just skill-bearing ones) so `SkillIndex._fresh` can detect a new skill
     folder appearing anywhere under the root.
     """
-    folders = _folders_in(root)
+    folders = _folders_in(root, stat_of)
     if folders is None:
         return (), ()
-    folder_stats: list[tuple[tuple[str, ...], int]] = []
-    for folder in sorted(folders):
-        stat = stat_of(folder)
-        if stat is None:
-            continue
-        folder_stats.append((folder.relative_to(root).parts, stat.st_mtime_ns))
+    folder_stats = [(folder.relative_to(root).parts, mtime) for folder, mtime in folders]
     entries = [
-        entry
-        for folder in sorted(folders)
-        if (entry := _skill_file(folder, root, stat_of)) is not None
+        entry for folder, _ in folders if (entry := _skill_file(folder, root, stat_of)) is not None
     ]
     return tuple(entries), tuple(folder_stats)
 
@@ -295,15 +297,10 @@ class SkillIndex:
         mtime and size. A new SKILL.md anywhere (folder mtime), an edit (file
         mtime/size), or a delete (folder set) each read as stale."""
         for root, saved in zip(self.roots, self.root_folders, strict=True):
-            folders = _folders_in(root)
+            folders = _folders_in(root, _stat_or_none)
             if folders is None:
                 return False
-            stats: list[tuple[tuple[str, ...], int]] = []
-            for folder in sorted(folders):
-                st = _stat_or_none(folder)
-                if st is None:
-                    return False
-                stats.append((folder.relative_to(root).parts, st.st_mtime_ns))
+            stats = [(folder.relative_to(root).parts, mtime) for folder, mtime in folders]
             if tuple(stats) != saved:
                 return False
         for e in self.entries:

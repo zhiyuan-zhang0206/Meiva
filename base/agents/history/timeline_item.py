@@ -10,13 +10,12 @@ from __future__ import annotations
 
 from typing import Any, Literal
 
-from psycopg.rows import dict_row
 from pydantic import BaseModel
 
-from base.agents.impersonation.history import ImpersonationMetadata
+from base.agents.impersonation.status import ImpersonationMetadata
 from base.agents.messages.inbound_images import inbound_image_urls
-from base.agents.sdk.telemetry import SdkCall
-from base.db import Database
+from base.agents.sdk.tally import SdkCall
+from base.db.protocols import DatabaseLike
 
 
 class TimelineItem(BaseModel):
@@ -116,7 +115,7 @@ class TimelineItem(BaseModel):
 
 
 def hydrate(
-    db: Database,
+    db: DatabaseLike,
     items: list[TimelineItem],
     agent_id: int,
     *,
@@ -148,7 +147,7 @@ def hydrate(
             upper_session, upper_seq = info.session_id, cursor_position[1] - 1
     if not anchors:
         return items
-    with db.connect() as conn, conn.cursor(row_factory=dict_row) as cur:
+    with db.connect() as conn, conn.cursor() as cur:
         cur.execute(
             "SELECT p.session_id,e.seq,e.created_at,e.payload FROM agent_impersonations p "
             "JOIN agent_impersonation_entries e ON e.lease_id=p.id "
@@ -158,7 +157,7 @@ def hydrate(
             (agent_id, list(anchors), upper_session, upper_session, upper_seq, limit + 1),
         )
         rows = cur.fetchall()
-    rendered = [_message(anchors[row["session_id"]], row) for row in reversed(rows)]
+    rendered = [_message(anchors[row[0]], row) for row in reversed(rows)]
     return sorted([*items, *rendered], key=lambda item: _position(item.item_id))
 
 
@@ -167,25 +166,25 @@ def _position(item_id: str) -> tuple[int, int]:
     return int(message), int(block)
 
 
-def _message(anchor: TimelineItem, row: dict[str, Any]) -> TimelineItem:
-    payload = row["payload"]
+def _message(anchor: TimelineItem, row: tuple[Any, ...]) -> TimelineItem:
+    _, seq, created_at, payload = row
     info = anchor.impersonation
     assert info is not None  # noqa: S101 — selected marker
     outgoing = payload["direction"] == "out"
     prefix = anchor.item_id.rsplit(".", 1)[0]
     return TimelineItem(
-        item_id=f"{prefix}.{row['seq'] + 1}",
+        item_id=f"{prefix}.{seq + 1}",
         kind="agent_chat" if outgoing else "inbound_chat",
         source=payload["source"],
         payload=payload["content"],
         images=None if outgoing else inbound_image_urls(info.agent_id, payload["payload"]),
-        created_at=row["created_at"].isoformat(),
+        created_at=created_at.isoformat(),
         inbound_id=None if outgoing else payload["inbound_id"],
         impersonation=ImpersonationMetadata.model_validate(
             {
                 **info.model_dump(),
                 "anchor_item_id": anchor.item_id,
-                "seq": row["seq"],
+                "seq": seq,
             }
         ),
     )

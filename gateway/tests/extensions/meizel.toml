@@ -4,6 +4,3 @@ exports = ["test_mcp_endpoint.py"]
 "test_guide.py" = ["draft_support.py"]
 "test_packages.py" = ["draft_support.py"]
 "test_schedule_draft.py" = ["draft_support.py"]
-
-[debt.first-party-patch]
-"test_ui.py#monkeypatch.setattr meiva.ui.page_host" = 1

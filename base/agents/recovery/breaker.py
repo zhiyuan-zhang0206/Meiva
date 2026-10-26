@@ -6,6 +6,7 @@ from typing import Final, LiteralString
 
 from psycopg_pool import AsyncConnectionPool
 
+from base.db.protocols import AsyncPool
 from base.db.transaction import async_write_transaction
 
 HALT_AFTER_CONSECUTIVE_PERMANENT_REJECTS = 1
@@ -81,7 +82,7 @@ async def halt_automatic_recovery(pool: AsyncConnectionPool, agent_id: int) -> b
         return cur.rowcount == 1
 
 
-async def admit_pending_wake(pool: AsyncConnectionPool, agent_id: int) -> bool:
+async def admit_pending_wake(pool: AsyncPool, agent_id: int) -> bool:
     """Keep background inputs halted; an explicit fresh peer/user chat can retry."""
     async with async_write_transaction(pool) as conn:
         row = await (

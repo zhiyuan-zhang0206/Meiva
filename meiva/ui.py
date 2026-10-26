@@ -277,6 +277,25 @@ class PageHost:
         if not closed:
             raise PageClosed(f"no open page {name!r} for agent {self.agent_id}")
 
+    # meiva:note
+    # Register a served directory after checking the port and wait until the page server answers.
+    def serve(self, request: ServeRequest) -> Page:
+        self.reject_foreign_port_occupant(request.port)
+        page = self.register(
+            request.name,
+            request.port,
+            request.title,
+            serve_dir=str(Path(request.dir).resolve()),
+            ttl=request.ttl,
+        )
+        if not self.wait_until_serving(request.port):
+            raise PageError(
+                f"page server for {request.name!r} on port {request.port} did not come up within "
+                f"{self.ready_timeout_s:.0f}s — is the page-server daemon running? "
+                "(the page row is registered; the daemon will keep retrying)"
+            )
+        return page
+
 
 # meiva:note
 # The validated arguments of one `show` / `serve` / `close` call. The entry points coerce and
@@ -413,26 +432,7 @@ def serve(
         title: defaults to `name`.
         ttl: page lifetime in seconds; omitted = the platform default.
     """
-    request = serve_request(dir, name, port, title, ttl)
-    host = page_host()
-    host.reject_foreign_port_occupant(request.port)
-
-    page = host.register(
-        request.name,
-        request.port,
-        request.title,
-        serve_dir=str(Path(request.dir).resolve()),
-        ttl=request.ttl,
-    )
-
-    # The daemon reconciles on a ~2s poll; wait for the server it spawns.
-    if not host.wait_until_serving(request.port):
-        raise PageError(
-            f"page server for {request.name!r} on port {request.port} did not come up within "
-            f"{host.ready_timeout_s:.0f}s — is the page-server daemon running? "
-            "(the page row is registered; the daemon will keep retrying)"
-        )
-    return page
+    return page_host().serve(serve_request(dir, name, port, title, ttl))
 
 
 def close(name: str) -> None:

@@ -30,7 +30,7 @@ from base.agents.impersonation.wake import publish_inbound_wake
 from base.agents.messages.kwargs import NoteTag
 from base.agents.messages.timestamp_policy import TimestampPolicy, TimestampSource
 from base.clock import Clock
-from base.db import Database
+from base.db.protocols import DatabaseLike
 from base.events.live.bus import EventBus
 from base.native_process.runtime_incarnation import RuntimeIncarnation
 
@@ -131,7 +131,7 @@ def resume_note_pending(state: BaseAgentState) -> bool:
 
 
 def save_document(
-    db: Database, session: dict[str, Any], incarnation: RuntimeIncarnation, *, workspace: Path
+    db: DatabaseLike, session: dict[str, Any], incarnation: RuntimeIncarnation, *, workspace: Path
 ) -> tuple[str, str]:
     with db.write_transaction() as conn:
         require_native(conn, incarnation)
@@ -150,7 +150,7 @@ def save_document(
 
 
 def record_handoff_receipt(
-    db: Database, session: dict[str, Any], incarnation: RuntimeIncarnation
+    db: DatabaseLike, session: dict[str, Any], incarnation: RuntimeIncarnation
 ) -> None:
     with db.write_transaction() as conn:
         require_native(conn, incarnation)
@@ -173,7 +173,7 @@ def record_handoff_receipt(
 
 async def deliver_handoff(
     graph: AgentGraph,
-    db: Database,
+    db: DatabaseLike,
     bus: EventBus,
     session: dict[str, Any],
     incarnation: RuntimeIncarnation,

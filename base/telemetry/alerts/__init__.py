@@ -36,8 +36,7 @@ from psycopg.rows import dict_row
 from psycopg.types.json import Jsonb
 
 from base.clock import Clock
-from base.config import get_field, settings
-from base.host.env.health_ports import health_port
+from base.config import settings
 from base.telemetry.alerts.copy import (
     ALERT_GROUP_COUNT,
     ALERT_GROUP_MORE,
@@ -326,13 +325,6 @@ def upsert_alert(
         status, severity, old_status, old_severity, was_notified=was_notified
     )
     return (fp, starts_at), did_insert, should_notify, row
-
-
-def im_bridge_rpc_url() -> str:
-    """Resolve the existing notification daemon endpoint at its composition owner."""
-    return (settings.services.im_bridge_health_url or "").rstrip("/") or (
-        f"http://127.0.0.1:{health_port('im_bridge', read_field=get_field)}"
-    )
 
 
 def format_local(ts: datetime | None) -> str:

@@ -16,7 +16,7 @@ from pathlib import Path
 from typing import TypeGuard
 
 from meizel.graph.model import MeizelError
-from meizel.graph.universe import MANIFEST
+from meizel.graph.universe import MANIFEST, GitRepo
 
 __all__ = [
     "ROLE_NAMES",
@@ -75,7 +75,7 @@ def check_table(table: object) -> tuple[dict[str, tuple[str, ...]], list[tuple[s
 def _read(root: Path) -> dict[str, tuple[str, ...]]:
     path = root / MANIFEST
     try:
-        document = tomllib.loads(path.read_text(encoding="utf-8"))
+        document = tomllib.loads(GitRepo(root).load_text(MANIFEST))
     except (OSError, tomllib.TOMLDecodeError) as error:
         raise MeizelError(f"{path}: cannot read the roles: {error}") from error
     if "roles" not in document:

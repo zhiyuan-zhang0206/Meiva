@@ -1,14 +1,5 @@
+purity = "strict"
 exports = ["tests"]
-
-[purity]
-"." = "strict-to-be"
-"allowlist.py" = "strict"
-"owner_method.py" = "strict"
-"scan.py" = "strict"
-"task_owner.py" = "strict"
-"task_owner_span.py" = "strict"
-"thread_owner.py" = "strict"
-"thread_admission.py" = "strict"
 
 [uses]
 "__init__.py" = ["allowlist.py", "bundle.py", "scan.py"]
@@ -20,13 +11,3 @@ exports = ["tests"]
 "tests" = ["__init__.py", "allowlist.py", "bundle.py", "owner_method.py"]
 "thread_owner.py" = ["module.py", "owner_method.py", "thread_admission.py"]
 "thread_admission.py" = ["module.py", "owner_method.py"]
-
-[debt.impure-call]
-"__init__.py#Path.is_file" = 2
-"__init__.py#Path.read_text" = 1
-"bundle.py#Path.is_file" = 1
-"bundle.py#Path.read_text" = 1
-"module.py#Path.is_dir" = 1
-"module.py#Path.is_file" = 1
-"module.py#Path.read_text" = 1
-"module.py#Path.stat" = 1

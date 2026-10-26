@@ -1,2 +1,0 @@
--- Schema reset anchor: the preceding 101 deltas are folded into db/schema.sql.
--- The runner checks the complete frozen generation before stamping this name.

@@ -5,11 +5,10 @@
 import asyncio
 from pathlib import Path
 
-from psycopg_pool import AsyncConnectionPool
-
 from agent.ownership.corpse_reap import ReapedCorpse, reap_crash_corpses
 from agent.ownership.hosted import LifecycleKind, apply_hosted_lifecycle
 from base.agents.lifecycle import release_browser_pages
+from base.db.protocols import AsyncPool
 from base.events.live.announce import publish_agent_updated
 from base.events.live.bus import EventBus
 from base.log import logger
@@ -91,7 +90,7 @@ async def finish_termination(
 # nothing; a terminate owes `finish_termination`. Returns the applied kind, or None when the
 # incarnation no longer owns the row or no command was claimed.
 async def apply_lifecycle_command(
-    pool: AsyncConnectionPool,
+    pool: AsyncPool,
     incarnation: RuntimeIncarnation,
     *,
     bus: EventBus,
@@ -111,7 +110,7 @@ async def apply_lifecycle_command(
 # release each one's browser pages. The durable flip already committed, so a failed hint is logged and
 # the next corpse still gets its pages released.
 async def reap_and_announce_corpses(
-    pool: AsyncConnectionPool, machine: str, *, bus: EventBus, home: Path
+    pool: AsyncPool, machine: str, *, bus: EventBus, home: Path
 ) -> list[ReapedCorpse]:
     reaped = await reap_crash_corpses(pool, machine)
     for corpse in reaped:
