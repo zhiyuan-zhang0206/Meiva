@@ -25,3 +25,6 @@ exports = ["launchd_job.py", "lifecycle.py", "onboarding.py", "signing_identity.
 "lifecycle.py#pid services.desktop.permissions_helper.launchd_job.helper_job_domain" = 1
 "onboarding.py#environ base.host.env.registry.process_environment" = 1
 "signing_identity.py#home base.paths.permissions_helper_app_dir" = 1
+
+[debt.fake-entropy]
+"onboarding.py#time.monotonic_ns in an f-string" = 2

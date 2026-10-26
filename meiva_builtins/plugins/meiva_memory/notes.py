@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-from datetime import UTC, datetime
-
 from langchain_core.messages import HumanMessage
 
 from agent.messages import NoteTag, system_note_message
@@ -52,7 +50,9 @@ def memory_index_note(ctx: MeivaContext) -> HumanMessage | None:
             f"{text}"
         )
     return system_note_message(
-        content=f"{_FRAMING}\n\n{text}", tag=NoteTag.MEMORY, created_at=datetime.now(UTC)
+        content=f"{_FRAMING}\n\n{text}",
+        tag=NoteTag.MEMORY,
+        created_at=ctx.require_clock().now(),
     )
 
 
@@ -128,5 +128,5 @@ def per_agent_memory_note(ctx: MeivaContext) -> HumanMessage | None:
     return system_note_message(
         content=f"{PER_AGENT_FRAMING}\n\n{body}{suffix}",
         tag=NoteTag.AGENT_MEMORY,
-        created_at=datetime.now(UTC),
+        created_at=ctx.require_clock().now(),
     )

@@ -136,6 +136,7 @@ def _init_and_start_settings_free() -> None:
     from cli.parsers import build_parser
     from cli.start_runtime import HomeSite
     from cli.startup.service_path import CallerHost
+    from cli.startup.tests.birth_facts import birth_facts
 
     scenario = sys.argv[1]
     authority = scenario != "init_and_start_settings_free"
@@ -150,6 +151,8 @@ def _init_and_start_settings_free() -> None:
         virtual_env=None,
         prefix_venv=None,
         occupied_ports=frozenset(),
+        local_names=frozenset(),
+        birth=birth_facts(),
     )
 
     def configured() -> None:
@@ -290,7 +293,7 @@ def _transport_key(argv: list[str]) -> None:
     from base.host.db_authority.unit import CAPABILITY_KEY_ENV
     from cli import main
 
-    args = argparse.Namespace(ssl_cert_file=None)
+    args = argparse.Namespace(ssl_cert_file=None, config_file=None)
     main.bind_entry_facts(args, argv, home=Path("/unit/home"), checkout=Path("/unit/checkout"))
     if argv[:1] == ["init"]:
         main.bind_init_inputs(args)

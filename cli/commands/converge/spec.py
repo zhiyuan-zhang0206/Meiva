@@ -12,11 +12,12 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from base.agents.context.clients import DatabaseFactory
-from base.clock import Timers
+from base.clock import Clock, Timers
 from base.cluster.machine import MachineIdentityReader, MachineRole, MachineRoles
 from base.config import ConfigBoot
 from base.host.permissions_helper.client import HelperFactory
 from base.host.system.hostport import Host
+from base.host.system.job_values import JobRoots
 from base.telemetry import EventPipeline
 from cli.database.runtime import UserSession
 
@@ -44,7 +45,16 @@ class ConvergeCtx:
     host: Host
     session: UserSession
     timers: Timers
+    # meiva:note
+    # The wall clock of the invocation that runs this converge; a step stamps with `clock.now()`.
+    clock: Clock
     services: frozenset[str]
+
+    # meiva:note
+    # The home, checkout and account home every OS job of this converge is anchored to.
+    @property
+    def job_roots(self) -> JobRoots:
+        return JobRoots(home=self.meiva_home, repo=self.repo, user_home=self.session.user_home)
 
     def require_helper(self) -> HelperFactory:
         """The permissions-helper factory, for a step that only runs where a helper exists."""

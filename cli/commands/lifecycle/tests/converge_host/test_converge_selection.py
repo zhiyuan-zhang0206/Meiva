@@ -182,7 +182,7 @@ def test_a_dev_cluster_converge_never_writes_or_clears_the_marker(ctx: ConvergeC
         converge_host.run_converge(ctx, (ConvergeStep("keychain", boom),), prod_install=False)
     assert read_incomplete(ctx.meiva_home) is None
 
-    record_incomplete(ctx.meiva_home, step="keychain", error="locked")
+    record_incomplete(ctx.meiva_home, step="keychain", error="locked", now=ctx.clock.now())
     converge_host.run_converge(ctx, (), prod_install=False)
     assert read_incomplete(ctx.meiva_home) is not None
 

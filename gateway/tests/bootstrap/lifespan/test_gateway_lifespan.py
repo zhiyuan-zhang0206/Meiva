@@ -13,6 +13,7 @@
 import asyncio
 import threading
 import time
+from dataclasses import replace
 from pathlib import Path
 from typing import Any
 
@@ -22,9 +23,10 @@ import pytest
 from base.cluster.machine import MachineIdentityReader
 from base.cluster.machine.tests.identity import machine_identity as machine_identity
 from base.config.tests.configuration import snapshot_process_config
-from base.host.system.tests.fake_commands import fake_host
+from base.host.system.tests.fake_commands import LINUX_X86, fake_host
+from base.host.system.tests.fake_crontab import FakeCrontab
 from base.packages.plugin_providers import build_model_catalog
-from base.paths import meiva_home
+from base.paths import meiva_home, repo_root
 from gateway import app as gateway_app
 from gateway.cluster.process_boot import LOADED_IMAGE, GatewayProcess
 from gateway.http.model_catalog import load_model_catalog
@@ -277,3 +279,38 @@ async def test_an_inspection_query_in_flight_finishes_before_the_data_pool_close
                 assert await asyncio.to_thread(running.wait, 5)
             assert await load == 1
     assert app.state.db_pool.closed
+
+
+# meiva:note
+# The health probe is registered for the home the entry resolved, the checkout the gateway runs
+# from and the account home the app config carries. The three are all paths, so the registration
+# is observed in the crontab it writes: a home taken for the account home would not own the job
+# and write nothing, and a swapped checkout would name another `meiva`.
+async def test_the_lifespan_registers_the_health_probe_for_its_home_checkout_and_account(
+    db_conn: psycopg.Connection[Any], tmp_path: Path, *, machine_identity: MachineIdentityReader
+) -> None:
+    del db_conn
+    account = tmp_path / "account"
+    home = account / ".meiva"
+    home.mkdir(parents=True, mode=0o700)
+    crontab = FakeCrontab()
+    boot = snapshot_process_config()
+    boot.set_field("os_jobs_enabled", True)
+    process = GatewayProcess(
+        home=home,
+        config=boot,
+        image=LOADED_IMAGE,
+        machine=machine_identity,
+        host=fake_host(crontab, platform=LINUX_X86, programs={"crontab": "/usr/bin/crontab"}),
+    )
+    config = replace(gateway_config_of(boot), human_auth="required", upload_home=account)
+    app = gateway_test_app(process=process, config=config, process_ownership="owned")
+
+    async with asyncio.timeout(10), app.router.lifespan_context(app):
+        pass
+
+    (line,) = crontab.lines
+    assert line == (
+        f"*/5 * * * * MEIVA_HOME={home} {repo_root() / '.venv/bin/meiva'} "
+        "cluster health-probe # meiva-health-probe"
+    )

@@ -1,7 +1,7 @@
 # meiva:note
 # Wake-delivery tests for the skill reference watchers, plus the meiva-dynamic-workflow orchestrator scripts' handoff-dir resolution.
 #
-# Five reference watchers wake the launching agent with a single send at their trigger point: ``watch_idle.py`` (long-running-agent, meiva-goal, and meiva-fleet), ``watch_work.py`` (meiva-guide.external-agents), and ``gather_files.py`` (meiva-dynamic-workflow). The send is made once; the SDK's own bounded same-key retries are the only retry. A send that still fails is not silent: the one-shot watchers log it and exit 2 (the exit notice reaches the launcher), and the ``watch_work.py`` supervision loop reports False and tries again at its next trigger. These tests pin the single send, the channel routing, and the exit-2 contract against a real gateway listener on port 0: the SDK client dials it through its real transport, the stub answers (or refuses) the sends, and every assertion reads what reached it.
+# Five reference watchers wake the launching agent with a single send at their trigger point: ``watch_idle.py`` (meiva-goal, which the long-running-agent and meiva-fleet skills read), ``watch_work.py`` (meiva-guide.external-agents), and ``gather_files.py`` (meiva-dynamic-workflow). The send is made once; the SDK's own bounded same-key retries are the only retry. A send that still fails is not silent: the one-shot watchers log it and exit 2 (the exit notice reaches the launcher), and the ``watch_work.py`` supervision loop reports False and tries again at its next trigger. These tests pin the single send, the channel routing, and the exit-2 contract against a real gateway listener on port 0: the SDK client dials it through its real transport, the stub answers (or refuses) the sends, and every assertion reads what reached it.
 #
 # The handoff-dir tests below (2026-09-28 fix, PR #3550 follow-up P2-1) lock `codebase_sweep_lite.py`, `deep_research_lite.py` (`meiva-dynamic-workflow/scripts/`), `codebase_sweep_orchestrator.py`, `deep_research_orchestrator.py`, and `orchestrator_template.py` (`meiva-dynamic-workflow/references/`, alongside `gather_files.py` above) to `base.paths.workspace_dir` instead of a hardcoded `Path.home() / ".meiva/workspaces"` that never read `MEIVA_HOME` at all. On a non-default home cluster (a worktree cluster, home `~/.meiva-<dir>`) that silently wrote scratch/handoff state into the WRONG cluster's workspace tree.
 
@@ -47,17 +47,10 @@ def _load(name: str, path: Path) -> ModuleType:
     return module
 
 
-_WATCH_IDLE_PATHS = {
-    "long-running-agent": _REPO
-    / "meiva_builtins/skills/coordination/meiva-being-a-long-running-agent/scripts/watch_idle.py",
-    "meiva-goal": _REPO / "meiva_builtins/skills/coordination/meiva-goal/scripts/watch_idle.py",
-    "meiva-fleet": _REPO
-    / "meiva_builtins/plugins/meiva_fleet/skills/meiva-fleet/reference/watch_idle.py",
-}
-watch_idle_modules = [
-    _load(f"watch_idle_{label.replace('-', '_')}_under_test", path)
-    for label, path in _WATCH_IDLE_PATHS.items()
-]
+watch_idle = _load(
+    "watch_idle_under_test",
+    _REPO / "meiva_builtins/skills/coordination/meiva-goal/scripts/watch_idle.py",
+)
 watch_work = _load(
     "watch_work_retry_under_test",
     _REPO / "meiva_builtins/skills/platform/meiva-guide/external-agents/scripts/watch_work.py",
@@ -93,25 +86,6 @@ def _assert_one_logical_send_that_was_refused(wire: GatewayWire) -> None:
     assert len({sent.headers["idempotency-key"] for sent in wire.sent}) == 1
 
 
-def test_watch_idle_bodies_match_after_module_docstring() -> None:
-    """The three copyable watchers share one byte-identical executable body."""
-    bodies: dict[str, bytes] = {}
-    for label, path in _WATCH_IDLE_PATHS.items():
-        source = path.read_bytes()
-        first = ast.parse(source).body[0]
-        assert isinstance(first, ast.Expr)
-        assert isinstance(first.value, ast.Constant) and isinstance(first.value.value, str)
-        assert first.lineno == 1 and first.col_offset == 0
-        assert first.end_lineno is not None and first.end_col_offset is not None
-        lines = source.splitlines(keepends=True)
-        offset = sum(map(len, lines[: first.end_lineno - 1])) + first.end_col_offset
-        bodies[label] = source[offset:]
-
-    reference = bodies["long-running-agent"]
-    for label, body in bodies.items():
-        assert body == reference, f"{label} watch_idle body differs from long-running-agent"
-
-
 # meiva:note
 # Rewrite the work file after `delay` seconds with a modification time that cannot equal the old one.
 def _rewrite_after(work: Path, delay: float, text: str) -> threading.Timer:
@@ -139,12 +113,11 @@ def _quick(**changes: float) -> Any:
     return watch_work.Cadence(**values)
 
 
-@pytest.mark.parametrize("module", watch_idle_modules, ids=list(_WATCH_IDLE_PATHS))
-def test_watch_idle_sends_the_reminder_once(launcher: GatewayWire, module: ModuleType) -> None:
+def test_watch_idle_sends_the_reminder_once(launcher: GatewayWire) -> None:
     """The idle reminder reaches the launching agent with one send."""
     _accept_messages(launcher)
 
-    module._notify(7)
+    watch_idle._notify(7)
 
     [sent] = launcher.sent
     assert sent.path == _LAUNCHER_MESSAGES  # meiva.self.AGENT_ID — the launching agent
@@ -153,14 +126,13 @@ def test_watch_idle_sends_the_reminder_once(launcher: GatewayWire, module: Modul
 
 # meiva:note
 # A refused send is not a silent nothing and not a ten-minute retry loop: the watcher logs it and exits 2 after the single send.
-@pytest.mark.parametrize("module", watch_idle_modules, ids=list(_WATCH_IDLE_PATHS))
 def test_watch_idle_failed_send_exits_2_without_a_retry_window(
-    launcher: GatewayWire, module: ModuleType, capsys: pytest.CaptureFixture[str]
+    launcher: GatewayWire, capsys: pytest.CaptureFixture[str]
 ) -> None:
     _refuse_messages(launcher)
 
     with pytest.raises(SystemExit) as excinfo:
-        module._notify(7)
+        watch_idle._notify(7)
 
     assert excinfo.value.code == 2
     _assert_one_logical_send_that_was_refused(launcher)

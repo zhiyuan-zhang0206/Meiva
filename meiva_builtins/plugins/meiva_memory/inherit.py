@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-from datetime import UTC, datetime
 from typing import Any
 
 from langchain_core.messages import HumanMessage
@@ -128,5 +127,5 @@ def inherited_memory_note(ctx: MeivaContext) -> HumanMessage | None:
         len(content),
     )
     return system_note_message(
-        content=content, tag=NoteTag.INHERITED_MEMORY, created_at=datetime.now(UTC)
+        content=content, tag=NoteTag.INHERITED_MEMORY, created_at=ctx.require_clock().now()
     )

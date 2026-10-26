@@ -17,8 +17,8 @@ composition root.
 
 `collector_artifact.platform_tag_for(system, machine)` is the pure decision of the
 release asset tag (`darwin_arm64`, `darwin_amd64`, `linux_amd64`, `linux_arm64`, else `None`)
-from a `Platform`'s values; the converge step hands it its `Host.platform` and nothing in the
-module reads the running process.
+from a `Platform`'s values (`system` is `"darwin"` or `"linux"`, as `Platform.system` is): the
+function reads nothing, and the converge step hands it `ctx.host.platform`.
 
 ## Dependency closure
 

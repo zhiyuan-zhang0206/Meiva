@@ -6,9 +6,10 @@ from pathlib import Path
 
 import pytest
 
+from base.host.system import logs_content
 from base.host.system import logs_job as job
 from base.host.system.hostport import Host
-from base.host.system.job_values import JobRoots
+from base.host.system.job_values import JobRoots, plist_path
 from base.host.system.tests.fake_commands import (
     DARWIN_ARM64,
     LINUX_X86,
@@ -51,7 +52,7 @@ def test_macos_reregistration_rewrites_and_reloads_idempotently(
     commands, host = _launchctl()
 
     assert job.register_macos(roots=job_roots, host=host) == 0
-    plist = job.launchd_plist_path(user_home=job_roots.user_home)
+    plist = plist_path(logs_content.LABEL, user_home=job_roots.user_home)
     first = plist.read_text(encoding="utf-8")
     assert job.register_macos(roots=job_roots, host=host) == 0
 
@@ -65,7 +66,7 @@ def test_macos_reregistration_rewrites_and_reloads_idempotently(
 
 
 def test_macos_unregister_removes_only_its_own_job(tmp_path: Path) -> None:
-    target = job.launchd_plist_path(user_home=tmp_path)
+    target = plist_path(logs_content.LABEL, user_home=tmp_path)
     target.parent.mkdir(parents=True)
     target.write_text("<target-plist/>", encoding="utf-8")
     other = target.parent / "com.meiva.packages-refresh.plist"
@@ -157,7 +158,7 @@ def test_macos_bootstrap_failure_and_repeated_unregister(
         for r in loguru_records
     )
 
-    plist = job.launchd_plist_path(user_home=job_roots.user_home)
+    plist = plist_path(logs_content.LABEL, user_home=job_roots.user_home)
     assert plist.exists()
     assert job.unregister_macos(host=host, user_home=job_roots.user_home) == 0
     assert job.unregister_macos(host=host, user_home=job_roots.user_home) == 0
