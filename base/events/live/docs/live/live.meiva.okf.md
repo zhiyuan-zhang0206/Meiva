@@ -132,6 +132,6 @@ client and publish of an `EventBus` retries `AuthenticationError` / `NoPermissio
 exponential delays (`AuthRetry`, `base/events/live/redis_resilience.py`). Each delay sits between
 half the exponential cap and the cap: the retry draws one uniform sample per attempt from the
 `random.Random` the process root hands the bus (`EventBus(config, rng=...)`), so a restarted
-fleet does not strike Redis in lockstep. `compute_auth_retry_delay` is the pure decision; the
-loops in `redis_client` only draw, ask it, and wait. The gateway streams and the host dispatcher
+fleet does not strike Redis in lockstep. `compute_auth_retry_delay` is the pure decision; `AuthRetry.next_delay` draws the
+sample and applies it, and the loops in `redis_client` call it and wait. The gateway streams and the host dispatcher
 take `bus.auth_retry` from the bus they already hold.
