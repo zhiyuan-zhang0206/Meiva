@@ -16,8 +16,5 @@ exports = ["metrics.py"]
 "inherited_blocks.py" = "strict"
 
 [roots]
-"agent_runtime.py" = { kinds = ["clock"], why = "Plugin runtime hook stamps emitted memory write-check reminder notes with current UTC time" }
-"inherit.py" = { kinds = ["clock"], why = "Context note builder stamps inherited memory note with current UTC time" }
-"notes.py" = { kinds = ["clock"], why = "Context note builders stamp shared and per-agent memory index notes with current UTC time" }
 "pool_ops.py" = { kinds = ["environ"], why = "Memory pool helper resolves MEIVA_MACHINE_NAME from process environment before falling back to home .env" }
 "setup.py" = ["settings"]

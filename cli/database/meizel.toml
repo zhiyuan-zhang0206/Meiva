@@ -4,4 +4,4 @@ exports = ["lifecycle_audit.py", "runtime.py", "tests"]
 "tests" = ["__init__.py", "lifecycle_audit.py", "runtime.py"]
 
 [roots]
-"runtime.py" = { kinds = ["environ", "home", "settings"], why = "CLI command composition root boots configuration and resolves process environment and home before assembling command inputs" }
+"runtime.py" = { kinds = ["environ", "home", "random", "settings"], why = "CLI command composition root boots configuration, resolves process environment and home, and chooses the identifier source before assembling command inputs" }

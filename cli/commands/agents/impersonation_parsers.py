@@ -61,6 +61,7 @@ def _h_impersonate(args: argparse.Namespace) -> int:
 
 
 def _h_impersonate_relay(args: argparse.Namespace) -> int:
+    from base.events.live.bus import EventBus, event_bus_config_from_config
     from cli.commands.agents.impersonation import ImpersonationEnv, relay_token
     from cli.commands.agents.impersonation_relay import RelayInputs, cmd_relay
     from cli.commands.agents.relay.destination import relay_spec_problem
@@ -84,6 +85,7 @@ def _h_impersonate_relay(args: argparse.Namespace) -> int:
         redis_url=args.runtime.config.view.data_plane.redis_url,
         codex_home=env.codex_home,
         stdout=args.runtime.terminal.stdout,
+        bus=EventBus(event_bus_config_from_config(args.runtime.config)),
     )
     return cmd_relay(
         args,

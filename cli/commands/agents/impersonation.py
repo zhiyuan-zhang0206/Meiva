@@ -24,7 +24,7 @@ from uuid import UUID
 
 from base.agents.context.clients import DatabaseFactory
 from base.db import Database
-from base.events.live.bus import EventBus
+from base.events.live.bus import EventBus, event_bus_config_from_config
 from base.events.live.redis_listener import RedisInboundListener
 from cli.commands.agents.cleanup_after import run_then_clean_up
 from cli.commands.agents.impersonation_adapters import codex_endpoint
@@ -198,6 +198,7 @@ def _send(args: argparse.Namespace, *, database_factory: DatabaseFactory) -> int
         args.target_agent_id,
         content,
         source=source,
+        idempotency_key=args.runtime.new_id(),
     )
     _emit({"status": status, "to": args.target_agent_id, "source": source})
     return 0
@@ -256,7 +257,7 @@ def _request(
     runtime = config.ensure_eager()
     response = sessions.request(
         database_factory(),
-        EventBus.from_settings(),
+        EventBus(event_bus_config_from_config(config)),
         args.agent_id,
         authority=ConfigAuthority(
             runtime=runtime,
@@ -298,7 +299,7 @@ def _dispatch(
     if command == "request":
         return _request(args, database_factory=database_factory, env=env)
     db = database_factory()
-    bus = EventBus.from_settings()
+    bus = EventBus(event_bus_config_from_config(args.runtime.config))
     if command == "list":
         _emit(sessions.list_sessions(db, args.agent_id, before=args.before, limit=args.limit))
         return 0

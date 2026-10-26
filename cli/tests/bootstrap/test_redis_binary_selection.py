@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import dataclasses
 import json
+import os
 import subprocess
 import sys
 from pathlib import Path
@@ -141,14 +142,21 @@ def test_local_config_write_only_changes_target_home(
     sibling = _home(tmp_path / "preview", None)
     sibling_bytes = (sibling / ".env").read_bytes()
     point_home(monkeypatch, target)
+    process = config_cli.ConfigProcess(environ=os.environ, home=target)
     target_bytes = (target / ".env").read_bytes()
-    assert config_cli.cmd_config_set(["redis_bin_dir=relative/bin"], None, local=True) == 1
+    assert (
+        config_cli.cmd_config_set(["redis_bin_dir=relative/bin"], None, process=process, local=True)
+        == 1
+    )
     assert (target / ".env").read_bytes() == target_bytes
-    assert config_cli.cmd_config_set([f"redis_bin_dir={selected}"], None, local=True) == 0
+    assert (
+        config_cli.cmd_config_set([f"redis_bin_dir={selected}"], None, process=process, local=True)
+        == 0
+    )
     assert unit_env_aliases()["MEIVA_REDIS_BIN_DIR"] == str(selected)
     capsys.readouterr()
-    assert config_cli.cmd_config_get("redis_bin_dir", None, local=True) == 0
+    assert config_cli.cmd_config_get("redis_bin_dir", None, process=process, local=True) == 0
     assert str(selected) in capsys.readouterr().out
-    assert config_cli.cmd_config_unset(["redis_bin_dir"], None, local=True) == 0
+    assert config_cli.cmd_config_unset(["redis_bin_dir"], None, process=process, local=True) == 0
     assert "MEIVA_REDIS_BIN_DIR" not in unit_env_aliases()
     assert (sibling / ".env").read_bytes() == sibling_bytes

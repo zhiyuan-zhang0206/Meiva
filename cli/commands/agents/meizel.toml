@@ -13,9 +13,3 @@ exports = ["cleanup_after.py", "computer.py", "control.py", "impersonation.py", 
 
 [purity]
 "__init__.py" = "strict"
-
-[roots]
-"control.py" = ["random"]
-"impersonation.py" = ["bus"]
-"impersonation_relay.py" = ["bus"]
-"notices.py" = ["random"]

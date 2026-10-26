@@ -10,6 +10,3 @@ exports = ["converge_host.py", "lgtm_toggle.py", "root_driver.py", "start", "sta
 "stop" = ["_exclusive_resources.py", "root_control", "root_driver.py", "root_readiness.py", "stand_down.py", "start"]
 "stand_down.py" = []
 "tests" = ["_exclusive_resources.py", "converge_host.py", "lgtm_toggle.py", "root_control", "root_driver.py", "root_readiness.py", "stand_down.py", "start", "status", "stop"]
-
-[roots]
-"converge_host.py" = ["settings"]

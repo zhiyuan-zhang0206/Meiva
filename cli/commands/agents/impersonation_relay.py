@@ -419,14 +419,16 @@ async def _serve(
 
 # meiva:note
 # What the handler read for one relay: the scoped credential from the channel the operator
-# chose, the Redis address of the invocation's configuration, CODEX_HOME as the shell saw it,
-# and the stdout a controller session reads the relay's pushes from.
+# chose, the Redis address and the live-events handle of the invocation's configuration,
+# CODEX_HOME as the shell saw it, and the stdout a controller session reads the relay's pushes
+# from.
 @dataclass(frozen=True)
 class RelayInputs:
     token: str
     redis_url: str
     codex_home: str | None
     stdout: TextIO
+    bus: EventBus
 
 
 # meiva:note
@@ -456,7 +458,7 @@ def cmd_relay(
         adapter = bind_adapter(destination, codex_home=inputs.codex_home, stdout=inputs.stdout)
         local_machine = machine.name()
         db = database_factory()
-        bus = EventBus.from_settings()
+        bus = inputs.bus
         if args.lease_id is None:
             lease_id = UUID(
                 str(resolve(db, args.agent_id, args.session_id, local_machine=local_machine)["id"])
