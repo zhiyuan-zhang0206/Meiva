@@ -4,6 +4,7 @@ import json
 import re
 import shutil
 from collections.abc import Callable
+from datetime import UTC, datetime
 from pathlib import Path
 
 import pytest
@@ -45,7 +46,7 @@ def test_converged_namespaces_load_real_task_instructions(
     db_url: str, tmp_path: Path, unit_home: Path
 ) -> None:
     repo = _repo(tmp_path)
-    converge_skills(repo, unit_home, binding=PROD_ELSEWHERE)
+    converge_skills(repo, unit_home, binding=PROD_ELSEWHERE, now=datetime.now(UTC))
 
     expected = {
         ("meiva_guide", "deploy"): "meiva init",

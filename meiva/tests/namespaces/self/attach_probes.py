@@ -31,6 +31,7 @@ def main() -> None:
     attempt("context", lambda: meiva.context)
     attempt("tasks", lambda: meiva.tasks)
     attempt("agents_send", lambda: meiva.agents.send_message(1, "x"))
+    attempt("watcher_at", lambda: meiva.watcher.at("2999-01-01T00:00:00+00:00", "x", name="probe"))
     attempt("attach", meiva.attach)
     print("REPORT " + json.dumps(report))
 

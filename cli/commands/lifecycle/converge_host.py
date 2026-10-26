@@ -119,6 +119,7 @@ def _converge_skills_step(ctx: ConvergeCtx) -> None:
         ctx.repo,
         ctx.meiva_home,
         source_binding(ctx.session.user_home, ctx.config.process_environment()),
+        now=ctx.clock.now(),
     )
     for kind, names in (
         ("copied", result.copied),

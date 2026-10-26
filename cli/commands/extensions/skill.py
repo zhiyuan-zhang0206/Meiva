@@ -30,13 +30,12 @@ from __future__ import annotations
 
 import subprocess
 import sys
+from datetime import datetime
 from pathlib import Path
 
-from base.clock import SYSTEM_TIMERS, Clock, ClockConfig
 from base.cluster.machine import MachineIdentityReader
 from base.config import ConfigBoot
 from base.packages.extensions import install_registry as reg
-from base.paths import meiva_home
 from cli.commands.extensions.plans.source_binding import SourceBinding
 from cli.commands.extensions.skill_package import ExtensionGateway
 from cli.commands.extensions.skills_sync import Source
@@ -59,6 +58,8 @@ def cmd_skill_install(
     check_every: str | None = None,
     gateway: ExtensionGateway,
     machine: MachineIdentityReader,
+    home: Path,
+    now: datetime,
 ) -> int:
     """`meiva skill install <git-url-or-local-path> [--ref REF] [--path SUBDIR]
     [--accept-risk] [--update-mode auto|notify|off] [--check-every DUR]` —
@@ -111,6 +112,8 @@ def cmd_skill_install(
                 check_every=interval,
                 gateway=gateway,
                 machine=machine,
+                home=home,
+                now=now,
             )
         except SkillScanRefused as e:
             print("[meiva skill install] security scan found critical patterns:", file=sys.stderr)
@@ -130,7 +133,7 @@ def cmd_skill_install(
         cleanup_temp(acquired.cloned)
 
 
-def cmd_skill_scan(target: str) -> int:
+def cmd_skill_scan(target: str, *, home: Path) -> int:
     """`meiva skill scan <name-or-path>` — print the supply-chain scan report for
     an installed package or any directory on disk.
 
@@ -144,10 +147,10 @@ def cmd_skill_scan(target: str) -> int:
 
     root = Path(target).expanduser()
     if not root.is_dir():
-        root = paths.skills_dir(paths.meiva_home()) / target
+        root = paths.skills_dir(home) / target
     if not root.is_dir():
         print(
-            f"[meiva skill scan] no directory at '{target}' nor {paths.skills_dir(paths.meiva_home()) / target}.",
+            f"[meiva skill scan] no directory at '{target}' nor {paths.skills_dir(home) / target}.",
             file=sys.stderr,
         )
         return 1
@@ -161,7 +164,7 @@ def cmd_skill_scan(target: str) -> int:
     return 2 if scan.criticals(findings) else 0
 
 
-def cmd_skill_trust(name: str, *, revoke: bool = False) -> int:
+def cmd_skill_trust(name: str, *, revoke: bool = False, now: datetime) -> int:
     """`meiva skill trust <name> [--revoke]` — record that a human read this
     package's content and vouches for it (tier "reviewed"), or take that back.
 
@@ -186,11 +189,7 @@ def cmd_skill_trust(name: str, *, revoke: bool = False) -> int:
         )
         return 1
     entry.trust = "unreviewed" if revoke else "reviewed"
-    entry.updated_at = (
-        Clock(ClockConfig("UTC", None, message_timestamp_weekday=False), timers=SYSTEM_TIMERS)
-        .now()
-        .isoformat(timespec="seconds")
-    )
+    entry.updated_at = now.isoformat(timespec="seconds")
     install_registry.register(entry)
     print(f"[meiva skill trust] {name} -> trust={entry.trust}.")
     return 0
@@ -231,7 +230,7 @@ def _set_enabled(name: str, *, enabled: bool) -> int:
     return 0
 
 
-def cmd_skill_register(name: str, *, accept_risk: bool = False) -> int:
+def cmd_skill_register(name: str, *, accept_risk: bool = False, home: Path, now: datetime) -> int:
     """`meiva skill register <name> [--accept-risk]` — track
     `$MEIVA_HOME/skills/<name>/` as a user package so the scanner loads it. The
     dir must already exist and every SKILL.md inside must parse (fail here, not
@@ -252,7 +251,7 @@ def cmd_skill_register(name: str, *, accept_risk: bool = False) -> int:
     # `name` is both a registry key and a path segment, so it has to become the
     # directory's REAL spelling before either use: the caller may type the
     # canonical dash form at a directory that is still `foo_bar/` on disk.
-    skills_root = paths.skills_dir(paths.meiva_home())
+    skills_root = paths.skills_dir(home)
     on_disk = (
         find(name, (p.name for p in skills_root.iterdir() if p.is_dir()))
         if skills_root.is_dir()
@@ -287,19 +286,15 @@ def cmd_skill_register(name: str, *, accept_risk: bool = False) -> int:
         print(e.report, file=sys.stderr)
         print(_REFUSAL_ADVICE.replace("install", "register"), file=sys.stderr)
         return 1
-    now = (
-        Clock(ClockConfig("UTC", None, message_timestamp_weekday=False), timers=SYSTEM_TIMERS)
-        .now()
-        .isoformat(timespec="seconds")
-    )
+    stamp = now.isoformat(timespec="seconds")
     install_registry.register(
         install_registry.InstalledPackage(
             name=name,
             type="skill",
-            installed_at=now,
-            updated_at=now,
+            installed_at=stamp,
+            updated_at=stamp,
             trust="unreviewed",
-            scanned_at=now,
+            scanned_at=stamp,
             accepted_findings=accepted,
         )
     )
@@ -312,17 +307,16 @@ def cmd_skill_register(name: str, *, accept_risk: bool = False) -> int:
 # ─── update / upgrade (R5 design, task #1013) ───────────────────────────────
 
 
-def _repo_native_sources(repo: Path | None = None) -> list[Source]:
+def _repo_native_sources(repo: Path, *, home: Path) -> list[Source]:
     """The repo-native skill sources of the running checkout (builtin skills
     from `meiva_builtins/skills/` and builtin-plugin skills) — the set `meiva
     skill update` syncs. `.agents/skills/` project skills are excluded (they
     reach agents through the project-local mount, not the load dir; issue
     #146). Installed-plugin skills are excluded too (they update via
     `meiva plugins upgrade`)."""
-    from cli.commands._repo import repo_root
     from cli.commands.extensions.skills_sync import iter_sources
 
-    sources, _conflicts = iter_sources(repo or repo_root())
+    sources, _conflicts = iter_sources(repo, home=home)
     return [s for s in sources if s.bootstrap_only]
 
 
@@ -530,9 +524,9 @@ def _update_one(
     )
 
 
-def _selected_sources(repo: Path, names: list[str] | None) -> list[Source]:
+def _selected_sources(repo: Path, names: list[str] | None, *, home: Path) -> list[Source]:
     """The repo-native sources to sync: all of them, or the named ones (unknown names warn)."""
-    sources = _repo_native_sources(repo)
+    sources = _repo_native_sources(repo, home=home)
     if names:
         wanted = set(names)
         sources = [s for s in sources if s.name in wanted]
@@ -592,26 +586,28 @@ def _report_update(
 # `repo` is the checkout whose sources to sync from; `binding` says which home is the prod home and
 # whether a worktree checkout may sync into it.
 def cmd_skill_update(
-    names: list[str] | None, *, config: ConfigBoot, repo: Path, binding: SourceBinding
+    names: list[str] | None,
+    *,
+    config: ConfigBoot,
+    repo: Path,
+    binding: SourceBinding,
+    home: Path,
+    now: datetime,
 ) -> int:
     from base import paths
     from base.packages.extensions import install_registry as reg
     from cli.commands.extensions.skills_sync import assert_repo_source_bound
 
     try:
-        assert_repo_source_bound(repo, meiva_home(), binding)
+        assert_repo_source_bound(repo, home, binding)
     except RuntimeError as e:
         print(f"[meiva skill update] {e}", file=sys.stderr)
         return 1
 
-    sources = _selected_sources(repo, names)
-    skills_root = paths.skills_dir(paths.meiva_home())
+    sources = _selected_sources(repo, names, home=home)
+    skills_root = paths.skills_dir(home)
     skills_root.mkdir(parents=True, exist_ok=True)
-    now = (
-        Clock(ClockConfig("UTC", None, message_timestamp_weekday=False), timers=SYSTEM_TIMERS)
-        .now()
-        .isoformat(timespec="seconds")
-    )
+    stamp = now.isoformat(timespec="seconds")
     landed: list[str] = []
     updated: list[str] = []
     unchanged: list[str] = []
@@ -623,7 +619,7 @@ def cmd_skill_update(
                 s,
                 skills_root,
                 registry,
-                now,
+                stamp,
                 config=config,
                 landed=landed,
                 updated=updated,
@@ -641,7 +637,7 @@ def cmd_skill_update(
     )
 
 
-def cmd_skill_upgrade(name: str) -> int:
+def cmd_skill_upgrade(name: str, *, home: Path, now: datetime) -> int:
     """`meiva skill upgrade <name>` — re-fetch an installed skill package
     from its recorded git source (a private skills repo and other user
     installs).
@@ -673,7 +669,7 @@ def cmd_skill_upgrade(name: str) -> int:
         )
         return 1
 
-    dest = paths.skills_dir(paths.meiva_home()) / name
+    dest = paths.skills_dir(home) / name
     if dest.exists() and install_registry.copy_changed(dest, pkg.installed_hash):
         print(
             f"[meiva skill upgrade] note: '{name}' was modified locally; "
@@ -707,11 +703,7 @@ def cmd_skill_upgrade(name: str) -> int:
             # path does.
             shutil.copytree(pkg_dir, dest, ignore=shutil.ignore_patterns(".git", ".venv"))
 
-        pkg.updated_at = (
-            Clock(ClockConfig("UTC", None, message_timestamp_weekday=False), timers=SYSTEM_TIMERS)
-            .now()
-            .isoformat(timespec="seconds")
-        )
+        pkg.updated_at = now.isoformat(timespec="seconds")
         pkg.installed_hash = install_registry.tree_hash(dest)
         install_registry.register(pkg)
         print(f"[meiva skill upgrade] re-fetched '{name}' from {pkg.source}.")

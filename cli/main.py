@@ -121,14 +121,6 @@ def opt_into_lite_config(
         deliver_lite_api_token(environ, home=home)
 
 
-def _opt_into_lite_config(args_in: list[str]) -> None:
-    from base.paths.home import resolve_meiva_home
-
-    if not args_in or args_in[0] not in _LITE_VERBS:
-        return
-    opt_into_lite_config(args_in, environ=os.environ, home=resolve_meiva_home())
-
-
 # meiva:note
 # Hand `meiva init` the host facts of its caller, the process facts beyond its site.
 #
@@ -386,25 +378,26 @@ def run_command(
     ensure_line_buffered_stdio()
     normalize_process_profile()
     args_in = sys.argv[1:] if argv is None else argv
-    # The checkout gate comes first, before `boot` and before anything loads a
-    # home's configuration: every command is refused unless this CLI belongs to
-    # the home (`cli.preflight.require_own_checkout`).
-    from cli.preflight import require_own_checkout
-
-    checkout = Path(__file__).resolve().parents[1]
-    rc = require_own_checkout(args_in, checkout)
-    if rc is not None:
-        return rc
-    _opt_into_lite_config(args_in)
-    args = parse_command_args(args_in, retained_children=retained_children)
     # meiva:note
-    # The home this command acts on is read here, once, behind the gate above. `declared` is the
+    # The home this command acts on is read here, once, before anything else. `declared` is the
     # path as the environment spells it (a symlinked home is refused when it is created); `home`
-    # is the resolved path every later owner (the init/start site, the command runtime, the
-    # producer) is handed.
+    # is the resolved path every later owner (the checkout gate, the lite-config opt-in, the
+    # init/start site, the command runtime, the producer) is handed.
     from base.paths.home import resolve_meiva_home
 
     declared = resolve_meiva_home()
+    # meiva:note
+    # The checkout gate comes first, before `boot` and before anything loads a home's configuration:
+    # every command is refused unless this CLI belongs to the home (`cli.preflight.check_own_checkout`).
+    from cli.preflight import check_own_checkout
+
+    checkout = Path(__file__).resolve().parents[1]
+    rc = check_own_checkout(args_in, checkout, home=declared)
+    if rc is not None:
+        return rc
+    if args_in and args_in[0] in _LITE_VERBS:
+        opt_into_lite_config(args_in, environ=os.environ, home=declared)
+    args = parse_command_args(args_in, retained_children=retained_children)
     return dispatch_parsed(
         args,
         args_in,

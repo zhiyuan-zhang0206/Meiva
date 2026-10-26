@@ -10,6 +10,7 @@ import sys
 import time
 from collections.abc import Callable, Generator, Mapping, Sequence
 from contextlib import contextmanager
+from pathlib import Path
 from typing import Literal
 
 from base.agents.context.clients import DatabaseFactory
@@ -107,7 +108,7 @@ def record_lifecycle_result(*, outcome: Outcome, seconds: float) -> None:
 # through the command's own database. `enabled=False` is the OS boot job's retried
 # start — nothing asked for it, so there is no operator to attribute and no result
 # worth a row. The caller block and the source commit are read once, when the scope
-# opens.
+# opens, from the `environ` and `home` the command carries.
 #
 # The audit is a write-only sink, so a sink that cannot be built never stops the command: a
 # reading that fails for any reason (a working directory that is gone, a home that cannot be
@@ -120,6 +121,8 @@ def record_lifecycle_result(*, outcome: Outcome, seconds: float) -> None:
 def operator_lifecycle_audit(
     *,
     database_factory: DatabaseFactory,
+    environ: Mapping[str, str],
+    home: Path,
     enabled: bool = True,
 ) -> Generator[CommandAudit, None, None]:
     if not enabled:
@@ -127,8 +130,8 @@ def operator_lifecycle_audit(
             yield command
         return
     try:
-        caller = _caller_identity()
-        head_sha = _head_sha()
+        caller = _caller_identity(environ)
+        head_sha = _head_sha(home, environ)
     except Exception as exc:
         print(
             f"meiva: warning: lifecycle audit could not identify its caller ({exc!r}); "
@@ -153,19 +156,16 @@ def _agent_id(raw: str | None) -> int | None:
     return int(raw) if raw is not None and raw.isdigit() else None
 
 
-def _caller_identity() -> CallerPayload:
-    from base.host.env.registry import process_environment
+def _caller_identity(environ: Mapping[str, str]) -> CallerPayload:
     from base.native_process.root_control.client import caller_identity
 
-    return caller_identity(process_environment())
+    return caller_identity(environ)
 
 
-def _head_sha() -> str | None:
+def _head_sha(home: Path, environ: Mapping[str, str]) -> str | None:
     from base.deploy.git.cluster_drift import prod_source_head_sha
-    from base.host.env.registry import process_environment
-    from base.paths import meiva_home
 
-    return prod_source_head_sha(meiva_home(), environ=process_environment())
+    return prod_source_head_sha(home, environ=environ)
 
 
 # meiva:note

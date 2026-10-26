@@ -81,7 +81,8 @@ equals it is a same-code restart — the two facts the 2026-10-14 outage could n
 be answered from once its logs had rotated (task #5464).
 
 `cli/database/lifecycle_audit.py` owns the writer; the operator command
-that holds the database scopes it with `operator_lifecycle_audit(...)`, which
+that holds the database scopes it with `operator_lifecycle_audit(...)`, passing its
+environment and home, which
 also yields the `CommandAudit` the body calls `exited(code)` on. Recording goes
 through `record_audit_reported`, not a standalone write: `audit_events` is the
 system of record and the unified stream its projection, and a database that is

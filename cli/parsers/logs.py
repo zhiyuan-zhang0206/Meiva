@@ -62,7 +62,7 @@ def _h_logs_retention(args: argparse.Namespace) -> int:
             None if explicit else args.runtime.config.view.observability.log_retention_days
         ),
         dry_run=args.dry_run,
-        logs_path=logs_dir(),
+        logs_path=logs_dir(home=args.runtime.home),
         now=args.runtime.clock.now(),
     )
 
@@ -74,7 +74,7 @@ def _h_logs_rotate(args: argparse.Namespace) -> int:
     return cmd_logs_rotate(
         dry_run=args.dry_run,
         size_mib=args.size_mib,
-        logs_path=logs_dir() if args.logs_path is None else args.logs_path,
+        logs_path=logs_dir(home=args.runtime.home) if args.logs_path is None else args.logs_path,
         now=args.runtime.clock.now(),
     )
 
