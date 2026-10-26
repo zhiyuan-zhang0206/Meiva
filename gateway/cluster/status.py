@@ -314,14 +314,23 @@ async def probe_agent_runner(env: RosterEnv, row: RosterRowSpec) -> MachineStatu
     return _render_answer(env, row, result, observed_at=None)
 
 
-def _local_resource_sample() -> ResourceSample | None:
-    """One live resource reading for the gateway's own machine (no status_snapshot call)."""
+# meiva:note
+# One live resource reading for the gateway's own machine (no status_snapshot call).
+def _local_resource_sample(*, ts: float) -> ResourceSample | None:
+    import subprocess
+
     import psutil
 
-    from base.host.resource_sample import resource_sample
+    from base.host.resource_sample import battery_sample, resource_sample
+    from base.native_process.os_platform import is_macos, primary_disk_path
 
+    platform = "darwin" if is_macos() else "other"
     try:
-        return resource_sample()
+        return resource_sample(
+            ts=ts,
+            disk_path=primary_disk_path(),
+            battery_fn=lambda: battery_sample(platform=platform, run=subprocess.run),
+        )
     except (OSError, psutil.Error):
         # An unreadable disk / process table degrades the row to no resource figures.
         return None
@@ -341,7 +350,7 @@ def read_local_facts(env: RosterEnv, *, with_resource: bool) -> LocalFacts:
         # roster shows the drift.
         running_sha=env.image.sha,
         schema_mismatch=schema_mismatch_status(env.db, local_machine=env.machine.name()),
-        resource=_local_resource_sample() if with_resource else None,
+        resource=_local_resource_sample(ts=utc_now().timestamp()) if with_resource else None,
     )
 
 

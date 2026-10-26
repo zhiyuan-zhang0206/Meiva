@@ -4,11 +4,12 @@ exports = ["ambient.py", "boot.py", "configured.py", "tests"]
 "__init__.py" = ["gateway_access.py", "identity.py"]
 "ambient.py" = ["__init__.py"]
 "boot.py" = ["__init__.py"]
-"configured.py" = ["identity.py"]
+"configured.py" = ["gateway_access.py", "identity.py"]
 "tests" = ["__init__.py", "configured.py"]
 
 [purity]
 "." = "strict-to-be"
+"__init__.py" = "strict"
 "configured.py" = "none"
 "gateway_access.py" = "strict"
 "identity.py" = "strict"
@@ -18,8 +19,5 @@ exports = ["ambient.py", "boot.py", "configured.py", "tests"]
 "ambient.py#settings base.config.settings" = 1
 
 [debt.impure-edge]
-"__init__.py#base/host/db_authority/api.py" = 1
-"__init__.py#base/host/db_authority/unit.py" = 1
-"__init__.py#base/paths/__init__.py" = 1
 "ambient.py#base/config/__init__.py" = 1
 "boot.py#base/config/__init__.py" = 1

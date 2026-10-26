@@ -24,6 +24,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Literal, Never, TypeGuard
 
+from base.clock import SYSTEM_TIMERS, Clock, ClockConfig
 from base.host.atomic_io import AtomicWriter
 from base.native_process.os_platform import file_lock
 
@@ -166,8 +167,17 @@ def locked_freeze_state(*, home: Path) -> Generator[PtyAllocationFreeze]:
         yield _read_unlocked(state_path(home))
 
 
-def freeze(*, home: Path, holder: str, reason: str, writer: AtomicWriter) -> PtyAllocationFreeze:
-    """Create a new operator-owned allocation freeze generation."""
+# meiva:note
+# Create a new operator-owned allocation freeze generation.
+def freeze(
+    *,
+    home: Path,
+    holder: str,
+    reason: str,
+    writer: AtomicWriter,
+    now: dt.datetime | None = None,
+    generation: str | None = None,
+) -> PtyAllocationFreeze:
     if not holder:
         raise ValueError("holder must be non-empty")
     if not reason:
@@ -182,14 +192,20 @@ def freeze(*, home: Path, holder: str, reason: str, writer: AtomicWriter) -> Pty
             raise PtyAllocationAlreadyFrozenError(
                 f"generation {current.generation!r} held by {current.holder!r} is already active"
             )
-        now = dt.datetime.now(dt.UTC)
+        timestamp = (
+            now
+            or Clock(
+                ClockConfig("UTC", None, message_timestamp_weekday=False),
+                timers=SYSTEM_TIMERS,
+            ).now()
+        ).astimezone(dt.UTC)
         payload: dict[str, object] = {
             "schema_version": SCHEMA_VERSION,
             "state": "frozen",
-            "generation": str(uuid.uuid4()),
+            "generation": generation if generation is not None else str(uuid.uuid4()),
             "holder": holder,
             "reason": reason,
-            "created_at": now.isoformat(),
+            "created_at": timestamp.isoformat(),
         }
         write_atomic(path, payload, writer=writer)
         return _parse(payload)

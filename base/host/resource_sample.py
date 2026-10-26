@@ -16,14 +16,11 @@ there is no cadence to keep, nothing to lose on restart, and no drift.
 from __future__ import annotations
 
 import re
-import subprocess
-import time
 from collections.abc import Callable
-from typing import Literal, TypedDict
+from typing import Literal, Protocol, TypedDict
 
+import psutil
 from pydantic import BaseModel, ConfigDict
-
-from base.native_process.os_platform import is_macos, primary_disk_path
 
 # psutil's non-blocking cpu_percent reports the average since the PREVIOUS call
 # in the same process, which is meaningless for a stateless one-shot: the first
@@ -37,6 +34,23 @@ CPU_INTERVAL_S = 0.1
 # consumes this sample. The probe's own 8s budget
 # (MEIVA_STATUS_PROBE_TIMEOUT_SECONDS) sets the ceiling; not an operator knob.
 _BATTERY_READ_TIMEOUT_S = 2.0
+
+
+class _CompletedProcess(Protocol):
+    @property
+    def stdout(self) -> str: ...
+
+
+class _BatteryRunner(Protocol):
+    def __call__(
+        self,
+        args: list[str],
+        *,
+        check: bool,
+        capture_output: bool,
+        text: bool,
+        timeout: float,
+    ) -> _CompletedProcess: ...
 
 
 class _BatteryFields(TypedDict, total=False):
@@ -101,18 +115,15 @@ def parse_battery(out: str) -> _BatteryFields:
     return fields
 
 
+# meiva:note
+# One best-effort battery reading; returns `{}` off macOS, on failure, or when no battery is present.
+# Swallows failures by design so battery telemetry degrades to None fields instead of failing the probe.
 def battery_sample(
     *,
-    platform: str | None = None,
-    run: Callable[..., subprocess.CompletedProcess[str]] = subprocess.run,
+    platform: str,
+    run: _BatteryRunner | None = None,
 ) -> _BatteryFields:
-    """One best-effort battery reading; {} off macOS / on failure / no battery.
-
-    Swallows failures by design: the sample degrades to None fields, it does
-    not fail the probe (unlike the psutil reads, which propagate).
-    """
-    on_macos = is_macos() if platform is None else platform == "darwin"
-    if not on_macos:
+    if platform != "darwin" or run is None:
         return {}
     try:
         out = run(
@@ -122,28 +133,28 @@ def battery_sample(
             text=True,
             timeout=_BATTERY_READ_TIMEOUT_S,
         ).stdout
-    except (OSError, subprocess.SubprocessError):
+    except Exception:
         return {}
     return parse_battery(out)
 
 
+def _empty_battery() -> _BatteryFields:
+    return {}
+
+
+# meiva:note
+# Read this machine's CPU, memory, primary-disk usage, and (on a macOS battery host) battery state right now.
+# Propagates psutil errors so status callers decide whether a missing reading degrades the row or fails the probe.
 def resource_sample(
     *,
+    ts: float,
+    disk_path: str = "/",
     cpu_percent: Callable[[float], float] | None = None,
-    battery_fn: Callable[[], _BatteryFields] = battery_sample,
+    battery_fn: Callable[[], _BatteryFields] = _empty_battery,
 ) -> ResourceSample:
-    """Read this machine's CPU / memory / primary-disk usage — and, on a macOS
-    battery host, its battery state — right now.
-
-    Raises whatever psutil raises (including ImportError when it is absent) —
-    the status callers decide whether a missing reading degrades the row or
-    fails the probe.
-    """
-    import psutil
-
     read_cpu = psutil.cpu_percent if cpu_percent is None else cpu_percent
     mem = psutil.virtual_memory()
-    disk = psutil.disk_usage(primary_disk_path())
+    disk = psutil.disk_usage(disk_path)
 
     # psutil's `percent` is the canonical fullness/pressure figure, but it is
     # measured against a *different* denominator than the naive `.total`, so
@@ -161,7 +172,7 @@ def resource_sample(
     mem_used = mem.total - mem.available
 
     return ResourceSample(
-        ts=time.time(),
+        ts=ts,
         cpu_pct=read_cpu(CPU_INTERVAL_S),
         mem_used_gb=round(mem_used / (1024**3), 2),
         mem_total_gb=round(mem.total / (1024**3), 2),
