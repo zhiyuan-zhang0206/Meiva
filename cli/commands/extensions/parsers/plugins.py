@@ -66,16 +66,16 @@ def _h_plugins_inspect(args: argparse.Namespace) -> int:
     from base.agents.sdk.call_policy import process_sampling_owner
     from cli.commands.extensions.plugins_inspect import cmd_plugins_inspect
 
-    sampling = process_sampling_owner()
+    sampling = process_sampling_owner(args.runtime.rng)
     with sampling.execution():
         return cmd_plugins_inspect(args.name, catalog=build_catalog(sampling=sampling))
 
 
-def _h_plugins_verify(_args: argparse.Namespace) -> int:
+def _h_plugins_verify(args: argparse.Namespace) -> int:
     # Own module for the same reason as `inspect`: it loads the agent layer.
     from cli.commands.extensions.plugins_inspect import cmd_plugins_verify
 
-    return cmd_plugins_verify()
+    return cmd_plugins_verify(rng=args.runtime.rng)
 
 
 def _h_plugins_upgrade(args: argparse.Namespace) -> int:

@@ -6,6 +6,7 @@ from pathlib import Path
 import pytest
 
 from base.clock.tests.manual_timers import ManualTimers
+from base.clock.tests.seeded_rng import seeded_rng
 from base.cluster.machine.configured import ConfiguredMachineIdentity
 from base.config import ConfigBoot
 from base.config.tests.configuration import snapshot_process_config
@@ -36,6 +37,7 @@ def command_runtime(tmp_path: Path) -> CommandRuntime:
         host=fake_host(),
         session=UserSession(user_home=tmp_path / "user", login_shell="/bin/zsh", interactive=False),
         timers=ManualTimers(),
+        rng=seeded_rng(),
         checkout=repo_root(),
         terminal=Terminal(io.StringIO(), io.StringIO(), io.StringIO()),
     )
