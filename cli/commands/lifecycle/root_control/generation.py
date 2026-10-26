@@ -54,7 +54,7 @@ def launch_digest(repo: Path, environment: Mapping[str, str], *, home: Path) -> 
 
 # meiva:note
 # Record the current HEAD for update change detection without failing start.
-def record_running_sha(repo: Path) -> None:
+def record_running_sha(repo: Path, *, home: Path) -> None:
     try:
         result = subprocess.run(
             ["git", "rev-parse", "HEAD"],
@@ -67,6 +67,6 @@ def record_running_sha(repo: Path) -> None:
         if result.returncode == 0:
             from base.deploy.git import running_sha
 
-            running_sha.set(result.stdout.strip())
+            running_sha.set(home, result.stdout.strip())
     except Exception as exc:
         print(f"  · running-sha bookmark skipped ({exc})")

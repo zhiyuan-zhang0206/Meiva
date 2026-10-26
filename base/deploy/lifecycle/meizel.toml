@@ -9,5 +9,4 @@ exports = ["home_lifecycle_locks.py", "launch_failures.py", "pause_markers.py", 
 
 [debt.ambient-read]
 "home_lifecycle_locks.py#clock datetime.datetime.now" = 1
-"pause_markers.py#home base.paths.meiva_home" = 1
 "start_serving.py#random uuid.uuid4" = 1
