@@ -1,13 +1,13 @@
 """Pre-send failures authorize a full-message retry only before the first acknowledgement."""
 
 from pathlib import Path
-from uuid import uuid4
 
 import httpx
 import pytest
 
+from base.clock.tests.fakes import system_clock
 from services.entrypoints.im_bridge.adapters import telegram, weixin
-from services.entrypoints.im_bridge.tests.slices import seeded_rng, system_clock, telegram_config
+from services.entrypoints.im_bridge.tests.slices import system_rng, telegram_config
 from services.entrypoints.im_bridge.types import SendNotStartedError
 
 
@@ -49,14 +49,14 @@ async def test_connect_failure_marker_cannot_escape_after_a_successful_prefix(
                 base_url="https://ilink.example",
                 bot_token="test",  # noqa: S106
                 user_id="owner",
+                saved_at=system_clock().now(),
             )
             adapter = weixin.WeixinAdapter(
                 None,
                 client=client,
                 state_dir=state_dir,
                 clock=system_clock(),
-                new_id=uuid4,
-                rng=seeded_rng(),
+                rng=system_rng(),
             )
             adapter._chunk_delay_seconds = 0
             text = "a" * 3000

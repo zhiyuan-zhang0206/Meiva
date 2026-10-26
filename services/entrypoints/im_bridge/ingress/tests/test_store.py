@@ -1,6 +1,6 @@
 from concurrent.futures import ThreadPoolExecutor
+from random import SystemRandom
 from threading import Barrier
-from uuid import uuid4
 
 import psycopg
 import pytest
@@ -33,7 +33,7 @@ def test_atomic_chat_receipt_replay_survives_deletion_and_selection_change(
 ) -> None:
     first, later = create_agent(db_conn), create_agent(db_conn)
     with database.pool(min_size=1, max_size=2) as pool:
-        store = WeixinIngressStore(pool, new_id=uuid4)
+        store = WeixinIngressStore(pool, rng=SystemRandom())
         binding = store.initialize("https://provider.example", "account")
         binding = store.checkpoint(binding, "", "", provider_empty=True)
         accepted = store.retain(
@@ -77,7 +77,7 @@ def test_fresh_concurrent_sources_commit_only_one_inbound(
     agent = create_agent(db_conn)
     barrier = Barrier(2)
     with database.pool(min_size=2, max_size=2) as pool:
-        store = WeixinIngressStore(pool, new_id=uuid4)
+        store = WeixinIngressStore(pool, rng=SystemRandom())
         binding = store.initialize("https://provider.example", "account")
         binding = store.checkpoint(binding, "", "", provider_empty=True)
 
@@ -104,7 +104,7 @@ def test_command_crash_is_retained_uncertain_and_cursor_can_continue(
     database: Database,
 ) -> None:
     with database.pool(min_size=1, max_size=2) as pool:
-        store = WeixinIngressStore(pool, new_id=uuid4)
+        store = WeixinIngressStore(pool, rng=SystemRandom())
         binding = store.initialize("https://provider.example", "account")
         binding = store.checkpoint(binding, "", "", provider_empty=True)
         retained = store.retain(
@@ -137,7 +137,7 @@ def test_restart_rejects_unclaimed_sources_and_releases_the_checkpoint_guard(
     database: Database,
 ) -> None:
     with database.pool(min_size=1, max_size=2) as pool:
-        store = WeixinIngressStore(pool, new_id=uuid4)
+        store = WeixinIngressStore(pool, rng=SystemRandom())
         binding = store.initialize("https://provider.example", "account")
         binding = store.checkpoint(binding, "", "", provider_empty=True)
         route = IngressRoute(kind=IngressRouteKind.COMMAND, text="/spawn")
@@ -166,7 +166,7 @@ def test_fresh_binding_drains_unproven_backlog_until_a_real_empty_commit(
 ) -> None:
     agent = create_agent(db_conn)
     with database.pool(min_size=1, max_size=2) as pool:
-        store = WeixinIngressStore(pool, new_id=uuid4)
+        store = WeixinIngressStore(pool, rng=SystemRandom())
         draining = store.initialize("https://provider.example", "account")
         assert draining.state.value == "draining" and draining.cursor == ""
         assert store.lookup(draining, source(), {"text": "unknown"}) is None
@@ -204,7 +204,7 @@ def test_account_replacement_fences_the_previous_owner_and_keeps_its_cursor(
     database: Database,
 ) -> None:
     with database.pool(min_size=1, max_size=2) as pool:
-        store = WeixinIngressStore(pool, new_id=uuid4)
+        store = WeixinIngressStore(pool, rng=SystemRandom())
         first = store.initialize("https://provider.example", "account")
         advanced = store.checkpoint(first, "", "opaque-progress")
         store.initialize("https://provider.example", "other-account")
@@ -220,7 +220,7 @@ def test_post_insert_failure_rolls_back_provider_receipt_chat_and_central_audit(
 ) -> None:
     agent = create_agent(db_conn)
     with database.pool(min_size=1, max_size=2) as pool:
-        store = WeixinIngressStore(pool, new_id=uuid4)
+        store = WeixinIngressStore(pool, rng=SystemRandom())
         binding = store.initialize("https://provider.example", "account")
         binding = store.checkpoint(binding, "", "", provider_empty=True)
         with (
@@ -252,7 +252,7 @@ def test_failed_empty_checkpoint_rolls_back_cursor_and_activation_together(
     database: Database,
 ) -> None:
     with database.pool(min_size=1, max_size=2) as pool:
-        store = WeixinIngressStore(pool, new_id=uuid4)
+        store = WeixinIngressStore(pool, rng=SystemRandom())
         draining = store.checkpoint(
             store.initialize("https://provider.example", "account"), "", "opaque-start"
         )

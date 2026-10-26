@@ -21,12 +21,10 @@ import contextlib
 import hashlib
 import json
 import random
-import time
-from collections.abc import Callable
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 from urllib.parse import urlsplit
-from uuid import UUID
 
 import httpx
 
@@ -65,6 +63,7 @@ from services.entrypoints.im_bridge.types import (
     RetryableTransportError,
     SendNotStartedError,
     SendOutcomeUncertainError,
+    new_uuid,
     raise_http_failure,
 )
 
@@ -138,7 +137,13 @@ def load_account(state_dir: Path) -> dict[str, Any] | None:
 # Persist QR-login credentials under `state_dir` atomically and owner-only (0600, via
 # `atomic_write_json`, which every credential-bearing write shares).
 def save_account(
-    state_dir: Path, *, account_id: str, bot_token: str, user_id: str, base_url: str
+    state_dir: Path,
+    *,
+    account_id: str,
+    bot_token: str,
+    user_id: str,
+    base_url: str,
+    saved_at: datetime,
 ) -> None:
     atomic_write_json(
         state_dir / "weixin_account.json",
@@ -147,7 +152,7 @@ def save_account(
             "bot_token": bot_token,
             "user_id": user_id,
             "base_url": base_url,
-            "saved_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+            "saved_at": saved_at.astimezone(UTC).strftime("%Y-%m-%dT%H:%M:%SZ"),
         },
     )
 
@@ -355,7 +360,6 @@ class WeixinAdapter(IMAdapter):
         client: httpx.AsyncClient | None = None,
         clock: Clock,
         rng: random.Random,
-        new_id: Callable[[], UUID],
     ) -> None:
         super().__init__(core)
         self._state_dir = state_dir
@@ -363,7 +367,6 @@ class WeixinAdapter(IMAdapter):
         self._owns_client = client is None
         self._clock = clock
         self._rng = rng
-        self._new_id = new_id
         self._poll_task: asyncio.Task[None] | None = None
         self._running = False
         self._ingress: WeixinIngress | None = None
@@ -511,7 +514,7 @@ class WeixinAdapter(IMAdapter):
                     raise TypeError("Weixin ingress requires TimelineCore")
                 self._ingress = WeixinIngress(
                     self.core,
-                    WeixinIngressStore(self.core.outbound_store.pool, new_id=self._new_id),
+                    WeixinIngressStore(self.core.outbound_store.pool, rng=self._rng),
                     self,
                 )
                 self._binding = await self._ingress.initialize(namespace, self._account_id)
@@ -632,7 +635,7 @@ class WeixinAdapter(IMAdapter):
     async def _send_chunks(self, chat_id: str, chunks: tuple[str, ...]) -> None:
         context_token = self._tokens.get(chat_id)
         for idx, chunk in enumerate(chunks):
-            client_id = self._new_id().hex
+            client_id = new_uuid(self._rng).hex
             try:
                 await self._send_chunk(chat_id, chunk, context_token, client_id)
             except (SendNotStartedError, RetryableTransportError, SendOutcomeUncertainError):

@@ -1,6 +1,7 @@
 """IM intents share atomic acceptance with their timeline or notice producer."""
 
-from collections.abc import Callable, Sequence
+import random
+from collections.abc import Sequence
 from datetime import datetime
 from typing import Any
 from uuid import UUID
@@ -31,6 +32,7 @@ from services.entrypoints.im_bridge.outbound.types import (
     TimelineAcceptance,
     TimelineCandidate,
 )
+from services.entrypoints.im_bridge.types import new_uuid
 
 
 # meiva:note
@@ -49,9 +51,9 @@ def _enforce_claim_fence(conn: Connection, fence: ClaimFence) -> None:
 
 
 class IMOutboxStore:
-    def __init__(self, pool: ConnectionSource | None = None, *, new_id: Callable[[], UUID]) -> None:
+    def __init__(self, pool: ConnectionSource | None = None, *, rng: random.Random) -> None:
         self.pool: ConnectionSource | None = pool
-        self._new_id = new_id
+        self._rng = rng
 
     def _pool(self) -> ConnectionSource:
         if self.pool is None:
@@ -552,7 +554,7 @@ class IMOutboxStore:
             ).fetchone()
             if row is None:
                 return None
-            attempt = self._new_id()
+            attempt = new_uuid(self._rng)
             conn.execute(
                 "UPDATE im_bridge_outbound_intents SET status='sending', attempt_id=%s, started_at=now(), "
                 "outcome_reason='send_result_unconfirmed' WHERE id=%s AND status='queued'",

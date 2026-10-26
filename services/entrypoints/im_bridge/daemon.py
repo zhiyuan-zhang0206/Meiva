@@ -17,13 +17,11 @@ import logging
 import random
 import signal
 import sys
-import uuid
 from collections.abc import Callable, Coroutine
 from dataclasses import dataclass, field
 from functools import partial
 from pathlib import Path
 from typing import Any, Protocol
-from uuid import UUID
 
 from psycopg.errors import ConnectionDoesNotExist, ConnectionFailure
 from psycopg_pool import ConnectionPool, PoolTimeout
@@ -172,10 +170,10 @@ def gateway_client(
     *,
     gateway_url: str,
     access: GatewayAccess,
-    new_id: Callable[[], UUID],
+    rng: random.Random,
 ) -> GatewayClient:
     return GatewayClient(
-        config, gateway_url=gateway_url, auth_headers=gateway_auth_headers(access), new_id=new_id
+        config, gateway_url=gateway_url, auth_headers=gateway_auth_headers(access), rng=rng
     )
 
 
@@ -192,7 +190,6 @@ class AdapterInputs:
     proxy_configured: bool
     clock: Clock
     rng: random.Random
-    new_id: Callable[[], UUID]
 
 
 def adapter_inputs(
@@ -201,7 +198,6 @@ def adapter_inputs(
     state_dir: Path,
     clock: Clock,
     rng: random.Random,
-    new_id: Callable[[], UUID],
 ) -> AdapterInputs:
     environment = config.process_environment()
     return AdapterInputs(
@@ -211,7 +207,6 @@ def adapter_inputs(
         proxy_configured=network_proxy_configured(environment),
         clock=clock,
         rng=rng,
-        new_id=new_id,
     )
 
 
@@ -230,7 +225,6 @@ def _build_adapter(name: str, core: IMBridgeCore, inputs: AdapterInputs) -> IMAd
             state_dir=inputs.state_dir,
             clock=inputs.clock,
             rng=inputs.rng,
-            new_id=inputs.new_id,
         )
     if name == "feishu":
         from services.entrypoints.im_bridge.adapters import feishu
@@ -407,7 +401,6 @@ async def _start(
     timings: DaemonTimings,
     clock: Clock,
     rng: random.Random,
-    new_id: Callable[[], UUID],
 ) -> None:
     config = im_bridge_config(process_config)
     access = gateway_access_from_boot(process_config)
@@ -415,7 +408,7 @@ async def _start(
     # The runtime directory is `<home>/run`, so its parent is the Meiva home.
     state_dir = state_dir_of(runtime.parent)
     client = gateway_client(
-        config, gateway_url=process_config.view.gateway.gateway_url, access=access, new_id=new_id
+        config, gateway_url=process_config.view.gateway.gateway_url, access=access, rng=rng
     )
     core = owned.core = IMBridgeCore(
         config,
@@ -425,7 +418,6 @@ async def _start(
         state_dir=state_dir,
         clock=clock,
         rng=rng,
-        new_id=new_id,
     )
     alerts = AlertOutboundBridge(
         core.outbound_store, core.adapters, enabled=process_config.view.alerts.im_notify_enabled
@@ -448,7 +440,7 @@ async def _start(
     adapters = owned.adapters = load_adapters(
         core,
         plan_adapters(frozenset(config.im_disabled_adapters)),
-        adapter_inputs(process_config, state_dir=state_dir, clock=clock, rng=rng, new_id=new_id),
+        adapter_inputs(process_config, state_dir=state_dir, clock=clock, rng=rng),
     )
     if not adapters:
         _log.warning("im_bridge: no adapters loaded — nothing to serve")
@@ -471,7 +463,6 @@ async def run(
     timings: DaemonTimings = DEFAULT_TIMINGS,
     clock: Clock,
     rng: random.Random,
-    new_id: Callable[[], UUID],
 ) -> None:
     """Start the daemon: healthz -> pidfile -> load adapters -> serve."""
     if _is_running(process_config, runtime=runtime):
@@ -504,7 +495,6 @@ async def run(
                     timings=timings,
                     clock=clock,
                     rng=rng,
-                    new_id=new_id,
                 )
             finally:
                 cleanup_errors.extend(_begin_shutdown(owned.adapters))
@@ -587,7 +577,6 @@ def main() -> None:
                 image=image,
                 clock=Clock(clock_config_from_boot(machine_config), timers=SYSTEM_TIMERS),
                 rng=random.SystemRandom(),
-                new_id=uuid.uuid4,
             )
         )
     except KeyboardInterrupt:

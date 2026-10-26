@@ -6,7 +6,7 @@ from __future__ import annotations
 
 import struct
 from collections.abc import Mapping
-from datetime import datetime
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, Protocol
 
@@ -169,9 +169,11 @@ def current_scale(helper: ScaleHelper, measured: float | None) -> float:
 
 
 # meiva:note
-# The file-name stamp of a capture taken at `moment` (microsecond resolution).
+# The file-name stamp of a capture taken at `moment`, in UTC at microsecond resolution. The retention
+# sweep (`meiva logs retention`) recognizes a capture by this exact shape, and one tool call takes at
+# most one capture, so one stamp names it.
 def snapshot_stamp(moment: datetime) -> str:
-    return moment.strftime("%Y%m%dT%H%M%S%f")
+    return moment.astimezone(UTC).strftime("%Y%m%dT%H%M%S%f")
 
 
 def snapshot_path(agent_id: int | None, *, stamp: str) -> Path:

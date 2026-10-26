@@ -16,12 +16,12 @@ import urllib.request
 from collections.abc import Iterator
 from pathlib import Path
 from typing import Any, cast
-from uuid import uuid4
 
 import psycopg
 import pytest
 from psycopg_pool import ConnectionPool
 
+from base.clock.tests.fakes import system_clock
 from base.cluster.machine import GatewayAccess, GatewayApiTokenMissing, gateway_auth_headers
 from base.config import ConfigBoot
 from base.daemon.health import Liveness, start_health_server
@@ -37,7 +37,7 @@ from services.entrypoints.im_bridge.adapters.run_plan import (
 )
 from services.entrypoints.im_bridge.adapters.telegram import TelegramAdapter
 from services.entrypoints.im_bridge.adapters.weixin import WeixinAdapter
-from services.entrypoints.im_bridge.tests.slices import im_bridge_config, seeded_rng, system_clock
+from services.entrypoints.im_bridge.tests.slices import im_bridge_config, system_rng
 from services.entrypoints.im_bridge.tests.support import DurableAdapter, owned_tasks
 from services.entrypoints.im_bridge.tests.test_im_bridge_core import (
     CoreFactory,
@@ -108,8 +108,7 @@ def _run(
             image=LoadedCommit(Path(), None),
             timings=_TIMINGS,
             clock=system_clock(),
-            rng=seeded_rng(),
-            new_id=uuid4,
+            rng=system_rng(),
             **overrides,
         )
     )
@@ -274,7 +273,7 @@ def test_load_adapters_builds_only_the_enabled_ones(
 ) -> None:
     core = make_core(FakeGateway())
     inputs = daemon.adapter_inputs(
-        process_config, state_dir=state_dir, clock=system_clock(), new_id=uuid4, rng=seeded_rng()
+        process_config, state_dir=state_dir, clock=system_clock(), rng=system_rng()
     )
     loaded = daemon.load_adapters(core, plan_adapters(frozenset({"weixin", "feishu"})), inputs)
     assert [type(adapter) for adapter in loaded] == [TelegramAdapter]
@@ -290,8 +289,7 @@ def test_load_adapters_hands_each_adapter_its_slice(
             process_config,
             state_dir=state_dir,
             clock=system_clock(),
-            new_id=uuid4,
-            rng=seeded_rng(),
+            rng=system_rng(),
         ),
         proxy_configured=True,
     )
@@ -311,7 +309,7 @@ def test_invalid_adapter_configuration_is_not_skipped(
     )
     core = make_core(FakeGateway())
     inputs = daemon.adapter_inputs(
-        process_config, state_dir=state_dir, clock=system_clock(), new_id=uuid4, rng=seeded_rng()
+        process_config, state_dir=state_dir, clock=system_clock(), rng=system_rng()
     )
     with pytest.raises(ValueError, match="qualified HTTPS namespace"):
         daemon.load_adapters(core, plan_adapters(frozenset({"telegram", "feishu"})), inputs)
@@ -344,7 +342,10 @@ def test_the_gateway_client_gets_the_gateway_url_and_bearer_from_the_root() -> N
         gateway_home=False,
     )
     client = daemon.gateway_client(
-        im_bridge_config(), gateway_url="http://gateway.example:8000/", access=access, new_id=uuid4
+        im_bridge_config(),
+        gateway_url="http://gateway.example:8000/",
+        access=access,
+        rng=system_rng(),
     )
     assert client._base == "http://gateway.example:8000"
     assert client._headers() == gateway_auth_headers(access)

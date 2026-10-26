@@ -13,6 +13,7 @@ from pathlib import Path
 import pytest
 
 import services.supervision.healthchecks.computer_mcp as hc
+from base.clock.tests.fakes import system_clock
 from base.db import Database
 from base.host.permissions_helper.client import PermissionsHelperClient
 from base.paths import computer_mcp_socket
@@ -33,6 +34,7 @@ async def daemon_home(database: Database):
             database,
             sock=str(sock),
             helper=PermissionsHelperClient("/unused.sock"),
+            clock=system_clock(),
         )
         server = await asyncio.start_unix_server(daemon.handle, path=str(sock))
         try:

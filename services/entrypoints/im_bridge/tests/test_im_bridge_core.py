@@ -14,16 +14,16 @@ from collections.abc import Callable
 from functools import partial
 from pathlib import Path
 from typing import Any, cast
-from uuid import uuid4
 
 import pytest
 from psycopg_pool import ConnectionPool
 
+from base.clock.tests.fakes import system_clock
 from services.entrypoints.im_bridge import copy
 from services.entrypoints.im_bridge.core import DEFAULT_TYPING, IMBridgeCore, TypingCadence
 from services.entrypoints.im_bridge.cursor_store import PushWatermark
 from services.entrypoints.im_bridge.gateway_client import GatewayClient
-from services.entrypoints.im_bridge.tests.slices import im_bridge_config, seeded_rng, system_clock
+from services.entrypoints.im_bridge.tests.slices import im_bridge_config, system_rng
 from services.entrypoints.im_bridge.tests.support import DurableAdapter, owned_tasks
 from services.entrypoints.im_bridge.types import (
     ChatState,
@@ -184,8 +184,7 @@ def create_test_core(
         state_dir=state_dir,
         typing=typing,
         clock=system_clock(),
-        new_id=uuid4,
-        rng=seeded_rng(),
+        rng=system_rng(),
     )
     telegram = FakePlainAdapter()
     telegram.channel = "telegram"

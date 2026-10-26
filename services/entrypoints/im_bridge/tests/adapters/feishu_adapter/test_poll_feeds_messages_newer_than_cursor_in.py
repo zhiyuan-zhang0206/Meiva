@@ -10,6 +10,7 @@ from types import SimpleNamespace
 
 import pytest
 
+from base.clock.tests.fakes import system_clock
 from base.sessions.tests.poll_until import poll_until_async
 from services.entrypoints.im_bridge.adapters.feishu import FeishuAdapter, backoff_delay
 from services.entrypoints.im_bridge.adapters.feishu_poll_cursor import FeishuListRejected
@@ -25,7 +26,7 @@ from services.entrypoints.im_bridge.tests.adapters.test_feishu_adapter import (
 from services.entrypoints.im_bridge.tests.adapters.test_feishu_adapter import (
     adapter as adapter,
 )
-from services.entrypoints.im_bridge.tests.slices import feishu_config, system_clock
+from services.entrypoints.im_bridge.tests.slices import feishu_config
 from services.entrypoints.im_bridge.tests.support import owned_tasks
 from services.entrypoints.im_bridge.types import (
     HTTPFailure,

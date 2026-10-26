@@ -12,6 +12,7 @@ from typing import cast
 import pytest
 
 from base.clock import Clock, ClockConfig
+from base.clock.tests.fakes import system_clock
 from base.clock.tests.manual_timers import ManualTimers
 from base.db import Database
 from base.db.code_version_gate import ProcessDbGate
@@ -22,7 +23,7 @@ from base.paths import logs_dir
 
 from ... import mcp_daemon as daemon_mod
 from ...protocol import Response
-from ..slices import AuditLog, FakeOcr, computer_use_config, short_sock_dir, system_clock
+from ..slices import AuditLog, FakeOcr, computer_use_config, short_sock_dir
 from ..test_computer_mcp_daemon import (
     SHORT_SESSION,
     FakeHelper,

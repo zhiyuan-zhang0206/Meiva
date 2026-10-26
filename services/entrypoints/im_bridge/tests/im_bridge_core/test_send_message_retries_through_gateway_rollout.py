@@ -12,7 +12,12 @@ from services.entrypoints.im_bridge import copy, daemon
 from services.entrypoints.im_bridge.core import TypingCadence
 from services.entrypoints.im_bridge.cursor_store import PushWatermark
 from services.entrypoints.im_bridge.outbound.retry import retry_backoff_seconds
-from services.entrypoints.im_bridge.tests.slices import gateway_client, im_bridge_config, seeded_rng
+from services.entrypoints.im_bridge.tests.slices import (
+    gateway_client,
+    im_bridge_config,
+    seeded_rng,
+    system_rng,
+)
 from services.entrypoints.im_bridge.tests.support import owned_tasks
 from services.entrypoints.im_bridge.tests.test_im_bridge_core import (
     CoreFactory,
@@ -467,7 +472,7 @@ def test_push_retry_backoff_is_config_backed() -> None:
     assert defaults.im_push_retry_backoff_seconds == 1.0
     assert defaults.im_push_retry_jitter_seconds == 2.0
     fixed = im_bridge_config(im_push_retry_backoff_seconds=1.5, im_push_retry_jitter_seconds=0.0)
-    assert retry_backoff_seconds(fixed, rng=seeded_rng()) == 1.5
+    assert retry_backoff_seconds(fixed, rng=system_rng()) == 1.5
     jittery = im_bridge_config(im_push_retry_backoff_seconds=1.5, im_push_retry_jitter_seconds=2.0)
     rng = seeded_rng()
     delays = [retry_backoff_seconds(jittery, rng=rng) for _ in range(50)]

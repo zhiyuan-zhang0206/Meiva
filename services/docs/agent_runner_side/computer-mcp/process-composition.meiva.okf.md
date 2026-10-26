@@ -20,6 +20,13 @@ One explicit database factory serves the logging pipeline and
 supplies the same gate; the daemon passes the resulting handle to action and
 session audits. Logging construction retains its lazy database dial.
 
+`main` also builds the process's `Clock` from the booted configuration and passes it to
+`run(sock, database=..., clock=...)`, which hands it to `ComputerMcpDaemon` and the loop
+watchdog. The daemon takes every time from it: the task-session envelope's epoch seconds
+(`first_action_at`, `last_action_at`) and the capture stamp that names a screenshot,
+`logs/computer/snapshots/agent-<id>-<UTC YYYYmmddTHHMMSSffffff>.png`. That name is the shape
+`meiva logs retention` matches, so a capture named any other way is never reclaimed.
+
 `run` keeps the existing computer-use configuration, optional socket argument,
 single-instance guard and handler identity. Its shutdown still stops the loop
 watchdog, closes the listener, joins the watchdog within one second, then drains

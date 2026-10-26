@@ -4,6 +4,7 @@ from pathlib import Path
 
 import pytest
 
+from base.clock.tests.fakes import system_clock
 from services.entrypoints.im_bridge.adapters.weixin import (
     load_account,
     ordinary_chat_key,
@@ -23,6 +24,7 @@ def set_account(
         base_url=base_url,
         user_id="bot-user-id",
         bot_token="test-bot-token",  # noqa: S106 — mock-only credential
+        saved_at=system_clock().now(),
     )
 
 

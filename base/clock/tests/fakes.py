@@ -16,6 +16,13 @@ def clock_with_unknown_timezone() -> Clock:
 
 
 # meiva:note
+# A real Clock over the system timers and the wall clock, in UTC: what a process root builds, for a
+# test that does not steer time. A test that does builds a `Clock` over `ManualTimers`.
+def system_clock() -> Clock:
+    return Clock(ClockConfig("UTC", "UTC", False), timers=SYSTEM_TIMERS)
+
+
+# meiva:note
 # A real Clock with a refused wall-time observation, for admission paths that must not ask it.
 # The failure is fixed at construction; no mutable arming flag or process-global patch is needed.
 def clock_rejecting_now() -> Clock:

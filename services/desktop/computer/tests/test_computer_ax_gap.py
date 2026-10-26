@@ -12,18 +12,14 @@ from typing import Any
 
 import pytest
 
+from base.clock.tests.fakes import system_clock
 from base.db import Database
 from base.host.permissions_helper.client import AxNode, AxTreeResult
 from services.desktop.computer import ax_gap
 from services.desktop.computer.ax_gap import Frame, VisualBox
 from services.desktop.computer.errors import ComputerUseError
 from services.desktop.computer.mcp_daemon import ComputerMcpDaemon
-from services.desktop.computer.tests.slices import (
-    FakeDesktopHelper,
-    FakeOcr,
-    computer_use_config,
-    system_clock,
-)
+from services.desktop.computer.tests.slices import FakeDesktopHelper, FakeOcr, computer_use_config
 
 WINDOW = (0.0, 0.0, 1000.0, 800.0)
 

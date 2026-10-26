@@ -1,7 +1,6 @@
 import asyncio
 import json
 from pathlib import Path
-from uuid import uuid4
 
 import httpx
 import psycopg
@@ -12,7 +11,7 @@ from services.entrypoints.im_bridge.gateway_client import GatewayClient
 from services.entrypoints.im_bridge.tests.adapters.test_weixin_adapter import env as env
 from services.entrypoints.im_bridge.tests.adapters.test_weixin_chat_identity import inbound_key
 from services.entrypoints.im_bridge.tests.conftest import state_dir as state_dir
-from services.entrypoints.im_bridge.tests.slices import im_bridge_config
+from services.entrypoints.im_bridge.tests.slices import im_bridge_config, system_rng
 
 
 def create_agent(conn: psycopg.Connection) -> int:
@@ -47,7 +46,7 @@ async def test_same_event_changed_body_or_selection_does_not_claim_recovery(
             im_bridge_config(im_send_retry_delays=(0.0,)),
             gateway_url="http://test-gateway",
             auth_headers={},
-            new_id=uuid4,
+            rng=system_rng(),
         )
         client._client = transport
         await client.send_message(first_agent, "same", idempotency_key=key)

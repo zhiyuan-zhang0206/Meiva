@@ -57,14 +57,13 @@ import os
 import signal
 import sys
 import threading
-import time
 from collections.abc import Callable
 from contextlib import suppress
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from base.clock import SYSTEM_TIMERS, Clock
+from base.clock import SYSTEM_TIMERS, Clock, Timers
 from base.clock.configuration import clock_config_from_boot
 from base.cluster.dataplane.direct_url import ClusterDirectUrl
 from base.cluster.machine.configured import ConfiguredMachineIdentity
@@ -143,20 +142,21 @@ _WATCHDOG_CHECK_S = 5.0  # watchdog-thread check interval (watchdog sampling det
 # while a live loop keeps the watchdog silent no matter how long a *caller* waits. The exit
 # is `dump_and_exit`, which ends the process, so a stall never returns to the caller.
 class LoopWatchdog(threading.Thread):
-    def __init__(self, stall_s: float, *, check_s: float) -> None:
+    def __init__(self, stall_s: float, *, check_s: float, timers: Timers) -> None:
         super().__init__(name="computer-mcp-loop-watchdog", daemon=True)
         self._stall_s = stall_s
         self._check_s = check_s
-        self._beat = time.monotonic()
+        self._timers = timers
+        self._beat = timers.monotonic()
         self._stopped = threading.Event()
 
     def beat(self) -> None:
         """Prove the loop is alive (called from the loop's tick callback)."""
-        self._beat = time.monotonic()
+        self._beat = self._timers.monotonic()
 
     def stale_for(self) -> float:
         """Seconds since the last beat."""
-        return time.monotonic() - self._beat
+        return self._timers.monotonic() - self._beat
 
     @property
     def stopped(self) -> bool:
@@ -167,7 +167,9 @@ class LoopWatchdog(threading.Thread):
 
     def run(self) -> None:
         while not self._stopped.wait(self._check_s):
-            if loop_is_silent(now=time.monotonic(), last_beat=self._beat, stall_s=self._stall_s):
+            if loop_is_silent(
+                now=self._timers.monotonic(), last_beat=self._beat, stall_s=self._stall_s
+            ):
                 dump_and_exit(f"run loop silent for over {self._stall_s}s")
                 return
 
@@ -205,11 +207,12 @@ def guard_loop_liveness(
     loop: asyncio.AbstractEventLoop,
     stall_s: float,
     *,
+    timers: Timers,
     beat_s: float = _WATCHDOG_BEAT_S,
     check_s: float = _WATCHDOG_CHECK_S,
 ) -> LoopWatchdog:
     stall_s = effective_stall_s(stall_s)
-    watchdog = LoopWatchdog(stall_s, check_s=check_s)
+    watchdog = LoopWatchdog(stall_s, check_s=check_s, timers=timers)
     watchdog.start()
     beat_interval = beat_interval_s(beat_s, stall_s)
 
@@ -647,7 +650,9 @@ async def run(
             limit=LINE_LIMIT,
         )
         logger.info(f"[computer-mcp] listening on {path}")
-        watchdog = guard_loop_liveness(asyncio.get_running_loop(), config.computer_use_loop_stall_s)
+        watchdog = guard_loop_liveness(
+            asyncio.get_running_loop(), config.computer_use_loop_stall_s, timers=clock
+        )
         stop = asyncio.Event()
 
         def _stop() -> None:

@@ -5,9 +5,9 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
-from collections.abc import AsyncGenerator, Callable, Mapping
+import random
+from collections.abc import AsyncGenerator, Mapping
 from typing import Any, Literal
-from uuid import UUID
 
 import httpx
 
@@ -18,6 +18,7 @@ from services.entrypoints.im_bridge.types import (
     AgentDetail,
     AgentDirectoryPage,
     RetryableTransportError,
+    new_uuid,
     raise_http_failure,
     retryable_http_status,
 )
@@ -34,14 +35,14 @@ class GatewayClient:
         *,
         gateway_url: str,
         auth_headers: Mapping[str, str],
-        new_id: Callable[[], UUID],
+        rng: random.Random,
     ) -> None:
         self._config = config
         self._base = gateway_url.rstrip("/")
         # The machine API token's Bearer (`gateway_auth_headers()`).
         self._auth_headers = dict(auth_headers)
         self._client: httpx.AsyncClient | None = None
-        self._new_id = new_id
+        self._rng = rng
 
     async def _http(self) -> httpx.AsyncClient:
         if self._client is None:
@@ -90,7 +91,7 @@ class GatewayClient:
         Idempotency-Key, so the server dedups even after a lost response. Once
         the retries are exhausted the error propagates; nothing is persisted
         or replayed later."""
-        key = idempotency_key or self._new_id().hex
+        key = idempotency_key or new_uuid(self._rng).hex
         headers = {**self._headers(), **keyed_headers(key)}
         for attempt, delay in enumerate(self._config.im_send_retry_delays, start=1):
             try:
@@ -143,7 +144,7 @@ class GatewayClient:
         config: dict[str, object] | None,
         idempotency_key: str | None = None,
     ) -> int:
-        key = self._new_id().hex if idempotency_key is None else idempotency_key
+        key = new_uuid(self._rng).hex if idempotency_key is None else idempotency_key
         client = await self._http()
         payload: dict[str, object] = {"spawner": "user"}
         if config:

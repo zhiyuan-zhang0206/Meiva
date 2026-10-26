@@ -4,6 +4,7 @@ from __future__ import annotations
 # Heartbeat and IM entries compose their database handle, health server, and cleanup from their owners.
 import asyncio
 import json
+import random
 import socket
 import time
 from collections.abc import Callable, Coroutine
@@ -99,6 +100,15 @@ def _start_entry(
         runtime=runtime,
         database=database,
         image=image,
+        clock=Clock(
+            ClockConfig(
+                timezone="UTC",
+                authoritative_timezone="UTC",
+                message_timestamp_weekday=False,
+            ),
+            timers=SYSTEM_TIMERS,
+        ),
+        rng=random.SystemRandom(),
     )
 
 

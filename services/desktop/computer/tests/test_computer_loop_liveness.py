@@ -15,9 +15,10 @@ from typing import cast
 import pytest
 
 import services.desktop.computer.mcp_daemon as daemon_mod
+from base.clock.tests.fakes import system_clock
 from base.db import Database
 from base.host.permissions_helper.client import PermissionsHelperClient
-from services.desktop.computer.tests.slices import short_sock_dir, system_clock
+from services.desktop.computer.tests.slices import short_sock_dir
 
 _CHILD = Path(__file__).with_name("loop_watchdog_child.py")
 _REPO_ROOT = Path(__file__).resolve().parents[4]
@@ -54,7 +55,7 @@ def test_a_live_loop_outlasts_the_window_and_shuts_down_cleanly() -> None:
 
 async def test_guard_loop_liveness_beats_from_the_loop() -> None:
     watchdog = daemon_mod.guard_loop_liveness(
-        asyncio.get_running_loop(), 1.0, beat_s=0.01, check_s=5.0
+        asyncio.get_running_loop(), 1.0, timers=system_clock(), beat_s=0.01, check_s=5.0
     )
     try:
         await asyncio.sleep(0.3)
