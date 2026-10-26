@@ -10,10 +10,10 @@ from __future__ import annotations
 
 from typing import Protocol
 
+from loguru import logger
 from redis.exceptions import ResponseError
 
 from base.cluster import inbound_channel
-from base.log import logger
 
 __all__ = ["publish_inbound_wake"]
 

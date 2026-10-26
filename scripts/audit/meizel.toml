@@ -12,11 +12,7 @@ purity = "strict-to-be"
 "schema_drift.py" = { kinds = ["settings"], why = "CLI schema drift audit falls back to the deployment database URL from settings when --dsn is omitted" }
 
 [debt.impure-call]
-"branch_protection.py#Path.read_text" = 1
 "branch_protection.py#import subprocess" = 1
-"branch_protection.py#import urllib" = 1
-"schema_drift.py#Path.exists" = 1
-"schema_drift.py#Path.read_text" = 2
 "schema_drift.py#Path.write_text" = 1
 "schema_drift.py#import psycopg" = 1
 "where_used_scan.py#import subprocess" = 1

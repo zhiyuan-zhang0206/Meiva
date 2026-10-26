@@ -40,12 +40,11 @@ from dataclasses import dataclass
 from types import ModuleType, SimpleNamespace
 from typing import Any
 
-from base.agents.sdk.call_policy import SamplingPolicyOwner
 from base.agents.sdk.capture import SdkCaptureOwner
 from base.agents.sdk.tally import SdkCallTally
 from meiva.sdk_surface import process_context
 from meiva.sdk_surface.discovery import agent_visible_names
-from meiva.sdk_surface.installation import EventPipelines, installed
+from meiva.sdk_surface.installation import EventPipelines, SamplingPolicyOwner, installed
 from meiva.sdk_surface.pure.caller.identity_plan import caller_facts
 from meiva.sdk_surface.pure.caller.usage_plan import usage_identity
 

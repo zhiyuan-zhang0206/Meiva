@@ -18,10 +18,11 @@ from concurrent.futures import Future, ThreadPoolExecutor
 from dataclasses import dataclass
 from typing import assert_never
 
+from loguru import logger
+
 from base.lm.catalog import ModelCatalog
 from base.lm.catalog.decide.types import DecisionError, YesNo, estimate_tokens, question_text
 from base.lm.catalog.provider_keys import ProviderKeys
-from base.log import logger
 
 from .pure.media.injection_plan import CheckStep, check_text, plan_check, split_for_model
 
