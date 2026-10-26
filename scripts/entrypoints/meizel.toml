@@ -6,6 +6,9 @@ purity = "strict-to-be"
 [roots]
 "agent.py" = { kinds = ["random"], why = "CLI bootstrap entrypoint generates a fresh UUID4 idempotency key for the spawn request" }
 
+[debt.ambient-read]
+"agent.py#settings base.cluster.machine.ambient.gateway_access_from_settings" = 1
+
 [debt.impure-call]
 "agent.py#uuid.uuid4" = 1
 

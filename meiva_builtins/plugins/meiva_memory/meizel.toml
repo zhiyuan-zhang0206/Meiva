@@ -21,3 +21,16 @@ exports = ["metrics.py"]
 "notes.py" = { kinds = ["clock"], why = "Context note builders stamp shared and per-agent memory index notes with current UTC time" }
 "pool_ops.py" = { kinds = ["environ"], why = "Memory pool helper resolves MEIVA_MACHINE_NAME from process environment before falling back to home .env" }
 "setup.py" = ["settings"]
+
+[debt.ambient-read]
+"agent_runtime.py#home base.paths.memory_dir" = 2
+"agent_runtime.py#home base.paths.workspace_dir" = 1
+"inherit.py#home base.paths.workspace_dir_readonly" = 1
+"notes.py#home base.paths.memory_dir" = 1
+"notes.py#home base.paths.workspace_dir" = 1
+"pool_ops.py#home base.paths.home.resolve_meiva_home" = 3
+"sdk.py#home base.paths.meiva_home" = 1
+"sdk.py#home base.paths.workspace_dir" = 1
+"setup.py#home base.paths.gateway_memory_dir" = 1
+"setup.py#home base.paths.memory_dir" = 1
+"written_notes.py#home base.paths.workspace_dir" = 1

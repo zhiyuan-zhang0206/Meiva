@@ -23,3 +23,7 @@ exports = ["__main__.py", "commands", "database", "fleet_update", "main.py", "pa
 "python_install.py" = { kinds = ["cwd", "environ"], why = "Pre-venv stdlib bootstrap inspects working directory and environment before launching uv" }
 "start_identity.py" = { kinds = ["clock", "random"], why = "First-boot identity provisioning mints fresh cluster/api secrets and records initial timestamps" }
 "start_intent.py" = { kinds = ["environ"], why = "Identity bootstrap precedes Settings: read the birth inputs and pin the resolved home before config imports." }
+
+[debt.ambient-read]
+"main.py#home base.paths.home.resolve_meiva_home" = 2
+"preflight.py#home base.paths.home.resolve_meiva_home" = 1

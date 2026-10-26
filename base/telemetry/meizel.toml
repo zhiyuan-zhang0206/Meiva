@@ -24,5 +24,7 @@ exports = ["alerts", "audit_events.py", "converge_report.py", "delivery", "emitt
 [debt.ambient-read]
 "emitter.py#clock datetime.datetime.now" = 1
 "lgtm_local.py#settings base.config.settings" = 1
+"observability.py#home base.paths.meiva_home" = 1
+"pipeline_build.py#environ base.host.env.registry.process_environment" = 1
 "process_logging.py#pid os.getpid" = 1
 "trace_mirror.py#clock datetime.datetime.now" = 1

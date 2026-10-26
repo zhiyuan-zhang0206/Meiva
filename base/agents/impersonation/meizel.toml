@@ -21,3 +21,7 @@ exports = ["delivery.py", "event_signals.py", "history.py", "host_transport.py",
 
 [roots]
 "host_transport.py" = { kinds = ["environ"], why = "CODEX_HOME is provider routing context, not cluster configuration; the shared transport preserves the CLI socket resolution contract" }
+
+[debt.ambient-read]
+"history.py#home base.paths.workspace_dir" = 1
+"host_transport.py#home base.paths.meiva_home" = 1

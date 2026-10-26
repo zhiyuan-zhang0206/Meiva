@@ -12,3 +12,6 @@ exports = ["daemon.py", "labeler.py", "tests"]
 
 [roots]
 "daemon.py" = ["settings"]
+
+[debt.ambient-read]
+"daemon.py#home base.paths.meiva_home" = 1

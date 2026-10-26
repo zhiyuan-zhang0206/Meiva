@@ -12,3 +12,10 @@ exports = ["diagnostic_probes.py", "manifests.py"]
 [roots]
 "diagnostic_probes.py" = { kinds = ["settings"], why = "Host diagnostic probes read configured endpoints and ports" }
 "glue.py" = { kinds = ["settings"], why = "Root supervisor startup composes process-owned handles and configuration" }
+
+[debt.ambient-read]
+"diagnostic_probes.py#environ base.native_process.child_env.inherited_process_env" = 1
+"diagnostic_probes.py#home base.paths.meiva_home" = 2
+"diagnostics.py#home base.paths.meiva_home" = 1
+"glue.py#home base.paths.meiva_home" = 1
+"glue.py#platform base.native_process.os_platform.Platform.current" = 1

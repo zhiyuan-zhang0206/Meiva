@@ -4,3 +4,6 @@
 [purity]
 "__init__.py" = "strict"
 "plugin.py" = "strict"
+
+[debt.ambient-read]
+"agent_runtime.py#home base.paths.workspace_dir" = 1

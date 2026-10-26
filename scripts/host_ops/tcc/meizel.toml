@@ -6,3 +6,9 @@
 "helper-signing.py" = { kinds = ["clock"], why = "operator signing CLI timestamps detached logs and helper backup directories" }
 "onboard-helper-grants.py" = { kinds = ["home", "pid", "platform"], why = "macOS TCC onboarding CLI checks the host platform, resolves guarded folders under $HOME, and stamps the run report with PID and nodename" }
 "request_grants_evidence.py" = { kinds = ["clock", "platform"], why = "macOS TCC grant-request evidence CLI checks the host platform and timestamps the tccd log window" }
+
+[debt.ambient-read]
+"helper-signing.py#home base.paths.logs_dir" = 1
+"helper-signing.py#home base.paths.permissions_helper_app_dir" = 3
+"onboard-helper-grants.py#environ base.host.env.registry.process_environment" = 1
+"request_grants_evidence.py#home base.paths.meiva_home" = 1

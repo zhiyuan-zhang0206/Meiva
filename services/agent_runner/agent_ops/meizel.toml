@@ -13,3 +13,8 @@ exports = ["boot.py", "daemon.py", "dispatch_sync.py", "in_flight.py", "tests"]
 
 [roots]
 "daemon.py" = { kinds = ["settings"], why = "Service or operator process entry boots configuration before composing its resources" }
+
+[debt.ambient-read]
+"boot.py#settings base.cluster.machine.ambient.gateway_access_from_settings" = 1
+"daemon.py#home base.paths.meiva_home" = 4
+"daemon.py#home base.paths.workspaces_root" = 1

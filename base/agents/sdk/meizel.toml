@@ -9,3 +9,6 @@ exports = ["call_policy.py", "capture.py", "tally.py", "telemetry.py", "tests"]
 "__init__.py" = "strict"
 "capture.py" = "strict"
 "tally.py" = "strict"
+
+[debt.ambient-read]
+"call_policy.py#environ base.host.env.registry.process_environment" = 1

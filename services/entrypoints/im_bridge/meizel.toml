@@ -22,3 +22,6 @@ exports = ["daemon.py", "gateway_client.py", "ingress", "tests", "types.py"]
 
 [roots]
 "daemon.py" = ["settings"]
+
+[debt.ambient-read]
+"daemon.py#home base.paths.meiva_home" = 1

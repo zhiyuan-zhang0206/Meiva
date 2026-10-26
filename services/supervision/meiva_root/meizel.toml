@@ -23,3 +23,6 @@ exports = ["__main__.py", "failure_state.py", "health.py", "inputs.py", "manifes
 
 [purity]
 "helper_chain_plan.py" = "strict"
+
+[debt.ambient-read]
+"supervisor.py#environ base.native_process.child_env.inherited_process_env" = 1

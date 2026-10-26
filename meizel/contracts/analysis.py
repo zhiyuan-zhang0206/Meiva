@@ -9,7 +9,13 @@ from concurrent.futures import ProcessPoolExecutor
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from meizel.contracts.ambient_read import ambient_diagnostics, sources_from, stale_roots
+from meizel.contracts.ambient_read import (
+    ambient_diagnostics,
+    reader_problems,
+    sources_from,
+    stale_readers,
+    stale_roots,
+)
 from meizel.contracts.debt import file_key, set_debt
 from meizel.contracts.enumerations import check as check_roles
 from meizel.contracts.ledger import debts_in, reconcile
@@ -558,10 +564,11 @@ def analyze(
     policy, policy_problems = load_policy(universe)
     diagnostics.extend(policy_problems)
     diagnostics.extend(check_policy(manifests, policy))
+    diagnostics.extend(reader_problems(policy))
     root_manifest = manifests.get("")
     diagnostics.extend(check_roles(universe, root_manifest.roles if root_manifest else {}))
     scope = None if changed is None else frozenset(changed)
-    sources = sources_from(manifests, policy)
+    sources = sources_from(manifests, policy, universe)
     scans = (
         scan_all(universe, sources, jobs, policy=policy)
         if scope is None
@@ -598,6 +605,7 @@ def analyze(
         )
         diagnostics.extend(_stale_diagnostics(manifests, stale))
         diagnostics.extend(stale_roots(scans, manifests))
+        diagnostics.extend(stale_readers(universe, policy))
         diagnostics.extend(paid_strict_to_be(manifests, purity_diags))
     diagnostics.extend(purity_diags)
     diagnostics = _distinct(diagnostics)

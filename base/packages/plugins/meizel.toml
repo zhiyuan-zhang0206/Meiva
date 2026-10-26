@@ -28,7 +28,12 @@ exports = ["activation.py", "config_face.py", "config_registration.py", "config_
 "plugin_errors.py" = "strict"
 
 [debt.ambient-read]
+"config_face.py#home base.paths.home.resolve_meiva_home" = 1
+"config_view.py#environ base.host.env.registry.process_environment" = 2
+"enable_config.py#home base.paths.meiva_home" = 1
 "flags.py#settings base.config.settings" = 1
+"manifest.py#environ base.host.git.gitenv.git_env" = 1
+"mcp_enabled.py#home base.paths.meiva_home" = 1
 
 [debt.any-collaborator]
 "extensions.py#any GraphHook.__call__.config" = 1

@@ -23,3 +23,10 @@ exports = ["archive.py", "check.py", "config.py", "probe.py", "restore.py", "sta
 "probe.py" = { kinds = ["clock"], why = "Cluster health probe entrypoint reads current UTC time to evaluate WAL-G tick and drill freshness" }
 "restore.py" = { kinds = ["clock"], why = "Operator restore command bounds recovery wait and narrates elapsed phase duration" }
 "tick.py" = { kinds = ["clock"], why = "Daily WAL-G tick entrypoint stamps step records with current UTC time" }
+
+[debt.ambient-read]
+"config.py#home base.paths.meiva_home" = 1
+"restore.py#environ base.native_process.child_env.daemon_process_env" = 1
+"restore.py#home base.paths.meiva_home" = 1
+"runner.py#environ base.native_process.child_env.daemon_process_env" = 1
+"state.py#home base.paths.meiva_home" = 1

@@ -10,3 +10,6 @@ exports = ["intermediates.py", "names.py", "offsite.py", "offsite_plan.py", "pas
 
 [roots]
 "passphrase.py" = { kinds = ["random"], why = "Mints a random 256-bit logical-backup passphrase at home birth" }
+
+[debt.ambient-read]
+"passphrase.py#home base.paths.meiva_home" = 1

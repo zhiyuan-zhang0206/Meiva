@@ -10,3 +10,8 @@ exports = ["cleanup_failures.py", "configuration.py", "graceful_exit.py", "insta
 
 [roots]
 "configuration.py" = { kinds = ["settings"], why = "Agent host process bootstrap constructs configuration and process home" }
+
+[debt.ambient-read]
+"configuration.py#environ meiva.boot.process_disable_entries" = 1
+"configuration.py#home base.paths.home.resolve_meiva_home" = 1
+"configuration.py#home base.paths.meiva_home" = 1

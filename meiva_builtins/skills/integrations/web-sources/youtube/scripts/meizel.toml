@@ -7,3 +7,6 @@ exports = ["feed.py"]
 
 [roots]
 "yt_run.py" = { kinds = ["clock"], why = "YouTube sync runner stamps fetched items with current UTC time" }
+
+[debt.ambient-read]
+"feed.py#home base.paths.home.resolve_meiva_home" = 1

@@ -10,3 +10,7 @@
 
 [roots]
 "agent_runtime.py" = { kinds = ["clock"], why = "Plugin runtime hook stamps emitted soft-limit reminder notes with current UTC time" }
+
+[debt.ambient-read]
+"agent_runtime.py#home base.paths.workspace_dir" = 1
+"written.py#home base.paths.workspace_dir" = 1

@@ -29,7 +29,10 @@ exports = ["admin", "agent_pins.py", "base.py", "config_registry.py", "domains",
 "_lite.py" = { kinds = ["environ"], why = "the boot-lite resolution layer IS the Settings bootstrap: it reads raw env aliases and plants the placeholder data-plane URLs before any sub-model exists — the same \"cannot depend on Settings by construction\" class as base/config/__init__.py" }
 
 [debt.ambient-read]
+"_full.py#home base.paths.home.resolve_meiva_home" = 1
 "_lite.py#clock time.time" = 1
+"_lite.py#home base.paths.home.resolve_meiva_home" = 2
+"base.py#home base.paths.home.resolve_meiva_home" = 1
 
 [debt.any-collaborator]
 "__init__.py#any __getattr__.return" = 1

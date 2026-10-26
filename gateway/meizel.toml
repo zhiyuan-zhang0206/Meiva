@@ -21,3 +21,7 @@ exports = ["agents", "alerts", "app.py", "cluster", "events", "http", "mcp_serve
 
 [roots]
 "app.py" = { kinds = ["clock", "settings"], why = "Gateway process and cold schema entry compose their configuration and request clock here" }
+
+[debt.ambient-read]
+"app.py#home base.paths.meiva_home" = 1
+"app.py#home base.paths.resolve_meiva_home" = 1

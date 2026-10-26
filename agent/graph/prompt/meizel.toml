@@ -19,3 +19,6 @@ exports = ["capabilities.py", "compaction.py", "context_notes.py", "conversation
 
 [roots]
 "context_notes.py" = { kinds = ["home"], why = "agent_id_note resolves workspace_facts relative to the host user home directory" }
+
+[debt.ambient-read]
+"system_prompt.py#home base.paths.workspace_dir" = 1
