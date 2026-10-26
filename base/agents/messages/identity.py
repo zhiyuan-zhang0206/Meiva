@@ -16,7 +16,7 @@ def _is_object_list(value: object) -> TypeGuard[list[Any]]:
     return isinstance(value, list)
 
 
-def normalize_stored_message_ids(value: Any) -> Any:
+def normalize_stored_message_ids(value: object) -> Any:
     """Mark IDs missing in stored data before a reducer can synthesize a UUID.
 
     This is a read/replay boundary, never a working-copy/new-delta boundary.

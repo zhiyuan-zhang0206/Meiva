@@ -74,6 +74,10 @@ def receipt_path(data: Path) -> Path:
     return _data_path(data).parent / "run" / "postgres.json"
 
 
+def _monotonic() -> float:
+    return time.monotonic()
+
+
 def _inode(path: Path) -> tuple[int, int]:
     info = path.stat()
     return info.st_dev, info.st_ino
@@ -382,10 +386,10 @@ def _complete_start(
 ) -> OwnedProcess:
     """One readiness and durable admission boundary for fresh and retained births."""
     owner = receipt.process()
-    deadline = time.monotonic() + timeout
+    deadline = _monotonic() + timeout
     while owner.live():
         protocol_ready = ready()
-        if time.monotonic() >= deadline:
+        if _monotonic() >= deadline:
             raise RuntimeError("PostgreSQL did not become ready; captured custody is retained")
         if protocol_ready:
             _require_process(data, receipt)
@@ -482,9 +486,9 @@ class Escalation:
 
 
 def _wait_all_gone(members: set[OwnedProcess], wait: float) -> bool:
-    deadline = time.monotonic() + wait
+    deadline = _monotonic() + wait
     while any(member.live() for member in members):
-        if time.monotonic() >= deadline:
+        if _monotonic() >= deadline:
             return False
         time.sleep(0.05)
     return True

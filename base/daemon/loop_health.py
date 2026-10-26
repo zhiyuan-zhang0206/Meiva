@@ -7,6 +7,10 @@ from datetime import UTC, datetime
 from base.clock import Timers
 
 
+def _now_iso() -> str:
+    return datetime.now(UTC).isoformat()
+
+
 class LoopProgress:
     """Progress for one loop, closing shared-heartbeat masking by moving only
     for completed work and making ``fail()`` irreversible until respawn."""
@@ -24,10 +28,10 @@ class LoopProgress:
         self._last = self._timers.monotonic()
 
     def mark_success(self) -> None:
-        self._last_success_at = datetime.now(UTC).isoformat()
+        self._last_success_at = _now_iso()
 
     def mark_error(self, message: str) -> None:
-        self._last_error = {"message": message, "at": datetime.now(UTC).isoformat()}
+        self._last_error = {"message": message, "at": _now_iso()}
 
     def fail(self, message: str) -> None:
         self._wedged = True

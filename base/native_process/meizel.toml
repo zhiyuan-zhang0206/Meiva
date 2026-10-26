@@ -23,8 +23,7 @@ exports = ["child_env.py", "code_version.py", "evidence.py", "exec_domain.py", "
 "ownership.py" = { kinds = ["environ"], why = "process_metadata records CODEX_HOME, the provider routing context the impersonation relay spec needs — a child-env handoff read, not persisted cluster config" }
 
 [debt.ambient-read]
-"os_platform.py#clock time.monotonic" = 2
-"os_platform.py#home pathlib.Path.home" = 1
+"os_platform.py#clock time.monotonic" = 1
 "os_platform.py#pid os.getpid" = 1
 "os_platform.py#pid os.getuid" = 1
 "os_platform.py#platform platform.machine" = 1

@@ -268,7 +268,7 @@ def scan_label_only_calls(repo: Path) -> list[LabelOnlyCall]:
 
 def main() -> int:
     ap = argparse.ArgumentParser(description=(__doc__ or "").split("\n\n")[0])
-    ap.add_argument("--repo", default=str(Path.home() / "Meiva"))
+    ap.add_argument("--repo", default=str(Path(__file__).resolve().parents[2]))
     args = ap.parse_args()
 
     event_kinds, event_type_kinds, sse_roles = scan_code(Path(args.repo))

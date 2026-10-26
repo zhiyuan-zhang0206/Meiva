@@ -5,6 +5,3 @@ exports = ["builtin_schedules.py", "completion_notices.py", "inputs.py", "watche
 
 [purity]
 "__init__.py" = "strict"
-
-[debt.ambient-read]
-"watcher.py#clock datetime.datetime.now" = 1

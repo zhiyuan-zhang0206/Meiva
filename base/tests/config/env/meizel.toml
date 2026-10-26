@@ -3,6 +3,3 @@
 "test_dotenv_boot_launcher_context.py" = ["test_dotenv_boot.py"]
 "test_file_lock_bounded.py" = ["_file_lock_holder.py"]
 "test_registry.py" = ["_env_import_child.py"]
-
-[debt.unresolved-patch]
-"test_file_lock_bounded.py#monkeypatch.setattr module.file_lock" = 1
