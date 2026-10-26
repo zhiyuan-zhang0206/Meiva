@@ -205,14 +205,14 @@ def test_register_dispatches_to_the_platform(job_roots: JobRoots, default_home: 
     ]
 
 
-def test_unregister_delegates_to_the_platform(
-    default_home: Path,
-) -> None:
+def test_unregister_delegates_to_the_platform(job_roots: JobRoots, default_home: Path) -> None:
     plist = job.launchd_plist_path(user_home=default_home)
     plist.parent.mkdir(parents=True, exist_ok=True)
     plist.write_text("<plist/>", encoding="utf-8")
     commands, host = _launchctl()
 
-    job.unregister_packages_job(host=host, user_home=default_home)
+    job.unregister_packages_job(
+        host=host, roots=replace(job_roots, home=default_home / ".meiva", user_home=default_home)
+    )
     assert not plist.exists()
     assert [argv[1] for argv in commands.argvs if argv[1] != "print"] == ["bootout"]

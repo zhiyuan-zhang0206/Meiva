@@ -218,8 +218,8 @@ refuses to write to it at all, via `MEIVA_OS_JOBS_ENABLED=false`
 (the explicit `enabled` value gates registration). Labels and
 crontab markers name a job, not a home, so a second gate covers both directions:
 only the default home (`~/.meiva`) may register or remove a job
-(`base.host.system.cron.mechanics.owns_os_jobs`), and a test of a registrar takes the
-`default_home` fixture to be that home. `pytest_sessionfinish` then diffs the
+(`base.host.system.cron.mechanics.owns_os_job_home`, asked of the `JobRoots` the registrar is
+given), and a test of a registrar hands it the `default_home` fixture's account as that home. `pytest_sessionfinish` then diffs the
 host's Meiva jobs (plist contents included) against a snapshot taken when the
 provisioning plugin is imported and fails the run on anything new or changed. It
 removes nothing: a leaked job replaced the host's real one.

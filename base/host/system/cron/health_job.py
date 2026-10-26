@@ -9,17 +9,19 @@ from loguru import logger
 
 from base.host.system.cron import health_content, mechanics
 from base.host.system.hostport import Host
+from base.host.system.job_readings import read_launchd_path, read_meiva_binary
+from base.host.system.job_values import JobRoots, cron_environment, plist_path
 from base.native_process.os_platform import descends_from_launchd_job, launchd_job_label
-from base.paths import meiva_home
+from base.paths.home import home_checkout_error
 
 DEFAULT_INTERVAL_SECONDS = 300
 _CRON_MARKER = "# meiva-health-probe"
 
 
-def _launchd_plist_path(user_home: Path | None = None) -> Path:
+def _launchd_plist_path(user_home: Path) -> Path:
     # meiva:note
     # Path to the health probe's launchd plist.
-    return mechanics.user_plist_path(health_content.LABEL, user_home=user_home)
+    return plist_path(health_content.LABEL, user_home=user_home)
 
 
 def _own_probe_job_of(
@@ -55,7 +57,7 @@ def register_macos(
     interval_s: int,
     *,
     host: Host,
-    user_home: Path | None = None,
+    roots: JobRoots,
     current_label: str | None = None,
     ancestral_labels: frozenset[str] | None = None,
 ) -> int:
@@ -66,7 +68,7 @@ def register_macos(
     # `launchctl bootstrap`. A call descended from this job leaves its own loaded
     # spec untouched; the next external converge applies any pending change.
     label = health_content.LABEL
-    plist_path = _launchd_plist_path(user_home)
+    plist = _launchd_plist_path(roots.user_home)
 
     # meiva:note
     # `bootout` terminates the job's whole process tree. A registering job
@@ -88,23 +90,20 @@ def register_macos(
 
     # meiva:note
     # Ensure the LaunchAgents directory exists.
-    plist_path.parent.mkdir(parents=True, exist_ok=True)
+    plist.parent.mkdir(parents=True, exist_ok=True)
 
     # meiva:note
     # Write the plist.
-    meiva_path = mechanics.meiva_binary_path(host=host)
-    log_file = meiva_home() / "logs" / "health-probe.log"
-    environment_home = Path(mechanics.job_home())
-    path_env = mechanics.launchd_path_env(host=host, user_home=user_home)
+    meiva_path = read_meiva_binary(roots.repo, host=host)
     content = health_content.launchd_plist_content(
         arguments=(meiva_path, "cluster", "health-probe"),
         interval_seconds=interval_s,
-        log_file=log_file,
-        environment_home=environment_home,
-        path_env=path_env,
+        log_file=roots.home / "logs" / "health-probe.log",
+        environment_home=roots.home,
+        path_env=read_launchd_path(meiva_path, user_home=roots.user_home, host=host),
     )
-    plist_path.write_text(content)
-    logger.info("Wrote plist to {}", plist_path)
+    plist.write_text(content)
+    logger.info("Wrote plist to {}", plist)
 
     # meiva:note
     # Unload any existing instance (ignore errors if not loaded).
@@ -117,7 +116,7 @@ def register_macos(
     # meiva:note
     # Load (bootstrap) the new plist.
     result = host.run(
-        ["launchctl", "bootstrap", f"gui/{host.uid}", str(plist_path)],
+        ["launchctl", "bootstrap", f"gui/{host.uid}", str(plist)],
         capture_output=True,
         text=True,
         timeout=mechanics.TOOL_TIMEOUT_S,
@@ -129,10 +128,10 @@ def register_macos(
     return 0
 
 
-def unregister_macos(*, host: Host, user_home: Path | None = None) -> int:
+def unregister_macos(*, host: Host, user_home: Path) -> int:
     # meiva:note
     # Remove the health probe's launchd job and plist.
-    plist_path = _launchd_plist_path(user_home)
+    plist = _launchd_plist_path(user_home)
     label = health_content.LABEL
 
     # meiva:note
@@ -141,9 +140,9 @@ def unregister_macos(*, host: Host, user_home: Path | None = None) -> int:
 
     # meiva:note
     # Remove the plist.
-    if plist_path.exists():
-        plist_path.unlink()
-        logger.info("Removed plist {}", plist_path)
+    if plist.exists():
+        plist.unlink()
+        logger.info("Removed plist {}", plist)
 
     if not retired:
         return 1
@@ -151,7 +150,7 @@ def unregister_macos(*, host: Host, user_home: Path | None = None) -> int:
     return 0
 
 
-def register_linux(interval_s: int, *, host: Host, repo: Path | None = None) -> int:
+def register_linux(interval_s: int, *, host: Host, roots: JobRoots) -> int:
     # meiva:note
     # Add the health probe to the user's crontab.
     #
@@ -175,9 +174,12 @@ def register_linux(interval_s: int, *, host: Host, repo: Path | None = None) -> 
     if missing is not None:
         return missing
 
-    meiva_path = mechanics.meiva_binary_path(host=host, repo=repo)
+    meiva_path = read_meiva_binary(roots.repo, host=host)
     minutes = max(1, interval_s // 60)
-    entry = f"*/{minutes} * * * * {mechanics.cron_env_prefix()}{meiva_path} cluster health-probe {_CRON_MARKER}"
+    entry = (
+        f"*/{minutes} * * * * {cron_environment(roots.home)}{meiva_path} "
+        f"cluster health-probe {_CRON_MARKER}"
+    )
 
     def report_update_failure(err: str) -> None:
         # meiva:note
@@ -230,8 +232,8 @@ def unregister_linux(*, host: Host) -> int:
 #
 # Platform-aware: dispatches to the macOS or Linux registrar.
 # Idempotent — re-running updates the interval and reloads the job.
-# A no-op when ``enabled`` is off (the test suite) or when this
-# process's home is not the default home (``owns_os_jobs``).
+# A no-op when ``enabled`` is off (the test suite) or when ``roots.home`` is not
+# the default home of ``roots.user_home`` (``owns_os_job_home``).
 #
 # Refused (with an error log) when this process runs from a non-prod
 # checkout against the prod home — the 2026-08-07 accident (Task #1025): a
@@ -241,7 +243,7 @@ def unregister_linux(*, host: Host) -> int:
 # ``meiva``. The probe then ran worktree code against prod data, misjudged
 # schema health, and auto-rolled-back (quiesce restarted every agent). The
 # job's content is anchored to THIS process's checkout, so the registration
-# must be too: same rule as ``meiva start`` (``prod_service_checkout_error``).
+# must be too: same rule as ``meiva start`` (``home_checkout_error``).
 #
 # Raises:
 #     RuntimeError: on registration failure.
@@ -250,25 +252,15 @@ def register_os_cron(
     *,
     enabled: bool,
     host: Host,
-    home: Path | None = None,
-    repo: Path | None = None,
-    user_home: Path | None = None,
+    roots: JobRoots,
     ancestral_labels: frozenset[str] | None = None,
 ) -> None:
     if not enabled:
         mechanics.skip_os_job("health-probe")
         return
-    owns = (
-        mechanics.owns_os_jobs("health-probe")
-        if home is None
-        else mechanics.owns_os_job_home("health-probe", home=home)
-    )
-    if not owns:
+    if not mechanics.owns_os_job_home("health-probe", roots=roots):
         return
-    from base.paths import prod_service_checkout_error, repo_root
-
-    checkout = repo_root() if repo is None else repo
-    refusal = prod_service_checkout_error(checkout)
+    refusal = home_checkout_error(roots.repo, home=roots.home)
     if refusal is not None:
         logger.error("health-probe registration refused: {}", refusal)
         return
@@ -277,24 +269,25 @@ def register_os_cron(
         macos=lambda: register_macos(
             interval_s,
             host=host,
-            user_home=user_home,
+            roots=roots,
             ancestral_labels=ancestral_labels,
         ),
-        linux=lambda: register_linux(interval_s, host=host, repo=repo),
+        linux=lambda: register_linux(interval_s, host=host, roots=roots),
         host=host,
     )
 
 
-def unregister_os_cron(*, host: Host, user_home: Path | None = None) -> None:
+def unregister_os_cron(*, host: Host, roots: JobRoots) -> None:
     # meiva:note
     # Remove the OS cron job of the cluster health probe.
     #
     # Platform-aware. Safe to call when no job is registered (no-op), and a no-op
-    # when this process's home is not the default home (``owns_os_jobs``).
-    if not mechanics.owns_os_jobs("health-probe"):
+    # when ``roots.home`` is not the default home of ``roots.user_home``
+    # (``owns_os_job_home``).
+    if not mechanics.owns_os_job_home("health-probe", roots=roots):
         return
     mechanics.unregister_platform_job(
-        macos=lambda: unregister_macos(host=host, user_home=user_home),
+        macos=lambda: unregister_macos(host=host, user_home=roots.user_home),
         linux=lambda: unregister_linux(host=host),
         host=host,
     )

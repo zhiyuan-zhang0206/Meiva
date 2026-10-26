@@ -12,16 +12,33 @@ from pathlib import Path
 
 import pytest
 
+from base.host.system.job_values import JobRoots
 from base.host.system.tests.fake_commands import FakeCommands, Reply, fake_host
 from base.paths.tests.homes import default_home as default_home
 from base.paths.tests.homes import unit_home as unit_home
 from cli.commands.cluster.cron import cmd_cron_register, cmd_cron_unregister
 
 
+def _scratch_roots(unit_home: Path) -> JobRoots:
+    return JobRoots(home=unit_home, repo=unit_home, user_home=unit_home)
+
+
+def _default_roots(user_home: Path) -> JobRoots:
+    return JobRoots(home=user_home / ".meiva", repo=user_home / "checkout", user_home=user_home)
+
+
 def test_a_disabled_os_job_gate_registers_nothing(unit_home: Path) -> None:
     commands = FakeCommands()
 
-    assert cmd_cron_register(os_jobs_enabled=False, interval_s=420, host=fake_host(commands)) == 0
+    assert (
+        cmd_cron_register(
+            os_jobs_enabled=False,
+            interval_s=420,
+            host=fake_host(commands),
+            roots=_scratch_roots(unit_home),
+        )
+        == 0
+    )
 
     assert commands.calls == []
 
@@ -29,8 +46,15 @@ def test_a_disabled_os_job_gate_registers_nothing(unit_home: Path) -> None:
 def test_a_scratch_home_never_reaches_the_hosts_scheduler(unit_home: Path) -> None:
     commands = FakeCommands()
 
-    assert cmd_cron_register(os_jobs_enabled=True, interval_s=420, host=fake_host(commands)) == 0
-    assert cmd_cron_unregister(host=fake_host(commands)) == 0
+    roots = _scratch_roots(unit_home)
+
+    assert (
+        cmd_cron_register(
+            os_jobs_enabled=True, interval_s=420, host=fake_host(commands), roots=roots
+        )
+        == 0
+    )
+    assert cmd_cron_unregister(host=fake_host(commands), roots=roots) == 0
 
     assert commands.calls == []
 
@@ -40,7 +64,12 @@ def test_a_default_home_on_a_host_without_a_crontab_skips_with_a_note(
 ) -> None:
     commands = FakeCommands()
 
-    rc = cmd_cron_register(os_jobs_enabled=True, interval_s=420, host=fake_host(commands))
+    rc = cmd_cron_register(
+        os_jobs_enabled=True,
+        interval_s=420,
+        host=fake_host(commands),
+        roots=_default_roots(default_home),
+    )
 
     assert rc == 0
     assert "crontab not installed on this host (skipping)" in capsys.readouterr().out
@@ -55,7 +84,9 @@ def test_a_crontab_the_host_refuses_to_write_is_a_failed_registration_with_the_r
     commands.on(("crontab", "-"), Reply(returncode=1, stderr="crontab: denied"))
     host = fake_host(commands, programs={"crontab": "/usr/bin/crontab"})
 
-    rc = cmd_cron_register(os_jobs_enabled=True, interval_s=420, host=host)
+    rc = cmd_cron_register(
+        os_jobs_enabled=True, interval_s=420, host=host, roots=_default_roots(default_home)
+    )
 
     assert rc == 1
     assert capsys.readouterr().out.endswith("  * cron registration failed on Linux\n")

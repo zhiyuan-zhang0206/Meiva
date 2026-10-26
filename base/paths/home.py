@@ -19,6 +19,7 @@ __all__ = [
     "home_checkout_error",
     "home_from_env",
     "is_default_home",
+    "is_default_home_of",
     "is_prod_install",
     "resolve_meiva_home",
     "user_home",
@@ -108,7 +109,16 @@ def default_home() -> Path:
 
 def is_default_home(home: Path) -> bool:
     """Whether `home` is the default prod home (`~/.meiva`)."""
-    return Path(home).expanduser().resolve() == default_home().resolve()
+    return is_default_home_of(Path(home).expanduser(), user_home=user_home())
+
+
+# meiva:note
+# Whether `home` is the default home of the account whose home directory is `user_home`.
+#
+# Pure: the account is a value, so a registrar that already holds its user home asks the
+# question without reading the process's own. Both sides are compared resolved.
+def is_default_home_of(home: Path, *, user_home: Path) -> bool:
+    return home.resolve() == (user_home / ".meiva").resolve()
 
 
 # meiva:note

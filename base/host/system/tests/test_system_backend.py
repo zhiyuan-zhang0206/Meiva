@@ -72,7 +72,6 @@ def test_linux_autostart_has_one_native_manager(tmp_path: Path) -> None:
     unit_file = unit_dir / "meiva-boot.service"
     assert (
         autostart.register_linux(
-            services=frozenset({"gateway"}),
             host=host,
             context=ctx,
             unit_dir=unit_dir,
@@ -94,8 +93,14 @@ def test_linux_autostart_has_one_native_manager(tmp_path: Path) -> None:
     assert ("rm", "-f", str(unit_file)) in commands.argvs
 
 
-def test_linux_autostart_propagates_unavailable_systemd() -> None:
+def test_linux_autostart_propagates_unavailable_systemd(tmp_path: Path) -> None:
+    ctx = BootUnitContext(
+        home=tmp_path / "home",
+        repo=tmp_path / "repo",
+        user="meiva-user",
+        group="meiva-group",
+        home_dir=tmp_path / "user-home",
+        services=frozenset({"gateway"}),
+    )
     with pytest.raises(RuntimeError, match="systemd"):
-        autostart.register_linux(
-            services=frozenset({"gateway"}), host=fake_host(platform=LINUX_X86)
-        )
+        autostart.register_linux(host=fake_host(platform=LINUX_X86), context=ctx)

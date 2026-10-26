@@ -17,7 +17,7 @@
 #
 # The job command runs the checkout's own venv python against the checkout's
 # `scripts/ci/pull_requests/pr_flow_export.py` (same checkout rule as
-# `base.host.system.cron.mechanics.meiva_binary_path`), so a worktree's converge — should the gate
+# `base.host.system.job_readings.read_meiva_binary`), so a worktree's converge — should the gate
 # ever pass there — would register its own pair, never prod's.
 
 from __future__ import annotations
@@ -34,8 +34,8 @@ from base.host.system.job_readings import read_launchd_path, read_meiva_binary
 from base.host.system.job_values import JobPaths, JobRoots, plist_path
 
 
-def launchd_plist_path(*, user_home: Path | None = None) -> Path:
-    return mechanics.user_plist_path(content.LABEL, user_home=user_home)
+def launchd_plist_path(*, user_home: Path) -> Path:
+    return plist_path(content.LABEL, user_home=user_home)
 
 
 def register_macos(*, roots: JobRoots, host: Host) -> int:
@@ -58,7 +58,7 @@ def register_macos(*, roots: JobRoots, host: Host) -> int:
     return 0
 
 
-def unregister_macos(*, host: Host, user_home: Path | None = None) -> int:
+def unregister_macos(*, host: Host, user_home: Path) -> int:
     retired = mechanics.remove_launchd_job(
         content.LABEL, launchd_plist_path(user_home=user_home), host=host
     )
@@ -113,7 +113,7 @@ def register_pr_flow_job(*, enabled: bool, production: bool, roots: JobRoots, ho
     if not enabled:
         mechanics.skip_os_job("pr flow")
         return
-    if not mechanics.owns_os_job_home("pr flow", home=roots.home):
+    if not mechanics.owns_os_job_home("pr flow", roots=roots):
         return
     blocker = credential_blocker(production=production, roots=roots, host=host)
     if blocker is not None:
@@ -127,11 +127,11 @@ def register_pr_flow_job(*, enabled: bool, production: bool, roots: JobRoots, ho
     )
 
 
-def unregister_pr_flow_job(*, host: Host, user_home: Path | None = None) -> None:
-    if not mechanics.owns_os_jobs("pr flow"):
+def unregister_pr_flow_job(*, host: Host, roots: JobRoots) -> None:
+    if not mechanics.owns_os_job_home("pr flow", roots=roots):
         return
     mechanics.unregister_platform_job(
-        macos=lambda: unregister_macos(host=host, user_home=user_home),
+        macos=lambda: unregister_macos(host=host, user_home=roots.user_home),
         linux=lambda: unregister_linux(host=host),
         host=host,
     )
