@@ -242,7 +242,34 @@ class StdioAppServer:
                 line = await stdout.readline()
                 if not line:
                     break
-                await self._dispatch(line)
+                message = self._dispatch(line)
+                if message is not None:
+                    request_id = message.get("id")
+                    method = as_text(message.get("method")) or ""
+                    params = as_object(message.get("params"))
+                    handler = self._request_handler
+                    if handler is None:
+                        await self._write(
+                            {
+                                "jsonrpc": "2.0",
+                                "id": request_id,
+                                "error": {"code": -32601, "message": "no handler"},
+                            }
+                        )
+                        continue
+                    try:
+                        reply = handler(method, params)
+                        result = await reply if inspect.isawaitable(reply) else reply
+                    except Exception as exc:
+                        await self._write(
+                            {
+                                "jsonrpc": "2.0",
+                                "id": request_id,
+                                "error": {"code": -32603, "message": str(exc)},
+                            }
+                        )
+                        continue
+                    await self._write({"jsonrpc": "2.0", "id": request_id, "result": result})
         except asyncio.CancelledError:
             raise
         except Exception as exc:
@@ -250,43 +277,18 @@ class StdioAppServer:
             return
         self._shutdown("app-server closed its stdout")
 
-    async def _dispatch(self, line: bytes) -> None:
+    def _dispatch(self, line: bytes) -> JsonObject | None:
         try:
             decoded = json.loads(line)
         except json.JSONDecodeError:
-            return
+            return None
         message = as_object(decoded)
         if not message:
-            return
+            return None
         if "id" in message and "method" in message:
-            request_id = message.get("id")
-            method = as_text(message.get("method")) or ""
-            params = as_object(message.get("params"))
-            handler = self._request_handler
-            if handler is None:
-                await self._write(
-                    {
-                        "jsonrpc": "2.0",
-                        "id": request_id,
-                        "error": {"code": -32601, "message": "no handler"},
-                    }
-                )
-                return
-            try:
-                reply = handler(method, params)
-                result = await reply if inspect.isawaitable(reply) else reply
-            except Exception as exc:
-                await self._write(
-                    {
-                        "jsonrpc": "2.0",
-                        "id": request_id,
-                        "error": {"code": -32603, "message": str(exc)},
-                    }
-                )
-                return
-            await self._write({"jsonrpc": "2.0", "id": request_id, "result": result})
-            return
+            return message
         self._dispatch_non_request(message)
+        return None
 
     def _dispatch_non_request(self, message: dict[str, Any]) -> None:
         if "id" in message:

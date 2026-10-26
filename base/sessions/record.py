@@ -16,16 +16,11 @@ import contextlib
 import json
 import os
 import tempfile
-import time
 from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Any, TypeGuard
 
 from base.native_process.kernel_identity import pid_starttime_ticks
-
-
-def current_started_at() -> float:
-    return time.time()
 
 
 def _is_record_dict(value: object) -> TypeGuard[dict[str, Any]]:

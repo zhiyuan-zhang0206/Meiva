@@ -2,6 +2,7 @@ exports = ["configuration.py", "tests"]
 
 [purity]
 "__init__.py" = "strict-to-be"
+"configuration.py" = "strict"
 
 [uses]
 "configuration.py" = ["__init__.py"]

@@ -10,6 +10,7 @@ exports = ["tests"]
 [purity]
 "." = "strict-to-be"
 "__init__.py" = "strict"
+"auth.py" = "strict"
 "config.py" = "strict"
 "mapping.py" = "strict"
 
@@ -21,7 +22,6 @@ exports = ["tests"]
 "session.py#async def start" = 1
 
 [debt.impure-edge]
-"auth.py#base/host/env/registry.py" = 1
 "session.py#base/host/env/harness_binaries.py" = 1
 "session.py#base/host/env/registry.py" = 1
 "session.py#base/lm/harness/base_session.py" = 1

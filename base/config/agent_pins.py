@@ -24,6 +24,36 @@ from collections.abc import Mapping
 from typing import Any
 
 import base.config.config_registry as _config_registry
+from base.config.config_registry import Lifecycle, per_agent_field_names, schema_extra
+
+
+# meiva:note
+# The per-agent lifecycle class of a `per_agent=True` field.
+def field_lifecycle(name: str) -> Lifecycle:
+    extra = schema_extra(_config_registry.fields()[name].info)
+    if extra.get("per_agent") is not True:
+        raise KeyError(f"config field {name!r} is not per_agent — it has no lifecycle class")
+    lifecycle = extra.get("lifecycle")
+    if lifecycle == "frozen":
+        return "frozen"
+    if lifecycle == "live":
+        return "live"
+    raise RuntimeError(f"config field {name!r} has invalid lifecycle {lifecycle!r}")
+
+
+# meiva:note
+# Per-agent field names whose value is resolved once at spawn and replayed for
+# the agent's life — the set `base/agents/model/birth_config.py` stamps into
+# `agents_meta.birth_config`.
+def frozen_field_names() -> set[str]:
+    return {n for n in per_agent_field_names() if field_lifecycle(n) == "frozen"}
+
+
+# meiva:note
+# Per-agent field names re-read from current cluster config at every process
+# start (absent an explicit overlay). The complement of `frozen_field_names`.
+def live_field_names() -> set[str]:
+    return {n for n in per_agent_field_names() if field_lifecycle(n) == "live"}
 
 
 def resolve_agent_config_pins(

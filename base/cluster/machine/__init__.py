@@ -34,7 +34,7 @@ from base.cluster.machine.identity import (
     roles_from_flags,
     validate_machine_name,
 )
-from base.host.net.auth import bearer_header, require_cluster_secret
+from base.host.net import bearer_header, require_cluster_secret
 
 __all__ = [
     "GatewayAccess",

@@ -7,6 +7,7 @@ message-endpoint image gating use the same core, plugin, and prefix answers.
 from __future__ import annotations
 
 import base64
+import os
 import stat
 from dataclasses import dataclass
 from pathlib import Path
@@ -231,13 +232,15 @@ def pack_attachments(
     )
 
 
+# meiva:note
+# Resolve and stat `entry.path`; an unreadable, non-regular, or unrecognized file becomes a captioned skip.
 def _attachment_file(entry: AttachEntry) -> _AttachmentFile | _SkippedAttachment:
     try:
         path = Path(entry.path).resolve()
     except (OSError, ValueError):
         return _SkippedAttachment(entry.path, None, None, "invalid file path")
     try:
-        file_stat = path.stat()
+        file_stat = os.stat(path)  # noqa: PTH116
     except FileNotFoundError:
         return _SkippedAttachment(str(path), None, None, "file does not exist")
     except OSError:
@@ -301,7 +304,14 @@ def _image_dimension_error(
 
 def _read_attachment(attachment: _AttachmentFile) -> tuple[bytes | None, str | None]:
     try:
-        return attachment.path.read_bytes(), None
+        fd = os.open(attachment.path, os.O_RDONLY)
+        try:
+            chunks: list[bytes] = []
+            while chunk := os.read(fd, 65536):
+                chunks.append(chunk)
+            return b"".join(chunks), None
+        finally:
+            os.close(fd)
     except OSError:
         return None, "cannot read file"
 

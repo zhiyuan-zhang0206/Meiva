@@ -4,9 +4,6 @@ exports = ["cache_writes.py", "catalog.py"]
 "__init__.py" = ["catalog.py"]
 
 [purity]
-"__init__.py" = "strict-to-be"
+"__init__.py" = "strict"
 "cache_writes.py" = "strict"
 "catalog.py" = "strict"
-
-[debt.impure-call]
-"__init__.py#Path.read_text" = 1

@@ -13,15 +13,9 @@ exports = ["checkpoints.py", "driver.py"]
 [debt.impure-edge]
 "__init__.py#agent/impersonation.py" = 1
 "__init__.py#agent/impersonation_handoff.py" = 1
-"__init__.py#agent/state.py" = 1
 "__init__.py#agent/turn/runloop.py" = 1
 "__init__.py#agent/turn/trace_checkpoint.py" = 1
 "__init__.py#base/agents/context/__init__.py" = 1
-"__init__.py#base/agents/observation/relay_supervision.py" = 1
 "__init__.py#base/events/live/bus.py" = 1
 "__init__.py#services/agent_runner/agent_host/db_recovery.py" = 1
 "__init__.py#services/agent_runner/agent_host/lifecycle/shells.py" = 1
-"__init__.py#services/agent_runner/agent_host/runtime.py" = 1
-"checkpoints.py#base/agents/history/delta_read_compat.py" = 1
-"driver.py#base/agents/context/__init__.py" = 1
-"driver.py#services/agent_runner/agent_host/runtime.py" = 1

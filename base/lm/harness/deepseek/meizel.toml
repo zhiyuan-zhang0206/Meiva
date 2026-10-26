@@ -18,10 +18,8 @@
 "session.py#async def _begin" = 1
 "session.py#async def _read_loop" = 1
 "session.py#async def _reap" = 1
-"session.py#async def _settle_turn" = 1
 "session.py#async def close" = 1
 "session.py#async def interrupt" = 1
-"session.py#async def permission_decision" = 1
 "session.py#async def start" = 1
 "usage.py#Path.is_file" = 1
 "usage.py#Path.open" = 1

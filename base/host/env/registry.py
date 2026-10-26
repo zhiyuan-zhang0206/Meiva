@@ -27,7 +27,22 @@ from dataclasses import dataclass
 from functools import lru_cache
 from typing import Literal
 
-from base.host.env.agent_env import AGENT_BIRTH_CONFIG_ENV, AGENT_CONFIG_OVERLAY_ENV
+from base.host.env.agent_env import (
+    AGENT_BIRTH_CONFIG_ENV,
+    AGENT_CONFIG_OVERLAY_ENV,
+)
+from base.host.env.agent_env import (
+    HOST_PASSTHROUGH_KEYS as HOST_PASSTHROUGH_KEYS,
+)
+from base.host.env.agent_env import (
+    MEIVA_HOME_ENV as MEIVA_HOME_ENV,
+)
+from base.host.env.agent_env import (
+    NETWORK_PROXY_KEYS as NETWORK_PROXY_KEYS,
+)
+from base.host.env.agent_env import (
+    session_child_env_keys as session_child_env_keys,
+)
 from base.host.env.config_lite_table import (
     FIELD_ALIASES,
     FIELD_CAPABILITIES,
@@ -62,10 +77,7 @@ class EnvField:
 # USER read a logged-in CLI as "Not logged in" (2026-09-26 Mode B takeover).
 # Forwarded non-empty only: an empty $DISPLAY means "no display", and
 # forwarding "" would make a stripped display falsely look present in the child.
-_HOST_PASSTHROUGH_ROWS = tuple(
-    EnvField(key) for key in ("DISPLAY", "WAYLAND_DISPLAY", "HOME", "USER", "LOGNAME")
-)
-HOST_PASSTHROUGH_KEYS = frozenset(row.key for row in _HOST_PASSTHROUGH_ROWS)
+_HOST_PASSTHROUGH_ROWS = tuple(EnvField(key) for key in sorted(HOST_PASSTHROUGH_KEYS))
 
 # The machine's network proxy configuration (issue #2095). A service child that
 # builds or installs (the frontend's `npm run build` fetching Google Fonts for
@@ -81,20 +93,7 @@ HOST_PASSTHROUGH_KEYS = frozenset(row.key for row in _HOST_PASSTHROUGH_ROWS)
 # `load_meiva_env` loads into os.environ before any child env is built), so no
 # repo file ever carries an address. Copied non-empty only, like the display
 # passthroughs above.
-_NETWORK_PROXY_ROWS = tuple(
-    EnvField(key)
-    for key in (
-        "HTTP_PROXY",
-        "HTTPS_PROXY",
-        "ALL_PROXY",
-        "NO_PROXY",
-        "http_proxy",
-        "https_proxy",
-        "all_proxy",
-        "no_proxy",
-    )
-)
-NETWORK_PROXY_KEYS = frozenset(row.key for row in _NETWORK_PROXY_ROWS)
+_NETWORK_PROXY_ROWS = tuple(EnvField(key) for key in sorted(NETWORK_PROXY_KEYS))
 
 
 # meiva:note
@@ -115,11 +114,6 @@ PLUGIN_CLUSTER_CONFIG_ENV = "MEIVA_PLUGIN_CLUSTER_CONFIG"
 # The Redis ACL runtime password is a file-only data-plane credential like the
 # runner database password. derive_env emits it and process isolation strips it.
 REDIS_PASSWORD_ENV = "MEIVA_REDIS_PASSWORD"  # noqa: S105 — env key, not a credential
-
-# The home is not a Settings field (`base.paths.home.resolve_meiva_home`
-# reads it before Settings exists): it is the one variable every descendant
-# inherits, so a process tree that set it keeps every child on the same home.
-MEIVA_HOME_ENV = "MEIVA_HOME"
 
 # Non-Settings guide keys an agent process needs before Settings: the TLS bundle
 # for the config fetch on corp-MITM hosts, plus the two JSON carriers above, all
@@ -367,27 +361,6 @@ def child_env(role: Literal["gateway", "runner"], environ: Mapping[str, str]) ->
         if environ.get(key):
             env[key] = environ[key]
     return env
-
-
-# meiva:note
-# Every key a harness session child may carry: the view `child_env("runner")` builds,
-# plus the PATH a delivery rebuilds and the two names a delivery adds (the session's
-# registration handle and the Claude config dir). A consumer that cannot *remove* an
-# inherited key — the Claude Agent SDK merges the parent process environment under its
-# own `env` — blanks every other key instead, so what the child sees is this allowlist
-# and nothing else.
-# meiva:link base/lm/harness/docs/harness.meiva.okf.md
-_SESSION_DELIVERY_KEYS = frozenset({"PATH", "MEIVA_HARNESS_HANDLE", "CLAUDE_CONFIG_DIR"})
-
-
-def session_child_env_keys() -> frozenset[str]:
-    return (
-        frozenset(session_forward_keys())
-        | HOST_PASSTHROUGH_KEYS
-        | _TEMP_DIR_KEYS
-        | NETWORK_PROXY_KEYS
-        | _SESSION_DELIVERY_KEYS
-    )
 
 
 # meiva:note

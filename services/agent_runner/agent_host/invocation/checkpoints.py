@@ -6,7 +6,7 @@ from typing import Any
 from langgraph.checkpoint.postgres.aio import AsyncPostgresSaver
 from langgraph.graph.state import CompiledStateGraph
 
-from base.agents.history.delta_read_compat import RecoveryReconstructionScope
+from base.api_contracts.agent_contract import ReconstructionScope
 
 
 @dataclass(frozen=True)
@@ -15,9 +15,9 @@ class TurnCheckpoints:
 
     saver: AsyncPostgresSaver
     graph: CompiledStateGraph[Any, Any, Any, Any]
-    reconstruction: RecoveryReconstructionScope | None = None
+    reconstruction: ReconstructionScope[AsyncPostgresSaver] | None = None
 
-    def bind(self, scope: RecoveryReconstructionScope | None) -> "TurnCheckpoints":
+    def bind(self, scope: ReconstructionScope[AsyncPostgresSaver] | None) -> "TurnCheckpoints":
         if scope is None:
             return self
         reader = scope.reader()

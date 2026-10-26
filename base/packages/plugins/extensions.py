@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from collections.abc import Callable, Iterator
+from collections.abc import Awaitable, Callable, Iterator
 from dataclasses import dataclass, fields
 from pathlib import Path
 from types import ModuleType, SimpleNamespace
@@ -35,7 +35,9 @@ class GraphHook(Protocol):
     @property
     def name(self) -> str: ...
 
-    async def __call__(self, state: Any, runtime: Any, config: Any, /) -> dict[str, Any] | None: ...
+    def __call__(
+        self, state: Any, runtime: Any, config: Any, /
+    ) -> Awaitable[dict[str, Any] | None]: ...
 
 
 PLUGIN_WRITABLE_BASE_FIELDS: frozenset[str] = frozenset({"messages"})

@@ -50,21 +50,16 @@ line from install.
 from __future__ import annotations
 
 from collections.abc import Mapping
-from enum import StrEnum
 from pathlib import Path
 from typing import Any, NamedTuple
 
 import psycopg
 
+from base.api_contracts.agent_contract import DefaultModelSource as DefaultModelSource
 from base.config import frozen_field_names
 from base.config.service_read import ConfigAuthority
 from base.lm.catalog import ModelCatalog
 from base.lm.registry import resolve_available_model
-
-
-class DefaultModelSource(StrEnum):
-    CLUSTER = "cluster"
-    CONFIG = "config"
 
 
 class DefaultModelResolution(NamedTuple):

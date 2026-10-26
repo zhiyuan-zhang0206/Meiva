@@ -1,6 +1,8 @@
 exports = ["derive.py", "jobs.py", "reader.py", "source.py"]
 
 [purity]
+"derive.py" = "strict"
+"jobs.py" = "strict"
 "model.py" = "strict"
 "nodes.py" = "strict"
 "source.py" = "strict"
@@ -23,15 +25,8 @@ exports = ["derive.py", "jobs.py", "reader.py", "source.py"]
 
 [debt.impure-edge]
 "backfill.py#base/agents/history/checkpoint_segment.py" = 1
-"backfill.py#base/clock/configuration.py" = 1
 "backfill.py#base/config/__init__.py" = 1
 "backfill.py#base/db/__init__.py" = 1
 "backfill.py#base/db/code_version_gate.py" = 1
-"backfill.py#base/db/config.py" = 1
 "backfill.py#base/native_process/code_version.py" = 1
 "backfill.py#base/native_process/loaded_commit.py" = 1
-"derive.py#base/agents/history/checkpoint.py" = 1
-"derive.py#base/agents/history/hierarchy/units.py" = 1
-"jobs.py#base/agents/history/checkpoint.py" = 1
-"jobs.py#base/db/transaction.py" = 1
-"reader.py#base/agents/history/checkpoint.py" = 1

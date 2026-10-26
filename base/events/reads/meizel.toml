@@ -1,6 +1,7 @@
 exports = ["audit_rows.py"]
 
 [uses]
+"audit_rows.py" = ["__init__.py"]
 "tests" = ["audit_rows.py"]
 
 [purity]

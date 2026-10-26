@@ -16,7 +16,18 @@ from contextlib import suppress
 from pathlib import Path
 from typing import Any
 
-from base.host.exit_codes import IDLE_EXIT_CODE, SYSTEM_HALT_EXIT_CODE
+from base.agents.lifecycle_signals import (
+    AgentRestart as AgentRestart,
+)
+from base.agents.lifecycle_signals import (
+    AgentTermination as AgentTermination,
+)
+from base.agents.lifecycle_signals import (
+    LifecycleExit as LifecycleExit,
+)
+from base.agents.lifecycle_signals import (
+    SystemHalt as SystemHalt,
+)
 from base.log import logger
 
 __all__ = [
@@ -30,35 +41,6 @@ __all__ = [
 
 _RELEASE_STREAM_LIMIT = 64 * 1024 * 1024
 _RELEASE_TIMEOUT_S = 3.0
-
-
-class LifecycleExit(SystemExit):
-    """Base for framework lifecycle signals — inherits SystemExit
-    (not Exception), so broad try/except Exception won't accidentally
-    swallow lifecycle transitions."""
-
-
-class AgentTermination(LifecycleExit):
-    """Raised on the success path of `terminate()`. Your process exits and
-    has to be woken up by sending it a chat message (auto-resurrect)."""
-
-    def __init__(self) -> None:
-        super().__init__(IDLE_EXIT_CODE)
-
-
-class AgentRestart(LifecycleExit):
-    """Raised on the success path of `restart()` and `update()`. Your
-    process exits and a fresh one comes up under the same agent id."""
-
-    def __init__(self) -> None:
-        super().__init__(IDLE_EXIT_CODE)
-
-
-class SystemHalt(LifecycleExit):
-    """Raised by `compact()` — framework takes over history compaction. Agent doesn't raise directly."""
-
-    def __init__(self) -> None:
-        super().__init__(SYSTEM_HALT_EXIT_CODE)
 
 
 # meiva:note

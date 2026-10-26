@@ -199,7 +199,12 @@ def facade_exports() -> dict[str, Any]:
         env_override_values,
         get_config_metadata,
     )
-    from base.config.agent_pins import resolve_agent_config_pins
+    from base.config.agent_pins import (
+        field_lifecycle,
+        frozen_field_names,
+        live_field_names,
+        resolve_agent_config_pins,
+    )
     from base.config.service_read import bootstrap_config_values, current_field_values
 
     fields = _config_registry.fields()
@@ -215,9 +220,9 @@ def facade_exports() -> dict[str, Any]:
         "CONFIG_UNCHANGED_SENTINEL": CONFIG_UNCHANGED_SENTINEL,
         "current_field_values": current_field_values,
         "bootstrap_config_values": bootstrap_config_values,
-        "field_lifecycle": _config_registry.field_lifecycle,
-        "frozen_field_names": _config_registry.frozen_field_names,
-        "live_field_names": _config_registry.live_field_names,
+        "field_lifecycle": field_lifecycle,
+        "frozen_field_names": frozen_field_names,
+        "live_field_names": live_field_names,
         "resolve_agent_config_pins": resolve_agent_config_pins,
         # The sub-model classes the facade used to import (tests and the
         # config-service read paths reach them through base.config).

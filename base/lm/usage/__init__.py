@@ -10,14 +10,15 @@ from datetime import UTC, datetime
 from typing import Any
 
 from langchain_core.messages import AIMessage
+from loguru import logger
 
 from base.lm.catalog import ModelCatalog
 from base.lm.catalog.provider_contract import InferenceSpeed
 from base.lm.content import message_addl_kwargs
 from base.lm.pricing import CacheTokens, CostQuote, quote, tally_tokens
 from base.lm.pricing.cache_writes import cache_write_tokens
-from base.log import logger
-from base.telemetry import ambient_agent_id, report_sink_failure
+from base.telemetry import ambient_agent_id
+from base.telemetry.delivery.reporting import report_sink_failure
 
 
 def usage_model(msg: AIMessage, requested_model: str, *, catalog: ModelCatalog) -> str:
@@ -59,6 +60,16 @@ class UsageOptions:
     for_agent_id: int | None = None
     attribution: str | None = None
     stamp_message: bool = False
+
+    @classmethod
+    def metered(cls, latency_ms: float | None) -> UsageOptions:
+        agent_id = ambient_agent_id()
+        return cls(
+            latency_ms=latency_ms,
+            for_agent_id=agent_id,
+            attribution="process" if agent_id is not None else "unattributed",
+            stamp_message=True,
+        )
 
 
 _DEFAULT_USAGE_OPTIONS = UsageOptions()

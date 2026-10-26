@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import inspect
 import json
 import os
 import signal
@@ -74,7 +75,7 @@ class PermissionRequest:
 # A permission handler returns an option id or None. None is reported to the agent
 # as a cancelled outcome, which the ACP contract lets it read as a refusal:
 # inventing an allow would turn a missing approval surface into an unaudited grant.
-PermissionHandler = Callable[[PermissionRequest], Awaitable[str | None]]
+PermissionHandler = Callable[[PermissionRequest], str | Awaitable[str | None] | None]
 
 
 # meiva:note
@@ -315,16 +316,28 @@ class AcpConnection:
                     self.stderr_tail.append(f"non-JSON stdout: {text[:300]}")
                     continue
                 if isinstance(frame, dict):
-                    await self._dispatch(frame)
+                    server_request = self._dispatch(frame)
+                    if server_request is not None:
+                        plan = self._answer_server_request(server_request)
+                        if isinstance(plan, dict):
+                            await self._write(plan)
+                        else:
+                            request, request_id = plan
+                            reply = (
+                                self.permission(request) if self.permission is not None else None
+                            )
+                            chosen = await reply if inspect.isawaitable(reply) else reply
+                            await self._write(
+                                _permission_response(request_id, chosen, request.options)
+                            )
         finally:
             self._closed = True
             self._fail_pending(AcpClosedError("the agent closed its output"))
             self._notifications.put_nowait(None)
 
-    async def _dispatch(self, frame: dict[str, Any]) -> None:
+    def _dispatch(self, frame: dict[str, Any]) -> dict[str, Any] | None:
         if "id" in frame and "method" in frame:
-            await self._answer_server_request(frame)
-            return
+            return frame
         if "method" in frame:
             params: _Json = frame.get("params")
             self._notifications.put_nowait(
@@ -333,13 +346,13 @@ class AcpConnection:
                     params=params if isinstance(params, dict) else {},
                 )
             )
-            return
+            return None
         request_id = frame.get("id")
         if not isinstance(request_id, int):
-            return
+            return None
         pending = self._pending.pop(request_id, None)
         if pending is None or pending.future.done():
-            return
+            return None
         error: _Json = frame.get("error")
         if isinstance(error, dict):
             pending.future.set_exception(
@@ -350,26 +363,24 @@ class AcpConnection:
                     error.get("data"),
                 )
             )
-            return
+            return None
         result: _Json = frame.get("result")
         pending.future.set_result(result if isinstance(result, dict) else {})
+        return None
 
-    async def _answer_server_request(self, frame: dict[str, Any]) -> None:
+    def _answer_server_request(
+        self, frame: dict[str, Any]
+    ) -> tuple[PermissionRequest, object] | dict[str, Any]:
         method = str(frame["method"])
         request_id = frame["id"]
         params: _Json = frame.get("params")
         if method == "session/request_permission" and isinstance(params, dict):
-            request = _parse_permission_request(params)
-            chosen = await self.permission(request) if self.permission is not None else None
-            await self._write(_permission_response(request_id, chosen, request.options))
-            return
-        await self._write(
-            {
-                "jsonrpc": "2.0",
-                "id": request_id,
-                "error": {"code": -32601, "message": f"client does not implement {method}"},
-            }
-        )
+            return (_parse_permission_request(params), request_id)
+        return {
+            "jsonrpc": "2.0",
+            "id": request_id,
+            "error": {"code": -32601, "message": f"client does not implement {method}"},
+        }
 
     async def _read_stderr(self, stderr: asyncio.StreamReader) -> None:
         while True:

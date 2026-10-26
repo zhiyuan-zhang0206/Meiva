@@ -4,10 +4,7 @@ exports = ["constants.py", "packing.py"]
 "packing.py" = ["constants.py"]
 
 [purity]
-"." = "strict-to-be"
+"." = "strict"
 "__init__.py" = "strict"
 "constants.py" = "strict"
-
-[debt.impure-call]
-"packing.py#Path.read_bytes" = 1
-"packing.py#Path.stat" = 1
+"packing.py" = "strict"

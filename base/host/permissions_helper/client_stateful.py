@@ -10,11 +10,41 @@ from __future__ import annotations
 from typing import Literal, overload
 
 from .wire import (
+    AliveResult,
+    AppsResult,
+    AxActResult,
+    AxTreeResult,
+    AxWindowInfo,
+    ClickPoint,
+    ClickResult,
     ClipboardReadResult,
     ClipboardWriteResult,
+    DragResult,
+    FileListResult,
+    FileReadResult,
+    FocusAppResult,
+    FrontmostApp,
+    HelperShutdownResult,
+    IndicatorStopResult,
+    KeyResult,
     MouseDownResult,
     MouseReleaseAllResult,
     MouseUpResult,
+    MoveResult,
+    PingResult,
+    RequestGrantsResult,
+    RootStatus,
+    ScreencaptureResult,
+    ScreenSize,
+    ScrollResult,
+    SessionInfo,
+    SessionListResult,
+    SignalResult,
+    SpawnResult,
+    TypeResult,
+    WindowCaptureResult,
+    WindowInfo,
+    WindowsResult,
 )
 
 
@@ -23,6 +53,105 @@ class StatefulCalls:
 
     They sit apart only to keep the client module within the file budget: each one rides the
     client's own `call` and `require_capability`."""
+
+    def _call_raw(self, method: str, **args: object) -> object:
+        raise NotImplementedError
+
+    @overload
+    def call(self, method: Literal["ping"], **args: object) -> PingResult: ...
+
+    @overload
+    def call(
+        self, method: Literal["screencapture_region"], **args: object
+    ) -> ScreencaptureResult: ...
+
+    @overload
+    def call(self, method: Literal["file_list"], **args: object) -> FileListResult: ...
+
+    @overload
+    def call(self, method: Literal["file_read"], **args: object) -> FileReadResult: ...
+
+    @overload
+    def call(self, method: Literal["click"], **args: object) -> ClickResult: ...
+
+    @overload
+    def call(self, method: Literal["move"], **args: object) -> MoveResult: ...
+
+    @overload
+    def call(self, method: Literal["cursor_position"], **args: object) -> ClickPoint: ...
+
+    @overload
+    def call(self, method: Literal["drag"], **args: object) -> DragResult: ...
+
+    @overload
+    def call(self, method: Literal["type"], **args: object) -> TypeResult: ...
+
+    @overload
+    def call(self, method: Literal["key"], **args: object) -> KeyResult: ...
+
+    @overload
+    def call(self, method: Literal["scroll"], **args: object) -> ScrollResult: ...
+
+    @overload
+    def call(self, method: Literal["indicator_stop"], **args: object) -> IndicatorStopResult: ...
+
+    @overload
+    def call(self, method: Literal["list_apps"], **args: object) -> AppsResult: ...
+
+    @overload
+    def call(self, method: Literal["list_windows"], **args: object) -> WindowsResult: ...
+
+    @overload
+    def call(self, method: Literal["focus_app"], **args: object) -> FocusAppResult: ...
+
+    @overload
+    def call(
+        self, method: Literal["screencapture_window"], **args: object
+    ) -> WindowCaptureResult: ...
+
+    @overload
+    def call(self, method: Literal["ax_window_info"], **args: object) -> AxWindowInfo: ...
+
+    @overload
+    def call(self, method: Literal["ax_tree"], **args: object) -> AxTreeResult: ...
+
+    @overload
+    def call(self, method: Literal["ax_act"], **args: object) -> AxActResult: ...
+
+    @overload
+    def call(self, method: Literal["window_info"], **args: object) -> WindowInfo: ...
+
+    @overload
+    def call(self, method: Literal["session_info"], **args: object) -> SessionInfo: ...
+
+    @overload
+    def call(self, method: Literal["spawn"], **args: object) -> SpawnResult: ...
+
+    @overload
+    def call(self, method: Literal["session_list"], **args: object) -> SessionListResult: ...
+
+    @overload
+    def call(self, method: Literal["session_has"], **args: object) -> AliveResult: ...
+
+    @overload
+    def call(self, method: Literal["signal"], **args: object) -> SignalResult: ...
+
+    @overload
+    def call(
+        self, method: Literal["root_seed", "root_status", "root_stop"], **args: object
+    ) -> RootStatus: ...
+
+    @overload
+    def call(self, method: Literal["helper_shutdown"], **args: object) -> HelperShutdownResult: ...
+
+    @overload
+    def call(self, method: Literal["screen_size"], **args: object) -> ScreenSize: ...
+
+    @overload
+    def call(self, method: Literal["frontmost_app"], **args: object) -> FrontmostApp: ...
+
+    @overload
+    def call(self, method: Literal["request_grants"], **args: object) -> RequestGrantsResult: ...
 
     @overload
     def call(self, method: Literal["mouse_down"], **args: object) -> MouseDownResult: ...
@@ -42,7 +171,7 @@ class StatefulCalls:
     def call(self, method: Literal["clipboard_write"], **args: object) -> ClipboardWriteResult: ...
 
     def call(self, method: str, **args: object) -> object:
-        raise NotImplementedError
+        return self._call_raw(method, **args)
 
     def require_capability(self, capability: str, use: str) -> None:
         raise NotImplementedError

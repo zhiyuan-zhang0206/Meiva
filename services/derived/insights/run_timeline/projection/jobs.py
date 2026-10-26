@@ -8,10 +8,9 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Literal
 
-from base.agents.history.checkpoint import FullHistory
+from base.agents.history.closing_request import FullHistory
 from base.agents.messages.timestamp_policy import TimestampSource
 from base.db.protocols import DatabaseLike
-from base.db.transaction import write_transaction
 from services.derived.insights.run_timeline.projection.derive import project_segment
 from services.derived.insights.run_timeline.projection.source import next_boundary
 from services.derived.insights.run_timeline.projection.store import last_segment, publish
@@ -26,24 +25,18 @@ def index_next[DbT: DatabaseLike](
     timestamps: TimestampSource,
     read_segment: Callable[[DbT, int, str], FullHistory],
 ) -> bool:
-    pool = db.pool(min_size=1, max_size=1)
-    try:
-        with write_transaction(pool) as conn:
-            conn.execute(
-                "SELECT pg_advisory_xact_lock(hashtextextended(%s, 0))", (f"timeline:{agent_id}",)
-            )
-            previous = last_segment(conn, agent_id)
-            checkpoint_id = next_boundary(conn, agent_id, previous)
-            if checkpoint_id is None:
-                return False
-            history = read_segment(db, agent_id, checkpoint_id)
-            projection = project_segment(
-                checkpoint_id, history, previous, inputs=timestamps.policy()
-            )
-            publish(conn, agent_id, projection)
-        return True
-    finally:
-        pool.close()
+    with db.write_transaction() as conn:
+        conn.execute(
+            "SELECT pg_advisory_xact_lock(hashtextextended(%s, 0))", (f"timeline:{agent_id}",)
+        )
+        previous = last_segment(conn, agent_id)
+        checkpoint_id = next_boundary(conn, agent_id, previous)
+        if checkpoint_id is None:
+            return False
+        history = read_segment(db, agent_id, checkpoint_id)
+        projection = project_segment(checkpoint_id, history, previous, inputs=timestamps.policy())
+        publish(conn, agent_id, projection)
+    return True
 
 
 @dataclass(frozen=True)

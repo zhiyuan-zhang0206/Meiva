@@ -352,7 +352,7 @@ class DeepSeekSession(BaseHarnessSession[BridgeConfig]):
         env.update(self.config.env_overrides)
         return env
 
-    async def permission_decision(self, request: PermissionRequest) -> str | None:
+    def permission_decision(self, request: PermissionRequest) -> str | None:
         mode = self.config.permission_mode
         if mode == "allow":
             option = request.option("allow_once")
@@ -444,18 +444,27 @@ class DeepSeekSession(BaseHarnessSession[BridgeConfig]):
         except AcpError as exc:
             self._fail_turn(ticket, exc)
             return
-        await self._settle_turn(ticket, result)
-
-    async def _settle_turn(self, ticket: TurnTicket, result: Mapping[str, Any]) -> None:
         await asyncio.sleep(0)
-        fields = parse_prompt_result(result)
-        text = "\n".join(ticket.parts).strip()
-        if self._session_id is None:
-            usage, measured = (Usage(), False)
-        else:
-            observed = await asyncio.to_thread(
+        observed = (
+            await asyncio.to_thread(
                 read_usage, self.config.dsh_home, self.config.cwd, self._session_id
             )
+            if self._session_id is not None
+            else None
+        )
+        self._settle_turn(ticket, result, observed)
+
+    def _settle_turn(
+        self,
+        ticket: TurnTicket,
+        result: Mapping[str, Any],
+        observed: UsageSnapshot | None,
+    ) -> None:
+        fields = parse_prompt_result(result)
+        text = "\n".join(ticket.parts).strip()
+        if observed is None:
+            usage, measured = (Usage(), False)
+        else:
             self._usage = observed
             usage, measured = _summarize_turn_usage(observed)
         cost = self._turn_cost(usage) if measured else None

@@ -9,8 +9,23 @@ regains control.
 
 from __future__ import annotations
 
-import subprocess
 from datetime import UTC, datetime, timedelta
+from typing import Protocol
+
+
+# meiva:note
+# Minimal child-process handle contract for a bound impersonation relay.
+class RelayProcess(Protocol):
+    @property
+    def returncode(self) -> int | None: ...
+
+    def poll(self) -> int | None: ...
+
+    def terminate(self) -> None: ...
+
+    def wait(self, timeout: float | None = None) -> object: ...
+
+    def kill(self) -> None: ...
 
 
 class RelayChild:
@@ -21,7 +36,7 @@ class RelayChild:
     def __init__(
         self,
         lease_id: str,
-        process: subprocess.Popen[bytes],
+        process: RelayProcess,
         token: str,
         spawned_at: float,
         generation: int = 0,
@@ -60,14 +75,14 @@ def terminate_relay(child: RelayChild) -> None:
     process.terminate()
     try:
         process.wait(timeout=5)
-    except subprocess.TimeoutExpired:
+    except TimeoutError:
         process.kill()
         process.wait()
 
 
 def heartbeat_fresh(heartbeat: datetime | None, *, now: datetime) -> bool:
     """Compare the relay heartbeat with the native supervision freshness window."""
-    from base.agents.impersonation import RELAY_HEARTBEAT_STALE_SECONDS
+    from base.agents.impersonation.status import RELAY_HEARTBEAT_STALE_SECONDS
 
     if heartbeat is None:
         return False

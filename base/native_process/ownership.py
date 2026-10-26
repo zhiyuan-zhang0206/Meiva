@@ -10,7 +10,6 @@
 from __future__ import annotations
 
 import os
-import sys
 from collections.abc import Iterable, Sequence
 from dataclasses import dataclass
 from typing import Any, Protocol, TypeGuard
@@ -20,6 +19,7 @@ import psutil
 from base.native_process import pidfd
 from base.native_process.birth_key import process_birth_key
 from base.native_process.kernel_identity import native_boot_id, pid_starttime_ticks
+from base.native_process.os_platform import is_macos
 
 # Identity reads use the stable start timestamp (stable_create_time): on macOS
 # the uncorrected kernel value, elsewhere the public create_time(). The public
@@ -56,7 +56,9 @@ def _has_platform_proc(process: object) -> TypeGuard[_ProcessWithPlatformProc]:
 
 
 def _sys_platform(platform: str | None = None) -> str:
-    return sys.platform if platform is None else platform
+    if platform is not None:
+        return platform
+    return "darwin" if is_macos() else "linux"
 
 
 def stable_create_time(process: psutil.Process) -> float:

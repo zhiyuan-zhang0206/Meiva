@@ -6,7 +6,7 @@ from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from base.agents.history.context_response import ContextBreakdownResponse
+from base.agents.history.context_breakdown import ContextBreakdownResponse
 
 
 class RunTimelineWindow(BaseModel):

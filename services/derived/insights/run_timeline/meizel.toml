@@ -12,6 +12,9 @@ exports = ["projection", "router.py", "schemas.py", "tests"]
 [purity]
 "." = "strict-to-be"
 "__init__.py" = "strict"
+"history.py" = "strict"
+"schemas.py" = "strict"
+"tokens.py" = "strict"
 
 [debt.impure-call]
 "context.py#import fastapi" = 1
@@ -21,9 +24,3 @@ exports = ["projection", "router.py", "schemas.py", "tests"]
 
 [debt.impure-edge]
 "context.py#base/agents/history/context_response.py" = 1
-"history.py#base/agents/history/checkpoint.py" = 1
-"history.py#base/agents/history/hierarchy/units.py" = 1
-"links.py#base/db/__init__.py" = 1
-"links.py#base/events/reads/audit_rows.py" = 2
-"schemas.py#base/agents/history/context_response.py" = 1
-"tokens.py#base/agents/history/hierarchy/units.py" = 1
