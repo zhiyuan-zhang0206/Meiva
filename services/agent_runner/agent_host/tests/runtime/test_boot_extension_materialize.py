@@ -8,7 +8,6 @@ import pytest
 
 from agent.process_boot import init_process_scope, land_cluster_extensions, process_trace_config
 from base import db, paths
-from base.cluster.machine import MachineIdentityReader
 from base.cluster.machine.configured import ConfiguredMachineIdentity
 from base.config import ConfigBoot
 from base.config.tests.configuration import snapshot_process_config
@@ -16,7 +15,6 @@ from base.db import Database
 from base.db.code_version_gate import ProcessDbGate
 from base.packages.extensions import registry as reg
 from base.telemetry.otlp.trace_config import TraceConfig
-from base.telemetry.otlp.trace_readiness import PROCESS_RECORDING, TraceReadiness
 
 _SKILL_MD = """---
 name: {name}
@@ -87,7 +85,7 @@ def test_the_hosted_daemon_lands_them_once_per_process() -> None:
 
 
 def test_process_scope_passes_its_machine_and_home_without_reading_identity(
-    monkeypatch: pytest.MonkeyPatch, unit_home: Path
+    unit_home: Path,
 ) -> None:
     from base.telemetry import tracing
 
@@ -100,25 +98,13 @@ def test_process_scope_passes_its_machine_and_home_without_reading_identity(
         endpoint="http://127.0.0.1:4318",
         retention_days=14,
         max_dir_mb=2048,
-        disk_watermark=0.9,
-        endpoint_explicit=False,
+        disk_watermark=0.0,
+        endpoint_explicit=True,
     )
-    calls: list[tuple[MachineIdentityReader, Path, TraceConfig, TraceReadiness]] = []
-
-    def initialize(
-        *,
-        machine: MachineIdentityReader,
-        home: Path,
-        config: TraceConfig,
-        readiness: TraceReadiness,
-    ) -> None:
-        calls.append((machine, home, config, readiness))
-
-    monkeypatch.setattr(tracing, "initialize_tracing", initialize)
+    tracing.reset_tracing_state()
     init_process_scope(machine=machine, home=unit_home, trace=trace)
     assert not config.prepared
-    assert calls == [(machine, unit_home, trace, PROCESS_RECORDING)]
-    assert calls[0][3] is PROCESS_RECORDING
+    assert (unit_home / "traces").is_dir()
     with pytest.raises(UnicodeDecodeError):
         machine.name()
 

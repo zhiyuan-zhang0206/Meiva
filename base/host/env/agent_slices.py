@@ -5,7 +5,7 @@ from __future__ import annotations
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field, fields
 from types import MappingProxyType
-from typing import Any, Literal, TypeGuard
+from typing import Any, Literal, TypeGuard, overload
 
 from pydantic import BaseModel
 
@@ -211,7 +211,82 @@ class AgentSlices:
             _default_reader=default_reader,
         )
 
-    def read(self, domain: str, field: str) -> Any:
+    @overload
+    def read(
+        self,
+        domain: str,
+        field: Literal[
+            "understanding_chunk_ratio",
+            "node_stall_dump_seconds",
+            "exec_node_timeout_seconds",
+            "exec_timeout_seconds",
+            "llm_compact_timeout_seconds",
+            "llm_retry_max_total_seconds",
+            "llm_retry_initial_interval_seconds",
+            "llm_retry_max_interval_seconds",
+        ],
+    ) -> float: ...
+
+    @overload
+    def read(
+        self,
+        domain: str,
+        field: Literal[
+            "exec_output_max_chars",
+            "llm_retry_max_attempts",
+            "llm_silent_idle_max_output_tokens",
+            "memory_inherit_max_block_chars",
+            "memory_inherit_max_total_chars",
+            "memory_per_agent_index_max_lines",
+            "timeline_default_limit",
+            "to_user_soft_limit_words",
+        ],
+    ) -> int: ...
+
+    @overload
+    def read(
+        self,
+        domain: str,
+        field: Literal[
+            "understanding_enabled",
+            "security_scan_enabled",
+            "message_timestamps",
+            "workspace_in_system_prompt",
+            "prompt_sdk_overview_enabled",
+            "prompt_knowledge_cutoff_enabled",
+            "memory_index_inject_enabled",
+            "memory_per_agent_inject_enabled",
+        ],
+    ) -> bool: ...
+
+    @overload
+    def read(
+        self,
+        domain: str,
+        field: Literal["prompt_memory_behavior_enabled"],
+    ) -> bool | None: ...
+
+    @overload
+    def read(
+        self,
+        domain: str,
+        field: Literal["sdk_expand_in_system_prompt"],
+    ) -> list[str]: ...
+
+    @overload
+    def read(
+        self,
+        domain: str,
+        field: Literal["llm_override", "llm_model"],
+    ) -> str: ...
+
+    @overload
+    def read(self, domain: Literal["sandbox"], field: str) -> int: ...
+
+    @overload
+    def read(self, domain: str, field: str) -> object: ...
+
+    def read(self, domain: str, field: str) -> object:
 
         if field in self.pins:
             return self.pins[field]

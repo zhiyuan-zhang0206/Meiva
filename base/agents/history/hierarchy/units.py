@@ -132,19 +132,20 @@ def read_times(
     return read
 
 
-def read_unit(unit: MessageUnit, read: Sequence[datetime | None]) -> MessageUnit:
-    """`unit` on the read times of its first and last message (a unit with no time stays so)."""
+# meiva:note
+# `unit` on the read times of its first and last message (a unit with no time stays so).
+def _read_unit(unit: MessageUnit, read: Sequence[datetime | None]) -> MessageUnit:
     end = read[unit.i1]
     if unit.start is None or unit.end is None or end is None:
         return unit
     return replace(unit, start=read[unit.i0] or end, end=end)
 
 
-@dataclass
+@dataclass(frozen=True)
 class _OpenWork:
     i0: int
     i1: int
-    items: list[TimelineItem]
+    items: tuple[TimelineItem, ...]
 
 
 class _Divider:
@@ -166,13 +167,13 @@ class _Divider:
         if text:
             self.units.append(_unit("text", idx, idx, text))
         if steps:
-            self._work = _OpenWork(idx, idx, steps)
+            self._work = _OpenWork(idx, idx, tuple(steps))
 
     def tool_result(self, idx: int, group: list[TimelineItem]) -> None:
         if self._work is None:
-            self._work = _OpenWork(idx, idx, [])
-        self._work.i1 = idx
-        self._work.items.extend(group)
+            self._work = _OpenWork(idx, idx, tuple(group))
+            return
+        self._work = replace(self._work, i1=idx, items=(*self._work.items, *group))
 
     def standalone(
         self, kind: UnitKind, idx: int, group: list[TimelineItem], *, closes: bool
@@ -258,10 +259,11 @@ def _flat(text: str, chars: int) -> str:
     return " ".join(text.split())[:chars]
 
 
-def inbound_type(source: str | None) -> str:
-    """The type label of an inbound unit, from its source: `human message` for the user,
-    `agent N message` for agent N, any other source (`watcher:1955`, `shell:1940`,
-    `system:notice-reply`) by its own name."""
+# meiva:note
+# The type label of an inbound unit, from its source: `human message` for the user,
+# `agent N message` for agent N, any other source (`watcher:1955`, `shell:1940`,
+# `system:notice-reply`) by its own name.
+def _inbound_type(source: str | None) -> str:
     if source is None or source == "user":
         return "human message"
     if source.startswith("agent:"):
@@ -275,7 +277,7 @@ def _inbound_content(msg: BaseMessage) -> str:
     # (`meiva_inbound_body_start`; the sender is the unit's source) and, for a system
     # source, without the envelope's closing tag. Every inbound records the offset and a
     # message without it raises `ValueError`; a missing source renders like the user's (see
-    # `inbound_type`) and carries no closing tag.
+    # `_inbound_type`) and carries no closing tag.
     # meiva:link agent/messages/docs/message-format.meiva.okf.md
     kwargs = read_meiva_kwargs(msg)
     start = kwargs.get("meiva_inbound_body_start")
@@ -320,7 +322,7 @@ def catalog_line(unit: MessageUnit, messages: Sequence[BaseMessage]) -> str:
     if unit.kind == "note":
         return note_label(msg)
     if unit.kind == "inbound":
-        return f"{inbound_type(unit.source)}: {_flat(_inbound_content(msg), CONTENT_CHARS)}"
+        return f"{_inbound_type(unit.source)}: {_flat(_inbound_content(msg), CONTENT_CHARS)}"
     if unit.kind == "text":
         return f"agent text: {_flat(msg.text, CONTENT_CHARS)}"
     parts: list[str] = []
@@ -455,7 +457,7 @@ def display_blocks(
     for unit in units:
         msg = messages[unit.i0]
         if unit.kind in ("inbound", "note"):
-            placed = read_unit(unit, read)
+            placed = _read_unit(unit, read)
             if placed.start is not None and placed.end is not None:
                 blocks.append(
                     DisplayBlock(

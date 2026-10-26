@@ -5,6 +5,7 @@ exports = ["code_version_gate.py", "config.py", "connections.py", "protocols.py"
 
 [uses]
 "__init__.py" = ["config.py", "connections.py", "handle.py"]
+"config.py" = ["protocols.py"]
 "connections.py" = ["code_version_gate.py", "config.py"]
 "handle.py" = ["code_version_gate.py", "config.py", "connections.py"]
 "tests" = ["__init__.py", "code_version_gate.py", "config.py", "connections.py", "test_db_guard.py", "transaction.py"]
@@ -18,6 +19,3 @@ exports = ["code_version_gate.py", "config.py", "connections.py", "protocols.py"
 [debt.ambient-read]
 "config.py#settings base.config.settings" = 1
 "handle.py#db base.db.connections.connect" = 1
-
-[debt.any-collaborator]
-"config.py#any _from_view.view" = 1

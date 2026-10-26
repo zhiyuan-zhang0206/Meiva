@@ -10,8 +10,6 @@ exports = ["harness", "plans.py", "wake.py"]
 "wake.py" = "strict"
 
 [debt.impure-edge]
-"__init__.py#base/agents/lifecycle.py" = 1
-"__init__.py#base/agents/model/model_config.py" = 1
 "__init__.py#base/telemetry/__init__.py" = 2
 "__init__.py#base/telemetry/audit_events.py" = 1
 "__init__.py#meiva/boot.py" = 1

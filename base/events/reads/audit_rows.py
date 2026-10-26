@@ -12,154 +12,28 @@ Loki line: the table does not keep the line bytes.
 
 from __future__ import annotations
 
-import json
-from datetime import UTC, datetime
-from hashlib import sha256
-from typing import Any, LiteralString
+from datetime import datetime
+from typing import Any
 
 from base.db.protocols import SyncConnection
 from base.events.contract import EventTier
-
-# Audit event names that form edges of the fleet graph and the neighbors walk. Lineage
-# (spawn/fork/resurrect) is permanent and all-time; messages (send_message) decay with recency.
-LINEAGE_EVENT_NAMES = ("spawn", "fork", "resurrect")
-EDGE_EVENT_NAMES = ("send_message", *LINEAGE_EVENT_NAMES)
-
-# A tier is derived from level and category (`base.events.contract.tier_for`): warning and above
-# is an anomaly, any other audit row is a business fact.
-_ANOMALY_LEVELS = ("warning", "error", "critical")
-
-_COLUMNS: LiteralString = (
-    "event_uid, ts, trace_id, span_id, agent_id, machine, process, event_name, level, source, "
-    "target_agent_id, attributes"
+from base.events.reads import (
+    EDGE_EVENT_NAMES as EDGE_EVENT_NAMES,
 )
-
-
-def _stream_id(event_uid: int) -> int:
-    """The unsigned stream id the event carries in Loki and the JSONL mirror."""
-    return event_uid + (1 << 64) if event_uid < 0 else event_uid
-
-
-def _row(record: tuple[Any, ...]) -> dict[str, Any]:
-    (
-        event_uid,
-        ts,
-        trace_id,
-        span_id,
-        agent_id,
-        machine,
-        process,
-        event_name,
-        level,
-        source,
-        target_agent_id,
-        attributes,
-    ) = record
-    ts = ts.astimezone(UTC)
-    digest = json.dumps(
-        [
-            ts.isoformat(),
-            trace_id,
-            span_id,
-            agent_id,
-            machine,
-            process,
-            event_name,
-            level,
-            source,
-            target_agent_id,
-            attributes,
-        ],
-        sort_keys=True,
-        separators=(",", ":"),
-        ensure_ascii=False,
-    )
-    return {
-        "id": _stream_id(event_uid),
-        "line_sha256": sha256(digest.encode()).hexdigest(),
-        "ts": ts,
-        "trace_id": trace_id,
-        "span_id": span_id,
-        "agent_id": agent_id,
-        "machine": machine,
-        "process": process,
-        "category": "audit",
-        "event_name": event_name,
-        "level": level,
-        "source": source,
-        "target_agent_id": target_agent_id,
-        "attributes": attributes,
-    }
-
-
-def _tier_clause(tiers: list[EventTier]) -> tuple[LiteralString | None, bool]:
-    """The level predicate for a tier filter, and whether any audit row can match.
-
-    Audit rows are `business` or, from warning up, `anomaly`; asking for both (or
-    for neither of them) needs no predicate.
-    """
-    wants_business, wants_anomaly = "business" in tiers, "anomaly" in tiers
-    if not (wants_business or wants_anomaly):
-        return None, False
-    if wants_business == wants_anomaly:
-        return None, True
-    return ("level = ANY(%s)" if wants_anomaly else "NOT (level = ANY(%s))"), True
-
-
-def _where(
-    *,
-    agent_id: int | None,
-    involving_agents: list[int] | None,
-    event_names: list[str] | None,
-    tiers: list[EventTier] | None,
-    trace_id: str | None,
-    machine: str | None,
-    level: str | None,
-    attribute_filters: dict[str, str] | None,
-    from_: datetime | None,
-    to: datetime | None,
-) -> tuple[LiteralString, list[Any]] | None:
-    """The WHERE clause and parameters, or None when the filters exclude every audit row."""
-    clauses: list[LiteralString] = []
-    params: list[Any] = []
-
-    def add(clause: LiteralString, *values: object) -> None:
-        clauses.append(clause)
-        params.extend(values)
-
-    if tiers is not None:
-        tier_clause, possible = _tier_clause(tiers)
-        if not possible:
-            return None
-        if tier_clause is not None:
-            add(tier_clause, list(_ANOMALY_LEVELS))
-    if involving_agents is not None:
-        add(
-            "(agent_id = ANY(%s) OR source = ANY(%s))",
-            involving_agents,
-            [f"agent:{involved}" for involved in involving_agents],
-        )
-    optional: tuple[tuple[LiteralString, Any], ...] = (
-        ("agent_id = %s", agent_id),
-        ("event_name = ANY(%s)", event_names),
-        ("trace_id = %s", trace_id),
-        ("machine = %s", machine),
-        ("level = %s", level.lower() if level is not None else None),
-        ("ts >= %s", from_),
-        ("ts <= %s", to),
-    )
-    for clause, value in optional:
-        if value is not None:
-            add(clause, value)
-    # Values compare as text, so a JSON number or boolean matches its string form; a `!=` prefix
-    # negates, and a missing key reads as the empty string (the Loki reader's semantics).
-    for key, value in (attribute_filters or {}).items():
-        if value.startswith("!="):
-            add("COALESCE(attributes ->> %s, '') <> %s", key, value[2:])
-        else:
-            add("COALESCE(attributes ->> %s, '') = %s", key, value)
-    where: LiteralString = " AND ".join(clauses) if clauses else "TRUE"
-    return where, params
+from base.events.reads import (
+    LINEAGE_EVENT_NAMES as LINEAGE_EVENT_NAMES,
+)
+from base.events.reads import (
+    AuditFilter,
+    count_audit_rows,
+    query_audit_rows,
+)
+from base.events.reads import (
+    edge_counts as edge_counts,
+)
+from base.events.reads import (
+    edge_weights as edge_weights,
+)
 
 
 def query_events(
@@ -179,38 +53,24 @@ def query_events(
     offset: int = 0,
     direction: str = "backward",
 ) -> tuple[list[dict[str, Any]], bool]:
-    """Slice of the audit record, newest first (`backward`) or oldest first (`forward`).
-
-    `involving_agents` keeps the rows done to one of those agents (`agent_id`) or by one of them
-    (`source` = `agent:N`).
-
-    Returns `(rows, has_more)`; `has_more` comes from a one-row lookahead, as in the Loki
-    reader. Ties on `ts` are ordered by the table's identity, stable across pages.
-    """
-    where = _where(
-        agent_id=agent_id,
-        involving_agents=involving_agents,
-        event_names=event_names,
-        tiers=tiers,
-        trace_id=trace_id,
-        machine=machine,
-        level=level,
-        attribute_filters=attribute_filters,
-        from_=from_,
-        to=to,
+    return query_audit_rows(
+        conn,
+        AuditFilter(
+            agent_id=agent_id,
+            involving_agents=involving_agents,
+            event_names=event_names,
+            tiers=tiers,
+            trace_id=trace_id,
+            machine=machine,
+            level=level,
+            attribute_filters=attribute_filters,
+            from_=from_,
+            to=to,
+        ),
+        limit=limit,
+        offset=offset,
+        direction=direction,
     )
-    if where is None:
-        return [], False
-    clause, params = where
-    order: LiteralString = "DESC" if direction == "backward" else "ASC"
-    # meiva:note
-    # Both _COLUMNS and clause are LiteralString fragments assembled from fixed SQL templates; user values stay in params.
-    query: LiteralString = (
-        f"SELECT {_COLUMNS} FROM audit_events WHERE {clause} "  # noqa: S608
-        f"ORDER BY ts {order}, id {order} LIMIT %s OFFSET %s"
-    )
-    records = conn.execute(query, [*params, limit + 1, offset]).fetchall()
-    return [_row(record) for record in records[:limit]], len(records) > limit
 
 
 def count_events(
@@ -228,76 +88,18 @@ def count_events(
     to: datetime | None = None,
 ) -> int:
     """Exact count of the audit rows `query_events` would page through."""
-    where = _where(
-        agent_id=agent_id,
-        involving_agents=involving_agents,
-        event_names=event_names,
-        tiers=tiers,
-        trace_id=trace_id,
-        machine=machine,
-        level=level,
-        attribute_filters=attribute_filters,
-        from_=from_,
-        to=to,
+    return count_audit_rows(
+        conn,
+        AuditFilter(
+            agent_id=agent_id,
+            involving_agents=involving_agents,
+            event_names=event_names,
+            tiers=tiers,
+            trace_id=trace_id,
+            machine=machine,
+            level=level,
+            attribute_filters=attribute_filters,
+            from_=from_,
+            to=to,
+        ),
     )
-    if where is None:
-        return 0
-    clause, params = where
-    # meiva:note
-    # clause is a LiteralString built from fixed SQL predicate templates; user filter values are passed via params.
-    query: LiteralString = f"SELECT count(*) FROM audit_events WHERE {clause}"  # noqa: S608
-    row = conn.execute(query, params).fetchone()
-    assert row is not None  # noqa: S101 — an aggregate always returns one row
-    return int(row[0])
-
-
-def edge_weights(
-    conn: SyncConnection,
-    *,
-    live_ids: set[int] | None,
-    win_start: datetime | None,
-    now: datetime,
-    decay_lambda: float,
-) -> list[tuple[int, int, str, float, int, datetime]]:
-    """Fleet-graph edge aggregates: `(target, agent, event_name, weight, count, last_seen)`.
-
-    One row per `(target_agent_id, agent_id, event_name)` over the edge events. Lineage rows weigh
-    2.0 each, all-time; a message weighs `exp(-lambda * days_ago)` and rows older than `win_start`
-    are left out. When `live_ids` is given, both endpoints must be in it.
-    """
-    query: LiteralString = """
-        SELECT target_agent_id, agent_id, event_name,
-               sum(CASE WHEN event_name = 'send_message'
-                        THEN exp(-%(lam)s * extract(epoch FROM (%(now)s - ts)) / 86400.0)
-                        ELSE 2.0 END)::float8,
-               count(*), max(ts)
-        FROM audit_events
-        WHERE event_name = ANY(%(names)s)
-          AND agent_id IS NOT NULL AND target_agent_id IS NOT NULL
-          AND (event_name <> 'send_message' OR %(win)s::timestamptz IS NULL OR ts >= %(win)s)
-          AND (%(live)s::bigint[] IS NULL
-               OR (agent_id = ANY(%(live)s) AND target_agent_id = ANY(%(live)s)))
-        GROUP BY target_agent_id, agent_id, event_name
-    """
-    records = conn.execute(
-        query,
-        {
-            "lam": decay_lambda,
-            "now": now,
-            "names": list(EDGE_EVENT_NAMES),
-            "win": win_start,
-            "live": sorted(live_ids) if live_ids is not None else None,
-        },
-    ).fetchall()
-    return [(int(t), int(a), str(n), float(w), int(c), last) for t, a, n, w, c, last in records]
-
-
-def edge_counts(conn: SyncConnection) -> list[tuple[int, int, str, int, datetime]]:
-    """Neighbors-walk tie inputs: `(agent, target, event_name, count, last_seen)` per edge."""
-    records = conn.execute(
-        "SELECT agent_id, target_agent_id, event_name, count(*), max(ts) FROM audit_events "
-        "WHERE event_name = ANY(%s) AND agent_id IS NOT NULL AND target_agent_id IS NOT NULL "
-        "GROUP BY agent_id, target_agent_id, event_name",
-        [list(EDGE_EVENT_NAMES)],
-    ).fetchall()
-    return [(int(a), int(t), str(n), int(c), last) for a, t, n, c, last in records]

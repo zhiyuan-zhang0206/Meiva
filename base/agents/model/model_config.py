@@ -1,10 +1,11 @@
 """Validate the effective model configuration before agent configuration writes."""
 
-from collections.abc import Mapping
-
 import psycopg
 
 from base.agents.model.birth_config import resolve_birth_config
+from base.agents.model.restart_config import (
+    validate_restart_model_config as validate_restart_model_config,
+)
 from base.api_contracts.agent_contract import AgentNotFound, InvalidModelConfig
 from base.config.agent_pins import resolve_agent_config_pins
 from base.config.service_read import ConfigAuthority
@@ -41,42 +42,6 @@ def validate_spawn_model_config(
             catalog=catalog,
             keys=keys,
             llm_override=llm_override,
-        )
-    except ValueError as exc:
-        raise InvalidModelConfig(str(exc)) from exc
-
-
-def validate_restart_model_config(
-    cur: psycopg.Cursor,
-    agent_id: int,
-    overlay: Mapping[str, object],
-    *,
-    catalog: ModelCatalog,
-    default_model: str,
-) -> None:
-    """Lock and check overlay > stored overlay > birth before changing either field.
-
-    The caller holds a writable transaction through its overlay and restart
-    writes. Provider credentials are checked on launch, not on this config edit.
-    """
-    if not {"llm_model", "reasoning_effort"}.intersection(overlay):
-        return
-    cur.execute(
-        "SELECT config_overlay,birth_config FROM agents_meta WHERE id=%s FOR UPDATE",
-        (agent_id,),
-    )
-    row = cur.fetchone()
-    if row is None:
-        raise AgentNotFound(f"agent {agent_id} does not exist")
-    stored_overlay: dict[str, object] | None = row[0]
-    birth_config: dict[str, object] | None = row[1]
-    merged = {**(stored_overlay or {}), **overlay}
-    pins = resolve_agent_config_pins(merged, birth_config)
-    try:
-        factory.validate_model_config(
-            model=pins.get("llm_model", default_model),
-            config=pins,
-            catalog=catalog,
         )
     except ValueError as exc:
         raise InvalidModelConfig(str(exc)) from exc

@@ -7,6 +7,3 @@ exports = ["accessibility.py", "browser_deps.py", "google_drive.py", "screen_cap
 
 [purity]
 "__init__.py" = "strict"
-
-[debt.ambient-read]
-"google_drive.py#random secrets.token_hex" = 1

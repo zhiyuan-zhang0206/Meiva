@@ -23,43 +23,21 @@ Reads use the process's constructed Settings domains. An unavailable domain
 fails explicitly; a read never constructs a second Settings image.
 """
 
-from base.config.config_registry import DOMAIN_ATTRS
-from base.host.env.config_lite_table import FIELD_DOMAINS, SENSITIVE_FIELDS
-
-
-class PluginFlagError(Exception):
-    """Root of plugin core-flag declaration and read failures."""
-
-
-class UnknownFlag(PluginFlagError):  # noqa: N818
-    """A declared key is malformed, unknown, or names a sensitive core field."""
-
-
-class UndeclaredFlag(PluginFlagError):  # noqa: N818
-    """The current plugin tried to read a flag absent from its declaration."""
-
-
-class FlagDomainUnavailable(PluginFlagError):  # noqa: N818
-    """The running process profile did not construct a declared flag's domain."""
-
-
-def validate_flag_key(key: str) -> str:
-    """Validate one fully qualified, non-sensitive Settings key and return it."""
-    if not isinstance(key, str) or key.count(".") != 1:
-        raise UnknownFlag(f"unknown plugin flag {key!r}: flags must use exactly <domain>.<field>.")
-    domain, field = key.split(".")
-    if not domain or not field:
-        raise UnknownFlag(f"unknown plugin flag {key!r}: flags must use exactly <domain>.<field>.")
-    if domain not in DOMAIN_ATTRS:
-        raise UnknownFlag(f"unknown plugin flag {key!r}: {domain!r} is not a Settings domain.")
-
-    if FIELD_DOMAINS.get(field) != domain:
-        raise UnknownFlag(
-            f"unknown plugin flag {key!r}: {field!r} is not a field in the {domain!r} domain."
-        )
-    if field in SENSITIVE_FIELDS:
-        raise UnknownFlag(f"unknown plugin flag {key!r}: secrets are not flags.")
-    return key
+from base.packages.plugins.plugin_errors import (
+    FlagDomainUnavailable as FlagDomainUnavailable,
+)
+from base.packages.plugins.plugin_errors import (
+    PluginFlagError as PluginFlagError,
+)
+from base.packages.plugins.plugin_errors import (
+    UndeclaredFlag as UndeclaredFlag,
+)
+from base.packages.plugins.plugin_errors import (
+    UnknownFlag as UnknownFlag,
+)
+from base.packages.plugins.plugin_errors import (
+    validate_flag_key as validate_flag_key,
+)
 
 
 def read_declared_flag(key: str, flags: tuple[str, ...]) -> object:

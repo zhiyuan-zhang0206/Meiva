@@ -220,7 +220,10 @@ class DeepSeekSession(BaseHarnessSession[BridgeConfig]):
         await self._close_tasks()
         observed, survivors = self._spawned_descendants()
         if survivors:
-            await self._reap(survivors)
+            reaped = self._term_spawned(survivors)
+            if reaped:
+                await asyncio.sleep(CANCEL_POLL_SECONDS)
+                self._kill_survivors(reaped)
         self._residue = self._record_sweep_survivors(observed, survivors, reason="session closed")
         # meiva:note
         # `connection.close()` above waited for the child, so this is final.
@@ -246,12 +249,14 @@ class DeepSeekSession(BaseHarnessSession[BridgeConfig]):
     async def interrupt(self) -> CancelReport:
         connection = self._require_connection()
         ticket = self._active
+        turn_id = None
         if ticket is not None:
             ticket.interrupt_requested = True
+            turn_id = ticket.turn_id
         pid = self._agent_pid
         if pid is None:
             return CancelReport(
-                turn_id=ticket.turn_id if ticket is not None else None,
+                turn_id=turn_id,
                 cancel_ms=0.0,
                 settled=None,
                 observed=(),
@@ -271,7 +276,10 @@ class DeepSeekSession(BaseHarnessSession[BridgeConfig]):
         while ticket is not None and not ticket.settled and self._monotonic() < settle_deadline:
             await asyncio.sleep(CANCEL_POLL_SECONDS)
         cancel_ms = (_perf_counter() - started) * 1000.0
-        reaped = await self._reap(spawned)
+        reaped = self._term_spawned(spawned)
+        if reaped:
+            await asyncio.sleep(CANCEL_POLL_SECONDS)
+            self._kill_survivors(reaped)
         gone, waited_ms = await wait_gone(
             self._probe,
             reaped,
@@ -280,9 +288,9 @@ class DeepSeekSession(BaseHarnessSession[BridgeConfig]):
         )
         remaining = describe(observed, [child for child in reaped if self._probe.is_alive(child)])
         return CancelReport(
-            turn_id=ticket.turn_id if ticket is not None else None,
+            turn_id=turn_id,
             cancel_ms=cancel_ms,
-            settled=True if not reaped else gone,
+            settled=not reaped or gone,
             observed=describe(observed, spawned),
             remaining=remaining,
             waited_ms=waited_ms,
@@ -290,7 +298,7 @@ class DeepSeekSession(BaseHarnessSession[BridgeConfig]):
             agent_alive=self._probe.is_alive(pid),
         )
 
-    async def _reap(self, spawned: Mapping[int, str]) -> tuple[int, ...]:
+    def _term_spawned(self, spawned: Mapping[int, str]) -> tuple[int, ...]:
         reaped: list[int] = []
         for child in sorted(spawned):
             if child == self._agent_pid or not self._probe.is_alive(child):
@@ -298,13 +306,13 @@ class DeepSeekSession(BaseHarnessSession[BridgeConfig]):
             with contextlib.suppress(ProcessLookupError, PermissionError):
                 self._deepseek_probe.kill(child, SIGTERM)
             reaped.append(child)
-        if reaped:
-            await asyncio.sleep(CANCEL_POLL_SECONDS)
+        return tuple(reaped)
+
+    def _kill_survivors(self, reaped: tuple[int, ...]) -> None:
         for child in reaped:
             if self._probe.is_alive(child):
                 with contextlib.suppress(ProcessLookupError, PermissionError):
                     self._deepseek_probe.kill(child, SIGKILL)
-        return tuple(reaped)
 
     # meiva:note
     # Snapshot the runtime process tree and select descendants spawned since turn start.
@@ -352,7 +360,7 @@ class DeepSeekSession(BaseHarnessSession[BridgeConfig]):
         env.update(self.config.env_overrides)
         return env
 
-    async def permission_decision(self, request: PermissionRequest) -> str | None:
+    def permission_decision(self, request: PermissionRequest) -> str | None:
         mode = self.config.permission_mode
         if mode == "allow":
             option = request.option("allow_once")
@@ -444,18 +452,27 @@ class DeepSeekSession(BaseHarnessSession[BridgeConfig]):
         except AcpError as exc:
             self._fail_turn(ticket, exc)
             return
-        await self._settle_turn(ticket, result)
-
-    async def _settle_turn(self, ticket: TurnTicket, result: Mapping[str, Any]) -> None:
         await asyncio.sleep(0)
-        fields = parse_prompt_result(result)
-        text = "\n".join(ticket.parts).strip()
-        if self._session_id is None:
-            usage, measured = (Usage(), False)
-        else:
-            observed = await asyncio.to_thread(
+        observed = (
+            await asyncio.to_thread(
                 read_usage, self.config.dsh_home, self.config.cwd, self._session_id
             )
+            if self._session_id is not None
+            else None
+        )
+        self._settle_turn(ticket, result, observed)
+
+    def _settle_turn(
+        self,
+        ticket: TurnTicket,
+        result: Mapping[str, Any],
+        observed: UsageSnapshot | None,
+    ) -> None:
+        fields = parse_prompt_result(result)
+        text = "\n".join(ticket.parts).strip()
+        if observed is None:
+            usage, measured = (Usage(), False)
+        else:
             self._usage = observed
             usage, measured = _summarize_turn_usage(observed)
         cost = self._turn_cost(usage) if measured else None

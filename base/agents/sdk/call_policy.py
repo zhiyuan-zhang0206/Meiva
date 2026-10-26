@@ -6,61 +6,25 @@ import contextlib
 import math
 import threading
 import time
-from collections.abc import Callable, Generator, Mapping
-from dataclasses import dataclass, field
-from pathlib import Path
+from collections.abc import Callable, Generator
 from types import TracebackType
 
-from pydantic import BaseModel, Field
-
-from base.host.env.boot_policy import BootstrapFetch
+from base.agents.sdk import (
+    InertSamplingPolicy as InertSamplingPolicy,
+)
+from base.agents.sdk import (
+    SamplingPolicy as SamplingPolicy,
+)
+from base.agents.sdk import (
+    SamplingPolicyLike as SamplingPolicyLike,
+)
+from base.agents.sdk import (
+    SamplingSource as SamplingSource,
+)
+from base.agents.sdk import (
+    policy_from_aliases as policy_from_aliases,
+)
 from base.log import logger
-
-
-class SamplingPolicy(BaseModel):
-    """Sampling is opt-in; the ratio is the inverse inclusion probability."""
-
-    sampling_enabled: bool = False
-    sample_every: int = Field(default=10, ge=1)
-
-
-# meiva:note
-# Where the SDK sampling policy is read from, and how often.
-#
-# `env` is the launch environment and `env_path` the `.env` file of the home: a process whose
-# config source is local reads the file, any other asks its gateway with the environment's URL
-# and machine token (`read_policy`). `env` is a mapping the root hands in, so a root that passes
-# the live process environment (`process_environment()`) sees a token or flag that appears later,
-# and a test passes a dict. `tuning` bounds the gateway fetch; `refresh_seconds` is the wait
-# between fetches, counted from the previous one (the first fetch is due that long after the owner
-# is built).
-@dataclass(frozen=True)
-class SamplingSource:
-    env: Mapping[str, str]
-    env_path: Path
-    tuning: BootstrapFetch = field(
-        default_factory=lambda: BootstrapFetch(timeout_s=2.0, attempts=1)
-    )
-    refresh_seconds: float = 5.0
-
-    def __post_init__(self) -> None:
-        if not math.isfinite(self.refresh_seconds) or self.refresh_seconds < 0:
-            raise ValueError("SDK sampling refresh_seconds must be finite and nonnegative")
-
-
-# meiva:note
-# The sampling policy `aliases` (env or `.env` values by alias) say; an alias that is absent takes
-# the default, and a value outside the policy's bounds raises `ValidationError`.
-def policy_from_aliases(aliases: Mapping[str, str]) -> SamplingPolicy:
-    defaults = SamplingPolicy()
-    return SamplingPolicy.model_validate(
-        {
-            "sampling_enabled": aliases.get(
-                "MEIVA_SDK_CALL_SAMPLING_ENABLED", defaults.sampling_enabled
-            ),
-            "sample_every": aliases.get("MEIVA_SDK_CALL_SAMPLE_EVERY", defaults.sample_every),
-        }
-    )
 
 
 # meiva:note

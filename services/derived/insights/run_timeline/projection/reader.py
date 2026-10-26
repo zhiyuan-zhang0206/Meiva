@@ -11,7 +11,7 @@ from typing import Any
 
 from fastapi import HTTPException
 
-from base.agents.history.checkpoint import FullHistory
+from base.agents.history.closing_request import FullHistory
 from base.agents.messages.timestamp_policy import TimestampSource
 from base.clock import Timers
 from base.db.protocols import DatabaseLike, SyncConnection, SyncPool

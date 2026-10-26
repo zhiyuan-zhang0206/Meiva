@@ -9,4 +9,3 @@ exports = ["creation_identity.py", "harness.py", "spawn.py", "transaction.py"]
 
 [debt.ambient-read]
 "harness.py#clock datetime.datetime.now" = 1
-"transaction.py#random uuid.uuid4" = 1

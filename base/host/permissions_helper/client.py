@@ -20,9 +20,9 @@ import binascii
 import json
 import socket
 import time
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal, overload
 
 from base.host.converge.accessibility import AccessibilityState, AccessibilityStatus
 from base.host.converge.screen_capture import ScreenCaptureState, ScreenCaptureStatus
@@ -219,7 +219,7 @@ def _exchange(
     req: dict[str, object],
     *,
     call_timeout_s: float = CALL_TIMEOUT_S,
-) -> dict[str, Any]:
+) -> Mapping[str, Any]:
     """Send one request line on a connected socket, read one reply, close it."""
     s.settimeout(call_timeout_s)
     try:
@@ -241,21 +241,33 @@ def _exchange(
     return parse_reply(bytes(buf), method)
 
 
-def parse_reply(buf: bytes, method: str) -> Any:
-    """The helper's JSON-line reply contract."""
+@overload
+def parse_reply(buf: bytes, method: Literal["ping"]) -> PingResult: ...
+
+
+@overload
+def parse_reply(buf: bytes, method: str) -> Mapping[str, Any]: ...
+
+
+# meiva:note
+# The helper's JSON-line reply contract.
+def parse_reply(buf: bytes, method: str) -> Mapping[str, Any]:
     if not buf:
         raise PermissionsHelperError(f"permissions helper closed without a response to {method!r}")
     if not buf.endswith(b"\n"):
         raise PermissionsHelperError(f"permissions helper response to {method!r} was truncated")
     resp = json.loads(buf)
+    # meiva:note
     # ok / error / result are contract-guaranteed by the daemon's dispatch; index
     # with [] so a wire-format break blows up here instead of being masked.
     if not resp["ok"]:
+        # meiva:note
         # `error_code` is optional: only the helper's user-abort stop sets it.
         if resp.get("error_code") == "user_abort":
             raise UserAbortError(resp["error"])
         raise PermissionsHelperError(resp["error"])
-    return resp["result"]
+    result: dict[str, Any] = resp["result"]
+    return result
 
 
 _NO_GRANT_DIAGNOSTIC = (
@@ -294,9 +306,10 @@ class PermissionsHelperClient(StatefulCalls):
     def sock_path(self) -> Path:
         return self._sock_path
 
-    def call(self, method: str, **args: object) -> Any:
-        """One JSON-line request/response over this helper's Unix socket."""
-        req = {"id": 1, "method": method, **args}  # one request per fresh connection
+    # meiva:note
+    # One JSON-line request/response over this helper's Unix socket (one request per fresh connection).
+    def _call_raw(self, method: str, **args: object) -> Mapping[str, Any]:
+        req = {"id": 1, "method": method, **args}
         return _exchange(
             connect(str(self._sock_path)), method, req, call_timeout_s=self._call_timeout_s
         )

@@ -5,7 +5,7 @@ exports = ["models.py", "stats.py", "tasks.py", "uploads.py"]
 "shell.py" = ["commands.py"]
 
 [purity]
-"." = "strict-to-be"
+"." = "strict"
 "__init__.py" = "strict"
 "commands.py" = "strict"
 "errors.py" = "strict"
@@ -19,6 +19,3 @@ exports = ["models.py", "stats.py", "tasks.py", "uploads.py"]
 "tasks.py" = "strict"
 "uploads.py" = "strict"
 "user_settings.py" = "strict"
-
-[debt.impure-edge]
-"models.py#base/agents/model/birth_config.py" = 1

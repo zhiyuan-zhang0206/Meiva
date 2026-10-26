@@ -3,7 +3,7 @@ exports = ["auth.py", "tests", "transport.py"]
 [uses]
 "__init__.py" = ["config.py", "session.py", "transport.py", "types.py"]
 "config.py" = []
-"mapping.py" = ["transport.py"]
+"mapping.py" = []
 "auth.py" = []
 "session.py" = ["auth.py", "config.py", "mapping.py", "transport.py", "types.py"]
 "tests" = ["__init__.py", "auth.py", "mapping.py", "session.py", "transport.py"]
@@ -19,7 +19,6 @@ exports = ["auth.py", "tests", "transport.py"]
 "session.py#async def close" = 1
 "session.py#async def interrupt" = 1
 "session.py#async def start" = 1
-"transport.py#async def _dispatch" = 1
 "transport.py#async def _read_loop" = 1
 "transport.py#async def _write" = 1
 "transport.py#async def close" = 1

@@ -37,7 +37,7 @@ from __future__ import annotations
 
 from collections.abc import Callable
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, Any, Self
+from typing import TYPE_CHECKING, Any, Protocol, Self
 
 from base.agents.context.clients import ClientSet, LazyConnection
 from base.agents.context.identity import AgentIdentity
@@ -55,7 +55,7 @@ from base.lm.harness.engine import TurnEngine
 from base.native_process.runtime_incarnation import RuntimeIncarnation
 from base.native_process.turn_identity import HostedTurnResources
 
-__all__ = ["MeivaContext", "agent_id_from_config"]
+__all__ = ["ContextCaptureOwner", "MeivaContext", "agent_id_from_config"]
 
 # The handle types are annotations only: the exec child builds this same type from its request
 # envelope, and its start must not import psycopg / redis / langchain for handles it never holds.
@@ -71,6 +71,13 @@ if TYPE_CHECKING:
     from base.host.env.agent_slices import AgentSlices
     from base.packages.composer_commands import CommandCatalog
     from base.packages.plugins.extensions import ExtensionRegistry
+    from base.telemetry.delivery.receipts import Event
+
+
+# meiva:note
+# The exclusive attachment owning admission and direct local audit capture.
+class ContextCaptureOwner(SdkCaptureOwner, Protocol):
+    def capture_local_event(self, event: Event) -> Event: ...
 
 
 def agent_id_from_config(
@@ -211,7 +218,7 @@ class MeivaContext:
     sdk_calls: SdkCallTally | None = None
     """This execution's unsampled public-call tally. Never serialized into requests or state."""
 
-    sdk_capture: SdkCaptureOwner | None = None
+    sdk_capture: ContextCaptureOwner | None = None
     """This exclusive attachment's capture owner; calls retain independent admissions."""
 
     @property

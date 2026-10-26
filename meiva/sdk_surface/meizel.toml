@@ -22,6 +22,7 @@ exports = ["agent_identity.py", "attachment_transport.py", "batch.py", "discover
 [purity]
 "." = "strict-to-be"
 "__init__.py" = "strict"
+"agent_identity.py" = "strict"
 "discovery.py" = "strict"
 "help.py" = "strict"
 "plugins.py" = "strict"
@@ -38,7 +39,6 @@ exports = ["agent_identity.py", "attachment_transport.py", "batch.py", "discover
 
 [debt.impure-call]
 "attachment_transport.py#Path.stat" = 1
-"batch.py#async def _bounded" = 1
 "batch.py#async def run_batch" = 1
 "injection_check.py#async def page_probability" = 1
 "metering.py#async def async_recorder" = 1
@@ -47,18 +47,14 @@ exports = ["agent_identity.py", "attachment_transport.py", "batch.py", "discover
 [debt.impure-edge]
 "extensions.py#base/packages/plugins/loading/faces.py" = 1
 "injection_check.py#base/lm/decision/call.py" = 1
-"install.py#base/packages/plugins/flags.py" = 1
 "install.py#base/packages/plugins/load_report.py" = 1
-"installation.py#base/agents/sdk/call_policy.py" = 1
 "installation.py#base/config/service_read.py" = 1
-"installation.py#base/packages/plugins/extensions.py" = 1
 "metering.py#base/agents/sdk/telemetry.py" = 1
 "process_context.py#base/agents/context/__init__.py" = 1
 "process_context.py#base/native_process/loaded_commit.py" = 1
 "settings.py#base/agents/context/clients.py" = 1
 "settings.py#base/config/__init__.py" = 1
 "settings.py#base/events/live/bus.py" = 1
-"settings.py#base/host/env/agent_slices.py" = 2
 "wraps.py#base/packages/plugins/activation.py" = 1
 
 [debt.wide-exports]

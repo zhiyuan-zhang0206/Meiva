@@ -13,7 +13,7 @@ import time
 from collections.abc import Awaitable, Callable, Generator, Mapping
 from typing import Any
 
-from base.agents.sdk.call_policy import SamplingPolicy, SamplingPolicyOwner
+from base.agents.sdk import SamplingPolicy, SamplingPolicyLike
 from base.agents.sdk.capture import SdkCaptureOwner
 from base.agents.sdk.tally import SdkCall, SdkCallTally, sdk_calls_by_tool_call_id
 from base.api_contracts.agent_contract import SdkCaptureAdmission
@@ -28,7 +28,7 @@ def emit(
     duration: float | None = None,
     *,
     identity: Mapping[str, Any],
-    sampling_owner: SamplingPolicyOwner,
+    sampling_owner: SamplingPolicyLike,
     sampling_policy: SamplingPolicy | None = None,
     admission: SdkCaptureAdmission | None = None,
     producer: Callable[[], Any] | None = None,
@@ -82,7 +82,7 @@ def _measure(
     identity: Mapping[str, Any],
     tally: SdkCallTally | None,
     capture_owner: SdkCaptureOwner | None,
-    sampling_owner: SamplingPolicyOwner,
+    sampling_owner: SamplingPolicyLike,
     producer: Callable[[], Any] | None,
     machine_reader: Callable[[], str] | None,
 ) -> Generator[None, None, None]:
@@ -135,7 +135,7 @@ def run_metered[ResultT](
     kwargs: Mapping[str, Any],
     *,
     identity: Mapping[str, Any],
-    sampling_owner: SamplingPolicyOwner,
+    sampling_owner: SamplingPolicyLike,
     tally: SdkCallTally | None = None,
     capture_owner: SdkCaptureOwner | None = None,
     producer: Callable[[], Any] | None = None,
@@ -153,7 +153,7 @@ async def run_metered_async[ResultT](
     kwargs: Mapping[str, Any],
     *,
     identity: Mapping[str, Any],
-    sampling_owner: SamplingPolicyOwner,
+    sampling_owner: SamplingPolicyLike,
     tally: SdkCallTally | None = None,
     capture_owner: SdkCaptureOwner | None = None,
     producer: Callable[[], Any] | None = None,

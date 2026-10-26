@@ -4,7 +4,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from datetime import datetime
 
-from base.agents.history.checkpoint import (
+from base.agents.history.closing_request import (
     FullHistory,
 )
 from base.agents.history.hierarchy.units import (

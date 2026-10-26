@@ -9,7 +9,7 @@ distribution and never generates text. It is deliberately separate from chat mod
 from __future__ import annotations
 
 import math
-from collections.abc import Callable, Mapping
+from collections.abc import Awaitable, Callable, Mapping
 from dataclasses import dataclass
 from typing import Protocol
 
@@ -179,7 +179,7 @@ class AsyncTransport(Protocol):
 class DecisionBinding(Protocol):
     """A provider's client for one decision model."""
 
-    async def decide(self, state: str, questions: Mapping[str, Question]) -> DecisionResult:
+    def decide(self, state: str, questions: Mapping[str, Question]) -> Awaitable[DecisionResult]:
         """Answer every question about ``state``; raise ``DecisionError`` on any failure."""
         ...
 

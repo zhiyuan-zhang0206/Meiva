@@ -3,15 +3,41 @@
 # meiva:link base/clock/docs/clock.meiva.okf.md
 from __future__ import annotations
 
+from typing import Protocol
+
 from base.clock import ClockConfig
-from base.config import ConfigBoot
 
 
-def clock_config_from_boot(boot: ConfigBoot) -> ClockConfig:
+class _GeneralDomain(Protocol):
+    @property
+    def timezone(self) -> str: ...
+
+    @property
+    def message_timestamp_weekday(self) -> bool: ...
+
+
+class _DirectView(Protocol):
+    @property
+    def general(self) -> _GeneralDomain: ...
+
+
+class _DynamicView(Protocol):
+    def __getattr__(self, name: str) -> _GeneralDomain: ...
+
+
+class _ConfigBoot(Protocol):
+    @property
+    def view(self) -> _DirectView | _DynamicView: ...
+
+    def field_explicitly_set(self, name: str) -> bool: ...
+
+
+def clock_config_from_boot(boot: _ConfigBoot) -> ClockConfig:
+    general = boot.view.general
     return ClockConfig(
-        timezone=boot.view.general.timezone,
+        timezone=general.timezone,
         authoritative_timezone=(
-            boot.view.general.timezone if boot.field_explicitly_set("timezone") else None
+            general.timezone if boot.field_explicitly_set("timezone") else None
         ),
-        message_timestamp_weekday=boot.view.general.message_timestamp_weekday,
+        message_timestamp_weekday=general.message_timestamp_weekday,
     )

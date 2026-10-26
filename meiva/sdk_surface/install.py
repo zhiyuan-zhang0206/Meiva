@@ -53,8 +53,8 @@ from typing import Unpack, assert_never
 from pydantic import BaseModel
 
 from base.packages.plugin_config_contracts import PluginConfigImages
-from base.packages.plugins.flags import PluginFlagError, validate_flag_key
 from base.packages.plugins.load_report import Reporter, reporter
+from base.packages.plugins.plugin_errors import PluginFlagError, validate_flag_key
 
 from . import meiva_module, wraps
 from . import plugins as _plugins

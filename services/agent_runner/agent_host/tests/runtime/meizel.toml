@@ -7,6 +7,3 @@ exports = ["host_support.py", "hosted_resources.py", "shutdown", "test_resource_
 "test_policy_inputs.py" = ["host_support.py"]
 "test_runtime_build_overrides.py" = ["host_support.py", "observation.py"]
 "test_settlement_reconciles.py" = ["host_support.py"]
-
-[debt.first-party-patch]
-"test_boot_extension_materialize.py#monkeypatch.setattr base.telemetry.tracing.initialize_tracing" = 1

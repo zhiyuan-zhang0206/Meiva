@@ -27,7 +27,7 @@ from base.native_process.os_platform import Platform
 from base.native_process.ownership import stable_create_time
 from base.paths import logs_dir, meiva_home, permissions_helper_socket, run_dir
 from base.sessions.protocol import SessionBackend
-from base.sessions.record import SessionRecord, current_started_at
+from base.sessions.record import SessionRecord
 
 # What a helper must answer `ping` with before the lifecycle trusts it with a root's custody.
 HELPER_PROTOCOLS = ("root_stop_intent_v1", "helper_shutdown_v1")
@@ -247,9 +247,12 @@ class HelperProcSessionBackend(SessionBackend):
         )
 
         try:
-            create_time = stable_create_time(psutil.Process(child_pid))
+            proc = psutil.Process(child_pid)
+            create_time = stable_create_time(proc)
+            started_at = proc.create_time()
         except psutil.NoSuchProcess:
             create_time = _DEAD_CHILD_SENTINEL
+            started_at = 0.0
             starttime = None
         else:
             starttime = pid_starttime_ticks(child_pid)
@@ -258,7 +261,7 @@ class HelperProcSessionBackend(SessionBackend):
             create_time=create_time,
             cmd=command_text,
             cwd=str(cwd),
-            started_at=current_started_at(),
+            started_at=started_at,
             starttime=starttime,
         ).write(_record_path(name))
         return True

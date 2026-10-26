@@ -12,7 +12,7 @@ from base.clock.configuration import clock_config_from_boot
 from base.config import ConfigBoot
 from base.db import Database
 from base.db.code_version_gate import ProcessDbGate
-from base.db.config import db_config_from_boot
+from base.db.protocols import db_config_from_boot
 from base.native_process.code_version import CodeVersion
 from base.native_process.loaded_commit import LoadedCommit
 from services.derived.insights.run_timeline.projection.jobs import index_next

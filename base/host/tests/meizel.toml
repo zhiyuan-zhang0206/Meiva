@@ -5,8 +5,5 @@ exports = ["daemon_shutdown.py", "daemon_shutdown_child.py", "short_tmp.py"]
 "daemon_shutdown.py" = ["daemon_shutdown_child.py"]
 "test_proc.py" = ["_hosting_child.py"]
 
-[debt.first-party-patch]
-"test_proc.py#monkeypatch.setattr base.host.proc.capture_tree" = 1
-
 [debt.third-party-patch]
 "test_proc.py#monkeypatch.setattr psutil.Process" = 1

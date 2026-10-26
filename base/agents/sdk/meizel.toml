@@ -1,14 +1,11 @@
 exports = ["call_policy.py", "capture.py", "tally.py", "telemetry.py", "tests"]
 
 [uses]
-"telemetry.py" = ["call_policy.py", "capture.py", "tally.py"]
+"call_policy.py" = ["__init__.py"]
+"telemetry.py" = ["__init__.py", "capture.py", "tally.py"]
 "tests" = ["call_policy.py", "tally.py", "telemetry.py"]
 
 [purity]
 "__init__.py" = "strict"
 "capture.py" = "strict"
 "tally.py" = "strict"
-
-[debt.any-collaborator]
-"capture.py#any SdkCaptureOwner.capture_local_event.event" = 1
-"capture.py#any SdkCaptureOwner.capture_local_event.return" = 1

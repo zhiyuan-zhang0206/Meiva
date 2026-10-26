@@ -1,8 +1,6 @@
 """Cooperative same-machine leases; the native agent remains the checkpoint owner."""
 
-import secrets
 from typing import Any
-from uuid import uuid4
 
 from psycopg import Connection
 from psycopg.rows import dict_row
@@ -168,8 +166,6 @@ def request(
         relay_codex_remote=relay_codex_remote,
         relay_batch_window_seconds=relay_batch_window_seconds,
     )
-    relay_token = secrets.token_urlsafe(32) if relay_provider in SESSION_RELAY_PROVIDERS else None
-    lease_id = uuid4()
     delivery_config = authority.current_field_values()
     with db.write_transaction() as conn:
         meta = lock_agent(conn, agent_id)
@@ -186,6 +182,13 @@ def request(
             raise ImpersonationError("Agent must be running or idling to receive a request")
         _reject_open_previous(conn, agent_id)
         set_actor(conn, caller.source())
+        seed_row = conn.execute(
+            "SELECT gen_random_uuid(), replace(gen_random_uuid()::text || gen_random_uuid()::text, '-', '')"
+        ).fetchone()
+        if seed_row is None:
+            raise RuntimeError("failed to mint lease seed")
+        lease_id, minted_token = seed_row
+        relay_token = minted_token if relay_provider in SESSION_RELAY_PROVIDERS else None
         conn.execute(
             INSERT_LEASE_SQL,
             (

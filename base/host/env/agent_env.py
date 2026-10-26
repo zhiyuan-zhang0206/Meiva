@@ -11,16 +11,53 @@ from collections.abc import Mapping
 from dataclasses import dataclass, fields
 from typing import Any
 
+from base.host.env.config_lite_table import FIELD_ALIASES, FIELD_SCOPES
+
 __all__ = [
     "AGENT_BIRTH_CONFIG_ENV",
     "AGENT_CONFIG_OVERLAY_ENV",
     "AGENT_ID_ENV",
+    "HOST_PASSTHROUGH_KEYS",
+    "MEIVA_HOME_ENV",
+    "NETWORK_PROXY_KEYS",
     "ModelOverrides",
+    "session_child_env_keys",
 ]
 
 AGENT_ID_ENV = "MEIVA_AGENT_ID"
 AGENT_CONFIG_OVERLAY_ENV = "MEIVA_AGENT_CONFIG_OVERLAY"
 AGENT_BIRTH_CONFIG_ENV = "MEIVA_AGENT_BIRTH_CONFIG"
+MEIVA_HOME_ENV = "MEIVA_HOME"
+
+HOST_PASSTHROUGH_KEYS = frozenset({"DISPLAY", "WAYLAND_DISPLAY", "HOME", "USER", "LOGNAME"})
+NETWORK_PROXY_KEYS = frozenset(
+    {
+        "HTTP_PROXY",
+        "HTTPS_PROXY",
+        "ALL_PROXY",
+        "NO_PROXY",
+        "http_proxy",
+        "https_proxy",
+        "all_proxy",
+        "no_proxy",
+    }
+)
+_TEMP_DIR_KEYS = frozenset({"TMPDIR", "TEMP", "TMP"})
+_SESSION_DELIVERY_KEYS = frozenset({"PATH", "MEIVA_HARNESS_HANDLE", "CLAUDE_CONFIG_DIR"})
+
+
+def session_child_env_keys() -> frozenset[str]:
+    host_aliases = frozenset(
+        FIELD_ALIASES[name] for name, scope in FIELD_SCOPES.items() if scope == "host"
+    )
+    return (
+        host_aliases
+        | {MEIVA_HOME_ENV}
+        | HOST_PASSTHROUGH_KEYS
+        | _TEMP_DIR_KEYS
+        | NETWORK_PROXY_KEYS
+        | _SESSION_DELIVERY_KEYS
+    )
 
 
 @dataclass(frozen=True)
