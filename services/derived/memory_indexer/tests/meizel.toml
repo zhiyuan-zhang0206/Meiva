@@ -2,7 +2,3 @@ exports = ["fake_provider.py"]
 
 [uses]
 "test_memory_indexer_import.py" = ["child_daemon_import.py"]
-
-[debt.first-party-patch]
-"test_memory_rerank.py#monkeypatch.setattr services.derived.memory_indexer.rerank.ask_relevance" = 2
-"test_memory_rerank.py#monkeypatch.setattr services.derived.memory_indexer.rerank.decide" = 2

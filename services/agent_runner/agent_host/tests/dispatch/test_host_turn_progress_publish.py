@@ -10,7 +10,7 @@ import pytest
 from redis.exceptions import ConnectionError as RedisConnectionError
 from redis.exceptions import ResponseError
 
-from base.agents.observation import turn_progress as progress_module
+from base.agents.observation import turn_progress
 from base.agents.observation.turn_progress import TurnProgress
 from base.events.live.bus import EventBus
 from base.events.live.redis_client import open_async_redis
@@ -30,13 +30,18 @@ class _FakeAdmission:
         return {}
 
 
+class _OkRedis:
+    async def set(self, key: str, value: str, *, ex: int) -> None:
+        del key, value, ex
+
+
 def test_turn_progress_snapshot_keeps_only_the_latest_three_marks(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     agent_id = 5815
     clock = TurnProgress()
     now = [10.0]
-    monkeypatch.setattr(progress_module.time, "monotonic", lambda: now[0])
+    monkeypatch.setattr(turn_progress.time, "monotonic", lambda: now[0])
 
     for timestamp in (10.0, 20.0, 30.0, 40.0):
         now[0] = timestamp
@@ -137,8 +142,6 @@ async def test_hung_progress_set_does_not_stop_repeated_corpse_reap(
         active_agents: frozenset[int] = frozenset()
 
     patch_async_redis(monkeypatch, HungRedis)
-    monkeypatch.setattr(host_daemon, "TURN_PROGRESS_PUBLISH_TIMEOUT_S", 0.01, raising=False)
-    monkeypatch.setattr(host_daemon, "LIVENESS_BEAT_STEP_S", 0.01)
     with caplog.at_level(logging.WARNING, logger=host_daemon.host_log.name):
         task = asyncio.create_task(
             host_daemon.beat_forever(
@@ -148,6 +151,8 @@ async def test_hung_progress_set_does_not_stop_repeated_corpse_reap(
                 "runner-a",
                 EventBus.from_settings(),
                 read_alert_seconds=lambda: 30.0,
+                publish_timeout_s=0.01,
+                beat_step_s=0.01,
             )
         )
         try:
@@ -246,17 +251,16 @@ async def test_timed_out_redis_connection_is_released_before_next_heartbeat(
     client = open_async_redis(f"redis://127.0.0.1:{server.sockets[0].getsockname()[1]}/0")
     client.connection_pool.max_connections = 1
     patch_async_redis(monkeypatch, lambda: client)
-    monkeypatch.setattr(host_daemon, "TURN_PROGRESS_PUBLISH_TIMEOUT_S", 0.1, raising=False)
     try:
         with caplog.at_level(logging.DEBUG, logger=host_daemon.host_log.name):
             async with asyncio.timeout(2.0):
                 await host_daemon.publish_turn_progress_heartbeat(
-                    EventBus.from_settings(), "runner-a", set(), TurnProgress()
+                    EventBus.from_settings(), "runner-a", set(), TurnProgress(), timeout_s=0.1
                 )
                 await first_disconnected.wait()
                 assert not client.connection_pool._in_use_connections
                 await host_daemon.publish_turn_progress_heartbeat(
-                    EventBus.from_settings(), "runner-a", set(), TurnProgress()
+                    EventBus.from_settings(), "runner-a", set(), TurnProgress(), timeout_s=0.1
                 )
                 assert writes == [[b"SET", b"host_turn_progress:runner-a", b"{}", b"EX", b"60"]] * 2
                 assert not client.connection_pool._in_use_connections
@@ -297,16 +301,11 @@ async def test_corpse_reap_timeout_logs_failure_with_traceback(
         def beat(self) -> None:
             pass
 
-    async def fake_publish(
-        _bus: object, machine: str, active_agents: object, _progress: object
-    ) -> None:
-        pass
-
     async def stop_sleep(delay: float) -> None:
+        del delay
         raise StopBeatError
 
-    monkeypatch.setattr(host_daemon, "BEAT_DB_TIMEOUT_S", 0.01)
-    monkeypatch.setattr(host_daemon, "publish_turn_progress_heartbeat", fake_publish)
+    patch_async_redis(monkeypatch, _OkRedis)
     monkeypatch.setattr(host_daemon.asyncio, "sleep", stop_sleep)
     caplog.set_level(logging.WARNING, logger="services.agent_runner.agent_host.daemon")
 
@@ -318,6 +317,7 @@ async def test_corpse_reap_timeout_logs_failure_with_traceback(
             "runner-a",
             EventBus.from_settings(),
             read_alert_seconds=lambda: 30.0,
+            beat_db_timeout_s=0.01,
         )
 
     [record] = [
@@ -349,16 +349,18 @@ async def test_agent_host_beats_liveness_before_reaping_corpses(
         def beat(self) -> None:
             calls.append("liveness")
 
-    async def fake_publish(
-        _bus: object, machine: str, active_agents: object, _progress: object
-    ) -> None:
-        calls.append(("publish", machine, active_agents))
+    class FakeRedis:
+        async def set(self, key: str, value: str, *, ex: int) -> None:
+            del value, ex
+            calls.append(
+                ("publish", key.removeprefix("host_turn_progress:"), FakeScheduler.active_agents)
+            )
 
     async def stop_sleep(delay: float) -> None:
         calls.append(("sleep", delay))
         raise StopBeatError
 
-    monkeypatch.setattr(host_daemon, "publish_turn_progress_heartbeat", fake_publish)
+    patch_async_redis(monkeypatch, FakeRedis)
     monkeypatch.setattr(host_daemon.asyncio, "sleep", stop_sleep)
 
     with pytest.raises(StopBeatError):
@@ -405,14 +407,7 @@ async def test_agent_host_liveness_continues_when_corpse_reap_hangs(
         def beat(self) -> None:
             beat_counts.append(len(beat_counts) + 1)
 
-    async def fake_publish(
-        _bus: object, machine: str, active_agents: object, _progress: object
-    ) -> None:
-        pass
-
-    monkeypatch.setattr(host_daemon, "BEAT_DB_TIMEOUT_S", 0.01)
-    monkeypatch.setattr(host_daemon, "LIVENESS_BEAT_STEP_S", 0.0)
-    monkeypatch.setattr(host_daemon, "publish_turn_progress_heartbeat", fake_publish)
+    patch_async_redis(monkeypatch, _OkRedis)
 
     beat = asyncio.create_task(
         host_daemon.beat_forever(
@@ -422,6 +417,8 @@ async def test_agent_host_liveness_continues_when_corpse_reap_hangs(
             "runner-a",
             EventBus.from_settings(),
             read_alert_seconds=lambda: 30.0,
+            beat_db_timeout_s=0.01,
+            beat_step_s=0.0,
         )
     )
     second_reap = asyncio.create_task(second_reap_started.wait())
@@ -463,13 +460,7 @@ async def test_agent_host_liveness_continues_when_corpse_reap_raises(
             if len(beat_counts) == 2:
                 second_beat.set()
 
-    async def fake_publish(
-        _bus: object, machine: str, active_agents: object, _progress: object
-    ) -> None:
-        pass
-
-    monkeypatch.setattr(host_daemon, "LIVENESS_BEAT_STEP_S", 0.01)
-    monkeypatch.setattr(host_daemon, "publish_turn_progress_heartbeat", fake_publish)
+    patch_async_redis(monkeypatch, _OkRedis)
     caplog.set_level(logging.ERROR, logger="services.agent_runner.agent_host.daemon")
 
     beat = asyncio.create_task(
@@ -480,6 +471,7 @@ async def test_agent_host_liveness_continues_when_corpse_reap_raises(
             "runner-a",
             EventBus.from_settings(),
             read_alert_seconds=lambda: 30.0,
+            beat_step_s=0.01,
         )
     )
     next_beat = asyncio.create_task(second_beat.wait())
@@ -567,11 +559,7 @@ async def test_three_database_reap_failures_exit_host_heartbeat(
     class FakeScheduler:
         active_agents = frozenset[int]()
 
-    async def publish(*_args: object) -> bool:
-        return True
-
-    monkeypatch.setattr(host_daemon, "LIVENESS_BEAT_STEP_S", 0.001)
-    monkeypatch.setattr(host_daemon, "publish_turn_progress_heartbeat", publish)
+    patch_async_redis(monkeypatch, _OkRedis)
     with pytest.raises(psycopg.OperationalError, match="offline"):
         await asyncio.wait_for(
             host_daemon.beat_forever(
@@ -581,6 +569,7 @@ async def test_three_database_reap_failures_exit_host_heartbeat(
                 "runner-a",
                 EventBus.from_settings(),
                 read_alert_seconds=lambda: 30.0,
+                beat_step_s=0.001,
             ),
             1.0,
         )
