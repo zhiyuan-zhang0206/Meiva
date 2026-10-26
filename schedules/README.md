@@ -25,6 +25,8 @@ directory. The manifest is the single expression of the built-in policy
 | `model-update-tracker` | `model-update-tracker-schedule.py` | product | **enabled** |
 | `trace-ship-tempo` | `trace-ship-tempo-schedule.py` | product | **enabled** |
 | `db-write-stall-watch` | `db-write-stall-watch-schedule.py` | operator | disabled |
+| `sched-dry-import-weekly` | `sched-dry-import-weekly-schedule.py` | operator | disabled |
+| `log-cred-mask-monthly` | `log-cred-mask-monthly-schedule.py` | operator | disabled |
 
 `dev-ci-metrics` also watches the timed workflows a pull request never blocks: it
 messages the P0 lead when one of them fails two runs in a row (`_SCHEDULED_WORKFLOWS`), because a red nightly is otherwise silent.
