@@ -140,16 +140,21 @@ class _PackingState:
         self.delivered_flags.append(True)
 
 
+# meiva:note
+# Pack current attachment files into content blocks without raising on bad files.
+#
+# Uses the attach contract (`attach_modalities_for_model`) rather than the raw
+# endpoint matrix so a file `attach()` rejected never slips through as a caption.
 def pack_attachments(
-    model: str, entries: list[AttachEntry], *, catalog: ModelCatalog
+    model: str,
+    entries: list[AttachEntry],
+    *,
+    catalog: ModelCatalog,
+    max_files_per_turn: int = ATTACH_MAX_FILES_PER_TURN,
 ) -> AttachmentPack | None:
-    """Pack current attachment files into content blocks without raising on bad files."""
     if not entries:
         return None
 
-    # The attach contract, not the raw endpoint matrix: a model with an
-    # attach-specific `attach_modalities` declaration packs exactly that set,
-    # so a file attach() already rejected never slips through as a caption.
     supported_media_types = attach_modalities_for_model(
         model,
         models=catalog.models,
@@ -170,7 +175,12 @@ def pack_attachments(
             )
             continue
         if reason := _delivery_error(
-            model, state, attachment.size, attachment.media_type, catalog=catalog
+            model,
+            state,
+            attachment.size,
+            attachment.media_type,
+            catalog=catalog,
+            max_files_per_turn=max_files_per_turn,
         ):
             state.skip(index, entry.label, _skip_for(attachment, reason))
             continue
@@ -183,9 +193,14 @@ def pack_attachments(
         if read_error is not None:
             state.skip(index, entry.label, _skip_for(attachment, read_error))
             continue
-        assert data is not None  # noqa: S101 — paired result from _read_attachment
+        assert data is not None  # noqa: S101
         if reason := _delivery_error(
-            model, state, len(data), attachment.media_type, catalog=catalog
+            model,
+            state,
+            len(data),
+            attachment.media_type,
+            catalog=catalog,
+            max_files_per_turn=max_files_per_turn,
         ):
             state.skip(index, entry.label, _skip_for(attachment, reason, len(data)))
             continue
@@ -249,17 +264,21 @@ def _skip_for(
 
 
 def _delivery_error(
-    model: str, state: _PackingState, size: int, media_type: str, *, catalog: ModelCatalog
+    model: str,
+    state: _PackingState,
+    size: int,
+    media_type: str,
+    *,
+    catalog: ModelCatalog,
+    max_files_per_turn: int = ATTACH_MAX_FILES_PER_TURN,
 ) -> str | None:
-    # The core ceiling is checked before the provider policy so a policy can
-    # only narrow the effective cap, never raise it (pre-plugin behavior).
     if size > ATTACH_MAX_FILE_BYTES:
         return f"file exceeds {_mib(ATTACH_MAX_FILE_BYTES)} limit"
     provider_size_limit = _file_size_limit(model, media_type, catalog=catalog)
     if size > provider_size_limit:
         return f"file exceeds {_mib(provider_size_limit)} limit"
-    if len(state.delivered) >= ATTACH_MAX_FILES_PER_TURN:
-        return f"turn already has {ATTACH_MAX_FILES_PER_TURN} delivered files"
+    if len(state.delivered) >= max_files_per_turn:
+        return f"turn already has {max_files_per_turn} delivered files"
     if state.delivered_bytes + size > ATTACH_MAX_TOTAL_BYTES:
         return f"would exceed {_mib(ATTACH_MAX_TOTAL_BYTES)} total limit"
     return None

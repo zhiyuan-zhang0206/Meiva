@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import asyncio
 import time
-from collections.abc import Callable
+from collections.abc import Callable, Coroutine
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import Protocol
@@ -32,7 +32,7 @@ class Timers(Protocol):
 
     def sleep(self, seconds: float) -> None: ...
 
-    async def asleep(self, seconds: float) -> None: ...
+    def asleep(self, seconds: float) -> Coroutine[object, object, None]: ...
 
 
 class _SystemTimers:
@@ -42,8 +42,8 @@ class _SystemTimers:
     def sleep(self, seconds: float) -> None:
         time.sleep(seconds)
 
-    async def asleep(self, seconds: float) -> None:
-        await asyncio.sleep(seconds)
+    def asleep(self, seconds: float) -> Coroutine[object, object, None]:
+        return asyncio.sleep(seconds)
 
 
 SYSTEM_TIMERS: Timers = _SystemTimers()
@@ -120,5 +120,5 @@ class Clock:
     def sleep(self, seconds: float) -> None:
         self._timers.sleep(seconds)
 
-    async def asleep(self, seconds: float) -> None:
-        await self._timers.asleep(seconds)
+    def asleep(self, seconds: float) -> Coroutine[object, object, None]:
+        return self._timers.asleep(seconds)

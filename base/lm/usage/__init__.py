@@ -273,19 +273,21 @@ def _log_usage(
     vendor = vendor_of_model(event.model, catalog=event.catalog)
     if vendor is not None and event.emit_billing:
         emit_billing_event(
-            vendor=vendor,
-            model=event.model,
-            tok_in=event.in_total,
-            tok_out=event.out_total,
-            tok_cached=event.cache_read,
-            cache_write_5m=event.cache_write_5m,
-            cache_write_1h=event.cache_write_1h,
-            cost_usd=priced.cost_usd if priced is not None else 0.0,
-            usage_kind=event.usage_kind,
-            unpriced=priced is None,
-            start_time_ns=(time.time_ns() - int(event.latency_ms * 1_000_000))
-            if event.latency_ms is not None
-            else None,
+            BillingSpan(
+                vendor=vendor,
+                model=event.model,
+                tok_in=event.in_total,
+                tok_out=event.out_total,
+                tok_cached=event.cache_read,
+                cache_write_5m=event.cache_write_5m,
+                cache_write_1h=event.cache_write_1h,
+                cost_usd=priced.cost_usd if priced is not None else 0.0,
+                usage_kind=event.usage_kind,
+                unpriced=priced is None,
+                start_time_ns=(_now_ns() - int(event.latency_ms * 1_000_000))
+                if event.latency_ms is not None
+                else None,
+            )
         )
 
     usage_logger = (
@@ -354,25 +356,33 @@ def vendor_of_model(model: str, *, catalog: ModelCatalog) -> str | None:
     return None
 
 
+def _now_ns() -> int:
+    return time.time_ns()
+
+
 def _utc_timestamp() -> str:
-    return datetime.now(UTC).replace(microsecond=0).isoformat().replace("+00:00", "Z")
+    return (
+        datetime.fromtimestamp(_now_ns() // 1_000_000_000, UTC).isoformat().replace("+00:00", "Z")
+    )
 
 
-def emit_billing_event(
-    *,
-    vendor: str,
-    model: str,
-    tok_in: int,
-    tok_out: int,
-    cost_usd: float,
-    usage_kind: str,
-    line: str = "meiva",
-    tok_cached: int | None = None,
-    cache_write_5m: int = 0,
-    cache_write_1h: int = 0,
-    unpriced: bool = False,
-    start_time_ns: int | None = None,
-) -> None:
+@dataclass(frozen=True, slots=True)
+class BillingSpan:
+    vendor: str
+    model: str
+    tok_in: int
+    tok_out: int
+    cost_usd: float
+    usage_kind: str
+    line: str = "meiva"
+    tok_cached: int | None = None
+    cache_write_5m: int = 0
+    cache_write_1h: int = 0
+    unpriced: bool = False
+    start_time_ns: int | None = None
+
+
+def emit_billing_event(span_data: BillingSpan) -> None:
     # meiva:note
     # End one trace-safe billing span for a completed provider call.
     #
@@ -396,24 +406,24 @@ def emit_billing_event(
 
         span = otel_trace.get_tracer("meiva.billing").start_span(
             "meiva.billing.call",
-            start_time=start_time_ns,
+            start_time=span_data.start_time_ns,
         )
-        span.set_attribute(MEIVA_BILLING_ATTR_LINE, line)
-        span.set_attribute(MEIVA_BILLING_ATTR_VENDOR, vendor)
-        span.set_attribute(MEIVA_BILLING_ATTR_MODEL, model)
-        span.set_attribute(MEIVA_BILLING_ATTR_TOKENS_IN, int(tok_in))
-        span.set_attribute(MEIVA_BILLING_ATTR_TOKENS_OUT, int(tok_out))
-        span.set_attribute(MEIVA_BILLING_ATTR_COST, round(float(cost_usd), 6))
-        span.set_attribute(MEIVA_BILLING_ATTR_USAGE_KIND, usage_kind)
+        span.set_attribute(MEIVA_BILLING_ATTR_LINE, span_data.line)
+        span.set_attribute(MEIVA_BILLING_ATTR_VENDOR, span_data.vendor)
+        span.set_attribute(MEIVA_BILLING_ATTR_MODEL, span_data.model)
+        span.set_attribute(MEIVA_BILLING_ATTR_TOKENS_IN, int(span_data.tok_in))
+        span.set_attribute(MEIVA_BILLING_ATTR_TOKENS_OUT, int(span_data.tok_out))
+        span.set_attribute(MEIVA_BILLING_ATTR_COST, round(float(span_data.cost_usd), 6))
+        span.set_attribute(MEIVA_BILLING_ATTR_USAGE_KIND, span_data.usage_kind)
         span.set_attribute(MEIVA_BILLING_ATTR_TS, _utc_timestamp())
-        if tok_cached is not None:
-            span.set_attribute(MEIVA_BILLING_ATTR_CACHE_READ_TOKENS, int(tok_cached))
-        if cache_write_5m:
-            span.set_attribute(MEIVA_BILLING_ATTR_CACHE_WRITE_5M_TOKENS, cache_write_5m)
-        if cache_write_1h:
-            span.set_attribute(MEIVA_BILLING_ATTR_CACHE_WRITE_1H_TOKENS, cache_write_1h)
-        if unpriced:
-            span.set_attribute(MEIVA_BILLING_ATTR_UNPRICED, unpriced)
+        if span_data.tok_cached is not None:
+            span.set_attribute(MEIVA_BILLING_ATTR_CACHE_READ_TOKENS, int(span_data.tok_cached))
+        if span_data.cache_write_5m:
+            span.set_attribute(MEIVA_BILLING_ATTR_CACHE_WRITE_5M_TOKENS, span_data.cache_write_5m)
+        if span_data.cache_write_1h:
+            span.set_attribute(MEIVA_BILLING_ATTR_CACHE_WRITE_1H_TOKENS, span_data.cache_write_1h)
+        if span_data.unpriced:
+            span.set_attribute(MEIVA_BILLING_ATTR_UNPRICED, span_data.unpriced)
         span.end()
     except Exception as exc:
         report_sink_failure("billing span emission (the span is dropped)", exc)
@@ -424,9 +434,7 @@ def emit_billing_from_message(
     *,
     model: str,
     usage_kind: str,
-    line: str = "meiva",
     start_time_ns: int | None = None,
-    vendor: str | None = None,
     catalog: ModelCatalog,
 ) -> None:
     # meiva:note
@@ -440,7 +448,7 @@ def emit_billing_from_message(
             return
         tok_cached = _metered_cache_read(usage_metadata, tok_cached)
         model = usage_model(msg, model, catalog=catalog)
-        resolved_vendor = vendor or vendor_of_model(model, catalog=catalog)
+        resolved_vendor = vendor_of_model(model, catalog=catalog)
         if resolved_vendor is None:
             return
         write_5m, write_1h = cache_write_tokens(usage_metadata.get("input_token_details") or {})
@@ -454,18 +462,19 @@ def emit_billing_from_message(
             prices=catalog.prices,
         )
         emit_billing_event(
-            line=line,
-            vendor=resolved_vendor,
-            model=model,
-            tok_in=tok_in,
-            tok_out=tok_out,
-            tok_cached=tok_cached,
-            cache_write_5m=write_5m,
-            cache_write_1h=write_1h,
-            cost_usd=priced.cost_usd if priced is not None else 0.0,
-            usage_kind=usage_kind,
-            unpriced=priced is None,
-            start_time_ns=start_time_ns,
+            BillingSpan(
+                vendor=resolved_vendor,
+                model=model,
+                tok_in=tok_in,
+                tok_out=tok_out,
+                tok_cached=tok_cached,
+                cache_write_5m=write_5m,
+                cache_write_1h=write_1h,
+                cost_usd=priced.cost_usd if priced is not None else 0.0,
+                usage_kind=usage_kind,
+                unpriced=priced is None,
+                start_time_ns=start_time_ns,
+            )
         )
     except Exception as exc:
         report_sink_failure("pricing a provider message for billing (its span is dropped)", exc)

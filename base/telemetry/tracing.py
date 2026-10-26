@@ -188,6 +188,7 @@ state: dict[str, Any] = {
     "arm_owner": None,
     "retry_owner": None,
     "collector_offline_reported": False,
+    "traceloop_init": None,
 }
 _init_lock = threading.Lock()
 _lifecycle_lock = threading.Lock()
@@ -357,7 +358,12 @@ def reset_tracing_state() -> None:
         collector_offline_reported=False,
         retry_owner=None,
         arm_owner=None,
+        traceloop_init=None,
     )
+
+
+def _call_traceloop_init(default_init: Callable[..., object], **kwargs: object) -> None:
+    (state.get("traceloop_init") or default_init)(**kwargs)
 
 
 # meiva:note
@@ -417,7 +423,8 @@ def _arm_tracing(
         with _init_lock:
             if readiness.resolved or (stop_requested is not None and stop_requested.is_set()):
                 return
-            Traceloop.init(  # pyright: ignore[reportUnknownMemberType]
+            _call_traceloop_init(
+                Traceloop.init,  # pyright: ignore[reportUnknownMemberType, reportUnknownArgumentType]
                 app_name="meiva",
                 exporter=OtlpJsonHttpSpanExporter(endpoint, strip_content=strip_content),
                 instruments=instruments,
