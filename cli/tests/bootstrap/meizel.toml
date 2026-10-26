@@ -17,16 +17,9 @@ exports = [
 [loads]
 "_logging_entry_child.py" = ["services/agent_runner/agent_ops"]
 
-[debt.env-patch]
-"test_start_identity.py#monkeypatch.setenv os.environ.MEIVA_CLUSTER_SECRET" = 1
-"test_start_identity.py#monkeypatch.setenv os.environ.MEIVA_DB_URL" = 1
-
 [debt.first-party-patch]
 "_logging_entry_child.py#assignment cli.main.main" = 1
 "child_main_dispatch.py#assignment base.config.ConfigBoot.prepare" = 1
-"child_telemetry_exit.py#assignment base.telemetry.event_store.store_events" = 1
-"child_telemetry_exit.py#assignment base.telemetry.metrics.observed_metrics.project_events" = 1
-"child_telemetry_exit.py#assignment cli.parsers.build_parser" = 1
 
 [debt.stdlib-patch]
 "child_main_dispatch.py#assignment socket.create_connection" = 1

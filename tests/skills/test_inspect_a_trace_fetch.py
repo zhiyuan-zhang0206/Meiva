@@ -34,13 +34,16 @@ fallback branch actually runs.
 
 from __future__ import annotations
 
+import http.server
 import importlib.util
 import json
 import os
 import shutil
 import subprocess
 import sys
-import urllib.request
+import threading
+from collections.abc import Generator
+from contextlib import contextmanager
 from datetime import UTC, date, datetime, timedelta
 from pathlib import Path
 from types import SimpleNamespace
@@ -203,20 +206,25 @@ def test_cmd_fetch_rejects_wrong_length_ids(capsys: pytest.CaptureFixture[str]) 
 
 
 def test_cmd_fetch_accepts_31_and_32_char_ids_and_zfills(
-    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    seen: list[str] = []
+    zfilled_id = "0" + "a" * 31
+    (tmp_path / "spans.jsonl").write_text(
+        json.dumps(_envelope(_span(_SPAN_A, trace_id=zfilled_id))) + "\n",
+        encoding="utf-8",
+    )
+    out_file = tmp_path / "out.json"
+    hit_args = _fetch_args("a" * 31)
+    hit_args.mirror_dir = str(tmp_path)
+    hit_args.out = str(out_file)
+    miss_args = _fetch_args("b" * 32)
+    miss_args.mirror_dir = str(tmp_path)
+    miss_args.out = str(tmp_path / "miss.json")
 
-    def fake_fetch(_args: Any, trace_id: str) -> list[dict[str, Any]]:
-        seen.append(trace_id)
-        return []
-
-    monkeypatch.setattr(ft, "fetch_from_mirror", fake_fetch)
-    monkeypatch.setattr(ft, "fetch_from_tempo", fake_fetch)
-
-    assert ft.cmd_fetch(_fetch_args("a" * 31)) == 1  # no spans -> not found
-    assert ft.cmd_fetch(_fetch_args("b" * 32)) == 1
-    assert seen == ["0" + "a" * 31, "b" * 32]
+    assert ft.cmd_fetch(hit_args) == 0
+    assert ft.cmd_fetch(miss_args) == 1
+    capsys.readouterr()
+    assert json.loads(out_file.read_text(encoding="utf-8"))["trace_id"] == zfilled_id
 
 
 # --- fetch_from_mirror: cross-rotation merge + malformed lines ---
@@ -271,13 +279,8 @@ def test_mirror_dir_respects_explicit_override(tmp_path: Path) -> None:
     assert ft._mirror_dir(args) == override
 
 
-def test_mirror_dir_uses_resolve_meiva_home(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    home = tmp_path / "dev-cluster-home"
-    monkeypatch.setattr(ft, "resolve_meiva_home", lambda: home)
-
-    assert ft._mirror_dir(SimpleNamespace(mirror_dir=None)) == home / "traces"
+def test_mirror_dir_uses_resolve_meiva_home() -> None:
+    assert ft._mirror_dir(SimpleNamespace(mirror_dir=None)) == ft.resolve_meiva_home() / "traces"
 
 
 # --- _cluster_secret: the machine token, then the explicit env var, then the home's .env ---
@@ -327,62 +330,59 @@ def test_cluster_secret_prefers_the_machine_api_token(
 # --- _gateway_get: the bearer comes from the resolved home ---
 
 
-class _FakeResponse:
-    def __init__(self, payload: dict[str, Any]) -> None:
-        self._body = json.dumps(payload).encode()
+@contextmanager
+def _serve_gateway() -> Generator[tuple[str, list[str | None]]]:
+    seen_auth: list[str | None] = []
+    body = json.dumps({"ok": True}).encode()
 
-    def read(self) -> bytes:
-        return self._body
+    class _Handler(http.server.BaseHTTPRequestHandler):
+        def do_GET(self) -> None:
+            seen_auth.append(self.headers.get("Authorization"))
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
 
-    def __enter__(self) -> _FakeResponse:
-        return self
+        def log_message(self, format: str, *args: object) -> None:
+            pass
 
-    def __exit__(self, *_exc: object) -> bool:
-        return False
-
-
-def _allow_network(monkeypatch: pytest.MonkeyPatch, seen_requests: list[Any]) -> None:
-    class _FakeOpener:
-        def open(self, req: Any, timeout: float | None = None) -> _FakeResponse:
-            seen_requests.append(req)
-            return _FakeResponse({"ok": True})
-
-    def _build_opener(*_args: object, **_kwargs: object) -> _FakeOpener:
-        return _FakeOpener()
-
-    monkeypatch.setattr(urllib.request, "build_opener", _build_opener)
+    server = http.server.ThreadingHTTPServer(("127.0.0.1", 0), _Handler)
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    try:
+        yield f"http://127.0.0.1:{server.server_port}", seen_auth
+    finally:
+        server.shutdown()
+        thread.join()
+        server.server_close()
 
 
 def test_gateway_get_sends_the_explicit_secret(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.setitem(os.environ, "MEIVA_CLUSTER_SECRET", "explicit-secret")
-    monkeypatch.setattr(rt, "resolve_meiva_home", lambda: tmp_path / "home")
-    seen: list[Any] = []
-    _allow_network(monkeypatch, seen)
-
-    result = rt._gateway_get("http://localhost:8000", "/api/events")
+    with _serve_gateway() as (base_url, seen_auth):
+        result = rt._gateway_get(base_url, "/api/events")
 
     assert result == {"ok": True}
-    assert len(seen) == 1
-    assert seen[0].get_header("Authorization") == "Bearer explicit-secret"
+    assert seen_auth == ["Bearer explicit-secret"]
 
 
 def test_gateway_get_uses_the_homes_env_file_secret(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.delitem(os.environ, "MEIVA_CLUSTER_SECRET", raising=False)
-    home = tmp_path / "dev-cluster-home"
-    home.mkdir()
-    (home / ".env").write_text("MEIVA_CLUSTER_SECRET=dev-cluster-secret\n")
-    monkeypatch.setattr(rt, "resolve_meiva_home", lambda: home)
-    seen: list[Any] = []
-    _allow_network(monkeypatch, seen)
-
-    result = rt._gateway_get("http://localhost:8000", "/api/events")
+    env_file = rt.resolve_meiva_home() / ".env"
+    env_file.write_text("MEIVA_CLUSTER_SECRET=dev-cluster-secret\n")
+    try:
+        with _serve_gateway() as (base_url, seen_auth):
+            result = rt._gateway_get(base_url, "/api/events")
+    finally:
+        env_file.unlink(missing_ok=True)
 
     assert result == {"ok": True}
-    assert seen[0].get_header("Authorization") == "Bearer dev-cluster-secret"
+    assert seen_auth == ["Bearer dev-cluster-secret"]
 
 
 # --------------------------------------------------------------------------- #

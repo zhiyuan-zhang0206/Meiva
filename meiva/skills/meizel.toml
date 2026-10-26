@@ -9,6 +9,3 @@ exports = ["skill_index.py", "skill_proxies.py"]
 
 [roots]
 "__init__.py" = { kinds = ["home"], why = "_consume_skill_body reads Path.home() to tilde-shorten the skill directory header in rendered skill docstrings" }
-
-[debt.any-collaborator]
-"skill_proxies.py#any LazySkillDoc.__getattribute__.return" = 1

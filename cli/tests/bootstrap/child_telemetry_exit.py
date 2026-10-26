@@ -19,9 +19,9 @@ from typing import Any
 
 from base import telemetry
 from base.cluster.machine import MachineIdentityReader
+from base.paths.home import resolve_meiva_home
 from base.telemetry import event_store
-from base.telemetry.metrics import observed_metrics
-from cli import main, parsers
+from cli import main
 from cli.database import OperatorDatabaseFactory, OperatorEventPipeline, open_operator_database
 
 FLUSH_INTERVAL_S = 60
@@ -40,12 +40,7 @@ class WatchedDatabase(OperatorDatabaseFactory):
         return super().__call__()
 
 
-def _discard(*_args: object) -> None:
-    return None
-
-
-event_store.store_events = _discard  # pyright: ignore[reportAttributeAccessIssue]
-observed_metrics.project_events = _discard  # pyright: ignore[reportAttributeAccessIssue]
+event_store.set_enabled(enabled=False)
 
 
 def dispatch(args: argparse.Namespace) -> int:
@@ -59,15 +54,6 @@ def dispatch(args: argparse.Namespace) -> int:
         return 7
     finally:
         command_returned.set()
-
-
-parser = argparse.ArgumentParser()
-parser.set_defaults(func=dispatch)
-
-
-def _build_parser(*, retained_children: object) -> argparse.ArgumentParser:
-    del retained_children
-    return parser
 
 
 def _producer(
@@ -85,11 +71,12 @@ def _producer(
     )
 
 
-parsers.build_parser = _build_parser  # pyright: ignore[reportAttributeAccessIssue]
 try:
-    result = main.run_command(
-        [],
-        retained_children=None,
+    result = main.dispatch_parsed(
+        argparse.Namespace(func=dispatch),
+        ["status"],
+        declared=resolve_meiva_home(),
+        checkout=Path(__file__).resolve().parents[3],
         producer_factory=_producer,
         open_database=open_operator_database,
     )

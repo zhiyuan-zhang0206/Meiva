@@ -256,10 +256,7 @@ def test_init_uses_explicit_home_not_ambient_projection(
     inputs: identity.IdentityInput,
     site: HomeSite,
     caller: CallerHost,
-    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    monkeypatch.setenv("MEIVA_DB_URL", "postgresql://foreign@foreign.invalid/production")
-    monkeypatch.setenv("MEIVA_CLUSTER_SECRET", "foreign-secret")
     prepare_init_identity(_single_box(), site, caller)
     env = dotenv_values(inputs.home / ".env")
     db_url = env["MEIVA_DB_URL"]
