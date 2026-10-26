@@ -149,7 +149,7 @@ dev = [
     "pre-commit>=4.5.1",
     "basedpyright>=1.40.2",
     "pytest>=9.0.3",
-    "pytest-asyncio>=1.0",
+    "pytest-asyncio>=1.4.0",
     "pytest-playwright>=0.7.0",
     "pytest-xdist>=3.8",
     # ruff 0.16 (migration, task #3162): PLR0917 joins its PLR0913 sibling in

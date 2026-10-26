@@ -2477,7 +2477,7 @@ dev = [
     { name = "mutmut", specifier = ">=3.5.0" },
     { name = "pre-commit", specifier = ">=4.5.1" },
     { name = "pytest", specifier = ">=9.0.3" },
-    { name = "pytest-asyncio", specifier = ">=1.0" },
+    { name = "pytest-asyncio", specifier = ">=1.4.0" },
     { name = "pytest-cov", specifier = ">=7.0" },
     { name = "pytest-playwright", specifier = ">=0.7.0" },
     { name = "pytest-split" },
