@@ -18,6 +18,7 @@ from pathlib import Path
 import pytest
 
 from base.api_contracts.agent_contract import ShellKillMode
+from base.clock import SYSTEM_TIMERS
 from base.sessions.backend import PosixProcSessionBackend, get_shell_backend
 from base.sessions.pty.tests.job_wait import wait_for_job
 from base.sessions.pty.tests.pty_shells import new, output_until, shell_process, type_line
@@ -40,7 +41,7 @@ def _now() -> datetime:
 @pytest.fixture
 def service_session(unit_home: Path) -> Iterator[str]:
     name = "meiva-ops-status-test"
-    backend = PosixProcSessionBackend()
+    backend = PosixProcSessionBackend(SYSTEM_TIMERS)
     assert backend.new_session(name, "/bin/sleep 300", unit_home, env=dict(os.environ))
     try:
         yield name
@@ -60,7 +61,9 @@ def test_both_backends_are_listed_for_this_cluster_only(
         new(name, unit_home)
 
     rows = collect_sessions(
-        service_backend=PosixProcSessionBackend(), shell_backend=get_shell_backend(), now=_now()
+        service_backend=PosixProcSessionBackend(SYSTEM_TIMERS),
+        shell_backend=get_shell_backend(),
+        now=_now(),
     )
 
     assert [row.name for row in rows] == [
@@ -142,10 +145,10 @@ def test_killing_a_shell_that_is_not_there_is_absent() -> None:
 def test_a_backend_without_kill_verdicts_is_assumed_to_have_cut_work_short(
     unit_home: Path, service_session: str
 ) -> None:
-    ok, interrupted = kill_with_verdict(PosixProcSessionBackend(), service_session)
+    ok, interrupted = kill_with_verdict(PosixProcSessionBackend(SYSTEM_TIMERS), service_session)
 
     assert (ok, interrupted) == (True, True)
-    assert service_session not in PosixProcSessionBackend().list_sessions("meiva-ops-")
+    assert service_session not in PosixProcSessionBackend(SYSTEM_TIMERS).list_sessions("meiva-ops-")
 
 
 def test_a_kill_all_takes_the_owners_shells_below_the_cutoff_and_nothing_else(

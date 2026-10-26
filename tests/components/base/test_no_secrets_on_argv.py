@@ -27,6 +27,7 @@ from pathlib import Path
 
 import psutil
 
+from base.clock import SYSTEM_TIMERS
 from base.cluster.machine.tests.identity import machine_identity as machine_identity
 from base.db import Database
 from base.paths.tests.homes import unit_home as unit_home
@@ -50,7 +51,7 @@ def test_session_backend_new_session(unit_home: Path, secrets_in_creator_env: No
     from base.sessions.env_forwarding import forward_env_dict
     from base.sessions.record import SessionRecord
 
-    backend = PosixProcSessionBackend()
+    backend = PosixProcSessionBackend(SYSTEM_TIMERS)
     backend.new_session(
         "meiva-gateway",
         "sleep 60",
@@ -74,7 +75,7 @@ def test_launch_record_cannot_reach_a_live_process(
     from base.sessions.backend import PosixProcSessionBackend
     from base.sessions.env_forwarding import forward_env_dict
 
-    backend = PosixProcSessionBackend()
+    backend = PosixProcSessionBackend(SYSTEM_TIMERS)
     backend.new_session(
         "meiva-gateway",
         "true",
