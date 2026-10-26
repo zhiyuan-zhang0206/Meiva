@@ -10,8 +10,8 @@ exports = ["daemon.py", "selection.py", "station_probe.py"]
 "__init__.py" = "strict"
 
 [roots]
-"daemon.py" = { kinds = ["bus", "clock", "random", "settings"], why = "Service or operator process entry boots configuration and builds the random generator its event bus draws retry jitter from; builds the process clock from SYSTEM_TIMERS" }
-"station_probe.py" = { kinds = ["settings"], why = "Service or operator process entry boots configuration before composing its resources" }
+"daemon.py" = { kinds = ["bus", "clock", "home", "random", "settings"], why = "Service or operator process entry boots configuration, reads the home it runs under and builds the random generator its event bus draws retry jitter from; builds the process clock from SYSTEM_TIMERS" }
+"station_probe.py" = { kinds = ["home", "settings"], why = "Service or operator process entry boots configuration and reads the home it runs under before composing its resources" }
 
 [debt.ambient-read]
 "daemon.py#home base.paths.meiva_home" = 1

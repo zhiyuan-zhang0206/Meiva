@@ -11,7 +11,7 @@ exports = ["app.py", "config.py", "daemon.py", "run_timeline"]
 "config.py" = "strict"
 
 [roots]
-"daemon.py" = { kinds = ["clock", "pid", "settings"], why = "process entry point of the insights daemon: builds ConfigBoot and reads its pid; builds the process clock from SYSTEM_TIMERS" }
+"daemon.py" = { kinds = ["clock", "home", "pid", "settings"], why = "process entry point of the insights daemon: builds ConfigBoot, reads its pid and the home it runs under; builds the process clock from SYSTEM_TIMERS" }
 
 [debt.ambient-read]
 "app.py#clock base.clock.SYSTEM_TIMERS" = 1
