@@ -16,9 +16,6 @@ from gateway.tests.routers.test_config_api import REMOTE
 from gateway.tests.routers.test_config_api import (
     clean_overrides as clean_overrides,
 )
-from gateway.tests.routers.test_config_api import (
-    stub_browser_capability as stub_browser_capability,
-)
 from gateway.tests.support.runner_ops.ops_stub import (
     OpsCall,
     OpsReply,

@@ -8,7 +8,7 @@ from typing import cast
 import pytest
 
 from base.cluster.machine import MachineRole
-from base.config import settings
+from base.config import get_field, set_field
 from base.paths import otel_collector_config
 from services.supervision.meiva_root.manifest import ManifestError, load_manifests
 from services.supervision.meiva_root.supervisor import SupervisorConfig
@@ -206,24 +206,26 @@ def test_every_roster_unit_gets_a_window_strictly_above_its_declared_ceiling() -
         assert window > default_window, f"{session}: window {window} <= default {default_window}"
 
 
-def test_gateway_window_follows_the_drain_budget_the_launch_hands_uvicorn(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
+def test_gateway_window_follows_the_drain_budget_the_launch_hands_uvicorn() -> None:
     """One setting drives both uvicorn's drain and root's wait: no value can undercut."""
     from base.config.tests.configuration import snapshot_process_config
     from gateway.cluster import server as _server
 
-    for drain in (30.0, 5.0, 120.0):
-        monkeypatch.setattr(settings.gateway, "gateway_graceful_shutdown_timeout_seconds", drain)
-        window = cast("float", _real_units()["gateway"]["stop_timeout_s"])
-        launched = _server.serve_kwargs(
-            host="127.0.0.1",
-            app="gateway.app:create_app_from_environment",
-            factory=True,
-            config=snapshot_process_config(),
-        )["timeout_graceful_shutdown"]
-        assert launched == drain
-        assert window > launched + gen.STOP_MARGIN_S  # room left for the lifespan cleanup
+    prior_drain = get_field("gateway_graceful_shutdown_timeout_seconds")
+    try:
+        for drain in (30.0, 5.0, 120.0):
+            set_field("gateway_graceful_shutdown_timeout_seconds", drain)
+            window = cast("float", _real_units()["gateway"]["stop_timeout_s"])
+            launched = _server.serve_kwargs(
+                host="127.0.0.1",
+                app="gateway.app:create_app_from_environment",
+                factory=True,
+                config=snapshot_process_config(),
+            )["timeout_graceful_shutdown"]
+            assert launched == drain
+            assert window > launched + gen.STOP_MARGIN_S  # room left for the lifespan cleanup
+    finally:
+        set_field("gateway_graceful_shutdown_timeout_seconds", prior_drain)
 
 
 def test_browser_mcp_window_covers_every_bounded_shutdown_step() -> None:

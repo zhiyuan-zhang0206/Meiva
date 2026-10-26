@@ -10,7 +10,6 @@ from langgraph.checkpoint.base import empty_checkpoint
 from langgraph.checkpoint.postgres import PostgresSaver
 from pydantic import BaseModel, Field
 
-import base.packages.plugins.loading.registry as extensions_registry
 import meiva
 from agent import state as state_module
 from agent.messages import NoteTag, system_note_message
@@ -29,7 +28,8 @@ from base.config.service_read import ConfigAuthority
 from base.db import Database, create_agent
 from base.events.live.bus import EventBus
 from base.native_process.runtime_incarnation import RuntimeIncarnation
-from base.packages.plugins.extensions import ExtensionRegistry, PluginContributions
+from base.packages.plugins import enable_config
+from base.packages.plugins.loading import faces
 from meiva import impersonation
 from meiva.sdk_surface import agent_identity, install, process_context
 from meiva.sdk_surface.installation import Installation
@@ -47,25 +47,41 @@ class IntegrationPlugin(BaseModel):
 @pytest.fixture
 def native_checkpoint(
     db_conn: psycopg.Connection,
-    monkeypatch: pytest.MonkeyPatch,
     request: pytest.FixtureRequest,
     model_installation: Installation,
+    unit_home: Path,
     *,
     machine_identity: MachineIdentityReader,
 ) -> tuple[RuntimeIncarnation, state_module.PluginStateHandle[IntegrationPlugin]]:
-    registry = ExtensionRegistry(
-        (("integration", PluginContributions(state=(IntegrationPlugin,))),)
+    plugin_dir = unit_home / "plugins" / "integration"
+    plugin_dir.mkdir(parents=True, exist_ok=True)
+    (plugin_dir / "meiva-plugin.json").write_text(
+        '{"apiVersion": 2, "name": "integration", "version": "1.0.0", "engines": {"meiva": ">=0.1.0"}}\n',
+        encoding="utf-8",
     )
+    (plugin_dir / "plugin.py").write_text(
+        "from base.packages.plugins.extensions import PluginContributions\n"
+        "def contribute() -> PluginContributions:\n"
+        "    return PluginContributions()\n",
+        encoding="utf-8",
+    )
+    (plugin_dir / "agent_runtime.py").write_text(
+        "from base.packages.plugins.extensions import PluginContributions\n"
+        "from gateway.tests.lifecycle.sdk.test_external_integration_agent import IntegrationPlugin\n"
+        "def contribute() -> PluginContributions:\n"
+        "    return PluginContributions(state=(IntegrationPlugin,))\n",
+        encoding="utf-8",
+    )
+    enable_config.write_local(
+        {
+            "plugins": {
+                **{name: {"enabled": False} for name in enable_config.discover_plugins()},
+                "integration": {"enabled": True},
+            }
+        }
+    )
+    registry = faces.import_faces(validate_state=state_module.plugin_state_schema).registry
 
-    # meiva:note
-    # One retained patch, for the integration plugin that exists only in this test:
-    # `load_snapshot` rediscovers plugins from disk through `build_registry` (needs base: it
-    # should read the installed registry). The SDK installation itself is the real installer's:
-    # a sampling owner with a fixed policy keeps usage metering from fetching one.
-    def build_registry(*, validate_state: object = None) -> ExtensionRegistry:
-        return registry
-
-    monkeypatch.setattr(extensions_registry, "build_registry", build_registry)
     pin_agent(None, owns_loop=True)
     process_context.unbind_exec_turn()
     request.addfinalizer(process_context.unbind_exec_turn)

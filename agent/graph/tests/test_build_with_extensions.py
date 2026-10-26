@@ -31,10 +31,13 @@ _PLUGIN_MODULE_PREFIXES = ("meiva_builtins.plugins.", "plugins.")
 # derived from the checkout's location, so the synthetic built-ins these tests declare cannot
 # sit beside the real ones without a redirect of `repo_plugins_dir`.
 @pytest.fixture(autouse=True)
-def _isolate_paths(tmp_path: Path, unit_home: Path, monkeypatch: pytest.MonkeyPatch):
+def _isolate_paths(tmp_path: Path, unit_home: Path, monkeypatch: pytest.MonkeyPatch) -> list[Path]:
+    del unit_home
     repo = tmp_path / "repo_plugins"
     repo.mkdir()
-    monkeypatch.setattr(paths, "repo_plugins_dir", lambda: repo)
+    active = [repo]
+    monkeypatch.setattr(paths, "repo_plugins_dir", lambda: active[0])
+    return active
 
 
 # meiva:note
@@ -199,7 +202,7 @@ def test_a_repeat_load_reuses_the_module_object_so_a_patch_still_lands():
 
 
 def test_a_different_file_under_the_same_name_gets_a_fresh_module(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    tmp_path: Path, _isolate_paths: list[Path]
 ):
     """Reuse is keyed on the file, not just the dotted name.
 
@@ -221,7 +224,7 @@ def test_a_different_file_under_the_same_name_gets_a_fresh_module(
 
     other_repo = tmp_path / "other_repo_plugins"
     other_repo.mkdir()
-    monkeypatch.setattr(paths, "repo_plugins_dir", lambda: other_repo)
+    _isolate_paths[0] = other_repo
     _make_plugin("demo", "__description__ = 'demo'\n")
 
     _loader.load_extensions(sampling=fixed_sampling_owner())

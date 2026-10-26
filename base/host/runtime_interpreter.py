@@ -138,9 +138,11 @@ def loaded_runtime() -> tuple[Path, Path, Path, bool]:
     )
 
 
-def verify_loaded_source(checkout: Path) -> LoadedRuntimeIdentity:
+def verify_loaded_source(
+    checkout: Path, *, loaded: tuple[Path, Path, Path, bool]
+) -> LoadedRuntimeIdentity:
     """Capture the exact developer checkout and the interpreter loading it."""
-    prefix, executable, package, _isolated = loaded_runtime()
+    prefix, executable, package, _isolated = loaded
     if (
         checkout.resolve(strict=True) != checkout
         or package != checkout
@@ -159,5 +161,5 @@ def verify_loaded_source(checkout: Path) -> LoadedRuntimeIdentity:
 
 def capture_loaded_runtime() -> LoadedRuntimeIdentity:
     """Capture the checkout that is executing this code."""
-    _prefix, _executable, package, _isolated = loaded_runtime()
-    return verify_loaded_source(package)
+    loaded = loaded_runtime()
+    return verify_loaded_source(loaded[2], loaded=loaded)

@@ -45,13 +45,12 @@ def fresh_entry() -> None:
     logger.add(lambda message: records.append(message.record["message"]), diagnose=False)
     from cli import main
 
-    # A public dispatch stub observes the actual executable prelude.
-    def dispatch() -> int:
-        logger.warning("must be quiet before configuration")
-        return 17
-
-    main.main = dispatch  # type: ignore[assignment]
-    result = main.entry()
+    sys.argv[:] = ["meiva", "--help"]
+    try:
+        result: object = main.entry()
+    except SystemExit as exc:
+        result = exc.code
+    logger.warning("must be quiet before configuration")
     emit(
         json.dumps(
             {

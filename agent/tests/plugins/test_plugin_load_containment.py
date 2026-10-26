@@ -36,10 +36,23 @@ _PLUGIN_MODULE_PREFIXES = ("meiva_builtins.plugins.", "plugins.")
 
 
 @pytest.fixture(autouse=True)
-def _isolate_paths(unit_home: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
-    repo = tmp_path / "repo_plugins"
-    repo.mkdir()
-    monkeypatch.setattr(paths, "repo_plugins_dir", lambda: repo)
+def _isolate_paths(unit_home: Path) -> None:
+    del unit_home
+
+
+def _write_enabled(plugins: dict[str, dict[str, bool]]) -> None:
+    write_local(
+        {
+            "plugins": {
+                **{
+                    p.name: {"enabled": False}
+                    for p in paths.repo_plugins_dir().iterdir()
+                    if p.is_dir() and not p.name.startswith(".") and (p / "plugin.py").exists()
+                },
+                **plugins,
+            }
+        }
+    )
 
 
 @pytest.fixture(autouse=True)
@@ -94,7 +107,7 @@ def test_boot_loader_never_imports_a_disabled_plugin(loguru_records: list[dict[s
         {"refresh.py": "MARK = 'x'\n"},
     )
     _write_plugin(paths.plugins_dir(), "good", "LOADED = True\n")
-    write_local({"plugins": {"codex_usage": {"enabled": False}, "good": {"enabled": True}}})
+    _write_enabled({"codex_usage": {"enabled": False}, "good": {"enabled": True}})
 
     from meiva.sdk_surface.extensions import load_extensions
 
@@ -117,12 +130,10 @@ def test_boot_loader_contains_broken_plugins_and_keeps_going(
     _write_plugin(home, "broken_syntax", "def oops(:\n")
     _write_plugin(home, "broken_raise", "raise RuntimeError('boom')\n")
     _write_plugin(home, "good", "LOADED = True\n")
-    write_local(
+    _write_enabled(
         {
-            "plugins": {
-                name: {"enabled": True}
-                for name in ("broken_relative", "broken_syntax", "broken_raise", "good")
-            }
+            name: {"enabled": True}
+            for name in ("broken_relative", "broken_syntax", "broken_raise", "good")
         }
     )
 
@@ -150,7 +161,7 @@ def test_a_package_relative_sibling_import_resolves_and_a_reload_keeps_the_modul
         "from . import refresh\nMARK = refresh.MARK\n",
         {"refresh.py": "MARK = 'x'\n"},
     )
-    write_local({"plugins": {"codex_usage": {"enabled": True}}})
+    _write_enabled({"codex_usage": {"enabled": True}})
 
     from meiva.sdk_surface.extensions import load_extensions
 
@@ -170,7 +181,7 @@ def test_host_boot_restart_loop_survives_a_broken_plugin(
     while the broken package sat on disk. Consecutive boots must each survive,
     each report, and each leave no half-executed module behind."""
     _write_plugin(paths.plugins_dir(), "codex_usage", "from . import refresh\n")
-    write_local({"plugins": {"codex_usage": {"enabled": True}}})
+    _write_enabled({"codex_usage": {"enabled": True}})
 
     from meiva.sdk_surface.extensions import load_extensions
 
@@ -205,7 +216,7 @@ def test_the_loader_binds_the_class_a_config_face_declares(unit_home: Path) -> N
         },
         contributions={"config": {"schema": "default_config.py"}},
     )
-    write_local({"plugins": {"faced": {"enabled": True}}})
+    _write_enabled({"faced": {"enabled": True}})
 
     try:
         loaded = load_extensions(sampling=fixed_sampling_owner())
@@ -227,7 +238,7 @@ def test_the_loader_retains_the_roots_explicit_owners(config_authority: ConfigAu
 
     catalog = CatalogBuilder().build()
     _write_plugin(paths.plugins_dir(), "good", "LOADED = True\n")
-    write_local({"plugins": {"good": {"enabled": True}}})
+    _write_enabled({"good": {"enabled": True}})
     sampling = fixed_sampling_owner()
     try:
         loaded = load_extensions(catalog=catalog, authority=config_authority, sampling=sampling)

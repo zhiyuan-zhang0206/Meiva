@@ -2,9 +2,3 @@ exports = ["providers"]
 
 [uses]
 "test_lm_call.py" = ["providers"]
-
-[debt.first-party-patch]
-"test_lm_call.py#monkeypatch.setattr base.lm.call.jittered" = 1
-
-[debt.stdlib-patch]
-"test_lm_call.py#monkeypatch.setattr time.sleep" = 1

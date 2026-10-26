@@ -12,7 +12,7 @@ from __future__ import annotations
 from collections.abc import Collection, Mapping
 from dataclasses import dataclass, field
 from dataclasses import fields as dataclass_fields
-from typing import Any
+from typing import Any, Literal, overload
 
 from base.api_contracts.agent_contract import Harness
 from base.lm.pricing import PriceBook
@@ -367,11 +367,28 @@ def normalize_overlay_llm_model(
 
 SettingValue = bool | int | float | str | None
 
+FloatSettingName = Literal[
+    "auto_compact_fraction",
+    "compact_reminder_fraction",
+    "llm_stream_ttft_timeout_seconds",
+    "llm_stream_total_timeout_seconds",
+    "llm_stream_inter_chunk_timeout_seconds",
+]
+IntSettingName = Literal[
+    "auto_compact_ceiling_tokens",
+    "claude_thinking_budget_tokens",
+    "llm_retry_max_attempts",
+]
+StrSettingName = Literal[
+    "reasoning_effort",
+    "agent_communication_style",
+]
+
 
 @dataclass(frozen=True)
-class ResolvedSetting:
+class ResolvedSetting[SettingT]:
     setting: str
-    value: Any
+    value: SettingT
     source: str
     shared_default: SettingValue
     model_default: SettingValue
@@ -382,20 +399,101 @@ def tuning_field_names() -> tuple[str, ...]:
     return tuple(f.name for f in dataclass_fields(ModelTuning))
 
 
+@overload
 def explain_setting(
-    setting: str, *, model: str, explicit: Any, models: Mapping[str, ModelSpec]
-) -> ResolvedSetting:
+    setting: FloatSettingName,
+    *,
+    model: str,
+    explicit: object,
+    models: Mapping[str, ModelSpec],
+) -> ResolvedSetting[float]: ...
+
+
+@overload
+def explain_setting(
+    setting: IntSettingName,
+    *,
+    model: str,
+    explicit: object,
+    models: Mapping[str, ModelSpec],
+) -> ResolvedSetting[int]: ...
+
+
+@overload
+def explain_setting(
+    setting: StrSettingName,
+    *,
+    model: str,
+    explicit: object,
+    models: Mapping[str, ModelSpec],
+) -> ResolvedSetting[str]: ...
+
+
+@overload
+def explain_setting(
+    setting: str,
+    *,
+    model: str,
+    explicit: object,
+    models: Mapping[str, ModelSpec],
+) -> ResolvedSetting[SettingValue]: ...
+
+
+def explain_setting(
+    setting: str, *, model: str, explicit: object, models: Mapping[str, ModelSpec]
+) -> ResolvedSetting[SettingValue]:
     floor: SettingValue = getattr(DEFAULT_TUNING, setting)
     spec = models.get(model)
     tuned: SettingValue = getattr(spec.tuning, setting) if spec is not None else None
     if explicit is not None:
-        return ResolvedSetting(setting, explicit, "explicit", floor, tuned, explicit)
+        explicit_val: Any = explicit
+        return ResolvedSetting(setting, explicit_val, "explicit", floor, tuned, explicit_val)
     if tuned is not None:
         return ResolvedSetting(setting, tuned, "model-default", floor, tuned, None)
     return ResolvedSetting(setting, floor, "shared-default", floor, tuned, None)
 
 
+@overload
 def resolve_setting(
-    setting: str, *, model: str, models: Mapping[str, ModelSpec], explicit: Any
-) -> Any:
+    setting: FloatSettingName,
+    *,
+    model: str,
+    models: Mapping[str, ModelSpec],
+    explicit: object,
+) -> float: ...
+
+
+@overload
+def resolve_setting(
+    setting: IntSettingName,
+    *,
+    model: str,
+    models: Mapping[str, ModelSpec],
+    explicit: object,
+) -> int: ...
+
+
+@overload
+def resolve_setting(
+    setting: StrSettingName,
+    *,
+    model: str,
+    models: Mapping[str, ModelSpec],
+    explicit: object,
+) -> str: ...
+
+
+@overload
+def resolve_setting(
+    setting: str,
+    *,
+    model: str,
+    models: Mapping[str, ModelSpec],
+    explicit: object,
+) -> SettingValue: ...
+
+
+def resolve_setting(
+    setting: str, *, model: str, models: Mapping[str, ModelSpec], explicit: object
+) -> SettingValue:
     return explain_setting(setting, model=model, models=models, explicit=explicit).value

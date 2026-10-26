@@ -33,7 +33,7 @@ from cli.commands.agents import parsers as _agents
 from cli.commands.cluster.tests.gateway_server import Reply, serving
 from cli.commands.extensions.parsers import mcp as _mcp
 from cli.commands.extensions.parsers import plugins as _plugins
-from cli.database import open_operator_database, operator_event_pipeline
+from cli.database import OperatorEventPipeline, open_operator_database, operator_event_pipeline
 from cli.database.runtime import CommandRuntime
 from cli.database.tests.command_inputs import command_runtime as command_runtime
 from cli.parsers import build_parser
@@ -183,7 +183,9 @@ def test_dispatch_invokes_per_subcommand_handler(
         argv,
         declared=tmp_path,
         checkout=Path(_main.__file__).resolve().parents[1],
-        producer_factory=operator_event_pipeline,
+        producer_factory=lambda db, machine, home: OperatorEventPipeline.recording(
+            db, machine=machine, home=home, log_sinks=[]
+        ),
         open_database=open_operator_database,
     )
     assert rc == 42

@@ -2,9 +2,3 @@
 "test_env_bootstrap_credentials.py" = ["child_env_bootstrap_credentials.py"]
 "test_plugin_registrations.py" = ["child_gate_without_agent_layer.py"]
 "test_throwaway_storage.py" = ["child_throwaway_storage.py"]
-
-[debt.first-party-patch]
-"test_database_gate.py#monkeypatch.setattr base.db.connections.connect" = 1
-"test_database_gate.py#monkeypatch.setattr base.native_process.code_version.first_parent_count" = 1
-"test_database_gate.py#monkeypatch.setattr base.native_process.loaded_commit.LoadedCommit.capture" = 1
-"test_stub_everywhere_alias_scan.py#monkeypatch.setattr meiva.mcps.servers" = 1

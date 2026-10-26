@@ -1,47 +1,94 @@
-from collections.abc import Generator
-from contextlib import contextmanager
 from pathlib import Path
 from typing import Literal, Self
 
 import pytest
 from httpx2 import Response
-from pydantic import model_validator
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from base.cluster.machine import MachineIdentityReader
 from base.cluster.machine.tests.identity import machine_identity as machine_identity
 from base.config.service_read import ConfigAuthority
 from base.host.system.tests.fake_commands import fake_host
-from base.packages import plugin_config_admin as plugin_config
-from base.packages import plugin_config_images
-from base.packages.plugin_config_images import PluginConfigOwner
+from base.packages.plugins.config_face import disk_image_path
+from base.packages.plugins.extensions import PluginContributions
 from gateway.tests.auth.gateway_config import gateway_test_client
-from meiva_builtins.plugins.meiva_fleet.default_config import FleetConfig
 from ops.host_config import config_write_op
 from ops.rpc_schemas import ConfigWriteOpResult
 
 
-class ValidatedFleetConfig(FleetConfig):
+class ValidatedFleetConfig(BaseModel):
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    policy_escalate_n: int = Field(
+        default=3,
+        description="Cluster-pinned policy threshold.",
+        json_schema_extra={
+            "env_var": "MEIVA_POLICY_ESCALATE_N",
+            "restart_required": "all",
+            "writable": True,
+            "sensitive": False,
+            "capability": "gateway",
+            "scope": "cluster-pinned",
+        },
+    )
+    policy_maintenance_limit: int = Field(
+        default=3,
+        description="Host-scoped remotely writable policy limit.",
+        json_schema_extra={
+            "env_var": "MEIVA_POLICY_MAINTENANCE_LIMIT",
+            "restart_required": "",
+            "writable": False,
+            "sensitive": False,
+            "capability": "gateway",
+            "scope": "host",
+            "remote_writable": True,
+        },
+    )
+
     @model_validator(mode="after")
     def validate_policy(self) -> Self:
-        if self.task_escalate_n < 1 or not self.task_maintenance_enabled:
+        if self.policy_escalate_n < 1 or self.policy_maintenance_limit < 1:
             raise ValueError("candidate Fleet policy rejected")
+        if self.policy_escalate_n == 7 or self.policy_maintenance_limit == 7:
+            image = disk_image_path("validated_policy")
+            competing = image.with_name("competing.json")
+            if competing.exists():
+                image.write_bytes(competing.read_bytes())
+                competing.unlink()
         return self
+
+
+def contribute() -> PluginContributions:
+    return PluginContributions(config=ValidatedFleetConfig)
 
 
 @pytest.fixture
 def owner_names() -> tuple[str, ...]:
-    return ("meiva_fleet",)
+    return ("validated_policy",)
 
 
 @pytest.fixture
-def owned_image(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, owner_names: tuple[str, ...]
-) -> Path:
-    image = tmp_path / "images" / "config.json"
-    image.parent.mkdir()
-    image.write_text(ValidatedFleetConfig().model_dump_json())
-    owners = {name: PluginConfigOwner(name, ValidatedFleetConfig, image) for name in owner_names}
-    monkeypatch.setattr(plugin_config, "config_owners", lambda: owners)
+def owned_image(unit_home: Path, owner_names: tuple[str, ...]) -> Path:
+    for name in owner_names:
+        plugin_dir = unit_home / "plugins" / name
+        plugin_dir.mkdir(parents=True, exist_ok=True)
+        (plugin_dir / "meiva-plugin.json").write_text(
+            f'{{"apiVersion": 2, "name": "{name}", "version": "1.0.0", "engines": {{"meiva": ">=0.1.0"}}}}\n',
+            encoding="utf-8",
+        )
+        (plugin_dir / "plugin.py").write_text(
+            "from base.packages.plugins.extensions import PluginContributions\n"
+            "def contribute() -> PluginContributions:\n"
+            "    return PluginContributions()\n",
+            encoding="utf-8",
+        )
+        (plugin_dir / "default_config.py").write_text(
+            "from gateway.tests.routers.config_api.test_plugin_write_errors import contribute\n",
+            encoding="utf-8",
+        )
+    image = disk_image_path(owner_names[0])
+    image.parent.mkdir(parents=True, exist_ok=True)
+    image.write_text(ValidatedFleetConfig().model_dump_json(), encoding="utf-8")
     return image
 
 
@@ -54,9 +101,9 @@ def write_request(
 ) -> Response | ConfigWriteOpResult:
     if consumer == "gateway":
         with gateway_test_client() as client:
-            return client.put("/api/config", json={"task_escalate_n": -1 if bad_candidate else 7})
+            return client.put("/api/config", json={"policy_escalate_n": -1 if bad_candidate else 7})
     return config_write_op(
-        {"task_maintenance_enabled": not bad_candidate},
+        {"policy_maintenance_limit": -1 if bad_candidate else 7},
         local=False,
         authority=config_authority,
         local_machine=local_machine,
@@ -93,24 +140,13 @@ def test_invalid_whole_candidate_is_rejected_without_writing(
 @pytest.mark.parametrize("consumer", ["gateway", "host"])
 def test_concurrent_image_change_is_rejected_without_overwriting(
     owned_image: Path,
-    monkeypatch: pytest.MonkeyPatch,
     consumer: Literal["gateway", "host"],
     *,
     config_authority: ConfigAuthority,
     machine_identity: MachineIdentityReader,
 ) -> None:
-    concurrent = ValidatedFleetConfig(task_escalate_n=19).model_dump_json().encode()
-    original_lock = plugin_config_images.file_lock
-
-    @contextmanager
-    def lock_after_competing_write(
-        path: Path, *, timeout_s: float | None = None
-    ) -> Generator[None]:
-        with original_lock(path, timeout_s=timeout_s):
-            owned_image.write_bytes(concurrent)
-            yield
-
-    monkeypatch.setattr(plugin_config_images, "file_lock", lock_after_competing_write)
+    concurrent = ValidatedFleetConfig(policy_escalate_n=19).model_dump_json().encode()
+    owned_image.with_name("competing.json").write_bytes(concurrent)
     result = write_request(
         consumer, config_authority=config_authority, local_machine=machine_identity.name()
     )
@@ -150,7 +186,7 @@ def test_unexpected_persistence_failure_keeps_original_exception_and_bytes(
 # meiva:note
 # Two owners declare the same fields: attributing a field to one of them fails with a ValueError
 # that no request handler anticipates.
-@pytest.mark.parametrize("owner_names", [("meiva_fleet", "meiva_fleet_copy")])
+@pytest.mark.parametrize("owner_names", [("validated_policy", "validated_policy_copy")])
 @pytest.mark.parametrize("consumer", ["gateway", "host"])
 def test_unexpected_owner_failure_keeps_original_exception_and_bytes(
     owned_image: Path,

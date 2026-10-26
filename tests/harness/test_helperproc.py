@@ -306,14 +306,19 @@ def test_backend_route_matrix(
     spawn: bool,
     expected: str,
 ) -> None:
-    from base.config import settings
+    from base.config import get_field, set_field
     from base.sessions import backend as session_backend
 
     monkeypatch.setattr(session_backend, "is_macos", lambda: is_macos)
-    monkeypatch.setattr(settings.services, "permissions_helper_enabled", enabled)
-    monkeypatch.setattr(settings.services, "permissions_helper_spawn", spawn)
-
-    backend = session_backend.get_backend()
+    prior_enabled = get_field("permissions_helper_enabled")
+    prior_spawn = get_field("permissions_helper_spawn")
+    set_field("permissions_helper_enabled", enabled)
+    set_field("permissions_helper_spawn", spawn)
+    try:
+        backend = session_backend.get_backend()
+    finally:
+        set_field("permissions_helper_enabled", prior_enabled)
+        set_field("permissions_helper_spawn", prior_spawn)
     assert type(backend).__name__ == expected
 
 

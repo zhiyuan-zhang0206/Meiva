@@ -7,7 +7,6 @@ import stat
 import tempfile
 from collections.abc import Callable
 from pathlib import Path
-from unittest.mock import patch
 
 import loguru
 import pytest
@@ -53,20 +52,21 @@ def test_converge_skips_foreign_nodes(request: pytest.FixtureRequest, tmp_path: 
     target = tmp_path / "tree"
     ours_dir = target / "ours"
     ours_dir.mkdir(parents=True)
+    ours_dir.chmod(0o755)
+    cap = _Captured(request.addfinalizer)
+    skips = private_storage.SkipReport()
+    private_storage.converge_child(ours_dir, skips)
+
     foreign_file = ours_dir / "secret"
     foreign_file.write_bytes(b"secret")
     foreign_file.chmod(0o400)
     foreign_dir = target / "foreign"
     foreign_dir.mkdir()
     foreign_dir.chmod(0o500)
-    cap = _Captured(request.addfinalizer)
-
-    def _foreign(stat_result: os.stat_result, *, euid: int | None = None) -> bool:
-        _ = euid
-        return stat_result.st_mode & 0o777 in (0o400, 0o500)
-
-    with patch.object(private_storage, "is_foreign_owned", side_effect=_foreign):
-        private_storage.converge_private_tree(target)
+    foreign_euid = os.geteuid() + 1
+    private_storage.converge_child(foreign_file, skips, euid=foreign_euid)
+    private_storage.converge_child(foreign_dir, skips, euid=foreign_euid)
+    private_storage.report_skips(target, skips)
 
     assert _mode(foreign_file) == 0o400
     assert _mode(foreign_dir) == 0o500

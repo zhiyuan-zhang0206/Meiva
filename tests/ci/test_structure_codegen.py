@@ -1,16 +1,16 @@
 import ast
+import builtins
 import io
 import json
 import os
 import re
 import shlex
 import subprocess
-import sys
-from contextlib import contextmanager, nullcontext, redirect_stdout
+from contextlib import contextmanager, redirect_stdout
 from pathlib import Path
 from tempfile import TemporaryDirectory
+from types import SimpleNamespace
 from unittest import TestCase
-from unittest.mock import patch
 
 import yaml
 
@@ -224,27 +224,91 @@ def test_closure_rejects_reachable_conditional_imports(tmp_path: Path) -> None:
 
 
 def select(
-    event: str, paths: tuple[str, ...] = (), error: Exception | None = None, selector_patch=None
-):
-
+    event: str,
+    paths: tuple[str, ...] = (),
+    *,
+    error: Exception | None = None,
+    yaml_config: dict[str, object] = CONFIG,
+    yaml_missing: bool = False,
+    read_error: Exception | None = None,
+    yaml_error: Exception | None = None,
+    re_error: Exception | None = None,
+    open_error: Exception | None = None,
+    fail_after_second_append: list[str] | None = None,
+) -> tuple[str, str, list[list[str]]]:
     with TemporaryDirectory() as directory:
         output = Path(directory) / "output"
         env = {
             "EVENT_NAME": event,
-            "LINT_STRUCTURE_BASELINE_BASE": "event-base-sha",
             "GITHUB_OUTPUT": str(output),
         }
+        if not isinstance(error, KeyError):
+            env["LINT_STRUCTURE_BASELINE_BASE"] = "event-base-sha"
         stdout = io.StringIO()
         failed = False
         changed = b"\0".join(os.fsencode(path) for path in paths)
-        with (
-            patch.dict(os.environ, env),
-            patch("subprocess.check_output", return_value=changed, side_effect=error) as diff,
-            redirect_stdout(stdout),
-            selector_patch or nullcontext(),
-        ):
+        calls: list[list[str]] = []
+        appends = 0
+
+        def check_output(cmd: list[str]) -> bytes:
+            calls.append(cmd)
+            if error is not None:
+                raise error
+            return changed
+
+        def safe_load(_text: str) -> dict[str, object]:
+            if yaml_error is not None:
+                raise yaml_error
+            return yaml_config
+
+        def compile_regex(pattern: str) -> re.Pattern[str]:
+            if re_error is not None:
+                raise re_error
+            return re.compile(pattern)
+
+        class _SelectorPath:
+            def __init__(self, raw: str) -> None:
+                self._path = Path(raw)
+
+            def read_text(self) -> str:
+                if read_error is not None:
+                    raise read_error
+                return self._path.read_text()
+
+            @contextmanager
+            def open(self, mode: str = "r"):
+                nonlocal appends
+                if open_error is not None:
+                    raise open_error
+                with self._path.open(mode) as stream:
+                    yield stream
+                if mode == "a":
+                    appends += 1
+                    if appends == 2 and fail_after_second_append is not None:
+                        fail_after_second_append.append(self._path.read_text())
+                        raise OSError("close failed after publishing skip")
+
+        def fake_import(name: str, *_args: object) -> object:
+            if name == "os":
+                return SimpleNamespace(environ=env, fsdecode=os.fsdecode)
+            if name == "subprocess":
+                return SimpleNamespace(check_output=check_output)
+            if name == "yaml":
+                if yaml_missing:
+                    raise ModuleNotFoundError("No module named 'yaml'")
+                return SimpleNamespace(safe_load=safe_load)
+            if name == "re":
+                return SimpleNamespace(compile=compile_regex)
+            if name == "pathlib":
+                return SimpleNamespace(Path=_SelectorPath)
+            raise ImportError(name)
+
+        ns: dict[str, object] = {
+            "__builtins__": {**vars(builtins), "__import__": fake_import},
+        }
+        with redirect_stdout(stdout):
             try:
-                exec(compile(SCRIPT, "ci.yml codegen selector", "exec"), {})
+                exec(compile(SCRIPT, "ci.yml codegen selector", "exec"), ns)
             except SystemExit as exit_error:
                 assert exit_error.code == 1
                 failed = True
@@ -252,7 +316,7 @@ def select(
         decision = output.read_text().splitlines()[-1] if output.exists() else "run=true"
         if failed:
             decision = "run=true"
-        return decision + "\n", stdout.getvalue(), diff.call_args_list
+        return decision + "\n", stdout.getvalue(), calls
 
 
 def test_required_job_identity_and_unconditional_lint() -> None:
@@ -509,19 +573,19 @@ def test_every_codegen_input_family_selects_freshness() -> None:
         assert (ROOT / path).is_file(), f"Freshness matrix path no longer exists: {path}"
         assert any(re.search(HOOKS[hook_id]["files"], path) for hook_id in CODEGEN), path
 
-        output, log, calls = select(
-            "pull_request", (path,), selector_patch=patch("yaml.safe_load", return_value=CONFIG)
-        )
+        output, log, calls = select("pull_request", (path,))
         assert output == "run=true\n", path
         assert "STEP SKIPPED" not in log
-        assert calls[0].args[0] == [
-            "git",
-            "diff",
-            "--name-only",
-            "--no-renames",
-            "-z",
-            "event-base-sha",
-            "HEAD",
+        assert calls == [
+            [
+                "git",
+                "diff",
+                "--name-only",
+                "--no-renames",
+                "-z",
+                "event-base-sha",
+                "HEAD",
+            ]
         ]
 
 
@@ -554,48 +618,32 @@ def test_diff_and_shallow_history_failures_run_freshness() -> None:
 
 
 def test_selector_config_and_runtime_failures_run_freshness() -> None:
-    for target, error in (
-        ("pathlib.Path.read_text", PermissionError("config unreadable")),
-        ("yaml.safe_load", yaml.YAMLError("invalid YAML")),
-        ("re.compile", re.error("invalid regex")),
-        ("re.compile", RuntimeError("unexpected selector error")),
-        ("pathlib.Path.open", OSError("output unavailable")),
+    paths = ("base/agents/observation/roster.py",)
+    for output, log, _ in (
+        select("pull_request", paths, read_error=PermissionError("config unreadable")),
+        select("pull_request", paths, yaml_error=yaml.YAMLError("invalid YAML")),
+        select("pull_request", paths, re_error=re.error("invalid regex")),
+        select("pull_request", paths, re_error=RuntimeError("unexpected selector error")),
+        select("pull_request", paths, open_error=OSError("output unavailable")),
     ):
-        output, log, _ = select(
-            "pull_request",
-            ("base/agents/observation/roster.py",),
-            selector_patch=patch(target, side_effect=error),
-        )
         assert output == "run=true\n"
         assert "::warning::Codegen selector failed" in log
         assert "STEP SKIPPED" not in log
 
 
 def test_missing_hook_defaults_to_run() -> None:
-    with patch("yaml.safe_load", return_value={"repos": []}):
-        output, log, _ = select("pull_request", ("base/agents/observation/roster.py",))
+    output, log, _ = select(
+        "pull_request",
+        ("base/agents/observation/roster.py",),
+        yaml_config={"repos": []},
+    )
     assert output == "run=true\n"
     assert "::warning::Codegen selector failed (KeyError)" in log
 
 
 def test_failure_after_skip_output_is_written_still_runs_freshness() -> None:
-    original = Path.open
-    written = []
-    appends = 0
-
-    @contextmanager
-    def opening(path, *args, **kwargs):
-        nonlocal appends
-        with original(path, *args, **kwargs) as stream:
-            yield stream
-        if args == ("a",):
-            appends += 1
-            if appends == 2:
-                with original(path) as output:
-                    written.append(output.read())
-                raise OSError("close failed after publishing skip")
-
-    output, log, _ = select("pull_request", selector_patch=patch.object(Path, "open", opening))
+    written: list[str] = []
+    output, log, _ = select("pull_request", fail_after_second_append=written)
     assert written == ["run=true\nrun=false\n"]
     assert output == "run=true\n"
     assert "::warning::Codegen selector failed (OSError)" in log
@@ -603,8 +651,11 @@ def test_failure_after_skip_output_is_written_still_runs_freshness() -> None:
 
 
 def test_selector_import_failure_defaults_to_run() -> None:
-    with patch.dict(sys.modules, {"yaml": None}):
-        output, log, _ = select("pull_request", ("base/agents/observation/roster.py",))
+    output, log, _ = select(
+        "pull_request",
+        ("base/agents/observation/roster.py",),
+        yaml_missing=True,
+    )
     assert output == "run=true\n"
     assert "::warning::Codegen selector failed (ModuleNotFoundError)" in log
 

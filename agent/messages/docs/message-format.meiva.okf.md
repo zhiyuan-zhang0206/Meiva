@@ -20,10 +20,10 @@ Message formats exchanged between agent, LLM, users, and other agents. `agent/me
 - The injection scan (`base/agents/messages/injection_scan.py`) triggers on both tags: a message that tries to forge or close a system note is flagged like any other forged structural markup.
 
 ### Inbound Messages (`inbound_message`)
-- `inbound_message(*, content, source, inbound_id, body_start, created_at=, image_urls=, message_id=)` — envelope wrapper (the header is `base/agents/messages/envelope.py:inbound_head`; `meiva_inbound_body_start` records its length so readers cut the content out by offset and never parse the header; the sender is `meiva_source`). Inbounds written before the field existed show whole, header included, in the hierarchy catalog. A system source (`system`, `system:<subtype>`) is wrapped as a system note (see above); every other source's header is a self-contained sender line.
+- `inbound_message(*, content, source, inbound_id, body_start, created_at=, image_urls=)` — envelope wrapper (the header is `base/agents/messages/envelope.py:inbound_head`; `meiva_inbound_body_start` records its length so readers cut the content out by offset and never parse the header; the sender is `meiva_source`). Inbounds written before the field existed show whole, header included, in the hierarchy catalog. A system source (`system`, `system:<subtype>`) is wrapped as a system note (see above); every other source's header is a self-contained sender line.
 - `source` is the original source string (`"system"` / `"agent:N"` / `"user"`), `meiva_inbound_id` records the source row id so history readers can correlate a message with its queue row. `inbound_id=None` omits that metadata key; system notes use their own message constructor.
 - `content` plain text or multimodal block list
-- `image_urls` keeps timeline reference URLs; model `content` may embed base64. `message_id` pins the LangChain ID.
+- `image_urls` keeps timeline reference URLs; model `content` may embed base64.
 - Two times in metadata: `meiva_created_at` keeps its meaning (an inbound's is its ARRIVAL time, the source row's `created_at`; other messages' is when they were produced). `meiva_picked_up_at` is when an injected message (inbound, note, attachment) was put into the LLM context, i.e. when the model reads it; the builders stamp it. AIMessage and tool output are produced inside the context, so their `meiva_created_at` already is the read time and they carry no `meiva_picked_up_at`. Time-ordered readers (timeline, history tree, history dump) use `message_read_time()` (`meiva_picked_up_at`, else `meiva_created_at`); delivery tracking uses `inbound_messages.created_at`. The body envelope header (`wrap_inbound`) keeps the arrival time so the agent knows when a message came in.
 
 ### Inbound timestamp ownership
@@ -62,7 +62,7 @@ stamp. Arrival-time formatting and source validation keep their existing order.
 - [[context-window.meiva.okf.md]] — message history is the main consumer of the context window
 
 ## Entry Points
-- `agent/messages/__init__.py:inbound_message(*, content, source, inbound_id, body_start, created_at=, image_urls=, message_id=)` — envelope-wrapped inbound message
+- `agent/messages/__init__.py:inbound_message(*, content, source, inbound_id, body_start, created_at=, image_urls=)` — envelope-wrapped inbound message
 - `agent/messages/__init__.py:system_note_message(...)` — system notification (with `NoteTag`)
 - `agent/messages/__init__.py:security_note_message(...)` — SECURITY note for one injection-scan finding
 - `agent/messages/__init__.py:exec_output_message(...)` — execution output; one shape for every ending. The structured record is `meiva_exec_status` (`ExecStatus`: completed / failed / timed_out / cancelled / halted / not_run / unknown), `meiva_exec_started_at` (the end is `meiva_created_at`), `meiva_exec_ms` and `meiva_exec_body_start` (where the body begins after the header); readers use these fields and never parse the header text, which is for the model. Results written before these fields existed carry no offset; the hierarchy catalog shows them whole, header included, instead of parsing the header

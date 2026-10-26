@@ -206,17 +206,24 @@ def test_a_test_enters_a_handful_of_python_frames(run: leak_guard.Run) -> None:
     assert _python_calls(lambda: run.compare(before)) <= _FRAMES_PER_PHASE
 
 
-def test_the_signals_are_read_without_the_python_wrapper(
-    run: leak_guard.Run, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_the_signals_are_read_without_the_python_wrapper(run: leak_guard.Run) -> None:
     """`signal.getsignal` is three frames and an enum construction per signal: the raw answer is enough."""
+    wrapper_code = signal.getsignal.__code__
+    wrapper_calls = 0
 
-    def forbidden(_signum: int) -> object:
-        raise AssertionError("the guard went through signal.getsignal")
+    def profile(frame: types.FrameType, event: str, _arg: object) -> None:
+        nonlocal wrapper_calls
+        if event == "call" and frame.f_code is wrapper_code:
+            wrapper_calls += 1
 
-    monkeypatch.setattr(signal, "getsignal", forbidden)
-    before = run.capture()
-    assert run.compare(before) == []
+    previous = sys.getprofile()
+    sys.setprofile(profile)
+    try:
+        before = run.capture()
+        assert run.compare(before) == []
+    finally:
+        sys.setprofile(previous)
+    assert wrapper_calls == 0
 
 
 def _handler(_signum: int, _frame: object) -> None:  # pragma: no cover - never called

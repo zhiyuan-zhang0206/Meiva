@@ -52,11 +52,8 @@ def emit(
     calls supply their entry snapshot so a refresh cannot mask the SDK outcome."""
     current = sampling_owner.read() if sampling_policy is None else sampling_policy
     every = current.sample_every if current.sampling_enabled else 1
-    if every > 1:
-        import random
-
-        if random.randrange(every) != 0:  # noqa: S311 — telemetry sampling, not security
-            return
+    if not sampling_owner.should_sample(every):
+        return
     extra: dict[str, Any] = {"fn": fn, "sample_rate": every}
     if detail:
         extra["detail"] = dict(detail)

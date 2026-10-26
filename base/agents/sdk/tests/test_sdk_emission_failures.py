@@ -1,9 +1,7 @@
 import asyncio
-from typing import Any
 
 import pytest
 
-from base import telemetry
 from base.agents.sdk import call_policy
 from base.agents.sdk import telemetry as sdk_usage_telemetry
 from base.agents.sdk.tally import SdkCallTally
@@ -16,22 +14,25 @@ def sampling_owner() -> call_policy.SamplingPolicyOwner:
 
 
 def test_simple_emit_unknown_error_is_not_recovered(
-    monkeypatch: pytest.MonkeyPatch, sampling_owner: call_policy.SamplingPolicyOwner
+    sampling_owner: call_policy.SamplingPolicyOwner,
 ) -> None:
     failure = RuntimeError("emitter programming error")
 
-    def broken(*_args: Any, **_kwargs: Any) -> None:
+    def broken() -> str:
         raise failure
 
-    monkeypatch.setattr(telemetry, "emit", broken)
     with pytest.raises(RuntimeError) as raised:
-        sdk_usage_telemetry.emit("files.write", identity={}, sampling_owner=sampling_owner)
+        sdk_usage_telemetry.emit(
+            "files.write",
+            identity={},
+            sampling_owner=sampling_owner,
+            machine_reader=broken,
+        )
     assert raised.value is failure
 
 
 @pytest.mark.parametrize("async_call", [False, True])
 async def test_successful_body_exposes_unknown_emit_failure_without_retry(
-    monkeypatch: pytest.MonkeyPatch,
     async_call: bool,
     sampling_owner: call_policy.SamplingPolicyOwner,
 ) -> None:
@@ -39,7 +40,7 @@ async def test_successful_body_exposes_unknown_emit_failure_without_retry(
     effects: list[str] = []
     tally = SdkCallTally()
 
-    def broken(*_args: Any, **_kwargs: Any) -> None:
+    def broken() -> str:
         raise failure
 
     def body() -> str:
@@ -49,7 +50,6 @@ async def test_successful_body_exposes_unknown_emit_failure_without_retry(
     async def async_body() -> str:
         return body()
 
-    monkeypatch.setattr(telemetry, "emit", broken)
     with pytest.raises(RuntimeError) as raised:
         if async_call:
             await sdk_usage_telemetry.run_metered_async(
@@ -60,6 +60,7 @@ async def test_successful_body_exposes_unknown_emit_failure_without_retry(
                 identity={},
                 tally=tally,
                 sampling_owner=sampling_owner,
+                machine_reader=broken,
             )
         else:
             sdk_usage_telemetry.run_metered(
@@ -70,6 +71,7 @@ async def test_successful_body_exposes_unknown_emit_failure_without_retry(
                 identity={},
                 tally=tally,
                 sampling_owner=sampling_owner,
+                machine_reader=broken,
             )
     assert raised.value is failure
     assert effects == ["committed"]
@@ -79,7 +81,6 @@ async def test_successful_body_exposes_unknown_emit_failure_without_retry(
 @pytest.mark.parametrize("async_call", [False, True])
 @pytest.mark.parametrize("primary_type", [ValueError, asyncio.CancelledError, KeyboardInterrupt])
 async def test_emit_secondary_failure_keeps_body_identity_cause_and_tally(
-    monkeypatch: pytest.MonkeyPatch,
     async_call: bool,
     primary_type: type[BaseException],
     sampling_owner: call_policy.SamplingPolicyOwner,
@@ -90,7 +91,7 @@ async def test_emit_secondary_failure_keeps_body_identity_cause_and_tally(
     effects: list[str] = []
     tally = SdkCallTally()
 
-    def broken(*_args: Any, **_kwargs: Any) -> None:
+    def broken() -> str:
         raise secondary
 
     def body() -> None:
@@ -100,7 +101,6 @@ async def test_emit_secondary_failure_keeps_body_identity_cause_and_tally(
     async def async_body() -> None:
         body()
 
-    monkeypatch.setattr(sdk_usage_telemetry, "emit", broken)
     with pytest.raises(primary_type) as raised:
         if async_call:
             await sdk_usage_telemetry.run_metered_async(
@@ -111,6 +111,7 @@ async def test_emit_secondary_failure_keeps_body_identity_cause_and_tally(
                 identity={},
                 tally=tally,
                 sampling_owner=sampling_owner,
+                machine_reader=broken,
             )
         else:
             sdk_usage_telemetry.run_metered(
@@ -121,6 +122,7 @@ async def test_emit_secondary_failure_keeps_body_identity_cause_and_tally(
                 identity={},
                 tally=tally,
                 sampling_owner=sampling_owner,
+                machine_reader=broken,
             )
     assert raised.value is primary
     assert primary.__cause__ is cause

@@ -17,7 +17,10 @@ import time
 from collections.abc import Callable, Sequence
 from typing import Any, TypeGuard
 
+from langchain_core.messages import BaseMessage
+
 from base.host.env.agent_slices import ModelOverrides
+from base.host.net import resilience
 from base.host.net.resilience import extract_retry_after, jittered
 from base.lm.catalog import ModelCatalog
 from base.lm.catalog.provider_keys import ProviderKeys
@@ -70,11 +73,12 @@ def invoke_response(
     retry_attempts: int = 0,
     retry_delay_seconds: float = 2.0,
     retry_max_delay_seconds: float = 30.0,
+    retry_jitter: str = "agent",
     model: str | None = None,
     usage_source: str | None = None,
     catalog: ModelCatalog,
     usage_agent_id: int | None = None,
-) -> Any:
+) -> BaseMessage:
     """Invoke `runnable` on an already-built message list; return the response.
 
     The middle of `invoke_text`, split out for callers that need the raw
@@ -146,7 +150,7 @@ def invoke_response(
                     delay = max(delay, retry_after)
                 # Per-process deterministic phase + random ±1s (R2-D
                 # jittered) — de-phases retry waves across the fleet.
-                time.sleep(jittered(delay))
+                resilience.retry_sleep(jittered(delay, mode=retry_jitter))
                 continue
             raise error_type(
                 f"Model call ({desc}) failed after {attempt + 1} attempt(s): {type(e).__name__}: {e}"
@@ -159,16 +163,18 @@ def invoke_response(
         raise error_type(f"Model call ({desc}) failed: no attempt produced a response")
     resolved_model = model or getattr(runnable, "model_name", None)
     if isinstance(resolved_model, str) and resolved_model:
-        from base.lm.usage import log_usage_from_message
+        from base.lm.usage import UsageOptions, log_usage_from_message
 
         log_usage_from_message(
             response,
             model=resolved_model,
             usage_kind="chat",
-            latency_ms=latency_ms,
-            source=usage_source,
+            options=UsageOptions(
+                latency_ms=latency_ms,
+                source=usage_source,
+                for_agent_id=usage_agent_id,
+            ),
             catalog=catalog,
-            for_agent_id=usage_agent_id,
         )
     return response
 
@@ -182,6 +188,7 @@ def invoke_text(
     retry_attempts: int = 0,
     retry_delay_seconds: float = 2.0,
     retry_max_delay_seconds: float = 30.0,
+    retry_jitter: str = "agent",
     model: str | None = None,
     usage_source: str | None = None,
     catalog: ModelCatalog,
@@ -205,6 +212,7 @@ def invoke_text(
         retry_attempts=retry_attempts,
         retry_delay_seconds=retry_delay_seconds,
         retry_max_delay_seconds=retry_max_delay_seconds,
+        retry_jitter=retry_jitter,
         model=model,
         usage_source=usage_source,
         catalog=catalog,

@@ -30,7 +30,7 @@ from base.lm.catalog.decide.types import (
     question_text,
 )
 from base.lm.catalog.provider_keys import ProviderKeys
-from base.lm.usage import log_usage_fields
+from base.lm.usage import UsageFields, log_usage_fields
 
 DEFAULT_TIMEOUT_S = 30.0
 _EPSILON = 1e-9
@@ -97,12 +97,14 @@ def _log_usage(
 ) -> None:
     log_usage_fields(
         model,
-        tok_in=input_tokens,
-        tok_out=0,
-        latency_ms=(time.monotonic() - started) * 1000,
+        UsageFields(
+            tok_in=input_tokens,
+            tok_out=0,
+            latency_ms=(time.monotonic() - started) * 1000,
+            source=source,
+            for_agent_id=for_agent_id,
+        ),
         usage_kind=usage_kind,
-        source=source,
-        for_agent_id=for_agent_id,
         catalog=catalog,
     )
 

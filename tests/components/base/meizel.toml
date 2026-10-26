@@ -2,16 +2,3 @@ exports = ["helper_chain_probe.py"]
 
 [uses]
 "test_shutdown.py" = ["child_graceful_stop.py", "plugin_restart_probe.py"]
-
-[debt.first-party-patch]
-"test_shutdown.py#monkeypatch.setattr base.host.exit_codes.logging.shutdown" = 1
-"test_shutdown.py#monkeypatch.setattr base.host.exit_codes.os._exit" = 2
-"test_shutdown.py#monkeypatch.setattr base.host.exit_codes.sys.stderr" = 1
-"test_shutdown.py#monkeypatch.setattr base.host.exit_codes.sys.stdout" = 1
-
-[debt.stdlib-patch]
-"test_no_secrets_on_argv.py#monkeypatch.setattr subprocess.run" = 1
-
-[debt.third-party-patch]
-"test_no_secrets_on_argv.py#monkeypatch.setattr psutil.Process" = 1
-"test_shutdown.py#monkeypatch.setattr loguru.logger.remove" = 2

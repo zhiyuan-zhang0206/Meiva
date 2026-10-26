@@ -23,15 +23,13 @@ projection through the environment.
 
 from __future__ import annotations
 
-import subprocess
 from pathlib import Path
-from typing import Any, cast
 
 import psutil
-import pytest
 
 from base.cluster.machine.tests.identity import machine_identity as machine_identity
 from base.db import Database
+from base.paths.tests.homes import unit_home as unit_home
 from base.sessions.pty.tests.pty_service import PtyServiceProcess, service_socket
 from base.sessions.pty.tests.pty_service import pty_service as pty_service
 from base.sessions.pty.tests.pty_shells import output_until, type_line
@@ -42,115 +40,56 @@ from base.sessions.pty.tests.secret_argv import (
 )
 from base.sessions.pty.tests.secret_argv import secret_env as secret_env
 from base.sessions.pty.tests.secret_argv import secrets_in_creator_env as secrets_in_creator_env
-
-# The pid the faked reparent helper reports. Every launch below drives the REAL
-# `posixproc.new_session` (only `subprocess.run` is faked), and that function
-# records the reported pid together with the create_time it reads for it — the
-# record a later `kill_session` resolves and SIGKILLs the process TREE of.
-_FAKE_CHILD_PID = 4242
+from base.sessions.tests.poll_until import poll_until
 
 
-@pytest.fixture
-def _fake_child_pid_never_resolves(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Keep the fabricated child pid from naming a real process.
-
-    Without this the tests here are a live weapon. `new_session` reads
-    `psutil.Process(<reported pid>).create_time()`; a fabricated pid that
-    happens to be in use on the box resolves to a stranger, and the session
-    record then carries that stranger's REAL create_time — so
-    `_process_for_record`'s recycling guard passes (it is genuinely the same
-    process) and a later `kill_session("meiva-gateway")` force-kills that
-    stranger's whole process tree. On a CI runner low pids are always in use,
-    and the stranger is typically a sibling xdist worker: the observed symptom is
-    `[gwN] node down: Not properly terminated` charged to whichever test was
-    running there, with no hint of where the kill came from.
-
-    Raising `NoSuchProcess` for this one pid routes the record through the
-    `_DEAD_CHILD_SENTINEL` branch `posixproc` already has for exactly this
-    danger (audit 2026-08-08 P2), which records a create_time no live process
-    can match. Other pids resolve normally.
-    """
-
-    real_process = psutil.Process
-
-    def guarded(pid: int | None = None, *args: Any, **kwargs: Any) -> Any:
-        if pid == _FAKE_CHILD_PID:
-            raise psutil.NoSuchProcess(pid)
-        return real_process(pid, *args, **kwargs)
-
-    monkeypatch.setattr(psutil, "Process", guarded)
-
-
-@pytest.fixture
-def captured_argv(
-    monkeypatch: pytest.MonkeyPatch, _fake_child_pid_never_resolves: None
-) -> list[list[str]]:
-    """Every subprocess argv the code under test builds (with the fabricated child pid
-    made unresolvable: the faked reparent helper reports it)."""
-    calls: list[list[str]] = []
-
-    def fake_run(args: Any, **_kwargs: Any) -> Any:
-        if isinstance(args, (list, tuple)):
-            calls.append([str(a) for a in cast(list[object] | tuple[object, ...], args)])
-        if isinstance(args, (list, tuple)) and "base.native_process.reparent" in [
-            str(a) for a in cast(list[object] | tuple[object, ...], args)
-        ]:
-            # The native supervisor's reparent helper reports the child pid on
-            # stdout; the launch continues past it with a fake pid.
-            pid_line = f"{_FAKE_CHILD_PID}\n"
-            return subprocess.CompletedProcess(args, returncode=0, stdout=pid_line, stderr="")  # pyright: ignore[reportUnknownArgumentType]
-        return subprocess.CompletedProcess(args, returncode=0, stdout="", stderr="")  # pyright: ignore[reportUnknownArgumentType]
-
-    monkeypatch.setattr(subprocess, "run", fake_run)
-    return calls
-
-
-def test_session_backend_new_session(
-    secret_env: None, captured_argv: list[list[str]], monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_session_backend_new_session(unit_home: Path, secrets_in_creator_env: None) -> None:
     """`meiva start` / `meiva restart` bring every daemon up through here."""
     from base.host.env.registry import process_environment
     from base.sessions.backend import PosixProcSessionBackend
     from base.sessions.env_forwarding import forward_env_dict
+    from base.sessions.record import SessionRecord
 
-    PosixProcSessionBackend().new_session(
+    backend = PosixProcSessionBackend()
+    backend.new_session(
         "meiva-gateway",
-        ".venv/bin/python -m gateway",
-        Path("/repo"),
+        "sleep 60",
+        unit_home,
         env=forward_env_dict(process_environment()),
     )
-    assert captured_argv, "no subprocess was launched"
-    assert_clean(captured_argv[-1], label="PosixProcSessionBackend.new_session")
+    try:
+        record = SessionRecord.read(unit_home / "run" / "sessions" / "meiva-gateway.json")
+        assert record is not None
+        cmdline = psutil.Process(record.pid).cmdline()
+        assert_clean([record.cmd, *cmdline], label="PosixProcSessionBackend.new_session")
+    finally:
+        backend.kill_session("meiva-gateway")
 
 
 def test_launch_record_cannot_reach_a_live_process(
-    secret_env: None, captured_argv: list[list[str]]
+    unit_home: Path, secrets_in_creator_env: None
 ) -> None:
-    """The session record a launch leaves behind must resolve to nothing.
-
-    This is the one thing in this file that can act outside the test. The child
-    pid here is fabricated, and `kill_session("meiva-gateway")` resolves whatever
-    record it finds and force-kills that pid's whole process TREE. A record
-    naming a live stranger therefore turns an argv-shape assertion into a kill
-    of an unrelated process
-    — a sibling xdist worker, on a CI runner where low pids are always in use.
-
-    `has_session` is the same resolve `kill_session` does, so False here means
-    there is nothing for it to reach.
-    """
     from base.host.env.registry import process_environment
     from base.sessions import posixproc
     from base.sessions.backend import PosixProcSessionBackend
     from base.sessions.env_forwarding import forward_env_dict
 
-    PosixProcSessionBackend().new_session(
+    backend = PosixProcSessionBackend()
+    backend.new_session(
         "meiva-gateway",
-        ".venv/bin/python -m gateway",
-        Path("/repo"),
+        "true",
+        unit_home,
         env=forward_env_dict(process_environment()),
     )
-    assert captured_argv, "no subprocess was launched"
-    assert not posixproc.has_session("meiva-gateway")
+    try:
+        poll_until(
+            lambda: not posixproc.has_session("meiva-gateway"),
+            timeout=5,
+            what="exited session record no longer resolves to a live process",
+        )
+        assert not posixproc.has_session("meiva-gateway")
+    finally:
+        backend.kill_session("meiva-gateway")
 
 
 def _shell_env_report(name: str) -> str:

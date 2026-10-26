@@ -9,9 +9,6 @@ exports = ["call_policy.py", "capture.py", "tally.py", "telemetry.py", "tests"]
 "capture.py" = "strict"
 "tally.py" = "strict"
 
-[debt.ambient-read]
-"telemetry.py#random random.randrange" = 1
-
 [debt.any-collaborator]
 "capture.py#any SdkCaptureOwner.capture_local_event.event" = 1
 "capture.py#any SdkCaptureOwner.capture_local_event.return" = 1

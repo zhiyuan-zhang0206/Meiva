@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from datetime import UTC, datetime
 from typing import Any
 
 import pytest
@@ -16,6 +17,7 @@ build_model_catalog()
 
 _MODEL = "deepseek-flash"
 _TINY_FRACTION = 1e-6
+_NOW = datetime(2026, 10, 1, tzinfo=UTC)
 
 
 def _state() -> AgentState:
@@ -36,7 +38,9 @@ def _agent(**pins: float) -> AgentSlices:
 def test_an_unpinned_agent_is_below_its_models_thresholds() -> None:
     assert not auto_compact_will_fire(_state(), _agent(), catalog=build_model_catalog())
     assert (
-        compact_reminder_update(_state(), _agent(), catalog=build_model_catalog(), extensions=EMPTY)
+        compact_reminder_update(
+            _state(), _agent(), catalog=build_model_catalog(), extensions=EMPTY, now=_NOW
+        )
         is None
     )
 
@@ -65,6 +69,7 @@ def test_an_agent_reminder_threshold_below_the_conversation_injects_the_reminder
         _agent(compact_reminder_fraction=_TINY_FRACTION),
         catalog=build_model_catalog(),
         extensions=EMPTY,
+        now=_NOW,
     )
     assert update is not None
     compact: CompactState = update["compact"]

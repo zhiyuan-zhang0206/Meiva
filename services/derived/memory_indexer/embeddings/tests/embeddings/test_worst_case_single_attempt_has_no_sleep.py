@@ -298,7 +298,6 @@ def test_sync_embed_slow_resolver_deadline(
         finally:
             finished.set()
 
-    monkeypatch.setenv("NO_PROXY", "*")
     monkeypatch.setattr(socket, "getaddrinfo", slow_getaddrinfo)
     with embedding_server(drip=False) as (endpoint, requests):
         started = time.monotonic()

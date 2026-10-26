@@ -109,30 +109,17 @@ def test_a_birth_that_only_resembles_a_live_process_is_never_signalled(
 
 
 def test_a_pid_reused_between_the_liveness_check_and_the_signal_is_never_signalled(
-    monkeypatch: pytest.MonkeyPatch, child: subprocess.Popen[bytes], short_tmp: Path
+    child: subprocess.Popen[bytes],
 ) -> None:
     # meiva:note
-    # The replacement process appears after `live()` answered yes and before the signal: no real
-    # process can be made to do that on demand, so `live` is the one thing stood in for. Everything
-    # after it (the pidfd or psutil handle, the fresh capture, the comparison) is real.
+    # The replacement process appears after `live()` answered yes and before the signal: `signal_pinned`
+    # runs the post-liveness pin, fresh capture and birth comparison against the real child.
     real = birth_of(child)
     ticks = None if real.starttime is None else real.starttime + 1
     reused = replace(real, birth=real.birth + 0.01, starttime=ticks)
 
-    def live(_self: OwnedProcess) -> bool:
-        return True
-
-    monkeypatch.setattr(OwnedProcess, "live", live)
-
     with pytest.raises(RuntimeError, match="native identity changed before signal"):
-        driver.stop_root_process(
-            driver.root_client(short_tmp),
-            snapshot_with_root(reused),
-            timeout_s=1.0,
-            helper=None,
-            home=short_tmp,
-            interval_s=0.01,
-        )
+        reused.signal_pinned(signal.SIGTERM)
 
     assert child.poll() is None
 

@@ -10,7 +10,6 @@ import pytest
 from redis.exceptions import ConnectionError as RedisConnectionError
 from redis.exceptions import ResponseError
 
-from base.agents.observation import turn_progress
 from base.agents.observation.turn_progress import TurnProgress
 from base.events.live.bus import EventBus
 from base.events.live.redis_client import open_async_redis
@@ -35,23 +34,22 @@ class _OkRedis:
         del key, value, ex
 
 
-def test_turn_progress_snapshot_keeps_only_the_latest_three_marks(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
+def test_turn_progress_snapshot_keeps_only_the_latest_three_marks() -> None:
     agent_id = 5815
     clock = TurnProgress()
-    now = [10.0]
-    monkeypatch.setattr(turn_progress.time, "monotonic", lambda: now[0])
+    recorded: list[float] = []
 
-    for timestamp in (10.0, 20.0, 30.0, 40.0):
-        now[0] = timestamp
+    for _ in range(4):
         clock.mark(agent_id)
-    now[0] = 45.0
+        snap = clock.snapshot(agent_id)
+        assert snap is not None
+        recorded.append(snap["last_marks"][-1])
 
-    assert clock.snapshot(agent_id) == {
-        "age_s": 5.0,
-        "last_marks": [20.0, 30.0, 40.0],
-    }
+    snapshot = clock.snapshot(agent_id)
+    assert snapshot is not None
+    assert snapshot["last_marks"] == recorded[1:]
+    assert len(snapshot["last_marks"]) == 3
+    assert 0.0 <= snapshot["age_s"] <= 5.0
 
 
 def test_turn_progress_snapshot_is_none_without_a_mark() -> None:
@@ -284,7 +282,7 @@ async def test_corpse_reap_timeout_logs_failure_with_traceback(
     monkeypatch: pytest.MonkeyPatch,
     caplog: pytest.LogCaptureFixture,
 ) -> None:
-    class StopBeatError(Exception):
+    class StopBeatError(BaseException):
         pass
 
     class FakeHost:
@@ -298,15 +296,14 @@ async def test_corpse_reap_timeout_logs_failure_with_traceback(
         active_agents = frozenset[int]()
 
     class FakeLiveness:
-        def beat(self) -> None:
-            pass
+        calls = 0
 
-    async def stop_sleep(delay: float) -> None:
-        del delay
-        raise StopBeatError
+        def beat(self) -> None:
+            self.calls += 1
+            if self.calls > 1:
+                raise StopBeatError
 
     patch_async_redis(monkeypatch, _OkRedis)
-    monkeypatch.setattr(host_daemon.asyncio, "sleep", stop_sleep)
     caplog.set_level(logging.WARNING, logger="services.agent_runner.agent_host.daemon")
 
     with pytest.raises(StopBeatError):
@@ -318,6 +315,7 @@ async def test_corpse_reap_timeout_logs_failure_with_traceback(
             EventBus.from_settings(),
             read_alert_seconds=lambda: 30.0,
             beat_db_timeout_s=0.01,
+            beat_step_s=0.0,
         )
 
     [record] = [
@@ -332,7 +330,7 @@ async def test_agent_host_beats_liveness_before_reaping_corpses(
 ) -> None:
     calls: list[object] = []
 
-    class StopBeatError(Exception):
+    class StopBeatError(BaseException):
         pass
 
     class FakeHost:
@@ -347,6 +345,8 @@ async def test_agent_host_beats_liveness_before_reaping_corpses(
 
     class FakeLiveness:
         def beat(self) -> None:
+            if "liveness" in calls:
+                raise StopBeatError
             calls.append("liveness")
 
     class FakeRedis:
@@ -356,12 +356,8 @@ async def test_agent_host_beats_liveness_before_reaping_corpses(
                 ("publish", key.removeprefix("host_turn_progress:"), FakeScheduler.active_agents)
             )
 
-    async def stop_sleep(delay: float) -> None:
-        calls.append(("sleep", delay))
-        raise StopBeatError
-
     patch_async_redis(monkeypatch, FakeRedis)
-    monkeypatch.setattr(host_daemon.asyncio, "sleep", stop_sleep)
+    assert host_daemon.LIVENESS_BEAT_STEP_S == 15.0
 
     with pytest.raises(StopBeatError):
         await host_daemon.beat_forever(
@@ -371,13 +367,13 @@ async def test_agent_host_beats_liveness_before_reaping_corpses(
             "runner-a",
             EventBus.from_settings(),
             read_alert_seconds=lambda: 30.0,
+            beat_step_s=0.0,
         )
 
     assert calls == [
         "liveness",
         "reap",
         ("publish", "runner-a", frozenset({41, 42})),
-        ("sleep", 15.0),
     ]
 
 

@@ -52,7 +52,12 @@ def verify_start_delivery(
     if scenario == "start_delivery_cold":
         assert urlsplit(url).password is None
         secret: GenerationSecret = seed_active_generation(home)
-        adopt_gateway_login(home, url, database_factory=factory)
+        adopt_gateway_login(
+            home,
+            url,
+            environment=config.process_environment(),
+            database_factory=factory,
+        )
     else:
         assert expected is not None
         secret = expected

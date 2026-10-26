@@ -9,9 +9,8 @@ from __future__ import annotations
 
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field
-from decimal import Decimal
 from enum import StrEnum
-from typing import TYPE_CHECKING, Any, Literal, NamedTuple, NotRequired, TypedDict
+from typing import TYPE_CHECKING, Any, Literal, NotRequired, TypedDict
 
 if TYPE_CHECKING:
     # Annotation-only reference (`ProviderBinding.build`): the registration
@@ -24,6 +23,18 @@ from base.host.env.agent_slices import ModelOverrides
 from base.lm.catalog.decide.types import DecisionBinding, DecisionBuildContext, DecisionModelSpec
 from base.lm.catalog.provider_keys import ProviderKeys
 from base.lm.compat.stop import StopSpec
+from base.lm.pricing.catalog import (
+    PricePeriod as PricePeriod,
+)
+from base.lm.pricing.catalog import (
+    PriceRates as PriceRates,
+)
+from base.lm.pricing.catalog import (
+    PriceTier as PriceTier,
+)
+from base.lm.pricing.catalog import (
+    PriceWindow as PriceWindow,
+)
 from base.lm.registry import ModelSpec
 
 # Increment for breaking contract changes; additive optional fields stay on the
@@ -56,62 +67,6 @@ class ThinkingConfig(TypedDict):
     type: Literal["enabled", "disabled", "adaptive"]
     budget_tokens: NotRequired[int]
     display: NotRequired[Literal["summarized", "omitted"]]
-
-
-class PriceWindow(NamedTuple):
-    """One recurring UTC rate override within a token tier."""
-
-    start: str
-    end: str
-    cache_miss: str | Decimal
-    cache_hit: str | Decimal
-    output: str | Decimal
-    cache_write_5m: str | Decimal | None = None
-    cache_write_1h: str | Decimal | None = None
-
-
-class PriceTier(NamedTuple):
-    """One gapless input-token band and its optional daily overrides."""
-
-    input_tokens_min: int
-    input_tokens_max: int | None
-    cache_miss: str | Decimal
-    cache_hit: str | Decimal
-    output: str | Decimal
-    windows: tuple[PriceWindow, ...] = ()
-    cache_write_5m: str | Decimal | None = None
-    cache_write_1h: str | Decimal | None = None
-
-
-class PricePeriod(NamedTuple):
-    """One half-open effective interval containing all input-token tiers."""
-
-    effective_from: str | None
-    effective_until: str | None
-    tiers: tuple[PriceTier, ...]
-
-
-@dataclass(frozen=True)
-class PriceRates:
-    """One model's complete price and vendor declaration (USD per 1M tokens).
-
-    Plugins declare prices in code — the plugin is itself the reviewed object
-    (``docs/decisions/runtime/processes/shutdown/2026-07-29-skill-trust-tiers-and-install-scan.md``). The
-    flat fields are a readable shortcut for one unbounded base tier. ``periods``
-    carries history, tiers, and recurring windows when present; its shape mirrors
-    ``base/lm/pricing/pricing_catalog_archive.json`` so runtime and archive selection
-    share one parser (``docs/decisions/observability/events/2026-08-18-versioned-model-pricing-catalog.md``).
-    """
-
-    cache_miss: float  # input tokens not served from cache
-    cache_hit: float  # cache-read input tokens
-    output: float
-    source_url: str  # HTTPS official pricing page
-    source_checked_at: str  # YYYY-MM-DD
-    vendor: str | None = None  # stable billing vocabulary; absent for older plugins
-    periods: tuple[PricePeriod, ...] = ()
-    cache_write_5m: float | None = field(default=None, kw_only=True)
-    cache_write_1h: float | None = field(default=None, kw_only=True)
 
 
 @dataclass(frozen=True)

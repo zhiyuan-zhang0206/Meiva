@@ -29,7 +29,7 @@ from base.config.service_read import ConfigAuthority
 from base.host import config_validators
 from base.host.env.tests.env_files import unit_env_aliases, unit_env_path
 from base.host.system.hostport import Host
-from base.host.system.tests.fake_commands import fake_host
+from base.host.system.tests.fake_commands import DARWIN_ARM64, fake_host
 from gateway.tests.auth.gateway_config import gateway_test_client
 from gateway.tests.support.runner_ops.ops_stub import (
     completed,
@@ -138,23 +138,14 @@ def test_enum_field_exposes_type_and_choices() -> None:
     assert fields["llm_model"]["choices"] is None
 
 
-@pytest.fixture
-def stub_browser_capability(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Force the browser_enabled read-time capability to a deterministic verdict:
-    the aggregate browser_capable() gate reports capable -> can_enable True.
-
-    Patches the predicate as bound in `config_validators`: no real display / Chrome / npx.
-    Retained: the display probe reads the ambient environment and the macOS Chrome path
-    is read from disk, so no `Host` value makes a "capable" host on every machine (needs
-    base: display and Chrome path as `Host` facts).
-    """
-    monkeypatch.setattr(config_validators, "browser_capable", lambda _chrome, **_kwargs: True)  # pyright: ignore[reportUnknownArgumentType]
-
-
-def test_get_self_host_fields_carry_capability_hint(stub_browser_capability: None) -> None:
+def test_get_self_host_fields_carry_capability_hint() -> None:
     """GET self: host fields carry a can_enable/reason hint where one exists
     (browser_enabled), cluster fields carry null for both."""
-    with gateway_test_client() as client:
+    with gateway_test_client(fields={"chrome_binary": "/bin/sh"}) as client:
+        client.app.state.host = fake_host(
+            platform=DARWIN_ARM64,
+            programs={"npx": "/bin/sh"},
+        )
         resp = client.get("/api/config")
     assert resp.status_code == 200, resp.text
     fields = {f["name"]: f for f in resp.json()["fields"]}

@@ -1,5 +1,2 @@
-[debt.env-patch]
-"test_worst_case_single_attempt_has_no_sleep.py#monkeypatch.setenv os.environ.NO_PROXY" = 1
-
 [debt.stdlib-patch]
 "test_worst_case_single_attempt_has_no_sleep.py#monkeypatch.setattr socket.getaddrinfo" = 1

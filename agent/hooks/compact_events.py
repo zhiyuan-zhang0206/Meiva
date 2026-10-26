@@ -9,8 +9,7 @@ when a forced/auto compaction begins, and exactly one `compact_finished`
 
 from __future__ import annotations
 
-from datetime import UTC, datetime
-from uuid import uuid4
+from datetime import datetime
 
 from base.events.live.projection import (
     CompactFinished,
@@ -50,6 +49,8 @@ def emit_compact_started(
     publisher: AgentEventPublisher | None,
     agent_id: int,
     *,
+    compact_id: str,
+    started_at: datetime,
     mode: CompactionMode,
 ) -> str | None:
     """Emit the start of one forced/auto compaction run; returns its
@@ -61,11 +62,8 @@ def emit_compact_started(
     """
     if publisher is None:
         return None
-    compact_id = uuid4().hex
     publisher.emit(
-        compact_started_event(
-            agent_id, compact_id=compact_id, started_at=datetime.now(UTC), mode=mode
-        )
+        compact_started_event(agent_id, compact_id=compact_id, started_at=started_at, mode=mode)
     )
     return compact_id
 
@@ -75,6 +73,7 @@ def emit_compact_finished(
     agent_id: int,
     compact_id: str | None,
     *,
+    finished_at: datetime,
     status: CompactionStatus,
 ) -> None:
     """Emit the terminal signal of one compaction run, closing its ticking
@@ -88,8 +87,6 @@ def emit_compact_finished(
     """
     if publisher is None:
         return
-    event = compact_finished_event(
-        agent_id, compact_id, finished_at=datetime.now(UTC), status=status
-    )
+    event = compact_finished_event(agent_id, compact_id, finished_at=finished_at, status=status)
     if event is not None:
         publisher.emit(event)

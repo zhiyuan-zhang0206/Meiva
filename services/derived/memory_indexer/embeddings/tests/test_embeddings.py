@@ -20,19 +20,21 @@ import json
 import sys
 import threading
 import time
-from collections.abc import AsyncGenerator, Generator, Iterator
+from collections.abc import AsyncGenerator, Generator, Iterator, Mapping
 from contextlib import asynccontextmanager, contextmanager
+from dataclasses import replace
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from io import BytesIO
 from pathlib import Path
-from typing import Any
+from typing import Any, Self, override
 
 import httpx
 import numpy as np
 import pytest
 
 from base.host.proc import run_bounded
-from base.lm import usage
+from base.lm.catalog import ModelCatalog
+from base.lm.provider_api import ProviderBinding
 from base.packages.plugin_providers import build_model_catalog
 from services.derived.memory_indexer.embeddings import gemini
 from services.derived.memory_indexer.embeddings.base import EmbeddingAPIError
@@ -57,10 +59,20 @@ pytestmark = pytest.mark.usefixtures("retry_waits")
 
 
 def build_provider(
-    *, timeout_s: float = TIMEOUT_S, api_key: str | None = API_KEY, endpoint: str = ENDPOINT
+    *,
+    catalog: ModelCatalog | None = None,
+    timeout_s: float = TIMEOUT_S,
+    api_key: str | None = API_KEY,
+    endpoint: str = ENDPOINT,
+    transport: httpx.AsyncBaseTransport | None = None,
 ) -> GeminiEmbeddingProvider:
+    active_catalog = build_model_catalog() if catalog is None else catalog
     return GeminiEmbeddingProvider(
-        build_model_catalog(), timeout_s=timeout_s, api_key=api_key, endpoint=endpoint
+        active_catalog,
+        timeout_s=timeout_s,
+        api_key=api_key,
+        endpoint=endpoint,
+        transport=transport,
     )
 
 
@@ -78,7 +90,7 @@ class _FakeResponse(httpx.Response):
         )
 
 
-class AsyncClient:
+class AsyncClient(httpx.AsyncBaseTransport):
     """Records attempts across client instances, including sync retry loops."""
 
     def __init__(
@@ -89,12 +101,18 @@ class AsyncClient:
         status_code: int = 200,
         prompt_token_count: int | None = None,
         response_body: dict[str, Any] | None = None,
+        enter_error: Exception | None = None,
+        request_error: Exception | None = None,
+        stage_calls: list[str] | None = None,
     ) -> None:
         self._vectors = vectors or []
         self._raises_remaining = raises_times
         self._status_code = status_code
         self._prompt_token_count = prompt_token_count
         self._response_body = response_body
+        self._enter_error = enter_error
+        self._request_error = request_error
+        self._stage_calls = stage_calls
         self.call_count = 0
         self.calls: list[dict[str, Any]] = []
         self.timeout = 0.0
@@ -103,19 +121,28 @@ class AsyncClient:
         self.timeout = timeout
         return self
 
-    async def __aenter__(self) -> AsyncClient:
+    @override
+    async def __aenter__(self) -> Self:
+        if self._stage_calls is not None and self._enter_error is not None:
+            self._stage_calls.append("client")
+        if self._enter_error is not None:
+            raise self._enter_error
         return self
 
+    @override
     async def __aexit__(self, *args: object) -> None:
         return None
 
-    @asynccontextmanager
-    async def stream(
-        self, method: str, url: str, *, json: dict[str, Any], headers: dict[str, str]
-    ) -> AsyncGenerator[httpx.Response]:
-        assert method == "POST"
+    def _build_response(
+        self, url: str, payload: dict[str, Any], headers: dict[str, str], timeout: float
+    ) -> httpx.Response:
+        if self._stage_calls is not None and self._request_error is not None:
+            self._stage_calls.append("request")
+        if self._request_error is not None:
+            raise self._request_error
         self.call_count += 1
-        self.calls.append({"url": url, "json": json, "headers": headers, "timeout": self.timeout})
+        self.timeout = timeout
+        self.calls.append({"url": url, "json": payload, "headers": headers, "timeout": timeout})
         if self._raises_remaining > 0:
             self._raises_remaining -= 1
             raise httpx.ConnectError("simulated network failure")
@@ -124,11 +151,55 @@ class AsyncClient:
             body["usageMetadata"] = {"promptTokenCount": self._prompt_token_count}
         if self._response_body is not None:
             body = self._response_body
-        yield _FakeResponse(body, status_code=self._status_code)
+        return _FakeResponse(body, status_code=self._status_code)
+
+    @override
+    async def handle_async_request(self, request: httpx.Request) -> httpx.Response:
+        assert request.method == "POST"
+        timeout_ext: Mapping[str, float] | None = request.extensions.get("timeout")
+        timeout = (
+            float(timeout_ext["read"])
+            if timeout_ext is not None and "read" in timeout_ext
+            else self.timeout
+        )
+        payload: dict[str, Any] = json.loads(request.content.decode("utf-8"))
+        return self._build_response(str(request.url), payload, dict(request.headers), timeout)
+
+    @asynccontextmanager
+    async def stream(
+        self, method: str, url: str, *, json: dict[str, Any], headers: dict[str, str]
+    ) -> AsyncGenerator[httpx.Response]:
+        assert method == "POST"
+        yield self._build_response(url, json, headers, self.timeout)
 
 
-def patch_client(monkeypatch: pytest.MonkeyPatch, fake: AsyncClient) -> None:
-    monkeypatch.setattr(httpx, "AsyncClient", fake)
+class _ObservedBindings(Mapping[str, ProviderBinding]):
+    def __init__(
+        self,
+        inner: Mapping[str, ProviderBinding],
+        *,
+        seen: list[Mapping[str, ProviderBinding]] | None = None,
+        error: Exception | None = None,
+    ) -> None:
+        self._inner = inner
+        self._seen = seen
+        self._error = error
+
+    @override
+    def __getitem__(self, key: str) -> ProviderBinding:
+        return self._inner[key]
+
+    @override
+    def __iter__(self) -> Iterator[str]:
+        if self._seen is not None:
+            self._seen.append(self)
+        if self._error is not None:
+            raise self._error
+        return iter(self._inner)
+
+    @override
+    def __len__(self) -> int:
+        return len(self._inner)
 
 
 # ── provider surface (the contract) ───────────────────────────────────────
@@ -144,20 +215,18 @@ def test_provider_declares_vector_space() -> None:
     assert provider.fingerprint.startswith("gemini:")
 
 
-def test_embed_batch_shape(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_embed_batch_shape() -> None:
     fake = AsyncClient(vectors=[[1.0] * DIM, [2.0] * DIM])
-    patch_client(monkeypatch, fake)
-    result = _provider().embed_batch(["text1", "text2"])
+    result = _provider(transport=fake).embed_batch(["text1", "text2"])
     assert result.shape == (2, DIM)
     assert result.dtype == np.float32
     body = fake.calls[-1]["json"]
     assert [r["taskType"] for r in body["requests"]] == ["RETRIEVAL_DOCUMENT"] * 2
 
 
-def test_embed_query_shape(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_embed_query_shape() -> None:
     fake = AsyncClient(vectors=[[1.0] * DIM])
-    patch_client(monkeypatch, fake)
-    result = _provider().embed_query("hello")
+    result = _provider(transport=fake).embed_query("hello")
     assert result.shape == (DIM,)
     body = fake.calls[-1]["json"]
     assert body["requests"][0]["taskType"] == "RETRIEVAL_QUERY"
@@ -232,11 +301,10 @@ def test_embed_batch_emits_priced_accounting_without_usage_metadata(tmp_path: Pa
     assert result.returncode == 0, result.stdout + result.stderr
 
 
-def test_embed_query_async_shape(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_embed_query_async_shape() -> None:
     """Async queries use the same client seam and query payload as sync queries."""
     fake = AsyncClient(vectors=[[1.0] * DIM])
-    patch_client(monkeypatch, fake)
-    result = asyncio.run(_provider().embed_query_async("hello"))
+    result = asyncio.run(_provider(transport=fake).embed_query_async("hello"))
     assert result.shape == (DIM,)
     call = fake.calls[-1]
     assert call["url"] == ENDPOINT
@@ -269,11 +337,10 @@ def test_embed_query_async_emits_priced_billing_span(tmp_path: Path) -> None:
     assert result.returncode == 0, result.stdout + result.stderr
 
 
-def test_embed_request_payload_and_auth(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_embed_request_payload_and_auth() -> None:
     """Wire contract: endpoint, api-key header, per-text request shape."""
     fake = AsyncClient(vectors=[[1.0] * DIM])
-    patch_client(monkeypatch, fake)
-    _provider().embed_batch(["hello world"])
+    _provider(transport=fake).embed_batch(["hello world"])
     call = fake.calls[-1]
     assert call["url"] == ENDPOINT
     assert call["headers"]["x-goog-api-key"]  # non-empty key forwarded
@@ -354,19 +421,16 @@ def test_embed_raises_after_max_retries(tmp_path: Path) -> None:
 
 @pytest.mark.parametrize("mode", ["batch", "query", "async_query"])
 @pytest.mark.parametrize("error_type", [RuntimeError, TypeError])
-def test_embed_usage_failure_propagates(
-    monkeypatch: pytest.MonkeyPatch, mode: str, error_type: type[Exception]
-) -> None:
+def test_embed_usage_failure_propagates(mode: str, error_type: type[Exception]) -> None:
     """Accounting fails after one successful provider call, without replaying it."""
     fake = AsyncClient(vectors=[[1.0] * DIM], prompt_token_count=123)
-    patch_client(monkeypatch, fake)
     failure = error_type("billing exploded")
-
-    def _boom(**_kwargs: object) -> None:
-        raise failure
-
-    monkeypatch.setattr(usage, "log_usage_fields", _boom)
-    provider = _provider()
+    base_catalog = build_model_catalog()
+    catalog = replace(
+        base_catalog,
+        bindings=_ObservedBindings(base_catalog.bindings, error=failure),
+    )
+    provider = _provider(catalog=catalog, transport=fake)
     with pytest.raises(error_type) as caught:
         if mode == "batch":
             provider.embed_batch(["hello"])
@@ -375,40 +439,35 @@ def test_embed_usage_failure_propagates(
         else:
             asyncio.run(provider.embed_query_async("hello"))
     assert caught.value is failure
-    assert fake.call_count == 1
+    assert len(fake.calls) == 1
 
 
-def test_factory_passes_same_catalog_to_all_embedding_paths(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
+def test_factory_passes_same_catalog_to_all_embedding_paths() -> None:
     from services.derived.memory_indexer.embeddings import factory
 
-    catalog = build_model_catalog()
-    seen: list[object] = []
-
-    def record_usage(*, catalog: object, **_kwargs: object) -> None:
-        seen.append(catalog)
-
-    monkeypatch.setattr(usage, "log_usage_fields", record_usage)
+    base_catalog = build_model_catalog()
+    seen: list[Mapping[str, ProviderBinding]] = []
+    bindings = _ObservedBindings(base_catalog.bindings, seen=seen)
+    catalog = replace(base_catalog, bindings=bindings)
     fake = AsyncClient(vectors=[[1.0] * DIM], prompt_token_count=123)
-    patch_client(monkeypatch, fake)
-    provider = factory.get_provider("gemini", catalog=catalog, timeout_s=TIMEOUT_S, api_key=API_KEY)
+    provider = factory.get_provider(
+        "gemini", catalog=catalog, timeout_s=TIMEOUT_S, api_key=API_KEY, transport=fake
+    )
     provider.embed_batch(["hello"])
     provider.embed_query("hello")
     asyncio.run(provider.embed_query_async("hello"))
     assert len(seen) == 3
-    assert all(received is catalog for received in seen)
-    assert fake.call_count == 3
+    assert all(received is bindings for received in seen)
+    assert len(fake.calls) == 3
 
 
-def test_embed_http_error_status_retries_then_raises(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_embed_http_error_status_retries_then_raises() -> None:
     """Non-2xx (raise_for_status) is a retryable failure; exhausting retries raises."""
     fake = AsyncClient(vectors=[[1.0] * DIM], status_code=500)
-    patch_client(monkeypatch, fake)
     with pytest.raises(EmbeddingAPIError, match="failed after"):
-        _provider().embed_query("hello")
+        _provider(transport=fake).embed_query("hello")
 
-    assert fake.call_count == QUERY_EMBED_POLICY.max_attempts
+    assert len(fake.calls) == QUERY_EMBED_POLICY.max_attempts
 
 
 def test_query_embed_policy_is_lighter_than_document_policy() -> None:
@@ -421,110 +480,86 @@ def test_query_embed_policy_is_lighter_than_document_policy() -> None:
     assert QUERY_EMBED_POLICY.max_attempts < EMBED_POLICY.max_attempts
 
 
-def test_embed_query_async_uses_the_query_policy(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
+def test_embed_query_async_uses_the_query_policy() -> None:
     """The gateway's async query embed retries on the lighter query schedule
     (2 attempts), not the indexer's 4: a 429 during a fleet wake must not burn
     the search deadline on retries."""
 
     fake = AsyncClient(raises_times=100)
-    patch_client(monkeypatch, fake)
     with pytest.raises(EmbeddingAPIError, match="failed after 2 attempts"):
-        asyncio.run(_provider().embed_query_async("hello"))
-    assert fake.call_count == QUERY_EMBED_POLICY.max_attempts
+        asyncio.run(_provider(transport=fake).embed_query_async("hello"))
+    assert len(fake.calls) == QUERY_EMBED_POLICY.max_attempts
 
 
-def test_embed_4xx_fails_immediately(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_embed_4xx_fails_immediately() -> None:
     """A deterministic 4xx is permanent: one attempt, then EmbeddingAPIError
     (R2-D classify; the pre-R2 loop wasted its whole budget retrying 400/403 —
     audit 06 Q4)."""
 
     fake = AsyncClient(status_code=400)
-    patch_client(monkeypatch, fake)
     with pytest.raises(EmbeddingAPIError, match="Gemini embed HTTP 400"):
-        _provider().embed_query("hello")
-    assert fake.call_count == 1  # 4xx -> permanent -> single attempt
+        _provider(transport=fake).embed_query("hello")
+    assert len(fake.calls) == 1  # 4xx -> permanent -> single attempt
 
 
 # meiva:note
 # The per-request timeout is the value the service root read from config
 # (MEIVA_EMBED_TIMEOUT_SECONDS, task #698 G8); the retry policy is a module
 # constant (R2-D).
-def test_embed_timeout_is_the_value_the_provider_was_given(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-
+def test_embed_timeout_is_the_value_the_provider_was_given() -> None:
     fake = AsyncClient(vectors=[[1.0] * DIM], raises_times=1)
-    patch_client(monkeypatch, fake)
 
-    _provider(timeout_s=12.5).embed_batch(["hello"])
+    _provider(timeout_s=12.5, transport=fake).embed_batch(["hello"])
 
     # meiva:note
     # 1 failure + 1 retry
-    assert fake.call_count == 2
+    assert len(fake.calls) == 2
     for call in fake.calls:
         assert call["timeout"] == 12.5
 
 
 # meiva:note
 # Missing key -> EmbeddingAPIError with actionable guidance, before any POST.
-def test_embed_no_api_key_raises(monkeypatch: pytest.MonkeyPatch) -> None:
-
+def test_embed_no_api_key_raises() -> None:
     # No key must mean no network attempt — this makes that observable.
-    monkeypatch.setattr(
-        httpx,
-        "AsyncClient",
-        lambda *_a, **_k: pytest.fail("must not construct a client without an API key"),  # pyright: ignore[reportUnknownArgumentType]
-    )
+    fake = AsyncClient(enter_error=AssertionError("must not enter client without an API key"))
     with pytest.raises(EmbeddingAPIError) as exc_info:
-        _provider(api_key=None).embed_query("hello")
+        _provider(api_key=None, transport=fake).embed_query("hello")
     message = str(exc_info.value)
     assert "GEMINI_API_KEY" in message
     assert ".env" in message  # actionable: points the operator at where to set it
+    assert fake.calls == []
 
 
-def test_embed_async_client_construction_failure_wraps(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
+def test_embed_async_client_construction_failure_wraps() -> None:
     """A modelled client transport failure becomes EmbeddingAPIError (#971).
 
     Client construction remains outside the async request retry loop.
     """
-
-    class _Boom:
-        def __init__(self, *args: object, **kwargs: object) -> None:
-            raise httpx.ConnectError("client init failed")
-
-    monkeypatch.setattr(httpx, "AsyncClient", _Boom)
+    calls: list[str] = []
+    fake = AsyncClient(
+        enter_error=httpx.ConnectError("client init failed"),
+        stage_calls=calls,
+    )
     with pytest.raises(EmbeddingAPIError, match="client init failed"):
-        asyncio.run(_provider().embed_query_async("hello"))
+        asyncio.run(_provider(transport=fake).embed_query_async("hello"))
+    assert calls == ["client"]
 
 
 @pytest.mark.parametrize("mode", ["batch", "query", "async_query"])
 @pytest.mark.parametrize("phase", ["client", "request"])
 @pytest.mark.parametrize("error_type", [TypeError, ValueError, RuntimeError])
 def test_unknown_http_stage_failure_propagates_without_retry(
-    monkeypatch: pytest.MonkeyPatch, mode: str, phase: str, error_type: type[Exception]
+    mode: str, phase: str, error_type: type[Exception]
 ) -> None:
     failure = error_type("local invariant failed")
     calls: list[str] = []
-    if phase == "client":
-
-        def failed_client(**_kwargs: object) -> None:
-            calls.append("client")
-            raise failure
-
-        monkeypatch.setattr(httpx, "AsyncClient", failed_client)
-    else:
-        patch_client(monkeypatch, AsyncClient())
-
-        async def failed_request(*_args: object, **_kwargs: object) -> dict[str, Any]:
-            calls.append("request")
-            raise failure
-
-        monkeypatch.setattr(gemini, "post_attempt_once", failed_request)
-    provider = _provider()
+    fake = (
+        AsyncClient(enter_error=failure, stage_calls=calls)
+        if phase == "client"
+        else AsyncClient(request_error=failure, stage_calls=calls)
+    )
+    provider = _provider(transport=fake)
     with pytest.raises(error_type) as caught:
         if mode == "batch":
             provider.embed_batch(["hello"])
@@ -536,29 +571,25 @@ def test_unknown_http_stage_failure_propagates_without_retry(
     assert calls == [phase]
 
 
-def test_embed_response_shape_mismatch_raises(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_embed_response_shape_mismatch_raises() -> None:
     fake = AsyncClient(vectors=[[1.0] * DIM] * 3)
-    patch_client(monkeypatch, fake)
     with pytest.raises(EmbeddingAPIError, match="unexpected shape"):
-        _provider().embed_batch(["a", "b"])
+        _provider(transport=fake).embed_batch(["a", "b"])
 
 
-def test_embed_malformed_response_raises(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_embed_malformed_response_raises() -> None:
     """Embedding entries missing `values` -> EmbeddingAPIError, not a crash."""
 
     fake = AsyncClient(response_body={"embeddings": [{"nope": []}]})
-    patch_client(monkeypatch, fake)
     with pytest.raises(EmbeddingAPIError, match="malformed"):
-        _provider().embed_query("hello")
+        _provider(transport=fake).embed_query("hello")
 
 
-def test_sync_embed_rejects_running_loop(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_sync_embed_rejects_running_loop() -> None:
     """Fail with caller guidance before creating a coroutine or a client."""
-
-    def unexpected_client(**kwargs: Any) -> None:
-        pytest.fail("running-loop guard must precede client construction")
-
-    monkeypatch.setattr(httpx, "AsyncClient", unexpected_client)
+    fake = AsyncClient(
+        enter_error=AssertionError("running-loop guard must precede client construction")
+    )
 
     async def invoke() -> None:
         with pytest.raises(RuntimeError, match="sync embedding provider API") as error:
@@ -568,6 +599,7 @@ def test_sync_embed_rejects_running_loop(monkeypatch: pytest.MonkeyPatch) -> Non
                 catalog=build_model_catalog(),
                 timeout_s=TIMEOUT_S,
                 api_key=API_KEY,
+                transport=fake,
             )
         assert type(error.value) is RuntimeError
         assert error.value.__cause__ is None
@@ -575,6 +607,7 @@ def test_sync_embed_rejects_running_loop(monkeypatch: pytest.MonkeyPatch) -> Non
         assert "asyncio.to_thread or an executor" in message
         assert "embed_query_async" in message
         assert "batch embedding stays sync" in message
+        assert fake.calls == []
 
     asyncio.run(invoke())
 

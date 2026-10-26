@@ -2,7 +2,7 @@
 
 from typing import Any, TypeGuard
 
-from langchain_core.messages import RemoveMessage, convert_to_messages
+from langchain_core.messages import BaseMessage, RemoveMessage, convert_to_messages
 from langchain_core.messages.utils import message_chunk_to_message
 from langgraph._internal._typing import MISSING
 from langgraph.checkpoint.base import CheckpointTuple
@@ -16,7 +16,7 @@ def _is_object_list(value: object) -> TypeGuard[list[Any]]:
     return isinstance(value, list)
 
 
-def normalize_stored_message_ids(value: object) -> Any:
+def normalize_stored_message_ids(value: object) -> list[BaseMessage]:
     """Mark IDs missing in stored data before a reducer can synthesize a UUID.
 
     This is a read/replay boundary, never a working-copy/new-delta boundary.
@@ -26,11 +26,14 @@ def normalize_stored_message_ids(value: object) -> Any:
     the sole ID generator; this function only records provenance.
     """
     if value is MISSING or value is None:
-        return value
+        empty: Any = value
+        return empty
     if isinstance(value, _DeltaSnapshot):
-        return _DeltaSnapshot(normalize_stored_message_ids(value.value))
+        snapshot: Any = _DeltaSnapshot(normalize_stored_message_ids(value.value))
+        return snapshot
     if isinstance(value, Overwrite):
-        return Overwrite(normalize_stored_message_ids(value.value))
+        overwrite: Any = Overwrite(normalize_stored_message_ids(value.value))
+        return overwrite
     group: list[Any] = value if _is_object_list(value) else [value]
     messages = [message_chunk_to_message(m) for m in convert_to_messages(group)]
     for message in messages:

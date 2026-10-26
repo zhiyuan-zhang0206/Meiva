@@ -1,11 +1,6 @@
 exports = ["test_pgbouncer_wire.py"]
 
 [debt.first-party-patch]
-"test_converge_lgtm_contract.py#monkeypatch.setattr base.config.settings.observability.lgtm_listen_host" = 2
-"test_operator_database.py#monkeypatch.setattr base.config.settings.data_plane.db_pool_max_size" = 1
-"test_operator_database.py#monkeypatch.setattr base.config.settings.data_plane.db_url" = 3
-"test_operator_database.py#monkeypatch.setattr base.config.settings.data_plane.pgbouncer_enabled" = 2
-"test_operator_database.py#monkeypatch.setattr base.telemetry.build_pipeline" = 1
 "test_pgbouncer_config.py#monkeypatch.setattr base.db.connections.ConnectionPool" = 1
 "test_pgbouncer_config.py#monkeypatch.setattr base.db.connections.psycopg.connect" = 1
 "test_pgbouncer_config.py#monkeypatch.setattr services.backup.dump.local_owner_authority" = 1

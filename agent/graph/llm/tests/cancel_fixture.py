@@ -1,23 +1,41 @@
 from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
 
-import pytest
-from psycopg_pool import AsyncConnectionPool
-
 from agent.graph.interrupt import InterruptEvent
-from agent.graph.llm import _cancel
-from base.native_process.turn_identity import HostedTurnResources
+from base.agents.messages.inbound import InterruptReason
 
 
-def install_cancel_event(monkeypatch: pytest.MonkeyPatch, event: InterruptEvent) -> None:
+class _CancelCursor:
+    def __init__(self, event: InterruptEvent) -> None:
+        self._event = event
+
+    async def execute(self, _query: str, _params: object = None) -> None:
+        return None
+
+    async def fetchone(self) -> tuple[str, str]:
+        await self._event.wait()
+        if self._event.reason is InterruptReason.RESTART:
+            return ("restart", "user")
+        if self._event.reason is InterruptReason.SYSTEM:
+            return ("cancel", "agent:0")
+        return ("cancel", "user")
+
+
+class _CancelConnection:
+    def __init__(self, event: InterruptEvent) -> None:
+        self._event = event
 
     @asynccontextmanager
-    async def fake_subscribe(
-        _pool: AsyncConnectionPool | None,
-        _agent_id: int,
-        *,
-        resources: HostedTurnResources | None,
-    ) -> AsyncGenerator[InterruptEvent]:
-        yield event
+    async def cursor(self) -> AsyncGenerator[_CancelCursor]:
+        yield _CancelCursor(self._event)
 
-    monkeypatch.setattr(_cancel, "subscribe_interrupt", fake_subscribe)
+
+# meiva:note
+# In-memory interrupt pool that yields a pending cancel row once `event` is set.
+class CancelPool:
+    def __init__(self, event: InterruptEvent) -> None:
+        self.event = event
+
+    @asynccontextmanager
+    async def connection(self) -> AsyncGenerator[_CancelConnection]:
+        yield _CancelConnection(self.event)

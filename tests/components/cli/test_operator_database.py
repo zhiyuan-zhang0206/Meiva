@@ -8,7 +8,6 @@ from unittest.mock import MagicMock
 import pytest
 
 from base.cluster.dataplane.direct_url import ClusterDirectUrl
-from base.cluster.machine import MachineIdentityReader
 from base.db import Database
 from base.db.code_version_gate import ProcessDbGate
 from base.db.config import DbConfig
@@ -98,21 +97,26 @@ def test_separate_commands_own_separate_exempt_gates(
 
 
 def test_each_operator_handle_reads_the_live_connection_settings(
-    monkeypatch: pytest.MonkeyPatch,
     command_runtime: CommandRuntime,
 ) -> None:
-    from base.config import settings
+    from base.config import get_field, set_field
 
-    monkeypatch.setattr(settings.data_plane, "pgbouncer_enabled", False)
-    first_url = "postgresql://operator@127.0.0.1:6101/meiva"
-    second_url = "postgresql://operator@127.0.0.1:6102/meiva"
-    factory = _factory(command_runtime, open_operator_database)
-    monkeypatch.setattr(settings.data_plane, "db_url", first_url)
-    first = factory()
-    monkeypatch.setattr(settings.data_plane, "db_url", second_url)
-    second = factory()
-    assert first.direct_url() == first_url
-    assert second.direct_url() == second_url
+    prior_pgbouncer = get_field("pgbouncer_enabled")
+    prior_db_url = get_field("db_url")
+    try:
+        set_field("pgbouncer_enabled", False)
+        first_url = "postgresql://operator@127.0.0.1:6101/meiva"
+        second_url = "postgresql://operator@127.0.0.1:6102/meiva"
+        factory = _factory(command_runtime, open_operator_database)
+        set_field("db_url", first_url)
+        first = factory()
+        set_field("db_url", second_url)
+        second = factory()
+        assert first.direct_url() == first_url
+        assert second.direct_url() == second_url
+    finally:
+        set_field("pgbouncer_enabled", prior_pgbouncer)
+        set_field("db_url", prior_db_url)
 
 
 def test_operator_handle_preserves_the_original_constructor_error(
@@ -132,44 +136,37 @@ def test_operator_handle_preserves_the_original_constructor_error(
 
 
 def test_command_pipeline_is_lazy_and_retains_the_same_database_factory(
-    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
     command_runtime: CommandRuntime,
 ) -> None:
-    from base import telemetry
-    from base.agents.context.clients import DatabaseFactory
     from cli.database import operator_event_pipeline
 
-    factory = _factory(command_runtime, open_operator_database)
-    pipeline = MagicMock(spec=telemetry.EventPipeline)
-    seen: list[DatabaseFactory] = []
+    opened: list[ProcessDbGate] = []
 
-    def build(
-        *,
-        database: DatabaseFactory,
-        machine: MachineIdentityReader,
-        home: Path,
-        flush_interval_s: float,
-    ) -> telemetry.EventPipeline:
-        assert machine is command_runtime.machine
-        assert home == command_home
-        assert flush_interval_s == 0.5
-        seen.append(database)
-        return pipeline
+    def open_database(
+        config: DbConfig, gate: ProcessDbGate, direct_url: ClusterDirectUrl
+    ) -> Database:
+        opened.append(gate)
+        return open_operator_database(config, gate, direct_url)
 
-    monkeypatch.setattr(telemetry, "build_pipeline", build)
-    command_home = Path("/command-home")
+    factory = _factory(command_runtime, open_database)
+    command_home = tmp_path / "command-home"
     producer = operator_event_pipeline(factory, machine=command_runtime.machine, home=command_home)
-    assert not seen
-    assert producer() is pipeline
-    assert producer() is pipeline
-    assert seen == [factory]
+    try:
+        assert not opened
+        pipeline = producer()
+        assert isinstance(pipeline, EventPipeline)
+        assert producer() is pipeline
+        assert producer._database_factory is factory
+        assert not opened
+    finally:
+        producer.close()
 
 
 def test_recovery_url_handle_keeps_the_operator_gate_and_live_slice(
-    monkeypatch: pytest.MonkeyPatch,
     command_runtime: CommandRuntime,
 ) -> None:
-    from base.config import settings
+    from base.config import get_field, set_field, settings
 
     seen: list[tuple[DbConfig, ProcessDbGate]] = []
 
@@ -180,20 +177,28 @@ def test_recovery_url_handle_keeps_the_operator_gate_and_live_slice(
         seen.append((config, gate))
         return open_operator_database(config, gate, direct_url)
 
-    monkeypatch.setattr(settings.data_plane, "pgbouncer_enabled", False)
-    live_url = "postgresql://operator@127.0.0.1:6101/meiva"
-    scratch_url = "postgresql://operator@127.0.0.1:6102/meiva"
-    monkeypatch.setattr(settings.data_plane, "db_url", live_url)
-    factory = _factory(command_runtime, open_database)
-    assert not seen
-    regular = factory()
-    monkeypatch.setattr(settings.data_plane, "db_pool_max_size", 7)
-    scratch = factory.for_url(scratch_url)
-    assert regular.direct_url() == live_url
-    assert scratch.direct_url() == scratch_url
-    assert seen[0][1] is seen[1][1]
-    assert seen[1][0].db_pool_max_size == 7
-    assert settings.data_plane.db_url == live_url
+    prior_pgbouncer = get_field("pgbouncer_enabled")
+    prior_db_url = get_field("db_url")
+    prior_pool_max = get_field("db_pool_max_size")
+    try:
+        set_field("pgbouncer_enabled", False)
+        live_url = "postgresql://operator@127.0.0.1:6101/meiva"
+        scratch_url = "postgresql://operator@127.0.0.1:6102/meiva"
+        set_field("db_url", live_url)
+        factory = _factory(command_runtime, open_database)
+        assert not seen
+        regular = factory()
+        set_field("db_pool_max_size", 7)
+        scratch = factory.for_url(scratch_url)
+        assert regular.direct_url() == live_url
+        assert scratch.direct_url() == scratch_url
+        assert seen[0][1] is seen[1][1]
+        assert seen[1][0].db_pool_max_size == 7
+        assert settings.data_plane.db_url == live_url
+    finally:
+        set_field("pgbouncer_enabled", prior_pgbouncer)
+        set_field("db_url", prior_db_url)
+        set_field("db_pool_max_size", prior_pool_max)
 
 
 def test_borrowed_cli_context_keeps_the_original_operator_factory(
