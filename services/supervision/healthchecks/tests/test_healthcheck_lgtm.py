@@ -8,6 +8,7 @@ from pathlib import Path
 
 import pytest
 
+from base.clock import SYSTEM_TIMERS, Clock, ClockConfig
 from base.cluster.machine import MachineFacts, MachineRoleInvalid
 from base.cluster.machine.configured import ConfiguredMachineIdentity
 from base.cluster.machine.tests.faults import InvalidRoleIdentity
@@ -16,46 +17,28 @@ from base.paths.tests.homes import unit_home as unit_home
 from services.supervision.healthchecks import lgtm as hc
 from services.supervision.healthchecks.tests.loki_stub import BackendStub
 
-
-def test_readiness_probes_exclude_remote_tempo() -> None:
-    """Only locally managed backends can trigger a local lifecycle repair —
-    and the default settings keep the historical loopback probe URLs exactly."""
-    assert hc.readiness_probes() == (
-        ("loki", "http://127.0.0.1:3100/ready"),
-        ("prometheus", "http://127.0.0.1:9090/-/ready"),
-        ("grafana", "http://127.0.0.1:3003/api/health"),
-    )
-
-
-def test_readiness_probes_ignore_remote_query_urls() -> None:
-    """Remote read endpoints cannot falsely mark a local native service alive."""
-    overrides: dict[str, str | int] = {
-        "telemetry_loki_url": "http://loki.example:3100/loki/",
-        "telemetry_prometheus_url": "http://prom.example:9090/",
-        "telemetry_grafana_url": "http://grafana.example:3003",
-    }
-    assert hc.readiness_probes(overrides=overrides) == (
-        ("loki", "http://127.0.0.1:3100/ready"),
-        ("prometheus", "http://127.0.0.1:9090/-/ready"),
-        ("grafana", "http://127.0.0.1:3003/api/health"),
-    )
-
-
 _NO_PAUSE = (0.0, 0.0)
+_CLOCK = Clock(ClockConfig("UTC", "UTC", message_timestamp_weekday=False), timers=SYSTEM_TIMERS)
 
 
 def test_write_path_probe_rejects_400_push() -> None:
     with BackendStub() as loki:
         loki.script.push_answers = [(400, b"")]
 
-        assert hc.write_path_probe(loki.url, backoff_s=_NO_PAUSE) == (False, "push_http_400")
+        assert hc.write_path_probe(loki.url, clock=_CLOCK, backoff_s=_NO_PAUSE) == (
+            False,
+            "push_http_400",
+        )
 
 
 def test_write_path_probe_retries_429_with_bounded_backoff() -> None:
     with BackendStub() as loki:
         loki.script.push_answers = [(429, b"")]
 
-        assert hc.write_path_probe(loki.url, backoff_s=_NO_PAUSE) == (False, "push_http_429")
+        assert hc.write_path_probe(loki.url, clock=_CLOCK, backoff_s=_NO_PAUSE) == (
+            False,
+            "push_http_429",
+        )
         assert len(loki.script.pushes) == 3
 
 
@@ -63,7 +46,7 @@ def test_write_path_probe_succeeds_after_a_throttle() -> None:
     with BackendStub() as loki:
         loki.script.push_answers = [(429, b""), (204, b"")]
 
-        assert hc.write_path_probe(loki.url, backoff_s=_NO_PAUSE) == (True, "ok")
+        assert hc.write_path_probe(loki.url, clock=_CLOCK, backoff_s=_NO_PAUSE) == (True, "ok")
         assert len(loki.script.pushes) == 2
 
 
@@ -73,7 +56,7 @@ def test_write_path_probe_identifies_stuck_ingester() -> None:
             (500, b"RPC error: code = Unknown desc = InGeStEr Is ShUtTiNg DoWn")
         ]
 
-        assert hc.write_path_probe(loki.url, backoff_s=_NO_PAUSE) == (
+        assert hc.write_path_probe(loki.url, clock=_CLOCK, backoff_s=_NO_PAUSE) == (
             False,
             "ingester_shutting_down",
         )
@@ -83,26 +66,32 @@ def test_write_path_probe_does_not_misclassify_plain_503() -> None:
     with BackendStub() as loki:
         loki.script.push_answers = [(503, b"write throttled because disk usage is too high")]
 
-        assert hc.write_path_probe(loki.url, backoff_s=_NO_PAUSE) == (False, "push_http_503")
+        assert hc.write_path_probe(loki.url, clock=_CLOCK, backoff_s=_NO_PAUSE) == (
+            False,
+            "push_http_503",
+        )
 
 
 def test_write_path_probe_reports_push_request_error() -> None:
     with BackendStub() as loki:
         url = loki.url
 
-    assert hc.write_path_probe(url, backoff_s=_NO_PAUSE) == (False, "push_error")
+    assert hc.write_path_probe(url, clock=_CLOCK, backoff_s=_NO_PAUSE) == (False, "push_error")
 
 
 def test_write_path_probe_reports_marker_not_visible() -> None:
     with BackendStub() as loki:
         loki.script.query_mode = "empty"
 
-        assert hc.write_path_probe(loki.url, backoff_s=_NO_PAUSE) == (False, "probe_not_visible")
+        assert hc.write_path_probe(loki.url, clock=_CLOCK, backoff_s=_NO_PAUSE) == (
+            False,
+            "probe_not_visible",
+        )
 
 
 def test_write_path_probe_finds_marker_in_numeric_query_window() -> None:
     with BackendStub() as loki:
-        assert hc.write_path_probe(loki.url, backoff_s=_NO_PAUSE) == (True, "ok")
+        assert hc.write_path_probe(loki.url, clock=_CLOCK, backoff_s=_NO_PAUSE) == (True, "ok")
 
         push = loki.script.pushes[0]
         assert push["path"] == "/otlp/v1/logs"
@@ -134,7 +123,10 @@ def test_write_path_probe_reports_query_request_error() -> None:
     with BackendStub() as loki:
         loki.script.query_mode = "drop"
 
-        assert hc.write_path_probe(loki.url, backoff_s=_NO_PAUSE) == (False, "query_error")
+        assert hc.write_path_probe(loki.url, clock=_CLOCK, backoff_s=_NO_PAUSE) == (
+            False,
+            "query_error",
+        )
 
 
 def test_is_lgtm_host_accepts_station_capability(tmp_path: Path) -> None:

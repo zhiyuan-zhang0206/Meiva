@@ -16,9 +16,11 @@ from pathlib import Path
 from types import MappingProxyType
 
 from base.agents.context.clients import ClientSet
+from base.clock import SYSTEM_TIMERS, Clock
+from base.clock.configuration import clock_config_from_boot
 from base.cluster.dataplane.direct_url import ClusterDirectUrl
 from base.cluster.machine.configured import ConfiguredMachineIdentity
-from base.config import ConfigBoot, settings
+from base.config import ConfigBoot, get_field, settings
 from base.db import Database
 from base.db.code_version_gate import ProcessDbGate
 from base.db.config import db_config_from_boot
@@ -27,15 +29,18 @@ from base.deploy.progress_timeout import (
     NON_CRITICAL_SERVICE_READY_TIMEOUT_S,
     SERVICE_READY_TIMEOUT_S,
 )
+from base.native_process.child_env import inherited_process_env
 from base.native_process.code_version import CodeVersion
 from base.native_process.loaded_commit import LoadedCommit
 from base.native_process.os_platform import Platform
 from base.telemetry import build_pipeline
+from base.telemetry.lgtm_local import backend_urls
 from services.supervision.meiva_root.health import HealthConfig, HealthMonitor, LeaseProbe
 from services.supervision.meiva_root.probes import Probe, ProbeError, ProbeRegistry, ProbeSource
 from services.supervision.meiva_root.selfcheck import SelfCheckConfig, TreeSelfCheck
 from services.supervision.meiva_root.wiring import WiringContext, WiringParticipant
 from services.supervision.meiva_root_glue.diagnostic_probes import (
+    ProbeConfig,
     build_diagnostics,
     database_recovery_probe,
     live_lease_probe,
@@ -156,6 +161,28 @@ def _systemd_user_scope_available(max_mb: int, swap_max_mb: int) -> bool:
     return done.returncode == 0
 
 
+# meiva:note
+# The settings the host diagnostics decide on, read once here, where the root assembles them.
+def probe_config_from_settings(*, home: Path) -> ProbeConfig:
+    from services.desktop.browser.profile import profile_dir
+
+    return ProbeConfig(
+        home=home,
+        redis_url=str(get_field("redis_url")),
+        db_url=str(get_field("db_url")),
+        pgbouncer_enabled=bool(get_field("pgbouncer_enabled")),
+        observability_url=str(get_field("observability_url")),
+        observability_otlp_port=int(get_field("observability_otlp_port")),
+        gateway_health_url=str(get_field("gateway_health_url")),
+        browser_cdp_port=int(get_field("browser_cdp_port")),
+        browser_profile=profile_dir(),
+        browser_reach_timeout_s=float(get_field("browser_reach_timeout_s")),
+        browser_reach_probe_interval_s=float(get_field("browser_reach_probe_interval_s")),
+        loki_url=backend_urls()["loki"],
+        environment=MappingProxyType(inherited_process_env()),
+    )
+
+
 STATIC_PROBES: Mapping[str, str] = MappingProxyType({})
 """Spec-less unit id -> `"module:attribute"` probe reference.
 
@@ -171,7 +198,7 @@ def build_wiring(
     *,
     config: ConfigBoot | None = None,
     diagnostics: Sequence[Diagnostic] | None = None,
-    diagnostic_overrides: Mapping[str, str | int | float | bool] | None = None,
+    probe_config: ProbeConfig | None = None,
     services: Sequence[ProbeSource] | None = None,
     static_probes: Mapping[str, str] = STATIC_PROBES,
 ) -> list[WiringParticipant]:
@@ -181,7 +208,7 @@ def build_wiring(
 
     home = meiva_home().resolve(strict=True)
     identity = capture_loaded_runtime()
-    if Path().resolve() != Path(identity.cwd):
+    if Path.cwd().resolve() != Path(identity.cwd):
         raise RuntimeError("root cwd differs from its loaded runtime")
     context.supervisor.bind_runtime(identity, home=home)
     # meiva:note
@@ -201,6 +228,7 @@ def build_wiring(
         config = ConfigBoot()
         config.boot()
     machine = ConfiguredMachineIdentity(config)
+    clock = Clock(clock_config_from_boot(config), timers=SYSTEM_TIMERS)
     version = CodeVersion(image)
     gate = ProcessDbGate(version=version.get, process="meiva-root")
 
@@ -235,7 +263,9 @@ def build_wiring(
             requested,
             database=database,
             machine=machine,
-            overrides=diagnostic_overrides,
+            config=probe_config_from_settings(home=home) if probe_config is None else probe_config,
+            clock=clock,
+            macos=Platform.current().system == "darwin",
         )
         if diagnostics is None
         else diagnostics
@@ -247,10 +277,12 @@ def build_wiring(
         db_recovery_probe=database_recovery_probe(database),
         lease_probe=live_lease_probe(database, machine.name()),
         rounds=RoundsInputs(
-            diagnostics=DiagnosticMonitor(resolved_diagnostics),
+            diagnostics=DiagnosticMonitor(resolved_diagnostics, clock=clock),
             clients=clients,
             image=image,
             machine=machine,
+            clock=clock,
+            home=home,
         ),
         startup_graces=startup_graces,
     )
@@ -287,6 +319,8 @@ def assemble(
             clients=rounds.clients,
             machine=rounds.machine,
             image=rounds.image,
+            clock=rounds.clock,
+            home=rounds.home,
             tasks=context.participant_tasks,
         )
         context.supervisor.attach_health(health_rounds)

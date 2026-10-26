@@ -9,7 +9,7 @@ exports = ["mcp_daemon.py", "mcp_socket_bridge.py", "mcp_wrapper.py", "orphan.py
 "mcp_wrapper.py" = ["mcp_socket_bridge.py"]
 "orphan.py" = ["profile.py"]
 "page_lifecycle.py" = ["protocol.py"]
-"probe.py" = ["macos_readiness.py", "orphan.py", "profile.py"]
+"probe.py" = ["macos_readiness.py", "orphan.py"]
 "session_restore.py" = ["session.py", "tab_groups"]
 "tab_groups" = ["session.py"]
 "tests" = ["daemon.py", "gateway_session.py", "macos_readiness.py", "mcp_daemon.py", "mcp_upstream.py", "orphan.py", "page_lifecycle.py", "probe.py", "profile.py", "profile_paths.py", "session.py", "session_restore.py", "tab_groups"]
@@ -24,7 +24,6 @@ exports = ["mcp_daemon.py", "mcp_socket_bridge.py", "mcp_wrapper.py", "orphan.py
 "daemon.py" = { kinds = ["settings"], why = "Service or operator process entry boots configuration before composing its resources" }
 "mcp_daemon.py" = { kinds = ["settings"], why = "Service or operator process entry boots configuration before composing its resources" }
 "mcp_wrapper.py" = { kinds = ["settings"], why = "Service or operator process entry boots configuration before composing its resources" }
-"probe.py" = { kinds = ["settings"], why = "Service or operator process entry boots configuration before composing its resources" }
 
 [debt.ambient-read]
 "daemon.py#home base.paths.logs_dir" = 1
