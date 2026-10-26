@@ -14,6 +14,7 @@ from pydantic import JsonValue
 
 from cli.commands.agents.notices import cmd_notices_clear, cmd_notices_list, cmd_notices_resolve
 from cli.commands.cluster.tests.gateway_server import Reply, access_to, serving
+from cli.database.tests.command_inputs import counting_ids
 
 OPEN = ("GET", "/api/notices/open")
 OPEN_TARGET = "/api/notices/open?include_awaiting=true"
@@ -79,7 +80,12 @@ def test_list_filters_by_agent_and_type(capsys: pytest.CaptureFixture[str]) -> N
 def test_resolve_requires_reply_for_answer(capsys: pytest.CaptureFixture[str]) -> None:
     with serving({}) as gateway:
         code = cmd_notices_resolve(
-            access_to(gateway.url), notice_id=1, agent_id=7, action="answer", reply=None
+            access_to(gateway.url),
+            notice_id=1,
+            agent_id=7,
+            action="answer",
+            reply=None,
+            idempotency_key="resolve-key",
         )
     assert code == 2
     assert capsys.readouterr().out == "--reply TEXT is required for action=answer\n"
@@ -91,7 +97,12 @@ def test_resolve_refuses_an_unknown_action_without_dialing(
 ) -> None:
     with serving({}) as gateway:
         code = cmd_notices_resolve(
-            access_to(gateway.url), notice_id=1, agent_id=7, action="snooze", reply=None
+            access_to(gateway.url),
+            notice_id=1,
+            agent_id=7,
+            action="snooze",
+            reply=None,
+            idempotency_key="resolve-key",
         )
     assert code == 2
     assert "invalid action 'snooze'" in capsys.readouterr().out
@@ -103,13 +114,18 @@ def test_resolve_posts_action(
 ) -> None:
     with serving({_resolve_route(7, 5): Reply(201)}) as gateway:
         code = cmd_notices_resolve(
-            access_to(gateway.url), notice_id=5, agent_id=7, action="dismiss", reply=None
+            access_to(gateway.url),
+            notice_id=5,
+            agent_id=7,
+            action="dismiss",
+            reply=None,
+            idempotency_key="resolve-key",
         )
     assert code == 0
     [request] = gateway.requests
     assert request.target == "/api/keyed/v1/agents/7/notices/5/resolve"
     assert request.body == {"action": "dismiss", "reply": None}
-    assert request.headers["idempotency-key"]
+    assert request.headers["idempotency-key"] == "resolve-key"
     assert request.headers["idempotency-scope"] == "principal-v1"
     assert capsys.readouterr().out == "notice #5 resolved: dismiss\n"
 
@@ -132,7 +148,12 @@ def test_resolve_rejects_conflicts_without_claiming_success(
         pytest.raises(httpx.HTTPStatusError) as error,
     ):
         cmd_notices_resolve(
-            access_to(gateway.url), notice_id=5, agent_id=7, action=action, reply=reply
+            access_to(gateway.url),
+            notice_id=5,
+            agent_id=7,
+            action=action,
+            reply=reply,
+            idempotency_key="resolve-key",
         )
     assert error.value.response.json() == {"detail": detail}
     assert len(gateway.requests) == 1
@@ -147,12 +168,18 @@ def test_clear_resolves_each_open() -> None:
         _resolve_route(7, 2): Reply(201),
     }
     with serving(routes) as gateway:
-        code = cmd_notices_clear(access_to(gateway.url), agent_id=7, force=True, stdin=NO_STDIN)
+        code = cmd_notices_clear(
+            access_to(gateway.url), agent_id=7, force=True, stdin=NO_STDIN, new_id=counting_ids()
+        )
     assert code == 0
     posts = [(r.target, r.body) for r in gateway.requests if r.method == "POST"]
     assert posts == [
         ("/api/keyed/v1/agents/7/notices/1/resolve", {"action": "dismiss", "reply": None}),
         ("/api/keyed/v1/agents/7/notices/2/resolve", {"action": "dismiss", "reply": None}),
+    ]
+    assert [r.headers["idempotency-key"] for r in gateway.requests if r.method == "POST"] == [
+        "id-1",
+        "id-2",
     ]
 
 
@@ -165,7 +192,9 @@ def test_clear_reports_how_many_notices_the_gateway_accepted(
         _resolve_route(7, 2): Reply(409, {"detail": "already resolved"}),
     }
     with serving(routes) as gateway:
-        code = cmd_notices_clear(access_to(gateway.url), agent_id=7, force=True, stdin=NO_STDIN)
+        code = cmd_notices_clear(
+            access_to(gateway.url), agent_id=7, force=True, stdin=NO_STDIN, new_id=counting_ids()
+        )
     assert code == 0
     assert capsys.readouterr().out == "cleared 1/2 notices: agent #7\n"
 
@@ -178,7 +207,11 @@ def test_clear_resolves_after_a_yes(answer: str, capsys: pytest.CaptureFixture[s
     }
     with serving(routes) as gateway:
         code = cmd_notices_clear(
-            access_to(gateway.url), agent_id=7, force=False, stdin=io.StringIO(answer)
+            access_to(gateway.url),
+            agent_id=7,
+            force=False,
+            stdin=io.StringIO(answer),
+            new_id=counting_ids(),
         )
     assert code == 0
     out = capsys.readouterr().out
@@ -194,7 +227,11 @@ def test_clear_aborts_unless_the_operator_says_yes(
     routes: dict[tuple[str, str], Reply] = {OPEN: Reply(body=[_notice(1, 7)])}
     with serving(routes) as gateway:
         code = cmd_notices_clear(
-            access_to(gateway.url), agent_id=7, force=False, stdin=io.StringIO(answer)
+            access_to(gateway.url),
+            agent_id=7,
+            force=False,
+            stdin=io.StringIO(answer),
+            new_id=counting_ids(),
         )
     assert code == 1
     assert capsys.readouterr().out.endswith("aborted.\n")
@@ -203,7 +240,9 @@ def test_clear_aborts_unless_the_operator_says_yes(
 
 def test_clear_with_nothing_open_for_the_agent_says_so(capsys: pytest.CaptureFixture[str]) -> None:
     with serving({OPEN: Reply(body=[_notice(1, 9)])}) as gateway:
-        code = cmd_notices_clear(access_to(gateway.url), agent_id=7, force=False, stdin=NO_STDIN)
+        code = cmd_notices_clear(
+            access_to(gateway.url), agent_id=7, force=False, stdin=NO_STDIN, new_id=counting_ids()
+        )
     assert code == 0
     assert capsys.readouterr().out == "agent #7: no open notices.\n"
 
@@ -247,7 +286,12 @@ def test_clear_stale_resolves_only_terminated() -> None:
     }
     with serving(routes) as gateway:
         code = cmd_notices_clear(
-            access_to(gateway.url), agent_id=None, force=True, stale=True, stdin=NO_STDIN
+            access_to(gateway.url),
+            agent_id=None,
+            force=True,
+            stale=True,
+            stdin=NO_STDIN,
+            new_id=counting_ids(),
         )
     assert code == 0
     posts = [(r.target, r.body) for r in gateway.requests if r.method == "POST"]
@@ -259,7 +303,12 @@ def test_clear_stale_resolves_only_terminated() -> None:
 def test_clear_stale_rejects_agent(capsys: pytest.CaptureFixture[str]) -> None:
     with serving({}) as gateway:
         code = cmd_notices_clear(
-            access_to(gateway.url), agent_id=7, force=True, stale=True, stdin=NO_STDIN
+            access_to(gateway.url),
+            agent_id=7,
+            force=True,
+            stale=True,
+            stdin=NO_STDIN,
+            new_id=counting_ids(),
         )
     assert code == 2
     assert capsys.readouterr().out == "--stale and --agent are mutually exclusive\n"
@@ -273,7 +322,12 @@ def test_stale_empty_notice_queue_never_reads_directory() -> None:
             cmd_notices_list(access, agent_id=None, priority=None, type_filter=None, stale=True)
             == 0
         )
-        assert cmd_notices_clear(access, agent_id=None, force=True, stale=True, stdin=NO_STDIN) == 0
+        assert (
+            cmd_notices_clear(
+                access, agent_id=None, force=True, stale=True, stdin=NO_STDIN, new_id=counting_ids()
+            )
+            == 0
+        )
     assert [r.target for r in gateway.requests] == [OPEN_TARGET] * 2
 
 
@@ -284,7 +338,12 @@ def test_stale_clear_keeps_notices_of_missing_agents() -> None:
     }
     with serving(routes) as gateway:
         code = cmd_notices_clear(
-            access_to(gateway.url), agent_id=None, force=True, stale=True, stdin=NO_STDIN
+            access_to(gateway.url),
+            agent_id=None,
+            force=True,
+            stale=True,
+            stdin=NO_STDIN,
+            new_id=counting_ids(),
         )
     assert code == 0
     assert [r.method for r in gateway.requests] == ["GET", "GET"]

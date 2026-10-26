@@ -28,6 +28,10 @@ from cli.commands.management.tests.config_gateway import ConfigGateway, run_conf
 _CHILD = Path(__file__).with_name("child_config_cmd.py")
 
 
+def _process(home: Path) -> cfg.ConfigProcess:
+    return cfg.ConfigProcess(environ=os.environ, home=home)
+
+
 def _field(
     name: str,
     env_var: str,
@@ -414,7 +418,7 @@ def test_local_get_masks_sensitive(
         f"MEIVA_BACKUP_OFFSITE_CREDENTIALS_FILE={credential_path}\n"
     )
 
-    rc = cfg.cmd_config_get(None, machine=None, local=True)
+    rc = cfg.cmd_config_get(None, machine=None, process=_process(local_env_home), local=True)
 
     assert rc == 0
     out = capsys.readouterr().out
@@ -437,7 +441,9 @@ def test_local_set_applies_valid_patch(
 ) -> None:
     (local_env_home / ".env").write_text("OTHER=kept\n")
 
-    rc = cfg.cmd_config_set(["ops_concurrency=7"], machine=None, local=True)
+    rc = cfg.cmd_config_set(
+        ["ops_concurrency=7"], machine=None, process=_process(local_env_home), local=True
+    )
 
     assert rc == 0
     assert unit_env_aliases()["MEIVA_OPS_CONCURRENCY"] == "7"
@@ -453,14 +459,17 @@ def test_the_offsite_keys_are_official_local_config(local_env_home: Path) -> Non
         "MEIVA_BACKUP_OFFSITE_CREDENTIALS_FILE": str(credentials),
     }
 
-    rc = cfg.cmd_config_set([f"{key}={value}" for key, value in keys.items()], None, local=True)
+    process = _process(local_env_home)
+    rc = cfg.cmd_config_set(
+        [f"{key}={value}" for key, value in keys.items()], None, process=process, local=True
+    )
 
     assert rc == 0
     aliases = unit_env_aliases()
     assert {key: aliases[key] for key in keys} == keys
     assert "OTHER" in aliases
 
-    assert cfg.cmd_config_unset(list(keys), None, local=True) == 0
+    assert cfg.cmd_config_unset(list(keys), None, process=process, local=True) == 0
     assert not set(keys) & set(unit_env_aliases())
 
 
@@ -468,12 +477,19 @@ def test_the_walg_key_is_official_local_config(local_env_home: Path) -> None:
     (local_env_home / ".env").write_text("MEIVA_MACHINE_SERVE_GATEWAY=true\nOTHER=kept\n")
     config_file = local_env_home / "walg.json"
 
-    assert cfg.cmd_config_set([f"MEIVA_WALG_CONFIG_FILE={config_file}"], None, local=True) == 0
+    process = _process(local_env_home)
+
+    assert (
+        cfg.cmd_config_set(
+            [f"MEIVA_WALG_CONFIG_FILE={config_file}"], None, process=process, local=True
+        )
+        == 0
+    )
     aliases = unit_env_aliases()
     assert aliases["MEIVA_WALG_CONFIG_FILE"] == str(config_file)
     assert "OTHER" in aliases
 
-    assert cfg.cmd_config_unset(["MEIVA_WALG_CONFIG_FILE"], None, local=True) == 0
+    assert cfg.cmd_config_unset(["MEIVA_WALG_CONFIG_FILE"], None, process=process, local=True) == 0
     assert "MEIVA_WALG_CONFIG_FILE" not in unit_env_aliases()
 
 
@@ -482,7 +498,12 @@ def test_local_set_can_pin_the_hosted_runner_health_port(
 ) -> None:
     (local_env_home / ".env").write_text("OTHER=kept\n")
 
-    rc = cfg.cmd_config_set(["MEIVA_AGENT_HOST_HEALTH_PORT=18133"], machine=None, local=True)
+    rc = cfg.cmd_config_set(
+        ["MEIVA_AGENT_HOST_HEALTH_PORT=18133"],
+        machine=None,
+        process=_process(local_env_home),
+        local=True,
+    )
 
     assert rc == 0
     aliases = unit_env_aliases()
@@ -493,7 +514,9 @@ def test_local_set_can_pin_the_hosted_runner_health_port(
 def test_local_unset_removes_key(local_env_home: Path) -> None:
     (local_env_home / ".env").write_text("MEIVA_OPS_CONCURRENCY=7\n")
 
-    rc = cfg.cmd_config_unset(["MEIVA_OPS_CONCURRENCY"], machine=None, local=True)
+    rc = cfg.cmd_config_unset(
+        ["MEIVA_OPS_CONCURRENCY"], machine=None, process=_process(local_env_home), local=True
+    )
 
     assert rc == 0
     assert "MEIVA_OPS_CONCURRENCY" not in unit_env_aliases()
@@ -561,7 +584,14 @@ def test_config_audit_local_reads_newest_first_and_filters(
     record_env_write(env_path, {"MEIVA_FEISHU_APP_ID"}, set(), site="second")
     machine_identity.set(name="audit-fixture")
 
-    assert cfg.cmd_config_audit(last=10, key=None, machine=None, identity=machine_identity) == 0
+    process = _process(local_env_home)
+
+    assert (
+        cfg.cmd_config_audit(
+            last=10, key=None, machine=None, identity=machine_identity, process=process
+        )
+        == 0
+    )
     out = capsys.readouterr().out
     assert "site=first" in out and "site=second" in out
     assert out.index("site=second") < out.index("site=first")
@@ -569,7 +599,11 @@ def test_config_audit_local_reads_newest_first_and_filters(
 
     assert (
         cfg.cmd_config_audit(
-            last=10, key="MEIVA_FEISHU_APP_ID", machine=None, identity=machine_identity
+            last=10,
+            key="MEIVA_FEISHU_APP_ID",
+            machine=None,
+            identity=machine_identity,
+            process=process,
         )
         == 0
     )
@@ -619,10 +653,21 @@ def test_config_audit_machine_fetches_via_gateway(captured_put: ConfigGateway) -
 
 
 def test_config_audit_rejects_out_of_range_last(
-    capsys: pytest.CaptureFixture[str], machine_identity: MachineIdentityReader
+    capsys: pytest.CaptureFixture[str], machine_identity: MachineIdentityReader, unit_home: Path
 ) -> None:
-    assert cfg.cmd_config_audit(last=0, key=None, machine=None, identity=machine_identity) == 1
+    process = _process(unit_home)
+    assert (
+        cfg.cmd_config_audit(
+            last=0, key=None, machine=None, identity=machine_identity, process=process
+        )
+        == 1
+    )
     assert "--last must be between 1 and 200" in capsys.readouterr().err
 
-    assert cfg.cmd_config_audit(last=201, key=None, machine="m1", identity=machine_identity) == 1
+    assert (
+        cfg.cmd_config_audit(
+            last=201, key=None, machine="m1", identity=machine_identity, process=process
+        )
+        == 1
+    )
     assert "--last must be between 1 and 200" in capsys.readouterr().err

@@ -2,7 +2,3 @@ exports = ["mcp.py", "packages.py", "plugins.py"]
 
 [purity]
 "__init__.py" = "strict"
-
-[roots]
-"packages.py" = { kinds = ["settings"], why = "CLI command composition root boots configuration before assembling command inputs" }
-"plugins.py" = { kinds = ["settings"], why = "CLI command composition root boots configuration before assembling command inputs" }

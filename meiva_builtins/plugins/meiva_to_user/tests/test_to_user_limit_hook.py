@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
@@ -12,6 +13,8 @@ from agent.state import CompactState, build_agent_state
 from base.agents.context import MeivaContext
 from base.agents.context.identity import AgentIdentity
 from base.agents.to_user.models import DOCUMENT_FILENAME
+from base.clock import Clock, ClockConfig
+from base.clock.tests.manual_timers import ManualTimers
 from base.config import settings
 from base.host.env.agent_slices import AgentSlices
 from base.log.tests.log_records import LogRecords
@@ -26,6 +29,12 @@ _WRITTEN = "meiva_to_user__panel_written"
 _REMINDED = "meiva_to_user__reminded"
 _BOOKMARK = "meiva_to_user__last_seen_compact"
 _OVER = "one two three four five six"
+_NOW = datetime(2026, 3, 4, 5, 6, 7, tzinfo=UTC)
+
+
+def _clock() -> Clock:
+    timers = ManualTimers(wall_start=_NOW)
+    return Clock(ClockConfig("UTC", "UTC", False), timers=timers, now=timers.now)
 
 
 def _default_reader(domain: str, field: str) -> Any:
@@ -56,6 +65,7 @@ def _runtime(pins: dict[str, Any] | None = None) -> Runtime[MeivaContext]:
     context = MeivaContext(
         identity=AgentIdentity(agent_id=_AGENT, owns_loop=True),
         agent=AgentSlices.resolve(pins=pins, default_reader=_default_reader),
+        clock_factory=_clock,
     )
     return Runtime(context=context)
 
@@ -106,6 +116,7 @@ async def test_an_over_limit_panel_gets_one_reminder_with_both_figures(
 
     note = _note(result)
     assert read_meiva_kwargs(note).get("meiva_note_tag") == NoteTag.TO_USER_SOFT_LIMIT.value
+    assert read_meiva_kwargs(note).get("meiva_created_at") == _NOW.isoformat()
     text = str(note.content)
     assert "6 words" in text
     assert "soft limit is 5" in text
