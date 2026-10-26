@@ -118,6 +118,8 @@ def run_check_on(
     binary_problem: str | None,
     admin: AbstractContextManager[psycopg.Connection[Any]],
 ) -> list[Step]:
+    if not token:
+        raise ValueError("the check names its probe object by a non-empty token")
     if path is None:
         return [Step("configured", "MEIVA_WALG_CONFIG_FILE is not set", ok=False)]
     steps = [Step("configured", str(path))]
