@@ -23,6 +23,7 @@ from agent.turn.runloop import PendingTurnFailure, publish_turn_failure
 from base.agents.context import MeivaContext
 from base.agents.recovery.breaker import admit_pending_wake
 from base.agents.tests.units import spawn_agent
+from base.clock.tests.seeded_rng import seeded_rng
 from base.cluster.machine import MachineIdentityReader
 from base.cluster.machine.tests.identity import machine_identity as machine_identity
 from base.config.service_read import ConfigAuthority
@@ -123,7 +124,12 @@ async def test_error_visible_after_cutoff_allows_immediate_new_chat(
     agent_id = incarnation.agent_id
     old_claim = _insert(db_conn, agent_id, "user", claimed=True)
     pending = _failure()
-    publisher = AgentEventPublisher(event_bus.async_redis(), event_bus.channel, agent_id=agent_id)
+    publisher = AgentEventPublisher(
+        event_bus.async_redis(),
+        event_bus.channel,
+        agent_id=agent_id,
+        auth_retry=event_bus.auth_retry,
+    )
     ctx = MeivaContext(
         ops_pool=aops_pool,
         event_publisher=publisher,
@@ -312,7 +318,10 @@ async def test_publication_failure_is_observable_and_never_repeated(
     agent_id = incarnation.agent_id
     original = ValueError("publication failed") if fault == "unknown" else asyncio.CancelledError()
     report_bus: EventBus = (
-        EventBus(EventBusConfig(redis_url="redis://127.0.0.1:1/0", events_channel="test"))
+        EventBus(
+            EventBusConfig(redis_url="redis://127.0.0.1:1/0", events_channel="test"),
+            rng=seeded_rng(),
+        )
         if fault == "unavailable"
         else PublicationDefectBus(original)
     )

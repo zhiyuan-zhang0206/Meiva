@@ -18,6 +18,7 @@ import pytest
 from base.agents import impersonation as leases
 from base.agents.impersonation import relay as lease_relay
 from base.agents.impersonation.status import ImpersonationStatus
+from base.clock.tests.seeded_rng import seeded_rng
 from base.cluster.machine import MachineIdentityReader
 from base.cluster.machine.tests.identity import machine_identity as machine_identity
 from base.db import Database
@@ -79,7 +80,9 @@ def test_the_relay_command_runs_a_claude_relay_to_the_leases_expiry(
     db_conn.commit()
     code = cmd_relay(
         _relay_args(lease),
-        inputs=RelayInputs(lease["relay_token"], redis_url, codex_home=None, stdout=stdout),
+        inputs=RelayInputs(
+            lease["relay_token"], redis_url, codex_home=None, stdout=stdout, rng=seeded_rng()
+        ),
         database_factory=operator_database,
         machine=machine_identity,
     )
@@ -107,7 +110,9 @@ def test_the_relay_command_reports_a_host_that_refuses_to_be_steered(
     with short_socket_path() as socket_path, codex_app_server(socket_path, [False]) as host:
         code = cmd_relay(
             _relay_args(lease, provider="codex", thread_id=str(THREAD), codex_remote=host.endpoint),
-            inputs=RelayInputs(lease["relay_token"], redis_url, codex_home=None, stdout=stdout),
+            inputs=RelayInputs(
+                lease["relay_token"], redis_url, codex_home=None, stdout=stdout, rng=seeded_rng()
+            ),
             database_factory=operator_database,
             machine=machine_identity,
         )
@@ -138,7 +143,9 @@ def test_unresolvable_destination_exits_before_any_lease_work(
             thread_id=str(THREAD),
             antigravity_endpoint_file=str(absent),
         ),
-        inputs=RelayInputs(lease["relay_token"], redis_url, codex_home=None, stdout=stdout),
+        inputs=RelayInputs(
+            lease["relay_token"], redis_url, codex_home=None, stdout=stdout, rng=seeded_rng()
+        ),
         database_factory=operator_database,
         machine=machine_identity,
     )
@@ -160,7 +167,9 @@ def test_agent_mismatch_refuses_inbox_before_subscription(
     stdout = io.StringIO()
     code = cmd_relay(
         _relay_args(lease, agent_id=lease["agent_id"] + 1),
-        inputs=RelayInputs(lease["relay_token"], redis_url, codex_home=None, stdout=stdout),
+        inputs=RelayInputs(
+            lease["relay_token"], redis_url, codex_home=None, stdout=stdout, rng=seeded_rng()
+        ),
         database_factory=operator_database,
         machine=machine_identity,
     )
@@ -179,7 +188,9 @@ def test_the_relay_command_refuses_a_credential_the_lease_did_not_mint(
     lease, _, _ = active
     code = cmd_relay(
         _relay_args(lease),
-        inputs=RelayInputs(UNMINTED, redis_url, codex_home=None, stdout=io.StringIO()),
+        inputs=RelayInputs(
+            UNMINTED, redis_url, codex_home=None, stdout=io.StringIO(), rng=seeded_rng()
+        ),
         database_factory=operator_database,
         machine=machine_identity,
     )

@@ -18,6 +18,7 @@ from base.agents.context import MeivaContext
 from base.agents.context.identity import AgentIdentity
 from base.agents.messages.kwargs import ExecStatus, read_meiva_kwargs
 from base.clock import Clock
+from base.clock.tests.seeded_rng import seeded_rng
 from base.config import settings
 from base.config.agent_pins import resolve_agent_config_pins
 from base.config.tests.configuration import defaults
@@ -100,7 +101,7 @@ async def test_concurrent_turn_configs_reach_real_children_without_cross_talk(
             MeivaContext(
                 agent=slices or AgentSlices.resolve(default_reader=defaults()),
                 db=database,
-                bus=EventBus.from_settings(),
+                bus=EventBus.from_settings(rng=seeded_rng()),
                 clients=snapshot_clients_over(lambda: database),
                 identity=AgentIdentity(agent_id=agent_id, owns_loop=True),
                 catalog=build_model_catalog(),

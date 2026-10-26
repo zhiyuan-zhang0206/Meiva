@@ -34,6 +34,7 @@ from base.agents.inbox.insert import insert_inbound_message
 from base.agents.messages.kwargs import MeivaMsgType, read_meiva_kwargs
 from base.agents.tests.units import spawn_agent
 from base.clock import Clock
+from base.clock.tests.seeded_rng import seeded_rng
 from base.cluster.machine import MachineIdentityReader
 from base.cluster.machine.tests.identity import machine_identity as machine_identity
 from base.config.service_read import ConfigAuthority
@@ -76,7 +77,7 @@ class _Turn:
                     default_reader=defaults(agent__security_scan_enabled=True)
                 ),
                 db=Database.from_settings(gate=database_gate),
-                bus=EventBus.from_settings(),
+                bus=EventBus.from_settings(rng=seeded_rng()),
                 catalog=build_model_catalog(),
                 clock_factory=Clock.from_settings,
                 commands=CommandCatalog.system(skills=list),

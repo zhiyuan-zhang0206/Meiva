@@ -11,6 +11,7 @@ from redis.backoff import NoBackoff
 from redis.retry import Retry
 
 from base.events.live.redis_client import open_sync_redis
+from base.events.live.tests.rng import seeded_auth_retry
 from base.log.tests.log_records import LogRecords
 from meiva.self.wake import publish_inbound_wake
 from meiva.tests.namespaces.self.redis_view import loose
@@ -21,7 +22,7 @@ _INBOUND_41 = "wakecase:inbound:41"
 
 @pytest.fixture
 def client(redis_url: str) -> Iterator[Redis]:
-    connection = open_sync_redis(redis_url, decode_responses=True)
+    connection = open_sync_redis(redis_url, decode_responses=True, auth_retry=seeded_auth_retry())
     try:
         yield connection
     finally:

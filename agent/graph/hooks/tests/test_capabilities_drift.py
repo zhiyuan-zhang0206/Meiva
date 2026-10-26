@@ -33,6 +33,7 @@ from base import paths
 from base.agents.context import MeivaContext
 from base.agents.messages.kwargs import NoteTag
 from base.clock import Clock
+from base.clock.tests.seeded_rng import seeded_rng
 from base.config.tests.configuration import defaults
 from base.db import Database
 from base.db.code_version_gate import ProcessDbGate
@@ -64,7 +65,7 @@ def _runtime(
             ops_pool=ops_pool,
             agent=_slices(pins),
             db=Database.from_settings(gate=database_gate),
-            bus=EventBus.from_settings(),
+            bus=EventBus.from_settings(rng=seeded_rng()),
             catalog=build_model_catalog(),
             clock_factory=Clock.from_settings,
         )
