@@ -23,7 +23,6 @@ from meizel.budgets import limits  # noqa: E402 — standalone script
 from meizel.contracts.analysis import (  # noqa: E402
     load_manifests,
     load_policy,
-    sources_from,
     type_checking_in_scope,
     type_checking_violations,
 )
@@ -303,7 +302,7 @@ def _load_type_context(argv: list[str], repo_root: Path) -> tuple[_TypeContext |
     return (
         _TypeContext(
             universe,
-            sources_from(manifests, policy, universe),
+            Sources(),
             frozenset(policy.reasons("type-checking", "files")),
             type_packages,
             set(_iter_py_files(roots)),

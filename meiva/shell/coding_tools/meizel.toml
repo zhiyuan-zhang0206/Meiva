@@ -13,3 +13,7 @@ exports = ["antigravity.py", "claude.py", "codex.py", "plans"]
 [roots]
 "_common.py" = { kinds = ["home"], why = "launch_site() resolves the operator's Path.home() for Claude and Codex user-level config files" }
 "claude.py" = { kinds = ["random"], why = "launch() mints a fresh UUID for a new Claude Code session when --resume is not given" }
+
+[debt.ambient-read]
+"_claude_checks.py#clock base.clock.SYSTEM_TIMERS" = 1
+"codex.py#clock base.clock.SYSTEM_TIMERS" = 1

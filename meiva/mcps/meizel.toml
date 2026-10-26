@@ -16,13 +16,14 @@ exports = ["config.py", "tests"]
 "_wire.py" = "strict"
 
 [roots]
-"_daemon.py" = { kinds = ["pid", "settings"], why = "daemon_config_from_process() is the MCP daemon process entry point composition root, reading settings and process PID once at startup" }
+"_daemon.py" = { kinds = ["pid", "platform", "settings"], why = "daemon_config_from_process() is the MCP daemon process entry point composition root, reading settings and process PID once at startup; builds the host of this process with Host.system()" }
 
 [debt.ambient-read]
 "__init__.py#home base.paths.meiva_home" = 1
 "_daemon.py#environ base.host.system.probes.display_available" = 1
 "_daemon.py#home base.paths.meiva_home" = 1
 "_oauth.py#home base.paths.meiva_home" = 1
+"_remote.py#clock base.clock.SYSTEM_TIMERS" = 1
 
 [debt.third-party-patch]
 "_oauth.py#assignment mcp.client.auth.oauth2.OAuthContext.prepare_token_auth" = 1

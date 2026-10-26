@@ -24,6 +24,7 @@ exports = ["analysis.py", "cli.py", "enumerations.py", "sync.py"]
 
 [purity]
 "." = "strict"
+"ambient_read.py" = "strict-to-be"
 "analysis.py" = "strict-to-be"
 "cli.py" = "strict-to-be"
 "debt_carry.py" = "strict-to-be"
@@ -36,6 +37,7 @@ exports = ["analysis.py", "cli.py", "enumerations.py", "sync.py"]
 "sync.py" = "strict-to-be"
 
 [debt.impure-call]
+"ambient_read.py#meizel.graph.universe.GitRepo" = 1
 "analysis.py#meizel.graph.universe.load_universe" = 1
 "cli.py#Path.resolve" = 2
 "cli.py#meizel.graph.universe.load_universe" = 1

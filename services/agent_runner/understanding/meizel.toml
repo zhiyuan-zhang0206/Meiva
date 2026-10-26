@@ -7,3 +7,9 @@ exports = ["chunk_consumer.py", "group_consumer.py", "rebuild.py", "tests"]
 
 [purity]
 "__init__.py" = "strict"
+
+[debt.ambient-read]
+"chunk_consumer.py#clock base.clock.Clock" = 2
+"chunk_consumer.py#clock base.clock.SYSTEM_TIMERS" = 1
+"group_consumer.py#clock base.clock.Clock" = 1
+"group_consumer.py#clock base.clock.SYSTEM_TIMERS" = 1
