@@ -227,7 +227,8 @@ export function useTimeline(
         abortReconcile();
       } else if (
         ev.role === "timeline_snapshot" &&
-        (ev.items as unknown as unknown[] | undefined)?.length &&
+        Array.isArray(ev.items) &&
+        ev.items.length > 0 &&
         compactPending.current
       ) {
         compactPending.current = false;

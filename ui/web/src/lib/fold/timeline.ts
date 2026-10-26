@@ -472,7 +472,7 @@ export function applySystemEvent(
  */
 export function mergeSnapshotWithStreaming(
   prev: BackendTimelineItem[],
-  snapshot: BackendTimelineItem[],
+  snapshot: readonly BackendTimelineItem[],
   msg_count: number,
   streamingIds: ReadonlySet<string> = new Set(),
 ): BackendTimelineItem[] {
@@ -546,7 +546,7 @@ export function foldEvent(t: ThreadTimelineState, ev: SystemEvent, nowMs = 1): T
   // len(state.messages); mergeSnapshotWithStreaming distinguishes the still-
   // streaming future partial by msg_idx == msg_count.
   if (ev.role === "timeline_snapshot") {
-    const snapItems = ev.items as unknown as BackendTimelineItem[];
+    const snapItems = ev.items;
     // Full-window snapshots (first publish of a process, compact shrink,
     // claim turn-end fallback) carry the system-prompt item 0.0; incremental
     // ones never do (message 0 is below the cursor). Either way the merge's

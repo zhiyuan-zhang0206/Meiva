@@ -22,6 +22,10 @@ interface DisplayConfigView {
   readonly fields?: readonly ConfigFieldView[];
 }
 
+function isDisplayConfigView(value: unknown): value is DisplayConfigView {
+  return typeof value === "object" && value !== null;
+}
+
 /** One `display` domain int field, resolved at runtime from GET /api/config.
  *  Returns `fallback` until the config read lands and whenever the field is
  *  missing, non-numeric, or the read failed. */
@@ -34,7 +38,7 @@ export function useDisplayLimit(envVar: string, fallback: number): number {
   // A malformed payload (an unknown endpoint served as {} — the visual-
   // regression e2e stubs do exactly that) must fall back, never crash: read
   // through a view type whose field list is honestly optional.
-  const view = data as DisplayConfigView | undefined;
+  const view: DisplayConfigView | undefined = isDisplayConfigView(data) ? data : undefined;
   const raw = view?.fields?.find((f) => f.env_var === envVar)?.current_value;
   return typeof raw === "number" && Number.isFinite(raw) ? raw : fallback;
 }

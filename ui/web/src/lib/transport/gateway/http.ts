@@ -45,7 +45,7 @@ function ok<T>(res: Response): Promise<T> {
       throw errorFromResponse(res.status, text);
     });
   }
-  return res.json() as Promise<T>;
+  return res.json();
 }
 
 // meiva:note

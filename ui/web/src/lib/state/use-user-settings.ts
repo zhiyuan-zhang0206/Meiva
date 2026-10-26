@@ -107,6 +107,17 @@ export function useUserSettings(): {
   };
 }
 
+function readStoredSetting<T>(raw: unknown, defaultValue: T): T {
+  function matchesDefault(candidate: unknown): candidate is T {
+    if (candidate === undefined) return false;
+    if (defaultValue !== undefined && defaultValue !== null) {
+      return typeof candidate === typeof defaultValue;
+    }
+    return typeof candidate === "object" && candidate !== null;
+  }
+  return matchesDefault(raw) ? raw : defaultValue;
+}
+
 // A DB-backed setting that a user drags (timeline width, force-layout sliders):
 // the value changes many times per second, so a write-through PUT on every
 // change would flood the server. This keeps a local copy for instant feedback
@@ -123,8 +134,8 @@ export function useDebouncedSetting<T>(
   delayMs = 400,
 ): readonly [T, (value: T) => void] {
   const { settings, setSetting } = useUserSettings();
-  const stored = settings[key] as T | undefined;
-  const [local, setLocal] = useState<T>(stored ?? defaultValue);
+  const resolvedValue = readStoredSetting(settings[key], defaultValue);
+  const [local, setLocal] = useState<T>(resolvedValue);
 
   const dirty = useRef(false);
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -156,8 +167,8 @@ export function useDebouncedSetting<T>(
   // (skipped while dirty so an active drag is not clobbered).
   useEffect(() => {
     if (dirty.current) return;
-    setLocal(stored ?? defaultValue);
-  }, [stored, defaultValue]);
+    setLocal(resolvedValue);
+  }, [resolvedValue]);
 
   const setValue = useCallback(
     (value: T) => {

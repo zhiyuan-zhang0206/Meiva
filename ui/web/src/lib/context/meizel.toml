@@ -5,6 +5,3 @@ exports = ["context-panel-open.ts", "reference-url.ts", "use-to-user.ts"]
 
 [purity]
 "reference-url.ts" = "strict"
-
-[debt.type-cast]
-"context-panel-open.ts#cast <module>" = 2

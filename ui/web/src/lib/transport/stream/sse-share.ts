@@ -53,6 +53,10 @@ const UNION_DEBOUNCE_MS = 250;
 const RECONNECT_BASE_MS = 1_000;
 const RECONNECT_MAX_MS = 30_000;
 
+function isShareMessage(raw: unknown): raw is Message {
+  return typeof raw === "object" && raw !== null && "type" in raw && typeof raw.type === "string";
+}
+
 export interface SseShareConfig {
   readonly base: string;
   readonly merged: ReadonlySet<SseChannel>;
@@ -267,8 +271,8 @@ export class ProfileSseTransport {
   }
 
   private receive(raw: unknown): void {
-    if (!raw || typeof raw !== "object" || !("type" in raw)) return;
-    const message = raw as Message;
+    if (!isShareMessage(raw)) return;
+    const message = raw;
     switch (message.type) {
       case "interest": {
         if (!this.leader) return;
