@@ -83,6 +83,22 @@
       "command": "python db-write-stall-watch-schedule.py"
     },
     {
+      "name": "sched-dry-import-weekly",
+      "class": "operator",
+      "default_enabled": false,
+      "description": "Operator sentinel for the schedules themselves: every Monday 09:00 cluster time it syntax-checks and imports-only executes every stored schedule script in the runner's venv, stopped rows included, then wakes the cluster operator with the exact module or syntax error of each red. It catches the drift class that broke seven in-store scripts in one wave (2026-10-25): the repository moves a module and the database-embedded copies do not roll. `--once` runs a sweep now; `--check-file` is the falsification control.",
+      "script": "sched-dry-import-weekly-schedule.py",
+      "command": "python sched-dry-import-weekly-schedule.py"
+    },
+    {
+      "name": "log-cred-mask-monthly",
+      "class": "operator",
+      "default_enabled": false,
+      "description": "Operator sweep for credentials left in logs: on the 15th at 10:00 cluster time it runs the host-local log-credential scanner (fresh strict scan, same-length masking, strict recount, final dry run) and wakes the cluster operator only when the sweep exits nonzero. The scanner is an operator tool that lives under the runtime home of the machine that owns the schedule manager; on a host without it the run reports rc=2 naming the missing path instead of retrying silently.",
+      "script": "log-cred-mask-monthly-schedule.py",
+      "command": "python log-cred-mask-monthly-schedule.py"
+    },
+    {
       "name": "qa-keepalive",
       "class": "operator",
       "default_enabled": false,

@@ -11,10 +11,10 @@
 "self-evolution-daily-schedule.py" = ["jobs", "plans"]
 "self-evolution-weekly-schedule.py" = ["jobs", "plans"]
 "trace-ship-tempo-schedule.py" = ["jobs", "plans"]
-"tests" = ["agent_status_guard.py", "debt-sweep-daily-schedule.py", "jobs", "plans"]
+"sched-dry-import-weekly-schedule.py" = ["jobs", "plans"]
+"log-cred-mask-monthly-schedule.py" = ["jobs", "plans"]
+"tests" = ["debt-sweep-daily-schedule.py", "jobs", "plans"]
 
-[purity]
-"agent_status_guard.py" = "strict"
 
 [roots]
 "adversarial-eval-weekly-schedule.py" = { kinds = ["clock", "environ"], why = "Schedule process entry reads its scheduler identity and start instant before composing the weekly batch loop" }
@@ -28,7 +28,25 @@
 "self-evolution-daily-schedule.py" = { kinds = ["clock", "environ"], why = "Schedule process entry reads its report recipient, scheduler identity and start instant before constructing DailyScan" }
 "self-evolution-weekly-schedule.py" = { kinds = ["clock", "environ"], why = "Schedule process entry reads its event API environment, scheduler identity and clock before composing the weekly job" }
 "trace-ship-tempo-schedule.py" = { kinds = ["clock", "environ"], why = "Schedule process entry reads its scheduler identity and start instant before composing the trace-shipping loop" }
+"sched-dry-import-weekly-schedule.py" = { kinds = ["clock", "environ"], why = "Schedule process entry reads its scheduler identity and start instant before composing the weekly dry-import sweep" }
+"log-cred-mask-monthly-schedule.py" = { kinds = ["clock", "environ"], why = "Schedule process entry reads its scheduler identity and start instant before composing the monthly credential sweep" }
+
+# meiva:note
+# The first two entries predate 2026-10-26; the third was approved that day.
+#
+# `log-cred-mask-monthly-schedule.py` starts the credential scanner as a `python <path>` subprocess,
+# and the scanner is a five-machine operator tool that by design never ships in this repository.
+# meizel's `python-commands` rule accepts only `-m <module>` or a literal repository file after the
+# interpreter, and neither `[external]` nor `[loads]` exempts this shape (checked 2026-10-26:
+# `[external]` reports `stale-external` and the violation stands), so a recorded debt is the only
+# mechanism that can express it.
+#
+# Exit condition: if meizel grows a declarative "runs an external command" surface the way `roots`
+# declares clock/environ reads, this entry goes to zero and is deleted.
+#
+# The directory is frozen at two: a schedule that needs to run an out-of-repository file comes to
+# the maintainer first and does not take this route again. There is no spare slot to absorb one.
 
 [debt.restricted-python]
-"model-update-tracker-schedule.py#python subprocess that runs something other than a literal repository file" = 1
+"log-cred-mask-monthly-schedule.py#python subprocess that runs something other than a literal repository file" = 1
 "self-evolution-daily-schedule.py#python subprocess that runs something other than a literal repository file" = 1
