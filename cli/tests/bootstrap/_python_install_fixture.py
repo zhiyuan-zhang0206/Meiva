@@ -195,3 +195,11 @@ def build_wheel(*args, **kwargs): return build_editable(*args, **kwargs)
         server.shutdown()
         server.server_close()
         thread.join(timeout=5)
+
+
+if __name__ == "__main__":
+    before = list(sys.path)
+    from cli import python_install
+
+    assert callable(python_install.install)
+    assert sys.path == before

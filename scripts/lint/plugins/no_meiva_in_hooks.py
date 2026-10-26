@@ -80,10 +80,12 @@ def _defines_hook(tree: ast.AST) -> bool:
 
 def _scan_file(path: Path, rel: str) -> list[tuple[int, str]]:
     """[(lineno, message), ...] for `meiva` imports in a hook module; empty for any other file."""
+    source = lint_common.read_utf8_text(path)
+    if source is None:
+        return []
     try:
-        source = path.read_text(encoding="utf-8")
         tree = ast.parse(source, filename=str(path))
-    except (OSError, UnicodeDecodeError, SyntaxError):
+    except SyntaxError:
         return []  # unreadable or broken files fail elsewhere; not this lint's job
     if not (rel.startswith(_HOOKS_DIR) or path.name == _FACE_NAME or _defines_hook(tree)):
         return []
@@ -99,32 +101,23 @@ def _scan_file(path: Path, rel: str) -> list[tuple[int, str]]:
     ]
 
 
-def _iter_files(targets: list[Path]) -> list[Path]:
-    files: list[Path] = []
-    for root in targets:
-        if root.is_file() and root.suffix == ".py":
-            files.append(root)
-        elif root.is_dir():
-            files.extend(root.rglob("*.py"))
-    return files
-
-
 def main(argv: list[str] | None = None, *, repo_root: Path = _REPO_ROOT) -> int:
     argv = argv if argv is not None else sys.argv[1:]
     argv, only = lint_common.split_only(argv)
     if argv:
-        missing = [arg for arg in argv if not Path(arg).exists()]
+        resolved, missing = lint_common.resolve_targets(argv, repo_root)
         if missing:
             print(f"error: target path(s) not found: {', '.join(missing)}", file=sys.stderr)
             return 1
-        targets = [Path(a).resolve() for a in argv]
+        files = [repo_root / entry for entry in resolved if entry.endswith(".py")]
     else:
-        targets = lint_common.scan_roots(repo_root, SCAN_DIRS)
+        roots = lint_common.scan_roots(repo_root, SCAN_DIRS)
+        files = [path for root in roots for path in root.rglob("*.py")]
 
     scope = lint_common.changed_scope(only, repo_root)
 
     total = 0
-    for path in sorted(lint_common.restrict(_iter_files(targets), scope, repo_root)):
+    for path in sorted(lint_common.restrict(files, scope, repo_root)):
         if lint_common.is_repo_test_file(path, repo_root):
             continue
         try:

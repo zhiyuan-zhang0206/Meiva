@@ -23,7 +23,7 @@ from psycopg_pool import ConnectionPool
 
 from base.config import settings
 from base.db import Database
-from base.events.live.bus import EventBus, event_bus_config_from_settings
+from base.events.live.bus import EventBus
 from base.events.notifications.outbox import republish_pending
 from meiva_builtins.plugins.meiva_fleet.task_maintenance.daemon import run_escalate
 from meiva_builtins.plugins.meiva_fleet.task_maintenance.tests.failing_writes import inserts_failing
@@ -254,9 +254,8 @@ def test_delegator_escalation_rearms_after_owner_update(
 # the publication as failed by returning None. The producer must neither record
 # that as delivered nor lose the notice.
 # meiva:link base/events/notifications/docs/notifications.meiva.okf.md
-class _RecordingBus(EventBus):
+class _RecordingBus:
     def __init__(self) -> None:
-        super().__init__(event_bus_config_from_settings())
         self.events: list[dict[str, Any]] = []
         self.drop = False
 
@@ -291,7 +290,7 @@ def test_user_escalation_delivers_a_needs_input_notification(
     # an `agent_updated` console refresh, so it never reached a phone or the Mac.
     # meiva:link base/events/notifications/docs/notifications.meiva.okf.md
     owner, tid, _parent = human_leg_subtask(db_conn)
-    live = _RecordingBus()
+    live: Any = _RecordingBus()
 
     assert run_escalate(pool, database, live, 3) == 1
 
@@ -319,7 +318,7 @@ def test_user_escalation_survives_a_lost_announce(
     # is delayed, never dropped.
     # meiva:link base/events/notifications/docs/notifications.meiva.okf.md
     owner, _tid, _parent = human_leg_subtask(db_conn)
-    live = _RecordingBus()
+    live: Any = _RecordingBus()
     live.drop = True
 
     assert run_escalate(pool, database, live, 3) == 1

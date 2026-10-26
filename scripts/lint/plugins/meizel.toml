@@ -1,15 +1,5 @@
 exports = ["no_plugin_wrap.py"]
-purity = "strict-to-be"
+purity = "strict"
 
 [uses]
 "tests" = ["no_meiva_in_hooks.py", "no_plugin_wrap.py"]
-
-[debt.impure-call]
-"no_meiva_in_hooks.py#Path.exists" = 1
-"no_meiva_in_hooks.py#Path.is_dir" = 1
-"no_meiva_in_hooks.py#Path.is_file" = 1
-"no_meiva_in_hooks.py#Path.read_text" = 1
-"no_plugin_wrap.py#Path.exists" = 1
-"no_plugin_wrap.py#Path.is_dir" = 1
-"no_plugin_wrap.py#Path.is_file" = 1
-"no_plugin_wrap.py#Path.read_text" = 1

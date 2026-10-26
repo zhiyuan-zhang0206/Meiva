@@ -6,7 +6,6 @@ exports = ["health_port_guard.py", "test_single_box.py"]
 
 [debt.env-patch]
 "test_single_box.py#monkeypatch.delitem os.environ" = 1
-"test_single_box.py#monkeypatch.setenv os.environ.MEIVA_HOME" = 1
 "test_single_box.py#monkeypatch.setitem os.environ" = 1
 "test_single_box.py#monkeypatch.setitem os.environ.MEIVA_DB_URL" = 1
 

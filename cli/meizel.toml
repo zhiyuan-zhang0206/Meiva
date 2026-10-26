@@ -1,4 +1,4 @@
-exports = ["__main__.py", "commands", "database", "fleet_update", "parsers", "start_identity.py", "tests"]
+exports = ["__main__.py", "commands", "database", "fleet_update", "main.py", "parsers", "start_identity.py", "tests"]
 
 [uses]
 "__main__.py" = ["main.py"]
