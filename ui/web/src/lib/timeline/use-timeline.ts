@@ -9,6 +9,7 @@
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { startTransition, useCallback, useEffect, useLayoutEffect, useRef } from "react";
 
+import { systemWallNowMs } from "../transport/system-transport";
 import { useApi } from "../transport/transport-context";
 import { useAgentReconcile } from "../agents/agent-reconcile";
 import { useDisplayLimit } from "../format/display-limits";
@@ -44,8 +45,10 @@ const RETAINED_ITEMS_FALLBACK = 250;
 const EMPTY_ITEMS: BackendTimelineItem[] = [];
 const timelineRuntime: {
   runTransition: (cb: () => void) => void;
+  nowMs: () => number;
 } = {
   runTransition: startTransition,
+  nowMs: systemWallNowMs,
 };
 
 export function setTimelineTransitionForTest(runner?: (cb: () => void) => void): void {
@@ -227,7 +230,8 @@ export function useTimeline(
         abortReconcile();
       } else if (
         ev.role === "timeline_snapshot" &&
-        (ev.items as unknown as unknown[] | undefined)?.length &&
+        Array.isArray(ev.items) &&
+        ev.items.length > 0 &&
         compactPending.current
       ) {
         compactPending.current = false;
@@ -259,10 +263,10 @@ export function useTimeline(
 
       if (isStreamingDelta(ev)) {
         timelineRuntime.runTransition(() => {
-          processSseEvent(ev, Date.now());
+          processSseEvent(ev, timelineRuntime.nowMs());
         });
       } else {
-        processSseEvent(ev, Date.now());
+        processSseEvent(ev, timelineRuntime.nowMs());
       }
       trackCompactForInvalidation(ev);
     },
@@ -284,7 +288,7 @@ export function useTimeline(
         if (startsTurn(ev)) noteTurnStart(ev.agent_id);
       }
       const hasStreaming = filtered.some((ev) => isStreamingDelta(ev));
-      const apply = () => processSseEventBatch(filtered, Date.now());
+      const apply = () => processSseEventBatch(filtered, timelineRuntime.nowMs());
       if (hasStreaming) {
         timelineRuntime.runTransition(apply);
       } else {
@@ -419,13 +423,13 @@ export function useTimeline(
     prevAgentRef.current = { id: agentId, status: agentStatus };
     if (agentId === null || agentStatus === undefined || agentStatus === "running") return;
     if (prev.id === agentId && prev.status === "running") {
-      useTimelineStore.getState().settleTurn(Date.now());
+      useTimelineStore.getState().settleTurn(timelineRuntime.nowMs());
       void queryClient.invalidateQueries({ queryKey: ["timeline", agentId] });
       return;
     }
     const st = useTimelineStore.getState();
     if (!st.turnActive && hasUnsettledClock(st.items)) {
-      st.settleTurn(Date.now());
+      st.settleTurn(timelineRuntime.nowMs());
     }
   }, [agentId, agentStatus, queryClient]);
 

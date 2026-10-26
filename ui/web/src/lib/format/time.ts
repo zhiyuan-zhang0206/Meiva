@@ -6,6 +6,7 @@
 // Clock times are written in one of two formats, chosen by the viewer's `display.clock_format` setting and 24-hour by default: `15:45` or `3:45 PM`. `formatClockText` is the single owner of that choice for the viewer's local zone; every formatter here takes `clockFormat` so no call site can hard-code a 12-hour clock. `formatAbsolute` appends the zone name only when `showTimeZone` is on (setting `display.show_timezone`, default off): the viewer's own zone is implied context, and a bare offset is noise.
 // meiva:link ui/web/src/lib/format/docs/time.meiva.okf.md
 
+import { systemWallNowDate } from "../transport/system-transport";
 import {
   DEFAULT_CLOCK_FORMAT,
   normalizeDayPeriodSpace,
@@ -117,7 +118,7 @@ export function formatUptime(seconds: number): string {
 // meiva:link ui/web/src/lib/format/docs/time.meiva.okf.md
 export function formatRelative(
   iso: string,
-  now: Date = new Date(),
+  now: Date = systemWallNowDate(),
   { capitalize = false }: { capitalize?: boolean } = {},
 ): string {
   const t = new Date(iso).getTime();

@@ -17,6 +17,3 @@ exports = ["api-factory.ts", "http.ts", "plans", "tests"]
 
 [purity]
 "." = "strict"
-
-[debt.type-cast]
-"http.ts#cast ok" = 1

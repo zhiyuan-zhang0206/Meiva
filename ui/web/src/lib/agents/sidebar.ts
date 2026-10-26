@@ -77,8 +77,7 @@ function isFlatSortKey(v: unknown): v is FlatSortKey {
 
 function isSidebarSort(v: unknown): v is SidebarSort {
   if (typeof v !== "object" || v === null) return false;
-  const s = v as Record<string, unknown>;
-  return isFlatSortKey(s.key) && (s.dir === "asc" || s.dir === "desc");
+  return "key" in v && isFlatSortKey(v.key) && "dir" in v && (v.dir === "asc" || v.dir === "desc");
 }
 
 export function useSidebarSort(): {

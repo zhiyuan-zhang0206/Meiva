@@ -18,10 +18,14 @@ export interface ContextPanelStorage {
   setItem: (key: string, value: string) => void;
 }
 
-const panelStore = {
+const panelStore: {
+  listeners: Set<() => void>;
+  storage: ContextPanelStorage | undefined;
+  fallbackOpen: boolean | undefined;
+} = {
   listeners: new Set<() => void>(),
-  storage: undefined as ContextPanelStorage | undefined,
-  fallbackOpen: undefined as boolean | undefined,
+  storage: undefined,
+  fallbackOpen: undefined,
 };
 
 function resolveStorage(storage?: ContextPanelStorage): ContextPanelStorage {

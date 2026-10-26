@@ -4,6 +4,7 @@
 
 import { useInfiniteQuery, useQuery, type QueryClient } from "@tanstack/react-query";
 
+import { systemWallNowMs } from "../transport/system-transport";
 import { useApi } from "../transport/transport-context";
 import type { NoticeItem } from "../contracts/types";
 
@@ -62,10 +63,13 @@ const TOMBSTONE_MS = 15_000;
 /** Drop tombstoned ids from one incoming open-queue snapshot. A snapshot
  *  that no longer lists an id proves the server resolved it — retire that
  *  tombstone; the deadline retires any tombstone no confirmation reaches. */
-function withoutDroppedRows(wire: NoticesFeedWire): NoticesFeedWire {
+function withoutDroppedRows(
+  wire: NoticesFeedWire,
+  nowMs: () => number = systemWallNowMs,
+): NoticesFeedWire {
   const { deadlines } = tombstoneState;
   if (deadlines.size === 0) return wire;
-  const now = Date.now();
+  const now = nowMs();
   for (const [id, deadline] of deadlines) {
     if (deadline <= now) deadlines.delete(id);
   }
@@ -81,20 +85,24 @@ function withoutDroppedRows(wire: NoticesFeedWire): NoticesFeedWire {
   };
 }
 
-export function useNotices(): NoticesFeed {
+function initialResolvedCursor(): ResolvedCursor | undefined {
+  return undefined;
+}
+
+export function useNotices(nowMs: () => number = systemWallNowMs): NoticesFeed {
   const api = useApi();
   const feedQuery = useQuery({
     queryKey: NOTICES_QUERY_KEY,
     // Page sizes come from the server defaults
     // (display.notices_open_default_limit / notices_resolved_default_page,
     // task #3696); the client pins no window.
-    queryFn: async () => withoutDroppedRows(await api.getNotices()),
+    queryFn: async () => withoutDroppedRows(await api.getNotices(), nowMs),
   });
 
   const resolvedQuery = useInfiniteQuery({
     queryKey: NOTICES_RESOLVED_QUERY_KEY,
     queryFn: ({ pageParam }) => api.getNotices({ ...pageParam }),
-    initialPageParam: undefined as ResolvedCursor | undefined,
+    initialPageParam: initialResolvedCursor(),
     // The endpoint returns next_cursor in wire shape (snake_case); the api
     // layer expects camelCase params, so translate here. None = end.
     getNextPageParam: (lastPage): ResolvedCursor | undefined =>
@@ -130,13 +138,17 @@ export function useNotices(): NoticesFeed {
  *  snapshot cannot land over the drop and resurrect the row (task #3269),
  *  and the dropped ids stay tombstoned for a beat so a refetch newly
  *  initiated after the drop cannot either (task #3272). */
-export function dropOpenNotices(queryClient: QueryClient, noticeIds: number[]): void {
+export function dropOpenNotices(
+  queryClient: QueryClient,
+  noticeIds: number[],
+  nowMs: () => number = systemWallNowMs,
+): void {
   if (noticeIds.length === 0) return;
   // Arm the tombstone before the optimistic drop: a refetch newly initiated
   // after this point (e.g. an SSE invalidation inside the resolve window)
   // still returns the pre-resolve snapshot, and would revive the rows for
   // the seconds until the resolve lands without this guard (task #3272).
-  const deadline = Date.now() + TOMBSTONE_MS;
+  const deadline = nowMs() + TOMBSTONE_MS;
   for (const id of noticeIds) tombstoneState.deadlines.set(id, deadline);
   // Cancel the in-flight open-queue refetch first: its snapshot predates this
   // drop, and letting it land would resurrect the just-resolved row until the

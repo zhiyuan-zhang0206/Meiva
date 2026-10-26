@@ -57,7 +57,8 @@ function isHeartbeat(raw: unknown): boolean {
     typeof raw === "object" &&
     raw !== null &&
     !Array.isArray(raw) &&
-    (raw as { role?: unknown }).role === "heartbeat"
+    "role" in raw &&
+    raw.role === "heartbeat"
   );
 }
 
@@ -66,8 +67,10 @@ function isAlertRow(raw: unknown): raw is Alert {
     typeof raw === "object" &&
     raw !== null &&
     !Array.isArray(raw) &&
-    typeof (raw as { id?: unknown }).id === "number" &&
-    typeof (raw as { status?: unknown }).status === "string"
+    "id" in raw &&
+    typeof raw.id === "number" &&
+    "status" in raw &&
+    typeof raw.status === "string"
   );
 }
 

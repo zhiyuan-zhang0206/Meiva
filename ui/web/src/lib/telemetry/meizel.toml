@@ -16,14 +16,5 @@ exports = ["nav-timing.ts", "telemetry-page-view.tsx", "telemetry.ts"]
 "telemetry-plan.ts" = "strict"
 "web-vitals-plan.ts" = "strict"
 
-[debt.ambient-read]
-"telemetry.ts#clock Date.now" = 3
-"telemetry.ts#random Math.random" = 1
-"telemetry.ts#random crypto.randomUUID" = 1
-
-[debt.type-cast]
-"nav-timing.ts#cast <module>" = 3
-"nav-timing.ts#cast startWatching.<lambda>" = 1
-"telemetry.ts#cast <module>" = 2
-"web-vitals-plan.ts#cast consumeLayoutShiftAndEventEntries" = 2
-"web-vitals.ts#cast <module>" = 3
+[roots]
+"telemetry.ts" = { kinds = ["clock", "random"], why = "browser telemetry composition root supplying session IDs and event timestamps" }
