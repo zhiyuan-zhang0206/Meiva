@@ -221,19 +221,14 @@ def test_incapability_branch_ordering(monkeypatch: pytest.MonkeyPatch) -> None:
 
     present = {"swiftc": "/usr/bin/swiftc", "codesign": "/usr/bin/codesign"}
 
-    def fake_display_available(*, host: Host) -> bool:
-        return True
-
-    monkeypatch.setattr(pp, "display_available", fake_display_available)
-
     assert pp.permissions_helper_incapability(host=mac(present)) is None
     assert "no swiftc" in reason(mac({}))
     assert "no codesign" in reason(mac({"swiftc": "/usr/bin/swiftc"}))
 
-    def fake_display_available2(*, host: Host) -> bool:
+    def fake_display_available(*, host: Host) -> bool:
         return False
 
-    monkeypatch.setattr(pp, "display_available", fake_display_available2)
+    monkeypatch.setattr(pp, "display_available", fake_display_available)
     assert "no display" in reason(mac(present))
 
     assert "macOS only" in reason(fake_host(platform=LINUX_X86))
