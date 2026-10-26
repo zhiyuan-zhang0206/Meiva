@@ -7,6 +7,7 @@ import http
 import json
 import stat
 from contextlib import suppress
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
@@ -14,6 +15,7 @@ import websockets.asyncio.server
 from websockets.asyncio.server import ServerConnection
 from websockets.http11 import Request, Response
 
+from base.clock.tests.fakes import system_clock
 from services.desktop.browser import session_restore
 from services.desktop.browser.session_restore import (
     PENDING_LAYOUT,
@@ -22,6 +24,8 @@ from services.desktop.browser.session_restore import (
     Tab,
     ledger_path,
 )
+
+NOW = datetime(2026, 10, 22, tzinfo=UTC)
 
 
 # meiva:note
@@ -136,7 +140,10 @@ def test_begin_launch_without_a_record_asks_for_nothing(tmp_path: Path) -> None:
 # `meiva start --only-service gateway` must not spend the recorded session.
 def test_a_pending_restore_that_never_launched_stays_pending(tmp_path: Path) -> None:
     session_restore.write(tmp_path, _ledger(_tab("https://a.example/")))
-    assert session_restore.report(home=tmp_path, chrome=FakeChrome(listing=[])) is None
+    assert (
+        session_restore.report(home=tmp_path, chrome=FakeChrome(listing=[]), timers=system_clock())
+        is None
+    )
     stored = session_restore.read(tmp_path)
     assert stored is not None and stored.pending == PENDING_RESTORE
 
@@ -166,13 +173,14 @@ async def test_capture_records_pins_and_groups_from_the_worker() -> None:
             ]
         ]
     )
-    ledger = await session_restore.capture(chrome)
+    ledger = await session_restore.capture(chrome, now=NOW)
     assert ledger is not None
     assert [tab.url for tab in ledger.tabs] == ["https://a.example/", "https://b.example/"]
     assert ledger.tabs[0].pinned is True
     assert ledger.tabs[1].group == "Meiva #7"
     assert ledger.layout is True
     assert ledger.pending == PENDING_RESTORE
+    assert ledger.captured_at == NOW.isoformat(timespec="seconds")
 
 
 async def test_capture_falls_back_to_urls_when_the_worker_is_unavailable() -> None:
@@ -184,7 +192,7 @@ async def test_capture_falls_back_to_urls_when_the_worker_is_unavailable() -> No
             {"type": "page", "url": "https://b.example/"},
         ],
     )
-    ledger = await session_restore.capture(chrome)
+    ledger = await session_restore.capture(chrome, now=NOW)
     assert ledger is not None
     assert [tab.url for tab in ledger.tabs] == ["https://a.example/", "https://b.example/"]
     assert ledger.layout is False
@@ -193,7 +201,7 @@ async def test_capture_falls_back_to_urls_when_the_worker_is_unavailable() -> No
 
 async def test_capture_without_a_browser_records_nothing() -> None:
     chrome = FakeChrome(layout=RuntimeError("no worker"), listing=OSError("connection refused"))
-    assert await session_restore.capture(chrome) is None
+    assert await session_restore.capture(chrome, now=NOW) is None
 
 
 # meiva:note
@@ -287,9 +295,9 @@ def test_report_counts_urls_and_layout_separately(tmp_path: Path) -> None:
             {"type": "page", "url": "about:blank"},
         ]
     )
-    assert session_restore.report(home=tmp_path, chrome=chrome, wait_s=0) == (
-        "browser session: restored 2/2 tabs; pin/group reapplied 1/1"
-    )
+    assert session_restore.report(
+        home=tmp_path, chrome=chrome, timers=system_clock(), wait_s=0
+    ) == ("browser session: restored 2/2 tabs; pin/group reapplied 1/1")
 
 
 def test_report_never_counts_the_browsers_own_blank_tab(tmp_path: Path) -> None:
@@ -300,23 +308,25 @@ def test_report_never_counts_the_browsers_own_blank_tab(tmp_path: Path) -> None:
             {"type": "page", "url": "https://a.example/"},
         ]
     )
-    assert session_restore.report(home=tmp_path, chrome=chrome, wait_s=0) == (
-        "browser session: restored 1/1 tabs; pin/group reapplied 0/0"
-    )
+    assert session_restore.report(
+        home=tmp_path, chrome=chrome, timers=system_clock(), wait_s=0
+    ) == ("browser session: restored 1/1 tabs; pin/group reapplied 0/0")
 
 
 def test_report_counts_a_url_once_per_tab(tmp_path: Path) -> None:
     _report_ledger(tmp_path, [_tab("https://a.example/"), _tab("https://a.example/", index=1)])
     chrome = FakeChrome(listing=[{"type": "page", "url": "https://a.example/"}])
-    assert session_restore.report(home=tmp_path, chrome=chrome, wait_s=0) == (
-        "browser session: restored 1/2 tabs; pin/group reapplied 0/0"
-    )
+    assert session_restore.report(
+        home=tmp_path, chrome=chrome, timers=system_clock(), wait_s=0
+    ) == ("browser session: restored 1/2 tabs; pin/group reapplied 0/0")
 
 
 def test_report_says_so_when_the_layout_was_never_recorded(tmp_path: Path) -> None:
     _report_ledger(tmp_path, [_tab("https://a.example/")], layout=False)
     chrome = FakeChrome(listing=[{"type": "page", "url": "https://a.example/"}])
-    assert session_restore.report(home=tmp_path, chrome=chrome, wait_s=0) == (
+    assert session_restore.report(
+        home=tmp_path, chrome=chrome, timers=system_clock(), wait_s=0
+    ) == (
         "browser session: restored 1/1 tabs; pin/group not recorded (the worker was unavailable at stop)"
     )
 
@@ -324,8 +334,14 @@ def test_report_says_so_when_the_layout_was_never_recorded(tmp_path: Path) -> No
 def test_report_is_printed_once(tmp_path: Path) -> None:
     _report_ledger(tmp_path, [_tab("https://a.example/")])
     chrome = FakeChrome(listing=[{"type": "page", "url": "https://a.example/"}])
-    assert session_restore.report(home=tmp_path, chrome=chrome, wait_s=0) is not None
-    assert session_restore.report(home=tmp_path, chrome=chrome, wait_s=0) is None
+    assert (
+        session_restore.report(home=tmp_path, chrome=chrome, timers=system_clock(), wait_s=0)
+        is not None
+    )
+    assert (
+        session_restore.report(home=tmp_path, chrome=chrome, timers=system_clock(), wait_s=0)
+        is None
+    )
 
 
 # meiva:note
@@ -353,7 +369,7 @@ def test_record_for_stop_writes_a_restorable_ledger(tmp_path: Path) -> None:
             ]
         ]
     )
-    line = session_restore.record_for_stop(home=tmp_path, chrome=chrome)
+    line = session_restore.record_for_stop(home=tmp_path, chrome=chrome, now=NOW)
     stored = session_restore.read(tmp_path)
     assert stored is not None and stored.pending == PENDING_RESTORE
     assert line == "browser session: recorded 2 tab(s) (1 pinned, 1 tab group(s))"
@@ -363,7 +379,7 @@ def test_record_for_stop_never_raises_and_records_nothing_without_a_browser(
     tmp_path: Path,
 ) -> None:
     chrome = FakeChrome(layout=RuntimeError("no worker"), listing=OSError("no browser"))
-    line = session_restore.record_for_stop(home=tmp_path, chrome=chrome)
+    line = session_restore.record_for_stop(home=tmp_path, chrome=chrome, now=NOW)
     assert session_restore.read(tmp_path) is None
     assert line is not None and "nothing to record" in line
 
@@ -436,7 +452,7 @@ async def test_the_ladder_reloads_the_extension_after_a_dead_worker_refuses_atta
         sock = next(iter(server.sockets))
         addr: tuple[str, int] = sock.getsockname()
         ws_port = addr[1]
-        chrome = session_restore.CdpChrome(ws_port)
+        chrome = session_restore.CdpChrome(ws_port, timers=system_clock())
         assert await chrome.worker("meivaLayout()") == {"ok": True}
     # meiva:note
     # The first attempt hit the dead target; the reload answered.
@@ -476,6 +492,6 @@ def test_report_still_prints_when_the_daemon_finished_first(tmp_path: Path) -> N
         ),
     )
     chrome = FakeChrome(listing=[{"type": "page", "url": "https://a.example/"}])
-    assert session_restore.report(home=tmp_path, chrome=chrome, wait_s=0) == (
-        "browser session: restored 1/1 tabs; pin/group reapplied 1/1"
-    )
+    assert session_restore.report(
+        home=tmp_path, chrome=chrome, timers=system_clock(), wait_s=0
+    ) == ("browser session: restored 1/1 tabs; pin/group reapplied 1/1")

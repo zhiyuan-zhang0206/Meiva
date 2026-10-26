@@ -102,7 +102,7 @@ async def _settle_attempts(
                 activate_accepted=False,
                 incarnation=incarnation,
                 timestamps=held.timestamps,
-                host=process_host(held.machine, rng=held.rng),
+                host=process_host(held.machine, rng=held.rng, clock=held.timestamps.clock),
             )
         except ImpersonationError:
             raise

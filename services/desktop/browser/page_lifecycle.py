@@ -44,7 +44,7 @@ from typing import Any, Protocol
 from mcp import types
 
 from base import telemetry
-from base.clock import SYSTEM_TIMERS, Clock, ClockConfig, Timers
+from base.clock import Clock
 from base.log import logger
 from services.desktop.browser.protocol import Request, Response
 
@@ -146,17 +146,10 @@ class PageRegistry:
         self,
         default_ttl_seconds: float = DEFAULT_PAGE_TTL_SECONDS,
         *,
-        timers: Timers = SYSTEM_TIMERS,
+        clock: Clock,
     ) -> None:
         self.default_ttl_seconds = float(default_ttl_seconds)
-        self._clock = Clock(
-            ClockConfig(
-                timezone="UTC",
-                authoritative_timezone="UTC",
-                message_timestamp_weekday=False,
-            ),
-            timers=timers,
-        )
+        self._clock = clock
         self.affinity: dict[int, int | None] = {}
         self.ttl_deadlines: dict[int, float] = {}
         self.page_owners: dict[int, int] = {}

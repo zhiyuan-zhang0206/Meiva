@@ -16,6 +16,7 @@ from base.agents import impersonation as leases
 from base.agents.impersonation.tests.test_host_transport import FakeAppServer
 from base.agents.impersonation.tests.test_host_transport import short_socket as short_socket
 from base.agents.observation.relay_supervision import RelayChild, RelaySupervision
+from base.clock import Clock
 from base.native_process.runtime_incarnation import RuntimeIncarnation
 
 DEGRADED = STALE_RELAY_REASON
@@ -36,6 +37,7 @@ async def _supervise(
         owner.agent_id,
         relays,
         incarnation=owner if native else None,
+        clock=Clock.from_settings(),
     )
 
 

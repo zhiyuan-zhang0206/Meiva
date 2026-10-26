@@ -16,6 +16,7 @@ from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from base import paths, telemetry
 from base.api_contracts.agent_contract import MeivaAgentError
+from base.clock import SYSTEM_TIMERS, Clock
 from base.cluster.machine.boot import gateway_access_from_boot
 from base.cluster.machine.configured import ConfiguredMachineIdentity
 from base.cluster.rate_limit import LoginRateLimitConfig, LoginRateLimiter
@@ -363,6 +364,7 @@ async def _cookie_session(request: Request, secret: str) -> tuple[str, str] | No
         cookie_token,
         secret,
         home=request.app.state.gateway_process.home,
+        now=request.app.state.clock.now(),
         cache=request.app.state.machine_token_acceptance,
     )
     return None if fact is None else (cookie_token, fact)
@@ -485,6 +487,7 @@ def create_app(
         openapi_url=None,
     )
     app.state.gateway_config = config
+    app.state.clock = Clock(config.clock, timers=SYSTEM_TIMERS)
     app.state.catalog = catalog
     if isinstance(catalog, ModelCatalog):
         app.state.memory_embedder = memory_router.build_embedder(config.memory_search, catalog)
@@ -575,14 +578,17 @@ def create_app(
 
 
 # meiva:note
-# The app's configuration as this process root builds it: the account home and the memory directory
-# under it are read here, once, and the entropy every request id, attempt id, upload batch id and
-# session key is drawn from is the operating system's.
-def process_config(config: ConfigBoot) -> GatewayConfig:
+# The app's configuration as this process root builds it: the account home is read here, once; the
+# memory directory is derived from the Meiva home the entry resolved and hands in; and the entropy
+# every request id, attempt id, upload batch id and session key is drawn from is the operating
+# system's.
+def process_config(config: ConfigBoot, *, home: Path) -> GatewayConfig:
     return gateway_config_from_boot(
         config,
         user_home=Path.home(),
-        memory_root=paths.gateway_memory_dir(roles=ConfiguredMachineIdentity(config).role()),
+        memory_root=paths.gateway_memory_dir(
+            roles=ConfiguredMachineIdentity(config).role(), home=home
+        ),
         rng=secrets.SystemRandom(),
     )
 
@@ -592,15 +598,16 @@ def create_app_from_environment() -> FastAPI:
     config = ConfigBoot()
     config.boot()
     config.ensure_eager()
+    home = paths.meiva_home()
     process = GatewayProcess(
-        home=paths.meiva_home(),
+        home=home,
         config=config,
         image=LOADED_IMAGE,
         machine=ConfiguredMachineIdentity(config),
         host=Host.system(),
     )
     return create_app(
-        process_config(process.config),
+        process_config(process.config, home=home),
         process=process,
         process_ownership="owned",
         catalog=load_model_catalog(build_model_catalog),
@@ -634,7 +641,7 @@ def openapi_schema_of(config: ConfigBoot, *, home: Path) -> dict[str, Any]:
 
 def _borrowed_app(process: GatewayProcess) -> FastAPI:
     return create_app(
-        process_config(process.config),
+        process_config(process.config, home=process.home),
         process=process,
         process_ownership="borrowed",
         catalog=load_model_catalog(build_model_catalog),
@@ -646,4 +653,4 @@ def main() -> None:
     config = ConfigBoot()
     config.boot()
     config.ensure_eager()
-    _run_gateway(config=config, build_app=_borrowed_app)
+    _run_gateway(home=paths.meiva_home(), config=config, build_app=_borrowed_app)
