@@ -87,9 +87,10 @@ RESTART_HELPER = guest_script(
 )
 # meiva:note
 # One JSON line for the host to judge: the helper's ping, its designated requirement and CDHash, the system TCC rows (with the code requirement blob) and a capture through the helper reduced to colour statistics. Runs in the checkout's venv.
-_VERIFY_PY = """
+VERIFY_PY = """
 import collections, json, struct, subprocess
 from base.paths import permissions_helper_app_dir
+from base.paths.home import resolve_meiva_home
 from base.sessions.helperproc import helper_client
 
 client = helper_client()
@@ -97,7 +98,7 @@ client = helper_client()
 def out(*argv):
     return subprocess.run(argv, capture_output=True, text=True).stdout
 
-app = str(permissions_helper_app_dir() / "MeivaPermissionsHelper.app")
+app = str(permissions_helper_app_dir(home=resolve_meiva_home()) / "MeivaPermissionsHelper.app")
 record = {"ping": dict(client.ping())}
 signing = subprocess.run(["codesign", "-dv", "-r-", "--verbose=4", app], capture_output=True, text=True)
 record["signature"] = [
@@ -129,7 +130,7 @@ print("RECORD " + json.dumps(record))
 """
 VERIFY = guest_script(
     f"cd \"{GUEST_SOURCE}\" && MEIVA_CONFIG_FETCH=skip .venv/bin/python - <<'PY'\n"
-    + _VERIFY_PY.replace("@TCC_DB@", TCC_DB).replace("@BUNDLE_ID@", BUNDLE_ID)
+    + VERIFY_PY.replace("@TCC_DB@", TCC_DB).replace("@BUNDLE_ID@", BUNDLE_ID)
     + "PY\n"
 )
 FINALIZE = guest_script('rm -rf "$HOME/.meiva/source"')
