@@ -112,7 +112,8 @@ def probe_backend(name: str, *, urls: Mapping[str, str]) -> DaemonProbe:
 
 # meiva:note
 # Send one unique OTLP log to the Loki at `loki_url` and verify that Loki made it queryable. A
-# throttled push is retried once per entry of `backoff_s`, pausing that many seconds first on `clock`.
+# throttled push is retried once per entry of `backoff_s`, pausing that many seconds first on
+# `clock`.
 def write_path_probe(
     loki_url: str,
     *,

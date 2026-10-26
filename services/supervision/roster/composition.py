@@ -52,10 +52,10 @@ def redis_bridge_launch(endpoint: RedisBridgeEndpoint | None) -> tuple[str, str,
 # meiva:note
 # Observe the relay endpoint when the roster is built. The required-relay gate
 # reports an unconfigured home; its declaration still carries the bare command.
-def redis_bridge_command() -> tuple[str, str, int]:
+def redis_bridge_command(home: Path) -> tuple[str, str, int]:
     try:
         endpoint = redis_bridge_endpoint(
-            meiva_home(),
+            home,
             machine_host=lambda: str(get_field("machine_host")).strip() or "localhost",
             remote_data_plane=lambda: names_foreign_host(
                 str(get_field("db_url")), str(get_field("redis_url"))
@@ -107,9 +107,10 @@ def build_services(
     from services.supervision.healthchecks.protocol_probe import probe as probe_protocol
     from services.supervision.healthchecks.redis_bridge import probe_relay
 
+    home = meiva_home()
     _fe_port = app_port()
     _fe_url = f"http://localhost:{_fe_port}"
-    _bridge_cmd, _bridge_host, _bridge_port = redis_bridge_command()
+    _bridge_cmd, _bridge_host, _bridge_port = redis_bridge_command(home)
     gateway_health_url = str(get_field("gateway_health_url"))
     gateway_shutdown_timeout_s = float(get_field("gateway_graceful_shutdown_timeout_seconds"))
     memory_search_port = int(get_field("memory_search_port"))
@@ -120,9 +121,7 @@ def build_services(
     browser_cdp_port = int(get_field("browser_cdp_port"))
     browser_profile = profile_dir()
     telemetry_otlp_port = int(get_field("telemetry_otlp_port"))
-    probe_protocol_service = partial(
-        probe_protocol, home=meiva_home(), browser_cdp_port=browser_cdp_port
-    )
+    probe_protocol_service = partial(probe_protocol, home=home, browser_cdp_port=browser_cdp_port)
 
     gateway_services = (
         ServiceSpec(
@@ -395,12 +394,12 @@ def build_services(
             session="otel-collector",
             cmd=shlex.join(
                 [
-                    str(otel_collector_binary(meiva_home())),
+                    str(otel_collector_binary(home)),
                     "--config",
-                    str(otel_collector_config(meiva_home())),
+                    str(otel_collector_config(home)),
                 ]
             ),
-            config_inputs=(otel_collector_config(meiva_home()),),
+            config_inputs=(otel_collector_config(home),),
             capabilities=BOTH,
             requires_db=False,
             # meiva:note
@@ -425,8 +424,8 @@ def build_services(
     observability_services = tuple(
         ServiceSpec(
             session=name,
-            cmd=shlex.join(service_argv(meiva_home(), name)),
-            config_inputs=service_input_paths(meiva_home(), name),
+            cmd=shlex.join(service_argv(home, name)),
+            config_inputs=service_input_paths(home, name),
             capabilities=frozenset({"gateway", "agent-runner", "observability-station"}),
             requires_db=False,
             curl_url=urls[name] + HEALTH_PATHS[name],
