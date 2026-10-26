@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import os
 import secrets
 from collections.abc import Callable
 from dataclasses import dataclass, replace
@@ -30,6 +29,13 @@ from base.lm.harness.registration import (
     handle_digest,
 )
 from base.lm.harness.registry import SessionRecord, SessionRegistry
+from base.native_process.os_platform import resolve_pid
+
+
+# meiva:note
+# Generate a 256-bit URL-safe attachment handle token from OS randomness.
+def _new_handle() -> str:
+    return secrets.token_urlsafe(32)
 
 
 class HarnessTurnFaultedError(RuntimeError):
@@ -94,6 +100,8 @@ class HarnessBridge:
         handoff: Handoff | None = None,
         registrations: RegistrationStore | None = None,
         registration_ttl_seconds: float,
+        controller_pid: int | None = None,
+        new_handle: Callable[[], str] = _new_handle,
     ) -> None:
         self.harness = harness
         self._agent_id = agent_id
@@ -104,6 +112,8 @@ class HarnessBridge:
         if registration_ttl_seconds <= 0:
             raise ValueError(f"a harness registration must expire, got {registration_ttl_seconds}s")
         self._registration_ttl = timedelta(seconds=registration_ttl_seconds)
+        self._controller_pid = resolve_pid(controller_pid)
+        self._new_handle = new_handle
         self._created_at: str | None = None
         self._session: HarnessSession | None = None
         self._model: str | None = None
@@ -144,7 +154,7 @@ class HarnessBridge:
             return self._session
         if self._closed:
             raise HarnessClosedError("this harness bridge is closed")
-        handle = secrets.token_urlsafe(32)
+        handle = self._new_handle()
         self._digest = handle_digest(handle)
         self._register("")
         session = self._factory(handle)
@@ -250,7 +260,7 @@ class HarnessBridge:
                 harness=self.harness.value,
                 external_session_id=external_session_id,
                 machine=self._machine,
-                controller_pid=os.getpid(),
+                controller_pid=self._controller_pid,
                 handle_sha256=self._digest,
                 created_at=self._created_at,
                 expires_at=(now + self._registration_ttl).isoformat(timespec="seconds"),
