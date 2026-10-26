@@ -20,6 +20,9 @@
 # - **`machine`**: the composition root's read-only machine identity, shared with its database,
 #   logger and event pipeline. It can be supplied without an agent or live clients;
 #   `require_machine()` rejects a context that did not receive one.
+# - **root values** (`user_home`, `meiva_home`, `rng`): what the process's composition root read or
+#   built once, for code below it to ask by `require_*()` instead of reading the account's home,
+#   resolving `MEIVA_HOME` or constructing a generator itself.
 # - **host-held state** the graph reads or writes across turns: `turn_progress`, `relays`.
 #   The host builds each once and hands the same object to every turn it runs;
 #   a context built without them (the eval driver, a test) carries private ones.
@@ -35,10 +38,12 @@
 
 from __future__ import annotations
 
+import random
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Protocol, Self
+from uuid import UUID
 
 from base.agents.context.clients import ClientSet, LazyConnection
 from base.agents.context.identity import AgentIdentity
@@ -159,14 +164,23 @@ class MeivaContext:
     # meiva:note
     # The invoking user's home directory, which the root fills when it builds the context
     # (`meiva/boot.py` for an SDK process, the agent host's root for a hosted agent). Code that
-    # needs it asks `require_user_home()` instead of reading `Path.home()` itself.
+    # needs it asks `require_user_home()` instead of reading `Path.home()` itself. It is the
+    # operating-system account's home (`~`); the Meiva home is `meiva_home`.
     user_home: Path | None = None
 
     # meiva:note
-    # The identifier source of this process: each call returns a fresh unique string. The root
-    # fills it when it builds the context, with the generator it owns; code that mints an
-    # identifier asks `require_new_id()` instead of calling `uuid4()` itself.
-    new_id: Callable[[], str] | None = None
+    # The Meiva home of the cluster this process works in (`MEIVA_HOME`: config, logs, skills and
+    # the data under them), which the root fills with the home it resolved once at its entry. Code
+    # that needs it asks `require_meiva_home()` instead of resolving the home a second way.
+    meiva_home: Path | None = None
+
+    # meiva:note
+    # The random source of this process, which the root fills with the generator it builds once.
+    # Retry jitter and identifiers draw from it through `require_rng()` / `require_new_id()`
+    # instead of constructing a generator. A root whose identifiers must stay unique across
+    # processes (idempotency keys, credentials) hands in a `random.SystemRandom`; a plain
+    # `random.Random` suffices for jitter alone.
+    rng: random.Random | None = None
 
     # meiva:note
     # Read the user home the root recorded; a partial context fails at first use, with no fallback
@@ -177,12 +191,27 @@ class MeivaContext:
         return self.user_home
 
     # meiva:note
-    # Mint a fresh identifier from the root's source; a partial context fails at first use, with
-    # no fallback to a local generator.
+    # Read the Meiva home the root recorded; a partial context fails at first use, with no
+    # fallback to resolving the home from the environment.
+    def require_meiva_home(self) -> Path:
+        if self.meiva_home is None:
+            raise RuntimeError("this MeivaContext carries no Meiva home")
+        return self.meiva_home
+
+    # meiva:note
+    # Read the random source the root recorded; a partial context fails at first use, with no
+    # fallback to a generator of its own.
+    def require_rng(self) -> random.Random:
+        if self.rng is None:
+            raise RuntimeError("this MeivaContext carries no random generator")
+        return self.rng
+
+    # meiva:note
+    # Mint a fresh version-4 identifier from the root's generator: 128 bits drawn from it, so the
+    # identifiers are unique across processes exactly when the root's generator is a
+    # `random.SystemRandom`.
     def require_new_id(self) -> str:
-        if self.new_id is None:
-            raise RuntimeError("this MeivaContext carries no identifier source")
-        return self.new_id()
+        return str(UUID(int=self.require_rng().getrandbits(128), version=4))
 
     # meiva:note
     # The message-timestamp policy of the unit of work that asks: this owner's clock and the

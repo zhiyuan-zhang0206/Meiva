@@ -1,15 +1,16 @@
-"""`EventBus`: the injected handle to the cluster Redis and its live-events channel.
-
-Components take an `EventBus` (or a client it opened), never the Redis URL or the channel name:
-the URL carries the login. A composition root builds the handle once (`EventBus.from_settings()`)
-and passes it down. The module-level `get_async_redis()` / `sync_redis()` / `publish_best_effort*`
-in `base.events.live.redis_client` remain as the process default that reads the live settings at
-each call, a shim that the `ambient-bus` rule (meizel/state/ambient_state) bans package by
-package.
-
-The transport decisions (resilience kwargs, auth-retry, the best-effort publish discipline) stay
-in `redis_client`; this class only binds one `EventBusConfig` to them.
-"""
+# meiva:note
+# `EventBus`: the injected handle to the cluster Redis and its live-events channel.
+#
+# Components take an `EventBus` (or a client it opened), never the Redis URL or the channel name:
+# the URL carries the login. A composition root builds the handle once
+# (`EventBus.from_settings(rng=...)`, with the process's random generator for the retry jitter)
+# and passes it down. The module-level `get_async_redis()` / `sync_redis()` /
+# `publish_best_effort*` in `base.events.live.redis_client` remain as the process default that
+# reads the live settings at each call, a shim that the `ambient-bus` rule
+# (meizel/state/ambient_state) bans package by package.
+#
+# The transport decisions (resilience kwargs, auth-retry, the best-effort publish discipline) stay
+# in `redis_client`; this class only binds one `EventBusConfig` to them.
 
 from __future__ import annotations
 
