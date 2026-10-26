@@ -78,7 +78,7 @@ below `cli/commands/cluster/` reads `settings` or the process environment.
   the directories it will delete. It acts on the default home too: the typed path
   is the guard.
 - A home that is not the default home neither registers nor removes OS jobs
-  (`base.host.system.cron.mechanics.owns_os_jobs`): their labels and crontab markers name the
+  (`base.host.system.cron.mechanics.owns_os_job_home`): their labels and crontab markers name the
   job, not a home.
 - A destroyed home keeps its files, `.env` included — that `.env` is the only
   copy of the cluster's secret, of any explicitly configured provider credentials, and

@@ -242,7 +242,9 @@ def test_register_delegates_when_credentials_pass(
         "bootstrap",
     ]
 
-    job.unregister_pr_flow_job(host=host, user_home=default_home)
+    job.unregister_pr_flow_job(
+        host=host, roots=replace(job_roots, home=default_home / ".meiva", user_home=default_home)
+    )
     assert not plist.exists()
     assert [argv[1] for argv in commands.argvs if argv[1] != "print"] == [
         "bootout",

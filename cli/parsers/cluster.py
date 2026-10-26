@@ -64,6 +64,7 @@ def _h_cluster_destroy(args: argparse.Namespace) -> int:
         stop_mode=StopMode(args.stop_mode),
         stop_timeout_s=args.stop_timeout,
         checkout=runtime.checkout,
+        user_home=runtime.session.user_home,
         helper_port=runtime.config.view.services.permissions_helper_port,
     )
     return cmd_cluster_destroy(request, host=runtime.host, terminal=runtime.terminal)
@@ -81,18 +82,30 @@ def _h_cluster_health_probe(args: argparse.Namespace) -> int:
 
 
 def _h_cluster_health_probe_register(args: argparse.Namespace) -> int:
+    from base.host.system.job_values import JobRoots
     from cli.commands.cluster.cron import cmd_cron_register
 
     runtime = args.runtime
     return cmd_cron_register(
-        os_jobs_enabled=runtime.config.view.general.os_jobs_enabled, host=runtime.host
+        os_jobs_enabled=runtime.config.view.general.os_jobs_enabled,
+        host=runtime.host,
+        roots=JobRoots(
+            home=runtime.home, repo=runtime.checkout, user_home=runtime.session.user_home
+        ),
     )
 
 
 def _h_cluster_health_probe_unregister(args: argparse.Namespace) -> int:
+    from base.host.system.job_values import JobRoots
     from cli.commands.cluster.cron import cmd_cron_unregister
 
-    return cmd_cron_unregister(host=args.runtime.host)
+    runtime = args.runtime
+    return cmd_cron_unregister(
+        host=runtime.host,
+        roots=JobRoots(
+            home=runtime.home, repo=runtime.checkout, user_home=runtime.session.user_home
+        ),
+    )
 
 
 def _h_cluster_db_authority_issue_unit(args: argparse.Namespace) -> int:

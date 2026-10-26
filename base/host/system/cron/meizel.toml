@@ -9,6 +9,3 @@ exports = ["health_content.py", "health_job.py", "mechanics.py"]
 
 [debt.ambient-read]
 "health_job.py#environ base.native_process.os_platform.launchd_job_label" = 1
-"health_job.py#home base.paths.meiva_home" = 1
-"mechanics.py#home base.paths.home.resolve_meiva_home" = 1
-"mechanics.py#home base.paths.meiva_home" = 1
