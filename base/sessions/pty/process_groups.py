@@ -10,6 +10,7 @@ import os
 import time
 from collections.abc import Iterable
 
+from base.native_process.os_platform import resolve_pid
 from base.native_process.ownership import OwnedProcess
 from base.native_process.process_control import ProcessControl
 
@@ -21,23 +22,24 @@ def live(identity: OwnedProcess) -> bool:
     return identity.live()
 
 
+# meiva:note
+# Signal each known group once, while its recorded member still verifies.
+# The caller's own group is never signaled as a batch: only the recorded birth is signaled.
+# Process disappearance is normal; other OS errors propagate.
 def signal(
     identities: Iterable[OwnedProcess],
     signum: int,
     *,
     process_control: ProcessControl,
+    current_pid: int | None = None,
 ) -> None:
-    """Signal each known group once, while its recorded member still verifies.
-
-    The caller's own group is never signaled as a batch: only the recorded birth
-    is signaled. Process disappearance is normal; other OS errors propagate.
-    """
     sent: set[int] = set()
     own_group = os.getpgrp()
+    own_pid = resolve_pid(current_pid)
     for identity in identities:
         if not live(identity):
             continue
-        if identity.pid == os.getpid():
+        if identity.pid == own_pid:
             raise RuntimeError("PTY cleanup cannot signal its own process")
         try:
             group = process_control.getpgid(identity.pid)

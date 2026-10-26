@@ -17,6 +17,7 @@
 from __future__ import annotations
 
 import logging
+import subprocess
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime
 from pathlib import Path
@@ -32,8 +33,9 @@ from base.deploy.git.cluster_drift import checkout_head_sha
 from base.deploy.lifecycle import start_serving
 from base.host.env.registry import process_environment
 from base.host.proc import process_alive
-from base.host.resource_sample import ResourceSample, resource_sample
+from base.host.resource_sample import ResourceSample, battery_sample, resource_sample
 from base.native_process.loaded_commit import LoadedCommit
+from base.native_process.os_platform import is_macos, primary_disk_path
 from base.paths import resolve_meiva_home
 from base.sessions.backend import get_backend, get_shell_backend
 from ops.cluster_status.model import (
@@ -149,9 +151,15 @@ def read_db_snapshot(
 
 # meiva:note
 # One live resource sample, degraded to None on any psutil failure.
-def read_resource_sample() -> ResourceSample | None:
+def read_resource_sample(*, ts: float | None = None) -> ResourceSample | None:
+    sample_ts = cluster_now().timestamp() if ts is None else ts
+    platform = "darwin" if is_macos() else "other"
     try:
-        return resource_sample()
+        return resource_sample(
+            ts=sample_ts,
+            disk_path=primary_disk_path(),
+            battery_fn=lambda: battery_sample(platform=platform, run=subprocess.run),
+        )
     except Exception:  # psutil may not be installed; degrade gracefully
         _log.warning("resource_sample failed (psutil missing?)", exc_info=True)
         return None
@@ -192,15 +200,16 @@ def status_snapshot(
         else None
     )
     supervisor_online = _supervisor_online(home)
+    now = cluster_now()
     sessions = collect_sessions(
-        service_backend=get_backend(), shell_backend=get_shell_backend(), now=cluster_now()
+        service_backend=get_backend(), shell_backend=get_shell_backend(), now=now
     )
     # meiva:note
     # The live one-shot resource sample blocks for its CPU interval. Run it in parallel with
     # the central-DB reads so snapshot latency pays the slower of those independent
     # operations, not their sum.
     with ThreadPoolExecutor(max_workers=1) as executor:
-        resource_future = executor.submit(read_resource_sample)
+        resource_future = executor.submit(read_resource_sample, ts=now.timestamp())
         db_snapshot = read_db_snapshot(db, pool, machine_name=machine_name, count_agents=runner)
         resource = resource_future.result()
     return assemble_status(

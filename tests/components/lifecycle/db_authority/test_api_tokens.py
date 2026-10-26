@@ -28,10 +28,9 @@ from base.cluster.machine import (
     GatewayApiTokenMissing,
     MachineIdentityReader,
     MachineRole,
-    daemon_acceptance,
     gateway_auth_headers,
 )
-from base.cluster.machine.configured import ConfiguredMachineIdentity
+from base.cluster.machine.configured import ConfiguredMachineIdentity, daemon_acceptance
 from base.config import get_field, set_field, settings
 from base.daemon.http_transport import start_daemon_http
 from base.host.db_authority import api, delivery, ledger, model, unit

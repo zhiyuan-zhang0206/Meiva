@@ -14,7 +14,7 @@ from base.host.resource_sample import (
 
 class TestResourceSample:
     def test_returns_a_self_consistent_reading(self) -> None:
-        s = resource_sample()
+        s = resource_sample(ts=100.0)
         assert isinstance(s, ResourceSample)
         assert s.cpu_pct >= 0.0
         assert 0.0 <= s.mem_pct <= 100.0
@@ -30,13 +30,13 @@ class TestResourceSample:
             intervals.append(interval)
             return psutil.cpu_percent(interval=interval)
 
-        first = resource_sample(cpu_percent=spy)
-        second = resource_sample(cpu_percent=spy)
+        first = resource_sample(ts=100.0, cpu_percent=spy)
+        second = resource_sample(ts=101.0, cpu_percent=spy)
         assert intervals == [CPU_INTERVAL_S, CPU_INTERVAL_S]
         assert second.ts >= first.ts
 
     def test_is_frozen(self) -> None:
-        s = resource_sample()
+        s = resource_sample(ts=100.0)
         with pytest.raises(Exception, match="frozen"):
             s.cpu_pct = 1.0
 
@@ -45,7 +45,7 @@ class TestResourceSample:
             raise RuntimeError("no psutil")
 
         with pytest.raises(RuntimeError, match="no psutil"):
-            resource_sample(cpu_percent=_fail)
+            resource_sample(ts=100.0, cpu_percent=_fail)
 
 
 class TestBatterySample:
@@ -113,7 +113,7 @@ class TestBatterySample:
         assert battery_sample(platform="darwin", run=_raise_timeout) == {}
 
     def test_sample_carries_battery_fields(self) -> None:
-        s = resource_sample(battery_fn=lambda: parse_battery(self.PMSET_CHARGING))
+        s = resource_sample(ts=100.0, battery_fn=lambda: parse_battery(self.PMSET_CHARGING))
         assert s.battery_percent == 80
         assert s.battery_power == "ac"
         assert s.battery_charging is True

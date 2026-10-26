@@ -29,9 +29,9 @@ from psycopg_pool import ConnectionPool, PoolTimeout
 from base.clock import SYSTEM_TIMERS, Clock
 from base.clock.configuration import clock_config_from_boot
 from base.cluster.dataplane.direct_url import ClusterDirectUrl
-from base.cluster.machine import GatewayAccess, daemon_acceptance, gateway_auth_headers
+from base.cluster.machine import GatewayAccess, gateway_auth_headers
 from base.cluster.machine.boot import gateway_access_from_boot
-from base.cluster.machine.configured import ConfiguredMachineIdentity
+from base.cluster.machine.configured import ConfiguredMachineIdentity, daemon_acceptance
 from base.config import ConfigBoot
 from base.daemon.endpoints import ServiceEndpoint, ServiceEndpoints
 from base.daemon.health import Liveness, start_health_server, stop_health_server
