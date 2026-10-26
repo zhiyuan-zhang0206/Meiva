@@ -3,7 +3,6 @@ from __future__ import annotations
 import base64
 from pathlib import Path
 
-import pytest
 from langchain_core.language_models.fake_chat_models import FakeListChatModel
 from PIL import Image
 
@@ -225,14 +224,10 @@ def test_provider_without_attach_policy_uses_core_size_and_dimension_defaults(
 
 def test_deepseek_attach_policy_switches_dimension_tier_at_image_15(
     tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
     *,
     model_catalog: ModelCatalog,
 ) -> None:
     model_name = "deepseek-flash"
-    from base.lm.attach import packing as attach
-
-    monkeypatch.setattr(attach, "ATTACH_MAX_FILES_PER_TURN", 15)
     entries: list[AttachEntry] = []
     for index in range(1, 14):
         path = tmp_path / f"image-{index}.png"
@@ -245,7 +240,7 @@ def test_deepseek_attach_policy_switches_dimension_tier_at_image_15(
     _png(image_15, (4097, 1))
     entries.append(_entry(image_15))
 
-    pack = pack_attachments(model_name, entries, catalog=model_catalog)
+    pack = pack_attachments(model_name, entries, catalog=model_catalog, max_files_per_turn=15)
 
     assert pack is not None
     assert str(image_14.resolve()) in pack.delivered
