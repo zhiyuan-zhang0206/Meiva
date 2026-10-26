@@ -6,7 +6,8 @@ from collections.abc import Iterable, Mapping
 from pathlib import Path
 
 from base.api_contracts.agent_contract import Harness
-from base.host.env.harness_binaries import with_harness_path
+from base.host.env.harness_binaries import resolve_harness_binary, with_harness_path
+from base.host.env.registry import process_environment
 from base.lm.harness.antigravity import AgySession, AntigravityConfig
 from base.lm.harness.antigravity import build_handoff as antigravity_handoff
 from base.lm.harness.bridge import HarnessBridge, HarnessSession, ScopedSessionRegistry
@@ -59,9 +60,13 @@ def open_session(
     skip_permissions: bool = True,
 ) -> HarnessSession:
     if harness is Harness.CLAUDE_CODE:
+        claude_env = session_environ(environ)
         return ClaudeSession(
-            BridgeConfig(cwd=cwd),
-            environ=session_environ(environ),
+            BridgeConfig(
+                cwd=cwd,
+                cli_path=resolve_harness_binary("claude", path_env=claude_env.get("PATH")),
+            ),
+            environ={**dict.fromkeys(process_environment(), ""), **claude_env},
             agent_id=agent_id,
             registry=registry,
         )

@@ -1,8 +1,11 @@
-purity = "strict-to-be"
 exports = ["checkpoints.py", "driver.py"]
 
 [uses]
 "__init__.py" = ["checkpoints.py"]
+
+[purity]
+"." = "strict-to-be"
+"checkpoints.py" = "strict"
 
 [debt.impure-call]
 "__init__.py#async def finish_completed_invocation" = 1

@@ -18,6 +18,7 @@ DEFAULT_MODEL = "claude-sonnet-5-5"
 class BridgeConfig:
     cwd: Path
     model: str = DEFAULT_MODEL
+    cli_path: str | None = None
     tools: tuple[str, ...] | None = None
     permission_mode: str = "bypassPermissions"
     max_turns: int | None = 24

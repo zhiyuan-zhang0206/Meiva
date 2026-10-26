@@ -3,7 +3,7 @@ exports = ["auth.py", "http_dial.py", "ports.py", "predicates.py", "resilience.p
 [uses]
 "auth.py" = ["__init__.py"]
 "http_dial.py" = ["predicates.py"]
-"tests" = ["auth.py", "http_dial.py", "ports.py", "predicates.py", "resilience.py", "url_secret.py"]
+"tests" = ["__init__.py", "auth.py", "http_dial.py", "ports.py", "predicates.py", "resilience.py", "url_secret.py"]
 "url_secret.py" = ["predicates.py"]
 
 [purity]
