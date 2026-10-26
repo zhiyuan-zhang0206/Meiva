@@ -17,12 +17,12 @@ tags:
 `base/sessions/pty/tests/test_pty_sessions_screen.py`, and the environment boundary
 and selection canaries.
 Directory ownership includes descendant tests and their existing local fixtures,
-except the exact `NATIVE_TEST_PATHS` compiler-contract file
-`meizel/tests/explain/test_typescript.py`. All five tests there use the real Node
-producer and locked TypeScript package; they run in the existing native backend
-job with Node/npm dependencies. Static recursion excludes that file, explicit
-static requests refuse it, and native `--omit-static-tests` traverses the owned
-ancestor directories to retain it. The older Python explain contracts stay static.
+except the exact `NATIVE_TEST_PATHS` compiler-contract files: the TypeScript
+scanner, AST, language parity and holder-evidence tests. They use the real Node
+producer and locked TypeScript package and run in the existing native backend
+job with Node/npm dependencies. Static recursion excludes those files, explicit
+static requests refuse them, and native `--omit-static-tests` traverses the owned
+ancestor directories to retain them. The older Python explain contracts stay static.
 The tool contracts inspect ASTs, files, workflow definitions, synthetic reports
 and temporary Git repositories. Path contracts operate on their private home;
 the PTY screen model consumes byte/ANSI sequences through pyte without starting

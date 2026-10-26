@@ -8,7 +8,6 @@ symbol's lines in the old file at the base, and inside the same symbol in the ne
 from __future__ import annotations
 
 import ast
-import re
 from collections import Counter
 from dataclasses import dataclass
 
@@ -16,9 +15,9 @@ from meizel.contracts.ambient_read import sources_from
 from meizel.contracts.analysis import diagnose
 from meizel.contracts.manifest import Manifest
 from meizel.contracts.policy import load_policy
-from meizel.graph.model import Code, MeizelError
+from meizel.graph.model import Code, MeizelError, Sources
 from meizel.graph.universe import Universe
-from meizel.language.scan import scan_source
+from meizel.language.scan import FileScan, scan_source
 
 __all__ = ["SymbolMove", "defines", "parse_symbol_moves", "symbol_debt"]
 
@@ -34,7 +33,7 @@ class SymbolMove:
     new: str
 
 
-_EXTENSIONS = (".py", ".ts", ".tsx")
+_EXTENSIONS = (".py", ".ts", ".tsx", ".mts", ".cts")
 
 
 def parse_symbol_moves(specs: list[str]) -> list[SymbolMove]:
@@ -64,30 +63,6 @@ def _py_span(tree: ast.Module, name: str) -> tuple[int, int] | None:
     return None
 
 
-def _ts_span(source: str, name: str) -> tuple[int, int] | None:
-    pattern = re.compile(
-        rf"^[ \t]*(?:export\s+)?(?:async\s+)?(?:function|class)\s+{re.escape(name)}\b",
-        re.MULTILINE,
-    )
-    match = pattern.search(source)
-    if match is None:
-        return None
-    brace = source.find("{", match.end())
-    if brace == -1:
-        return None
-    depth = 0
-    for idx in range(brace, len(source)):
-        if source[idx] == "{":
-            depth += 1
-        elif source[idx] == "}":
-            depth -= 1
-            if depth == 0:
-                start_line = source.count("\n", 0, match.start()) + 1
-                end_line = source.count("\n", 0, idx) + 1
-                return start_line, end_line
-    return None
-
-
 def _parse(path: str, source: bytes) -> ast.Module:
     try:
         return ast.parse(source, filename=path)
@@ -95,15 +70,15 @@ def _parse(path: str, source: bytes) -> ast.Module:
         raise MeizelError(f"{path}: cannot parse: {error}") from error
 
 
-def _source_span(path: str, source: bytes, name: str) -> tuple[int, int] | None:
-    if path.endswith((".ts", ".tsx")):
-        return _ts_span(source.decode("utf-8", errors="replace"), name)
-    return _py_span(_parse(path, source), name)
+def _source_span(scan: FileScan, source: bytes, name: str) -> tuple[int, int] | None:
+    if scan.path.endswith(".py"):
+        return _py_span(_parse(scan.path, source), name)
+    return next(((start, end) for symbol, start, end in scan.symbols if symbol == name), None)
 
 
-def defines(path: str, source: bytes, name: str) -> bool:
-    """Whether the source of `path` defines the top-level function or class `name`."""
-    return _source_span(path, source, name) is not None
+def defines(universe: Universe, path: str, source: bytes, name: str) -> bool:
+    scan = scan_source(universe, path, source, Sources())
+    return _source_span(scan, source, name) is not None
 
 
 def symbol_debt(
@@ -114,12 +89,12 @@ def symbol_debt(
     name: str,
 ) -> Found:
     """The violations inside `name` in this version of `path`, counted per `(code, owner, key)`."""
-    span = _source_span(path, source, name)
+    policy, _ = load_policy(universe)
+    scan = scan_source(universe, path, source, sources_from(manifests, policy))
+    span = _source_span(scan, source, name)
     if span is None:
         raise MeizelError(f"{path} defines no top-level function or class {name}")
     found: Counter[tuple[Code, str, str]] = Counter()
-    policy, _ = load_policy(universe)
-    scan = scan_source(universe, path, source, sources_from(manifests, policy))
     for item in diagnose(scan, manifests, policy=policy):
         if item.debt is not None and span[0] <= item.line <= span[1]:
             found[(item.code, item.debt.owner, item.debt.key)] += 1

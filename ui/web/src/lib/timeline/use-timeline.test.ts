@@ -213,7 +213,7 @@ beforeEach(async () => {
   });
   wireReplies.clear();
   await gateway.close();
-  gateway = await startGateway((request) => {
+  gateway = await startGateway(realNetwork.createServer, (request) => {
     const url = new URL(request.path, gateway.origin);
     const match = /^\/api\/agents\/(\d+)\/(timeline|conversation-snapshot)$/.exec(url.pathname);
     if (match === null) return { kind: "text", status: 404, body: "unexpected route" };

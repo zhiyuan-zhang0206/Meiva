@@ -9,7 +9,7 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import type { ReactNode } from "react";
 
 import { apiWrapper } from "../transport/tests/api/api-provider";
-import { startGateway, type GatewayReply, type TestGateway } from "../transport/tests/api/api-provider";
+import { realNetwork, startGateway, type GatewayReply, type TestGateway } from "../transport/tests/api/api-provider";
 import { gatewayRig, type HttpRig } from "../transport/tests/api/api-provider";
 import {
   AgentEventStreamContext,
@@ -52,7 +52,7 @@ function wrapperFor(client: QueryClient) {
 
 beforeEach(async () => {
   held = null;
-  gateway = await startGateway((request) => {
+  gateway = await startGateway(realNetwork.createServer, (request) => {
     if (held !== null) return held;
     const match = /^\/api\/agents\/(\d+)\/token-usage$/.exec(request.path);
     if (match === null) return { kind: "text", status: 404, body: "unexpected route" };

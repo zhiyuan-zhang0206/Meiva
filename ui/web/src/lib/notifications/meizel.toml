@@ -10,3 +10,11 @@ exports = ["notices.ts", "task-notify.ts", "use-alerts.tsx", "use-cluster-health
 [purity]
 "notices.ts" = "strict"
 "task-notify.ts" = "strict"
+
+[debt.ambient-read]
+"use-notices.ts#clock Date.now" = 2
+
+[debt.type-cast]
+"use-alerts.tsx#cast isAlertRow" = 2
+"use-alerts.tsx#cast isHeartbeat" = 1
+"use-notices.ts#cast useNotices" = 1

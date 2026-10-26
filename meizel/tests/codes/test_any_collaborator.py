@@ -237,7 +237,7 @@ def test_entry_consistency_and_process_pool_across_200_files(make_repo: RepoFact
     assert [d for d in single if d.code is Code.ANY_COLLABORATOR] == [
         d for d in found.diagnostics if d.path == "app_0.py" and d.code is Code.ANY_COLLABORATOR
     ]
-    pooled = scan_all(found.universe, Sources(), jobs=2)
+    pooled = scan_all(found.universe, Sources(), jobs=2, policy=load_policy(found.universe)[0])
     assert pooled["app_0.py"].any_collaborators == found.scans["app_0.py"].any_collaborators
 
 

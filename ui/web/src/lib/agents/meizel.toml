@@ -17,3 +17,8 @@ exports = ["agent-reconcile.ts", "agent-tree.ts", "sidebar.ts", "use-agent-pages
 
 [purity]
 "agent-tree.ts" = "strict"
+
+[debt.type-cast]
+"sidebar-stats.ts#cast useStatsWindow" = 2
+"sidebar.ts#cast isSidebarSort" = 1
+"use-agents.ts#cast useAgents.<lambda>" = 1

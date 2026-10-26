@@ -1,7 +1,7 @@
 ---
 type: doc
 title: "meizel/ — Locality Checker"
-description: "Meizel models the repository as a nested dependency DAG declared in meizel.toml manifests and checks every first-party code dependency against it: commands, fact edges, the rule, restricted Python and failure conditions."
+description: "Meizel checks tracked first-party dependencies against the nested DAG in meizel.toml manifests."
 tags:
   - locality
   - tool
@@ -17,9 +17,9 @@ facts from source and fails when a fact is not covered by a declaration. The
 decision and its rationale live in
 [the accepted decision](../../../docs/decisions/engineering/design/simplification/2026-10-11-meizel-nested-dag-locality.md).
 
-The checker uses only the standard library and never imports the source. The
-node universe is `git ls-files -z`; facts come from tracked first-party `.py`
-files and configured TypeScript (`.ts` / `.tsx`) scopes. Run from the repository root.
+The checker never executes inspected source. Tracked files come from `git ls-files -z`.
+Python uses stdlib AST; TypeScript uses the locked Node compiler. See TypeScript
+scanning below for setup, selection and coverage.
 
 ```
 python -m meizel check [paths... | --changed files...] [--limit N]
@@ -67,6 +67,9 @@ python -m meizel roles list <role>... | check | write
 - `[loads]` declarations (below); `path_scopes.toml` mounts
   ([[meizel/docs/checker/mounts.meiva.okf.md|mounts]]).
 
+TypeScript aliases, supported syntax and analysis boundaries:
+[[meizel/docs/checker/typescript.meiva.okf.md|TypeScript dependency scanning]].
+
 ## The rule
 
 For a fact edge `f -> t`, `L` is the deepest directory containing both; `cf` and
@@ -74,7 +77,7 @@ For a fact edge `f -> t`, `L` is the deepest directory containing both; `cf` and
 
 1. `L`'s `[uses]` declares `cf -> ct`.
 2. Every directory from `ct` down to `t`'s parent exports the next child on the
-   path. `__init__.py`, `index.ts` and `index.tsx` are package doors, no export needed; a child whose name starts
+   path. `__init__.py`, `index.ts`, `index.tsx`, `index.mts` and `index.cts` are package doors, no export needed; a child whose name starts
    with an underscore (not a dunder) can never be exported.
 3. Every name used from `t` is public. A leading underscore (dunders excepted)
    makes a name private to its defining file, tests and fixtures included: a

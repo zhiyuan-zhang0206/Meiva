@@ -22,8 +22,8 @@ __all__ = ["ambient_diagnostics", "sources_from", "stale_roots"]
 
 _CALL_MARK = "()"
 # meiva:note
-# The roles whose Python is governed: what ships, the runnable templates and the tooling.
-_GOVERNED_ROLES = ("application", "templates", "tooling")
+# The roles whose source code is governed: what ships, the runnable templates and the tooling.
+_GOVERNED_ROLES = ("application", "templates", "tooling", "frontend")
 _WHAT = {
     AmbientKind.SETTINGS: "the process configuration",
     AmbientKind.DB: "a database handle built from the live settings",
@@ -60,7 +60,7 @@ _SEE = (
 
 
 def _module_of(directory: str, file: str) -> str:
-    stem = file.removesuffix(".py")
+    stem = file.rsplit(".", 1)[0]
     parts = [*directory.split("/"), *([] if stem == "__init__" else [stem])]
     return ".".join(part for part in parts if part)
 

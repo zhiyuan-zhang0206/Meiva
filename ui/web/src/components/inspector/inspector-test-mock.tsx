@@ -19,7 +19,7 @@ import type {
   WireAgentCard,
 } from "@/lib/contracts/types";
 import { useStore } from "@/lib/state/store";
-import { startGateway, type TestGateway } from "@/lib/transport/tests/api/api-provider";
+import { realNetwork, startGateway, type TestGateway } from "@/lib/transport/tests/api/api-provider";
 import { gatewayRig, type HttpRig } from "@/lib/transport/tests/api/api-provider";
 import { ApiProvider } from "@/lib/transport/transport-context";
 
@@ -117,7 +117,7 @@ export function createInspectorQueryClient(
 
 export async function setupInspectorTest() {
   pageRows = [];
-  pageGateway = await startGateway((request) => {
+  pageGateway = await startGateway(realNetwork.createServer, (request) => {
     const match = /^\/api\/agents\/(\d+)\/pages$/.exec(request.path);
     return match === null
       ? { kind: "text", status: 404, body: "unexpected route" }

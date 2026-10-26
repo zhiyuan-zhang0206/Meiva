@@ -22,7 +22,7 @@ def test_a_complete_declaration_is_clean(make_repo: RepoFactory) -> None:
 def test_a_top_level_directory_with_python_and_no_role_is_reported(make_repo: RepoFactory) -> None:
     found = problems(make_repo, '[roles]\napplication = ["a"]\ntests = ["t"]\n')
     assert found == [
-        "top-level directory 'b' holds Python but has no role; declare it under [roles]"
+        "top-level directory 'b' holds Python or TypeScript but has no role; declare it under [roles]"
     ]
 
 

@@ -18,10 +18,10 @@ function exchange<T>(http: Http, request: UploadExchange<T>): Promise<T> {
     xhr.open("POST", http.url(request.path));
     xhr.withCredentials = true;
     for (const [name, value] of Object.entries(request.headers)) xhr.setRequestHeader(name, value);
-    xhr.upload.onprogress = (event) => {
+    xhr.upload.addEventListener("progress", (event) => {
       const percent = uploadPercent(event);
       if (percent !== null) request.onProgress?.(percent);
-    };
+    });
     xhr.onload = () => {
       try {
         resolve(request.settle(xhr.status, xhr.responseText));

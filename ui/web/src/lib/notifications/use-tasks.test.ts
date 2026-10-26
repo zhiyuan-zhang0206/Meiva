@@ -12,7 +12,7 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 import type { TaskListResponse, TaskRow } from "../contracts/types";
 import { apiWrapper } from "../transport/tests/api/api-provider";
-import { startGateway, type GatewayReply, type TestGateway } from "../transport/tests/api/api-provider";
+import { realNetwork, startGateway, type GatewayReply, type TestGateway } from "../transport/tests/api/api-provider";
 import { gatewayRig } from "../transport/tests/api/api-provider";
 import { useTasks } from "./use-tasks";
 
@@ -53,7 +53,7 @@ function freshClient(): QueryClient {
 
 beforeEach(async () => {
   answer = { kind: "json", body: RESPONSE };
-  gateway = await startGateway((request) => request.path === "/api/tasks?window=all&fields=full"
+  gateway = await startGateway(realNetwork.createServer, (request) => request.path === "/api/tasks?window=all&fields=full"
     ? answer : { kind: "text", status: 404, body: "unexpected route" });
 });
 

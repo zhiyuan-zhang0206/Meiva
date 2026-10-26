@@ -8,3 +8,6 @@ exports = ["plugin-nav.ts", "plugin-stats.ts", "ui-contributions.ts", "use-theme
 
 [purity]
 "plugins-plan.ts" = "strict"
+
+[debt.ambient-read]
+"plugin-stats.ts#clock Date" = 1

@@ -4,3 +4,7 @@
 "i18n" = ["lib"]
 "proxy.ts" = ["lib"]
 "test-support" = ["lib"]
+
+[debt.private-name]
+"components/content/markdown.test.tsx -> lib/markdown/math.ts#__resetMarkdownMathForTests" = 1
+"components/content/markdown.test.tsx -> lib/markdown/math.ts#__setMarkdownMathImportForTests" = 1

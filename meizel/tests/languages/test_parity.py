@@ -1,0 +1,239 @@
+from __future__ import annotations
+
+import subprocess
+import sys
+import tomllib
+from pathlib import Path
+
+import pytest
+
+from meizel.tests.synthetic import RepoFactory, analysis_of, commit, diagnostics, git, run, write
+
+
+@pytest.mark.parametrize("extension", ["py", "ts", "tsx", "mts", "cts"])
+def test_both_languages_share_check_record_prune_and_strict_modes(
+    make_repo: RepoFactory, extension: str
+) -> None:
+    path = f"pkg/value.{extension}"
+    source = (
+        "def value(a: int, b: int, c: int, d: int, e: int, f: int, g: int) -> int:\n    return a + b\n"
+        if extension == "py"
+        else "export const value = (a: number, b: number, c: number, d: number, e: number, f: number, g: number): number => a + b;"
+    )
+    root = make_repo({path: source, "pkg/meizel.toml": 'purity = "strict-to-be"\n'})
+    [diagnostic] = diagnostics(root, "wide-params")
+    assert diagnostic.path == path and diagnostic.debt is not None
+    assert run(root, "check") == 1
+    assert run(root, "debt", "record", "pkg") == 0
+    git(root, "add", "-A")
+    assert run(root, "check") == 0
+    fixed = (
+        "def value() -> int:\n    return 1\n"
+        if extension == "py"
+        else "export const value = (): number => 1;"
+    )
+    write(root, {path: fixed})
+    assert run(root, "debt", "prune") == 0
+    assert "wide-params" not in tomllib.loads((root / "pkg/meizel.toml").read_text()).get(
+        "debt", {}
+    )
+    write(root, {path: source, "pkg/meizel.toml": 'purity = "strict"\n'})
+    strict = diagnostics(root, "wide-params")
+    assert len(strict) == 1 and strict[0].debt is None
+    assert run(root, "debt", "record", "pkg") == 1
+
+
+@pytest.mark.parametrize("extension", ["py", "ts"])
+def test_languages_share_architectural_rule_diagnostics(
+    make_repo: RepoFactory, extension: str
+) -> None:
+    source = (
+        "from typing import Any, cast\nimport time\n\ndef inspect(value: Any) -> Any:\n"
+        "    value.owner.state.name = 'changed'\n    time.time()\n    return cast(object, value.owner.state.deep.name)\n"
+        if extension == "py"
+        else "export function inspect(value: any): any { value.owner.state.name = 'changed'; Date.now(); return value.owner.state.deep.name as object; }"
+    )
+    root = make_repo(
+        {
+            f"pkg/inspect.{extension}": source,
+            "pkg/meizel.toml": 'purity = "strict-to-be"\n',
+            "meizel.toml": '[roles]\napplication = ["pkg"]\n',
+        }
+    )
+    codes = {d.code.value for d in analysis_of(root).diagnostics}
+    assert codes >= {
+        "any-collaborator",
+        "type-cast",
+        "nested-attr-write",
+        "deep-attr-chain",
+        "ambient-read",
+        "impure-call",
+    }
+
+
+def test_typescript_debt_symbol_move_uses_ast_spans(make_repo: RepoFactory) -> None:
+    moved = "export const moved = (): number => { const text = '}'; return Date.now() + text.length; };\n"
+    kept = "export const kept = (): number => Date.now();\n"
+    root = make_repo({"pkg/old.ts": moved + kept, "pkg/meizel.toml": 'purity = "strict-to-be"\n'})
+    assert run(root, "debt", "record", "pkg") == 0
+    git(root, "add", "-A")
+    commit(root)
+    write(root, {"pkg/old.ts": kept, "pkg/new.ts": moved})
+    assert run(root, "debt", "carry", "--move-symbol", "pkg/old.ts::moved=pkg/new.ts") == 0
+    git(root, "add", "-A")
+    assert run(root, "check") == 0
+    debt = tomllib.loads((root / "pkg/meizel.toml").read_text())["debt"]
+    assert debt["impure-call"] == {"new.ts#moved#Date.now": 1, "old.ts#kept#Date.now": 1}
+
+
+# meiva:note
+# The fixed Python probe receives an empty PATH to exercise missing Node without changing
+# process-wide environment or replacing the production subprocess collaborator.
+def test_missing_node_is_an_error_only_when_typescript_is_selected(tmp_path: Path) -> None:
+    for path, expected in (("value.py", 0), ("value.ts", 2)):
+        result = subprocess.run(  # noqa: S603
+            [sys.executable, "-m", "meizel.tests.languages.compiler_probe", path, str(tmp_path)],
+            env={"PATH": ""},
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        assert result.returncode == expected, result.stderr
+        if expected:
+            assert "TypeScript compiler unavailable" in result.stdout
+
+
+@pytest.mark.parametrize("extension", ["py", "ts"])
+def test_dynamic_loads_use_the_same_manifest_contract(
+    make_repo: RepoFactory, extension: str
+) -> None:
+    source = (
+        "import importlib\ndef load(name):\n    return importlib.import_module(name)\n"
+        if extension == "py"
+        else "export const load = (name: string) => import(name);"
+    )
+    root = make_repo(
+        {
+            f"app/load.{extension}": source,
+            "app/meizel.toml": f'[loads]\n"load.{extension}" = ["plugins"]\n',
+            f"plugins/value.{extension}": "value = 1"
+            if extension == "py"
+            else "export const value = 1;",
+            "meizel.toml": '[uses]\napp = ["plugins"]\n',
+        }
+    )
+    assert run(root, "check") == 0
+    write(root, {f"app/load.{extension}": ""})
+    assert "stale-load" in {d.code.value for d in analysis_of(root).verdict}
+
+
+@pytest.mark.parametrize("extension", ["py", "ts"])
+def test_ambient_roots_and_state_contracts_cover_both_languages(
+    make_repo: RepoFactory, extension: str
+) -> None:
+    source = (
+        "import time\nsettings = {'flag': True}\ndef now():\n    return time.time()\n"
+        if extension == "py"
+        else "export const settings = {flag: true}; export const now = () => Date.now();"
+    )
+    reader = (
+        "from app.runtime import settings\ndef read():\n    return settings['flag']\n"
+        if extension == "py"
+        else "import {settings as config} from './runtime'; export const read = () => config.flag;"
+    )
+    root = make_repo(
+        {
+            f"app/runtime.{extension}": source,
+            f"app/reader.{extension}": reader,
+            "app/meizel.toml": f'[uses]\n"reader.{extension}" = ["runtime.{extension}"]\n[state]\n"runtime.{extension}" = ["settings"]\n[roots]\n"runtime.{extension}" = ["clock"]\n',
+            "meizel.toml": '[roles]\nfrontend = ["app"]\n',
+            "meizel.policy.toml": '[ambient]\nsettings = ["settings"]\n',
+        }
+    )
+    diagnostics = analysis_of(root).diagnostics
+    assert not any(d.code.value == "manifest-unknown-child" for d in diagnostics)
+    assert not any(
+        d.code.value == "ambient-read" and d.path == f"app/runtime.{extension}" for d in diagnostics
+    )
+    assert any(
+        d.code.value == "ambient-read" and d.path == f"app/reader.{extension}" for d in diagnostics
+    )
+
+
+@pytest.mark.parametrize("extension", ["py", "ts"])
+def test_external_loader_declaration_is_language_neutral(
+    make_repo: RepoFactory, extension: str
+) -> None:
+    source = (
+        "import importlib\ndef load(name):\n    return importlib.import_module(name)\n"
+        if extension == "py"
+        else "export const load = (name: string) => import(name);"
+    )
+    root = make_repo(
+        {
+            f"loader.{extension}": source,
+            "meizel.toml": f'[external]\n"loader.{extension}" = "loads operator-selected extensions"\n',
+        }
+    )
+    assert run(root, "check") == 0
+    write(root, {f"loader.{extension}": ""})
+    assert "stale-external" in {d.code.value for d in analysis_of(root).verdict}
+
+
+def test_typescript_rule_comparison_refreshes_policy_after_the_old_snapshot(
+    make_repo: RepoFactory, capsys: pytest.CaptureFixture[str]
+) -> None:
+    root = make_repo(
+        {
+            "app/view.ts": "export const value = afterCall();\n",
+            "app/meizel.toml": 'purity = "strict-to-be"\n',
+            "rules/engine.py": "RULE = 1\n",
+            "meizel.policy.toml": '[typescript]\nimpure-calls = ["beforeCall"]\n',
+        }
+    )
+    commit(root)
+    write(
+        root,
+        {
+            "rules/engine.py": "RULE = 2\n",
+            "meizel.policy.toml": '[typescript]\nimpure-calls = ["afterCall"]\n',
+        },
+    )
+    assert run(root, "debt", "record", ".") == 0
+    write(root, {})
+    capsys.readouterr()
+    assert (
+        run(
+            root,
+            "debt",
+            "diff",
+            "--against",
+            "HEAD",
+            "--on-growth",
+            "fail",
+            "--waive-if-changed",
+            ":(glob)rules/**",
+        )
+        == 0
+    )
+    row = next(
+        line.split()
+        for line in capsys.readouterr().out.splitlines()
+        if line.startswith("impure-call")
+    )
+    assert row[1:] == ["0", "1", "1", "+1", "+0"]
+
+
+@pytest.mark.parametrize("extension", ["py", "ts"])
+def test_malformed_policy_reports_the_same_diagnostic_for_both_languages(
+    make_repo: RepoFactory, extension: str
+) -> None:
+    root = make_repo(
+        {
+            f"value.{extension}": "value = 1" if extension == "py" else "export const value = 1;",
+            "meizel.policy.toml": "this is not toml",
+        }
+    )
+    [error] = diagnostics(root, "policy-syntax")
+    assert error.path == "meizel.policy.toml"
+    assert run(root, "check") == 1

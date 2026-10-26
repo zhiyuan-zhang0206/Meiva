@@ -17,3 +17,6 @@ exports = ["math.ts", "remark-autolink-delimiter.ts", "remark-cjk-link-boundary.
 "remark-display-math-recovery.ts" = "strict"
 "remark-math-prose-guard.ts" = "strict"
 "remark-shared.ts" = "strict"
+
+[debt.type-cast]
+"remark-autolink-delimiter.ts#cast lastDelimiterRun" = 1

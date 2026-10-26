@@ -1,0 +1,2 @@
+[uses]
+"test_parity.py" = ["compiler_probe.py"]
