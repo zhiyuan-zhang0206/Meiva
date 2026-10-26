@@ -40,7 +40,7 @@ def test_collector_preparation_never_controls_a_running_service_tree(
     command_runtime.config.set_field("db_url", PLACEHOLDER_DB_URL)
     installed = otel_collector_dir(home)
     installed.mkdir(parents=True)
-    (installed / collector_artifact.binary_name()).write_bytes(b"bin")
+    (installed / collector_artifact.BINARY_NAME).write_bytes(b"bin")
     (installed / collector_artifact.VERSION_MARKER).write_text(
         collector_artifact.OTELCOL_CONTRIB_VERSION, encoding="utf-8"
     )

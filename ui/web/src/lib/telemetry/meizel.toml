@@ -16,3 +16,5 @@ exports = ["nav-timing.ts", "telemetry-page-view.tsx", "telemetry.ts"]
 "telemetry-plan.ts" = "strict"
 "web-vitals-plan.ts" = "strict"
 
+[debt.ambient-read]
+"telemetry.ts#clock Date.now" = 2

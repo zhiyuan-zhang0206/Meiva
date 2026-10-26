@@ -27,12 +27,16 @@ def _stderr(message: str) -> None:
         return
 
 
+def _utc_now() -> datetime:
+    return datetime.now(UTC)
+
+
 # meiva:note
 # Preserve the affected process identity and mark actual data loss as error.
 def loss_event(
     event: Event, count: int, queue_name: str, *, dropped_at: datetime | None = None
 ) -> Event:
-    now = event.ts
+    now = _utc_now()
     return replace(
         event,
         ts=now,
@@ -94,7 +98,7 @@ class _ExporterDropFilter(logging.Filter):
         if record.msg != "Queue full, dropping %s.":
             return True
         try:
-            now = datetime.fromtimestamp(record.created, tz=UTC)
+            now = _utc_now()
             state = process_state
             event = Event(
                 ts=now,

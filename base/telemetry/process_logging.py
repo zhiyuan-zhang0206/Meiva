@@ -10,6 +10,7 @@ sink registration — and the two entry points that compose them (`init_gateway_
 from __future__ import annotations
 
 import itertools
+import os
 import traceback as _traceback
 from collections.abc import Callable
 from functools import partial
@@ -311,10 +312,11 @@ def init_gateway_process(
         # a healthcheck that revives a dead service via Popen gives the revived
         # service its own boot row. `name` is the log-file name passed in (the
         # daemon's identity), pid/sha/host disambiguate restarts on the same box.
-        logger.patch(lambda r: r["extra"].setdefault("pid", r["process"].id)).info(
-            "service started: {name} (pid={extra[pid]}, sha={sha}, host={host})",
+        logger.info(
+            "service started: {name} (pid={pid}, sha={sha}, host={host})",
             event="service_started",
             name=name,
+            pid=os.getpid(),
             sha=image.sha,
             host=machine_reader(),
         )

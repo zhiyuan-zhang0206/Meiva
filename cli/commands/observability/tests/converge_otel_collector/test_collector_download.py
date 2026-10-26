@@ -38,7 +38,7 @@ def test_a_missing_binary_is_fetched_through_the_units_opener_and_checked_agains
             unit.ensure(RUNNER)
 
     assert [(request.method, request.path) for request in mirror.received] == [("GET", ASSET)]
-    assert not (otel_collector_dir(unit.home) / collector_artifact.binary_name()).exists()
+    assert not (otel_collector_dir(unit.home) / collector_artifact.BINARY_NAME).exists()
     assert not (otel_collector_dir(unit.home) / collector_artifact.VERSION_MARKER).exists()
     assert not otel_collector_config(unit.home).exists()
 

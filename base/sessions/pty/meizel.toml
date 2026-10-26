@@ -12,4 +12,7 @@ exports = ["allocation_freeze.py", "client.py", "closure.py", "keys.py", "paths.
 "survivor_role.py" = "strict"
 
 [debt.ambient-read]
+"allocation_freeze.py#clock datetime.datetime.now" = 1
 "allocation_freeze.py#random uuid.uuid4" = 1
+"paths.py#pid os.getuid" = 1
+"process_groups.py#pid os.getpid" = 1

@@ -8,6 +8,7 @@ from base.agents.to_user.resources import (
     resolve_reference,
     resource_descriptions,
 )
+from base.config import settings
 
 
 def read_document(workspace: Path, *, references: list[str] | None = None) -> ToUserDocument:
@@ -24,7 +25,7 @@ def read_document(workspace: Path, *, references: list[str] | None = None) -> To
         legacy_html=not references and (workspace / "to_user.html").is_file(),
     )
     try:
-        raw, info = read_regular_file(path)
+        raw, info = read_regular_file(path, settings.to_user.max_document_bytes)
     except FileNotFoundError:
         if references:
             raise

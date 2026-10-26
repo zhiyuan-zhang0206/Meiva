@@ -10,7 +10,6 @@ import os
 import time
 from collections.abc import Iterable
 
-from base.native_process.os_platform import resolve_pid
 from base.native_process.ownership import OwnedProcess
 from base.native_process.process_control import ProcessControl
 
@@ -31,15 +30,13 @@ def signal(
     signum: int,
     *,
     process_control: ProcessControl,
-    current_pid: int | None = None,
 ) -> None:
     sent: set[int] = set()
     own_group = os.getpgrp()
-    own_pid = resolve_pid(current_pid)
     for identity in identities:
         if not live(identity):
             continue
-        if identity.pid == own_pid:
+        if identity.pid == os.getpid():
             raise RuntimeError("PTY cleanup cannot signal its own process")
         try:
             group = process_control.getpgid(identity.pid)

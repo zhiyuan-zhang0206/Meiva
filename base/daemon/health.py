@@ -64,6 +64,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import os
 import time
 import urllib.error
 import urllib.request
@@ -80,7 +81,6 @@ from base.daemon.http_transport import RouteHandler as RouteHandler
 from base.daemon.http_transport import start_daemon_http
 from base.daemon.loop_health import LivenessGroup, LoopProgress  # noqa: F401  # pyright: ignore
 from base.native_process.loaded_commit import LoadedCommit
-from base.native_process.os_platform import resolve_pid
 from base.paths import meiva_home
 
 # Re-export trackers moved to loop_health after this module crossed the 800-line ceiling.
@@ -216,10 +216,9 @@ async def start_health_server(
     extra: dict[str, object] | Callable[[], dict[str, object]] | None = None,
     auth_digests: frozenset[str] | None = None,
     image: LoadedCommit,
-    pid: int | None = None,
 ) -> asyncio.Server:
     started_at = time.time()
-    resolved_pid = resolve_pid(pid)
+    pid = os.getpid()
     # Resolved once at bind time, not per request: meiva_home() mkdirs on every call.
     home = str(meiva_home())
 
@@ -228,7 +227,7 @@ async def start_health_server(
         current_extra = extra() if callable(extra) else extra
         return _healthz_payload(
             name,
-            resolved_pid,
+            pid,
             home,
             started_at,
             liveness,
