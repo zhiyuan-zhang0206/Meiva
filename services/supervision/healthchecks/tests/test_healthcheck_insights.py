@@ -97,7 +97,7 @@ def test_protocol_router_preserves_the_insights_identity_refusal(served: Path) -
     server, thread = _serve(served, _app(served, reported_home="/elsewhere"))
     _record_pid(served)
     try:
-        result = protocol_probe.probe("insights", home=served)
+        result = protocol_probe.probe("insights", home=served, browser_cdp_port=9222)
         assert not result.alive
         assert result.detail == "the insights socket belongs to home '/elsewhere'"
     finally:

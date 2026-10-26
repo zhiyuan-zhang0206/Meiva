@@ -5,7 +5,6 @@ import logging
 import socket
 from pathlib import Path
 
-from base.config import get_field
 from base.paths import chrome_mcp_socket
 from services.desktop.browser.protocol import Request, Response
 
@@ -14,13 +13,12 @@ _log = logging.getLogger("services.supervision.healthchecks.browser_mcp")
 _TIMEOUT_S = 5.0
 
 
-def browser_mcp_probe(home: Path, *, port: int | None = None) -> bool:
+def browser_mcp_probe(home: Path, *, port: int) -> bool:
     """True when the daemon of `home` answers a lock-free ping over its socket."""
-    resolved_port = int(get_field("browser_cdp_port")) if port is None else port
     sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
     sock.settimeout(_TIMEOUT_S)
     try:
-        sock.connect(str(chrome_mcp_socket(home, resolved_port)))
+        sock.connect(str(chrome_mcp_socket(home, port)))
         req: Request = {"id": 0, "method": "ping"}
         sock.sendall((json.dumps(req) + "\n").encode())
         buf = b""
@@ -35,7 +33,7 @@ def browser_mcp_probe(home: Path, *, port: int | None = None) -> bool:
         sock.close()
 
 
-def is_alive(home: Path, *, port: int | None = None) -> bool:
+def is_alive(home: Path, *, port: int) -> bool:
     """True when the daemon of `home` answers a ping; ANY probe failure means "not alive".
 
     A healthcheck's contract with the watchdog is a bool, not an exception: an

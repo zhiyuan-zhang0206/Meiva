@@ -15,27 +15,19 @@ import time
 from collections.abc import Callable, Sequence
 from contextlib import suppress
 from dataclasses import dataclass
+from pathlib import Path
 from threading import Event, Lock
 from typing import Protocol
 
 from base.agents.context.clients import ClientSet
-from base.clock import SYSTEM_TIMERS, Clock, ClockConfig
+from base.clock import Clock
 from base.cluster.machine import MachineIdentityReader
 from base.daemon.health import DaemonProbe, ProbeVerdict
 from base.native_process.loaded_commit import LoadedCommit
-from base.paths import meiva_home
 from base.telemetry.delivery.pipeline import EventPipeline
 from services.supervision.meiva_root.health import ProbeRunner
 
 _log = logging.getLogger(__name__)
-
-
-def _wall_time() -> float:
-    return (
-        Clock(ClockConfig("UTC", "UTC", message_timestamp_weekday=False), timers=SYSTEM_TIMERS)
-        .now()
-        .timestamp()
-    )
 
 
 class HealthRoundOwner(Protocol):
@@ -113,7 +105,8 @@ class _State:
 class DiagnosticMonitor:
     """Finite diagnostic roster; one worker per entry and no autonomous repairs."""
 
-    def __init__(self, diagnostics: Sequence[Diagnostic]) -> None:
+    def __init__(self, diagnostics: Sequence[Diagnostic], *, clock: Clock) -> None:
+        self._clock = clock
         self._checks = tuple(diagnostics)
         if len({check.name for check in self._checks}) != len(self._checks):
             raise ValueError("duplicate diagnostic name")
@@ -160,7 +153,7 @@ class DiagnosticMonitor:
             with self._report_admission:
                 report_closed.set()
         state.result = result
-        state.sampled_at = _wall_time()
+        state.sampled_at = self._clock.now().timestamp()
         recovered = result.alive and state.failures > 0
         state.failures = state.failures + 1 if not result.alive else 0
         self._report_sample(check, state, result, recovered=recovered)
@@ -252,6 +245,8 @@ class RoundsInputs:
     clients: ClientSet
     image: LoadedCommit
     machine: MachineIdentityReader
+    clock: Clock
+    home: Path
 
 
 class RootHealthRounds:
@@ -265,13 +260,16 @@ class RootHealthRounds:
         clients: ClientSet,
         image: LoadedCommit,
         machine: MachineIdentityReader,
+        clock: Clock,
+        home: Path,
         interval_s: float = 60.0,
         tasks: asyncio.TaskGroup | None = None,
         telemetry: ProcessTelemetry = SYSTEM_PROCESS_TELEMETRY,
     ) -> None:
         if interval_s <= 0:
             raise ValueError("root health interval must be positive")
-        self._home = str(meiva_home().resolve())
+        self._clock = clock
+        self._home = str(home.resolve())
         self._home_id = hashlib.sha256(self._home.encode()).hexdigest()
         self._health = health
         self._diagnostics = diagnostics
@@ -301,7 +299,7 @@ class RootHealthRounds:
         await asyncio.gather(self._health.run_round(), self._diagnostics.run_round())
         from base.log import logger
 
-        self._last_completed = _wall_time()
+        self._last_completed = self._clock.now().timestamp()
         logger.info(
             "root completed a health observation round",
             event="root_health_tick",
@@ -330,7 +328,7 @@ class RootHealthRounds:
             except BaseException as cleanup:
                 primary.add_note(f"root pipeline startup cleanup failed: {cleanup!r}")
             raise
-        self._expected_since = _wall_time()
+        self._expected_since = self._clock.now().timestamp()
         logger.info(
             "root health rounds expected",
             event="root_health_expected",
