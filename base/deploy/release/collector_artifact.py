@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import hashlib
-import platform
 import shutil
 import sys
 import tarfile
@@ -38,24 +37,22 @@ _DOWNLOAD_URL = (
 VERSION_MARKER = "version"
 
 
-def platform_tag() -> str | None:
-    """The release asset tag for this machine, or None when unsupported.
+_ARCH = {"arm64": "arm64", "aarch64": "arm64", "x86_64": "amd64", "amd64": "amd64"}
 
-    Tags follow the release assets: darwin_arm64 / darwin_amd64 / linux_amd64 /
-    linux_arm64. Anything else (linux_386, ...)
-    has no pinned binary — the sidecar is skipped and OTLP export auto-disables
-    at the agent preflight.
-    """
-    machine = platform.machine().lower()
-    arch = {"arm64": "arm64", "aarch64": "arm64", "x86_64": "amd64", "amd64": "amd64"}.get(machine)
-    if arch is None:
+
+# meiva:note
+# The release asset tag of a platform, or None when no binary is pinned for it.
+#
+# `system` is `Platform.system` ("darwin" or "linux") and `machine` the hardware name the OS
+# reports ("arm64", "x86_64", "aarch64"; case does not matter). Tags follow the release assets:
+# darwin_arm64 / darwin_amd64 / linux_amd64 / linux_arm64. Anything else (linux_386, ...) has no
+# pinned binary: the sidecar is skipped and OTLP export auto-disables at the agent preflight.
+# It decides from its two arguments and reads nothing.
+def platform_tag_for(system: str, machine: str) -> str | None:
+    arch = _ARCH.get(machine.lower())
+    if arch is None or system not in ("darwin", "linux"):
         return None
-    sys_name = platform.system()
-    if sys_name == "Darwin":
-        return f"darwin_{arch}"
-    if sys_name == "Linux":
-        return f"linux_{arch}"
-    return None
+    return f"{system}_{arch}"
 
 
 BINARY_NAME = "otelcol-contrib"

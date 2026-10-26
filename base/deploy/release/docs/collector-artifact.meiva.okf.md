@@ -13,6 +13,13 @@ binary beside its version marker. The converge step
 (`cli/commands/observability/otel_collector.py:ensure_otel_collector`) is its
 composition root.
 
+## Which asset
+
+`collector_artifact.platform_tag_for(system, machine)` is the pure decision of the
+release asset tag (`darwin_arm64`, `darwin_amd64`, `linux_amd64`, `linux_arm64`, else `None`)
+from a `Platform`'s values; the converge step hands it its `Host.platform` and nothing in the
+module reads the running process.
+
 ## Dependency closure
 
 The operation takes its own dependencies as required arguments: `open_url`

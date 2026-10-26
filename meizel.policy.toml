@@ -143,7 +143,6 @@ bus = [
 "services.desktop.permissions_helper.launchd_job.helper_job_label()" = "falls back to meiva_home() for the helper's home"
 
 [ambient-readers.platform]
-"base.deploy.release.collector_artifact.platform_tag()" = "reads platform.machine() and platform.system()"
 "base.native_process.os_platform.Platform.current()" = "reads sys.platform and platform.machine()"
 
 [ambient-readers.pid]
