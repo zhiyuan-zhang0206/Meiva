@@ -1,14 +1,17 @@
-"""$MEIVA_HOME path resolution — single-point entry shared by gateway /
-agent / subprocess.
-
-`base.paths.home.resolve_meiva_home` is the path source (`$MEIVA_HOME`,
-else `~/.meiva`, read on every call); `meiva_home()` adds the mkdir side effect for
-the home itself. A helper that takes `home` is a pure derivation (no environment,
-no mkdir); the zero-argument helpers that remain still create their directory on
-first access. The three process classes inherit the same variable.
-The package holds only this door; its doc nodes (`docs/paths.meiva.okf.md`,
-`docs/lock-discipline.meiva.okf.md`) sit beside it.
-"""
+# meiva:note
+# $MEIVA_HOME path resolution — single-point entry shared by gateway /
+# agent / subprocess.
+#
+# `base.paths.home.resolve_meiva_home` is the path source (`$MEIVA_HOME`,
+# else `~/.meiva`, read on every call); `meiva_home()` adds the mkdir side effect for
+# the home itself. A helper `H(home)` is a pure derivation (no environment, no mkdir). The
+# ten helpers that create their home or their directory (`plugins_dir`, `logs_dir`,
+# `workspace_dir`, ...) take `home=` as a keyword: an explicit home is created owner-only, as
+# `meiva_home()` creates the ambient one, and is refused when it is not absolute; without it they
+# still read the ambient home, which a later step removes. The three process classes inherit the
+# same variable.
+# The package holds only this door; its doc nodes (`docs/paths.meiva.okf.md`,
+# `docs/lock-discipline.meiva.okf.md`) sit beside it.
 
 from pathlib import Path
 
@@ -27,7 +30,11 @@ def meiva_home() -> Path:
 # none. The ambient form is the first step of retiring the zero-argument helpers: callers move to
 # passing the home their entry resolved once, and the second step removes the default.
 def _root(home: Path | None) -> Path:
-    return meiva_home() if home is None else ensure_private_dir(home)
+    if home is None:
+        return meiva_home()
+    if not home.is_absolute():
+        raise ValueError(f"home must be an absolute path, got {str(home)!r}")
+    return ensure_private_dir(home)
 
 
 def run_dir(home: Path) -> Path:

@@ -1,7 +1,7 @@
 ---
 type: doc
 title: "`$MEIVA_HOME` Layout"
-description: '`base/paths/__init__.py` resolves every per-unit path from `$MEIVA_HOME`. One home = one unit; co-located units keep separate state because their homes differ. `meiva_home()` reads the environment and creates the home; a helper that takes `home` is a pure derivation that creates nothing.'
+description: '`base/paths/__init__.py` resolves every per-unit path from `$MEIVA_HOME`. One home = one unit; co-located units keep separate state because their homes differ. `meiva_home()` reads the environment and creates the home; a pure helper `H(home)` derives a path from the home it is handed and creates nothing, while the keyword form `H(*, home)` also creates an explicit home owner-only.'
 tags:
 - base
 - library
@@ -17,8 +17,9 @@ comes from `base.paths.home.resolve_meiva_home` (env `MEIVA_HOME`, default
 `~/.meiva`), read on every call — never captured at import; it is the ambient door of the
 pure `home_from_env(env, user_home=...)`, which a function that is handed the environment
 calls instead. Only
-`meiva_home()` reads the environment and creates the home (mode 0700); the composition
-root of a process calls it once and passes the result down.
+`meiva_home()` reads the environment; it creates the ambient home (mode 0700), as the keyword
+helpers below create an explicit one. The composition root of a process calls it once and
+passes the result down.
 
 A helper takes one of two forms. The **pure form** `H(home)` (`traces_dir`, `skills_dir`,
 `mcps_dir`, `install_registry_path`, `running_sha_path`, `launch_failures_path`, the run
@@ -26,9 +27,16 @@ tree — `run_dir`, `exec_run_dir`, `root_run_dir`, `root_manifests_path`, the c
 permissions-helper, insights and MCP-daemon sockets, `insights_pidfile`
 and the `otel_collector_*` paths) derives a path from the home it is handed: it reads no
 environment and creates nothing, so a test hands in `tmp_path` and the process that binds a
-socket, takes a lock or writes a file creates the directory. The zero-argument
-helpers that remain read `MEIVA_HOME` and `mkdir(parents=True, exist_ok=True)` on first
-access; each is replaced by its pure form together with its callers.
+socket, takes a lock or writes a file creates the directory.
+
+The ten helpers that make a directory or sit on the home itself (`plugins_dir`, `logs_dir`,
+`permissions_helper_app_dir`, `memory_dir`, `gateway_memory_dir`, `workspaces_root`,
+`workspace_dir`, `workspace_dir_readonly`, `harness_sessions_dir`, `harness_registrations_dir`)
+take a **keyword form** `H(*, home)`: an explicit absolute home is created owner-only (0700, as
+`meiva_home()` creates the ambient one) and the helper derives from it, reading no environment;
+a relative home is refused. `workspace_dir`, `plugins_dir` and `logs_dir` also create their own
+directory. Without `home=` the same helpers still read `MEIVA_HOME` — a transitional form that
+disappears with its callers, leaving the keyword form as the only one.
 
 All three process classes — gateway, agent, exec subprocess — inherit the same
 `MEIVA_HOME` variable, so nothing is passed by hand. **The home is the unit's

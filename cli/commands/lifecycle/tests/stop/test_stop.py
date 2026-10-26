@@ -168,6 +168,33 @@ def test_repeated_stop_needs_no_live_database(
     assert rc == 0
 
 
+# meiva:note
+# A stop holds the home's lifecycle lock under the invocation's pid: the holder record names the
+# purpose and the `CommandRuntime` pid (a live process that is not this one), and is marked released.
+def test_a_stop_holds_the_lifecycle_lock_under_the_invocations_pid(
+    home: Path,
+    operator_pipeline: Callable[[], EventPipeline],
+    stop_runtime: CommandRuntime,
+) -> None:
+    def down() -> NoReturn:
+        raise AssertionError("DB is down: a stop with no notice to write must not reach for it")
+
+    assert (
+        do_stop(
+            stop_request(timeout=1),
+            stop_environment(stop_runtime, down, operator_pipeline),
+            retained_children=[],
+        )
+        == 0
+    )
+
+    lock = home_lifecycle_locks.lifecycle_lock_path(home)
+    record = json.loads(home_lifecycle_locks.holder_path(lock).read_text())
+    assert record["purpose"] == "cli.do_stop"
+    assert record["pid"] == stop_runtime.pid != os.getpid()
+    assert record["state"] == "released"
+
+
 def test_resource_stop_excludes_concurrent_start(home: Path) -> None:
     entered, finish, start_finished = Event(), Event(), Event()
     order: list[str] = []

@@ -102,7 +102,7 @@ def _under(path: str | None, target: Path, *, fold: bool) -> bool:
 @dataclass(frozen=True)
 class Invoker:
     pid: int
-    pgid: int | None
+    pgid: int
 
 
 # meiva:note
@@ -158,7 +158,7 @@ def _process_anchors(target: Path, *, fold: bool, invoker: Invoker) -> list[str]
         pid = proc.info["pid"]
         if pid in skip:
             continue
-        if group is not None and _pgid_of(pid) == group:
+        if _pgid_of(pid) == group:
             continue
         cwd = proc.info["cwd"]
         exe = proc.info["exe"]
