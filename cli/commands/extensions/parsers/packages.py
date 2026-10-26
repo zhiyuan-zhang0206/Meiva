@@ -15,7 +15,10 @@ def _h_packages_status(args: argparse.Namespace) -> int:
     from cli.database.runtime import delivered_config
 
     return cmd_packages_status(
-        config=delivered_config(args.runtime.config), json_output=args.json_output
+        config=delivered_config(args.runtime.config),
+        home=args.runtime.home,
+        now=args.runtime.clock.now(),
+        json_output=args.json_output,
     )
 
 
@@ -26,6 +29,7 @@ def _h_packages_refresh(args: argparse.Namespace) -> int:
     return cmd_packages_refresh(
         config=delivered_config(args.runtime.config),
         repo=args.runtime.checkout,
+        home=args.runtime.home,
         now=args.runtime.clock.now(),
         check_only=args.check,
         only=args.package,
@@ -37,7 +41,7 @@ def _h_packages_refresh(args: argparse.Namespace) -> int:
 def _h_packages_rollback(args: argparse.Namespace) -> int:
     from cli.commands.extensions.packages import cmd_packages_rollback
 
-    return cmd_packages_rollback(args.name)
+    return cmd_packages_rollback(args.name, home=args.runtime.home, now=args.runtime.clock.now())
 
 
 def _duration(value: str) -> str:

@@ -21,10 +21,10 @@ def _duration(value: str) -> str:
     return value
 
 
-def _h_plugins_update(_args: argparse.Namespace) -> int:
+def _h_plugins_update(args: argparse.Namespace) -> int:
     from cli.commands.extensions.plugins import cmd_plugins_update
 
-    return cmd_plugins_update()
+    return cmd_plugins_update(home=args.runtime.home)
 
 
 def _h_plugins_install(args: argparse.Namespace) -> int:
@@ -43,13 +43,15 @@ def _h_plugins_install(args: argparse.Namespace) -> int:
         binding=source_binding(
             args.runtime.session.user_home, args.runtime.config.process_environment()
         ),
+        home=args.runtime.home,
+        now=args.runtime.clock.now(),
     )
 
 
 def _h_plugins_uninstall(args: argparse.Namespace) -> int:
     from cli.commands.extensions.plugins import cmd_plugins_uninstall
 
-    return cmd_plugins_uninstall(args.name)
+    return cmd_plugins_uninstall(args.name, home=args.runtime.home)
 
 
 def _h_plugins_installed(_args: argparse.Namespace) -> int:
@@ -87,6 +89,8 @@ def _h_plugins_upgrade(args: argparse.Namespace) -> int:
         binding=source_binding(
             args.runtime.session.user_home, args.runtime.config.process_environment()
         ),
+        home=args.runtime.home,
+        now=args.runtime.clock.now(),
     )
 
 
@@ -102,13 +106,15 @@ def _h_skill_update(args: argparse.Namespace) -> int:
         binding=source_binding(
             args.runtime.session.user_home, args.runtime.config.process_environment()
         ),
+        home=args.runtime.home,
+        now=args.runtime.clock.now(),
     )
 
 
 def _h_skill_upgrade(args: argparse.Namespace) -> int:
     from cli.commands.extensions.skill import cmd_skill_upgrade
 
-    return cmd_skill_upgrade(args.name)
+    return cmd_skill_upgrade(args.name, home=args.runtime.home, now=args.runtime.clock.now())
 
 
 def _h_plugins_enable(args: argparse.Namespace) -> int:
@@ -137,6 +143,8 @@ def _h_skill_install(args: argparse.Namespace) -> int:
         check_every=args.check_every,
         gateway=HttpExtensionGateway(gateway_access_from_boot(args.runtime.config)),
         machine=args.runtime.machine,
+        home=args.runtime.home,
+        now=args.runtime.clock.now(),
     )
 
 
@@ -155,19 +163,24 @@ def _h_skill_disable(args: argparse.Namespace) -> int:
 def _h_skill_register(args: argparse.Namespace) -> int:
     from cli.commands.extensions.skill import cmd_skill_register
 
-    return cmd_skill_register(args.name, accept_risk=args.accept_risk)
+    return cmd_skill_register(
+        args.name,
+        accept_risk=args.accept_risk,
+        home=args.runtime.home,
+        now=args.runtime.clock.now(),
+    )
 
 
 def _h_skill_scan(args: argparse.Namespace) -> int:
     from cli.commands.extensions.skill import cmd_skill_scan
 
-    return cmd_skill_scan(args.target)
+    return cmd_skill_scan(args.target, home=args.runtime.home)
 
 
 def _h_skill_trust(args: argparse.Namespace) -> int:
     from cli.commands.extensions.skill import cmd_skill_trust
 
-    return cmd_skill_trust(args.name, revoke=args.revoke)
+    return cmd_skill_trust(args.name, revoke=args.revoke, now=args.runtime.clock.now())
 
 
 def add_plugins_parser(sub: argparse._SubParsersAction[argparse.ArgumentParser]) -> None:

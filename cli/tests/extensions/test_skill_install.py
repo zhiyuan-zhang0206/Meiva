@@ -106,6 +106,8 @@ def test_bare_standard_skill_from_local_path(
             None,
             gateway=RecordingGateway(),
             machine=command_runtime.machine,
+            home=unit_home,
+            now=command_runtime.clock.now(),
         )
         == 0
     )
@@ -138,6 +140,8 @@ def test_optional_standard_fields_do_not_block_the_mount(
             None,
             gateway=RecordingGateway(),
             machine=command_runtime.machine,
+            home=unit_home,
+            now=command_runtime.clock.now(),
         )
         == 0
     )
@@ -165,7 +169,13 @@ def test_claude_code_skills_tree(
 
     assert (
         cmd_skill_install(
-            url, None, None, gateway=RecordingGateway(), machine=command_runtime.machine
+            url,
+            None,
+            None,
+            gateway=RecordingGateway(),
+            machine=command_runtime.machine,
+            home=unit_home,
+            now=command_runtime.clock.now(),
         )
         == 0
     )
@@ -191,7 +201,13 @@ def test_skills_collection_keeps_nested_subskills(
 
     assert (
         cmd_skill_install(
-            url, None, None, gateway=RecordingGateway(), machine=command_runtime.machine
+            url,
+            None,
+            None,
+            gateway=RecordingGateway(),
+            machine=command_runtime.machine,
+            home=unit_home,
+            now=command_runtime.clock.now(),
         )
         == 0
     )
@@ -216,7 +232,13 @@ def test_bare_collection_of_skill_folders(
 
     assert (
         cmd_skill_install(
-            url, None, None, gateway=RecordingGateway(), machine=command_runtime.machine
+            url,
+            None,
+            None,
+            gateway=RecordingGateway(),
+            machine=command_runtime.machine,
+            home=unit_home,
+            now=command_runtime.clock.now(),
         )
         == 0
     )
@@ -241,6 +263,8 @@ def test_path_selects_a_subdirectory(
             "tools/pdf-processing",
             gateway=RecordingGateway(),
             machine=command_runtime.machine,
+            home=unit_home,
+            now=command_runtime.clock.now(),
         )
         == 0
     )
@@ -269,6 +293,8 @@ def test_crlf_and_bom_skill_installs(
             None,
             gateway=RecordingGateway(),
             machine=command_runtime.machine,
+            home=unit_home,
+            now=command_runtime.clock.now(),
         )
         == 0
     )
@@ -295,6 +321,8 @@ def test_collision_leaves_the_load_dir_untouched(
             None,
             gateway=RecordingGateway(),
             machine=command_runtime.machine,
+            home=unit_home,
+            now=command_runtime.clock.now(),
         )
         == 0
     )
@@ -306,6 +334,8 @@ def test_collision_leaves_the_load_dir_untouched(
             None,
             gateway=RecordingGateway(),
             machine=command_runtime.machine,
+            home=unit_home,
+            now=command_runtime.clock.now(),
         )
         == 1
     )
@@ -332,6 +362,8 @@ def test_no_skill_in_source_fails_fast(
             None,
             gateway=RecordingGateway(),
             machine=command_runtime.machine,
+            home=unit_home,
+            now=command_runtime.clock.now(),
         )
         == 1
     )
@@ -359,6 +391,8 @@ def test_malformed_skill_md_fails_fast(
             None,
             gateway=RecordingGateway(),
             machine=command_runtime.machine,
+            home=unit_home,
+            now=command_runtime.clock.now(),
         )
         == 1
     )
@@ -381,6 +415,8 @@ def test_missing_path_in_source_errors(
             "nope",
             gateway=RecordingGateway(),
             machine=command_runtime.machine,
+            home=unit_home,
+            now=command_runtime.clock.now(),
         )
         == 1
     )
@@ -409,6 +445,8 @@ def test_install_skips_junk_names(
             None,
             gateway=RecordingGateway(),
             machine=command_runtime.machine,
+            home=unit_home,
+            now=command_runtime.clock.now(),
         )
         == 0
     )
@@ -439,6 +477,8 @@ def test_install_records_explicit_update_policy(
             check_every="2h",
             gateway=RecordingGateway(),
             machine=command_runtime.machine,
+            home=unit_home,
+            now=command_runtime.clock.now(),
         )
         == 0
     )
@@ -467,6 +507,8 @@ def test_install_rejects_a_bad_check_every(
             check_every="soon",
             gateway=RecordingGateway(),
             machine=command_runtime.machine,
+            home=unit_home,
+            now=command_runtime.clock.now(),
         )
         == 1
     )

@@ -64,13 +64,15 @@ def _h_mcp_install(args: argparse.Namespace) -> int:
         uv=UvBuild(
             host=args.runtime.host, caller_environ=args.runtime.config.process_environment()
         ),
+        home=args.runtime.home,
+        now=args.runtime.clock.now(),
     )
 
 
 def _h_mcp_uninstall(args: argparse.Namespace) -> int:
     from cli.commands.extensions.mcp import cmd_mcp_uninstall
 
-    return cmd_mcp_uninstall(name=args.name)
+    return cmd_mcp_uninstall(name=args.name, home=args.runtime.home)
 
 
 def _h_mcp_upgrade(args: argparse.Namespace) -> int:
@@ -81,6 +83,8 @@ def _h_mcp_upgrade(args: argparse.Namespace) -> int:
         uv=UvBuild(
             host=args.runtime.host, caller_environ=args.runtime.config.process_environment()
         ),
+        home=args.runtime.home,
+        now=args.runtime.clock.now(),
     )
 
 

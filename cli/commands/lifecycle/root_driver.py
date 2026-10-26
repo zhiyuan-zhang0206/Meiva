@@ -712,7 +712,7 @@ def stop_dormant_helper_root(
     try:
         keeper = helper().root_status()
     except PermissionsHelperError as exc:
-        target = f"{helper_job_domain()}/{helper_job_label()}"
+        target = f"{helper_job_domain()}/{helper_job_label(home)}"
         if retirement_query(target, deadline, runner=runner) is None:
             return
         raise RootDriverError(

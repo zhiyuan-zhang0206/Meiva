@@ -11,7 +11,7 @@ exports = ["agents", "cluster", "converge", "data_plane", "duration.py", "extens
 "lifecycle" = ["_repo.py", "_setup.py", "cluster", "converge", "data_plane", "extensions", "observability", "probe.py"]
 "management" = ["cluster"]
 "observability" = ["converge"]
-"tests" = ["_repo.py", "_setup.py", "converge", "data_plane", "extensions", "lifecycle", "observability", "permissions.py", "probe.py", "probe_report.py"]
+"tests" = ["_repo.py", "_setup.py", "cluster", "converge", "data_plane", "extensions", "lifecycle", "observability", "permissions.py", "probe.py", "probe_report.py"]
 
 [external]
 "harness.py" = "runs the Python file or stdin the operator names, inside a harness attachment: the operator-authored program is run content, not a dependency of this repository"
@@ -20,7 +20,3 @@ exports = ["agents", "cluster", "converge", "data_plane", "duration.py", "extens
 "__init__.py" = "strict"
 "duration.py" = "strict"
 "probe_report.py" = "strict"
-
-[debt.ambient-read]
-"_repo.py#home base.paths.meiva_home" = 1
-"_repo.py#settings base.cluster.machine.ambient.gateway_access_from_settings" = 1

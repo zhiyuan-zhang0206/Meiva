@@ -22,15 +22,14 @@ def _ensure_symlink(link: Path, target: Path) -> None:
     link.symlink_to(target)
 
 
+# meiva:note
+# The host's bare `meiva` -> this checkout's `.venv/bin/meiva`.
+#
+# A plain symlink: the host runs one cluster, so the CLI needs no routing. Which home it acts on is
+# `MEIVA_HOME`, else `~/.meiva`, like every CLI, and the checkout guard
+# (`cli.preflight.check_own_checkout`) refuses every command from a checkout that is not the home's
+# own. An existing link to anything else is repointed.
 def ensure_meiva_on_path(ctx: ConvergeCtx) -> None:
-    """The host's bare `meiva` -> this checkout's `.venv/bin/meiva`.
-
-    A plain symlink: the host runs one cluster, so the CLI needs no routing. Which
-    home it acts on is `MEIVA_HOME`, else `~/.meiva`, like every CLI, and the checkout
-    guard (`cli.preflight.require_own_checkout`) refuses every command from a
-    checkout that is not the home's own. An existing link to anything else is
-    repointed.
-    """
     _ensure_symlink(
         ctx.session.user_home / ".local" / "bin" / "meiva", ctx.repo / ".venv" / "bin" / "meiva"
     )

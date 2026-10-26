@@ -17,7 +17,8 @@ from pathlib import Path
 from typing import NamedTuple
 
 from base.clock import Timers
-from base.cluster.machine import MachineIdentityReader, MachineRoles
+from base.cluster.machine import GatewayAccess, MachineIdentityReader, MachineRoles
+from base.cluster.machine.boot import gateway_access_from_boot
 from base.db import Database
 from base.deploy.progress_timeout import GATEWAY_PREFLIGHT_BUDGET_S
 from base.sessions.env_forwarding import frontend_toolchain_env
@@ -188,7 +189,9 @@ class GatewayProbe(NamedTuple):
     detail: str
 
 
-def probe_gateway_once(gateway_url: str, *, timeout_s: float = 10.0) -> GatewayProbe:
+def probe_gateway_once(
+    gateway_url: str, *, access: GatewayAccess, timeout_s: float = 10.0
+) -> GatewayProbe:
     """Dial `GATEWAY_PROBE_PATH` on `gateway_url` once, with this cluster's auth.
 
     Classifies rather than decides: no printing, no retrying, no exit code. The
@@ -198,10 +201,8 @@ def probe_gateway_once(gateway_url: str, *, timeout_s: float = 10.0) -> GatewayP
     import httpx
 
     from base.cluster.machine import gateway_auth_headers
-    from base.cluster.machine.ambient import gateway_access_from_settings
     from base.host.net.http_dial import get as dial_get
 
-    access = gateway_access_from_settings()  # ambient: C
     try:
         resp = dial_get(
             f"{gateway_url.rstrip('/')}{GATEWAY_PROBE_PATH}",
@@ -223,6 +224,7 @@ _PREFLIGHT_RETRY_INTERVAL_S = 5.0
 def probe_gateway_or_die(
     gateway_url: str,
     *,
+    access: GatewayAccess,
     timers: Timers,
     budget_s: float = GATEWAY_PREFLIGHT_BUDGET_S,
     retry_interval_s: float = _PREFLIGHT_RETRY_INTERVAL_S,
@@ -251,7 +253,7 @@ def probe_gateway_or_die(
     attempt = 0
     while True:
         attempt += 1
-        probe = probe_gateway_once(gateway_url)
+        probe = probe_gateway_once(gateway_url, access=access)
         if probe.status == 200:
             print(f"  ✓ gateway reachable ({gateway_url})")
             return 0
@@ -307,7 +309,7 @@ def register_machine_or_die(
 
     from base.cluster.machines import LoopbackDialUrlRefused, register_self, unit_dial_url
     from base.daemon.endpoints import ServiceEndpoints
-    from base.paths import meiva_home, run_dir
+    from base.paths import run_dir
 
     endpoints = ServiceEndpoints.from_boot(command.config, runtime=run_dir(command.home))
     url = unit_dial_url(
@@ -325,7 +327,7 @@ def register_machine_or_die(
             name=command.machine.name(),
             roles=roles,
             description=command.machine.description(),
-            home=str(meiva_home()),
+            home=str(command.home),
             gateway=command.config.view.gateway.gateway_url,
         )
     except LoopbackDialUrlRefused as e:
@@ -391,7 +393,11 @@ def preflight_probes(db: Database, *, command: CommandRuntime) -> int:
 
     if "agent-runner" in roles and "gateway" not in roles:
         print("\n→ preflight: probe gateway")
-        rc = probe_gateway_or_die(resolved["gateway_url"], timers=command.timers)
+        rc = probe_gateway_or_die(
+            resolved["gateway_url"],
+            access=gateway_access_from_boot(command.config),
+            timers=command.timers,
+        )
         if rc != 0:
             print("  ✗ preflight failed: gateway unreachable — host still serving", file=sys.stderr)
             return rc
