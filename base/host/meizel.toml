@@ -19,7 +19,6 @@ exports = ["atomic_io.py", "brew_pin.py", "config_validators.py", "converge", "d
 "verified_file.py" = "strict"
 
 [debt.ambient-read]
-"private_storage.py#random uuid.uuid4" = 1
 "proc.py#clock time.monotonic" = 1
 "resource_sample.py#clock time.time" = 1
 

@@ -19,6 +19,7 @@ exports = ["acp", "antigravity", "bridge.py", "claude", "codex", "deepseek", "en
 "tests" = ["__init__.py", "antigravity", "claude", "codex", "handoff.py", "kimi", "registration.py", "registry.py", "wiring.py"]
 
 [purity]
+"engine.py" = "strict"
 "events.py" = "strict"
 "handoff.py" = "strict"
 

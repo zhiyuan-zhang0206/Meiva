@@ -7,7 +7,6 @@ from typing import NamedTuple
 from loguru import logger
 
 from base.db.protocols import AsyncPool
-from base.db.transaction import async_write_transaction
 from base.deploy.progress_timeout import CORPSE_REAP_GRACE_S
 from base.telemetry import Event, emit_prepared
 from base.telemetry.audit_events import prepare_event_log, record_audit_async
@@ -40,7 +39,8 @@ async def reap_crash_corpses(
     pool: AsyncPool,
     machine: str,
 ) -> list[ReapedCorpse]:
-    async with async_write_transaction(pool) as conn:
+    async with pool.connection() as conn, conn.transaction():
+        await conn.execute("SET TRANSACTION READ WRITE")
         rows = await (
             await conn.execute(
                 "UPDATE agents_meta SET status = 'terminated', "

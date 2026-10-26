@@ -14,8 +14,6 @@ import threading
 import time
 import traceback
 from collections.abc import Callable
-from dataclasses import replace
-from datetime import UTC, datetime
 
 from base.telemetry.delivery.receipts import (
     DrainPhase,
@@ -87,7 +85,7 @@ class EventPipeline:
     def _record_drop(self, event: Event) -> None:
         with self._dropped_lock:
             self.dropped += 1
-            self._drop_example = replace(event, ts=datetime.now(UTC))
+            self._drop_example = event
             now = time.monotonic()
             due = self.dropped == 1 or now - getattr(self, "_drop_reported_at", 0.0) >= 5
             if due:

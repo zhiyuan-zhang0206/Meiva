@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import os
 import stat
-import uuid
+import tempfile
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -230,8 +230,9 @@ def scan_non_regular_nodes(root: Path) -> list[Path]:
     return out
 
 
-def _temporary_path(path: Path) -> Path:
-    return path.with_name(f".{path.name}.{uuid.uuid4().hex}.tmp")
+def _open_temporary(path: Path) -> tuple[int, Path]:
+    fd, raw_path = tempfile.mkstemp(dir=path.parent, prefix=f".{path.name}.", suffix=".tmp")
+    return fd, Path(raw_path)
 
 
 def create_private_bytes(path: Path, data: bytes) -> None:
@@ -241,8 +242,7 @@ def create_private_bytes(path: Path, data: bytes) -> None:
     reads the winner's file instead.
     """
     ensure_private_dir(path.parent)
-    temporary = _temporary_path(path)
-    fd = os.open(temporary, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+    fd, temporary = _open_temporary(path)
     try:
         os.fchmod(fd, 0o600)
         with os.fdopen(fd, "wb") as file:
@@ -265,8 +265,7 @@ def create_private_bytes(path: Path, data: bytes) -> None:
 def write_private_bytes(path: Path, data: bytes) -> None:
     """Atomically replace `path` with owner-only `data` in its private directory."""
     ensure_private_dir(path.parent)
-    temporary = _temporary_path(path)
-    fd = os.open(temporary, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+    fd, temporary = _open_temporary(path)
     try:
         os.fchmod(fd, 0o600)
         with os.fdopen(fd, "wb") as file:

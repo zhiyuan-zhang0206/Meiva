@@ -9,8 +9,7 @@ from pydantic import (
     BaseModel,
 )
 
-from base.agents.model.birth_config import DefaultModelSource
-from base.api_contracts.agent_contract import Harness
+from base.api_contracts.agent_contract import DefaultModelSource, Harness
 from base.lm.registry import ReferenceTps
 
 

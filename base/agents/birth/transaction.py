@@ -6,7 +6,7 @@ import json
 import re
 from dataclasses import dataclass
 from typing import Any
-from uuid import UUID, uuid4
+from uuid import UUID
 
 import psycopg
 
@@ -248,7 +248,6 @@ def insert_agent_birth(
     target_machine = machine
     conn = cur.connection
 
-    launch_attempt_id = uuid4()
     prompt_inbound_id: int | None = None
     prompt_event: telemetry.Event | None = None
     existing = recover_birth(conn, creation_key, creation_request_hash)
@@ -275,7 +274,8 @@ def insert_agent_birth(
         "INSERT INTO agents_meta (id, spawner, born_spawner, fork_source_agent_id, "
         "fork_source_checkpoint_id, status, machine, harness, config_overlay, birth_config, "
         "last_launch_attempt_id) "
-        "VALUES (%s, %s, %s, %s, %s, 'idling', %s, %s, %s::jsonb, %s::jsonb, %s)",
+        "VALUES (%s, %s, %s, %s, %s, 'idling', %s, %s, %s::jsonb, %s::jsonb, gen_random_uuid()) "
+        "RETURNING last_launch_attempt_id",
         (
             new_id,
             lineage_spawner,
@@ -286,9 +286,9 @@ def insert_agent_birth(
             born_harness,
             json.dumps(config) if config else None,
             json.dumps(birth_config, sort_keys=True),
-            launch_attempt_id,
         ),
     )
+    launch_attempt_id: UUID = fetch_one(cur, "spawn: insert agent meta")[0]
     _insert_fork_history(cur, new_id, fork_from, fork_checkpoint, fork_tail_skills)
     if prompt is not None:
         assert prompt_source is not None, "prompt requires prompt_source (validated above)"  # noqa: S101

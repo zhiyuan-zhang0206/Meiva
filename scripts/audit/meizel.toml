@@ -9,6 +9,7 @@ exports = ["branch_protection.py", "module_moves.py"]
 "module_moves.py" = "strict"
 "sdk_usage.py" = "strict"
 "where_used.py" = "strict"
+"where_used_scan.py" = "strict"
 
 [external]
 "module_moves.py" = "imports the old and new module names the operator passes on the command line"

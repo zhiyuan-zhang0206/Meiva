@@ -24,6 +24,8 @@ Error wire protocol:
 
 from __future__ import annotations
 
+import asyncio
+from collections.abc import Awaitable
 from enum import StrEnum
 from typing import Any, ClassVar, Literal, Protocol
 
@@ -32,6 +34,11 @@ class AgentStatus(StrEnum):
     RUNNING = "running"
     IDLING = "idling"
     TERMINATED = "terminated"
+
+
+class DefaultModelSource(StrEnum):
+    CLUSTER = "cluster"
+    CONFIG = "config"
 
 
 class LivenessState(StrEnum):
@@ -518,3 +525,30 @@ class SdkCaptureAdmission(Protocol):
     def release(self) -> None:
         """Release admitted work and seal only when its original owner drains."""
         ...
+
+
+# meiva:note
+# Deferred publication of a settled turn's fatal failure diagnostics.
+class TurnFailureReport(Protocol):
+    def __call__(self) -> Awaitable[None]: ...
+
+
+# meiva:note
+# Scoped checkpoint reader factory bound to one admitted turn's recovery scope.
+class ReconstructionScope[SaverT](Protocol):
+    def reader(self) -> SaverT: ...
+
+
+# meiva:note
+# Lifecycle of the event publisher owned by one hosted turn invocation.
+class DrivenEventPublisher(Protocol):
+    def start(self, task_group: asyncio.TaskGroup, /) -> Awaitable[object]: ...
+
+    def aclose(self) -> Awaitable[object]: ...
+
+
+# meiva:note
+# Context surface required by the hosted invocation publisher driver.
+class DrivenContext(Protocol):
+    @property
+    def event_publisher(self) -> DrivenEventPublisher | None: ...

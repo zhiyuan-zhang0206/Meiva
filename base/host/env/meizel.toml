@@ -1,6 +1,7 @@
 exports = ["agent_env.py", "agent_slices.py", "boot_policy.py", "bootstrap.py", "config_lite_table.py", "dotenv_boot.py", "dotenv_content.py", "dotenv_file.py", "harness_binaries.py", "health_ports.py", "port_lease.py", "port_table.py", "process_profile.py", "registry.py", "tests"]
 
 [uses]
+"agent_env.py" = ["config_lite_table.py"]
 "agent_slices.py" = ["agent_env.py", "config_lite_table.py"]
 "bootstrap.py" = ["boot_policy.py", "process_profile.py", "registry.py"]
 "dotenv_boot.py" = ["boot_policy.py", "bootstrap.py", "dotenv_file.py", "harness_binaries.py", "registry.py"]
@@ -13,7 +14,9 @@ exports = ["agent_env.py", "agent_slices.py", "boot_policy.py", "bootstrap.py", 
 "dotenv_content.py" = "strict"
 "__init__.py" = "strict"
 "agent_env.py" = "strict"
+"agent_slices.py" = "strict"
 "boot_policy.py" = "strict"
+"config_lite_table.py" = "strict"
 "port_table.py" = "strict"
 "process_profile.py" = "strict"
 
@@ -26,6 +29,3 @@ exports = ["agent_env.py", "agent_slices.py", "boot_policy.py", "bootstrap.py", 
 "port_lease.py#pid os.getpid" = 1
 "port_lease.py#pid os.getuid" = 1
 "port_lease.py#random secrets.randbelow" = 1
-
-[debt.any-collaborator]
-"agent_slices.py#any AgentSlices.read.return" = 1

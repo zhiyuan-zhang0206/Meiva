@@ -28,73 +28,46 @@ environment and constructs no Settings.
 
 from __future__ import annotations
 
-from collections.abc import Callable, Mapping
-from dataclasses import dataclass
+from collections.abc import Mapping
 from functools import lru_cache
-from types import UnionType
-from typing import Any, Literal, Protocol, Union, get_args, get_origin
+from typing import Any
 
-from base.api_contracts.config import Capability
-from base.host.env.process_profile import ProcessProfile
+from base.api_contracts.config import Capability as Capability
+from base.config.profiles import (
+    ALLOWED_CAPABILITIES as ALLOWED_CAPABILITIES,
+)
+from base.config.profiles import (
+    ALLOWED_RESTART_REQUIRED as ALLOWED_RESTART_REQUIRED,
+)
+from base.config.profiles import (
+    RESTART_REQUIRED_PROFILE as RESTART_REQUIRED_PROFILE,
+)
+from base.config.profiles import (
+    DomainModelLike as _DomainModelLike,
+)
+from base.config.profiles import (
+    FieldInfoLike as _FieldInfoLike,
+)
+from base.config.profiles import (
+    FieldRef as _FieldRef,
+)
+from base.config.profiles import (
+    Lifecycle as Lifecycle,
+)
+from base.config.profiles import (
+    SchemaExtra as SchemaExtra,
+)
+from base.config.profiles import (
+    field_editor_type as field_editor_type,
+)
+from base.config.profiles import (
+    schema_extra as schema_extra,
+)
+from base.config.profiles import (
+    validate_field_metadata,
+)
 
-
-class _FieldInfoLike(Protocol):
-    """The pydantic ``FieldInfo`` surface this registry reads.
-
-    Declared structurally rather than importing ``pydantic.fields``: this
-    module must import without pydantic (it is importable before the config
-    package), while the real FieldInfo objects only appear through the build.
-    """
-
-    @property
-    def alias(self) -> str | None: ...
-
-    @property
-    def annotation(self) -> object: ...
-
-    @property
-    def default(self) -> object: ...
-
-    @property
-    def default_factory(self) -> Callable[..., object] | None: ...
-
-    @property
-    def description(self) -> str | None: ...
-
-    @property
-    def serialization_alias(self) -> str | None: ...
-
-    @property
-    def validation_alias(self) -> object: ...
-
-    @property
-    def json_schema_extra(self) -> dict[str, Any] | Callable[[dict[str, Any]], None] | None: ...
-
-    def get_default(
-        self, *, call_default_factory: Literal[True], validated_data: dict[str, Any] | None = None
-    ) -> object: ...
-
-
-class _DomainModelLike(Protocol):
-    @property
-    def model_fields(self) -> Mapping[str, _FieldInfoLike]: ...
-
-
-# The capability a config field configures — the top-level config-panel section.
-# `gateway` / `agent-runner` mirror the `MachineRole` capability tokens
-# (`base.cluster.machine`); `common` is the third bucket for config owned by neither
-# single capability (cluster-wide policy, or the host/carrier identity both
-# capabilities on a box share). DISPLAY grouping only — orthogonal to `scope`,
-# which alone drives distribution + write routing.
-ALLOWED_CAPABILITIES = frozenset({"gateway", "agent-runner", "common"})
-# The resolved capability of a field — the top-level config-panel section
-# (declared in the wire contract, which must stay importable without `base.config`).
-
-# (domain attr, frontend group label, sub-model class, default capability).
-# Order = field render order. The default capability owns every field in the
-# domain unless a field overrides it with json_schema_extra={"capability": ...}
-# (services / daemon / general straddle both capabilities — see those files).
-DOMAIN_MODELS: tuple[tuple[str, str, str | Any, str], ...] = (
+DOMAIN_MODELS: tuple[tuple[str, str, str | type[object] | _DomainModelLike, str], ...] = (
     ("lm", "LLM", "LmSettings", "agent-runner"),
     ("sandbox", "Sandbox", "SandboxSettings", "agent-runner"),
     ("agent", "Agent", "AgentSettings", "agent-runner"),
@@ -114,20 +87,12 @@ DOMAIN_MODELS: tuple[tuple[str, str, str | Any, str], ...] = (
     ("general", "General", "GeneralSettings", "common"),
 )
 
-# The domain attribute names on `settings` — used by the profile fail-fast
-# (Settings.__getattr__) to tell a real domain from a typo. Derived, so a new
-# domain can never drift out of the fail-fast check.
 DOMAIN_ATTRS = frozenset(attr for attr, _label, _model, _cap in DOMAIN_MODELS)
 
 
-def model_classes() -> dict[str, Any]:
-    """The sub-model class behind each `DOMAIN_MODELS` name.
-
-    The classes are imported INSIDE this function (see module docstring):
-    importing them at module level would execute the `base.config` package while
-    this registry is still initializing, breaking the dotenv_boot pre-Settings
-    boot.
-    """
+# meiva:note
+# The sub-model class behind each `DOMAIN_MODELS` name.
+def _model_classes() -> dict[str, Any]:
     from base.config.domains.agent.settings import AgentSettings
     from base.config.domains.channels.feishu import FeishuSettings
     from base.config.domains.channels.telegram import TelegramSettings
@@ -167,175 +132,14 @@ def model_classes() -> dict[str, Any]:
     }
 
 
-@dataclass(frozen=True)
-class _FieldRef:
-    name: str
-    domain: str  # attribute on `settings`, e.g. "lm"
-    group: str  # frontend group label for the owning domain
-    capability: Capability  # top-level config-panel section
-    info: _FieldInfoLike
-
-
-def schema_extra(info: _FieldInfoLike) -> dict[str, Any]:
-    """The field's `json_schema_extra` as a plain dict (empty if unset / callable).
-
-    pydantic types `json_schema_extra` as a `dict[str, JsonValue] | callable | None`
-    union whose Unknown-keyed branch poisons every downstream `.get()`; funnel the
-    isinstance narrowing through here so the metadata walkers read a clean dict.
-    """
-    extra = info.json_schema_extra
-    if callable(extra) or extra is None:
-        return {}
-    return extra
-
-
-_ALLOWED_SCOPES = frozenset({"cluster-pinned", "cluster-default", "host", "agent"})
-# The per-agent config lifecycle classes (see the module docstring). Required on
-# every per_agent field, forbidden on every other field.
-_ALLOWED_LIFECYCLES = frozenset({"frozen", "live"})
-# One per-agent field's lifecycle class: "frozen" (stamped into birth_config at
-# spawn, replayed for life) or "live" (re-read from cluster config every start).
-Lifecycle = Literal["frozen", "live"]
-
-# Which process must restart after a change to the field — the operator's ONLY
-# behavioral guide (the panel/CLI prompt from it; nothing restarts on its own).
-# The empty string means no restart is needed. Every other value names a process
-# kind that must CONSUME the field (see the profile cross-check in
-# build_registry); "schedule" is the gateway-hosted schedule runner, which has
-# no config profile and reads every domain.
-ALLOWED_RESTART_REQUIRED = frozenset({"", "agent", "all", "gateway", "ops", "schedule"})
-# restart_required -> the PROCESS_PROFILES set that must contain the field's
-# domain for the value to make sense (the profile sets ARE the consumption
-# matrix, verified bidirectionally by cli/commands/lifecycle/tests/startup/test_gateway_consumer_guard.py).
-# "schedule" / "all" / "" have no named-kind constraint ("schedule" runs without
-# a profile and constructs every domain; "all" is satisfied by any consumer).
-RESTART_REQUIRED_PROFILE: dict[str, ProcessProfile] = {
-    "agent": "agent",
-    "gateway": "gateway",
-    "ops": "runner",
-}
-
-
-def _validate_field(
-    name: str, attr: str, extra: dict[str, Any], default_capability: str
-) -> Capability:
-    """Fail fast on one field's ownership metadata; returns its validated capability."""
-    scope = extra.get("scope")
-    # The field's capability is its explicit override or the domain default;
-    # a bad override can never load (same fail-fast posture as scope).
-    capability = extra.get("capability", default_capability)
-    if capability not in ALLOWED_CAPABILITIES:
-        raise RuntimeError(
-            f"config field {name!r} ({attr}) has capability={capability!r}; must be "
-            f"one of {sorted(ALLOWED_CAPABILITIES)} — it names the config-panel "
-            f"section the field renders under"
-        )
-    if scope not in _ALLOWED_SCOPES:
-        raise RuntimeError(
-            f"config field {name!r} ({attr}) has scope={scope!r}; must be one of "
-            f"{sorted(_ALLOWED_SCOPES)} — scope drives BOOTSTRAP_FIELDS distribution + "
-            f".env write routing"
-        )
-    _validate_scope_rules(name, extra, scope)
-    _validate_lifecycle(name, attr, extra)
-    _validate_restart_required(name, attr, extra)
-    if capability == "gateway":
-        return "gateway"
-    if capability == "agent-runner":
-        return "agent-runner"
-    return "common"
-
-
-def _validate_scope_rules(name: str, extra: dict[str, Any], scope: object) -> None:
-    if scope == "host" and not isinstance(extra.get("remote_writable"), bool):
-        raise RuntimeError(
-            f"host-scope field {name!r} must declare remote_writable: bool "
-            f"(got {extra.get('remote_writable')!r})"
-        )
-    if scope != "host" and extra.get("remote_writable") is True:
-        raise RuntimeError(
-            f"non-host field {name!r} sets remote_writable=True — only host-scope "
-            f"fields are remote-writable"
-        )
-    if scope == "cluster-default" and extra.get("per_agent") is not True:
-        raise RuntimeError(
-            f"cluster-default field {name!r} must be per_agent=True (the per-agent override gate)"
-        )
-
-
-def _validate_lifecycle(name: str, attr: str, extra: dict[str, Any]) -> None:
-    lifecycle = extra.get("lifecycle")
-    if extra.get("per_agent") is True:
-        if lifecycle not in _ALLOWED_LIFECYCLES:
-            raise RuntimeError(
-                f"per-agent field {name!r} ({attr}) has lifecycle={lifecycle!r}; must be "
-                f"one of {sorted(_ALLOWED_LIFECYCLES)} — 'frozen' is stamped into "
-                f"agents_meta.birth_config at spawn and replayed for the agent's life, "
-                f"'live' is re-read from cluster config at every process start. There is "
-                f"no default: the choice is a semantic ruling about whether the field is "
-                f"the agent's identity material or an operational knob."
-            )
-    elif lifecycle is not None:
-        raise RuntimeError(
-            f"field {name!r} ({attr}) declares lifecycle={lifecycle!r} but is not "
-            f"per_agent=True — the lifecycle axis only applies to fields that HAVE a "
-            f"per-agent instance to freeze; cluster-scope config is read live by "
-            f"whatever process next starts"
-        )
-
-
-def _validate_restart_required(name: str, attr: str, extra: dict[str, Any]) -> None:
-    restart_required = extra.get("restart_required", "")
-    if restart_required not in ALLOWED_RESTART_REQUIRED:
-        raise RuntimeError(
-            f"config field {name!r} ({attr}) has restart_required={restart_required!r}; "
-            f"must be one of {sorted(ALLOWED_RESTART_REQUIRED)} — it names the process "
-            f"the operator must restart after a change, and the panel/CLI prompt from it"
-        )
-    # Cross-check against the consumption matrix: restart_required names a
-    # process kind, so that kind's config profile must contain the field's
-    # domain (the profile sets ARE the consumption matrix — verified
-    # bidirectionally by cli/commands/lifecycle/tests/startup/test_gateway_consumer_guard.py). A
-    # field only a gateway daemon reads marked "agent" would have the
-    # operator restart the wrong process and the change silently not take
-    # effect (the telegram/feishu/im_* 11-field bug this check seals, lost
-    # in the main rebuild and re-landed by #1226). "schedule" / "all" / ""
-    # carry no constraint.
-    profile_kind = RESTART_REQUIRED_PROFILE.get(restart_required)
-    if profile_kind is not None:
-        from base.config.profiles import PROCESS_PROFILES
-
-        profile = PROCESS_PROFILES[profile_kind]
-        if attr not in profile:
-            raise RuntimeError(
-                f"field {name!r} ({attr}) declares restart_required={restart_required!r} "
-                f"but its domain is not in the {profile_kind!r} process profile "
-                f"({sorted(profile)}) — the named process kind "
-                f"does not consume this field, so the operator would restart the wrong "
-                f"process and the change would silently not take effect. Point it at "
-                f"the kind that actually reads it (the im_bridge-consumed telegram/feishu/"
-                f"im_* fields are 'gateway'), or use 'all' or 'schedule'."
-            )
-
-
-# meiva:note
-# Walk `domain_models` into a flat name->owner registry, failing fast on an
-# ownership-metadata mistake. Accepting `domain_models` directly lets registry
-# contract tests validate synthetic domain models without patching module globals.
 def validate_domain_models(
-    domain_models: tuple[tuple[str, str, str | Any, str], ...],
+    domain_models: tuple[tuple[str, str, str | type[object] | _DomainModelLike, str], ...],
 ) -> dict[str, _FieldRef]:
     reg: dict[str, _FieldRef] = {}
     for attr, label, model_name, default_capability in domain_models:
-        if isinstance(model_name, str):
-            # meiva:note
-            # Deferred import (see module docstring): the sub-model classes live
-            # under the `base.config` package. Importing them only at build time
-            # keeps this registry importable before Settings construction.
-            model: _DomainModelLike = model_classes()[model_name]
-        else:
-            model = model_name
-        for name, info in model.model_fields.items():
+        model: Any = _model_classes()[model_name] if isinstance(model_name, str) else model_name
+        fields_map: Mapping[str, _FieldInfoLike] = model.model_fields
+        for name, info in fields_map.items():
             if name in reg:
                 raise RuntimeError(
                     f"config field name {name!r} is not unique across sub-models "
@@ -343,7 +147,7 @@ def validate_domain_models(
                     f"requires globally-unique field names"
                 )
             extra = schema_extra(info)
-            capability = _validate_field(name, attr, extra, default_capability)
+            capability = validate_field_metadata(name, attr, extra, default_capability)
             reg[name] = _FieldRef(
                 name=name,
                 domain=attr,
@@ -365,8 +169,7 @@ def build_registry() -> dict[str, _FieldRef]:
     return validate_domain_models(DOMAIN_MODELS)
 
 
-def fields() -> dict[str, _FieldRef]:
-    return build_registry()
+fields = build_registry
 
 
 # Leaf FieldInfo by name — the compat replacement for the old flat
@@ -393,43 +196,9 @@ def field_alias(name: str) -> str:
     return info.serialization_alias or info.alias or name.upper()
 
 
-def field_editor_type(annotation: object) -> tuple[str, list[str] | None]:
-    """Return the config editor type and enum choices declared by ``annotation``.
-
-    Optional fields retain the editor for their concrete member rather than
-    degrading to free text. This is shared by the gateway metadata export and
-    the settings-free local config CLI.
-    """
-    union_args = get_args(annotation)
-    if get_origin(annotation) in (Union, UnionType) and type(None) in union_args:
-        non_none = [item for item in union_args if item is not type(None)]
-        if len(non_none) == 1:
-            annotation = non_none[0]
-    if annotation is bool:
-        return "bool", None
-    if annotation is int:
-        return "int", None
-    if annotation is float:
-        return "float", None
-    if get_origin(annotation) is Literal:
-        return "enum", [str(item) for item in get_args(annotation)]
-    return "string", None
-
-
-def field_alias_map() -> dict[str, str]:
-    """`{field name: env alias}` for every field — the flat map runtime_config /
-    lint / session env-forwarding build on."""
-    return {name: field_alias(name) for name in fields()}
-
-
 def field_domain(name: str) -> str:
     """The `settings` attribute holding this field (e.g. 'lm')."""
     return fields()[name].domain
-
-
-def field_names() -> set[str]:
-    """Every leaf config field name across all sub-models."""
-    return set(fields())
 
 
 def per_agent_field_names() -> set[str]:
@@ -438,34 +207,3 @@ def per_agent_field_names() -> set[str]:
     return {
         name for name, ref in fields().items() if schema_extra(ref.info).get("per_agent") is True
     }
-
-
-def field_lifecycle(name: str) -> Lifecycle:
-    """The per-agent lifecycle class of a `per_agent=True` field.
-
-    Raises KeyError for a field that is not per-agent — that field has no
-    per-agent instance, so it has no lifecycle (see the module docstring's
-    boundary note).
-    """
-    extra = schema_extra(fields()[name].info)
-    if extra.get("per_agent") is not True:
-        raise KeyError(f"config field {name!r} is not per_agent — it has no lifecycle class")
-    lifecycle = extra["lifecycle"]
-    if lifecycle == "frozen":
-        return "frozen"
-    if lifecycle == "live":
-        return "live"
-    raise RuntimeError(f"config field {name!r} has invalid lifecycle {lifecycle!r}")
-
-
-def frozen_field_names() -> set[str]:
-    """Per-agent field names whose value is resolved once at spawn and replayed for
-    the agent's life — the set `base/agents/model/birth_config.py` stamps into
-    `agents_meta.birth_config`."""
-    return {n for n in per_agent_field_names() if field_lifecycle(n) == "frozen"}
-
-
-def live_field_names() -> set[str]:
-    """Per-agent field names re-read from current cluster config at every process
-    start (absent an explicit overlay). The complement of `frozen_field_names`."""
-    return {n for n in per_agent_field_names() if field_lifecycle(n) == "live"}

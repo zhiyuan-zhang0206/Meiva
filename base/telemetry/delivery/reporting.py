@@ -28,7 +28,7 @@ def report_no_pipeline(
     Never raises, never blocks — and never silent: when loguru itself fails the
     diagnostic goes to stderr."""
     try:
-        from base.log import logger
+        from loguru import logger
 
         # **{NO_EMITTER: True} — bind() takes literal kwargs, so the marker
         # key must be the constant's VALUE, not its name.

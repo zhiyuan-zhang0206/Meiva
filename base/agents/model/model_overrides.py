@@ -7,22 +7,21 @@ cluster-wide display does.
 
 from __future__ import annotations
 
-from typing import Any
-
-from psycopg_pool import ConnectionPool
+from collections.abc import Mapping
 
 from base.config.agent_pins import resolve_agent_config_pins
+from base.db.protocols import SyncPool
 from base.host.env.agent_slices import ModelOverrides
 
 
 def agent_overrides(
-    config_overlay: dict[str, Any] | None, birth_config: dict[str, Any] | None
+    config_overlay: Mapping[str, object] | None, birth_config: Mapping[str, object] | None
 ) -> ModelOverrides:
     """The overrides held by an agent's two stored config maps (overlay over birth config)."""
     return ModelOverrides.from_pins(resolve_agent_config_pins(config_overlay, birth_config))
 
 
-def read_agent_overrides(pool: ConnectionPool[Any], agent_id: int) -> ModelOverrides:
+def read_agent_overrides(pool: SyncPool, agent_id: int) -> ModelOverrides:
     """`agent_overrides` of the agent's stored row; none for an agent without one."""
     with pool.connection() as conn, conn.cursor() as cur:
         cur.execute(

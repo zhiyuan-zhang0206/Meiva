@@ -327,7 +327,7 @@ class Universe:
 
 def _is_regular(root: Path, rel: str) -> bool:
     full = root / rel
-    return full.is_file() and not full.is_symlink()
+    return _is_file(full) and not full.is_symlink()
 
 
 # meiva:note

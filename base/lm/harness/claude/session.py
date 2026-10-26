@@ -6,8 +6,6 @@ from collections.abc import AsyncIterator, Awaitable, Callable, Mapping
 from dataclasses import dataclass
 from typing import Any, Protocol
 
-from base.host.env.harness_binaries import resolve_harness_binary
-from base.host.env.registry import process_environment
 from base.lm.harness.base_session import (
     EVENT_STREAM_END,
     BaseHarnessSession,
@@ -133,11 +131,7 @@ class ClaudeSession(BaseHarnessSession[BridgeConfig]):
         # none (#5491). Pin the CLI we resolved; an injected SDK is a test double and must
         # not require the binary to exist.
         # meiva:link base/lm/harness/docs/harness.meiva.okf.md
-        self._cli_path: str | None = (
-            None
-            if sdk is not None
-            else resolve_harness_binary("claude", path_env=self._environ.get("PATH"))
-        )
+        self._cli_path: str | None = None if sdk is not None else config.cli_path
         self._client: ClaudeClientProtocol | None = None
         self._cli_pid: int | None = None
         self._turn_steps_count = 0
@@ -249,7 +243,7 @@ class ClaudeSession(BaseHarnessSession[BridgeConfig]):
             setting_sources=[],
             strict_mcp_config=True,
             include_partial_messages=True,
-            env=build_env(self._environ, self.config.auth, host=process_environment()),
+            env=build_env(self._environ, self.config.auth, host=self._environ),
             resume=resume,
         )
 

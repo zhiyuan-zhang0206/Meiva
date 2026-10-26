@@ -26,9 +26,9 @@ re-entering the boot it is part of.
 from __future__ import annotations
 
 import json
+import pkgutil
 from collections.abc import Mapping
 from dataclasses import dataclass
-from pathlib import Path
 from types import MappingProxyType
 from typing import Any
 
@@ -58,9 +58,10 @@ def _read_index() -> tuple[
     frozenset[str],
 ]:
     """Parse once; only immutable index values survive the local JSON payload."""
-    raw: dict[str, Any] = json.loads(
-        Path(__file__).with_name("config_lite_table.json").read_text(encoding="utf-8")
-    )
+    data = pkgutil.get_data(__package__ or "base.host.env", "config_lite_table.json")
+    if data is None:
+        raise FileNotFoundError("config_lite_table.json is missing from base.host.env")
+    raw: dict[str, Any] = json.loads(data.decode("utf-8"))
     raw_lite: dict[str, list[Any]] = raw["lite_fields"]
     lite_fields: dict[str, LiteField] = {
         name: (row[0], row[1], row[2], row[3], row[4], row[5]) for name, row in raw_lite.items()

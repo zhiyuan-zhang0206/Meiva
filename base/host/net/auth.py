@@ -23,6 +23,16 @@ from base64 import urlsafe_b64encode
 from collections.abc import Collection, Mapping
 from secrets import token_bytes
 
+from base.host.net import (
+    ClusterSecretMissingError as ClusterSecretMissingError,
+)
+from base.host.net import (
+    bearer_header as bearer_header,
+)
+from base.host.net import (
+    require_cluster_secret as require_cluster_secret,
+)
+
 # The launch-environment key carrying this process's machine API token
 # (`base.host.db_authority.api`): set per process by the root launcher, or by
 # the boot pass for an admitted operator process; never in `.env`.
@@ -37,36 +47,10 @@ _DEFAULT_SESSION_TTL_SECONDS = 24 * 3600
 MANAGED_BROWSER_USER_AGENT = "meiva-managed-browser"
 
 
-def bearer_header(secret: str) -> dict[str, str]:
-    """The Authorization header a caller presents to an authenticated surface."""
-    return {"Authorization": f"{_SCHEME}{secret}"}
-
-
 # meiva:note
 # The machine API token `env` (a process's launch environment) carries, if any.
 def delivered_token(env: Mapping[str, str]) -> str | None:
     return env.get(API_TOKEN_ENV) or None
-
-
-class ClusterSecretMissingError(RuntimeError):
-    """A gateway home has no `MEIVA_CLUSTER_SECRET`: the cluster API cannot start."""
-
-
-def require_cluster_secret(secret: str, *, where: str) -> str:
-    """The gateway's human secret, or `ClusterSecretMissingError`.
-
-    Every cluster authenticates its API with a human secret; there is no open
-    posture. `meiva init` mints one into a new home's `.env`, so a missing one
-    means a hand-edited or pre-existing home.
-    """
-    if not secret:
-        raise ClusterSecretMissingError(
-            f"{where} has no MEIVA_CLUSTER_SECRET, and the cluster API always authenticates. "
-            "Set it in the gateway home's .env to a fresh URL-safe token "
-            "(python3 -c 'import secrets; print(secrets.token_urlsafe(32))'), then run `meiva start --all-services` (or this unit's own service selection); "
-            "`meiva init` mints one for every new home"
-        )
-    return secret
 
 
 def verify_bearer(authorization: str | None, secret: str) -> bool:

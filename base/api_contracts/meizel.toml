@@ -3,7 +3,6 @@ exports = ["agent_contract.py", "caller_identity.py", "config.py", "contracts.py
 [purity]
 "." = "strict-to-be"
 "__init__.py" = "strict"
-"agent_contract.py" = "strict"
 "caller_identity.py" = "strict"
 "config.py" = "strict"
 "contracts.py" = "strict"

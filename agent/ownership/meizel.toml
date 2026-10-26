@@ -20,7 +20,6 @@ exports = ["corpse_reap.py", "hosted.py", "inbound.py", "tests"]
 "inbound.py#async def lock_inbound_owner" = 1
 
 [debt.impure-edge]
-"corpse_reap.py#base/db/transaction.py" = 1
 "corpse_reap.py#base/telemetry/__init__.py" = 1
 "corpse_reap.py#base/telemetry/audit_events.py" = 1
 "hosted.py#base/agents/impersonation/replacement.py" = 1

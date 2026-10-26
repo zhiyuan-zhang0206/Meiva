@@ -12,7 +12,3 @@ exports = ["client.py", "grants", "wire.py"]
 
 [debt.ambient-read]
 "client.py#clock time.monotonic" = 1
-
-[debt.any-collaborator]
-"client.py#any PermissionsHelperClient.call.return" = 1
-"client.py#any parse_reply.return" = 1

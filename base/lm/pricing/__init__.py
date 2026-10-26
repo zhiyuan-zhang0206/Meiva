@@ -72,9 +72,9 @@ from __future__ import annotations
 
 import json
 import math
+import pkgutil
 from collections.abc import Iterator, Mapping, Sequence
 from datetime import UTC, date, datetime
-from pathlib import Path
 from types import MappingProxyType
 from typing import TYPE_CHECKING, Any
 
@@ -119,8 +119,10 @@ __all__ = [
 
 
 def load_archive() -> dict[str, ModelPrice]:
-    path = Path(__file__).with_name("pricing_catalog_archive.json")
-    raw: Any = json.loads(path.read_text(encoding="utf-8"))
+    data = pkgutil.get_data(__package__ or "base.lm.pricing", "pricing_catalog_archive.json")
+    if data is None:
+        raise FileNotFoundError("pricing_catalog_archive.json is missing from base.lm.pricing")
+    raw: Any = json.loads(data.decode("utf-8"))
     return parse_catalog(raw)
 
 

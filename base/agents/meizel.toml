@@ -1,4 +1,4 @@
-exports = ["birth", "context", "history", "impersonation", "inbox", "incarnation", "labels.py", "lifecycle.py", "messages", "model", "observation", "recovery", "sdk", "tasks", "tests", "to_user", "upload_delivery"]
+exports = ["birth", "context", "history", "impersonation", "inbox", "incarnation", "labels.py", "lifecycle.py", "lifecycle_signals.py", "messages", "model", "observation", "recovery", "sdk", "tasks", "tests", "to_user", "upload_delivery"]
 
 [uses]
 "birth" = ["history", "impersonation", "inbox", "labels.py", "model"]
@@ -6,6 +6,7 @@ exports = ["birth", "context", "history", "impersonation", "inbox", "incarnation
 "history" = ["impersonation", "incarnation", "messages", "model", "sdk"]
 "impersonation" = ["messages"]
 "inbox" = ["impersonation", "messages"]
+"lifecycle.py" = ["lifecycle_signals.py"]
 "observation" = ["impersonation", "tasks"]
 "sdk" = ["impersonation", "messages"]
 "tasks" = ["inbox", "messages"]
@@ -14,3 +15,4 @@ exports = ["birth", "context", "history", "impersonation", "inbox", "incarnation
 
 [purity]
 "__init__.py" = "strict"
+"lifecycle_signals.py" = "strict"

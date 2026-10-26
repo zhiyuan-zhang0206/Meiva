@@ -21,7 +21,3 @@ exports = ["delivery.py", "event_signals.py", "history.py", "host_transport.py",
 
 [roots]
 "host_transport.py" = { kinds = ["environ"], why = "CODEX_HOME is provider routing context, not cluster configuration; the shared transport preserves the CLI socket resolution contract" }
-
-[debt.ambient-read]
-"__init__.py#random secrets.token_urlsafe" = 1
-"__init__.py#random uuid.uuid4" = 1
