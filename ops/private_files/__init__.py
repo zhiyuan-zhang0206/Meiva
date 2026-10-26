@@ -2,8 +2,9 @@
 # Read-only verification for registered private production files.
 #
 # The shell reads the manifest, the checked tree and the durable git sources, and hands what it
-# found to `verdicts` and `report`. `main` is the one place that resolves the process home, and
-# only when the operator named no root.
+# found to `verdicts` and `report`. `main` takes the process home from its caller, the operator
+# entry (`__main__.py`), which resolves it unconditionally; the home matters only when the operator
+# named no root.
 
 from __future__ import annotations
 
