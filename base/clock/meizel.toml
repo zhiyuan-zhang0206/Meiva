@@ -12,7 +12,6 @@ exports = ["configuration.py", "tests"]
 "__init__.py#settings base.config.settings" = 1
 
 [debt.impure-call]
-"__init__.py#async def asleep" = 3
 "__init__.py#datetime.now" = 1
 "__init__.py#time.monotonic" = 1
 "__init__.py#time.sleep" = 1

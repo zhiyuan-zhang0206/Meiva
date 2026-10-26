@@ -362,17 +362,24 @@ def _printable_ratio(s: str) -> float:
     return sum(c.isprintable() or c in "\n\t" for c in s) / len(s) if s else 0.0
 
 
-def _decode_blobs(text: str) -> list[tuple[str, int, str]]:
-    """Every decodable encoded blob in `text`, as `(decoded, line, encoding)`.
+def _unquote_url(line: str) -> str:
+    return re.sub(
+        r"(?:%[0-9a-fA-F]{2})+",
+        lambda m: bytes.fromhex(m.group(0).replace("%", "")).decode("utf-8", errors="replace"),
+        line,
+    )
 
-    A blob that decodes to mostly-unprintable bytes is not a hidden instruction,
-    it is a checksum or an embedded image — dropped, so the caller does not scan
-    binary noise. Bounded in count and recursion depth: this runs on hostile
-    input, and a decode bomb is a denial-of-service on the install command.
-    """
+
+# meiva:note
+# Every decodable encoded blob in `text`, as `(decoded, line, encoding)`.
+#
+# A blob that decodes to mostly-unprintable bytes is not a hidden instruction,
+# it is a checksum or an embedded image — dropped, so the caller does not scan
+# binary noise. Bounded in count and recursion depth: this runs on hostile
+# input, and a decode bomb is a denial-of-service on the install command.
+def _decode_blobs(text: str) -> list[tuple[str, int, str]]:
     import base64
     import binascii
-    import urllib.parse
 
     out: list[tuple[str, int, str]] = []
 
@@ -398,7 +405,7 @@ def _decode_blobs(text: str) -> list[tuple[str, int, str]]:
 
     for lineno, line in enumerate(text.splitlines()[:_MAX_BLOBS_PER_TEXT], start=1):
         if len(_URLENC_ESCAPE.findall(line)) >= _URLENC_MIN_ESCAPES:
-            keep(urllib.parse.unquote(line), line, lineno, "url")
+            keep(_unquote_url(line), line, lineno, "url")
     return out
 
 

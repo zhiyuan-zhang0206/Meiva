@@ -23,4 +23,3 @@ exports = ["index.py", "names.py", "scan.py", "tree.py"]
 "scan.py#Path.is_file" = 1
 "scan.py#Path.read_bytes" = 1
 "scan.py#Path.stat" = 1
-"scan.py#import urllib" = 1
