@@ -7,6 +7,7 @@ result/declared range, in text and `--json` (tasks #2915 / #3267).
 from __future__ import annotations
 
 import json
+from datetime import UTC, datetime
 from pathlib import Path
 
 import pytest
@@ -28,6 +29,8 @@ def test_empty_registry_prints_host_and_no_packages(
     assert (
         cmd_packages_status(
             config=process_config,
+            now=datetime.now(UTC),
+            home=unit_home,
         )
         == 0
     )
@@ -47,6 +50,8 @@ def test_text_table_shows_resolved_policy_per_source_class(
     assert (
         cmd_packages_status(
             config=process_config,
+            now=datetime.now(UTC),
+            home=unit_home,
         )
         == 0
     )
@@ -66,7 +71,12 @@ def test_json_output_carries_host_channels_and_packages(
 ) -> None:
     _register("repo-skill", origin="repo", origin_path="/x/meiva_builtins/skills/repo-skill")
 
-    assert cmd_packages_status(config=process_config, json_output=True) == 0
+    assert (
+        cmd_packages_status(
+            config=process_config, json_output=True, now=datetime.now(UTC), home=unit_home
+        )
+        == 0
+    )
     payload = json.loads(capsys.readouterr().out)  # pyright: ignore[reportUnknownMemberType]
     assert payload["host"]["registry_schema"] == 2
     assert "+g" in payload["host"]["display"]
@@ -88,7 +98,12 @@ def test_invalid_manifest_reported_not_crashed(
     manifest.parent.mkdir(parents=True)
     manifest.write_text("{ not json", encoding="utf-8")
 
-    assert cmd_packages_status(config=process_config, json_output=True) == 0
+    assert (
+        cmd_packages_status(
+            config=process_config, json_output=True, now=datetime.now(UTC), home=unit_home
+        )
+        == 0
+    )
     payload = json.loads(capsys.readouterr().out)  # pyright: ignore[reportUnknownMemberType]
     (row,) = payload["packages"]
     assert row["manifest"] is None
@@ -115,6 +130,8 @@ def test_declared_range_displayed(
     assert (
         cmd_packages_status(
             config=process_config,
+            now=datetime.now(UTC),
+            home=unit_home,
         )
         == 0
     )
@@ -142,7 +159,12 @@ def test_host_blocked_package_surfaces_the_reason(
         encoding="utf-8",
     )
 
-    assert cmd_packages_status(config=process_config, json_output=True) == 0
+    assert (
+        cmd_packages_status(
+            config=process_config, json_output=True, now=datetime.now(UTC), home=unit_home
+        )
+        == 0
+    )
     payload = json.loads(capsys.readouterr().out)  # pyright: ignore[reportUnknownMemberType]
     (row,) = payload["packages"]
     assert row["host_blocked"] is not None and "2099" in row["host_blocked"]
@@ -150,6 +172,8 @@ def test_host_blocked_package_surfaces_the_reason(
     assert (
         cmd_packages_status(
             config=process_config,
+            now=datetime.now(UTC),
+            home=unit_home,
         )
         == 0
     )

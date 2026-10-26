@@ -30,6 +30,7 @@ from __future__ import annotations
 import shutil
 import subprocess
 import sys
+from datetime import datetime
 from pathlib import Path
 
 from base.cluster.machine import MachineIdentityReader
@@ -41,7 +42,7 @@ from cli.commands.extensions.skill_package import ExtensionGateway
 from ._pkg_source import cleanup_temp, clone_git
 
 
-def cmd_plugins_update() -> int:
+def cmd_plugins_update(*, home: Path) -> int:
     """`meiva plugins update` — scan all plugins, auto-merge disk image schema diff.
 
     Actual scan + merge logic lives in `base.packages.plugin_config_admin.update_all_disk_images`;
@@ -49,9 +50,8 @@ def cmd_plugins_update() -> int:
     """
     from base.packages.plugin_config_admin import update_all_disk_images
     from base.packages.plugins.enable_config import discover_plugins
-    from base.paths.home import resolve_meiva_home
 
-    result = update_all_disk_images(plugin_dirs=discover_plugins(), home=resolve_meiva_home())
+    result = update_all_disk_images(plugin_dirs=discover_plugins(), home=home)
     if not result.entries:
         print("[meiva plugins update] no plugins found")
         return 0
@@ -116,15 +116,14 @@ def _skill_name_at(pkg_dir: Path) -> str | None:
     return fields["name"]
 
 
-def _sync_skills_load_dir(binding: SourceBinding) -> None:
+def _sync_skills_load_dir(binding: SourceBinding, *, home: Path, now: datetime) -> None:
     """Run the skills converge pass so a just-(un)installed plugin's skills
     land in / leave `~/.meiva/skills/` now, keeping the "active on the next
     skill scan, no restart" promise. Idempotent."""
-    from base.paths import meiva_home
     from cli.commands._repo import repo_root
     from cli.commands.extensions.skills_sync import converge_skills
 
-    result = converge_skills(repo_root(), meiva_home(), binding)
+    result = converge_skills(repo_root(), home, binding, now=now)
     for warning in result.warnings:
         print(f"  ! skills: {warning}", file=sys.stderr)
 
@@ -151,6 +150,8 @@ def _install_bare_skill(
     accept_risk: bool,
     gateway: ExtensionGateway,
     machine: MachineIdentityReader,
+    home: Path,
+    now: datetime,
 ) -> int:
     """Install a cloned bare-skill package into the load dir and register it.
 
@@ -168,6 +169,8 @@ def _install_bare_skill(
             accept_risk=accept_risk,
             gateway=gateway,
             machine=machine,
+            home=home,
+            now=now,
         )
     except SkillScanRefused as e:
         return _report_refusal(e.report)
@@ -188,6 +191,7 @@ def _register_plugin_install(
     *,
     accepted: list[str],
     dest: Path,
+    now: datetime,
 ) -> None:
     """Record a freshly materialized plugin in the install registry.
 
@@ -206,6 +210,7 @@ def _register_plugin_install(
             url,
             path,
             ref,
+            now=now,
             accepted_findings=accepted,
             content_hash=tree_hash(dest),
         )
@@ -249,6 +254,8 @@ def _install_claude_code_plugin(
     *,
     accept_risk: bool,
     binding: SourceBinding,
+    home: Path,
+    now: datetime,
 ) -> int:
     """Scan, materialize and register a Claude Code plugin bundle; prints what it contributes."""
     from base import paths
@@ -259,9 +266,10 @@ def _install_claude_code_plugin(
         report, accepted = skill_package.scan_report(pkg_dir, pkg_dir.name, accept_risk=accept_risk)
     except skill_package.SkillScanRefused as e:
         return _report_refusal(e.report)
-    _claude_code_plugin.sweep_plugin_residue(paths.plugins_dir())
+    plugins_root = paths.plugins_dir(home=home)
+    _claude_code_plugin.sweep_plugin_residue(plugins_root)
     try:
-        result = _claude_code_plugin.materialize(pkg_dir, paths.plugins_dir())
+        result = _claude_code_plugin.materialize(pkg_dir, plugins_root)
     except _claude_code_plugin.ClaudeCodePluginError as e:
         print(f"[meiva plugins install] {e}", file=sys.stderr)
         return 1
@@ -271,19 +279,20 @@ def _install_claude_code_plugin(
         path,
         ref,
         accepted=accepted,
-        dest=paths.plugins_dir() / result.name,
+        dest=plugins_root / result.name,
+        now=now,
     )
-    _sync_skills_load_dir(binding)
-    _print_plugin_install(result, report)
+    _sync_skills_load_dir(binding, home=home, now=now)
+    _print_plugin_install(result, report, home=home)
     return 0
 
 
-def _print_plugin_install(result: Materialized, report: str) -> None:
+def _print_plugin_install(result: Materialized, report: str, *, home: Path) -> None:
     from base import paths
 
     print(
         f"[meiva plugins install] installed plugin '{result.name}' "
-        f"-> {paths.plugins_dir() / result.name}"
+        f"-> {paths.plugins_dir(home=home) / result.name}"
     )
     print(report)
     print("  contributes:")
@@ -316,6 +325,8 @@ def cmd_plugins_install(
     gateway: ExtensionGateway,
     machine: MachineIdentityReader,
     binding: SourceBinding,
+    home: Path,
+    now: datetime,
 ) -> int:
     """`meiva plugins install <url> [--path SUBDIR] [--ref REF] [--accept-risk]` —
     install an external package.
@@ -360,11 +371,20 @@ def cmd_plugins_install(
                 accept_risk=accept_risk,
                 gateway=gateway,
                 machine=machine,
+                home=home,
+                now=now,
             )
 
         if _claude_code_plugin.is_claude_code_plugin(pkg_dir):
             return _install_claude_code_plugin(
-                pkg_dir, url, path, ref, accept_risk=accept_risk, binding=binding
+                pkg_dir,
+                url,
+                path,
+                ref,
+                accept_risk=accept_risk,
+                binding=binding,
+                home=home,
+                now=now,
             )
 
         if (pkg_dir / ".mcp.json").is_file():
@@ -387,16 +407,14 @@ def cmd_plugins_install(
         cleanup_temp(cloned)
 
 
-def _install_dest(pkg_type: str, name: str) -> Path:
+def _install_dest(pkg_type: str, name: str, *, home: Path) -> Path:
     """On-disk install location for a package, by type."""
     from base import paths
 
-    return (
-        paths.plugins_dir() if pkg_type == "plugin" else paths.skills_dir(paths.meiva_home())
-    ) / name
+    return (paths.plugins_dir(home=home) if pkg_type == "plugin" else paths.skills_dir(home)) / name
 
 
-def cmd_plugins_uninstall(name: str) -> int:
+def cmd_plugins_uninstall(name: str, *, home: Path) -> int:
     """`meiva plugins uninstall <name>` — remove an installed package + registry entry."""
     from base import paths
     from base.packages.extensions import install_registry
@@ -408,12 +426,12 @@ def cmd_plugins_uninstall(name: str) -> int:
             file=sys.stderr,
         )
         return 1
-    dest = _install_dest(pkg.type, name)
+    dest = _install_dest(pkg.type, name, home=home)
     if dest.exists():
         shutil.rmtree(dest)
     if pkg.type == "plugin":
         # Its skills were converged into the load dir; drop that copy too.
-        converged = paths.skills_dir(paths.meiva_home()) / name
+        converged = paths.skills_dir(home) / name
         if converged.exists():
             shutil.rmtree(converged)
         # Sweep atomic-install residue so nothing ghost-like survives an
@@ -441,7 +459,7 @@ def cmd_plugins_installed() -> int:
     return 0
 
 
-def cmd_plugins_upgrade(name: str, *, binding: SourceBinding) -> int:
+def cmd_plugins_upgrade(name: str, *, binding: SourceBinding, home: Path, now: datetime) -> int:
     """`meiva plugins upgrade <name>` — re-fetch an installed package
     from its source.
 
@@ -464,7 +482,7 @@ def cmd_plugins_upgrade(name: str, *, binding: SourceBinding) -> int:
         )
         return 1
 
-    dest = _install_dest(pkg.type, name)
+    dest = _install_dest(pkg.type, name, home=home)
     if dest.exists() and install_registry.copy_changed(dest, pkg.installed_hash):
         print(
             f"[meiva plugins upgrade] note: '{name}' was modified locally; "
@@ -504,19 +522,13 @@ def cmd_plugins_upgrade(name: str, *, binding: SourceBinding) -> int:
                 shutil.rmtree(dest)
             shutil.move(str(pkg_dir), str(dest))
 
-        from base.clock import SYSTEM_TIMERS, Clock, ClockConfig
-
-        pkg.updated_at = (
-            Clock(ClockConfig("UTC", None, message_timestamp_weekday=False), timers=SYSTEM_TIMERS)
-            .now()
-            .isoformat(timespec="seconds")
-        )
+        pkg.updated_at = now.isoformat(timespec="seconds")
         pkg.installed_hash = install_registry.tree_hash(dest)
         install_registry.register(pkg)
         if pkg.type == "plugin":
             # After the registry write — the converge pass updates this
             # entry's content_hash, which a later register(pkg) would clobber.
-            _sync_skills_load_dir(binding)
+            _sync_skills_load_dir(binding, home=home, now=now)
         print(f"[meiva plugins upgrade] re-fetched '{name}' from {pkg.source}.")
         print("  active on the next skill scan; no restart needed.")
         return 0

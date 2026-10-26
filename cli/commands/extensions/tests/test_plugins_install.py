@@ -8,6 +8,7 @@
 import json
 import shutil
 import subprocess
+from datetime import UTC, datetime
 from pathlib import Path
 
 import pytest
@@ -132,6 +133,7 @@ def _install(
     ref: str | None,
     path: str | None,
     *,
+    home: Path,
     machine: MachineIdentityReader,
     accept_risk: bool = False,
 ) -> int:
@@ -143,11 +145,13 @@ def _install(
         gateway=RecordingGateway(),
         machine=machine,
         binding=PROD_ELSEWHERE,
+        home=home,
+        now=datetime.now(UTC),
     )
 
 
-def _upgrade(name: str) -> int:
-    return cmd_plugins_upgrade(name, binding=PROD_ELSEWHERE)
+def _upgrade(name: str, *, home: Path) -> int:
+    return cmd_plugins_upgrade(name, binding=PROD_ELSEWHERE, home=home, now=datetime.now(UTC))
 
 
 def test_install_skill_records_and_surfaces(
@@ -159,7 +163,7 @@ def test_install_skill_records_and_surfaces(
     command_machine: MachineIdentityReader,
 ) -> None:
     url = _make_skill_repo(tmp_path, "demo")
-    assert _install(url, None, None, machine=command_machine) == 0
+    assert _install(url, None, None, machine=command_machine, home=unit_home) == 0
 
     pkg = reg.get("demo")
     assert pkg is not None and pkg.type == "skill" and pkg.source == url and pkg.enabled
@@ -178,7 +182,7 @@ def test_install_disabled_skill_hidden_from_scanner(
     command_machine: MachineIdentityReader,
 ) -> None:
     url = _make_skill_repo(tmp_path, "demo")
-    _install(url, None, None, machine=command_machine)
+    _install(url, None, None, machine=command_machine, home=unit_home)
     reg.register(
         reg.InstalledPackage(name="demo", type="skill", source=url, ref=None, enabled=False)
     )
@@ -193,8 +197,10 @@ def test_install_rejects_duplicate(
     command_machine: MachineIdentityReader,
 ) -> None:
     url = _make_skill_repo(tmp_path, "demo")
-    assert _install(url, None, None, machine=command_machine) == 0
-    assert _install(url, None, None, machine=command_machine) == 1  # already installed
+    assert _install(url, None, None, machine=command_machine, home=unit_home) == 0
+    assert (
+        _install(url, None, None, machine=command_machine, home=unit_home) == 1
+    )  # already installed
 
 
 def test_install_rejects_unrecognized(
@@ -205,7 +211,7 @@ def test_install_rejects_unrecognized(
     command_machine: MachineIdentityReader,
 ) -> None:
     url = _make_plugin_repo(tmp_path)
-    assert _install(url, None, None, machine=command_machine) == 1
+    assert _install(url, None, None, machine=command_machine, home=unit_home) == 1
     assert "unrecognized package" in capsys.readouterr().err  # pyright: ignore[reportUnknownMemberType]
     assert reg.load().packages == []
 
@@ -229,7 +235,7 @@ def test_install_bare_mcp_package_signposts_mcp_install(
     _git(repo, "config", "user.name", "t")
     _git(repo, "add", ".")
     _git(repo, "commit", "-q", "-m", "init")
-    assert _install(f"file://{repo}", None, None, machine=command_machine) == 1
+    assert _install(f"file://{repo}", None, None, machine=command_machine, home=unit_home) == 1
     assert "meiva mcp install" in capsys.readouterr().err  # pyright: ignore[reportUnknownMemberType]
     assert reg.load().packages == []
 
@@ -242,14 +248,14 @@ def test_uninstall_removes_dir_and_entry(
     command_machine: MachineIdentityReader,
 ) -> None:
     url = _make_skill_repo(tmp_path, "demo")
-    _install(url, None, None, machine=command_machine)
-    assert cmd_plugins_uninstall("demo") == 0
+    _install(url, None, None, machine=command_machine, home=unit_home)
+    assert cmd_plugins_uninstall("demo", home=unit_home) == 0
     assert reg.get("demo") is None
     assert not (unit_home / "skills" / "demo").exists()
 
 
 def test_uninstall_unknown_errors(unit_home: Path) -> None:
-    assert cmd_plugins_uninstall("nope") == 1
+    assert cmd_plugins_uninstall("nope", home=unit_home) == 1
 
 
 def test_installed_lists_entries(
@@ -262,7 +268,9 @@ def test_installed_lists_entries(
 ) -> None:
     assert cmd_plugins_installed() == 0
     assert "(none)" in capsys.readouterr().out  # pyright: ignore[reportUnknownMemberType]
-    _install(_make_skill_repo(tmp_path, "demo"), None, None, machine=command_machine)
+    _install(
+        _make_skill_repo(tmp_path, "demo"), None, None, machine=command_machine, home=unit_home
+    )
     assert cmd_plugins_installed() == 0
     assert "demo" in capsys.readouterr().out  # pyright: ignore[reportUnknownMemberType]
 
@@ -275,14 +283,14 @@ def test_upgrade_refetches(
     command_machine: MachineIdentityReader,
 ) -> None:
     url = _make_skill_repo(tmp_path, "demo", description="v1")
-    _install(url, None, None, machine=command_machine)
+    _install(url, None, None, machine=command_machine, home=unit_home)
     # mutate the source repo + commit, then upgrade
     repo = tmp_path / "demo-src"
     (repo / "SKILL.md").write_text(
         "---\nname: demo\ndescription: v2\n---\n\n# demo v2\n", encoding="utf-8"
     )
     _git(repo, "commit", "-aqm", "v2")
-    assert _upgrade("demo") == 0
+    assert _upgrade("demo", home=unit_home) == 0
     installed = (unit_home / "skills" / "demo" / "SKILL.md").read_text()
     assert "v2" in installed
 
@@ -294,7 +302,7 @@ def test_install_claude_code_plugin_from_subdir_surfaces_skill(
     command_machine: MachineIdentityReader,
 ) -> None:
     url = _make_claude_code_plugin_repo(tmp_path)
-    assert _install(url, None, "plugins/pr-toolkit", machine=command_machine) == 0
+    assert _install(url, None, "plugins/pr-toolkit", machine=command_machine, home=unit_home) == 0
 
     pkg = reg.get("pr-toolkit")
     assert pkg is not None
@@ -319,7 +327,7 @@ def test_install_claude_code_plugin_without_anything_refused(
     command_machine: MachineIdentityReader,
 ) -> None:
     url = _make_claude_code_plugin_repo(tmp_path, agents=False, mcp=False, skills=False)
-    assert _install(url, None, "plugins/pr-toolkit", machine=command_machine) == 1
+    assert _install(url, None, "plugins/pr-toolkit", machine=command_machine, home=unit_home) == 1
     assert "nothing to" in capsys.readouterr().err  # pyright: ignore[reportUnknownMemberType]
     assert reg.load().packages == []
 
@@ -333,7 +341,7 @@ def test_install_claude_code_plugin_skills_only_surfaces(
 ) -> None:
     # superpowers shape: a Claude Code plugin shipping skills/ but no agents/ or .mcp.json
     url = _make_claude_code_plugin_repo(tmp_path, agents=False, mcp=False, skills=True)
-    assert _install(url, None, "plugins/pr-toolkit", machine=command_machine) == 0
+    assert _install(url, None, "plugins/pr-toolkit", machine=command_machine, home=unit_home) == 0
 
     pkg = reg.get("pr-toolkit")
     assert pkg is not None and pkg.type == "plugin" and pkg.enabled
@@ -357,7 +365,7 @@ def test_upgrade_claude_code_plugin_skills_only(
     command_machine: MachineIdentityReader,
 ) -> None:
     url = _make_claude_code_plugin_repo(tmp_path, agents=False, mcp=False, skills=True)
-    _install(url, None, "plugins/pr-toolkit", machine=command_machine)
+    _install(url, None, "plugins/pr-toolkit", machine=command_machine, home=unit_home)
     # add a third skill to the source, commit, upgrade
     repo = tmp_path / "claude-code-src"
     new_skill = repo / "plugins" / "pr-toolkit" / "skills" / "debugging"
@@ -368,7 +376,7 @@ def test_upgrade_claude_code_plugin_skills_only(
     )
     _git(repo, "add", ".")
     _git(repo, "commit", "-qm", "add skill")
-    assert _upgrade("pr-toolkit") == 0
+    assert _upgrade("pr-toolkit", home=unit_home) == 0
     assert (unit_home / "plugins" / "pr-toolkit" / "skills" / "debugging" / "SKILL.md").is_file()
 
 
@@ -380,7 +388,7 @@ def test_install_claude_code_plugin_reports_contributions(
     command_machine: MachineIdentityReader,
 ) -> None:
     url = _make_claude_code_plugin_repo(tmp_path, agents=True, mcp=True)
-    assert _install(url, None, "plugins/pr-toolkit", machine=command_machine) == 0
+    assert _install(url, None, "plugins/pr-toolkit", machine=command_machine, home=unit_home) == 0
     out = capsys.readouterr().out  # pyright: ignore[reportUnknownMemberType]
     # the install message itemizes what the plugin folder contributed
     assert "contributes:" in out
@@ -400,7 +408,7 @@ def test_install_claude_code_plugin_with_bundled_mcp(
     from meiva.mcps.config import load_mcp_config
 
     url = _make_claude_code_plugin_repo(tmp_path, agents=True, mcp=True)
-    assert _install(url, None, "plugins/pr-toolkit", machine=command_machine) == 0
+    assert _install(url, None, "plugins/pr-toolkit", machine=command_machine, home=unit_home) == 0
 
     # skill still materialized
     assert (unit_home / "plugins" / "pr-toolkit" / "skills" / "pr-toolkit" / "SKILL.md").is_file()
@@ -418,7 +426,7 @@ def test_install_claude_code_plugin_mcp_only(
     from meiva.mcps.config import load_mcp_config
 
     url = _make_claude_code_plugin_repo(tmp_path, agents=False, mcp=True)
-    assert _install(url, None, "plugins/pr-toolkit", machine=command_machine) == 0
+    assert _install(url, None, "plugins/pr-toolkit", machine=command_machine, home=unit_home) == 0
 
     pkg = reg.get("pr-toolkit")
     assert pkg is not None and pkg.type == "plugin" and pkg.enabled
@@ -443,7 +451,7 @@ def test_install_claude_code_plugin_commands_surface(
     url = _make_claude_code_plugin_repo(
         tmp_path, agents=False, mcp=False, skills=False, commands=True
     )
-    assert _install(url, None, "plugins/pr-toolkit", machine=command_machine) == 0
+    assert _install(url, None, "plugins/pr-toolkit", machine=command_machine, home=unit_home) == 0
 
     # commands/ copied verbatim into the overlay
     assert (unit_home / "plugins" / "pr-toolkit" / "commands" / "deploy.md").is_file()
@@ -461,8 +469,8 @@ def test_uninstall_claude_code_plugin_removes_plugin_dir(
     command_machine: MachineIdentityReader,
 ) -> None:
     url = _make_claude_code_plugin_repo(tmp_path)
-    _install(url, None, "plugins/pr-toolkit", machine=command_machine)
-    assert cmd_plugins_uninstall("pr-toolkit") == 0
+    _install(url, None, "plugins/pr-toolkit", machine=command_machine, home=unit_home)
+    assert cmd_plugins_uninstall("pr-toolkit", home=unit_home) == 0
     assert reg.get("pr-toolkit") is None
     assert not (unit_home / "plugins" / "pr-toolkit").exists()
 
@@ -474,7 +482,7 @@ def test_upgrade_claude_code_plugin_rematerializes(
     command_machine: MachineIdentityReader,
 ) -> None:
     url = _make_claude_code_plugin_repo(tmp_path)
-    _install(url, None, "plugins/pr-toolkit", machine=command_machine)
+    _install(url, None, "plugins/pr-toolkit", machine=command_machine, home=unit_home)
     # add a third agent to the source, commit, upgrade
     repo = tmp_path / "claude-code-src"
     (repo / "plugins" / "pr-toolkit" / "agents" / "type-design-analyzer.md").write_text(
@@ -483,7 +491,7 @@ def test_upgrade_claude_code_plugin_rematerializes(
     )
     _git(repo, "add", ".")
     _git(repo, "commit", "-qm", "add agent")
-    assert _upgrade("pr-toolkit") == 0
+    assert _upgrade("pr-toolkit", home=unit_home) == 0
     refs = unit_home / "plugins" / "pr-toolkit" / "skills" / "pr-toolkit" / "references"
     assert (refs / "type-design-analyzer.md").is_file()
 
@@ -511,7 +519,7 @@ def test_install_failure_mid_materialize_leaves_nothing(
     _add_dangling_link(tmp_path / "claude-code-src", "brainstorming", tmp_path / "gone.md")
 
     with pytest.raises(shutil.Error):
-        _install(url, None, "plugins/pr-toolkit", machine=command_machine)
+        _install(url, None, "plugins/pr-toolkit", machine=command_machine, home=unit_home)
 
     plugins_root = unit_home / "plugins"
     assert not (plugins_root / "pr-toolkit").exists()
@@ -529,7 +537,7 @@ def test_upgrade_failure_keeps_previous_version(
     complete version in place — never a missing or half-installed plugin —
     and no staging/backup residue."""
     url = _make_claude_code_plugin_repo(tmp_path, skills=True)
-    assert _install(url, None, "plugins/pr-toolkit", machine=command_machine) == 0
+    assert _install(url, None, "plugins/pr-toolkit", machine=command_machine, home=unit_home) == 0
     v1_skill = unit_home / "plugins" / "pr-toolkit" / "skills" / "brainstorming" / "SKILL.md"
     assert v1_skill.is_file()
 
@@ -543,7 +551,7 @@ def test_upgrade_failure_keeps_previous_version(
     _add_dangling_link(repo, "debugging", tmp_path / "gone.md")
 
     with pytest.raises(shutil.Error):
-        _upgrade("pr-toolkit")
+        _upgrade("pr-toolkit", home=unit_home)
 
     # the previous version is still fully there
     assert v1_skill.is_file()
@@ -595,7 +603,12 @@ def test_install_refuses_dot_prefixed_plugin_name(
     _git(repo, "add", ".")
     _git(repo, "commit", "-q", "-m", "init")
 
-    assert _install(f"file://{repo}", None, "plugins/pr-toolkit", machine=command_machine) == 1
+    assert (
+        _install(
+            f"file://{repo}", None, "plugins/pr-toolkit", machine=command_machine, home=unit_home
+        )
+        == 1
+    )
     assert "starts with" in capsys.readouterr().err  # pyright: ignore[reportUnknownMemberType]
     assert reg.load().packages == []
 
@@ -616,7 +629,7 @@ def test_install_sweeps_stale_backup_residue(
     (plugins_root / ".pr-toolkit.staging" / "plugin.py").write_text("x = 1\n")
 
     url = _make_claude_code_plugin_repo(tmp_path)
-    assert _install(url, None, "plugins/pr-toolkit", machine=command_machine) == 0
+    assert _install(url, None, "plugins/pr-toolkit", machine=command_machine, home=unit_home) == 0
 
     assert not (plugins_root / ".pr-toolkit.backup-999").exists()
     assert not (plugins_root / ".pr-toolkit.staging").exists()
@@ -631,14 +644,14 @@ def test_uninstall_sweeps_stale_backup_residue(
 ) -> None:
     """QA N4: uninstall removes dot-prefixed residue for the plugin too."""
     url = _make_claude_code_plugin_repo(tmp_path)
-    assert _install(url, None, "plugins/pr-toolkit", machine=command_machine) == 0
+    assert _install(url, None, "plugins/pr-toolkit", machine=command_machine, home=unit_home) == 0
 
     plugins_root = unit_home / "plugins"
     stale = plugins_root / ".pr-toolkit.backup-999"
     stale.mkdir()
     (stale / "plugin.py").write_text("x = 1\n")
 
-    assert cmd_plugins_uninstall("pr-toolkit") == 0
+    assert cmd_plugins_uninstall("pr-toolkit", home=unit_home) == 0
 
     assert not (plugins_root / "pr-toolkit").exists()
     assert not (plugins_root / ".pr-toolkit.backup-999").exists()

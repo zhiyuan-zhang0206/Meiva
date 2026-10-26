@@ -65,6 +65,7 @@ def _refresh(
         check_only=check_only,
         only=only,
         from_job=from_job,
+        home=_home(),
     )
 
 
@@ -290,7 +291,7 @@ def test_refresh_apply_then_apply_with_installed_hash(
     assert _row("foo").update.applied_rev == c3
 
     # rollback reads the same baseline: no false refusal, and it dual-writes too
-    assert cmd_packages_rollback("foo") == 0
+    assert cmd_packages_rollback("foo", home=_home(), now=datetime.now(UTC)) == 0
     row = _row("foo")
     assert row.installed_hash == row.content_hash
     assert "# v2" in (_home() / "skills" / "foo" / "SKILL.md").read_text(encoding="utf-8")
@@ -377,6 +378,7 @@ def test_git_channel_copy_edit_converges_to_incoming(
             from_job=False,
             now=datetime.now(UTC),
             repo=core_repo,
+            home=_home(),
         )
         result, new_hash = gate._apply_staged(pkg, staged, "0" * 40)
     finally:
@@ -584,7 +586,7 @@ def test_rollback_restores_the_previous_tree(
     _commit_push(core_repo, "foo v2")
     assert _refresh(refresh_config, core_repo).items[0].result == "applied"
 
-    assert cmd_packages_rollback("foo") == 0
+    assert cmd_packages_rollback("foo", home=_home(), now=datetime.now(UTC)) == 0
     home = _home()
     assert "# v1" in (home / "skills" / "foo" / "SKILL.md").read_text(encoding="utf-8")
     assert "# v2" in (home / "skills" / ".foo.prev" / "SKILL.md").read_text(encoding="utf-8")
@@ -593,7 +595,7 @@ def test_rollback_restores_the_previous_tree(
     # a differing local copy is replaced (and reported), not refused
     copy = home / "skills" / "foo" / "SKILL.md"
     copy.write_text("---\nname: foo\ndescription: MINE\n---\n\nedited\n", encoding="utf-8")
-    assert cmd_packages_rollback("foo") == 0
+    assert cmd_packages_rollback("foo", home=_home(), now=datetime.now(UTC)) == 0
     assert "current copy differs" in capsys.readouterr().out  # pyright: ignore[reportUnknownMemberType]
     assert "# v2" in copy.read_text(encoding="utf-8")
 
@@ -603,7 +605,7 @@ def test_rollback_without_a_previous_tree_refuses(core_repo: Path) -> None:
 
     c1 = _head(core_repo)
     _seed(core_repo, "foo", applied_rev=c1)
-    assert cmd_packages_rollback("foo") == 1
+    assert cmd_packages_rollback("foo", home=_home(), now=datetime.now(UTC)) == 1
 
 
 def test_policy_verb_writes_explicit_values(refresh_config: ConfigBoot, core_repo: Path) -> None:
@@ -639,6 +641,7 @@ def test_refresh_cmd_json_shape(
             repo=core_repo,
             now=datetime.now(UTC),
             json_output=True,
+            home=_home(),
         )
         == 0
     )

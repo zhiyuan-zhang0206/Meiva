@@ -9,6 +9,3 @@ exports = ["gateway.py", "plan.py", "render.py", "roster.py"]
 "plan.py" = "strict"
 "render.py" = "strict"
 "roster.py" = "strict"
-
-[debt.ambient-read]
-"__init__.py#environ base.host.env.registry.process_environment" = 2
