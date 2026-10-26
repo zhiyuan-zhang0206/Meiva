@@ -14,8 +14,9 @@ What is left:
   `services/wake/schedule_manager/runner.py`. Left: `meiva/boot.py` (`launched_context`,
   `OwnedBoot.new_context`). A root that needs the generator unpredictable and not copied by a
   fork hands in a `random.SystemRandom`.
-- `require_new_id()` returns `new_uuid(rng).hex` (`base/clock/ids.py`, the 32-character form
-  `CommandRuntime.new_id()` and the IM bridge use) once that module is on main.
+- `require_new_id()` returns the 32-character hex form that `CommandRuntime.new_id()` and the IM
+  bridge use; its body repeats `new_uuid(rng).hex` and imports that function once
+  `base/clock/ids.py` is on main.
 - `bus()` takes `current_context().require_rng()`; `SamplingPolicyLike.rng` and
   `InertSamplingPolicy.rng` go away, and `settings.py` leaves `[roots]`. The commit that added the
   installation-backed lookup answered the `root-middle-layer` hint with this item.
