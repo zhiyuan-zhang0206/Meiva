@@ -296,11 +296,6 @@ class Universe:
             if depth < len(parts) - 1:
                 children.setdefault("/".join(parts[: depth + 1]), set())
 
-    # meiva:note
-    # The tracked files with `suffix` that contain any of `words` as a whole word.
-    def grep_words(self, words: Collection[str], suffix: str) -> list[str]:
-        return GitRepo(self.root).grep_words(words, suffix)
-
     def resolve_module(self, dotted: str) -> Module | None:
         """Resolve a dotted name against the checkout, as `pythonpath = ["."]` would."""
         if dotted in self._modules:

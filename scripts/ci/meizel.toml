@@ -13,3 +13,8 @@ exports = ["cli.py", "pull_requests", "refresh_test_durations.py", "shard_counts
 "host_marks_census.py" = { kinds = ["platform"], why = "CLI census entrypoint records the host OS it ran on in the artifact" }
 "migration_smoke.py" = { kinds = ["environ", "settings"], why = "builds a psql subprocess env (PGHOST/PGPORT/... from a throwaway native Postgres); PG* are libpq plumbing, not Meiva runtime config; Tool entry composes its process resources from the launch configuration" }
 "pgvector_runtime_smoke.py" = { kinds = ["platform", "settings"], why = "Tool entry checks supported host OS/arch and composes its process resources from the launch configuration" }
+
+[debt.ambient-read]
+"cli.py#clock base.clock.Clock" = 1
+"cli.py#clock base.clock.SYSTEM_TIMERS" = 1
+"cli.py#platform base.host.system.hostport.Host.system" = 1

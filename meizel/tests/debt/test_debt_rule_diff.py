@@ -404,3 +404,63 @@ def test_type_cast_rule_cannot_trade_an_old_group_for_new_content(
     assert "cast g" in out.out
     assert "1 recorded, 0 found" in out.out
     assert "grew" in out.err
+
+
+READER_BASE = {
+    "meizel.toml": '[roles]\napplication = ["app", "lib"]\n\n[uses]\n"app" = ["lib"]\n',
+    "lib/__init__.py": "",
+    "lib/meizel.toml": 'exports = ["env.py"]\n\n[roots]\n"env.py" = { kinds = ["environ"], why = "returns the environment" }\n',
+    "lib/env.py": "import os\n\n\ndef read():\n    return os.environ\n",
+    "app/__init__.py": "",
+    "app/use.py": "from lib.env import read\n\nx = read()\n",
+}
+READERS = '\n[ambient-readers.environ]\n"lib.env.read()" = "returns the environment"\n'
+
+
+def reader_diff(root: Path) -> int:
+    return run(
+        root,
+        "debt",
+        "diff",
+        "--against",
+        "HEAD",
+        "--on-growth",
+        "fail",
+        "--waive-if-changed",
+        "meizel.policy.toml",
+    )
+
+
+def add_reader(root: Path) -> None:
+    policy = (root / "meizel.policy.toml").read_text(encoding="utf-8")
+    write(root, {"meizel.policy.toml": policy + READERS})
+
+
+def test_listing_a_reader_in_the_policy_is_a_rule_change_not_content_growth(
+    make_repo: RepoFactory, capsys: pytest.CaptureFixture[str]
+) -> None:
+    root = make_repo(READER_BASE)
+    commit(root)
+    add_reader(root)
+    assert run(root, "debt", "record", ".") == 0
+    write(root, {})
+    capsys.readouterr()
+    assert reader_diff(root) == 0
+    out = capsys.readouterr().out
+    assert "ambient-read" in out
+    assert "+1" in out
+    assert "no content growth" in out
+
+
+def test_a_policy_change_that_also_adds_a_call_site_fails(
+    make_repo: RepoFactory, capsys: pytest.CaptureFixture[str]
+) -> None:
+    root = make_repo(READER_BASE)
+    commit(root)
+    add_reader(root)
+    write(root, {"app/other.py": "from lib.env import read\n\ny = read()\n"})
+    assert run(root, "debt", "record", ".") == 0
+    write(root, {})
+    capsys.readouterr()
+    assert reader_diff(root) == 1
+    assert "other.py#environ lib.env.read" in capsys.readouterr().out

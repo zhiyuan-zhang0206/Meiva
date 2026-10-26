@@ -1,16 +1,25 @@
 from __future__ import annotations
 
+from itertools import pairwise
 from pathlib import Path
 
 import pytest
 
 from meizel.contracts.analysis import render_policy
+from meizel.graph.model import MeizelError
 from meizel.tests.synthetic import RepoFactory, analysis_of, diagnostics
 
 ROOT = '[roles]\napplication = ["app", "lib"]\ntests = ["tests"]\n'
 READERS = {
     "environ": ["lib.env.process_environment()"],
     "home": ["lib.paths.meiva_home()", "lib.paths.Home.current()"],
+}
+CLOCKS = {
+    "lib/clocks.py": (
+        "class Clock:\n    @classmethod\n    def from_settings(cls):\n        return cls()\n\n\n"
+        "SYSTEM = Clock()\n"
+    ),
+    "lib/meizel.toml": '[roots]\n"clocks.py" = ["clock"]\n',
 }
 FILES = {
     "lib/__init__.py": "",
@@ -202,17 +211,14 @@ def test_a_reader_that_no_longer_exists_is_stale(make_repo: RepoFactory) -> None
     root = repo(make_repo, {}, readers)
     stale = diagnostics(root, "stale-reader")
     assert [(d.path, d.message.split("] ", 1)[1]) for d in stale] == [
+        ("meizel.policy.toml", "'lib.env.vanished()' `vanished` is not defined in lib/env.py"),
         (
             "meizel.policy.toml",
-            "'lib.env.vanished()' names no function or method `vanished` in lib/env.py",
+            "'lib.gone.read()' names no module `lib.gone` and no class `gone` in lib/__init__.py",
         ),
         (
             "meizel.policy.toml",
-            "'lib.gone.read()' names no function or method `gone.read` in lib/__init__.py",
-        ),
-        (
-            "meizel.policy.toml",
-            "'lib.paths.Home.vanished()' names no function or method `Home.vanished` in lib/paths.py",
+            "'lib.paths.Home.vanished()' class `Home` in lib/paths.py defines no `vanished`",
         ),
     ]
     assert [d.line > 1 for d in stale] == [True, True, True]
@@ -221,8 +227,8 @@ def test_a_reader_that_no_longer_exists_is_stale(make_repo: RepoFactory) -> None
 @pytest.mark.parametrize(
     ("readers", "fragment"),
     [
-        ({"environ": ["lib.env.process_environment"]}, "must be a qualified call"),
-        ({"environ": ["process_environment()"]}, "must be a qualified call"),
+        ({"environ": ["process_environment()"]}, "must be qualified"),
+        ({"clock": ["SYSTEM"]}, "must be qualified"),
         (
             {
                 "environ": ["lib.env.process_environment()"],
@@ -232,7 +238,7 @@ def test_a_reader_that_no_longer_exists_is_stale(make_repo: RepoFactory) -> None
         ),
     ],
 )
-def test_a_reader_entry_is_a_qualified_call_under_one_kind(
+def test_a_reader_entry_is_qualified_and_listed_under_one_kind(
     make_repo: RepoFactory, readers: dict[str, list[str]], fragment: str
 ) -> None:
     root = repo(make_repo, {}, readers)
@@ -254,3 +260,117 @@ def test_a_reader_called_in_a_strict_directory_is_an_error_not_debt(make_repo: R
     )
     found = [d for d in diagnostics(root, "ambient-read") if d.path == "app/mod.py"]
     assert [d.debt for d in found] == [None]
+
+
+NAMES = {"clock": ["lib.clocks.SYSTEM", "lib.clocks.Clock()", "lib.clocks.Clock.from_settings()"]}
+
+
+def clock_acquired(make_repo: RepoFactory, source: str, extra: dict[str, str] | None = None):
+    root = repo(make_repo, {**CLOCKS, "app/mod.py": source, **(extra or {})}, NAMES)
+    return [(a.kind.value, a.target) for a in analysis_of(root).scans["app/mod.py"].ambient]
+
+
+@pytest.mark.parametrize(
+    ("source", "expected"),
+    [
+        ("from lib.clocks import SYSTEM\n\nx = SYSTEM.now()\n", [("clock", "lib.clocks.SYSTEM")]),
+        ("import lib.clocks as c\n\nx = c.SYSTEM.now()\n", [("clock", "lib.clocks.SYSTEM")]),
+        ("from lib import clocks\n\nx = clocks.SYSTEM\n", [("clock", "lib.clocks.SYSTEM")]),
+        ("from lib.clocks import Clock\n\nx = Clock()\n", [("clock", "lib.clocks.Clock")]),
+        (
+            "from lib.clocks import Clock\n\nx = Clock.from_settings()\n",
+            [("clock", "lib.clocks.Clock.from_settings")],
+        ),
+        ("from lib.clocks import Clock\n\ndef f(c: Clock) -> Clock:\n    return c\n", []),
+        ("def SYSTEM():\n    return 1\n\n\nx = SYSTEM()\n", []),
+    ],
+)
+def test_a_bare_name_acquires_where_it_is_imported_or_read_and_a_class_where_it_is_built(
+    make_repo: RepoFactory, source: str, expected: list[tuple[str, str]]
+) -> None:
+    assert clock_acquired(make_repo, source) == expected
+
+
+def test_a_bare_name_is_followed_through_a_re_export(make_repo: RepoFactory) -> None:
+    extra = {"lib/__init__.py": "from lib.clocks import SYSTEM\n"}
+    found = clock_acquired(make_repo, "import lib\n\nx = lib.SYSTEM.now()\n", extra)
+    assert found == [("clock", "lib.SYSTEM")]
+
+
+def test_a_function_that_moved_and_left_a_re_export_is_stale(make_repo: RepoFactory) -> None:
+    files = {
+        "lib/impl.py": "import os\n\n\ndef process_environment():\n    return os.environ\n",
+        "lib/env.py": "from lib.impl import process_environment\n",
+        "lib/meizel.toml": '[roots]\n"impl.py" = ["environ"]\n',
+        "app/mod.py": "from lib.impl import process_environment\n\nx = process_environment()\n",
+    }
+    root = repo(make_repo, files, {"environ": ["lib.env.process_environment()"]})
+    stale = diagnostics(root, "stale-reader")
+    assert [d.message.split("] ", 1)[1] for d in stale] == [
+        "'lib.env.process_environment()' `process_environment` is imported by lib/env.py, "
+        "not defined there; list the module that defines it"
+    ]
+
+
+def test_a_value_listed_as_a_call_and_a_function_listed_as_a_name_are_stale(
+    make_repo: RepoFactory,
+) -> None:
+    files = {"lib/clocks.py": "SYSTEM = object()\n"}
+    readers = {
+        "environ": ["lib.env.process_environment"],
+        "clock": ["lib.clocks.SYSTEM()"],
+        "home": ["lib.paths.Home.current"],
+    }
+    stale = diagnostics(repo(make_repo, files, readers), "stale-reader")
+    assert sorted(d.message.split("] ", 1)[1] for d in stale) == [
+        "'lib.clocks.SYSTEM()' `SYSTEM` is a value, not a callable: list it as `lib.clocks.SYSTEM`, without `()`",
+        "'lib.env.process_environment' `process_environment` is a function: list it as `lib.env.process_environment()`",
+        "'lib.paths.Home.current' `Home.current` is a method: list it as `lib.paths.Home.current()`",
+    ]
+
+
+def test_a_class_may_be_listed_as_a_name_and_as_a_call(make_repo: RepoFactory) -> None:
+    files = {"lib/clocks.py": "class Clock:\n    pass\n"}
+    readers = {"clock": ["lib.clocks.Clock", "lib.clocks.Clock()"]}
+    root = repo(make_repo, files, readers)
+    assert diagnostics(root, "stale-reader") == []
+    assert diagnostics(root, "policy-syntax") == []
+
+
+# meiva:note
+# A reader defined in `z00` and imported on down the chain, each module sorting before the one it
+# imports from, so that each round of the scan can follow only one hop.
+def chain(length: int) -> dict[str, str]:
+    names = [f"{chr(ord('z') - step)}{step:02d}" for step in range(length)]
+    files = {"lib/z00.py": "import os\n\n\ndef read():\n    return os.environ\n"}
+    for before, after in pairwise(names):
+        files[f"lib/{after}.py"] = f"from lib.{before} import read\n"
+    files["lib/meizel.toml"] = '[roots]\n"z00.py" = ["environ"]\n'
+    files["app/mod.py"] = f"from lib.{names[-1]} import read\n\nx = read()\n"
+    return files
+
+
+def test_a_call_imported_through_several_re_exports_is_still_the_reader(
+    make_repo: RepoFactory,
+) -> None:
+    root = repo(make_repo, chain(5), {"environ": ["lib.z00.read()"]})
+    scan = analysis_of(root).scans["app/mod.py"]
+    assert [a.kind.value for a in scan.ambient] == ["environ"]
+
+
+def test_a_chain_of_re_exports_too_long_to_follow_fails_instead_of_going_unseen(
+    make_repo: RepoFactory,
+) -> None:
+    root = repo(make_repo, chain(16), {"environ": ["lib.z00.read()"]})
+    with pytest.raises(MeizelError, match="more than 12 modules"):
+        analysis_of(root)
+
+
+def test_a_class_re_exported_by_a_relative_import_is_followed(make_repo: RepoFactory) -> None:
+    files = {
+        "lib/__init__.py": "from .paths import Home\n",
+        "app/mod.py": "from lib import Home\n\nx = Home.current()\n",
+    }
+    root = repo(make_repo, files)
+    scan = analysis_of(root).scans["app/mod.py"]
+    assert [(a.kind.value, a.target) for a in scan.ambient] == [("home", "lib.Home.current")]

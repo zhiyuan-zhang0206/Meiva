@@ -103,7 +103,7 @@ violations pass, anything new fails, and the debt may only shrink
   is left.
 - CI fails when the recorded total grows against the base (`debt diff --on-growth=fail`).
   The one exception is a rule change (it edits meizel's own rule code: Python under `meizel/`
-  outside tests), whose growth is split in two by the tool, not by a reader. The growth the new
+  outside tests, or `meizel.policy.toml`, whose reader tables decide what is an acquisition), whose growth is split in two by the tool, not by a reader. The growth the new
   rules cause in the base's unchanged code is reported, because widening a rule grows the
   baselines. The growth the content causes is failed: every debt key the change records must be one
   the new rules find in the base, so a rule change cannot carry a new violation or a moved file.
@@ -126,14 +126,17 @@ violations pass, anything new fails, and the debt may only shrink
   decision in the middle becomes a pure function of its inputs. Declare a file a root only when
   it is one, and a root that stops reading a kind fails as `stale-root`. A function that
   returns what the world decides (`meiva_home()`, `process_environment()`, `RpcClient.system()`)
-  is listed in `meizel.policy.toml` as a reader, and calling it is a read of its kind
-  ([ambient reads](../meizel/docs/checker/ambient.meiva.okf.md)).
+  and the process-wide object that does (`SYSTEM_TIMERS`, `Clock`) are listed in
+  `meizel.policy.toml` as readers, and using one is a read of its kind; an entry whose
+  definition moved fails as `stale-reader`, so a PR that moves or renames one updates the entry
+  ([ambient reads](../meizel/docs/checker/ambient.meiva.okf.md),
+  [readers](../meizel/docs/checker/ambient-readers.meiva.okf.md)).
 - `meizel.policy.toml` lists every allowance a manifest cannot grant itself (`[external]` sites,
   `[loads]` sites, default-argument injections) and every exemption of the lint rules in
   `meizel/` (ambient state, clock lattice, single owners, setenv in tests, per-agent settings,
   `TYPE_CHECKING`) and the names through which the repository's own state is reached
-  (`[ambient]`, `[ambient-readers]`). Rule code holds no exemption of its own. Do not edit the file unless the task
-  names the entry; CI prints every change to it
+  (`[ambient]`, `[ambient-readers]`). Rule code holds no exemption of its own. Do not edit the
+  file unless the task names the entry; CI prints every change to it
   ([the policy file](../meizel/docs/checker/policy.meiva.okf.md)).
 
 Before submitting, review your own diff with

@@ -23,7 +23,7 @@ exports = ["config.py", "execute.py", "input.py", "mcp_daemon.py", "mcp_wrapper.
 "task_sessions.py" = "strict"
 
 [roots]
-"mcp_daemon.py" = { kinds = ["db", "home", "settings"], why = "process entry point of the computer-use MCP daemon: reads the settings, the home it runs under and opens the database from them" }
+"mcp_daemon.py" = { kinds = ["clock", "db", "home", "settings"], why = "process entry point of the computer-use MCP daemon: reads the settings, the home it runs under and opens the database from them; builds the process clock from SYSTEM_TIMERS" }
 "mcp_wrapper.py" = { kinds = ["environ", "home", "settings"], why = "_agent_id() reads the ambient MEIVA_AGENT_ID to stamp computer-mcp requests; same identity channel, not Settings-managed; the stdio wrapper process entry reads the home whose daemon socket it dials; Service or operator process entry boots configuration before composing its resources" }
 
 [debt.ambient-read]

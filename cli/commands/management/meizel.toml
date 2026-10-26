@@ -10,7 +10,7 @@ exports = ["config.py", "fleet_gateway.py", "fleet_leases.py", "schedules.py", "
 
 [roots]
 "schedule_verify_child.py" = { kinds = ["cwd"], why = "Schedule verification process entry captures its repository working directory and passes it to call-site analysis" }
-"fleet_gateway.py" = { kinds = ["random", "settings"], why = "CLI command composition root boots configuration before assembling command inputs and mints a fresh smoke-test idempotency key" }
+"fleet_gateway.py" = { kinds = ["clock", "random", "settings"], why = "CLI command composition root boots configuration before assembling command inputs and mints a fresh smoke-test idempotency key; builds the process clock from SYSTEM_TIMERS" }
 
 [purity]
 "__init__.py" = "strict"
@@ -20,6 +20,7 @@ exports = ["config.py", "fleet_gateway.py", "fleet_leases.py", "schedules.py", "
 
 [debt.ambient-read]
 "fleet_leases.py#home base.paths.home.resolve_meiva_home" = 1
+"schedules_verify.py#clock base.clock.Clock" = 1
 "schedules_verify_read_rows.py#home base.paths.home.resolve_meiva_home" = 1
 
 [debt.impure-call]

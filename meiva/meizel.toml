@@ -19,13 +19,14 @@ exports = ["agents", "boot.py", "files.py", "gateway_client", "impersonation", "
 "web" = ["sdk_surface", "security.py"]
 
 [roots]
-"boot.py" = { kinds = ["environ", "random", "settings"], why = "SDK process bootstrap: reads the launch environment (MEIVA_AGENT_ID is the only channel by which a child process, such as a shell session or a watcher, discovers its parent agent), builds the process's random generator that the sampling owner draws from, and constructs and binds the process-owned configuration owner and context" }
+"boot.py" = { kinds = ["clock", "environ", "random", "settings"], why = "SDK process bootstrap: reads the launch environment (MEIVA_AGENT_ID is the only channel by which a child process, such as a shell session or a watcher, discovers its parent agent), builds the process's random generator that the sampling owner draws from, and constructs and binds the process-owned configuration owner and context; builds the process clock from SYSTEM_TIMERS" }
 "files.py" = { kinds = ["home", "random"], why = "workspace_base() reads Path.home() as the documented pre-bootstrap fallback for relative paths when no agent identity is bound, and _new_file_mode() generates a random UUID suffix for its temporary umask probe file" }
 
 [debt.ambient-read]
 "__init__.py#environ meiva.boot.is_launched_process" = 1
 "boot.py#home base.paths.home.resolve_meiva_home" = 2
 "boot.py#home base.paths.meiva_home" = 1
+"ui.py#clock base.clock.SYSTEM_TIMERS" = 1
 
 [debt.any-collaborator]
 "__init__.py#any __getattr__.return" = 1

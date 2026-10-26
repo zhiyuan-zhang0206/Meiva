@@ -11,7 +11,8 @@ exports = ["app.py", "config.py", "daemon.py", "run_timeline"]
 "config.py" = "strict"
 
 [roots]
-"daemon.py" = { kinds = ["settings", "pid"], why = "process entry point of the insights daemon: builds ConfigBoot and reads its pid" }
+"daemon.py" = { kinds = ["clock", "pid", "settings"], why = "process entry point of the insights daemon: builds ConfigBoot and reads its pid; builds the process clock from SYSTEM_TIMERS" }
 
 [debt.ambient-read]
+"app.py#clock base.clock.SYSTEM_TIMERS" = 1
 "daemon.py#home base.paths.meiva_home" = 2

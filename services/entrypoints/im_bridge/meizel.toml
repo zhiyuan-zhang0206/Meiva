@@ -21,4 +21,4 @@ exports = ["daemon.py", "gateway_client.py", "ingress", "tests", "types.py"]
 "copy.py" = "strict"
 
 [roots]
-"daemon.py" = { kinds = ["settings", "random", "home"], why = "process entry point of the IM bridge daemon: builds ConfigBoot from the process environment, reads the home it runs under, and builds the process's random generator" }
+"daemon.py" = { kinds = ["clock", "home", "random", "settings"], why = "process entry point of the IM bridge daemon: builds ConfigBoot from the process environment, reads the home it runs under, and builds the process's random generator; builds the process clock from SYSTEM_TIMERS" }
