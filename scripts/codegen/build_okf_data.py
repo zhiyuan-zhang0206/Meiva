@@ -22,6 +22,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent))
 # Re-exported: scripts/content_lint/lint_meiva_okf.py does `from build_okf_data import resolve_wikilink`.
 from base.packages.docs.okf_graph import build_graph_data
 from base.packages.docs.okf_graph import resolve_wikilink as resolve_wikilink
+from base.packages.okf_bundle import read_bundle
 
 
 def _print_stats(
@@ -57,7 +58,9 @@ def main():
     args = parser.parse_args()
 
     raw_links: list[tuple[str, str, str | None]] = []
-    data = build_graph_data(args.bundle_dir, name=args.name, raw_links_out=raw_links)
+    data = build_graph_data(
+        read_bundle(Path(args.bundle_dir)), name=args.name, raw_links_out=raw_links
+    )
 
     with Path(args.out_file).open("w", encoding="utf-8") as fh:
         json.dump(data, fh, ensure_ascii=False, indent=1)
