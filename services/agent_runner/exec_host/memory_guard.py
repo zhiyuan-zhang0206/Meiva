@@ -1,7 +1,19 @@
 # meiva:note
-# Memory guard for exec subprocesses: relieve critical system memory pressure
-# by killing the one largest `execute_code` process domain owned by exec-host,
-# and record the notice next to its result file so the agent learns why.
+# Memory guard for exec subprocesses: take down a runaway `execute_code` at
+# critical system memory pressure, and record the notice next to its result file
+# so the agent learns why.
+#
+# The guard relieves pressure; it does not free memory. A kill is worth the work
+# it destroys only when the victim is large, so the largest domain at or below the
+# relief floor (`settings.agent.exec_memory_guard_floor_mb`) is reported as skipped
+# and left running. 2026-10-26 is why: the guard killed a 0.1 GiB exec and the
+# system stayed critical (pressure was still 2 fifty seconds later), so that work
+# was lost for no relief — and 39% of that day's pressure samples were already
+# critical, which makes the case ordinary rather than a corner.
+#
+# The notice says why an exec died; it cannot make that exec's writes atomic. An
+# agent that must not leave a truncated artifact writes a temporary file and
+# renames it: with this guard in place that is a requirement, not an optimization.
 
 from __future__ import annotations
 
@@ -14,7 +26,7 @@ from pathlib import Path
 
 import psutil
 
-from base.host.memory_pressure import MemorySource, host_memory_source
+from base.host.memory_pressure import MemorySource, PressureLevel, host_memory_source
 from base.host.proc import EXEC_DOMAIN_SESSION_ENTRIES
 from base.log import logger
 from base.native_process.exec_kill_notice import write_notice
@@ -106,19 +118,28 @@ class ExecMemoryGuard:
         source: MemorySource,
         *,
         domains: Callable[[], list[ExecDomain]],
+        floor_bytes: int,
         interval_s: float = POLL_INTERVAL_S,
     ) -> None:
         self._source = source
         self._domains = domains
+        self._floor_bytes = floor_bytes
         self._interval_s = interval_s
+        self._skipped_pid: int | None = None
 
     def check_once(self) -> ExecDomain | None:
         level = self._source.pressure()
-        candidates = self._domains() if level == "critical" else []
+        if level != "critical":
+            self._skipped_pid = None
+            return None
+        candidates = self._domains()
         chosen = select_victim(level, candidates)
         if chosen is None:
             return None
         victim, notice = chosen
+        if victim.footprint <= self._floor_bytes:
+            self._report_skip(victim, len(candidates), level)
+            return None
         write_notice(victim.result_path, notice)
         kill_domain_leader(victim)
         logger.warning(
@@ -134,6 +155,33 @@ class ExecMemoryGuard:
         )
         return victim
 
+    # meiva:note
+    # Critical pressure with nothing worth killing is still news, once per episode.
+    #
+    # The loop ticks every few seconds while a machine can sit critical for hours, so
+    # the same skip is reported once: again only after the largest exec has changed,
+    # which is the fact that would change a reader's mind. Silence here would hide the
+    # guard's most common outcome (2026-10-26: 39% of samples critical, one kill).
+    def _report_skip(self, largest: ExecDomain, running: int, level: PressureLevel) -> None:
+        if self._skipped_pid == largest.pid:
+            return
+        self._skipped_pid = largest.pid
+        logger.info(
+            "[{label}] largest exec is {footprint:.1f} GiB, at or below the {floor:.1f} GiB"
+            " relief floor — nothing killed",
+            label="exec-memory-guard",
+            event="exec_memory_guard_skipped",
+            agent_id=largest.agent_id,
+            pid=largest.pid,
+            footprint=largest.footprint / _GIB,
+            floor=self._floor_bytes / _GIB,
+            footprint_bytes=largest.footprint,
+            floor_bytes=self._floor_bytes,
+            running=running,
+            pressure=level,
+            free_swap_bytes=psutil.swap_memory().free,
+        )
+
     async def run_forever(self, stop: asyncio.Event) -> None:
         while not stop.is_set():
             try:
@@ -146,11 +194,11 @@ class ExecMemoryGuard:
                 continue
 
 
-async def run_memory_guard_forever(stop: asyncio.Event, *, host_pid: int) -> None:
+async def run_memory_guard_forever(stop: asyncio.Event, *, host_pid: int, floor_bytes: int) -> None:
     source = host_memory_source()
     if source is None:
         logger.info("[exec-host] exec memory guard idle — this OS reports no memory pressure state")
         return
-    await ExecMemoryGuard(source, domains=lambda: find_exec_domains(host_pid, source)).run_forever(
-        stop
-    )
+    await ExecMemoryGuard(
+        source, domains=lambda: find_exec_domains(host_pid, source), floor_bytes=floor_bytes
+    ).run_forever(stop)

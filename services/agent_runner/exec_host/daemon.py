@@ -15,7 +15,7 @@ import resource
 import sys
 from pathlib import Path
 
-from base.config import ConfigBoot
+from base.config import ConfigBoot, settings
 from base.deploy.release import editable_install
 from base.log import logger
 from base.log.sinks import add_sink
@@ -69,9 +69,21 @@ def main() -> int:
     return run_with_home(meiva_home(), default_cwd=Path.cwd())
 
 
+# meiva:note
+# The relief floor is configuration read here, in the composition root, and handed to
+# the guard: a guard that read settings itself could not be tested with a floor and
+# would answer differently on another machine.
+def _relief_floor_bytes() -> int:
+    return settings.agent.exec_memory_guard_floor_mb * 1024 * 1024
+
+
 async def _serve_with_guard(service: ExecHostService, path: Path, drain_s: float) -> None:
     async with asyncio.TaskGroup() as tasks:
-        tasks.create_task(run_memory_guard_forever(service.stop_event, host_pid=os.getpid()))
+        tasks.create_task(
+            run_memory_guard_forever(
+                service.stop_event, host_pid=os.getpid(), floor_bytes=_relief_floor_bytes()
+            )
+        )
         await service.serve(path, drain_timeout_s=drain_s)
 
 
