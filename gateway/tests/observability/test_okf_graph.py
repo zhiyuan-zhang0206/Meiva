@@ -221,6 +221,7 @@ def test_graph_of_layered_bundle_has_one_root_and_physical_edges(tmp_path: Path)
     """End to end: layered nodes get tree edges to layered parents, wikilinks
     keep resolving to physical paths, and no edge dangles."""
     from base.packages.docs.okf_graph import build_graph_data
+    from base.packages.okf_bundle import read_bundle
 
     def write(rel: str, body: str = "") -> None:
         path = tmp_path / rel
@@ -238,7 +239,7 @@ def test_graph_of_layered_bundle_has_one_root_and_physical_edges(tmp_path: Path)
     write("legacy/legacy.meiva.okf.md")
     write("legacy/child.meiva.okf.md")
 
-    data = build_graph_data(tmp_path)
+    data = build_graph_data(read_bundle(tmp_path))
     ids = {n["id"] for n in data["nodes"]}
     roots = [n["id"] for n in data["nodes"] if n["parent"] is None]
     assert roots == ["docs/index.meiva.okf.md"]

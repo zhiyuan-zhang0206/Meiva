@@ -1,25 +1,20 @@
 # meiva:note
-# Shared markdown-note model + walkers — one parser for the whole repo.
+# Shared markdown-note model — one parser for the whole repo.
 #
-# The memory pool graph (`gateway/routers/memory_api/memory.py`) and the OKF bundle graph
-# (`base/packages/docs/okf_graph.py`) both build graphs out of `---`-frontmatter markdown
-# notes; this module is the single place that reads a note off disk, decides it
-# is a note, and maps frontmatter to the fields both consumers need. It stays
-# schema-free: `Note` is plain data, and graph-specific semantics (primary_tag,
-# edge filtering) live in the callers.
+# The memory pool (`gateway/routers/memory_api/memory.py`) and the OKF bundle graph
+# (`base/packages/docs/okf_graph.py`) both build on `---`-frontmatter markdown notes; this
+# module is the single place that decides a text is a note and maps frontmatter to the fields
+# both consumers need. It does no I/O and stays schema-free: `Note` is plain data, and
+# graph-specific semantics (primary_tag, edge filtering) live in the callers.
 
 from __future__ import annotations
 
 import re
-from collections.abc import Iterator
 from contextlib import suppress
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, TypeGuard
 
-from loguru import logger
-
-from base.host.verified_file import RegularFileReadError, regular_bytes
 from base.packages.docs.frontmatter import parse_frontmatter_typed
 
 _MD_LINK_RE = re.compile(r"\[([^\]]+)\]\(([^)]+)\)")
@@ -90,39 +85,6 @@ def parse_note(text: str, rel: str) -> Note | None:
         body=body,
         fm=fm,
     )
-
-
-def walk_notes(
-    root: Path,
-    *,
-    suffix: str = ".md",
-    skip_names: frozenset[str] = frozenset(),
-    warnings: list[str] | None = None,
-) -> Iterator[tuple[Path, Note]]:
-    """Yield `(path, note)` for every valid note under `root`, in sorted order.
-
-    Files whose name is in `skip_names` are skipped; an unreadable file is skipped with a
-    `cannot read <rel>` warning (appended to `warnings` when given, else logged at WARNING);
-    a file without valid frontmatter is skipped silently. `note.rel` is the
-    posix path relative to `root` sans `suffix`.
-    """
-    for md_file in sorted(root.rglob(f"*{suffix}")):
-        if md_file.name in skip_names:
-            continue
-        rel = md_file.relative_to(root).as_posix()
-        rel_id = rel[: -len(suffix)] if rel.endswith(suffix) else rel
-        try:
-            text = regular_bytes(md_file).decode("utf-8")
-        except (OSError, UnicodeDecodeError, RegularFileReadError):
-            if warnings is not None:
-                warnings.append(f"cannot read {rel}")
-            else:
-                logger.opt(exception=True).warning("cannot read note {}; skipped", rel)
-            continue
-        note = parse_note(text, rel_id)
-        if note is None:
-            continue
-        yield md_file, note
 
 
 def extract_md_links(
