@@ -21,7 +21,7 @@ def test_a_home_without_the_scanner_ends_as_one_explicit_line_and_is_logged_in_t
     done = subprocess.run(
         [sys.executable, str(_SCRIPT), "--once", "--no-notify"],
         cwd=_ROOT,
-        env={**os.environ, "MEIVA_HOME": str(tmp_path)},
+        env={**os.environ, "MEIVA_HOME": str(tmp_path), "MEIVA_CONFIG_FETCH": "skip"},
         capture_output=True,
         text=True,
         timeout=120,
