@@ -161,7 +161,7 @@ def test_status_reports_an_unreadable_state_file(
 def test_check_prints_a_mark_per_step_and_exits_zero_when_all_pass(
     plane: DataPlaneConfig, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    assert walg_cmd.cmd_walg_check(plane) == 0
+    assert walg_cmd.cmd_walg_check(plane, token="e" * 32) == 0
 
     out = capsys.readouterr().out
     assert [line.split(":")[0] for line in out.splitlines()] == [
@@ -179,7 +179,7 @@ def test_check_exits_non_zero_and_names_the_failing_step(
 ) -> None:
     sandbox.set_mode("nodelete")
 
-    assert walg_cmd.cmd_walg_check(plane) == 1
+    assert walg_cmd.cmd_walg_check(plane, token="f" * 32) == 1
 
     assert "  ✗ storage: cannot delete" in capsys.readouterr().out
 

@@ -6,7 +6,9 @@ import argparse
 def _h_backup_walg_check(args: argparse.Namespace) -> int:
     from cli.commands.data_plane.walg import cmd_walg_check, walg_plane
 
-    return cmd_walg_check(walg_plane(args.runtime.config))
+    return cmd_walg_check(
+        walg_plane(args.runtime.config), token=f"{args.runtime.rng.getrandbits(128):032x}"
+    )
 
 
 def _h_backup_walg_run(args: argparse.Namespace) -> int:
