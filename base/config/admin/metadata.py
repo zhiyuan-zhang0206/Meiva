@@ -83,8 +83,9 @@ def get_config_metadata(*, authority: ConfigMetadataAuthority) -> list[ConfigFie
     composes them on top (`panel_metadata`)."""
     values = authority.current_field_values()
     result: list[ConfigFieldMeta] = []
+    models = domain_model_classes()
     for name, ref in fields().items():
-        field_info: FieldInfo = domain_model_classes()[ref.domain].model_fields[name]
+        field_info: FieldInfo = models[ref.domain].model_fields[name]
         extra = schema_extra(field_info)
         type_name, choices = field_editor_type(field_info.annotation)
 
