@@ -23,7 +23,7 @@ from services.backup.layout import BackupTree
 # The backup tree of a home of this test's own, with its passphrase pinned the way a
 # gateway birth pins it. Nothing is shared with the session home.
 def minted_tree(home: Path) -> BackupTree:
-    passphrase.ensure_minted(home)
+    passphrase.ensure_pinned(home, passphrase="ab" * 32)
     return BackupTree(home)
 
 
