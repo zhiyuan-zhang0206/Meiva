@@ -185,7 +185,7 @@ def test_a_file_outside_a_root_is_told_where_the_world_is_read(make_repo: RepoFa
 
 
 def test_a_declared_root_may_read_its_kinds_and_only_those(make_repo: RepoFactory) -> None:
-    manifest = '[roots]\n"mod.py" = ["environ"]\n'
+    manifest = '[roots]\n"mod.py" = { kinds = ["environ"], why = "reads the environment" }\n'
     source = "import os\nfrom cfg import settings\n\nx = os.environ['A']\ny = settings.a\n"
     _, sites = read_sites(make_repo, source, manifest)
     assert [d.debt.key for d in sites if d.debt] == ["mod.py#settings cfg.settings"]
@@ -199,7 +199,7 @@ def test_a_root_may_say_why(make_repo: RepoFactory) -> None:
 
 
 def test_a_root_kind_the_file_no_longer_acquires_is_stale(make_repo: RepoFactory) -> None:
-    manifest = '[roots]\n"mod.py" = ["environ", "settings"]\n'
+    manifest = '[roots]\n"mod.py" = { kinds = ["environ", "settings"], why = "reads both" }\n'
     root, _ = read_sites(make_repo, "import os\n\nx = os.environ['A']\n", manifest)
     stale = diagnostics(root, "stale-root")
     assert [(d.path, "settings" in d.message) for d in stale] == [("app/meizel.toml", True)]

@@ -145,6 +145,9 @@ def add_exports(text: str, names: set[str]) -> str:
     return "\n".join([row, "", *lines] if lines else [row]) + "\n"
 
 
+_RESTORED_WHY = "restored from a historical registry that recorded no reason"
+
+
 # meiva:note
 # Snapshot preparation replaces one finite declaration table while preserving every other table.
 # Purity levels and ambient kinds share this text-edit operation, not their semantic vocabulary;
@@ -167,8 +170,8 @@ def set_scope(
     block = [f"[{table}]"]
     for name, declared in sorted(declarations.items()):
         values = json.dumps(declared if isinstance(declared, str) else [k.value for k in declared])
-        why = reasons.get(name, "")
-        if table == "roots" and why:
+        if table == "roots":
+            why = reasons.get(name) or _RESTORED_WHY
             values = f"{{ kinds = {values}, why = {json.dumps(why)} }}"
         block.append(f"{json.dumps(name)} = {values}")
     if declarations:

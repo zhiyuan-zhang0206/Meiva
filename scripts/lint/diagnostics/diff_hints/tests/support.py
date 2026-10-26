@@ -20,11 +20,12 @@ def sites(
     *,
     added: frozenset[int] | None = None,
     roots: frozenset[AmbientKind] = frozenset(),
+    importers: int = 0,
 ) -> list[Site]:
     text = source.lstrip("\n")
     lines = added if added is not None else frozenset(range(1, len(text.splitlines()) + 1))
     change = FileChange(path, lines, (), (), deleted=False)
-    return analyze((change,), {path: text}, ROLES, {path: roots})
+    return analyze((change,), {path: text}, ROLES, {path: roots}, {path: importers})
 
 
 def hints(source: str, path: str = "cli/x.py") -> list[HintId]:

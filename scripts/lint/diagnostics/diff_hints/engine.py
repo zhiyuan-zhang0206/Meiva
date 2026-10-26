@@ -7,7 +7,7 @@ from __future__ import annotations
 from collections.abc import Callable, Mapping
 
 from meizel.graph.model import AmbientKind
-from scripts.lint.diagnostics.diff_hints.ambient import service_locator
+from scripts.lint.diagnostics.diff_hints.ambient import root_middle_layer, service_locator
 from scripts.lint.diagnostics.diff_hints.branches import wildcard_case
 from scripts.lint.diagnostics.diff_hints.model import FileChange, Roles, Site, Unit
 from scripts.lint.diagnostics.diff_hints.removed import deleted_tests
@@ -37,6 +37,7 @@ _DETECTORS: tuple[Detector, ...] = (
     double_subclasses,
     spy_assert,
     lambda_dependency,
+    root_middle_layer,
 )
 
 
@@ -48,12 +49,20 @@ def analyze(
     texts: Mapping[str, str],
     roles: Roles,
     roots: Mapping[str, frozenset[AmbientKind]],
+    importers: Mapping[str, int] | None = None,
 ) -> list[Site]:
     sites: list[Site] = []
     for change in changes:
         text = texts.get(change.path)
         unit = (
-            parse_unit(change.path, text, change.added, roles, roots.get(change.path, frozenset()))
+            parse_unit(
+                change.path,
+                text,
+                change.added,
+                roles,
+                roots.get(change.path, frozenset()),
+                (importers or {}).get(change.path, 0),
+            )
             if text is not None
             else None
         )
