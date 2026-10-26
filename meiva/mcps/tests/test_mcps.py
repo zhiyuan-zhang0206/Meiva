@@ -10,6 +10,8 @@ import meiva.mcps as mcps_mod
 import meiva.mcps._remote as remote_mod
 from base.agents.context.clients import ClientSet
 from base.agents.context.identity import AgentIdentity
+from base.clock import Clock, ClockConfig
+from base.clock.tests.manual_timers import ManualTimers
 from meiva.mcps._clients import McpClients
 from meiva.mcps._tools import DiskCache, ServerProxy, cached_tools, call_raw, list_tools
 from meiva.mcps.tests._mcps_helpers import (
@@ -27,6 +29,13 @@ from meiva.mcps.tests.stub_daemon import stub_daemon as stub_daemon
 from meiva.sdk_surface.tests.agent_binding import BindAgent
 
 Start = Callable[[Respond], StubDaemon]
+
+
+def _clock() -> Clock:
+    timers = ManualTimers()
+    return Clock(
+        ClockConfig("UTC", None, message_timestamp_weekday=False), timers=timers, now=timers.now
+    )
 
 
 # meiva:note
@@ -103,6 +112,7 @@ def test_module_getattr_returns_proxy(machine_config: Path, bound_agent: BindAge
     bound_agent(
         1,
         clients=ClientSet(factories={McpClients: lambda: McpClients(Path("unused.sock"), 1.0)}),
+        clock_factory=_clock,
     )
     write_servers(machine_config, {"fs": {"command": "x"}})
     proxy = mcps_mod.fs  # goes through module-level __getattr__
@@ -116,9 +126,10 @@ def test_a_proxy_runs_against_the_bound_contexts_values(
     unit_home: Path, machine_config: Path, bound_agent: BindAgent
 ) -> None:
     clients = ClientSet(factories={McpClients: lambda: McpClients(Path("unused.sock"), 7.5)})
-    bound_agent(3, clients=clients)
+    bound_agent(3, clients=clients, clock_factory=_clock)
     write_servers(machine_config, {"fs": {"command": "x"}})
     source = mcps_mod.fs._source
+    assert source.now == _clock().now().timestamp()
     assert source.remote is clients.get(McpClients)
     assert source.timeout_seconds == 7.5
     assert source.cache == DiskCache(unit_home / "mcp_cache")

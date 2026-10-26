@@ -38,7 +38,7 @@ from cli.commands.agents.tests.lease_support import (
 from cli.commands.agents.tests.lease_support import active as active
 from cli.commands.agents.tests.lease_support import lease_at as lease_at
 from cli.commands.agents.tests.loopback_hosts import codex_app_server, short_socket_path
-from cli.commands.agents.tests.relay_harness import THREAD
+from cli.commands.agents.tests.relay_harness import REAL_CLOCK, THREAD
 from cli.database import OperatorDatabaseFactory
 from cli.database.tests.cli_tests import operator_database as operator_database
 from cli.database.tests.command_inputs import command_runtime as command_runtime
@@ -87,6 +87,7 @@ def test_the_relay_command_runs_a_claude_relay_to_the_leases_expiry(
             antigravity_server=None,
             stdout=stdout,
             bus=event_bus,
+            clock=REAL_CLOCK,
         ),
         database_factory=operator_database,
         machine=machine_identity,
@@ -123,6 +124,7 @@ def test_the_relay_command_reports_a_host_that_refuses_to_be_steered(
                 antigravity_server=None,
                 stdout=stdout,
                 bus=event_bus,
+                clock=REAL_CLOCK,
             ),
             database_factory=operator_database,
             machine=machine_identity,
@@ -162,6 +164,7 @@ def test_unresolvable_destination_exits_before_any_lease_work(
             antigravity_server=None,
             stdout=stdout,
             bus=event_bus,
+            clock=REAL_CLOCK,
         ),
         database_factory=operator_database,
         machine=machine_identity,
@@ -192,6 +195,7 @@ def test_agent_mismatch_refuses_inbox_before_subscription(
             antigravity_server=None,
             stdout=stdout,
             bus=event_bus,
+            clock=REAL_CLOCK,
         ),
         database_factory=operator_database,
         machine=machine_identity,
@@ -219,6 +223,7 @@ def test_the_relay_command_refuses_a_credential_the_lease_did_not_mint(
             antigravity_server=None,
             stdout=io.StringIO(),
             bus=event_bus,
+            clock=REAL_CLOCK,
         ),
         database_factory=operator_database,
         machine=machine_identity,

@@ -10,5 +10,4 @@ exports = ["launch_plan.py", "plans.py", "spawn.py", "wiring.py"]
 "launch_plan.py" = "strict"
 
 [roots]
-"__init__.py" = { kinds = ["clock"], why = "The meiva.watcher SDK facade reads the current UTC wall-clock timestamp once at launch, cron, and at entry before building pure SpawnRequest plans" }
 "wiring.py" = { kinds = ["environ", "home"], why = "The SDK watcher wiring builds a watcher session's inputs for this process on every launch, cron and at call: it hands the launcher's runner projection the whole process environment, the unit home and the OS user's home, and the session directories are derived from the same home" }

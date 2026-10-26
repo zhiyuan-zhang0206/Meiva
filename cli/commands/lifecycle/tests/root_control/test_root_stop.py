@@ -11,6 +11,7 @@ from pathlib import Path
 
 import pytest
 
+from base.clock import SYSTEM_TIMERS
 from base.host.tests.short_tmp import short_tmp as short_tmp
 from base.paths import root_manifests_path, root_run_dir
 from cli.commands.lifecycle import root_driver as driver
@@ -40,7 +41,12 @@ def stop_tree(
 ) -> dict[str, str]:
     with scripted_root(home, rows) as root:
         driver.stop_root_service_tree(
-            preserve=preserve, timeout_s=10.0, force=force, helper=None, home=home
+            preserve=preserve,
+            timeout_s=10.0,
+            force=force,
+            helper=None,
+            home=home,
+            timers=SYSTEM_TIMERS,
         )
     return {unit_id: row.state for unit_id, row in root.units.items()}
 
@@ -70,7 +76,12 @@ def test_a_stop_that_preserves_every_unit_changes_nothing(
 def test_a_forced_stop_force_downs_every_unit(short_tmp: Path) -> None:
     with scripted_root(short_tmp, [UnitRow("gateway"), UnitRow("ops")]) as root:
         driver.stop_root_service_tree(
-            preserve=frozenset({"ops"}), timeout_s=10.0, force=True, helper=None, home=short_tmp
+            preserve=frozenset({"ops"}),
+            timeout_s=10.0,
+            force=True,
+            helper=None,
+            home=short_tmp,
+            timers=SYSTEM_TIMERS,
         )
 
     assert [verb for verb, _ in root.calls if verb != "status"] == ["force-down"]
@@ -80,7 +91,12 @@ def test_stopping_a_home_with_no_root_reports_no_custody(
     short_tmp: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
     driver.stop_root_service_tree(
-        preserve=frozenset(), timeout_s=1.0, force=False, helper=None, home=short_tmp
+        preserve=frozenset(),
+        timeout_s=1.0,
+        force=False,
+        helper=None,
+        home=short_tmp,
+        timers=SYSTEM_TIMERS,
     )
 
     assert "no live owner or retained service custody" in capsys.readouterr().out

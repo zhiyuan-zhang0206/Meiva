@@ -269,7 +269,10 @@ def test_an_aborted_converge_is_reported_before_the_service_table(
 ) -> None:
     assert "converge:" not in status.run(capsys, role="agent-runner")
     incomplete.record_incomplete(
-        status.command.home, step="permissions helper", error="the login keychain is locked"
+        status.command.home,
+        step="permissions helper",
+        error="the login keychain is locked",
+        now=status.command.clock.now(),
     )
 
     out = status.run(capsys, role="agent-runner")

@@ -188,7 +188,7 @@ def _h_notices_clear(args: argparse.Namespace) -> int:
         force=args.force,
         stale=args.stale,
         stdin=args.runtime.terminal.stdin,
-        new_id=args.runtime.new_id,
+        rng=args.runtime.rng,
     )
 
 

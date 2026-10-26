@@ -579,6 +579,7 @@ def _edit_local_config(
     """Validate and persist one local `.env` patch without booting Settings."""
     from base.config.admin.candidate import validate_env_patch_for_write
     from base.config.runtime_config import write_fields
+    from base.host.env.dotenv_file import env_file_path
 
     try:
         writes, removals, changed = _build_local_patch(pairs, unset_keys, process)
@@ -586,7 +587,8 @@ def _edit_local_config(
         print(f"[meiva config {verb}] {e}", file=sys.stderr)
         return 1
 
-    candidate = validate_env_patch_for_write(writes, removals)
+    env_path = env_file_path(process.home)
+    candidate = validate_env_patch_for_write(writes, removals, path=env_path)
     if candidate.errors:
         for error in candidate.errors:
             print(f"[meiva config {verb}] {error}", file=sys.stderr)
@@ -598,6 +600,7 @@ def _edit_local_config(
             removals,
             expected_digest=candidate.expected_digest,
             audit=EnvWriteAudit(site="cli_config_local", actor=f"cli:{getpass.getuser()}"),
+            path=env_path,
         )
     except RuntimeError as e:
         print(f"[meiva config {verb}] {e}; retry against the current .env", file=sys.stderr)
