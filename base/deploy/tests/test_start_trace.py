@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import os
 import time
 from pathlib import Path
 
@@ -13,7 +14,7 @@ from base.deploy import start_trace
 
 def test_phases_are_recorded_in_start_order() -> None:
     trace = start_trace.StartTrace()
-    trace.begin()
+    trace.begin(pid=os.getpid())
     with trace.phase("first"):
         time.sleep(0.001)
     with trace.phase("second"):
@@ -27,7 +28,7 @@ def test_phases_are_recorded_in_start_order() -> None:
 
 def test_a_raising_phase_still_closes_its_span() -> None:
     trace = start_trace.StartTrace()
-    trace.begin()
+    trace.begin(pid=os.getpid())
     with pytest.raises(RuntimeError), trace.phase("explodes"):
         raise RuntimeError("boom")
 
@@ -36,7 +37,7 @@ def test_a_raising_phase_still_closes_its_span() -> None:
 
 def test_report_names_phases_services_and_total() -> None:
     trace = start_trace.StartTrace()
-    trace.begin()
+    trace.begin(pid=os.getpid())
     with trace.phase("readiness wait"):
         pass
     trace.service_ready("frontend", 12.5)
@@ -60,7 +61,7 @@ def test_report_renders_when_asked() -> None:
 
 def test_write_keeps_one_json_record(tmp_path: Path) -> None:
     trace = start_trace.StartTrace()
-    trace.begin()
+    trace.begin(pid=os.getpid())
     with trace.phase("phase"):
         pass
 
@@ -71,9 +72,25 @@ def test_write_keeps_one_json_record(tmp_path: Path) -> None:
     assert payload["phases"][0]["name"] == "phase"
 
 
+def test_write_names_the_record_for_the_pid_given_at_begin(tmp_path: Path) -> None:
+    trace = start_trace.StartTrace()
+    trace.begin(pid=4242)
+
+    path = trace.write(tmp_path)
+
+    assert path is not None and path.name.endswith("-4242.json")
+
+
+def test_write_before_begin_has_no_pid_to_name_the_record_by(tmp_path: Path) -> None:
+    trace = start_trace.StartTrace()
+
+    with pytest.raises(RuntimeError, match="begin"):
+        trace.write(tmp_path)
+
+
 def test_write_never_creates_a_missing_home(tmp_path: Path) -> None:
     trace = start_trace.StartTrace()
-    trace.begin()
+    trace.begin(pid=os.getpid())
     with trace.phase("phase"):
         pass
     missing = tmp_path / "never-initialized"

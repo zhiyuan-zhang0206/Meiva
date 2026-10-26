@@ -30,6 +30,7 @@ import psutil
 
 from base import cluster
 from base.agents.context.clients import DatabaseFactory
+from base.clock import SYSTEM_TIMERS
 from base.cluster import ownership
 from base.cluster import postgres as owned_postgres
 from base.cluster.checkpoint_schema import PostgresCheckpointSchema
@@ -499,6 +500,7 @@ def stop_cluster_instance(
                     immediate_wait=PROCESS_CLEANUP_WAIT_S,
                     kill_wait=PROCESS_KILL_WAIT_S,
                     retained_children=retained_children,
+                    timers=SYSTEM_TIMERS,
                 )
                 if escalation is not None:
                     report_postgres_stop_escalation(escalation, producer=producer)

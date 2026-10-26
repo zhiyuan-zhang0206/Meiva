@@ -26,6 +26,7 @@ from typing import Any
 import psycopg
 import pytest
 
+from base.clock import SYSTEM_TIMERS
 from base.cluster import postgres as native_postgres
 from base.cluster.dataplane import pg_admin, walg_binary
 from base.cluster.dataplane.pg_tools import pg_shm_args, pg_start_env, pg_tool, pg_tz_args
@@ -246,7 +247,13 @@ def postgres_instance(*extra_args: str, path: Path | None = None) -> Generator[P
             return True
 
         native_postgres.start(
-            data, instance.port, argv, pg_start_env(), ready=ready, retained_children=children
+            data,
+            instance.port,
+            argv,
+            pg_start_env(),
+            ready=ready,
+            retained_children=children,
+            timers=SYSTEM_TIMERS,
         )
         process = children[0]
         yield instance

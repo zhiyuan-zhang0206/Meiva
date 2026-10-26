@@ -24,6 +24,7 @@ import pytest
 import redis
 from redis.asyncio import Redis as AsyncRedis
 
+from base.clock import SYSTEM_TIMERS
 from base.cluster import ownership
 from base.cluster import postgres as owned_postgres
 from base.cluster.machine import MachineIdentityReader
@@ -246,7 +247,7 @@ def test_a_replaced_postmaster_identity_fails_the_leg_and_leaves_postgres_runnin
 
         assert real.live() and ownership.postgres(data) is not None
     finally:
-        owned_postgres.stop(data, timeout=10, retained_children=retained)
+        owned_postgres.stop(data, timeout=10, retained_children=retained, timers=SYSTEM_TIMERS)
 
 
 # meiva:note
@@ -308,4 +309,4 @@ def test_the_stop_ends_a_whole_local_data_plane_in_order(
                 pass
             maintenance_stop.require_no_unrecorded({}, home=unit_home)
     finally:
-        owned_postgres.stop(data, timeout=10, retained_children=retained)
+        owned_postgres.stop(data, timeout=10, retained_children=retained, timers=SYSTEM_TIMERS)
