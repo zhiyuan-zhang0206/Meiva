@@ -53,7 +53,7 @@ def _clean(**changes: object) -> PreflightFacts:
         ports=PortFacts(roles_resolved=True, check_error=None, occupied=()),
         trees=(_tree("/h/logs"), _tree("/h/workspaces"), _tree("/h/memory")),
         not_directories=(),
-        marker="/h/logs/.metadata_never_index",
+        marker="/h/.metadata_never_index",
         marker_problem=None,
         migration_error=None,
         unreadable_migrations=(),
@@ -138,7 +138,7 @@ def test_the_metadata_marker_must_be_a_regular_file() -> None:
     report = preflight_report(_clean(marker_problem="is not a regular file"))
 
     assert report.exit_code == 1
-    assert "/h/logs/.metadata_never_index is not a regular file" in _fatal(report)
+    assert "/h/.metadata_never_index is not a regular file" in _fatal(report)
 
 
 # meiva:note

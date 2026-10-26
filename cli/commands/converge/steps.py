@@ -49,7 +49,14 @@ def ensure_meiva_home_dirs(ctx: ConvergeCtx) -> None:
         (ctx.meiva_home / sub).mkdir(parents=True, exist_ok=True)
     for sub in ("logs", "workspaces", "memory"):
         converge_private_tree(ctx.meiva_home / sub)
-    marker = ctx.meiva_home / "logs" / ".metadata_never_index"
+    # meiva:note
+    # The Spotlight opt-out marker sits at the HOME ROOT, so one file excludes the whole
+    # runtime tree: source checkouts, worktrees, workspaces, the memory repo. A marker
+    # under `logs/` excluded only the rotating logs while mds_stores and fseventsd kept
+    # churning metadata over everything else (2026-10-24: fseventsd RSS 1.1 -> 2.1 GB
+    # across the same window as two disk steps). Converge owns it because a hand-made
+    # file is dropped by the next cleanup or migration.
+    marker = ctx.meiva_home / ".metadata_never_index"
     marker.touch(exist_ok=True)
     ensure_private_file(marker)
 

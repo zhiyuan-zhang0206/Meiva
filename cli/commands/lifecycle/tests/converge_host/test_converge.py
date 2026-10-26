@@ -129,8 +129,13 @@ def test_ensure_meiva_home_dirs(ctx: ConvergeCtx) -> None:
 
     for sub in ("logs", "configs", "secrets"):
         assert (ctx.meiva_home / sub).is_dir()
-    # Exclude rotating logs from Spotlight; mds_stores otherwise consumes GBs of memory.
-    assert (ctx.meiva_home / "logs" / ".metadata_never_index").is_file()
+    # meiva:note
+    # Exclude the whole runtime tree from Spotlight from the home root down: one marker
+    # there covers logs, workspaces, checkouts and memory (mds_stores would otherwise
+    # consume GBs of memory). Exactly one marker — a second one under `logs/` would state
+    # nothing new and only leave a second fact to keep true.
+    assert (ctx.meiva_home / ".metadata_never_index").is_file()
+    assert not (ctx.meiva_home / "logs" / ".metadata_never_index").exists()
 
 
 def test_ensure_meiva_home_dirs_recursively_converges_private_data_trees(
@@ -174,7 +179,7 @@ def test_ensure_meiva_home_dirs_survives_a_workspace_socket(
 
         assert stat.S_ISSOCK(socket_path.lstat().st_mode)  # left in place
         assert stat.S_IMODE((meiva_home / "workspaces").stat().st_mode) == 0o700
-        assert (meiva_home / "logs" / ".metadata_never_index").exists()
+        assert (meiva_home / ".metadata_never_index").exists()
     finally:
         server.close()
 
