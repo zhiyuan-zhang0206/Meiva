@@ -4,7 +4,8 @@ from pathlib import Path
 from typing import LiteralString, NamedTuple, NoReturn, Protocol
 
 from base.agents.lifecycle import AgentRestart, AgentTermination, SystemHalt
-from meiva import boot, files
+from meiva.boot import maybe_load_plugins_for_missing
+from meiva.files import workspace_base
 from meiva.sdk_surface import attachment_transport, process_context
 from meiva.sdk_surface import settings as _settings
 from meiva.sdk_surface.help import HARNESS_HIDDEN_SELF_MEMBERS as HARNESS_HIDDEN_SELF_MEMBERS
@@ -87,7 +88,7 @@ def __getattr__(name: str) -> object:
     # meiva.__getattr__ never fires — trigger the shared lazy load here, then retry.
     import sys as _sys
 
-    if boot.maybe_load_plugins_for_missing(name):
+    if maybe_load_plugins_for_missing(name):
         return getattr(_sys.modules[__name__], name)
     raise AttributeError(f"module 'meiva.self' has no attribute {name!r}")
 
@@ -148,7 +149,7 @@ def attach(path: str | Path, *, label: str | None = None) -> None:
     turn, with a 20 MiB limit per file. Raises an error outside an agent turn.
     """
     _assert_native_self_action("attach")
-    attachment_transport.register(path, label=label, base=files.workspace_base())
+    attachment_transport.register(path, label=label, base=workspace_base())
 
 
 def _publish_self_inbound_wake() -> None:
@@ -202,7 +203,7 @@ def restart(config_overlay: dict[str, object] | None = None) -> NoReturn:
             config_overlay, models=_settings.model_catalog().models
         )
         if model_receipt is not None:
-            from base.log import logger
+            from loguru import logger
 
             logger.warning(
                 "restart config_overlay llm_model {requested!r} is withdrawn; "
@@ -276,9 +277,9 @@ def pause_heartbeat(duration: float) -> None:
     agent_id = agent_identity.require_agent_id()
     with process_context.current_context().sql.cursor() as cur:
         _run(cur, plans.heartbeat_pause_statements(agent_id, seconds))
-        from base import telemetry
+        from base.telemetry import emit
 
-        telemetry.emit(
+        emit(
             "telemetry",
             "heartbeat_paused",
             level="info",
@@ -306,7 +307,7 @@ def compact(summary: str) -> NoReturn:
 
     _assert_native_self_action("compact")
     agent_identity.assert_self_action("compact")
-    from base import telemetry
+    from base.telemetry import emit_prepared
     from base.telemetry.audit_events import prepare_event_log, record_audit
 
     # The inbound and its audit fact commit together.
@@ -323,7 +324,7 @@ def compact(summary: str) -> NoReturn:
                 payload={"compact_kind": "summary", "length": len(summary)},
             ),
         )
-    telemetry.emit_prepared(compact_event)
+    emit_prepared(compact_event)
     # Best-effort: a publish failure must not stop the wake + SystemHalt below.
     # The durable compact_summary inbound is already committed; if this live-UI
     # event is lost the frontend recovers on its next fetch. Routed through the

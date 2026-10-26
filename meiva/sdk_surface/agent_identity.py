@@ -7,9 +7,9 @@ never an SDK identity source. Borrowed leases are validated on each identity use
 
 from __future__ import annotations
 
-from base.agents.context import MeivaContext
 from base.agents.context.identity import AgentIdentity
 from meiva.sdk_surface import process_context
+from meiva.sdk_surface.process_context import MeivaContext
 from meiva.sdk_surface.pure.caller.identity_plan import (
     ActorFacts,
     actor_after_external,

@@ -48,22 +48,14 @@ exports = ["agent_identity.py", "attachment_transport.py", "batch.py", "discover
 "wraps.py#async def async_chained" = 1
 
 [debt.impure-edge]
-"agent_identity.py#base/agents/context/__init__.py" = 1
 "attachment_transport.py#base/lm/registry.py" = 1
-"extensions.py#base/config/service_read.py" = 1
-"extensions.py#base/packages/plugins/load_report.py" = 1
 "extensions.py#base/packages/plugins/loading/faces.py" = 1
 "injection_check.py#base/lm/decision/call.py" = 1
-"injection_check.py#base/log/__init__.py" = 1
-"install.py#base/agents/sdk/call_policy.py" = 1
-"install.py#base/config/service_read.py" = 1
-"install.py#base/packages/plugins/extensions.py" = 1
 "install.py#base/packages/plugins/flags.py" = 1
 "install.py#base/packages/plugins/load_report.py" = 1
 "installation.py#base/agents/sdk/call_policy.py" = 1
 "installation.py#base/config/service_read.py" = 1
 "installation.py#base/packages/plugins/extensions.py" = 1
-"metering.py#base/agents/sdk/call_policy.py" = 1
 "metering.py#base/agents/sdk/telemetry.py" = 1
 "process_context.py#base/agents/context/__init__.py" = 1
 "process_context.py#base/native_process/loaded_commit.py" = 1
@@ -71,12 +63,7 @@ exports = ["agent_identity.py", "attachment_transport.py", "batch.py", "discover
 "settings.py#base/config/__init__.py" = 1
 "settings.py#base/events/live/bus.py" = 1
 "settings.py#base/host/env/agent_slices.py" = 2
-"wraps.py#base/log/__init__.py" = 1
 "wraps.py#base/packages/plugins/activation.py" = 1
 
 [debt.wide-exports]
 "meizel.toml#exports" = 1
-
-[debt.wide-params]
-"extensions.py#def load_extensions" = 1
-"install.py#def install" = 1

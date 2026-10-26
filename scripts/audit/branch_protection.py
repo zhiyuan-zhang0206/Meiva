@@ -18,9 +18,10 @@ import subprocess
 from collections.abc import Callable, Mapping
 from pathlib import Path
 from typing import TypeGuard
-from urllib.parse import quote
 
 import yaml
+
+from meizel import lint_common
 
 _REPO_ROOT = Path(__file__).resolve().parents[2]
 TRUNK_FILE = _REPO_ROOT / ".trunk" / "trunk.yaml"
@@ -46,6 +47,13 @@ _REQUIRED_WORKFLOWS = (
     ".github/workflows/ci.yml",
     ".github/workflows/ci-rerun.yml",
 )
+_SAFE_URL_BYTES = frozenset(b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789_.-~")
+
+
+def _encode_branch(branch: str) -> str:
+    return "".join(
+        chr(byte) if byte in _SAFE_URL_BYTES else f"%{byte:02X}" for byte in branch.encode("utf-8")
+    )
 
 
 def _is_raw_dict(value: object) -> TypeGuard[dict[object, object]]:
@@ -226,7 +234,9 @@ def _audit(
     if not branch:
         raise ValueError("--branch must not be empty")
 
-    trunk_text = trunk_file.read_text()
+    trunk_text = lint_common.read_utf8_text(trunk_file)
+    if trunk_text is None:
+        raise FileNotFoundError(trunk_file)
     declaration_findings = trunk_gate_findings(trunk_text)
     if declaration_findings:
         return declaration_findings
@@ -237,7 +247,7 @@ def _audit(
                 "api",
                 "--method",
                 "GET",
-                f"repos/{repo}/branches/{quote(branch, safe='')}/protection",
+                f"repos/{repo}/branches/{_encode_branch(branch)}/protection",
             ]
         ),
         "branch protection response",

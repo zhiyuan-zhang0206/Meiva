@@ -7,10 +7,11 @@ is appended to `meiva.state_update["skill_reads"]` at the one point all read pat
 it from there. See `agent/graph/hooks/tests/test_skill_recall_hook.py` for the consumer.
 """
 
+import contextlib
 import json
 import subprocess
 import sys
-from collections.abc import Iterator
+from collections.abc import Generator, Iterator
 from pathlib import Path
 from typing import Any
 
@@ -18,7 +19,12 @@ import pytest
 
 import meiva
 from meiva.sdk_surface import process_context
-from meiva.tests.skills._skills_helpers import AuditedAgent, write_skill
+from meiva.tests.skills._skills_helpers import (
+    AuditedAgent,
+    pin_agent,
+    snapshot_clients_over,
+    write_skill,
+)
 from meiva.tests.skills._skills_helpers import audited_agent as audited_agent
 from meiva.tests.skills._skills_helpers import fake_skills_dir as fake_skills_dir
 
@@ -129,46 +135,38 @@ def test_the_audit_is_still_written_when_the_read_is_noted(
     assert audited_agent.invoked() == [("alpha", "loaded")]
 
 
+# meiva:note
 # A read in the exec child must cost the child no network or decision stack: it runs on every
 # execute_code that opens a skill, and the child's start is kept off those imports on purpose.
 # `import meiva` already holds httpx and the decision value types, so the probe reports what the
-# read itself adds, with the audit write and the settings root stubbed (both far heavier than
-# the note, and covered elsewhere).
-_PROBE = """
-import json
-import sys
-import types
+# read itself adds, with an in-memory no-op database handle bound on the child context.
+class _NoopDatabase:
+    @contextlib.contextmanager
+    def write_transaction(self) -> Generator[object]:
+        yield self
 
-root, home = sys.argv[1], sys.argv[2]
-sys.path.insert(0, root)
-import meiva
-import meiva.sdk_surface.agent_identity as identity
+    def execute(self, *_args: object, **_kwargs: object) -> None:
+        return None
 
-identity.require_agent_id = lambda _context=None: 1
-import base.packages.extensions.install_registry as registry
 
-registry.loadable_skill_names = lambda: {"alpha", "grp"}
-settings = types.ModuleType("meiva.sdk_surface.settings")
-settings.database = lambda: None
-sys.modules["meiva.sdk_surface.settings"] = settings
-audit = types.ModuleType("base.telemetry.audit_events")
-audit.SkillInvokedPayload = lambda **kw: types.SimpleNamespace(model_dump=lambda: kw)
-audit.prepare_event_log = lambda **kw: kw
-audit.record_audit_reported = lambda *a, **kw: None
-sys.modules["base.telemetry.audit_events"] = audit
+def _run_child_probe() -> None:
+    import meiva.skills
 
-meiva.state = object()
-meiva.state_update = {}
-import meiva.skills
-
-before = set(sys.modules)
-meiva.skills.alpha.__doc__
-forbidden = ("httpx", "langchain", "langgraph", "agent", "base.lm.decision.call")
-print(json.dumps({
-    "update": meiva.state_update,
-    "new": sorted(m for m in set(sys.modules) - before if m.startswith(forbidden)),
-}))
-"""
+    noop_db: Any = _NoopDatabase
+    pin_agent(1, clients=snapshot_clients_over(noop_db))
+    process_context.set_state(object())
+    process_context.set_state_update({})
+    before = set(sys.modules)
+    _ = meiva.skills.alpha.__doc__
+    forbidden = ("httpx", "langchain", "langgraph", "agent", "base.lm.decision.call")
+    print(
+        json.dumps(
+            {
+                "update": process_context.get_state_update(),
+                "new": sorted(m for m in set(sys.modules) - before if m.startswith(forbidden)),
+            }
+        )
+    )
 
 
 def test_noting_a_read_in_the_child_imports_no_network_or_decision_stack(
@@ -176,9 +174,14 @@ def test_noting_a_read_in_the_child_imports_no_network_or_decision_stack(
 ) -> None:
     _skills(fake_skills_dir)
     proc = subprocess.run(  # noqa: S603 — fixed argv, sys.executable is trusted
-        [sys.executable, "-I", "-B", "-X", "utf8", "-c", _PROBE, str(_REPO_ROOT), str(unit_home)],
+        [sys.executable, "-B", "-X", "utf8", str(Path(__file__))],
         cwd=_REPO_ROOT,
-        env={"HOME": str(unit_home), "MEIVA_HOME": str(unit_home)},
+        env={
+            "HOME": str(unit_home),
+            "MEIVA_HOME": str(unit_home),
+            "MEIVA_CONFIG_FETCH": "skip",
+            "PYTHONPATH": str(_REPO_ROOT),
+        },
         capture_output=True,
         text=True,
         timeout=120,
@@ -189,3 +192,7 @@ def test_noting_a_read_in_the_child_imports_no_network_or_decision_stack(
     report = json.loads(proc.stdout.strip().splitlines()[-1])
     assert report["update"] == {"skill_reads": ["alpha"]}
     assert report["new"] == []
+
+
+if __name__ == "__main__":
+    _run_child_probe()

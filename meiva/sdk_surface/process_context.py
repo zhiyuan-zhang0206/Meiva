@@ -28,7 +28,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from base.agents.context import MeivaContext
+from base.agents.context import MeivaContext as MeivaContext
 from base.native_process.loaded_commit import LoadedCommit
 
 from . import (

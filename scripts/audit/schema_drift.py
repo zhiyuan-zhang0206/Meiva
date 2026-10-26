@@ -13,6 +13,8 @@ from typing import Any
 
 import psycopg
 
+from meizel import lint_common
+
 _CONSTRAINT = frozenset({"CONSTRAINT", "PRIMARY", "UNIQUE", "CHECK", "FOREIGN", "EXCLUDE", "LIKE"})
 _PARTITION = re.compile(r"^(?P<parent>.+)_(?P<suffix>\d{6}|default)$")
 _RUNTIME_DDL = ("checkpoint",)
@@ -199,11 +201,12 @@ def _parse_args(argv: list[str] | None) -> argparse.Namespace:
 
 
 def _allowlisted(drift: Drift, allow: Path | None) -> Drift:
-    if allow is None or not allow.exists():
+    if allow is None:
         return drift
-    allowed = {
-        line.strip() for line in allow.read_text(encoding="utf-8").splitlines() if line.strip()
-    }
+    allow_text = lint_common.read_utf8_text(allow)
+    if allow_text is None:
+        return drift
+    allowed = {line.strip() for line in allow_text.splitlines() if line.strip()}
     return Drift(
         extra_tables=[name for name in drift.extra_tables if name not in allowed],
         missing_tables=drift.missing_tables,
@@ -242,7 +245,10 @@ def main(argv: list[str] | None = None) -> int:
         from base.config import settings
 
         dsn = settings.data_plane.db_url
-    schema = schema_columns(args.schema.read_text(encoding="utf-8"))
+    schema_text = lint_common.read_utf8_text(args.schema)
+    if schema_text is None:
+        raise FileNotFoundError(args.schema)
+    schema = schema_columns(schema_text)
     with psycopg.connect(dsn) as conn:
         conn.read_only = True
         live = _live_columns(conn)
