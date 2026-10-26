@@ -1,4 +1,4 @@
-exports = ["derive.py", "jobs.py", "reader.py", "source.py"]
+exports = ["derive.py", "jobs.py", "model.py", "reader.py", "source.py"]
 
 [purity]
 "derive.py" = "strict"

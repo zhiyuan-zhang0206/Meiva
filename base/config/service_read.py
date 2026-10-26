@@ -14,7 +14,6 @@ from __future__ import annotations
 import threading
 from collections.abc import Callable, Iterable
 from dataclasses import dataclass
-from functools import lru_cache
 from pathlib import Path
 from typing import Any, Literal, Protocol, overload
 from urllib.parse import urlsplit
@@ -24,12 +23,10 @@ from pydantic import SecretStr
 
 from base.config.config_registry import (
     DOMAIN_MODELS,
+    domain_model_classes,
     field_alias,
     fields,
     schema_extra,
-)
-from base.config.config_registry import (
-    domain_model_classes as _domain_model_classes,
 )
 from base.host.env.config_lite_table import FIELD_DOMAINS
 from base.host.net.url_secret import credential_free, url_with_host
@@ -38,7 +35,6 @@ __all__ = [
     "ConfigAuthority",
     "bootstrap_config_values",
     "current_field_values",
-    "domain_model_classes",
     "served_db_endpoint",
 ]
 
@@ -236,8 +232,9 @@ class ConfigAuthority:
                 pending.setdefault(ref.domain, {})[name] = aliases[alias]
             else:
                 out[name] = self.service_field_value(name)
+        models = domain_model_classes()
         for domain, file_values in pending.items():
-            model = domain_model_classes()[domain]
+            model = models[domain]
             payload: dict[str, Any] = {
                 name: self.service_field_value(name) for name in model.model_fields
             }
@@ -353,12 +350,6 @@ def _serve_reachable_data_plane_hosts(out: dict[str, str], reachable: str) -> No
         host = urlsplit(value).hostname or ""
         if host and is_loopback_host(host):
             out[alias] = url_with_host(value, reachable)
-
-
-@lru_cache(maxsize=1)
-def domain_model_classes() -> dict[str, type[Any]]:
-    """Resolve registry class metadata without constructing any Settings."""
-    return _domain_model_classes()
 
 
 def current_field_values(authority: ConfigAuthority) -> dict[str, Any]:

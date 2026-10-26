@@ -319,8 +319,9 @@ def validate_config_overlay_shape(
                 by_domain: dict[str, dict[str, object]] = {}
                 for f, v in updates.items():
                     by_domain.setdefault(domain_of(f), {})[f] = v
+                models = domain_model_classes()
                 for dom, upd in by_domain.items():
-                    cls = domain_model_classes()[dom]
+                    cls = models[dom]
                     sub = cls()
                     cls.model_validate({**sub.model_dump(), **upd})
             else:
