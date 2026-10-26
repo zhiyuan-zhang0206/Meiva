@@ -1,5 +1,4 @@
 exports = ["analysis.py", "cli.py", "enumerations.py", "sync.py"]
-purity = "strict"
 
 [roots]
 "cli.py" = { kinds = ["cwd"], why = "CLI composition root captures the working directory once for repository and relative-path inputs" }
@@ -22,3 +21,33 @@ purity = "strict"
 "policy.py" = ["manifest.py"]
 "rule.py" = ["debt.py", "manifest.py", "policy.py"]
 "sync.py" = ["analysis.py", "debt_edit.py", "declare.py", "manifest.py", "manifest_text.py"]
+
+[purity]
+"." = "strict"
+"analysis.py" = "strict-to-be"
+"cli.py" = "strict-to-be"
+"debt_carry.py" = "strict-to-be"
+"debt_edit.py" = "strict-to-be"
+"debt_report.py" = "strict-to-be"
+"debt_rules.py" = "strict-to-be"
+"declare.py" = "strict-to-be"
+"enumerations.py" = "strict-to-be"
+"policy.py" = "strict-to-be"
+"sync.py" = "strict-to-be"
+
+[debt.impure-call]
+"analysis.py#meizel.graph.universe.load_universe" = 1
+"cli.py#Path.resolve" = 2
+"cli.py#meizel.graph.universe.load_universe" = 1
+"debt_carry.py#meizel.graph.universe.GitRepo" = 3
+"debt_carry.py#meizel.graph.universe.load_universe" = 2
+"debt_edit.py#meizel.graph.universe.GitRepo" = 1
+"debt_report.py#meizel.graph.universe.GitRepo" = 2
+"debt_report.py#meizel.graph.universe.load_universe" = 3
+"debt_rules.py#meizel.graph.universe.GitRepo" = 6
+"debt_rules.py#meizel.graph.universe.load_universe" = 6
+"declare.py#meizel.graph.universe.GitRepo" = 2
+"enumerations.py#meizel.graph.universe.GitRepo" = 2
+"enumerations.py#meizel.graph.universe.load_universe" = 1
+"policy.py#meizel.graph.universe.GitRepo" = 1
+"sync.py#meizel.graph.universe.GitRepo" = 1

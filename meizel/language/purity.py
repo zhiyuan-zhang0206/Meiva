@@ -16,7 +16,6 @@ from meizel.language.purity_structure import (
     record_params,
     record_pass_through,
 )
-from meizel.lint_common import read_utf8_text
 
 __all__ = [
     "DEFAULT_IMPURE_CALLS",
@@ -84,6 +83,26 @@ DEFAULT_IMPURE_CALLS = frozenset(
         "io.open",
         "uuid.uuid4",
         "uuid.uuid1",
+        "os.stat",
+        "os.lstat",
+        "os.fstat",
+        "os.open",
+        "os.read",
+        "os.listdir",
+        "os.scandir",
+        "os.walk",
+        "os.readlink",
+        "os.path.exists",
+        "os.path.isfile",
+        "os.path.isdir",
+        "os.path.islink",
+        "os.path.getsize",
+        "os.path.getmtime",
+        "os.path.realpath",
+        "pkgutil.get_data",
+        "inspect.getsource",
+        "inspect.getsourcefile",
+        "inspect.getsourcelines",
     }
 )
 
@@ -101,9 +120,18 @@ _PATH_IO_METHODS = frozenset(
         "is_file",
         "is_dir",
         "stat",
+        "lstat",
+        "iterdir",
+        "rglob",
+        "is_symlink",
+        "readlink",
+        "touch",
+        "chmod",
+        "samefile",
     }
 )
-_PATH_AMBIGUOUS_METHODS = frozenset({"replace", "open"})
+_PATH_AMBIGUOUS_METHODS = frozenset({"replace", "open", "glob", "resolve"})
+_PATH_CLASSES = frozenset({"pathlib.Path", "pathlib.PosixPath", "pathlib.PurePath"})
 _CALL_ALIASES = {
     "datetime.datetime.now": "datetime.now",
     "datetime.datetime.utcnow": "datetime.utcnow",
@@ -195,10 +223,10 @@ def _policy_int(policy: allowances.Policy, section: str, default: int) -> int:
 
 @cache
 def _rules_for_root(root: Path) -> tuple[frozenset[str], frozenset[str], int, int, int]:
-    raw = read_utf8_text(root / allowances.POLICY)
-    if raw is None:
+    path = root / allowances.POLICY
+    if not path.is_file():
         return DEFAULT_IMPURE_IMPORTS, DEFAULT_IMPURE_CALLS, 6, 6, 3
-    policy, _ = allowances.parse(raw)
+    policy, _ = allowances.parse(path.read_text(encoding="utf-8"))
     imports = DEFAULT_IMPURE_IMPORTS | frozenset(policy.names("purity", "impure-imports"))
     calls = DEFAULT_IMPURE_CALLS | frozenset(policy.names("purity", "impure-calls"))
     return (
@@ -367,15 +395,46 @@ def _is_path_expr(expr: ast.expr, dotted: _Dotted, path_vars: set[str]) -> bool:
     return False
 
 
+# meiva:note
+# The impure call a value names without calling it (`_is_file = Path.is_file`,
+# `read = os.stat`): the alias is the call under another name, and every use of the name would
+# otherwise be a call the scanner does not see. Recorded once, at the assignment.
+def _impure_alias(state: PurityState, value: ast.expr, dotted: _Dotted) -> str | None:
+    if not isinstance(value, ast.Attribute | ast.Name):
+        return None
+    name = dotted(value)
+    if name is None:
+        return None
+    norm = _CALL_ALIASES.get(name, name)
+    if norm in state.impure_calls and norm != _OS_ENVIRON:
+        return norm
+    owner, _, attr = name.rpartition(".")
+    if owner in _PATH_CLASSES and attr in _PATH_IO_METHODS | _PATH_AMBIGUOUS_METHODS:
+        return f"Path.{attr}"
+    return None
+
+
 def record_assign(state: PurityState, node: ast.Assign | ast.AnnAssign, dotted: _Dotted) -> None:
     targets = node.targets if isinstance(node, ast.Assign) else [node.target]
+    if node.value is None:
+        return
     if (
         len(targets) == 1
         and isinstance(targets[0], ast.Name)
-        and node.value is not None
         and _is_path_expr(node.value, dotted, state.path_vars)
     ):
         state.path_vars.add(targets[0].id)
+    alias = _impure_alias(state, node.value, dotted)
+    if alias is not None:
+        state.items.append(
+            PurityItem(
+                node.lineno,
+                Code.IMPURE_CALL,
+                alias,
+                f"impure call `{alias}` bound to a name in strict module",
+                _IMPURE_CALL_HINT,
+            )
+        )
 
 
 def record_call(

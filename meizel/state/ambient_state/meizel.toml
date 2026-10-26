@@ -1,4 +1,3 @@
-purity = "strict"
 exports = ["tests"]
 
 [uses]
@@ -11,3 +10,18 @@ exports = ["tests"]
 "tests" = ["__init__.py", "allowlist.py", "bundle.py", "owner_method.py"]
 "thread_owner.py" = ["module.py", "owner_method.py", "thread_admission.py"]
 "thread_admission.py" = ["module.py", "owner_method.py"]
+
+[purity]
+"." = "strict"
+"__init__.py" = "strict-to-be"
+"allowlist.py" = "strict-to-be"
+"bundle.py" = "strict-to-be"
+"module.py" = "strict-to-be"
+
+[debt.impure-call]
+"__init__.py#Path.is_file" = 1
+"allowlist.py#Path.resolve" = 1
+"bundle.py#Path.is_file" = 1
+"module.py#Path.is_dir" = 1
+"module.py#Path.is_file" = 1
+"module.py#Path.stat" = 1

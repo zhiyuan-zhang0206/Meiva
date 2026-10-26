@@ -1,3 +1,5 @@
+from pathlib import Path
+
 import pytest
 
 from base.daemon.health import DaemonProbe
@@ -22,6 +24,7 @@ def test_canary_distinguishes_browser_failure_from_unknown(
         probes.browser_reach(
             url="https://example.invalid/health",
             port=9222,
+            profile=Path("/unused/chrome-profile"),
             timeout_s=1.0,
             browser_verdict=DaemonProbe.up("owned"),
             canary_result=hc.CanaryResult(outcome, "browser evidence"),

@@ -18,6 +18,7 @@ from datetime import UTC, datetime
 import pytest
 
 from base.api_contracts.agent_contract import ShellKillMode
+from base.clock import SYSTEM_TIMERS
 from base.sessions.backend import PosixProcSessionBackend, get_shell_backend
 from base.sessions.pty import client
 from base.sessions.pty.tests.pty_service import service_socket
@@ -66,7 +67,9 @@ def _wedged_service() -> Generator[None]:
 
 def test_a_host_with_no_service_has_no_sessions() -> None:
     rows = collect_sessions(
-        service_backend=PosixProcSessionBackend(), shell_backend=get_shell_backend(), now=_now()
+        service_backend=PosixProcSessionBackend(SYSTEM_TIMERS),
+        shell_backend=get_shell_backend(),
+        now=_now(),
     )
 
     assert rows == ()
@@ -106,7 +109,7 @@ def test_a_service_that_does_not_answer_is_skipped_and_logged(
 ) -> None:
     with _wedged_service(), caplog.at_level(logging.WARNING, logger="ops.cluster_status.sessions"):
         rows = collect_sessions(
-            service_backend=PosixProcSessionBackend(),
+            service_backend=PosixProcSessionBackend(SYSTEM_TIMERS),
             shell_backend=get_shell_backend(),
             now=_now(),
         )

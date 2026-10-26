@@ -23,7 +23,9 @@ def _config(boot: ConfigBoot) -> GatewayConfig:
     return gateway_config_from_boot(
         boot,
         user_home=Path.home(),
-        memory_root=paths.gateway_memory_dir(roles=ConfiguredMachineIdentity(boot).role()),
+        memory_root=paths.gateway_memory_dir(
+            roles=ConfiguredMachineIdentity(boot).role(), home=paths.meiva_home()
+        ),
         rng=_rng(),
     )
 

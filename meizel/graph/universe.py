@@ -28,21 +28,15 @@ __all__ = [
 
 MANIFEST = "meizel.toml"
 SOURCE_EXTENSIONS = (".py", ".ts", ".tsx", ".mts", ".cts")
-_is_file = Path.is_file
-_mkdir = Path.mkdir
-_read_file_bytes = Path.read_bytes
-_rmdir = Path.rmdir
-_unlink = Path.unlink
-_write_file_bytes = Path.write_bytes
 
 
 def _read_text(path: Path) -> str:
-    return _read_file_bytes(path).decode("utf-8")
+    return path.read_bytes().decode("utf-8")
 
 
 def _write_bytes(path: Path, data: bytes) -> None:
-    _mkdir(path.parent, parents=True, exist_ok=True)
-    _write_file_bytes(path, data)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_bytes(data)
 
 
 def _write_text(path: Path, text: str) -> None:
@@ -54,7 +48,7 @@ def _mkdtemp(root: Path, prefix: str) -> Path:
     for idx in range(100_000):
         candidate = base / f".{prefix}{idx}"
         try:
-            _mkdir(candidate, mode=0o700)
+            candidate.mkdir(mode=0o700)
             return candidate
         except FileExistsError:
             continue
@@ -66,16 +60,16 @@ def _rmtree(root: Path) -> None:
         base = Path(dirpath)
         for name in filenames:
             with suppress(OSError):
-                _unlink(base / name)
+                (base / name).unlink()
         for name in dirnames:
             sub = base / name
             with suppress(OSError):
                 if sub.is_symlink():
-                    _unlink(sub)
+                    sub.unlink()
                 else:
-                    _rmdir(sub)
+                    sub.rmdir()
     with suppress(OSError):
-        _rmdir(root)
+        root.rmdir()
 
 
 @dataclass(frozen=True, slots=True)
@@ -87,13 +81,13 @@ class EditPlan:
 
     def apply(self) -> None:
         for directory in self.dirs:
-            _mkdir(directory, parents=True, exist_ok=True)
+            directory.mkdir(parents=True, exist_ok=True)
         for path, text in self.writes.items():
             _write_text(path, text)
         for path, data in self.byte_writes.items():
             _write_bytes(path, data)
         for path in self.deletes:
-            _unlink(path)
+            path.unlink()
 
 
 @dataclass(frozen=True, slots=True)
@@ -101,16 +95,16 @@ class GitRepo:
     root: Path
 
     def has_file(self, rel: str) -> bool:
-        return _is_file(self.root / rel)
+        return (self.root / rel).is_file()
 
     def load_text(self, rel: str, *, default: str | None = None) -> str:
         full = self.root / rel
-        if default is not None and not _is_file(full):
+        if default is not None and not full.is_file():
             return default
         return _read_text(full)
 
     def load_bytes(self, rel: str) -> bytes:
-        return _read_file_bytes(self.root / rel)
+        return (self.root / rel).read_bytes()
 
     def run_text(self, *args: str) -> str:
         # meiva:note
@@ -302,6 +296,11 @@ class Universe:
             if depth < len(parts) - 1:
                 children.setdefault("/".join(parts[: depth + 1]), set())
 
+    # meiva:note
+    # The tracked files with `suffix` that contain any of `words` as a whole word.
+    def grep_words(self, words: Collection[str], suffix: str) -> list[str]:
+        return GitRepo(self.root).grep_words(words, suffix)
+
     def resolve_module(self, dotted: str) -> Module | None:
         """Resolve a dotted name against the checkout, as `pythonpath = ["."]` would."""
         if dotted in self._modules:
@@ -333,18 +332,18 @@ class Universe:
         return (*self.python_files, *ts)
 
     def has_file(self, rel: str) -> bool:
-        return _is_file(self.root / rel)
+        return (self.root / rel).is_file()
 
     def load_text(self, rel: str) -> str:
         return _read_text(self.root / rel)
 
     def load_bytes(self, rel: str) -> bytes:
-        return _read_file_bytes(self.root / rel)
+        return (self.root / rel).read_bytes()
 
 
 def _is_regular(root: Path, rel: str) -> bool:
     full = root / rel
-    return _is_file(full) and not full.is_symlink()
+    return full.is_file() and not full.is_symlink()
 
 
 # meiva:note

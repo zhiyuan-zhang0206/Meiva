@@ -5,7 +5,6 @@ from http.client import HTTPException
 from pathlib import Path
 
 from base.cluster.machine import MachineIdentityReader, MachineRoleMissing
-from base.config import get_field
 from base.daemon.health import DaemonProbe
 from base.telemetry.observability import (
     collector_allowed_for_home,
@@ -60,14 +59,6 @@ def probe_collector_at(otlp_port: int) -> DaemonProbe:
     if is_alive(otlp_port):
         return DaemonProbe.up("collector accepts OTLP trace requests")
     return DaemonProbe.down("collector does not accept a valid OTLP trace request")
-
-
-# meiva:note
-# The registry's zero-argument probe: this unit's local OTLP port, read when the probe runs
-# (a remote or stale producer export override cannot redirect local liveness).
-def probe_collector(*, port: int | None = None) -> DaemonProbe:
-    resolved_port = int(get_field("telemetry_otlp_port")) if port is None else port
-    return probe_collector_at(resolved_port)
 
 
 # meiva:note

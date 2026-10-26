@@ -13,6 +13,7 @@ service that is still coming up (a start races its own clients).
 from __future__ import annotations
 
 import base64
+import math
 import socket
 import time
 from dataclasses import dataclass
@@ -38,6 +39,11 @@ REQUEST_TIMEOUT_S = 30.0
 class PtyClientConfig:
     socket_path: Path
     connect_wait_s: float = 5.0
+
+    # meiva:note
+    # A wait `connect_attempts` refuses fails when the config is built, not on the first request.
+    def __post_init__(self) -> None:
+        connect_attempts(self.connect_wait_s)
 
 
 _CONNECT_RETRY_S = 0.1
@@ -98,31 +104,42 @@ class KillVerdict:
     survivors: tuple[int, ...] = ()
 
 
-def _monotonic() -> float:
-    return time.monotonic()
-
-
 def _is_json_object(value: object) -> TypeGuard[dict[str, Any]]:
     return isinstance(value, dict)
 
 
+# meiva:note
+# How many times a connect is tried for a wait of `wait_s` seconds: the first attempt, then one more
+# per fixed retry pause that fits in the wait. A pause is the unit instead of a deadline because
+# an attempt on a unix socket is a single syscall, so the pauses are the whole wait and no clock
+# is read to decide when to stop.
+def connect_attempts(wait_s: float) -> int:
+    if not math.isfinite(wait_s) or wait_s < 0:
+        raise ValueError(f"connect wait must be a non-negative number of seconds: {wait_s!r}")
+    return 1 + math.ceil(wait_s / _CONNECT_RETRY_S)
+
+
+def _dial(path: str) -> socket.socket:
+    conn = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+    try:
+        conn.connect(path)
+    except BaseException:
+        conn.close()
+        raise
+    return conn
+
+
 def _connect(wait_s: float, socket_path: Path) -> socket.socket:
     path = str(socket_path)
-    deadline = _monotonic() + wait_s
-    while True:
-        conn = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+    for _ in range(connect_attempts(wait_s) - 1):
         try:
-            conn.connect(path)
-        except (FileNotFoundError, ConnectionRefusedError) as exc:
-            conn.close()
-            if _monotonic() >= deadline:
-                raise ServiceDownError(f"no pty-sessions service is listening at {path}") from exc
+            return _dial(path)
+        except (FileNotFoundError, ConnectionRefusedError):
             time.sleep(_CONNECT_RETRY_S)
-        except OSError:
-            conn.close()
-            raise
-        else:
-            return conn
+    try:
+        return _dial(path)
+    except (FileNotFoundError, ConnectionRefusedError) as exc:
+        raise ServiceDownError(f"no pty-sessions service is listening at {path}") from exc
 
 
 # meiva:note

@@ -1,8 +1,16 @@
 exports = ["ambient_state", "machine_role.py", "no_os_environ.py", "turn_scoped_config.py"]
 
+[uses]
+"tests" = ["no_os_environ.py", "turn_scoped_config.py"]
+
 [purity]
 "." = "strict"
 "machine_role.py" = "strict"
+"no_os_environ.py" = "strict-to-be"
+"turn_scoped_config.py" = "strict-to-be"
 
-[uses]
-"tests" = ["no_os_environ.py", "turn_scoped_config.py"]
+[debt.impure-call]
+"no_os_environ.py#Path.resolve" = 1
+"no_os_environ.py#Path.rglob" = 1
+"turn_scoped_config.py#Path.resolve" = 3
+"turn_scoped_config.py#Path.rglob" = 1

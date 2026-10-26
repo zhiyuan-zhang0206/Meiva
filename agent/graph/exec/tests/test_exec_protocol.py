@@ -57,7 +57,7 @@ def _exec_envelope_events() -> list[dict[str, Any]]:
     """Read the durable telemetry mirror's exec-envelope rows."""
     from base.paths import logs_dir
 
-    path = logs_dir() / f"events-{datetime.now(UTC):%Y%m%d}.jsonl"
+    path = logs_dir(home=meiva_home()) / f"events-{datetime.now(UTC):%Y%m%d}.jsonl"
     if not path.exists():
         return []
     events: list[dict[str, Any]] = []

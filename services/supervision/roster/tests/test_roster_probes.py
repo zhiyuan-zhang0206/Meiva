@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import os
+from functools import partial
 from pathlib import Path
 from urllib.parse import urlsplit
 
@@ -86,4 +87,7 @@ def test_browser_identity_requires_the_units_positive_profile_fact(
 
 def test_browser_identity_is_the_profile_probe_not_a_curl() -> None:
     declared = _service("browser")
-    assert declared.identity_probe is composition.browser_probe
+    probe = declared.identity_probe
+    assert isinstance(probe, partial)
+    assert probe.func is composition.browser_probe
+    assert probe.args == (int(get_field("browser_cdp_port")), profile_dir())

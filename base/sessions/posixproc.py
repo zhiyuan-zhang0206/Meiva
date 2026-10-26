@@ -36,12 +36,12 @@ import contextlib
 import signal
 import subprocess
 import sys
-import time
 from collections.abc import Iterable, Sequence
 from pathlib import Path
 
 import psutil
 
+from base.clock import Timers
 from base.log import logger
 from base.native_process.kernel_identity import pid_starttime_ticks
 from base.native_process.ownership import stable_create_time
@@ -408,15 +408,12 @@ def process_group_has_live_members(
     return False
 
 
-def _monotonic() -> float:
-    return time.monotonic()
-
-
 def terminate_tree(
     proc: psutil.Process,
     *,
     graceful: bool,
     timeout: float,
+    timers: Timers,
     process_control: ProcessControl = SYSTEM_PROCESS_CONTROL,
     wait_timeout: float = 5.0,
 ) -> bool:
@@ -458,15 +455,15 @@ def terminate_tree(
         # command an unwound finally spawns mid-wait is not in any children
         # snapshot — only a group signal reaches both.
         _signal_group(pgid, signal.SIGTERM, process_control=process_control)
-        deadline = _monotonic() + timeout
-        while _monotonic() < deadline:
+        deadline = timers.monotonic() + timeout
+        while timers.monotonic() < deadline:
             if (
                 not process_is_live(proc)
                 and not process_group_has_live_members(pgid, process_control=process_control)
                 and all(not process_is_live(c) for c in children)
             ):
                 return True
-            time.sleep(_KILL_POLL_S)
+            timers.sleep(_KILL_POLL_S)
     # Hard kill: the group first (a SIGTERM-ignoring straggler or a child
     # spawned during the graceful wait dies here), then the pre-captured walk
     # for a descendant that left the group (a setsid'd worker) — the group
@@ -486,6 +483,7 @@ def kill_session(
     *,
     graceful: bool = False,
     timeout: float = 15.0,
+    timers: Timers,
     process_control: ProcessControl = SYSTEM_PROCESS_CONTROL,
     wait_timeout: float = 5.0,
 ) -> tuple[bool, str]:
@@ -511,6 +509,7 @@ def kill_session(
             proc,
             graceful=graceful,
             timeout=timeout,
+            timers=timers,
             process_control=process_control,
             wait_timeout=wait_timeout,
         )

@@ -5,6 +5,7 @@ import shlex
 from collections.abc import Callable
 from pathlib import Path
 
+from base.clock import Timers
 from base.native_process.os_platform import is_macos
 from base.paths import logs_dir, meiva_home, run_dir
 from base.sessions.helperproc import (
@@ -22,6 +23,9 @@ _log = logging.getLogger(__name__)
 
 
 class PosixProcSessionBackend(SessionBackend):
+    def __init__(self, timers: Timers) -> None:
+        self._timers = timers
+
     @staticmethod
     def format_command(
         cmd: str,
@@ -75,7 +79,7 @@ class PosixProcSessionBackend(SessionBackend):
         del expected
         from base.sessions import posixproc
 
-        return posixproc.kill_session(name, graceful=graceful, timeout=timeout)
+        return posixproc.kill_session(name, graceful=graceful, timeout=timeout, timers=self._timers)
 
     def graceful_signal(self, name: str, *, expected: SessionRecord | None = None) -> bool:
         from base.sessions import posixproc
@@ -240,10 +244,10 @@ def helper_spawn_enabled(*, macos: bool = is_macos()) -> bool:
 
 
 # meiva:link base/sessions/docs/session-backend.meiva.okf.md
-def get_backend(*, macos: bool = is_macos()) -> SessionBackend:
+def get_backend(*, timers: Timers, macos: bool = is_macos()) -> SessionBackend:
     if helper_spawn_enabled(macos=macos):
-        return HelperProcSessionBackend(helper_client)
-    return PosixProcSessionBackend()
+        return HelperProcSessionBackend(helper_client, timers)
+    return PosixProcSessionBackend(timers)
 
 
 # meiva:link base/sessions/docs/session-backend.meiva.okf.md

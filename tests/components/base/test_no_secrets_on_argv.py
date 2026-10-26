@@ -27,6 +27,7 @@ from pathlib import Path
 
 import psutil
 
+from base.clock import SYSTEM_TIMERS
 from base.cluster.machine.tests.identity import machine_identity as machine_identity
 from base.db import Database
 from base.paths.tests.homes import unit_home as unit_home
@@ -50,7 +51,7 @@ def test_session_backend_new_session(unit_home: Path, secrets_in_creator_env: No
     from base.sessions.env_forwarding import forward_env_dict
     from base.sessions.record import SessionRecord
 
-    backend = PosixProcSessionBackend()
+    backend = PosixProcSessionBackend(SYSTEM_TIMERS)
     backend.new_session(
         "meiva-gateway",
         "sleep 60",
@@ -74,7 +75,7 @@ def test_launch_record_cannot_reach_a_live_process(
     from base.sessions.backend import PosixProcSessionBackend
     from base.sessions.env_forwarding import forward_env_dict
 
-    backend = PosixProcSessionBackend()
+    backend = PosixProcSessionBackend(SYSTEM_TIMERS)
     backend.new_session(
         "meiva-gateway",
         "true",
@@ -112,7 +113,7 @@ def test_agent_shell_session(
     children re-source them at their own boot), so the secret values appear
     NOWHERE in this launch path: not on an argv of the service or the shell, not in
     the shell's environment."""
-    from base.paths import workspace_dir
+    from base.paths import meiva_home, workspace_dir
     from base.sessions.backend import PtySessionBackend, get_shell_backend
     from base.sessions.pty.client import PtyClientConfig
     from meiva.shell.sessions import ShellSessions, session_host
@@ -123,7 +124,7 @@ def test_agent_shell_session(
         backend=PtySessionBackend(PtyClientConfig(socket_path=service_socket())),
         database=database,
         agent_id=1,
-    ).create("probe", cwd=workspace_dir(1), ttl=120, host=session_host())
+    ).create("probe", cwd=workspace_dir(1, home=meiva_home()), ttl=120, host=session_host())
     name = "meiva-agent-1-shell-3-probe"
     assert get_shell_backend().has_session(name)
 

@@ -39,6 +39,7 @@ def test_pooler_protocol_requires_both_authenticated_listeners(
     assert (
         pgbouncer(
             machine=machine_identity,
+            home=Path("/unused"),
             record=record,
             admin_password=admin_password,
             loopback=loopback,

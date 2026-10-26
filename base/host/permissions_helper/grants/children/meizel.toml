@@ -2,4 +2,7 @@ exports = ["apple_event.py", "folder_touch.py", "preflight.py"]
 
 [purity]
 "__init__.py" = "strict"
-"folder_touch.py" = "strict"
+"folder_touch.py" = "strict-to-be"
+
+[debt.impure-call]
+"folder_touch.py#Path.iterdir" = 1

@@ -4,6 +4,9 @@ exports = ["cache_writes.py", "catalog.py"]
 "__init__.py" = ["catalog.py"]
 
 [purity]
-"__init__.py" = "strict"
+"__init__.py" = "strict-to-be"
 "cache_writes.py" = "strict"
 "catalog.py" = "strict"
+
+[debt.impure-call]
+"__init__.py#pkgutil.get_data" = 1

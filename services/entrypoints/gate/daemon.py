@@ -360,13 +360,15 @@ class GateServer(ThreadingHTTPServer):
         self.gate = gate
 
 
-def _entry_port_of(frontend_healthcheck_url: str) -> int:
+# meiva:note
+# The entry port: the port of the frontend health-check URL, else 3000.
+def entry_port_of(frontend_healthcheck_url: str) -> int:
     return urlsplit(frontend_healthcheck_url).port or 3000
 
 
 def entry_port() -> int:
     """The public fleet UI port, shared by Gate and its roster readiness probe."""
-    return _entry_port_of(settings.services.frontend_healthcheck_url)
+    return entry_port_of(settings.services.frontend_healthcheck_url)
 
 
 def app_port() -> int:
@@ -457,7 +459,7 @@ def gate_database(
 # the gate reads its settings.
 def read_facts(config: ConfigBoot, machine: MachineIdentityReader) -> GateFacts:
     services = config.view.services
-    entry = _entry_port_of(services.frontend_healthcheck_url)
+    entry = entry_port_of(services.frontend_healthcheck_url)
     return GateFacts(
         entry_port=entry,
         app_port=app_port_of(services.app_port, entry_port=entry),
