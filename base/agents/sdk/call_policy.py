@@ -113,7 +113,7 @@ class SamplingPolicyOwner:
         self.stopped = False
 
     def should_sample(self, every: int) -> bool:
-        if every <= 1:
+        if every == 1:
             return True
         return keep_sample(every, self.rng.random())
 

@@ -84,7 +84,9 @@ class SamplingPolicyLike(Protocol):
 # value in [0, 1) that the owner of the policy drew from its random generator for this call, so
 # each call is kept with probability 1/every whatever the other call sites do.
 def keep_sample(every: int, draw: float) -> bool:
-    return every <= 1 or draw < 1.0 / every
+    if every < 1:
+        raise ValueError(f"a sample ratio is 1 in a positive count: {every!r}")
+    return every == 1 or draw < 1.0 / every
 
 
 # meiva:note
