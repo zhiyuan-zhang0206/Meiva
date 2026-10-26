@@ -1,4 +1,5 @@
 [uses]
 "browser_mcp_daemon" = ["test_browser_mcp_daemon.py"]
+"test_browser_mcp_daemon_stop.py" = ["test_browser_mcp_daemon_tab_groups.py"]
 "test_browser_mcp_daemon_tab_groups.py" = ["test_browser_mcp_daemon.py"]
 "test_profile_seed_exit.py" = ["_profile_seed_child.py"]

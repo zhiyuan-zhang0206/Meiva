@@ -29,13 +29,14 @@ import itertools
 import json
 from collections.abc import Iterator
 from dataclasses import dataclass, replace
+from datetime import datetime
 from pathlib import Path
 from typing import Any, Protocol
 
 import websockets
 from websockets.asyncio.client import ClientConnection
 
-from base.clock import SYSTEM_TIMERS, Clock, ClockConfig, Timers
+from base.clock import Timers
 from base.host.atomic_io import write_text_atomic
 from base.log import logger
 from base.paths import run_dir
@@ -249,19 +250,8 @@ def begin_launch(home: Path) -> bool:
 
 # meiva:note
 # Record the browser's open tabs, or None when there is no browser to record.
-async def capture(chrome: Chrome) -> Ledger | None:
-    captured_at = (
-        Clock(
-            ClockConfig(
-                timezone="UTC",
-                authoritative_timezone="UTC",
-                message_timestamp_weekday=False,
-            ),
-            timers=SYSTEM_TIMERS,
-        )
-        .now()
-        .isoformat(timespec="seconds")
-    )
+async def capture(chrome: Chrome, *, now: datetime) -> Ledger | None:
+    captured_at = now.isoformat(timespec="seconds")
     windows = await _extension_layout(chrome)
     if windows is None:
         urls = await _listed_urls(chrome)
@@ -435,8 +425,8 @@ def report(
     *,
     home: Path,
     chrome: Chrome,
+    timers: Timers,
     wait_s: float = REPORT_WAIT_S,
-    timers: Timers = SYSTEM_TIMERS,
 ) -> str | None:
     ledger = read(home)
     if ledger is None or not ledger.report_pending:
@@ -473,9 +463,9 @@ def report(
 #     Called before the services phase: by the time the stop's own `browser` phase
 #     runs, the `meiva-browser` session has already been signalled and Chrome is on
 #     its way out. A stop that cannot record still stops.
-def record_for_stop(*, home: Path, chrome: Chrome) -> str | None:
+def record_for_stop(*, home: Path, chrome: Chrome, now: datetime) -> str | None:
     try:
-        ledger = asyncio.run(capture(chrome))
+        ledger = asyncio.run(capture(chrome, now=now))
     except Exception as exc:
         logger.opt(exception=True).warning(
             "[browser-session] could not record the browser's tabs ({}: {}); "
@@ -513,7 +503,7 @@ class CdpChrome:
         self,
         cdp_port: int,
         *,
-        timers: Timers = SYSTEM_TIMERS,
+        timers: Timers,
     ) -> None:
         self._cdp_port = cdp_port
         self._timers = timers
