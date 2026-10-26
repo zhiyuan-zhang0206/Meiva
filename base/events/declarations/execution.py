@@ -66,6 +66,19 @@ class ExecMemoryGuardKilled(TypedDict):
     pressure: str
 
 
+# meiva:note
+# `exec_memory_guard_skipped` payload — critical pressure found the largest exec at or
+# below the relief floor, so the guard killed nothing and said so.
+class ExecMemoryGuardSkipped(TypedDict):
+    agent_id: int | None
+    pid: int
+    footprint_bytes: int
+    floor_bytes: int
+    running: int
+    pressure: str
+    free_swap_bytes: int
+
+
 class SyntaxFix(TypedDict):
     """`syntax_fix` payload."""
 
@@ -121,6 +134,12 @@ EVENTS: dict[str, EventSpec] = {
         "system memory pressure",
         payload=ExecMemoryGuardKilled,
         tier="anomaly",
+    ),
+    "exec_memory_guard_skipped": telemetry_event(
+        "exec_memory_guard_skipped",
+        "the host memory guard found critical pressure but the largest exec sat at or "
+        "below the relief floor, so it killed nothing",
+        payload=ExecMemoryGuardSkipped,
     ),
     "code": telemetry_event(
         "code", "LLM generated code block", payload=ExecPayload, tier="noise", persist=True

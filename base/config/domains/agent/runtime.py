@@ -68,6 +68,30 @@ class AgentRuntimeSettings(EnvSettings):
         },
     )
 
+    exec_memory_guard_floor_mb: int = Field(
+        default=1024,
+        alias="MEIVA_EXEC_MEMORY_GUARD_FLOOR_MB",
+        description=(
+            "Smallest exec footprint in MiB the host memory guard kills for at critical"
+            " system memory pressure; at or below it the guard records a skip and kills"
+            " nothing. The guard takes down a runaway, it does not free memory: a kill"
+            " below this line costs the agent's work and returns no relief. 2026-10-26"
+            " killed a 0.1 GiB exec while the system stayed critical, and 39% of that"
+            " day's pressure samples were already critical, so the case is ordinary."
+            " Keep it far under what a runaway reaches in seconds (a runaway passes 1 GiB"
+            " long before it threatens the machine), and above the noise of ordinary work."
+        ),
+        ge=0,
+        json_schema_extra={
+            "capability": "agent-runner",
+            "restart_required": "agent",
+            "writable": True,
+            "sensitive": False,
+            "scope": "host",
+            "remote_writable": False,
+        },
+    )
+
     exec_oom_score_adj: int = Field(
         default=800,
         alias="MEIVA_EXEC_OOM_SCORE_ADJ",
