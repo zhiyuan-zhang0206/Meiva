@@ -83,12 +83,11 @@ def test_the_stored_object_is_named_by_the_callers_token(sandbox: Sandbox) -> No
     assert put[3] == f"meiva-check/{'b' * 32}.txt"
 
 
-def test_two_runs_with_different_tokens_never_address_the_same_object(sandbox: Sandbox) -> None:
-    _run_check(sandbox, token="c" * 32)
-    _run_check(sandbox, token="d" * 32)
+def test_an_empty_token_is_refused_before_any_storage_call(sandbox: Sandbox) -> None:
+    with pytest.raises(ValueError, match="non-empty token"):
+        _run_check(sandbox, token="")
 
-    puts = [call.split()[3] for call in sandbox.calls() if call.startswith("st put")]
-    assert puts == [f"meiva-check/{'c' * 32}.txt", f"meiva-check/{'d' * 32}.txt"]
+    assert sandbox.calls() == []
 
 
 def test_the_check_never_pins_the_key(sandbox: Sandbox) -> None:

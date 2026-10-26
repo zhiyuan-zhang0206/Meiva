@@ -184,6 +184,24 @@ def test_check_exits_non_zero_and_names_the_failing_step(
     assert "  ✗ storage: cannot delete" in capsys.readouterr().out
 
 
+def test_check_at_the_door_names_each_run_by_a_token_it_draws(
+    sandbox: Sandbox,
+    command_runtime: CommandRuntime,
+    operator_database: OperatorDatabaseFactory,
+) -> None:
+    for _ in range(2):
+        _at_the_door(
+            ["backup", "walg", "check"],
+            command_runtime,
+            operator_database,
+            walg_config_file=sandbox.config_file,
+        )
+
+    puts = [call.split()[3] for call in sandbox.calls() if call.startswith("st put")]
+    assert len(puts) == 2 and puts[0] != puts[1]
+    assert all(re.fullmatch(r"meiva-check/[0-9a-f]{32}\.txt", name) for name in puts)
+
+
 def test_status_when_off_says_so(
     plane_off: DataPlaneConfig, capsys: pytest.CaptureFixture[str]
 ) -> None:
