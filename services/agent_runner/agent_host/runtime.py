@@ -31,7 +31,7 @@ from base.lm.harness.wiring import bridge_for
 from base.lm.registry import resolve_available_model
 from base.log import logger
 from base.paths import workspace_dir
-from services.agent_runner.agent_host import stored_config
+from services.agent_runner.agent_host.scheduling import stored_config
 
 __all__ = [
     "AgentRuntime",

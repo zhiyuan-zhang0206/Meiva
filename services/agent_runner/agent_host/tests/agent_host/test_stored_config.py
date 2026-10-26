@@ -6,7 +6,10 @@ from decimal import Decimal
 from pathlib import Path
 
 from base.host.proc import run_bounded
-from services.agent_runner.agent_host.stored_config import StoredConfig, config_fingerprint
+from services.agent_runner.agent_host.scheduling.stored_config import (
+    StoredConfig,
+    config_fingerprint,
+)
 
 _CHILD = Path(__file__).with_name("stored_config_import_child.py")
 

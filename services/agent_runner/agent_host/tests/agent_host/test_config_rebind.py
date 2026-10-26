@@ -27,7 +27,7 @@ from services.agent_runner.agent_host.runtime import (
     StallTiming,
 )
 from services.agent_runner.agent_host.scheduling import wake_screening
-from services.agent_runner.agent_host.stored_config import StoredConfig
+from services.agent_runner.agent_host.scheduling.stored_config import StoredConfig
 from services.agent_runner.agent_host.tests.host_policy import configured_policy
 from services.agent_runner.agent_host.tests.runtime.host_support import (
     Build,

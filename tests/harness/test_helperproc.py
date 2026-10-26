@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import ast
 import contextlib
 import inspect
 import json
@@ -9,10 +10,12 @@ import socket
 import subprocess
 import sys
 import tempfile
+import textwrap
 import threading
 from collections.abc import Callable, Generator
 from dataclasses import replace
 from pathlib import Path
+from typing import Any, cast
 
 import psutil
 import pytest
@@ -447,14 +450,71 @@ def test_parent_chain_guard_rejects_an_outside_pid_on_a_real_chain(tmp_path: Pat
         outsider.wait(timeout=10)
 
 
-def test_parent_chain_checks_are_wired_at_host_boot_and_heartbeat() -> None:
+async def test_beat_runs_the_parent_chain_check_before_the_liveness_beat() -> None:
+    from services.agent_runner.agent_host import host_beat
+
+    calls: list[str] = []
+
+    class BrokenChain(BaseException):
+        pass
+
+    class FakeLiveness:
+        def beat(self) -> None:
+            calls.append("beat")
+
+    def broken_chain() -> None:
+        calls.append("chain")
+        raise BrokenChain
+
+    # meiva:note
+    # The beat reads no process identity itself: the host hands it the check that does,
+    # and every tick runs that check before the liveness beat.
+    with pytest.raises(BrokenChain):
+        await host_beat.beat_forever(
+            cast(Any, FakeLiveness()),
+            cast(Any, object()),
+            cast(Any, object()),
+            "runner-a",
+            cast(Any, object()),
+            require_helper_chain=broken_chain,
+            read_alert_seconds=lambda: 30.0,
+        )
+
+    assert calls == ["chain"]
+
+
+def test_host_boot_checks_the_parent_chain_first() -> None:
     from services.agent_runner.agent_host import daemon
 
-    hosted_boot = inspect.getsource(daemon.main)
-    hosted_beat = inspect.getsource(daemon.beat_forever)
+    assert "require_helper_parent_chain()" in inspect.getsource(daemon.main)
 
-    assert "require_helper_parent_chain()" in hosted_boot
-    assert "require_helper_parent_chain()" in hosted_beat
+
+def _beat_construction(function: Callable[..., object]) -> ast.Call:
+    # meiva:note
+    # The `ownership_beat_completion(...)` call inside `function`'s body: the one place that
+    # decides which chain check a running host's beat gets.
+    tree = ast.parse(textwrap.dedent(inspect.getsource(function)))
+    [call] = [
+        node
+        for node in ast.walk(tree)
+        if isinstance(node, ast.Call)
+        and isinstance(node.func, ast.Name)
+        and node.func.id == "ownership_beat_completion"
+    ]
+    return call
+
+
+def test_run_hands_the_real_parent_chain_check_to_the_beat() -> None:
+    from services.agent_runner.agent_host import daemon
+
+    keywords = {keyword.arg: keyword.value for keyword in _beat_construction(daemon.run).keywords}
+    [check] = [value for name, value in keywords.items() if name == "require_helper_chain"]
+
+    assert isinstance(check, ast.Name)
+    # meiva:note
+    # `run` resolves that name from the daemon's own globals: the object `main` also checks
+    # with at boot, never a same-named no-op.
+    assert daemon.run.__globals__[check.id] is daemon.require_helper_parent_chain
 
 
 def test_broken_parent_chain_exits_host_with_software_error() -> None:
