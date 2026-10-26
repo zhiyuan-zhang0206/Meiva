@@ -248,7 +248,7 @@ def test_a_fresh_unit_converges_every_step_that_needs_no_unit_configuration(
     # Seed pgvector too; its injection is covered by the runtime smoke test.
     seeded_ext = rb.vendored_pg_dir() / "share/postgresql/extension"
     seeded_ext.mkdir(parents=True)
-    (seeded_ext / rb._PGVECTOR_SQL).write_text("-- seeded\n")
+    (seeded_ext / rb.PGVECTOR_SQL).write_text("-- seeded\n")
     steps = tuple(
         step
         for step in converge_host.CONVERGE_STEPS

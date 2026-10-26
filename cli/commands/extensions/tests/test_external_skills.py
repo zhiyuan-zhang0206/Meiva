@@ -397,9 +397,16 @@ def test_failed_update_restores_previous_copy_and_cleans_only_its_staging_dir(
     (unrelated / "keep").write_text("untouched\n")
     (source / "SKILL.md").write_text("operator v2\n")
     original_rename = module.rename_no_replace
+    failed = False
 
     def fail_staged_activation(path: Path, destination: Path) -> None:
-        if path.name.startswith(f".{SKILL_NAME}.meiva-stage-") and destination == target:
+        nonlocal failed
+        if (
+            not failed
+            and path.name.startswith(f".{SKILL_NAME}.meiva-stage-")
+            and destination == target
+        ):
+            failed = True
             raise OSError("injected activation failure")
         original_rename(path, destination)
 
@@ -418,7 +425,6 @@ def test_failed_update_restores_previous_copy_and_cleans_only_its_staging_dir(
 
     assert _tree_snapshot(target) == before
     assert (unrelated / "keep").read_text() == "untouched\n"
-    monkeypatch.setattr(module, "rename_no_replace", original_rename)
     _converge(
         _ctx(
             repo,

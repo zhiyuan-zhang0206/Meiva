@@ -334,10 +334,7 @@ _SERVED = Reply(
 
 # meiva:note
 # A remote runner's first start against the gateway at `gateway_url`.
-def _runner_start(monkeypatch: pytest.MonkeyPatch, gateway_url: str, *extra: str) -> Any:
-    # meiva:note
-    # A remote unit joins without the human secret: its capability authenticates.
-    monkeypatch.delenv("MEIVA_CLUSTER_SECRET", raising=False)
+def _runner_start(gateway_url: str, *extra: str) -> Any:
     return _args(
         "--serve-agent-runner",
         "--no-serve-gateway",
@@ -355,7 +352,6 @@ def test_runner_without_a_capability_refuses_before_persisting(
     inputs: identity.IdentityInput,
     site: HomeSite,
     caller: CallerHost,
-    monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
     seed_write_generation: Any,
 ) -> None:
@@ -364,7 +360,7 @@ def test_runner_without_a_capability_refuses_before_persisting(
     from base.host.db_authority import unit
 
     with serving({_BOOTSTRAP: _SERVED}) as served:
-        args = _runner_start(monkeypatch, served.url)
+        args = _runner_start(served.url)
         with pytest.raises(ValueError, match="holds no database capability"):
             prepare_init_identity(args, site, caller)
         assert not (inputs.home / ".env").exists()
@@ -405,12 +401,11 @@ def test_capability_bundle_needs_its_transport_key(
     inputs: identity.IdentityInput,
     site: HomeSite,
     caller: CallerHost,
-    monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
 ) -> None:
     bundle = tmp_path / "unit.bundle"
     bundle.write_text("{}")
-    args = _runner_start(monkeypatch, closed_port_url(), "--db-capability", str(bundle))
+    args = _runner_start(closed_port_url(), "--db-capability", str(bundle))
     with pytest.raises(ValueError, match="MEIVA_DB_CAPABILITY_KEY"):
         prepare_init_identity(args, site, caller)
     assert bundle.exists()

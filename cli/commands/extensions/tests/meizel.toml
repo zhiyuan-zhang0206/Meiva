@@ -18,4 +18,4 @@
 "test_external_skills_adversarial.py#monkeypatch.setattr cli.commands.extensions.external_skills.verify_marker" = 1
 
 [debt.unresolved-patch]
-"test_external_skills.py#monkeypatch.setattr module.rename_no_replace" = 2
+"test_external_skills.py#monkeypatch.setattr module.rename_no_replace" = 1

@@ -155,7 +155,7 @@ def fresh_ops() -> None:
                 raise ConfigurationReachedError
 
     sys.meta_path.insert(0, ConfigurationBoundary())
-    sys.argv = ["agent-ops"]
+    del sys.argv[1:]
     try:
         runpy.run_module("services.agent_runner.agent_ops.daemon", run_name="__main__")
     except ConfigurationReachedError:

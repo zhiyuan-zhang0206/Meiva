@@ -30,6 +30,8 @@ from collections.abc import Callable, Iterable, Iterator, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 
+from meizel import lint_common
+
 _CLIP = 110
 _GENERATED = frozenset({".test_durations"})
 _DOC_SUFFIXES = (".md", ".mdx", ".rst")
@@ -172,15 +174,11 @@ def load_repo(root: Path) -> Repo:
     texts: dict[str, str] = {}
     for name in listing.decode().split("\0"):
         path = root / name
-        if not name or name in _GENERATED or path.is_symlink() or not path.is_file():
+        if not name or name in _GENERATED or path.is_symlink():
             continue
-        data = path.read_bytes()
-        if b"\0" in data[:8192]:
-            continue
-        try:
-            texts[name] = data.decode("utf-8")
-        except UnicodeDecodeError:
-            continue
+        text = lint_common.read_utf8_text(path)
+        if text is not None:
+            texts[name] = text
     return index_repo(texts)
 
 
