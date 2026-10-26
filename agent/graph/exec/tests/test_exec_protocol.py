@@ -43,7 +43,7 @@ from agent.execution.protocol import (
 from base.cluster.machine import MachineIdentityReader
 from base.cluster.machine.tests.identity import machine_identity as machine_identity
 from base.db import Database
-from base.paths import meiva_home
+from base.paths import meiva_home, resolve_meiva_home
 from meiva.tests.fixtures.pin_agent import exec_context
 
 _NOW = datetime(2026, 10, 27, 12, 0, tzinfo=UTC)
@@ -57,7 +57,7 @@ def _exec_envelope_events() -> list[dict[str, Any]]:
     """Read the durable telemetry mirror's exec-envelope rows."""
     from base.paths import logs_dir
 
-    path = logs_dir(home=meiva_home()) / f"events-{datetime.now(UTC):%Y%m%d}.jsonl"
+    path = logs_dir(home=resolve_meiva_home()) / f"events-{datetime.now(UTC):%Y%m%d}.jsonl"
     if not path.exists():
         return []
     events: list[dict[str, Any]] = []

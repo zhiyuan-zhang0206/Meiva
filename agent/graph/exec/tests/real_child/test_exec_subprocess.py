@@ -35,7 +35,7 @@ from base.host.env.dotenv_file import upsert_env
 from base.host.proc import kill_process_tree
 from base.native_process.exec_domain import ExecProcessDomain
 from base.native_process.process_control import SYSTEM_PROCESS_CONTROL
-from base.paths import logs_dir, meiva_home
+from base.paths import logs_dir, resolve_meiva_home
 from meiva.tests.fixtures.pin_agent import exec_context
 
 _AGENT_ID = 424242
@@ -164,7 +164,7 @@ async def test_a_run_prunes_the_stale_results_of_its_own_agent(tmp_path: Path) -
 async def test_exec_child_disables_otlp_after_cluster_env_authority(tmp_path: Path) -> None:
     env_path = Path(os.environ["MEIVA_HOME"]) / ".env"
     original_env = env_path.read_text()
-    log_path = logs_dir(home=meiva_home()) / f"agent-{_AGENT_ID}.log"
+    log_path = logs_dir(home=resolve_meiva_home()) / f"agent-{_AGENT_ID}.log"
     log_offset = log_path.stat().st_size if log_path.exists() else 0
     upsert_env(env_path, {"MEIVA_TELEMETRY_OTLP_ENABLED": "true"})
     try:
