@@ -15,3 +15,6 @@ exports = ["goto.py", "node.py", "tests"]
 
 [roots]
 "_retry.py" = { kinds = ["random"], why = "draw_jitter samples retry backoff jitter" }
+
+[debt.ambient-read]
+"node.py#random agent.graph.llm._retry.draw_jitter" = 1

@@ -3,3 +3,7 @@
 "deep_research_orchestrator.py" = { kinds = ["clock", "random"], why = "Reference orchestrator script stamps runs with UTC time and generates operation keys" }
 "minimal_dispatch.py" = { kinds = ["random"], why = "Reference dispatch script generates idempotency operation keys" }
 "orchestrator_template.py" = { kinds = ["random"], why = "Reference orchestrator template generates idempotency operation keys" }
+
+[debt.ambient-read]
+"deep_research_orchestrator.py#home base.paths.workspace_dir" = 1
+"orchestrator_template.py#home base.paths.workspace_dir" = 1

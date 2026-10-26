@@ -47,6 +47,19 @@
 # The directory is frozen at two: a schedule that needs to run an out-of-repository file comes to
 # the maintainer first and does not take this route again. There is no spare slot to absorb one.
 
+[debt.ambient-read]
+"adversarial-eval-weekly-schedule.py#home base.paths.home.resolve_meiva_home" = 1
+"db-write-stall-watch-schedule.py#home base.paths.home.resolve_meiva_home" = 1
+"debt-sweep-daily-schedule.py#home base.paths.home.resolve_meiva_home" = 1
+"dev-ci-metrics-schedule.py#home base.paths.home.resolve_meiva_home" = 1
+"log-cred-mask-monthly-schedule.py#home base.paths.home.resolve_meiva_home" = 1
+"log-cred-mask-monthly-schedule.py#home base.paths.logs_dir" = 2
+"model-update-tracker-schedule.py#home base.paths.home.resolve_meiva_home" = 1
+"qa-keepalive-schedule.py#home base.paths.home.resolve_meiva_home" = 1
+"sched-dry-import-weekly-schedule.py#home base.paths.logs_dir" = 2
+"self-evolution-daily-schedule.py#home base.paths.home.resolve_meiva_home" = 1
+"self-evolution-weekly-schedule.py#home base.paths.home.resolve_meiva_home" = 1
+
 [debt.restricted-python]
 "log-cred-mask-monthly-schedule.py#python subprocess that runs something other than a literal repository file" = 1
 "self-evolution-daily-schedule.py#python subprocess that runs something other than a literal repository file" = 1

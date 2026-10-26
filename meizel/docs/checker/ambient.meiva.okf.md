@@ -1,7 +1,7 @@
 ---
 type: doc
 title: "meizel/ — Ambient Reads"
-description: "Only a composition root reaches the world a process runs in: the closed vocabulary of ambient kinds, how acquisition points are found, the [state] and [roots] manifest keys, the ambient-read and stale-root codes, and what the analysis cannot see."
+description: "Only a composition root reaches the world a process runs in: the closed vocabulary of ambient kinds, how acquisition points are found, the [state] and [roots] manifest keys, the policy's reader functions, the ambient-read, stale-root and stale-reader codes, and what the analysis cannot see."
 tags:
   - locality
   - tool
@@ -69,6 +69,12 @@ acquires nothing.
 "__init__.py" = ["settings"]
 ```
 
+## Readers
+
+A function that reads the world and hands it on is an acquisition point of its own: the policy
+lists it under `[ambient-readers.<kind>]` by its fully qualified call, and a call to it is a read of
+that kind at the call site ([[meizel/docs/checker/ambient-readers.meiva.okf.md|readers]]).
+
 ## Roots
 
 `[roots]` declares the files that may read the world, each with the kinds it may read and, in the
@@ -101,7 +107,9 @@ pass it down, or lift the decision into a pure function of its inputs.
 
 Only the point of acquisition is recorded; the analysis has no types, so what code does with the
 object after it holds it is not followed (`settings.x.y` after the import is a plain read). A
-name reached through a re-export outside the declared modules, an alias assigned to a variable and
-called later, `Path("~").expanduser()` and a string passed to `getattr` are not seen.
+name reached through a re-export of a `[state]` module, an alias assigned to a variable and
+called later, `Path("~").expanduser()` and a string passed to `getattr` are not seen. A function
+that reads the world for its caller is seen only if the policy lists it as a reader, and a call
+to a function of the same module is not an acquisition.
 
 Parent: [[meizel/docs/checker/checker.meiva.okf.md|checker]].

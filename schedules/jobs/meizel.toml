@@ -21,3 +21,6 @@ exports = ["adversarial_batch.py", "adversarial_scenario.py", "adversarial_worke
 "agent_directory.py" = { kinds = ["random"], why = "Agent directory shell generates a fresh UUID idempotency key when spawning a missing schedule worker" }
 "entry.py" = { kinds = ["settings"], why = "Schedule process entry boots configuration before assembling its runtime" }
 "loop.py" = { kinds = ["clock"], why = "Schedule runner loop polls current UTC time on each iteration" }
+
+[debt.ambient-read]
+"entry.py#home base.paths.home.resolve_meiva_home" = 1

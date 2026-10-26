@@ -9,3 +9,6 @@ exports = ["daemon.py", "tests"]
 
 [roots]
 "daemon.py" = { kinds = ["pid", "settings"], why = "Service or operator process entry boots configuration before composing its resources" }
+
+[debt.ambient-read]
+"daemon.py#home base.paths.meiva_home" = 2

@@ -26,3 +26,7 @@ exports = ["blocked_streak.py", "daemon.py", "engine.py", "host_restart.py", "la
 [roots]
 "daemon.py" = { kinds = ["settings"], why = "Service or operator process entry boots configuration before composing its resources" }
 "runner.py" = { kinds = ["pid", "settings"], why = "Service or operator process entry boots configuration before composing its resources" }
+
+[debt.ambient-read]
+"daemon.py#home base.paths.meiva_home" = 1
+"runner.py#home base.paths.meiva_home" = 1

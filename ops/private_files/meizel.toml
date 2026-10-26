@@ -8,3 +8,6 @@
 "model.py" = "strict"
 "report.py" = "strict"
 "verdicts.py" = "strict"
+
+[debt.ambient-read]
+"__init__.py#home base.paths.home.resolve_meiva_home" = 1

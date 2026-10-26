@@ -20,3 +20,9 @@ exports = ["config.py", "fleet_gateway.py", "fleet_leases.py", "schedules.py", "
 
 "fleet_gateway.py" = { kinds = ["random", "settings"], why = "CLI command composition root boots configuration before assembling command inputs and mints a fresh smoke-test idempotency key" }
 "schedules.py" = { kinds = ["random"], why = "Mints per-request idempotency UUIDs for schedule mutation calls" }
+
+[debt.ambient-read]
+"config.py#home base.paths.home.resolve_meiva_home" = 1
+"fleet_leases.py#home base.paths.home.resolve_meiva_home" = 1
+"schedules.py#settings base.cluster.machine.ambient.gateway_access_from_settings" = 2
+"schedules_verify_read_rows.py#home base.paths.home.resolve_meiva_home" = 1

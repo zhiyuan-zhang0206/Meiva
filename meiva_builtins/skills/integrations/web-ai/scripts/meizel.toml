@@ -11,3 +11,6 @@
 "_dom.py" = { kinds = ["clock"], why = "Browser download helper polls file arrival against monotonic deadline" }
 "_utils.py" = { kinds = ["clock"], why = "Web-AI output helper stamps artifact directories with current UTC time" }
 "webchat.py" = { kinds = ["clock"], why = "Web-AI browser driver polls DOM readiness and streaming idle state against monotonic deadlines" }
+
+[debt.ambient-read]
+"_utils.py#home base.paths.home.resolve_meiva_home" = 1

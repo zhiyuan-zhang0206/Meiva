@@ -624,7 +624,9 @@ judged like any other, because the point is the split itself. A shell executes a
 reads no environment; the only files that read the world are the roots, whatever their mode.
 Only the point where a file takes the value is recorded; what it does with the object afterwards
 is not followed, so a root that hands its `settings` down whole is still a service locator and
-review catches that.
+review catches that. A function in a root that returns what it read (`process_environment()`,
+`meiva_home()`, `RpcClient.system()`) does not move the read into the root: the policy lists it
+as a reader, and a call to it from a file that is not a root is an `ambient-read` of its kind.
 
 A dependency is a required parameter. A default (`client: Client = Client()`), a
 module-level instance, or a function that builds its own client when none is passed puts

@@ -13,5 +13,6 @@ exports = ["catalog.py", "checklist.py", "gate.py", "probe.py", "triggers.py"]
 
 [debt.ambient-read]
 "gate.py#clock datetime.datetime.now" = 1
+"gate.py#home base.paths.meiva_home" = 1
 "probe.py#clock time.monotonic" = 1
 "triggers.py#clock time.monotonic" = 1

@@ -20,3 +20,7 @@ exports = ["agents", "cluster", "converge", "data_plane", "duration.py", "extens
 "__init__.py" = "strict"
 "duration.py" = "strict"
 "probe_report.py" = "strict"
+
+[debt.ambient-read]
+"_repo.py#home base.paths.meiva_home" = 1
+"_repo.py#settings base.cluster.machine.ambient.gateway_access_from_settings" = 1

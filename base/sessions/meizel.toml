@@ -16,8 +16,18 @@ exports = ["backend.py", "coding_session_owner.py", "coding_session_owner_record
 "provenance.py" = "strict"
 
 [debt.ambient-read]
+"backend.py#home base.paths.logs_dir" = 1
+"backend.py#home base.paths.meiva_home" = 1
 "coding_session_owner.py#clock datetime.datetime.now" = 1
 "coding_session_owner.py#pid os.getuid" = 1
 "coding_session_owner.py#random uuid.uuid4" = 1
+"coding_session_owner_record.py#home base.paths.meiva_home" = 2
+"helper_chain_guard.py#environ base.native_process.child_env.inherited_process_env" = 1
+"helperproc.py#home base.paths.logs_dir" = 2
+"helperproc.py#home base.paths.meiva_home" = 2
 "helperproc.py#settings base.config.settings" = 1
+"posixproc.py#home base.paths.logs_dir" = 2
+"posixproc.py#home base.paths.meiva_home" = 1
+"record.py#home base.paths.meiva_home" = 1
 "tool_capabilities.py#clock datetime.datetime.now" = 1
+"tool_capabilities.py#home base.paths.meiva_home" = 1

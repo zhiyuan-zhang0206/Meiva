@@ -10,3 +10,6 @@ exports = ["gate.py", "notes.py", "process.py", "relay.py"]
 "gate.py" = "strict"
 "notes.py" = "strict"
 "relay.py" = "strict"
+
+[debt.ambient-read]
+"process.py#environ base.host.env.registry.process_environment" = 1

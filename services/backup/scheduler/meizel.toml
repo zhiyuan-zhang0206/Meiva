@@ -12,3 +12,8 @@ exports = ["daemon.py", "settings.py", "worker.py"]
 [roots]
 "daemon.py" = { kinds = ["clock", "settings"], why = "Service or operator process entry boots configuration before composing its resources" }
 "worker.py" = { kinds = ["settings"], why = "Service or operator process entry boots configuration before composing its resources" }
+
+[debt.ambient-read]
+"daemon.py#environ base.native_process.child_env.inherited_process_env" = 1
+"daemon.py#home base.paths.meiva_home" = 1
+"worker.py#home base.paths.meiva_home" = 1

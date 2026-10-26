@@ -19,6 +19,12 @@ exports = ["config.py", "tests"]
 "__init__.py" = { kinds = ["clock"], why = "The meiva.mcps SDK facade (_source) reads the wall-clock timestamp once when constructing a ServerProxy's ToolSource for DiskCache TTL evaluation" }
 "_daemon.py" = { kinds = ["pid", "settings"], why = "daemon_config_from_process() is the MCP daemon process entry point composition root, reading settings and process PID once at startup" }
 
+[debt.ambient-read]
+"__init__.py#home base.paths.meiva_home" = 1
+"_daemon.py#environ base.host.system.probes.display_available" = 1
+"_daemon.py#home base.paths.meiva_home" = 1
+"_oauth.py#home base.paths.meiva_home" = 1
+
 [debt.third-party-patch]
 "_oauth.py#assignment mcp.client.auth.oauth2.OAuthContext.prepare_token_auth" = 1
 "_oauth.py#assignment mcp.client.auth.oauth2.validate_metadata_issuer" = 1

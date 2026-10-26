@@ -7,6 +7,7 @@ from functools import cache
 from pathlib import Path
 from typing import TypeGuard, assert_never
 
+from meizel.graph.model import AmbientKind
 from meizel.graph.universe import GitRepo
 
 __all__ = [
@@ -30,6 +31,7 @@ NAMES = "names"  # a list of names
 # rule -> section -> shape. A rule listed in `PER_NAME` has one reasons table per name it governs.
 RULES: dict[str, dict[str, str]] = {
     "ambient": {"settings": NAMES, "db": NAMES, "endpoints": NAMES, "bus": NAMES},
+    "ambient-readers": dict.fromkeys((kind.value for kind in AmbientKind), REASONS),
     "ambient-state": {
         "sink-callees": NAMES,
         "sink-callee-suffixes": NAMES,

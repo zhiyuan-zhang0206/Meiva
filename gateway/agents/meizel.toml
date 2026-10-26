@@ -17,3 +17,6 @@ exports = ["creation.py", "eval_guard.py", "history", "inbound_provenance.py", "
 
 [roots]
 "launch_retry.py" = { kinds = ["random"], why = "retry_launch mints a fresh UUID attempt id for each launch retry request" }
+
+[debt.ambient-read]
+"launch_retry.py#settings ops.cluster.rpc.dispatch_to_machine" = 1

@@ -5,7 +5,7 @@ from __future__ import annotations
 import os
 import re
 import subprocess
-from collections.abc import Generator
+from collections.abc import Collection, Generator
 from contextlib import contextmanager, suppress
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -186,6 +186,23 @@ class GitRepo:
             for p in done.stdout.splitlines()
             if p.endswith(suffixes) and not p.startswith("meizel/")
         )
+
+    def grep_words(self, words: Collection[str], suffix: str) -> list[str]:
+        # meiva:note
+        # Lists tracked files with the given suffix that contain any of the words as a whole word,
+        # via git grep with a fixed argv and without invoking a shell.
+        if not words:
+            return []
+        patterns = [arg for word in sorted(words) for arg in ("-e", word)]
+        done = subprocess.run(  # noqa: S603
+            ["git", "-C", str(self.root), "grep", "-l", "-w", "-F", *patterns, "--", f"*{suffix}"],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        if done.returncode not in (0, 1):
+            raise MeizelError(f"git grep failed: {done.stderr.strip()}")
+        return sorted(done.stdout.splitlines())
 
     @contextmanager
     def checkout(self, ref: str) -> Generator[Path]:

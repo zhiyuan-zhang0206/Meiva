@@ -90,7 +90,7 @@ def symbol_debt(
 ) -> Found:
     """The violations inside `name` in this version of `path`, counted per `(code, owner, key)`."""
     policy, _ = load_policy(universe)
-    scan = scan_source(universe, path, source, sources_from(manifests, policy))
+    scan = scan_source(universe, path, source, sources_from(manifests, policy, universe))
     span = _source_span(scan, source, name)
     if span is None:
         raise MeizelError(f"{path} defines no top-level function or class {name}")

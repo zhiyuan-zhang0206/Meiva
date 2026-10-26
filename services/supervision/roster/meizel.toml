@@ -19,3 +19,8 @@ exports = ["__main__.py", "composition.py", "healthz.py", "plugin_services.py", 
 "composition.py" = ["settings"]
 "healthz.py" = ["endpoints"]
 "spec.py" = ["settings"]
+
+[debt.ambient-read]
+"composition.py#home base.paths.meiva_home" = 7
+"spec.py#environ base.host.env.registry.process_environment" = 1
+"spec.py#home base.paths.meiva_home" = 3

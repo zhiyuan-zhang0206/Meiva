@@ -17,3 +17,6 @@ exports = ["neighbors.py", "okf_graph.py", "router.py", "schemas.py"]
 "__init__.py" = "strict"
 "_coverage.py" = "strict"
 "_heartbeat.py" = "strict"
+
+[debt.ambient-read]
+"router.py#settings ops.cluster.rpc.dispatch_to_machine" = 1

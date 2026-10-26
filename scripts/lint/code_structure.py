@@ -303,7 +303,7 @@ def _load_type_context(argv: list[str], repo_root: Path) -> tuple[_TypeContext |
     return (
         _TypeContext(
             universe,
-            sources_from(manifests, policy),
+            sources_from(manifests, policy, universe),
             frozenset(policy.reasons("type-checking", "files")),
             type_packages,
             set(_iter_py_files(roots)),

@@ -8,4 +8,6 @@ exports = ["api.py", "delivery.py", "ledger.py", "model.py", "tests", "unit.py"]
 "unit.py" = ["api.py", "delivery.py", "ledger.py", "model.py"]
 
 [debt.ambient-read]
+"ledger.py#pid base.paths.private_dir.is_foreign_owned" = 1
 "unit.py#clock time.time" = 1
+"unit.py#random base.host.net.auth.random_bytes" = 1
