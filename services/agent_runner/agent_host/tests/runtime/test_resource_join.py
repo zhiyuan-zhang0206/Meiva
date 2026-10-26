@@ -152,10 +152,11 @@ def exercise_unfinished_main() -> None:
         database: Callable[[], Database],
         machine: MachineIdentityReader,
         home: Path,
+        user_home: Path,
         clients: ClientSet,
         on_clients_owned: Callable[[], None],
     ) -> None:
-        _ = (config, machine)
+        _ = (config, machine, user_home)
         assert home == Path(os.environ["MEIVA_HOME"])
         on_clients_owned()
         marker = Path(os.environ["RESOURCE_JOIN_MARKER"])
