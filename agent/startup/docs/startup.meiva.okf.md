@@ -44,7 +44,8 @@ extensions is a single indexed query returning no rows.
 Agent scope runs once per agent, cached on the agent's stored configuration.
 `boot_agent_scope()` creates the agent's workspace, seeds an empty `to_user.md`
 when the file is missing, sends the one-time desktop-permission notice (the text is
-`permission_notice.py`'s pure decision over the claimed faults), and
+`permission_notice.py`'s pure decision over the claimed faults; its idempotency key is
+drawn by the host and passed in), and
 builds the chat model for the agent's model, reasoning effort and thinking
 budget. The workspace pre-create is unconditional — the folder is the
 relative-path base for `meiva.files` / `meiva.shell.run` even when the prompt section

@@ -19,13 +19,17 @@ reducers.
 The real operation is synchronous until it returns the backend awaitable: inner
 execution limits are read before the outer shield timeout. State serialization
 and those reads occur without suspension; serialization now precedes the inner
-reads. No live configuration is frozen at graph construction; the only value read then
-is the process's `ParentFacts`.
+reads. No live configuration is frozen at graph construction; the only values handed in then
+are the process's `ParentFacts` and the generator the envelope identities are drawn from.
 
 The production adapter delegates to the existing subprocess backend. It is a frozen
 value holding the `ParentFacts` of this process (environment, cwd, interpreter,
-checkout, editable roots), which `process.read_parent_facts` reads once when the
-graph is built (`_build.py`). After editable-install admission and writing the
+checkout, editable roots), which the agent host's root reads once with
+`process.read_parent_facts` and passes to `build_graph`, and the `random.Random` it draws
+each call's request and result envelope identities from (`req-<uuid>.json`,
+`res-<uuid>.json`; the root builds a cryptographically secure one, a test a seeded one).
+Before it writes a request, `run_in_subprocess` prunes the agent's stale result files
+against its context's clock (`protocol.prune_stale`). After editable-install admission and writing the
 request envelope, `run_in_subprocess` connects to the per-home `exec-host` service
 over `<home>/run/exec-host.sock` (`_remote.py` / `base.sessions.exec_host`) when
 available, streaming output frames into `StreamingTextIO`, forwarding cancellation

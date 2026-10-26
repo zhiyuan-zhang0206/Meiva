@@ -31,7 +31,9 @@ cannot tune a limit away). No handler reads `Path.home()` or an app-state resolv
 decisions that need no effect, the manifest fingerprint and the object names (or the suffix
 refusal), are `upload_plan.py`, strict and asserted by value; `batches.py` is the shell:
 `claim_batch` commits the receiving identity, `publish_files` links the objects, and
-`save_keyed_batch` runs both and commits the receipt.
+`save_keyed_batch` runs both and commits the receipt. The batch id and each attempt's
+staging id are values: the router draws them from the config's `rng` and hands them to
+`save_keyed_batch`, which passes them to the two steps.
 
 Files use flat `meiva-upload-<uuid>-<ordinal><suffix>` names; original names remain
 display metadata. Suffixes preserve image MIME consumers and must fit 128 UTF-8
