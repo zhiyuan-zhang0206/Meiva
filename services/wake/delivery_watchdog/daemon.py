@@ -2,6 +2,7 @@
 
 import asyncio
 import logging
+import random
 import signal
 import sys
 import time
@@ -53,6 +54,13 @@ from services.wake.delivery_watchdog.stranded_wake import (
 )
 
 _log = logging.getLogger("services.wake.delivery_watchdog.daemon")
+
+
+# meiva:note
+# The process's random generator, built once at its entry for the event bus's retry jitter. Jitter
+# is not a secret, so it is a plain `random.Random`.
+def _new_rng() -> random.Random:
+    return random.Random()  # noqa: S311
 
 
 def _endpoint(config: ConfigBoot, *, runtime: Path) -> ServiceEndpoint:
@@ -349,7 +357,7 @@ async def run(
 
     db = database()
     pool = db.pool(max_size=_POOL_MAX_SIZE)
-    bus = EventBus.from_settings()
+    bus = EventBus.from_settings(rng=_new_rng())
     try:
         # meiva:note
         # One TaskGroup owns both resident loops, each with its own progress tracker so

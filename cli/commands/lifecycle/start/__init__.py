@@ -344,7 +344,10 @@ def _report_browser_session(start: _Start) -> None:
     with start_trace.phase("browser session"):
         restored = session_restore.report(
             home=start.command.home,
-            chrome=session_restore.CdpChrome(start.config.browser_cdp_port),
+            chrome=session_restore.CdpChrome(
+                start.config.browser_cdp_port, timers=start.command.timers
+            ),
+            timers=start.command.timers,
         )
         if restored is not None:
             print(f"  {restored}")

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import ast
 import copy
 import json
 import re
@@ -93,6 +94,24 @@ def test_the_guest_scripts_pin_the_pieces_the_experiment_found_necessary() -> No
     assert tart_golden.FINALIZE.splitlines()[-1] == 'rm -rf "$HOME/.meiva/source"'
     assert "sqlite3" in tart_golden.VERIFY and "-readonly" in tart_golden.VERIFY
     assert not re.search(r"\b(insert|update|delete)\b", tart_golden.VERIFY, re.I)
+
+
+# meiva:note
+# `VERIFY_PY` runs inside the guest VM as a string, so meizel and the checks over the repository's AST never see it. This parses it and requires every helper-directory lookup to name the home it resolved itself.
+def test_the_guest_verify_script_names_the_home_of_every_helper_lookup() -> None:
+    tree = ast.parse(tart_golden.VERIFY_PY.replace("@TCC_DB@", "db").replace("@BUNDLE_ID@", "id"))
+    lookups = [
+        node
+        for node in ast.walk(tree)
+        if isinstance(node, ast.Call)
+        and isinstance(node.func, ast.Name)
+        and node.func.id == "permissions_helper_app_dir"
+    ]
+    assert lookups
+    for call in lookups:
+        assert [keyword.arg for keyword in call.keywords] == ["home"]
+        assert not call.args
+    assert "from base.paths.home import resolve_meiva_home" in tart_golden.VERIFY_PY
 
 
 def test_a_fully_granted_helper_passes() -> None:

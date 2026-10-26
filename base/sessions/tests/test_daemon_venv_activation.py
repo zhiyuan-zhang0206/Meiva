@@ -41,13 +41,14 @@ def _path0(env: dict[str, str]) -> str:
 
 def test_launch_path_activates_venv(process_config: object, unit_home: Path) -> None:
     del process_config
+    from base.clock import SYSTEM_TIMERS
     from base.host.env.registry import process_environment
     from base.native_process.os_platform import raise_fd_limit
     from base.sessions.backend import get_backend
     from base.sessions.env_forwarding import forward_env_dict
 
     raise_fd_limit(65536)
-    backend = get_backend()
+    backend = get_backend(timers=SYSTEM_TIMERS)
     out = unit_home / "launch_env.txt"
     assert backend.new_session(
         "venvcheck-launch",

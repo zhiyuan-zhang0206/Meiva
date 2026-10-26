@@ -18,14 +18,14 @@ from base.db.code_version_gate import ProcessDbGate
 from base.packages.tests.lm.providers.provider_plugin_support import (
     provider_plugin as provider_plugin,
 )
-from base.paths import plugins_dir
+from base.paths import meiva_home, plugins_dir
 from tests.e2e._ports import FRONTEND_URL, GATEWAY_URL
 
 
 @pytest.fixture
 def scenario_env(truncated_db: None, provider_plugin: Callable[..., None]) -> None:
     provider_plugin(dir_name="z_broken_provider")
-    (plugins_dir() / "z_broken_provider" / "provider.py").write_text(
+    (plugins_dir(home=meiva_home()) / "z_broken_provider" / "provider.py").write_text(
         'raise RuntimeError("private provider startup fault")\n'
     )
 

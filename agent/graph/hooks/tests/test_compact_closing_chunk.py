@@ -8,6 +8,7 @@ from psycopg_pool import AsyncConnectionPool
 from agent.graph.hooks import compact
 from agent.state import AgentState
 from agent.state_channels import CompactState
+from base.clock import SYSTEM_TIMERS
 from base.log.tests.log_records import LogRecords
 
 _AGENT = 9
@@ -59,7 +60,9 @@ async def test_stamp_enqueues_the_closing_chunk_against_the_stamped_checkpoint(
         messages=_request(8), compact=CompactState(version=1, understanding_cut_index=3)
     )
 
-    await compact.stamp_compact_boundary(aops_pool, _AGENT, state, understanding_enabled=True)
+    await compact.stamp_compact_boundary(
+        aops_pool, _AGENT, state, understanding_enabled=True, timers=SYSTEM_TIMERS
+    )
 
     assert await _jobs(aops_pool) == [(_AGENT, 1, 3, 8, "m7", "cp-7")]
     assert await _stamped(aops_pool, "cp-7")
@@ -70,7 +73,11 @@ async def test_a_thread_without_a_checkpoint_stamps_nothing_and_enqueues_no_clos
     db_url: str, aops_pool: AsyncConnectionPool
 ) -> None:
     await compact.stamp_compact_boundary(
-        aops_pool, _AGENT, AgentState(messages=_request(8)), understanding_enabled=True
+        aops_pool,
+        _AGENT,
+        AgentState(messages=_request(8)),
+        understanding_enabled=True,
+        timers=SYSTEM_TIMERS,
     )
 
     assert await _jobs(aops_pool) == []
@@ -82,7 +89,11 @@ async def test_a_stamp_that_fails_is_reported_and_enqueues_no_closing_chunk(
     unopened: AsyncConnectionPool = AsyncConnectionPool(db_url, open=False)
 
     await compact.stamp_compact_boundary(
-        unopened, _AGENT, AgentState(messages=_request(8)), understanding_enabled=True
+        unopened,
+        _AGENT,
+        AgentState(messages=_request(8)),
+        understanding_enabled=True,
+        timers=SYSTEM_TIMERS,
     )
 
     assert any("compact boundary stamp failed" in record["message"] for record in loguru_records)
@@ -96,7 +107,9 @@ async def test_with_understanding_off_the_boundary_is_stamped_and_no_chunk_is_en
         messages=_request(8), compact=CompactState(version=1, understanding_cut_index=3)
     )
 
-    await compact.stamp_compact_boundary(aops_pool, _AGENT, state, understanding_enabled=False)
+    await compact.stamp_compact_boundary(
+        aops_pool, _AGENT, state, understanding_enabled=False, timers=SYSTEM_TIMERS
+    )
 
     assert await _jobs(aops_pool) == []
     assert await _stamped(aops_pool, "cp-7")
@@ -107,7 +120,9 @@ async def test_without_a_state_the_boundary_is_stamped_and_nothing_is_enqueued(
 ) -> None:
     await _checkpoint(aops_pool, "cp-7")
 
-    await compact.stamp_compact_boundary(aops_pool, _AGENT, None, understanding_enabled=True)
+    await compact.stamp_compact_boundary(
+        aops_pool, _AGENT, None, understanding_enabled=True, timers=SYSTEM_TIMERS
+    )
 
     assert await _jobs(aops_pool) == []
     assert await _stamped(aops_pool, "cp-7")

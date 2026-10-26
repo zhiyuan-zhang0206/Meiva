@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import random
+import re
 from pathlib import Path
 
 import pytest
@@ -8,23 +9,24 @@ import pytest
 from services.backup.artifact import passphrase
 
 
-# meiva:note
-# A generator with a fixed seed, so a test sees the same draw on every run.
-def _rng(seed: int) -> random.Random:
-    return random.Random(seed)  # noqa: S311
+def _minted() -> str:
+    return passphrase.mint(random.SystemRandom())
 
 
-def test_a_minted_passphrase_is_64_lowercase_hex_characters_that_follow_the_generator() -> None:
-    first = passphrase.mint(_rng(1))
+def test_a_minted_passphrase_is_64_lowercase_hex_characters_of_256_bits() -> None:
+    rng = random.SystemRandom()
+    draws = [passphrase.mint(rng) for _ in range(8)]
 
-    assert len(first) == 64 and first == first.lower()
-    int(first, 16)
-    assert passphrase.mint(_rng(1)) == first
-    assert passphrase.mint(_rng(2)) != first
+    assert all(re.fullmatch(r"[0-9a-f]{64}", draw) for draw in draws)
+    assert len(set(draws)) == len(draws)
+    # meiva:note
+    # A 128-bit draw padded to 64 digits would never exceed 128 bits; 256 random bits
+    # exceed it except with probability 2**-128 per draw.
+    assert any(int(draw, 16).bit_length() > 128 for draw in draws)
 
 
 def test_birth_pins_the_value_it_is_given(tmp_path: Path) -> None:
-    value = passphrase.mint(_rng(3))
+    value = _minted()
 
     passphrase.ensure_pinned(tmp_path, passphrase=value)
 
@@ -32,7 +34,7 @@ def test_birth_pins_the_value_it_is_given(tmp_path: Path) -> None:
 
 
 def test_an_interrupted_birth_keeps_the_passphrase_it_already_pinned(tmp_path: Path) -> None:
-    first, second = passphrase.mint(_rng(4)), passphrase.mint(_rng(5))
+    first, second = _minted(), _minted()
     passphrase.ensure_pinned(tmp_path, passphrase=first)
 
     passphrase.ensure_pinned(tmp_path, passphrase=second)
@@ -45,3 +47,16 @@ def test_birth_refuses_a_value_that_is_not_a_passphrase(tmp_path: Path) -> None:
 
     with pytest.raises(passphrase.PassphrasePinError, match="64 lowercase hex"):
         passphrase.ensure_pinned(tmp_path, passphrase=too_short)
+
+
+def test_birth_refuses_a_malformed_value_even_when_a_passphrase_is_already_pinned(
+    tmp_path: Path,
+) -> None:
+    pinned = _minted()
+    passphrase.ensure_pinned(tmp_path, passphrase=pinned)
+    too_short = "short"
+
+    with pytest.raises(passphrase.PassphrasePinError, match="64 lowercase hex"):
+        passphrase.ensure_pinned(tmp_path, passphrase=too_short)
+
+    assert passphrase.resolve(tmp_path) == pinned

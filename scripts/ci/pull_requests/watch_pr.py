@@ -59,6 +59,7 @@ from base.clock import Clock
 from base.config.domains.storage.data_plane import AgentProfileOwnerDbUrlRefusedError
 from base.host.system.hostport import Host
 from base.paths import workspace_dir
+from base.paths.home import resolve_meiva_home
 
 # ── Configure before launching ───────────────────────────────────────────────
 REPO_ROOT = ""  # e.g. "/home/user/meiva/.worktrees/meiva-1234-task" — the worktree
@@ -73,7 +74,7 @@ WATCHER_ID = 0  # agent to wake (meiva.self.AGENT_ID of the launching agent)
 VERDICT_FILE = f"ci-verdict-{PR_NUMBER}.txt"  # relative — `meiva.files` resolves
 # it in the launching agent's workspace: the settled verdict is persisted
 # there before any delivery attempt and stays behind after a failed delivery
-VERDICT_PATH = (workspace_dir(WATCHER_ID) / VERDICT_FILE).resolve()
+VERDICT_PATH = (workspace_dir(WATCHER_ID, home=resolve_meiva_home()) / VERDICT_FILE).resolve()
 
 os.chdir(REPO_ROOT)
 sys.path.insert(0, CI_UTILS)

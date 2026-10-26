@@ -18,7 +18,7 @@ from meizel.contracts.manifest import Manifest, effective_purity
 from meizel.contracts.policy import POLICY, Policy
 from meizel.graph.imports import Scope, collect_scope
 from meizel.graph.model import Acquisition, AmbientKind, Code, DebtKey, Diagnostic, Sources
-from meizel.graph.universe import GitRepo, Universe
+from meizel.graph.universe import Universe
 from meizel.language.scan import FileScan, module_bindings
 from meizel.lint_common import is_test_path
 
@@ -312,13 +312,12 @@ def _spread(universe: Universe, candidates: Iterable[str], exported: _Spellings)
 # of the names are read, so the cost follows the readers, not the repository.
 def _followed(universe: Universe, readers: Mapping[str, AmbientKind]) -> dict[str, AmbientKind]:
     exported = _origins(universe, readers)
-    repo = GitRepo(universe.root)
     seen: set[str] = set()
     candidates: set[str] = set()
     for _ in range(_REEXPORT_HOPS):
         tokens = {origin.rpartition(".")[2] for origin in exported} - seen
         seen |= tokens
-        candidates.update(p for p in repo.grep_words(tokens, ".py") if not is_test_path(p))
+        candidates.update(p for p in universe.grep_words(tokens, ".py") if not is_test_path(p))
         if not _spread(universe, candidates, exported):
             break
     return {

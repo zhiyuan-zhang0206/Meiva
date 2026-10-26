@@ -9,6 +9,7 @@ import psycopg
 import pytest
 from fastapi.testclient import TestClient
 
+from base.clock.tests.seeded_rng import seeded_rng
 from base.cluster.machine import MachineIdentityReader
 from base.cluster.machine.tests.identity import machine_identity as machine_identity
 from base.config import Settings
@@ -37,7 +38,7 @@ def spawn_agent(
 
     agent_id, _, _prompt_id, _attempt_id = create_agent_row(
         Database.from_settings(gate=database_gate),
-        EventBus.from_settings(),
+        EventBus.from_settings(rng=seeded_rng()),
         machine=local_machine.name(),
         catalog=build_model_catalog(),
         authority=config_authority,

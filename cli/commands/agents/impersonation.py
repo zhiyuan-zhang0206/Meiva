@@ -256,7 +256,7 @@ def _request(
     runtime = config.ensure_eager()
     response = sessions.request(
         database_factory(),
-        EventBus.from_settings(),
+        EventBus.from_settings(rng=args.runtime.rng),
         args.agent_id,
         authority=ConfigAuthority(
             runtime=runtime,
@@ -301,7 +301,7 @@ def _dispatch(
     if command == "request":
         return _request(args, database_factory=database_factory, env=env)
     db = database_factory()
-    bus = EventBus.from_settings()
+    bus = EventBus.from_settings(rng=args.runtime.rng)
     if command == "list":
         _emit(sessions.list_sessions(db, args.agent_id, before=args.before, limit=args.limit))
         return 0

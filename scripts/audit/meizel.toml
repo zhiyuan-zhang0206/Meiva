@@ -4,22 +4,29 @@ exports = ["branch_protection.py", "module_moves.py"]
 "tests" = ["branch_protection.py", "impact_census.py", "module_moves.py", "schema_drift.py", "sdk_usage.py", "where_used.py", "where_used_scan.py"]
 "where_used.py" = ["module_moves.py", "where_used_scan.py"]
 
-[purity]
-"." = "strict-to-be"
-"module_moves.py" = "strict"
-"sdk_usage.py" = "strict"
-"where_used.py" = "strict"
-"where_used_scan.py" = "strict"
-
 [external]
 "module_moves.py" = "imports the old and new module names the operator passes on the command line"
 
 [roots]
 "schema_drift.py" = { kinds = ["settings"], why = "CLI schema drift audit falls back to the deployment database URL from settings when --dsn is omitted" }
 
+[purity]
+"." = "strict-to-be"
+"module_moves.py" = "strict-to-be"
+"sdk_usage.py" = "strict"
+"where_used.py" = "strict-to-be"
+"where_used_scan.py" = "strict-to-be"
+
 [debt.impure-call]
+"branch_protection.py#Path.resolve" = 1
 "branch_protection.py#import subprocess" = 1
+"impact_census.py#Path.resolve" = 1
+"module_moves.py#Path.is_symlink" = 1
+"module_moves.py#Path.readlink" = 1
+"module_moves.py#Path.resolve" = 3
 "schema_drift.py#import psycopg" = 1
+"where_used.py#Path.resolve" = 4
+"where_used_scan.py#Path.is_symlink" = 1
 
 [debt.impure-edge]
 "impact_census.py#scripts/ci/test_impact.py" = 1

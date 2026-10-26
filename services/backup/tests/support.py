@@ -7,6 +7,7 @@
 from __future__ import annotations
 
 import os
+import random
 import time
 from collections.abc import Generator
 from contextlib import contextmanager
@@ -23,7 +24,7 @@ from services.backup.layout import BackupTree
 # The backup tree of a home of this test's own, with its passphrase pinned the way a
 # gateway birth pins it. Nothing is shared with the session home.
 def minted_tree(home: Path) -> BackupTree:
-    passphrase.ensure_pinned(home, passphrase="ab" * 32)
+    passphrase.ensure_pinned(home, passphrase=passphrase.mint(random.SystemRandom()))
     return BackupTree(home)
 
 

@@ -1,4 +1,7 @@
 exports = ["feed.py"]
 
 [purity]
-"feed.py" = "strict"
+"feed.py" = "strict-to-be"
+
+[debt.impure-call]
+"feed.py#Path.resolve" = 1

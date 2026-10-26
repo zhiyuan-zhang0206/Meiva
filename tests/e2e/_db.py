@@ -10,6 +10,7 @@ from psycopg import sql
 
 from base.agents.history.checkpoint_postgres_walks import HistoryPostgresSaver as PostgresSaver
 from base.agents.history.delta_read_compat import reconstruct_delta_messages
+from base.clock.tests.seeded_rng import seeded_rng
 from base.config import settings
 from base.db import Database
 from base.sessions.tests.poll_until import poll_until
@@ -71,7 +72,7 @@ def enqueue_compact_history_fixture(agent_id: int, *, database: Database) -> int
 
     with psycopg.connect(settings.data_plane.db_url) as conn:
         return insert_compact_request_inbound(
-            conn, agent_id, database=database, bus=EventBus.from_settings()
+            conn, agent_id, database=database, bus=EventBus.from_settings(rng=seeded_rng())
         )
 
 

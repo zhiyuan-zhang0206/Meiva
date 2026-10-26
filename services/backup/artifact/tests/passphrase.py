@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import random
+
 import pytest
 
 from base.paths import meiva_home
@@ -12,4 +14,4 @@ from services.backup.artifact import passphrase
 def _backup_passphrase_pinned() -> None:
     """The suite home as a gateway birth leaves it: its logical-backup
     passphrase pinned (backups never derive a key from the cluster secret)."""
-    passphrase.ensure_pinned(meiva_home(), passphrase="ab" * 32)
+    passphrase.ensure_pinned(meiva_home(), passphrase=passphrase.mint(random.SystemRandom()))

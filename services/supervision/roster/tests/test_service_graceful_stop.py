@@ -8,6 +8,7 @@ from pathlib import Path
 import psutil
 import pytest
 
+from base.clock import SYSTEM_TIMERS
 from base.sessions import posixproc
 from base.sessions.backend import PosixProcSessionBackend
 from base.sessions.env_forwarding import exec_into
@@ -48,7 +49,7 @@ def _wait_for(path: Path, timeout: float = 20.0) -> bool:
 
 
 def _launch(name: str, script: Path, tmp_path: Path) -> None:
-    ok = PosixProcSessionBackend().new_session(
+    ok = PosixProcSessionBackend(SYSTEM_TIMERS).new_session(
         name, f"{sys.executable} {script}", tmp_path, env=dict(os.environ)
     )
     assert ok is True
@@ -81,7 +82,7 @@ def test_login_shell_session_records_the_daemon_not_a_wrapper_shell(
         assert not shells, f"a shell survives under the daemon: {shells} (all: {descendants})"
         assert posixproc.has_session("meiva-test-shape")
     finally:
-        posixproc.kill_session("meiva-test-shape", graceful=False)
+        posixproc.kill_session("meiva-test-shape", graceful=False, timers=SYSTEM_TIMERS)
 
 
 def test_graceful_signal_reaches_the_daemon_and_runs_its_cleanup(
@@ -102,7 +103,7 @@ def test_graceful_signal_reaches_the_daemon_and_runs_its_cleanup(
         elapsed = time.monotonic() - t0
         assert elapsed < 5.0, f"daemon took {elapsed:.1f}s to react to SIGTERM"
     finally:
-        posixproc.kill_session("meiva-test-graceful", graceful=False)
+        posixproc.kill_session("meiva-test-graceful", graceful=False, timers=SYSTEM_TIMERS)
 
 
 def test_kill_session_reports_forced_when_the_daemon_ignores_sigterm(
@@ -115,11 +116,13 @@ def test_kill_session_reports_forced_when_the_daemon_ignores_sigterm(
     _launch("meiva-test-deaf", script, tmp_path)
     try:
         assert _wait_for(started), "daemon never started"
-        ok, mode = posixproc.kill_session("meiva-test-deaf", graceful=True, timeout=1.0)
+        ok, mode = posixproc.kill_session(
+            "meiva-test-deaf", graceful=True, timeout=1.0, timers=SYSTEM_TIMERS
+        )
         assert ok is True, "the SIGKILL fallback must still confirm the process is gone"
         assert mode == "forced"
     finally:
-        posixproc.kill_session("meiva-test-deaf", graceful=False)
+        posixproc.kill_session("meiva-test-deaf", graceful=False, timers=SYSTEM_TIMERS)
 
 
 def test_install_graceful_shutdown_raises_keyboardinterrupt():
@@ -198,7 +201,7 @@ def test_orchestration_session_keeps_its_wrapper_shell(tmp_path: Path, unit_home
     log = tmp_path / "log"
     script = tmp_path / "daemon.py"
     script.write_text(_DAEMON.format(started=str(started), marker=str(marker)))
-    backend = PosixProcSessionBackend()
+    backend = PosixProcSessionBackend(SYSTEM_TIMERS)
     pipeline = f"{sys.executable} {script} | tee -a {log}"
     assert backend.new_session(
         "meiva-test-orch", pipeline, tmp_path, env=dict(os.environ), exec_cmd=False
@@ -210,7 +213,7 @@ def test_orchestration_session_keeps_its_wrapper_shell(tmp_path: Path, unit_home
         assert pipeline in cmdline
         assert f"exec {pipeline}" not in cmdline
     finally:
-        posixproc.kill_session("meiva-test-orch", graceful=False)
+        posixproc.kill_session("meiva-test-orch", graceful=False, timers=SYSTEM_TIMERS)
 
 
 def test_every_service_spec_command_is_exec_safe():

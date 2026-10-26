@@ -101,12 +101,12 @@ def test_boot_loader_never_imports_a_disabled_plugin(loguru_records: list[dict[s
     loader — it imported every directory on disk, so the disabled broken plugin
     still crashed startup. Disabled must mean never imported, on both paths."""
     _write_plugin(
-        paths.plugins_dir(),
+        paths.plugins_dir(home=paths.meiva_home()),
         "codex_usage",
         "from . import refresh\nMARK = refresh.MARK\n",
         {"refresh.py": "MARK = 'x'\n"},
     )
-    _write_plugin(paths.plugins_dir(), "good", "LOADED = True\n")
+    _write_plugin(paths.plugins_dir(home=paths.meiva_home()), "good", "LOADED = True\n")
     _write_enabled({"codex_usage": {"enabled": False}, "good": {"enabled": True}})
 
     from meiva.sdk_surface.extensions import load_extensions
@@ -125,7 +125,7 @@ def test_boot_loader_contains_broken_plugins_and_keeps_going(
     """The incident matrix at the boot loader: relative import with no parent
     package, syntax error, top-level raise, missing sibling — each is skipped
     loudly and the healthy plugin still loads."""
-    home = paths.plugins_dir()
+    home = paths.plugins_dir(home=paths.meiva_home())
     _write_plugin(home, "broken_relative", "from . import nope\n")
     _write_plugin(home, "broken_syntax", "def oops(:\n")
     _write_plugin(home, "broken_raise", "raise RuntimeError('boom')\n")
@@ -156,7 +156,7 @@ def test_a_package_relative_sibling_import_resolves_and_a_reload_keeps_the_modul
     """The loader execs `plugin.py` under its dotted name, so a package-relative sibling import
     resolves, and a second load re-executes the same module object (reload-in-place)."""
     _write_plugin(
-        paths.plugins_dir(),
+        paths.plugins_dir(home=paths.meiva_home()),
         "codex_usage",
         "from . import refresh\nMARK = refresh.MARK\n",
         {"refresh.py": "MARK = 'x'\n"},
@@ -180,7 +180,9 @@ def test_host_boot_restart_loop_survives_a_broken_plugin(
     """Issue #2161's second half: the host failed to start on EVERY restart
     while the broken package sat on disk. Consecutive boots must each survive,
     each report, and each leave no half-executed module behind."""
-    _write_plugin(paths.plugins_dir(), "codex_usage", "from . import refresh\n")
+    _write_plugin(
+        paths.plugins_dir(home=paths.meiva_home()), "codex_usage", "from . import refresh\n"
+    )
     _write_enabled({"codex_usage": {"enabled": True}})
 
     from meiva.sdk_surface.extensions import load_extensions
@@ -203,7 +205,7 @@ def test_the_loader_binds_the_class_a_config_face_declares(unit_home: Path) -> N
     from meiva.sdk_surface.extensions import load_extensions
 
     _write_plugin(
-        paths.plugins_dir(),
+        paths.plugins_dir(home=paths.meiva_home()),
         "faced",
         "LOADED = True\n",
         {
@@ -237,7 +239,7 @@ def test_the_loader_retains_the_roots_explicit_owners(config_authority: ConfigAu
     from meiva.sdk_surface.installation import installed
 
     catalog = CatalogBuilder().build()
-    _write_plugin(paths.plugins_dir(), "good", "LOADED = True\n")
+    _write_plugin(paths.plugins_dir(home=paths.meiva_home()), "good", "LOADED = True\n")
     _write_enabled({"good": {"enabled": True}})
     sampling = fixed_sampling_owner()
     try:

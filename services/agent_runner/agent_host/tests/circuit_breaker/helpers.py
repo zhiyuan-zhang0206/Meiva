@@ -15,6 +15,7 @@ from agent.turn.runloop import handle_fatal_llm_error
 from base.agents.context import MeivaContext
 from base.agents.tests.units import spawn_agent
 from base.clock import Clock
+from base.clock.tests.seeded_rng import seeded_rng
 from base.cluster.machine import MachineIdentityReader
 from base.cluster.machine.tests.identity import machine_identity as machine_identity
 from base.config.service_read import ConfigAuthority
@@ -59,7 +60,7 @@ def breaker_ctx(*, database_gate: ProcessDbGate) -> MeivaContext:
         event_publisher=MagicMock(),
         agent=AgentSlices.resolve(default_reader=defaults()),
         db=Database.from_settings(gate=database_gate),
-        bus=EventBus.from_settings(),
+        bus=EventBus.from_settings(rng=seeded_rng()),
         catalog=build_model_catalog(),
         clock_factory=Clock.from_settings,
     )
@@ -90,7 +91,7 @@ async def reject_turn(
             event_publisher=cast(AgentEventPublisher, publisher),
             agent=AgentSlices.resolve(default_reader=defaults()),
             db=Database.from_settings(gate=database_gate),
-            bus=EventBus.from_settings(),
+            bus=EventBus.from_settings(rng=seeded_rng()),
             catalog=build_model_catalog(),
             clock_factory=Clock.from_settings,
         ),

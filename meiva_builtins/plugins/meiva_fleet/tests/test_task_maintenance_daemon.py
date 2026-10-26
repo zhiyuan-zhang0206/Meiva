@@ -19,6 +19,7 @@ import psycopg
 import pytest
 from psycopg_pool import ConnectionPool
 
+from base.clock.tests.seeded_rng import seeded_rng
 from base.config import settings
 from base.db import Database
 from base.events.live.bus import EventBus, EventBusConfig
@@ -684,7 +685,8 @@ class TestRemind:
         owner = _make_agent(db_conn)
         tid = _make_task(db_conn, owner=owner, remind_interval_seconds=1800, updated_s_ago=3600)
         unreachable_bus = EventBus(
-            EventBusConfig(redis_url="redis://127.0.0.1:1/0", events_channel="lost-hints")
+            EventBusConfig(redis_url="redis://127.0.0.1:1/0", events_channel="lost-hints"),
+            rng=seeded_rng(),
         )
 
         assert run_reminders(pool, database, unreachable_bus, 3600.0) == 1

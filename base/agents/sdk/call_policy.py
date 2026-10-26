@@ -103,7 +103,7 @@ class SamplingPolicyOwner:
         self, *, initial: SamplingPolicy, source: SamplingSource, rng: random.Random
     ) -> None:
         self.source = source
-        self._rng = rng
+        self.rng = rng
         self.value = initial
         self.next_refresh = time.monotonic() + source.refresh_seconds
         self.lock = threading.Lock()
@@ -115,7 +115,7 @@ class SamplingPolicyOwner:
     def should_sample(self, every: int) -> bool:
         if every <= 1:
             return True
-        return keep_sample(every, self._rng.random())
+        return keep_sample(every, self.rng.random())
 
     def read(self) -> SamplingPolicy:
         with self.lock:

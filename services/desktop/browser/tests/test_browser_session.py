@@ -33,6 +33,7 @@ from services.desktop.browser.gateway_session import GatewaySession
 
 SECRET = "test-cluster-secret"  # noqa: S105
 GATEWAY = "http://gateway.example:8000"
+NOW = 1_700_000_000
 
 
 def _fixed_clock(now_ts: float = 1_700_000_000.0) -> Clock:
@@ -245,10 +246,10 @@ async def test_gateway_session_login_returns_server_cookie() -> None:
         "opaque-session",
         1_700_086_400,
     )
-    name, value, expires = await sess.gateway_session_login(stack.gateway_url, SECRET)
+    name, value, expires = await sess.gateway_session_login(stack.gateway_url, SECRET, now=NOW)
 
     assert (name, value) == ("meiva_session", "opaque-session")
-    assert expires > 0
+    assert expires == NOW + 86_400
     url, body, headers = stack.login_calls[0]
     assert (url, body) == (f"{stack.gateway_url}/api/auth/login", {"password": SECRET})
     # the managed-browser marker lets the sessions list label this row
@@ -259,7 +260,7 @@ async def test_gateway_session_login_rejects_non_200() -> None:
     stack = await _LoopbackSessionStack.start(login_status=401)
 
     with pytest.raises(RuntimeError, match="HTTP 401"):
-        await sess.gateway_session_login(stack.gateway_url, SECRET)
+        await sess.gateway_session_login(stack.gateway_url, SECRET, now=NOW)
 
 
 @pytest.mark.parametrize(
@@ -277,16 +278,12 @@ async def test_gateway_session_login_rejects_malformed_cookie(
     stack = await _LoopbackSessionStack.start(set_cookie=set_cookie)
 
     with pytest.raises(RuntimeError, match="session cookie"):
-        await sess.gateway_session_login(stack.gateway_url, SECRET)
+        await sess.gateway_session_login(stack.gateway_url, SECRET, now=NOW)
 
 
 async def test_inject_sets_cookie_with_login_flags() -> None:
     stack = await _LoopbackSessionStack.start()
-    await sess.inject_session_cookie(
-        stack.port,
-        stack.gateway_url,
-        SECRET,
-    )
+    await sess.inject_session_cookie(stack.port, stack.gateway_url, SECRET, now=NOW)
 
     # create a throwaway tab, set the cookie on it, close it
     browser_calls = [c["method"] for c in stack.browser_sent]
@@ -303,13 +300,13 @@ async def test_inject_sets_cookie_with_login_flags() -> None:
     assert params["httpOnly"] is True
     assert params["sameSite"] == "Lax"
     assert params["value"] == "opaque-session"
-    assert isinstance(params["expires"], int) and params["expires"] > 0
+    assert params["expires"] == NOW + 86_400
 
 
 async def test_inject_raises_when_browser_rejects_cookie() -> None:
     stack = await _LoopbackSessionStack.start(cookie_accepted=False)
     with pytest.raises(RuntimeError, match="rejected"):
-        await sess.inject_session_cookie(stack.port, stack.gateway_url, SECRET)
+        await sess.inject_session_cookie(stack.port, stack.gateway_url, SECRET, now=NOW)
 
 
 async def test_cdp_call_raises_on_protocol_error() -> None:
@@ -321,7 +318,7 @@ async def test_cdp_call_raises_on_protocol_error() -> None:
 async def test_inject_raises_when_chrome_unreachable() -> None:
     stack = await _LoopbackSessionStack.start()
     with pytest.raises(httpx.ConnectError):
-        await sess.inject_session_cookie(_closed_port(), stack.gateway_url, SECRET)
+        await sess.inject_session_cookie(_closed_port(), stack.gateway_url, SECRET, now=NOW)
 
 
 # meiva:note
@@ -330,7 +327,9 @@ async def test_inject_raises_when_chrome_unreachable() -> None:
 
 async def test_inject_once_skips_when_gateway_url_unset() -> None:
     stack = await _LoopbackSessionStack.start()
-    keeper = GatewaySession(asyncio.TaskGroup(), stack.port, access=stack.access(gateway_url=""))
+    keeper = GatewaySession(
+        asyncio.TaskGroup(), stack.port, access=stack.access(gateway_url=""), clock=_fixed_clock()
+    )
     await keeper.inject_once()  # must not raise
     assert stack.login_calls == []
 
@@ -345,17 +344,20 @@ async def test_inject_once_skips_on_empty_secret() -> None:
         launcher_profile=None,
         gateway_home=True,
     )
-    keeper = GatewaySession(asyncio.TaskGroup(), stack.port, access=access)
+    keeper = GatewaySession(asyncio.TaskGroup(), stack.port, access=access, clock=_fixed_clock())
     await keeper.inject_once()
     assert stack.login_calls == []
 
 
 async def test_inject_once_injects_with_settings() -> None:
     stack = await _LoopbackSessionStack.start()
-    keeper = GatewaySession(asyncio.TaskGroup(), stack.port, access=stack.access())
+    keeper = GatewaySession(
+        asyncio.TaskGroup(), stack.port, access=stack.access(), clock=_fixed_clock()
+    )
     await keeper.inject_once()
     assert len(stack.login_calls) == 1
     assert len(stack.page_sent) == 1
+    assert stack.page_sent[0]["params"]["expires"] == NOW + 86_400
 
 
 def test_session_params_present_the_delivered_runner_token() -> None:
@@ -398,7 +400,9 @@ def test_session_params_without_a_token_log_the_defect_instead_of_using_the_secr
 
 async def test_inject_once_swallows_injection_failure() -> None:
     stack = await _LoopbackSessionStack.start(login_status=500)
-    keeper = GatewaySession(asyncio.TaskGroup(), stack.port, access=stack.access())
+    keeper = GatewaySession(
+        asyncio.TaskGroup(), stack.port, access=stack.access(), clock=_fixed_clock()
+    )
     await keeper.inject_once()  # must not raise
 
 
@@ -406,7 +410,9 @@ async def test_session_loop_injects_then_waits() -> None:
     stack = await _LoopbackSessionStack.start()
     stop = asyncio.Event()
     stack.stop_on_login = stop
-    keeper = GatewaySession(asyncio.TaskGroup(), stack.port, access=stack.access())
+    keeper = GatewaySession(
+        asyncio.TaskGroup(), stack.port, access=stack.access(), clock=_fixed_clock()
+    )
     await keeper.refresh_loop(stop)
     assert len(stack.login_calls) == 1
 
@@ -414,7 +420,7 @@ async def test_session_loop_injects_then_waits() -> None:
 async def test_spawn_inject_tracks_task() -> None:
     stack = await _LoopbackSessionStack.start()
     async with asyncio.TaskGroup() as tasks:
-        keeper = GatewaySession(tasks, stack.port, access=stack.access())
+        keeper = GatewaySession(tasks, stack.port, access=stack.access(), clock=_fixed_clock())
         keeper.spawn_inject()
         assert len(keeper.inject_tasks) == 1
         # let the task finish so its done-callback clears the set
@@ -426,6 +432,6 @@ async def test_spawn_inject_tracks_task() -> None:
 async def test_a_failing_one_shot_does_not_abort_its_group() -> None:
     stack = await _LoopbackSessionStack.start(login_status=500)
     async with asyncio.TaskGroup() as tasks:
-        keeper = GatewaySession(tasks, stack.port, access=stack.access())
+        keeper = GatewaySession(tasks, stack.port, access=stack.access(), clock=_fixed_clock())
         keeper.spawn_inject()
         await asyncio.gather(*keeper.inject_tasks)

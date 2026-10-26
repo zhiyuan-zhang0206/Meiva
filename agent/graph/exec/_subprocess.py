@@ -35,7 +35,7 @@ from agent.execution.protocol import (
     write_request,
 )
 from base.agents.context import MeivaContext
-from base.clock import SYSTEM_TIMERS
+from base.clock import Timers
 from base.deploy.release import editable_install
 from base.log import logger
 from base.native_process.exec_domain import KILL_GRACE_S, ExecProcessDomain
@@ -136,14 +136,15 @@ async def _poll_child(
     cancel_event: asyncio.Event,
     timeout: float,
     reader: ExecOutputPipe,
+    timers: Timers,
 ) -> tuple[bool, bool]:
-    started = SYSTEM_TIMERS.monotonic()
+    started = timers.monotonic()
     deadline = started + timeout
     last_activity = started
     while not _leader_exited(leader):
         reader.pump()
         pending = stream.take_pending() if chunk_publisher is not None else ""
-        now = SYSTEM_TIMERS.monotonic()
+        now = timers.monotonic()
         plan = plan_poll(
             pending=bool(pending),
             now=now,
@@ -163,16 +164,18 @@ async def _poll_child(
         if plan.stop is Stop.DEADLINE:
             domain.signal(signal.SIGTERM)
             return False, True
-        await asyncio.sleep(_POLL_INTERVAL_S)
+        await timers.asleep(_POLL_INTERVAL_S)
     return False, False
 
 
 # meiva:note
 # Give a signalled leader its grace window to exit on its own.
-async def _await_leader_exit(domain: ExecProcessDomain, leader: psutil.Process) -> None:
-    deadline = SYSTEM_TIMERS.monotonic() + KILL_GRACE_S
+async def _await_leader_exit(
+    domain: ExecProcessDomain, leader: psutil.Process, timers: Timers
+) -> None:
+    deadline = timers.monotonic() + KILL_GRACE_S
     while not _leader_exited(leader):
-        if SYSTEM_TIMERS.monotonic() >= deadline:
+        if timers.monotonic() >= deadline:
             logger.warning(
                 "[{label}] exec child {pid} survived the {grace}s grace period — "
                 "hard-stopping its process group (native-stuck code or swallowed signal)",
@@ -182,7 +185,7 @@ async def _await_leader_exit(domain: ExecProcessDomain, leader: psutil.Process) 
                 event="exec_subprocess_killed",
             )
             return
-        await asyncio.sleep(_POLL_INTERVAL_S)
+        await timers.asleep(_POLL_INTERVAL_S)
 
 
 # meiva:note
@@ -235,6 +238,7 @@ async def _run_local_child(
     cancel_event: asyncio.Event,
     config_overlay: dict[str, object] | None,
     birth_config: dict[str, object] | None,
+    timers: Timers,
 ) -> tuple[int | None, bool, bool] | ExecCrashed:
     domain: ExecProcessDomain | None = None
     reader: ExecOutputPipe | None = None
@@ -256,14 +260,14 @@ async def _run_local_child(
             )
 
         leader = psutil.Process(proc.pid)
-        reader = ExecOutputPipe(proc, stream)
+        reader = ExecOutputPipe(proc, stream, timers)
         reader.watch()
 
         cancelled, timed_out = await _poll_child(
-            domain, leader, stream, chunk_publisher, cancel_event, timeout, reader
+            domain, leader, stream, chunk_publisher, cancel_event, timeout, reader, timers
         )
         if cancelled or timed_out:
-            await _await_leader_exit(domain, leader)
+            await _await_leader_exit(domain, leader, timers)
         _close_domain(domain)
         await reader.finish(_OUTPUT_DRAIN_TIMEOUT_S)
         _close_output(reader)
@@ -322,7 +326,8 @@ async def run_in_subprocess(
     if guard_failure is not None:
         return guard_failure, None
     agent_id = context.require_identity().agent_id
-    prune_stale(exec_dir, agent_id, now=context.require_clock().now())
+    clock = context.require_clock()
+    prune_stale(exec_dir, agent_id, now=clock.now())
     request_path = make_request_path(exec_dir, agent_id, request_id=request_id)
     result_path = make_result_path(exec_dir, agent_id, result_id=result_id)
 
@@ -344,6 +349,7 @@ async def run_in_subprocess(
             cancel_event=cancel_event,
             config_overlay=config_overlay,
             birth_config=birth_config,
+            timers=clock,
         )
         if outcome is None:
             outcome = await _run_local_child(
@@ -357,6 +363,7 @@ async def run_in_subprocess(
                 cancel_event=cancel_event,
                 config_overlay=config_overlay,
                 birth_config=birth_config,
+                timers=clock,
             )
         if isinstance(outcome, ExecCrashed):
             return outcome, None

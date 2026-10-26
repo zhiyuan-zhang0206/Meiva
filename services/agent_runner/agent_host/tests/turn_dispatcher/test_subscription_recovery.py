@@ -6,6 +6,7 @@ import time
 
 import pytest
 
+from base.clock.tests.seeded_rng import seeded_rng
 from base.events.live.bus import EventBus
 from base.events.live.tests.fakes import patch_open_async_redis
 from base.log.tests.log_records import LogRecords
@@ -36,7 +37,7 @@ class TestSubscriptionRecovery:
             raise RuntimeError("database unavailable")
 
         disp = InboundWakeDispatcher(
-            EventBus.from_settings(),
+            EventBus.from_settings(rng=seeded_rng()),
             ScanScheduler(),
             pending_scan=_pending,
             scan_interval_s=0.02,
@@ -72,7 +73,7 @@ class TestSubscriptionRecovery:
             raise RuntimeError("database unavailable")
 
         disp = InboundWakeDispatcher(
-            EventBus.from_settings(),
+            EventBus.from_settings(rng=seeded_rng()),
             scheduler,
             pending_scan=_pending,
             scan_interval_s=0.02,
@@ -114,7 +115,7 @@ class TestSubscriptionRecovery:
             return []
 
         disp = InboundWakeDispatcher(
-            EventBus.from_settings(),
+            EventBus.from_settings(rng=seeded_rng()),
             ScanScheduler(),
             pending_scan=_pending,
             scan_interval_s=0.02,
@@ -176,7 +177,7 @@ class TestSubscriptionRecovery:
 
         patch_open_async_redis(monkeypatch, _open)
         disp = InboundWakeDispatcher(
-            EventBus.from_settings(),
+            EventBus.from_settings(rng=seeded_rng()),
             ScanScheduler(),
             subscription_read_timeout_s=0.01,
             subscription_read_deadline_grace_s=0.01,
@@ -236,7 +237,7 @@ class TestReconnectExhaustion:
 
         patch_open_async_redis(monkeypatch, _open)
         disp = InboundWakeDispatcher(
-            EventBus.from_settings(), ScanScheduler(), reconnect_delay_s=0.0
+            EventBus.from_settings(rng=seeded_rng()), ScanScheduler(), reconnect_delay_s=0.0
         )
 
         with pytest.raises(dispatcher.DispatcherReconnectExhaustedError) as raised:
@@ -266,7 +267,7 @@ class TestReconnectExhaustion:
 
         patch_open_async_redis(monkeypatch, _open)
         disp = InboundWakeDispatcher(
-            EventBus.from_settings(),
+            EventBus.from_settings(rng=seeded_rng()),
             ScanScheduler(),
             subscription_read_timeout_s=0.005,
             subscription_read_deadline_grace_s=0.05,

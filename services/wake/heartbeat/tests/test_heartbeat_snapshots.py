@@ -11,6 +11,7 @@ from psycopg_pool import ConnectionPool
 import base.db
 from base.clock import Clock, ClockConfig
 from base.clock.tests.manual_timers import ManualTimers
+from base.clock.tests.seeded_rng import seeded_rng
 from base.daemon.loop_health import LoopProgress
 from base.db import Database
 from base.db.code_version_gate import ProcessDbGate
@@ -94,7 +95,7 @@ def test_a_probed_machine_is_snapshotted_with_its_status(
         run_liveness_pass(
             Database.from_settings(gate=database_gate),
             pool,
-            EventBus.from_settings(),
+            EventBus.from_settings(rng=seeded_rng()),
             probe=_Probe({"runner-1": _status("runner-1")}),
             config=LivenessConfig(8.0),
         )
@@ -111,7 +112,7 @@ def test_one_failed_probe_keeps_the_last_status_and_counts_the_failure(
         run_liveness_pass(
             Database.from_settings(gate=database_gate),
             pool,
-            EventBus.from_settings(),
+            EventBus.from_settings(rng=seeded_rng()),
             probe=_Probe({"runner-1": _status("runner-1")}),
             config=LivenessConfig(8.0),
         )
@@ -121,7 +122,7 @@ def test_one_failed_probe_keeps_the_last_status_and_counts_the_failure(
         run_liveness_pass(
             Database.from_settings(gate=database_gate),
             pool,
-            EventBus.from_settings(),
+            EventBus.from_settings(rng=seeded_rng()),
             probe=_Probe({"runner-1": None}),
             config=LivenessConfig(8.0),
         )
@@ -132,7 +133,7 @@ def test_one_failed_probe_keeps_the_last_status_and_counts_the_failure(
         run_liveness_pass(
             Database.from_settings(gate=database_gate),
             pool,
-            EventBus.from_settings(),
+            EventBus.from_settings(rng=seeded_rng()),
             probe=_Probe({"runner-1": None}),
             config=LivenessConfig(8.0),
         )
@@ -143,7 +144,7 @@ def test_one_failed_probe_keeps_the_last_status_and_counts_the_failure(
         run_liveness_pass(
             Database.from_settings(gate=database_gate),
             pool,
-            EventBus.from_settings(),
+            EventBus.from_settings(rng=seeded_rng()),
             probe=_Probe({"runner-1": _status("runner-1")}),
             config=LivenessConfig(8.0),
         )
@@ -159,7 +160,7 @@ def test_a_reachable_answer_that_is_not_a_cluster_status_clears_the_status(
         run_liveness_pass(
             Database.from_settings(gate=database_gate),
             pool,
-            EventBus.from_settings(),
+            EventBus.from_settings(rng=seeded_rng()),
             probe=_Probe({"runner-1": _status("runner-1")}),
             config=LivenessConfig(8.0),
         )
@@ -169,7 +170,7 @@ def test_a_reachable_answer_that_is_not_a_cluster_status_clears_the_status(
         run_liveness_pass(
             Database.from_settings(gate=database_gate),
             pool,
-            EventBus.from_settings(),
+            EventBus.from_settings(rng=seeded_rng()),
             probe=_Probe({"runner-1": {"result": "?"}}),
             config=LivenessConfig(8.0),
         )
@@ -190,7 +191,7 @@ def test_staging_and_stopped_hosts_are_snapshotted_but_not_judged(
         run_liveness_pass(
             Database.from_settings(gate=database_gate),
             pool,
-            EventBus.from_settings(),
+            EventBus.from_settings(rng=seeded_rng()),
             probe=probe,
             config=LivenessConfig(8.0),
         )
@@ -215,7 +216,7 @@ def test_paused_and_non_runner_machines_are_not_probed(
         run_liveness_pass(
             Database.from_settings(gate=database_gate),
             pool,
-            EventBus.from_settings(),
+            EventBus.from_settings(rng=seeded_rng()),
             probe=probe,
             config=LivenessConfig(8.0),
         )

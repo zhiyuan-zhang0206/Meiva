@@ -19,6 +19,8 @@ from pathlib import Path
 import psutil
 import pytest
 
+from base.clock import SYSTEM_TIMERS
+from base.clock.tests.manual_timers import ManualTimers
 from base.native_process.kernel_identity import pid_starttime_ticks
 from base.native_process.process_control import SYSTEM_PROCESS_CONTROL
 from base.native_process.tests.fake_process_control import FakeProcessControl, Signalled
@@ -170,7 +172,7 @@ def test_new_session_reparents_to_init_no_zombie(
             what="spawner has no zombie descendants",
         )
     finally:
-        posixproc.kill_session(name, graceful=False)
+        posixproc.kill_session(name, graceful=False, timers=SYSTEM_TIMERS)
 
 
 def test_zombie_check_ignores_a_zombie_an_earlier_test_left() -> None:
@@ -205,7 +207,7 @@ def test_graceful_signal_terminates(unit_home) -> None:
             what="gracefully signaled session disappears",
         )
     finally:
-        posixproc.kill_session(name, graceful=False)
+        posixproc.kill_session(name, graceful=False, timers=SYSTEM_TIMERS)
 
 
 def test_kill_session_force_kills_sigterm_ignoring_survivor(unit_home: Path) -> None:
@@ -223,7 +225,7 @@ def test_kill_session_force_kills_sigterm_ignoring_survivor(unit_home: Path) -> 
     pid = _pid(name)
     poll_until(lambda: psutil.pid_exists(pid), what="SIGTERM-ignoring child process appears")
     poll_until(marker.exists, what="child installs SIG_IGN")
-    ok, mode = posixproc.kill_session(name, graceful=True, timeout=0.5)
+    ok, mode = posixproc.kill_session(name, graceful=True, timeout=0.5, timers=SYSTEM_TIMERS)
     # The child ignores SIGTERM, so the graceful signal alone cannot end it —
     # the force floor must fire, which is exactly what `forced` reports.
     assert ok is True and mode == "forced"
@@ -231,6 +233,26 @@ def test_kill_session_force_kills_sigterm_ignoring_survivor(unit_home: Path) -> 
         lambda: _pid_gone_or_zombie(pid),
         what="SIGTERM-ignoring child process exits",
     )
+    assert not posixproc.record_path(name).exists()
+
+
+# meiva:note
+# The graceful wait is a loop over the injected clock: it ends because that clock reached the
+# timeout (a real 30 s wait would be the test's whole runtime), and then the force floor fires.
+def test_a_graceful_stop_the_process_ignores_escalates_once_the_timers_say_its_timeout_passed(
+    unit_home: Path,
+) -> None:
+    name = "meiva-test-agent-timers"
+    marker = unit_home / "sigign-timers-ready"
+    argv = [sys.executable, "-I", str(_CHILD), "sigign_sleep", str(marker)]
+    _new(name, argv, unit_home)
+    pid = _pid(name)
+    poll_until(marker.exists, what="child installs SIG_IGN")
+    timers = ManualTimers()
+    ok, mode = posixproc.kill_session(name, graceful=True, timeout=30.0, timers=timers)
+    assert ok is True and mode == "forced"
+    assert timers.monotonic() >= 30.0
+    poll_until(lambda: _pid_gone_or_zombie(pid), what="SIGTERM-ignoring child process exits")
     assert not posixproc.record_path(name).exists()
 
 
@@ -249,7 +271,7 @@ def test_kill_session_reaps_process_tree(unit_home) -> None:
     )
     child_pid = psutil.Process(parent_pid).children()[0].pid
 
-    posixproc.kill_session(name, graceful=False)
+    posixproc.kill_session(name, graceful=False, timers=SYSTEM_TIMERS)
     poll_until(
         lambda: _pid_gone_or_zombie(parent_pid),
         what="parent process is reaped with its tree",
@@ -264,7 +286,7 @@ def test_has_session_false_when_process_gone(unit_home) -> None:
     name = "meiva-test-agent-5"
     _new(name, list(_SLEEP), unit_home)  # pyright: ignore[reportUnknownArgumentType]
     pid = _pid(name)
-    posixproc.kill_session(name, graceful=False)
+    posixproc.kill_session(name, graceful=False, timers=SYSTEM_TIMERS)
     # The SIGKILLed child lingers as a zombie until init reaps it — poll with a
     # zombie counted as gone instead of asserting on the one-shot pid_exists.
     poll_until(
@@ -352,7 +374,7 @@ def test_session_record_spans_import_epochs(unit_home: Path) -> None:
         )
         assert posixproc.has_session(name)
     finally:
-        posixproc.kill_session(name, graceful=False)
+        posixproc.kill_session(name, graceful=False, timers=SYSTEM_TIMERS)
 
 
 @pytest.mark.requires_host("linux")
@@ -455,11 +477,14 @@ def test_new_session_idempotent_when_live(unit_home) -> None:
         assert _new(name, list(_SLEEP), unit_home) is True  # pyright: ignore[reportUnknownArgumentType]
         assert _pid(name) == first_pid  # not relaunched
     finally:
-        posixproc.kill_session(name, graceful=False)
+        posixproc.kill_session(name, graceful=False, timers=SYSTEM_TIMERS)
 
 
 def test_kill_session_noop_on_absent(unit_home) -> None:
-    assert posixproc.kill_session("meiva-test-agent-does-not-exist") == (True, "noop")
+    assert posixproc.kill_session("meiva-test-agent-does-not-exist", timers=SYSTEM_TIMERS) == (
+        True,
+        "noop",
+    )
     assert posixproc.graceful_signal("meiva-test-agent-does-not-exist") is False
 
 
@@ -483,13 +508,17 @@ def test_kill_session_survivor_reports_and_keeps_record(
     # or AccessDenied skipped terminate_tree's whole body).
     noop_control = FakeProcessControl(groups={pid: os.getpgid(pid)})
     ok, mode = posixproc.kill_session(
-        name, graceful=False, process_control=noop_control, wait_timeout=0.0
+        name,
+        graceful=False,
+        process_control=noop_control,
+        wait_timeout=0.0,
+        timers=SYSTEM_TIMERS,
     )
     assert ok is False and mode == "forced"
     assert psutil.pid_exists(pid), "the process must still be alive"
     assert posixproc.record_path(name).exists(), "record must survive so the reap sees it"
 
-    ok, _mode = posixproc.kill_session(name, graceful=False)
+    ok, _mode = posixproc.kill_session(name, graceful=False, timers=SYSTEM_TIMERS)
     assert ok is True
     poll_until(
         lambda: not psutil.pid_exists(pid),
@@ -516,13 +545,17 @@ def test_kill_session_terminate_error_keeps_record(
 
     failing_control = FakeProcessControl(groups={pid: os.getpgid(pid)}, on_signal=boom)
     ok, mode = posixproc.kill_session(
-        name, graceful=False, process_control=failing_control, wait_timeout=0.0
+        name,
+        graceful=False,
+        process_control=failing_control,
+        wait_timeout=0.0,
+        timers=SYSTEM_TIMERS,
     )
     assert ok is False and mode == "forced"
     assert psutil.pid_exists(pid)
     assert posixproc.record_path(name).exists()
 
-    ok, _mode = posixproc.kill_session(name, graceful=False)
+    ok, _mode = posixproc.kill_session(name, graceful=False, timers=SYSTEM_TIMERS)
     assert ok is True
     poll_until(
         lambda: not psutil.pid_exists(pid),
@@ -583,7 +616,7 @@ def test_kill_session_group_kill_reaps_late_spawned_child(
             ready_file.exists,
             what="top process arms its SIGTERM handler",
         )
-        ok, mode = posixproc.kill_session(name, graceful=True, timeout=2.0)
+        ok, mode = posixproc.kill_session(name, graceful=True, timeout=2.0, timers=SYSTEM_TIMERS)
         assert ok is True and mode == "forced"
         poll_until(
             lambda: not psutil.pid_exists(pid),
@@ -605,7 +638,7 @@ def test_kill_session_group_kill_reaps_late_spawned_child(
             what="late-spawned child exits with the process group",
         )
     finally:
-        posixproc.kill_session(name, graceful=False)
+        posixproc.kill_session(name, graceful=False, timers=SYSTEM_TIMERS)
 
 
 def test_kill_session_group_kill_reaps_sigterm_ignoring_wrapper(
@@ -629,7 +662,7 @@ def test_kill_session_group_kill_reaps_sigterm_ignoring_wrapper(
             what="SIGTERM-ignoring wrapper spawns a child",
         )
         child_pid = psutil.Process(pid).children()[0].pid
-        ok, mode = posixproc.kill_session(name, graceful=True, timeout=0.5)
+        ok, mode = posixproc.kill_session(name, graceful=True, timeout=0.5, timers=SYSTEM_TIMERS)
         assert ok is True and mode == "forced"
         poll_until(
             lambda: not psutil.pid_exists(pid),
@@ -640,7 +673,7 @@ def test_kill_session_group_kill_reaps_sigterm_ignoring_wrapper(
             what="wrapper child dies with the process group",
         )
     finally:
-        posixproc.kill_session(name, graceful=False)
+        posixproc.kill_session(name, graceful=False, timers=SYSTEM_TIMERS)
 
 
 def test_kill_session_signals_the_process_group(
@@ -656,13 +689,15 @@ def test_kill_session_signals_the_process_group(
     pgid = os.getpgid(pid)
     control = FakeProcessControl(forward_to=SYSTEM_PROCESS_CONTROL)
     try:
-        ok, mode = posixproc.kill_session(name, graceful=True, timeout=2.0, process_control=control)
+        ok, mode = posixproc.kill_session(
+            name, graceful=True, timeout=2.0, process_control=control, timers=SYSTEM_TIMERS
+        )
         assert ok is True and mode == "graceful"
         assert Signalled("killpg", pgid, signal.SIGTERM) in control.signals, (
             "graceful kill must signal the group"
         )
     finally:
-        posixproc.kill_session(name, graceful=False)
+        posixproc.kill_session(name, graceful=False, timers=SYSTEM_TIMERS)
 
 
 def test_kill_session_group_kill_reaps_detached_descendant(
@@ -697,7 +732,7 @@ def test_kill_session_group_kill_reaps_detached_descendant(
         # The descendant must really be outside the session's group, or the
         # test proves nothing (the group signal would cover it).
         assert os.getpgid(detached_pid) != os.getpgid(pid)
-        ok, mode = posixproc.kill_session(name, graceful=True, timeout=1.0)
+        ok, mode = posixproc.kill_session(name, graceful=True, timeout=1.0, timers=SYSTEM_TIMERS)
         assert ok is True and mode == "forced"  # the detached survivor forces the hard kill
         poll_until(
             lambda: not psutil.pid_exists(pid),
@@ -708,7 +743,7 @@ def test_kill_session_group_kill_reaps_detached_descendant(
             what="detached descendant dies with the session",
         )
     finally:
-        posixproc.kill_session(name, graceful=False)
+        posixproc.kill_session(name, graceful=False, timers=SYSTEM_TIMERS)
         # The detached descendant is outside the group, so a cleanup
         # kill_session cannot reach it — kill it directly if it survived.
         if detached_pid > 0:

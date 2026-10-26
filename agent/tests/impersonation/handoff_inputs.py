@@ -27,7 +27,7 @@ from agent.impersonation import protect_native_hooks, settle_checkpoint
 from agent.impersonation_handoff import flush_checkpoint
 from agent.ownership.hosted import admit_hosted_runtime
 from agent.takeover.relay import RelayWait, TakeoverHost
-from agent.tests.impersonation.lease_support import relay_program, throttled_saver
+from agent.tests.impersonation.lease_support import fixed_clock, relay_program, throttled_saver
 from base.agents import impersonation as leases
 from base.agents.context import MeivaContext
 from base.agents.context.clients import ClientSet
@@ -39,6 +39,7 @@ from base.agents.messages.timestamp_policy import TimestampSource
 from base.agents.observation.relay_supervision import RelaySupervision
 from base.api_contracts.caller_identity import CallerIdentity
 from base.clock import SYSTEM_TIMERS, Clock, ClockConfig
+from base.clock.tests.seeded_rng import seeded_rng
 from base.cluster import inbound_channel
 from base.cluster.machine import MachineIdentityReader
 from base.config.service_read import ConfigAuthority
@@ -109,6 +110,7 @@ def takeover_host(tmp_path: Path, machine: MachineIdentityReader) -> TakeoverHos
         relay_program=relay_program(tmp_path / "relay", "exit:9"),
         wait=RelayWait(timeout_s=5.0, poll_s=0.05),
         rng=_rng(),
+        clock=fixed_clock(),
     )
 
 
@@ -203,7 +205,7 @@ async def prepare_graph(
     assert owner is not None
     requested = leases.request(
         Database.from_settings(gate=database_gate),
-        EventBus.from_settings(),
+        EventBus.from_settings(rng=seeded_rng()),
         agent_id,
         caller=CallerIdentity(kind="external_agent", subject="codex"),
         process_metadata=recorded_tree(),
@@ -248,7 +250,7 @@ async def prepare_graph(
         event_publisher=MagicMock(),
         agent=AgentSlices.resolve(default_reader=defaults()),
         db=Database.from_settings(gate=database_gate),
-        bus=EventBus.from_settings(),
+        bus=EventBus.from_settings(rng=seeded_rng()),
         clients=clients,
         identity=AgentIdentity(agent_id=agent_id, owns_loop=True),
         original_incarnation=owner,
@@ -430,6 +432,7 @@ async def stop_takeover_with_lost_relay(
         owner.agent_id,
         relays,
         incarnation=owner,
+        clock=fixed_clock(),
     )
     return "the bound relay stopped heartbeating"
 

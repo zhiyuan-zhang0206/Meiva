@@ -21,6 +21,7 @@ from redis.asyncio.client import PubSub
 from base.events.live.bus import EventBus
 from base.events.live.projection import EVENT_ADAPTER
 from base.events.live.publisher import AgentEventPublisher
+from base.events.live.tests.rng import seeded_auth_retry
 
 __all__ = [
     "LiveEvents",
@@ -80,7 +81,7 @@ async def live_events(event_bus: EventBus) -> AsyncIterator[LiveEvents]:
     sender = event_bus.open_async_redis()
     tasks = asyncio.TaskGroup()
     await tasks.__aenter__()
-    publisher = AgentEventPublisher(sender, channel, agent_id=0)
+    publisher = AgentEventPublisher(sender, channel, agent_id=0, auth_retry=seeded_auth_retry())
     try:
         async with subscriber.pubsub() as subscription:  # pyright: ignore[reportUnknownMemberType]
             await subscription.subscribe(channel)
@@ -98,7 +99,9 @@ async def live_events(event_bus: EventBus) -> AsyncIterator[LiveEvents]:
 # A real publisher nobody started: its emits wait in the queue and nothing reaches Redis, for
 # tests whose subject is not the events the code under test publishes.
 def idle_publisher() -> AgentEventPublisher:
-    return AgentEventPublisher(aredis.Redis(), "live-test-events:unused", agent_id=0)
+    return AgentEventPublisher(
+        aredis.Redis(), "live-test-events:unused", agent_id=0, auth_retry=seeded_auth_retry()
+    )
 
 
 # meiva:note

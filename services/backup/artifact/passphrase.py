@@ -39,6 +39,11 @@ class PassphrasePinError(RuntimeError):
     """The pinned passphrase is missing, unreadable, malformed, or contradicts a pin request."""
 
 
+def _require_format(passphrase: str) -> None:
+    if _PASSPHRASE.fullmatch(passphrase) is None:
+        raise PassphrasePinError("a logical-backup passphrase is 64 lowercase hex characters")
+
+
 def pin_path(home: Path) -> Path:
     return home / "backups" / PIN_NAME
 
@@ -49,9 +54,11 @@ def derive(cluster_secret: str) -> str:
 
 
 # meiva:note
-# A fresh passphrase (256 bits) drawn from `rng`, in the pinned file's format. The birth root hands
-# in a `random.SystemRandom`; a test hands in a seeded generator.
-def mint(rng: random.Random) -> str:
+# A fresh passphrase (256 bits) drawn from `rng`, in the pinned file's format. `rng` must be the
+# operating system's generator: this is backup key material, and a seeded or merely statistical
+# generator (such as a command's `random.Random`) would make it reproducible. The type is
+# `random.SystemRandom` so that a plain `random.Random` is refused where the callers are checked.
+def mint(rng: random.SystemRandom) -> str:
     return f"{rng.getrandbits(256):064x}"
 
 
@@ -93,8 +100,7 @@ def pin(home: Path, passphrase: str) -> None:
     The caller serializes pinning for `home` (birth under the start lock, or a
     rotation under its journal).
     """
-    if _PASSPHRASE.fullmatch(passphrase) is None:
-        raise PassphrasePinError("a logical-backup passphrase is 64 lowercase hex characters")
+    _require_format(passphrase)
     current = pinned(home)
     if current is None:
         write_private_bytes(pin_path(home), (passphrase + "\n").encode())
@@ -105,8 +111,10 @@ def pin(home: Path, passphrase: str) -> None:
 
 # meiva:note
 # Birth: pin `passphrase`, which the caller minted, unless one is already pinned. An interrupted
-# birth that already pinned keeps its passphrase.
+# birth that already pinned keeps its passphrase, whatever value the retry minted; the value is
+# checked either way, so a malformed one fails on every birth and not only on the first.
 def ensure_pinned(home: Path, *, passphrase: str) -> None:
+    _require_format(passphrase)
     if pinned(home) is None:
         pin(home, passphrase)
 

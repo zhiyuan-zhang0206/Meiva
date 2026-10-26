@@ -42,7 +42,7 @@ from gateway.http.auth.session_store import (
     session_mint,
     ticket_mint,
 )
-from gateway.http.config import GatewayConfig, utc_now
+from gateway.http.config import GatewayConfig, gateway_clock, utc_now
 from gateway.http.middleware.cors import request_host, session_cookie_secure
 from gateway.http.middleware.error_envelope import error_response
 
@@ -293,6 +293,7 @@ async def check(request: Request) -> JSONResponse:
         token,
         config.cluster_secret,
         home=request.app.state.gateway_process.home,
+        now=gateway_clock(request).now(),
         cache=request.app.state.machine_token_acceptance,
     )
     # meiva:note

@@ -49,6 +49,7 @@ from agent.state import AgentState
 from base.agents.context import MeivaContext
 from base.agents.tests.units import spawn_agent
 from base.clock import Clock
+from base.clock.tests.seeded_rng import seeded_rng
 from base.cluster.machine import MachineIdentityReader
 from base.cluster.machine.tests.identity import machine_identity as machine_identity
 from base.config import settings
@@ -60,7 +61,7 @@ from base.events.live.bus import EventBus
 from base.host.env.agent_slices import AgentSlices, HistoryDump
 from base.lm.catalog import ModelCatalog
 from base.packages.plugin_providers import build_model_catalog
-from base.paths import workspace_dir
+from base.paths import meiva_home, workspace_dir
 
 # ── helpers ──
 
@@ -96,7 +97,7 @@ def _clear(path: Path) -> None:
 # The workspace of agent 1 under the test home, with no dumps in it: the auto-compact tests run as agent 1 and write where the production code writes.
 @pytest.fixture
 def agent_workspace() -> Path:
-    workspace = workspace_dir(1)
+    workspace = workspace_dir(1, home=meiva_home())
     _clear(workspace / "message-history")
     return workspace
 
@@ -181,7 +182,7 @@ def _runtime_with_llm(
                 default_reader=lambda domain, field: getattr(getattr(settings, domain), field),
             ),
             db=Database.from_settings(gate=database_gate),
-            bus=EventBus.from_settings(),
+            bus=EventBus.from_settings(rng=seeded_rng()),
             catalog=build_model_catalog(),
             clock_factory=Clock.from_settings,
         )
@@ -218,7 +219,7 @@ def _make_runtime(
             default_reader=lambda domain, field: getattr(getattr(settings, domain), field),
         ),
         db=Database.from_settings(gate=database_gate),
-        bus=EventBus.from_settings(),
+        bus=EventBus.from_settings(rng=seeded_rng()),
         catalog=build_model_catalog(),
         clock_factory=Clock.from_settings,
     )

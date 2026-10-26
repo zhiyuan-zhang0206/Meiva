@@ -1,5 +1,6 @@
 from typing import Any
 
+from base.clock.tests.seeded_rng import seeded_rng
 from base.cluster.machine import MachineIdentityReader
 from base.config.service_read import ConfigAuthority
 from base.db import Database
@@ -23,7 +24,10 @@ def spawn_agent(
     from base.agents.birth.spawn import create_agent_row
     from base.agents.impersonation.wake import publish_inbound_wake
 
-    db, bus = Database.from_settings(gate=database_gate), EventBus.from_settings()
+    db, bus = (
+        Database.from_settings(gate=database_gate),
+        EventBus.from_settings(rng=seeded_rng()),
+    )
     agent_id, _, _prompt_id, _attempt_id = create_agent_row(
         db,
         bus,

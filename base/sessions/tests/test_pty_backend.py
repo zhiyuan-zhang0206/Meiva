@@ -24,6 +24,7 @@ import psutil
 import pytest
 
 import base.sessions.backend as sb
+from base.clock import SYSTEM_TIMERS
 from base.host.atomic_io import SYSTEM_FS, AtomicWriter
 from base.host.env.registry import process_environment
 from base.paths import meiva_home
@@ -447,11 +448,11 @@ def test_non_pty_backends_still_raise_send() -> None:
     """send is PTY-only like send_keys/capture_pane: the process supervisors
     raise, the PTY backend implements."""
     with pytest.raises(NotImplementedError):
-        PosixProcSessionBackend().send("s", "text")
+        PosixProcSessionBackend(SYSTEM_TIMERS).send("s", "text")
 
 
 def test_get_shell_backend_is_pty() -> None:
     """get_shell_backend() is PtySessionBackend on POSIX; service sessions live on
     the process-supervisor backend."""
     assert isinstance(sb.get_shell_backend(), PtySessionBackend)
-    assert sb.get_shell_backend() is not sb.get_backend()
+    assert sb.get_shell_backend() is not sb.get_backend(timers=SYSTEM_TIMERS)

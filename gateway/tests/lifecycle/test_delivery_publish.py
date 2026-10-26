@@ -21,6 +21,7 @@ from psycopg_pool import ConnectionPool
 
 from base.agents.inbox.chat_delivery import ChatInboundCommittedError
 from base.api_contracts.agent_contract import AgentStatus
+from base.clock.tests.seeded_rng import seeded_rng
 from base.cluster.machine import MachineFacts, MachineIdentityReader
 from base.cluster.machine.configured import ConfiguredMachineIdentity
 from base.cluster.machine.tests.identity import machine_identity as machine_identity
@@ -80,7 +81,9 @@ def _inbound_kinds(conn: psycopg.Connection, agent_id: int) -> list[tuple[str, i
 
 
 def _bus(redis_url: str) -> EventBus:
-    return EventBus(EventBusConfig(redis_url=redis_url, events_channel="delivery-test"))
+    return EventBus(
+        EventBusConfig(redis_url=redis_url, events_channel="delivery-test"), rng=seeded_rng()
+    )
 
 
 # meiva:note

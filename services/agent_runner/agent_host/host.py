@@ -394,6 +394,7 @@ class AgentHost:
             agent_id,
             self.relays,
             incarnation=incarnation,
+            clock=self._handoff_stamping.clock,
         )
         # meiva:note
         # An earlier ordinary failure can leave a buffered tail. Preserve
@@ -573,7 +574,10 @@ class AgentHost:
         """Build this invocation's context; the driver owns its publisher lifecycle."""
         checkpoints = checkpoints or TurnCheckpoints(self._checkpointer, self._graph)
         event_publisher = AgentEventPublisher(
-            self._bus.async_redis(), self._bus.channel, agent_id=agent_id
+            self._bus.async_redis(),
+            self._bus.channel,
+            agent_id=agent_id,
+            auth_retry=self._bus.auth_retry,
         )
         ctx = MeivaContext(
             machine=self._machine_identity,

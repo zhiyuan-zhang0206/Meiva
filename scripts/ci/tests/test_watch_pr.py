@@ -114,7 +114,12 @@ def _run_watcher(
     fake_meiva = fake if fake is not None else _FakeMeiva(tmp_path)
     monkeypatch.chdir(tmp_path)
 
-    def workspace_for_test(_agent_id: int) -> Path:
+    meiva_home = tmp_path / "meiva-home"
+
+    def workspace_for_test(_agent_id: int, *, home: Path) -> Path:
+        # meiva:note
+        # The template must hand the workspace lookup the home its entry resolved, not read the environment again below it.
+        assert home == meiva_home
         return tmp_path
 
     code = _TEMPLATE.read_text()
@@ -128,6 +133,7 @@ def _run_watcher(
         ("from base.clock import Clock\n", ""),
         ("from base.host.system.hostport import Host\n", ""),
         ("from base.paths import workspace_dir\n", ""),
+        ("from base.paths.home import resolve_meiva_home\n", ""),
         (
             "from scripts.ci.pull_requests.status import CIStatus, check_ci, repo_has_workflows  # noqa: E402\n",
             "",
@@ -148,6 +154,7 @@ def _run_watcher(
                 "Clock": types.SimpleNamespace(from_settings=lambda: clock),
                 "Host": types.SimpleNamespace(system=lambda: host),
                 "workspace_dir": workspace_for_test,
+                "resolve_meiva_home": lambda: meiva_home,
                 "CIStatus": CIStatus,
                 "check_ci": _check_ci,
                 "repo_has_workflows": repo_has_workflows,

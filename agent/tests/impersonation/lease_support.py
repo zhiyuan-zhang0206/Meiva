@@ -270,6 +270,7 @@ def stub_host(
         relay_program=relay_program(tmp_path / "relay", mode),
         wait=wait,
         rng=rng,
+        clock=fixed_clock(),
     )
 
 
