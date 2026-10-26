@@ -22,5 +22,10 @@ exports = ["agents", "boot.py", "files.py", "gateway_client", "impersonation", "
 "boot.py" = { kinds = ["environ", "settings"], why = "launched_context() / has_launched_identity() read os.environ[\"MEIVA_AGENT_ID\"]; the env key is the only channel for child processes (shell sessions, watchers) to discover their parent agent; SDK process bootstrap constructs and binds process-owned contexts" }
 "files.py" = { kinds = ["home", "random"], why = "workspace_base() reads Path.home() as the documented pre-bootstrap fallback for relative paths when no agent identity is bound, and _new_file_mode() generates a random UUID suffix for its temporary umask probe file" }
 
+[debt.ambient-read]
+"__init__.py#environ meiva.boot.is_launched_process" = 1
+"boot.py#home base.paths.home.resolve_meiva_home" = 2
+"boot.py#home base.paths.meiva_home" = 1
+
 [debt.any-collaborator]
 "__init__.py#any __getattr__.return" = 1

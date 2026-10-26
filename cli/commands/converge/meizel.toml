@@ -15,3 +15,6 @@ exports = ["brew_pin.py", "firewall.py", "firewall_command.py", "frontend_env.py
 
 [purity]
 "__init__.py" = "strict"
+
+[debt.ambient-read]
+"health_preflight.py#environ base.host.git.gitenv.git_env" = 1

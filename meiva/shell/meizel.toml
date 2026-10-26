@@ -16,3 +16,7 @@ exports = ["background.py", "background_plan.py", "coding_tools", "log_ring.py",
 
 [roots]
 "__init__.py" = { kinds = ["home"], why = "run() reads Path.home() as the documented pre-bootstrap cwd fallback when no agent identity is bound" }
+
+[debt.ambient-read]
+"sessions.py#environ base.host.env.registry.process_environment" = 1
+"sessions.py#home base.paths.workspace_dir" = 2

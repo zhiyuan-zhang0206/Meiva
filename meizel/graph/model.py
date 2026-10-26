@@ -78,6 +78,7 @@ class Code(StrEnum):
     TYPE_CHECKING = "type-checking"
     AMBIENT_READ = "ambient-read"
     STALE_ROOT = "stale-root"
+    STALE_READER = "stale-reader"
     IMPURE_EDGE = "impure-edge"
     IMPURE_CALL = "impure-call"
     UNFROZEN_VALUE = "unfrozen-value"

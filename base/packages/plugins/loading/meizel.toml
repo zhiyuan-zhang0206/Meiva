@@ -9,3 +9,6 @@ exports = ["discovery.py", "faces.py", "plugin_loader.py", "registry.py"]
 
 [purity]
 "__init__.py" = "strict"
+
+[debt.ambient-read]
+"faces.py#home base.paths.home.resolve_meiva_home" = 1

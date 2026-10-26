@@ -17,3 +17,7 @@ exports = ["artifact", "dump.py", "layout.py", "restore_drill.py", "scheduler", 
 [roots]
 "dump.py" = { kinds = ["settings"], why = "Service or operator process entry boots configuration before composing its resources" }
 "restore_drill.py" = { kinds = ["settings"], why = "Service or operator process entry boots configuration before composing its resources" }
+
+[debt.ambient-read]
+"dump.py#environ base.native_process.child_env.inherited_process_env" = 2
+"restore_drill.py#home base.paths.meiva_home" = 1

@@ -11,5 +11,8 @@ exports = ["feishu.py", "feishu_poll_cursor.py", "feishu_ws_proxy.py", "run_plan
 "run_plan.py" = "strict"
 "ws_proxy_plan.py" = "strict"
 
+[debt.ambient-read]
+"weixin_login.py#home base.paths.meiva_home" = 1
+
 [debt.third-party-patch]
 "feishu_ws_proxy.py#setattr lark_oapi.ws.client._ws_connect_kwargs" = 1

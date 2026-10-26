@@ -15,3 +15,13 @@ exports = ["launchd_job.py", "lifecycle.py", "onboarding.py", "signing_identity.
 "lifecycle.py" = ["clock", "settings"]
 "onboarding.py" = ["home", "platform"]
 "signing_identity.py" = ["random"]
+
+[debt.ambient-read]
+"lifecycle.py#home base.paths.logs_dir" = 1
+"lifecycle.py#home base.paths.meiva_home" = 3
+"lifecycle.py#home base.paths.permissions_helper_app_dir" = 2
+"lifecycle.py#home services.desktop.permissions_helper.launchd_job.helper_job_agents_dir" = 1
+"lifecycle.py#home services.desktop.permissions_helper.launchd_job.helper_job_label" = 1
+"lifecycle.py#pid services.desktop.permissions_helper.launchd_job.helper_job_domain" = 1
+"onboarding.py#environ base.host.env.registry.process_environment" = 1
+"signing_identity.py#home base.paths.permissions_helper_app_dir" = 1

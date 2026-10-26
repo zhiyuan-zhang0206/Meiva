@@ -18,3 +18,9 @@ exports = ["accounting.py", "classify_paths.py", "commands.py", "export_process.
 "export_process.py" = { kinds = ["db", "settings"], why = "Tool entry composes its process resources from the launch configuration" }
 "pr_flow_export.py" = { kinds = ["clock", "home"], why = "CLI entrypoint resolves the current UTC timestamp and ~/.trunk/api-token" }
 "runs_export.py" = { kinds = ["clock"], why = "CLI entrypoint resolves the current UTC timestamp for trailing-window sampling" }
+
+[debt.ambient-read]
+"export_process.py#home base.paths.meiva_home" = 1
+"runs_export.py#home base.paths.meiva_home" = 1
+"trunk_api.py#environ base.host.git.gitenv.git_env" = 1
+"watch_pr.py#home base.paths.workspace_dir" = 1

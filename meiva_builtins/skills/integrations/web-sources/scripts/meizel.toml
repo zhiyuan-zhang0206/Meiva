@@ -7,3 +7,6 @@ exports = ["webscrape.py"]
 
 [roots]
 "webscrape.py" = { kinds = ["clock", "environ"], why = "Web-scrape CLI entry reads ScrapeConfig from process environment and stamps fetched posts with UTC time" }
+
+[debt.ambient-read]
+"webscrape.py#home base.paths.home.resolve_meiva_home" = 1

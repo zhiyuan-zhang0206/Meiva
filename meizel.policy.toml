@@ -104,6 +104,76 @@ bus = [
     "EventBus.from_settings()",
 ]
 
+# ambient-readers (meizel/contracts/ambient_read.py): repository functions that read the world on
+# their caller's behalf, by kind. A call to one is an acquisition of that kind at the call site, so
+# a wrapper around `os.environ`, `Path.home()` or the process settings does not hide the read
+# behind a root that is allowed to make it. Each name is the fully qualified call
+# (`pkg.module.name()`, `pkg.module.Class.method()`) of the module that defines it, with the
+# reason it reads the world; a module that re-exports the function is followed. A listed function
+# that no longer exists fails as stale.
+[ambient-readers.environ]
+"agent.graph.exec.process.read_parent_facts()" = "copies os.environ and reads the working and home directories"
+"base.agents.impersonation.host_transport.default_control_socket()" = "falls back to os.environ for CODEX_HOME"
+"base.agents.messages.external_caller.external_caller()" = "falls back to os.environ for MEIVA_CALLER_IDENTITY"
+"base.host.env.dotenv_boot.watcher_runner_env()" = "projects the live os.environ for the watcher runner"
+"base.host.env.registry.process_environment()" = "returns the live os.environ"
+"base.host.git.gitenv.git_env()" = "copies the live os.environ when no mapping is passed"
+"base.host.system.probes.display_available()" = "reads DISPLAY and WAYLAND_DISPLAY from os.environ"
+"base.native_process.child_env.daemon_process_env()" = "filters the live os.environ"
+"base.native_process.child_env.inherited_process_env()" = "copies the live os.environ"
+"base.native_process.os_platform.launchd_job_label()" = "reads XPC_SERVICE_NAME from os.environ"
+"meiva.boot.is_launched_process()" = "judges the launch facts from the live os.environ"
+"meiva.boot.process_disable_entries()" = "reads the SDK disable entries from the live os.environ"
+
+[ambient-readers.home]
+"base.paths.gateway_memory_dir()" = "a directory under meiva_home()"
+"base.paths.harness_registrations_dir()" = "a directory under meiva_home()"
+"base.paths.harness_sessions_dir()" = "a directory under meiva_home()"
+"base.paths.home.resolve_meiva_home()" = "reads MEIVA_HOME from os.environ and falls back to Path.home()"
+"base.paths.home.user_home()" = "returns Path.home()"
+"base.paths.logs_dir()" = "a directory under meiva_home()"
+"base.paths.meiva_home()" = "resolve_meiva_home() plus creating the directory"
+"base.paths.memory_dir()" = "a directory under meiva_home()"
+"base.paths.permissions_helper_app_dir()" = "a directory under meiva_home()"
+"base.paths.plugins_dir()" = "a directory under meiva_home()"
+"base.paths.workspace_dir()" = "a directory under meiva_home()"
+"base.paths.workspace_dir_readonly()" = "a directory under meiva_home()"
+"base.paths.workspaces_root()" = "a directory under meiva_home()"
+"meiva.files.workspace_base()" = "the agent's workspace directory, or the home when no agent is bound"
+"services.desktop.permissions_helper.launchd_job.helper_job_agents_dir()" = "falls back to Path.home() for the LaunchAgents directory"
+"services.desktop.permissions_helper.launchd_job.helper_job_label()" = "falls back to meiva_home() for the helper's home"
+
+[ambient-readers.platform]
+"base.deploy.release.collector_artifact.platform_tag()" = "reads platform.machine() and platform.system()"
+"base.native_process.os_platform.Platform.current()" = "reads sys.platform and platform.machine()"
+
+[ambient-readers.pid]
+"base.native_process.os_platform.resolve_pid()" = "returns os.getpid() when no pid is passed"
+"base.native_process.root_control.client.current_uid()" = "returns os.getuid()"
+"base.paths.private_dir.is_foreign_owned()" = "compares with os.geteuid() when no euid is passed"
+"services.desktop.permissions_helper.launchd_job.helper_job_domain()" = "names the domain of os.getuid()"
+
+[ambient-readers.clock]
+"base.lm.harness.registration.current_utc()" = "returns the current time"
+"ops.cluster_status.cluster_now()" = "returns the current time"
+
+[ambient-readers.random]
+"agent.execution.protocol.make_request_path()" = "names a file with uuid4"
+"agent.execution.protocol.make_result_path()" = "names a file with uuid4"
+"agent.graph.llm._retry.draw_jitter()" = "draws random.uniform"
+"base.host.net.auth.random_bytes()" = "draws secrets.token_bytes"
+"base.host.net.resilience.jittered()" = "draws random jitter"
+
+[ambient-readers.bus]
+"meiva.sdk_surface.settings.bus()" = "builds the event bus from the process settings"
+
+[ambient-readers.settings]
+"base.cluster.machine.ambient.gateway_access_from_settings()" = "reads the gateway credentials from the process settings"
+"base.packages.plugins.flags.read_declared_flag()" = "reads a field of the process settings"
+"ops.cluster.rpc.RpcClient.system()" = "builds the client from the process settings"
+"ops.cluster.rpc.dispatch_to_machine()" = "builds RpcClient.system() on every call"
+"ops.cluster.rpc.dispatch_to_url()" = "builds RpcClient.system() on every call"
+
 # ambient-state (meizel/state/ambient_state): what module-level state may be let through.
 # Callees that build a write-only handle, framework wiring, or a constant fixed by its literals.
 [ambient-state]

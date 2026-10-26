@@ -14,3 +14,6 @@ exports = ["agents", "alerts.py", "cluster", "cluster_status", "env_audit", "hos
 
 [purity]
 "__init__.py" = "strict"
+
+[debt.ambient-read]
+"to_user.py#home base.paths.workspace_dir_readonly" = 1

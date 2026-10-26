@@ -9,3 +9,4 @@ exports = ["creation_identity.py", "harness.py", "spawn.py", "transaction.py"]
 
 [debt.ambient-read]
 "harness.py#clock datetime.datetime.now" = 1
+"harness.py#environ base.host.env.registry.process_environment" = 1

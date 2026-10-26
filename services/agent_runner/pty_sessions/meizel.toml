@@ -11,3 +11,8 @@ exports = ["daemon.py", "ledger.py", "shutdown_budget.py"]
 
 [roots]
 "daemon.py" = { kinds = ["clock", "pid", "random"], why = "The pty-sessions process entry composes its service with the system clock, process identity, and host generation" }
+
+[debt.ambient-read]
+"daemon.py#home base.paths.meiva_home" = 2
+"service.py#environ base.native_process.child_env.inherited_process_env" = 1
+"service.py#home base.paths.logs_dir" = 1

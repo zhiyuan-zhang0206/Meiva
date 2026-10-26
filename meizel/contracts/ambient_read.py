@@ -10,17 +10,28 @@
 
 from __future__ import annotations
 
+import ast
 from collections.abc import Iterable, Mapping
 
 from meizel.contracts.debt import file_key
 from meizel.contracts.manifest import Manifest, effective_purity
-from meizel.contracts.policy import Policy
+from meizel.contracts.policy import POLICY, Policy
+from meizel.graph.imports import Scope, collect_scope
 from meizel.graph.model import Acquisition, AmbientKind, Code, DebtKey, Diagnostic, Sources
-from meizel.language.scan import FileScan
+from meizel.graph.universe import GitRepo, Universe
+from meizel.language.scan import FileScan, module_bindings
+from meizel.lint_common import is_test_path
 
-__all__ = ["ambient_diagnostics", "sources_from", "stale_roots"]
+__all__ = [
+    "ambient_diagnostics",
+    "reader_problems",
+    "sources_from",
+    "stale_readers",
+    "stale_roots",
+]
 
 _CALL_MARK = "()"
+_READERS = "ambient-readers"
 # meiva:note
 # The roles whose source code is governed: what ships, the runnable templates and the tooling.
 _GOVERNED_ROLES = ("application", "templates", "tooling", "frontend")
@@ -67,7 +78,7 @@ def _module_of(directory: str, file: str) -> str:
 
 # meiva:note
 # The state a repository keeps: modules that declare `[state]`, and the policy's names for it.
-def sources_from(manifests: Mapping[str, Manifest], policy: Policy) -> Sources:
+def sources_from(manifests: Mapping[str, Manifest], policy: Policy, universe: Universe) -> Sources:
     names: dict[str, AmbientKind] = {}
     calls: dict[str, AmbientKind] = {}
     for directory, manifest in manifests.items():
@@ -79,6 +90,7 @@ def sources_from(manifests: Mapping[str, Manifest], policy: Policy) -> Sources:
                         calls[f"{module}.{name.removesuffix(_CALL_MARK)}"] = kind
                     else:
                         names[f"{module}.{name}"] = kind
+    calls.update(_followed(universe, _readers(policy)))
     return Sources(names, calls)
 
 
@@ -157,3 +169,160 @@ def stale_roots(
                 if kind not in acquired
             )
     return found
+
+
+def _policy_line(policy: Policy, name: str) -> int:
+    quoted = f'"{name}"'
+    return next((number for number, text in enumerate(policy.lines, 1) if quoted in text), 1)
+
+
+# meiva:note
+# The policy's reader entries as `dotted call -> kind`, in the order of the kinds.
+def _readers(policy: Policy) -> dict[str, AmbientKind]:
+    return {
+        name.removesuffix(_CALL_MARK): kind
+        for kind in AmbientKind
+        for name in policy.reasons(_READERS, kind.value)
+    }
+
+
+# meiva:note
+# The shape of the policy's `[ambient-readers.<kind>]` entries: a fully qualified function that
+# is called (`pkg.module.name()` or `pkg.module.Class.method()`), listed under exactly one kind.
+def reader_problems(policy: Policy) -> list[Diagnostic]:
+    found: list[Diagnostic] = []
+    seen: set[str] = set()
+    for kind in AmbientKind:
+        for name in policy.reasons(_READERS, kind.value):
+            where = f"[{_READERS}.{kind.value}] {name!r}"
+            line = _policy_line(policy, name)
+            if not name.endswith(_CALL_MARK) or "." not in name.removesuffix(_CALL_MARK):
+                message = f"{where} must be a qualified call such as `pkg.module.name()`"
+            elif name in seen:
+                message = f"{where} is listed under more than one kind: a reader has one kind"
+            else:
+                seen.add(name)
+                continue
+            found.append(Diagnostic(POLICY, line, Code.POLICY_SYNTAX, message))
+    return found
+
+
+# meiva:note
+# The module that defines a dotted reader: its dotted name, its file and the member path below it
+# (`name` or `Class.method`). The longest prefix that names a tracked module wins.
+def _locate(universe: Universe, target: str) -> tuple[str, str, tuple[str, ...]] | None:
+    parts = target.split(".")
+    for end in range(len(parts) - 1, 0, -1):
+        dotted = ".".join(parts[:end])
+        module = universe.resolve_module(dotted)
+        if module is not None and module.file is not None:
+            return dotted, module.file, tuple(parts[end:])
+    return None
+
+
+# meiva:note
+# Why a reader can no longer be found, or None when its module still defines it.
+def _missing_reader(universe: Universe, target: str) -> str | None:
+    located = _locate(universe, target)
+    if located is None:
+        return "names no tracked module"
+    _, file, member = located
+    bindings = module_bindings(universe.root, file)
+    named = len(member) == 1 and member[0] in bindings.names
+    method = len(member) == 2 and any(
+        facts.name == member[0] and member[1] in facts.methods for facts in bindings.classes
+    )
+    if bindings.dynamic or named or method:
+        return None
+    return f"names no function or method `{'.'.join(member)}` in {file}"
+
+
+# meiva:note
+# A listed reader that no longer exists fails, like any other stale allowance; only a
+# whole-repository run knows.
+def stale_readers(universe: Universe, policy: Policy) -> list[Diagnostic]:
+    found: list[Diagnostic] = []
+    for kind in AmbientKind:
+        for name in policy.reasons(_READERS, kind.value):
+            problem = _missing_reader(universe, name.removesuffix(_CALL_MARK))
+            if problem is not None:
+                found.append(
+                    Diagnostic(
+                        POLICY,
+                        _policy_line(policy, name),
+                        Code.STALE_READER,
+                        f"[{_READERS}.{kind.value}] {name!r} {problem}",
+                        ("remove the entry, or fix the name if the function moved",),
+                    )
+                )
+    return found
+
+
+_REEXPORT_HOPS = 4
+
+
+# meiva:note
+# The names a module binds by importing, as `local name -> dotted origin`; an unparsable file binds none.
+def _imports(universe: Universe, path: str) -> dict[str, str]:
+    text = universe.load_text(path)
+    try:
+        tree = ast.parse(text, filename=path)
+    except (SyntaxError, ValueError):
+        return {}
+    scope = Scope(None)
+    collect_scope(scope, tree.body, path.split("/")[:-1], walrus=":=" in text)
+    return scope.imports
+
+
+type _Spellings = dict[str, dict[str, AmbientKind]]
+
+
+# meiva:note
+# What can be re-exported, by its dotted origin: `module.name` -> {tail: kind}, where the tail is
+# the method path below it (empty for a function).
+def _origins(universe: Universe, readers: Mapping[str, AmbientKind]) -> _Spellings:
+    exported: _Spellings = {}
+    for target, kind in readers.items():
+        located = _locate(universe, target)
+        if located is not None:
+            module, _, member = located
+            exported.setdefault(f"{module}.{member[0]}", {})[".".join(member[1:])] = kind
+    return exported
+
+
+# meiva:note
+# One round: every module among `candidates` that imports a known origin spells it under its own
+# name too. Returns whether a new spelling appeared.
+def _spread(universe: Universe, candidates: Iterable[str], exported: _Spellings) -> bool:
+    grew = False
+    for path in sorted(candidates):
+        module = _module_of(*path.rpartition("/")[::2])
+        for local, origin in _imports(universe, path).items():
+            for tail, kind in list(exported.get(origin, {}).items()):
+                spelled = exported.setdefault(f"{module}.{local}", {})
+                if tail not in spelled:
+                    spelled[tail] = kind
+                    grew = True
+    return grew
+
+
+# meiva:note
+# The readers and every spelling a module gives them by importing them at its top level: a call
+# through a re-export is still the call of the reader. Only the non-test sources that mention one
+# of the names are read, so the cost follows the readers, not the repository.
+def _followed(universe: Universe, readers: Mapping[str, AmbientKind]) -> dict[str, AmbientKind]:
+    exported = _origins(universe, readers)
+    repo = GitRepo(universe.root)
+    seen: set[str] = set()
+    candidates: set[str] = set()
+    for _ in range(_REEXPORT_HOPS):
+        tokens = {origin.rpartition(".")[2] for origin in exported} - seen
+        seen |= tokens
+        candidates.update(p for p in repo.grep_words(tokens, ".py") if not is_test_path(p))
+        if not _spread(universe, candidates, exported):
+            break
+    return {
+        f"{origin}.{tail}" if tail else origin: kind
+        for origin, tails in exported.items()
+        for tail, kind in tails.items()
+    }

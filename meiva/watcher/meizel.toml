@@ -11,3 +11,8 @@ exports = ["launch_plan.py", "plans.py", "spawn.py", "wiring.py"]
 
 [roots]
 "__init__.py" = { kinds = ["clock"], why = "The meiva.watcher SDK facade reads the current UTC wall-clock timestamp once at launch, cron, and at entry before building pure SpawnRequest plans" }
+
+[debt.ambient-read]
+"wiring.py#environ base.host.env.dotenv_boot.watcher_runner_env" = 1
+"wiring.py#home base.paths.meiva_home" = 1
+"wiring.py#home base.paths.workspace_dir" = 1

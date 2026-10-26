@@ -13,3 +13,10 @@
 "daily_scan.py" = { kinds = ["settings"], why = "CLI entry reads self_evolution_coverage_alert_floor from settings in process_env()" }
 "evaluate.py" = { kinds = ["clock", "random"], why = "Skill evaluation driver stamps evaluation runs with UTC time and generates spawn idempotency keys" }
 "mine.py" = { kinds = ["clock"], why = "CLI entry passes current UTC timestamp into main() for default dataset resolution" }
+
+[debt.ambient-read]
+"collect.py#home base.paths.meiva_home" = 1
+"collect.py#settings base.cluster.machine.ambient.gateway_access_from_settings" = 1
+"evaluate.py#home base.paths.meiva_home" = 2
+"evaluate.py#home base.paths.workspace_dir" = 1
+"mine.py#home base.paths.meiva_home" = 1

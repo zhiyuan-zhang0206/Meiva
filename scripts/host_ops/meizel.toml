@@ -12,3 +12,7 @@ exports = ["admission_floor.py", "check_worktree_remove.py", "onboarding"]
 "guard_editable_venv.py" = { kinds = ["cwd", "environ"], why = "dependency-free pre-uv preflight must inspect inherited VIRTUAL_ENV and default checkout cwd before a project environment can be trusted or Settings can import" }
 "host_memory_sample.py" = { kinds = ["clock", "home", "pid"], why = "host memory sampler CLI reads the current user slice by UID, timestamps the sample, and appends to ~/.meiva/logs/host-memory.jsonl" }
 "update_schedule_script.py" = { kinds = ["db"], why = "operator maintenance CLI opens the target home's database pool after verifying the agent host is stopped" }
+
+[debt.ambient-read]
+"update_schedule_script.py#environ base.host.env.registry.process_environment" = 1
+"update_schedule_script.py#home base.paths.home.resolve_meiva_home" = 1

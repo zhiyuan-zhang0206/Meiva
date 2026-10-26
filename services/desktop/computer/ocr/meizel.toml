@@ -1,2 +1,5 @@
 [uses]
 "tests" = ["__init__.py"]
+
+[debt.ambient-read]
+"__init__.py#home base.paths.logs_dir" = 1

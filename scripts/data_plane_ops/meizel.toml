@@ -6,3 +6,7 @@ exports = ["rotate_cluster_secret.py", "tests"]
 [roots]
 "rotate_cluster_secret.py" = { kinds = ["random"], why = "emergency bearer rotation CLI mints a replacement cryptographic cluster secret" }
 "rotate_data_plane_secrets.py" = { kinds = ["clock", "random", "settings"], why = "gateway Redis credential rotation CLI reads the active data-plane configuration, timestamps the rotation journal, and mints replacement passwords" }
+
+[debt.ambient-read]
+"rotate_cluster_secret.py#home base.paths.meiva_home" = 1
+"rotate_data_plane_secrets.py#home base.paths.meiva_home" = 1

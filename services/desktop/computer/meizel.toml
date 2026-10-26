@@ -24,3 +24,8 @@ exports = ["config.py", "execute.py", "input.py", "mcp_daemon.py", "mcp_wrapper.
 [roots]
 "mcp_daemon.py" = ["settings", "db"]
 "mcp_wrapper.py" = { kinds = ["environ", "settings"], why = "_agent_id() reads the ambient MEIVA_AGENT_ID to stamp computer-mcp requests; same identity channel, not Settings-managed; Service or operator process entry boots configuration before composing its resources" }
+
+[debt.ambient-read]
+"mcp_daemon.py#home base.paths.meiva_home" = 2
+"mcp_wrapper.py#home base.paths.meiva_home" = 1
+"screen.py#home base.paths.logs_dir" = 1

@@ -10,3 +10,7 @@ exports = ["check_git_hooks.py", "cluster_drift.py", "github_pr.py", "memory_rep
 [debt.ambient-read]
 "check_git_hooks.py#cwd pathlib.Path.cwd" = 1
 "check_git_hooks.py#home pathlib.Path.home" = 1
+"cluster_drift.py#environ base.host.git.gitenv.git_env" = 1
+"running_sha.py#home base.paths.meiva_home" = 3
+"source_tree_guard.py#environ base.host.git.gitenv.git_env" = 1
+"worktree_guard.py#home base.paths.home.resolve_meiva_home" = 1

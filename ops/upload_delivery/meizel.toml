@@ -7,3 +7,6 @@
 
 [roots]
 "__init__.py" = { kinds = ["home"], why = "Upload delivery receive entry resolves the OS user's Downloads directory under Path.home()" }
+
+[debt.ambient-read]
+"__init__.py#settings base.cluster.machine.ambient.gateway_access_from_settings" = 1

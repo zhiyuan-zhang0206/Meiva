@@ -5,3 +5,6 @@ exports = ["lint_no_cjk.py", "lint_no_tailnet.py"]
 
 [roots]
 "lint_meiva_okf.py" = { kinds = ["cwd"], why = "CLI OKF linter defaults to the current checkout directory when invoked from the command line" }
+
+[debt.ambient-read]
+"check_cross_branch_migrations.py#environ base.host.git.gitenv.git_env" = 1

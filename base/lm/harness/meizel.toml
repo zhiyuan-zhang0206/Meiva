@@ -24,6 +24,9 @@ exports = ["acp", "antigravity", "bridge.py", "claude", "codex", "deepseek", "en
 "handoff.py" = "strict"
 
 [debt.ambient-read]
+"base_session.py#clock base.lm.harness.registration.current_utc" = 1
+"bridge.py#clock base.lm.harness.registration.current_utc" = 1
 "bridge.py#pid os.getpid" = 1
 "bridge.py#random secrets.token_urlsafe" = 1
 "registration.py#clock datetime.datetime.now" = 1
+"wiring.py#environ base.host.env.registry.process_environment" = 1

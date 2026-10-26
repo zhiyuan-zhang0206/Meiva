@@ -18,3 +18,8 @@ exports = ["backends", "chunking.py", "config.py", "daemon.py", "embeddings", "m
 "recall_regression.py" = { kinds = ["settings"], why = "The operator script entry boots configuration and injects it into the recall regression command" }
 "daemon.py" = { kinds = ["settings"], why = "Service or operator process entry boots configuration before composing its resources" }
 "memory_search_reconcile.py" = { kinds = ["settings"], why = "Service or operator process entry boots configuration before composing its resources" }
+
+[debt.ambient-read]
+"daemon.py#home base.paths.gateway_memory_dir" = 1
+"daemon.py#home base.paths.meiva_home" = 1
+"memory_search_reconcile.py#home base.paths.gateway_memory_dir" = 1

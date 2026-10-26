@@ -20,3 +20,11 @@ exports = ["daemon.py", "held_settle.py", "host.py", "host_beat.py", "invocation
 
 [roots]
 "daemon.py" = ["endpoints", "pid", "random"]
+
+[debt.ambient-read]
+"daemon.py#environ base.native_process.child_env.inherited_process_env" = 1
+"health_routes.py#home base.paths.meiva_home" = 1
+"host.py#home base.paths.harness_registrations_dir" = 1
+"host.py#home base.paths.harness_sessions_dir" = 1
+"runtime.py#home base.paths.workspace_dir" = 1
+"stdout_log.py#home base.paths.logs_dir" = 1

@@ -8,4 +8,5 @@ exports = ["home.py", "private_dir.py", "tests"]
 "home.py" = { kinds = ["environ", "home"], why = "resolve_meiva_home and default_home read MEIVA_HOME and Path.home(): the home is the input that locates the .env Settings is built from, so it is read before (and below) Settings; moved here from dotenv_boot unchanged" }
 
 [debt.ambient-read]
+"__init__.py#home base.paths.home.resolve_meiva_home" = 2
 "private_dir.py#pid os.geteuid" = 1
