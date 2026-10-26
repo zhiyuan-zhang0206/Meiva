@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import sys
 from collections.abc import Callable
+from pathlib import Path
 
 from base.log import logger
 from base.log.sinks import HUMAN_FORMAT, add_file_sink, add_sink, install_stdlib_intercept
@@ -29,25 +30,29 @@ __all__ = ["init_subprocess_logger", "start_process_logging"]
 init_done = False
 
 
-def init_subprocess_logger(*, agent_id: int) -> None:
-    """Called once at exec subprocess startup. **Only** adds the file
-    sink, no stderr — the subprocess's stderr is captured by parent
-    and injected into exec_output fed to the LLM; framework logs to
-    stderr would pollute the agent context.
-
-    Writes `agent-{N}.log`, which every exec subprocess of that agent appends
-    to; `process_role="subprocess"` marks these records.
-
-    Idempotent — repeat in the same process silent-skips (see
-    ``init_done`` at module top).
-    """
+# meiva:note
+# Called once at exec subprocess startup. **Only** adds the file
+# sink, no stderr — the subprocess's stderr is captured by parent
+# and injected into exec_output fed to the LLM; framework logs to
+# stderr would pollute the agent context.
+#
+# Writes `agent-{N}.log`, which every exec subprocess of that agent appends
+# to; `process_role="subprocess"` marks these records.
+#
+# ``home`` is the home whose ``logs/`` directory holds the file; the entry that resolved it
+# passes it, and without it the ambient home is read (a transitional form that goes with its
+# callers).
+#
+# Idempotent — repeat in the same process silent-skips (see
+# ``init_done`` at module top).
+def init_subprocess_logger(*, agent_id: int, home: Path | None = None) -> None:
     global init_done  # noqa: PLW0603
     if init_done:
         return
     from base.paths import logs_dir
 
     logger.configure(extra={"agent_id": str(agent_id), "process_role": "subprocess"})
-    add_file_sink(logs_dir() / f"agent-{agent_id}.log")
+    add_file_sink(logs_dir(home=home) / f"agent-{agent_id}.log")
     install_stdlib_intercept()
     init_done = True
 
@@ -63,19 +68,23 @@ def _add_stderr_sink_before_settings() -> None:
     add_sink(sys.stderr, format=HUMAN_FORMAT, level="INFO", colorize=True)
 
 
+# meiva:note
+# Open a long-running process's sinks once: stderr (human) + file (``<name>.log``)
+# + the event sink ``attach_events`` registers + the stdlib intercept.
+#
+# The caller (telemetry owns the event pipeline) supplies ``attach_events`` so this
+# module never imports it; ``announce`` runs after the sinks are live (a boot log line).
+# ``home`` is the home whose ``logs/`` directory holds the file; the entry that resolved it
+# passes it, and without it the ambient home is read (a transitional form that goes with its
+# callers). Agent id is the ``-`` sentinel (no agent). Idempotent — a repeat in the same process
+# silent-skips (see ``init_done``).
 def start_process_logging(
     name: str,
     *,
     attach_events: Callable[[], object],
     announce: Callable[[], None] | None = None,
+    home: Path | None = None,
 ) -> None:
-    """Open a long-running process's sinks once: stderr (human) + file (``<name>.log``)
-    + the event sink ``attach_events`` registers + the stdlib intercept.
-
-    The caller (telemetry owns the event pipeline) supplies ``attach_events`` so this
-    module never imports it; ``announce`` runs after the sinks are live (a boot log line).
-    Agent id is the ``-`` sentinel (no agent). Idempotent — a repeat in the same process
-    silent-skips (see ``init_done``)."""
     global init_done  # noqa: PLW0603
     if init_done:
         return
@@ -83,7 +92,7 @@ def start_process_logging(
     _add_stderr_sink_before_settings()
     from base.paths import logs_dir
 
-    add_file_sink(logs_dir() / f"{name}.log")
+    add_file_sink(logs_dir(home=home) / f"{name}.log")
     attach_events()
     install_stdlib_intercept()
     if announce is not None:

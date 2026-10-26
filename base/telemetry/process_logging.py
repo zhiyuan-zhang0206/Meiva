@@ -14,6 +14,7 @@ import os
 import traceback as _traceback
 from collections.abc import Callable
 from functools import partial
+from pathlib import Path
 from typing import Any, Literal, Protocol
 
 import loguru
@@ -285,6 +286,9 @@ _event_sink_id: int | None = None
 # file (`<name>.log`) + unified event pipeline. Rows have
 # agent_id NULL (extra agent_id sentinel `-`).
 #
+# `home` is the home whose `logs/` directory holds the file; the entry that resolved it passes it,
+# and without it the ambient home is read (a transitional form that goes with its callers).
+#
 # `name` picks the per-daemon log file AND the process dimension of every
 # event the daemon emits. Each daemon writes its own `<name>.log` so its
 # logs — including an uncaught-exception traceback logged at the daemon's
@@ -303,6 +307,7 @@ def init_gateway_process(
     producer: Callable[[], EventPipeline],
     machine_reader: Callable[[], str],
     image: LoadedImage,
+    home: Path | None = None,
 ) -> None:
     def announce() -> None:
         # One structured `service_started` agent_event per gateway-style process
@@ -327,33 +332,43 @@ def init_gateway_process(
             add_event_sink, process=name, producer=producer, machine_reader=machine_reader
         ),
         announce=announce,
+        home=home,
     )
 
 
+# meiva:note
+# Called once by the CLI verbs that bring a unit up. Identical sink set to ``init_gateway_process``,
+# minus its ``service_started`` row: stderr (human) + file (``<name>.log``)
+# + unified event pipeline (agent_id NULL).
+#
+# The CLI's verbs are the keys of ``cli.main._CLI_LOG_NAMES`` (``start``,
+# ``restart``, ``lgtm on|off``), which also name each
+# one's file; ``cli.main`` calls this before dispatch. Every other verb
+# (``meiva status`` etc.) opens no sink — its output already lands on the
+# caller's terminal, and the extra sinks would clutter ``logs/`` and the
+# event stream with one row per command.
+#
+# Catches stdlib ``logging.getLogger`` calls from imported modules
+# (uvicorn / httpx / anthropic SDK / etc.) — CLI's own ``print()``
+# output still lands on stdout/stderr (which the parent's Popen
+# captures into its own per-invocation log file). The events
+# sink lets ``/api/cluster/admin/events`` surface a stuck supervised
+# CLI child's last logged step without ssh into the host.
+#
+# ``home`` is the home whose ``logs/`` directory holds the file; the entry that resolved it
+# passes it, and without it the ambient home is read (a transitional form that goes with its
+# callers).
 def init_cli_process(
-    *, name: str, producer: Callable[[], EventPipeline], machine_reader: Callable[[], str]
+    *,
+    name: str,
+    producer: Callable[[], EventPipeline],
+    machine_reader: Callable[[], str],
+    home: Path | None = None,
 ) -> None:
-    """Called once by the CLI verbs that bring a unit up. Identical sink set to ``init_gateway_process``,
-    minus its ``service_started`` row: stderr (human) + file (``<name>.log``)
-    + unified event pipeline (agent_id NULL).
-
-    The CLI's verbs are the keys of ``cli.main._CLI_LOG_NAMES`` (``start``,
-    ``restart``, ``lgtm on|off``), which also name each
-    one's file; ``cli.main`` calls this before dispatch. Every other verb
-    (``meiva status`` etc.) opens no sink — its output already lands on the
-    caller's terminal, and the extra sinks would clutter ``logs/`` and the
-    event stream with one row per command.
-
-    Catches stdlib ``logging.getLogger`` calls from imported modules
-    (uvicorn / httpx / anthropic SDK / etc.) — CLI's own ``print()``
-    output still lands on stdout/stderr (which the parent's Popen
-    captures into its own per-invocation log file). The events
-    sink lets ``/api/cluster/admin/events`` surface a stuck supervised
-    CLI child's last logged step without ssh into the host.
-    """
     start_process_logging(
         name,
         attach_events=partial(
             add_event_sink, process=name, producer=producer, machine_reader=machine_reader
         ),
+        home=home,
     )
