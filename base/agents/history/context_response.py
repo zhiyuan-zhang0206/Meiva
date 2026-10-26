@@ -6,10 +6,7 @@ models and the budget resolution (the agent's model window and compaction thresh
 rather than in either of them.
 """
 
-import logging
-from typing import Any
-
-from psycopg_pool import ConnectionPool
+from loguru import logger
 
 from base.agents.history.context_breakdown import (
     ContextBreakdownResponse as ContextBreakdownResponse,
@@ -24,15 +21,14 @@ from base.agents.history.context_breakdown import (
     RequestBreakdown,
 )
 from base.agents.model.model_overrides import read_agent_overrides
+from base.db.protocols import SyncPool
 from base.lm.catalog import ModelCatalog
 from base.lm.context_budget import UnknownModelWindowError, resolve_context_budget
 from base.lm.registry import resolve_available_model
 
-_log = logging.getLogger(__name__)
-
 
 def resolve_agent_model(
-    pool: ConnectionPool[Any],
+    pool: SyncPool,
     agent_id: int,
     *,
     catalog: ModelCatalog,
@@ -51,7 +47,7 @@ def resolve_agent_model(
 
 
 def context_breakdown_response(
-    pool: ConnectionPool[Any],
+    pool: SyncPool,
     agent_id: int,
     breakdown: RequestBreakdown,
     *,
@@ -69,7 +65,7 @@ def context_breakdown_response(
         soft_compact_tokens = budget.soft_compact_tokens
         hard_compact_tokens = budget.hard_compact_tokens
     except UnknownModelWindowError as exc:
-        _log.warning("context-breakdown: %s", exc)
+        logger.warning("context-breakdown: {}", exc)
 
     return ContextBreakdownResponse(
         total_input_tokens=breakdown.total.tokens,

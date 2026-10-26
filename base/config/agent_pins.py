@@ -21,7 +21,6 @@ bare singleton from the turn-scoped packages — those reads come from the agent
 from __future__ import annotations
 
 from collections.abc import Mapping
-from typing import Any
 
 import base.config.config_registry as _config_registry
 from base.config.config_registry import Lifecycle, per_agent_field_names, schema_extra
@@ -57,9 +56,9 @@ def live_field_names() -> set[str]:
 
 
 def resolve_agent_config_pins(
-    config_overlay: Mapping[str, Any] | None,
-    birth_config: Mapping[str, Any] | None,
-) -> dict[str, Any]:
+    config_overlay: Mapping[str, object] | None,
+    birth_config: Mapping[str, object] | None,
+) -> dict[str, object]:
     """Merge an agent's two stored config maps into the flat pin map.
 
     birth_config first, config_overlay on top. Only framework `Settings` fields are kept:
@@ -73,7 +72,7 @@ def resolve_agent_config_pins(
     stored configuration does not restore a deleted field.
     """
     fields = _config_registry.fields()
-    pins: dict[str, Any] = {}
+    pins: dict[str, object] = {}
     for source in (birth_config, config_overlay):
         if not source:
             continue

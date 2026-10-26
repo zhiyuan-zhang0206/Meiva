@@ -1,6 +1,7 @@
 exports = ["admin", "agent_pins.py", "base.py", "config_registry.py", "domains", "env_changed.py", "profiles.py", "runtime_config.py", "service_read.py", "tests"]
 
 [purity]
+"agent_pins.py" = "strict"
 "base.py" = "strict-to-be"
 "config_registry.py" = "strict"
 "env_changed.py" = "strict"

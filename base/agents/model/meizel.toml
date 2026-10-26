@@ -6,4 +6,5 @@ exports = ["birth_config.py", "model_config.py", "model_overrides.py", "restart_
 
 [purity]
 "__init__.py" = "strict"
+"model_overrides.py" = "strict"
 "restart_config.py" = "strict"

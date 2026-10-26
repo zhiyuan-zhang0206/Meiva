@@ -22,7 +22,5 @@ exports = ["tests"]
 "session.py#async def start" = 1
 
 [debt.impure-edge]
-"session.py#base/host/env/harness_binaries.py" = 1
-"session.py#base/host/env/registry.py" = 1
 "session.py#base/lm/harness/base_session.py" = 1
 "session.py#base/lm/harness/process.py" = 1

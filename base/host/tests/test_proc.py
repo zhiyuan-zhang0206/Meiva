@@ -214,16 +214,13 @@ def test_kill_process_tree_on_an_absent_pid_is_a_noop() -> None:
     kill_process_tree(2_000_000_000)
 
 
-def test_unreadable_tree_cannot_report_completed_cleanup(monkeypatch: pytest.MonkeyPatch) -> None:
-    from base.host import proc
-
+def test_unreadable_tree_cannot_report_completed_cleanup() -> None:
     def unreadable(_parent: OwnedProcess) -> set[OwnedProcess]:
         raise psutil.AccessDenied(5252)
 
-    monkeypatch.setattr(proc, "capture_tree", unreadable)
     # It is safe to name this test process: the failure must precede any signal.
     with pytest.raises(psutil.AccessDenied):
-        proc.kill_process_tree(os.getpid())
+        kill_process_tree(os.getpid(), tree_capture=unreadable)
 
 
 def test_kill_process_tree_skips_stale_ancestry(tmp_path: Path) -> None:

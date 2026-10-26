@@ -17,7 +17,6 @@
 [debt.impure-call]
 "session.py#async def _begin" = 1
 "session.py#async def _read_loop" = 1
-"session.py#async def _reap" = 1
 "session.py#async def close" = 1
 "session.py#async def interrupt" = 1
 "session.py#async def start" = 1

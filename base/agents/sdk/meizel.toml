@@ -9,7 +9,3 @@ exports = ["call_policy.py", "capture.py", "tally.py", "telemetry.py", "tests"]
 "__init__.py" = "strict"
 "capture.py" = "strict"
 "tally.py" = "strict"
-
-[debt.any-collaborator]
-"capture.py#any SdkCaptureOwner.capture_local_event.event" = 1
-"capture.py#any SdkCaptureOwner.capture_local_event.return" = 1

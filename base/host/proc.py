@@ -29,7 +29,13 @@ import psutil
 
 from base.native_process.ownership import OwnedProcess, capture_tree
 
-__all__ = ["CommandRunner", "SubprocessError", "run_bounded", "terminate_owned_tree"]
+__all__ = [
+    "CommandRunner",
+    "SubprocessError",
+    "TreeCapture",
+    "run_bounded",
+    "terminate_owned_tree",
+]
 
 SubprocessError = subprocess.SubprocessError
 
@@ -217,8 +223,18 @@ def wait_owned(members: list[OwnedProcess], timeout: float) -> list[OwnedProcess
         time.sleep(min(0.02, remaining))
 
 
+# meiva:note
+# Capture the generation- and ancestry-validated members of a process tree.
+class TreeCapture(Protocol):
+    def __call__(self, identity: OwnedProcess, /) -> set[OwnedProcess]: ...
+
+
 def kill_process_tree(
-    pid: int, *, grace_s: float = _TERMINATE_GRACE_S, include_root: bool = True
+    pid: int,
+    *,
+    grace_s: float = _TERMINATE_GRACE_S,
+    include_root: bool = True,
+    tree_capture: TreeCapture = capture_tree,
 ) -> None:
     """Take down `pid` **and every descendant**: terminate the tree, wait up to
     `grace_s`, then hard-kill whatever is still standing. A pid that is already
@@ -248,7 +264,7 @@ def kill_process_tree(
     """
     try:
         parent = OwnedProcess.capture(psutil.Process(pid))
-        members = list(capture_tree(parent) - {parent})
+        members = list(tree_capture(parent) - {parent})
         if include_root:
             members.append(parent)
     except psutil.NoSuchProcess:
