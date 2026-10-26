@@ -29,7 +29,7 @@ from services.supervision.meiva_root.wiring import WiringContext
 from services.supervision.meiva_root_glue import drill, glue
 from services.supervision.meiva_root_glue.diagnostic_probes import StationProbe
 from services.supervision.meiva_root_glue.diagnostics import RootHealthRounds
-from services.supervision.meiva_root_glue.tests.slices import probe_config
+from services.supervision.meiva_root_glue.tests.slices import probe_config, system_clock
 
 _SLEEPER = ["/bin/sleep", "60"]
 
@@ -57,10 +57,13 @@ def _registry(unit_ids: tuple[str, ...]) -> UnitRegistry:
 def _context(tmp_path: Path, registry: UnitRegistry) -> WiringContext:
     log_dir = tmp_path / "logs"
     return WiringContext(
-        supervisor=Supervisor(registry, run_dir=tmp_path),
+        supervisor=Supervisor(
+            registry, run_dir=tmp_path, clock=system_clock(), root_pid=os.getpid()
+        ),
         registry=registry,
         run_dir=tmp_path,
         log_dir=log_dir,
+        clock=system_clock(),
     )
 
 
@@ -186,24 +189,30 @@ def _view(*units: dict[str, object]) -> dict[str, object]:
 
 def test_drill_liveness_probe_reads_the_raw_tree() -> None:
     dead = drill.liveness_probe(
-        _TreeStub(_view({"id": "u1", "state": "running", "pid": 999_999_999})), "u1"
+        _TreeStub(_view({"id": "u1", "state": "running", "pid": 999_999_999})),
+        "u1",
+        clock=system_clock(),
     )
     assert dead().verdict.value == "down"  # claimed running, pid not alive
 
     live = drill.liveness_probe(
-        _TreeStub(_view({"id": "u1", "state": "running", "pid": os.getpid()})), "u1"
+        _TreeStub(_view({"id": "u1", "state": "running", "pid": os.getpid()})),
+        "u1",
+        clock=system_clock(),
     )
     assert live().verdict.value == "alive"
 
     stopped = drill.liveness_probe(
-        _TreeStub(_view({"id": "u1", "state": "stopped", "pid": None})), "u1"
+        _TreeStub(_view({"id": "u1", "state": "stopped", "pid": None})), "u1", clock=system_clock()
     )
     assert stopped().verdict.value == "down"
 
-    missing = drill.liveness_probe(_TreeStub(_view()), "u1")
+    missing = drill.liveness_probe(_TreeStub(_view()), "u1", clock=system_clock())
     assert missing().verdict.value == "down"
 
-    broken = drill.liveness_probe(_TreeStub(error=RuntimeError("no tree")), "u1")
+    broken = drill.liveness_probe(
+        _TreeStub(error=RuntimeError("no tree")), "u1", clock=system_clock()
+    )
     assert broken().verdict.value == "unavailable"
 
 
@@ -216,6 +225,7 @@ def test_drill_heartbeat_probe_requires_freshness(tmp_path: Path) -> None:
         _TreeStub(_view({"id": "u1", "state": "running", "pid": os.getpid()})),
         "u1",
         heartbeat_dir=heartbeat_dir,
+        clock=system_clock(),
     )
 
     fresh = probe()

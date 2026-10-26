@@ -31,6 +31,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Protocol, runtime_checkable
 
+from base.clock import Clock
 from services.supervision.meiva_root.manifest import UnitRegistry
 from services.supervision.meiva_root.supervisor import Supervisor
 
@@ -63,6 +64,7 @@ class WiringContext:
     registry: UnitRegistry
     run_dir: Path
     log_dir: Path
+    clock: Clock
     participant_tasks: asyncio.TaskGroup | None = field(default=None, kw_only=True)
     resource_handlers: dict[str, ResourceHandler] = field(
         default_factory=dict[str, ResourceHandler]

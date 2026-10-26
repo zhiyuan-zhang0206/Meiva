@@ -27,21 +27,15 @@ from __future__ import annotations
 
 import asyncio
 import logging
-import time
 from collections.abc import Mapping
 from contextlib import suppress
 from dataclasses import dataclass
 from typing import Any, Protocol
 
+from base.clock import Timers
 from base.host.proc import child_state
 
 _log = logging.getLogger(__name__)
-
-
-def _monotonic() -> float:
-    """Wall-independent clock for the episode ages — a module seam so tests can
-    advance time (the same pattern as `base.service_respawn`)."""
-    return time.monotonic()
 
 
 class TreeHost(Protocol):
@@ -88,10 +82,12 @@ class TreeSelfCheck:
         self,
         host: TreeHost,
         *,
+        timers: Timers,
         config: SelfCheckConfig | None = None,
         tasks: asyncio.TaskGroup | None = None,
     ) -> None:
         self._host = host
+        self._timers = timers
         self._config = config if config is not None else SelfCheckConfig()
         self._state = _ChainState()
         self._task: asyncio.Task[None] | None = None
@@ -99,7 +95,7 @@ class TreeSelfCheck:
 
     def run_once(self, *, verdicts: Mapping[str, str] | None = None) -> None:
         """Walk every unit once, folding the verdicts into the episode state."""
-        now = _monotonic()
+        now = self._timers.monotonic()
         self._state.rounds += 1
         view = self._host.tree_view()
         raw_root_pid: Any = view["root_pid"]
@@ -193,7 +189,7 @@ class TreeSelfCheck:
 
     def metrics_snapshot(self) -> dict[str, object]:
         """The `metrics` block `Supervisor.status()` embeds (the B7 status surface)."""
-        now = _monotonic()
+        now = self._timers.monotonic()
         return {
             "chain": {
                 "broken": self._state.broken_since is not None,

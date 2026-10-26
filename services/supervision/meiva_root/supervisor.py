@@ -12,11 +12,11 @@ import os
 from collections.abc import Awaitable, Callable, Sequence
 from pathlib import Path
 from time import monotonic
-from typing import Any, Protocol
+from typing import Any
 
 import psutil
 
-from base.clock import SYSTEM_TIMERS, Clock, ClockConfig
+from base.clock import Clock
 from base.host.exit_codes import CODE_BEHIND_MINIMUM_EXIT_CODE
 from base.host.runtime_interpreter import LoadedRuntimeIdentity
 from base.native_process.child_env import inherited_process_env
@@ -51,33 +51,17 @@ from services.supervision.meiva_root.stopping import (
     rotate_unit_log,
 )
 from services.supervision.meiva_root.unit_ledger import GenerationRecord
-from services.supervision.meiva_root.unit_records import Generation, UnitRuntime
+from services.supervision.meiva_root.unit_records import (
+    Generation,
+    HealthSource,
+    MetricsSource,
+    UnitRuntime,
+)
 
 _log = logging.getLogger(__name__)
 # meiva:note
 # A refused wrapper is refused in milliseconds; losing the cap beats a restart loop.
 REWRITE_STARTUP_WINDOW_S = 10.0
-
-
-def _wall_time() -> float:
-    cfg = ClockConfig("UTC", "UTC", message_timestamp_weekday=False)
-    return Clock(cfg, timers=SYSTEM_TIMERS).now().timestamp()
-
-
-class HealthSource(Protocol):
-    """The health runner slice `status()` embeds (W1.2a's `HealthMonitor`)."""
-
-    def health_snapshot(self) -> dict[str, object]:
-        """A plain-dict health view, keyed by unit id."""
-        ...
-
-
-class MetricsSource(Protocol):
-    """The self-check slice `status()` embeds (W1.2b's `TreeSelfCheck`)."""
-
-    def metrics_snapshot(self) -> dict[str, object]:
-        """The B7 metrics block (the chain gauges)."""
-        ...
 
 
 type ChildSpawn = Callable[..., Awaitable[asyncio.subprocess.Process]]
@@ -97,11 +81,15 @@ class Supervisor(LeftBehindMixin, StoppingMixin):
         registry: UnitRegistry,
         *,
         run_dir: Path,
+        clock: Clock,
+        root_pid: int,
         config: SupervisorConfig | None = None,
         spawn: ChildSpawn | None = None,
         process_control: ProcessControl = SYSTEM_PROCESS_CONTROL,
     ) -> None:
         self._registry = registry
+        self._clock = clock
+        self._root_pid = root_pid
         # meiva:note
         # The child-process launcher. None means `asyncio.create_subprocess_exec`;
         # a deployment assembly (`--wiring`) may install its own before start.
@@ -134,6 +122,13 @@ class Supervisor(LeftBehindMixin, StoppingMixin):
         self._home: Path | None = None
         self._watches: dict[asyncio.Task[None], Generation] = {}
         self._watch_errors: list[BaseException] = []
+
+    @property
+    def root_pid(self) -> int:
+        return self._root_pid
+
+    def _now(self) -> float:
+        return self._clock.now().timestamp()
 
     # ── lifecycle ────────────────────────────────────────────────────────────
 
@@ -369,7 +364,7 @@ class Supervisor(LeftBehindMixin, StoppingMixin):
                 ),
             }
             units.append(entry)
-        own_identity = OwnedProcess.capture(psutil.Process())
+        own_identity = OwnedProcess.capture(psutil.Process(self._root_pid))
         root: dict[str, object] = {
             "pid": own_identity.pid,
             "create_time": own_identity.birth,
@@ -427,7 +422,7 @@ class Supervisor(LeftBehindMixin, StoppingMixin):
             }
             for runtime in self._units.values()
         ]
-        return {"root_pid": psutil.Process().pid, "units": units}
+        return {"root_pid": self._root_pid, "units": units}
 
     def health_generation(self, unit_id: str) -> tuple[OwnedProcess, float] | None:
         """The retained native generation and its monotonic launch time."""
@@ -511,12 +506,16 @@ class Supervisor(LeftBehindMixin, StoppingMixin):
         # meiva:note
         # Stamp the intent's age where the intent is set: a stop's age is what
         # decides whether it still counts as a deliberate, owned action (#5611).
-        runtime.intent_since = _wall_time()
+        runtime.intent_since = self._now()
         self._write_record(runtime)
 
     def _write_record(self, runtime: UnitRuntime) -> None:
         record = IntentRecord(
-            runtime.intent, runtime.intent_source, runtime.restart_failed, runtime.intent_caller
+            runtime.intent,
+            runtime.intent_source,
+            runtime.restart_failed,
+            runtime.intent_caller,
+            updated_at=self._now(),
         )
         intent_store.write(self._run_dir, runtime.manifest.id, record)
 
@@ -530,7 +529,7 @@ class Supervisor(LeftBehindMixin, StoppingMixin):
         runtime.intent_source = merged.source
         runtime.restart_failed = merged.restart_failed
         runtime.intent_caller = None if record is None else record.caller
-        runtime.intent_since = _wall_time() if record is None else record.updated_at
+        runtime.intent_since = self._now() if record is None else record.updated_at
         if record is None or (record.intent, record.source, record.restart_failed) != (
             merged.intent,
             merged.source,
@@ -543,7 +542,7 @@ class Supervisor(LeftBehindMixin, StoppingMixin):
     ) -> None:
         """Record one member's failed replacement half; store first, then signal."""
         previous = runtime.restart_failed
-        since = previous.since if previous is not None else _wall_time()
+        since = previous.since if previous is not None else self._now()
         failure = RestartFailure(stage=stage, since=since, detail=detail)
         runtime.restart_failed = failure
         self._write_record(runtime)
@@ -577,8 +576,7 @@ class Supervisor(LeftBehindMixin, StoppingMixin):
             # let a signal failure corrupt the transition that produced it.
             _log.exception("unit %s: restart-failure event fan-out failed", runtime.manifest.id)
 
-    @staticmethod
-    def _emit_restart_cleared(runtime: UnitRuntime, failure: RestartFailure) -> None:
+    def _emit_restart_cleared(self, runtime: UnitRuntime, failure: RestartFailure) -> None:
         try:
             from base.log import logger
 
@@ -587,7 +585,7 @@ class Supervisor(LeftBehindMixin, StoppingMixin):
                 "{failed_for_s:.0f}s",
                 event="root_restart_cleared",
                 unit=runtime.manifest.id,
-                failed_for_s=max(0.0, _wall_time() - failure.since),
+                failed_for_s=max(0.0, self._now() - failure.since),
             )
         except Exception:
             _log.exception("unit %s: restart-cleared event fan-out failed", runtime.manifest.id)
@@ -685,7 +683,10 @@ class Supervisor(LeftBehindMixin, StoppingMixin):
         # meiva:link services/supervision/meiva_root/docs/meiva_root.meiva.okf.md
         if identity is not None:
             record = GenerationRecord(
-                identity, generation.seq, manifest.digest(), started_at=_wall_time()
+                identity,
+                generation.seq,
+                manifest.digest(),
+                started_at=self._now(),
             )
             unit_ledger.write(self._run_dir, manifest.id, record)
         watch = asyncio.create_task(self._watch(runtime, generation))

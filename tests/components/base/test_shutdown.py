@@ -9,6 +9,7 @@ from pathlib import Path
 
 import pytest
 
+from base.clock import SYSTEM_TIMERS, Clock, ClockConfig
 from base.daemon import shutdown
 from base.host.proc import run_bounded
 from base.log.tests.log_records import LogRecords
@@ -115,7 +116,13 @@ async def test_root_graceful_stop_runs_the_product_handlers_cleanup(unit_home: P
     command = (sys.executable, str(_CHILD), str(started), str(marker))
     unit = UnitManifest("svc", command, RestartPolicy.NEVER, "root", env)
     owner = Supervisor(
-        UnitRegistry([unit]), run_dir=unit_home / "root", config=SupervisorConfig(stop_timeout_s=10)
+        UnitRegistry([unit]),
+        run_dir=unit_home / "root",
+        config=SupervisorConfig(stop_timeout_s=10),
+        clock=Clock(
+            ClockConfig("UTC", "UTC", message_timestamp_weekday=False), timers=SYSTEM_TIMERS
+        ),
+        root_pid=os.getpid(),
     )
     await owner.start()
     try:

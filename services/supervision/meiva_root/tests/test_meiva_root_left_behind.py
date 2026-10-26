@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import asyncio
+import os
 import subprocess
 import sys
 import time
@@ -24,6 +25,7 @@ from services.supervision.meiva_root.manifest import RestartPolicy, UnitManifest
 from services.supervision.meiva_root.probes import ProbeRegistry
 from services.supervision.meiva_root.stopping import SupervisorConfig
 from services.supervision.meiva_root.supervisor import Supervisor
+from services.supervision.meiva_root.tests.slices import system_clock
 from services.supervision.meiva_root.unit_records import OperatorStopFacts
 
 _CHILD = Path(__file__).with_name("child_unit.py")
@@ -40,6 +42,8 @@ def _root(run_dir: Path, *scenario: str, stop_timeout_s: float = 0.2) -> Supervi
         UnitRegistry([unit]),
         run_dir=run_dir,
         config=SupervisorConfig(stop_timeout_s=stop_timeout_s),
+        clock=system_clock(),
+        root_pid=os.getpid(),
     )
 
 
@@ -249,6 +253,7 @@ async def test_an_alive_answer_from_no_generation_is_reported_once(
         stub,
         registry,
         config=HealthConfig(interval_s=0.01, startup_grace_s=0.0, restart_backoff_s=(0.0,)),
+        clock=system_clock(),
     )
     await monitor.run_round()
     await monitor.run_round()
