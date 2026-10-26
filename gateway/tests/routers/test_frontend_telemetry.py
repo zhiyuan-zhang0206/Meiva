@@ -45,11 +45,11 @@ def _rows(session: str) -> list[tuple]:  # type: ignore[no-untyped-def]
     import json
     from datetime import UTC, datetime
 
-    from base.paths import logs_dir
+    from base.paths import logs_dir, meiva_home
 
     telemetry.sync()
     day = datetime.now(UTC).strftime("%Y%m%d")
-    path = logs_dir() / f"events-{day}.jsonl"
+    path = logs_dir(home=meiva_home()) / f"events-{day}.jsonl"
     if not path.exists():
         return []
     out: list[tuple[Any, ...]] = []

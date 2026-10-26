@@ -97,7 +97,7 @@ def _demo_manifest(name: str, *, runtime: bool) -> str:
 def _write_plugin(
     name: str, body: str, *, manifest: str | None = None, runtime: str | None = None
 ) -> Path:
-    plugin_dir = paths.plugins_dir() / name
+    plugin_dir = paths.plugins_dir(home=paths.meiva_home()) / name
     plugin_dir.mkdir(parents=True, exist_ok=True)
     (plugin_dir / "plugin.py").write_text(body)
     if runtime is not None:
