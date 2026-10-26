@@ -7,7 +7,7 @@ import { readScrollMemory, saveScrollMemory } from "@/lib/layout/scroll-memory";
 import { useTimeline } from "@/lib/timeline/use-timeline";
 import { useTimelineStore } from "@/lib/timeline/timeline-store";
 import { cacheOnlyApi } from "@/lib/transport/tests/api/api-provider";
-import { ApiProvider } from "@/lib/transport/transport-context";
+import { ApiProvider, WallClockProvider } from "@/lib/transport/transport-context";
 import { TimelineView } from ".";
 vi.mock("@/lib/transport/api", () => ({ api: {
   getConfig: vi.fn().mockResolvedValue({ fields: [] }),
@@ -35,10 +35,13 @@ function Conversation({ agentId, entry }: { agentId: number | null; entry: strin
   const timeline = useTimeline(agentId, () => undefined);
   return <TimelineView items={timeline.items} threadKey={agentId === null ? undefined : String(agentId)} scrollMemoryKey={entry} />;
 }
+const wallNow = () => Date.now();
 function conversation(agentId: number | null, entry: string) {
   return (
     <QueryClientProvider client={client}>
-      <ApiProvider api={gateway}><Conversation agentId={agentId} entry={entry} key={entry} /></ApiProvider>
+      <WallClockProvider wallNow={wallNow}>
+        <ApiProvider api={gateway}><Conversation agentId={agentId} entry={entry} key={entry} /></ApiProvider>
+      </WallClockProvider>
     </QueryClientProvider>
   );
 }
@@ -272,7 +275,9 @@ function AgentTabs({ agentId, entry }: { agentId: number; entry: string }) {
 function tabs(agentId: number, entry: string) {
   return (
     <QueryClientProvider client={client}>
-      <ApiProvider api={gateway}><AgentTabs agentId={agentId} entry={entry} /></ApiProvider>
+      <WallClockProvider wallNow={wallNow}>
+        <ApiProvider api={gateway}><AgentTabs agentId={agentId} entry={entry} /></ApiProvider>
+      </WallClockProvider>
     </QueryClientProvider>
   );
 }
