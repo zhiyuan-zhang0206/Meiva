@@ -27,7 +27,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 import base.host.proc
-from base.clock import SYSTEM_TIMERS, Timers
+from base.clock import Timers
 from base.host.system.hostport import Host
 from base.native_process.os_platform import is_macos
 
@@ -262,7 +262,7 @@ def degraded_wait_reason() -> str | None:
 
 def wait_for_browser_startup_readiness(
     *,
-    timers: Timers = SYSTEM_TIMERS,
+    timers: Timers,
     readiness_sequence: Iterable[StartupReadiness] = (),
 ) -> None:
     """Block the supervised daemon until macOS can safely serve Chrome's keys."""

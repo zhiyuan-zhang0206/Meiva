@@ -8,6 +8,7 @@ import sys
 
 import psutil
 
+from base.clock import Clock, ClockConfig
 from base.native_process.ownership import OwnedProcess, capture_tree, retain_processes
 from cli.commands.data_plane.stop_waits import wait_for_exit
 from cli.database.runtime import CommandRuntime
@@ -23,7 +24,12 @@ def record_browser_session(command: CommandRuntime) -> None:
 
     line = session_restore.record_for_stop(
         home=command.home,
-        chrome=session_restore.CdpChrome(command.config.view.services.browser_cdp_port),
+        chrome=session_restore.CdpChrome(
+            command.config.view.services.browser_cdp_port, timers=command.timers
+        ),
+        now=Clock(
+            ClockConfig("UTC", None, message_timestamp_weekday=False), timers=command.timers
+        ).now(),
     )
     if line is not None:
         print(f"  {line}")

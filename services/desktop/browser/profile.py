@@ -28,7 +28,6 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import TextIO
 
-from base.clock import SYSTEM_TIMERS, Clock, ClockConfig
 from base.host.proc import process_alive
 from base.paths import meiva_home
 
@@ -133,14 +132,14 @@ def copy_default_profile(src: Path, dst: Path) -> None:
     shutil.copytree(src, dst, ignore=ignore_junk, symlinks=True)
 
 
-def validate_local_state(profile: Path) -> str | None:
-    """Return a warning for unsafe-looking `Local State`, without reading it.
-
-    Chrome owns this file's encrypted metadata. Startup only validates its
-    existence, ordinary read permission, and mtime; it never parses,
-    copies, rewrites, or deletes it. A warning remains non-fatal because Chrome
-    is the only component that can authoritatively interpret its own state.
-    """
+# meiva:note
+# Return a warning for unsafe-looking `Local State`, without reading it.
+#
+# Chrome owns this file's encrypted metadata. Startup only validates its existence, ordinary read
+# permission, and mtime (against `now`, epoch seconds); it never parses, copies, rewrites, or
+# deletes it. A warning remains non-fatal because Chrome is the only component that can
+# authoritatively interpret its own state.
+def validate_local_state(profile: Path, *, now: float) -> str | None:
     local_state = profile / "Local State"
     try:
         metadata = local_state.stat()
@@ -150,19 +149,7 @@ def validate_local_state(profile: Path) -> str | None:
         return f"Local State could not be inspected at {local_state}: {exc}"
     if not metadata.st_mode & 0o444 or not os.access(local_state, os.R_OK):
         return f"Local State is not readable at {local_state}"
-    now_ts = (
-        Clock(
-            ClockConfig(
-                timezone="UTC",
-                authoritative_timezone="UTC",
-                message_timestamp_weekday=False,
-            ),
-            timers=SYSTEM_TIMERS,
-        )
-        .now()
-        .timestamp()
-    )
-    if metadata.st_mtime > now_ts + 300:
+    if metadata.st_mtime > now + 300:
         return f"Local State mtime is unexpectedly in the future at {local_state}"
     return None
 

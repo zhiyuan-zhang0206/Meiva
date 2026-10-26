@@ -29,7 +29,6 @@ exports = ["mcp_daemon.py", "mcp_socket_bridge.py", "mcp_wrapper.py", "orphan.py
 [debt.ambient-read]
 "daemon.py#home base.paths.logs_dir" = 1
 "daemon.py#home base.paths.meiva_home" = 1
-"gateway_session.py#settings base.cluster.machine.ambient.gateway_access_from_settings" = 1
 "mcp_daemon.py#home base.paths.meiva_home" = 1
 "mcp_wrapper.py#home base.paths.meiva_home" = 1
 "profile.py#home base.paths.meiva_home" = 1
