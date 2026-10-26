@@ -20,6 +20,7 @@ from pathlib import Path
 import psutil
 import pytest
 
+from base.clock import SYSTEM_TIMERS
 from base.sessions import posixproc
 from base.sessions.backend import PosixProcSessionBackend, PtySessionBackend, get_shell_backend
 from base.sessions.protocol import SessionBackend
@@ -30,7 +31,7 @@ _SLEEP = "/bin/sleep 300"
 
 
 def _backend() -> PosixProcSessionBackend:
-    return PosixProcSessionBackend()
+    return PosixProcSessionBackend(SYSTEM_TIMERS)
 
 
 def _pid(name: str) -> int:
@@ -321,4 +322,4 @@ def test_get_shell_backend_returns_pty_backend():
     shell = get_shell_backend()
     assert isinstance(shell, PtySessionBackend)
     assert isinstance(shell, SessionBackend)
-    assert not isinstance(get_backend(), PtySessionBackend)
+    assert not isinstance(get_backend(timers=SYSTEM_TIMERS), PtySessionBackend)

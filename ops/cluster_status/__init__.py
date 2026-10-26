@@ -24,7 +24,7 @@ from pathlib import Path
 import psycopg
 from psycopg_pool import ConnectionPool
 
-from base.clock import Clock
+from base.clock import SYSTEM_TIMERS, Clock
 from base.cluster.machine import MachineIdentityReader
 from base.daemon.endpoints import ServiceEndpoints
 from base.db import Database
@@ -193,7 +193,9 @@ def status_snapshot(
     )
     supervisor_online = _supervisor_online(home)
     sessions = collect_sessions(
-        service_backend=get_backend(), shell_backend=get_shell_backend(), now=cluster_now()
+        service_backend=get_backend(timers=SYSTEM_TIMERS),
+        shell_backend=get_shell_backend(),
+        now=cluster_now(),
     )
     # meiva:note
     # The live one-shot resource sample blocks for its CPU interval. Run it in parallel with
