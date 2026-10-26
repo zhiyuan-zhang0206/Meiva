@@ -529,7 +529,7 @@ def cmd_start_body(
         # Failed start attempts must leave recovery actions gated.
         with start_trace.phase("serving generation"):
             serving_generation = start_serving.begin_start(command.home)
-            record_running_sha(runtime.code_root)
+            record_running_sha(runtime.code_root, home=command.home)
         launch = _launch(
             start, roster, retained_children=retained_children, boot_attempt=boot_attempt
         )
