@@ -12,3 +12,4 @@ exports = ["core.py", "nodes.py", "plugin_state_codec.py", "state_channels.py", 
 "identity.py" = "strict"
 "nodes.py" = "strict"
 "state_channels.py" = "strict"
+"state_schema.py" = "strict"
