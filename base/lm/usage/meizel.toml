@@ -8,6 +8,9 @@ exports = ["__init__.py", "metering.py"]
 [debt.ambient-read]
 "__init__.py#clock time.time_ns" = 1
 
+[debt.fake-entropy]
+"metering.py#interval-wrapper _monotonic" = 1
+
 [debt.impure-call]
 "metering.py#time.monotonic" = 1
 

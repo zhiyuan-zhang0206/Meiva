@@ -633,6 +633,14 @@ module-level instance, or a function that builds its own client when none is pas
 the dependency back out of sight, and a module entry that calls a factory itself has
 become a second composition root. Defaults are for tuning constants only.
 
+Identifiers and random draws are read in the root as well, with `uuid.uuid4()` or a `random.Random`.
+A `time.monotonic_ns()`, `perf_counter()`, `id(obj)` or `itertools.count()` reading is not a source of
+identity or randomness: two processes started together draw the same value and a restart repeats it.
+Spending one in an f-string, a `uuid5`, a seed, a remainder or a bit mask, and a private
+`def _monotonic(): return time.monotonic()` that nothing injects, is `fake-entropy`
+([fake entropy](../../meizel/docs/checker/fake-entropy.meiva.okf.md)); a duration (`end - start`) is
+the plain use of an interval clock.
+
 ### Existing patches
 
 Existing patches stay recorded debt until their component is converted. Do not add one,

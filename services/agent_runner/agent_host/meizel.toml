@@ -27,3 +27,6 @@ exports = ["daemon.py", "held_settle.py", "host.py", "host_beat.py", "invocation
 "host.py#home base.paths.harness_sessions_dir" = 1
 "runtime.py#home base.paths.workspace_dir" = 1
 "stdout_log.py#home base.paths.logs_dir" = 1
+
+[debt.fake-entropy]
+"host.py#id in uuid.UUID" = 1
