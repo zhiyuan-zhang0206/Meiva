@@ -493,6 +493,8 @@ def test_service_stdout_names_are_managed_and_follow_service_family_rules(
         ("agent_host.2026-10-20_00-33-19_718373.log", "agent"),
         ("page_server.2026-10-23_13-10-31_174359.log", "agent"),
         ("meiva-root.2026-10-19_08-00-05_763203.log", "ops"),
+        ("browser-mcp.2026-10-23_12-10-19_089545.log", "ops"),
+        ("computer-mcp.2026-10-23_13-10-34_139253.log", "ops"),
         ("wibble.2026-10-20_00-33-19_718373.log", "other"),
     ],
 )
@@ -503,6 +505,83 @@ def test_rotated_supervisor_logs_keep_their_evidence_window(name: str, family: s
     assert match is not None
     assert match["service"] == name.split(".", 1)[0]
     assert log_family(match) == family
+
+
+# meiva:note
+# The daily run has to say which services have no family. `wibble` is one the map does not name,
+# and the fresh file proves the line is not an expiry report: the todo shows up on day one, not
+# after the catch-all window has passed. A native archive (`loki.log.DATE`) shares the family but
+# is not a service, so it must never be named as a mapping todo.
+# meiva:link cli/commands/observability/docs/log-maintenance.md
+def test_catch_all_reports_unnamed_services_at_any_age(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    from cli.commands.observability import logs
+
+    expired = _file_at(tmp_path, "wibble.2026-08-01_00-00-00_12345.log", _NOW - timedelta(days=16))
+    fresh = _file_at(tmp_path, "wibble.2026-08-24_00-00-00_54321.log", _NOW - timedelta(days=1))
+    native_archive = _file_at(tmp_path, "loki.log.2026-08-01", _NOW - timedelta(days=16))
+
+    rc = logs.cmd_logs_retention(
+        older_than_days=None,
+        family_days={},
+        dry_run=False,
+        default_retention_days=None,
+        logs_path=tmp_path,
+        now=_NOW,
+    )
+
+    out = capsys.readouterr().out
+    assert rc == 0
+    assert "retention_catch_all\tservices=wibble\tdays=15\tfiles=2" in out
+    assert "retention_summary\tmode=delete\tdeleted=2" in out
+    assert not expired.exists()
+    assert not native_archive.exists()
+    assert fresh.exists()
+
+
+def test_catch_all_says_none_explicitly_when_every_service_has_a_family(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    from cli.commands.observability import logs
+
+    _file_at(tmp_path, "browser-mcp.2026-08-01_00-00-00_12345.log", _NOW - timedelta(days=31))
+
+    rc = logs.cmd_logs_retention(
+        older_than_days=None,
+        family_days={},
+        dry_run=False,
+        default_retention_days=None,
+        logs_path=tmp_path,
+        now=_NOW,
+    )
+
+    out = capsys.readouterr().out
+    assert rc == 0
+    assert "retention_catch_all\tservices=-\tdays=15\tfiles=0" in out
+
+
+def test_dry_run_reports_the_catch_all_line_too(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    from cli.commands.observability import logs
+
+    _file_at(tmp_path, "wibble.2026-08-24_00-00-00_12345.log", _NOW - timedelta(days=1))
+
+    rc = logs.cmd_logs_retention(
+        older_than_days=None,
+        family_days={},
+        dry_run=True,
+        default_retention_days=None,
+        logs_path=tmp_path,
+        now=_NOW,
+    )
+
+    assert rc == 0
+    assert "retention_catch_all\tservices=wibble\tdays=15\tfiles=1" in capsys.readouterr().out
 
 
 def test_agent_and_shell_names_keep_precedence_over_service_stdout() -> None:
