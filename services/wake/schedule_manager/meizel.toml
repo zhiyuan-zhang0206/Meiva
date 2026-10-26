@@ -25,8 +25,7 @@ exports = ["blocked_streak.py", "daemon.py", "engine.py", "host_restart.py", "la
 
 [roots]
 "daemon.py" = { kinds = ["settings"], why = "Service or operator process entry boots configuration before composing its resources" }
-"runner.py" = { kinds = ["pid", "settings"], why = "Service or operator process entry boots configuration before composing its resources" }
+"runner.py" = { kinds = ["home", "pid", "random", "settings"], why = "Service or operator process entry boots configuration before composing its resources; it resolves the account home and builds the random generator once, for the SDK context it binds" }
 
 [debt.ambient-read]
 "daemon.py#home base.paths.meiva_home" = 1
-"runner.py#home base.paths.meiva_home" = 1

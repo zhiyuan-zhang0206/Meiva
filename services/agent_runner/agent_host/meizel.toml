@@ -19,7 +19,7 @@ exports = ["daemon.py", "held_settle.py", "host.py", "host_beat.py", "invocation
 "__init__.py" = "strict"
 
 [roots]
-"daemon.py" = { kinds = ["endpoints", "environ", "pid", "random"], why = "the agent host process entry: it reads the parent environment once at boot to build the exec children's ParentFacts, draws every host identity and credential from one secure generator, and holds the process pid and service endpoints" }
+"daemon.py" = { kinds = ["endpoints", "environ", "home", "pid", "random"], why = "the agent host process entry: it reads the parent environment once at boot to build the exec children's ParentFacts, draws every host identity and credential from one secure generator, and holds the process pid and service endpoints; it reads the account home once and hands it to the contexts the host builds" }
 
 [debt.ambient-read]
 "health_routes.py#home base.paths.meiva_home" = 1
