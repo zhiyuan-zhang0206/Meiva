@@ -12,7 +12,7 @@ import pytest
 
 from base.config import settings
 from base.db import Database
-from base.paths import meiva_home, workspace_dir
+from base.paths import resolve_meiva_home, workspace_dir
 from base.sessions.tests.poll_until import poll_until
 from tests.e2e._db import (
     chat_and_wait,
@@ -172,7 +172,7 @@ def test_sdk_calls_resolve_relative_paths_against_the_logical_cwd(
 
     assert (sub / "out.txt").read_text() == "ALPHA\nbeta\n", f"exec output: {out!r}"
     assert not (sub / "gone.txt").exists()
-    workspace = workspace_dir(spawned_agent, home=meiva_home())
+    workspace = workspace_dir(spawned_agent, home=resolve_meiva_home())
     assert not (workspace / "out.txt").exists() and not (workspace / "gone.txt").exists()
 
     assert "set-error FileNotFoundError" in out
@@ -233,7 +233,7 @@ def test_a_vanished_cwd_falls_back_to_the_workspace_after_restart(
     _restart_and_wait(spawned_agent)
 
     chat_and_wait(spawned_agent, "where are you now")
-    fallback = str(workspace_dir(spawned_agent, home=meiva_home()).resolve())
+    fallback = str(workspace_dir(spawned_agent, home=resolve_meiva_home()).resolve())
     out = _tool_outputs(world.model_inputs()[-1])
     assert f"cwd-after-restart {fallback}" in out, (
         f"stale cwd not repaired: expected the workspace {fallback}; model saw: {out!r}"

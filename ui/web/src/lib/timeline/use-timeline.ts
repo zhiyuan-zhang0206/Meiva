@@ -9,7 +9,7 @@
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { startTransition, useCallback, useEffect, useLayoutEffect, useRef } from "react";
 
-import { useApi } from "../transport/transport-context";
+import { useApi, useWallNow } from "../transport/transport-context";
 import { useAgentReconcile } from "../agents/agent-reconcile";
 import { useDisplayLimit } from "../format/display-limits";
 import { useAgentReadRepair } from "../agents/use-agent-read-repair";
@@ -103,6 +103,7 @@ export function useTimeline(
   agentStatus?: string,
 ): UseTimelineResult {
   const api = useApi();
+  const wallNow = useWallNow();
   const queryClient = useQueryClient();
 
   const { isVisible } = useAgentReadRepair("timeline", agentId);
@@ -258,7 +259,7 @@ export function useTimeline(
       if (ev.role === "token_usage") return;
       if (startsTurn(ev)) noteTurnStart(ev.agent_id);
 
-      const apply = () => processSseEvent(ev, Date.now());
+      const apply = () => processSseEvent(ev, wallNow());
       if (isStreamingDelta(ev)) {
         timelineRuntime.runTransition(apply);
       } else {
@@ -266,7 +267,7 @@ export function useTimeline(
       }
       trackCompactForInvalidation(ev);
     },
-    [processSseEvent, trackCompactForInvalidation],
+    [processSseEvent, trackCompactForInvalidation, wallNow],
   );
 
   // Frame-batch delivery: the provider calls this ONCE per SSE frame with
@@ -284,7 +285,7 @@ export function useTimeline(
         if (startsTurn(ev)) noteTurnStart(ev.agent_id);
       }
       const hasStreaming = filtered.some((ev) => isStreamingDelta(ev));
-      const apply = () => processSseEventBatch(filtered, Date.now());
+      const apply = () => processSseEventBatch(filtered, wallNow());
       if (hasStreaming) {
         timelineRuntime.runTransition(apply);
       } else {
@@ -294,7 +295,7 @@ export function useTimeline(
         trackCompactForInvalidation(ev);
       }
     },
-    [processSseEventBatch, trackCompactForInvalidation],
+    [processSseEventBatch, trackCompactForInvalidation, wallNow],
   );
 
   const onConnectionEvent = useCallback(
@@ -421,12 +422,12 @@ export function useTimeline(
     const st = useTimelineStore.getState();
     const transitionedFromRunning = prev.id === agentId && prev.status === "running";
     if (transitionedFromRunning || (!st.turnActive && hasUnsettledClock(st.items))) {
-      st.settleTurn(Date.now());
+      st.settleTurn(wallNow());
       if (transitionedFromRunning) {
         void queryClient.invalidateQueries({ queryKey: ["timeline", agentId] });
       }
     }
-  }, [agentId, agentStatus, queryClient]);
+  }, [agentId, agentStatus, queryClient, wallNow]);
 
   const selected = activeThreadId === agentId;
   const retained = selected || agentId === null ? undefined : queryClient.getQueryData<ReadingWindow>(["timeline-reading-window", agentId]);

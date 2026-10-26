@@ -95,9 +95,9 @@ def _demo_manifest(name: str, *, runtime: bool) -> str:
 
 
 def _write_plugin(
-    name: str, body: str, *, manifest: str | None = None, runtime: str | None = None
+    home: Path, name: str, body: str, *, manifest: str | None = None, runtime: str | None = None
 ) -> Path:
-    plugin_dir = paths.plugins_dir(home=paths.meiva_home()) / name
+    plugin_dir = paths.plugins_dir(home=home) / name
     plugin_dir.mkdir(parents=True, exist_ok=True)
     (plugin_dir / "plugin.py").write_text(body)
     if runtime is not None:
@@ -132,8 +132,8 @@ def test_every_surface_entry_point_renders_its_live_signature():
             assert "(" in rendered
 
 
-def test_declarations_are_attributed_to_the_declaring_plugin():
-    _write_plugin("demo", _DEMO_PLUGIN, runtime=_DEMO_RUNTIME)
+def test_declarations_are_attributed_to_the_declaring_plugin(unit_home: Path):
+    _write_plugin(unit_home, "demo", _DEMO_PLUGIN, runtime=_DEMO_RUNTIME)
     _enable(demo=True)
 
     catalog = catalog_mod.build_catalog(sampling=fixed_sampling_owner())
@@ -155,8 +155,8 @@ def test_declarations_are_attributed_to_the_declaring_plugin():
     assert all(c.plugin == "demo" for c in view.contributions)
 
 
-def test_a_disabled_plugin_reports_no_declarations():
-    _write_plugin("demo", _DEMO_PLUGIN, runtime=_DEMO_RUNTIME)
+def test_a_disabled_plugin_reports_no_declarations(unit_home: Path):
+    _write_plugin(unit_home, "demo", _DEMO_PLUGIN, runtime=_DEMO_RUNTIME)
     _enable(demo=False)
 
     view = catalog_mod.build_catalog(sampling=fixed_sampling_owner()).plugin("demo")
@@ -165,8 +165,8 @@ def test_a_disabled_plugin_reports_no_declarations():
     assert view.contributions == ()
 
 
-def test_a_reload_does_not_accumulate_contributions():
-    _write_plugin("demo", _DEMO_PLUGIN, runtime=_DEMO_RUNTIME)
+def test_a_reload_does_not_accumulate_contributions(unit_home: Path):
+    _write_plugin(unit_home, "demo", _DEMO_PLUGIN, runtime=_DEMO_RUNTIME)
     _enable(demo=True)
 
     first = catalog_mod.build_catalog(sampling=fixed_sampling_owner()).plugin("demo").contributions
@@ -175,10 +175,10 @@ def test_a_reload_does_not_accumulate_contributions():
     assert len(first) == len(second)
 
 
-def test_framework_hooks_are_not_reported_as_plugin_contributions():
+def test_framework_hooks_are_not_reported_as_plugin_contributions(unit_home: Path):
     from agent.graph.hooks.framework import framework_hooks
 
-    _write_plugin("demo", _DEMO_PLUGIN, runtime=_DEMO_RUNTIME)
+    _write_plugin(unit_home, "demo", _DEMO_PLUGIN, runtime=_DEMO_RUNTIME)
     _enable(demo=True)
 
     catalog = catalog_mod.build_catalog(sampling=fixed_sampling_owner())
@@ -242,8 +242,10 @@ def contribute() -> PluginContributions:
 """
 
 
-def test_declared_vs_registered_reports_both_directions():
-    _write_plugin("declared", _DECLARED_PLUGIN, manifest=_MANIFEST, runtime=_DECLARED_RUNTIME)
+def test_declared_vs_registered_reports_both_directions(unit_home: Path):
+    _write_plugin(
+        unit_home, "declared", _DECLARED_PLUGIN, manifest=_MANIFEST, runtime=_DECLARED_RUNTIME
+    )
     _enable(declared=True)
 
     view = catalog_mod.build_catalog(sampling=fixed_sampling_owner()).plugin("declared")
@@ -258,8 +260,8 @@ def test_declared_vs_registered_reports_both_directions():
     assert statuses[("sdkWraps", "files.write")] == "registered-not-declared"
 
 
-def test_a_plugin_without_a_manifest_fails_the_catalog():
-    plugin_dir = _write_plugin("demo", _DEMO_PLUGIN, runtime=_DEMO_RUNTIME)
+def test_a_plugin_without_a_manifest_fails_the_catalog(unit_home: Path):
+    plugin_dir = _write_plugin(unit_home, "demo", _DEMO_PLUGIN, runtime=_DEMO_RUNTIME)
     (plugin_dir / "meiva-plugin.json").unlink()
     _enable(demo=True)
 
@@ -278,8 +280,8 @@ def test_install_time_manifest_keys_have_no_runtime_registry():
     } == catalog_mod.DECLARATION_ONLY_KEYS
 
 
-def test_unknown_plugin_fails_fast_and_names_the_installed_ones():
-    _write_plugin("demo", _DEMO_PLUGIN, runtime=_DEMO_RUNTIME)
+def test_unknown_plugin_fails_fast_and_names_the_installed_ones(unit_home: Path):
+    _write_plugin(unit_home, "demo", _DEMO_PLUGIN, runtime=_DEMO_RUNTIME)
     _enable(demo=True)
     catalog = catalog_mod.build_catalog(sampling=fixed_sampling_owner())
 
@@ -287,8 +289,8 @@ def test_unknown_plugin_fails_fast_and_names_the_installed_ones():
         catalog.plugin("nope")
 
 
-def test_a_dashed_name_resolves_to_the_plugin_directory():
-    _write_plugin("demo_plugin", _DEMO_PLUGIN)
+def test_a_dashed_name_resolves_to_the_plugin_directory(unit_home: Path):
+    _write_plugin(unit_home, "demo_plugin", _DEMO_PLUGIN)
     _enable(demo_plugin=True)
 
     assert (
@@ -369,8 +371,10 @@ def _registered(load_failures: LoadFailures) -> dict[str, tuple[str, ...]]:
 
 def test_a_plugin_whose_manifest_and_contribute_agree_is_admitted(
     load_failures: LoadFailures,
+    unit_home: Path,
 ):
     _write_plugin(
+        unit_home,
         "gate_ok",
         _GATE_PLUGIN,
         manifest=_gate_manifest("gate_ok", hooks=("before_llm",), sections=("gate_section",)),
@@ -404,14 +408,17 @@ def test_a_plugin_whose_manifest_and_contribute_disagree_on_hooks_is_excluded(
     manifest_hooks: tuple[str, ...],
     provided_hooks: tuple[str, ...],
     problem: str,
+    unit_home: Path,
 ):
     _write_plugin(
+        unit_home,
         "gate_bad",
         _GATE_PLUGIN,
         manifest=_gate_manifest("gate_bad", hooks=manifest_hooks, sections=("gate_section",)),
         runtime=_gate_runtime(provided_hooks),
     )
     _write_plugin(
+        unit_home,
         "gate_ok",
         _GATE_PLUGIN,
         manifest=_gate_manifest("gate_ok", hooks=("before_llm",), sections=("gate_section",)),
@@ -449,8 +456,10 @@ def test_a_plugin_whose_manifest_and_contribute_disagree_on_sections_is_excluded
     manifest_sections: tuple[str, ...],
     provides_section: bool,
     problem: str,
+    unit_home: Path,
 ):
     _write_plugin(
+        unit_home,
         "gate_bad",
         _GATE_PLUGIN,
         manifest=_gate_manifest("gate_bad", hooks=("before_llm",), sections=manifest_sections),
@@ -465,12 +474,13 @@ def test_a_plugin_whose_manifest_and_contribute_disagree_on_sections_is_excluded
     assert problem in str(exc)
 
 
-def test_a_plugin_without_a_manifest_is_excluded(load_failures: LoadFailures):
+def test_a_plugin_without_a_manifest_is_excluded(load_failures: LoadFailures, unit_home: Path):
     bare = _write_plugin(
-        "gate_bare", _GATE_PLUGIN, runtime=_gate_runtime(("before_llm", "after_exec"))
+        unit_home, "gate_bare", _GATE_PLUGIN, runtime=_gate_runtime(("before_llm", "after_exec"))
     )
     (bare / "meiva-plugin.json").unlink()
     _write_plugin(
+        unit_home,
         "gate_ok",
         _GATE_PLUGIN,
         manifest=_gate_manifest("gate_ok", hooks=("before_llm",), sections=("gate_section",)),
@@ -487,17 +497,23 @@ def test_a_plugin_without_a_manifest_is_excluded(load_failures: LoadFailures):
 
 def test_an_invalid_state_declaration_excludes_the_plugin(
     load_failures: LoadFailures,
+    unit_home: Path,
 ):
     core_state = "class GateState(BaseModel):\n    halted: bool = False\n"
     ok_manifest = _gate_manifest("gate_ok", hooks=("before_llm",), sections=("gate_section",))
     _write_plugin(
+        unit_home,
         "gate_state",
         _GATE_PLUGIN,
         manifest=ok_manifest,
         runtime=_gate_runtime(("before_llm",), state=core_state),
     )
     _write_plugin(
-        "gate_ok", _GATE_PLUGIN, manifest=ok_manifest, runtime=_gate_runtime(("before_llm",))
+        unit_home,
+        "gate_ok",
+        _GATE_PLUGIN,
+        manifest=ok_manifest,
+        runtime=_gate_runtime(("before_llm",)),
     )
     _enable(gate_state=True, gate_ok=True)
 
@@ -508,9 +524,10 @@ def test_an_invalid_state_declaration_excludes_the_plugin(
     assert "halted" in str(exc)
 
 
-def test_a_valid_state_declaration_is_admitted(load_failures: LoadFailures):
+def test_a_valid_state_declaration_is_admitted(load_failures: LoadFailures, unit_home: Path):
     state = "class GateState(BaseModel):\n    counter: int = 0\n"
     _write_plugin(
+        unit_home,
         "gate_state",
         _GATE_PLUGIN,
         manifest=_gate_manifest("gate_state", sections=("gate_section",)),

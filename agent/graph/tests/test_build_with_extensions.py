@@ -82,16 +82,16 @@ def _write_manifest(plugin_dir: Path, *, sections: tuple[str, ...] = ()) -> None
     )
 
 
-def _make_plugin(name: str, body: str | None = None) -> None:
-    root = paths.plugins_dir(home=paths.meiva_home())
+def _make_plugin(home: Path, name: str, body: str | None = None) -> None:
+    root = paths.plugins_dir(home=home)
     plugin_dir = root / name
     plugin_dir.mkdir(parents=True, exist_ok=True)
     (plugin_dir / "plugin.py").write_text(body or f"__description__ = '{name}'\n")
     _write_manifest(plugin_dir)
 
 
-def _make_external_plugin(name: str) -> None:
-    root = paths.plugins_dir(home=paths.meiva_home())
+def _make_external_plugin(home: Path, name: str) -> None:
+    root = paths.plugins_dir(home=home)
     plugin_dir = root / name
     plugin_dir.mkdir(parents=True, exist_ok=True)
     (plugin_dir / "plugin.py").write_text(f"__description__ = '{name}'\n")
@@ -102,11 +102,11 @@ def _imported_plugins() -> set[str]:
     return {key for key in sys.modules if key.startswith(_PLUGIN_MODULE_PREFIXES)}
 
 
-def test_only_enabled_plugins_are_imported():
+def test_only_enabled_plugins_are_imported(unit_home: Path):
     """enabled=true plugins are imported; enabled=false are not."""
-    _make_plugin("compact")
-    _make_plugin("syntax_fix")
-    _make_plugin("demo")
+    _make_plugin(unit_home, "compact")
+    _make_plugin(unit_home, "syntax_fix")
+    _make_plugin(unit_home, "demo")
 
     _write_enabled(
         {
@@ -129,10 +129,10 @@ def test_only_enabled_plugins_are_imported():
     assert not any("meiva_to_user" in name for name in imported)
 
 
-def test_external_plugin_also_loaded():
+def test_external_plugin_also_loaded(unit_home: Path):
     """External plugins (~/.meiva/plugins/) are also loaded."""
-    _make_plugin("compact")
-    _make_external_plugin("audit")
+    _make_plugin(unit_home, "compact")
+    _make_external_plugin(unit_home, "audit")
 
     _write_enabled(
         {
@@ -166,7 +166,7 @@ def test_load_extensions_installs_metering():
     assert installation.metered, "the recorder was installed over the surface"
 
 
-def test_a_repeat_load_reuses_the_module_object_so_a_patch_still_lands():
+def test_a_repeat_load_reuses_the_module_object_so_a_patch_still_lands(unit_home: Path):
     """Issue #147: a second `load_extensions()` re-executes the plugin module
     already registered in `sys.modules` — it must not bind a new one.
 
@@ -186,6 +186,7 @@ def test_a_repeat_load_reuses_the_module_object_so_a_patch_still_lands():
     changes rather than once at process boot.
     """
     _make_plugin(
+        unit_home,
         "demo",
         "__description__ = 'demo'\nMARK = 'real'\n\n\ndef probe():\n    return MARK\n",
     )
@@ -208,7 +209,7 @@ def test_a_repeat_load_reuses_the_module_object_so_a_patch_still_lands():
 
 
 def test_a_different_file_under_the_same_name_gets_a_fresh_module(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, unit_home: Path
 ):
     """Reuse is keyed on the file, not just the dotted name.
 
@@ -221,7 +222,7 @@ def test_a_different_file_under_the_same_name_gets_a_fresh_module(
     from base.paths.tests.homes import point_home
     from meiva.sdk_surface import extensions as _loader
 
-    _make_plugin("demo", "__description__ = 'demo'\nGHOST = 'first file'\n")
+    _make_plugin(unit_home, "demo", "__description__ = 'demo'\nGHOST = 'first file'\n")
     _write_enabled({"demo": {"enabled": True}})
 
     _loader.load_extensions(sampling=fixed_sampling_owner())
@@ -232,7 +233,7 @@ def test_a_different_file_under_the_same_name_gets_a_fresh_module(
     other_home = tmp_path / "other_home"
     other_home.mkdir()
     point_home(monkeypatch, other_home)
-    _make_plugin("demo", "__description__ = 'demo'\n")
+    _make_plugin(other_home, "demo", "__description__ = 'demo'\n")
     _write_enabled({"demo": {"enabled": True}})
 
     _loader.load_extensions(sampling=fixed_sampling_owner())
@@ -241,19 +242,19 @@ def test_a_different_file_under_the_same_name_gets_a_fresh_module(
     assert not hasattr(sys.modules[dotted], "GHOST")
 
 
-def test_duplicate_plugin_name_raises():
+def test_duplicate_plugin_name_raises(unit_home: Path):
     """Same-named plugin in two locations -> discover_plugins raises DuplicatePlugin."""
     from base.packages.plugins.enable_config import DuplicatePlugin, discover_plugins
 
-    _make_external_plugin("meiva_syntax_fix")
+    _make_external_plugin(unit_home, "meiva_syntax_fix")
 
     with pytest.raises(DuplicatePlugin, match="meiva_syntax_fix"):
         discover_plugins()
 
 
-def _make_face(name: str, body: str, *, sections: tuple[str, ...] = ()) -> None:
+def _make_face(home: Path, name: str, body: str, *, sections: tuple[str, ...] = ()) -> None:
     """Give an existing test plugin an `agent_runtime` face; its manifest declares `sections`."""
-    plugin_dir = paths.plugins_dir(home=paths.meiva_home()) / name
+    plugin_dir = paths.plugins_dir(home=home) / name
     (plugin_dir / "agent_runtime.py").write_text(body)
     _write_manifest(plugin_dir, sections=sections)
 
@@ -278,13 +279,15 @@ def contribute():
 """
 
 
-def test_build_registry_holds_what_each_enabled_plugin_declares():
+def test_build_registry_holds_what_each_enabled_plugin_declares(unit_home: Path):
     """The registry is built from `contribute()` alone, in plugin name order, and nothing is
     registered anywhere: a second build is a new, equal registry, and a plugin disabled since
     is simply absent from it."""
     for name in ("beta", "alpha"):
-        _make_plugin(name)
-        _make_face(name, _CONTRIBUTING_FACE.format(name=name), sections=(f"{name}_section",))
+        _make_plugin(unit_home, name)
+        _make_face(
+            unit_home, name, _CONTRIBUTING_FACE.format(name=name), sections=(f"{name}_section",)
+        )
     _write_enabled({"alpha": {"enabled": True}, "beta": {"enabled": True}})
 
     from base.packages.plugins.loading.registry import build_registry
@@ -312,12 +315,16 @@ def test_build_registry_holds_what_each_enabled_plugin_declares():
     "contribute_body",
     ["    return ['not', 'contributions']", "    raise RuntimeError('boom')"],
 )
-def test_a_face_whose_contribute_misbehaves_is_skipped_not_fatal(contribute_body: str):
+def test_a_face_whose_contribute_misbehaves_is_skipped_not_fatal(
+    contribute_body: str, unit_home: Path
+):
     """Same fail-soft contract as a plugin that fails to import: report it, keep the others."""
-    _make_plugin("good")
-    _make_face("good", _CONTRIBUTING_FACE.format(name="good"), sections=("good_section",))
-    _make_plugin("bad")
-    _make_face("bad", f"def contribute():\n{contribute_body}\n")
+    _make_plugin(unit_home, "good")
+    _make_face(
+        unit_home, "good", _CONTRIBUTING_FACE.format(name="good"), sections=("good_section",)
+    )
+    _make_plugin(unit_home, "bad")
+    _make_face(unit_home, "bad", f"def contribute():\n{contribute_body}\n")
     _write_enabled({"good": {"enabled": True}, "bad": {"enabled": True}})
 
     from base.packages.plugins.loading.registry import build_registry
@@ -331,17 +338,17 @@ def test_a_face_whose_contribute_misbehaves_is_skipped_not_fatal(contribute_body
 # --- fail-soft loading (2026-08-28 meiva_ledger incident) --------------------
 
 
-def _make_external_plugin_with(name: str, body: str) -> None:
+def _make_external_plugin_with(home: Path, name: str, body: str) -> None:
     """External plugin with an explicit plugin.py body (the default helper
     writes only `__description__`)."""
-    plugin_dir = paths.plugins_dir(home=paths.meiva_home()) / name
+    plugin_dir = paths.plugins_dir(home=home) / name
     plugin_dir.mkdir(parents=True, exist_ok=True)
     (plugin_dir / "plugin.py").write_text(body, encoding="utf-8")
     _write_manifest(plugin_dir)
 
 
 def test_broken_external_plugin_skipped_and_others_load(
-    loguru_records: list[dict], emitted_events: EmittedEvents
+    loguru_records: list[dict], emitted_events: EmittedEvents, unit_home: Path
 ) -> None:
     """Fail-soft contract: a plugin whose plugin.py raises at import is skipped
     with a loud warning; the load proceeds; other plugins load.
@@ -350,8 +357,10 @@ def test_broken_external_plugin_skipped_and_others_load(
     module it imports missing — `from . import _ledger` raised
     ModuleNotFoundError and took `import meiva` down with it.
     """
-    _make_external_plugin_with("meiva_ledger", "from . import _missing\n__description__ = 'x'\n")
-    _make_external_plugin("audit")
+    _make_external_plugin_with(
+        unit_home, "meiva_ledger", "from . import _missing\n__description__ = 'x'\n"
+    )
+    _make_external_plugin(unit_home, "audit")
     _write_enabled({"meiva_ledger": {"enabled": True}, "audit": {"enabled": True}})
 
     from meiva.sdk_surface import extensions as _loader
@@ -374,7 +383,7 @@ def test_broken_external_plugin_skipped_and_others_load(
     assert "ImportError" in error and "_missing" in error
 
 
-def test_broken_builtin_plugin_skipped_and_others_load(tmp_path: Path) -> None:
+def test_broken_builtin_plugin_skipped_and_others_load(tmp_path: Path, unit_home: Path) -> None:
     """The same fail-soft contract applies to repo-shipped plugins."""
     from base.packages.plugins.loading.plugin_loader import safe_load_plugin_module
     from meiva.sdk_surface import extensions as _loader
@@ -386,7 +395,7 @@ def test_broken_builtin_plugin_skipped_and_others_load(tmp_path: Path) -> None:
     )
     assert "meiva_builtins.plugins.syntax_fix.plugin" not in sys.modules
 
-    _make_plugin("syntax_fix", "raise RuntimeError('boom')\n")
+    _make_plugin(unit_home, "syntax_fix", "raise RuntimeError('boom')\n")
     _write_enabled({"syntax_fix": {"enabled": True}, "meiva_silent_idle": {"enabled": True}})
 
     _loader.load_extensions(sampling=fixed_sampling_owner())  # must not raise
@@ -397,6 +406,7 @@ def test_broken_builtin_plugin_skipped_and_others_load(tmp_path: Path) -> None:
 
 def test_external_plugin_relative_import_resolves_when_plugins_prefix_is_shadowed(
     monkeypatch: pytest.MonkeyPatch,
+    unit_home: Path,
 ) -> None:
     """sys.path fix: `from . import _helper` inside plugin.py resolves against
     the plugin's own directory even when the top-level `plugins` package
@@ -415,7 +425,7 @@ def test_external_plugin_relative_import_resolves_when_plugins_prefix_is_shadowe
     decoy.__path__ = ["/nonexistent/decoy"]  # pyright: ignore[reportAttributeAccessIssue]
     monkeypatch.setitem(sys.modules, "plugins", decoy)
 
-    pdir = paths.plugins_dir(home=paths.meiva_home()) / "meiva_ledger"
+    pdir = paths.plugins_dir(home=unit_home) / "meiva_ledger"
     pdir.mkdir(parents=True)
     (pdir / "plugin.py").write_text(
         "from . import _helper\n__description__ = 'x'\nMARK = _helper.VALUE\n",
@@ -433,7 +443,9 @@ def test_external_plugin_relative_import_resolves_when_plugins_prefix_is_shadowe
     assert sys.modules["plugins.meiva_ledger"].__path__ == [str(pdir)]
 
 
-def test_dangling_config_entry_reported_and_skipped(emitted_events: EmittedEvents) -> None:
+def test_dangling_config_entry_reported_and_skipped(
+    emitted_events: EmittedEvents, unit_home: Path
+) -> None:
     """A config entry whose plugin directory is gone (interrupted upgrade,
     manual rm) must not block the plugin load: reported through the canonical
     fail-soft reporter (loguru ERROR + `plugin_load_failed` event), treated as
@@ -441,7 +453,7 @@ def test_dangling_config_entry_reported_and_skipped(emitted_events: EmittedEvent
     admission each read the config and report their own failed load.
     """
     missing = f"vanished_{uuid4().hex}"
-    _make_external_plugin("audit")
+    _make_external_plugin(unit_home, "audit")
     _write_enabled({"audit": {"enabled": True}, missing: {"enabled": True}})
 
     from meiva.sdk_surface import extensions as _loader
@@ -463,7 +475,7 @@ def test_dangling_config_entry_reported_and_skipped(emitted_events: EmittedEvent
     assert all(missing in str(a["error"]) for a in repeated)
 
 
-def test_dot_prefixed_dirs_are_not_discovered(tmp_path: Path) -> None:
+def test_dot_prefixed_dirs_are_not_discovered(tmp_path: Path, unit_home: Path) -> None:
     """Atomic-install residue (.name.staging / .name.backup-<pid>) must never
     surface as ghost plugins — a hard kill between rename steps would
     otherwise have the loader import a half-installed tree as a plugin."""
@@ -475,18 +487,16 @@ def test_dot_prefixed_dirs_are_not_discovered(tmp_path: Path) -> None:
     real_dir.mkdir()
     (real_dir / "plugin.py").write_text("__description__ = 'real'\n", encoding="utf-8")
     _write_manifest(real_dir)
-    _make_external_plugin("ext")
+    _make_external_plugin(unit_home, "ext")
     # same ghost name in BOTH roots: without the dot-prefix filter this would
     # raise DuplicatePlugin, not just mis-discover
-    for root in (repo_root, paths.plugins_dir(home=paths.meiva_home())):
+    for root in (repo_root, paths.plugins_dir(home=unit_home)):
         ghost = root / ".ghost.staging"
         ghost.mkdir()
         (ghost / "plugin.py").write_text("__description__ = 'ghost'\n", encoding="utf-8")
 
     assert set(
-        discover_plugin_dirs(
-            repo_dir=repo_root, user_dir=paths.plugins_dir(home=paths.meiva_home())
-        )
+        discover_plugin_dirs(repo_dir=repo_root, user_dir=paths.plugins_dir(home=unit_home))
     ) == {
         "real",
         "ext",
