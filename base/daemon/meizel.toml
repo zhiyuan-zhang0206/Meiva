@@ -13,5 +13,4 @@ exports = ["endpoints.py", "health.py", "health_schema.py", "http_transport.py",
 
 [debt.ambient-read]
 "health.py#clock time.time" = 1
-"health.py#pid os.getpid" = 1
 "loop_health.py#clock datetime.datetime.now" = 1

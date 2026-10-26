@@ -4,19 +4,15 @@ from __future__ import annotations
 from bisect import bisect_left, bisect_right
 from dataclasses import dataclass
 from datetime import datetime
-from typing import Annotated
 
-from fastapi import APIRouter, Query, Request
 from langchain_core.messages import AIMessage
 
 from base.agents.history.context_breakdown import request_breakdown
 from base.agents.history.context_response import context_breakdown_response
-from services.derived.insights.config import InsightsConfig
+from base.db.protocols import SyncPool
+from base.lm.catalog import ModelCatalog
 from services.derived.insights.run_timeline.history import HistoryView
-from services.derived.insights.run_timeline.projection.reader import TimelineReader
 from services.derived.insights.run_timeline.schemas import RunTimelineContext
-
-router = APIRouter()
 
 
 @dataclass(frozen=True)
@@ -45,39 +41,43 @@ def request_at(requests: list[LlmRequest], at: int) -> LlmRequest | None:
     return requests[min(found, len(requests) - 1)]
 
 
-@router.get(
-    "/api/agents/{agent_id}/run-timeline/context",
-    description="The context breakdown of the LLM request at (or next after) message index `at`.",
-)
-def get_run_timeline_context(
-    request: Request,
+@dataclass(frozen=True)
+class ResolvedRequest:
+    idx: int
+    ts: datetime
+    session: int
+    offset: int
+    sessions: int
+    view: HistoryView
+
+
+def build_run_timeline_context(
+    pool: SyncPool,
     agent_id: int,
-    at: Annotated[int, Query(ge=0)],
-    snapshot: Annotated[str | None, Query(min_length=1, max_length=64)] = None,
+    resolved: ResolvedRequest,
+    *,
+    catalog: ModelCatalog,
+    default_model: str,
 ) -> RunTimelineContext:
-    reader: TimelineReader = request.app.state.run_timeline_reader
-    cut = reader.get(agent_id, snapshot)
-    idx, ts, segment, view = reader.request(cut, at)
-    local = idx - segment.offset
-    history = view.history
+    local = resolved.idx - resolved.offset
+    history = resolved.view.history
     body_start = history.segment_starts[0]
-    config: InsightsConfig = request.app.state.insights_config
     breakdown = context_breakdown_response(
-        request.app.state.db_pool,
+        pool,
         agent_id,
         request_breakdown(
             history.segment_heads[0],
             history.messages[body_start : local + 1],
-            view.segments[0],
+            resolved.view.segments[0],
             local - body_start,
         ),
-        catalog=request.app.state.catalog,
-        default_model=config.default_model,
+        catalog=catalog,
+        default_model=default_model,
     )
     return RunTimelineContext(
         **breakdown.model_dump(),
-        request=idx,
-        session=segment.session,
-        sessions=cut.sessions,
-        ts=ts,
+        request=resolved.idx,
+        session=resolved.session,
+        sessions=resolved.sessions,
+        ts=resolved.ts,
     )

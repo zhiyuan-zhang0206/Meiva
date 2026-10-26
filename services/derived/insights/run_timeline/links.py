@@ -10,10 +10,9 @@ assignment is a system note) -- read per page against `inbound_messages`; a sour
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from datetime import datetime
-from typing import Annotated, Any, TypeGuard, get_args
-
-from fastapi import APIRouter, HTTPException, Query, Request
+from typing import TypeGuard, get_args
 
 from base.agents.messages.envelope import validate_source
 from base.db.protocols import DatabaseLike as Database
@@ -23,10 +22,7 @@ from services.derived.insights.run_timeline.schemas import (
     LinkKind,
     RunTimelineLink,
     RunTimelineLinkContent,
-    RunTimelineLinks,
 )
-
-router = APIRouter()
 
 # The kinds read from `audit_events`; a notice comes from `agent_notices`.
 _AUDIT_KINDS: list[str] = [kind for kind in get_args(LinkKind) if kind != "notice"]
@@ -61,8 +57,9 @@ def _message_inbound(row: dict[str, object]) -> int | None:
     return None
 
 
-def _chat_inbounds(conn: SyncConnection, page: list[dict[str, Any]]) -> set[int]:
-    """The ids among the page's messages whose inbound row is a chat (a task assignment is a system note)."""
+# meiva:note
+# The ids among the page's messages whose inbound row is a chat (a task assignment is a system note).
+def _chat_inbounds(conn: SyncConnection, page: Sequence[dict[str, object]]) -> set[int]:
     ids = [
         inbound
         for row in page
@@ -157,53 +154,25 @@ def read(
             offset += page_size
 
 
-@router.get("/api/insights/run-timeline/links")
-def get_run_timeline_links(
-    request: Request,
-    agents: Annotated[str, Query()],
-    from_: Annotated[datetime, Query(alias="from")],
-    to: Annotated[datetime, Query()],
-) -> RunTimelineLinks:
-    """Agent-to-agent events in the window with at least one end among the comma-separated `agents`."""
-    try:
-        ids = sorted({int(part) for part in agents.split(",")})
-    except ValueError:
-        raise HTTPException(
-            status_code=422, detail="agents must be comma-separated integers"
-        ) from None
-    if from_.tzinfo is None or to.tzinfo is None:
-        raise HTTPException(status_code=422, detail="from and to must include a timezone offset")
-    if from_ >= to:
-        raise HTTPException(status_code=422, detail="from must be earlier than to")
-    db: Database = request.app.state.db
-    return RunTimelineLinks(links=read(db, ids, from_, to))
-
-
-@router.get("/api/insights/run-timeline/link-content")
-def get_run_timeline_link_content(
-    request: Request,
-    inbound_id: Annotated[int | None, Query(ge=1)] = None,
-    notice_id: Annotated[int | None, Query(ge=1)] = None,
-) -> RunTimelineLinkContent:
-    """The full text of one chat message (`inbound_id`) or the title and text of one notice (`notice_id`); exactly one."""
-    if (inbound_id is None) == (notice_id is None):
-        raise HTTPException(status_code=422, detail="give exactly one of inbound_id and notice_id")
-    db: Database = request.app.state.db
+# meiva:note
+# The full text of one chat message (`inbound_id`) or the title and text of one notice (`notice_id`).
+def read_content(
+    db: Database,
+    *,
+    inbound_id: int | None = None,
+    notice_id: int | None = None,
+) -> RunTimelineLinkContent | None:
     with db.connect(autocommit=True) as conn:
         if inbound_id is not None:
             row = conn.execute(
                 "SELECT content FROM inbound_messages WHERE id = %s AND kind = 'chat'", [inbound_id]
             ).fetchone()
-            found = None if row is None else RunTimelineLinkContent(title=None, content=str(row[0]))
-        else:
-            row = conn.execute(
-                "SELECT title, content FROM agent_notices WHERE id = %s", [notice_id]
-            ).fetchone()
-            found = (
-                None
-                if row is None
-                else RunTimelineLinkContent(title=str(row[0]), content=str(row[1] or ""))
-            )
-    if found is None:
-        raise HTTPException(status_code=404, detail="no such message or notice")
-    return found
+            return None if row is None else RunTimelineLinkContent(title=None, content=str(row[0]))
+        row = conn.execute(
+            "SELECT title, content FROM agent_notices WHERE id = %s", [notice_id]
+        ).fetchone()
+        return (
+            None
+            if row is None
+            else RunTimelineLinkContent(title=str(row[0]), content=str(row[1] or ""))
+        )
