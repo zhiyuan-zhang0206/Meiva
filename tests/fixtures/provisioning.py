@@ -83,7 +83,7 @@ _VALUE_OPTIONS = frozenset(
 
 
 def full_run_guard_message(
-    rootpath: Path, args: list[str], env: Mapping[str, str], cwd: Path
+    rootpath: Path, args: list[str], env: Mapping[str, str], cwd: Path, *, home: Path
 ) -> str | None:
     if env.get("GITHUB_ACTIONS") == "true":
         return None
@@ -91,8 +91,8 @@ def full_run_guard_message(
         return None
 
     shared_roots = {
-        (Path.home() / "Meiva").resolve(),
-        (Path.home() / ".meiva" / "source").resolve(),
+        (home / "Meiva").resolve(),
+        (home / ".meiva" / "source").resolve(),
     }
     resolved_rootpath = rootpath.resolve()
     if resolved_rootpath not in shared_roots:
@@ -131,7 +131,7 @@ Do not use this override without user approval."""
 
 def pytest_configure(config: pytest.Config) -> None:
     message = full_run_guard_message(
-        config.rootpath, config.args, os.environ, config.invocation_params.dir
+        config.rootpath, config.args, os.environ, config.invocation_params.dir, home=Path.home()
     )
     if message is not None:
         pytest.exit(message, returncode=1)

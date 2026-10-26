@@ -83,7 +83,7 @@ class _SdkModule(_ModuleType):
     """The `meiva` module, whose three framework slots delegate to `process_context`."""
 
     @property
-    def state(self) -> Any:
+    def state(self) -> object:
         return process_context.get_state()
 
     @state.setter
@@ -91,7 +91,7 @@ class _SdkModule(_ModuleType):
         process_context.set_state(value)
 
     @property
-    def state_update(self) -> Any:
+    def state_update(self) -> object:
         return process_context.get_state_update()
 
     @state_update.setter
