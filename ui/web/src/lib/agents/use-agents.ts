@@ -106,7 +106,11 @@ export function useAgents(showError: (msg: string) => void) {
     const push = !traversal.current && previous != null && id != null && previous !== id;
     traversal.current = false;
     if (url.toString() === window.location.href && !push) return;
-    const state = { ...((window.history.state ?? {}) as Record<string, unknown>) };
+    const rawState: unknown = window.history.state;
+    const state: Record<string, unknown> =
+      typeof rawState === "object" && rawState !== null && !Array.isArray(rawState)
+        ? { ...rawState }
+        : {};
     if (push) window.history.pushState(state, "", url);
     else window.history.replaceState(state, "", url);
   }, [activeId]);

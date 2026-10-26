@@ -190,7 +190,7 @@ export function applySseEvent(state: TimelineState, ev: SystemEvent, nowMs = 1):
     }
     // The first nonempty compact snapshot replaces the selected segment.
     if (ev.role === "timeline_snapshot") {
-      const snapItems = ev.items as unknown as BackendTimelineItem[];
+      const snapItems = [...ev.items];
       // A full-window snapshot (0.0 present) whose compact envelope the local
       // items never folded is the post-compact history a missed compact_done
       // should have armed the window for (SSE gap) — replace wholesale so the

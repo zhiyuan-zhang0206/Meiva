@@ -13,12 +13,3 @@ purity = "strict"
 "timing-plan.test.ts" = ["timing-plan.ts"]
 "upload-plan.test.ts" = ["upload-plan.ts"]
 "upload-plan.ts" = ["key-plan.ts"]
-
-[debt.type-cast]
-"response-plan.ts#cast ApiError.constructor" = 1
-"response-plan.ts#cast confirmDraftReceipt" = 1
-"response-plan.ts#cast errorFromResponse" = 1
-"response-plan.ts#cast serverMessage" = 1
-"response-plan.ts#cast validationMessage" = 1
-"upload-plan.ts#cast confirmUploadAcceptance" = 1
-"upload-plan.ts#cast legacyUploadResult" = 2

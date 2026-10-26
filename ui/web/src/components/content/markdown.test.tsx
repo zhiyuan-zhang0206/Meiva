@@ -7,7 +7,7 @@ vi.mock("./python-code", () => ({
   ),
 }));
 
-import { __resetMarkdownMathForTests, __setMarkdownMathImportForTests, type MarkdownMath } from "@/lib/markdown/math";
+import { resetMarkdownMathForTests, setMarkdownMathImportForTests, type MarkdownMath } from "@/lib/markdown/math";
 import reportedMessage from "./fixtures/reported-message-20261019.json";
 import { ChatMarkdown, preloadChatMarkdown } from "./markdown";
 
@@ -350,13 +350,13 @@ line<br>break <mark>m</mark> <kbd>K</kbd>
 
 describe("math through the lazy KaTeX surface", () => {
   afterEach(() => {
-    __resetMarkdownMathForTests();
-    __setMarkdownMathImportForTests(null);
+    resetMarkdownMathForTests();
+    setMarkdownMathImportForTests(null);
   });
 
   it("never loads the math chunk for content without $", () => {
     const load = vi.fn((): Promise<MarkdownMath> => Promise.resolve({ remark: [], rehype: [] }));
-    __setMarkdownMathImportForTests(load);
+    setMarkdownMathImportForTests(load);
     render(<ChatMarkdown content="no formulas here" />);
     expect(load).not.toHaveBeenCalled();
   });

@@ -36,11 +36,16 @@ const FLUSH_INTERVAL_MS = 15_000;
 
 // ── module state (browser only; everything is a no-op under SSR) ──
 
-const runtimeState = {
+const runtimeState: {
+  bufferState: ReturnType<typeof createTelemetryBufferState>;
+  flushTimer: ReturnType<typeof setInterval> | null;
+  warnedOnce: boolean;
+  fetchImpl: ((url: string, init: RequestInit) => Promise<unknown>) | undefined;
+} = {
   bufferState: createTelemetryBufferState(typeof window !== "undefined"),
-  flushTimer: null as ReturnType<typeof setInterval> | null,
+  flushTimer: null,
   warnedOnce: false,
-  fetchImpl: undefined as ((url: string, init: RequestInit) => Promise<unknown>) | undefined,
+  fetchImpl: undefined,
 };
 
 function newSessionId(): string {

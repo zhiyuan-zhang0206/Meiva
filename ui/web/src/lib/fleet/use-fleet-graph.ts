@@ -34,7 +34,13 @@ export interface FleetGraphResult {
  * shim was a no-op copy.
  */
 function normalizeEventType(raw: string): GraphEventType {
-  return raw === "send_message" ? "message" : (raw as GraphEventType);
+  if (raw === "spawn" || raw === "fork" || raw === "resurrect" || raw === "message") {
+    return raw;
+  }
+  if (raw === "send_message") {
+    return "message";
+  }
+  throw new Error(`unknown fleet graph event_type: ${raw}`);
 }
 
 function normalizeGraph(raw: WireFleetGraph): FleetGraph {

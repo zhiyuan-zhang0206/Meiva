@@ -22,10 +22,14 @@ function navigatorLocks(): unknown {
   return typeof navigator === "undefined" ? undefined : Reflect.get(navigator, "locks");
 }
 
+function isLockPort(locks: unknown): locks is LockPort {
+  return typeof locks === "object" && locks !== null && "request" in locks && typeof locks.request === "function";
+}
+
 function usableLocks(): LockPort | null {
   const locks = navigatorLocks();
-  if (typeof locks === "object" && locks !== null && "request" in locks && typeof locks.request === "function") {
-    return locks as LockPort;
+  if (isLockPort(locks)) {
+    return locks;
   }
   return null;
 }
