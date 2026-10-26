@@ -23,6 +23,8 @@ def test_entry_keeps_the_config_owner_and_captured_image(tmp_path: Path, sha: st
     assert wiring.process_home == home.resolve()
     assert wiring.machine.name() == "browser-entry"
     assert wiring.browser_cdp_port == boot.view.services.browser_cdp_port
+    assert wiring.gateway_access.gateway_url == boot.view.gateway.gateway_url
+    assert wiring.clock.now().utcoffset() is not None
     assert wiring.direct_url().local_host() == wiring.machine.host()
 
     boot.set_field("mcp_connect_timeout_seconds", 17.0)
