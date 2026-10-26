@@ -25,10 +25,11 @@ _REPO_ROOT = Path(base.__file__).resolve().parents[1]
 
 if __name__ == "__main__":
     cli = parse_cli(sys.argv[1:])
+    home = resolve_meiva_home()
     schedule = CronSchedule((Trigger(CRON),), timezone=cluster_timezone())
     sweep = DebtSweep(
         repo=(cli.repo or _REPO_ROOT).resolve(),
-        home=resolve_meiva_home(),
+        home=home,
         tz=schedule.timezone,
         worker_label=parse_worker_label(os.environ.get(_WORKER_LABEL_ENV)),
     )
@@ -42,7 +43,7 @@ if __name__ == "__main__":
             _REPORT_LABEL,
             os.environ.get(_REPORT_AGENT_ENV),
         )
-        with open_schedule_entry(globals().get("MEIVA_SCHEDULE_INPUTS")) as inputs:
+        with open_schedule_entry(globals().get("MEIVA_SCHEDULE_INPUTS"), home=home) as inputs:
             run_loop(
                 inputs.database(),
                 schedule,
