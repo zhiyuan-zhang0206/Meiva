@@ -36,6 +36,8 @@ class StartTrace:
         self._open: list[float] = []
 
     def begin(self, *, pid: int, now: datetime, enabled: bool = False) -> None:
+        if now.tzinfo is None:
+            raise ValueError("the start time of a timing record must carry a timezone")
         self.enabled = self.enabled or enabled
         self.pid = pid
         self.started_utc = now.astimezone(UTC)

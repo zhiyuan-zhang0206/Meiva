@@ -1,7 +1,7 @@
 ---
 type: doc
 title: "Markdown Note Model"
-description: '`base/packages/docs/notes.py` — one parser for the whole repo: decides a `---`-frontmatter markdown text is a note and lifts the fields both graph consumers need. Note/parse_note/extract_md_links/normalize_tags (the pool walker `walk_notes` is the shell `base/packages/note_files.py`), plus the lenient type-preserving `parse_frontmatter_typed` in `base/packages/docs/frontmatter.py`.'
+description: '`base/packages/docs/notes.py` — one parser for the whole repo: decides a `---`-frontmatter markdown text is a note and lifts the fields both graph consumers need. Note/parse_note/normalize_tags (the pool walker `walk_notes` is the shell `base/packages/note_files.py`), plus the lenient type-preserving `parse_frontmatter_typed` in `base/packages/docs/frontmatter.py`.'
 tags:
 - base
 - library
@@ -34,11 +34,6 @@ different tags-normalization rules; now the delimiter scan lives once in
 - `base/packages/note_files.py:walk_notes(root, skip_names=..., warnings=...)` — the shell: yields
   `(path, note)` in sorted order, reading each file whole; unreadable files surface as warnings,
   reserved names and non-notes are skipped silently.
-- `extract_md_links(body, source_dir, root, source_id)` — markdown links →
-  `(source_id, target_id)` edges, resolved relative to the source file's
-  directory; `http(s)`/`#`/empty targets skipped, and a link that resolves
-  outside `root` is dropped instead of raising (an out-of-root link used to
-  500 the graph view that has since been removed).
 
 ## Notes
 
