@@ -1,7 +1,7 @@
 exports = ["harness", "plans.py", "wake.py"]
 
 [uses]
-"__init__.py" = ["harness", "plans.py", "wake.py"]
+"__init__.py" = ["plans.py", "wake.py"]
 "harness" = []
 
 [purity]
@@ -14,4 +14,3 @@ exports = ["harness", "plans.py", "wake.py"]
 "__init__.py#base/telemetry/audit_events.py" = 1
 "__init__.py#meiva/boot.py" = 1
 "__init__.py#meiva/files.py" = 1
-"__init__.py#meiva/self/harness/__init__.py" = 1

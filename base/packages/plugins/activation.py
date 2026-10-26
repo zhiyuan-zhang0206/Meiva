@@ -1,8 +1,9 @@
 from __future__ import annotations
 
-from base.log import logger
+from loguru import logger
+
 from base.packages.plugins.contributions import SurfaceId
-from base.telemetry import report_sink_failure
+from base.telemetry.delivery.reporting import report_sink_failure
 
 PLUGIN_ACTIVATION_EVENT = "plugin_activation"
 
