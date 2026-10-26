@@ -62,7 +62,7 @@ that launches a child (`cmd_start_body`, `prepare_cold_start`, the LGTM toggle),
 the frozen values the start passes down; only the parser handlers, which may be built without
 one, refuse a launching verb that has none.
 
-`cmd_start_body` runs under the home's lifecycle lock (`exclusive_resources`) and returns an
+`cmd_start_body` runs under the home's lifecycle lock (`resource_lock`) and returns an
 exit code: the same body serves `meiva start` and the start leg of `meiva restart`.
 
 After launch, `cli/commands/lifecycle/root_readiness.py` observes the roster through

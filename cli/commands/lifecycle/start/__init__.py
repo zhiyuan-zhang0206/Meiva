@@ -25,6 +25,7 @@ from base.cluster import session_name
 from base.cluster.machine import MachineIdentityReader, MachineRoles
 from base.deploy import start_trace
 from base.deploy.lifecycle import launch_failures, pause_markers, start_serving
+from base.deploy.lifecycle.home_lifecycle_locks import resource_lock
 from base.deploy.lifecycle.service_selection import resolve_selection
 from base.deploy.progress_timeout import CRITICAL_SERVICE_SESSIONS, SERVICE_READY_TIMEOUT_S
 from base.host.system.hostport import Host
@@ -35,7 +36,6 @@ from cli.commands import _repo, _setup, probe
 from cli.commands._setup import SetupValues
 from cli.commands.data_plane.bringup import read_launch_delivery
 from cli.commands.lifecycle import root_driver, root_readiness, stand_down
-from cli.commands.lifecycle._exclusive_resources import exclusive_resources
 from cli.commands.lifecycle.root_control.generation import record_running_sha
 from cli.commands.lifecycle.root_control.launch_plan import RootLaunchInputs
 from cli.commands.lifecycle.start.admission import (
@@ -452,7 +452,6 @@ def _finalize(start: _Start, serving_generation: str) -> int:
     return 0
 
 
-@exclusive_resources
 def cmd_start_body(
     database_factory: OperatorDatabaseFactory,
     *,
@@ -467,81 +466,84 @@ def cmd_start_body(
     command: CommandRuntime,
     boot_attempt: bool = False,
 ) -> int:
-    # meiva:note
-    # Core start logic, shared by cmd_start and cmd_restart.
-    #
-    # The caller names exactly one service selection; nothing is persisted, so no
-    # later start inherits it. ``reconcile`` is off only for restart's start leg.
-    with start_trace.phase("stand-down"):
-        ended = _stand_down(command.home, boot_attempt=boot_attempt)
-    if ended is not None:
-        return ended
-    with start_trace.phase("admission"):
-        refused = _guard(command, runtime)
-    if refused is not None:
-        return refused
-    with start_trace.phase("identity"):
-        identity = _resolve_identity(command)
-    if isinstance(identity, int):
-        return identity
-    resolved, roles = identity
-    config = read_start_config(command.config)
-    start = _Start(
-        command=command,
-        database_factory=database_factory,
-        producer=producer,
-        runtime=runtime,
-        selection=_Selection(only_services, disabled_services, all_services, reconcile),
-        resolved=resolved,
-        roles=roles,
-        config=config,
-        launch_inputs=RootLaunchInputs(
-            delivery=read_launch_delivery(
-                home=command.home,
-                remote_data_plane=config.data_plane.is_remote,
-                config=command.config,
+    with resource_lock(home=command.home, pid=command.pid, purpose="cli.cmd_start_body"):
+        # meiva:note
+        # Core start logic, shared by cmd_start and cmd_restart.
+        #
+        # The caller names exactly one service selection; nothing is persisted, so no
+        # later start inherits it. ``reconcile`` is off only for restart's start leg.
+        with start_trace.phase("stand-down"):
+            ended = _stand_down(command.home, boot_attempt=boot_attempt)
+        if ended is not None:
+            return ended
+        with start_trace.phase("admission"):
+            refused = _guard(command, runtime)
+        if refused is not None:
+            return refused
+        with start_trace.phase("identity"):
+            identity = _resolve_identity(command)
+        if isinstance(identity, int):
+            return identity
+        resolved, roles = identity
+        config = read_start_config(command.config)
+        start = _Start(
+            command=command,
+            database_factory=database_factory,
+            producer=producer,
+            runtime=runtime,
+            selection=_Selection(only_services, disabled_services, all_services, reconcile),
+            resolved=resolved,
+            roles=roles,
+            config=config,
+            launch_inputs=RootLaunchInputs(
+                delivery=read_launch_delivery(
+                    home=command.home,
+                    remote_data_plane=config.data_plane.is_remote,
+                    config=command.config,
+                ),
+                service_path=config.service_path,
             ),
-            service_path=config.service_path,
-        ),
-    )
-    admitted = _admit(start, retained_children=retained_children)
-    if admitted is not None:
-        return admitted
-    registered = _register_and_probe(start)
-    if registered is not None:
-        return registered
+        )
+        admitted = _admit(start, retained_children=retained_children)
+        if admitted is not None:
+            return admitted
+        registered = _register_and_probe(start)
+        if registered is not None:
+            return registered
 
-    # meiva:note
-    # Preparation may materialize plugins on a cold start; resolve the launch roster now.
-    with start_trace.phase("roster resolve (launch)"):
-        roster = _roster_for(start)
+        # meiva:note
+        # Preparation may materialize plugins on a cold start; resolve the launch roster now.
+        with start_trace.phase("roster resolve (launch)"):
+            roster = _roster_for(start)
 
-    # meiva:note
-    # Probe before binding: refuse to launch a daemon onto a health port another unit already
-    # answers on. This is the last point at which nothing has been spawned, and the roster is
-    # knowable only after the skip resolves.
-    with start_trace.phase("health-port preflight"):
-        rc = refuse_occupied_health_ports(roster)
-    if rc != 0:
-        return rc
+        # meiva:note
+        # Probe before binding: refuse to launch a daemon onto a health port another unit already
+        # answers on. This is the last point at which nothing has been spawned, and the roster is
+        # knowable only after the skip resolves.
+        with start_trace.phase("health-port preflight"):
+            rc = refuse_occupied_health_ports(roster)
+        if rc != 0:
+            return rc
 
-    # meiva:note
-    # Failed start attempts must leave recovery actions gated.
-    with start_trace.phase("serving generation"):
-        serving_generation = start_serving.begin_start(command.home)
-        record_running_sha(runtime.code_root)
-    launch = _launch(start, roster, retained_children=retained_children, boot_attempt=boot_attempt)
-    wait = _wait_ready(start, launch, ready_timeout=ready_timeout)
-    _report_running_tree(start, started=tuple(launch.started), wait=wait)
+        # meiva:note
+        # Failed start attempts must leave recovery actions gated.
+        with start_trace.phase("serving generation"):
+            serving_generation = start_serving.begin_start(command.home)
+            record_running_sha(runtime.code_root)
+        launch = _launch(
+            start, roster, retained_children=retained_children, boot_attempt=boot_attempt
+        )
+        wait = _wait_ready(start, launch, ready_timeout=ready_timeout)
+        _report_running_tree(start, started=tuple(launch.started), wait=wait)
 
-    # meiva:note
-    # Readiness verdict last: its exit code and printed snapshot describe the same run.
-    verdict = readiness_verdict(launch, wait, ready_timeout=ready_timeout)
-    if verdict is not None:
-        return verdict
-    _assert_archive_after_readiness(start, wait)
-    _report_pause_markers(command.home)
-    return _finalize(start, serving_generation)
+        # meiva:note
+        # Readiness verdict last: its exit code and printed snapshot describe the same run.
+        verdict = readiness_verdict(launch, wait, ready_timeout=ready_timeout)
+        if verdict is not None:
+            return verdict
+        _assert_archive_after_readiness(start, wait)
+        _report_pause_markers(command.home)
+        return _finalize(start, serving_generation)
 
 
 def cmd_start(

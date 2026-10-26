@@ -20,8 +20,6 @@ import logging
 from collections.abc import Generator
 from pathlib import Path
 
-import base.paths
-from base.deploy.lifecycle.status_journal import current_pid
 from base.host.atomic_io import SYSTEM_FS, AtomicWriter
 from base.native_process.os_platform import LockTimeoutError, file_lock
 
@@ -33,8 +31,8 @@ _log = logging.getLogger("base.deploy.lifecycle.home_lifecycle_locks")
 
 # meiva:note
 # Stable mutex for long local resource transitions.
-def lifecycle_lock_path() -> Path:
-    return base.paths.meiva_home() / "deploy-state.lifecycle.lock"
+def lifecycle_lock_path(home: Path) -> Path:
+    return home / "deploy-state.lifecycle.lock"
 
 
 def holder_path(path: Path) -> Path:
@@ -70,7 +68,7 @@ def write_atomic(path: Path, payload: dict[str, object], *, writer: AtomicWriter
 
 
 @contextlib.contextmanager
-def _diagnostic_lock(path: Path, *, purpose: str, timeout_s: float) -> Generator[None]:
+def _diagnostic_lock(path: Path, *, purpose: str, pid: int, timeout_s: float) -> Generator[None]:
     """Hold an OS mutex with an atomic, best-effort postmortem holder record.
 
     The OS lock is authority; the sidecar is diagnostic only. Keep the last
@@ -81,7 +79,7 @@ def _diagnostic_lock(path: Path, *, purpose: str, timeout_s: float) -> Generator
         with file_lock(path, timeout_s=timeout_s):
             acquired = True
             holder = {
-                "pid": current_pid(),
+                "pid": pid,
                 "purpose": purpose,
                 "since": dt.datetime.now(dt.UTC).isoformat(),
             }
@@ -107,7 +105,9 @@ def _diagnostic_lock(path: Path, *, purpose: str, timeout_s: float) -> Generator
 
 
 @contextlib.contextmanager
-def resource_lock(*, purpose: str, timeout_s: float = _RESOURCE_LOCK_TIMEOUT_S) -> Generator[None]:
+def resource_lock(
+    *, home: Path, pid: int, purpose: str, timeout_s: float = _RESOURCE_LOCK_TIMEOUT_S
+) -> Generator[None]:
     """Serialize long local start/stop operations with bounded waiting."""
-    with _diagnostic_lock(lifecycle_lock_path(), purpose=purpose, timeout_s=timeout_s):
+    with _diagnostic_lock(lifecycle_lock_path(home), purpose=purpose, pid=pid, timeout_s=timeout_s):
         yield

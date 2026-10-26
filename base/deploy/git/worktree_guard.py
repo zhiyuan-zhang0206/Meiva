@@ -28,12 +28,12 @@ from __future__ import annotations
 
 import contextlib
 import os
+from dataclasses import dataclass
 from pathlib import Path
 from typing import TypeGuard
 
 import psutil
 
-from base.paths.home import resolve_meiva_home
 from base.sessions.pty import client
 from base.sessions.pty.paths import service_socket_path
 
@@ -96,37 +96,31 @@ def _under(path: str | None, target: Path, *, fold: bool) -> bool:
     return left == right or left.startswith(right + os.sep)
 
 
-def _caller_chain() -> set[int]:
-    """This process plus its ancestors — the pids the anchor scan skips.
+# meiva:note
+# The process that runs the check: its pid and process group, read once by the entry that
+# starts it. The scan skips this process, its ancestors and its job tree.
+@dataclass(frozen=True)
+class Invoker:
+    pid: int
+    pgid: int | None
 
-    The check is normally invoked BY the cleanup that wants the removal, and
-    that habit runs it from inside the target (`cd <worktree> && check`): the
-    invoking shell's cwd then lies under the path and the scan would REFUSE a
-    clean worktree (issue #3685) — tempting the caller into `--force`, which
-    is exactly how a real anchor gets missed. The caller's chain is the
-    remover, not an anchor; a long-lived session ON the chain is still
-    protected by the pty-records arm. A transient gap in the chain (a parent
-    reaped mid-walk) must not fail the scan.
-    """
-    proc = psutil.Process()
-    chain = {proc.pid}
+
+# meiva:note
+# The invoker plus its ancestors — the pids the anchor scan skips.
+#
+# The check is normally invoked BY the cleanup that wants the removal, and
+# that habit runs it from inside the target (`cd <worktree> && check`): the
+# invoking shell's cwd then lies under the path and the scan would REFUSE a
+# clean worktree (issue #3685) — tempting the caller into `--force`, which
+# is exactly how a real anchor gets missed. The caller's chain is the
+# remover, not an anchor; a long-lived session ON the chain is still
+# protected by the pty-records arm. A transient gap in the chain (a parent
+# reaped mid-walk) must not fail the scan.
+def _caller_chain(pid: int) -> set[int]:
+    chain = {pid}
     with contextlib.suppress(psutil.NoSuchProcess, psutil.AccessDenied):
-        chain.update(parent.pid for parent in proc.parents())
+        chain.update(parent.pid for parent in psutil.Process(pid).parents())
     return chain
-
-
-def _caller_group() -> int | None:
-    """This process's group id — the rest of the invoking job tree.
-
-    A cleanup that pipes the output (`… check … | tail`) puts the consumer in
-    the checker's group as a SIBLING, so the ancestor chain alone still read
-    `tail` as an anchor (issue #3685, QA follow-up). Group membership marks
-    the invocation's job tree wherever the OS has process groups; None
-    disables the arm and must never compare equal to a scanned value.
-    """
-    if not hasattr(os, "getpgrp"):  # pragma: no cover — non-POSIX
-        return None
-    return os.getpgrp()
 
 
 def _pgid_of(pid: int) -> int | None:
@@ -155,11 +149,11 @@ def _pty_anchors(run: Path, target: Path, *, fold: bool) -> list[str]:
     ]
 
 
-def _process_anchors(target: Path, *, fold: bool) -> list[str]:
+def _process_anchors(target: Path, *, fold: bool, invoker: Invoker) -> list[str]:
     """Live processes (outside the caller's job tree) with cwd / exe / argv under `target`."""
     hits: list[str] = []
-    skip = _caller_chain()
-    group = _caller_group()
+    skip = _caller_chain(invoker.pid)
+    group = invoker.pgid
     for proc in psutil.process_iter(["pid", "cwd", "exe", "cmdline"]):
         pid = proc.info["pid"]
         if pid in skip:
@@ -183,17 +177,17 @@ def _process_anchors(target: Path, *, fold: bool) -> list[str]:
     return hits
 
 
-def find_live_anchors(path: Path, *, run: Path | None = None) -> list[str]:
-    """Human-readable list of live things anchored under `path`.
-
-    `run` overrides the run directory holding the pty-sessions socket (tests); it
-    defaults to `$MEIVA_HOME/run` (else `~/.meiva/run`). The scan only reads: the home is
-    resolved, never created, repaired or chmodded. Process scanning excludes the
-    invoking job tree: the caller's chain (issue #3685) and its process group,
-    because the check is run by the cleanup from inside the target; a genuinely
-    unrelated anchor (another session, a daemon) is in neither.
-    """
+# meiva:note
+# Human-readable list of live things anchored under `path`.
+#
+# `run` is the run directory holding the pty-sessions socket (`<home>/run`). The scan only
+# reads: the home is never created, repaired or chmodded. Process scanning excludes the
+# invoking job tree: the invoker's chain (issue #3685) and its process group,
+# because the check is run by the cleanup from inside the target; a genuinely
+# unrelated anchor (another session, a daemon) is in neither.
+def find_live_anchors(path: Path, *, run: Path, invoker: Invoker) -> list[str]:
     target = path.resolve()
     fold = _folds_case(target)
-    run_dir = run if run is not None else resolve_meiva_home() / "run"
-    return _pty_anchors(run_dir, target, fold=fold) + _process_anchors(target, fold=fold)
+    return _pty_anchors(run, target, fold=fold) + _process_anchors(
+        target, fold=fold, invoker=invoker
+    )

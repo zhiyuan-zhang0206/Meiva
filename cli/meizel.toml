@@ -19,7 +19,7 @@ exports = ["__main__.py", "commands", "database", "fleet_update", "main.py", "pa
 "_python_index.py" = { kinds = ["home", "platform"], why = "Pre-venv stdlib bootstrap resolves host platform and user home before third-party libraries exist" }
 "fleet_alert_silence.py" = { kinds = ["clock", "settings"], why = "Standalone SSH entrypoint shipped to the gateway over stdin reads its own clock and settings" }
 "init_intent.py" = { kinds = ["platform"], why = "Init wizard captures the local host name as the default machine identity" }
-"main.py" = { kinds = ["environ", "pid"], why = "CLI bootstrap sets config/profile/log routing before importing Settings or command modules, and hands the start timing recorder this process's pid." }
+"main.py" = { kinds = ["clock", "environ", "pid"], why = "CLI bootstrap sets config/profile/log routing before importing Settings or command modules, and hands the start timing recorder this process's pid and start time." }
 "python_install.py" = { kinds = ["cwd", "environ"], why = "Pre-venv stdlib bootstrap inspects working directory and environment before launching uv" }
 "start_identity.py" = { kinds = ["clock", "random"], why = "First-boot identity provisioning mints fresh cluster/api secrets and records initial timestamps" }
 "start_intent.py" = { kinds = ["environ"], why = "Identity bootstrap precedes Settings: read the birth inputs and pin the resolved home before config imports." }

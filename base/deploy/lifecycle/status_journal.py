@@ -37,13 +37,6 @@ from base.log import logger
 from base.paths import run_dir
 
 
-def current_pid() -> int:
-    return psutil.Process().pid
-
-
-_current_pid = current_pid
-
-
 def _is_obj_list(value: object) -> TypeGuard[list[object]]:
     return isinstance(value, list)
 
@@ -125,7 +118,7 @@ def writer_alive(op: LifecycleOp) -> bool:
         return True
 
 
-def begin(home: Path, operation: str, *, deadline: float | None = None) -> bool:
+def begin(home: Path, operation: str, *, pid: int, deadline: float | None = None) -> bool:
     """Start journaling `operation` (stop / restart).
 
     Returns True when this call OWNS the journal: it started a fresh one,
@@ -149,7 +142,7 @@ def begin(home: Path, operation: str, *, deadline: float | None = None) -> bool:
             home,
             LifecycleOp(
                 operation=operation,
-                pid=_current_pid(),
+                pid=pid,
                 started_at=time.monotonic(),
                 deadline=deadline,
                 phases=op.phases,
@@ -163,7 +156,7 @@ def begin(home: Path, operation: str, *, deadline: float | None = None) -> bool:
         home,
         LifecycleOp(
             operation=operation,
-            pid=_current_pid(),
+            pid=pid,
             started_at=time.monotonic(),
             deadline=deadline,
         ),
@@ -172,7 +165,7 @@ def begin(home: Path, operation: str, *, deadline: float | None = None) -> bool:
 
 
 @contextmanager
-def phase(home: Path, name: str) -> Generator[None, None, None]:
+def phase(home: Path, name: str, *, pid: int) -> Generator[None, None, None]:
     """Record one named phase; its outcome is written even when it raises.
 
     With no journal yet (a caller that skipped begin), an implicit one is
@@ -184,7 +177,7 @@ def phase(home: Path, name: str) -> Generator[None, None, None]:
     if op is None:
         op = LifecycleOp(
             operation="unknown",
-            pid=_current_pid(),
+            pid=pid,
             started_at=time.monotonic(),
             deadline=None,
         )

@@ -9,6 +9,7 @@ import json
 import time
 from collections.abc import Generator, Mapping
 from contextlib import AbstractContextManager, contextmanager
+from datetime import UTC, datetime
 from pathlib import Path
 
 _ENV = "MEIVA_START_TIMING"
@@ -21,20 +22,23 @@ def requested(environ: Mapping[str, str]) -> bool:
 
 class StartTrace:
     # meiva:note
-    # The origin and the pid are set by `begin()` at the CLI entry, so a row's start offset is
-    # measured from command dispatch — not from this module's import (the interpreter's import of
-    # the CLI is outside every span) — and the saved record is named for the process that ran it.
+    # The origin, the pid and the wall-clock start are set by `begin()` at the CLI entry, so a
+    # row's start offset is measured from command dispatch — not from this module's import (the
+    # interpreter's import of the CLI is outside every span) — and the saved record is named for
+    # the process that ran it and the moment it started.
     def __init__(self, *, enabled: bool = False) -> None:
         self.enabled = enabled
         self.spans: list[tuple[str, float, float]] = []
         self.services: list[tuple[str, float]] = []
         self.origin: float | None = None
         self.pid: int | None = None
+        self.started_utc: datetime | None = None
         self._open: list[float] = []
 
-    def begin(self, *, pid: int, enabled: bool = False) -> None:
+    def begin(self, *, pid: int, now: datetime, enabled: bool = False) -> None:
         self.enabled = self.enabled or enabled
         self.pid = pid
+        self.started_utc = now.astimezone(UTC)
         if self.origin is None:
             self.origin = time.monotonic()
 
@@ -95,13 +99,13 @@ class StartTrace:
         # only persisted under a home that already exists.
         if not home.is_dir():
             return None
-        pid = self.pid
-        if pid is None:
-            raise RuntimeError("a start timing record is saved only after begin(pid=...)")
+        pid, started = self.pid, self.started_utc
+        if pid is None or started is None:
+            raise RuntimeError("a start timing record is saved only after begin(pid=..., now=...)")
         try:
             target = home / "logs" / "start-timing"
             target.mkdir(parents=True, exist_ok=True)
-            stamp = time.strftime("%Y%m%dT%H%M%SZ", time.gmtime())
+            stamp = started.strftime("%Y%m%dT%H%M%SZ")
             path = target / f"{stamp}-{pid}.json"
             path.write_text(json.dumps(self.payload(), indent=2) + "\n")
             return path
@@ -116,8 +120,8 @@ def trace() -> StartTrace:
     return _TRACE
 
 
-def begin(*, pid: int, enabled: bool = False) -> None:
-    _TRACE.begin(pid=pid, enabled=enabled)
+def begin(*, pid: int, now: datetime, enabled: bool = False) -> None:
+    _TRACE.begin(pid=pid, now=now, enabled=enabled)
 
 
 def phase(name: str) -> AbstractContextManager[None]:

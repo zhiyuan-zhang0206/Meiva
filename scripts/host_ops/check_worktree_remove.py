@@ -15,6 +15,7 @@ nor "refused"). See base/deploy/git/worktree_guard.py for the scan.
 
 from __future__ import annotations
 
+import os
 import sys
 from pathlib import Path
 
@@ -31,7 +32,8 @@ if __name__ == "__main__":
 EXIT_MISSING_DEPENDENCY = 3
 
 try:
-    from base.deploy.git.worktree_guard import find_live_anchors
+    from base.deploy.git.worktree_guard import Invoker, find_live_anchors
+    from base.paths.home import resolve_meiva_home
 except ModuleNotFoundError as error:
     print(
         f"MISSING DEPENDENCY {error.name}: {sys.executable} cannot run the live-anchor scan, "
@@ -50,7 +52,11 @@ def main() -> int:
         )
         return 2
     target = Path(sys.argv[1])
-    hits = find_live_anchors(target)
+    hits = find_live_anchors(
+        target,
+        run=resolve_meiva_home() / "run",
+        invoker=Invoker(pid=os.getpid(), pgid=os.getpgrp()),
+    )
     if hits:
         print(f"REFUSE {target}: {len(hits)} live anchor(s) would be killed by removal:")
         for hit in hits:
