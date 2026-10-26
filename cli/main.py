@@ -133,13 +133,17 @@ def _opt_into_lite_config(args_in: list[str]) -> None:
 # Hand `meiva init` the host facts of its caller, the process facts beyond its site.
 #
 # Init reads none of them itself: the caller's tool directories, which ports of the
-# fixed table something already holds and the transport key of a database-capability bundle
+# fixed table something already holds, the names this host answers to, the instant and the
+# secrets a new home is born with, and the transport key of a database-capability bundle
 # (`args.transport_key`, taken out of the environment by `_take_transport_key`). A
 # `--ssl-cert-file` is pinned into the process before dispatch because the gateway join that
 # follows dials with it.
 def bind_init_inputs(args: argparse.Namespace) -> None:
+    import secrets
+    from datetime import UTC, datetime
+
     from base import cluster
-    from cli.startup.service_path import CallerHost
+    from cli.startup.service_path import BirthFacts, CallerHost
 
     table = cluster.new_home_ports()
     args.caller_host = CallerHost(
@@ -150,10 +154,32 @@ def bind_init_inputs(args: argparse.Namespace) -> None:
         occupied_ports=frozenset(
             port for port in table.values() if isinstance(port, int) and not cluster.port_free(port)
         ),
+        local_names=_local_names() if args.config_file is not None else frozenset(),
+        birth=BirthFacts(
+            now=datetime.now(UTC),
+            cluster_secret=secrets.token_urlsafe(32),
+            redis_admin_password=secrets.token_urlsafe(32),
+            redis_password=secrets.token_urlsafe(32),
+        ),
         transport_key=args.transport_key,
     )
     if args.ssl_cert_file is not None:
         os.environ["SSL_CERT_FILE"] = args.ssl_cert_file
+
+
+# meiva:note
+# The host names and interface addresses by which this host is known, in lowercase. Only a
+# first-start config file can name a remote data plane that must not be this host, so only an
+# init that carries one pays for the lookup.
+def _local_names() -> frozenset[str]:
+    import socket
+
+    import psutil
+
+    names = {socket.gethostname().lower(), socket.getfqdn().lower()}
+    for addresses in psutil.net_if_addrs().values():
+        names.update(a.address.split("%", 1)[0].lower() for a in addresses)
+    return frozenset(names)
 
 
 # meiva:note

@@ -10,7 +10,7 @@ surface module carries only the description (task #3633).
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import UTC, datetime
+from datetime import datetime
 from typing import Any
 
 from langchain_core.messages import AIMessage, ToolCall
@@ -195,6 +195,7 @@ async def _handle_compile_failure(
     fixed_msg: AIMessage,
     tool_call_id: str,
     repair: RepairInputs,
+    now: datetime,
 ) -> dict[str, object]:
     """Last-resort handling for source that still does not compile: hand it to
     the LLM repair model, or surface the error to the agent (skipping the
@@ -249,7 +250,7 @@ async def _handle_compile_failure(
         tool_call_id=tool_call_id,
         status=ExecStatus.FAILED,
         body_start=len(error_header),
-        created_at=datetime.now(UTC),
+        created_at=now,
     )
     return {
         "goto": "after_exec",
@@ -263,6 +264,7 @@ class FixInputs:
     ruff_format: bool
     ruff: RuffRun
     repair: RepairInputs
+    now: datetime
 
 
 async def _fix_call(
@@ -282,7 +284,14 @@ async def _fix_call(
         compile(fixed_code, "<agent_code>", "exec")
     except SyntaxError as e:
         return await _handle_compile_failure(
-            e, fixed_code, fixes_applied, last_msg, fixed_msg, call["id"] or "", inputs.repair
+            e,
+            fixed_code,
+            fixes_applied,
+            last_msg,
+            fixed_msg,
+            call["id"] or "",
+            inputs.repair,
+            inputs.now,
         )
     return _finalize_success(fixed_msg, fixes_applied, before_code=code)
 
@@ -307,6 +316,7 @@ class _SyntaxFixHook(Hook):
         last_msg = normalize_tool_calls(original) or original
         changed = last_msg is not original
         slices = runtime.context.require_agent()
+        clock = runtime.context.require_clock()
         inputs = FixInputs(
             ruff_format=slices.sandbox.syntax_fix_ruff_format,
             ruff=system_ruff(),
@@ -315,7 +325,9 @@ class _SyntaxFixHook(Hook):
                 keys=runtime.context.require_provider_keys(),
                 overrides=slices.overrides,
                 llm_override=slices.read("lm", "llm_override"),
+                clock=clock,
             ),
+            now=clock.now(),
         )
         for call in last_msg.tool_calls:
             result = await _fix_call(last_msg, call, inputs)

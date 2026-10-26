@@ -1,7 +1,7 @@
 ---
 type: doc
 title: meiva-fleet skill — Fleet Collaboration Master Outline
-description: "Master outline skill for fleet collaboration: a one-shot orchestrator decomposes large goals, forks workers, is woken to gather and judge results; communication bisection—authorization/decisions reach the user directly from any depth, progress/conclusions roll up the delegation tree to the delegator for aggregation. Includes orchestrator / worker role manuals and a watch_idle.py reference script."
+description: "Master outline skill for fleet collaboration: a one-shot orchestrator decomposes large goals, forks workers, is woken to gather and judge results; communication bisection—authorization/decisions reach the user directly from any depth, progress/conclusions roll up the delegation tree to the delegator for aggregation. Includes orchestrator / worker role manuals; its goal watcher is the meiva-goal skill's watch_idle.py reference script."
 tags:
 - fleet
 - agent-instruction
@@ -64,7 +64,7 @@ The Autonomy axis of the Two Dials (who consumes evidence to make decisions) con
 ## Reference Sub-documents
 
 - `reference/orchestrator.md` / `reference/worker.md` — per-role deep-dive manuals: delegator semantics of the first prompt, delivery path (results = write a file + send the path, siblings only consume published artifacts), reporting discipline.
-- `reference/watch_idle.py` — reference script for a goal-mode watcher (wake and judge when the goal is idle).
+- The goal-mode watcher (wake and judge when the goal is idle) is `scripts/watch_idle.py` of the meiva-goal skill; Fleet keeps no copy.
 - `meiva-being-a-long-running-agent` owns the independent usage report and optional notification script; Fleet provides task coordination only.
 
 ## Key Dependencies

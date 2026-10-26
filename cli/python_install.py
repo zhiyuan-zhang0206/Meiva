@@ -157,6 +157,8 @@ def install(
     mirror_env: Path | None = None,
     run: UvRunner = _run,
     environment: Mapping[str, str] = os.environ,
+    user_home: Path,
+    platform: str,
 ) -> int:
     """Validate first, then install into this checkout's own inexact environment."""
     if (repo / ".venv").is_symlink():
@@ -165,7 +167,7 @@ def install(
     if errors:
         raise ValueError("Noncanonical uv.lock; restore the committed PyPI lock before installing")
     configured = configured_env(environment, mirror_env)
-    index = python_index(repo, configured)
+    index = python_index(repo, configured, user_home=user_home, platform=platform)
     env = {key: value for key, value in configured.items() if key not in _IGNORED_ENV}
     flags = (["--no-dev"] if no_dev else []) + (["--verbose"] if verbose else [])
     python_args = ["--python", interpreter] if interpreter else []
@@ -301,6 +303,8 @@ def main() -> int:
             interpreter=args.python,
             reinstall_package=args.reinstall_package,
             mirror_env=args.mirror_env,
+            user_home=Path.home(),
+            platform=sys.platform,
         )
     except (ValueError, OSError, subprocess.SubprocessError) as exc:
         print(f"Python installation failed: {exc}", file=sys.stderr)

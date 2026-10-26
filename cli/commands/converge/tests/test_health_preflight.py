@@ -25,6 +25,7 @@ from cli.database.runtime import CommandRuntime, UserSession
 from cli.database.tests.cli_tests import operator_database as operator_database
 from cli.database.tests.cli_tests import operator_pipeline as operator_pipeline
 from cli.database.tests.command_inputs import command_runtime as command_runtime
+from cli.startup.tests.birth_facts import birth_facts
 
 
 # meiva:note
@@ -94,6 +95,7 @@ def _born_gateway_home(home: Path) -> cluster.ClusterRecord:
             frozenset({"gateway"}),
             {"MEIVA_MACHINE_NAME": "gw", "MEIVA_GATEWAY_URL": "http://127.0.0.1:1"},
             occupied_ports=frozenset(),
+            birth=birth_facts(),
         )
     )
     record = cluster.get_record(home)

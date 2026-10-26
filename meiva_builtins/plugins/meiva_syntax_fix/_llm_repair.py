@@ -5,13 +5,13 @@
 from __future__ import annotations
 
 import asyncio
-import time
 from dataclasses import dataclass
 
 from langchain_core.language_models.chat_models import BaseChatModel
 from langchain_core.messages import AIMessage, BaseMessage, HumanMessage, SystemMessage
 from loguru import logger
 
+from base.clock import Clock
 from base.host.env.agent_slices import ModelOverrides
 from base.lm.catalog import ModelCatalog
 from base.lm.catalog.provider_keys import ProviderKeys
@@ -36,15 +36,17 @@ class RepairInputs:
     keys: ProviderKeys
     overrides: ModelOverrides
     llm_override: str
+    clock: Clock
 
 
 # meiva:note
 # One LLM repair attempt: invoke with a timeout, then flatten and strip the reply. The candidate
 # source, or None when the model is unavailable (missing key, timeout, empty output).
 async def repair_once(
-    llm: BaseChatModel, messages: list[BaseMessage], *, catalog: ModelCatalog
+    llm: BaseChatModel, messages: list[BaseMessage], *, catalog: ModelCatalog, clock: Clock
 ) -> str | None:
-    started = time.monotonic()
+    started = clock.monotonic()
+    started_at = clock.now()
     try:
         resp = await asyncio.wait_for(llm.ainvoke(messages), timeout=_REPAIR_TIMEOUT)
     except (
@@ -54,7 +56,7 @@ async def repair_once(
             "[syntax_fix] llm_repair unavailable: model={model} elapsed={elapsed:.1f}s err={err}",
             event="syntax_fix",
             model=_REPAIR_MODEL,
-            elapsed=time.monotonic() - started,
+            elapsed=clock.monotonic() - started,
             err=f"{type(exc).__name__}: {exc}",
         )
         return None
@@ -65,7 +67,7 @@ async def repair_once(
         model=_REPAIR_MODEL,
         catalog=catalog,
         usage_kind="chat",
-        start_time_ns=time.time_ns() - int((time.monotonic() - started) * 1_000_000_000),
+        start_time_ns=int(started_at.timestamp() * 1_000_000_000),
     )
     return strip_code_fence(extract_text(resp.content)).strip() or None
 
@@ -108,7 +110,7 @@ async def llm_repair_syntax(code: str, rendered_error: str, repair: RepairInputs
             model=_REPAIR_MODEL,
             lines=len(code.splitlines()),
         )
-        candidate = await repair_once(llm, messages, catalog=repair.catalog)
+        candidate = await repair_once(llm, messages, catalog=repair.catalog, clock=repair.clock)
         if candidate is None:
             return None
         try:

@@ -8,6 +8,7 @@ import os
 import pytest
 
 from cli.startup.service_path import CallerHost, ServicePathChoice, choose_service_path
+from cli.startup.tests.birth_facts import birth_facts
 
 _CHECKOUT = "/work/meiva"
 
@@ -19,7 +20,15 @@ def _caller(
     virtual_env: str | None = None,
     prefix_venv: str | None = None,
 ) -> CallerHost:
-    return CallerHost(service_path, path, virtual_env, prefix_venv, frozenset())
+    return CallerHost(
+        service_path,
+        path,
+        virtual_env,
+        prefix_venv,
+        frozenset(),
+        local_names=frozenset(),
+        birth=birth_facts(),
+    )
 
 
 def test_a_declaration_the_home_already_carries_is_admitted_as_written() -> None:
