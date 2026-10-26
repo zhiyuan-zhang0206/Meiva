@@ -28,5 +28,4 @@ exports = ["blocked_streak.py", "daemon.py", "engine.py", "host_restart.py", "la
 "runner.py" = { kinds = ["pid", "settings"], why = "Service or operator process entry boots configuration before composing its resources" }
 
 [debt.stdlib-patch]
-"engine.py#assignment sys.argv" = 2
 "engine.py#assignment time.sleep" = 2
