@@ -158,7 +158,9 @@ def test_register_and_unregister_delegate_in_the_default_home(
     )
     plist = job.launchd_plist_path(user_home=default_home)
     assert plist.exists()
-    job.unregister_walg_job(host=host, user_home=default_home)
+    job.unregister_walg_job(
+        host=host, roots=replace(job_roots, home=default_home / ".meiva", user_home=default_home)
+    )
     assert not plist.exists()
     assert [argv[1] for argv in commands.argvs if argv[1] != "print"] == [
         "bootout",

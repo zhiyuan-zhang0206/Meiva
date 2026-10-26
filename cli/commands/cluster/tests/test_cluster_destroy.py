@@ -19,9 +19,9 @@ import pytest
 
 from base.cluster.dataplane.pg_admin import pg_socket_path
 from base.host.system.hostport import Host
+from base.host.system.job_values import JobRoots
 from base.host.system.tests.fake_commands import FakeCommands, Reply, fake_host
 from base.paths.tests.homes import default_home as default_home
-from base.paths.tests.homes import unit_home as unit_home
 from cli import start_identity
 from cli.commands.cluster.home import (
     DestroyRequest,
@@ -59,6 +59,10 @@ class Session:
 
 def _anything(_argv: tuple[str, ...]) -> bool:
     return True
+
+
+def _default_roots(user_home: Path) -> JobRoots:
+    return JobRoots(home=user_home / ".meiva", repo=user_home / "checkout", user_home=user_home)
 
 
 def _detached(home: Path) -> bool:
@@ -116,13 +120,16 @@ def home(tmp_path: Path, checkout: Path, roles: list[str]) -> Path:
     return home
 
 
-def _request(home: Path, checkout: Path, *, drop_db: bool = False) -> DestroyRequest:
+def _request(
+    home: Path, checkout: Path, *, user_home: Path, drop_db: bool = False
+) -> DestroyRequest:
     return DestroyRequest(
         home=home,
         drop_db=drop_db,
         stop_mode=StopMode.SMOOTH,
         stop_timeout_s=300.0,
         checkout=checkout,
+        user_home=user_home,
         helper_port=8181,
     )
 
@@ -136,10 +143,10 @@ class Destroy(Protocol):
 
 
 @pytest.fixture
-def destroy(home: Path, checkout: Path) -> Destroy:
+def destroy(home: Path, checkout: Path, tmp_path: Path) -> Destroy:
     def run(session: Session, *, drop_db: bool = False, host: Host | None = None) -> int:
         return cmd_cluster_destroy(
-            _request(home, checkout, drop_db=drop_db),
+            _request(home, checkout, user_home=tmp_path / "user", drop_db=drop_db),
             host=fake_host() if host is None else host,
             terminal=session.terminal,
         )
@@ -294,9 +301,7 @@ def test_drop_db_removes_the_data_directories_after_the_stop_and_keeps_the_env(
 
 # meiva:note
 # Labels name a job, not a home: only the default home may remove one.
-def test_a_scratch_home_never_reaches_the_hosts_scheduler(
-    unit_home: Path, home: Path, destroy: Destroy
-) -> None:
+def test_a_scratch_home_never_reaches_the_hosts_scheduler(home: Path, destroy: Destroy) -> None:
     commands = FakeCommands()
 
     assert destroy(Session(f"{home}\n"), host=fake_host(commands)) == 0
@@ -329,7 +334,9 @@ def test_a_failure_to_retire_the_jobs_leaves_the_home_attached_and_a_rerun_compl
 
     first = Session(f"{prod}\n")
     failed = cmd_cluster_destroy(
-        _request(prod, checkout), host=fake_host(broken), terminal=first.terminal
+        _request(prod, checkout, user_home=default_home),
+        host=fake_host(broken),
+        terminal=first.terminal,
     )
     assert failed == 1
     assert first.stderr.getvalue().startswith("cluster cleanup incomplete: could not remove")
@@ -337,7 +344,9 @@ def test_a_failure_to_retire_the_jobs_leaves_the_home_attached_and_a_rerun_compl
 
     second = Session(f"{prod}\n")
     done = cmd_cluster_destroy(
-        _request(prod, checkout), host=fake_host(working), terminal=second.terminal
+        _request(prod, checkout, user_home=default_home),
+        host=fake_host(working),
+        terminal=second.terminal,
     )
     assert done == 0 and _detached(prod)
     assert working.calls
@@ -348,7 +357,7 @@ def test_every_scheduled_job_is_tried_even_when_the_first_fails(default_home: Pa
     broken.on(_anything, OSError("launchctl unavailable"), repeat=True)
 
     with pytest.raises(RuntimeError) as failed:
-        unregister_scheduled_jobs(host=fake_host(broken))
+        unregister_scheduled_jobs(host=fake_host(broken), roots=_default_roots(default_home))
 
     message = str(failed.value)
     assert message.startswith("could not remove scheduled jobs: health probe (")
@@ -365,6 +374,6 @@ def test_the_crontab_is_read_once_per_cron_based_job_on_a_default_home(
     working = FakeCommands()
     working.on(_anything, Reply(), repeat=True)
 
-    unregister_scheduled_jobs(host=fake_host(working))
+    unregister_scheduled_jobs(host=fake_host(working), roots=_default_roots(default_home))
 
     assert working.argvs == [("crontab", "-l")] * 5

@@ -27,6 +27,7 @@ from base.host.db_authority.api import AcceptanceCache
 from base.host.net.auth import cookie_name
 from base.host.system.cron.health_job import register_os_cron
 from base.host.system.hostport import Host
+from base.host.system.job_values import JobRoots
 from base.lm.catalog import ModelCatalog
 from base.packages.composer_commands import CommandCatalog, load_skill_names
 from base.packages.plugin_providers import build_model_catalog
@@ -255,6 +256,11 @@ async def lifespan(
                     register_os_cron,
                     enabled=config.view.general.os_jobs_enabled,
                     host=process.host,
+                    roots=JobRoots(
+                        home=process.home,
+                        repo=paths.repo_root(),
+                        user_home=app.state.gateway_config.upload_home,
+                    ),
                 )
             except Exception:
                 _log.warning("OS health-probe cron registration failed", exc_info=True)

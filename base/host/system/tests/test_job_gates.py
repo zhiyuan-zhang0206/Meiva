@@ -22,7 +22,7 @@ from base.host.system.tests.fake_crontab import FakeCrontab
 @pytest.mark.parametrize("enabled", [False, True])
 def test_packages_gates_stop_at_the_switch_then_the_home(tmp_path: Path, enabled: bool) -> None:
     packages_job.register_packages_job(
-        roots=JobRoots(home=tmp_path / ".meiva", repo=Path("/isolated"), user_home=tmp_path),
+        roots=JobRoots(home=tmp_path / "scratch-home", repo=Path("/isolated"), user_home=tmp_path),
         enabled=enabled,
         schedule=None,
         host=fake_host(),
@@ -173,14 +173,15 @@ def test_every_registrar_stops_at_the_switch_before_the_home(
 ) -> None:
     loop = tmp_path / "self-loop"
     loop.symlink_to(loop)
+    roots = JobRoots(home=loop, repo=tmp_path, user_home=tmp_path)
     if register is autostart.register_autostart:
-        register(services=frozenset({"gateway"}), enabled=False, host=fake_host(), home=loop)
+        register(services=frozenset({"gateway"}), enabled=False, host=fake_host(), roots=roots)
         with pytest.raises(RuntimeError, match="Symlink loop"):
-            register(services=frozenset({"gateway"}), enabled=True, host=fake_host(), home=loop)
+            register(services=frozenset({"gateway"}), enabled=True, host=fake_host(), roots=roots)
     else:
-        register(enabled=False, host=fake_host(), home=loop)
+        register(enabled=False, host=fake_host(), roots=roots)
         with pytest.raises(RuntimeError, match="Symlink loop"):
-            register(enabled=True, host=fake_host(), home=loop)
+            register(enabled=True, host=fake_host(), roots=roots)
 
 
 @pytest.mark.parametrize("kind", ["logs", "packages", "pr-flow", "walg"])

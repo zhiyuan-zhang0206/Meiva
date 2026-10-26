@@ -24,8 +24,8 @@ from base.host.system.job_readings import read_launchd_path, read_meiva_binary
 from base.host.system.job_values import JobPaths, JobRoots, plist_path
 
 
-def launchd_plist_path(*, user_home: Path | None = None) -> Path:
-    return mechanics.user_plist_path(content.LABEL, user_home=user_home)
+def launchd_plist_path(*, user_home: Path) -> Path:
+    return plist_path(content.LABEL, user_home=user_home)
 
 
 def register_macos(*, tick_seconds: int, roots: JobRoots, host: Host) -> int:
@@ -47,7 +47,7 @@ def register_macos(*, tick_seconds: int, roots: JobRoots, host: Host) -> int:
     return 0
 
 
-def unregister_macos(*, host: Host, user_home: Path | None = None) -> int:
+def unregister_macos(*, host: Host, user_home: Path) -> int:
     retired = mechanics.remove_launchd_job(
         content.LABEL, launchd_plist_path(user_home=user_home), host=host
     )
@@ -103,7 +103,7 @@ def register_packages_job(
     if not enabled:
         mechanics.skip_os_job("packages refresh")
         return
-    if not mechanics.owns_os_job_home("packages refresh", home=roots.home):
+    if not mechanics.owns_os_job_home("packages refresh", roots=roots):
         return
     if schedule is None:
         raise ValueError("registering the packages refresh job needs its schedule")
@@ -123,11 +123,11 @@ def register_packages_job(
     )
 
 
-def unregister_packages_job(*, host: Host, user_home: Path | None = None) -> None:
-    if not mechanics.owns_os_jobs("packages refresh"):
+def unregister_packages_job(*, host: Host, roots: JobRoots) -> None:
+    if not mechanics.owns_os_job_home("packages refresh", roots=roots):
         return
     mechanics.unregister_platform_job(
-        macos=lambda: unregister_macos(host=host, user_home=user_home),
+        macos=lambda: unregister_macos(host=host, user_home=roots.user_home),
         linux=lambda: unregister_linux(host=host),
         host=host,
     )

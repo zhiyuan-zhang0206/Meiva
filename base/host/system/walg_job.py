@@ -30,8 +30,8 @@ from base.host.system.job_readings import read_launchd_path, read_meiva_binary
 from base.host.system.job_values import JobPaths, JobRoots, plist_path
 
 
-def launchd_plist_path(*, user_home: Path | None = None) -> Path:
-    return mechanics.user_plist_path(content.LABEL, user_home=user_home)
+def launchd_plist_path(*, user_home: Path) -> Path:
+    return plist_path(content.LABEL, user_home=user_home)
 
 
 def register_macos(*, backup_hour: int, roots: JobRoots, host: Host) -> int:
@@ -56,7 +56,7 @@ def register_macos(*, backup_hour: int, roots: JobRoots, host: Host) -> int:
     return 0
 
 
-def unregister_macos(*, host: Host, user_home: Path | None = None) -> int:
+def unregister_macos(*, host: Host, user_home: Path) -> int:
     retired = mechanics.remove_launchd_job(
         content.LABEL, launchd_plist_path(user_home=user_home), host=host
     )
@@ -112,7 +112,7 @@ def register_walg_job(
     if not enabled:
         mechanics.skip_os_job("WAL-G tick")
         return
-    if not mechanics.owns_os_job_home("WAL-G tick", home=roots.home):
+    if not mechanics.owns_os_job_home("WAL-G tick", roots=roots):
         return
     if backup_hour is None:
         raise ValueError("registering the WAL-G tick needs the backup hour")
@@ -125,11 +125,11 @@ def register_walg_job(
     )
 
 
-def unregister_walg_job(*, host: Host, user_home: Path | None = None) -> None:
-    if not mechanics.owns_os_jobs("WAL-G tick"):
+def unregister_walg_job(*, host: Host, roots: JobRoots) -> None:
+    if not mechanics.owns_os_job_home("WAL-G tick", roots=roots):
         return
     mechanics.unregister_platform_job(
-        macos=lambda: unregister_macos(host=host, user_home=user_home),
+        macos=lambda: unregister_macos(host=host, user_home=roots.user_home),
         linux=lambda: unregister_linux(host=host),
         host=host,
     )
