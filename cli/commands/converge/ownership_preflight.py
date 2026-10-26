@@ -5,9 +5,9 @@ from __future__ import annotations
 import grp
 import pwd
 import sys
+from datetime import datetime
 from pathlib import Path
 
-from base.clock import SYSTEM_TIMERS, Clock, ClockConfig
 from cli.commands.converge.plans.ownership_plan import (
     Account,
     OwnedPath,
@@ -35,7 +35,9 @@ def ensure_ownership_preflight(ctx: ConvergeCtx) -> None:
     for line in report_lines(warnings):
         print(line, file=sys.stderr)
     if warnings:
-        _append_warnings(ctx.meiva_home / "logs" / "ownership_preflight.log", warnings)
+        _append_warnings(
+            ctx.meiva_home / "logs" / "ownership_preflight.log", warnings, now=ctx.clock.now()
+        )
 
 
 def _key_paths(meiva_home: Path) -> tuple[Path, ...]:
@@ -64,12 +66,9 @@ def _account(uid: int) -> Account:
         return Account(uid, pw.pw_name, str(gid))
 
 
-def _append_warnings(path: Path, warnings: tuple[str, ...]) -> None:
+def _append_warnings(path: Path, warnings: tuple[str, ...], *, now: datetime) -> None:
     try:
         path.parent.mkdir(parents=True, exist_ok=True)
-        now = Clock(
-            ClockConfig("UTC", None, message_timestamp_weekday=False), timers=SYSTEM_TIMERS
-        ).now()
         stamp = now.isoformat(timespec="seconds")
         with path.open("a", encoding="utf-8") as output:
             for line in log_lines(stamp, warnings):

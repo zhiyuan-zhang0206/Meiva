@@ -205,6 +205,8 @@ class CollectorUnit:
                 user_home=self.home.parent / "user", login_shell="/bin/zsh", interactive=False
             ),
             timers=self.runtime.timers,
+            clock=self.runtime.clock,
+            new_id=self.runtime.new_id,
             services=frozenset(),
         )
 

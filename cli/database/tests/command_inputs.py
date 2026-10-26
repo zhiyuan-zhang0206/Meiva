@@ -5,6 +5,7 @@ from pathlib import Path
 
 import pytest
 
+from base.clock import Clock, ClockConfig
 from base.clock.tests.manual_timers import ManualTimers
 from base.cluster.machine.configured import ConfiguredMachineIdentity
 from base.config import ConfigBoot
@@ -40,6 +41,7 @@ def command_runtime(tmp_path: Path) -> CommandRuntime:
     ttys, so a command that asks a person a question finds nobody to answer.
     """
     config = snapshot_process_config()
+    timers = ManualTimers()
     return CommandRuntime(
         config=config,
         home=meiva_home(),
@@ -47,7 +49,12 @@ def command_runtime(tmp_path: Path) -> CommandRuntime:
         helper=refuse_helper,
         host=fake_host(),
         session=UserSession(user_home=tmp_path / "user", login_shell="/bin/zsh", interactive=False),
-        timers=ManualTimers(),
+        timers=timers,
+        clock=Clock(
+            ClockConfig("UTC", None, message_timestamp_weekday=False),
+            timers=timers,
+            now=timers.now,
+        ),
         checkout=repo_root(),
         terminal=Terminal(io.StringIO(), io.StringIO(), io.StringIO()),
         new_id=counting_ids(),

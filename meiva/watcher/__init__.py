@@ -17,6 +17,7 @@ import datetime
 from base.daemon.schedules.watcher import (
     CronExprError as CronExprError,
 )
+from meiva.sdk_surface import settings as sdk_settings
 from meiva.shell import SessionHandle
 from meiva.watcher import plans, spawn, wiring
 
@@ -27,10 +28,6 @@ __all_for_meiva__ = [
 ]
 
 type WatcherTimeout = float | datetime.timedelta | str
-
-
-def _now() -> datetime.datetime:
-    return datetime.datetime.now(datetime.UTC)
 
 
 def launch(
@@ -51,7 +48,7 @@ def launch(
         shell sessions while running) and `output_path` (the log its output
         streams to). Kill or capture it through `sessions`.
     """
-    request = plans.plan_launch(code, timeout, name, notify, _now())
+    request = plans.plan_launch(code, timeout, name, notify, sdk_settings.clock().now())
     return spawn.run(request, wiring.spawn_deps())
 
 
@@ -83,12 +80,12 @@ def cron(
         The same handle `run_background` returns: `session_id` (kill it to stop
         the schedule) and `output_path` (the log its output streams to).
     """
-    from base.clock import Clock
     from base.config import host_tz_name
 
     # Default to the cluster clock when authoritative; a settings-lite
     # process (no authoritative cluster timezone) falls back to this host's
     # own zone - the same wall clock its other displays use.
+    clock = sdk_settings.clock()
     request = plans.plan_cron(
         expr,
         message,
@@ -96,8 +93,8 @@ def cron(
         end_time=end_time,
         name=name,
         notify=notify,
-        now=_now(),
-        default_timezone=Clock.from_settings().authoritative_timezone or host_tz_name(),
+        now=clock.now(),
+        default_timezone=clock.authoritative_timezone or host_tz_name(),
     )
     return spawn.run(request, wiring.spawn_deps())
 
@@ -121,14 +118,13 @@ def at(
         The same handle `run_background` returns: `session_id` (kill that session
         to cancel) and `output_path` (the log its output streams to).
     """
-    from base.clock import Clock
-
+    clock = sdk_settings.clock()
     request = plans.plan_at(
         when,
         message,
         name=name,
         notify=notify,
-        now=_now(),
-        announce_timezone=Clock.from_settings().authoritative_timezone,
+        now=clock.now(),
+        announce_timezone=clock.authoritative_timezone,
     )
     return spawn.run(request, wiring.spawn_deps())

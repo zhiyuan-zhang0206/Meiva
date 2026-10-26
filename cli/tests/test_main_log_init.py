@@ -27,6 +27,7 @@ import yaml
 
 import cli.main as _main
 from base import telemetry
+from base.clock import Clock, ClockConfig
 from base.clock.tests.manual_timers import ManualTimers
 from base.cluster import postgres
 from base.cluster.dataplane.direct_url import ClusterDirectUrl
@@ -49,6 +50,7 @@ from cli.database import (
 from cli.database.runtime import CommandRuntime, UserSession
 from cli.database.tests.cli_tests import operator_database as operator_database
 from cli.database.tests.command_inputs import command_runtime as command_runtime
+from cli.database.tests.command_inputs import counting_ids
 from cli.parsers import build_parser
 from cli.tests.bootstrap.init_identity import initialized_runner_home
 
@@ -343,6 +345,10 @@ def _cold_report(
         host=fake_host(platform=DARWIN_ARM64),
         session=UserSession(user_home=path, login_shell="/bin/zsh", interactive=False),
         timers=ManualTimers(),
+        clock=Clock(
+            ClockConfig("UTC", None, message_timestamp_weekday=False), timers=ManualTimers()
+        ),
+        new_id=counting_ids(),
     )
     lgtm_native.ensure_lgtm_native_step(context)
     return 0

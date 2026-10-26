@@ -12,13 +12,13 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from base.agents.context.clients import DatabaseFactory
-from base.clock import Timers
+from base.clock import Clock, Timers
 from base.cluster.machine import MachineIdentityReader, MachineRole, MachineRoles
 from base.config import ConfigBoot
 from base.host.permissions_helper.client import HelperFactory
 from base.host.system.hostport import Host
 from base.telemetry import EventPipeline
-from cli.database.runtime import UserSession
+from cli.database.runtime import NewId, UserSession
 
 ALL_ROLES: frozenset[MachineRole] = frozenset({"gateway", "agent-runner", "observability-station"})
 
@@ -44,6 +44,11 @@ class ConvergeCtx:
     host: Host
     session: UserSession
     timers: Timers
+    # meiva:note
+    # The wall clock and the identifier source of the invocation that runs this converge; a step
+    # stamps with `clock.now()` and names new records with `new_id()`.
+    clock: Clock
+    new_id: NewId
     services: frozenset[str]
 
     def require_helper(self) -> HelperFactory:

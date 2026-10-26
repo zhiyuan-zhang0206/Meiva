@@ -59,6 +59,8 @@ def context(
         host=host_on(DARWIN_ARM64),
         session=UserSession(user_home=unit.home, login_shell="/bin/zsh", interactive=False),
         timers=runtime.timers,
+        clock=runtime.clock,
+        new_id=runtime.new_id,
         services=frozenset(BACKENDS),
     )
 

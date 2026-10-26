@@ -9,7 +9,7 @@ from pathlib import Path
 import pytest
 
 import meiva.skills
-from base.clock import SYSTEM_TIMERS
+from base.clock import SYSTEM_TIMERS, Clock, ClockConfig
 from base.host.system.tests.fake_commands import fake_host
 from base.sessions.tests.refuse_helper import refuse_helper
 from base.telemetry import EventPipeline
@@ -22,6 +22,7 @@ from cli.database.runtime import CommandRuntime, UserSession
 from cli.database.tests.cli_tests import operator_database as operator_database
 from cli.database.tests.cli_tests import operator_pipeline as operator_pipeline
 from cli.database.tests.command_inputs import command_runtime as command_runtime
+from cli.database.tests.command_inputs import counting_ids
 
 REPO = Path(__file__).resolve().parents[4]
 GUIDE = REPO / "meiva_builtins" / "skills" / "platform" / "meiva-guide"
@@ -130,6 +131,10 @@ def test_external_guide_preserves_legacy_copies_and_publishes_nested_resources(
         session=UserSession(user_home=meiva_home, login_shell="/bin/zsh", interactive=False),
         services=frozenset(),
         timers=SYSTEM_TIMERS,
+        clock=Clock(
+            ClockConfig("UTC", None, message_timestamp_weekday=False), timers=SYSTEM_TIMERS
+        ),
+        new_id=counting_ids(),
     )
     external_skills.converge_external_agent_skill(context, host_home=host_home)
     target = client_home / "skills" / "meiva-guide"

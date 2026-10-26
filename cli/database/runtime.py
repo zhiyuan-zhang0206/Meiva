@@ -10,7 +10,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import TextIO
 
-from base.clock import SYSTEM_TIMERS, Timers
+from base.clock import SYSTEM_TIMERS, Clock, ClockConfig, Timers
 from base.cluster.machine.configured import ConfiguredMachineIdentity
 from base.config import ConfigBoot
 from base.host.permissions_helper.client import HelperFactory
@@ -114,6 +114,12 @@ class CommandRuntime:
     session: UserSession
     timers: Timers
     # meiva:note
+    # The wall clock of this invocation, over the same `timers`. A command asks it for the instant it
+    # stamps or compares with (`clock.now()`, UTC) and passes that value down; the real one carries
+    # the UTC zone because an instant has none to choose, and a command that formats times for a
+    # person builds a clock from its configuration owner (`clock_config_from_boot`).
+    clock: Clock
+    # meiva:note
     # The checkout whose code runs this invocation (`base.paths.repo_root`), chosen here with the
     # other process facts. The entry's checkout gate has already accepted it for `home`.
     checkout: Path
@@ -130,9 +136,8 @@ class CommandRuntime:
     # resolved home the entry settled on; it is neither created nor checked here.
     #
     # This is the one place the real permissions-helper factory, the real host, the real
-    # timers, the real user session, the real checkout, the real terminal and the real identifier
-    # source are chosen: the
-    # helper (for the host's platform) only builds a client and reads the helper's port when a
+    # timers and clock, the real user session, the real checkout, the real terminal and the real
+    # identifier source are chosen: the helper (for the host's platform) only builds a client and reads the helper's port when a
     # macOS code path asks for one, and the host only answers when a step asks it to find or run
     # something.
     @classmethod
@@ -147,6 +152,9 @@ class CommandRuntime:
             host=host,
             session=UserSession.current(),
             timers=SYSTEM_TIMERS,
+            clock=Clock(
+                ClockConfig("UTC", None, message_timestamp_weekday=False), timers=SYSTEM_TIMERS
+            ),
             checkout=repo_root(),
             terminal=Terminal.current(),
             new_id=mint_id,

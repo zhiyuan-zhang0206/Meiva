@@ -17,6 +17,7 @@ def _h_backup_walg_run(args: argparse.Namespace) -> int:
         walg_plane(config),
         throwaway=walg_throwaway(config),
         database_for_url=args.database_factory.for_url,
+        clock=args.runtime.clock,
     )
 
 
@@ -28,6 +29,7 @@ def _h_backup_walg_drill(args: argparse.Namespace) -> int:
         walg_plane(config),
         throwaway=walg_throwaway(config),
         database_for_url=args.database_factory.for_url,
+        clock=args.runtime.clock,
     )
 
 
@@ -41,6 +43,7 @@ def _h_backup_walg_restore(args: argparse.Namespace) -> int:
         time=args.time,
         lsn=args.lsn,
         user=args.user,
+        clock=args.runtime.clock,
     )
 
 

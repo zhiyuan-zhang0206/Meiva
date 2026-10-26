@@ -68,6 +68,8 @@ def _preflight_ctx(
         session=UserSession(user_home=tmp_path / "home", login_shell="/bin/zsh", interactive=False),
         services=frozenset(),
         timers=command_runtime.timers,
+        clock=command_runtime.clock,
+        new_id=command_runtime.new_id,
     )
 
 
@@ -404,6 +406,8 @@ def _git_repo(
         session=UserSession(user_home=tmp_path / "home", login_shell="/bin/zsh", interactive=False),
         services=frozenset(),
         timers=command_runtime.timers,
+        clock=command_runtime.clock,
+        new_id=command_runtime.new_id,
     )
     return ctx, head, first
 
@@ -479,6 +483,8 @@ def test_checkout_worktree_skipped(
         session=UserSession(user_home=tmp_path / "home", login_shell="/bin/zsh", interactive=False),
         services=frozenset(),
         timers=command_runtime.timers,
+        clock=command_runtime.clock,
+        new_id=command_runtime.new_id,
     )
     (wt / "stray.txt").write_text("dirty\n")
 

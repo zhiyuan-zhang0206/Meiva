@@ -38,7 +38,7 @@ from cli.commands.agents.tests.lease_support import (
 from cli.commands.agents.tests.lease_support import active as active
 from cli.commands.agents.tests.lease_support import lease_at as lease_at
 from cli.commands.agents.tests.loopback_hosts import codex_app_server, short_socket_path
-from cli.commands.agents.tests.relay_harness import THREAD
+from cli.commands.agents.tests.relay_harness import REAL_CLOCK, THREAD
 from cli.database import OperatorDatabaseFactory
 from cli.database.tests.cli_tests import operator_database as operator_database
 from cli.database.tests.command_inputs import command_runtime as command_runtime
@@ -81,7 +81,12 @@ def test_the_relay_command_runs_a_claude_relay_to_the_leases_expiry(
     code = cmd_relay(
         _relay_args(lease),
         inputs=RelayInputs(
-            lease["relay_token"], redis_url, codex_home=None, stdout=stdout, bus=event_bus
+            lease["relay_token"],
+            redis_url,
+            codex_home=None,
+            stdout=stdout,
+            bus=event_bus,
+            clock=REAL_CLOCK,
         ),
         database_factory=operator_database,
         machine=machine_identity,
@@ -112,7 +117,12 @@ def test_the_relay_command_reports_a_host_that_refuses_to_be_steered(
         code = cmd_relay(
             _relay_args(lease, provider="codex", thread_id=str(THREAD), codex_remote=host.endpoint),
             inputs=RelayInputs(
-                lease["relay_token"], redis_url, codex_home=None, stdout=stdout, bus=event_bus
+                lease["relay_token"],
+                redis_url,
+                codex_home=None,
+                stdout=stdout,
+                bus=event_bus,
+                clock=REAL_CLOCK,
             ),
             database_factory=operator_database,
             machine=machine_identity,
@@ -146,7 +156,12 @@ def test_unresolvable_destination_exits_before_any_lease_work(
             antigravity_endpoint_file=str(absent),
         ),
         inputs=RelayInputs(
-            lease["relay_token"], redis_url, codex_home=None, stdout=stdout, bus=event_bus
+            lease["relay_token"],
+            redis_url,
+            codex_home=None,
+            stdout=stdout,
+            bus=event_bus,
+            clock=REAL_CLOCK,
         ),
         database_factory=operator_database,
         machine=machine_identity,
@@ -171,7 +186,12 @@ def test_agent_mismatch_refuses_inbox_before_subscription(
     code = cmd_relay(
         _relay_args(lease, agent_id=lease["agent_id"] + 1),
         inputs=RelayInputs(
-            lease["relay_token"], redis_url, codex_home=None, stdout=stdout, bus=event_bus
+            lease["relay_token"],
+            redis_url,
+            codex_home=None,
+            stdout=stdout,
+            bus=event_bus,
+            clock=REAL_CLOCK,
         ),
         database_factory=operator_database,
         machine=machine_identity,
@@ -193,7 +213,12 @@ def test_the_relay_command_refuses_a_credential_the_lease_did_not_mint(
     code = cmd_relay(
         _relay_args(lease),
         inputs=RelayInputs(
-            UNMINTED, redis_url, codex_home=None, stdout=io.StringIO(), bus=event_bus
+            UNMINTED,
+            redis_url,
+            codex_home=None,
+            stdout=io.StringIO(),
+            bus=event_bus,
+            clock=REAL_CLOCK,
         ),
         database_factory=operator_database,
         machine=machine_identity,

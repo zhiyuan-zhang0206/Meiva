@@ -16,11 +16,11 @@ import subprocess
 import sys
 from collections.abc import Callable
 from dataclasses import dataclass
+from datetime import datetime
 from pathlib import Path
 from typing import assert_never
 
 from base import cluster
-from base.clock import SYSTEM_TIMERS, Clock, ClockConfig
 from base.cluster import session_name
 from base.cluster.machine import MachineIdentityReader, MachineRoles
 from base.deploy import start_trace
@@ -121,16 +121,13 @@ class _Start:
         return self.runtime.code_root
 
 
-def _stand_down(home: Path, *, boot_attempt: bool) -> int | None:
+def _stand_down(home: Path, *, boot_attempt: bool, now: datetime) -> int | None:
     # meiva:note
     # A stop that says "stopped" outranks this start when the OS boot job is the
     # caller: the boot job exists for an accidental death, not to undo an
     # operator's stop (task #5493). An explicit start is the one thing that ends
     # a stand-down, so it clears the record before anything is admitted or launched.
     held = stand_down.read(home)
-    now = Clock(
-        ClockConfig("UTC", None, message_timestamp_weekday=False), timers=SYSTEM_TIMERS
-    ).now()
     step = stand_down_step(
         boot_attempt=boot_attempt,
         recorded=held is not None,
@@ -303,7 +300,9 @@ def _register_and_probe(start: _Start) -> int | None:
         # cluster status; catching a broken path now puts the failure on this stdout.
         print("\n\u2192 probe gateway")
         with start_trace.phase("gateway probe"):
-            rc = _repo.probe_gateway_or_die(start.resolved["gateway_url"])
+            rc = _repo.probe_gateway_or_die(
+                start.resolved["gateway_url"], timers=start.command.timers
+            )
         if rc != 0:
             return rc
     return None
@@ -417,6 +416,7 @@ def _launch(
             runtime=start.runtime,
             honor_restart_budget=boot_attempt,
             inputs=start.launch_inputs,
+            timers=start.command.timers,
         )
     # meiva:note
     # Hand the launch failures to whoever runs this start from another process. Written
@@ -437,7 +437,10 @@ def _wait_ready(
     print("\n\u2192 waiting for services to come up")
     with start_trace.phase("readiness wait"):
         return root_readiness.wait_for_service_tree(
-            tuple(launch.started), timeout_s=ready_timeout, home=start.command.home
+            tuple(launch.started),
+            timeout_s=ready_timeout,
+            home=start.command.home,
+            timers=start.command.timers,
         )
 
 
@@ -473,7 +476,7 @@ def cmd_start_body(
     # The caller names exactly one service selection; nothing is persisted, so no
     # later start inherits it. ``reconcile`` is off only for restart's start leg.
     with start_trace.phase("stand-down"):
-        ended = _stand_down(command.home, boot_attempt=boot_attempt)
+        ended = _stand_down(command.home, boot_attempt=boot_attempt, now=command.clock.now())
     if ended is not None:
         return ended
     with start_trace.phase("admission"):

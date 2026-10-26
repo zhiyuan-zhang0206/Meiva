@@ -10,7 +10,7 @@ from typing import Any, cast
 
 import pytest
 
-from base.clock import SYSTEM_TIMERS
+from base.clock import SYSTEM_TIMERS, Clock, ClockConfig
 from base.cluster.machine import MachineIdentityReader
 from base.config import ConfigBoot
 from base.host.system.tests.fake_commands import fake_host
@@ -32,6 +32,7 @@ from cli.database.tests.cli_tests import operator_database as operator_database
 from cli.database.tests.cli_tests import operator_pipeline as operator_pipeline
 from cli.database.tests.command_inputs import command_config_machine as command_config_machine
 from cli.database.tests.command_inputs import command_runtime as command_runtime
+from cli.database.tests.command_inputs import counting_ids
 
 SKILL = "operating-meiva-cluster"
 
@@ -73,6 +74,10 @@ def _world(
             session=UserSession(user_home=meiva_home, login_shell="/bin/zsh", interactive=False),
             services=frozenset(),
             timers=SYSTEM_TIMERS,
+            clock=Clock(
+                ClockConfig("UTC", None, message_timestamp_weekday=False), timers=SYSTEM_TIMERS
+            ),
+            new_id=counting_ids(),
         ),
     )
 

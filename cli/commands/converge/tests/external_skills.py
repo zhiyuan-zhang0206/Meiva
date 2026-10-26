@@ -5,7 +5,7 @@ from collections.abc import Callable
 from pathlib import Path
 from typing import Any, cast
 
-from base.clock import SYSTEM_TIMERS
+from base.clock import SYSTEM_TIMERS, Clock, ClockConfig
 from base.cluster.machine import MachineIdentityReader
 from base.config import ConfigBoot
 from base.host.system.tests.fake_commands import fake_host
@@ -13,6 +13,7 @@ from base.sessions.tests.refuse_helper import refuse_helper
 from base.telemetry import EventPipeline
 from cli.commands.converge.spec import ConvergeCtx
 from cli.database.runtime import UserSession
+from cli.database.tests.command_inputs import counting_ids
 
 SKILL = "operating-meiva-cluster"
 
@@ -49,6 +50,10 @@ def skill_ctx(
         session=UserSession(user_home=meiva_home, login_shell="/bin/zsh", interactive=False),
         services=frozenset(),
         timers=SYSTEM_TIMERS,
+        clock=Clock(
+            ClockConfig("UTC", None, message_timestamp_weekday=False), timers=SYSTEM_TIMERS
+        ),
+        new_id=counting_ids(),
     )
 
 

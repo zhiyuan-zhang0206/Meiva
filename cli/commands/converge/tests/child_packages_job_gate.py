@@ -6,6 +6,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+from base.clock import Clock, ClockConfig
 from base.clock.tests.manual_timers import ManualTimers
 from base.cluster.machine.configured import ConfiguredMachineIdentity
 from base.config import ConfigBoot
@@ -21,6 +22,7 @@ from cli.database import (
     operator_event_pipeline,
 )
 from cli.database.runtime import UserSession
+from cli.database.tests.command_inputs import counting_ids
 
 
 def main() -> None:
@@ -47,6 +49,10 @@ def main() -> None:
         session=UserSession(user_home=Path.home(), login_shell="/bin/sh", interactive=False),
         services=frozenset(),
         timers=ManualTimers(),
+        clock=Clock(
+            ClockConfig("UTC", None, message_timestamp_weekday=False), timers=ManualTimers()
+        ),
+        new_id=counting_ids(),
     )
     try:
         ensure_packages_refresh_job(context)

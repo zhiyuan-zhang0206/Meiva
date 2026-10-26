@@ -8,7 +8,6 @@ with the tool's named arguments."""
 from __future__ import annotations
 
 import sys
-import time
 import types
 from pathlib import Path
 from typing import Any
@@ -38,6 +37,7 @@ from meiva.mcps.config import (
     ToolInfo as ToolInfo,
 )
 from meiva.sdk_surface import process_context
+from meiva.sdk_surface import settings as sdk_settings
 from meiva.sdk_surface.validation import coerce_str
 
 # The module whose `call_raw` every tool call funnels through, text form and `raw` form alike.
@@ -63,7 +63,7 @@ def _source() -> _tools.ToolSource:
         timeout_seconds=clients.timeout_seconds,
         cache=_tools.DiskCache(_cache_dir()),
         identity=context.identity,
-        now=time.time(),
+        now=sdk_settings.clock().now().timestamp(),
     )
 
 

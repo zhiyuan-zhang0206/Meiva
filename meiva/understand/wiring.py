@@ -28,9 +28,7 @@ def _output_site() -> OutputSite | None:
         agent_id = agent_identity.require_agent_id()
     except RuntimeError:
         return None
-    return OutputSite(
-        workspace_dir(agent_id) / OVERFLOW_DIRNAME, sdk_settings.clock().explicit_zone()
-    )
+    return OutputSite(workspace_dir(agent_id) / OVERFLOW_DIRNAME, sdk_settings.clock())
 
 
 # meiva:note

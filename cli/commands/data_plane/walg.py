@@ -6,12 +6,13 @@ from __future__ import annotations
 import sys
 from collections.abc import Callable
 from contextlib import AbstractContextManager
+from functools import partial
 from pathlib import Path
 from typing import Any
 
 import psycopg
 
-from base.clock import SYSTEM_TIMERS, Clock, ClockConfig
+from base.clock import Clock
 from base.cluster.dataplane import walg_binary
 from base.cluster.dataplane.pg_throwaway_base import ThrowawayConfig, configured_base
 from base.config import ConfigBoot
@@ -56,11 +57,8 @@ def cmd_walg_check(plane: DataPlaneConfig) -> int:
 
 # meiva:note
 # One output line with a UTC timestamp: the OS job's output is appended to a log file.
-def _stamped(line: str) -> None:
-    now = Clock(
-        ClockConfig("UTC", None, message_timestamp_weekday=False), timers=SYSTEM_TIMERS
-    ).now()
-    print(f"{now:%Y-%m-%dT%H:%M:%SZ} {line}", flush=True)
+def _stamped(clock: Clock, line: str) -> None:
+    print(f"{clock.now():%Y-%m-%dT%H:%M:%SZ} {line}", flush=True)
 
 
 # meiva:note
@@ -73,9 +71,10 @@ def cmd_walg_run(
     *,
     throwaway: ThrowawayConfig,
     database_for_url: Callable[[str], Database],
+    clock: Clock,
 ) -> int:
     return tick.run_tick(
-        _stamped,
+        partial(_stamped, clock),
         path=plane.walg_config_file,
         database_for_url=database_for_url,
         throwaway=throwaway,
@@ -92,9 +91,10 @@ def cmd_walg_drill(
     *,
     throwaway: ThrowawayConfig,
     database_for_url: Callable[[str], Database],
+    clock: Clock,
 ) -> int:
     return tick.run_drill_now(
-        _stamped,
+        partial(_stamped, clock),
         path=plane.walg_config_file,
         database_for_url=database_for_url,
         throwaway=throwaway,
@@ -115,6 +115,7 @@ def cmd_walg_restore(
     time: str | None,
     lsn: str | None,
     user: str | None = None,
+    clock: Clock,
 ) -> int:
     path = plane.walg_config_file
     if path is None:
@@ -135,7 +136,7 @@ def cmd_walg_restore(
             Path(directory).resolve(),
             backup=backup,
             target=target,
-            report=_stamped,
+            report=partial(_stamped, clock),
             user=user,
             keep_data=True,
             path=path,

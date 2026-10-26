@@ -17,6 +17,7 @@ from urllib.parse import urlsplit
 import pytest
 import redis
 
+from base.clock.tests.manual_timers import ManualTimers
 from base.cluster.machine.configured import ConfiguredMachineIdentity
 from base.cluster.ports import new_home_ports
 from base.config import ConfigBoot
@@ -103,6 +104,8 @@ def _context(
         session=UserSession(user_home=files.user_home, login_shell="/bin/zsh", interactive=False),
         services=frozenset(),
         timers=command_runtime.timers,
+        clock=command_runtime.clock,
+        new_id=command_runtime.new_id,
     )
 
 
@@ -134,7 +137,9 @@ def test_files_left_by_an_unloaded_job_are_removed_without_a_bootout(
 ) -> None:
     commands = _launchd(False)
 
-    bridge.retire_launchd_bridge(files.home, host=_mac(commands), user_home=files.user_home)
+    bridge.retire_launchd_bridge(
+        files.home, host=_mac(commands), user_home=files.user_home, timers=ManualTimers()
+    )
 
     assert commands.argvs == [("launchctl", "print", f"gui/{_UID}/{_LABEL}")]
     assert not files.plist.exists()
@@ -145,7 +150,10 @@ def test_a_home_with_nothing_of_the_standalone_bridge_is_left_alone(tmp_path: Pa
     commands = _launchd(False)
 
     bridge.retire_launchd_bridge(
-        tmp_path / "home", host=_mac(commands), user_home=tmp_path / "user"
+        tmp_path / "home",
+        host=_mac(commands),
+        user_home=tmp_path / "user",
+        timers=ManualTimers(),
     )
 
     assert commands.argvs == [("launchctl", "print", f"gui/{_UID}/{_LABEL}")]
@@ -156,7 +164,11 @@ def test_retire_preserves_artifacts_when_launchd_job_does_not_exit(files: Bridge
 
     with pytest.raises(RuntimeError, match="remained loaded"):
         bridge.retire_launchd_bridge(
-            files.home, host=_mac(commands), user_home=files.user_home, timeout_s=0.0
+            files.home,
+            host=_mac(commands),
+            user_home=files.user_home,
+            timers=ManualTimers(),
+            timeout_s=0.0,
         )
 
     assert files.plist.exists()
@@ -165,10 +177,14 @@ def test_retire_preserves_artifacts_when_launchd_job_does_not_exit(files: Bridge
 
 def test_a_job_that_unloads_late_is_waited_for(files: BridgeFiles) -> None:
     commands = _launchd(True, True, True, False)
+    timers = ManualTimers()
 
-    bridge.retire_launchd_bridge(files.home, host=_mac(commands), user_home=files.user_home)
+    bridge.retire_launchd_bridge(
+        files.home, host=_mac(commands), user_home=files.user_home, timers=timers
+    )
 
     assert [argv[1] for argv in commands.argvs] == ["print", "bootout", "print", "print", "print"]
+    assert len(timers.sleeps) == 2
     assert not files.plist.exists()
 
 
