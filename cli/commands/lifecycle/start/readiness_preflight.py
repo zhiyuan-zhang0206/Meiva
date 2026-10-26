@@ -12,7 +12,7 @@
 #
 # - the `$MEIVA_HOME` private-tree skeleton: a `logs` / `workspaces` / `memory` root that
 #   converge would ABORT on (a symlink, or not a directory), and the
-#   `logs/.metadata_never_index` marker whose converge write requires a regular file.
+#   `.metadata_never_index` marker whose converge write requires a regular file.
 #   Non-regular nodes INSIDE the trees (sockets, FIFOs, devices) are reported as observations
 #   only: converge skips them, so start survives them;
 # - daemon health ports another home's daemon already answers on, the blocking pre-bind gate of
@@ -105,7 +105,7 @@ def preflight_start_readiness(
 
 
 def _marker(home: Path) -> Path:
-    return home / "logs" / ".metadata_never_index"
+    return home / ".metadata_never_index"
 
 
 # meiva:note

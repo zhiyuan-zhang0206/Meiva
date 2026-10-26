@@ -170,7 +170,7 @@ def test_private_tree_root_file_is_fatal(run: Run, capsys: pytest.CaptureFixture
 def test_metadata_marker_must_be_a_regular_file(
     run: Run, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    os.mkfifo(run.home / "logs" / ".metadata_never_index")
+    os.mkfifo(run.home / ".metadata_never_index")
 
     assert run() == 1
     assert "is not a regular file" in capsys.readouterr().err
