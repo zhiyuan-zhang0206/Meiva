@@ -575,14 +575,17 @@ def create_app(
 
 
 # meiva:note
-# The app's configuration as this process root builds it: the account home and the memory directory
-# under it are read here, once, and the entropy every request id, attempt id, upload batch id and
-# session key is drawn from is the operating system's.
-def process_config(config: ConfigBoot) -> GatewayConfig:
+# The app's configuration as this process root builds it: the account home is read here, once; the
+# memory directory is derived from the Meiva home the entry resolved and hands in; and the entropy
+# every request id, attempt id, upload batch id and session key is drawn from is the operating
+# system's.
+def process_config(config: ConfigBoot, *, home: Path) -> GatewayConfig:
     return gateway_config_from_boot(
         config,
         user_home=Path.home(),
-        memory_root=paths.gateway_memory_dir(roles=ConfiguredMachineIdentity(config).role()),
+        memory_root=paths.gateway_memory_dir(
+            roles=ConfiguredMachineIdentity(config).role(), home=home
+        ),
         rng=secrets.SystemRandom(),
     )
 
@@ -592,15 +595,16 @@ def create_app_from_environment() -> FastAPI:
     config = ConfigBoot()
     config.boot()
     config.ensure_eager()
+    home = paths.meiva_home()
     process = GatewayProcess(
-        home=paths.meiva_home(),
+        home=home,
         config=config,
         image=LOADED_IMAGE,
         machine=ConfiguredMachineIdentity(config),
         host=Host.system(),
     )
     return create_app(
-        process_config(process.config),
+        process_config(process.config, home=home),
         process=process,
         process_ownership="owned",
         catalog=load_model_catalog(build_model_catalog),
@@ -634,7 +638,7 @@ def openapi_schema_of(config: ConfigBoot, *, home: Path) -> dict[str, Any]:
 
 def _borrowed_app(process: GatewayProcess) -> FastAPI:
     return create_app(
-        process_config(process.config),
+        process_config(process.config, home=process.home),
         process=process,
         process_ownership="borrowed",
         catalog=load_model_catalog(build_model_catalog),
@@ -646,4 +650,4 @@ def main() -> None:
     config = ConfigBoot()
     config.boot()
     config.ensure_eager()
-    _run_gateway(config=config, build_app=_borrowed_app)
+    _run_gateway(home=paths.meiva_home(), config=config, build_app=_borrowed_app)

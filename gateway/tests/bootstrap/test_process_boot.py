@@ -233,6 +233,15 @@ def test_openapi_schema_is_cold() -> None:
     assert config.boot_state() == _NEVER_READ
 
 
+def test_the_memory_checkout_follows_the_home_the_entry_hands_in(tmp_path: Path) -> None:
+    home = tmp_path / "served-home"
+
+    memory_root = gateway_app.process_config(snapshot_process_config(), home=home).memory_root
+
+    assert memory_root in {home / "memory", home / "gateway" / "memory"}
+    assert home.is_dir()
+
+
 # meiva:note
 # A reload worker builds its app from its own environment: booting loads the unit's
 # `.env` into the process, so the check runs in a process of its own.
@@ -245,9 +254,10 @@ def test_create_app_from_environment_assembles_gateway_config(
         f"MEIVA_REDIS_URL={config_authority.service_field_value('redis_url')}\n",
         encoding="utf-8",
     )
+    home = config_authority.env_path.parent
     result = proc.run_bounded(
-        [sys.executable, str(_CHILD), "app_from_environment"],
-        env={**os.environ, "MEIVA_HOME": str(config_authority.env_path.parent)},
+        [sys.executable, str(_CHILD), "app_from_environment", str(home)],
+        env={**os.environ, "MEIVA_HOME": str(home)},
         capture_output=True,
         text=True,
         timeout=60,
@@ -394,6 +404,5 @@ def test_the_data_root_is_resolved_only_at_the_gateway_entries() -> None:
         and not path.name.startswith("test_")
     }
     assert {module: functions for module, functions in found.items() if functions} == {
-        "gateway/app.py": {"create_app_from_environment": 1, "openapi_schema": 1},
-        "gateway/cluster/server.py": {"main": 1},
+        "gateway/app.py": {"create_app_from_environment": 1, "main": 1, "openapi_schema": 1},
     }
