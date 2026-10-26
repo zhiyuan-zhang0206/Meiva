@@ -15,8 +15,7 @@ exports = ["daemon.py", "shells.py"]
 "shell_plan.py" = "strict"
 
 [roots]
-"daemon.py" = { kinds = ["random", "settings"], why = "Service or operator process entry boots configuration and builds the random generator its event bus draws retry jitter from" }
+"daemon.py" = { kinds = ["home", "random", "settings"], why = "Service or operator process entry boots configuration, reads the home it runs under and builds the random generator its event bus draws retry jitter from" }
 
 [debt.ambient-read]
-"daemon.py#home base.paths.meiva_home" = 1
 "shells.py#settings ops.cluster.rpc.dispatch_to_machine" = 1

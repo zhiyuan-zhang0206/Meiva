@@ -11,7 +11,4 @@ exports = ["app.py", "config.py", "daemon.py", "run_timeline"]
 "config.py" = "strict"
 
 [roots]
-"daemon.py" = { kinds = ["settings", "pid"], why = "process entry point of the insights daemon: builds ConfigBoot and reads its pid" }
-
-[debt.ambient-read]
-"daemon.py#home base.paths.meiva_home" = 2
+"daemon.py" = { kinds = ["home", "pid", "settings"], why = "process entry point of the insights daemon: builds ConfigBoot, reads its pid and the home it runs under" }
