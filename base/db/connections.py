@@ -465,6 +465,55 @@ def _dial_url(cfg: DbConfig, *, direct: bool, direct_url: DirectUrlResolver | No
     return require_direct(require_direct_url(direct_url)(cfg))
 
 
+# meiva:note
+# Open a new connection to the cluster Postgres.
+#
+# The single entry point for one-off connections, so call sites stop reading
+# `settings.data_plane.db_url` by hand. By default this dials the
+# `db_url` of `DbConfig` (built from the live settings unless `config` names
+# one; a `Database` handle always passes its own) — the cluster's one access URL (PgBouncer when
+# enabled, direct Postgres when off; the port is chosen at URL generation, so
+# the dial is a plain connect). The returned connection is a context manager:
+# `with base.db.connect() as conn: ...`. `autocommit` is passed through for
+# the DDL / advisory-lock call sites that need it.
+#
+# `direct=True` forces the connection to the real Postgres, bypassing PgBouncer
+# (the URL comes from the composition root's `direct_url` resolver, which
+# derives it from the registry record). The admin
+# plane MUST use it wherever a transaction pooler would break correctness —
+# session-level state that outlives a single transaction: the migration applier
+# holds a **session** advisory lock (`pg_advisory_lock`, in base.deploy.schema.migrations)
+# across its whole apply loop, which transaction pooling would silently drop.
+# `prepare_threshold=None` disables server-side prepared statements so the same
+# connection is safe across the different backends a transaction pooler hands
+# out (a prepared statement made on one backend does not exist on the next); it
+# is a harmless no-op on a direct connection. psycopg3 semantics: `None` = never
+# prepare; `0` = prepare on the FIRST execution (the opposite of this docstring's
+# old claim — with the pooler untracked, every fresh connection prepares its
+# first statement as the same `_pg3_0` name, and two of them on one backend
+# raise DuplicatePreparedStatement).
+#
+# On a non-direct dial the session is scrubbed back to baseline — RESET ALL
+# plus the statement ceiling as an explicit `SET` (PgBouncer drops the
+# `options` startup parameter and never resets backend session state between
+# clients, so a borrowed backend may carry another client's session GUCs; see
+# restore_pooled_session) — unless `unbounded=True`.
+#
+# `unbounded=True` (admin plane only — the migration applier) drops the
+# statement-timeout ceiling entirely: migration DDL runs may legitimately
+# exceed 60s (a large-table rebuild, a partition backfill), and the applier
+# must stay unbounded. The keepalives and connect timeout stay: a long DDL on
+# a remote link is exactly the flow a dead peer would otherwise pin. On a
+# direct dial this means no `options` parameter; on a pooled dial the
+# pooler's `connect_query` still bounds the backend at birth, so an unbounded
+# pooled dial is not truly unbounded — pair it with `direct=True` wherever the
+# ceiling must actually be off.
+#
+# Raises:
+#     PlaceholderDbUrlError: the resolved db_url is the placeholder.
+#     NoDatabaseAuthorityError: this home keeps a write-generation ledger and
+#         the resolved db_url is a credential-free endpoint this process was
+#         given no login for (see `guard_db_url`).
 def connect(
     *,
     autocommit: bool = False,
@@ -473,56 +522,8 @@ def connect(
     config: DbConfig | None = None,
     gate: ProcessDbGate,
     direct_url: DirectUrlResolver | None = None,
+    dial: Callable[..., psycopg.Connection[Any]] = psycopg.connect,
 ) -> psycopg.Connection:
-    """Open a new connection to the cluster Postgres.
-
-    The single entry point for one-off connections, so call sites stop reading
-    `settings.data_plane.db_url` by hand. By default this dials the
-    `db_url` of `DbConfig` (built from the live settings unless `config` names
-    one; a `Database` handle always passes its own) — the cluster's one access URL (PgBouncer when
-    enabled, direct Postgres when off; the port is chosen at URL generation, so
-    the dial is a plain connect). The returned connection is a context manager:
-    `with base.db.connect() as conn: ...`. `autocommit` is passed through for
-    the DDL / advisory-lock call sites that need it.
-
-    `direct=True` forces the connection to the real Postgres, bypassing PgBouncer
-    (the URL comes from the composition root's `direct_url` resolver, which
-    derives it from the registry record). The admin
-    plane MUST use it wherever a transaction pooler would break correctness —
-    session-level state that outlives a single transaction: the migration applier
-    holds a **session** advisory lock (`pg_advisory_lock`, in base.deploy.schema.migrations)
-    across its whole apply loop, which transaction pooling would silently drop.
-    `prepare_threshold=None` disables server-side prepared statements so the same
-    connection is safe across the different backends a transaction pooler hands
-    out (a prepared statement made on one backend does not exist on the next); it
-    is a harmless no-op on a direct connection. psycopg3 semantics: `None` = never
-    prepare; `0` = prepare on the FIRST execution (the opposite of this docstring's
-    old claim — with the pooler untracked, every fresh connection prepares its
-    first statement as the same `_pg3_0` name, and two of them on one backend
-    raise DuplicatePreparedStatement).
-
-    On a non-direct dial the session is scrubbed back to baseline — RESET ALL
-    plus the statement ceiling as an explicit `SET` (PgBouncer drops the
-    `options` startup parameter and never resets backend session state between
-    clients, so a borrowed backend may carry another client's session GUCs; see
-    restore_pooled_session) — unless `unbounded=True`.
-
-    `unbounded=True` (admin plane only — the migration applier) drops the
-    statement-timeout ceiling entirely: migration DDL runs may legitimately
-    exceed 60s (a large-table rebuild, a partition backfill), and the applier
-    must stay unbounded. The keepalives and connect timeout stay: a long DDL on
-    a remote link is exactly the flow a dead peer would otherwise pin. On a
-    direct dial this means no `options` parameter; on a pooled dial the
-    pooler's `connect_query` still bounds the backend at birth, so an unbounded
-    pooled dial is not truly unbounded — pair it with `direct=True` wherever the
-    ceiling must actually be off.
-
-    Raises:
-        PlaceholderDbUrlError: the resolved db_url is the placeholder.
-        NoDatabaseAuthorityError: this home keeps a write-generation ledger and
-            the resolved db_url is a credential-free endpoint this process was
-            given no login for (see `guard_db_url`).
-    """
     from base.config.domains.storage.data_plane import sslmode_for_url
 
     cfg = config if config is not None else db_config_from_settings()
@@ -531,7 +532,7 @@ def connect(
         refusal=cfg.db_authority_refusal,
     )
     sslmode = sslmode_for_url(url, cfg.db_sslmode)
-    conn = psycopg.connect(
+    conn = dial(
         url,
         autocommit=autocommit,
         prepare_threshold=None,
@@ -554,46 +555,47 @@ def connect(
     return conn
 
 
+# meiva:note
+# Open one connection to an explicit Postgres target the caller names.
+#
+# `connect()` dials the cluster's own URL from settings; this is the admin
+# plane's door for every other target — a dump source, a replication login
+# under test, a scratch instance a restore check provisions, the pooler's
+# admin console, a URL a probe or boot check is handed. The caller owns the
+# target: the URL carries its host, credential, database, startup options and
+# `sslmode`, and nothing here reads settings, so no cluster login is
+# substituted and the configured `MEIVA_DB_SSLMODE` is not injected. (This
+# module still resolves a home and imports settings at load, so a process
+# that must do neither — the restricted restore worker, the throwaway-Postgres
+# tooling — dials on its own; see the `postgres-dial` allowed map in
+# meizel/owners/decisions.py.)
+#
+# The door owns the transport posture, the same as `connect()`'s:
+# `prepare_threshold=None`, `PG_KEEPALIVE_KWARGS`, and the statement ceiling
+# appended after any startup options the URL carries itself. `connect_timeout`
+# bounds establishing the connection (a short probe passes its own);
+# `unbounded=True` drops the statement ceiling for a caller whose statements
+# may legitimately run long (DDL, full-table reads of a restored copy), and
+# keeps the keepalives. The session is never scrubbed: an explicit target is
+# a backend the caller dials directly, not a borrowed pooled one (a probe of
+# the cluster's pooled URL runs only read-only statements).
+#
+# Raises:
+#     PlaceholderDbUrlError: url is the placeholder.
 def connect_url(
     url: str,
     *,
     autocommit: bool = False,
     unbounded: bool = False,
     connect_timeout: int = PG_KEEPALIVE_KWARGS["connect_timeout"],
+    dial: Callable[..., psycopg.Connection[Any]] = psycopg.connect,
 ) -> psycopg.Connection:
-    """Open one connection to an explicit Postgres target the caller names.
-
-    `connect()` dials the cluster's own URL from settings; this is the admin
-    plane's door for every other target — a dump source, a replication login
-    under test, a scratch instance a restore check provisions, the pooler's
-    admin console, a URL a probe or boot check is handed. The caller owns the
-    target: the URL carries its host, credential, database, startup options and
-    `sslmode`, and nothing here reads settings, so no cluster login is
-    substituted and the configured `MEIVA_DB_SSLMODE` is not injected. (This
-    module still resolves a home and imports settings at load, so a process
-    that must do neither — the restricted restore worker, the throwaway-Postgres
-    tooling — dials on its own; see the `postgres-dial` allowed map in
-    meizel/owners/decisions.py.)
-
-    The door owns the transport posture, the same as `connect()`'s:
-    `prepare_threshold=None`, `PG_KEEPALIVE_KWARGS`, and the statement ceiling
-    appended after any startup options the URL carries itself. `connect_timeout`
-    bounds establishing the connection (a short probe passes its own);
-    `unbounded=True` drops the statement ceiling for a caller whose statements
-    may legitimately run long (DDL, full-table reads of a restored copy), and
-    keeps the keepalives. The session is never scrubbed: an explicit target is
-    a backend the caller dials directly, not a borrowed pooled one (a probe of
-    the cluster's pooled URL runs only read-only statements).
-
-    Raises:
-        PlaceholderDbUrlError: url is the placeholder.
-    """
     _refuse_placeholder(url)
     transport: dict[str, Any] = {
         **_transport_kwargs(url, unbounded=unbounded),
         "connect_timeout": connect_timeout,
     }
-    return psycopg.connect(url, autocommit=autocommit, prepare_threshold=None, **transport)
+    return dial(url, autocommit=autocommit, prepare_threshold=None, **transport)
 
 
 def _transport_kwargs(url: str, *, unbounded: bool) -> dict[str, Any]:
