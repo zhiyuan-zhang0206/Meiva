@@ -50,13 +50,23 @@ def reap_impersonations(
     return len(expired_agents)
 
 
-def signal_incomplete_event_logs(pool: ConnectionPool) -> int:
-    """Emit the incomplete-event-log signal for every lease still holding it.
+# meiva:note
+# Reclaim, in one bounded pass, the source receipts an ended lease's controller never sealed, and
+# return how many that sealed. It runs before the signal pass so a lease it reclaims stops
+# reporting in the same cycle instead of leaving a closed gap announced as still open.
+def reclaim_abandoned_event_logs(pool: ConnectionPool, *, grace_seconds: int) -> int:
+    from base.agents.impersonation.event_log import seal_abandoned_event_sources
 
-    A state signal, not a threshold: a lease cannot complete until its source
-    seals (or ever, after a capture failure), and nothing else will say so.
-    Re-emitted every pass while the fact holds.
-    """
+    with write_transaction(pool) as conn:
+        return seal_abandoned_event_sources(conn, grace_seconds=grace_seconds, limit=_PASS_BATCH)
+
+
+# meiva:note
+# Emit the incomplete-event-log signal for every lease not yet reported. A state signal, not a
+# threshold: a lease cannot complete until its source seals, or ever after a capture failure, and
+# nothing else will say so. Each lease and condition is reported once, because the emitting pass
+# records that report in the lease's own log.
+def signal_incomplete_event_logs(pool: ConnectionPool) -> int:
     from base.agents.impersonation.event_signals import emit_incomplete_event_logs
     from base.log import logger
 

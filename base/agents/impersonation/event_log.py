@@ -23,6 +23,7 @@ from psycopg.types.json import Jsonb
 
 from base.agents.impersonation._store import lock_lease
 from base.agents.impersonation.history import append, export_handoff
+from base.agents.impersonation.status import LOG_PROTOCOL_VERSION
 from base.telemetry import Event, event_id, event_line, event_line_digest
 from base.telemetry.audit_events import audit_event_uid, record_audit
 from base.telemetry.delivery.serialization import event_payload
@@ -101,3 +102,72 @@ def refresh_completed_export(conn: psycopg.Connection, lease_id: str) -> None:
             "UPDATE agent_impersonations SET handoff_document=%s WHERE id=%s",
             (Jsonb(document), lease_id),
         )
+
+
+# meiva:note
+# Seal the source receipts of ended leases whose controller never sealed them, and return how many
+# receipts that sealed. A receipt is sealed by the controller process that opened it, on detach
+# (`seal_local_participant`); a controller killed before its detach, or one whose seal was lost to
+# a transient write failure, leaves the receipt open and no later pass is its owner, so the lease
+# can never complete. Past `grace_seconds` after `ended_at` that receipt has no owner left: this
+# pass writes `event_source_abandoned` into the lease's log (source key, open time, row count,
+# reason) and seals it with the rows it holds, the count a graceful detach would have sealed, so
+# the log completes with a declared gap instead of an unbounded one.
+# meiva:link base/agents/impersonation/docs/event-log.meiva.okf.md
+def seal_abandoned_event_sources(
+    conn: psycopg.Connection, *, grace_seconds: int, limit: int
+) -> int:
+    candidates = conn.execute(
+        "SELECT id FROM agent_impersonations WHERE event_delivery_protocol_version=%s "
+        "AND ended_at IS NOT NULL "
+        "AND ended_at <= clock_timestamp() - %s * interval '1 second' "
+        "AND events_completed_at IS NULL "
+        "AND EXISTS (SELECT 1 FROM agent_impersonation_event_participants p "
+        "WHERE p.lease_id=agent_impersonations.id AND p.state='open') "
+        "ORDER BY ended_at LIMIT %s",
+        (LOG_PROTOCOL_VERSION, grace_seconds, limit),
+    ).fetchall()
+    sealed = 0
+    for (lease_id,) in candidates:
+        # meiva:note
+        # The lease row lock is the serialization point every receipt writer takes before
+        # touching a participant, so the states read below cannot change under this pass.
+        lease = lock_lease(conn, str(lease_id))
+        if lease["events_completed_at"] is not None:
+            continue
+        open_sources = conn.execute(
+            "SELECT p.source_key, p.opened_at, "
+            "(SELECT count(*) FROM agent_impersonation_entries e "
+            "WHERE e.lease_id=p.lease_id AND e.source_key=p.source_key) AS item_count "
+            "FROM agent_impersonation_event_participants p "
+            "WHERE p.lease_id=%s AND p.state='open' ORDER BY p.opened_at",
+            (lease_id,),
+        ).fetchall()
+        for source_key, opened_at, item_count in open_sources:
+            append(
+                conn,
+                str(lease_id),
+                "lifecycle",
+                {
+                    "event": "event_source_abandoned",
+                    "source_key": source_key,
+                    "source_opened_at": opened_at.isoformat(),
+                    "item_count": item_count,
+                    "grace_seconds": grace_seconds,
+                    "reason": "the controller process never sealed this source receipt",
+                },
+                event_key=f"abandoned:{source_key}",
+            )
+            # meiva:note
+            # The seal procedure re-counts under the receipt lock and refuses a count that
+            # differs, so a source whose rows moved cannot be sealed from this count alone.
+            conn.execute(
+                "SELECT seal_impersonation_event_participant(%s,%s,'sealed',NULL,"
+                "(SELECT count(*) FROM agent_impersonation_entries "
+                "WHERE lease_id=%s AND source_key=%s))",
+                (lease_id, source_key) * 2,
+            )
+            sealed += 1
+        if open_sources:
+            refresh_completed_export(conn, str(lease_id))
+    return sealed

@@ -36,7 +36,8 @@ compared on resolved content, whichever side holds the body.
   by the call's explicit admission callback before the emit queue, while the
   controller's receipt is open. The `source_key` is the receipt's key. This is effect-then-write: a hard
   crash between a call's effect and its row leaves the source unsealed, so the
-  lease stays pending.
+  receipt stays pending until the abandoned-receipt pass reclaims it, which closes
+  the log with a recorded gap rather than recovering the row.
 
 The emitted event still goes to Loki as an observation copy, tagged with
 `impersonation_session`. SDK sampling precedes capture, so a sampled-out call is in
@@ -88,13 +89,28 @@ open or failed. No external store, certifier or loop takes part.
 A failed receipt never completes its lease. A lease that ended with an open
 receipt is pending as `awaiting_participant_seal`.
 
+That pending state has one owner and one way out. The receipt is sealed by the
+controller process that opened it, when it detaches; a controller killed before
+its detach, or one whose seal was lost to a transient write failure, leaves the
+receipt open with no process able to finish it. `seal_abandoned_event_sources`
+is that missing retry: past `MEIVA_IMPERSONATION_EVENT_ABANDON_GRACE_SECONDS`
+after `ended_at`, the ttl reaper seals the receipt with the rows it holds (the
+count a graceful detach would seal) and first writes an `event_source_abandoned`
+lifecycle entry holding the source key, when it opened, its row count and the
+reason. The log therefore completes and still says what was lost: a reclaim is a
+declared gap, never a silent one. Inside the grace the receipt belongs to its
+controller and is left alone.
+
 ## Signal
 
-State signal only, no thresholds. The gateway ttl reaper emits
-`impersonation_event_log_incomplete` on every pass, per lease and condition, while the
-row fact holds: `seal_stuck` for an ended lease still waiting on an open receipt (clears
-when it seals), `capture_failed` for a lease with a failed receipt (permanent, because the
-lease can no longer complete). The alert rule over the event stream owns the notification.
+State signal only, no thresholds, reported once per lease and condition rather than on
+every pass: `seal_stuck` for an ended lease still waiting on an open receipt (clears when
+the source seals or the abandoned-receipt pass reclaims it) and `capture_failed` for a
+lease with a failed receipt (permanent, because the lease can no longer complete). The
+pass writes an `event_log_incomplete` lifecycle entry recording the condition, the reason
+and the receipts behind it before it emits the event, so the lease's own log keeps what
+could not complete and a later pass stays quiet. The alert rule over the event stream
+owns the notification.
 
 ## Hand-off statistics
 

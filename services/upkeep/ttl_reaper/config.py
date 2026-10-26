@@ -19,5 +19,6 @@ class TtlReaperConfig:
     fire_log_cleanup_interval_s: float
     fire_log_retention_days: int
     shell_kill_deadline_s: float
+    impersonation_event_abandon_grace_s: int
     zone: ZoneInfo | None
     clock: Clock
