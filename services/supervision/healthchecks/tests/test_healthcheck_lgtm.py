@@ -9,16 +9,53 @@ from pathlib import Path
 import pytest
 
 from base.clock import SYSTEM_TIMERS, Clock, ClockConfig
+from base.clock.tests.manual_timers import ManualTimers
 from base.cluster.machine import MachineFacts, MachineRoleInvalid
 from base.cluster.machine.configured import ConfiguredMachineIdentity
 from base.cluster.machine.tests.faults import InvalidRoleIdentity
 from base.cluster.machine.tests.identity import machine_identity as machine_identity
 from base.paths.tests.homes import unit_home as unit_home
+from base.telemetry.lgtm_local import backend_urls
 from services.supervision.healthchecks import lgtm as hc
 from services.supervision.healthchecks.tests.loki_stub import BackendStub
 
+
+def test_the_default_backend_urls_dial_the_historical_loopback_ports() -> None:
+    # meiva:note
+    # `lgtm_grafana_listen_host` defaults to the wildcard; the probe must dial loopback.
+    assert backend_urls() == {
+        "loki": "http://127.0.0.1:3100",
+        "prometheus": "http://127.0.0.1:9090",
+        "grafana": "http://127.0.0.1:3003",
+    }
+
+
 _NO_PAUSE = (0.0, 0.0)
 _CLOCK = Clock(ClockConfig("UTC", "UTC", message_timestamp_weekday=False), timers=SYSTEM_TIMERS)
+
+
+def test_write_path_probe_pauses_on_the_clock_it_was_given_between_throttled_pushes() -> None:
+    timers = ManualTimers()
+    clock = Clock(ClockConfig("UTC", "UTC", message_timestamp_weekday=False), timers=timers)
+    with BackendStub() as loki:
+        loki.script.push_answers = [(429, b""), (429, b""), (204, b"")]
+
+        assert hc.write_path_probe(loki.url, clock=clock, backoff_s=(1.0, 2.0)) == (True, "ok")
+        assert len(loki.script.pushes) == 3
+    assert timers.sleeps == [1.0, 2.0]
+
+
+def test_probe_backend_asks_the_readiness_path_of_the_named_backend() -> None:
+    with BackendStub() as loki:
+        assert hc.probe_backend("loki", urls={"loki": loki.url}).alive
+        loki.script.ready = (503, b"")
+        assert not hc.probe_backend("loki", urls={"loki": loki.url}).alive
+
+
+def test_probe_backend_without_an_explicit_port_is_unavailable() -> None:
+    probe = hc.probe_backend("loki", urls={"loki": "http://127.0.0.1"})
+    assert not probe.alive
+    assert "no explicit local port" in probe.detail
 
 
 def test_write_path_probe_rejects_400_push() -> None:
