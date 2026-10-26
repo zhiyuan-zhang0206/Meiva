@@ -29,7 +29,6 @@ import httpx
 import websockets
 from websockets.asyncio.client import ClientConnection
 
-from base.clock import SYSTEM_TIMERS, Clock, ClockConfig
 from base.host.net.auth import MANAGED_BROWSER_USER_AGENT, cookie_name
 from base.log import logger
 
@@ -66,18 +65,7 @@ def parse_login_cookie(
     return name, morsel.value, now + max_age
 
 
-def _utc_clock() -> Clock:
-    return Clock(
-        ClockConfig(
-            timezone="UTC",
-            authoritative_timezone="UTC",
-            message_timestamp_weekday=False,
-        ),
-        timers=SYSTEM_TIMERS,
-    )
-
-
-async def gateway_session_login(gateway_url: str, secret: str) -> tuple[str, str, int]:
+async def gateway_session_login(gateway_url: str, secret: str, *, now: int) -> tuple[str, str, int]:
     """Log in and return ``(cookie_name, value, expires_unix)``.
 
     The login carries the managed-browser user-agent marker, so the gateway's
@@ -93,7 +81,7 @@ async def gateway_session_login(gateway_url: str, secret: str) -> tuple[str, str
     return parse_login_cookie(
         response.status_code,
         response.headers.get("set-cookie"),
-        now=int(_utc_clock().now().timestamp()),
+        now=now,
     )
 
 
@@ -139,6 +127,8 @@ async def inject_session_cookie(
     cdp_port: int,
     gateway_url: str,
     secret: str,
+    *,
+    now: int,
 ) -> None:
     """Log in to the gateway and set its session cookie in managed Chrome.
 
@@ -147,7 +137,7 @@ async def inject_session_cookie(
 
     Raises RuntimeError when Chrome is unreachable or rejects the cookie.
     """
-    name, value, expires = await gateway_session_login(gateway_url, secret)
+    name, value, expires = await gateway_session_login(gateway_url, secret, now=now)
     version: Any = await http_json(f"http://127.0.0.1:{cdp_port}/json/version")
     version_obj: object = version
     if type(version_obj) is not dict:
