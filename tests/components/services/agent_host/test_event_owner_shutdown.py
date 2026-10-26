@@ -188,6 +188,7 @@ async def test_boot_primary_survives_a_failed_constructed_writer_cleanup(
                 database=lambda: cast(Database, _PoolFactoryDb(closed_pools)),
                 machine=machine,
                 home=unit_home,
+                user_home=unit_home,
                 clients=clients,
                 on_clients_owned=fail_during_boot,
             )
