@@ -20,6 +20,7 @@ from services.supervision.meiva_root.selfcheck import (
     TreeSelfCheck,
 )
 from services.supervision.meiva_root.supervisor import Supervisor
+from services.supervision.meiva_root.tests.slices import system_clock
 
 _CHILD = Path(__file__).with_name("child_unit.py")
 
@@ -78,7 +79,7 @@ def test_walk_checks_every_running_unit_and_skips_acknowledged_states(
                 {"id": "waiting", "state": "backoff", "pid": None},
             ]
         )
-        check = TreeSelfCheck(host)
+        check = TreeSelfCheck(host, timers=system_clock())
         check.run_once()
         chain = _chain(check)
         assert chain["broken"] is False
@@ -107,7 +108,7 @@ def test_missing_process_opens_one_event_per_episode(
 ) -> None:
     caplog.set_level(logging.DEBUG, logger="services.supervision.meiva_root.selfcheck")
     host = _StubHost([_broken_unit("svc")])
-    check = TreeSelfCheck(host)
+    check = TreeSelfCheck(host, timers=system_clock())
 
     check.run_once()
     _assert_first_episode_opened_one_event(check, recorder)
@@ -135,7 +136,7 @@ def test_detached_process_is_broken(recorder: _Recorder) -> None:
         host = _StubHost(
             [{"id": "svc", "state": "running", "pid": sleeper.pid}], root_pid=os.getppid()
         )
-        check = TreeSelfCheck(host)
+        check = TreeSelfCheck(host, timers=system_clock())
         check.run_once()
         assert _chain(check)["broken"] is True
         events = recorder.events("root_chain_broken")
@@ -151,7 +152,7 @@ def test_unverifiable_is_separated_from_broken(
     caplog.set_level(logging.DEBUG, logger="services.supervision.meiva_root.selfcheck")
 
     host = _StubHost([{"id": "svc", "state": "running", "pid": 12345}])
-    check = TreeSelfCheck(host)
+    check = TreeSelfCheck(host, timers=system_clock())
 
     check.run_once(verdicts={"svc": "unverifiable"})
     chain = _chain(check)
@@ -180,7 +181,12 @@ def test_config_validation() -> None:
 
 async def test_loop_start_stop() -> None:
     async with asyncio.TaskGroup() as tasks:
-        check = TreeSelfCheck(_StubHost([]), config=SelfCheckConfig(interval_s=0.02), tasks=tasks)
+        check = TreeSelfCheck(
+            _StubHost([]),
+            config=SelfCheckConfig(interval_s=0.02),
+            tasks=tasks,
+            timers=system_clock(),
+        )
         await check.start()
         with pytest.raises(RuntimeError, match="already started"):
             await check.start()
@@ -209,7 +215,9 @@ async def started(short_tmp: Path) -> AsyncIterator[StartFactory]:
     created: list[Supervisor] = []
 
     async def factory(units: list[UnitManifest]) -> Supervisor:
-        supervisor = Supervisor(UnitRegistry(units), run_dir=short_tmp)
+        supervisor = Supervisor(
+            UnitRegistry(units), run_dir=short_tmp, clock=system_clock(), root_pid=os.getpid()
+        )
         created.append(supervisor)
         await supervisor.start()
         return supervisor
@@ -227,7 +235,7 @@ async def test_integration_detects_a_disarmed_death_and_allows_replacement(
     units = cast("list[dict[str, object]]", supervisor.tree_view()["units"])
     pid = cast(int, units[0]["pid"])
 
-    check = TreeSelfCheck(supervisor)
+    check = TreeSelfCheck(supervisor, timers=system_clock())
     check.run_once()
     assert _chain(check)["broken"] is False
 

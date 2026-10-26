@@ -22,7 +22,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any, Protocol
 
-from base.clock import SYSTEM_TIMERS, Clock, ClockConfig
+from base.clock import Clock
 from base.daemon.health import DaemonProbe
 from base.host.proc import process_alive
 from services.supervision.meiva_root.health import HealthConfig
@@ -48,7 +48,9 @@ def build_drill_wiring(context: WiringContext) -> list[WiringParticipant]:
     registry = ProbeRegistry()
     heartbeat_dir = context.run_dir / "heartbeat"
     for manifest in context.registry.units:
-        probe = liveness_probe(context.supervisor, manifest.id, heartbeat_dir=heartbeat_dir)
+        probe = liveness_probe(
+            context.supervisor, manifest.id, heartbeat_dir=heartbeat_dir, clock=context.clock
+        )
         registry.register(manifest.id, probe)
     return assemble(
         context,
@@ -58,7 +60,9 @@ def build_drill_wiring(context: WiringContext) -> list[WiringParticipant]:
     )
 
 
-def liveness_probe(host: _TreeHost, unit_id: str, *, heartbeat_dir: Path | None = None) -> Probe:
+def liveness_probe(
+    host: _TreeHost, unit_id: str, *, clock: Clock, heartbeat_dir: Path | None = None
+) -> Probe:
     """`running with a live pid`; a published heartbeat must also be fresh.
 
     A unit opts into the heartbeat surface by touching
@@ -85,19 +89,20 @@ def liveness_probe(host: _TreeHost, unit_id: str, *, heartbeat_dir: Path | None 
                 pid = unit["pid"]
                 state = unit["state"]
                 if state == "running" and isinstance(pid, int) and process_alive(pid):
-                    return _heartbeat_verdict(heartbeat_dir, unit_id, pid)
+                    return _heartbeat_verdict(heartbeat_dir, unit_id, pid, clock)
                 return DaemonProbe.down(f"state={state} pid={pid}")
         return DaemonProbe.down(f"unit {unit_id!r} not in the tree view")
 
     return probe
 
 
-def _heartbeat_verdict(heartbeat_dir: Path | None, unit_id: str, pid: int) -> DaemonProbe:
+def _heartbeat_verdict(
+    heartbeat_dir: Path | None, unit_id: str, pid: int, clock: Clock
+) -> DaemonProbe:
     """The liveness half passed; apply the heartbeat half when one is published."""
     if heartbeat_dir is None:
         return DaemonProbe.up(f"pid {pid} alive")
     beat = heartbeat_dir / f"{unit_id}.beat"
-    clock = Clock(ClockConfig("UTC", "UTC", message_timestamp_weekday=False), timers=SYSTEM_TIMERS)
     try:
         age = clock.now().timestamp() - beat.stat().st_mtime
     except FileNotFoundError:

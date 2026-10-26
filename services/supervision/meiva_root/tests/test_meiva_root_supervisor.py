@@ -17,6 +17,7 @@ from services.supervision.meiva_root.inputs import InputSeal
 from services.supervision.meiva_root.manifest import RestartPolicy, UnitManifest, UnitRegistry
 from services.supervision.meiva_root.stopping import rotate_unit_log
 from services.supervision.meiva_root.supervisor import Supervisor, SupervisorConfig
+from services.supervision.meiva_root.tests.slices import system_clock
 
 _CHILD = Path(__file__).with_name("child_unit.py")
 
@@ -30,7 +31,11 @@ def root(tmp_path: Path, *scenario: str, env: tuple[tuple[str, str], ...] = ()) 
         env,
     )
     return Supervisor(
-        UnitRegistry([unit]), run_dir=tmp_path, config=SupervisorConfig(stop_timeout_s=0.2)
+        UnitRegistry([unit]),
+        run_dir=tmp_path,
+        config=SupervisorConfig(stop_timeout_s=0.2),
+        clock=system_clock(),
+        root_pid=os.getpid(),
     )
 
 
@@ -104,7 +109,9 @@ async def test_restart_refuses_changed_inputs_before_native_birth(
         "root",
         inputs=(InputSeal.capture(config),),
     )
-    owner = Supervisor(UnitRegistry([unit]), run_dir=tmp_path / "root")
+    owner = Supervisor(
+        UnitRegistry([unit]), run_dir=tmp_path / "root", clock=system_clock(), root_pid=os.getpid()
+    )
     await owner.start()
     try:
         await wait_file(output)
@@ -142,7 +149,13 @@ async def test_a_child_ignoring_term_is_escalated_at_the_hard_budget(tmp_path: P
         "root",
         stop_timeout_s=0.5,
     )
-    owner = Supervisor(UnitRegistry([unit]), run_dir=tmp_path, config=SupervisorConfig())
+    owner = Supervisor(
+        UnitRegistry([unit]),
+        run_dir=tmp_path,
+        config=SupervisorConfig(),
+        clock=system_clock(),
+        root_pid=os.getpid(),
+    )
     await owner.start()
     await wait_file(ready)
     pid = (await row(owner))["pid"]
@@ -340,6 +353,8 @@ def _probe_supervisor(tmp_path: Path, launcher: Any) -> Supervisor:
         run_dir=tmp_path,
         config=SupervisorConfig(stop_timeout_s=0.2),
         spawn=launcher,
+        clock=system_clock(),
+        root_pid=os.getpid(),
     )
 
 
@@ -386,6 +401,8 @@ async def test_a_stopped_unit_keeps_its_rewrite(tmp_path: Path) -> None:
         run_dir=tmp_path,
         config=SupervisorConfig(stop_timeout_s=0.2),
         spawn=launcher,
+        clock=system_clock(),
+        root_pid=os.getpid(),
     )
     owner.set_argv_transform(lambda unit_id, argv: [f"wrapped:{unit_id}", *argv])
     await owner.start()
@@ -421,6 +438,8 @@ async def test_an_early_non_zero_exit_retires_the_rewrite(tmp_path: Path) -> Non
         run_dir=tmp_path,
         config=SupervisorConfig(stop_timeout_s=0.2),
         spawn=launcher,
+        clock=system_clock(),
+        root_pid=os.getpid(),
     )
     owner.set_argv_transform(lambda unit_id, argv: [f"wrapped:{unit_id}", *argv])
     await owner.start()

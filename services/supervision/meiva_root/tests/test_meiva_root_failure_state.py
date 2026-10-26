@@ -21,6 +21,7 @@ from services.supervision.meiva_root.failure_state import (
 from services.supervision.meiva_root.health import HealthConfig, HealthMonitor
 from services.supervision.meiva_root.intent_store import IntentSource, RestartFailure, RestartStage
 from services.supervision.meiva_root.probes import ProbeRegistry
+from services.supervision.meiva_root.tests.slices import clock_over, system_clock
 
 
 class _Recorder:
@@ -140,7 +141,9 @@ def _monitor(
         "max_restart_attempts": 3,
         "restart_backoff_s": (0.0,),
     }
-    return HealthMonitor(supervisor, registry, config=HealthConfig(**values), timers=timers)
+    return HealthMonitor(
+        supervisor, registry, config=HealthConfig(**values), clock=clock_over(timers)
+    )
 
 
 async def test_exhausted_attempts_are_reported_every_round_then_clear_on_alive(
@@ -246,7 +249,7 @@ def _paced_monitor(
             restart_backoff_s=(60.0, 300.0, 900.0),
         ),
         db_recovery_probe=database,
-        timers=timers,
+        clock=clock_over(timers),
     )
 
 
@@ -379,7 +382,11 @@ def _lease_monitor(
         "lease_grace_s": lease_grace_s,
     }
     return HealthMonitor(
-        supervisor, registry, config=HealthConfig(**values), lease_probe=lease_probe
+        supervisor,
+        registry,
+        config=HealthConfig(**values),
+        lease_probe=lease_probe,
+        clock=system_clock(),
     )
 
 
