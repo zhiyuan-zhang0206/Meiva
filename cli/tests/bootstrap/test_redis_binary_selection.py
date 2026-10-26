@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import dataclasses
 import json
+import os
 import subprocess
 import sys
 from pathlib import Path
@@ -13,7 +14,6 @@ import pytest
 from pydantic import ValidationError
 
 from base.config.service_read import ConfigAuthority
-from base.paths.tests.homes import point_home
 from cli.commands.data_plane import cluster_instance as instance
 from cli.commands.data_plane.config import DataPlaneConfig
 from cli.commands.data_plane.tests.data_plane_records import data_plane_config as data_plane_config
@@ -131,24 +131,30 @@ def test_config_is_local_writable_and_not_a_runner_bootstrap_fact(
 
 
 def test_local_config_write_only_changes_target_home(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    from base.host.env.tests.env_files import unit_env_aliases
+    from base.host.env.dotenv_file import env_file_path, read_env_aliases
     from cli.commands.management import config as config_cli
 
     selected = _tools(tmp_path / "bin", "selected-8")
     target = _home(tmp_path / "gateway", None)
     sibling = _home(tmp_path / "preview", None)
     sibling_bytes = (sibling / ".env").read_bytes()
-    point_home(monkeypatch, target)
+    process = config_cli.ConfigProcess(environ=os.environ, home=target)
     target_bytes = (target / ".env").read_bytes()
-    assert config_cli.cmd_config_set(["redis_bin_dir=relative/bin"], None, local=True) == 1
+    assert (
+        config_cli.cmd_config_set(["redis_bin_dir=relative/bin"], None, process=process, local=True)
+        == 1
+    )
     assert (target / ".env").read_bytes() == target_bytes
-    assert config_cli.cmd_config_set([f"redis_bin_dir={selected}"], None, local=True) == 0
-    assert unit_env_aliases()["MEIVA_REDIS_BIN_DIR"] == str(selected)
+    assert (
+        config_cli.cmd_config_set([f"redis_bin_dir={selected}"], None, process=process, local=True)
+        == 0
+    )
+    assert read_env_aliases(env_file_path(target))["MEIVA_REDIS_BIN_DIR"] == str(selected)
     capsys.readouterr()
-    assert config_cli.cmd_config_get("redis_bin_dir", None, local=True) == 0
+    assert config_cli.cmd_config_get("redis_bin_dir", None, process=process, local=True) == 0
     assert str(selected) in capsys.readouterr().out
-    assert config_cli.cmd_config_unset(["redis_bin_dir"], None, local=True) == 0
-    assert "MEIVA_REDIS_BIN_DIR" not in unit_env_aliases()
+    assert config_cli.cmd_config_unset(["redis_bin_dir"], None, process=process, local=True) == 0
+    assert "MEIVA_REDIS_BIN_DIR" not in read_env_aliases(env_file_path(target))
     assert (sibling / ".env").read_bytes() == sibling_bytes

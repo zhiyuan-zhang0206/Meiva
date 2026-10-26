@@ -8,7 +8,7 @@ surface module carries only the description (task #3633).
 
 from __future__ import annotations
 
-from datetime import UTC, datetime
+from datetime import datetime
 from typing import Any
 
 from langchain_core.messages import AIMessage, AnyMessage, HumanMessage, ToolMessage
@@ -194,17 +194,18 @@ class _SdkReminderAfterExecHook(Hook):
             # exec-output message keeps carrying only the agent's real output.
             update["messages"] = [
                 system_note_message(
-                    content=hints, tag=NoteTag.SDK_HINT, created_at=datetime.now(UTC)
+                    content=hints,
+                    tag=NoteTag.SDK_HINT,
+                    created_at=runtime.context.require_clock().now(),
                 )
             ]
         return update
 
 
-def _agent_reply_note() -> HumanMessage:
-    """The system-styled note pointing at `meiva.agents.send_message`, stamped now."""
-    return system_note_message(
-        content=AGENT_REPLY_HINT, tag=NoteTag.AGENT_REPLY, created_at=datetime.now(UTC)
-    )
+# meiva:note
+# The system-styled note pointing at `meiva.agents.send_message`, stamped `now`.
+def _agent_reply_note(now: datetime) -> HumanMessage:
+    return system_note_message(content=AGENT_REPLY_HINT, tag=NoteTag.AGENT_REPLY, created_at=now)
 
 
 class _SdkReminderAgentReplyHook(Hook):
@@ -258,7 +259,7 @@ class _SdkReminderAgentReplyHook(Hook):
         # fall-through.
         match agent.sdk_reminders.agent_reply_reminder_cadence:
             case "every_time":
-                return {"messages": [_agent_reply_note()]}
+                return {"messages": [_agent_reply_note(runtime.context.require_clock().now())]}
             case "once_per_compaction":
                 reminded, new_bookmark = _rearmed(state)
                 if AGENT_REPLY_CATEGORY in reminded:
@@ -268,7 +269,7 @@ class _SdkReminderAgentReplyHook(Hook):
                     return None
                 reminded.add(AGENT_REPLY_CATEGORY)
                 return {
-                    "messages": [_agent_reply_note()],
+                    "messages": [_agent_reply_note(runtime.context.require_clock().now())],
                     _REMINDED_FIELD: reminded,
                     _BOOKMARK_FIELD: new_bookmark,
                 }

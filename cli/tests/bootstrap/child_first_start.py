@@ -19,6 +19,7 @@ from cli.start_intent import admitted_home
 from cli.start_runtime import HomeSite
 from cli.startup.log_sinks import START_SINK
 from cli.startup.service_path import CallerHost
+from cli.startup.tests.birth_facts import birth_facts
 
 prepare_process_logging()
 home = Path(os.environ["MEIVA_HOME"])
@@ -34,6 +35,8 @@ caller = CallerHost(
     virtual_env=None,
     prefix_venv=None,
     occupied_ports=frozenset(),
+    local_names=frozenset(),
+    birth=birth_facts(),
 )
 assert init_intent.run_init(init_args, site, caller) == 0
 

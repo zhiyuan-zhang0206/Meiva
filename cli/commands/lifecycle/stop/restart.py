@@ -300,7 +300,7 @@ def restart_agent_host(
     fresh = root_driver.root_client(command.home, timeout=timeout)
     _require_ok(fresh.up(AGENT_HOST), f"up {AGENT_HOST}")
     waited = root_readiness.wait_for_service_tree(
-        (spec,), timeout_s=start_timeout, home=command.home
+        (spec,), timeout_s=start_timeout, home=command.home, timers=command.timers
     )
     if waited.unready:
         print(f"  ✗ {AGENT_HOST} did not become ready after restart", file=sys.stderr)

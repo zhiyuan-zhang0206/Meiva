@@ -158,7 +158,7 @@ A worker can stop early or idle silently — thinking it finished when it has no
 Launch the watcher **before** the worker starts, so you do not miss its first idle:
 
 ```python
-watcher = meiva.files.read(f"{meiva.skills.meiva_fleet.path}/reference/watch_idle.py")
+watcher = meiva.files.read(f"{meiva.skills.meiva_goal.path}/scripts/watch_idle.py")
 watcher = watcher.replace("TARGET_AGENT_ID = 0", f"TARGET_AGENT_ID = {worker_id}")
 meiva.watcher.launch(watcher, timeout="6h", name="goal-watcher")
 ```
@@ -169,7 +169,7 @@ The watcher is one-shot: it wakes you on the worker's next idle and exits. Each 
 
 A watcher runs out of sight, so a quiet bug in it leaves you idle with no wake ever coming. Two rules whenever you write or adapt one:
 
-- **Start from the reference body; don't hand-roll the parse.** The bundled `watch_idle.py` filters lifecycle updates for the target's idle transition — substitute the target id into it rather than rewriting its parse. Hand-rolled parsing is where the silent bugs live: e.g. matching a `STATUS:` line with `line.strip()` yields the whole `"STATUS: DONE"` instead of just `"DONE"`, so the match never fires and you wait forever.
+- **Start from the reference body; don't hand-roll the parse.** The meiva-goal skill's `scripts/watch_idle.py` filters lifecycle updates for the target's idle transition — substitute the target id into it rather than rewriting its parse. Hand-rolled parsing is where the silent bugs live: e.g. matching a `STATUS:` line with `line.strip()` yields the whole `"STATUS: DONE"` instead of just `"DONE"`, so the match never fires and you wait forever.
 - **Never `except: pass`.** A swallowed exception kills the watcher silently. Let it raise, or print the error to stderr so it surfaces when you inspect the run — a watcher that dies loudly is recoverable; one that dies silently strands you.
 
 ## Reducing: Gathering and Judging Results

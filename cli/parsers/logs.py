@@ -51,13 +51,9 @@ def _family_days(value: str) -> dict[str, int]:
 
 
 def _h_logs_retention(args: argparse.Namespace) -> int:
-    from base.clock import Clock, ClockConfig
     from base.paths import logs_dir
     from cli.commands.observability.logs import cmd_logs_retention
 
-    clock = Clock(
-        ClockConfig("UTC", None, message_timestamp_weekday=False), timers=args.runtime.timers
-    )
     explicit = args.older_than is not None or args.family_days is not None
     return cmd_logs_retention(
         older_than_days=args.older_than,
@@ -67,23 +63,19 @@ def _h_logs_retention(args: argparse.Namespace) -> int:
         ),
         dry_run=args.dry_run,
         logs_path=logs_dir(),
-        now=clock.now(),
+        now=args.runtime.clock.now(),
     )
 
 
 def _h_logs_rotate(args: argparse.Namespace) -> int:
-    from base.clock import Clock, ClockConfig
     from base.paths import logs_dir
     from cli.commands.observability.logs import cmd_logs_rotate
 
-    clock = Clock(
-        ClockConfig("UTC", None, message_timestamp_weekday=False), timers=args.runtime.timers
-    )
     return cmd_logs_rotate(
         dry_run=args.dry_run,
         size_mib=args.size_mib,
         logs_path=logs_dir() if args.logs_path is None else args.logs_path,
-        now=clock.now(),
+        now=args.runtime.clock.now(),
     )
 
 
