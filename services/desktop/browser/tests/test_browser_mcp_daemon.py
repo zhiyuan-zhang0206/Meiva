@@ -12,6 +12,7 @@ from mcp import types
 from mcp.shared.exceptions import MCPError
 from mcp.types import CONNECTION_CLOSED, REQUEST_TIMEOUT
 
+from base.clock.tests.fakes import system_clock
 from services.desktop.browser import page_lifecycle
 from services.desktop.browser.mcp_daemon import (
     ChromeMcpDaemon,
@@ -115,7 +116,7 @@ def new_daemon(
     groups: Any = tab_groups if tab_groups is not None else NoTabGroups()
     return ChromeMcpDaemon(
         upstream,
-        PageRegistry(default_ttl_seconds=default_ttl_seconds),
+        PageRegistry(default_ttl_seconds=default_ttl_seconds, clock=system_clock()),
         groups,
     )
 
