@@ -9,7 +9,7 @@ from gateway.tests.auth.gateway_config import gateway_test_client
 
 
 def _write_plugin(name: str, *, files: dict[str, str] | None = None) -> Path:
-    directory = paths.plugins_dir(home=paths.meiva_home()) / name
+    directory = paths.plugins_dir(home=paths.resolve_meiva_home()) / name
     directory.mkdir(parents=True)
     (directory / "plugin.py").write_text('"""A test plugin."""\n', encoding="utf-8")
     for rel, content in (files or {}).items():
