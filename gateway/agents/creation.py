@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import asyncio
-from datetime import UTC, datetime
 from uuid import UUID
 
 from fastapi import Header, HTTPException, Request
@@ -38,6 +37,7 @@ from gateway.http.auth.request_principal import (
     PrincipalScopeError,
     request_key,
 )
+from gateway.http.config import utc_now
 from ops.lifecycle.launch import spawn_prechecks_blocking
 from ops.rpc_schemas import LaunchAgentRequest, SpawnAgentRequest, SpawnedAgent
 
@@ -472,8 +472,8 @@ def creation_availability(
             type(exc).__name__,
             exc,
         )
-        return AgentAvailability(reason=AvailabilityReason.UNKNOWN, observed_at=datetime.now(UTC))
+        return AgentAvailability(reason=AvailabilityReason.UNKNOWN, observed_at=utc_now())
     if snap is None or snap.availability is None:
         logger.warning("created agent {} unavailable for receipt read", agent_id)
-        return AgentAvailability(reason=AvailabilityReason.UNKNOWN, observed_at=datetime.now(UTC))
+        return AgentAvailability(reason=AvailabilityReason.UNKNOWN, observed_at=utc_now())
     return snap.availability

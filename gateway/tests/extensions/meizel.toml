@@ -7,6 +7,3 @@ exports = ["test_mcp_endpoint.py"]
 
 [debt.first-party-patch]
 "test_ui.py#monkeypatch.setattr meiva.ui.page_host" = 1
-
-[debt.restricted-python]
-"test_schedule_stall_guard.py#python -c" = 3

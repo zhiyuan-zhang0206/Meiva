@@ -27,13 +27,13 @@ clock (one time source for the whole stream).
 from __future__ import annotations
 
 import logging
-import time
 from collections import deque
 from typing import Any
 
 from fastapi import APIRouter, Request, Response
 
 from base import telemetry
+from gateway.http.config import utc_now
 from gateway.http.middleware.error_envelope import error_response
 from gateway.schemas import FrontendInteractionIn, FrontendTelemetryBatch
 
@@ -128,7 +128,7 @@ async def ingest(request: Request) -> Response:
         )
 
     limiter: SessionRateLimiter = request.app.state.telemetry_rate_limiter
-    now = time.time()
+    now = utc_now().timestamp()
     accepted = 0
     dropped = 0
     for ev in batch.events:

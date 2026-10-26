@@ -15,7 +15,7 @@ inspector panel).
 
 from __future__ import annotations
 
-from datetime import UTC, datetime
+from datetime import datetime
 from typing import Annotated
 
 import psycopg
@@ -28,7 +28,7 @@ from gateway.events.events_plan import AgentEventsRequest, plan_agent_events
 from gateway.events.schemas import AgentEventRow
 from gateway.events.sse import event_stream
 from gateway.events.sse_frames import SseCadence
-from gateway.http.config import GatewayConfig, gateway_config
+from gateway.http.config import GatewayConfig, gateway_config, utc_now
 
 router = APIRouter()
 
@@ -123,7 +123,7 @@ def get_agent_events(
             limit=limit,
             offset=offset,
         ),
-        now=datetime.now(UTC),
+        now=utc_now(),
         default_limit=gateway_config(request).display.events_default_limit,
     )
     config: GatewayConfig = request.app.state.gateway_config

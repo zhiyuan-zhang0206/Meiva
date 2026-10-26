@@ -8,13 +8,12 @@ transaction pooling in front of Postgres) lives in test_pgbouncer_wire.py.
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
-from types import SimpleNamespace
 from unittest.mock import MagicMock, call
 
 import pytest
 
-from base.cluster.dataplane import direct_url
 from base.cluster.dataplane.direct_url import ClusterDirectUrl
 from base.cluster.machine import MachineIdentityReader
 from base.cluster.machine.configured import ConfiguredMachineIdentity
@@ -167,10 +166,9 @@ def test_backup_defaults_to_a_direct_dump_source(
 
 @pytest.mark.parametrize("direct", [False, True])
 def test_base_db_connect_and_pool_dial_one_url_with_direct_escape(
-    monkeypatch: pytest.MonkeyPatch, direct: bool
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, direct: bool
 ) -> None:
     """Dial the access URL or its recorded direct port with pooling-safe policy."""
-    import base.cluster
     import base.db
     from base.db import connections
 
@@ -181,12 +179,17 @@ def test_base_db_connect_and_pool_dial_one_url_with_direct_escape(
         db_pool_max_size=2,
         pgbouncer_enabled=True,
     )
-
-    def record(_home: Path | None) -> SimpleNamespace:
-        return SimpleNamespace(ports={"pgbouncer": 6433, "postgres": 5433})
-
-    monkeypatch.setattr(base.cluster, "get_record", record)
-    monkeypatch.setattr(direct_url, "get_record", record)
+    (tmp_path / "start-intent.json").write_text(
+        json.dumps(
+            {
+                "record": {
+                    "ports": {"pgbouncer": 6433, "postgres": 5433},
+                    "gateway_home": str(tmp_path),
+                    "created_at": "2026-01-01T00:00:00Z",
+                }
+            }
+        )
+    )
     gate = MagicMock(spec=ProcessDbGate)
     gate.application_name.return_value = "pgbouncer-contract-test"
     gate.min_read_due.return_value = False
@@ -197,7 +200,7 @@ def test_base_db_connect_and_pool_dial_one_url_with_direct_escape(
     monkeypatch.setattr(connections, "ConnectionPool", make_pool)
     expected_url = config.db_url.replace(":6433/", ":5433/") if direct else config.db_url
 
-    resolver = ClusterDirectUrl(lambda: "127.0.0.1")
+    resolver = ClusterDirectUrl(lambda: "127.0.0.1", home=tmp_path)
 
     assert base.db.connect(config=config, gate=gate, direct=direct, direct_url=resolver) is conn
     assert dial.call_args.args == (expected_url,)

@@ -1,7 +1,6 @@
 """Versioned notice selectors requiring observed identity and transactional receipts."""
 
 import asyncio
-from datetime import UTC, datetime
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, Header, Request
@@ -18,6 +17,7 @@ from gateway.agents.notice_operations.notices import (
     publish_response_required_hint,
 )
 from gateway.agents.schemas import AgentMessageEnqueued, NoticeItem, ResolveNoticeIn
+from gateway.http.config import utc_now
 from ops import lifecycle
 
 router = APIRouter()
@@ -91,7 +91,7 @@ async def dismiss_current(
                 "withdrawn",
                 require_response=record.require_response,
                 created_at=record.created_at,
-                now=datetime.now(UTC),
+                now=utc_now(),
                 replied=record.reply is not None,
             ),
         )

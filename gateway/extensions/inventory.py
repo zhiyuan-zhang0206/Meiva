@@ -22,7 +22,6 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from datetime import UTC, datetime
 
 from fastapi import APIRouter, HTTPException, Request
 from psycopg_pool import ConnectionPool
@@ -38,6 +37,7 @@ from gateway.extensions.schemas import (
     InventoryMachineView,
     InventoryWriteResult,
 )
+from gateway.http.config import utc_now
 from ops.cluster import rpc as cluster_rpc
 from ops.rpc_schemas import InventoryReadResult, InventoryWriteOpResult
 
@@ -159,7 +159,7 @@ async def _aggregate(db: Database, pool: ConnectionPool, *, budget_s: float) -> 
     rows = _agent_runner_rows(pool)
     machines = [name for name, _stopped in rows]
     plan = plan_dials(
-        rows, await asyncio.to_thread(snapshots.read_all_blocking, pool), now=datetime.now(UTC)
+        rows, await asyncio.to_thread(snapshots.read_all_blocking, pool), now=utc_now()
     )
     if plan.skipped:
         _log.debug("inventory aggregate: not dialing known-down host(s) %s", sorted(plan.skipped))

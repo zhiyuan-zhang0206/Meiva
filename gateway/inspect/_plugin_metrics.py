@@ -27,7 +27,7 @@ from __future__ import annotations
 import importlib
 import re
 from collections.abc import Collection, Sequence
-from datetime import UTC, datetime, timedelta
+from datetime import timedelta
 from pathlib import Path
 from typing import Any
 
@@ -46,6 +46,7 @@ from base.telemetry.metrics.plugin_metrics import (
     render_title,
     validate_metric_sql,
 )
+from gateway.http.config import utc_now
 from gateway.inspect import _event_metrics
 from gateway.inspect._plugin_faces import enabled_face_files
 from gateway.inspect.schemas import MetricPoint, PluginMetricResult
@@ -259,7 +260,7 @@ def _execute_metric_logql(
         unit=spec.unit,
         panel=spec.panel,
     )
-    stop = datetime.now(UTC)
+    stop = utc_now()
     try:
         with conn.transaction():
             points = _event_metrics.points(

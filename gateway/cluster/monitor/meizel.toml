@@ -3,7 +3,3 @@ exports = ["alert_classes.py", "ops_monitor.py", "ops_series.py", "stats_events.
 [uses]
 "alert_classes.py" = ["stats_events.py"]
 "ops_monitor.py" = ["ops_series.py", "stats_events.py"]
-
-[debt.ambient-read]
-"alert_classes.py#clock datetime.datetime.now" = 3
-"ops_series.py#clock datetime.datetime.now" = 1

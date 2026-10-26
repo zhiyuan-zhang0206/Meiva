@@ -12,5 +12,5 @@ exports = ["cors.py", "error_envelope.py", "error_handlers.py", "latency.py", "r
 "loop_lag.py" = "strict"
 "stopping.py" = "strict"
 
-[debt.ambient-read]
-"error_envelope.py#random uuid.uuid4" = 1
+[roots]
+"error_envelope.py" = { kinds = ["random"], why = "request_trace_middleware mints a fresh request trace id when no OTel span is active" }

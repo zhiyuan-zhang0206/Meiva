@@ -13,7 +13,7 @@
 from __future__ import annotations
 
 import asyncio
-from datetime import UTC, datetime
+from datetime import datetime
 
 from fastapi import APIRouter, HTTPException, Request
 from psycopg_pool import ConnectionPool
@@ -80,7 +80,7 @@ def _drain_tasks_blocking(pool: ConnectionPool, name: str, clock: Clock) -> int:
                 f"terminated; task reassigned to drain owner #{_MACHINE_PAUSE_DRAIN_OWNER} "
                 f"(see `meiva cluster resume {name}`)",
                 clock=clock,
-                now=datetime.now(UTC),
+                now=clock.now(),
             )
             with conn.cursor() as cur:
                 cur.execute(

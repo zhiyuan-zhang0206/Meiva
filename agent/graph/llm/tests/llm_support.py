@@ -92,20 +92,16 @@ class ScriptedModel(BaseChatModel):
 
 # meiva:note
 # A stream handler that takes every chunk, or raises `fail_with` on the first, as a failing live-view fan-out would.
-class StubHandler(RedisStreamHandler):
-    def __init__(self, fail_with: BaseException | None = None) -> None:
-        super().__init__(
-            event_publisher=sink_publisher(),
-            agent_id=1,
-            msg_idx=0,
-            turn_progress=TurnProgress(),
-        )
-        self._fail_with = fail_with
-
-    def process_chunk(self, chunk: AIMessageChunk, now: float) -> None:
-        if self._fail_with is not None:
-            raise self._fail_with
-        super().process_chunk(chunk, now)
+def StubHandler(fail_with: BaseException | None = None) -> RedisStreamHandler:  # noqa: N802
+    publisher = MagicMock(spec=AgentEventPublisher)
+    if fail_with is not None:
+        publisher.emit.side_effect = fail_with
+    return RedisStreamHandler(
+        event_publisher=publisher,
+        agent_id=1,
+        msg_idx=0,
+        turn_progress=TurnProgress(),
+    )
 
 
 def sink_publisher() -> AgentEventPublisher:
