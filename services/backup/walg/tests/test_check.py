@@ -29,11 +29,13 @@ def sandbox(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, postgres_access: No
 def _run_check(
     sandbox: Sandbox,
     *,
+    token: str = "a" * 32,
     binary_problem: str | None = None,
     admin: AbstractContextManager[psycopg.Connection[Any]] | None = None,
 ) -> list[check.Step]:
     return check.run_check_on(
         path=sandbox.path,
+        token=token,
         binary_problem=binary_problem,
         admin=probe.admin_connection_to(_REFUSED) if admin is None else admin,
     )
@@ -72,6 +74,21 @@ def test_a_working_setup_passes_every_step_and_leaves_nothing_in_the_store(
     assert sandbox.calls()[2].split()[2] == put[3] + ".lz4", "`st get` takes the stored .lz4 name"
     assert "not pinned yet" in next(s.detail for s in steps if s.name == "configuration")
     assert not any(secret in step.detail for step in steps for secret in SECRETS)
+
+
+def test_the_stored_object_is_named_by_the_callers_token(sandbox: Sandbox) -> None:
+    _run_check(sandbox, token="b" * 32)
+
+    put = sandbox.calls()[0].split()
+    assert put[3] == f"meiva-check/{'b' * 32}.txt"
+
+
+def test_two_runs_with_different_tokens_never_address_the_same_object(sandbox: Sandbox) -> None:
+    _run_check(sandbox, token="c" * 32)
+    _run_check(sandbox, token="d" * 32)
+
+    puts = [call.split()[3] for call in sandbox.calls() if call.startswith("st put")]
+    assert puts == [f"meiva-check/{'c' * 32}.txt", f"meiva-check/{'d' * 32}.txt"]
 
 
 def test_the_check_never_pins_the_key(sandbox: Sandbox) -> None:
