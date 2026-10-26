@@ -12,22 +12,30 @@ This module is the read side every SDK piece below the installer shares (`wraps`
 
 from __future__ import annotations
 
-from collections.abc import Callable, Mapping
-from dataclasses import dataclass, field
+from collections.abc import Callable, Mapping, Sequence
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 from types import MappingProxyType, ModuleType
-from typing import Any, Protocol
+from typing import Any, Protocol, TypedDict
 
 from pydantic import BaseModel
 
-from base.agents.sdk.call_policy import SamplingPolicyOwner
+from base.agents.sdk.call_policy import (
+    SamplingPolicy,
+    SamplingPolicyOwner,
+    SamplingSource,
+)
 from base.api_contracts.caller_identity import CallerIdentity
 from base.clock import Clock
 from base.config.service_read import ConfigAuthority
 from base.lm.catalog import ModelCatalog
 from base.lm.catalog.provider_keys import ProviderKeys
 from base.packages.plugin_config_contracts import PluginConfigImages, UnboundPluginConfigImages
-from base.packages.plugins.extensions import EMPTY, ExtensionRegistry
+from base.packages.plugins.extensions import (
+    EMPTY,
+    ExtensionRegistry,
+    PluginContributions,
+)
 
 from . import meiva_module
 
@@ -45,6 +53,7 @@ class WrapLayer:
 
 
 SkillProvider = Callable[[], list[Path]]
+AdmittedPlugin = tuple[str, PluginContributions]
 
 
 # meiva:note
@@ -97,6 +106,19 @@ type Reversal = NamespaceAdded | MemberAdded | WrapAdded | ProviderAdded | Confi
 # keeps this module free of the client stack's imports.
 class EventPipelines(Protocol):
     def event_pipeline(self) -> object: ...
+
+
+# meiva:note
+# Optional root collaborator and disable-entry keyword arguments accepted by `install` and
+# forwarded by `load_extensions`.
+class InstallOptions(TypedDict, total=False):
+    catalog: ModelCatalog | None
+    provider_keys: ProviderKeys | None
+    authority: ConfigAuthority | None
+    clock: Clock | None
+    clients: EventPipelines | None
+    external_caller: CallerIdentity | None
+    disabled_entries: Sequence[str]
 
 
 # meiva:note
@@ -154,6 +176,18 @@ class Installation:
             provider_keys=provider_keys,
             authority=authority,
         )
+
+    # meiva:note
+    # The installation of a process that mounts a skill root before any plugin load. It meters
+    # nothing, so the sampling owner it carries is never read; a later `install` replaces the
+    # whole value with its own root's owner.
+    @classmethod
+    def bare_provider_mount(cls, provider: SkillProvider) -> Installation:
+        inert = SamplingPolicyOwner(
+            initial=SamplingPolicy(),
+            source=SamplingSource(env={}, env_path=Path("/nonexistent-sampling-home/.env")),
+        )
+        return replace(cls.bare(sampling=inert), skill_providers=(provider,))
 
     def require_catalog(self) -> ModelCatalog:
         """Return this installation's explicit model facts or refuse a non-model installation."""

@@ -107,7 +107,7 @@ def _record_activation(target: str, plugin: str, inner_calls: int) -> None:
 
         model = _settings.agent_setting("llm_model")
     except Exception:
-        from base.log import logger
+        from loguru import logger
 
         logger.opt(exception=True).warning(
             "wrap activation for {} by plugin {} not recorded: reading the model failed",
