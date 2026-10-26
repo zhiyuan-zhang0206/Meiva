@@ -24,7 +24,7 @@ filter or `--changed` does not turn that scoped result into a whole-repository j
 
 | Dimension | Evidence and limit |
 |---|---|
-| Recognized syntax | `impure-call` and related diagnostics name matched imports, calls or writes. An import or async declaration is a rule observation, not observed runtime execution. |
+| Recognized syntax | `impure-call` and related diagnostics name matched imports, calls or writes. An import or async declaration is a rule observation, not observed runtime execution. A name bound to an impure call (`_is_file = Path.is_file`) is that call; the policy also lists the shell constructors `GitRepo` and `load_universe`. |
 | Unresolved or unmeasured behavior | Unresolved imports/patches are reported where recognized. No diagnostic does not establish absence of callback effects, input mutation or transitive effects; those are not comprehensively analyzed. |
 | Structure | Container budgets and frozen-shape rules bound forms and sizes, not semantic effects. A frozen dataclass can contain a mutable list; a frozen JS holder or Set is not proof against nested mutation. |
 | Test resources | Fixture diagnostics recognize configured requests. They do not measure bootstrap cost or authorize a lightweight runner. Explicit [[tests/fixtures/docs/static-environment.meiva.okf.md|static ownership and refusal canaries]] govern that boundary. |
@@ -68,7 +68,7 @@ explicitly targeted. Instead, a test file whose first-party targets are all `str
 | Code | Scope | What it catches |
 |---|---|---|
 | `impure-edge` | `strict`, `strict-to-be` module | Importing or reading an attribute from a first-party module whose effective purity is `none` |
-| `impure-call` | `strict`, `strict-to-be` module | `async def`, `global`, `nonlocal`, importing an effectful module (`subprocess`, `socket`, `httpx`, `requests`, `urllib`, `shutil`, `tempfile`, `ctypes`, `multiprocessing`, `signal`, plus policy `impure-imports`), or calling an ambient clock, randomness, environment, I/O or filesystem method (`time.time`, `time.monotonic`, `time.sleep`, `datetime.now`, `datetime.utcnow`, `os.environ`, `os.getenv`, `random.*`, ` secrets.*`, `uuid.uuid4`, `open`, `print`, `input`, `Path.read_text/write_text/open/exists/is_file/is_dir/mkdir/unlink/...`, plus policy `impure-calls`) |
+| `impure-call` | `strict`, `strict-to-be` module | `async def`, `global`, `nonlocal`, importing an effectful module (`subprocess`, `socket`, `httpx`, `requests`, `urllib`, `shutil`, `tempfile`, `ctypes`, `multiprocessing`, `signal`, plus policy `impure-imports`), or calling an ambient clock, randomness, environment, I/O or filesystem method (`time.time`, `time.monotonic`, `time.sleep`, `datetime.now`, `datetime.utcnow`, `os.environ`, `os.getenv`, `random.*`, ` secrets.*`, `uuid.uuid4`, `open`, `print`, `input`, `Path.read_text/write_text/open/exists/is_file/mkdir/unlink/iterdir/rglob/resolve/...`, `os.stat/open/scandir/walk`, `pkgutil.get_data`, `inspect.getsource`, plus policy `impure-calls`) |
 | `unfrozen-value` | `strict`, `strict-to-be` module | A class that is not an Enum, Exception, Protocol, TypedDict, NamedTuple, frozen `BaseModel`, or `@dataclass(frozen=True)`, or a module-level mutable literal/comprehension/call assigned to a binding |
 | `untyped-export` | `strict`, `strict-to-be` module | A public function (or exported symbol) missing parameter or return type annotations, or annotated with `Any` or bare `dict` |
 | `pass-through-function` | `strict`, `strict-to-be` module | A public undecorated function whose body only forwards its exact parameters to another function or module attribute call |
@@ -91,7 +91,7 @@ Repository-specific additions and container budget thresholds live under `[purit
 ```toml
 [purity]
 impure-imports = ["psycopg", "psycopg_pool", "redis", "fastapi", "uvicorn", "aiohttp", "websockets", "starlette", "sqlalchemy", "alembic", " celery", "kombu"]
-impure-calls = ["loguru.logger.debug", "loguru.logger.info", "loguru.logger.warning", "loguru.logger.error", "loguru.logger.exception", "loguru.logger.critical", "logging.debug", "logging.info", "logging.warning", "logging.error", "logging.exception", "logging.critical"]
+impure-calls = ["loguru.logger.info", "logging.info", "meizel.graph.universe.GitRepo"]
 impure-fixtures = ["db_session", "postgres_container", "redis_container"]
 max-uses = 8
 max-exports = 4

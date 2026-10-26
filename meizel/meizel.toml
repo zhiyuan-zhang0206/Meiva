@@ -1,12 +1,5 @@
 exports = ["allowances.py", "budgets", "contracts", "graph", "language", "lint_common.py", "owners", "roles.py", "state", "tests"]
 
-[purity]
-"." = "strict-to-be"
-"__init__.py" = "strict"
-"__main__.py" = "strict"
-"allowances.py" = "strict"
-"roles.py" = "strict"
-
 [uses]
 "__main__.py" = ["contracts"]
 "allowances.py" = ["graph"]
@@ -20,8 +13,20 @@ exports = ["allowances.py", "budgets", "contracts", "graph", "language", "lint_c
 "state" = ["allowances.py", "lint_common.py", "roles.py"]
 "tests" = ["allowances.py", "contracts", "graph", "language", "lint_common.py", "owners", "roles.py", "state"]
 
+[purity]
+"." = "strict-to-be"
+"__init__.py" = "strict"
+"__main__.py" = "strict"
+"allowances.py" = "strict-to-be"
+"roles.py" = "strict-to-be"
+
 [debt.impure-call]
+"allowances.py#meizel.graph.universe.GitRepo" = 1
 "lint_common.py#Path.is_dir" = 1
 "lint_common.py#Path.is_file" = 1
 "lint_common.py#Path.read_bytes" = 1
+"lint_common.py#Path.resolve" = 1
+"lint_common.py#Path.rglob" = 1
 "lint_common.py#import subprocess" = 1
+"roles.py#Path.resolve" = 1
+"roles.py#meizel.graph.universe.GitRepo" = 1

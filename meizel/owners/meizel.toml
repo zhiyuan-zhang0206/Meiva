@@ -1,5 +1,16 @@
-purity = "strict"
 exports = ["clock_lattice.py", "decisions.py"]
 
 [uses]
 "tests" = ["clock_lattice.py", "decisions.py"]
+
+[purity]
+"." = "strict"
+"clock_lattice.py" = "strict-to-be"
+"decisions.py" = "strict-to-be"
+
+[debt.impure-call]
+"clock_lattice.py#Path.is_file" = 1
+"clock_lattice.py#Path.resolve" = 1
+"clock_lattice.py#Path.rglob" = 1
+"decisions.py#Path.is_file" = 1
+"decisions.py#Path.resolve" = 1

@@ -32,26 +32,25 @@ def budget_files(
     files: set[Path] = set()
     visited: set[Path] = set()
 
-    def visit(candidate: Path) -> None:
-        if candidate in visited:
+    def visit(directory: Path) -> None:
+        if directory in visited:
             return
-        visited.add(candidate)
-        try:
-            children = directory_budget.entries(candidate)
-        except NotADirectoryError:
-            if candidate.suffix == ".py":
-                files.add(candidate)
-            return
-        except OSError:
-            return
-        for entry in children:
-            visit(entry)
+        visited.add(directory)
+        for entry in directory_budget.entries(directory):
+            if entry.is_dir():
+                visit(entry)
+            elif entry.is_file() and entry.suffix == ".py":
+                files.add(entry)
 
     for target in targets:
         for scope in (repo_root / name for name in structure_dirs):
             selected = directory_budget.selected_under(target, scope, repo_root)
-            if selected is not None:
+            if selected is None:
+                continue
+            if selected.is_dir():
                 visit(selected)
+            elif selected.is_file() and selected.suffix == ".py":
+                files.add(selected)
     return files
 
 
