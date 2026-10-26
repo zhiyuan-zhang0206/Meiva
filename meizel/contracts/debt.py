@@ -27,6 +27,7 @@ __all__ = [
     "AMBIENT_CODES",
     "CYCLE_EDGE",
     "DEBTABLE",
+    "ENTROPY_CODES",
     "PATCH_CODES",
     "PURITY_CODES",
     "TABLE_KEY",
@@ -73,6 +74,9 @@ PURITY_CODES = (
 # meiva:note
 # The code of an ambient read: the key of an entry is `file#kind target`.
 AMBIENT_CODES = (Code.AMBIENT_READ,)
+# meiva:note
+# The code of a spent reading: the key of an entry is `file#reading in where`.
+ENTROPY_CODES = (Code.FAKE_ENTROPY,)
 _FILE_CODES = frozenset(
     {
         Code.RESTRICTED,
@@ -81,6 +85,7 @@ _FILE_CODES = frozenset(
         *PATCH_CODES,
         *PURITY_CODES,
         *AMBIENT_CODES,
+        *ENTROPY_CODES,
     }
 )
 DEBTABLE = _EDGE_CODES | _FILE_CODES
