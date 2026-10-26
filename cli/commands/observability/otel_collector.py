@@ -327,7 +327,7 @@ def ensure_otel_collector(
     plan = plan_collector_install(
         tag=tag,
         platform_label=platform_label,
-        binary_present=(dest_dir / collector_artifact.binary_name()).exists(),
+        binary_present=(dest_dir / collector_artifact.BINARY_NAME).exists(),
         marker=marker.read_text(encoding="utf-8") if marker.exists() else None,
         pinned_version=collector_artifact.OTELCOL_CONTRIB_VERSION,
     )

@@ -15,9 +15,11 @@ Postgres for what the SQL actually does.
 
 from __future__ import annotations
 
+import logging
+import os
 import subprocess
 import sys
-from collections.abc import Callable, Iterator
+from collections.abc import Iterator
 from pathlib import Path
 from typing import Any, NoReturn
 
@@ -97,28 +99,34 @@ class _Exited(BaseException):
         self.code = code
 
 
-def _make_exit(exits: list[int]) -> Callable[[int], NoReturn]:
+@pytest.fixture
+def _gated_process(monkeypatch: pytest.MonkeyPatch) -> list[int]:
+    """A gated process at a fixed version whose `os._exit` is observable.
+
+    The public process posture/version answers and the owned read timestamp are replaced for
+    the test and restored after; `hard_exit` also closes loguru's sinks and the
+    stdlib handlers, so both are neutralized to keep the session's. Returns the
+    exit codes attempted.
+    """
+    exits: list[int] = []
+
     def fake_exit(code: int) -> NoReturn:
         exits.append(code)
         raise _Exited(code)
 
-    return fake_exit
+    def keep(*_args: object, **_kwargs: object) -> None:
+        return None
 
-
-@pytest.fixture
-def _gated_process() -> list[int]:
-    """Observable exit codes recorded when a gated process refuses a stale version."""
-    return []
+    monkeypatch.setattr(os, "_exit", fake_exit)
+    monkeypatch.setattr(loguru_logger, "remove", keep)
+    monkeypatch.setattr(logging, "shutdown", keep)
+    return exits
 
 
 @pytest.fixture
 def process_gate(_gated_process: list[int]) -> gate.ProcessDbGate:
     """The test process's explicit budget, with the original fixed version and identity."""
-    return gate.ProcessDbGate(
-        version=lambda: _VERSION,
-        process=_PROCESS,
-        on_exit=_make_exit(_gated_process),
-    )
+    return gate.ProcessDbGate(version=lambda: _VERSION, process=_PROCESS)
 
 
 # Every test retains the original observable hard-exit instrumentation.
@@ -531,11 +539,7 @@ def test_independent_handles_and_async_restore_share_one_process_budget(
     stored_minimum: int,
     _gated_process: list[int],
 ) -> None:
-    owner = gate.ProcessDbGate(
-        version=lambda: _VERSION,
-        process="test-process",
-        on_exit=_make_exit(_gated_process),
-    )
+    owner = gate.ProcessDbGate(version=lambda: _VERSION, process="test-process")
     _set_minimum(_VERSION)
     first = Database.from_settings(gate=owner)
     second = Database.from_settings(gate=owner)
@@ -564,11 +568,7 @@ async def test_sync_and_async_pool_callbacks_retain_the_same_gate(
 ) -> None:
     from psycopg_pool import AsyncConnectionPool
 
-    owner = gate.ProcessDbGate(
-        version=lambda: _VERSION,
-        process="test-process",
-        on_exit=_make_exit(_gated_process),
-    )
+    owner = gate.ProcessDbGate(version=lambda: _VERSION, process="test-process")
     _set_minimum(_VERSION)
     first = Database.from_settings(gate=owner).pool(min_size=1, max_size=1)
     second = Database.from_settings(gate=owner).async_pool(

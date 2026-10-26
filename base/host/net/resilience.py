@@ -29,6 +29,7 @@ when the retry is built, so a test observes or skips the waits through the
 from __future__ import annotations
 
 import asyncio
+import os
 import random
 import time
 import urllib.error
@@ -37,8 +38,6 @@ from collections.abc import Set as AbstractSet
 from contextlib import suppress
 from dataclasses import dataclass, field
 from typing import Protocol, TypeVar
-
-from base.native_process.os_platform import resolve_pid
 
 __all__ = [
     "ExponentialBackoff",
@@ -91,13 +90,13 @@ class ExponentialBackoff:
         return min(self.base * (self.factor**attempt), self.cap)
 
 
-def agent_phase(span: float, *, pid: int | None = None) -> float:
+def agent_phase(span: float) -> float:
     """Deterministic phase for this native process, independent of agent identity.
 
     Agent-specific schedules pass their identity explicitly at their own owner
     (the graph LLM retry policy does so). Generic transport calls spread by pid.
     """
-    return span * (resolve_pid(pid) % 1000) / 1000.0
+    return span * (os.getpid() % 1000) / 1000.0
 
 
 # meiva:note

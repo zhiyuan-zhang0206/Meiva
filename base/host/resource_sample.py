@@ -16,46 +16,14 @@ there is no cadence to keep, nothing to lose on restart, and no drift.
 from __future__ import annotations
 
 import re
-from collections.abc import Callable
-from typing import Literal, Protocol, TypedDict
+from typing import Literal, TypedDict
 
-import psutil
 from pydantic import BaseModel, ConfigDict
 
-# psutil's non-blocking cpu_percent reports the average since the PREVIOUS call
-# in the same process, which is meaningless for a stateless one-shot: the first
-# call returns 0.0 and later ones cover whatever interval the last poller left
-# behind. A short blocking measurement is self-contained; the callers already
-# run this off the event loop.
-CPU_INTERVAL_S = 0.1
 
-# task #3696 exception inventory: a protective bound on one best-effort local
-# read (`pmset -g batt`) so a hung command cannot stall the status probe that
-# consumes this sample. The probe's own 8s budget
-# (MEIVA_STATUS_PROBE_TIMEOUT_SECONDS) sets the ceiling; not an operator knob.
-_BATTERY_READ_TIMEOUT_S = 2.0
-
-
-class _CompletedProcess(Protocol):
-    @property
-    def stdout(self) -> str: ...
-
-
-class _BatteryRunner(Protocol):
-    def __call__(
-        self,
-        args: list[str],
-        *,
-        check: bool,
-        capture_output: bool,
-        text: bool,
-        timeout: float,
-    ) -> _CompletedProcess: ...
-
-
-class _BatteryFields(TypedDict, total=False):
-    """The battery keys `parse_battery` may emit; an absent key means unknown."""
-
+# meiva:note
+# The battery keys `parse_battery` may emit; an absent key means unknown.
+class BatteryFields(TypedDict, total=False):
     battery_percent: int
     battery_power: Literal["ac", "battery"]
     battery_charging: bool
@@ -83,7 +51,7 @@ class ResourceSample(BaseModel):
     battery_remaining_min: int | None = None
 
 
-def parse_battery(out: str) -> _BatteryFields:
+def parse_battery(out: str) -> BatteryFields:
     """Parse `pmset -g batt` text into the battery fields; {} when no battery.
 
     Sample input (a battery-powered macOS host on AC):
@@ -97,7 +65,7 @@ def parse_battery(out: str) -> _BatteryFields:
     m = re.search(r"(\d+)%;\s*([^;\n]+)", out)
     if m is None:
         return {}
-    fields: _BatteryFields = {"battery_percent": int(m.group(1))}
+    fields: BatteryFields = {"battery_percent": int(m.group(1))}
     state = m.group(2).strip().lower()
     if state in ("charging", "finishing charge"):
         fields["battery_charging"] = True
@@ -113,72 +81,3 @@ def parse_battery(out: str) -> _BatteryFields:
     if r:
         fields["battery_remaining_min"] = int(r.group(1)) * 60 + int(r.group(2))
     return fields
-
-
-# meiva:note
-# One best-effort battery reading; returns `{}` off macOS, on failure, or when no battery is present.
-# Swallows failures by design so battery telemetry degrades to None fields instead of failing the probe.
-def battery_sample(
-    *,
-    platform: str,
-    run: _BatteryRunner | None = None,
-) -> _BatteryFields:
-    if platform != "darwin" or run is None:
-        return {}
-    try:
-        out = run(
-            ["/usr/bin/pmset", "-g", "batt"],
-            check=False,
-            capture_output=True,
-            text=True,
-            timeout=_BATTERY_READ_TIMEOUT_S,
-        ).stdout
-    except Exception:
-        return {}
-    return parse_battery(out)
-
-
-def _empty_battery() -> _BatteryFields:
-    return {}
-
-
-# meiva:note
-# Read this machine's CPU, memory, primary-disk usage, and (on a macOS battery host) battery state right now.
-# Propagates psutil errors so status callers decide whether a missing reading degrades the row or fails the probe.
-def resource_sample(
-    *,
-    ts: float,
-    disk_path: str = "/",
-    cpu_percent: Callable[[float], float] | None = None,
-    battery_fn: Callable[[], _BatteryFields] = _empty_battery,
-) -> ResourceSample:
-    read_cpu = psutil.cpu_percent if cpu_percent is None else cpu_percent
-    mem = psutil.virtual_memory()
-    disk = psutil.disk_usage(disk_path)
-
-    # psutil's `percent` is the canonical fullness/pressure figure, but it is
-    # measured against a *different* denominator than the naive `.total`, so
-    # `used / total` disagreed with the shown percent (disk read 69% next to
-    # an 84% bar, memory 34% next to 80%). Derive the displayed used/total
-    # pair from that same denominator so the panel is self-consistent —
-    # shown_used / shown_total == shown_percent:
-    #   * disk.percent == used / (used + free)  (== `df` Capacity; the
-    #     root-reserved blocks that pad `disk.total` are excluded), so the
-    #     shown total is used + free, the space actually available to us.
-    #   * mem.percent == (total - available) / total, where `available`
-    #     counts reclaimable cache; `mem.used` alone undercounts on macOS, so
-    #     the shown used is total - available (real pressure), total is RAM.
-    disk_total = disk.used + disk.free
-    mem_used = mem.total - mem.available
-
-    return ResourceSample(
-        ts=ts,
-        cpu_pct=read_cpu(CPU_INTERVAL_S),
-        mem_used_gb=round(mem_used / (1024**3), 2),
-        mem_total_gb=round(mem.total / (1024**3), 2),
-        mem_pct=mem.percent,
-        disk_used_gb=round(disk.used / (1024**3), 2),
-        disk_total_gb=round(disk_total / (1024**3), 2),
-        disk_pct=disk.percent,
-        **battery_fn(),
-    )

@@ -6,7 +6,7 @@ exports = ["announce.py", "bus.py", "coalescer.py", "projection.py", "publisher.
 "coalescer.py" = ["projection.py"]
 "publisher.py" = ["redis_client.py", "redis_resilience.py"]
 "redis_client.py" = ["redis_resilience.py"]
-"redis_listener.py" = ["bus.py", "redis_client.py", "redis_resilience.py"]
+"redis_listener.py" = ["redis_client.py", "redis_resilience.py"]
 "tests" = ["bus.py", "coalescer.py", "projection.py", "publisher.py", "redis_client.py", "redis_listener.py", "redis_resilience.py"]
 
 [purity]
@@ -19,3 +19,4 @@ exports = ["announce.py", "bus.py", "coalescer.py", "projection.py", "publisher.
 
 [debt.ambient-read]
 "bus.py#settings base.config.settings" = 1
+"redis_listener.py#settings base.config.settings" = 1

@@ -14,7 +14,6 @@ from __future__ import annotations
 
 from collections.abc import Callable, Generator
 from contextlib import contextmanager
-from typing import Any
 
 import psycopg
 from psycopg_pool import AsyncConnectionPool, ConnectionPool
@@ -34,12 +33,10 @@ class Database:
         *,
         gate: ProcessDbGate,
         direct_url: DirectUrlResolver | None = None,
-        dial: Callable[..., psycopg.Connection[Any]] = psycopg.connect,
     ) -> None:
         self._config = config
         self._gate = gate
         self._direct_url = direct_url
-        self._dial = dial
 
     # meiva:note
     # The composition-root constructor: the config as the live settings hold it now.
@@ -64,7 +61,6 @@ class Database:
             config=self._config,
             gate=self._gate,
             direct_url=self._direct_url,
-            dial=self._dial,
         )
 
     def pool(

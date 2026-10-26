@@ -24,5 +24,6 @@ exports = ["acp", "antigravity", "bridge.py", "claude", "codex", "deepseek", "en
 "handoff.py" = "strict"
 
 [debt.ambient-read]
+"bridge.py#pid os.getpid" = 1
 "bridge.py#random secrets.token_urlsafe" = 1
 "registration.py#clock datetime.datetime.now" = 1

@@ -22,7 +22,7 @@ import os
 import signal
 import subprocess
 import time
-from collections.abc import Callable, Sequence
+from collections.abc import Sequence
 from typing import Any, Literal, Protocol
 
 import psutil
@@ -146,11 +146,6 @@ def process_cmdline(pid: int) -> list[str] | None:
 ChildState = Literal["attached", "detached", "missing", "unverifiable"]
 
 
-class _ChildProcessHandle(Protocol):
-    def status(self) -> str: ...
-    def ppid(self) -> int: ...
-
-
 # meiva:note
 # How live process `pid` reads relative to its expected chain parent.
 #
@@ -160,14 +155,9 @@ class _ChildProcessHandle(Protocol):
 # (reparented out of the chain, or the pid was recycled); ``missing`` — no
 # such process, or a corpse awaiting its reaper (neither can serve);
 # ``unverifiable`` — the read itself failed; the answer is never guessed.
-def child_state(
-    pid: int,
-    parent_pid: int,
-    *,
-    process_factory: Callable[[int], _ChildProcessHandle] = psutil.Process,
-) -> ChildState:
+def child_state(pid: int, parent_pid: int) -> ChildState:
     try:
-        proc = process_factory(pid)
+        proc = psutil.Process(pid)
         status = proc.status()
         ppid = proc.ppid()
     except psutil.NoSuchProcess:

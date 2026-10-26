@@ -17,7 +17,6 @@ from base.lm.harness.handoff import ClusterFact, Handoff, HarnessContribution
 from base.lm.harness.kimi import KimiConfig, KimiSession
 from base.lm.harness.registration import HANDLE_ENV, RegistrationStore
 from base.lm.harness.registry import SessionRegistry
-from base.native_process.os_platform import resolve_pid
 
 # meiva:note
 # The document a fresh session wakes on. It states who the agent is and where it
@@ -184,5 +183,4 @@ def bridge_for(
         handoff=handoff,
         registrations=registrations,
         registration_ttl_seconds=registration_ttl_seconds,
-        controller_pid=resolve_pid(None),
     )

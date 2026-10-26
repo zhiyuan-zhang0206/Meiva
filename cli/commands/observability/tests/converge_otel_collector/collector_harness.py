@@ -181,7 +181,7 @@ class CollectorUnit:
     def install_pinned_binary(self) -> Path:
         destination = otel_collector_dir(self.home)
         destination.mkdir(parents=True, exist_ok=True)
-        binary = destination / collector_artifact.binary_name()
+        binary = destination / collector_artifact.BINARY_NAME
         binary.write_bytes(b"bin")
         (destination / collector_artifact.VERSION_MARKER).write_text(
             collector_artifact.OTELCOL_CONTRIB_VERSION, encoding="utf-8"

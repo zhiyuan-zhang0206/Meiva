@@ -9,9 +9,8 @@ Old ``pty-close-notices.json`` files are retained only for inspection.
 from __future__ import annotations
 
 import hashlib
+import os
 from pathlib import Path
-
-from base.native_process.root_control.client import current_uid
 
 # AF_UNIX sun_path bound: 104 bytes on macOS, 108 on Linux. A deeply nested
 # $MEIVA_HOME (a long worktree path) pushes the natural socket path over it; the
@@ -49,19 +48,18 @@ RESIZE_MAX = 10000
 # ``tempfile.gettempdir()`` because the service (launched by root) and its clients
 # (agent processes with their own TMPDIR) must compute the same path; the service
 # creates the directory owner-only (`fallback_dir`).
-def service_socket_path(run: Path, *, uid: int | None = None) -> Path:
+def service_socket_path(run: Path) -> Path:
     natural = run / "pty-sessions.sock"
     if len(str(natural)) <= SUN_PATH_MAX:
         return natural
     digest = hashlib.sha1(f"{run}\0pty-sessions".encode(), usedforsecurity=False).hexdigest()
-    return fallback_dir(uid=uid) / f"{digest[:12]}.sock"
+    return fallback_dir() / f"{digest[:12]}.sock"
 
 
 # meiva:note
 # Where a socket too long for its home lives: ``/tmp/meiva-pty-<uid>`` (owner-only).
-def fallback_dir(*, uid: int | None = None) -> Path:
-    owner_uid = current_uid() if uid is None else uid
-    return Path("/tmp") / f"meiva-pty-{owner_uid}"  # noqa: S108 — a fixed, uid-keyed, owner-only directory: every process of the user must compute the same path
+def fallback_dir() -> Path:
+    return Path("/tmp") / f"meiva-pty-{os.getuid()}"  # noqa: S108 — a fixed, uid-keyed, owner-only directory: every process of the user must compute the same path
 
 
 def lock_path(run: Path) -> Path:

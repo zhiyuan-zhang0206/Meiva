@@ -16,7 +16,7 @@ exports = ["agents", "api_contracts", "clock", "cluster", "config", "daemon", "d
 "log" = ["paths"]
 "native_process" = ["log", "paths"]
 "packages" = ["api_contracts", "cluster", "config", "db", "host", "lm", "log", "native_process", "paths", "telemetry"]
-"sessions" = ["clock", "cluster", "config", "host", "log", "native_process", "paths"]
+"sessions" = ["cluster", "config", "host", "log", "native_process", "paths"]
 "telemetry" = ["api_contracts", "clock", "cluster", "config", "db", "events", "host", "log", "native_process", "paths"]
 "tests" = ["agents", "api_contracts", "clock", "cluster", "config", "daemon", "db", "deploy", "events", "host", "lm", "log", "native_process", "packages", "paths", "sessions", "telemetry"]
 

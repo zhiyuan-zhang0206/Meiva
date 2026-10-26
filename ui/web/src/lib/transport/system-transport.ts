@@ -34,10 +34,6 @@ function usableLocks(): LockPort | null {
   return null;
 }
 
-export function systemWallNow(): number {
-  return Date.now();
-}
-
 export function systemStreamTransport(): StreamTransport {
   return {
     openEventSource: (url, init) => new EventSource(url, init),
@@ -50,7 +46,7 @@ export function systemStreamTransport(): StreamTransport {
     get page() {
       return document;
     },
-    wallNow: () => systemWallNow(),
+    wallNow: () => Date.now(),
     newTabId: () =>
       Array.from(systemKeySource().getRandomValues(new Uint8Array(8)), (b) =>
         b.toString(16).padStart(2, "0"),

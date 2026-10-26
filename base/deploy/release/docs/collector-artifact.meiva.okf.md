@@ -59,6 +59,12 @@ The regression tests scale every number down and keep the bound's shape:
 without `Content-Length`, a connection that never sends headers, a late close)
 and pins the wait accounting with `ManualTimers`.
 
+`install_binary` extracts the binary into a staging directory inside the destination and renames it over
+`otelcol-contrib`, so an upgrade never writes into a collector that is running (Linux refuses to write to an
+executable in use, macOS would truncate it) and a failure part-way leaves the previous binary in place. The
+SHA256 is accumulated while the body streams (`DownloadProgress.record`), so verification does not read the
+tarball back. `test_collector_artifact_install.py` installs from real tarballs under `tmp_path`.
+
 One collector download operation holds a single absolute deadline (started + total_budget) that every attempt and every retry wait is charged to; each socket read is preceded by a remaining-budget check, the empty read that ends the body is checked too, each request opens with min(socket_timeout_s, remaining), and a backoff is clamped to the remaining budget, so the residual overshoot is one in-flight read bounded by that request's socket timeout (at most min(socket_timeout_s, total_budget_s)).
 
 The collector download waits its retry backoff through the caller's timers, clamped to the budget the attempts left, so a wait never runs past the operation's deadline; reported elapsed and remaining times use the same clock, a ManualTimers records the waits instead of blocking, and the retry loop stays in base/host/net/resilience.py.
