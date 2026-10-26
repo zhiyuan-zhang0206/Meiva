@@ -133,10 +133,10 @@ def _is_meiva_setattr(node: ast.AST) -> TypeGuard[ast.Call]:
 
 def _scan_file(path: Path) -> list[tuple[int, str]]:
     """Return [(lineno, message), ...] for bare meiva monkey-patches."""
-    try:
-        lines = path.read_text(encoding="utf-8").splitlines()
-    except (OSError, UnicodeDecodeError):
+    source = lint_common.read_utf8_text(path)
+    if source is None:
         return []  # unreadable entry (e.g. a dangling symlink) or binary content
+    lines = source.splitlines()
     try:
         tree = ast.parse("\n".join(lines), filename=str(path))
     except SyntaxError:
@@ -162,16 +162,6 @@ def _scan_file(path: Path) -> list[tuple[int, str]]:
     return out
 
 
-def _iter_plugin_files(targets: list[Path]) -> list[Path]:
-    files: list[Path] = []
-    for root in targets:
-        if root.is_file() and root.suffix == ".py":
-            files.append(root)
-        elif root.is_dir():
-            files.extend(root.rglob("*.py"))
-    return files
-
-
 def _under_plugins(path: Path, repo_root: Path = REPO_ROOT) -> bool:
     try:
         rel = path.resolve().relative_to(repo_root).as_posix()
@@ -188,18 +178,23 @@ def main(argv: list[str] | None = None, *, repo_root: Path = REPO_ROOT) -> int:
     # Empty = default full scan of the plugins dir, or the `--only` changed files
     # (the commit hook) under that same scope.
     if argv:
-        missing = [arg for arg in argv if not Path(arg).exists()]
+        resolved, missing = lint_common.resolve_targets(argv, repo_root)
         if missing:
             print(f"error: target path(s) not found: {', '.join(missing)}", file=sys.stderr)
             return 1
-        targets = [p for p in (Path(a).resolve() for a in argv) if _under_plugins(p, repo_root)]
+        files = [
+            path
+            for entry in resolved
+            if entry.endswith(".py") and _under_plugins(path := repo_root / entry, repo_root)
+        ]
     else:
-        targets = lint_common.scan_roots(repo_root, (SCAN_DIR,))
+        roots = lint_common.scan_roots(repo_root, (SCAN_DIR,))
+        files = [path for root in roots for path in root.rglob("*.py")]
 
     scope = lint_common.changed_scope(only, repo_root)
 
     total = 0
-    for path in sorted(lint_common.restrict(_iter_plugin_files(targets), scope, repo_root)):
+    for path in sorted(lint_common.restrict(files, scope, repo_root)):
         try:
             rel = path.relative_to(repo_root).as_posix()
         except ValueError:

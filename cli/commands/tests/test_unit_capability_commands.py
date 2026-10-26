@@ -7,7 +7,7 @@ import psycopg
 import pytest
 
 from base import config
-from base.cluster.authority.tests.unit_capability_support import MACHINE, _open, issue
+from base.cluster.authority.tests.unit_capability_support import MACHINE, issue, open_issued
 from base.config.service_read import ConfigAuthority, served_db_endpoint
 from base.host.db_authority import delivery, unit
 from base.packages.plugin_providers import build_model_catalog
@@ -68,7 +68,7 @@ def test_a_bundle_whose_login_cannot_be_proven_never_installs(
     with pytest.raises(unit.UnitCapabilityError, match="refuses generation 0"):
         unit.install_bundle(
             runner,
-            _open(bundle),
+            open_issued(bundle),
             machine=MACHINE,
             served_endpoint=endpoint,
             probe=unit.probe_login,
@@ -85,7 +85,7 @@ def test_a_bundle_whose_login_cannot_be_proven_never_installs(
     )
     installed = unit.install_bundle(
         runner,
-        _open(bundle),
+        open_issued(bundle),
         machine=MACHINE,
         served_endpoint=endpoint,
         probe=unit.probe_login,
@@ -95,7 +95,7 @@ def test_a_bundle_whose_login_cannot_be_proven_never_installs(
         assert conn.execute("SELECT current_user").fetchone() == ("meiva_g0_runner",)
     again = unit.install_bundle(
         runner,
-        _open(issue(born.home, runner, endpoint=endpoint)),
+        open_issued(issue(born.home, runner, endpoint=endpoint)),
         machine=MACHINE,
         served_endpoint=endpoint,
         probe=unit.probe_login,

@@ -34,9 +34,10 @@ from __future__ import annotations
 import argparse
 import importlib
 import re
-import subprocess
 import sys
 from pathlib import Path
+
+from meizel import lint_common
 
 __all__ = ["is_frozen", "main"]
 
@@ -61,7 +62,7 @@ def _is_excluded(name: str) -> bool:
 
 
 def _tracked_text(repo_root: Path) -> list[tuple[str, str]]:
-    paths = subprocess.check_output(["git", "ls-files", "-z"], cwd=repo_root).decode().split("\0")
+    paths = lint_common.tracked_files(repo_root)
     texts: list[tuple[str, str]] = []
     for name in paths:
         if _is_excluded(name):
@@ -70,12 +71,8 @@ def _tracked_text(repo_root: Path) -> list[tuple[str, str]]:
         if path.resolve() == Path(__file__).resolve():
             continue
         # Git tracks a symlink's target path, not the target file's content.
-        data = path.readlink().as_posix().encode() if path.is_symlink() else path.read_bytes()
-        if b"\0" in data:
-            continue
-        try:
-            text = data.decode("utf-8")
-        except UnicodeDecodeError:
+        text = path.readlink().as_posix() if path.is_symlink() else lint_common.read_utf8_text(path)
+        if text is None or "\0" in text:
             continue
         texts.append((name, text))
     return texts

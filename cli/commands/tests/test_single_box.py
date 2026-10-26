@@ -43,6 +43,7 @@ from base.host.env import port_lease
 from base.host.env.registry import process_environment
 from base.host.net.url_secret import url_with_userinfo
 from base.native_process.child_env import daemon_process_env
+from base.paths.tests.homes import point_home
 from cli.commands.data_plane import bringup, completion
 from cli.commands.data_plane import cluster_instance as ci
 from cli.commands.data_plane import pgbouncer as pooler
@@ -155,7 +156,7 @@ def _configure(
 
     home = (tmp_path / "home").resolve()
     home.mkdir(mode=0o700)
-    monkeypatch.setenv("MEIVA_HOME", str(home))
+    point_home(monkeypatch, home)
     # meiva:note
     # Allocate the entire roster at once. The lease hands out a number it never repeats
     # while this session lives, so the slots cannot collide with each other, with another

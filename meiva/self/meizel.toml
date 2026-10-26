@@ -9,10 +9,6 @@ exports = ["harness", "plans.py", "wake.py"]
 "plans.py" = "strict"
 "wake.py" = "strict-to-be"
 
-[debt.any-collaborator]
-"__init__.py#any _assert_native_self_action.cur" = 1
-"__init__.py#any _run.cur" = 1
-
 [debt.impure-call]
 "wake.py#import redis" = 1
 

@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Any, NamedTuple, NoReturn
+from typing import LiteralString, NamedTuple, NoReturn, Protocol
 
 from base.agents.lifecycle import AgentRestart, AgentTermination, SystemHalt
 from meiva import boot, files
@@ -101,7 +101,13 @@ def __getattr__(name: str) -> object:
 # caller actually accesses InvalidConfigOverlay.
 
 
-def _assert_native_self_action(action: str, cur: Any = None) -> None:
+class _Cursor(Protocol):
+    def execute(self, query: LiteralString, params: tuple[object, ...] = ..., /) -> object: ...
+
+    def fetchone(self) -> tuple[object, ...] | None: ...
+
+
+def _assert_native_self_action(action: str, cur: _Cursor | None = None) -> None:
     from meiva.sdk_surface import agent_identity
     from meiva.sdk_surface.pure.caller.identity_plan import native_harness_refusal
 
@@ -158,7 +164,7 @@ def _publish_self_inbound_wake() -> None:
     )
 
 
-def _run(cur: Any, statements: tuple[plans.SqlStatement, ...]) -> None:
+def _run(cur: _Cursor, statements: tuple[plans.SqlStatement, ...]) -> None:
     for statement in statements:
         cur.execute(statement.sql, statement.params)
 

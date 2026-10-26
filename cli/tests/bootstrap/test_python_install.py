@@ -511,19 +511,13 @@ def test_fresh_bootstrap_finds_checkout_code_with_safe_path(python_mirror: Pytho
 
 
 def test_loading_installer_without_running_main_preserves_import_path(tmp_path: Path) -> None:
-    from cli.tests.bootstrap._python_install_fixture import ROOT
-
     # Loading this stdlib-only entry as a library must expose install without
     # performing the standalone program's checkout bootstrap.
     result = subprocess.run(  # noqa: S603 — current interpreter and fixed library probe
         [
             sys.executable,
             "-I",
-            "-c",
-            "import runpy, sys; before = list(sys.path); "
-            "module = runpy.run_path(sys.argv[1], run_name='installer_library'); "
-            "assert callable(module['install']); assert sys.path == before",
-            str(ROOT / "cli/python_install.py"),
+            str(Path(__file__).with_name("_python_install_fixture.py")),
         ],
         cwd=tmp_path,
         capture_output=True,
