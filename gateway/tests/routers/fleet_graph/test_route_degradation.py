@@ -9,6 +9,8 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 from psycopg import errors as pg_errors
 
+from base.clock.tests.fakes import system_clock
+from base.config.tests.configuration import snapshot_process_config
 from base.db import Database
 from base.events.live.bus import EventBus
 from base.events.live.tests.fakes import patch_sync_redis
@@ -16,6 +18,7 @@ from gateway.http.middleware.error_envelope import request_trace_middleware
 from gateway.http.middleware.error_handlers import unhandled_exception_handler
 from gateway.lgtm.telemetry_staleness import TelemetryStaleness
 from gateway.routers.fleet import fleet_graph as fg
+from gateway.tests.auth.gateway_config import gateway_config_of
 from gateway.tests.routers.fleet_graph.staleness_support import write_fresh_heartbeat
 
 
@@ -45,6 +48,8 @@ def app(
     app.middleware("http")(request_trace_middleware(_rng()))
     app.add_exception_handler(Exception, unhandled_exception_handler)
     app.state.bus = event_bus
+    app.state.gateway_config = gateway_config_of(snapshot_process_config())
+    app.state.clock = system_clock()
     app.state.telemetry_staleness = TelemetryStaleness(check_interval_s=0)
     with database.pool(max_size=2) as pool:
         write_fresh_heartbeat(pool)

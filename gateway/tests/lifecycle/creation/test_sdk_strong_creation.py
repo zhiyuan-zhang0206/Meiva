@@ -58,6 +58,7 @@ def _older(current: FastAPI) -> FastAPI:
     )
     older.state.gateway_config = current.state.gateway_config
     older.state.gateway_process = current.state.gateway_process
+    older.state.clock = current.state.clock
     older.state.catalog = current.state.catalog
     older.exception_handlers = current.exception_handlers.copy()
     routes = APIRouter()
