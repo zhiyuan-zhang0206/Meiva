@@ -51,3 +51,9 @@ def test_eval_isolation_off_leaves_sdk_and_memory_unchanged() -> None:
     code, out, err = _run("off")
     assert code == 0, err
     assert out.strip() == "ok"
+
+
+def test_eval_isolation_without_an_agent_id_is_refused_not_guessed() -> None:
+    code, out, err = _run("missing_agent")
+    assert code == 0, err
+    assert out.strip() == "ok"

@@ -5,9 +5,11 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import random
 from collections.abc import Iterator
 from dataclasses import replace
 from types import SimpleNamespace
+from uuid import UUID
 
 import httpx
 import httpx2
@@ -28,7 +30,6 @@ from gateway.app import (
     cluster_auth_middleware,
 )
 from gateway.http.auth import rejection_log
-from gateway.http.config import gateway_config_from_boot
 from gateway.http.middleware.error_envelope import request_trace_middleware
 from gateway.http.middleware.error_handlers import (
     http_exception_handler,
@@ -38,7 +39,7 @@ from gateway.http.middleware.error_handlers import (
 )
 from gateway.lgtm.backend_failure import raise_backend_unavailable
 from gateway.schemas import ErrorEnvelope
-from gateway.tests.auth.gateway_config import GatewayTestClient
+from gateway.tests.auth.gateway_config import GatewayTestClient, gateway_config_of
 
 _middleware_app = FastAPI()
 # meiva:note
@@ -84,7 +85,7 @@ def _assert_envelope(
 def handler_client() -> Iterator[GatewayTestClient]:
     """An isolated app that dispatches every shared gateway error handler."""
     app = FastAPI()
-    app.state.gateway_config = gateway_config_from_boot(snapshot_process_config())
+    app.state.gateway_config = gateway_config_of(snapshot_process_config())
     app.add_middleware(
         CORSMiddleware,
         allow_origin_regex=".*",
@@ -92,7 +93,7 @@ def handler_client() -> Iterator[GatewayTestClient]:
         allow_methods=["*"],
         allow_headers=["*"],
     )
-    app.middleware("http")(request_trace_middleware)
+    app.middleware("http")(request_trace_middleware(app.state.gateway_config.rng))
     app.add_exception_handler(MeivaAgentError, meiva_agent_error_handler)  # type: ignore[arg-type]
     app.add_exception_handler(StarletteHTTPException, http_exception_handler)  # type: ignore[arg-type]
     app.add_exception_handler(RequestValidationError, request_validation_error_handler)  # type: ignore[arg-type]
@@ -120,6 +121,18 @@ def handler_client() -> Iterator[GatewayTestClient]:
 
     with GatewayTestClient(app, raise_server_exceptions=False) as client:
         yield client
+
+
+# meiva:note
+# The app config's seeded generator decides the fallback correlation id of a request: the first
+# draw is the middleware's, and the second request gets a different one.
+def test_a_request_without_a_trace_gets_the_id_its_app_generator_draws(
+    handler_client: GatewayTestClient,
+) -> None:
+    response = handler_client.get("/agent")
+    expected = UUID(int=random.Random(0).getrandbits(128), version=4).hex  # noqa: S311
+    assert response.json()["trace_id"] == expected
+    assert handler_client.get("/agent").json()["trace_id"] != expected
 
 
 @pytest.mark.parametrize(
@@ -174,7 +187,7 @@ def _request(
     bearer and anonymous requests pay no session lookup.
     """
     _middleware_app.state.gateway_config = replace(
-        gateway_config_from_boot(snapshot_process_config()),
+        gateway_config_of(snapshot_process_config()),
         cluster_secret=_SECRET,
         human_auth="required",
     )
@@ -190,7 +203,7 @@ def _request(
             "headers": headers or [],
             "client": client,
             "server": ("testserver", 80),
-            "state": {},
+            "state": {"trace_id": "0" * 32},
             "app": _middleware_app,
         }
     )

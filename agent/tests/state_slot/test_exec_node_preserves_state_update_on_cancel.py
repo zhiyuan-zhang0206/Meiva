@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import asyncio
+import random
 import time
 from pathlib import Path
 from typing import cast
@@ -27,6 +28,12 @@ from base.lm.catalog import ModelCatalog
 from base.native_process.turn_identity import HostedTurnResources
 from meiva.sdk_surface import process_context
 from meiva.tests.fixtures.pin_agent import hosted_resources as hosted_resources
+
+
+# meiva:note
+# A fresh seeded generator for each use, so no test sees another's draws.
+def _rng() -> random.Random:
+    return random.Random(0)  # noqa: S311
 
 
 # meiva:note
@@ -77,7 +84,7 @@ async def test_exec_node_preserves_state_update_on_cancel(
             cast(BaseAgentState, state),
             runtime,
             config,
-            process=SubprocessExecProcess(read_parent_facts()),
+            process=SubprocessExecProcess(read_parent_facts(), rng=_rng()),
         )
     )
     deadline = time.monotonic() + 20.0

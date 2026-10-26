@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import random
 import time
 from datetime import datetime
 from typing import Any, Literal, NoReturn, TypeGuard
@@ -35,11 +36,11 @@ from base.lm.catalog import ModelCatalog
 from base.lm.reasoning import content_blocks
 from base.log import logger
 
-from ._backoff import Attempt, RetryPolicy, assess_failure, budget_spent
+from ._backoff import WAIT_JITTER_SPAN_S, Attempt, RetryPolicy, assess_failure, budget_spent
 from ._cancel import race_stream_vs_cancel
 from ._chunk import assemble_final_message
 from ._chunk import validate_stop_reason as validate_stop_reason
-from ._retry import draw_jitter, record_remaining, retry_policy, retry_wait
+from ._retry import record_remaining, retry_policy, retry_wait
 from ._stream import stream_llm
 from .goto import LlmGoto
 
@@ -120,6 +121,7 @@ async def llm_node(
     config: RunnableConfig,
     *,
     ledger: LlmLedger,
+    rng: random.Random,
 ) -> Command[LlmGoto]:
     agent_id = agent_id_from_config(config)
     policy = retry_policy(
@@ -135,7 +137,8 @@ async def llm_node(
             raise
         except Exception as exc:
             failed += 1
-            wait = retry_wait(exc, failed, policy=policy, jitter_seconds=draw_jitter())
+            jitter_seconds = rng.uniform(0, WAIT_JITTER_SPAN_S)
+            wait = retry_wait(exc, failed, policy=policy, jitter_seconds=jitter_seconds)
             if wait is None:
                 raise
             await asyncio.sleep(wait)

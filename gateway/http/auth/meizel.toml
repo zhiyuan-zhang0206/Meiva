@@ -10,6 +10,3 @@ exports = ["rejection_log.py", "request_principal.py", "router.py", "session_sto
 [purity]
 "__init__.py" = "strict"
 "rejection_policy.py" = "strict"
-
-[roots]
-"request_principal.py" = { kinds = ["random"], why = "SessionKeys.key generates the cluster session HMAC secret on first login" }

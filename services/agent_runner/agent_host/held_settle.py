@@ -18,6 +18,7 @@
 from __future__ import annotations
 
 import asyncio
+import random
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 
@@ -56,6 +57,7 @@ class HeldSettle:
     timestamps: TimestampSource
     machine: str
     stats: HostStats
+    rng: random.Random
     # meiva:note
     # Whether the receipt this wake owed has landed; the failure path asks it, and the host
     # hands over the database read (`agent.impersonation.handoff_landed`) rather than this
@@ -100,7 +102,7 @@ async def _settle_attempts(
                 activate_accepted=False,
                 incarnation=incarnation,
                 timestamps=held.timestamps,
-                host=process_host(held.machine),
+                host=process_host(held.machine, rng=held.rng),
             )
         except ImpersonationError:
             raise

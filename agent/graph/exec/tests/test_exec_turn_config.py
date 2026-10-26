@@ -1,5 +1,6 @@
 import asyncio
 import json
+import random
 from dataclasses import replace
 from pathlib import Path
 from typing import Any, cast
@@ -29,6 +30,12 @@ from base.lm.catalog import ModelCatalog
 from base.packages.plugin_providers import build_model_catalog
 from base.paths import workspace_dir_readonly
 from meiva.tests.fixtures.pin_agent import snapshot_clients_over
+
+
+# meiva:note
+# A fresh seeded generator for each use, so no test sees another's draws.
+def _rng() -> random.Random:
+    return random.Random(0)  # noqa: S311
 
 
 def _plugin(unit_home: Path) -> None:
@@ -70,7 +77,7 @@ def _ambient_pins_process() -> SubprocessExecProcess:
             {"llm_stream_ttft_timeout_seconds": 99.0, "exec_probe_marker": "ambient-parent"}
         ),
     }
-    return SubprocessExecProcess(replace(facts, environ={**facts.environ, **ambient}))
+    return SubprocessExecProcess(replace(facts, environ={**facts.environ, **ambient}), rng=_rng())
 
 
 async def test_concurrent_turn_configs_reach_real_children_without_cross_talk(
@@ -178,7 +185,7 @@ async def _execution_message(context: MeivaContext, code: str) -> ToolMessage:
         state,
         Runtime(context=context),
         {"configurable": {"thread_id": str(agent_id)}},
-        process=SubprocessExecProcess(read_parent_facts()),
+        process=SubprocessExecProcess(read_parent_facts(), rng=_rng()),
     )
     update = cast(dict[str, Any], command.update)
     assert update["halted"] is False

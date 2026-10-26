@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import random
 import subprocess
 import sys
 from collections.abc import Generator, Iterator
@@ -256,13 +257,19 @@ def relay_program(directory: Path, mode: str) -> tuple[str, ...]:
 
 
 def stub_host(
-    cluster: Cluster, tmp_path: Path, mode: str, *, wait: RelayWait = QUICK_WAIT
+    cluster: Cluster,
+    tmp_path: Path,
+    mode: str,
+    *,
+    rng: random.Random,
+    wait: RelayWait = QUICK_WAIT,
 ) -> TakeoverHost:
     return TakeoverHost(
         local_machine=cluster.local_machine,
         workspaces_root=tmp_path / "workspaces",
         relay_program=relay_program(tmp_path / "relay", mode),
         wait=wait,
+        rng=rng,
     )
 
 

@@ -1,5 +1,6 @@
 import asyncio
 import logging
+import secrets
 import time
 from collections.abc import AsyncGenerator, Awaitable, Callable
 from contextlib import AsyncExitStack, asynccontextmanager, nullcontext
@@ -234,7 +235,7 @@ async def lifespan(
             app.state.db_pool = db_pool
             releases.callback(db_pool.close)
             app.state.sessions = SessionStore(db_pool)
-            app.state.session_keys = SessionKeys()
+            app.state.session_keys = SessionKeys(app.state.gateway_config.rng)
             app.state.session_touch = SessionTouchThrottle()
             app.state.page_host_cache = page_target.PageHostCache()
             app.state.telemetry_rate_limiter = frontend_telemetry_router.SessionRateLimiter()
@@ -504,7 +505,7 @@ def create_app(
         allow_headers=["*"],
     )
 
-    app.middleware("http")(request_trace_middleware)
+    app.middleware("http")(request_trace_middleware(config.rng))
 
     app.add_exception_handler(MeivaAgentError, meiva_agent_error_handler)  # type: ignore[arg-type]
     app.add_exception_handler(RequestValidationError, request_validation_error_handler)  # type: ignore[arg-type]
@@ -573,6 +574,19 @@ def create_app(
     return app
 
 
+# meiva:note
+# The app's configuration as this process root builds it: the account home and the memory directory
+# under it are read here, once, and the entropy every request id, attempt id, upload batch id and
+# session key is drawn from is the operating system's.
+def process_config(config: ConfigBoot) -> GatewayConfig:
+    return gateway_config_from_boot(
+        config,
+        user_home=Path.home(),
+        memory_root=paths.gateway_memory_dir(roles=ConfiguredMachineIdentity(config).role()),
+        rng=secrets.SystemRandom(),
+    )
+
+
 def create_app_from_environment() -> FastAPI:
 
     config = ConfigBoot()
@@ -586,7 +600,7 @@ def create_app_from_environment() -> FastAPI:
         host=Host.system(),
     )
     return create_app(
-        gateway_config_from_boot(process.config),
+        process_config(process.config),
         process=process,
         process_ownership="owned",
         catalog=load_model_catalog(build_model_catalog),
@@ -620,7 +634,7 @@ def openapi_schema_of(config: ConfigBoot, *, home: Path) -> dict[str, Any]:
 
 def _borrowed_app(process: GatewayProcess) -> FastAPI:
     return create_app(
-        gateway_config_from_boot(process.config),
+        process_config(process.config),
         process=process,
         process_ownership="borrowed",
         catalog=load_model_catalog(build_model_catalog),

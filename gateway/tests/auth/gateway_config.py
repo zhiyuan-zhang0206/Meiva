@@ -1,3 +1,4 @@
+import random
 import uuid
 from collections.abc import Generator, Mapping
 from contextlib import contextmanager, nullcontext
@@ -30,6 +31,7 @@ __all__ = [
     "GatewayTestClient",
     "anonymous_gateway_client",
     "gateway_config_fields",
+    "gateway_config_of",
     "gateway_test_app",
     "gateway_test_client",
     "gateway_test_config",
@@ -55,6 +57,18 @@ def gateway_config_fields(**fields: Any) -> Generator[dict[str, Any]]:
 
 
 # meiva:note
+# The gateway config a test derives from `boot`: the process's own account home and a seeded
+# generator, which makes every id and session key the app draws repeat from run to run.
+def gateway_config_of(boot: ConfigBoot) -> GatewayConfig:
+    return gateway_config_from_boot(
+        boot,
+        user_home=Path.home(),
+        memory_root=paths.gateway_memory_dir(roles=ConfiguredMachineIdentity(boot).role()),
+        rng=random.Random(0),  # noqa: S311
+    )
+
+
+# meiva:note
 # The app config a test client gets by default (human auth required), with `changes`
 # applied: a tuning value a test shrinks or a limit it lowers, passed as a `GatewayConfig`
 # field to `gateway_test_client(config=...)`. The positional `fields` are configuration fields applied to the
@@ -64,9 +78,7 @@ def gateway_config_fields(**fields: Any) -> Generator[dict[str, Any]]:
 def gateway_test_config(
     fields: Mapping[str, Any] | None = None, /, **changes: Any
 ) -> GatewayConfig:
-    return replace(
-        gateway_config_from_boot(_resolve_boot(None, fields)), human_auth="required", **changes
-    )
+    return replace(gateway_config_of(_resolve_boot(None, fields)), human_auth="required", **changes)
 
 
 # meiva:note
@@ -150,7 +162,7 @@ def gateway_test_app(
     else:
         ownership = "borrowed" if process_ownership is None else process_ownership
     resolved_config = (
-        replace(gateway_config_from_boot(process.config), human_auth="required")
+        replace(gateway_config_of(process.config), human_auth="required")
         if config is None
         else config
     )

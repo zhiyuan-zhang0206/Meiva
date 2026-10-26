@@ -201,6 +201,7 @@ class AgentHost:
             timestamps=handoff_stamping,
             machine=self._machine,
             stats=self.stats,
+            rng=policy.rng,
             receipt_landed=handoff_landed,
         )
         self._resource_service = HostedServiceResources()
@@ -488,6 +489,7 @@ class AgentHost:
             catalog=self._catalog,
             keys=self._policy.provider_keys,
             llm_override=self._policy.llm_override,
+            permissions_notice_key=UUID(int=self._policy.rng.getrandbits(128), version=4),
             harness=harness,
             registry=self._harness_registry,
             registrations=self._registrations,
@@ -663,6 +665,7 @@ class AgentHost:
                                 self._handoff_stamping,
                                 self._machine,
                                 self._home,
+                                self._policy.rng,
                             ),
                             self.drop_agent,
                             self._wake_resumed,
@@ -708,6 +711,7 @@ class AgentHost:
                 self._handoff_stamping,
                 self._machine,
                 self._home,
+                self._policy.rng,
             ),
         )
         return await self._invoke_native_graph(

@@ -30,9 +30,12 @@ from base.telemetry import DrainStatus
 from gateway import app as gateway_app
 from gateway.cluster import server
 from gateway.cluster.process_boot import LOADED_IMAGE, GatewayProcess
-from gateway.http.config import gateway_config_from_boot
 from gateway.http.model_catalog import load_model_catalog
-from gateway.tests.auth.gateway_config import gateway_test_app, gateway_test_client
+from gateway.tests.auth.gateway_config import (
+    gateway_config_of,
+    gateway_test_app,
+    gateway_test_client,
+)
 
 _CHILD = Path(__file__).with_name("child_gateway_scenarios.py")
 
@@ -271,7 +274,7 @@ def _rooted_app(home: Path) -> Any:
         host=fake_host(),
     )
     return gateway_app.create_app(
-        gateway_config_from_boot(process.config),
+        gateway_config_of(process.config),
         process=process,
         process_ownership="owned",
         catalog=load_model_catalog(build_model_catalog),

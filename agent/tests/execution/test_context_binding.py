@@ -5,6 +5,7 @@ import os
 import subprocess
 import sys
 from pathlib import Path
+from uuid import UUID
 
 import pytest
 
@@ -29,8 +30,8 @@ def _start(tmp_path: Path, agent_id: int, code: str) -> tuple[subprocess.Popen[s
         catalog=build_model_catalog(),
         clients=snapshot_clients(),
     )
-    request = make_request_path(tmp_path / "exec", agent_id=agent_id)
-    result = make_result_path(tmp_path / "exec", agent_id=agent_id)
+    request = make_request_path(tmp_path / "exec", agent_id=agent_id, request_id=UUID(int=1))
+    result = make_result_path(tmp_path / "exec", agent_id=agent_id, result_id=UUID(int=2))
     write_request(
         request,
         code=code,

@@ -464,7 +464,7 @@ def run_child(
 
     from agent.process_boot import apply_per_agent_eval_isolation
 
-    apply_per_agent_eval_isolation(default_reader=read_agent_default)
+    apply_per_agent_eval_isolation(agent_id=request.agent_id, default_reader=read_agent_default)
     build_state_slot(child, request)
 
     if request.timeout_s > 0:

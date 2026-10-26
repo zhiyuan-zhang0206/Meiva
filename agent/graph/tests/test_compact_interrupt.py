@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import random
 from typing import Any, cast
 
 import psycopg
@@ -39,6 +40,13 @@ from base.native_process.turn_identity import HostedTurnResources
 from base.packages.composer_commands import CommandCatalog
 from base.packages.plugin_providers import build_model_catalog
 from meiva.tests.fixtures.pin_agent import hosted_resources as hosted_resources
+
+
+# meiva:note
+# A fresh seeded generator for each use, so no test sees another's draws.
+def _rng() -> random.Random:
+    return random.Random(0)  # noqa: S311
+
 
 # meiva:note
 # The watcher polls on its production cadence here, so a cancel queued while the summary runs is
@@ -104,7 +112,13 @@ async def test_auto_compaction_cancels_at_llm_node_without_replacing_context(
         database_gate=database_gate,
     )
     invocation = asyncio.create_task(
-        llm_node(state, runtime, {"configurable": {"thread_id": str(tid)}}, ledger=LlmLedger())
+        llm_node(
+            state,
+            runtime,
+            {"configurable": {"thread_id": str(tid)}},
+            ledger=LlmLedger(),
+            rng=_rng(),
+        )
     )
     try:
         await asyncio.wait_for(model.started.wait(), timeout=_INTERRUPT_WINDOW_S)
@@ -179,7 +193,7 @@ async def test_compaction_returns_through_claim_then_generates_before_compacting
         database_gate=database_gate,
     )
     state = AgentState(messages=[HumanMessage(content="old work " * 100)], halted=False)
-    compacted = await llm_node(state, runtime, config, ledger=LlmLedger())
+    compacted = await llm_node(state, runtime, config, ledger=LlmLedger(), rng=_rng())
     assert compacted.goto == "init_context"
     state = _apply(state, compacted)
     state.context_reset.tail[0].additional_kwargs["meiva_msg_type"] = marker
@@ -212,7 +226,7 @@ async def test_compaction_returns_through_claim_then_generates_before_compacting
     state = _apply(state, resumed)
     assert not auto_compact_will_fire(state, runtime.context.require_agent(), catalog=catalog)
     assert await compact_reminder(state, runtime, config) is None
-    generated = await llm_node(state, runtime, config, ledger=LlmLedger())
+    generated = await llm_node(state, runtime, config, ledger=LlmLedger(), rng=_rng())
     assert generated.goto == "after_exec"
     state = _apply(state, generated)
     assert state.messages[-1].content == "resumed ordinary work"

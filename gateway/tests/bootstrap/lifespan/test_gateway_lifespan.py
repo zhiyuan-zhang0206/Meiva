@@ -27,9 +27,12 @@ from base.packages.plugin_providers import build_model_catalog
 from base.paths import meiva_home
 from gateway import app as gateway_app
 from gateway.cluster.process_boot import LOADED_IMAGE, GatewayProcess
-from gateway.http.config import gateway_config_from_boot
 from gateway.http.model_catalog import load_model_catalog
-from gateway.tests.auth.gateway_config import gateway_test_app, gateway_test_process
+from gateway.tests.auth.gateway_config import (
+    gateway_config_of,
+    gateway_test_app,
+    gateway_test_process,
+)
 
 _FLUSHERS = ("gateway-latency-flusher", "gateway-auth-flusher")
 _BACKGROUND = (*_FLUSHERS, "gateway-notification-outbox")
@@ -120,7 +123,7 @@ def test_invalid_process_ownership_rejected(*, machine_identity: MachineIdentity
     bad_ownership: Any = "invalid"
     with pytest.raises(ValueError, match="gateway process ownership must be borrowed or owned"):
         gateway_app.create_app(
-            gateway_config_from_boot(boot),
+            gateway_config_of(boot),
             process=process,
             process_ownership=bad_ownership,
             catalog=load_model_catalog(build_model_catalog),

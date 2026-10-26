@@ -23,6 +23,7 @@
 # meiva:link agent/graph/docs/graph.meiva.okf.md
 
 
+import random
 from typing import Any
 
 from langchain_core.runnables import RunnableConfig
@@ -57,7 +58,7 @@ from ._init_context import init_context_node
 from .claim.harness_turn import harness_turn_node
 from .claim.node import claim_node
 from .exec.node import ExecGoto, exec_node
-from .exec.process import SubprocessExecProcess, read_parent_facts
+from .exec.process import ParentFacts, SubprocessExecProcess
 from .llm.goto import LlmGoto
 from .llm.node import llm_node
 
@@ -84,10 +85,15 @@ def _after_exec_default_next(_state: BaseAgentState) -> NodeName:
 def build_graph(
     checkpointer: BaseCheckpointSaver[Any] | None,
     extensions: ExtensionRegistry,
+    *,
+    parent: ParentFacts,
+    rng: random.Random,
 ) -> CompiledStateGraph[BaseAgentState, MeivaContext, BaseAgentState, BaseAgentState]:
     # meiva:note
     # Build the self-cycling graph — deps injected via ainvoke(context=MeivaContext);
-    #     this function takes the checkpointer and the plugin registry.
+    #     this function takes the checkpointer and the plugin registry, plus what the process
+    #     root read for it: the parent facts every exec child is launched from, and the
+    #     generator the llm node's retry jitter and the exec envelope identities are drawn from.
     #
     #     9-Node topology:
     #         START → after_init → init_context → claim → before_llm → llm → before_exec → exec → after_exec
@@ -137,7 +143,7 @@ def build_graph(
     # What the llm node remembers per agent between tries and turns belongs to this graph: one
     # ledger per compiled graph, so two graphs in one process never share failure counts.
     ledger = LlmLedger()
-    process = SubprocessExecProcess(read_parent_facts())
+    process = SubprocessExecProcess(parent, rng)
 
     async def execute(
         state: BaseAgentState, runtime: Runtime[MeivaContext], config: RunnableConfig
@@ -147,7 +153,7 @@ def build_graph(
     async def llm(
         state: BaseAgentState, runtime: Runtime[MeivaContext], config: RunnableConfig
     ) -> Command[LlmGoto]:
-        return await llm_node(state, runtime, config, ledger=ledger)
+        return await llm_node(state, runtime, config, ledger=ledger, rng=rng)
 
     g.add_node(  # type: ignore[arg-type]
         AFTER_INIT,

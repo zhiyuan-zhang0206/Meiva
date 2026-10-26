@@ -12,6 +12,7 @@ mock `BaseChatModel.astream` returns async chunk iterator + AsyncMock redis, val
 Assert using `EVENT_ADAPTER.validate_json` deserialization——same code path as UI tailer,
 if any side field changes, the other side test will turn red."""
 
+import random
 from collections.abc import AsyncIterator, Mapping
 from pathlib import Path
 from typing import Any
@@ -46,6 +47,12 @@ from base.native_process.turn_identity import HostedTurnResources
 from base.packages.plugin_providers import build_model_catalog
 from meiva.tests.fixtures.pin_agent import hosted_resources as hosted_resources
 from meiva.tests.fixtures.pin_agent import snapshot_clients
+
+
+# meiva:note
+# A fresh seeded generator for each use, so no test sees another's draws.
+def _rng() -> random.Random:
+    return random.Random(0)  # noqa: S311
 
 
 # meiva:note
@@ -133,6 +140,7 @@ async def test_llm_node_collects_chunks_into_final_message(
         _make_runtime(hosted_resources=hosted_resources, llm=fake_llm, database_gate=database_gate),
         config,
         ledger=LlmLedger(),
+        rng=_rng(),
     )
 
     assert isinstance(result, Command)
@@ -198,7 +206,11 @@ async def test_llm_node_stamps_last_active_at_with_text(
     )
     state = AgentState(messages=[HumanMessage(content="hi")], halted=False)
     await llm_node(
-        state, runtime, {"configurable": {"thread_id": str(agent_id)}}, ledger=LlmLedger()
+        state,
+        runtime,
+        {"configurable": {"thread_id": str(agent_id)}},
+        ledger=LlmLedger(),
+        rng=_rng(),
     )
 
     active, text, corpse = _turn_stamps(db_conn, agent_id)
@@ -256,7 +268,11 @@ async def test_llm_node_stamps_last_active_at_on_tool_only_turn(
     )
     state = AgentState(messages=[HumanMessage(content="run it")], halted=False)
     await llm_node(
-        state, runtime, {"configurable": {"thread_id": str(agent_id)}}, ledger=LlmLedger()
+        state,
+        runtime,
+        {"configurable": {"thread_id": str(agent_id)}},
+        ledger=LlmLedger(),
+        rng=_rng(),
     )
 
     active, text, corpse = _turn_stamps(db_conn, agent_id)
@@ -330,6 +346,7 @@ async def test_llm_node_dispatches_chunks_to_handler_with_anthropic_shape(
         ),
         config,
         ledger=LlmLedger(),
+        rng=_rng(),
     )
 
     roles = [e.role for e in await live_events.typed()]
@@ -385,6 +402,7 @@ async def test_llm_node_publishes_reasoning_tokens(
         ),
         config,
         ledger=LlmLedger(),
+        rng=_rng(),
     )
 
     usage = [e for e in await live_events.typed() if e.role == "token_usage"]
@@ -425,6 +443,7 @@ async def test_llm_node_preserves_usage_metadata(
         _make_runtime(hosted_resources=hosted_resources, llm=fake_llm, database_gate=database_gate),
         config,
         ledger=LlmLedger(),
+        rng=_rng(),
     )
 
     assert isinstance(result, Command)
@@ -454,7 +473,7 @@ async def test_exec_node_publishes_exec_start_and_output(
             database_gate=database_gate,
         ),
         config,
-        process=SubprocessExecProcess(read_parent_facts()),
+        process=SubprocessExecProcess(read_parent_facts(), rng=_rng()),
     )
 
     events = await live_events.typed()
@@ -486,7 +505,7 @@ async def test_exec_node_output_uses_wrap_code_output_envelope(
         state,
         _make_runtime(hosted_resources=hosted_resources, database_gate=database_gate),
         config,
-        process=SubprocessExecProcess(read_parent_facts()),
+        process=SubprocessExecProcess(read_parent_facts(), rng=_rng()),
     )
 
     assert isinstance(result, Command)
@@ -531,7 +550,7 @@ async def test_exec_node_protects_archives_referenced_by_its_current_state(
         ),
         runtime,
         config,
-        process=SubprocessExecProcess(read_parent_facts()),
+        process=SubprocessExecProcess(read_parent_facts(), rng=_rng()),
     )
     prior_output = first.update["messages"][0]
     directory = overflow_dir(7)
@@ -544,7 +563,7 @@ async def test_exec_node_protects_archives_referenced_by_its_current_state(
         halted=False,
     )
     result = await exec_node(
-        state, runtime, config, process=SubprocessExecProcess(read_parent_facts())
+        state, runtime, config, process=SubprocessExecProcess(read_parent_facts(), rng=_rng())
     )
 
     assert new_body in result.update["messages"][0].content  # pyright: ignore[reportUnknownMemberType]

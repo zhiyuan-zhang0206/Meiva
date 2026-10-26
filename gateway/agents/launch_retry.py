@@ -1,7 +1,7 @@
 """Guarded HTTP admission for an explicitly observed launch attempt."""
 
 import asyncio
-from uuid import uuid4
+from uuid import UUID
 
 from fastapi import APIRouter, HTTPException, Request
 
@@ -18,6 +18,7 @@ from gateway.http.auth.request_principal import (
     PrincipalScopeError,
     request_key,
 )
+from gateway.http.config import gateway_config
 from ops.agents.launch_retry import RetryLaunchConflictError, accept_retry_launch
 from ops.cluster import rpc
 
@@ -53,7 +54,7 @@ async def retry_launch(
             scoped,
             agent_id,
             body,
-            new_attempt_id=uuid4(),
+            new_attempt_id=UUID(int=gateway_config(request).rng.getrandbits(128), version=4),
         )
     except RetryLaunchConflictError as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc

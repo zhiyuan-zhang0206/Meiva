@@ -29,6 +29,7 @@ Test coverage:
 """
 
 import asyncio
+import random
 from typing import Annotated, Any, cast
 from unittest.mock import AsyncMock, MagicMock
 
@@ -63,6 +64,13 @@ from base.packages.plugin_providers import build_model_catalog
 from base.packages.plugins.extensions import ExtensionRegistry, PluginContributions
 from meiva.sdk_surface import process_context
 from meiva.tests.fixtures.pin_agent import snapshot_clients
+
+
+# meiva:note
+# A fresh seeded generator for each use, so no test sees another's draws.
+def _rng() -> random.Random:
+    return random.Random(0)  # noqa: S311
+
 
 assert (
     asyncio
@@ -305,7 +313,7 @@ async def test_exec_node_merges_plugin_messages_with_framework_toolmessage(
     runtime, config = make_runtime_and_config(AsyncMock(), database_gate=database_gate)
 
     cmd = await exec_node_impl(
-        state, runtime, config, process=SubprocessExecProcess(read_parent_facts())
+        state, runtime, config, process=SubprocessExecProcess(read_parent_facts(), rng=_rng())
     )
 
     update = cast(dict[str, Any], cmd.update)
@@ -514,7 +522,7 @@ async def test_exec_node_merges_plugin_state_update_into_command(database_gate: 
         cast(BaseAgentState, state),
         runtime,
         config,
-        process=SubprocessExecProcess(read_parent_facts()),
+        process=SubprocessExecProcess(read_parent_facts(), rng=_rng()),
     )
 
     update = cast(dict, cmd.update)
@@ -535,7 +543,7 @@ async def test_exec_node_commits_the_skill_reads_the_sdk_writes(database_gate: P
     runtime, config = make_runtime_and_config(AsyncMock(), database_gate=database_gate)
 
     cmd = await exec_node_impl(
-        state, runtime, config, process=SubprocessExecProcess(read_parent_facts())
+        state, runtime, config, process=SubprocessExecProcess(read_parent_facts(), rng=_rng())
     )
 
     assert cast(dict, cmd.update)["skill_reads"] == ["alpha"]
@@ -547,7 +555,9 @@ async def test_exec_node_never_binds_the_slot_in_the_parent(database_gate: Proce
     state = BaseAgentState(messages=[ai_message_with_code("pass")], halted=False)
     runtime, config = make_runtime_and_config(AsyncMock(), database_gate=database_gate)
 
-    await exec_node_impl(state, runtime, config, process=SubprocessExecProcess(read_parent_facts()))
+    await exec_node_impl(
+        state, runtime, config, process=SubprocessExecProcess(read_parent_facts(), rng=_rng())
+    )
     assert not process_context.in_exec_turn()
 
 
@@ -561,7 +571,7 @@ async def test_exec_node_leaves_parent_unbound_even_on_crash(database_gate: Proc
     runtime, config = make_runtime_and_config(AsyncMock(), database_gate=database_gate)
 
     cmd = await exec_node_impl(
-        state, runtime, config, process=SubprocessExecProcess(read_parent_facts())
+        state, runtime, config, process=SubprocessExecProcess(read_parent_facts(), rng=_rng())
     )
     assert cmd is not None
     assert not process_context.in_exec_turn()
@@ -595,7 +605,7 @@ async def test_plugin_cannot_overwrite_base_field_via_meiva_state(database_gate:
         cast(BaseAgentState, state),
         runtime,
         config,
-        process=SubprocessExecProcess(read_parent_facts()),
+        process=SubprocessExecProcess(read_parent_facts(), rng=_rng()),
     )
 
     # real state unchanged
@@ -629,7 +639,7 @@ async def test_state_update_base_field_key_raises(base_field, database_gate: Pro
 
     with pytest.raises(ValueError, match=f"base field.*{base_field}"):
         await exec_node_impl(
-            state, runtime, config, process=SubprocessExecProcess(read_parent_facts())
+            state, runtime, config, process=SubprocessExecProcess(read_parent_facts(), rng=_rng())
         )
 
 
@@ -652,7 +662,7 @@ async def test_state_update_unknown_key_raises(database_gate: ProcessDbGate):
             cast(BaseAgentState, state),
             runtime,
             config,
-            process=SubprocessExecProcess(read_parent_facts()),
+            process=SubprocessExecProcess(read_parent_facts(), rng=_rng()),
         )
 
 
@@ -671,7 +681,7 @@ async def test_state_update_multiple_plugins_no_conflict(database_gate: ProcessD
         cast(BaseAgentState, state),
         runtime,
         config,
-        process=SubprocessExecProcess(read_parent_facts()),
+        process=SubprocessExecProcess(read_parent_facts(), rng=_rng()),
     )
 
     update = cast(dict, cmd.update)
@@ -691,7 +701,7 @@ async def test_state_update_non_dict_raises_type_error(database_gate: ProcessDbG
 
     with pytest.raises(TypeError, match=r"plugin tampered with meiva.state_update"):
         await exec_node_impl(
-            state, runtime, config, process=SubprocessExecProcess(read_parent_facts())
+            state, runtime, config, process=SubprocessExecProcess(read_parent_facts(), rng=_rng())
         )
 
 
