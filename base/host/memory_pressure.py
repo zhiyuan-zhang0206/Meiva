@@ -15,8 +15,9 @@ import ctypes
 import ctypes.util
 import errno
 import struct
-import sys
 from typing import Literal, Protocol
+
+from base.native_process.os_platform import is_macos
 
 PressureLevel = Literal["normal", "warning", "critical"]
 
@@ -60,4 +61,4 @@ class _DarwinMemory:
 
 def host_memory_source() -> MemorySource | None:
     """The platform's memory source, or None where the OS exposes no pressure state."""
-    return _DarwinMemory() if sys.platform == "darwin" else None
+    return _DarwinMemory() if is_macos() else None

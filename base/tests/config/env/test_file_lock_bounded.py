@@ -14,7 +14,6 @@ import subprocess
 import sys
 import time
 from pathlib import Path
-from typing import Any
 
 import pytest
 
@@ -139,21 +138,7 @@ def test_the_unbounded_default_is_unchanged(tmp_path: Path) -> None:
     assert lock.exists()
 
 
-# meiva:note
-# Wrap `module.file_lock` so a test can see which path it took.
-def _recorded_lock(monkeypatch: pytest.MonkeyPatch, module: Any, taken: list[Path]) -> None:
-    real = module.file_lock
-
-    def _record(target: Path, *, timeout_s: float | None = None) -> Any:
-        taken.append(target)
-        return real(target, timeout_s=timeout_s)
-
-    monkeypatch.setattr(module, "file_lock", _record)
-
-
-def test_every_env_write_door_takes_the_lock(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_every_env_write_door_takes_the_lock(tmp_path: Path) -> None:
     # meiva:note
     # All THREE doors, not just the one this started with.
     #
@@ -169,16 +154,17 @@ def test_every_env_write_door_takes_the_lock(
     env.write_text("MEIVA_OLD=1\n")
     expected = env_lock_path(env)
 
-    taken: list[Path] = []
-    _recorded_lock(monkeypatch, rc, taken)
-    _recorded_lock(monkeypatch, dotenv_file_mod, taken)
-
+    expected.unlink(missing_ok=True)
     rc.write_fields({}, set(), path=env)
-    dotenv_file_mod.upsert_env(env, {"MEIVA_NEW": "2"})
-    dotenv_file_mod.remove_env(env, {"MEIVA_OLD"})
+    assert expected.exists(), "write_fields wrote .env without creating the lock"
 
-    assert len(taken) == 3, f"a door wrote .env without the lock: {taken}"
-    assert set(taken) == {expected}
+    expected.unlink()
+    dotenv_file_mod.upsert_env(env, {"MEIVA_NEW": "2"})
+    assert expected.exists(), "upsert_env wrote .env without creating the lock"
+
+    expected.unlink()
+    dotenv_file_mod.remove_env(env, {"MEIVA_OLD"})
+    assert expected.exists(), "remove_env wrote .env without creating the lock"
 
 
 def test_the_write_doors_are_leaves(tmp_path: Path) -> None:

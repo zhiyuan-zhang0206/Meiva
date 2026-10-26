@@ -54,5 +54,9 @@ elif mode == "meiva_home":
     import base.paths as p
 
     sys.stdout.write(f"{p.meiva_home()}\n")
+elif mode == "resolve_meiva_home":
+    from base.paths.home import resolve_meiva_home
+
+    sys.stdout.write(f"{resolve_meiva_home()}\n")
 else:
     raise SystemExit(f"unknown mode: {mode}")

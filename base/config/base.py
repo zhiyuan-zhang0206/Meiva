@@ -14,7 +14,7 @@ from typing import Any, Self
 from pydantic_settings import BaseSettings, SettingsConfigDict
 from pydantic_settings.sources import EnvSettingsSource
 
-from base.paths.home import resolve_meiva_home
+from base.paths.home import is_default_home, resolve_meiva_home
 
 
 def unit_home() -> Path:
@@ -22,6 +22,12 @@ def unit_home() -> Path:
     sub-model construction: the process's home (`resolve_meiva_home`), so pidfiles /
     memory / logs default under THIS unit's home."""
     return resolve_meiva_home()
+
+
+# meiva:note
+# Checks whether `home` (or this unit's resolved home) resolves to the default user home.
+def is_default_unit_home(home: Path | None = None) -> bool:
+    return is_default_home(unit_home() if home is None else home)
 
 
 class EnvSettings(BaseSettings):

@@ -21,6 +21,7 @@ __all__ = [
     "is_default_home",
     "is_prod_install",
     "resolve_meiva_home",
+    "user_home",
 ]
 
 
@@ -92,11 +93,17 @@ def home_checkout_error(repo: Path, *, home: Path) -> str | None:
 
 
 # meiva:note
+# The current OS user's home directory (`~`).
+def user_home() -> Path:
+    return Path.home()
+
+
+# meiva:note
 # The default (prod) cluster home, `~/.meiva` — the one home whose initialization
 # uses the fixed default port block and whose checkout anchors without a
 # pointer. The ambient reader for composition roots.
 def default_home() -> Path:
-    return Path.home() / ".meiva"
+    return user_home() / ".meiva"
 
 
 def is_default_home(home: Path) -> bool:

@@ -15,6 +15,6 @@ exports = ["direct_url.py", "pg_admin.py", "pg_foreground.py", "pg_runtime.py", 
 "provision_plan.py" = "strict"
 
 [debt.ambient-read]
-"pg_foreground.py#clock time.monotonic" = 2
+"pg_foreground.py#clock time.monotonic" = 1
 "pg_stall_watchdog.py#clock datetime.datetime.now" = 1
 "pg_tools.py#pid os.getpid" = 1

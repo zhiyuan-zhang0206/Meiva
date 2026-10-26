@@ -80,37 +80,17 @@ def validate_cron(expr: str, *, now: _dt.datetime) -> None:
         raise CronExprError(f"invalid cron expression: {expr!r}") from exc
 
 
+# meiva:note
+# Computes the next UTC fire time after `after` in `timezone` (defaulting to UTC so the
+# primitive never picks up OS wall time), backing up `after` by `tolerance` when resuming
+# a sleep loop so a wake slightly past the fire minute does not skip a full period.
 def next_fire(
     expr: str,
-    after: _dt.datetime | None = None,
+    after: _dt.datetime,
     timezone: str | None = None,
     tolerance: _dt.timedelta | None = None,
 ) -> _dt.datetime:
-    """Given a cron expression + base time (default now UTC), return the next
-    fire time (UTC).
-
-    ``timezone`` is an IANA timezone string (e.g. ``"Asia/Shanghai"``). None ->
-    compute in UTC. croniter parses the cron expression in this timezone.
-
-    The UTC default is the primitive staying neutral: it has no opinion about
-    which wall clock a caller means, and UTC is the only reading that cannot
-    silently pick up the host's OS timezone. Callers that mean "the cluster's
-    wall clock" — the built-in schedules, ``meiva.watcher.cron`` — pass
-    ``settings.general.timezone`` explicitly; nothing here reaches for config.
-
-    ``tolerance`` widens the match window for resumable sleep loops. croniter's
-    ``get_next`` is strictly greater than the base, so a loop that sleeps until
-    the fire minute wakes a few milliseconds past it and the next fire jumps a
-    whole period (deterministic miss — Task #958). Passing e.g.
-    ``timedelta(minutes=2)`` backs the base up by that much, so a wake within
-    the tolerance of the fire time still resolves to the current period's fire
-    (the returned instant may then be slightly in the past; callers treat
-    ``wait <= threshold`` as "fire now").
-
-    Raises:
-        CronExprError: invalid cron expression.
-    """
-    base = after if after is not None else _dt.datetime.now(_dt.UTC)
+    base = after
     if base.tzinfo is None:
         base = base.replace(tzinfo=_dt.UTC)
     if tolerance is not None:

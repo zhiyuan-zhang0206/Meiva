@@ -37,8 +37,13 @@ def wait_foreground_postgres(
     process: subprocess.Popen[bytes], *, log: Path, port: int, data: Path, timeout_s: float = 60
 ) -> None:
     """Accept only a live owned postmaster answering for the expected PGDATA."""
-    deadline = time.monotonic() + timeout_s
-    while time.monotonic() < deadline:
+    deadline: float | None = None
+    while True:
+        now = time.monotonic()
+        if deadline is None:
+            deadline = now + timeout_s
+        if now >= deadline:
+            break
         if process.poll() is not None:
             raise RuntimeError(f"foreground Postgres exited {process.returncode}: {log}")
         try:

@@ -9,4 +9,4 @@ exports = ["launch_retry.py", "memory_search.py", "transport.py"]
 "__init__.py" = "strict"
 
 [debt.ambient-read]
-"transport.py#random uuid.uuid4" = 2
+"transport.py#random uuid.uuid4" = 1

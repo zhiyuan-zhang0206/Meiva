@@ -17,6 +17,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Literal, TextIO
 
+from base.paths.home import user_home
+
 
 @dataclass(frozen=True)
 class Platform:
@@ -237,9 +239,12 @@ def _bounded_file_lock(path: Path, timeout_s: float) -> Generator[None]:
     """`file_lock`'s bounded mode — poll non-blocking take until deadline."""
     fd = os.open(path, os.O_CREAT | os.O_RDWR, 0o600)
     try:
-        deadline = time.monotonic() + timeout_s
+        deadline: float | None = None
         while not _take_nonblocking(fd):
-            if time.monotonic() >= deadline:
+            now = time.monotonic()
+            if deadline is None:
+                deadline = now + timeout_s
+            if now >= deadline:
                 raise LockTimeoutError(
                     f"could not take {path} within {timeout_s:g}s — another "
                     f"process holds it; it is released when that process exits"
@@ -295,7 +300,7 @@ def crontab_lock() -> Generator[None]:
     home, so a /tmp sweep cannot unlink it mid-hold. It is advisory —
     every crontab rewrite in the repo must go through this lock.
     """
-    with file_lock(Path.home() / ".meiva-crontab.lock"):
+    with file_lock(user_home() / ".meiva-crontab.lock"):
         yield
 
 

@@ -17,6 +17,3 @@ exports = ["contract.py", "declarations", "live", "reads", "scan_kinds.py", "tes
 
 [loads]
 "loader.py" = ["base/events/declarations"]
-
-[debt.ambient-read]
-"scan_kinds.py#home pathlib.Path.home" = 1

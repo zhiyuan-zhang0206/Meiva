@@ -1,8 +1,5 @@
 exports = ["sampling_owners.py"]
 
-[external]
-"test_sdk_telemetry.py" = "wraps builtins.__import__ so one import raises"
-
 [uses]
 "test_call_policy.py" = ["_sdk_cold_child.py", "sampling_owners.py"]
 "test_policy_owner.py" = ["sampling_owners.py"]
@@ -10,15 +7,12 @@ exports = ["sampling_owners.py"]
 "test_sdk_telemetry.py" = ["_sdk_cold_child.py", "sampling_owners.py"]
 
 [debt.first-party-patch]
-"_sdk_cold_child.py#assignment base.agents.sdk.telemetry.emit" = 1
 "test_call_policy.py#monkeypatch.setattr base.telemetry.emitter.init_telemetry" = 1
 "test_sdk_emission_failures.py#monkeypatch.setattr base.agents.sdk.telemetry.emit" = 1
 "test_sdk_emission_failures.py#monkeypatch.setattr base.telemetry.emit" = 2
-"test_sdk_telemetry.py#monkeypatch.setattr base.agents.sdk.telemetry.emit" = 1
 "test_sdk_telemetry.py#monkeypatch.setattr base.telemetry.emit" = 1
 
 [debt.stdlib-patch]
-"test_sdk_telemetry.py#monkeypatch.setattr builtins.__import__" = 1
 "test_sdk_telemetry.py#monkeypatch.setattr random.randrange" = 1
 
 [debt.third-party-patch]
