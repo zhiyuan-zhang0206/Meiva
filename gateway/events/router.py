@@ -54,7 +54,7 @@ from gateway.events.events_plan import (
     plan_events,
 )
 from gateway.events.schemas import EventRow, EventsMeta, EventsResponse
-from gateway.http.config import GatewayConfig, gateway_config, utc_now
+from gateway.http.config import GatewayConfig, gateway_clock, gateway_config
 
 router = APIRouter()
 
@@ -186,7 +186,7 @@ def get_events(
     `window_from` is always set — the default 24h lower bound when the
     request named none. An empty window returns `items: []`.
     """
-    now = utc_now()
+    now = gateway_clock(request).now()
     try:
         plan = plan_events(
             EventsRequest(

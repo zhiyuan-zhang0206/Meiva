@@ -42,7 +42,7 @@ from gateway.http.auth.session_store import (
     session_mint,
     ticket_mint,
 )
-from gateway.http.config import GatewayConfig, gateway_clock, utc_now
+from gateway.http.config import GatewayConfig, gateway_clock
 from gateway.http.middleware.cors import request_host, session_cookie_secure
 from gateway.http.middleware.error_envelope import error_response
 
@@ -94,7 +94,7 @@ async def login(body: LoginRequest, request: Request) -> JSONResponse:
     secret = config.cluster_secret
 
     login_limiter: LoginRateLimiter = request.app.state.login_limiter
-    remaining = login_limiter.lockout_remaining(ip, now=utc_now().timestamp())
+    remaining = login_limiter.lockout_remaining(ip, now=gateway_clock(request).now().timestamp())
     if remaining > 0:
         return error_response(
             request,
@@ -109,7 +109,7 @@ async def login(body: LoginRequest, request: Request) -> JSONResponse:
     password = body.password
 
     if not password:
-        login_limiter.record_failure(ip, now=utc_now().timestamp())
+        login_limiter.record_failure(ip, now=gateway_clock(request).now().timestamp())
         return error_response(
             request,
             code="invalid_password",
@@ -127,7 +127,7 @@ async def login(body: LoginRequest, request: Request) -> JSONResponse:
         cache=request.app.state.machine_token_acceptance,
     )
     if mint is None:
-        login_limiter.record_failure(ip, now=utc_now().timestamp())
+        login_limiter.record_failure(ip, now=gateway_clock(request).now().timestamp())
         return error_response(
             request,
             code="invalid_password",
@@ -238,7 +238,7 @@ async def redeem_login_ticket(body: LoginTicketRedeemRequest, request: Request) 
     """
     ip = request.client.host if request.client else "unknown"
     login_limiter: LoginRateLimiter = request.app.state.login_limiter
-    remaining = login_limiter.lockout_remaining(ip, now=utc_now().timestamp())
+    remaining = login_limiter.lockout_remaining(ip, now=gateway_clock(request).now().timestamp())
     if remaining > 0:
         return error_response(
             request,
@@ -252,7 +252,7 @@ async def redeem_login_ticket(body: LoginTicketRedeemRequest, request: Request) 
 
     mint = await _consume_login_ticket(request, body.ticket)
     if mint is None:
-        login_limiter.record_failure(ip, now=utc_now().timestamp())
+        login_limiter.record_failure(ip, now=gateway_clock(request).now().timestamp())
         return error_response(
             request,
             code="invalid_login_ticket",

@@ -22,7 +22,7 @@ from base.telemetry.metrics.aggregate import (
     fetch_aggregate,
 )
 from gateway.events.schemas import AgentMetricsItem, AgentMetricsReport, MetricsMeta, MetricsReport
-from gateway.http.config import gateway_config, utc_now
+from gateway.http.config import gateway_clock, gateway_config
 
 router = APIRouter()
 
@@ -51,7 +51,7 @@ def get_metrics(
     before); audit events are excluded."""
     if days is None:
         days = int(gateway_config(request).display.metrics_default_window_days)
-    now = utc_now()
+    now = gateway_clock(request).now()
     try:
         with request.app.state.db_pool.connection() as conn:
             conn.execute(_READ_TIMEOUT)
@@ -80,7 +80,7 @@ def get_metrics_agents(
     processes), the W9-widened scope documented on `get_metrics`."""
     if days is None:
         days = int(gateway_config(request).display.metrics_default_window_days)
-    now = utc_now()
+    now = gateway_clock(request).now()
     try:
         with request.app.state.db_pool.connection() as conn:
             conn.execute(_READ_TIMEOUT)

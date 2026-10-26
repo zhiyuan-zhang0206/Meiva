@@ -28,6 +28,7 @@ from psycopg_pool import ConnectionPool
 from pydantic import ValidationError
 
 from base.api_contracts.status import MachineStatus
+from base.clock import Clock
 from base.cluster.machine import (
     MachineIdentityReader,
 )
@@ -63,7 +64,7 @@ from gateway.cluster.schemas import (
     StatsTokens,
     SystemStatus,
 )
-from gateway.http.config import GatewayConfig, gateway_config, utc_now
+from gateway.http.config import GatewayConfig, gateway_clock, gateway_config
 from gateway.schemas.stats import StatsWindowHours, window_delta
 from ops.cluster import rpc as cluster_rpc
 from ops.cluster_status import ClusterStatus, check_pidfile, serving_gate_reason
@@ -114,18 +115,21 @@ def get_stats_dashboard(
 ) -> StatsDashboard:
     try:
         return _compute_stats_dashboard(
-            request.app.state.db_pool, hours, request.app.state.gateway_config
+            request.app.state.db_pool,
+            hours,
+            request.app.state.gateway_config,
+            gateway_clock(request),
         )
     except psycopg.errors.QueryCanceled as exc:
         raise HTTPException(status_code=503, detail="stats read timed out; retry") from exc
 
 
 def _compute_stats_dashboard(
-    pool: ConnectionPool[Any], hours: StatsWindowHours, config: GatewayConfig
+    pool: ConnectionPool[Any], hours: StatsWindowHours, config: GatewayConfig, clock: Clock
 ) -> StatsDashboard:
     """Assemble the payload from one pooled connection."""
     cluster = cluster_label()
-    now = utc_now()
+    now = clock.now()
     window_start = now - window_delta(hours)
     with pool.connection() as conn:
         stats_events.set_statement_timeout(conn, config.stats_statement_timeout_ms)
@@ -160,7 +164,7 @@ def _compute_stats_dashboard(
         alert_classes_active=sum(row.dismissal_id is None for row in alert_classes),
         alert_classes_dismissed=sum(row.dismissal_id is not None for row in alert_classes),
         plugin_stats=_plugin_stat_rows(pool),
-        as_of=utc_now(),
+        as_of=clock.now(),
     )
 
 
@@ -216,6 +220,7 @@ class RosterEnv:
     home: Path
     machine: MachineIdentityReader
     probe_timeout_s: float
+    clock: Clock
 
 
 def roster_env(request: Request) -> RosterEnv:
@@ -226,6 +231,7 @@ def roster_env(request: Request) -> RosterEnv:
         home=request.app.state.gateway_process.home,
         machine=request.app.state.machine,
         probe_timeout_s=gateway_config(request).status_probe_timeout_seconds,
+        clock=gateway_clock(request),
     )
 
 
@@ -381,7 +387,7 @@ async def _execute(env: RosterEnv, step: RosterStep) -> MachineStatus:
 async def gather_cluster_status(
     env: RosterEnv, rows: Sequence[RosterRowSpec], snapshots: Mapping[str, Snapshot] | None
 ) -> list[MachineStatus]:
-    steps = plan_roster(rows, env.machine.name(), snapshots, now=utc_now())
+    steps = plan_roster(rows, env.machine.name(), snapshots, now=env.clock.now())
     machines = await asyncio.gather(*(_execute(env, step) for step in steps))
     return sorted(machines, key=lambda m: m.name)
 

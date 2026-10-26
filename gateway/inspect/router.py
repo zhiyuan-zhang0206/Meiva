@@ -15,8 +15,9 @@ from psycopg.errors import QueryCanceled
 from psycopg_pool import ConnectionPool, PoolTimeout
 
 from base.api_contracts.agent_contract import AgentNotFound
+from base.clock import Clock
 from base.db import Database
-from gateway.http.config import gateway_config, utc_now
+from gateway.http.config import gateway_clock, gateway_config
 from gateway.inspect import _metrics, _plugin_metrics, _plugin_widgets, neighbors
 from gateway.inspect._cache import InspectCacheFullError, InspectQueryCache
 from gateway.inspect._heartbeat import HeartbeatCadence, HeartbeatState
@@ -45,7 +46,9 @@ _shell_probe_failures = metrics.get_meter(__name__).create_counter(
 _HEARTBEAT_PAUSE_LOOKBACK = timedelta(hours=24)
 
 
-def _heartbeat_last_pause(pool: ConnectionPool[Any], agent_id: int) -> HeartbeatLastPause | None:
+def _heartbeat_last_pause(
+    pool: ConnectionPool[Any], agent_id: int, *, now: datetime
+) -> HeartbeatLastPause | None:
     """Read the newest recent committed pause from the indexed durable trail.
 
     ``meiva.self.pause_heartbeat`` inserts this row in the same transaction as
@@ -57,7 +60,7 @@ def _heartbeat_last_pause(pool: ConnectionPool[Any], agent_id: int) -> Heartbeat
             "SELECT created_at, duration_s FROM heartbeat_pause_log "
             "WHERE agent_id = %s AND created_at >= %s "
             "ORDER BY created_at DESC, id DESC LIMIT 1",
-            (agent_id, utc_now() - _HEARTBEAT_PAUSE_LOOKBACK),
+            (agent_id, now - _HEARTBEAT_PAUSE_LOOKBACK),
         )
         row = cur.fetchone()
     return HeartbeatLastPause(at=row[0], duration_s=row[1]) if row is not None else None
@@ -148,6 +151,7 @@ async def _inspect_rows_cached_async(
     hours: StatsWindowHours | None,
     *,
     spawned_at: datetime,
+    clock: Clock,
 ) -> _metrics.MetricsSnapshot:
     key = (agent_id, None if hours is None else int(hours))
     try:
@@ -158,6 +162,7 @@ async def _inspect_rows_cached_async(
                 agent_id,
                 hours,
                 spawned_at=spawned_at,
+                clock=clock,
             ),
             ttl_s=0,
             now=time_mod.monotonic(),
@@ -181,7 +186,7 @@ async def get_agent_inspect_live(agent_id: int, request: Request) -> AgentInspec
     notice, shells, last_pause = await asyncio.gather(
         asyncio.to_thread(notice_blocking, pool, agent_id),
         _probe_agent_shells(request.app.state.db, agent_id, db.machine, pool),
-        asyncio.to_thread(_heartbeat_last_pause, pool, agent_id),
+        asyncio.to_thread(_heartbeat_last_pause, pool, agent_id, now=gateway_clock(request).now()),
     )
     return AgentInspectLive(
         agent_id=agent_id,
@@ -238,6 +243,7 @@ async def get_agent_inspect_statistics(
                 agent_id,
                 hours,
                 spawned_at=spawned_at,
+                clock=gateway_clock(request),
             ),
             timeout=_INSPECT_RESPONSE_TIMEOUT_S,
         )
@@ -319,6 +325,7 @@ def get_agent_neighbors(
             max_depth=depth,
             limit=limit,
             db_pool=request.app.state.db_pool,
+            now=gateway_clock(request).now(),
         )
     except QueryCanceled as exc:
         raise HTTPException(status_code=503, detail="neighbor tie read timed out") from exc
@@ -387,7 +394,11 @@ async def get_agent_plugin_metrics(agent_id: int, request: Request) -> list[Plug
         _plugin_metrics.load_plugin_metrics, SHIPPED_PLUGINS_DIR, enabled_plugin_names()
     )
     return await asyncio.to_thread(
-        _plugin_metrics.metrics_for_agent, request.app.state.db_pool, agent_id, registry=registry
+        _plugin_metrics.metrics_for_agent,
+        request.app.state.db_pool,
+        agent_id,
+        registry=registry,
+        clock=gateway_clock(request),
     )
 
 

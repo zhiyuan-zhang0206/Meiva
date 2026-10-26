@@ -17,7 +17,7 @@ from gateway.agents.notice_operations.notices import (
     publish_response_required_hint,
 )
 from gateway.agents.schemas import AgentMessageEnqueued, NoticeItem, ResolveNoticeIn
-from gateway.http.config import utc_now
+from gateway.http.config import gateway_clock
 from ops import lifecycle
 
 router = APIRouter()
@@ -91,7 +91,7 @@ async def dismiss_current(
                 "withdrawn",
                 require_response=record.require_response,
                 created_at=record.created_at,
-                now=utc_now(),
+                now=gateway_clock(request).now(),
                 replied=record.reply is not None,
             ),
         )

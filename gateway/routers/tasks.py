@@ -32,7 +32,7 @@ from base.agents.tasks.rules import first_open_child, is_closed, open_title_hold
 from base.db.transaction import write_transaction
 from gateway.agents.eval_guard import deny_isolated_result_read
 from gateway.http.auth.request_principal import PrincipalScopeError, request_key
-from gateway.http.config import utc_now
+from gateway.http.config import gateway_clock
 from gateway.routers.receipts.task import existing_task_receipt, save_task_receipt
 from gateway.schemas.tasks import (
     TaskGraphRow,
@@ -160,7 +160,7 @@ def _row_to_task(
 
 
 def _windowed_tasks(
-    tasks: list[TaskRow | TaskSummaryRow], window: str
+    tasks: list[TaskRow | TaskSummaryRow], window: str, *, now: datetime
 ) -> list[TaskRow | TaskSummaryRow]:
     """Narrow the registry to a last-activity window, keeping tree structure.
 
@@ -172,7 +172,7 @@ def _windowed_tasks(
     toggle-hidden parents the same way). done/cancelled tasks outside the
     window with no kept descendant are omitted. Order preserved.
     """
-    cutoff = utc_now() - _TASK_WINDOWS[window]
+    cutoff = now - _TASK_WINDOWS[window]
     kept: set[int] = set()
     for t in tasks:
         if (
@@ -250,7 +250,7 @@ def get_tasks(
         tasks = [_row_to_task(r[:-1], fields, owner_label=r[-1]) for r in cur.fetchall()]
     if window == "all":
         return TaskListResponse(tasks=tasks)
-    return TaskListResponse(tasks=_windowed_tasks(tasks, window))
+    return TaskListResponse(tasks=_windowed_tasks(tasks, window, now=gateway_clock(request).now()))
 
 
 def _collect_updates(body: TaskUpdateRequest) -> tuple[list[str], list[object]]:
