@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 import dataclasses
+import grp
 import os
+import pwd
 import re
 from pathlib import Path
 
@@ -19,10 +21,12 @@ from base.host.system.boot_unit import (
     render_unit,
     systemd_running,
     uninstall,
+    unit_context,
     unit_enabled,
     verify_post_publication,
 )
 from base.host.system.hostport import Host
+from base.host.system.job_values import JobRoots
 from base.host.system.tests.fake_commands import (
     DARWIN_ARM64,
     LINUX_X86,
@@ -69,6 +73,26 @@ def _context(tmp_path: Path) -> BootUnitContext:
 @pytest.fixture()
 def ctx(tmp_path: Path) -> BootUnitContext:
     return _context(tmp_path)
+
+
+# meiva:note
+# The unit is anchored to the cluster the roots name and run by the account that owns the host
+# process; nothing is read from the environment of the test.
+def test_unit_context_names_the_roots_and_the_account_running_the_host(tmp_path: Path) -> None:
+    roots = JobRoots(home=tmp_path / "home", repo=tmp_path / "repo", user_home=tmp_path / "user")
+    host = _linux(uid=os.getuid())
+    account = pwd.getpwuid(os.getuid())
+
+    context = unit_context(roots=roots, services=frozenset({"gateway"}), host=host)
+
+    assert context == BootUnitContext(
+        home=roots.home,
+        repo=roots.repo,
+        user=account.pw_name,
+        group=grp.getgrgid(account.pw_gid).gr_name,
+        home_dir=Path(account.pw_dir),
+        services=frozenset({"gateway"}),
+    )
 
 
 def test_render_unit_states_the_boot_policy(ctx: BootUnitContext) -> None:
@@ -188,7 +212,6 @@ def _install_seams(tmp_path: Path, *, enabled: bool) -> tuple[FakeCommands, Path
 def test_install_refuses_without_systemd(ctx: BootUnitContext, tmp_path: Path) -> None:
     with pytest.raises(RuntimeError, match="systemd"):
         install(
-            services=ctx.services,
             context=ctx,
             host=_linux(programs={}),
             runtime_dir=tmp_path / "absent",
@@ -417,7 +440,6 @@ def test_install_enables_native_unit_without_recursively_starting(
 ) -> None:
     commands, unit_dir, runtime_dir = _install_seams(tmp_path, enabled=False)
     steps = install(
-        services=ctx.services,
         context=ctx,
         host=_linux(commands),
         unit_dir=unit_dir,
@@ -441,7 +463,6 @@ def test_unchanged_enabled_unit_never_restarts_or_rewrites(
     target.write_text(render_unit(ctx))
     assert (
         install(
-            services=ctx.services,
             context=ctx,
             host=_linux(commands),
             unit_dir=unit_dir,

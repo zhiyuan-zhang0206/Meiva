@@ -15,7 +15,7 @@ from pathlib import Path
 from typing import assert_never
 
 from base.deploy.progress_timeout import HOST_PACKAGE_INSTALL_TIMEOUT_S
-from base.host.system.cron.mechanics import owns_os_jobs
+from base.host.system.cron.mechanics import owns_os_job_home
 from base.host.system.hostport import Host
 from base.paths.home import is_prod_install
 from base.sessions.env_forwarding import frontend_toolchain_path
@@ -123,8 +123,8 @@ def ensure_host_dependencies(*, repo: Path, scope: StartScope, probing: Probing)
 # meiva:note
 # OS jobs live in one namespace per OS user, so both gates apply: the switch is on AND this is
 # the default home (a test or worktree home owns neither).
-def _os_jobs_owned(*, enabled: bool) -> bool:
-    return enabled and owns_os_jobs("host dependency preflight")
+def _os_jobs_owned(*, enabled: bool, ctx: ConvergeCtx) -> bool:
+    return enabled and owns_os_job_home("host dependency preflight", roots=ctx.job_roots)
 
 
 # meiva:note
@@ -142,7 +142,7 @@ def scope_for(ctx: ConvergeCtx) -> StartScope:
         ),
         macos=ctx.host.platform.system == "darwin",
         is_root=ctx.host.uid == 0,
-        os_jobs=_os_jobs_owned(enabled=view.general.os_jobs_enabled),
+        os_jobs=_os_jobs_owned(enabled=view.general.os_jobs_enabled, ctx=ctx),
         permissions_helper=view.services.permissions_helper_enabled,
         require_github_pr=view.general.require_github_pr,
         memory_keep_local=view.general.memory_keep_local,

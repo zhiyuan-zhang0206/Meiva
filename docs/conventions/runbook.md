@@ -418,7 +418,7 @@ launch root directly. The unit carries the exact home, checkout and registry.
 There is no cron boot route or second boot-install command. Two properties are
 load-bearing:
 
-- **A job spec is anchored to the checkout that wrote it.** `meiva_binary_path()`
+- **A job spec is anchored to the checkout that wrote it.** `read_meiva_binary(roots.repo)`
   resolves this checkout's `.venv` binary (PATH only as a fallback), and the
   launchd plist / systemd unit / maintenance crontab line pin `MEIVA_HOME` explicitly, so a job registered by
   cluster X can never run cluster Y's `meiva` against cluster Y's home.

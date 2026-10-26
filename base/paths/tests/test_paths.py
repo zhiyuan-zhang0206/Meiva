@@ -7,7 +7,7 @@ from pathlib import Path
 import pytest
 
 from base import paths
-from base.paths.home import default_home, is_default_home, is_prod_install
+from base.paths.home import default_home, is_default_home, is_default_home_of, is_prod_install
 
 
 def test_meiva_home_reads_settings(unit_home: Path):
@@ -54,6 +54,23 @@ def test_default_home_is_bare_meiva():
 def test_is_default_home_expands_and_compares():
     assert is_default_home(Path("~/.meiva"))
     assert not is_default_home(Path("~/.meiva-foo"))
+
+
+def test_is_default_home_of_compares_against_the_given_account_not_the_process(tmp_path: Path):
+    account = tmp_path / "account"
+    assert is_default_home_of(account / ".meiva", user_home=account)
+    assert is_default_home_of(account / "elsewhere" / ".." / ".meiva", user_home=account)
+    assert not is_default_home_of(account / ".meiva-foo", user_home=account)
+    assert not is_default_home_of(default_home(), user_home=account)
+
+
+def test_is_default_home_of_follows_a_symlinked_spelling_of_the_same_directory(tmp_path: Path):
+    account = tmp_path / "account"
+    (account / ".meiva").mkdir(parents=True)
+    alias = tmp_path / "alias"
+    alias.symlink_to(account / ".meiva")
+
+    assert is_default_home_of(alias, user_home=account)
 
 
 def test_is_prod_install_needs_the_default_home_and_a_non_worktree_checkout(tmp_path: Path):
