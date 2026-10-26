@@ -26,10 +26,9 @@ _SCAN_TIMEOUT_SECONDS = 10800
 
 
 if __name__ == "__main__":
-    with open_schedule_entry(globals().get("MEIVA_SCHEDULE_INPUTS")) as inputs:
-        daily_scan = (
-            resolve_meiva_home() / "skills" / "meiva-self-evolution" / "reference" / "daily_scan.py"
-        )
+    home = resolve_meiva_home()
+    with open_schedule_entry(globals().get("MEIVA_SCHEDULE_INPUTS"), home=home) as inputs:
+        daily_scan = home / "skills" / "meiva-self-evolution" / "reference" / "daily_scan.py"
         scan = DailyScan(
             command=(sys.executable, str(daily_scan), "--days", "1"),
             script=daily_scan,

@@ -4,6 +4,7 @@
 
 from collections.abc import Generator
 from contextlib import AbstractContextManager, contextmanager
+from pathlib import Path
 
 from base.agents.context import MeivaContext
 from base.agents.context.clients import ClientSet
@@ -19,7 +20,6 @@ from base.db.config import db_config_from_boot
 from base.log import prepare_process_logging
 from base.native_process.code_version import CodeVersion
 from base.native_process.loaded_commit import LoadedCommit
-from base.paths.home import resolve_meiva_home
 from base.telemetry import build_pipeline, process_name
 from meiva.sdk_surface import process_context
 
@@ -27,16 +27,18 @@ __all__ = ["fresh_schedule_entry", "open_schedule_entry", "schedule_entry"]
 
 
 # meiva:note
-# `image` is the commit the process loaded and `process` names it in the database gate. Both
-# are the caller's values: the entry reads neither from the checkout it happens to sit in.
+# `image` is the commit the process loaded and `process` names it in the database gate; `home` is
+# the home the script's entry resolved. All three are the caller's values: the entry reads none
+# of them from the checkout it happens to sit in.
 @contextmanager
-def fresh_schedule_entry(*, image: LoadedCommit, process: str) -> Generator[ScheduleInputs]:
+def fresh_schedule_entry(
+    *, image: LoadedCommit, process: str, home: Path
+) -> Generator[ScheduleInputs]:
     import meiva
 
     config = ConfigBoot()
     config.boot()
     machine = ConfiguredMachineIdentity(config)
-    home = resolve_meiva_home()
     gate = ProcessDbGate(process=process, version=CodeVersion(image).get)
 
     def database() -> Database:
@@ -79,8 +81,12 @@ def fresh_schedule_entry(*, image: LoadedCommit, process: str) -> Generator[Sche
 # A script's `__main__` hands over `MEIVA_SCHEDULE_INPUTS` (what the runner injected, or `None`
 # when the script is run by hand). Inputs from a runner are borrowed as they are; a hand run
 # opens process logging and owns a fresh entry for the image this process loaded.
-def open_schedule_entry(borrowed: ScheduleInputs | None) -> AbstractContextManager[ScheduleInputs]:
+def open_schedule_entry(
+    borrowed: ScheduleInputs | None, *, home: Path
+) -> AbstractContextManager[ScheduleInputs]:
     if borrowed is not None:
         return schedule_entry(borrowed)
     prepare_process_logging()
-    return fresh_schedule_entry(image=process_context.loaded_code_image(), process=process_name())
+    return fresh_schedule_entry(
+        image=process_context.loaded_code_image(), process=process_name(), home=home
+    )

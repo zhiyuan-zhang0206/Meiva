@@ -28,7 +28,8 @@ FOLLOW_UP_CRON = "0 0 * * 5"
 
 
 if __name__ == "__main__":
-    with open_schedule_entry(globals().get("MEIVA_SCHEDULE_INPUTS")) as inputs:
+    home = resolve_meiva_home()
+    with open_schedule_entry(globals().get("MEIVA_SCHEDULE_INPUTS"), home=home) as inputs:
         run_weekly(
             inputs.database(),
             CronSchedule(
@@ -38,7 +39,7 @@ if __name__ == "__main__":
             ),
             partial(
                 handle_weekly_trigger,
-                api=read_events_api(os.environ, resolve_meiva_home()),
+                api=read_events_api(os.environ, home),
                 prompt=PROMPT,
             ),
             schedule_id=parse_schedule_id(os.environ.get("MEIVA_SCHEDULE_ID")),

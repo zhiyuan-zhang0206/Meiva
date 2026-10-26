@@ -47,7 +47,9 @@ def test_quiet_schedule_exit_never_builds_a_writer(tmp_path: Path) -> None:
     image = _repo_with_commits(tmp_path, 1)
     before = _writer_threads()
 
-    with fresh_schedule_entry(image=image, process="schedule-probe") as inputs:
+    with fresh_schedule_entry(
+        image=image, process="schedule-probe", home=tmp_path / "home"
+    ) as inputs:
         assert callable(inputs.producer)
         assert meiva.context.require_machine() is inputs.machine
         assert _writer_threads() == before
@@ -61,7 +63,9 @@ def test_schedule_closes_constructed_writer_and_preserves_loop_error(tmp_path: P
 
     with (
         pytest.raises(RuntimeError) as caught,
-        fresh_schedule_entry(image=image, process="schedule-probe") as inputs,
+        fresh_schedule_entry(
+            image=image, process="schedule-probe", home=tmp_path / "home"
+        ) as inputs,
     ):
         pipeline = inputs.producer()
         assert inputs.producer() is pipeline
@@ -83,7 +87,9 @@ def test_database_sessions_name_the_image_loaded_not_the_checkout_now(
     _git(tmp_path, "commit", "--allow-empty", "-m", "the checkout moved on")
 
     with (
-        fresh_schedule_entry(image=image, process="schedule-probe") as inputs,
+        fresh_schedule_entry(
+            image=image, process="schedule-probe", home=tmp_path / "home"
+        ) as inputs,
         inputs.database().connect(autocommit=True) as conn,
     ):
         row = conn.execute("SHOW application_name").fetchone()
