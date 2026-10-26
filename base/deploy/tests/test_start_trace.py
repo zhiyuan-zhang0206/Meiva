@@ -109,3 +109,10 @@ def test_write_never_creates_a_missing_home(tmp_path: Path) -> None:
 
     assert trace.write(missing) is None
     assert not missing.exists()
+
+
+def test_a_start_time_without_a_timezone_is_refused() -> None:
+    trace = start_trace.StartTrace()
+
+    with pytest.raises(ValueError, match="timezone"):
+        trace.begin(pid=1, now=_ENTRY.replace(tzinfo=None))

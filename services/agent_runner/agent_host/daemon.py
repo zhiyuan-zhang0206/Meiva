@@ -456,6 +456,7 @@ async def run(
     database: Callable[[], Database],
     machine: MachineIdentityReader,
     home: Path,
+    user_home: Path,
     clients: ClientSet | None = None,
     on_clients_owned: Callable[[], None] | None = None,
 ) -> None:
@@ -515,7 +516,12 @@ async def run(
             bus=bus,
             db=db,
             catalog=installation.require_catalog(),
-            policy=host_policy(config, keys=installation.require_provider_keys(), rng=secure_rng),
+            policy=host_policy(
+                config,
+                keys=installation.require_provider_keys(),
+                rng=secure_rng,
+                user_home=user_home,
+            ),
             handoff_stamping=stamping,
             clients=clients,
             extensions=installation.registry,
@@ -648,6 +654,7 @@ def main() -> None:
                 database=database,
                 machine=machine,
                 home=home,
+                user_home=Path.home(),
                 clients=clients,
                 on_clients_owned=hand_off_clients,
             )

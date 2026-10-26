@@ -10,6 +10,7 @@ from collections import OrderedDict
 from collections.abc import Awaitable, Callable, Iterable, Mapping
 from dataclasses import dataclass, field
 from datetime import datetime
+from pathlib import Path
 from typing import Any
 from uuid import UUID
 
@@ -94,6 +95,10 @@ class HostPolicy:
     # The generator the host draws identities and credentials from: a runtime's startup notice
     # key and each relay credential. The daemon root builds it once (a CSPRNG).
     rng: random.Random
+    # meiva:note
+    # The operating-system account's home (`~`), read once by the daemon root and handed to the
+    # contexts the host builds.
+    user_home: Path
 
     def resolve_slices(
         self,
