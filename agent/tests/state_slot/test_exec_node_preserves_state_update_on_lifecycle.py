@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import random
 from pathlib import Path
 from typing import Any, cast
 from unittest.mock import AsyncMock
@@ -24,6 +25,12 @@ from agent.tests.test_state_slot import (
 from base.agents.messages.security_finding import SecurityFindingEntry
 from base.db.code_version_gate import ProcessDbGate
 from meiva.sdk_surface import process_context
+
+
+# meiva:note
+# A fresh seeded generator for each use, so no test sees another's draws.
+def _rng() -> random.Random:
+    return random.Random(0)  # noqa: S311
 
 
 async def test_exec_node_preserves_state_update_on_lifecycle(*, database_gate: ProcessDbGate):
@@ -52,7 +59,7 @@ async def test_exec_node_preserves_state_update_on_lifecycle(*, database_gate: P
         cast(BaseAgentState, state),
         runtime,
         config,
-        process=SubprocessExecProcess(read_parent_facts()),
+        process=SubprocessExecProcess(read_parent_facts(), rng=_rng()),
     )
 
     update = cast(dict, cmd.update)
@@ -72,7 +79,7 @@ async def test_exec_node_commits_security_finding_to_graph_state(*, database_gat
     runtime, config = make_runtime_and_config(AsyncMock(), database_gate=database_gate)
 
     cmd = await exec_node_impl(
-        state, runtime, config, process=SubprocessExecProcess(read_parent_facts())
+        state, runtime, config, process=SubprocessExecProcess(read_parent_facts(), rng=_rng())
     )
 
     update = cast(dict[str, Any], cmd.update)
@@ -101,7 +108,7 @@ async def test_exec_node_keeps_plugin_notes_after_toolmessage_beside_findings(
     runtime, config = make_runtime_and_config(AsyncMock(), database_gate=database_gate)
 
     cmd = await exec_node_impl(
-        state, runtime, config, process=SubprocessExecProcess(read_parent_facts())
+        state, runtime, config, process=SubprocessExecProcess(read_parent_facts(), rng=_rng())
     )
 
     update = cast(dict[str, Any], cmd.update)
@@ -139,7 +146,7 @@ async def test_exec_node_checkpoints_child_attachment(
     )
 
     cmd = await exec_node_impl(
-        state, runtime, config, process=SubprocessExecProcess(read_parent_facts())
+        state, runtime, config, process=SubprocessExecProcess(read_parent_facts(), rng=_rng())
     )
 
     update = cast(dict[str, Any], cmd.update)
@@ -194,7 +201,7 @@ async def test_exec_node_compact_path_drops_notes_and_findings(
     )
 
     cmd = await exec_node_impl(
-        state, runtime, config, process=SubprocessExecProcess(read_parent_facts())
+        state, runtime, config, process=SubprocessExecProcess(read_parent_facts(), rng=_rng())
     )
 
     update = cast(dict, cmd.update)

@@ -8,6 +8,7 @@ real LangGraph so the channel's reducer (`operator.add`) and the `Overwrite([])`
 
 from __future__ import annotations
 
+import random
 from functools import partial
 from typing import Any
 from unittest.mock import MagicMock
@@ -35,6 +36,13 @@ from base.host.env.agent_slices import AgentSlices
 from base.packages.plugin_providers import build_model_catalog
 from base.packages.plugins.extensions import ExtensionRegistry
 from meiva.tests.fixtures.pin_agent import snapshot_clients
+
+
+# meiva:note
+# A fresh seeded generator for each use, so no test sees another's draws.
+def _rng() -> random.Random:
+    return random.Random(0)  # noqa: S311
+
 
 _CONFIG = {"configurable": {"thread_id": "1042"}}
 _FIRST = SecurityFindingEntry(source="web.fetch", triggers=["ignore previous instructions"])
@@ -156,7 +164,7 @@ async def test_a_real_childs_finding_reaches_the_model_through_the_hook(
     builder: Any = StateGraph(AgentState, context_schema=MeivaContext)
     builder.add_node(
         "exec",
-        partial(exec_node_impl, process=SubprocessExecProcess(read_parent_facts())),
+        partial(exec_node_impl, process=SubprocessExecProcess(read_parent_facts(), rng=_rng())),
         input_schema=AgentState,
     )
     builder.add_node("after_exec", after_exec)

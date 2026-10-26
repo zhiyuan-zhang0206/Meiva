@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import asyncio
 from typing import Annotated
+from uuid import UUID
 
 from fastapi import APIRouter, Depends, File, Header, HTTPException, Query, Request, UploadFile
 from fastapi.responses import FileResponse
@@ -108,6 +109,8 @@ async def upload_files(
         agent_upload_dir(agent_id, create=False, home=config.upload_home),
         batch,
         [file.filename or "untitled" for file in files],
+        batch_id=UUID(int=config.rng.getrandbits(128), version=4).hex,
+        staging_id=UUID(int=config.rng.getrandbits(128), version=4).hex,
         max_bytes=config.max_agent_upload_bytes,
         max_files=config.max_agent_upload_files,
         local_machine=request.app.state.machine.name(),

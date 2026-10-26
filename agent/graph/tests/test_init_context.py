@@ -6,6 +6,7 @@ claim's compact return, the auto-compact hook); the drift between those copies
 is what these tests pin down now that there is one owner.
 """
 
+import random
 from collections.abc import Callable, Mapping
 from pathlib import Path
 from typing import Any, cast
@@ -46,6 +47,12 @@ from base.packages.plugins.extensions import (
 from base.paths import meiva_home, skills_dir
 from meiva.tests.fixtures.pin_agent import hosted_resources as hosted_resources
 from meiva.tests.fixtures.pin_agent import snapshot_clients
+
+
+# meiva:note
+# A fresh seeded generator for each use, so no test sees another's draws.
+def _rng() -> random.Random:
+    return random.Random(0)  # noqa: S311
 
 
 def _config(tid: int) -> RunnableConfig:
@@ -498,6 +505,7 @@ async def test_a_compaction_in_the_same_pass_keeps_its_summary_and_its_head(
         ),
         _config(tid),
         ledger=LlmLedger(),
+        rng=_rng(),
     )
     assert cmd.goto == "init_context"
     assert isinstance(cmd.update, dict)

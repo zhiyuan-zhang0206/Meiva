@@ -11,6 +11,7 @@ import time
 from collections.abc import Generator
 from pathlib import Path
 from typing import Any, cast
+from uuid import UUID
 
 import pytest
 
@@ -67,8 +68,8 @@ def _spawn(
     tmp_path: Path, code: str, endpoint: str, *, corrupt_request: bool = False
 ) -> tuple[subprocess.CompletedProcess[str], Path]:
     exec_dir = tmp_path / "exec"
-    request_path = make_request_path(exec_dir, agent_id=_AGENT_ID)
-    result_path = make_result_path(exec_dir, agent_id=_AGENT_ID)
+    request_path = make_request_path(exec_dir, agent_id=_AGENT_ID, request_id=UUID(int=1))
+    result_path = make_result_path(exec_dir, agent_id=_AGENT_ID, result_id=UUID(int=2))
     if corrupt_request:
         request_path.write_text("corrupt request body", encoding="utf-8")
     else:

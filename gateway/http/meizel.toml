@@ -6,6 +6,3 @@ exports = ["auth", "config.py", "disconnect.py", "middleware", "model_catalog.py
 
 [purity]
 "__init__.py" = "strict"
-
-[roots]
-"config.py" = { kinds = ["home"], why = "gateway_config_from_boot reads Path.home() once for the account upload root so handlers receive upload_home as a value" }

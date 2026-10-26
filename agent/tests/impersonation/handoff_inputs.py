@@ -1,4 +1,5 @@
 import json
+import random
 from collections.abc import Generator, Iterator
 from contextlib import contextmanager
 from dataclasses import replace
@@ -53,6 +54,13 @@ from base.packages.plugins.extensions import ExtensionRegistry, PluginContributi
 from meiva.boot import derived_clients
 from meiva.tests.fixtures.pin_agent import hosted_resources as hosted_resources
 
+
+# meiva:note
+# A fresh seeded generator for each use, so no test sees another's draws.
+def _rng() -> random.Random:
+    return random.Random(0)  # noqa: S311
+
+
 __all__ = [
     "HandoffState",
     "WakeLog",
@@ -100,6 +108,7 @@ def takeover_host(tmp_path: Path, machine: MachineIdentityReader) -> TakeoverHos
         workspaces_root=tmp_path / "workspaces",
         relay_program=relay_program(tmp_path / "relay", "exit:9"),
         wait=RelayWait(timeout_s=5.0, poll_s=0.05),
+        rng=_rng(),
     )
 
 
@@ -149,12 +158,12 @@ class HandoffState(BaseModel):
 def runner_exec_process(runner_db_url: str) -> SubprocessExecProcess:
     facts = read_parent_facts()
     return SubprocessExecProcess(
-        replace(facts, environ={**facts.environ, "MEIVA_DB_URL": runner_db_url})
+        replace(facts, environ={**facts.environ, "MEIVA_DB_URL": runner_db_url}), rng=_rng()
     )
 
 
 def local_exec_process() -> SubprocessExecProcess:
-    return SubprocessExecProcess(read_parent_facts())
+    return SubprocessExecProcess(read_parent_facts(), rng=_rng())
 
 
 async def prepare_graph(

@@ -56,9 +56,11 @@ of future traffic.
 ## Recoverability and space
 
 Full soft-cropped output is written before returning the preview, atomically
-(a complete owner-only file or none, through `base/host/atomic_io`), using a
-UUID filename under the agent workspace: `.exec_output/crop_<uuid>.txt`.
-The agent can read or grep that exact path. These files are independent of the
+(a complete owner-only file or none, through `base/host/atomic_io`), under a filename
+that is the first 128 bits of the SHA-256 of the output, in the agent workspace:
+`.exec_output/crop_<digest>.txt`. The same output archived again is the same file,
+rewritten in place and counted once against the byte budget. The agent can read or
+grep that exact path. These files are independent of the
 legacy `exec_*.txt` ring, so repeated hard overflows cannot remove a soft archive.
 
 The native exec node passes its current messages explicitly to the formatter;

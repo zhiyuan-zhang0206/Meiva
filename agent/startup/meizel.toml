@@ -4,6 +4,3 @@
 
 [purity]
 "permission_notice.py" = "strict"
-
-[roots]
-"__init__.py" = { kinds = ["random"], why = "notify_desktop_permissions_at_startup mints an idempotency UUID for the startup notice" }

@@ -7,6 +7,7 @@ import sys
 import time
 from pathlib import Path
 from typing import Any
+from uuid import UUID
 
 import psutil
 import pytest
@@ -266,6 +267,8 @@ async def _run(tmp_path: Path, code: str, *, database_gate: ProcessDbGate) -> An
             editable_roots=(),
         ),
         accumulation_max_chars=1_000_000,
+        request_id=UUID(int=1),
+        result_id=UUID(int=2),
     )
     return result
 

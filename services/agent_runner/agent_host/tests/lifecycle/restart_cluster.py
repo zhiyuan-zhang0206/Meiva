@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import asyncio
 import dataclasses
+import random
 from functools import partial
 from typing import Any
 
@@ -19,6 +20,7 @@ from langgraph.checkpoint.postgres.aio import AsyncPostgresSaver
 from psycopg_pool import AsyncConnectionPool
 
 from agent.graph import build_graph
+from agent.graph.exec.process import read_parent_facts
 from base.agents.context.clients import ClientSet
 from base.agents.inbox.insert import insert_inbound_message
 from base.agents.tests.units import spawn_agent
@@ -42,6 +44,13 @@ from services.agent_runner.agent_host.lifecycle.graceful_exit import (
 from services.agent_runner.agent_host.scheduling.pending_wakes import scan_rows
 from services.agent_runner.agent_host.tests.host_policy import configured_policy, handoff_timestamps
 from services.agent_runner.agent_host.tests.lifecycle import scripted_model
+
+
+# meiva:note
+# A fresh seeded generator for each use, so no test sees another's draws.
+def _rng() -> random.Random:
+    return random.Random(0)  # noqa: S311
+
 
 __all__ = ["Cluster", "Host", "Inbound", "cluster"]
 
@@ -167,7 +176,9 @@ class Cluster:
             home=meiva_home(),
             pool=self.pool,
             checkpointer=checkpointer,
-            graph=build_graph(checkpointer, ExtensionRegistry()),
+            graph=build_graph(
+                checkpointer, ExtensionRegistry(), parent=read_parent_facts(), rng=_rng()
+            ),
             machine=self.machine,
             bus=self.bus,
             db=self.database,

@@ -157,9 +157,6 @@ bus = [
 "ops.cluster_status.cluster_now()" = "returns the current time"
 
 [ambient-readers.random]
-"agent.execution.protocol.make_request_path()" = "names a file with uuid4"
-"agent.execution.protocol.make_result_path()" = "names a file with uuid4"
-"agent.graph.llm._retry.draw_jitter()" = "draws random.uniform"
 "base.host.net.auth.random_bytes()" = "draws secrets.token_bytes"
 "base.host.net.resilience.jittered()" = "draws random jitter"
 

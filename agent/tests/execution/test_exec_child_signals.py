@@ -4,6 +4,7 @@ import subprocess
 import sys
 import time
 from pathlib import Path
+from uuid import UUID
 
 import pytest
 
@@ -19,8 +20,8 @@ from meiva.tests.fixtures.pin_agent import exec_context
 
 def test_child_sigterm_writes_timed_out_envelope(tmp_path: Path) -> None:
     exec_dir = tmp_path / "exec"
-    request_path = make_request_path(exec_dir, agent_id=AGENT_ID)
-    result_path = make_result_path(exec_dir, agent_id=AGENT_ID)
+    request_path = make_request_path(exec_dir, agent_id=AGENT_ID, request_id=UUID(int=1))
+    result_path = make_result_path(exec_dir, agent_id=AGENT_ID, result_id=UUID(int=2))
     write_request(
         request_path,
         code="import time\nprint('before sleep', flush=True)\ntime.sleep(60)",
@@ -58,8 +59,8 @@ def test_child_sigterm_writes_timed_out_envelope(tmp_path: Path) -> None:
 
 def test_child_turns_a_sigterm_during_boot_into_a_crash_envelope(tmp_path: Path) -> None:
     exec_dir = tmp_path / "exec"
-    request_path = make_request_path(exec_dir, agent_id=AGENT_ID)
-    result_path = make_result_path(exec_dir, agent_id=AGENT_ID)
+    request_path = make_request_path(exec_dir, agent_id=AGENT_ID, request_id=UUID(int=1))
+    result_path = make_result_path(exec_dir, agent_id=AGENT_ID, result_id=UUID(int=2))
     os.mkfifo(request_path)
     # meiva:note
     # The request file is a pipe nobody writes to, so the child blocks reading its request.

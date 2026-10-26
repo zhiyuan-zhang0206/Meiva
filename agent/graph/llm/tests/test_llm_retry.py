@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import random
 from dataclasses import replace
 from typing import Any
 
@@ -13,6 +14,7 @@ from langchain_core.runnables import RunnableConfig
 
 from agent.graph.hooks.compact import CompactionFailedError
 from agent.graph.llm import node
+from agent.graph.llm._backoff import WAIT_JITTER_SPAN_S
 from agent.graph.llm._retry import record_remaining, retry_policy, retry_wait
 from agent.graph.llm.tests.llm_support import ScriptedModel, end_turn_chunk, llm_runtime
 from agent.graph.llm_errors import (
@@ -32,6 +34,14 @@ from base.lm.catalog import ModelCatalog
 from base.lm.registry import ModelSpec, ModelTuning
 from base.log.tests.log_records import LogRecords
 from base.packages.plugin_providers import build_model_catalog
+
+
+# meiva:note
+# A fresh seeded generator for each use, so no test sees another's draws; a seed names the draw a
+# test expects.
+def _seeded(seed: int) -> random.Random:
+    return random.Random(seed)  # noqa: S311
+
 
 _MODEL = "deepseek-flash"
 # meiva:note
@@ -172,13 +182,14 @@ async def _node_run(
     model_catalog: ModelCatalog,
     database_gate: ProcessDbGate,
     thread: str = "1000",
+    seed: int = 0,
     **pins: Any,
 ) -> Any:
     runtime = llm_runtime(
         model, model_catalog=model_catalog, database_gate=database_gate, pins={**_QUICK, **pins}
     )
     config: RunnableConfig = {"configurable": {"thread_id": thread}}
-    return await node.llm_node(_STATE, runtime, config, ledger=LlmLedger())
+    return await node.llm_node(_STATE, runtime, config, ledger=LlmLedger(), rng=_seeded(seed))
 
 
 async def test_the_node_retries_a_transient_failure_and_returns_the_next_success(
@@ -192,6 +203,33 @@ async def test_the_node_retries_a_transient_failure_and_returns_the_next_success
     assert model.scripts == []
     retries = loguru_records.events("llm_retry")
     assert [record["extra"]["outcome"] for record in retries] == ["succeeded"]
+
+
+# meiva:note
+# Two runs that differ only in their generator wait exactly as long as the draws differ.
+async def test_the_node_draws_its_retry_jitter_from_the_generator_it_is_given(
+    model_catalog: ModelCatalog, database_gate: ProcessDbGate, loguru_records: LogRecords
+) -> None:
+    waits: list[float] = []
+    for seed in (31, 43):
+        model = ScriptedModel(scripts=[[ModelConnectionError("a")], [end_turn_chunk("ok")]])
+        mark = len(loguru_records)
+        await _node_run(
+            model,
+            model_catalog=model_catalog,
+            database_gate=database_gate,
+            seed=seed,
+        )
+        retried = [
+            record["extra"]["wait"]
+            for record in loguru_records[mark:]
+            if record["message"].startswith("Retrying the llm node")
+        ]
+        assert len(retried) == 1
+        waits.append(retried[0])
+
+    drawn = [_seeded(seed).uniform(0, WAIT_JITTER_SPAN_S) for seed in (31, 43)]
+    assert waits[1] - waits[0] == pytest.approx(drawn[1] - drawn[0])
 
 
 async def test_the_node_does_not_retry_a_fatal_failure(

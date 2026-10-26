@@ -1,10 +1,12 @@
 import asyncio
 import os
+import random
 import sys
 from collections.abc import Awaitable
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Protocol
+from uuid import UUID
 
 from agent.execution.protocol import ResultPayload
 from base.agents.context import MeivaContext
@@ -59,10 +61,12 @@ def read_parent_facts() -> ParentFacts:
 
 # meiva:note
 # The production exec process: one disposable child per call, launched from the parent facts it
-# was constructed with.
+# was constructed with. Each call draws the identities of its request and result envelopes from
+# `rng`, which the composition root builds (a CSPRNG in production).
 @dataclass(frozen=True)
 class SubprocessExecProcess:
     parent: ParentFacts
+    rng: random.Random
 
     # meiva:note
     # Capture inner limits before the caller's shield reads its outer timeout.
@@ -89,6 +93,8 @@ class SubprocessExecProcess:
             ),
             parent=self.parent,
             exec_dir=exec_run_dir(meiva_home()),
+            request_id=UUID(int=self.rng.getrandbits(128), version=4),
+            result_id=UUID(int=self.rng.getrandbits(128), version=4),
             state=state,
             config_overlay=config_overlay,
         )

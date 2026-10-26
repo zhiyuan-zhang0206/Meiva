@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import random
 import time
 from collections.abc import AsyncIterator
 from typing import Any
@@ -37,6 +38,12 @@ from base.native_process.turn_identity import HostedTurnResources
 from meiva.tests.fixtures.pin_agent import hosted_resources as hosted_resources
 
 
+# meiva:note
+# A fresh seeded generator for each use, so no test sees another's draws.
+def _rng() -> random.Random:
+    return random.Random(0)  # noqa: S311
+
+
 async def test_llm_node_billing_error_logs_billing_vendor_and_model(
     hosted_resources: HostedTurnResources,
     loguru_records,
@@ -63,6 +70,7 @@ async def test_llm_node_billing_error_logs_billing_vendor_and_model(
             ),
             CONFIG,
             ledger=ledger,
+            rng=_rng(),
         )
 
     assert "out of credit or quota" in str(exc_info.value)
@@ -132,6 +140,7 @@ async def test_llm_node_configured_fatal_error_type_fails_fast(
             ),
             CONFIG,
             ledger=ledger,
+            rng=_rng(),
         )
     assert exc_info.value.error_class == "transient"
     assert exc_info.value.status == 429
@@ -170,6 +179,7 @@ async def test_silent_idle_guard_halts_at_cumulative_output_token_cap(
             ),
             CONFIG,
             ledger=ledger,
+            rng=_rng(),
         )
         assert isinstance(result, Command)
         assert result.goto == "after_exec"
@@ -263,6 +273,7 @@ async def test_silent_idle_streak_resets_after_normal_turn(
         ),
         CONFIG,
         ledger=ledger,
+        rng=_rng(),
     )
     assert ledger.silent_idle_output_tokens("7") == 1
 
@@ -279,6 +290,7 @@ async def test_silent_idle_streak_resets_after_normal_turn(
         ),
         CONFIG,
         ledger=ledger,
+        rng=_rng(),
     )
     assert result.update["halted"] is True  # text, no tool_call → halt
     assert ledger.silent_idle_output_tokens("7") == 0
@@ -296,6 +308,7 @@ async def test_silent_idle_streak_resets_after_normal_turn(
         ),
         CONFIG,
         ledger=ledger,
+        rng=_rng(),
     )
     assert result.update["halted"] is False
     assert ledger.silent_idle_output_tokens("7") == 1
@@ -450,6 +463,7 @@ async def test_llm_usage_event_carries_latency_ms(
         ),
         CONFIG,
         ledger=ledger,
+        rng=_rng(),
     )
 
     usage = [r for r in loguru_records if r["extra"].get("event") == "llm_usage"]  # pyright: ignore[reportUnknownMemberType]

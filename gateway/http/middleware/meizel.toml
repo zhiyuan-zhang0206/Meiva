@@ -4,13 +4,10 @@ exports = ["cors.py", "error_envelope.py", "error_handlers.py", "latency.py", "r
 "error_envelope.py" = ["correlation.py"]
 "error_handlers.py" = ["error_envelope.py"]
 "runtime_metrics.py" = ["loop_lag.py"]
-"tests" = ["correlation.py", "error_handlers.py", "loop_lag.py", "runtime_metrics.py"]
+"tests" = ["correlation.py", "error_envelope.py", "error_handlers.py", "loop_lag.py", "runtime_metrics.py"]
 
 [purity]
 "__init__.py" = "strict"
 "correlation.py" = "strict"
 "loop_lag.py" = "strict"
 "stopping.py" = "strict"
-
-[roots]
-"error_envelope.py" = { kinds = ["random"], why = "request_trace_middleware mints a fresh request trace id when no OTel span is active" }

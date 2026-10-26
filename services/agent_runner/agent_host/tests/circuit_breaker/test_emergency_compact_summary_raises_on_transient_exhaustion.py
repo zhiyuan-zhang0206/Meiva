@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import random
 from typing import Any, cast
 from unittest.mock import MagicMock
 
@@ -40,6 +41,12 @@ from services.agent_runner.agent_host.tests.circuit_breaker.helpers import (
 )
 
 
+# meiva:note
+# A fresh seeded generator for each use, so no test sees another's draws.
+def _rng() -> random.Random:
+    return random.Random(0)  # noqa: S311
+
+
 async def test_llm_node_closes_circuit_on_success(
     hosted_resources: HostedTurnResources, *, database_gate: ProcessDbGate
 ) -> None:
@@ -67,6 +74,7 @@ async def test_llm_node_closes_circuit_on_success(
         ),
         _LLM_CONFIG,
         ledger=LlmLedger(),
+        rng=_rng(),
     )
 
     assert cmd.update["circuit"].open is False  # pyright: ignore[reportOptionalSubscript, reportUnknownMemberType]
@@ -108,6 +116,7 @@ async def test_llm_node_cancel_does_not_close_circuit(
         ),
         _LLM_CONFIG,
         ledger=LlmLedger(),
+        rng=_rng(),
     )
     await trigger
 

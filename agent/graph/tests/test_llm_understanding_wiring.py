@@ -4,6 +4,7 @@
 # pyright: reportUnknownVariableType = warning
 """The llm node carries the understanding cut on whichever command ends the turn."""
 
+import random
 from collections.abc import AsyncIterator
 from unittest.mock import MagicMock
 
@@ -29,6 +30,12 @@ from base.host.env.agent_slices import AgentSlices
 from base.native_process.turn_identity import HostedTurnResources
 from base.packages.plugin_providers import build_model_catalog
 from meiva.tests.fixtures.pin_agent import hosted_resources as hosted_resources
+
+
+# meiva:note
+# A fresh seeded generator for each use, so no test sees another's draws.
+def _rng() -> random.Random:
+    return random.Random(0)  # noqa: S311
 
 
 async def _aiter(chunks: list[AIMessageChunk]) -> AsyncIterator[AIMessageChunk]:
@@ -132,6 +139,7 @@ async def test_cut_rides_the_tool_and_the_idle_command(
         _runtime(_turn(2500, tool=tool), database_gate, aops_pool, agent_id, hosted_resources),
         {"configurable": {"thread_id": str(agent_id)}},
         ledger=LlmLedger(),
+        rng=_rng(),
     )
     assert isinstance(result, Command)
     assert result.update["compact"].understanding_cut_index == 2  # type: ignore[index]
@@ -155,6 +163,7 @@ async def test_turn_under_the_threshold_leaves_the_state_alone(
         _runtime(_turn(10, tool=True), database_gate, aops_pool, agent_id, hosted_resources),
         {"configurable": {"thread_id": str(agent_id)}},
         ledger=LlmLedger(),
+        rng=_rng(),
     )
     assert "compact" not in result.update  # type: ignore[operator]
     assert await _jobs(aops_pool) == []

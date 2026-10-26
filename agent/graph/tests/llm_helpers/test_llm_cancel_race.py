@@ -1,6 +1,7 @@
 """The LLM node discards a partial turn when the cancel event wins its race with the stream."""
 
 import asyncio
+import random
 from collections.abc import AsyncIterator
 from typing import Any
 from unittest.mock import MagicMock
@@ -23,6 +24,12 @@ from base.events.live.tests.live_capture import LiveEvents
 from base.native_process.stop_timing import RESTART_INTERRUPT_GRACE_S
 from base.native_process.turn_identity import HostedTurnResources
 from meiva.tests.fixtures.pin_agent import hosted_resources as hosted_resources
+
+
+# meiva:note
+# A fresh seeded generator for each use, so no test sees another's draws.
+def _rng() -> random.Random:
+    return random.Random(0)  # noqa: S311
 
 
 def _config(agent_id: int) -> RunnableConfig:
@@ -78,7 +85,7 @@ async def test_llm_node_cancel_event_race_discards_partial(
         database_gate=database_gate,
         ops_pool=aops_pool,
     )
-    result = await llm_node(state, runtime, _config(agent_id), ledger=LlmLedger())
+    result = await llm_node(state, runtime, _config(agent_id), ledger=LlmLedger(), rng=_rng())
     await trigger
 
     assert isinstance(result, Command)
@@ -121,7 +128,7 @@ async def test_llm_node_restart_interrupt_discards_partial_and_marks_the_turn_un
         database_gate=database_gate,
         ops_pool=aops_pool,
     )
-    result = await llm_node(state, runtime, _config(agent_id), ledger=LlmLedger())
+    result = await llm_node(state, runtime, _config(agent_id), ledger=LlmLedger(), rng=_rng())
     await trigger
 
     assert isinstance(result, Command)
@@ -183,7 +190,7 @@ async def test_llm_node_cancel_event_race_discards_partial_tool_call(
         database_gate=database_gate,
         ops_pool=aops_pool,
     )
-    result = await llm_node(state, runtime, _config(agent_id), ledger=LlmLedger())
+    result = await llm_node(state, runtime, _config(agent_id), ledger=LlmLedger(), rng=_rng())
     await trigger
 
     assert isinstance(result, Command)
@@ -226,7 +233,7 @@ async def test_llm_node_cancel_event_race_no_partial_returns_halted(
         database_gate=database_gate,
         ops_pool=aops_pool,
     )
-    result = await llm_node(state, runtime, _config(agent_id), ledger=LlmLedger())
+    result = await llm_node(state, runtime, _config(agent_id), ledger=LlmLedger(), rng=_rng())
     assert _has_cancelled(await live_events.typed(), agent_id)
 
     assert isinstance(result, Command)
@@ -261,7 +268,7 @@ async def test_llm_node_cancel_event_race_normal_completion(
     state = AgentState(messages=[HumanMessage(content="go")], halted=False)
 
     runtime = make_runtime(resources=hosted_resources, llm=fake_llm, database_gate=database_gate)
-    result = await llm_node(state, runtime, _config(7), ledger=LlmLedger())
+    result = await llm_node(state, runtime, _config(7), ledger=LlmLedger(), rng=_rng())
 
     assert isinstance(result, Command)
     assert result.update is not None

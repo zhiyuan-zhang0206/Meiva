@@ -8,6 +8,7 @@ from collections.abc import Awaitable, Callable
 from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Any
+from uuid import UUID
 
 from agent.execution.protocol import ResultPayload, read_request, write_result
 from agent.graph.exec._remote import exec_host_socket
@@ -93,6 +94,8 @@ async def test_run_in_subprocess_routes_through_exec_host_socket_and_streams_out
             exec_dir=exec_dir,
             config_overlay={"model": "test"},
             birth_config={"seed": 1},
+            request_id=UUID(int=1),
+            result_id=UUID(int=2),
         )
 
     assert isinstance(result, ExecDone)
@@ -180,6 +183,8 @@ async def test_run_in_subprocess_forwards_cancel_over_exec_host_socket(tmp_path:
             accumulation_max_chars=1_000_000,
             parent=real_parent(),
             exec_dir=exec_dir,
+            request_id=UUID(int=1),
+            result_id=UUID(int=2),
         )
 
     assert isinstance(result, ExecCancelled)
@@ -220,6 +225,8 @@ async def test_run_in_subprocess_maps_exec_host_timeout_to_exec_timed_out(
             accumulation_max_chars=1_000_000,
             parent=real_parent(),
             exec_dir=exec_dir,
+            request_id=UUID(int=1),
+            result_id=UUID(int=2),
         )
 
     assert isinstance(result, ExecTimedOut)
@@ -258,6 +265,8 @@ async def test_run_in_subprocess_maps_exec_host_spawn_failure_to_exec_crashed(
             accumulation_max_chars=1_000_000,
             parent=real_parent(),
             exec_dir=exec_dir,
+            request_id=UUID(int=1),
+            result_id=UUID(int=2),
         )
 
     assert isinstance(result, ExecCrashed)
@@ -279,6 +288,8 @@ async def test_run_in_subprocess_falls_back_to_local_child_when_exec_host_socket
         accumulation_max_chars=1_000_000,
         parent=real_parent(),
         exec_dir=exec_dir,
+        request_id=UUID(int=1),
+        result_id=UUID(int=2),
     )
 
     assert isinstance(result, ExecDone)

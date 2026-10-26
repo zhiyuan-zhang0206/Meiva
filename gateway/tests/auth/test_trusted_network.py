@@ -19,9 +19,12 @@ from gateway.http.auth.request_principal import (
     TRUSTED_NETWORK_FACT,
     require_human_credential,
 )
-from gateway.http.config import gateway_config_from_boot
 from gateway.http.middleware.cors import request_host, trusted_request_hosts
-from gateway.tests.auth.gateway_config import gateway_test_app, gateway_test_process
+from gateway.tests.auth.gateway_config import (
+    gateway_config_of,
+    gateway_test_app,
+    gateway_test_process,
+)
 
 CLUSTER_KEY = "trusted-network-test-secret"
 ALLOWED_ORIGIN = "http://10.0.0.5:3000"
@@ -45,7 +48,7 @@ def served(
 ) -> Generator[TestClient]:
     with gateway_test_process(machine=machine) as process:
         config = replace(
-            gateway_config_from_boot(process.config),
+            gateway_config_of(process.config),
             cluster_secret=CLUSTER_KEY,
             allowed_origins=(ALLOWED_ORIGIN,),
             trusted_hosts=HOSTS,

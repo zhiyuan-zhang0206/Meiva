@@ -1,5 +1,7 @@
 import json
 import os
+import random
+import re
 import time
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
@@ -8,7 +10,7 @@ from typing import Any
 
 import pytest
 
-from agent.impersonation import establish_relay
+from agent.impersonation import draw_relay_token, establish_relay
 from agent.takeover.process import spawn_relay
 from agent.takeover.relay import (
     CREDENTIAL_RENEWED_REASON,
@@ -30,6 +32,13 @@ CREDENTIAL = "private-test-credential"
 SLOW = RelayWait(timeout_s=20.0, poll_s=0.05)
 
 
+# meiva:note
+# A fresh seeded generator for each use, so no test sees another's draws; a seed names the draw a
+# test expects.
+def _seeded(seed: int) -> random.Random:
+    return random.Random(seed)  # noqa: S311
+
+
 def _wait_for(path: Path, *, complete: bytes = b"") -> bytes:
     deadline = time.monotonic() + 15
     while time.monotonic() < deadline:
@@ -48,6 +57,7 @@ def _establish(
     tmp_path: Path,
     mode: str,
     wait: RelayWait = SLOW,
+    seed: int = 0,
 ) -> bool:
     return establish_relay(
         cluster.database,
@@ -55,7 +65,7 @@ def _establish(
         session,
         owner,
         relays,
-        host=stub_host(cluster, tmp_path, mode, wait=wait),
+        host=stub_host(cluster, tmp_path, mode, wait=wait, rng=_seeded(seed)),
     )
 
 
@@ -150,7 +160,14 @@ def test_a_codex_relay_is_provisioned_spawned_and_awaited_until_its_first_heartb
     marker = tmp_path / "relay"
     with ThreadPoolExecutor(max_workers=1) as pool:
         ready = pool.submit(
-            _establish, cluster, session, owner, relays, tmp_path=tmp_path, mode="serve"
+            _establish,
+            cluster,
+            session,
+            owner,
+            relays,
+            tmp_path=tmp_path,
+            mode="serve",
+            seed=11,
         )
         try:
             token = _wait_for(marker / "token", complete=b"\n").decode().strip()
@@ -163,6 +180,8 @@ def test_a_codex_relay_is_provisioned_spawned_and_awaited_until_its_first_heartb
                 terminate_relay(child)
     child = relays.children[owner.agent_id]
     assert child.token == token
+    assert token == draw_relay_token(_seeded(11))
+    assert re.fullmatch(r"[A-Za-z0-9_-]{43}", token)
     assert child.lease_id == accepted["id"]
     assert child.generation == cluster.get(accepted["id"])["relay_generation"] == 1
     assert json.loads((marker / "argv.json").read_text()) == [

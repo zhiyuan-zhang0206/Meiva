@@ -20,6 +20,7 @@ import asyncio
 from dataclasses import replace
 from datetime import datetime
 from pathlib import Path
+from uuid import UUID
 
 from agent.graph.exec._result import StreamCap
 from agent.graph.exec._stream import StreamingTextIO
@@ -275,6 +276,8 @@ async def test_runaway_print_loop_is_truncated_and_the_run_completes(
         accumulation_max_chars=budget,
         parent=real_parent(),
         exec_dir=tmp_path / "exec",
+        request_id=UUID(int=1),
+        result_id=UUID(int=2),
     )
 
     assert isinstance(result, ExecDone), f"the run must not be killed, got {type(result).__name__}"
