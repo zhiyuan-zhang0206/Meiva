@@ -7,6 +7,7 @@ from unittest.mock import AsyncMock, MagicMock
 
 from redis.exceptions import ConnectionError as RedisConnectionError
 
+from base.events.live.tests.rng import seeded_auth_retry
 from base.log.tests.log_records import LogRecords
 
 from ..publisher import AgentEventPublisher
@@ -16,7 +17,12 @@ def _publisher(maxsize: int = 2) -> AgentEventPublisher:
     redis = MagicMock()
     redis.connection_pool.disconnect = AsyncMock()
     return AgentEventPublisher(
-        redis, "meiva:events", agent_id=42, maxsize=maxsize, publish_timeout=0.1
+        redis,
+        "meiva:events",
+        agent_id=42,
+        maxsize=maxsize,
+        publish_timeout=0.1,
+        auth_retry=seeded_auth_retry(),
     )
 
 
@@ -75,7 +81,12 @@ async def test_publish_error_detail_carries_the_class_and_message(
         redis.connection_pool.disconnect = AsyncMock()
         redis.pipeline.return_value = _BrokenPipeline()
         pub = AgentEventPublisher(
-            redis, "meiva:events", agent_id=42, maxsize=2, publish_timeout=0.1
+            redis,
+            "meiva:events",
+            agent_id=42,
+            maxsize=2,
+            publish_timeout=0.1,
+            auth_retry=seeded_auth_retry(),
         )
         await pub.start(tasks)
         pub.emit("one")
@@ -106,7 +117,14 @@ async def test_batch_command_failure_detail_carries_the_class_and_message(
 
     redis = MagicMock()
     redis.pipeline.return_value = _Pipeline()
-    pub = AgentEventPublisher(redis, "meiva:events", agent_id=42, maxsize=2, publish_timeout=0.1)
+    pub = AgentEventPublisher(
+        redis,
+        "meiva:events",
+        agent_id=42,
+        maxsize=2,
+        publish_timeout=0.1,
+        auth_retry=seeded_auth_retry(),
+    )
     await pub._publish_batch(["one"])
 
     assert len(_reports(loguru_records)) == 1

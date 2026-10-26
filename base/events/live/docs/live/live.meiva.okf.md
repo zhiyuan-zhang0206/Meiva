@@ -124,3 +124,14 @@ these separate owners. The event adapter converts existing wire strings to
 members and rejects unknown values; role discriminators and JSON spellings
 remain unchanged. These statuses describe a live run, not persisted agent
 lifecycle state.
+
+## ACL-transition retry and the bus
+
+Redis accepts connections before the cluster ACL user is re-affirmed after a restart, so every
+client and publish of an `EventBus` retries `AuthenticationError` / `NoPermissionError` with bounded
+exponential delays (`AuthRetry`, `base/events/live/redis_resilience.py`). Each delay sits between
+half the exponential cap and the cap: the retry draws one uniform sample per attempt from the
+`random.Random` the process root hands the bus (`EventBus(config, rng=...)`), so a restarted
+fleet does not strike Redis in lockstep. `compute_auth_retry_delay` is the pure decision; the
+loops in `redis_client` only draw, ask it, and wait. The gateway streams and the host dispatcher
+take `bus.auth_retry` from the bus they already hold.
