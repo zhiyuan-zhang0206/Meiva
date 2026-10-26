@@ -21,6 +21,7 @@ import psycopg
 import pytest
 from psycopg_pool import ConnectionPool
 
+from base.clock.tests.fakes import system_clock
 from base.cluster.machine import GatewayAccess, GatewayApiTokenMissing, gateway_auth_headers
 from base.config import ConfigBoot
 from base.daemon.health import Liveness, start_health_server
@@ -36,7 +37,7 @@ from services.entrypoints.im_bridge.adapters.run_plan import (
 )
 from services.entrypoints.im_bridge.adapters.telegram import TelegramAdapter
 from services.entrypoints.im_bridge.adapters.weixin import WeixinAdapter
-from services.entrypoints.im_bridge.tests.slices import im_bridge_config
+from services.entrypoints.im_bridge.tests.slices import im_bridge_config, system_rng
 from services.entrypoints.im_bridge.tests.support import DurableAdapter, owned_tasks
 from services.entrypoints.im_bridge.tests.test_im_bridge_core import (
     CoreFactory,
@@ -106,6 +107,8 @@ def _run(
             database=lambda: database,
             image=LoadedCommit(Path(), None),
             timings=_TIMINGS,
+            clock=system_clock(),
+            rng=system_rng(),
             **overrides,
         )
     )
@@ -269,7 +272,9 @@ def test_load_adapters_builds_only_the_enabled_ones(
     process_config: ConfigBoot, make_core: CoreFactory, state_dir: Path
 ) -> None:
     core = make_core(FakeGateway())
-    inputs = daemon.adapter_inputs(process_config, state_dir=state_dir)
+    inputs = daemon.adapter_inputs(
+        process_config, state_dir=state_dir, clock=system_clock(), rng=system_rng()
+    )
     loaded = daemon.load_adapters(core, plan_adapters(frozenset({"weixin", "feishu"})), inputs)
     assert [type(adapter) for adapter in loaded] == [TelegramAdapter]
     assert core.adapters["telegram"] is loaded[0]
@@ -280,7 +285,13 @@ def test_load_adapters_hands_each_adapter_its_slice(
 ) -> None:
     core = make_core(FakeGateway())
     inputs = dataclasses.replace(
-        daemon.adapter_inputs(process_config, state_dir=state_dir), proxy_configured=True
+        daemon.adapter_inputs(
+            process_config,
+            state_dir=state_dir,
+            clock=system_clock(),
+            rng=system_rng(),
+        ),
+        proxy_configured=True,
     )
     telegram, weixin, feishu = daemon.load_adapters(core, plan_adapters(frozenset()), inputs)
     assert isinstance(telegram, TelegramAdapter) and telegram._config == inputs.telegram
@@ -297,7 +308,9 @@ def test_invalid_adapter_configuration_is_not_skipped(
         json.dumps({"account_id": "a", "bot_token": "t", "base_url": "http://plain.example"})
     )
     core = make_core(FakeGateway())
-    inputs = daemon.adapter_inputs(process_config, state_dir=state_dir)
+    inputs = daemon.adapter_inputs(
+        process_config, state_dir=state_dir, clock=system_clock(), rng=system_rng()
+    )
     with pytest.raises(ValueError, match="qualified HTTPS namespace"):
         daemon.load_adapters(core, plan_adapters(frozenset({"telegram", "feishu"})), inputs)
 
@@ -329,7 +342,10 @@ def test_the_gateway_client_gets_the_gateway_url_and_bearer_from_the_root() -> N
         gateway_home=False,
     )
     client = daemon.gateway_client(
-        im_bridge_config(), gateway_url="http://gateway.example:8000/", access=access
+        im_bridge_config(),
+        gateway_url="http://gateway.example:8000/",
+        access=access,
+        rng=system_rng(),
     )
     assert client._base == "http://gateway.example:8000"
     assert client._headers() == gateway_auth_headers(access)

@@ -181,6 +181,8 @@ def _snapshot_tool(
     args: dict[str, Any],
     agent_id: int,
     ocr_cache: dict[str, Any] | None,
+    *,
+    stamp: str,
 ) -> dict[str, Any]:
     if "region" in args and "target" in args:
         raise ComputerUseError("snapshot accepts region or target, not both")
@@ -189,12 +191,14 @@ def _snapshot_tool(
             raise ComputerUseError("include_ax is available only for a whole-screen snapshot")
         if "region" in args:
             region = CaptureRegion.parse(args["region"])
-            path, scale, (pw, ph) = capture_region(helper, agent_id, region)
+            path, scale, (pw, ph) = capture_region(
+                helper, region, path=snapshot_path(agent_id, stamp=stamp)
+            )
             frame = CaptureFrame(CoordinateSpace.REGION_PIXELS, region.x, region.y, scale, pw, ph)
             source = "region"
         else:
             target = WindowTarget.parse(args["target"])
-            path = snapshot_path(agent_id)
+            path = snapshot_path(agent_id, stamp=stamp)
             captured = helper.screencapture_window(target.pid, target.window_id, str(path))
             pw, ph = png_size(path)
             if (pw, ph) != (captured["width"], captured["height"]):
@@ -216,7 +220,7 @@ def _snapshot_tool(
             "pixels": {"width": pw, "height": ph},
         }
     else:
-        path, size, scale, (pw, ph) = capture_screen(helper, agent_id)
+        path, size, scale, (pw, ph) = capture_screen(helper, agent_id, stamp=stamp)
         result = {
             "path": str(path),
             "source": "screen",
@@ -392,6 +396,14 @@ _ARGS_ONLY_TOOLS: dict[str, Callable[[DesktopHelper, dict[str, Any]], dict[str, 
 }
 
 
+# meiva:note
+# Run one tool against the permissions helper. Raises on failure.
+#
+# `stamp` names any screen capture the tool writes (see `snapshot_stamp`). `pointer` is retained for
+# callers of the existing internal interface; scroll reads the live native cursor without explicit
+# x/y. `scale` is the last measured physical->logical scale, falling back to the helper report.
+# `ocr_cache` carries the last OCR text boxes (snapshot include_ocr / find_text / click_text),
+# reused by find_text(snapshot_fresh=false).
 def _execute(
     helper: DesktopHelper,
     tool: str,
@@ -400,26 +412,21 @@ def _execute(
     pointer: tuple[float, float] | None = None,
     scale: float | None = None,
     ocr_cache: dict[str, Any] | None = None,
+    *,
+    stamp: str,
 ) -> dict[str, Any]:
-    """Run one tool against the permissions helper. Raises on failure.
-
-    `pointer` is retained for callers of the existing internal interface;
-    scroll reads the live native cursor without explicit x/y. `scale` is the
-    last measured physical->logical scale, falling back to the helper report.
-    `ocr_cache` carries the last OCR text boxes (snapshot include_ocr /
-    find_text / click_text), reused by find_text(snapshot_fresh=false)."""
     del pointer  # Retain the internal call signature; cursor reads are now live.
     _require(tool, args)
     if tool == "snapshot":
-        return _snapshot_tool(helper, args, agent_id, ocr_cache)
+        return _snapshot_tool(helper, args, agent_id, ocr_cache, stamp=stamp)
     if tool == "find_text":
-        return find_text_tool(helper, args, agent_id, ocr_cache)
+        return find_text_tool(helper, args, agent_id, ocr_cache, stamp=stamp)
     if tool in _SCALED_TOOLS:
         return _SCALED_TOOLS[tool](helper, args, scale)
     if tool in _ARGS_ONLY_TOOLS:
         return _ARGS_ONLY_TOOLS[tool](helper, args)
     if tool == "click_text":
-        return click_text_tool(helper, args, agent_id, ocr_cache)
+        return click_text_tool(helper, args, agent_id, ocr_cache, stamp=stamp)
     if tool == "type_text":
         return {"typed": helper.type_text(str(args["text"]))["typed"]}
     if tool == "cursor_position":
@@ -438,9 +445,6 @@ def _execute(
     raise ComputerUseError(f"unknown tool {tool!r}")
 
 
-_AX_TOOLS = {"ax_tree": ax_tools.ax_tree_tool, "ax_act": ax_act.ax_act_tool}
-
-
 def execute_tool(
     helper: DesktopHelper,
     tool: str,
@@ -449,12 +453,25 @@ def execute_tool(
     pointer: tuple[float, float] | None = None,
     scale: float | None = None,
     ocr_cache: dict[str, Any] | None = None,
-    ax_session: AxSession | None = None,
+    *,
+    ax_session: AxSession,
+    stamp: str,
 ) -> dict[str, Any]:
     """The daemon's entry: the accessibility tools, else `_execute`."""
-    if tool in _AX_TOOLS:
-        return _AX_TOOLS[tool](helper, args, agent_id, scale, ax_session or AxSession())
-    return _execute(helper, tool, args, agent_id, pointer=pointer, scale=scale, ocr_cache=ocr_cache)
+    if tool == "ax_tree":
+        return ax_tools.ax_tree_tool(helper, args, agent_id, scale, ax_session, stamp)
+    if tool == "ax_act":
+        return ax_act.ax_act_tool(helper, args, agent_id, scale, ax_session)
+    return _execute(
+        helper,
+        tool,
+        args,
+        agent_id,
+        pointer=pointer,
+        scale=scale,
+        ocr_cache=ocr_cache,
+        stamp=stamp,
+    )
 
 
 # MCP tool declarations (list_tools shape: name / description / input_schema).

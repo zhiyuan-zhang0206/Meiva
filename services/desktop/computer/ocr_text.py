@@ -80,6 +80,8 @@ def find_text_tool(
     args: dict[str, Any],
     agent_id: int,
     ocr_cache: dict[str, Any] | None,
+    *,
+    stamp: str,
 ) -> dict[str, Any]:
     """find_text: OCR the screen and return the boxes matching ``text``.
 
@@ -97,7 +99,7 @@ def find_text_tool(
         items: list[dict[str, Any]] = cached_items  # the screen the caller last saw
         fresh = False
     else:
-        path, _size, _scale, _pixels = capture_screen(helper, agent_id)
+        path, _size, _scale, _pixels = capture_screen(helper, agent_id, stamp=stamp)
         items = _ocr_screen(path, ocr_cache)
         fresh = True
     matches = match_ocr_boxes(items, query, mode)
@@ -115,6 +117,8 @@ def click_text_tool(
     args: dict[str, Any],
     agent_id: int,
     ocr_cache: dict[str, Any] | None,
+    *,
+    stamp: str,
 ) -> dict[str, Any]:
     """click_text: OCR -> locate -> click, one audited action.
 
@@ -130,7 +134,7 @@ def click_text_tool(
     validate_text_query(query, mode)
     if index < 0:
         raise ComputerUseError("index must be >= 0")
-    path, _size, scale, _pixels = capture_screen(helper, agent_id)
+    path, _size, scale, _pixels = capture_screen(helper, agent_id, stamp=stamp)
     matches = match_ocr_boxes(_ocr_screen(path, ocr_cache), query, mode)
     if not matches:
         raise ComputerUseError(f"no on-screen text matching {query!r} (match={mode})")

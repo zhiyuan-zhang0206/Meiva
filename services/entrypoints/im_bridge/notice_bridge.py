@@ -5,7 +5,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
-import time
+import random
 from contextlib import suppress
 from pathlib import Path
 from typing import Any, Protocol
@@ -15,7 +15,7 @@ from psycopg_pool import ConnectionPool, PoolTimeout
 
 from base.api_contracts.idempotency import keyed_headers
 from base.api_contracts.notice_question import parse_question, question_instructions
-from base.clock import SYSTEM_TIMERS, Clock, ClockConfig, Timers
+from base.clock import Clock
 from base.db.transaction import write_transaction
 from base.events.notifications.catalog import core_catalog
 from base.events.notifications.policy import enabled_for
@@ -35,6 +35,7 @@ from services.entrypoints.im_bridge.types import (
     IMAdapter,
     NoticeBridgeOwner,
     SendNotStartedError,
+    new_uuid,
 )
 
 _log = logging.getLogger("services.entrypoints.im_bridge.notice_bridge")
@@ -119,16 +120,15 @@ class NoticeBridge(NoticeBridgeOwner):
         *,
         db_pool: ConnectionPool | None = None,
         state_dir: Path,
-        timers: Timers = SYSTEM_TIMERS,
+        clock: Clock,
+        rng: random.Random,
     ) -> None:
         self._config = config
         self.core: Any = core
         self.db_pool: ConnectionPool | None = db_pool
         self._state_dir = state_dir
-        self._clock = Clock(
-            ClockConfig("UTC", "UTC", message_timestamp_weekday=False), timers=timers
-        )
-        self._op_seq = 0
+        self._clock = clock
+        self._rng = rng
         self.poll_store = NoticePollStore(self.core.outbound_store)
         self._reply_modes: dict[str, dict[str, Any]] = {}  # chat_id -> mode
         self._filters: dict[str, Any] = {"min_priority": None, "agent": None}
@@ -136,10 +136,6 @@ class NoticeBridge(NoticeBridgeOwner):
 
     def _now(self) -> float:
         return self._clock.now().timestamp()
-
-    def _next_key(self) -> str:
-        self._op_seq += 1
-        return f"notice-{self._op_seq}-{time.perf_counter_ns():x}"
 
     # -- persistence -------------------------------------------------------
 
@@ -164,7 +160,7 @@ class NoticeBridge(NoticeBridgeOwner):
 
     def _keyed_headers(self) -> dict[str, str]:
         """Auth headers plus one fresh principal-v1 operation key for a resolve call."""
-        return {**self.core.gateway._headers(), **keyed_headers(self._next_key())}
+        return {**self.core.gateway._headers(), **keyed_headers(str(new_uuid(self._rng)))}
 
     async def _post(self, path: str, body: dict[str, Any]) -> None:
         g = self.core.gateway
@@ -350,7 +346,7 @@ class NoticeBridge(NoticeBridgeOwner):
     def _warn_push_held(self, n: dict[str, Any]) -> None:
         """Log that the cursor is held on notice ``n`` — throttled, because
         an absent telegram adapter would otherwise log every poll round."""
-        now = time.monotonic()
+        now = self._clock.monotonic()
         if now - self._push_held_warned_at < 300:
             return
         self._push_held_warned_at = now

@@ -11,6 +11,7 @@ from typing import Any, cast
 import jsonschema
 import pytest
 
+from base.clock.tests.fakes import system_clock
 from base.db import Database
 from base.host.permissions_helper.client import PermissionsHelperClient
 
@@ -38,6 +39,7 @@ class Desktop:
             database,
             sock="/unused",
             helper=helper,
+            clock=system_clock(),
         )
         self.daemon._scale = 2
 

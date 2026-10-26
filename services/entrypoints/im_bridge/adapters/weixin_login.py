@@ -9,12 +9,13 @@ from __future__ import annotations
 import argparse
 import asyncio
 from dataclasses import dataclass
+from datetime import datetime
 from pathlib import Path
 from typing import Any
 
 import httpx
 
-from base.clock import SYSTEM_TIMERS, Timers
+from base.clock import SYSTEM_TIMERS, Clock, ClockConfig
 from base.log import logger
 from base.paths import meiva_home
 from services.entrypoints.im_bridge.adapters.weixin import (
@@ -77,7 +78,9 @@ async def _refresh_qr(
     return qrcode_value, qrcode_url
 
 
-def _confirmed_credentials(status: dict[str, Any], state_dir: Path) -> dict[str, Any] | None:
+def _confirmed_credentials(
+    status: dict[str, Any], state_dir: Path, *, saved_at: datetime
+) -> dict[str, Any] | None:
     """Validate a "confirmed" status payload; persist and return credentials."""
     account_id = get_str(status, "ilink_bot_id")
     bot_token = get_str(status, "bot_token")
@@ -92,6 +95,7 @@ def _confirmed_credentials(status: dict[str, Any], state_dir: Path) -> dict[str,
         bot_token=bot_token,
         user_id=user_id,
         base_url=bot_base_url,
+        saved_at=saved_at,
     )
     logger.info("WeChat connected, account_id={}", account_id)
     return {
@@ -140,7 +144,7 @@ async def qr_login(
     state_dir: Path,
     timeout_seconds: int = 480,
     client: httpx.AsyncClient | None = None,
-    timers: Timers = SYSTEM_TIMERS,
+    clock: Clock,
 ) -> dict[str, Any] | None:
     """Run the interactive iLink QR login; persist credentials on success."""
     owns_client = client is None
@@ -155,14 +159,14 @@ async def qr_login(
             return None
         _show_qr(qrcode_value, qrcode_url)
         session = _QrSession(base_url=ILINK_BASE_URL, qrcode_value=qrcode_value)
-        deadline = timers.monotonic() + timeout_seconds
+        deadline = clock.monotonic() + timeout_seconds
         last_state = ""
-        while timers.monotonic() < deadline:
+        while clock.monotonic() < deadline:
             status = await _qr_get(
                 client, session.base_url, EP_GET_QR_STATUS, f"qrcode={session.qrcode_value}"
             )
             if status is None:
-                await timers.asleep(1)
+                await clock.asleep(1)
                 continue
             state = str(status.get("status") or "wait")
             if state != last_state:
@@ -170,8 +174,8 @@ async def qr_login(
                     return None
                 last_state = state
             if state == "confirmed":
-                return _confirmed_credentials(status, state_dir)
-            await timers.asleep(1)
+                return _confirmed_credentials(status, state_dir, saved_at=clock.now())
+            await clock.asleep(1)
         logger.warning("WeChat login timed out.")
         return None
     finally:
@@ -192,7 +196,10 @@ def main(argv: list[str] | None = None) -> int:
     )
     args = parser.parse_args(argv)
     if args.login:
-        creds = asyncio.run(qr_login(state_dir=state_dir_of(meiva_home())))
+        clock = Clock(
+            ClockConfig("UTC", "UTC", message_timestamp_weekday=False), timers=SYSTEM_TIMERS
+        )
+        creds = asyncio.run(qr_login(state_dir=state_dir_of(meiva_home()), clock=clock))
         return 0 if creds else 1
     parser.print_help()
     return 1

@@ -11,6 +11,7 @@ from typing import Any, cast
 import jsonschema
 import pytest
 
+from base.clock.tests.fakes import system_clock
 from base.db import Database
 from base.host.permissions_helper.client import PermissionsHelperClient
 
@@ -64,6 +65,7 @@ def desktop(database: Database) -> Iterator[Desktop]:
             database,
             sock="/unused.sock",
             helper=PermissionsHelperClient(path),
+            clock=system_clock(),
         )
         with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as listener:
             listener.bind(str(path))

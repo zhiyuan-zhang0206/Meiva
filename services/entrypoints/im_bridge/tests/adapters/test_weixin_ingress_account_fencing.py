@@ -5,6 +5,7 @@ import asyncio
 import psycopg
 import pytest
 
+from base.clock.tests.fakes import system_clock
 from services.entrypoints.im_bridge.adapters.weixin import WeixinAdapter, save_account
 from services.entrypoints.im_bridge.outbound.claim_fence import StalePollBindingError
 from services.entrypoints.im_bridge.tests.adapters.test_weixin_ingress_recovery import (
@@ -14,6 +15,7 @@ from services.entrypoints.im_bridge.tests.adapters.weixin_native import (
     NativeWeixin,
     message,
 )
+from services.entrypoints.im_bridge.tests.slices import system_rng
 from services.entrypoints.im_bridge.tests.support import held_table_lock
 
 
@@ -28,8 +30,15 @@ async def test_registration_before_new_poll_rejects_old_runtime_without_effects(
         bot_token="isolated-test-token",  # noqa: S106
         user_id="owner",
         base_url="https://provider.example",
+        saved_at=system_clock().now(),
     )
-    new = WeixinAdapter(native_weixin.core, state_dir=native_weixin.state_dir, client=old._http)
+    new = WeixinAdapter(
+        native_weixin.core,
+        state_dir=native_weixin.state_dir,
+        client=old._http,
+        clock=system_clock(),
+        rng=system_rng(),
+    )
     native_weixin.core.register(new)
     assert new.selection_requires_account_proof is True
     for text, source in (("ordinary", "701"), (f"/switch {native_weixin.agent_id}", "702")):
@@ -138,7 +147,7 @@ async def test_epoch_replacement_between_preflight_and_effect_is_rejected_in_sql
         )
         await asyncio.to_thread(held.wait_for_waiters, 1)
         await asyncio.to_thread(
-            WeixinIngressStore(native_weixin.pool).initialize,
+            WeixinIngressStore(native_weixin.pool, rng=system_rng()).initialize,
             "https://provider.example",
             "replacement",
         )

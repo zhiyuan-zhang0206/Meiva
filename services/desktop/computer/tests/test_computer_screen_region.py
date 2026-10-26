@@ -46,7 +46,7 @@ def test_capture_preserves_origin_and_measures_retina_scale(
     helper: _Display, tmp_path: Path
 ) -> None:
     path = tmp_path / "capture.png"
-    assert screen.capture_region(helper, 7, CaptureRegion(-350, -50, 200, 100), path=path) == (
+    assert screen.capture_region(helper, CaptureRegion(-350, -50, 200, 100), path=path) == (
         path,
         2,
         (400, 200),
@@ -63,15 +63,15 @@ def test_capture_preserves_origin_and_measures_retina_scale(
         CaptureRegion(0, 495, 10, 10),
     ],
 )
-def test_outside_main_display_fails_before_capture(helper: _Display, region: CaptureRegion) -> None:
+def test_outside_main_display_fails_before_capture(
+    helper: _Display, region: CaptureRegion, tmp_path: Path
+) -> None:
     helper.png = None
     with pytest.raises(ComputerUseError, match="main display"):
-        screen.capture_region(helper, 7, region)
+        screen.capture_region(helper, region, path=tmp_path / "capture.png")
 
 
 def test_unexpected_clipping_is_an_error(helper: _Display, tmp_path: Path) -> None:
     helper.png = (400, 170)
     with pytest.raises(ComputerUseError, match="dimensions"):
-        screen.capture_region(
-            helper, 7, CaptureRegion(0, 0, 200, 100), path=tmp_path / "capture.png"
-        )
+        screen.capture_region(helper, CaptureRegion(0, 0, 200, 100), path=tmp_path / "capture.png")

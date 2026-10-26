@@ -9,12 +9,13 @@ import psycopg
 import pytest
 from psycopg_pool import ConnectionPool
 
+from base.clock.tests.fakes import system_clock
 from base.db import Database, create_agent
 from services.entrypoints.im_bridge.adapters.weixin import WeixinAdapter, save_account
 from services.entrypoints.im_bridge.core import IMBridgeCore, TypingCadence
 from services.entrypoints.im_bridge.gateway_client import GatewayClient
 from services.entrypoints.im_bridge.ingress.store import WeixinIngressStore
-from services.entrypoints.im_bridge.tests.slices import im_bridge_config
+from services.entrypoints.im_bridge.tests.slices import im_bridge_config, system_rng
 from services.entrypoints.im_bridge.tests.support import owned_tasks
 
 
@@ -52,6 +53,7 @@ async def native_weixin(
         bot_token="isolated-test-token",  # noqa: S106
         user_id="owner",
         base_url="https://provider.example",
+        saved_at=system_clock().now(),
     )
     agent_id = create_agent(db_conn)
     db_conn.execute("INSERT INTO agents_meta(id,status) VALUES (%s,'running')", (agent_id,))
@@ -90,7 +92,9 @@ async def native_weixin(
             ) as gateway_http,
             httpx.AsyncClient(transport=httpx.MockTransport(provider)) as provider_http,
         ):
-            client = GatewayClient(config, gateway_url="http://isolated-gateway", auth_headers={})
+            client = GatewayClient(
+                config, gateway_url="http://isolated-gateway", auth_headers={}, rng=system_rng()
+            )
             client._client = gateway_http
             core = IMBridgeCore(
                 config,
@@ -100,11 +104,19 @@ async def native_weixin(
                 state_dir=state_dir,
                 typing=TypingCadence(max_s=0.0),
                 subscribe_timeline=False,
+                clock=system_clock(),
+                rng=system_rng(),
             )
-            adapter = WeixinAdapter(core, state_dir=state_dir, client=provider_http)
+            adapter = WeixinAdapter(
+                core,
+                state_dir=state_dir,
+                client=provider_http,
+                clock=system_clock(),
+                rng=system_rng(),
+            )
             core.register(adapter)
 
-            store = WeixinIngressStore(pool)
+            store = WeixinIngressStore(pool, rng=system_rng())
             binding = store.initialize("https://provider.example", "bot-id")
             store.checkpoint(binding, "", "", provider_empty=True)
             state = core._get_or_create_state("weixin", "peer-1")

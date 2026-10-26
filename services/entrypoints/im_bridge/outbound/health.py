@@ -18,8 +18,9 @@ no delivered push on record reports ``PUSH_HEALTH_NEVER_SENT``.
 from __future__ import annotations
 
 import asyncio
+from datetime import datetime
 
-from base.clock import SYSTEM_TIMERS, Clock, ClockConfig
+from base.clock import Clock
 from base.log import logger
 from services.entrypoints.im_bridge.config import ImBridgeConfig
 from services.entrypoints.im_bridge.outbound.store import IMOutboxStore
@@ -31,15 +32,14 @@ from services.entrypoints.im_bridge.outbound.store import IMOutboxStore
 PUSH_HEALTH_NEVER_SENT = -1.0
 
 
-async def emit_push_health_once(store: IMOutboxStore, config: ImBridgeConfig) -> None:
-    """Read the outbox ledger once and emit one event per configured channel."""
-
+# meiva:note
+# Read the outbox ledger once and emit one event per configured channel; ages run to `now`.
+async def emit_push_health_once(
+    store: IMOutboxStore, config: ImBridgeConfig, *, now: datetime
+) -> None:
     snapshot = await asyncio.to_thread(
         store.push_health_snapshot, tuple(config.im_push_health_channels)
     )
-    now = Clock(
-        ClockConfig("UTC", "UTC", message_timestamp_weekday=False), timers=SYSTEM_TIMERS
-    ).now()
     for channel in config.im_push_health_channels:
         pending, last_ok = snapshot.get(channel, (0, None))
         if last_ok is None:
@@ -56,8 +56,8 @@ async def emit_push_health_once(store: IMOutboxStore, config: ImBridgeConfig) ->
 
 
 # meiva:note
-# Sample every configured leg each ``im_push_health_interval_seconds``.
-async def push_health_loop(store: IMOutboxStore, config: ImBridgeConfig) -> None:
+# Sample every configured leg each ``im_push_health_interval_seconds``, timed by `clock`.
+async def push_health_loop(store: IMOutboxStore, config: ImBridgeConfig, *, clock: Clock) -> None:
     while True:
-        await emit_push_health_once(store, config)
-        await asyncio.sleep(config.im_push_health_interval_seconds)
+        await emit_push_health_once(store, config, now=clock.now())
+        await clock.asleep(config.im_push_health_interval_seconds)

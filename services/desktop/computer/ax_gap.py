@@ -44,9 +44,9 @@ class GapRead:
     error: str | None
 
 
-def read_screen(helper: ScreenHelper, agent_id: int) -> GapRead:
+def read_screen(helper: ScreenHelper, agent_id: int, *, stamp: str) -> GapRead:
     """Capture the screen and OCR it; an OCR failure is reported, not raised."""
-    path, _size, scale, _pixels = capture_screen(helper, agent_id)
+    path, _size, scale, _pixels = capture_screen(helper, agent_id, stamp=stamp)
     try:
         return GapRead(ocr_mod.ocr_image(path), scale, None)
     except ocr_mod.OcrError as e:

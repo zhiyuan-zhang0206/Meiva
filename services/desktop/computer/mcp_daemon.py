@@ -57,13 +57,14 @@ import os
 import signal
 import sys
 import threading
-import time
 from collections.abc import Callable
 from contextlib import suppress
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+from base.clock import SYSTEM_TIMERS, Clock, Timers
+from base.clock.configuration import clock_config_from_boot
 from base.cluster.dataplane.direct_url import ClusterDirectUrl
 from base.cluster.machine.configured import ConfiguredMachineIdentity
 from base.config import ConfigBoot, settings
@@ -78,6 +79,7 @@ from base.sessions.helperproc import helper_client
 from base.telemetry import audit_events, build_pipeline
 from base.telemetry.process_logging import init_gateway_process
 
+from .audit_coords import audit_coords
 from .ax_ids import AxSession
 from .config import (
     ComputerUseConfig,
@@ -89,6 +91,7 @@ from .config import (
 )
 from .execute import TOOLS, DesktopHelper, execute_tool, mcp_result, priority
 from .protocol import Request, Response
+from .screen import snapshot_stamp
 from .session import ScreenSession
 from .task_sessions import TaskSessionTracker
 
@@ -105,88 +108,6 @@ def _hide_badge(helper: DesktopHelper) -> None:
         helper.indicator_stop()
     except (PermissionsHelperError, OSError) as e:
         logger.warning(f"[computer-mcp] capture indicator not stopped, its lease will expire: {e}")
-
-
-_AuditArgs = dict[str, Any]
-_AuditResult = dict[str, Any] | None
-
-
-def _coords_point(args: _AuditArgs, result: _AuditResult) -> str | None:
-    del result
-    # Audited as given, also for a call refused for a missing coordinate.
-    return f"{args['x']},{args.get('y')}" if "x" in args else None
-
-
-def _coords_drag(args: _AuditArgs, result: _AuditResult) -> str | None:
-    del result
-    return f"{args.get('start_x')},{args.get('start_y')}->{args.get('end_x')},{args.get('end_y')}"
-
-
-def _coords_click_text(args: _AuditArgs, result: _AuditResult) -> str | None:
-    # click_text resolves its own target via OCR: audit the center it
-    # clicked (physical pixels), not an argument coordinate.
-    del args
-    return None if result is None else f"{result.get('x')},{result.get('y')}"
-
-
-def _coords_ax_act(args: _AuditArgs, result: _AuditResult) -> str | None:
-    # The element's center and the action - never the value written.
-    del args
-    if result is None:
-        return None
-    return (
-        f"{result.get('x')},{result.get('y')},{result.get('native_action', result.get('action'))}"
-    )
-
-
-def _coords_mouse_button(args: _AuditArgs, result: _AuditResult) -> str | None:
-    del result
-    where = f"{args['x']},{args.get('y')}" if "x" in args else "pointer"
-    return f"{where},{args.get('button', 'left')}"
-
-
-def _coords_scroll(args: _AuditArgs, result: _AuditResult) -> str | None:
-    del result
-    return f"{args.get('x')},{args.get('y')},{args.get('dy')}"
-
-
-def _coords_key(args: _AuditArgs, result: _AuditResult) -> str | None:
-    del result
-    return str(args.get("key") or args.get("keycode") or "")
-
-
-def _coords_clipboard_write(args: _AuditArgs, result: _AuditResult) -> str | None:
-    # The clipboard may hold a secret: only a length is ever recorded, never the text.
-    del args
-    return None if result is None else f"{result.get('written')} chars"
-
-
-def _coords_clipboard_read(args: _AuditArgs, result: _AuditResult) -> str | None:
-    del args
-    if result is None:
-        return None
-    return f"{result['length']} chars" if result.get("text") is not None else "no text"
-
-
-_AUDIT_COORDS: dict[str, Callable[[_AuditArgs, _AuditResult], str | None]] = {
-    "click": _coords_point,
-    "move": _coords_point,
-    "drag": _coords_drag,
-    "click_text": _coords_click_text,
-    "ax_act": _coords_ax_act,
-    "scroll": _coords_scroll,
-    "mouse_down": _coords_mouse_button,
-    "mouse_up": _coords_mouse_button,
-    "key": _coords_key,
-    "clipboard_write": _coords_clipboard_write,
-    "clipboard_read": _coords_clipboard_read,
-}
-
-
-def _audit_coords(tool: str, args: dict[str, Any], result: dict[str, Any] | None) -> str | None:
-    """The compact "where / what" string of a computer_action audit row."""
-    describe = _AUDIT_COORDS.get(tool)
-    return None if describe is None else describe(args, result)
 
 
 def computer_use_config(daemon_settings: DaemonSettingsLike | None = None) -> ComputerUseConfig:
@@ -221,20 +142,21 @@ _WATCHDOG_CHECK_S = 5.0  # watchdog-thread check interval (watchdog sampling det
 # while a live loop keeps the watchdog silent no matter how long a *caller* waits. The exit
 # is `dump_and_exit`, which ends the process, so a stall never returns to the caller.
 class LoopWatchdog(threading.Thread):
-    def __init__(self, stall_s: float, *, check_s: float) -> None:
+    def __init__(self, stall_s: float, *, check_s: float, timers: Timers) -> None:
         super().__init__(name="computer-mcp-loop-watchdog", daemon=True)
         self._stall_s = stall_s
         self._check_s = check_s
-        self._beat = time.monotonic()
+        self._timers = timers
+        self._beat = timers.monotonic()
         self._stopped = threading.Event()
 
     def beat(self) -> None:
         """Prove the loop is alive (called from the loop's tick callback)."""
-        self._beat = time.monotonic()
+        self._beat = self._timers.monotonic()
 
     def stale_for(self) -> float:
         """Seconds since the last beat."""
-        return time.monotonic() - self._beat
+        return self._timers.monotonic() - self._beat
 
     @property
     def stopped(self) -> bool:
@@ -245,7 +167,9 @@ class LoopWatchdog(threading.Thread):
 
     def run(self) -> None:
         while not self._stopped.wait(self._check_s):
-            if loop_is_silent(now=time.monotonic(), last_beat=self._beat, stall_s=self._stall_s):
+            if loop_is_silent(
+                now=self._timers.monotonic(), last_beat=self._beat, stall_s=self._stall_s
+            ):
                 dump_and_exit(f"run loop silent for over {self._stall_s}s")
                 return
 
@@ -283,11 +207,12 @@ def guard_loop_liveness(
     loop: asyncio.AbstractEventLoop,
     stall_s: float,
     *,
+    timers: Timers,
     beat_s: float = _WATCHDOG_BEAT_S,
     check_s: float = _WATCHDOG_CHECK_S,
 ) -> LoopWatchdog:
     stall_s = effective_stall_s(stall_s)
-    watchdog = LoopWatchdog(stall_s, check_s=check_s)
+    watchdog = LoopWatchdog(stall_s, check_s=check_s, timers=timers)
     watchdog.start()
     beat_interval = beat_interval_s(beat_s, stall_s)
 
@@ -350,9 +275,11 @@ class ComputerMcpDaemon:
         sock: str | None = None,
         *,
         helper: DesktopHelper,
+        clock: Clock,
     ) -> None:
         self._db = db
         self._helper = helper
+        self._clock = clock
         self._sock = sock or str(computer_mcp_socket(meiva_home()))
         # Last legacy pointer position in PHYSICAL pixels, retained for diagnostics.
         # Scroll without x/y reads the actual native cursor.
@@ -465,7 +392,7 @@ class ComputerMcpDaemon:
             return
         try:
             for event_type, session_agent_id, payload in self._task_sessions.note(
-                tid, agent_id, tool, now=time.monotonic()
+                tid, agent_id, tool, now=self._clock.now().timestamp()
             ):
                 self._emit_session_event(event_type, session_agent_id, payload)
         except Exception as e:  # auxiliary path, see below
@@ -508,6 +435,7 @@ class ComputerMcpDaemon:
                     scale=self._scale,
                     ocr_cache=self._ocr_cache,
                     ax_session=self._ax_session,
+                    stamp=snapshot_stamp(self._clock.now()),
                 )
                 self._track_tool_effects(tool, args, result)
                 self._track_mouse_hold(tool, agent_id, result)
@@ -604,7 +532,7 @@ class ComputerMcpDaemon:
         result: dict[str, Any] | None = None,
     ) -> None:
         """One computer_action audit event per call — facts for later review."""
-        coords = _audit_coords(tool, args, result)
+        coords = audit_coords(tool, args, result)
         if agent_id is None:
             # No identity, no audit row: events.agent_id references agents(id).
             return
@@ -699,9 +627,10 @@ async def run(
     *,
     database: Callable[[], Database],
     helper: DesktopHelper,
+    clock: Clock,
 ) -> None:
     config = computer_use_config()
-    daemon = ComputerMcpDaemon(config, database(), sock, helper=helper)
+    daemon = ComputerMcpDaemon(config, database(), sock, helper=helper, clock=clock)
     path = Path(daemon._sock)
     path.parent.mkdir(parents=True, exist_ok=True)
     if await socket_in_use(path):
@@ -721,7 +650,9 @@ async def run(
             limit=LINE_LIMIT,
         )
         logger.info(f"[computer-mcp] listening on {path}")
-        watchdog = guard_loop_liveness(asyncio.get_running_loop(), config.computer_use_loop_stall_s)
+        watchdog = guard_loop_liveness(
+            asyncio.get_running_loop(), config.computer_use_loop_stall_s, timers=clock
+        )
         stop = asyncio.Event()
 
         def _stop() -> None:
@@ -789,7 +720,13 @@ def main() -> None:
         machine_reader=entry.machine.name,
         image=entry.image,
     )
-    asyncio.run(run(database=database, helper=helper_client()))
+    asyncio.run(
+        run(
+            database=database,
+            helper=helper_client(),
+            clock=Clock(clock_config_from_boot(machine_config), timers=SYSTEM_TIMERS),
+        )
+    )
 
 
 if __name__ == "__main__":

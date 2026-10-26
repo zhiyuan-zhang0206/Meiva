@@ -10,6 +10,7 @@ from types import SimpleNamespace
 
 import pytest
 
+from base.clock.tests.fakes import system_clock
 from base.sessions.tests.poll_until import poll_until_async
 from services.entrypoints.im_bridge.adapters.feishu import FeishuAdapter, backoff_delay
 from services.entrypoints.im_bridge.adapters.feishu_poll_cursor import FeishuListRejected
@@ -178,6 +179,7 @@ def test_start_poller_honors_zero_interval(state_dir: Path) -> None:
         feishu_config(feishu_poll_interval_seconds=0),
         state_dir=state_dir,
         proxy_configured=False,
+        clock=system_clock(),
     )
     adapter._start_poller(asyncio.TaskGroup())
     assert adapter._poll_task is None
@@ -355,7 +357,9 @@ async def test_poll_program_error_preserves_message_and_cursor(
 
     core = AlwaysFailingCore()
     rest = FakeRestClient()
-    adapter = FeishuAdapter(core, feishu_config(), state_dir=state_dir, proxy_configured=False)
+    adapter = FeishuAdapter(
+        core, feishu_config(), state_dir=state_dir, proxy_configured=False, clock=system_clock()
+    )
     adapter._rest_client = rest
     adapter._poll_chats.add("oc_p2p_1")
     window = make_list_response(
@@ -466,7 +470,9 @@ async def test_poll_inbound_failure_retried_next_round(
 
     core = FlakyCore()
     rest = FakeRestClient()
-    adapter = FeishuAdapter(core, feishu_config(), state_dir=state_dir, proxy_configured=False)
+    adapter = FeishuAdapter(
+        core, feishu_config(), state_dir=state_dir, proxy_configured=False, clock=system_clock()
+    )
     adapter._rest_client = rest
     adapter._poll_chats.add("oc_p2p_1")
     failing_window = make_list_response(
@@ -501,7 +507,9 @@ async def test_poll_never_marks_seen_before_delivery(
 
     core = FailingCore()
     rest = FakeRestClient()
-    adapter = FeishuAdapter(core, feishu_config(), state_dir=state_dir, proxy_configured=False)
+    adapter = FeishuAdapter(
+        core, feishu_config(), state_dir=state_dir, proxy_configured=False, clock=system_clock()
+    )
     adapter._rest_client = rest
     adapter._poll_chats.add("oc_p2p_1")
     rest.list_responses = [

@@ -19,6 +19,7 @@ from typing import Any
 import pytest
 from psycopg_pool import ConnectionPool
 
+from base.clock.tests.fakes import system_clock
 from base.config import settings
 from base.sessions.tests.poll_until import poll_until_async
 from services.entrypoints.im_bridge.adapters.feishu import FeishuAdapter
@@ -90,6 +91,7 @@ def _adapter(rest: _Rest, store: CursorStore, state_dir: Path) -> FeishuAdapter:
         state_dir=state_dir,
         proxy_configured=False,
         cursor_store=store,
+        clock=system_clock(),
     )
     adapter._rest_client = rest
     return adapter

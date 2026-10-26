@@ -7,12 +7,14 @@ from pathlib import Path
 import httpx
 import pytest
 
+from base.clock.tests.fakes import system_clock
 from services.entrypoints.im_bridge.adapters.telegram import TelegramAdapter
 from services.entrypoints.im_bridge.adapters.weixin import WeixinAdapter
 from services.entrypoints.im_bridge.tests.adapters.test_telegram_adapter import (
     FakeCore,
     make_config,
 )
+from services.entrypoints.im_bridge.tests.slices import system_rng
 from services.entrypoints.im_bridge.types import SendNotStartedError
 
 
@@ -113,8 +115,9 @@ async def test_weixin_preparation_uses_existing_login_identity_not_context_or_to
         user_id="user",
         bot_token="PRIVATE",  # noqa: S106
         base_url="https://ilink.example",
+        saved_at=system_clock().now(),
     )
-    adapter = WeixinAdapter(FakeCore(), state_dir=state_dir)
+    adapter = WeixinAdapter(FakeCore(), state_dir=state_dir, clock=system_clock(), rng=system_rng())
     adapter._tokens.set("chat", "CONTEXT")
     prepared = await adapter.prepare_timeline("hello")
     assert "bot-id" in prepared.account_id
@@ -224,8 +227,9 @@ async def test_native_weixin_owner_uses_login_user_and_holds_missing_owner(
         user_id="owner",
         bot_token="PRIVATE",  # noqa: S106
         base_url="https://ilink.example",
+        saved_at=system_clock().now(),
     )
-    adapter = WeixinAdapter(FakeCore(), state_dir=state_dir)
+    adapter = WeixinAdapter(FakeCore(), state_dir=state_dir, clock=system_clock(), rng=system_rng())
     target, prepared = await adapter.prepare_alert_owner("plain")
     assert target == "owner" and prepared.chunks[0].text == "plain"
     assert "PRIVATE" not in prepared.model_dump_json()
@@ -237,8 +241,11 @@ async def test_native_weixin_owner_uses_login_user_and_holds_missing_owner(
         user_id="",
         bot_token="PRIVATE",  # noqa: S106
         base_url="https://ilink.example",
+        saved_at=system_clock().now(),
     )
-    ownerless = WeixinAdapter(FakeCore(), state_dir=state_dir)
+    ownerless = WeixinAdapter(
+        FakeCore(), state_dir=state_dir, clock=system_clock(), rng=system_rng()
+    )
     with pytest.raises(SendNotStartedError, match="owner"):
         await ownerless.prepare_alert_owner("plain")
 
@@ -255,6 +262,7 @@ async def test_native_feishu_owner_uses_last_open_id_and_holds_unknown(state_dir
         ),
         state_dir=state_dir,
         proxy_configured=False,
+        clock=system_clock(),
     )
     with pytest.raises(SendNotStartedError, match="owner"):
         await adapter.prepare_alert_owner("plain")

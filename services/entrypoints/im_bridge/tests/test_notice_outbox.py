@@ -12,6 +12,7 @@ from psycopg import Connection
 from psycopg_pool import ConnectionPool
 
 from base.agents.tests.units import spawn_agent
+from base.clock.tests.fakes import system_clock
 from base.cluster.machine import MachineIdentityReader
 from base.cluster.machine.tests.identity import machine_identity as machine_identity
 from base.config.service_read import ConfigAuthority
@@ -19,7 +20,7 @@ from base.db.code_version_gate import ProcessDbGate
 from base.lm.catalog import ModelCatalog
 from services.entrypoints.im_bridge.core import IMBridgeCore
 from services.entrypoints.im_bridge.outbound.types import NoticePollImportReason
-from services.entrypoints.im_bridge.tests.slices import im_bridge_config
+from services.entrypoints.im_bridge.tests.slices import im_bridge_config, system_rng
 from services.entrypoints.im_bridge.tests.support import failing_insert
 from services.entrypoints.im_bridge.tests.test_im_bridge_core import FakeGateway
 from services.entrypoints.im_bridge.tests.test_timeline_outbox import RecordingAdapter
@@ -63,6 +64,8 @@ def make_core(
         db_pool=pool,
         tasks=asyncio.TaskGroup(),
         state_dir=state_dir,
+        clock=system_clock(),
+        rng=system_rng(),
     )
     adapter = NoticeAdapter()
     core.register(adapter)

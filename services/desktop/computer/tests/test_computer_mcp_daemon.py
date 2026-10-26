@@ -10,11 +10,15 @@ prompt-level peer convention, not code-enforced (user ruling 2026-08-10).
 from __future__ import annotations
 
 import json
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
 import pytest
 
+from base.clock import Clock, ClockConfig
+from base.clock.tests.fakes import system_clock
+from base.clock.tests.manual_timers import ManualTimers
 from base.db import Database
 from base.db.code_version_gate import ProcessDbGate
 from base.host.permissions_helper.client import UserAbortError
@@ -32,6 +36,7 @@ def computer_daemon(
     *,
     database_gate: ProcessDbGate,
     helper: DesktopHelper | None = None,
+    clock: Clock | None = None,
     **config: Any,
 ) -> ComputerMcpDaemon:
     return ComputerMcpDaemon(
@@ -39,6 +44,7 @@ def computer_daemon(
         Database.from_settings(gate=database_gate),
         sock="/nonexistent-test.sock",
         helper=helper if helper is not None else FakeHelper(),
+        clock=clock if clock is not None else system_clock(),
     )
 
 
@@ -270,6 +276,23 @@ async def test_user_abort_is_an_error_and_is_never_retried_or_replayed(
     assert [c[0] for c in fake_helper.calls].count("click") == 1
     assert (await call(d, "click", {"x": 100, "y": 200}))["ok"] is True
     assert [c[0] for c in fake_helper.calls].count("click") == 2
+
+
+async def test_snapshot_file_name_carries_the_daemon_clocks_stamp(
+    fake_helper: FakeHelper, audit_log: list, *, database_gate: ProcessDbGate
+) -> None:
+    timers = ManualTimers(wall_start=datetime(2026, 3, 4, 5, 6, 7, 123456, tzinfo=UTC))
+    clock = Clock(
+        ClockConfig("UTC", "UTC", message_timestamp_weekday=False), timers=timers, now=timers.now
+    )
+    d = computer_daemon(database_gate=database_gate, helper=fake_helper, clock=clock)
+
+    first = await ok_result(d, "snapshot", {})
+    timers.advance(1.0)
+    second = await ok_result(d, "snapshot", {})
+
+    assert Path(first["path"]).name == "agent-7-20260304T050607123456.png"
+    assert Path(second["path"]).name == "agent-7-20260304T050608123456.png"
 
 
 async def test_snapshot_returns_path_and_geometry(

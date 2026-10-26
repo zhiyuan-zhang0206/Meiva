@@ -8,6 +8,8 @@ from uuid import uuid4
 
 from psycopg_pool import ConnectionPool
 
+from base.clock.tests.fakes import system_clock
+from base.clock.tests.manual_timers import ManualTimers
 from base.log.tests.log_records import LogRecords
 from base.log.tests.log_records import loguru_records as loguru_records
 from services.entrypoints.im_bridge.outbound.health import (
@@ -16,7 +18,7 @@ from services.entrypoints.im_bridge.outbound.health import (
     push_health_loop,
 )
 from services.entrypoints.im_bridge.outbound.store import IMOutboxStore
-from services.entrypoints.im_bridge.tests.slices import im_bridge_config
+from services.entrypoints.im_bridge.tests.slices import im_bridge_config, system_rng
 
 
 class _Store:
@@ -34,7 +36,7 @@ def _fake_store(snapshot: dict[str, tuple[int, datetime | None]]) -> IMOutboxSto
 
 
 async def test_emit_once_reports_age_and_pending_per_leg(loguru_records: LogRecords) -> None:
-    now = datetime.now(UTC)
+    now = ManualTimers().now()
     store = _fake_store(
         {
             "telegram": (3, now - timedelta(seconds=125.0)),
@@ -43,23 +45,21 @@ async def test_emit_once_reports_age_and_pending_per_leg(loguru_records: LogReco
     )
     config = im_bridge_config(im_push_health_channels=("telegram", "feishu"))
 
-    await emit_push_health_once(store, config)
+    await emit_push_health_once(store, config, now=now)
 
     events = loguru_records.events("im_push_health")
     assert [(e["extra"]["channel"], e["extra"]["pending"]) for e in events] == [
         ("telegram", 3),
         ("feishu", 0),
     ]
-    ages = [e["extra"]["last_ok_age_s"] for e in events]
-    assert 124.0 <= ages[0] <= 130.0
-    assert 89.0 <= ages[1] <= 95.0
+    assert [e["extra"]["last_ok_age_s"] for e in events] == [125.0, 90.0]
 
 
 async def test_emit_once_reports_never_sent_sentinel(loguru_records: LogRecords) -> None:
     store = _fake_store({"telegram": (2, None)})
     config = im_bridge_config(im_push_health_channels=("telegram",))
 
-    await emit_push_health_once(store, config)
+    await emit_push_health_once(store, config, now=datetime.now(UTC))
 
     (event,) = loguru_records.events("im_push_health")
     assert event["extra"]["last_ok_age_s"] == PUSH_HEALTH_NEVER_SENT
@@ -69,11 +69,11 @@ async def test_emit_once_reports_never_sent_sentinel(loguru_records: LogRecords)
 async def test_loop_samples_once_per_interval(
     loguru_records: LogRecords, pool: ConnectionPool
 ) -> None:
-    store = IMOutboxStore(pool)
+    store = IMOutboxStore(pool, rng=system_rng())
     config = im_bridge_config(
         im_push_health_channels=("feishu",), im_push_health_interval_seconds=0.02
     )
-    sampling = asyncio.create_task(push_health_loop(store, config))
+    sampling = asyncio.create_task(push_health_loop(store, config, clock=system_clock()))
     try:
         for _ in range(200):
             if len(loguru_records.events("im_push_health")) >= 3:
@@ -89,7 +89,7 @@ async def test_loop_samples_once_per_interval(
 
 
 def test_snapshot_counts_waiting_and_last_sent(pool: ConnectionPool) -> None:
-    store = IMOutboxStore(pool)
+    store = IMOutboxStore(pool, rng=system_rng())
     channel = "test-health-snapshot"
     sent_at = datetime.now(UTC) - timedelta(seconds=42)
     with pool.connection() as conn:

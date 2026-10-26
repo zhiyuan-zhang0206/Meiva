@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import random
 from collections.abc import Mapping
 from dataclasses import replace
 from functools import cache
@@ -18,6 +19,8 @@ __all__ = [
     "feishu_config",
     "gateway_client",
     "im_bridge_config",
+    "seeded_rng",
+    "system_rng",
     "telegram_config",
 ]
 
@@ -61,4 +64,18 @@ def gateway_client(
         config or im_bridge_config(),
         gateway_url="http://localhost:8000",
         auth_headers=auth_headers or {},
+        rng=system_rng(),
     )
+
+
+# meiva:note
+# A generator with a fixed seed, so a test that draws from it sees the same values every run.
+def seeded_rng(seed: int = 0) -> random.Random:
+    return random.Random(seed)  # noqa: S311
+
+
+# meiva:note
+# The operating system's generator, as the daemon builds it: a test that does not need the same
+# draws on every run passes this, so two objects built in one test never mint the same id.
+def system_rng() -> random.Random:
+    return random.SystemRandom()

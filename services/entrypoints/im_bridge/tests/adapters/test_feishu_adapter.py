@@ -19,6 +19,7 @@ from typing import Any
 
 import pytest
 
+from base.clock.tests.fakes import system_clock
 from base.log.tests.log_records import LogRecords
 from base.log.tests.log_records import loguru_records as loguru_records
 from base.sessions.tests.poll_until import poll_until_async
@@ -147,13 +148,24 @@ def build_patching_adapter(
     core: FakeCore, config: Any, ws_client: FakeWsClient, *, state_dir: Path
 ) -> FeishuAdapter:
     return FeishuAdapter(
-        core, config, state_dir=state_dir, proxy_configured=False, ws_client=ws_client
+        core,
+        config,
+        state_dir=state_dir,
+        proxy_configured=False,
+        ws_client=ws_client,
+        clock=system_clock(),
     )
 
 
 @pytest.fixture
 def adapter(state_dir: Path) -> FeishuAdapter:
-    return FeishuAdapter(FakeCore(), feishu_config(), state_dir=state_dir, proxy_configured=False)
+    return FeishuAdapter(
+        FakeCore(),
+        feishu_config(),
+        state_dir=state_dir,
+        proxy_configured=False,
+        clock=system_clock(),
+    )
 
 
 # -- inbound ---------------------------------------------------------------
@@ -235,6 +247,7 @@ async def test_start_skips_without_credentials(state_dir: Path) -> None:
             feishu_config(feishu_app_id="", feishu_app_secret=""),
             state_dir=state_dir,
             proxy_configured=False,
+            clock=system_clock(),
         )
         await adapter.start(_owned_tasks)
         assert adapter._ws_task is None
@@ -346,6 +359,7 @@ async def test_build_ws_client_installs_the_env_proxy_kwargs_builder(
         feishu_config(feishu_rest_timeout_seconds=7.5),
         state_dir=state_dir,
         proxy_configured=proxy_configured,
+        clock=system_clock(),
     )
     adapter._app_id = "cli_x"
     adapter._app_secret = "secret_x"  # noqa: S105 — a literal, never a real credential
@@ -484,6 +498,7 @@ def test_rest_client_applies_configured_timeout(state_dir: Path) -> None:
         feishu_config(feishu_rest_timeout_seconds=7.5),
         state_dir=state_dir,
         proxy_configured=False,
+        clock=system_clock(),
     )
     adapter._app_id = "cli_x"
     adapter._app_secret = "secret_x"  # noqa: S105
@@ -605,7 +620,11 @@ def make_list_response(items: list[SimpleNamespace]) -> SimpleNamespace:
 
 def poll_adapter(rest: FakeRestClient, state_dir: Path) -> FeishuAdapter:
     adapter = FeishuAdapter(
-        FakeCore(), feishu_config(), state_dir=state_dir, proxy_configured=False
+        FakeCore(),
+        feishu_config(),
+        state_dir=state_dir,
+        proxy_configured=False,
+        clock=system_clock(),
     )
     adapter._rest_client = rest
     return adapter

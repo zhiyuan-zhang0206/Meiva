@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
-import time
+import random
 from dataclasses import dataclass
 from functools import partial
 from pathlib import Path
@@ -12,7 +12,7 @@ from typing import Any, Literal
 
 from psycopg_pool import ConnectionPool
 
-from base.clock import SYSTEM_TIMERS, Timers
+from base.clock import Clock
 from services.entrypoints.im_bridge import copy, notice_bridge, push_watchdog
 from services.entrypoints.im_bridge.config import ImBridgeConfig
 from services.entrypoints.im_bridge.cursor_store import CursorStore, PushWatermark
@@ -45,6 +45,7 @@ from services.entrypoints.im_bridge.types import (
     InboundMessage,
     Reply,
     SendNotStartedError,
+    new_uuid,
     parse_command,
 )
 
@@ -108,7 +109,8 @@ class IMBridgeCore(
         tasks: asyncio.TaskGroup,
         state_dir: Path,
         typing: TypingCadence = DEFAULT_TYPING,
-        timers: Timers = SYSTEM_TIMERS,
+        clock: Clock,
+        rng: random.Random,
         subscribe_timeline: bool = True,
     ) -> None:
         self._tasks = tasks
@@ -116,17 +118,19 @@ class IMBridgeCore(
         self.gateway = gateway
         self._state_dir = state_dir
         self._typing = typing
-        self._timers = timers
+        self._clock = clock
+        self._rng = rng
         self._subscribe_timeline = subscribe_timeline
         self.ensured: list[int | None] = []
-        self._op_seq = 0
         self.cursor_store = CursorStore(db_pool)
-        self.outbound_store = IMOutboxStore(db_pool)
+        self.outbound_store = IMOutboxStore(db_pool, rng=rng)
         self._notice_bridge: notice_bridge.NoticeBridge = notice_bridge.NoticeBridge(
-            self, config, db_pool=db_pool, state_dir=state_dir, timers=timers
+            self, config, db_pool=db_pool, state_dir=state_dir, clock=clock, rng=rng
         )
         self.adapters: dict[str, IMAdapter] = {}
-        self.outbound_worker = IMOutboxWorker(self.outbound_store, self.adapters, config=config)
+        self.outbound_worker = IMOutboxWorker(
+            self.outbound_store, self.adapters, config=config, rng=rng
+        )
         self.chats: dict[tuple[str, str], ChatState] = {}
         self._selection_locks: dict[tuple[str, str], asyncio.Lock] = {}
         self._subscriptions: dict[tuple[str, str], asyncio.Task[Any]] = {}
@@ -144,10 +148,6 @@ class IMBridgeCore(
     @notice_bridge.setter
     def notice_bridge(self, value: notice_bridge.NoticeBridge) -> None:
         self._notice_bridge = value
-
-    def _next_replay_id(self) -> str:
-        self._op_seq += 1
-        return f"replay-{self._op_seq}-{time.perf_counter_ns():x}"
 
     async def stop(self) -> None:
         """Cancel service-owned loops before closing their adapters and database."""
@@ -181,7 +181,7 @@ class IMBridgeCore(
                     # partial, not a lambda: this iteration's adapter is bound
                     # now, so the retry call can never read a loop variable late.
                     await retry_once_after_backoff(
-                        partial(adapter.send_to_owner, text), self.config
+                        partial(adapter.send_to_owner, text), self.config, rng=self._rng
                     )
                     results[channel] = "ok"
                 except Exception as retry_exc:
@@ -243,7 +243,7 @@ class IMBridgeCore(
                 state,
                 text,
                 msg.idempotency_key,
-                replay_id=msg.idempotency_key or msg.message_id or self._next_replay_id(),
+                replay_id=msg.idempotency_key or msg.message_id or new_uuid(self._rng).hex,
             )
         else:
             try:
@@ -264,7 +264,7 @@ class IMBridgeCore(
             replies = reply if isinstance(reply, list) else [reply]
             for r in replies:
                 await self._send(msg.channel, msg.chat_id, r)
-            await push_watchdog.hint_recovered(self, msg)
+            await push_watchdog.hint_recovered(self, msg, now=self._clock.now().timestamp())
 
     async def _send(
         self, channel: str, chat_id: str, reply: Reply, *, adapter: IMAdapter | None = None
@@ -273,7 +273,7 @@ class IMBridgeCore(
         if adapter is None:
             _log.error("no adapter for channel %s", channel)
             return
-        await push_watchdog.send_with_retry(self, channel, chat_id, reply, adapter)
+        await push_watchdog.send_with_retry(self, channel, chat_id, reply, adapter, rng=self._rng)
 
     # -- commands ------------------------------------------------------------
 
@@ -404,7 +404,7 @@ class IMBridgeCore(
             # user ruling: /switch without an id is an error — the picker
             # lives on /list's tap-to-switch card, not here
             return Reply(copy.SWITCH_USAGE)
-        replay_id = replay_id or self._next_replay_id()
+        replay_id = replay_id or new_uuid(self._rng).hex
         account = await selection_account(self, state, selection_admission)
         recovered = await asyncio.to_thread(
             self.outbound_store.lookup_replay,
@@ -573,16 +573,16 @@ class IMBridgeCore(
     async def _typing_loop(
         self, key: tuple[str, str], state: ChatState, adapter: IMAdapter
     ) -> None:
-        deadline = self._timers.monotonic() + self._typing.max_s
+        deadline = self._clock.monotonic() + self._typing.max_s
         try:
-            while self._timers.monotonic() < deadline:
+            while self._clock.monotonic() < deadline:
                 try:
                     await adapter.typing(state.chat_id)
                 except NETWORK_ERRORS:
                     # cosmetic feature — a failing indicator gives up quietly
                     _log.warning("typing failed channel=%s chat=%s", state.channel, state.chat_id)
                     return
-                await self._timers.asleep(self._typing.interval_s)
+                await self._clock.asleep(self._typing.interval_s)
         finally:
             self._typing_tasks.pop(key, None)
 

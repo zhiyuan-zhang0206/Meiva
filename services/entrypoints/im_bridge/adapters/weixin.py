@@ -20,14 +20,15 @@ import base64
 import contextlib
 import hashlib
 import json
-import time
+import random
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 from urllib.parse import urlsplit
 
 import httpx
 
-from base.clock import SYSTEM_TIMERS, Clock, ClockConfig
+from base.clock import Clock
 from base.host.private_storage import write_private_bytes
 from base.log import logger
 from services.entrypoints.im_bridge.ingress.identity import (
@@ -62,6 +63,7 @@ from services.entrypoints.im_bridge.types import (
     RetryableTransportError,
     SendNotStartedError,
     SendOutcomeUncertainError,
+    new_uuid,
     raise_http_failure,
 )
 
@@ -135,7 +137,13 @@ def load_account(state_dir: Path) -> dict[str, Any] | None:
 # Persist QR-login credentials under `state_dir` atomically and owner-only (0600, via
 # `atomic_write_json`, which every credential-bearing write shares).
 def save_account(
-    state_dir: Path, *, account_id: str, bot_token: str, user_id: str, base_url: str
+    state_dir: Path,
+    *,
+    account_id: str,
+    bot_token: str,
+    user_id: str,
+    base_url: str,
+    saved_at: datetime,
 ) -> None:
     atomic_write_json(
         state_dir / "weixin_account.json",
@@ -144,7 +152,7 @@ def save_account(
             "bot_token": bot_token,
             "user_id": user_id,
             "base_url": base_url,
-            "saved_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+            "saved_at": saved_at.astimezone(UTC).strftime("%Y-%m-%dT%H:%M:%SZ"),
         },
     )
 
@@ -194,19 +202,22 @@ class ContextTokenStore:
             logger.warning("weixin: failed to persist context tokens: {}", exc)
 
 
-def _random_wechat_uin() -> str:
-    """A random per-request X-WECHAT-UIN value (base64 of a uint32)."""
-    value = (time.perf_counter_ns() * 1103515245 + 12345) & 0xFFFFFFFF
-    return base64.b64encode(str(value).encode("utf-8")).decode("ascii")
+# meiva:note
+# The X-WECHAT-UIN value (base64 of a uint32) for a caller-drawn 32-bit integer.
+def wechat_uin(draw: int) -> str:
+    if not 0 <= draw <= 0xFFFFFFFF:
+        raise ValueError("the X-WECHAT-UIN draw must fit in 32 bits")
+    return base64.b64encode(str(draw).encode("utf-8")).decode("ascii")
 
 
-def _headers(token: str) -> dict[str, str]:
-    """Headers for authenticated iLink POST endpoints."""
+# meiva:note
+# Headers for authenticated iLink POST endpoints; `uin_draw` is this request's random uint32.
+def post_headers(token: str, *, uin_draw: int) -> dict[str, str]:
     return {
         "Content-Type": "application/json",
         "AuthorizationType": "ilink_bot_token",
         "Authorization": f"Bearer {token}",
-        "X-WECHAT-UIN": _random_wechat_uin(),
+        "X-WECHAT-UIN": wechat_uin(uin_draw),
         "iLink-App-Id": ILINK_APP_ID,
         "iLink-App-ClientVersion": ILINK_APP_CLIENT_VERSION,
     }
@@ -347,12 +358,15 @@ class WeixinAdapter(IMAdapter):
         *,
         state_dir: Path,
         client: httpx.AsyncClient | None = None,
+        clock: Clock,
+        rng: random.Random,
     ) -> None:
         super().__init__(core)
         self._state_dir = state_dir
         self._client = client  # injected in tests; else created lazily
         self._owns_client = client is None
-        self._op_seq = 0
+        self._clock = clock
+        self._rng = rng
         self._poll_task: asyncio.Task[None] | None = None
         self._running = False
         self._ingress: WeixinIngress | None = None
@@ -484,22 +498,11 @@ class WeixinAdapter(IMAdapter):
         except OSError as exc:
             logger.warning("weixin: failed to persist activity: {}", exc)
 
-    def _wall_time(self) -> float:
-        return (
-            Clock(ClockConfig("UTC", "UTC", message_timestamp_weekday=False), timers=SYSTEM_TIMERS)
-            .now()
-            .timestamp()
-        )
-
     def _mark_inbound(self, peer_id: str) -> None:
         """Record inbound activity (each user message carries a fresh
         context_token, restoring outbound pushes)."""
-        self._last_inbound[peer_id] = self._wall_time()
+        self._last_inbound[peer_id] = self._clock.now().timestamp()
         self._persist_activity()
-
-    def _next_client_id(self) -> str:
-        self._op_seq += 1
-        return f"wx-{self._op_seq}-{time.perf_counter_ns():x}"
 
     async def _ensure_ingress(self) -> tuple[WeixinIngress, PollBinding]:
         async with self._ingress_init_lock:
@@ -510,7 +513,9 @@ class WeixinAdapter(IMAdapter):
                 if not isinstance(self.core, TimelineCore):
                     raise TypeError("Weixin ingress requires TimelineCore")
                 self._ingress = WeixinIngress(
-                    self.core, WeixinIngressStore(self.core.outbound_store.pool), self
+                    self.core,
+                    WeixinIngressStore(self.core.outbound_store.pool, rng=self._rng),
+                    self,
                 )
                 self._binding = await self._ingress.initialize(namespace, self._account_id)
             self._binding = await asyncio.to_thread(
@@ -630,7 +635,7 @@ class WeixinAdapter(IMAdapter):
     async def _send_chunks(self, chat_id: str, chunks: tuple[str, ...]) -> None:
         context_token = self._tokens.get(chat_id)
         for idx, chunk in enumerate(chunks):
-            client_id = self._next_client_id()
+            client_id = new_uuid(self._rng).hex
             try:
                 await self._send_chunk(chat_id, chunk, context_token, client_id)
             except (SendNotStartedError, RetryableTransportError, SendOutcomeUncertainError):
@@ -678,7 +683,7 @@ class WeixinAdapter(IMAdapter):
                 # user message that refreshed it — reset the watchdog and
                 # remember the recovery moment for the core's "recovered" hint.
                 if self.push_failures > 0:
-                    self.push_recovered_at = self._wall_time()
+                    self.push_recovered_at = self._clock.now().timestamp()
                 self.push_failures = 0
                 return
             session_expired = SESSION_EXPIRED_ERRCODE in (ret, errcode) or (
@@ -695,7 +700,7 @@ class WeixinAdapter(IMAdapter):
                 continue
             errmsg = str(resp.get("errmsg") or resp.get("msg") or "unknown error")
             self.push_failures += 1
-            self.push_failed_at = self._wall_time()
+            self.push_failed_at = self._clock.now().timestamp()
             raise RuntimeError(
                 f"iLink sendmessage error: ret={ret} errcode={errcode} errmsg={errmsg[:200]}"
             )
@@ -712,7 +717,7 @@ class WeixinAdapter(IMAdapter):
             resp = await self._http.post(
                 f"{self._base_url}/{endpoint}",
                 json={**payload, "base_info": _base_info()},
-                headers=_headers(self._token),
+                headers=post_headers(self._token, uin_draw=self._rng.getrandbits(32)),
                 timeout=timeout,
             )
         except httpx.TimeoutException as exc:

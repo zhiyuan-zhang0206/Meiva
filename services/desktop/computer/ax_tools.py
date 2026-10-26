@@ -414,6 +414,7 @@ def ax_tree_tool(
     agent_id: int,
     scale: float | None,
     session: AxSession,
+    stamp: str,
 ) -> dict[str, Any]:
     """`ax_tree`: read a window's accessibility tree as filtered text."""
     wanted = _args(args)
@@ -459,7 +460,7 @@ def ax_tree_tool(
     factor = current_scale(helper, scale)
     visual_block = ""
     if wanted.ocr_gap:
-        read = ax_gap.read_screen(helper, agent_id)
+        read = ax_gap.read_screen(helper, agent_id, stamp=stamp)
         factor = read.scale  # the capture's measured scale: one space for tree and px:
         visual_block, report = _visual_gap(nodes, read, session)
         out.update(report)
