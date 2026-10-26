@@ -22,6 +22,7 @@ import pytest
 import redis.asyncio as aredis
 from redis.exceptions import NoPermissionError
 
+from base.clock.tests.seeded_rng import seeded_rng
 from base.cluster import inbound_channel, redis_channel_prefix
 from base.config import settings
 from base.events.live.bus import EventBus
@@ -35,7 +36,7 @@ async def _publish_inbound(
     channel_source = (
         settings.data_plane.events_channel if events_channel is None else events_channel
     )
-    r = EventBus.from_settings().sync_redis()
+    r = EventBus.from_settings(rng=seeded_rng()).sync_redis()
     try:
         r.publish(inbound_channel(agent_id, channel_source), str(inbound_id))  # pyright: ignore[reportUnknownMemberType]
     finally:
@@ -62,7 +63,7 @@ async def _subscribed(agent_id: int, *, events_channel: str | None = None) -> No
         settings.data_plane.events_channel if events_channel is None else events_channel
     )
     channel = inbound_channel(agent_id, channel_source)
-    probe = EventBus.from_settings().sync_redis()
+    probe = EventBus.from_settings(rng=seeded_rng()).sync_redis()
     try:
         await _until(
             lambda: int(probe.pubsub_numsub(channel)[0][1]) > 0,  # pyright: ignore[reportUnknownMemberType, reportUnknownArgumentType]
@@ -545,7 +546,7 @@ def _make_scoped_user(user: str, channel_grant: str) -> None:
     default channel grant first, so the user reaches ONLY the granted pattern,
     modelling `ensure_cluster_redis_acl`'s `resetchannels &<prefix>:*`."""
 
-    r = EventBus.from_settings().sync_redis()
+    r = EventBus.from_settings(rng=seeded_rng()).sync_redis()
     try:
         r.execute_command(
             "ACL",

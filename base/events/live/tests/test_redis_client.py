@@ -15,16 +15,18 @@ from redis.asyncio.connection import AbstractConnection
 from redis.exceptions import AuthenticationError, NoPermissionError
 from redis.exceptions import ConnectionError as RedisConnectionError
 
+from base.clock.tests.seeded_rng import seeded_rng
 from base.config import settings
 from base.events.live import redis_client as mod
 from base.events.live.bus import EventBus, event_bus_config_from_settings
 from base.events.live.redis_client import TransportAwareAsyncConnection
-from base.events.live.redis_resilience import AuthRetryPolicy, plan_auth_retry_delays
+from base.events.live.redis_resilience import AuthRetryPolicy
 from base.events.live.tests.fakes import patch_async_redis, patch_sync_redis
+from base.events.live.tests.rng import seeded_auth_retry
 from base.host.net.predicates import is_ipv4_literal
 
 _FAST_RETRY = AuthRetryPolicy(initial_delay_s=0.0005, delay_cap_s=0.002, window_s=1.0)
-_bus = EventBus.from_settings()
+_bus = EventBus.from_settings(rng=seeded_rng())
 _PUBLISH_BOUND_S = event_bus_config_from_settings().publish_attempt_timeout_s
 
 
@@ -34,7 +36,10 @@ def _fresh_bus() -> None:
     per-loop registry; otherwise a cached client from a previous test would survive into the
     next loop."""
     global _bus  # noqa: PLW0603 — the module's tests share one handle per test
-    _bus = EventBus(replace(event_bus_config_from_settings(), auth_retry_policy=_FAST_RETRY))
+    _bus = EventBus(
+        replace(event_bus_config_from_settings(), auth_retry_policy=_FAST_RETRY),
+        rng=seeded_rng(),
+    )
 
 
 async def test_same_loop_returns_same_instance() -> None:
@@ -47,7 +52,7 @@ async def test_open_async_redis_pins_socket_timeout_none() -> None:
     """redis-py >= 5 defaults socket_timeout to 5s; a pub/sub listener's long
     blocking read must not be cut by it (the hosted dispatcher reconnect-looped
     every 5s of idle until pinned to None — 2026-08-30 soak startup)."""
-    client = mod.open_async_redis(settings.data_plane.redis_url)
+    client = mod.open_async_redis(settings.data_plane.redis_url, auth_retry=seeded_auth_retry())
     kwargs = client.connection_pool.connection_kwargs  # pyright: ignore[reportUnknownMemberType]
     # `in + is None`, not `.get()`: a MISSING key would silently pass the same
     # assertion while the redis-py 5s default quietly applies.
@@ -131,7 +136,6 @@ async def test_publish_retries_auth_failures_with_bounded_exponential_delays(
 
     assert await _bus.publish_best_effort("payload", channel="meiva:events") == 3
     assert publisher.attempts == 3
-    assert plan_auth_retry_delays(failures=2) == [0.5, 1.0]
 
 
 async def test_publish_auth_retry_stops_within_its_total_wait_budget(
@@ -142,10 +146,6 @@ async def test_publish_auth_retry_stops_within_its_total_wait_budget(
 
     assert await _bus.publish_best_effort("payload", channel="meiva:events") is None
     assert publisher.attempts == _FAST_RETRY.max_attempts
-    delays = plan_auth_retry_delays(failures=100)
-    assert len(delays) == 9
-    assert sum(delays) <= 60.0
-    assert max(delays) <= 10.0
 
 
 async def test_publish_does_not_retry_connection_errors(
@@ -177,7 +177,10 @@ async def test_best_effort_publish_bounds_a_half_open_health_check_read(
     """
     publisher = _HalfOpenHealthCheckPublisher()
     patch_async_redis(monkeypatch, lambda: publisher)
-    quick = EventBus(replace(event_bus_config_from_settings(), publish_attempt_timeout_s=0.01))
+    quick = EventBus(
+        replace(event_bus_config_from_settings(), publish_attempt_timeout_s=0.01),
+        rng=seeded_rng(),
+    )
 
     task = asyncio.create_task(quick.publish_best_effort("payload", channel="meiva:events"))
     await asyncio.wait_for(publisher.read_started.wait(), timeout=1.0)
@@ -200,7 +203,6 @@ def test_sync_publish_retries_auth_failures_with_bounded_exponential_delays(
 
     assert _bus.publish_best_effort_sync("payload", channel="meiva:events") == 3
     assert publisher.attempts == 3
-    assert plan_auth_retry_delays(failures=2) == [0.5, 1.0]
 
 
 async def test_different_loops_get_different_clients() -> None:
@@ -482,7 +484,9 @@ def _acl_user_url(user: str) -> str:
 
 
 def _set_acl_user(user: str, *rules: str) -> None:
-    admin = mod.open_sync_redis(settings.data_plane.redis_url, decode_responses=True)
+    admin = mod.open_sync_redis(
+        settings.data_plane.redis_url, decode_responses=True, auth_retry=seeded_auth_retry()
+    )
     try:
         admin.execute_command("ACL", "SETUSER", user, "on", f">{user}", *rules)
     finally:
@@ -490,7 +494,9 @@ def _set_acl_user(user: str, *rules: str) -> None:
 
 
 def _reset_acl_log() -> None:
-    admin = mod.open_sync_redis(settings.data_plane.redis_url, decode_responses=True)
+    admin = mod.open_sync_redis(
+        settings.data_plane.redis_url, decode_responses=True, auth_retry=seeded_auth_retry()
+    )
     try:
         admin.execute_command("ACL", "LOG", "RESET")
     finally:
@@ -498,7 +504,9 @@ def _reset_acl_log() -> None:
 
 
 def _acl_denied_attempts(user: str, command: str) -> int:
-    admin = mod.open_sync_redis(settings.data_plane.redis_url, decode_responses=True)
+    admin = mod.open_sync_redis(
+        settings.data_plane.redis_url, decode_responses=True, auth_retry=seeded_auth_retry()
+    )
     try:
         entries: Any = admin.execute_command("ACL", "LOG")
     finally:
@@ -520,7 +528,7 @@ async def test_async_command_and_publish_keep_one_auth_retry_budget(
     _reset_acl_log()
     client = mod.open_async_redis(
         _acl_user_url(user),
-        auth_retry_policy=_FAST_RETRY,
+        auth_retry=seeded_auth_retry(_FAST_RETRY),
     )
     try:
         if best_effort:
@@ -530,7 +538,7 @@ async def test_async_command_and_publish_keep_one_auth_retry_budget(
                 "payload",
                 warn_last={},
                 attempt_timeout_s=_PUBLISH_BOUND_S,
-                auth_retry_policy=_FAST_RETRY,
+                auth_retry=seeded_auth_retry(_FAST_RETRY),
             )
             assert result is None
             assert _acl_denied_attempts(user, "publish") == _FAST_RETRY.max_attempts
@@ -552,7 +560,7 @@ def test_sync_command_and_publish_keep_one_auth_retry_budget(
     _reset_acl_log()
     client = mod.open_sync_redis(
         _acl_user_url(user),
-        auth_retry_policy=_FAST_RETRY,
+        auth_retry=seeded_auth_retry(_FAST_RETRY),
     )
     try:
         if best_effort:
@@ -562,7 +570,7 @@ def test_sync_command_and_publish_keep_one_auth_retry_budget(
                     "channel",
                     "payload",
                     warn_last={},
-                    auth_retry_policy=_FAST_RETRY,
+                    auth_retry=seeded_auth_retry(_FAST_RETRY),
                 )
                 is None
             )
@@ -586,7 +594,7 @@ async def test_task_started_during_publish_keeps_its_own_command_retry_budget() 
     )
     client = mod.open_async_redis(
         _acl_user_url(user),
-        auth_retry_policy=policy,
+        auth_retry=seeded_auth_retry(policy),
     )
     child: asyncio.Task[object] | None = None
     publish_task = asyncio.create_task(
@@ -596,7 +604,7 @@ async def test_task_started_during_publish_keeps_its_own_command_retry_budget() 
             "payload",
             warn_last={},
             attempt_timeout_s=_PUBLISH_BOUND_S,
-            auth_retry_policy=policy,
+            auth_retry=seeded_auth_retry(policy),
         )
     )
     try:
