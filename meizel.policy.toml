@@ -65,7 +65,7 @@
 "services/backup/scheduler/operation/worker_bootstrap.py" = ["services/backup/scheduler"]
 "services/supervision/meiva_root/probes.py" = ["services/supervision/healthchecks"]
 "tests/ci/test_path_scopes.py" = ["tests/path_scoped"]
-"tests/components/schedules/test_goal_watch_filter.py" = ["meiva_builtins/plugins", "meiva_builtins/skills"]
+"tests/components/schedules/test_goal_watch_filter.py" = ["meiva_builtins/skills"]
 "tests/e2e/process_support.py" = ["services/agent_runner"]
 "tests/fixtures/path_scopes.py" = ["tests/path_scoped"]
 "tests/skills/test_inspect_a_trace_fetch.py" = [".agents/skills/inspect-a-trace/scripts"]

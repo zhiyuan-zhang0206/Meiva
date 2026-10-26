@@ -17,7 +17,6 @@ from pathlib import Path
 from typing import TextIO, assert_never
 
 from base.agents.context.clients import DatabaseFactory
-from base.clock import Clock, ClockConfig
 from base.deploy.lifecycle import start_serving
 from base.deploy.lifecycle.status_journal import phase as journal_phase
 from base.telemetry import EventPipeline
@@ -140,9 +139,7 @@ def _perform(
             announce_stopping(
                 command,
                 window,
-                now=Clock(
-                    ClockConfig("UTC", None, message_timestamp_weekday=False), timers=command.timers
-                ).now(),
+                now=command.clock.now(),
             )
         case RecordBrowserSession():
             browser.record_browser_session(command)
@@ -153,6 +150,7 @@ def _perform(
                 force=force,
                 helper=command.helper,
                 home=command.home,
+                timers=command.timers,
             )
         case StopBrowser():
             browser.stop_browser(run.deadline)

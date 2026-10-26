@@ -345,6 +345,7 @@ def test_paths_auto_save_source_labels_list(
     understand_harness.understand([{"prompt": "compare", "paths": [str(fake_image), str(shot)]}])
 
     [saved] = saved_in.glob("understand_*.txt")
+    assert saved.name.startswith("understand_20260101_000000_000000_")
     assert f"# source: paths={[str(fake_image), str(shot)]!r}" in saved.read_text()
 
 

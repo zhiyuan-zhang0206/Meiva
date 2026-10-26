@@ -11,6 +11,8 @@ from typing import Any
 
 import pytest
 
+from base.clock import Clock, ClockConfig
+from base.clock.tests.manual_timers import ManualTimers
 from cli.commands.data_plane import walg as walg_cmd
 from cli.commands.data_plane.config import DataPlaneConfig
 from cli.commands.data_plane.tests.data_plane_records import data_plane_config as data_plane_config
@@ -77,6 +79,13 @@ def test_the_parser_reaches_every_verb() -> None:
 _STAMPED = re.compile(r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z \S")
 
 
+def _clock() -> Clock:
+    timers = ManualTimers()
+    return Clock(
+        ClockConfig("UTC", None, message_timestamp_weekday=False), timers=timers, now=timers.now
+    )
+
+
 # meiva:note
 # The parser's handler is the verb's door: it reads the invocation's own configuration owner (the
 # command runtime's) and hands the verb values.
@@ -111,6 +120,8 @@ def test_run_prints_timestamped_lines_and_returns_the_ticks_exit_code(
     lines = capsys.readouterr().out.splitlines()
     assert lines
     assert all(_STAMPED.match(line) for line in lines)
+    stamp = f"{command_runtime.clock.now():%Y-%m-%dT%H:%M:%SZ} "
+    assert all(line.startswith(stamp) for line in lines)
 
 
 def test_status_says_when_the_tick_never_ran(
@@ -335,7 +346,13 @@ def test_restore_recovers_to_the_target_and_keeps_the_data_directory(
         destination = tmp_path / "out"
 
         code = walg_cmd.cmd_walg_restore(
-            plane, directory=str(destination), backup=backup, time=None, lsn=target, user="meiva"
+            plane,
+            directory=str(destination),
+            backup=backup,
+            time=None,
+            lsn=target,
+            user="meiva",
+            clock=_clock(),
         )
 
     assert code == 0
@@ -365,7 +382,7 @@ def test_restore_rejects_a_bad_target_before_fetching(
     message: str,
 ) -> None:
     code = walg_cmd.cmd_walg_restore(
-        plane, directory=str(tmp_path / "out"), backup="LATEST", **kwargs
+        plane, directory=str(tmp_path / "out"), backup="LATEST", clock=_clock(), **kwargs
     )
 
     assert code == 1
@@ -379,7 +396,12 @@ def test_restore_reports_a_failed_fetch_and_exits_non_zero(
     sandbox.fail("backup-fetch")
 
     code = walg_cmd.cmd_walg_restore(
-        plane, directory=str(tmp_path / "out"), backup="LATEST", time=None, lsn=None
+        plane,
+        directory=str(tmp_path / "out"),
+        backup="LATEST",
+        time=None,
+        lsn=None,
+        clock=_clock(),
     )
 
     assert code == 1
@@ -396,7 +418,7 @@ def test_restore_refuses_a_directory_that_holds_something(
     (occupied / "keep.txt").write_text("mine")
 
     code = walg_cmd.cmd_walg_restore(
-        plane, directory=str(occupied), backup="LATEST", time=None, lsn=None
+        plane, directory=str(occupied), backup="LATEST", time=None, lsn=None, clock=_clock()
     )
 
     assert code == 1
@@ -409,7 +431,7 @@ def test_restore_while_wal_g_is_off_says_so(
     plane_off: DataPlaneConfig, capsys: pytest.CaptureFixture[str]
 ) -> None:
     code = walg_cmd.cmd_walg_restore(
-        plane_off, directory="/x", backup="LATEST", time=None, lsn=None
+        plane_off, directory="/x", backup="LATEST", time=None, lsn=None, clock=_clock()
     )
 
     assert code == 1
@@ -433,6 +455,8 @@ def test_drill_prints_timestamped_lines_and_returns_the_drills_exit_code(
     lines = capsys.readouterr().out.splitlines()
     assert lines
     assert all(_STAMPED.match(line) for line in lines)
+    stamp = f"{command_runtime.clock.now():%Y-%m-%dT%H:%M:%SZ} "
+    assert all(line.startswith(stamp) for line in lines)
 
 
 def test_status_shows_the_last_drill_and_the_last_success(

@@ -16,7 +16,6 @@ exports = ["config.py", "tests"]
 "_wire.py" = "strict"
 
 [roots]
-"__init__.py" = { kinds = ["clock"], why = "The meiva.mcps SDK facade (_source) reads the wall-clock timestamp once when constructing a ServerProxy's ToolSource for DiskCache TTL evaluation" }
 "_daemon.py" = { kinds = ["pid", "settings"], why = "daemon_config_from_process() is the MCP daemon process entry point composition root, reading settings and process PID once at startup" }
 
 [debt.ambient-read]

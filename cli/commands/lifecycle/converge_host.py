@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import sys
 from collections.abc import Callable
+from datetime import datetime
 from pathlib import Path
 from typing import assert_never
 
@@ -567,6 +568,7 @@ def converge_host(
         producer=producer,
         helper=command.helper,
         timers=command.timers,
+        clock=command.clock,
         host=command.host,
         session=command.session,
     )
@@ -623,7 +625,11 @@ def run_converge(ctx: ConvergeCtx, steps: tuple[ConvergeStep, ...], *, prod_inst
         # converge), so the marker is the only durable trace of an unapplied step.
         # meiva:link cli/commands/converge/docs/converge-incomplete.meiva.okf.md
         record_incomplete(
-            ctx.meiva_home, step=failed_step, error=str(exc), prod_install=prod_install
+            ctx.meiva_home,
+            step=failed_step,
+            error=str(exc),
+            prod_install=prod_install,
+            now=ctx.clock.now(),
         )
         raise
     if prod_install:
@@ -634,10 +640,12 @@ def run_converge(ctx: ConvergeCtx, steps: tuple[ConvergeStep, ...], *, prod_inst
 # Only the host's prod install owns the marker: a dev cluster's converge must
 # never clear or set the prod home's record.
 # meiva:link cli/commands/converge/docs/converge-incomplete.meiva.okf.md
-def record_incomplete(meiva_home: Path, *, step: str, error: str, prod_install: bool) -> None:
+def record_incomplete(
+    meiva_home: Path, *, step: str, error: str, prod_install: bool, now: datetime
+) -> None:
     if not prod_install:
         return
-    record_incomplete_marker(meiva_home, step=step, error=error)
+    record_incomplete_marker(meiva_home, step=step, error=error, now=now)
 
 
 def selected_service_names(
