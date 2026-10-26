@@ -14,7 +14,7 @@ import fcntl
 import os
 from pathlib import Path
 
-from base.paths import meiva_home, run_dir
+from base.paths import run_dir
 
 MARKER_GLOB = "*pause*"
 
@@ -86,13 +86,12 @@ def claimed_state(path: Path) -> str:
 # The live fact decides, never the file's age and never the command that wrote it: a marker goes
 # only where the home serves (agent host and meiva-root both running), and a home that is not
 # serving keeps every marker, because nothing there proves its claim wrong.
-def sweep(home: Path | None = None) -> list[str]:
-    target = meiva_home() if home is None else home
-    markers = marker_paths(target)
+def sweep(home: Path) -> list[str]:
+    markers = marker_paths(home)
     if not markers:
         return []
-    serving = agent_host_running(target)
-    root = root_running(target)
+    serving = agent_host_running(home)
+    root = root_running(home)
     if not serving or root is not True:
         named = ", ".join(path.name for path in markers)
         return [
