@@ -388,8 +388,9 @@ def harness_availability() -> list[HarnessAvailability]:
 
     Each row says whether the harness's command is installed and whether it is signed
     in, with a readable reason. A sign-in state that cannot be read here reports
-    `unknown` instead of being guessed. The check reads this machine only: it starts no
-    session, runs no command and spends no quota.
+    `unknown` instead of being guessed, and an unproven sign-in is never reported as a
+    proven one. The check asks that harness's own CLI for its login state under a
+    bounded timeout; it starts no session, spends no quota and reads this machine only.
     """
     from base.agents.birth.harness import probe_local_harnesses
 

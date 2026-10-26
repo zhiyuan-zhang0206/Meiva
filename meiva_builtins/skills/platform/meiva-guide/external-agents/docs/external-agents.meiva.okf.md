@@ -17,6 +17,7 @@ tags:
 - **Tool choice**: verify availability and capability using the actual installed tool; use `meiva-workflow` for task decomposition and verification criteria.
 - **Persistent sessions are the default**: start in `meiva.shell.sessions`, steer across rounds; headless one-shot (`claude -p` / `codex exec`) is rarely needed. **Flags and models drift with versions**, text is a snapshot not a contract.
 - **Two modes, no leakage**: Mode A's task/work files and supervisor belong to delegated workers only; a takeover runs file-less and supervisor-less (`--prompt`), with start = interruption (checkpoint + pause) and end = one resume system note.
+- **Availability is three states behind one word**: the spawn picker greys a row with a single `unavailable`, and which probe state (`available` / `unavailable` / `unknown`) sits behind it decides the advice. The diagnosis order, the per-harness login checks and the two false alarms (a macOS Keychain login read over SSH, an absent `~/.claude/.credentials.json`) are in `references/harness-availability.md`; `dsh` is not a harness value, so the picker never describes it.
 
 ## Canonical Codex lifecycle
 

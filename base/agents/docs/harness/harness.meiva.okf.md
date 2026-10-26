@@ -75,13 +75,13 @@ gates keep rows born before the rule inert. The set, both gates and what
 ## The availability probe
 
 `meiva.agents.harness_availability()` reports one row per harness for this machine.
-A row carries a status — `available` (installed, and the store holds a token),
-`unavailable` (not installed, a store holding no token, or credentials that cannot
-renew and have expired) or `unknown` (installed, but the store is missing or
-unreadable) — plus a readable reason, the resolved executable path (symlinks
-followed, so not always the name on PATH) and whether PATH led to it.
+A row carries a status — `available` (installed, and the CLI or the store shows a
+live sign-in), `unavailable` (not installed, no sign-in, or credentials that
+cannot renew and have expired) or `unknown` (installed, but no login state could
+be read) — plus a readable reason, the executable a session would start and
+whether PATH led to it.
 
-The probe reads a credential store; it does not authenticate. Two distinctions
+The probe asks about a stored sign-in; it does not authenticate. Two distinctions
 follow. A store is evidence, an account record is not: `~/.claude.json` keeps
 `oauthAccount` after the login behind it dies, so a probe reading it alone called
 an ubuntu machine signed in while its CLI reported `loggedIn: false`; the record
@@ -97,12 +97,16 @@ The store has to belong to the CLI: Antigravity's IDE writes
 `antigravity-cli/antigravity-oauth-token`, and an IDE-only machine answers
 `authentication required` — so only the CLI's file is read.
 
-The probe reads the filesystem only. It runs no CLI, so it cannot hang on a login
-prompt, spend quota or start a session. When PATH misses a user-level install the
-probe still looks in the conventional bin directories, because an agent process
-starts without the interactive shell profile; `on_path=false` says that is how the
-executable was found. A harness whose credentials are kept somewhere the probe
-does not know reports `unknown` rather than an invented answer.
+The probe asks the CLI, then reads the store. It runs `claude auth status --json`,
+`codex login status` or `agy models` — the one that belongs to that harness —
+through the environment a session would be handed and under a bounded timeout,
+and falls back to the stored credential only when the CLI cannot answer: a
+timeout, a binary that will not run, or output that names no login state. Neither
+path starts a session or spends model quota, and a sign-in nobody can prove stays
+`unknown` rather than an invented answer. When PATH misses a user-level install
+the probe still looks in the conventional bin directories, because an agent
+process starts without the interactive shell profile; `on_path=false` says that
+is how the executable was found.
 
 Recording and validating the harness is one slice: the launchers that actually
 start a session on an external harness are separate, and they read this column

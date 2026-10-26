@@ -58,3 +58,36 @@ agent's normal timeline.
 
 Relay mechanics and the operator-side setup are in
 `docs/conventions/agents/agent-impersonation-hosts.md#deepseek-harness-dsh` in the Meiva source checkout.
+
+## Availability: `dsh` has no row in the picker
+
+`dsh` is not a `Harness` value. An agent's harness is the built-in `meiva` runtime,
+`claude_code`, `codex` or `antigravity`, so the spawn form's availability row
+(the three states in [why a harness shows unavailable](harness-availability.md))
+never describes `dsh`. Nothing on the form reports a machine's `dsh` before a
+launch, and the launcher does not probe it either: a takeover launch has no
+capability line, no version floor and no flag check.
+
+What a launch does check is narrower, and it fails before the session starts:
+`spawn_dsh.py` resolves `node` and `dsh` through PATH alone, so a CLI installed
+under an npm global prefix that the launching process does not carry on PATH is
+reported as missing:
+
+```text
+DeepSeek Harness needs `node` and `dsh` on PATH (install with `npm install -g @deepseek-ai/dsh`)
+```
+
+Check a machine in this order:
+
+```bash
+command -v node dsh                                  # both, or the launch refuses
+dsh --version
+dsh --profile headless "Reply with exactly: OK"      # the only proof the key resolves
+```
+
+The third command spends a token or two and is still cheaper than a takeover
+that dies at its first model call.
+
+Pending real-machine acceptance: #5425 (Antigravity) / #5334 (dsh). No `dsh`
+takeover has been walked end to end yet; add what the launch and the first model
+call actually did when #5334 completes.
