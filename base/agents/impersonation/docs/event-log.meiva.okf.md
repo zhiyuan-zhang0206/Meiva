@@ -94,8 +94,10 @@ controller process that opened it, when it detaches; a controller killed before
 its detach, or one whose seal was lost to a transient write failure, leaves the
 receipt open with no process able to finish it. `seal_abandoned_event_sources`
 is that missing retry: past `MEIVA_IMPERSONATION_EVENT_ABANDON_GRACE_SECONDS`
-after `ended_at`, the ttl reaper seals the receipt with the rows it holds (the
-count a graceful detach would seal) and first writes an `event_source_abandoned`
+after `ended_at` (which config refuses to load unless it exceeds both
+`MEIVA_IMPERSONATION_EVENT_SEAL_WAIT_SECONDS` and 60 seconds), the ttl reaper seals the
+receipt with the rows it holds (the count a graceful detach would seal) and first writes
+an `event_source_abandoned`
 lifecycle entry holding the source key, when it opened, its row count and the
 reason. The log therefore completes and still says what was lost: a reclaim is a
 declared gap, never a silent one. Inside the grace the receipt belongs to its
@@ -103,14 +105,19 @@ controller and is left alone.
 
 ## Signal
 
-State signal only, no thresholds, reported once per lease and condition rather than on
-every pass: `seal_stuck` for an ended lease still waiting on an open receipt (clears when
-the source seals or the abandoned-receipt pass reclaims it) and `capture_failed` for a
-lease with a failed receipt (permanent, because the lease can no longer complete). The
-pass writes an `event_log_incomplete` lifecycle entry recording the condition, the reason
-and the receipts behind it before it emits the event, so the lease's own log keeps what
-could not complete and a later pass stays quiet. The alert rule over the event stream
-owns the notification.
+State signal only, no thresholds, reported per lease and condition at most once per
+`MEIVA_IMPERSONATION_EVENT_REPORT_INTERVAL_SECONDS` (default a day): `seal_stuck` for an
+ended lease still waiting on an open receipt (clears when the source seals or the
+abandoned-receipt pass reclaims it) and `capture_failed` for a lease with a failed receipt
+(never clears, because a failed receipt never completes its lease). Each report is written
+as an `event_log_incomplete` lifecycle entry holding the condition, the reason and the
+receipts behind it before the event is emitted, so the lease's own log dates every report
+and a pass inside the cadence stays quiet.
+
+The cadence is what keeps a permanent defect visible: `capture_failed` re-reports for as
+long as the lease stays incomplete, so the alert keeps firing on that cadence instead of
+going quiet after the first day. A condition that clears costs exactly one report. The
+alert rule over the event stream owns the notification.
 
 ## Hand-off statistics
 

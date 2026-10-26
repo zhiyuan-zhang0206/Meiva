@@ -25,9 +25,10 @@ class ImpersonationTerminalNoticeFailed(TypedDict):
 
 # meiva:note
 # `impersonation_event_log_incomplete` payload, produced by
-# base/agents/impersonation/event_signals.py. One event per lease and condition, not one per pass:
-# the emitting pass writes an `event_log_incomplete` entry into that lease's log, and later passes
-# stay quiet while the row fact holds. `seal_stuck` is an ended lease still waiting on an open event
+# base/agents/impersonation/event_signals.py. At most one event per lease and condition per report
+# cadence (default daily), never one per pass: each report is written as an `event_log_incomplete`
+# entry into that lease's log, and passes inside the cadence stay quiet. A condition that never
+# clears therefore keeps re-reporting for as long as it holds. `seal_stuck` is an ended lease still waiting on an open event
 # source (clears when the source seals, or when the abandoned-receipt pass reclaims it);
 # `capture_failed` a lease with a failed source (permanent — a failed source never completes its
 # lease). The agent is the event's `agent_id`, and `pending_sources` names the receipts behind the
@@ -46,8 +47,8 @@ EVENTS: dict[str, EventSpec] = {
     "impersonation_event_log_incomplete": telemetry_event(
         "impersonation_event_log_incomplete",
         "an impersonation event log cannot complete on its own (ended lease with an "
-        "open source, or a failed capture source); reported once per lease and "
-        "condition, recorded in that lease's log",
+        "open source, or a failed capture source); reported per lease and condition at "
+        "most once per report cadence, each report recorded in that lease's log",
         payload=ImpersonationEventLogIncomplete,
         tier="anomaly",
     ),

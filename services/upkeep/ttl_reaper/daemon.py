@@ -103,6 +103,9 @@ def ttl_reaper_config(config: ConfigBoot) -> TtlReaperConfig:
         impersonation_event_abandon_grace_s=(
             config.view.general.impersonation_event_abandon_grace_seconds
         ),
+        impersonation_event_report_interval_s=(
+            config.view.general.impersonation_event_report_interval_seconds
+        ),
         zone=clock.zone(),
         clock=clock,
     )
