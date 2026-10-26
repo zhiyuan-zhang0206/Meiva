@@ -25,6 +25,7 @@ import {
 import { noteTurnStart } from "../format/interaction-timing";
 import type { CompactTransitionBuffer } from "../layout/compact-transition";
 import { CONVERSATION_RETENTION_MS } from "../layout/switch-budget";
+import { systemWallNow } from "../transport/system-transport";
 import { useAgentEventStream } from "../transport/useEventStream";
 import {
   computeOlderPageLimit,
@@ -44,12 +45,18 @@ const RETAINED_ITEMS_FALLBACK = 250;
 const EMPTY_ITEMS: BackendTimelineItem[] = [];
 const timelineRuntime: {
   runTransition: (cb: () => void) => void;
+  wallNow: () => number;
 } = {
   runTransition: startTransition,
+  wallNow: systemWallNow,
 };
 
 export function setTimelineTransitionForTest(runner?: (cb: () => void) => void): void {
   timelineRuntime.runTransition = runner ?? startTransition;
+}
+
+export function setTimelineWallNowForTest(wallNow?: () => number): void {
+  timelineRuntime.wallNow = wallNow ?? systemWallNow;
 }
 
 export interface UseTimelineResult {
@@ -258,7 +265,7 @@ export function useTimeline(
       if (ev.role === "token_usage") return;
       if (startsTurn(ev)) noteTurnStart(ev.agent_id);
 
-      const apply = () => processSseEvent(ev, Date.now());
+      const apply = () => processSseEvent(ev, timelineRuntime.wallNow());
       if (isStreamingDelta(ev)) {
         timelineRuntime.runTransition(apply);
       } else {
@@ -284,7 +291,7 @@ export function useTimeline(
         if (startsTurn(ev)) noteTurnStart(ev.agent_id);
       }
       const hasStreaming = filtered.some((ev) => isStreamingDelta(ev));
-      const apply = () => processSseEventBatch(filtered, Date.now());
+      const apply = () => processSseEventBatch(filtered, timelineRuntime.wallNow());
       if (hasStreaming) {
         timelineRuntime.runTransition(apply);
       } else {
@@ -421,7 +428,7 @@ export function useTimeline(
     const st = useTimelineStore.getState();
     const transitionedFromRunning = prev.id === agentId && prev.status === "running";
     if (transitionedFromRunning || (!st.turnActive && hasUnsettledClock(st.items))) {
-      st.settleTurn(Date.now());
+      st.settleTurn(timelineRuntime.wallNow());
       if (transitionedFromRunning) {
         void queryClient.invalidateQueries({ queryKey: ["timeline", agentId] });
       }
