@@ -9,7 +9,12 @@ from agent import impersonation
 from agent.nodes import END
 from agent.state import BaseAgentState
 from agent.takeover.relay import STALE_RELAY_REASON
-from agent.tests.impersonation.lease_support import Cluster, exited_child, native_context
+from agent.tests.impersonation.lease_support import (
+    Cluster,
+    exited_child,
+    fixed_clock,
+    native_context,
+)
 from agent.tests.impersonation.lease_support import cluster as cluster
 from agent.tests.impersonation.lease_support import sleeper as sleeper
 from base.agents import impersonation as leases
@@ -36,6 +41,7 @@ async def _supervise(
         owner.agent_id,
         relays,
         incarnation=owner if native else None,
+        clock=fixed_clock(),
     )
 
 

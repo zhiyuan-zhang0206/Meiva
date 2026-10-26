@@ -7,6 +7,7 @@ from enum import Enum
 from pathlib import Path
 
 from agent.takeover.gate import LeasePhase
+from base.clock import Clock
 
 SPAWNED_PROVIDERS = ("codex", "antigravity")
 UNBOUND_REASON = "request has no relay binding"
@@ -26,9 +27,10 @@ class RelayWait:
 # The facts a native host reads once and hands to the takeover shells: its own machine
 # name, the root of the per-agent workspaces, the command prefix that starts a bound
 # relay (the `meiva` entry point; `impersonate relay ...` follows it) and the relay
-# readiness tuning, and the generator relay credentials are drawn from (a cryptographically
-# secure one in production: the credential authenticates the relay to the lease). A test hands
-# in a temporary root, a small script as the program, a short wait and a seeded generator.
+# readiness tuning, the generator relay credentials are drawn from (a cryptographically secure
+# one in production: the credential authenticates the relay to the lease) and the clock its waits
+# read and sleep on. A test hands in a temporary root, a small script as the program, a short
+# wait and a seeded generator.
 # meiva:link agent/docs/impersonation/relay-supervision.meiva.okf.md
 @dataclass(frozen=True)
 class TakeoverHost:
@@ -36,6 +38,7 @@ class TakeoverHost:
     workspaces_root: Path
     relay_program: tuple[str, ...]
     rng: random.Random
+    clock: Clock
     wait: RelayWait = RelayWait()
 
     def workspace(self, agent_id: int) -> Path:

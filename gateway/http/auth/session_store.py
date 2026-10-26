@@ -17,18 +17,11 @@ from typing import Any
 from psycopg.rows import dict_row
 from psycopg_pool import ConnectionPool
 
-from base.clock import SYSTEM_TIMERS, Clock, ClockConfig
 from base.db.transaction import write_transaction
 from base.host.net.auth import new_session_id
 
 _CACHE_TTL = timedelta(seconds=30)
 _SESSION_CACHE_MAX_ENTRIES = 4096
-
-
-def _now() -> datetime:
-    return Clock(
-        ClockConfig("UTC", None, message_timestamp_weekday=False), timers=SYSTEM_TIMERS
-    ).now()
 
 
 def minted_session_id(mint: str) -> str:
@@ -104,18 +97,17 @@ class SessionStore:
         session_id: str | None,
         *,
         admitted: Collection[str],
-        now: datetime | None = None,
+        now: datetime,
     ) -> bool:
         """Whether a session carries an `admitted` mint, exists, is unrevoked and
         has not expired. A mint no longer admitted is refused before the cache and
         the database are consulted."""
         if not session_id or session_mint(session_id) not in admitted:
             return False
-        checked_at = now if now is not None else _now()
         cached = self._cache.get(session_id)
         if cached is not None:
             cache_deadline, expires_at = cached
-            if checked_at < cache_deadline and checked_at < expires_at:
+            if now < cache_deadline and now < expires_at:
                 with suppress(KeyError):
                     self._cache.move_to_end(session_id)
                 return True
@@ -130,10 +122,10 @@ class SessionStore:
         if row is None:
             return False
         _, expires_at, revoked_at = row
-        if revoked_at is not None or expires_at <= checked_at:
+        if revoked_at is not None or expires_at <= now:
             return False
 
-        self._cache[session_id] = (min(checked_at + _CACHE_TTL, expires_at), expires_at)
+        self._cache[session_id] = (min(now + _CACHE_TTL, expires_at), expires_at)
         with suppress(KeyError):
             self._cache.move_to_end(session_id)
         if len(self._cache) > self._max_cache_entries:

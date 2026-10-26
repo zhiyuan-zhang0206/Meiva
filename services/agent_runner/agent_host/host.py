@@ -394,6 +394,7 @@ class AgentHost:
             agent_id,
             self.relays,
             incarnation=incarnation,
+            clock=self._handoff_stamping.clock,
         )
         # meiva:note
         # An earlier ordinary failure can leave a buffered tail. Preserve

@@ -22,7 +22,7 @@ that follows it (or the segment's baseline, or nothing), and `snapshot_wait.py` 
 `strict` module) says whether a checkpoint holds a state's last message
 (`snapshot_verdict`) and when a message was read (`read_time`). `understanding_chunks.py`
 is the shell: it reads the config, enqueues through `enqueue_chunk`, polls the checkpoint
-table and sleeps. Its tests run the shell against the throwaway Postgres.
+table and sleeps on the `timers` it is given (the context's clock). Its tests run the shell against the throwaway Postgres.
 
 ## Entry Points
 

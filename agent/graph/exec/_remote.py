@@ -13,10 +13,10 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
-import time
 from pathlib import Path
 from typing import Any, TypeGuard
 
+from base.clock import Timers
 from base.sessions.exec_host import protocol
 from base.sessions.exec_host.paths import service_socket_path
 
@@ -127,8 +127,9 @@ async def _stream_exec_host(
     chunk_publisher: ExecOutputChunkPublisher | None,
     cancel_event: asyncio.Event,
     timeout: float,
+    timers: Timers,
 ) -> tuple[int | None, bool, bool] | ExecCrashed:
-    started = time.monotonic()
+    started = timers.monotonic()
     deadline = started + timeout
     last_activity = started
     cancel_sent = False
@@ -151,7 +152,7 @@ async def _stream_exec_host(
         last_activity, should_cancel = _apply_poll_beat(
             stream,
             chunk_publisher,
-            now=time.monotonic(),
+            now=timers.monotonic(),
             last_activity=last_activity,
             deadline=deadline,
             cancel_requested=cancel_event.is_set(),
@@ -177,6 +178,7 @@ async def run_via_exec_host(
     cancel_event: asyncio.Event,
     config_overlay: dict[str, object] | None,
     birth_config: dict[str, object] | None,
+    timers: Timers,
 ) -> tuple[int | None, bool, bool] | ExecCrashed | None:
     connection = await _open_exec_host(exec_host_socket(exec_dir))
     if connection is None:
@@ -212,6 +214,7 @@ async def run_via_exec_host(
             chunk_publisher,
             cancel_event,
             timeout,
+            timers,
         )
     finally:
         writer.close()

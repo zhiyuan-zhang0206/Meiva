@@ -15,7 +15,7 @@ from gateway.agents.reply_suggestion.service import (
     ReplySuggestionConfigurationError,
     ReplySuggestionService,
 )
-from gateway.http.config import gateway_config
+from gateway.http.config import gateway_clock, gateway_config
 from gateway.http.disconnect import run_until_disconnect
 from gateway.http.middleware.error_envelope import error_response
 
@@ -46,7 +46,7 @@ async def post_reply_suggestion(
                 agent_id,
                 db=request.app.state.db,
                 policy=request.app.state.reply_suggestion_policy,
-                rendering=timeline_rendering(gateway_config(request)),
+                rendering=timeline_rendering(gateway_config(request), gateway_clock(request)),
                 catalog=catalog,
                 keys=keys,
             ),

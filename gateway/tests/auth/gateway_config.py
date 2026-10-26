@@ -85,7 +85,9 @@ def gateway_test_config(
 # Replace the frozen config of a running test app with a copy that has `changes` applied. A
 # handler reads `app.state.gateway_config` at each request, so the next request sees the new
 # value; use it where one test needs two values of one tunable, and build a second app
-# (`gateway_test_client(config=...)`) where the tunable must hold from the start.
+# (`gateway_test_client(config=...)`) where the tunable must hold from the start. Only the config
+# is replaced: `app.state.clock` was built from the original `config.clock` and is not rebuilt, so
+# a test that varies the clock configuration builds a second app too.
 def reconfigure(client: TestClient, **changes: Any) -> GatewayConfig:
     app = cast(FastAPI, client.app)
     app.state.gateway_config = replace(app.state.gateway_config, **changes)
