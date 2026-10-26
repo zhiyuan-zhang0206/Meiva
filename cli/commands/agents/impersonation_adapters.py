@@ -89,9 +89,11 @@ RelayAdapter = ClaudeStdout | DshStdout | CodexSteer | AntigravitySend
 # runtime is handed the record the request wrote, by path; a hand-started relay falls back to
 # the same lookup (its own host-provided environment, then that record). Neither path guesses
 # at a language_server process, which a standalone `agy` CLI never produces.
-def _antigravity_server(thread_id: UUID, endpoint_record: str | None) -> AntigravityServer:
+def _antigravity_server(
+    thread_id: UUID, endpoint_record: str | None, *, injected: AntigravityServer | None
+) -> AntigravityServer:
     if endpoint_record is None:
-        return resolve_antigravity_endpoint(str(thread_id))
+        return resolve_antigravity_endpoint(str(thread_id), antigravity_server=injected)
     path = Path(endpoint_record)
     server = read_antigravity_endpoint_file(path)
     if server is None:
@@ -116,7 +118,11 @@ def codex_endpoint(remote: str | None, *, codex_home: str | None) -> str:
 # Bind the planned destination before the relay opens its inbox, so an unreachable host fails
 # startup and rolls the acceptance back instead of failing after the first heartbeat.
 def bind_adapter(
-    destination: RelayDestination, *, codex_home: str | None, stdout: TextIO
+    destination: RelayDestination,
+    *,
+    codex_home: str | None,
+    antigravity_server: AntigravityServer | None,
+    stdout: TextIO,
 ) -> RelayAdapter:
     match destination:
         case ClaudeSession():
@@ -126,7 +132,9 @@ def bind_adapter(
         case CodexThread(thread_id=thread_id, remote=remote):
             return CodexSteer(thread_id, codex_endpoint(remote, codex_home=codex_home))
         case AntigravityConversation(thread_id=thread_id, endpoint_record=record):
-            return AntigravitySend(thread_id, _antigravity_server(thread_id, record))
+            return AntigravitySend(
+                thread_id, _antigravity_server(thread_id, record, injected=antigravity_server)
+            )
         case _:
             assert_never(destination)
 
