@@ -12,7 +12,9 @@ leaves no anchor.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, NamedTuple
+
+from langchain_core.messages import BaseMessage, SystemMessage
 
 # The boundary checkpoint's metadata key holding the anchor.
 METADATA_KEY = "compact_anchor"
@@ -51,3 +53,21 @@ class ClosingRequest:
         if not isinstance(tokens, int) or tokens <= 0 or not isinstance(extra, int):
             return None
         return cls(tokens, extra, model if isinstance(model, str) else None)
+
+
+# meiva:note
+# Stitched message history paired with per-segment leading SystemMessage heads, body start indices, and closing anchors.
+class FullHistory(NamedTuple):
+    messages: list[BaseMessage]
+    segment_heads: tuple[SystemMessage | None, ...]
+    segment_starts: tuple[int, ...]
+    segment_closings: tuple[ClosingRequest | None, ...] = ()
+
+
+# meiva:note
+# Wraps a single uncompacted message list into a 1-segment FullHistory separating any leading SystemMessage head.
+def single_segment_history(messages: list[BaseMessage]) -> FullHistory:
+    if not messages:
+        return FullHistory([], (), ())
+    head = messages[0] if isinstance(messages[0], SystemMessage) else None
+    return FullHistory(messages, (head,), (1 if head is not None else 0,))

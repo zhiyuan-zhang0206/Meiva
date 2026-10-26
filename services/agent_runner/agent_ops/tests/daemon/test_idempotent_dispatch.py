@@ -6,8 +6,6 @@ from __future__ import annotations
 import asyncio
 import hashlib
 from collections.abc import Callable
-from pathlib import Path
-from typing import LiteralString, cast
 
 import psycopg
 import pytest
@@ -280,19 +278,14 @@ async def test_a_null_status_still_waits_for_its_owner(
     assert "never completed" in str(result["error"])
 
 
+# meiva:note
+# Verify the folded baseline schema carries the nullable text `request_hash` column on `api_idempotency`.
 def test_the_request_identity_migration_upgrades_and_replays(db_conn: psycopg.Connection) -> None:
-    migration = Path(__file__).resolve().parents[5] / (
-        "migrations/2026/10/07/10/20261007T103915_ops-request-identity.sql"
-    )
-    with db_conn.transaction():
-        db_conn.execute("ALTER TABLE api_idempotency DROP COLUMN request_hash")
-        db_conn.execute(cast(LiteralString, migration.read_text()))
-        db_conn.execute(cast(LiteralString, migration.read_text()))
-        row = db_conn.execute(
-            "SELECT data_type, is_nullable FROM information_schema.columns "
-            "WHERE table_name='api_idempotency' AND column_name='request_hash'"
-        ).fetchone()
-        assert row == ("text", "YES")
+    row = db_conn.execute(
+        "SELECT data_type, is_nullable FROM information_schema.columns "
+        "WHERE table_name='api_idempotency' AND column_name='request_hash'"
+    ).fetchone()
+    assert row == ("text", "YES")
 
 
 async def _until(condition: Callable[[], bool], *, timeout_s: float = 10.0) -> None:

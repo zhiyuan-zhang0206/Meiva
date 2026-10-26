@@ -4,7 +4,3 @@ exports = ["api_keys.py", "config_authority.py", "configuration.py", "served_gat
 "conftest.py" = ["config_authority.py"]
 "test_config_boot_owner.py" = ["_boot_owner_child.py"]
 "test_slice_defaults.py" = ["configuration.py"]
-
-[debt.first-party-patch]
-"_boot_lite_child.py#assignment base.config._full.build" = 8
-"test_config_boot_owner.py#monkeypatch.setattr base.config._full.build" = 2

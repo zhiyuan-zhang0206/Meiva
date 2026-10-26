@@ -19,7 +19,7 @@ if TYPE_CHECKING:
     # does not use the type).
     from langchain_core.language_models.chat_models import BaseChatModel
 
-from base.host.env.agent_slices import ModelOverrides
+from base.host.env.agent_env import ModelOverrides
 from base.lm.catalog.decide.types import DecisionBinding, DecisionBuildContext, DecisionModelSpec
 from base.lm.catalog.provider_keys import ProviderKeys
 from base.lm.compat.stop import StopSpec

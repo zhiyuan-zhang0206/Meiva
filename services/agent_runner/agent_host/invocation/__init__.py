@@ -10,7 +10,6 @@ from pathlib import Path
 from langchain_core.runnables import RunnableConfig
 from langgraph.graph.state import CompiledStateGraph
 from loguru import logger
-from psycopg_pool import AsyncConnectionPool
 
 from agent.impersonation import process_host, settle_checkpoint
 from agent.impersonation_handoff import flush_checkpoint, resume_note_pending
@@ -20,7 +19,7 @@ from agent.turn.trace_checkpoint import attach_trace_checkpoint_ref
 from base.agents.context import MeivaContext
 from base.agents.messages.timestamp_policy import TimestampSource
 from base.agents.observation.relay_supervision import RelaySupervision
-from base.db import Database
+from base.db.protocols import AsyncPool, DatabaseLike
 from base.events.live.bus import EventBus
 from services.agent_runner.agent_host.db_recovery import database_phase
 from services.agent_runner.agent_host.invocation.checkpoints import TurnCheckpoints
@@ -45,7 +44,7 @@ class PendingWorkResult:
 
 @dataclass(frozen=True)
 class HandoffSettlement:
-    db: Database
+    db: DatabaseLike
     bus: EventBus
     relays: RelaySupervision
     timestamps: TimestampSource
@@ -112,7 +111,7 @@ async def finish_pending_failure(
 
 
 async def finish_completed_invocation(
-    pool: AsyncConnectionPool,
+    pool: AsyncPool,
     checkpoints: TurnCheckpoints,
     agent_id: int,
     ctx: MeivaContext,

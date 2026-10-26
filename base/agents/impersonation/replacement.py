@@ -7,18 +7,15 @@ abort reason below, and the replacement resumes through the ordinary return chai
 An external controller must request again.
 """
 
-from typing import Any
-
-import psycopg
-
 from base.agents.impersonation.status import is_log_native
+from base.db.protocols import AsyncConnectionLike
 from base.native_process.runtime_incarnation import RuntimeIncarnation
 
 REPLACED_DETAIL = "native runtime restarted"
 
 
 async def end_for_replacement(
-    conn: psycopg.AsyncConnection[Any], agent_id: int, incarnation: RuntimeIncarnation
+    conn: AsyncConnectionLike, agent_id: int, incarnation: RuntimeIncarnation
 ) -> str | None:
     # meiva:note
     # Close the agent's accepted or active lease if another incarnation accepted it.

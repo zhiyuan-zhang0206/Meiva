@@ -11,7 +11,3 @@ exports = ["constants.py", "packing.py"]
 [debt.impure-call]
 "packing.py#Path.read_bytes" = 1
 "packing.py#Path.stat" = 1
-
-[debt.impure-edge]
-"packing.py#base/lm/factory.py" = 1
-"packing.py#base/lm/provider_api.py" = 1

@@ -6,7 +6,6 @@ from collections.abc import Mapping
 from typing import Any
 from uuid import UUID
 
-import psycopg
 from psycopg.rows import dict_row
 
 from base.agents.impersonation.status import (
@@ -17,6 +16,7 @@ from base.agents.impersonation.status import (
     parse_lease,
 )
 from base.api_contracts.agent_contract import AgentStatus, Harness
+from base.db.protocols import SyncConnection
 from base.native_process.runtime_incarnation import RuntimeIncarnation
 
 
@@ -28,7 +28,7 @@ def token_hash(token: str) -> str:
     return hashlib.sha256(token.encode()).hexdigest()
 
 
-def lock_agent(conn: psycopg.Connection, agent_id: int) -> dict[str, Any]:
+def lock_agent(conn: SyncConnection, agent_id: int) -> dict[str, Any]:
     with conn.cursor(row_factory=dict_row) as cur:
         cur.execute("SELECT * FROM agents_meta WHERE id=%s FOR UPDATE", (agent_id,))
         row = cur.fetchone()
@@ -37,7 +37,7 @@ def lock_agent(conn: psycopg.Connection, agent_id: int) -> dict[str, Any]:
     return row
 
 
-def lock_lease(conn: psycopg.Connection, lease_id: str) -> LeaseRecord:
+def lock_lease(conn: SyncConnection, lease_id: str) -> LeaseRecord:
     # Read only the immutable foreign key first; all mutations acquire the agent
     # lock before the lease or inbox, matching native ownership and claim order.
     row = conn.execute(
@@ -69,7 +69,7 @@ def public(lease: Mapping[str, Any]) -> dict[str, Any]:
 # lagging reaper -- a released lease keeps its future `expires_at` (real rows show 4h/8h TTLs
 # ended early), so testing the clock alone reports a lease nobody holds. Read-only: the
 # caller owns the transaction and the failure semantics.
-def live_lease_on_machine(conn: psycopg.Connection, machine: str) -> tuple[str, str] | None:
+def live_lease_on_machine(conn: SyncConnection, machine: str) -> tuple[str, str] | None:
     row = conn.execute(
         "SELECT id::text, source, executor_name FROM agent_impersonations "
         "WHERE machine=%s AND status IN ('requested','accepted','active') "
@@ -131,7 +131,7 @@ def require_meiva_harness(meta: Mapping[str, Any]) -> None:
         )
 
 
-def require_native(conn: psycopg.Connection, incarnation: RuntimeIncarnation) -> dict[str, Any]:
+def require_native(conn: SyncConnection, incarnation: RuntimeIncarnation) -> dict[str, Any]:
     meta = lock_agent(conn, incarnation.agent_id)
     require_meiva_harness(meta)
     if (meta["runtime_generation"], meta["runtime_owner"]) != (
@@ -142,7 +142,7 @@ def require_native(conn: psycopg.Connection, incarnation: RuntimeIncarnation) ->
     return meta
 
 
-def dismiss_reminders(conn: psycopg.Connection, lease: Mapping[str, Any]) -> None:
+def dismiss_reminders(conn: SyncConnection, lease: Mapping[str, Any]) -> None:
     """Retire this lease's pending renewal reminders, in the lease transaction.
 
     Reminders are written for the external controller only; once the lease
@@ -157,7 +157,7 @@ def dismiss_reminders(conn: psycopg.Connection, lease: Mapping[str, Any]) -> Non
     )
 
 
-def expire(conn: psycopg.Connection, lease: LeaseRecord) -> LeaseRecord:
+def expire(conn: SyncConnection, lease: LeaseRecord) -> LeaseRecord:
     if lease["status"] not in OPEN:
         return lease
     fresh = conn.execute("SELECT %s > clock_timestamp()", (lease["expires_at"],)).fetchone()
@@ -227,7 +227,7 @@ def validate_active(
 
 
 def require_active_locked(
-    conn: psycopg.Connection,
+    conn: SyncConnection,
     lease: LeaseRecord,
     *,
     local_machine: str,
@@ -297,7 +297,7 @@ def authenticate_relay(
 
 
 def require_relay_active_locked(
-    conn: psycopg.Connection,
+    conn: SyncConnection,
     lease: LeaseRecord,
     relay_token: str,
     *,
@@ -320,7 +320,7 @@ def require_relay_active_locked(
         raise ImpersonationError("Agent placement or lifecycle changed")
 
 
-def close_event_admission(conn: psycopg.Connection, lease_id: str) -> bool:
+def close_event_admission(conn: SyncConnection, lease_id: str) -> bool:
     """Close a log-native lease's admission gate through its narrow SQL door."""
     row = conn.execute(
         "SELECT close_impersonation_event_admission(%s)",

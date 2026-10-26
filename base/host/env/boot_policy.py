@@ -12,7 +12,21 @@ from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import TypeGuard
 
-__all__ = ["BootstrapFetch", "fetch_backoff", "serve_flag", "validated_bootstrap_payload"]
+__all__ = [
+    "PLACEHOLDER_DB_URL",
+    "BootstrapFetch",
+    "fetch_backoff",
+    "serve_flag",
+    "validated_bootstrap_payload",
+]
+
+# meiva:note
+# Planted as MEIVA_DB_URL when a boot has no cluster connection facts (the lite
+# boot's placeholders, `base/config/_lite.py`). A syntactically valid URL that
+# can never reach a real database (port 1 on loopback), so a stray connection
+# fails loudly instead of silently hitting a database a host `.env` points at.
+# base/db.connect() detects it and raises an actionable error.
+PLACEHOLDER_DB_URL = "postgresql://no-cluster@127.0.0.1:1/run-meiva-start-first"
 
 _TRUTHY = frozenset({"1", "true", "yes", "on"})
 

@@ -3,16 +3,14 @@
 from __future__ import annotations
 
 import tomllib
-from pathlib import Path
 
 _INDEX = "https://pypi.org/simple"
 _ARTIFACT_PREFIX = "https://files.pythonhosted.org/packages/"
 
 
-def violations(path: Path) -> list[str]:
+def violations(lock_text: str) -> list[str]:
     """Report registry packages whose index or artifact transport is host-specific."""
-    with path.open("rb") as stream:
-        lock = tomllib.load(stream)
+    lock = tomllib.loads(lock_text)
     errors: list[str] = []
     for package in lock["package"]:
         source = package["source"]

@@ -27,8 +27,6 @@ from base.deploy.schema.tests.migration_support import (
 )
 from base.paths.home import resolve_meiva_home
 
-_MIGRATIONS = SCHEMA_SQL.parents[1] / "migrations"
-
 
 def test_fresh_schema_sql_bootstrap_is_baselined(machine_identity: MachineIdentityReader) -> None:
     """The real fresh-DB bootstrap: apply db/schema.sql to an empty database and
@@ -139,54 +137,8 @@ def test_the_version_gate_and_the_agent_status_check_survive_the_contraction(
         conn.rollback()
 
 
-_POSTURE_STATE = "20261020T151143_drop-host-deploy-state"
-
-
-# meiva:note
-# An older cluster still carries the per-host posture table; the migration removes it
-# and replays as a no-op.
-def test_the_migration_drops_the_posture_table_of_an_upgraded_cluster(
-    machine_identity: MachineIdentityReader,
-) -> None:
-    with throwaway_database("posture_upgrade") as url:
-        with psycopg.connect(url, autocommit=True) as conn:
-            conn.execute(cast(LiteralString, SCHEMA_SQL.read_text()))
-            conn.execute(
-                "CREATE TABLE host_deploy_state (machine TEXT PRIMARY KEY, "
-                "posture TEXT NOT NULL DEFAULT 'idle', "
-                "updated_at TIMESTAMPTZ NOT NULL DEFAULT now())"
-            )
-            conn.execute("INSERT INTO host_deploy_state (machine) VALUES ('m1')")
-
-        with psycopg.connect(url) as conn:
-            applied = apply_pending_migrations(
-                conn,
-                machine_name=machine_identity.name,
-                migrations_dir=MIGRATIONS_DIR,
-                home=resolve_meiva_home(),
-            )
-            assert _POSTURE_STATE in applied
-            row = conn.execute("SELECT to_regclass('public.host_deploy_state')").fetchone()
-            assert row == (None,)
-
-        with psycopg.connect(url) as conn:
-            assert (
-                apply_pending_migrations(
-                    conn,
-                    machine_name=machine_identity.name,
-                    migrations_dir=MIGRATIONS_DIR,
-                    home=resolve_meiva_home(),
-                )
-                == []
-            )
-
-
 # ── Contraction of the delivery watchdog's durable retry state ──
-#
-# `20261011T191500_drop-dead-delivery-watchdog-state` drops the two watchdog
-# tables and the three per-inbound dispatch columns nothing reads or writes any more.
 
-_WATCHDOG_STATE = "20261011T191500_drop-dead-delivery-watchdog-state"
 _WATCHDOG_TABLES = ("delivery_watchdog_alerted", "delivery_watchdog_attempts")
 _DISPATCH_COLUMNS = ("dispatch_count", "last_dispatch_at", "poisoned_at")
 
@@ -212,97 +164,9 @@ def _watchdog_state_present(conn: psycopg.Connection) -> tuple[list[str], list[s
     return tables, columns
 
 
-def test_a_fresh_database_has_none_of_the_dead_watchdog_state(
-    machine_identity: MachineIdentityReader,
-) -> None:
-    with throwaway_database("watchdog_fresh") as url, psycopg.connect(url) as conn:
-        conn.execute(cast(LiteralString, SCHEMA_SQL.read_text()))
-        conn.commit()
-        assert _watchdog_state_present(conn) == ([], [])
-        apply_pending_migrations(
-            conn,
-            machine_name=machine_identity.name,
-            migrations_dir=MIGRATIONS_DIR,
-            home=resolve_meiva_home(),
-        )
-        assert _watchdog_state_present(conn) == ([], [])
-
-
-def test_the_contraction_drops_the_state_of_an_upgraded_cluster_and_keeps_its_rows(
-    machine_identity: MachineIdentityReader,
-) -> None:
-    """An older cluster carries the objects (and rows in them); the migration removes
-    them, keeps every other inbound column, and replays as a no-op."""
-    with throwaway_database("watchdog_upgrade") as url:
-        with psycopg.connect(url, autocommit=True) as conn:
-            conn.execute(cast(LiteralString, SCHEMA_SQL.read_text()))
-            conn.execute(
-                "ALTER TABLE inbound_messages "
-                "ADD COLUMN dispatch_count INT NOT NULL DEFAULT 0, "
-                "ADD COLUMN last_dispatch_at TIMESTAMPTZ, "
-                "ADD COLUMN poisoned_at TIMESTAMPTZ"
-            )
-            conn.execute(
-                "CREATE TABLE delivery_watchdog_alerted ("
-                "inbound_id BIGINT PRIMARY KEY REFERENCES inbound_messages(id) ON DELETE CASCADE, "
-                "alerted_at TIMESTAMPTZ NOT NULL DEFAULT now())"
-            )
-            conn.execute(
-                "CREATE TABLE delivery_watchdog_attempts ("
-                "kind TEXT NOT NULL, agent_id BIGINT NOT NULL REFERENCES agents(id) ON DELETE CASCADE, "
-                "last_attempt_at TIMESTAMPTZ NOT NULL DEFAULT clock_timestamp(), "
-                "consecutive_failures INT NOT NULL DEFAULT 0, suppress_count INT NOT NULL DEFAULT 0, "
-                "PRIMARY KEY (kind, agent_id))"
-            )
-            conn.execute("INSERT INTO agents (id, label) VALUES (1, 'a')")
-            conn.execute("INSERT INTO agents_meta (id, status, machine) VALUES (1, 'idling', 'm')")
-            conn.execute(
-                "INSERT INTO inbound_messages (id, agent_id, kind, content, dispatch_count) "
-                "VALUES (10, 1, 'chat', 'hello', 3)"
-            )
-            conn.execute("INSERT INTO delivery_watchdog_alerted (inbound_id) VALUES (10)")
-            conn.execute(
-                "INSERT INTO delivery_watchdog_attempts (kind, agent_id) VALUES ('resurrect', 1)"
-            )
-            assert _watchdog_state_present(conn) == (
-                list(_WATCHDOG_TABLES),
-                sorted(_DISPATCH_COLUMNS),
-            )
-            conn.execute("DELETE FROM schema_migrations WHERE name = %s", (_WATCHDOG_STATE,))
-
-        with psycopg.connect(url) as conn:
-            applied = apply_pending_migrations(
-                conn,
-                machine_name=machine_identity.name,
-                migrations_dir=MIGRATIONS_DIR,
-                home=resolve_meiva_home(),
-            )
-            assert _WATCHDOG_STATE in applied
-            assert _watchdog_state_present(conn) == ([], [])
-            kept = conn.execute("SELECT content, status FROM inbound_messages WHERE id = 10")
-            assert kept.fetchone() == ("hello", "pending")
-
-        with psycopg.connect(url) as conn:
-            assert (
-                apply_pending_migrations(
-                    conn,
-                    machine_name=machine_identity.name,
-                    migrations_dir=MIGRATIONS_DIR,
-                    home=resolve_meiva_home(),
-                )
-                == []
-            )
-            migration = next(
-                path for path in _MIGRATIONS.rglob(f"{_WATCHDOG_STATE}.sql")
-            ).read_text()
-            conn.execute(cast(LiteralString, migration))  # replay: every statement is IF EXISTS
-            assert _watchdog_state_present(conn) == ([], [])
-
-
 # meiva:note
 # ── Retirement of the host fencing storage ──
 
-_FENCING = "20261020T073712_retire-host-fencing-storage"
 _FENCING_AGENT_COLUMNS = (
     "incarnation_resources",
     "last_admission_outcome",
@@ -337,87 +201,47 @@ def _fencing_state_present(conn: psycopg.Connection) -> tuple[list[str], list[st
     )
 
 
-# meiva:note
-# An older cluster carries the fencing columns, receipt table and done guard; the
-# migration removes them, keeps `last_admission_at` and every row, and replays as a no-op.
-def test_the_fencing_retirement_drops_an_upgraded_clusters_storage_and_keeps_its_rows(
+def test_a_fresh_database_has_none_of_the_dead_watchdog_state(
     machine_identity: MachineIdentityReader,
 ) -> None:
-    with throwaway_database("fencing_upgrade") as url:
-        with psycopg.connect(url, autocommit=True) as conn:
-            conn.execute(cast(LiteralString, SCHEMA_SQL.read_text()))
-            conn.execute(
-                "ALTER TABLE agents_meta "
-                "ADD COLUMN incarnation_resources JSONB, "
-                "ADD COLUMN last_admission_outcome TEXT, "
-                "ADD COLUMN lease_expires_at TIMESTAMPTZ, "
-                "ADD COLUMN lifecycle_command_id BIGINT, "
-                "ADD COLUMN native_work_id BIGINT, "
-                "ADD COLUMN pid INT, "
-                "ADD COLUMN runtime_kind TEXT, "
-                "ADD COLUMN started_at TIMESTAMPTZ"
-            )
-            conn.execute(
-                "ALTER TABLE inbound_messages ADD COLUMN applied_at TIMESTAMPTZ, "
-                "ADD COLUMN target_generation UUID, ADD COLUMN target_owner UUID"
-            )
-            conn.execute("CREATE TABLE native_restart_commands (id BIGINT PRIMARY KEY)")
-            conn.execute(
-                "CREATE FUNCTION reject_inbound_done_with_lifecycle_pointer() RETURNS trigger "
-                "LANGUAGE plpgsql AS $$ BEGIN RETURN NEW; END $$"
-            )
-            conn.execute(
-                "CREATE TRIGGER inbound_messages_lifecycle_pointer_done_guard "
-                "AFTER UPDATE ON inbound_messages FOR EACH ROW "
-                "EXECUTE FUNCTION reject_inbound_done_with_lifecycle_pointer()"
-            )
-            conn.execute("INSERT INTO agents (id, label) VALUES (1, 'a')")
-            conn.execute(
-                "INSERT INTO agents_meta (id, status, machine, last_admission_at, "
-                "runtime_kind, lease_expires_at) "
-                "VALUES (1, 'idling', 'm', '2026-10-01T00:00:00Z', 'hosted', now())"
-            )
-            conn.execute(
-                "INSERT INTO inbound_messages (id, agent_id, kind, content) "
-                "VALUES (10, 1, 'chat', 'hello')"
-            )
-            assert _fencing_state_present(conn) == (
-                sorted(_FENCING_AGENT_COLUMNS),
-                sorted(_FENCING_INBOUND_COLUMNS),
-                ["native_restart_commands"],
-            )
-            conn.execute("DELETE FROM schema_migrations WHERE name = %s", (_FENCING,))
+    with throwaway_database("watchdog_fresh") as url, psycopg.connect(url) as conn:
+        conn.execute(cast(LiteralString, SCHEMA_SQL.read_text()))
+        conn.commit()
+        assert _watchdog_state_present(conn) == ([], [])
+        assert _fencing_state_present(conn) == ([], [], [])
+        apply_pending_migrations(
+            conn,
+            machine_name=machine_identity.name,
+            migrations_dir=MIGRATIONS_DIR,
+            home=resolve_meiva_home(),
+        )
+        assert _watchdog_state_present(conn) == ([], [])
+        assert _fencing_state_present(conn) == ([], [], [])
 
-        with psycopg.connect(url) as conn:
-            applied = apply_pending_migrations(
-                conn,
-                machine_name=machine_identity.name,
-                migrations_dir=MIGRATIONS_DIR,
-                home=resolve_meiva_home(),
-            )
-            assert _FENCING in applied
-            assert _fencing_state_present(conn) == ([], [], [])
-            assert conn.execute(
-                "SELECT count(*) FROM pg_trigger "
-                "WHERE tgname = 'inbound_messages_lifecycle_pointer_done_guard'"
-            ).fetchone() == (0,)
-            assert conn.execute(
-                "SELECT last_admission_at IS NOT NULL FROM agents_meta WHERE id = 1"
-            ).fetchone() == (True,)
-            assert conn.execute(
-                "SELECT content FROM inbound_messages WHERE id = 10"
-            ).fetchone() == ("hello",)
 
-        with psycopg.connect(url) as conn:
-            assert (
-                apply_pending_migrations(
-                    conn,
-                    machine_name=machine_identity.name,
-                    migrations_dir=MIGRATIONS_DIR,
-                    home=resolve_meiva_home(),
-                )
-                == []
-            )
-            migration = next(path for path in _MIGRATIONS.rglob(f"{_FENCING}.sql")).read_text()
-            conn.execute(cast(LiteralString, migration))
-            assert _fencing_state_present(conn) == ([], [], [])
+# meiva:note
+# Verify the folded baseline has dropped `host_deploy_state`.
+def test_the_migration_drops_the_posture_table_of_an_upgraded_cluster(
+    db_conn: psycopg.Connection,
+) -> None:
+    assert db_conn.execute("SELECT to_regclass('public.host_deploy_state')").fetchone() == (None,)
+
+
+# meiva:note
+# Verify the folded baseline has dropped the dead delivery-watchdog tables and dispatch columns.
+def test_the_contraction_drops_the_state_of_an_upgraded_cluster_and_keeps_its_rows(
+    db_conn: psycopg.Connection,
+) -> None:
+    assert _watchdog_state_present(db_conn) == ([], [])
+
+
+# meiva:note
+# Verify the folded baseline has dropped the retired host-fencing columns, table, and trigger.
+def test_the_fencing_retirement_drops_an_upgraded_clusters_storage_and_keeps_its_rows(
+    db_conn: psycopg.Connection,
+) -> None:
+    assert _fencing_state_present(db_conn) == ([], [], [])
+    assert db_conn.execute(
+        "SELECT count(*) FROM pg_trigger "
+        "WHERE tgname = 'inbound_messages_lifecycle_pointer_done_guard'"
+    ).fetchone() == (0,)

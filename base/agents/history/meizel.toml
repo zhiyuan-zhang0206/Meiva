@@ -7,7 +7,7 @@ exports = ["checkpoint.py", "checkpoint_copy.py", "checkpoint_postgres_walks.py"
 "context_breakdown.py" = ["message_tokens.py"]
 "context_response.py" = ["context_breakdown.py"]
 "hierarchy" = ["checkpoint.py", "timeline.py"]
-"message_tokens.py" = ["checkpoint.py", "closing_request.py"]
+"message_tokens.py" = ["closing_request.py"]
 "tests" = ["checkpoint.py", "checkpoint_postgres_walks.py", "closing_request.py", "compact_boundary.py", "context_breakdown.py", "context_response.py", "delta_read_compat.py", "hierarchy", "message_tokens.py", "timeline.py"]
 "timeline.py" = ["timeline_item.py"]
 
@@ -16,3 +16,7 @@ exports = ["checkpoint.py", "checkpoint_copy.py", "checkpoint_postgres_walks.py"
 "checkpoint_serde.py" = "strict"
 "checkpoint_serializer.py" = "strict"
 "closing_request.py" = "strict"
+"context_breakdown.py" = "strict"
+"message_tokens.py" = "strict"
+"timeline.py" = "strict"
+"timeline_item.py" = "strict"

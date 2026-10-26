@@ -7,6 +7,8 @@ from functools import cache
 from pathlib import Path
 from typing import TypeGuard, assert_never
 
+from meizel.graph.universe import GitRepo
+
 __all__ = [
     "POLICY",
     "RETIRED_AMBIENT_SECTIONS",
@@ -276,10 +278,10 @@ def parse_snapshot(text: str) -> tuple[Policy, list[str]]:
 
 
 def _load(root: Path, source: _PolicySource) -> Policy:
-    path = root / POLICY
-    if not path.is_file():
+    repo = GitRepo(root)
+    if not repo.has_file(POLICY):
         return Policy()
-    policy, problems = _parse(path.read_text(encoding="utf-8"), source)
+    policy, problems = _parse(repo.load_text(POLICY), source)
     if problems:
         raise ValueError(f"{POLICY}: {problems[0]}")
     return policy

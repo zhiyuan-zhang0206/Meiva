@@ -5,6 +5,3 @@ exports = ["cancel_fixture.py", "test_llm_helpers.py"]
 
 [external]
 "test_agent_traceback.py" = "executes agent-style code to check how its traceback is rendered"
-
-[debt.first-party-patch]
-"test_build_with_extensions.py#monkeypatch.setattr base.paths.repo_plugins_dir" = 1

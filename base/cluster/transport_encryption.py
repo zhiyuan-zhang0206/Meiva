@@ -32,3 +32,15 @@ def verify_transport_encryption_declaration(
 def _requires_transport_encryption_declaration(bind_host: str, *, authenticated: bool) -> bool:
     normalized_host = bind_host.strip().lower().removeprefix("[").removesuffix("]")
     return authenticated and normalized_host not in _LOOPBACK_BIND_HOSTS
+
+
+# meiva:note
+# Derives the Redis pub/sub channel prefix by stripping the :events suffix from the configured events channel.
+def redis_channel_prefix(events_channel: str) -> str:
+    return events_channel.removesuffix(":events")
+
+
+# meiva:note
+# Derives the per-agent Redis pub/sub inbound wake channel from the configured events channel.
+def inbound_channel(agent_id: int, events_channel: str) -> str:
+    return f"{redis_channel_prefix(events_channel)}:inbound:{agent_id}"

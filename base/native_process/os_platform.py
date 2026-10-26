@@ -101,6 +101,12 @@ def _launchd_print(
     )
 
 
+# meiva:note
+# Resolve an optional PID to the current process ID when None.
+def resolve_pid(pid: int | None) -> int:
+    return os.getpid() if pid is None else pid
+
+
 def descends_from_launchd_job(
     label: str,
     *,
@@ -140,7 +146,7 @@ def descends_from_launchd_job(
     if match is None:
         return False  # loaded but not running — it owns no live process
     job_pid = int(match.group(1))
-    pid = os.getpid() if current_pid is None else current_pid
+    pid = resolve_pid(current_pid)
     while pid > 1:  # bounded by reaching launchd (pid 1)
         if pid == job_pid:
             return True

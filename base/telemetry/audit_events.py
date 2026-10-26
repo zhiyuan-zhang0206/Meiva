@@ -52,6 +52,7 @@ from pydantic import BaseModel, ConfigDict
 
 from base import telemetry
 from base.db import Database
+from base.db.protocols import AsyncConnectionLike
 from base.events.contract import EVENTS
 
 
@@ -190,9 +191,7 @@ def record_audit(conn: psycopg.Connection, event: telemetry.Event) -> telemetry.
     return event
 
 
-async def record_audit_async(
-    conn: psycopg.AsyncConnection[Any], event: telemetry.Event
-) -> telemetry.Event:
+async def record_audit_async(conn: AsyncConnectionLike, event: telemetry.Event) -> telemetry.Event:
     """:func:`record_audit` for an async connection inside the caller's transaction."""
     await conn.execute(_INSERT_AUDIT_EVENT, _audit_row(event))
     return event

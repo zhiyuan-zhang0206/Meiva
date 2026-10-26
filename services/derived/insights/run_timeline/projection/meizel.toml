@@ -2,6 +2,9 @@ exports = ["derive.py", "jobs.py", "reader.py", "source.py"]
 
 [purity]
 "model.py" = "strict"
+"nodes.py" = "strict"
+"source.py" = "strict"
+"store.py" = "strict"
 
 [uses]
 "backfill.py" = ["jobs.py"]
@@ -17,10 +20,6 @@ exports = ["derive.py", "jobs.py", "reader.py", "source.py"]
 
 [debt.impure-call]
 "reader.py#import fastapi" = 1
-"reader.py#import psycopg" = 1
-"reader.py#import psycopg_pool" = 1
-"source.py#import psycopg" = 1
-"store.py#import psycopg" = 1
 
 [debt.impure-edge]
 "backfill.py#base/agents/history/checkpoint_segment.py" = 1
@@ -34,9 +33,5 @@ exports = ["derive.py", "jobs.py", "reader.py", "source.py"]
 "derive.py#base/agents/history/checkpoint.py" = 1
 "derive.py#base/agents/history/hierarchy/units.py" = 1
 "jobs.py#base/agents/history/checkpoint.py" = 1
-"jobs.py#base/db/__init__.py" = 1
 "jobs.py#base/db/transaction.py" = 1
-"nodes.py#base/agents/history/hierarchy/store.py" = 1
-"nodes.py#base/db/__init__.py" = 1
 "reader.py#base/agents/history/checkpoint.py" = 1
-"reader.py#base/db/__init__.py" = 1

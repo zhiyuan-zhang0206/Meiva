@@ -29,7 +29,9 @@ import psutil
 
 from base.native_process.ownership import OwnedProcess, capture_tree
 
-__all__ = ["CommandRunner", "run_bounded", "terminate_owned_tree"]
+__all__ = ["CommandRunner", "SubprocessError", "run_bounded", "terminate_owned_tree"]
+
+SubprocessError = subprocess.SubprocessError
 
 # psutil exceptions that mean "the process is already gone / not ours to touch" —
 # expected during a teardown, not an error: between enumerating a tree and

@@ -17,9 +17,7 @@ from datetime import UTC, datetime
 from hashlib import sha256
 from typing import Any, LiteralString
 
-import psycopg
-from psycopg import sql
-
+from base.db.protocols import SyncConnection
 from base.events.contract import EventTier
 
 # Audit event names that form edges of the fleet graph and the neighbors walk. Lineage
@@ -120,13 +118,13 @@ def _where(
     attribute_filters: dict[str, str] | None,
     from_: datetime | None,
     to: datetime | None,
-) -> tuple[sql.Composable, list[Any]] | None:
+) -> tuple[LiteralString, list[Any]] | None:
     """The WHERE clause and parameters, or None when the filters exclude every audit row."""
-    clauses: list[sql.Composable] = []
+    clauses: list[LiteralString] = []
     params: list[Any] = []
 
     def add(clause: LiteralString, *values: object) -> None:
-        clauses.append(sql.SQL(clause))
+        clauses.append(clause)
         params.extend(values)
 
     if tiers is not None:
@@ -160,12 +158,12 @@ def _where(
             add("COALESCE(attributes ->> %s, '') <> %s", key, value[2:])
         else:
             add("COALESCE(attributes ->> %s, '') = %s", key, value)
-    where = sql.SQL(" AND ").join(clauses) if clauses else sql.SQL("TRUE")
+    where: LiteralString = " AND ".join(clauses) if clauses else "TRUE"
     return where, params
 
 
 def query_events(
-    conn: psycopg.Connection,
+    conn: SyncConnection,
     *,
     agent_id: int | None = None,
     involving_agents: list[int] | None = None,
@@ -204,17 +202,19 @@ def query_events(
     if where is None:
         return [], False
     clause, params = where
-    order = sql.SQL("DESC") if direction == "backward" else sql.SQL("ASC")
-    query = sql.SQL(
-        "SELECT {columns} FROM audit_events WHERE {where} "
-        "ORDER BY ts {order}, id {order} LIMIT %s OFFSET %s"
-    ).format(columns=sql.SQL(_COLUMNS), where=clause, order=order)
+    order: LiteralString = "DESC" if direction == "backward" else "ASC"
+    # meiva:note
+    # Both _COLUMNS and clause are LiteralString fragments assembled from fixed SQL templates; user values stay in params.
+    query: LiteralString = (
+        f"SELECT {_COLUMNS} FROM audit_events WHERE {clause} "  # noqa: S608
+        f"ORDER BY ts {order}, id {order} LIMIT %s OFFSET %s"
+    )
     records = conn.execute(query, [*params, limit + 1, offset]).fetchall()
     return [_row(record) for record in records[:limit]], len(records) > limit
 
 
 def count_events(
-    conn: psycopg.Connection,
+    conn: SyncConnection,
     *,
     agent_id: int | None = None,
     involving_agents: list[int] | None = None,
@@ -243,14 +243,16 @@ def count_events(
     if where is None:
         return 0
     clause, params = where
-    query = sql.SQL("SELECT count(*) FROM audit_events WHERE {where}").format(where=clause)
+    # meiva:note
+    # clause is a LiteralString built from fixed SQL predicate templates; user filter values are passed via params.
+    query: LiteralString = f"SELECT count(*) FROM audit_events WHERE {clause}"  # noqa: S608
     row = conn.execute(query, params).fetchone()
     assert row is not None  # noqa: S101 — an aggregate always returns one row
     return int(row[0])
 
 
 def edge_weights(
-    conn: psycopg.Connection,
+    conn: SyncConnection,
     *,
     live_ids: set[int] | None,
     win_start: datetime | None,
@@ -290,7 +292,7 @@ def edge_weights(
     return [(int(t), int(a), str(n), float(w), int(c), last) for t, a, n, w, c, last in records]
 
 
-def edge_counts(conn: psycopg.Connection) -> list[tuple[int, int, str, int, datetime]]:
+def edge_counts(conn: SyncConnection) -> list[tuple[int, int, str, int, datetime]]:
     """Neighbors-walk tie inputs: `(agent, target, event_name, count, last_seen)` per edge."""
     records = conn.execute(
         "SELECT agent_id, target_agent_id, event_name, count(*), max(ts) FROM audit_events "

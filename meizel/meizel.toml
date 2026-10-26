@@ -4,9 +4,13 @@ exports = ["allowances.py", "budgets", "contracts", "graph", "language", "lint_c
 "." = "strict-to-be"
 "__init__.py" = "strict"
 "__main__.py" = "strict"
+"allowances.py" = "strict"
+"roles.py" = "strict"
 
 [uses]
 "__main__.py" = ["contracts"]
+"allowances.py" = ["graph"]
+"budgets" = ["graph", "lint_common.py"]
 "contracts" = ["allowances.py", "graph", "language", "roles.py", "source_evidence"]
 "language" = ["allowances.py", "graph", "lint_common.py"]
 "lint_common.py" = ["__init__.py", "graph", "roles.py"]
@@ -17,11 +21,7 @@ exports = ["allowances.py", "budgets", "contracts", "graph", "language", "lint_c
 "tests" = ["allowances.py", "contracts", "graph", "language", "lint_common.py", "owners", "roles.py", "state"]
 
 [debt.impure-call]
-"allowances.py#Path.is_file" = 1
-"allowances.py#Path.read_text" = 1
-"lint_common.py#Path.exists" = 2
-"lint_common.py#Path.is_dir" = 2
-"lint_common.py#Path.is_file" = 2
+"lint_common.py#Path.is_dir" = 1
+"lint_common.py#Path.is_file" = 1
 "lint_common.py#Path.read_bytes" = 1
 "lint_common.py#import subprocess" = 1
-"roles.py#Path.read_text" = 1

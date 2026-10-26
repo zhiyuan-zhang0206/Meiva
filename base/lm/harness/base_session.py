@@ -9,7 +9,6 @@ from datetime import datetime
 from pathlib import Path
 from types import TracebackType
 from typing import Protocol, Self
-from uuid import uuid4
 
 from base.lm.harness.events import (
     BridgeEvent,
@@ -213,6 +212,7 @@ class BaseHarnessSession[ConfigT: SessionConfig](ExitStatus):
         self._resumed_existing = False
         self._record: SessionRecord | None = None
         self._handoff_ticket: TurnTicket | None = None
+        self._turn_seq = 0
 
     async def start(self, *, resume: str | None = None, handoff: Handoff | None = None) -> None:
         raise NotImplementedError
@@ -254,8 +254,9 @@ class BaseHarnessSession[ConfigT: SessionConfig](ExitStatus):
                 f"{len(self._pending)} turns already queued "
                 f"(limit {self.config.max_pending_turns}); keep the message and retry"
             )
+        self._turn_seq += 1
         ticket = TurnTicket(
-            turn_id=f"turn-{uuid4().hex[:12]}",
+            turn_id=f"turn-{self._turn_seq}",
             text=trimmed,
             key=key,
             future=asyncio.get_running_loop().create_future(),

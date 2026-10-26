@@ -13,11 +13,11 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Annotated, Any, TypeGuard, get_args
 
-import psycopg
 from fastapi import APIRouter, HTTPException, Query, Request
 
 from base.agents.messages.envelope import validate_source
 from base.db import Database
+from base.db.protocols import SyncConnection
 from base.events.reads import audit_rows
 from services.derived.insights.run_timeline.schemas import (
     LinkKind,
@@ -61,7 +61,7 @@ def _message_inbound(row: dict[str, object]) -> int | None:
     return None
 
 
-def _chat_inbounds(conn: psycopg.Connection, page: list[dict[str, Any]]) -> set[int]:
+def _chat_inbounds(conn: SyncConnection, page: list[dict[str, Any]]) -> set[int]:
     """The ids among the page's messages whose inbound row is a chat (a task assignment is a system note)."""
     ids = [
         inbound
@@ -97,7 +97,7 @@ def _link(row: dict[str, object]) -> RunTimelineLink | None:
 
 
 def _notices(
-    conn: psycopg.Connection, agents: list[int], start: datetime, end: datetime
+    conn: SyncConnection, agents: list[int], start: datetime, end: datetime
 ) -> list[RunTimelineLink]:
     """Notices the agents posted to the user in the window: the one structured agent-to-user channel."""
     rows = conn.execute(

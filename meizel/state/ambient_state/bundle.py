@@ -4,6 +4,7 @@ import ast
 from functools import cache
 from pathlib import Path
 
+from meizel.lint_common import read_utf8_text
 from meizel.state.ambient_state.scan import Hit
 
 BUNDLE_LEAK = "bundle-leak"
@@ -25,9 +26,12 @@ def _is_bundle(node: ast.ClassDef) -> bool:
 @cache
 def bundles_defined_in(path: Path) -> frozenset[str]:
     """The `@root_bundle` class names a source file defines."""
+    text = read_utf8_text(path)
+    if text is None:
+        return frozenset()
     try:
-        tree = ast.parse(path.read_text(encoding="utf-8"))
-    except (OSError, SyntaxError, UnicodeDecodeError):
+        tree = ast.parse(text)
+    except SyntaxError:
         return frozenset()
     return frozenset(
         n.name for n in ast.walk(tree) if isinstance(n, ast.ClassDef) and _is_bundle(n)
@@ -37,7 +41,7 @@ def bundles_defined_in(path: Path) -> frozenset[str]:
 def _module_file(repo_root: Path, module: str) -> Path | None:
     base = repo_root.joinpath(*module.split("."))
     for candidate in (base.with_suffix(".py"), base / "__init__.py"):
-        if candidate.is_file():
+        if read_utf8_text(candidate) is not None:
             return candidate
     return None
 

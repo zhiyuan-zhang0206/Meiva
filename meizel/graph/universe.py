@@ -332,9 +332,10 @@ def _is_regular(root: Path, rel: str) -> bool:
 
 # meiva:note
 # Fixed Git argv and NUL framing preserve tracked names containing whitespace or newlines.
-def tracked_files(repo_root: Path) -> list[str]:
+def tracked_files(repo_root: Path, *, include_untracked: bool = False) -> list[str]:
+    extra = ("--cached", "--others", "--exclude-standard") if include_untracked else ()
     result = subprocess.run(  # noqa: S603
-        ["git", "-C", str(repo_root), "ls-files", "-z"],
+        ["git", "-C", str(repo_root), "ls-files", "-z", *extra],
         capture_output=True,
         check=False,
         timeout=30,

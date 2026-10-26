@@ -16,13 +16,13 @@
 
 from __future__ import annotations
 
-import os
 import shutil
 from collections.abc import Callable
 from dataclasses import dataclass
 
 from base.host.proc import CommandRunner, run_bounded
 from base.native_process.os_platform import Platform
+from base.native_process.root_control.client import current_uid
 
 __all__ = ["Host"]
 
@@ -47,5 +47,5 @@ class Host:
             run=run_bounded,
             which=shutil.which,
             platform=Platform.current(),
-            uid=os.getuid(),
+            uid=current_uid(),
         )

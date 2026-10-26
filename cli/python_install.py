@@ -161,7 +161,7 @@ def install(
     """Validate first, then install into this checkout's own inexact environment."""
     if (repo / ".venv").is_symlink():
         raise ValueError("The checkout virtualenv must be a real directory, not a symlink")
-    errors = violations(repo / "uv.lock")
+    errors = violations((repo / "uv.lock").read_text(encoding="utf-8"))
     if errors:
         raise ValueError("Noncanonical uv.lock; restore the committed PyPI lock before installing")
     configured = configured_env(environment, mirror_env)

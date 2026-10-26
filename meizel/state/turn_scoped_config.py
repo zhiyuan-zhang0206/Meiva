@@ -28,9 +28,9 @@ _LAYERED_READ = re.compile(r"\b(?:resolve_setting|get_field)\(\s*[\"']([a-z_]+)[
 _PLUGIN_CONFIGS_READ = re.compile(r"\b_PLUGIN_CONFIGS\[")
 
 
-def _iter_files(paths: list[str], root: Path = _REPO_ROOT) -> list[Path]:
-    if paths:
-        return [Path(p) for p in paths if p.endswith(".py")]
+def _iter_files(resolved: list[str], root: Path = _REPO_ROOT, *, explicit: bool) -> list[Path]:
+    if explicit:
+        return [root / p for p in resolved if p.endswith(".py")]
     files: list[Path] = []
     for d in _SCAN_DIRS:
         files.extend((root / d).rglob("*.py"))
@@ -78,9 +78,8 @@ def _scan(
         return
     if path.name.startswith("test_") or path.name.endswith("_test.py"):
         return
-    try:
-        text = path.read_text(encoding="utf-8")
-    except (OSError, UnicodeDecodeError):
+    text = lint_common.read_utf8_text(path)
+    if text is None:
         return
     layered_errors.extend(_layered_reads(text, rel, per_agent))
     for lineno, line in enumerate(text.splitlines(), start=1):
@@ -102,16 +101,18 @@ def main(
     """Run the lint; `per_agent_field_names` returns the config fields that are per-agent."""
     root = _REPO_ROOT if repo_root is None else repo_root
     argv, only = lint_common.split_only(argv)
-    missing = [a for a in argv if not Path(a).exists()]
-    if missing:
-        print(f"error: target path(s) not found: {', '.join(missing)}", file=sys.stderr)
-        return 1
+    resolved: list[str] = []
+    if argv:
+        resolved, missing = lint_common.resolve_targets(argv, root)
+        if missing:
+            print(f"error: target path(s) not found: {', '.join(missing)}", file=sys.stderr)
+            return 1
     scope = lint_common.changed_scope(only, root, inputs=_RULE_INPUTS)
     per_agent = set(per_agent_field_names())
     errors: list[str] = []
     layered_errors: list[str] = []
     plugin_errors: list[str] = []
-    for path in lint_common.restrict(_iter_files(argv, root), scope, root):
+    for path in lint_common.restrict(_iter_files(resolved, root, explicit=bool(argv)), scope, root):
         _scan(path, per_agent, errors, layered_errors, plugin_errors, root=root)
     _report(
         "plugin config read straight out of the process-global _PLUGIN_CONFIGS in turn-scoped "

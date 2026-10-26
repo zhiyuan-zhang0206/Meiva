@@ -39,16 +39,10 @@ HEADERS = {"Idempotency-Key": "intent", "Idempotency-Scope": "principal-v1"}
 @pytest.fixture
 def uploaded_agent(
     db_conn: psycopg.Connection,
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
+    default_home: Path,
     *,
     machine_identity: MachineIdentityReader,
 ) -> Iterator[tuple[GatewayTestClient, int]]:
-    # meiva:note
-    # The native receiver (`ops.upload_delivery.receive`) reads `Path.home()` itself, so the one
-    # retained patch points it at the directory the gateway is built with (needs ops: take the
-    # home as a value). The gateway side takes that directory as `upload_home`.
-    monkeypatch.setattr(Path, "home", lambda: tmp_path)
     unit = current_unit(local_machine=machine_identity.name())
     agent = seed_agent(db_conn)
     db_conn.execute(
@@ -65,7 +59,7 @@ def uploaded_agent(
     db_conn.commit()
     # Deterministic fault tests call a real round explicitly; no background race.
     config = gateway_test_config(
-        upload_home=tmp_path, cluster_secret=SECRET, upload_recovery_enabled=False
+        upload_home=default_home, cluster_secret=SECRET, upload_recovery_enabled=False
     )
     with gateway_test_client(
         machine=machine_identity, config=config, raise_server_exceptions=False

@@ -22,19 +22,21 @@ YYYY/MM/DD/YYYYMMDDTHHMMSS_<kebab-name>.sql
 - The current full schema lives in **`db/schema.sql`** (the squashed baseline a
   fresh DB bootstraps from); a new migration must also reflect its change there.
 
-## Current baseline (2026-09-23)
+## Current baseline (2026-10-26)
 
-The 101 deltas through `20260921T211400_watcher-agent-notify` are folded into
-`db/schema.sql`. Fresh databases stamp the baseline sentinel and
-`20260923T031516_schema-baseline`; the retired history's seed rows are absent.
-Subsequent deltas must also be reflected in the current schema.
+The 93 deltas through `20261024T234523_agents-meta-harness-exit-code` are folded into
+`db/schema.sql` (`20261017T203552_checkpoints-compact-boundary-index` remains as a
+post-baseline file because `public.checkpoints` is created by LangGraph's
+`PostgresSaver.setup()` after `db/schema.sql`). Fresh databases stamp the baseline
+sentinel and `20261026T091500_schema-baseline`; the retired history's seed rows are
+absent. Subsequent deltas must also be reflected in the current schema.
 
 `base/deploy/schema/migration_history.py` keeps the exact frozen inventories for this reset
-and the 2026-08-14 reset (59 names). The earlier inventory remains necessary
-because restores before 2026-08-14 have not been ruled out. Before deleting any
-tracking rows, the runner refuses partial generations. A database without the
-current anchor must carry the entire 101-name predecessor inventory; an old
-baseline-only restore cannot masquerade as a fresh database.
+(93 names), the 2026-09-23 reset (101 names), and the 2026-08-14 reset (59 names). The
+earlier inventories remain necessary because older backup/PITR restores have not been
+ruled out. Before deleting any tracking rows, the runner refuses partial generations. A
+database without the current anchor must carry the entire 93-name predecessor inventory;
+an old baseline-only restore cannot masquerade as a fresh database.
 
 Upgrade older restores through the release immediately before the applicable
 reset. Integer-keyed history is unsupported; restore it under its matching

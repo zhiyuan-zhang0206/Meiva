@@ -14,6 +14,7 @@ from typing import Any
 import psycopg
 
 from meizel import lint_common
+from meizel.graph.universe import EditPlan
 
 _CONSTRAINT = frozenset({"CONSTRAINT", "PRIMARY", "UNIQUE", "CHECK", "FOREIGN", "EXCLUDE", "LIKE"})
 _PARTITION = re.compile(r"^(?P<parent>.+)_(?P<suffix>\d{6}|default)$")
@@ -256,7 +257,7 @@ def main(argv: list[str] | None = None) -> int:
     drift = _allowlisted(compare(schema, live), args.allow)
     print(drift.render(declared))
     if args.json is not None:
-        args.json.write_text(json.dumps(_as_json(drift, declared), indent=2), encoding="utf-8")
+        EditPlan(writes={args.json: json.dumps(_as_json(drift, declared), indent=2)}).apply()
     return int(_is_dirty(drift))
 
 

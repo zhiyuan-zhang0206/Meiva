@@ -9,6 +9,7 @@ from typing import Any, Literal, TypeGuard
 
 from pydantic import BaseModel
 
+from base.host.env.agent_env import ModelOverrides as ModelOverrides
 from base.host.env.config_lite_table import FIELD_DOMAINS
 
 Cadence = Literal["once_per_compaction", "every_time"]
@@ -88,24 +89,6 @@ class Sandbox:
 
 
 @dataclass(frozen=True)
-class ModelOverrides:
-    llm_stream_ttft_timeout_seconds: float | None
-    llm_stream_total_timeout_seconds: float | None
-    llm_stream_inter_chunk_timeout_seconds: float | None
-    reasoning_effort: str | None
-    claude_thinking_budget_tokens: int | None
-    auto_compact_fraction: float | None
-    auto_compact_ceiling_tokens: int | None
-    compact_reminder_fraction: float | None
-
-    @classmethod
-    def from_pins(cls, pins: Mapping[str, Any] | None) -> ModelOverrides:
-
-        pins = pins or {}
-        return cls(**{f.name: pins.get(f.name) for f in fields(cls)})
-
-
-@dataclass(frozen=True)
 class AgentKernel:
     checkpoint_interval: int
     heartbeat_pause_max_seconds: float
@@ -121,7 +104,7 @@ class HarnessCli:
     harness_skip_permissions: bool
 
 
-def _value[T](pins: Mapping[str, Any], name: str, default_reader: Callable[[str, str], T]) -> T:
+def _value[T](pins: Mapping[str, object], name: str, default_reader: Callable[[str, str], T]) -> T:
 
     value: Any = pins[name] if name in pins else default_reader(FIELD_DOMAINS[name], name)
     result: Any = tuple(value) if _is_any_list(value) else value
@@ -130,7 +113,7 @@ def _value[T](pins: Mapping[str, Any], name: str, default_reader: Callable[[str,
 
 def agent_setting[T](
     name: str,
-    pins: Mapping[str, Any] | None = None,
+    pins: Mapping[str, object] | None = None,
     *,
     default_reader: Callable[[str, str], T],
 ) -> T:

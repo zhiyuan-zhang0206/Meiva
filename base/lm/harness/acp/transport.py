@@ -77,6 +77,46 @@ class PermissionRequest:
 PermissionHandler = Callable[[PermissionRequest], Awaitable[str | None]]
 
 
+# meiva:note
+# Decode a `session/request_permission` payload into a `PermissionRequest`.
+def _parse_permission_request(params: dict[str, Any]) -> PermissionRequest:
+    raw_options: _Json = params.get("options")
+    option_items = raw_options if isinstance(raw_options, list) else []
+    options = tuple(
+        PermissionOption(
+            option_id=str(option.get("optionId", "")),
+            name=str(option.get("name", "")),
+            kind=str(option.get("kind", "")),
+        )
+        for option in option_items
+        if isinstance(option, dict)
+    )
+    raw_tool_call: _Json = params.get("toolCall")
+    return PermissionRequest(
+        session_id=str(params.get("sessionId", "")),
+        tool_call=raw_tool_call if isinstance(raw_tool_call, dict) else {},
+        options=options,
+    )
+
+
+# meiva:note
+# Build the JSON-RPC permission outcome frame for the chosen option id.
+def _permission_response(
+    request_id: object, chosen: str | None, options: tuple[PermissionOption, ...]
+) -> dict[str, Any]:
+    if chosen is None or chosen not in {option.option_id for option in options}:
+        return {
+            "jsonrpc": "2.0",
+            "id": request_id,
+            "result": {"outcome": {"outcome": "cancelled"}},
+        }
+    return {
+        "jsonrpc": "2.0",
+        "id": request_id,
+        "result": {"outcome": {"outcome": "selected", "optionId": chosen}},
+    }
+
+
 @dataclass(frozen=True, slots=True)
 class _Pending:
     request_id: int
@@ -146,17 +186,6 @@ class AcpConnection:
         task.add_done_callback(self._children.discard)
         return task
 
-    async def _close_tasks(self) -> None:
-        children = [task for task in self._children if not task.done()]
-        for task in children:
-            task.cancel()
-        if children:
-            await asyncio.gather(*children, return_exceptions=True)
-        if self._tasks_entered:
-            self._tasks_entered = False
-            with contextlib.suppress(ExceptionGroup):
-                await self._tasks.__aexit__(None, None, None)
-
     @property
     def pid(self) -> int | None:
         return None if self._process is None else self._process.pid
@@ -225,21 +254,30 @@ class AcpConnection:
                 try:
                     await asyncio.wait_for(process.wait(), timeout=self.shutdown_timeout_seconds)
                 except TimeoutError:
-                    await self._terminate(process)
-            await self._close_tasks()
+                    for sig in (signal.SIGTERM, signal.SIGKILL):
+                        if process.returncode is not None:
+                            break
+                        with contextlib.suppress(ProcessLookupError, PermissionError):
+                            os.killpg(os.getpgid(process.pid), sig)
+                        try:
+                            await asyncio.wait_for(process.wait(), timeout=5.0)
+                            break
+                        except TimeoutError:
+                            continue
+            children = self._cancel_active_children()
+            if children:
+                await asyncio.gather(*children, return_exceptions=True)
+            if self._tasks_entered:
+                self._tasks_entered = False
+                with contextlib.suppress(ExceptionGroup):
+                    await self._tasks.__aexit__(None, None, None)
             self._close_complete = True
 
-    async def _terminate(self, process: asyncio.subprocess.Process) -> None:
-        for sig in (signal.SIGTERM, signal.SIGKILL):
-            if process.returncode is not None:
-                return
-            with contextlib.suppress(ProcessLookupError, PermissionError):
-                os.killpg(os.getpgid(process.pid), sig)
-            try:
-                await asyncio.wait_for(process.wait(), timeout=5.0)
-                return
-            except TimeoutError:
-                continue
+    def _cancel_active_children(self) -> list[asyncio.Task[None]]:
+        children = [task for task in self._children if not task.done()]
+        for task in children:
+            task.cancel()
+        return children
 
     def _register(self, method: str) -> _Pending:
         if self._closed or self._process is None or self._process.returncode is not None:
@@ -321,51 +359,16 @@ class AcpConnection:
         request_id = frame["id"]
         params: _Json = frame.get("params")
         if method == "session/request_permission" and isinstance(params, dict):
-            await self._answer_permission(request_id, params)
-            return
-        await self._answer_error(request_id, -32601, f"client does not implement {method}")
-
-    async def _answer_permission(self, request_id: object, params: dict[str, Any]) -> None:
-        raw_options: _Json = params.get("options")
-        option_items = raw_options if isinstance(raw_options, list) else []
-        options = tuple(
-            PermissionOption(
-                option_id=str(option.get("optionId", "")),
-                name=str(option.get("name", "")),
-                kind=str(option.get("kind", "")),
-            )
-            for option in option_items
-            if isinstance(option, dict)
-        )
-        raw_tool_call: _Json = params.get("toolCall")
-        request = PermissionRequest(
-            session_id=str(params.get("sessionId", "")),
-            tool_call=raw_tool_call if isinstance(raw_tool_call, dict) else {},
-            options=options,
-        )
-        chosen: str | None = None
-        if self.permission is not None:
-            chosen = await self.permission(request)
-        if chosen is None or chosen not in {option.option_id for option in options}:
-            await self._write(
-                {
-                    "jsonrpc": "2.0",
-                    "id": request_id,
-                    "result": {"outcome": {"outcome": "cancelled"}},
-                }
-            )
+            request = _parse_permission_request(params)
+            chosen = await self.permission(request) if self.permission is not None else None
+            await self._write(_permission_response(request_id, chosen, request.options))
             return
         await self._write(
             {
                 "jsonrpc": "2.0",
                 "id": request_id,
-                "result": {"outcome": {"outcome": "selected", "optionId": chosen}},
+                "error": {"code": -32601, "message": f"client does not implement {method}"},
             }
-        )
-
-    async def _answer_error(self, request_id: object, code: int, message: str) -> None:
-        await self._write(
-            {"jsonrpc": "2.0", "id": request_id, "error": {"code": code, "message": message}}
         )
 
     async def _read_stderr(self, stderr: asyncio.StreamReader) -> None:

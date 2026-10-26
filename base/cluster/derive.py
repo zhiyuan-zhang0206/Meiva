@@ -21,6 +21,12 @@ from urllib.parse import urlsplit, urlunsplit
 
 from base.cluster.machine import MachineIdentityReader, MachineNameMissing
 from base.cluster.record import ClusterRecord
+from base.cluster.transport_encryption import (
+    inbound_channel as inbound_channel,
+)
+from base.cluster.transport_encryption import (
+    redis_channel_prefix as redis_channel_prefix,
+)
 from base.host.env.registry import REDIS_PASSWORD_ENV, health_port_env_aliases
 from base.host.net.url_secret import redacted_url, url_with_port, url_with_userinfo
 
@@ -263,23 +269,6 @@ def project_runner_db_url(db_url: str, runner_password: str) -> str:
             "restore its recorded credential before starting services or agents."
         )
     return url_with_userinfo(db_url, RUNNER_ROLE, runner_password)
-
-
-def redis_channel_prefix(events_channel: str) -> str:
-    """The pub/sub channel prefix (`meiva`) — the events channel is `<prefix>:events`,
-    so strip that suffix. Fixed across clusters now that each owns its redis: there
-    is no neighbour to prefix away from."""
-    return events_channel.removesuffix(":events")
-
-
-def inbound_channel(agent_id: int, events_channel: str) -> str:
-    """The Redis pub/sub channel an agent waits on for inbound wake-ups —
-    `meiva:inbound:<agent_id>`, via `redis_channel_prefix(events_channel)`.
-
-    Publish (`base.agents.inbox.insert.insert_inbound_message` / `insert_compact_request_inbound`,
-    `meiva.self`) and subscribe (`RedisInboundListener`) both derive the channel here
-    so the two halves can never drift."""
-    return f"{redis_channel_prefix(events_channel)}:inbound:{agent_id}"
 
 
 def _is_port_map(value: object) -> TypeGuard[dict[str, int]]:

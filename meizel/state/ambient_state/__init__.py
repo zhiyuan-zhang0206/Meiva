@@ -128,12 +128,14 @@ def missing_allowlist_errors(repo_root: Path) -> list[str]:
     errors = [
         f"{path}:1: stale ambient_state list entry — the file no longer exists; remove it from {_LIST_FILE}"
         for path in sorted(listed_paths)
-        if not (repo_root / path).is_file()
+        if lint_common.read_utf8_text(repo_root / path) is None
     ]
     for callee in sorted(allow.PURE_REPO_CALLEES):
         owner, _, name = callee.rpartition(".")
-        path = repo_root.joinpath(*owner.split(".")).with_suffix(".py")
-        if not path.is_file() or f"def {name}(" not in path.read_text(encoding="utf-8"):
+        source = lint_common.read_utf8_text(
+            repo_root.joinpath(*owner.split(".")).with_suffix(".py")
+        )
+        if source is None or f"def {name}(" not in source:
             errors.append(
                 f"{_LIST_FILE}:1: stale [ambient-state.pure-repo-callees] entry {callee} — no such function; remove it"
             )

@@ -9,11 +9,9 @@ from base.agents.history.message_tokens import (
     ModelSwitch,
     PartTokens,
     ai_message_parts,
-    context_through,
     history_message_tokens,
     history_segment_tokens,
     segment_tokens,
-    split_parts,
     summarize_segments,
     total_of,
 )
@@ -167,7 +165,7 @@ def test_context_before_a_switch_is_unchanged() -> None:
         _ai("c", inp=9000, out=10, model="m2"),
     ]
     seg = segment_tokens(SYS, body)
-    head_rec, records = context_through(SYS, body, seg, 2)
+    head_rec, records = seg.context_through(SYS, body, 2)
     assert head_rec == seg.head
     assert records == list(seg.messages[:2])
 
@@ -181,7 +179,7 @@ def test_context_after_a_switch_resplits_the_earlier_messages_by_the_new_total()
         _ai("c", inp=5300, out=10, model="m2"),
     ]
     seg = segment_tokens(None, body)
-    _, records = context_through(None, body, seg, 4)
+    _, records = seg.context_through(None, body, 4)
     assert sum(r.context_tokens or 0 for r in records[:2]) == 5000
     assert {r.source for r in records[:2]} == {"estimated"}
     assert sum(r.context_tokens or 0 for r in records) == 5300
@@ -373,7 +371,7 @@ def test_ai_message_parts_are_split_and_conserve_the_whole() -> None:
 
 
 def test_split_parts_lone_part_keeps_source_and_sections_conserve() -> None:
-    assert split_parts({"only": "abc"}, 7, "exact") == {"only": PartTokens(7, "exact")}
-    sections = split_parts({"a": "x" * 10, "b": "y" * 33, "c": ""}, 101, "exact")
+    assert PartTokens.split({"only": "abc"}, 7, "exact") == {"only": PartTokens(7, "exact")}
+    sections = PartTokens.split({"a": "x" * 10, "b": "y" * 33, "c": ""}, 101, "exact")
     assert sum(p.tokens for p in sections.values()) == 101
     assert sections["c"].tokens == 0
