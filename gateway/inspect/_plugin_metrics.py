@@ -36,6 +36,7 @@ from fastapi import HTTPException
 from psycopg import Connection, Cursor
 from psycopg_pool import ConnectionPool
 
+from base.clock import Clock
 from base.packages.plugins import data_registry
 from base.telemetry.metrics.core import catalog
 from base.telemetry.metrics.logql import validate_logql
@@ -46,7 +47,6 @@ from base.telemetry.metrics.plugin_metrics import (
     render_title,
     validate_metric_sql,
 )
-from gateway.http.config import utc_now
 from gateway.inspect import _event_metrics
 from gateway.inspect._plugin_faces import enabled_face_files
 from gateway.inspect.schemas import MetricPoint, PluginMetricResult
@@ -206,7 +206,7 @@ def _as_float(value: object) -> float | None:
 # was established by validate_metric_sql, not by psycopg.
 # meiva:link gateway/inspect/docs/inspect.meiva.okf.md
 def _execute_metric(
-    conn: Connection[Any], cur: Cursor, spec: MetricSpec, query: str
+    conn: Connection[Any], cur: Cursor, spec: MetricSpec, query: str, *, clock: Clock
 ) -> PluginMetricResult:
     base = PluginMetricResult(
         name=spec.name,
@@ -217,7 +217,7 @@ def _execute_metric(
         panel=spec.panel,
     )
     if spec.query_type == "logql":
-        return _execute_metric_logql(conn, spec, query)
+        return _execute_metric_logql(conn, spec, query, clock=clock)
     try:
         with conn.transaction():
             cur.execute(query)  # pyright: ignore[reportArgumentType, reportCallIssue]
@@ -241,7 +241,7 @@ def _execute_metric(
 
 
 def _execute_metric_logql(
-    conn: Connection[Any], spec: MetricSpec, query: str
+    conn: Connection[Any], spec: MetricSpec, query: str, *, clock: Clock
 ) -> PluginMetricResult:
     """Evaluate one rendered LogQL template on the event record and fold the points into a
     PluginMetricResult.
@@ -260,7 +260,7 @@ def _execute_metric_logql(
         unit=spec.unit,
         panel=spec.panel,
     )
-    stop = utc_now()
+    stop = clock.now()
     try:
         with conn.transaction():
             points = _event_metrics.points(
@@ -278,6 +278,7 @@ def metrics_for_agent(
     agent_id: int,
     *,
     registry: Sequence[MetricSpec],
+    clock: Clock,
 ) -> list[PluginMetricResult]:
     """Sync twin of the metrics endpoint — runs via asyncio.to_thread.
 
@@ -300,5 +301,5 @@ def metrics_for_agent(
             query = translate_macros(
                 render_metric_query(spec, agent_id), logql=spec.query_type == "logql"
             )
-            results.append(_execute_metric(conn, cur, spec, query))
+            results.append(_execute_metric(conn, cur, spec, query, clock=clock))
     return results

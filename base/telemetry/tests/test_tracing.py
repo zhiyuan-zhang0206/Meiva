@@ -16,6 +16,7 @@ from base.log.tests.log_records import loguru_records as loguru_records
 from base.telemetry import tracing as tracing_mod
 from base.telemetry.otlp.trace_config import TraceConfig
 from base.telemetry.otlp.trace_readiness import TraceReadiness
+from base.telemetry.tests.capture.trace_state import reset_tracing_state
 from base.telemetry.tests.otlp.identity_inputs import machine_identity
 from base.telemetry.tracing import (
     OtlpJsonHttpSpanExporter,
@@ -147,10 +148,10 @@ def trace_readiness() -> TraceReadiness:
 @pytest.fixture(autouse=True)
 def reset_trace_workers(trace_readiness: TraceReadiness) -> Iterator[None]:
     _assert_no_background_trace_threads()
-    tracing_mod.reset_tracing_state()
+    reset_tracing_state()
     yield
     _drain_background_trace_threads(trace_readiness=trace_readiness)
-    tracing_mod.reset_tracing_state()
+    reset_tracing_state()
 
 
 def wait_init_resolved(timeout: float = 5.0, *, trace_readiness: TraceReadiness) -> None:

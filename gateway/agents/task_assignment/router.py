@@ -14,6 +14,7 @@ from base.agents.birth.transaction import insert_agent_birth
 from base.agents.tasks.creation import create_task_in_transaction, ensure_parent_exists
 from base.api_contracts.agent_contract import AgentLaunchFailed
 from base.api_contracts.idempotency import PRINCIPAL_SCOPE, SCOPE_HEADER
+from base.clock import Clock
 from base.config.service_read import ConfigAuthority
 from base.db import Database
 from base.db.transaction import write_transaction
@@ -30,6 +31,7 @@ from gateway.agents.task_assignment.schemas import (
     TaskAssignmentIn,
     TaskAssignmentResult,
 )
+from gateway.http.config import gateway_clock
 from gateway.http.model_catalog import (
     CatalogLoadFailure,
     request_default_model,
@@ -125,6 +127,7 @@ async def observe_launch(
     *,
     catalog: ModelCatalog | CatalogLoadFailure,
     default_model: str,
+    clock: Clock,
 ) -> TaskAssignmentAccepted:
 
     def current() -> CreationReceipt | None:
@@ -143,6 +146,7 @@ async def observe_launch(
             existing,
             catalog=require_catalog(catalog),
             default_model=default_model,
+            clock=clock,
         )
     except AgentLaunchFailed as exc:
         response.launch_failure = str(exc)
@@ -227,4 +231,5 @@ async def post_task_assignment(
         result,
         catalog=request.app.state.catalog,
         default_model=request_default_model(request),
+        clock=gateway_clock(request),
     )

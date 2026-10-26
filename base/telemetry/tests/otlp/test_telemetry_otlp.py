@@ -15,6 +15,7 @@ from opentelemetry.sdk.metrics.export import InMemoryMetricReader
 from base import telemetry
 from base.config import settings
 from base.db import Database
+from base.telemetry.delivery.defer_plan import CHILD_DEFER_MAX_AGE_DEFAULT_S, ChildDeferPlan
 from base.telemetry.delivery.receipts import Category, Event, Level
 from base.telemetry.otlp import telemetry_otlp
 from base.telemetry.tests.capture.event_capture import EmittedEvents
@@ -24,6 +25,7 @@ from base.telemetry.tests.otlp.identity_inputs import machine_identity
 OtlpFixture = tuple[telemetry_otlp.OtlpBackend, InMemoryLogRecordExporter, InMemoryMetricReader]
 
 AGENT = 8902
+CHILD_DEFER = ChildDeferPlan(enabled=True, max_age_s=CHILD_DEFER_MAX_AGE_DEFAULT_S)
 
 
 def otlp_test_event(

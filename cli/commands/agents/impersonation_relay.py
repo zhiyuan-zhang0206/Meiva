@@ -37,6 +37,7 @@ from base.agents.impersonation import (
 from base.agents.impersonation import relay_inbox as read_inbox_rows
 from base.agents.impersonation.delivery import reserve_delivery
 from base.agents.impersonation.history import resolve
+from base.agents.impersonation.host_transport import AntigravityServer
 from base.agents.impersonation.status import OPEN, ImpersonationStatus
 from base.agents.impersonation.terminal_notices import notice_text
 from base.clock import SYSTEM_TIMERS, Clock, ClockConfig
@@ -421,13 +422,15 @@ async def _serve(
 # meiva:note
 # What the handler read for one relay: the scoped credential from the channel the operator
 # chose, the Redis address of the invocation's configuration, CODEX_HOME as the shell saw it,
-# the stdout a controller session reads the relay's pushes from, and the invocation's random
-# source (the bus's authentication-retry jitter draws from it).
+# the Antigravity endpoint its environment named (if any), the stdout a controller session reads
+# the relay's pushes from, and the invocation's random source (the bus's authentication-retry
+# jitter draws from it).
 @dataclass(frozen=True)
 class RelayInputs:
     token: str
     redis_url: str
     codex_home: str | None
+    antigravity_server: AntigravityServer | None
     stdout: TextIO
     rng: random.Random
 
@@ -456,7 +459,12 @@ def cmd_relay(
             endpoint_record=args.antigravity_endpoint_file,
         )
         tuning = RelayTuning(debounce=args.debounce, max_chars=PUSH_MAX_CHARS)
-        adapter = bind_adapter(destination, codex_home=inputs.codex_home, stdout=inputs.stdout)
+        adapter = bind_adapter(
+            destination,
+            codex_home=inputs.codex_home,
+            antigravity_server=inputs.antigravity_server,
+            stdout=inputs.stdout,
+        )
         local_machine = machine.name()
         db = database_factory()
         bus = EventBus.from_settings(rng=inputs.rng)

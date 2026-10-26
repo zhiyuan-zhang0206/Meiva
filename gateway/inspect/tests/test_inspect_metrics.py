@@ -11,6 +11,7 @@ import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
+from base.clock import SYSTEM_TIMERS, Clock, ClockConfig
 from base.db import Database
 from base.telemetry.metrics.observed_metrics import MetricObservation, write_observations
 from gateway.inspect import _metrics
@@ -32,6 +33,9 @@ def app(database: Database) -> Iterator[FastAPI]:
 
     application = FastAPI(lifespan=lifespan)
     application.include_router(router)
+    application.state.clock = Clock(
+        ClockConfig("UTC", None, message_timestamp_weekday=False), timers=SYSTEM_TIMERS
+    )
     with database.pool(max_size=2) as pool:
         application.state.db_pool = pool
         yield application

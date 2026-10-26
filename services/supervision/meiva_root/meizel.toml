@@ -24,5 +24,8 @@ exports = ["__main__.py", "failure_state.py", "health.py", "inputs.py", "manifes
 [purity]
 "helper_chain_plan.py" = "strict"
 
+[roots]
+"daemon.py" = { kinds = ["pid"], why = "process entry of the root supervisor: reads its own pid once and hands it to the supervisor and the helper-chain watch" }
+
 [debt.ambient-read]
 "supervisor.py#environ base.native_process.child_env.inherited_process_env" = 1

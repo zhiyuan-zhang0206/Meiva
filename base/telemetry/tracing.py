@@ -8,7 +8,6 @@ import atexit
 import contextlib
 import json
 import math
-import os
 import threading
 import time
 from collections.abc import Callable, Generator, Sequence
@@ -348,20 +347,6 @@ def start_collector_retry(
         state["retry_owner"] = owner
 
 
-# meiva:note
-# Reset process-level trace state and content capture environment variable.
-def reset_tracing_state() -> None:
-    os.environ.pop("TRACELOOP_TRACE_CONTENT", None)
-    state.clear()
-    state.update(
-        closed=False,
-        collector_offline_reported=False,
-        retry_owner=None,
-        arm_owner=None,
-        traceloop_init=None,
-    )
-
-
 def _call_traceloop_init(default_init: Callable[..., object], **kwargs: object) -> None:
     (state.get("traceloop_init") or default_init)(**kwargs)
 
@@ -390,13 +375,10 @@ def _arm_tracing(
         if stop_requested is not None and stop_requested.is_set():
             return
         # meiva:note
-        # Content stripping, layer 1 (the source): false-before-init keeps
-        # LLM content out of span attributes. Unconditional when
-        # strip_content is on — an operator-set true would re-open the
-        # 31 GB/h hole. Layer 2 (the exporter) stays armed regardless.
-        if strip_content:
-            os.environ["TRACELOOP_TRACE_CONTENT"] = "false"
-
+        # Content stripping, layer 1 (the source) is the process root's job:
+        # `TraceConfig.traceloop_environment()` names the SDK's one content switch,
+        # and the root sets it before this runs. Layer 2 (the exporter) stays armed
+        # regardless.
         from traceloop.sdk import Traceloop
         from traceloop.sdk.instruments import Instruments
 
@@ -605,8 +587,9 @@ def _serialized_initialize[**P](function: Callable[P, None]) -> Callable[P, None
 #   guard, so an over-watermark disk still gets its relief pass.
 # - disk watermark (`trace_disk_watermark`): data disk over the fraction ->
 #   recording skipped, warning event emitted (auto-degrade).
-# - content stripping (`trace_strip_content`): TRACELOOP_TRACE_CONTENT=false
-#   + exporter-side re-strip, so the mirror holds metadata only.
+# - content stripping (`trace_strip_content`): the root sets TRACELOOP_TRACE_CONTENT=false
+#   (`TraceConfig.traceloop_environment`) + exporter-side re-strip, so the mirror holds
+#   metadata only.
 @_serialized_initialize
 def initialize_tracing(
     *,

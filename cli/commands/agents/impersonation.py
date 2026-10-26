@@ -23,6 +23,10 @@ from typing import Any, TextIO, assert_never
 from uuid import UUID
 
 from base.agents.context.clients import DatabaseFactory
+from base.agents.impersonation.host_transport import (
+    AntigravityServer,
+    antigravity_server_from_environment,
+)
 from base.db import Database
 from base.events.live.bus import EventBus
 from base.events.live.redis_listener import RedisInboundListener
@@ -210,7 +214,9 @@ def _send(args: argparse.Namespace, *, database_factory: DatabaseFactory) -> int
 # is owner-only; its CSRF token never reaches argv, the environment, the database or a log
 # line.
 # meiva:link docs/conventions/agents/agent-impersonation-hosts.md
-def _record_antigravity_endpoint(plan: RequestPlan, home: Path) -> None:
+def _record_antigravity_endpoint(
+    plan: RequestPlan, home: Path, *, antigravity_server: AntigravityServer | None
+) -> None:
     from base.agents.impersonation.host_transport import (
         resolve_antigravity_endpoint,
         write_antigravity_endpoint,
@@ -219,7 +225,9 @@ def _record_antigravity_endpoint(plan: RequestPlan, home: Path) -> None:
     if plan.thread_id is None:
         raise ValueError("the antigravity relay needs a conversation id")
     write_antigravity_endpoint(
-        resolve_antigravity_endpoint(plan.thread_id, home=home),
+        resolve_antigravity_endpoint(
+            plan.thread_id, home=home, antigravity_server=antigravity_server
+        ),
         thread_id=plan.thread_id,
         home=home,
     )
@@ -247,7 +255,13 @@ def _request(
         case Handoff.CODEX:
             endpoint = codex_endpoint(endpoint, codex_home=env.codex_home)
         case Handoff.ANTIGRAVITY:
-            _record_antigravity_endpoint(plan, home)
+            _record_antigravity_endpoint(
+                plan,
+                home,
+                antigravity_server=antigravity_server_from_environment(
+                    args.runtime.config.process_environment()
+                ),
+            )
         case Handoff.CLAUDE | Handoff.DSH:
             pass
         case _:

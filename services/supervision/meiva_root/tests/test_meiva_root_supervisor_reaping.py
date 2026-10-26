@@ -20,6 +20,7 @@ import psutil
 
 from services.supervision.meiva_root.manifest import RestartPolicy, UnitManifest, UnitRegistry
 from services.supervision.meiva_root.supervisor import Supervisor, SupervisorConfig
+from services.supervision.meiva_root.tests.slices import system_clock
 
 _CHILD = Path(__file__).with_name("child_unit.py")
 
@@ -32,7 +33,11 @@ def _supervisor(run_dir: Path) -> Supervisor:
         "root",
     )
     return Supervisor(
-        UnitRegistry([unit]), run_dir=run_dir, config=SupervisorConfig(stop_timeout_s=0.2)
+        UnitRegistry([unit]),
+        run_dir=run_dir,
+        config=SupervisorConfig(stop_timeout_s=0.2),
+        clock=system_clock(),
+        root_pid=os.getpid(),
     )
 
 

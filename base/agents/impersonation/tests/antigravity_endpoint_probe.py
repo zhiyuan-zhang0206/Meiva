@@ -1,9 +1,14 @@
 from __future__ import annotations
 
 import json
+import os
 import sys
 
-from base.agents.impersonation.host_transport import antigravity_rpc, resolve_antigravity_endpoint
+from base.agents.impersonation.host_transport import (
+    antigravity_rpc,
+    antigravity_server_from_environment,
+    resolve_antigravity_endpoint,
+)
 
 
 # meiva:note
@@ -12,7 +17,9 @@ from base.agents.impersonation.host_transport import antigravity_rpc, resolve_an
 # endpoint can only come from the record the request wrote. The RPC is read-only.
 # meiva:link docs/conventions/agents/agent-impersonation-hosts.md
 def main() -> int:
-    endpoint = resolve_antigravity_endpoint(sys.argv[1])
+    endpoint = resolve_antigravity_endpoint(
+        sys.argv[1], antigravity_server=antigravity_server_from_environment(os.environ)
+    )
     sys.stdout.write(json.dumps(antigravity_rpc("GetWorkspaceInfos", {}, server=endpoint)) + "\n")
     return 0
 

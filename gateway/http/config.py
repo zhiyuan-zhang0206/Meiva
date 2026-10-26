@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import random
 from dataclasses import dataclass, field
-from datetime import datetime
 from pathlib import Path
 from typing import Literal, get_args, get_type_hints
 from urllib.parse import urlsplit
@@ -16,7 +15,7 @@ from base.agents.upload_delivery.paths import (
     MAX_AGENT_UPLOAD_FILES,
     MAX_UPLOAD_BYTES,
 )
-from base.clock import SYSTEM_TIMERS, Clock, ClockConfig
+from base.clock import Clock, ClockConfig
 from base.clock.configuration import clock_config_from_boot
 from base.cluster.machine.configured import ConfiguredMachineIdentity
 from base.config import ConfigBoot
@@ -440,9 +439,3 @@ def gateway_config(request: Request) -> GatewayConfig:
 # app root builds it once beside the config, so a handler asks for time instead of creating a clock.
 def gateway_clock(request: Request) -> Clock:
     return request.app.state.clock
-
-
-def utc_now() -> datetime:
-    return Clock(
-        ClockConfig("UTC", None, message_timestamp_weekday=False), timers=SYSTEM_TIMERS
-    ).now()

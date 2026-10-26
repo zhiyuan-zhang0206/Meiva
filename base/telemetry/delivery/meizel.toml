@@ -1,12 +1,13 @@
-exports = ["loss.py", "mirror.py", "pipeline.py", "receipts.py", "reporting.py", "serialization.py", "state.py"]
+exports = ["defer_plan.py", "loss.py", "mirror.py", "pipeline.py", "receipts.py", "reporting.py", "serialization.py", "state.py"]
 
 [uses]
 "loss.py" = ["mirror.py", "receipts.py", "state.py"]
 "mirror.py" = ["receipts.py", "reporting.py", "serialization.py", "state.py"]
-"pipeline.py" = ["loss.py", "receipts.py", "reporting.py"]
+"pipeline.py" = ["defer_plan.py", "loss.py", "receipts.py", "reporting.py"]
 
 [purity]
 "__init__.py" = "strict"
+"defer_plan.py" = "strict"
 "receipts.py" = "strict"
 "reporting.py" = "strict"
 
