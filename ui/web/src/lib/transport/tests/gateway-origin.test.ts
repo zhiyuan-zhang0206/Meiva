@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { gatewayOriginForRequest } from "../gateway-origin";
+import { gatewayBaseForPage, gatewayOriginForRequest } from "../gateway-origin";
 
 const options = { browserOrigin: "https://console.example", gatewayPort: "20016" };
 
@@ -24,5 +24,28 @@ describe("staged HTTPS browser entry", () => {
     expect(gatewayOriginForRequest(new URL("https://console.example"), {
       ...options, apiBase: "http://localhost:8001",
     })).toBe("http://localhost:8001");
+  });
+});
+
+describe("the gateway base of a page", () => {
+  it("is the configured API base exactly as written, whatever the page", () => {
+    expect(gatewayBaseForPage({ apiBase: "http://localhost:8001/" }, new URL("https://console.example/")))
+      .toBe("http://localhost:8001/");
+    expect(gatewayBaseForPage({ apiBase: "http://localhost:8001" }, null)).toBe("http://localhost:8001");
+  });
+
+  it("is empty on the server, where no page exists", () => {
+    expect(gatewayBaseForPage(options, null)).toBe("");
+  });
+
+  it("is the origin the request rules pick for a browser page", () => {
+    expect(gatewayBaseForPage(options, new URL("https://console.example/?agent_id=42")))
+      .toBe("https://console.example");
+    expect(gatewayBaseForPage(options, new URL("http://192.0.2.2:20017/"))).toBe("http://192.0.2.2:20016");
+  });
+
+  it("treats an empty API base as unset", () => {
+    expect(gatewayBaseForPage({ ...options, apiBase: "" }, new URL("https://console.example/")))
+      .toBe("https://console.example");
   });
 });
