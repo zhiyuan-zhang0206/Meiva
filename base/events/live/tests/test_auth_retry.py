@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import random
+from collections.abc import Callable
 
 import pytest
 from redis.exceptions import AuthenticationError
@@ -60,18 +61,43 @@ def test_the_delays_of_a_run_of_failures_stay_inside_the_window() -> None:
     assert max(delays) <= 10.0
 
 
-def test_the_retry_draws_from_the_generator_it_was_given() -> None:
-    retry = AuthRetry(_POLICY, rng=_rng(5))
+def _delays(retry: AuthRetry, failures: int) -> list[float]:
+    return [
+        retry.next_delay(failure_count=count, waited_s=0.0, elapsed_s=0.0)
+        for count in range(1, failures + 1)
+    ]
+
+
+def test_the_retry_places_each_delay_by_a_sample_from_the_generator_it_was_given() -> None:
     reference = _rng(5)
-    assert [retry.draw() for _ in range(4)] == [reference.random() for _ in range(4)]
+    expected = [
+        compute_auth_retry_delay(
+            failure_count=count,
+            waited_s=0.0,
+            elapsed_s=0.0,
+            jitter_sample=reference.random(),
+            policy=_POLICY,
+        )
+        for count in range(1, 5)
+    ]
+    assert _delays(AuthRetry(_POLICY, rng=_rng(5)), 4) == expected
 
 
-def test_the_bus_hands_its_generator_to_the_retry_of_every_client_and_publish() -> None:
+def test_generators_with_different_seeds_give_different_delays() -> None:
+    first = _delays(AuthRetry(_POLICY, rng=_rng(1)), 6)
+    second = _delays(AuthRetry(_POLICY, rng=_rng(2)), 6)
+    assert first != second
+    assert len(set(first)) == len(first)
+
+
+def test_the_bus_owns_one_retry_over_its_generator() -> None:
     bus = EventBus(event_bus_config_from_settings(), rng=_rng(7))
-    assert bus.auth_retry.draw() == _rng(7).random()
+    policy = bus.auth_retry.policy
+    reference = AuthRetry(policy, rng=_rng(7))
+    assert _delays(bus.auth_retry, 3) == _delays(reference, 3)
 
 
-def _failing(times: int) -> object:
+def _failing(times: int) -> Callable[[], str]:
     state = {"left": times}
 
     def operation() -> str:
@@ -91,7 +117,7 @@ def test_the_sync_loop_draws_one_jitter_sample_per_retry() -> None:
     rng = _rng(11)
     operation = _failing(3)
 
-    result = retry_auth_failures_sync(operation, auth_retry=AuthRetry(_POLICY, rng=rng))  # pyright: ignore[reportArgumentType]
+    result = retry_auth_failures_sync(operation, auth_retry=AuthRetry(_POLICY, rng=rng))
 
     assert result == "done"
     reference = _rng(11)

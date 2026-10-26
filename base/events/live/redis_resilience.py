@@ -49,10 +49,16 @@ class AuthRetry:
         self._rng = rng
 
     # meiva:note
-    # The next jitter sample, in [0, 1): `compute_auth_retry_delay` places the delay between half
-    # the exponential cap and the cap by it.
-    def draw(self) -> float:
-        return self._rng.random()
+    # What the next failed attempt waits: one jitter sample in [0, 1) from the generator places the
+    # delay between half the exponential cap and the cap, never past what is left of the window.
+    def next_delay(self, *, failure_count: int, waited_s: float, elapsed_s: float) -> float:
+        return compute_auth_retry_delay(
+            failure_count=failure_count,
+            waited_s=waited_s,
+            elapsed_s=elapsed_s,
+            jitter_sample=self._rng.random(),
+            policy=self.policy,
+        )
 
 
 def compute_auth_retry_delay(

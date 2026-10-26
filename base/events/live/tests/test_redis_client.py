@@ -128,7 +128,7 @@ class _EventuallySyncPublisher:
 
 
 @pytest.mark.parametrize("error", (AuthenticationError, NoPermissionError))
-async def test_publish_retries_auth_failures_with_bounded_exponential_delays(
+async def test_publish_retries_auth_failures_until_it_succeeds(
     monkeypatch: pytest.MonkeyPatch, error: type[Exception]
 ) -> None:
     publisher = _EventuallyAsyncPublisher(error, failures=2)
@@ -138,7 +138,7 @@ async def test_publish_retries_auth_failures_with_bounded_exponential_delays(
     assert publisher.attempts == 3
 
 
-async def test_publish_auth_retry_stops_within_its_total_wait_budget(
+async def test_publish_auth_retry_stops_when_the_attempts_are_spent(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     publisher = _EventuallyAsyncPublisher(AuthenticationError, failures=100)
@@ -195,7 +195,7 @@ async def test_best_effort_publish_bounds_a_half_open_health_check_read(
     assert publisher.cancelled
 
 
-def test_sync_publish_retries_auth_failures_with_bounded_exponential_delays(
+def test_sync_publish_retries_auth_failures_until_it_succeeds(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     publisher = _EventuallySyncPublisher(failures=2)

@@ -1,6 +1,7 @@
 from uuid import uuid4
 
 import psycopg
+import pytest
 
 from base.api_contracts.idempotency import keyed_headers
 from base.cluster.machine import MachineIdentityReader
@@ -12,6 +13,11 @@ from meiva_builtins.plugins.meiva_fleet.tests.task_registry.seeds import (
     root_task_id as root_task_id,
 )
 from meiva_builtins.plugins.meiva_fleet.tests.task_registry.seeds import seed_agent
+
+# meiva:note
+# The task registry publishes through the SDK's event bus, which needs the generator the SDK root
+# carries; every test here runs under the bare installation `sdk_root` holds.
+pytestmark = pytest.mark.usefixtures("sdk_root")
 
 
 def test_gateway_enqueue_failure_rolls_back_assignment(
