@@ -6,6 +6,7 @@ import subprocess
 import sys
 from pathlib import Path
 from typing import Any, cast
+from uuid import UUID
 
 import pytest
 from langchain_core.messages import HumanMessage
@@ -63,8 +64,8 @@ def spawn_real_child(
     context: dict[str, Any] | None = None,
 ) -> tuple[subprocess.CompletedProcess[str], Path, Path]:
     exec_dir = tmp_path / "exec"
-    request_path = make_request_path(exec_dir, agent_id=AGENT_ID)
-    result_path = make_result_path(exec_dir, agent_id=AGENT_ID)
+    request_path = make_request_path(exec_dir, agent_id=AGENT_ID, request_id=UUID(int=1))
+    result_path = make_result_path(exec_dir, agent_id=AGENT_ID, result_id=UUID(int=2))
     if write_request_file:
         desc = context or exec_context(AGENT_ID).describe()
         write_request(

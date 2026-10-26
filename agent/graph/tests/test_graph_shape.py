@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import random
+
 # meiva:note
 # The compiled graph's shape, from both ends: every node receives the plugins' state
 # channels (a node annotated with the static base class would silently drop them), and
@@ -16,6 +18,7 @@ from pydantic import BaseModel
 import agent.state as agent_state
 from agent.graph import build_graph
 from agent.graph.claim.node import route_target
+from agent.graph.exec.process import read_parent_facts
 from agent.state import AgentState, ContextReset
 from base.agents.context import MeivaContext
 from base.api_contracts.agent_contract import Harness
@@ -27,6 +30,12 @@ from base.packages.plugin_providers import build_model_catalog
 from base.packages.plugins.extensions import EMPTY, ExtensionRegistry, PluginContributions
 
 
+# meiva:note
+# A fresh seeded generator for each use, so no test sees another's draws.
+def _rng() -> random.Random:
+    return random.Random(0)  # noqa: S311
+
+
 class _Counter(BaseModel):
     seen: int = 0
 
@@ -34,7 +43,7 @@ class _Counter(BaseModel):
 def test_every_node_receives_the_plugins_state_channels() -> None:
     registry = ExtensionRegistry((("demo", PluginContributions(state=(_Counter,))),))
 
-    graph = build_graph(None, registry)
+    graph = build_graph(None, registry, parent=read_parent_facts(), rng=_rng())
 
     state_cls = graph.builder.state_schema
     assert state_cls is not agent_state.BaseAgentState
@@ -94,7 +103,7 @@ def make_context(harness: Harness, engine: FakeEngine | None) -> MeivaContext:
 async def executed_nodes(
     harness: Harness, engine: FakeEngine | None, *, stop_at: frozenset[str] = frozenset()
 ) -> list[str]:
-    graph = build_graph(None, EMPTY)
+    graph = build_graph(None, EMPTY, parent=read_parent_facts(), rng=_rng())
     state = AgentState(
         messages=[
             SystemMessage(content="prompt"),
@@ -166,7 +175,9 @@ async def test_a_context_reset_keeps_an_external_harness_off_the_native_nodes() 
     )
     seen: list[str] = []
     async for chunk in _stream(
-        build_graph(None, EMPTY), state, make_context(Harness.CLAUDE_CODE, engine)
+        build_graph(None, EMPTY, parent=read_parent_facts(), rng=_rng()),
+        state,
+        make_context(Harness.CLAUDE_CODE, engine),
     ):
         seen.extend(chunk.keys())
 

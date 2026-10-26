@@ -6,6 +6,7 @@ import signal
 import sys
 import time
 from pathlib import Path
+from uuid import UUID
 
 import psutil
 import pytest
@@ -105,6 +106,8 @@ async def test_a_run_ends_with_its_group_dead_and_its_files_removed(tmp_path: Pa
         exec_dir=tmp_path / "exec",
         parent=real_parent(),
         accumulation_max_chars=1_000_000,
+        request_id=UUID(int=1),
+        result_id=UUID(int=2),
     )
 
     assert isinstance(result, ExecDone), result.output
@@ -135,6 +138,8 @@ async def test_a_detached_output_holder_cannot_hold_the_run_past_the_drain_bound
             exec_dir=tmp_path / "exec",
             parent=real_parent(),
             accumulation_max_chars=1_000_000,
+            request_id=UUID(int=1),
+            result_id=UUID(int=2),
         )
 
         assert isinstance(result, ExecDone), result.output
@@ -154,6 +159,8 @@ async def test_real_missing_executable_crashes_the_exec_without_a_child(tmp_path
         exec_dir=tmp_path,
         parent=real_parent(executable=str(tmp_path / "absent")),
         accumulation_max_chars=1_000_000,
+        request_id=UUID(int=1),
+        result_id=UUID(int=2),
     )
     assert isinstance(outcome, ExecCrashed)
     assert "could not be spawned" in outcome.output

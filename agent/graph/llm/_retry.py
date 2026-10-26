@@ -7,7 +7,6 @@ this turn. The node never retries a graph or code execution.
 from __future__ import annotations
 
 import contextlib
-import random
 
 from agent.graph.hooks.compact import CompactionFailedError
 from agent.graph.llm_errors import (
@@ -19,7 +18,7 @@ from base.lm.catalog import ModelCatalog
 from base.lm.errors import is_retryable_provider_error
 from base.lm.registry import resolve_setting
 
-from ._backoff import WAIT_JITTER_SPAN_S, RetryPolicy, backoff_wait
+from ._backoff import RetryPolicy, backoff_wait
 
 RETRY_REMAINING_ATTR = "_meiva_retry_budget_remaining_seconds"
 _NEVER_RETRIED = (FatalLLMStreamError, FatalProviderError, CompactionFailedError)
@@ -58,12 +57,6 @@ def record_remaining(exc: BaseException, seconds: float) -> None:
 def remaining_of(exc: BaseException) -> float | None:
     remaining = getattr(exc, RETRY_REMAINING_ATTR, None)
     return remaining if isinstance(remaining, float) else None
-
-
-# meiva:note
-# The one dice roll of the retry loop. Jitter only spreads out agents that failed together; it is not a secret.
-def draw_jitter() -> float:
-    return random.uniform(0, WAIT_JITTER_SPAN_S)  # noqa: S311
 
 
 # meiva:note

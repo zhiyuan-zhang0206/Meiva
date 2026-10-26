@@ -1,15 +1,14 @@
 from __future__ import annotations
 
-import os
 from collections.abc import Callable
 from pathlib import Path
 from typing import Any
+from uuid import UUID
 
 import meiva
 from base.cluster.machine import MachineIdentityReader
 from base.config import ConfigBoot
 from base.db import Database
-from base.host.env.agent_env import AGENT_ID_ENV
 from base.host.env.agent_slices import ModelOverrides, agent_setting
 from base.lm.catalog import ModelCatalog
 from base.lm.catalog.provider_contract import ProviderBinding
@@ -28,7 +27,9 @@ def apply_per_agent_sdk_disable(*, default_reader: Callable[[str, str], Any]) ->
     sdk_disable.apply_sdk_disable(list(configured))
 
 
-def apply_per_agent_eval_isolation(*, default_reader: Callable[[str, str], Any]) -> None:
+def apply_per_agent_eval_isolation(
+    *, agent_id: int | None, default_reader: Callable[[str, str], Any]
+) -> None:
     if not agent_setting("eval_isolation", default_reader=default_reader):
         return
 
@@ -40,7 +41,8 @@ def apply_per_agent_eval_isolation(*, default_reader: Callable[[str, str], Any])
         disabled.append("understand")
     sdk_disable.apply_sdk_disable(disabled)
 
-    agent_id = int(os.environ[AGENT_ID_ENV])
+    if agent_id is None:
+        raise RuntimeError("eval isolation needs the agent identity of the exec it isolates")
     isolated_pool = workspace_dir(agent_id) / "memory-pool"
     isolated_pool.mkdir(parents=True, exist_ok=True)
     memory = getattr(meiva, "memory", None)
@@ -105,6 +107,7 @@ async def boot_agent_scope(
     catalog: ModelCatalog,
     keys: ProviderKeys,
     llm_override: str,
+    permissions_notice_key: UUID,
 ) -> tuple[Any, ProviderBinding | None]:
     workspace = workspace_dir(agent_id)
 
@@ -114,7 +117,9 @@ async def boot_agent_scope(
 
     from .startup import notify_desktop_permissions_at_startup
 
-    await notify_desktop_permissions_at_startup(meiva_home())
+    await notify_desktop_permissions_at_startup(
+        meiva_home(), idempotency_key=permissions_notice_key
+    )
 
     from base.lm.factory import build_chat_model_bound
 

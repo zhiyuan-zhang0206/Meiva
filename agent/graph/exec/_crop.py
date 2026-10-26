@@ -5,12 +5,12 @@ evict them. Native execs for one agent are serial. Only unreferenced soft files
 are candidates for eviction, and an exhausted budget leaves the output inline.
 """
 
+import hashlib
 import re
 import stat
 from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import Path
-from uuid import uuid4
 
 from langchain_core.messages import AIMessage, BaseMessage
 
@@ -76,9 +76,11 @@ def format_crop_preview(
     return preview if len(preview) < len(output) else None
 
 
+# meiva:note
+# The same content has the same filename; the archive directory is per agent, so agents never share
+# a file. Matching the basename also keeps references safe when a context note quotes a relative
+# workspace path.
 def _references(messages: Sequence[BaseMessage]) -> set[str]:
-    # UUID filenames are unique across agents. Matching the basename also keeps
-    # references safe when a context note quotes a relative workspace path.
     referenced: set[str] = set()
     for message in messages:
         referenced.update(_CROP_NAME.findall(message.text))
@@ -101,13 +103,30 @@ def _references(messages: Sequence[BaseMessage]) -> set[str]:
     return referenced
 
 
-def _make_room(directory: Path, size: int, budget: int, referenced: set[str]) -> bool:
+# meiva:note
+# The archive file name of one output: the first 128 bits of its SHA-256, so the same output
+# archived twice is one file.
+def _archive_name(encoded: bytes) -> str:
+    return f"crop_{hashlib.sha256(encoded).hexdigest()[:32]}.txt"
+
+
+# meiva:note
+# Whether `incoming` (a file of `size` bytes) fits the budget, evicting unreferenced files. A file
+# already named `incoming` holds the same bytes (the name is their digest) and is rewritten in
+# place, so it counts once, as the incoming file, and is never evicted for itself.
+def _make_room(
+    directory: Path, size: int, budget: int, referenced: set[str], *, incoming: str
+) -> bool:
     if size > budget:
         return False
     existing: list[tuple[Path, int, float]] = []
     for path in directory.glob("crop_*.txt"):
         metadata = path.lstat()
-        if _CROP_NAME.fullmatch(path.name) and stat.S_ISREG(metadata.st_mode):
+        if (
+            path.name != incoming
+            and _CROP_NAME.fullmatch(path.name)
+            and stat.S_ISREG(metadata.st_mode)
+        ):
             existing.append((path, metadata.st_size, metadata.st_mtime))
     protected_bytes = sum(size for path, size, _ in existing if path.name in referenced)
     if protected_bytes + size > budget:
@@ -131,7 +150,8 @@ def crop_output(
     max_chars: int,
 ) -> str | None:
     """Archive before returning a preview; capacity/storage failures keep the body."""
-    path = directory / f"crop_{uuid4().hex}.txt"
+    encoded = output.encode("utf-8")
+    path = directory / _archive_name(encoded)
     preview = format_crop_preview(
         output,
         path,
@@ -143,13 +163,13 @@ def crop_output(
     )
     if preview is None or len(preview) > max_chars:
         return None
-    encoded = output.encode("utf-8")
     try:
         if not _make_room(
             directory,
             len(encoded),
             config.exec_output_crop_archive_max_bytes,
             _references(referenced_messages) | set(_CROP_NAME.findall(output)),
+            incoming=path.name,
         ):
             logger.info("Soft output crop skipped: referenced archives or output fill byte budget")
             return None

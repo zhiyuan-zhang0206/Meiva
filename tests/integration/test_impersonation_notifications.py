@@ -1,5 +1,6 @@
 import asyncio
 import io
+import random
 import sys
 from dataclasses import replace
 from typing import Any, cast
@@ -42,6 +43,12 @@ from cli.commands.agents.impersonation_adapters import ClaudeStdout
 from cli.commands.agents.relay.steps import RelayTuning
 from ops.agents.wake import resurrect_agent
 from ops.lifecycle.termination import enqueue_termination_inbounds, force_terminate_transaction
+
+
+# meiva:note
+# A fresh seeded generator for each use, so no test sees another's draws.
+def _rng() -> random.Random:
+    return random.Random(0)  # noqa: S311
 
 
 def test_reminder_commands_are_bare_meiva(
@@ -326,7 +333,7 @@ async def test_termination_notices_precede_resurrection_in_native_claim(
         runtime.context.relays,
         incarnation=successor,
         timestamps=TimestampSource(clock=Clock.from_settings(), timestamps_enabled=False),
-        host=process_host(machine_identity.name()),
+        host=process_host(machine_identity.name(), rng=_rng()),
     )
     resumed = await claim_node(
         BaseAgentState(), runtime, {"configurable": {"thread_id": str(owner.agent_id)}}

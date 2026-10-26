@@ -10,6 +10,7 @@ Stop-reason and thinking-block validation cover the remaining mutation gaps.
 from __future__ import annotations
 
 import asyncio
+import random
 from collections.abc import AsyncIterator, Mapping
 from typing import Any
 from unittest.mock import MagicMock
@@ -43,6 +44,13 @@ from base.host.env.agent_slices import AgentSlices, LlmCallPolicy
 from base.native_process.turn_identity import HostedTurnResources
 from base.packages.plugin_providers import build_model_catalog
 from meiva.tests.fixtures.pin_agent import hosted_resources as hosted_resources
+
+
+# meiva:note
+# A fresh seeded generator for each use, so no test sees another's draws.
+def _rng() -> random.Random:
+    return random.Random(0)  # noqa: S311
+
 
 CONFIG: RunnableConfig = {"configurable": {"thread_id": "7"}}
 
@@ -240,6 +248,7 @@ async def test_cancel_branch_publishes_cancelled_and_returns_halted(
         ),
         _config(agent_id),
         ledger=ledger,
+        rng=_rng(),
     )
     await trigger
     events = await live_events.typed()
@@ -301,6 +310,7 @@ async def test_stream_normal_completion_no_cancelled_event(
         ),
         CONFIG,
         ledger=ledger,
+        rng=_rng(),
     )
     events = await live_events.typed()
 
@@ -348,6 +358,7 @@ async def test_silent_idle_with_reasoning_continue_loops_not_raises(
         ),
         CONFIG,
         ledger=ledger,
+        rng=_rng(),
     )
 
     assert isinstance(result, Command)
@@ -391,6 +402,7 @@ async def test_truly_empty_no_reasoning_halts_with_warning(
         ),
         CONFIG,
         ledger=ledger,
+        rng=_rng(),
     )
 
     assert isinstance(result, Command)
@@ -485,6 +497,7 @@ async def test_cancel_event_set_before_first_chunk_returns_halted_no_publish_don
         ),
         _config(agent_id),
         ledger=ledger,
+        rng=_rng(),
     )
     events = await live_events.typed()
 
@@ -536,6 +549,7 @@ async def test_silent_idle_with_thinking_blocks_continue_loops(
         ),
         CONFIG,
         ledger=ledger,
+        rng=_rng(),
     )
 
     assert isinstance(result, Command)
@@ -579,6 +593,7 @@ async def test_silent_idle_with_deepseek_reasoning_content_continue_loops(
         ),
         CONFIG,
         ledger=ledger,
+        rng=_rng(),
     )
 
     assert isinstance(result, Command)
@@ -618,6 +633,7 @@ async def test_silent_idle_zero_output_reasoning_content_consumes_minimum_budget
             ),
             CONFIG,
             ledger=ledger,
+            rng=_rng(),
         )
         assert isinstance(result, Command)
         assert result.update["halted"] is (turn == 3)
@@ -679,6 +695,7 @@ async def test_llm_node_permanent_provider_error_fails_fast_with_structured_fiel
             ),
             CONFIG,
             ledger=ledger,
+            rng=_rng(),
         )
 
     assert exc_info.value.error_class == "permanent"

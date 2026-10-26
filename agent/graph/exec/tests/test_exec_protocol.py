@@ -19,6 +19,7 @@ import time
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, TypeGuard
+from uuid import UUID
 
 import pytest
 from langchain_core.messages import AIMessage, BaseMessage, HumanMessage, ToolMessage
@@ -33,6 +34,7 @@ from agent.execution.protocol import (
     loads_typed,
     make_request_path,
     make_result_path,
+    prune_stale,
     read_request,
     read_result,
     write_request,
@@ -43,6 +45,8 @@ from base.cluster.machine.tests.identity import machine_identity as machine_iden
 from base.db import Database
 from base.paths import meiva_home
 from meiva.tests.fixtures.pin_agent import exec_context
+
+_NOW = datetime(2026, 10, 27, 12, 0, tzinfo=UTC)
 
 
 def _context_description(agent_id: int | None) -> dict[str, Any]:
@@ -140,7 +144,7 @@ def _make_state_dump() -> dict[str, Any]:
 
 def test_request_envelope_round_trip(tmp_path: Path) -> None:
     state = _make_state_dump()
-    path = make_request_path(tmp_path, agent_id=7)
+    path = make_request_path(tmp_path, agent_id=7, request_id=UUID(int=1))
     write_request(
         path,
         code="print('hi')",
@@ -180,7 +184,7 @@ def test_request_envelope_transfers_emit_size_and_serialize_time(
     )
     try:
         with logger.contextualize(agent_id=7):
-            path = make_request_path(tmp_path, agent_id=7)
+            path = make_request_path(tmp_path, agent_id=7, request_id=UUID(int=1))
             write_request(
                 path,
                 code="print('hi')",
@@ -213,7 +217,7 @@ def test_request_envelope_transfers_emit_size_and_serialize_time(
 
 
 def test_request_envelope_without_state(tmp_path: Path) -> None:
-    path = make_request_path(tmp_path, agent_id=None)
+    path = make_request_path(tmp_path, agent_id=None, request_id=UUID(int=1))
     write_request(
         path,
         code="x = 1",
@@ -231,7 +235,7 @@ def test_request_envelope_without_state(tmp_path: Path) -> None:
 
 
 def test_request_envelope_rejects_version_drift(tmp_path: Path) -> None:
-    path = make_request_path(tmp_path, agent_id=7)
+    path = make_request_path(tmp_path, agent_id=7, request_id=UUID(int=1))
     write_request(
         path,
         code="x = 1",
@@ -259,7 +263,7 @@ def test_result_envelope_round_trip(tmp_path: Path) -> None:
         state_update={"messages": [HumanMessage(content="note")]},
         sdk_calls=[{"method": "files.read", "count": 3}],
     )
-    path = make_result_path(tmp_path, agent_id=7)
+    path = make_result_path(tmp_path, agent_id=7, result_id=UUID(int=1))
     write_result(path, payload)
     back = read_result(path)
     assert back.kind == "crashed"
@@ -271,7 +275,7 @@ def test_result_envelope_round_trip(tmp_path: Path) -> None:
 
 
 def test_result_envelope_minimal(tmp_path: Path) -> None:
-    path = make_result_path(tmp_path, agent_id=7)
+    path = make_result_path(tmp_path, agent_id=7, result_id=UUID(int=1))
     write_result(path, ResultPayload(kind="done"))
     back = read_result(path)
     assert back.kind == "done"
@@ -279,7 +283,7 @@ def test_result_envelope_minimal(tmp_path: Path) -> None:
 
 
 def test_result_envelope_without_sdk_calls_reads_as_old_format(tmp_path: Path) -> None:
-    path = make_result_path(tmp_path, agent_id=7)
+    path = make_result_path(tmp_path, agent_id=7, result_id=UUID(int=1))
     write_result(path, ResultPayload(kind="done"))
     raw = json.loads(path.read_text(encoding="utf-8"))
     del raw["sdk_calls"]
@@ -289,7 +293,7 @@ def test_result_envelope_without_sdk_calls_reads_as_old_format(tmp_path: Path) -
 
 
 def test_result_envelope_rejects_unknown_kind(tmp_path: Path) -> None:
-    path = make_result_path(tmp_path, agent_id=7)
+    path = make_result_path(tmp_path, agent_id=7, result_id=UUID(int=1))
     write_result(path, ResultPayload(kind="done"))
     raw = json.loads(path.read_text(encoding="utf-8"))
     raw["kind"] = "exploded"
@@ -299,7 +303,7 @@ def test_result_envelope_rejects_unknown_kind(tmp_path: Path) -> None:
 
 
 def test_result_envelope_rejects_version_drift(tmp_path: Path) -> None:
-    path = make_result_path(tmp_path, agent_id=7)
+    path = make_result_path(tmp_path, agent_id=7, result_id=UUID(int=1))
     write_result(path, ResultPayload(kind="done"))
     raw = json.loads(path.read_text(encoding="utf-8"))
     raw["v"] = RESULT_VERSION + 99
@@ -312,7 +316,7 @@ def test_result_envelope_rejects_version_drift(tmp_path: Path) -> None:
 
 
 def test_envelope_files_are_owner_only(tmp_path: Path) -> None:
-    request = make_request_path(tmp_path, agent_id=7)
+    request = make_request_path(tmp_path, agent_id=7, request_id=UUID(int=1))
     write_request(
         request,
         code="x = 1",
@@ -321,7 +325,7 @@ def test_envelope_files_are_owner_only(tmp_path: Path) -> None:
         state=None,
         incarnation=None,
     )
-    result = make_result_path(tmp_path, agent_id=7)
+    result = make_result_path(tmp_path, agent_id=7, result_id=UUID(int=2))
     write_result(result, ResultPayload(kind="done"))
     for path in (request, result):
         mode = stat.S_IMODE(path.stat().st_mode)
@@ -330,33 +334,58 @@ def test_envelope_files_are_owner_only(tmp_path: Path) -> None:
     assert stat.S_IMODE(agent_dir.stat().st_mode) == 0o700
 
 
+def test_envelope_paths_are_named_by_their_call_identity(tmp_path: Path) -> None:
+    request_id, result_id = UUID(int=1), UUID(int=2)
+    request = make_request_path(tmp_path, agent_id=7, request_id=request_id)
+    result = make_result_path(tmp_path, agent_id=7, result_id=result_id)
+    assert request == tmp_path / "7" / f"req-{request_id.hex}.json"
+    assert result == tmp_path / "7" / f"res-{result_id.hex}.json"
+
+
+def test_pruning_judges_age_against_the_instant_it_is_given(tmp_path: Path) -> None:
+    agent_dir = make_result_path(tmp_path, agent_id=7, result_id=UUID(int=1)).parent
+    recent = agent_dir / "res-recent.json"
+    recent.write_text("{}", encoding="utf-8")
+    edge = _NOW.timestamp() - STALE_FILE_AGE_S
+    os.utime(recent, (edge + 1, edge + 1))
+    gone = agent_dir / "res-gone.json"
+    gone.write_text("{}", encoding="utf-8")
+    os.utime(gone, (edge - 1, edge - 1))
+
+    prune_stale(tmp_path, 7, now=_NOW)
+
+    assert recent.exists()
+    assert not gone.exists()
+
+
 def test_result_write_fails_on_unknown_kind(tmp_path: Path) -> None:
     with pytest.raises(ValueError, match="unknown result kind"):
-        write_result(make_result_path(tmp_path, agent_id=7), ResultPayload(kind="nope"))  # type: ignore[arg-type]
+        result_path = make_result_path(tmp_path, agent_id=7, result_id=UUID(int=1))
+        write_result(result_path, ResultPayload(kind="nope"))  # type: ignore[arg-type]
 
 
 def test_stale_request_evidence_retained_while_result_is_pruned(tmp_path: Path) -> None:
-    path = make_request_path(tmp_path, agent_id=7)
+    path = make_request_path(tmp_path, agent_id=7, request_id=UUID(int=1))
     old_request = path.parent / "req-dead.json"
     old_request.write_text("{}", encoding="utf-8")
     old_gate = path.parent / "req-dead.job-ready.json"
     old_gate.write_text("{}", encoding="utf-8")
     old_result = path.parent / "res-dead.json"
     old_result.write_text("{}", encoding="utf-8")
-    old_time = time.time() - STALE_FILE_AGE_S - 10
+    old_time = _NOW.timestamp() - STALE_FILE_AGE_S - 10
 
     for old in (old_request, old_gate, old_result):
         os.utime(old, (old_time, old_time))
-    fresh = make_request_path(tmp_path, agent_id=7)
+    prune_stale(tmp_path, 7, now=_NOW)
     assert old_request.exists()
     assert old_gate.exists()
     assert not old_result.exists()
-    assert fresh.parent.is_dir()
+    assert path.parent.is_dir()
 
 
 def test_failed_envelope_write_leaves_nothing_at_the_destination(tmp_path: Path) -> None:
     """A write failing before the rename never materializes at `path` (D-3)."""
-    path = make_request_path(tmp_path, agent_id=7)
+    path = make_request_path(tmp_path, agent_id=7, request_id=UUID(int=1))
     path.mkdir()
 
     with pytest.raises(OSError):
@@ -377,7 +406,7 @@ def test_envelope_write_commits_the_full_bytes_and_a_second_write_replaces_them(
     tmp_path: Path,
 ) -> None:
     """The committed file is complete, owner-only, and leaves no scratch behind."""
-    path = make_request_path(tmp_path, agent_id=7)
+    path = make_request_path(tmp_path, agent_id=7, request_id=UUID(int=1))
     write_request(
         path,
         code="x = 1",
@@ -406,23 +435,24 @@ def test_envelope_write_commits_the_full_bytes_and_a_second_write_replaces_them(
 def test_orphaned_write_temp_files_are_swept(tmp_path: Path) -> None:
     """A crashed writer's scratch file is swept by a later allocation."""
 
-    path = make_request_path(tmp_path, agent_id=7)
+    path = make_request_path(tmp_path, agent_id=7, request_id=UUID(int=1))
     agent_dir = path.parent
     orphan = agent_dir / ".req-dead.json.deadbeef.tmp"
     orphan.write_text("partial")
     live = agent_dir / ".req-live.json.cafef00d.tmp"
     live.write_text("partial")
-    old_time = time.time() - STALE_FILE_AGE_S - 10
+    old_time = _NOW.timestamp() - STALE_FILE_AGE_S - 10
     os.utime(orphan, (old_time, old_time))
+    os.utime(live, (_NOW.timestamp(), _NOW.timestamp()))
 
-    make_request_path(tmp_path, agent_id=7)
+    prune_stale(tmp_path, 7, now=_NOW)
 
     assert not orphan.exists()
     assert live.exists()
 
 
 def test_size_ceiling_enforced(tmp_path: Path) -> None:
-    path = make_request_path(tmp_path, agent_id=7)
+    path = make_request_path(tmp_path, agent_id=7, request_id=UUID(int=1))
     write_request(
         path,
         code="x = 1",
@@ -437,5 +467,5 @@ def test_size_ceiling_enforced(tmp_path: Path) -> None:
 
 
 def test_no_agent_dirname(tmp_path: Path) -> None:
-    path = make_request_path(tmp_path, agent_id=None)
+    path = make_request_path(tmp_path, agent_id=None, request_id=UUID(int=1))
     assert path.parent.name == "_no_agent_"

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import random
 from collections.abc import Sequence
 from dataclasses import replace
 from datetime import UTC, datetime
@@ -42,6 +43,12 @@ from meiva_builtins.plugins.tests.test_meiva_sdk_reminder_plugin import (
 from meiva_builtins.plugins.tests.test_meiva_sdk_reminder_plugin import (
     reminder_plugin_loaded as reminder_plugin_loaded,
 )
+
+
+# meiva:note
+# A fresh seeded generator for each use, so no test sees another's draws.
+def _rng() -> random.Random:
+    return random.Random(0)  # noqa: S311
 
 
 class SummaryModel(BaseChatModel):
@@ -308,7 +315,7 @@ async def test_real_runner_compaction_wins_no_note(
     assert isinstance(hook_update, dict) and "messages" not in hook_update
     from agent.graph.llm.node import llm_node
 
-    cmd = await llm_node(state, runtime, make_config(), ledger=LlmLedger())
+    cmd = await llm_node(state, runtime, make_config(), ledger=LlmLedger(), rng=_rng())
     update = cmd.update
     assert isinstance(update, dict)
     # Apply the real add_messages reducer to get the committed messages.

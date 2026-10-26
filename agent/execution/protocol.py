@@ -8,13 +8,13 @@ import base64
 import contextlib
 import json
 import time
-import uuid
 from dataclasses import dataclass
+from datetime import datetime
 from pathlib import Path
 from typing import Any, Literal, TypeGuard
+from uuid import UUID
 
 from agent.execution.result_kind import RESULT_KINDS, ResultKind
-from base.clock import SYSTEM_TIMERS, Clock, ClockConfig
 from base.host.atomic_io import write_bytes_atomic
 from base.log import logger
 from base.native_process.runtime_incarnation import RuntimeIncarnation
@@ -94,14 +94,16 @@ class ResultPayload:
     sdk_calls: list[dict[str, Any]] | None = None
 
 
-def make_request_path(exec_dir: Path, agent_id: int | None) -> Path:
-    agent_dir = _agent_dir(exec_dir, agent_id)
-    _prune_stale(agent_dir)
-    return agent_dir / f"req-{uuid.uuid4().hex}.json"
+# meiva:note
+# The request envelope path of one exec call; `request_id` is that call's own identity.
+def make_request_path(exec_dir: Path, agent_id: int | None, *, request_id: UUID) -> Path:
+    return _agent_dir(exec_dir, agent_id) / f"req-{request_id.hex}.json"
 
 
-def make_result_path(exec_dir: Path, agent_id: int | None) -> Path:
-    return _agent_dir(exec_dir, agent_id) / f"res-{uuid.uuid4().hex}.json"
+# meiva:note
+# The result envelope path of one exec call; `result_id` is that call's own identity.
+def make_result_path(exec_dir: Path, agent_id: int | None, *, result_id: UUID) -> Path:
+    return _agent_dir(exec_dir, agent_id) / f"res-{result_id.hex}.json"
 
 
 def _agent_dir(exec_dir: Path, agent_id: int | None) -> Path:
@@ -112,13 +114,12 @@ def _agent_dir(exec_dir: Path, agent_id: int | None) -> Path:
     return d
 
 
-def _prune_stale(agent_dir: Path) -> None:
-    cutoff = (
-        Clock(ClockConfig("UTC", None, message_timestamp_weekday=False), timers=SYSTEM_TIMERS)
-        .now()
-        .timestamp()
-        - STALE_FILE_AGE_S
-    )
+# meiva:note
+# Remove the result files and write scratch an exec left over an hour before `now`. Request
+# envelopes stay: a dead call's request is evidence of what it was asked to run.
+def prune_stale(exec_dir: Path, agent_id: int | None, *, now: datetime) -> None:
+    agent_dir = _agent_dir(exec_dir, agent_id)
+    cutoff = now.timestamp() - STALE_FILE_AGE_S
     for path in (*agent_dir.glob("*.json"), *agent_dir.glob(".*.tmp")):
         if path.name.startswith("req-"):
             continue
@@ -172,8 +173,6 @@ def read_request(path: Path) -> RequestPayload:
     state_raw = None
     if envelope.get("state_b64") is not None:
         state_raw = (str(envelope["state_tag"]), base64.b64decode(envelope["state_b64"]))
-    from uuid import UUID
-
     acts_as = envelope["context"]["identity"]["agent_id"]
     if envelope["agent_id"] != acts_as:
         raise ValueError(

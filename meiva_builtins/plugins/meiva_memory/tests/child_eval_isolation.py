@@ -1,9 +1,8 @@
 """Child process for the eval-isolation boot tests: install the memory plugin, then apply boot.
 
-Usage: `child_eval_isolation.py <isolated|network_allowlist|off>`; prints `ok` on success.
+Usage: `child_eval_isolation.py <isolated|network_allowlist|missing_agent|off>`; prints `ok` on success.
 """
 
-import os
 import sys
 from types import SimpleNamespace
 
@@ -43,10 +42,10 @@ def isolated() -> None:
     assert hasattr(meiva, "tasks")
 
     original_path_doc = meiva.memory.PATH.__doc__
-    os.environ["MEIVA_AGENT_ID"] = "417"
     process_context.bind_context(MeivaContext(identity=AgentIdentity(417, True)))
     apply_per_agent_eval_isolation(
-        default_reader=defaults(agent__eval_isolation=True, agent__eval_network_allowlist=[])
+        agent_id=417,
+        default_reader=defaults(agent__eval_isolation=True, agent__eval_network_allowlist=[]),
     )
 
     assert not hasattr(meiva, "web")
@@ -66,10 +65,10 @@ def isolated() -> None:
 
 def network_allowlist() -> None:
     _install()
-    os.environ["MEIVA_AGENT_ID"] = "418"
     process_context.bind_context(MeivaContext(identity=AgentIdentity(418, True)))
     apply_per_agent_eval_isolation(
-        default_reader=defaults(agent__eval_isolation=True, agent__eval_network_allowlist=["web"])
+        agent_id=418,
+        default_reader=defaults(agent__eval_isolation=True, agent__eval_network_allowlist=["web"]),
     )
 
     assert hasattr(meiva, "web")
@@ -77,10 +76,26 @@ def network_allowlist() -> None:
     print("ok")
 
 
+def missing_agent() -> None:
+    _install()
+    try:
+        apply_per_agent_eval_isolation(
+            agent_id=None,
+            default_reader=defaults(agent__eval_isolation=True, agent__eval_network_allowlist=[]),
+        )
+    except RuntimeError as error:
+        assert "agent identity" in str(error)
+        print("ok")
+        return
+    raise AssertionError("eval isolation without an agent id was accepted")
+
+
 def off() -> None:
     _install()
     original_path = meiva.memory.PATH
-    apply_per_agent_eval_isolation(default_reader=defaults(agent__eval_isolation=False))
+    apply_per_agent_eval_isolation(
+        agent_id=None, default_reader=defaults(agent__eval_isolation=False)
+    )
 
     assert hasattr(meiva, "web")
     assert hasattr(meiva, "understand")
@@ -91,4 +106,9 @@ def off() -> None:
     print("ok")
 
 
-{"isolated": isolated, "network_allowlist": network_allowlist, "off": off}[sys.argv[1]]()
+{
+    "isolated": isolated,
+    "network_allowlist": network_allowlist,
+    "missing_agent": missing_agent,
+    "off": off,
+}[sys.argv[1]]()

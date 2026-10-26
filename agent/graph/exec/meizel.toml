@@ -22,10 +22,7 @@ exports = ["node.py", "output.py", "process.py", "tests"]
 "_result.py" = "strict"
 
 [roots]
-"_crop.py" = { kinds = ["random"], why = "crop_output mints a unique filename for each cropped output artifact" }
-"process.py" = { kinds = ["cwd", "environ", "home"], why = "read_parent_facts copies the LIVE parent env, cwd and home, which plan_child_launch (in _child_boundary.py) layers the exec protocol vars on top of — a whole-environment child handoff (same class as base/sessions/env_forwarding.py / ops/agent_launch.py); Settings cannot enumerate non-modeled keys and the dict must reflect the parent env" }
+"process.py" = { kinds = ["cwd", "environ", "home"], why = "read_parent_facts copies the LIVE parent env, cwd and home, which plan_child_launch (in _child_boundary.py) layers the exec protocol vars on top of — a whole-environment child handoff (same class as base/sessions/env_forwarding.py / ops/agent_launch.py); Settings cannot enumerate non-modeled keys and the dict must reflect the parent env. The agent host's daemon root calls it once and passes the result to build_graph" }
 
 [debt.ambient-read]
-"_subprocess.py#random agent.execution.protocol.make_request_path" = 1
-"_subprocess.py#random agent.execution.protocol.make_result_path" = 1
 "output.py#home base.paths.workspace_dir_readonly" = 1
