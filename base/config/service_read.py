@@ -16,10 +16,11 @@ from collections.abc import Callable, Iterable
 from dataclasses import dataclass
 from functools import lru_cache
 from pathlib import Path
-from typing import Any, Protocol
+from typing import Any, Literal, Protocol, overload
 from urllib.parse import urlsplit
 
 from dotenv import dotenv_values
+from pydantic import SecretStr
 
 from base.config.config_registry import DOMAIN_MODELS, field_alias, fields, schema_extra
 from base.host.env.config_lite_table import FIELD_DOMAINS
@@ -112,8 +113,92 @@ class ConfigAuthority:
             name: value for name, value in dotenv_values(self.env_path).items() if value is not None
         }
 
-    def service_field_value(self, name: str) -> Any:
-        """Read an owned model value without recovering arbitrary AttributeError failures."""
+    @overload
+    def service_field_value(
+        self,
+        name: Literal[
+            "brave_api_key",
+            "deepseek_api_key",
+            "jina_api_key",
+        ],
+    ) -> SecretStr | None: ...
+
+    @overload
+    def service_field_value(
+        self,
+        name: Literal[
+            "chrome_binary",
+            "db_url",
+            "events_channel",
+            "llm_model",
+            "llm_override",
+            "machine_host",
+            "redis_url",
+            "timezone",
+            "understand_media_base_url",
+            "understand_media_model",
+            "understand_media_resolution",
+            "understand_media_thinking_level",
+            "understand_text_model",
+            "web_brave_search_endpoint",
+            "web_deepseek_fetch_endpoint",
+            "web_deepseek_search_endpoint",
+            "web_fetch_injection_model",
+            "web_fetch_model",
+            "web_fetch_reader",
+            "web_fetch_reasoning",
+            "web_jina_reader_base",
+            "web_search_provider",
+        ],
+    ) -> str: ...
+
+    @overload
+    def service_field_value(
+        self,
+        name: Literal[
+            "exec_timeout_seconds",
+            "llm_invoke_retry_delay_seconds",
+            "llm_invoke_retry_max_delay_seconds",
+            "llm_invoke_timeout_seconds",
+            "provider_guard_balance_min_cny",
+            "web_deepseek_qps",
+            "web_fetch_injection_threshold",
+            "web_fetch_timeout_seconds",
+            "web_search_timeout_seconds",
+        ],
+    ) -> float: ...
+
+    @overload
+    def service_field_value(
+        self,
+        name: Literal[
+            "llm_invoke_retry_attempts",
+            "neighbors_default_depth",
+            "neighbors_default_limit",
+            "ops_concurrency",
+            "shell_capture_default_lines",
+            "telemetry_otlp_port",
+            "web_deepseek_max_results",
+            "web_max_search_results",
+        ],
+    ) -> int: ...
+
+    @overload
+    def service_field_value(
+        self,
+        name: Literal[
+            "provider_guard_balance_enabled",
+            "trace_enabled",
+            "web_fetch_injection_check_enabled",
+        ],
+    ) -> bool: ...
+
+    @overload
+    def service_field_value(self, name: str) -> object: ...
+
+    # meiva:note
+    # Read an owned model value without recovering arbitrary AttributeError failures.
+    def service_field_value(self, name: str) -> object:
         domain = FIELD_DOMAINS[name]
         source = self.runtime if self.runtime.has_domain(domain) else self.all_domains
         return getattr(getattr(source, domain), name)
@@ -145,7 +230,9 @@ class ConfigAuthority:
                 out[name] = self.service_field_value(name)
         for domain, file_values in pending.items():
             model = domain_model_classes()[domain]
-            payload = {name: self.service_field_value(name) for name in model.model_fields}
+            payload: dict[str, Any] = {
+                name: self.service_field_value(name) for name in model.model_fields
+            }
             payload.update(file_values)
             if domain == "data_plane":
                 self._project_runner_db_url(payload)
@@ -263,11 +350,45 @@ def _serve_reachable_data_plane_hosts(out: dict[str, str], reachable: str) -> No
 @lru_cache(maxsize=1)
 def domain_model_classes() -> dict[str, type[Any]]:
     """Resolve registry class metadata without constructing any Settings."""
-    from base.config.config_registry import model_classes
+    from base.config.domains.agent.settings import AgentSettings
+    from base.config.domains.channels.feishu import FeishuSettings
+    from base.config.domains.channels.telegram import TelegramSettings
+    from base.config.domains.daemon.settings import DaemonSettings
+    from base.config.domains.display import DisplaySettings
+    from base.config.domains.gateway import GatewaySettings
+    from base.config.domains.general import GeneralSettings
+    from base.config.domains.lm import LmSettings
+    from base.config.domains.observability.alerts import AlertsSettings
+    from base.config.domains.observability.settings import ObservabilitySettings
+    from base.config.domains.packages import PackagesSettings
+    from base.config.domains.sandbox import SandboxSettings
+    from base.config.domains.services.settings import ServiceSettings
+    from base.config.domains.storage.data_plane import DataPlaneSettings
+    from base.config.domains.storage.walg import WalgSettings
+    from base.config.domains.to_user import ToUserSettings
+    from base.config.domains.web import WebSettings
 
-    classes = model_classes()
+    classes: dict[str, type[Any]] = {
+        "LmSettings": LmSettings,
+        "SandboxSettings": SandboxSettings,
+        "AgentSettings": AgentSettings,
+        "WebSettings": WebSettings,
+        "ToUserSettings": ToUserSettings,
+        "GatewaySettings": GatewaySettings,
+        "DaemonSettings": DaemonSettings,
+        "AlertsSettings": AlertsSettings,
+        "DataPlaneSettings": DataPlaneSettings,
+        "ServiceSettings": ServiceSettings,
+        "ObservabilitySettings": ObservabilitySettings,
+        "DisplaySettings": DisplaySettings,
+        "PackagesSettings": PackagesSettings,
+        "FeishuSettings": FeishuSettings,
+        "TelegramSettings": TelegramSettings,
+        "WalgSettings": WalgSettings,
+        "GeneralSettings": GeneralSettings,
+    }
     return {
-        attr: classes[model] if isinstance(model, str) else model
+        attr: classes[model] if isinstance(model, str) else classes[attr]
         for attr, _label, model, _capability in DOMAIN_MODELS
     }
 

@@ -11,6 +11,7 @@ semaphore scheduling lived in three copies (`_search_all` / `_fetch_all` /
 from __future__ import annotations
 
 import asyncio
+import threading
 from collections.abc import Callable
 
 # The SDK's convenience batches must not turn one agent action into an
@@ -60,11 +61,11 @@ async def run_batch[T, R](
     if max_concurrent is None:
         tasks = [asyncio.to_thread(worker, item) for item in items]
     else:
-        sem = asyncio.Semaphore(max_concurrent)
+        sem = threading.Semaphore(max_concurrent)
 
-        async def _bounded(item: T) -> R:
-            async with sem:
-                return await asyncio.to_thread(worker, item)
+        def _bounded(item: T) -> R:
+            with sem:
+                return worker(item)
 
-        tasks = [_bounded(item) for item in items]
+        tasks = [asyncio.to_thread(_bounded, item) for item in items]
     return await asyncio.gather(*tasks)

@@ -8,7 +8,8 @@ machine cannot participate. This is framework plumbing, not the agent SDK.
 
 from __future__ import annotations
 
-import secrets
+import os
+import tempfile
 from collections.abc import Iterable
 from pathlib import Path
 
@@ -64,14 +65,18 @@ def is_writable(d: Path) -> bool:
     """True if a temp file round-trips (write + read + delete) inside `d`."""
     if not d.is_dir():
         return False
-    probe = d / f".meiva_drive_check_{secrets.token_hex(6)}.tmp"
+    probe: Path | None = None
     try:
+        fd, raw_probe = tempfile.mkstemp(dir=d, prefix=".meiva_drive_check_", suffix=".tmp")
+        os.close(fd)
+        probe = Path(raw_probe)
         probe.write_text("ok", encoding="utf-8")
         ok = probe.read_text(encoding="utf-8") == "ok"
     except OSError:
         return False
     finally:
-        probe.unlink(missing_ok=True)
+        if probe is not None:
+            probe.unlink(missing_ok=True)
     return ok
 
 

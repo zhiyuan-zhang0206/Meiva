@@ -320,7 +320,7 @@ async def test_an_overrunning_turn_is_interrupted(tmp_path: Path) -> None:
 async def test_permission_allow_answers_with_allow_once(tmp_path: Path) -> None:
     harness = await start(tmp_path, permission_mode="allow")
     try:
-        assert await harness.session.permission_decision(permission_request()) == "allow_once"
+        assert harness.session.permission_decision(permission_request()) == "allow_once"
     finally:
         await harness.stop()
 
@@ -328,7 +328,7 @@ async def test_permission_allow_answers_with_allow_once(tmp_path: Path) -> None:
 async def test_permission_ask_refuses_and_records_the_tool(tmp_path: Path) -> None:
     harness = await start(tmp_path)
     try:
-        assert await harness.session.permission_decision(permission_request()) == "reject_once"
+        assert harness.session.permission_decision(permission_request()) == "reject_once"
         await harness.session.submit("hello").outcome()
         [completed] = harness.of(TurnCompleted)
         assert completed.permission_denials == ("write file",)
@@ -339,9 +339,7 @@ async def test_permission_ask_refuses_and_records_the_tool(tmp_path: Path) -> No
 async def test_permission_without_a_reject_option_answers_with_nothing(tmp_path: Path) -> None:
     harness = await start(tmp_path)
     try:
-        assert (
-            await harness.session.permission_decision(permission_request(("allow_once",))) is None
-        )
+        assert harness.session.permission_decision(permission_request(("allow_once",))) is None
     finally:
         await harness.stop()
 

@@ -12,5 +12,4 @@ exports = ["graphs.py", "imports.py", "model.py", "universe.py"]
 "universe.py" = ["model.py"]
 
 [debt.impure-call]
-"universe.py#Path.is_file" = 1
 "universe.py#import subprocess" = 1

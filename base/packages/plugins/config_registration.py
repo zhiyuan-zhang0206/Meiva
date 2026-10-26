@@ -170,9 +170,9 @@ def _per_agent_fields_for(cls: type[BaseModel]) -> set[str]:
 
 # meiva:link base/packages/plugins/docs/plugin-config/plugin-config.meiva.okf.md
 def _framework_field_tables() -> tuple[set[str], set[str], Callable[[str], str]]:
-    from base.config import field_domain, field_names, per_agent_field_names
+    from base.host.env.config_lite_table import FIELD_DOMAINS, PER_AGENT_FIELDS
 
-    return per_agent_field_names(), field_names(), field_domain
+    return set(PER_AGENT_FIELDS), set(FIELD_DOMAINS), FIELD_DOMAINS.__getitem__
 
 
 def resolve_overlay_targets(

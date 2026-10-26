@@ -19,6 +19,7 @@ from typing import Any, TypeGuard
 
 from loguru import logger
 
+from base.host.verified_file import RegularFileReadError, regular_bytes
 from base.packages.docs.frontmatter import parse_frontmatter_typed
 
 _MD_LINK_RE = re.compile(r"\[([^\]]+)\]\(([^)]+)\)")
@@ -111,8 +112,8 @@ def walk_notes(
         rel = md_file.relative_to(root).as_posix()
         rel_id = rel[: -len(suffix)] if rel.endswith(suffix) else rel
         try:
-            text = md_file.read_text(encoding="utf-8")
-        except (OSError, UnicodeDecodeError):
+            text = regular_bytes(md_file).decode("utf-8")
+        except (OSError, UnicodeDecodeError, RegularFileReadError):
             if warnings is not None:
                 warnings.append(f"cannot read {rel}")
             else:

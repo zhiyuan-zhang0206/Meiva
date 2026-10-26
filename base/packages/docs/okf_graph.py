@@ -23,6 +23,7 @@ from collections.abc import Iterable, Mapping
 from pathlib import Path
 from typing import Any, TypedDict
 
+from base.host.verified_file import regular_bytes
 from base.packages.docs.frontmatter import parse_frontmatter_typed
 from base.packages.docs.notes import normalize_tags
 
@@ -246,9 +247,7 @@ def build_graph_data(
     raw_links: list[tuple[str, str, str | None]] = []
 
     for path in paths:
-        filepath = str(Path(bundle_dir) / path)
-        with Path(filepath).open(encoding="utf-8") as fh:
-            text = fh.read()
+        text = regular_bytes(Path(bundle_dir) / path).decode("utf-8")
 
         fm, body = parse_frontmatter(text)
 

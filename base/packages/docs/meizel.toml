@@ -6,11 +6,7 @@ exports = ["frontmatter.py", "notes.py", "okf_graph.py", "pages_copy.py"]
 "tests" = ["frontmatter.py", "notes.py", "okf_graph.py"]
 
 [purity]
-"." = "strict-to-be"
+"." = "strict"
 "__init__.py" = "strict"
 "frontmatter.py" = "strict"
 "pages_copy.py" = "strict"
-
-[debt.impure-call]
-"notes.py#Path.read_text" = 1
-"okf_graph.py#Path.open" = 1

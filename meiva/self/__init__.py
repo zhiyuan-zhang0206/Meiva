@@ -3,7 +3,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import LiteralString, NamedTuple, NoReturn, Protocol
 
-from base.agents.lifecycle import AgentRestart, AgentTermination, SystemHalt
+from base.agents.lifecycle_signals import AgentRestart, AgentTermination, SystemHalt
 from meiva.boot import maybe_load_plugins_for_missing
 from meiva.files import workspace_base
 from meiva.sdk_surface import attachment_transport, process_context
@@ -219,7 +219,7 @@ def restart(config_overlay: dict[str, object] | None = None) -> NoReturn:
         cur.execute("SET TRANSACTION READ WRITE")
         _assert_native_self_action("restart", cur)
         if config_overlay:
-            from base.agents.model.model_config import validate_restart_model_config
+            from base.agents.model.restart_config import validate_restart_model_config
 
             validate_restart_model_config(
                 cur,

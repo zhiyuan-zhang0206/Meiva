@@ -2,6 +2,7 @@ exports = ["admin", "agent_pins.py", "base.py", "config_registry.py", "domains",
 
 [purity]
 "base.py" = "strict-to-be"
+"config_registry.py" = "strict"
 "env_changed.py" = "strict"
 "lite_parse.py" = "strict"
 "profiles.py" = "strict"
@@ -34,7 +35,6 @@ exports = ["admin", "agent_pins.py", "base.py", "config_registry.py", "domains",
 "_lite.py#any ConfigBoot.get_field.return" = 1
 "_lite.py#any _SettingsView.__getattr__.return" = 1
 "_lite.py#any get_field.return" = 1
-"service_read.py#any ConfigAuthority.service_field_value.return" = 1
 
 [debt.impure-edge]
 "base.py#base/paths/home.py" = 1

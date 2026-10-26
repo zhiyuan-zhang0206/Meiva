@@ -4,14 +4,14 @@
 import asyncio
 from collections.abc import Awaitable, Callable
 
-from base.agents.context import MeivaContext
-from services.agent_runner.agent_host.runtime import TurnOutcome
+from base.api_contracts.agent_contract import DrivenContext
+from services.agent_runner.agent_host import TurnOutcome
 
 
-async def drive_context(
+async def drive_context[C: DrivenContext](
     agent_id: int,
-    ctx: MeivaContext,
-    invoke: Callable[[int, MeivaContext], Awaitable[TurnOutcome]],
+    ctx: C,
+    invoke: Callable[[int, C], Awaitable[TurnOutcome]],
 ) -> TurnOutcome:
     """The publisher and explicit context belong to this invocation, not a cached runtime."""
     publisher = ctx.event_publisher

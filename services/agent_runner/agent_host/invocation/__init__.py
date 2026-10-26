@@ -8,12 +8,10 @@ from functools import partial
 from pathlib import Path
 
 from langchain_core.runnables import RunnableConfig
-from langgraph.graph.state import CompiledStateGraph
 from loguru import logger
 
 from agent.impersonation import process_host, settle_checkpoint
-from agent.impersonation_handoff import flush_checkpoint, resume_note_pending
-from agent.state import BaseAgentState
+from agent.impersonation_handoff import AgentGraph, flush_checkpoint, handoff_resume_pending
 from agent.turn.runloop import PendingTurnFailure, publish_turn_failure, settle_turn_failure
 from agent.turn.trace_checkpoint import attach_trace_checkpoint_ref
 from base.agents.context import MeivaContext
@@ -21,10 +19,10 @@ from base.agents.messages.timestamp_policy import TimestampSource
 from base.agents.observation.relay_supervision import RelaySupervision
 from base.db.protocols import AsyncPool, DatabaseLike
 from base.events.live.bus import EventBus
+from services.agent_runner.agent_host import TurnOutcome
 from services.agent_runner.agent_host.db_recovery import database_phase
 from services.agent_runner.agent_host.invocation.checkpoints import TurnCheckpoints
 from services.agent_runner.agent_host.lifecycle.shells import apply_lifecycle_command
-from services.agent_runner.agent_host.runtime import TurnOutcome
 
 
 class PendingWorkResult:
@@ -62,7 +60,7 @@ class InvocationHooks:
 # meiva:note
 # Settle a pending external handoff checkpoint, without activating a new lease.
 async def settle_handoff_before_invocation(
-    graph: CompiledStateGraph[BaseAgentState, MeivaContext, BaseAgentState, BaseAgentState],
+    graph: AgentGraph,
     ctx: MeivaContext,
     agent_id: int,
     *,
@@ -83,13 +81,11 @@ async def settle_handoff_before_invocation(
         )
         if not fresh_input or ctx.original_incarnation is None:
             return False
-        snapshot = await graph.aget_state({"configurable": {"thread_id": str(agent_id)}})
-        state = BaseAgentState.model_validate(snapshot.values)
-        return not state.halted and resume_note_pending(state)
+        return await handoff_resume_pending(graph, agent_id)
 
 
 async def finish_pending_failure(
-    graph: CompiledStateGraph[BaseAgentState, MeivaContext, BaseAgentState, BaseAgentState],
+    graph: AgentGraph,
     checkpointer: object,
     agent_id: int,
     ctx: MeivaContext,

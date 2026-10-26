@@ -15,7 +15,6 @@ from __future__ import annotations
 import base64
 import socket
 import time
-import uuid
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, TypeGuard
@@ -145,7 +144,7 @@ def request(
     wait: float = 0.0,
     **fields: object,
 ) -> dict[str, Any]:
-    req_id = uuid.uuid4().hex
+    req_id = 1
     conn = _connect(wait, socket_path)
     with conn:
         conn.settimeout(timeout)

@@ -5,7 +5,7 @@ from dataclasses import dataclass
 from enum import StrEnum
 from pathlib import Path
 
-from base.host.env.registry import session_child_env_keys
+from base.host.env.agent_env import session_child_env_keys
 
 SECRET_ENV_NAMES: tuple[str, ...] = ("ANTHROPIC_API_KEY", "CLAUDE_CODE_OAUTH_TOKEN")
 

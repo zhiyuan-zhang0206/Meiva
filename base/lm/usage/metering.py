@@ -18,11 +18,11 @@ from langchain_core.callbacks import BaseCallbackHandler, BaseCallbackManager, C
 from langchain_core.language_models.chat_models import BaseChatModel
 from langchain_core.messages import AIMessage, BaseMessage
 from langchain_core.outputs import LLMResult
+from loguru import logger
 
 from base.lm.catalog import ModelCatalog
 from base.lm.usage import UsageOptions, log_usage_from_message
-from base.log import logger
-from base.telemetry import ambient_agent_id, report_sink_failure
+from base.telemetry.delivery.reporting import report_sink_failure
 
 __all__ = ["DIRECT_USAGE_KIND", "LlmUsageMeter", "install_usage_meter", "unmeter"]
 
@@ -92,19 +92,14 @@ class LlmUsageMeter(BaseCallbackHandler):
                     self._record(message, latency_ms)
 
     def _record(self, message: AIMessage, latency_ms: float | None) -> None:
-        agent_id = ambient_agent_id()
+        options = UsageOptions.metered(latency_ms)
         try:
             self._emit(
                 message,
                 self._model,
                 catalog=self._catalog,
                 usage_kind=DIRECT_USAGE_KIND,
-                options=UsageOptions(
-                    latency_ms=latency_ms,
-                    for_agent_id=agent_id,
-                    attribution="process" if agent_id is not None else "unattributed",
-                    stamp_message=True,
-                ),
+                options=options,
             )
         except Exception as exc:
             self._report_failure(exc)

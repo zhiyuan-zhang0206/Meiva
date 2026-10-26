@@ -20,10 +20,11 @@ from typing import Any, Protocol, TypedDict
 
 from pydantic import BaseModel
 
-from base.agents.sdk.call_policy import (
-    SamplingPolicy,
-    SamplingPolicyOwner,
-    SamplingSource,
+from base.agents.sdk import (
+    InertSamplingPolicy,
+)
+from base.agents.sdk import (
+    SamplingPolicyLike as SamplingPolicyOwner,
 )
 from base.api_contracts.caller_identity import CallerIdentity
 from base.clock import Clock
@@ -183,11 +184,7 @@ class Installation:
     # whole value with its own root's owner.
     @classmethod
     def bare_provider_mount(cls, provider: SkillProvider) -> Installation:
-        inert = SamplingPolicyOwner(
-            initial=SamplingPolicy(),
-            source=SamplingSource(env={}, env_path=Path("/nonexistent-sampling-home/.env")),
-        )
-        return replace(cls.bare(sampling=inert), skill_providers=(provider,))
+        return replace(cls.bare(sampling=InertSamplingPolicy()), skill_providers=(provider,))
 
     def require_catalog(self) -> ModelCatalog:
         """Return this installation's explicit model facts or refuse a non-model installation."""

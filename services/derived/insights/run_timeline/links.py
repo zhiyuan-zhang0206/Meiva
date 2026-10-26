@@ -16,9 +16,9 @@ from typing import Annotated, Any, TypeGuard, get_args
 from fastapi import APIRouter, HTTPException, Query, Request
 
 from base.agents.messages.envelope import validate_source
-from base.db import Database
+from base.db.protocols import DatabaseLike as Database
 from base.db.protocols import SyncConnection
-from base.events.reads import audit_rows
+from base.events.reads import AuditFilter, query_audit_rows
 from services.derived.insights.run_timeline.schemas import (
     LinkKind,
     RunTimelineLink,
@@ -132,12 +132,14 @@ def read(
     offset = 0
     with db.connect(autocommit=True) as conn:
         while True:
-            page, has_more = audit_rows.query_events(
+            page, has_more = query_audit_rows(
                 conn,
-                involving_agents=agents,
-                event_names=_AUDIT_KINDS,
-                from_=start,
-                to=end,
+                AuditFilter(
+                    involving_agents=agents,
+                    event_names=_AUDIT_KINDS,
+                    from_=start,
+                    to=end,
+                ),
                 limit=page_size,
                 offset=offset,
                 direction="forward",

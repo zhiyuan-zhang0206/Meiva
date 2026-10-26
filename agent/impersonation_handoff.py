@@ -130,6 +130,14 @@ def resume_note_pending(state: BaseAgentState) -> bool:
     return getattr(messages[-1], "id", None) == handoff_note_id(receipt)
 
 
+# meiva:note
+# Whether a settled handoff left an unprocessed trailing resume note.
+async def handoff_resume_pending(graph: AgentGraph, agent_id: int) -> bool:
+    snapshot = await graph.aget_state({"configurable": {"thread_id": str(agent_id)}})
+    state = BaseAgentState.model_validate(snapshot.values)
+    return not state.halted and resume_note_pending(state)
+
+
 def save_document(
     db: DatabaseLike, session: dict[str, Any], incarnation: RuntimeIncarnation, *, workspace: Path
 ) -> tuple[str, str]:
