@@ -1,6 +1,7 @@
 # meiva:link base/deploy/release/docs/collector-artifact.meiva.okf.md
 from __future__ import annotations
 
+import hashlib
 import http.server
 import re
 import socketserver
@@ -66,8 +67,11 @@ def test_download_with_retry_preserves_contract(
         )
         assert caught.value.__cause__ is errors[-1]
     else:
-        artifact.download_with_retry(URL, tarball, timers=timers, open_url=opener, limits=LIMITS)
+        digest = artifact.download_with_retry(
+            URL, tarball, timers=timers, open_url=opener, limits=LIMITS
+        )
         assert tarball.read_bytes() == b"ok"
+        assert digest == hashlib.sha256(b"ok").hexdigest()
     calls = len(opener.calls)
     assert calls == min(failures + 1, 3)
     assert retry_waits == []

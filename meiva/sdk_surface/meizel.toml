@@ -55,7 +55,6 @@ exports = ["agent_identity.py", "attachment_transport.py", "batch.py", "discover
 "settings.py#base/agents/context/clients.py" = 1
 "settings.py#base/config/__init__.py" = 1
 "settings.py#base/events/live/bus.py" = 1
-"wraps.py#base/packages/plugins/activation.py" = 1
 
 [debt.wide-exports]
 "meizel.toml#exports" = 1
