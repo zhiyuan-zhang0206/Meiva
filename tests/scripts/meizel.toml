@@ -2,6 +2,4 @@
 "test_alert_rules.py" = ["test_alert_rules_signals.py"]
 
 [debt.first-party-patch]
-"test_rotate_cluster_secret.py#monkeypatch.setattr base.config.settings.data_plane.cluster_secret" = 2
-"test_rotate_cluster_secret.py#monkeypatch.setattr base.paths.meiva_home" = 1
 "test_rotate_cluster_secret.py#monkeypatch.setattr services.backup.dump.pg_tool" = 1

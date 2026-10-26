@@ -160,9 +160,6 @@ async def test_boot_primary_survives_a_failed_constructed_writer_cleanup(
     ) -> tuple[Any, Any, EventBus, Database]:
         return object(), object(), EventBus.from_settings(), database
 
-    def clients_over(*_args: Any, **_kwargs: Any) -> ClientSet:
-        return clients
-
     def load_plugins(_config: ConfigBoot, **_kwargs: Any) -> Installation:
         clients.event_pipeline().enqueue(event())
         with pytest.raises(TypeError):
@@ -196,7 +193,6 @@ async def test_boot_primary_survives_a_failed_constructed_writer_cleanup(
     monkeypatch.setattr(daemon, "open_host_pools", open_pools)
     monkeypatch.setattr(daemon, "close_host_pools", close_pools)
     monkeypatch.setattr(daemon, "load_installation", load_plugins)
-    monkeypatch.setattr(daemon, "clients_over", clients_over)
     monkeypatch.setattr(daemon, "remove_pidfile", remove_pidfile)
     monkeypatch.setattr(process_boot, "init_process_scope", initialize_process_scope)
     monkeypatch.setattr(process_boot, "land_cluster_extensions", no_op)
@@ -215,6 +211,7 @@ async def test_boot_primary_survives_a_failed_constructed_writer_cleanup(
                 database=lambda: database,
                 machine=machine,
                 home=unit_home,
+                clients=clients,
             )
         assert observed.value is boot_error
         assert any(str(writer_error) in note for note in boot_error.__notes__)

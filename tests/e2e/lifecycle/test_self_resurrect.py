@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 from concurrent.futures import ThreadPoolExecutor
+from dataclasses import replace
 
 import httpx
 import psycopg
@@ -10,9 +11,8 @@ import pytest
 from base.config import settings
 from base.db import Database
 from base.db.code_version_gate import ProcessDbGate
-from base.host.net.auth import API_TOKEN_ENV
 from base.sessions.tests.poll_until import poll_until
-from ops.cluster.rpc import dispatch_to_machine
+from ops.cluster.rpc import RpcClient
 from tests.e2e._credentials import current_credentials
 from tests.e2e._db import wait_for_status
 from tests.e2e.fixture_environment import E2EEnv
@@ -22,7 +22,6 @@ from tests.e2e.fixture_environment import E2EEnv
 @pytest.mark.parametrize("explicit", [False, True])
 def test_resurrect_brings_back_terminated_agent(
     e2e_env: E2EEnv,
-    monkeypatch: pytest.MonkeyPatch,
     explicit: bool,
     database_gate: ProcessDbGate,
 ) -> None:
@@ -44,11 +43,18 @@ def test_resurrect_brings_back_terminated_agent(
     assert original is not None and original[0] is not None
     assert command == [("done",)]
     if explicit:
-        monkeypatch.setenv(API_TOKEN_ENV, current_credentials().gateway_token)
+        base_rpc = RpcClient.system()
+        rpc = replace(
+            base_rpc,
+            access=lambda: replace(
+                base_rpc.access(),
+                machine_token=current_credentials().gateway_token,
+            ),
+        )
         with ThreadPoolExecutor(max_workers=1) as executor:
             response = executor.submit(
                 asyncio.run,
-                dispatch_to_machine(
+                rpc.dispatch_to_machine(
                     Database.from_settings(gate=database_gate),
                     target_machine=original[1],
                     kind="lifecycle",
