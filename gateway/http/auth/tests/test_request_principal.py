@@ -109,6 +109,7 @@ def test_the_first_login_draws_the_session_key_from_the_generator_it_was_given(
     tmp_path: Path,
 ) -> None:
     key = SessionKeys(_seeded(3)).key(tmp_path, create=True)
+    assert key is not None
     assert key == _seeded(3).randbytes(32)
     stored = session_key_path(tmp_path)
     assert stored.read_text() == key.hex() + "\n"

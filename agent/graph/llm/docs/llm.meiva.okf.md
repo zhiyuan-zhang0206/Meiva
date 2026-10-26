@@ -50,7 +50,7 @@ reads the agent's lm config once, with the model's try cap resolved, into a froz
 `RetryPolicy`; `_backoff.py` (a `strict` module) answers from values only: the next wait
 (`backoff_wait`: policy, tries failed, the budget the failed try recorded, a jitter roll),
 whether the budget is spent (`budget_spent`) and which limit a failed try hit
-(`assess_failure`). The shell reads the wall clock, draws the jitter (`draw_jitter`), sleeps
+(`assess_failure`). The shell reads the wall clock, draws the jitter from the generator `build_graph` handed it, sleeps
 and logs. Tests assert the plan with values (`tests/test_backoff.py`, `test_deadlines.py`)
 and run the loop through a scripted chat model with small configured intervals.
 The handler records the first-to-last chunk window as decode time, separately

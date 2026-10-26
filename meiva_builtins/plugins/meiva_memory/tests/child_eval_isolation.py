@@ -1,7 +1,7 @@
-"""Child process for the eval-isolation boot tests: install the memory plugin, then apply boot.
-
-Usage: `child_eval_isolation.py <isolated|network_allowlist|missing_agent|off>`; prints `ok` on success.
-"""
+# meiva:note
+# Child process for the eval-isolation boot tests: install the memory plugin, then apply boot.
+#
+# Usage: `child_eval_isolation.py <isolated|network_allowlist|missing_agent|off>`; prints `ok` on success.
 
 import sys
 from types import SimpleNamespace
@@ -76,6 +76,8 @@ def network_allowlist() -> None:
     print("ok")
 
 
+# meiva:note
+# The scenario `missing_agent`: isolation is on but the exec carries no agent id, which is refused.
 def missing_agent() -> None:
     _install()
     try:
