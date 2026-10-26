@@ -12,7 +12,7 @@ exports = ["converge_host.py", "lgtm_toggle.py", "root_driver.py", "start", "sta
 "tests" = ["_exclusive_resources.py", "converge_host.py", "lgtm_toggle.py", "root_control", "root_driver.py", "root_readiness.py", "stand_down.py", "start", "status", "stop"]
 
 [roots]
-"converge_host.py" = ["settings"]
+"converge_host.py" = { kinds = ["settings"], why = "reads settings.general.memory_remote in the GitHub PR preflight, next to a config view the converge context already carries" }
 
 [debt.ambient-read]
 "root_driver.py#environ base.host.env.registry.process_environment" = 1

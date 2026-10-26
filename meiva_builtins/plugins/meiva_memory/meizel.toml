@@ -20,7 +20,7 @@ exports = ["metrics.py"]
 "inherit.py" = { kinds = ["clock"], why = "Context note builder stamps inherited memory note with current UTC time" }
 "notes.py" = { kinds = ["clock"], why = "Context note builders stamp shared and per-agent memory index notes with current UTC time" }
 "pool_ops.py" = { kinds = ["environ"], why = "Memory pool helper resolves MEIVA_MACHINE_NAME from process environment before falling back to home .env" }
-"setup.py" = ["settings"]
+"setup.py" = { kinds = ["settings"], why = "reads the process settings and the gateway access at the stages of memory pool provisioning" }
 
 [debt.ambient-read]
 "agent_runtime.py#home base.paths.memory_dir" = 2

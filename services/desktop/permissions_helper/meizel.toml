@@ -11,10 +11,10 @@ exports = ["launchd_job.py", "lifecycle.py", "onboarding.py", "signing_identity.
 "hardened_runtime.py" = "strict"
 
 [roots]
-"launchd_job.py" = ["home", "pid", "platform"]
-"lifecycle.py" = ["clock", "settings"]
-"onboarding.py" = ["home", "platform"]
-"signing_identity.py" = ["random"]
+"launchd_job.py" = { kinds = ["home", "pid", "platform"], why = "helper LaunchAgent plumbing: falls back to Path.home() for the agents directory, reads the uid and pid of the process and branches on sys.platform" }
+"lifecycle.py" = { kinds = ["clock", "settings"], why = "reads the process settings and stamps the signing time with datetime.now when it builds and installs the helper" }
+"onboarding.py" = { kinds = ["home", "platform"], why = "describes the local host from Path.home() and sys.platform for the permission onboarding" }
+"signing_identity.py" = { kinds = ["random"], why = "draws the password of the helper's signing keychain with secrets" }
 
 [debt.ambient-read]
 "lifecycle.py#home base.paths.logs_dir" = 1
