@@ -260,9 +260,10 @@ whole-cluster update to the approved target before the cluster starts again.
 Runner-hosted templates receive immutable `ScheduleInputs` through `runpy.init_globals`:
 one loaded image, the entry's database/pipeline builders and its `MachineIdentity`.
 A template's `__main__` hands the injected inputs (or `None` when run by hand) to
-`open_schedule_entry`: injected inputs are borrowed without closing them or changing
+`open_schedule_entry(inputs, home=...)`: injected inputs are borrowed without closing them or changing
 the shared SDK context, and a hand run owns a fresh entry built by
-`fresh_schedule_entry(image=..., process=...)` for the commit it loaded, with its lazy
+`fresh_schedule_entry(image=..., process=..., home=...)` for the commit it loaded and the home the
+script's entry resolved, with its lazy
 machine, SDK context, gate and cold writer. Exit restores the prior SDK context and
 closes constructed clients within two seconds while preserving an original loop failure.
 C9 and the debt sweep open process logging and the event writer only when they report

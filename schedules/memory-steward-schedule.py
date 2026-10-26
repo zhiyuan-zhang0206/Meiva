@@ -4,6 +4,7 @@ import os
 from datetime import UTC, datetime
 from functools import partial
 
+from base.paths.home import resolve_meiva_home
 from schedules.jobs.catchup import cluster_timezone
 from schedules.jobs.entry import open_schedule_entry
 from schedules.jobs.loop import CronSchedule, Trigger, run_loop
@@ -23,7 +24,8 @@ TRIGGERS = (
 
 
 if __name__ == "__main__":
-    with open_schedule_entry(globals().get("MEIVA_SCHEDULE_INPUTS")) as inputs:
+    home = resolve_meiva_home()
+    with open_schedule_entry(globals().get("MEIVA_SCHEDULE_INPUTS"), home=home) as inputs:
         run_loop(
             inputs.database(),
             CronSchedule(TRIGGERS, timezone=cluster_timezone(), timing=LoopTiming(rest=60.0)),

@@ -22,8 +22,9 @@ _TIMING = LoopTiming(max_sleep=60.0, rest=0.0)
 
 
 if __name__ == "__main__":
-    with open_schedule_entry(globals().get("MEIVA_SCHEDULE_INPUTS")) as inputs:
-        config = BatchConfig(root=resolve_meiva_home() / "adversarial_eval")
+    home = resolve_meiva_home()
+    with open_schedule_entry(globals().get("MEIVA_SCHEDULE_INPUTS"), home=home) as inputs:
+        config = BatchConfig(root=home / "adversarial_eval")
         run_loop(
             inputs.database(),
             CronSchedule((Trigger(CRON),), timezone=cluster_timezone(), timing=_TIMING),

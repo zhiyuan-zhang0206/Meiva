@@ -21,9 +21,10 @@ _TIMEOUT_SECONDS = 120
 
 
 if __name__ == "__main__":
-    with open_schedule_entry(globals().get("MEIVA_SCHEDULE_INPUTS")) as inputs:
+    home = resolve_meiva_home()
+    with open_schedule_entry(globals().get("MEIVA_SCHEDULE_INPUTS"), home=home) as inputs:
         root = repo_root()
-        report_dir = resolve_meiva_home() / "model-tracker"
+        report_dir = home / "model-tracker"
         tracker = ModelTracker(
             command=(
                 sys.executable,

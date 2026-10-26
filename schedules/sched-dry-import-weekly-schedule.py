@@ -29,6 +29,7 @@ import os
 import subprocess
 import sys
 from datetime import UTC, datetime
+from functools import partial
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
@@ -36,6 +37,7 @@ import base
 import meiva
 from base.daemon.schedules.watcher import next_fire
 from base.paths import logs_dir
+from base.paths.home import resolve_meiva_home
 from schedules.jobs.catchup import cluster_timezone
 from schedules.jobs.entry import open_schedule_entry
 from schedules.jobs.loop import CronSchedule, Trigger, run_loop
@@ -65,9 +67,9 @@ DRY_IMPORT_CHILD = SOURCE_ROOT / "schedules" / "jobs" / "dry_import_child.py"
 # meiva:note
 # Append one run's lines; a log that cannot be written is noise on stderr, never a failed sweep --
 # the report to the operator is what has to survive, the file is the archive.
-def _log(lines: list[str]) -> None:
+def _log(lines: list[str], *, home: Path) -> None:
     try:
-        with (logs_dir() / LOG_NAME).open("a", encoding="utf-8") as handle:
+        with (logs_dir(home=home) / LOG_NAME).open("a", encoding="utf-8") as handle:
             for line in lines:
                 handle.write(line + "\n")
     except OSError as exc:
@@ -92,9 +94,14 @@ def _send_sdk(message: str) -> None:
 # a loud stderr line when both fail -- an unreported red is the one outcome this schedule must not
 # have. Never fatal: the loop has to keep sweeping.
 def _notify(
-    checked: int, reds: list[tuple[int, str, str]], stamp: str, tool_error: str | None = None
+    checked: int,
+    reds: list[tuple[int, str, str]],
+    stamp: str,
+    *,
+    home: Path,
+    tool_error: str | None = None,
 ) -> None:
-    log_path = logs_dir() / LOG_NAME
+    log_path = logs_dir(home=home) / LOG_NAME
     if tool_error is not None:
         message = "[sched-dry-import] tool-error (ts=%s): %s\nlog: %s" % (
             stamp,
@@ -185,9 +192,9 @@ def check_script(script: str) -> str | None:
 # Read every row, stopped ones included: a disabled schedule is exactly the one that crashes when
 # somebody re-enables it, so it cannot be skipped. The resident entry's inputs are reused when a
 # sweep runs inside the schedule; `--once` builds a fresh one.
-def _fetch_rows() -> list[tuple[int, str, str]]:
+def _fetch_rows(home: Path) -> list[tuple[int, str, str]]:
     with (
-        open_schedule_entry(globals().get("MEIVA_SCHEDULE_INPUTS")) as inputs,
+        open_schedule_entry(globals().get("MEIVA_SCHEDULE_INPUTS"), home=home) as inputs,
         inputs.database().connect(autocommit=True) as conn,
         conn.cursor() as cur,
     ):
@@ -199,15 +206,21 @@ def _fetch_rows() -> list[tuple[int, str, str]]:
 # One full sweep. An empty script (a non-Python or cleared row) counts green because there is
 # nothing to import; a failure to read the rows at all is the tool-error path (rc=2) and still
 # writes a summary line, so a broken sweep never looks like a green one.
-def sweep(*, notify: bool = True) -> tuple[int, str, list[tuple[int, str, str]]]:
+def sweep(*, home: Path, notify: bool = True) -> tuple[int, str, list[tuple[int, str, str]]]:
     stamp = datetime.now(ZoneInfo(cluster_timezone())).isoformat(timespec="seconds")
     try:
-        rows = _fetch_rows()
+        rows = _fetch_rows(home)
     except Exception as exc:
         line = "RESULT ts=%s checked=0 green=0 red=0 rc=2" % stamp
-        _log([line, "TOOL-ERROR %s: %s" % (type(exc).__name__, str(exc)[:160])])
+        _log([line, "TOOL-ERROR %s: %s" % (type(exc).__name__, str(exc)[:160])], home=home)
         if notify:
-            _notify(0, [], stamp, tool_error="%s: %s" % (type(exc).__name__, str(exc)[:160]))
+            _notify(
+                0,
+                [],
+                stamp,
+                home=home,
+                tool_error="%s: %s" % (type(exc).__name__, str(exc)[:160]),
+            )
         return 2, line, []
     reds: list[tuple[int, str, str]] = []
     checked = 0
@@ -228,14 +241,14 @@ def sweep(*, notify: bool = True) -> tuple[int, str, list[tuple[int, str, str]]]
     ]
     for sid, name, missing in reds:
         lines.append("RED id=%s name=%s missing=%s" % (sid, name, missing))
-    _log(lines)
+    _log(lines, home=home)
     if reds and notify:
-        _notify(checked, reds, stamp)
+        _notify(checked, reds, stamp, home=home)
     return rc, lines[0], reds
 
 
-def _fire(_slot: datetime, message: str | None) -> None:
-    rc, summary, reds = sweep(notify=True)
+def _fire(_slot: datetime, message: str | None, *, home: Path) -> None:
+    rc, summary, reds = sweep(home=home, notify=True)
     print("[sched-dry-import] %s (rc=%s) %s" % (message, rc, summary))
     for sid, name, missing in reds:
         print("[sched-dry-import] RED id=%s name=%s missing=%s" % (sid, name, missing))
@@ -245,8 +258,8 @@ def _fire(_slot: datetime, message: str | None) -> None:
 # The next-fire line is an observation point, not decoration: `run_loop` never prints when it will
 # fire next, this schedule is weekly and silent when green, so without the line there is no way to
 # tell "computed correctly and waiting" from "computed wrongly and will never fire".
-def main() -> None:
-    with open_schedule_entry(globals().get("MEIVA_SCHEDULE_INPUTS")) as inputs:
+def main(home: Path) -> None:
+    with open_schedule_entry(globals().get("MEIVA_SCHEDULE_INPUTS"), home=home) as inputs:
         print(
             "[sched-dry-import] next fire %s (cron %s)"
             % (
@@ -261,20 +274,21 @@ def main() -> None:
                 timezone=cluster_timezone(),
                 timing=LoopTiming(),
             ),
-            _fire,
+            partial(_fire, home=home),
             schedule_id=parse_schedule_id(os.environ.get("MEIVA_SCHEDULE_ID")),
             started_at=datetime.now(UTC),
         )
 
 
 if __name__ == "__main__":
+    _home = resolve_meiva_home()
     if "--check-file" in sys.argv:
         target = Path(sys.argv[sys.argv.index("--check-file") + 1])
         result = check_script(target.read_text(encoding="utf-8"))
         print("CHECK-OK" if result is None else "CHECK-RED missing=%s" % result)
         sys.exit(0 if result is None else 1)
     if "--once" in sys.argv:
-        _rc, _summary, _reds = sweep(notify="--no-notify" not in sys.argv)
+        _rc, _summary, _reds = sweep(home=_home, notify="--no-notify" not in sys.argv)
         print(_summary)
         for _sid, _name, _missing in _reds:
             print("RED id=%s name=%s missing=%s" % (_sid, _name, _missing))
@@ -285,4 +299,4 @@ if __name__ == "__main__":
             file=sys.stderr,
         )
         sys.exit(2)
-    main()
+    main(_home)
