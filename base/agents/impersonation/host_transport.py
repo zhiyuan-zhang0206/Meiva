@@ -71,21 +71,27 @@ class AntigravityServer:
 
 # meiva:note
 # The local codex daemon's control socket path. A bare ``--listen unix://`` binds here (verified
-# on codex 0.153.4), and ``CODEX_HOME`` in `env` overrides ``~/.codex`` exactly as it does for
-# codex itself.
-def default_control_socket(*, env: Mapping[str, str]) -> Path:
-    home = env.get("CODEX_HOME")
-    base = Path(home).expanduser() if home else Path("~/.codex").expanduser()
+# on codex 0.153.4), and ``CODEX_HOME`` in `env` overrides ``user_home/.codex`` as it does for
+# codex itself; a leading ``~`` in ``CODEX_HOME`` names `user_home`, the account home the caller
+# read once (``~user`` forms are taken literally).
+def default_control_socket(*, env: Mapping[str, str], user_home: Path) -> Path:
+    configured = env.get("CODEX_HOME")
+    if not configured:
+        base = user_home / ".codex"
+    elif configured == "~" or configured.startswith("~/"):
+        base = user_home / configured.removeprefix("~").removeprefix("/")
+    else:
+        base = Path(configured)
     return base / "app-server-control" / "app-server-control.sock"
 
 
-def default_control_endpoint(*, env: Mapping[str, str]) -> str | None:
+def default_control_endpoint(*, env: Mapping[str, str], user_home: Path) -> str | None:
     """The local daemon's endpoint once its socket exists, else None.
 
     Resolution does not prove the daemon owns the target thread. The request
     records this endpoint; the relay's first submission must still succeed.
     """
-    socket_path = default_control_socket(env=env)
+    socket_path = default_control_socket(env=env, user_home=user_home)
     return f"unix://{socket_path}" if socket_path.exists() else None
 
 
@@ -385,7 +391,7 @@ def _open(endpoint: str, deadline: float) -> ClientConnection:
     if endpoint == "unix://":
         raise ValueError(
             "a bare unix:// endpoint is the caller's to resolve first: "
-            "default_control_endpoint(env=...) names the daemon's socket"
+            "default_control_endpoint names the daemon's socket"
         )
     raise ValueError(f"unsupported app-server endpoint: {endpoint!r}")
 

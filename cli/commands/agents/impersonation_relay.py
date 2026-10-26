@@ -21,6 +21,7 @@ import sys
 from collections.abc import Coroutine
 from dataclasses import dataclass
 from datetime import datetime
+from pathlib import Path
 from typing import Any, TextIO, assert_never
 from uuid import UUID
 
@@ -429,14 +430,15 @@ async def _serve(
 # meiva:note
 # What the handler read for one relay: the scoped credential from the channel the operator
 # chose, the Redis address of the invocation's configuration, CODEX_HOME as the shell saw it,
-# the Antigravity endpoint its environment named (if any), the stdout a controller session reads
-# the relay's pushes from, the invocation's event bus, and its clock, which paces the delivery
-# loop.
+# the account home its session recorded, the Antigravity endpoint its environment named (if any),
+# the stdout a controller session reads the relay's pushes from, the invocation's event bus, and
+# its clock, which paces the delivery loop.
 @dataclass(frozen=True)
 class RelayInputs:
     token: str
     redis_url: str
     codex_home: str | None
+    user_home: Path
     antigravity_server: AntigravityServer | None
     stdout: TextIO
     bus: EventBus
@@ -470,6 +472,7 @@ def cmd_relay(
         adapter = bind_adapter(
             destination,
             codex_home=inputs.codex_home,
+            user_home=inputs.user_home,
             antigravity_server=inputs.antigravity_server,
             stdout=inputs.stdout,
         )
