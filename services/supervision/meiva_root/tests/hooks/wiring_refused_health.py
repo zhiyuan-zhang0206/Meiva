@@ -4,6 +4,7 @@ from pathlib import Path
 from base.daemon.health import DaemonProbe
 from services.supervision.meiva_root.health import HealthConfig, HealthMonitor
 from services.supervision.meiva_root.probes import ProbeRegistry
+from services.supervision.meiva_root.tests.slices import system_clock
 from services.supervision.meiva_root.wiring import WiringContext
 
 
@@ -31,6 +32,7 @@ def build(context: WiringContext) -> HealthMonitor:
             restart_backoff_s=(0.0,),
         ),
         tasks=context.participant_tasks,
+        clock=system_clock(),
     )
     context.supervisor.attach_health(monitor)
     return monitor

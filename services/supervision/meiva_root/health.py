@@ -14,7 +14,6 @@ from __future__ import annotations
 import asyncio
 import logging
 import math
-import time
 from collections.abc import Callable, Mapping, Sequence
 from concurrent.futures import Future
 from contextlib import suppress
@@ -22,7 +21,7 @@ from dataclasses import dataclass, field, replace
 from threading import Event, Thread
 from typing import Final, Protocol
 
-from base.clock import SYSTEM_TIMERS, Clock, ClockConfig, Timers
+from base.clock import Clock
 from base.daemon.health import DaemonProbe, ProbeVerdict
 from base.deploy.progress_timeout import (
     DEFAULT_STARTUP_GRACE_S,
@@ -56,11 +55,6 @@ _log = logging.getLogger(__name__)
 # `agent_host` exit within seconds; unspaced, each machine spent its three restarts
 # in four minutes and then sat silent for 36 (task #5315).
 DEFAULT_RESTART_BACKOFF_S: Final[tuple[float, ...]] = (60.0, 300.0, 900.0)
-
-
-def monotonic() -> float:
-    """Wall-independent startup clock, replaceable in tests."""
-    return time.monotonic()
 
 
 # meiva:note
@@ -300,7 +294,7 @@ class HealthMonitor:
         startup_graces: Mapping[str, float] | None = None,
         db_recovery_probe: Probe | None = None,
         lease_probe: LeaseProbe | None = None,
-        timers: Timers = SYSTEM_TIMERS,
+        clock: Clock,
     ) -> None:
         self._supervisor = supervisor
         self._registry = registry
@@ -308,7 +302,7 @@ class HealthMonitor:
         self._gate = gate
         self._lease_probe = lease_probe
         self._db_recovery_probe = db_recovery_probe
-        self._timers = timers
+        self._clock = clock
         self._db_runner = ProbeRunner()
         self._db_verdict: ProbeVerdict | None = None
         self._startup_graces = dict(startup_graces or {})
@@ -433,16 +427,16 @@ class HealthMonitor:
                     await task
             except BaseException as exc:
                 failures.append(exc)
-        deadline = time.monotonic() + 0.2
+        deadline = self._clock.monotonic() + 0.2
         unfinished: list[str] = []
         for unit_id, runner in self._runners.items():
             try:
-                if not runner.stop(max(0.0, deadline - time.monotonic())):
+                if not runner.stop(max(0.0, deadline - self._clock.monotonic())):
                     unfinished.append(unit_id)
             except BaseException as exc:
                 failures.append(exc)
         try:
-            if not self._db_runner.stop(max(0.0, deadline - time.monotonic())):
+            if not self._db_runner.stop(max(0.0, deadline - self._clock.monotonic())):
                 unfinished.append(_DB_RECOVERY)
         except BaseException as exc:
             failures.append(exc)
@@ -484,7 +478,7 @@ class HealthMonitor:
             return 0.0
         if state.next_restart_at is None:
             return None
-        return max(0.0, state.next_restart_at - self._timers.monotonic())
+        return max(0.0, state.next_restart_at - self._clock.monotonic())
 
     # meiva:note
     # A stopped tree holds every unit down, which resets its breaker, so the
@@ -525,7 +519,7 @@ class HealthMonitor:
                 unit_id=unit_id,
                 attempt=state.restart_attempts + 1,
                 window_s=self._config.lease_grace_s,
-                now=self._timers.monotonic(),
+                now=self._clock.monotonic(),
             )
             self._note_alive_ownership(unit_id, state)
             self._reset(state)
@@ -576,7 +570,7 @@ class HealthMonitor:
             window_s=self._config.lease_grace_s,
             unit_id=unit_id,
             attempt=state.restart_attempts + 1,
-            now=self._timers.monotonic(),
+            now=self._clock.monotonic(),
         )
         if deadline is not None:
             state.next_restart_at = deadline
@@ -589,7 +583,7 @@ class HealthMonitor:
         state.db_recovery_pending = False
         state.restart_attempts += 1
         delay_s = restart_delay_s(state.restart_attempts, self._config.restart_backoff_s)
-        state.next_restart_at = self._timers.monotonic() + delay_s
+        state.next_restart_at = self._clock.monotonic() + delay_s
         if breaker_open and recovery:
             _log.warning(
                 "[health] unit %s: down (%s), the database answered — restarting now "
@@ -627,9 +621,7 @@ class HealthMonitor:
             facts = self._supervisor.unit_failure_facts(unit_id)
         except UnknownUnitError:
             return
-        now = Clock(
-            ClockConfig("UTC", "UTC", message_timestamp_weekday=False), timers=SYSTEM_TIMERS
-        ).now()
+        now = self._clock.now()
         state.alarmed_stop_since = note_operator_stop(
             unit_id,
             facts,
@@ -648,7 +640,7 @@ class HealthMonitor:
     def _attempt_due(self, state: UnitHealth) -> bool:
         if state.db_recovery_pending:
             return True
-        return state.next_restart_at is None or self._timers.monotonic() >= state.next_restart_at
+        return state.next_restart_at is None or self._clock.monotonic() >= state.next_restart_at
 
     # meiva:note
     # Signal each circuit-breaker transition exactly once: the per-round
@@ -663,7 +655,7 @@ class HealthMonitor:
         from base.log import logger
 
         if open_now:
-            state.breaker_since = self._timers.monotonic()
+            state.breaker_since = self._clock.monotonic()
             logger.warning(
                 "[health] unit {unit}: circuit breaker OPEN after {attempts} failed automatic "
                 "restarts — only the ladder's capped cadence or a database recovery restarts it "
@@ -675,7 +667,7 @@ class HealthMonitor:
             )
             return
         held_for = (
-            0.0 if state.breaker_since is None else self._timers.monotonic() - state.breaker_since
+            0.0 if state.breaker_since is None else self._clock.monotonic() - state.breaker_since
         )
         state.breaker_since = None
         logger.info(
@@ -776,7 +768,7 @@ class HealthMonitor:
         if state.generation is None or state.generation_ready:
             return 0.0
         grace = self._startup_graces.get(unit_id, self._config.startup_grace_s)
-        return max(0.0, state.generation[1] + grace - self._timers.monotonic())
+        return max(0.0, state.generation[1] + grace - self._clock.monotonic())
 
     def _unit_state(self, unit_id: str) -> UnitHealth:
         state = self._units.get(unit_id)

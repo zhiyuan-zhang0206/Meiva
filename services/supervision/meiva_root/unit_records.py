@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import asyncio
 from dataclasses import dataclass, field
+from typing import Protocol
 
 from base.native_process.ownership import OwnedProcess
 from base.native_process.root_control.ipc import UnitState
@@ -82,3 +83,17 @@ class UnitRuntime:
     last_error: str | None = None
     watch_task: asyncio.Task[None] | None = None
     """Current-generation handle; Supervisor separately owns all generations' outcomes."""
+
+
+# meiva:note
+# The health runner slice `status()` embeds (W1.2a's `HealthMonitor`): a plain-dict health view,
+# keyed by unit id.
+class HealthSource(Protocol):
+    def health_snapshot(self) -> dict[str, object]: ...
+
+
+# meiva:note
+# The self-check slice `status()` embeds (W1.2b's `TreeSelfCheck`): the B7 metrics block, which is
+# the chain gauges.
+class MetricsSource(Protocol):
+    def metrics_snapshot(self) -> dict[str, object]: ...

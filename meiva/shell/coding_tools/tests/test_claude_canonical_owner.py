@@ -325,7 +325,7 @@ def test_claude_prompt_cli_rejects_files_and_blank_prompt(extra: list[str], tmp_
 
 def test_antigravity_launch_needs_its_files_or_prompt(tmp_path: Path) -> None:
     with pytest.raises(ValueError, match="a supervised launch needs its task and work files"):
-        antigravity.launch(tmp_path, None, None, skill_dir=_SKILL_DIR)
+        antigravity.launch(tmp_path, None, None, skill_dir=_SKILL_DIR, antigravity_server=None)
 
 
 def test_antigravity_prompt_cli_rejects_files_and_blank_prompt(tmp_path: Path) -> None:

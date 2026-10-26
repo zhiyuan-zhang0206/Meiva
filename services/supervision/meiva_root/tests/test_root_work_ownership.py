@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import os
 import sys
 from contextlib import suppress
 from pathlib import Path
@@ -23,6 +24,7 @@ from services.supervision.meiva_root.manifest import RestartPolicy, UnitManifest
 from services.supervision.meiva_root.probes import ProbeRegistry
 from services.supervision.meiva_root.server import ControlServer
 from services.supervision.meiva_root.supervisor import Supervisor, SupervisorConfig
+from services.supervision.meiva_root.tests.slices import system_clock
 from services.supervision.meiva_root.unit_records import Generation
 
 _CHILD = Path(__file__).with_name("child_unit.py")
@@ -90,7 +92,9 @@ async def test_native_worker_error_cannot_skip_other_root_teardowns(short_tmp: P
             if self.name == "probe":
                 runner.stop(0.2)
 
-    owner = Supervisor(UnitRegistry([]), run_dir=short_tmp)
+    owner = Supervisor(
+        UnitRegistry([]), run_dir=short_tmp, clock=system_clock(), root_pid=os.getpid()
+    )
     server = ControlServer(short_tmp / "control.sock", owner.dispatch)
     await server.start()
     lock_fd = acquire_instance_lock(short_tmp)
@@ -207,7 +211,13 @@ async def test_cross_generation_watch_errors_are_visible_and_collected_without_p
         wrapped: Any = _PostReapErrorProcess(proc)
         return wrapped
 
-    owner = Supervisor(UnitRegistry([unit]), run_dir=tmp_path, spawn=spawn_with_post_reap_error)
+    owner = Supervisor(
+        UnitRegistry([unit]),
+        run_dir=tmp_path,
+        spawn=spawn_with_post_reap_error,
+        clock=system_clock(),
+        root_pid=os.getpid(),
+    )
     caplog.set_level(logging.ERROR)
     peer_release = asyncio.Event()
     async with asyncio.TaskGroup() as participants:
@@ -265,6 +275,8 @@ async def test_failed_watch_never_certifies_an_unreaped_live_child(
         run_dir=tmp_path,
         config=SupervisorConfig(stop_timeout_s=0.02, stop_kill_reap_s=0.1),
         spawn=spawn_broken_wait,
+        clock=system_clock(),
+        root_pid=os.getpid(),
     )
     await owner.start()
     generation = owner._units["worker"].generation
@@ -291,7 +303,9 @@ async def test_shutdown_closes_supervisor_birth_admission(tmp_path: Path) -> Non
     unit = UnitManifest(
         "worker", (sys.executable, str(_CHILD), "noop"), RestartPolicy.ALWAYS, "root"
     )
-    owner = Supervisor(UnitRegistry([unit]), run_dir=tmp_path)
+    owner = Supervisor(
+        UnitRegistry([unit]), run_dir=tmp_path, clock=system_clock(), root_pid=os.getpid()
+    )
     await owner.start()
     await owner.shutdown()
     with pytest.raises(RuntimeError, match="admission closed"):
@@ -311,7 +325,11 @@ async def test_health_stop_closes_even_unobserved_unit_admission(tmp_path: Path)
         return DaemonProbe.up("fresh")
 
     registry.register("unobserved", fresh)
-    health = HealthMonitor(Supervisor(UnitRegistry([]), run_dir=tmp_path), registry)
+    health = HealthMonitor(
+        Supervisor(UnitRegistry([]), run_dir=tmp_path, clock=system_clock(), root_pid=os.getpid()),
+        registry,
+        clock=system_clock(),
+    )
     await health.stop()
     with pytest.raises(RuntimeError, match="admission closed"):
         await health.run_round()
@@ -360,6 +378,8 @@ async def test_refused_child_keeps_real_reap_and_late_error_at_original_owner(
         ),
         spawn=spawn_late_error,
         process_control=FakeProcessControl(),
+        clock=system_clock(),
+        root_pid=os.getpid(),
     )
     caplog.set_level(logging.ERROR)
     await owner.start()
@@ -422,6 +442,8 @@ async def test_watch_join_has_independent_bound_when_completed_child_watch_resis
         run_dir=tmp_path,
         config=SupervisorConfig(watch_join_timeout_s=0.02),
         spawn=spawn_resistant,
+        clock=system_clock(),
+        root_pid=os.getpid(),
     )
     await owner.start()
     wait_entered = asyncio.create_task(entered.wait())

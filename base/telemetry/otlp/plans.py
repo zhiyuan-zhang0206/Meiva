@@ -1,15 +1,11 @@
 # meiva:note
-# Pure OTLP export plans, attribute filters, and deferral config parsers.
+# Pure OTLP export plans and attribute filters.
 
 from __future__ import annotations
 
-import math
 from collections.abc import Collection, Mapping
 from dataclasses import dataclass
 
-CHILD_DEFER_MAX_AGE_DEFAULT_S = 60.0
-_TRUE_SPELLINGS = frozenset({"1", "true", "yes", "on"})
-_FALSE_SPELLINGS = frozenset({"0", "false", "no", "off"})
 _NO_METRIC_ATTRS = frozenset({"body"})
 _MAX_METRIC_ATTR_CHARS = 64
 
@@ -46,34 +42,6 @@ BASE_METRIC_DISPOSITION: dict[tuple[str, str], str | None] = {
     ("gateway_process", "rss_bytes"): "gauge",
     ("gateway_process", "fd_count"): "gauge",
 }
-
-
-# meiva:note
-# Parse a tristate child-defer boolean string; unrecognized values return ``default``.
-def parse_defer_flag(raw: str | None, *, default: bool = True) -> bool:
-    if raw is None:
-        return default
-    normalized = raw.strip().lower()
-    if normalized in _TRUE_SPELLINGS:
-        return True
-    if normalized in _FALSE_SPELLINGS:
-        return False
-    return default
-
-
-# meiva:note
-# Parse a positive finite max-age duration in seconds; invalid inputs return ``default``.
-def parse_defer_seconds(raw: str | None, default: float = CHILD_DEFER_MAX_AGE_DEFAULT_S) -> float:
-    if raw is None:
-        return default
-    normalized = raw.strip()
-    if not normalized:
-        return default
-    try:
-        value = float(normalized)
-    except ValueError:
-        return default
-    return value if math.isfinite(value) and value > 0 else default
 
 
 # meiva:note

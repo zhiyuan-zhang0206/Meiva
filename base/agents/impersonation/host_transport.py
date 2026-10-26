@@ -26,7 +26,6 @@ from __future__ import annotations
 
 import contextlib
 import json
-import os
 import time
 import urllib.error
 import urllib.request
@@ -70,19 +69,17 @@ class AntigravityServer:
     csrf_token: str
 
 
-def default_control_socket(*, env: Mapping[str, str] | None = None) -> Path:
-    """The local codex daemon's control socket path.
-
-    A bare ``--listen unix://`` binds here (verified on codex 0.153.4), and
-    ``CODEX_HOME`` overrides ``~/.codex`` exactly as it does for codex itself.
-    """
-    source_env = os.environ if env is None else env
-    home = source_env.get("CODEX_HOME")
+# meiva:note
+# The local codex daemon's control socket path. A bare ``--listen unix://`` binds here (verified
+# on codex 0.153.4), and ``CODEX_HOME`` in `env` overrides ``~/.codex`` exactly as it does for
+# codex itself.
+def default_control_socket(*, env: Mapping[str, str]) -> Path:
+    home = env.get("CODEX_HOME")
     base = Path(home).expanduser() if home else Path("~/.codex").expanduser()
     return base / "app-server-control" / "app-server-control.sock"
 
 
-def default_control_endpoint(*, env: Mapping[str, str] | None = None) -> str | None:
+def default_control_endpoint(*, env: Mapping[str, str]) -> str | None:
     """The local daemon's endpoint once its socket exists, else None.
 
     Resolution does not prove the daemon owns the target thread. The request
@@ -92,43 +89,25 @@ def default_control_endpoint(*, env: Mapping[str, str] | None = None) -> str | N
     return f"unix://{socket_path}" if socket_path.exists() else None
 
 
-def require_control_endpoint(remote: str | None) -> str:
-    """Resolve the existing host's Steer endpoint before acquiring control."""
-    endpoint = remote or default_control_endpoint()
-    if endpoint is None:
-        raise RuntimeError(
-            "Codex Steer delivery requires the existing session's app server; "
-            "pass --codex-remote with the same endpoint used by codex --remote. "
-            "Pending delivery via codex queue is not supported."
-        )
-    return f"unix://{default_control_socket()}" if endpoint == "unix://" else endpoint
-
-
+# meiva:note
+# Try to hand one message to a running codex app server, live. Returns ``None`` when the server
+# accepted the input (a JSON-RPC result: it started a turn or steered the active one). Otherwise
+# returns a short reason — a refusal, an unreachable endpoint, a failed handshake, a timeout — for
+# the caller to report as a delivery failure. Never raises for a failed delivery. ``endpoint``
+# takes ``unix://PATH``, ``ws://host:port`` or ``wss://host:port``; a bare ``unix://`` is the
+# caller's to resolve first (``default_control_endpoint``). Authentication headers are not sent;
+# the recorded endpoint is expected to be reachable as-is.
 def live_submit(
     thread_id: str,
     message: str,
     *,
     endpoint: str,
     timeout: float = LIVE_SUBMIT_TIMEOUT_SECONDS,
-    default_socket: Callable[[], Path] = default_control_socket,
 ) -> str | None:
-    """Try to hand one message to a running codex app server, live.
-
-    Returns ``None`` when the server accepted the input (a JSON-RPC result:
-    it started a turn or steered the active one). Otherwise returns a short
-    reason — a refusal, an unreachable endpoint, a failed handshake, a timeout
-    — for the caller to report as a delivery failure. Never
-    raises for a failed delivery.
-
-    ``endpoint`` takes the shapes codex itself accepts: ``unix://PATH`` (bare
-    ``unix://`` means the default control socket), ``ws://host:port`` or
-    ``wss://host:port``. Authentication headers are not sent; the recorded
-    endpoint is expected to be reachable as-is.
-    """
     deadline = time.monotonic() + timeout
     conn: ClientConnection | None = None
     try:
-        conn = _open(endpoint, deadline, default_socket=default_socket)
+        conn = _open(endpoint, deadline)
         _initialize(conn, deadline)
         response = _request(
             conn,
@@ -207,20 +186,17 @@ def _probe_antigravity_server(candidate: AntigravityServer, timeout: float) -> b
 # cluster configuration. An absent environment is not an error here: the caller
 # falls back to the record the request wrote.
 # meiva:link docs/conventions/agents/agent-impersonation-hosts.md
-def _env_antigravity_server(environment: Mapping[str, str] | None) -> AntigravityServer | None:
-    source = os.environ if environment is None else environment
-    address = (source.get("ANTIGRAVITY_LS_ADDRESS") or "").strip()
-    token = (source.get("ANTIGRAVITY_CSRF_TOKEN") or "").strip()
+def antigravity_server_from_environment(environment: Mapping[str, str]) -> AntigravityServer | None:
+    address = (environment.get("ANTIGRAVITY_LS_ADDRESS") or "").strip()
+    token = (environment.get("ANTIGRAVITY_CSRF_TOKEN") or "").strip()
     return AntigravityServer(address=address, csrf_token=token) if address and token else None
 
 
+# meiva:note
+# Scan this machine's processes for a language_server Connect endpoint and CSRF token.
 def discover_antigravity_server(
-    *, timeout: float = LIVE_SUBMIT_TIMEOUT_SECONDS, environment: Mapping[str, str] | None = None
+    *, timeout: float = LIVE_SUBMIT_TIMEOUT_SECONDS
 ) -> AntigravityServer:
-    """Resolve the local Antigravity language_server Connect endpoint and CSRF token."""
-    server = _env_antigravity_server(environment)
-    if server is not None:
-        return server
     probe_timeout = min(timeout, _ANTIGRAVITY_PROBE_TIMEOUT_SECONDS)
     for proc in psutil.process_iter(["pid", "name", "cmdline"]):
         for candidate in _process_candidate_servers(proc):
@@ -295,20 +271,20 @@ def write_antigravity_endpoint(
 # request recorded for this conversation, then a listening language_server. The
 # record is why a host daemon can reach an Antigravity CLI at all, and the failure
 # names the record it looked for: "no language_server is running" was the wrong
-# answer for the CLI case. ``home``/``environment``/``scan`` are the caller's
-# explicit context; a host daemon passes nothing and reads its own.
+# answer for the CLI case. ``antigravity_server`` is the endpoint the caller's own process
+# environment named (``antigravity_server_from_environment``; a host daemon outside the external
+# session passes ``None``); ``home``/``scan`` are the caller's explicit context.
 # meiva:link docs/conventions/agents/agent-impersonation-hosts.md
 def resolve_antigravity_endpoint(
     thread_id: str,
     *,
     home: Path | None = None,
-    environment: Mapping[str, str] | None = None,
+    antigravity_server: AntigravityServer | None,
     timeout: float = LIVE_SUBMIT_TIMEOUT_SECONDS,
     scan: Callable[..., AntigravityServer] = discover_antigravity_server,
 ) -> AntigravityServer:
-    server = _env_antigravity_server(environment)
-    if server is not None:
-        return server
+    if antigravity_server is not None:
+        return antigravity_server
     path = antigravity_endpoint_path(thread_id, home=home)
     recorded = read_antigravity_endpoint_file(path)
     if recorded is not None:
@@ -386,15 +362,10 @@ def antigravity_live_submit(
         return _clip(f"{type(exc).__name__}: {exc}")
 
 
-def _open(
-    endpoint: str,
-    deadline: float,
-    *,
-    default_socket: Callable[[], Path] = default_control_socket,
-) -> ClientConnection:
+def _open(endpoint: str, deadline: float) -> ClientConnection:
     remaining = _remaining(deadline)
-    if endpoint.startswith("unix://"):
-        path = endpoint.removeprefix("unix://") or str(default_socket())
+    if endpoint.startswith("unix://") and endpoint != "unix://":
+        path = endpoint.removeprefix("unix://")
         return unix_connect(
             path=path,
             open_timeout=remaining,
@@ -410,6 +381,11 @@ def _open(
             close_timeout=_CLOSE_TIMEOUT_SECONDS,
             compression=None,
             proxy=None,
+        )
+    if endpoint == "unix://":
+        raise ValueError(
+            "a bare unix:// endpoint is the caller's to resolve first: "
+            "default_control_endpoint(env=...) names the daemon's socket"
         )
     raise ValueError(f"unsupported app-server endpoint: {endpoint!r}")
 

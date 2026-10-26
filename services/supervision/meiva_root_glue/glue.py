@@ -16,8 +16,6 @@ from pathlib import Path
 from types import MappingProxyType
 
 from base.agents.context.clients import ClientSet
-from base.clock import SYSTEM_TIMERS, Clock
-from base.clock.configuration import clock_config_from_boot
 from base.cluster.dataplane.direct_url import ClusterDirectUrl
 from base.cluster.machine.configured import ConfiguredMachineIdentity
 from base.config import ConfigBoot, get_field, settings
@@ -228,7 +226,7 @@ def build_wiring(
         config = ConfigBoot()
         config.boot()
     machine = ConfiguredMachineIdentity(config)
-    clock = Clock(clock_config_from_boot(config), timers=SYSTEM_TIMERS)
+    clock = context.clock
     version = CodeVersion(image)
     gate = ProcessDbGate(version=version.get, process="meiva-root")
 
@@ -308,9 +306,13 @@ def assemble(
         startup_graces=startup_graces,
         db_recovery_probe=db_recovery_probe,
         lease_probe=lease_probe,
+        clock=context.clock,
     )
     check = TreeSelfCheck(
-        context.supervisor, config=selfcheck_config, tasks=context.participant_tasks
+        context.supervisor,
+        timers=context.clock,
+        config=selfcheck_config,
+        tasks=context.participant_tasks,
     )
     if rounds is not None:
         health_rounds = RootHealthRounds(

@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from collections.abc import Callable
+from collections.abc import Callable, MutableMapping
 from pathlib import Path
 from typing import Any
 from uuid import UUID
@@ -17,6 +17,7 @@ from base.log import logger
 from base.paths import meiva_home, workspace_dir
 from base.telemetry.observability import endpoint_override_is_explicit
 from base.telemetry.otlp.trace_config import TraceConfig
+from base.telemetry.otlp.trace_readiness import TraceReadiness
 from meiva.sdk_surface import sdk_disable
 
 
@@ -68,11 +69,18 @@ def process_trace_config(config: ConfigBoot) -> TraceConfig:
     )
 
 
-def init_process_scope(*, machine: MachineIdentityReader, home: Path, trace: TraceConfig) -> None:
-    from base.telemetry.otlp.trace_readiness import PROCESS_RECORDING
+def init_process_scope(
+    *,
+    machine: MachineIdentityReader,
+    home: Path,
+    trace: TraceConfig,
+    environ: MutableMapping[str, str],
+    readiness: TraceReadiness,
+) -> None:
     from base.telemetry.tracing import initialize_tracing
 
-    initialize_tracing(machine=machine, home=home, config=trace, readiness=PROCESS_RECORDING)
+    environ.update(trace.traceloop_environment())
+    initialize_tracing(machine=machine, home=home, config=trace, readiness=readiness)
 
 
 def land_cluster_extensions(db: Database) -> None:

@@ -19,7 +19,7 @@ import json
 from pathlib import Path
 from uuid import UUID
 
-from base.agents.impersonation.host_transport import antigravity_rpc
+from base.agents.impersonation.host_transport import AntigravityServer, antigravity_rpc
 
 from ._common import init_file, write_task_file_header
 from ._common import resolve_dir as resolve_dir
@@ -34,6 +34,7 @@ def launch(
     work_file: Path | None,
     *,
     skill_dir: Path,
+    antigravity_server: AntigravityServer | None,
     prompt: str | None = None,
     provenance: str | None = None,
 ) -> int:
@@ -66,6 +67,7 @@ def launch(
             "initialPrompt": initial_prompt,
             "workspaceUris": [workspace.as_uri()],
         },
+        server=antigravity_server,
     )
     cascade_id = str(response.get("cascadeId") or "").strip()
     if not cascade_id:
@@ -79,7 +81,9 @@ def launch(
     return 0
 
 
-def send(conversation_id: str, message: str) -> int:
+def send(
+    conversation_id: str, message: str, *, antigravity_server: AntigravityServer | None
+) -> int:
     """Send a follow-up message to an existing Antigravity conversation."""
     target = str(UUID(conversation_id))
     if not message.strip():
@@ -87,17 +91,19 @@ def send(conversation_id: str, message: str) -> int:
     antigravity_rpc(
         "SendAgentMessage",
         {"recipient": target, "content": message},
+        server=antigravity_server,
     )
     print(f"sent. antigravity_conversation={target}")
     return 0
 
 
-def status(conversation_id: str) -> int:
+def status(conversation_id: str, *, antigravity_server: AntigravityServer | None) -> int:
     """Query metadata for an Antigravity conversation."""
     target = str(UUID(conversation_id))
     response = antigravity_rpc(
         "GetConversationMetadata",
         {"conversationId": target},
+        server=antigravity_server,
     )
     print("status=ok")
     print(f"antigravity_conversation={target}")
@@ -105,12 +111,13 @@ def status(conversation_id: str) -> int:
     return 0
 
 
-def stop(conversation_id: str) -> int:
+def stop(conversation_id: str, *, antigravity_server: AntigravityServer | None) -> int:
     """Force-stop an Antigravity conversation tree."""
     target = str(UUID(conversation_id))
     response = antigravity_rpc(
         "ForceStopCascadeTree",
         {"conversationId": target},
+        server=antigravity_server,
     )
     stopped = response.get("stoppedConversationIds") or [target]
     print(f"stopped. antigravity_conversation={target}")
