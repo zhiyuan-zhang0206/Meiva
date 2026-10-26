@@ -1,0 +1,4 @@
+exports = ["use-now.ts"]
+
+[uses]
+"use-now.test.tsx" = ["use-now.ts"]
