@@ -8,8 +8,9 @@ checkpointer flush. A database lease gates every subsequent invocation.
 from __future__ import annotations
 
 import asyncio
+import base64
 import contextlib
-import secrets
+import random
 import sys
 import time
 from collections.abc import Awaitable, Callable
@@ -92,12 +93,20 @@ from base.paths import workspaces_root
 RELAY_WAIT = RelayWait()
 
 
-def process_host(local_machine: str) -> TakeoverHost:
+def process_host(local_machine: str, *, rng: random.Random) -> TakeoverHost:
     return TakeoverHost(
         local_machine=local_machine,
         workspaces_root=workspaces_root(),
         relay_program=(str(Path(sys.executable).with_name("meiva")),),
+        rng=rng,
     )
+
+
+# meiva:note
+# The credential a spawned relay presents to the lease: 32 random bytes as URL-safe base64 without
+# padding (43 characters). It is a secret, so the host's generator must be a secure one.
+def draw_relay_token(rng: random.Random) -> str:
+    return base64.urlsafe_b64encode(rng.randbytes(32)).rstrip(b"=").decode("ascii")
 
 
 def _held(
@@ -510,7 +519,7 @@ def _establish_spawned_relay(
             )
         antigravity_endpoint_file = str(antigravity_endpoint_path(session["relay_thread_id"]))
 
-    relay_token = secrets.token_urlsafe(32)
+    relay_token = draw_relay_token(host.rng)
     try:
         minted = provision_relay(db, session["id"], incarnation, relay_token)
     except ImpersonationError:

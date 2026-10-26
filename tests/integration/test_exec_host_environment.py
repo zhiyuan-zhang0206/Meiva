@@ -6,6 +6,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import random
 import tempfile
 import time
 from collections.abc import AsyncGenerator, Generator
@@ -31,6 +32,13 @@ from base.paths import run_dir
 from base.sessions.exec_host.paths import service_socket_path
 from meiva.tests.fixtures.pin_agent import exec_context
 from services.agent_runner.exec_host.service import ExecHostService
+
+
+# meiva:note
+# A fresh seeded generator for each use, so no test sees another's draws.
+def _rng() -> random.Random:
+    return random.Random(0)  # noqa: S311
+
 
 type Location = Literal["inside", "outside", "worktree", "claude-worktree"]
 
@@ -142,7 +150,7 @@ async def test_socket_and_direct_children_observe_the_same_checkout_environment(
     socket_path = service_socket_path(run_dir(unit_home))
 
     with _child_cwd(source_root, tmp_path, location) as cwd:
-        process = SubprocessExecProcess(replace(parent, cwd=cwd))
+        process = SubprocessExecProcess(replace(parent, cwd=cwd), rng=_rng())
         assert not socket_path.exists()
         direct, direct_payload = await process.run(
             _OBSERVE_ENV,

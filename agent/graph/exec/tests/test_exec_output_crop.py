@@ -1,3 +1,4 @@
+import hashlib
 from dataclasses import replace
 from datetime import datetime, timedelta
 from pathlib import Path
@@ -149,15 +150,16 @@ def test_execute_code_argument_reference_protects_archive(
             }
         ],
     )
+    second_body = body.replace("content", "another")
     wrapped = output.wrap_code_output(
-        body,
+        second_body,
         referenced_messages=[call],
         limits=limits,
         now=output_now,
         elapsed_seconds=1.0,
     ).text
     assert archive.exists()
-    assert body in wrapped
+    assert second_body in wrapped
 
 
 @pytest.mark.parametrize("kind", ["thinking", "reasoning", "provider_reasoning"])
@@ -188,15 +190,47 @@ def test_reasoning_reference_protects_archive(
         )
     else:
         message = AIMessage(content=[{"type": "thinking", "thinking": str(archive)}])
+    second_body = body.replace("content", "another")
     wrapped = output.wrap_code_output(
-        body,
+        second_body,
         referenced_messages=[message],
         limits=limits,
         now=output_now,
         elapsed_seconds=1.0,
     ).text
     assert archive.exists()
-    assert body in wrapped
+    assert second_body in wrapped
+
+
+def test_the_same_output_is_one_archive_named_by_its_digest(
+    archive_dir: Path, limits: OutputLimits, output_now: datetime
+):
+    body = _output()
+    for _ in range(2):
+        output.wrap_code_output(body, limits=limits, now=output_now, elapsed_seconds=1.0)
+    digest = hashlib.sha256(body.encode()).hexdigest()[:32]
+    assert [path.name for path in archive_dir.glob("crop_*.txt")] == [f"crop_{digest}.txt"]
+
+
+def test_a_repeated_output_reuses_its_referenced_archive_in_a_full_budget(
+    archive_dir: Path, limits: OutputLimits, output_now: datetime
+):
+    body = _output()
+    limits = replace(
+        limits, crop=replace(limits.crop, exec_output_crop_archive_max_bytes=len(body.encode()))
+    )
+    first = output.wrap_code_output(body, limits=limits, now=output_now, elapsed_seconds=1.0).text
+    archive = next(archive_dir.glob("crop_*.txt"))
+    again = output.wrap_code_output(
+        body,
+        referenced_messages=[HumanMessage(content=first)],
+        limits=limits,
+        now=output_now,
+        elapsed_seconds=1.0,
+    ).text
+    assert again == first
+    assert list(archive_dir.glob("crop_*.txt")) == [archive]
+    assert archive.read_text() == body
 
 
 @pytest.mark.parametrize("body", [_output(120), _output(300), "\n" * 121, "x" * 12_000])

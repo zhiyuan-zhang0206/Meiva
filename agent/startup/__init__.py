@@ -21,7 +21,7 @@ from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
-from uuid import uuid4
+from uuid import UUID
 from weakref import WeakValueDictionary
 
 from langchain_core.runnables import RunnableConfig
@@ -399,7 +399,9 @@ async def consume_claimed_inbounds(
         )
 
 
-async def notify_desktop_permissions_at_startup(home: Path) -> None:
+# meiva:note
+# `idempotency_key` identifies this one notice to `meiva.ui.notify`; the caller draws it.
+async def notify_desktop_permissions_at_startup(home: Path, *, idempotency_key: UUID) -> None:
     """Surface broken helper desktop permissions via meiva.ui.notify, once.
 
     The converge preflight writes independent Screen Recording and
@@ -448,7 +450,7 @@ async def notify_desktop_permissions_at_startup(home: Path) -> None:
             title=notice.title,
             content=notice.content,
             priority="P1",
-            idempotency_key=str(uuid4()),
+            idempotency_key=str(idempotency_key),
         )
     except Exception:
         logger.opt(exception=True).warning(

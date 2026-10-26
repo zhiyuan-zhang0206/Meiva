@@ -1,4 +1,5 @@
 import json
+import random
 from collections.abc import Callable, Iterator
 from datetime import UTC, datetime
 from functools import partial
@@ -32,13 +33,19 @@ from meiva_builtins.plugins.meiva_syntax_fix.tests.hook_support import (
 )
 
 
+# meiva:note
+# A fresh seeded generator for each use, so no test sees another's draws.
+def _rng() -> random.Random:
+    return random.Random(0)  # noqa: S311
+
+
 def _graph(state_cls: type[AgentState], **compile_options: Any) -> Any:
     from langgraph.graph import END, START, StateGraph
 
     builder: Any = StateGraph(state_cls, context_schema=MeivaContext)
     builder.add_node(
         "exec",
-        partial(exec_node_impl, process=SubprocessExecProcess(read_parent_facts())),
+        partial(exec_node_impl, process=SubprocessExecProcess(read_parent_facts(), rng=_rng())),
         input_schema=state_cls,
     )
     builder.add_node("after_exec", lambda _state: {})

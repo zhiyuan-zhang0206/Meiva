@@ -22,6 +22,7 @@ import signal
 import subprocess
 from pathlib import Path
 from typing import Any
+from uuid import UUID
 
 import psutil
 
@@ -29,6 +30,7 @@ from agent.execution.protocol import (
     ResultPayload,
     make_request_path,
     make_result_path,
+    prune_stale,
     read_result,
     write_request,
 )
@@ -310,6 +312,8 @@ async def run_in_subprocess(
     accumulation_max_chars: int,
     parent: ParentFacts,
     exec_dir: Path,
+    request_id: UUID,
+    result_id: UUID,
     state: dict[str, Any] | None = None,
     config_overlay: dict[str, object] | None = None,
     birth_config: dict[str, object] | None = None,
@@ -318,8 +322,9 @@ async def run_in_subprocess(
     if guard_failure is not None:
         return guard_failure, None
     agent_id = context.require_identity().agent_id
-    request_path = make_request_path(exec_dir, agent_id)
-    result_path = make_result_path(exec_dir, agent_id)
+    prune_stale(exec_dir, agent_id, now=context.require_clock().now())
+    request_path = make_request_path(exec_dir, agent_id, request_id=request_id)
+    result_path = make_result_path(exec_dir, agent_id, result_id=result_id)
 
     request_error = _write_request_failure(request_path, code, context, timeout, state)
     if request_error is not None:

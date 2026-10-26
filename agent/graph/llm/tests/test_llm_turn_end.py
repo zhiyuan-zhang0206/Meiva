@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import random
 import time
 
 import pytest
@@ -17,6 +18,13 @@ from agent.state import AgentState
 from base.db.code_version_gate import ProcessDbGate
 from base.lm.catalog import ModelCatalog
 from base.log.tests.log_records import LogRecords
+
+
+# meiva:note
+# A fresh seeded generator for each use, so no test sees another's draws.
+def _rng() -> random.Random:
+    return random.Random(0)  # noqa: S311
+
 
 _STATE = AgentState(messages=[HumanMessage(content="hi")], halted=False)
 
@@ -68,6 +76,7 @@ async def test_turn_end_ok_true_record_no_exception(
         llm_runtime(model, model_catalog=model_catalog, database_gate=database_gate),
         _config_with_thread(),
         ledger=LlmLedger(),
+        rng=_rng(),
     )
 
     assert result.update is not None and result.update["messages"][0].content == "ok"

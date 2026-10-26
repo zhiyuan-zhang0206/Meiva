@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import json
 from pathlib import Path
+from uuid import UUID
 
 from agent.graph.exec._guard import inspection_refusal, violation_refusal
 from agent.graph.exec._result import ExecChildError, ExecDone
@@ -54,6 +55,8 @@ async def test_a_system_interpreter_has_no_checkout_to_guard(
         exec_dir=tmp_path / "exec",
         parent=real_parent(),
         accumulation_max_chars=1_000_000,
+        request_id=UUID(int=1),
+        result_id=UUID(int=2),
     )
 
     assert isinstance(result, ExecDone)
@@ -85,6 +88,8 @@ async def test_a_real_poisoned_checkout_refuses_the_run_without_repairing_files(
         exec_dir=tmp_path / "exec",
         parent=real_parent(source_root=source, editable_roots=()),
         accumulation_max_chars=1_000_000,
+        request_id=UUID(int=1),
+        result_id=UUID(int=2),
     )
 
     assert payload is None

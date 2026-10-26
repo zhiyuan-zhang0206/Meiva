@@ -8,12 +8,14 @@ import threading
 import time
 from pathlib import Path
 from typing import Any
+from uuid import UUID
 
 import psutil
 import psycopg
 import pytest
 from langchain_core.messages import HumanMessage
 
+from agent.execution.protocol import STALE_FILE_AGE_S
 from agent.graph.exec._child_boundary import ParentFacts
 from agent.graph.exec._result import ExecLifecycleKind
 from agent.graph.exec._subprocess import run_in_subprocess
@@ -86,6 +88,8 @@ async def _run(
             exec_dir=tmp_path / "exec",
             parent=parent or real_parent(),
             accumulation_max_chars=1_000_000,
+            request_id=UUID(int=1),
+            result_id=UUID(int=2),
         )
         return result
     finally:
@@ -138,6 +142,23 @@ async def test_subprocess_done(tmp_path: Path) -> None:
     assert isinstance(result, ExecDone)
     assert "hello from child" in result.output
     assert not list((tmp_path / "exec" / str(_AGENT_ID)).iterdir())
+
+
+async def test_a_run_prunes_the_stale_results_of_its_own_agent(tmp_path: Path) -> None:
+    agent_dir = tmp_path / "exec" / str(_AGENT_ID)
+    agent_dir.mkdir(parents=True)
+    stale = agent_dir / "res-left-behind.json"
+    stale.write_text("{}", encoding="utf-8")
+    long_ago = time.time() - STALE_FILE_AGE_S - 60
+    os.utime(stale, (long_ago, long_ago))
+    kept_request = agent_dir / "req-left-behind.json"
+    kept_request.write_text("{}", encoding="utf-8")
+    os.utime(kept_request, (long_ago, long_ago))
+
+    await _run(tmp_path, "pass")
+
+    assert not stale.exists()
+    assert kept_request.exists()
 
 
 async def test_exec_child_disables_otlp_after_cluster_env_authority(tmp_path: Path) -> None:
@@ -372,6 +393,8 @@ async def test_outer_task_cancel_reaps_child_and_descendant(tmp_path: Path) -> N
             exec_dir=tmp_path / "exec",
             parent=real_parent(),
             accumulation_max_chars=1_000_000,
+            request_id=UUID(int=1),
+            result_id=UUID(int=2),
         )
     )
     pids: list[int] = []
