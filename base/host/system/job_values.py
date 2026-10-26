@@ -17,11 +17,22 @@ LAUNCHD_LABEL_PREFIX = "com.meiva"
 
 # meiva:note
 # Converge supplies these already captured command values before any job-specific I/O.
-@dataclass(frozen=True)
+#
+# The three fields are all paths, so a swapped argument is invisible to the type checker: they
+# are keyword-only, and each must be absolute (a relative path would follow the working
+# directory of whoever registers the job).
+@dataclass(frozen=True, kw_only=True)
 class JobRoots:
     home: Path
     repo: Path
     user_home: Path
+
+    def __post_init__(self) -> None:
+        for name in ("home", "repo", "user_home"):
+            if not getattr(self, name).is_absolute():
+                raise ValueError(
+                    f"JobRoots.{name} must be an absolute path, got {getattr(self, name)!r}"
+                )
 
 
 @dataclass(frozen=True)

@@ -29,6 +29,7 @@ from base.host.system.boot_policy import (
     boot_start_arguments,
 )
 from base.host.system.hostport import Host
+from base.host.system.job_values import JobRoots
 from base.native_process.os_platform import resolve_pid
 from base.native_process.ownership import OwnedProcess
 
@@ -74,17 +75,17 @@ def root_pid_path(home: Path) -> Path:
     return home / "run" / "meiva-root" / "systemd.pid"
 
 
-def _default_context(*, services: frozenset[str], host: Host) -> BootUnitContext:
+def unit_context(*, roots: JobRoots, services: frozenset[str], host: Host) -> BootUnitContext:
+    # meiva:note
+    # The unit of the cluster `roots` names, run by the account that owns this host process.
     import grp
     import pwd
-
-    from base.paths import meiva_home, repo_root
 
     entry = pwd.getpwuid(host.uid)
     group = grp.getgrgid(entry.pw_gid).gr_name
     return BootUnitContext(
-        home=meiva_home(),
-        repo=repo_root(),
+        home=roots.home,
+        repo=roots.repo,
         user=entry.pw_name,
         group=group,
         home_dir=Path(entry.pw_dir),
@@ -336,8 +337,7 @@ def _read_text(path: Path) -> str | None:
 
 def install(
     *,
-    services: frozenset[str],
-    context: BootUnitContext | None = None,
+    context: BootUnitContext,
     host: Host,
     unit_dir: Path = SYSTEM_UNIT_DIR,
     runtime_dir: Path = SYSTEMD_RUNTIME_DIR,
@@ -347,11 +347,10 @@ def install(
         raise RuntimeError(
             "the boot unit needs a Linux host running systemd as its service manager"
         )
-    ctx = context if context is not None else _default_context(services=services, host=host)
     steps: list[str] = []
 
     destination = unit_path(unit_dir)
-    unit_content = render_unit(ctx)
+    unit_content = render_unit(context)
     if _read_text(destination) != unit_content:
         fd, name = tempfile.mkstemp(prefix="meiva-boot-unit-", suffix=".service")
         os.close(fd)
@@ -371,7 +370,7 @@ def install(
     if not unit_enabled(host=host, runtime_dir=runtime_dir):
         _privileged_or_raise(["systemctl", "enable", UNIT_NAME], f"enable {UNIT_NAME}", host=host)
         steps.append(f"enabled {UNIT_NAME}")
-    logger.info("boot unit ready for {}", ctx.home)
+    logger.info("boot unit ready for {}", context.home)
     return steps
 
 

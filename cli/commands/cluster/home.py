@@ -20,6 +20,7 @@ from base.host.private_storage import write_private_bytes
 from base.host.system.boot_autostart.registration import unregister_autostart
 from base.host.system.cron.health_job import unregister_os_cron
 from base.host.system.hostport import Host
+from base.host.system.job_values import JobRoots
 from base.host.system.logs_job import unregister_logs_job
 from base.host.system.packages_job import unregister_packages_job
 from base.host.system.pr_flow_job import unregister_pr_flow_job
@@ -52,9 +53,9 @@ from services.desktop.permissions_helper.launchd_job import unregister_helper
 # meiva:note
 # What the operator asked destroy to do, with the facts of this checkout and configuration
 # that the composition root reads once: the home it acts on (this process's home, the default
-# production home included), the checkout whose `meiva` runs the stop, and the registered
-# permissions-helper port. The terminal the person answers at travels beside it, in the
-# command's runtime.
+# production home included), the checkout whose `meiva` runs the stop, the account home the OS
+# jobs live under, and the registered permissions-helper port. The terminal the person answers
+# at travels beside it, in the command's runtime.
 @dataclass(frozen=True)
 class DestroyRequest:
     home: Path
@@ -62,6 +63,7 @@ class DestroyRequest:
     stop_mode: StopMode
     stop_timeout_s: float
     checkout: Path
+    user_home: Path
     helper_port: int
 
 
@@ -154,7 +156,10 @@ def _execute(
                 return returncode
         case RetireJobs():
             try:
-                unregister_scheduled_jobs(host=host)
+                unregister_scheduled_jobs(
+                    host=host,
+                    roots=JobRoots(home=home, repo=request.checkout, user_home=request.user_home),
+                )
             except (OSError, RuntimeError, ValueError, TypeError) as exc:
                 print(cleanup_incomplete(str(exc)), file=terminal.stderr)
                 return 1
@@ -181,11 +186,11 @@ def _execute(
 # Remove every OS-scheduled job the host registered (health probe, boot autostart, logs
 # maintenance, packages refresh, PR flow and the WAL-G tick).
 #
-# Labels name jobs, not homes, and each `unregister_*` is a no-op outside the default home, so
-# a scratch home's destroy never touches the host's jobs. Every job must be retired before the
+# Labels name jobs, not homes, and each `unregister_*` is a no-op outside the account's default
+# home, so a scratch home's destroy never touches the host's jobs. Every job must be retired before the
 # home is marked detached. An unavailable scheduler is ambiguous custody, so failures are
 # raised.
-def unregister_scheduled_jobs(*, host: Host) -> None:
+def unregister_scheduled_jobs(*, host: Host, roots: JobRoots) -> None:
     jobs = (
         ("health probe", unregister_os_cron),
         ("autostart", unregister_autostart),
@@ -197,7 +202,7 @@ def unregister_scheduled_jobs(*, host: Host) -> None:
     failed: list[tuple[str, str]] = []
     for name, unregister in jobs:
         try:
-            unregister(host=host)
+            unregister(host=host, roots=roots)
         except Exception as e:
             failed.append((name, str(e)))
     if failed:
