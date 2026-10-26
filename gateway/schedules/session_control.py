@@ -19,7 +19,7 @@ from typing import Any
 from psycopg import Connection
 from psycopg_pool import ConnectionPool
 
-from base.clock import SYSTEM_TIMERS
+from base.clock import Timers
 from base.cluster import session_name
 from base.db.transaction import write_transaction
 from base.sessions.protocol import SessionBackend
@@ -58,13 +58,13 @@ def _is_queued_blocking(pool: ConnectionPool[Any], schedule_id: int) -> bool:
 # Wait up to `wait_s` (the service's one-second poll plus the kill and relaunch it runs)
 # for the request to be consumed, looking every `poll_s`.
 async def wait_consumed(
-    pool: ConnectionPool[Any], schedule_id: int, *, wait_s: float, poll_s: float
+    pool: ConnectionPool[Any], schedule_id: int, *, wait_s: float, poll_s: float, timers: Timers
 ) -> None:
-    deadline = SYSTEM_TIMERS.monotonic() + wait_s
-    while SYSTEM_TIMERS.monotonic() < deadline:
+    deadline = timers.monotonic() + wait_s
+    while timers.monotonic() < deadline:
         if not await asyncio.to_thread(_is_queued_blocking, pool, schedule_id):
             return
-        await asyncio.sleep(poll_s)
+        await timers.asleep(poll_s)
     _log.warning(
         "schedule %s: sync request not consumed within %.0fs — the schedule-manager "
         "service will converge it when it is next up",
@@ -74,13 +74,13 @@ async def wait_consumed(
 
 
 async def request_sync(
-    pool: ConnectionPool[Any], schedule_id: int, *, wait_s: float, poll_s: float
+    pool: ConnectionPool[Any], schedule_id: int, *, wait_s: float, poll_s: float, timers: Timers
 ) -> None:
     """Ask the schedule-manager service to converge one schedule's session to its
     latest desired revision now (adopt an applied revision, or replace
     its predecessor), and wait a bounded time for it to do so."""
     await asyncio.to_thread(enqueue_blocking, pool, schedule_id)
-    await wait_consumed(pool, schedule_id, wait_s=wait_s, poll_s=poll_s)
+    await wait_consumed(pool, schedule_id, wait_s=wait_s, poll_s=poll_s, timers=timers)
 
 
 async def capture(backend: SessionBackend, schedule_id: int, lines: int) -> str | None:

@@ -7,12 +7,15 @@ import pytest
 
 from agent.graph.exec._output_pipe import ExecOutputPipe
 from agent.graph.exec._stream import StreamingTextIO
+from base.clock import SYSTEM_TIMERS
 
 
 def pipe(stream: Any = None) -> tuple[ExecOutputPipe, int]:
     source, destination = os.pipe()
     process: Any = SimpleNamespace(stdout=os.fdopen(source, "rb"))
-    return ExecOutputPipe(process, stream or StreamingTextIO(max_chars=64)), destination
+    return ExecOutputPipe(
+        process, stream or StreamingTextIO(max_chars=64), timers=SYSTEM_TIMERS
+    ), destination
 
 
 async def test_partial_output_streams_before_writer_eof() -> None:
@@ -123,4 +126,4 @@ async def test_output_cap_does_not_prevent_eof_settlement() -> None:
 def test_missing_pipe_fails_at_launch_boundary() -> None:
     process: Any = SimpleNamespace(stdout=None)
     with pytest.raises(RuntimeError, match="no output pipe"):
-        ExecOutputPipe(process, StreamingTextIO(max_chars=64))
+        ExecOutputPipe(process, StreamingTextIO(max_chars=64), timers=SYSTEM_TIMERS)
