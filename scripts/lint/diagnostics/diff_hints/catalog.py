@@ -256,6 +256,24 @@ def _spec_spy_assert() -> HintSpec:
     )
 
 
+def _spec_root_middle_layer() -> HintSpec:
+    return HintSpec(
+        why=(
+            "a file declared a root that three or more modules outside the roots import is a "
+            "middle layer: each importer reads the world through it, so the read is not made "
+            "once at the process entry and a test cannot hand the importer a value."
+        ),
+        instead=(
+            "1) read the value in the real root (the daemon, the CLI runtime, the wiring "
+            "module) and pass it down as a required parameter; 2) if the file is a "
+            "factory the process builds once, name its single caller in the PR description; "
+            "3) never widen the declaration to make an importer pass; 4) a module that "
+            "only wraps the read is an `[ambient-readers]` entry, not a root."
+        ),
+        see=_ROOTS,
+    )
+
+
 # meiva:note
 # One builder per id. A new `HintId` without a builder fails the catalog test for every
 # id, so the text cannot lag the vocabulary.
@@ -274,6 +292,7 @@ def _builders() -> dict[HintId, Callable[[], HintSpec]]:
         HintId.TEST_SUBCLASS: _spec_test_subclass,
         HintId.LAMBDA_DEPENDENCY: _spec_lambda_dependency,
         HintId.SPY_ASSERT: _spec_spy_assert,
+        HintId.ROOT_MIDDLE_LAYER: _spec_root_middle_layer,
     }
 
 

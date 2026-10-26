@@ -145,7 +145,7 @@ def test_ambient_roots_and_state_contracts_cover_both_languages(
         {
             f"app/runtime.{extension}": source,
             f"app/reader.{extension}": reader,
-            "app/meizel.toml": f'[uses]\n"reader.{extension}" = ["runtime.{extension}"]\n[state]\n"runtime.{extension}" = ["settings"]\n[roots]\n"runtime.{extension}" = ["clock"]\n',
+            "app/meizel.toml": f'[uses]\n"reader.{extension}" = ["runtime.{extension}"]\n[state]\n"runtime.{extension}" = ["settings"]\n[roots]\n"runtime.{extension}" = {{ kinds = ["clock"], why = "reads the clock" }}\n',
             "meizel.toml": '[roles]\nfrontend = ["app"]\n',
             "meizel.policy.toml": '[ambient]\nsettings = ["settings"]\n',
         }

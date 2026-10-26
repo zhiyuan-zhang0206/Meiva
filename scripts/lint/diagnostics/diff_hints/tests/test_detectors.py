@@ -434,3 +434,28 @@ def test_a_non_settings_root_still_reports_service_locator_reads() -> None:
 def test_a_settings_root_can_assemble_inputs_from_the_application() -> None:
     source = "def inputs(request):\n    return request.app.state.thing\n"
     assert sites(source, "cli/worker.py", roots=frozenset({AmbientKind.SETTINGS})) == []
+
+
+HOME_ROOT = frozenset({AmbientKind.HOME})
+
+
+@pytest.mark.parametrize(
+    ("path", "roots", "importers", "fires"),
+    [
+        ("base/paths/home.py", HOME_ROOT, 3, True),
+        ("base/paths/home.py", HOME_ROOT, 12, True),
+        ("base/paths/home.py", HOME_ROOT, 2, False),
+        ("base/paths/home.py", frozenset[AmbientKind](), 9, False),
+        ("cli/database/runtime.py", HOME_ROOT, 18, False),
+        ("gateway/app.py", HOME_ROOT, 6, False),
+        ("cli/commands/tests/test_home.py", HOME_ROOT, 9, False),
+    ],
+)
+def test_a_root_that_three_modules_outside_the_roots_import_is_a_middle_layer(
+    path: str, roots: frozenset[AmbientKind], importers: int, fires: bool
+) -> None:
+    found = sites("VALUE = 1\n", path, roots=roots, importers=importers)
+    assert [site.hint for site in found] == ([HintId.ROOT_MIDDLE_LAYER] if fires else [])
+    if fires:
+        assert found[0].line == 1
+        assert f"imported by {importers}" in found[0].detail

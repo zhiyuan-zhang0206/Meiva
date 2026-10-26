@@ -403,12 +403,17 @@ class _Reader:
         return result
 
     # meiva:note
-    # One `[roots]` value: a list of kinds, or a table with `kinds` and a `why`.
+    # One `[roots]` value: a table with `kinds` and a `why`. A bare list of kinds says what a file
+    # may read and nothing about why it is the place to read it, so it is not accepted.
     def read_root(self, key: str, value: object, line: int) -> Root | None:
         where = f"[roots] {key!r}"
         if not _is_table(value):
-            kinds = self.kinds(value, where, line, tuple(AmbientKind))
-            return Root(kinds) if kinds else None
+            self.report(
+                line,
+                Code.MANIFEST_SYNTAX,
+                f'{where} is `{{ kinds = [...], why = "..." }}`: a list of kinds carries no reason',
+            )
+            return None
         fields = value
         unknown = sorted(set(fields) - {"kinds", "why"})
         why = fields.get("why", "")
