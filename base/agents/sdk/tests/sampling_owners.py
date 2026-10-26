@@ -1,3 +1,4 @@
+import random
 from pathlib import Path
 
 from base.agents.sdk.call_policy import (
@@ -13,6 +14,7 @@ __all__ = [
     "fixed_sampling_owner",
     "gateway_sampling_owner",
     "sampling_owner_failing_to_read",
+    "sampling_owner_over",
     "sampling_owner_serving",
 ]
 
@@ -20,15 +22,22 @@ _NO_ENV_FILE = Path("/nonexistent-sampling-home/.env")
 
 
 # meiva:note
-# A sampling owner whose policy is the default and stays the default: it reads no gateway, and the
-# `.env` path it refreshes from names no file, so the SDK call path under test sees live sampling
-# without a network call, a settings read or a file.
-def fixed_sampling_owner() -> SamplingPolicyOwner:
+# A sampling owner whose policy is the default and stays the default, drawing its decisions from
+# `rng`: it reads no gateway, and the `.env` path it refreshes from names no file, so the SDK call
+# path under test sees live sampling without a network call, a settings read or a file. A test
+# about the generator hands in its own; the others use `fixed_sampling_owner`.
+def sampling_owner_over(rng: random.Random) -> SamplingPolicyOwner:
     return SamplingPolicyOwner(
         initial=SamplingPolicy(),
         source=SamplingSource(env={}, env_path=_NO_ENV_FILE),
-        rng=seeded_rng(),
+        rng=rng,
     )
+
+
+# meiva:note
+# `sampling_owner_over` the seeded generator every test shares: repeatable decisions.
+def fixed_sampling_owner() -> SamplingPolicyOwner:
+    return sampling_owner_over(seeded_rng())
 
 
 # meiva:note
