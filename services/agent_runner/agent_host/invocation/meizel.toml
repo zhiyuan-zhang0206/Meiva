@@ -1,11 +1,12 @@
-exports = ["checkpoints.py", "driver.py"]
+exports = ["checkpoints.py", "completion_decisions.py", "driver.py"]
 
 [uses]
-"__init__.py" = ["checkpoints.py"]
+"__init__.py" = ["checkpoints.py", "completion_decisions.py"]
 
 [purity]
 "." = "strict-to-be"
 "checkpoints.py" = "strict"
+"completion_decisions.py" = "strict"
 
 [debt.impure-call]
 "__init__.py#async def finish_completed_invocation" = 1

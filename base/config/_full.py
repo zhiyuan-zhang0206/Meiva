@@ -181,7 +181,7 @@ def build(
     if environment is None:
         settings = Settings(env_boot=env_boot)
     else:
-        from base.config.service_read import domain_model_classes
+        from base.config.config_registry import domain_model_classes
 
         domains = {
             name: model.from_environment(environment)

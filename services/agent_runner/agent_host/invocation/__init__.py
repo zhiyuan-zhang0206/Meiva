@@ -1,4 +1,5 @@
-"""Pending invocation state and the host's database-only failure boundary."""
+# meiva:note
+# Pending invocation state and the host's database-only failure boundary.
 
 from __future__ import annotations
 
@@ -22,12 +23,17 @@ from base.events.live.bus import EventBus
 from services.agent_runner.agent_host import TurnOutcome
 from services.agent_runner.agent_host.db_recovery import database_phase
 from services.agent_runner.agent_host.invocation.checkpoints import TurnCheckpoints
+from services.agent_runner.agent_host.invocation.completion_decisions import (
+    lifecycle_return_requested,
+    restart_resumes_turn,
+    should_wake_resumed,
+)
 from services.agent_runner.agent_host.lifecycle.shells import apply_lifecycle_command
 
 
+# meiva:note
+# The completed invocation and its in-process database settlement phase.
 class PendingWorkResult:
-    """The completed invocation and its in-process database settlement phase."""
-
     def __init__(
         self,
         result: dict[str, object],
@@ -84,6 +90,8 @@ async def settle_handoff_before_invocation(
         return await handoff_resume_pending(graph, agent_id)
 
 
+# meiva:note
+# Finish the original abort's durable writes without another invocation.
 async def finish_pending_failure(
     graph: AgentGraph,
     checkpointer: object,
@@ -92,7 +100,6 @@ async def finish_pending_failure(
     config: RunnableConfig,
     pending: PendingTurnFailure,
 ) -> TurnOutcome:
-    """Finish the original abort's durable writes without another invocation."""
     async with database_phase():
         await settle_turn_failure(graph, checkpointer, config, ctx, agent_id, pending)
         await attach_trace_checkpoint_ref(graph, ctx, agent_id)
@@ -106,6 +113,9 @@ async def finish_pending_failure(
     )
 
 
+# meiva:note
+# Settle the original completed work through its admission's checkpoint view.
+# Correlate the original trace only after its checkpoint is durable.
 async def finish_completed_invocation(
     pool: AsyncPool,
     checkpoints: TurnCheckpoints,
@@ -114,8 +124,6 @@ async def finish_completed_invocation(
     pending: PendingWorkResult,
     hooks: InvocationHooks,
 ) -> TurnOutcome | None:
-    """Settle the original completed work through its admission's checkpoint view."""
-    # Correlate the original trace only after its checkpoint is durable.
     async with database_phase():
         if not pending.checkpoint_flushed:
             await flush_checkpoint(checkpoints.saver, agent_id)
@@ -123,15 +131,10 @@ async def finish_completed_invocation(
         if not pending.trace_attached:
             await attach_trace_checkpoint_ref(checkpoints.graph, ctx, agent_id)
             pending.trace_attached = True
-    if pending.result["exit_requested"] or pending.result["restart_requested"]:
+    if lifecycle_return_requested(pending.result):
         incarnation = ctx.require_original_incarnation(agent_id)
         hooks.drop_agent(agent_id)
-        # meiva:note
-        # After a restart claim `halted` is the claim's verdict on the agent it found:
-        # set, it was idle; clear, its turn was unfinished and the apply queues the note
-        # that continues it. Nothing else reads the turn's progress here.
-        # meiva:link agent/graph/docs/turn-interrupts.meiva.okf.md
-        resume_turn = bool(pending.result["restart_requested"]) and not pending.result["halted"]
+        resume_turn = restart_resumes_turn(pending.result)
         async with database_phase():
             kind = await apply_lifecycle_command(
                 pool,
@@ -146,13 +149,7 @@ async def finish_completed_invocation(
             generation=str(incarnation.generation),
             command_kind=kind,
         )
-        if kind == "restart" and resume_turn:
-            # meiva:note
-            # The apply committed the note that continues the turn. This host's scheduler
-            # starts that turn as soon as this one ends, instead of the pending scan finding
-            # it up to its interval later. A host that is exiting refuses the wake and the
-            # next host's scan takes the note.
-            # meiva:link services/agent_runner/agent_host/lifecycle/docs/graceful-exit.meiva.okf.md
+        if should_wake_resumed(kind, resume_turn=resume_turn):
             hooks.wake_resumed(agent_id)
         return TurnOutcome(exited=kind == "terminate", crashed=False)
     if pending.result["turn_idle"]:

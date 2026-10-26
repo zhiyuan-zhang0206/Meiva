@@ -119,12 +119,10 @@ def sun_path_limit(*, macos: bool | None = None) -> int:
     return 104 if on_macos else 108
 
 
+# meiva:note
+# ``<short tmp>/meiva-<uid>``: a real directory this user owns, mode 0700.
+# A world-writable parent lets anyone pre-create the name, so a directory that is a symlink or belongs to another user is refused.
 def private_socket_dir(*, base: Path | None = None, macos: bool | None = None) -> Path:
-    """``<short tmp>/meiva-<uid>``: a real directory this user owns, mode 0700.
-
-    A world-writable parent lets anyone pre-create the name, so a directory
-    that is a symlink or belongs to another user is refused rather than used.
-    """
     # macOS /tmp is a symlink; codex requires a real directory path.
     if base is None:
         base = default_socket_root(macos=macos)
@@ -143,6 +141,10 @@ def private_socket_dir(*, base: Path | None = None, macos: bool | None = None) -
     return directory
 
 
+# meiva:note
+# Private host-local unix socket for a generation's shared Codex app server.
+# The socket lives in a short per-user directory (`/private/tmp/meiva-<uid>` on macOS, `/tmp/meiva-<uid>` elsewhere),
+# created 0700 and verified to be this user's real directory; fails before any launch if the path exceeds `sun_path`.
 def codex_app_server_socket(
     key: CodingSessionKey,
     generation: str,
@@ -151,18 +153,6 @@ def codex_app_server_socket(
     base: Path | None = None,
     macos: bool | None = None,
 ) -> Path:
-    """Private host-local unix socket for a generation's shared Codex app server.
-
-    The socket lives in a short per-user directory (``/private/tmp/meiva-<uid>``
-    on macOS, ``/tmp/meiva-<uid>`` elsewhere), created 0700 and verified to be
-    this user's real directory, so its length no longer depends on the cluster
-    home: a home under a long directory path pushed a
-    ``<home>/run`` socket past the kernel limit and codex refused to listen.
-    The name carries the key digest (cluster, workspace, tool) and the
-    generation, so clusters never collide and a dying predecessor can never
-    unlink a successor's socket; a crashed generation's stale file is inert.
-    A path that would still not fit ``sun_path`` fails here, before any launch.
-    """
     name = f"codex-app-server.{key_digest(key)[:12]}-{generation.replace('-', '')[:8]}.sock"
     directory = socket_dir if socket_dir is not None else private_socket_dir(base=base, macos=macos)
     path = directory / name

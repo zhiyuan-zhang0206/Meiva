@@ -146,16 +146,16 @@ def process_cmdline(pid: int) -> list[str] | None:
 ChildState = Literal["attached", "detached", "missing", "unverifiable"]
 
 
+# meiva:note
+# How live process `pid` reads relative to its expected chain parent.
+#
+# The root supervisor's self-check probes each managed child with this:
+# ``attached`` — a genuinely live (zombie != live, the reaper's own rule)
+# direct child of `parent_pid`; ``detached`` — live but parented elsewhere
+# (reparented out of the chain, or the pid was recycled); ``missing`` — no
+# such process, or a corpse awaiting its reaper (neither can serve);
+# ``unverifiable`` — the read itself failed; the answer is never guessed.
 def child_state(pid: int, parent_pid: int) -> ChildState:
-    """How live process `pid` reads relative to its expected chain parent.
-
-    The root supervisor's self-check probes each managed child with this:
-    ``attached`` — a genuinely live (zombie ≠ live, the reaper's own rule)
-    direct child of `parent_pid`; ``detached`` — live but parented elsewhere
-    (reparented out of the chain, or the pid was recycled); ``missing`` — no
-    such process, or a corpse awaiting its reaper (neither can serve);
-    ``unverifiable`` — the read itself failed; the answer is never guessed.
-    """
     try:
         proc = psutil.Process(pid)
         status = proc.status()

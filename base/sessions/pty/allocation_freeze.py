@@ -166,8 +166,15 @@ def locked_freeze_state(*, home: Path) -> Generator[PtyAllocationFreeze]:
         yield _read_unlocked(state_path(home))
 
 
-def freeze(*, home: Path, holder: str, reason: str, writer: AtomicWriter) -> PtyAllocationFreeze:
-    """Create a new operator-owned allocation freeze generation."""
+# meiva:note
+# Create a new operator-owned allocation freeze generation.
+def freeze(
+    *,
+    home: Path,
+    holder: str,
+    reason: str,
+    writer: AtomicWriter,
+) -> PtyAllocationFreeze:
     if not holder:
         raise ValueError("holder must be non-empty")
     if not reason:

@@ -182,8 +182,9 @@ class EventPipeline:
     def record_export_loss(self, report: Event) -> None:
         """Writer-only pipelines have no independent exporter loss metric."""
 
+    # meiva:note
+    # Write loss summaries directly; a saturated queue cannot shed its own alarm.
     def _flush(self, batch: list[Event]) -> None:
-        """Write loss summaries directly; a saturated queue cannot shed its own alarm."""
         with self._dropped_lock:
             n = self.dropped
             self.dropped = 0

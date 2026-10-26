@@ -24,9 +24,9 @@ from base.db.config import DbConfig, db_config_from_settings
 from base.db.connections import DirectUrlResolver
 
 
+# meiva:note
+# One cluster Postgres, dialed with one `DbConfig`.
 class Database:
-    """One cluster Postgres, dialed with one `DbConfig`."""
-
     def __init__(
         self,
         config: DbConfig,
@@ -38,6 +38,8 @@ class Database:
         self._gate = gate
         self._direct_url = direct_url
 
+    # meiva:note
+    # The composition-root constructor: the config as the live settings hold it now.
     @classmethod
     def from_settings(
         cls,
@@ -45,13 +47,13 @@ class Database:
         gate: ProcessDbGate,
         direct_url: DirectUrlResolver | None = None,
     ) -> Database:
-        """The composition-root constructor: the config as the live settings hold it now."""
         return cls(db_config_from_settings(), gate=gate, direct_url=direct_url)
 
+    # meiva:note
+    # `base.db.connect()` on this handle's config.
     def connect(
         self, *, autocommit: bool = False, direct: bool = False, unbounded: bool = False
     ) -> psycopg.Connection:
-        """`base.db.connect()` on this handle's config."""
         return connections.connect(
             autocommit=autocommit,
             direct=direct,

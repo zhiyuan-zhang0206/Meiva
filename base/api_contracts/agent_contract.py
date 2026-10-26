@@ -26,6 +26,8 @@ from __future__ import annotations
 
 import asyncio
 from collections.abc import Awaitable
+from dataclasses import dataclass, field
+from datetime import datetime
 from enum import StrEnum
 from typing import Any, ClassVar, Literal, Protocol
 
@@ -511,12 +513,36 @@ if (
     )
 
 
-class SdkCaptureAdmission(Protocol):
-    """One call's retained receipt admission, released after its final event."""
+Category = Literal["audit", "telemetry", "log"]
+Level = Literal["debug", "info", "warning", "error", "critical"]
 
-    def capture(self, event: Any) -> Any:
-        """Append an eligible event to this call's original receipt."""
-        ...
+
+# meiva:note
+# One event in the unified stream — OTel LogRecord semantics (events = logs
+# with names), the shape the event stream carries.
+@dataclass(frozen=True)
+class Event:
+    ts: datetime
+    trace_id: str | None
+    span_id: str | None
+    agent_id: int | None
+    machine: str
+    cluster: str
+    process: str
+    category: Category
+    event_name: str
+    level: Level
+    source: str
+    target_agent_id: int | None
+    attributes: dict[str, Any] = field(default_factory=dict[str, Any])
+
+
+# meiva:note
+# One call's retained receipt admission, released after its final event.
+class SdkCaptureAdmission(Protocol):
+    # meiva:note
+    # Append an eligible event to this call's original receipt.
+    def capture(self, event: Event) -> Event: ...
 
     def capture_failed(self) -> None:
         """Fence the original receipt after an event could not be captured."""

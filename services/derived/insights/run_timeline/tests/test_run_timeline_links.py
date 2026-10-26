@@ -17,7 +17,7 @@ from base.config.service_read import ConfigAuthority
 from base.db import Database
 from base.db.code_version_gate import ProcessDbGate
 from base.lm.catalog import ModelCatalog
-from services.derived.insights.run_timeline import links
+from services.derived.insights.run_timeline import links, router
 
 _INSERT: LiteralString = (
     "INSERT INTO audit_events (event_uid, ts, machine, process, event_name, level, source, "
@@ -245,7 +245,7 @@ def test_a_window_longer_than_a_page_is_read_completely(
 def _content(*, database_gate: ProcessDbGate, **params: int):
     state = SimpleNamespace(db=Database.from_settings(gate=database_gate))
     request = Request({"type": "http", "app": SimpleNamespace(state=state)})
-    return links.get_run_timeline_link_content(request, **params)
+    return router.get_run_timeline_link_content(request, **params)
 
 
 def test_the_full_text_of_a_message_is_served_uncut(

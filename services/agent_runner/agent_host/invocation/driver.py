@@ -8,12 +8,13 @@ from base.api_contracts.agent_contract import DrivenContext
 from services.agent_runner.agent_host import TurnOutcome
 
 
+# meiva:note
+# The publisher and explicit context belong to this invocation, not a cached runtime.
 async def drive_context[C: DrivenContext](
     agent_id: int,
     ctx: C,
     invoke: Callable[[int, C], Awaitable[TurnOutcome]],
 ) -> TurnOutcome:
-    """The publisher and explicit context belong to this invocation, not a cached runtime."""
     publisher = ctx.event_publisher
     if publisher is None:
         raise RuntimeError("hosted invocation requires its event publisher")
@@ -28,6 +29,7 @@ async def drive_context[C: DrivenContext](
                 try:
                     await publisher.aclose()
                 except asyncio.CancelledError:
+                    # meiva:note
                     # TaskGroup may cancel this parent while a failed invocation is
                     # draining. Keep the original failure alongside its worker error.
                     raise primary from None
@@ -40,6 +42,7 @@ async def drive_context[C: DrivenContext](
                 await publisher.aclose()
                 return outcome
     except BaseExceptionGroup as failures:
+        # meiva:note
         # TaskGroup wraps a body failure even when its worker exits cleanly.
         # Keep host lifecycle/stall classification on the original exception;
         # a worker failure or multiple failures still leave as the full group.

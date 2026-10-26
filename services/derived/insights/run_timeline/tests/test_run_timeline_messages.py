@@ -15,7 +15,7 @@ from base.agents.messages.timestamp_policy import TimestampSource
 from base.clock import Clock
 from base.config import settings
 from services.derived.insights.config import InsightsConfig
-from services.derived.insights.run_timeline import messages as route
+from services.derived.insights.run_timeline import router as route
 from services.derived.insights.run_timeline.history import HistoryView
 
 _TIMELINE_SOURCE = TimestampSource(
