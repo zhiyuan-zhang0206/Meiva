@@ -9,8 +9,8 @@ tags: [deploy, harnesses, credentials]
 
 A second machine needs three different things, and they do not travel the same
 way: the **binary** comes from its vendor, the **configuration** can be copied,
-and the **login** may refuse to be copied at all. `scripts/onboarding/
-harness_onboarding.py` keeps those three apart:
+and the **login** may refuse to be copied at all.
+`scripts/host_ops/onboarding/harness_onboarding.py` keeps those three apart:
 
 | Operation | Question it answers |
 |---|---|
@@ -20,14 +20,14 @@ harness_onboarding.py` keeps those three apart:
 
 ```bash
 # the matrix
-.venv/bin/python scripts/onboarding/harness_onboarding.py doctor --verify \
+.venv/bin/python scripts/host_ops/onboarding/harness_onboarding.py doctor --verify \
     --hosts macmini company-mini company-air macbook-air ubuntu
 
 # a fresh machine
-.venv/bin/python scripts/onboarding/harness_onboarding.py install claude codex agy dsh --hosts company-mini
+.venv/bin/python scripts/host_ops/onboarding/harness_onboarding.py install claude codex agy dsh --hosts company-mini
 
 # state from the machine that is already set up
-.venv/bin/python scripts/onboarding/harness_onboarding.py sync claude codex \
+.venv/bin/python scripts/host_ops/onboarding/harness_onboarding.py sync claude codex \
     --from macbook-air --to company-mini --dry-run
 ```
 
@@ -39,7 +39,7 @@ invisible is indistinguishable from one that is missing.
 ## What "installed" has to mean
 
 The platform probe (`base/agents/birth/harness.py`) looks on `PATH` first, then
-in `_FALLBACK_BIN_DIRS` (`~/.local/bin`, `~/.npm-global/bin`, `~/.bun/bin`,
+in `HARNESS_BIN_DIRS` (`~/.local/bin`, `~/.npm-global/bin`, `~/.bun/bin`,
 `~/.claude/local`, `/usr/local/bin`, `/opt/homebrew/bin`). An install that lands
 anywhere else is invisible to the probe until the process PATH happens to
 include it — which is why the catalog pins every harness to a vendor command
@@ -78,8 +78,8 @@ none of it is inferred from a vendor document.
 
 ### Where `agy` actually keeps its session
 
-The platform probe reports `unknown` for Antigravity on every machine because it
-looks only inside the CLI's config directory. The session is one level away:
+The platform probe asks `agy models`, and falls back to the CLI's own token file
+when that cannot answer. The session is one level away:
 
 ```
 ~/.gemini/antigravity-cli/antigravity-oauth-token     # current (agy 1.4.2)
@@ -197,21 +197,22 @@ copy is live:
 | Symptom | Cause | Fix |
 |---|---|---|
 | `env: node: No such file or directory` from `codex --version` | the npm shim runs a Node script and `node` is not on the executing PATH | install Node (`brew install node` / `apt install nodejs npm`); the pinned PATH in `transport.py` already includes `/opt/homebrew/bin` |
-| probe `unavailable` although the CLI answers | npm installed it under `/usr/bin`, which is not in `_FALLBACK_BIN_DIRS`, and the caller's PATH is trimmed | export PATH for that process, or install through a directory the probe searches |
-| `command -v claude` finds nothing in a non-interactive ssh session, yet the machine is set up | the native installer put it in `~/.local/bin` and only the login shell adds that to PATH; the probe still finds it through `_FALLBACK_BIN_DIRS`, so it reports `on_path=false` rather than `unavailable` | read the `on_path` column, not `command -v`; `transport.py` pins the same directories into every command it runs |
-| probe `available`, `claude auth status` says `loggedIn: false` | `~/.claude.json` keeps an `oauthAccount` record after the token expires or is revoked; the probe reads that record as evidence | treat `claude auth status` as authoritative until the probe stops treating `oauthAccount` as proof |
-| `agy` reports `unknown` everywhere | the probe looks only inside the CLI's config directory | expected; use `doctor --verify` and a real `agy -p` invocation |
+| probe `unavailable` although the CLI answers | npm installed it under `/usr/bin`, which is not in `HARNESS_BIN_DIRS`, and the caller's PATH is trimmed | export PATH for that process, or install through a directory the probe searches |
+| `command -v claude` finds nothing in a non-interactive ssh session, yet the machine is set up | the native installer put it in `~/.local/bin` and only the login shell adds that to PATH; the probe still finds it through `HARNESS_BIN_DIRS`, so it reports `on_path=false` rather than `unavailable` | read the `on_path` column, not `command -v`; `transport.py` pins the same directories into every command it runs |
+| probe `available`, `claude auth status` says `loggedIn: false` | the two ask the same question from different contexts: the probe from the runner's environment, your shell from yours (on macOS an SSH chain cannot reach the login Keychain) | judge it in the context that will run the session — `launchctl managername` says which one you are in |
+| `agy` reports `unknown` everywhere | `agy models` could not answer (a slow or dead network, a hung prompt) and no readable CLI token file backed it up | use `doctor --verify` and a real `agy -p` invocation |
 | `agy -p` says `authentication required` although `~/.gemini/jetski-standalone-oauth-token` exists | that file belongs to the Antigravity IDE; the CLI reads only `~/.gemini/antigravity-cli/antigravity-oauth-token` | copy the legacy file to the CLI's path, or sign the CLI in once |
 | `sync` prints `WITHHELD …` | the store's rotation is `unknown` or `rotating` and no acknowledgement was given | sign in once on the target, or pass `--accept-credential-risk` knowing the source may be signed out later |
 
 ## What `doctor` is not
 
-`doctor` runs the platform probe and, with `--verify`, two checks the probe
-deliberately does not make: it runs `<binary> --version` (does the installed
-file actually execute) and asks the CLI for its own login state. The two columns
-are separate on purpose — a probe that must never start a process cannot also be
-the authority on whether a login is currently valid. Rows where they disagree
-are printed with the disagreement rather than resolved silently.
+`doctor` runs the platform probe and, with `--verify`, two checks the probe does
+not make: it runs `<binary> --version` (does the installed file actually execute)
+and asks the CLI for its login state from an ssh shell. The two columns are
+separate on purpose — the probe asks from the runner's environment, this asks
+from a shell, and only a real launch settles which one the machine honours. Rows
+where they disagree are printed with the disagreement rather than resolved
+silently.
 
 `--verify` runs `claude auth status` and `codex login status`, which read local
 state and spend no quota. `agy` has no non-interactive status command, so its

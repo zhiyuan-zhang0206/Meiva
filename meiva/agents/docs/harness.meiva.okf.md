@@ -47,18 +47,18 @@ a new agent instead of forking.
 for the machine the caller runs on:
 
 - `harness`: which harness the row describes.
-- `status`: `available` (installed, and its credential store holds a token),
-  `unavailable` (not installed, or installed with a store holding no token, or
-  one whose credentials cannot renew and have expired), or `unknown` (installed,
-  but the sign-in state cannot be read here — an account recorded in a config
-  file is not a login).
+- `status`: `available` (installed, and the CLI or the store shows a live
+  sign-in), `unavailable` (not installed, no sign-in, or credentials that cannot
+  renew and have expired), or `unknown` (installed, but no login state could be
+  read here — an account recorded in a config file is not a login).
 - `reason`: one readable sentence explaining that status.
-- `binary` and `on_path`: the resolved executable path this machine would run
-  (following symlinks to the real target, which is not always the name on PATH),
+- `binary` and `on_path`: the executable this machine would start (the path
+  PATH resolved, which is the symlink itself when there is one, not its target),
   and whether PATH led to it. `on_path=false` means only a conventional install
   directory held it, so a process started with a trimmed PATH may not find it.
 
-The check reads the filesystem only: it runs no command, starts no session and
+The check asks the CLI for its login state under a bounded timeout and falls back
+to the stored credential when the CLI cannot answer: it starts no session and
 spends no quota. A sign-in it cannot prove is reported as `unknown`, never as a
 guess.
 

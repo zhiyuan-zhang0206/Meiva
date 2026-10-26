@@ -47,16 +47,18 @@ own, so no command is re-parsed by a second shell.
 ## What the probe decides, and what this tool adds
 
 `doctor` asks the platform probe (`base/agents/birth/harness.py`) on every
-machine. That probe reads the filesystem only: it never starts a process, so it
-cannot hang on a login prompt or spend quota, and it reports `unknown` rather
-than guess.
+machine. That probe asks the CLI for its login state (`claude auth status` with
+`--json`, `codex login status`, `agy models`) under a bounded timeout and falls
+back to the stored credential when the CLI cannot answer: it starts no session
+and spends no quota, and a sign-in it cannot prove stays `unknown` rather than a
+guess.
 
-`--verify` adds the two checks the probe deliberately does not make: whether the
-installed file actually executes (`<binary> --version`) and whether the CLI
-itself reports a login (`claude auth status`, `codex login status`). The columns
-stay separate on purpose. A row whose sources disagree — the probe says
-`available`, the CLI says signed out — is printed with the disagreement instead
-of being resolved silently.
+`--verify` adds the checks the probe does not make: whether the installed file
+actually executes (`<binary> --version`) and what the CLI says about its login
+when a shell asks it (`claude auth status`, `codex login status`; empty for `agy`,
+which has no non-interactive status subcommand). The columns stay separate on
+purpose — they ask from different contexts, so they can disagree. A row that
+does is printed with the disagreement instead of being resolved silently.
 
 ## Install bookkeeping
 
