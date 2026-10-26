@@ -28,7 +28,7 @@ from base.agents.impersonation.host_transport import (
     antigravity_server_from_environment,
 )
 from base.db import Database
-from base.events.live.bus import EventBus
+from base.events.live.bus import EventBus, event_bus_config_from_config
 from base.events.live.redis_listener import RedisInboundListener
 from cli.commands.agents.cleanup_after import run_then_clean_up
 from cli.commands.agents.impersonation_adapters import codex_endpoint
@@ -202,6 +202,7 @@ def _send(args: argparse.Namespace, *, database_factory: DatabaseFactory) -> int
         args.target_agent_id,
         content,
         source=source,
+        idempotency_key=args.runtime.new_id(),
     )
     _emit({"status": status, "to": args.target_agent_id, "source": source})
     return 0
@@ -270,7 +271,7 @@ def _request(
     runtime = config.ensure_eager()
     response = sessions.request(
         database_factory(),
-        EventBus.from_settings(rng=args.runtime.rng),
+        EventBus(event_bus_config_from_config(config), rng=args.runtime.rng),
         args.agent_id,
         authority=ConfigAuthority(
             runtime=runtime,
@@ -315,7 +316,7 @@ def _dispatch(
     if command == "request":
         return _request(args, database_factory=database_factory, env=env)
     db = database_factory()
-    bus = EventBus.from_settings(rng=args.runtime.rng)
+    bus = EventBus(event_bus_config_from_config(args.runtime.config), rng=args.runtime.rng)
     if command == "list":
         _emit(sessions.list_sessions(db, args.agent_id, before=args.before, limit=args.limit))
         return 0

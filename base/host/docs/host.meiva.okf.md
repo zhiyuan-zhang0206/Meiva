@@ -84,9 +84,9 @@ loop that records `call_later` delays; those observations prove scheduling value
 and attempt counts, not that one or two real seconds elapsed. Other retry
 consumers and their existing wait contracts retain their interfaces.
 
-The four recurring maintenance jobs (logs, packages refresh, PR flow and WAL-G)
-receive `JobRoots` from the converge command's existing home, checkout, user
-session values. Platform dispatch remains in the existing `Host` resource shell. Their `*_content.py` owners render commands,
+Every OS job (health probe, boot autostart, logs, packages refresh, PR flow and WAL-G),
+registering or retiring, receives `JobRoots` from its command's existing home, checkout and
+user session values. Platform dispatch remains in the existing `Host` resource shell. Their `*_content.py` owners render commands,
 launchd XML and cron entries without `Host` or ambient path reads. The registrar
 first applies its existing switch/home/policy gates, then captures the checkout
 binary and, for launchd, the PATH. PR-flow checks production, `gh` and the token

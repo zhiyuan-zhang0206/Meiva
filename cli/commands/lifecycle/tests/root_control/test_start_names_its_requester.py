@@ -11,6 +11,7 @@ from pathlib import Path
 
 import pytest
 
+from base.clock import SYSTEM_TIMERS
 from base.host.tests.short_tmp import short_tmp as short_tmp
 from base.paths import root_manifests_path, root_run_dir
 from cli.commands.lifecycle import root_driver as driver
@@ -47,6 +48,7 @@ def test_a_cold_start_records_its_units_before_the_manifest_is_published(
             {},
             retained_children=children,
             helper=None,
+            timers=SYSTEM_TIMERS,
         )
 
     assert lifecycle_rows.requests() == [("up", ["gateway"])]
@@ -77,6 +79,7 @@ def test_a_cold_start_records_its_units_and_publishes_the_manifest_before_the_ro
             {"PATH": os.environ["PATH"]},
             retained_children=children,
             helper=None,
+            timers=SYSTEM_TIMERS,
         )
 
     assert lifecycle_rows.requests() == [("up", ["gateway"])]
@@ -115,6 +118,7 @@ def test_a_stop_records_the_units_it_is_about_to_take_down(
             force=True,
             helper=None,
             home=short_tmp,
+            timers=SYSTEM_TIMERS,
         )
 
     assert lifecycle_rows.requests() == [("force-down", ["agent-host"])]

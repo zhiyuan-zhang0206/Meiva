@@ -35,6 +35,7 @@ from cli.commands.data_plane.tests.native_cluster import retained_children as re
 from cli.database.runtime import CommandRuntime
 from cli.database.tests.cli_tests import operator_database as operator_database
 from cli.database.tests.command_inputs import command_runtime as command_runtime
+from cli.startup.tests.birth_facts import birth_facts
 
 
 # meiva:note
@@ -47,6 +48,7 @@ def _born(home: Path) -> cluster.ClusterRecord:
             frozenset({"gateway"}),
             {"MEIVA_MACHINE_NAME": "gw", "MEIVA_GATEWAY_URL": "http://127.0.0.1:1"},
             occupied_ports=frozenset(),
+            birth=birth_facts(),
         )
     )
     start_identity.mark_phase(home, "provisioned")

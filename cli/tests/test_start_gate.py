@@ -13,6 +13,7 @@ import pytest
 from base.host.proc import run_bounded
 from base.native_process.os_platform import file_lock
 from cli import start_identity
+from cli.startup.tests.birth_facts import birth_facts
 from cli.tests.guards.start_refusal_child import SINK_SENTINEL
 
 _GATEWAY = {"gateway", "agent-runner"}
@@ -32,7 +33,12 @@ def _home(tmp_path: Path, tools: str, roles: set[str], **extra: str) -> Path:
     values = {"MEIVA_MACHINE_NAME": "gate", "MEIVA_SERVICE_PATH": tools, **extra}
     start_identity.prepare_identity(
         start_identity.IdentityInput(
-            home, checkout, frozenset(roles), values, occupied_ports=frozenset()
+            home,
+            checkout,
+            frozenset(roles),
+            values,
+            occupied_ports=frozenset(),
+            birth=birth_facts(),
         )
     )
     return home

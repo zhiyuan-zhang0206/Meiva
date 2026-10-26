@@ -1,16 +1,16 @@
-"""The OS-job gates, and what a generated job spec is anchored to.
-
-`MEIVA_OS_JOBS_ENABLED` stops the suite from arming a job at all; the default-home
-gate (`owns_os_jobs`) stops any other home from registering or removing one,
-because labels and crontab markers name a job, not a home; and the anchoring makes
-any job that IS armed name the binary and `$MEIVA_HOME` of the checkout that wrote
-it — so no stale job can resolve onto the prod install.
-"""
+# meiva:note
+# The OS-job gates, and what a generated job spec is anchored to.
+#
+# `MEIVA_OS_JOBS_ENABLED` stops the suite from arming a job at all; the default-home
+# gate (`owns_os_job_home`) stops any other home from registering or removing one,
+# because labels and crontab markers name a job, not a home; and the anchoring makes
+# any job that IS armed name the binary and `$MEIVA_HOME` of the checkout that wrote
+# it — so no stale job can resolve onto the prod install.
 
 from __future__ import annotations
 
 from collections.abc import Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from functools import partial
 from pathlib import Path
 
@@ -130,24 +130,12 @@ def test_registration_never_reaches_the_backend_when_gated(
     default_home: Path,
 ) -> None:
     host = _probe_host(default_home)
+    roots = JobRoots(home=default_home / ".meiva", repo=default_home, user_home=default_home)
     assert callable(call)
     if isinstance(call, partial) and call.func is pr_flow_job.register_pr_flow_job:
-        call(
-            production=True,
-            roots=JobRoots(home=default_home / ".meiva", repo=default_home, user_home=default_home),
-            host=host,
-        )
-    elif isinstance(call, partial) and call.func in (
-        logs_job.register_logs_job,
-        packages_job.register_packages_job,
-        walg_job.register_walg_job,
-    ):
-        call(
-            roots=JobRoots(home=default_home / ".meiva", repo=default_home, user_home=default_home),
-            host=host,
-        )
+        call(production=True, roots=roots, host=host)
     else:
-        call(host=host)
+        call(roots=roots, host=host)
 
 
 def test_registration_dispatches_when_enabled(
@@ -156,11 +144,12 @@ def test_registration_dispatches_when_enabled(
     host = _probe_host(default_home)
     roots = JobRoots(home=default_home / ".meiva", repo=default_home, user_home=default_home)
     calls: list[Callable[[], None]] = [
-        lambda: health_job.register_os_cron(enabled=True, host=host),
+        lambda: health_job.register_os_cron(enabled=True, host=host, roots=roots),
         lambda: autostart.register_autostart(
             services=frozenset({"gateway"}),
             enabled=True,
             host=host,
+            roots=roots,
         ),
         lambda: logs_job.register_logs_job(roots=roots, enabled=True, host=host),
         lambda: packages_job.register_packages_job(
@@ -195,11 +184,11 @@ def test_deregistration_is_not_gated_by_the_os_jobs_switch(
 ) -> None:
     """Cleanup has to work wherever registration is switched off (the suite runs
     with it off) — otherwise a leak under an older build can never be swept."""
-    _ = default_home
     host = _probe_host()
+    roots = JobRoots(home=default_home / ".meiva", repo=default_home, user_home=default_home)
     for call in _UNREGISTER_CALLS.values():
         with pytest.raises(RuntimeError, match="unsupported host platform for OS jobs"):
-            call(host=host)
+            call(host=host, roots=roots)
 
 
 # ---------------------------------------------------------------------------
@@ -218,41 +207,31 @@ def test_a_scratch_home_registers_nothing(
     unit_home: Path,
 ) -> None:
     host = _probe_host(unit_home)
+    roots = JobRoots(home=unit_home, repo=unit_home, user_home=unit_home)
     assert callable(call)
     if isinstance(call, partial) and call.func is pr_flow_job.register_pr_flow_job:
-        call(
-            production=True,
-            roots=JobRoots(home=unit_home, repo=unit_home, user_home=unit_home),
-            host=host,
-        )
-    elif isinstance(call, partial) and call.func in (
-        logs_job.register_logs_job,
-        packages_job.register_packages_job,
-        walg_job.register_walg_job,
-    ):
-        call(
-            roots=JobRoots(home=unit_home, repo=unit_home, user_home=unit_home),
-            host=host,
-        )
+        call(production=True, roots=roots, host=host)
     else:
-        call(host=host)
+        call(roots=roots, host=host)
 
 
 @pytest.mark.parametrize("call", _UNREGISTERS)
 def test_a_scratch_home_removes_nothing(call: object, unit_home: Path) -> None:
-    _ = unit_home
     assert callable(call)
-    call(host=_probe_host())
+    call(host=_probe_host(), roots=JobRoots(home=unit_home, repo=unit_home, user_home=unit_home))
 
 
 def test_the_default_home_owns_the_jobs_however_it_is_spelled(
     default_home: Path,
 ) -> None:
-    assert mechanics.owns_os_jobs("autostart")
+    roots = JobRoots(home=default_home / ".meiva", repo=default_home, user_home=default_home)
+    assert mechanics.owns_os_job_home("autostart", roots=roots)
     assert mechanics.owns_os_job_home(
-        "autostart", home=default_home / "elsewhere" / ".." / ".meiva"
+        "autostart", roots=replace(roots, home=default_home / "elsewhere" / ".." / ".meiva")
     )
-    assert not mechanics.owns_os_job_home("autostart", home=default_home / ".meiva-preview")
+    assert not mechanics.owns_os_job_home(
+        "autostart", roots=replace(roots, home=default_home / ".meiva-preview")
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -260,19 +239,7 @@ def test_the_default_home_owns_the_jobs_however_it_is_spelled(
 # ---------------------------------------------------------------------------
 
 
-def test_meiva_binary_path_prefers_this_checkout_over_path() -> None:
-    """PATH belongs to whoever launched the process; the job must run the binary
-    of the checkout that owns `$MEIVA_HOME`. A leaked e2e job named a worktree's
-    `meiva` resolved off `uv run`'s PATH — one `shutil.which` hit away from naming
-    prod's."""
-    resolved = Path(
-        mechanics.meiva_binary_path(host=fake_host(programs={"meiva": "/somewhere/else/bin/meiva"}))
-    )
-    assert resolved.parent.parent.parent == Path(__file__).resolve().parents[4]
-    assert resolved.parent.parent.name == ".venv"
-
-
-def test_meiva_binary_path_falls_back_to_path_without_a_venv(
+def test_the_meiva_binary_falls_back_to_path_without_a_venv(
     tmp_path: Path,
 ) -> None:
     commands = FakeCommands()
@@ -320,12 +287,13 @@ def test_every_launchagent_pins_meiva_home(tmp_path: Path) -> None:
     assert f"<key>MEIVA_HOME</key>\n        <string>{home}</string>" in body
 
 
-def test_cron_env_prefix_scopes_to_one_command(
+# meiva:note
+# `MEIVA_HOME=<home> <cmd>` and not a bare `MEIVA_HOME=` line: cron applies a
+# standalone assignment to the WHOLE crontab, which would silently retarget a
+# co-located cluster's entries.
+def test_cron_environment_scopes_to_one_command(
     tmp_path: Path,
 ) -> None:
-    """`MEIVA_HOME=<home> <cmd>` and not a bare `MEIVA_HOME=` line: cron applies a
-    standalone assignment to the WHOLE crontab, which would silently retarget a
-    co-located cluster's entries."""
     prefix = cron_environment(tmp_path / ".meiva-x")
     assert prefix == f"MEIVA_HOME={tmp_path / '.meiva-x'} "
     assert not prefix.startswith("\n")

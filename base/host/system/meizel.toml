@@ -1,8 +1,8 @@
 exports = ["boot_autostart", "backend.py", "boot_policy.py", "boot_unit.py", "cron", "hostport.py", "job_values.py", "logs_content.py", "logs_job.py", "macos_firewall.py", "packages_content.py", "packages_job.py", "pr_flow_job.py", "probes.py", "tests", "walg_job.py"]
 
 [uses]
-"boot_autostart" = ["boot_policy.py", "boot_unit.py", "cron", "hostport.py", "job_values.py"]
-"boot_unit.py" = ["boot_policy.py", "hostport.py"]
+"boot_autostart" = ["boot_policy.py", "boot_unit.py", "cron", "hostport.py", "job_readings.py", "job_values.py"]
+"boot_unit.py" = ["boot_policy.py", "hostport.py", "job_values.py"]
 "cron" = ["hostport.py", "job_readings.py", "job_values.py"]
 "job_readings.py" = ["hostport.py"]
 "logs_content.py" = ["job_values.py"]
@@ -29,7 +29,6 @@ exports = ["boot_autostart", "backend.py", "boot_policy.py", "boot_unit.py", "cr
 "probes.py" = { kinds = ["environ"], why = "display_available reads DISPLAY/WAYLAND_DISPLAY to detect X11/Wayland; these are OS display-server vars, not meiva runtime config; no Settings field models them. Single source of truth shared by the browser daemon / MCP loader / host-config validators" }
 
 [debt.ambient-read]
-"boot_unit.py#home base.paths.meiva_home" = 1
 "boot_unit.py#pid base.native_process.os_platform.resolve_pid" = 2
 "hostport.py#pid base.native_process.root_control.client.current_uid" = 1
 "hostport.py#platform base.native_process.os_platform.Platform.current" = 1

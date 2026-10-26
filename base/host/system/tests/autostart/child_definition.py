@@ -48,6 +48,16 @@ def _assert_written(plist: Path) -> None:
     assert values["ThrottleInterval"] == BOOT_RETRY_INTERVAL_S
 
 
+def _roots():
+    from base.host.system.job_values import JobRoots
+
+    return JobRoots(
+        home=Path.home() / ".meiva",
+        repo=Path(__file__).resolve().parents[5],
+        user_home=Path.home(),
+    )
+
+
 def _registration(scenario: str) -> None:
     from base.host.system.boot_autostart import registration
     from base.host.system.tests.fake_commands import DARWIN_ARM64, FakeCommands, fake_host
@@ -62,11 +72,17 @@ def _registration(scenario: str) -> None:
         os.utime(plist, ns=(1_000_000_000, 1_000_000_000))
         before = plist.stat()
         assert (
-            registration.register_macos(services=frozenset({"frontend", "gateway"}), host=host) == 0
+            registration.register_macos(
+                services=frozenset({"frontend", "gateway"}), host=host, roots=_roots()
+            )
+            == 0
         )
         after = plist.stat()
         assert (after.st_ino, after.st_mtime_ns) == (before.st_ino, before.st_mtime_ns)
-        assert registration.register_macos(services=frozenset({"gateway"}), host=host) == 0
+        assert (
+            registration.register_macos(services=frozenset({"gateway"}), host=host, roots=_roots())
+            == 0
+        )
         assert plistlib.loads(plist.read_bytes())["ProgramArguments"][-2:] == [
             "--only-service",
             "gateway",
@@ -76,7 +92,9 @@ def _registration(scenario: str) -> None:
         plist.parent.mkdir(parents=True)
         plist.write_text("registered")
         try:
-            registration.register_autostart(services=frozenset(), enabled=True, host=host)
+            registration.register_autostart(
+                services=frozenset(), enabled=True, host=host, roots=_roots()
+            )
         except ValueError as exc:
             assert "starts no service" in str(exc)
         else:
@@ -84,7 +102,10 @@ def _registration(scenario: str) -> None:
         assert plist.read_text() == "registered"
     else:
         assert (
-            registration.register_macos(services=frozenset({"gateway", "frontend"}), host=host) == 0
+            registration.register_macos(
+                services=frozenset({"gateway", "frontend"}), host=host, roots=_roots()
+            )
+            == 0
         )
         assert plist.exists()
         _assert_written(plist)

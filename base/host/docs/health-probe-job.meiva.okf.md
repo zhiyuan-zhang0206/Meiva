@@ -21,13 +21,14 @@ and publishes no forwarding aliases. This separation is an ownership choice;
 a single effect module would also fit the directory budget.
 
 Registration still checks enabled, default-home ownership and production-checkout
-refusal before platform dispatch. On macOS it observes the destination Path.home
-before checking its own launchd label and process ancestry. An own-job call returns
-without mkdir, definition capture, writes or scheduler commands: bootout would kill
-its own tree. An external call creates the directory, resolves the executable,
-reads the log home, reads the environment home and composes PATH, in that order.
-PATH still separately observes the executable and user home. These observations
-are not merged into one atomic JobRoots snapshot.
+refusal before platform dispatch. Ownership and the refusal are asked of the
+`JobRoots` the caller captured (the gateway lifespan, the converge step or the CLI
+verb), never of the process environment. On macOS the destination derives from
+`roots.user_home` before the job checks its own launchd label and process ancestry.
+An own-job call returns without mkdir, definition capture, writes or scheduler
+commands: bootout would kill its own tree. An external call creates the directory,
+resolves the checkout executable from `roots.repo`, and composes PATH from
+`roots.user_home`; the log directory and the environment home are `roots.home`.
 
 External registration always writes and reloads, even for equal content: write,
 bootout, bootstrap. Bootout status remains ignored here; bootstrap failure returns1.

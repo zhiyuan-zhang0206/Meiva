@@ -6,19 +6,35 @@ handed. These tests hand it a real state class instance (the same one an exec's 
 """
 
 import subprocess
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
 import pytest
+from langgraph.runtime import Runtime
 
 import meiva
 from agent.state import BaseAgentState, CompactState, build_agent_state
+from base.agents.context import MeivaContext
 from base.agents.sdk.tests.sampling_owners import fixed_sampling_owner
+from base.clock import Clock, ClockConfig
+from base.clock.tests.manual_timers import ManualTimers
 from base.packages.plugin_config_images import DiskPluginConfigImages
 from base.packages.plugins.extensions import ExtensionRegistry
 from base.paths.home import resolve_meiva_home
 from meiva.sdk_surface import install, process_context
 from meiva_builtins.plugins.meiva_code.tests.surface_support import code_registry
+
+_NOW = datetime(2026, 3, 4, 5, 6, 7, tzinfo=UTC)
+
+
+def _clock() -> Clock:
+    timers = ManualTimers(wall_start=_NOW)
+    return Clock(ClockConfig("UTC", "UTC", False), timers=timers, now=timers.now)
+
+
+def _runtime() -> Runtime[MeivaContext]:
+    return Runtime(context=MeivaContext(clock_factory=_clock))
 
 
 @pytest.fixture(autouse=True)
@@ -89,13 +105,16 @@ async def test_after_exec_hook_injects_cwd_and_project_skills_notes(tmp_path: Pa
 
     with pytest.raises(AttributeError):
         _ = meiva.state
-    result = await hook(committed, None, None)
+    result = await hook(committed, _runtime(), None)
 
     notes = _hook_notes(result)
     assert [tag for tag, _ in notes] == ["context", "project_skills"]
     assert notes[0][1] == f"Working directory set to {repo}"
     assert "demo-proj" in notes[1][1]
     assert result is not None
+    assert {m.additional_kwargs["meiva_created_at"] for m in result["messages"]} == {
+        _NOW.isoformat()
+    }
     assert result["meiva_code__cwd_note"] is None
     assert result["meiva_code__project_skills_seen_compact"] == 0
 
@@ -119,8 +138,8 @@ async def test_after_exec_hook_reinjects_project_skills_only_after_compact(tmp_p
             messages=[], halted=False, compact=CompactState(version=compact_version), **fields
         )
 
-    assert await hook(state_at(0, 0), None, None) is None
-    result = await hook(state_at(1, 0), None, None)
+    assert await hook(state_at(0, 0), _runtime(), None) is None
+    result = await hook(state_at(1, 0), _runtime(), None)
     assert [tag for tag, _ in _hook_notes(result)] == ["project_skills"]
     assert result is not None
     assert result["meiva_code__project_skills_seen_compact"] == 1
@@ -131,7 +150,7 @@ async def test_after_exec_hook_is_noop_without_pending_notes(tmp_path: Path):
     from meiva_builtins.plugins.meiva_code import agent_runtime
 
     hook = agent_runtime.contribute().after_exec[0]
-    assert await hook(_make_state_with_cwd(str(tmp_path)), None, None) is None
+    assert await hook(_make_state_with_cwd(str(tmp_path)), _runtime(), None) is None
 
 
 async def test_after_exec_hook_on_a_state_without_the_plugin_fields_fails_loudly():
@@ -141,4 +160,4 @@ async def test_after_exec_hook_on_a_state_without_the_plugin_fields_fails_loudly
 
     hook = agent_runtime.contribute().after_exec[0]
     with pytest.raises(AttributeError):
-        await hook(BaseAgentState(), None, None)
+        await hook(BaseAgentState(), _runtime(), None)

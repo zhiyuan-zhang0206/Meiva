@@ -39,7 +39,7 @@ def _linux(crontab: FakeCrontab) -> Host:
 
 def _register_all(crontab: FakeCrontab, roots: JobRoots) -> None:
     host = _linux(crontab)
-    assert health_job.register_linux(300, host=host, repo=roots.repo) == 0
+    assert health_job.register_linux(300, host=host, roots=roots) == 0
     assert logs_job.register_linux(roots=roots, host=host) == 0
     assert packages_job.register_linux(roots=roots, tick_seconds=900, host=host) == 0
     assert pr_flow_job.register_linux(roots=roots, host=host) == 0
