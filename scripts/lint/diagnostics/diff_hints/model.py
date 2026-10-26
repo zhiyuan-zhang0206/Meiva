@@ -29,6 +29,7 @@ class HintId(StrEnum):
     TEST_SUBCLASS = "test-subclass"
     LAMBDA_DEPENDENCY = "lambda-dependency"
     SPY_ASSERT = "spy-assert"
+    ROOT_MIDDLE_LAYER = "root-middle-layer"
 
 
 FunctionNode = ast.FunctionDef | ast.AsyncFunctionDef
@@ -82,7 +83,8 @@ class Roles:
 
 
 # meiva:note
-# One parsed Python file with its declared root kinds and the lines the change added.
+# One parsed Python file with its declared root kinds, the number of non-root production modules
+# that import it and the lines the change added.
 # `names` maps each imported name to its dotted origin (`from time import monotonic` binds
 # `monotonic` to `time.monotonic`). The index is built by one walk of the tree so that
 # a detector looks only at what the change touched: `touched` holds the nodes that
@@ -96,6 +98,7 @@ class Unit:
     kind: FileKind
     roles: Roles
     roots: frozenset[AmbientKind]
+    importers: int
     names: Mapping[str, str]
     touched: tuple[ast.AST, ...]
     functions: tuple[FunctionNode, ...]

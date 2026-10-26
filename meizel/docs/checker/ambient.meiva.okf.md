@@ -77,14 +77,20 @@ that kind at the call site ([[meizel/docs/checker/ambient-readers.meiva.okf.md|r
 
 ## Roots
 
-`[roots]` declares the files that may read the world, each with the kinds it may read and, in the
-table form, why. Only direct children are named; a deeper file is declared in its own directory.
+`[roots]` declares the files that may read the world, each with the kinds it may read and why. A
+bare list of kinds is `manifest-syntax`: it says what a file may read and nothing about why it is the
+place to read it. Only direct children are named; a deeper file is declared in its own directory.
 
 ```toml
 [roots]
-"daemon.py" = ["settings", "db"]
+"daemon.py" = { kinds = ["settings", "db"], why = "process entry point: builds ConfigBoot and opens the database" }
 "boot.py" = { kinds = ["environ", "home"], why = "reads the launch environment before Settings exists" }
 ```
+
+The reason says what the file reads, not that it is allowed to. A file that many modules outside the roots
+import is a middle layer, not a root: changing it asks the `root-middle-layer`
+[diff hint](../../../scripts/lint/docs/diff-hints/catalog.meiva.okf.md), whose answer is the value passed
+down from the real root.
 
 ## The rule
 

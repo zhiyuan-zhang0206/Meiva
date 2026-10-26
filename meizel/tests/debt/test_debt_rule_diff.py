@@ -231,7 +231,7 @@ def ambient_rule_change(root: Path) -> None:
             "meizel.policy.toml": AMBIENT_POLICY,
             "base/meizel.toml": '[state]\n"config.py" = ["settings"]\n"db.py" = ["db"]\n'
             '"events.py" = ["bus"]\n"endpoints.py" = ["endpoints"]\n',
-            "app/meizel.toml": '[roots]\n"bootstrap.py" = ["db"]\n'
+            "app/meizel.toml": '[roots]\n"bootstrap.py" = { kinds = ["db"], why = "opens the database" }\n'
             '"env.py" = { kinds = ["environ", "settings"], why = "the process environment boundary" }\n',
         },
     )
@@ -261,7 +261,13 @@ def test_new_root_permission_is_not_copied_into_the_historical_baseline(
     root = ambient_base(make_repo)
     ambient_rule_change(root)
     path = root / "app/meizel.toml"
-    write(root, {"app/meizel.toml": path.read_text() + '"x.py" = ["db"]\n'})
+    write(
+        root,
+        {
+            "app/meizel.toml": path.read_text()
+            + '"x.py" = { kinds = ["db"], why = "opens the database" }\n'
+        },
+    )
     record(root)
     capsys.readouterr()
     assert diff(root) == 0

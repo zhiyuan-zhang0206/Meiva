@@ -55,7 +55,12 @@ def _holds(node: ast.AST, lines: list[int]) -> bool:
 # The parsed unit of a file, or None when the file is out of scope, the change added no
 # line, or the file does not parse (a syntax error is another gate's finding, not a hint).
 def parse_unit(
-    path: str, text: str, added: frozenset[int], roles: Roles, roots: frozenset[AmbientKind]
+    path: str,
+    text: str,
+    added: frozenset[int],
+    roles: Roles,
+    roots: frozenset[AmbientKind],
+    importers: int = 0,
 ) -> Unit | None:
     kind = classify(path, roles)
     if kind is FileKind.OTHER or not added:
@@ -85,6 +90,7 @@ def parse_unit(
         kind,
         roles,
         roots,
+        importers,
         names,
         touched,
         tuple(functions),

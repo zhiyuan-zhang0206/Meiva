@@ -14,7 +14,10 @@ READERS = {
 }
 FILES = {
     "lib/__init__.py": "",
-    "lib/meizel.toml": '[roots]\n"env.py" = ["environ"]\n"paths.py" = ["environ", "home"]\n',
+    "lib/meizel.toml": (
+        '[roots]\n"env.py" = { kinds = ["environ"], why = "reads it" }\n'
+        '"paths.py" = { kinds = ["environ", "home"], why = "reads both" }\n'
+    ),
     "lib/env.py": "import os\n\n\ndef process_environment():\n    return os.environ\n",
     "lib/paths.py": (
         "import os\nfrom pathlib import Path\n\n\n"
@@ -125,7 +128,7 @@ def test_a_function_of_the_same_name_in_another_module_is_not_the_reader(
 def test_a_re_export_is_the_same_reader(make_repo: RepoFactory) -> None:
     files = {
         "lib/__init__.py": "from lib.env import process_environment\n",
-        "lib/meizel.toml": '[roots]\n"env.py" = ["environ"]\n',
+        "lib/meizel.toml": '[roots]\n"env.py" = { kinds = ["environ"], why = "reads it" }\n',
     }
     root = repo(make_repo, {**files, "app/mod.py": "import lib\n\nx = lib.process_environment()\n"})
     scan = analysis_of(root).scans["app/mod.py"]
@@ -139,7 +142,7 @@ def test_a_rename_in_a_re_export_is_followed(
 ) -> None:
     files = {
         "lib/__init__.py": "from lib.env import process_environment as live\n",
-        "lib/meizel.toml": '[roots]\n"env.py" = ["environ"]\n',
+        "lib/meizel.toml": '[roots]\n"env.py" = { kinds = ["environ"], why = "reads it" }\n',
         "app/mod.py": "from lib import live\n\nx = live()\n",
     }
     root = repo(make_repo, files)
@@ -176,7 +179,9 @@ def test_a_root_of_the_kind_may_call_the_reader_and_a_root_of_another_kind_may_n
     make_repo: RepoFactory, kinds: str, recorded: list[str]
 ) -> None:
     source = "from lib.env import process_environment\n\nx = process_environment()\n"
-    found = sites(make_repo, source, f'[roots]\n"mod.py" = ["{kinds}"]\n')
+    found = sites(
+        make_repo, source, f'[roots]\n"mod.py" = {{ kinds = ["{kinds}"], why = "reads it" }}\n'
+    )
     assert [key for key, _ in found] == recorded
 
 
