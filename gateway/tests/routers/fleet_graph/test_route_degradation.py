@@ -1,5 +1,6 @@
 """Fleet graph PG failures through a router with explicit app-owned resources."""
 
+import random
 from collections.abc import Iterator
 from unittest.mock import MagicMock
 
@@ -11,10 +12,17 @@ from psycopg import errors as pg_errors
 from base.db import Database
 from base.events.live.bus import EventBus
 from base.events.live.tests.fakes import patch_sync_redis
+from gateway.http.middleware.error_envelope import request_trace_middleware
 from gateway.http.middleware.error_handlers import unhandled_exception_handler
 from gateway.lgtm.telemetry_staleness import TelemetryStaleness
 from gateway.routers.fleet import fleet_graph as fg
 from gateway.tests.routers.fleet_graph.staleness_support import write_fresh_heartbeat
+
+
+# meiva:note
+# A fresh seeded generator for each use, so no test sees another's draws.
+def _rng() -> random.Random:
+    return random.Random(0)  # noqa: S311
 
 
 @pytest.fixture
@@ -34,6 +42,7 @@ def app(
     patch_sync_redis(monkeypatch, lambda: redis)
     app = FastAPI()
     app.include_router(fg.router)
+    app.middleware("http")(request_trace_middleware(_rng()))
     app.add_exception_handler(Exception, unhandled_exception_handler)
     app.state.bus = event_bus
     app.state.telemetry_staleness = TelemetryStaleness(check_interval_s=0)

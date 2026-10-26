@@ -36,10 +36,10 @@ from base.packages.docs.pages_copy import (
     PAGE_SERVER_DOWN_BODY,
     PAGE_SERVER_TIMEOUT_BODY,
 )
-from gateway.http.config import GatewayConfig, gateway_config_from_boot
+from gateway.http.config import GatewayConfig
 from gateway.routers.page_serving import page_target
 from gateway.tests.agents.gateway_auth import without_credentials
-from gateway.tests.auth.gateway_config import gateway_test_client
+from gateway.tests.auth.gateway_config import gateway_config_of, gateway_test_client
 from gateway.tests.support.db_faults.missing_table import missing_table
 
 _SECRET = "test-cluster-secret"  # noqa: S105 — test fixture
@@ -49,7 +49,7 @@ _SECRET = "test-cluster-secret"  # noqa: S105 — test fixture
 # The test gateway's HTTP policy with a short page-proxy read bound.
 def _with_read_bound(seconds: float) -> GatewayConfig:
     return replace(
-        gateway_config_from_boot(snapshot_process_config()),
+        gateway_config_of(snapshot_process_config()),
         human_auth="required",
         page_proxy_read_seconds=seconds,
     )

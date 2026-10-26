@@ -22,10 +22,10 @@ from base.cluster import rate_limit
 from base.cluster.machine import MachineIdentityReader
 from base.cluster.machine.tests.identity import machine_identity as machine_identity
 from base.cluster.rate_limit import LoginRateLimitConfig, LoginRateLimiter
-from gateway.http.config import gateway_config_from_boot
 from gateway.tests.auth.gateway_config import (
     GatewayTestClient,
     gateway_config_fields,
+    gateway_config_of,
     gateway_test_app,
     gateway_test_client,
     gateway_test_process,
@@ -156,7 +156,7 @@ def test_login_lockout_is_isolated_between_application_lifespans(
     *, machine_identity: MachineIdentityReader
 ) -> None:
     with gateway_test_process(machine=machine_identity) as process:
-        app_config = gateway_config_from_boot(process.config)
+        app_config = gateway_config_of(process.config)
         first = gateway_test_app(process=process, config=app_config)
         second = gateway_test_app(process=process, config=app_config)
         with (

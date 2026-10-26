@@ -1,11 +1,31 @@
+import random
+from pathlib import Path
+
 import pytest
 
+from base import paths
 from base.clock import SYSTEM_TIMERS, Clock
 from base.clock.configuration import clock_config_from_boot
-from base.config import field_names, get_field, set_field, settings
+from base.cluster.machine.configured import ConfiguredMachineIdentity
+from base.config import ConfigBoot, field_names, get_field, set_field, settings
 from base.config.tests.configuration import snapshot_process_config
-from gateway.http.config import gateway_config_from_boot
+from gateway.http.config import GatewayConfig, gateway_config_from_boot
 from tests.fixtures.gateway_config import gateway_test_app
+
+
+# meiva:note
+# A fresh seeded generator for each use, so no test sees another's draws.
+def _rng() -> random.Random:
+    return random.Random(0)  # noqa: S311
+
+
+def _config(boot: ConfigBoot) -> GatewayConfig:
+    return gateway_config_from_boot(
+        boot,
+        user_home=Path.home(),
+        memory_root=paths.gateway_memory_dir(roles=ConfiguredMachineIdentity(boot).role()),
+        rng=_rng(),
+    )
 
 
 @pytest.mark.parametrize("explicit", [False, True], ids=["default", "explicit"])
@@ -45,9 +65,9 @@ def test_gateway_snapshot_preserves_all_values_and_timezone_origin(explicit: boo
             settings.general.model_fields_set.discard("timezone")
         values = {name: get_field(name) for name in field_names()}
         boot = snapshot_process_config()
-        app = gateway_test_app(boot=boot, config=gateway_config_from_boot(boot))
+        app = gateway_test_app(boot=boot, config=_config(boot))
         owner = app.state.gateway_process.config
-        assert app.state.gateway_config == gateway_config_from_boot(owner)
+        assert app.state.gateway_config == _config(owner)
         assert {name: owner.get_field(name) for name in values} == values
         assert owner.field_explicitly_set("timezone") is explicit
         clock = Clock(clock_config_from_boot(owner), timers=SYSTEM_TIMERS)

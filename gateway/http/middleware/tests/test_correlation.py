@@ -3,6 +3,8 @@
 
 from __future__ import annotations
 
+import pytest
+
 from gateway.http.middleware.correlation import Correlation, correlation
 
 
@@ -24,4 +26,15 @@ def test_a_request_without_either_takes_the_fresh_id_and_remembers_it() -> None:
     )
     assert correlation(active=None, assigned=17, fresh="c" * 32) == Correlation(
         "c" * 32, assign=True
+    )
+
+
+def test_a_request_without_any_id_and_nothing_drawn_for_it_is_refused() -> None:
+    with pytest.raises(ValueError, match="no correlation id"):
+        correlation(active=None, assigned=None, fresh=None)
+
+
+def test_a_request_that_carries_an_id_needs_nothing_drawn_for_it() -> None:
+    assert correlation(active=None, assigned="b" * 32, fresh=None) == Correlation(
+        "b" * 32, assign=False
     )

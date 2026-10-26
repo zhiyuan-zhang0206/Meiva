@@ -5,6 +5,7 @@
 # only, the first object linked, every object linked but no receipt, or the committed receipt.
 # The phases are the public steps of `batches`, run in order and cut short by `os._exit`.
 
+import hashlib
 import json
 import os
 import sys
@@ -26,6 +27,8 @@ def main() -> None:
 
     directory = Path(config["directory"])
     key = config.get("key", "crash")
+    batch_id = hashlib.sha256(f"{key}:batch".encode()).hexdigest()[:32]
+    staging_id = hashlib.sha256(f"{key}:staging".encode()).hexdigest()[:32]
     with ConnectionPool[psycopg.Connection](config["dsn"], min_size=1, max_size=1) as pool:
         if config["phase"] == "ready":
             owner.save_keyed_batch(
@@ -35,6 +38,8 @@ def main() -> None:
                 directory,
                 _ITEMS,
                 _NAMES,
+                batch_id=batch_id,
+                staging_id=staging_id,
                 max_bytes=6,
                 max_files=2,
                 local_machine=config["machine"],
@@ -47,14 +52,15 @@ def main() -> None:
             directory,
             _ITEMS,
             _NAMES,
+            batch_id=batch_id,
             max_bytes=6,
             max_files=2,
             local_machine=config["machine"],
         )
         if config["phase"] == "first-file":
-            owner.publish_files(directory, claim.manifest[:1], _ITEMS[:1])
+            owner.publish_files(directory, claim.manifest[:1], _ITEMS[:1], staging_id=staging_id)
         elif config["phase"] == "published":
-            owner.publish_files(directory, claim.manifest, _ITEMS)
+            owner.publish_files(directory, claim.manifest, _ITEMS, staging_id=staging_id)
     os._exit(_DEATH)
 
 

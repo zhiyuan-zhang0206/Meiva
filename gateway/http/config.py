@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import random
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
@@ -20,7 +21,6 @@ from base.clock.configuration import clock_config_from_boot
 from base.cluster.machine.configured import ConfiguredMachineIdentity
 from base.config import ConfigBoot
 from base.host.env.health_ports import health_port
-from base.paths import gateway_memory_dir
 from gateway.http.middleware.cors import cors_allowed_origins, trusted_request_hosts
 
 
@@ -186,6 +186,12 @@ class GatewayConfig:
     timeline_compact_history: int
     message_timestamps: bool
     clock: ClockConfig
+    # meiva:note
+    # The entropy this gateway app draws request correlation ids, attempt ids, upload batch ids
+    # and the session MAC key from. The root builds it once (a CSPRNG in production), so a
+    # handler asks the config for the value it needs and a test hands in a seeded generator. It
+    # is a resource, not a setting: it takes no part in comparing two configs.
+    rng: random.Random = field(repr=False, compare=False)
     trusted_hosts: frozenset[str] = frozenset()
     # meiva:note
     # How long a lifecycle request (resurrect / terminate / restart) may wait on the home
@@ -242,7 +248,12 @@ class GatewayConfig:
     upload_recovery_enabled: bool = True
 
 
-def gateway_config_from_boot(config: ConfigBoot) -> GatewayConfig:
+# meiva:note
+# The root reads the account home and the memory directory under it and builds the entropy source;
+# this function only records them beside the settings it snapshots.
+def gateway_config_from_boot(
+    config: ConfigBoot, *, user_home: Path, memory_root: Path, rng: random.Random
+) -> GatewayConfig:
     """Snapshot HTTP policy without creating or booting another config owner."""
     view = config.view
     gateway = view.gateway
@@ -279,8 +290,8 @@ def gateway_config_from_boot(config: ConfigBoot) -> GatewayConfig:
             if explicit_secure is not None
             else urlsplit(gateway_url).scheme == "https"
         ),
-        memory_root=gateway_memory_dir(roles=machine.role()),
-        upload_home=Path.home(),
+        memory_root=memory_root,
+        upload_home=user_home,
         human_auth=gateway.human_auth,
         display=DisplayDefaults(
             shell_capture_default_lines=display.shell_capture_default_lines,
@@ -354,6 +365,7 @@ def gateway_config_from_boot(config: ConfigBoot) -> GatewayConfig:
         timeline_compact_history=gateway.timeline_compact_history,
         message_timestamps=view.general.message_timestamps,
         clock=clock_config_from_boot(config),
+        rng=rng,
         trusted_hosts=trusted_request_hosts(
             allowed_origins=allowed_origins,
             machine_host=machine.host(),
@@ -412,6 +424,7 @@ def placeholder_config() -> GatewayConfig:
         timeline_compact_history=0,
         message_timestamps=False,
         clock=_placeholders(ClockConfig),
+        rng=random.Random(0),  # noqa: S311
     )
 
 
