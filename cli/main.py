@@ -23,6 +23,7 @@ import os
 import subprocess
 import sys
 from collections.abc import Callable, MutableMapping, Sequence
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -319,7 +320,9 @@ def main(
     """Run one command with the operator event pipeline as its telemetry producer."""
     from base.deploy import start_trace
 
-    start_trace.begin(enabled=start_trace.requested(os.environ), pid=os.getpid())
+    start_trace.begin(
+        enabled=start_trace.requested(os.environ), pid=os.getpid(), now=datetime.now(UTC)
+    )
     from cli.database import open_operator_database
 
     return run_command(

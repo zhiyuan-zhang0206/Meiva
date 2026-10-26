@@ -13,8 +13,9 @@ tags:
 
 `base/deploy/lifecycle/home_lifecycle_locks.py` owns one OS advisory lock under `$MEIVA_HOME`:
 
-- `resource_lock` (`deploy-state.lifecycle.lock`) serializes long local
-  start/stop transitions with a bounded wait.
+- `resource_lock(home=..., pid=..., purpose=...)` (`deploy-state.lifecycle.lock`) serializes long
+  local start/stop transitions with a bounded wait. The caller names the home and its own pid
+  (`CommandRuntime.home` and `CommandRuntime.pid` for the CLI commands); the module reads neither.
 
 ## Diagnostics
 

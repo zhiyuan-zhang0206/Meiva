@@ -19,6 +19,7 @@ import psycopg
 import pytest
 
 from base.clock import SYSTEM_TIMERS
+from base.clock.tests.manual_timers import ManualTimers
 from base.cluster import ownership
 from base.cluster import postgres as pg
 from base.cluster.dataplane.pg_tools import (
@@ -123,6 +124,30 @@ def _startup_gate(data: Path) -> Generator[None]:
         gate.unlink()
         gate.write_text("")
         os.close(held)
+
+
+# meiva:note
+# The readiness deadline is the caller's clock: a postmaster that never answers is refused after
+# exactly the timeout of sleeps on the caller's `Timers`, without waiting for it.
+def test_a_postmaster_that_never_becomes_ready_is_refused_on_the_callers_timers(
+    postmaster: tuple[Path, int, list[subprocess.Popen[bytes]]],
+) -> None:
+    data, port, children = postmaster
+    manual = ManualTimers()
+    with _startup_gate(data), pytest.raises(RuntimeError, match="did not become ready"):
+        pg.start(
+            data,
+            port,
+            _argv(data, port),
+            pg_start_env(),
+            ready=lambda: False,
+            timeout=2.0,
+            retained_children=children,
+            timers=manual,
+        )
+
+    assert sum(manual.sleeps) == pytest.approx(2.0, abs=0.06)
+    assert manual.monotonic() >= 2.0
 
 
 def test_captured_postmaster_without_pidfile_resumes_full_admission(

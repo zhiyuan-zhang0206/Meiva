@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import argparse
 import hashlib
+import os
 import re
 import sys
 from collections.abc import Callable, Generator, Mapping
@@ -123,10 +124,12 @@ def source_version(source: Path) -> Callable[[], int]:
 
 
 @contextmanager
-def repair_guard(home: Path, *, lock_timeout_s: float = 30.0) -> Generator[None]:
+def repair_guard(home: Path, *, pid: int, lock_timeout_s: float = 30.0) -> Generator[None]:
     from base.deploy.lifecycle.home_lifecycle_locks import resource_lock
 
-    with resource_lock(purpose="operator.update_schedule_script", timeout_s=lock_timeout_s):
+    with resource_lock(
+        home=home, pid=pid, purpose="operator.update_schedule_script", timeout_s=lock_timeout_s
+    ):
         require_agent_host_stopped(home)
         yield
 
@@ -140,13 +143,14 @@ def repair_script(
     schedule_id: int,
     script: str,
     expected_sha256: str,
+    pid: int,
 ) -> str:
     load_installed_runtime(home, source)
     from base.db import Database
     from base.db.code_version_gate import ProcessDbGate
     from base.telemetry import process_name
 
-    with repair_guard(home):
+    with repair_guard(home, pid=pid):
         gate = ProcessDbGate(version=source_version(source), process=process_name())
         with Database.from_settings(gate=gate).pool() as pool:
             return replace_script(pool, schedule_id, script, expected_sha256)
@@ -184,6 +188,7 @@ def main(argv: list[str] | None = None) -> int:
         schedule_id=args.schedule_id,
         script=script,
         expected_sha256=args.expected_sha256,
+        pid=os.getpid(),
     )
     print(f"schedule {args.schedule_id}: {result} script_sha256={script_sha256(script)}")
     return 0

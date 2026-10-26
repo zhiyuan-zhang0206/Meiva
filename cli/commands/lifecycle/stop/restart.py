@@ -142,7 +142,7 @@ def _restart(run: _Invocation, retained_children: list[subprocess.Popen[bytes]])
     # When an outer operation's journal is still running, this restart records phases into it
     # and leaves the finish to that caller (`conclude`).
     home = run.command.home
-    owns_journal = status_journal.begin(home, "restart")
+    owns_journal = status_journal.begin(home, "restart", pid=run.command.pid)
     print(
         budget_line(
             run.request.timeout, run.request.start_timeout, str(status_journal.status_path(home))
@@ -152,7 +152,7 @@ def _restart(run: _Invocation, retained_children: list[subprocess.Popen[bytes]])
     for leg in Leg:
         if leg.heading:
             print(leg.heading)
-        with status_journal.phase(home, leg.phase):
+        with status_journal.phase(home, leg.phase, pid=run.command.pid):
             rc = _run_leg(leg, run, retained_children)
         outcome = settle_leg(leg, rc)
         match outcome:

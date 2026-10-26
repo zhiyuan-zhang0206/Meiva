@@ -82,6 +82,10 @@ class CommandRuntime:
 
     config: ConfigBoot
     # meiva:note
+    # This process's id, read once where the command is composed; the lifecycle lock and journal
+    # name their holder by it.
+    pid: int
+    # meiva:note
     # The home this invocation operates, resolved once by the entry (`cli.main`), which reads the
     # same value for the init/start site and creates the directory: the runtime only holds it, so
     # nothing below the entry names the home a second way.
@@ -122,6 +126,7 @@ class CommandRuntime:
         host = Host.system()
         return cls(
             config=config,
+            pid=os.getpid(),
             home=home,
             machine=ConfiguredMachineIdentity(config),
             helper=helper_for(host.platform),

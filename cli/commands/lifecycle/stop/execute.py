@@ -88,13 +88,15 @@ class StopOutcome:
 # The phase name is printed BEFORE the step runs, and the lifecycle journal carries the same
 # timeline durably. An untimed step (`label` None) just runs.
 @contextmanager
-def timed_phase(home: Path, phases: list[tuple[str, float]], label: str | None) -> Generator[None]:
+def timed_phase(
+    home: Path, pid: int, phases: list[tuple[str, float]], label: str | None
+) -> Generator[None]:
     if label is None:
         yield
         return
     started = time.monotonic()
     print(f"  · stop phase: {label}", flush=True)
-    with journal_phase(home, label):
+    with journal_phase(home, label, pid=pid):
         try:
             yield
         finally:
@@ -113,7 +115,9 @@ def execute_plan(
 ) -> StopOutcome:
     outcome = StopOutcome((), ())
     for step in plan.steps:
-        with timed_phase(env.command.home, run.phases, phase_label(step) if timed else None):
+        with timed_phase(
+            env.command.home, env.command.pid, run.phases, phase_label(step) if timed else None
+        ):
             reported = _perform(step, env, run, retained_children)
         if reported is not None:
             outcome = reported

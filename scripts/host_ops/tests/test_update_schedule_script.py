@@ -36,7 +36,7 @@ def test_a_running_agent_host_refuses_the_repair_before_the_database(tmp_path: P
     try:
         with (
             pytest.raises(RuntimeError, match="requires the agent host to be stopped"),
-            repair.repair_guard(tmp_path),
+            repair.repair_guard(tmp_path, pid=os.getpid()),
         ):
             pass
     finally:
@@ -67,9 +67,11 @@ def test_wrong_home_is_refused(tmp_path: Path) -> None:
 
 def test_lifecycle_lock_prevents_a_competing_edit(tmp_path: Path) -> None:
     with (
-        home_lifecycle_locks.resource_lock(purpose="test:other-lifecycle"),
+        home_lifecycle_locks.resource_lock(
+            home=tmp_path, pid=os.getpid(), purpose="test:other-lifecycle"
+        ),
         pytest.raises(LockTimeoutError, match="last holder"),
-        repair.repair_guard(tmp_path, lock_timeout_s=0.01),
+        repair.repair_guard(tmp_path, pid=os.getpid(), lock_timeout_s=0.01),
     ):
         pass
 

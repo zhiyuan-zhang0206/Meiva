@@ -8,6 +8,7 @@
 from __future__ import annotations
 
 import json
+import os
 import subprocess
 import time
 from collections.abc import Callable
@@ -114,15 +115,19 @@ def test_restarting_agent_host_inside_a_supervised_session_is_incomplete_not_a_t
 # An outer operation's still-running journal is never closed by the nested restart: the
 # journal's opener closes it (task #2898).
 def test_the_restart_finishes_the_journal_only_when_it_owns_it(home: Path) -> None:
-    assert status_journal.begin(home, "update"), "the outer operation opens the journal"
-    assert not status_journal.begin(home, "restart"), "the nested restart is not its owner"
+    assert status_journal.begin(home, "update", pid=os.getpid()), (
+        "the outer operation opens the journal"
+    )
+    assert not status_journal.begin(home, "restart", pid=os.getpid()), (
+        "the nested restart is not its owner"
+    )
 
     assert conclude(home, Finish(rc=0, error=None, notice=None), owns_journal=False) == 0
     journal = json.loads((home / "run/lifecycle-op.json").read_text())
     assert not journal["complete"], "the outer operation still owns the journal"
 
     status_journal.finish(home, 0)
-    assert status_journal.begin(home, "restart"), (
+    assert status_journal.begin(home, "restart", pid=os.getpid()), (
         "with no outer operation the restart opens its own"
     )
     assert (

@@ -4,7 +4,7 @@ exports = ["lifecycle_audit.py", "runtime.py", "tests"]
 "tests" = ["__init__.py", "lifecycle_audit.py", "runtime.py"]
 
 [roots]
-"runtime.py" = { kinds = ["environ", "home", "random", "settings"], why = "CLI command composition root boots configuration, resolves process environment and home, and builds the invocation's random generator before assembling command inputs" }
+"runtime.py" = { kinds = ["environ", "home", "pid", "random", "settings"], why = "CLI command composition root boots configuration, resolves process environment, pid and home, and builds the invocation's random generator before assembling command inputs" }
 
 [debt.ambient-read]
 "lifecycle_audit.py#environ base.host.env.registry.process_environment" = 2

@@ -83,8 +83,8 @@ no journal to report into.
 job, executable, socket and direct root-child ownership are checked before native
 helper exit and removal of its definition. Start recreates that definition. The helper exists
 on macOS only (`extras_plan.retires_helper`) and cannot be retired while any unit is retained.
-Root owns Gate and native LGTM application services. `_exclusive_resources`
-serializes whole local start and stop operations under the home lifecycle lock.
+Root owns Gate and native LGTM application services. `do_stop` and `cmd_start_body`
+hold the home lifecycle lock for a whole start or stop.
 
 A stop keeps no state that gates anything: `stop` clears the home's serving gate
 (`base/deploy/lifecycle/start_serving.py`) before it stops anything, `start` marks it

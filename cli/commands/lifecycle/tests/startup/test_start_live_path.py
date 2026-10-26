@@ -9,10 +9,12 @@
 
 from __future__ import annotations
 
+from pathlib import Path
+
 import psycopg
 import pytest
 
-from base.deploy.lifecycle import launch_failures, start_serving
+from base.deploy.lifecycle import home_lifecycle_locks, launch_failures, start_serving
 from base.host.exit_codes import SERVICES_NOT_READY_EXIT_CODE
 from cli.commands.lifecycle.tests.scripted_root import UnitRow
 from cli.commands.lifecycle.tests.startup.start_harness import (
@@ -50,6 +52,15 @@ def _row(
     )
 
 
+# meiva:note
+# What a start leaves in `home` besides the lifecycle lock and its holder record, which every
+# local start takes under the home it operates.
+def _entries_besides_the_lifecycle_lock(home: Path) -> list[str]:
+    lock = home_lifecycle_locks.lifecycle_lock_path(home)
+    held = {lock.name, home_lifecycle_locks.holder_path(lock).name}
+    return sorted(path.name for path in home.iterdir() if path.name not in held)
+
+
 def test_an_identical_live_generation_is_reused_and_the_start_serves(
     start_run: StartRun, capsys: pytest.CaptureFixture[str]
 ) -> None:
@@ -65,7 +76,7 @@ def test_an_identical_live_generation_is_reused_and_the_start_serves(
     assert run.serving_published
     assert gateway.requests, "a pure runner probes its gateway before launching"
     assert ("up", "pty-sessions") not in root.calls, "a running unit is not launched again"
-    assert sorted(path.name for path in run.home.iterdir()) == ["run"], "nothing converged"
+    assert _entries_besides_the_lifecycle_lock(run.home) == ["run"], "nothing converged"
     out = capsys.readouterr().out
     assert "roles = agent-runner, machine = start-test" in out
     assert "probe gateway" in out
@@ -198,7 +209,7 @@ def test_a_changed_live_generation_is_refused_before_anything_is_prepared(
 
     assert "start admission/preparation failed" in capsys.readouterr().err
     assert [call for call in root.calls if call[0] != "status"] == []
-    assert sorted(path.name for path in run.home.iterdir()) == ["run"], "nothing converged"
+    assert _entries_besides_the_lifecycle_lock(run.home) == ["run"], "nothing converged"
     assert gateway.requests == [], "refused before the gateway probe"
     assert not run.serving_published
 

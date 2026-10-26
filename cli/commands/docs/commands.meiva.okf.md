@@ -85,8 +85,8 @@ it does not restart anything, and the operator decides whether to retry the stop
 or run `meiva start`. `stop/extras` uses the same exact-home helper retirement as destroy:
 native job, executable, socket and stopped-root custody are checked before
 native helper exit and removal of its definition. Start recreates that definition.
-Root owns Gate and native LGTM application services. `_exclusive_resources`
-serializes whole local start and stop operations under the home lifecycle lock.
+Root owns Gate and native LGTM application services. `do_stop` and `cmd_start_body`
+hold the home lifecycle lock for a whole start or stop.
 See [the coordinated operator procedure](../../../docs/conventions/operations/graceful-maintenance.md).
 
 Gateway data-plane startup (`data_plane/cluster_instance`, `data_plane/bringup`,

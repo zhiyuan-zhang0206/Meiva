@@ -8,6 +8,7 @@
 from __future__ import annotations
 
 import json
+import os
 import time
 from collections.abc import Callable
 from dataclasses import replace
@@ -29,7 +30,6 @@ from base.sessions.pty.tests.pty_service import service_socket
 from base.sessions.pty.tests.pty_shells import new
 from base.sessions.record import SessionRecord
 from base.telemetry import EventPipeline
-from cli.commands.lifecycle._exclusive_resources import exclusive_resources
 from cli.commands.lifecycle.stop import browser, do_stop, refuse_hosted_stop
 from cli.commands.lifecycle.stop.extras import stop_extras
 from cli.commands.lifecycle.stop.restart_plan import RestartRequest, restart_stop_request
@@ -171,16 +171,18 @@ def test_resource_stop_excludes_concurrent_start(home: Path) -> None:
     entered, finish, start_finished = Event(), Event(), Event()
     order: list[str] = []
 
-    @exclusive_resources
     def stopping() -> None:
-        order.append("stop")
-        entered.set()
-        assert finish.wait(5)
+        with home_lifecycle_locks.resource_lock(home=home, pid=os.getpid(), purpose="cli.do_stop"):
+            order.append("stop")
+            entered.set()
+            assert finish.wait(5)
 
-    @exclusive_resources
     def starting() -> int:
-        order.append("start")
-        return 0
+        with home_lifecycle_locks.resource_lock(
+            home=home, pid=os.getpid(), purpose="cli.cmd_start_body"
+        ):
+            order.append("start")
+            return 0
 
     thread = Thread(target=stopping)
     thread.start()
@@ -203,7 +205,9 @@ def test_resource_stop_excludes_concurrent_start(home: Path) -> None:
     assert start_finished.is_set() and order == ["stop", "start"]
     # meiva:note
     # The lock is free again once both are done.
-    with home_lifecycle_locks.resource_lock(purpose="test:after", timeout_s=1):
+    with home_lifecycle_locks.resource_lock(
+        home=home, pid=os.getpid(), purpose="test:after", timeout_s=1
+    ):
         pass
 
 
