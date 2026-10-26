@@ -6,7 +6,7 @@ import os
 import re
 import shutil
 import sys
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
@@ -59,6 +59,17 @@ class RetentionFailure:
 
 
 # meiva:note
+# A scan of one or more roots: what expired, what could not be inspected, and which services the
+# family map does not cover. `catch_all` counts files at any age, because a name in it is a mapping
+# todo rather than a statement about what expires today.
+@dataclass(frozen=True)
+class RetentionScan:
+    candidates: tuple[RetentionCandidate, ...]
+    failures: tuple[RetentionFailure, ...]
+    catch_all: Mapping[str, int]
+
+
+# meiva:note
 # The supervisor names two of its own logs without the `meiva-` prefix and with an
 # underscore: `agent_host.log` (the per-turn agent runtime, whose 49 MB files are the
 # main evidence for a failed turn) and `meiva-root.log` (the root supervisor that
@@ -72,13 +83,18 @@ class RetentionFailure:
 # 1-4 MB per file in the observed logs, so 30 days would double the largest bucket.
 # The family answers "how long do I need to look back at one session", not "is this
 # infrastructure".
+#
+# `browser-mcp` and `computer-mcp` go the other way: one long-lived daemon per machine, a handful of
+# dated files of 4-140 KB each, so 30 days stays under a megabyte. They are the per-machine piece of
+# the MCP plane -- same role as the gateway, which is also 30 days -- and nothing about them is
+# "one session".
 # meiva:link cli/commands/observability/docs/log-maintenance.md
 def _service_family(service: str) -> str:
     if service.startswith("gateway"):
         return "gateway"
     if service == "ops" or service.startswith(("ops-", "ops_")):
         return "ops"
-    if service in {"root", "meiva-root"}:
+    if service in {"root", "meiva-root", "browser-mcp", "computer-mcp"}:
         return "ops"
     if service.endswith(("-watchdog", "_watchdog")):
         return "watchdog"
@@ -87,6 +103,21 @@ def _service_family(service: str) -> str:
     if service in {"agent_host", "page_server"} or service.startswith("agent-"):
         return "agent"
     return "other"
+
+
+# meiva:note
+# Which service one allowlisted filename belongs to, or `None` when the shape names no service.
+# `log_family` asks for the shapes that carry one, and the catch-all tally asks so it can skip the
+# native archives that share the family (`loki.log.<date>` and friends): those are not services,
+# so they are never a mapping todo.
+def log_service(match: re.Match[str]) -> str | None:
+    service = match["service"]
+    if service is not None:
+        return service
+    service_stdout = match["svcout"] or match["rotout"]
+    if service_stdout is None:
+        return None
+    return service_stdout.removeprefix("meiva-").split(".out.log", 1)[0]
 
 
 def log_family(match: re.Match[str]) -> str:
@@ -100,11 +131,8 @@ def log_family(match: re.Match[str]) -> str:
     if match["rotlog"] is not None:
         return "other"
 
-    service = match["service"]
-    if service is None:
-        service_stdout = match["svcout"] or match["rotout"]
-        service = service_stdout.removeprefix("meiva-").split(".out.log", 1)[0]
-    return _service_family(service)
+    service = log_service(match)
+    return "other" if service is None else _service_family(service)
 
 
 def _maintenance_roots(logs_path: Path) -> tuple[Path, ...]:
@@ -143,14 +171,19 @@ def _active_log_paths(logs_path: Path) -> set[Path]:
     return active
 
 
-def _retention_candidates(
+# meiva:note
+# One root's scan. The catch-all tally sits before the age test and covers every allowlisted file
+# the scan reads: "this service has no family" is a fact about the family map, not about what
+# happens to expire today, and waiting for the first expiry would hide it for up to `other` days.
+def _retention_scan_root(
     logs_path: Path,
     current: datetime,
     family_days: Mapping[str, int],
     active_paths: set[Path],
-) -> tuple[list[RetentionCandidate], list[RetentionFailure]]:
+) -> RetentionScan:
     candidates: list[RetentionCandidate] = []
     failures: list[RetentionFailure] = []
+    catch_all: dict[str, int] = {}
     with os.scandir(logs_path) as entries:
         for entry in entries:
             match = MANAGED_LOG_NAME.fullmatch(entry.name)
@@ -167,6 +200,10 @@ def _retention_candidates(
                 failures.append(RetentionFailure(path=path, error=exc))
                 continue
             family = log_family(match)
+            if family == "other":
+                service = log_service(match)
+                if service is not None:
+                    catch_all[service] = catch_all.get(service, 0) + 1
             retention_days = family_days[family]
             cutoff = (current - timedelta(days=retention_days)).timestamp()
             if file_stat.st_mtime >= cutoff:
@@ -180,7 +217,11 @@ def _retention_candidates(
                     size_bytes=file_stat.st_size,
                 )
             )
-    return sorted(candidates, key=lambda candidate: candidate.path.name), failures
+    return RetentionScan(
+        candidates=tuple(sorted(candidates, key=lambda candidate: candidate.path.name)),
+        failures=tuple(failures),
+        catch_all=catch_all,
+    )
 
 
 def _utc_mtime(timestamp: float) -> str:
@@ -195,12 +236,13 @@ def _retention_scan(
     target: Path,
     current: datetime,
     family_days: Mapping[str, int],
-) -> tuple[list[RetentionCandidate], list[RetentionFailure]]:
+) -> RetentionScan:
     candidates: list[RetentionCandidate] = []
     failures: list[RetentionFailure] = []
+    catch_all: dict[str, int] = {}
     for root in _retention_roots(target):
         try:
-            root_candidates, root_failures = _retention_candidates(
+            root_scan = _retention_scan_root(
                 root,
                 current,
                 family_days,
@@ -214,19 +256,37 @@ def _retention_scan(
         except OSError as exc:
             failures.append(RetentionFailure(path=root, error=exc))
             continue
-        candidates.extend(root_candidates)
-        failures.extend(root_failures)
-    return sorted(candidates, key=lambda candidate: str(candidate.path)), failures
+        candidates.extend(root_scan.candidates)
+        failures.extend(root_scan.failures)
+        for service, count in root_scan.catch_all.items():
+            catch_all[service] = catch_all.get(service, 0) + count
+    return RetentionScan(
+        candidates=tuple(sorted(candidates, key=lambda candidate: str(candidate.path))),
+        failures=tuple(failures),
+        catch_all=catch_all,
+    )
+
+
+# meiva:note
+# Name the services the family map does not cover, so one that lands in the catch-all is a visible
+# mapping todo instead of a silent 15-day leash. `services=-` is the explicit empty reading: a
+# missing line must never be how "every service has a family" looks.
+def _print_catch_all(catch_all: Mapping[str, int], days: int) -> None:
+    print(
+        "retention_catch_all"
+        f"\tservices={','.join(sorted(catch_all)) or '-'}"
+        f"\tdays={days}"
+        f"\tfiles={sum(catch_all.values())}"
+    )
 
 
 def _print_dry_run(
-    candidates: list[RetentionCandidate],
-    scan_failures: list[RetentionFailure],
+    scan: RetentionScan,
     family_days: Mapping[str, int] | None,
     resolved_family_days: Mapping[str, int],
 ) -> None:
-    total_bytes = sum(candidate.size_bytes for candidate in candidates)
-    for candidate in candidates:
+    total_bytes = sum(candidate.size_bytes for candidate in scan.candidates)
+    for candidate in scan.candidates:
         family_fields = ""
         if family_days is not None:
             family_fields = f"\tfamily={candidate.family}\tdays={candidate.retention_days}"
@@ -240,7 +300,7 @@ def _print_dry_run(
     if family_days is not None:
         for family in sorted(resolved_family_days):
             family_candidates = [
-                candidate for candidate in candidates if candidate.family == family
+                candidate for candidate in scan.candidates if candidate.family == family
             ]
             print(
                 "retention_family"
@@ -249,15 +309,20 @@ def _print_dry_run(
                 f"\tfiles={len(family_candidates)}"
                 f"\tbytes={sum(candidate.size_bytes for candidate in family_candidates)}"
             )
+        _print_catch_all(scan.catch_all, resolved_family_days["other"])
     print(
         "retention_summary"
-        f"\tmode=dry-run\tfiles={len(candidates)}\tbytes={total_bytes}"
-        f"\tfailed={len(scan_failures)}"
+        f"\tmode=dry-run\tfiles={len(scan.candidates)}\tbytes={total_bytes}"
+        f"\tfailed={len(scan.failures)}"
     )
 
 
-def _delete_candidates(candidates: list[RetentionCandidate], scan_failed: int) -> int:
-    """Unlink every candidate and print the summary; the failure count (scan failures included)."""
+# meiva:note
+# Unlink every candidate and hand back (deleted, bytes, failed), scan failures included, so the
+# command prints the catch-all line and then the one summary line for the run.
+def _delete_candidates(
+    candidates: Sequence[RetentionCandidate], scan_failed: int
+) -> tuple[int, int, int]:
     deleted = 0
     reclaimed_bytes = 0
     failed = scan_failed
@@ -273,11 +338,7 @@ def _delete_candidates(candidates: list[RetentionCandidate], scan_failed: int) -
             continue
         deleted += 1
         reclaimed_bytes += candidate.size_bytes
-    print(
-        "retention_summary"
-        f"\tmode=delete\tdeleted={deleted}\tbytes={reclaimed_bytes}\tfailed={failed}"
-    )
-    return failed
+    return deleted, reclaimed_bytes, failed
 
 
 # meiva:note
@@ -325,22 +386,28 @@ def cmd_logs_retention(
         older_than_days, family_days, default_retention_days
     )
 
-    candidates, scan_failures = _retention_scan(
+    scan = _retention_scan(
         logs_path,
         now,
         resolved_family_days,
     )
-    for failure in scan_failures:
+    for failure in scan.failures:
         print(
             f"retention_error\tpath={failure.path}\terror={failure.error}",
             file=sys.stderr,
         )
 
     if dry_run:
-        _print_dry_run(candidates, scan_failures, family_days, resolved_family_days)
-        return 1 if scan_failures else 0
+        _print_dry_run(scan, family_days, resolved_family_days)
+        return 1 if scan.failures else 0
 
-    failed = _delete_candidates(candidates, len(scan_failures))
+    deleted, reclaimed_bytes, failed = _delete_candidates(scan.candidates, len(scan.failures))
+    if family_days is not None:
+        _print_catch_all(scan.catch_all, resolved_family_days["other"])
+    print(
+        "retention_summary"
+        f"\tmode=delete\tdeleted={deleted}\tbytes={reclaimed_bytes}\tfailed={failed}"
+    )
     return 1 if failed else 0
 
 
