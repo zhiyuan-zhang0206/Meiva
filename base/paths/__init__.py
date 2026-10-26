@@ -21,6 +21,15 @@ def meiva_home() -> Path:
     return ensure_private_dir(resolve_meiva_home())
 
 
+# meiva:note
+# The home a path helper below derives from: the explicit `home` (created owner-only when it is
+# missing, as `meiva_home()` does for the ambient one), or the ambient home when a caller passes
+# none. The ambient form is the first step of retiring the zero-argument helpers: callers move to
+# passing the home their entry resolved once, and the second step removes the default.
+def _root(home: Path | None) -> Path:
+    return meiva_home() if home is None else ensure_private_dir(home)
+
+
 def run_dir(home: Path) -> Path:
     """Runtime directory for pid/sock files (`<home>/run`).
 
@@ -37,9 +46,9 @@ def install_registry_path(home: Path) -> Path:
     return home / "installed.json"
 
 
-def plugins_dir() -> Path:
+def plugins_dir(*, home: Path | None = None) -> Path:
     """External plugin directory (~/.meiva/plugins/); create if missing."""
-    target = meiva_home() / "plugins"
+    target = _root(home) / "plugins"
     target.mkdir(parents=True, exist_ok=True)
     return target
 
@@ -68,9 +77,9 @@ def repo_plugins_dir() -> Path:
     return repo_root() / "meiva_builtins" / "plugins"
 
 
-def logs_dir() -> Path:
+def logs_dir(*, home: Path | None = None) -> Path:
     """Per-unit log directory ($MEIVA_HOME/logs); create if missing."""
-    target = meiva_home() / "logs"
+    target = _root(home) / "logs"
     target.mkdir(parents=True, exist_ok=True)
     return target
 
@@ -93,13 +102,13 @@ def permissions_helper_socket(home: Path, port: int) -> Path:
     return run_dir(home) / f"permissions-helper.{port}.sock"
 
 
-def permissions_helper_app_dir() -> Path:
+def permissions_helper_app_dir(*, home: Path | None = None) -> Path:
     """Stable install directory for the macOS permissions-helper app.
 
     The app lives outside the source checkout so a release checkout cannot
     replace it or change its freshness metadata beneath a running helper.
     """
-    return meiva_home() / "helper"
+    return _root(home) / "helper"
 
 
 def traces_dir(home: Path) -> Path:
@@ -135,17 +144,17 @@ def otel_collector_config(home: Path) -> Path:
     return otel_collector_dir(home) / "config.yaml"
 
 
-def memory_dir() -> Path:
+def memory_dir(*, home: Path | None = None) -> Path:
     """Per-unit memory git repo root ($MEIVA_HOME/memory). Returns the path only;
     the caller (memory_repo) runs git init / clone.
 
     On a unit that also carries 'gateway' capability, this is the agent-runner's
     authoring checkout (machine-<name> branch); the gateway indexes from a
     separate consolidated checkout returned by gateway_memory_dir()."""
-    return meiva_home() / "memory"
+    return _root(home) / "memory"
 
 
-def gateway_memory_dir(*, roles: frozenset[str]) -> Path:
+def gateway_memory_dir(*, roles: frozenset[str], home: Path | None = None) -> Path:
     """Gateway's consolidated memory checkout path. On a combined unit
     (gateway+agent-runner on one host) this is $MEIVA_HOME/gateway/memory to
     keep the gateway's index source (main branch) separate from the
@@ -153,8 +162,8 @@ def gateway_memory_dir(*, roles: frozenset[str]) -> Path:
     On a gateway-only unit it is the same as memory_dir(). Returns the path
     only."""
     if "agent-runner" in roles:
-        return meiva_home() / "gateway" / "memory"
-    return memory_dir()
+        return _root(home) / "gateway" / "memory"
+    return memory_dir(home=home)
 
 
 def skills_dir(home: Path) -> Path:
@@ -173,11 +182,11 @@ def mcps_dir(home: Path) -> Path:
     return home / "mcps"
 
 
-def workspaces_root() -> Path:
-    return meiva_home() / "workspaces"
+def workspaces_root(*, home: Path | None = None) -> Path:
+    return _root(home) / "workspaces"
 
 
-def workspace_dir(agent_id: int) -> Path:
+def workspace_dir(agent_id: int, *, home: Path | None = None) -> Path:
     """Per-agent workspace ($MEIVA_HOME/workspaces/<agent_id>); create if missing.
 
     A stable scratch area for files an agent produces or downloads. Survives
@@ -192,18 +201,18 @@ def workspace_dir(agent_id: int) -> Path:
             "workspace); callers that need a pre-bootstrap fallback use Path.home() "
             "explicitly instead of calling workspace_dir()."
         )
-    target = workspaces_root() / str(agent_id)
+    target = workspaces_root(home=home) / str(agent_id)
     target.mkdir(parents=True, exist_ok=True)
     return target
 
 
-def workspace_dir_readonly(agent_id: int) -> Path:
+def workspace_dir_readonly(agent_id: int, *, home: Path | None = None) -> Path:
     """Per-agent workspace path ($MEIVA_HOME/workspaces/<agent_id>) with NO
     create side effect — the read path for ANOTHER agent's workspace (the
     inherited-memory note scans an ancestor's `memory/`). `workspace_dir`
     deliberately ensures its target; a reader must not manufacture a
     workspace that does not exist."""
-    return workspaces_root() / str(agent_id)
+    return workspaces_root(home=home) / str(agent_id)
 
 
 # meiva:note
@@ -212,8 +221,8 @@ def workspace_dir_readonly(agent_id: int) -> Path:
 # purpose: resurrect resumes the transcript by that id, so the pair has to survive
 # the restart that loses everything else. The writer creates the directory.
 # meiva:link base/lm/harness/docs/harness.meiva.okf.md
-def harness_sessions_dir() -> Path:
-    return meiva_home() / "harness" / "sessions"
+def harness_sessions_dir(*, home: Path | None = None) -> Path:
+    return _root(home) / "harness" / "sessions"
 
 
 # meiva:note
@@ -222,8 +231,8 @@ def harness_sessions_dir() -> Path:
 # operator. Kept apart from the resume registry beside it: this one describes a live
 # attachment, that one describes a transcript.
 # meiva:link base/lm/harness/docs/harness.meiva.okf.md
-def harness_registrations_dir() -> Path:
-    return meiva_home() / "harness" / "registrations"
+def harness_registrations_dir(*, home: Path | None = None) -> Path:
+    return _root(home) / "harness" / "registrations"
 
 
 # meiva:note
