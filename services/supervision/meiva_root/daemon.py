@@ -79,17 +79,16 @@ class HelperChainWatch:
     async def run(self) -> None:
         broken_rounds = 0
         while not self._stop.is_set():
-            root_pid = self._root_pid
             reading = observe_round(
                 broken_rounds=broken_rounds,
-                intact=parent_chain_intact(root_pid),
+                intact=parent_chain_intact(self._root_pid),
                 confirm_rounds=self._config.confirm_rounds,
             )
             broken_rounds = reading.broken_rounds
             if reading.retire:
                 self._retire(
                     evidence_line(
-                        root_pid=root_pid,
+                        root_pid=self._root_pid,
                         marker=helper_marker_pid(),
                         broken_rounds=broken_rounds,
                     )
@@ -189,18 +188,16 @@ async def run(options: DaemonOptions) -> int:
     registry = load_manifests(options.manifests_path)
     lock_fd = acquire_instance_lock(options.run_dir)
     async with asyncio.TaskGroup() as participant_tasks:
-        log_dir = options.run_dir / "logs"
         clock = Clock(
             ClockConfig("UTC", "UTC", message_timestamp_weekday=False), timers=SYSTEM_TIMERS
         )
-        supervisor = Supervisor(
-            registry, run_dir=options.run_dir, clock=clock, root_pid=os.getpid()
-        )
+        root_pid = os.getpid()
+        supervisor = Supervisor(registry, run_dir=options.run_dir, clock=clock, root_pid=root_pid)
         context = WiringContext(
             supervisor=supervisor,
             registry=registry,
             run_dir=options.run_dir,
-            log_dir=log_dir,
+            log_dir=options.run_dir / "logs",
             clock=clock,
             participant_tasks=participant_tasks,
         )
@@ -263,7 +260,7 @@ async def run(options: DaemonOptions) -> int:
                     retire=retirement.retire,
                     stop=stop,
                     config=options.helper_chain,
-                    root_pid=supervisor.root_pid,
+                    root_pid=root_pid,
                 ).run()
             )
             await stop.wait()

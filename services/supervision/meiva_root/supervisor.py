@@ -11,7 +11,6 @@ import logging
 import os
 from collections.abc import Awaitable, Callable, Sequence
 from pathlib import Path
-from time import monotonic
 from typing import Any
 
 import psutil
@@ -123,10 +122,6 @@ class Supervisor(LeftBehindMixin, StoppingMixin):
         self._watches: dict[asyncio.Task[None], Generation] = {}
         self._watch_errors: list[BaseException] = []
 
-    @property
-    def root_pid(self) -> int:
-        return self._root_pid
-
     def _now(self) -> float:
         return self._clock.now().timestamp()
 
@@ -138,7 +133,7 @@ class Supervisor(LeftBehindMixin, StoppingMixin):
         async with self._lock:
             self._require_admission()
             self._running = True
-            self._started_at = monotonic()
+            self._started_at = self._clock.monotonic()
             for runtime in self._units.values():
                 self._boot_intent(runtime)
             await asyncio.gather(
@@ -369,7 +364,9 @@ class Supervisor(LeftBehindMixin, StoppingMixin):
             "pid": own_identity.pid,
             "create_time": own_identity.birth,
             "starttime": own_identity.starttime,
-            "uptime_s": monotonic() - self._started_at if self._started_at is not None else 0.0,
+            "uptime_s": self._clock.monotonic() - self._started_at
+            if self._started_at is not None
+            else 0.0,
             "unit_count": len(self._units),
             "launch_digest": self._registry.launch_digest,
             "running": self._running,
@@ -668,7 +665,7 @@ class Supervisor(LeftBehindMixin, StoppingMixin):
         runtime.spawn_seq += 1
         generation = Generation(
             proc=proc,
-            started_at=monotonic(),
+            started_at=self._clock.monotonic(),
             seq=runtime.spawn_seq,
             identity=identity,
             rewritten=argv != plain,
@@ -730,7 +727,7 @@ class Supervisor(LeftBehindMixin, StoppingMixin):
                     generation.rewritten
                     and not self._rewrite_retired
                     and returncode > 0
-                    and monotonic() - generation.started_at <= REWRITE_STARTUP_WINDOW_S
+                    and self._clock.monotonic() - generation.started_at <= REWRITE_STARTUP_WINDOW_S
                 ):
                     self._rewrite_retired = True
                     _log.warning(
