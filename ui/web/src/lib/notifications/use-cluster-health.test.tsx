@@ -12,7 +12,7 @@ import { useStore } from "../state/store";
 import { AGENTS_QUERY_KEY } from "../agents/use-agents";
 import type { ClusterStatus } from "../contracts/types";
 import { apiWrapper } from "../transport/tests/api/api-provider";
-import { startGateway, type TestGateway } from "../transport/tests/api/api-provider";
+import { realNetwork, startGateway, type TestGateway } from "../transport/tests/api/api-provider";
 import { gatewayRig } from "../transport/tests/api/api-provider";
 import {
   CLUSTER_STATUS_QUERY_KEY,
@@ -52,7 +52,7 @@ function freshClient(): QueryClient {
 
 beforeEach(async () => {
   paused = false;
-  gateway = await startGateway((request) => request.path === "/api/cluster/status"
+  gateway = await startGateway(realNetwork.createServer, (request) => request.path === "/api/cluster/status"
     ? { kind: "json", body: clusterStatus(paused) }
     : { kind: "text", status: 500, body: "the heavier status endpoint must not be read" });
   act(() => useStore.setState({ reconnectNonce: 0 }));

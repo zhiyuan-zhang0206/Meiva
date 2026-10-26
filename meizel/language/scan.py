@@ -42,6 +42,7 @@ from meizel.language.bindings import (
 from meizel.language.input_mutations import InputListAppend, input_list_appends
 from meizel.language.mounts import mount_facts
 from meizel.language.restricted import EXTERNAL_FORMS, const_str
+from meizel.language.typescript import typescript_files
 from meizel.lint_common import is_test_path
 
 __all__ = [
@@ -54,6 +55,8 @@ __all__ = [
     "scan_file",
     "scan_source",
     "scan_tree",
+    "scan_typescript_files",
+    "typescript_files",
 ]
 
 # The calls that start a process, with where the argument list is: the index of the list argument,
@@ -169,6 +172,7 @@ class FileScan:
     type_casts: list[TypeCastSite] = field(default_factory=list[TypeCastSite])
     any_collaborators: list[AnyCollaboratorSite] = field(default_factory=list[AnyCollaboratorSite])
     type_checking: tuple[int, ...] = ()
+    symbols: tuple[tuple[str, int, int], ...] = ()
 
 
 class Scanner(AmbientAccess):
@@ -577,16 +581,17 @@ class Scanner(AmbientAccess):
 
 def scan_source(universe: Universe, path: str, source: bytes, sources: Sources) -> FileScan:
     """Scan `source` as if it were the file at `path` (a version that is not in the working tree)."""
-    if path.endswith((".ts", ".tsx")):
-        ts = typescript.scan_typescript(path, source.decode("utf-8", errors="replace"), universe)
-        return FileScan(
-            path,
-            facts=list(ts.facts),
-            patches=list(ts.patches),
-            problems=list(ts.problems),
-            imported=set(ts.external),
-            purity=list(ts.purity),
-        )
+    if path.endswith((".ts", ".tsx", ".mts", ".cts")):
+        try:
+            text = source.decode("utf-8")
+        except UnicodeDecodeError as error:
+            raise MeizelError(
+                f"{path}: cannot decode TypeScript source as UTF-8: {error}"
+            ) from error
+        ts = typescript.scan_batch(universe, {path: text}, allowances.load(universe.root), sources)[
+            path
+        ]
+        return _typescript_scan(ts)
     try:
         tree = ast.parse(source, filename=path)
     except SyntaxError as error:
@@ -596,18 +601,49 @@ def scan_source(universe: Universe, path: str, source: bytes, sources: Sources) 
     return scan_tree(universe, path, tree, sources, walrus=b":=" in source)
 
 
+def _typescript_scan(ts: typescript.TsScan) -> FileScan:
+    return FileScan(
+        ts.path,
+        facts=list(ts.facts),
+        patches=list(ts.patches),
+        problems=list(ts.problems),
+        imported=set(ts.external),
+        purity=list(ts.purity),
+        ambient=list(ts.ambient),
+        type_casts=list(ts.type_casts),
+        any_collaborators=list(ts.any_collaborators),
+        enum_subsets=list(ts.enum_subsets),
+        symbols=ts.symbols,
+        restricted=list(ts.restricted),
+    )
+
+
 def scan_tree(
     universe: Universe, path: str, tree: ast.Module, sources: Sources, *, walrus: bool
 ) -> FileScan:
     return Scanner(universe, path, tree, walrus=walrus, sources=sources).run()
 
 
-def scan_file(universe: Universe, path: str, sources: Sources) -> FileScan:
+def _read_source(universe: Universe, path: str) -> bytes:
     try:
-        source = (universe.root / path).read_bytes()
+        return (universe.root / path).read_bytes()
     except (OSError, ValueError) as error:
         raise MeizelError(f"{path}: cannot read: {error}") from error
-    return scan_source(universe, path, source, sources)
+
+
+def scan_file(universe: Universe, path: str, sources: Sources) -> FileScan:
+    return scan_source(universe, path, _read_source(universe, path), sources)
+
+
+def scan_typescript_files(
+    universe: Universe, paths: list[str], sources: Sources, policy: allowances.Policy
+) -> dict[str, FileScan]:
+    try:
+        contents = {path: _read_source(universe, path).decode("utf-8") for path in paths}
+    except UnicodeDecodeError as error:
+        raise MeizelError(f"cannot decode TypeScript source as UTF-8: {error}") from error
+    scans = typescript.scan_batch(universe, contents, policy, sources)
+    return {path: _typescript_scan(scan) for path, scan in scans.items()}
 
 
 # meiva:note

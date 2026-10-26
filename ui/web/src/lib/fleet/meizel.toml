@@ -7,3 +7,6 @@ exports = ["use-fleet-graph.ts", "use-force-layout.ts", "use-svg-zoom-pan.ts"]
 
 [purity]
 "memory-graph-colors.ts" = "strict"
+
+[debt.type-cast]
+"use-fleet-graph.ts#cast normalizeEventType" = 1

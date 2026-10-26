@@ -17,7 +17,7 @@ import { QueryClient } from "@tanstack/react-query";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { NoticeItem, NoticesFeed } from "../contracts/types";
-import { startGateway, type TestGateway } from "../transport/tests/api/api-provider";
+import { realNetwork, startGateway, type TestGateway } from "../transport/tests/api/api-provider";
 import { gatewayRig } from "../transport/tests/api/api-provider";
 import { eventStreamHarness, type EventStreamHarness } from "../transport/tests/stream/event-stream-harness";
 import {
@@ -71,7 +71,7 @@ beforeEach(async () => {
   dropTombstonesResetForTest();
   desk = { open: [], awaiting: [], resolved: [], nextCursor: null, older: [] };
   failureStatus = null;
-  gateway = await startGateway((request) => {
+  gateway = await startGateway(realNetwork.createServer, (request) => {
     const url = new URL(request.path, "http://gateway");
     if (url.pathname !== "/api/notices") return { kind: "text", status: 404, body: "unexpected route" };
     if (failureStatus !== null) return { kind: "text", status: failureStatus, body: "unavailable" };

@@ -113,10 +113,11 @@ export class ProfileSseTransport {
   ) {
     this.tabId = env.newTabId();
     this.timers = env.timers ?? defaultTimers;
-    this.channel = config.solo ? null : (env.openChannel?.(NAME) ?? null);
-    if (this.channel) {
-      this.channel.onmessage = (event: MessageEvent<unknown>) => this.receive(event.data);
+    const channel = config.solo ? null : (env.openChannel?.(NAME) ?? null);
+    if (channel) {
+      channel.onmessage = (event: MessageEvent<unknown>) => this.receive(event.data);
     }
+    this.channel = channel;
     env.page.addEventListener("visibilitychange", this.syncParticipation);
   }
 
@@ -197,14 +198,11 @@ export class ProfileSseTransport {
     this.pendingLock = controller;
     const locks = this.env.locks;
     if (locks === null) throw new Error("shared SSE lock manager missing");
-    void locks.request(NAME, { mode: "exclusive", signal: controller.signal }, async () => {
-      if (!this.participating) return;
+    void locks.request(NAME, { mode: "exclusive", signal: controller.signal }, () => {
+      if (!this.participating) return Promise.resolve();
       this.leader = true;
       this.currentLeader = this.tabId;
-      try {
-        this.startLeader();
-        await new Promise<void>((resolve) => { this.releaseLock = resolve; });
-      } finally {
+      const cleanup = (): void => {
         this.releaseLock = null;
         try {
           this.stopLeader();
@@ -212,7 +210,14 @@ export class ProfileSseTransport {
           this.leader = false;
           this.currentLeader = null;
         }
-      }
+      };
+      return new Promise<void>((resolve) => {
+        this.startLeader();
+        this.releaseLock = resolve;
+      }).then(cleanup, (err: unknown) => {
+        cleanup();
+        throw err;
+      });
     }).catch((error: unknown) => {
       if (error instanceof DOMException && error.name === "AbortError") return;
       this.stopParticipation();

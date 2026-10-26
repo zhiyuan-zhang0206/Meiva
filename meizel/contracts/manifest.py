@@ -19,7 +19,7 @@ from meizel.contracts.debt import (
 )
 from meizel.graph.graphs import cycle_through, strongly_connected, unneeded_back_edges
 from meizel.graph.model import AmbientKind, Code, Diagnostic
-from meizel.graph.universe import MANIFEST, Universe, is_private_module
+from meizel.graph.universe import MANIFEST, SOURCE_EXTENSIONS, Universe, is_private_module
 from meizel.roles import check_table
 
 __all__ = [
@@ -273,7 +273,6 @@ class _Reader:
         self.check_cycles()
 
     def read_roles(self, table: object) -> None:
-        """`[roles]`, root only: every top-level directory with Python has exactly one role."""
         line = self.manifest.line_of("roles")
         if self.directory:
             self.report(line, Code.MANIFEST_ROLES, "[roles] belongs in the root manifest only")
@@ -290,13 +289,17 @@ class _Reader:
                     Code.MANIFEST_ROLES,
                     f"role entry {name!r} is not a tracked top-level directory",
                 )
-        python_tops = {path.split("/", 1)[0] for path in self.universe.python_files if "/" in path}
-        for name in sorted(python_tops - listed):
+        source_tops = {
+            path.split("/", 1)[0]
+            for path in (*self.universe.python_files, *self.universe.typescript_files)
+            if "/" in path
+        }
+        for name in sorted(source_tops - listed):
             if not name.startswith("."):
                 self.report(
                     line,
                     Code.MANIFEST_ROLES,
-                    f"top-level directory {name!r} holds Python but has no role; "
+                    f"top-level directory {name!r} holds Python or TypeScript but has no role; "
                     "declare it under [roles]",
                 )
 
@@ -312,9 +315,11 @@ class _Reader:
         result: dict[str, str] = {}
         for key, reason in table.items():
             line = self.manifest.line_of(key)
-            if not key.endswith(".py"):
+            if not key.endswith(SOURCE_EXTENSIONS):
                 self.report(
-                    line, Code.MANIFEST_CHILD, f"[external] key {key!r} must be a Python file"
+                    line,
+                    Code.MANIFEST_CHILD,
+                    f"[external] key {key!r} must be a Python or TypeScript file",
                 )
             elif not self.child(key, "[external]", line):
                 self.dangling.append(("external", key, None))
@@ -330,13 +335,13 @@ class _Reader:
         return result
 
     # meiva:note
-    # A Python file directly in this directory; deeper ones belong to their own manifest.
-    def python_child(self, section: str, key: str, line: int) -> bool:
-        if not key.endswith(".py") or "/" in key:
+    # A Python or TypeScript file directly in this directory; deeper ones belong to their own manifest.
+    def source_child(self, section: str, key: str, line: int) -> bool:
+        if not key.endswith(SOURCE_EXTENSIONS) or "/" in key:
             self.report(
                 line,
                 Code.MANIFEST_CHILD,
-                f"[{section}] key {key!r} must be a Python file directly in this directory; "
+                f"[{section}] key {key!r} must be a Python or TypeScript file directly in this directory; "
                 "declare a deeper one in its own directory's manifest",
             )
             return False
@@ -374,7 +379,7 @@ class _Reader:
         result: dict[str, tuple[AmbientKind, ...]] = {}
         for key, value in table.items():
             line = self.manifest.line_of(key)
-            if self.python_child("state", key, line):
+            if self.source_child("state", key, line):
                 kinds = self.kinds(value, f"[state] {key!r}", line, HELD_KINDS)
                 if kinds:
                     result[key] = kinds
@@ -391,7 +396,7 @@ class _Reader:
         result: dict[str, Root] = {}
         for key, value in table.items():
             line = self.manifest.line_of(key)
-            if self.python_child("roots", key, line):
+            if self.source_child("roots", key, line):
                 root = self.read_root(key, value, line)
                 if root is not None:
                     result[key] = root
@@ -496,8 +501,12 @@ class _Reader:
         return tuple(kept)
 
     def read_load(self, source: str, targets: tuple[str, ...], line: int) -> tuple[str, ...]:
-        if not source.endswith(".py"):
-            self.report(line, Code.MANIFEST_CHILD, f"[loads] key {source!r} must be a Python file")
+        if not source.endswith(SOURCE_EXTENSIONS):
+            self.report(
+                line,
+                Code.MANIFEST_CHILD,
+                f"[loads] key {source!r} must be a Python or TypeScript file",
+            )
         kept: list[str] = []
         for target in targets:
             if target in self.universe.dirs:
@@ -572,7 +581,21 @@ def _is_test_path(path: str) -> bool:
         or name == "conftest.py"
         or name.startswith("test_")
         or name.endswith(
-            ("_test.py", ".test.ts", ".test.tsx", ".spec.ts", ".spec.tsx", "-mock.ts", "-mock.tsx")
+            (
+                "_test.py",
+                ".test.ts",
+                ".test.tsx",
+                ".spec.ts",
+                ".spec.tsx",
+                "-mock.ts",
+                "-mock.tsx",
+                ".test.mts",
+                ".test.cts",
+                ".spec.mts",
+                ".spec.cts",
+                "-mock.mts",
+                "-mock.cts",
+            )
         )
     )
 

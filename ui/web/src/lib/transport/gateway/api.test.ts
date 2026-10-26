@@ -43,7 +43,7 @@ beforeEach(async () => {
     request.method === "GET" && /^\/api\/agents(?:\?|$)/.test(request.path)
       ? { kind: "json", body: { agents: [], next_cursor: null } }
       : OK_JSON;
-  gateway = await startGateway((request) => answer(request));
+  gateway = await startGateway(realNetwork.createServer, (request) => answer(request));
   rig = rigWith();
 });
 

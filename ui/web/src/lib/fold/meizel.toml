@@ -20,3 +20,6 @@ exports = ["agents.ts", "notices.ts", "owner.ts", "timeline.ts"]
 "tasks.ts" = "strict"
 "timeline.ts" = "strict"
 "types.ts" = "strict"
+
+[debt.type-cast]
+"timeline.ts#cast foldEvent" = 1

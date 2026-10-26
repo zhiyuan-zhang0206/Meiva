@@ -1,4 +1,4 @@
-import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
+import type { createServer, IncomingMessage, ServerResponse } from "node:http";
 import type { AddressInfo, Socket } from "node:net";
 
 export interface GatewayRequest {
@@ -86,12 +86,13 @@ function send(response: ServerResponse, reply: GatewayReply, cors: Record<string
 // dropped connection. Browser-origin requests (XMLHttpRequest from the test DOM)
 // get matching CORS headers and preflight answers.
 export async function startGateway(
+  serverFactory: typeof createServer,
   answer: (request: GatewayRequest) => GatewayReply | Promise<GatewayReply>,
 ): Promise<TestGateway> {
   const requests: GatewayRequest[] = [];
   const closedRequests: GatewayRequest[] = [];
   const sockets = new Set<Socket>();
-  const server = createServer((request, response) => {
+  const server = serverFactory((request, response) => {
     const cors = corsHeaders(request);
     if (request.method === "OPTIONS") {
       response.writeHead(204, cors);

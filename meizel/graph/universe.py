@@ -14,6 +14,7 @@ from meizel.graph.model import MeizelError
 
 __all__ = [
     "MANIFEST",
+    "SOURCE_EXTENSIONS",
     "EditPlan",
     "GitRepo",
     "Module",
@@ -22,9 +23,11 @@ __all__ = [
     "load_universe",
     "parent_of",
     "toplevel",
+    "tracked_files",
 ]
 
 MANIFEST = "meizel.toml"
+SOURCE_EXTENSIONS = (".py", ".ts", ".tsx", ".mts", ".cts")
 _is_file = Path.is_file
 _mkdir = Path.mkdir
 _read_file_bytes = Path.read_bytes
@@ -238,7 +241,9 @@ def toplevel(cwd: Path) -> Path:
 class Universe:
     """Tracked regular files, every directory above them, and module resolution."""
 
-    DOOR_FILES: frozenset[str] = frozenset({"__init__.py", "index.ts", "index.tsx"})
+    DOOR_FILES: frozenset[str] = frozenset(
+        {"__init__.py", "index.ts", "index.tsx", "index.mts", "index.cts"}
+    )
 
     def __init__(self, root: Path, tracked: list[str]) -> None:
         self.root = root
@@ -255,7 +260,12 @@ class Universe:
         )
         self.python_files: tuple[str, ...] = tuple(sorted(p for p in tracked if p.endswith(".py")))
         self.typescript_files: tuple[str, ...] = tuple(
-            sorted(p for p in tracked if p.endswith((".ts", ".tsx")) and not p.endswith(".d.ts"))
+            sorted(
+                p
+                for p in tracked
+                if p.endswith((".ts", ".tsx", ".mts", ".cts"))
+                and not p.endswith((".d.ts", ".d.mts", ".d.cts"))
+            )
         )
         self.roots: frozenset[str] = frozenset(
             name.removesuffix(".py") for name in self.children.get("", ())
@@ -320,13 +330,19 @@ def _is_regular(root: Path, rel: str) -> bool:
     return full.is_file() and not full.is_symlink()
 
 
-def load_universe(root: Path) -> Universe:
-    result = subprocess.run(  # noqa: S603 - fixed argv
-        ["git", "-C", str(root), "ls-files", "-z"],
+# meiva:note
+# Fixed Git argv and NUL framing preserve tracked names containing whitespace or newlines.
+def tracked_files(repo_root: Path) -> list[str]:
+    result = subprocess.run(  # noqa: S603
+        ["git", "-C", str(repo_root), "ls-files", "-z"],
         capture_output=True,
         check=False,
+        timeout=30,
     )
     if result.returncode != 0:
         raise MeizelError(f"git ls-files failed: {result.stderr.decode(errors='replace').strip()}")
-    listed = [p.decode() for p in result.stdout.split(b"\0") if p]
-    return Universe(root, sorted({p for p in listed if _is_regular(root, p)}))
+    return [path.decode() for path in result.stdout.split(b"\0") if path]
+
+
+def load_universe(root: Path) -> Universe:
+    return Universe(root, sorted({path for path in tracked_files(root) if _is_regular(root, path)}))

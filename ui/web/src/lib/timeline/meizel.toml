@@ -21,3 +21,13 @@ exports = ["timeline-colors.ts", "timeline-store.ts", "timeline-width.ts", "time
 "timeline-store.ts" = "strict"
 "timeline-width.ts" = "strict"
 "timeline.ts" = "strict"
+
+[debt.ambient-read]
+"use-throttled-streaming.ts#clock Date.now" = 3
+"use-timeline.ts#clock Date.now" = 5
+
+[debt.type-cast]
+"timeline-colors.ts#cast isColorFamily" = 1
+"timeline-colors.ts#cast resolveTimelineColors" = 2
+"timeline-store-events.ts#cast applySseEvent" = 1
+"use-timeline.ts#cast useTimeline.<lambda>" = 1

@@ -76,6 +76,7 @@ def _run_check(
         if target and target not in known.files and target not in known.dirs:
             raise MeizelError(f"{raw}: not a tracked file or directory")
     diagnostics = _select(analysis, targets)
+    print(analysis.coverage_line())
     if diagnostics:
         _print_verdict(diagnostics, limit)
         return 1
@@ -102,7 +103,9 @@ def _build_parser() -> argparse.ArgumentParser:
     show = commands.add_parser("explain", help="show a node's view of the graph")
     show.add_argument("path")
     show.add_argument(
-        "--typescript-index", type=Path, help="explicit source-evidence index; never starts Node"
+        "--typescript-index",
+        type=Path,
+        help="explicit additional holder-evidence index; ordinary analysis still uses the compiler",
     )
     sync = commands.add_parser("sync", help="maintain manifests")
     sync.add_argument("--prune", action="store_true", help="remove stale declared edges")

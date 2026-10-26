@@ -19,7 +19,7 @@ import {
 import type { Alert, AlertsResponse } from "../contracts/types";
 import type { Api } from "../transport/api";
 import { StreamHub } from "../transport/stream/stream-hub";
-import { startGateway, type TestGateway } from "../transport/tests/api/api-provider";
+import { realNetwork, startGateway, type TestGateway } from "../transport/tests/api/api-provider";
 import { gatewayRig, type HttpRig } from "../transport/tests/api/api-provider";
 import { FakeNetwork, FakeTab, READY, type FakeEventSource } from "../transport/stream/tests/fake-stream";
 import { ScriptedAuth } from "../transport/stream/tests/scripted-auth";
@@ -145,7 +145,7 @@ beforeEach(async () => {
   queryClients = [];
   auth = new ScriptedAuth();
   snapshot = resp([], 0);
-  gateway = await startGateway((request) => request.path.split("?", 1)[0] === "/api/alerts"
+  gateway = await startGateway(realNetwork.createServer, (request) => request.path.split("?", 1)[0] === "/api/alerts"
     ? { kind: "json", body: snapshot }
     : { kind: "text", status: 404, body: "unexpected route" });
   rig = gatewayRig(gateway);

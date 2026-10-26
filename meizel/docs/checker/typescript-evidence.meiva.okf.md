@@ -8,8 +8,9 @@ tags: [tool, locality, testing]
 # TypeScript holder source evidence
 
 `explain` can show non-gating source observations from an explicitly supplied
-TypeScript compiler index. Ordinary `check`, `analyze` and `explain` never start
-Node or install dependencies. Absence of observations is not evidence of purity,
+TypeScript compiler index. Ordinary `check`, `analyze` and `explain` use the
+compiler for selected TypeScript sources; they never generate this additional
+holder index or install dependencies. Absence of observations is not evidence of purity,
 immutability, effect freedom or static-test admission.
 
 Generate one batch with the locked compiler already installed under `ui/web`:
@@ -59,7 +60,8 @@ repository root, schema, source/dependency hashes and locked compiler identity.
 It delegates actual UTF-8 disk decoding to the existing `read_utf8_text` owner;
 this is I/O, not a claim of semantic purity. Invalid or stale receipts fail with
 `MeizelError`, rather than becoming empty successful evidence. Valid parser
-failure receipts are displayed as unavailable. Statuses distinguish not-requested,
+failure receipts carry unavailable status; a syntax failure in ordinary analysis
+fails the command before the additional receipt is rendered. Statuses distinguish not-requested,
 not-applicable, unavailable and observed; observed records may still be unknown.
 
 The CLI passes a required typed report value to the existing I/O-free renderer.

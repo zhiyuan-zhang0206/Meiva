@@ -1,6 +1,9 @@
+import { createServer } from "node:http";
+
 export const REAL_NETWORK_KEY = Symbol.for("meiva.test.realNetwork");
 
 interface RealNetwork {
+  readonly createServer: typeof createServer;
   readonly fetch: typeof fetch;
   readonly XMLHttpRequest: typeof XMLHttpRequest;
 }
@@ -8,11 +11,11 @@ interface RealNetwork {
 function captured(): RealNetwork {
   const value: unknown = Reflect.get(globalThis, REAL_NETWORK_KEY);
   if (typeof value === "object" && value !== null) {
-    return value as RealNetwork;
+    return Object.freeze({ ...(value as RealNetwork), createServer });
   }
   const fetchFn = Reflect.get(globalThis, "fetch");
   const xhr = Reflect.get(globalThis, "XMLHttpRequest");
-  return Object.freeze({ fetch: fetchFn, XMLHttpRequest: xhr });
+  return Object.freeze({ fetch: fetchFn, XMLHttpRequest: xhr, createServer });
 }
 
 // meiva:note

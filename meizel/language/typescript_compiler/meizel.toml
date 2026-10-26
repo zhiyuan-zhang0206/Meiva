@@ -1,0 +1,12 @@
+exports = ["__init__.py"]
+
+[purity]
+"." = "strict"
+"config.py" = "strict"
+"decode.py" = "strict"
+"model.py" = "strict"
+
+[uses]
+"__init__.py" = ["config.py", "model.py", "runtime.py"]
+"decode.py" = ["model.py"]
+"runtime.py" = ["config.py", "decode.py", "model.py"]

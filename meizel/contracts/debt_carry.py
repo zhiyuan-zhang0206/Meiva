@@ -166,13 +166,15 @@ def _check_move(root: Path, base: str, universe: Universe, move: SymbolMove) -> 
         )
     repo = GitRepo(root)
     before, after = repo.show_bytes(base, move.old), universe.load_bytes(move.new)
-    if repo.has_file(move.old) and defines(move.old, repo.load_bytes(move.old), move.name):
+    if repo.has_file(move.old) and defines(
+        universe, move.old, repo.load_bytes(move.old), move.name
+    ):
         raise MeizelError(f"{move.old} still defines {move.name}: that is a copy, not a move")
     for path, source, where in (
         (move.old, before, f"{move.old} at {base}"),
         (move.new, after, move.new),
     ):
-        if not defines(path, source, move.name):
+        if not defines(universe, path, source, move.name):
             raise MeizelError(f"{where} defines no top-level function or class {move.name}")
     return before, after
 
