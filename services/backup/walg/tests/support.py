@@ -28,7 +28,7 @@ import pytest
 
 from base.clock import SYSTEM_TIMERS
 from base.cluster import postgres as native_postgres
-from base.cluster.dataplane import pg_admin, walg_binary
+from base.cluster.dataplane import pg_admin
 from base.cluster.dataplane.pg_tools import pg_shm_args, pg_start_env, pg_tool, pg_tz_args
 from base.host.env import port_lease
 from base.paths import meiva_home
@@ -134,8 +134,6 @@ def make_sandbox(
     binary.chmod(0o755)
 
     point_home(monkeypatch, home)
-    # The fake is not the pinned build; everything else (path, argv, config) is real.
-    monkeypatch.setattr(walg_binary, "installed_problem", lambda: None)
     sandbox = Sandbox(home, store_dir, config_file, key_file, enabled)
     sandbox.write_config(valid_config(key_file))
     if enabled:

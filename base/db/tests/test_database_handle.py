@@ -31,7 +31,7 @@ class _Dialed:
         self.kwargs: list[dict[str, Any]] = []
         self._owner = threading.current_thread()
 
-    def connect(self, url: str, **kwargs: Any) -> object:
+    def connect(self, url: str, **kwargs: Any) -> Any:
         if threading.current_thread() is self._owner:
             self.urls.append(url)
             self.kwargs.append(kwargs)
@@ -59,16 +59,14 @@ class _FakeConn:
 
 
 @pytest.fixture
-def dialed(monkeypatch: pytest.MonkeyPatch) -> _Dialed:
-    rec = _Dialed()
-    monkeypatch.setattr(connections.psycopg, "connect", rec.connect)
-    return rec
+def dialed() -> _Dialed:
+    return _Dialed()
 
 
 def test_a_handle_dials_its_own_config_not_the_settings(
     database_gate: ProcessDbGate, dialed: _Dialed
 ) -> None:
-    Database(_config(), gate=database_gate).connect()
+    Database(_config(), gate=database_gate, dial=dialed.connect).connect()
     assert dialed.urls == [_URL]
     assert settings.data_plane.db_url != _URL
 
@@ -76,7 +74,7 @@ def test_a_handle_dials_its_own_config_not_the_settings(
 def test_a_handle_applies_its_sslmode_when_the_url_is_silent(
     database_gate: ProcessDbGate, dialed: _Dialed
 ) -> None:
-    Database(_config(db_sslmode="require"), gate=database_gate).connect()
+    Database(_config(db_sslmode="require"), gate=database_gate, dial=dialed.connect).connect()
     assert dialed.kwargs[0]["sslmode"] == "require"
 
 
@@ -86,9 +84,9 @@ def test_the_module_level_connect_builds_the_live_settings_each_call(
     old_url = get_field("db_url")
     try:
         set_field("db_url", "postgresql://u:p@first.example:1/x")
-        connect(gate=database_gate)
+        connect(gate=database_gate, dial=dialed.connect)
         set_field("db_url", "postgresql://u:p@second.example:2/y")
-        connect(gate=database_gate)
+        connect(gate=database_gate, dial=dialed.connect)
     finally:
         set_field("db_url", old_url)
     assert dialed.urls == [
@@ -100,7 +98,7 @@ def test_the_module_level_connect_builds_the_live_settings_each_call(
 def test_a_write_transaction_declares_itself_writable(
     database_gate: ProcessDbGate, dialed: _Dialed
 ) -> None:
-    with Database(_config(), gate=database_gate).write_transaction() as conn:
+    with Database(_config(), gate=database_gate, dial=dialed.connect).write_transaction() as conn:
         assert isinstance(conn, _FakeConn)
     assert dialed.urls == [_URL]
 
@@ -142,7 +140,9 @@ def _never_asked(_config: DbConfig) -> connections.DirectResolution:
 def test_a_required_direct_dial_refuses_a_url_it_cannot_resolve(
     database_gate: ProcessDbGate, dialed: _Dialed
 ) -> None:
-    handle = Database(_runner_config(), gate=database_gate, direct_url=_unresolvable)
+    handle = Database(
+        _runner_config(), gate=database_gate, direct_url=_unresolvable, dial=dialed.connect
+    )
     with pytest.raises(connections.DirectUnavailableError) as caught:
         handle.connect(direct=True)
     assert "10.20.30.40:6433" in str(caught.value)
@@ -159,7 +159,9 @@ def test_a_refused_direct_pool_never_opens(database_gate: ProcessDbGate) -> None
 def test_an_ordinary_dial_of_the_same_url_never_asks_for_a_direct_one(
     database_gate: ProcessDbGate, dialed: _Dialed
 ) -> None:
-    Database(_runner_config(), gate=database_gate, direct_url=_never_asked).connect()
+    Database(
+        _runner_config(), gate=database_gate, direct_url=_never_asked, dial=dialed.connect
+    ).connect()
     assert dialed.urls == [_RUNNER_URL]
 
 
@@ -170,6 +172,7 @@ def test_a_resolved_direct_dial_dials_what_the_resolver_returned(
         _runner_config(),
         gate=database_gate,
         direct_url=lambda config: connections.DirectResolution(url=config.db_url, is_direct=True),
+        dial=dialed.connect,
     )
     handle.connect(direct=True)
     assert dialed.urls == [_RUNNER_URL]
@@ -179,7 +182,7 @@ def test_a_handle_without_a_resolver_refuses_a_direct_dial(
     database_gate: ProcessDbGate, dialed: _Dialed
 ) -> None:
     with pytest.raises(RuntimeError, match="direct_url resolver"):
-        Database(_runner_config(), gate=database_gate).connect(direct=True)
+        Database(_runner_config(), gate=database_gate, dial=dialed.connect).connect(direct=True)
     assert dialed.urls == []
 
 
