@@ -11,7 +11,7 @@ import { SETTINGS_QUERY_KEY } from "../state/use-user-settings";
 import {
   cacheOnlyApi,
   gatewayRig,
-  startGateway,
+  realNetwork, startGateway,
   type TestGateway,
 } from "../transport/tests/api/api-provider";
 import { ApiProvider } from "../transport/transport-context";
@@ -75,7 +75,7 @@ describe("useContentToggle", () => {
   });
 
   it('setDetailsMode writes display.expand_runs_mode="last"', async () => {
-    const gateway = await startGateway((req) => {
+    const gateway = await startGateway(realNetwork.createServer, (req) => {
       if (req.method === "GET" && req.path === "/api/settings") {
         return { kind: "json", body: { settings: [] } };
       }

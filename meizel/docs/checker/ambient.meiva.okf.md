@@ -20,6 +20,12 @@ the world is read once, in a composition root, and passed down. Meizel makes tha
 recording each point where a file reaches the world and asking its directory manifest whether the
 file is allowed to.
 
+The rule governs the `application`, `templates`, `tooling` and `frontend` roles
+for both Python and TypeScript. Both languages use the same `[state]` and `[roots]`
+manifest entries. TypeScript acquisition uses compiler bindings for imports and
+shadowing; its built-in spellings include `process.env`, `process.cwd()`,
+`Date.now()`, zero-argument `new Date()`, `Math.random()` and Node/DOM crypto calls.
+
 ## Kinds
 
 A closed vocabulary (`AmbientKind` in `meizel/graph/model.py`); an unknown kind in a manifest is

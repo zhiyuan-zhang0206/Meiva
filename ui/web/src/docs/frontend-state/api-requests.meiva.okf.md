@@ -33,7 +33,13 @@ clock read around each request, the upload channel, key entropy),
 wall clock, a diagnostics sink) and `SessionPort`. `system-transport.ts` is the
 only module that builds them from real globals. `createHttp(transport, base,
 telemetry)` gives the `Http` client every endpoint is written against;
-`createApi(http)` gives the `Api` object. `api.ts` composes the app's one client;
+`createApi(http)` gives the `Api` object. The HTTP owner also owns response-body
+consumption: `accepted` preserves raw HTTP refusal text for no-body endpoints,
+`rawJson` applies that refusal contract before JSON decoding, and `decoded`
+passes status plus decoded unknown payload to a pure receipt validator. Endpoints
+keep request-planning errors inside their existing Promise contract. Uploads
+subscribe to the upload event owner's progress interface instead of replacing its
+handler property. `api.ts` composes the app's one client;
 `components/shell/providers.tsx` hands it to `ApiProvider` and a `StreamHub` (which
 owns the shared-stream objects of the page) to `StreamHubProvider`.
 
@@ -48,7 +54,10 @@ action. Shells run against a real HTTP server on port 0
 (`gateway/tests/gateway-server.ts`, which can also answer with no reply, headers
 without a body, or a dropped connection) through the platform's own `fetch`,
 which the test setup file captures before it installs its guards
-(`gateway/tests/real-network.ts`). Only what a network cannot produce is a double
+(`gateway/tests/real-network.ts`). This boundary also owns Node's `createServer`;
+callers pass `realNetwork.createServer` explicitly to `startGateway`, keeping
+resource acquisition visible without making the server fixture a global I/O owner.
+Only what a network cannot produce is a double
 in `tests/`: upload progress events (`gateway/tests/fake-upload.ts`) and the EventSource state
 machine, tab channels and Web Locks (`stream/tests/fake-stream.ts`). Hook tests use
 `gatewayRig` and `apiWrapper` through the public test door

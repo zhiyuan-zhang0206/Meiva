@@ -11,7 +11,7 @@ from __future__ import annotations
 import json
 from dataclasses import asdict, dataclass
 
-from meizel.contracts.analysis import scan_all
+from meizel.contracts.analysis import load_policy, scan_all
 from meizel.contracts.debt import PATCH_CODES
 from meizel.graph.model import Code, MeizelError, Sources
 from meizel.graph.universe import Universe
@@ -61,7 +61,10 @@ def sites(
     scopes = [p.rstrip("/") for p in paths]
     files = [p for p in (*universe.python_files, *universe.typescript_files) if _within(p, scopes)]
     found: list[Site] = []
-    for path, scan in sorted(scan_all(universe, Sources(), jobs, files).items()):
+    policy, problems = load_policy(universe)
+    if problems:
+        raise MeizelError(problems[0].render())
+    for path, scan in sorted(scan_all(universe, Sources(), jobs, files, policy=policy).items()):
         found.extend(
             Site(path, patch.line, wanted.value, patch.form, patch.target)
             for patch in scan.patches

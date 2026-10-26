@@ -28,7 +28,7 @@ async function settle<T>(delivery: Promise<T>): Promise<void> {
 beforeEach(async () => {
   vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
   answer = () => RECEIPT;
-  gateway = await startGateway((request) => answer(request, gateway.requests.length - 1));
+  gateway = await startGateway(realNetwork.createServer, (request) => answer(request, gateway.requests.length - 1));
   rig = httpRig({
     base: gateway.origin,
     fetch: realNetwork.fetch,

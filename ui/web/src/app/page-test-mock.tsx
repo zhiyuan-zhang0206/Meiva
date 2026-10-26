@@ -5,7 +5,7 @@ import { vi } from "vitest";
 
 import type { AgentRow, ReplySuggestionResponse } from "@/lib/contracts/types";
 import type { ConnectionState } from "@/lib/timeline/use-timeline";
-import { startGateway, type TestGateway } from "@/lib/transport/tests/api/api-provider";
+import { realNetwork, startGateway, type TestGateway } from "@/lib/transport/tests/api/api-provider";
 import { gatewayRig, type HttpRig } from "@/lib/transport/tests/api/api-provider";
 import { ApiProvider } from "@/lib/transport/transport-context";
 
@@ -146,7 +146,7 @@ export function wrap(ui: React.ReactElement) {
 
 export async function resetHomePageTestState() {
   replySuggestions = { suggestions: [], reason: null };
-  homePageGateway = await startGateway((request) => {
+  homePageGateway = await startGateway(realNetwork.createServer, (request) => {
     if (/^\/api\/agents\/\d+\/reply-suggestion$/.test(request.path)) return { kind: "json", body: replySuggestions };
     if (/^\/api\/agents\/\d+\/pending$/.test(request.path)) return { kind: "json", body: [] };
     if (request.path === "/api/notices") return { kind: "json", body: { open: [], awaiting: [], resolved_page: [], next_cursor: null } };

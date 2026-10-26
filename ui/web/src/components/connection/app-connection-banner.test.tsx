@@ -11,7 +11,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { ConnectionState } from "@/lib/contracts/types";
 import { useStore } from "@/lib/state/store";
-import { startGateway, type TestGateway } from "@/lib/transport/tests/api/api-provider";
+import { realNetwork, startGateway, type TestGateway } from "@/lib/transport/tests/api/api-provider";
 import { gatewayRig, type HttpRig } from "@/lib/transport/tests/api/api-provider";
 import { ApiProvider } from "@/lib/transport/transport-context";
 
@@ -50,7 +50,7 @@ function render(ui: ReactElement) {
 beforeEach(async () => {
   states.length = 0;
   emit = null;
-  gateway = await startGateway(() => ({ kind: "hang" }));
+  gateway = await startGateway(realNetwork.createServer, () => ({ kind: "hang" }));
   rig = gatewayRig(gateway);
   useStore.setState({
     connState: "open",

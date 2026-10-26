@@ -1,5 +1,3 @@
-"""Shared scan scope, file traversal and text decoding for standalone repository lints."""
-
 from __future__ import annotations
 
 import os
@@ -8,6 +6,8 @@ from collections.abc import Iterable
 from pathlib import Path
 
 from meizel import is_repo_test_file, is_test_path, split_only
+from meizel.graph.model import MeizelError
+from meizel.graph.universe import tracked_files
 from meizel.roles import packages, pytest_test_hosts
 
 __all__ = [
@@ -19,6 +19,7 @@ __all__ = [
     "read_utf8_text",
     "resolve_targets",
     "restrict",
+    "run_node_analyzer",
     "scan_roots",
     "split_only",
     "tracked_files",
@@ -84,19 +85,6 @@ def restrict(paths: Iterable[Path], scope: frozenset[str] | None, repo_root: Pat
     return [path for path in paths if _rel_or_abs(path, repo_root) in scope]
 
 
-def tracked_files(repo_root: Path) -> list[str]:
-    """Return git-tracked paths in git's order, relative to the repo root."""
-    # Fixed command line; the root comes from the calling script's own __file__.
-    out = subprocess.run(  # noqa: S603 - fixed argv, script-derived repo root
-        ["git", "-C", str(repo_root), "ls-files"],
-        capture_output=True,
-        text=True,
-        check=True,
-        timeout=30,
-    )
-    return [path for path in out.stdout.splitlines() if path]
-
-
 def _rel_or_abs(path: Path, repo_root: Path) -> str:
     try:
         return path.relative_to(repo_root).as_posix()
@@ -144,3 +132,26 @@ def read_utf8_text(path: Path) -> str | None:
         return data.decode("utf-8")
     except UnicodeDecodeError:
         return None
+
+
+# meiva:note
+# This I/O boundary starts one tool-owned analyzer with JSON stdin and bounded heap/time.
+# Successful fact production is not a semantic purity proof of the scanned code.
+# meiva:link meizel/docs/checker/typescript.meiva.okf.md
+def run_node_analyzer(producer: Path, payload: str) -> str:
+    try:
+        result = subprocess.run(  # noqa: S603
+            ["node", "--max-old-space-size=4096", str(producer)],
+            input=payload,
+            capture_output=True,
+            text=True,
+            check=False,
+            timeout=180,
+        )
+    except (OSError, subprocess.TimeoutExpired) as error:
+        raise MeizelError(
+            f"TypeScript compiler unavailable: {error}; install Node and the tool's locked ui/web dependencies"
+        ) from error
+    if result.returncode != 0:
+        raise MeizelError(f"TypeScript compiler failed: {result.stderr.strip()}")
+    return result.stdout

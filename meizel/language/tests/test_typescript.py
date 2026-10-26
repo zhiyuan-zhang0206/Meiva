@@ -62,9 +62,9 @@ export function passthrough(a: number, b: string) {
   return api.call(a, b);
 }
 
-export function wideFn(a: number, b: number, c: number, d: number, e: number, f: number) {
+export function wideFn(a: number, b: number, c: number, d: number, e: number, f: number, g: number) {
   const [val] = useState(0);
-  return fetch("/api") && Date.now() + val + a + b + c + d + e + f;
+  return fetch("/api") && Date.now() + val + a + b + c + d + e + f + g;
 }
 """
     prod_scan = scan_typescript("ui/web/src/lib/state/settings.ts", prod_source, universe, policy)
@@ -119,10 +119,93 @@ def test_typescript_wide_public_surface_and_door_exemption() -> None:
     policy, _ = parse('[typescript]\nscopes = ["ui/web/src/lib"]\n')
     universe = _make_universe(["ui/web/src/lib/mod.ts", "ui/web/src/lib/index.ts"])
     many_exports = (
-        "\n".join(f"export const v{i} = {i};" for i in range(8)) + "\nexport type T = number;\n"
+        "\n".join(f"export const v{i} = (): number => {i};" for i in range(8))
+        + "\nexport type T = number;\n"
     )
     mod_scan = scan_typescript("ui/web/src/lib/mod.ts", many_exports, universe, policy)
     assert any(item.code is Code.WIDE_PUBLIC_SURFACE for item in mod_scan.purity)
     door_scan = scan_typescript("ui/web/src/lib/index.ts", many_exports, universe, policy)
     assert not any(item.code is Code.WIDE_PUBLIC_SURFACE for item in door_scan.purity)
-    assert typescript_files(universe) == ()
+    assert set(typescript_files(universe, policy)) == set(universe.files)
+
+
+def test_typescript_import_clauses_do_not_consume_other_declarations() -> None:
+    policy, _ = parse('[typescript]\nscopes = ["src"]\n')
+    universe = _make_universe(["src/a.ts", "src/b.ts", "src/c.ts", "src/d.ts"])
+    source = """
+export class Registry { value = 1 }
+export { value } from './a.ts'
+import './b.ts'
+import type { Shape } from './c.ts'
+const loaded = import('./d.ts', { with: { type: 'json' } })
+"""
+    scan = scan_typescript("src/owner.ts", source, universe, policy)
+    assert {(f.dst, f.line) for f in scan.facts} == {
+        ("src/a.ts", 3),
+        ("src/b.ts", 4),
+        ("src/c.ts", 5),
+        ("src/d.ts", 6),
+    }
+
+
+def test_typescript_source_examples_are_not_imports_or_patches() -> None:
+    policy, _ = parse('[typescript]\nscopes = ["src"]\n')
+    universe = _make_universe(["src/real.ts", "src/example.ts"])
+    source = """
+const example = `
+import { example } from './example.ts'
+export * from './example.ts'
+import './example.ts'
+import('./example.ts')
+vi.mock('./example.ts')
+vi.spyOn(example, 'read')
+vi.stubEnv('HOME', '/tmp')
+vi.stubGlobal('fetch', fake)
+`
+const quoted = "import { example } from './example.ts'"
+import { real } from './real.ts'
+vi.mock('./real.ts')
+"""
+    scan = scan_typescript("src/owner.test.ts", source, universe, policy)
+    assert {f.dst for f in scan.facts} == {"src/real.ts"}
+    assert [(p.form, p.target) for p in scan.patches] == [("vi.mock", "src/real.ts")]
+
+
+def test_typescript_aliases_resolve_exact_and_most_specific_patterns() -> None:
+    policy, _ = parse("""
+[typescript]
+scopes = ["src"]
+aliases = [
+    "@pkg/*=src/general/*", "@pkg=src/index.ts", "@pkg/detail/*=src/detail/*",
+    "@pkg/detail/exact=src/exact.ts", "@suffix/*.js=src/suffix/*.ts", "@/=src/",
+]
+""")
+    universe = _make_universe(
+        [
+            "src/index.ts",
+            "src/exact.ts",
+            "src/detail/leaf.ts",
+            "src/general/leaf.ts",
+            "src/suffix/leaf.ts",
+            "src/legacy.ts",
+        ]
+    )
+    source = """
+import '@pkg'
+import '@pkg/leaf'
+import '@pkg/detail/leaf'
+import '@pkg/detail/exact'
+import '@suffix/leaf.js'
+import '@/legacy'
+import '@pkg-extra'
+"""
+    scan = scan_typescript("src/owner.ts", source, universe, policy)
+    assert {f.dst for f in scan.facts} == set(universe.files)
+    assert scan.external == frozenset({"@pkg-extra"})
+
+
+def test_typescript_js_specifiers_resolve_source_before_emitted_file() -> None:
+    policy, _ = parse('[typescript]\nscopes = ["src"]\n')
+    universe = _make_universe(["src/a.ts", "src/a.js", "src/b.tsx", "src/b.jsx"])
+    scan = scan_typescript("src/owner.ts", "import './a.js'; import './b.jsx'", universe, policy)
+    assert [f.dst for f in scan.facts] == ["src/a.ts", "src/b.tsx"]

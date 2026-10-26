@@ -18,7 +18,7 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 import type { WireFleetGraph } from "../contracts/types";
 import { apiWrapper } from "../transport/tests/api/api-provider";
-import { startGateway, type GatewayReply, type TestGateway } from "../transport/tests/api/api-provider";
+import { realNetwork, startGateway, type GatewayReply, type TestGateway } from "../transport/tests/api/api-provider";
 import { gatewayRig } from "../transport/tests/api/api-provider";
 import { useFleetGraph } from "./use-fleet-graph";
 
@@ -67,7 +67,7 @@ function freshClient(): QueryClient {
 
 beforeEach(async () => {
   answer = { kind: "json", body: API_GRAPH };
-  gateway = await startGateway((request) => request.path === "/api/fleet/graph"
+  gateway = await startGateway(realNetwork.createServer, (request) => request.path === "/api/fleet/graph"
     ? answer : { kind: "text", status: 404, body: "unexpected route" });
 });
 

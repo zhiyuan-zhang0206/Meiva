@@ -10,7 +10,7 @@ export class FakeUpload implements UploadRequest {
   withCredentials = false;
   onload: UploadRequest["onload"] = null;
   onerror: UploadRequest["onerror"] = null;
-  upload: UploadRequest["upload"] = { onprogress: null };
+  readonly upload = new EventTarget();
   readonly headers: [string, string][] = [];
   opened: [string, string] | null = null;
   sent: FormData | null = null;
@@ -28,10 +28,7 @@ export class FakeUpload implements UploadRequest {
   }
 
   progress(loaded: number, total: number, lengthComputable: boolean): void {
-    this.upload.onprogress?.call(
-      this as unknown as XMLHttpRequest,
-      { lengthComputable, loaded, total } as ProgressEvent,
-    );
+    this.upload.dispatchEvent(new ProgressEvent("progress", { lengthComputable, loaded, total }));
   }
 
   finish(status: number, responseText: string): void {

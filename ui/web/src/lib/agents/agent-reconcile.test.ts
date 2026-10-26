@@ -7,7 +7,7 @@
 import { QueryClient } from "@tanstack/react-query";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { startGateway, type GatewayReply, type TestGateway } from "../transport/tests/api/api-provider";
+import { realNetwork, startGateway, type GatewayReply, type TestGateway } from "../transport/tests/api/api-provider";
 import { gatewayRig, httpRig, noUpload, type HttpRig } from "../transport/tests/api/api-provider";
 import { UncancellableFetch } from "../transport/tests/api/api-provider";
 import { systemKeySource } from "../transport/system-transport";
@@ -67,7 +67,7 @@ beforeEach(async () => {
   queuedAnswers = [];
   defaultAnswer = { kind: "text", status: 500, body: "this test scripted no snapshot answer" };
   client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
-  gateway = await startGateway((request) => {
+  gateway = await startGateway(realNetwork.createServer, (request) => {
     const match = /^\/api\/agents\/(\d+)\/conversation-snapshot$/.exec(request.path);
     if (match === null) return { kind: "text", status: 404, body: "unexpected route" };
     const signal = rig.sent.findLast((sent) => sent.url === `${gateway.origin}${request.path}`)?.init.signal;

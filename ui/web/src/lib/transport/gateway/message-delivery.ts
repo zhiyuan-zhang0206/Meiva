@@ -3,12 +3,11 @@ import {
   messageInit,
   MessageDeliveryUnknownError,
   nextDeliveryStep,
-  type DeliveryEvent,
   type DeliveryStep,
 } from "./plans";
 import type { Http } from "./http";
 
-export async function sendMessageWithReconciliation(
+export function sendMessageWithReconciliation(
   http: Http,
   agentId: number,
   content: string | ContentBlock[],
@@ -16,35 +15,35 @@ export async function sendMessageWithReconciliation(
 ): Promise<AgentMessageEnqueued> {
   const path = `/api/agents/${agentId}/messages`;
   const init = messageInit(content, clientMessageId);
-  let step: DeliveryStep = nextDeliveryStep({ stage: "start" }, { kind: "begin" });
-  for (;;) {
+  const runStep = (step: DeliveryStep): Promise<AgentMessageEnqueued> => {
     const { action } = step;
     switch (action.kind) {
       case "post":
       case "reconcile": {
         const target = action.kind === "post" ? path : `${path}/reconcile`;
-        let event: DeliveryEvent;
-        let enqueued: AgentMessageEnqueued | undefined;
-        try {
-          enqueued = await http.jsonTimed<AgentMessageEnqueued>(target, init, action.timeoutMs);
-          event = { kind: "succeeded" };
-        } catch (error: unknown) {
-          event = { kind: "failed", error };
-        }
-        step = nextDeliveryStep(step.state, event);
-        if (step.action.kind === "done" && enqueued !== undefined) return enqueued;
-        break;
+        return http.jsonTimed<AgentMessageEnqueued>(target, init, action.timeoutMs).then(
+          (enqueued): Promise<AgentMessageEnqueued> => {
+            const next = nextDeliveryStep(step.state, { kind: "succeeded" });
+            if (next.action.kind === "done") return Promise.resolve(enqueued);
+            return runStep(next);
+          },
+          (error: unknown): Promise<AgentMessageEnqueued> =>
+            runStep(nextDeliveryStep(step.state, { kind: "failed", error })),
+        );
       }
       case "wait":
-        await http.wait(action.ms);
-        step = nextDeliveryStep(step.state, { kind: "waited" });
-        break;
+        return http
+          .wait(action.ms)
+          .then(() => runStep(nextDeliveryStep(step.state, { kind: "waited" })));
       case "fail":
-        throw action.error;
+        return new Promise<never>(() => {
+          throw action.error;
+        });
       case "unconfirmed":
-        throw new MessageDeliveryUnknownError(clientMessageId);
+        return Promise.reject(new MessageDeliveryUnknownError(clientMessageId));
       case "done":
-        throw new Error("delivery finished without a receipt");
+        return Promise.reject(new Error("delivery finished without a receipt"));
     }
-  }
+  };
+  return runStep(nextDeliveryStep({ stage: "start" }, { kind: "begin" }));
 }

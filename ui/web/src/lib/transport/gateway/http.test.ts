@@ -21,7 +21,7 @@ function rigWith(now: () => number): HttpRig {
 
 beforeEach(async () => {
   answer = OK_JSON;
-  gateway = await startGateway(() => answer);
+  gateway = await startGateway(realNetwork.createServer, () => answer);
 });
 
 afterEach(async () => {

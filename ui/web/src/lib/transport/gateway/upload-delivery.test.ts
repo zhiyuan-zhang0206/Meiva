@@ -40,7 +40,7 @@ function rigOver(openUpload: () => UploadRequest): HttpRig {
 
 beforeEach(async () => {
   answer = ACCEPTED;
-  gateway = await startGateway(() => answer);
+  gateway = await startGateway(realNetwork.createServer, () => answer);
   opened = [];
   rig = rigOver(() => {
     const request = new realNetwork.XMLHttpRequest();

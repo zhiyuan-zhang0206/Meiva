@@ -65,7 +65,7 @@ export function resetTelemetryBufferState(
   state.currentPage = "unknown";
   state.buffer = [];
   state.lastTracked.clear();
-  state.sentAt.length = 0;
+  state.sentAt = [];
 }
 
 export function sanitizeValue(value: unknown): string | undefined {

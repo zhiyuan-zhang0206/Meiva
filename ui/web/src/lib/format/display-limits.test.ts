@@ -12,7 +12,7 @@ import { afterEach, describe, expect, it } from "vitest";
 
 import {
   gatewayRig,
-  startGateway,
+  realNetwork, startGateway,
   type GatewayReply,
   type TestGateway,
 } from "../transport/tests/api/api-provider";
@@ -30,7 +30,7 @@ afterEach(async () => {
 });
 
 async function setupConfigGateway(reply: GatewayReply) {
-  const gateway = await startGateway((req) => {
+  const gateway = await startGateway(realNetwork.createServer, (req) => {
     if (req.method === "GET" && req.path === "/api/config") {
       return reply;
     }
