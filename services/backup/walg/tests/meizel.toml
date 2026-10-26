@@ -15,6 +15,3 @@ exports = ["support.py"]
 "test_tick.py" = ["support.py"]
 "test_verify.py" = ["support.py"]
 "test_walg_config_boot_owner.py" = ["child_walg.py"]
-
-[debt.first-party-patch]
-"support.py#monkeypatch.setattr base.cluster.dataplane.walg_binary.installed_problem" = 1

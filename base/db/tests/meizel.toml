@@ -4,14 +4,3 @@ exports = ["fakes.py", "lost_ack.py", "swallowed_cancel.py"]
 "test_boot_authority.py" = ["_boot_authority_child.py"]
 "test_connect_helpers.py" = ["_stale_worker_child.py"]
 "test_swallowed_cancel.py" = ["swallowed_cancel.py"]
-
-[debt.first-party-patch]
-"test_database_handle.py#monkeypatch.setattr base.db.connections.psycopg.connect" = 1
-
-[debt.stdlib-patch]
-"test_connect_helpers.py#monkeypatch.setattr logging.shutdown" = 1
-"test_connect_helpers.py#monkeypatch.setattr os._exit" = 1
-
-[debt.third-party-patch]
-"test_connect_helpers.py#monkeypatch.setattr loguru.logger.remove" = 1
-"test_db.py#monkeypatch.setattr psycopg.connect" = 1

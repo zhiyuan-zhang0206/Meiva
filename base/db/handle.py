@@ -14,6 +14,7 @@ from __future__ import annotations
 
 from collections.abc import Callable, Generator
 from contextlib import contextmanager
+from typing import Any
 
 import psycopg
 from psycopg_pool import AsyncConnectionPool, ConnectionPool
@@ -24,20 +25,24 @@ from base.db.config import DbConfig, db_config_from_settings
 from base.db.connections import DirectUrlResolver
 
 
+# meiva:note
+# One cluster Postgres, dialed with one `DbConfig`.
 class Database:
-    """One cluster Postgres, dialed with one `DbConfig`."""
-
     def __init__(
         self,
         config: DbConfig,
         *,
         gate: ProcessDbGate,
         direct_url: DirectUrlResolver | None = None,
+        dial: Callable[..., psycopg.Connection[Any]] = psycopg.connect,
     ) -> None:
         self._config = config
         self._gate = gate
         self._direct_url = direct_url
+        self._dial = dial
 
+    # meiva:note
+    # The composition-root constructor: the config as the live settings hold it now.
     @classmethod
     def from_settings(
         cls,
@@ -45,13 +50,13 @@ class Database:
         gate: ProcessDbGate,
         direct_url: DirectUrlResolver | None = None,
     ) -> Database:
-        """The composition-root constructor: the config as the live settings hold it now."""
         return cls(db_config_from_settings(), gate=gate, direct_url=direct_url)
 
+    # meiva:note
+    # `base.db.connect()` on this handle's config.
     def connect(
         self, *, autocommit: bool = False, direct: bool = False, unbounded: bool = False
     ) -> psycopg.Connection:
-        """`base.db.connect()` on this handle's config."""
         return connections.connect(
             autocommit=autocommit,
             direct=direct,
@@ -59,6 +64,7 @@ class Database:
             config=self._config,
             gate=self._gate,
             direct_url=self._direct_url,
+            dial=self._dial,
         )
 
     def pool(

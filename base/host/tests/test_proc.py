@@ -440,9 +440,8 @@ def test_child_state_missing_for_a_zombie() -> None:
         proc.wait()
 
 
-def test_child_state_unverifiable_when_the_read_fails(monkeypatch: pytest.MonkeyPatch) -> None:
-    def raiser(pid: int) -> object:
+def test_child_state_unverifiable_when_the_read_fails() -> None:
+    def raiser(_pid: int) -> psutil.Process:
         raise psutil.AccessDenied
 
-    monkeypatch.setattr(psutil, "Process", raiser)
-    assert child_state(999999, os.getpid()) == "unverifiable"
+    assert child_state(999999, os.getpid(), process_factory=raiser) == "unverifiable"
