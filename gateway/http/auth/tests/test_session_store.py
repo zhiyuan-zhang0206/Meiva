@@ -53,9 +53,9 @@ def test_create_validate_revoke_lifecycle(
 ) -> None:
     store.create(_id("session-one"), 3600, "test-agent", "127.0.0.1")
 
-    assert store.is_valid(_id("session-one"), admitted=_ADMITTED) is True
+    assert store.is_valid(_id("session-one"), admitted=_ADMITTED, now=datetime.now(UTC)) is True
     assert store.revoke(_id("session-one")) is True
-    assert store.is_valid(_id("session-one"), admitted=_ADMITTED) is False
+    assert store.is_valid(_id("session-one"), admitted=_ADMITTED, now=datetime.now(UTC)) is False
     assert store.revoke(_id("session-one")) is False
     assert store.revoke("missing") is False
 
@@ -315,7 +315,9 @@ def test_session_cache_tolerates_an_entry_evicted_after_db_lookup(
     store = SessionStore(pool, cache=_EvictedOnTouch())
     store.create(_id("racing-db-session"), 3600, "", "")
 
-    assert store.is_valid(_id("racing-db-session"), admitted=_ADMITTED) is True
+    assert (
+        store.is_valid(_id("racing-db-session"), admitted=_ADMITTED, now=datetime.now(UTC)) is True
+    )
 
 
 def test_session_ids_with_suffix_matches_active_rows_only(

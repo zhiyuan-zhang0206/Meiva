@@ -23,6 +23,7 @@ from agent.llm import execute_code
 from agent.tests.test_compact import make_fake_llm, pinned_slices
 from base.agents.history.closing_request import METADATA_KEY as CLOSING_METADATA_KEY
 from base.agents.history.closing_request import ClosingRequest
+from base.clock import SYSTEM_TIMERS
 from base.lm.catalog import ModelCatalog
 from base.packages.plugin_providers import build_model_catalog
 
@@ -56,10 +57,12 @@ async def test_stamp_compact_boundary_writes_the_closing_request(
     closing = ClosingRequest(100, 5, "m1")
     await _checkpoint(aops_pool, "cp-1")
     await compact.stamp_compact_boundary(
-        aops_pool, 1, None, closing=closing, understanding_enabled=False
+        aops_pool, 1, None, closing=closing, understanding_enabled=False, timers=SYSTEM_TIMERS
     )
     await _checkpoint(aops_pool, "cp-2")
-    await compact.stamp_compact_boundary(aops_pool, 1, understanding_enabled=False)
+    await compact.stamp_compact_boundary(
+        aops_pool, 1, understanding_enabled=False, timers=SYSTEM_TIMERS
+    )
 
     assert await _metadata(aops_pool, "cp-1") == {
         "compact_boundary": True,
