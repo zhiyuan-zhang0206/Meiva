@@ -8,6 +8,3 @@ exports = ["inspector.py", "notification_contributions.py", "stats.py", "ui_cont
 "inspector.py" = "strict"
 "notification_contributions.py" = "strict"
 "ui_contributions.py" = "strict"
-
-[debt.ambient-read]
-"stats.py#settings base.config.settings" = 1

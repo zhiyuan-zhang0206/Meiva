@@ -17,11 +17,11 @@ import contextlib
 import datetime as dt
 import json
 import logging
-import os
 from collections.abc import Generator
 from pathlib import Path
 
 import base.paths
+from base.deploy.lifecycle.status_journal import current_pid
 from base.host.atomic_io import SYSTEM_FS, AtomicWriter
 from base.native_process.os_platform import LockTimeoutError, file_lock
 
@@ -81,7 +81,7 @@ def _diagnostic_lock(path: Path, *, purpose: str, timeout_s: float) -> Generator
         with file_lock(path, timeout_s=timeout_s):
             acquired = True
             holder = {
-                "pid": os.getpid(),
+                "pid": current_pid(),
                 "purpose": purpose,
                 "since": dt.datetime.now(dt.UTC).isoformat(),
             }

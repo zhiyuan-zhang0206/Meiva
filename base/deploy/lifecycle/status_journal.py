@@ -37,8 +37,11 @@ from base.log import logger
 from base.paths import run_dir
 
 
-def _current_pid() -> int:
+def current_pid() -> int:
     return os.getpid()
+
+
+_current_pid = current_pid
 
 
 def _is_obj_list(value: object) -> TypeGuard[list[object]]:

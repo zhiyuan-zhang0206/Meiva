@@ -1,14 +1,16 @@
 from __future__ import annotations
 
+import logging
 from collections.abc import Sequence
 from pathlib import Path
 
-from base.log import logger
 from base.packages.skills.index import SkillFile, SkillIndex
 from base.packages.skills.names import SkillIdentity, match_key
 from base.packages.skills.tree import NS, Leaf, Skill, Tree, claim, descend, flatten
 
 __all__ = ["SkillIndexBuilder", "scan_tree", "skills_in"]
+
+_log = logging.getLogger("base.packages.skills.tree_builder")
 
 
 # meiva:note
@@ -25,11 +27,11 @@ class SkillIndexBuilder:
         self._seen_hashes: set[str] = set()
 
     def mount(self, root: Path, gate: set[str] | None) -> None:
-        if not root.is_dir():
+        index = SkillIndex.cached([root])
+        if not index.entries:
             return
         self._claimed = {}
         gate_keys = None if gate is None else {match_key(g) for g in gate}
-        index = SkillIndex.cached([root])
         for entry in index.entries:
             self._mount_folder_skill(root, entry, gate_keys)
             self._mount_folder_index(entry, gate_keys)
@@ -46,11 +48,11 @@ class SkillIndexBuilder:
                 return
             self._seen_hashes.add(entry.content_hash)
         if entry.error is not None:
-            logger.warning("skipping malformed skill {}: {}", skill_md, entry.error)
+            _log.warning("skipping malformed skill %s: %s", skill_md, entry.error)
             return
         if entry.security_rules:
-            logger.warning(
-                "refusing to mount skill {}: supply-chain scan flagged {}",
+            _log.warning(
+                "refusing to mount skill %s: supply-chain scan flagged %s",
                 skill_md,
                 ", ".join(entry.security_rules),
             )

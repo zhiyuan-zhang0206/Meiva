@@ -176,10 +176,10 @@ _DIGITS: dict[str, LiteralString] = {
 
 
 def restore_budget_statement(budget_seconds: float | None = None) -> tuple[LiteralString, int]:
-    from base.config import settings
+    from base.db.config import default_restore_budget_seconds
 
     if budget_seconds is None:
-        budget_seconds = settings.data_plane.db_pool_restore_timeout_seconds
+        budget_seconds = default_restore_budget_seconds()
     budget_ms = max(1, int(budget_seconds * 1000))
     ms_lit: LiteralString = "".join(_DIGITS[ch] for ch in str(budget_ms))
     reset = PG_POOLED_BASELINE_RESTORE_SQL[0]
@@ -207,10 +207,10 @@ PG_POOLED_RESTORE_WITH_MIN_SQL: LiteralString = (
 # about to fire cleanly still fires first; see
 # `db_pool_restore_client_deadline_seconds` for why they must not be equal.
 def restore_client_deadline_seconds(client_deadline_seconds: float | None = None) -> float:
-    from base.config import settings
+    from base.db.config import default_restore_client_deadline_seconds
 
     if client_deadline_seconds is None:
-        client_deadline_seconds = settings.data_plane.db_pool_restore_client_deadline_seconds
+        client_deadline_seconds = default_restore_client_deadline_seconds()
     return client_deadline_seconds
 
 

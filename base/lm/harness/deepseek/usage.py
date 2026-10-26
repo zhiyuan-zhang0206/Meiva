@@ -85,16 +85,22 @@ def session_log_dir(dsh_home: Path, cwd: Path) -> Path:
     return Path(dsh_home) / "sessions" / escaped
 
 
-def session_log_path(dsh_home: Path, cwd: Path, session_id: str) -> Path | None:
+def _session_log_candidates(dsh_home: Path, cwd: Path, session_id: str) -> Iterable[Path]:
     directory = session_log_dir(dsh_home, cwd) / session_id
     for suffix in (COMPRESSED_SUFFIX, JSONL_SUFFIX):
-        candidate = directory / f"session.v4{suffix}"
-        if candidate.is_file():
-            return candidate
-    for candidate in sorted(Path(dsh_home).glob(f"sessions/*/{session_id}/session.v4.*")):
-        if candidate.is_file():
-            return candidate
-    return None
+        yield directory / f"session.v4{suffix}"
+    yield from sorted(Path(dsh_home).glob(f"sessions/*/{session_id}/session.v4.*"))
+
+
+def session_log_path(dsh_home: Path, cwd: Path, session_id: str) -> Path | None:
+    return next(
+        (
+            candidate
+            for candidate in _session_log_candidates(dsh_home, cwd, session_id)
+            if candidate.is_file()
+        ),
+        None,
+    )
 
 
 def read_usage(

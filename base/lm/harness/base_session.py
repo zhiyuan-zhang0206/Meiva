@@ -5,7 +5,7 @@ import time
 from collections import OrderedDict, deque
 from collections.abc import AsyncIterator, Coroutine
 from dataclasses import dataclass, replace
-from datetime import UTC, datetime
+from datetime import datetime
 from pathlib import Path
 from types import TracebackType
 from typing import Protocol, Self
@@ -22,6 +22,7 @@ from base.lm.harness.events import (
 )
 from base.lm.harness.handoff import Handoff
 from base.lm.harness.process import ChildProbe, ExitStatus, PsutilChildProbe
+from base.lm.harness.registration import current_utc
 from base.lm.harness.registry import SessionRecord, SessionRegistry
 
 # meiva:note
@@ -311,7 +312,7 @@ class BaseHarnessSession[ConfigT: SessionConfig](ExitStatus):
             yield event
 
     def _now_iso(self) -> str:
-        now = self._clock.now() if self._clock is not None else datetime.now(UTC)
+        now = self._clock.now() if self._clock is not None else current_utc()
         return now.isoformat(timespec="seconds")
 
     def _monotonic(self) -> float:

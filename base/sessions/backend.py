@@ -7,7 +7,11 @@ from pathlib import Path
 
 from base.native_process.os_platform import is_macos
 from base.paths import logs_dir, meiva_home, run_dir
-from base.sessions.helperproc import HelperProcSessionBackend, helper_client
+from base.sessions.helperproc import (
+    HelperProcSessionBackend,
+    helper_client,
+    helper_spawn_configured,
+)
 from base.sessions.protocol import SessionBackend
 from base.sessions.pty import client
 from base.sessions.pty.keys import keys_to_bytes
@@ -225,12 +229,7 @@ def helper_spawn_enabled() -> bool:
     if not is_macos():
         return False
     try:
-        from base.config import settings
-
-        return bool(
-            settings.services.permissions_helper_enabled
-            and settings.services.permissions_helper_spawn
-        )
+        return helper_spawn_configured()
     except Exception:
         _log.warning(
             "reading the permissions-helper settings failed; routing process creation "

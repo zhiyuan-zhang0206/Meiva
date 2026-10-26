@@ -27,7 +27,7 @@ from base.native_process.os_platform import Platform
 from base.native_process.ownership import stable_create_time
 from base.paths import logs_dir, meiva_home, permissions_helper_socket, run_dir
 from base.sessions.protocol import SessionBackend
-from base.sessions.record import SessionRecord
+from base.sessions.record import SessionRecord, current_started_at
 
 # What a helper must answer `ping` with before the lifecycle trusts it with a root's custody.
 HELPER_PROTOCOLS = ("root_stop_intent_v1", "helper_shutdown_v1")
@@ -97,14 +97,26 @@ def _record_reapable(record: SessionRecord) -> tuple[bool, str]:
     return False, "live pid did not satisfy the identity check"
 
 
+def _services_config() -> tuple[int, bool]:
+    from base.config import settings
+
+    services = settings.services
+    return (
+        services.permissions_helper_port,
+        bool(services.permissions_helper_enabled and services.permissions_helper_spawn),
+    )
+
+
+def helper_spawn_configured() -> bool:
+    _, spawn_enabled = _services_config()
+    return spawn_enabled
+
+
 def helper_client() -> PermissionsHelperClient:
     """The client for this cluster's permissions helper: the composition root's one way to
     reach it. The socket is keyed by the cluster's helper port, read here once per client."""
-    from base.config import settings
-
-    return PermissionsHelperClient(
-        permissions_helper_socket(meiva_home(), settings.services.permissions_helper_port)
-    )
+    port, _ = _services_config()
+    return PermissionsHelperClient(permissions_helper_socket(meiva_home(), port))
 
 
 def helper_for(platform: Platform) -> HelperFactory | None:
@@ -246,7 +258,7 @@ class HelperProcSessionBackend(SessionBackend):
             create_time=create_time,
             cmd=command_text,
             cwd=str(cwd),
-            started_at=time.time(),
+            started_at=current_started_at(),
             starttime=starttime,
         ).write(_record_path(name))
         return True

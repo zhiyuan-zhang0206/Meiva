@@ -7,6 +7,3 @@ exports = ["__init__.py", "config.py", "session.py", "usage.py"]
 
 [purity]
 "mapping.py" = "strict"
-
-[debt.ambient-read]
-"config.py#home pathlib.Path.home" = 1

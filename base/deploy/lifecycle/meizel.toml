@@ -1,6 +1,7 @@
 exports = ["home_lifecycle_locks.py", "launch_failures.py", "pause_markers.py", "service_selection.py", "start_serving.py", "status_journal.py", "tests"]
 
 [uses]
+"home_lifecycle_locks.py" = ["status_journal.py"]
 "tests" = ["home_lifecycle_locks.py", "launch_failures.py", "pause_markers.py", "service_selection.py", "start_serving.py", "status_journal.py"]
 
 [purity]
@@ -9,6 +10,5 @@ exports = ["home_lifecycle_locks.py", "launch_failures.py", "pause_markers.py", 
 
 [debt.ambient-read]
 "home_lifecycle_locks.py#clock datetime.datetime.now" = 1
-"home_lifecycle_locks.py#pid os.getpid" = 1
 "start_serving.py#random uuid.uuid4" = 1
 "status_journal.py#pid os.getpid" = 1

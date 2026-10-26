@@ -10,6 +10,3 @@ exports = ["mapping.py", "session.py", "tests", "transport.py"]
 
 [purity]
 "config.py" = "strict"
-
-[debt.ambient-read]
-"mapping.py#home pathlib.Path.home" = 1

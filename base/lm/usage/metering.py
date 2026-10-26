@@ -33,6 +33,10 @@ _FAILURE_REPORT_EVERY = 50
 UsageEmitter = Callable[..., Any]
 
 
+def _monotonic() -> float:
+    return time.monotonic()
+
+
 class LlmUsageMeter(BaseCallbackHandler):
     raise_error = False
 
@@ -64,7 +68,7 @@ class LlmUsageMeter(BaseCallbackHandler):
         # provider call that ended.
         # meiva:link base/lm/usage/docs/usage.meiva.okf.md
         with self._lock:
-            self._started[run_id] = time.monotonic()
+            self._started[run_id] = _monotonic()
 
     def on_llm_end(
         self,
@@ -80,7 +84,7 @@ class LlmUsageMeter(BaseCallbackHandler):
         # meiva:link base/lm/usage/docs/usage.meiva.okf.md
         with self._lock:
             started = self._started.pop(run_id, None)
-        latency_ms = None if started is None else (time.monotonic() - started) * 1_000.0
+        latency_ms = None if started is None else (_monotonic() - started) * 1_000.0
         for generations in response.generations:
             for generation in generations:
                 message: AIMessage | None = getattr(generation, "message", None)

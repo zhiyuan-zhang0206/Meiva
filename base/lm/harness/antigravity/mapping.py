@@ -2,9 +2,9 @@ from __future__ import annotations
 
 import json
 from dataclasses import dataclass, field
-from pathlib import Path
 from typing import Any
 
+from base.host.env.harness_binaries import resolve_user_home
 from base.lm.harness.events import (
     AssistantText,
     BridgeEvent,
@@ -219,7 +219,7 @@ def _tool_content(info: dict[str, Any]) -> str:
 
 def _read_transcript_rows(conversation_id: str) -> list[dict[str, Any]]:
     log_dir = (
-        Path.home()
+        resolve_user_home()
         / ".gemini"
         / "antigravity-cli"
         / "brain"
