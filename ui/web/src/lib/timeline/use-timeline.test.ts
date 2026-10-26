@@ -194,9 +194,21 @@ let gateway: TestGateway = {
 };
 let rig: HttpRig;
 
+// meiva:note
+// The wall clock the page hands the hook: frozen at the instant each test starts and moved only by
+// `wallClock.advance`, so a stamp the hook writes is the value a test chose. A module-level function
+// keeps the provider value the same across re-renders.
+const wallClock = {
+  ms: 0,
+  now: () => wallClock.ms,
+  advance: (ms: number) => {
+    wallClock.ms += ms;
+  },
+};
+
 function Gateway({ children }: { children: React.ReactNode }) {
   return React.createElement(WallClockProvider, {
-    wallNow: () => Date.now(),
+    wallNow: wallClock.now,
     children: React.createElement(ApiProvider, { api: rig.api, children }),
   });
 }
@@ -209,6 +221,7 @@ let queryClient = new QueryClient({
 let visibility: DocumentVisibilityState = "visible";
 
 beforeEach(async () => {
+  wallClock.ms = Date.now();
   queryClient = new QueryClient({
     defaultOptions: {
       queries: { retry: false, staleTime: Infinity },
@@ -535,6 +548,7 @@ const testContext: UseTimelineTestContext = {
   tlResp,
   composedSnapshot,
   getQueryClient: () => queryClient,
+  wallClock,
   wrapper,
   seedSettings,
   setVisibility,

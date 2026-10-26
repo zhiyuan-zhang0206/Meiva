@@ -50,6 +50,7 @@ export interface UseTimelineTestContext {
   tlResp: (items?: BackendTimelineItem[], has_more?: boolean) => TimelineResponse;
   composedSnapshot: (timeline: TimelineResponse) => ConversationSnapshotResponse;
   getQueryClient: () => QueryClient;
+  wallClock: { now: () => number; advance: (ms: number) => void };
   wrapper: ({ children }: { children: React.ReactNode }) => React.ReactElement;
   seedSettings: (overrides: Record<string, unknown>) => void;
   setVisibility: (visibility: DocumentVisibilityState) => void;
