@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import time
 from collections.abc import Mapping
+from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import Any
 
@@ -96,24 +97,26 @@ def log_usage_from_message(
     write_5m, write_1h = cache_write_tokens(usage_metadata.get("input_token_details") or {})
     record: dict[str, Any] = {}
     logged = _log_usage(
-        usage_model(msg, model, catalog=catalog),
-        in_total=in_total,
-        out_total=out_total,
-        cache_read=cache_read,
-        cache_write_5m=write_5m,
-        cache_write_1h=write_1h,
-        reasoning=reasoning,
-        latency_ms=latency_ms,
-        decode_ms=decode_ms,
-        priced_at=priced_at,
-        usage_kind=usage_kind,
-        source=source,
-        for_agent_id=for_agent_id,
-        attribution=attribution,
-        emit_billing="input_tokens" in usage_metadata and "output_tokens" in usage_metadata,
-        requested_model=model,
+        _UsageEvent(
+            model=usage_model(msg, model, catalog=catalog),
+            in_total=in_total,
+            out_total=out_total,
+            cache_read=cache_read,
+            cache_write_5m=write_5m,
+            cache_write_1h=write_1h,
+            reasoning=reasoning,
+            latency_ms=latency_ms,
+            decode_ms=decode_ms,
+            priced_at=priced_at,
+            usage_kind=usage_kind,
+            source=source,
+            for_agent_id=for_agent_id,
+            attribution=attribution,
+            emit_billing="input_tokens" in usage_metadata and "output_tokens" in usage_metadata,
+            requested_model=model,
+            catalog=catalog,
+        ),
         record_out=record,
-        catalog=catalog,
     )
     if stamp_message:
         message_addl_kwargs(msg)["meiva_usage"] = record
@@ -139,19 +142,21 @@ def log_usage_fields(
     # meiva:note
     # Log raw provider usage; absent cache metering stays absent, including on decisions.
     return _log_usage(
-        model,
-        in_total=tok_in,
-        out_total=tok_out,
-        cache_read=tok_cached,
-        cache_write_5m=cache_write_5m,
-        cache_write_1h=cache_write_1h,
-        reasoning=tok_reasoning,
-        latency_ms=latency_ms,
-        usage_kind=usage_kind,
-        source=source,
-        for_agent_id=for_agent_id,
-        calls=calls,
-        catalog=catalog,
+        _UsageEvent(
+            model=model,
+            in_total=tok_in,
+            out_total=tok_out,
+            cache_read=tok_cached,
+            cache_write_5m=cache_write_5m,
+            cache_write_1h=cache_write_1h,
+            reasoning=tok_reasoning,
+            latency_ms=latency_ms,
+            usage_kind=usage_kind,
+            source=source,
+            for_agent_id=for_agent_id,
+            calls=calls,
+            catalog=catalog,
+        )
     )
 
 
@@ -199,41 +204,48 @@ def _cache_usage(
     return fields, text
 
 
+@dataclass(frozen=True, slots=True)
+class _UsageEvent:
+    model: str
+    in_total: int
+    out_total: int
+    cache_read: int | None
+    reasoning: int
+    latency_ms: float | None
+    usage_kind: str
+    catalog: ModelCatalog
+    decode_ms: float | None = None
+    priced_at: datetime | None = None
+    source: str | None = None
+    for_agent_id: int | None = None
+    emit_billing: bool = True
+    requested_model: str | None = None
+    cache_write_5m: int = 0
+    cache_write_1h: int = 0
+    attribution: str | None = None
+    calls: int = 1
+
+
 def _log_usage(
-    model: str,
+    event: _UsageEvent,
     *,
-    in_total: int,
-    out_total: int,
-    cache_read: int | None,
-    reasoning: int,
-    latency_ms: float | None,
-    usage_kind: str,
-    decode_ms: float | None = None,
-    priced_at: datetime | None = None,
-    source: str | None = None,
-    for_agent_id: int | None = None,
-    emit_billing: bool = True,
-    requested_model: str | None = None,
-    cache_write_5m: int = 0,
-    cache_write_1h: int = 0,
-    attribution: str | None = None,
     record_out: dict[str, Any] | None = None,
-    calls: int = 1,
-    catalog: ModelCatalog,
 ) -> tuple[int, float]:
     # meiva:note
     # Emit one priced or explicitly unpriced usage event and billing span.
-    cache_fields, cache_text = _cache_usage(cache_read, in_total, cache_write_5m, cache_write_1h)
-    reason_pct = f" ({reasoning / out_total * 100:.0f}%)" if out_total else ""
+    cache_fields, cache_text = _cache_usage(
+        event.cache_read, event.in_total, event.cache_write_5m, event.cache_write_1h
+    )
+    reason_pct = f" ({event.reasoning / event.out_total * 100:.0f}%)" if event.out_total else ""
     priced = quote(
-        model,
-        in_total,
-        out_total,
-        cache_read,
-        at=priced_at,
-        cache_write_5m=cache_write_5m,
-        cache_write_1h=cache_write_1h,
-        prices=catalog.prices,
+        event.model,
+        event.in_total,
+        event.out_total,
+        event.cache_read,
+        at=event.priced_at,
+        cache_write_5m=event.cache_write_5m,
+        cache_write_1h=event.cache_write_1h,
+        prices=event.catalog.prices,
     )
     if priced is not None:
         snapshot = _price_snapshot(priced)
@@ -241,56 +253,62 @@ def _log_usage(
         logger.warning(
             "[llm usage] model {model!r} is unpriced; add it to "
             "base/lm/pricing/pricing_catalog_archive.json or the plugin price registry",
-            model=model,
+            model=event.model,
         )
         snapshot = {"unpriced": 1}
     # meiva:note
     # The one figure set both the event and (via `record_out`) the message carry.
     record: dict[str, Any] = {
-        "model": model,
-        "in_total": in_total,
-        "out_total": out_total,
+        "model": event.model,
+        "in_total": event.in_total,
+        "out_total": event.out_total,
         **cache_fields,
-        "reasoning": reasoning,
+        "reasoning": event.reasoning,
         **snapshot,
-        "attribution": attribution or _attribution(for_agent_id),
+        "attribution": event.attribution or _attribution(event.for_agent_id),
     }
     if record_out is not None:
         record_out.update(record)
 
-    vendor = vendor_of_model(model, catalog=catalog)
-    if vendor is not None and emit_billing:
+    vendor = vendor_of_model(event.model, catalog=event.catalog)
+    if vendor is not None and event.emit_billing:
         emit_billing_event(
             vendor=vendor,
-            model=model,
-            tok_in=in_total,
-            tok_out=out_total,
-            tok_cached=cache_read,
-            cache_write_5m=cache_write_5m,
-            cache_write_1h=cache_write_1h,
+            model=event.model,
+            tok_in=event.in_total,
+            tok_out=event.out_total,
+            tok_cached=event.cache_read,
+            cache_write_5m=event.cache_write_5m,
+            cache_write_1h=event.cache_write_1h,
             cost_usd=priced.cost_usd if priced is not None else 0.0,
-            usage_kind=usage_kind,
+            usage_kind=event.usage_kind,
             unpriced=priced is None,
-            start_time_ns=(time.time_ns() - int(latency_ms * 1_000_000))
-            if latency_ms is not None
+            start_time_ns=(time.time_ns() - int(event.latency_ms * 1_000_000))
+            if event.latency_ms is not None
             else None,
         )
 
-    usage_logger = logger.bind(agent_id=for_agent_id) if for_agent_id is not None else logger
+    usage_logger = (
+        logger.bind(agent_id=event.for_agent_id) if event.for_agent_id is not None else logger
+    )
     usage_logger.info(
         "[llm usage] in={in_total}" + cache_text + "  "
         "out={out_total} reason={reasoning}{reason_pct}",
         event="llm_usage",
-        calls=calls,
+        calls=event.calls,
         reason_pct=reason_pct,
-        **({"requested_model": requested_model} if requested_model is not None else {}),
-        latency_ms=latency_ms,
-        decode_ms=decode_ms,
-        usage_kind=usage_kind,
-        **({"source": source, "transport_source": "system"} if source is not None else {}),
+        **({"requested_model": event.requested_model} if event.requested_model is not None else {}),
+        latency_ms=event.latency_ms,
+        decode_ms=event.decode_ms,
+        usage_kind=event.usage_kind,
+        **(
+            {"source": event.source, "transport_source": "system"}
+            if event.source is not None
+            else {}
+        ),
         **record,
     )
-    return in_total + out_total, priced.cost_usd if priced is not None else 0.0
+    return event.in_total + event.out_total, priced.cost_usd if priced is not None else 0.0
 
 
 MEIVA_BILLING_ATTR_LINE = "meiva.billing.line"

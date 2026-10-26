@@ -4,7 +4,7 @@ import os
 import secrets
 from collections.abc import Callable
 from dataclasses import dataclass, replace
-from datetime import UTC, datetime, timedelta
+from datetime import timedelta
 
 from base.api_contracts.agent_contract import Harness
 from base.lm.harness.engine import CompletedTurnEvent, HarnessSession, HarnessTurn, SubmittedTurn
@@ -26,6 +26,7 @@ from base.lm.harness.registration import (
     ATTACHED,
     HarnessRegistration,
     RegistrationStore,
+    current_utc,
     handle_digest,
 )
 from base.lm.harness.registry import SessionRecord, SessionRegistry
@@ -241,7 +242,7 @@ class HarnessBridge:
     def _register(self, external_session_id: str) -> None:
         if self._registrations is None or self._digest is None:
             return
-        now = datetime.now(UTC)
+        now = current_utc()
         self._created_at = self._created_at or now.isoformat(timespec="seconds")
         self._registrations.write(
             HarnessRegistration(

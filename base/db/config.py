@@ -48,3 +48,11 @@ def _from_view(view: Any) -> DbConfig:
         pgbouncer_enabled=view.data_plane.pgbouncer_enabled,
         db_authority_refusal=view.env_boot.db_authority_refusal,
     )
+
+
+def default_restore_budget_seconds() -> float:
+    return settings.data_plane.db_pool_restore_timeout_seconds
+
+
+def default_restore_client_deadline_seconds() -> float:
+    return settings.data_plane.db_pool_restore_client_deadline_seconds

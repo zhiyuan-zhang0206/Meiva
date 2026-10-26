@@ -113,14 +113,20 @@ def _scan_critical(text: str) -> tuple[str, ...]:
     return tuple(sorted({f.rule_id for f in scan_text_critical(text)}))
 
 
+def _read_utf8(path: Path) -> tuple[str | None, OSError | None]:
+    try:
+        return path.read_text(encoding="utf-8"), None
+    except OSError as exc:
+        return None, exc
+
+
 def _parse_skill_md(
     skill_md: Path,
 ) -> tuple[str | None, str | None, str | None, str | None, tuple[str, ...]]:
     """`(name, description, content_hash, error, security_rules)` of one SKILL.md."""
-    try:
-        raw = skill_md.read_text(encoding="utf-8")
-    except OSError as e:
-        return None, None, None, f"unreadable: {e}", ()
+    raw, err = _read_utf8(skill_md)
+    if raw is None:
+        return None, None, None, f"unreadable: {err}", ()
     content_hash = hashlib.sha256(raw.encode()).hexdigest()
     try:
         fields, _body = parse_skill_frontmatter(raw)
@@ -131,10 +137,8 @@ def _parse_skill_md(
 
 def _read_index_md(index_md: Path) -> str | None:
     """The INDEX.md text, or None when unreadable."""
-    try:
-        return index_md.read_text(encoding="utf-8")
-    except OSError:
-        return None
+    text, _ = _read_utf8(index_md)
+    return text
 
 
 def _stat_or_none(path: Path) -> os.stat_result | None:
@@ -155,9 +159,8 @@ def _regular_file_stat(
 
 
 def _folders_in(root: Path) -> list[Path] | None:
-    if not root.is_dir():
-        return None
-    return [root, *(p for p in root.rglob("*") if p.is_dir())]
+    folders = [p for p in (root, *root.rglob("*")) if p.is_dir()]
+    return folders or None
 
 
 def _skill_file(

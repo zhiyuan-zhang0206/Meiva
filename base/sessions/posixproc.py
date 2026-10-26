@@ -47,7 +47,7 @@ from base.native_process.kernel_identity import pid_starttime_ticks
 from base.native_process.ownership import stable_create_time
 from base.native_process.process_control import SYSTEM_PROCESS_CONTROL, ProcessControl
 from base.paths import logs_dir, meiva_home, run_dir
-from base.sessions.record import SessionRecord
+from base.sessions.record import SessionRecord, current_started_at
 
 __all__ = [
     "build_session_record",
@@ -184,7 +184,7 @@ def build_session_record(
         create_time=create_time,
         cmd=cmd if isinstance(cmd, str) else " ".join(cmd),
         cwd=str(cwd),
-        started_at=time.time() if started_at is None else started_at,
+        started_at=current_started_at() if started_at is None else started_at,
         starttime=starttime,
         pgid=pgid,
     )

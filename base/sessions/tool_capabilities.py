@@ -234,14 +234,14 @@ def _from_cache(entry: object, *, now: dt.datetime) -> Probe | None:
     )
 
 
-def _to_cache(probe: Probe) -> dict[str, object]:
+def _to_cache(probe: Probe, *, now: dt.datetime) -> dict[str, object]:
     return {
         "tool": probe.tool,
         "path": probe.path,
         "version_text": probe.version_text,
         "flags": probe.flags,
         "unknown_reason": probe.unknown_reason,
-        "probed_at": (probe.probed_at or dt.datetime.now(dt.UTC)).isoformat(),
+        "probed_at": (probe.probed_at or now).isoformat(),
     }
 
 
@@ -258,6 +258,7 @@ def probe_tool(
 ) -> Probe:
     runner = run or _default_run
     target = store or cache_path()
+    reference = now or dt.datetime.now(dt.UTC)
     resolved = _resolve(spec)
     if resolved is None:
         return Probe(
@@ -266,9 +267,8 @@ def probe_tool(
             version=None,
             version_text=None,
             unknown_reason="not found on PATH or its candidate paths",
-            probed_at=now or dt.datetime.now(dt.UTC),
+            probed_at=reference,
         )
-    reference = now or dt.datetime.now(dt.UTC)
     key = _cache_key(resolved)
     cache = _read_cache(target)
     cached = _from_cache(cache.get(key), now=reference)
@@ -294,7 +294,7 @@ def probe_tool(
         unknown_reason=None if version is not None else "version output was not a version",
         probed_at=reference,
     )
-    cache[key] = _to_cache(result)
+    cache[key] = _to_cache(result, now=reference)
     _write_cache(target, cache)
     return result
 
