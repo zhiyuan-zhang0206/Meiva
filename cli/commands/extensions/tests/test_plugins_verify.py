@@ -8,6 +8,7 @@ from pathlib import Path
 import pytest
 
 from base import paths
+from base.clock.tests.seeded_rng import seeded_rng
 from base.packages.plugins import load_report
 from base.packages.plugins.enable_config import (
     discover_plugin_dirs,
@@ -82,7 +83,7 @@ def test_loadable_plugins_are_green(capsys: pytest.CaptureFixture[str]) -> None:
     _plugin("good", "LOADED = True\n")
     _enable("good")
 
-    assert cmd_plugins_verify() == 0
+    assert cmd_plugins_verify(rng=seeded_rng()) == 0
 
     assert "RESULT enabled=1 failed=0 rc=0" in capsys.readouterr().out
 
@@ -97,7 +98,7 @@ def test_a_plugin_using_a_deleted_framework_api_is_red_and_the_rest_still_count(
     )
     _enable("good", "old_hooks")
 
-    assert cmd_plugins_verify() == 1
+    assert cmd_plugins_verify(rng=seeded_rng()) == 1
 
     out = capsys.readouterr().out
     assert "RESULT enabled=2 failed=1 rc=1" in out
@@ -114,7 +115,7 @@ def test_a_plugin_without_a_manifest_is_red(capsys: pytest.CaptureFixture[str]) 
     (paths.plugins_dir() / "bare" / "meiva-plugin.json").unlink()
     _enable("good", "bare")
 
-    assert cmd_plugins_verify() == 1
+    assert cmd_plugins_verify(rng=seeded_rng()) == 1
 
     out = capsys.readouterr().out
     assert "RESULT enabled=2 failed=1 rc=1" in out
@@ -125,7 +126,7 @@ def test_a_broken_runtime_face_is_red_too(capsys: pytest.CaptureFixture[str]) ->
     _plugin("half", "LOADED = True\n", **{"agent_runtime.py": "from agent.hooks import gone\n"})
     _enable("half")
 
-    assert cmd_plugins_verify() == 1
+    assert cmd_plugins_verify(rng=seeded_rng()) == 1
 
     assert "RED plugin=half ImportError" in capsys.readouterr().out
 
@@ -133,7 +134,7 @@ def test_a_broken_runtime_face_is_red_too(capsys: pytest.CaptureFixture[str]) ->
 def test_an_enabled_plugin_missing_from_disk_is_red(capsys: pytest.CaptureFixture[str]) -> None:
     _enable("vanished")
 
-    assert cmd_plugins_verify() == 1
+    assert cmd_plugins_verify(rng=seeded_rng()) == 1
 
     assert "RED plugin=vanished" in capsys.readouterr().out
 
@@ -142,7 +143,7 @@ def test_a_disabled_broken_plugin_is_never_imported(capsys: pytest.CaptureFixtur
     _plugin("old_hooks", "raise RuntimeError('boom')\n")
     _configure(disabled=("old_hooks",))
 
-    assert cmd_plugins_verify() == 0
+    assert cmd_plugins_verify(rng=seeded_rng()) == 0
 
     assert "RESULT enabled=0 failed=0 rc=0" in capsys.readouterr().out
 
@@ -153,7 +154,7 @@ def test_nothing_is_emitted_while_verifying_and_the_canonical_reporter_is_unchan
     _plugin("old_hooks", "raise RuntimeError('boom')\n")
     _enable("old_hooks")
 
-    assert cmd_plugins_verify() == 1
+    assert cmd_plugins_verify(rng=seeded_rng()) == 1
     assert len(emitted_events) == 0
 
     load_report.report_plugin_load_failure("elsewhere", RuntimeError("later"))
@@ -163,7 +164,7 @@ def test_nothing_is_emitted_while_verifying_and_the_canonical_reporter_is_unchan
 def test_a_loader_crash_is_a_tool_error_not_a_red(capsys: pytest.CaptureFixture[str]) -> None:
     local_config_path().write_text("{ this is not json")
 
-    assert cmd_plugins_verify() == 2
+    assert cmd_plugins_verify(rng=seeded_rng()) == 2
 
     out = capsys.readouterr().out
     assert "TOOL-ERROR" in out and "RESULT enabled=0 failed=0 rc=2" in out

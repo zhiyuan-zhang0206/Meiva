@@ -21,6 +21,7 @@ from base.agents.sdk.tests.sampling_owners import (
     sampling_owner_failing_to_read,
     sampling_owner_serving,
 )
+from base.clock.tests.seeded_rng import seeded_rng
 from base.host.net.tests.local_http import closed_port_url, serve_hangup, serve_json
 
 _ENABLED_EVERY_3 = {"MEIVA_SDK_CALL_SAMPLING_ENABLED": "true", "MEIVA_SDK_CALL_SAMPLE_EVERY": "3"}
@@ -271,6 +272,7 @@ def test_invalid_refresh_dependency_classification_reaches_the_caller(
     cache = call_policy.SamplingPolicyOwner(
         initial=SamplingPolicy(),
         source=SamplingSource(env=BrokenEnv(), env_path=tmp_path / ".env"),
+        rng=seeded_rng(),
     )
     cache.refresh()
     with pytest.raises(AttributeError, match="HTTPStatusError"):

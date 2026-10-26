@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import contextlib
 import math
+import random
 import threading
 import time
 from collections.abc import Callable, Generator
@@ -20,6 +21,9 @@ from base.agents.sdk import (
 )
 from base.agents.sdk import (
     SamplingSource as SamplingSource,
+)
+from base.agents.sdk import (
+    keep_sample,
 )
 from base.agents.sdk import (
     policy_from_aliases as policy_from_aliases,
@@ -92,10 +96,14 @@ class _Refresh:
 # meiva:note
 # The SDK installation's policy snapshot and the finite lifetime of its refresh. `initial` is the
 # snapshot served until the first fetch lands; `source` says where each refresh reads from, off
-# the SDK call path. The installation's root builds both.
+# the SDK call path; `rng` is the process root's random generator, which the owner draws each
+# call's sampling decision from. The installation's root builds all three.
 class SamplingPolicyOwner:
-    def __init__(self, *, initial: SamplingPolicy, source: SamplingSource) -> None:
+    def __init__(
+        self, *, initial: SamplingPolicy, source: SamplingSource, rng: random.Random
+    ) -> None:
         self.source = source
+        self._rng = rng
         self.value = initial
         self.next_refresh = time.monotonic() + source.refresh_seconds
         self.lock = threading.Lock()
@@ -103,14 +111,11 @@ class SamplingPolicyOwner:
         self.error: tuple[Exception, TracebackType | None] | None = None
         self.worker: _Refresh | None = None
         self.stopped = False
-        self.calls = 0
 
     def should_sample(self, every: int) -> bool:
         if every <= 1:
             return True
-        with self.lock:
-            self.calls += 1
-            return self.calls % every == 0
+        return keep_sample(every, self._rng.random())
 
     def read(self) -> SamplingPolicy:
         with self.lock:
@@ -226,7 +231,7 @@ class SamplingPolicyOwner:
 # the home's `.env` location here, once, as values. The environment is the live process
 # environment, so a flag or token delivered after install is seen at the next refresh. Until the
 # first refresh the owner serves the policy the environment already carries.
-def process_sampling_owner() -> SamplingPolicyOwner:
+def process_sampling_owner(rng: random.Random) -> SamplingPolicyOwner:
     from base.host.env.dotenv_file import process_env_file
     from base.host.env.registry import process_environment
 
@@ -234,4 +239,5 @@ def process_sampling_owner() -> SamplingPolicyOwner:
     return SamplingPolicyOwner(
         initial=policy_from_aliases(env),
         source=SamplingSource(env=env, env_path=process_env_file()),
+        rng=rng,
     )

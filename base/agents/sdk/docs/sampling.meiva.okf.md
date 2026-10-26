@@ -27,7 +27,7 @@ rejects a call before execution and therefore adds no tally.
 
 The owner is built from a `SamplingSource` value: the launch environment, the home's `.env`
 path, the gateway-fetch tuning and the wait between refreshes. A composition root builds it
-(`process_sampling_owner()` reads the live process environment and the home once); a test
+(`process_sampling_owner(rng)` reads the live process environment and the home once); a test
 passes a dict, a file in `tmp_path` or a loopback gateway. Until the first refresh the owner
 serves the policy the environment already carries (`policy_from_aliases`), and it refreshes at
 most once per `refresh_seconds` (five by default), the first one due that long after the owner
