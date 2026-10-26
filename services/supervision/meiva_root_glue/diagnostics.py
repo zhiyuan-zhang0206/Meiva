@@ -11,7 +11,6 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import logging
-import time
 from collections.abc import Callable, Sequence
 from contextlib import suppress
 from dataclasses import dataclass
@@ -121,12 +120,12 @@ class DiagnosticMonitor:
             self._closed = True
         for state in self._states.values():
             state.runner.close()
-        deadline = time.monotonic() + 0.2
+        deadline = self._clock.monotonic() + 0.2
         unfinished: list[str] = []
         failures: list[BaseException] = []
         for name, state in self._states.items():
             try:
-                if not state.runner.stop(max(0.0, deadline - time.monotonic())):
+                if not state.runner.stop(max(0.0, deadline - self._clock.monotonic())):
                     unfinished.append(name)
             except BaseException as exc:
                 failures.append(exc)
@@ -143,9 +142,9 @@ class DiagnosticMonitor:
 
     async def _check(self, check: Diagnostic) -> None:
         state = self._states[check.name]
-        if time.monotonic() < state.next_due:
+        if self._clock.monotonic() < state.next_due:
             return
-        state.next_due = time.monotonic() + check.interval_s
+        state.next_due = self._clock.monotonic() + check.interval_s
         report_closed = Event()
         try:
             result = await state.runner.observe(self._sample(check, report_closed), check.timeout_s)
@@ -170,7 +169,7 @@ class DiagnosticMonitor:
         reporter = check.report
         if reporter is None:
             return check.probe
-        deadline = time.monotonic() + check.timeout_s
+        deadline = self._clock.monotonic() + check.timeout_s
 
         def sample_and_report() -> DaemonProbe:
             result = check.probe()
@@ -178,7 +177,7 @@ class DiagnosticMonitor:
                 with self._report_admission:
                     if self._closed or report_closed.is_set():
                         return DaemonProbe.unavailable("diagnostic report admission closed")
-                    if time.monotonic() >= deadline:
+                    if self._clock.monotonic() >= deadline:
                         return DaemonProbe.unavailable("diagnostic sample exceeded its deadline")
                     # Admission starts the report; stop never waits for the callback.
                 try:
@@ -341,7 +340,7 @@ class RootHealthRounds:
     async def _loop(self) -> None:
         while True:
             await self.run_round()
-            await asyncio.sleep(self._interval_s)
+            await self._clock.asleep(self._interval_s)
 
     async def stop(self) -> None:
         task = self._task
