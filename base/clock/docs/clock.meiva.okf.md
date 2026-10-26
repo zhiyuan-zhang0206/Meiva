@@ -91,6 +91,14 @@ Timers. ManualTimers is a sequential test double, not a concurrent scheduler: it
 waits immediately advance shared virtual time. It does not establish correctness
 for real blocking I/O or cross-task deadline races.
 
+## Identifiers
+
+`base.clock.ids.new_uuid(rng)` is the one way a component above `base` makes an identifier, an
+idempotency key or a record name: the 128 bits of a version 4 UUID drawn from the `random.Random`
+its process root built. It reads no entropy of its own, so the root chooses the source (a
+`SystemRandom` where the id must be unguessable) and a test that hands in a seeded generator gets
+the same identifiers on every run. A component does not take an id callable; it takes the generator.
+
 `base/deploy/timing.py` defines another class named `Clock`: the registry that gives
 each timing constant its place in the clock lattice. It has nothing to do with this
 module.
