@@ -280,3 +280,52 @@ def test_base_policy_uses_the_owner_snapshot_decoder(tmp_path: Path, legacy: str
     else:
         _assert_selected(root, "base/leaf.py", "tests/consumer/test_old.py", base_ref="HEAD")
     assert (root / "meizel.policy.toml").read_text() == ""
+
+
+def test_interface_early_cutoff_isolates_strict_module_internal_edits(tmp_path: Path) -> None:
+    root = _repo(tmp_path)
+    _write(root, "base/lm/meizel.toml", 'purity = "strict"\n')
+    _write(
+        root,
+        "base/lm/retry.py",
+        "def compute_backoff(attempt: int, *, backoff_ms: int = 100) -> int:\n"
+        "    return backoff_ms * attempt\n",
+    )
+    _write(
+        root,
+        "base/lm/tests/test_lm.py",
+        "from base.lm.retry import compute_backoff\n\ndef test_lm():\n    assert compute_backoff(2) == 200\n",
+    )
+    _write(
+        root,
+        "tests/consumer/test_cli.py",
+        "from base.lm.retry import compute_backoff\n\ndef test_cli():\n    assert compute_backoff(1) == 100\n",
+    )
+    _git(root, "init", "-q")
+    _git(root, "add", ".")
+    _git(root, "-c", "user.name=Test", "-c", "user.email=test@example.com", "commit", "-qm", "base")
+    base = _git(root, "rev-parse", "HEAD")
+
+    _write(
+        root,
+        "base/lm/retry.py",
+        "def _clamp(value: int) -> int:\n"
+        "    return max(0, value)\n\n"
+        "def compute_backoff(attempt: int, *, backoff_ms: int = 100) -> int:\n"
+        "    return _clamp(backoff_ms * attempt)\n",
+    )
+    internal = test_selector.select_tests(["base/lm/retry.py"], repo_root=root, base_ref=base)
+    assert internal.decision == "SELECTED"
+    assert internal.tests == ("base/lm/tests/test_lm.py",)
+
+    _write(
+        root,
+        "base/lm/retry.py",
+        "def compute_backoff(attempt: int, *, backoff_s: float = 0.1) -> float:\n"
+        "    return backoff_s * attempt\n",
+    )
+    signature_changed = test_selector.select_tests(
+        ["base/lm/retry.py"], repo_root=root, base_ref=base
+    )
+    assert signature_changed.decision == "SELECTED"
+    assert signature_changed.tests == ("base/lm/tests/test_lm.py", "tests/consumer/test_cli.py")

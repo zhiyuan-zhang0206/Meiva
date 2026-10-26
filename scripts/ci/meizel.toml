@@ -2,6 +2,7 @@ exports = ["cli.py", "pull_requests", "refresh_test_durations.py", "shard_counts
 
 [uses]
 "cli.py" = ["pull_requests"]
+"e2e_scope.py" = ["test_impact.py", "test_selector.py"]
 "file_shard_runtime.py" = ["file_shard_shadow.py"]
 "pull_requests" = ["collection_tracebacks.py", "test_selector.py"]
 "test_selector.py" = ["test_impact.py"]
