@@ -40,7 +40,7 @@ from base.packages.docs.pages_copy import (
     PAGE_SERVER_TIMEOUT_BODY,
 )
 from base.telemetry.alerts import display_language
-from gateway.http.config import GatewayConfig, gateway_config
+from gateway.http.config import GatewayConfig, gateway_clock, gateway_config
 from gateway.routers.page_serving import page_acceptance, page_target, page_target_policy
 from gateway.schemas import PageCloseRequest, PageRegisterRequest
 from ops.pages import (
@@ -179,6 +179,7 @@ async def post_guarded_page_register(
         _absolute_url(request, ""),
         request.app.state.page_host_cache,
         gateway_config(request).pages.default_ttl_seconds,
+        gateway_clock(request),
     )
     if not result.replayed:
         for name in result.closed_names:

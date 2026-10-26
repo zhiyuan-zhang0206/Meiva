@@ -33,7 +33,7 @@ from typing import Any
 from fastapi import APIRouter, Request, Response
 
 from base import telemetry
-from gateway.http.config import utc_now
+from gateway.http.config import gateway_clock
 from gateway.http.middleware.error_envelope import error_response
 from gateway.schemas import FrontendInteractionIn, FrontendTelemetryBatch
 
@@ -128,7 +128,7 @@ async def ingest(request: Request) -> Response:
         )
 
     limiter: SessionRateLimiter = request.app.state.telemetry_rate_limiter
-    now = utc_now().timestamp()
+    now = gateway_clock(request).now().timestamp()
     accepted = 0
     dropped = 0
     for ev in batch.events:

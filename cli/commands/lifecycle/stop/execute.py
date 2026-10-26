@@ -115,26 +115,29 @@ def execute_plan(
     timed: bool,
 ) -> StopOutcome:
     outcome = StopOutcome((), ())
+    clock = Clock(clock_config_from_boot(env.command.config), timers=env.command.timers)
     for step in plan.steps:
         with timed_phase(
             env.command.home, env.command.pid, run.phases, phase_label(step) if timed else None
         ):
-            reported = _perform(step, env, run, retained_children)
+            reported = _perform(step, env, run, retained_children, clock=clock)
         if reported is not None:
             outcome = reported
     return outcome
 
 
 # meiva:note
-# Perform one step; only the data-plane stop has something to report.
+# Perform one step, reading the time from the stop's one `clock`; only the data-plane stop has
+# something to report.
 def _perform(
     step: StopStep,
     env: StopEnvironment,
     run: StopRun,
     retained_children: list[subprocess.Popen[bytes]] | None,
+    *,
+    clock: Clock,
 ) -> StopOutcome | None:
     command = env.command
-    clock = Clock(clock_config_from_boot(command.config), timers=command.timers)
     match step:
         case ClearServing():
             start_serving.clear_serving(command.home)

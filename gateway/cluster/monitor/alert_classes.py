@@ -28,7 +28,7 @@ from gateway.cluster.schemas import (
     AlertClassSamples,
     AlertLevel,
 )
-from gateway.http.config import GatewayConfig, utc_now
+from gateway.http.config import GatewayConfig, gateway_clock
 from gateway.schemas.stats import StatsWindowHours, window_delta
 from services.upkeep.events_maintenance import resolution
 
@@ -77,7 +77,7 @@ def get_alert_classes(
     request: Request,
     hours: Annotated[StatsWindowHours, Query()] = StatsWindowHours.H24,
 ) -> AlertClassesResponse:
-    now = utc_now()
+    now = gateway_clock(request).now()
     config: GatewayConfig = request.app.state.gateway_config
     try:
         with request.app.state.db_pool.connection() as conn:
@@ -90,7 +90,7 @@ def get_alert_classes(
         classes=classes[: config.alert_classes_limit],
         total_classes=len(classes),
         total_events=sum(row.count for row in classes),
-        as_of=utc_now(),
+        as_of=gateway_clock(request).now(),
     )
 
 
@@ -106,7 +106,7 @@ def get_alert_class_samples(
     process: Annotated[str, Query(max_length=255)] = "",
     hours: Annotated[StatsWindowHours, Query()] = StatsWindowHours.H24,
 ) -> AlertClassSamples:
-    now = utc_now()
+    now = gateway_clock(request).now()
     config: GatewayConfig = request.app.state.gateway_config
     try:
         with (

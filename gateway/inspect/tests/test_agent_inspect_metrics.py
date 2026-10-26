@@ -29,6 +29,7 @@ from fastapi import HTTPException
 from psycopg_pool import ConnectionPool
 
 import meiva_builtins.plugins as shipped_plugins
+from base.clock import SYSTEM_TIMERS, Clock, ClockConfig
 from base.db import Database
 from base.telemetry.metrics.plugin_metrics import MetricSpec
 from gateway.inspect import _plugin_metrics
@@ -93,7 +94,8 @@ def _metric(
 # The inspector results of `agent_id` for these registry rows, as the route serializes them.
 def _run(pool: ConnectionPool, agent_id: int, *metrics: dict[str, Any]) -> list[dict[str, Any]]:
     registry = [MetricSpec.model_validate(m) for m in metrics]
-    results = metrics_for_agent(pool, agent_id, registry=registry)
+    clock = Clock(ClockConfig("UTC", None, message_timestamp_weekday=False), timers=SYSTEM_TIMERS)
+    results = metrics_for_agent(pool, agent_id, registry=registry, clock=clock)
     return [result.model_dump(mode="json") for result in results]
 
 

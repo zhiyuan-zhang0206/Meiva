@@ -124,6 +124,7 @@ def _serve_process(
         producer=process.event_pipeline,
         machine_reader=process.machine.name,
         image=process.image,
+        home=process.home,
     )
 
     # Raise the cluster's minimum code version to this gateway's own: a process

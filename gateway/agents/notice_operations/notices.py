@@ -42,7 +42,7 @@ from gateway.agents.schemas import (
     ResolveNoticeIn,
 )
 from gateway.http.auth.request_principal import PrincipalScopeError, request_key
-from gateway.http.config import gateway_config, utc_now
+from gateway.http.config import gateway_clock, gateway_config
 from ops import lifecycle as _ops
 from ops.agents import get_agent_status
 
@@ -268,7 +268,9 @@ async def post_notice_resolve(
                     detail=f"notice {notice_id} does not exist for agent {agent_id}",
                 )
             title, require_response, resolved_at, raw_question, expire_at, created_at = row
-            if raw_question is not None and question_expired(expire_at, now=utc_now()):
+            if raw_question is not None and question_expired(
+                expire_at, now=gateway_clock(request).now()
+            ):
                 raise HTTPException(status_code=409, detail="this question has expired")
             resolved_answer = resolution_answer(body, raw_question)
             reply = resolved_answer.reply
@@ -276,7 +278,7 @@ async def post_notice_resolve(
                 _ACTION_RESOLUTION[action],
                 require_response=bool(require_response),
                 created_at=created_at,
-                now=utc_now(),
+                now=gateway_clock(request).now(),
                 replied=reply is not None or resolved_answer.answer is not None,
             )
             if resolved_at is not None:
@@ -410,7 +412,7 @@ async def post_notice_create(
             if previous is not None:
                 return _replayed_create_receipt(previous)
             validate_creation(body)
-            validate_creation_state(conn, body)
+            validate_creation_state(conn, body, now=gateway_clock(request).now())
             # meiva:note
             # Serialize all creations for an agent, including different keys:
             # no-open-notice races must not allocate the same local id.
@@ -443,7 +445,7 @@ async def post_notice_create(
                 )
             final_expire_at = notice_expiry(
                 body.expire_at,
-                now=utc_now(),
+                now=gateway_clock(request).now(),
                 ttl_limit_seconds=gateway_config(request).notice_ttl_limit_seconds,
             )
 
@@ -685,12 +687,14 @@ def validate_creation(body: NoticeCreateIn) -> None:
 
 # meiva:note
 # Validate mutable creation preconditions only for a fresh operation.
-def validate_creation_state(conn: psycopg.Connection, body: NoticeCreateIn) -> None:
+def validate_creation_state(
+    conn: psycopg.Connection, body: NoticeCreateIn, *, now: datetime
+) -> None:
     if body.task_id is not None:
         with conn.cursor() as cur:
             cur.execute("SELECT 1 FROM agent_tasks WHERE id = %s", (body.task_id,))
             if cur.fetchone() is None:
                 raise HTTPException(status_code=422, detail=f"task {body.task_id} does not exist")
-    problem = past_expiry_problem(body.expire_at, now=utc_now())
+    problem = past_expiry_problem(body.expire_at, now=now)
     if problem is not None:
         raise HTTPException(status_code=422, detail=problem)
