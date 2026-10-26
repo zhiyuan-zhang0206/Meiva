@@ -55,12 +55,13 @@ log path, environment home and PATH, using the shared `launchd_environment` enco
 The log file is escaped as XML text in both output/error fields, so a private home
 containing `&` or `<` round trips through plistlib without changing the real path.
 
-The registration shell observes the plist destination, creates its directory,
-resolves the binary, reads the log home, plans the boot arguments, reads the
-environment home and then composes PATH, in that order. The two home reads and
-binary observations remain independent; this is no shared or atomic home snapshot.
-Only a changed definition is written. The enabled/home/selection gates and Linux
-systemd delegation retain their original interfaces and order.
+The registration shell receives the `JobRoots` its command captured and observes nothing
+about the home itself: the plist destination derives from `roots.user_home`, the binary is
+the checkout executable of `roots.repo`, the log directory and environment home are
+`roots.home`, and PATH composes from `roots.user_home`. On Linux the boot unit context is
+built from the same roots plus the account that owns the host process. Retirement takes
+the same roots. Only a changed definition is written. The enabled/home/selection gates
+and the systemd delegation keep their order.
 
 ## Retry definition
 

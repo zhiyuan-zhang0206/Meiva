@@ -52,7 +52,7 @@ def unit_home(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
 def default_home(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     """A fake OS user whose `~/.meiva` is this test's home, and so the default home.
 
-    OS jobs belong to the default home only (`base.host.system.cron.mechanics.owns_os_jobs`),
+    OS jobs belong to the default home only (`base.host.system.cron.mechanics.owns_os_job_home`),
     so a test of a registrar or unregistrar needs this, not `unit_home`. `HOME`
     points into the tmp dir, which also keeps `~/Library/LaunchAgents` and the
     crontab lock off the operator's real ones; yields the user's home, whose
