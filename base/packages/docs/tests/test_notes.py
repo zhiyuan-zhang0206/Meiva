@@ -1,19 +1,15 @@
-"""base.packages.docs.notes — the note model + walkers (audit #2448 Phase 1/2 pure-function
-unit tests: no filesystem for parse/extract, tmp_path for walk)."""
+# meiva:note
+# base.packages.docs.notes — the note model, tested as pure functions.
 
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Any
-
-import pytest
 
 from base.packages.docs.frontmatter import parse_frontmatter_typed
 from base.packages.docs.notes import (
     extract_md_links,
     normalize_tags,
     parse_note,
-    walk_notes,
 )
 
 # ── parse_frontmatter_typed ──
@@ -142,52 +138,3 @@ class TestExtractMdLinks:
 
     def test_no_links(self, tmp_path: Path) -> None:
         assert extract_md_links("# nothing\n", tmp_path, tmp_path, "alpha") == ()
-
-
-# ── walk_notes ──
-
-
-class TestWalkNotes:
-    def test_walks_sorted_and_parses(self, tmp_path: Path) -> None:
-        (tmp_path / "b.md").write_text("---\ntitle: B\n---\n\nb\n", encoding="utf-8")
-        (tmp_path / "a.md").write_text("---\ntitle: A\n---\n\na\n", encoding="utf-8")
-        (tmp_path / "sub").mkdir()
-        (tmp_path / "sub" / "c.md").write_text("---\ntitle: C\n---\n\nc\n", encoding="utf-8")
-
-        out = list(walk_notes(tmp_path))
-        assert [(p.name, n.rel, n.title) for p, n in out] == [
-            ("a.md", "a", "A"),
-            ("b.md", "b", "B"),
-            ("c.md", "sub/c", "C"),
-        ]
-
-    def test_skip_names_and_no_frontmatter(self, tmp_path: Path) -> None:
-        (tmp_path / "MEMORY.md").write_text("---\ntitle: Idx\n---\n\n#\n", encoding="utf-8")
-        (tmp_path / "plain.md").write_text("# no fm\n", encoding="utf-8")
-        (tmp_path / "good.md").write_text("---\ntitle: G\n---\n\ng\n", encoding="utf-8")
-
-        out = list(walk_notes(tmp_path, skip_names=frozenset({"MEMORY.md"})))
-        assert [n.rel for _, n in out] == ["good"]
-
-    def test_unreadable_file_warns_and_skips(self, tmp_path: Path) -> None:
-        (tmp_path / "x.md").mkdir()  # a directory named *.md — read_text raises
-        (tmp_path / "good.md").write_text("---\ntitle: G\n---\n\ng\n", encoding="utf-8")
-        warnings: list[str] = []
-        out = list(walk_notes(tmp_path, warnings=warnings))
-        assert [n.rel for _, n in out] == ["good"]
-        assert warnings == ["cannot read x.md"]
-
-    def test_unreadable_file_without_warnings_list_logs_a_warning(
-        self, tmp_path: Path, loguru_records: list[dict[str, Any]]
-    ) -> None:
-        (tmp_path / "x.md").mkdir()
-        list(walk_notes(tmp_path))
-        assert any(
-            "cannot read note x.md" in r["message"] and r["level"].no >= 30 for r in loguru_records
-        )
-
-    def test_notes_are_frozen(self, tmp_path: Path) -> None:
-        (tmp_path / "a.md").write_text("---\ntitle: A\n---\n\na\n", encoding="utf-8")
-        note = next(walk_notes(tmp_path))[1]
-        with pytest.raises(AttributeError):
-            note.title = "changed"  # type: ignore[misc]
