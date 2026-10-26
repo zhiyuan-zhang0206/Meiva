@@ -71,8 +71,7 @@ def sdk_metering(sdk_environment: MeivaContext) -> Iterator[None]:
 
 # meiva:note
 # A bare SDK installation over a fixed sampling owner, for a test that pins an agent without
-# installing a surface but reaches `meiva.sdk_surface.settings.bus()`: the SDK's event bus draws
-# its retry jitter from the generator the installation's sampling owner carries.
+# installing a surface.
 @pytest.fixture
 def sdk_root() -> Generator[Installation]:
     with held_installation(Installation.bare(sampling=fixed_sampling_owner())) as installation:

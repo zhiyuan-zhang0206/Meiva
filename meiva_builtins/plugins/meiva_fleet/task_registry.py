@@ -25,6 +25,7 @@ if TYPE_CHECKING:
     # site so plugin autoload stays off the psycopg stack (task #3816).
     import psycopg
 
+    from base.events.live.bus import EventBus
     from base.telemetry import Event
 
 from ._task_assignment import TaskAssignment, create_and_assign_guarded
@@ -157,7 +158,7 @@ def create_in_context(
         priority=priority,
         operation_key=operation_key,
     )
-    publish_creation(committed.publication)
+    publish_creation(committed.publication, context.require_bus())
     return committed.task
 
 
@@ -229,18 +230,17 @@ def commit_creation(
 # meiva:note
 # The emission half of a creation: the recorded events, then a live refresh of every open task
 # board. A replayed acceptance publishes nothing.
-def publish_creation(committed: TaskPublication | None) -> None:
+def publish_creation(committed: TaskPublication | None, bus: EventBus) -> None:
     if committed is None:
         return
     # meiva:note
     # Deferred imports keep the psycopg stack off plugin autoload (task #3816).
     from base import telemetry
     from base.events.live import announce
-    from meiva.sdk_surface import settings as sdk_settings
 
     for event in publication_events(committed):
         telemetry.emit_prepared(event)
-    announce.publish_task_created_sync(sdk_settings.bus(), committed.actor, committed.task_id)
+    announce.publish_task_created_sync(bus, committed.actor, committed.task_id)
 
 
 def create_and_assign(
@@ -392,7 +392,8 @@ def update_in_context(
             parent_id=parent_id,
             note=note,
             operation_key=operation_key,
-        )
+        ),
+        context.require_bus(),
     )
 
 
@@ -538,18 +539,17 @@ def commit_update(
 # meiva:note
 # The emission half of an update: the recorded events, a live refresh of every open task board and,
 # when the update closed the task, one log line. A replayed commit publishes nothing.
-def publish_update(committed: TaskPublication | None) -> None:
+def publish_update(committed: TaskPublication | None, bus: EventBus) -> None:
     if committed is None:
         return
     # meiva:note
     # Deferred imports keep the psycopg stack off plugin autoload (task #3816).
     from base import telemetry
     from base.events.live import announce
-    from meiva.sdk_surface import settings as sdk_settings
 
     for event in publication_events(committed):
         telemetry.emit_prepared(event)
-    announce.publish_task_updated_sync(sdk_settings.bus(), committed.actor, committed.task_id)
+    announce.publish_task_updated_sync(bus, committed.actor, committed.task_id)
     if committed.closed_title is not None:
         _log_closed(committed.actor, committed.task_id, committed.closed_title)
 

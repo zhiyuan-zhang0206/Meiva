@@ -13,9 +13,11 @@ from base.agents.context.identity import AgentIdentity, ExternalLease
 from base.api_contracts.agent_contract import Harness
 from base.clock import SYSTEM_TIMERS, Clock
 from base.clock.configuration import clock_config_from_boot
+from base.clock.tests.seeded_rng import seeded_rng
 from base.cluster.machine import MachineIdentityReader
 from base.cluster.machine.configured import ConfiguredMachineIdentity
 from base.config.tests.configuration import snapshot_process_config
+from base.events.live.bus import EventBus
 from base.native_process.runtime_incarnation import RuntimeIncarnation
 from base.native_process.turn_identity import HostedServiceResources, HostedTurnResources
 from meiva.boot import clients_over, derived_clients
@@ -44,6 +46,15 @@ def snapshot_clients() -> ClientSet:
 def snapshot_clients_over(database: DatabaseFactory) -> ClientSet:
     config = snapshot_process_config()
     return clients_over(config, ConfiguredMachineIdentity(config), database)
+
+
+# meiva:note
+# The event bus a pinned agent carries when the test names none: the bound context's, else one over
+# the live settings drawing its retry jitter from a seeded generator, as a process root builds it.
+def _pinned_bus(bound: MeivaContext | None) -> EventBus:
+    if bound is not None and bound.bus is not None:
+        return bound.bus
+    return EventBus.from_settings(rng=seeded_rng())
 
 
 def pin_agent(
@@ -75,6 +86,7 @@ def pin_agent(
                 if clock_factory is not None
                 else (None if bound is None else bound.clock_factory)
             ),
+            bus=_pinned_bus(bound),
         )
     )
 
@@ -99,4 +111,5 @@ def exec_context(
         hosted_resources=resources,
         clients=derived_clients(config, machine),
         clock_factory=lambda: Clock(clock_config_from_boot(config), timers=SYSTEM_TIMERS),
+        bus=EventBus.from_settings(rng=seeded_rng()),
     )

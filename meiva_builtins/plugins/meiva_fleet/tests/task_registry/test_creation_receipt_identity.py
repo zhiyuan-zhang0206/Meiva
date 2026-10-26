@@ -8,8 +8,10 @@ import pytest
 from base.agents.context import MeivaContext
 from base.agents.context.clients import ClientSet
 from base.agents.context.identity import AgentIdentity, ExternalLease
+from base.clock.tests.seeded_rng import seeded_rng
 from base.db import Database
 from base.db.code_version_gate import ProcessDbGate
+from base.events.live.bus import EventBus
 from meiva.tests.fixtures.pin_agent import pin_agent
 from meiva_builtins.plugins.meiva_fleet import task_registry
 from meiva_builtins.plugins.meiva_fleet.tests.task_registry.seeds import (
@@ -65,7 +67,11 @@ def test_lease_expiring_during_operation_lock_wait_cannot_write(
             identity = AgentIdentity(
                 owner, False, lease=ExternalLease(actor, validate, lambda: None)
             )
-            context = MeivaContext(identity=identity, clients=clients)
+            context = MeivaContext(
+                identity=identity,
+                clients=clients,
+                bus=EventBus.from_settings(rng=seeded_rng()),
+            )
             task_registry.create_in_context(
                 context, "stale", "work", parent=root_task_id, operation_key="wait"
             )

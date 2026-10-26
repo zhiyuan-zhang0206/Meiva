@@ -11,8 +11,10 @@ import meiva
 from base.agents.context import MeivaContext
 from base.agents.context.clients import ClientSet
 from base.agents.context.identity import AgentIdentity
+from base.clock.tests.seeded_rng import seeded_rng
 from base.db import Database
 from base.db.code_version_gate import ProcessDbGate
+from base.events.live.bus import EventBus
 from base.telemetry.tests.capture.event_capture import EmittedEvents
 from base.telemetry.tests.capture.event_capture import emitted_events as emitted_events
 from meiva.tests.fixtures.pin_agent import pin_agent
@@ -48,7 +50,11 @@ def test_concurrent_duplicate_note_has_one_business_effect(
     def append(_index: int) -> None:
         clients = ClientSet(database=lambda: Database.from_settings(gate=database_gate))
         try:
-            context = MeivaContext(identity=AgentIdentity(actor, True), clients=clients)
+            context = MeivaContext(
+                identity=AgentIdentity(actor, True),
+                clients=clients,
+                bus=EventBus.from_settings(rng=seeded_rng()),
+            )
             barrier.wait()
             task_registry.update_in_context(
                 context, tid, note="one progress line", operation_key="same"
@@ -100,7 +106,7 @@ def test_publication_emits_the_committed_events_once_and_in_order(
     assert committed is not None
     assert task_registry.publication_events(committed)[0].event_name == "task_update"
 
-    task_registry.publish_update(committed)
+    task_registry.publish_update(committed, meiva.context.require_bus())
 
     assert emitted_events.names() == [
         event.event_name for event in task_registry.publication_events(committed)

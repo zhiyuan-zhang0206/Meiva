@@ -4,6 +4,9 @@
 # `meiva/sdk_surface/tests/test_identity_plan.py`; these tests drive the steps over a real slot value.
 from __future__ import annotations
 
+import random
+from pathlib import Path
+
 import pytest
 
 from base.agents.context import MeivaContext
@@ -12,6 +15,7 @@ from base.agents.sdk.tests.sampling_owners import fixed_sampling_owner
 from base.clock import SYSTEM_TIMERS, Clock, ClockConfig
 from base.cluster.machine import MachineIdentityReader
 from base.config.tests.configuration import snapshot_process_config
+from base.paths.tests.homes import unit_home as unit_home
 from meiva import boot
 from meiva.sdk_surface.installation import Installation, Loading, slot
 from meiva.sdk_surface.pure.load_plan import LoadStep
@@ -68,6 +72,36 @@ def test_an_owned_boot_carries_the_roots_of_its_configuration() -> None:
         assert owned.new_context().require_clock() is owned.clock
     finally:
         owned.clients.close()
+
+
+# meiva:note
+# An attachment draws its identifiers from the operating system's generator and carries the
+# homes its boot read once and an event bus over its own configuration, so nothing it runs reads
+# them again.
+def test_an_attachment_context_carries_the_homes_the_generator_and_the_bus_of_its_boot() -> None:
+    owned = boot.own_external_process(snapshot_process_config())
+    try:
+        context = owned.new_context()
+        assert context.require_user_home() == Path.home()
+        assert context.require_meiva_home() == owned.meiva_home
+        assert isinstance(context.require_rng(), random.SystemRandom)
+        assert context.require_bus() is not None
+    finally:
+        owned.clients.close()
+
+
+# meiva:note
+# A launched script's context carries the same four values, with a plain generator (nothing it
+# draws is a secret) that the SDK's sampling owner shares.
+def test_a_launched_context_carries_the_homes_the_generator_and_the_bus(
+    unit_home: Path,
+) -> None:
+    context = boot.launched_context(env={"MEIVA_AGENT_ID": "7"}, config=snapshot_process_config())
+    assert context is not None
+    assert context.require_user_home() == Path.home()
+    assert context.require_meiva_home() == unit_home
+    assert not isinstance(context.require_rng(), random.SystemRandom)
+    assert context.require_bus() is not None
 
 
 def test_a_borrowed_boot_takes_the_machine_and_database_of_the_bound_context(

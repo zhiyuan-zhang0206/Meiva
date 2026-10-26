@@ -19,6 +19,7 @@ import meiva
 from base.agents.context import MeivaContext
 from base.agents.context.clients import ClientSet
 from base.agents.context.identity import AgentIdentity
+from base.clock.tests.seeded_rng import seeded_rng
 from base.db import Database
 from base.db.code_version_gate import ProcessDbGate
 from base.events.live.bus import EventBus
@@ -56,7 +57,11 @@ def test_concurrent_creation_returns_same_original_task(
     def create(_index: int) -> task_registry.Task:
         clients = ClientSet(database=lambda: Database.from_settings(gate=database_gate))
         try:
-            context = MeivaContext(identity=AgentIdentity(actor, True), clients=clients)
+            context = MeivaContext(
+                identity=AgentIdentity(actor, True),
+                clients=clients,
+                bus=EventBus.from_settings(rng=seeded_rng()),
+            )
             barrier.wait()
             return task_registry.create_in_context(
                 context,
@@ -129,7 +134,7 @@ def test_publication_emits_the_committed_events_once_and_in_order(
     assert publication is not None
     assert task_registry.publication_events(publication)
 
-    task_registry.publish_creation(publication)
+    task_registry.publish_creation(publication, meiva.context.require_bus())
 
     assert emitted_events.names() == [
         event.event_name for event in task_registry.publication_events(publication)
@@ -314,7 +319,7 @@ def test_sdk_result_and_materialized_events_cannot_rewrite_publication(
     )
 
     with recorded_events(event_bus) as messages:
-        task_registry.publish_creation(publication)
+        task_registry.publish_creation(publication, event_bus)
     assert [message["task_id"] for message in messages] == [task_id]
     assert tuple(event_line(event) for event in emitted_events) == retained_lines
 
