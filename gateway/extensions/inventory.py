@@ -22,6 +22,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+from datetime import datetime
 
 from fastapi import APIRouter, HTTPException, Request
 from psycopg_pool import ConnectionPool
@@ -37,7 +38,7 @@ from gateway.extensions.schemas import (
     InventoryMachineView,
     InventoryWriteResult,
 )
-from gateway.http.config import utc_now
+from gateway.http.config import gateway_clock
 from ops.cluster import rpc as cluster_rpc
 from ops.rpc_schemas import InventoryReadResult, InventoryWriteOpResult
 
@@ -155,12 +156,12 @@ async def _dial_inventory_read(
 #
 # `plan_dials` decides which hosts are dialed; the rest report `unreachable` directly.
 # Dialed hosts run under a bounded transport policy.
-async def _aggregate(db: Database, pool: ConnectionPool, *, budget_s: float) -> InventoryAggregate:
+async def _aggregate(
+    db: Database, pool: ConnectionPool, *, budget_s: float, now: datetime
+) -> InventoryAggregate:
     rows = _agent_runner_rows(pool)
     machines = [name for name, _stopped in rows]
-    plan = plan_dials(
-        rows, await asyncio.to_thread(snapshots.read_all_blocking, pool), now=utc_now()
-    )
+    plan = plan_dials(rows, await asyncio.to_thread(snapshots.read_all_blocking, pool), now=now)
     if plan.skipped:
         _log.debug("inventory aggregate: not dialing known-down host(s) %s", sorted(plan.skipped))
 
@@ -201,6 +202,7 @@ async def get_inventory(
             request.app.state.db,
             request.app.state.db_pool,
             budget_s=request.app.state.gateway_config.inventory_host_wait_seconds,
+            now=gateway_clock(request).now(),
         )
 
     await asyncio.to_thread(_assert_inventory_target, request.app.state.db_pool, machine)

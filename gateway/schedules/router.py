@@ -461,6 +461,7 @@ async def guarded_draft_schedule(
         catalog=require_model_catalog(request),
         authority=request.app.state.config_authority,
         creation_key=key,
+        clock=gateway_clock(request),
         creation_identity=body.model_dump(mode="json"),
     )
     return ScheduleDraftResponse(agent_id=spawned.id)

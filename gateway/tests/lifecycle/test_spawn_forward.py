@@ -20,6 +20,7 @@ from psycopg.rows import TupleRow
 from psycopg_pool import ConnectionPool
 
 from base.agents.observation.evidence import AvailabilityReason
+from base.clock import SYSTEM_TIMERS, Clock, ClockConfig
 from base.cluster.machine import MachineIdentityReader
 from base.cluster.machine.tests.identity import MachineIdentitySetter
 from base.db import Database
@@ -256,6 +257,9 @@ def test_receipt_read_failure_keeps_accepted_creation(fault: str, database: Data
             987654,
             catalog=build_model_catalog(),
             default_model="model",
+            clock=Clock(
+                ClockConfig("UTC", None, message_timestamp_weekday=False), timers=SYSTEM_TIMERS
+            ),
         )
     assert availability.reason == AvailabilityReason.UNKNOWN
     assert availability.observed_at

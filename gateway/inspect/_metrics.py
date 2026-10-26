@@ -18,7 +18,7 @@ from psycopg import Connection
 from psycopg.rows import dict_row
 from psycopg_pool import ConnectionPool
 
-from gateway.http.config import utc_now
+from base.clock import Clock
 from gateway.inspect._metrics_health import note_inspect_metrics_coverage
 from gateway.inspect.schemas import (
     AgentActivity,
@@ -215,13 +215,14 @@ def inspect_snapshot(
     hours: StatsWindowHours | None,
     *,
     spawned_at: datetime,
+    clock: Clock,
 ) -> MetricsSnapshot:
     """Read one consistent DB snapshot; no HTTP/Loki request belongs on this path.
 
     Historical evidence remains partial even after a successful backfill, because the old
     best-effort event producer cannot certify that every observation survived.
     """
-    sampled_at = utc_now()
+    sampled_at = clock.now()
     start = spawned_at if hours is None else sampled_at - window_delta(hours)
     with pool.connection(timeout=1.0) as conn, conn.transaction():
         conn.execute("SET TRANSACTION ISOLATION LEVEL REPEATABLE READ READ ONLY")
