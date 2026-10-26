@@ -53,6 +53,7 @@ def identity_child_record() -> dict[str, Any]:
         999999,
         producer=clients.event_pipeline,
         machine_reader=lambda: "lazy-child-probe",
+        environ={},
     )  # the real arm path (task #3816 M4b)
     # The boot clock is all the record reads; the SDK modules stay unimported.
     child = exec_child.ChildContext(

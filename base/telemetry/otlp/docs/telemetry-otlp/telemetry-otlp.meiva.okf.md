@@ -24,8 +24,9 @@ are specified in [[cluster-isolation.meiva.okf.md|Telemetry cluster isolation]].
   (default **on** for the registered `.meiva` production identity). Production
   exec children hold their records until exit, hold saturation, or the max-age
   bound (`base.telemetry.otlp.telemetry_otlp_defer`, task #3816 M4b) instead of warming the
-  exporter stack at boot; test/ad-hoc exec children stay off unless an operator
-  supplies an explicit endpoint. Their request-file handshake is not an export
+  exporter stack at boot. The child's entry builds the `ChildDeferPlan` they follow from its
+  environment (`base.telemetry.delivery.defer_plan`); the exporter never reads it. Test/ad-hoc
+  exec children stay off unless an operator supplies an explicit endpoint. Their request-file handshake is not an export
   authority.
 - `base/telemetry/tracing.py` — spans → OTLP/HTTP (protobuf, content-stripped) to
   the sidecar's `/v1/traces`; the sidecar's file exporter writes the OTLP/JSON

@@ -45,7 +45,12 @@ def test_codex_requires_a_control_endpoint_without_queueing(
     codex_home: CodexHome,
 ) -> None:
     with pytest.raises(RuntimeError, match=r"Steer.*--codex-remote"):
-        bind_adapter(CodexThread(THREAD, None), codex_home=codex_home.home, stdout=io.StringIO())
+        bind_adapter(
+            CodexThread(THREAD, None),
+            codex_home=codex_home.home,
+            antigravity_server=None,
+            stdout=io.StringIO(),
+        )
 
 
 @pytest.mark.parametrize("remote", ["explicit", "default", "bare-unix"])
@@ -55,7 +60,10 @@ def test_codex_emitter_delivers_literal_input_to_the_owning_server(
     with codex_app_server(codex_home.socket, [True]) as host:
         recorded = {"explicit": host.endpoint, "default": None, "bare-unix": "unix://"}[remote]
         adapter = bind_adapter(
-            CodexThread(THREAD, recorded), codex_home=codex_home.home, stdout=io.StringIO()
+            CodexThread(THREAD, recorded),
+            codex_home=codex_home.home,
+            antigravity_server=None,
+            stdout=io.StringIO(),
         )
         assert adapter == CodexSteer(THREAD, host.endpoint)
         deliver(adapter, PUSH)
@@ -81,7 +89,9 @@ def test_controller_session_adapters_need_no_destination_probe(
 ) -> None:
     stream = io.StringIO()
     expected = ClaudeStdout(stream) if isinstance(session, ClaudeSession) else DshStdout(stream)
-    assert bind_adapter(session, codex_home=None, stdout=stream) == expected
+    assert (
+        bind_adapter(session, codex_home=None, antigravity_server=None, stdout=stream) == expected
+    )
 
 
 @pytest.mark.parametrize("kind", [ClaudeStdout, DshStdout])
@@ -114,7 +124,10 @@ def test_antigravity_readiness_passes_for_a_resolvable_language_server(
     server = AntigravityServer(address="127.0.0.1:59901", csrf_token=CSRF)
     record = write_antigravity_endpoint(server, thread_id=str(THREAD), home=tmp_path)
     adapter = bind_adapter(
-        AntigravityConversation(THREAD, str(record)), codex_home=None, stdout=io.StringIO()
+        AntigravityConversation(THREAD, str(record)),
+        codex_home=None,
+        antigravity_server=None,
+        stdout=io.StringIO(),
     )
     assert adapter == AntigravitySend(THREAD, server)
 
@@ -125,7 +138,10 @@ def test_antigravity_readiness_resolves_the_language_server(
     absent = tmp_path / "absent.json"
     with pytest.raises(RuntimeError, match=f"endpoint record is missing at {absent}"):
         bind_adapter(
-            AntigravityConversation(THREAD, str(absent)), codex_home=None, stdout=io.StringIO()
+            AntigravityConversation(THREAD, str(absent)),
+            codex_home=None,
+            antigravity_server=None,
+            stdout=io.StringIO(),
         )
 
 
@@ -136,7 +152,10 @@ def test_antigravity_destination_resolves_once_and_every_push_reuses_it(
         server = AntigravityServer(address=host.address, csrf_token=CSRF)
         record = write_antigravity_endpoint(server, thread_id=str(THREAD), home=tmp_path)
         adapter = bind_adapter(
-            AntigravityConversation(THREAD, str(record)), codex_home=None, stdout=io.StringIO()
+            AntigravityConversation(THREAD, str(record)),
+            codex_home=None,
+            antigravity_server=None,
+            stdout=io.StringIO(),
         )
         # meiva:note
         # The record is read once, at binding: replacing it later does not move the relay.

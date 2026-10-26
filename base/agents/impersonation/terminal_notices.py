@@ -67,7 +67,7 @@ def send_ended_notice(
         if not thread_id:
             return "the recorded Antigravity destination is not deliverable"
         try:
-            server = resolve_antigravity(thread_id)
+            server = resolve_antigravity(thread_id, antigravity_server=None)
         except (OSError, RuntimeError, ValueError) as exc:
             return str(exc)[:_REASON_MAX_CHARS]
         return host_transport.antigravity_live_submit(

@@ -15,6 +15,7 @@ import time
 import traceback
 from collections.abc import Callable
 
+from base.telemetry.delivery.defer_plan import ChildDeferPlan
 from base.telemetry.delivery.receipts import (
     DrainPhase,
     DrainResult,
@@ -166,7 +167,7 @@ class EventPipeline:
         self._thread.join(timeout=max(0.0, deadline - time.monotonic()))
         return self._result(completed=not self._thread.is_alive(), phase=DrainPhase.STOP)
 
-    def defer_exports(self) -> None:
+    def defer_exports(self, plan: ChildDeferPlan) -> None:
         """Writer-only pipelines have no downstream exporter to defer."""
 
     def finalize_exports(self) -> None:
