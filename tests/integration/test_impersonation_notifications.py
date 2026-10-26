@@ -540,6 +540,7 @@ async def test_terminal_relay_start_delivers_interruption_best_effort(
             token=session["relay_token"],
             redis_url=redis_url,
             codex_home=None,
+            antigravity_server=None,
             stdout=transport,
             rng=seeded_rng(),
         ),

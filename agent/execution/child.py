@@ -165,6 +165,7 @@ def init_logger(
     *,
     producer: Callable[[], Any],
     machine_reader: Callable[[], str],
+    environ: Mapping[str, str],
 ) -> None:
     if agent_id is None:
         return
@@ -187,7 +188,9 @@ def init_logger(
             agent_id=agent_id,
         )
         return
-    producer().defer_exports()
+    from base.telemetry.delivery.defer_plan import child_defer_plan
+
+    producer().defer_exports(child_defer_plan(environ))
 
 
 def emit_child_boot_timing(child: ChildContext, *, clients: ClientSet, now: float) -> None:
@@ -414,6 +417,7 @@ def run_child(
         None if raw_agent_id is None else int(raw_agent_id),
         producer=context.clients.event_pipeline,
         machine_reader=context.require_machine().name,
+        environ=os.environ,
     )
     request = read_request(Path(request_path))
     payload = ResultPayload(kind="done")
@@ -446,6 +450,7 @@ def run_child(
         request.agent_id,
         producer=meiva.context.clients.event_pipeline,
         machine_reader=context.require_machine().name,
+        environ=os.environ,
     )
     from meiva.boot import initialize_context
 

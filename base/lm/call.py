@@ -35,8 +35,15 @@ def _is_str_dict(value: object) -> TypeGuard[dict[str, object]]:
     return isinstance(value, dict)
 
 
-def _monotonic() -> float:
-    return time.monotonic()
+# meiva:note
+# One provider call and how long it took, in milliseconds. The duration is the plain use of the
+# interval clock: nothing here waits or decides on it, and the retry loop around it holds the
+# waiting.
+def _invoke_timed(runnable: object, messages: list[Any]) -> tuple[Any, float]:
+    invoker: Any = runnable
+    started = time.monotonic()
+    response = invoker.invoke(messages)
+    return response, (time.monotonic() - started) * 1_000
 
 
 def extract_text(response: object) -> str:
@@ -126,12 +133,9 @@ def invoke_response(
     retry_max_delay_seconds = max(retry_delay_seconds, retry_max_delay_seconds)
     response: Any | None = None
     latency_ms: float | None = None
-    invoker: Any = runnable
     for attempt in range(retry_attempts + 1):
         try:
-            started = _monotonic()
-            response = invoker.invoke(messages)
-            latency_ms = (_monotonic() - started) * 1_000
+            response, latency_ms = _invoke_timed(runnable, messages)
             break
         except Exception as e:
             resolved_model = model or getattr(runnable, "model_name", None)

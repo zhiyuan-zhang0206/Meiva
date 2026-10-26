@@ -1,61 +1,43 @@
-"""Child OTLP deferral policy — hold exec-child records until the backend is
-deliberately brought up (task #3816 M4b).
-
-An exec child arms the deferral before its first record; batches are held in
-the OTLP backend's bounded queue with the OTel stack, the settings chain, and
-the metric plumbing unimported, and complete at:
-
-- ``complete("finalize")`` — clean exit, or the shutdown fallback on abnormal
-  exits: the hold is brought up and drained synchronously;
-- ``complete("saturation")`` — the hold's bound was reached: the child's own
-  event volume says the exporter stack is worth its memory;
-- ``complete("age")`` — the one-shot max-age clock, the observability-delay
-  bound for a low-traffic long child (default 60 s).
-
-Record values, attributes, and timestamps are unchanged by the delay
-(timestamps come from the Event, not the export moment); the JSONL mirror is
-unaffected, so a child's live local channel stays live. Completion order:
-snapshot the hold BEFORE bring-up, replay metrics for exactly that snapshot
-BEFORE the events become visible to the worker — and only after a successful
-bring-up, so a failed attempt (which keeps the hold untouched under the
-standard five-minute retry gate) cannot double-count when a later one succeeds.
-
-Both knobs are read from the environment directly: reading them through the
-settings singleton would import the full config chain this deferral exists to
-keep out of the child's life. They stay registered as Settings fields
-(``base/config/domains/observability/settings.py``) so the .env surface, scope routing, and
-docs have one home.
-"""
+# meiva:note
+# Child OTLP deferral policy — hold exec-child records until the backend is
+# deliberately brought up (task #3816 M4b).
+#
+# An exec child arms the deferral before its first record; batches are held in
+# the OTLP backend's bounded queue with the OTel stack, the settings chain, and
+# the metric plumbing unimported, and complete at:
+#
+# - ``complete("finalize")`` — clean exit, or the shutdown fallback on abnormal
+#   exits: the hold is brought up and drained synchronously;
+# - ``complete("saturation")`` — the hold's bound was reached: the child's own
+#   event volume says the exporter stack is worth its memory;
+# - ``complete("age")`` — the one-shot max-age clock, the observability-delay
+#   bound for a low-traffic long child (default 60 s).
+#
+# Record values, attributes, and timestamps are unchanged by the delay
+# (timestamps come from the Event, not the export moment); the JSONL mirror is
+# unaffected, so a child's live local channel stays live. Completion order:
+# snapshot the hold BEFORE bring-up, replay metrics for exactly that snapshot
+# BEFORE the events become visible to the worker — and only after a successful
+# bring-up, so a failed attempt (which keeps the hold untouched under the
+# standard five-minute retry gate) cannot double-count when a later one succeeds.
+#
+# Both knobs arrive as a ``ChildDeferPlan`` that the child's entry builds from its
+# environment (``base/telemetry/delivery/defer_plan.py``): reading them through the settings
+# singleton would import the full config chain this deferral exists to keep out of the
+# child's life. They stay registered as Settings fields
+# (``base/config/domains/observability/settings.py``) so the .env surface, scope routing, and
+# docs have one home.
 
 from __future__ import annotations
 
 import contextlib
-import os
 import queue
 import threading
 from collections.abc import Callable
 
+from base.telemetry.delivery.defer_plan import ChildDeferPlan
 from base.telemetry.delivery.receipts import Event
 from base.telemetry.delivery.reporting import failure_isolated
-from base.telemetry.otlp.plans import (
-    CHILD_DEFER_MAX_AGE_DEFAULT_S,
-    parse_defer_flag,
-    parse_defer_seconds,
-)
-
-_CHILD_DEFER_ENV = "MEIVA_TELEMETRY_OTLP_CHILD_DEFER"
-_CHILD_DEFER_MAX_AGE_ENV = "MEIVA_TELEMETRY_OTLP_CHILD_DEFER_MAX_AGE_S"
-
-
-def _env_flag(name: str, *, default: bool) -> bool:
-    """Tristate env read: explicit true/false spellings win; anything else
-    (absent, empty, unrecognized) falls back to `default`."""
-    return parse_defer_flag(os.environ.get(name), default=default)
-
-
-def _env_seconds(name: str, default: float) -> float:
-    """Positive-float env read; absent/unparseable/non-positive -> default."""
-    return parse_defer_seconds(os.environ.get(name), default)
 
 
 class ChildDeferral:
@@ -76,14 +58,12 @@ class ChildDeferral:
         bring_up: Callable[[], bool],
         record_metrics: Callable[[Event], None],
         export_live: Callable[[list[Event]], None],
-        enabled: bool | None = None,
     ) -> None:
         self._queue = queue
         self._bring_up = bring_up
         self._record_metrics = record_metrics
         self._export_live = export_live
-        self._enabled_override = enabled
-        self._max_age_override: float | None = None
+        self._plan: ChildDeferPlan | None = None
         self._lock = threading.Lock()
         self._clock_lock = threading.Lock()
         self.active = False
@@ -93,28 +73,14 @@ class ChildDeferral:
         self.completion_idle = threading.Event()
         self.completion_idle.set()
 
-    def arm(
-        self,
-        *,
-        enabled: bool | None = None,
-        max_age_s: float | None = None,
-    ) -> None:
-        """Arm deferred export; no-op when MEIVA_TELEMETRY_OTLP_CHILD_DEFER is
-        off (the documented revert switch)."""
-        if max_age_s is not None:
-            self._max_age_override = max_age_s
+    # meiva:note
+    # Arm deferred export; no-op when the plan is off (the documented
+    # MEIVA_TELEMETRY_OTLP_CHILD_DEFER=0 revert switch).
+    def arm(self, plan: ChildDeferPlan) -> None:
+        self._plan = plan
         if self.active or self._stopped.is_set():
             return
-        resolved_enabled = (
-            enabled
-            if enabled is not None
-            else (
-                self._enabled_override
-                if self._enabled_override is not None
-                else _env_flag(_CHILD_DEFER_ENV, default=True)
-            )
-        )
-        if not resolved_enabled:
+        if not plan.enabled:
             return
         with self._lock:
             if not self._stopped.is_set():
@@ -195,13 +161,11 @@ class ChildDeferral:
         with self._clock_lock:
             if self._clock_started or self._stopped.is_set():
                 return
+            plan = self._plan
+            if plan is None:
+                raise RuntimeError("a deferral hold started its max-age clock before it was armed")
             self._clock_started = True
-            age_s = (
-                self._max_age_override
-                if self._max_age_override is not None and self._max_age_override > 0
-                else _env_seconds(_CHILD_DEFER_MAX_AGE_ENV, CHILD_DEFER_MAX_AGE_DEFAULT_S)
-            )
-            timer = threading.Timer(age_s, self.complete, args=("age",))
+            timer = threading.Timer(plan.max_age_s, self.complete, args=("age",))
             timer.daemon = True
             self._clock = timer
             timer.start()

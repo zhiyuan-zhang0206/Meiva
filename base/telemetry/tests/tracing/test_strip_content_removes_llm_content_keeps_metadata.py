@@ -293,11 +293,28 @@ def test_initialize_relief_pass_runs_when_disk_over_watermark(
     assert init_calls == []
 
 
-def test_initialize_sets_trace_content_false(
+# meiva:note
+# The process root applies `TraceConfig.traceloop_environment()` before recording is armed: the
+# SDK's one content switch is false whenever recording is on and strips content.
+@pytest.mark.parametrize(
+    ("enabled", "strip_content", "expected"),
+    [
+        (True, True, {"TRACELOOP_TRACE_CONTENT": "false"}),
+        (True, False, {}),
+        (False, True, {}),
+        (False, False, {}),
+    ],
+)
+def test_traceloop_environment_forces_content_off_only_when_recording_strips(
+    *, enabled: bool, strip_content: bool, expected: dict[str, str]
+) -> None:
+    config = trace_config(enabled=enabled, strip_content=strip_content)
+    assert dict(config.traceloop_environment()) == expected
+
+
+def test_initialize_leaves_the_environment_to_its_process_root(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path, *, trace_readiness: TraceReadiness
 ) -> None:
-    """initialize_tracing forces TRACELOOP_TRACE_CONTENT=false before
-    Traceloop.init when strip_content is on."""
     home = tmp_path / ".meiva"
     home.mkdir()
     calls: list[dict[str, Any]] = []
@@ -306,6 +323,7 @@ def test_initialize_sets_trace_content_false(
         calls.append(kw)
 
     stub_traceloop_init(monkeypatch, record_init)
+    before = dict(os.environ)
 
     initialize_tracing(
         machine=machine_identity(),
@@ -315,8 +333,8 @@ def test_initialize_sets_trace_content_false(
     )
     wait_init_resolved(trace_readiness=trace_readiness)
 
-    assert os.environ["TRACELOOP_TRACE_CONTENT"] == "false"
     assert len(calls) == 1
+    assert dict(os.environ) == before
 
 
 def test_initialize_skips_when_collector_unreachable(

@@ -62,6 +62,7 @@ from typing import Any, Protocol
 
 from base.cluster.derive import production_identity
 from base.cluster.machine import MachineIdentityReader
+from base.telemetry.delivery.defer_plan import ChildDeferPlan
 from base.telemetry.delivery.loss import report_loss
 from base.telemetry.delivery.mirror import append_jsonl
 from base.telemetry.delivery.receipts import DrainPhase, DrainResult, DrainStatus, Event
@@ -259,7 +260,6 @@ class OtlpBackend:
         enabled: Callable[[], bool] | None = None,
         endpoint: str | None = None,
         retry_interval_s: float = COLLECTOR_RETRY_INTERVAL_S,
-        defer_enabled: bool | None = None,
         mirror_dir: Path | None = None,
         home: Path | None = None,
     ) -> None:
@@ -303,7 +303,6 @@ class OtlpBackend:
             bring_up=lambda: self._enabled() and self._ensure(),
             record_metrics=lambda event: self._record_metrics(event),  # noqa: PLW0108 — per-call lookup keeps owner seams live
             export_live=lambda events: self._export_live(events),  # noqa: PLW0108 — per-call lookup keeps owner seams live
-            enabled=defer_enabled,
         )
 
     # ── public surface (called by base.telemetry) ─────────────────────────
@@ -450,16 +449,11 @@ class OtlpBackend:
 
     # ── child deferral (task #3816 M4b) ─────────────────────────────────────
 
-    def defer_until_exit(
-        self,
-        *,
-        enabled: bool | None = None,
-        max_age_s: float | None = None,
-    ) -> None:
+    def defer_until_exit(self, plan: ChildDeferPlan) -> None:
         """Arm a cold child hold; flag-off and already-live backends are no-ops."""
         if self._logs is not None:
             return
-        self._deferral.arm(enabled=enabled, max_age_s=max_age_s)
+        self._deferral.arm(plan)
 
     def finalize(self, *, finalizing: bool = False) -> None:
         """Complete an ordinary deferred hold, then observe its FIFO flush.

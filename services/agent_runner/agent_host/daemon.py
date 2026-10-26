@@ -471,6 +471,7 @@ async def run(
     from agent.graph import build_graph  # pyright: ignore[reportUnknownVariableType]
     from agent.graph.exec.process import read_parent_facts
     from agent.process_boot import init_process_scope, land_cluster_extensions, process_trace_config
+    from base.telemetry.otlp.trace_readiness import PROCESS_RECORDING
 
     rng = _new_rng()
     workload_pool, control_pool, bus, db = boot_handles(database(), config, rng)
@@ -482,7 +483,13 @@ async def run(
     try:
         if on_clients_owned is not None:
             on_clients_owned()
-        init_process_scope(machine=machine, home=home, trace=process_trace_config(config))
+        init_process_scope(
+            machine=machine,
+            home=home,
+            trace=process_trace_config(config),
+            environ=os.environ,
+            readiness=PROCESS_RECORDING,
+        )
         land_cluster_extensions(db)
         local_machine = machine.name()
         await open_host_pools(workload_pool, control_pool)
