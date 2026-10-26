@@ -28,6 +28,7 @@ from langgraph.runtime import Runtime
 from agent.messages import NoteTag
 from agent.state import build_agent_state
 from base.agents.context import MeivaContext
+from base.clock.tests.seeded_rng import seeded_rng
 from base.config.tests.configuration import defaults
 from base.db import Database
 from base.db.code_version_gate import ProcessDbGate
@@ -73,7 +74,7 @@ def _runtime(
         ),
         catalog=catalog,
         db=Database.from_settings(gate=database_gate),
-        bus=EventBus.from_settings(),
+        bus=EventBus.from_settings(rng=seeded_rng()),
     )
     return Runtime(context=ctx)
 

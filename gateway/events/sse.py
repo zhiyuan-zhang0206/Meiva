@@ -37,6 +37,7 @@ from redis.exceptions import AuthenticationError, NoPermissionError
 from base.events.live.bus import EventBus
 from base.events.live.projection import EVENT_ADAPTER, Error, Event
 from base.events.live.redis_client import AuthRetryAsyncRedis, retry_auth_failures_async
+from base.events.live.redis_resilience import AuthRetry
 from gateway.events.sse_frames import (
     HEARTBEAT_FRAME,
     SseCadence,
@@ -76,11 +77,11 @@ def _matches_filter(
 
 
 async def _subscribe_error_frame(
-    pubsub: PubSub, channel: str, agent_id: int, *, batched: bool = False
+    pubsub: PubSub, channel: str, agent_id: int, *, auth_retry: AuthRetry, batched: bool = False
 ) -> bytes | None:
     """Return a wire-shaped error after a failed subscribe, else None."""
     try:
-        await retry_auth_failures_async(lambda: pubsub.subscribe(channel))
+        await retry_auth_failures_async(lambda: pubsub.subscribe(channel), auth_retry=auth_retry)
     except REDIS_IO_ERRORS + REDIS_ACL_ERRORS as exc:
         _log.warning("sse pubsub subscribe failed: %r agent_id=%s", exc, agent_id)
         payload = _error_payload(agent_id, exc)
@@ -185,7 +186,9 @@ async def event_stream(
     metrics_opened = False
     _log.info("sse attach: agent_id=%s channel=%s broadcast=%s", agent_id, _channel, broadcast)
     try:
-        if error_frame := await _subscribe_error_frame(pubsub, _channel, agent_id):
+        if error_frame := await _subscribe_error_frame(
+            pubsub, _channel, agent_id, auth_retry=bus.auth_retry
+        ):
             yield error_frame
             return
         runtime_metrics.sse_opened("filtered")
@@ -212,7 +215,8 @@ async def event_stream(
                         # than this are negligible compared to network RTT. env
                         # override: `MEIVA_SSE_DISCONNECT_POLL_SECONDS`.
                         timeout=poll_s,
-                    )
+                    ),
+                    auth_retry=bus.auth_retry,
                 )
             except REDIS_IO_ERRORS + REDIS_ACL_ERRORS as exc:
                 _log.warning("sse pubsub read failed: %r agent_id=%s", exc, agent_id)
@@ -263,6 +267,7 @@ async def _drain_redis_messages(
     flush_interval: float,
     *,
     agent_filter: set[int] | None,
+    auth_retry: AuthRetry,
 ) -> tuple[list[str], bool]:
     """Drain all available messages from Redis within one flush window.
 
@@ -290,7 +295,9 @@ async def _drain_redis_messages(
         if remaining <= 0:
             break
         poll = min(remaining, 0.1)
-        msg = await retry_auth_failures_async(lambda poll=poll: get_pubsub_message(pubsub, poll))
+        msg = await retry_auth_failures_async(
+            lambda poll=poll: get_pubsub_message(pubsub, poll), auth_retry=auth_retry
+        )
         if msg is None:
             break
         raw = msg["data"]
@@ -356,7 +363,9 @@ async def throttled_event_stream(
         throttle_rate,
     )
     try:
-        if error_frame := await _subscribe_error_frame(pubsub, _channel, 0, batched=True):
+        if error_frame := await _subscribe_error_frame(
+            pubsub, _channel, 0, auth_retry=bus.auth_retry, batched=True
+        ):
             yield error_frame
             return
         runtime_metrics.sse_opened("throttled")
@@ -373,6 +382,7 @@ async def throttled_event_stream(
                     request,
                     flush_interval,
                     agent_filter=agent_filter,
+                    auth_retry=bus.auth_retry,
                 )
             except REDIS_IO_ERRORS + REDIS_ACL_ERRORS as exc:
                 _log.warning("sse throttle pubsub read failed: %r", exc)

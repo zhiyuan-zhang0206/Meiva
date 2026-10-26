@@ -24,6 +24,7 @@ Usage:
 
 import asyncio
 import logging
+import random
 import signal
 import sys
 from collections.abc import Callable
@@ -63,6 +64,13 @@ _LIVENESS_SLACK_S = 60.0
 _SWEEP_LIVENESS_TIMEOUT_S = 300.0
 # Connections the two loops' concurrent statements can hold at once.
 _POOL_MAX_SIZE = 4
+
+
+# meiva:note
+# The process's random generator, built once at its entry for the event bus's retry jitter. Jitter
+# is not a secret, so it is a plain `random.Random`.
+def _new_rng() -> random.Random:
+    return random.Random()  # noqa: S311
 
 
 def _endpoint(config: ConfigBoot, *, runtime: Path) -> ServiceEndpoint:
@@ -139,7 +147,7 @@ async def run(
 
     db = database()
     pool = db.pool(max_size=_POOL_MAX_SIZE)
-    bus = EventBus(event_bus_config_from_config(process_config))
+    bus = EventBus(event_bus_config_from_config(process_config), rng=_new_rng())
     try:
         await run_loops(pool, db, bus, liveness, ttl_reaper_config(process_config))
     finally:

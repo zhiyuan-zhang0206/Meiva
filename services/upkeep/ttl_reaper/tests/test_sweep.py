@@ -21,6 +21,7 @@ import redis
 from psycopg_pool import ConnectionPool
 
 from base.clock import SYSTEM_TIMERS
+from base.clock.tests.seeded_rng import seeded_rng
 from base.cluster import inbound_channel
 from base.config import settings
 from base.daemon.loop_health import LoopProgress
@@ -258,7 +259,10 @@ def test_reap_expired_pages_skips_already_terminal(
         )
     db_conn.commit()
 
-    assert reap_expired_pages_blocking(reaper_pool, database, EventBus.from_settings()) == []
+    assert (
+        reap_expired_pages_blocking(reaper_pool, database, EventBus.from_settings(rng=seeded_rng()))
+        == []
+    )
 
 
 def test_reap_expired_pages_notifies_only_live_agents(

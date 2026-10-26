@@ -8,7 +8,8 @@ import redis.asyncio as aredis
 from redis.exceptions import AuthenticationError, NoPermissionError, ResponseError
 
 from ..publisher import AgentEventPublisher
-from ..redis_resilience import AuthRetryPolicy, plan_auth_retry_delays
+from ..redis_resilience import AuthRetryPolicy
+from .rng import seeded_auth_retry
 
 
 class _FakePipeline:
@@ -66,6 +67,7 @@ class _FakeRedis:
 
 
 def _pub(redis: _FakeRedis, **kwargs: Any) -> AgentEventPublisher:
+    kwargs.setdefault("auth_retry", seeded_auth_retry())
     return AgentEventPublisher(cast(aredis.Redis, redis), "ch", agent_id=1, **kwargs)
 
 
@@ -91,11 +93,10 @@ async def test_batch_retries_acl_transition_without_real_waiting(
 
     await _pub(
         redis,
-        auth_retry_policy=policy,
+        auth_retry=seeded_auth_retry(policy),
     )._publish_batch(["event"])
 
     assert redis.pipeline_attempts == 3
-    assert plan_auth_retry_delays(failures=2) == [0.5, 1.0]
     assert redis.published == [("ch", "event")]
 
 

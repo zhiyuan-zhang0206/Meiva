@@ -14,6 +14,7 @@ in `redis_client`; this class only binds one `EventBusConfig` to them.
 from __future__ import annotations
 
 import asyncio
+import random
 from dataclasses import dataclass, field
 
 from base.config import ConfigBoot, settings
@@ -27,6 +28,7 @@ from base.events.live.redis_client import (
 )
 from base.events.live.redis_resilience import (
     DEFAULT_AUTH_RETRY_POLICY,
+    AuthRetry,
     AuthRetryPolicy,
 )
 
@@ -69,15 +71,24 @@ def event_bus_config_from_config(boot: ConfigBoot) -> EventBusConfig:
 class EventBus:
     """One cluster Redis and its events channel, dialed with one `EventBusConfig`."""
 
-    def __init__(self, config: EventBusConfig) -> None:
+    def __init__(self, config: EventBusConfig, *, rng: random.Random) -> None:
         self._config = config
+        self._auth_retry = AuthRetry(config.auth_retry_policy, rng=rng)
         self._warn_last: dict[tuple[str, str], float] = {}
         self._clients: dict[asyncio.AbstractEventLoop, AuthRetryAsyncRedis] = {}
 
+    # meiva:note
+    # The composition-root constructor: the config as the live settings hold it now. `rng` is the
+    # process root's one random generator; the bus draws its auth-retry jitter from it.
     @classmethod
-    def from_settings(cls) -> EventBus:
-        """The composition-root constructor: the config as the live settings hold it now."""
-        return cls(event_bus_config_from_settings())
+    def from_settings(cls, *, rng: random.Random) -> EventBus:
+        return cls(event_bus_config_from_settings(), rng=rng)
+
+    # meiva:note
+    # The ACL-transition retry every client and publish of this bus runs.
+    @property
+    def auth_retry(self) -> AuthRetry:
+        return self._auth_retry
 
     @property
     def channel(self) -> str:
@@ -89,7 +100,7 @@ class EventBus:
         return open_async_redis(
             self._config.redis_url,
             decode_responses=decode_responses,
-            auth_retry_policy=self._config.auth_retry_policy,
+            auth_retry=self._auth_retry,
         )
 
     def async_redis(self) -> AuthRetryAsyncRedis:
@@ -106,7 +117,7 @@ class EventBus:
         return open_sync_redis(
             self._config.redis_url,
             decode_responses=decode_responses,
-            auth_retry_policy=self._config.auth_retry_policy,
+            auth_retry=self._auth_retry,
         )
 
     async def publish_best_effort(
@@ -121,7 +132,7 @@ class EventBus:
             warn_last=self._warn_last,
             attempt_timeout_s=self._config.publish_attempt_timeout_s,
             context=context,
-            auth_retry_policy=self._config.auth_retry_policy,
+            auth_retry=self._auth_retry,
         )
 
     def publish_best_effort_sync(
@@ -139,5 +150,5 @@ class EventBus:
             payload,
             warn_last=self._warn_last,
             context=context,
-            auth_retry_policy=self._config.auth_retry_policy,
+            auth_retry=self._auth_retry,
         )

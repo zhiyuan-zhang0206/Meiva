@@ -28,6 +28,7 @@ from base.agents.impersonation.tests.impersonation_support import recorded_tree
 from base.agents.messages.timestamp_policy import TimestampSource
 from base.api_contracts.caller_identity import CallerIdentity
 from base.clock import Clock
+from base.clock.tests.seeded_rng import seeded_rng
 from base.cluster.machine import MachineIdentityReader
 from base.cluster.machine.tests.identity import machine_identity as machine_identity
 from base.config.service_read import ConfigAuthority
@@ -176,7 +177,7 @@ async def _termination_session(
     assert owner is not None
     session = leases.request(
         Database.from_settings(gate=database_gate),
-        EventBus.from_settings(),
+        EventBus.from_settings(rng=seeded_rng()),
         agent_id,
         caller=CallerIdentity(kind="external_agent", subject="codex"),
         ttl_seconds=300,
@@ -191,7 +192,7 @@ async def _termination_session(
     if status in ("accepted", "active"):
         leases.prepare(
             Database.from_settings(gate=database_gate),
-            EventBus.from_settings(),
+            EventBus.from_settings(rng=seeded_rng()),
             session["id"],
             agent_id,
             owner,
@@ -201,7 +202,7 @@ async def _termination_session(
     if status == "active":
         leases.activate(
             Database.from_settings(gate=database_gate),
-            EventBus.from_settings(),
+            EventBus.from_settings(rng=seeded_rng()),
             session["id"],
             owner,
         )
@@ -236,7 +237,7 @@ async def _terminate_native(
         else:
             terminate_id, _cutoff = enqueue_termination_inbounds(
                 Database.from_settings(gate=database_gate),
-                EventBus.from_settings(),
+                EventBus.from_settings(rng=seeded_rng()),
                 owner.agent_id,
                 ops_pool,
                 source="user",
@@ -288,7 +289,7 @@ async def test_termination_notices_precede_resurrection_in_native_claim(
                 default_reader=defaults(),
             ),
             db=Database.from_settings(gate=database_gate),
-            bus=EventBus.from_settings(),
+            bus=EventBus.from_settings(rng=seeded_rng()),
             identity=AgentIdentity(agent_id=owner.agent_id, owns_loop=True),
             original_incarnation=owner,
             clock_factory=Clock.from_settings,
@@ -535,7 +536,13 @@ async def test_terminal_relay_start_delivers_interruption_best_effort(
     result = await asyncio.to_thread(
         relay.cmd_relay,
         args,
-        inputs=relay.RelayInputs(session["relay_token"], redis_url, None, transport),
+        inputs=relay.RelayInputs(
+            token=session["relay_token"],
+            redis_url=redis_url,
+            codex_home=None,
+            stdout=transport,
+            rng=seeded_rng(),
+        ),
         database_factory=lambda: database,
         machine=machine_identity,
     )

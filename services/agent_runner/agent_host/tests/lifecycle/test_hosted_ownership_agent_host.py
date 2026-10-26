@@ -8,6 +8,7 @@ from uuid import uuid4
 import pytest
 
 from agent.ownership.hosted import admit_hosted_runtime, settle_hosted_runtime
+from base.clock.tests.seeded_rng import seeded_rng
 from base.db import Database
 from base.events.live.bus import EventBus, EventBusConfig
 from base.native_process.turn_identity import HostedTurnResources
@@ -61,7 +62,8 @@ async def half_open_redis_bus() -> AsyncGenerator[_HalfOpenRedisProbe]:
                 redis_url=f"redis://127.0.0.1:{port}",
                 events_channel="test",
                 publish_attempt_timeout_s=60.0,
-            )
+            ),
+            rng=seeded_rng(),
         )
         probe = _HalfOpenRedisProbe(bus=bus)
         yield probe

@@ -53,6 +53,7 @@ deadline makes `/healthz` return 503 for watchdog recovery.
 """
 
 import asyncio
+import random
 import signal
 import socket
 import sys
@@ -104,6 +105,13 @@ from services.upkeep.events_maintenance.resolution import AutoDismissCadence, ru
 from services.upkeep.events_maintenance.rollup import compute_rollup
 from services.upkeep.events_maintenance.telemetry_replay import recover_telemetry_events
 from services.upkeep.events_maintenance.token_totals import fold_totals
+
+
+# meiva:note
+# The process's random generator, built once at its entry for the event bus's retry jitter. Jitter
+# is not a secret, so it is a plain `random.Random`.
+def _new_rng() -> random.Random:
+    return random.Random()  # noqa: S311
 
 
 # meiva:note
@@ -416,7 +424,7 @@ async def run(
             group.create_task(resolution_loop(pool, progress["resolution"], config, tasks=group))
             group.create_task(registry_gauge.registry_gauge_loop(pool, progress["registry_gauge"]))
             if "alert_reconciliation" in progress:
-                bus = EventBus(event_bus_config_from_config(process_config))
+                bus = EventBus(event_bus_config_from_config(process_config), rng=_new_rng())
                 group.create_task(
                     alert_reconciler.reconciliation_loop(
                         pool, bus, progress["alert_reconciliation"], config

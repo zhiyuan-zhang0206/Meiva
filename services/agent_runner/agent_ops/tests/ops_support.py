@@ -22,6 +22,7 @@ from typing import Any, cast
 from psycopg_pool import ConnectionPool
 from redis.client import PubSub
 
+from base.clock.tests.seeded_rng import seeded_rng
 from base.cluster import inbound_channel
 from base.cluster.machine import MachineIdentityReader
 from base.config.service_read import ConfigAuthority
@@ -92,6 +93,7 @@ class Ops:
             image=self.image,
             local_machine=self.machine,
             host=self.host,
+            rng=seeded_rng(),
         )
 
     async def run_arm(
@@ -109,6 +111,7 @@ class Ops:
             image=self.image,
             local_machine=self.machine,
             host=self.host,
+            rng=seeded_rng(),
         )
 
     async def idempotent(
@@ -143,6 +146,7 @@ class Ops:
             image=self.image,
             local_machine=self.machine,
             host=self.host,
+            rng=seeded_rng(),
             **tunables,
         )
 
@@ -170,6 +174,7 @@ class Ops:
             image=self.image,
             local_machine=self.machine,
             host=self.host,
+            rng=seeded_rng(),
         )
 
 

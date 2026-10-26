@@ -11,6 +11,7 @@ from psycopg import sql
 
 from base.clock import Clock, ClockConfig
 from base.clock.tests.manual_timers import ManualTimers
+from base.clock.tests.seeded_rng import seeded_rng
 from base.cluster.machine import MachineIdentityReader
 from base.cluster.machine.tests.identity import machine_identity as machine_identity
 from base.daemon.schedules.completion_notices import (
@@ -74,7 +75,7 @@ def test_flush_once_delivers_one_digest_and_marks_the_authoritative_events(
                 completion_digest.flush_once(
                     pool,
                     Database.from_settings(gate=database_gate),
-                    EventBus.from_settings(),
+                    EventBus.from_settings(rng=seeded_rng()),
                     now=datetime(2026, 9, 22, 12, tzinfo=UTC),
                     machine=machine_identity,
                 )
@@ -113,7 +114,7 @@ def test_flush_once_delivers_one_digest_and_marks_the_authoritative_events(
                 completion_digest.flush_once(
                     pool,
                     Database.from_settings(gate=database_gate),
-                    EventBus.from_settings(),
+                    EventBus.from_settings(rng=seeded_rng()),
                     now=datetime(2026, 9, 22, 12, tzinfo=UTC),
                     machine=machine_identity,
                 )
@@ -174,7 +175,7 @@ def test_unknown_digest_failure_propagates_to_service(
                 completion_digest.flush_once(
                     pool,
                     Database.from_settings(gate=database_gate),
-                    EventBus.from_settings(),
+                    EventBus.from_settings(rng=seeded_rng()),
                     now=datetime(2026, 9, 22, 12, tzinfo=UTC),
                     machine=machine_identity,
                 )
@@ -230,7 +231,7 @@ def test_digest_postcommit_failure_keeps_events_unmarked_and_recovers_same_inbou
                     completion_digest.flush_once(
                         pool,
                         Database.from_settings(gate=database_gate),
-                        EventBus.from_settings(),
+                        EventBus.from_settings(rng=seeded_rng()),
                         now=datetime(2026, 9, 22, 12, tzinfo=UTC),
                         machine=machine_identity,
                     )
@@ -245,7 +246,7 @@ def test_digest_postcommit_failure_keeps_events_unmarked_and_recovers_same_inbou
                 completion_digest.flush_once(
                     pool,
                     Database.from_settings(gate=database_gate),
-                    EventBus.from_settings(),
+                    EventBus.from_settings(rng=seeded_rng()),
                     now=datetime(2026, 9, 22, 12, tzinfo=UTC),
                     machine=machine_identity,
                 )
@@ -286,7 +287,7 @@ def test_owned_digest_round_uses_its_clock_to_close_each_window_once(
         digest = completion_digest.CompletionDigestRound(
             pool,
             Database.from_settings(gate=database_gate),
-            EventBus.from_settings(),
+            EventBus.from_settings(rng=seeded_rng()),
             machine_identity,
             clock,
             completion_digest.DigestConfig(),

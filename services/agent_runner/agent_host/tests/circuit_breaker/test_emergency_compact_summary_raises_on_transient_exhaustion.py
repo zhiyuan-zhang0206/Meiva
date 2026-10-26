@@ -19,6 +19,7 @@ from agent.graph.tests.test_llm_helpers import make_runtime as _llm_make_runtime
 from base.agents.context import MeivaContext
 from base.agents.tests.units import spawn_agent
 from base.clock import Clock
+from base.clock.tests.seeded_rng import seeded_rng
 from base.cluster.machine import MachineIdentityReader
 from base.cluster.machine.tests.identity import machine_identity as machine_identity
 from base.config.service_read import ConfigAuthority
@@ -251,7 +252,7 @@ async def test_completed_turn_resets_the_streak_and_clears_the_marker(
             event_publisher=MagicMock(),
             agent=AgentSlices.resolve(default_reader=defaults()),
             db=Database.from_settings(gate=database_gate),
-            bus=EventBus.from_settings(),
+            bus=EventBus.from_settings(rng=seeded_rng()),
             catalog=build_model_catalog(),
             clock_factory=Clock.from_settings,
         ),

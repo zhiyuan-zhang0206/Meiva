@@ -8,7 +8,7 @@ exports = ["daemon.py", "dead_letter.py", "stranded_wake.py"]
 "__init__.py" = "strict"
 
 [roots]
-"daemon.py" = { kinds = ["bus", "settings"], why = "Service or operator process entry boots configuration before composing its resources" }
+"daemon.py" = { kinds = ["bus", "random", "settings"], why = "Service or operator process entry boots configuration and builds the random generator its event bus draws retry jitter from" }
 
 [debt.ambient-read]
 "daemon.py#home base.paths.meiva_home" = 1

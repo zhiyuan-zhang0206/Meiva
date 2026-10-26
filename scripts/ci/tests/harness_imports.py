@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from base import cluster
+from base.clock.tests.seeded_rng import seeded_rng
 from base.cluster.dataplane.direct_url import ClusterDirectUrl
 from base.cluster.dataplane.pg_stall_watchdog import StallWatchdogConfig, stall_guard
 from base.cluster.dataplane.pg_throwaway_base import ThrowawayConfig, configured_base
@@ -59,6 +60,7 @@ __all__ = [
     "raise_fd_limit",
     "redis_server",
     "run_bounded",
+    "seeded_rng",
     "set_field",
     "settings",
     "snapshot_process_config",

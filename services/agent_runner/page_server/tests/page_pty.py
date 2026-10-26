@@ -22,6 +22,7 @@ import psycopg
 from psycopg import sql
 from psycopg_pool import ConnectionPool
 
+from base.clock.tests.seeded_rng import seeded_rng
 from base.events.live.bus import EventBus
 from base.host.env import port_lease
 from base.sessions.backend import PtySessionBackend
@@ -124,7 +125,7 @@ def page_state(conn: psycopg.Connection, agent_id: int, name: str) -> PageState:
 # meiva:note
 # One production pass against the pty service of the test home.
 def reconcile(pool: ConnectionPool, managed: dict[PageKey, ServerHandle]) -> None:
-    daemon.reconcile_once(pool, managed, HOST, EventBus.from_settings(), _backend())
+    daemon.reconcile_once(pool, managed, HOST, EventBus.from_settings(rng=seeded_rng()), _backend())
 
 
 # meiva:note
@@ -132,7 +133,9 @@ def reconcile(pool: ConnectionPool, managed: dict[PageKey, ServerHandle]) -> Non
 def reconcile_snapshot(
     pool: ConnectionPool, managed: dict[PageKey, ServerHandle], rows: list[PageRow]
 ) -> None:
-    daemon.reconcile_rows(pool, managed, rows, HOST, EventBus.from_settings(), _backend())
+    daemon.reconcile_rows(
+        pool, managed, rows, HOST, EventBus.from_settings(rng=seeded_rng()), _backend()
+    )
 
 
 def session_names() -> set[str]:
