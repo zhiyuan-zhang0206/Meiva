@@ -24,9 +24,10 @@ import { useParams, useRouter } from "next/navigation";
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 
 import { api } from "@/lib/transport/api";
+import { useWallNow } from "@/lib/transport/transport-context";
 import { useDisplayLimit } from "@/lib/format/display-limits";
 import { readScrollMemory, saveScrollMemory, type SavedScroll } from "@/lib/layout/scroll-memory";
-import { useNow } from "@/lib/format/use-now";
+import { useNow } from "@/lib/format/now/use-now";
 import { useUserSettings } from "@/lib/state/use-user-settings";
 import { formatUptime } from "@/lib/format/time";
 import { useTimeFormat } from "@/lib/format/use-time-format";
@@ -201,7 +202,7 @@ export default function ShellMonitorPage() {
   // the probe-time uptime snapshot when created_at is missing); TTL remaining
   // is expires_at − now. "No TTL" is defensive only: the backend answers a
   // deadline whenever it can count from the launch epoch.
-  const now = useNow(1_000, new Date());
+  const now = useNow(1_000, useWallNow());
   const createdMs = data?.created_at != null ? new Date(data.created_at).getTime() : NaN;
   const runtimeSeconds = Number.isFinite(createdMs)
     ? Math.max(0, Math.floor((now.getTime() - createdMs) / 1000))

@@ -32,8 +32,11 @@ from mcp import ClientSession, types
 from mcp.shared.exceptions import MCPError
 from mcp.types import CONNECTION_CLOSED, REQUEST_TIMEOUT
 
+from base.clock import SYSTEM_TIMERS, Clock
+from base.clock.configuration import clock_config_from_boot
 from base.cluster.dataplane.direct_url import ClusterDirectUrl
 from base.cluster.machine import GatewayAccess
+from base.cluster.machine.boot import gateway_access_from_boot
 from base.cluster.machine.configured import ConfiguredMachineIdentity
 from base.config import ConfigBoot
 from base.db import Database
@@ -561,12 +564,12 @@ async def serve_with_upstream(
     stop: asyncio.Event,
     upstream: ClientSession,
     current_stack: AsyncExitStack | None,
+    clock: Clock,
     default_ttl_seconds: float = page_lifecycle.DEFAULT_PAGE_TTL_SECONDS,
-    daemon_out: list[ChromeMcpDaemon] | None = None,
 ) -> None:
     daemon_ref: list[ChromeMcpDaemon | None] = [None]
     sock, server = await _open_daemon_socket(home, browser_cdp_port, daemon_ref)
-    pages = PageRegistry(default_ttl_seconds=default_ttl_seconds)
+    pages = PageRegistry(default_ttl_seconds=default_ttl_seconds, clock=clock)
     async with asyncio.TaskGroup() as tasks:
         gateway = GatewaySession(
             tasks,
@@ -579,6 +582,7 @@ async def serve_with_upstream(
                 launcher_profile=None,
                 gateway_home=False,
             ),
+            clock=clock,
         )
         tab_groups = AgentTabGroups(browser_cdp_port, tasks)
         session_task = tasks.create_task(
@@ -587,8 +591,6 @@ async def serve_with_upstream(
         try:
             daemon = ChromeMcpDaemon(upstream, pages, tab_groups)
             daemon_ref[0] = daemon
-            if daemon_out is not None:
-                daemon_out.append(daemon)
             await _serve_generation(daemon, stop, gateway)
             if daemon.dead.is_set():
                 raise RuntimeError("browser-mcp upstream died; explicit service restart required")
@@ -610,15 +612,17 @@ async def run(
     home: Path,
     browser_cdp_port: int,
     connect_timeout_reader: Callable[[], float],
+    clock: Clock,
+    gateway_access: GatewayAccess,
     default_ttl_seconds: float = page_lifecycle.DEFAULT_PAGE_TTL_SECONDS,
 ) -> None:
     browser_url = f"http://127.0.0.1:{browser_cdp_port}"
     daemon_ref: list[ChromeMcpDaemon | None] = [None]
     sock, server = await _open_daemon_socket(home, browser_cdp_port, daemon_ref)
-    pages = PageRegistry(default_ttl_seconds=default_ttl_seconds)
+    pages = PageRegistry(default_ttl_seconds=default_ttl_seconds, clock=clock)
     stop = stop_on_signals()
     async with asyncio.TaskGroup() as tasks:
-        gateway = GatewaySession(tasks, browser_cdp_port)
+        gateway = GatewaySession(tasks, browser_cdp_port, access=gateway_access, clock=clock)
         tab_groups = AgentTabGroups(browser_cdp_port, tasks)
         session_task = tasks.create_task(
             contained(gateway.refresh_loop(stop), "gateway session refresh")
@@ -636,7 +640,9 @@ async def run(
             # meiva:link services/desktop/browser/docs/browser-session-restore.meiva.okf.md
             tasks.create_task(
                 contained(
-                    session_restore.reapply(home, session_restore.CdpChrome(browser_cdp_port)),
+                    session_restore.reapply(
+                        home, session_restore.CdpChrome(browser_cdp_port, timers=clock)
+                    ),
                     "browser session restore",
                 )
             )
@@ -760,6 +766,8 @@ def main() -> None:
             home=wiring.process_home,
             browser_cdp_port=wiring.browser_cdp_port,
             connect_timeout_reader=lambda: config.view.sandbox.mcp_connect_timeout_seconds,
+            clock=Clock(clock_config_from_boot(config), timers=SYSTEM_TIMERS),
+            gateway_access=gateway_access_from_boot(config),
             default_ttl_seconds=wiring.default_ttl_seconds,
         )
     )

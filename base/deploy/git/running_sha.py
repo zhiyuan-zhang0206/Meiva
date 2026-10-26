@@ -20,12 +20,14 @@ update detection should compare its own running commit, not the cluster pin.
 
 from __future__ import annotations
 
-from base.paths import meiva_home, running_sha_path
+from pathlib import Path
+
+from base.paths import running_sha_path
 
 
-def get() -> str | None:
+def get(home: Path) -> str | None:
     """The commit this host was last started on, or None if never recorded."""
-    path = running_sha_path(meiva_home())
+    path = running_sha_path(home)
     try:
         content = path.read_text().strip()
     except FileNotFoundError:
@@ -35,14 +37,14 @@ def get() -> str | None:
     return content
 
 
-def set(sha: str) -> None:
+def set(home: Path, sha: str) -> None:
     """Record `sha` as the commit this host is now running."""
-    path = running_sha_path(meiva_home())
+    path = running_sha_path(home)
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(sha.strip() + "\n")
 
 
-def clear() -> None:
+def clear(home: Path) -> None:
     """Remove the bookmark (recovery — forces fallback-to-HEAD on the next
     update check)."""
-    running_sha_path(meiva_home()).unlink(missing_ok=True)
+    running_sha_path(home).unlink(missing_ok=True)

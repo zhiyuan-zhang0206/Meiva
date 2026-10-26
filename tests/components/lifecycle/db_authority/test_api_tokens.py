@@ -16,6 +16,7 @@ import hashlib
 import json
 from collections.abc import Callable, Iterator
 from dataclasses import replace
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
@@ -282,11 +283,15 @@ def test_a_session_records_which_credential_minted_it(
         sessions = client.app.state.sessions
         keys: request_principal.SessionKeys = client.app.state.session_keys
         assert (
-            request_principal.current_session_fact(sessions, keys, human, _HUMAN, home=gateway)
+            request_principal.current_session_fact(
+                sessions, keys, human, _HUMAN, home=gateway, now=datetime.now(UTC)
+            )
             == "user_session"
         )
         assert (
-            request_principal.current_session_fact(sessions, keys, machine, _HUMAN, home=gateway)
+            request_principal.current_session_fact(
+                sessions, keys, machine, _HUMAN, home=gateway, now=datetime.now(UTC)
+            )
             == "machine_session:runner"
         )
 

@@ -16,7 +16,7 @@ from base.cluster import session_name
 from base.db.transaction import write_transaction
 from base.sessions.protocol import SessionBackend
 from gateway.agents.creation import create_and_launch_agent, guarded_draft_key
-from gateway.http.config import GatewayConfig, gateway_config
+from gateway.http.config import GatewayConfig, gateway_clock, gateway_config
 from gateway.http.model_catalog import require_model_catalog
 from gateway.routers.receipts import creation as creation_receipts
 from gateway.schedules import plans, receipts, session_control
@@ -313,6 +313,7 @@ async def _wait_consumed(request: Request, schedule_id: int) -> None:
         schedule_id,
         wait_s=config.schedule_consume_wait_seconds,
         poll_s=config.schedule_consume_poll_seconds,
+        timers=gateway_clock(request),
     )
 
 

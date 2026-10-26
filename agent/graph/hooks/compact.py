@@ -36,6 +36,7 @@ from base.agents.history.closing_request import ClosingRequest
 from base.agents.history.compact_boundary import mark_compact_boundary
 from base.agents.messages.kwargs import MeivaMsgType, read_meiva_kwargs
 from base.agents.to_user import DOCUMENT_FILENAME
+from base.clock import Timers
 from base.events.live.projection import Cancelled, CompactDone, CompactionMode, CompactionStatus
 from base.host.env.agent_slices import AgentSlices
 from base.lm.catalog import ModelCatalog
@@ -79,11 +80,14 @@ async def stamp_compact_boundary(
     closing: ClosingRequest | None = None,
     *,
     understanding_enabled: bool,
+    timers: Timers,
 ) -> None:
     if pool is None:
         return
     boundary: str | None = None
-    await await_snapshot(pool, state, agent_id, understanding_enabled=understanding_enabled)
+    await await_snapshot(
+        pool, state, agent_id, understanding_enabled=understanding_enabled, timers=timers
+    )
     try:
         boundary = await mark_compact_boundary(pool, str(agent_id), closing=closing)
     except Exception as exc:
@@ -419,6 +423,7 @@ async def auto_compact_for_llm(
         understanding_enabled=runtime.context.require_agent().read(
             "agent", "understanding_enabled"
         ),
+        timers=runtime.context.require_clock(),
     )
     transition["compact"] = state.compact.next_segment()
     emit_compact_finished(
