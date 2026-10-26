@@ -1,6 +1,7 @@
 """Explicit configuration and machine inputs for one CLI test invocation."""
 
 import io
+import os
 from pathlib import Path
 
 import pytest
@@ -31,6 +32,7 @@ def command_runtime(tmp_path: Path) -> CommandRuntime:
     config = snapshot_process_config()
     return CommandRuntime(
         config=config,
+        pid=os.getpid(),
         home=meiva_home(),
         machine=ConfiguredMachineIdentity(config),
         helper=refuse_helper,

@@ -1,15 +1,22 @@
 from __future__ import annotations
 
+import os
 import subprocess
 import time
 from pathlib import Path
 
 import pytest
 
-from base.deploy.git.worktree_guard import find_live_anchors
+from base.deploy.git.worktree_guard import Invoker, find_live_anchors
 from base.sessions.pty.tests.pty_service import PtyServiceProcess
 from base.sessions.pty.tests.pty_service import pty_service as pty_service
 from base.sessions.pty.tests.pty_shells import new
+
+
+# meiva:note
+# The process running the test, as the entry that starts the check would describe itself.
+def _invoker() -> Invoker:
+    return Invoker(pid=os.getpid(), pgid=os.getpgrp())
 
 
 def test_a_pty_session_anchored_under_the_target_is_reported(
@@ -23,7 +30,7 @@ def test_a_pty_session_anchored_under_the_target_is_reported(
     new("meiva-schedule-1", target)
     new("agent-shell", elsewhere)
 
-    hits = find_live_anchors(target, run=unit_home / "run")
+    hits = find_live_anchors(target, run=unit_home / "run", invoker=_invoker())
 
     (reported,) = [hit for hit in hits if hit.startswith("pty session")]
     assert "meiva-schedule-1" in reported and str(target) in reported
@@ -37,13 +44,15 @@ def test_clean_when_nothing_anchored(unit_home: Path, pty_service: PtyServicePro
     elsewhere.mkdir(parents=True)
     new("agent-shell", elsewhere)
 
-    assert find_live_anchors(target, run=unit_home / "run") == []
+    assert find_live_anchors(target, run=unit_home / "run", invoker=_invoker()) == []
 
 
 def test_no_service_means_no_pty_session_and_the_home_is_not_created(tmp_path: Path) -> None:
     home = tmp_path / "never-created"
 
-    assert find_live_anchors(tmp_path / "worktrees" / "wt", run=home / "run") == []
+    assert (
+        find_live_anchors(tmp_path / "worktrees" / "wt", run=home / "run", invoker=_invoker()) == []
+    )
     assert not home.exists()
 
 
@@ -53,7 +62,7 @@ def test_live_process_cwd_anchor_reported(tmp_path: Path) -> None:
     child = subprocess.Popen(["sleep", "30"], cwd=target, start_new_session=True)
     try:
         time.sleep(0.5)
-        hits = find_live_anchors(target, run=tmp_path / "nope")
+        hits = find_live_anchors(target, run=tmp_path / "nope", invoker=_invoker())
         assert any("process" in h and str(target) in h for h in hits)
     finally:
         child.kill()
@@ -86,13 +95,13 @@ def test_case_alias_spelling_finds_anchors(
 
     pty_session_cwd = target
     new("meiva-case-alias", pty_session_cwd)
-    hits = find_live_anchors(alias, run=unit_home / "run")
+    hits = find_live_anchors(alias, run=unit_home / "run", invoker=_invoker())
     assert any("pty session" in h for h in hits), hits
 
     sleeper = subprocess.Popen(["sleep", "30"], cwd=target, start_new_session=True)
     try:
         time.sleep(0.5)
-        hits = find_live_anchors(alias, run=tmp_path / "nope")
+        hits = find_live_anchors(alias, run=tmp_path / "nope", invoker=_invoker())
         assert any("process" in h for h in hits), hits
     finally:
         sleeper.kill()

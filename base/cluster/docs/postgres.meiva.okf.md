@@ -59,8 +59,10 @@ never returns) is ended when the caller supplies the escalation waits: SIGQUIT t
 postmaster, then SIGKILL of the descendants captured before the signal that still
 match their recorded birth ([decision](../../../docs/decisions/data/database/2026-10-02-pg-stop-escalates-to-immediate.md));
 `stop` returns the `Escalation`. Without the waits it fails with custody retained.
-`start` and `stop` poll with the `Timers` their caller passes (a root passes `SYSTEM_TIMERS`), so the
-readiness and shutdown deadlines are the caller's clock and neither reads one itself.
+`start` and `stop` poll with the required `Timers` their caller passes (the CLI data-plane commands pass
+`SYSTEM_TIMERS`; a test passes `ManualTimers`), so the readiness and shutdown deadlines are the
+caller's clock and neither reads one itself. The control `file_lock` they take first still keeps
+its own clock.
 Linux signals use a PID-retaining descriptor. Reload uses the same receipt and
 native identity gate. Unknown metadata, surviving archive children or a replaced
 pidfile refuse. Clean stop retains the receipt; a subsequent launch replaces it

@@ -19,8 +19,8 @@ def home(unit_home: Path) -> Path:
 
 
 def test_begin_phase_finish_round_trip(home: Path) -> None:
-    assert journal.begin(home, "stop", deadline=time.monotonic() + 30) is True
-    with journal.phase(home, "drain"):
+    assert journal.begin(home, "stop", deadline=time.monotonic() + 30, pid=os.getpid()) is True
+    with journal.phase(home, "drain", pid=os.getpid()):
         pass
     journal.finish(home, 0)
     op = journal.read(home)
@@ -34,8 +34,11 @@ def test_begin_phase_finish_round_trip(home: Path) -> None:
 
 
 def test_failed_phase_is_recorded_and_reraised(home: Path) -> None:
-    journal.begin(home, "stop")
-    with pytest.raises(RuntimeError, match="boom"), journal.phase(home, "services"):
+    journal.begin(home, "stop", pid=os.getpid())
+    with (
+        pytest.raises(RuntimeError, match="boom"),
+        journal.phase(home, "services", pid=os.getpid()),
+    ):
         raise RuntimeError("boom")
     journal.finish(home, 1, error="RuntimeError: boom", extra={"phases": "services 1.2s"})
     op = journal.read(home)
@@ -48,11 +51,14 @@ def test_failed_phase_is_recorded_and_reraised(home: Path) -> None:
 
 
 def test_inner_stop_leg_never_hijacks_the_restart_journal(home: Path) -> None:
-    assert journal.begin(home, "restart") is True
-    with journal.phase(home, "preflight"):
+    assert journal.begin(home, "restart", pid=os.getpid()) is True
+    with journal.phase(home, "preflight", pid=os.getpid()):
         pass
-    assert journal.begin(home, "stop") is False
-    with journal.phase(home, "stop"), journal.phase(home, "drain"):
+    assert journal.begin(home, "stop", pid=os.getpid()) is False
+    with (
+        journal.phase(home, "stop", pid=os.getpid()),
+        journal.phase(home, "drain", pid=os.getpid()),
+    ):
         pass
     op = journal.read(home)
     assert op is not None
@@ -62,9 +68,9 @@ def test_inner_stop_leg_never_hijacks_the_restart_journal(home: Path) -> None:
 
 
 def test_completed_journal_can_be_replaced(home: Path) -> None:
-    journal.begin(home, "stop")
+    journal.begin(home, "stop", pid=os.getpid())
     journal.finish(home, 0)
-    assert journal.begin(home, "restart") is True
+    assert journal.begin(home, "restart", pid=os.getpid()) is True
     op = journal.read(home)
     assert op is not None and op.operation == "restart" and op.complete is False
 
@@ -94,10 +100,10 @@ def test_wrong_shape_journal_reads_as_absent(home: Path) -> None:
 
 
 def test_journal_survives_an_unfinished_process(home: Path) -> None:
-    journal.begin(home, "restart")
-    with journal.phase(home, "stop"):
+    journal.begin(home, "restart", pid=os.getpid())
+    with journal.phase(home, "stop", pid=os.getpid()):
         pass
-    with pytest.raises(SystemExit), journal.phase(home, "start"):
+    with pytest.raises(SystemExit), journal.phase(home, "start", pid=os.getpid()):
         raise SystemExit(1)
     op = journal.read(home)
     assert op is not None
@@ -107,7 +113,7 @@ def test_journal_survives_an_unfinished_process(home: Path) -> None:
 
 
 def test_phase_without_begin_still_journals(home: Path) -> None:
-    with journal.phase(home, "mystery"):
+    with journal.phase(home, "mystery", pid=os.getpid()):
         pass
     op = journal.read(home)
     assert op is not None
@@ -126,14 +132,14 @@ def _op_with_pid(pid: int) -> journal.LifecycleOp:
 
 
 def test_begin_takes_over_a_dead_writers_journal(home: Path) -> None:
-    journal.begin(home, "restart")
-    with journal.phase(home, "stop"):
+    journal.begin(home, "restart", pid=os.getpid())
+    with journal.phase(home, "stop", pid=os.getpid()):
         pass
     raw = json.loads(journal.status_path(home).read_text())
     raw["pid"] = _reaped_pid()
     journal.status_path(home).write_text(json.dumps(raw))
 
-    assert journal.begin(home, "restart") is True
+    assert journal.begin(home, "restart", pid=os.getpid()) is True
     op = journal.read(home)
     assert op is not None
     assert op.operation == "restart" and op.complete is False
@@ -168,8 +174,8 @@ def test_journal_write_failure_never_breaks_the_operation(
     blocked = journal.journal_path(home)
     blocked.mkdir(parents=True)
 
-    journal.begin(home, "stop")
-    with journal.phase(home, "drain"):
+    journal.begin(home, "stop", pid=os.getpid())
+    with journal.phase(home, "drain", pid=os.getpid()):
         pass
     journal.finish(home, 0)
 

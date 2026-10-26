@@ -21,6 +21,7 @@ from pathlib import Path
 from typing import TextIO
 
 from base.cluster import session_name
+from base.deploy.lifecycle.home_lifecycle_locks import resource_lock
 from base.deploy.lifecycle.status_journal import begin
 from base.host.proc import hosting_exec_domain
 from base.sessions.hosting import hosting_supervised_session
@@ -28,7 +29,6 @@ from base.sessions.pty.paths import SERVICE_UNIT
 from cli.commands.data_plane.stop_budget import require_valid_timeout
 from cli.commands.data_plane.stop_waits import deadline_after
 from cli.commands.lifecycle import root_driver
-from cli.commands.lifecycle._exclusive_resources import exclusive_resources
 from cli.commands.lifecycle.stop.admission import CONFIRM_PROMPT, confirmed, hosted_stop_refusal
 from cli.commands.lifecycle.stop.choices import (
     BROWSER_SESSION,
@@ -95,7 +95,6 @@ def _agrees(stdin: TextIO | None) -> bool:
 #
 # A refusal (a contradictory choice, a stop run from inside the work it drains) is raised
 # before a single unit is signalled.
-@exclusive_resources
 def do_stop(
     request: StopRequest,
     env: StopEnvironment,
@@ -104,28 +103,29 @@ def do_stop(
     choices: StopChoices = request.choices
     require_consistent(choices, pty_unit=SERVICE_UNIT)
     require_valid_timeout(request.timeout)
-    if not choices.force:
-        refuse_hosted_stop(env.command.home)
-    host = _host(env, force=choices.force)
-    plan = plan_stop(choices, host, request.window)
-    if not choices.force:
-        # meiva:note
-        # Positive first-start evidence turns the stop into the close of an attempt that never
-        # admitted work; it is read-only, so it precedes the confirm gate.
-        try:
-            unstarted = require_unstarted_initialization(env.command.home)
-        except _STOP_FAILURES as exc:
-            report_incomplete(
-                exc, [], home=env.command.home, owns_journal=False, journal_opened=False
-            )
-            return 1
-        if unstarted:
-            plan = plan_stop(choices, replace(host, unstarted=True), request.window)
-    if not _admitted(plan, request, env):
-        return 0
-    if choices.force:
-        return _run_force(plan, request, env, retained_children)
-    return _run_normal(plan, request, env, retained_children)
+    with resource_lock(home=env.command.home, pid=env.command.pid, purpose="cli.do_stop"):
+        if not choices.force:
+            refuse_hosted_stop(env.command.home)
+        host = _host(env, force=choices.force)
+        plan = plan_stop(choices, host, request.window)
+        if not choices.force:
+            # meiva:note
+            # Positive first-start evidence turns the stop into the close of an attempt that never
+            # admitted work; it is read-only, so it precedes the confirm gate.
+            try:
+                unstarted = require_unstarted_initialization(env.command.home)
+            except _STOP_FAILURES as exc:
+                report_incomplete(
+                    exc, [], home=env.command.home, owns_journal=False, journal_opened=False
+                )
+                return 1
+            if unstarted:
+                plan = plan_stop(choices, replace(host, unstarted=True), request.window)
+        if not _admitted(plan, request, env):
+            return 0
+        if choices.force:
+            return _run_force(plan, request, env, retained_children)
+        return _run_normal(plan, request, env, retained_children)
 
 
 # meiva:note
@@ -166,7 +166,7 @@ def _run_normal(
 ) -> int:
     deadline = deadline_after(request.timeout)
     home = env.command.home
-    owns_journal = begin(home, "stop", deadline=deadline)
+    owns_journal = begin(home, "stop", pid=env.command.pid, deadline=deadline)
     # meiva:note
     # Per-phase accounting: a failed stop names each phase and how much of the shared budget it
     # consumed, so the operator sees WHERE the budget went, never a bare timeout (#2045).
