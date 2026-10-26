@@ -6,6 +6,7 @@ from typing import Any
 
 import pytest
 
+from base.clock.tests.seeded_rng import seeded_rng
 from base.events.live.bus import EventBus
 from base.events.live.tests.fakes import patch_open_async_redis
 from services.agent_runner.agent_host.dispatcher import InboundWakeDispatcher
@@ -57,7 +58,7 @@ async def test_reconnect_logs_warning_without_a_traceback(
 
     patch_open_async_redis(monkeypatch, _open)
     disp = InboundWakeDispatcher(
-        EventBus.from_settings(),
+        EventBus.from_settings(rng=seeded_rng()),
         _IdleScheduler(),
         subscription_read_timeout_s=0.01,
         subscription_read_deadline_grace_s=0.01,

@@ -18,6 +18,7 @@ from psycopg_pool import ConnectionPool
 import base.db
 from base.agents.tests.units import spawn_agent
 from base.clock import SYSTEM_TIMERS
+from base.clock.tests.seeded_rng import seeded_rng
 from base.cluster.machine import MachineIdentityReader
 from base.cluster.machine.tests.identity import machine_identity as machine_identity
 from base.config import ConfigBoot
@@ -91,7 +92,10 @@ def _progress() -> LoopProgress:
 
 async def _round(pool: ConnectionPool, *, bus: EventBus | None = None) -> None:
     await dead_pages.dead_pages_round(
-        pool, _HOST, _progress(), EventBus.from_settings() if bus is None else bus
+        pool,
+        _HOST,
+        _progress(),
+        EventBus.from_settings(rng=seeded_rng()) if bus is None else bus,
     )
 
 
@@ -218,7 +222,11 @@ async def test_the_loop_scans_at_once_then_paces(
     _page(db_conn, agent, "dead-at-start", _free_port())
     task = asyncio.create_task(
         dead_pages.dead_pages_loop(
-            pool, _HOST, _progress(), page_server_config(), EventBus.from_settings()
+            pool,
+            _HOST,
+            _progress(),
+            page_server_config(),
+            EventBus.from_settings(rng=seeded_rng()),
         )
     )
     try:

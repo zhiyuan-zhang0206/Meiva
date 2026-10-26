@@ -14,6 +14,7 @@ from typing import Any
 import pytest
 from redis.asyncio.client import PubSub
 
+from base.clock.tests.seeded_rng import seeded_rng
 from base.events.live.bus import EventBus, EventBusConfig
 from base.events.live.projection import ToUserChanged
 from services.agent_runner.agent_ops.to_user_watch import watch_to_user
@@ -213,7 +214,7 @@ async def scale_probe(root: Path, bus_config: EventBusConfig) -> dict[str, float
         workspace = root / str(index)
         workspace.mkdir()
         (workspace / "to_user.md").write_text("existing markdown")
-    bus = EventBus(bus_config)
+    bus = EventBus(bus_config, rng=seeded_rng())
     loop = asyncio.get_running_loop()
     gaps: list[float] = []
     started = previous = loop.time()

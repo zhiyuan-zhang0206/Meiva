@@ -7,6 +7,7 @@ import pytest
 from psycopg_pool import ConnectionPool
 
 from base.agents.tests.units import spawn_agent
+from base.clock.tests.seeded_rng import seeded_rng
 from base.cluster.machine import MachineIdentityReader
 from base.cluster.machine.tests.identity import machine_identity as machine_identity
 from base.config.service_read import ConfigAuthority
@@ -110,7 +111,7 @@ class TestLivenessPass:
             run_liveness_pass(
                 Database.from_settings(gate=database_gate),
                 pool,
-                EventBus.from_settings(),
+                EventBus.from_settings(rng=seeded_rng()),
                 probe=host_down,
                 config=LivenessConfig(8.0),
             )
@@ -124,7 +125,7 @@ class TestLivenessPass:
             run_liveness_pass(
                 Database.from_settings(gate=database_gate),
                 pool,
-                EventBus.from_settings(),
+                EventBus.from_settings(rng=seeded_rng()),
                 probe=FakeProbe({MACHINE: False}),
                 config=LivenessConfig(8.0),
             )
@@ -224,7 +225,7 @@ class TestLivenessPass:
             run_liveness_pass(
                 Database.from_settings(gate=database_gate),
                 pool,
-                EventBus.from_settings(),
+                EventBus.from_settings(rng=seeded_rng()),
                 probe=RecordingProbe({MACHINE: True}),
                 config=LivenessConfig(12.0),
             )
@@ -258,7 +259,7 @@ class TestLivenessPass:
             run_liveness_pass(
                 Database.from_settings(gate=database_gate),
                 pool,
-                EventBus.from_settings(),
+                EventBus.from_settings(rng=seeded_rng()),
                 probe=FakeProbe({MACHINE: True}),
                 config=LivenessConfig(8.0),
             )
@@ -351,7 +352,7 @@ class TestLivenessPass:
             run_liveness_pass(
                 Database.from_settings(gate=database_gate),
                 pool,
-                EventBus.from_settings(),
+                EventBus.from_settings(rng=seeded_rng()),
                 probe=fail,
                 config=LivenessConfig(8.0),
             )
@@ -361,7 +362,7 @@ class TestLivenessPass:
             run_liveness_pass(
                 Database.from_settings(gate=database_gate),
                 pool,
-                EventBus.from_settings(),
+                EventBus.from_settings(rng=seeded_rng()),
                 probe=fail,
                 config=LivenessConfig(8.0),
             )
@@ -371,7 +372,7 @@ class TestLivenessPass:
             run_liveness_pass(
                 Database.from_settings(gate=database_gate),
                 pool,
-                EventBus.from_settings(),
+                EventBus.from_settings(rng=seeded_rng()),
                 probe=FakeProbe({MACHINE: True}),
                 config=LivenessConfig(8.0),
             )
@@ -390,7 +391,7 @@ class TestLivenessPass:
                 run_liveness_pass(
                     Database.from_settings(gate=database_gate),
                     pool,
-                    EventBus.from_settings(),
+                    EventBus.from_settings(rng=seeded_rng()),
                     probe=fail,
                     config=LivenessConfig(8.0),
                 )
@@ -401,7 +402,7 @@ class TestLivenessPass:
             run_liveness_pass(
                 Database.from_settings(gate=database_gate),
                 pool,
-                EventBus.from_settings(),
+                EventBus.from_settings(rng=seeded_rng()),
                 probe=FakeProbe({MACHINE: True}),
                 config=LivenessConfig(8.0),
             )
@@ -429,7 +430,7 @@ class TestLivenessPass:
             database_gate=database_gate,
             local_machine=machine_identity,
         )
-        bus = EventBus.from_settings()
+        bus = EventBus.from_settings(rng=seeded_rng())
         with snapshots_at_events(bus, lambda: str(_state(db_conn, aid)[0])) as seen:
             asyncio.run(
                 run_liveness_pass(
@@ -526,7 +527,7 @@ class TestLivenessPass:
             run_liveness_pass(
                 Database.from_settings(gate=database_gate),
                 pool,
-                EventBus.from_settings(),
+                EventBus.from_settings(rng=seeded_rng()),
                 probe=FakeProbe({MACHINE: True}),
                 config=LivenessConfig(8.0),
             )
@@ -565,7 +566,7 @@ class TestLivenessPass:
             run_liveness_pass(
                 Database.from_settings(gate=database_gate),
                 pool,
-                EventBus.from_settings(),
+                EventBus.from_settings(rng=seeded_rng()),
                 probe=FakeProbe({MACHINE: True}),
                 config=LivenessConfig(8.0),
             )
@@ -598,7 +599,7 @@ class TestLivenessPass:
             run_liveness_pass(
                 Database.from_settings(gate=database_gate),
                 pool,
-                EventBus.from_settings(),
+                EventBus.from_settings(rng=seeded_rng()),
                 probe=FakeProbe({}),
                 config=LivenessConfig(8.0),
             )
@@ -632,7 +633,7 @@ class TestLivenessPass:
             run_liveness_pass(
                 Database.from_settings(gate=database_gate),
                 pool,
-                EventBus.from_settings(),
+                EventBus.from_settings(rng=seeded_rng()),
                 probe=fail,
                 config=LivenessConfig(8.0),
             )
@@ -641,7 +642,7 @@ class TestLivenessPass:
             run_liveness_pass(
                 Database.from_settings(gate=database_gate),
                 pool,
-                EventBus.from_settings(),
+                EventBus.from_settings(rng=seeded_rng()),
                 probe=fail,
                 config=LivenessConfig(8.0),
             )
@@ -651,7 +652,7 @@ class TestLivenessPass:
             run_liveness_pass(
                 Database.from_settings(gate=database_gate),
                 pool,
-                EventBus.from_settings(),
+                EventBus.from_settings(rng=seeded_rng()),
                 probe=FakeProbe({MACHINE: True}),
                 config=LivenessConfig(8.0),
             )

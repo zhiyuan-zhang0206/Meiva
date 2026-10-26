@@ -21,6 +21,7 @@ from base.config import settings
 from base.config.service_read import ConfigAuthority
 from base.db.code_version_gate import ProcessDbGate
 from base.events.live.redis_client import open_sync_redis
+from base.events.live.tests.rng import seeded_auth_retry
 from base.lm.catalog import ModelCatalog
 from meiva.tests.fixtures.pin_agent import pin_agent
 from meiva.tests.namespaces.self.redis_view import loose
@@ -59,7 +60,7 @@ def test_terminate_queues_its_inbound_row_and_wakes_the_agents_own_channel(
     machine_identity: MachineIdentityReader,
 ) -> None:
     agent_id = _spawned(model_catalog, config_authority, database_gate, machine_identity)
-    listener = open_sync_redis(redis_url, decode_responses=True)
+    listener = open_sync_redis(redis_url, decode_responses=True, auth_retry=seeded_auth_retry())
     subscription = loose(listener).pubsub()
     subscription.subscribe(inbound_channel(agent_id, settings.data_plane.events_channel))
     assert subscription.get_message(timeout=5)["type"] == "subscribe"

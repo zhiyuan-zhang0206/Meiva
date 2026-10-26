@@ -14,6 +14,7 @@ from psycopg_pool import ConnectionPool
 
 import base.db
 from base.clock import SYSTEM_TIMERS
+from base.clock.tests.seeded_rng import seeded_rng
 from base.config import ConfigBoot, settings
 from base.daemon.endpoints import ServiceEndpoints
 from base.daemon.loop_health import LivenessGroup
@@ -82,7 +83,7 @@ async def test_a_crashing_loop_cancels_its_sibling_and_ends_the_service(
             daemon.run_loops(
                 pool,
                 Database.from_settings(gate=database_gate),
-                EventBus.from_settings(),
+                EventBus.from_settings(rng=seeded_rng()),
                 liveness,
                 reaper_config(),
             ),

@@ -310,6 +310,10 @@ def compact(summary: str) -> NoReturn:
     from base.telemetry import emit_prepared
     from base.telemetry.audit_events import prepare_event_log, record_audit
 
+    # meiva:note
+    # Taken before the commit: an SDK root without a random generator fails here, not after the
+    # summary is durable and the wake + SystemHalt below have been skipped.
+    bus = _settings.bus()
     # The inbound and its audit fact commit together.
     db = process_context.current_context().sql
     with db.transaction(), db.cursor() as cur:
@@ -333,7 +337,7 @@ def compact(summary: str) -> NoReturn:
     # live-events stacks into every exec child (startup-path laziness, task #3816).
     from base.events.live.projection import CompactRequest
 
-    _settings.bus().publish_best_effort_sync(
+    bus.publish_best_effort_sync(
         CompactRequest(
             agent_id=agent_identity.require_agent_id(),
             content=f"[compact requested, {len(summary)} chars]",

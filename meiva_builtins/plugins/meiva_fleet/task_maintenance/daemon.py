@@ -1,6 +1,7 @@
 import asyncio
 import logging
 import os
+import random
 import sys
 from collections import defaultdict
 from collections.abc import Callable, Mapping, Sequence
@@ -64,6 +65,13 @@ _log = logging.getLogger("meiva_builtins.plugins.meiva_fleet.task_maintenance.da
 
 
 _DAEMON_MODULE = "meiva_builtins.plugins.meiva_fleet.task_maintenance.daemon"
+
+
+# meiva:note
+# The process's random generator, built once at its entry for the event bus's retry jitter. Jitter
+# is not a secret, so it is a plain `random.Random`.
+def _new_rng() -> random.Random:
+    return random.Random()  # noqa: S311
 
 
 def task_maintenance_endpoint() -> ServiceEndpoint:
@@ -598,7 +606,7 @@ def main() -> None:
             run(
                 config,
                 database=database,
-                bus=EventBus.from_settings(),
+                bus=EventBus.from_settings(rng=_new_rng()),
                 image=image,
                 endpoint=endpoint,
             )

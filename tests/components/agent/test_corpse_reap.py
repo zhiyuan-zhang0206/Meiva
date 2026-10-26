@@ -10,6 +10,7 @@ from agent.ownership.hosted import (
     admit_hosted_runtime,
     settle_and_stamp_turn,
 )
+from base.clock.tests.seeded_rng import seeded_rng
 from base.db import Database, create_agent
 from base.db.code_version_gate import ProcessDbGate
 from base.events.live.bus import EventBus
@@ -57,7 +58,7 @@ async def test_corpse_stamp_failure_keeps_its_traceback(
         settlement = await settle_and_stamp_turn(
             aops_pool,
             incarnation,
-            bus=EventBus.from_settings(),
+            bus=EventBus.from_settings(rng=seeded_rng()),
             exited=False,
             crashed=True,
         )

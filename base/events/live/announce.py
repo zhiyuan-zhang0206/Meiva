@@ -10,6 +10,8 @@ must not roll back or fail the already-committed lifecycle write.
 
 from __future__ import annotations
 
+from typing import Protocol
+
 from base.events.live.bus import EventBus
 from base.events.live.projection import (
     AgentSpawned,
@@ -18,6 +20,21 @@ from base.events.live.projection import (
     TaskCreated,
     TaskUpdated,
 )
+
+
+# meiva:note
+# What a synchronous task announcement needs of a bus: the best-effort sync publish. The SDK
+# hands out its bus through this shape, so the plugin that announces a task never names the
+# `EventBus` class (and the redis stack behind it) on the `import meiva` path.
+class SyncPublisher(Protocol):
+    def publish_best_effort_sync(
+        self,
+        payload: str,
+        *,
+        channel: str | None = None,
+        decode_responses: bool = True,
+        context: str = "",
+    ) -> int | None: ...
 
 
 def publish_agent_spawned_sync(bus: EventBus, agent_id: int) -> None:
@@ -38,7 +55,7 @@ def publish_impersonation_changed_sync(bus: EventBus, agent_id: int) -> None:
     bus.publish_best_effort_sync(ev.model_dump_json(), context="impersonation_changed")
 
 
-def publish_task_created_sync(bus: EventBus, agent_id: int, task_id: int) -> None:
+def publish_task_created_sync(bus: SyncPublisher, agent_id: int, task_id: int) -> None:
     """Publish TaskCreated from a sync context (the meiva.tasks.create SDK path).
     No task read — the frontend refetches /api/tasks on receipt, so the event
     only names the task; `agent_id` is the creating agent."""
@@ -46,7 +63,7 @@ def publish_task_created_sync(bus: EventBus, agent_id: int, task_id: int) -> Non
     bus.publish_best_effort_sync(ev.model_dump_json(), context="task_created")
 
 
-def publish_task_updated_sync(bus: EventBus, agent_id: int, task_id: int) -> None:
+def publish_task_updated_sync(bus: SyncPublisher, agent_id: int, task_id: int) -> None:
     """Publish TaskUpdated from a sync context (the meiva.tasks.update SDK path).
     See publish_task_created_sync; `agent_id` is the acting agent."""
     ev = TaskUpdated(agent_id=agent_id, task_id=task_id)

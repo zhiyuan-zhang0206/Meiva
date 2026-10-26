@@ -8,6 +8,7 @@ import psycopg
 import pytest
 import redis as sync_redis
 
+from base.clock.tests.seeded_rng import seeded_rng
 from base.config import settings
 from base.db import create_agent
 from base.events.live.bus import EventBus
@@ -40,7 +41,7 @@ async def _collect_throttled_frames(
     """
     req = FakeRequest()
     gen = throttled_event_stream(
-        EventBus.from_settings(),
+        EventBus.from_settings(rng=seeded_rng()),
         req,  # type: ignore[arg-type]
         channel=channel,
         throttle_rate=throttle_rate,

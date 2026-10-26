@@ -33,6 +33,7 @@ from agent.graph.prompt.system_prompt import capture_meiva_overview, get_meiva_o
 from agent.state import AgentState
 from base.agents.context import MeivaContext
 from base.clock import Clock
+from base.clock.tests.seeded_rng import seeded_rng
 from base.config import settings
 from base.config.tests.configuration import defaults
 from base.db import Database, create_agent
@@ -190,7 +191,7 @@ def make_runtime(
         event_publisher=event_publisher if event_publisher is not None else MagicMock(),  # pyright: ignore[reportUnknownArgumentType]
         agent=AgentSlices.resolve(pins, default_reader=defaults()),
         db=Database.from_settings(gate=database_gate),
-        bus=EventBus.from_settings(),
+        bus=EventBus.from_settings(rng=seeded_rng()),
         catalog=build_model_catalog(),
         clock_factory=Clock.from_settings,
     )

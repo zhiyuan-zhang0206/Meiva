@@ -555,6 +555,7 @@ class InboundWakeDispatcher:
                 await retry_auth_failures_async(
                     lambda pubsub=pubsub: pubsub.psubscribe(pattern),
                     attempt_timeout_s=self._subscription_read_timeout_s,
+                    auth_retry=self._bus.auth_retry,
                 )
                 logger.info(
                     "hosted dispatcher subscribed to {pattern}",

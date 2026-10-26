@@ -17,6 +17,7 @@ identity probe (`services/supervision/roster/healthz.py`).
 
 import asyncio
 import logging
+import random
 import signal
 import sys
 from collections.abc import Callable
@@ -61,6 +62,13 @@ POLL_INTERVAL_S = 1.0
 # to 10 LLM label calls; beating per-item keeps a slow-but-legit call from
 # tripping it, while a genuine wedge still flips /healthz 503 -> respawn.
 LIVENESS_TIMEOUT_S = 120.0
+
+
+# meiva:note
+# The process's random generator, built once at its entry for the event bus's retry jitter. Jitter
+# is not a secret, so it is a plain `random.Random`.
+def _new_rng() -> random.Random:
+    return random.Random()  # noqa: S311
 
 
 # meiva:note
@@ -257,7 +265,7 @@ async def run(
     db = database()
     pool = db.pool()
     catalog = build_model_catalog()
-    bus = EventBus(event_bus_config_from_config(process_config))
+    bus = EventBus(event_bus_config_from_config(process_config), rng=_new_rng())
     try:
         await dispatch_loop(
             pool,

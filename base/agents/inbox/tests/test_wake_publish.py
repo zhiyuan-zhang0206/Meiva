@@ -10,6 +10,7 @@ import pytest
 
 from base.agents.impersonation.wake import publish_inbound_wake
 from base.agents.inbox.insert import insert_inbound_message
+from base.clock.tests.seeded_rng import seeded_rng
 from base.cluster import redis_channel_prefix
 from base.config import settings
 from base.db import Database, create_agent
@@ -24,7 +25,7 @@ async def test_publish_leaves_no_redis_key(database: Database, event_bus: EventB
     with psycopg.connect(settings.data_plane.db_url, autocommit=True) as conn:
         agent_id = create_agent(conn)
         insert_inbound_message(conn, agent_id, "wake", "user", bus=event_bus, database=database)
-    r = EventBus.from_settings().sync_redis(decode_responses=True)
+    r = EventBus.from_settings(rng=seeded_rng()).sync_redis(decode_responses=True)
     try:
         prefix = redis_channel_prefix(settings.data_plane.events_channel)
         leftover = [

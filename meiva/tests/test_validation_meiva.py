@@ -10,6 +10,7 @@ import psycopg
 import pytest
 
 from base.agents.lifecycle import SystemHalt
+from base.agents.sdk.tests.sampling_owners import fixed_sampling_owner
 from base.agents.tests.units import spawn_agent
 from base.cluster.machine import MachineIdentityReader
 from base.cluster.machine.tests.identity import machine_identity as machine_identity
@@ -19,6 +20,8 @@ from base.lm.catalog import ModelCatalog
 from meiva import files as _files
 from meiva import ui as _ui
 from meiva import watcher as _watcher
+from meiva.sdk_surface.installation import Installation
+from meiva.sdk_surface.tests.installation_holder import held_installation
 from meiva.tests.fixtures.pin_agent import pin_agent
 
 
@@ -239,7 +242,10 @@ class TestSelfEntries:
             machine=machine_identity,
         )
         pin_agent(agent_id)
-        with pytest.raises(SystemHalt):
+        with (
+            held_installation(Installation.bare(sampling=fixed_sampling_owner())),
+            pytest.raises(SystemHalt),
+        ):
             self_mod.compact(("summary",))  # pyright: ignore[reportArgumentType]
         row = db_conn.execute(
             "SELECT content FROM inbound_messages WHERE agent_id = %s AND kind = 'compact_summary'",

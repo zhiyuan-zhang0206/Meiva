@@ -6,6 +6,7 @@ import psycopg
 
 from base.agents.birth.spawn import create_agent_row
 from base.agents.impersonation.wake import publish_inbound_wake
+from base.clock.tests.seeded_rng import seeded_rng
 from base.cluster.machine import MachineIdentityReader
 from base.config.service_read import ConfigAuthority
 from base.db import Database
@@ -47,7 +48,7 @@ def spawn_agent(
 ) -> int:
     agent_id, _birth_config, _prompt_id, _attempt_id = create_agent_row(
         Database.from_settings(gate=database_gate),
-        EventBus.from_settings(),
+        EventBus.from_settings(rng=seeded_rng()),
         spawner=spawner,
         fork_from=fork_from,
         fork_checkpoint=fork_checkpoint,
@@ -60,7 +61,10 @@ def spawn_agent(
         authority=config_authority,
     )
     publish_inbound_wake(
-        Database.from_settings(gate=database_gate), EventBus.from_settings(), agent_id, "0"
+        Database.from_settings(gate=database_gate),
+        EventBus.from_settings(rng=seeded_rng()),
+        agent_id,
+        "0",
     )
     return agent_id
 

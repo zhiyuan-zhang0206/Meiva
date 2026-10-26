@@ -10,6 +10,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import os
+import random
 import secrets
 import signal
 import sys
@@ -76,6 +77,13 @@ _LIVENESS_TIMEOUT_S = 60.0
 # A dead-page round probes every open show page of the host (1.5 s each, eight at once);
 # a loop that completed nothing for this long is wedged.
 _DEAD_PAGES_LIVENESS_TIMEOUT_S = 600.0
+
+
+# meiva:note
+# The process's random generator, built once at its entry for the event bus's retry jitter. Jitter
+# is not a secret, so it is a plain `random.Random`.
+def _new_rng() -> random.Random:
+    return random.Random()  # noqa: S311
 
 
 def page_server_config(*, daemon_settings: DaemonSettings | None = None) -> PageServerConfig:
@@ -509,7 +517,7 @@ async def run(
     )
     db = database()
     pool = db.pool()
-    config, bus = page_server_config(), EventBus.from_settings()
+    config, bus = page_server_config(), EventBus.from_settings(rng=_new_rng())
     try:
         # One TaskGroup owns the resident loops, each with its own progress tracker so
         # a stalled loop cannot be masked by a busy sibling: a loop that raises cancels

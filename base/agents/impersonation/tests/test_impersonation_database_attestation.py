@@ -6,6 +6,7 @@ import pytest
 from base.agents import impersonation as leases
 from base.agents.impersonation.tests.impersonation_support import recorded_tree
 from base.api_contracts.caller_identity import CallerIdentity
+from base.clock.tests.seeded_rng import seeded_rng
 from base.cluster.machine import MachineIdentityReader
 from base.cluster.machine.tests.identity import machine_identity as machine_identity
 from base.config.service_read import ConfigAuthority
@@ -42,7 +43,7 @@ def _active(
 ) -> dict[str, Any]:
     lease = leases.request(
         Database.from_settings(gate=database_gate),
-        EventBus.from_settings(),
+        EventBus.from_settings(rng=seeded_rng()),
         owner.agent_id,
         caller=CallerIdentity(kind="external_agent", subject="codex"),
         ttl_seconds=300,
@@ -57,7 +58,7 @@ def _active(
     )
     leases.prepare(
         Database.from_settings(gate=database_gate),
-        EventBus.from_settings(),
+        EventBus.from_settings(rng=seeded_rng()),
         lease["id"],
         owner.agent_id,
         owner,
@@ -66,7 +67,7 @@ def _active(
     )
     leases.activate(
         Database.from_settings(gate=database_gate),
-        EventBus.from_settings(),
+        EventBus.from_settings(rng=seeded_rng()),
         lease["id"],
         owner,
     )

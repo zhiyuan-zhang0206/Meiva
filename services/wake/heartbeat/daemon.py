@@ -21,6 +21,7 @@ supervisor through the roster's `/healthz` probe; repeated failed rounds end the
 import asyncio
 import logging
 import math
+import random
 import signal
 import sys
 from collections.abc import Callable
@@ -61,6 +62,13 @@ from services.wake.heartbeat.loops import DispatchRound, LivenessRound, dispatch
 from services.wake.heartbeat.selection import select_idle_agents_needing_heartbeat
 
 _log = logging.getLogger("services.wake.heartbeat.daemon")
+
+
+# meiva:note
+# The process's random generator, built once at its entry for the event bus's retry jitter. Jitter
+# is not a secret, so it is a plain `random.Random`.
+def _new_rng() -> random.Random:
+    return random.Random()  # noqa: S311
 
 
 def _endpoint(config: ConfigBoot, *, runtime: Path) -> ServiceEndpoint:
@@ -594,7 +602,7 @@ async def run(
 
     db = database()
     pool = db.pool()
-    bus = EventBus.from_settings()
+    bus = EventBus.from_settings(rng=_new_rng())
     try:
         # One TaskGroup owns the resident loops, each with its own progress tracker
         # so a stalled loop cannot be masked by a busy sibling. The liveness pass

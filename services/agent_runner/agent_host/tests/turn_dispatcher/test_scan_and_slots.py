@@ -7,6 +7,7 @@ import threading
 
 import pytest
 
+from base.clock.tests.seeded_rng import seeded_rng
 from base.config import settings
 from base.events.live.bus import EventBus
 from services.agent_runner.agent_host import dispatcher
@@ -163,7 +164,7 @@ class TestDispatcherMessageHandling:
             def wake(self, agent_id: int) -> None:
                 woken.append(agent_id)
 
-        return InboundWakeDispatcher(EventBus.from_settings(), _Sched()), woken  # pyright: ignore[reportArgumentType]
+        return InboundWakeDispatcher(EventBus.from_settings(rng=seeded_rng()), _Sched()), woken  # pyright: ignore[reportArgumentType]
 
     def test_pmessage_wakes_its_agent(self) -> None:
         disp, woken = self._dispatcher()
@@ -190,7 +191,9 @@ class TestPendingScan:
         async def _pending() -> list[int]:
             return [23]
 
-        disp = InboundWakeDispatcher(EventBus.from_settings(), scheduler, pending_scan=_pending)
+        disp = InboundWakeDispatcher(
+            EventBus.from_settings(rng=seeded_rng()), scheduler, pending_scan=_pending
+        )
 
         await disp.scan_once()
 
@@ -233,7 +236,7 @@ class TestStallRestartEscalation:
             return []
 
         disp = InboundWakeDispatcher(
-            EventBus.from_settings(),
+            EventBus.from_settings(rng=seeded_rng()),
             scheduler,
             pending_scan=_pending,
             scan_interval_s=0.005,
@@ -273,7 +276,9 @@ class TestScanNeverCancelsATurn:
         async def _pending() -> list[int]:
             return [23]
 
-        disp = InboundWakeDispatcher(EventBus.from_settings(), scheduler, pending_scan=_pending)
+        disp = InboundWakeDispatcher(
+            EventBus.from_settings(rng=seeded_rng()), scheduler, pending_scan=_pending
+        )
         await disp.scan_once()
 
         assert cancelled == [], "the dispatcher scan must not cancel a running turn"

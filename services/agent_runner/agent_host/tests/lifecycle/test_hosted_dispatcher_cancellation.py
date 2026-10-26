@@ -21,6 +21,7 @@ import pytest
 import pytest_asyncio
 from psycopg_pool import AsyncConnectionPool
 
+from base.clock.tests.seeded_rng import seeded_rng
 from base.db import Database
 from base.events.live.bus import EventBus
 from services.agent_runner.agent_host.dispatcher import InboundWakeDispatcher
@@ -94,7 +95,7 @@ async def test_cancelled_dispatcher_unwinds_after_a_swallowed_pool_check_cancel(
             return []
 
     dispatcher = InboundWakeDispatcher(
-        EventBus.from_settings(),
+        EventBus.from_settings(rng=seeded_rng()),
         _IdleScheduler(),
         pending_scan=pending,
         scan_interval_s=0.05,
