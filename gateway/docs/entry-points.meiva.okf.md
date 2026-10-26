@@ -12,11 +12,12 @@ tags: []
 - `gateway/app.py` — FastAPI application factories (`create_app`, `create_app_from_environment`), cold `openapi_schema()`, lifespan, middleware, route mounting
 - `gateway/http/config.py` — frozen `GatewayConfig` (`gateway_config_from_boot`, the one place the root reads settings for handlers; the root also hands it the account home, the memory directory under it and the `rng` every request id, attempt id, upload batch id and session key is drawn from) shared across app assembly, auth, CORS, memory reads, and lifespan; its groups (`display`, `models`, `sse`, `alerts`, `pages`, `memory_search`, ...) carry the tunables a route reads, and `gateway_config(request)` hands it to a handler
 - `gateway/__main__.py` — `.venv/bin/python -m gateway` → uvicorn
-- `gateway/cluster/server.py` — the process root `main(config=..., build_app=...)`: it reads three facts from the booted config and executes the plan `gateway/cluster/serve_plan.py` returns
+- `gateway/cluster/server.py` — the process root `main(home=..., config=..., build_app=...)`: it reads three facts from the booted config and executes the plan `gateway/cluster/serve_plan.py` returns
 - `services/wake/schedule_manager/engine.py` — the schedule execution engine; the ScheduleManager launches `services/wake/schedule_manager/runner.py` to compose the SDK in an independent process
 - `scripts/entrypoints/gateway.py` — canonical launch script (per `gateway/app.py` docstring)
 
-`gateway.app.main` boots the `ConfigBoot` and hands it to `server.main`. `serve_plan` is a
+`gateway.app.main` boots the `ConfigBoot`, resolves the Meiva home once and hands both to `server.main`;
+the borrowed builder then derives the memory directory from the home the process was given. `serve_plan` is a
 strict module over three values (does this machine serve the gateway role, does it declare a
 reachable address, is hot reload on) and returns what `main` then does in order: require the
 cluster secret, bind the loopback or every interface, require the transport-encryption

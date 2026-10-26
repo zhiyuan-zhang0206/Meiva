@@ -208,7 +208,7 @@ def start_root(
         # fixed interpreter + in-repo entry, no shell. The child leads its own process group,
         # so teardown reaches the hot-reload worker the child spawns as well.
         proc = subprocess.Popen(  # noqa: S603
-            [sys.executable, str(_CHILD_ENTRY), "server_main"],
+            [sys.executable, str(_CHILD_ENTRY), "server_main", str(home)],
             cwd=_REPO_ROOT,
             env=env,
             stdout=log_file,

@@ -6,10 +6,11 @@
 # - `checkout_move <source> <repo>`: import the gateway's first-load image from a
 #   throwaway checkout, move that checkout's HEAD, and print what the image reports.
 # - `server_shutdown`: run the real gateway server child for the SIGTERM tests.
-# - `server_main`: run the real `gateway.cluster.server.main` (the process root) with a probe app;
-#   the app builder leaves a marker file where `BUILT_ENV` names it, so a parent can tell whether
-#   the root built the app itself.
-# - `app_from_environment`: build the gateway app twice from the environment, as a reload worker does.
+# - `server_main <home>`: run the real `gateway.cluster.server.main` (the process root) serving
+#   `<home>` with a probe app; the app builder leaves a marker file where `BUILT_ENV` names it, so a
+#   parent can tell whether the root built the app itself.
+# - `app_from_environment <home>`: build the gateway app twice from the environment, as a reload
+#   worker does, and compare it with the configuration `<home>` yields.
 
 from __future__ import annotations
 
@@ -134,23 +135,23 @@ def _build_marked_probe_app(_process: object) -> FastAPI:
     return probe_app()
 
 
-def run_main() -> None:
+def run_main(home: Path) -> None:
     from base.config import ConfigBoot
     from gateway.cluster import server as _server
 
     config = ConfigBoot()
     config.boot()
     config.ensure_eager()
-    _server.main(config=config, build_app=_build_marked_probe_app)
+    _server.main(home=home, config=config, build_app=_build_marked_probe_app)
 
 
-def _app_from_environment() -> None:
+def _app_from_environment(home: Path) -> None:
     from base.config import ConfigBoot
     from gateway import app as gateway_app
 
     first = gateway_app.create_app_from_environment()
     second = gateway_app.create_app_from_environment()
-    expected = gateway_app.process_config(ConfigBoot())
+    expected = gateway_app.process_config(ConfigBoot(), home=home)
     sys.stdout.write(
         json.dumps(
             {
@@ -230,8 +231,8 @@ if __name__ == "__main__":
     elif sys.argv[1] == "server_shutdown":
         run_child()
     elif sys.argv[1] == "server_main":
-        run_main()
+        run_main(Path(sys.argv[2]))
     elif sys.argv[1] == "app_from_environment":
-        _app_from_environment()
+        _app_from_environment(Path(sys.argv[2]))
     else:
         raise SystemExit(f"unknown scenario {sys.argv[1]!r}")
