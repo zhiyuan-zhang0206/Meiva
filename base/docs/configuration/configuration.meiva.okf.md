@@ -61,7 +61,7 @@ remains the authority for whether a unit's `.env` owns cluster configuration or
 a pure runner must fetch it from the gateway. The home is not configuration:
 `MEIVA_HOME` is read by `base.paths.home.resolve_meiva_home` before Settings exists (there
 is no `meiva_home` field), and a script a git hook launches that reaches application
-code calls `dotenv_boot.enter_scratch_home()` first (behind
+code calls `boot_actions.enter_scratch_home()` first (behind
 `if __name__ == "__main__":`, never at import; it refuses inside pytest), so its
 imports never read another unit's `.env` or present a gateway bearer. Other
 development tools set a temporary `MEIVA_HOME` by convention (`docs/conventions/dev-setup.md`).

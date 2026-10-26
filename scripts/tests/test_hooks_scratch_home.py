@@ -34,7 +34,7 @@ from meizel.roles import packages
 _REPO = Path(__file__).resolve().parents[2]
 
 _APPLICATION_PACKAGES = frozenset(packages("application", "templates"))
-_SCRATCH_PROVIDER = "base.host.env.dotenv_boot"
+_SCRATCH_PROVIDER = "base.host.env.boot_actions"
 
 # A hook script that reaches application code and still needs no scratch home.
 _BOOTS_NOTHING = {
@@ -200,7 +200,7 @@ def test_a_hook_script_exempt_from_the_scratch_home_runs_without_a_third_party_p
 
 
 def test_enter_scratch_home_refuses_inside_a_pytest_process() -> None:
-    from base.host.env.dotenv_boot import enter_scratch_home
+    from base.host.env.boot_actions import enter_scratch_home
 
     home = os.environ["MEIVA_HOME"]
     with pytest.raises(RuntimeError, match="pytest process"):

@@ -15,6 +15,7 @@
 from __future__ import annotations
 
 import dataclasses
+import os
 from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import Any, assert_never
@@ -40,7 +41,6 @@ from base.config import ConfigBoot
 from base.config.agent_pins import resolve_agent_config_pins
 from base.config.service_read import ConfigAuthority
 from base.host.env.agent_slices import PluginConfigView
-from base.native_process.ownership import process_metadata
 from base.packages.plugins.config_view import resolve_agent_plugin_pins
 from base.telemetry import Event
 from meiva.boot import (
@@ -71,13 +71,16 @@ __all__ = ["AttachInputs", "Attachment", "attach"]
 
 # meiva:note
 # Everything one attachment needs from the process, resolved by `attach`: the lease it names, the
-# context it borrows (None for an independent attachment) and the boot of the process around it,
-# which holds the clients, clock and configuration an independent attachment owns.
+# context it borrows (None for an independent attachment), the boot of the process around it,
+# which holds the clients, clock and configuration an independent attachment owns, and the
+# identity of this attachment's event participant (the process id and a unique suffix).
 @dataclass(frozen=True, slots=True)
 class AttachInputs:
     target: LeaseTarget
     bound: MeivaContext | None
     boot: ExternalBoot
+    pid: int
+    suffix: str
 
 
 class _Codec:
@@ -150,6 +153,8 @@ class _LeaseIdentity:
 class Attachment(ExternalAttachment):
     def __init__(self, inputs: AttachInputs) -> None:
         self._target = inputs.target
+        self._pid = inputs.pid
+        self._suffix = inputs.suffix
         self.lease_id = inputs.target.lease_id
         self.config: tuple[Mapping[str, Any], PluginConfigView] | None = None
         self._seal_authority: ConfigAuthority | None = None
@@ -287,8 +292,8 @@ class Attachment(ExternalAttachment):
 
         source_key = participant_source_key(
             log_native=is_log_native(self._lease()),
-            pid=process_metadata()["pid"],
-            suffix=uuid4().hex,
+            pid=self._pid,
+            suffix=self._suffix,
         )
         if source_key is None:
             return
@@ -376,7 +381,7 @@ def attach(session_id: int | str, *, agent_id: int | None = None) -> Attachment:
         borrow_external_process(bound) if bound is not None else own_external_process(ConfigBoot())
     )
     try:
-        return Attachment(AttachInputs(target, bound, boot))
+        return Attachment(AttachInputs(target, bound, boot, pid=os.getpid(), suffix=uuid4().hex))
     except BaseException:
         if isinstance(boot, OwnedBoot):
             boot.clients.close()

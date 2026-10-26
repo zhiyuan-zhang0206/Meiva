@@ -346,7 +346,7 @@ def apply_cluster_timezone(owner: ConfigBoot | None = None) -> None:
     to apply, and forcing the field default ``America/Los_Angeles`` onto it
     would be wrong.
     """
-    from base.host.env.dotenv_boot import apply_process_timezone
+    from base.host.env.boot_actions import apply_process_timezone
 
     apply_process_timezone(cluster_tz_name(owner))
 

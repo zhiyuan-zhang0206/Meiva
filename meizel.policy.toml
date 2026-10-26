@@ -115,7 +115,6 @@ bus = [
 "agent.graph.exec.process.read_parent_facts()" = "copies os.environ and reads the working and home directories"
 "base.agents.impersonation.host_transport.default_control_socket()" = "falls back to os.environ for CODEX_HOME"
 "base.agents.messages.external_caller.external_caller()" = "falls back to os.environ for MEIVA_CALLER_IDENTITY"
-"base.host.env.dotenv_boot.watcher_runner_env()" = "projects the live os.environ for the watcher runner"
 "base.host.env.registry.process_environment()" = "returns the live os.environ"
 "base.host.git.gitenv.git_env()" = "copies the live os.environ when no mapping is passed"
 "base.host.system.probes.display_available()" = "reads DISPLAY and WAYLAND_DISPLAY from os.environ"

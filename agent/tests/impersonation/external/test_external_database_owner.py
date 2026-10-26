@@ -72,7 +72,7 @@ def test_an_independent_attachment_closes_the_clients_it_owns_at_detach(
     process_context.unbind_context()
     boot, pipeline = owned_boot()
     target = lease_target(attached_runtime.lease_id, None)
-    with Attachment(AttachInputs(target, None, boot)):
+    with Attachment(AttachInputs(target, None, boot, pid=os.getpid(), suffix="probe")):
         (pid,) = meiva.context.sql.execute("SELECT pg_backend_pid()").fetchone()
         assert backend_alive(attached_runtime, pid)
         assert not pipeline.stopped
@@ -127,7 +127,9 @@ def test_independent_attachment_does_not_redeliver_environment(
     delivered.read_process_environment()
     process_context.unbind_context()
     target = lease_target(attached_runtime.lease_id, None)
-    with Attachment(AttachInputs(target, None, independent_boot())):
+    with Attachment(
+        AttachInputs(target, None, independent_boot(), pid=os.getpid(), suffix="probe")
+    ):
         assert dict(os.environ) == before
         assert meiva.context.require_clock().timezone == delivered.view.general.timezone
         if contended:
@@ -153,7 +155,11 @@ def test_unbound_attachment_failure_closes_owned_clients_and_releases_binding(
         install.mark_load_failed(primary)
     try:
         with pytest.raises(RuntimeError) as raised:
-            Attachment(AttachInputs(lease_target(lease_id, None), None, boot))
+            Attachment(
+                AttachInputs(
+                    lease_target(lease_id, None), None, boot, pid=os.getpid(), suffix="probe"
+                )
+            )
         if failure_at == "plugins":
             assert raised.value is primary
     finally:

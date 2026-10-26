@@ -5,15 +5,14 @@
 
 from __future__ import annotations
 
-import json
 from collections.abc import Mapping
 from pathlib import Path
 
 import pytest
 
+from base.host.env.dotenv_boot import project_watcher_runner_env
 from base.sessions.env_forwarding import cwd_is_inside_checkout
 from meiva.shell.session_env import SessionHost, session_environment
-from meiva.tests.bootstrap.probe_runner import run_probe
 
 _RUNNER_DB = "postgresql://meiva_runner:runner@127.0.0.1:6433/meiva"
 _OWNER_DB = "postgresql://meiva_main:owner@127.0.0.1:6433/meiva"
@@ -81,7 +80,8 @@ def test_runner_urls_reach_a_session_only_through_the_explicit_override(tmp_path
 
 
 # meiva:note
-# What `watcher_runner_env` answers in a fresh interpreter with exactly this environment.
+# What the watcher's runner projection answers for exactly this environment, in `unit` as the home
+# and `tmp_path` as the OS user's home.
 def _projection(
     tmp_path: Path,
     env: Mapping[str, str],
@@ -98,9 +98,11 @@ def _projection(
         **({"MEIVA_MACHINE_SERVE_GATEWAY": "true"} if serve_gateway else {}),
         **env,
     }
-    result = run_probe("watcher_runner_env", env=scenario_env, clean=True)
-    assert result.returncode == 0, result.stderr
-    return json.loads(result.stdout.strip().splitlines()[-1])
+    try:
+        projected = project_watcher_runner_env(scenario_env, home=unit, user_home=tmp_path)
+    except RuntimeError as exc:
+        return {"error": str(exc)}
+    return {"env": projected}
 
 
 @pytest.mark.parametrize("profile_key", ["MEIVA_PROCESS_PROFILE", "MEIVA_LAUNCHER_PROFILE"])
