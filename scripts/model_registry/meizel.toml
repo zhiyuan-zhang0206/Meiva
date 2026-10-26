@@ -1,4 +1,4 @@
-exports = ["update_model_pricing.py"]
+exports = ["check_model_updates.py", "update_model_pricing.py"]
 
 [uses]
 "plugin_price_source.py" = ["plugin_price_rates.py"]

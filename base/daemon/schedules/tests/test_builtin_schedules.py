@@ -34,6 +34,8 @@ class TestLoadManifest:
             "model-update-tracker": "product",
             "trace-ship-tempo": "product",
             "db-write-stall-watch": "operator",
+            "sched-dry-import-weekly": "operator",
+            "log-cred-mask-monthly": "operator",
             "qa-keepalive": "operator",
         }
         assert {name for name, s in by_name.items() if s.default_enabled} == {

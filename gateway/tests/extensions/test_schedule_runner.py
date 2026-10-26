@@ -174,16 +174,14 @@ def test_agent_status_guard_failure_is_visible_in_schedule_records(
     db_conn: psycopg.Connection, unit_home: Path, *, machine_identity: MachineIdentityReader
 ) -> None:
     script = """
-from schedules.agent_status_guard import ensure_agent_status_members
-
 class DriftedAgentStatus:
     RUNNING = "running"
 
-ensure_agent_status_members(
-    DriftedAgentStatus,
-    {"IDLING", "RUNNING"},
-    schedule_name="drift-probe",
-)
+missing = sorted({"IDLING", "RUNNING"} - set(dir(DriftedAgentStatus)))
+if missing:
+    raise SystemExit(
+        "schedule 'drift-probe' is missing AgentStatus members: " + ", ".join(missing)
+    )
 """
     sid = _insert_schedule(db_conn, script=script, name="drift-probe")
 

@@ -99,3 +99,13 @@ def test_snapshot_decoder_preserves_retired_shape_validation(value: str) -> None
 @pytest.mark.parametrize("text", ["[unknown]\n", "[ambient-state]\nunknown = []\n", "["])
 def test_snapshot_decoder_rejects_every_other_unknown_or_malformed_input(text: str) -> None:
     assert allowances.parse_snapshot(text)[1]
+
+
+# meiva:note
+# The allowance tables are a review surface, not a convenience: each entry says one file may do what
+# the rule otherwise forbids. Pinning the counts makes adding one a deliberate edit here too, so a
+# new allowance cannot arrive inside a change that looks local. Bump a number only with its entry.
+def test_repo_policy_allowance_counts_are_pinned() -> None:
+    policy = allowances.load(ROOT)
+    assert len(policy.external) == 43
+    assert len(policy.loads) == 26

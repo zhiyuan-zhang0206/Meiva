@@ -44,6 +44,7 @@
 "tests/e2e/fakes/child_budget_writer.py" = "executes the generated scenario program passed on its command line"
 
 [loads]
+"schedules/jobs/dry_import_child.py" = ["schedules"]
 "meiva/boot.py" = ["agent/extensions"]
 "meiva_builtins/skills/coordination/meiva-being-a-long-running-agent/tests/test_agent_usage.py" = ["meiva_builtins/skills"]
 "meiva_builtins/skills/coordination/meiva-dynamic-workflow/tests/test_minimal_dispatch.py" = ["meiva_builtins/skills"]
