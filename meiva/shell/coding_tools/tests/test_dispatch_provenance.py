@@ -156,7 +156,7 @@ def test_a_missing_reason_is_a_usage_error() -> None:
     args = parser.parse_args(["--for-task", "9"])
 
     with pytest.raises(SystemExit):
-        require_lineage(parser, args)
+        require_lineage(parser, args, now=NOW)
 
 
 def test_task_metadata_without_a_task_is_a_usage_error() -> None:
@@ -169,7 +169,7 @@ def test_task_metadata_without_a_task_is_a_usage_error() -> None:
     args = parser.parse_args(["--why", "because", "--priority", "P1"])
 
     with pytest.raises(SystemExit):
-        require_lineage(parser, args)
+        require_lineage(parser, args, now=NOW)
 
 
 @pytest.mark.usefixtures("no_agent")
@@ -179,12 +179,13 @@ def test_the_block_is_generated_from_validated_flags() -> None:
         ["--why", "because", "--for-task", "9", "--task-label", "lineage", "--priority", "P1"]
     )
 
-    text = require_lineage(parser, args)
+    text = require_lineage(parser, args, now=NOW)
 
     assert text.startswith(provenance.MARKER)
     assert 'for_task: 9 "lineage" (P1)' in text.splitlines()
     assert "why_you: because" in text.splitlines()
     assert "dispatched_by: unknown (no agent identity in the launching process)" in text
+    assert "dispatched_at: 2026-10-18T15:41+00:00" in text.splitlines()
 
 
 @pytest.mark.usefixtures("no_agent")
@@ -192,7 +193,7 @@ def test_a_takeover_gets_the_three_line_form() -> None:
     parser = _parser()
     args = parser.parse_args(["--why", "because"])
 
-    text = require_lineage(parser, args, takeover=True)
+    text = require_lineage(parser, args, now=NOW, takeover=True)
 
     lines = text.splitlines()
     assert len(lines) == 3

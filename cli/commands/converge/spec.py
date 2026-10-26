@@ -12,7 +12,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from base.agents.context.clients import DatabaseFactory
-from base.clock import Timers
+from base.clock import Clock, Timers
 from base.cluster.machine import MachineIdentityReader, MachineRole, MachineRoles
 from base.config import ConfigBoot
 from base.host.permissions_helper.client import HelperFactory
@@ -44,6 +44,9 @@ class ConvergeCtx:
     host: Host
     session: UserSession
     timers: Timers
+    # meiva:note
+    # The wall clock of the invocation that runs this converge; a step stamps with `clock.now()`.
+    clock: Clock
     services: frozenset[str]
 
     def require_helper(self) -> HelperFactory:

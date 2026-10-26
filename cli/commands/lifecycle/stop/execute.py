@@ -149,6 +149,7 @@ def _perform(
                 force=force,
                 helper=command.helper,
                 home=command.home,
+                timers=command.timers,
             )
         case StopBrowser():
             browser.stop_browser(run.deadline)

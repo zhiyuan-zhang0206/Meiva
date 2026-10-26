@@ -12,9 +12,10 @@ import httpx
 import pytest
 from pydantic import JsonValue
 
+from base.clock.ids import new_uuid
+from base.clock.tests.seeded_rng import seeded_rng
 from cli.commands.agents.notices import cmd_notices_clear, cmd_notices_list, cmd_notices_resolve
 from cli.commands.cluster.tests.gateway_server import Reply, access_to, serving
-from cli.database.tests.command_inputs import counting_ids
 
 OPEN = ("GET", "/api/notices/open")
 OPEN_TARGET = "/api/notices/open?include_awaiting=true"
@@ -169,7 +170,7 @@ def test_clear_resolves_each_open() -> None:
     }
     with serving(routes) as gateway:
         code = cmd_notices_clear(
-            access_to(gateway.url), agent_id=7, force=True, stdin=NO_STDIN, new_id=counting_ids()
+            access_to(gateway.url), agent_id=7, force=True, stdin=NO_STDIN, rng=seeded_rng()
         )
     assert code == 0
     posts = [(r.target, r.body) for r in gateway.requests if r.method == "POST"]
@@ -177,9 +178,10 @@ def test_clear_resolves_each_open() -> None:
         ("/api/keyed/v1/agents/7/notices/1/resolve", {"action": "dismiss", "reply": None}),
         ("/api/keyed/v1/agents/7/notices/2/resolve", {"action": "dismiss", "reply": None}),
     ]
+    drawn = seeded_rng()
     assert [r.headers["idempotency-key"] for r in gateway.requests if r.method == "POST"] == [
-        "id-1",
-        "id-2",
+        new_uuid(drawn).hex,
+        new_uuid(drawn).hex,
     ]
 
 
@@ -193,7 +195,7 @@ def test_clear_reports_how_many_notices_the_gateway_accepted(
     }
     with serving(routes) as gateway:
         code = cmd_notices_clear(
-            access_to(gateway.url), agent_id=7, force=True, stdin=NO_STDIN, new_id=counting_ids()
+            access_to(gateway.url), agent_id=7, force=True, stdin=NO_STDIN, rng=seeded_rng()
         )
     assert code == 0
     assert capsys.readouterr().out == "cleared 1/2 notices: agent #7\n"
@@ -211,7 +213,7 @@ def test_clear_resolves_after_a_yes(answer: str, capsys: pytest.CaptureFixture[s
             agent_id=7,
             force=False,
             stdin=io.StringIO(answer),
-            new_id=counting_ids(),
+            rng=seeded_rng(),
         )
     assert code == 0
     out = capsys.readouterr().out
@@ -231,7 +233,7 @@ def test_clear_aborts_unless_the_operator_says_yes(
             agent_id=7,
             force=False,
             stdin=io.StringIO(answer),
-            new_id=counting_ids(),
+            rng=seeded_rng(),
         )
     assert code == 1
     assert capsys.readouterr().out.endswith("aborted.\n")
@@ -241,7 +243,7 @@ def test_clear_aborts_unless_the_operator_says_yes(
 def test_clear_with_nothing_open_for_the_agent_says_so(capsys: pytest.CaptureFixture[str]) -> None:
     with serving({OPEN: Reply(body=[_notice(1, 9)])}) as gateway:
         code = cmd_notices_clear(
-            access_to(gateway.url), agent_id=7, force=False, stdin=NO_STDIN, new_id=counting_ids()
+            access_to(gateway.url), agent_id=7, force=False, stdin=NO_STDIN, rng=seeded_rng()
         )
     assert code == 0
     assert capsys.readouterr().out == "agent #7: no open notices.\n"
@@ -291,7 +293,7 @@ def test_clear_stale_resolves_only_terminated() -> None:
             force=True,
             stale=True,
             stdin=NO_STDIN,
-            new_id=counting_ids(),
+            rng=seeded_rng(),
         )
     assert code == 0
     posts = [(r.target, r.body) for r in gateway.requests if r.method == "POST"]
@@ -308,7 +310,7 @@ def test_clear_stale_rejects_agent(capsys: pytest.CaptureFixture[str]) -> None:
             force=True,
             stale=True,
             stdin=NO_STDIN,
-            new_id=counting_ids(),
+            rng=seeded_rng(),
         )
     assert code == 2
     assert capsys.readouterr().out == "--stale and --agent are mutually exclusive\n"
@@ -324,7 +326,7 @@ def test_stale_empty_notice_queue_never_reads_directory() -> None:
         )
         assert (
             cmd_notices_clear(
-                access, agent_id=None, force=True, stale=True, stdin=NO_STDIN, new_id=counting_ids()
+                access, agent_id=None, force=True, stale=True, stdin=NO_STDIN, rng=seeded_rng()
             )
             == 0
         )
@@ -343,7 +345,7 @@ def test_stale_clear_keeps_notices_of_missing_agents() -> None:
             force=True,
             stale=True,
             stdin=NO_STDIN,
-            new_id=counting_ids(),
+            rng=seeded_rng(),
         )
     assert code == 0
     assert [r.method for r in gateway.requests] == ["GET", "GET"]
