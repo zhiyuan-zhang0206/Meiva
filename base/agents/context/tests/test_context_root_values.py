@@ -55,13 +55,13 @@ def test_a_context_without_a_generator_refuses_to_mint_an_identifier() -> None:
         MeivaContext().require_new_id()
 
 
-def test_identifiers_are_distinct_version_4_uuids() -> None:
+def test_identifiers_are_distinct_32_character_version_4_uuids() -> None:
     context = MeivaContext(rng=_rng(3))
 
     minted = [context.require_new_id() for _ in range(3)]
 
     assert len(set(minted)) == 3
-    assert all(UUID(value).version == 4 for value in minted)
+    assert all(len(value) == 32 and UUID(hex=value).version == 4 for value in minted)
 
 
 def test_identifiers_come_from_the_generator_the_root_recorded() -> None:

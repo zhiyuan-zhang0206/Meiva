@@ -208,10 +208,12 @@ class MeivaContext:
         return self.rng
 
     # meiva:note
-    # Mint a fresh version-4 identifier from the root's generator; a partial context fails at
-    # first use, with no fallback to a generator of its own.
+    # Mint a fresh version-4 identifier from the root's generator, as the 32-character hex form
+    # the CLI runtime and the IM bridge use (`new_uuid(rng).hex`; this body is that function until
+    # `base/clock/ids.py` is on main). A partial context fails at first use, with no fallback to
+    # a generator of its own.
     def require_new_id(self) -> str:
-        return str(UUID(int=self.require_rng().getrandbits(128), version=4))
+        return UUID(int=self.require_rng().getrandbits(128), version=4).hex
 
     # meiva:note
     # The message-timestamp policy of the unit of work that asks: this owner's clock and the
