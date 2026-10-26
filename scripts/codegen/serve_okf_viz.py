@@ -23,7 +23,9 @@ from base.packages.docs.okf_graph import (  # noqa: E402
 
 
 def build() -> OkfGraphData:
-    return build_graph_data(REPO)
+    from base.packages.okf_bundle import read_bundle
+
+    return build_graph_data(read_bundle(REPO))
 
 
 def inject(data: OkfGraphData, out: Path) -> None:

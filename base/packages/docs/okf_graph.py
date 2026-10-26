@@ -23,7 +23,6 @@ from collections.abc import Iterable, Mapping
 from pathlib import Path
 from typing import Any, TypedDict
 
-from base.host.verified_file import regular_bytes
 from base.packages.docs.frontmatter import parse_frontmatter_typed
 from base.packages.docs.notes import normalize_tags
 
@@ -41,21 +40,6 @@ DATA_PLACEHOLDER = "/*__GRAPH_DATA_JSON__*/"
 
 def _posix(p: str) -> str:
     return p.replace(os.sep, "/")
-
-
-def _find_files(bundle_dir: str | Path) -> list[str]:
-    out: list[str] = []
-    for root, dirs, files in os.walk(bundle_dir):
-        # meiva:note
-        # `.github/` is walked despite being hidden: its overview node lives
-        # inside it (`.github/.github.meiva.okf.md`). Every other hidden dir
-        # (`.git`, `.venv`, `.claude`, worktrees, ...) stays excluded.
-        dirs[:] = [d for d in dirs if (not d.startswith(".") or d == ".github") and d != ".git"]
-        for f in files:
-            if f.endswith(EXT):
-                rel = _posix(os.path.relpath(str(Path(root) / f), bundle_dir))
-                out.append(rel)
-    return sorted(out)
 
 
 class OkfGraphData(TypedDict):
@@ -224,22 +208,24 @@ def _cross_edges(
 
 
 # meiva:note
-# Parse every `.meiva.okf.md` file under `bundle_dir` into D3 graph data:
-# nodes, tree edges (from the filesystem hierarchy), cross edges (from
-# resolved `[[wikilinks]]`, deduplicated + weighted), and the set of all tags.
+# Turn the `.meiva.okf.md` notes of a bundle into D3 graph data: nodes, tree edges (from the
+# directory hierarchy), cross edges (from resolved `[[wikilinks]]`, deduplicated + weighted), and
+# the set of all tags.
+#
+# `files` maps each note's bundle-relative posix path to its text; reading the bundle off disk is
+# `base.packages.okf_bundle.read_bundle`, so this function does no I/O.
 #
 # `raw_links_out`, if given, is extended with every `(source, raw_target,
 # resolved_or_None)` wikilink tuple seen — used by the CLI to report
 # unresolved links; callers that only want the graph (e.g. the gateway
 # route) can leave it `None`.
 def build_graph_data(
-    bundle_dir: str | Path,
+    files: Mapping[str, str],
     name: str = "OKF",
     *,
     raw_links_out: list[tuple[str, str, str | None]] | None = None,
 ) -> OkfGraphData:
-    bundle_dir = str(bundle_dir)
-    paths = _find_files(bundle_dir)
+    paths = sorted(files)
     path_set = set(paths)
     root = _find_root(path_set)
 
@@ -247,9 +233,7 @@ def build_graph_data(
     raw_links: list[tuple[str, str, str | None]] = []
 
     for path in paths:
-        text = regular_bytes(Path(bundle_dir) / path).decode("utf-8")
-
-        fm, body = parse_frontmatter(text)
+        fm, body = parse_frontmatter(files[path])
 
         tags = list(normalize_tags(fm.get("tags")))
 

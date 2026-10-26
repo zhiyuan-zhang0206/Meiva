@@ -23,6 +23,7 @@ from fastapi import APIRouter
 from fastapi.responses import HTMLResponse
 
 from base.packages.docs.okf_graph import build_graph_data, render_html
+from base.packages.okf_bundle import read_bundle
 from base.paths import repo_root
 
 router = APIRouter()
@@ -36,5 +37,5 @@ def get_okf_graph() -> HTMLResponse:
     into the self-contained D3 template — open directly in a browser tab."""
     repo = repo_root()
     template_text = (repo / "scripts" / "codegen" / _TEMPLATE_NAME).read_text(encoding="utf-8")
-    data = build_graph_data(repo, name="Meiva OKF")
+    data = build_graph_data(read_bundle(repo), name="Meiva OKF")
     return HTMLResponse(render_html(data, template_text))
