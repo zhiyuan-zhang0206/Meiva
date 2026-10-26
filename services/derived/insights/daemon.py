@@ -147,7 +147,7 @@ def main() -> None:
     try:
         runner.run(
             run(
-                home=meiva_home(),
+                home=process_home,
                 config=config_from_boot(config),
                 catalog=build_model_catalog(),
                 database=database,

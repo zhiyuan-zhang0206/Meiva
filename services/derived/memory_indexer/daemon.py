@@ -48,9 +48,9 @@ from services.pidfile import acquire_pidfile, pidfile_holds_daemon, remove_pidfi
 _log = logging.getLogger("services.derived.memory_indexer.daemon")
 
 
-def memory_root(*, roles: MachineRoles) -> Path:
+def memory_root(*, roles: MachineRoles, home: Path) -> Path:
     """The consolidated memory checkout this daemon indexes, resolved on use."""
-    return gateway_memory_dir(roles=roles)
+    return gateway_memory_dir(roles=roles, home=home)
 
 
 def _endpoint(config: ConfigBoot, *, runtime: Path) -> ServiceEndpoint:
@@ -629,7 +629,7 @@ def main() -> None:
                     runtime=process_home / "run",
                     database=database,
                     image=image,
-                    root=memory_root(roles=machine.role()),
+                    root=memory_root(roles=machine.role(), home=process_home),
                     tuning=MemoryIndexerConfig(),
                 )
             )

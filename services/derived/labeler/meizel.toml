@@ -11,7 +11,4 @@ exports = ["daemon.py", "labeler.py", "tests"]
 "label_rules.py" = "strict"
 
 [roots]
-"daemon.py" = { kinds = ["random", "settings"], why = "process entry point of the labeler daemon: builds ConfigBoot from the process environment and the random generator its event bus draws retry jitter from" }
-
-[debt.ambient-read]
-"daemon.py#home base.paths.meiva_home" = 1
+"daemon.py" = { kinds = ["home", "random", "settings"], why = "process entry point of the labeler daemon: builds ConfigBoot from the process environment, reads the home it runs under and builds the random generator its event bus draws retry jitter from" }
