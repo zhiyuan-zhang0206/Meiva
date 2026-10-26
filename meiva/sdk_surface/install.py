@@ -45,22 +45,14 @@
 from __future__ import annotations
 
 import atexit
-from collections.abc import Callable, Sequence
+from collections.abc import Callable
 from dataclasses import dataclass, field, replace
-from pathlib import Path
 from types import MappingProxyType
-from typing import assert_never
+from typing import Unpack, assert_never
 
 from pydantic import BaseModel
 
-from base.agents.sdk.call_policy import SamplingPolicy, SamplingPolicyOwner, SamplingSource
-from base.api_contracts.caller_identity import CallerIdentity
-from base.clock import Clock
-from base.config.service_read import ConfigAuthority
-from base.lm.catalog import ModelCatalog
-from base.lm.catalog.provider_keys import ProviderKeys
 from base.packages.plugin_config_contracts import PluginConfigImages
-from base.packages.plugins.extensions import ExtensionRegistry, PluginContributions
 from base.packages.plugins.flags import PluginFlagError, validate_flag_key
 from base.packages.plugins.load_report import Reporter, reporter
 
@@ -70,13 +62,16 @@ from .installation import (
     LOADING,
     SLOT,
     ConfigBound,
-    EventPipelines,
+    ExtensionRegistry,
     Installation,
+    InstallOptions,
     Loading,
     MemberAdded,
     NamespaceAdded,
+    PluginContributions,
     ProviderAdded,
     Reversal,
+    SamplingPolicyOwner,
     SkillProvider,
     WrapAdded,
     WrapLayer,
@@ -125,24 +120,12 @@ def _is_bare_provider_mount(installation: Installation) -> bool:
     )
 
 
-# meiva:note
-# The installation of a process that mounts a skill root before any plugin load. It meters
-# nothing, so the sampling owner it carries is never read; a later `install` replaces the whole
-# value with its own root's owner.
-def _bare_provider_mount(provider: SkillProvider) -> Installation:
-    inert = SamplingPolicyOwner(
-        initial=SamplingPolicy(),
-        source=SamplingSource(env={}, env_path=Path("/nonexistent-sampling-home/.env")),
-    )
-    return replace(Installation.bare(sampling=inert), skill_providers=(provider,))
-
-
 def mount_skill_provider(provider: SkillProvider) -> Callable[[], None]:
     prior = slot()
     mounted = (
         replace(prior, skill_providers=(*prior.skill_providers, provider))
         if isinstance(prior, Installation)
-        else _bare_provider_mount(provider)
+        else Installation.bare_provider_mount(provider)
     )
     setattr(meiva_module(), SLOT, mounted)
 
@@ -293,14 +276,8 @@ def install(
     report: Reporter | None = None,
     *,
     config_images: PluginConfigImages,
-    catalog: ModelCatalog | None = None,
-    provider_keys: ProviderKeys | None = None,
-    authority: ConfigAuthority | None = None,
     sampling: SamplingPolicyOwner,
-    clock: Clock | None = None,
-    clients: EventPipelines | None = None,
-    external_caller: CallerIdentity | None = None,
-    disabled_entries: Sequence[str] = (),
+    **options: Unpack[InstallOptions],
 ) -> ExtensionRegistry:
     if installed() is not None:
         raise RuntimeError(
@@ -310,11 +287,12 @@ def install(
 
     from . import metering, sdk_disable
 
+    clients = options.get("clients")
     prior = slot()
     setattr(meiva_module(), SLOT, LOADING)
     build = Build()
     admitted: list[tuple[str, PluginContributions]] = []
-    disabled = list(disabled_entries)
+    disabled = list(options.get("disabled_entries", ()))
     try:
         if disabled:
             # meiva:note
@@ -362,12 +340,12 @@ def install(
         faces=False,
         undo=tuple(build.undo),
         configs=MappingProxyType(dict(build.configs)),
-        catalog=catalog,
-        provider_keys=provider_keys,
-        authority=authority,
-        clock=clock,
+        catalog=options.get("catalog"),
+        provider_keys=options.get("provider_keys"),
+        authority=options.get("authority"),
+        clock=options.get("clock"),
         clients=clients,
-        external_caller=external_caller,
+        external_caller=options.get("external_caller"),
     )
     setattr(meiva_module(), SLOT, installation)
     return installation.registry

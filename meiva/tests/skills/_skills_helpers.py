@@ -15,7 +15,7 @@ import pytest
 
 from base.packages.extensions import install_registry
 from base.paths import meiva_home, skills_dir
-from meiva.tests.fixtures.pin_agent import pin_agent
+from meiva.tests.fixtures.pin_agent import pin_agent, snapshot_clients_over
 
 
 @pytest.fixture
@@ -88,6 +88,8 @@ __all__: list[str] = [
     "AuditedAgent",
     "audited_agent",
     "fake_skills_dir",
+    "pin_agent",
+    "snapshot_clients_over",
     "track",
     "track_present",
     "write_skill",

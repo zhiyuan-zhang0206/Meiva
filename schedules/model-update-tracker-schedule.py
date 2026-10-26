@@ -4,9 +4,8 @@ import os
 import sys
 from datetime import UTC, datetime
 from functools import partial
-from pathlib import Path
 
-import base
+from base.paths import repo_root
 from base.paths.home import resolve_meiva_home
 from schedules.jobs.catchup import cluster_timezone
 from schedules.jobs.entry import open_schedule_entry
@@ -23,17 +22,12 @@ _TIMEOUT_SECONDS = 120
 
 if __name__ == "__main__":
     with open_schedule_entry(globals().get("MEIVA_SCHEDULE_INPUTS")) as inputs:
-        # meiva:note
-        # `base.__file__` rather than `repo_root()`: the same directory, expressed so the checker can
-        # see the file this schedule runs (`python-commands` reads a literal path or `-m <module>`
-        # after the interpreter). The call form was a recorded `restricted-python` debt; this spelling
-        # pays it down and keeps the schedule running the tracked copy.
-        root = Path(base.__file__).resolve().parents[1]
+        root = repo_root()
         report_dir = resolve_meiva_home() / "model-tracker"
         tracker = ModelTracker(
             command=(
                 sys.executable,
-                str(root / "scripts" / "model_registry" / "check_model_updates.py"),
+                "scripts/model_registry/check_model_updates.py",
                 "--write-report",
                 str(report_dir),
             ),

@@ -11,20 +11,22 @@ can supply.
 
 from __future__ import annotations
 
-from collections.abc import Sequence
 from dataclasses import replace
+from typing import Unpack
 
-from base.api_contracts.caller_identity import CallerIdentity
-from base.clock import Clock
-from base.config.service_read import ConfigAuthority
-from base.lm.catalog import ModelCatalog
-from base.lm.catalog.provider_keys import ProviderKeys
-from base.packages.plugins.load_report import Reporter
 from base.packages.plugins.loading import StateGate
 from base.packages.plugins.loading.faces import LoadedExtensions, import_faces
 
 from . import install as sdk_install
-from .installation import EventPipelines, SamplingPolicyOwner, installed
+from .installation import InstallOptions, SamplingPolicyOwner, installed
+
+
+# meiva:note
+# Keyword arguments accepted by `load_extensions` on top of `InstallOptions`.
+class LoadExtensionsOptions(InstallOptions, total=False):
+    report: sdk_install.Reporter | None
+    sampling: SamplingPolicyOwner | None
+    validate_state: StateGate | None
 
 
 # meiva:note
@@ -52,17 +54,12 @@ from .installation import EventPipelines, SamplingPolicyOwner, installed
 def load_extensions(
     *,
     surface: bool = False,
-    report: Reporter | None = None,
-    catalog: ModelCatalog | None = None,
-    provider_keys: ProviderKeys | None = None,
-    authority: ConfigAuthority | None = None,
-    sampling: SamplingPolicyOwner | None = None,
-    clock: Clock | None = None,
-    clients: EventPipelines | None = None,
-    external_caller: CallerIdentity | None = None,
-    disabled_entries: Sequence[str] = (),
-    validate_state: StateGate | None = None,
+    **options: Unpack[LoadExtensionsOptions],
 ) -> LoadedExtensions:
+    sampling = options.get("sampling")
+    clients = options.get("clients")
+    clock = options.get("clock")
+    report = options.get("report")
     previous = installed() if not surface else None
     if previous is not None:
         if sampling is None:
@@ -77,18 +74,20 @@ def load_extensions(
     if not surface:
         sdk_install.uninstall(retaining_sampling=sampling)
 
-    loaded = import_faces(surface=surface, report=report, validate_state=validate_state)
+    loaded = import_faces(
+        surface=surface, report=report, validate_state=options.get("validate_state")
+    )
     admitted = sdk_install.install(
         loaded.registry,
         report,
         config_images=loaded.config_images,
-        catalog=catalog,
-        provider_keys=provider_keys,
-        authority=authority,
+        catalog=options.get("catalog"),
+        provider_keys=options.get("provider_keys"),
+        authority=options.get("authority"),
         clients=clients,
         sampling=sampling,
         clock=clock,
-        external_caller=external_caller,
-        disabled_entries=disabled_entries,
+        external_caller=options.get("external_caller"),
+        disabled_entries=options.get("disabled_entries", ()),
     )
     return replace(loaded, registry=admitted)

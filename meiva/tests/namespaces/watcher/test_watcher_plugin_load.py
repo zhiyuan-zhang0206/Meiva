@@ -107,13 +107,6 @@ def test_bare_shell_child_eager_loads_plugins(tmp_path: Path) -> None:
     _write_isolated_home(home)
 
     marker = home / "marker.txt"
-    script = home / "bare.py"
-    script.write_text(
-        "import meiva, pathlib\n"
-        "from meiva.sdk_surface.installation import installed\n"
-        f"pathlib.Path({str(marker)!r}).write_text("
-        "f'{installed() is not None}:{meiva.probe.ok()}')\n"
-    )
     env = {
         **os.environ,
         "MEIVA_HOME": str(home),
@@ -123,7 +116,7 @@ def test_bare_shell_child_eager_loads_plugins(tmp_path: Path) -> None:
         "MEIVA_EXEC_REQUEST_FILE": str(home / "missing-request.json"),
     }
     result = subprocess.run(  # noqa: S603
-        [sys.executable, str(script)],
+        [sys.executable, str(Path(__file__)), "bare-eager", str(marker)],
         env=env,
         capture_output=True,
         text=True,
@@ -144,22 +137,10 @@ def test_bare_process_without_agent_id_stays_fail_fast(tmp_path: Path) -> None:
     home.mkdir()
     _write_isolated_home(home)
 
-    script = home / "bare.py"
-    script.write_text(
-        "import meiva\n"
-        "from meiva.sdk_surface.installation import installed\n"
-        "assert installed() is None\n"
-        "try:\n"
-        "    meiva.probe\n"
-        "except AttributeError:\n"
-        "    print('FAILFAST-OK')\n"
-        "else:\n"
-        "    raise SystemExit('lazy load fired without MEIVA_AGENT_ID')\n"
-    )
     env = {**os.environ, "MEIVA_HOME": str(home), "MEIVA_CONFIG_FETCH": "skip"}
     env.pop("MEIVA_AGENT_ID", None)
     result = subprocess.run(  # noqa: S603
-        [sys.executable, str(script)],
+        [sys.executable, str(Path(__file__)), "bare-failfast"],
         env=env,
         capture_output=True,
         text=True,
@@ -168,3 +149,29 @@ def test_bare_process_without_agent_id_stays_fail_fast(tmp_path: Path) -> None:
     )
     assert result.returncode == 0, f"stdout:\n{result.stdout}\nstderr:\n{result.stderr}"
     assert "FAILFAST-OK" in result.stdout
+
+
+def _child_entry() -> None:
+    import meiva
+    from meiva.sdk_surface.installation import installed
+
+    mode = sys.argv[1]
+    if mode == "bare-eager":
+        marker = Path(sys.argv[2])
+        probe = meiva.probe
+        marker.write_text(f"{installed() is not None}:{probe.ok()}")
+        return
+    if mode == "bare-failfast":
+        assert installed() is None
+        try:
+            _ = meiva.probe
+        except AttributeError:
+            print("FAILFAST-OK")
+        else:
+            raise SystemExit("lazy load fired without MEIVA_AGENT_ID")
+        return
+    raise SystemExit(f"unknown mode: {mode!r}")
+
+
+if __name__ == "__main__":
+    _child_entry()
