@@ -13,6 +13,3 @@ exports = ["grafana_render.py", "inputs.py", "lgtm.py", "lgtm_native.py", "logs.
 "tests" = ["_lgtm_provisioning.py", "grafana_render.py", "inputs.py", "lgtm_native.py", "otel_collector.py", "plans", "trace.py", "url_split.py"]
 "trace.py" = ["inputs.py", "plans", "url_split.py"]
 "url_split.py" = ["plans"]
-
-[debt.ambient-read]
-"otel_collector.py#platform base.deploy.release.collector_artifact.platform_tag" = 1
