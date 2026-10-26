@@ -42,13 +42,16 @@ def boot_process() -> tuple[ConfigBoot, Path]:
     return config, home
 
 
-def host_policy(config: ConfigBoot, *, keys: ProviderKeys, rng: random.Random) -> HostPolicy:
+def host_policy(
+    config: ConfigBoot, *, keys: ProviderKeys, rng: random.Random, user_home: Path
+) -> HostPolicy:
     daemon = config.view.daemon
     return HostPolicy(
         max_concurrent_turns=daemon.host_max_concurrent_turns,
         provider_keys=keys,
         harness_environ=child_env("runner", config.process_environment()),
         rng=rng,
+        user_home=user_home,
         cache=HostCachePolicy(
             idle_ttl_seconds=daemon.host_agent_idle_ttl_seconds, size=daemon.host_agent_cache_size
         ),

@@ -2,6 +2,7 @@
 # A fresh schedule entry retains the loaded image and one admission gate for database handles instead of relabeling code after checkout changes.
 # meiva:link schedules/docs/entry-composition.meiva.okf.md
 
+import random
 from collections.abc import Generator
 from contextlib import AbstractContextManager, contextmanager
 from pathlib import Path
@@ -58,6 +59,9 @@ def fresh_schedule_entry(
             clients=clients,
             machine=machine,
             clock_factory=lambda: Clock(clock_config_from_boot(config), timers=SYSTEM_TIMERS),
+            meiva_home=home,
+            user_home=Path.home(),
+            rng=random.SystemRandom(),
         )
     )
     try:
