@@ -8,9 +8,10 @@ from pathlib import Path
 
 import pytest
 
+from base.host.system import walg_content
 from base.host.system import walg_job as job
 from base.host.system.hostport import Host
-from base.host.system.job_values import JobRoots
+from base.host.system.job_values import JobRoots, plist_path
 from base.host.system.tests.fake_commands import (
     DARWIN_ARM64,
     LINUX_X86,
@@ -51,7 +52,7 @@ def test_macos_reregistration_rewrites_and_reloads_idempotently(
     commands, host = _launchctl()
 
     assert job.register_macos(roots=job_roots, backup_hour=3, host=host) == 0
-    plist = job.launchd_plist_path(user_home=job_roots.user_home)
+    plist = plist_path(walg_content.LABEL, user_home=job_roots.user_home)
     first = plist.read_text(encoding="utf-8")
     assert job.register_macos(roots=job_roots, backup_hour=3, host=host) == 0
 
@@ -69,7 +70,7 @@ def test_macos_unregister_removes_the_plist_and_is_repeatable(
 ) -> None:
     commands, host = _launchctl()
     assert job.register_macos(roots=job_roots, backup_hour=3, host=host) == 0
-    plist = job.launchd_plist_path(user_home=job_roots.user_home)
+    plist = plist_path(walg_content.LABEL, user_home=job_roots.user_home)
     assert plist.exists()
 
     assert (
@@ -156,7 +157,7 @@ def test_register_and_unregister_delegate_in_the_default_home(
         backup_hour=3,
         host=host,
     )
-    plist = job.launchd_plist_path(user_home=default_home)
+    plist = plist_path(walg_content.LABEL, user_home=default_home)
     assert plist.exists()
     job.unregister_walg_job(
         host=host, roots=replace(job_roots, home=default_home / ".meiva", user_home=default_home)

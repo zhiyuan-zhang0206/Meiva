@@ -34,10 +34,6 @@ from base.host.system.job_readings import read_launchd_path, read_meiva_binary
 from base.host.system.job_values import JobPaths, JobRoots, plist_path
 
 
-def launchd_plist_path(*, user_home: Path) -> Path:
-    return plist_path(content.LABEL, user_home=user_home)
-
-
 def register_macos(*, roots: JobRoots, host: Host) -> int:
     paths = JobPaths(roots, read_meiva_binary(roots.repo, host=host))
     path_env = read_launchd_path(paths.meiva, user_home=roots.user_home, host=host)
@@ -60,7 +56,7 @@ def register_macos(*, roots: JobRoots, host: Host) -> int:
 
 def unregister_macos(*, host: Host, user_home: Path) -> int:
     retired = mechanics.remove_launchd_job(
-        content.LABEL, launchd_plist_path(user_home=user_home), host=host
+        content.LABEL, plist_path(content.LABEL, user_home=user_home), host=host
     )
     return 0 if retired else 1
 

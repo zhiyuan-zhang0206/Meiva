@@ -256,6 +256,10 @@ async def lifespan(
             releases.push_async_callback(grafana_client.aclose)
 
             try:
+                # meiva:note
+                # The job is anchored to the home this entry resolved, the checkout this module was
+                # imported from, and the account home the root read once into the app config
+                # (`upload_home`: the uploads live under that account's `Downloads`).
                 await asyncio.to_thread(
                     register_os_cron,
                     enabled=config.view.general.os_jobs_enabled,
