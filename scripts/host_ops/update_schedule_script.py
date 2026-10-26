@@ -48,8 +48,8 @@ def check_runtime_admission(
     if Path(sys.prefix).resolve() != (source / ".venv").resolve():
         raise RuntimeError("run this tool with the source checkout's own .venv interpreter")
     sys.path.insert(0, str(source))
+    from base.host.env.boot_actions import skip_config_fetch
     from base.host.env.bootstrap import LAUNCHER_PROFILE_ENV_KEY
-    from base.host.env.dotenv_boot import skip_config_fetch
     from base.host.env.process_profile import MEIVA_PROCESS_PROFILE_ENV
 
     if operator_home.expanduser().resolve() != home:

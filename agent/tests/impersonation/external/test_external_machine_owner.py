@@ -6,6 +6,8 @@
 
 from __future__ import annotations
 
+import os
+
 import meiva
 from agent.tests.impersonation.external.runtime import Takeover, independent_boot
 from meiva import impersonation
@@ -33,7 +35,7 @@ def test_independent_attachments_own_fresh_machine_caches(attached_runtime: Take
     owners: list[object] = []
     for _ in range(2):
         boot = independent_boot()
-        with Attachment(AttachInputs(target, None, boot)):
+        with Attachment(AttachInputs(target, None, boot, pid=os.getpid(), suffix="probe")):
             machine = meiva.context.require_machine()
             assert machine is boot.machine
             assert machine.name() == attached_runtime.machine

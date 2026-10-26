@@ -18,29 +18,24 @@
 #
 # The boot functions work on the environment mapping they are given (`os.environ` at
 # the one composition root, `base.config._lite.ConfigBoot`) and on a `home` path; a test
-# passes a dict and a `tmp_path`. Only `apply_process_timezone`, `skip_config_fetch` and
-# `enter_scratch_home` touch the process itself (`time.tzset`, a program's own
-# environment), and they are for a program's top level.
+# passes a dict and a `tmp_path`. This module reads no process state itself: the operations
+# that touch the process (`apply_process_timezone`, `skip_config_fetch`, `enter_scratch_home`)
+# live in `base.host.env.boot_actions`.
 #
 # Callers:
 #     base/config.py            - before importing Settings
 #     scripts/entrypoints/agent.py      - bootstrap root agent
 #
 # `load_meiva_env` is idempotent and does not overwrite already-set keys; repeated
-# calls have no side effects. Explicit startup boot also
-# uses `apply_process_timezone` with its resolved authoritative timezone. Importing
-# this module or reading an existing environment never applies that operation.
+# calls have no side effects.
 
 
 from __future__ import annotations
 
-import os
 import re
-import time
 from collections.abc import Collection, Mapping, MutableMapping
 from pathlib import Path
 from urllib.parse import urlsplit
-from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from dotenv import dotenv_values
 from dotenv.variables import parse_variables
@@ -52,22 +47,16 @@ from base.host.env.bootstrap import (
     is_delivered_unit_login,
     launcher_context,
 )
-from base.host.env.harness_binaries import resolve_user_home
-from base.paths.home import resolve_meiva_home
 
 __all__ = [
     "LAUNCHER_PROFILE_ENV_KEY",
     "PLACEHOLDER_DB_URL",
     "EnvBootResult",
-    "apply_process_timezone",
     "enforce_cluster_env_authority",
-    "enter_scratch_home",
     "load_meiva_env",
     "operator_db_delivery",
     "project_watcher_runner_env",
     "read_database_delivery",
-    "skip_config_fetch",
-    "watcher_runner_env",
 ]
 
 # See `_is_launcher_runner_projection`.
@@ -101,76 +90,6 @@ def read_database_delivery(environment: Mapping[str, str], *, home: Path) -> Env
     return EnvBootResult(
         db_authority_refusal="no database login was delivered by this process's startup entry"
     )
-
-
-def apply_process_timezone(name: str | None) -> None:
-    """Apply an explicitly resolved authoritative timezone at process startup.
-
-    The configuration owner validates raw input and decides whether it holds an
-    authoritative value. None leaves the host clock untouched. An invalid name
-    that bypassed that boundary also leaves it untouched, matching the existing
-    startup operation. A valid value is exported for children and refreshes the local clock
-    with ``time.tzset``.
-
-    This operation never reads Settings, a field default or ``MEIVA_TIMEZONE``.
-    Read-only environment attachments must not call it.
-    """
-    if name is None:
-        return
-    try:
-        ZoneInfo(name)
-    except (ZoneInfoNotFoundError, ValueError):
-        return
-    os.environ["TZ"] = name
-    time.tzset()
-
-
-def skip_config_fetch() -> None:
-    """Keep this process from fetching cluster configuration from a gateway.
-
-    For a tool that must keep the real home (it reads this machine's own state) but
-    has no business asking a gateway for anything: the config boot then stays
-    settings-lite and dials nothing. Call it before the tool's first application
-    import, as a program only (see `enter_scratch_home`).
-    """
-    from base.host.env.bootstrap import CONFIG_FETCH_ENV, CONFIG_FETCH_SKIP
-
-    os.environ[CONFIG_FETCH_ENV] = CONFIG_FETCH_SKIP
-
-
-def enter_scratch_home() -> Path:
-    """Point this process tree at a fresh temporary home, whatever its environment carries.
-
-    For a script that imports application code but must not touch the host's
-    cluster (the scripts git hooks launch): it sets `MEIVA_HOME` to a new
-    private directory and `MEIVA_CONFIG_FETCH=skip`, so nothing in the tree
-    resolves `~/.meiva`, reads another home's `.env` or dials a gateway. Call it
-    before the tool's first application import, and only when the tool runs as a
-    program (`if __name__ == "__main__":`): every descendant inherits the home,
-    so a module that enters one while being imported replaces the importing
-    process's own. The directory is removed at exit.
-
-    A pytest process refuses: the session home is set before any project import
-    and every later test reads it, so a tool imported at collection that entered
-    a scratch home would silently redirect the whole worker.
-    """
-    import atexit
-    import shutil
-    import sys
-    import tempfile
-
-    if "pytest" in sys.modules:
-        raise RuntimeError(
-            "enter_scratch_home() was called inside a pytest process: it would replace the "
-            "session's MEIVA_HOME for every later test. A tool calls it only as a program, "
-            'behind `if __name__ == "__main__":`; run the tool in a subprocess to test it.'
-        )
-
-    home = Path(tempfile.mkdtemp(prefix="meiva-scratch-home-"))
-    os.environ["MEIVA_HOME"] = str(home)
-    skip_config_fetch()
-    atexit.register(shutil.rmtree, home, ignore_errors=True)
-    return home
 
 
 # meiva:note
@@ -316,17 +235,6 @@ def _is_launcher_redis_url(env: Mapping[str, str], value: str | None) -> bool:
         return bool(urlsplit(value).hostname)
     except ValueError:
         return False
-
-
-# meiva:note
-# `project_watcher_runner_env` over this process's own environment and homes.
-#
-# The SDK's watcher wiring (`meiva/watcher/wiring.py`) is the one caller: it hands a
-# watcher session the launcher's runner projection.
-def watcher_runner_env() -> dict[str, str]:
-    return project_watcher_runner_env(
-        os.environ, home=resolve_meiva_home(), user_home=resolve_user_home()
-    )
 
 
 # meiva:note

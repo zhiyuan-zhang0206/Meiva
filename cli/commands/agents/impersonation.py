@@ -265,7 +265,10 @@ def _request(
         ),
         name=args.name,
         executor_name=args.caller,
-        process_metadata={**process_metadata(), "invoked_python": sys.executable},
+        process_metadata={
+            **process_metadata(codex_home=env.codex_home),
+            "invoked_python": sys.executable,
+        },
         ttl_seconds=args.ttl,
         reason=args.reason,
         provider=args.relay_provider,

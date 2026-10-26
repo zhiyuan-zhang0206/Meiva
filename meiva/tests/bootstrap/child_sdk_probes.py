@@ -101,19 +101,6 @@ def agent_profile_owner_url_guard() -> None:
         )
 
 
-# meiva:note
-# The data-plane URLs a watcher session may carry, or the refusal, for this environment.
-def watcher_runner_env() -> None:
-    import json
-
-    from base.host.env import dotenv_boot
-
-    try:
-        print(json.dumps({"env": dotenv_boot.watcher_runner_env()}))
-    except RuntimeError as exc:
-        print(json.dumps({"error": str(exc)}))
-
-
 def non_agent_import_unbound_context() -> None:
     import importlib
     import os
@@ -256,7 +243,6 @@ SCENARIOS = {
     "plain_import_sdk_events": plain_import_sdk_events,
     "agent_profile_owner_url_guard": agent_profile_owner_url_guard,
     "non_agent_import_unbound_context": non_agent_import_unbound_context,
-    "watcher_runner_env": watcher_runner_env,
     "launched_identity": launched_identity,
     "unestablished_identity": unestablished_identity,
     "external_profile_actor": external_profile_actor,

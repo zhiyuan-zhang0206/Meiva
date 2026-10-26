@@ -119,7 +119,7 @@ def _ensure_index_present() -> None:
 # stops any gateway fetch; the index is read for nothing but the surfaces this
 # script rewrites anyway. The registry data itself comes from the model
 # declarations, never from the environment.
-from base.host.env.dotenv_boot import enter_scratch_home  # noqa: E402
+from base.host.env.boot_actions import enter_scratch_home  # noqa: E402
 
 if __name__ == "__main__":
     enter_scratch_home()

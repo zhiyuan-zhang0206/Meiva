@@ -21,6 +21,7 @@ from typing import Any, Protocol
 from base.config.config_registry import DOMAIN_ATTRS
 from base.config.lite_parse import parse_field
 from base.config.profiles import PROCESS_PROFILES, profile_domain_error
+from base.host.env.boot_actions import apply_process_timezone
 from base.host.env.boot_policy import BootstrapFetch
 from base.host.env.bootstrap import (
     CONFIG_FETCH_ENV,
@@ -40,7 +41,6 @@ from base.host.env.config_lite_table import (
 from base.host.env.dotenv_boot import (
     PLACEHOLDER_DB_URL,
     EnvBootResult,
-    apply_process_timezone,
     load_meiva_env,
     read_database_delivery,
 )
