@@ -8,7 +8,4 @@ exports = ["cluster_registry.py", "refresh.py", "refresh_git_plan.py", "refresh_
 "refresh_git_plan.py" = "strict"
 
 [debt.ambient-read]
-"__init__.py#home base.paths.meiva_home" = 5
-"__init__.py#home base.paths.plugins_dir" = 1
 "refresh.py#environ base.host.git.gitenv.git_env" = 6
-"refresh.py#home base.paths.meiva_home" = 2

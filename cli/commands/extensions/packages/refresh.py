@@ -112,6 +112,7 @@ class Pass:
         from_job: bool,
         now: datetime,
         repo: Path,
+        home: Path,
     ) -> None:
         self.config = config
         self.check_only = check_only
@@ -119,7 +120,8 @@ class Pass:
         self.from_job = from_job
         self.now = now
         self.repo = repo
-        self.skills_dir = paths.skills_dir(paths.meiva_home())
+        self.home = home
+        self.skills_dir = paths.skills_dir(home)
         self.registry: install_registry.Registry | None = None
         self.deltas: dict[str, _Delta] = {}
         self.channel: install_registry.ChannelState | None = None
@@ -280,7 +282,7 @@ class Pass:
             ["git", "-C", str(self.repo), "config", "--get", "remote.origin.url"],
             capture_output=True,
             text=True,
-            env=git_env(),
+            env=git_env(self.config.process_environment()),
             timeout=_LOCAL_GIT_TIMEOUT_S,
         )
         if result.returncode != 0:
@@ -294,7 +296,7 @@ class Pass:
             self.repo,
             remote,
             ref,
-            env=git_env(),
+            env=git_env(self.config.process_environment()),
             timeout=self.config.view.packages.refresh_network_timeout_seconds,
         )
         try:
@@ -321,7 +323,7 @@ class Pass:
             self.repo,
             remote,
             ref,
-            env=git_env(),
+            env=git_env(self.config.process_environment()),
             timeout=self.config.view.packages.refresh_network_timeout_seconds,
         )
         try:
@@ -425,7 +427,7 @@ class Pass:
 
     def _sources(self) -> list[Source]:
         if self._sources_cache is None:
-            sources, _conflicts = iter_sources(self.repo)
+            sources, _conflicts = iter_sources(self.repo, home=self.home)
             self._sources_cache = sources
         return self._sources_cache
 
@@ -495,7 +497,7 @@ class Pass:
             ["git", "-C", str(self.repo), *args],
             capture_output=True,
             text=True,
-            env=git_env(),
+            env=git_env(self.config.process_environment()),
             timeout=_LOCAL_GIT_TIMEOUT_S,
         )
         return result.returncode, result.stdout
@@ -520,7 +522,7 @@ class Pass:
                 ["git", "-C", str(self.repo), "archive", "-o", str(tarpath), head, "--", src_rel],
                 capture_output=True,
                 text=True,
-                env=git_env(),
+                env=git_env(self.config.process_environment()),
                 timeout=_LOCAL_GIT_TIMEOUT_S,
             )
             if result.returncode != 0 or not tarpath.is_file():
@@ -578,7 +580,7 @@ class Pass:
         command = package_listing(
             source,
             ref,
-            env=git_env(),
+            env=git_env(self.config.process_environment()),
             timeout=self.config.view.packages.refresh_network_timeout_seconds,
         )
         try:
@@ -723,6 +725,7 @@ def run_refresh(
     *,
     config: ConfigBoot,
     repo: Path,
+    home: Path,
     now: datetime,
     check_only: bool = False,
     only: str | None = None,
@@ -743,7 +746,7 @@ def run_refresh(
         return _skip("OS jobs disabled (MEIVA_OS_JOBS_ENABLED=false)")
     if from_job and not config.view.packages.refresh_enabled:
         return _skip("refresh disabled (MEIVA_PACKAGES_REFRESH_ENABLED=false)")
-    lock_path = paths.meiva_home() / "packages-refresh.lock"
+    lock_path = home / "packages-refresh.lock"
     try:
         with file_lock(lock_path, timeout_s=_QUEUE_LOCK_TIMEOUT_S):
             pass_ = Pass(
@@ -753,6 +756,7 @@ def run_refresh(
                 from_job=from_job,
                 now=now,
                 repo=repo,
+                home=home,
             )
             return pass_.run()
     except LockTimeoutError:

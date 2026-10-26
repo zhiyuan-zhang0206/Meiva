@@ -18,7 +18,6 @@ from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any, TypeGuard
 
-from base.clock import SYSTEM_TIMERS, Clock, ClockConfig
 from base.config import ConfigBoot
 from base.packages.extensions import install_registry
 from base.packages.extensions.install_registry import InstalledPackage, UpdateMode
@@ -48,21 +47,21 @@ class _Row:
     host_blocked: str | None = None
 
 
-def _package_root(pkg: InstalledPackage) -> Path | None:
+def _package_root(pkg: InstalledPackage, home: Path) -> Path | None:
     """The package's LIVE directory on this machine (None when absent)."""
     from base import paths
 
     root = {
-        "skill": paths.skills_dir(paths.meiva_home()) / pkg.name,
-        "plugin": paths.plugins_dir() / pkg.name,
-        "mcp": paths.mcps_dir(paths.meiva_home()) / pkg.name,
+        "skill": paths.skills_dir(home) / pkg.name,
+        "plugin": home / "plugins" / pkg.name,
+        "mcp": paths.mcps_dir(home) / pkg.name,
     }.get(pkg.type)
     if root is None or not root.is_dir():
         return None
     return root
 
 
-def _read_declared_range(pkg: InstalledPackage) -> tuple[dict[str, object] | None, str | None]:
+def _read_declared_range(root: Path | None) -> tuple[dict[str, object] | None, str | None]:
     """(manifest dict | None, error | None) for a package's on-disk manifest.
 
     Reads the LIVE copy on this machine (what would actually load), not the
@@ -73,7 +72,6 @@ def _read_declared_range(pkg: InstalledPackage) -> tuple[dict[str, object] | Non
     """
     from base.packages.plugins import manifest as manifest_module
 
-    root = _package_root(pkg)
     if root is None:
         return None, None
     try:
@@ -102,19 +100,14 @@ def _next_check_at(last_check_at: str | None, interval_seconds: int | None) -> s
     return (last + timedelta(seconds=interval_seconds)).isoformat(timespec="seconds")
 
 
-def _fmt_due(next_check_at: str | None) -> str:
+def _fmt_due(next_check_at: str | None, now: datetime) -> str:
     if next_check_at is None:
         return "due"
     try:
         due = datetime.fromisoformat(next_check_at)
     except ValueError:
         return "due"
-    remaining = (
-        due
-        - Clock(
-            ClockConfig("UTC", None, message_timestamp_weekday=False), timers=SYSTEM_TIMERS
-        ).now()
-    )
+    remaining = due - now
     if remaining.total_seconds() <= 0:
         return "due"
     hours, rest = divmod(int(remaining.total_seconds()), 3600)
@@ -141,13 +134,15 @@ def _fmt_range(manifest: dict[str, object] | None, manifest_error: str | None) -
     return ", ".join(parts) if parts else "-"
 
 
-def _status_rows(registry: install_registry.Registry, *, config: ConfigBoot) -> list[_Row]:
+def _status_rows(
+    registry: install_registry.Registry, *, config: ConfigBoot, home: Path
+) -> list[_Row]:
     """One display row per tracked package, by name."""
     rows: list[_Row] = []
     for pkg in sorted(registry.packages, key=lambda p: p.name):
         policy = install_registry.resolved_policy(pkg, defaults_reader=lambda: config.view.packages)
-        manifest, manifest_error = _read_declared_range(pkg)
-        root = _package_root(pkg)
+        root = _package_root(pkg, home)
+        manifest, manifest_error = _read_declared_range(root)
         host_blocked = install_registry.host_contract_reason(root) if root is not None else None
         rows.append(
             _Row(
@@ -176,14 +171,13 @@ def _status_payload(
     rows: list[_Row],
     host_bare: str | None,
     host_display: str | None,
+    home: Path,
 ) -> dict[str, Any]:
-    from base import paths
-
     return {
         "host": {
             "version": host_bare,
             "display": host_display,
-            "home": str(paths.meiva_home()),
+            "home": str(home),
             "registry_schema": registry.version,
         },
         "channels": {
@@ -219,7 +213,7 @@ def _status_payload(
     }
 
 
-def _print_rows(rows: list[_Row]) -> None:
+def _print_rows(rows: list[_Row], now: datetime) -> None:
     print(
         f"  {'NAME':<30} {'KIND':<6} {'ORIGIN':<7} {'CHANNEL':<8} {'MODE':<7} "
         f"{'INTERVAL':<9} {'APPLIED':<9} {'LAST RESULT':<{_RESULT_W}} "
@@ -235,16 +229,17 @@ def _print_rows(rows: list[_Row]) -> None:
             f"  {r.name:<30} {r.kind:<6} {r.origin:<7} "
             f"{(r.channel or '-'):<8} {r.mode:<7} {interval_text:<9} "
             f"{applied:<9} {last_result:<{_RESULT_W}} "
-            f"{_fmt_due(r.next_check_at):<10} {_fmt_range(r.manifest, r.manifest_error)}"
+            f"{_fmt_due(r.next_check_at, now):<10} {_fmt_range(r.manifest, r.manifest_error)}"
         )
 
 
-def cmd_packages_status(*, config: ConfigBoot, json_output: bool = False) -> int:
+def cmd_packages_status(
+    *, config: ConfigBoot, home: Path, now: datetime, json_output: bool = False
+) -> int:
     """`meiva packages status [--json]` — host version, channels, and per-package
     channel/policy/applied-rev/last-result/declared-range. Read-only."""
     import json
 
-    from base import paths
     from base.host.git import host_version as host_version_mod
 
     registry = install_registry.load()
@@ -255,15 +250,14 @@ def cmd_packages_status(*, config: ConfigBoot, json_output: bool = False) -> int
         host_bare = None
         host_display = "unknown"
 
-    rows = _status_rows(registry, config=config)
+    rows = _status_rows(registry, config=config, home=home)
 
     if json_output:
-        print(json.dumps(_status_payload(registry, rows, host_bare, host_display), indent=2))
+        print(json.dumps(_status_payload(registry, rows, host_bare, host_display, home), indent=2))
         return 0
 
     print(
-        f"[meiva packages status] host {host_display} · home {paths.meiva_home()} "
-        f"· registry v{registry.version}"
+        f"[meiva packages status] host {host_display} · home {home} · registry v{registry.version}"
     )
     if registry.channels:
         for name, ch in sorted(registry.channels.items()):
@@ -278,7 +272,7 @@ def cmd_packages_status(*, config: ConfigBoot, json_output: bool = False) -> int
     if not rows:
         print("  (no tracked packages)")
         return 0
-    _print_rows(rows)
+    _print_rows(rows, now)
     for r in rows:
         if r.host_blocked is not None:
             print(f"  ! {r.name}: not loadable on this host — {r.host_blocked}")
@@ -294,6 +288,7 @@ def cmd_packages_refresh(
     *,
     config: ConfigBoot,
     repo: Path,
+    home: Path,
     now: datetime,
     check_only: bool = False,
     only: str | None = None,
@@ -313,6 +308,7 @@ def cmd_packages_refresh(
     report = run_refresh(
         config=config,
         repo=repo,
+        home=home,
         now=now,
         check_only=check_only,
         only=only,
@@ -389,7 +385,7 @@ def _swap_trees_with_prev(skills: Path, name: str, skip: frozenset[tuple[str, ..
     return dest
 
 
-def cmd_packages_rollback(name: str) -> int:
+def cmd_packages_rollback(name: str, *, home: Path, now: datetime) -> int:
     """`meiva packages rollback <name>` — restore the package's previous
     tree (the `.<name>.prev` kept by the last successful apply), swapping it with
     the current one. A differing local copy is replaced and reported. The channel
@@ -413,7 +409,7 @@ def cmd_packages_rollback(name: str) -> int:
             file=sys.stderr,
         )
         return 1
-    skills = paths.skills_dir(paths.meiva_home())
+    skills = paths.skills_dir(home)
     dest = skills / row.name
     prev = skills / f".{row.name}.prev"
     if not prev.is_dir():
@@ -430,11 +426,7 @@ def cmd_packages_rollback(name: str) -> int:
             "applied content; replacing it"
         )
     dest = _swap_trees_with_prev(skills, row.name, skip)
-    stamp = (
-        Clock(ClockConfig("UTC", None, message_timestamp_weekday=False), timers=SYSTEM_TIMERS)
-        .now()
-        .isoformat(timespec="seconds")
-    )
+    stamp = now.isoformat(timespec="seconds")
     with install_registry.mutate() as reg:
         fresh = next((p for p in reg.packages if match_key(p.name) == match_key(row.name)), None)
         if fresh is not None:

@@ -13,6 +13,7 @@ import json
 import threading
 from collections.abc import Iterator
 from dataclasses import dataclass, field
+from datetime import UTC, datetime
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from pathlib import Path
 from typing import Any, ClassVar
@@ -106,6 +107,8 @@ def test_a_malicious_skill_refuses_and_leaves_nothing_behind(
             None,
             gateway=RecordingGateway(),
             machine=command_runtime.machine,
+            home=unit_home,
+            now=datetime.now(UTC),
         )
         == 1
     )
@@ -136,6 +139,8 @@ def test_one_bad_skill_aborts_a_whole_collection_before_the_first_copy(
             None,
             gateway=RecordingGateway(),
             machine=command_runtime.machine,
+            home=unit_home,
+            now=datetime.now(UTC),
         )
         == 1
     )
@@ -161,6 +166,8 @@ def test_accept_risk_installs_and_records_what_it_waived(
             accept_risk=True,
             gateway=RecordingGateway(),
             machine=command_runtime.machine,
+            home=unit_home,
+            now=datetime.now(UTC),
         )
         == 0
     )
@@ -190,6 +197,8 @@ def test_a_clean_third_party_install_is_still_unreviewed(
             None,
             gateway=RecordingGateway(),
             machine=command_runtime.machine,
+            home=unit_home,
+            now=datetime.now(UTC),
         )
         == 0
     )
@@ -207,11 +216,16 @@ def test_register_scans_too_so_a_hand_copy_is_not_the_way_around_the_gate(
     has to meet the same gate or the gate is decorative."""
     _write(unit_home / "skills" / "helpful-backup", "helpful-backup", _MALICIOUS)
 
-    assert cmd_skill_register("helpful-backup") == 1
+    assert cmd_skill_register("helpful-backup", home=unit_home, now=datetime.now(UTC)) == 1
     assert "credential-exfiltration" in capsys.readouterr().err  # pyright: ignore[reportUnknownMemberType]
     assert reg.get("helpful-backup") is None  # on disk, but never loadable
 
-    assert cmd_skill_register("helpful-backup", accept_risk=True) == 0
+    assert (
+        cmd_skill_register(
+            "helpful-backup", accept_risk=True, home=unit_home, now=datetime.now(UTC)
+        )
+        == 0
+    )
     entry = reg.get("helpful-backup")
     assert entry is not None and entry.accepted_findings == ["credential-exfiltration"]
 
@@ -227,7 +241,7 @@ def test_register_and_enable_fold_the_typed_name_onto_the_real_directory(
 
     _write(unit_home / "skills" / "page_ocr", "page_ocr", _BENIGN)
 
-    assert cmd_skill_register("page-ocr") == 0
+    assert cmd_skill_register("page-ocr", home=unit_home, now=datetime.now(UTC)) == 0
     entry = reg.get("page-ocr")
     assert entry is not None
     assert entry.name == "page_ocr"  # the directory's spelling, not the typed one
@@ -255,19 +269,21 @@ def test_trust_is_a_separate_human_verb(
             None,
             gateway=RecordingGateway(),
             machine=command_runtime.machine,
+            home=unit_home,
+            now=datetime.now(UTC),
         )
         == 0
     )
 
-    assert cmd_skill_trust("code-review") == 0
+    assert cmd_skill_trust("code-review", now=datetime.now(UTC)) == 0
     assert reg.get("code-review").trust == "reviewed"  # type: ignore[union-attr]
 
-    assert cmd_skill_trust("code-review", revoke=True) == 0
+    assert cmd_skill_trust("code-review", revoke=True, now=datetime.now(UTC)) == 0
     assert reg.get("code-review").trust == "unreviewed"  # type: ignore[union-attr]
 
 
 def test_trust_refuses_an_unknown_package(unit_home: Path, capsys: pytest.CaptureFixture) -> None:
-    assert cmd_skill_trust("nope") == 1
+    assert cmd_skill_trust("nope", now=datetime.now(UTC)) == 1
     assert "not tracked" in capsys.readouterr().err  # pyright: ignore[reportUnknownMemberType]
 
 
@@ -289,14 +305,16 @@ def test_scan_reports_an_installed_package_and_exits_on_criticals(
             None,
             gateway=RecordingGateway(),
             machine=command_runtime.machine,
+            home=unit_home,
+            now=datetime.now(UTC),
         )
         == 0
     )
-    assert cmd_skill_scan("code-review") == 0
+    assert cmd_skill_scan("code-review", home=unit_home) == 0
     assert "trust=unreviewed" in capsys.readouterr().out  # pyright: ignore[reportUnknownMemberType]
 
     dirty = _write(tmp_path / "helpful-backup", "helpful-backup", _MALICIOUS)
-    assert cmd_skill_scan(str(dirty)) == 2
+    assert cmd_skill_scan(str(dirty), home=unit_home) == 2
     assert "credential-exfiltration" in capsys.readouterr().out  # pyright: ignore[reportUnknownMemberType]
 
 
@@ -319,11 +337,13 @@ def test_scan_surfaces_previously_accepted_findings(
             accept_risk=True,
             gateway=RecordingGateway(),
             machine=command_runtime.machine,
+            home=unit_home,
+            now=datetime.now(UTC),
         )
         == 0
     )
 
-    assert cmd_skill_scan("helpful-backup") == 2
+    assert cmd_skill_scan("helpful-backup", home=unit_home) == 2
     assert "previously accepted: credential-exfiltration" in capsys.readouterr().out  # pyright: ignore[reportUnknownMemberType]
 
 
@@ -348,12 +368,14 @@ def test_converge_stamps_repo_skills_builtin_and_leaves_a_review_alone(
             None,
             gateway=RecordingGateway(),
             machine=command_runtime.machine,
+            home=unit_home,
+            now=datetime.now(UTC),
         )
         == 0
     )
-    assert cmd_skill_trust("code-review") == 0
+    assert cmd_skill_trust("code-review", now=datetime.now(UTC)) == 0
 
-    converge_skills(repo, unit_home, binding=PROD_ELSEWHERE)
+    converge_skills(repo, unit_home, binding=PROD_ELSEWHERE, now=datetime.now(UTC))
 
     assert reg.get("meiva-goal").trust == "builtin"  # type: ignore[union-attr]
     assert reg.get("code-review").trust == "reviewed"  # type: ignore[union-attr]
@@ -366,9 +388,9 @@ def test_trust_refuses_to_hand_edit_a_builtin_tier(unit_home: Path, tmp_path: Pa
 
     repo = tmp_path / "repo"
     _write(repo / "meiva_builtins" / "skills" / "meiva-goal", "meiva-goal", _BENIGN)
-    converge_skills(repo, unit_home, binding=PROD_ELSEWHERE)
+    converge_skills(repo, unit_home, binding=PROD_ELSEWHERE, now=datetime.now(UTC))
 
-    assert cmd_skill_trust("meiva-goal") == 1
+    assert cmd_skill_trust("meiva-goal", now=datetime.now(UTC)) == 1
     assert reg.get("meiva-goal").trust == "builtin"  # type: ignore[union-attr]
 
 
@@ -381,7 +403,15 @@ def test_install_registers_through_the_gateway_before_the_local_copy(
     gateway = RecordingGateway()
 
     assert (
-        cmd_skill_install(str(src), None, None, gateway=gateway, machine=command_runtime.machine)
+        cmd_skill_install(
+            str(src),
+            None,
+            None,
+            gateway=gateway,
+            machine=command_runtime.machine,
+            home=unit_home,
+            now=datetime.now(UTC),
+        )
         == 0
     )
 
@@ -408,7 +438,15 @@ def test_a_refused_registration_fails_the_install_and_copies_nothing(
     gateway = RecordingGateway(refuse="the cluster gateway refused 'gw-refused' (HTTP 401)")
 
     assert (
-        cmd_skill_install(str(src), None, None, gateway=gateway, machine=command_runtime.machine)
+        cmd_skill_install(
+            str(src),
+            None,
+            None,
+            gateway=gateway,
+            machine=command_runtime.machine,
+            home=unit_home,
+            now=datetime.now(UTC),
+        )
         == 1
     )
 

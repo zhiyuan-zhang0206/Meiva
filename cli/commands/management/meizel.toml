@@ -17,7 +17,5 @@ exports = ["config.py", "fleet_gateway.py", "fleet_leases.py", "schedules.py", "
 [roots]
 "schedule_verify_child.py" = { kinds = ["cwd"], why = "Schedule verification process entry captures its repository working directory and passes it to call-site analysis" }
 "fleet_gateway.py" = { kinds = ["random", "settings"], why = "CLI command composition root boots configuration before assembling command inputs and mints a fresh smoke-test idempotency key" }
-
-[debt.ambient-read]
-"fleet_leases.py#home base.paths.home.resolve_meiva_home" = 1
-"schedules_verify_read_rows.py#home base.paths.home.resolve_meiva_home" = 1
+"fleet_leases.py" = { kinds = ["home"], why = "Standalone program that cli.fleet_update pipes to a host whose installed code may predate this checkout; it resolves that host's home itself, and only when the host's CommandRuntime.create accepts one" }
+"schedules_verify_read_rows.py" = { kinds = ["home"], why = "Standalone program that cli.fleet_update ships to a host whose installed code may predate this checkout; it resolves that host's home itself, and only when the host's CommandRuntime.create accepts one" }

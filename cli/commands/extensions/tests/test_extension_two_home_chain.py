@@ -71,6 +71,8 @@ def test_install_on_home_a_materializes_on_home_b(
                 None,
                 gateway=_DbGateway(operator_database),
                 machine=installing_machine,
+                home=home_a,
+                now=command_runtime.clock.now(),
             )
             == 0
         )
@@ -111,6 +113,8 @@ def test_home_b_is_idempotent_on_a_second_pass(
                 None,
                 gateway=_DbGateway(operator_database),
                 machine=installing_machine,
+                home=home_a,
+                now=command_runtime.clock.now(),
             )
             == 0
         )
@@ -143,6 +147,8 @@ def test_the_row_records_the_installing_machine(
                 None,
                 gateway=_DbGateway(operator_database),
                 machine=installing_machine,
+                home=home_a,
+                now=command_runtime.clock.now(),
             )
             == 0
         )
@@ -174,6 +180,8 @@ def test_disabling_on_the_cluster_stops_new_machines_getting_it(
                 None,
                 gateway=_DbGateway(operator_database),
                 machine=installing_machine,
+                home=home_a,
+                now=command_runtime.clock.now(),
             )
             == 0
         )
@@ -208,6 +216,8 @@ def test_home_b_keeps_its_own_edit_when_the_cluster_moves(
                 None,
                 gateway=_DbGateway(operator_database),
                 machine=installing_machine,
+                home=home_a,
+                now=command_runtime.clock.now(),
             )
             == 0
         )

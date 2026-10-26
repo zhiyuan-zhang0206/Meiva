@@ -41,7 +41,7 @@ from cli.parsers import cluster as _cluster
 from cli.parsers import host as _host
 from cli.parsers import logs as _logs
 from cli.parsers import pty as _pty
-from cli.preflight import require_own_checkout
+from cli.preflight import check_own_checkout
 from cli.start_runtime import HomeSite
 from cli.startup.service_path import CallerHost
 from cli.tests.bootstrap.init_identity import initialized_runner_home
@@ -639,7 +639,7 @@ def test_the_homes_own_checkout_runs_the_state_changing_verbs(
     (home / "source").symlink_to(checkout)
     point_home(monkeypatch, home)
 
-    assert require_own_checkout(["stop", "-y"], checkout) is None
+    assert check_own_checkout(["stop", "-y"], checkout, home=home) is None
     assert _main.main(["pty", "status"]) == 0
 
 
@@ -651,7 +651,7 @@ def test_a_home_with_no_source_accepts_any_checkout(
     point_home(monkeypatch, tmp_path)
     checkout = Path(_main.__file__).resolve().parents[1]
 
-    assert require_own_checkout(["stop", "-y"], checkout) is None
+    assert check_own_checkout(["stop", "-y"], checkout, home=tmp_path) is None
     assert _main.main(["pty", "status"]) == 0
 
 

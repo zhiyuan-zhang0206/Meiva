@@ -23,6 +23,7 @@ from typing import assert_never
 from base import cluster
 from base.cluster import session_name
 from base.cluster.machine import MachineIdentityReader, MachineRoles
+from base.cluster.machine.boot import gateway_access_from_boot
 from base.deploy import start_trace
 from base.deploy.lifecycle import launch_failures, pause_markers, start_serving
 from base.deploy.lifecycle.home_lifecycle_locks import resource_lock
@@ -301,7 +302,9 @@ def _register_and_probe(start: _Start) -> int | None:
         print("\n\u2192 probe gateway")
         with start_trace.phase("gateway probe"):
             rc = _repo.probe_gateway_or_die(
-                start.resolved["gateway_url"], timers=start.command.timers
+                start.resolved["gateway_url"],
+                access=gateway_access_from_boot(start.command.config),
+                timers=start.command.timers,
             )
         if rc != 0:
             return rc
@@ -568,7 +571,10 @@ def cmd_start(
     # boot job's retried start, which leaves a unit whose meiva-root circuit breaker is open
     # down: the health monitor keeps retrying that unit on its backoff ladder (task #5315).
     with operator_lifecycle_audit(
-        database_factory=database_factory, enabled=not boot_attempt
+        database_factory=database_factory,
+        environ=command.config.process_environment(),
+        home=command.home,
+        enabled=not boot_attempt,
     ) as audit:
         code = cmd_start_body(
             database_factory,

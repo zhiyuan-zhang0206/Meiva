@@ -86,6 +86,7 @@ def test_a_process_without_a_handle_is_unchanged(marker: Path) -> None:
     assert report["agent_id"] == {"ok": "None"}
     assert report["context"]["error"] == "ContextOutsideProcessError"
     assert report["tasks"]["error"] == "AttributeError"
+    assert report["watcher_at"]["error"] == "ContextOutsideProcessError"
 
 
 def test_a_dead_session_keeps_what_needs_no_identity(marker: Path) -> None:
@@ -94,7 +95,7 @@ def test_a_dead_session_keeps_what_needs_no_identity(marker: Path) -> None:
     assert report["has_tasks_at_import"] is False
     assert report["files_read"] == {"ok": "'marker'"}
     assert report["shell_run"] == {"ok": "'hi'"}
-    for label in ("agent_id", "agent_id_again", "context", "tasks", "agents_send"):
+    for label in ("agent_id", "agent_id_again", "context", "tasks", "agents_send", "watcher_at"):
         assert report[label]["error"] == "HarnessAttachError", label
     assert "no harness session matches this handle" in report["agent_id"]["message"]
     assert "stop retrying and report this failure" in report["agent_id"]["message"]

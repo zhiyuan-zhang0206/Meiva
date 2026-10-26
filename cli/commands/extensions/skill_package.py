@@ -33,10 +33,10 @@ from __future__ import annotations
 
 import shutil
 from dataclasses import dataclass
+from datetime import datetime
 from pathlib import Path
 from typing import Protocol
 
-from base.clock import SYSTEM_TIMERS, Clock, ClockConfig
 from base.cluster.machine import MachineIdentityReader
 from base.packages.extensions.install_registry import IGNORED_NAMES, tree_hash
 from base.packages.extensions.registry import ExtensionKind
@@ -159,6 +159,7 @@ def register_installed(
     path: str | None,
     ref: str | None,
     *,
+    now: datetime,
     accepted_findings: list[str] | None = None,
     content_hash: str | None = None,
     update_mode: str | None = None,
@@ -180,11 +181,7 @@ def register_installed(
     """
     from base.packages.extensions import install_registry
 
-    now = (
-        Clock(ClockConfig("UTC", None, message_timestamp_weekday=False), timers=SYSTEM_TIMERS)
-        .now()
-        .isoformat(timespec="seconds")
-    )
+    stamp = now.isoformat(timespec="seconds")
     update = install_registry.UpdateState()
     if update_mode is not None:
         update.mode = update_mode  # type: ignore[assignment]  # callers pass the literal
@@ -198,10 +195,10 @@ def register_installed(
             path=path,
             ref=ref,
             enabled=True,
-            installed_at=now,
-            updated_at=now,
+            installed_at=stamp,
+            updated_at=stamp,
             trust="unreviewed",
-            scanned_at=now,
+            scanned_at=stamp,
             accepted_findings=accepted_findings or [],
             content_hash=content_hash,
             installed_hash=content_hash,
@@ -266,6 +263,8 @@ def install(
     check_every: int | None = None,
     gateway: ExtensionGateway,
     machine: MachineIdentityReader,
+    home: Path,
+    now: datetime,
 ) -> list[tuple[Path, str]]:
     """Copy every package into the skills load dir and register it; return the
     installed `(destination, scan report)` pairs in the order given.
@@ -281,7 +280,7 @@ def install(
     """
     from base import paths
 
-    dest_root = paths.skills_dir(paths.meiva_home())
+    dest_root = paths.skills_dir(home)
     clashes = [pkg.name for pkg in packages if (dest_root / pkg.name).exists()]
     if clashes:
         raise SkillPackageError(
@@ -313,6 +312,7 @@ def install(
             path,
             ref,
             accepted_findings=accepted,
+            now=now,
             content_hash=tree_hash(dest),
             update_mode=update_mode,
             check_every=check_every,

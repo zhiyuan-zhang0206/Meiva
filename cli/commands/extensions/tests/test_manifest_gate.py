@@ -9,6 +9,7 @@ legacy paths (covered by the existing install tests).
 
 import json
 import subprocess
+from datetime import UTC, datetime
 from pathlib import Path
 
 import pytest
@@ -84,7 +85,7 @@ def test_mcp_install_refuses_manifest_beyond_host_engines(
     # (2026.x), so the beyond-host example must outrun a full year, not two digits.
     bad = dict(GOOD_MANIFEST, engines={"meiva": ">=2099"})
     _write_manifest(pkg, bad)
-    assert cmd_mcp_install(str(pkg), None, None, uv=uv) == 1
+    assert cmd_mcp_install(str(pkg), None, None, uv=uv, home=unit_home, now=datetime.now(UTC)) == 1
     assert "requires Meiva >=2099" in capsys.readouterr().err  # pyright: ignore[reportUnknownMemberType]
     assert reg.get("acme") is None
     assert not (unit_home / "mcps" / "acme").exists()
@@ -101,7 +102,7 @@ def test_mcp_install_refuses_unbounded_pyproject(
         'requires-python = ">=3.12"\ndependencies = ["mcp>=1.27"]\n\n[tool.uv]\npackage = false\n',
         encoding="utf-8",
     )
-    assert cmd_mcp_install(str(pkg), None, None, uv=uv) == 1
+    assert cmd_mcp_install(str(pkg), None, None, uv=uv, home=unit_home, now=datetime.now(UTC)) == 1
     assert "#1198" in capsys.readouterr().err  # pyright: ignore[reportUnknownMemberType]
     assert reg.get("acme") is None
 
@@ -116,7 +117,7 @@ def test_mcp_install_refuses_pyproject_out_of_declared_range(
         'requires-python = ">=3.12"\ndependencies = ["mcp>=1.27,<3"]\n\n[tool.uv]\npackage = false\n',
         encoding="utf-8",
     )
-    assert cmd_mcp_install(str(pkg), None, None, uv=uv) == 1
+    assert cmd_mcp_install(str(pkg), None, None, uv=uv, home=unit_home, now=datetime.now(UTC)) == 1
     assert "reaches above" in capsys.readouterr().err  # pyright: ignore[reportUnknownMemberType]
     assert reg.get("acme") is None
 
@@ -126,7 +127,7 @@ def test_mcp_install_refuses_invalid_manifest(
 ) -> None:
     pkg = _make_mcp_package(tmp_path)
     (pkg / "meiva-plugin.json").write_text("not json", encoding="utf-8")
-    assert cmd_mcp_install(str(pkg), None, None, uv=uv) == 1
+    assert cmd_mcp_install(str(pkg), None, None, uv=uv, home=unit_home, now=datetime.now(UTC)) == 1
     assert "not valid JSON" in capsys.readouterr().err  # pyright: ignore[reportUnknownMemberType]
     assert reg.get("acme") is None
 
@@ -134,7 +135,7 @@ def test_mcp_install_refuses_invalid_manifest(
 def test_mcp_install_accepts_valid_manifest(unit_home: Path, tmp_path: Path, uv: UvBuild) -> None:
     pkg = _make_mcp_package(tmp_path)
     _write_manifest(pkg, GOOD_MANIFEST)
-    assert cmd_mcp_install(str(pkg), None, None, uv=uv) == 0
+    assert cmd_mcp_install(str(pkg), None, None, uv=uv, home=unit_home, now=datetime.now(UTC)) == 0
     row = reg.get("acme")
     assert row is not None
     assert (unit_home / "mcps" / "acme" / "meiva-plugin.json").is_file()
@@ -146,7 +147,7 @@ def test_mcp_install_manifest_without_pyproject_fails_when_declaring_packages(
     pkg = _make_mcp_package(tmp_path)
     _write_manifest(pkg, GOOD_MANIFEST)
     (pkg / "pyproject.toml").unlink()
-    assert cmd_mcp_install(str(pkg), None, None, uv=uv) == 1
+    assert cmd_mcp_install(str(pkg), None, None, uv=uv, home=unit_home, now=datetime.now(UTC)) == 1
     assert "no pyproject.toml" in capsys.readouterr().err  # pyright: ignore[reportUnknownMemberType]
 
 
@@ -164,12 +165,12 @@ def test_mcp_upgrade_refuses_source_that_breaks_the_contract(
     _git(pkg, "add", ".")
     _git(pkg, "commit", "-q", "-m", "init")
     url = f"file://{pkg}"
-    assert cmd_mcp_install(url, None, None, uv=uv) == 0
+    assert cmd_mcp_install(url, None, None, uv=uv, home=unit_home, now=datetime.now(UTC)) == 0
 
     _write_manifest(pkg, dict(GOOD_MANIFEST, engines={"meiva": ">=2099"}))
     _git(pkg, "add", ".")
     _git(pkg, "commit", "-q", "-m", "break engines")
-    assert cmd_mcp_upgrade("acme", uv=uv) == 1
+    assert cmd_mcp_upgrade("acme", uv=uv, home=unit_home, now=datetime.now(UTC)) == 1
     assert "requires Meiva >=2099" in capsys.readouterr().err  # pyright: ignore[reportUnknownMemberType]
     # the landed copy still carries the previous manifest — nothing was re-landed
     landed = unit_home / "mcps" / "acme" / "meiva-plugin.json"
@@ -206,6 +207,8 @@ def test_plugins_install_refuses_invalid_manifest_before_detection(
             gateway=RecordingGateway(),
             machine=command_machine,
             binding=PROD_ELSEWHERE,
+            home=unit_home,
+            now=datetime.now(UTC),
         )
         == 1
     )
@@ -235,6 +238,8 @@ def test_plugins_install_accepts_manifest_with_valid_engines(
             gateway=RecordingGateway(),
             machine=command_machine,
             binding=PROD_ELSEWHERE,
+            home=unit_home,
+            now=datetime.now(UTC),
         )
         == 1
     )
@@ -258,6 +263,8 @@ def test_skill_install_refuses_invalid_manifest_before_discovery(
             None,
             gateway=RecordingGateway(),
             machine=command_machine,
+            home=unit_home,
+            now=datetime.now(UTC),
         )
         == 1
     )
@@ -286,6 +293,8 @@ def test_skill_install_valid_manifest_proceeds(
             None,
             gateway=RecordingGateway(),
             machine=command_machine,
+            home=unit_home,
+            now=datetime.now(UTC),
         )
         == 0
     )

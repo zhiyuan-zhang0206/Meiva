@@ -50,10 +50,10 @@ def test_plugins_update_reconciles_retired_only_image(
     image.parent.mkdir(parents=True)
     image.write_text('{"agent_standing_directives": []}\n')
 
-    assert cmd_plugins_update() == 0
+    assert cmd_plugins_update(home=tmp_path) == 0
     assert json.loads(image.read_text()) == SampleConfig().model_dump()
     saved = image.read_bytes()
     capsys.readouterr()
-    assert cmd_plugins_update() == 0
+    assert cmd_plugins_update(home=tmp_path) == 0
     assert "retired_demo: no schema diff" in capsys.readouterr().out
     assert image.read_bytes() == saved

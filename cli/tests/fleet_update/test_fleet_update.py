@@ -304,7 +304,7 @@ def test_macos_start_is_a_gui_one_shot() -> None:
 
 def test_the_macos_one_shot_start_passes_the_home_and_os_job_gates(default_home: Path) -> None:
     from base.host.system.cron import mechanics
-    from cli.preflight import require_own_checkout
+    from cli.preflight import check_own_checkout
 
     script = oneshot.gui_oneshot("mac", _STAMP, 60, "--all-services")
     job = plistlib.loads(
@@ -317,7 +317,7 @@ def test_the_macos_one_shot_start_passes_the_home_and_os_job_gates(default_home:
 
     home = default_home / ".meiva"
     (home / "source").mkdir(parents=True)
-    assert require_own_checkout(["start"], home / "source") is None
+    assert check_own_checkout(["start"], home / "source", home=home) is None
     assert mechanics.owns_os_jobs("autostart")
 
 
