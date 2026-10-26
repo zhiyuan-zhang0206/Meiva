@@ -29,8 +29,9 @@ import pytest
 from base.cluster import postgres as native_postgres
 from base.cluster.dataplane import pg_admin, walg_binary
 from base.cluster.dataplane.pg_tools import pg_shm_args, pg_start_env, pg_tool, pg_tz_args
-from base.config import settings
 from base.host.env import port_lease
+from base.paths import meiva_home
+from base.paths.tests.homes import point_home
 from services.backup.walg.archive import archive_pg_args
 from services.backup.walg.pg_target import PgTarget
 
@@ -131,12 +132,13 @@ def make_sandbox(
     shutil.copy(FAKE_WALG, binary)
     binary.chmod(0o755)
 
-    monkeypatch.setenv("MEIVA_HOME", str(home))
+    point_home(monkeypatch, home)
     # The fake is not the pinned build; everything else (path, argv, config) is real.
     monkeypatch.setattr(walg_binary, "installed_problem", lambda: None)
     sandbox = Sandbox(home, store_dir, config_file, key_file, enabled)
     sandbox.write_config(valid_config(key_file))
-    monkeypatch.setattr(settings.walg, "walg_config_file", sandbox.path)
+    if enabled:
+        (store_dir / "enabled").write_text("1")
     return sandbox
 
 
@@ -260,15 +262,19 @@ def postgres_instance(*extra_args: str, path: Path | None = None) -> Generator[P
         shutil.rmtree(root, ignore_errors=True)
 
 
+def _ambient_sandbox_path() -> Path | None:
+    store = meiva_home() / "secrets" / "walg"
+    return store / "walg.json" if (store / "enabled").exists() else None
+
+
 # meiva:note
 # `postgres_instance` carrying the sandbox's `archive_pg_args()` on its command line.
 #
-# Without a `sandbox` the archive settings come from the process settings that
-# `make_sandbox` patched (the form the CLI tests use).
+# Without a `sandbox` the archive settings come from the active sandbox in `meiva_home()`.
 def archiving_postgres(
     *extra_args: str, sandbox: Sandbox | None = None
 ) -> AbstractContextManager[PgInstance]:
-    path = sandbox.path if sandbox is not None else settings.walg.walg_config_file
+    path = sandbox.path if sandbox is not None else _ambient_sandbox_path()
     return postgres_instance(*extra_args, path=path)
 
 

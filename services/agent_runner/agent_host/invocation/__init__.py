@@ -1,5 +1,7 @@
 """Pending invocation state and the host's database-only failure boundary."""
 
+from __future__ import annotations
+
 from collections.abc import Callable
 from dataclasses import dataclass
 from functools import partial
@@ -7,6 +9,7 @@ from pathlib import Path
 
 from langchain_core.runnables import RunnableConfig
 from langgraph.graph.state import CompiledStateGraph
+from loguru import logger
 from psycopg_pool import AsyncConnectionPool
 
 from agent.impersonation import process_host, settle_checkpoint
@@ -19,7 +22,6 @@ from base.agents.messages.timestamp_policy import TimestampSource
 from base.agents.observation.relay_supervision import RelaySupervision
 from base.db import Database
 from base.events.live.bus import EventBus
-from base.log import logger
 from services.agent_runner.agent_host.db_recovery import database_phase
 from services.agent_runner.agent_host.invocation.checkpoints import TurnCheckpoints
 from services.agent_runner.agent_host.lifecycle.shells import apply_lifecycle_command

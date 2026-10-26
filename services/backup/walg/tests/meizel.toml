@@ -16,9 +16,5 @@ exports = ["support.py"]
 "test_verify.py" = ["support.py"]
 "test_walg_config_boot_owner.py" = ["child_walg.py"]
 
-[debt.env-patch]
-"support.py#monkeypatch.setenv os.environ.MEIVA_HOME" = 1
-
 [debt.first-party-patch]
 "support.py#monkeypatch.setattr base.cluster.dataplane.walg_binary.installed_problem" = 1
-"support.py#monkeypatch.setattr base.config.settings.walg.walg_config_file" = 1

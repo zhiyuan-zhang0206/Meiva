@@ -20,24 +20,22 @@ def _expect_refusal(action: Callable[[], object], fragment: str) -> None:
 def host_refuses_env_context_and_attachment() -> None:
     import os
     import runpy
+    from pathlib import Path
 
     os.environ.pop("MEIVA_AGENT_ID", None)
+    dotenv = Path(os.environ["MEIVA_HOME"]) / ".env"
+    dotenv.write_bytes(b"\xff")
     import meiva
     from base import config
 
-    class BootStoppedError(RuntimeError):
-        pass
-
-    def stop_boot(self: object) -> None:
-        raise BootStoppedError("after SDK posture")
-
-    config.ConfigBoot.ensure_eager = stop_boot  # pyright: ignore[reportAttributeAccessIssue]
     try:
         runpy.run_module("services.agent_runner.agent_host.daemon", run_name="__main__")
-    except BootStoppedError:
+    except UnicodeDecodeError:
         stopped = True
     else:
         stopped = False
+    finally:
+        dotenv.unlink(missing_ok=True)
     assert stopped, "boot did not stop"
     from meiva import boot
     from meiva.sdk_surface import agent_identity, process_context
