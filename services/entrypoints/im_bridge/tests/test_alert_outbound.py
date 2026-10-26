@@ -19,6 +19,7 @@ from services.entrypoints.im_bridge.alert_outbound import (
     AlertOwnerDecision,
 )
 from services.entrypoints.im_bridge.outbound.store import IMOutboxStore
+from services.entrypoints.im_bridge.tests.slices import system_rng
 from services.entrypoints.im_bridge.tests.support import failing_insert
 from services.entrypoints.im_bridge.tests.test_timeline_outbox import RecordingAdapter, worker_for
 from services.entrypoints.im_bridge.types import PreparedOutboundSend, SendNotStartedError
@@ -70,7 +71,7 @@ def bridge(
     pool: ConnectionPool, *adapters: AlertAdapter, enabled: bool = True
 ) -> AlertOutboundBridge:
     return AlertOutboundBridge(
-        IMOutboxStore(pool, new_id=uuid4),
+        IMOutboxStore(pool, rng=system_rng()),
         {adapter.channel: adapter for adapter in adapters},
         enabled=enabled,
     )

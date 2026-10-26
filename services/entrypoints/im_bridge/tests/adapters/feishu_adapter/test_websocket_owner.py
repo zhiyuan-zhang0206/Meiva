@@ -6,6 +6,7 @@ from pathlib import Path
 
 import pytest
 
+from base.clock.tests.fakes import system_clock
 from services.entrypoints.im_bridge.adapters.feishu import FeishuAdapter
 from services.entrypoints.im_bridge.tests.adapters.test_feishu_adapter import (
     FakeCore,
@@ -13,7 +14,7 @@ from services.entrypoints.im_bridge.tests.adapters.test_feishu_adapter import (
     build_patching_adapter,
     make_event,
 )
-from services.entrypoints.im_bridge.tests.slices import feishu_config, system_clock
+from services.entrypoints.im_bridge.tests.slices import feishu_config
 from services.entrypoints.im_bridge.types import InboundMessage
 
 

@@ -11,12 +11,13 @@ from typing import Any, cast
 import jsonschema
 import pytest
 
+from base.clock.tests.fakes import system_clock
 from base.db import Database
 from base.host.permissions_helper.client import PermissionsHelperClient
 
 from ..computer.config import ComputerUseConfig
 from ..computer.mcp_daemon import ComputerMcpDaemon
-from ..computer.tests.slices import AuditLog, system_clock
+from ..computer.tests.slices import AuditLog
 
 
 class RequestLog(list[dict[str, Any]]):

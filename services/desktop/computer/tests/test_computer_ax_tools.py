@@ -13,6 +13,7 @@ from typing import Any
 
 import pytest
 
+from base.clock.tests.fakes import system_clock
 from base.db import Database
 from base.db.code_version_gate import ProcessDbGate
 from base.host.permissions_helper.client import AxNode, AxTreeResult
@@ -21,7 +22,7 @@ from .. import ax_tools as ax
 from ..errors import ComputerUseError
 from ..mcp_daemon import ComputerMcpDaemon
 from ..screen import DesktopHelper
-from .slices import FakeDesktopHelper, computer_use_config, system_clock
+from .slices import FakeDesktopHelper, computer_use_config
 
 
 def node(

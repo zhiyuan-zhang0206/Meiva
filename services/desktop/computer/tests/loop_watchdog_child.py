@@ -11,6 +11,7 @@ import sys
 import time
 from typing import cast
 
+from base.clock import SYSTEM_TIMERS
 from services.desktop.computer import mcp_daemon
 
 
@@ -36,7 +37,7 @@ async def main(mode: str) -> None:
         )
         return
     watchdog = mcp_daemon.guard_loop_liveness(
-        asyncio.get_running_loop(), 1.0, beat_s=0.1, check_s=0.05
+        asyncio.get_running_loop(), 1.0, timers=SYSTEM_TIMERS, beat_s=0.1, check_s=0.05
     )
     if mode == "blocked":
         time.sleep(30)

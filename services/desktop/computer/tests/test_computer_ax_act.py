@@ -13,6 +13,7 @@ from typing import Any
 
 import pytest
 
+from base.clock.tests.fakes import system_clock
 from base.db import Database
 from base.host.permissions_helper.client import (
     AxNode,
@@ -23,7 +24,7 @@ from .. import ax_act as ax_action_tools
 from ..ax_ids import AxIdTable, AxSession
 from ..errors import ComputerUseError
 from ..mcp_daemon import ComputerMcpDaemon
-from .slices import AuditLog, FakeDesktopHelper, computer_use_config, system_clock
+from .slices import AuditLog, FakeDesktopHelper, computer_use_config
 
 TYPED_TEXT = "hunter2-s3cret"
 

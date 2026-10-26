@@ -11,7 +11,6 @@ from dataclasses import replace
 from pathlib import Path
 from typing import Any
 
-from base.clock import SYSTEM_TIMERS, Clock, ClockConfig
 from base.db import Database
 from services.desktop.computer import mcp_daemon
 from services.desktop.computer import ocr as ocr_mod
@@ -20,13 +19,6 @@ from services.desktop.computer.config import ComputerUseConfig
 
 def computer_use_config(**overrides: Any) -> ComputerUseConfig:
     return replace(mcp_daemon.computer_use_config(), **overrides)
-
-
-# meiva:note
-# The real wall clock and timers, as the daemon entry builds them: a test that does not steer
-# time passes this, one that does builds a `Clock` over `ManualTimers`.
-def system_clock() -> Clock:
-    return Clock(ClockConfig("UTC", "UTC", message_timestamp_weekday=False), timers=SYSTEM_TIMERS)
 
 
 def short_sock_dir() -> tuple[Path, Path, Any]:

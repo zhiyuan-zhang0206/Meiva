@@ -5,12 +5,10 @@ from __future__ import annotations
 import asyncio
 import logging
 import random
-from collections.abc import Callable
 from dataclasses import dataclass
 from functools import partial
 from pathlib import Path
 from typing import Any, Literal
-from uuid import UUID
 
 from psycopg_pool import ConnectionPool
 
@@ -47,6 +45,7 @@ from services.entrypoints.im_bridge.types import (
     InboundMessage,
     Reply,
     SendNotStartedError,
+    new_uuid,
     parse_command,
 )
 
@@ -112,7 +111,6 @@ class IMBridgeCore(
         typing: TypingCadence = DEFAULT_TYPING,
         clock: Clock,
         rng: random.Random,
-        new_id: Callable[[], UUID],
         subscribe_timeline: bool = True,
     ) -> None:
         self._tasks = tasks
@@ -122,13 +120,12 @@ class IMBridgeCore(
         self._typing = typing
         self._clock = clock
         self._rng = rng
-        self._new_id = new_id
         self._subscribe_timeline = subscribe_timeline
         self.ensured: list[int | None] = []
         self.cursor_store = CursorStore(db_pool)
-        self.outbound_store = IMOutboxStore(db_pool, new_id=new_id)
+        self.outbound_store = IMOutboxStore(db_pool, rng=rng)
         self._notice_bridge: notice_bridge.NoticeBridge = notice_bridge.NoticeBridge(
-            self, config, db_pool=db_pool, state_dir=state_dir, clock=clock, new_id=new_id
+            self, config, db_pool=db_pool, state_dir=state_dir, clock=clock, rng=rng
         )
         self.adapters: dict[str, IMAdapter] = {}
         self.outbound_worker = IMOutboxWorker(
@@ -246,7 +243,7 @@ class IMBridgeCore(
                 state,
                 text,
                 msg.idempotency_key,
-                replay_id=msg.idempotency_key or msg.message_id or self._new_id().hex,
+                replay_id=msg.idempotency_key or msg.message_id or new_uuid(self._rng).hex,
             )
         else:
             try:
@@ -407,7 +404,7 @@ class IMBridgeCore(
             # user ruling: /switch without an id is an error — the picker
             # lives on /list's tap-to-switch card, not here
             return Reply(copy.SWITCH_USAGE)
-        replay_id = replay_id or self._new_id().hex
+        replay_id = replay_id or new_uuid(self._rng).hex
         account = await selection_account(self, state, selection_admission)
         recovered = await asyncio.to_thread(
             self.outbound_store.lookup_replay,

@@ -19,11 +19,12 @@ from typing import Any
 import pytest
 from psycopg_pool import ConnectionPool
 
+from base.clock.tests.fakes import system_clock
 from base.config import settings
 from base.sessions.tests.poll_until import poll_until_async
 from services.entrypoints.im_bridge.adapters.feishu import FeishuAdapter
 from services.entrypoints.im_bridge.cursor_store import CursorStore
-from services.entrypoints.im_bridge.tests.slices import feishu_config, system_clock
+from services.entrypoints.im_bridge.tests.slices import feishu_config
 from services.entrypoints.im_bridge.tests.support import owned_tasks
 from services.entrypoints.im_bridge.types import InboundMessage, RetryableTransportError
 

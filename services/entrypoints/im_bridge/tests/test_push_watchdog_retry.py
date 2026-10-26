@@ -5,7 +5,7 @@ import logging
 import pytest
 
 from services.entrypoints.im_bridge import push_watchdog
-from services.entrypoints.im_bridge.tests.slices import im_bridge_config, seeded_rng
+from services.entrypoints.im_bridge.tests.slices import im_bridge_config, system_rng
 from services.entrypoints.im_bridge.types import (
     Reply,
     SendNotStartedError,
@@ -48,7 +48,7 @@ async def test_first_failure_logs_warning_and_a_healed_retry_stays_clean(
     adapter = _Adapter(fail_attempts=1)
 
     await push_watchdog.send_with_retry(
-        _Core(), "weixin", "chat", Reply("hello"), adapter, rng=seeded_rng()
+        _Core(), "weixin", "chat", Reply("hello"), adapter, rng=system_rng()
     )
 
     assert adapter.attempts == 2
@@ -64,7 +64,7 @@ async def test_failed_retry_keeps_error_with_traceback(
     adapter = _Adapter(fail_attempts=2)
 
     await push_watchdog.send_with_retry(
-        _Core(), "weixin", "chat", Reply("hello"), adapter, rng=seeded_rng()
+        _Core(), "weixin", "chat", Reply("hello"), adapter, rng=system_rng()
     )
 
     assert adapter.attempts == 2
@@ -90,7 +90,7 @@ async def test_ambiguous_or_partial_send_is_not_repeated(
     caplog.set_level(logging.WARNING, logger=_LOGGER)
     adapter = PartialAdapter(fail_attempts=0)
     await push_watchdog.send_with_retry(
-        _Core(), "weixin", "chat", Reply("hello"), adapter, rng=seeded_rng()
+        _Core(), "weixin", "chat", Reply("hello"), adapter, rng=system_rng()
     )
     assert adapter.attempts == 1
     assert any("outcome uncertain" in record.getMessage() for record in caplog.records)
@@ -113,7 +113,7 @@ async def test_unknown_send_fault_reaches_owner_without_retry(error: Exception) 
     adapter = FaultingAdapter(fail_attempts=0)
     with pytest.raises(type(error)) as caught:
         await push_watchdog.send_with_retry(
-            _Core(), "weixin", "chat", Reply("hello"), adapter, rng=seeded_rng()
+            _Core(), "weixin", "chat", Reply("hello"), adapter, rng=system_rng()
         )
     assert caught.value is error
     assert adapter.attempts == 1

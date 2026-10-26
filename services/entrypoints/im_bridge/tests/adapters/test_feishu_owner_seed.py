@@ -21,6 +21,7 @@ from typing import Any
 
 import pytest
 
+from base.clock.tests.fakes import system_clock
 from services.entrypoints.im_bridge.adapters.feishu import FeishuAdapter
 from services.entrypoints.im_bridge.config import FeishuCredentialsConfig
 from services.entrypoints.im_bridge.tests.adapters.test_feishu_adapter import (
@@ -28,7 +29,7 @@ from services.entrypoints.im_bridge.tests.adapters.test_feishu_adapter import (
     FakeWsClient,
     websocket_ready,
 )
-from services.entrypoints.im_bridge.tests.slices import feishu_config, system_clock
+from services.entrypoints.im_bridge.tests.slices import feishu_config
 from services.entrypoints.im_bridge.tests.support import owned_tasks
 from services.entrypoints.im_bridge.types import InboundMessage
 

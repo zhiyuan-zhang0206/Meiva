@@ -13,13 +13,13 @@ from __future__ import annotations
 import asyncio
 from pathlib import Path
 from typing import Any, cast
-from uuid import uuid4
 
 from psycopg_pool import ConnectionPool
 
+from base.clock.tests.fakes import system_clock
 from services.entrypoints.im_bridge.core import IMBridgeCore
 from services.entrypoints.im_bridge.gateway_client import GatewayClient
-from services.entrypoints.im_bridge.tests.slices import im_bridge_config, seeded_rng, system_clock
+from services.entrypoints.im_bridge.tests.slices import im_bridge_config, system_rng
 from services.entrypoints.im_bridge.tests.support import DurableAdapter, owned_tasks
 from services.entrypoints.im_bridge.types import ChatState, InboundMessage
 
@@ -97,8 +97,7 @@ def _core(
         tasks=tasks if tasks is not None else asyncio.TaskGroup(),
         state_dir=state_dir,
         clock=system_clock(),
-        new_id=uuid4,
-        rng=seeded_rng(),
+        rng=system_rng(),
     )
     adapter = _Adapter()
     core.register(adapter)

@@ -15,15 +15,10 @@ import asyncio
 import json
 from pathlib import Path
 from typing import Any
-from uuid import uuid4
 
+from base.clock.tests.fakes import system_clock
 from services.entrypoints.im_bridge.core import IMBridgeCore
-from services.entrypoints.im_bridge.tests.slices import (
-    gateway_client,
-    im_bridge_config,
-    seeded_rng,
-    system_clock,
-)
+from services.entrypoints.im_bridge.tests.slices import gateway_client, im_bridge_config, system_rng
 from services.entrypoints.im_bridge.tests.support import DurableAdapter, owned_tasks
 from services.entrypoints.im_bridge.types import SendNotStartedError
 
@@ -88,8 +83,7 @@ async def test_notify_user_fans_out_to_all_adapters(state_dir: Path) -> None:
             tasks=_owned_tasks,
             state_dir=state_dir,
             clock=system_clock(),
-            new_id=uuid4,
-            rng=seeded_rng(),
+            rng=system_rng(),
         )
         a1, a2 = _RecordingAdapter(), _RecordingAdapter()
         core.register(a1)
@@ -117,8 +111,7 @@ async def test_notify_user_skips_and_isolates_failures(state_dir: Path) -> None:
             tasks=_owned_tasks,
             state_dir=state_dir,
             clock=system_clock(),
-            new_id=uuid4,
-            rng=seeded_rng(),
+            rng=system_rng(),
         )
         skipped, broken, ok = (
             _RecordingAdapter(skipped=True),
@@ -152,8 +145,7 @@ async def test_notify_user_retry_after_backoff_recovers(state_dir: Path) -> None
             tasks=_owned_tasks,
             state_dir=state_dir,
             clock=system_clock(),
-            new_id=uuid4,
-            rng=seeded_rng(),
+            rng=system_rng(),
         )
         flaky = _RecordingAdapter(error=SendNotStartedError("connect jitter"), fail_times=1)
         core.register(flaky)
@@ -176,8 +168,7 @@ async def test_notify_user_double_failure_reports_error(state_dir: Path) -> None
             tasks=_owned_tasks,
             state_dir=state_dir,
             clock=system_clock(),
-            new_id=uuid4,
-            rng=seeded_rng(),
+            rng=system_rng(),
         )
         broken = _RecordingAdapter(error=ValueError("boom"))
         core.register(broken)
@@ -199,8 +190,7 @@ async def test_notify_user_empty_core(state_dir: Path) -> None:
             tasks=_owned_tasks,
             state_dir=state_dir,
             clock=system_clock(),
-            new_id=uuid4,
-            rng=seeded_rng(),
+            rng=system_rng(),
         )
 
         async def run() -> dict[str, str]:

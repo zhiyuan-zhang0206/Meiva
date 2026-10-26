@@ -1,8 +1,8 @@
 """Account-fenced Weixin source retention and native chat admission."""
 
 import json
-from collections.abc import Callable, Mapping
-from uuid import UUID
+import random
+from collections.abc import Mapping
 
 from psycopg import Connection, sql
 from psycopg.types.json import Jsonb
@@ -25,6 +25,7 @@ from services.entrypoints.im_bridge.outbound.claim_fence import (
     StalePollBindingError,
     binding_is_current,
 )
+from services.entrypoints.im_bridge.types import new_uuid
 
 _RECEIPT_COLUMNS = "id,namespace,account_id,sender_id,message_id,route,status,attempt_id,inbound_id,outcome_reason,result"
 
@@ -53,9 +54,9 @@ def receipt_from_row(row: tuple[object, ...]) -> IngressReceipt:
 
 
 class WeixinIngressStore:
-    def __init__(self, pool: ConnectionSource | None = None, *, new_id: Callable[[], UUID]) -> None:
+    def __init__(self, pool: ConnectionSource | None = None, *, rng: random.Random) -> None:
         self.pool: ConnectionSource | None = pool
-        self._new_id = new_id
+        self._rng = rng
 
     def require_pool(self) -> ConnectionSource:
         if self.pool is None:
@@ -75,7 +76,7 @@ class WeixinIngressStore:
     def initialize(self, namespace: str, account_id: str) -> PollBinding:
         if not namespace or not account_id:
             raise ValueError("Weixin poll requires a qualified namespace and account")
-        epoch = self._new_id()
+        epoch = new_uuid(self._rng)
         with write_transaction(self.require_pool()) as conn:
             conn.execute(
                 "INSERT INTO weixin_ingress_bindings(id,namespace,account_id,epoch) VALUES (1,%s,%s,%s) "
@@ -287,7 +288,7 @@ class WeixinIngressStore:
                     "UPDATE weixin_ingress_receipts SET status='claimed',attempt_id=%s "
                     "WHERE id=%s AND namespace=%s AND account_id=%s AND status='retained' AND EXISTS (SELECT 1 FROM weixin_ingress_cursors c WHERE c.namespace=weixin_ingress_receipts.namespace AND c.account_id=weixin_ingress_receipts.account_id AND c.state='active') RETURNING {}"
                 ).format(sql.SQL(_RECEIPT_COLUMNS)),
-                (self._new_id(), receipt_id, binding.namespace, binding.account_id),
+                (new_uuid(self._rng), receipt_id, binding.namespace, binding.account_id),
             ).fetchone()
             return receipt_from_row(row) if row is not None else None
 

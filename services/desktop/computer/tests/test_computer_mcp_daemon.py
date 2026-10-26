@@ -17,6 +17,7 @@ from typing import Any
 import pytest
 
 from base.clock import Clock, ClockConfig
+from base.clock.tests.fakes import system_clock
 from base.clock.tests.manual_timers import ManualTimers
 from base.db import Database
 from base.db.code_version_gate import ProcessDbGate
@@ -28,7 +29,7 @@ from ..errors import ComputerUseError
 from ..mcp_daemon import ComputerMcpDaemon
 from ..protocol import Request, Response
 from ..screen import DesktopHelper
-from .slices import AuditLog, FakeDesktopHelper, FakeOcr, computer_use_config, system_clock
+from .slices import AuditLog, FakeDesktopHelper, FakeOcr, computer_use_config
 
 
 def computer_daemon(

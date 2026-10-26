@@ -19,6 +19,7 @@ from typing import Any
 
 import pytest
 
+from base.clock.tests.fakes import system_clock
 from base.log.tests.log_records import LogRecords
 from base.log.tests.log_records import loguru_records as loguru_records
 from base.sessions.tests.poll_until import poll_until_async
@@ -27,7 +28,7 @@ from services.entrypoints.im_bridge.adapters.feishu import (
     FeishuAdapter,
     segment_text,
 )
-from services.entrypoints.im_bridge.tests.slices import feishu_config, system_clock
+from services.entrypoints.im_bridge.tests.slices import feishu_config
 from services.entrypoints.im_bridge.tests.support import owned_tasks
 from services.entrypoints.im_bridge.types import InboundMessage
 
