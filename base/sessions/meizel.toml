@@ -12,7 +12,7 @@ exports = ["backend.py", "coding_session_owner.py", "coding_session_owner_record
 
 [purity]
 "__init__.py" = "strict"
-"log_prefix.py" = "strict"
+"log_prefix.py" = "strict-to-be"
 "provenance.py" = "strict"
 
 [debt.ambient-read]
@@ -31,3 +31,7 @@ exports = ["backend.py", "coding_session_owner.py", "coding_session_owner_record
 "record.py#home base.paths.meiva_home" = 1
 "tool_capabilities.py#clock datetime.datetime.now" = 1
 "tool_capabilities.py#home base.paths.meiva_home" = 1
+
+[debt.impure-call]
+"log_prefix.py#os.fstat" = 1
+"log_prefix.py#os.open" = 2

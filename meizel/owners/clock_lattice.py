@@ -272,7 +272,7 @@ def stale_allowlist_entries(
     exempt = INDEPENDENT_CLOCKS if independent is None else independent
     errors: list[str] = []
     for rel in family_modules:
-        if lint_common.read_utf8_text(root / rel) is None:
+        if not (root / rel).is_file():
             errors.append(f"{rel}: stale FAMILY_MODULES entry — the file no longer exists")
     for rel, name in exempt:
         source = lint_common.read_utf8_text(root / rel)

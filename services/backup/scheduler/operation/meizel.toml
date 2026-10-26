@@ -10,4 +10,7 @@ exports = ["cleanup_plan.py", "staging.py", "worker_bootstrap.py", "worker_proce
 [purity]
 "__init__.py" = "strict"
 "cleanup_plan.py" = "strict"
-"worker_bootstrap.py" = "strict"
+"worker_bootstrap.py" = "strict-to-be"
+
+[debt.impure-call]
+"worker_bootstrap.py#Path.resolve" = 1

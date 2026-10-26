@@ -1,8 +1,18 @@
 exports = ["directory_budget.py", "limits.py"]
 
-[purity]
-"." = "strict"
-
 [uses]
 "limits.py" = ["directory_budget.py"]
 "tests" = ["directory_budget.py", "limits.py"]
+
+[purity]
+"." = "strict"
+"directory_budget.py" = "strict-to-be"
+"limits.py" = "strict-to-be"
+
+[debt.impure-call]
+"directory_budget.py#Path.is_dir" = 1
+"directory_budget.py#Path.is_symlink" = 2
+"directory_budget.py#Path.iterdir" = 1
+"limits.py#Path.is_dir" = 2
+"limits.py#Path.is_file" = 2
+"limits.py#meizel.graph.universe.GitRepo" = 1

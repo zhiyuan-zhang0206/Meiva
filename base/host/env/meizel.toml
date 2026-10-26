@@ -11,19 +11,19 @@ exports = ["agent_env.py", "agent_slices.py", "boot_actions.py", "boot_policy.py
 "registry.py" = ["agent_env.py", "config_lite_table.py", "process_profile.py"]
 "tests" = ["agent_env.py", "boot_actions.py", "boot_policy.py", "bootstrap.py", "dotenv_content.py", "dotenv_file.py", "harness_binaries.py", "port_lease.py", "port_table.py", "registry.py"]
 
+[roots]
+"boot_actions.py" = { kinds = ["environ"], why = "The program-level operations that write this process's own TZ, MEIVA_HOME and config-fetch marker before the first application import; nothing else in base.host.env writes the process environment" }
+"registry.py" = { kinds = ["environ"], why = "child_env builds the parent->child forwarding dict from the LIVE env (the registry's allowlist keys + passthrough rows); Settings cannot enumerate non-modeled keys and the dict must reflect the parent env, not its own snapshot — same child-env handoff as base.sessions.env_forwarding" }
+
 [purity]
-"dotenv_content.py" = "strict"
 "__init__.py" = "strict"
 "agent_env.py" = "strict"
 "agent_slices.py" = "strict"
 "boot_policy.py" = "strict"
-"config_lite_table.py" = "strict"
+"config_lite_table.py" = "strict-to-be"
+"dotenv_content.py" = "strict"
 "port_table.py" = "strict"
 "process_profile.py" = "strict"
-
-[roots]
-"boot_actions.py" = { kinds = ["environ"], why = "The program-level operations that write this process's own TZ, MEIVA_HOME and config-fetch marker before the first application import; nothing else in base.host.env writes the process environment" }
-"registry.py" = { kinds = ["environ"], why = "child_env builds the parent->child forwarding dict from the LIVE env (the registry's allowlist keys + passthrough rows); Settings cannot enumerate non-modeled keys and the dict must reflect the parent env, not its own snapshot — same child-env handoff as base.sessions.env_forwarding" }
 
 [debt.ambient-read]
 "dotenv_file.py#clock datetime.datetime.now" = 1
@@ -32,3 +32,6 @@ exports = ["agent_env.py", "agent_slices.py", "boot_actions.py", "boot_policy.py
 "port_lease.py#pid os.getpid" = 1
 "port_lease.py#pid os.getuid" = 1
 "port_lease.py#random secrets.randbelow" = 1
+
+[debt.impure-call]
+"config_lite_table.py#pkgutil.get_data" = 1

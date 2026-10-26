@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import ast
 import builtins
-import os
 import types
 from collections.abc import Iterator
 from dataclasses import dataclass
@@ -78,7 +77,7 @@ def is_imported_binding(bindings: Bindings, name: str) -> bool:
 # The bindings of `root/file`; an unreadable or unparsable file is treated as dynamic.
 def module_bindings(root: Path, file: str) -> Bindings:
     try:
-        stat = os.stat(root / file)  # noqa: PTH116
+        stat = (root / file).stat()
     except OSError:
         return Bindings(frozenset(), dynamic=True)
     return _read(str(root / file), stat.st_mtime_ns, stat.st_size, file)
