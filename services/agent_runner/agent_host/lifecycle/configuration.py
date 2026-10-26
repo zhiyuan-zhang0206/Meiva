@@ -2,6 +2,7 @@
 # The host root supplies its configuration authority and producer without eagerly constructing a complete Settings view for a profile-restricted process.
 # meiva:link services/agent_runner/agent_host/lifecycle/docs/configuration.meiva.okf.md
 
+import random
 from collections.abc import Callable
 from pathlib import Path
 
@@ -86,6 +87,7 @@ def load_installation(
     *,
     clients: ClientSet,
     load_extensions: Callable[..., object],
+    rng: random.Random,
 ) -> Installation:
     from base.agents.sdk.call_policy import process_sampling_owner
     from base.config.service_read import ConfigAuthority
@@ -105,7 +107,7 @@ def load_installation(
         catalog=catalog,
         provider_keys=process_provider_keys(catalog),
         authority=authority,
-        sampling=process_sampling_owner(),
+        sampling=process_sampling_owner(rng),
         clients=clients,
         clock=Clock(clock_config_from_boot(config), timers=SYSTEM_TIMERS),
         disabled_entries=process_disable_entries(),

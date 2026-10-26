@@ -6,6 +6,7 @@ from base.agents.sdk.call_policy import (
     SamplingSource,
     policy_from_aliases,
 )
+from base.clock.tests.seeded_rng import seeded_rng
 from base.host.env.boot_policy import BootstrapFetch
 
 __all__ = [
@@ -24,7 +25,9 @@ _NO_ENV_FILE = Path("/nonexistent-sampling-home/.env")
 # without a network call, a settings read or a file.
 def fixed_sampling_owner() -> SamplingPolicyOwner:
     return SamplingPolicyOwner(
-        initial=SamplingPolicy(), source=SamplingSource(env={}, env_path=_NO_ENV_FILE)
+        initial=SamplingPolicy(),
+        source=SamplingSource(env={}, env_path=_NO_ENV_FILE),
+        rng=seeded_rng(),
     )
 
 
@@ -42,6 +45,7 @@ def sampling_owner_serving(
     return SamplingPolicyOwner(
         initial=policy,
         source=SamplingSource(env={}, env_path=env_path, refresh_seconds=refresh_seconds),
+        rng=seeded_rng(),
     )
 
 
@@ -69,6 +73,7 @@ def gateway_sampling_owner(
             tuning=BootstrapFetch(timeout_s=timeout_s, attempts=1),
             refresh_seconds=refresh_seconds,
         ),
+        rng=seeded_rng(),
     )
 
 
@@ -83,4 +88,5 @@ def sampling_owner_failing_to_read(
     return SamplingPolicyOwner(
         initial=SamplingPolicy(),
         source=SamplingSource(env={}, env_path=env_path, refresh_seconds=refresh_seconds),
+        rng=seeded_rng(),
     )

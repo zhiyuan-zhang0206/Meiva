@@ -11,6 +11,8 @@ import os
 import sys
 from pathlib import Path
 
+from base.clock.tests.seeded_rng import seeded_rng
+
 
 def cold_import_loads_no_httpx() -> None:
     import base.agents.sdk.telemetry  # noqa: F401  # pyright: ignore[reportUnusedImport]
@@ -46,6 +48,7 @@ def capture_import_failure() -> None:
     owner = call_policy.SamplingPolicyOwner(
         initial=SamplingPolicy(),
         source=call_policy.SamplingSource(env={}, env_path=Path("absent.env")),
+        rng=seeded_rng(),
     )
     sys.meta_path.insert(0, BrokenCapture())
     try:

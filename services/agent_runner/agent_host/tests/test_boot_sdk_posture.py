@@ -10,6 +10,7 @@ import pytest
 from agent.state import plugin_state_schema
 from base import config
 from base.agents.context.clients import ClientSet
+from base.clock.tests.seeded_rng import seeded_rng
 from meiva.sdk_surface import install, process_context
 from meiva.sdk_surface.extensions import load_extensions
 from services.agent_runner.agent_host import daemon
@@ -43,6 +44,7 @@ def test_host_root_supplies_model_and_config_owners() -> None:
             boot,
             clients=clients,
             load_extensions=partial(load_extensions, validate_state=plugin_state_schema),
+            rng=seeded_rng(),
         )
         assert installation.require_catalog().models
         assert installation.clients is clients
@@ -75,6 +77,7 @@ def _assert_profiled_host_defers_complete_model() -> None:
             boot,
             clients=ClientSet(pipeline_factory=pipeline),
             load_extensions=partial(load_extensions, validate_state=plugin_state_schema),
+            rng=seeded_rng(),
         )
         assert calls == []
         authority = installation.authority

@@ -73,19 +73,27 @@ class SamplingPolicyLike(Protocol):
 
 
 # meiva:note
-# Inert sampling policy owner for mounts before an SDK root is installed.
+# Whether one SDK call is kept at a sample ratio of 1 in `every`. `draw` is an independent uniform
+# value in [0, 1) that the owner of the policy drew from its random generator for this call, so
+# each call is kept with probability 1/every whatever the other call sites do.
+def keep_sample(every: int, draw: float) -> bool:
+    return every <= 1 or draw < 1.0 / every
+
+
+# meiva:note
+# Inert sampling policy owner for mounts before an SDK root is installed. Its policy never enables
+# sampling, so a call is always kept; it holds no random generator and refuses a ratio it cannot
+# honor.
 class InertSamplingPolicy:
     def __init__(self) -> None:
         self.value = SamplingPolicy()
         self.stopped = False
-        self.calls = 0
         self.worker: SamplingWorkerLike | None = None
 
     def should_sample(self, every: int) -> bool:
-        if every <= 1:
-            return True
-        self.calls += 1
-        return self.calls % every == 0
+        if every > 1:
+            raise RuntimeError("an inert sampling policy never samples")
+        return True
 
     def read(self) -> SamplingPolicy:
         if self.stopped:
@@ -114,5 +122,6 @@ __all__ = [
     "SamplingPolicy",
     "SamplingPolicyLike",
     "SamplingSource",
+    "keep_sample",
     "policy_from_aliases",
 ]
