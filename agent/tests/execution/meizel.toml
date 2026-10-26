@@ -5,6 +5,3 @@
 "test_lazy_child_imports.py" = ["child_lazy_imports.py"]
 "test_lazy_child_telemetry.py" = ["child_lazy_telemetry.py"]
 "test_telemetry_otlp_exit_delivery_agent.py" = ["child_external_cli.py"]
-
-[debt.test-subclass-override]
-"test_delta_read_compat_agent.py#subclass base.agents.history.checkpoint_postgres_walks.HistoryAsyncPostgresSaver.aget_delta_channel_history" = 1
