@@ -1,6 +1,7 @@
 """Account handover fences native effects and derived background subscriptions."""
 
 import asyncio
+from uuid import uuid4
 
 import psycopg
 import pytest
@@ -14,6 +15,7 @@ from services.entrypoints.im_bridge.tests.adapters.weixin_native import (
     NativeWeixin,
     message,
 )
+from services.entrypoints.im_bridge.tests.slices import seeded_rng, system_clock
 from services.entrypoints.im_bridge.tests.support import held_table_lock
 
 
@@ -29,7 +31,14 @@ async def test_registration_before_new_poll_rejects_old_runtime_without_effects(
         user_id="owner",
         base_url="https://provider.example",
     )
-    new = WeixinAdapter(native_weixin.core, state_dir=native_weixin.state_dir, client=old._http)
+    new = WeixinAdapter(
+        native_weixin.core,
+        state_dir=native_weixin.state_dir,
+        client=old._http,
+        clock=system_clock(),
+        new_id=uuid4,
+        rng=seeded_rng(),
+    )
     native_weixin.core.register(new)
     assert new.selection_requires_account_proof is True
     for text, source in (("ordinary", "701"), (f"/switch {native_weixin.agent_id}", "702")):
@@ -138,7 +147,7 @@ async def test_epoch_replacement_between_preflight_and_effect_is_rejected_in_sql
         )
         await asyncio.to_thread(held.wait_for_waiters, 1)
         await asyncio.to_thread(
-            WeixinIngressStore(native_weixin.pool).initialize,
+            WeixinIngressStore(native_weixin.pool, new_id=uuid4).initialize,
             "https://provider.example",
             "replacement",
         )

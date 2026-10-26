@@ -5,8 +5,8 @@ daemon.
 from __future__ import annotations
 
 import struct
-import time
 from collections.abc import Mapping
+from datetime import datetime
 from pathlib import Path
 from typing import Any, Protocol
 
@@ -168,16 +168,21 @@ def current_scale(helper: ScaleHelper, measured: float | None) -> float:
     return float(helper.screen_size()["scale"])
 
 
-def snapshot_path(agent_id: int | None) -> Path:
+# meiva:note
+# The file-name stamp of a capture taken at `moment` (microsecond resolution).
+def snapshot_stamp(moment: datetime) -> str:
+    return moment.strftime("%Y%m%dT%H%M%S%f")
+
+
+def snapshot_path(agent_id: int | None, *, stamp: str) -> Path:
     """A fresh capture path under $MEIVA_HOME/logs/computer/snapshots/."""
     directory = logs_dir() / "computer" / "snapshots"
     directory.mkdir(parents=True, exist_ok=True)
-    stamp = time.monotonic_ns()
     return directory / f"agent-{agent_id or 0}-{stamp}.png"
 
 
 def capture_screen(
-    helper: ScreenHelper, agent_id: int
+    helper: ScreenHelper, agent_id: int, *, stamp: str
 ) -> tuple[Path, Mapping[str, Any], float, tuple[int, int]]:
     """One full-screen capture: (PNG path, helper screen report, measured
     scale, physical pixel size).
@@ -188,7 +193,7 @@ def capture_screen(
     the PNG is the ground truth callers click against; the helper's reported
     scale can be stale (see _pixel_scale).
     """
-    path = snapshot_path(agent_id)
+    path = snapshot_path(agent_id, stamp=stamp)
     size = helper.screen_size()
     helper.screencapture_region(0, 0, int(size["w"]), int(size["h"]), str(path))
     pw, ph = png_size(path)
@@ -197,10 +202,9 @@ def capture_screen(
 
 def capture_region(
     helper: ScreenHelper,
-    agent_id: int,
     region: CaptureRegion,
     *,
-    path: Path | None = None,
+    path: Path,
 ) -> tuple[Path, float, tuple[int, int]]:
     """Capture a main-display rectangle without changing whole-screen state.
 
@@ -217,10 +221,9 @@ def capture_region(
         and region.y + region.h <= screen["y"] + screen["h"]
     ):
         raise ComputerUseError("region must be wholly inside the main display")
-    out_path = snapshot_path(agent_id) if path is None else path
-    helper.screencapture_region(region.x, region.y, region.w, region.h, str(out_path))
-    pw, ph = png_size(out_path)
+    helper.screencapture_region(region.x, region.y, region.w, region.h, str(path))
+    pw, ph = png_size(path)
     scale = _pixel_scale(pw, region.w)
     if abs(ph - region.h * scale) > 1:
         raise ComputerUseError("captured region dimensions do not match the requested rectangle")
-    return out_path, scale, (pw, ph)
+    return path, scale, (pw, ph)

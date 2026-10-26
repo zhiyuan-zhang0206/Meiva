@@ -15,9 +15,15 @@ import asyncio
 import json
 from pathlib import Path
 from typing import Any
+from uuid import uuid4
 
 from services.entrypoints.im_bridge.core import IMBridgeCore
-from services.entrypoints.im_bridge.tests.slices import gateway_client, im_bridge_config
+from services.entrypoints.im_bridge.tests.slices import (
+    gateway_client,
+    im_bridge_config,
+    seeded_rng,
+    system_clock,
+)
 from services.entrypoints.im_bridge.tests.support import DurableAdapter, owned_tasks
 from services.entrypoints.im_bridge.types import SendNotStartedError
 
@@ -77,7 +83,13 @@ async def test_notify_user_fans_out_to_all_adapters(state_dir: Path) -> None:
     """Every loaded adapter gets the text; results report per-channel ok."""
     async with owned_tasks() as _owned_tasks:
         core = IMBridgeCore(
-            im_bridge_config(), gateway_client(), tasks=_owned_tasks, state_dir=state_dir
+            im_bridge_config(),
+            gateway_client(),
+            tasks=_owned_tasks,
+            state_dir=state_dir,
+            clock=system_clock(),
+            new_id=uuid4,
+            rng=seeded_rng(),
         )
         a1, a2 = _RecordingAdapter(), _RecordingAdapter()
         core.register(a1)
@@ -100,7 +112,13 @@ async def test_notify_user_skips_and_isolates_failures(state_dir: Path) -> None:
     retry (a permanent condition); the unknown failure is not repeated."""
     async with owned_tasks() as _owned_tasks:
         core = IMBridgeCore(
-            im_bridge_config(), gateway_client(), tasks=_owned_tasks, state_dir=state_dir
+            im_bridge_config(),
+            gateway_client(),
+            tasks=_owned_tasks,
+            state_dir=state_dir,
+            clock=system_clock(),
+            new_id=uuid4,
+            rng=seeded_rng(),
         )
         skipped, broken, ok = (
             _RecordingAdapter(skipped=True),
@@ -129,7 +147,13 @@ async def test_notify_user_retry_after_backoff_recovers(state_dir: Path) -> None
     healed by exactly one retry after the bounded jitter backoff."""
     async with owned_tasks() as _owned_tasks:
         core = IMBridgeCore(
-            im_bridge_config(), gateway_client(), tasks=_owned_tasks, state_dir=state_dir
+            im_bridge_config(),
+            gateway_client(),
+            tasks=_owned_tasks,
+            state_dir=state_dir,
+            clock=system_clock(),
+            new_id=uuid4,
+            rng=seeded_rng(),
         )
         flaky = _RecordingAdapter(error=SendNotStartedError("connect jitter"), fail_times=1)
         core.register(flaky)
@@ -147,7 +171,13 @@ async def test_notify_user_double_failure_reports_error(state_dir: Path) -> None
     """An unknown failure retains the compatible error result without retry."""
     async with owned_tasks() as _owned_tasks:
         core = IMBridgeCore(
-            im_bridge_config(), gateway_client(), tasks=_owned_tasks, state_dir=state_dir
+            im_bridge_config(),
+            gateway_client(),
+            tasks=_owned_tasks,
+            state_dir=state_dir,
+            clock=system_clock(),
+            new_id=uuid4,
+            rng=seeded_rng(),
         )
         broken = _RecordingAdapter(error=ValueError("boom"))
         core.register(broken)
@@ -164,7 +194,13 @@ async def test_notify_user_empty_core(state_dir: Path) -> None:
     """No adapters loaded -> empty results, no error (daemon serves nothing)."""
     async with owned_tasks() as _owned_tasks:
         core = IMBridgeCore(
-            im_bridge_config(), gateway_client(), tasks=_owned_tasks, state_dir=state_dir
+            im_bridge_config(),
+            gateway_client(),
+            tasks=_owned_tasks,
+            state_dir=state_dir,
+            clock=system_clock(),
+            new_id=uuid4,
+            rng=seeded_rng(),
         )
 
         async def run() -> dict[str, str]:

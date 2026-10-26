@@ -17,7 +17,7 @@ from base.host.permissions_helper.client import PermissionsHelperClient
 from ..computer.config import ComputerUseConfig
 from ..computer.mcp_daemon import ComputerMcpDaemon
 from ..computer.protocol import Response
-from ..computer.tests.slices import AuditLog
+from ..computer.tests.slices import AuditLog, system_clock
 
 
 class Desktop:
@@ -38,6 +38,7 @@ class Desktop:
             database,
             sock="/unused",
             helper=helper,
+            clock=system_clock(),
         )
         self.daemon._scale = 2
 

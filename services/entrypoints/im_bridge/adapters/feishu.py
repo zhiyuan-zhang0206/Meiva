@@ -16,6 +16,7 @@ from typing import Any, Protocol
 
 import requests
 
+from base.clock import Clock
 from base.log import logger
 from services.entrypoints.im_bridge.adapters import feishu_poll_cursor as cursors
 from services.entrypoints.im_bridge.adapters.feishu_inbound import (
@@ -84,9 +85,11 @@ class FeishuAdapter(IMAdapter):
         ws_client: FeishuWsClient | None = None,
         rest_client: cursors.FeishuRestClient | None = None,
         cursor_store: PollCursorStore | None = None,
+        clock: Clock,
     ) -> None:
         super().__init__(core)
         self._config = config
+        self._clock = clock
         self._state_dir = state_dir
         self._proxy_configured = proxy_configured
         self._replay_window_s = config.delivery_watchdog_stale_claimed_threshold_seconds
@@ -426,6 +429,9 @@ class FeishuAdapter(IMAdapter):
         self._poll_failures += 1
         return backoff_delay(interval, self._poll_failures)
 
+    def _now_ms(self) -> int:
+        return int(self._clock.now().timestamp() * 1000)
+
     async def _poll_once(self, chat_id: str) -> bool:
         """List the chat's newest messages; feed unseen user texts to core.
 
@@ -450,7 +456,9 @@ class FeishuAdapter(IMAdapter):
                 # Never polled before: seed only (no history replay), even on
                 # an empty window, so the first real message is delivered;
                 # a failed round never seeds. Saved cursors replay below.
-                message_id, self._poll_cursor_ms[chat_id] = cursors.anchor(items)
+                message_id, self._poll_cursor_ms[chat_id] = cursors.anchor(
+                    items, now_ms=self._now_ms()
+                )
                 if message_id is not None:
                     self._poll_cursor[chat_id] = message_id
                 await self._save_cursor(chat_id)
@@ -461,6 +469,7 @@ class FeishuAdapter(IMAdapter):
             self._poll_cursor_ms.get(chat_id),
             replay=replay,
             replay_window_s=self._replay_window_s,
+            now_ms=self._now_ms(),
         )
         if stale:
             logger.warning(

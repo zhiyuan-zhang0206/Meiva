@@ -1,4 +1,5 @@
 from typing import cast
+from uuid import uuid4
 
 import pytest
 from psycopg_pool import ConnectionPool
@@ -40,7 +41,7 @@ def test_durable_cursor_orders_compact_and_numeric_tail(
     item.item["item_id"] = item_id
     if item_stamp is not None:
         item.item["created_at"] = item_stamp
-    result = IMOutboxStore(pool).accept("telegram", "bot", "chat", 7, [item])
+    result = IMOutboxStore(pool, new_id=uuid4).accept("telegram", "bot", "chat", 7, [item])
     assert bool(result.intent_ids) is accepted
     expected = (
         PushWatermark(item_stamp, item_id) if accepted else PushWatermark(saved_stamp, saved_id)
@@ -53,7 +54,7 @@ def test_legacy_numbering_rollback_cannot_advance_without_an_intent(pool: Connec
     original = PushWatermark(None, "377.1")
     cursors.save_push("telegram", "chat", 7, original)
     item = candidate(128, qualified=False)
-    result = IMOutboxStore(pool).accept("telegram", "bot", "chat", 7, [item])
+    result = IMOutboxStore(pool, new_id=uuid4).accept("telegram", "bot", "chat", 7, [item])
     assert not result.intent_ids
     assert cursors.load_push() == {("telegram", "chat", 7): original}
 

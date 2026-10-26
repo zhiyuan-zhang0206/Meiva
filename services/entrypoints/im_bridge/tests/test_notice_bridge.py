@@ -8,6 +8,7 @@ import asyncio
 import time
 from pathlib import Path
 from typing import Any, cast
+from uuid import uuid4
 
 import psycopg
 import pytest
@@ -22,7 +23,7 @@ from base.lm.catalog import ModelCatalog
 from services.entrypoints.im_bridge.core import IMBridgeCore
 from services.entrypoints.im_bridge.gateway_client import GatewayClient
 from services.entrypoints.im_bridge.notice_bridge import NoticeBridge
-from services.entrypoints.im_bridge.tests.slices import im_bridge_config
+from services.entrypoints.im_bridge.tests.slices import im_bridge_config, seeded_rng, system_clock
 from services.entrypoints.im_bridge.tests.support import owned_tasks
 from services.entrypoints.im_bridge.types import (
     OutboundAdapterKind,
@@ -136,6 +137,9 @@ def _bridge(
         db_pool=pool,
         tasks=tasks if tasks is not None else asyncio.TaskGroup(),
         state_dir=state_dir,
+        clock=system_clock(),
+        new_id=uuid4,
+        rng=seeded_rng(),
     )
     adapter = FakeAdapter()
     core.adapters["telegram"] = adapter  # type: ignore[assignment]
@@ -454,6 +458,8 @@ async def test_cmd_notice_filter_updates_and_persists(
             _bridge(pool, state_dir, gateway, tasks=_owned_tasks)[0].core,
             im_bridge_config(),
             state_dir=state_dir,
+            clock=system_clock(),
+            new_id=uuid4,
         )
         assert bridge2._filters["min_priority"] == "P1"
         assert bridge2._filters["agent"] == 5
@@ -473,6 +479,9 @@ def _direct_bridge(
         db_pool=pool,
         tasks=asyncio.TaskGroup(),
         state_dir=state_dir,
+        clock=system_clock(),
+        new_id=uuid4,
+        rng=seeded_rng(),
     )
     adapter = FakeAdapter()
     core.adapters["telegram"] = adapter  # type: ignore[assignment]

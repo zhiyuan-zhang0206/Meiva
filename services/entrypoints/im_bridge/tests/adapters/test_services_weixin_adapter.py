@@ -9,12 +9,14 @@ from __future__ import annotations
 import asyncio
 from pathlib import Path
 from typing import Any
+from uuid import uuid4
 
 import httpx
 import pytest
 
 from services.entrypoints.im_bridge.adapters import weixin
 from services.entrypoints.im_bridge.adapters.weixin import WeixinAdapter, outbound_message
+from services.entrypoints.im_bridge.tests.slices import seeded_rng, system_clock
 
 _ACCOUNT = {
     "account_id": "acct-1",
@@ -50,7 +52,9 @@ def _adapter(http: _FakeHTTP, state_dir: Path) -> WeixinAdapter:
         user_id=_ACCOUNT["user_id"],
         base_url=_ACCOUNT["base_url"],
     )
-    a = WeixinAdapter(None, state_dir=state_dir)  # type: ignore[arg-type]
+    a = WeixinAdapter(
+        None, state_dir=state_dir, clock=system_clock(), rng=seeded_rng(), new_id=uuid4
+    )  # type: ignore[arg-type]
     a._client = http  # type: ignore[attr-defined]
     a._owns_client = False
     return a

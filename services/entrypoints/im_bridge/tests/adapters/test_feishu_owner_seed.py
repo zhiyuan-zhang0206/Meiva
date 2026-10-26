@@ -28,7 +28,7 @@ from services.entrypoints.im_bridge.tests.adapters.test_feishu_adapter import (
     FakeWsClient,
     websocket_ready,
 )
-from services.entrypoints.im_bridge.tests.slices import feishu_config
+from services.entrypoints.im_bridge.tests.slices import feishu_config, system_clock
 from services.entrypoints.im_bridge.tests.support import owned_tasks
 from services.entrypoints.im_bridge.types import InboundMessage
 
@@ -66,6 +66,7 @@ def _boot_adapter(
         state_dir=state_dir,
         proxy_configured=False,
         ws_client=ws_client,
+        clock=system_clock(),
     )
 
 
@@ -129,6 +130,7 @@ async def test_seed_lets_send_to_owner_reach_the_seeded_owner(state_dir: Path) -
         state_dir=state_dir,
         proxy_configured=False,
         rest_client=rest,
+        clock=system_clock(),
     )
     adapter._app_id = "cli_x"
     adapter._app_secret = "secret_x"  # noqa: S105
@@ -147,7 +149,11 @@ async def test_seed_never_overwrites_a_known_owner(state_dir: Path) -> None:
     never replaced by the persisted state — the rule _register_sent_chat keeps."""
     _write_switch_state(state_dir, {"feishu:ou_state": 405})
     adapter = FeishuAdapter(
-        FakeCore(), feishu_config(), state_dir=state_dir, proxy_configured=False
+        FakeCore(),
+        feishu_config(),
+        state_dir=state_dir,
+        proxy_configured=False,
+        clock=system_clock(),
     )
     adapter._last_open_id = "ou_known"
 
@@ -169,7 +175,11 @@ async def test_seed_without_a_source_emits_the_failure_event_and_stays_blind(
     if state is not None:
         _write_switch_state(state_dir, state)
     adapter = FeishuAdapter(
-        FakeCore(), feishu_config(), state_dir=state_dir, proxy_configured=False
+        FakeCore(),
+        feishu_config(),
+        state_dir=state_dir,
+        proxy_configured=False,
+        clock=system_clock(),
     )
 
     await adapter._seed_owner_from_switch_state()
@@ -185,7 +195,11 @@ async def test_seed_with_multiple_feishu_chats_emits_the_ambiguity_event(
     """Two recorded feishu chats are ambiguous: never guess one — emit instead."""
     _write_switch_state(state_dir, {"feishu:ou_a": 405, "feishu:ou_b": 405})
     adapter = FeishuAdapter(
-        FakeCore(), feishu_config(), state_dir=state_dir, proxy_configured=False
+        FakeCore(),
+        feishu_config(),
+        state_dir=state_dir,
+        proxy_configured=False,
+        clock=system_clock(),
     )
 
     await adapter._seed_owner_from_switch_state()
@@ -203,7 +217,11 @@ async def test_seed_with_invalid_state_fails_without_blind_fallback(
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text("[1, 2, 3]", encoding="utf-8")
     adapter = FeishuAdapter(
-        FakeCore(), feishu_config(), state_dir=state_dir, proxy_configured=False
+        FakeCore(),
+        feishu_config(),
+        state_dir=state_dir,
+        proxy_configured=False,
+        clock=system_clock(),
     )
 
     with pytest.raises(ValueError):

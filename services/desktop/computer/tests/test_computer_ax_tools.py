@@ -21,7 +21,7 @@ from .. import ax_tools as ax
 from ..errors import ComputerUseError
 from ..mcp_daemon import ComputerMcpDaemon
 from ..screen import DesktopHelper
-from .slices import FakeDesktopHelper, computer_use_config
+from .slices import FakeDesktopHelper, computer_use_config, system_clock
 
 
 def node(
@@ -278,6 +278,7 @@ async def call_ax(
         Database.from_settings(gate=database_gate),
         sock="/nonexistent-test.sock",
         helper=helper if helper is not None else FakeAxHelper(),
+        clock=system_clock(),
     )
     resp = await daemon._dispatch(
         {"id": 1, "method": "call_tool", "tool": "ax_tree", "args": args or {}, "agent_id": None}
@@ -339,7 +340,11 @@ async def test_ax_tree_scope_goes_through_the_raw_id_and_widens_the_walk(
     fake_ax: FakeAxHelper, database: Database, *, database_gate: ProcessDbGate
 ) -> None:
     daemon = ComputerMcpDaemon(
-        computer_use_config(), database, sock="/nonexistent-test.sock", helper=fake_ax
+        computer_use_config(),
+        database,
+        sock="/nonexistent-test.sock",
+        helper=fake_ax,
+        clock=system_clock(),
     )
     await call_ax({"app": "Mail"}, daemon, database_gate=database_gate, helper=fake_ax)
     await call_ax(
@@ -394,7 +399,11 @@ async def test_ax_tree_rejects_bad_arguments(
 
 async def test_ax_tree_is_declared_in_the_tool_list(database: Database) -> None:
     daemon = ComputerMcpDaemon(
-        computer_use_config(), database, sock="/nonexistent-test.sock", helper=FakeAxHelper()
+        computer_use_config(),
+        database,
+        sock="/nonexistent-test.sock",
+        helper=FakeAxHelper(),
+        clock=system_clock(),
     )
     resp = await daemon._dispatch({"id": 1, "method": "list_tools"})
     assert resp["ok"] is True

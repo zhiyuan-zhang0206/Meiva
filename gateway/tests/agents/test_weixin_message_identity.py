@@ -1,6 +1,7 @@
 import asyncio
 import json
 from pathlib import Path
+from uuid import uuid4
 
 import httpx
 import psycopg
@@ -46,6 +47,7 @@ async def test_same_event_changed_body_or_selection_does_not_claim_recovery(
             im_bridge_config(im_send_retry_delays=(0.0,)),
             gateway_url="http://test-gateway",
             auth_headers={},
+            new_id=uuid4,
         )
         client._client = transport
         await client.send_message(first_agent, "same", idempotency_key=key)

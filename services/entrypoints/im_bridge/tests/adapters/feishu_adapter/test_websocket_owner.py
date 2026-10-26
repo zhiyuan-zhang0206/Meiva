@@ -13,7 +13,7 @@ from services.entrypoints.im_bridge.tests.adapters.test_feishu_adapter import (
     build_patching_adapter,
     make_event,
 )
-from services.entrypoints.im_bridge.tests.slices import feishu_config
+from services.entrypoints.im_bridge.tests.slices import feishu_config, system_clock
 from services.entrypoints.im_bridge.types import InboundMessage
 
 
@@ -27,7 +27,11 @@ async def test_ws_callback_fault_fails_the_service_group_without_marking_seen(
             raise fault
 
     adapter = FeishuAdapter(
-        FaultingCore(), feishu_config(), state_dir=state_dir, proxy_configured=False
+        FaultingCore(),
+        feishu_config(),
+        state_dir=state_dir,
+        proxy_configured=False,
+        clock=system_clock(),
     )
     with pytest.raises(ExceptionGroup) as caught:
         async with asyncio.TaskGroup() as tasks:
@@ -45,7 +49,9 @@ async def test_ws_callback_fault_fails_the_service_group_without_marking_seen(
 
 async def test_ws_closing_rejects_queued_events_and_ends_owner_wait(state_dir: Path) -> None:
     core = FakeCore()
-    adapter = FeishuAdapter(core, feishu_config(), state_dir=state_dir, proxy_configured=False)
+    adapter = FeishuAdapter(
+        core, feishu_config(), state_dir=state_dir, proxy_configured=False, clock=system_clock()
+    )
 
     async def lifecycle() -> None:
         async with asyncio.TaskGroup() as tasks:
@@ -200,7 +206,11 @@ async def test_queued_ws_job_is_not_send_ready_and_shutdown_cancels_boot(state_d
 
 async def test_active_task_creation_fault_reaches_owner(state_dir: Path) -> None:
     adapter = FeishuAdapter(
-        FakeCore(), feishu_config(), state_dir=state_dir, proxy_configured=False
+        FakeCore(),
+        feishu_config(),
+        state_dir=state_dir,
+        proxy_configured=False,
+        clock=system_clock(),
     )
     async with asyncio.TaskGroup() as finished_group:
         pass

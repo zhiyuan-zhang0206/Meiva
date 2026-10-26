@@ -23,7 +23,7 @@ from .. import ax_act as ax_action_tools
 from ..ax_ids import AxIdTable, AxSession
 from ..errors import ComputerUseError
 from ..mcp_daemon import ComputerMcpDaemon
-from .slices import AuditLog, FakeDesktopHelper, computer_use_config
+from .slices import AuditLog, FakeDesktopHelper, computer_use_config, system_clock
 
 TYPED_TEXT = "hunter2-s3cret"
 
@@ -169,7 +169,11 @@ def audit_log(database: Database) -> AuditLog:
 @pytest.fixture
 def daemon(database: Database, app: FakeAxApp) -> ComputerMcpDaemon:
     return ComputerMcpDaemon(
-        computer_use_config(), database, sock="/nonexistent-test.sock", helper=app
+        computer_use_config(),
+        database,
+        sock="/nonexistent-test.sock",
+        helper=app,
+        clock=system_clock(),
     )
 
 
@@ -430,7 +434,11 @@ async def test_a_failed_set_value_leaves_the_value_out_of_the_audit_too(
 
 async def test_ax_act_is_declared_with_its_required_arguments(database: Database) -> None:
     daemon = ComputerMcpDaemon(
-        computer_use_config(), database, sock="/nonexistent-test.sock", helper=FakeAxApp()
+        computer_use_config(),
+        database,
+        sock="/nonexistent-test.sock",
+        helper=FakeAxApp(),
+        clock=system_clock(),
     )
     resp = await daemon._dispatch({"id": 1, "method": "list_tools"})
     assert resp["ok"] is True

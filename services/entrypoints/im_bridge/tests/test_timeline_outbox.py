@@ -23,7 +23,7 @@ from services.entrypoints.im_bridge.outbound.types import (
     TimelineCandidate,
 )
 from services.entrypoints.im_bridge.outbound.worker import IMOutboxWorker
-from services.entrypoints.im_bridge.tests.slices import im_bridge_config
+from services.entrypoints.im_bridge.tests.slices import im_bridge_config, seeded_rng
 from services.entrypoints.im_bridge.tests.support import failing_insert, failing_update
 from services.entrypoints.im_bridge.types import (
     IMAdapter,
@@ -35,7 +35,7 @@ from services.entrypoints.im_bridge.types import (
 
 
 def worker_for(store: IMOutboxStore, adapters: dict[str, IMAdapter]) -> IMOutboxWorker:
-    return IMOutboxWorker(store, adapters, config=im_bridge_config())
+    return IMOutboxWorker(store, adapters, config=im_bridge_config(), rng=seeded_rng())
 
 
 class RecordingAdapter(IMAdapter):
@@ -126,7 +126,7 @@ def statuses(pool: ConnectionPool) -> list[tuple[Any, ...]]:
 
 
 def test_acceptance_replays_atomic_batch_and_target_conflicts(pool: ConnectionPool) -> None:
-    store = IMOutboxStore(pool)
+    store = IMOutboxStore(pool, new_id=uuid4)
     original = store.accept(
         "telegram", "bot", "chat", 7, [candidate(replay="event")], replay_id="event"
     )
@@ -148,7 +148,7 @@ def test_acceptance_replays_atomic_batch_and_target_conflicts(pool: ConnectionPo
 
 def test_concurrent_acceptance_commits_one_intent_and_cursor(pool: ConnectionPool) -> None:
     def accept(_index: int):
-        return IMOutboxStore(pool).accept("telegram", "bot", "chat", 7, [candidate()])
+        return IMOutboxStore(pool, new_id=uuid4).accept("telegram", "bot", "chat", 7, [candidate()])
 
     with ThreadPoolExecutor(max_workers=2) as executor:
         results = list(executor.map(accept, range(2)))
@@ -161,7 +161,7 @@ def test_concurrent_acceptance_commits_one_intent_and_cursor(pool: ConnectionPoo
 def test_failed_insert_rolls_back_cursor_and_earlier_intent(
     pool: ConnectionPool, db_conn: psycopg.Connection
 ) -> None:
-    store = IMOutboxStore(pool)
+    store = IMOutboxStore(pool, new_id=uuid4)
     with (
         failing_insert(
             db_conn,
@@ -178,7 +178,7 @@ def test_failed_insert_rolls_back_cursor_and_earlier_intent(
 
 
 def test_changed_manifest_does_not_replace_original(pool: ConnectionPool) -> None:
-    store = IMOutboxStore(pool)
+    store = IMOutboxStore(pool, new_id=uuid4)
     store.accept("telegram", "bot", "chat", 7, [candidate(replay="event")], replay_id="event")
     with write_transaction(pool) as conn:
         conn.execute("UPDATE im_bridge_cursors SET push_item_id='0.0'")
@@ -192,7 +192,7 @@ def test_changed_manifest_does_not_replace_original(pool: ConnectionPool) -> Non
 def test_legacy_unqualified_blocks_cursor_and_account_rebind_requires_replay(
     pool: ConnectionPool,
 ) -> None:
-    store = IMOutboxStore(pool)
+    store = IMOutboxStore(pool, new_id=uuid4)
     result = store.accept(
         "telegram", "bot", "chat", 7, [candidate(), candidate(2, qualified=False), candidate(3)]
     )
@@ -220,16 +220,18 @@ def test_legacy_empty_cursor_remains_held_after_account_binding_restart(
     with write_transaction(pool) as conn:
         conn.execute("INSERT INTO im_bridge_cursors(channel,chat_id) VALUES ('telegram','chat')")
     for _ in range(2):
-        result = IMOutboxStore(pool).accept("telegram", "bot", "chat", 7, [candidate()])
+        result = IMOutboxStore(pool, new_id=uuid4).accept(
+            "telegram", "bot", "chat", 7, [candidate()]
+        )
         assert result.blocked and not result.intent_ids
     assert statuses(pool) == []
-    store = IMOutboxStore(pool)
+    store = IMOutboxStore(pool, new_id=uuid4)
     store.accept("telegram", "bot", "chat", 7, [], replay_id="empty-switch")
     assert store.accept("telegram", "bot", "chat", 7, [candidate()]).intent_ids
 
 
 def test_old_accounts_cannot_starve_current_account_limit(pool: ConnectionPool) -> None:
-    store = IMOutboxStore(pool)
+    store = IMOutboxStore(pool, new_id=uuid4)
     for index in range(20):
         store.accept(
             "telegram", "old", f"old-{index}", 7, [candidate(account="old", chat=f"old-{index}")]
@@ -249,7 +251,7 @@ def test_old_accounts_cannot_starve_current_account_limit(pool: ConnectionPool) 
 async def test_worker_records_whole_send_outcome_without_secret(
     pool: ConnectionPool, error: Any, expected: str
 ) -> None:
-    store = IMOutboxStore(pool)
+    store = IMOutboxStore(pool, new_id=uuid4)
     store.accept("telegram", "bot", "chat", 7, [candidate()])
     adapter = RecordingAdapter()
     adapter.error = error
@@ -262,7 +264,7 @@ async def test_worker_records_whole_send_outcome_without_secret(
 
 
 async def test_worker_retries_a_proved_no_effect_send_once(pool: ConnectionPool) -> None:
-    store = IMOutboxStore(pool)
+    store = IMOutboxStore(pool, new_id=uuid4)
     store.accept("telegram", "bot", "chat", 7, [candidate()])
     adapter = RecordingAdapter()
     adapter.error_queue = [SendNotStartedError("no effect"), None]
@@ -275,7 +277,7 @@ async def test_worker_retries_a_proved_no_effect_send_once(pool: ConnectionPool)
 async def test_worker_records_failed_when_the_retry_also_proves_no_effect(
     pool: ConnectionPool,
 ) -> None:
-    store = IMOutboxStore(pool)
+    store = IMOutboxStore(pool, new_id=uuid4)
     store.accept("telegram", "bot", "chat", 7, [candidate()])
     adapter = RecordingAdapter()
     adapter.error = SendNotStartedError("no effect")
@@ -288,7 +290,7 @@ async def test_worker_records_failed_when_the_retry_also_proves_no_effect(
 
 
 async def test_worker_never_retries_an_ambiguous_outcome(pool: ConnectionPool) -> None:
-    store = IMOutboxStore(pool)
+    store = IMOutboxStore(pool, new_id=uuid4)
     store.accept("telegram", "bot", "chat", 7, [candidate()])
     adapter = RecordingAdapter()
     adapter.error = httpx.ReadError("https://provider/botSECRET?context_token=SECRET")
@@ -302,7 +304,7 @@ async def test_blocked_send_releases_single_pool_lease_and_other_worker_claims_l
     pool: ConnectionPool,
 ) -> None:
     with ConnectionPool[Connection](settings.data_plane.db_url, min_size=1, max_size=1) as small:
-        store = IMOutboxStore(small)
+        store = IMOutboxStore(small, new_id=uuid4)
         store.accept("telegram", "bot", "chat", 7, [candidate(), candidate(2, text="later")])
         live = RecordingAdapter()
         live.started, live.release = asyncio.Event(), asyncio.Event()
@@ -314,7 +316,8 @@ async def test_blocked_send_releases_single_pool_lease_and_other_worker_claims_l
             original_attempt = statuses(pool)[0][1]
             restarted = RecordingAdapter()
             await asyncio.wait_for(
-                worker_for(IMOutboxStore(pool), {"telegram": restarted}).run_once(), timeout=5
+                worker_for(IMOutboxStore(pool, new_id=uuid4), {"telegram": restarted}).run_once(),
+                timeout=5,
             )
             assert restarted.sent == ["later"]
             assert statuses(pool)[0] == ("sending", original_attempt, "send_result_unconfirmed")
@@ -326,13 +329,13 @@ async def test_blocked_send_releases_single_pool_lease_and_other_worker_claims_l
             with pytest.raises(asyncio.CancelledError):
                 await worker
         assert live.sent == ["original"]
-        await worker_for(IMOutboxStore(pool), {"telegram": restarted}).run_once()
+        await worker_for(IMOutboxStore(pool, new_id=uuid4), {"telegram": restarted}).run_once()
         assert [row[0] for row in statuses(pool)] == ["sending", "sent"]
         assert restarted.sent == ["later"]
 
 
 def test_two_concurrent_claims_cannot_start_the_same_intent(pool: ConnectionPool) -> None:
-    store = IMOutboxStore(pool)
+    store = IMOutboxStore(pool, new_id=uuid4)
     [intent_id] = store.accept("telegram", "bot", "chat", 7, [candidate()]).intent_ids
 
     def claim(_index: int):
@@ -348,7 +351,7 @@ def test_two_concurrent_claims_cannot_start_the_same_intent(pool: ConnectionPool
 
 
 async def test_claim_without_send_is_unconfirmed_and_does_not_block_later(pool: ConnectionPool):
-    store = IMOutboxStore(pool)
+    store = IMOutboxStore(pool, new_id=uuid4)
     store.accept("telegram", "bot", "chat", 7, [candidate(), candidate(2, text="later")])
     claimed = store.claim(("telegram", "bot", "chat"))
     assert claimed is not None
@@ -363,7 +366,7 @@ async def test_claim_without_send_is_unconfirmed_and_does_not_block_later(pool: 
 async def test_success_before_outcome_commit_failure_never_repeats_external_send(
     pool: ConnectionPool, db_conn: psycopg.Connection
 ) -> None:
-    store = IMOutboxStore(pool)
+    store = IMOutboxStore(pool, new_id=uuid4)
     original = store.accept("telegram", "bot", "chat", 7, [candidate()]).intent_ids[0]
     adapter = RecordingAdapter()
     with (
@@ -391,7 +394,7 @@ async def test_success_before_outcome_commit_failure_never_repeats_external_send
 async def test_programming_error_is_visible_then_rethrown_without_resend(
     pool: ConnectionPool, db_conn: psycopg.Connection, finish_fails: bool
 ) -> None:
-    store = IMOutboxStore(pool)
+    store = IMOutboxStore(pool, new_id=uuid4)
     store.accept("telegram", "bot", "chat", 7, [candidate()])
     adapter = RecordingAdapter()
     original = TypeError("invalid adapter state SECRET")
@@ -433,7 +436,7 @@ async def test_partial_prefix_is_never_replayed_as_a_whole_manifest(pool: Connec
             self.sent.append(prepared.chunks[0].text)
             raise SendOutcomeUncertainError("prefix delivered; suffix unknown")
 
-    store = IMOutboxStore(pool)
+    store = IMOutboxStore(pool, new_id=uuid4)
     first = candidate()
     assert first.intent is not None
     first = TimelineCandidate(
@@ -460,7 +463,7 @@ async def test_partial_prefix_is_never_replayed_as_a_whole_manifest(pool: Connec
 
 
 async def test_cancelled_send_still_exposes_collected_programming_error(pool: ConnectionPool):
-    store = IMOutboxStore(pool)
+    store = IMOutboxStore(pool, new_id=uuid4)
     store.accept("telegram", "bot", "chat", 7, [candidate()])
     started, release = asyncio.Event(), Event()
     original = TypeError("late SDK result invalid")

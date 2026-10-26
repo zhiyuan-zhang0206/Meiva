@@ -17,7 +17,7 @@ import pytest
 import services.desktop.computer.mcp_daemon as daemon_mod
 from base.db import Database
 from base.host.permissions_helper.client import PermissionsHelperClient
-from services.desktop.computer.tests.slices import short_sock_dir
+from services.desktop.computer.tests.slices import short_sock_dir, system_clock
 
 _CHILD = Path(__file__).with_name("loop_watchdog_child.py")
 _REPO_ROOT = Path(__file__).resolve().parents[4]
@@ -75,6 +75,7 @@ async def test_run_serves_until_stopped_then_joins_its_watchdog(
             sock=str(sock),
             database=lambda: database,
             helper=PermissionsHelperClient(d / "unserved-helper.sock"),
+            clock=system_clock(),
         )
     )
     try:

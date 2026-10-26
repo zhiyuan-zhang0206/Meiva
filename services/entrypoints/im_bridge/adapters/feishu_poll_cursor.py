@@ -18,7 +18,6 @@ from typing import Any, Protocol
 
 import requests
 
-from base.clock import SYSTEM_TIMERS, Clock, ClockConfig
 from services.entrypoints.im_bridge.types import RetryableTransportError, raise_http_failure
 
 
@@ -92,11 +91,6 @@ def idempotency_key(message_id: str | None) -> str | None:
     return f"feishu:{message_id}" if message_id else None
 
 
-def now_ms() -> int:
-    clock = Clock(ClockConfig("UTC", "UTC", message_timestamp_weekday=False), timers=SYSTEM_TIMERS)
-    return int(clock.now().timestamp() * 1000)
-
-
 def create_ms(item: object) -> int | None:
     """A listed message's create time in epoch ms; None when absent/garbled."""
 
@@ -106,20 +100,27 @@ def create_ms(item: object) -> int | None:
         return None
 
 
-def anchor(items: list[Any]) -> tuple[str | None, int]:
-    """Where a never-polled chat is anchored: its newest message (nothing is
-    processed). Anchors on the newest item that carries an id: an id-less
-    newest item (defensive — the API guarantees ids) must not leave the chat
-    without a cursor, which would replay the whole window. An empty window
-    still yields a time position, so the first message afterwards is replayed
-    after a restart rather than mistaken for history."""
-
+# meiva:note
+# Where a never-polled chat is anchored: its newest message (nothing is processed). Anchors on the
+# newest item that carries an id: an id-less newest item (defensive — the API guarantees ids) must
+# not leave the chat without a cursor, which would replay the whole window. An empty window still
+# yields a time position, so the first message afterwards is replayed after a restart rather than
+# mistaken for history. `now_ms` is the caller's clock reading.
+def anchor(items: list[Any], *, now_ms: int) -> tuple[str | None, int]:
     newest = next((item for item in reversed(items) if item.message_id), None)
     if newest is None:
-        return None, now_ms()
-    return newest.message_id, create_ms(newest) or now_ms()
+        return None, now_ms
+    return newest.message_id, create_ms(newest) or now_ms
 
 
+# meiva:note
+# The messages to process after the cursor, as (to process, too old).
+#
+# Position: after the cursor id when it is listed. Replaying after a restart and the id not listed
+# (rotated out, or a time-only cursor): by create time (`>=`, because the platform's clock is
+# millisecond-grained and a duplicate is deduped by the gateway while a skipped message is lost).
+# A replay also drops what is older than the replay window (measured from `now_ms`); a live round
+# never does.
 def pending_after(
     items: list[Any],
     cursor_id: str | None,
@@ -127,15 +128,8 @@ def pending_after(
     *,
     replay: bool,
     replay_window_s: float,
+    now_ms: int,
 ) -> tuple[list[Any], list[Any]]:
-    """The messages to process after the cursor, as (to process, too old).
-
-    Position: after the cursor id when it is listed. Replaying after a restart
-    and the id not listed (rotated out, or a time-only cursor): by create time
-    (`>=`, because the platform's clock is millisecond-grained and a duplicate
-    is deduped by the gateway while a skipped message is lost). A replay also
-    drops what is older than the replay window; a live round never does."""
-
     ids = [item.message_id for item in items]
     if cursor_id is not None and cursor_id in ids:
         gap = items[ids.index(cursor_id) + 1 :]
@@ -145,7 +139,7 @@ def pending_after(
         gap = items
     if not replay:
         return gap, []
-    cutoff = now_ms() - int(replay_window_s * 1000)
+    cutoff = now_ms - int(replay_window_s * 1000)
     fresh: list[Any] = []
     stale: list[Any] = []
     for item in gap:

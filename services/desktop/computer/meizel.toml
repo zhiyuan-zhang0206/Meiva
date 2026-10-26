@@ -7,7 +7,7 @@ exports = ["config.py", "execute.py", "input.py", "mcp_daemon.py", "mcp_wrapper.
 "ax_tools.py" = ["ax_gap.py", "ax_ids.py", "errors.py", "screen.py", "targets.py"]
 "execute.py" = ["ax_act.py", "ax_ids.py", "ax_tools.py", "errors.py", "input.py", "ocr", "ocr_text.py", "screen.py", "targets.py"]
 "input.py" = ["errors.py", "targets.py"]
-"mcp_daemon.py" = ["ax_ids.py", "config.py", "execute.py", "protocol.py", "session.py", "task_sessions.py"]
+"mcp_daemon.py" = ["audit_coords.py", "ax_ids.py", "config.py", "execute.py", "protocol.py", "screen.py", "session.py", "task_sessions.py"]
 "ocr_text.py" = ["errors.py", "ocr", "screen.py"]
 "screen.py" = ["errors.py", "targets.py"]
 "targets.py" = ["errors.py"]
@@ -15,6 +15,7 @@ exports = ["config.py", "execute.py", "input.py", "mcp_daemon.py", "mcp_wrapper.
 
 [purity]
 "__init__.py" = "strict"
+"audit_coords.py" = "strict"
 "config.py" = "strict"
 "errors.py" = "strict"
 "protocol.py" = "strict"

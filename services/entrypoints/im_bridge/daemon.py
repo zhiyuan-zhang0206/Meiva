@@ -14,17 +14,22 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import random
 import signal
 import sys
+import uuid
 from collections.abc import Callable, Coroutine
 from dataclasses import dataclass, field
 from functools import partial
 from pathlib import Path
 from typing import Any, Protocol
+from uuid import UUID
 
 from psycopg.errors import ConnectionDoesNotExist, ConnectionFailure
 from psycopg_pool import ConnectionPool, PoolTimeout
 
+from base.clock import SYSTEM_TIMERS, Clock
+from base.clock.configuration import clock_config_from_boot
 from base.cluster.dataplane.direct_url import ClusterDirectUrl
 from base.cluster.machine import GatewayAccess, daemon_acceptance, gateway_auth_headers
 from base.cluster.machine.boot import gateway_access_from_boot
@@ -163,30 +168,50 @@ def feishu_config(config: ConfigBoot) -> FeishuCredentialsConfig:
 
 
 def gateway_client(
-    config: ImBridgeConfig, *, gateway_url: str, access: GatewayAccess
+    config: ImBridgeConfig,
+    *,
+    gateway_url: str,
+    access: GatewayAccess,
+    new_id: Callable[[], UUID],
 ) -> GatewayClient:
-    return GatewayClient(config, gateway_url=gateway_url, auth_headers=gateway_auth_headers(access))
+    return GatewayClient(
+        config, gateway_url=gateway_url, auth_headers=gateway_auth_headers(access), new_id=new_id
+    )
 
 
 # meiva:note
 # What the adapters are built from: the configuration slices of the adapters that take one, the
-# bridge's state directory, and whether the machine names an outbound proxy for the Feishu
-# websocket handshake.
+# bridge's state directory, whether the machine names an outbound proxy for the Feishu websocket
+# handshake, and the process's clock, random generator and id source that the adapters which
+# stamp times, draw jitter or mint ids use.
 @dataclass(frozen=True)
 class AdapterInputs:
     telegram: TelegramCredentialsConfig
     feishu: FeishuCredentialsConfig
     state_dir: Path
     proxy_configured: bool
+    clock: Clock
+    rng: random.Random
+    new_id: Callable[[], UUID]
 
 
-def adapter_inputs(config: ConfigBoot, *, state_dir: Path) -> AdapterInputs:
+def adapter_inputs(
+    config: ConfigBoot,
+    *,
+    state_dir: Path,
+    clock: Clock,
+    rng: random.Random,
+    new_id: Callable[[], UUID],
+) -> AdapterInputs:
     environment = config.process_environment()
     return AdapterInputs(
         telegram=telegram_config(config),
         feishu=feishu_config(config),
         state_dir=state_dir,
         proxy_configured=network_proxy_configured(environment),
+        clock=clock,
+        rng=rng,
+        new_id=new_id,
     )
 
 
@@ -200,7 +225,13 @@ def _build_adapter(name: str, core: IMBridgeCore, inputs: AdapterInputs) -> IMAd
     if name == "weixin":
         from services.entrypoints.im_bridge.adapters import weixin
 
-        return weixin.ADAPTER_CLASS(core, state_dir=inputs.state_dir)
+        return weixin.ADAPTER_CLASS(
+            core,
+            state_dir=inputs.state_dir,
+            clock=inputs.clock,
+            rng=inputs.rng,
+            new_id=inputs.new_id,
+        )
     if name == "feishu":
         from services.entrypoints.im_bridge.adapters import feishu
 
@@ -210,6 +241,7 @@ def _build_adapter(name: str, core: IMBridgeCore, inputs: AdapterInputs) -> IMAd
             state_dir=inputs.state_dir,
             proxy_configured=inputs.proxy_configured,
             cursor_store=core.cursor_store,
+            clock=inputs.clock,
         )
     raise ValueError(f"unknown im_bridge adapter {name!r}")
 
@@ -373,6 +405,9 @@ async def _start(
     db_pool: ConnectionPool,
     image: LoadedCommit,
     timings: DaemonTimings,
+    clock: Clock,
+    rng: random.Random,
+    new_id: Callable[[], UUID],
 ) -> None:
     config = im_bridge_config(process_config)
     access = gateway_access_from_boot(process_config)
@@ -380,10 +415,17 @@ async def _start(
     # The runtime directory is `<home>/run`, so its parent is the Meiva home.
     state_dir = state_dir_of(runtime.parent)
     client = gateway_client(
-        config, gateway_url=process_config.view.gateway.gateway_url, access=access
+        config, gateway_url=process_config.view.gateway.gateway_url, access=access, new_id=new_id
     )
     core = owned.core = IMBridgeCore(
-        config, client, db_pool=db_pool, tasks=loops, state_dir=state_dir
+        config,
+        client,
+        db_pool=db_pool,
+        tasks=loops,
+        state_dir=state_dir,
+        clock=clock,
+        rng=rng,
+        new_id=new_id,
     )
     alerts = AlertOutboundBridge(
         core.outbound_store, core.adapters, enabled=process_config.view.alerts.im_notify_enabled
@@ -406,14 +448,14 @@ async def _start(
     adapters = owned.adapters = load_adapters(
         core,
         plan_adapters(frozenset(config.im_disabled_adapters)),
-        adapter_inputs(process_config, state_dir=state_dir),
+        adapter_inputs(process_config, state_dir=state_dir, clock=clock, rng=rng, new_id=new_id),
     )
     if not adapters:
         _log.warning("im_bridge: no adapters loaded — nothing to serve")
     await core.restore_subscriptions()
     loops.create_task(liveness_loop(liveness, interval_s=timings.liveness_beat_s))
     loops.create_task(notice_loop(core, interval_s=timings.notice_poll_s))
-    loops.create_task(push_health_loop(core.outbound_store, config))
+    loops.create_task(push_health_loop(core.outbound_store, config, clock=clock))
     await asyncio.gather(*(a.start(loops) for a in adapters))
     if adapters:
         loops.create_task(timeline_outbound_loop(core, alerts, interval_s=timings.outbound_round_s))
@@ -427,6 +469,9 @@ async def run(
     database: Callable[[], Database],
     image: LoadedCommit,
     timings: DaemonTimings = DEFAULT_TIMINGS,
+    clock: Clock,
+    rng: random.Random,
+    new_id: Callable[[], UUID],
 ) -> None:
     """Start the daemon: healthz -> pidfile -> load adapters -> serve."""
     if _is_running(process_config, runtime=runtime):
@@ -457,6 +502,9 @@ async def run(
                     db_pool=db_pool,
                     image=image,
                     timings=timings,
+                    clock=clock,
+                    rng=rng,
+                    new_id=new_id,
                 )
             finally:
                 cleanup_errors.extend(_begin_shutdown(owned.adapters))
@@ -537,6 +585,9 @@ def main() -> None:
                 runtime=process_home / "run",
                 database=database,
                 image=image,
+                clock=Clock(clock_config_from_boot(machine_config), timers=SYSTEM_TIMERS),
+                rng=random.SystemRandom(),
+                new_id=uuid.uuid4,
             )
         )
     except KeyboardInterrupt:
