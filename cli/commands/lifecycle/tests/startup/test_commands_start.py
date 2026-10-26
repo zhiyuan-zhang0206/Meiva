@@ -7,7 +7,7 @@
 from __future__ import annotations
 
 import inspect
-from datetime import UTC, datetime, timedelta
+from datetime import timedelta
 from pathlib import Path
 
 import pytest
@@ -31,7 +31,7 @@ def test_the_boot_job_leaves_a_home_down_that_an_operator_stopped(
     start_run: StartRun, capsys: pytest.CaptureFixture[str]
 ) -> None:
     run = start_run
-    stand_down.record(run.home, now=datetime.now(UTC), until=None, reason="operator stop")
+    stand_down.record(run.home, now=run.command.clock.now(), until=None, reason="operator stop")
 
     assert run.start(boot_attempt=True) == 0
 
@@ -46,7 +46,7 @@ def test_the_boot_job_leaves_a_home_down_that_an_operator_stopped(
 # that declared nothing, which an ended stand-down does not skip.
 def test_the_boot_job_proceeds_once_a_declared_window_has_ended(start_run: StartRun) -> None:
     run = start_run
-    now = datetime.now(UTC)
+    now = run.command.clock.now()
     stand_down.record(run.home, now=now, until=now - timedelta(minutes=5), reason="window")
 
     assert run.start(boot_attempt=True) == 1
@@ -58,7 +58,7 @@ def test_an_explicit_start_ends_a_stand_down_before_anything_else_runs(
     start_run: StartRun, capsys: pytest.CaptureFixture[str]
 ) -> None:
     run = start_run
-    stand_down.record(run.home, now=datetime.now(UTC), until=None, reason="operator stop")
+    stand_down.record(run.home, now=run.command.clock.now(), until=None, reason="operator stop")
 
     # meiva:note
     # the undeclared unit is refused after the gate

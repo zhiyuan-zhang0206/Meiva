@@ -6,6 +6,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+from base.clock import Clock, ClockConfig
 from base.clock.tests.manual_timers import ManualTimers
 from base.cluster.machine.configured import ConfiguredMachineIdentity
 from base.config import ConfigBoot
@@ -47,6 +48,9 @@ def main() -> None:
         session=UserSession(user_home=Path.home(), login_shell="/bin/sh", interactive=False),
         services=frozenset(),
         timers=ManualTimers(),
+        clock=Clock(
+            ClockConfig("UTC", None, message_timestamp_weekday=False), timers=ManualTimers()
+        ),
     )
     try:
         ensure_packages_refresh_job(context)

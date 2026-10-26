@@ -291,10 +291,6 @@ ALLOWED: dict[str, tuple[Category, str]] = {
         "contract",
         "the shared wire-format fixtures, tests/fixtures/events, parse through the event adapter and cover every system role",
     ),
-    "tests/components/schedules/test_goal_watch_filter.py": (
-        "contract",
-        "tests the watch_idle reference snippet that the meiva-goal skill shares with the long-running-agent and meiva-fleet skills",
-    ),
     "tests/contracts/test_lint_contextvars_allowlist.py": (
         "contract",
         "probes the ruff contextvars ban configured in pyproject.toml",

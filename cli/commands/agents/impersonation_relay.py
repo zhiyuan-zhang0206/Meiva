@@ -39,7 +39,7 @@ from base.agents.impersonation.history import resolve
 from base.agents.impersonation.host_transport import AntigravityServer
 from base.agents.impersonation.status import OPEN, ImpersonationStatus
 from base.agents.impersonation.terminal_notices import notice_text
-from base.clock import SYSTEM_TIMERS, Clock, ClockConfig
+from base.clock import Clock
 from base.cluster.machine import MachineIdentityReader
 from base.db import Database
 from base.events.live.bus import EventBus
@@ -194,13 +194,6 @@ def announce_end(snapshot: InboxSnapshot, ref: LeaseRef, adapter: RelayAdapter) 
     assert_never(verdict)
 
 
-def _clock() -> ClockReading:
-    wall_now = Clock(
-        ClockConfig("UTC", None, message_timestamp_weekday=False), timers=SYSTEM_TIMERS
-    ).now()
-    return ClockReading(monotonic_now=asyncio.get_running_loop().time(), wall_now=wall_now)
-
-
 # meiva:note
 # The state of one relay's delivery loop: the lease it serves and the resources it drives. Its
 # decisions are `relay.steps.next_step` and `plan_reservation`; this class takes the steps.
@@ -214,6 +207,7 @@ class _InboxRelay:
         listener: RedisInboundListener,
         adapter: RelayAdapter,
         tuning: RelayTuning,
+        clock: Clock,
     ) -> None:
         self.lease = lease
         self.db = db
@@ -221,7 +215,11 @@ class _InboxRelay:
         self.listener = listener
         self.adapter = adapter
         self.tuning = tuning
+        self.clock = clock
         self.state = RelayState.initial()
+
+    def _reading(self) -> ClockReading:
+        return ClockReading(monotonic_now=self.clock.monotonic(), wall_now=self.clock.now())
 
     # meiva:note
     # The current snapshot, or None once the lease ended (the end was announced).
@@ -268,7 +266,7 @@ class _InboxRelay:
                 fresh, reserved, redelivery=plan.redelivery, ref=lease.ref(), tuning=self.tuning
             )
             deliver(self.adapter, push)
-            self.state = emitted(self.state, at=_clock().monotonic_now)
+            self.state = emitted(self.state, at=self.clock.monotonic())
         self.state = batch_closed(self.state)
         return False
 
@@ -281,12 +279,12 @@ class _InboxRelay:
             if snapshot is None:
                 return
             step, self.state = next_step(
-                self.state, snapshot, _clock(), self.lease.ref(), self.tuning
+                self.state, snapshot, self._reading(), self.lease.ref(), self.tuning
             )
             match step:
                 case SendStart(text=text):
                     deliver(self.adapter, text)
-                    self.state = emitted(self.state, at=_clock().monotonic_now)
+                    self.state = emitted(self.state, at=self.clock.monotonic())
                 case WaitForWake(timeout=timeout):
                     await self.listener.wait_one(timeout)
                 case Deliver(pause=pause):
@@ -315,9 +313,10 @@ async def push_inbox(
     listener: RedisInboundListener,
     adapter: RelayAdapter,
     tuning: RelayTuning,
+    clock: Clock,
 ) -> None:
     await _InboxRelay(
-        lease, db=db, bus=bus, listener=listener, adapter=adapter, tuning=tuning
+        lease, db=db, bus=bus, listener=listener, adapter=adapter, tuning=tuning, clock=clock
     ).run()
 
 
@@ -393,6 +392,7 @@ async def _serve(
     redis_url: str,
     adapter: RelayAdapter,
     tuning: RelayTuning,
+    clock: Clock,
 ) -> None:
     if not await asyncio.to_thread(
         write_heartbeat, db, lease.lease_id, lease.token, local_machine=lease.machine
@@ -414,7 +414,15 @@ async def _serve(
     listener = RedisInboundListener(redis_url, lease.agent_id)
     await run_beside_heartbeat(
         heartbeat_completion(db, lease.lease_id, lease.token, local_machine=lease.machine),
-        push_inbox(lease, db=db, bus=bus, listener=listener, adapter=adapter, tuning=tuning),
+        push_inbox(
+            lease,
+            db=db,
+            bus=bus,
+            listener=listener,
+            adapter=adapter,
+            tuning=tuning,
+            clock=clock,
+        ),
     )
 
 
@@ -422,7 +430,8 @@ async def _serve(
 # What the handler read for one relay: the scoped credential from the channel the operator
 # chose, the Redis address of the invocation's configuration, CODEX_HOME as the shell saw it,
 # the Antigravity endpoint its environment named (if any), the stdout a controller session reads
-# the relay's pushes from, and the invocation's event bus.
+# the relay's pushes from, the invocation's event bus, and its clock, which paces the delivery
+# loop.
 @dataclass(frozen=True)
 class RelayInputs:
     token: str
@@ -431,6 +440,7 @@ class RelayInputs:
     antigravity_server: AntigravityServer | None
     stdout: TextIO
     bus: EventBus
+    clock: Clock
 
 
 # meiva:note
@@ -478,7 +488,13 @@ def cmd_relay(
         lease = RelayLease(args.agent_id, lease_id, session_id, token, local_machine)
         asyncio.run(
             _serve(
-                lease, db=db, bus=bus, redis_url=inputs.redis_url, adapter=adapter, tuning=tuning
+                lease,
+                db=db,
+                bus=bus,
+                redis_url=inputs.redis_url,
+                adapter=adapter,
+                tuning=tuning,
+                clock=inputs.clock,
             )
         )
     except KeyboardInterrupt:

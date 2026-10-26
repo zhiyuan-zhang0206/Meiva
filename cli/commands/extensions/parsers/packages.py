@@ -20,16 +20,13 @@ def _h_packages_status(args: argparse.Namespace) -> int:
 
 
 def _h_packages_refresh(args: argparse.Namespace) -> int:
-    from base.clock import Clock, ClockConfig
     from cli.commands.extensions.packages import cmd_packages_refresh
     from cli.database.runtime import delivered_config
 
     return cmd_packages_refresh(
         config=delivered_config(args.runtime.config),
         repo=args.runtime.checkout,
-        now=Clock(
-            ClockConfig("UTC", None, message_timestamp_weekday=False), timers=args.runtime.timers
-        ).now(),
+        now=args.runtime.clock.now(),
         check_only=args.check,
         only=args.package,
         json_output=args.json_output,

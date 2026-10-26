@@ -7,7 +7,7 @@ from pathlib import Path
 
 import pytest
 
-from base.clock import SYSTEM_TIMERS
+from base.clock import SYSTEM_TIMERS, Clock, ClockConfig
 from base.cluster.machine import MachineIdentityReader
 from base.config import ConfigBoot
 from base.host.system.tests.fake_commands import fake_host
@@ -77,6 +77,9 @@ def _ctx(
         session=UserSession(user_home=meiva_home, login_shell="/bin/zsh", interactive=False),
         services=frozenset(),
         timers=SYSTEM_TIMERS,
+        clock=Clock(
+            ClockConfig("UTC", None, message_timestamp_weekday=False), timers=SYSTEM_TIMERS
+        ),
     )
 
 

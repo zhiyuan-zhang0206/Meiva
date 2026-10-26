@@ -8,7 +8,6 @@ with the tool's named arguments."""
 from __future__ import annotations
 
 import sys
-import time
 import types
 from pathlib import Path
 from typing import Any
@@ -63,7 +62,7 @@ def _source() -> _tools.ToolSource:
         timeout_seconds=clients.timeout_seconds,
         cache=_tools.DiskCache(_cache_dir()),
         identity=context.identity,
-        now=time.time(),
+        now=context.require_clock().now().timestamp(),
     )
 
 

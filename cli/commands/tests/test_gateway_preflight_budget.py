@@ -32,6 +32,7 @@ from collections.abc import Generator
 from contextlib import contextmanager
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
+from base.clock import SYSTEM_TIMERS
 from base.deploy.progress_timeout import GATEWAY_PREFLIGHT_BUDGET_S, NO_PROGRESS_TIMEOUT_S
 from cli.commands import _repo
 from cli.commands.observability.tests.scripted_http import Reply, serve
@@ -85,7 +86,9 @@ def _gateway_back_after(delay_s: float) -> Generator[str]:
 def test_a_gateway_that_comes_back_inside_the_budget_is_not_declined() -> None:
     with _gateway_back_after(0.15) as url:
         started = time.monotonic()
-        rc = _repo.probe_gateway_or_die(url, budget_s=BUDGET_S, retry_interval_s=INTERVAL_S)
+        rc = _repo.probe_gateway_or_die(
+            url, budget_s=BUDGET_S, retry_interval_s=INTERVAL_S, timers=SYSTEM_TIMERS
+        )
 
     assert rc == 0
     assert time.monotonic() - started < BUDGET_S
@@ -101,7 +104,7 @@ def test_a_dead_gateway_still_fails_and_inside_the_bound() -> None:
     budget_s = 0.2
     started = time.monotonic()
     rc = _repo.probe_gateway_or_die(
-        closed_port_url(), budget_s=budget_s, retry_interval_s=INTERVAL_S
+        closed_port_url(), budget_s=budget_s, retry_interval_s=INTERVAL_S, timers=SYSTEM_TIMERS
     )
 
     assert rc == 1
@@ -114,7 +117,9 @@ def test_a_dead_gateway_still_fails_and_inside_the_bound() -> None:
 def test_a_reachable_gateway_costs_one_dial_and_no_sleep() -> None:
     with serve({PROBE_PATH: Reply(status=200, body=b"{}")}) as gateway:
         started = time.monotonic()
-        rc = _repo.probe_gateway_or_die(gateway.url, budget_s=BUDGET_S, retry_interval_s=10.0)
+        rc = _repo.probe_gateway_or_die(
+            gateway.url, budget_s=BUDGET_S, retry_interval_s=10.0, timers=SYSTEM_TIMERS
+        )
         elapsed = time.monotonic() - started
 
     assert rc == 0
@@ -129,7 +134,9 @@ def test_a_reachable_gateway_costs_one_dial_and_no_sleep() -> None:
 def test_a_5xx_is_retried_on_the_same_budget() -> None:
     script = [Reply(status=503, body=b"starting"), Reply(status=200, body=b"{}")]
     with serve({PROBE_PATH: script}) as gateway:
-        rc = _repo.probe_gateway_or_die(gateway.url, budget_s=BUDGET_S, retry_interval_s=INTERVAL_S)
+        rc = _repo.probe_gateway_or_die(
+            gateway.url, budget_s=BUDGET_S, retry_interval_s=INTERVAL_S, timers=SYSTEM_TIMERS
+        )
 
     assert rc == 0
     assert len(gateway.received) == 2
@@ -140,7 +147,9 @@ def test_a_5xx_is_retried_on_the_same_budget() -> None:
 # No amount of waiting resolves it, so it must not spend the budget.
 def test_a_refusal_the_gateway_chose_is_terminal_at_once() -> None:
     with serve({PROBE_PATH: Reply(status=403, body=b"forbidden")}) as gateway:
-        rc = _repo.probe_gateway_or_die(gateway.url, budget_s=BUDGET_S, retry_interval_s=INTERVAL_S)
+        rc = _repo.probe_gateway_or_die(
+            gateway.url, budget_s=BUDGET_S, retry_interval_s=INTERVAL_S, timers=SYSTEM_TIMERS
+        )
 
     assert rc == 1
     assert len(gateway.received) == 1
