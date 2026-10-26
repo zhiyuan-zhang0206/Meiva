@@ -22,5 +22,3 @@ exports = ["timeline-colors.ts", "timeline-store.ts", "timeline-width.ts", "time
 "timeline-width.ts" = "strict"
 "timeline.ts" = "strict"
 
-[debt.ambient-read]
-"use-timeline.ts#clock Date.now" = 3

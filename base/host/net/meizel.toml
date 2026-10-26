@@ -12,5 +12,4 @@ exports = ["auth.py", "http_dial.py", "ports.py", "predicates.py", "resilience.p
 
 [debt.ambient-read]
 "auth.py#random secrets.token_bytes" = 1
-"resilience.py#pid os.getpid" = 1
 "resilience.py#random random.uniform" = 1
