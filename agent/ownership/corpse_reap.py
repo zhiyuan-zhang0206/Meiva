@@ -1,21 +1,15 @@
-"""Mark crashed hosted agents terminated and publish failure diagnostics."""
+# meiva:note
+# Mark crashed hosted agents terminated and publish failure diagnostics.
 
 from __future__ import annotations
 
-from typing import NamedTuple
-
 from loguru import logger
 
+from agent.ownership.lifecycle_plan import ReapedCorpse as ReapedCorpse
 from base.db.protocols import AsyncPool
 from base.deploy.progress_timeout import CORPSE_REAP_GRACE_S
 from base.telemetry import Event, emit_prepared
 from base.telemetry.audit_events import prepare_event_log, record_audit_async
-
-
-class ReapedCorpse(NamedTuple):
-    """One committed termination; no recovery input is created."""
-
-    agent_id: int
 
 
 # meiva:note

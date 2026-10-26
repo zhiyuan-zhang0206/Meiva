@@ -31,7 +31,7 @@ from base.host.env.agent_slices import ModelOverrides
 from base.lm.catalog import ModelCatalog
 from base.lm.context_budget import resolve_context_budget
 from services.derived.insights.config import InsightsConfig
-from services.derived.insights.run_timeline import context
+from services.derived.insights.run_timeline import context, router
 from services.derived.insights.run_timeline.history import HistoryView
 from services.derived.insights.run_timeline.projection.derive import segment_view
 from services.derived.insights.run_timeline.schemas import RunTimelineContext
@@ -292,7 +292,7 @@ def call(
         ),
     )
     request = Request({"type": "http", "app": SimpleNamespace(state=app_state)})
-    return context.get_run_timeline_context(request, agent_id, at)
+    return router.get_run_timeline_context(request, agent_id, at)
 
 
 def test_the_context_is_the_breakdown_of_that_request_summed_from_its_messages(

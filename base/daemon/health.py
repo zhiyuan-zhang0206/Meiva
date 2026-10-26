@@ -64,7 +64,6 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
-import os
 import time
 import urllib.error
 import urllib.request
@@ -81,6 +80,7 @@ from base.daemon.http_transport import RouteHandler as RouteHandler
 from base.daemon.http_transport import start_daemon_http
 from base.daemon.loop_health import LivenessGroup, LoopProgress  # noqa: F401  # pyright: ignore
 from base.native_process.loaded_commit import LoadedCommit
+from base.native_process.os_platform import resolve_pid
 from base.paths import meiva_home
 
 # Re-export trackers moved to loop_health after this module crossed the 800-line ceiling.
@@ -171,6 +171,40 @@ def _healthz_payload(
     return health_schema.render(payload, components, liveness=liveness, extra=extra)
 
 
+# meiva:note
+# Start daemon HTTP server; return server instance (caller is responsible for close).
+#
+# - `name`: daemon name (used in `/healthz` response `name` field + log)
+# - `port`: the daemon's port, from its `ServiceEndpoint`
+# - `host`: bind interface. Default `127.0.0.1` (healthcheck / local RPC
+#   only). The agent-runner ops server passes `0.0.0.0` so the
+#   gateway can dial it over the private network; an open port on the
+#   trusted cluster's private network is the same posture as the
+#   gateway's own `0.0.0.0` bind.
+# - `extra_routes`: optional daemon-specific routes,
+#   `{(method, path): handler}`. handler is an async
+#   callable taking body bytes and returning (status, body,
+#   content_type). On handler exception -> 500. Body size
+#   exceeding 64 KB -> 413 (actually returned as 400 for
+#   simplicity).
+# - `liveness`: optional main-loop heartbeat or concurrent-loop group; when
+#   it is not alive, `/healthz` returns 503 instead of 200 so the
+#   watchdog respawns a wedged daemon. Groups also expose per-loop
+#   progress snapshots in the response.
+# - `components`: optional per-component health state. A callable is evaluated
+#   for each request, so a daemon can report fresh worker progress without
+#   sharing mutable response state with this server.
+# - `extra`: optional non-component health fields. As with `components`, a
+#   callable is evaluated on each request.
+# - `image`: immutable code image captured by the process entry point.
+#   The handler retains this object; a missing SHA stays unknown.
+# - `auth_digests`: when set, every `extra_routes` request must carry
+#   `Authorization: Bearer <token>` whose SHA-256 is one of
+#   `auth_digests`, or it gets 401. `/healthz` stays unauthenticated
+#   (the watchdog probes it locally and it leaks no secret). The ops
+#   server passes the digests of its write generation's machine API
+#   tokens when its API is authenticated, so a LAN peer cannot drive
+#   /ops without one; the server compares digests only.
 async def start_health_server(
     name: str,
     port: int,
@@ -182,44 +216,10 @@ async def start_health_server(
     extra: dict[str, object] | Callable[[], dict[str, object]] | None = None,
     auth_digests: frozenset[str] | None = None,
     image: LoadedCommit,
+    pid: int | None = None,
 ) -> asyncio.Server:
-    """Start daemon HTTP server; return server instance (caller is responsible for close).
-
-    Args:
-        name: daemon name (used in ``/healthz`` response `name` field + log)
-        port: the daemon's port, from its ``ServiceEndpoint``
-        host: bind interface. Default ``127.0.0.1`` (healthcheck / local RPC
-            only). The agent-runner ops server passes ``0.0.0.0`` so the
-            gateway can dial it over the private network; an open port on the
-            trusted cluster's private network is the same posture as the
-            gateway's own ``0.0.0.0`` bind.
-        extra_routes: optional daemon-specific routes,
-            ``{(method, path): handler}``. handler is an async
-            callable taking body bytes and returning (status, body,
-            content_type). On handler exception -> 500. Body size
-            exceeding 64 KB -> 413 (actually returned as 400 for
-            simplicity).
-        liveness: optional main-loop heartbeat or concurrent-loop group; when
-            it is not alive, ``/healthz`` returns 503 instead of 200 so the
-            watchdog respawns a wedged daemon. Groups also expose per-loop
-            progress snapshots in the response.
-        components: optional per-component health state. A callable is evaluated
-            for each request, so a daemon can report fresh worker progress without
-            sharing mutable response state with this server.
-        extra: optional non-component health fields. As with ``components``, a
-            callable is evaluated on each request.
-        image: immutable code image captured by the process entry point.
-            The handler retains this object; a missing SHA stays unknown.
-        auth_digests: when set, every ``extra_routes`` request must carry
-            ``Authorization: Bearer <token>`` whose SHA-256 is one of
-            ``auth_digests``, or it gets 401. ``/healthz`` stays unauthenticated
-            (the watchdog probes it locally and it leaks no secret). The ops
-            server passes the digests of its write generation's machine API
-            tokens when its API is authenticated, so a LAN peer cannot drive
-            /ops without one; the server compares digests only.
-    """
     started_at = time.time()
-    pid = os.getpid()
+    resolved_pid = resolve_pid(pid)
     # Resolved once at bind time, not per request: meiva_home() mkdirs on every call.
     home = str(meiva_home())
 
@@ -228,7 +228,7 @@ async def start_health_server(
         current_extra = extra() if callable(extra) else extra
         return _healthz_payload(
             name,
-            pid,
+            resolved_pid,
             home,
             started_at,
             liveness,

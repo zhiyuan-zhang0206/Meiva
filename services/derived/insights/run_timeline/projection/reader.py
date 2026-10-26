@@ -7,7 +7,6 @@ from bisect import bisect_right
 from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import datetime, timedelta
-from typing import Any
 
 from fastapi import HTTPException
 
@@ -76,7 +75,9 @@ class TimelineReader:
     ) -> None:
         self.db: DatabaseLike = db
         self.pool, self.timestamps, self.jobs = pool, timestamps, jobs
-        self.read_segment: Callable[[Any, int, str], FullHistory] = read_segment
+        self._load_segment: Callable[[int, str], FullHistory] = lambda agent_id, checkpoint_id: (
+            read_segment(db, agent_id, checkpoint_id)
+        )
         self.timers = timers
         self.read_source: Callable[[SyncConnection, int], Source] = capture_source
         self._lock = threading.Lock()
@@ -154,7 +155,7 @@ class TimelineReader:
         if source.head is not None and source.head != source.boundary:
             tail = project_segment(
                 source.head,
-                self.read_segment(self.db, agent_id, source.head),
+                self._load_segment(agent_id, source.head),
                 source.previous,
                 inputs=self.timestamps.policy(),
             )
@@ -237,7 +238,7 @@ class TimelineReader:
             (
                 segment,
                 segment_view(
-                    self.read_segment(self.db, snapshot.agent_id, segment.checkpoint_id),
+                    self._load_segment(snapshot.agent_id, segment.checkpoint_id),
                     segment.read_before,
                     inputs=self.timestamps.policy(),
                 ),

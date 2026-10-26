@@ -7,19 +7,30 @@ from typing import Annotated
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 
 from base.agents.messages.timestamp_policy import TimestampSource
-from services.derived.insights.run_timeline.context import router as context_router
-from services.derived.insights.run_timeline.links import router as links_router
-from services.derived.insights.run_timeline.messages import router as messages_router
+from base.db.protocols import DatabaseLike as Database
+from services.derived.insights.config import InsightsConfig
+from services.derived.insights.run_timeline.context import (
+    ResolvedRequest,
+    build_run_timeline_context,
+)
+from services.derived.insights.run_timeline.links import read as read_links
+from services.derived.insights.run_timeline.links import read_content as read_link_content
+from services.derived.insights.run_timeline.messages import (
+    LIMIT_MAX,
+    MessageSliceSpec,
+    slice_messages,
+)
 from services.derived.insights.run_timeline.projection.reader import TimelineReader
 from services.derived.insights.run_timeline.schemas import (
+    RunTimelineContext,
+    RunTimelineLinkContent,
+    RunTimelineLinks,
+    RunTimelineMessages,
     RunTimelineResponse,
     RunTimelineWindow,
 )
 
 router = APIRouter()
-router.include_router(messages_router)
-router.include_router(context_router)
-router.include_router(links_router)
 
 
 _EMPTY_WINDOW = timedelta(hours=24)
@@ -52,6 +63,15 @@ def _options(
     snapshot: Annotated[str | None, Query(min_length=1, max_length=64)] = None,
 ) -> tuple[int | None, str | None]:
     return max_units, snapshot
+
+
+def _message_options(
+    limit: Annotated[int, Query(ge=1, le=LIMIT_MAX)] = 50,
+    *,
+    full: Annotated[bool, Query()] = False,
+    snapshot: Annotated[str | None, Query(min_length=1, max_length=64)] = None,
+) -> tuple[int, bool, str | None]:
+    return limit, full, snapshot
 
 
 @router.get(
@@ -96,3 +116,113 @@ def get_run_timeline(
         units_omitted=omitted,
         snapshot=cut.id,
     )
+
+
+@router.get(
+    "/api/agents/{agent_id}/run-timeline/messages",
+    description="Messages ``start..end`` of the agent's stitched history, at most ``limit`` of them.",
+)
+def get_run_timeline_messages(
+    request: Request,
+    agent_id: int,
+    start: Annotated[int, Query(ge=0)],
+    end: Annotated[int, Query(ge=0)],
+    options: Annotated[tuple[int, bool, str | None], Depends(_message_options)] = (
+        50,
+        False,
+        None,
+    ),
+) -> RunTimelineMessages:
+    limit, full, snapshot = options
+    if end < start:
+        raise HTTPException(status_code=422, detail="end must not be before start")
+    config: InsightsConfig = request.app.state.insights_config
+    reader: TimelineReader = request.app.state.run_timeline_reader
+    cut = reader.get(agent_id, snapshot)
+    if end >= cut.count:
+        raise HTTPException(404, f"message {end} not found: history has {cut.count}")
+    stop = min(end, start + limit - 1)
+    timestamps: TimestampSource = request.app.state.timeline_timestamps
+    return slice_messages(
+        reader.span(cut, start, stop),
+        MessageSliceSpec(
+            start=start,
+            stop=stop,
+            end=end,
+            full=full,
+            text_max=config.run_timeline_message_text_max,
+            inputs=timestamps.policy(),
+        ),
+    )
+
+
+@router.get(
+    "/api/agents/{agent_id}/run-timeline/context",
+    description="The context breakdown of the LLM request at (or next after) message index `at`.",
+)
+def get_run_timeline_context(
+    request: Request,
+    agent_id: int,
+    at: Annotated[int, Query(ge=0)],
+    snapshot: Annotated[str | None, Query(min_length=1, max_length=64)] = None,
+) -> RunTimelineContext:
+    reader: TimelineReader = request.app.state.run_timeline_reader
+    cut = reader.get(agent_id, snapshot)
+    idx, ts, segment, view = reader.request(cut, at)
+    config: InsightsConfig = request.app.state.insights_config
+    return build_run_timeline_context(
+        request.app.state.db_pool,
+        agent_id,
+        ResolvedRequest(
+            idx=idx,
+            ts=ts,
+            session=segment.session,
+            offset=segment.offset,
+            sessions=cut.sessions,
+            view=view,
+        ),
+        catalog=request.app.state.catalog,
+        default_model=config.default_model,
+    )
+
+
+@router.get(
+    "/api/insights/run-timeline/links",
+    description="Agent-to-agent events in the window with at least one end among the comma-separated `agents`.",
+)
+def get_run_timeline_links(
+    request: Request,
+    agents: Annotated[str, Query()],
+    from_: Annotated[datetime, Query(alias="from")],
+    to: Annotated[datetime, Query()],
+) -> RunTimelineLinks:
+    try:
+        ids = sorted({int(part) for part in agents.split(",")})
+    except ValueError:
+        raise HTTPException(
+            status_code=422, detail="agents must be comma-separated integers"
+        ) from None
+    if from_.tzinfo is None or to.tzinfo is None:
+        raise HTTPException(status_code=422, detail="from and to must include a timezone offset")
+    if from_ >= to:
+        raise HTTPException(status_code=422, detail="from must be earlier than to")
+    db: Database = request.app.state.db
+    return RunTimelineLinks(links=read_links(db, ids, from_, to))
+
+
+@router.get(
+    "/api/insights/run-timeline/link-content",
+    description="The full text of one chat message (`inbound_id`) or the title and text of one notice (`notice_id`); exactly one.",
+)
+def get_run_timeline_link_content(
+    request: Request,
+    inbound_id: Annotated[int | None, Query(ge=1)] = None,
+    notice_id: Annotated[int | None, Query(ge=1)] = None,
+) -> RunTimelineLinkContent:
+    if (inbound_id is None) == (notice_id is None):
+        raise HTTPException(status_code=422, detail="give exactly one of inbound_id and notice_id")
+    db: Database = request.app.state.db
+    found = read_link_content(db, inbound_id=inbound_id, notice_id=notice_id)
+    if found is None:
+        raise HTTPException(status_code=404, detail="no such message or notice")
+    return found
