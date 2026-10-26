@@ -19,6 +19,7 @@ import psutil
 import psycopg
 import pytest
 
+from base.clock import SYSTEM_TIMERS
 from base.cluster import ownership
 from base.cluster import postgres as pg
 from base.cluster.dataplane.pg_admin import pg_admin_url
@@ -139,7 +140,14 @@ def test_a_hung_archive_command_ends_in_an_immediate_shutdown_inside_the_budget(
         assert event.level == "error" and event.source == "stop"
         assert set(event.attributes["killed"]) <= hung_pids | {owner.pid}
     finally:
-        pg.stop(data, timeout=10, immediate_wait=1, kill_wait=1, retained_children=retained)
+        pg.stop(
+            data,
+            timeout=10,
+            immediate_wait=1,
+            kill_wait=1,
+            retained_children=retained,
+            timers=SYSTEM_TIMERS,
+        )
         for process in psutil.process_iter(["cmdline"]):
             if HUNG_SECONDS in " ".join(process.info["cmdline"] or []):
                 process.kill()

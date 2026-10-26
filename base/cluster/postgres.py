@@ -11,7 +11,6 @@ import math
 import os
 import signal
 import subprocess
-import time
 from collections.abc import Callable, Generator, Iterable, Sequence
 from contextlib import contextmanager
 from dataclasses import dataclass
@@ -22,6 +21,7 @@ from typing import Any, Literal, Protocol
 import psutil
 from pydantic import Field, model_validator
 
+from base.clock import Timers
 from base.cluster.port_preflight import require_listener
 from base.host.atomic_io import write_text_atomic
 from base.host.verified_file import regular_bytes
@@ -72,10 +72,6 @@ def _data_path(data: Path) -> Path:
 
 def receipt_path(data: Path) -> Path:
     return _data_path(data).parent / "run" / "postgres.json"
-
-
-def _monotonic() -> float:
-    return time.monotonic()
 
 
 def _inode(path: Path) -> tuple[int, int]:
@@ -383,13 +379,14 @@ def _complete_start(
     receipt: Receipt,
     ready: Callable[[], bool],
     timeout: float,
+    timers: Timers,
 ) -> OwnedProcess:
     """One readiness and durable admission boundary for fresh and retained births."""
     owner = receipt.process()
-    deadline = _monotonic() + timeout
+    deadline = timers.monotonic() + timeout
     while owner.live():
         protocol_ready = ready()
-        if _monotonic() >= deadline:
+        if timers.monotonic() >= deadline:
             raise RuntimeError("PostgreSQL did not become ready; captured custody is retained")
         if protocol_ready:
             _require_process(data, receipt)
@@ -401,7 +398,7 @@ def _complete_start(
             if admitted != receipt:
                 write(data, admitted)
             return owner
-        time.sleep(0.05)
+        timers.sleep(0.05)
     require_closed(data, receipt, processes=live_processes())
     raise RuntimeError(f"PostgreSQL exited before readiness; inspect {data / 'pg.log'}")
 
@@ -437,6 +434,7 @@ def start(
     timeout: float = 60,
     expected: OwnedProcess | None = None,
     retained_children: list[subprocess.Popen[bytes]],
+    timers: Timers,
 ) -> OwnedProcess:
     """Complete readiness for a new child or the exact retained postmaster.
 
@@ -453,7 +451,7 @@ def start(
     with file_lock(path.with_suffix(".lock"), timeout_s=timeout):
         if expected is not None:
             retained = _retained_start(data, port, expected)
-            owner = _complete_start(data, retained, ready, timeout)
+            owner = _complete_start(data, retained, ready, timeout, timers)
             if retained.state == "captured" and not owner.send_signal(signal.SIGHUP):
                 raise RuntimeError("PostgreSQL exited before retained startup")
             return owner
@@ -474,7 +472,7 @@ def start(
             env,
             retained_children=retained_children,
         )
-        return _complete_start(data, captured, ready, timeout)
+        return _complete_start(data, captured, ready, timeout, timers)
 
 
 @dataclass(frozen=True)
@@ -485,12 +483,12 @@ class Escalation:
     killed: tuple[int, ...]  # pids SIGKILLed after the immediate shutdown (verified descendants)
 
 
-def _wait_all_gone(members: set[OwnedProcess], wait: float) -> bool:
-    deadline = _monotonic() + wait
+def _wait_all_gone(members: set[OwnedProcess], wait: float, timers: Timers) -> bool:
+    deadline = timers.monotonic() + wait
     while any(member.live() for member in members):
-        if _monotonic() >= deadline:
+        if timers.monotonic() >= deadline:
             return False
-        time.sleep(0.05)
+        timers.sleep(0.05)
     return True
 
 
@@ -500,6 +498,7 @@ def _escalate(
     fast_wait: float,
     immediate_wait: float,
     kill_wait: float,
+    timers: Timers,
 ) -> Escalation:
     """End a fast shutdown that is stuck: SIGQUIT, then SIGKILL what outlives it.
 
@@ -519,13 +518,13 @@ def _escalate(
     for member in tuple(tree):  # a command the archiver started after the first capture
         retain_processes(tree, capture_tree(member))
     owner.send_signal(signal.SIGQUIT)
-    _wait_all_gone({owner}, immediate_wait)
+    _wait_all_gone({owner}, immediate_wait, timers)
     survivors = sorted(
         (member for member in tree if member.live()), key=lambda member: member == owner
     )
     for member in survivors:
         member.send_signal(signal.SIGKILL)
-    if not _wait_all_gone(tree, kill_wait):
+    if not _wait_all_gone(tree, kill_wait, timers):
         alive = sorted(member.pid for member in tree if member.live())
         logger.error(f"[postgres] processes outlived SIGKILL: {alive}")
         raise RuntimeError(
@@ -546,6 +545,7 @@ def reap_retained_child(owner_pid: int, retained_children: list[subprocess.Popen
 def stop(
     data: Path,
     *,
+    timers: Timers,
     expected: OwnedProcess | None = None,
     timeout: float = 60,
     immediate_wait: float | None = None,
@@ -578,10 +578,10 @@ def stop(
         tree = capture_tree(owner)
         owner.send_signal(signal.SIGINT)  # PostgreSQL fast, checkpointed shutdown.
         escalation: Escalation | None = None
-        if not _wait_all_gone(tree, timeout):
+        if not _wait_all_gone(tree, timeout, timers):
             if immediate_wait is None or kill_wait is None:
                 raise RuntimeError("PostgreSQL native shutdown did not complete; custody retained")
-            escalation = _escalate(owner, tree, timeout, immediate_wait, kill_wait)
+            escalation = _escalate(owner, tree, timeout, immediate_wait, kill_wait, timers)
         require_closed(data, receipt, processes=live_processes())
         require_listener(None, receipt.port, required=False)
         if retained_children is not None:

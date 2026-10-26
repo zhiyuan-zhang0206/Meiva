@@ -18,6 +18,7 @@ from pathlib import Path
 import psycopg
 import pytest
 
+from base.clock import SYSTEM_TIMERS
 from base.cluster import ownership
 from base.cluster import postgres as pg
 from base.cluster.dataplane.pg_tools import (
@@ -131,7 +132,16 @@ def test_captured_postmaster_without_pidfile_resumes_full_admission(
     argv, env, ready = _argv(data, port), pg_start_env(), partial(_ready, port)
     with _startup_gate(data):
         with pytest.raises(RuntimeError, match="did not become ready"):
-            pg.start(data, port, argv, env, ready=ready, timeout=0.1, retained_children=children)
+            pg.start(
+                data,
+                port,
+                argv,
+                env,
+                ready=ready,
+                timeout=0.1,
+                retained_children=children,
+                timers=SYSTEM_TIMERS,
+            )
         captured = pg.read_receipt(data)
         assert captured is not None and captured.state == "captured"
         owner = captured.process()
@@ -149,6 +159,7 @@ def test_captured_postmaster_without_pidfile_resumes_full_admission(
                 timeout=0.1,
                 expected=owner,
                 retained_children=children,
+                timers=SYSTEM_TIMERS,
             )
         assert owner.live() and pg.read_receipt(data) == captured
 
@@ -188,6 +199,7 @@ def test_captured_postmaster_without_pidfile_resumes_full_admission(
         timeout=10,
         expected=owner,
         retained_children=children,
+        timers=SYSTEM_TIMERS,
     )
     assert owner.same_birth(resumed)
     assert len(children) == 1
@@ -210,6 +222,7 @@ def test_ready_postmaster_still_requires_its_bound_pidfile(
         ready=partial(_ready, port),
         timeout=10,
         retained_children=children,
+        timers=SYSTEM_TIMERS,
     )
     record = data / "postmaster.pid"
     saved = record.rename(data / "retained.pid")
@@ -226,6 +239,7 @@ def test_ready_postmaster_still_requires_its_bound_pidfile(
                 timeout=1,
                 expected=owner,
                 retained_children=children,
+                timers=SYSTEM_TIMERS,
             )
     finally:
         saved.rename(record)
@@ -251,6 +265,7 @@ def test_ready_warm_start_reloads_configuration_before_waiting_for_readiness(
         ready=partial(_ready, port),
         timeout=10,
         retained_children=children,
+        timers=SYSTEM_TIMERS,
     )
     with (data / "postgresql.conf").open("a") as config:
         config.write("\nlog_min_messages = 'error'\n")
@@ -264,6 +279,7 @@ def test_ready_warm_start_reloads_configuration_before_waiting_for_readiness(
         timeout=10,
         expected=owner,
         retained_children=children,
+        timers=SYSTEM_TIMERS,
     )
     assert owner.same_birth(resumed) and len(children) == 1
     assert _reloaded(port)

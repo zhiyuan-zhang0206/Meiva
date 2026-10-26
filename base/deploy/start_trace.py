@@ -21,18 +21,20 @@ def requested(environ: Mapping[str, str]) -> bool:
 
 class StartTrace:
     # meiva:note
-    # The origin is set by `begin()` at the CLI entry, so a row's start offset is
-    # measured from command dispatch — not from this module's import (the
-    # interpreter's import of the CLI is outside every span).
+    # The origin and the pid are set by `begin()` at the CLI entry, so a row's start offset is
+    # measured from command dispatch — not from this module's import (the interpreter's import of
+    # the CLI is outside every span) — and the saved record is named for the process that ran it.
     def __init__(self, *, enabled: bool = False) -> None:
         self.enabled = enabled
         self.spans: list[tuple[str, float, float]] = []
         self.services: list[tuple[str, float]] = []
         self.origin: float | None = None
+        self.pid: int | None = None
         self._open: list[float] = []
 
-    def begin(self, *, enabled: bool = False) -> None:
+    def begin(self, *, pid: int, enabled: bool = False) -> None:
         self.enabled = self.enabled or enabled
+        self.pid = pid
         if self.origin is None:
             self.origin = time.monotonic()
 
@@ -93,11 +95,14 @@ class StartTrace:
         # only persisted under a home that already exists.
         if not home.is_dir():
             return None
+        pid = self.pid
+        if pid is None:
+            raise RuntimeError("a start timing record is saved only after begin(pid=...)")
         try:
             target = home / "logs" / "start-timing"
             target.mkdir(parents=True, exist_ok=True)
             stamp = time.strftime("%Y%m%dT%H%M%SZ", time.gmtime())
-            path = target / f"{stamp}-{time.monotonic_ns()}.json"
+            path = target / f"{stamp}-{pid}.json"
             path.write_text(json.dumps(self.payload(), indent=2) + "\n")
             return path
         except OSError:
@@ -111,8 +116,8 @@ def trace() -> StartTrace:
     return _TRACE
 
 
-def begin(*, enabled: bool = False) -> None:
-    _TRACE.begin(enabled=enabled)
+def begin(*, pid: int, enabled: bool = False) -> None:
+    _TRACE.begin(pid=pid, enabled=enabled)
 
 
 def phase(name: str) -> AbstractContextManager[None]:

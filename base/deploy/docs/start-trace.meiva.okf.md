@@ -14,8 +14,9 @@ that long" from one run instead of from guesses.
 ## Enabling it
 
 `MEIVA_START_TIMING=1` (also `true`, `yes`, `on`). The CLI entry reads the
-environment and hands the answer to `start_trace.begin`, so no module below the
-CLI consults the environment on its own.
+environment and hands the answer to `start_trace.begin`, together with its own pid, so no
+module below the CLI consults the environment or asks for the process id on its own. The pid
+names the JSON copy.
 
 ```bash
 MEIVA_START_TIMING=1 meiva start --all-services
