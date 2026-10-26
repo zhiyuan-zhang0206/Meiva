@@ -2,13 +2,14 @@
 
 from __future__ import annotations
 
+import random
 from typing import Any, TextIO
 
 from base.api_contracts.idempotency import keyed_headers
 from base.api_contracts.notice_question import parse_question, question_instructions
+from base.clock.ids import new_uuid
 from base.cluster.machine import GatewayAccess, gateway_api_base, gateway_auth_headers
 from base.host.net import http_dial
-from cli.database.runtime import NewId
 
 _TIMEOUT_S = 15.0
 
@@ -164,13 +165,13 @@ def cmd_notices_resolve(
 
 
 # meiva:link cli/docs/operator-surfaces/operator-surfaces.meiva.okf.md
-def _resolve_all(access: GatewayAccess, notices: list[dict[str, Any]], new_id: NewId) -> int:
+def _resolve_all(access: GatewayAccess, notices: list[dict[str, Any]], rng: random.Random) -> int:
     cleared = 0
     for n in notices:
         r = http_dial.post(
             f"{_api(access)}/keyed/v1/agents/{n['agent_id']}/notices/{n['id']}/resolve",
             timeout=_TIMEOUT_S,
-            headers=_keyed_headers(gateway_auth_headers(access), new_id()),
+            headers=_keyed_headers(gateway_auth_headers(access), new_uuid(rng).hex),
             json={"action": "dismiss", "reply": None},
         )
         if r.status_code in (200, 201):
@@ -186,7 +187,7 @@ def cmd_notices_clear(
     force: bool,
     stale: bool = False,
     stdin: TextIO,
-    new_id: NewId,
+    rng: random.Random,
 ) -> int:
     if stale and agent_id is not None:
         print("--stale and --agent are mutually exclusive")
@@ -207,7 +208,7 @@ def cmd_notices_clear(
     if not force and not _confirm_clear(notices, stale=stale, agent_id=agent_id, stdin=stdin):
         print("aborted.")
         return 1
-    cleared = _resolve_all(access, notices, new_id)
+    cleared = _resolve_all(access, notices, rng)
     target = "stale notices" if stale else f"agent #{agent_id}"
     print(f"cleared {cleared}/{len(notices)} notices: {target}")
     return 0

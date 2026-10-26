@@ -12,6 +12,7 @@ from contextlib import asynccontextmanager, suppress
 from typing import Any
 from uuid import UUID
 
+from base.clock import SYSTEM_TIMERS, Clock, ClockConfig
 from base.cluster.machine import MachineIdentityReader
 from base.db import Database
 from base.events.live.bus import EventBus
@@ -20,7 +21,17 @@ from cli.commands.agents.impersonation_adapters import RelayAdapter
 from cli.commands.agents.impersonation_relay import RelayLease, push_inbox
 from cli.commands.agents.relay.steps import RelayTuning
 
-__all__ = ["CSRF", "FAST", "SLOW", "THREAD", "Printed", "relay_lease", "running", "until"]
+__all__ = [
+    "CSRF",
+    "FAST",
+    "REAL_CLOCK",
+    "SLOW",
+    "THREAD",
+    "Printed",
+    "relay_lease",
+    "running",
+    "until",
+]
 
 THREAD = UUID("b9d32d0d-bd27-40fc-83e8-692769b21523")
 FAST = RelayTuning(
@@ -44,6 +55,12 @@ def relay_lease(lease: dict[str, Any], machine: MachineIdentityReader) -> RelayL
     )
 
 
+# meiva:note
+# The system clock: the relay paces its batches against real time, and the leases it serves
+# expire in the throwaway database's own real time.
+REAL_CLOCK = Clock(ClockConfig("UTC", None, message_timestamp_weekday=False), timers=SYSTEM_TIMERS)
+
+
 @asynccontextmanager
 async def running(
     lease: RelayLease,
@@ -57,7 +74,13 @@ async def running(
     listener = RedisInboundListener(redis_url, lease.agent_id)
     task = asyncio.create_task(
         push_inbox(
-            lease, db=database, bus=event_bus, listener=listener, adapter=adapter, tuning=tuning
+            lease,
+            db=database,
+            bus=event_bus,
+            listener=listener,
+            adapter=adapter,
+            tuning=tuning,
+            clock=REAL_CLOCK,
         )
     )
     try:

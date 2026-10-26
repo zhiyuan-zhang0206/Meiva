@@ -27,7 +27,7 @@ from typing import NamedTuple, TypeGuard, assert_never
 
 import psutil
 
-from base.clock import SYSTEM_TIMERS
+from base.clock import Timers
 from base.cluster import session_name
 from base.cluster.machine import MachineIdentityReader, MachineRoles
 from base.deploy import start_trace
@@ -307,12 +307,13 @@ def await_root_status(
     client: RootClient,
     launch: RootLaunch,
     *,
+    timers: Timers,
     proc: subprocess.Popen[bytes] | None = None,
     timeout_s: float = _ROOT_READY_TIMEOUT_S,
     interval_s: float = READY_POLL_INTERVAL_S,
 ) -> RootSnapshot:
     """Poll the control socket until the daemon serves, or fail with its log tail."""
-    started = SYSTEM_TIMERS.monotonic()
+    started = timers.monotonic()
     while True:
         if proc is not None and proc.poll() is not None:
             raise RootDriverError(
@@ -323,13 +324,13 @@ def await_root_status(
         if snapshot is not None:
             return snapshot
         unmet = unmet_step(
-            elapsed_s=SYSTEM_TIMERS.monotonic() - started,
+            elapsed_s=timers.monotonic() - started,
             timeout_s=timeout_s,
             interval_s=interval_s,
         )
         match unmet:
             case Retry(after_s):
-                SYSTEM_TIMERS.sleep(after_s)
+                timers.sleep(after_s)
             case Expired():
                 raise RootDriverError(
                     f"meiva-root did not become ready within {timeout_s:.0f}s; "
@@ -344,6 +345,7 @@ def seed_via_helper(
     env: Mapping[str, str],
     *,
     helper: HelperFactory,
+    timers: Timers,
     timeout_s: float = _ROOT_READY_TIMEOUT_S,
     interval_s: float = READY_POLL_INTERVAL_S,
 ) -> None:
@@ -356,7 +358,7 @@ def seed_via_helper(
         keeper = helper().seed_root(seed)
     except Exception as exc:
         raise RootDriverError(f"root_seed over the helper failed: {exc}") from exc
-    started = SYSTEM_TIMERS.monotonic()
+    started = timers.monotonic()
     while True:
         verdict = keeper_verdict(keeper, str(launch.run_dir))
         match verdict:
@@ -369,13 +371,13 @@ def seed_via_helper(
             case _:
                 assert_never(verdict)
         unmet = unmet_step(
-            elapsed_s=SYSTEM_TIMERS.monotonic() - started,
+            elapsed_s=timers.monotonic() - started,
             timeout_s=timeout_s,
             interval_s=interval_s,
         )
         match unmet:
             case Retry(after_s):
-                SYSTEM_TIMERS.sleep(after_s)
+                timers.sleep(after_s)
             case Expired():
                 raise RootDriverError(
                     f"the helper did not bring meiva-root up within {timeout_s:.0f}s "
@@ -396,6 +398,7 @@ def bring_up_root(
     *,
     retained_children: list[subprocess.Popen[bytes]],
     helper: HelperFactory | None,
+    timers: Timers,
 ) -> RootSnapshot:
     """Start through the required platform owner; never change ownership on failure."""
     if helper is not None:
@@ -405,11 +408,11 @@ def bring_up_root(
                 "activate a reviewed signed helper supporting durable root stop before "
                 "starting services. Refusing direct spawning outside the permission ancestry"
             )
-        seed_via_helper(launch, env, helper=helper)
-        return await_root_status(client, launch)
+        seed_via_helper(launch, env, helper=helper, timers=timers)
+        return await_root_status(client, launch, timers=timers)
     proc = spawn_direct(launch, env, retained_children=retained_children)
     print(f"  + meiva-root spawned directly (pid {proc.pid})")
-    return await_root_status(client, launch, proc=proc)
+    return await_root_status(client, launch, proc=proc, timers=timers)
 
 
 def stop_root_process(
@@ -419,6 +422,7 @@ def stop_root_process(
     timeout_s: float,
     helper: HelperFactory | None,
     home: Path,
+    timers: Timers,
     interval_s: float = READY_POLL_INTERVAL_S,
 ) -> None:
     """Stop through the keeper on macOS, or SIGTERM; await native root exit."""
@@ -439,18 +443,18 @@ def stop_root_process(
             raise RootDriverError("helper did not retain root stop intent")
     else:
         identity.send_signal(signal.SIGTERM)
-    started = SYSTEM_TIMERS.monotonic()
+    started = timers.monotonic()
     while True:
         if not identity.live() and root_status(client) is None:
             return
         unmet = unmet_step(
-            elapsed_s=SYSTEM_TIMERS.monotonic() - started,
+            elapsed_s=timers.monotonic() - started,
             timeout_s=timeout_s,
             interval_s=interval_s,
         )
         match unmet:
             case Retry(after_s):
-                SYSTEM_TIMERS.sleep(after_s)
+                timers.sleep(after_s)
             case Expired():
                 raise RootDriverError(
                     f"meiva-root at {root_run_dir(home)} did not stop within {timeout_s:.0f}s"
@@ -576,6 +580,7 @@ def bring_up_cold_root(
     *,
     retained_children: list[subprocess.Popen[bytes]],
     helper: HelperFactory | None,
+    timers: Timers,
 ) -> RootSnapshot:
     from services.supervision.meiva_root_glue.manifests import write_manifest
 
@@ -583,7 +588,7 @@ def bring_up_cold_root(
     write_manifest(launch.manifests, manifest)
     with start_trace.phase("root spawn"):
         return bring_up_root(
-            launch, client, env, retained_children=retained_children, helper=helper
+            launch, client, env, retained_children=retained_children, helper=helper, timers=timers
         )
 
 
@@ -602,6 +607,7 @@ def launch_service_tree(
     runtime: StartRuntime,
     honor_restart_budget: bool,
     inputs: RootLaunchInputs,
+    timers: Timers,
 ) -> LaunchOutcome:
     home = inputs.home
     env = managed_service_env(inputs.service_path, environ=inputs.environment)
@@ -630,6 +636,7 @@ def launch_service_tree(
                 env,
                 retained_children=retained_children,
                 helper=helper,
+                timers=timers,
             )
             require_root_owner(snapshot, helper=helper, home=home)
             require_same_generation(manifest, snapshot, reconcile=reconcile)
@@ -745,6 +752,7 @@ def stop_root_service_tree(
     force: bool = False,
     helper: HelperFactory | None,
     home: Path,
+    timers: Timers,
 ) -> None:
     """Stop the root-owned tree — everything, or only the units not preserved.
 
@@ -779,6 +787,7 @@ def stop_root_service_tree(
                     timeout_s=max(0.0, deadline - time.monotonic()),
                     helper=helper,
                     home=home,
+                    timers=timers,
                 )
                 print("  ✓ meiva-root stopped (tree down, root exited)")
         case _:
