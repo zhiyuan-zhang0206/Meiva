@@ -37,7 +37,7 @@ from cli.commands.data_plane import maintenance_stop
 from cli.commands.data_plane.config import DataPlaneConfig
 from cli.commands.data_plane.maintenance.plan import RedisShutdownMode, ShutdownRedis, StopPostgres
 from cli.commands.data_plane.maintenance.process_scan import judge, refusal
-from cli.commands.data_plane.stop_waits import StopLegs, deadline_after
+from cli.commands.data_plane.stop_waits import Deadline, StopLegs
 from cli.commands.data_plane.tests.native_processes import (
     owned_pooler,
     running_pooler,
@@ -78,12 +78,14 @@ def test_a_redis_of_this_home_that_nothing_recorded_refuses_the_stop(unit_home: 
         running_redis(instance.redis_data_dir(unit_home)) as ours,
         pytest.raises(RuntimeError, match=rf"unrecorded or replacement.*redis pid {ours.pid}"),
     ):
-        maintenance_stop.require_no_unrecorded({}, home=unit_home)
+        maintenance_stop.require_no_unrecorded({}, home=unit_home, timers=SYSTEM_TIMERS)
 
 
 def test_a_recorded_redis_is_accounted_for(unit_home: Path) -> None:
     with running_redis(instance.redis_data_dir(unit_home)) as ours:
-        maintenance_stop.require_no_unrecorded({"redis": frozenset({ours.pid})}, home=unit_home)
+        maintenance_stop.require_no_unrecorded(
+            {"redis": frozenset({ours.pid})}, home=unit_home, timers=SYSTEM_TIMERS
+        )
 
 
 # meiva:note
@@ -92,7 +94,7 @@ def test_a_recorded_redis_is_accounted_for(unit_home: Path) -> None:
 def test_processes_of_a_sibling_home_are_not_unrecorded(unit_home: Path) -> None:
     sibling = _sibling(unit_home)
     with running_redis(sibling / "redis"), running_pooler(sibling):
-        maintenance_stop.require_no_unrecorded({}, home=unit_home)
+        maintenance_stop.require_no_unrecorded({}, home=unit_home, timers=SYSTEM_TIMERS)
 
 
 @pytest.mark.parametrize("relative_ini", [False, True])
@@ -103,9 +105,11 @@ def test_a_pooler_of_this_home_that_nothing_recorded_refuses_the_stop(
         with pytest.raises(
             RuntimeError, match=rf"unrecorded or replacement.*pgbouncer pid {ours.pid}"
         ):
-            maintenance_stop.require_no_unrecorded({}, home=unit_home)
+            maintenance_stop.require_no_unrecorded({}, home=unit_home, timers=SYSTEM_TIMERS)
 
-        maintenance_stop.require_no_unrecorded({"pgbouncer": frozenset({ours.pid})}, home=unit_home)
+        maintenance_stop.require_no_unrecorded(
+            {"pgbouncer": frozenset({ours.pid})}, home=unit_home, timers=SYSTEM_TIMERS
+        )
 
 
 # meiva:note
@@ -119,7 +123,7 @@ def test_a_pooler_of_this_home_that_nothing_recorded_refuses_the_stop(
 def test_a_process_whose_directory_cannot_be_read_is_reported_not_raised() -> None:
     assert os.geteuid() != 0, "root reads every working directory; this needs the suite's user"
     with sleeping_child(undumpable=True) as child:
-        seen = maintenance_stop.look_at(psutil.Process(child.pid), "postgres")
+        seen = maintenance_stop.look_at(psutil.Process(child.pid), "postgres", timers=SYSTEM_TIMERS)
 
         assert seen.locator is None and not seen.other_user and not seen.exiting
         problem = refusal(judge((seen,), homes={"postgres": "/h/pg"}, recorded={}))
@@ -146,7 +150,9 @@ def test_a_redis_that_never_answers_cannot_hold_the_stop_past_its_deadline(
         started = time.monotonic()
 
         with pytest.raises((TimeoutError, RuntimeError)):
-            maintenance_stop.stop(plane, 0.3, home=unit_home, producer=operator_pipeline)
+            maintenance_stop.stop(
+                plane, 0.3, home=unit_home, producer=operator_pipeline, timers=SYSTEM_TIMERS
+            )
 
         assert time.monotonic() - started < 1.5
 
@@ -167,7 +173,7 @@ def test_a_redis_connection_ended_after_capture_cannot_shut_down_another_connect
             # meiva:note
             # redis-py's async command stubs are partially unknown; the pyright directives
             # below say only that.
-            deadline = deadline_after(10)
+            deadline = Deadline.after(10, SYSTEM_TIMERS)
             dedicated = AsyncRedis(
                 host="127.0.0.1",
                 port=server.port,
@@ -179,7 +185,7 @@ def test_a_redis_connection_ended_after_capture_cannot_shut_down_another_connect
                 dedicated,
                 port=server.port,
                 data_dir=instance.redis_data_dir(unit_home),
-                deadline=deadline,
+                deadline=deadline.at,
             )
             assert identity is not None
             connection_id = await dedicated.client_id()  # pyright: ignore[reportUnknownMemberType]
@@ -225,7 +231,12 @@ def test_a_replaced_postmaster_identity_fails_the_leg_and_leaves_postgres_runnin
     try:
         assert (
             instance.start_pg(
-                plane, port, home=unit_home, retained_children=retained, machine=command_machine
+                plane,
+                port,
+                home=unit_home,
+                retained_children=retained,
+                machine=command_machine,
+                timers=SYSTEM_TIMERS,
             )
             == 0
         )
@@ -241,7 +252,11 @@ def test_a_replaced_postmaster_identity_fails_the_leg_and_leaves_postgres_runnin
         with pytest.raises(RuntimeError, match="replacement"):
             asyncio.run(
                 maintenance_stop.request_stop(
-                    StopPostgres(), replaced, unused_client, deadline_after(10), context
+                    StopPostgres(),
+                    replaced,
+                    unused_client,
+                    Deadline.after(10, SYSTEM_TIMERS),
+                    context,
                 )
             )
 
@@ -281,6 +296,7 @@ def test_the_stop_ends_a_whole_local_data_plane_in_order(
                     home=unit_home,
                     retained_children=retained,
                     machine=command_machine,
+                    timers=SYSTEM_TIMERS,
                 )
                 == 0
             )
@@ -293,6 +309,7 @@ def test_the_stop_ends_a_whole_local_data_plane_in_order(
                 home=unit_home,
                 retained_children=retained,
                 producer=operator_pipeline,
+                timers=SYSTEM_TIMERS,
             )
 
             assert stopped.stopped == ("pgbouncer", "postgres", "redis")
@@ -307,6 +324,6 @@ def test_the_stop_ends_a_whole_local_data_plane_in_order(
                 closing(socket.create_connection(("127.0.0.1", store.port), timeout=2)),
             ):
                 pass
-            maintenance_stop.require_no_unrecorded({}, home=unit_home)
+            maintenance_stop.require_no_unrecorded({}, home=unit_home, timers=SYSTEM_TIMERS)
     finally:
         owned_postgres.stop(data, timeout=10, retained_children=retained, timers=SYSTEM_TIMERS)

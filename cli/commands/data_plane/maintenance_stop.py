@@ -22,7 +22,6 @@ import contextlib
 import socket
 import subprocess
 import sys
-import time
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from pathlib import Path
@@ -35,7 +34,7 @@ from redis.backoff import NoBackoff
 from redis.exceptions import ConnectionError as RedisConnectionError
 from redis.exceptions import RedisError
 
-from base.clock import SYSTEM_TIMERS
+from base.clock import Timers
 from base.cluster import ownership
 from base.cluster import postgres as owned_postgres
 from base.cluster.dataplane import pooler as pooler_files
@@ -67,12 +66,12 @@ from cli.commands.data_plane.maintenance.report_lines import (
     pooler_clients_line,
     pooler_console_unreadable_line,
 )
+from cli.commands.data_plane.pooler.ini import listen_port
 from cli.commands.data_plane.stop_budget import postgres_fast_budget_s
 from cli.commands.data_plane.stop_waits import (
     DEFAULT_STOP_LEGS,
+    Deadline,
     StopLegs,
-    deadline_after,
-    remaining,
     report_postgres_stop_escalation,
     wait_for_exit,
 )
@@ -98,11 +97,11 @@ def _working_directory(process: psutil.Process) -> str | None:
 # is made once more after a short pause, because a process that is exiting (or exec-ing) refuses
 # its working directory for an instant and then is gone: the second read raises NoSuchProcess and
 # the candidate drops out, where a process that stays unreadable is reported as that.
-def _locator(process: psutil.Process, name: str) -> str | None:
+def _locator(process: psutil.Process, name: str, timers: Timers) -> str | None:
     read = pooler.config_of if service_of(name) == "pgbouncer" else _working_directory
     found = read(process)
     if found is None:
-        time.sleep(_REREAD_PAUSE_S)
+        timers.sleep(_REREAD_PAUSE_S)
         found = read(process)
     return found
 
@@ -110,7 +109,7 @@ def _locator(process: psutil.Process, name: str) -> str | None:
 # meiva:note
 # One candidate process as the process table shows it now. A process that exits while it is
 # read is not a candidate; one whose uid or attributing path cannot be read is reported as that.
-def look_at(process: psutil.Process, name: str) -> SeenProcess:
+def look_at(process: psutil.Process, name: str, *, timers: Timers) -> SeenProcess:
     try:
         if process.uids().real != Host.system().uid:
             return SeenProcess(process.pid, name, other_user=True, exiting=False, locator=None)
@@ -120,18 +119,18 @@ def look_at(process: psutil.Process, name: str) -> SeenProcess:
     if exiting:
         return SeenProcess(process.pid, name, other_user=False, exiting=True, locator=None)
     return SeenProcess(
-        process.pid, name, other_user=False, exiting=False, locator=_locator(process, name)
+        process.pid, name, other_user=False, exiting=False, locator=_locator(process, name, timers)
     )
 
 
-def _seen_processes() -> tuple[SeenProcess, ...]:
+def _seen_processes(timers: Timers) -> tuple[SeenProcess, ...]:
     seen: list[SeenProcess] = []
     for process in psutil.process_iter(["pid", "name"]):
         name = process.info["name"]
         if name not in SCANNED_NAMES:
             continue
         try:
-            seen.append(look_at(process, name))
+            seen.append(look_at(process, name, timers=timers))
         except psutil.NoSuchProcess:
             continue
     return tuple(seen)
@@ -144,13 +143,15 @@ def _seen_processes() -> tuple[SeenProcess, ...]:
 # A missing pidfile or refused port is not evidence of no local process, so the process table
 # is scanned too. `recorded` maps each service to the pids of its captured process and
 # descendants (PostgreSQL worker processes share the postmaster's data directory).
-def require_no_unrecorded(recorded: Mapping[str, frozenset[int]], *, home: Path) -> None:
+def require_no_unrecorded(
+    recorded: Mapping[str, frozenset[int]], *, home: Path, timers: Timers
+) -> None:
     homes = {
         "postgres": str(instance.pg_data_dir(home).resolve()),
         "redis": str(instance.redis_data_dir(home).resolve()),
         "pgbouncer": str(pooler_files.ini_path().resolve()),
     }
-    problem = refusal(judge(_seen_processes(), homes=homes, recorded=recorded))
+    problem = refusal(judge(_seen_processes(timers), homes=homes, recorded=recorded))
     if problem is not None:
         raise RuntimeError(problem)
 
@@ -163,9 +164,9 @@ def require_no_unrecorded(recorded: Mapping[str, frozenset[int]], *, home: Path)
 # the stop: the line (stderr, log, and the returned value) names the remote clients a
 # coordinated stop should already have stopped first. A console that cannot be read is reported
 # as that, never as an empty list, whatever made it unreadable.
-def report_pooler_clients(identity: OwnedProcess, *, home: Path) -> str | None:
+def report_pooler_clients(*, home: Path) -> str | None:
     try:
-        port = OwnedPooler.from_config(identity, pooler_files.ini_path()).port
+        port = listen_port(pooler_files.ini_path().read_text())
         found = pooler_files.clients(port, read_pooler_admin(home).password)
     except Exception as exc:
         line = pooler_console_unreadable_line(repr(exc))
@@ -185,8 +186,8 @@ def report_pooler_clients(identity: OwnedProcess, *, home: Path) -> str | None:
 # meiva:note
 # One Redis command bound by the stop's deadline. redis-py's command stubs are partially unknown;
 # the pyright directive says only that.
-async def _redis_command(client: Redis, deadline: float, *args: str) -> None:
-    await asyncio.wait_for(client.execute_command(*args), remaining(deadline))  # pyright: ignore[reportUnknownMemberType, reportUnknownArgumentType]
+async def _redis_command(client: Redis, deadline: Deadline, *args: str) -> None:
+    await asyncio.wait_for(client.execute_command(*args), deadline.remaining())  # pyright: ignore[reportUnknownMemberType, reportUnknownArgumentType]
 
 
 # meiva:note
@@ -217,9 +218,9 @@ class MaintenanceStop:
 # Redis' save. A stop whose remaining time is not larger than the reserve gives the fast
 # shutdown all of it; the escalation legs then overrun the deadline by their own bounded waits,
 # like the shell-session closure's SIGKILL leg.
-def postgres_fast_budget(deadline: float, legs: StopLegs) -> float:
+def postgres_fast_budget(deadline: Deadline, legs: StopLegs) -> float:
     reserve = fast_shutdown_reserve_s(legs.cleanup_wait_s, legs.kill_wait_s)
-    return postgres_fast_budget_s(remaining(deadline), reserve)
+    return postgres_fast_budget_s(deadline.remaining(), reserve)
 
 
 # meiva:note
@@ -229,7 +230,7 @@ async def request_stop(
     step: StopStep,
     identity: OwnedProcess,
     client: Redis,
-    deadline: float,
+    deadline: Deadline,
     context: StopContext,
     *,
     retained_children: list[subprocess.Popen[bytes]] | None = None,
@@ -246,7 +247,7 @@ async def request_stop(
                 immediate_wait=context.legs.cleanup_wait_s,
                 kill_wait=context.legs.kill_wait_s,
                 retained_children=retained_children,
-                timers=SYSTEM_TIMERS,
+                timers=deadline.timers,
             )
             if escalation is not None:
                 return report_postgres_stop_escalation(escalation, producer=context.producer)
@@ -258,8 +259,8 @@ async def request_stop(
             with contextlib.suppress(RedisConnectionError):
                 await _redis_command(client, deadline, "SHUTDOWN", mode.value)
         case StopPooler():
-            custodian = OwnedPooler.from_config(identity, pooler_files.ini_path())
-            if not custodian.stop(deadline=deadline):
+            custodian = OwnedPooler.from_config(identity, pooler_files.ini_path(), deadline.timers)
+            if not custodian.stop(deadline=deadline.at):
                 raise TimeoutError("PgBouncer stop incomplete; custody retained")
         case _:
             assert_never(step)
@@ -270,15 +271,15 @@ async def request_stop(
 # The dedicated admin connection of the stop. The default user is the native instance's admin
 # identity; the runtime URL can carry a restricted ACL user's different password, which is not
 # admin auth. Every wait of the client is bound by what is left of the stop's deadline.
-def _admin_client(config: DataPlaneConfig, port: int, deadline: float) -> Redis:
+def _admin_client(config: DataPlaneConfig, port: int, deadline: Deadline) -> Redis:
     return Redis(
         host="127.0.0.1",
         port=port,
         password=config.redis_admin_password or None,
         decode_responses=True,
         single_connection_client=True,
-        socket_connect_timeout=remaining(deadline),
-        socket_timeout=remaining(deadline),
+        socket_connect_timeout=deadline.remaining(),
+        socket_timeout=deadline.remaining(),
         retry=Retry(NoBackoff(), 0),
     )
 
@@ -286,22 +287,22 @@ def _admin_client(config: DataPlaneConfig, port: int, deadline: float) -> Redis:
 # meiva:note
 # Cleanup must not wait another full socket timeout after the shared deadline. Close this
 # private transport without waiting for peer EOF.
-async def _release(client: Redis, deadline: float) -> None:
+async def _release(client: Redis, deadline: Deadline) -> None:
     if client.connection is not None:
         await client.connection.disconnect(nowait=True)
-    await asyncio.wait_for(client.aclose(), max(0.001, deadline - time.monotonic()))
+    await asyncio.wait_for(client.aclose(), max(0.001, deadline.at - deadline.timers.monotonic()))
 
 
-def _require_nothing_left(port: int, deadline: float, home: Path) -> None:
-    remaining(deadline)
+def _require_nothing_left(port: int, deadline: Deadline, home: Path) -> None:
+    deadline.remaining()
     if (
         ownership.postgres(instance.pg_data_dir(home)) is not None
         or ownership.pooler(pooler_files.ini_path(), pooler_files.pidfile_path()) is not None
     ):
         raise RuntimeError("data-plane process appeared during held stop")
-    require_no_unrecorded({}, home=home)
+    require_no_unrecorded({}, home=home, timers=deadline.timers)
     try:
-        with socket.create_connection(("127.0.0.1", port), timeout=remaining(deadline)):
+        with socket.create_connection(("127.0.0.1", port), timeout=deadline.remaining()):
             raise RuntimeError("Redis endpoint still accepts connections after held stop")
     except ConnectionRefusedError:
         return
@@ -312,7 +313,7 @@ async def _end_services(
     captured: Mapping[str, OwnedProcess],
     trees: Mapping[str, set[OwnedProcess]],
     client: Redis,
-    deadline: float,
+    deadline: Deadline,
     context: StopContext,
     *,
     retained_children: list[subprocess.Popen[bytes]] | None,
@@ -322,12 +323,12 @@ async def _end_services(
     clients: list[str] = []
     for step in steps:
         name, identity = step.service, captured[step.service]
-        remaining(deadline)
+        deadline.remaining()
         if not identity.live():
             raise RuntimeError(f"{name} identity changed before stop")
         if (
             isinstance(step, StopPooler)
-            and (line := report_pooler_clients(identity, home=context.home)) is not None
+            and (line := report_pooler_clients(home=context.home)) is not None
         ):
             clients.append(line)
         note = await request_stop(
@@ -342,7 +343,7 @@ async def _end_services(
 
 async def _stop(
     config: DataPlaneConfig,
-    deadline: float,
+    deadline: Deadline,
     context: StopContext,
     *,
     save: bool,
@@ -357,7 +358,7 @@ async def _stop(
     custody = ownership.RedisConnectionCustody()
     try:
         redis_process = await custody.capture(
-            client, port=port, data_dir=instance.redis_data_dir(context.home), deadline=deadline
+            client, port=port, data_dir=instance.redis_data_dir(context.home), deadline=deadline.at
         )
         captured = {
             name: process
@@ -368,6 +369,7 @@ async def _stop(
         require_no_unrecorded(
             {name: frozenset(member.pid for member in tree) for name, tree in trees.items()},
             home=context.home,
+            timers=deadline.timers,
         )
         # meiva:note
         # Every service is identified before the first stop; no foreign Redis endpoint can be
@@ -398,8 +400,9 @@ def stop(
     retained_children: list[subprocess.Popen[bytes]] | None = None,
     producer: Callable[[], EventPipeline],
     legs: StopLegs = DEFAULT_STOP_LEGS,
+    timers: Timers,
 ) -> MaintenanceStop:
-    deadline = deadline_after(timeout)
+    deadline = Deadline.after(timeout, timers)
     if config.is_remote:
         raise RuntimeError("maintenance cannot verify a remote-managed data-plane stop")
     return asyncio.run(

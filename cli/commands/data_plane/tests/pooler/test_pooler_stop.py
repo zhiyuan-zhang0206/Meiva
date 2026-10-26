@@ -22,6 +22,7 @@ import psutil
 import psycopg
 import pytest
 
+from base.clock import SYSTEM_TIMERS
 from base.cluster import port_preflight
 from base.cluster.machine import MachineIdentityReader
 from base.native_process.ownership import OwnedProcess
@@ -88,13 +89,14 @@ def test_repeated_normal_stop_preserves_waiting_transaction(
             failure: RuntimeError | TimeoutError | None = None
             try:
                 if _attempt and compensation_retry:
-                    pooler.stop_pgbouncer()
+                    pooler.stop_pgbouncer(timers=SYSTEM_TIMERS)
                 else:
                     maintenance_stop.stop(
                         pooler_plane(data_plane_config),
                         _STOP_BUDGET_S,
                         home=unit_home,
                         producer=operator_pipeline,
+                        timers=SYSTEM_TIMERS,
                     )
             except (RuntimeError, TimeoutError) as exc:
                 failure = exc
@@ -192,7 +194,9 @@ def test_a_restart_cannot_replace_a_pooler_holding_a_transaction(
 # for the live pooler's birth, exactly as the crashed stop would have left it.
 def test_a_recorded_intent_never_authorizes_another_signal(unit_home: Path) -> None:
     with running_pooler(unit_home) as running:
-        custodian = OwnedPooler.from_config(running.identity, running.directory / "pgbouncer.ini")
+        custodian = OwnedPooler.from_config(
+            running.identity, running.directory / "pgbouncer.ini", timers=SYSTEM_TIMERS
+        )
         intent = running.directory / "stop-intent.json"
         intent.write_text(render_intent(_birth_of(running.identity)))
 
@@ -215,7 +219,9 @@ def test_an_intent_for_an_earlier_birth_does_not_stop_this_one_from_being_stoppe
     unit_home: Path,
 ) -> None:
     with running_pooler(unit_home) as running:
-        custodian = OwnedPooler.from_config(running.identity, running.directory / "pgbouncer.ini")
+        custodian = OwnedPooler.from_config(
+            running.identity, running.directory / "pgbouncer.ini", timers=SYSTEM_TIMERS
+        )
         intent = running.directory / "stop-intent.json"
         earlier = native_birth(
             running.identity.pid,
@@ -237,7 +243,9 @@ def test_an_intent_for_an_earlier_birth_does_not_stop_this_one_from_being_stoppe
 # the pooler keeps serving.
 def test_an_expired_stop_budget_never_admits_a_signal(unit_home: Path) -> None:
     with running_pooler(unit_home) as running:
-        custodian = OwnedPooler.from_config(running.identity, running.directory / "pgbouncer.ini")
+        custodian = OwnedPooler.from_config(
+            running.identity, running.directory / "pgbouncer.ini", timers=SYSTEM_TIMERS
+        )
 
         with pytest.raises(TimeoutError, match="stop deadline expired; custody retained"):
             custodian.stop(deadline=time.monotonic() - 1)
@@ -259,7 +267,7 @@ def test_a_replaced_pid_is_reported_gone_and_not_signalled(tmp_path: Path) -> No
             real.birth + 1,
             real.starttime + 1 if real.starttime is not None else None,
         )
-        custodian = OwnedPooler(replaced, 16433, tmp_path / "pgbouncer.ini")
+        custodian = OwnedPooler(replaced, 16433, tmp_path / "pgbouncer.ini", timers=SYSTEM_TIMERS)
 
         assert custodian.stop(deadline=time.monotonic() + 1)
 
@@ -277,7 +285,9 @@ def test_a_foreign_listener_refuses_before_intent_or_signal(tmp_path: Path) -> N
         with contextlib.closing(socket.socket(socket.AF_INET, socket.SOCK_STREAM)) as foreign:
             foreign.bind(("127.0.0.1", 0))
             foreign.listen()
-            custodian = OwnedPooler(recorded, foreign.getsockname()[1], tmp_path / "pgbouncer.ini")
+            custodian = OwnedPooler(
+                recorded, foreign.getsockname()[1], tmp_path / "pgbouncer.ini", timers=SYSTEM_TIMERS
+            )
 
             with pytest.raises(RuntimeError, match="does not belong"):
                 custodian.stop(deadline=time.monotonic() + 1)
@@ -288,7 +298,9 @@ def test_a_foreign_listener_refuses_before_intent_or_signal(tmp_path: Path) -> N
 
 def test_a_corrupt_stop_intent_cannot_authorize_another_signal(unit_home: Path) -> None:
     with running_pooler(unit_home) as running:
-        custodian = OwnedPooler.from_config(running.identity, running.directory / "pgbouncer.ini")
+        custodian = OwnedPooler.from_config(
+            running.identity, running.directory / "pgbouncer.ini", timers=SYSTEM_TIMERS
+        )
         (running.directory / "stop-intent.json").write_text(json.dumps({"pid": running.pid}))
 
         with pytest.raises(RuntimeError, match="invalid PgBouncer stop intent"):

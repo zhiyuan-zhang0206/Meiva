@@ -28,6 +28,7 @@ import pytest
 from redis.exceptions import RedisError
 
 from base import cluster
+from base.clock import SYSTEM_TIMERS
 from base.cluster import authority, ownership
 from base.cluster.dataplane import pooler as base_pooler
 from base.cluster.dataplane.direct_url import ClusterDirectUrl
@@ -131,7 +132,7 @@ def _intent(home: Path, record: cluster.ClusterRecord, values: dict[str, str]) -
 
 def _teardown(born: Born) -> None:
     try:
-        pooler.stop_pgbouncer(force=True)
+        pooler.stop_pgbouncer(force=True, timers=SYSTEM_TIMERS)
     finally:
         subprocess.run(
             [str(pg_tool("pg_ctl")), "-D", str(born.home / "pg"), "-m", "immediate", "stop"],
@@ -240,6 +241,7 @@ def _prepare_schema(
             database_factory=operator_database,
             machine=command_runtime.machine,
             macos=command_runtime.host.platform.system == "darwin",
+            timers=SYSTEM_TIMERS,
         )
         == 0
     )
@@ -263,6 +265,7 @@ def _birth(
         database_factory=operator_database,
         machine=command_runtime.machine,
         macos=command_runtime.host.platform.system == "darwin",
+        timers=SYSTEM_TIMERS,
     )
 
 
@@ -433,6 +436,7 @@ def test_pooler_restart_revokes_a_removed_user_a_reload_would_keep(
         daemon_env=daemon_process_env(),
         macos=command_runtime.host.platform.system == "darwin",
         bind_wait_s=ci.BIND_WAIT_TIMEOUT_S,
+        timers=SYSTEM_TIMERS,
     )
     rc = pooler.ensure_pgbouncer(spec)
     assert rc == 0
@@ -457,6 +461,7 @@ def test_unchanged_userlist_reloads_without_restart(
         database_factory=operator_database,
         machine=command_runtime.machine,
         macos=command_runtime.host.platform.system == "darwin",
+        timers=SYSTEM_TIMERS,
     )
     after = ownership.pooler(base_pooler.ini_path(), base_pooler.pidfile_path())
     assert before is not None and after is not None and before.pid == after.pid
@@ -480,6 +485,7 @@ def test_ordinary_start_refuses_a_stray_group_member_and_leaves_it_untouched(
             database_factory=operator_database,
             machine=command_runtime.machine,
             macos=command_runtime.host.platform.system == "darwin",
+            timers=SYSTEM_TIMERS,
         )
     with born.admin() as conn:
         assert conn.execute(
@@ -505,6 +511,7 @@ def test_ordinary_start_holds_on_an_invariant_violation(
             database_factory=operator_database,
             machine=command_runtime.machine,
             macos=command_runtime.host.platform.system == "darwin",
+            timers=SYSTEM_TIMERS,
         )
 
 
@@ -526,6 +533,7 @@ def test_ordinary_start_refuses_a_home_without_a_ledger_before_any_effect(
             database_factory=operator_database,
             machine=command_runtime.machine,
             macos=command_runtime.host.platform.system == "darwin",
+            timers=SYSTEM_TIMERS,
         )
         == 1
     )
@@ -539,6 +547,7 @@ def test_ordinary_start_refuses_a_home_without_a_ledger_before_any_effect(
             database_factory=operator_database,
             machine=command_runtime.machine,
             macos=command_runtime.host.platform.system == "darwin",
+            timers=SYSTEM_TIMERS,
         )
 
 
@@ -565,6 +574,7 @@ def test_interrupted_birth_retries_to_the_same_generation(
         database_factory=operator_database,
         machine=command_runtime.machine,
         macos=macos,
+        timers=SYSTEM_TIMERS,
     )
 
     interrupted = ledger.require_ledger(configured.home)
@@ -577,6 +587,7 @@ def test_interrupted_birth_retries_to_the_same_generation(
         database_factory=operator_database,
         machine=command_runtime.machine,
         macos=macos,
+        timers=SYSTEM_TIMERS,
     )
     settled = ledger.require_ledger(configured.home)
     assert settled.active is not None and settled.active.number == 0

@@ -15,6 +15,7 @@ from pathlib import Path
 import pytest
 from psycopg.conninfo import make_conninfo
 
+from base.clock import SYSTEM_TIMERS
 from base.cluster.checkpoint_schema import CheckpointSchema, PostgresCheckpointSchema
 from base.cluster.dataplane.pg_admin import pg_admin_url
 from base.cluster.dataplane.pg_tools import pg_tool
@@ -63,6 +64,7 @@ def owned_pg(
                 home=unit_home,
                 retained_children=children,
                 machine=command_runtime.machine,
+                timers=SYSTEM_TIMERS,
             )
             == 0
         )

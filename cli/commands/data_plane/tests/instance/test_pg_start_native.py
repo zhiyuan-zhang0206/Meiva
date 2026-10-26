@@ -14,6 +14,7 @@ import psutil
 import psycopg
 import pytest
 
+from base.clock import SYSTEM_TIMERS
 from base.cluster import ownership
 from base.cluster.dataplane.pg_tools import pg_tool
 from base.cluster.machine import MachineIdentityReader
@@ -46,6 +47,7 @@ def _start(
         retained_children=cluster.retained_children,
         machine=machine,
         tuning=StartTuning(bind_wait_s=bind_wait_s),
+        timers=SYSTEM_TIMERS,
     )
 
 

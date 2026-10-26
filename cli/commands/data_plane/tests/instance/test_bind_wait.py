@@ -14,6 +14,7 @@ import time
 
 import pytest
 
+from base.clock import SYSTEM_TIMERS
 from cli.commands.data_plane import cluster_instance as instance
 
 # meiva:note
@@ -33,7 +34,9 @@ def test_an_address_no_interface_holds_is_not_assigned() -> None:
 @pytest.mark.parametrize("alias", ["localhost", "127.0.0.1", "::1", "ip6-localhost"])
 def test_a_loopback_only_host_never_waits(alias: str) -> None:
     started = time.monotonic()
-    assert instance.wait_for_reachable_bind(host=alias, timeout_s=60.0) is True
+    assert (
+        instance.wait_for_reachable_bind(host=alias, timeout_s=60.0, timers=SYSTEM_TIMERS) is True
+    )
     assert time.monotonic() - started < 1.0
 
 
@@ -43,11 +46,21 @@ def test_a_loopback_only_host_never_waits(alias: str) -> None:
 # which the test only probes and never listens on).
 def test_an_address_the_kernel_can_bind_settles_on_the_first_look() -> None:
     started = time.monotonic()
-    assert instance.wait_for_reachable_bind(host="0.0.0.0", timeout_s=60.0) is True  # noqa: S104
+    assert (
+        instance.wait_for_reachable_bind(
+            host="0.0.0.0",  # noqa: S104
+            timeout_s=60.0,
+            timers=SYSTEM_TIMERS,
+        )
+        is True
+    )
     assert time.monotonic() - started < 1.0
 
 
 # meiva:note
 # The address is absent and the budget is spent: fail fast (the caller aborts the start).
 def test_an_address_that_never_appears_gives_up_at_the_deadline() -> None:
-    assert instance.wait_for_reachable_bind(host=_UNASSIGNED, timeout_s=0.0) is False
+    assert (
+        instance.wait_for_reachable_bind(host=_UNASSIGNED, timeout_s=0.0, timers=SYSTEM_TIMERS)
+        is False
+    )

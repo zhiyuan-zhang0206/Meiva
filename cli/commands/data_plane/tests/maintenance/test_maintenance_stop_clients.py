@@ -41,7 +41,7 @@ def test_remaining_clients_are_named_in_stderr_and_returned_for_the_report(
     unit_home: Path,
     capsys: pytest.CaptureFixture[str],
 ) -> None:
-    custodian, pooled, _direct = native_pooler
+    _custodian, pooled, _direct = native_pooler
     _admin_password(unit_home)
     with (
         psycopg.connect(pooled, prepare_threshold=None, application_name="probe-a") as first,
@@ -50,7 +50,7 @@ def test_remaining_clients_are_named_in_stderr_and_returned_for_the_report(
         first.execute("SELECT 1")
         second.execute("SELECT 1")
 
-        line = maintenance_stop.report_pooler_clients(custodian.identity, home=unit_home)
+        line = maintenance_stop.report_pooler_clients(home=unit_home)
 
     err = capsys.readouterr().err
     assert "2 client(s) still connected when the pooler stops" in err
@@ -62,8 +62,8 @@ def test_remaining_clients_are_named_in_stderr_and_returned_for_the_report(
 def test_a_console_with_no_clients_says_nothing(
     unit_home: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    with running_pooler(unit_home, console_password=_admin_password(unit_home)) as running:
-        line = maintenance_stop.report_pooler_clients(running.identity, home=unit_home)
+    with running_pooler(unit_home, console_password=_admin_password(unit_home)):
+        line = maintenance_stop.report_pooler_clients(home=unit_home)
 
     assert capsys.readouterr().err == "" and line is None
 
@@ -74,8 +74,8 @@ def test_a_console_with_no_clients_says_nothing(
 def test_a_home_without_an_admin_credential_is_reported_as_unreadable_not_as_empty(
     unit_home: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    with running_pooler(unit_home) as running:
-        line = maintenance_stop.report_pooler_clients(running.identity, home=unit_home)
+    with running_pooler(unit_home):
+        line = maintenance_stop.report_pooler_clients(home=unit_home)
 
     assert "could not be listed before the pooler stop" in capsys.readouterr().err
     assert line is not None and "no pooler admin credential" in line
@@ -85,8 +85,8 @@ def test_a_console_that_refuses_the_credential_is_reported_as_unreadable(
     unit_home: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
     _admin_password(unit_home)
-    with running_pooler(unit_home, console_password=_OTHER_CONSOLE_PASSWORD) as running:
-        line = maintenance_stop.report_pooler_clients(running.identity, home=unit_home)
+    with running_pooler(unit_home, console_password=_OTHER_CONSOLE_PASSWORD):
+        line = maintenance_stop.report_pooler_clients(home=unit_home)
 
     assert "could not be listed before the pooler stop" in capsys.readouterr().err
     assert line is not None and "OperationalError" in line

@@ -24,6 +24,7 @@ import psutil
 import psycopg
 import pytest
 
+from base.clock import SYSTEM_TIMERS
 from base.cluster import ownership
 from base.cluster.dataplane import pooler as pooler_files
 from base.cluster.dataplane.pg_throwaway_base import ThrowawayConfig
@@ -120,6 +121,7 @@ def pooler_spec(
         bind_wait_s=bind_wait_s,
         stop_wait_s=stop_wait_s,
         ready_wait_s=ready_wait_s,
+        timers=SYSTEM_TIMERS,
     )
 
 
@@ -272,7 +274,12 @@ def native_pooler(
             with psycopg.connect(direct, autocommit=True) as conn:
                 conn.execute("CREATE TABLE pooler_stop_receipt (value integer)")
             yield (
-                OwnedPooler(running.identity, running.port, running.directory / "pgbouncer.ini"),
+                OwnedPooler(
+                    running.identity,
+                    running.port,
+                    running.directory / "pgbouncer.ini",
+                    timers=SYSTEM_TIMERS,
+                ),
                 f"postgresql://meiva@127.0.0.1:{running.port}/test",
                 direct,
             )

@@ -20,7 +20,7 @@ from pathlib import Path
 from typing import assert_never
 
 from base.agents.context.clients import DatabaseFactory
-from base.clock import SYSTEM_TIMERS
+from base.clock import Timers
 from base.events.live.bus import EventBus, event_bus_config_from_config
 from base.native_process.process_control import SYSTEM_PROCESS_CONTROL
 from base.paths import run_dir
@@ -39,7 +39,7 @@ from cli.commands.data_plane.stop_budget import (
     settle_until,
     time_left,
 )
-from cli.commands.data_plane.stop_waits import PROCESS_CLEANUP_WAIT_S, PROCESS_KILL_WAIT_S
+from cli.commands.data_plane.stop_waits import PROCESS_CLEANUP_WAIT_S, PROCESS_KILL_WAIT_S, Deadline
 from cli.commands.lifecycle.stop.closure_plan import (
     AwaitNoSessions,
     FailShells,
@@ -154,19 +154,19 @@ def _shell_sessions_incomplete(
 #
 # The service drops a session from its table the moment its teardown is claimed, so this only
 # waits out one still tearing down; a shell session born during the closure fails it.
-def await_no_shell_sessions(home: Path, until: float, stage: str) -> None:
+def await_no_shell_sessions(home: Path, until: float, stage: str, timers: Timers) -> None:
     while True:
         left = live_shell_sessions(home)
         if not left:
             return
-        delay = poll_delay(time_left(until, SYSTEM_TIMERS.monotonic()), _SETTLE_POLL_S)
+        delay = poll_delay(time_left(until, timers.monotonic()), _SETTLE_POLL_S)
         if delay is None:
             raise StopIncompleteError(
                 f"shell-session closure incomplete — shell sessions still present after the "
                 f"closure ended every session it captured: {left}",
                 stage=stage,
             )
-        SYSTEM_TIMERS.sleep(delay)
+        timers.sleep(delay)
 
 
 # meiva:note
@@ -221,7 +221,7 @@ def settle_closure(
     outcome: closure.Outcome,
     reason: str,
     *,
-    deadline: float,
+    deadline: Deadline,
     direct_db: bool,
     database_factory: DatabaseFactory,
     command: CommandRuntime,
@@ -241,8 +241,10 @@ def settle_closure(
             case FailShells():
                 raise _shell_sessions_incomplete(outcome, step, "shell-sessions")
             case AwaitNoSessions():
-                until = settle_until(deadline, SYSTEM_TIMERS.monotonic(), SHELL_SESSION_KILL_WAIT_S)
-                await_no_shell_sessions(command.home, until, "shell-sessions")
+                until = settle_until(
+                    deadline.at, deadline.timers.monotonic(), SHELL_SESSION_KILL_WAIT_S
+                )
+                await_no_shell_sessions(command.home, until, "shell-sessions", deadline.timers)
             case _:
                 assert_never(step)
 
@@ -258,14 +260,14 @@ def settle_closure(
 # still tearing down after that gets the rest of the deadline, and at least
 # `SHELL_SESSION_KILL_WAIT_S`, to leave the service's table.
 def close_shell_sessions(
-    deadline: float,
+    deadline: Deadline,
     *,
     direct_db: bool,
     database_factory: DatabaseFactory,
     command: CommandRuntime,
     cleanup_wait_s: float,
 ) -> None:
-    grace_s = closure_grace_s(deadline - SYSTEM_TIMERS.monotonic(), cleanup_wait_s)
+    grace_s = closure_grace_s(deadline.at - deadline.timers.monotonic(), cleanup_wait_s)
     outcome, reason = run_closure(command.home, grace_s, SHELL_SESSION_KILL_WAIT_S)
     settle_closure(
         outcome,

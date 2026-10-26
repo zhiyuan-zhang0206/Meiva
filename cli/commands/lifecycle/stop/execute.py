@@ -9,7 +9,6 @@
 from __future__ import annotations
 
 import subprocess
-import time
 from collections.abc import Callable, Generator
 from contextlib import contextmanager
 from dataclasses import dataclass
@@ -17,7 +16,7 @@ from pathlib import Path
 from typing import TextIO, assert_never
 
 from base.agents.context.clients import DatabaseFactory
-from base.clock import Clock
+from base.clock import Clock, Timers
 from base.clock.configuration import clock_config_from_boot
 from base.deploy.lifecycle import start_serving
 from base.deploy.lifecycle.status_journal import phase as journal_phase
@@ -25,7 +24,7 @@ from base.telemetry import EventPipeline
 from cli.commands.data_plane import maintenance_stop
 from cli.commands.data_plane.bringup import stop_cluster_instance
 from cli.commands.data_plane.config import data_plane_config_from_boot
-from cli.commands.data_plane.stop_waits import remaining
+from cli.commands.data_plane.stop_waits import Deadline
 from cli.commands.lifecycle import root_driver
 from cli.commands.lifecycle.stop import browser, extras, shell_sessions
 from cli.commands.lifecycle.stop.announce import announce_stopping
@@ -70,7 +69,7 @@ class StopEnvironment:
 # failed stop reports even though the plan raised before it could return anything.
 @dataclass
 class StopRun:
-    deadline: float
+    deadline: Deadline
     phases: list[tuple[str, float]]
 
 
@@ -90,18 +89,18 @@ class StopOutcome:
 # timeline durably. An untimed step (`label` None) just runs.
 @contextmanager
 def timed_phase(
-    home: Path, pid: int, phases: list[tuple[str, float]], label: str | None
+    home: Path, pid: int, phases: list[tuple[str, float]], label: str | None, timers: Timers
 ) -> Generator[None]:
     if label is None:
         yield
         return
-    started = time.monotonic()
+    started = timers.monotonic()
     print(f"  · stop phase: {label}", flush=True)
     with journal_phase(home, label, pid=pid):
         try:
             yield
         finally:
-            phases.append((label, time.monotonic() - started))
+            phases.append((label, timers.monotonic() - started))
 
 
 # meiva:note
@@ -118,7 +117,11 @@ def execute_plan(
     clock = Clock(clock_config_from_boot(env.command.config), timers=env.command.timers)
     for step in plan.steps:
         with timed_phase(
-            env.command.home, env.command.pid, run.phases, phase_label(step) if timed else None
+            env.command.home,
+            env.command.pid,
+            run.phases,
+            phase_label(step) if timed else None,
+            env.command.timers,
         ):
             reported = _perform(step, env, run, retained_children, clock=clock)
         if reported is not None:
@@ -148,7 +151,7 @@ def _perform(
         case StopServices(preserve, force, _phase):
             root_driver.stop_root_service_tree(
                 preserve=preserve,
-                timeout_s=remaining(run.deadline),
+                timeout_s=run.deadline.remaining(),
                 force=force,
                 helper=command.helper,
                 home=command.home,
@@ -181,6 +184,7 @@ def _perform(
                         macos=command.host.platform.system == "darwin",
                         retained_children=retained_children,
                         producer=env.producer,
+                        timers=command.timers,
                     )
                 )
                 if failure is not None:
@@ -188,10 +192,11 @@ def _perform(
             else:
                 stopped = maintenance_stop.stop(
                     config,
-                    remaining(run.deadline),
+                    run.deadline.remaining(),
                     home=command.home,
                     retained_children=retained_children,
                     producer=env.producer,
+                    timers=command.timers,
                 )
                 return StopOutcome(stopped.notes, stopped.clients)
         case SkipDataPlane(plane):

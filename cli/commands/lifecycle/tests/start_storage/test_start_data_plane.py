@@ -17,6 +17,7 @@ import psycopg
 import pytest
 
 from base import cluster
+from base.clock import SYSTEM_TIMERS
 from base.host.db_authority.api import read_telemetry_token, telemetry_token, telemetry_token_path
 from cli import start_identity
 from cli.commands.data_plane import bringup
@@ -79,6 +80,7 @@ def test_gateway_data_plane_brings_up_own_instance(
             database_factory=operator_database,
             machine=command_runtime.machine,
             macos=NATIVE_TEST_MACOS,
+            timers=SYSTEM_TIMERS,
         )
         == 0
     )
@@ -117,6 +119,7 @@ def test_gateway_data_plane_refuses_a_home_without_a_ledger_before_any_effect(
             database_factory=operator_database,
             machine=command_runtime.machine,
             macos=command_runtime.host.platform.system == "darwin",
+            timers=SYSTEM_TIMERS,
         )
         == 1
     )
@@ -143,6 +146,7 @@ def test_gateway_data_plane_no_record_is_error(
             database_factory=operator_database,
             machine=command_runtime.machine,
             macos=command_runtime.host.platform.system == "darwin",
+            timers=SYSTEM_TIMERS,
         )
         == 1
     )
@@ -166,6 +170,7 @@ def test_local_launch_without_owner_cannot_publish_authority(
             database_factory=operator_database,
             machine=command_runtime.machine,
             macos=command_runtime.host.platform.system == "darwin",
+            timers=SYSTEM_TIMERS,
         )
 
     assert not telemetry_token_path(unit_home.resolve()).exists()
