@@ -4,12 +4,14 @@ wake-time admission of an agent's stored model configuration."""
 from __future__ import annotations
 
 import asyncio
+import random
 import time
 from collections import OrderedDict
 from collections.abc import Awaitable, Callable, Iterable, Mapping
 from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Any
+from uuid import UUID
 
 from langchain_core.language_models.chat_models import BaseChatModel
 from psycopg_pool import AsyncConnectionPool
@@ -88,6 +90,10 @@ class HostPolicy:
     # meiva:note
     # The environment an external harness session starts from (`child_env("runner", ...)`).
     harness_environ: Mapping[str, str]
+    # meiva:note
+    # The generator the host draws identities and credentials from: a runtime's startup notice
+    # key and each relay credential. The daemon root builds it once (a CSPRNG).
+    rng: random.Random
 
     def resolve_slices(
         self,
@@ -360,6 +366,7 @@ async def build_runtime(
     catalog: ModelCatalog,
     keys: ProviderKeys,
     llm_override: str,
+    permissions_notice_key: UUID,
     harness: Harness = Harness.MEIVA,
     registry: SessionRegistry | None = None,
     registrations: RegistrationStore | None = None,
@@ -376,6 +383,7 @@ async def build_runtime(
         catalog=catalog,
         keys=keys,
         llm_override=llm_override,
+        permissions_notice_key=permissions_notice_key,
     )
     return AgentRuntime(
         fingerprint=fingerprint,

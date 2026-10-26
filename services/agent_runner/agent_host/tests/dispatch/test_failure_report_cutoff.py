@@ -1,4 +1,5 @@
 import asyncio
+import random
 from collections.abc import Generator
 from contextlib import contextmanager
 from functools import partial
@@ -13,6 +14,7 @@ from psycopg_pool import AsyncConnectionPool
 from redis.asyncio.client import PubSub
 
 from agent.graph import build_graph
+from agent.graph.exec.process import read_parent_facts
 from agent.graph.llm_errors import FatalProviderError
 from agent.ownership.hosted import admit_hosted_runtime
 from agent.ownership.tests.ownership_support import PublicationDefectBus
@@ -39,6 +41,12 @@ from services.agent_runner.agent_host.runtime import TurnOutcome
 from services.agent_runner.agent_host.tests.host_policy import configured_policy
 from services.agent_runner.agent_host.tests.runtime.host_support import EventTap
 from services.agent_runner.agent_host.tests.runtime.host_support import event_tap as event_tap
+
+
+# meiva:note
+# A fresh seeded generator for each use, so no test sees another's draws.
+def _rng() -> random.Random:
+    return random.Random(0)  # noqa: S311
 
 
 def _failure() -> PendingTurnFailure:
@@ -129,7 +137,7 @@ async def test_error_visible_after_cutoff_allows_immediate_new_chat(
     received: list[Error] = []
     new_chats: list[int] = []
     async with AsyncPostgresSaver.from_conn_string(db_url) as saver:
-        graph = build_graph(saver, ExtensionRegistry())
+        graph = build_graph(saver, ExtensionRegistry(), parent=read_parent_facts(), rng=_rng())
         config: RunnableConfig = {"configurable": {"thread_id": str(agent_id)}}
         async with asyncio.TaskGroup() as workers:
             await publisher.start(workers)

@@ -1,3 +1,4 @@
+import random
 from dataclasses import replace
 from typing import Any
 
@@ -31,6 +32,7 @@ def configured_policy(**changes: Any) -> HostPolicy:
             clock_factory=Clock.from_settings,
             harness_registration_ttl_seconds=daemon.harness_registration_ttl_seconds,
             harness_environ={"HOME": "/nonexistent/host-policy-home"},
+            rng=random.Random(0),  # noqa: S311
             stall=StallTiming(
                 scan_interval_s=daemon.host_turn_progress_scan_interval_seconds,
                 no_progress_timeout_s=daemon.host_turn_no_progress_timeout_seconds,

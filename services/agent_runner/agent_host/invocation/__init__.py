@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import random
 from collections.abc import Callable
 from dataclasses import dataclass
 from functools import partial
@@ -54,6 +55,7 @@ class HandoffSettlement:
     timestamps: TimestampSource
     local_machine: str
     home: Path
+    rng: random.Random
 
 
 @dataclass(frozen=True)
@@ -83,7 +85,7 @@ async def settle_handoff_before_invocation(
             activate_accepted=False,
             incarnation=ctx.original_incarnation,
             timestamps=settlement.timestamps,
-            host=process_host(settlement.local_machine),
+            host=process_host(settlement.local_machine, rng=settlement.rng),
         )
         if not fresh_input or ctx.original_incarnation is None:
             return False
@@ -162,7 +164,7 @@ async def finish_completed_invocation(
                 hooks.settlement.relays,
                 incarnation=ctx.original_incarnation,
                 timestamps=hooks.settlement.timestamps,
-                host=process_host(hooks.settlement.local_machine),
+                host=process_host(hooks.settlement.local_machine, rng=hooks.settlement.rng),
             )
         return TurnOutcome(exited=False, crashed=False)
     return None

@@ -1,3 +1,4 @@
+import random
 from typing import Any
 from unittest.mock import MagicMock
 from uuid import uuid4
@@ -28,6 +29,12 @@ from services.agent_runner.agent_host.invocation import (
 )
 from services.agent_runner.agent_host.scheduling.pending_wakes import scan_rows
 from services.agent_runner.agent_host.tests.host_policy import configured_policy
+
+
+# meiva:note
+# A fresh seeded generator for each use, so no test sees another's draws.
+def _rng() -> random.Random:
+    return random.Random(0)  # noqa: S311
 
 
 @pytest.mark.parametrize(
@@ -148,6 +155,7 @@ async def test_the_scan_wake_settles_the_receipt_it_selected_the_row_for(
             ),
             local_machine="handoff-scan",
             home=meiva_home(),
+            rng=_rng(),
         ),
     )
     assert db_conn.execute(

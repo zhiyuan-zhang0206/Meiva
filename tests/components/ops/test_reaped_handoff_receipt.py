@@ -4,6 +4,7 @@
 # Nothing else in the suite covers resurrect x handoff, and without this the deadlock would
 # only move from zero seconds to the reap grace.
 
+import random
 from collections.abc import Iterator
 from pathlib import Path
 from typing import Any
@@ -38,6 +39,13 @@ from services.agent_runner.agent_host.invocation import (
     settle_handoff_before_invocation,
 )
 from services.agent_runner.agent_host.tests.host_policy import configured_policy
+
+
+# meiva:note
+# A fresh seeded generator for each use, so no test sees another's draws.
+def _rng() -> random.Random:
+    return random.Random(0)  # noqa: S311
+
 
 _MACHINE = "claim-test"
 
@@ -150,6 +158,7 @@ async def test_a_reaped_handoff_receipt_lands_on_the_resurrected_agents_first_tu
         ),
         local_machine=_MACHINE,
         home=meiva_home(),
+        rng=_rng(),
     )
     await settle_handoff_before_invocation(
         graph, ctx, agent_id, fresh_input=False, settlement=settlement
