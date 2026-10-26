@@ -68,6 +68,14 @@ def _failing(
     return server
 
 
+@pytest.mark.parametrize(
+    ("url", "expected"),
+    [("http://localhost:4100/", 4100), ("http://localhost/", 3000), ("", 3000)],
+)
+def test_the_entry_port_is_the_url_port_or_3000(url: str, expected: int) -> None:
+    assert daemon.entry_port_of(url) == expected
+
+
 def test_an_interrupt_ends_serving_and_closes_the_listener() -> None:
     server = _idle_server(_InterruptedServer)
     daemon.serve(server)

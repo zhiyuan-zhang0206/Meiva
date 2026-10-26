@@ -61,3 +61,4 @@ def test_an_ipv6_host_is_bracketed_once(host: str, expected: str) -> None:
 def test_the_app_port_is_the_configured_one_or_the_slot_after_the_entry() -> None:
     assert app_port_of(None, entry_port=3000) == 3001
     assert app_port_of(4800, entry_port=3000) == 4800
+    assert app_port_of(0, entry_port=4100) == 4101

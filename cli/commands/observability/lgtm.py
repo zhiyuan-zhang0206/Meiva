@@ -29,6 +29,7 @@ def cmd_lgtm_status(*, home: Path, machine: MachineIdentityReader) -> int:
 # meiva:note
 # Print each backend's probe verdict and detail.
 def print_lgtm_status() -> None:
+    urls = backend_urls()
     for name in BACKENDS:
-        result = probe_backend(name)
+        result = probe_backend(name, urls=urls)
         print(f"  {name}: {result.verdict.value} ({result.detail})")

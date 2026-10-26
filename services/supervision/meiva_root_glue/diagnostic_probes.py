@@ -8,21 +8,21 @@ from __future__ import annotations
 
 import shutil
 from collections.abc import Callable, Mapping
+from dataclasses import dataclass, field
 from functools import partial
 from pathlib import Path
 from urllib.parse import urlsplit
 
 from base.agents.impersonation import live_lease_on_machine
+from base.clock import Clock
 from base.cluster.machine import MachineIdentityReader
 from base.cluster.record import ClusterRecord
-from base.config import get_field
 from base.daemon.health import DaemonProbe
 from base.db import Database
 from base.host import brew_pin, proc
 from base.host.db_authority.api import read_telemetry_token
 from base.host.net.ports import SYSTEM_URL_OPENER, UrlOpener
 from base.host.net.url_secret import names_foreign_host
-from base.native_process.os_platform import is_macos
 from base.telemetry.station_endpoint import StationEndpointConfig
 from services.desktop.browser.probe import probe_browser as _default_probe_browser
 from services.supervision.healthchecks.browser_reach import (
@@ -45,12 +45,26 @@ from services.supervision.meiva_root.health import LeaseProbe
 from services.supervision.meiva_root_glue.diagnostics import Diagnostic
 
 
-def _setting(
-    name: str, overrides: Mapping[str, str | int | float | bool] | None = None
-) -> str | int | float | bool:
-    if overrides is not None and name in overrides:
-        return overrides[name]
-    return get_field(name)
+# meiva:note
+# The settings the host diagnostics decide on, read once by the root that builds them
+# (`glue.build_wiring`) and frozen: a probe never reads configuration while it runs. `loki_url` is
+# the local Loki base URL with a wildcard bind already resolved to loopback. The two URLs and the
+# environment can carry credentials, so they stay out of the repr.
+@dataclass(frozen=True)
+class ProbeConfig:
+    home: Path
+    redis_url: str = field(repr=False)
+    db_url: str = field(repr=False)
+    pgbouncer_enabled: bool
+    observability_url: str
+    observability_otlp_port: int
+    gateway_health_url: str
+    browser_cdp_port: int
+    browser_profile: Path
+    browser_reach_timeout_s: float
+    browser_reach_probe_interval_s: float
+    loki_url: str
+    environment: Mapping[str, str] = field(repr=False)
 
 
 def brew_pins(
@@ -71,11 +85,10 @@ def brew_pins(
     return DaemonProbe.up("installed approved Homebrew formulae are pinned")
 
 
-def venv() -> DaemonProbe:
-    from base.native_process.child_env import inherited_process_env
+def venv(*, environment: Mapping[str, str]) -> DaemonProbe:
     from services.supervision.healthchecks import prod_venv
 
-    uv = shutil.which("uv")
+    uv = shutil.which("uv", path=environment.get("PATH", ""))
     if uv is None:
         return DaemonProbe.unavailable("uv unavailable: dependency consistency was not measured")
     # meiva:note
@@ -84,7 +97,7 @@ def venv() -> DaemonProbe:
     violations = prod_venv.venv_violations(
         source_root=Path(__file__).resolve().parents[3],
         uv=uv,
-        environment=inherited_process_env(),
+        environment=environment,
     )
     if violations:
         return DaemonProbe.down("; ".join(violations))
@@ -93,13 +106,12 @@ def venv() -> DaemonProbe:
 
 def redis_acl(
     *,
-    redis_url: str | None = None,
+    redis_url: str,
     connection: RedisPingConnection | None = None,
 ) -> DaemonProbe:
     from base.cluster import ownership
 
-    resolved_url = str(get_field("redis_url")) if redis_url is None else redis_url
-    port = ownership.redis_port_of(resolved_url)
+    port = ownership.redis_port_of(redis_url)
     if port is None:
         return DaemonProbe.unavailable("no explicit local Redis endpoint")
 
@@ -107,7 +119,7 @@ def redis_acl(
         from redis.exceptions import RedisError
 
         try:
-            _default_redis_ping(resolved_url, connection=connection)
+            _default_redis_ping(redis_url, connection=connection)
         except RedisError as exc:
             return DaemonProbe.down(f"native Redis runtime ACL PING failed: {type(exc).__name__}")
         return DaemonProbe.up("Redis runtime ACL authenticated and answered PING")
@@ -142,7 +154,7 @@ def _default_public_reachable(port: int, user: str, *, machine: MachineIdentityR
 def pgbouncer(
     *,
     machine: MachineIdentityReader,
-    home: Path | None = None,
+    home: Path,
     record: ClusterRecord | None = None,
     admin_password: str | None = None,
     loopback: bool | None = None,
@@ -150,16 +162,14 @@ def pgbouncer(
 ) -> DaemonProbe:
     from base.host.db_authority.delivery import POOLER_ADMIN
     from base.host.db_authority.model import AuthorityRefusedError
-    from base.paths import meiva_home
 
-    resolved_home = meiva_home() if home is None else home
-    resolved_record = _default_get_record(resolved_home) if record is None else record
+    resolved_record = _default_get_record(home) if record is None else record
     if resolved_record is None:
         return DaemonProbe.unavailable("no registry record for the local pooler")
     port = resolved_record.ports["pgbouncer"]
     if admin_password is None:
         try:
-            resolved_password = _default_pooler_admin_password(resolved_home)
+            resolved_password = _default_pooler_admin_password(home)
         except AuthorityRefusedError as exc:
             return DaemonProbe.unavailable(f"no pooler admin credential: {exc}")
     else:
@@ -185,27 +195,26 @@ def pgbouncer(
 
 def browser_reach(
     *,
-    url: str | None = None,
-    port: int | None = None,
-    timeout_s: float | None = None,
+    url: str,
+    port: int,
+    profile: Path,
+    timeout_s: float,
     browser_verdict: DaemonProbe | None = None,
     canary_result: CanaryResult | None = None,
     host_result: HostResult | None = None,
 ) -> DaemonProbe:
-    resolved_url = (str(get_field("gateway_health_url")) if url is None else url).strip()
+    resolved_url = url.strip()
     if not resolved_url:
         return DaemonProbe.unavailable("gateway reachability URL is not configured")
-    resolved_port = int(get_field("browser_cdp_port")) if port is None else port
-    resolved_timeout_s = (
-        float(get_field("browser_reach_timeout_s")) if timeout_s is None else timeout_s
-    )
 
     def protocol() -> DaemonProbe:
-        browser = _default_probe_browser() if browser_verdict is None else browser_verdict
+        browser = (
+            _default_probe_browser(port, profile) if browser_verdict is None else browser_verdict
+        )
         if not browser.alive:
             return DaemonProbe.unavailable(f"browser canary prerequisite failed: {browser.detail}")
         canary = (
-            _default_canary(resolved_port, resolved_url, resolved_timeout_s)
+            _default_canary(port, resolved_url, timeout_s)
             if canary_result is None
             else canary_result
         )
@@ -213,11 +222,7 @@ def browser_reach(
             return DaemonProbe.unavailable(canary.detail)
         if canary.outcome == "ok":
             return DaemonProbe.up(canary.detail)
-        host = (
-            _default_host_probe(resolved_url, resolved_timeout_s)
-            if host_result is None
-            else host_result
-        )
+        host = _default_host_probe(resolved_url, timeout_s) if host_result is None else host_result
         detail = f"browser={canary.detail}; host={host.detail}"
         if not host.ok:
             return DaemonProbe.unavailable(f"host baseline also failed: {detail}")
@@ -354,17 +359,15 @@ class StationProbe:
         return DaemonProbe.down("remote station OTLP ingress failed")
 
 
-def lgtm_write_path() -> DaemonProbe:
-    from base.telemetry.lgtm_local import backend_urls
+def lgtm_write_path(*, loki_url: str, clock: Clock) -> DaemonProbe:
     from services.supervision.healthchecks import lgtm
 
-    loki_url = backend_urls()["loki"]
     port = urlsplit(loki_url).port
     if port is None:
         return DaemonProbe.unavailable("native Loki endpoint has no explicit port")
 
     def protocol() -> DaemonProbe:
-        ok, reason = lgtm.write_path_probe(loki_url)
+        ok, reason = lgtm.write_path_probe(loki_url, clock=clock)
         return DaemonProbe.up(reason) if ok else DaemonProbe.down(reason)
 
     return protocol()
@@ -411,59 +414,65 @@ def build_diagnostics(
     *,
     database: Callable[[], Database],
     machine: MachineIdentityReader,
-    overrides: Mapping[str, str | int | float | bool] | None = None,
-    macos: bool | None = None,
+    config: ProbeConfig,
+    clock: Clock,
+    macos: bool,
 ) -> list[Diagnostic]:
     """Host policy is explicit; absent capabilities do not create fake samples."""
-    is_mac = is_macos() if macos is None else macos
     checks: list[Diagnostic] = []
-    if is_mac:
+    if macos:
         checks.append(Diagnostic("brew-pin", brew_pins))
-    checks.append(Diagnostic("venv", venv))
-    if is_mac:
+    checks.append(Diagnostic("venv", partial(venv, environment=config.environment)))
+    if macos:
         from services.supervision.healthchecks.permissions_helper import episode_reporter, probe
 
         checks.append(Diagnostic("permissions-helper", probe, report=episode_reporter()))
     if "gateway" in machine.role():
-        redis_url = str(_setting("redis_url", overrides))
-        is_remote = names_foreign_host(str(_setting("db_url", overrides)), redis_url)
+        is_remote = names_foreign_host(config.db_url, config.redis_url)
         if not is_remote:
-            checks.append(Diagnostic("redis-acl", partial(redis_acl, redis_url=redis_url)))
-            if bool(_setting("pgbouncer_enabled", overrides)):
-                checks.append(Diagnostic("pgbouncer", partial(pgbouncer, machine=machine)))
+            checks.append(Diagnostic("redis-acl", partial(redis_acl, redis_url=config.redis_url)))
+            if config.pgbouncer_enabled:
+                checks.append(
+                    Diagnostic("pgbouncer", partial(pgbouncer, machine=machine, home=config.home))
+                )
         # meiva:note
         # Cluster-wide record, one observer: the delivery comparison reads the whole fleet's
         # rows, so any other host's root would report the same finding.
         checks.append(Diagnostic("task-telemetry", task_telemetry(database), interval_s=3600))
-        obs_url = str(_setting("observability_url", overrides)).strip()
+        obs_url = config.observability_url.strip()
         if obs_url:
-            from base.paths import meiva_home
-
             station = StationProbe(
                 database=database,
                 config=StationEndpointConfig(
                     observability_url=obs_url,
-                    otlp_port=int(_setting("observability_otlp_port", overrides)),
+                    otlp_port=config.observability_otlp_port,
                 ),
-                home=meiva_home().resolve(),
+                home=config.home,
                 open_url=SYSTEM_URL_OPENER,
             )
             checks.append(Diagnostic("observatory-station", station.probe))
     if "browser" in requested:
-        timeout_s = float(_setting("browser_reach_timeout_s", overrides))
+        timeout_s = config.browser_reach_timeout_s
         checks.append(
             Diagnostic(
                 "browser-reach",
                 partial(
                     browser_reach,
-                    url=str(_setting("gateway_health_url", overrides)),
-                    port=int(_setting("browser_cdp_port", overrides)),
+                    url=config.gateway_health_url,
+                    port=config.browser_cdp_port,
+                    profile=config.browser_profile,
                     timeout_s=timeout_s,
                 ),
-                interval_s=max(60.0, float(_setting("browser_reach_probe_interval_s", overrides))),
+                interval_s=max(60.0, config.browser_reach_probe_interval_s),
                 timeout_s=max(20.0, timeout_s * 3 + 10),
             )
         )
     if "loki" in requested:
-        checks.append(Diagnostic("lgtm-write-path", lgtm_write_path, report=LokiReport()))
+        checks.append(
+            Diagnostic(
+                "lgtm-write-path",
+                partial(lgtm_write_path, loki_url=config.loki_url, clock=clock),
+                report=LokiReport(),
+            )
+        )
     return checks

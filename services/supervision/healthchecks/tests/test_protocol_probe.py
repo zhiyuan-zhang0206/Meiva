@@ -55,7 +55,7 @@ def test_unix_invalid_or_closed_ping_is_down(payload: bytes) -> None:
 
 
 def test_missing_unix_endpoint_is_down(tmp_path: Path) -> None:
-    assert probe.probe("mcp-daemon", home=tmp_path).verdict.value == "down"
+    assert probe.probe("mcp-daemon", home=tmp_path, browser_cdp_port=9222).verdict.value == "down"
 
 
 def test_protocol_ping_reads_the_pty_service_as_up(pty_service: PtyServiceProcess) -> None:
@@ -66,4 +66,4 @@ def test_protocol_ping_reads_the_pty_service_as_up(pty_service: PtyServiceProces
 
 def test_unknown_protocol_service_is_rejected(tmp_path: Path) -> None:
     with pytest.raises(ValueError, match="unsupported protocol probe: unknown-service"):
-        probe.probe("unknown-service", home=tmp_path)
+        probe.probe("unknown-service", home=tmp_path, browser_cdp_port=9222)
