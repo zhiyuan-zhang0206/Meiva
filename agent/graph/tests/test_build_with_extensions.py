@@ -83,7 +83,7 @@ def _write_manifest(plugin_dir: Path, *, sections: tuple[str, ...] = ()) -> None
 
 
 def _make_plugin(name: str, body: str | None = None) -> None:
-    root = paths.plugins_dir()
+    root = paths.plugins_dir(home=paths.meiva_home())
     plugin_dir = root / name
     plugin_dir.mkdir(parents=True, exist_ok=True)
     (plugin_dir / "plugin.py").write_text(body or f"__description__ = '{name}'\n")
@@ -91,7 +91,7 @@ def _make_plugin(name: str, body: str | None = None) -> None:
 
 
 def _make_external_plugin(name: str) -> None:
-    root = paths.plugins_dir()
+    root = paths.plugins_dir(home=paths.meiva_home())
     plugin_dir = root / name
     plugin_dir.mkdir(parents=True, exist_ok=True)
     (plugin_dir / "plugin.py").write_text(f"__description__ = '{name}'\n")
@@ -253,7 +253,7 @@ def test_duplicate_plugin_name_raises():
 
 def _make_face(name: str, body: str, *, sections: tuple[str, ...] = ()) -> None:
     """Give an existing test plugin an `agent_runtime` face; its manifest declares `sections`."""
-    plugin_dir = paths.plugins_dir() / name
+    plugin_dir = paths.plugins_dir(home=paths.meiva_home()) / name
     (plugin_dir / "agent_runtime.py").write_text(body)
     _write_manifest(plugin_dir, sections=sections)
 
@@ -334,7 +334,7 @@ def test_a_face_whose_contribute_misbehaves_is_skipped_not_fatal(contribute_body
 def _make_external_plugin_with(name: str, body: str) -> None:
     """External plugin with an explicit plugin.py body (the default helper
     writes only `__description__`)."""
-    plugin_dir = paths.plugins_dir() / name
+    plugin_dir = paths.plugins_dir(home=paths.meiva_home()) / name
     plugin_dir.mkdir(parents=True, exist_ok=True)
     (plugin_dir / "plugin.py").write_text(body, encoding="utf-8")
     _write_manifest(plugin_dir)
@@ -415,7 +415,7 @@ def test_external_plugin_relative_import_resolves_when_plugins_prefix_is_shadowe
     decoy.__path__ = ["/nonexistent/decoy"]  # pyright: ignore[reportAttributeAccessIssue]
     monkeypatch.setitem(sys.modules, "plugins", decoy)
 
-    pdir = paths.plugins_dir() / "meiva_ledger"
+    pdir = paths.plugins_dir(home=paths.meiva_home()) / "meiva_ledger"
     pdir.mkdir(parents=True)
     (pdir / "plugin.py").write_text(
         "from . import _helper\n__description__ = 'x'\nMARK = _helper.VALUE\n",
@@ -478,12 +478,16 @@ def test_dot_prefixed_dirs_are_not_discovered(tmp_path: Path) -> None:
     _make_external_plugin("ext")
     # same ghost name in BOTH roots: without the dot-prefix filter this would
     # raise DuplicatePlugin, not just mis-discover
-    for root in (repo_root, paths.plugins_dir()):
+    for root in (repo_root, paths.plugins_dir(home=paths.meiva_home())):
         ghost = root / ".ghost.staging"
         ghost.mkdir()
         (ghost / "plugin.py").write_text("__description__ = 'ghost'\n", encoding="utf-8")
 
-    assert set(discover_plugin_dirs(repo_dir=repo_root, user_dir=paths.plugins_dir())) == {
+    assert set(
+        discover_plugin_dirs(
+            repo_dir=repo_root, user_dir=paths.plugins_dir(home=paths.meiva_home())
+        )
+    ) == {
         "real",
         "ext",
     }

@@ -14,7 +14,7 @@ def _write_plugin(
     raw: str | None = None,
     manifest: bool = True,
 ) -> None:
-    directory = paths.plugins_dir() / name
+    directory = paths.plugins_dir(home=paths.meiva_home()) / name
     directory.mkdir(parents=True)
     (directory / "plugin.py").write_text('"""A test plugin."""\n', encoding="utf-8")
     if raw is not None:

@@ -432,7 +432,7 @@ class TestPauseHeartbeat:
         from base.paths import logs_dir
 
         day = _dt.now(_UTC).strftime("%Y%m%d")
-        path = logs_dir() / f"events-{day}.jsonl"
+        path = logs_dir(home=meiva_home()) / f"events-{day}.jsonl"
         assert path.exists(), "mirror file missing"
         event_row = None
         for line in reversed(path.read_text(encoding="utf-8").splitlines()):

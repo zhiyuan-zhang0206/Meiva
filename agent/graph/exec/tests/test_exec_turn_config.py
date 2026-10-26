@@ -28,7 +28,7 @@ from base.host.env.agent_env import AGENT_BIRTH_CONFIG_ENV, AGENT_CONFIG_OVERLAY
 from base.host.env.agent_slices import AgentSlices
 from base.lm.catalog import ModelCatalog
 from base.packages.plugin_providers import build_model_catalog
-from base.paths import workspace_dir_readonly
+from base.paths import meiva_home, workspace_dir_readonly
 from meiva.tests.fixtures.pin_agent import snapshot_clients_over
 
 
@@ -252,7 +252,14 @@ async def test_crop_limits_follow_each_turns_own_settings(
     assert "[output cropped:" in first_result.text
     assert "[output cropped:" not in second_result.text
     assert body in second_result.text
-    archives = list((workspace_dir_readonly(424206) / ".exec_output").glob("crop_*.txt"))
+    archives = list(
+        (workspace_dir_readonly(424206, home=meiva_home()) / ".exec_output").glob("crop_*.txt")
+    )
     assert len(archives) == 1 and archives[0].read_text() == body
     assert str(archives[0]) in first_result.text
-    assert list((workspace_dir_readonly(424207) / ".exec_output").glob("crop_*.txt")) == []
+    assert (
+        list(
+            (workspace_dir_readonly(424207, home=meiva_home()) / ".exec_output").glob("crop_*.txt")
+        )
+        == []
+    )
