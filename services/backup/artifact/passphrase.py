@@ -22,8 +22,8 @@ from __future__ import annotations
 
 import hashlib
 import os
+import random
 import re
-import secrets
 import tempfile
 from contextlib import suppress
 from pathlib import Path
@@ -48,9 +48,11 @@ def derive(cluster_secret: str) -> str:
     return hashlib.sha256(cluster_secret.encode()).hexdigest()
 
 
-def mint() -> str:
-    """A fresh random passphrase (256 bits), in the pinned file's format."""
-    return secrets.token_hex(32)
+# meiva:note
+# A fresh passphrase (256 bits) drawn from `rng`, in the pinned file's format. The birth root hands
+# in a `random.SystemRandom`; a test hands in a seeded generator.
+def mint(rng: random.Random) -> str:
+    return f"{rng.getrandbits(256):064x}"
 
 
 def fingerprint(passphrase: str) -> str:
@@ -101,13 +103,19 @@ def pin(home: Path, passphrase: str) -> None:
         raise PassphrasePinError(f"{pin_path(home)} pins another passphrase")
 
 
-def ensure_minted(home: Path) -> None:
-    """Birth: pin a freshly minted passphrase unless one is already pinned.
-
-    An interrupted birth that already pinned keeps its passphrase.
-    """
+# meiva:note
+# Birth: pin `passphrase`, which the caller minted, unless one is already pinned. An interrupted
+# birth that already pinned keeps its passphrase.
+def ensure_pinned(home: Path, *, passphrase: str) -> None:
     if pinned(home) is None:
-        pin(home, mint())
+        pin(home, passphrase)
+
+
+# meiva:note
+# The birth entry that mints for its caller. It stays only until the birth root passes a minted
+# value to `ensure_pinned` itself; then it and this module's `random` root go.
+def ensure_minted(home: Path) -> None:
+    ensure_pinned(home, passphrase=mint(random.SystemRandom()))
 
 
 def logical_backup_passphrase() -> str:
