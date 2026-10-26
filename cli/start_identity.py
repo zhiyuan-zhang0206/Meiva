@@ -216,14 +216,15 @@ def gateway_values(rec: cluster.ClusterRecord, inputs: IdentityInput) -> dict[st
     return derived
 
 
-def _publish_claim(home: Path, data: dict[str, Any]) -> None:
+# meiva:note
+# Publish a claim's payload. A gateway's logical backups are encrypted under a passphrase the
+# entry minted, independent of its cluster secret (an empty one included).
+def _publish_claim(home: Path, data: dict[str, Any], *, backup_passphrase: str) -> None:
     if data["phase"] == "claiming":
         if data["record"] is not None:
-            # A gateway's logical backups are encrypted under a passphrase minted
-            # here, independent of its cluster secret (an empty one included).
             from services.backup.artifact import passphrase
 
-            passphrase.ensure_minted(home)
+            passphrase.ensure_pinned(home, passphrase=backup_passphrase)
         upsert_env(home / ".env", data["env"])
         data["phase"] = "configured"
         # `.env` now holds the payload, credentials included; the intent keeps
@@ -270,17 +271,18 @@ def _require_unclaimed_state(home: Path) -> None:
         )
 
 
-def resume_claim(home: Path) -> None:
-    """Finish an interrupted claim from the payload its intent recorded.
-
-    The caller holds the home's `start-intent.lock`. The recorded ports and
-    credentials are published as they were minted; the input flags of the
-    interrupted run are not asked for again.
-    """
+# meiva:note
+# Finish an interrupted claim from the payload its intent recorded.
+#
+# The caller holds the home's `start-intent.lock`. The recorded ports and credentials are published
+# as they were minted; the input flags of the interrupted run are not asked for again.
+# `backup_passphrase` is the one this run's entry minted: a home whose interrupted claim already
+# pinned one keeps it.
+def resume_claim(home: Path, *, backup_passphrase: str) -> None:
     data = pending_claim(home)
     if data is None:
         raise RuntimeError("no interrupted claim to resume")
-    _publish_claim(home, data)
+    _publish_claim(home, data, backup_passphrase=backup_passphrase)
 
 
 def prepare_identity(inputs: IdentityInput) -> None:
@@ -330,7 +332,7 @@ def _create_claim(inputs: IdentityInput) -> None:
         "env": values,
     }
     _write(inputs.home / INTENT_NAME, data)
-    _publish_claim(inputs.home, data)
+    _publish_claim(inputs.home, data, backup_passphrase=inputs.birth.backup_passphrase)
 
 
 # --- what a home declares for itself, and the admission `meiva start` gives it -------------

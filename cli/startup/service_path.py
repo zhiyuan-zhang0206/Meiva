@@ -13,14 +13,15 @@ __all__ = ["BirthFacts", "CallerHost", "ServicePathChoice", "choose_service_path
 # meiva:note
 # What a home's birth needs that only the process entry can choose: the instant it is born and
 # the secrets minted for a gateway unit (the cluster's human secret unless the operator gave
-# one, and the two Redis logins). The entry mints them once per `meiva init`; they stay out of
-# every repr.
+# one, the two Redis logins, and the logical-backup passphrase). The entry mints them once per
+# `meiva init`; they stay out of every repr.
 @dataclass(frozen=True)
 class BirthFacts:
     now: datetime
     cluster_secret: str = field(repr=False)
     redis_admin_password: str = field(repr=False)
     redis_password: str = field(repr=False)
+    backup_passphrase: str = field(repr=False)
 
 
 # meiva:note
