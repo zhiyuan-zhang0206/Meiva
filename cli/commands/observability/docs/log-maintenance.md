@@ -41,10 +41,12 @@ is the explicit global override. `--family-days` activates the C baseline:
 agent-main, `meiva-agent-*` service stdout, `agent_host` (the per-turn agent
 runtime), and their archives 15 days; named PTY shell transcript/host files and
 computer-use snapshots 7 days; `gateway*`, `ops*`, `meiva-root` / `root` (the root
-supervisor's own log), and `*-watchdog` / `*_watchdog` service files and rotations
-30 days; all other service and native archives 15 days (the catch-all is a safety
-net, not a short leash: a service that lands there is a mapping todo, and the daily
-run now names it). The rotation shape also admits underscores, so
+supervisor's own log), `browser-mcp` / `computer-mcp` (the per-machine MCP daemons,
+a handful of 4-140 KB files each), and `*-watchdog` / `*_watchdog` service files
+and rotations 30 days; all other service and native archives 15 days. The
+catch-all is a safety net, not a short leash: a service that lands there is a
+mapping todo, and the run names it (see below). The rotation shape also admits
+underscores, so
 `delivery_watchdog` is in the watchdog family. Supply only the family values
 that differ; omitted values retain that baseline. In a mapping, `default=N`
 aliases `other=N` for the catch-all service family.
@@ -55,6 +57,21 @@ with its candidate count, days, and bytes. A file exactly at its cutoff is
 retained (`mtime < cutoff` is deleted). Delete failures are reported per path on
 stderr, remaining candidates are attempted, and the command exits nonzero if any
 inspection or deletion failed.
+
+Both modes then print one `retention_catch_all` line naming the services the map
+does not cover, for example
+`retention_catch_all\tservices=browser-mcp\tdays=15\tfiles=3`. It counts every
+allowlisted service file the scan read, at any age, not only the ones expiring
+today: a mapping todo has to be visible on the day a service first writes a log,
+not `other` days later. `services=-` is the explicit "nothing is unmapped"
+reading. Native archives in the catch-all (`loki.log.<date>` and friends) are not
+services and are never named there.
+
+Local logs have exactly this one lifecycle: `rotate` copies a live or
+day-old stdout log to a dated sibling, and `retention` deletes by family age.
+There is no archive chain, and none is missing -- anything that must be queried
+longer than its family window belongs in Loki or object storage, and anything that
+must be kept longer locally is a deliberate raise of that family's days.
 
 Converge registers one low-traffic daily job per machine. macOS launchd and
 Linux cron run rotation followed by retention at 04:40 local time; the second
