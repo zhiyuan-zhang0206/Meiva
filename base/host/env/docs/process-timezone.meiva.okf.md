@@ -9,7 +9,7 @@ tags:
 
 # Process timezone delivery
 
-`base/host/env/dotenv_boot.py:apply_process_timezone` owns the process clock
+`base/host/env/boot_actions.py:apply_process_timezone` owns the process clock
 operation. Its caller supplies the resolved authoritative timezone, or `None`
 when no authority exists. The operation does not read Settings, `MEIVA_TIMEZONE`
 or a timezone field default. A valid IANA name sets `TZ` for child processes and
@@ -26,12 +26,13 @@ The legacy `base.config.apply_cluster_timezone` facade resolves its existing
 cluster authority and calls the same operation; it does not own a second
 implementation.
 
-The operation is defined in the existing environment delivery owner, below
-configuration composition. ConfigBoot imports that definition directly, so a
-standalone configuration owner does not import a private operation from the
-root Settings facade. The exact entry module and its static `__all__` declare
-this operation alongside the owner's existing environment delivery interfaces.
-This change does not retire the legacy Settings facade or its full-build graph.
+The operation is defined in `base/host/env/boot_actions.py`, the module of the
+program-level operations that change the process itself (`apply_process_timezone`,
+`skip_config_fetch`, `enter_scratch_home`) and the root of that kind, below configuration
+composition. ConfigBoot imports that definition directly, so a standalone configuration
+owner does not import a private operation from the root Settings facade. `dotenv_boot`
+works on the mapping it is given and imports none of them. This change does not retire the
+legacy Settings facade or its full-build graph.
 
 ## Backup filename test premise
 

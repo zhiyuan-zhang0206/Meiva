@@ -20,7 +20,7 @@ from pathlib import Path
 # checkout's modules (without it, an editable install of another checkout
 # shadows them — same pattern as dump_event_fixtures.py / dump_openapi.py).
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent))
-from base.host.env.dotenv_boot import enter_scratch_home
+from base.host.env.boot_actions import enter_scratch_home
 
 if __name__ == "__main__":
     enter_scratch_home()

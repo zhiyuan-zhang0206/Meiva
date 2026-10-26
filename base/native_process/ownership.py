@@ -429,16 +429,17 @@ def assemble_process_metadata(
     return result
 
 
-def process_metadata() -> dict[str, Any]:
-    """Observed process facts for one caller, standardized for attestation.
-
-    Identity fields use the stable start time (`stable_create_time`) so a
-    later reader compares against the same value the kernel keeps. The parent
-    walk is bounded and records what it could observe instead of failing: a
-    permission gap on an ancestor path must not lose the facts below it.
-    """
-    # env-ok: inherited provider routing context, never an executor identity assertion
-    codex_home = os.environ.get("CODEX_HOME")
+# meiva:note
+# Observed process facts for one caller, standardized for attestation.
+#
+# `codex_home` is the `CODEX_HOME` the caller's invocation saw (provider routing context the
+# relay spec needs, never an executor identity assertion); the caller's root reads it.
+#
+# Identity fields use the stable start time (`stable_create_time`) so a
+# later reader compares against the same value the kernel keeps. The parent
+# walk is bounded and records what it could observe instead of failing: a
+# permission gap on an ancestor path must not lose the facts below it.
+def process_metadata(*, codex_home: str | None) -> dict[str, Any]:
     nodes: list[dict[str, object]] = []
     observation_error: str | None = None
     process = psutil.Process()

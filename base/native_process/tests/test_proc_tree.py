@@ -181,3 +181,14 @@ def test_process_metadata_records_the_script_of_a_node_ancestor() -> None:
     recorded_node, recorded_shell = ancestors
     assert recorded_node["name"] == "node" and recorded_node["script"] == "/opt/homebrew/bin/dsh"
     assert "script" not in recorded_shell
+
+
+# meiva:note
+# The facts name this very process, and `CODEX_HOME` is recorded only when the caller hands it in.
+def test_process_metadata_names_the_caller_and_records_the_codex_home_it_was_given() -> None:
+    given = proc_tree.process_metadata(codex_home="/codex")
+    absent = proc_tree.process_metadata(codex_home=None)
+
+    assert given["pid"] == absent["pid"] == os.getpid()
+    assert given["codex_home"] == "/codex"
+    assert "codex_home" not in absent

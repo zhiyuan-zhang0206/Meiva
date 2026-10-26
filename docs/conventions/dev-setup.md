@@ -152,7 +152,7 @@ export MEIVA_HOME="$(mktemp -d)" MEIVA_CONFIG_FETCH=skip   # a throwaway home: n
 
 Code enforces this in one place only, where the convention is sure to be broken by
 nobody's choice: the git hooks. pre-commit and pre-push launch scripts on every commit,
-so each hook script that reaches application code calls `dotenv_boot.enter_scratch_home()`
+so each hook script that reaches application code calls `boot_actions.enter_scratch_home()`
 itself (only when run as a program; `scripts/tests/test_hooks_scratch_home.py` derives the
 hook scripts from `.pre-commit-config.yaml`). The test harness sets a temporary home
 before any import. Every other script is run by a person or an agent on purpose, and the
