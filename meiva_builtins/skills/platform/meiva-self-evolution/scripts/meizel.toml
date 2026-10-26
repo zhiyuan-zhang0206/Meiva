@@ -1,12 +1,3 @@
-[purity]
-"audit.py" = "strict"
-"events_window.py" = "strict"
-"label.py" = "strict"
-"record.py" = "strict"
-"record_inputs.py" = "strict"
-"scan_report.py" = "strict"
-"window_records.py" = "strict"
-
 [roots]
 "aggregate.py" = { kinds = ["clock"], why = "CLI entry passes current UTC timestamp into main()" }
 "collect.py" = { kinds = ["clock", "db"], why = "CLI entry constructs cluster DB handle and passes current UTC timestamp into CollectFacts" }
@@ -14,9 +5,23 @@
 "evaluate.py" = { kinds = ["clock", "random"], why = "Skill evaluation driver stamps evaluation runs with UTC time and generates spawn idempotency keys" }
 "mine.py" = { kinds = ["clock"], why = "CLI entry passes current UTC timestamp into main() for default dataset resolution" }
 
+[purity]
+"audit.py" = "strict"
+"events_window.py" = "strict"
+"label.py" = "strict"
+"record.py" = "strict-to-be"
+"record_inputs.py" = "strict"
+"scan_report.py" = "strict-to-be"
+"window_records.py" = "strict-to-be"
+
 [debt.ambient-read]
 "collect.py#home base.paths.meiva_home" = 1
 "collect.py#settings base.cluster.machine.ambient.gateway_access_from_settings" = 1
 "evaluate.py#home base.paths.meiva_home" = 2
 "evaluate.py#home base.paths.workspace_dir" = 1
 "mine.py#home base.paths.meiva_home" = 1
+
+[debt.impure-call]
+"record.py#Path.resolve" = 1
+"scan_report.py#Path.resolve" = 1
+"window_records.py#Path.resolve" = 1

@@ -98,9 +98,9 @@ def _type_checking_ids(tree: ast.Module) -> set[int]:
 # meiva:note
 # Whether a sibling module exists as a `.py` file or package `__init__.py` in `d`.
 def _sibling_kind(d: Path, first: str, *, dotted: bool) -> str | None:
-    if lint_common.read_utf8_text(d / f"{first}.py") is not None:
+    if (d / f"{first}.py").is_file():
         return None if dotted else "file"
-    if lint_common.read_utf8_text(d / first / "__init__.py") is not None:
+    if (d / first / "__init__.py").is_file():
         return "pkg"
     return None
 

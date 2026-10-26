@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import pytest
 
+from meizel.contracts.analysis import render_policy
 from meizel.language.scan import is_imported_binding, module_bindings
 from meizel.tests.synthetic import RepoFactory, analysis_of, diagnostics, git, run
 
@@ -87,6 +88,52 @@ def test_impure_edge_fails_in_strict_and_records_in_strict_to_be(
             "from pathlib import Path\n\ndef move(p: Path, q: Path) -> None:\n    p.replace(q)\n",
             "a.py#Path.replace",
         ),
+        ("import os\n\ndef size(p: str) -> int:\n    return os.stat(p).st_size\n", "a.py#os.stat"),
+        ("import os\n\ndef lstat(p: str) -> object:\n    return os.lstat(p)\n", "a.py#os.lstat"),
+        ("import os\n\ndef grab(p: str) -> int:\n    return os.open(p, 0)\n", "a.py#os.open"),
+        ("import os\n\ndef pull(fd: int) -> bytes:\n    return os.read(fd, 8)\n", "a.py#os.read"),
+        ("import os\n\ndef shape(fd: int) -> object:\n    return os.fstat(fd)\n", "a.py#os.fstat"),
+        (
+            "import os\n\ndef names(p: str) -> list[str]:\n    return os.listdir(p)\n",
+            "a.py#os.listdir",
+        ),
+        ("import os\n\ndef scan(p: str) -> object:\n    return os.scandir(p)\n", "a.py#os.scandir"),
+        ("import os\n\ndef tree(p: str) -> object:\n    return os.walk(p)\n", "a.py#os.walk"),
+        (
+            "import os\n\ndef here(p: str) -> bool:\n    return os.path.isdir(p)\n",
+            "a.py#os.path.isdir",
+        ),
+        (
+            "import pkgutil\n\ndef blob() -> bytes | None:\n    return pkgutil.get_data('a', 'b')\n",
+            "a.py#pkgutil.get_data",
+        ),
+        (
+            "import inspect\n\ndef source(f: object) -> str:\n    return inspect.getsource(f)\n",
+            "a.py#inspect.getsource",
+        ),
+        (
+            "from pathlib import Path\n\ndef kids(p: Path) -> object:\n    return Path('x').iterdir()\n",
+            "a.py#Path.iterdir",
+        ),
+        (
+            "from pathlib import Path\n\ndef all_py() -> object:\n    return Path('x').rglob('*.py')\n",
+            "a.py#Path.rglob",
+        ),
+        (
+            "from pathlib import Path\n\ndef link() -> bool:\n    return Path('x').is_symlink()\n",
+            "a.py#Path.is_symlink",
+        ),
+        (
+            "from pathlib import Path\n\ndef where() -> Path:\n    return Path('x').resolve()\n",
+            "a.py#Path.resolve",
+        ),
+        (
+            "from pathlib import Path\n\ndef hits() -> object:\n    return Path('x').glob('*')\n",
+            "a.py#Path.glob",
+        ),
+        ("from pathlib import Path\n\n_is_file = Path.is_file\n", "a.py#Path.is_file"),
+        ("import os\n\nread_info = os.stat\n", "a.py#os.stat"),
+        ("import time\n\nnap = time.sleep\n", "a.py#time.sleep"),
     ],
 )
 def test_impure_call_catches_effectful_imports_async_and_calls(
@@ -463,3 +510,42 @@ def test_deep_attr_chain_flags_train_wrecks_and_ignores_module_or_method_chains(
     [found] = diagnostics(root, "deep-attr-chain")
     assert found.debt is not None
     assert found.debt.key == "a.py#ctx.a.b.c.d"
+
+
+@pytest.mark.parametrize(
+    "source",
+    [
+        "def settle(future: object) -> object:\n    return future.resolve()\n",
+        "def pick(pattern: object) -> object:\n    return pattern.glob\n",
+        "from pathlib import Path\n\njoin = Path.joinpath\n",
+        "import os\n\nsep = os.sep\n",
+        "import os\n\ndef split(p: str) -> tuple[str, str]:\n    return os.path.split(p)\n",
+        "import inspect\n\ndef signature(f: object) -> object:\n    return inspect.signature(f)\n",
+    ],
+)
+def test_a_pure_look_alike_is_not_an_impure_call(make_repo: RepoFactory, source: str) -> None:
+    root = make_repo(
+        {
+            "pkg/__init__.py": "",
+            "pkg/a.py": source,
+            "pkg/meizel.toml": 'purity = "strict"\n',
+        }
+    )
+    assert diagnostics(root, "impure-call") == []
+
+
+def test_a_shell_constructor_the_policy_lists_is_an_impure_call(make_repo: RepoFactory) -> None:
+    root = make_repo(
+        {
+            "meizel.policy.toml": render_policy({}, {})
+            + '\n[purity]\nimpure-calls = ["meizel.graph.universe.GitRepo"]\n',
+            "pkg/__init__.py": "",
+            "pkg/a.py": (
+                "from meizel.graph.universe import GitRepo\n\n"
+                "def repo(root: object) -> object:\n    return GitRepo(root)\n"
+            ),
+            "pkg/meizel.toml": 'purity = "strict-to-be"\n',
+        }
+    )
+    keys = [d.debt.key for d in diagnostics(root, "impure-call") if d.debt is not None]
+    assert keys == ["a.py#meizel.graph.universe.GitRepo"]

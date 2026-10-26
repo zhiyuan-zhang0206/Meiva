@@ -1,4 +1,3 @@
-purity = "strict"
 exports = ["fixtures.py", "no_script_sibling_imports.py", "path_imports.py", "scan.py"]
 
 [uses]
@@ -10,3 +9,21 @@ exports = ["fixtures.py", "no_script_sibling_imports.py", "path_imports.py", "sc
 "tests" = ["no_script_sibling_imports.py", "path_imports.py", "typescript.py"]
 "typescript.py" = ["typescript_compiler"]
 "typescript_compiler" = ["fixtures.py"]
+
+[purity]
+"." = "strict"
+"bindings.py" = "strict-to-be"
+"no_script_sibling_imports.py" = "strict-to-be"
+"path_imports.py" = "strict-to-be"
+"purity.py" = "strict-to-be"
+"scan.py" = "strict-to-be"
+
+[debt.impure-call]
+"bindings.py#Path.stat" = 1
+"no_script_sibling_imports.py#Path.is_file" = 2
+"no_script_sibling_imports.py#Path.resolve" = 2
+"no_script_sibling_imports.py#Path.rglob" = 1
+"path_imports.py#Path.resolve" = 1
+"purity.py#Path.is_file" = 1
+"purity.py#Path.read_text" = 1
+"scan.py#Path.resolve" = 1

@@ -11,7 +11,6 @@ imported from.
 from __future__ import annotations
 
 import ast
-import os
 from collections.abc import Iterator
 from pathlib import Path
 
@@ -328,7 +327,7 @@ class Module:
 
     def is_repo_module(self, dotted_name: str) -> bool:
         path = self.repo_root.joinpath(*dotted_name.split("."))
-        return read_utf8_text(path.with_suffix(".py")) is not None or any(path.rglob("*.py"))
+        return path.with_suffix(".py").is_file() or path.is_dir()
 
     def module_of(self, node: ast.expr) -> str | None:
         """The first-party module an attribute-assignment base names, if any."""
@@ -389,7 +388,7 @@ def _load(repo_root: Path, dotted_name: str) -> Module | None:
     base = repo_root.joinpath(*dotted_name.split("."))
     for path in (base.with_suffix(".py"), base / "__init__.py"):
         try:
-            stamp = (str(path), os.stat(path).st_mtime_ns)  # noqa: PTH116
+            stamp = (str(path), path.stat().st_mtime_ns)
         except OSError:
             continue
         if stamp not in _PARSED:

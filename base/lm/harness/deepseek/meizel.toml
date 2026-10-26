@@ -20,6 +20,7 @@
 "session.py#async def close" = 1
 "session.py#async def interrupt" = 1
 "session.py#async def start" = 1
+"usage.py#Path.glob" = 1
 "usage.py#Path.is_file" = 1
 "usage.py#Path.open" = 1
 "usage.py#Path.read_bytes" = 1

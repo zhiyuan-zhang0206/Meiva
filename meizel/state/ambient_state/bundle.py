@@ -41,7 +41,7 @@ def bundles_defined_in(path: Path) -> frozenset[str]:
 def _module_file(repo_root: Path, module: str) -> Path | None:
     base = repo_root.joinpath(*module.split("."))
     for candidate in (base.with_suffix(".py"), base / "__init__.py"):
-        if read_utf8_text(candidate) is not None:
+        if candidate.is_file():
             return candidate
     return None
 

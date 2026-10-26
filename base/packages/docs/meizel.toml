@@ -9,4 +9,8 @@ exports = ["frontmatter.py", "notes.py", "okf_graph.py", "pages_copy.py"]
 "." = "strict"
 "__init__.py" = "strict"
 "frontmatter.py" = "strict"
+"notes.py" = "strict-to-be"
 "pages_copy.py" = "strict"
+
+[debt.impure-call]
+"notes.py#Path.resolve" = 1

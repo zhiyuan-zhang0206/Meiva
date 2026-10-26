@@ -16,7 +16,7 @@ exports = ["atomic_io.py", "brew_pin.py", "config_validators.py", "converge", "d
 "__init__.py" = "strict"
 "exit_codes.py" = "strict"
 "resource_sample.py" = "strict-to-be"
-"verified_file.py" = "strict"
+"verified_file.py" = "strict-to-be"
 
 [debt.ambient-read]
 "config_validators.py#environ base.host.system.probes.display_available" = 1
@@ -28,6 +28,9 @@ exports = ["atomic_io.py", "brew_pin.py", "config_validators.py", "converge", "d
 [debt.impure-call]
 "resource_sample.py#import subprocess" = 1
 "resource_sample.py#time.time" = 1
+"verified_file.py#Path.lstat" = 2
+"verified_file.py#os.fstat" = 2
+"verified_file.py#os.open" = 1
 
 [debt.impure-edge]
 "resource_sample.py#base/native_process/os_platform.py" = 1

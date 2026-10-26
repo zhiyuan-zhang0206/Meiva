@@ -10,19 +10,22 @@ exports = ["child_env.py", "code_version.py", "evidence.py", "exec_domain.py", "
 "tests" = ["birth_key.py", "child_env.py", "code_version.py", "evidence.py", "kernel_identity.py", "loaded_commit.py", "os_platform.py", "ownership.py", "pidfd.py", "process_control.py", "runtime_incarnation.py", "turn_identity.py"]
 "turn_identity.py" = ["stop_timing.py"]
 
-[purity]
-"birth_key.py" = "strict"
-"evidence.py" = "strict"
-"reparent.py" = "strict"
-"runtime_incarnation.py" = "strict"
-"stop_timing.py" = "strict"
-
 [roots]
 "child_env.py" = { kinds = ["environ"], why = "centralized process-protocol seam: copies the complete live env, consumes one-shot markers, and adopts a child's committed handoff; Settings cannot model dynamic per-process state" }
 "os_platform.py" = { kinds = ["environ"], why = "launchd_job_label reads the per-process XPC_SERVICE_NAME scheduler identity" }
+
+[purity]
+"birth_key.py" = "strict"
+"evidence.py" = "strict"
+"reparent.py" = "strict-to-be"
+"runtime_incarnation.py" = "strict"
+"stop_timing.py" = "strict"
 
 [debt.ambient-read]
 "os_platform.py#home base.paths.home.user_home" = 1
 "os_platform.py#pid os.getpid" = 1
 "os_platform.py#platform platform.machine" = 1
 "os_platform.py#platform sys.platform" = 1
+
+[debt.impure-call]
+"reparent.py#os.open" = 3
