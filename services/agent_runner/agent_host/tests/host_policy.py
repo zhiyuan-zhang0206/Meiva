@@ -1,5 +1,6 @@
 import random
 from dataclasses import replace
+from pathlib import Path
 from typing import Any
 
 from base.agents.messages.timestamp_policy import TimestampSource
@@ -33,6 +34,7 @@ def configured_policy(**changes: Any) -> HostPolicy:
             harness_registration_ttl_seconds=daemon.harness_registration_ttl_seconds,
             harness_environ={"HOME": "/nonexistent/host-policy-home"},
             rng=random.Random(0),  # noqa: S311
+            user_home=Path("/nonexistent/host-policy-user-home"),
             stall=StallTiming(
                 scan_interval_s=daemon.host_turn_progress_scan_interval_seconds,
                 no_progress_timeout_s=daemon.host_turn_no_progress_timeout_seconds,
