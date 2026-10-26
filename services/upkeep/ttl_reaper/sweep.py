@@ -288,7 +288,11 @@ async def sweep_round(
         pool,
         grace_seconds=config.impersonation_event_abandon_grace_s,
     )
-    await asyncio.to_thread(signal_incomplete_event_logs, pool)
+    await asyncio.to_thread(
+        signal_incomplete_event_logs,
+        pool,
+        repeat_interval_seconds=config.impersonation_event_report_interval_s,
+    )
     progress.beat()
     pages = await asyncio.to_thread(reap_expired_pages_blocking, pool, db, bus)
     progress.beat()

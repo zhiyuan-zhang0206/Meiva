@@ -62,17 +62,17 @@ def reclaim_abandoned_event_logs(pool: ConnectionPool, *, grace_seconds: int) ->
 
 
 # meiva:note
-# Emit the incomplete-event-log signal for every lease not yet reported. A state signal, not a
-# threshold: a lease cannot complete until its source seals, or ever after a capture failure, and
-# nothing else will say so. Each lease and condition is reported once, because the emitting pass
-# records that report in the lease's own log.
-def signal_incomplete_event_logs(pool: ConnectionPool) -> int:
+# Emit the incomplete-event-log signal for every lease and condition whose last report is older
+# than `repeat_interval_seconds`. A state signal, not a threshold: a lease cannot complete until
+# its source seals, or ever after a capture failure, and nothing else will say so. The interval,
+# not a one-shot flag, is what keeps a permanent defect visible for as long as it holds.
+def signal_incomplete_event_logs(pool: ConnectionPool, *, repeat_interval_seconds: int) -> int:
     from base.agents.impersonation.event_signals import emit_incomplete_event_logs
     from base.log import logger
 
     try:
         with pool.connection() as conn:
-            return emit_incomplete_event_logs(conn)
+            return emit_incomplete_event_logs(conn, repeat_interval_seconds=repeat_interval_seconds)
     except Exception:
         # A failing signal pass must not stop the reclamation that runs after it.
         logger.exception("impersonation event-log signal pass failed")
