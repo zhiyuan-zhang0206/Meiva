@@ -9,6 +9,7 @@
 
 from __future__ import annotations
 
+import os
 from collections.abc import Callable
 from pathlib import Path
 from typing import Any
@@ -81,6 +82,7 @@ def test_gateway_data_plane_brings_up_own_instance(
             machine=command_runtime.machine,
             macos=NATIVE_TEST_MACOS,
             timers=SYSTEM_TIMERS,
+            environ=os.environ,
         )
         == 0
     )
@@ -120,6 +122,7 @@ def test_gateway_data_plane_refuses_a_home_without_a_ledger_before_any_effect(
             machine=command_runtime.machine,
             macos=command_runtime.host.platform.system == "darwin",
             timers=SYSTEM_TIMERS,
+            environ=os.environ,
         )
         == 1
     )
@@ -147,6 +150,7 @@ def test_gateway_data_plane_no_record_is_error(
             machine=command_runtime.machine,
             macos=command_runtime.host.platform.system == "darwin",
             timers=SYSTEM_TIMERS,
+            environ=os.environ,
         )
         == 1
     )
@@ -171,6 +175,7 @@ def test_local_launch_without_owner_cannot_publish_authority(
             machine=command_runtime.machine,
             macos=command_runtime.host.platform.system == "darwin",
             timers=SYSTEM_TIMERS,
+            environ=os.environ,
         )
 
     assert not telemetry_token_path(unit_home.resolve()).exists()

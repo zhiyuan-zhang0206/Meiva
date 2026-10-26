@@ -11,6 +11,7 @@
 from __future__ import annotations
 
 import dataclasses
+import os
 from collections.abc import Iterator
 from pathlib import Path
 
@@ -63,6 +64,7 @@ def _start_instance(
         machine=machine,
         macos=NATIVE_TEST_MACOS,
         timers=SYSTEM_TIMERS,
+        environ=os.environ,
     )
     assert rc == 0
 

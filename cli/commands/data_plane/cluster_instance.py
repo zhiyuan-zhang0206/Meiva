@@ -45,6 +45,7 @@ import shutil
 import socket
 import subprocess
 import sys
+from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
 from typing import assert_never
@@ -62,7 +63,7 @@ from base.host.brew_pin import brew_prefix
 from base.host.net.url_secret import url_host
 from base.host.private_storage import write_private_bytes
 from base.host.proc import run_bounded
-from base.native_process.child_env import daemon_process_env, inherited_process_env
+from base.native_process.child_env import filter_daemon_env
 from base.native_process.ownership import OwnedProcess
 from cli.commands.data_plane.config import DataPlaneConfig
 from cli.commands.data_plane.instance import pg_plan, redis_plan
@@ -441,15 +442,21 @@ def start_pg(
 # The child env that authenticates `redis-cli` without a secret on its command line.
 #
 # Raises ValueError when the admin password is empty: the owned Redis always requires it.
-def redis_cli_env(redis_admin_password: str) -> dict[str, str]:
-    return inherited_process_env(redis_plan.redis_auth_env(redis_admin_password))
+def redis_cli_env(redis_admin_password: str, environ: Mapping[str, str]) -> dict[str, str]:
+    return {**environ, **redis_plan.redis_auth_env(redis_admin_password)}
 
 
-def redis_running(redis_cli: str, redis_admin_password: str, redis_port: int, host: str) -> bool:
+def redis_running(
+    redis_cli: str,
+    redis_admin_password: str,
+    redis_port: int,
+    host: str,
+    environ: Mapping[str, str],
+) -> bool:
     try:
         out = run_bounded(
             [redis_cli, "-h", host, "-p", str(redis_port), "ping"],
-            env=redis_cli_env(redis_admin_password),
+            env=redis_cli_env(redis_admin_password, environ),
             capture_output=True,
             text=True,
             timeout=_REDIS_PROBE_TIMEOUT_S,
@@ -488,6 +495,7 @@ class _RedisStart:
     tuning: StartTuning
     timers: Timers
     macos: bool
+    environ: Mapping[str, str]
     redis_cli: str
     dial_host: str
 
@@ -516,7 +524,12 @@ class _RedisStart:
                 self.data.mkdir(parents=True, exist_ok=True)
             case redis_plan.LaunchServer():
                 launched = _launch_redis(
-                    self.config, self.redis_port, self.data, self.machine, macos=self.macos
+                    self.config,
+                    self.redis_port,
+                    self.data,
+                    self.machine,
+                    macos=self.macos,
+                    environ=self.environ,
                 )
                 return 0 if launched else 1
             case redis_plan.AwaitServerReady():
@@ -530,7 +543,9 @@ class _RedisStart:
 
     def _await_ready(self) -> int:
         admin = self.config.redis_admin_password
-        if _await_redis(self.redis_cli, admin, self.redis_port, self.dial_host, self.timers):
+        if _await_redis(
+            self.redis_cli, admin, self.redis_port, self.dial_host, self.timers, self.environ
+        ):
             return 0
         print(f"  ✗ redis did not become ready on :{self.redis_port}", file=sys.stderr)
         return 1
@@ -551,6 +566,7 @@ def start_redis(
     machine: MachineIdentityReader,
     macos: bool,
     timers: Timers,
+    environ: Mapping[str, str],
     tuning: StartTuning = PRODUCTION_TUNING,
 ) -> int:
     redis_plan.require_redis_credentials(config.redis_admin_password, runtime_password)
@@ -567,10 +583,11 @@ def start_redis(
         tuning=tuning,
         timers=timers,
         macos=macos,
+        environ=environ,
         redis_cli=redis_cli,
         dial_host=dial_host,
     )
-    running = redis_running(redis_cli, admin, redis_port, dial_host)
+    running = redis_running(redis_cli, admin, redis_port, dial_host, environ)
     steps = redis_plan.plan_redis_start(
         running=running, macos=macos, off_box_host=_off_box_host(machine)
     )
@@ -618,12 +635,13 @@ def _launch_redis(
     machine: MachineIdentityReader,
     *,
     macos: bool,
+    environ: Mapping[str, str],
 ) -> bool:
     result = run_bounded(
         redis_launch_argv(config, redis_port, data, machine, macos=macos),
         capture_output=True,
         text=True,
-        env=daemon_process_env(),
+        env=filter_daemon_env(environ),
         timeout=_REDIS_LAUNCH_TIMEOUT_S,
     )
     if result.returncode != 0:
@@ -638,12 +656,17 @@ def _launch_redis(
 # meiva:note
 # `redis-server --daemonize` returns at once; poll until the port answers PING.
 def _await_redis(
-    redis_cli: str, admin: str, redis_port: int, dial_host: str, timers: Timers
+    redis_cli: str,
+    admin: str,
+    redis_port: int,
+    dial_host: str,
+    timers: Timers,
+    environ: Mapping[str, str],
 ) -> bool:
     started = timers.monotonic()
     while True:
         verdict = wait_verdict(
-            satisfied=redis_running(redis_cli, admin, redis_port, dial_host),
+            satisfied=redis_running(redis_cli, admin, redis_port, dial_host, environ),
             elapsed_s=timers.monotonic() - started,
             timeout_s=_REDIS_READY_TIMEOUT_S,
         )
@@ -706,6 +729,7 @@ def ensure_cluster_storage(
     machine: MachineIdentityReader,
     macos: bool,
     timers: Timers,
+    environ: Mapping[str, str],
 ) -> int:
     require_storage_credentials(config.redis_admin_password, redis_password)
     print(f"\n→ per-cluster data plane (pg :{pg_port}, redis :{redis_port})")
@@ -728,6 +752,7 @@ def ensure_cluster_storage(
         machine=machine,
         macos=macos,
         timers=timers,
+        environ=environ,
     )
 
 

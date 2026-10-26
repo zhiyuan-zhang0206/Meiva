@@ -16,6 +16,7 @@ from __future__ import annotations
 import contextlib
 import getpass
 import json
+import os
 import shutil
 import subprocess
 from collections.abc import Callable, Iterator
@@ -242,6 +243,7 @@ def _prepare_schema(
             machine=command_runtime.machine,
             macos=command_runtime.host.platform.system == "darwin",
             timers=SYSTEM_TIMERS,
+            environ=os.environ,
         )
         == 0
     )
@@ -534,6 +536,7 @@ def test_ordinary_start_refuses_a_home_without_a_ledger_before_any_effect(
             machine=command_runtime.machine,
             macos=command_runtime.host.platform.system == "darwin",
             timers=SYSTEM_TIMERS,
+            environ=os.environ,
         )
         == 1
     )

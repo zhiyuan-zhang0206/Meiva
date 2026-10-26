@@ -10,6 +10,7 @@
 from __future__ import annotations
 
 import dataclasses
+import os
 import socket
 from pathlib import Path
 
@@ -56,6 +57,7 @@ def _start_storage(cluster: NativeCluster, machine: MachineIdentityReader) -> No
         machine=machine,
         macos=NATIVE_TEST_MACOS,
         timers=SYSTEM_TIMERS,
+        environ=os.environ,
     )
     assert rc == 0
 

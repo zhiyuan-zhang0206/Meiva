@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import contextlib
 import dataclasses
+import os
 import socket
 import threading
 from collections.abc import Callable, Generator
@@ -58,6 +59,7 @@ def _start(cluster: NativeCluster, machine: MachineIdentityReader) -> None:
         machine=machine,
         macos=NATIVE_TEST_MACOS,
         timers=SYSTEM_TIMERS,
+        environ=os.environ,
     )
     assert rc == 0
 
@@ -70,6 +72,7 @@ def _stop(cluster: NativeCluster, producer: Callable[[], EventPipeline]) -> int:
         producer=producer,
         macos=NATIVE_TEST_MACOS,
         timers=SYSTEM_TIMERS,
+        environ=os.environ,
     )
 
 
@@ -139,6 +142,7 @@ def test_a_redis_that_the_admin_cannot_shut_down_is_a_failed_stop(
         producer=operator_pipeline,
         macos=NATIVE_TEST_MACOS,
         timers=SYSTEM_TIMERS,
+        environ=os.environ,
     )
 
     assert rc == 1
@@ -211,6 +215,7 @@ def test_a_remote_plane_stops_nothing_and_says_so(
         producer=operator_pipeline,
         macos=NATIVE_TEST_MACOS,
         timers=SYSTEM_TIMERS,
+        environ=os.environ,
     )
 
     assert rc == 0
@@ -246,6 +251,7 @@ def test_a_local_instance_left_behind_by_a_switch_to_remote_is_named_and_not_tou
         producer=operator_pipeline,
         macos=NATIVE_TEST_MACOS,
         timers=SYSTEM_TIMERS,
+        environ=os.environ,
     )
 
     assert rc == 0

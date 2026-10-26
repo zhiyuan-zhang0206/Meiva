@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import dataclasses
 import getpass
+import os
 import subprocess
 import tempfile
 import time
@@ -68,6 +69,7 @@ def _storage(cluster_: NativeCluster, machine: MachineIdentityReader) -> int:
         machine=machine,
         macos=NATIVE_TEST_MACOS,
         timers=SYSTEM_TIMERS,
+        environ=os.environ,
     )
 
 
@@ -178,6 +180,7 @@ def test_the_entry_brings_up_the_instance_on_the_recorded_ports_with_the_url_ide
             machine=command_machine,
             macos=NATIVE_TEST_MACOS,
             timers=SYSTEM_TIMERS,
+            environ=os.environ,
         )
 
     assert start() == 0
@@ -221,6 +224,7 @@ def test_a_fresh_single_box_redis_refuses_unauthenticated_connections(
             machine=command_machine,
             macos=NATIVE_TEST_MACOS,
             timers=SYSTEM_TIMERS,
+            environ=os.environ,
         )
         == 0
     )

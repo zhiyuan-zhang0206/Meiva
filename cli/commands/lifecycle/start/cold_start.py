@@ -124,6 +124,7 @@ def _run_step(
                 database_factory=cold.database_factory,
                 machine=command.machine,
                 timers=command.timers,
+                environ=command.config.process_environment(),
             )
         case ColdStep.GATEWAY_SCHEMA:
             bringup.prepare_gateway_schema(cold.plane, home=command.home)

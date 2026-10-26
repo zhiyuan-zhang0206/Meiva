@@ -16,8 +16,3 @@ exports = ["bringup.py", "cluster_instance.py", "completion.py", "config.py", "h
 [purity]
 "__init__.py" = "strict"
 "stop_budget.py" = "strict"
-
-[debt.ambient-read]
-"cluster_instance.py#environ base.native_process.child_env.daemon_process_env" = 1
-"cluster_instance.py#environ base.native_process.child_env.inherited_process_env" = 1
-"completion.py#environ base.native_process.child_env.daemon_process_env" = 1
