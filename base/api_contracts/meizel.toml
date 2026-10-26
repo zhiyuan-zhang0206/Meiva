@@ -18,9 +18,5 @@ exports = ["agent_contract.py", "caller_identity.py", "config.py", "contracts.py
 [uses]
 "tests" = ["contracts.py", "idempotency.py", "notice_question.py"]
 
-[debt.any-collaborator]
-"agent_contract.py#any SdkCaptureAdmission.capture.event" = 1
-"agent_contract.py#any SdkCaptureAdmission.capture.return" = 1
-
 [debt.wide-exports]
 "meizel.toml#exports" = 1
