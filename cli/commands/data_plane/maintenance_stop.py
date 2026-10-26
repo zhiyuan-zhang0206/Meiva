@@ -35,6 +35,7 @@ from redis.backoff import NoBackoff
 from redis.exceptions import ConnectionError as RedisConnectionError
 from redis.exceptions import RedisError
 
+from base.clock import SYSTEM_TIMERS
 from base.cluster import ownership
 from base.cluster import postgres as owned_postgres
 from base.cluster.dataplane import pooler as pooler_files
@@ -245,6 +246,7 @@ async def request_stop(
                 immediate_wait=context.legs.cleanup_wait_s,
                 kill_wait=context.legs.kill_wait_s,
                 retained_children=retained_children,
+                timers=SYSTEM_TIMERS,
             )
             if escalation is not None:
                 return report_postgres_stop_escalation(escalation, producer=context.producer)

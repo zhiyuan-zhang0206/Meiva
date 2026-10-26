@@ -369,6 +369,7 @@ def _launch_postmaster(
         timeout=tuning.pg_start_s,
         expected=owner,
         retained_children=retained_children,
+        timers=SYSTEM_TIMERS,
     )
 
 

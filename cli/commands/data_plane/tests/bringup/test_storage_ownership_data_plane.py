@@ -17,6 +17,7 @@ from pathlib import Path
 import psycopg
 import pytest
 
+from base.clock import SYSTEM_TIMERS
 from base.cluster import ownership, port_preflight
 from base.cluster import postgres as pg
 from base.cluster.dataplane.pg_admin import pg_admin_url
@@ -134,6 +135,7 @@ def test_real_owned_postgres_resume_and_fast_stop(
             native_cluster.pg_data,
             expected=first,
             retained_children=native_cluster.retained_children,
+            timers=SYSTEM_TIMERS,
         )
     assert second.live()
 

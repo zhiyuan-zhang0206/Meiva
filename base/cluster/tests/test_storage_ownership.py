@@ -13,6 +13,7 @@ from pathlib import Path
 import psutil
 import pytest
 
+from base.clock import SYSTEM_TIMERS
 from base.cluster import ownership, port_preflight
 from base.cluster import postgres as pg
 from base.native_process.ownership import OwnedProcess
@@ -296,6 +297,7 @@ def test_retained_postgres_cannot_signal_replacement(
             ready=lambda: True,
             expected=OwnedProcess(123, 100.0, 456),
             retained_children=retained_children,
+            timers=SYSTEM_TIMERS,
         )
 
 
