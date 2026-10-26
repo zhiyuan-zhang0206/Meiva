@@ -9,5 +9,5 @@
 "report.py" = "strict"
 "verdicts.py" = "strict"
 
-[roots]
-"__main__.py" = { kinds = ["home"], why = "Operator entry of the private-files check resolves the home it verifies when no --root is given" }
+[debt.ambient-read]
+"__init__.py#home base.paths.home.resolve_meiva_home" = 1
