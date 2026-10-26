@@ -16,10 +16,11 @@ from __future__ import annotations
 
 import argparse
 import json
+import re
 import subprocess
 import sys
 import tomllib
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from pathlib import Path
 from typing import TypeGuard
 
@@ -148,18 +149,91 @@ def _root_kinds(rev: str, paths: Sequence[str]) -> dict[str, frozenset[AmbientKi
         if not _is_str_dict(raw):
             raise GitError(f"{manifest}: [roots] must be a table")
         name = Path(path).name
-        value = raw.get(name, [])
-        if _is_str_dict(value):
-            value = value.get("kinds")
-        if not _is_object_list(value):
+        if name not in raw:
+            found[path] = frozenset()
+            continue
+        value = raw[name]
+        if not _is_str_dict(value):
+            raise GitError(f"{manifest}: [roots] {name!r} must be a table with kinds and why")
+        listed = value.get("kinds")
+        if not _is_object_list(listed):
             raise GitError(f"{manifest}: [roots] {name!r} must declare kinds")
         kinds: set[AmbientKind] = set()
-        for item in value:
+        for item in listed:
             if not isinstance(item, str):
                 raise GitError(f"{manifest}: root kinds must be strings")
             kinds.add(AmbientKind(item))
         found[path] = frozenset(kinds)
     return found
+
+
+# meiva:note
+# The tracked Python files at `rev` (the index when it is empty) that contain one of the fixed
+# strings. `git grep` exits 1 for no match, which is an answer and not a failure.
+def _grep(rev: str, needles: Sequence[str], pathspec: str) -> set[str]:
+    where = ["--cached"] if not rev else [rev]
+    command = ["git", "grep", "-l", "-F", *(a for n in needles for a in ("-e", n)), *where]
+    done = subprocess.run([*command, "--", pathspec], capture_output=True, check=False)  # noqa: S603
+    if done.returncode not in (0, 1):
+        raise GitError(f"git grep failed: {done.stderr.decode('utf-8', 'replace').strip()}")
+    prefix = f"{rev}:" if rev else ""
+    return {
+        line.removeprefix(prefix) for line in done.stdout.decode("utf-8", "replace").splitlines()
+    }
+
+
+# meiva:note
+# Whether `text` imports the module `module` (`a.b.c`): `import a.b.c`, `from a.b.c import x`,
+# `from a.b import c`, and from a file beside it `from .c import x` or `from . import c`.
+def _imports_module(text: str, module: str, *, beside: bool) -> bool:
+    parent, _, leaf = module.rpartition(".")
+    whole = rf"^\s*(?:from|import)\s+{re.escape(module)}(?:\s|$|\.|,)"
+    if re.search(whole, text, re.MULTILINE):
+        return True
+    packages = [*([re.escape(parent)] if parent else []), *([r"\.+"] if beside else [])]
+    for package in packages:
+        listing = rf"^\s*from\s+{package}\s+import\s+(?P<names>\([^)]*\)|[^\n]*)"
+        for found in re.finditer(listing, text, re.MULTILINE):
+            if re.search(rf"\b{re.escape(leaf)}\b", found["names"]):
+                return True
+    relative = rf"^\s*from\s+\.+{re.escape(leaf)}(?:\s|\.)"
+    return beside and re.search(relative, text, re.MULTILINE) is not None
+
+
+# meiva:note
+# The files that import `path` as a module. The candidates are the tracked files that mention the
+# dotted name or the `from <package> import` line; their text decides.
+def _importing_files(rev: str, path: str) -> set[str]:
+    module = path.removesuffix(".py").removesuffix("/__init__").replace("/", ".")
+    parent = module.rpartition(".")[0]
+    directory = Path(path).parent.as_posix()
+    needles = [module, *([f"from {parent} import"] if parent else [])]
+    candidates = _grep(rev, needles, "*.py")
+    if directory != ".":
+        candidates |= _grep(rev, ["from ."], f"{directory}/*.py")
+    candidates.discard(path)
+    texts = _read_blobs(rev, sorted(candidates))
+    return {
+        found
+        for found, text in texts.items()
+        if _imports_module(text, module, beside=Path(found).parent.as_posix() == directory)
+    }
+
+
+# meiva:note
+# For each declared root among `roots`, how many production modules that are not roots import it.
+def _importer_counts(
+    rev: str, roots: Mapping[str, frozenset[AmbientKind]], roles: Roles
+) -> dict[str, int]:
+    declared = [path for path, kinds in roots.items() if kinds]
+    counts: dict[str, int] = {}
+    for path in declared:
+        importers = sorted(
+            p for p in _importing_files(rev, path) if classify(p, roles) is FileKind.PRODUCTION
+        )
+        also_roots = _root_kinds(rev, importers)
+        counts[path] = sum(1 for p in importers if not also_roots.get(p))
+    return counts
 
 
 def _diff(
@@ -178,7 +252,8 @@ def _diff(
 def _sites(spec: Sequence[str], rev: str) -> list[Site]:
     roles = _roles()
     changes, texts = _diff(spec, rev, roles)
-    return analyze(changes, texts, roles, _root_kinds(rev, tuple(texts)))
+    roots = _root_kinds(rev, tuple(texts))
+    return analyze(changes, texts, roles, roots, _importer_counts(rev, roots, roles))
 
 
 # meiva:note

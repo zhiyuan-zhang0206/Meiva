@@ -90,6 +90,10 @@ What the calibration changed, each from a sample of the hits:
   `ParkedPool(AsyncConnectionPool)` case.
 - A field compared with a literal was added to `wildcard-case` and removed again: 4 of its 17
   sites were on a reviewed finding, the rest compared wire kinds (`item.kind == "system_prompt"`).
+- `root-middle-layer` is measured against the roots audit, not against the five pull requests: of the 238
+  declared roots, 35 have three or more importers that are not roots (28 middle layers, 3 wiring or runtime
+  factories, 2 undecided, 1 process entry, 1 new root). The filename heuristic already exempts the
+  runtime and entry names, and a hit exists only when such a file is changed in the diff.
 - Renames: the first run read a moved file as a new file and asked about its old contents again.
   The diff is read with rename detection now, so a pure rename asks nothing and a rename with
   edits asks about the edits.

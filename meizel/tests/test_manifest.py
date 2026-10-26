@@ -33,12 +33,13 @@ def code_for(make_repo: RepoFactory, manifest: str, code: str, extra: dict[str, 
         ('[uses]\n"a.py" = "b.py"\n', "manifest-syntax"),
         ("this is not toml", "manifest-syntax"),
         ('[uses]\n"a.py" = ["meizel.toml"]\n', "manifest-unknown-child"),
-        ('[roots]\n"a.py" = ["nonsense"]\n', "manifest-syntax"),
+        ('[roots]\n"a.py" = { kinds = ["nonsense"], why = "x" }\n', "manifest-syntax"),
+        ('[roots]\n"a.py" = ["environ"]\n', "manifest-syntax"),
         ('[roots]\n"a.py" = []\n', "manifest-syntax"),
         ('[roots]\n"a.py" = "environ"\n', "manifest-syntax"),
-        ('[roots]\n"ghost.py" = ["environ"]\n', "manifest-unknown-child"),
-        ('[roots]\n"sub/a.py" = ["environ"]\n', "manifest-unknown-child"),
-        ('[roots]\n"a" = ["environ"]\n', "manifest-unknown-child"),
+        ('[roots]\n"ghost.py" = { kinds = ["environ"], why = "x" }\n', "manifest-unknown-child"),
+        ('[roots]\n"sub/a.py" = { kinds = ["environ"], why = "x" }\n', "manifest-unknown-child"),
+        ('[roots]\n"a" = { kinds = ["environ"], why = "x" }\n', "manifest-unknown-child"),
         ('[roots]\n"a.py" = { kinds = ["environ"] }\n', "manifest-syntax"),
         ('[roots]\n"a.py" = { kinds = ["environ"], why = " " }\n', "manifest-syntax"),
         ('[roots]\n"a.py" = { kinds = ["environ"], why = "x", also = 1 }\n', "manifest-syntax"),
@@ -89,7 +90,7 @@ def test_unknown_keys_do_not_hide_other_errors(make_repo: RepoFactory) -> None:
 def test_state_and_roots_are_read_into_the_manifest(make_repo: RepoFactory) -> None:
     manifest = (
         '[state]\n"a.py" = ["settings", "db"]\n\n'
-        '[roots]\n"a.py" = ["environ"]\n"b.py" = { kinds = ["clock", "pid"], why = "stamps rows" }\n'
+        '[roots]\n"a.py" = { kinds = ["environ"], why = "reads it" }\n"b.py" = { kinds = ["clock", "pid"], why = "stamps rows" }\n'
     )
     root = make_repo({**BASE, "pkg/meizel.toml": manifest})
     read = analysis_of(root).manifests["pkg"]
@@ -97,6 +98,6 @@ def test_state_and_roots_are_read_into_the_manifest(make_repo: RepoFactory) -> N
         "a.py": ["settings", "db"]
     }
     assert {name: ([k.value for k in r.kinds], r.why) for name, r in read.roots.items()} == {
-        "a.py": (["environ"], ""),
+        "a.py": (["environ"], "reads it"),
         "b.py": (["clock", "pid"], "stamps rows"),
     }
