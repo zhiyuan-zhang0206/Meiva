@@ -40,7 +40,7 @@ from __future__ import annotations
 import logging
 from collections.abc import Generator
 from contextlib import contextmanager
-from typing import Any, NamedTuple
+from typing import Any
 
 from langchain_core.messages import BaseMessage, SystemMessage
 from langchain_core.runnables import RunnableConfig
@@ -49,7 +49,12 @@ from psycopg.rows import dict_row
 from psycopg_pool import AsyncConnectionPool
 
 from base.agents.history.checkpoint_serde import STATIC_CHECKPOINT_MSGPACK_TYPES
-from base.agents.history.closing_request import METADATA_KEY, ClosingRequest
+from base.agents.history.closing_request import (
+    METADATA_KEY,
+    ClosingRequest,
+    FullHistory,
+    single_segment_history,
+)
 from base.agents.history.delta_read_compat import reconstruct_delta_messages
 from base.db import Database
 from base.db.transaction import async_write_transaction
@@ -358,32 +363,6 @@ def load_checkpoint_messages_segment(
     return messages[1:]
 
 
-class FullHistory(NamedTuple):
-    """The stitched history plus where each compaction segment sits in it.
-
-    A segment is what one stored snapshot held: the agent's own request head
-    at that time (its SystemMessage, then the conversation). The stitched
-    `messages` list drops the repeated SystemMessage at every join, so a
-    consumer that needs the request the agent really sent at some position
-    (the understanding chunk's cache-parity prefix) re-attaches the segment's own
-    head to the segment's body.
-
-    `segment_heads[k]` is segment k's leading SystemMessage (None when the
-    snapshot had none); `segment_starts[k]` is the index in `messages` of
-    segment k's first body message, so the body is
-    `messages[segment_starts[k]:segment_starts[k + 1]]`.
-
-    `segment_closings[k]` is the compaction LLM call that read segment k whole when it was
-    sealed (`ClosingRequest`), None where the compaction left no anchor; empty for a history
-    read without boundaries.
-    """
-
-    messages: list[BaseMessage]
-    segment_heads: tuple[SystemMessage | None, ...]
-    segment_starts: tuple[int, ...]
-    segment_closings: tuple[ClosingRequest | None, ...] = ()
-
-
 def load_checkpoint_messages_full(db: Database, agent_id: int) -> list[BaseMessage]:
     """Reconstruct one agent's full history across compaction segments.
 
@@ -393,14 +372,6 @@ def load_checkpoint_messages_full(db: Database, agent_id: int) -> list[BaseMessa
         CheckpointReadError: the store read or blob deserialize failed.
     """
     return load_checkpoint_history_full(db, agent_id).messages
-
-
-def single_segment_history(messages: list[BaseMessage]) -> FullHistory:
-    """A history that is one snapshot: its head (if a SystemMessage) and body."""
-    if not messages:
-        return FullHistory([], (), ())
-    head = messages[0] if isinstance(messages[0], SystemMessage) else None
-    return FullHistory(messages, (head,), (1 if head is not None else 0,))
 
 
 def load_checkpoint_history_full(db: Database, agent_id: int) -> FullHistory:

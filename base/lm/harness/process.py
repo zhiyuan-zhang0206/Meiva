@@ -11,6 +11,9 @@ import psutil
 
 from base.log import logger
 
+SIGTERM = 15
+SIGKILL = 9
+
 
 class ChildProbe(Protocol):
     def descendants(self, pid: int) -> dict[int, str]: ...

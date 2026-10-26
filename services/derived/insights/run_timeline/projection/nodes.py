@@ -5,7 +5,7 @@ from collections.abc import Mapping
 from datetime import datetime
 
 from base.agents.history.hierarchy.store import load_generation_costs
-from base.db import Database
+from base.db.protocols import DatabaseLike
 from services.derived.insights.run_timeline.projection.model import Fact, NodeRow
 from services.derived.insights.run_timeline.schemas import (
     RunTimelineGeneration,
@@ -71,7 +71,7 @@ def project_nodes(
 
 
 def window_nodes(
-    db: Database,
+    db: DatabaseLike,
     agent_id: int,
     rows: list[NodeRow],
 ) -> list[RunTimelineNode]:

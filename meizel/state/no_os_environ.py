@@ -76,9 +76,8 @@ def _scan_file(
 ) -> list[tuple[int, str, str]]:
     if rel_path in _ALLOWED_FILES or not _is_test_file(rel_path):
         return []
-    try:
-        text = path.read_text(encoding="utf-8")
-    except (OSError, UnicodeDecodeError):
+    text = lint_common.read_utf8_text(path)
+    if text is None:
         return []  # unreadable entry (e.g. a dangling symlink) or binary content
     violations: list[tuple[int, str, str]] = []
     inside_triple = False
@@ -107,24 +106,15 @@ def _scan_file(
     return violations
 
 
-def _iter_py_files(roots: list[Path]) -> list[Path]:
-    files: list[Path] = []
-    for root in roots:
-        if root.is_file() and root.suffix == ".py":
-            files.append(root)
-        elif root.is_dir():
-            files.extend(root.rglob("*.py"))
-    return files
-
-
-def _files_to_scan(argv: list[str], scope: frozenset[str] | None, root: Path) -> list[Path]:
+def _files_to_scan(
+    resolved: list[str], scope: frozenset[str] | None, root: Path, *, explicit: bool
+) -> list[Path]:
     """Explicit paths as given; otherwise every file the default scan reads, narrowed to the
     `--only` changed files when `scope` names them."""
-    if argv:
-        return _iter_py_files([Path(a).resolve() for a in argv])
-    targets = [root / d for d in _SCAN_DIRS] + [root / "tests"]
-    targets += [root / d for d in _TEST_ONLY_DIRS if (root / d).is_dir()]
-    default = [p for p in _iter_py_files(targets) if _in_default_scope(p, root)]
+    if explicit:
+        return [root / entry for entry in resolved if entry.endswith(".py")]
+    targets = [root / d for d in (*_SCAN_DIRS, "tests", *_TEST_ONLY_DIRS)]
+    default = [p for target in targets for p in target.rglob("*.py") if _in_default_scope(p, root)]
     return lint_common.restrict(default, scope, root)
 
 
@@ -164,13 +154,14 @@ def main(
     # meiva:note
     # argv non-empty = explicit paths; empty = the test files of all _SCAN_DIRS + tests/, or
     # the `--only` changed files (the commit hook) under that same scope.
+    resolved: list[str] = []
     if argv:
-        missing = [arg for arg in argv if not Path(arg).exists()]
+        resolved, missing = lint_common.resolve_targets(argv, root)
         if missing:
             print(f"error: target path(s) not found: {', '.join(missing)}", file=sys.stderr)
             return 1
     scope = lint_common.changed_scope(only, root, inputs=_RULE_INPUTS)
-    py_files = _files_to_scan(argv, scope, root)
+    py_files = _files_to_scan(resolved, scope, root, explicit=bool(argv))
     # meiva:note
     # Importing the config registry is the slow part of a run that judges no test file.
     managed_envs: frozenset[str] = (

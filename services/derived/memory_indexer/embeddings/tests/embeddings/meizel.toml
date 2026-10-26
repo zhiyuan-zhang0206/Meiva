@@ -1,2 +1,0 @@
-[debt.stdlib-patch]
-"test_worst_case_single_attempt_has_no_sleep.py#monkeypatch.setattr socket.getaddrinfo" = 1

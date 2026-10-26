@@ -7,12 +7,23 @@ from contextlib import (
     asynccontextmanager,
     contextmanager,
 )
-from typing import Any, Protocol, TypeVar
+from typing import Any, Protocol
 
 import psycopg
-from psycopg_pool import AsyncConnectionPool
 
-_CT = TypeVar("_CT", bound=psycopg.AsyncConnection[Any])
+from base.db.protocols import AsyncConnectionLike, SyncConnection
+
+
+# meiva:note
+# Generic async connection-lending contract preserving the connection subtype across transactions.
+class _AsyncTransactionPool[CT: AsyncConnectionLike](Protocol):
+    def connection(self, timeout: float | None = None) -> AbstractAsyncContextManager[CT]: ...
+
+
+# meiva:note
+# Generic sync connection-lending contract preserving the connection subtype across transactions.
+class _SyncTransactionPool[SyncCT: SyncConnection](Protocol):
+    def connection(self, timeout: float | None = None) -> AbstractContextManager[SyncCT]: ...
 
 
 # meiva:note
@@ -37,9 +48,9 @@ class ConnectionSource(Protocol):
 
 
 @contextmanager
-def write_transaction(
-    pool: ConnectionSource, *, timeout: float | None = None
-) -> Generator[psycopg.Connection, None, None]:
+def write_transaction[SyncCT: SyncConnection](
+    pool: _SyncTransactionPool[SyncCT], *, timeout: float | None = None
+) -> Generator[SyncCT, None, None]:
     """Open one transaction explicitly allowed to write, on a connection of `pool`.
 
     The session may default to read-only without this client asking: a pooler
@@ -56,9 +67,9 @@ def write_transaction(
 
 
 @asynccontextmanager
-async def async_write_transaction(  # noqa: UP047 - preserve the pool connection subtype.
-    pool: AsyncConnectionPool[_CT], *, timeout: float | None = None
-) -> AsyncGenerator[_CT, None]:
+async def async_write_transaction[CT: AsyncConnectionLike](
+    pool: _AsyncTransactionPool[CT], *, timeout: float | None = None
+) -> AsyncGenerator[CT, None]:
     """Borrow one async connection for an explicitly writable transaction.
 
     The session may default to read-only without this client asking (see

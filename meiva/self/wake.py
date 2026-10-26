@@ -11,9 +11,8 @@ from __future__ import annotations
 from typing import Protocol
 
 from loguru import logger
-from redis.exceptions import ResponseError
 
-from base.cluster import inbound_channel
+from base.cluster.transport_encryption import inbound_channel
 
 __all__ = ["publish_inbound_wake"]
 
@@ -24,6 +23,12 @@ class _RedisPublisher(Protocol):
 
 class _LazyRedis(Protocol):
     def __getattr__(self, attr: str) -> object: ...
+
+
+# meiva:note
+# Detects Redis ResponseError subclasses (including NoPermissionError) without importing redis at module load.
+def _is_response_error(exc: Exception) -> bool:
+    return any(cls.__name__ == "ResponseError" for cls in type(exc).__mro__)
 
 
 # meiva:note
@@ -43,16 +48,17 @@ def publish_inbound_wake(
     channel = inbound_channel(agent_id, events_channel)
     try:
         redis.publish(channel, "0")  # pyright: ignore[reportAttributeAccessIssue,reportUnknownMemberType,reportCallIssue]
-    except ResponseError as exc:
-        logger.warning(
-            "self inbound wake publish to {ch!r} rejected by redis ({exc!r}) - "
-            "this agent's redis ACL user lacks its inbound channel; the "
-            "self-restart/terminate/compact wake falls back to the claim SELECT "
-            "recheck. Check ensure_cluster_redis_acl.",
-            ch=channel,
-            exc=exc,
-        )
-    except Exception:
+    except Exception as exc:
+        if _is_response_error(exc):
+            logger.warning(
+                "self inbound wake publish to {ch!r} rejected by redis ({exc!r}) - "
+                "this agent's redis ACL user lacks its inbound channel; the "
+                "self-restart/terminate/compact wake falls back to the claim SELECT "
+                "recheck. Check ensure_cluster_redis_acl.",
+                ch=channel,
+                exc=exc,
+            )
+            return
         logger.opt(exception=True).warning(
             "self inbound wake publish to {ch!r} failed; the wake falls back to the claim "
             "SELECT recheck",

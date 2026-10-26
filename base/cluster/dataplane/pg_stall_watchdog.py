@@ -110,7 +110,6 @@ def capture_stall_evidence(port: int, admin_url: str) -> str | None:
     except OSError as e:
         logger.warning(f"could not create stall-evidence dir {dest_dir}: {e!r}")
         return None
-    import datetime
 
     evidence = dest_dir / f"stall-{port}.txt"
 
@@ -121,12 +120,8 @@ def capture_stall_evidence(port: int, admin_url: str) -> str | None:
         except OSError as e:
             logger.warning(f"could not write stall evidence {evidence}: {e!r}")
 
-    _append(
-        [
-            f"throwaway PG stall evidence (port {port}) at "
-            f"{datetime.datetime.now(datetime.UTC).isoformat()}Z"
-        ]
-    )
+    _append([f"throwaway PG stall evidence (port {port})"])
+
     for pid, state_line in postmaster_pids(port):
         _append([f"process: {state_line}"])
         if is_macos():

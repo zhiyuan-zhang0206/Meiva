@@ -19,7 +19,6 @@ the function so flag-off processes never pay for the SDK.
 
 from __future__ import annotations
 
-import time
 from collections.abc import Callable
 from typing import Any, Protocol
 
@@ -85,7 +84,6 @@ def emit_log_record(logs: _LoggerProvider, event: Event) -> None:
         context = set_span_in_context(NonRecordingSpan(span_context))
     record = LogRecord(
         timestamp=int(event.ts.timestamp() * 1_000_000_000),
-        observed_timestamp=time.time_ns(),
         context=context,
         severity_text=event.level,
         # The event.name semantic field is not in the stub overloads yet;

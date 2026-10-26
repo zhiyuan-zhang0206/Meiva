@@ -45,7 +45,6 @@ from gateway.upload_delivery.worker import UploadRecovery
 def test_hard_death_native_temp_not_double_charged_or_cleaned(
     uploaded_agent: tuple[GatewayTestClient, int],
     db_conn: psycopg.Connection[Any],
-    tmp_path: Path,
     stage: str,
     machine_identity: MachineIdentityReader,
 ):
@@ -53,7 +52,7 @@ def test_hard_death_native_temp_not_double_charged_or_cleaned(
     # meiva:note
     # Publication cannot start: the downloads root is a file, so it cannot hold the agent's
     # directory (a fault that binds root as well, unlike a permission bit).
-    downloads = tmp_path / "Downloads"
+    downloads = client.app.state.gateway_config.upload_home / "Downloads"
     downloads.write_text("not a directory")
     assert post(client, agent).status_code == 500
     downloads.unlink()

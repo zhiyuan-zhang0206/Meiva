@@ -2,9 +2,9 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
-import signal
 import time
 from collections.abc import Callable, Mapping
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Protocol
 
@@ -22,7 +22,6 @@ from base.lm.harness.deepseek.mapping import assistant_text, map_update, parse_p
 from base.lm.harness.deepseek.types import (
     EVENT_STREAM_END,
     BaseHarnessSession,
-    CancelReport,
     InboundQueueFullError,
     SessionClosedError,
     SessionRegistry,
@@ -40,6 +39,8 @@ from base.lm.harness.events import (
 )
 from base.lm.harness.handoff import Handoff
 from base.lm.harness.process import (
+    SIGKILL,
+    SIGTERM,
     ChildProbe,
     ProcessObservation,
     PsutilChildProbe,
@@ -74,6 +75,40 @@ _EVENT_STREAM_END = EVENT_STREAM_END
 
 def _perf_counter() -> float:
     return time.perf_counter()
+
+
+# meiva:note
+# `CancelReport.settled` is None when the runtime pid is unobservable — an
+# unobservable tree is reported as unknown, never as clean — and `remaining` names
+# every process that outlived the sweep so the caller decides instead of assuming.
+# meiva:link base/lm/harness/deepseek/docs/deepseek.meiva.okf.md
+@dataclass(frozen=True, slots=True)
+class CancelReport:
+    turn_id: str | None
+    cancel_ms: float
+    settled: bool | None
+    observed: tuple[ProcessObservation, ...]
+    remaining: tuple[ProcessObservation, ...]
+    waited_ms: float
+    agent_pid: int | None
+    agent_alive: bool | None
+
+
+# meiva:note
+# Summarize the latest turn's token usage from a parsed `UsageSnapshot`.
+def _summarize_turn_usage(observed: UsageSnapshot) -> tuple[Usage, bool]:
+    if not observed.per_turn_usage:
+        return (Usage(), False)
+    steps = observed.latest_turn()
+    return (
+        Usage(
+            input_tokens=sum(step.input_tokens for step in steps),
+            output_tokens=sum(step.output_tokens for step in steps),
+            cache_creation_input_tokens=sum(step.cache_write_tokens for step in steps),
+            cache_read_input_tokens=sum(step.cache_read_tokens for step in steps),
+        ),
+        True,
+    )
 
 
 class DeepSeekProbe(ChildProbe, Protocol):
@@ -147,7 +182,13 @@ class DeepSeekSession(BaseHarnessSession[BridgeConfig]):
             if not isinstance(session_id, str) or not session_id:
                 raise AcpError(f"session/new returned no sessionId: {created!r}")
             self._session_id = session_id
-        await self._configure()
+        for option_params in self._config_option_requests():
+            with contextlib.suppress(AcpRpcError):
+                await connection.request(
+                    "session/set_config_option",
+                    option_params,
+                    timeout=self.config.startup_timeout_seconds,
+                )
         await self._enter_tasks()
         self._reader = self._spawn(self._read_loop(connection))
         self._emit(
@@ -177,7 +218,10 @@ class DeepSeekSession(BaseHarnessSession[BridgeConfig]):
                     )
             await connection.close(reason=reason)
         await self._close_tasks()
-        self._residue = await self._sweep(reason="session closed")
+        observed, survivors = self._spawned_descendants()
+        if survivors:
+            await self._reap(survivors)
+        self._residue = self._record_sweep_survivors(observed, survivors, reason="session closed")
         # meiva:note
         # `connection.close()` above waited for the child, so this is final.
         self._exit_code = connection.returncode if connection is not None else None
@@ -252,25 +296,36 @@ class DeepSeekSession(BaseHarnessSession[BridgeConfig]):
             if child == self._agent_pid or not self._probe.is_alive(child):
                 continue
             with contextlib.suppress(ProcessLookupError, PermissionError):
-                self._deepseek_probe.kill(child, signal.SIGTERM)
+                self._deepseek_probe.kill(child, SIGTERM)
             reaped.append(child)
         if reaped:
             await asyncio.sleep(CANCEL_POLL_SECONDS)
         for child in reaped:
             if self._probe.is_alive(child):
                 with contextlib.suppress(ProcessLookupError, PermissionError):
-                    self._deepseek_probe.kill(child, signal.SIGKILL)
+                    self._deepseek_probe.kill(child, SIGKILL)
         return tuple(reaped)
 
-    async def _sweep(self, *, reason: str) -> tuple[ProcessObservation, ...]:
-        pid = self._agent_pid
-        observed = snapshot(self._probe, pid)
+    # meiva:note
+    # Snapshot the runtime process tree and select descendants spawned since turn start.
+    def _spawned_descendants(self) -> tuple[dict[int, str], dict[int, str]]:
+        observed = snapshot(self._probe, self._agent_pid)
         survivors = {
             child: command for child, command in observed.items() if child not in self._baseline
         }
+        return (observed, survivors)
+
+    # meiva:note
+    # Describe any descendants still alive after `_reap` and emit `SessionFaulted`.
+    def _record_sweep_survivors(
+        self,
+        observed: Mapping[int, str],
+        survivors: Mapping[int, str],
+        *,
+        reason: str,
+    ) -> tuple[ProcessObservation, ...]:
         if not survivors:
             return ()
-        await self._reap(survivors)
         still = [child for child in survivors if self._probe.is_alive(child)]
         if still:
             self._emit(
@@ -308,28 +363,22 @@ class DeepSeekSession(BaseHarnessSession[BridgeConfig]):
         )
         return denial.option_id if denial else None
 
-    async def _configure(self) -> None:
-        connection = self._require_connection()
+    # meiva:note
+    # Build the `session/set_config_option` payloads for configured model and reasoning effort.
+    def _config_option_requests(self) -> tuple[dict[str, str], ...]:
         session_id = self._session_id
         if session_id is None or self.config.model is None:
-            return
-        with contextlib.suppress(AcpRpcError):
-            await connection.request(
-                "session/set_config_option",
-                {"sessionId": session_id, "configId": "model", "value": self.config.model},
-                timeout=self.config.startup_timeout_seconds,
-            )
+            return ()
+        requests = [{"sessionId": session_id, "configId": "model", "value": self.config.model}]
         if self.config.reasoning_effort is not None:
-            with contextlib.suppress(AcpRpcError):
-                await connection.request(
-                    "session/set_config_option",
-                    {
-                        "sessionId": session_id,
-                        "configId": "reasoning_effort",
-                        "value": self.config.reasoning_effort,
-                    },
-                    timeout=self.config.startup_timeout_seconds,
-                )
+            requests.append(
+                {
+                    "sessionId": session_id,
+                    "configId": "reasoning_effort",
+                    "value": self.config.reasoning_effort,
+                }
+            )
+        return tuple(requests)
 
     async def _read_loop(self, connection: AcpConnection) -> None:
         try:
@@ -401,7 +450,14 @@ class DeepSeekSession(BaseHarnessSession[BridgeConfig]):
         await asyncio.sleep(0)
         fields = parse_prompt_result(result)
         text = "\n".join(ticket.parts).strip()
-        usage, measured = await self._turn_usage()
+        if self._session_id is None:
+            usage, measured = (Usage(), False)
+        else:
+            observed = await asyncio.to_thread(
+                read_usage, self.config.dsh_home, self.config.cwd, self._session_id
+            )
+            self._usage = observed
+            usage, measured = _summarize_turn_usage(observed)
         cost = self._turn_cost(usage) if measured else None
         self._totals = self._totals.with_turn(usage, measured=measured, cost=cost)
         outcome = TurnOutcome(
@@ -439,27 +495,6 @@ class DeepSeekSession(BaseHarnessSession[BridgeConfig]):
             )
         )
         self._complete(ticket, outcome)
-
-    async def _turn_usage(self) -> tuple[Usage, bool]:
-        session_id = self._session_id
-        if session_id is None:
-            return (Usage(), False)
-        observed = await asyncio.to_thread(
-            read_usage, self.config.dsh_home, self.config.cwd, session_id
-        )
-        self._usage = observed
-        if not observed.per_turn_usage:
-            return (Usage(), False)
-        steps = observed.latest_turn()
-        return (
-            Usage(
-                input_tokens=sum(step.input_tokens for step in steps),
-                output_tokens=sum(step.output_tokens for step in steps),
-                cache_creation_input_tokens=sum(step.cache_write_tokens for step in steps),
-                cache_read_input_tokens=sum(step.cache_read_tokens for step in steps),
-            ),
-            True,
-        )
 
     def _turn_cost(self, usage: Usage) -> float | None:
         model = self.config.model

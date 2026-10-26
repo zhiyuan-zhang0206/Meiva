@@ -271,9 +271,9 @@ class PriceBook:
         return entry.rates_at(instant, input_tokens)
 
 
-def _aware_utc(instant: datetime | None) -> datetime:
+def _aware_utc(instant: datetime | None) -> datetime | None:
     if instant is None:
-        return datetime.now(UTC)
+        return None
     if instant.utcoffset() is None:
         raise ValueError("pricing instant must be timezone-aware")
     return instant.astimezone(UTC)

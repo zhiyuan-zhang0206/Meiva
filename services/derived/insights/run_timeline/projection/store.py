@@ -2,9 +2,9 @@
 from __future__ import annotations
 
 from datetime import datetime
+from typing import LiteralString
 
-from psycopg import Connection, sql
-
+from base.db.protocols import SyncConnection
 from services.derived.insights.run_timeline.projection.model import (
     VERSION,
     Fact,
@@ -14,8 +14,23 @@ from services.derived.insights.run_timeline.projection.model import (
 )
 from services.derived.insights.run_timeline.schemas import RunTimelineUnit
 
-_SEGMENT_COLUMNS = """session, checkpoint_id, message_start, message_end, local_start,
-    read_before, read_after, start_ts, end_ts, totals"""
+_INSERT_SEGMENT: LiteralString = (
+    "INSERT INTO run_timeline_segments"
+    " (agent_id, version, session, checkpoint_id, message_start, message_end, local_start,"
+    " read_before, read_after, start_ts, end_ts, totals)"
+    " VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s::jsonb)"
+)
+
+_COUNT_BLOCKS: LiteralString = (
+    "SELECT count(*) FROM run_timeline_blocks"
+    " WHERE agent_id = %s AND version = %s AND session < %s AND start_ts <= %s AND end_ts >= %s"
+)
+
+_SELECT_BLOCKS: LiteralString = (
+    "SELECT payload FROM run_timeline_blocks"
+    " WHERE agent_id = %s AND version = %s AND session < %s AND start_ts <= %s AND end_ts >= %s"
+    " ORDER BY session, ordinal"
+)
 
 _NODES = """
 WITH tail AS MATERIALIZED (
@@ -45,7 +60,7 @@ SELECT to_jsonb(q) FROM (
 """
 
 
-def last_segment(conn: Connection, agent_id: int) -> Segment | None:
+def last_segment(conn: SyncConnection, agent_id: int) -> Segment | None:
     row = conn.execute(
         "SELECT to_jsonb(s) - 'agent_id' - 'version' FROM run_timeline_segments s"
         " WHERE agent_id = %s AND version = %s ORDER BY session DESC LIMIT 1",
@@ -54,15 +69,12 @@ def last_segment(conn: Connection, agent_id: int) -> Segment | None:
     return Segment.model_validate(row[0]) if row else None
 
 
-def publish(conn: Connection, agent_id: int, projection: Projection) -> None:
+def publish(conn: SyncConnection, agent_id: int, projection: Projection) -> None:
     segment = projection.segment
     data = segment.model_dump()
     data["totals"] = segment.totals.model_dump_json()
     conn.execute(
-        sql.SQL(
-            "INSERT INTO run_timeline_segments (agent_id, version, {})"
-            " VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s::jsonb)"
-        ).format(sql.SQL(_SEGMENT_COLUMNS)),
+        _INSERT_SEGMENT,
         (agent_id, VERSION, *data.values()),
     )
     with conn.cursor() as cur:
@@ -105,7 +117,7 @@ def publish(conn: Connection, agent_id: int, projection: Projection) -> None:
 
 
 def node_index_bounds(
-    conn: Connection,
+    conn: SyncConnection,
     agent_id: int,
     sessions: int,
     start: datetime,
@@ -125,7 +137,7 @@ def node_index_bounds(
 
 
 def window_node_rows(
-    conn: Connection,
+    conn: SyncConnection,
     agent_id: int,
     cut: tuple[int, int, list[Fact]],
     bounds: tuple[int, int],
@@ -154,7 +166,7 @@ def window_node_rows(
 
 
 def window_blocks(
-    conn: Connection,
+    conn: SyncConnection,
     agent_id: int,
     sessions: int,
     start: datetime,
@@ -162,27 +174,17 @@ def window_blocks(
     *,
     allowance: int | None,
 ) -> tuple[list[RunTimelineUnit], int]:
-    where = (
-        "WHERE agent_id = %s AND version = %s AND session < %s AND start_ts <= %s AND end_ts >= %s"
-    )
     args = (agent_id, VERSION, sessions, end, start)
-    row = conn.execute(
-        sql.SQL("SELECT count(*) FROM run_timeline_blocks {}").format(sql.SQL(where)), args
-    ).fetchone()
+    row = conn.execute(_COUNT_BLOCKS, args).fetchone()
     count = int(row[0]) if row else 0
     if allowance is not None and count > allowance:
         return [], count
-    rows = conn.execute(
-        sql.SQL("SELECT payload FROM run_timeline_blocks {} ORDER BY session, ordinal").format(
-            sql.SQL(where)
-        ),
-        args,
-    ).fetchall()
+    rows = conn.execute(_SELECT_BLOCKS, args).fetchall()
     return [RunTimelineUnit.model_validate_json(bytes(row[0])) for row in rows], count
 
 
 def segments_for_span(
-    conn: Connection,
+    conn: SyncConnection,
     agent_id: int,
     sessions: int,
     start: int,

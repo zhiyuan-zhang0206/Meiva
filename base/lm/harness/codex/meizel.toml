@@ -16,21 +16,16 @@ exports = ["auth.py", "tests", "transport.py"]
 
 [debt.impure-call]
 "session.py#async def _begin" = 1
-"session.py#async def _initialize" = 1
-"session.py#async def _on_request" = 1
-"session.py#async def _open_thread" = 1
 "session.py#async def close" = 1
 "session.py#async def interrupt" = 1
 "session.py#async def start" = 1
-"transport.py#async def _answer" = 1
-"transport.py#async def _cancel_children" = 1
 "transport.py#async def _dispatch" = 1
 "transport.py#async def _read_loop" = 1
 "transport.py#async def _write" = 1
-"transport.py#async def close" = 2
-"transport.py#async def notify" = 2
-"transport.py#async def request" = 2
-"transport.py#async def start" = 2
+"transport.py#async def close" = 1
+"transport.py#async def notify" = 1
+"transport.py#async def request" = 1
+"transport.py#async def start" = 1
 
 [debt.impure-edge]
 "config.py#base/host/env/harness_binaries.py" = 1

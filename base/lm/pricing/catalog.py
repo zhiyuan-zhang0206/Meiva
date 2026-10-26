@@ -127,10 +127,11 @@ class _TokenTier:
             self.input_tokens_max is None or input_tokens <= self.input_tokens_max
         )
 
-    def rates_at(self, instant: datetime) -> Rates:
-        for override in self.utc_daily_overrides:
-            if override.contains(instant):
-                return override.rates
+    def rates_at(self, instant: datetime | None) -> Rates:
+        if instant is not None:
+            for override in self.utc_daily_overrides:
+                if override.contains(instant):
+                    return override.rates
         return self.rates
 
 
@@ -140,7 +141,9 @@ class _EffectivePeriod:
     effective_until: datetime | None
     tiers: tuple[_TokenTier, ...]
 
-    def contains(self, instant: datetime) -> bool:
+    def contains(self, instant: datetime | None) -> bool:
+        if instant is None:
+            return self.effective_until is None
         return (self.effective_from is None or instant >= self.effective_from) and (
             self.effective_until is None or instant < self.effective_until
         )
@@ -156,7 +159,9 @@ class ModelPrice:
     effective_time_note: str | None
     periods: tuple[_EffectivePeriod, ...]
 
-    def rates_at(self, instant: datetime, input_tokens: int | None) -> Rates | None:
+    def rates_at(
+        self, instant: datetime | None = None, input_tokens: int | None = None
+    ) -> Rates | None:
         for period in self.periods:
             if not period.contains(instant):
                 continue

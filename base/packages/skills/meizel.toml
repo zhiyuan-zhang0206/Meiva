@@ -12,14 +12,12 @@ exports = ["index.py", "names.py", "scan.py", "tree.py"]
 "__init__.py" = "strict"
 "names.py" = "strict"
 "tree.py" = "strict"
+"tree_builder.py" = "strict"
 
 [debt.impure-call]
-"index.py#Path.is_dir" = 1
 "index.py#Path.read_text" = 1
 "index.py#Path.stat" = 1
-"project_roots.py#Path.exists" = 1
 "project_roots.py#Path.is_dir" = 1
 "project_roots.py#Path.is_file" = 1
-"scan.py#Path.is_file" = 1
 "scan.py#Path.read_bytes" = 1
 "scan.py#Path.stat" = 1

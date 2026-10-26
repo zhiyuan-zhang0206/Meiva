@@ -9,15 +9,17 @@ from __future__ import annotations
 import os
 import re
 from pathlib import Path
-from urllib.parse import parse_qs, urlsplit
 
 from pydantic import Field, field_validator, model_validator
 
 from base.config.base import EnvSettings, is_default_unit_home
-from base.host.env.dotenv_boot import PLACEHOLDER_DB_URL
+from base.host.env.boot_policy import PLACEHOLDER_DB_URL
 from base.host.net.predicates import is_ipv4_literal, is_loopback_host
 from base.host.net.url_secret import (
     names_foreign_host,
+    url_has_query_param,
+    url_host,
+    url_username,
     url_with_host,
     url_with_query_param,
 )
@@ -27,12 +29,18 @@ def _is_default_user_home(home: Path | None = None) -> bool:
     return is_default_unit_home(home)
 
 
+# meiva:note
+# Read one raw process-environment variable at sub-model construction time.
+def _env(name: str) -> str:
+    return os.environ.get(name, "")
+
+
 def self_machine_host() -> str:
     """This host's reachable address, mirroring `MachineIdentity.host`
     (env `MEIVA_MACHINE_HOST` > `localhost`).
     Duplicated at this leaf because base.cluster.machine imports settings — a config
     sub-model cannot import it back."""
-    return os.environ.get("MEIVA_MACHINE_HOST", "").strip() or "localhost"
+    return _env("MEIVA_MACHINE_HOST").strip() or "localhost"
 
 
 # A runner-class login: a local plane's write-generation runner login
@@ -49,7 +57,7 @@ def _is_runner_db_url(url: str) -> bool:
     consumer uses), never from a cluster name. The name shape only classifies a
     projection a launcher or bootstrap already delivered; the database decides
     what that login may do."""
-    return _RUNNER_LOGIN.fullmatch(urlsplit(url).username or "") is not None
+    return _RUNNER_LOGIN.fullmatch(url_username(url)) is not None
 
 
 def _loopback_if_self(url: str, *, machine_host: str | None = None) -> str:
@@ -66,7 +74,7 @@ def _loopback_if_self(url: str, *, machine_host: str | None = None) -> str:
     loopback, not route it to where the URL happens to point."""
     if url == PLACEHOLDER_DB_URL:
         return url
-    host = urlsplit(url).hostname or ""
+    host = url_host(url, "")
     if not host or is_loopback_host(host):
         return url
     machine = (
@@ -97,7 +105,7 @@ def sslmode_for_url(url: str, configured: str) -> str | None:
     kwargs over the URL's conninfo params, so injecting here when the URL
     already names a mode would silently downgrade a stricter URL mode.
     """
-    if "sslmode" in parse_qs(urlsplit(url).query):
+    if url_has_query_param(url, "sslmode"):
         return None
     return configured.strip() or None
 
@@ -151,9 +159,7 @@ def project_service_db_url(
         local_owner = (
             raw != PLACEHOLDER_DB_URL
             and not _is_runner_db_url(raw)
-            and is_loopback_host(
-                urlsplit(_loopback_if_self(raw, machine_host=machine_host)).hostname or ""
-            )
+            and is_loopback_host(url_host(_loopback_if_self(raw, machine_host=machine_host), ""))
         )
     except ValueError:
         return raw
@@ -629,15 +635,13 @@ class DataPlaneSettings(EnvSettings):
         local_owner_url = (
             self.db_url != PLACEHOLDER_DB_URL
             and not _is_runner_db_url(self.db_url)
-            and is_loopback_host(urlsplit(self.db_url).hostname or "")
+            and is_loopback_host(url_host(self.db_url, ""))
         )
         on_default_home = _is_default_user_home()
         # MEIVA_PROCESS_PROFILE is a launcher-only process marker, not a Settings
         # field. It must remain an environment read so agent startup can preserve
         # its injected database projection.
-        agent_profile_on_default_home = (
-            os.environ.get("MEIVA_PROCESS_PROFILE") == "agent" and on_default_home
-        )
+        agent_profile_on_default_home = _env("MEIVA_PROCESS_PROFILE") == "agent" and on_default_home
         if agent_profile_on_default_home and self.cluster_secret and local_owner_url:
             raise AgentProfileOwnerDbUrlRefusedError(
                 "agent-profile processes must receive a runner-class MEIVA_DB_URL; "
@@ -676,7 +680,7 @@ class DataPlaneSettings(EnvSettings):
         are untouched.
         """
         if self.db_url != PLACEHOLDER_DB_URL:
-            host = urlsplit(self.db_url).hostname or ""
+            host = url_host(self.db_url, "")
             if is_ipv4_literal(host):
                 self.db_url = url_with_query_param(self.db_url, "hostaddr", host)
         return self

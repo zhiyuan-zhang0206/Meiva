@@ -29,6 +29,7 @@ from base.host.system.boot_policy import (
     boot_start_arguments,
 )
 from base.host.system.hostport import Host
+from base.native_process.os_platform import resolve_pid
 from base.native_process.ownership import OwnedProcess
 
 SYSTEM_UNIT_DIR = Path("/etc/systemd/system")
@@ -215,15 +216,11 @@ def process_cgroup(pid: int, *, proc_root: Path = PROC_ROOT) -> str:
     raise RuntimeError(f"PID {pid} has no observable systemd cgroup")
 
 
-def _resolve_pid(pid: int | None) -> int:
-    return os.getpid() if pid is None else pid
-
-
 def in_boot_unit(*, host: Host, proc_root: Path = PROC_ROOT, pid: int | None = None) -> bool:
     """Interactive start has no systemd readiness tail, even on Linux."""
     if host.platform.system != "linux":
         return False
-    target_pid = _resolve_pid(pid)
+    target_pid = resolve_pid(pid)
     return process_cgroup(target_pid, proc_root=proc_root) == f"/system.slice/{UNIT_NAME}"
 
 
@@ -266,7 +263,7 @@ def publish_root_ready(
     closure. Interactive start writes nothing. This hint never replaces the
     birth-bound root custody checked by the caller.
     """
-    caller_pid = _resolve_pid(control_pid)
+    caller_pid = resolve_pid(control_pid)
     if not in_boot_unit(host=host, proc_root=proc_root, pid=caller_pid):
         return
     expected = f"/system.slice/{UNIT_NAME}"

@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import re
+from collections.abc import Sequence
 from typing import Any, TypeGuard
 
 from langchain_core.messages import AIMessage, BaseMessage
@@ -73,3 +74,17 @@ def ai_message_texts(msg: AIMessage) -> dict[str, str]:
         if isinstance(code := tc["args"].get("code"), str):
             out["tool_call"] += code
     return out
+
+
+# meiva:note
+# Largest-remainder apportionment conserves total tokens exactly across weighted parts.
+def apportion(weights: Sequence[int], total: int) -> list[int]:
+    if not weights:
+        return []
+    basis = list(weights) if sum(weights) > 0 else [1] * len(weights)
+    denom = sum(basis)
+    shares = [total * w // denom for w in basis]
+    by_remainder = sorted(range(len(basis)), key=lambda i: -(total * basis[i] % denom))
+    for i in by_remainder[: total - sum(shares)]:
+        shares[i] += 1
+    return shares

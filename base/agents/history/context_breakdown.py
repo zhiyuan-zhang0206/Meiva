@@ -29,14 +29,13 @@ from langchain_core.messages import (
     SystemMessage,
     ToolMessage,
 )
+from pydantic import BaseModel, Field
 
 from base.agents.history.message_tokens import (
     MessageTokens,
     SegmentTokens,
     TokenTotal,
     ai_message_parts,
-    apportion,
-    context_through,
     segment_tokens,
     total_of,
 )
@@ -46,7 +45,7 @@ from base.agents.messages.kwargs import (
     is_compact_summary_text,
     read_meiva_kwargs,
 )
-from base.agents.messages.token_estimate import estimate_text_tokens
+from base.agents.messages.token_estimate import apportion, estimate_text_tokens
 
 # Bucket kinds — the canonical enumeration, and the stable tie-break order when
 # two categories share the same token count (the frontend legend renders them
@@ -333,7 +332,7 @@ def request_breakdown(
 
     The request's own `input_tokens` is the provider's number: when the parts add up to it, the
     total is exact however the parts were obtained (the categories stay as they are)."""
-    head_rec, records = context_through(head, body, segment, upto)
+    head_rec, records = segment.context_through(head, body, upto)
     messages: list[BaseMessage] = ([head] if head is not None else []) + list(body[:upto])
     counted = ([head_rec] if head is not None and head_rec is not None else []) + records
     found = compute_breakdown(messages, counted)
@@ -369,3 +368,47 @@ def latest_request_breakdown(messages: Sequence[BaseMessage]) -> RequestBreakdow
 
 def _text(content: object) -> str:
     return content if isinstance(content, str) else str(content)
+
+
+# meiva:note
+# One node of the system prompt's recursive section breakdown with its estimated token share
+# and recursive sub-heading children when split.
+class ContextSection(BaseModel):
+    name: str
+    tokens: int
+    estimated: bool = True
+    children: list[ContextSection] = Field(default_factory=list)  # pyright: ignore[reportUnknownVariableType]
+
+    # meiva:note
+    # Convert a pure `SectionNode` tree into the wire `ContextSection` model tree.
+    @classmethod
+    def from_node(cls, node: SectionNode) -> ContextSection:
+        return cls(
+            name=node.name,
+            tokens=node.tokens,
+            estimated=node.estimated,
+            children=[cls.from_node(child) for child in node.children],
+        )
+
+
+# meiva:note
+# One context bucket with its summed message token count, estimation flag, and exact share.
+class ContextCategory(BaseModel):
+    kind: str
+    tokens: int
+    estimated: bool
+    exact_fraction: float
+
+
+# meiva:note
+# Wire response for context-window breakdown across categories, system-prompt sections, and
+# model window/compaction thresholds.
+class ContextBreakdownResponse(BaseModel):
+    total_input_tokens: int
+    estimated: bool
+    exact_fraction: float
+    max_input_tokens: int = 0
+    soft_compact_tokens: int = 0
+    hard_compact_tokens: int = 0
+    sections: list[ContextSection]
+    categories: list[ContextCategory]

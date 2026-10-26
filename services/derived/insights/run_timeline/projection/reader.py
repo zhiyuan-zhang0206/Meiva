@@ -10,13 +10,11 @@ from datetime import datetime, timedelta
 from typing import Any
 
 from fastapi import HTTPException
-from psycopg import Connection
-from psycopg_pool import ConnectionPool
 
 from base.agents.history.checkpoint import FullHistory
 from base.agents.messages.timestamp_policy import TimestampSource
 from base.clock import Timers
-from base.db import Database
+from base.db.protocols import DatabaseLike, SyncConnection, SyncPool
 from services.derived.insights.run_timeline.history import HistoryView
 from services.derived.insights.run_timeline.projection.derive import project_segment, segment_view
 from services.derived.insights.run_timeline.projection.jobs import IndexJobs
@@ -66,19 +64,21 @@ class Snapshot:
 
 
 class TimelineReader:
-    def __init__(
+    def __init__[DbT: DatabaseLike](
         self,
-        db: Database,
-        pool: ConnectionPool[Any],
+        db: DbT,
+        pool: SyncPool,
         *,
         timestamps: TimestampSource,
         jobs: IndexJobs,
-        read_segment: Callable[[Database, int, str], FullHistory],
+        read_segment: Callable[[DbT, int, str], FullHistory],
         timers: Timers,
     ) -> None:
-        self.db, self.pool, self.timestamps, self.jobs = db, pool, timestamps, jobs
-        self.read_segment, self.timers = read_segment, timers
-        self.read_source: Callable[[Connection[Any], int], Source] = capture_source
+        self.db: DatabaseLike = db
+        self.pool, self.timestamps, self.jobs = pool, timestamps, jobs
+        self.read_segment: Callable[[Any, int, str], FullHistory] = read_segment
+        self.timers = timers
+        self.read_source: Callable[[SyncConnection, int], Source] = capture_source
         self._lock = threading.Lock()
 
         self._building = [threading.Lock() for _ in range(MAX_ENTRIES)]

@@ -11,8 +11,11 @@ imported from.
 from __future__ import annotations
 
 import ast
+import os
 from collections.abc import Iterator
 from pathlib import Path
+
+from meizel.lint_common import read_utf8_text
 
 MUTATORS = frozenset(
     {
@@ -325,7 +328,7 @@ class Module:
 
     def is_repo_module(self, dotted_name: str) -> bool:
         path = self.repo_root.joinpath(*dotted_name.split("."))
-        return path.with_suffix(".py").is_file() or path.is_dir()
+        return read_utf8_text(path.with_suffix(".py")) is not None or any(path.rglob("*.py"))
 
     def module_of(self, node: ast.expr) -> str | None:
         """The first-party module an attribute-assignment base names, if any."""
@@ -386,13 +389,16 @@ def _load(repo_root: Path, dotted_name: str) -> Module | None:
     base = repo_root.joinpath(*dotted_name.split("."))
     for path in (base.with_suffix(".py"), base / "__init__.py"):
         try:
-            stamp = (str(path), path.stat().st_mtime_ns)
+            stamp = (str(path), os.stat(path).st_mtime_ns)  # noqa: PTH116
         except OSError:
             continue
         if stamp not in _PARSED:
+            text = read_utf8_text(path)
+            if text is None:
+                return None
             try:
-                tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
-            except (OSError, UnicodeDecodeError, SyntaxError):
+                tree = ast.parse(text, filename=str(path))
+            except SyntaxError:
                 return None
             _PARSED[stamp] = Module(tree, path.relative_to(repo_root).as_posix(), repo_root)
         return _PARSED[stamp]

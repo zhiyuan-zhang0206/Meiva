@@ -3,8 +3,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from psycopg import Connection
-
+from base.db.protocols import SyncConnection
 from services.derived.insights.run_timeline.projection.model import VERSION, Segment
 
 
@@ -22,7 +21,7 @@ class Source:
         return self.previous is not None and self.previous.session + 1 == self.boundaries
 
 
-def capture_source(conn: Connection, agent_id: int) -> Source:
+def capture_source(conn: SyncConnection, agent_id: int) -> Source:
     row = conn.execute(
         """
         WITH head AS (
@@ -47,7 +46,7 @@ def capture_source(conn: Connection, agent_id: int) -> Source:
     return Source(head, boundary, count, previous)
 
 
-def next_boundary(conn: Connection, agent_id: int, previous: Segment | None) -> str | None:
+def next_boundary(conn: SyncConnection, agent_id: int, previous: Segment | None) -> str | None:
     through = previous.checkpoint_id if previous else ""
     if previous is not None:
         row = conn.execute(

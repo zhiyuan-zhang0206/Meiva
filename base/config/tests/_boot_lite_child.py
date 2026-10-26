@@ -13,6 +13,19 @@ def emit(*parts: object) -> None:
     sys.stdout.write(" ".join(str(part) for part in parts) + "\n")
 
 
+# meiva:note
+# Wait for the test gate event or raise when timed out.
+def _wait_release(release: Any) -> None:
+    if not release.wait(30):
+        raise RuntimeError("gate not released")
+
+
+# meiva:note
+# Simulate a pre-install build failure inside the in-flight window.
+def _fail_build() -> None:
+    raise RuntimeError("first build died before install")
+
+
 def default_boot_is_lite_and_pydantic_settings_free() -> None:
     import sys
 
@@ -147,20 +160,21 @@ def inflight_build_read_waits_then_serves_the_full_value() -> None:
     import threading
 
     import base.config as c
-    import base.config._full as full
+    import base.config._lite as lite
 
-    real: Any = full.build
     entered = threading.Event()
     release = threading.Event()
-
-    def gated(*, env_boot: Any) -> Any:
-        entered.set()
-        if not release.wait(30):
-            raise RuntimeError("gate not released")
-        return real(env_boot=env_boot)
-
-    full.build = gated
     out: dict[str, Any] = {}
+
+    def build_owner() -> None:
+        try:
+            with lite.in_flight_build():
+                entered.set()
+                _wait_release(release)
+                c.ensure_eager()
+                out["a"] = c.settings.web.web_jina_reader_base
+        except Exception as exc:
+            out["a"] = f"ERR {type(exc).__name__}: {exc}"
 
     def read(tag: str) -> None:
         try:
@@ -168,7 +182,7 @@ def inflight_build_read_waits_then_serves_the_full_value() -> None:
         except Exception as exc:
             out[tag] = f"ERR {type(exc).__name__}: {exc}"
 
-    t1 = threading.Thread(target=read, args=("a",))
+    t1 = threading.Thread(target=build_owner)
     t1.start()
     assert entered.wait(30), "build never started"
     t2 = threading.Thread(target=read, args=("b",))
@@ -187,22 +201,22 @@ def inflight_build_read_timeout_raises_retryable() -> None:
     import threading
 
     import base.config as c
-    import base.config._full as full
     import base.config._lite as lite
 
     lite.set_wait_timeout(0.3)
-    real: Any = full.build
     entered = threading.Event()
     release = threading.Event()
-
-    def gated(*, env_boot: Any) -> Any:
-        entered.set()
-        if not release.wait(30):
-            raise RuntimeError("gate not released")
-        return real(env_boot=env_boot)
-
-    full.build = gated
     out: dict[str, Any] = {}
+
+    def build_owner() -> None:
+        try:
+            with lite.in_flight_build():
+                entered.set()
+                _wait_release(release)
+                c.ensure_eager()
+                out["a"] = c.settings.web.web_jina_reader_base
+        except Exception as exc:
+            out["a"] = f"{type(exc).__name__}: {exc}"
 
     def read(tag: str) -> None:
         try:
@@ -210,7 +224,7 @@ def inflight_build_read_timeout_raises_retryable() -> None:
         except Exception as exc:
             out[tag] = f"{type(exc).__name__}: {exc}"
 
-    t1 = threading.Thread(target=read, args=("a",))
+    t1 = threading.Thread(target=build_owner)
     t1.start()
     assert entered.wait(30), "build never started"
     t2 = threading.Thread(target=read, args=("b",))
@@ -232,26 +246,25 @@ def inflight_build_same_thread_read_does_not_self_wait() -> None:
     import threading
 
     import base.config as c
-    import base.config._full as full
+    import base.config._lite as lite
 
-    real: Any = full.build
     entered = threading.Event()
     release = threading.Event()
     inside: dict[str, Any] = {}
 
-    def gated(*, env_boot: Any) -> Any:
-        entered.set()
-        try:
-            _ = c.settings.web.web_jina_reader_base
-            inside["result"] = "READ-OK"
-        except Exception as exc:
-            inside["result"] = f"{type(exc).__name__}: {exc}"
-        if not release.wait(30):
-            raise RuntimeError("gate not released")
-        return real(env_boot=env_boot)
+    def build_owner() -> None:
+        with lite.in_flight_build():
+            entered.set()
+            try:
+                _ = c.settings.web.web_jina_reader_base
+                inside["result"] = "READ-OK"
+            except Exception as exc:
+                inside["result"] = f"{type(exc).__name__}: {exc}"
+            if not release.wait(30):
+                raise RuntimeError("gate not released")
+            c.ensure_eager()
 
-    full.build = gated
-    t = threading.Thread(target=lambda: c.settings.sandbox.exec_timeout_seconds)
+    t = threading.Thread(target=build_owner)
     t.start()
     assert entered.wait(30), "build never started"
     release.set()
@@ -269,20 +282,21 @@ def inflight_build_get_field_waits_then_serves() -> None:
     import threading
 
     import base.config as c
-    import base.config._full as full
+    import base.config._lite as lite
 
-    real: Any = full.build
     entered = threading.Event()
     release = threading.Event()
-
-    def gated(*, env_boot: Any) -> Any:
-        entered.set()
-        if not release.wait(30):
-            raise RuntimeError("gate not released")
-        return real(env_boot=env_boot)
-
-    full.build = gated
     out: dict[str, Any] = {}
+
+    def build_owner() -> None:
+        try:
+            with lite.in_flight_build():
+                entered.set()
+                _wait_release(release)
+                c.ensure_eager()
+                out["a"] = c.get_field("web_jina_reader_base")
+        except Exception as exc:
+            out["a"] = f"ERR {type(exc).__name__}: {exc}"
 
     def read(tag: str) -> None:
         try:
@@ -290,7 +304,7 @@ def inflight_build_get_field_waits_then_serves() -> None:
         except Exception as exc:
             out[tag] = f"ERR {type(exc).__name__}: {exc}"
 
-    t1 = threading.Thread(target=read, args=("a",))
+    t1 = threading.Thread(target=build_owner)
     t1.start()
     assert entered.wait(30), "build never started"
     t2 = threading.Thread(target=read, args=("b",))
@@ -309,22 +323,22 @@ def inflight_build_get_field_timeout_raises_retryable() -> None:
     import threading
 
     import base.config as c
-    import base.config._full as full
     import base.config._lite as lite
 
     lite.set_wait_timeout(0.3)
-    real: Any = full.build
     entered = threading.Event()
     release = threading.Event()
-
-    def gated(*, env_boot: Any) -> Any:
-        entered.set()
-        if not release.wait(30):
-            raise RuntimeError("gate not released")
-        return real(env_boot=env_boot)
-
-    full.build = gated
     out: dict[str, Any] = {}
+
+    def build_owner() -> None:
+        try:
+            with lite.in_flight_build():
+                entered.set()
+                _wait_release(release)
+                c.ensure_eager()
+                out["a"] = c.get_field("web_jina_reader_base")
+        except Exception as exc:
+            out["a"] = f"{type(exc).__name__}: {exc}"
 
     def read(tag: str) -> None:
         try:
@@ -332,7 +346,7 @@ def inflight_build_get_field_timeout_raises_retryable() -> None:
         except Exception as exc:
             out[tag] = f"{type(exc).__name__}: {exc}"
 
-    t1 = threading.Thread(target=read, args=("a",))
+    t1 = threading.Thread(target=build_owner)
     t1.start()
     assert entered.wait(30), "build never started"
     t2 = threading.Thread(target=read, args=("b",))
@@ -356,24 +370,20 @@ def pre_install_build_death_revives_on_waiting_reader() -> None:
     import threading
 
     import base.config as c
-    import base.config._full as full
+    import base.config._lite as lite
 
-    real: Any = full.build
     entered = threading.Event()
     release = threading.Event()
-    calls: list[int] = []
-
-    def gated(*, env_boot: Any) -> Any:
-        calls.append(1)
-        if len(calls) == 1:
-            entered.set()
-            if not release.wait(30):
-                raise RuntimeError("gate not released")
-            raise RuntimeError("first build died before install")
-        return real(env_boot=env_boot)
-
-    full.build = gated
     out: dict[str, Any] = {}
+
+    def build_owner() -> None:
+        try:
+            with lite.in_flight_build():
+                entered.set()
+                _wait_release(release)
+                _fail_build()
+        except Exception as exc:
+            out["a"] = f"{type(exc).__name__}: {exc}"
 
     def read(tag: str) -> None:
         try:
@@ -381,7 +391,7 @@ def pre_install_build_death_revives_on_waiting_reader() -> None:
         except Exception as exc:
             out[tag] = f"{type(exc).__name__}: {exc}"
 
-    t1 = threading.Thread(target=read, args=("a",))
+    t1 = threading.Thread(target=build_owner)
     t1.start()
     assert entered.wait(30), "build never started"
     t2 = threading.Thread(target=read, args=("b",))
@@ -487,28 +497,23 @@ def field_faces_serve_while_another_thread_builds() -> None:
     import threading
 
     import base.config as c
-    import base.config._full as full
+    import base.config._lite as lite
 
-    real: Any = full.build
     entered = threading.Event()
     release = threading.Event()
-
-    def gated(*, env_boot: Any) -> Any:
-        entered.set()
-        if not release.wait(30):
-            raise RuntimeError("gate not released")
-        return real(env_boot=env_boot)
-
-    full.build = gated
     out: dict[str, Any] = {}
 
-    def read(tag: str) -> None:
+    def build_owner() -> None:
         try:
-            out[tag] = c.settings.web.web_jina_reader_base
+            with lite.in_flight_build():
+                entered.set()
+                _wait_release(release)
+                c.ensure_eager()
+                out["build"] = c.settings.web.web_jina_reader_base
         except Exception as exc:
-            out[tag] = f"ERR {type(exc).__name__}: {exc}"
+            out["build"] = f"ERR {type(exc).__name__}: {exc}"
 
-    t = threading.Thread(target=read, args=("build",))
+    t = threading.Thread(target=build_owner)
     t.start()
     assert entered.wait(30), "build never started"
     try:
@@ -537,34 +542,29 @@ def module_attribute_read_waits_then_serves() -> None:
     import threading
 
     import base.config as c
-    import base.config._full as full
+    import base.config._lite as lite
 
-    real: Any = full.build
     entered = threading.Event()
     release = threading.Event()
     inside: dict[str, Any] = {}
-
-    def gated(*, env_boot: Any) -> Any:
-        entered.set()
-        try:
-            _ = c.Settings
-            inside["reentrant"] = "READ-OK"
-        except Exception as exc:
-            inside["reentrant"] = f"{type(exc).__name__}: {exc}"
-        if not release.wait(30):
-            raise RuntimeError("gate not released")
-        return real(env_boot=env_boot)
-
-    full.build = gated
     out: dict[str, Any] = {}
 
-    def read(tag: str) -> None:
+    def build_owner() -> None:
         try:
-            out[tag] = c.settings.web.web_jina_reader_base
+            with lite.in_flight_build():
+                entered.set()
+                try:
+                    _ = c.Settings
+                    inside["reentrant"] = "READ-OK"
+                except Exception as exc:
+                    inside["reentrant"] = f"{type(exc).__name__}: {exc}"
+                _wait_release(release)
+                c.ensure_eager()
+                out["build"] = c.settings.web.web_jina_reader_base
         except Exception as exc:
-            out[tag] = f"ERR {type(exc).__name__}: {exc}"
+            out["build"] = f"ERR {type(exc).__name__}: {exc}"
 
-    t1 = threading.Thread(target=read, args=("build",))
+    t1 = threading.Thread(target=build_owner)
     t1.start()
     assert entered.wait(30), "build never started"
 

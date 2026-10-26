@@ -7,10 +7,8 @@ from dataclasses import dataclass
 from datetime import datetime
 from typing import Any
 
-from psycopg import Connection, sql
-
 from base.agents.history.hierarchy.usage import GenerationUsage
-from base.db import Database
+from base.db.protocols import DatabaseLike, SyncConnection
 
 SCHEMA_VERSION = 1
 
@@ -32,7 +30,7 @@ class StoredNode:
 
 
 @contextmanager
-def _read_connection(db: Database) -> Generator[Connection[Any]]:
+def _read_connection(db: DatabaseLike) -> Generator[SyncConnection]:
     db_pool = db.pool(autocommit=True)
     try:
         with db_pool.connection() as conn:
@@ -41,7 +39,7 @@ def _read_connection(db: Database) -> Generator[Connection[Any]]:
         db_pool.close()
 
 
-def load_nodes(db: Database, agent_id: int) -> list[StoredNode]:
+def load_nodes(db: DatabaseLike, agent_id: int) -> list[StoredNode]:
     with _read_connection(db) as conn:
         rows = conn.execute(
             """
@@ -64,7 +62,7 @@ def _costs(rows: list[Any]) -> dict[Any, GenerationUsage]:
 
 
 def load_generation_costs(
-    db: Database,
+    db: DatabaseLike,
     agent_id: int,
     *,
     job_ids: list[int] | None = None,
@@ -72,21 +70,35 @@ def load_generation_costs(
 ) -> tuple[dict[int, GenerationUsage], dict[str, GenerationUsage]]:
     with _read_connection(db) as conn:
         jobs = conn.execute(
-            sql.SQL("""
+            """
             SELECT job_id, count(*), coalesce(sum((usage_metadata->>'input_tokens')::bigint), 0),
                    coalesce(sum((usage_metadata->'input_token_details'->>'cache_read')::bigint), 0),
                    coalesce(sum((usage_metadata->>'output_tokens')::bigint), 0), sum(duration_ms)
-            FROM understanding_chunk_calls WHERE agent_id = %s {} GROUP BY job_id
-            """).format(sql.SQL(" AND job_id = ANY(%s)" if job_ids is not None else "")),
+            FROM understanding_chunk_calls WHERE agent_id = %s AND job_id = ANY(%s) GROUP BY job_id
+            """
+            if job_ids is not None
+            else """
+            SELECT job_id, count(*), coalesce(sum((usage_metadata->>'input_tokens')::bigint), 0),
+                   coalesce(sum((usage_metadata->'input_token_details'->>'cache_read')::bigint), 0),
+                   coalesce(sum((usage_metadata->>'output_tokens')::bigint), 0), sum(duration_ms)
+            FROM understanding_chunk_calls WHERE agent_id = %s GROUP BY job_id
+            """,
             (agent_id, job_ids) if job_ids is not None else (agent_id,),
         ).fetchall()
         checks = conn.execute(
-            sql.SQL("""
+            """
             SELECT check_key, count(*), coalesce(sum((usage_metadata->>'input_tokens')::bigint), 0),
                    coalesce(sum((usage_metadata->'input_token_details'->>'cache_read')::bigint), 0),
                    coalesce(sum((usage_metadata->>'output_tokens')::bigint), 0), sum(duration_ms)
-            FROM understanding_group_calls WHERE agent_id = %s {} GROUP BY check_key
-            """).format(sql.SQL(" AND check_key = ANY(%s)" if check_keys is not None else "")),
+            FROM understanding_group_calls WHERE agent_id = %s AND check_key = ANY(%s) GROUP BY check_key
+            """
+            if check_keys is not None
+            else """
+            SELECT check_key, count(*), coalesce(sum((usage_metadata->>'input_tokens')::bigint), 0),
+                   coalesce(sum((usage_metadata->'input_token_details'->>'cache_read')::bigint), 0),
+                   coalesce(sum((usage_metadata->>'output_tokens')::bigint), 0), sum(duration_ms)
+            FROM understanding_group_calls WHERE agent_id = %s GROUP BY check_key
+            """,
             (agent_id, check_keys) if check_keys is not None else (agent_id,),
         ).fetchall()
     return _costs(jobs), _costs(checks)

@@ -27,7 +27,7 @@ from meizel.contracts.analysis import (  # noqa: E402
     type_checking_in_scope,
     type_checking_violations,
 )
-from meizel.graph.model import Sources  # noqa: E402
+from meizel.graph.model import MeizelError, Sources  # noqa: E402
 from meizel.graph.universe import Universe, load_universe  # noqa: E402
 from meizel.language import path_imports  # noqa: E402 — standalone script
 from meizel.language.scan import scan_tree  # noqa: E402
@@ -445,7 +445,7 @@ def main(
     errors = _baseline_guard(baseline, repo_root=repo_root, base=base, renames=renames)
     try:
         errors.extend(limits.check(targets, directory_targets, repo_root, _STRUCTURE_DIRS))
-    except (OSError, subprocess.CalledProcessError, ValueError) as exc:
+    except (MeizelError, OSError, subprocess.CalledProcessError, ValueError) as exc:
         print(f"cannot read tracked directory structure: {exc}", file=sys.stderr)
         return 1
     errors.extend(

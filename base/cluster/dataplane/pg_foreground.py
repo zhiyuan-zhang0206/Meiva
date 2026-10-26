@@ -3,12 +3,12 @@
 from __future__ import annotations
 
 import subprocess
-import time
 from collections.abc import Mapping
 from pathlib import Path
 
 import psycopg
 
+from base.clock import SYSTEM_TIMERS, Timers
 from base.cluster.dataplane.pg_plan import (
     POSTMASTER_SHUTDOWN_S,
     foreground_stop_argv,
@@ -34,12 +34,18 @@ def start_foreground_postgres(
 
 
 def wait_foreground_postgres(
-    process: subprocess.Popen[bytes], *, log: Path, port: int, data: Path, timeout_s: float = 60
+    process: subprocess.Popen[bytes],
+    *,
+    log: Path,
+    port: int,
+    data: Path,
+    timeout_s: float = 60,
+    timers: Timers = SYSTEM_TIMERS,
 ) -> None:
     """Accept only a live owned postmaster answering for the expected PGDATA."""
     deadline: float | None = None
     while True:
-        now = time.monotonic()
+        now = timers.monotonic()
         if deadline is None:
             deadline = now + timeout_s
         if now >= deadline:
@@ -57,7 +63,7 @@ def wait_foreground_postgres(
             ) as connection:
                 row = connection.execute("SHOW data_directory").fetchone()
         except psycopg.OperationalError:
-            time.sleep(0.1)
+            timers.sleep(0.1)
             continue
         verify_foreground_data_dir(None if row is None else str(row[0]), data)
         if process.poll() is not None:

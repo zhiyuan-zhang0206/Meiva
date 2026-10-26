@@ -6,7 +6,7 @@ Keep the 2026-08-14 inventory until older backup/PITR restores are ruled out.
 
 from base.deploy.schema.migration_errors import MigrationHistoryGap
 
-RESET_ANCHOR = "20260923T031516_schema-baseline"
+RESET_ANCHOR = "20261026T091500_schema-baseline"
 
 # The 59 timestamped migrations squashed into db/schema.sql at the v0.1.0
 # release (2026-08-14 schema reset). Frozen at reset time — do not bump. A DB
@@ -78,7 +78,7 @@ V010_PRE_RESET_SET = frozenset(
 
 
 # Exact up-file inventory folded on 2026-09-23 from ff598105f. Never extend it.
-PRE_RESET_SET = frozenset(
+SEP2026_PRE_RESET_SET = frozenset(
     {
         "20260814T235959_v010-baseline",
         "20260818T142518_llm-cost-rollup-columns",
@@ -185,11 +185,111 @@ PRE_RESET_SET = frozenset(
 )
 
 
+PRE_RESET_SET = frozenset(
+    {
+        "20260922T053200_impersonation-delivery-budget",
+        "20260922T075826_impersonation-delivery-config",
+        "20260923T031516_schema-baseline",
+        "20260923T031517_drop-retired-schema-markers",
+        "20260923T175411_agent-creation-availability",
+        "20260923T195300_agent-launch-failure",
+        "20260923T205208_impersonation-event-manifest",
+        "20260924T070003_hierarchy-worker-breaker",
+        "20260924T071500_hierarchy-jobs-runner-grant",
+        "20260924T150840_impersonation-receipt-lock-door",
+        "20260924T193804_task-escalation-marker",
+        "20260926T135638_impersonation-dsh-relay",
+        "20260927T031935_impersonation-terminate-closes-admission",
+        "20260928T124324_impersonation-termination-notices",
+        "20260930T024143_min-code-version",
+        "20261001T055030_drop-retired-deploy-and-watcher-storage",
+        "20261001T055130_retire-restarting-and-publication-deferred",
+        "20261002T041442_delivery-watchdog-attempts",
+        "20261002T043655_impersonation-event-log-source",
+        "20261002T044224_audit-events",
+        "20261002T051710_im-bridge-cursors",
+        "20261002T090059_maintenance-state",
+        "20261002T094232_impersonation-event-log-contract",
+        "20261002T101244_schedule-manager-state",
+        "20261002T121709_machine-status-snapshot",
+        "20261002T153217_telemetry-events",
+        "20261003T000100_telemetry-events-anomaly-index",
+        "20261003T010000_telemetry-events-metrics-index",
+        "20261003T020000_agent-model-tokens-total",
+        "20261003T043232_drop-dead-tables",
+        "20261003T110251_im-bridge-push-created-at",
+        "20261003T120000_impersonation-allocator-definer",
+        "20261003T153340_drop-retired-schema-objects",
+        "20261004T015244_retire-dead-log-era-event-dismissals",
+        "20261004T044500_drop-machine-probe-transition-since",
+        "20261004T102418_drop-work-failed-events",
+        "20261005T095252_separate-impersonation-transport-lifecycle",
+        "20261006T085744_impersonation-heartbeat-history",
+        "20261006T181011_completion-notice-events-stop-outcome",
+        "20261007T045501_understanding-chunk-tree",
+        "20261007T045502_retire-hierarchy-worker",
+        "20261007T081957_drop-hierarchy-worker-tables",
+        "20261007T103034_agent-creation-identity",
+        "20261007T103457_notice-operation-receipts",
+        "20261007T103553_schedule-convergence-revisions",
+        "20261007T103915_ops-request-identity",
+        "20261007T110219_resource-creation-receipts",
+        "20261007T113552_completion-notice-events-drop-outcome",
+        "20261007T114500_understanding-manual-build",
+        "20261007T172200_agent-control-acceptance",
+        "20261007T181301_im-timeline-outbox",
+        "20261007T181501_silent-upload-batches",
+        "20261007T181608_task-patch-receipts",
+        "20261007T183849_task-update-receipts",
+        "20261007T190652_task-creation-receipts",
+        "20261007T192116_im-timeline-cursor-semantics",
+        "20261007T194939_im-notice-poll-acceptance",
+        "20261007T201556_task-assignment-receipts",
+        "20261007T202446_alert-notification-shadow-facts",
+        "20261007T205013_page-operation-receipts",
+        "20261007T211550_native-alert-outbound",
+        "20261007T213541_weixin-durable-ingress",
+        "20261007T221349_mcp-credential-creation-receipts",
+        "20261007T221732_native-work-cancel",
+        "20261007T225057_upload-delivery-recovery",
+        "20261008T000137_guarded-draft-birth-snapshots",
+        "20261008T003901_native-active-restart",
+        "20261008T021500_agent-launch-retry-receipts",
+        "20261008T060000_guarded-manual-compact",
+        "20261011T191500_drop-dead-delivery-watchdog-state",
+        "20261013T171423_observed-cache-input",
+        "20261014T023838_notice-questions",
+        "20261014T175032_impersonation-antigravity-relay",
+        "20261016T153550_run-timeline-range-projection",
+        "20261016T194934_drop-agent-presets",
+        "20261017T120000_meiva-rename",
+        "20261017T121500_schedule-launch-generation",
+        "20261018T044700_notification-events",
+        "20261018T112825_drop-agents-meta-watchers",
+        "20261018T142500_telemetry-owner-inference",
+        "20261018T151232_notification-outbox",
+        "20261018T175531_notification-outbox-column-grant",
+        "20261018T180059_impersonation-capabilities",
+        "20261019T070410_impersonation-capabilities-runner-grant",
+        "20261019T092549_agents-meta-harness",
+        "20261020T015700_drop-restart-completed-kind",
+        "20261020T045024_drop-mcp-client-credentials",
+        "20261020T073712_retire-host-fencing-storage",
+        "20261020T114157_machine-maintenance-window",
+        "20261020T151143_drop-host-deploy-state",
+        "20261021T052819_automatic-meiva-impersonation",
+        "20261024T041600_agents-meta-harness-kimi-code",
+        "20261024T234523_agents-meta-harness-exit-code",
+    }
+)
+
+
 def assert_reset_history(applied: set[str], required: set[str]) -> None:
     """Refuse partial generations before deleting any applied-set evidence."""
     for generation, history in (
         ("2026-08-14", V010_PRE_RESET_SET),
-        ("2026-09-23", PRE_RESET_SET),
+        ("2026-09-23", SEP2026_PRE_RESET_SET),
+        ("2026-10-26", PRE_RESET_SET),
     ):
         present = applied & history
         missing = history - applied

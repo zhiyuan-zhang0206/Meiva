@@ -6,6 +6,20 @@ from enum import StrEnum
 from typing import Any, Literal, TypedDict, TypeGuard
 from uuid import UUID
 
+from pydantic import BaseModel
+
+
+# meiva:note
+# Declared impersonation identity attached to rendered messages without copying session-wide process metadata.
+class ImpersonationMetadata(BaseModel):
+    agent_id: int
+    session_id: int
+    name: str
+    executor_name: str
+    provider: str | None
+    anchor_item_id: str | None = None
+    seq: int | None = None
+
 
 class ImpersonationStatus(StrEnum):
     """Persisted cooperative lease lifecycle; distinct from native agent status."""

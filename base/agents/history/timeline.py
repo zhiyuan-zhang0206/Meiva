@@ -12,7 +12,7 @@ from langchain_core.messages import (
 )
 
 from base.agents.history.timeline_item import TimelineItem as TimelineItem
-from base.agents.impersonation.history import ImpersonationMetadata
+from base.agents.impersonation.status import ImpersonationMetadata
 from base.agents.messages.kwargs import (
     MeivaMessageKwargs,
     MeivaMsgType,
@@ -21,7 +21,7 @@ from base.agents.messages.kwargs import (
     read_meiva_kwargs,
 )
 from base.agents.messages.timestamp_policy import TimestampPolicy
-from base.agents.sdk.telemetry import SdkCall, sdk_calls_by_tool_call_id
+from base.agents.sdk.tally import SdkCall, sdk_calls_by_tool_call_id
 from base.lm.content import message_addl_kwargs, message_content
 from base.lm.system_note import unwrap_system_note
 
@@ -399,8 +399,7 @@ def ai_message_items(
         for pos, block in enumerate(content):
             item, block_idx, reasoning_attached = _content_block_item(
                 block,
-                pos,
-                msg_idx,
+                (pos, msg_idx),
                 created_at,
                 reasoning_ms_by_block,
                 reasoning_tokens,
@@ -433,14 +432,14 @@ def _chat_item(msg_idx: int, block_idx: int, payload: str, created_at: str | Non
 # meiva:link base/agents/history/docs/timeline/timeline.meiva.okf.md
 def _content_block_item(
     block: str | dict[str, Any],
-    pos: int,
-    msg_idx: int,
+    coords: tuple[int, int],
     created_at: str | None,
     reasoning_ms_by_block: Mapping[str, int] | None,
     reasoning_tokens: int | None,
     *,
     reasoning_attached: bool,
 ) -> tuple[TimelineItem | None, int | None, bool]:
+    pos, msg_idx = coords
     if not isinstance(block, dict):
         return None, None, reasoning_attached
     block_type = block.get("type")

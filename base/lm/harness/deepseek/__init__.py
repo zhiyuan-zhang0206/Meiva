@@ -3,12 +3,13 @@ from __future__ import annotations
 from base.lm.harness.deepseek.config import DEFAULT_MODEL, REASONING_EFFORTS, BridgeConfig
 from base.lm.harness.deepseek.mapping import PromptFields, map_update, parse_prompt_result
 from base.lm.harness.deepseek.session import (
+    CancelReport,
     DeepSeekSession,
     InboundQueueFullError,
     SessionClosedError,
     dsh_home_for,
 )
-from base.lm.harness.deepseek.types import CancelReport, SessionTotals, TurnOutcome, TurnTicket
+from base.lm.harness.deepseek.types import SessionTotals, TurnOutcome, TurnTicket
 from base.lm.harness.deepseek.usage import (
     StepUsage,
     UsageSnapshot,

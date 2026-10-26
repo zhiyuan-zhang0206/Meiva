@@ -14,14 +14,16 @@ from pathlib import Path
 from typing import Any
 from uuid import UUID
 
-import psycopg
 from psycopg.rows import dict_row
 from psycopg.types.json import Jsonb
-from pydantic import BaseModel
 
 from base.agents.impersonation._store import machine_mismatch_message
-from base.agents.impersonation.status import ImpersonationStatus, parse_lease
-from base.db import Database
+from base.agents.impersonation.status import (
+    ImpersonationMetadata,
+    ImpersonationStatus,
+    parse_lease,
+)
+from base.db.protocols import DatabaseLike, SyncConnection
 from base.events.live.bus import EventBus
 from base.host.private_storage import write_private_bytes
 from base.paths import workspace_dir
@@ -44,22 +46,6 @@ _EVENT_CONTENT_FIELDS: tuple[str, ...] = (
     "attributes",
 )
 _CONSUMED_EVENT_KINDS: tuple[str, ...] = ("sdk_call", "api_event")
-
-
-class ImpersonationMetadata(BaseModel):
-    """Declared identity on a rendered message.
-
-    The observed process facts are captured once at request time and live on
-    the session record (``process_metadata``), not on every message.
-    """
-
-    agent_id: int
-    session_id: int
-    name: str
-    executor_name: str
-    provider: str | None
-    anchor_item_id: str | None = None
-    seq: int | None = None
 
 
 def metadata(lease: Mapping[str, Any]) -> ImpersonationMetadata:
@@ -110,7 +96,7 @@ def public_session(lease: Mapping[str, Any]) -> dict[str, Any]:
 
 
 def resolve(
-    db: Database,
+    db: DatabaseLike,
     agent_id: int,
     session_id: int,
     *,
@@ -138,7 +124,7 @@ def resolve(
     return lease
 
 
-def set_actor(conn: psycopg.Connection, actor: str) -> None:
+def set_actor(conn: SyncConnection, actor: str) -> None:
     conn.execute("SELECT set_config('meiva.impersonation_actor',%s,true)", (actor,))
 
 
@@ -147,7 +133,7 @@ def _event_content(payload: dict[str, Any]) -> tuple[Any, ...]:
 
 
 def append(
-    conn: psycopg.Connection,
+    conn: SyncConnection,
     lease_id: str,
     kind: str,
     payload: dict[str, Any],
@@ -188,7 +174,7 @@ def append(
     return seq
 
 
-def capture_pending(conn: psycopg.Connection, lease: Mapping[str, Any]) -> None:
+def capture_pending(conn: SyncConnection, lease: Mapping[str, Any]) -> None:
     """Include the backlog handed to this session, even if it predates activation."""
     with conn.cursor(row_factory=dict_row) as cur:
         cur.execute(
@@ -217,7 +203,7 @@ def capture_pending(conn: psycopg.Connection, lease: Mapping[str, Any]) -> None:
 
 
 def say(
-    db: Database,
+    db: DatabaseLike,
     bus: EventBus,
     lease_id: str,
     content: str,
@@ -264,7 +250,7 @@ def say(
     return seq
 
 
-def entries(lease_id: str, conn: psycopg.Connection) -> list[dict[str, Any]]:
+def entries(lease_id: str, conn: SyncConnection) -> list[dict[str, Any]]:
     """The lease's log in order, central event references resolved to their bodies."""
     with conn.cursor(row_factory=dict_row) as cur:
         cur.execute(
@@ -277,7 +263,7 @@ def entries(lease_id: str, conn: psycopg.Connection) -> list[dict[str, Any]]:
     return rows
 
 
-def _audit_bodies(conn: psycopg.Connection, uids: list[int]) -> dict[int, dict[str, Any]]:
+def _audit_bodies(conn: SyncConnection, uids: list[int]) -> dict[int, dict[str, Any]]:
     with conn.cursor(row_factory=dict_row) as cur:
         cur.execute(
             "SELECT event_uid,ts,trace_id,span_id,agent_id,machine,process,event_name,level,"
@@ -314,7 +300,7 @@ def _resolved_payload(reference: dict[str, Any], body: dict[str, Any] | None) ->
     }
 
 
-def _resolve_event_references(rows: list[dict[str, Any]], conn: psycopg.Connection) -> None:
+def _resolve_event_references(rows: list[dict[str, Any]], conn: SyncConnection) -> None:
     """Replace each central reference payload with the `audit_events` body it names."""
     refs = [row for row in rows if "event_uid" in row["payload"]]
     if not refs:
@@ -324,7 +310,7 @@ def _resolve_event_references(rows: list[dict[str, Any]], conn: psycopg.Connecti
         row["payload"] = _resolved_payload(row["payload"], bodies.get(row["payload"]["event_uid"]))
 
 
-def _resolve_payload(conn: psycopg.Connection, payload: dict[str, Any]) -> dict[str, Any]:
+def _resolve_payload(conn: SyncConnection, payload: dict[str, Any]) -> dict[str, Any]:
     if "event_uid" not in payload:
         return payload
     return _resolved_payload(
@@ -466,7 +452,7 @@ def build_document(lease: Mapping[str, Any], rows: list[dict[str, Any]]) -> dict
 
 def export_handoff(
     lease: Mapping[str, Any],
-    conn: psycopg.Connection,
+    conn: SyncConnection,
     *,
     workspace: Path | None = None,
 ) -> tuple[dict[str, Any], str]:

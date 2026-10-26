@@ -16,5 +16,6 @@ exports = ["build.py", "check_plan.py", "chunk_generate.py", "chunk_plan.py", "c
 
 [purity]
 "__init__.py" = "strict"
-"usage.py" = "strict"
 "check_plan.py" = "strict"
+"store.py" = "strict"
+"usage.py" = "strict"

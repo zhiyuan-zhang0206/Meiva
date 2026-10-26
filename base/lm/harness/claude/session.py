@@ -268,14 +268,14 @@ class ClaudeSession(BaseHarnessSession[BridgeConfig]):
         client = self._require_client()
         try:
             async for message in client.receive_messages():
-                await self._handle(message)
+                self._handle(message)
         except asyncio.CancelledError:
             raise
         except Exception as exc:
             self._emit(SessionFaulted(turn_id=None, error=f"session stream failed: {exc}"))
             self._fail_active(exc)
 
-    async def _handle(self, message: object) -> None:
+    def _handle(self, message: object) -> None:
         name = type(message).__name__
         if name == "ResultMessage":
             self._handle_result(message)

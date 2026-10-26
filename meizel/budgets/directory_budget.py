@@ -58,8 +58,7 @@ def entries(directory: Path) -> list[Path]:
         for entry in directory.iterdir()
         if not entry.is_symlink()
         and not entry.name.startswith(".")
-        and entry.name != "__pycache__"
-        and not (entry.name == "migrations" and entry.is_dir())
+        and entry.name not in {"__pycache__", "migrations"}
     ]
 
 

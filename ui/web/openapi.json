@@ -11030,8 +11030,7 @@
           "sections",
           "categories"
         ],
-        "title": "ContextBreakdownResponse",
-        "description": "GET /api/agents/{id}/context-breakdown — how the agent's context window is\nspent, for the composer's breakdown panel (lazy-loaded when the panel opens).\n\nThe breakdown of the latest LLM request's input. Each message's tokens are anchored to\nthe provider's reported `input_tokens` (see `base/agents/history/message_tokens.py`), so\n`categories` sum exactly to `total_input_tokens`; only the inside of a message\n(reasoning / output / tool_call, system-prompt sections) is split by an estimator.\n`estimated` / `exact_fraction` say whether any part of the total was estimated and how much\nof it was the provider's own number. `sections` break down the `system_prompt` category.\nWith no LLM request yet the total is 0 and nothing is listed. `max_input_tokens` /\n`soft_compact_tokens` / `hard_compact_tokens` mirror the token-usage endpoint (0 when the\nmodel window is unknown)."
+        "title": "ContextBreakdownResponse"
       },
       "ContextCategory": {
         "properties": {
@@ -11059,8 +11058,7 @@
           "estimated",
           "exact_fraction"
         ],
-        "title": "ContextCategory",
-        "description": "One context bucket (system_prompt / compact_summary / cluster_memory /\nagent_memory / context_note / user_input / agent_messages / automation /\nreasoning / output / tool_call / tool_response) with its token count: the sum of its\nmessages' own counts. `estimated` is true when any part was a share of a provider total\nrather than the provider's own number (the UI appends \"(estimated)\"); `exact_fraction` is the\nshare of `tokens` that was exact. Inbound messages split by source: user_input (a human\nturn), agent_messages (a peer agent), automation (a machine/framework wakeup)."
+        "title": "ContextCategory"
       },
       "ContextSection": {
         "properties": {
@@ -11090,8 +11088,7 @@
           "name",
           "tokens"
         ],
-        "title": "ContextSection",
-        "description": "One node of the system prompt's recursive section breakdown: a heading — or\nthe `(preamble)` / `(intro)` prose before the first sub-heading — with its\ntoken share of the system prompt (always estimated: a section is never measured alone). A section over ~1000 tokens is drilled into its\nnext-level sub-headings as `children` (recursively); a smaller section, or one\nwith no deeper heading, is a leaf (`children == []`). When `children` is\nnon-empty their tokens sum to this node's `tokens`."
+        "title": "ContextSection"
       },
       "ConversationSnapshotResponse": {
         "properties": {
@@ -12306,8 +12303,7 @@
           "executor_name",
           "provider"
         ],
-        "title": "ImpersonationMetadata",
-        "description": "Declared identity on a rendered message.\n\nThe observed process facts are captured once at request time and live on\nthe session record (``process_metadata``), not on every message."
+        "title": "ImpersonationMetadata"
       },
       "InspectMetricsMetadata": {
         "properties": {
@@ -17159,8 +17155,7 @@
           "method",
           "count"
         ],
-        "title": "SdkCall",
-        "description": "One SDK method's call count in an agent_code block, e.g.\n``SdkCall(method=\"files.read\", count=3)`` for ``meiva.files.read(...)`` x3."
+        "title": "SdkCall"
       },
       "ServiceItem": {
         "properties": {

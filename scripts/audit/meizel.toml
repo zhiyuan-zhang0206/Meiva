@@ -1,9 +1,14 @@
 exports = ["branch_protection.py", "module_moves.py"]
-purity = "strict-to-be"
 
 [uses]
 "tests" = ["branch_protection.py", "impact_census.py", "module_moves.py", "schema_drift.py", "sdk_usage.py", "where_used.py", "where_used_scan.py"]
 "where_used.py" = ["module_moves.py", "where_used_scan.py"]
+
+[purity]
+"." = "strict-to-be"
+"module_moves.py" = "strict"
+"sdk_usage.py" = "strict"
+"where_used.py" = "strict"
 
 [external]
 "module_moves.py" = "imports the old and new module names the operator passes on the command line"
@@ -13,9 +18,7 @@ purity = "strict-to-be"
 
 [debt.impure-call]
 "branch_protection.py#import subprocess" = 1
-"schema_drift.py#Path.write_text" = 1
 "schema_drift.py#import psycopg" = 1
-"where_used_scan.py#import subprocess" = 1
 
 [debt.impure-edge]
 "impact_census.py#scripts/ci/test_impact.py" = 1

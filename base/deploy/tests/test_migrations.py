@@ -226,60 +226,22 @@ def test_schema_mutation_lock_released_on_exception(db_conn: psycopg.Connection)
     db_conn.rollback()
 
 
-def test_transport_delta_preserves_legacy_custody_and_does_not_backfill_notices() -> None:
-    from typing import LiteralString, cast
-
-    from psycopg import sql
-
-    from base.deploy.schema.tests.migration_support import SCHEMA_SQL, throwaway_database
-
-    root = Path(__file__).resolve().parents[3]
-    delta = (
-        root
-        / "migrations/2026/10/05/20261005T095252_separate-impersonation-transport-lifecycle.sql"
-    )
-    with (
-        throwaway_database("impersonation_transport") as url,
-        psycopg.connect(url, autocommit=True) as conn,
-    ):
-        conn.execute(cast(LiteralString, SCHEMA_SQL.read_text()))
-        conn.execute("DROP TRIGGER agent_impersonations_terminal_notice ON agent_impersonations")
-        conn.execute("DROP FUNCTION mark_impersonation_terminal_notice()")
-        columns = (
-            "relay_generation",
-            "relay_identity",
-            "relay_degraded_reason",
-            "relay_degraded_at",
-            "terminal_notice_snapshot",
-            "terminal_notice_pending_at",
-            "terminal_notice_accepted_at",
-            "terminal_notice_attempt_id",
-            "terminal_notice_attempt_at",
-            "terminal_notice_attempts",
-            "terminal_notice_error",
-            "terminal_notice_unsupported_at",
-        )
-        for column in columns:
-            conn.execute(
-                sql.SQL("ALTER TABLE agent_impersonations DROP COLUMN {}").format(
-                    sql.Identifier(column)
-                )
-            )
-        conn.execute("DELETE FROM schema_migrations WHERE name=%s", (delta.stem,))
-        assert conn.execute(
-            "SELECT count(*) FROM information_schema.columns WHERE table_name='agent_impersonations' AND column_name=ANY(%s)",
-            (list(columns),),
-        ).fetchone() == (0,)
-        row = conn.execute(
+# meiva:note
+# Verify the folded baseline schema defaults relay custody fields and populates terminal notice snapshots on expiry.
+def test_transport_delta_preserves_legacy_custody_and_does_not_backfill_notices(
+    db_conn: psycopg.Connection,
+) -> None:
+    with db_conn.transaction():
+        row = db_conn.execute(
             "INSERT INTO agents(label) VALUES('transport fixture') RETURNING id"
         ).fetchone()
         assert row is not None
         aid = row[0]
-        conn.execute(
+        db_conn.execute(
             "INSERT INTO agents_meta(id,status,machine,harness) VALUES(%s,'idling','fixture','meiva')",
             (aid,),
         )
-        conn.execute(
+        db_conn.execute(
             "INSERT INTO agent_impersonations(id,agent_id,source,machine,status,ttl_seconds,"
             "expires_at,ended_at,handoff_applied_at) "
             "VALUES(gen_random_uuid(),%s,'codex','fixture','released',3600,"
@@ -288,14 +250,19 @@ def test_transport_delta_preserves_legacy_custody_and_does_not_backfill_notices(
             "now()+interval '1 hour',NULL,NULL)",
             (aid, aid),
         )
-        conn.execute(cast(LiteralString, delta.read_text()))
-        assert conn.execute(
-            "SELECT relay_generation,relay_identity,terminal_notice_pending_at FROM agent_impersonations ORDER BY session_id"
+        assert db_conn.execute(
+            "SELECT relay_generation,relay_identity,terminal_notice_pending_at "
+            "FROM agent_impersonations WHERE agent_id=%s ORDER BY session_id",
+            (aid,),
         ).fetchall() == [(0, None, None), (0, None, None)]
-        conn.execute(
-            "UPDATE agent_impersonations SET status='expired',ended_at=now() WHERE status='active'"
+        db_conn.execute(
+            "UPDATE agent_impersonations SET status='expired',ended_at=now() "
+            "WHERE agent_id=%s AND status='active'",
+            (aid,),
         )
-        assert conn.execute(
+        assert db_conn.execute(
             "SELECT terminal_notice_pending_at IS NOT NULL,terminal_notice_snapshot->>'status' "
-            "FROM agent_impersonations WHERE status='expired'"
+            "FROM agent_impersonations WHERE agent_id=%s AND status='expired'",
+            (aid,),
         ).fetchone() == (True, "expired")
+    db_conn.rollback()

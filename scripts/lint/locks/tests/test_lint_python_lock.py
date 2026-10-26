@@ -31,7 +31,7 @@ def test_rejects_mirror_index_or_artifact(tmp_path: Path, changed: str) -> None:
     }
     values[changed] = "https://mirror.example/simple-or-package"
     path = _lock(tmp_path / "uv.lock", **values)
-    assert len(gate.violations(path)) == 1
+    assert len(gate.violations(path.read_text(encoding="utf-8"))) == 1
 
 
 def test_canonical_lock_and_explicit_local_mirror_are_independent(tmp_path: Path) -> None:
@@ -44,4 +44,4 @@ def test_canonical_lock_and_explicit_local_mirror_are_independent(tmp_path: Path
     (tmp_path / "mirror.env").write_text(
         "UV_DEFAULT_INDEX=https://mirror.example/simple\n", encoding="utf-8"
     )
-    assert gate.violations(path) == []
+    assert gate.violations(path.read_text(encoding="utf-8")) == []

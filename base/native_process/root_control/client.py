@@ -116,6 +116,12 @@ def root_process(*, home: Path, timeout: float = 2.0) -> OwnedProcess | None:
 
 
 # meiva:note
+# The real user ID of the current process.
+def current_uid() -> int:
+    return os.getuid()
+
+
+# meiva:note
 # The caller block is what makes a lifecycle request attributable after the fact:
 # pid/ppid/uid/cwd/argv name the local process, `machine` names the host (so two
 # machines cannot be confused, as they were on 2026-10-15), and `env_keys` lists
@@ -125,7 +131,7 @@ def caller_identity(environ: Mapping[str, str]) -> CallerPayload:
     return CallerPayload(
         pid=os.getpid(),
         ppid=os.getppid(),
-        uid=os.getuid(),
+        uid=current_uid(),
         cwd=_bounded(str(Path.cwd())),
         argv=redacted_argv(list(sys.argv)),
         # meiva:note

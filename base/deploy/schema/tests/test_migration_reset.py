@@ -270,7 +270,7 @@ def test_squash_ignores_pre_reset_names_outside_the_frozen_set(
             c.execute("DELETE FROM schema_migrations WHERE name = %s", (SYN_ORPHAN,))
 
 
-@pytest.mark.parametrize("applied_count", [0, 1, 100])
+@pytest.mark.parametrize("applied_count", [0, 1, 92])
 def test_current_reset_refuses_missing_history_without_mutation(
     db_conn: psycopg.Connection,
     applied_count: int,
@@ -280,11 +280,11 @@ def test_current_reset_refuses_missing_history_without_mutation(
     from base.deploy.schema.migrations import MigrationHistoryGap, applied_migration_names
     from base.deploy.schema.tests.migration_support import set_table_to
 
-    assert len(PRE_RESET_SET) == 101
+    assert len(PRE_RESET_SET) == 93
     before = {BASELINE_NAME, *sorted(PRE_RESET_SET)[:applied_count]}
     set_table_to(db_conn, "set", before)
     with psycopg.connect(db_url()) as conn:
-        with pytest.raises(MigrationHistoryGap, match="2026-09-23"):
+        with pytest.raises(MigrationHistoryGap, match="2026-10-26"):
             apply_pending_migrations(
                 conn,
                 machine_name=machine_identity.name,

@@ -13,13 +13,13 @@ from base.agents.impersonation.status import (
     RELAY_HEARTBEAT_STALE_SECONDS,
 )
 from base.cluster import inbound_channel
-from base.db import Database
+from base.db.protocols import DatabaseLike
 from base.events.live.announce import publish_agent_updated_sync, publish_impersonation_changed_sync
 from base.events.live.bus import EventBus
 from base.log import logger
 
 
-def publish_inbound_wake(db: Database, bus: EventBus, agent_id: int, payload: str) -> bool:
+def publish_inbound_wake(db: DatabaseLike, bus: EventBus, agent_id: int, payload: str) -> bool:
     """Best-effort Redis publish to wake an idle agent — the fast path paired
     with the claim loop's SELECT recheck. Pub/sub is fire-and-forget: a wake
     published while the agent's listener is disconnected is not replayed, and
@@ -72,7 +72,7 @@ def publish_inbound_wake(db: Database, bus: EventBus, agent_id: int, payload: st
         return False
 
 
-def relay_liveness_alert(db: Database, agent_id: int) -> None:
+def relay_liveness_alert(db: DatabaseLike, agent_id: int) -> None:
     """Loud, best-effort signal when a wake lands for an agent whose active
     lease has a stale relay heartbeat. Never raises: the wake itself must not
     be held hostage to this diagnostic. Logged at most once per stamp interval.
@@ -106,7 +106,7 @@ def relay_liveness_alert(db: Database, agent_id: int) -> None:
 
 
 def wake_agent(
-    db: Database,
+    db: DatabaseLike,
     bus: EventBus,
     agent_id: int,
     *,

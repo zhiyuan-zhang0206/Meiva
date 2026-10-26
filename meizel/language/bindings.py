@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import ast
 import builtins
+import os
 import types
 from collections.abc import Iterator
 from dataclasses import dataclass
@@ -12,6 +13,7 @@ from pathlib import Path
 
 from meizel.graph.imports import Scope, collect_scope, dotted_chain
 from meizel.graph.universe import Universe
+from meizel.lint_common import read_utf8_text
 
 __all__ = [
     "Bindings",
@@ -72,10 +74,11 @@ def is_imported_binding(bindings: Bindings, name: str) -> bool:
     )
 
 
+# meiva:note
+# The bindings of `root/file`; an unreadable or unparsable file is treated as dynamic.
 def module_bindings(root: Path, file: str) -> Bindings:
-    """The bindings of `root/file`; an unreadable or unparsable file is treated as dynamic."""
     try:
-        stat = (root / file).stat()
+        stat = os.stat(root / file)  # noqa: PTH116
     except OSError:
         return Bindings(frozenset(), dynamic=True)
     return _read(str(root / file), stat.st_mtime_ns, stat.st_size, file)
@@ -84,9 +87,12 @@ def module_bindings(root: Path, file: str) -> Bindings:
 @cache
 def _read(path: str, mtime_ns: int, size: int, file: str) -> Bindings:
     del mtime_ns, size  # the cache key: a rewritten file is read again
+    source = read_utf8_text(Path(path))
+    if source is None:
+        return Bindings(frozenset(), dynamic=True)
     try:
-        tree = ast.parse(Path(path).read_bytes(), filename=path)
-    except (OSError, SyntaxError, ValueError):
+        tree = ast.parse(source, filename=path)
+    except (SyntaxError, ValueError):
         return Bindings(frozenset(), dynamic=True)
     defined: set[str] = set()
     imported: set[str] = set()
