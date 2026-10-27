@@ -475,12 +475,13 @@ def test_log_keeps_reminder_count(
     assert ladder() == before
 
 
-def test_log_bumps_updated_at(
+# meiva:note
+# A log line is activity on the record, not on the work: `updated_at` is the reminder daemon's due
+# clock, so a note must not make an annotated, frozen task look freshly worked on (task #5311 —
+# this replaces the Task #1969 assertion that required the bump).
+def test_log_keeps_updated_at(
     redis_url: str, db_conn: psycopg.Connection, root_task_id: int
 ) -> None:
-    """A note append is real task activity: updated_at moves, so the task
-    graph's last-activity window (Task #1969) keeps a task that only received
-    log notes."""
     agent_id = seed_agent(db_conn)
     pin_agent(agent_id)
     task = task_registry.create(
@@ -495,7 +496,7 @@ def test_log_bumps_updated_at(
     task_registry.log(task.id, "note", operation_key=str(uuid4()))
     with db_conn.cursor() as cur:
         cur.execute(
-            "SELECT now() - updated_at < interval '1 hour' FROM agent_tasks WHERE id = %s",
+            "SELECT now() - updated_at > interval '29 days' FROM agent_tasks WHERE id = %s",
             (task.id,),
         )
         row = cur.fetchone()

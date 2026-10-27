@@ -180,6 +180,60 @@ def test_policy_can_name_the_note_kind(
 
 
 # meiva:note
+# `updated_at` is the reminder daemon's due clock (`now() - updated_at > remind_interval_seconds`),
+# so the same criterion decides it: only a write that changes the work moves it. A note-only write
+# that moved it kept an annotated, frozen task below its interval forever, which is why no task in
+# the fleet ever passed one reminder (task #5311).
+def _age(db: psycopg.Connection, task_id: int) -> None:
+    with db.cursor() as cur:
+        cur.execute(
+            "UPDATE agent_tasks SET updated_at = now() - interval '30 days' WHERE id = %s",
+            (task_id,),
+        )
+    db.commit()
+
+
+def _age_days(db: psycopg.Connection, task_id: int) -> float:
+    with db.cursor() as cur:
+        cur.execute(
+            "SELECT EXTRACT(EPOCH FROM (now() - updated_at)) / 86400 FROM agent_tasks WHERE id = %s",
+            (task_id,),
+        )
+        row = cur.fetchone()
+    assert row is not None
+    return float(row[0])
+
+
+def test_note_only_write_keeps_the_clock(
+    redis_url: str, db_conn: psycopg.Connection, root_task_id: int
+) -> None:
+    _actor, _owner, task_id = seed_owned_task(db_conn, root_task_id)
+    _age(db_conn, task_id)
+    task_registry.update(task_id, note="still waiting on the draft", operation_key=str(uuid4()))
+    assert _age_days(db_conn, task_id) > 29
+
+
+def test_results_write_moves_the_clock(
+    redis_url: str, db_conn: psycopg.Connection, root_task_id: int
+) -> None:
+    _actor, _owner, task_id = seed_owned_task(db_conn, root_task_id)
+    _age(db_conn, task_id)
+    task_registry.update(task_id, results="came back clean", operation_key=str(uuid4()))
+    assert _age_days(db_conn, task_id) < 1
+
+
+# meiva:note
+# The clock follows the policy, not "any field": a rename restates the work, so it keeps the age.
+def test_title_change_keeps_the_clock(
+    redis_url: str, db_conn: psycopg.Connection, root_task_id: int
+) -> None:
+    _actor, _owner, task_id = seed_owned_task(db_conn, root_task_id)
+    _age(db_conn, task_id)
+    task_registry.update(task_id, title="receipt task, renamed", operation_key=str(uuid4()))
+    assert _age_days(db_conn, task_id) > 29
+
+
+# meiva:note
 # Why a task did or did not escalate must be readable after the fact.
 def test_audit_fact_records_the_restart(
     redis_url: str, db_conn: psycopg.Connection, root_task_id: int

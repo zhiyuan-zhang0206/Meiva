@@ -45,7 +45,15 @@ The id string of the agent who created this task (`"system"` for root; historica
 
 ## `created_at` / `updated_at`
 
-Timestamps auto-managed by the database. `updated_at` is refreshed on every `update`/`log` call.
+Timestamps auto-managed by the database. `created_at` is when the row was inserted.
+
+`updated_at` is **when the work last changed**, and it moves only on a write that changes the work —
+the same criterion that restarts the reminder window (Fleet `task_reminder_reset_on`; see
+[[task_model_reminders.meiva.okf.md|Reminders]]). Recording a note with `log`, renaming the task or
+editing its description leaves it where it was. The reminder daemon's due clock reads
+`now() - updated_at`, so a note that moved it would postpone the reminder indefinitely for a task
+that is only annotated, never advanced (task #5311). The HTTP `PATCH` surface has no note channel
+and every field it accepts is a deliberate edit, so a `PATCH` always moves the column.
 
 ## `priority`
 

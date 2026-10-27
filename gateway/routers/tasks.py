@@ -324,7 +324,9 @@ def _patch_fields(body: TaskUpdateRequest) -> tuple[list[str], list[object]]:
     # escalation marker is part of the bookkeeping — clearing it lets the fresh window escalate
     # on its own. The SDK path narrows this to writes that change the work
     # (`base/agents/tasks/reminder_window.py`, Fleet `task_reminder_reset_on`), because there an
-    # appended note is not an edit to the task's work.
+    # appended note is not an edit to the task's work. `updated_at` follows the same asymmetry
+    # (the UPDATE below always moves it, the SDK path only when the work changes), because it is
+    # the due clock the reminder daemon reads (task #5311).
     sets.append("last_reminded_at = NULL")
     sets.append("reminder_count = 0")
     sets.append("escalated_at = NULL")
