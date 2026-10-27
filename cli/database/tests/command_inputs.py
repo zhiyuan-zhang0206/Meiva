@@ -2,6 +2,7 @@
 
 import io
 import os
+import random
 from pathlib import Path
 
 import pytest
@@ -42,6 +43,7 @@ def command_runtime(tmp_path: Path) -> CommandRuntime:
         session=UserSession(user_home=tmp_path / "user", login_shell="/bin/zsh", interactive=False),
         timers=timers,
         rng=seeded_rng(),
+        secure_rng=random.SystemRandom(),
         clock=Clock(
             ClockConfig("UTC", None, message_timestamp_weekday=False),
             timers=timers,

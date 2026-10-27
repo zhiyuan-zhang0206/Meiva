@@ -6,7 +6,7 @@ from __future__ import annotations
 
 import os
 import subprocess
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from pathlib import Path
 
 import psutil
@@ -18,17 +18,35 @@ from base.paths import root_run_dir
 from base.sessions.tests.scripted_helper import ScriptedHelper
 from cli.commands.data_plane.instance.launch_delivery import LaunchDelivery
 from cli.commands.lifecycle.root_control.launch_plan import RootLaunchInputs
+from services.desktop.permissions_helper.launchd_job import LaunchdFacts
 from services.supervision.roster.service_spec import ServiceSpec
 
 __all__ = [
+    "LAUNCHD_FACTS",
     "custody_helper",
     "fake_interpreter",
     "git_repo",
     "launch_delivery",
     "launch_inputs",
+    "refuse_launchctl",
     "service",
     "this_process",
 ]
+
+# meiva:note
+# The account these tests act as for launchd's purposes: macOS, a user id, and a home that no test
+# reads. A test that needs launchd's answer hands in a runner that gives it.
+LAUNCHD_FACTS = LaunchdFacts(uid=4242, platform="darwin", user_home=Path("/nonexistent/user-home"))
+
+
+# meiva:note
+# A command runner for a test whose path never asks launchd: a call is a failure.
+def refuse_launchctl(
+    cmd: Sequence[str], /, *, timeout: float, capture_output: bool = True
+) -> subprocess.CompletedProcess[bytes]:
+    del timeout, capture_output
+    raise AssertionError(f"this test must not run {list(cmd)}")
+
 
 # meiva:note
 # Both capabilities and no database: the launcher delivers this service no login, no API

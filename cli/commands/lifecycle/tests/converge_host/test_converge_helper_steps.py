@@ -39,6 +39,7 @@ from cli.commands.converge.plans.helper_plan import (
 from cli.commands.converge.spec import ConvergeCtx
 from cli.commands.lifecycle import converge_host
 from cli.commands.lifecycle.tests.converge_host.context_inputs import capable_mac
+from services.desktop.permissions_helper.launchd_job import LaunchdFacts
 
 _BRING_UP = "permissions helper build + sign + load"
 _NO_HELPER_HERE = "macOS only (permissions helper drives the desktop)"
@@ -51,6 +52,27 @@ def _bring_up(ctx: ConvergeCtx) -> None:
 
 # meiva:note
 # --- the decisions (pure) -----------------------------------------------------------
+
+
+# meiva:note
+# The bring-up's inputs come from the context and the configured values, each one distinct from the
+# environment this test runs in: the home, the account's home, the port and the artifact directory.
+def test_the_helper_bring_up_runs_in_what_the_context_and_the_config_name(
+    ctx: ConvergeCtx, tmp_path: Path
+) -> None:
+    mac = replace(ctx, host=capable_mac(), meiva_home=tmp_path / "unit-home")
+    artifact = tmp_path / "artifact"
+
+    env = converge_host.helper_install_env(mac, helper_port=9301, artifact_dir=artifact)
+
+    assert (env.helper_port, env.artifact_dir) == (9301, artifact)
+    assert env.build.home == tmp_path / "unit-home"
+    assert env.build.facts == LaunchdFacts(
+        uid=mac.host.uid, platform="darwin", user_home=mac.session.user_home
+    )
+    assert env.build.run is mac.host.run
+    assert env.build.timers is mac.timers and env.build.clock is mac.clock
+    assert env.build.rng is mac.secure_rng
 
 
 def test_only_a_mac_gets_a_helper_bring_up() -> None:

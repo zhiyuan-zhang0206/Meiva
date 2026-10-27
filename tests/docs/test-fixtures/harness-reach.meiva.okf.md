@@ -20,8 +20,6 @@ A fixture that needs a package for a few consumers lives in the owner's `tests/`
 them through the consumer's conftest import or its directory's `path_scopes.toml`:
 
 - the CLI readiness guard, `cli/tests/guards/service_readiness_guard.py`
-- the helper's native-command guard,
-  `services/desktop/permissions_helper/tests/permissions_helper/native_io_guard.py`
 - the inbound helpers, `base/agents/inbox/tests/inbound_helpers.py`
 
 A global guard that must protect a package it may not import names the package by

@@ -6,6 +6,7 @@
 # `$MEIVA_HOME/logs/health_preflight.log`, never failing a start.
 
 
+import random
 import socket
 import subprocess
 from collections.abc import Callable
@@ -56,6 +57,7 @@ def _preflight_ctx(
     config.set_field("db_url", urls[0])
     config.set_field("redis_url", urls[1])
     return ConvergeCtx(
+        secure_rng=random.SystemRandom(),
         repo=tmp_path / "repo",
         meiva_home=tmp_path / "home",
         roles=roles,
@@ -393,6 +395,7 @@ def _git_repo(
     first = _commit("one")
     head = _commit("two")
     ctx = ConvergeCtx(
+        secure_rng=random.SystemRandom(),
         repo=repo,
         meiva_home=tmp_path / "home",
         roles=frozenset({"gateway"}),
@@ -469,6 +472,7 @@ def test_checkout_worktree_skipped(
     wt = tmp_path / ".claude" / "worktrees" / "some-task"
     wt.mkdir(parents=True)
     ctx = ConvergeCtx(
+        secure_rng=random.SystemRandom(),
         repo=wt,
         meiva_home=tmp_path / "home",
         roles=frozenset({"gateway"}),

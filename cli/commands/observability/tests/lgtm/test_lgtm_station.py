@@ -9,6 +9,7 @@
 
 from __future__ import annotations
 
+import random
 from collections.abc import Callable
 from dataclasses import replace
 from pathlib import Path
@@ -48,6 +49,7 @@ def context(
     producer: Callable[[], EventPipeline],
 ) -> ConvergeCtx:
     return ConvergeCtx(
+        secure_rng=random.SystemRandom(),
         repo=REPO_ROOT,
         meiva_home=unit.home,
         roles=roles,

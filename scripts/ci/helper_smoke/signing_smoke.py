@@ -1,12 +1,18 @@
 from __future__ import annotations
 
 import argparse
+import random
 import subprocess
 import sys
 from pathlib import Path
 
+from base.clock import SYSTEM_TIMERS, Clock, ClockConfig
+from base.config import settings
+from base.host.system.hostport import Host
+from base.paths import meiva_home
 from base.sessions.helperproc import helper_client
 from services.desktop.permissions_helper import lifecycle
+from services.desktop.permissions_helper.launchd_job import LaunchdFacts, helper_job_label
 
 APPLE_EVENTS_ENTITLEMENT = "com.apple.security.automation.apple-events"
 
@@ -48,21 +54,46 @@ def verify_signature(app: Path) -> None:
         raise SystemExit(problem)
 
 
-def load_and_ping(app: Path) -> None:
+# meiva:note
+# The world this smoke run builds and installs in, read once by the entry: the home the
+# environment names, the account's launchd facts, the real command runner, timers and clock,
+# and the operating system's random generator.
+def install_env() -> lifecycle.InstallEnv:
+    home = meiva_home()
+    host = Host.system()
+    build = lifecycle.BuildEnv(
+        home=home,
+        facts=LaunchdFacts.of(host, user_home=Path.home()),
+        run=host.run,
+        timers=SYSTEM_TIMERS,
+        clock=Clock(
+            ClockConfig("UTC", None, message_timestamp_weekday=False), timers=SYSTEM_TIMERS
+        ),
+        rng=random.SystemRandom(),
+    )
+    return lifecycle.InstallEnv(
+        build=build,
+        helper_port=settings.services.permissions_helper_port,
+        artifact_dir=settings.services.permissions_helper_artifact_dir,
+    )
+
+
+def load_and_ping(app: Path, env: lifecycle.InstallEnv) -> None:
     """Bootstrap the helper under launchd and ping it.
 
     A bootstrap failure intentionally fails the lane: the hosted runner's user launchd chain is
     part of the production contract being tested.
     """
-    lifecycle.install_and_load(app, rebuilt=True, helper=helper_client)
+    lifecycle.install_and_load(app, rebuilt=True, helper=helper_client, env=env)
     if helper_client().ping()["pong"] is not True:
         raise SystemExit("the helper did not answer the ping")
 
 
 def run() -> None:
-    app, _rebuilt = lifecycle.build_and_sign()
+    env = install_env()
+    app, _rebuilt = lifecycle.build_and_sign(destination=None, env=env.build)
     verify_signature(app)
-    load_and_ping(app)
+    load_and_ping(app, env)
 
 
 def main(argv: list[str]) -> int:
@@ -72,9 +103,12 @@ def main(argv: list[str]) -> int:
     commands = parser.add_subparsers(dest="command", required=True)
     commands.add_parser("run", help="build, sign, read back, launch and ping")
     commands.add_parser("label", help="print the launchd label of the helper job")
+    commands.add_parser("converge", help="build, sign, install and load the helper")
     args = parser.parse_args(argv)
     if args.command == "label":
-        print(lifecycle.label())
+        print(helper_job_label(meiva_home()))
+    elif args.command == "converge":
+        lifecycle.converge(helper=helper_client, env=install_env())
     else:
         run()
     return 0

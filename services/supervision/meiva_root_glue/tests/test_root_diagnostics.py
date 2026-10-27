@@ -30,7 +30,7 @@ from services.supervision.meiva_root_glue.diagnostics import (
     DiagnosticMonitor,
     RootHealthRounds,
 )
-from services.supervision.meiva_root_glue.tests.slices import probe_config, system_clock
+from services.supervision.meiva_root_glue.tests.slices import checks_for, probe_config, system_clock
 
 
 class _Events:
@@ -516,7 +516,7 @@ def test_helper_diagnostics_are_macos_only(*, machine_identity: ConfiguredMachin
     machine_identity.set(role="agent-runner")
     names = {
         check.name
-        for check in probes.build_diagnostics(
+        for check in checks_for(
             set(),
             database=_unused_database,
             machine=machine_identity,
@@ -528,7 +528,7 @@ def test_helper_diagnostics_are_macos_only(*, machine_identity: ConfiguredMachin
     assert names == {"venv"}
     names = {
         check.name
-        for check in probes.build_diagnostics(
+        for check in checks_for(
             set(),
             database=_unused_database,
             machine=machine_identity,
@@ -637,7 +637,7 @@ def test_each_root_roster_owns_its_helper_episode_reporter(
     machine_identity.set(role="agent-runner")
     first = next(
         check
-        for check in probes.build_diagnostics(
+        for check in checks_for(
             set(),
             database=_unused_database,
             machine=machine_identity,
@@ -649,7 +649,7 @@ def test_each_root_roster_owns_its_helper_episode_reporter(
     )
     second = next(
         check
-        for check in probes.build_diagnostics(
+        for check in checks_for(
             set(),
             database=_unused_database,
             machine=machine_identity,
@@ -784,7 +784,7 @@ def test_the_reminder_record_is_observed_on_the_gateway_only(
         machine_identity.set(role=role)
         return {
             check.name: check
-            for check in probes.build_diagnostics(
+            for check in checks_for(
                 set(),
                 database=_unused_database,
                 machine=machine_identity,

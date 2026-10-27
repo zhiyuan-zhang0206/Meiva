@@ -10,6 +10,7 @@
 from __future__ import annotations
 
 import dataclasses
+import random
 import shutil
 import stat
 from collections.abc import Callable
@@ -288,6 +289,7 @@ def _context(
     services: frozenset[str] = frozenset({"frontend"}),
 ) -> ConvergeCtx:
     return ConvergeCtx(
+        secure_rng=random.SystemRandom(),
         repo=Path("/repo"),
         meiva_home=Path.home() / ".meiva",
         roles=roles,

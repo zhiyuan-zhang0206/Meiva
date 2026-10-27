@@ -15,23 +15,83 @@ from pathlib import Path
 
 import pytest
 
+from base.clock import SYSTEM_TIMERS, Timers
+from base.host.permissions_helper.client import HelperAtSocket, SessionProc
 from base.native_process.ownership import OwnedProcess
 from base.sessions.tests.refuse_helper import refuse_connect
 from base.sessions.tests.scripted_helper import ScriptedHelper, scripted_at
 from services.desktop.permissions_helper import launchd_job as jobs
 from services.desktop.permissions_helper import lifecycle
-from services.desktop.permissions_helper.tests.support import stopped_helper_plist
+from services.desktop.permissions_helper.tests.support import (
+    helper_build_env,
+    launchctl_reply,
+    launchd_facts,
+    refuse_tools,
+    stopped_helper_plist,
+)
 from services.desktop.permissions_helper.tests.test_permissions_helper import (
     fake_identity_reply,
     stage_signing_identity,
 )
 
 
+def _absent_job(cmd: Sequence[str], **_kwargs: object) -> subprocess.CompletedProcess[bytes]:
+    return subprocess.CompletedProcess(list(cmd), 113, b"", b"Could not find service")
+
+
+# meiva:note
+# The replacement guard over a home whose launchd job is absent: the processes that run the
+# executable are the real ones.
+class _RetirementGuard:
+    def __init__(self, home: Path) -> None:
+        self._home = home
+
+    def require(self, executable: Path) -> None:
+        jobs.require_retired_helper(
+            executable,
+            home=self._home,
+            facts=launchd_facts(self._home),
+            run=_absent_job,
+            timers=SYSTEM_TIMERS,
+        )
+
+
+# meiva:note
+# Retire `home`'s helper as the test process: the real user id, this process as the caller, and the
+# real clock (the owner tests wait on real processes).
+def _unregister(
+    home: Path,
+    *,
+    connect: HelperAtSocket,
+    run: jobs.BoundedRunner,
+    timers: Timers = SYSTEM_TIMERS,
+    force: bool = False,
+) -> None:
+    jobs.unregister_helper(
+        home,
+        helper_port=23456,
+        connect=connect,
+        facts=launchd_facts(home),
+        caller_pid=os.getpid(),
+        run=run,
+        timers=timers,
+        force=force,
+    )
+
+
+# meiva:note
+# A scripted helper that also reports its (empty) process sessions, as the retirement proof asks.
+class _RetiringHelper(ScriptedHelper):
+    def session_list(self, prefix: str = "") -> list[SessionProc]:
+        return self._answer("session_list", prefix)
+
+
 def test_isolated_helper_build_never_replaces_installed_artifact(
     tmp_path: Path,
 ) -> None:
-    installed = tmp_path / "installed"
-    installed.mkdir()
+    home = tmp_path / "home"
+    installed = home / "helper"
+    installed.mkdir(parents=True)
     sentinel = installed / "build-state.json"
     sentinel.write_text("unchanged installed state")
     candidate = tmp_path / "candidate"
@@ -50,11 +110,7 @@ def test_isolated_helper_build_never_replaces_installed_artifact(
             return subprocess.CompletedProcess(argv, 0, b"designated => adhoc-dr\n", b"")
         return subprocess.CompletedProcess(argv, 0, b"", b"")
 
-    env = lifecycle.BuildEnv(
-        app_dir=installed,
-        source_hash="source",
-        runner=run,
-    )
+    env = helper_build_env(home, run)
     app, rebuilt = lifecycle.build_and_sign(destination=candidate, env=env)
     assert rebuilt and app == candidate / "MeivaPermissionsHelper.app"
     assert sentinel.read_text() == "unchanged installed state"
@@ -67,23 +123,40 @@ def test_isolated_helper_build_never_replaces_installed_artifact(
     assert [Path(command[0]).name for command in commands] == ["swiftc", "codesign", "codesign"]
 
 
+# meiva:note
+# The account's own production helper directory is protected from an isolated build by the user
+# home the facts carry, not by whichever home this process happens to run under.
+def test_the_helper_directory_of_the_account_is_protected_from_isolated_builds(
+    tmp_path: Path,
+) -> None:
+    user_home = tmp_path / "user"
+    app_dir = tmp_path / "home" / "helper"
+
+    with pytest.raises(lifecycle.PermissionsHelperBuildError, match="outside the installed"):
+        lifecycle.build_directory(
+            user_home / ".meiva" / "helper", app_dir=app_dir, user_home=user_home
+        )
+    other = tmp_path / "somebody" / ".meiva" / "helper"
+    assert lifecycle.build_directory(other, app_dir=app_dir, user_home=user_home) == other
+
+
 def test_isolated_helper_rejects_installed_destination_before_building(
     tmp_path: Path,
 ) -> None:
+    env = helper_build_env(tmp_path / "home", refuse_tools)
     with pytest.raises(lifecycle.PermissionsHelperBuildError, match="outside the installed"):
-        lifecycle.build_and_sign(
-            destination=tmp_path,
-            env=lifecycle.BuildEnv(app_dir=tmp_path),
-        )
+        lifecycle.build_and_sign(destination=env.app_dir, env=env)
 
 
+# meiva:note
+# A stale helper installed under `<tmp>/home`, with launchd answering `loaded` for its job. Every
+# tool call goes through one runner, which records the order of the steps in `events`.
 def _stale_installed_helper(
     tmp_path: Path,
     events: list[str],
     *,
     dr: str = "adhoc-dr-new",
     loaded: bool = False,
-    pids: Sequence[int] = (),
 ) -> tuple[Path, lifecycle.BuildEnv]:
     home = tmp_path / "home"
     installed = home / "helper"
@@ -92,21 +165,13 @@ def _stale_installed_helper(
     exe.write_bytes(b"old helper")
     state = {"source_hash": "old", "dr": dr, "signed_at": "2026-09-29T00:00:00+00:00"}
     (installed / "build-state.json").write_text(json.dumps(state))
-    agents = tmp_path / "agents"
-    agents.mkdir()
     stage_signing_identity(installed)
-
-    def launchd_run(
-        command: Sequence[str], **_kwargs: object
-    ) -> subprocess.CompletedProcess[bytes]:
-        argv = list(command)
-        events.append("launchd")
-        if loaded:
-            return subprocess.CompletedProcess(argv, 0, b"pid = 321\n", b"")
-        return subprocess.CompletedProcess(argv, 113, b"", b"Could not find service")
 
     def run(command: Sequence[str], **_kwargs: object) -> subprocess.CompletedProcess[bytes]:
         argv = list(command)
+        if (job := launchctl_reply(argv, loaded=loaded)) is not None:
+            events.append("launchd")
+            return job
         if (identity := fake_identity_reply(argv, app_dir=installed)) is not None:
             return identity
         if argv[:3] == ["codesign", "-d", "-r-"]:
@@ -120,20 +185,7 @@ def _stale_installed_helper(
             Path(argv[-1]).write_bytes(b"new helper")
         return subprocess.CompletedProcess(argv, 0, b"", b"")
 
-    retirement = jobs.RetirementEnv(
-        home=home,
-        agents_dir=agents,
-        pids=pids,
-        runner=launchd_run,
-    )
-    env = lifecycle.BuildEnv(
-        app_dir=installed,
-        home=home,
-        source_hash="new",
-        retirement=retirement,
-        runner=run,
-    )
-    return exe, env
+    return exe, helper_build_env(home, run)
 
 
 @pytest.mark.parametrize("blocker", ["loaded", "plist", "pid"])
@@ -141,24 +193,26 @@ def test_stale_installed_helper_is_never_replaced_while_in_use(
     tmp_path: Path, blocker: str
 ) -> None:
     events: list[str] = []
-    exe, env = _stale_installed_helper(
-        tmp_path,
-        events,
-        loaded=blocker == "loaded",
-        pids=[4242] if blocker == "pid" else (),
-    )
+    exe, env = _stale_installed_helper(tmp_path, events, loaded=blocker == "loaded")
     state = (exe.parents[3] / "build-state.json").read_text()
     if blocker == "plist":
-        assert env.retirement is not None
-        jobs.helper_job_plist_path(
-            env.retirement.home,
-            agents_dir=env.retirement.agents_dir,
-        ).write_bytes(b"retained definition")
-    reason = {"loaded": "launchd still has", "plist": "still registered", "pid": "pid 4242 still"}
+        jobs.helper_job_plist_path(env.home, facts=env.facts).parent.mkdir(parents=True)
+        jobs.helper_job_plist_path(env.home, facts=env.facts).write_bytes(b"retained definition")
+    if blocker == "pid":
+        # meiva:note
+        # A live process runs the installed executable: this test process, through a link.
+        exe.unlink()
+        exe.symlink_to(Path(sys.executable).resolve())
+    reason = {
+        "loaded": "launchd still has",
+        "plist": "still registered",
+        "pid": r"pid \d+(, \d+)* still runs",
+    }
     with pytest.raises(RuntimeError, match=reason[blocker]) as refused:
-        lifecycle.build_and_sign(env=env)
+        lifecycle.build_and_sign(destination=None, env=env)
     assert "run `meiva stop` first" in str(refused.value)
-    assert exe.read_bytes() == b"old helper"
+    if blocker != "pid":
+        assert exe.read_bytes() == b"old helper"
     assert (exe.parents[3] / "build-state.json").read_text() == state
     assert not {"swiftc", "codesign"} & set(events)
 
@@ -172,11 +226,12 @@ def test_retired_stale_installed_helper_is_replaced_after_the_compile(
     events: list[str] = []
     exe, env = _stale_installed_helper(tmp_path, events, dr=previous_dr)
 
-    assert lifecycle.build_and_sign(env=env) == (exe.parents[2], True)
+    assert lifecycle.build_and_sign(destination=None, env=env) == (exe.parents[2], True)
     assert exe.read_bytes() == b"new helper"
     assert " ".join(events) == "launchd swiftc launchd codesign read-dr"
     state = json.loads((exe.parents[3] / "build-state.json").read_text())
-    assert (state["source_hash"], state["dr"]) == ("new", "adhoc-dr-new")
+    assert state["dr"] == "adhoc-dr-new"
+    assert state["source_hash"] == lifecycle.source_content_hash(env.sources)
     warned = "need granting again" in capsys.readouterr().err
     assert warned == (previous_dr != "adhoc-dr-new")
 
@@ -190,6 +245,8 @@ def test_stale_installed_helper_survives_a_host_that_cannot_compile(
 
     def fail(command: Sequence[str], **_kwargs: object) -> subprocess.CompletedProcess[bytes]:
         argv = list(command)
+        if (job := launchctl_reply(argv, loaded=False)) is not None:
+            return job
         if (identity := fake_identity_reply(argv, app_dir=env.app_dir)) is not None:
             return identity
         if argv[0] == "swiftc":
@@ -197,7 +254,7 @@ def test_stale_installed_helper_survives_a_host_that_cannot_compile(
         return subprocess.CompletedProcess(argv, 0, b"", b"")
 
     with pytest.raises(lifecycle.PermissionsHelperBuildError, match="swiftc failed"):
-        lifecycle.build_and_sign(env=replace(env, runner=fail))
+        lifecycle.build_and_sign(destination=None, env=replace(env, run=fail))
     assert exe.read_bytes() == b"old helper"
     assert (exe.parents[3] / "build-state.json").read_text() == state
     assert "codesign" not in events
@@ -222,14 +279,14 @@ def test_isolated_artifact_stays_immutable_without_consulting_the_home_job(
 def test_replacement_guard_names_a_live_process_running_the_artifact(
     tmp_path: Path,
 ) -> None:
-    env = jobs.RetirementEnv(home=tmp_path, agents_dir=tmp_path, loaded=False)
-    jobs.require_retired_helper(tmp_path / "unused-executable", env=env)
+    guard = _RetirementGuard(tmp_path)
+    guard.require(tmp_path / "unused-executable")
     child = subprocess.Popen(
         [sys.executable, "-m", "services.desktop.permissions_helper.tests.support"]
     )
     try:
         with pytest.raises(RuntimeError, match=rf"pid (\d+, )*{child.pid}\b.* still runs"):
-            jobs.require_retired_helper(Path(sys.executable), env=env)
+            guard.require(Path(sys.executable))
     finally:
         child.kill()
         child.wait(timeout=5)
@@ -270,7 +327,9 @@ def test_helper_retirement_unknown_job_never_removes_definition(
     tmp_path: Path,
 ) -> None:
     home = tmp_path.resolve()
-    path = jobs.helper_job_plist_path(home, agents_dir=tmp_path)
+    facts = launchd_facts(home)
+    path = jobs.helper_job_plist_path(home, facts=facts)
+    path.parent.mkdir(parents=True)
     path.write_bytes(b"retained definition")
 
     def unknown(cmd: Sequence[str], **_kwargs: object) -> subprocess.CompletedProcess[bytes]:
@@ -278,9 +337,8 @@ def test_helper_retirement_unknown_job_never_removes_definition(
         assert argv[:2] == ["launchctl", "print"]
         return subprocess.CompletedProcess(argv, 5, b"", b"native manager unavailable")
 
-    env = jobs.RetirementEnv(platform="darwin", agents_dir=tmp_path, runner=unknown)
     with pytest.raises(RuntimeError, match="cannot inspect"):
-        jobs.unregister_helper(home, helper_port=23456, connect=refuse_connect, env=env)
+        _unregister(home, connect=refuse_connect, run=unknown)
     assert path.read_bytes() == b"retained definition"
 
 
@@ -295,6 +353,24 @@ def test_helper_retirement_rejects_caller_ancestry_before_wire_or_signal(tmp_pat
             tmp_path / "no-socket",
             psutil.Process().exe(),
             connect=refuse_connect,
+            caller_pid=os.getpid(),
+        )
+
+
+# meiva:note
+# The ancestry check asks about the caller it is given, not about the current process: the job's
+# process is this one, the caller is another process outside its tree, so the check passes and the
+# retirement goes on to dial the helper.
+def test_helper_retirement_asks_about_the_caller_it_was_given(tmp_path: Path) -> None:
+    import psutil
+
+    with pytest.raises(AssertionError, match="dialled the permissions helper"):
+        jobs.retirement_owner(
+            f"pid = {os.getpid()}\n",
+            tmp_path / "no-socket",
+            psutil.Process().exe(),
+            connect=refuse_connect,
+            caller_pid=2**22,
         )
 
 
@@ -313,7 +389,7 @@ def test_helper_retirement_refuses_foreign_home_plist(tmp_path: Path) -> None:
         )
     )
     with pytest.raises(RuntimeError, match="exact home"):
-        jobs.retirement_plist(path, home, home / "socket")
+        jobs.retirement_plist(path, home, home / "socket", uid=os.getuid())
 
 
 @pytest.mark.parametrize("conflict", [None, "reappeared", "changed", "live-socket", "wrong-seed"])
@@ -325,7 +401,9 @@ def test_retained_definition_after_completed_stop_requires_exact_absence(
     with tempfile.TemporaryDirectory(prefix="meivah-", dir="/tmp") as directory:
         home = Path(directory).resolve()
         (home / "run").mkdir()
-        path = jobs.helper_job_plist_path(home, agents_dir=tmp_path)
+        facts = launchd_facts(home)
+        path = jobs.helper_job_plist_path(home, facts=facts)
+        path.parent.mkdir(parents=True)
         stopped_helper_plist(home, path)
         if conflict == "wrong-seed":
             data = plistlib.loads(path.read_bytes())
@@ -333,7 +411,7 @@ def test_retained_definition_after_completed_stop_requires_exact_absence(
                 "/foreign/seed.json"
             )
             path.write_bytes(plistlib.dumps(data))
-        neighbor = tmp_path / "neighbor.plist"
+        neighbor = path.parent / "neighbor.plist"
         neighbor.write_bytes(b"neighbor")
         reads: list[str] = []
 
@@ -350,19 +428,18 @@ def test_retained_definition_after_completed_stop_requires_exact_absence(
                     path.write_bytes(b"changed authority")
             return subprocess.CompletedProcess(argv, 113, b"", b"Could not find service")
 
-        env = jobs.RetirementEnv(platform="darwin", agents_dir=tmp_path, runner=runner)
         with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as listener:
             sock = home / "run/permissions-helper.23456.sock"
             listener.bind(str(sock))
             if conflict == "live-socket":
                 listener.listen()
             if conflict is None:
-                jobs.unregister_helper(home, helper_port=23456, connect=refuse_connect, env=env)
-                jobs.unregister_helper(home, helper_port=23456, connect=refuse_connect, env=env)
+                _unregister(home, connect=refuse_connect, run=runner)
+                _unregister(home, connect=refuse_connect, run=runner)
                 assert not path.exists() and len(reads) == 5
             else:
                 with pytest.raises(RuntimeError):
-                    jobs.unregister_helper(home, helper_port=23456, connect=refuse_connect, env=env)
+                    _unregister(home, connect=refuse_connect, run=runner)
                 assert path.exists()
         assert neighbor.read_bytes() == b"neighbor"
 
@@ -371,7 +448,8 @@ def test_helper_socket_inspection_error_retains_definition(
     tmp_path: Path,
 ) -> None:
     home = tmp_path.resolve()
-    path = jobs.helper_job_plist_path(home, agents_dir=tmp_path)
+    path = jobs.helper_job_plist_path(home, facts=launchd_facts(home))
+    path.parent.mkdir(parents=True)
     original = stopped_helper_plist(home, path)
     (home / "run").mkdir()
     (home / "run/permissions-helper.23456.sock").write_bytes(b"untrusted socket input")
@@ -379,9 +457,8 @@ def test_helper_socket_inspection_error_retains_definition(
     def absent(cmd: Sequence[str], **_kwargs: object) -> subprocess.CompletedProcess[bytes]:
         return subprocess.CompletedProcess(list(cmd), 113, b"", b"Could not find service")
 
-    env = jobs.RetirementEnv(platform="darwin", agents_dir=tmp_path, runner=absent)
     with pytest.raises(RuntimeError, match="socket absence"):
-        jobs.unregister_helper(home, helper_port=23456, connect=refuse_connect, env=env)
+        _unregister(home, connect=refuse_connect, run=absent)
     assert path.read_bytes() == original
 
 
@@ -404,9 +481,9 @@ def test_helper_native_shutdown_wait_never_signals_unresponsive_owner(tmp_path: 
             time.sleep(0.01)
         owner = OwnedProcess.capture(psutil.Process(child.pid))
         with pytest.raises(TimeoutError, match="did not complete"):
-            jobs.wait_retirement_owner(owner, time.monotonic() + 0.05)
+            jobs.wait_retirement_owner(owner, time.monotonic() + 0.05, timers=SYSTEM_TIMERS)
         assert owner.live(), "normal helper shutdown wait must not signal its owner"
-        jobs.force_retirement_owner(owner, time.monotonic() + 5)
+        jobs.force_retirement_owner(owner, time.monotonic() + 5, timers=SYSTEM_TIMERS)
         assert not owner.live()
     finally:
         if child.poll() is None:
@@ -421,7 +498,7 @@ def test_helper_force_signal_refuses_reused_native_birth() -> None:
     try:
         original = OwnedProcess(child.pid, 0.0, None)
         with pytest.raises(RuntimeError, match="identity changed"):
-            jobs.force_retirement_owner(original, time.monotonic() + 5)
+            jobs.force_retirement_owner(original, time.monotonic() + 5, timers=SYSTEM_TIMERS)
         assert child.poll() is None
     finally:
         if child.poll() is None:
@@ -434,7 +511,8 @@ def test_idle_shutdown_retry_requires_native_success_and_retained_intent(
     tmp_path: Path, fault: str | None
 ) -> None:
     home = tmp_path.resolve()
-    path = jobs.helper_job_plist_path(home, agents_dir=tmp_path)
+    path = jobs.helper_job_plist_path(home, facts=launchd_facts(home))
+    path.parent.mkdir(parents=True)
     original = stopped_helper_plist(home, path)
     marker = home / "run" / "meiva-root" / "helper-stopped"
     marker.parent.mkdir(parents=True)
@@ -459,17 +537,28 @@ def test_idle_shutdown_retry_requires_native_success_and_retained_intent(
             argv, 0, f"state = {state}\nlast exit code = {code}\n".encode(), b""
         )
 
-    env = jobs.RetirementEnv(platform="darwin", agents_dir=tmp_path, runner=command)
     if fault is None:
-        jobs.unregister_helper(home, helper_port=23456, connect=refuse_connect, env=env)
-        jobs.unregister_helper(home, helper_port=23456, connect=refuse_connect, env=env)
+        _unregister(home, connect=refuse_connect, run=command)
+        _unregister(home, connect=refuse_connect, run=command)
         assert not path.exists() and marker.exists()
         assert sum(args[0] == "bootout" for args in commands) == 1
     else:
         with pytest.raises(RuntimeError):
-            jobs.unregister_helper(home, helper_port=23456, connect=refuse_connect, env=env)
+            _unregister(home, connect=refuse_connect, run=command)
         assert path.read_bytes() == original
         assert all(args[0] == "print" for args in commands)
+
+
+# meiva:note
+# The helper's own answers for a native process `pid`: it answers the ping as that process, speaks
+# the stop protocol, owns no root and no sessions, and acknowledges (or not) a shutdown request.
+def _helper_of(pid: int, shutdown: object) -> ScriptedHelper:
+    return _RetiringHelper(
+        ping={"pong": True, "pid": pid, "root_stop_intent_v1": True, "helper_shutdown_v1": True},
+        root_status={"state": "unseeded", "seeded": False},
+        session_list=[],
+        shutdown_helper=shutdown,
+    )
 
 
 @pytest.mark.parametrize("fault", ["wrong-ack", "lost-ack", "relaunch", "missing-intent"])
@@ -477,9 +566,12 @@ def test_unproven_shutdown_never_boots_out_native_job(tmp_path: Path, fault: str
     from base.host.permissions_helper import client
 
     home = tmp_path.resolve()
-    path = jobs.helper_job_plist_path(home, agents_dir=tmp_path)
-    original = stopped_helper_plist(home, path)
-    owner = OwnedProcess(321, 100.0, None)
+    path = jobs.helper_job_plist_path(home, facts=launchd_facts(home))
+    path.parent.mkdir(parents=True)
+    child = subprocess.Popen(
+        [sys.executable, "-m", "services.desktop.permissions_helper.tests.support"]
+    )
+    original = stopped_helper_plist(home, path, executable=str(Path(sys.executable).resolve()))
     requested = [False]
     commands: list[list[str]] = []
 
@@ -491,9 +583,11 @@ def test_unproven_shutdown_never_boots_out_native_job(tmp_path: Path, fault: str
             marker.chmod(0o600)
         if fault == "lost-ack":
             raise RuntimeError("lost response after durable intent")
+        if fault in ("relaunch", "missing-intent"):
+            child.kill()
         return {
             "stopping": True,
-            "pid": 999 if fault == "wrong-ack" else 321,
+            "pid": 999 if fault == "wrong-ack" else child.pid,
             "run_dir": str(run_dir),
         }
 
@@ -502,7 +596,7 @@ def test_unproven_shutdown_never_boots_out_native_job(tmp_path: Path, fault: str
         args = argv[1:]
         commands.append(args)
         assert args[0] == "print", "unknown shutdown must retain native job authority"
-        state = "pid = 321\n"
+        state = f"pid = {child.pid}\n"
         if requested[0]:
             state = (
                 "pid = 999\n"
@@ -511,21 +605,15 @@ def test_unproven_shutdown_never_boots_out_native_job(tmp_path: Path, fault: str
             )
         return subprocess.CompletedProcess(argv, 0, state.encode(), b"")
 
-    env = jobs.RetirementEnv(
-        platform="darwin",
-        agents_dir=tmp_path,
-        owner=owner,
-        runner=command,
-    )
-    with pytest.raises(RuntimeError):
-        jobs.unregister_helper(
-            home,
-            helper_port=23456,
-            connect=scripted_at(ScriptedHelper(shutdown_helper=shutdown)),
-            env=env,
-        )
-    assert requested[0] and path.read_bytes() == original
-    assert all(args[0] == "print" for args in commands)
+    try:
+        with pytest.raises(RuntimeError):
+            _unregister(home, connect=scripted_at(_helper_of(child.pid, shutdown)), run=command)
+        assert requested[0] and path.read_bytes() == original
+        assert all(args[0] == "print" for args in commands)
+    finally:
+        if child.poll() is None:
+            child.kill()
+        child.wait(timeout=5)
 
 
 _REGION_GRANT_GUARD = (
@@ -632,11 +720,11 @@ def test_exact_home_helper_retirement_keeps_neighbor_and_waits_for_native_exit(
     from base.host.permissions_helper import client
 
     home = tmp_path.resolve() / "home"
-    agents = tmp_path / "agents"
-    agents.mkdir()
-    path = jobs.helper_job_plist_path(home, agents_dir=agents)
-    stopped_helper_plist(home, path)
-    neighbor = agents / "neighbor.plist"
+    facts = launchd_facts(home)
+    path = jobs.helper_job_plist_path(home, facts=facts)
+    path.parent.mkdir(parents=True)
+    stopped_helper_plist(home, path, executable=str(Path(sys.executable).resolve()))
+    neighbor = path.parent / "neighbor.plist"
     neighbor.write_bytes(b"neighbor authority")
     child = subprocess.Popen(
         [sys.executable, "-m", "services.desktop.permissions_helper.tests.support"]
@@ -654,7 +742,7 @@ def test_exact_home_helper_retirement_keeps_neighbor_and_waits_for_native_exit(
             child.kill()
             return {"stopping": True, "pid": owner.pid, "run_dir": str(run_dir)}
 
-        connect = scripted_at(ScriptedHelper(shutdown_helper=shutdown))
+        connect = scripted_at(_helper_of(child.pid, shutdown))
 
         def command(cmd: Sequence[str], **_kwargs: object) -> subprocess.CompletedProcess[bytes]:
             argv = list(cmd)
@@ -672,18 +760,12 @@ def test_exact_home_helper_retirement_keeps_neighbor_and_waits_for_native_exit(
                 )
             return subprocess.CompletedProcess(argv, 113, b"", b"Could not find service")
 
-        env = jobs.RetirementEnv(
-            platform="darwin",
-            agents_dir=agents,
-            owner=owner,
-            runner=command,
-        )
-        jobs.unregister_helper(home, helper_port=23456, connect=connect, env=env)
-        jobs.unregister_helper(home, helper_port=23456, connect=connect, env=env)
-        jobs.unregister_helper(home, helper_port=23456, connect=connect, env=env)
+        _unregister(home, connect=connect, run=command)
+        _unregister(home, connect=connect, run=command)
+        _unregister(home, connect=connect, run=command)
         assert not path.exists()
         assert neighbor.read_bytes() == b"neighbor authority"
-        expected = f"{jobs.helper_job_domain()}/{jobs.helper_job_label(home)}"
+        expected = f"{facts.domain}/{jobs.helper_job_label(home)}"
         assert all(args[1] == expected for args in commands)
         assert [args[0] for args in commands].count("bootout") == 1
         assert all(args[0] in ("print", "bootout") for args in commands)

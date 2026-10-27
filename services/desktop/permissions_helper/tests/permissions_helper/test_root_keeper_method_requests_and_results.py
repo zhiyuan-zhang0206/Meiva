@@ -307,10 +307,10 @@ def test_label_is_per_cluster() -> None:
     from pathlib import Path
 
     from base.cluster import home_slug
-    from services.desktop.permissions_helper import lifecycle
+    from services.desktop.permissions_helper import launchd_job
 
     demo = Path("/x/.meiva-demo")
-    assert lifecycle.label(demo) == f"com.meiva.permissions-helper.{home_slug(demo)}"
+    assert launchd_job.helper_job_label(demo) == f"com.meiva.permissions-helper.{home_slug(demo)}"
 
 
 def test_screen_capture_probe_reads_the_helpers_grant(fake_helper) -> None:
@@ -483,7 +483,7 @@ def test_read_dr_accepts_legacy_stderr_stream(
             )
         raise AssertionError(f"unexpected call {argv}")
 
-    assert lifecycle.read_dr(app, runner=run) == sample_dr()
+    assert lifecycle.read_dr(app, run=run) == sample_dr()
 
 
 def test_entitlements_request_apple_events_for_spawned_children() -> None:
@@ -518,5 +518,5 @@ def test_source_mtime_change_does_not_rebuild_identical_content(
     newer = exe.stat().st_mtime + 60
     os.utime(bundle.sources.source, (newer, newer))
 
-    assert lifecycle.build_and_sign(env=env) == (bundle.app, False)
+    assert lifecycle.build_and_sign(destination=None, env=env) == (bundle.app, False)
     assert not any(c[0] == "swiftc" for c in recorded_argvs(recorded))

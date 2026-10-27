@@ -1,10 +1,11 @@
 exports = ["permissions_helper"]
 
 [uses]
-"conftest.py" = ["permissions_helper"]
-"permissions_helper" = ["test_permissions_helper.py"]
+"permissions_helper" = ["support.py", "test_permissions_helper.py"]
 "test_ax_tree_wire.py" = ["test_permissions_helper.py"]
+"test_permissions_helper.py" = ["support.py"]
 "test_helper_retirement.py" = ["support.py", "test_permissions_helper.py"]
 "test_native_drag.py" = ["support.py"]
+"test_os_jobs_gate.py" = ["support.py"]
 "test_native_input.py" = ["support.py"]
 "test_native_mouse_hold.py" = ["support.py"]

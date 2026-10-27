@@ -15,6 +15,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import random
 import re
 import subprocess
 import sys
@@ -332,6 +333,7 @@ def _cold_report(
     destination.write_text("previous dashboard")
     args.runtime.machine.set(role="observability-station")
     context = ConvergeCtx(
+        secure_rng=random.SystemRandom(),
         repo=repo,
         meiva_home=path,
         roles=frozenset({"observability-station"}),

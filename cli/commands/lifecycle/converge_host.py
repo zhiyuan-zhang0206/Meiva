@@ -89,6 +89,9 @@ from cli.commands.extensions.external_skills import converge_external_agent_skil
 from cli.commands.observability.lgtm_native import ensure_lgtm_native_step
 from cli.commands.observability.otel_collector import ensure_otel_collector_step
 from cli.database.runtime import CommandRuntime
+from services.desktop.permissions_helper import converge
+from services.desktop.permissions_helper.launchd_job import LaunchdFacts
+from services.desktop.permissions_helper.lifecycle import BuildEnv, InstallEnv
 
 __all__ = [
     "CONVERGE_STEPS",
@@ -180,6 +183,23 @@ def _helper_present(ctx: ConvergeCtx) -> bool:
     )
 
 
+# meiva:note
+# What the helper's build and install run in, from the converge context (its home, host, session,
+# timers, clock and the operating system's generator) and the two configured values.
+def helper_install_env(
+    ctx: ConvergeCtx, *, helper_port: int, artifact_dir: Path | None
+) -> InstallEnv:
+    build = BuildEnv(
+        home=ctx.meiva_home,
+        facts=LaunchdFacts.of(ctx.host, user_home=ctx.session.user_home),
+        run=ctx.host.run,
+        timers=ctx.timers,
+        clock=ctx.clock,
+        rng=ctx.secure_rng,
+    )
+    return InstallEnv(build=build, helper_port=helper_port, artifact_dir=artifact_dir)
+
+
 def _ensure_permissions_helper(ctx: ConvergeCtx) -> None:
     """Require the stable signed ancestor before starting a macOS root."""
     plan = helper_bring_up_plan(
@@ -193,9 +213,13 @@ def _ensure_permissions_helper(ctx: ConvergeCtx) -> None:
         case RefuseBringUp(message=message):
             raise RuntimeError(message)
         case BringUpHelper():
-            from services.desktop.permissions_helper import converge
-
-            converge(helper=ctx.require_helper())
+            services = ctx.read_config().view.services
+            env = helper_install_env(
+                ctx,
+                helper_port=services.permissions_helper_port,
+                artifact_dir=services.permissions_helper_artifact_dir,
+            )
+            converge(helper=ctx.require_helper(), env=env)
         case _:
             assert_never(plan)
 
@@ -569,6 +593,7 @@ def converge_host(
         producer=producer,
         helper=command.helper,
         timers=command.timers,
+        secure_rng=command.secure_rng,
         clock=command.clock,
         host=command.host,
         session=command.session,
