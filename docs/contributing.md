@@ -31,22 +31,14 @@ default home and can target a running deployment.
 ## Change and verify
 
 Implement a focused change with its related tests and current documentation.
-**The change record is the history itself.** The merge queue squashes a PR into
-one commit on `main`, and that commit's message is the entry a reader meets in
-`git log`, in the release notes page generated from a commit range (`gh compare`),
-and in the commit `git blame` lands on. The squash takes the **head commit's
-message**, not the PR title, so the head commit is the one that writes the
-record: `git commit --amend` before you push is how you make it the sentence you
-want months later. Write it for whoever reads it months later — what changed, and
-for whom — and let the diff and the PR description carry the detail. The PR title
-stays the human entry point beside the diff; a deliberate difference between the
-two is fine, as long as the head commit carries the record. There is no changelog
-file to append to and no per-entry file to add.
-
-```bash
-test "$(git log -1 --format=%s)" = "$(gh pr view --json title -q .title)" \
-  || echo "head commit subject differs from the PR title: say why in the PR body"
-```
+**The change record is the PR.** The merge queue squashes a PR into one commit on `main`
+whose title is the PR title and whose message is the PR description. That commit is the entry
+a reader meets in `git log`, in the release notes page generated from a commit range
+(`gh compare`), and in the commit `git blame` lands on, so the description is the permanent
+record: write it for whoever reads it months later (what changed, for whom, the accounting of any
+debt, the behavior that changes and how it was verified) and keep it true when the branch
+changes. The commit messages inside the branch do not reach `main`, and a branch holds no
+merge commit. There is no changelog file to append to and no per-entry file to add.
 
 Keep shared facts in their owning module; use existing third-party capabilities
 rather than creating a second framework or registry. Resolve generated-file
@@ -149,12 +141,12 @@ choice, discuss it with the user before changing that choice.
 ## Submit the PR
 
 Push the branch and open a PR against `main`. Explain the problem, resulting
-behavior, validation and known gaps. Its title becomes the squash commit's
-subject, so it is also the change note later readers and the release notes see;
-write it as one. Use a file tree or control-flow explanation
+behavior, validation and known gaps; the description becomes the squash commit's message.
+Its title becomes the squash commit's subject, so it is also the change note later readers
+and the release notes see; write it as one. Use a file tree or control-flow explanation
 when it helps readers understand a larger change; no fixed template is required.
 Address relevant CI failures and review feedback. Distinguish successful execution
-from missing, skipped or incomplete verification. Maintainers choose how to merge.
+from missing, skipped or incomplete verification. The queue squashes the PR once the checks pass.
 
 Keep the checkout while it contains needed work. Before removing a worktree,
 check for live sessions or processes anchored there with

@@ -8,5 +8,5 @@ exports = ["constants.py", "files.py", "packing.py"]
 "." = "strict"
 "__init__.py" = "strict"
 "constants.py" = "strict"
-"files.py" = "none"
+"files.py" = { mode = "none", why = "the shell that runs the attachment plan against the filesystem: it resolves, stats, reads and measures what the pure plan in packing.py asks for and hands the answer back" }
 "packing.py" = "strict"

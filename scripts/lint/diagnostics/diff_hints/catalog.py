@@ -278,6 +278,23 @@ def _spec_root_middle_layer() -> HintSpec:
     )
 
 
+def _spec_strict_promotion() -> HintSpec:
+    return HintSpec(
+        why=(
+            "a file promoted to strict has no debt left because the effect left it, and where the "
+            "effect went is what a review needs to see: a shell that runs a plan the strict module "
+            "returns is the split; a lower-level read in a neighbour that no rule judges is the "
+            "same debt under another name."
+        ),
+        instead=(
+            "1) name the shell that runs the plan and the strict function that returns it, in the "
+            "Hint-Ack trailer; 2) if the read has no plan to run, keep the file strict-to-be; "
+            "3) never replace a filesystem call with a lower-level one to reach strict."
+        ),
+        see="docs/conventions/architecture/code-placement-and-purity.md#updating-meizeltoml-when-placing-or-splitting-files",
+    )
+
+
 # meiva:note
 # One builder per id. A new `HintId` without a builder fails the catalog test for every
 # id, so the text cannot lag the vocabulary.
@@ -297,6 +314,7 @@ def _builders() -> dict[HintId, Callable[[], HintSpec]]:
         HintId.LAMBDA_DEPENDENCY: _spec_lambda_dependency,
         HintId.SPY_ASSERT: _spec_spy_assert,
         HintId.ROOT_MIDDLE_LAYER: _spec_root_middle_layer,
+        HintId.STRICT_PROMOTION: _spec_strict_promotion,
     }
 
 

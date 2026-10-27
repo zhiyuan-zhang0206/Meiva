@@ -10,7 +10,15 @@ from __future__ import annotations
 
 import ast
 
-from scripts.lint.diagnostics.diff_hints.model import FileKind, FunctionNode, HintId, Site, Unit
+from scripts.lint.diagnostics.diff_hints.model import (
+    FileKind,
+    FunctionNode,
+    HintId,
+    Site,
+    StatId,
+    StatSite,
+    Unit,
+)
 from scripts.lint.diagnostics.diff_hints.names import (
     OS_ENVIRON,
     annotation_names,
@@ -244,6 +252,47 @@ def none_fallback(unit: Unit) -> list[Site]:
                 if line in unit.added or param_added:
                     detail = "a `None` default falls back to a real implementation"
                     sites.append(Site(HintId.NONE_FALLBACK, unit.path, line, detail))
+    return sites
+
+
+# meiva:note
+# Whether an annotation lets the value be None: `X | None`, `Optional[X]`, `Union[X, None]`.
+def _allows_none(annotation: ast.expr | None) -> bool:
+    if annotation is None:
+        return False
+    optional = isinstance(annotation, ast.Subscript) and type_head(annotation) == "Optional"
+    return optional or any(_is_none(member) for member in union_members(annotation))
+
+
+# meiva:note
+# The parameters that may be None and have no default: the caller must pass them, and the function
+# still falls back to the world when it is passed None.
+def _required_optional_parameters(function: FunctionNode) -> dict[str, int]:
+    return {
+        arg.arg: arg.lineno
+        for arg, default in parameters(function)
+        if default is None and arg.arg not in {"self", "cls"} and _allows_none(arg.annotation)
+    }
+
+
+# meiva:note
+# Statistic, not a hint: the `none-fallback` shape for a parameter typed `X | None` with no default.
+# The function accepts None and then reads the environment or builds the implementation itself, so
+# the default of the signature is not what hides the dependency.
+def optional_fallback(unit: Unit) -> list[StatSite]:
+    if unit.kind is not FileKind.PRODUCTION:
+        return []
+    sites: list[StatSite] = []
+    for function in unit.functions:
+        optional = _required_optional_parameters(function)
+        if not optional:
+            continue
+        param_added = any(line in unit.added for line in optional.values())
+        for node in own_nodes(function):
+            for line in _fallback_sites(node, unit, optional):
+                if line in unit.added or param_added:
+                    detail = "a required `X | None` parameter falls back to a real implementation"
+                    sites.append(StatSite(StatId.OPTIONAL_FALLBACK, unit.path, line, detail))
     return sites
 
 

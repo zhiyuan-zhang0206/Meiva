@@ -8,8 +8,10 @@ from scripts.lint.diagnostics.diff_hints.model import (
     HintId,
     Importers,
     NewRoot,
+    Promotion,
     RemovedLine,
 )
+from scripts.lint.diagnostics.diff_hints.promotion import strict_promotion
 from scripts.lint.diagnostics.diff_hints.removed import deleted_tests
 from scripts.lint.diagnostics.diff_hints.tests.support import ROLES, hints, sites
 
@@ -500,3 +502,39 @@ def test_the_site_of_a_newly_declared_root_replaces_the_one_for_its_changed_file
     )
     assert len(found) == 1
     assert "declares a root" in found[0].detail
+
+
+PROMOTED = Promotion("base/lm/attach/packing.py", "base/lm/attach/meizel.toml", "strict-to-be")
+
+
+def change(path: str, *added: str) -> FileChange:
+    return FileChange(path, frozenset(range(1, len(added) + 1)), added, (), deleted=False)
+
+
+@pytest.mark.parametrize(
+    ("added", "fires"),
+    [
+        (("    data = os.stat(path)",), True),
+        (("    text = path.read_text()",), True),
+        (("    with open(path) as handle:",), True),
+        (("    return plan(request)",), False),
+        (("    name = path.name",), False),
+    ],
+)
+def test_a_promotion_with_reads_added_beside_it_is_asked_about(
+    added: tuple[str, ...], fires: bool
+) -> None:
+    found = strict_promotion([PROMOTED], [change("base/lm/attach/files.py", *added)])
+    assert [site.hint for site in found] == ([HintId.STRICT_PROMOTION] if fires else [])
+    if fires:
+        assert found[0].path == PROMOTED.path
+        assert "base/lm/attach/files.py" in found[0].detail
+
+
+def test_reads_in_a_test_in_another_directory_or_in_the_promoted_file_are_not_beside_it() -> None:
+    changes = [
+        change("base/lm/attach/tests/test_files.py", "    data = os.stat(path)"),
+        change("base/lm/other/files.py", "    data = os.stat(path)"),
+        change(PROMOTED.path, "    data = os.stat(path)"),
+    ]
+    assert strict_promotion([PROMOTED], changes) == []

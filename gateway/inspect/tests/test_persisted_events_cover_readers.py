@@ -5,8 +5,11 @@ import os
 import re
 from pathlib import Path
 
+import pytest
+
 from base.events.contract import EVENTS, LLM_ERROR_FAMILY, family_events
 
+pytestmark = pytest.mark.registry
 _ROOT = Path(__file__).resolve().parents[3]
 _SKIPPED_DIRS = frozenset(
     {".git", ".venv", ".worktrees", "node_modules", "tests", "__pycache__", "migrations"}
