@@ -202,6 +202,7 @@ class AgentHost:
             timestamps=handoff_stamping,
             machine=self._machine,
             home=home,
+            environ=policy.environ,
             stats=self.stats,
             rng=policy.rng,
             receipt_landed=handoff_landed,
@@ -681,6 +682,7 @@ class AgentHost:
                                 self._machine,
                                 self._home,
                                 self._policy.rng,
+                                self._policy.environ,
                             ),
                             self.drop_agent,
                             self._wake_resumed,
@@ -727,6 +729,7 @@ class AgentHost:
                 self._machine,
                 self._home,
                 self._policy.rng,
+                self._policy.environ,
             ),
         )
         return await self._invoke_native_graph(

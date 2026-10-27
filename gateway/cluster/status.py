@@ -16,7 +16,7 @@ import logging
 import threading
 import time
 from collections.abc import Callable, Mapping, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
 from typing import Annotated, Any
@@ -36,7 +36,6 @@ from base.daemon.endpoints import ServiceEndpoints
 from base.db import Database
 from base.deploy.git.cluster_drift import checkout_head_sha
 from base.deploy.lifecycle import start_serving
-from base.host.env.registry import process_environment
 from base.host.resource_sample import ResourceSample
 from base.native_process.loaded_commit import LoadedCommit
 from base.packages.plugins.surface import stats
@@ -223,6 +222,7 @@ class RosterEnv:
     probe_timeout_s: float
     clock: Clock
     rpc: RpcClient
+    environ: Mapping[str, str] = field(repr=False)
 
 
 def roster_env(request: Request) -> RosterEnv:
@@ -235,6 +235,7 @@ def roster_env(request: Request) -> RosterEnv:
         probe_timeout_s=gateway_config(request).status_probe_timeout_seconds,
         clock=gateway_clock(request),
         rpc=gateway_rpc(request),
+        environ=request.app.state.gateway_process.config.process_environment(),
     )
 
 
@@ -344,7 +345,7 @@ def _local_resource_sample() -> ResourceSample | None:
 def read_local_facts(env: RosterEnv, *, with_resource: bool) -> LocalFacts:
     return LocalFacts(
         paused_reason=serving_gate_reason(serving=start_serving.is_serving(env.home)),
-        head_sha=checkout_head_sha(env.home / "source", environ=process_environment()),
+        head_sha=checkout_head_sha(env.home / "source", environ=env.environ),
         # meiva:note
         # This gateway process's own frozen commit — not a disk bookmark, so a
         # gateway that outlived a checkout advance reports the old commit and the

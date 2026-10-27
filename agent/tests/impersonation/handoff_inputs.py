@@ -1,4 +1,5 @@
 import json
+import os
 import random
 from collections.abc import Generator, Iterator
 from contextlib import contextmanager
@@ -109,6 +110,7 @@ def takeover_host(tmp_path: Path, machine: MachineIdentityReader) -> TakeoverHos
         local_machine=machine.name(),
         workspaces_root=tmp_path / "workspaces",
         relay_program=relay_program(tmp_path / "relay", "exit:9"),
+        environ=dict(os.environ),
         wait=RelayWait(timeout_s=5.0, poll_s=0.05),
         rng=_rng(),
         clock=fixed_clock(),

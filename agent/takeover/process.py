@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import contextlib
 import subprocess
+from collections.abc import Mapping
 
 from agent.takeover.relay import RelayBinding, relay_command
 
@@ -17,14 +18,11 @@ __all__ = ["spawn_relay"]
 # by its exit poll, not by the pipe write.
 # meiva:link agent/docs/impersonation/relay-supervision.meiva.okf.md
 def spawn_relay(
-    program: tuple[str, ...], binding: RelayBinding, *, token: str
+    program: tuple[str, ...], binding: RelayBinding, *, token: str, environ: Mapping[str, str]
 ) -> subprocess.Popen[bytes]:
-    from base.host.env.registry import process_environment
     from base.sessions.env_forwarding import forward_env_dict
 
-    command = relay_command(
-        program, binding, token=token, forwarded_env=forward_env_dict(process_environment())
-    )
+    command = relay_command(program, binding, token=token, forwarded_env=forward_env_dict(environ))
     process = subprocess.Popen(  # noqa: S603
         command.argv,
         stdin=subprocess.PIPE,

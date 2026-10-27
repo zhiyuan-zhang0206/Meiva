@@ -1,3 +1,4 @@
+import os
 import random
 from typing import Any
 from unittest.mock import MagicMock
@@ -156,6 +157,7 @@ async def test_the_scan_wake_settles_the_receipt_it_selected_the_row_for(
             local_machine="handoff-scan",
             home=meiva_home(),
             rng=_rng(),
+            environ=dict(os.environ),
         ),
     )
     assert db_conn.execute(
