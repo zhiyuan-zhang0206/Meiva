@@ -20,6 +20,7 @@ from typing import Any
 import httpx
 import pytest
 
+from base.clock.ids import new_uuid
 from base.clock.tests.fakes import system_clock
 from services.entrypoints.im_bridge.adapters import weixin
 from services.entrypoints.im_bridge.adapters.weixin import WeixinAdapter, wechat_uin
@@ -28,7 +29,7 @@ from services.entrypoints.im_bridge.ingress.types import IngressReceipt, Ingress
 from services.entrypoints.im_bridge.tests.adapters.weixin_native import NativeWeixin
 from services.entrypoints.im_bridge.tests.slices import seeded_rng, system_rng
 from services.entrypoints.im_bridge.tests.support import owned_tasks
-from services.entrypoints.im_bridge.types import InboundMessage, new_uuid
+from services.entrypoints.im_bridge.types import InboundMessage
 
 
 class FakeCore:

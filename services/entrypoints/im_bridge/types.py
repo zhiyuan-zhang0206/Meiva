@@ -3,24 +3,14 @@
 from __future__ import annotations
 
 import asyncio
-import random
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from enum import StrEnum
 from http import HTTPStatus
 from typing import Any, NoReturn, Protocol, TypedDict
-from uuid import UUID
 
 import httpx
 from pydantic import BaseModel, ConfigDict, Field
-
-
-# meiva:note
-# A random (version 4) UUID drawn from `rng`: the bridge's one source of ids. The daemon hands in a
-# `random.SystemRandom`, so the ids are as unguessable and as unique as `uuid.uuid4()`; a test
-# hands in a seeded generator and gets the same ids on every run.
-def new_uuid(rng: random.Random) -> UUID:
-    return UUID(int=rng.getrandbits(128), version=4)
 
 
 class SendNotStartedError(RuntimeError):

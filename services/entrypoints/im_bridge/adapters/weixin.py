@@ -29,6 +29,7 @@ from urllib.parse import urlsplit
 import httpx
 
 from base.clock import Clock
+from base.clock.ids import new_uuid
 from base.host.private_storage import write_private_bytes
 from base.log import logger
 from services.entrypoints.im_bridge.ingress.identity import (
@@ -63,7 +64,6 @@ from services.entrypoints.im_bridge.types import (
     RetryableTransportError,
     SendNotStartedError,
     SendOutcomeUncertainError,
-    new_uuid,
     raise_http_failure,
 )
 
