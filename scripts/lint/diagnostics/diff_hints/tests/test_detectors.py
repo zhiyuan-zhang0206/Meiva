@@ -3,7 +3,13 @@ from __future__ import annotations
 import pytest
 
 from meizel.graph.model import AmbientKind
-from scripts.lint.diagnostics.diff_hints.model import FileChange, HintId, RemovedLine
+from scripts.lint.diagnostics.diff_hints.model import (
+    FileChange,
+    HintId,
+    Importers,
+    NewRoot,
+    RemovedLine,
+)
 from scripts.lint.diagnostics.diff_hints.removed import deleted_tests
 from scripts.lint.diagnostics.diff_hints.tests.support import ROLES, hints, sites
 
@@ -440,22 +446,57 @@ HOME_ROOT = frozenset({AmbientKind.HOME})
 
 
 @pytest.mark.parametrize(
-    ("path", "roots", "importers", "fires"),
+    ("path", "roots", "importers", "onward", "fires"),
     [
-        ("base/paths/home.py", HOME_ROOT, 3, True),
-        ("base/paths/home.py", HOME_ROOT, 12, True),
-        ("base/paths/home.py", HOME_ROOT, 2, False),
-        ("base/paths/home.py", frozenset[AmbientKind](), 9, False),
-        ("cli/database/runtime.py", HOME_ROOT, 18, False),
-        ("gateway/app.py", HOME_ROOT, 6, False),
-        ("cli/commands/tests/test_home.py", HOME_ROOT, 9, False),
+        ("base/paths/home.py", HOME_ROOT, 3, 0, True),
+        ("base/paths/home.py", HOME_ROOT, 12, 0, True),
+        ("base/paths/home.py", HOME_ROOT, 2, 0, True),
+        ("base/paths/home.py", HOME_ROOT, 1, 0, False),
+        ("base/paths/home.py", HOME_ROOT, 1, 2, False),
+        ("base/paths/home.py", HOME_ROOT, 1, 3, True),
+        ("base/paths/home.py", HOME_ROOT, 0, 0, False),
+        ("base/paths/home.py", frozenset[AmbientKind](), 9, 0, False),
+        ("cli/database/runtime.py", HOME_ROOT, 18, 0, False),
+        ("gateway/app.py", HOME_ROOT, 6, 0, False),
+        ("cli/main.py", HOME_ROOT, 6, 0, False),
+        ("cli/fleet_update/__main__.py", HOME_ROOT, 6, 0, False),
+        ("cli/commands/tests/test_home.py", HOME_ROOT, 9, 0, False),
     ],
 )
-def test_a_root_that_three_modules_outside_the_roots_import_is_a_middle_layer(
-    path: str, roots: frozenset[AmbientKind], importers: int, fires: bool
+def test_a_root_that_other_modules_outside_the_roots_import_is_a_middle_layer(
+    path: str, roots: frozenset[AmbientKind], importers: int, onward: int, fires: bool
 ) -> None:
-    found = sites("VALUE = 1\n", path, roots=roots, importers=importers)
+    found = sites("VALUE = 1\n", path, roots=roots, importers=importers, onward=onward)
     assert [site.hint for site in found] == ([HintId.ROOT_MIDDLE_LAYER] if fires else [])
     if fires:
         assert found[0].line == 1
-        assert f"imported by {importers}" in found[0].detail
+        detail = found[0].detail
+        assert f"imported by {importers}" in detail if importers >= 2 else "which 3" in detail
+        if importers:
+            assert "`cli/user0.py`" in detail
+
+
+def test_a_newly_declared_root_is_asked_about_whatever_imports_it() -> None:
+    declared = NewRoot("cli/home.py", "cli/meizel.toml", HOME_ROOT, Importers((), ()))
+    found = sites("VALUE = 1\n", "cli/other.py", new_roots=(declared,))
+    assert [(site.hint, site.path, site.line) for site in found] == [
+        (HintId.ROOT_MIDDLE_LAYER, "cli/home.py", 1)
+    ]
+    assert "declares a root (home) in cli/meizel.toml" in found[0].detail
+    assert "no production module that is not a root imports it" in found[0].detail
+
+
+def test_a_newly_declared_typescript_root_is_asked_about_without_counting_importers() -> None:
+    declared = NewRoot("ui/web/src/lib/env.ts", "ui/web/meizel.toml", HOME_ROOT, None)
+    [found] = sites("VALUE = 1\n", "cli/other.py", new_roots=(declared,))
+    assert found.path == "ui/web/src/lib/env.ts"
+    assert "importers are not read for this language" in found.detail
+
+
+def test_the_site_of_a_newly_declared_root_replaces_the_one_for_its_changed_file() -> None:
+    declared = NewRoot("base/paths/home.py", "base/paths/meizel.toml", HOME_ROOT, Importers((), ()))
+    found = sites(
+        "VALUE = 1\n", "base/paths/home.py", roots=HOME_ROOT, importers=3, new_roots=(declared,)
+    )
+    assert len(found) == 1
+    assert "declares a root" in found[0].detail

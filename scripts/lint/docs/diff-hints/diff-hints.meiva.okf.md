@@ -85,7 +85,8 @@ and a moved file with edits reports its edits only. The diff prefixes are fixed 
 
 ## What is read
 
-- Python files only; `git diff -U0` gives the added lines and, for `deleted-test`, the
+- Python files, plus the `[roots]` table of every changed `meizel.toml` (a root added there is asked
+  about); `git diff -U0` gives the added lines and, for `deleted-test`, the
   removed ones. A hint fires only for a node that starts on an added line (a function or
   class whose span holds an added line is looked at, but the site is the added line).
 - Production hints judge the application and template packages from the root `meizel.toml`

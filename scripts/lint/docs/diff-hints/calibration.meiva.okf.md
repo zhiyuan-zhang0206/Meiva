@@ -16,8 +16,7 @@ head the review judged). The 2026-10-25 rerun used the fixed inputs below and co
 changed files, correcting the earlier 2,109 total. Sites and path-level answers were rerun;
 the manual finding and misfire classifications below are retained from the original review.
 These are the pull requests the catalog was fitted on, so the recall below is a fit, not a
-prediction; there is no hold-out set yet.
-The first real one is the next set of reviewed pull requests, and this page is updated from it.
+prediction; there is no hold-out set yet. The next set of reviewed pull requests is the first.
 
 | PR | Base | Head | Changed files |
 |---|---|---|---|
@@ -40,8 +39,7 @@ counts are summed per PR, so a path changed in two pull requests counts twice.
 
 Eight diff-shape findings have no remaining hint: three belonged to the retired `ambient-read`
 hint, and five were already missed before its retirement. Those five are a source-text assertion
-whose added lines carry no
-`inspect.getsource`, a `Callable` type alias used as a required port, an enum if-chain without a
+whose added lines carry no `inspect.getsource`, a `Callable` type alias used as a required port, an enum if-chain without a
 final `else`, `Literal` selectors that fall into `else`, and a field compared with a literal
 (`fact.role == "shell"`, left to review on purpose). Of the 35 findings that are not a diff shape,
 9 are leftovers in untouched code, 4 are patch bookkeeping that meizel owns, and 22 are behavior,
@@ -90,10 +88,11 @@ What the calibration changed, each from a sample of the hits:
   `ParkedPool(AsyncConnectionPool)` case.
 - A field compared with a literal was added to `wildcard-case` and removed again: 4 of its 17
   sites were on a reviewed finding, the rest compared wire kinds (`item.kind == "system_prompt"`).
-- `root-middle-layer` is measured against the roots audit, not against the five pull requests: of the 238
-  declared roots, 35 have three or more importers that are not roots (28 middle layers, 3 wiring or runtime
-  factories, 2 undecided, 1 process entry, 1 new root). The filename heuristic already exempts the
-  runtime and entry names, and a hit exists only when such a file is changed in the diff.
+- `root-middle-layer` is measured against the roots audit (238 roots: 119 process entries, 10 wiring, 101
+  middle layers, 8 undecided). Importers come from the syntax tree. Three importers that are not roots found
+  32 middle layers and 2 wiring files; two found 38 and the same 2; one level further for a root with one
+  importer adds 3 and 2. 36 middle layers had no importer (loaded by name), which only the newly declared
+  root question reaches. A random 15 middle layers: 4 hits at three importers, 6 at two.
 - Renames: the first run read a moved file as a new file and asked about its old contents again.
   The diff is read with rename detection now, so a pure rename asks nothing and a rename with
   edits asks about the edits.

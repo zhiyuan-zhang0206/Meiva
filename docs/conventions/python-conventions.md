@@ -614,8 +614,7 @@ That is checked, not held by reviewers: a file that is not a root and reaches on
 those is an `ambient-read` of `meizel check`
 ([ambient reads](../../meizel/docs/checker/ambient.meiva.okf.md)). A root declares itself
 under `[roots]` in its directory's `meizel.toml` with the kinds it reads (`settings`, `db`,
-`endpoints`, `bus`, `environ`, `clock`, `home`, `cwd`, `platform`, `pid`, `random`), and says why
-when the reason is not plain. The existing reads are recorded debt of the directory
+`endpoints`, `bus`, `environ`, `clock`, `home`, `cwd`, `platform`, `pid`, `random`) and a reason. The existing reads are recorded debt of the directory
 that holds them and may only shrink; a file under `purity = "strict"` has none. This reverses
 the earlier decision to leave `settings` to reviewers ("a convention that reviewers hold, not
 a lint"): a component that imports `settings` is no longer a defect only a reader notices.

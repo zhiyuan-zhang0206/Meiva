@@ -4,12 +4,24 @@
 # nothing here touches a file, a clock or the environment.
 from __future__ import annotations
 
-from collections.abc import Callable, Mapping
+from collections.abc import Callable, Mapping, Sequence
 
 from meizel.graph.model import AmbientKind
-from scripts.lint.diagnostics.diff_hints.ambient import root_middle_layer, service_locator
+from scripts.lint.diagnostics.diff_hints.ambient import (
+    new_root_sites,
+    root_middle_layer,
+    service_locator,
+)
 from scripts.lint.diagnostics.diff_hints.branches import wildcard_case
-from scripts.lint.diagnostics.diff_hints.model import FileChange, Roles, Site, Unit
+from scripts.lint.diagnostics.diff_hints.model import (
+    FileChange,
+    HintId,
+    Importers,
+    NewRoot,
+    Roles,
+    Site,
+    Unit,
+)
 from scripts.lint.diagnostics.diff_hints.removed import deleted_tests
 from scripts.lint.diagnostics.diff_hints.scope import parse_unit
 from scripts.lint.diagnostics.diff_hints.seams import double_subclasses, patch_shapes, spy_assert
@@ -49,9 +61,11 @@ def analyze(
     texts: Mapping[str, str],
     roles: Roles,
     roots: Mapping[str, frozenset[AmbientKind]],
-    importers: Mapping[str, int] | None = None,
+    importers: Mapping[str, Importers],
+    new_roots: Sequence[NewRoot],
 ) -> list[Site]:
     sites: list[Site] = []
+    declared_now = {new.path for new in new_roots}
     for change in changes:
         text = texts.get(change.path)
         unit = (
@@ -61,13 +75,18 @@ def analyze(
                 change.added,
                 roles,
                 roots.get(change.path, frozenset()),
-                (importers or {}).get(change.path, 0),
+                importers.get(change.path, Importers((), ())),
             )
             if text is not None
             else None
         )
         if unit is not None:
             for detector in _DETECTORS:
-                sites.extend(detector(unit))
+                sites.extend(
+                    site
+                    for site in detector(unit)
+                    if not (site.hint is HintId.ROOT_MIDDLE_LAYER and site.path in declared_now)
+                )
     sites.extend(deleted_tests(changes, roles))
+    sites.extend(new_root_sites(new_roots))
     return sorted(sites, key=lambda site: (site.path, site.line, site.hint.value))
