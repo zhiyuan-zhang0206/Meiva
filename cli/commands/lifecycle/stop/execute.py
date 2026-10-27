@@ -45,6 +45,7 @@ from cli.commands.lifecycle.stop.steps import (
     phase_label,
 )
 from cli.database.runtime import CommandRuntime
+from services.desktop.permissions_helper.launchd_job import LaunchdFacts
 
 
 # meiva:note
@@ -147,6 +148,8 @@ def _perform(
                 force=force,
                 helper=command.helper,
                 home=command.home,
+                facts=LaunchdFacts.of(command.host, user_home=command.session.user_home),
+                run=command.host.run,
                 timers=command.timers,
             )
         case StopBrowser():

@@ -35,7 +35,6 @@ from base.deploy.progress_timeout import CRITICAL_SERVICE_SESSIONS
 from base.host.atomic_io import write_text_atomic
 from base.host.env.registry import process_environment
 from base.host.permissions_helper.client import HelperFactory, PermissionsHelperError
-from base.host.proc import run_bounded
 from base.host.system.hostport import Host
 from base.native_process.ownership import OwnedProcess
 from base.native_process.root_control import instance_lock
@@ -83,7 +82,7 @@ from cli.commands.lifecycle.root_control.snapshot import (
 )
 from cli.database.lifecycle_audit import record_lifecycle_request
 from cli.start_runtime import StartRuntime
-from services.desktop.permissions_helper.launchd_job import BoundedRunner
+from services.desktop.permissions_helper.launchd_job import BoundedRunner, LaunchdFacts
 from services.supervision.roster import service_spec
 from services.supervision.roster.service_spec import ServiceSpec
 
@@ -698,22 +697,20 @@ def stop_dormant_helper_root(
     *,
     helper: HelperFactory | None,
     home: Path,
-    runner: BoundedRunner = run_bounded,
+    facts: LaunchdFacts,
+    run: BoundedRunner,
+    timers: Timers,
 ) -> None:
     """Revoke a pending keeper restart even when no root IPC is serving."""
     if helper is None:
         return
-    from services.desktop.permissions_helper.launchd_job import (
-        helper_job_domain,
-        helper_job_label,
-        retirement_query,
-    )
+    from services.desktop.permissions_helper.launchd_job import helper_job_label, retirement_query
 
     try:
         keeper = helper().root_status()
     except PermissionsHelperError as exc:
-        target = f"{helper_job_domain()}/{helper_job_label()}"
-        if retirement_query(target, deadline, runner=runner) is None:
+        target = f"{facts.domain}/{helper_job_label(home)}"
+        if retirement_query(target, deadline, run=run, timers=timers) is None:
             return
         raise RootDriverError(
             "loaded helper custody is unavailable; stop remains incomplete"
@@ -752,6 +749,8 @@ def stop_root_service_tree(
     force: bool = False,
     helper: HelperFactory | None,
     home: Path,
+    facts: LaunchdFacts,
+    run: BoundedRunner,
     timers: Timers,
 ) -> None:
     """Stop the root-owned tree — everything, or only the units not preserved.
@@ -766,7 +765,9 @@ def stop_root_service_tree(
     snapshot = root_status(client)
     if snapshot is None:
         require_root_absent(home)
-        stop_dormant_helper_root(deadline, helper=helper, home=home)
+        stop_dormant_helper_root(
+            deadline, helper=helper, home=home, facts=facts, run=run, timers=timers
+        )
         print("  meiva-root: no live owner or retained service custody")
         return
     require_root_owner(snapshot, helper=helper, home=home)

@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import random
 import stat
+from dataclasses import replace
 from pathlib import Path
 
 import pytest
@@ -28,7 +30,7 @@ def test_first_build_provisions_the_identity_without_asking_anyone(
     bundle = stage_bundle(tmp_path, exe_present=False, identity=False)
     recorded, env = fake_tools(bundle)
 
-    assert lifecycle.build_and_sign(env=env) == (bundle.app, True)
+    assert lifecycle.build_and_sign(destination=None, env=env) == (bundle.app, True)
 
     argv = sign_command(recorded)
     assert argv[argv.index("--sign") + 1] == signing_identity.IDENTITY_NAME
@@ -45,6 +47,35 @@ def test_first_build_provisions_the_identity_without_asking_anyone(
     assert any(argv[:2] == ["/usr/bin/security", "set-key-partition-list"] for argv in argvs)
 
 
+# meiva:note
+# The generator the entry hands the build: a stand-in for the operating system's whose draw a test
+# fixes, so the password the keychain is created with is known.
+class _FixedDraw(random.SystemRandom):
+    def getrandbits(self, k: int) -> int:
+        assert k == 256
+        return 0xC0FFEE
+
+
+def test_the_keychain_password_is_drawn_from_the_generator_the_entry_hands_in(
+    tmp_path: Path,
+) -> None:
+    from services.desktop.permissions_helper import lifecycle, signing_identity
+
+    bundle = stage_bundle(tmp_path, exe_present=False, identity=False)
+    recorded, env = fake_tools(bundle)
+
+    lifecycle.build_and_sign(destination=None, env=replace(env, rng=_FixedDraw()))
+
+    password = f"{0xC0FFEE:064x}"
+    assert signing_identity.password_path(bundle.app_dir).read_text().strip() == password
+    create = next(
+        argv
+        for argv in recorded_argvs(recorded)
+        if argv[:2] == ["/usr/bin/security", "create-keychain"]
+    )
+    assert create[create.index("-p") + 1] == password
+
+
 def test_build_never_falls_back_to_an_ad_hoc_signature(
     tmp_path: Path,
 ) -> None:
@@ -53,7 +84,7 @@ def test_build_never_falls_back_to_an_ad_hoc_signature(
     bundle = stage_bundle(tmp_path, exe_present=False)
     recorded, env = fake_tools(bundle)
 
-    lifecycle.build_and_sign(env=env)
+    lifecycle.build_and_sign(destination=None, env=env)
 
     for argv in recorded_argvs(recorded):
         if "--sign" in argv:
@@ -70,7 +101,7 @@ def test_a_deleted_identity_stops_the_build_instead_of_minting_a_new_one(
     write_current_build_state(bundle.app, "previous", dr=certificate_dr())
 
     with pytest.raises(lifecycle.PermissionsHelperBuildError, match="is gone"):
-        lifecycle.build_and_sign(env=env)
+        lifecycle.build_and_sign(destination=None, env=env)
     assert not any(argv[0] == "/usr/bin/openssl" for argv in recorded_argvs(recorded))
     assert not any("--force" in argv for argv in recorded_argvs(recorded))
 
@@ -87,7 +118,7 @@ def test_a_keychain_without_the_certificate_is_reported_not_replaced(
     recorded, env = fake_tools(bundle, identity_name="Someone Else")
 
     with pytest.raises(lifecycle.PermissionsHelperBuildError, match="no 'Meiva Local Signing'"):
-        lifecycle.build_and_sign(env=env)
+        lifecycle.build_and_sign(destination=None, env=env)
     assert not any(argv[0] == "/usr/bin/openssl" for argv in recorded_argvs(recorded))
 
 
@@ -100,7 +131,7 @@ def test_a_keychain_outside_the_search_list_is_appended_not_replaced(
     other = str(tmp_path / "other.keychain-db")
     recorded, env = fake_tools(bundle, search_list=[other])
 
-    lifecycle.build_and_sign(env=env)
+    lifecycle.build_and_sign(destination=None, env=env)
 
     repair = next(
         argv
@@ -123,10 +154,10 @@ def test_a_keychain_listed_through_a_symlink_is_not_added_twice(
     alias = tmp_path / "alias"
     alias.symlink_to(tmp_path, target_is_directory=True)
     recorded, env = fake_tools(
-        bundle, search_list=(str(alias / "installed-helper" / "signing.keychain-db"),)
+        bundle, search_list=(str(alias / "home" / "helper" / "signing.keychain-db"),)
     )
 
-    lifecycle.build_and_sign(env=env)
+    lifecycle.build_and_sign(destination=None, env=env)
 
     assert not any("-s" in argv for argv in recorded_argvs(recorded) if "list-keychains" in argv)
 
@@ -142,5 +173,5 @@ def test_a_second_keychain_with_the_same_name_stops_the_build(
     recorded, env = fake_tools(bundle, search_list=(str(stale),), rival=True)
 
     with pytest.raises(lifecycle.PermissionsHelperBuildError, match="ambiguous"):
-        lifecycle.build_and_sign(env=env)
+        lifecycle.build_and_sign(destination=None, env=env)
     assert not any("--force" in argv for argv in recorded_argvs(recorded))

@@ -72,10 +72,9 @@ TCC_DB = "/Library/Application Support/com.apple.TCC/TCC.db"
 # The helper's two desktop grants, as the system TCC database names them.
 GRANTED = {"kTCCServiceScreenCapture": 2, "kTCCServiceAccessibility": 2}
 
-_HELPER_LIFECYCLE = "from services.desktop.permissions_helper import lifecycle; lifecycle.{call}"
 HELPER = guest_script(
-    f'cd "{GUEST_SOURCE}" && MEIVA_CONFIG_FETCH=skip .venv/bin/python -c '
-    f'"{_HELPER_LIFECYCLE.format(call="converge()")}"'
+    f'cd "{GUEST_SOURCE}" && MEIVA_CONFIG_FETCH=skip '
+    ".venv/bin/python scripts/ci/helper_smoke/signing_smoke.py converge"
 )
 # Restart the helper through launchd: its job label names the home, so read it from the
 # LaunchAgent the converge wrote.

@@ -7,8 +7,12 @@ from pathlib import Path
 
 import pytest
 
+from base.clock.tests.manual_timers import ManualTimers
 from base.sessions.tests.refuse_helper import refuse_helper
 from base.sessions.tests.scripted_helper import ScriptedHelper, serve
+from services.desktop.permissions_helper import launchd_job
+from services.desktop.permissions_helper.launchd_job import helper_job_loaded
+from services.desktop.permissions_helper.tests.support import launchd_facts
 from services.desktop.permissions_helper.tests.test_permissions_helper import (
     fake_helper as fake_helper,
 )
@@ -35,7 +39,7 @@ def test_source_content_change_forces_rebuild(
 
     before = (bundle.app / "Contents/MacOS/MeivaPermissionsHelper").read_bytes()
     with pytest.raises(RuntimeError, match="still in use"):
-        lifecycle.build_and_sign(env=env)
+        lifecycle.build_and_sign(destination=None, env=env)
     assert (bundle.app / "Contents/MacOS/MeivaPermissionsHelper").read_bytes() == before
     assert not any(c[0] == "swiftc" for c in recorded_argvs(recorded))
 
@@ -53,7 +57,7 @@ def test_locale_content_change_forces_rebuild(
 
     before = (bundle.app / "Contents/MacOS/MeivaPermissionsHelper").read_bytes()
     with pytest.raises(RuntimeError, match="still in use"):
-        lifecycle.build_and_sign(env=env)
+        lifecycle.build_and_sign(destination=None, env=env)
     assert (bundle.app / "Contents/MacOS/MeivaPermissionsHelper").read_bytes() == before
     assert not any(c[0] == "swiftc" for c in recorded_argvs(recorded))
 
@@ -70,7 +74,7 @@ def test_entitlements_content_change_forces_rebuild(
 
     before = (bundle.app / "Contents/MacOS/MeivaPermissionsHelper").read_bytes()
     with pytest.raises(RuntimeError, match="still in use"):
-        lifecycle.build_and_sign(env=env)
+        lifecycle.build_and_sign(destination=None, env=env)
     assert (bundle.app / "Contents/MacOS/MeivaPermissionsHelper").read_bytes() == before
     assert not any(c[0] == "swiftc" for c in recorded_argvs(recorded))
 
@@ -83,7 +87,7 @@ def test_build_copies_locale_resources_into_the_bundle(
     bundle = stage_bundle(tmp_path, exe_present=False)
     _, env = fake_tools(bundle)
 
-    assert lifecycle.build_and_sign(env=env) == (bundle.app, True)
+    assert lifecycle.build_and_sign(destination=None, env=env) == (bundle.app, True)
     for language in ("en", "zh-Hans"):
         source = bundle.sources.locales / (language + ".lproj") / "Localizable.strings"
         copied = (
@@ -103,7 +107,7 @@ def test_missing_build_state_forces_rebuild(
 
     before = (bundle.app / "Contents/MacOS/MeivaPermissionsHelper").read_bytes()
     with pytest.raises(RuntimeError, match="still in use"):
-        lifecycle.build_and_sign(env=env)
+        lifecycle.build_and_sign(destination=None, env=env)
     assert (bundle.app / "Contents/MacOS/MeivaPermissionsHelper").read_bytes() == before
     assert not any(c[0] == "swiftc" for c in recorded_argvs(recorded))
 
@@ -117,7 +121,7 @@ def test_current_build_is_neither_rebuilt_nor_re_signed(
     recorded, env = fake_tools(bundle)
     write_current_build_state(bundle.app, bundle.source_hash())
 
-    assert lifecycle.build_and_sign(env=env) == (bundle.app, False)
+    assert lifecycle.build_and_sign(destination=None, env=env) == (bundle.app, False)
     assert not any(
         c[0] == "swiftc" or (Path(c[0]).name == "codesign" and "--force" in c)
         for c in recorded_argvs(recorded)
@@ -134,7 +138,7 @@ def test_bundle_that_fails_codesign_verification_is_rebuilt(
     write_current_build_state(bundle.app, bundle.source_hash())
 
     with pytest.raises(RuntimeError, match="still in use"):
-        lifecycle.build_and_sign(env=env)
+        lifecycle.build_and_sign(destination=None, env=env)
 
 
 def test_content_hash_needs_no_signing_tool_or_identity(
@@ -155,7 +159,7 @@ def test_build_signs_with_the_fixed_identity_and_the_declared_entitlements(
     bundle = stage_bundle(tmp_path, exe_present=False)
     recorded, env = fake_tools(bundle)
 
-    assert lifecycle.build_and_sign(env=env) == (bundle.app, True)
+    assert lifecycle.build_and_sign(destination=None, env=env) == (bundle.app, True)
     assert sign_command(recorded) == [
         "/usr/bin/codesign",
         "--force",
@@ -189,7 +193,7 @@ def test_build_state_records_the_signed_code_identity(
     bundle = stage_bundle(tmp_path, exe_present=False)
     _, env = fake_tools(bundle)
 
-    lifecycle.build_and_sign(env=env)
+    lifecycle.build_and_sign(destination=None, env=env)
     state = json.loads((bundle.app.parent / "build-state.json").read_text())
     assert state["source_hash"] == bundle.source_hash()
     assert state["dr"] == sample_dr()
@@ -203,7 +207,7 @@ def test_first_build_does_not_warn_about_regranting(
     bundle = stage_bundle(tmp_path, exe_present=False)
     _, env = fake_tools(bundle)
 
-    lifecycle.build_and_sign(env=env)
+    lifecycle.build_and_sign(destination=None, env=env)
     assert "need granting again" not in capsys.readouterr().err
 
 
@@ -218,7 +222,7 @@ def test_rebuild_with_a_new_code_identity_warns_that_grants_are_needed_again(
     )
     _, env = fake_tools(bundle)
 
-    assert lifecycle.build_and_sign(env=env) == (bundle.app, True)
+    assert lifecycle.build_and_sign(destination=None, env=env) == (bundle.app, True)
     assert "need granting again" in capsys.readouterr().err
 
 
@@ -229,7 +233,7 @@ def test_codesign_failure_aborts_the_build(tmp_path: Path) -> None:
     _, env = fake_tools(bundle, sign_rc=1)
 
     with pytest.raises(lifecycle.PermissionsHelperBuildError, match=r"codesign failed \(1\)"):
-        lifecycle.build_and_sign(env=env)
+        lifecycle.build_and_sign(destination=None, env=env)
     assert not (bundle.app.parent / "build-state.json").exists()
 
 
@@ -242,7 +246,7 @@ def test_unreadable_designated_requirement_aborts_the_build(
     _, env = fake_tools(bundle, dr_streams=(b"", b"Executable=/tmp/helper\n"))
 
     with pytest.raises(lifecycle.PermissionsHelperBuildError, match="did not report a designated"):
-        lifecycle.build_and_sign(env=env)
+        lifecycle.build_and_sign(destination=None, env=env)
     assert not (bundle.app.parent / "build-state.json").exists()
 
 
@@ -254,7 +258,7 @@ def test_every_call_carries_its_declared_bound(
     bundle = stage_bundle(tmp_path, exe_present=False)
     recorded, env = fake_tools(bundle)
 
-    lifecycle.build_and_sign(env=env)
+    lifecycle.build_and_sign(destination=None, env=env)
     assert recorded
     for call in recorded:
         assert call.timeout == lifecycle.TIMEOUTS_S[Path(call.argv[0]).name], call.argv
@@ -269,7 +273,7 @@ def test_swiftc_hang_fails_the_build_instead_of_blocking(
     recorded, env = fake_tools(bundle, hang=("swiftc",))
 
     with pytest.raises(lifecycle.PermissionsHelperTimeoutError) as err:
-        lifecycle.build_and_sign(env=env)
+        lifecycle.build_and_sign(destination=None, env=env)
     assert f"{lifecycle.TIMEOUTS_S['swiftc']:.0f}s" in str(err.value)
     assert not any(
         Path(c[0]).name == "codesign" and "--force" in c for c in recorded_argvs(recorded)
@@ -285,7 +289,7 @@ def test_codesign_hang_fails_the_build_instead_of_blocking(
     _, env = fake_tools(bundle, hang=("/usr/bin/codesign",))
 
     with pytest.raises(lifecycle.PermissionsHelperTimeoutError) as err:
-        lifecycle.build_and_sign(env=env)
+        lifecycle.build_and_sign(destination=None, env=env)
     assert f"{lifecycle.TIMEOUTS_S['codesign']:.0f}s" in str(err.value)
     assert not (bundle.app.parent / "build-state.json").exists()
 
@@ -303,10 +307,11 @@ def test_hung_helper_job_is_unknown_while_build_probes_report_failure(
     app = tmp_path / "MeivaPermissionsHelper.app"
     lifecycle.app_executable(app).parent.mkdir(parents=True)
     lifecycle.app_executable(app).write_bytes(b"\x00")
+    home = Path("/x/.meiva-demo")
 
     with pytest.raises(subprocess.TimeoutExpired):
-        lifecycle.is_loaded(Path("/x/.meiva-demo"), runner=hang)
-    assert lifecycle.is_valid_app(app, runner=hang) is False
+        helper_job_loaded(home, facts=launchd_facts(home), run=hang, timers=ManualTimers())
+    assert lifecycle.is_valid_app(app, run=hang) is False
 
 
 def test_helper_ping_settles_until_cold_start_answers() -> None:
@@ -329,7 +334,7 @@ def test_helper_ping_settles_until_cold_start_answers() -> None:
 
     helper = ScriptedHelper(ping=ping)
 
-    assert lifecycle.helper_answers_ping(serve(helper), settle_seconds=0.0)
+    assert lifecycle.helper_answers_ping(serve(helper), timers=ManualTimers(), settle_seconds=0.0)
     assert helper.calls == ["ping"] * 4
     assert replies == []
 
@@ -341,13 +346,13 @@ def test_loaded_helper_changes_refuse_before_any_mutation(tmp_path: Path, *, cha
     app, run_calls, probe_calls, env = install_env(
         tmp_path, loaded=True, matching_plist=not changed
     )
-    assert env.plist is not None
-    path = env.plist
+    path = launchd_job.helper_job_plist_path(env.build.home, facts=env.build.facts)
     before = path.read_bytes() if path.exists() else None
     with pytest.raises(lifecycle.PermissionsHelperBuildError, match="stop and unregister"):
         lifecycle.install_and_load(app, rebuilt=not changed, helper=refuse_helper, env=env)
     assert (path.read_bytes() if path.exists() else None) == before
-    assert run_calls == probe_calls == []
+    assert run_calls == []
+    assert probe_calls and probe_calls[0][:2] == ["launchctl", "print"]
 
 
 def test_unresponsive_loaded_helper_keeps_unknown_custody(
@@ -361,7 +366,8 @@ def test_unresponsive_loaded_helper_keeps_unknown_custody(
         lifecycle.install_and_load(
             app, rebuilt=False, helper=serve(silent), settle_seconds=0.0, env=env
         )
-    assert run_calls == probe_calls == []
+    assert run_calls == []
+    assert probe_calls and probe_calls[0][:2] == ["launchctl", "print"]
     assert len(silent.calls) > 1 and set(silent.calls) == {"ping"}
     assert silent.calls == ["ping"] * 10
 
@@ -372,7 +378,7 @@ def test_unloaded_helper_bootstraps_and_must_answer_ping(
     from services.desktop.permissions_helper import lifecycle
 
     app, run_calls, _, env = install_env(tmp_path, loaded=False, matching_plist=False)
-    assert env.plist is not None
+    plist_path = launchd_job.helper_job_plist_path(env.build.home, facts=env.build.facts)
     helper = ScriptedHelper(
         ping={
             "pong": True,
@@ -385,8 +391,8 @@ def test_unloaded_helper_bootstraps_and_must_answer_ping(
 
     lifecycle.install_and_load(app, rebuilt=False, helper=serve(helper), env=env)
 
-    assert ["launchctl", "bootstrap", "gui/501", str(env.plist)] in run_calls
-    plist = plistlib.loads(env.plist.read_bytes())
+    assert ["launchctl", "bootstrap", f"gui/{env.build.facts.uid}", str(plist_path)] in run_calls
+    plist = plistlib.loads(plist_path.read_bytes())
     assert plist["ProgramArguments"] == [str(app / "Contents" / "MacOS" / "MeivaPermissionsHelper")]
     assert plist["KeepAlive"] == {"SuccessfulExit": False}
 
@@ -401,7 +407,7 @@ def test_helper_start_clears_shutdown_intent_only_after_native_job_absence(
     helper = serve(
         ScriptedHelper(ping={"pong": True, "root_stop_intent_v1": True, "helper_shutdown_v1": True})
     )
-    marker = tmp_path / "run" / "meiva-root" / "helper-stopped"
+    marker = env.build.home / "run" / "meiva-root" / "helper-stopped"
     marker.parent.mkdir(parents=True, exist_ok=True)
     marker.write_bytes(b"stopped\n")
     marker.chmod(0o600)

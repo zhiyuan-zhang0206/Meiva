@@ -14,6 +14,7 @@ import subprocess
 import sys
 import time
 from collections.abc import Sequence
+from functools import partial
 from pathlib import Path
 
 import psutil
@@ -33,11 +34,13 @@ from cli.commands.lifecycle.root_control.launch_plan import RootLaunch, plan_roo
 from cli.commands.lifecycle.root_control.snapshot import root_units
 from cli.commands.lifecycle.tests.root_control.snapshots import snapshot_with_root
 from cli.commands.lifecycle.tests.root_control.support import (
+    LAUNCHD_FACTS,
     custody_helper,
     fake_interpreter,
     git_repo,
     launch_delivery,
     launch_inputs,
+    refuse_launchctl,
     service,
     this_process,
 )
@@ -112,8 +115,20 @@ def test_a_helper_lacking_the_retirement_protocol_has_no_custody_to_offer(short_
         driver.require_root_owner(snapshot_with_root(me), helper=serve(old_helper), home=short_tmp)
 
 
+# meiva:note
+# The dormant-root stop over a macOS account whose launchd the test answers (or refuses) through
+# `run`.
+_stop_dormant = partial(
+    driver.stop_dormant_helper_root,
+    float("inf"),
+    facts=LAUNCHD_FACTS,
+    run=refuse_launchctl,
+    timers=SYSTEM_TIMERS,
+)
+
+
 def test_a_platform_without_a_helper_has_no_dormant_helper_root_to_stop(short_tmp: Path) -> None:
-    driver.stop_dormant_helper_root(float("inf"), helper=None, home=short_tmp)
+    _stop_dormant(helper=None, home=short_tmp)
 
 
 def test_stop_without_root_ipc_cancels_pending_helper_restart(short_tmp: Path) -> None:
@@ -129,7 +144,7 @@ def test_stop_without_root_ipc_cancels_pending_helper_restart(short_tmp: Path) -
         stop_root=stop,
     )
 
-    driver.stop_dormant_helper_root(float("inf"), helper=serve(helper), home=short_tmp)
+    _stop_dormant(helper=serve(helper), home=short_tmp)
 
     assert keeper["stop_requested"]
 
@@ -146,7 +161,7 @@ def test_a_keeper_that_holds_a_root_without_ipc_is_not_stopped_blind(short_tmp: 
     )
 
     with pytest.raises(driver.RootDriverError, match="custody requires recovery"):
-        driver.stop_dormant_helper_root(float("inf"), helper=serve(helper), home=short_tmp)
+        _stop_dormant(helper=serve(helper), home=short_tmp)
 
 
 @pytest.mark.parametrize("loaded", [False, True])
@@ -172,13 +187,9 @@ def test_unusable_helper_socket_requires_positive_native_absence(
 
     if loaded:
         with pytest.raises(driver.RootDriverError, match="custody is unavailable"):
-            driver.stop_dormant_helper_root(
-                float("inf"), helper=unavailable, home=short_tmp, runner=runner
-            )
+            _stop_dormant(helper=unavailable, home=short_tmp, run=runner)
     else:
-        driver.stop_dormant_helper_root(
-            float("inf"), helper=unavailable, home=short_tmp, runner=runner
-        )
+        _stop_dormant(helper=unavailable, home=short_tmp, run=runner)
 
 
 # meiva:note

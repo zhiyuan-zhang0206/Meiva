@@ -6,6 +6,7 @@
 from __future__ import annotations
 
 from base.host.permissions_helper.client import HelperFactory
+from services.desktop.permissions_helper.lifecycle import InstallEnv
 
 
 # meiva:note
@@ -13,7 +14,7 @@ from base.host.permissions_helper.client import HelperFactory
 #
 # The door stays import-light: the lifecycle module loads on first use, so the test plugins
 # that stub this function never import the configuration.
-def converge(*, helper: HelperFactory) -> None:
+def converge(*, helper: HelperFactory, env: InstallEnv) -> None:
     from services.desktop.permissions_helper.lifecycle import converge as _converge
 
-    _converge(helper=helper)
+    _converge(helper=helper, env=env)

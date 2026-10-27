@@ -17,6 +17,7 @@ from typing import Protocol
 
 import pytest
 
+from base.clock.tests.manual_timers import ManualTimers
 from base.cluster.dataplane.pg_admin import pg_socket_path
 from base.host.system.hostport import Host
 from base.host.system.job_values import JobRoots
@@ -133,6 +134,7 @@ def _request(
         checkout=checkout,
         user_home=user_home,
         helper_port=8181,
+        pid=4321,
     )
 
 
@@ -151,6 +153,7 @@ def destroy(home: Path, checkout: Path, tmp_path: Path) -> Destroy:
             _request(home, checkout, user_home=tmp_path / "user", drop_db=drop_db),
             host=fake_host() if host is None else host,
             terminal=session.terminal,
+            timers=ManualTimers(),
         )
 
     return run
@@ -340,6 +343,7 @@ def test_a_failure_to_retire_the_jobs_leaves_the_home_attached_and_a_rerun_compl
         _request(prod, checkout, user_home=default_home),
         host=fake_host(broken),
         terminal=first.terminal,
+        timers=ManualTimers(),
     )
     assert failed == 1
     assert first.stderr.getvalue().startswith("cluster cleanup incomplete: could not remove")
@@ -350,6 +354,7 @@ def test_a_failure_to_retire_the_jobs_leaves_the_home_attached_and_a_rerun_compl
         _request(prod, checkout, user_home=default_home),
         host=fake_host(working),
         terminal=second.terminal,
+        timers=ManualTimers(),
     )
     assert done == 0 and _detached(prod)
     assert working.calls

@@ -18,7 +18,13 @@ from base.host.system.hostport import Host
 from base.paths import repo_root
 from base.sessions.helperproc import helper_for
 
-__all__ = ["CommandRuntime", "Terminal", "UserSession", "delivered_config"]
+__all__ = ["CommandRuntime", "OsRandom", "Terminal", "UserSession", "delivered_config"]
+
+
+# meiva:note
+# The type of the operating system's random generator, spelled once where this entry builds it so
+# the owners that carry one (`CommandRuntime.secure_rng`, a converge context) do not name it.
+OsRandom = random.SystemRandom
 
 
 # meiva:note
@@ -119,6 +125,11 @@ class CommandRuntime:
     # builds and never makes a second one.
     rng: random.Random
     # meiva:note
+    # The operating system's random generator, for the one kind of draw a secret rides on (the
+    # permissions helper's signing keychain password): `rng` is statistical and must never mint
+    # key material. A command hands it to the owner that draws and never makes a second one.
+    secure_rng: OsRandom
+    # meiva:note
     # The wall clock of this invocation, over the same `timers`. A command asks it for the instant it
     # stamps or compares with (`clock.now()`, UTC) and passes that value down; the real one carries
     # the UTC zone because an instant has none to choose, and a command that formats times for a
@@ -161,6 +172,7 @@ class CommandRuntime:
             session=UserSession.current(),
             timers=SYSTEM_TIMERS,
             rng=_new_rng(),
+            secure_rng=random.SystemRandom(),
             clock=Clock(
                 ClockConfig("UTC", None, message_timestamp_weekday=False), timers=SYSTEM_TIMERS
             ),

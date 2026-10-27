@@ -18,12 +18,16 @@ def stop_permissions_helper(command: CommandRuntime, *, timeout_s: float) -> Non
     if not retires_helper(command.host.platform.system):
         return
     from base.host.permissions_helper.client import PermissionsHelperClient
-    from services.desktop.permissions_helper.launchd_job import unregister_helper
+    from services.desktop.permissions_helper.launchd_job import LaunchdFacts, unregister_helper
 
     unregister_helper(
         command.home,
         helper_port=command.config.view.services.permissions_helper_port,
         connect=PermissionsHelperClient,
+        facts=LaunchdFacts.of(command.host, user_home=command.session.user_home),
+        caller_pid=command.pid,
+        run=command.host.run,
+        timers=command.timers,
         timeout_s=timeout_s,
     )
 

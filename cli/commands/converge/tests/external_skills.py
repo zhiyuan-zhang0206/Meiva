@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import random
 from collections.abc import Callable
 from pathlib import Path
 from typing import Any, cast
@@ -37,6 +38,7 @@ def skill_ctx(
     meiva_home = tmp_path / "meiva-home"
     (meiva_home / "configs").mkdir(parents=True)
     return ConvergeCtx(
+        secure_rng=random.SystemRandom(),
         repo=repo,
         meiva_home=meiva_home,
         roles=None,

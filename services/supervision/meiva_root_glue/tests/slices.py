@@ -1,13 +1,36 @@
 from __future__ import annotations
 
+import subprocess
+from collections.abc import Sequence
 from dataclasses import replace
 from pathlib import Path
 from typing import Any
 
 from base.clock import SYSTEM_TIMERS, Clock, ClockConfig
+from services.desktop.permissions_helper.launchd_job import LaunchdFacts
+from services.supervision.meiva_root_glue import diagnostic_probes as probes
 from services.supervision.meiva_root_glue.diagnostic_probes import ProbeConfig
+from services.supervision.meiva_root_glue.diagnostics import Diagnostic
 
-__all__ = ["probe_config", "system_clock"]
+__all__ = ["checks_for", "probe_config", "system_clock"]
+
+# meiva:note
+# The account the diagnostics' launchd probe would read, and a runner that fails a test which lets
+# that probe run: the roster tests build the checks without ever calling them.
+LAUNCHD = LaunchdFacts(uid=501, platform="darwin", user_home=Path("/unused/user"))
+
+
+def refuse_launchctl(
+    cmd: Sequence[str], /, *, timeout: float, capture_output: bool = True
+) -> subprocess.CompletedProcess[bytes]:
+    del timeout, capture_output
+    raise AssertionError(f"this test must not run {list(cmd)}")
+
+
+# meiva:note
+# `probes.build_diagnostics` for a roster test: the account's launchd probe is built, never run.
+def checks_for(requested: set[str], **inputs: Any) -> list[Diagnostic]:
+    return probes.build_diagnostics(requested, launchd=LAUNCHD, run=refuse_launchctl, **inputs)
 
 
 # meiva:note

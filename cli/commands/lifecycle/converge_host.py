@@ -193,8 +193,24 @@ def _ensure_permissions_helper(ctx: ConvergeCtx) -> None:
             raise RuntimeError(message)
         case BringUpHelper():
             from services.desktop.permissions_helper import converge
+            from services.desktop.permissions_helper.launchd_job import LaunchdFacts
+            from services.desktop.permissions_helper.lifecycle import BuildEnv, InstallEnv
 
-            converge(helper=ctx.require_helper())
+            services = ctx.read_config().view.services
+            build = BuildEnv(
+                home=ctx.meiva_home,
+                facts=LaunchdFacts.of(ctx.host, user_home=ctx.session.user_home),
+                run=ctx.host.run,
+                timers=ctx.timers,
+                clock=ctx.clock,
+                rng=ctx.secure_rng,
+            )
+            env = InstallEnv(
+                build=build,
+                helper_port=services.permissions_helper_port,
+                artifact_dir=services.permissions_helper_artifact_dir,
+            )
+            converge(helper=ctx.require_helper(), env=env)
         case _:
             assert_never(plan)
 
@@ -568,6 +584,7 @@ def converge_host(
         producer=producer,
         helper=command.helper,
         timers=command.timers,
+        secure_rng=command.secure_rng,
         clock=command.clock,
         host=command.host,
         session=command.session,

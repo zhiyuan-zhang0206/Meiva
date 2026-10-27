@@ -16,7 +16,11 @@ from base.host.tests.short_tmp import short_tmp as short_tmp
 from base.paths import root_manifests_path, root_run_dir
 from cli.commands.lifecycle import root_driver as driver
 from cli.commands.lifecycle.root_control.launch_plan import plan_root_launch
-from cli.commands.lifecycle.tests.root_control.support import service
+from cli.commands.lifecycle.tests.root_control.support import (
+    LAUNCHD_FACTS,
+    refuse_launchctl,
+    service,
+)
 from cli.commands.lifecycle.tests.scripted_root import UnitRow, scripted_root
 from cli.database.tests.cli_tests import operator_database as operator_database
 from cli.database.tests.command_inputs import command_runtime as command_runtime
@@ -118,6 +122,8 @@ def test_a_stop_records_the_units_it_is_about_to_take_down(
             force=True,
             helper=None,
             home=short_tmp,
+            facts=LAUNCHD_FACTS,
+            run=refuse_launchctl,
             timers=SYSTEM_TIMERS,
         )
 

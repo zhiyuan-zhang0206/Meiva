@@ -26,6 +26,11 @@ from base.host.system.job_values import JobRoots, cron_environment, plist_path
 from base.host.system.packages_content import RefreshSchedule
 from base.host.system.tests.fake_commands import DARWIN_ARM64, FakeCommands, Reply, fake_host
 from base.sessions.tests.refuse_helper import refuse_helper
+from services.desktop.permissions_helper.tests.support import (
+    helper_build_env,
+    helper_install_env,
+    refuse_tools,
+)
 
 
 @dataclass(frozen=True)
@@ -299,28 +304,20 @@ def test_cron_environment_scopes_to_one_command(
     assert not prefix.startswith("\n")
 
 
-@pytest.mark.parametrize("boundary", ["converge", "build", "sign", "launchd"])
-def test_helper_native_effects_require_explicit_test_boundary(boundary: str) -> None:
+# meiva:note
+# The door is the one native boundary the harness guards: the build, signing and launchd modules
+# run a tool only through the runner they are handed, so a test that gives them none cannot reach
+# the host, and `converge` itself is refused unless the test opts in.
+def test_helper_native_effects_require_explicit_test_boundary(tmp_path: Path) -> None:
     from services.desktop import permissions_helper
-    from services.desktop.permissions_helper import launchd_job, lifecycle
 
+    env = helper_install_env(helper_build_env(tmp_path / "home", refuse_tools))
     with pytest.raises(pytest.fail.Exception, match="native effect forbidden"):
-        if boundary == "converge":
-            permissions_helper.converge(helper=refuse_helper)
-        elif boundary == "build":
-            lifecycle.run_tool(["swiftc", "unreachable.swift"])
-        elif boundary == "sign":
-            lifecycle.run_tool(["codesign", "--sign", "unreachable"])
-        elif boundary == "launchd":
-            launchd_job.retirement_command(["bootout", "gui/0/unreachable"], float("inf"))
+        permissions_helper.converge(helper=refuse_helper, env=env)
 
 
 @pytest.mark.native_permissions_helper
 def test_native_helper_opt_in_exposes_real_boundaries_without_running_them() -> None:
-    from base.host.proc import run_bounded
     from services.desktop import permissions_helper
-    from services.desktop.permissions_helper import launchd_job, lifecycle
 
     assert permissions_helper.converge.__module__ == "services.desktop.permissions_helper"
-    assert lifecycle.run_bounded is run_bounded
-    assert launchd_job.run_bounded is run_bounded

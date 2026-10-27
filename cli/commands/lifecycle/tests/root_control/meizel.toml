@@ -6,5 +6,6 @@
 "test_root_driver.py" = ["snapshots.py", "support.py"]
 "test_root_readiness.py" = ["snapshots.py", "support.py"]
 "test_root_signals.py" = ["_stand_in_root.py", "snapshots.py"]
+"test_root_stop.py" = ["support.py"]
 "test_snapshot.py" = []
 "test_start_names_its_requester.py" = ["support.py"]

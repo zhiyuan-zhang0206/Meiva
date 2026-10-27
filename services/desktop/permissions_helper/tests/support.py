@@ -1,9 +1,80 @@
 from __future__ import annotations
 
+import os
+import random
+import subprocess
+from collections.abc import Sequence
+from dataclasses import replace
 from pathlib import Path
 
+from base.clock import Clock, ClockConfig, Timers
+from base.clock.tests.manual_timers import ManualTimers
+from services.desktop.permissions_helper.launchd_job import BoundedRunner, LaunchdFacts
+from services.desktop.permissions_helper.lifecycle import BuildEnv, HelperSources, InstallEnv
 
-def stopped_helper_plist(home: Path, path: Path) -> bytes:
+# meiva:note
+# The account these tests act as for launchd's purposes: macOS, this process's real user id (the
+# plists a test writes are its own, which retirement checks for ownership) and an account home under
+# the test's own directory, so the LaunchAgents directory is one the test can read back.
+USER_ID = os.getuid()
+
+
+def launchd_facts(home: Path) -> LaunchdFacts:
+    return LaunchdFacts(uid=USER_ID, platform="darwin", user_home=home / "user")
+
+
+# meiva:note
+# What `launchctl print` answers for this home's helper job: a running job, or launchd's own
+# "could not find service" (status 113). None for any other command, so a fake runner can chain it.
+def launchctl_reply(
+    cmd: Sequence[str], *, loaded: bool
+) -> subprocess.CompletedProcess[bytes] | None:
+    if cmd[:2] != ["launchctl", "print"]:
+        return None
+    if loaded:
+        return subprocess.CompletedProcess(list(cmd), 0, b"pid = 321\n", b"")
+    return subprocess.CompletedProcess(list(cmd), 113, b"", b"Could not find service")
+
+
+# meiva:note
+# The world a helper build reads, over the test's own `home`: this account's launchd facts, the
+# runner the test hands in, timers the test moves by hand and the operating system's generator for
+# the keychain password. The sources are the helper's own unless the test stages others.
+def helper_build_env(
+    home: Path,
+    run: BoundedRunner,
+    *,
+    sources: HelperSources | None = None,
+    timers: Timers | None = None,
+) -> BuildEnv:
+    clock_timers = ManualTimers() if timers is None else timers
+    env = BuildEnv(
+        home=home,
+        facts=launchd_facts(home),
+        run=run,
+        timers=clock_timers,
+        clock=Clock(ClockConfig("UTC", None, message_timestamp_weekday=False), timers=clock_timers),
+        rng=random.SystemRandom(),
+    )
+    return env if sources is None else replace(env, sources=sources)
+
+
+# meiva:note
+# A runner for a test whose path runs no tool: a call is a failure.
+def refuse_tools(
+    cmd: Sequence[str], /, *, timeout: float, capture_output: bool = True
+) -> subprocess.CompletedProcess[bytes]:
+    del timeout, capture_output
+    raise AssertionError(f"this test must not run {list(cmd)}")
+
+
+def helper_install_env(build: BuildEnv, *, helper_port: int = 9223) -> InstallEnv:
+    return InstallEnv(build=build, helper_port=helper_port, artifact_dir=None)
+
+
+def stopped_helper_plist(
+    home: Path, path: Path, *, executable: str = "/private/test/MeivaPermissionsHelper"
+) -> bytes:
     import plistlib
 
     from services.desktop.permissions_helper import launchd_job as jobs
@@ -11,7 +82,7 @@ def stopped_helper_plist(home: Path, path: Path) -> bytes:
     body = plistlib.dumps(
         {
             "Label": jobs.helper_job_label(home),
-            "ProgramArguments": ["/private/test/MeivaPermissionsHelper"],
+            "ProgramArguments": [executable],
             "KeepAlive": {"SuccessfulExit": False},
             "EnvironmentVariables": {
                 "MEIVA_PERMISSIONS_HELPER_SOCKET": str(home / "run/permissions-helper.23456.sock"),

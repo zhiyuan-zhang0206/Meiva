@@ -27,6 +27,7 @@ from base.host.net.ports import SYSTEM_URL_OPENER, UrlOpener
 from base.host.net.url_secret import names_foreign_host
 from base.telemetry.station_endpoint import StationEndpointConfig
 from services.desktop.browser.probe import probe_browser as _default_probe_browser
+from services.desktop.permissions_helper.launchd_job import BoundedRunner, LaunchdFacts
 from services.supervision.healthchecks.browser_reach import (
     CanaryResult,
     HostResult,
@@ -480,6 +481,8 @@ def build_diagnostics(
     config: ProbeConfig,
     clock: Clock,
     macos: bool,
+    launchd: LaunchdFacts,
+    run: BoundedRunner,
 ) -> list[Diagnostic]:
     """Host policy is explicit; absent capabilities do not create fake samples."""
     checks: list[Diagnostic] = []
@@ -505,7 +508,13 @@ def build_diagnostics(
     if macos:
         from services.supervision.healthchecks.permissions_helper import episode_reporter, probe
 
-        checks.append(Diagnostic("permissions-helper", probe, report=episode_reporter()))
+        checks.append(
+            Diagnostic(
+                "permissions-helper",
+                partial(probe, home=config.home, facts=launchd, run=run),
+                report=episode_reporter(),
+            )
+        )
     if "gateway" in machine.role():
         is_remote = names_foreign_host(config.db_url, config.redis_url)
         if not is_remote:

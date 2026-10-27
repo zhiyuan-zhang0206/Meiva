@@ -8,6 +8,7 @@
 
 from __future__ import annotations
 
+import random
 from pathlib import Path
 from typing import NoReturn
 
@@ -45,6 +46,7 @@ def test_collector_preparation_never_controls_a_running_service_tree(
         collector_artifact.OTELCOL_CONTRIB_VERSION, encoding="utf-8"
     )
     ctx = ConvergeCtx(
+        secure_rng=random.SystemRandom(),
         repo=Path(__file__).resolve().parents[4],
         meiva_home=home,
         roles=frozenset({"gateway"}),

@@ -1,12 +1,11 @@
 from __future__ import annotations
 
 import os
-import secrets
+import random
 import tempfile
 from collections.abc import Callable
 from pathlib import Path
 
-import base.paths
 from services.desktop.permissions_helper import hardened_runtime
 
 # meiva:note
@@ -60,20 +59,24 @@ Runner = Callable[[list[str]], object]
 class SigningIdentityError(RuntimeError): ...
 
 
-def directory(app_dir: Path | None = None) -> Path:
-    return base.paths.permissions_helper_app_dir() if app_dir is None else app_dir
+# meiva:note
+# The generator the keychain password is drawn from: the operating system's, because the password
+# guards a signing key and a seeded or merely statistical generator would make it reproducible.
+# The entry that provisions the identity builds one and hands it down; the type is spelled here,
+# where the draw is, so the owners in between do not name the generator themselves.
+SigningRandom = random.SystemRandom
 
 
-def keychain_path(app_dir: Path | None = None) -> Path:
-    return directory(app_dir) / KEYCHAIN_NAME
+def keychain_path(app_dir: Path) -> Path:
+    return app_dir / KEYCHAIN_NAME
 
 
-def password_path(app_dir: Path | None = None) -> Path:
-    return directory(app_dir) / KEYCHAIN_UNLOCK_FILE
+def password_path(app_dir: Path) -> Path:
+    return app_dir / KEYCHAIN_UNLOCK_FILE
 
 
-def readme_path(app_dir: Path | None = None) -> Path:
-    return directory(app_dir) / README_NAME
+def readme_path(app_dir: Path) -> Path:
+    return app_dir / README_NAME
 
 
 # meiva:note
@@ -89,9 +92,7 @@ def policy() -> str:
 
 # meiva:note
 # The codesign invocation that signs `app` with the fixed identity.
-def sign_arguments(
-    app: Path, *, entitlements: Path, identifier: str, app_dir: Path | None = None
-) -> list[str]:
+def sign_arguments(app: Path, *, entitlements: Path, identifier: str, app_dir: Path) -> list[str]:
     return [
         CODESIGN,
         *_SIGN_ARGV_HEAD,
@@ -114,7 +115,7 @@ def sign_arguments(
 # signed with a certificate: a missing keychain there means the identity was
 # destroyed, and quietly minting a replacement would invalidate every grant
 # without saying so.
-def ensure(run: Runner, *, create: bool, app_dir: Path | None = None) -> None:
+def ensure(run: Runner, *, create: bool, app_dir: Path, rng: SigningRandom) -> None:
     if not keychain_path(app_dir).exists():
         if not create:
             raise SigningIdentityError(
@@ -122,21 +123,21 @@ def ensure(run: Runner, *, create: bool, app_dir: Path | None = None) -> None:
                 f"is gone -- every desktop grant was keyed to it. Restore that keychain, or "
                 f"provision a new identity with `{PROVISION_COMMAND}` and grant the helper again"
             )
-        provision(run, app_dir=app_dir)
+        provision(run, app_dir=app_dir, rng=rng)
     require(run, app_dir=app_dir)
 
 
 # meiva:note
 # Create the keychain, certificate and password file, then record them.
-def provision(run: Runner, *, app_dir: Path | None = None) -> None:
-    directory(app_dir).mkdir(parents=True, exist_ok=True)
-    password = secrets.token_urlsafe(32)
+def provision(run: Runner, *, app_dir: Path, rng: SigningRandom) -> None:
+    app_dir.mkdir(parents=True, exist_ok=True)
+    password = f"{rng.getrandbits(256):064x}"
     write_secret(password_path(app_dir), password)
     keychain = keychain_path(app_dir)
     run([SECURITY, "create-keychain", "-p", password, str(keychain)])
     run([SECURITY, "set-keychain-settings", str(keychain)])
     run([SECURITY, "unlock-keychain", "-p", password, str(keychain)])
-    with tempfile.TemporaryDirectory(dir=directory(app_dir)) as scratch:
+    with tempfile.TemporaryDirectory(dir=app_dir) as scratch:
         archive = _certificate_archive(Path(scratch), run, app_dir=app_dir)
         run(
             [
@@ -175,7 +176,7 @@ def provision(run: Runner, *, app_dir: Path | None = None) -> None:
 
 # meiva:note
 # Prove the identity is present, unlocked and reachable by `codesign`.
-def require(run: Runner, *, app_dir: Path | None = None) -> None:
+def require(run: Runner, *, app_dir: Path) -> None:
     keychain = keychain_path(app_dir)
     if not keychain.exists():
         raise SigningIdentityError(
@@ -188,7 +189,7 @@ def require(run: Runner, *, app_dir: Path | None = None) -> None:
         )
     password = password_path(app_dir).read_text().strip()
     run([SECURITY, "unlock-keychain", "-p", password, str(keychain)])
-    listed = _identities(run, app_dir=app_dir)
+    listed = _identities(run, keychain=keychain_path(app_dir))
     if identity_line(listed) is None:
         raise SigningIdentityError(
             f"{keychain} holds no {IDENTITY_NAME!r} code-signing identity; "
@@ -223,19 +224,19 @@ def search_list(list_keychains_output: str) -> list[str]:
 # `codesign --sign <name> --keychain <keychain>` still resolves the name across
 # the whole search list and fails with "ambiguous" when two keychains match, so
 # a leftover test keychain breaks every build until it is removed.
-def _rival_keychains(run: Runner, *, app_dir: Path | None = None) -> list[str]:
+def _rival_keychains(run: Runner, *, app_dir: Path) -> list[str]:
     ours = keychain_path(app_dir).resolve()
     rivals: list[str] = []
     for entry in search_list(_text(run([SECURITY, "list-keychains", "-d", "user"]))):
         path = Path(entry)
         if path.resolve() == ours or not path.exists():
             continue
-        if identity_line(_identities(run, keychain=path, app_dir=app_dir)) is not None:
+        if identity_line(_identities(run, keychain=path)) is not None:
             rivals.append(entry)
     return rivals
 
 
-def _identities(run: Runner, *, keychain: Path | None = None, app_dir: Path | None = None) -> str:
+def _identities(run: Runner, *, keychain: Path) -> str:
     return _text(
         run(
             [
@@ -243,7 +244,7 @@ def _identities(run: Runner, *, keychain: Path | None = None, app_dir: Path | No
                 "find-identity",
                 "-p",
                 "codesigning",
-                str(keychain or keychain_path(app_dir)),
+                str(keychain),
             ]
         )
     )
@@ -260,7 +261,7 @@ def _identities(run: Runner, *, keychain: Path | None = None, app_dir: Path | No
 # Entries are compared by resolved path: the same keychain is `/tmp/...` in a
 # home path and `/private/tmp/...` from `security`, and comparing the strings
 # would append a duplicate on every build.
-def _add_to_search_list(run: Runner, *, app_dir: Path | None = None) -> None:
+def _add_to_search_list(run: Runner, *, app_dir: Path) -> None:
     current = search_list(_text(run([SECURITY, "list-keychains", "-d", "user"])))
     listed: dict[str, str] = {}
     for entry in current:
@@ -273,7 +274,7 @@ def _add_to_search_list(run: Runner, *, app_dir: Path | None = None) -> None:
         run([SECURITY, "list-keychains", "-d", "user", "-s", *wanted])
 
 
-def _certificate_archive(scratch: Path, run: Runner, *, app_dir: Path | None = None) -> Path:
+def _certificate_archive(scratch: Path, run: Runner, *, app_dir: Path) -> Path:
     config = scratch / "cert.cnf"
     config.write_text(_CERT_CONFIG)
     key = scratch / "identity.key"
@@ -394,7 +395,7 @@ from `security list-keychains -d user`.
 """
 
 
-def _readme_text(*, app_dir: Path | None = None) -> str:
+def _readme_text(*, app_dir: Path) -> str:
     values = {
         "IDENTITY_NAME": IDENTITY_NAME,
         "IDENTITY_ORG": IDENTITY_ORG,
