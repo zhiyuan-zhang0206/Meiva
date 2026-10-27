@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import json as _json
-import uuid as _uuid
 from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Any, Protocol, TypeGuard
@@ -329,10 +328,12 @@ def _post_semantics(path: str, *, idempotent: bool | None) -> Idempotency:
     return Idempotency.IDEMPOTENT if idempotent else Idempotency.NON_IDEMPOTENT
 
 
-def _idempotency_headers(*, keyed: bool, idempotency_key: str | None) -> dict[str, str] | None:
+def _idempotency_headers(
+    *, keyed: bool, idempotency_key: str | None, context: MeivaContext
+) -> dict[str, str] | None:
     if not keyed:
         return None
-    return keyed_headers(_uuid.uuid4().hex if idempotency_key is None else idempotency_key)
+    return keyed_headers(context.require_new_id() if idempotency_key is None else idempotency_key)
 
 
 def post(
@@ -401,7 +402,7 @@ def post(
     retryable = semantics is Idempotency.IDEMPOTENT or keyed
     # One key per logical call — every retry of this call shares it, so the
     # server can dedup the retries against the original.
-    headers = _idempotency_headers(keyed=keyed, idempotency_key=idempotency_key)
+    headers = _idempotency_headers(keyed=keyed, idempotency_key=idempotency_key, context=context)
 
     retries = request_max_retries(context) if max_retries is None else max_retries
     return _request_with_retry(
@@ -461,7 +462,7 @@ def patch(
     """
     semantics = contracts.idempotency_for("PATCH", path)
     keyed = semantics is Idempotency.AT_LEAST_ONCE_WITH_KEY
-    headers = _idempotency_headers(keyed=keyed, idempotency_key=idempotency_key)
+    headers = _idempotency_headers(keyed=keyed, idempotency_key=idempotency_key, context=context)
     return _request_with_retry(
         lambda: gateway_http(context).patch(path, json=json or {}, headers=headers),
         request_max_retries(context),

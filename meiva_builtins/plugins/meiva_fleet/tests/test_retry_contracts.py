@@ -13,6 +13,8 @@ from base.agents.context import MeivaContext
 from base.agents.context.gateway_client import transport
 from base.agents.context.identity import AgentIdentity
 from base.api_contracts.agent_contract import GatewayUnavailable
+from base.clock.ids import new_uuid
+from base.clock.tests.seeded_rng import seeded_rng
 from base.cluster.machine import MachineIdentityReader
 from base.cluster.machine.tests.identity import machine_identity as machine_identity
 from base.config import ConfigBoot
@@ -44,6 +46,7 @@ def retry_gateway(
         identity=AgentIdentity(7, True),
         clients=derived_clients(config, machine_identity),
         machine=machine_identity,
+        rng=seeded_rng(3),
     )
     previous = process_context.bound_context()
     process_context.bind_context(context)
@@ -165,8 +168,9 @@ def test_keyed_post_and_patch_mint_a_key_when_none_is_pinned(retry_gateway: Gate
     transport.patch("/api/tasks/1", {"priority": "P1"}, context=process_context.current_context())
     transport.post("/api/agents/1/system-note", {}, context=process_context.current_context())
     assert len(retry_gateway.received) == 2
+    expected = seeded_rng(3)
     for request in retry_gateway.received:
-        assert request.headers["Idempotency-Key"]
+        assert request.headers["Idempotency-Key"] == new_uuid(expected).hex
         assert request.headers["Idempotency-Scope"] == "principal-v1"
 
 

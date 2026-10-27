@@ -26,6 +26,7 @@ from base.agents.context import MeivaContext
 from base.agents.context.clients import ClientSet
 from base.agents.context.gateway_client.transport import GatewayTransportInputs
 from base.agents.context.identity import AgentIdentity
+from base.clock.tests.seeded_rng import seeded_rng
 from meiva.sdk_surface import process_context
 
 CLIENT_TIMEOUT_SECONDS = 7.5
@@ -171,6 +172,7 @@ def wire_context(
                 )
             },
         ),
+        rng=seeded_rng(),
     )
 
 
