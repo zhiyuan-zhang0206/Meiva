@@ -133,7 +133,7 @@ def compute_parent(path: str, all_paths: set[str], root: str | None = _UNSET_ROO
 
     logical = logical_path(path)
     directory = Path(logical).parent
-    while directory != Path():
+    while directory.parts:
         overview = _posix(str(directory / (directory.name + EXT)))
         if overview != logical and overview in physical:
             return physical[overview]
