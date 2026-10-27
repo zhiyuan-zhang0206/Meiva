@@ -13,11 +13,11 @@ tags:
 
 ## Fields
 
-- `remind_interval_seconds: int | None` — seconds without an update after which to remind the owner. Default 1800 (30 minutes). **Reminders cannot be turned off**: passing `None` to `create` falls back to default, passing `None` to `update` means "no change". Maximum 24h (86400s). Can be `NULL` only on the [[task_model_root.meiva.okf.md|Root Task]] (which is never reminded).
+- `remind_interval_seconds: int | None` — seconds without a change to the work after which to remind the owner. The clock is `updated_at`, so recording a note does not postpone the reminder. Default 1800 (30 minutes). **Reminders cannot be turned off**: passing `None` to `create` falls back to default, passing `None` to `update` means "no change". Maximum 24h (86400s). Can be `NULL` only on the [[task_model_root.meiva.okf.md|Root Task]] (which is never reminded).
 - `last_reminded_at: datetime | None` — last reminder time; cleared when a write restarts the overdue window.
 - `reminder_count: int` — number of reminders sent; cleared with the same rule.
 
-A write clears `last_reminded_at`, `reminder_count` and `escalated_at` when it **changes the work**, restarting the overdue window from that write. Fleet `task_reminder_reset_on` (default `status`, `results`, `owner`, `priority`, `parent`) names the kinds that count; recording a note or renaming a task does not, because neither says anything about progress — resetting on the daily note stream is what held every task's counter at zero. The comparison is against the stored row, so restating the current status or results is not a change either. `meiva_builtins/plugins/meiva_fleet/task_maintenance/daemon.py` sees the counter; `base/agents/tasks/reminder_window.py` owns the criterion.
+A write clears `last_reminded_at`, `reminder_count` and `escalated_at` when it **changes the work**, restarting the overdue window from that write. Fleet `task_reminder_reset_on` (default `status`, `results`, `owner`, `priority`, `parent`) names the kinds that count; recording a note or renaming a task does not, because neither says anything about progress — resetting on the daily note stream is what held every task's counter at zero. The comparison is against the stored row, so restating the current status or results is not a change either. `meiva_builtins/plugins/meiva_fleet/task_maintenance/daemon.py` sees the counter; `base/agents/tasks/reminder_window.py` owns the criterion. The same criterion moves `updated_at` — the column the daemon measures the overdue interval against — so the due clock and the ladder cannot disagree.
 
 ## Daemon Behavior
 

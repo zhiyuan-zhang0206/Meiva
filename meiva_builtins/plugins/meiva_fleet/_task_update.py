@@ -78,10 +78,13 @@ def _append_note_to_results(cur: psycopg.Cursor, task_id: int, note: str) -> Non
     current: str = row[0] or ""
     if current and not current.endswith("\n"):
         current += "\n"
-    # The update also bumps updated_at: a note append is real task activity,
-    # so the task graph's last-activity window must see it (Task #1969).
+    # meiva:note
+    # The line lands in `results`; the row's timestamps stay where they are. A note is the record
+    # of the work, not the work: `updated_at` is the reminder daemon's due clock
+    # (`task_maintenance/daemon.py` reads `now() - updated_at`), so moving it here let a daily
+    # annotation hold a frozen task below its interval and the ladder never climbed (task #5311).
     cur.execute(
-        "UPDATE agent_tasks SET results = %s, updated_at = now() WHERE id = %s",
+        "UPDATE agent_tasks SET results = %s WHERE id = %s",
         (current + line, task_id),
     )
 
@@ -252,28 +255,37 @@ def write_task_update(
     # meiva:note
     # Only a real change to the work restarts the ladder (Fleet `task_reminder_reset_on`); the
     # counters and the delegator marker are cleared together so the fresh window can escalate on
-    # its own. A note-only write leaves every counter alone and only bumps `updated_at` below.
+    # its own. `updated_at` moves in the same branch because it is the same fact: it is the
+    # reminder daemon's due clock (`task_maintenance/daemon.py` reads `now() - updated_at`), so a
+    # write that does not change the work must not move it either — a note-only write used to keep
+    # an annotated, frozen task below its interval forever (task #5311).
     if resets_window(changed_kinds(snapshot, update), reset_on):
         sets.append("last_reminded_at = NULL")
         sets.append("reminder_count = 0")
         sets.append("escalated_at = NULL")
+        sets.append("updated_at = now()")
         payload["reminder_window_reset"] = True
-    sql = f"UPDATE agent_tasks SET {', '.join([*sets, 'updated_at = now()'])} WHERE id = %s"  # noqa: S608
-    # type: ignore[arg-type] — the SET clause is assembled at runtime from
-    # user-passed field names; psycopg accepts any str query.
-    import psycopg  # per-call: keeps the psycopg stack off plugin autoload (task #3816)
+    # meiva:note
+    # A note-only write has no row field to set: the note is appended into `results` below and the
+    # row keeps its timestamps. `sets` is empty exactly when nothing but the note changed, and an
+    # executed statement would then carry an empty SET list.
+    if sets:
+        sql = f"UPDATE agent_tasks SET {', '.join(sets)} WHERE id = %s"  # noqa: S608
+        # type: ignore[arg-type] — the SET clause is assembled at runtime from
+        # user-passed field names; psycopg accepts any str query.
+        import psycopg  # per-call: keeps the psycopg stack off plugin autoload (task #3816)
 
-    try:
-        cur.execute(sql, (*params, task_id))  # type: ignore[arg-type]
-    except psycopg.errors.UniqueViolation as exc:
-        # Same race as create(): a concurrent rename landed this title between
-        # the pre-check above and the UPDATE, and the partial unique index
-        # rejected the write. Transaction aborted — generic message, see
-        # _insert_task.
-        raise ValueError(
-            f"task with title {update.title!r} already exists among in_progress tasks — "
-            "duplicate in_progress titles are not allowed (enforced by the database)"
-        ) from exc
+        try:
+            cur.execute(sql, (*params, task_id))  # type: ignore[arg-type]
+        except psycopg.errors.UniqueViolation as exc:
+            # Same race as create(): a concurrent rename landed this title between
+            # the pre-check above and the UPDATE, and the partial unique index
+            # rejected the write. Transaction aborted — generic message, see
+            # _insert_task.
+            raise ValueError(
+                f"task with title {update.title!r} already exists among in_progress tasks — "
+                "duplicate in_progress titles are not allowed (enforced by the database)"
+            ) from exc
 
     # Append a timestamped note to results — works with any status or
     # standalone (no status change) as a drop-in for log().

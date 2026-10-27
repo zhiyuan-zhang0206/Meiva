@@ -14,18 +14,23 @@ from collections.abc import Iterator
 from concurrent.futures import ThreadPoolExecutor
 from itertools import count
 from typing import Any
+from uuid import uuid4
 
 import psycopg
 import pytest
 from psycopg_pool import ConnectionPool
 
+from base.clock import SYSTEM_TIMERS, Clock
+from base.clock.configuration import clock_config_from_boot
 from base.clock.tests.seeded_rng import seeded_rng
-from base.config import settings
+from base.config import ConfigBoot, settings
 from base.db import Database
 from base.events.live.bus import EventBus, EventBusConfig
 from base.events.live.tests.live_capture import snapshots_at_events
 from base.telemetry.tests.capture.event_capture import EmittedEvents
 from base.telemetry.tests.capture.event_capture import emitted_events as emitted_events
+from meiva.tests.fixtures.pin_agent import pin_agent, pin_no_identity, snapshot_clients_over
+from meiva_builtins.plugins.meiva_fleet import task_registry
 from meiva_builtins.plugins.meiva_fleet.task_maintenance import daemon
 from meiva_builtins.plugins.meiva_fleet.task_maintenance.daemon import run_reminders
 from meiva_builtins.plugins.meiva_fleet.task_maintenance.tests.failing_writes import (
@@ -50,6 +55,27 @@ def pool(db_url: str):
 def deliver(db_conn: psycopg.Connection) -> Iterator[TaskNotes]:
     with record_notes(db_conn) as notes:
         yield notes
+
+
+# meiva:note
+# A context carrying a clock and a bus, bound during setup: an SDK task write stamps its note
+# through the process clock and publishes the board refresh afterwards, so the writer must be
+# pinned before the test body runs (pinning inside a body leaves `meiva._exec_context` behind for
+# the leak guard to flag).
+@pytest.fixture
+def sdk_writer(
+    database: Database, process_config: ConfigBoot, event_bus: EventBus
+) -> Iterator[None]:
+    pin_agent(
+        None,
+        clients=snapshot_clients_over(lambda: database),
+        bus=event_bus,
+        clock_factory=lambda: Clock(clock_config_from_boot(process_config), timers=SYSTEM_TIMERS),
+    )
+    try:
+        yield
+    finally:
+        pin_no_identity()
 
 
 def _maintenance_events(
@@ -225,6 +251,35 @@ class TestRemind:
         _status, _owner, reminder_count, last_reminded_at = row
         assert reminder_count == 1
         assert last_reminded_at is not None
+
+    # meiva:note
+    # The due clock and the ladder are one criterion: a note written seconds ago must not hold a
+    # task that has not advanced for hours below its interval. Before task #5311 the SDK note write
+    # bumped `updated_at`, so this task was not due at all and no reminder was ever sent.
+    def test_a_note_does_not_postpone_an_overdue_task(
+        self,
+        sdk_writer: None,
+        emitted_events: EmittedEvents,
+        pool: ConnectionPool,
+        db_conn: psycopg.Connection,
+        deliver: TaskNotes,
+        database: Database,
+        event_bus: EventBus,
+    ) -> None:
+        owner = _make_agent(db_conn)
+        tid = _make_task(db_conn, owner=owner, remind_interval_seconds=1800, updated_s_ago=7200)
+        pin_agent(owner)
+        task_registry.log(tid, "still waiting on the draft", operation_key=str(uuid4()))
+
+        assert run_reminders(pool, database, event_bus, 3600.0) == 1
+        delivered_owner, message = deliver.deliveries()[0]
+        assert delivered_owner == owner
+        assert f"#{tid}" in message
+        assert "no update for 2.0h" in message
+        row = _task_row(db_conn, tid)
+        assert row is not None
+        assert row[2] == 1
+        assert "task_reminder_digest" in emitted_events.names()
 
     def test_owner_receives_one_digest_for_all_overdue_tasks(
         self,
