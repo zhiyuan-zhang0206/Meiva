@@ -1,7 +1,8 @@
 exports = ["branch_protection.py", "module_moves.py"]
 
 [uses]
-"tests" = ["branch_protection.py", "impact_census.py", "module_moves.py", "schema_drift.py", "sdk_usage.py", "where_used.py", "where_used_scan.py"]
+"sdk_usage.py" = ["sdk_usage_report.py"]
+"tests" = ["branch_protection.py", "impact_census.py", "module_moves.py", "schema_drift.py", "sdk_usage.py", "sdk_usage_report.py", "where_used.py", "where_used_scan.py"]
 "where_used.py" = ["module_moves.py", "where_used_scan.py"]
 
 [external]
@@ -13,7 +14,8 @@ exports = ["branch_protection.py", "module_moves.py"]
 [purity]
 "." = "strict-to-be"
 "module_moves.py" = "strict-to-be"
-"sdk_usage.py" = "strict"
+"sdk_usage.py" = { mode = "none", why = "the command line shell: it reads the mirrors the operator names, hands their lines to the report module and prints the result; every decision is in sdk_usage_report.py" }
+"sdk_usage_report.py" = "strict"
 "where_used.py" = "strict-to-be"
 "where_used_scan.py" = "strict-to-be"
 

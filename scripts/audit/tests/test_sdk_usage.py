@@ -1,11 +1,13 @@
 """SDK expansion recommendations use runtime evidence and explicit windows."""
 
 import json
+from collections.abc import Mapping
 from pathlib import Path
 
 import pytest
 
-from scripts.audit.sdk_usage import CallEvent, main, read_calls, report, timestamp
+from scripts.audit.sdk_usage import main
+from scripts.audit.sdk_usage_report import CallEvent, read_calls, report, timestamp
 
 
 def event(identity: int, method: str, agent: int = 1, weight: int = 1) -> CallEvent:
@@ -49,20 +51,24 @@ def test_window_and_agent_filters_apply_before_ranking() -> None:
     assert empty["observed_events"] == 0
 
 
-def test_mirrors_deduplicate_and_reject_conflicting_event_ids(tmp_path: Path) -> None:
+def mirror(*events: Mapping[str, object]) -> tuple[str, list[str]]:
+    return "events.jsonl", [json.dumps(raw) for raw in events]
+
+
+def test_mirrors_deduplicate_and_reject_conflicting_event_ids() -> None:
+    raw = {**event(1, "files.read").model_dump(mode="json"), "event_name": "sdk_call"}
+    assert len(read_calls([mirror(raw, raw), mirror(raw)])) == 1
+    conflicting = {**raw, "attributes": {"fn": "shell.run", "sample_rate": 1}}
+    with pytest.raises(ValueError, match=r"events\.jsonl:3: conflicting"):
+        read_calls([mirror(raw, raw, conflicting)])
+
+
+def test_the_entry_reads_a_duplicated_mirror_once_and_reports(tmp_path: Path) -> None:
     path = tmp_path / "events.jsonl"
     raw = {**event(1, "files.read").model_dump(mode="json"), "event_name": "sdk_call"}
-    path.write_text(json.dumps(raw) + "\n" + json.dumps(raw) + "\n")
-    with path.open(encoding="utf-8") as first, path.open(encoding="utf-8") as second:
-        assert len(read_calls([first, second])) == 1
-    raw["attributes"] = {"fn": "shell.run", "sample_rate": 1}
-    with path.open("a") as stream:
-        stream.write(json.dumps(raw) + "\n")
-    with (
-        path.open(encoding="utf-8") as stream,
-        pytest.raises(ValueError, match=r"events\.jsonl:3: conflicting"),
-    ):
-        read_calls([stream])
+    path.write_text(json.dumps(raw) + "\n")
+    code = main([str(path), str(path), "--start", START.isoformat(), "--end", END.isoformat()])
+    assert code == 0
 
 
 @pytest.mark.parametrize("weight", [0, -1, True, "5"])
