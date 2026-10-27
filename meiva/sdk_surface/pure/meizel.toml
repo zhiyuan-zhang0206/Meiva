@@ -1,4 +1,7 @@
 exports = ["caller", "const.py", "media", "plans"]
 
+[uses]
+"plans" = ["caller"]
+
 [purity]
 "." = "strict"

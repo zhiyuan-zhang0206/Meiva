@@ -1,4 +1,4 @@
-exports = ["batch_plan.py", "load_plan.py"]
+exports = ["batch_plan.py", "installation", "load_plan.py", "metering"]
 
 [purity]
 "." = "strict"

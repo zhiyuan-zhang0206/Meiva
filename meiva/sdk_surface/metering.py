@@ -37,7 +37,7 @@ import functools
 import inspect
 from collections.abc import Callable
 from dataclasses import dataclass
-from types import ModuleType, SimpleNamespace
+from types import ModuleType
 from typing import Any
 
 from base.agents.sdk.capture import SdkCaptureOwner
@@ -45,30 +45,29 @@ from base.agents.sdk.tally import SdkCallTally
 from meiva.sdk_surface import process_context
 from meiva.sdk_surface.discovery import agent_visible_names
 from meiva.sdk_surface.installation import EventPipelines, SamplingPolicyOwner, installed
-from meiva.sdk_surface.pure.caller.identity_plan import caller_facts
-from meiva.sdk_surface.pure.caller.usage_plan import usage_identity
-
-# A recorder marks itself with a reference to itself. `is_recorder` tests that identity, so
-# `install()` skips a target only when the current top callable *is* a recorder — robust to
-# `meiva.extend`'s wrap machinery, which copies a wrapped callable's __dict__: a plugin wrapper built
-# over a recorder inherits the marker, but it points at the inner recorder, not at the wrapper.
-_RECORDER_MARK = "__meiva_recorder__"
-_SAMPLING_MARK = "__meiva_sampling_owner__"
+from meiva.sdk_surface.pure.plans.metering.meter_plan import (
+    MemberKind,
+    call_identity,
+    mcp_call_name,
+    member_kind,
+)
+from meiva.sdk_surface.pure.plans.metering.recorder_plan import (
+    RECORDER_MARK,
+    SAMPLING_MARK,
+    foreign_recorder,
+    needs_recorder,
+    restore_target,
+)
 
 
 def _recorder(fn: Callable[..., Any], sampling: SamplingPolicyOwner) -> Callable[..., Any]:
-    setattr(fn, _RECORDER_MARK, fn)
-    setattr(fn, _SAMPLING_MARK, sampling)
+    setattr(fn, RECORDER_MARK, fn)
+    setattr(fn, SAMPLING_MARK, sampling)
     return fn
 
 
-def is_recorder(fn: object) -> bool:
-    """Whether `fn` is itself a metering recorder (not a wrapper that merely copied one's attributes)."""
-    return fn is not None and getattr(fn, _RECORDER_MARK, None) is fn
-
-
 def _check_sampling(fn: object, sampling: SamplingPolicyOwner) -> None:
-    if is_recorder(fn) and getattr(fn, _SAMPLING_MARK) is not sampling:
+    if foreign_recorder(fn, sampling):
         raise ValueError("SDK recorders already belong to another sampling owner")
 
 
@@ -83,12 +82,10 @@ def _caller(
 ]:
     """Snapshot this call's provenance; invalid identity rejects admission."""
     bound = process_context.ambient_context()
-    own = None if bound is None else bound.identity
-    borrowed = own.lease.agent_id if own is not None and own.lease is not None else None
     installation = installed()
-    external = None if installation is None else installation.external_caller
-    identity = usage_identity(
-        borrowed, caller_facts(own), None if external is None else external.source()
+    identity = call_identity(
+        None if bound is None else bound.identity,
+        None if installation is None else installation.external_caller,
     )
     if bound is None:
         return identity, None, None, None if clients is None else clients.event_pipeline, None
@@ -179,7 +176,7 @@ def make_mcp_recorder[F: Callable[..., object]](
         run_metered, _ = _telemetry_runners()
         identity, tally, capture_owner, call_producer, machine_reader = _caller(clients)
         return run_metered(
-            f"mcps.{server}.{tool}",
+            mcp_call_name(server, tool),
             original,
             (source, server, tool, *args),
             kwargs,
@@ -225,9 +222,10 @@ def _instrument_targets(root: object) -> list[tuple[object, str, str]]:
             if attr is None:
                 continue
             fq = f"{prefix}{name}"
-            if inspect.isroutine(attr):
+            kind = member_kind(attr)
+            if kind is MemberKind.ROUTINE:
                 targets.append((container, name, fq))
-            elif isinstance(attr, (ModuleType, SimpleNamespace)):
+            elif kind is MemberKind.NAMESPACE:
                 walk(attr, f"{fq}.")
 
     walk(root, "")
@@ -272,12 +270,12 @@ def install(
     wrapped: list[tuple[object, str]] = []
     for parent, attr, fq in surface.routines:
         current = getattr(parent, attr, None)
-        if current is None or is_recorder(current):
+        if not needs_recorder(current):
             continue
         setattr(parent, attr, make_recorder(current, fq, sampling, clients))
         wrapped.append((parent, attr))
 
-    if funnel_mod is not None and callable(funnel) and not is_recorder(funnel):
+    if funnel_mod is not None and callable(funnel) and needs_recorder(funnel):
         setattr(funnel_mod, _MCP_CALL_FUNNEL, make_mcp_recorder(funnel, sampling, clients))
         wrapped.append((funnel_mod, _MCP_CALL_FUNNEL))
     return tuple(wrapped)
@@ -305,6 +303,6 @@ def uninstall(ledger: tuple[tuple[object, str], ...]) -> None:
     if not ledger:
         return
     for parent, attr in ledger:
-        current = getattr(parent, attr, None)
-        if current is not None and is_recorder(current):
-            setattr(parent, attr, current.__wrapped__)
+        original = restore_target(getattr(parent, attr, None))
+        if original is not None:
+            setattr(parent, attr, original)

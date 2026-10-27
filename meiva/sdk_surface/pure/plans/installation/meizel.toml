@@ -1,0 +1,7 @@
+exports = ["attempt_plan.py", "lifecycle_plan.py", "slot_plan.py", "wrap_plan.py"]
+
+[purity]
+"." = "strict"
+
+[uses]
+"attempt_plan.py" = ["slot_plan.py"]

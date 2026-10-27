@@ -43,12 +43,13 @@ from base.packages.plugins.plugin_errors import DuplicateRegistration
 from base.paths.home import resolve_meiva_home
 from base.telemetry.tests.capture.event_capture import EmittedEvents
 from base.telemetry.tests.capture.event_capture import emitted_events as emitted_events
-from meiva.sdk_surface import install, metering, process_context, skill_sources, wraps
+from meiva.sdk_surface import install, process_context, skill_sources, wraps
 from meiva.sdk_surface.installation import installed
 from meiva.sdk_surface.plugins import (
     InvalidNamespaceNameError,
     PluginNamespaceConflictError,
 )
+from meiva.sdk_surface.pure.plans.metering.recorder_plan import is_recorder
 
 InstallSurface = Callable[..., ExtensionRegistry]
 
@@ -424,9 +425,9 @@ def test_the_recorder_is_outermost_over_plugin_wraps_and_gone_after_uninstall(
     install_surface(registry)
 
     ping = meiva.install_ns.ping  # type: ignore[attr-defined]
-    assert metering.is_recorder(ping)  # the recorder is the outermost layer
-    assert not metering.is_recorder(ping.__wrapped__)  # ... with the plugin's layer under it
-    assert metering.is_recorder(meiva.files.read)
+    assert is_recorder(ping)  # the recorder is the outermost layer
+    assert not is_recorder(ping.__wrapped__)  # ... with the plugin's layer under it
+    assert is_recorder(meiva.files.read)
     assert ping() == "w(pong)"
     # one count per agent call, not one per layer
     assert [event.attributes["fn"] for event in emitted_events] == ["install_ns.ping"]
@@ -436,7 +437,7 @@ def test_the_recorder_is_outermost_over_plugin_wraps_and_gone_after_uninstall(
     # The recorder came off before the plugin wraps were undone, so the framework callable is
     # restored to the very object it was, not to a recorder proxy or a stale chain.
     assert meiva.files.read is original_read
-    assert not metering.is_recorder(original_read)
+    assert not is_recorder(original_read)
     assert wraps.wrappers() == {}
 
 
