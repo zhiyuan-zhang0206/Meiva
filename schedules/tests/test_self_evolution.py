@@ -41,13 +41,13 @@ from schedules.plans.scan_outcome import (
     plan_scan,
 )
 from schedules.plans.weekly_trigger import WeeklyDecision, decide_follow_up, decide_main
-from schedules.tests.gateway_directory import (
+from schedules.tests.support.gateway_directory import (
     AgentRowSpec,
     DirectoryPage,
     GatewayRequest,
     serve_gateway,
 )
-from schedules.tests.schedule_support import claimed_slots, insert_schedule
+from schedules.tests.support.schedule_support import claimed_slots, insert_schedule
 
 _NOW = datetime(2026, 9, 8, 0, 0, 20, tzinfo=UTC)
 _STAMP = "2026-09-08T00:00:20+00:00"

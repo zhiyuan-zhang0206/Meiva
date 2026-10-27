@@ -42,13 +42,13 @@ from schedules.plans.ci_workflows import (
 )
 from schedules.plans.directory_plan import ReportRecipient
 from scripts.ci.pull_requests.gh_process import GhProcess
-from schedules.tests.gateway_directory import (
+from schedules.tests.support.gateway_directory import (
     AgentRowSpec,
     DirectoryPage,
     GatewayRequest,
     serve_gateway,
 )
-from schedules.tests.schedule_support import borrowed_inputs
+from schedules.tests.support.schedule_support import borrowed_inputs
 
 _ROOT = Path(__file__).resolve().parents[2]
 _FAKE_GH = Path(__file__).parent / "children" / "fake_gh.py"

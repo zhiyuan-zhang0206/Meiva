@@ -1,4 +1,4 @@
-exports = ["adversarial_cases.py", "adversarial_marker.py", "adversarial_scoreboard.py", "adversarial_spawn.py", "adversarial_workers.py", "c9_window.py", "ci_workflows.py", "debt_sweep_scan.py", "debt_sweep_worker.py", "directory_plan.py", "keepalive_rule.py", "loop_plan.py", "scan_outcome.py", "schedule_identity.py", "stall_rule.py", "tracker_report.py", "weekly_trigger.py"]
+exports = ["adversarial_cases.py", "adversarial_marker.py", "adversarial_scoreboard.py", "adversarial_spawn.py", "adversarial_workers.py", "agent_watch_rule.py", "c9_window.py", "ci_workflows.py", "debt_sweep_scan.py", "debt_sweep_worker.py", "directory_plan.py", "keepalive_rule.py", "loop_plan.py", "scan_outcome.py", "schedule_identity.py", "stall_rule.py", "tracker_report.py", "weekly_trigger.py"]
 
 [purity]
 "__init__.py" = "strict"
@@ -7,6 +7,7 @@ exports = ["adversarial_cases.py", "adversarial_marker.py", "adversarial_scorebo
 "adversarial_scoreboard.py" = "strict"
 "adversarial_spawn.py" = "strict"
 "adversarial_workers.py" = "strict"
+"agent_watch_rule.py" = "strict"
 "c9_window.py" = "strict"
 "ci_workflows.py" = "strict"
 "debt_sweep_scan.py" = "strict"

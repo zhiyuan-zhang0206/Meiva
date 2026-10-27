@@ -10,7 +10,7 @@ import pytest
 from base.agents.context import MeivaContext
 from meiva.gateway_client import use_client
 from schedules.jobs.memory_maintenance import wake_arbiter
-from schedules.tests.gateway_directory import AgentRowSpec, DirectoryPage, serve_gateway
+from schedules.tests.support.gateway_directory import AgentRowSpec, DirectoryPage, serve_gateway
 
 _SLOT = datetime(2026, 9, 7, 4, 0, tzinfo=UTC)
 _JOB = "Daily consolidation (commit + push + PR merge)"
