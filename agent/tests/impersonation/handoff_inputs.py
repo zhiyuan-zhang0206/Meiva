@@ -22,8 +22,8 @@ from agent import impersonation
 from agent import state as states
 from agent.graph.claim.node import claim_node
 from agent.graph.exec.node import exec_node
-from agent.graph.exec.parent_facts import read_parent_facts
 from agent.graph.exec.process import SubprocessExecProcess
+from agent.graph.exec.tests.process_inputs import live_parent_facts
 from agent.impersonation import protect_native_hooks, settle_checkpoint
 from agent.impersonation_handoff import flush_checkpoint
 from agent.ownership.hosted import admit_hosted_runtime
@@ -159,14 +159,14 @@ class HandoffState(BaseModel):
 # An exec process whose children connect to the database as the runner login: the child
 # environment is the parent's facts with the runner URL, so no process environment changes.
 def runner_exec_process(runner_db_url: str) -> SubprocessExecProcess:
-    facts = read_parent_facts()
+    facts = live_parent_facts()
     return SubprocessExecProcess(
         replace(facts, environ={**facts.environ, "MEIVA_DB_URL": runner_db_url}), rng=_rng()
     )
 
 
 def local_exec_process() -> SubprocessExecProcess:
-    return SubprocessExecProcess(read_parent_facts(), rng=_rng())
+    return SubprocessExecProcess(live_parent_facts(), rng=_rng())
 
 
 async def prepare_graph(

@@ -14,7 +14,7 @@ from psycopg_pool import AsyncConnectionPool
 from redis.asyncio.client import PubSub
 
 from agent.graph import build_graph
-from agent.graph.exec.parent_facts import read_parent_facts
+from agent.graph.exec.tests.process_inputs import live_parent_facts
 from agent.graph.llm_errors import FatalProviderError
 from agent.ownership.hosted import admit_hosted_runtime
 from agent.ownership.tests.ownership_support import PublicationDefectBus
@@ -143,7 +143,7 @@ async def test_error_visible_after_cutoff_allows_immediate_new_chat(
     received: list[Error] = []
     new_chats: list[int] = []
     async with AsyncPostgresSaver.from_conn_string(db_url) as saver:
-        graph = build_graph(saver, ExtensionRegistry(), parent=read_parent_facts(), rng=_rng())
+        graph = build_graph(saver, ExtensionRegistry(), parent=live_parent_facts(), rng=_rng())
         config: RunnableConfig = {"configurable": {"thread_id": str(agent_id)}}
         async with asyncio.TaskGroup() as workers:
             await publisher.start(workers)

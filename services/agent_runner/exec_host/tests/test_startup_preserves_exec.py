@@ -18,8 +18,8 @@ import httpx
 import pytest
 
 from agent.execution.protocol import ResultPayload
-from agent.graph.exec.parent_facts import read_parent_facts
 from agent.graph.exec.process import ExecOutputChunkPublisher, ExecResult, SubprocessExecProcess
+from agent.graph.exec.tests.process_inputs import live_parent_facts
 from base.config.tests.configuration import defaults
 from base.events.live.tests.live_capture import idle_publisher
 from base.host.env.agent_slices import AgentSlices
@@ -44,7 +44,7 @@ _AGENT_ID = 424242
 
 @pytest.fixture
 def short_home(monkeypatch: pytest.MonkeyPatch) -> Generator[Path]:
-    environ = read_parent_facts().environ
+    environ = live_parent_facts().environ
     with tempfile.TemporaryDirectory(prefix="exec-startup-", dir="/tmp") as name:
         home = Path(name)
         upsert_env(
@@ -80,7 +80,7 @@ async def _paused_exec(home: Path, directory: Path) -> AsyncGenerator[ActiveExec
         agent=AgentSlices.resolve(default_reader=defaults(sandbox__exec_timeout_seconds=90)),
     )
     cancel = asyncio.Event()
-    process = SubprocessExecProcess(read_parent_facts(), rng=_rng())
+    process = SubprocessExecProcess(live_parent_facts(), rng=_rng())
     task = asyncio.ensure_future(
         process.run(
             code,
@@ -197,7 +197,7 @@ async def test_exec_host_startup_preserves_an_active_direct_child(
 ) -> None:
     socket = service_socket_path(run_dir(short_home))
     assert not socket.exists()
-    environ = read_parent_facts().environ
+    environ = live_parent_facts().environ
     log = tmp_path / "exec-host.log"
     async with asyncio.timeout(90), _paused_exec(short_home, tmp_path) as active:
         if start_daemon:
@@ -216,7 +216,7 @@ async def test_agent_host_startup_preserves_an_active_delegated_child(
     distinct_free_ports: Callable[[int], list[int]],
 ) -> None:
     port = distinct_free_ports(1)[0]
-    environ = dict(read_parent_facts().environ) | {
+    environ = dict(live_parent_facts().environ) | {
         "MEIVA_DB_URL": db_url,
         "MEIVA_REDIS_URL": redis_url,
         "MEIVA_MACHINE_NAME": "startup-sweep-test",

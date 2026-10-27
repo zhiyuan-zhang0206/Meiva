@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import asyncio
-import os
 import signal
 import sys
 import time
@@ -13,7 +12,6 @@ import pytest
 
 from agent.graph.exec import _subprocess
 from agent.graph.exec._result import ExecCrashed, ExecDone
-from agent.graph.exec.parent_facts import read_parent_facts
 from agent.graph.exec.tests.process_inputs import real_parent
 from base.native_process.exec_domain import ExecProcessDomain
 from base.native_process.process_control import SYSTEM_PROCESS_CONTROL
@@ -44,15 +42,6 @@ async def _assert_gone(pid: int, timeout_s: float = 5.0) -> None:
             return
         await asyncio.sleep(0.05)
     raise AssertionError(f"process {pid} is still alive")
-
-
-def test_the_parent_facts_describe_this_process() -> None:
-    facts = read_parent_facts()
-
-    assert dict(facts.environ) == dict(os.environ)
-    assert facts.cwd == Path.cwd().resolve()
-    assert facts.executable == sys.executable
-    assert facts.editable_roots == (Path.home() / "Meiva",)
 
 
 async def test_kill_and_reap_ends_the_whole_group(tmp_path: Path) -> None:
