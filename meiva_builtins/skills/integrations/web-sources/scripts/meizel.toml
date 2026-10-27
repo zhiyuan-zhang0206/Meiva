@@ -6,8 +6,4 @@ exports = ["webscrape.py"]
 "scrape_wire.py" = "strict"
 
 [roots]
-"webscrape.py" = { kinds = ["clock", "environ"], why = "Web-scrape CLI entry reads ScrapeConfig from process environment and stamps fetched posts with UTC time" }
-
-[debt.ambient-read]
-"webscrape.py#home base.paths.home.resolve_meiva_home" = 1
-"webscrape.py#home pathlib.Path.expanduser" = 1
+"webscrape.py" = { kinds = ["clock", "environ", "home"], why = "Web-scrape CLI entry reads ScrapeConfig from process environment, resolves the Meiva home for the default mirror directory and stamps fetched posts with UTC time" }

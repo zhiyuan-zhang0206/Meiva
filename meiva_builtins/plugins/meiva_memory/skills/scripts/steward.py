@@ -3,6 +3,7 @@ from __future__ import annotations
 import argparse
 import sys
 
+from base.paths.home import resolve_meiva_home
 from meiva_builtins.plugins.meiva_memory.pool_ops import (
     branch_name,
     current_branch,
@@ -19,8 +20,9 @@ def main() -> int:
     ap.add_argument("-m", "--message", required=True, help="commit message")
     args = ap.parse_args()
 
-    pool = pool_dir()
-    branch = branch_name()
+    home = resolve_meiva_home()
+    pool = pool_dir(home)
+    branch = branch_name(home)
     print(f"memory pool: {pool}  branch: {branch}")
 
     current = current_branch(pool)
@@ -34,7 +36,7 @@ def main() -> int:
         )
         return 2
 
-    regenerate_indexes()
+    regenerate_indexes(pool)
     stage_and_commit(args.message, pool)
     run(["git", "-C", str(pool), "push", "origin", "HEAD"])
 

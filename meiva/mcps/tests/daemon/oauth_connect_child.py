@@ -4,7 +4,8 @@
 # process of its own. It connects to the server named in argv, as a daemon would (the home comes
 # from the environment), lists its tools and prints what came of it as one JSON object: the tool
 # names and flow locks of a connection, or the class of the error that stopped it.
-# Arguments: the repository root, the server name, the connect timeout in seconds.
+# Arguments: the repository root, the server name, the connect timeout in seconds and, optionally, the
+# home the daemon configuration names (default: the environment's home).
 
 from __future__ import annotations
 
@@ -17,13 +18,15 @@ from pathlib import Path
 
 async def main() -> None:
     root, server, timeout = sys.argv[1], sys.argv[2], float(sys.argv[3])
+    config_home = Path(sys.argv[4]) if len(sys.argv) > 4 else None
     sys.path.insert(0, root)
     import meiva.mcps._daemon as daemon_mod
     from base.paths import meiva_home
     from meiva.mcps.tests.daemon.daemon_support import daemon_config
 
     locks: dict[str, asyncio.Lock] = {}
-    config = replace(daemon_config(Path(meiva_home())), connect_timeout_seconds=timeout)
+    home = config_home if config_home is not None else Path(meiva_home())
+    config = replace(daemon_config(home), connect_timeout_seconds=timeout)
     try:
         session, stack = await daemon_mod.connect_server(server, config, locks)
     except Exception as error:

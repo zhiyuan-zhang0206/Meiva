@@ -23,7 +23,7 @@ import meiva.mcps._oauth as oauth_mod
 
 def test_token_storage_roundtrip(unit_home: Path) -> None:
     """Tokens and client info survive a write/read cycle at 0600."""
-    storage = oauth_mod.FileTokenStorage("exa")
+    storage = oauth_mod.FileTokenStorage("exa", home=unit_home)
     assert storage._path == unit_home / "mcp_oauth" / "exa.json"
 
     token = OAuthToken(
@@ -48,15 +48,26 @@ def test_token_storage_roundtrip(unit_home: Path) -> None:
     assert got_info.client_id == "abc"
 
 
+# meiva:note
+# The token file sits under the home the caller hands in, not under the environment's home: the two
+# differ here.
+def test_token_storage_follows_the_home_it_is_given(unit_home: Path, tmp_path: Path) -> None:
+    other = tmp_path / "other-home"
+    storage = oauth_mod.FileTokenStorage("exa", home=other)
+
+    assert storage._path == other / "mcp_oauth" / "exa.json"
+    assert other != unit_home
+
+
 def test_token_storage_empty_when_absent(unit_home: Path) -> None:
-    storage = oauth_mod.FileTokenStorage("none")
+    storage = oauth_mod.FileTokenStorage("none", home=unit_home)
     assert asyncio.run(storage.get_tokens()) is None
     assert asyncio.run(storage.get_client_info()) is None
 
 
 def test_token_storage_file_permissions(unit_home: Path) -> None:
     """Tokens are a secret: the file must be owner-only."""
-    storage = oauth_mod.FileTokenStorage("exa")
+    storage = oauth_mod.FileTokenStorage("exa", home=unit_home)
     token = OAuthToken(
         access_token="at",  # noqa: S106
         token_type="Bearer",  # noqa: S106
@@ -146,7 +157,7 @@ def test_normalized_validate_issuer_still_rejects_mismatch() -> None:
 _CLIENT_SECRET = "sec"  # noqa: S105 — test fixture, never a real secret
 
 
-def _make_oauth_context() -> Any:
+def _make_oauth_context(home: Path) -> Any:
     """A minimal live OAuthContext (dataclass: server_url, metadata, storage)."""
     from mcp.client.auth.oauth2 import OAuthContext
     from mcp.shared.auth import OAuthClientMetadata
@@ -158,7 +169,7 @@ def _make_oauth_context() -> Any:
             client_name="t",
             redirect_uris=[AnyUrl(f"http://127.0.0.1:{oauth_mod.OAUTH_CALLBACK_PORT}/callback")],
         ),
-        storage=oauth_mod.FileTokenStorage("t"),
+        storage=oauth_mod.FileTokenStorage("t", home=home),
         redirect_handler=None,
         callback_handler=None,
     )
@@ -184,7 +195,7 @@ def test_token_auth_basic_shim_strips_body_client_id(unit_home: Path) -> None:
     skill-trigger-bench/notion-sdk-patch-5229.py). The first assertion pins
     the SDK's own shape (mcp==2.0.0) so the shim's necessity stays visible —
     if an upstream SDK upgrade makes it fail, the shim can be removed."""
-    ctx = _make_oauth_context()
+    ctx = _make_oauth_context(unit_home)
     ctx.client_info = _client_info("client_secret_basic", _CLIENT_SECRET)
     base_data = {
         "grant_type": "authorization_code",
@@ -213,7 +224,7 @@ def test_token_auth_basic_shim_strips_body_client_id(unit_home: Path) -> None:
 def test_token_auth_basic_shim_keeps_client_secret_post_body(unit_home: Path) -> None:
     """client_secret_post is the RFC path where the body carries the client
     identity — the shim must not touch it."""
-    ctx = _make_oauth_context()
+    ctx = _make_oauth_context(unit_home)
     ctx.client_info = _client_info("client_secret_post", _CLIENT_SECRET)
 
     oauth_mod.install_token_auth_basic_shim()
@@ -228,7 +239,7 @@ def test_token_auth_basic_shim_keeps_client_secret_post_body(unit_home: Path) ->
 
 def test_token_auth_basic_shim_leaves_none_method_alone(unit_home: Path) -> None:
     """A public client ("none") keeps its body client_id — no Basic header."""
-    ctx = _make_oauth_context()
+    ctx = _make_oauth_context(unit_home)
     ctx.client_info = _client_info("none", None)
 
     oauth_mod.install_token_auth_basic_shim()

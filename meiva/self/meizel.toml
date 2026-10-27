@@ -9,9 +9,6 @@ exports = ["harness", "plans.py", "wake.py"]
 "plans.py" = "strict"
 "wake.py" = "strict"
 
-[debt.ambient-read]
-"__init__.py#home meiva.files.workspace_base" = 1
-
 [debt.impure-edge]
 "__init__.py#base/telemetry/__init__.py" = 2
 "__init__.py#base/telemetry/audit_events.py" = 1

@@ -14,4 +14,3 @@ exports = ["answer.py", "calls.py", "errors.py", "outputs.py", "plans.py", "wiri
 
 [debt.ambient-read]
 "answer.py#home pathlib.Path.expanduser" = 1
-"wiring.py#home meiva.files.workspace_base" = 1

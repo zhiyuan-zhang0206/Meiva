@@ -5,8 +5,4 @@ exports = ["feed.py"]
 "rss_post.py" = "strict"
 
 [roots]
-"feed.py" = { kinds = ["clock", "environ"], why = "The command entry builds its scrape configuration from the process environment and stamps fetched posts with UTC time" }
-
-[debt.ambient-read]
-"feed.py#home base.paths.home.resolve_meiva_home" = 1
-"feed.py#home pathlib.Path.expanduser" = 1
+"feed.py" = { kinds = ["clock", "environ", "home"], why = "The command entry builds its scrape configuration from the process environment, resolves the Meiva home for the default mirror directory and stamps fetched posts with UTC time" }

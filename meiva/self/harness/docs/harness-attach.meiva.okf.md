@@ -28,7 +28,7 @@ handoff document alone: `import meiva` in a bare interpreter fails, because ever
 The decisions are strict functions of values in `admission.py` (the row's shape is in
 `registration.py`); `attachment.py` and `store.py` are the shells. `open_attachment` reads
 the process (context, boot, pid, clock) into `HarnessInputs`; the shell reads no environment and
-asks the lineage and clock again at each SDK call, as expiry and ancestry are rechecked then. `open_attachment(handle)` takes its row from `default_store()`; `resolve_registration`
+asks the lineage and clock again at each SDK call, as expiry and ancestry are rechecked then. `open_attachment(handle)` reads its row via `registration_store`; `resolve_registration`
 requires its store.
 
 `meiva.attach()` is the public entry: with no argument it reads

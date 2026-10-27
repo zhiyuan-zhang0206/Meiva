@@ -144,7 +144,7 @@ def test_regenerate_indexes_writes_every_directory_index(unit_home: Path) -> Non
     (pool / "a" / "b").mkdir(parents=True)
     (pool / "a" / "b" / "deep.md").write_text(_NOTE)
 
-    pool_ops.regenerate_indexes()
+    pool_ops.regenerate_indexes(pool)
 
     assert "* [Retry rule](deep.md)" in (pool / "a" / "b" / "index.md").read_text()
     assert "* [b/](b/) - 1 notes" in (pool / "a" / "index.md").read_text()

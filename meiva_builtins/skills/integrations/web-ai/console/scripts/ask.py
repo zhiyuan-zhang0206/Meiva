@@ -29,6 +29,8 @@ from collections.abc import Mapping, Sequence
 from pathlib import Path
 from typing import Any
 
+from base.paths.home import resolve_meiva_home
+
 # `webchat` lives in the parent skill's scripts/ dir, a sibling tree within
 # this same web-ai skill (not an importable package; PYTHONSAFEPATH=1 keeps a
 # script's own directory off sys.path). Structure Rule 6 recognizes this exact
@@ -230,4 +232,4 @@ def main(
 
 
 if __name__ == "__main__":
-    main(sys.argv[1:], places=webchat.system_places())
+    main(sys.argv[1:], places=webchat.system_places(resolve_meiva_home()))
