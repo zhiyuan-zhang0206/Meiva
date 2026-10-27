@@ -24,17 +24,17 @@ marker on ordinary exit or a handled signal. Absence of that marker after the ha
 suppression of an exit callback; it does not exercise watcher notification delivery. Session IDs
 are fixture allocations, not reserved roles.
 
-`terminate_agent_op` and `cancel_agent_op` take the `LocalAgentHost` that names this machine's
-agent host (its data home and loopback health port); `lifecycle_op` reads those two values once
-per request. In the tests the host is a loopback server answering `POST /cancel-turn` through the
-same HTTP client production uses, so the force-cancel case asserts on a real request: its route
-re-reads the agent row over another connection before it answers, proving commit precedes the
-cancellation, and the late shell session of the replacement case is allocated by that same route,
-after the force fence and before the kill. A host that cannot be reached leaves a force
-termination durable and fails a cancel request. A kill the session service could not confirm
-cannot be produced with a real service, because the pty client reports a service that is down as
-an empty listing, so that failure path is not exercised: the kill is the last step of the request
-and nothing wraps it.
+`terminate_agent_op` and `cancel_agent_op` take the `LocalAgentHost` that names this machine's agent
+host (its data home and loopback health port); `lifecycle_op` takes the data home from the op entry
+that serves it and reads the health port from the settings once per request. In the tests the host
+is a loopback server answering `POST /cancel-turn` through the same HTTP client production uses, so
+the force-cancel case asserts on a real request: its route re-reads the agent row over another
+connection before it answers, proving commit precedes the cancellation, and the late shell session
+of the replacement case is allocated by that same route, after the force fence and before the kill.
+A host that cannot be reached leaves a force termination durable and fails a cancel request. A kill
+the session service could not confirm cannot be produced with a real service, because the pty client
+reports a service that is down as an empty listing, so that failure path is not exercised: the kill
+is the last step of the request and nothing wraps it.
 
 Launch validation tests preserve and re-read a real agent birth row on rejection;
 repeatable launches are observed through a Redis subscription. Restart overlay
