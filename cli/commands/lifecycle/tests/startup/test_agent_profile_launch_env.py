@@ -58,6 +58,7 @@ def test_root_manifest_projects_runner_url_for_agent_profile(
         repo_root=tmp_path,
         specs=(agent, ops),
         environments=environments,
+        home=unit_home,
     )
     units = {unit.id: unit for unit in load_manifests(path).units}
     assert dict(units["agent-host"].env) == {

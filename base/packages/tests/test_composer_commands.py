@@ -9,6 +9,7 @@ from base.packages import composer_commands
 from base.packages.composer_commands import CommandCatalog, CommandSources
 from base.packages.skills.tree import Skill
 from base.packages.tests.composer_inputs import CommandInputs
+from base.paths import meiva_home
 
 
 @pytest.fixture
@@ -101,13 +102,13 @@ def test_discover_sorted_by_name(tmp_path: Path, command_inputs: CommandInputs):
 
 
 def test_builtin_commands_discoverable():
-    names = {c["name"] for c in CommandCatalog.system(skills=list).discover()}
+    names = {c["name"] for c in CommandCatalog.system(skills=list, home=meiva_home()).discover()}
     assert {"recap", "compact"} <= names
     assert "plan" not in names
 
 
 def test_removed_builtin_plan_passes_through():
-    commands = CommandCatalog.system(skills=list).discover()
+    commands = CommandCatalog.system(skills=list, home=meiva_home()).discover()
     assert composer_commands.expand_command("/plan the migration", commands) == (
         "/plan the migration"
     )
@@ -236,7 +237,9 @@ def test_explicit_command_overrides_skill_as_command(tmp_path: Path, command_inp
 
 def test_skill_carried_commands_walk_the_skills_it_is_given():
     skills = [_fake_skill("brainstorming", ("demo",)), _fake_skill("goal")]
-    assert composer_commands.command_dirs(skills, sources=CommandSources.system())[-2:] == [
+    assert composer_commands.command_dirs(skills, sources=CommandSources.system(home=meiva_home()))[
+        -2:
+    ] == [
         (Path("/x/commands"), ("demo", "brainstorming")),
         (Path("/x/commands"), ("goal",)),
     ]
@@ -284,7 +287,7 @@ def test_catalog_plain_text_does_not_read_skills(content: str):
     def unavailable_skills() -> Sequence[Skill]:
         raise OSError("Skill registry is unavailable")
 
-    catalog = CommandCatalog.system(skills=unavailable_skills)
+    catalog = CommandCatalog.system(skills=unavailable_skills, home=meiva_home())
     assert catalog.expand(content) == content
 
 
@@ -298,7 +301,7 @@ def test_catalog_plain_text_does_not_read_command_files(tmp_path: Path):
         "path": str(tmp_path),
         "namespace": (),
     }
-    catalog = CommandCatalog.system(skills=lambda: [skill])
+    catalog = CommandCatalog.system(skills=lambda: [skill], home=meiva_home())
     assert catalog.expand("just chatting") == "just chatting"
     with pytest.raises(UnicodeDecodeError):
         catalog.expand("/local:bad")
@@ -313,7 +316,7 @@ def test_catalog_reads_command_files_afresh(tmp_path: Path):
         "path": str(tmp_path),
         "namespace": (),
     }
-    catalog = CommandCatalog.system(skills=lambda: [skill])
+    catalog = CommandCatalog.system(skills=lambda: [skill], home=meiva_home())
     assert catalog.expand("/local:recap") == "Command /local:recap:\nFirst version."
     _write(commands_dir, "recap.md", "Second version.")
     assert catalog.expand("/local:recap") == "Command /local:recap:\nSecond version."
@@ -321,7 +324,7 @@ def test_catalog_reads_command_files_afresh(tmp_path: Path):
 
 def test_the_catalog_reads_its_skill_source_on_every_call():
     installed: list[Skill] = []
-    catalog = CommandCatalog.system(skills=lambda: installed)
+    catalog = CommandCatalog.system(skills=lambda: installed, home=meiva_home())
 
     def skill_commands() -> list[str]:
         return [c["name"] for c in catalog.discover() if c["skill_target"] is not None]

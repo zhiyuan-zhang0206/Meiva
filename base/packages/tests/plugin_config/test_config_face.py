@@ -34,8 +34,8 @@ def _isolate_paths(model_catalog: ModelCatalog, unit_home: Path) -> None:
 
 
 def _write_enabled(raw: dict[str, dict[str, dict[str, bool]]]) -> None:
-    states = {name: {"enabled": False} for name in discover_plugins()}
-    write_local({"plugins": {**states, **raw["plugins"]}})
+    states = {name: {"enabled": False} for name in discover_plugins(home=meiva_home())}
+    write_local({"plugins": {**states, **raw["plugins"]}}, home=meiva_home())
 
 
 def _plugin(name: str, face: str | None) -> Path:
@@ -77,22 +77,24 @@ def test_overlay_validation_recognizes_the_enabled_plugins_config(
     _plugin("probe", _FACE)
     _write_enabled({"plugins": {"probe": {"enabled": True}}})
 
-    assert overlay_config_classes()["probe"].__name__ == "Config"
-    assert resolve_overlay_targets({"marker": "x"}) == {"marker": ("probe", "marker")}
-    validate_config_overlay({"marker": "x"}, models=model_catalog.models)
+    assert overlay_config_classes(home=meiva_home())["probe"].__name__ == "Config"
+    assert resolve_overlay_targets({"marker": "x"}, home=meiva_home()) == {
+        "marker": ("probe", "marker")
+    }
+    validate_config_overlay({"marker": "x"}, models=model_catalog.models, home=meiva_home())
     with pytest.raises(InvalidConfigOverlay, match="type validation"):
-        validate_config_overlay({"marker": 3}, models=model_catalog.models)
+        validate_config_overlay({"marker": 3}, models=model_catalog.models, home=meiva_home())
     with pytest.raises(InvalidConfigOverlay, match="per_agent"):
-        resolve_overlay_targets({"fixed": 2})
+        resolve_overlay_targets({"fixed": 2}, home=meiva_home())
 
 
 def test_overlay_validation_ignores_a_disabled_plugin() -> None:
     _plugin("probe", _FACE)
     _write_enabled({"plugins": {"probe": {"enabled": False}}})
 
-    assert "probe" not in overlay_config_classes()
+    assert "probe" not in overlay_config_classes(home=meiva_home())
     with pytest.raises(InvalidConfigOverlay, match="not in framework Settings"):
-        resolve_overlay_targets({"marker": "x"})
+        resolve_overlay_targets({"marker": "x"}, home=meiva_home())
 
 
 def test_a_broken_face_is_left_out_not_raised() -> None:
@@ -100,7 +102,7 @@ def test_a_broken_face_is_left_out_not_raised() -> None:
     _plugin("broken", "raise RuntimeError('boom')\n")
     _write_enabled({"plugins": {"probe": {"enabled": True}, "broken": {"enabled": True}}})
 
-    assert sorted(overlay_config_classes()) == ["probe"]
+    assert sorted(overlay_config_classes(home=meiva_home())) == ["probe"]
 
 
 def test_a_pure_face_admits_config_and_core_dependencies() -> None:
@@ -132,7 +134,7 @@ def test_pure_admission_rejects_sensitive_and_unknown_core_dependencies(key: str
 def bootstrap_authority_home(unit_home: Path) -> dict[str, object]:
     import json
 
-    baseline: dict[str, object] = json.loads(plugin_bootstrap_config())
+    baseline: dict[str, object] = json.loads(plugin_bootstrap_config(home=unit_home))
     assert "probe" not in baseline
     return baseline
 
@@ -152,20 +154,20 @@ def test_bootstrap_packet_reads_fresh_authority_and_only_declared_cluster_fields
     from base.packages.plugins.config_registration import disk_image_path
 
     _plugin("probe", _cluster_face())
-    image = disk_image_path("probe")
-    assert json.loads(plugin_bootstrap_config()) == {
+    image = disk_image_path("probe", home=meiva_home())
+    assert json.loads(plugin_bootstrap_config(home=meiva_home())) == {
         **bootstrap_authority_home,
         "probe": {"marker": ".git"},
     }
     assert not image.exists()
     image.parent.mkdir(parents=True)
     image.write_text('{"marker":"first","fixed":2}')
-    assert json.loads(plugin_bootstrap_config()) == {
+    assert json.loads(plugin_bootstrap_config(home=meiva_home())) == {
         **bootstrap_authority_home,
         "probe": {"marker": "first"},
     }
     image.write_text('{"marker":"second","fixed":3}')
-    assert json.loads(plugin_bootstrap_config()) == {
+    assert json.loads(plugin_bootstrap_config(home=meiva_home())) == {
         **bootstrap_authority_home,
         "probe": {"marker": "second"},
     }
@@ -176,7 +178,7 @@ def test_bootstrap_packet_rejects_sensitive_cluster_declarations(
 ) -> None:
     _plugin("probe", _cluster_face(sensitive=True))
     with pytest.raises(ValueError, match=r"probe\.marker may not carry secrets"):
-        plugin_bootstrap_config()
+        plugin_bootstrap_config(home=meiva_home())
 
 
 @pytest.mark.parametrize("content", ['{"marker":"only"}', '{"marker":1,"fixed":2}', "bad json"])
@@ -187,8 +189,8 @@ def test_bootstrap_packet_preserves_authority_schema_admission(
     from base.packages.plugins.plugin_errors import InvalidConfigData, SchemaDriftError
 
     _plugin("probe", _cluster_face())
-    image = disk_image_path("probe")
+    image = disk_image_path("probe", home=meiva_home())
     image.parent.mkdir(parents=True)
     image.write_text(content)
     with pytest.raises((InvalidConfigData, SchemaDriftError)):
-        plugin_bootstrap_config()
+        plugin_bootstrap_config(home=meiva_home())

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from collections.abc import Callable
 from contextlib import AbstractContextManager
+from functools import partial
 from pathlib import Path
 
 import psycopg
@@ -12,6 +13,7 @@ from base.db.code_version_gate import ProcessDbGate
 from base.packages.extensions import adopt as adopt
 from base.packages.extensions import install_registry
 from base.packages.extensions import registry as reg
+from base.paths import meiva_home
 
 _AsMachine = Callable[[Path], AbstractContextManager[MachineIdentityReader]]
 
@@ -40,7 +42,8 @@ def _install_locally(
     install_registry.register(
         install_registry.InstalledPackage(
             name=name, type="skill", origin=origin, enabled=enabled, trust=trust
-        )
+        ),
+        home=meiva_home(),
     )
     return dest
 
@@ -59,6 +62,7 @@ def test_sweep_uploads_a_pre_registry_install(
                 pool,
                 skills_root=paths.skills_dir(paths.meiva_home()),
                 machine_name=installing_machine.name(),
+                home=meiva_home(),
             )
         assert result.adopted == ["sweep-demo"]
 
@@ -83,6 +87,7 @@ def test_a_swept_name_crosses_to_a_machine_that_never_had_it(
                 pool,
                 skills_root=paths.skills_dir(paths.meiva_home()),
                 machine_name=installing_machine.name(),
+                home=meiva_home(),
             )
         original = (src / "SKILL.md").read_text(encoding="utf-8")
 
@@ -90,7 +95,11 @@ def test_a_swept_name_crosses_to_a_machine_that_never_had_it(
         home_b = tmp_path / "home-b"
         from base.packages.extensions import materialize as mat
 
-        result = mat.materialize_skills(db_conn, dest_root=paths.skills_dir(paths.meiva_home()))
+        result = mat.materialize_skills(
+            db_conn,
+            dest_root=paths.skills_dir(paths.meiva_home()),
+            last_written=partial(mat.last_written_hash, home=home_b),
+        )
         assert result.landed == ["crossing-demo"]
         assert (home_b / "skills" / "crossing-demo" / "SKILL.md").read_text(
             encoding="utf-8"
@@ -112,12 +121,14 @@ def test_the_sweep_is_idempotent(
                 pool,
                 skills_root=paths.skills_dir(paths.meiva_home()),
                 machine_name=installing_machine.name(),
+                home=meiva_home(),
             )
         with db.pool(gate=database_gate) as pool:
             second = adopt.adopt_local_installs(
                 pool,
                 skills_root=paths.skills_dir(paths.meiva_home()),
                 machine_name=installing_machine.name(),
+                home=meiva_home(),
             )
 
     assert first.adopted == ["idem-sweep"]
@@ -141,6 +152,7 @@ def test_two_machines_with_identical_content_merge_silently(
                     pool,
                     skills_root=paths.skills_dir(paths.meiva_home()),
                     machine_name=installing_machine.name(),
+                    home=tmp_path / home,
                 )
 
     assert result.conflicts == []
@@ -161,6 +173,7 @@ def test_a_disagreement_is_refused_with_both_machines_named(
                 pool,
                 skills_root=paths.skills_dir(paths.meiva_home()),
                 machine_name=installing_machine.name(),
+                home=meiva_home(),
             )
 
     with as_machine(tmp_path / "home-b") as installing_machine:
@@ -170,6 +183,7 @@ def test_a_disagreement_is_refused_with_both_machines_named(
                 pool,
                 skills_root=paths.skills_dir(paths.meiva_home()),
                 machine_name=installing_machine.name(),
+                home=meiva_home(),
             )
 
         assert result.adopted == []
@@ -201,6 +215,7 @@ def test_converge_managed_packages_are_not_adopted(
                 pool,
                 skills_root=paths.skills_dir(paths.meiva_home()),
                 machine_name=installing_machine.name(),
+                home=meiva_home(),
             )
 
     assert result.adopted == []
@@ -221,6 +236,7 @@ def test_a_locally_disabled_skill_adopts_disabled(
                 pool,
                 skills_root=paths.skills_dir(paths.meiva_home()),
                 machine_name=installing_machine.name(),
+                home=meiva_home(),
             )
 
     row = reg.get(db_conn, "off-demo")
@@ -243,6 +259,7 @@ def test_local_reviewed_trust_travels(
                 pool,
                 skills_root=paths.skills_dir(paths.meiva_home()),
                 machine_name=installing_machine.name(),
+                home=meiva_home(),
             )
 
     row = reg.get(db_conn, "trusted-demo")
@@ -264,6 +281,7 @@ def test_reviewed_row_survives_a_later_unreviewed_machine(
                 pool,
                 skills_root=paths.skills_dir(paths.meiva_home()),
                 machine_name=installing_machine.name(),
+                home=meiva_home(),
             )
 
     with as_machine(tmp_path / "home-b") as installing_machine:
@@ -273,6 +291,7 @@ def test_reviewed_row_survives_a_later_unreviewed_machine(
                 pool,
                 skills_root=paths.skills_dir(paths.meiva_home()),
                 machine_name=installing_machine.name(),
+                home=meiva_home(),
             )
         assert result.conflicts == []
         assert result.already_claimed == ["shared-trust-demo"]
@@ -291,13 +310,15 @@ def test_a_tracked_name_missing_from_disk_is_reported_not_invented(
 ) -> None:
     with as_machine(tmp_path / "home-a") as installing_machine:
         install_registry.register(
-            install_registry.InstalledPackage(name="ghost-demo", type="skill", origin="user")
+            install_registry.InstalledPackage(name="ghost-demo", type="skill", origin="user"),
+            home=meiva_home(),
         )
         with db.pool(gate=database_gate) as pool:
             result = adopt.adopt_local_installs(
                 pool,
                 skills_root=paths.skills_dir(paths.meiva_home()),
                 machine_name=installing_machine.name(),
+                home=meiva_home(),
             )
 
     assert result.missing_tree == ["ghost-demo"]

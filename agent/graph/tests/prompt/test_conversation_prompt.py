@@ -10,6 +10,7 @@ from base.config.tests.configuration import defaults
 from base.host.env.agent_slices import AgentSlices
 from base.packages.plugin_providers import build_model_catalog
 from base.packages.plugins.extensions import EMPTY
+from base.paths import meiva_home
 
 
 def _slices(**changes: Any) -> AgentSlices:
@@ -17,14 +18,18 @@ def _slices(**changes: Any) -> AgentSlices:
 
 
 def _inputs(slices: AgentSlices) -> SectionInputs:
-    return SectionInputs(slices, build_model_catalog(), LiveSdk(SkillView((), (), (), ()), (), ()))
+    return SectionInputs(
+        slices, build_model_catalog(home=meiva_home()), LiveSdk(SkillView((), (), (), ()), (), ())
+    )
 
 
 @pytest.mark.parametrize("style", ["off", "oriented", "concise", "silent"])
 def test_initial_human_response_is_present_without_plugins(style: str) -> None:
     slices = _slices(agent__agent_communication_style=style)
 
-    prompt = build_system_prompt(EMPTY, slices, agent_id=1, catalog=build_model_catalog())
+    prompt = build_system_prompt(
+        EMPTY, slices, agent_id=1, catalog=build_model_catalog(home=meiva_home()), home=meiva_home()
+    )
 
     assert prompt.count(user_reply_section(_inputs(slices))) == 1
     assert (
@@ -48,7 +53,9 @@ def test_initial_human_response_is_present_without_plugins(style: str) -> None:
 @pytest.mark.parametrize("style", ["off", "oriented", "concise", "silent"])
 def test_reply_routing_and_handoff_policy_survive_every_style(style: str) -> None:
     slices = _slices(agent__agent_communication_style=style)
-    prompt = build_system_prompt(EMPTY, slices, agent_id=1, catalog=build_model_catalog())
+    prompt = build_system_prompt(
+        EMPTY, slices, agent_id=1, catalog=build_model_catalog(home=meiva_home()), home=meiva_home()
+    )
 
     assert prompt.count("Reply in ordinary assistant text in this conversation") == 1
     assert "Text alongside a tool call also reaches the user" in prompt
@@ -73,7 +80,9 @@ def communication_prompt(request: pytest.FixtureRequest) -> tuple[str, str]:
         agent__prompt_output_conciseness_enabled=output_shape,
     )
 
-    return style, build_system_prompt(EMPTY, slices, agent_id=1, catalog=build_model_catalog())
+    return style, build_system_prompt(
+        EMPTY, slices, agent_id=1, catalog=build_model_catalog(home=meiva_home()), home=meiva_home()
+    )
 
 
 def test_language_policy_survives_optional_guidance(communication_prompt: tuple[str, str]) -> None:

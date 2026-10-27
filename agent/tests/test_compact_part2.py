@@ -47,7 +47,7 @@ from base.events.live.bus import EventBus
 from base.host.env.agent_slices import AgentSlices
 from base.packages.plugin_providers import build_model_catalog
 from base.packages.plugins.extensions import EMPTY
-from base.paths import resolve_meiva_home
+from base.paths import meiva_home, resolve_meiva_home
 
 
 def _compact_tail(update: Any) -> list[AnyMessage]:
@@ -117,7 +117,7 @@ def _runtime_with_llm(llm: Any, database_gate: ProcessDbGate) -> Runtime[MeivaCo
         ),
         db=Database.from_settings(gate=database_gate),
         bus=EventBus.from_settings(rng=seeded_rng()),
-        catalog=build_model_catalog(),
+        catalog=build_model_catalog(home=meiva_home()),
         clock_factory=Clock.from_settings,
     )
     return Runtime(context=ctx)
@@ -137,7 +137,9 @@ async def test_generate_summary_returns_summary():
 
     slices = AgentSlices.resolve(None, default_reader=defaults())
     llm = _fake_llm(summary_text="a synthetic summary")
-    summary = await generate_summary(msgs, llm, slices, catalog=build_model_catalog())
+    summary = await generate_summary(
+        msgs, llm, slices, catalog=build_model_catalog(home=meiva_home())
+    )
 
     assert summary == "a synthetic summary"
 
@@ -156,7 +158,7 @@ async def test_generate_summary_remembers_the_call_that_produced_it() -> None:
         response_metadata={"model_name": "m1"},
     )
     summary = await generate_summary(
-        msgs, _fake_llm(response=response), slices, catalog=build_model_catalog()
+        msgs, _fake_llm(response=response), slices, catalog=build_model_catalog(home=meiva_home())
     )
 
     closing = closing_of(summary)
@@ -167,7 +169,7 @@ async def test_generate_summary_remembers_the_call_that_produced_it() -> None:
     assert summary == "a synthetic summary"  # still the plain text everywhere else
 
     bare = await generate_summary(
-        msgs, _fake_llm("no usage"), slices, catalog=build_model_catalog()
+        msgs, _fake_llm("no usage"), slices, catalog=build_model_catalog(home=meiva_home())
     )
     assert closing_of(bare) is None
     assert closing_of("an agent-written summary") is None
@@ -278,7 +280,7 @@ def _make_runtime(ops_pool=None, llm=None, *, database_gate: ProcessDbGate):
         agent=AgentSlices.resolve(default_reader=defaults()),
         db=Database.from_settings(gate=database_gate),
         bus=EventBus.from_settings(rng=seeded_rng()),
-        catalog=build_model_catalog(),
+        catalog=build_model_catalog(home=meiva_home()),
         clock_factory=Clock.from_settings,
     )
     from langgraph.runtime import Runtime

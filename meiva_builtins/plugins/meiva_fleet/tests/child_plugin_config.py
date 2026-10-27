@@ -12,6 +12,7 @@ from base.packages.plugins.config_registration import (
     read_service_config,
 )
 from base.packages.plugins.plugin_errors import InvalidConfigData, SchemaDriftError
+from base.paths import meiva_home
 from meiva_builtins.plugins.meiva_fleet.default_config import FleetConfig
 
 mode = sys.argv[1]
@@ -19,7 +20,9 @@ if mode not in ("image", "service"):
     raise ValueError(f"unknown mode {mode!r}")
 try:
     config = (
-        read_plugin_config("meiva_fleet", FleetConfig, disk_image_path("meiva_fleet"))
+        read_plugin_config(
+            "meiva_fleet", FleetConfig, disk_image_path("meiva_fleet", home=meiva_home())
+        )
         if mode == "image"
         else read_service_config("meiva_fleet", FleetConfig)
     )

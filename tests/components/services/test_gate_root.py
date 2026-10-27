@@ -18,7 +18,7 @@ from base.daemon.health import DaemonProbe
 from base.daemon.http_transport import start_daemon_http
 from base.native_process.ownership import OwnedProcess
 from base.native_process.root_control.client import RootClient, native_identity
-from base.paths import root_run_dir
+from base.paths import meiva_home, root_run_dir
 from services.entrypoints.gate.tests.test_gate import FakeApp, FakeGateway, Servers, gate_request
 from services.entrypoints.gate.tests.test_gate import probe_timeout_s as probe_timeout_s
 from services.entrypoints.gate.tests.test_gate import servers as servers
@@ -61,7 +61,7 @@ async def test_gate_native_child_readiness_restart_and_stop(short_tmp: Path) -> 
     prior_url = get_field("frontend_healthcheck_url")
     set_field("frontend_healthcheck_url", f"http://127.0.0.1:{port}")
     run_dir = root_run_dir(short_tmp)
-    spec = next(spec for spec in build_services() if spec.session == "gate")
+    spec = next(spec for spec in build_services(home=meiva_home()) if spec.session == "gate")
     assert spec.identity_probe is not None
     assert spec.capabilities == frozenset({"gateway"})
     assert not spec.requires_db

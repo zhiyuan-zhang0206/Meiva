@@ -22,14 +22,14 @@ os.environ["MEIVA_HOME"] = home
 
 from base.packages.extensions import install_registry as reg  # noqa: E402
 
-reg.load()  # pay the import + first-read cost before the handshake
+reg.load(home=pathlib.Path(home))  # pay the import + first-read cost before the handshake
 if role == "fast":
     deadline = time.monotonic() + 60
     while not marker.exists():
         if time.monotonic() > deadline:
             raise SystemExit("the slow writer never reached its window")
         time.sleep(0.01)
-with reg.mutate() as registry:
+with reg.mutate(home=pathlib.Path(home)) as registry:
     if role == "slow":
         marker.touch()
         time.sleep(float(hold_arg))

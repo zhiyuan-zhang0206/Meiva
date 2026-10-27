@@ -8,11 +8,12 @@ from __future__ import annotations
 import json
 import sys
 
+from base.paths import meiva_home
 from services.supervision.roster.composition import build_services
 
 
 def main() -> None:
-    specs = build_services()
+    specs = build_services(home=meiva_home())
     by_session = {spec.session: spec for spec in specs}
     report = {
         "sessions": sorted(by_session),

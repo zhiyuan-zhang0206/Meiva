@@ -479,7 +479,7 @@ def converge_skills(
     plugins_root = paths.plugins_dir(home=meiva_home)
     result = SkillsConvergeResult()
 
-    with install_registry.mutate() as registry:
+    with install_registry.mutate(home=meiva_home) as registry:
         sources, conflicts = iter_sources(repo, home=meiva_home)
         for c in conflicts:
             result.warnings.append(f"skipped {c}")

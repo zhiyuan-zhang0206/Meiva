@@ -10,4 +10,5 @@ exports = ["diagnostic_probes.py", "manifests.py"]
 "__init__.py" = "strict"
 
 [roots]
+"manifests.py" = { kinds = ["home"], why = "the manifest generator CLI resolves the home whose plugins declare the services it writes into the manifest" }
 "glue.py" = { kinds = ["settings", "cwd", "home", "platform", "environ"], why = "Root supervisor startup composes process-owned handles and configuration, and checks that the root runs from the loaded runtime's cwd" }

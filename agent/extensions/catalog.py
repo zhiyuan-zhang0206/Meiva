@@ -275,15 +275,17 @@ class UnknownPluginError(Exception):
 
 
 # meiva:link agent/extensions/docs/catalog.meiva.okf.md
-def build_catalog(*, sampling: SamplingPolicyOwner) -> Catalog:
+def build_catalog(*, sampling: SamplingPolicyOwner, home: Path) -> Catalog:
     from agent.state import plugin_state_schema
     from base.packages.plugins.loading.registry import declarations
     from meiva.sdk_surface.extensions import load_extensions
 
-    config = load_extensions(sampling=sampling, validate_state=plugin_state_schema).config
-    declared = {name: contributions for name, _dir, contributions in declarations()}
-    data_records = _data_records()
-    discovered = enable_config.installed_plugin_dirs()
+    config = load_extensions(
+        sampling=sampling, validate_state=plugin_state_schema, home=home
+    ).config
+    declared = {name: contributions for name, _dir, contributions in declarations(home=home)}
+    data_records = _data_records(home=home)
+    discovered = enable_config.installed_plugin_dirs(home=home)
     repo_plugins = _repo_plugins_dir()
 
     views: list[PluginView] = []
@@ -307,12 +309,12 @@ def build_catalog(*, sampling: SamplingPolicyOwner) -> Catalog:
     return Catalog(surfaces=SURFACES, plugins=tuple(views))
 
 
-def _data_records() -> dict[str, tuple[Contribution, ...]]:
+def _data_records(*, home: Path) -> dict[str, tuple[Contribution, ...]]:
     from base.packages.plugins import data_registry
     from base.packages.plugins.loading.plugin_loader import safe_load_plugin_module
 
     records: dict[str, tuple[Contribution, ...]] = {}
-    for name, directory in enabled_plugin_dirs():
+    for name, directory in enabled_plugin_dirs(home=home):
         found: list[Contribution] = []
         for face in ("metrics", "inspector", "provider"):
             path = directory / f"{face}.py"

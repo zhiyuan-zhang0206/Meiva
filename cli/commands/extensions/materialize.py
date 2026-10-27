@@ -13,13 +13,16 @@ is a roster of host-state steps, not a place for a subsystem's reader.
 from __future__ import annotations
 
 import sys
+from functools import partial
 from pathlib import Path
 
 from base.agents.context.clients import DatabaseFactory
 from base.cluster.machine import MachineIdentityReader
 
 
-def materialize_cluster_extensions(*, database_factory: DatabaseFactory, skills_root: Path) -> None:
+def materialize_cluster_extensions(
+    *, database_factory: DatabaseFactory, skills_root: Path, home: Path
+) -> None:
     """Land the cluster's installed skills onto `skills_root` on this machine.
 
     Adds the names that arrived by `meiva skill install` on any machine of the
@@ -54,7 +57,11 @@ def materialize_cluster_extensions(*, database_factory: DatabaseFactory, skills_
         # than letting ConnectionPool.__del__ run at interpreter exit (it then
         # joins its own worker and prints "cannot join current thread" noise).
         with database_factory().pool() as pool, pool.connection() as conn:
-            result = materialize.materialize_skills(conn, dest_root=skills_root)
+            result = materialize.materialize_skills(
+                conn,
+                dest_root=skills_root,
+                last_written=partial(materialize.last_written_hash, home=home),
+            )
     except Exception as exc:  # see the docstring: report, never block converge
         print(f"  ! extensions: cluster registry unreachable ({exc}); skipping", file=sys.stderr)
         return
@@ -72,7 +79,11 @@ def materialize_cluster_extensions(*, database_factory: DatabaseFactory, skills_
 
 
 def adopt_local_extensions(
-    *, database_factory: DatabaseFactory, machine: MachineIdentityReader, skills_root: Path
+    *,
+    database_factory: DatabaseFactory,
+    machine: MachineIdentityReader,
+    skills_root: Path,
+    home: Path,
 ) -> None:
     """Upload this machine's pre-registry skill installs into the cluster.
 
@@ -92,7 +103,7 @@ def adopt_local_extensions(
     try:
         with database_factory().pool() as pool:
             result = adopt.adopt_local_installs(
-                pool, skills_root=skills_root, machine_name=machine.name()
+                pool, skills_root=skills_root, machine_name=machine.name(), home=home
             )
     except Exception as exc:  # see the docstring: report, never block converge
         print(f"  ! extensions: could not adopt local installs ({exc}); skipping", file=sys.stderr)

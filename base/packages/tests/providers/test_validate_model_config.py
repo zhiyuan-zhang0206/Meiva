@@ -8,6 +8,7 @@ import pytest
 
 from base.host.proc import run_bounded
 from base.packages.plugin_providers import build_model_catalog
+from base.paths import meiva_home
 
 
 def _provider_keys() -> dict[str, str]:
@@ -184,7 +185,12 @@ class TestValidateModelConfig:
 
 class TestThinkingDisabledAcrossRoster:
     @pytest.mark.parametrize(
-        "model", [m for models in build_model_catalog().supported_models.values() for m in models]
+        "model",
+        [
+            m
+            for models in build_model_catalog(home=meiva_home()).supported_models.values()
+            for m in models
+        ],
     )
     def test_roster_model_constructs_with_thinking_disabled(
         self, tmp_path: Path, model: str

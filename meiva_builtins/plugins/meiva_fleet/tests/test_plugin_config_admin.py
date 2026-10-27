@@ -18,7 +18,7 @@ from base.packages.plugin_config_images import (
 )
 from base.packages.plugins.config_registration import disk_image_path
 from base.packages.plugins.plugin_errors import InvalidConfigOverlay
-from base.paths import plugins_dir
+from base.paths import meiva_home, plugins_dir
 from meiva_builtins.plugins.meiva_fleet.default_config import FleetConfig
 
 
@@ -40,7 +40,11 @@ def owner(path: Path) -> PluginConfigOwner:
 
 
 def test_metadata_uses_plugin_owner_and_preserves_host_cluster_policy() -> None:
-    fields = {field.name: field for field in plugin_metadata() if field.owner == "meiva_fleet"}
+    fields = {
+        field.name: field
+        for field in plugin_metadata(home=meiva_home())
+        if field.owner == "meiva_fleet"
+    }
     assert set(fields) == set(FleetConfig.model_fields)
     assert fields["task_maintenance_enabled"].scope == "host"
     assert fields["task_maintenance_enabled"].remote_writable is True
@@ -54,16 +58,16 @@ def test_metadata_uses_plugin_owner_and_preserves_host_cluster_policy() -> None:
 def test_mixed_owner_patch_fails_before_any_image_write(tmp_path: Path) -> None:
     image = tmp_path / "config.json"
     with pytest.raises(InvalidConfigOverlay, match="mixes owners"):
-        patch_owner({"task_escalate_n", "llm_model"})
+        patch_owner({"task_escalate_n", "llm_model"}, home=meiva_home())
     assert not image.exists()
-    actual = patch_owner({"task_escalate_n"})
+    actual = patch_owner({"task_escalate_n"}, home=meiva_home())
     assert actual is not None and actual.name == "meiva_fleet"
-    assert patch_owner({"llm_model"}) is None
+    assert patch_owner({"llm_model"}, home=meiva_home()) is None
 
 
 def test_unknown_patch_field_is_a_request_rejection() -> None:
     with pytest.raises(InvalidConfigOverlay, match="unknown field"):
-        patch_owner({"unknown_plugin_config_field"})
+        patch_owner({"unknown_plugin_config_field"}, home=meiva_home())
 
 
 _SECOND_FACE = """
@@ -87,10 +91,10 @@ def test_duplicate_declaration_is_not_a_request_rejection(unit_home: Path) -> No
     (second / "plugin.py").write_text("")
     (second / "default_config.py").write_text(_SECOND_FACE)
     with pytest.raises(ValueError, match="more than one declaration owner") as refused:
-        patch_owner({"task_escalate_n"})
+        patch_owner({"task_escalate_n"}, home=unit_home)
     assert not isinstance(refused.value, InvalidConfigOverlay)
-    assert not disk_image_path("meiva_fleet").exists()
-    assert not disk_image_path("second_fleet").exists()
+    assert not disk_image_path("meiva_fleet", home=unit_home).exists()
+    assert not disk_image_path("second_fleet", home=unit_home).exists()
 
 
 def test_image_patch_validates_whole_candidate_and_cas(tmp_path: Path) -> None:

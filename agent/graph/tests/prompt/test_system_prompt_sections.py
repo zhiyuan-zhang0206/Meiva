@@ -39,6 +39,7 @@ from base.lm.catalog import ModelCatalog
 from base.log.tests.log_records import LogRecords
 from base.packages.plugin_providers import build_model_catalog
 from base.packages.plugins.extensions import EMPTY, ExtensionRegistry, PluginContributions
+from base.paths import meiva_home
 
 
 def _slices(**changes: Any) -> AgentSlices:
@@ -47,7 +48,7 @@ def _slices(**changes: Any) -> AgentSlices:
 
 def _inputs(**changes: Any) -> SectionInputs:
     live = LiveSdk(SkillView(("*",), (), (), ()), (), ())
-    return SectionInputs(_slices(**changes), build_model_catalog(), live)
+    return SectionInputs(_slices(**changes), build_model_catalog(home=meiva_home()), live)
 
 
 @pytest.mark.parametrize(
@@ -140,7 +141,8 @@ def test_invest_in_the_future_section_in_full_prompt_when_on():
         EMPTY,
         _slices(agent__prompt_invest_future_enabled=True),
         agent_id=1,
-        catalog=build_model_catalog(),
+        catalog=build_model_catalog(home=meiva_home()),
+        home=meiva_home(),
     )
 
     assert "# Invest in the future" in prompt
@@ -154,7 +156,8 @@ def test_invest_in_the_future_section_absent_from_full_prompt_when_off():
         EMPTY,
         _slices(agent__prompt_invest_future_enabled=False),
         agent_id=1,
-        catalog=build_model_catalog(),
+        catalog=build_model_catalog(home=meiva_home()),
+        home=meiva_home(),
     )
 
     assert "# Invest in the future" not in prompt
@@ -212,7 +215,11 @@ def test_codeact_section_defaults_to_on():
     """Unconfigured clusters receive batching guidance in the assembled prompt."""
     assert _slices().prompt.prompt_codeact_enabled is True
     assert "# CodeAct" in build_system_prompt(
-        EMPTY, _slices(), agent_id=1, catalog=build_model_catalog()
+        EMPTY,
+        _slices(),
+        agent_id=1,
+        catalog=build_model_catalog(home=meiva_home()),
+        home=meiva_home(),
     )
 
 
@@ -255,7 +262,8 @@ def test_codeact_section_in_full_prompt_when_on():
         EMPTY,
         _slices(agent__prompt_codeact_enabled=True),
         agent_id=1,
-        catalog=build_model_catalog(),
+        catalog=build_model_catalog(home=meiva_home()),
+        home=meiva_home(),
     )
 
     assert "CodeAct" in prompt
@@ -269,7 +277,8 @@ def test_codeact_section_absent_from_full_prompt_when_off():
         EMPTY,
         _slices(agent__prompt_codeact_enabled=False),
         agent_id=1,
-        catalog=build_model_catalog(),
+        catalog=build_model_catalog(home=meiva_home()),
+        home=meiva_home(),
     )
 
     assert "CodeAct" not in prompt
@@ -400,7 +409,8 @@ def test_off_style_is_absent_from_the_full_system_prompt() -> None:
         EMPTY,
         _slices(agent__agent_communication_style="off"),
         agent_id=1,
-        catalog=build_model_catalog(),
+        catalog=build_model_catalog(home=meiva_home()),
+        home=meiva_home(),
     )
 
     assert "# Keeping the user oriented" not in prompt
@@ -445,7 +455,7 @@ def test_user_tone_uses_strong_gemini_variant() -> None:
 
     gemini_id = next(
         model
-        for model, spec in build_model_catalog().models.items()
+        for model, spec in build_model_catalog(home=meiva_home()).models.items()
         if spec.provider == "gemini" and spec.spawnable
     )
 
@@ -511,7 +521,8 @@ def test_user_tone_section_is_present_in_the_full_prompt_when_enabled(
         EMPTY,
         _slices(agent__prompt_user_tone_enabled=enabled, lm__llm_model="deepseek-v4-pro"),
         agent_id=1,
-        catalog=build_model_catalog(),
+        catalog=build_model_catalog(home=meiva_home()),
+        home=meiva_home(),
     )
 
     assert ("# Communicating with the user" in prompt) is expect_section
@@ -524,7 +535,11 @@ def test_knowledge_cutoff_appears_for_known_model():
     """When the current model has a knowledge cutoff,
     build_system_prompt() appends a 'Knowledge cutoff: YYYY-MM' line."""
     prompt = build_system_prompt(
-        EMPTY, _slices(lm__llm_model="claude-sonnet-5"), agent_id=1, catalog=build_model_catalog()
+        EMPTY,
+        _slices(lm__llm_model="claude-sonnet-5"),
+        agent_id=1,
+        catalog=build_model_catalog(home=meiva_home()),
+        home=meiva_home(),
     )
     assert "Knowledge cutoff: 2026-01" in prompt
 
@@ -533,7 +548,11 @@ def test_knowledge_cutoff_absent_for_unknown_model():
     """When the model has no knowledge cutoff, no cutoff line is
     appended — the prompt just omits it rather than crashing."""
     prompt = build_system_prompt(
-        EMPTY, _slices(lm__llm_model="unknown-model-v1"), agent_id=1, catalog=build_model_catalog()
+        EMPTY,
+        _slices(lm__llm_model="unknown-model-v1"),
+        agent_id=1,
+        catalog=build_model_catalog(home=meiva_home()),
+        home=meiva_home(),
     )
     assert "Knowledge cutoff:" not in prompt
 
@@ -544,7 +563,7 @@ def test_model_knowledge_cutoff_all_entries_valid():
 
     from base.packages.plugin_providers import build_model_catalog
 
-    cutoffs = build_model_catalog().knowledge_cutoffs
+    cutoffs = build_model_catalog(home=meiva_home()).knowledge_cutoffs
     assert len(cutoffs) > 0
     for model, cutoff in cutoffs.items():
         assert re.match(r"^\d{4}-\d{2}$", cutoff), f"Bad format for {model}: {cutoff!r}"
@@ -554,7 +573,7 @@ def test_supported_models_all_have_cutoff():
     """Every spawnable model in the catalog has a knowledge cutoff."""
     from base.packages.plugin_providers import build_model_catalog
 
-    catalog = build_model_catalog()
+    catalog = build_model_catalog(home=meiva_home())
     for models in catalog.supported_models.values():
         for model in models:
             assert model in catalog.knowledge_cutoffs, (
@@ -625,7 +644,8 @@ def test_cross_machine_delegation_hint_in_full_prompt_when_on():
         EMPTY,
         _slices(agent__prompt_cross_machine_delegation_enabled=True),
         agent_id=1,
-        catalog=build_model_catalog(),
+        catalog=build_model_catalog(home=meiva_home()),
+        home=meiva_home(),
     )
 
     assert _CROSS_MACHINE_DELEGATION_SENTENCE in prompt
@@ -640,7 +660,8 @@ def test_cross_machine_delegation_hint_absent_from_full_prompt_when_off():
         EMPTY,
         _slices(agent__prompt_cross_machine_delegation_enabled=False),
         agent_id=1,
-        catalog=build_model_catalog(),
+        catalog=build_model_catalog(home=meiva_home()),
+        home=meiva_home(),
     )
 
     assert _CROSS_MACHINE_DELEGATION_SENTENCE not in prompt
@@ -680,7 +701,7 @@ def test_plugin_prompt_section_records_an_activation(loguru_records: LogRecords)
     spending — recorded with its length + digest, so which variant landed is
     identifiable without storing the text. A section returning "" contributed
     nothing and records nothing."""
-    catalog = build_model_catalog()
+    catalog = build_model_catalog(home=meiva_home())
     first_model = sorted(catalog.models)[0]
 
     def loud_section(_slices: object, *, catalog: ModelCatalog) -> str:
@@ -693,7 +714,7 @@ def test_plugin_prompt_section_records_an_activation(loguru_records: LogRecords)
         (("myplugin", PluginContributions(system_prompt_sections=(loud_section, silent_section))),)
     )
     slices = _slices()
-    prompt = build_system_prompt(registry, slices, agent_id=1, catalog=catalog)
+    prompt = build_system_prompt(registry, slices, agent_id=1, catalog=catalog, home=meiva_home())
 
     contribution = f"## Loud\n\nsomething for {first_model}."
     assert contribution in prompt
@@ -713,7 +734,8 @@ def test_long_running_operation_without_fleet():
         EMPTY,
         _slices(agent__skills_to_inject_into_system_prompt=[]),
         agent_id=1,
-        catalog=build_model_catalog(),
+        catalog=build_model_catalog(home=meiva_home()),
+        home=meiva_home(),
     )
     assert prompt.count("# Efficient long-running operation") == 1
     assert "## Agent-to-agent communication" not in prompt

@@ -12,8 +12,7 @@ exports = ["check_model_updates.py", "update_model_pricing.py"]
 "update_model_pricing.py" = ["plugin_price_sync.py"]
 
 [roots]
-"check_model_updates.py" = { kinds = ["environ"], why = "tracker selects provider API-key aliases dynamically and must prefer the live process env before its `.env` fallback" }
+"check_model_updates.py" = { kinds = ["environ", "home"], why = "tracker selects provider API-key aliases dynamically and must prefer the live process env before its `.env` fallback; main() resolves the home once for the tracker state directory and the model catalog" }
 "update_model_pricing.py" = { kinds = ["clock"], why = "CLI entrypoint stamps provisional pricing updates and selects the active archive period against current UTC time" }
 
 [debt.ambient-read]
-"check_model_updates.py#home base.paths.meiva_home" = 1

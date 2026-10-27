@@ -13,6 +13,7 @@ from base.lm.harness.registration import SecureRandom
 from base.native_process.stop_timing import CANCEL_UNWIND_TIMEOUT_S
 from base.packages.plugin_providers import build_model_catalog
 from base.packages.tests.model_catalog import inert_keys
+from base.paths import meiva_home
 from services.agent_runner.agent_host.runtime import HostCachePolicy, HostPolicy, StallTiming
 
 
@@ -24,7 +25,7 @@ def configured_policy(**changes: Any) -> HostPolicy:
     return replace(
         HostPolicy(
             max_concurrent_turns=daemon.host_max_concurrent_turns,
-            provider_keys=inert_keys(build_model_catalog()),
+            provider_keys=inert_keys(build_model_catalog(home=meiva_home())),
             cache=HostCachePolicy(
                 idle_ttl_seconds=daemon.host_agent_idle_ttl_seconds,
                 size=daemon.host_agent_cache_size,

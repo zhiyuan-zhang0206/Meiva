@@ -39,7 +39,8 @@ def main(name: str) -> None:
                 **{key: {"enabled": False} for key in builtins},
                 "inspect-root": {"enabled": True},
             }
-        }
+        },
+        home=meiva_home(),
     )
     args = parsers.parse_args(["plugins", "inspect", name], retained_children=[])
     args.runtime = CommandRuntime.create(paths.meiva_home())

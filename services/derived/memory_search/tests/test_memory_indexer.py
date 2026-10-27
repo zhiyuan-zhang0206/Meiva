@@ -25,6 +25,7 @@ import pytest
 
 from base.daemon.health import Liveness
 from base.packages.plugin_providers import build_model_catalog
+from base.paths import meiva_home
 from services.derived.memory_indexer import config, daemon
 from services.derived.memory_indexer.backends.base import (
     ChunkHit,
@@ -503,7 +504,10 @@ def test_factory_worst_case_registry_complete() -> None:
     unknown = "unknown-provider"
     with pytest.raises(ValueError, match="unknown embedding provider") as provider_error:
         factory.get_provider(
-            unknown, catalog=build_model_catalog(), timeout_s=EMBED_TIMEOUT_S, api_key=None
+            unknown,
+            catalog=build_model_catalog(home=meiva_home()),
+            timeout_s=EMBED_TIMEOUT_S,
+            api_key=None,
         )
     with pytest.raises(ValueError) as budget_error:
         factory.worst_case_batch_seconds(unknown, timeout_seconds=EMBED_TIMEOUT_S)

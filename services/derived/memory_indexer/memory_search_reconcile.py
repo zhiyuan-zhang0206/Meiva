@@ -226,7 +226,7 @@ def main(argv: Sequence[str], *, out: TextIO, err: TextIO) -> int:
     inputs = MemoryIndexerInputs.from_boot(boot)
     provider = get_provider(
         inputs.embedding_name,
-        catalog=build_model_catalog(),
+        catalog=build_model_catalog(home=meiva_home()),
         timeout_s=inputs.embed_timeout_s,
         api_key=inputs.api_key,
     )

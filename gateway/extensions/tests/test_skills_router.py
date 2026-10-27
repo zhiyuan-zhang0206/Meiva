@@ -9,6 +9,7 @@ from fastapi import Request
 from base import paths
 from base.packages.extensions import install_registry
 from base.packages.extensions.install_registry import InstalledPackage, PackageOrigin, tree_hash
+from base.paths import meiva_home
 from gateway.extensions.skills import get_skills
 
 
@@ -44,7 +45,8 @@ def _register(
             origin_path=f"/src/{name}",
             content_hash=content_hash,
             enabled=enabled,
-        )
+        ),
+        home=meiva_home(),
     )
 
 
@@ -106,7 +108,7 @@ def test_put_toggles_enabled(unit_home: Path) -> None:
     )
     assert result.enabled is False
 
-    pkg = install_registry.get("delta")
+    pkg = install_registry.get("delta", home=unit_home)
     assert pkg is not None
     assert pkg.enabled is False
 
@@ -115,7 +117,7 @@ def test_put_toggles_enabled(unit_home: Path) -> None:
     )
     assert result.enabled is True
 
-    pkg = install_registry.get("delta")
+    pkg = install_registry.get("delta", home=unit_home)
     assert pkg is not None
     assert pkg.enabled is True
 
@@ -134,9 +136,9 @@ def test_put_accepts_the_canonical_dash_spelling_of_a_legacy_row(unit_home: Path
     assert result.enabled is False
     assert result.layer == "machine"
 
-    pkg = install_registry.get("page_ocr")
+    pkg = install_registry.get("page_ocr", home=unit_home)
     assert pkg is not None and pkg.enabled is False
-    assert [p.name for p in install_registry.load().packages] == ["page_ocr"]
+    assert [p.name for p in install_registry.load(home=unit_home).packages] == ["page_ocr"]
 
 
 def test_get_renders_legacy_underscore_dirs_in_canonical_spelling(unit_home: Path) -> None:

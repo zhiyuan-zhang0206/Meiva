@@ -9,6 +9,7 @@ from base.events.live.bus import EventBus
 from base.lm.catalog import ModelCatalog
 from base.lm.pricing import PriceBook
 from base.packages.plugins import config_registration, plugin_errors
+from base.paths import meiva_home
 from ops import lifecycle
 from ops.rpc_schemas import RestartAgentRequest
 
@@ -22,9 +23,14 @@ def test_dto_shape_does_not_construct_a_catalog() -> None:
     assert request.config_overlay == {"llm_model": "test-provider-model"}
     assert request.config_overlay is not None
     with pytest.raises(plugin_errors.InvalidConfigOverlay, match="not a registered model"):
-        config_registration.validate_config_overlay(request.config_overlay, configs={}, models={})
+        config_registration.validate_config_overlay(
+            request.config_overlay, configs={}, models={}, home=meiva_home()
+        )
     config_registration.validate_config_overlay(
-        request.config_overlay, configs={}, models={"test-provider-model": object()}
+        request.config_overlay,
+        configs={},
+        models={"test-provider-model": object()},
+        home=meiva_home(),
     )
 
 
@@ -45,4 +51,5 @@ def test_runner_catalog_refusal_precedes_transaction(
             unopened,
             catalog=_catalog(),
             default_model="test-provider-model",
+            home=meiva_home(),
         )

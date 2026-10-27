@@ -82,15 +82,15 @@ def test_install_from_local_path_records_and_surfaces(
     pkg = _make_mcp_package(tmp_path)
     assert cmd_mcp_install(str(pkg), None, None, uv=uv, home=unit_home, now=datetime.now(UTC)) == 0
 
-    r = reg.get("acme")
+    r = reg.get("acme", home=unit_home)
     assert r is not None and r.type == "mcp" and r.origin == "user" and r.enabled
     dest = unit_home / "mcps" / "acme"
     assert (dest / ".mcp.json").is_file()
     assert (dest / ".venv" / "bin" / "python").exists()
     assert (pkg / ".mcp.json").is_file()
-    cfg = load_mcp_config()
+    cfg = load_mcp_config(home=unit_home)
     assert cfg["acme"]["command"] == ".venv/bin/python"
-    assert installed_mcp_dir("acme") == dest
+    assert installed_mcp_dir("acme", home=unit_home) == dest
 
 
 def test_install_from_git_moves_and_strips_git(
@@ -101,7 +101,7 @@ def test_install_from_git_moves_and_strips_git(
     dest = unit_home / "mcps" / "acme"
     assert (dest / ".mcp.json").is_file()
     assert not (dest / ".git").exists()
-    assert "acme" in load_mcp_config()
+    assert "acme" in load_mcp_config(home=unit_home)
 
 
 def test_install_with_path_subdir(unit_home: Path, tmp_path: Path, uv: UvBuild) -> None:
@@ -113,7 +113,7 @@ def test_install_with_path_subdir(unit_home: Path, tmp_path: Path, uv: UvBuild) 
         )
         == 0
     )
-    assert reg.get("acme") is not None
+    assert reg.get("acme", home=unit_home) is not None
     assert (unit_home / "mcps" / "acme").is_dir()
 
 
@@ -129,7 +129,7 @@ def test_install_rejects_builtin_collision(
     pkg = _make_mcp_package(tmp_path, "chrome")
     assert cmd_mcp_install(str(pkg), None, None, uv=uv, home=unit_home, now=datetime.now(UTC)) == 1
     assert "built-in" in capsys.readouterr().err  # pyright: ignore[reportUnknownMemberType]
-    assert reg.get("chrome") is None
+    assert reg.get("chrome", home=unit_home) is None
 
 
 def test_install_rejects_no_mcp_json_or_pyproject(
@@ -187,7 +187,7 @@ def test_install_auto_detects_from_pyproject(unit_home: Path, tmp_path: Path, uv
     assert cmd_mcp_install(str(pkg), None, None, uv=uv, home=unit_home, now=datetime.now(UTC)) == 0
 
     # Server name derived from pyproject name (stripped "meiva-mcp-" prefix)
-    r = reg.get("widget")
+    r = reg.get("widget", home=unit_home)
     assert r is not None and r.type == "mcp"
     dest = unit_home / "mcps" / "widget"
     assert (dest / ".mcp.json").is_file()
@@ -198,7 +198,7 @@ def test_install_auto_detects_from_pyproject(unit_home: Path, tmp_path: Path, uv
     assert spec["args"] == ["-m", "widget_mcp"]
     assert spec["description"] == "widget MCP bridge"
     # Surfaces in merged config
-    cfg = load_mcp_config()
+    cfg = load_mcp_config(home=unit_home)
     assert cfg["widget"]["command"] == ".venv/bin/python"
 
 
@@ -222,7 +222,7 @@ def test_install_auto_detect_falls_back_to_single_package(
     mod.mkdir()
     (mod / "__init__.py").write_text("", encoding="utf-8")
     assert cmd_mcp_install(str(pkg), None, None, uv=uv, home=unit_home, now=datetime.now(UTC)) == 0
-    assert reg.get("fallback") is not None
+    assert reg.get("fallback", home=unit_home) is not None
 
 
 def test_install_auto_detect_rejects_bare_pyproject(
@@ -246,7 +246,7 @@ def test_install_auto_detect_rejects_bare_pyproject(
     # succeed, but the server won't start.  Install succeeds anyway (we
     # don't verify the module exists on disk — that's a runtime concern).
     assert cmd_mcp_install(str(pkg), None, None, uv=uv, home=unit_home, now=datetime.now(UTC)) == 0
-    assert reg.get("bare") is not None
+    assert reg.get("bare", home=unit_home) is not None
 
 
 # ─── --env injection (the only channel a secret reaches a spawned server) ─
@@ -282,7 +282,7 @@ def test_install_env_injected_into_landed_copy(
     src = json.loads((pkg / ".mcp.json").read_text(encoding="utf-8"))
     assert "TOKEN" not in (src["mcpServers"]["acme"].get("env") or {})
     # and the merged config the daemon reads carries it
-    assert load_mcp_config()["acme"]["env"]["TOKEN"] == _FAKE_TOKEN
+    assert load_mcp_config(home=unit_home)["acme"]["env"]["TOKEN"] == _FAKE_TOKEN
 
 
 def test_install_env_overrides_package_default(
@@ -338,7 +338,7 @@ def test_upgrade_preserves_injected_env(unit_home: Path, tmp_path: Path, uv: UvB
         encoding="utf-8",
     )
     assert cmd_mcp_upgrade("acme", uv=uv, home=unit_home, now=datetime.now(UTC)) == 0
-    assert load_mcp_config()["acme"]["description"] == "v2"  # code/config refreshed
+    assert load_mcp_config(home=unit_home)["acme"]["description"] == "v2"  # code/config refreshed
     assert _landed_env(unit_home)["TOKEN"] == _FAKE_TOKEN  # secret survived
 
 
@@ -376,7 +376,7 @@ def test_list_flags_installed_origin(
     cmd_mcp_install(
         str(_make_mcp_package(tmp_path)), None, None, uv=uv, home=unit_home, now=datetime.now(UTC)
     )
-    assert cmd_mcp_list() == 0
+    assert cmd_mcp_list(home=unit_home) == 0
     out = capsys.readouterr().out  # pyright: ignore[reportUnknownMemberType]
     assert "acme" in out and "installed" in out
 
@@ -388,9 +388,9 @@ def test_uninstall_removes_dir_registry_and_config(
         str(_make_mcp_package(tmp_path)), None, None, uv=uv, home=unit_home, now=datetime.now(UTC)
     )
     assert cmd_mcp_uninstall("acme", home=unit_home) == 0
-    assert reg.get("acme") is None
+    assert reg.get("acme", home=unit_home) is None
     assert not (unit_home / "mcps" / "acme").exists()
-    assert "acme" not in load_mcp_config()
+    assert "acme" not in load_mcp_config(home=unit_home)
 
 
 def test_uninstall_rejects_non_mcp(unit_home: Path, capsys: pytest.CaptureFixture) -> None:
@@ -417,7 +417,7 @@ def test_upgrade_refetches_from_source(unit_home: Path, tmp_path: Path, uv: UvBu
         encoding="utf-8",
     )
     assert cmd_mcp_upgrade("acme", uv=uv, home=unit_home, now=datetime.now(UTC)) == 0
-    assert load_mcp_config()["acme"]["description"] == "v2"
+    assert load_mcp_config(home=unit_home)["acme"]["description"] == "v2"
 
 
 def test_upgrade_rejects_non_mcp(
@@ -439,7 +439,7 @@ def test_a_failed_build_removes_the_landed_copy_and_registers_nothing(
 
     assert "uv sync failed: No solution found when resolving" in capsys.readouterr().err
     assert not (unit_home / "mcps" / "acme").exists()
-    assert reg.get("acme") is None
+    assert reg.get("acme", home=unit_home) is None
 
 
 def test_a_host_without_uv_fails_the_build_by_name(
@@ -510,7 +510,7 @@ def test_install_real_uv_sync_builds_venv(unit_home: Path, tmp_path: Path) -> No
     )
     dest = unit_home / "mcps" / "echoreal"
     assert (dest / ".venv" / "bin" / "python").exists()
-    assert "echoreal" in load_mcp_config()
+    assert "echoreal" in load_mcp_config(home=unit_home)
 
 
 @pytest.mark.skipif(shutil.which("uv") is None, reason="uv not on PATH")
@@ -560,6 +560,6 @@ def test_mcp_list_flags_dead_source(unit_home: Path, tmp_path: Path, capsys, uv:
     pkg = _make_mcp_package(tmp_path, "orphan2", module="orphan2_mcp")
     assert cmd_mcp_install(str(pkg), None, None, uv=uv, home=unit_home, now=datetime.now(UTC)) == 0
     shutil.rmtree(pkg)
-    assert cmd_mcp_list() == 0
+    assert cmd_mcp_list(home=unit_home) == 0
     err = capsys.readouterr().err  # pyright: ignore[reportUnknownMemberType]
     assert "recorded source path no longer exists" in err

@@ -30,7 +30,8 @@ def fake_skills_dir(unit_home: Path) -> Path:
 def track(*names: str, enabled: bool = True) -> None:
     for name in names:
         install_registry.register(
-            install_registry.InstalledPackage(name=name, type="skill", enabled=enabled)
+            install_registry.InstalledPackage(name=name, type="skill", enabled=enabled),
+            home=meiva_home(),
         )
 
 

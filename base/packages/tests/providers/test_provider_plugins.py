@@ -98,8 +98,8 @@ _REPO_MODEL_VENDORS = {
 
 
 def test_repo_provider_plugins_are_the_exact_default_enabled_set() -> None:
-    discovered = enable_config.discover_plugins()
-    config = enable_config.load_for_runtime(set(discovered))
+    discovered = enable_config.discover_plugins(home=meiva_home())
+    config = enable_config.load_for_runtime(set(discovered), home=meiva_home())
     repo_root = paths.repo_plugins_dir().resolve()
     repo_provider_plugins = {
         name
@@ -122,9 +122,9 @@ def test_zero_provider_plugins_fail_loud_and_remain_retryable(
         isolated.setattr(enable_config, "discover_plugins", dict)
 
         with pytest.raises(RuntimeError, match="no provider plugins enabled"):
-            build_model_catalog()
+            build_model_catalog(home=meiva_home())
         with pytest.raises(RuntimeError, match="no provider plugins enabled"):
-            build_model_catalog()
+            build_model_catalog(home=meiva_home())
 
 
 def test_repo_model_vendor_vocabulary_is_complete(model_catalog: ModelCatalog) -> None:
@@ -184,11 +184,11 @@ def _install(
 
 
 def test_repo_deepseek_provider_is_enabled_and_registers_complete_contract() -> None:
-    discovered = enable_config.discover_plugins()
-    config = enable_config.load_for_runtime(set(discovered))
+    discovered = enable_config.discover_plugins(home=meiva_home())
+    config = enable_config.load_for_runtime(set(discovered), home=meiva_home())
 
     assert config.plugins["lm_deepseek"].enabled
-    catalog = build_model_catalog()
+    catalog = build_model_catalog(home=meiva_home())
 
     assert {model for model in catalog.models if model.startswith("deepseek-")} == {
         "deepseek-flash"
@@ -208,11 +208,11 @@ def test_repo_deepseek_provider_is_enabled_and_registers_complete_contract() -> 
 
 
 def test_repo_google_provider_is_enabled_and_registers_complete_contract() -> None:
-    discovered = enable_config.discover_plugins()
-    config = enable_config.load_for_runtime(set(discovered))
+    discovered = enable_config.discover_plugins(home=meiva_home())
+    config = enable_config.load_for_runtime(set(discovered), home=meiva_home())
 
     assert config.plugins["lm_google"].enabled
-    catalog = build_model_catalog()
+    catalog = build_model_catalog(home=meiva_home())
 
     gemini_models = {
         "gemini-4-argon",
@@ -249,11 +249,11 @@ def test_repo_google_provider_is_enabled_and_registers_complete_contract() -> No
 
 
 def test_repo_alibaba_provider_is_enabled_and_registers_complete_contract() -> None:
-    discovered = enable_config.discover_plugins()
-    config = enable_config.load_for_runtime(set(discovered))
+    discovered = enable_config.discover_plugins(home=meiva_home())
+    config = enable_config.load_for_runtime(set(discovered), home=meiva_home())
 
     assert config.plugins["lm_alibaba"].enabled
-    catalog = build_model_catalog()
+    catalog = build_model_catalog(home=meiva_home())
 
     qwen_models = {
         "qwen3.8-max",
@@ -276,11 +276,11 @@ def test_repo_alibaba_provider_is_enabled_and_registers_complete_contract() -> N
 
 
 def test_repo_zhipu_provider_is_enabled_and_registers_complete_contract() -> None:
-    discovered = enable_config.discover_plugins()
-    config = enable_config.load_for_runtime(set(discovered))
+    discovered = enable_config.discover_plugins(home=meiva_home())
+    config = enable_config.load_for_runtime(set(discovered), home=meiva_home())
 
     assert config.plugins["lm_zhipu"].enabled
-    catalog = build_model_catalog()
+    catalog = build_model_catalog(home=meiva_home())
 
     glm_models = {
         "glm-5.2",
@@ -306,11 +306,11 @@ def test_repo_zhipu_provider_is_enabled_and_registers_complete_contract() -> Non
 
 
 def test_repo_moonshot_provider_is_enabled_and_registers_complete_contract() -> None:
-    discovered = enable_config.discover_plugins()
-    config = enable_config.load_for_runtime(set(discovered))
+    discovered = enable_config.discover_plugins(home=meiva_home())
+    config = enable_config.load_for_runtime(set(discovered), home=meiva_home())
 
     assert config.plugins["lm_moonshot"].enabled
-    catalog = build_model_catalog()
+    catalog = build_model_catalog(home=meiva_home())
 
     assert {"kimi-k3", "kimi-k3.1-pro", "kimi-k3.1-pro-highspeed"} <= catalog.models.keys()
     assert set(catalog.supported_models["kimi"]) == {
@@ -367,11 +367,11 @@ def _assert_mimo_provider_key_and_binding(catalog: ModelCatalog) -> None:
 
 
 def test_repo_xiaomi_provider_is_enabled_and_registers_complete_contract() -> None:
-    discovered = enable_config.discover_plugins()
-    config = enable_config.load_for_runtime(set(discovered))
+    discovered = enable_config.discover_plugins(home=meiva_home())
+    config = enable_config.load_for_runtime(set(discovered), home=meiva_home())
 
     assert config.plugins["lm_xiaomi"].enabled
-    catalog = build_model_catalog()
+    catalog = build_model_catalog(home=meiva_home())
 
     _assert_mimo_models_registered_with_pricing_vendor(catalog)
     _assert_mimo_provider_key_and_binding(catalog)
@@ -379,7 +379,7 @@ def test_repo_xiaomi_provider_is_enabled_and_registers_complete_contract() -> No
 
 def test_plugin_model_registers_and_builds(provider_plugin: Callable[..., None]) -> None:
     provider_plugin()
-    catalog = build_model_catalog()
+    catalog = build_model_catalog(home=meiva_home())
 
     assert "testp-1" in catalog.models
     assert "testp-1" in catalog.supported_models["testp"]
@@ -415,7 +415,7 @@ def test_plugin_price_vendor_reaches_pricing_lookup(
     expected: str | None,
 ) -> None:
     provider_plugin(price_vendor=price_vendor)
-    catalog = build_model_catalog()
+    catalog = build_model_catalog(home=meiva_home())
 
     assert catalog.prices.plugin["testp-1"].vendor == expected
     assert pricing.model_vendor("testp-1", prices=catalog.prices) == expected
@@ -477,7 +477,7 @@ def test_plugin_model_validation_and_key_check(
     unit_home: Path, provider_plugin: Callable[..., None]
 ) -> None:
     provider_plugin()
-    catalog = build_model_catalog()
+    catalog = build_model_catalog(home=unit_home)
     assert "TESTP_API_KEY" in catalog.key_envs
     assert "TESTP_API_KEY" not in os.environ
     (unit_home / ".env").write_text("")
@@ -497,7 +497,7 @@ def test_plugin_model_validation_and_key_check(
 
 def test_vision_flag_drives_image_gate(provider_plugin: Callable[..., None]) -> None:
     provider_plugin(prefix="testv-", model="testv-1", vision=True)
-    catalog = build_model_catalog()
+    catalog = build_model_catalog(home=meiva_home())
 
     assert model_supports_vision("testv-unregistered", catalog=catalog)
     assert not model_supports_vision("testp-9", catalog=catalog)
@@ -521,7 +521,7 @@ def test_registered_plugin_model_vision_overrides_binding(
         dir_name="vision_false",
     )
 
-    catalog = build_model_catalog()
+    catalog = build_model_catalog(home=meiva_home())
 
     assert model_supports_vision("testvtrue-1", catalog=catalog)
     assert not model_supports_vision("testvfalse-1", catalog=catalog)
@@ -537,10 +537,10 @@ def test_duplicate_prefix_rejected(provider_plugin: Callable[..., None]) -> None
         dir_name="test_provider2",
     )
     with pytest.raises(provider_api.ProviderRegistrationError, match="already claimed") as excinfo:
-        build_model_catalog()
+        build_model_catalog(home=meiva_home())
     assert "already claimed" in str(excinfo.value)
     with pytest.raises(provider_api.ProviderRegistrationError, match="already claimed"):
-        build_model_catalog()
+        build_model_catalog(home=meiva_home())
 
 
 def test_nested_prefix_rejected() -> None:
@@ -641,7 +641,7 @@ def test_plugin_price_must_name_registered_model() -> None:
 def test_spawnable_model_without_price_rejected(provider_plugin: Callable[..., None]) -> None:
     provider_plugin(with_price=False)
     with pytest.raises(provider_api.ProviderRegistrationError, match="no current price") as excinfo:
-        build_model_catalog()
+        build_model_catalog(home=meiva_home())
     assert "no current price" in str(excinfo.value.__cause__)
 
 
@@ -689,10 +689,10 @@ def test_loader_revalidates_cross_model_constraints(
     provider_plugin(superseded_by="testp-missing")
 
     with pytest.raises(RuntimeError, match="not in models"):
-        build_model_catalog()
+        build_model_catalog(home=meiva_home())
 
     with pytest.raises(RuntimeError):
-        build_model_catalog()
+        build_model_catalog(home=meiva_home())
 
 
 @pytest.mark.parametrize(
@@ -722,7 +722,7 @@ def test_stop_spec_registration_reaches_classify_stop(provider_plugin: Callable[
         model="tests-1",
         stop_spec='StopSpec("testsdk", "finish_reason", frozenset({"stop"}), frozenset({"length"}))',
     )
-    catalog = build_model_catalog()
+    catalog = build_model_catalog(home=meiva_home())
     from base.lm.compat.stop import classify_stop
 
     category, raw = classify_stop(
@@ -746,7 +746,7 @@ def test_disabled_plugin_skipped(provider_plugin: Callable[..., None]) -> None:
     provider_plugin(dir_name="disabled_provider")
     cfg_path = paths.meiva_home() / "plugins_config.json"
     cfg_path.write_text(json.dumps({"plugins": {"disabled_provider": {"enabled": False}}}))
-    catalog = build_model_catalog()
+    catalog = build_model_catalog(home=meiva_home())
     assert "testp-1" not in catalog.models
     assert "kept-1" in catalog.models
 
@@ -761,10 +761,10 @@ def test_broken_provider_plugin_refuses_catalog_and_recovers(
     (broken / "provider.py").write_text("raise RuntimeError('provider boom')\n")
     try:
         with pytest.raises(RuntimeError, match="provider boom"):
-            build_model_catalog()
+            build_model_catalog(home=meiva_home())
     finally:
         shutil.rmtree(broken)
-    catalog = build_model_catalog()
+    catalog = build_model_catalog(home=meiva_home())
     assert "kept-1" in catalog.models
 
 
@@ -773,7 +773,7 @@ def test_provider_missing_provider_py_is_noop(provider_plugin: Callable[..., Non
     plugin_dir = paths.plugins_dir(home=meiva_home()) / "no_provider"
     plugin_dir.mkdir(parents=True, exist_ok=True)
     (plugin_dir / "plugin.py").write_text("# empty")
-    catalog = build_model_catalog()
+    catalog = build_model_catalog(home=meiva_home())
     assert "kept-1" in catalog.models
     assert "no_provider-1" not in catalog.models
 
@@ -783,6 +783,6 @@ def test_provider_only_dir_is_not_a_plugin(provider_plugin: Callable[..., None])
     plugin_dir = paths.plugins_dir(home=meiva_home()) / "orphan_provider"
     plugin_dir.mkdir(parents=True, exist_ok=True)
     (plugin_dir / "provider.py").write_text("# no plugin.py beside me")
-    catalog = build_model_catalog()
+    catalog = build_model_catalog(home=meiva_home())
     assert "kept-1" in catalog.models
     assert "orphan-provider-1" not in catalog.models

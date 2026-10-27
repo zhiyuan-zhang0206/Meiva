@@ -10,7 +10,7 @@ from base.db import Database
 from base.db.code_version_gate import ProcessDbGate
 from base.db.config import DbConfig
 from base.log import logger
-from meiva.tests.fixtures.pin_agent import pin_agent, pin_no_identity
+from meiva.tests.fixtures.pin_agent import pin_agent
 from meiva.tests.skills._skills_helpers import AuditedAgent, write_skill
 from meiva.tests.skills._skills_helpers import audited_agent as audited_agent
 from meiva.tests.skills._skills_helpers import fake_skills_dir as fake_skills_dir
@@ -147,7 +147,7 @@ def test_every_consumption_records_one_event_and_nothing_is_remembered(
 
 
 def test_files_read_skill_md_silent_outside_agent(db_url: str, fake_skills_dir: Path) -> None:
-    pin_no_identity()
+    pin_agent(None)
     write_skill(fake_skills_dir, "alpha", "name: alpha\ndescription: a", body="# A\n")
     out = meiva.files.read(meiva.skills.alpha.path + "/SKILL.md")
     assert out.endswith("# A\n")

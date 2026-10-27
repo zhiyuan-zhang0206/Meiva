@@ -30,6 +30,7 @@ from base.log.tests.log_records import LogRecords
 from base.packages.plugin_providers import build_model_catalog
 from base.packages.plugins.activation import PLUGIN_ACTIVATION_EVENT
 from base.packages.plugins.extensions import ExtensionRegistry, PluginContributions
+from base.paths import meiva_home
 
 
 def _runner(*hooks: Hook, plugin: str | None = None, name: str = "before_llm"):
@@ -83,7 +84,7 @@ def _empty_runtime(database_gate: ProcessDbGate) -> Runtime[MeivaContext]:
         agent=AgentSlices.resolve(default_reader=defaults()),
         db=Database.from_settings(gate=database_gate),
         bus=EventBus.from_settings(rng=seeded_rng()),
-        catalog=build_model_catalog(),
+        catalog=build_model_catalog(home=meiva_home()),
         clock_factory=Clock.from_settings,
     )
     return Runtime(context=ctx)

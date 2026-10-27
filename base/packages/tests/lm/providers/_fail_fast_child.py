@@ -13,10 +13,11 @@ import pytest
 
 from base.lm.call import invoke_response
 from base.packages.plugin_providers import build_model_catalog
+from base.paths import meiva_home
 
 
 def main(error: Exception, provider_cause: bool) -> None:
-    model_catalog = build_model_catalog()
+    model_catalog = build_model_catalog(home=meiva_home())
     calls: list[list[Any]] = []
     sleeps: list[object] = []
     if provider_cause:

@@ -3,6 +3,7 @@ from __future__ import annotations
 import pytest
 
 from base.agents.sdk.tests.sampling_owners import fixed_sampling_owner
+from base.paths import meiva_home
 from meiva.sdk_surface import meiva_module, metering
 
 
@@ -19,7 +20,9 @@ def test_a_plugin_load_is_undone_by_the_autouse_teardown(request: pytest.Fixture
     install.uninstall()
     bare_funnel = meiva.mcps.call_funnel.call_raw
 
-    load_extensions(validate_state=plugin_state_schema, sampling=fixed_sampling_owner())
+    load_extensions(
+        validate_state=plugin_state_schema, sampling=fixed_sampling_owner(), home=meiva_home()
+    )
     metered = {
         fq
         for p, a, fq in metering.read_surface(meiva_module()).routines

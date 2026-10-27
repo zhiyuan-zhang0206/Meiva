@@ -14,6 +14,7 @@ import asyncio
 import threading
 import time
 from dataclasses import replace
+from functools import partial
 from pathlib import Path
 from typing import Any
 
@@ -128,7 +129,7 @@ def test_invalid_process_ownership_rejected(*, machine_identity: MachineIdentity
             gateway_config_of(boot),
             process=process,
             process_ownership=bad_ownership,
-            catalog=load_model_catalog(build_model_catalog),
+            catalog=load_model_catalog(partial(build_model_catalog, home=process.home)),
         )
 
 

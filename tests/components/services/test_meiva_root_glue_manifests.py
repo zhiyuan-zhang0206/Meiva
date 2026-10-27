@@ -9,7 +9,7 @@ import pytest
 
 from base.cluster.machine import MachineRole
 from base.config import get_field, set_field
-from base.paths import otel_collector_config
+from base.paths import meiva_home, otel_collector_config
 from services.supervision.meiva_root.manifest import ManifestError, load_manifests
 from services.supervision.meiva_root.supervisor import SupervisorConfig
 from services.supervision.meiva_root_glue import manifests as gen
@@ -30,7 +30,7 @@ def _declared_configuration(unit_home: Path) -> None:
     from base.telemetry.lgtm_local import BACKENDS, service_input_paths
 
     # A launch manifest follows converge's plugin configuration initialization.
-    update_all_disk_images(plugin_dirs=discover_plugins(), home=unit_home)
+    update_all_disk_images(plugin_dirs=discover_plugins(home=unit_home), home=unit_home)
     collector = otel_collector_config(unit_home)
     collector.parent.mkdir(parents=True)
     collector.write_text("receivers: {}")
@@ -56,7 +56,7 @@ def _spec(session: str, capabilities: frozenset[MachineRole], cmd: str) -> Servi
 
 
 def test_real_roster_gateway_subset() -> None:
-    units = gen.build_units(capabilities=["gateway"], repo_root=_REPO)
+    units = gen.build_units(capabilities=["gateway"], repo_root=_REPO, home=meiva_home())
     ids = [u["id"] for u in units]
     assert "gateway" in ids
     assert "gate" in ids
@@ -75,19 +75,27 @@ def test_real_roster_gateway_subset() -> None:
 
 
 def test_agent_runner_subset_and_otel() -> None:
-    runner = {u["id"] for u in gen.build_units(capabilities=["agent-runner"], repo_root=_REPO)}
+    runner = {
+        u["id"]
+        for u in gen.build_units(capabilities=["agent-runner"], repo_root=_REPO, home=meiva_home())
+    }
     assert {"agent-host", "page-server", "ops"} <= runner
     assert "gateway" not in runner
     assert "otel-collector" in runner  # intersects on either side of the pair
     assert {
-        u["id"] for u in gen.build_units(capabilities=["observability-station"], repo_root=_REPO)
+        u["id"]
+        for u in gen.build_units(
+            capabilities=["observability-station"], repo_root=_REPO, home=meiva_home()
+        )
     } == {"loki", "prometheus", "grafana"}
 
 
 def test_key_units_exec_restart_attach() -> None:
     units = {
         u["id"]: u
-        for u in gen.build_units(capabilities=["gateway", "agent-runner"], repo_root=_REPO)
+        for u in gen.build_units(
+            capabilities=["gateway", "agent-runner"], repo_root=_REPO, home=meiva_home()
+        )
     }
     assert units["gateway"]["exec"] == [
         "/bin/sh",
@@ -108,9 +116,9 @@ def test_key_units_exec_restart_attach() -> None:
 
 def test_capability_tokens_validated() -> None:
     with pytest.raises(ManifestError, match="unknown capability"):
-        gen.build_units(capabilities=["nope"], repo_root=_REPO)
+        gen.build_units(capabilities=["nope"], repo_root=_REPO, home=meiva_home())
     with pytest.raises(ManifestError, match="must not be empty"):
-        gen.build_units(capabilities=[], repo_root=_REPO)
+        gen.build_units(capabilities=[], repo_root=_REPO, home=meiva_home())
 
 
 def test_specs_order_and_subset_are_preserved() -> None:
@@ -119,7 +127,9 @@ def test_specs_order_and_subset_are_preserved() -> None:
         _spec("svc-a", AGENT_RUNNER, ".venv/bin/python -m a"),
         _spec("svc-c", BOTH, ".venv/bin/python -m c"),
     ]
-    units = gen.build_units(specs, capabilities=["agent-runner"], repo_root=_REPO)
+    units = gen.build_units(
+        specs, capabilities=["agent-runner"], repo_root=_REPO, home=meiva_home()
+    )
     assert [u["id"] for u in units] == ["svc-a", "svc-c"]
 
 
@@ -139,10 +149,15 @@ def test_exec_prefix_only_for_simple_commands() -> None:
 
 def test_generated_manifest_is_consumed_by_load_manifests(tmp_path: Path) -> None:
     path = gen.generate(
-        tmp_path / "units.json", capabilities=["gateway", "agent-runner"], repo_root=_REPO
+        tmp_path / "units.json",
+        capabilities=["gateway", "agent-runner"],
+        repo_root=_REPO,
+        home=meiva_home(),
     )
     registry = load_manifests(path)
-    expected = gen.build_units(capabilities=["gateway", "agent-runner"], repo_root=_REPO)
+    expected = gen.build_units(
+        capabilities=["gateway", "agent-runner"], repo_root=_REPO, home=meiva_home()
+    )
     assert [manifest.id for manifest in registry.units] == [u["id"] for u in expected]
     first = registry.units[0]
     assert first.id == "agent-host"
@@ -162,7 +177,9 @@ def test_session_host_attach_table_matches_the_g6b_ruling() -> None:
 
 
 def _real_units() -> dict[str, dict[str, object]]:
-    units = gen.build_units(capabilities=["gateway", "agent-runner"], repo_root=_REPO)
+    units = gen.build_units(
+        capabilities=["gateway", "agent-runner"], repo_root=_REPO, home=meiva_home()
+    )
     return {cast("str", unit["id"]): unit for unit in units}
 
 
@@ -178,7 +195,7 @@ def test_declared_shutdown_ceiling_becomes_root_window_and_undeclared_keeps_the_
     units = {
         unit["id"]: unit
         for unit in gen.build_units(
-            [declared, undeclared], capabilities=["gateway"], repo_root=_REPO
+            [declared, undeclared], capabilities=["gateway"], repo_root=_REPO, home=meiva_home()
         )
     }
     assert units["svc-a"]["stop_timeout_s"] == 30.0 + gen.STOP_MARGIN_S
@@ -191,7 +208,7 @@ def test_every_roster_unit_gets_a_window_strictly_above_its_declared_ceiling() -
 
     default_window = SupervisorConfig().stop_timeout_s
     units = _real_units()
-    for spec in build_services():
+    for spec in build_services(home=meiva_home()):
         if spec.session not in units:
             continue
         window = cast("float | None", units[spec.session].get("stop_timeout_s"))

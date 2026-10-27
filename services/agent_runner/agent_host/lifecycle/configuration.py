@@ -109,8 +109,9 @@ def load_installation(
         authority = ConfigAuthority.deferred(
             runtime=config.view, build_all_domains=config.complete_read_model, env_path=env_path
         )
-    catalog = build_model_catalog()
+    catalog = build_model_catalog(home=home)
     load_extensions(
+        home=home,
         catalog=catalog,
         provider_keys=process_provider_keys(catalog),
         authority=authority,

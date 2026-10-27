@@ -337,6 +337,7 @@ def ensure_plugins_loaded(
     clients: ClientSet | None = None,
     validate_state: StateGate | None = None,
 ) -> None:
+    from base import paths
     from meiva.sdk_surface import install as _sdk_install
 
     if context is not None:
@@ -357,8 +358,9 @@ def ensure_plugins_loaded(
             launched=launched_process(_launch_facts(context, env)),
         )
     )
+    home = paths.meiva_home()
     if plan.step is not LoadStep.LOAD_SURFACE:
-        settle_installed(plan.step, context)
+        settle_installed(plan.step, context, home=home)
         return
     if plan.prepare_launched:
         context, config = _prepare_launched_context(env)
@@ -375,6 +377,7 @@ def ensure_plugins_loaded(
             clients=clients,
             caller=external_caller(env=env),
             validate_state=validate_state,
+            home=home,
         )
     except BaseException as exc:
         _sdk_install.mark_load_failed(exc)
@@ -387,7 +390,7 @@ def ensure_plugins_loaded(
 # The steps of a load plan that need no new owner: they act on the installation already in the
 # slot and on the context the caller holds. `LOAD_SURFACE` is not one of them: it needs the owners
 # `LoadInputs` carries and goes through `load_surface`, so asking for it here is a caller bug.
-def settle_installed(step: LoadStep, context: MeivaContext | None) -> None:
+def settle_installed(step: LoadStep, context: MeivaContext | None, *, home: Path) -> None:
     from meiva.sdk_surface import install as _sdk_install
     from meiva.sdk_surface import sdk_disable
 
@@ -398,7 +401,7 @@ def settle_installed(step: LoadStep, context: MeivaContext | None) -> None:
             _bind_installed_catalog(context)
         case LoadStep.UPGRADE_FACES:
             _sdk_install.mark_load_attempt()
-            upgrade_faces()
+            upgrade_faces(home=home)
             _bind_installed_catalog(context)
         case LoadStep.NOTHING:
             return
@@ -459,8 +462,8 @@ def _load_inputs(
     clients: ClientSet | None,
     caller: CallerIdentity | None,
     validate_state: StateGate | None,
+    home: Path,
 ) -> LoadInputs:
-    from base import paths
     from base.lm.factory import process_provider_keys
     from base.packages.plugin_providers import build_model_catalog
 
@@ -476,7 +479,7 @@ def _load_inputs(
         clock = context.require_clock()
     else:
         clock = Clock(clock_config_from_boot(config), timers=SYSTEM_TIMERS)
-    catalog = build_model_catalog()
+    catalog = build_model_catalog(home=home)
     sampling = process_sampling_owner(
         context.rng if context is not None and context.rng is not None else _new_rng()
     )
@@ -489,7 +492,7 @@ def _load_inputs(
         sampling=sampling,
         caller=caller,
         clock=clock,
-        home=paths.meiva_home(),
+        home=home,
         catalog=catalog,
         provider_keys=process_provider_keys(catalog),
         context=context,
@@ -507,12 +510,12 @@ def _apply_disable(entries: tuple[str, ...]) -> None:
     sdk_disable.apply_entries(list(entries))
 
 
-def upgrade_faces() -> None:
+def upgrade_faces(*, home: Path) -> None:
     from base.packages.plugins.loading.faces import load_agent_faces
     from meiva.sdk_surface import install as _sdk_install
 
     try:
-        load_agent_faces()
+        load_agent_faces(home=home)
         _sdk_install.mark_faces_loaded()
     except BaseException as exc:
         _sdk_install.mark_load_failed(exc)
@@ -532,6 +535,7 @@ def load_surface(inputs: LoadInputs) -> None:
         )
         load_extensions(
             surface=inputs.surface,
+            home=inputs.home,
             catalog=inputs.catalog,
             provider_keys=inputs.provider_keys,
             authority=authority,

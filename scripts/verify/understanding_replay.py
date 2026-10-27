@@ -42,6 +42,7 @@ from base.lm.factory import process_provider_keys  # noqa: E402
 from base.native_process.code_version import CodeVersion  # noqa: E402
 from base.native_process.loaded_commit import LoadedCommit  # noqa: E402
 from base.packages.plugin_providers import build_model_catalog  # noqa: E402
+from base.paths import meiva_home  # noqa: E402
 from base.telemetry import process_name  # noqa: E402
 from services.agent_runner.understanding.chunk_consumer import (  # noqa: E402
     ModelCache,
@@ -352,7 +353,7 @@ def main(argv: Sequence[str] | None = None, *, dockerenv: Path = DOCKERENV) -> N
     if args.command == "report":
         print_replay_report(db, args.agent_id)
         return
-    catalog = build_model_catalog()
+    catalog = build_model_catalog(home=meiva_home())
     if args.command == "consume":
         asyncio.run(_consume(db, args.agent_id, catalog=catalog, config=config))
         return

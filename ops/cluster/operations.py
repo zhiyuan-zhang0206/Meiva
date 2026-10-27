@@ -242,20 +242,20 @@ def _narrow_commands(
 # contributing project-local roots only for this call. The provider is scoped to this call (and
 # only it is taken back), so one request cannot leak its project skills into a later agent's
 # result. The result also carries this runner's enabled MCP names as phase-2 groundwork.
-def agent_skill_view_op(agent_id: int, pool: ConnectionPool) -> AgentSkillViewResult:
+def agent_skill_view_op(agent_id: int, pool: ConnectionPool, *, home: Path) -> AgentSkillViewResult:
     from base.packages.composer_commands import CommandCatalog, load_skill_names
     from base.packages.mcp_config import load_mcp_config
     from base.packages.plugins.mcp_enabled import read_enabled
 
     cwd, wanted, harness = agent_skill_view_inputs(pool, agent_id)
-    loaded = load_skill_names(_project_skill_roots(cwd))
+    loaded = load_skill_names(_project_skill_roots(cwd), home=home)
     commands = _narrow_commands(
-        CommandCatalog.system(skills=lambda: loaded).discover(), wanted, loaded
+        CommandCatalog.system(skills=lambda: loaded, home=home).discover(), wanted, loaded
     )
     if harness != "meiva":
         commands = [c for c in commands if c["name"] != "compact"]
-    merged_mcp = load_mcp_config(include_disabled=True)
-    mcp_overlay = read_enabled()
+    merged_mcp = load_mcp_config(include_disabled=True, home=home)
+    mcp_overlay = read_enabled(home=home)
     return AgentSkillViewResult(
         commands=[
             OpsCommandItem(

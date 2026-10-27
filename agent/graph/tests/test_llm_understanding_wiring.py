@@ -30,6 +30,7 @@ from base.events.live.bus import EventBus
 from base.host.env.agent_slices import AgentSlices
 from base.native_process.turn_identity import HostedTurnResources
 from base.packages.plugin_providers import build_model_catalog
+from base.paths import meiva_home
 from meiva.tests.fixtures.pin_agent import hosted_resources as hosted_resources
 
 
@@ -71,7 +72,7 @@ def _runtime(
             db=Database.from_settings(gate=database_gate),
             bus=EventBus.from_settings(rng=seeded_rng()),
             identity=AgentIdentity(agent_id=agent_id, owns_loop=True),
-            catalog=build_model_catalog(),
+            catalog=build_model_catalog(home=meiva_home()),
             clock_factory=Clock.from_settings,
         )
     )

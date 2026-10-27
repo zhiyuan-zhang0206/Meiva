@@ -163,7 +163,7 @@ def _host(
         bus=event_bus,
         db=database,
         catalog=model_catalog,
-        commands=CommandCatalog.system(skills=list),
+        commands=CommandCatalog.system(skills=list, home=meiva_home()),
     )
 
 

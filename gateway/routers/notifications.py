@@ -114,7 +114,9 @@ class NotificationDeliveriesResponse(BaseModel):
 @router.get("/api/notifications/categories")
 async def get_notification_categories(request: Request) -> NotificationCategoriesResponse:
     pool = request.app.state.db_pool
-    catalog = await asyncio.to_thread(declared_categories)
+    catalog = await asyncio.to_thread(
+        declared_categories, home=request.app.state.gateway_process.home
+    )
     switches = await asyncio.to_thread(read_overrides_sync, pool)
     return NotificationCategoriesResponse(
         categories=[
@@ -140,7 +142,9 @@ async def post_notification(
     agent_id: int, body: NotificationCreateIn, request: Request
 ) -> dict[str, Any]:
     pool = request.app.state.db_pool
-    catalog = await asyncio.to_thread(declared_categories)
+    catalog = await asyncio.to_thread(
+        declared_categories, home=request.app.state.gateway_process.home
+    )
     if body.category not in catalog:
         raise HTTPException(
             status_code=422, detail=f"unknown notification category: {body.category}"
@@ -229,7 +233,9 @@ async def get_notification_audit(
         raise HTTPException(status_code=422, detail="now needs a UTC offset")
     tz_name, audit_now = _audit_clock_inputs(tz, now, gateway_clock(request))
     pool = request.app.state.db_pool
-    catalog = await asyncio.to_thread(declared_categories)
+    catalog = await asyncio.to_thread(
+        declared_categories, home=request.app.state.gateway_process.home
+    )
     try:
         report = await asyncio.to_thread(
             run_audit,

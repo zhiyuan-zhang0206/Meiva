@@ -17,6 +17,7 @@ from base.config.service_read import ConfigAuthority
 from base.db import Database
 from base.events.live.bus import EventBus
 from base.packages.plugin_providers import build_model_catalog
+from base.paths import meiva_home
 from ops.agents.launch_retry import RetryLaunchConflictError, accept_retry_launch
 
 
@@ -31,7 +32,7 @@ def _prior_attempt(
         event_bus,
         spawner="user",
         machine=machine_identity.name(),
-        catalog=build_model_catalog(),
+        catalog=build_model_catalog(home=meiva_home()),
         authority=config_authority,
     )
     return agent_id, attempt

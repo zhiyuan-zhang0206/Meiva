@@ -51,6 +51,7 @@ from typing import Any, get_args
 
 from base.cluster.machine import MachineRole
 from base.native_process.stop_timing import STOP_MARGIN_S
+from base.paths import meiva_home
 from services.supervision.meiva_root.inputs import InputSeal
 from services.supervision.meiva_root.manifest import (
     ManifestError,
@@ -123,9 +124,12 @@ def build_units(
     repo_root: Path,
     environments: Mapping[str, dict[str, str]] | None = None,
     plugin_dirs: Mapping[str, Path] | None = None,
+    home: Path,
 ) -> list[dict[str, object]]:
     """K2 unit rows for every spec whose capabilities intersect `capabilities`."""
-    chosen = tuple(build_services(plugin_dirs=plugin_dirs)) if specs is None else tuple(specs)
+    chosen = (
+        tuple(build_services(plugin_dirs=plugin_dirs, home=home)) if specs is None else tuple(specs)
+    )
     caps = _validated_capabilities(capabilities)
     units: list[dict[str, object]] = []
     for spec in sorted(chosen, key=lambda spec: spec.session != STOPS_FIRST):
@@ -168,6 +172,7 @@ def build_manifest(
     repo_root: Path | None = None,
     specs: Iterable[ServiceSpec] | None = None,
     environments: Mapping[str, dict[str, str]] | None = None,
+    home: Path,
 ) -> dict[str, object]:
     """Build and validate a K2 manifest document (fail-fast, in memory).
 
@@ -180,10 +185,7 @@ def build_manifest(
     caps = _validated_capabilities(capabilities)
     manifest: dict[str, object] = {
         "units": build_units(
-            specs,
-            capabilities=caps,
-            repo_root=resolved_repo,
-            environments=environments,
+            specs, capabilities=caps, repo_root=resolved_repo, environments=environments, home=home
         )
     }
     _validate(manifest)
@@ -218,10 +220,15 @@ def generate(
     repo_root: Path | None = None,
     specs: Iterable[ServiceSpec] | None = None,
     environments: Mapping[str, dict[str, str]] | None = None,
+    home: Path,
 ) -> Path:
     """Build, validate in memory, write, then re-read with `load_manifests`."""
     manifest = build_manifest(
-        capabilities=capabilities, repo_root=repo_root, specs=specs, environments=environments
+        capabilities=capabilities,
+        repo_root=repo_root,
+        specs=specs,
+        environments=environments,
+        home=home,
     )
     write_manifest(path, manifest)
     load_manifests(path)  # the consumer's own reader must accept what we wrote
@@ -249,7 +256,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     args = parser.parse_args(argv)
     caps = [part.strip() for part in args.capabilities.split(",") if part.strip()]
     try:
-        path = generate(args.out, capabilities=caps, repo_root=args.repo_root)
+        path = generate(args.out, capabilities=caps, repo_root=args.repo_root, home=meiva_home())
     except ManifestError as exc:
         sys.stderr.write(f"error: {exc}\n")
         return 1

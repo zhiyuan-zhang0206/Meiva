@@ -15,7 +15,7 @@ exports = ["scripted_reply.py", "understanding_replay.py"]
 "observe.py" = { kinds = ["clock", "home", "platform", "random"], why = "In-boundary observer CLI records the guest platform, timestamp, home directory and idempotency key" }
 "tart_golden.py" = { kinds = ["home"], why = "Golden VM builder CLI resolves the default Tart binary and host home boundary" }
 "tart_run.py" = { kinds = ["home", "random"], why = "Tart verification CLI resolves the host home boundary and generates a unique run VM name" }
-"understanding_replay.py" = { kinds = ["db", "settings"], why = "Tool entry composes its process resources from the launch configuration" }
+"understanding_replay.py" = { kinds = ["db", "home", "settings"], why = "Tool entry composes its process resources from the launch configuration and resolves the home the model catalog discovers plugins under" }
 
 [debt.ambient-read]
 "container.py#clock time.strftime()" = 1

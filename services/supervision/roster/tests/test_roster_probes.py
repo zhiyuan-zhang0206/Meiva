@@ -12,6 +12,7 @@ from base.config import get_field, set_field
 from base.daemon.health import ProbeVerdict, start_health_server, stop_health_server
 from base.daemon.tests.health_support import unknown_image
 from base.host.net.tests.local_http import serve_json
+from base.paths import meiva_home
 from services.desktop.browser.orphan import is_cluster_chrome
 from services.desktop.browser.profile import profile_dir
 from services.supervision.healthchecks.gate import probe as gate_probe
@@ -20,7 +21,11 @@ from services.supervision.roster.service_spec import ServiceSpec
 
 
 def _service(session: str) -> ServiceSpec:
-    return next(service for service in composition.build_services() if service.session == session)
+    return next(
+        service
+        for service in composition.build_services(home=meiva_home())
+        if service.session == session
+    )
 
 
 @pytest.mark.parametrize("same_home", [True, False])

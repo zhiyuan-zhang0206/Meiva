@@ -192,6 +192,7 @@ def restart(config_overlay: dict[str, object] | None = None) -> NoReturn:
             None if installation is None else installation.configs,
             models=catalog.models,
             decision_models=catalog.decision_models,
+            home=process_context.current_context().require_meiva_home(),
         )
         # Settle a withdrawn llm_model before it is stored (task #4306): the
         # rewrite is reported in this agent's own log — the spawner-visible

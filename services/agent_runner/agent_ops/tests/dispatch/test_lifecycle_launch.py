@@ -14,6 +14,7 @@ from base.config.service_read import ConfigAuthority
 from base.db import Database
 from base.events.live.bus import EventBus
 from base.packages.plugin_providers import build_model_catalog
+from base.paths import meiva_home
 from ops.agents.launch_retry import accept_retry_launch
 from ops.cluster import rpc
 from ops.rpc_schemas import LaunchAgentRequest
@@ -34,7 +35,7 @@ def launch(
         machine=machine_identity.name(),
         prompt="one goal",
         prompt_source="user",
-        catalog=build_model_catalog(),
+        catalog=build_model_catalog(home=meiva_home()),
         authority=config_authority,
     )
     return LaunchAgentRequest(

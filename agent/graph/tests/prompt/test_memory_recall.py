@@ -30,6 +30,7 @@ from base.config.tests.configuration import defaults
 from base.host.env.agent_slices import AgentSlices
 from base.log.tests.log_records import LogRecords
 from base.packages.plugin_providers import build_model_catalog
+from base.paths import meiva_home
 
 
 @pytest.fixture
@@ -151,7 +152,7 @@ def _context(
 ) -> MeivaContext:
     return MeivaContext(
         identity=AgentIdentity(agent_id=agent_id, owns_loop=True) if agent_id is not None else None,
-        catalog=build_model_catalog(),
+        catalog=build_model_catalog(home=meiva_home()),
         clock_factory=_clock,
         clients=ClientSet(
             gateway_url="http://gateway.test",

@@ -246,6 +246,8 @@ def test_a_module_needs_an_actual_composition_import(tmp_path: Path) -> None:
 
 
 def test_real_healthcheck_documentation_matches_current_sources():
+    from base.paths import meiva_home
     from scripts.content_lint import lint_doc_roster as lint
+    from services.supervision.roster.composition import build_services
 
-    assert lint.check_healthcheck_roster() == 0
+    assert lint.check_healthcheck_roster(services=build_services(home=meiva_home())) == 0

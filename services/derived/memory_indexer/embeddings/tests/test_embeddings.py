@@ -36,6 +36,7 @@ from base.host.proc import run_bounded
 from base.lm.catalog import ModelCatalog
 from base.lm.provider_api import ProviderBinding
 from base.packages.plugin_providers import build_model_catalog
+from base.paths import meiva_home
 from services.derived.memory_indexer.embeddings import gemini
 from services.derived.memory_indexer.embeddings.base import EmbeddingAPIError
 from services.derived.memory_indexer.embeddings.gemini import (
@@ -66,7 +67,7 @@ def build_provider(
     endpoint: str = ENDPOINT,
     transport: httpx.AsyncBaseTransport | None = None,
 ) -> GeminiEmbeddingProvider:
-    active_catalog = build_model_catalog() if catalog is None else catalog
+    active_catalog = build_model_catalog(home=meiva_home()) if catalog is None else catalog
     return GeminiEmbeddingProvider(
         active_catalog,
         timeout_s=timeout_s,
@@ -425,7 +426,7 @@ def test_embed_usage_failure_propagates(mode: str, error_type: type[Exception]) 
     """Accounting fails after one successful provider call, without replaying it."""
     fake = AsyncClient(vectors=[[1.0] * DIM], prompt_token_count=123)
     failure = error_type("billing exploded")
-    base_catalog = build_model_catalog()
+    base_catalog = build_model_catalog(home=meiva_home())
     catalog = replace(
         base_catalog,
         bindings=_ObservedBindings(base_catalog.bindings, error=failure),
@@ -445,7 +446,7 @@ def test_embed_usage_failure_propagates(mode: str, error_type: type[Exception]) 
 def test_factory_passes_same_catalog_to_all_embedding_paths() -> None:
     from services.derived.memory_indexer.embeddings import factory
 
-    base_catalog = build_model_catalog()
+    base_catalog = build_model_catalog(home=meiva_home())
     seen: list[Mapping[str, ProviderBinding]] = []
     bindings = _ObservedBindings(base_catalog.bindings, seen=seen)
     catalog = replace(base_catalog, bindings=bindings)
@@ -596,7 +597,7 @@ def test_sync_embed_rejects_running_loop() -> None:
             gemini.embed(
                 ["hello"],
                 "RETRIEVAL_DOCUMENT",
-                catalog=build_model_catalog(),
+                catalog=build_model_catalog(home=meiva_home()),
                 timeout_s=TIMEOUT_S,
                 api_key=API_KEY,
                 transport=fake,

@@ -18,6 +18,7 @@ from base.lm.catalog import ModelCatalog
 from base.packages.plugin_providers import build_model_catalog
 from base.packages.tests.lm.providers.billing_sensors import disabled, failing
 from base.packages.tests.lm.providers.invoke_billing import invoke
+from base.paths import meiva_home
 from base.telemetry.tests.capture.armed_tracing import BillingRuntime, armed_billing
 
 
@@ -178,7 +179,7 @@ def cache_read(
 
 
 def main(scenario: str, path: Literal["message", "durable"], cached: int | None) -> None:
-    catalog = build_model_catalog()
+    catalog = build_model_catalog(home=meiva_home())
     if scenario == "disabled":
         disabled()
         return

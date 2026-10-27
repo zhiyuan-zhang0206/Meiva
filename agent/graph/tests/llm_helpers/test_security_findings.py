@@ -37,7 +37,7 @@ from base.events.live.bus import EventBus
 from base.host.env.agent_slices import AgentSlices
 from base.packages.plugin_providers import build_model_catalog
 from base.packages.plugins.extensions import ExtensionRegistry
-from base.paths import resolve_meiva_home
+from base.paths import meiva_home, resolve_meiva_home
 from meiva.tests.fixtures.pin_agent import snapshot_clients
 
 
@@ -144,7 +144,7 @@ async def test_a_real_childs_finding_reaches_the_model_through_the_hook(
             bus=EventBus.from_settings(rng=seeded_rng()),
             clients=snapshot_clients(),
             identity=AgentIdentity(agent_id=1042, owns_loop=True),
-            catalog=build_model_catalog(),
+            catalog=build_model_catalog(home=meiva_home()),
             clock_factory=Clock.from_settings,
         )
     )

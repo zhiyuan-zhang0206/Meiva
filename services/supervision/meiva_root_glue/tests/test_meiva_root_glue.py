@@ -16,6 +16,7 @@ import pytest
 from base.cluster.dataplane.direct_url import ClusterDirectUrl
 from base.config.tests.configuration import snapshot_process_config
 from base.daemon.health import DaemonProbe
+from base.paths import meiva_home
 from services.supervision.meiva_root.health import HealthMonitor
 from services.supervision.meiva_root.manifest import (
     ROOT_ID,
@@ -76,10 +77,7 @@ async def test_reference_wiring_registers_gated_specs(tmp_path: Path) -> None:
         _Spec("svc-c", "services.supervision.healthchecks.fake", None),
     )
     participants = glue.build_wiring(
-        context,
-        config=snapshot_process_config(),
-        diagnostics=(),
-        services=specs,
+        context, config=snapshot_process_config(), diagnostics=(), services=specs, home=meiva_home()
     )
     await context.supervisor.start()
     try:
@@ -113,6 +111,7 @@ async def test_static_probe_seam_resolves_lazily(
         diagnostics=(),
         services=(),
         static_probes={"svc-host": "wiring_fixture_probe:probe"},
+        home=meiva_home(),
     )
     await context.supervisor.start()
     try:
@@ -134,6 +133,7 @@ async def test_unresolvable_static_probe_yields_no_verdict(tmp_path: Path) -> No
         diagnostics=(),
         services=(),
         static_probes={"svc-host": "no_such_probe_module:probe"},
+        home=meiva_home(),
     )
     await context.supervisor.start()
     try:
@@ -250,6 +250,7 @@ def test_reference_wiring_refuses_unobserved_manifest_unit(tmp_path: Path) -> No
             config=snapshot_process_config(),
             diagnostics=(),
             services=(),
+            home=meiva_home(),
         )
 
 
@@ -266,10 +267,7 @@ async def test_glue_uses_shared_readiness_tiers_for_native_startup(
         _Spec(name, "probe", lambda: DaemonProbe.down("starting")) for name in ("gate", "labeler")
     )
     rounds = glue.build_wiring(
-        context,
-        config=snapshot_process_config(),
-        diagnostics=(),
-        services=specs,
+        context, config=snapshot_process_config(), diagnostics=(), services=specs, home=meiva_home()
     )[0]
     await context.supervisor.start()
     try:
@@ -321,6 +319,7 @@ async def test_reference_station_and_writer_share_one_entry_gate(
             observability_otlp_port=4325,
         ),
         services=(),
+        home=meiva_home(),
     )[0]
     assert isinstance(rounds, RootHealthRounds)
     station_check = next(

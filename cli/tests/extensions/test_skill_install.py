@@ -21,6 +21,7 @@ from base.packages.extensions import install_registry as reg
 from cli.commands.extensions.skill import cmd_skill_install
 from cli.database.runtime import CommandRuntime
 from cli.database.tests.command_inputs import command_runtime as command_runtime
+from meiva.sdk_surface.tests.context_home import context_over_unit_home as context_over_unit_home
 
 # Every test here installs a package, which records `local:<machine>` provenance
 # in the cluster registry — that needs a machine identity, which a bare
@@ -117,7 +118,7 @@ def test_bare_standard_skill_from_local_path(
     assert (dest / "references" / "REFERENCE.md").is_file()
     assert (dest / "scripts" / "run.py").is_file()
     assert src.is_dir()  # a local source is read in place, never moved
-    pkg = reg.get("pdf-processing")
+    pkg = reg.get("pdf-processing", home=unit_home)
     assert pkg is not None and pkg.type == "skill" and pkg.enabled
     assert "pdf-processing" in _installed_names()
 
@@ -181,7 +182,10 @@ def test_claude_code_skills_tree(
     )
 
     assert {"commit-style", "release-notes"} <= _installed_names()
-    assert reg.get("commit-style") is not None and reg.get("release-notes") is not None
+    assert (
+        reg.get("commit-style", home=unit_home) is not None
+        and reg.get("release-notes", home=unit_home) is not None
+    )
     assert not (unit_home / "skills" / "commit-style" / ".git").exists()
 
 
@@ -269,7 +273,7 @@ def test_path_selects_a_subdirectory(
         == 0
     )
     assert "pdf-processing" in _installed_names()
-    assert reg.get("pdf-processing").path == "tools/pdf-processing"  # type: ignore[union-attr]
+    assert reg.get("pdf-processing", home=command_runtime.home).path == "tools/pdf-processing"  # type: ignore[union-attr]
 
 
 def test_crlf_and_bom_skill_installs(
@@ -341,7 +345,7 @@ def test_collision_leaves_the_load_dir_untouched(
     )
     assert "already installed: alpha" in capsys.readouterr().err  # pyright: ignore[reportUnknownMemberType]
     assert not (unit_home / "skills" / "beta").exists()
-    assert reg.get("beta") is None
+    assert reg.get("beta", home=unit_home) is None
 
 
 def test_no_skill_in_source_fails_fast(
@@ -368,7 +372,7 @@ def test_no_skill_in_source_fails_fast(
         == 1
     )
     assert "no skill found" in capsys.readouterr().err  # pyright: ignore[reportUnknownMemberType]
-    assert reg.load().packages == []
+    assert reg.load(home=unit_home).packages == []
 
 
 def test_malformed_skill_md_fails_fast(
@@ -397,7 +401,7 @@ def test_malformed_skill_md_fails_fast(
         == 1
     )
     assert "description" in capsys.readouterr().err  # pyright: ignore[reportUnknownMemberType]
-    assert reg.load().packages == []
+    assert reg.load(home=unit_home).packages == []
 
 
 def test_missing_path_in_source_errors(
@@ -483,7 +487,7 @@ def test_install_records_explicit_update_policy(
         == 0
     )
 
-    pkg = reg.get("policy-skill")
+    pkg = reg.get("policy-skill", home=unit_home)
     assert pkg is not None
     assert pkg.update.mode == "notify"
     assert pkg.update.interval_seconds == 7200
@@ -513,7 +517,7 @@ def test_install_rejects_a_bad_check_every(
         == 1
     )
     assert "duration" in capsys.readouterr().err  # pyright: ignore[reportUnknownMemberType]
-    assert reg.get("bad-duration") is None
+    assert reg.get("bad-duration", home=unit_home) is None
 
 
 def test_check_every_is_validated_at_parse_time(capsys: pytest.CaptureFixture[str]) -> None:

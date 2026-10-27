@@ -14,11 +14,12 @@ from agent.llm.usage import log_llm_usage
 from base.lm.pricing import quote
 from base.log import logger
 from base.packages.plugin_providers import build_model_catalog
+from base.paths import meiva_home
 from base.telemetry.tests.capture.armed_tracing import BillingRuntime, armed_billing
 
 
 def priced(tracer: BillingRuntime) -> None:
-    catalog = build_model_catalog()
+    catalog = build_model_catalog(home=meiva_home())
     priced_at = datetime(2026, 8, 17, 0, 0, tzinfo=UTC)
     expected = quote("deepseek-v4-pro", 1_000, 100, 800, at=priced_at, prices=catalog.prices)
     assert expected is not None
@@ -69,7 +70,9 @@ def incomplete(tracer: BillingRuntime) -> None:
     message = AIMessage.model_construct(
         content="", usage_metadata={"input_tokens": 100, "total_tokens": 100}
     )
-    log_llm_usage(message, agent_id=7, model="deepseek-v4-pro", catalog=build_model_catalog())
+    log_llm_usage(
+        message, agent_id=7, model="deepseek-v4-pro", catalog=build_model_catalog(home=meiva_home())
+    )
     assert tracer.spans == []
     assert message.usage_metadata is not None
     assert message.usage_metadata["input_tokens"] == 100

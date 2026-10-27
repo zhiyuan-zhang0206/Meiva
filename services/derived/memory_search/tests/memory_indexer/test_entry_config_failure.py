@@ -7,6 +7,7 @@ from base.config import ConfigBoot
 from base.db import Database
 from base.host.env import port_lease
 from base.native_process.loaded_commit import LoadedCommit
+from base.paths import meiva_home
 from services.derived.memory_indexer import daemon
 from services.derived.memory_indexer.config import MemoryIndexerConfig
 
@@ -35,6 +36,7 @@ async def test_run_unknown_provider_fails_before_health_server(
             image=LoadedCommit(Path(), None),
             root=tmp_path / "memory",
             tuning=MemoryIndexerConfig(),
+            home=meiva_home(),
         )
 
     assert exc.value.code == 1

@@ -155,7 +155,7 @@ def cmd_skill_scan(target: str, *, home: Path) -> int:
         )
         return 1
     findings = scan.scan_package(root)
-    entry = install_registry.get(root.name)
+    entry = install_registry.get(root.name, home=home)
     tier = entry.trust if entry is not None else "untracked"
     print(f"[meiva skill scan] {root} (trust={tier})")
     print(scan.render(findings, package=root.name))
@@ -164,7 +164,7 @@ def cmd_skill_scan(target: str, *, home: Path) -> int:
     return 2 if scan.criticals(findings) else 0
 
 
-def cmd_skill_trust(name: str, *, revoke: bool = False, now: datetime) -> int:
+def cmd_skill_trust(name: str, *, revoke: bool = False, now: datetime, home: Path) -> int:
     """`meiva skill trust <name> [--revoke]` — record that a human read this
     package's content and vouches for it (tier "reviewed"), or take that back.
 
@@ -175,7 +175,7 @@ def cmd_skill_trust(name: str, *, revoke: bool = False, now: datetime) -> int:
     """
     from base.packages.extensions import install_registry
 
-    entry = install_registry.get(name)
+    entry = install_registry.get(name, home=home)
     if entry is None:
         print(
             f"[meiva skill trust] '{name}' is not tracked in the install registry.", file=sys.stderr
@@ -190,27 +190,27 @@ def cmd_skill_trust(name: str, *, revoke: bool = False, now: datetime) -> int:
         return 1
     entry.trust = "unreviewed" if revoke else "reviewed"
     entry.updated_at = now.isoformat(timespec="seconds")
-    install_registry.register(entry)
+    install_registry.register(entry, home=home)
     print(f"[meiva skill trust] {name} -> trust={entry.trust}.")
     return 0
 
 
-def cmd_skill_enable(name: str) -> int:
+def cmd_skill_enable(name: str, *, home: Path) -> int:
     """`meiva skill enable <name>` — surface a tracked package to the skill scanner."""
-    return _set_enabled(name, enabled=True)
+    return _set_enabled(name, enabled=True, home=home)
 
 
-def cmd_skill_disable(name: str) -> int:
+def cmd_skill_disable(name: str, *, home: Path) -> int:
     """`meiva skill disable <name>` — hide a tracked package (stays on disk)."""
-    return _set_enabled(name, enabled=False)
+    return _set_enabled(name, enabled=False, home=home)
 
 
-def _set_enabled(name: str, *, enabled: bool) -> int:
+def _set_enabled(name: str, *, enabled: bool, home: Path) -> int:
     from base.packages.extensions import install_registry
     from base.packages.skills.names import find
 
     verb = "enable" if enabled else "disable"
-    with install_registry.mutate() as registry:
+    with install_registry.mutate(home=home) as registry:
         # The typed name is inbound: fold it onto the row's real spelling so the
         # canonical dash form works against a registry row still written with
         # underscores (and vice versa).
@@ -262,7 +262,7 @@ def cmd_skill_register(name: str, *, accept_risk: bool = False, home: Path, now:
         print(f"[meiva skill register] no dir at {d}.", file=sys.stderr)
         return 1
     name = d.name
-    if install_registry.get(name) is not None:
+    if install_registry.get(name, home=home) is not None:
         print(
             f"[meiva skill register] '{name}' is already tracked; "
             f"`meiva skill enable {name}` if it is disabled.",
@@ -296,7 +296,8 @@ def cmd_skill_register(name: str, *, accept_risk: bool = False, home: Path, now:
             trust="unreviewed",
             scanned_at=stamp,
             accepted_findings=accepted,
-        )
+        ),
+        home=home,
     )
     print(f"[meiva skill register] '{name}' registered (origin=user, trust=unreviewed).")
     print(report)
@@ -613,7 +614,7 @@ def cmd_skill_update(
     unchanged: list[str] = []
     replaced: list[str] = []
     skipped: list[str] = []
-    with reg.mutate() as registry:
+    with reg.mutate(home=home) as registry:
         for s in sources:
             _update_one(
                 s,
@@ -653,7 +654,7 @@ def cmd_skill_upgrade(name: str, *, home: Path, now: datetime) -> int:
 
     from ._pkg_source import SourcePathNotFoundError, acquire_source, cleanup_temp
 
-    pkg = install_registry.get(name)
+    pkg = install_registry.get(name, home=home)
     if pkg is None or pkg.type != "skill":
         print(
             f"[meiva skill upgrade] '{name}' is not an installed skill package "
@@ -705,7 +706,7 @@ def cmd_skill_upgrade(name: str, *, home: Path, now: datetime) -> int:
 
         pkg.updated_at = now.isoformat(timespec="seconds")
         pkg.installed_hash = install_registry.tree_hash(dest)
-        install_registry.register(pkg)
+        install_registry.register(pkg, home=home)
         print(f"[meiva skill upgrade] re-fetched '{name}' from {pkg.source}.")
         print("  active on the next skill scan; no restart needed.")
         return 0

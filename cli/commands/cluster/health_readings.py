@@ -212,7 +212,9 @@ def read_service_failures(command: CommandRuntime, launched: LaunchRecord) -> tu
     scope = launch_scope(launched)
     if isinstance(scope, Unavailable):
         return (scope.reason,)
-    roster = services_for_capabilities_annotated(roles, machine=command.machine, host=command.host)
+    roster = services_for_capabilities_annotated(
+        roles, machine=command.machine, host=command.host, home=command.home
+    )
     wanted = sessions_to_probe(scope, tuple(RosterGate(s.session, why) for s, why in roster))
     outcomes: list[ProbeOutcome] = []
     for spec in (spec for spec, _why in roster if spec.session in wanted):

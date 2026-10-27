@@ -10,11 +10,12 @@ import sys
 
 from base.packages.plugins.config_registration import validate_config_overlay
 from base.packages.plugins.plugin_errors import InvalidConfigOverlay
+from base.paths import meiva_home
 
 
 def _verdict(overlay: dict[str, object]) -> str:
     try:
-        validate_config_overlay(overlay, models={}, decision_models={})
+        validate_config_overlay(overlay, models={}, decision_models={}, home=meiva_home())
     except InvalidConfigOverlay:
         return "rejected"
     return "accepted"

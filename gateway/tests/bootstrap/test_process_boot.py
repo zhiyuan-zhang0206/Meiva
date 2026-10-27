@@ -5,6 +5,7 @@ import json
 import os
 import sys
 from collections.abc import Callable
+from functools import partial
 from pathlib import Path
 from typing import Any
 
@@ -287,7 +288,7 @@ def _rooted_app(home: Path) -> Any:
         gateway_config_of(process.config),
         process=process,
         process_ownership="owned",
-        catalog=load_model_catalog(build_model_catalog),
+        catalog=load_model_catalog(partial(build_model_catalog, home=process.home)),
     )
 
 

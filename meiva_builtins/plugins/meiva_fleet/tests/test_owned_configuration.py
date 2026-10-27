@@ -16,6 +16,7 @@ from base.packages.plugins.config_registration import (
     service_config_packet,
 )
 from base.packages.plugins.flags import UndeclaredFlag, read_declared_flag
+from base.paths import meiva_home
 from meiva_builtins.plugins.meiva_fleet.default_config import FleetConfig, contribute
 from meiva_builtins.plugins.meiva_fleet.services import services
 
@@ -72,7 +73,7 @@ def preserve_env_file() -> Generator[None]:
 
 
 def write_image(config: FleetConfig) -> Path:
-    path = disk_image_path("meiva_fleet")
+    path = disk_image_path("meiva_fleet", home=meiva_home())
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(config.model_dump_json())
     return path
@@ -129,7 +130,7 @@ def test_invalid_present_projection_is_rejected_even_on_gateway(packet: str) -> 
 
 def test_gateway_truth_is_authoritative_and_projection_has_exact_scope() -> None:
     write_image(FleetConfig(task_escalate_n=7, task_maintenance_enabled=False))
-    packet = json.loads(plugin_bootstrap_config())["meiva_fleet"]
+    packet = json.loads(plugin_bootstrap_config(home=meiva_home()))["meiva_fleet"]
     assert set(packet) == set(FleetConfig.model_fields) - _host_fields()
     assert packet["task_escalate_n"] == 7
 
@@ -147,7 +148,7 @@ def test_gateway_truth_is_authoritative_and_projection_has_exact_scope() -> None
 
 def test_gate_and_daemon_birth_share_one_captured_image() -> None:
     image = write_image(FleetConfig(task_maintenance_enabled=False, task_escalate_n=7))
-    service = services()[0]
+    service = services(home=meiva_home())[0]
     assert service.config_inputs == (image,)
     assert service.gate is not None and "disabled" in str(service.gate())
     assert service.plugin_config is not None

@@ -10,7 +10,7 @@ from base.paths import meiva_home
 
 
 def main(home: Path, keys_all_live: bool) -> None:
-    catalog = build_model_catalog()
+    catalog = build_model_catalog(home=home)
     assert meiva_home() == home
     (home / ".env").write_bytes(b"DEEPSEEK_API_KEY=\xff\n")
     try:

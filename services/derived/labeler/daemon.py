@@ -240,6 +240,7 @@ async def run(
     *,
     process_config: ConfigBoot,
     runtime: Path,
+    home: Path,
     database: Callable[[], Database],
     image: LoadedCommit,
 ) -> None:
@@ -264,7 +265,7 @@ async def run(
 
     db = database()
     pool = db.pool()
-    catalog = build_model_catalog()
+    catalog = build_model_catalog(home=home)
     bus = EventBus(event_bus_config_from_config(process_config), rng=_new_rng())
     try:
         await dispatch_loop(
@@ -334,6 +335,7 @@ def main() -> None:
             run(
                 process_config=machine_config,
                 runtime=process_home / "run",
+                home=process_home,
                 database=database,
                 image=image,
             )

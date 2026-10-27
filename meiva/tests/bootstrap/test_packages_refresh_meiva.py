@@ -24,10 +24,10 @@ def test_scan_drops_host_blocked_packages(unit_home: Path) -> None:
         d = home / "skills" / name
         d.mkdir(parents=True)
         (d / "SKILL.md").write_text(f"---\nname: {name}\ndescription: d\n---\n", encoding="utf-8")
-        reg.register(reg.InstalledPackage(name=name, type="skill", enabled=True))
+        reg.register(reg.InstalledPackage(name=name, type="skill", enabled=True), home=home)
     (home / "skills" / "blocked" / "meiva-plugin.json").write_text(
         json.dumps(_manifest_for("blocked", engines={"meiva": ">=2099"})), encoding="utf-8"
     )
 
-    tree = scan_tree(home / "skills", loadable_skill_names(), [])
+    tree = scan_tree(home / "skills", loadable_skill_names(home=home), [])
     assert "ok" in tree and "blocked" not in tree

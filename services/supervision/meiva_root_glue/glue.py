@@ -201,6 +201,7 @@ def build_wiring(
     probe_config: ProbeConfig | None = None,
     services: Sequence[ProbeSource] | None = None,
     static_probes: Mapping[str, str] = STATIC_PROBES,
+    home: Path,
 ) -> list[WiringParticipant]:
     """The reference participant set: health monitor + tree self-check."""
     from base.host.runtime_interpreter import capture_loaded_runtime
@@ -246,7 +247,7 @@ def build_wiring(
     )
     registry = ProbeRegistry()
     requested = {unit.id for unit in context.registry.units}
-    raw_specs: Sequence[ProbeSource] = build_services() if services is None else services
+    raw_specs: Sequence[ProbeSource] = build_services(home=home) if services is None else services
     registry.register_specs(spec for spec in raw_specs if spec.session in requested)
     for unit_id, ref in static_probes.items():
         registry.register_ref(unit_id, ref)

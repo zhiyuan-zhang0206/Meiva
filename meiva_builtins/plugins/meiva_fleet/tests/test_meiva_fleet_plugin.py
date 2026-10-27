@@ -15,6 +15,7 @@ from base.config.tests.configuration import defaults
 from base.host.env.agent_slices import AgentSlices
 from base.packages.plugin_providers import build_model_catalog
 from base.packages.plugins.extensions import EMPTY
+from base.paths import meiva_home
 from meiva.sdk_surface import install
 from meiva.sdk_surface.installation import installed
 from meiva.tests.fixtures.gateway_wire import GatewayWire
@@ -57,14 +58,22 @@ def test_member_torn_down_on_uninstall(load_activity_plugin: None):
 
 def test_plugin_registers_prompt_section(load_activity_plugin: None):
     prompt = build_system_prompt(
-        fleet_registry(), _fleet_slices(), agent_id=1, catalog=build_model_catalog()
+        fleet_registry(),
+        _fleet_slices(),
+        agent_id=1,
+        catalog=build_model_catalog(home=meiva_home()),
+        home=meiva_home(),
     )
     assert "meiva.self.set_label" in prompt
 
 
 def test_prompt_assigns_shared_milestone_reporting(load_activity_plugin: None):
     prompt = build_system_prompt(
-        fleet_registry(), _fleet_slices(), agent_id=1, catalog=build_model_catalog()
+        fleet_registry(),
+        _fleet_slices(),
+        agent_id=1,
+        catalog=build_model_catalog(home=meiva_home()),
+        home=meiva_home(),
     )
 
     assert prompt.count("one reporter per milestone") == 1
@@ -76,7 +85,11 @@ def test_prompt_assigns_shared_milestone_reporting(load_activity_plugin: None):
 
 def test_prompt_section_states_the_message_threshold(load_activity_plugin: None):
     prompt = build_system_prompt(
-        fleet_registry(), _fleet_slices(), agent_id=1, catalog=build_model_catalog()
+        fleet_registry(),
+        _fleet_slices(),
+        agent_id=1,
+        catalog=build_model_catalog(home=meiva_home()),
+        home=meiva_home(),
     )
     assert prompt.count("Message another agent only when they must reply") == 1
     assert (
@@ -92,7 +105,8 @@ def test_enabled_fleet_preserves_parallel_work_policy(load_activity_plugin: None
         fleet_registry(),
         _fleet_slices(agent__prompt_delegation_check_enabled=True),
         agent_id=1,
-        catalog=build_model_catalog(),
+        catalog=build_model_catalog(home=meiva_home()),
+        home=meiva_home(),
     )
     assert "Workflow selection belongs to `meiva-workflow`" in prompt
     assert "enabling Fleet does not require a registry task or a management tree" in prompt
@@ -117,9 +131,13 @@ def test_enabled_fleet_preserves_parallel_work_policy(load_activity_plugin: None
 def test_fleet_does_not_duplicate_core_lifecycle(load_activity_plugin: None):
     from meiva_builtins.plugins.meiva_fleet.agent_runtime import fleet_self_section
 
-    section = fleet_self_section(_fleet_slices(), catalog=build_model_catalog())
+    section = fleet_self_section(_fleet_slices(), catalog=build_model_catalog(home=meiva_home()))
     prompt = build_system_prompt(
-        fleet_registry(), _fleet_slices(), agent_id=1, catalog=build_model_catalog()
+        fleet_registry(),
+        _fleet_slices(),
+        agent_id=1,
+        catalog=build_model_catalog(home=meiva_home()),
+        home=meiva_home(),
     )
     assert "# Efficient long-running operation" not in section
     assert prompt.count("# Efficient long-running operation") == 1
@@ -134,7 +152,11 @@ def test_peer_communication_survives_human_guidance_toggle(
 
     set_fleet_configuration(reduce_context_switch=False)
     prompt = build_system_prompt(
-        fleet_registry(), _fleet_slices(), agent_id=1, catalog=build_model_catalog()
+        fleet_registry(),
+        _fleet_slices(),
+        agent_id=1,
+        catalog=build_model_catalog(home=meiva_home()),
+        home=meiva_home(),
     )
     assert prompt.count("## Agent-to-agent communication") == 1
     assert "## Reduce context switch for the human" not in prompt
@@ -147,7 +169,7 @@ def test_peer_communication_survives_human_guidance_toggle(
 def test_prompt_section_dismiss_notice_after_dialog_reply(load_activity_plugin: None):
     from meiva_builtins.plugins.meiva_fleet.agent_runtime import fleet_self_section
 
-    section = fleet_self_section(_fleet_slices(), catalog=build_model_catalog())
+    section = fleet_self_section(_fleet_slices(), catalog=build_model_catalog(home=meiva_home()))
     assert "Dismiss a pending notice" in section
     assert "when the dialog resolves it" in section
     assert "dismiss_notice" not in section
@@ -156,7 +178,7 @@ def test_prompt_section_dismiss_notice_after_dialog_reply(load_activity_plugin: 
 def test_prompt_section_queue_delivery_mandate(load_activity_plugin: None):
     from meiva_builtins.plugins.meiva_fleet.agent_runtime import fleet_self_section
 
-    section = fleet_self_section(_fleet_slices(), catalog=build_model_catalog())
+    section = fleet_self_section(_fleet_slices(), catalog=build_model_catalog(home=meiva_home()))
     assert "queue necessary decisions and results" in section
     assert "even while they are offline" in section
     assert "offline" in section
@@ -174,11 +196,16 @@ def test_prompt_section_reduce_context_switch_gating(
 
     set_fleet_configuration(reduce_context_switch=True)
     assert "Queue, never push" in reduce_context_switch_section(
-        _fleet_slices(), catalog=build_model_catalog()
+        _fleet_slices(), catalog=build_model_catalog(home=meiva_home())
     )
 
     set_fleet_configuration(reduce_context_switch=False)
-    assert reduce_context_switch_section(_fleet_slices(), catalog=build_model_catalog()) == ""
+    assert (
+        reduce_context_switch_section(
+            _fleet_slices(), catalog=build_model_catalog(home=meiva_home())
+        )
+        == ""
+    )
 
 
 def test_prompt_section_reduce_context_switch_content(
@@ -189,7 +216,9 @@ def test_prompt_section_reduce_context_switch_content(
     )
 
     set_fleet_configuration(reduce_context_switch=True)
-    section = reduce_context_switch_section(_fleet_slices(), catalog=build_model_catalog())
+    section = reduce_context_switch_section(
+        _fleet_slices(), catalog=build_model_catalog(home=meiva_home())
+    )
 
     assert "Queue, never push" in section
     assert "irreversible risk in motion" in section
@@ -209,19 +238,29 @@ def test_reduce_context_switch_reaches_the_prompt(
     section = "## Reduce context switch for the human"
     set_fleet_configuration(reduce_context_switch=True)
     assert section in build_system_prompt(
-        fleet_registry(), _fleet_slices(), agent_id=1, catalog=build_model_catalog()
+        fleet_registry(),
+        _fleet_slices(),
+        agent_id=1,
+        catalog=build_model_catalog(home=meiva_home()),
+        home=meiva_home(),
     )
 
     set_fleet_configuration(reduce_context_switch=False)
     assert section not in build_system_prompt(
-        fleet_registry(), _fleet_slices(), agent_id=1, catalog=build_model_catalog()
+        fleet_registry(),
+        _fleet_slices(),
+        agent_id=1,
+        catalog=build_model_catalog(home=meiva_home()),
+        home=meiva_home(),
     )
 
 
 def test_fleet_operating_contract_is_loaded_on_demand(load_activity_plugin: None):
     from meiva_builtins.plugins.meiva_fleet import agent_runtime
 
-    section = agent_runtime.fleet_self_section(_fleet_slices(), catalog=build_model_catalog())
+    section = agent_runtime.fleet_self_section(
+        _fleet_slices(), catalog=build_model_catalog(home=meiva_home())
+    )
     skill_directory = Path(agent_runtime.__file__).parent / "skills" / "meiva-fleet"
     skill = (skill_directory / "SKILL.md").read_text()
     contract = (skill_directory / "reference" / "operating-contract.md").read_text()
@@ -267,7 +306,8 @@ def test_task_conversion_absent_when_plugin_disabled(**changes: Any):
             default_reader=defaults(**changes),
         ),
         agent_id=1,
-        catalog=build_model_catalog(),
+        catalog=build_model_catalog(home=meiva_home()),
+        home=meiva_home(),
     )
 
     assert "## Fleet task interaction" not in prompt

@@ -13,6 +13,7 @@ from base.db import Database
 from base.db.code_version_gate import ProcessDbGate
 from base.native_process.code_version import CodeVersion
 from base.native_process.loaded_commit import LoadedCommit
+from base.paths import meiva_home
 from services.derived.labeler import daemon
 from services.derived.labeler.tests.db_faults import table_missing
 from services.derived.labeler.tests.service_probe import assert_released, our_backends, wait_serving
@@ -52,6 +53,7 @@ async def test_run_serves_while_it_polls_and_releases_everything_when_stopped(
             runtime=runtime,
             database=lambda: database,
             image=LoadedCommit(Path(), None),
+            home=meiva_home(),
         )
     )
     try:
@@ -86,6 +88,7 @@ async def test_run_releases_everything_when_the_poll_fails(
                 runtime=runtime,
                 database=lambda: database,
                 image=LoadedCommit(Path(), None),
+                home=meiva_home(),
             ),
             timeout=30.0,
         )

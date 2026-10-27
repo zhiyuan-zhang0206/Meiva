@@ -110,7 +110,7 @@ def test_capability_surface_expands_when_named_explicitly(model_catalog: ModelCa
     write_skill(
         skills_dir(meiva_home()), "alpha", "alpha", "Alpha desc", body="# Body\n\nSECRET_MARKER\n"
     )
-    install_registry.register(InstalledPackage(name="alpha", type="skill"))
+    install_registry.register(InstalledPackage(name="alpha", type="skill"), home=meiva_home())
     assert "skills" in _expand(["*", "skills"])
 
     text = sdk_expand_section(SectionInputs(_slices(["*", "skills"]), model_catalog, _live()))

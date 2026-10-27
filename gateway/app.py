@@ -512,7 +512,9 @@ def create_app(
     app.state.catalog = catalog
     if isinstance(catalog, ModelCatalog):
         app.state.memory_embedder = memory_router.build_embedder(config.memory_search, catalog)
-    app.state.command_catalog = CommandCatalog.system(skills=load_skill_names)
+    app.state.command_catalog = CommandCatalog.system(
+        skills=partial(load_skill_names, home=process.home), home=process.home
+    )
     app.state.memory_unreadable_reports = memory_router.unreadable_reports()
     app.state.gateway_process = process
     machine_token_acceptance: AcceptanceCache = {}
@@ -631,7 +633,7 @@ def create_app_from_environment() -> FastAPI:
         process_config(process.config, home=home),
         process=process,
         process_ownership="owned",
-        catalog=load_model_catalog(build_model_catalog),
+        catalog=load_model_catalog(partial(build_model_catalog, home=home)),
     )
 
 
@@ -665,7 +667,7 @@ def _borrowed_app(process: GatewayProcess) -> FastAPI:
         process_config(process.config, home=process.home),
         process=process,
         process_ownership="borrowed",
-        catalog=load_model_catalog(build_model_catalog),
+        catalog=load_model_catalog(partial(build_model_catalog, home=process.home)),
     )
 
 

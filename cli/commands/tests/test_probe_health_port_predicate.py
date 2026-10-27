@@ -3,6 +3,7 @@ from __future__ import annotations
 from dataclasses import replace
 
 from base.daemon.health import DaemonProbe
+from base.paths import meiva_home
 from cli.commands.probe import occupied_health_ports
 from services.supervision.roster import composition
 from services.supervision.roster.service_spec import ServiceSpec
@@ -11,7 +12,7 @@ _NOT_DAEMON_PORTS = ("gateway", "browser", "frontend", "memory-search", "otel-co
 
 
 def _by_session() -> dict[str, ServiceSpec]:
-    return {s.session: s for s in composition.build_services()}
+    return {s.session: s for s in composition.build_services(home=meiva_home())}
 
 
 def _reports_foreign_occupant(spec: ServiceSpec) -> bool:
@@ -24,7 +25,7 @@ def _url_suffix_rule(spec: ServiceSpec) -> bool:
 
 
 def test_the_preflight_covers_exactly_the_entries_the_url_suffix_covered() -> None:
-    for spec in composition.build_services():
+    for spec in composition.build_services(home=meiva_home()):
         assert _reports_foreign_occupant(spec) == _url_suffix_rule(spec), spec.session
 
 

@@ -56,11 +56,11 @@ async def test_fresh_processes_bind_the_same_winning_image(unit_home: Path) -> N
         for child in children:
             assert child.stdout is not None
             assert await asyncio.wait_for(child.stdout.readline(), 30) == b"READY\n"
-        assert not disk_image_path("boot-race").exists()
+        assert not disk_image_path("boot-race", home=unit_home).exists()
         results = await _release_creation(children)
         for child, (_, stderr) in zip(children, results, strict=True):
             assert child.returncode == 0, stderr.decode()
-        winner = json.loads(disk_image_path("boot-race").read_text())["marker"]
+        winner = json.loads(disk_image_path("boot-race", home=unit_home).read_text())["marker"]
         assert winner in ("first", "second")
         assert [stdout.decode().strip() for stdout, _ in results] == [winner, winner]
     finally:
@@ -72,7 +72,7 @@ async def test_fresh_processes_bind_the_same_winning_image(unit_home: Path) -> N
 
 def test_bind_rereads_image_created_after_the_missing_read(unit_home: Path) -> None:
     configs: dict[str, BaseModel] = {}
-    image = disk_image_path("read-race")
+    image = disk_image_path("read-race", home=unit_home)
 
     @dataclass(frozen=True)
     class CompetingRead:
@@ -125,7 +125,7 @@ def test_bind_rejects_invalid_winning_image(
     expected_error: type[Exception],
 ) -> None:
     configs: dict[str, BaseModel] = {}
-    image = disk_image_path("invalid-winner")
+    image = disk_image_path("invalid-winner", home=unit_home)
 
     @dataclass(frozen=True)
     class InvalidWinner:
@@ -180,12 +180,14 @@ def test_bind_propagates_unknown_creation_errors(
     with pytest.raises(error_type) as captured:
         bind_plugin_config(
             FailedCreation(
-                "unknown-writer-error", BootConfig, disk_image_path("unknown-writer-error")
+                "unknown-writer-error",
+                BootConfig,
+                disk_image_path("unknown-writer-error", home=unit_home),
             ),
             configs,
         )
     assert captured.value is error
-    assert not disk_image_path("unknown-writer-error").exists()
+    assert not disk_image_path("unknown-writer-error", home=unit_home).exists()
     with pytest.raises(KeyError):
         get_plugin_config(
             "unknown-writer-error",
@@ -198,7 +200,7 @@ def test_bind_propagates_unknown_creation_errors(
 
 
 def test_default_writer_still_rejects_an_existing_image(unit_home: Path) -> None:
-    image = disk_image_path("create-only")
+    image = disk_image_path("create-only", home=unit_home)
     write_config_image(
         PluginConfigOwner("create-only", BootConfig, image),
         BootConfig(marker="existing"),
@@ -206,13 +208,13 @@ def test_default_writer_still_rejects_an_existing_image(unit_home: Path) -> None
     )
     before = image.read_bytes()
     with pytest.raises(PluginConfigChangedError):
-        config_registration.write_default_disk_image("create-only", BootConfig)
+        config_registration.write_default_disk_image("create-only", BootConfig, home=unit_home)
     assert image.read_bytes() == before
 
 
 def test_bind_does_not_replace_a_disappearing_winner_with_defaults(unit_home: Path) -> None:
     configs: dict[str, BaseModel] = {}
-    image = disk_image_path("missing-winner")
+    image = disk_image_path("missing-winner", home=unit_home)
 
     @dataclass(frozen=True)
     class DisappearingWinner:
@@ -252,7 +254,7 @@ def test_bind_propagates_unknown_winning_image_errors(
 ) -> None:
     configs: dict[str, BaseModel] = {}
     error = error_type("unexpected winning image failure")
-    image = disk_image_path("unknown-read-error")
+    image = disk_image_path("unknown-read-error", home=unit_home)
 
     @dataclass(frozen=True)
     class FailedWinningRead:
@@ -271,7 +273,9 @@ def test_bind_propagates_unknown_winning_image_errors(
     with pytest.raises(error_type) as captured:
         bind_plugin_config(
             FailedWinningRead(
-                "unknown-read-error", BootConfig, disk_image_path("unknown-read-error")
+                "unknown-read-error",
+                BootConfig,
+                disk_image_path("unknown-read-error", home=unit_home),
             ),
             configs,
         )

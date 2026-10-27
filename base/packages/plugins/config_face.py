@@ -26,7 +26,6 @@ from pydantic import BaseModel
 
 from base.packages.plugins import config_from_image, load_report
 from base.packages.plugins.extensions import PluginContributions
-from base.paths.home import resolve_meiva_home
 
 CONFIG_FACE = "default_config"
 
@@ -104,10 +103,10 @@ def enabled_config_classes(plugin_dirs: dict[str, Path]) -> dict[str, type[BaseM
     return classes
 
 
-def disk_image_path(plugin: str) -> Path:
+def disk_image_path(plugin: str, *, home: Path) -> Path:
     from base.packages.plugin_config_images import config_image_path
 
-    return config_image_path(plugin, home=resolve_meiva_home())
+    return config_image_path(plugin, home=home)
 
 
 def read_config_image[C: BaseModel](cls: type[C], config_path: Path) -> C:
@@ -119,9 +118,9 @@ def read_config_image[C: BaseModel](cls: type[C], config_path: Path) -> C:
     return config_from_image(cls, content, config_path)
 
 
-def write_default_disk_image(plugin: str, cls: type[BaseModel]) -> Path:
+def write_default_disk_image(plugin: str, cls: type[BaseModel], *, home: Path) -> Path:
     from base.packages.plugin_config_images import PluginConfigOwner
 
-    config_path = disk_image_path(plugin)
+    config_path = disk_image_path(plugin, home=home)
     PluginConfigOwner(plugin, cls, config_path).create_default()
     return config_path

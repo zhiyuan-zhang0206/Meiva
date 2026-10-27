@@ -50,7 +50,6 @@ from base.packages.plugins.loading.discovery import (
 )
 from base.packages.plugins.loading.plugin_loader import safe_load_plugin_module
 from base.packages.plugins.loading.registry import ALL_FACES, SURFACE_FACES, build_registry
-from base.paths.home import resolve_meiva_home
 
 
 def _load_face(
@@ -87,6 +86,7 @@ def import_faces(
     surface: bool = False,
     report: load_report.Reporter | None = None,
     validate_state: StateGate | None = None,
+    home: Path,
 ) -> LoadedExtensions:
     """Read plugins_config.json, import the enabled plugins' faces, build the registry they declare.
 
@@ -102,8 +102,8 @@ def import_faces(
     ``report`` receives each contained failure instead of the canonical reporter (log + telemetry);
     `meiva plugins verify` passes a collector, so the failures come back as values.
     """
-    config_images = DiskPluginConfigImages(resolve_meiva_home().resolve())
-    discovered, config = discovered_and_config(report)
+    config_images = DiskPluginConfigImages(home.resolve())
+    discovered, config = discovered_and_config(report, home=home)
 
     for name in sorted(config.plugins):
         if not config.plugins[name].enabled:
@@ -124,12 +124,12 @@ def import_faces(
             _load_face(name, plugin_dir, pkg=pkg, report=report)
 
     registry = build_registry(
-        SURFACE_FACES if surface else ALL_FACES, report, validate_state=validate_state
+        SURFACE_FACES if surface else ALL_FACES, report, validate_state=validate_state, home=home
     )
     return LoadedExtensions(config, registry, config_images)
 
 
-def load_agent_faces() -> None:
+def load_agent_faces(*, home: Path) -> None:
     """Import the runtime face of every enabled plugin whose surface is loaded.
 
     Faces only: no reset (it would tear down the already-loaded surface),
@@ -138,7 +138,7 @@ def load_agent_faces() -> None:
     surface has not loaded are skipped too: the surface owns the module
     identity the face imports against.
     """
-    for name, plugin_dir in enabled_plugin_dirs():
+    for name, plugin_dir in enabled_plugin_dirs(home=home):
         pkg = pkg_of(plugin_dir)
         if f"{pkg}.{name}.{FACE_MODULE}" in sys.modules:
             continue

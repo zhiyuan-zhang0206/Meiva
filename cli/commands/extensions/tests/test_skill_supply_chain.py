@@ -34,6 +34,7 @@ from cli.commands.extensions.skill_package import ExtensionRegistryError
 from cli.commands.extensions.tests.support.source_bindings import PROD_ELSEWHERE
 from cli.database.runtime import CommandRuntime
 from cli.database.tests.command_inputs import command_runtime as command_runtime
+from meiva.sdk_surface.tests.context_home import context_over_unit_home as context_over_unit_home
 
 
 @dataclass
@@ -117,7 +118,7 @@ def test_a_malicious_skill_refuses_and_leaves_nothing_behind(
     assert "credential-exfiltration" in err
     assert "--accept-risk" in err
     assert not (unit_home / "skills" / "helpful-backup").exists()
-    assert reg.load().packages == []
+    assert reg.load(home=unit_home).packages == []
 
 
 def test_one_bad_skill_aborts_a_whole_collection_before_the_first_copy(
@@ -146,7 +147,7 @@ def test_one_bad_skill_aborts_a_whole_collection_before_the_first_copy(
     )
 
     assert not (unit_home / "skills" / "good-one").exists()
-    assert reg.load().packages == []
+    assert reg.load(home=unit_home).packages == []
 
 
 def test_accept_risk_installs_and_records_what_it_waived(
@@ -172,7 +173,7 @@ def test_accept_risk_installs_and_records_what_it_waived(
         == 0
     )
 
-    entry = reg.get("helpful-backup")
+    entry = reg.get("helpful-backup", home=unit_home)
     assert entry is not None
     assert entry.accepted_findings == ["credential-exfiltration"]
     assert entry.trust == "unreviewed"  # an override records a decision, it does not promote
@@ -203,7 +204,7 @@ def test_a_clean_third_party_install_is_still_unreviewed(
         == 0
     )
 
-    entry = reg.get("code-review")
+    entry = reg.get("code-review", home=unit_home)
     assert entry is not None
     assert entry.trust == "unreviewed"
     assert entry.accepted_findings == []
@@ -218,7 +219,7 @@ def test_register_scans_too_so_a_hand_copy_is_not_the_way_around_the_gate(
 
     assert cmd_skill_register("helpful-backup", home=unit_home, now=datetime.now(UTC)) == 1
     assert "credential-exfiltration" in capsys.readouterr().err  # pyright: ignore[reportUnknownMemberType]
-    assert reg.get("helpful-backup") is None  # on disk, but never loadable
+    assert reg.get("helpful-backup", home=unit_home) is None  # on disk, but never loadable
 
     assert (
         cmd_skill_register(
@@ -226,7 +227,7 @@ def test_register_scans_too_so_a_hand_copy_is_not_the_way_around_the_gate(
         )
         == 0
     )
-    entry = reg.get("helpful-backup")
+    entry = reg.get("helpful-backup", home=unit_home)
     assert entry is not None and entry.accepted_findings == ["credential-exfiltration"]
 
 
@@ -242,16 +243,16 @@ def test_register_and_enable_fold_the_typed_name_onto_the_real_directory(
     _write(unit_home / "skills" / "page_ocr", "page_ocr", _BENIGN)
 
     assert cmd_skill_register("page-ocr", home=unit_home, now=datetime.now(UTC)) == 0
-    entry = reg.get("page-ocr")
+    entry = reg.get("page-ocr", home=unit_home)
     assert entry is not None
     assert entry.name == "page_ocr"  # the directory's spelling, not the typed one
 
-    assert cmd_skill_disable("page-ocr") == 0
-    assert reg.get("page_ocr").enabled is False  # type: ignore[union-attr]
-    assert cmd_skill_enable("page_ocr") == 0
-    assert reg.get("page-ocr").enabled is True  # type: ignore[union-attr]
+    assert cmd_skill_disable("page-ocr", home=unit_home) == 0
+    assert reg.get("page_ocr", home=unit_home).enabled is False  # type: ignore[union-attr]
+    assert cmd_skill_enable("page_ocr", home=unit_home) == 0
+    assert reg.get("page-ocr", home=unit_home).enabled is True  # type: ignore[union-attr]
     # one row throughout — no dash/underscore duplicate
-    assert [p.name for p in reg.load().packages] == ["page_ocr"]
+    assert [p.name for p in reg.load(home=unit_home).packages] == ["page_ocr"]
 
 
 def test_trust_is_a_separate_human_verb(
@@ -275,15 +276,15 @@ def test_trust_is_a_separate_human_verb(
         == 0
     )
 
-    assert cmd_skill_trust("code-review", now=datetime.now(UTC)) == 0
-    assert reg.get("code-review").trust == "reviewed"  # type: ignore[union-attr]
+    assert cmd_skill_trust("code-review", now=datetime.now(UTC), home=unit_home) == 0
+    assert reg.get("code-review", home=unit_home).trust == "reviewed"  # type: ignore[union-attr]
 
-    assert cmd_skill_trust("code-review", revoke=True, now=datetime.now(UTC)) == 0
-    assert reg.get("code-review").trust == "unreviewed"  # type: ignore[union-attr]
+    assert cmd_skill_trust("code-review", revoke=True, now=datetime.now(UTC), home=unit_home) == 0
+    assert reg.get("code-review", home=unit_home).trust == "unreviewed"  # type: ignore[union-attr]
 
 
 def test_trust_refuses_an_unknown_package(unit_home: Path, capsys: pytest.CaptureFixture) -> None:
-    assert cmd_skill_trust("nope", now=datetime.now(UTC)) == 1
+    assert cmd_skill_trust("nope", now=datetime.now(UTC), home=unit_home) == 1
     assert "not tracked" in capsys.readouterr().err  # pyright: ignore[reportUnknownMemberType]
 
 
@@ -373,12 +374,12 @@ def test_converge_stamps_repo_skills_builtin_and_leaves_a_review_alone(
         )
         == 0
     )
-    assert cmd_skill_trust("code-review", now=datetime.now(UTC)) == 0
+    assert cmd_skill_trust("code-review", now=datetime.now(UTC), home=unit_home) == 0
 
     converge_skills(repo, unit_home, binding=PROD_ELSEWHERE, now=datetime.now(UTC))
 
-    assert reg.get("meiva-goal").trust == "builtin"  # type: ignore[union-attr]
-    assert reg.get("code-review").trust == "reviewed"  # type: ignore[union-attr]
+    assert reg.get("meiva-goal", home=unit_home).trust == "builtin"  # type: ignore[union-attr]
+    assert reg.get("code-review", home=unit_home).trust == "reviewed"  # type: ignore[union-attr]
 
 
 def test_trust_refuses_to_hand_edit_a_builtin_tier(unit_home: Path, tmp_path: Path) -> None:
@@ -390,8 +391,8 @@ def test_trust_refuses_to_hand_edit_a_builtin_tier(unit_home: Path, tmp_path: Pa
     _write(repo / "meiva_builtins" / "skills" / "meiva-goal", "meiva-goal", _BENIGN)
     converge_skills(repo, unit_home, binding=PROD_ELSEWHERE, now=datetime.now(UTC))
 
-    assert cmd_skill_trust("meiva-goal", now=datetime.now(UTC)) == 1
-    assert reg.get("meiva-goal").trust == "builtin"  # type: ignore[union-attr]
+    assert cmd_skill_trust("meiva-goal", now=datetime.now(UTC), home=unit_home) == 1
+    assert reg.get("meiva-goal", home=unit_home).trust == "builtin"  # type: ignore[union-attr]
 
 
 def test_install_registers_through_the_gateway_before_the_local_copy(

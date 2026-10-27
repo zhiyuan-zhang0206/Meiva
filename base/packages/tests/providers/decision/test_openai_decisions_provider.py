@@ -20,6 +20,7 @@ from base.lm.catalog.decide.types import (
 from base.lm.catalog.provider_keys import ProviderKeys
 from base.lm.decision.call import decide
 from base.packages.plugin_providers import build_model_catalog
+from base.paths import meiva_home
 
 _MODEL = "gpt-6-luna-decisions"
 _QUESTIONS = {
@@ -81,7 +82,7 @@ _KEYS = ProviderKeys({"OPENAI_API_KEY": "sk-test-key"})
 
 @pytest.fixture
 def catalog() -> ModelCatalog:
-    return build_model_catalog()
+    return build_model_catalog(home=meiva_home())
 
 
 async def _decide(
@@ -203,7 +204,7 @@ async def test_missing_key_fails_before_any_request() -> None:
     server = _Server(httpx.Response(200, json=_body()))
 
     with pytest.raises(DecisionKeyMissingError, match="OPENAI_API_KEY not set"):
-        await _decide(build_model_catalog(), server, keys=ProviderKeys({}))
+        await _decide(build_model_catalog(home=meiva_home()), server, keys=ProviderKeys({}))
     assert server.requests == []
 
 

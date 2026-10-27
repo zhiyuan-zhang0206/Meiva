@@ -54,6 +54,7 @@ from base.native_process.runtime_incarnation import RuntimeIncarnation
 from base.packages.composer_commands import CommandCatalog
 from base.packages.plugin_providers import build_model_catalog
 from base.packages.plugins.extensions import ExtensionRegistry, PluginContributions
+from base.paths import meiva_home
 from meiva.boot import derived_clients
 from meiva.tests.fixtures.pin_agent import hosted_resources as hosted_resources
 
@@ -257,9 +258,9 @@ async def prepare_graph(
         clients=clients,
         identity=AgentIdentity(agent_id=agent_id, owns_loop=True),
         original_incarnation=owner,
-        catalog=build_model_catalog(),
+        catalog=build_model_catalog(home=meiva_home()),
         clock_factory=Clock.from_settings,
-        commands=CommandCatalog.system(skills=list),
+        commands=CommandCatalog.system(skills=list, home=meiva_home()),
     )
     config: RunnableConfig = {"configurable": {"thread_id": str(agent_id)}, "recursion_limit": 100}
     reset: dict[str, Any] = {

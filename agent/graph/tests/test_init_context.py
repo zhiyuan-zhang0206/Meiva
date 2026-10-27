@@ -46,6 +46,7 @@ from base.packages.plugins.extensions import (
     PluginContributions,
 )
 from base.paths import meiva_home, resolve_meiva_home, skills_dir
+from meiva.sdk_surface.tests.context_home import context_over_unit_home as context_over_unit_home
 from meiva.tests.fixtures.pin_agent import hosted_resources as hosted_resources
 from meiva.tests.fixtures.pin_agent import snapshot_clients
 
@@ -87,7 +88,7 @@ def _runtime(
             extensions=extensions,
             db=Database.from_settings(gate=database_gate),
             bus=EventBus.from_settings(rng=seeded_rng()),
-            catalog=build_model_catalog(),
+            catalog=build_model_catalog(home=meiva_home()),
             clock_factory=Clock.from_settings,
         )
     )
@@ -126,7 +127,7 @@ def _install_skill(name: str, description: str) -> None:
     (root / "SKILL.md").write_text(
         f"---\nname: {name}\ndescription: {description}\n---\n\nBODY\n", encoding="utf-8"
     )
-    install_registry.register(InstalledPackage(name=name, type="skill"))
+    install_registry.register(InstalledPackage(name=name, type="skill"), home=meiva_home())
 
 
 def _tags(msgs: list[AnyMessage]) -> list[str | None]:

@@ -21,9 +21,10 @@ manifest that fails here means the on-disk copy changed under the cluster.
 
 from __future__ import annotations
 
+from pathlib import Path
 from typing import Any, TypeGuard
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Request
 
 from base.packages.plugins import enable_config
 from base.packages.plugins.manifest import ManifestError, load_manifest
@@ -53,10 +54,10 @@ def _str_dict(value: object) -> dict[str, str]:
     return {str(k): str(v) for k, v in value.items()} if _is_str_any_dict(value) else {}
 
 
-def _enabled_ui_declarations() -> list[tuple[str, dict[str, Any]]]:
+def _enabled_ui_declarations(*, home: Path) -> list[tuple[str, dict[str, Any]]]:
     """`(plugin, contributions.ui)` for every enabled plugin that declares one."""
-    installed = enable_config.installed_plugin_dirs()
-    config = enable_config.load_for_runtime(set(installed))
+    installed = enable_config.installed_plugin_dirs(home=home)
+    config = enable_config.load_for_runtime(set(installed), home=home)
     declarations: list[tuple[str, dict[str, Any]]] = []
     for name in sorted(installed):
         entry = config.plugins.get(name)
@@ -77,12 +78,12 @@ def _enabled_ui_declarations() -> list[tuple[str, dict[str, Any]]]:
 
 
 @router.get("/api/ui/contributions")
-def get_ui_contributions() -> UiContributionsResponse:
+def get_ui_contributions(request: Request) -> UiContributionsResponse:
     """Every console contribution the cluster's enabled plugins declare."""
     themes: list[UiThemeContribution] = []
     nav: list[UiNavContribution] = []
     stats: list[UiStatContribution] = []
-    for plugin, ui in _enabled_ui_declarations():
+    for plugin, ui in _enabled_ui_declarations(home=request.app.state.gateway_process.home):
         for theme in _dict_list(ui.get("themes", [])):
             # Absent darkTokens is carried as None, not as an empty map: the
             # picker distinguishes "pins both modes" from "has a dark half",

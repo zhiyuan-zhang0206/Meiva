@@ -519,8 +519,8 @@ def _api_key(
     return file_val if file_val.strip() else None
 
 
-def _state_path(state_dir: Path | None) -> Path:
-    return (state_dir if state_dir is not None else meiva_home() / "model-tracker") / "state.json"
+def _state_path(state_dir: Path | None, *, home: Path) -> Path:
+    return (state_dir if state_dir is not None else home / "model-tracker") / "state.json"
 
 
 def _valid_status(value: object) -> str:
@@ -764,13 +764,14 @@ def main(
         "--write-report", type=Path, help="write last-report.md and last-report.json here"
     )
     args = parser.parse_args(argv)
-    state_path = _state_path(args.state_dir)
+    home = meiva_home()
+    state_path = _state_path(args.state_dir, home=home)
     try:
         state = _load_state(state_path)
         reports = check_sources(
             _read_env_file(args.env_file),
             state,
-            models=build_model_catalog().models if models is None else models,
+            models=build_model_catalog(home=home).models if models is None else models,
             env_lookup=env_lookup,
             model_fetcher=model_fetcher,
         )

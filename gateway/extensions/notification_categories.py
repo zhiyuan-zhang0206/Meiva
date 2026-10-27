@@ -47,9 +47,9 @@ def categories_from_manifests(
     return merge_catalog(groups)
 
 
-def declared_categories() -> dict[str, NotificationCategory]:
-    installed = enable_config.installed_plugin_dirs()
-    config = enable_config.load_for_runtime(set(installed))
+def declared_categories(*, home: Path) -> dict[str, NotificationCategory]:
+    installed = enable_config.installed_plugin_dirs(home=home)
+    config = enable_config.load_for_runtime(set(installed), home=home)
     return categories_from_manifests(
         installed, {name for name, entry in config.plugins.items() if entry.enabled}
     )

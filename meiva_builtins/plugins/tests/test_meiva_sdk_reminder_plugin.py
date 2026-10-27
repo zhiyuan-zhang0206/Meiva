@@ -28,6 +28,7 @@ from base.host.env.agent_slices import AgentSlices
 from base.packages.plugin_config_images import DiskPluginConfigImages
 from base.packages.plugin_providers import build_model_catalog
 from base.packages.plugins.extensions import ExtensionRegistry
+from base.paths import meiva_home
 from base.paths.home import resolve_meiva_home
 from meiva.sdk_surface import install
 from meiva_builtins.plugins.meiva_sdk_reminder.agent_runtime import (
@@ -79,7 +80,7 @@ def make_runtime(**pins: Any) -> Runtime[MeivaContext]:
     return Runtime(
         context=MeivaContext(
             agent=AgentSlices.resolve(pins, default_reader=defaults()),
-            catalog=build_model_catalog(),
+            catalog=build_model_catalog(home=meiva_home()),
             clock_factory=Clock.from_settings,
         )
     )

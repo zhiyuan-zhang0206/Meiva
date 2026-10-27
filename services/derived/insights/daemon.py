@@ -161,7 +161,7 @@ def main() -> None:
             run(
                 home=process_home,
                 config=config_from_boot(config),
-                catalog=build_model_catalog(),
+                catalog=build_model_catalog(home=process_home),
                 database=database,
                 timestamps=TimestampSource(
                     clock=Clock(clock_config_from_boot(config), timers=SYSTEM_TIMERS),

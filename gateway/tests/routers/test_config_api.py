@@ -30,6 +30,7 @@ from base.host import config_validators
 from base.host.env.tests.env_files import unit_env_aliases, unit_env_path
 from base.host.system.hostport import Host
 from base.host.system.tests.fake_commands import DARWIN_ARM64, fake_host
+from base.paths import meiva_home
 from gateway.tests.auth.gateway_config import gateway_test_client
 from gateway.tests.support.runner_ops.ops_stub import (
     completed,
@@ -246,7 +247,7 @@ def _full_host_fields_for_remote(
     from base.packages.plugin_config_admin import panel_metadata
 
     out: dict[str, Any] = {}
-    for meta in panel_metadata(authority=config_authority):
+    for meta in panel_metadata(authority=config_authority, home=meiva_home()):
         if meta.scope != "host":
             continue
         if meta.name in overrides:
@@ -528,7 +529,7 @@ def test_put_rejects_bad_scalar(
 
     scalar = next(
         m
-        for m in panel_metadata(authority=config_authority)
+        for m in panel_metadata(authority=config_authority, home=meiva_home())
         if m.scope != "host" and m.writable and m.field_type in ("int", "float")
     )
     with gateway_test_client() as client:
@@ -547,7 +548,7 @@ def test_put_rejects_bool_for_int_field(
 
     scalar = next(
         m
-        for m in panel_metadata(authority=config_authority)
+        for m in panel_metadata(authority=config_authority, home=meiva_home())
         if m.scope != "host" and m.writable and m.field_type == "int"
     )
     with gateway_test_client() as client:
@@ -653,7 +654,7 @@ def test_plugin_config_owner_metadata_and_mixed_patch_rejection(clean_overrides:
 
     unit_env_path().touch()
     before_env = unit_env_path().read_bytes()
-    image = disk_image_path("meiva_fleet")
+    image = disk_image_path("meiva_fleet", home=meiva_home())
     before_image = image.read_bytes() if image.exists() else None
     with gateway_test_client() as client:
         fields = {field["name"]: field for field in client.get("/api/config").json()["fields"]}
@@ -681,7 +682,7 @@ def test_fleet_cluster_write_goes_only_to_owned_image(clean_overrides: Path) -> 
     assert response.json()["applied"] is True
     assert response.json()["restart_required"] == ["agent", "all"]
     assert invalid.status_code == 400
-    saved = read_config_image(FleetConfig, disk_image_path("meiva_fleet"))
+    saved = read_config_image(FleetConfig, disk_image_path("meiva_fleet", home=meiva_home()))
     assert saved.task_escalate_n == 11 and saved.reduce_context_switch is False
     assert unit_env_path().read_bytes() == before_env
 
@@ -699,6 +700,7 @@ def test_remote_host_fleet_toggle_respects_owned_image_and_policy(
         authority=config_authority,
         local_machine=machine_identity.name(),
         host=fake_host(),
+        home=meiva_home(),
     )
     assert rejected.applied is False
     accepted = config_write_op(
@@ -707,10 +709,13 @@ def test_remote_host_fleet_toggle_respects_owned_image_and_policy(
         authority=config_authority,
         local_machine=machine_identity.name(),
         host=fake_host(),
+        home=meiva_home(),
     )
     assert accepted.applied is True
     assert (
-        read_config_image(FleetConfig, disk_image_path("meiva_fleet")).task_maintenance_enabled
+        read_config_image(
+            FleetConfig, disk_image_path("meiva_fleet", home=meiva_home())
+        ).task_maintenance_enabled
         is False
     )
     mixed = config_write_op(
@@ -718,10 +723,13 @@ def test_remote_host_fleet_toggle_respects_owned_image_and_policy(
         authority=config_authority,
         local_machine=machine_identity.name(),
         host=fake_host(),
+        home=meiva_home(),
     )
     assert mixed.applied is False
     assert "mixes owners" in str(mixed.results["task_maintenance_enabled"].reason)
     assert (
-        read_config_image(FleetConfig, disk_image_path("meiva_fleet")).task_maintenance_enabled
+        read_config_image(
+            FleetConfig, disk_image_path("meiva_fleet", home=meiva_home())
+        ).task_maintenance_enabled
         is False
     )

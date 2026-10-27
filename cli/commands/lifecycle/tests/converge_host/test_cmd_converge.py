@@ -18,6 +18,7 @@ import pytest
 
 from base.packages.extensions import install_registry
 from base.packages.extensions import registry as reg
+from base.paths import meiva_home
 from base.telemetry import EventPipeline
 from cli.commands.converge.incomplete import read_incomplete
 from cli.commands.converge.plans.shell_rc import PATH_BEGIN
@@ -195,7 +196,8 @@ def test_converge_adopts_what_this_machine_installed_before_the_registry(
     install_registry.register(
         install_registry.InstalledPackage(
             name="pre-registry", type="skill", origin="user", enabled=True, trust="unreviewed"
-        )
+        ),
+        home=meiva_home(),
     )
     assert reg.get(db_conn, "pre-registry") is None
 

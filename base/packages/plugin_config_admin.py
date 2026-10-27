@@ -33,22 +33,22 @@ from base.packages.plugins.enable_config import discover_plugins
 from base.packages.plugins.plugin_errors import InvalidConfigOverlay
 
 
-def config_owners() -> dict[str, PluginConfigOwner]:
+def config_owners(*, home: Path) -> dict[str, PluginConfigOwner]:
     """Discover declared plugin schemas independently of agent enable state."""
     owners: dict[str, PluginConfigOwner] = {}
-    for name, directory in discover_plugins().items():
+    for name, directory in discover_plugins(home=home).items():
         cls = declared_config_class(name, directory)
         if cls is not None:
-            owners[name] = PluginConfigOwner(name, cls, disk_image_path(name))
+            owners[name] = PluginConfigOwner(name, cls, disk_image_path(name, home=home))
     return owners
 
 
-def plugin_field_owners() -> dict[str, PluginConfigOwner]:
+def plugin_field_owners(*, home: Path) -> dict[str, PluginConfigOwner]:
     """Config-panel fields, uniquely attributed by their declared scope metadata."""
     from base.config import FIELD_INFOS, schema_extra
 
     fields: dict[str, PluginConfigOwner] = {}
-    for owner in config_owners().values():
+    for owner in config_owners(home=home).values():
         for name, info in owner.cls.model_fields.items():
             if "scope" not in schema_extra(info):
                 continue
@@ -58,11 +58,11 @@ def plugin_field_owners() -> dict[str, PluginConfigOwner]:
     return fields
 
 
-def patch_owner(fields: set[str]) -> PluginConfigOwner | None:
+def patch_owner(fields: set[str], *, home: Path) -> PluginConfigOwner | None:
     """Return the one image owner, or None for Core; reject mixed-owner writes."""
     from base.config import FIELD_INFOS
 
-    plugins = plugin_field_owners()
+    plugins = plugin_field_owners(home=home)
     owners: dict[str | None, PluginConfigOwner | None] = {}
     for name in fields:
         if name in plugins:
@@ -77,14 +77,14 @@ def patch_owner(fields: set[str]) -> PluginConfigOwner | None:
     return next(iter(owners.values()), None)
 
 
-def plugin_metadata() -> list[ConfigFieldMeta]:
+def plugin_metadata(*, home: Path) -> list[ConfigFieldMeta]:
     """Derive panel metadata from image values and the owning schema."""
     from base.config import schema_extra
     from base.config.config_registry import field_editor_type
 
     result: list[ConfigFieldMeta] = []
-    fields = plugin_field_owners()
-    for owner in config_owners().values():
+    fields = plugin_field_owners(home=home)
+    for owner in config_owners(home=home).values():
         names = [name for name, assigned in fields.items() if assigned.name == owner.name]
         if not names:
             continue
@@ -116,11 +116,11 @@ def plugin_metadata() -> list[ConfigFieldMeta]:
     return result
 
 
-def plugin_overrides() -> dict[str, object]:
+def plugin_overrides(*, home: Path) -> dict[str, object]:
     """Present image values for panel reducers; defaults of absent images are not overrides."""
-    fields = plugin_field_owners()
+    fields = plugin_field_owners(home=home)
     values: dict[str, object] = {}
-    for owner in config_owners().values():
+    for owner in config_owners(home=home).values():
         if not owner.path.exists():
             continue
         data = read_config_image(owner.cls, owner.path).model_dump(mode="json")
@@ -164,18 +164,20 @@ def write_plugin_patch(
     write_config_image(owner, candidate, expected_digest=captured_digest)
 
 
-def panel_metadata(*, authority: ConfigAuthority) -> list[ConfigFieldMeta]:
+def panel_metadata(*, authority: ConfigAuthority, home: Path) -> list[ConfigFieldMeta]:
     """Core and plugin-owned config-panel metadata, in panel order."""
-    return [*get_config_metadata(authority=authority), *plugin_metadata()]
+    return [*get_config_metadata(authority=authority), *plugin_metadata(home=home)]
 
 
-def panel_overrides(*, authority: ConfigAuthority, local: bool = False) -> dict[str, Any]:
+def panel_overrides(
+    *, authority: ConfigAuthority, local: bool = False, home: Path
+) -> dict[str, Any]:
     """The editable override set of core `.env` fields and plugin-owned images."""
     return env_override_values(
         authority=authority,
         local=local,
-        plugin_metadata=plugin_metadata(),
-        plugin_values=plugin_overrides(),
+        plugin_metadata=plugin_metadata(home=home),
+        plugin_values=plugin_overrides(home=home),
     )
 
 

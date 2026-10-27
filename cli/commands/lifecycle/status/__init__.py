@@ -114,8 +114,10 @@ def _roster(
     # role roster WITH each gated-out service's reason; gateway daemons on a runner-only
     # host stay filtered (they are not in the role union).
     if roles is None:
-        return tuple((spec, None) for spec in build_services())
-    return services_for_capabilities_annotated(roles, machine=command.machine, host=command.host)
+        return tuple((spec, None) for spec in build_services(home=command.home))
+    return services_for_capabilities_annotated(
+        roles, machine=command.machine, host=command.host, home=command.home
+    )
 
 
 def _execute(

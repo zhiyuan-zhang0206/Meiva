@@ -19,6 +19,7 @@ from base import paths
 from base.agents.context.clients import ClientSet
 from base.agents.sdk.tests.sampling_owners import fixed_sampling_owner
 from base.packages.plugins.enable_config import write_local
+from base.paths import meiva_home
 from base.telemetry.tests.capture.event_capture import EmittedEvents
 from base.telemetry.tests.capture.event_capture import emitted_events as emitted_events
 
@@ -42,7 +43,8 @@ def _write_enabled(plugins: dict[str, dict[str, bool]]) -> None:
                 },
                 **plugins,
             }
-        }
+        },
+        home=meiva_home(),
     )
 
 
@@ -119,7 +121,7 @@ def test_only_enabled_plugins_are_imported(unit_home: Path):
 
     from meiva.sdk_surface import extensions as _loader
 
-    _loader.load_extensions(sampling=fixed_sampling_owner())
+    _loader.load_extensions(sampling=fixed_sampling_owner(), home=unit_home)
 
     imported = _imported_plugins()
     assert "meiva_builtins.plugins.meiva_silent_idle.plugin" in imported
@@ -143,7 +145,7 @@ def test_external_plugin_also_loaded(unit_home: Path):
 
     from meiva.sdk_surface import extensions as _loader
 
-    _loader.load_extensions(sampling=fixed_sampling_owner())
+    _loader.load_extensions(sampling=fixed_sampling_owner(), home=unit_home)
 
     imported = _imported_plugins()
     assert "plugins.audit.plugin" in imported
@@ -158,7 +160,9 @@ def test_load_extensions_installs_metering():
 
     _write_enabled({})
     expected_clients = ClientSet()
-    _loader.load_extensions(clients=expected_clients, sampling=fixed_sampling_owner())
+    _loader.load_extensions(
+        clients=expected_clients, sampling=fixed_sampling_owner(), home=meiva_home()
+    )
 
     installation = installed()
     assert installation is not None
@@ -194,12 +198,12 @@ def test_a_repeat_load_reuses_the_module_object_so_a_patch_still_lands(unit_home
 
     from meiva.sdk_surface import extensions as _loader
 
-    _loader.load_extensions(sampling=fixed_sampling_owner())
+    _loader.load_extensions(sampling=fixed_sampling_owner(), home=unit_home)
     dotted = "plugins.demo.plugin"
     first = sys.modules[dotted]
     stale_probe = first.probe  # the reference an earlier importer would be holding
 
-    _loader.load_extensions(sampling=fixed_sampling_owner())
+    _loader.load_extensions(sampling=fixed_sampling_owner(), home=unit_home)
 
     assert sys.modules[dotted] is first
     # The consequence that actually bites: a callable captured before the reload
@@ -225,7 +229,7 @@ def test_a_different_file_under_the_same_name_gets_a_fresh_module(
     _make_plugin(unit_home, "demo", "__description__ = 'demo'\nGHOST = 'first file'\n")
     _write_enabled({"demo": {"enabled": True}})
 
-    _loader.load_extensions(sampling=fixed_sampling_owner())
+    _loader.load_extensions(sampling=fixed_sampling_owner(), home=unit_home)
     dotted = "plugins.demo.plugin"
     first = sys.modules[dotted]
     assert first.GHOST == "first file"
@@ -236,7 +240,7 @@ def test_a_different_file_under_the_same_name_gets_a_fresh_module(
     _make_plugin(other_home, "demo", "__description__ = 'demo'\n")
     _write_enabled({"demo": {"enabled": True}})
 
-    _loader.load_extensions(sampling=fixed_sampling_owner())
+    _loader.load_extensions(sampling=fixed_sampling_owner(), home=other_home)
 
     assert sys.modules[dotted] is not first
     assert not hasattr(sys.modules[dotted], "GHOST")
@@ -249,7 +253,7 @@ def test_duplicate_plugin_name_raises(unit_home: Path):
     _make_external_plugin(unit_home, "meiva_syntax_fix")
 
     with pytest.raises(DuplicatePlugin, match="meiva_syntax_fix"):
-        discover_plugins()
+        discover_plugins(home=unit_home)
 
 
 def _make_face(home: Path, name: str, body: str, *, sections: tuple[str, ...] = ()) -> None:
@@ -293,8 +297,8 @@ def test_build_registry_holds_what_each_enabled_plugin_declares(unit_home: Path)
     from base.packages.plugins.loading.registry import build_registry
     from meiva.sdk_surface import extensions as _loader
 
-    _loader.load_extensions(sampling=fixed_sampling_owner())
-    registry = build_registry()
+    _loader.load_extensions(sampling=fixed_sampling_owner(), home=unit_home)
+    registry = build_registry(home=unit_home)
 
     assert [(p, fn.__name__) for p, fn in registry.system_prompt_sections()] == [
         ("alpha", "alpha_section"),
@@ -305,10 +309,10 @@ def test_build_registry_holds_what_each_enabled_plugin_declares(unit_home: Path)
         ("beta", "beta_note", 5, True),
     ]
     assert registry.records("alpha")[0].identifier == "alpha_section"
-    assert build_registry() == registry
+    assert build_registry(home=unit_home) == registry
 
     _write_enabled({"alpha": {"enabled": True}, "beta": {"enabled": False}})
-    assert [p for p, _fn in build_registry().system_prompt_sections()] == ["alpha"]
+    assert [p for p, _fn in build_registry(home=unit_home).system_prompt_sections()] == ["alpha"]
 
 
 @pytest.mark.parametrize(
@@ -330,9 +334,9 @@ def test_a_face_whose_contribute_misbehaves_is_skipped_not_fatal(
     from base.packages.plugins.loading.registry import build_registry
     from meiva.sdk_surface import extensions as _loader
 
-    _loader.load_extensions(sampling=fixed_sampling_owner())
+    _loader.load_extensions(sampling=fixed_sampling_owner(), home=unit_home)
 
-    assert [p for p, _fn in build_registry().system_prompt_sections()] == ["good"]
+    assert [p for p, _fn in build_registry(home=unit_home).system_prompt_sections()] == ["good"]
 
 
 # --- fail-soft loading (2026-08-28 meiva_ledger incident) --------------------
@@ -365,7 +369,7 @@ def test_broken_external_plugin_skipped_and_others_load(
 
     from meiva.sdk_surface import extensions as _loader
 
-    _loader.load_extensions(sampling=fixed_sampling_owner())  # must not raise
+    _loader.load_extensions(sampling=fixed_sampling_owner(), home=unit_home)  # must not raise
 
     # the healthy plugin loaded
     assert "plugins.audit.plugin" in sys.modules
@@ -398,7 +402,7 @@ def test_broken_builtin_plugin_skipped_and_others_load(tmp_path: Path, unit_home
     _make_plugin(unit_home, "syntax_fix", "raise RuntimeError('boom')\n")
     _write_enabled({"syntax_fix": {"enabled": True}, "meiva_silent_idle": {"enabled": True}})
 
-    _loader.load_extensions(sampling=fixed_sampling_owner())  # must not raise
+    _loader.load_extensions(sampling=fixed_sampling_owner(), home=unit_home)  # must not raise
 
     assert "meiva_builtins.plugins.meiva_silent_idle.plugin" in sys.modules
     assert "plugins.syntax_fix.plugin" not in sys.modules
@@ -437,7 +441,7 @@ def test_external_plugin_relative_import_resolves_when_plugins_prefix_is_shadowe
 
     from meiva.sdk_surface import extensions as _loader
 
-    _loader.load_extensions(sampling=fixed_sampling_owner())  # must not raise
+    _loader.load_extensions(sampling=fixed_sampling_owner(), home=unit_home)  # must not raise
 
     assert sys.modules["plugins.meiva_ledger.plugin"].MARK == 7
     assert sys.modules["plugins.meiva_ledger"].__path__ == [str(pdir)]
@@ -458,7 +462,9 @@ def test_dangling_config_entry_reported_and_skipped(
 
     from meiva.sdk_surface import extensions as _loader
 
-    loaded = _loader.load_extensions(sampling=fixed_sampling_owner())  # must not raise
+    loaded = _loader.load_extensions(
+        sampling=fixed_sampling_owner(), home=unit_home
+    )  # must not raise
 
     assert "plugins.audit.plugin" in sys.modules
     assert missing not in loaded.config.plugins
@@ -467,7 +473,7 @@ def test_dangling_config_entry_reported_and_skipped(
     assert all(str(a["error"]).startswith("DanglingPlugin: ") for a in attrs)
     assert all(missing in str(a["error"]) for a in attrs)
 
-    reloaded = _loader.load_extensions(sampling=fixed_sampling_owner())
+    reloaded = _loader.load_extensions(sampling=fixed_sampling_owner(), home=unit_home)
     assert missing not in reloaded.config.plugins
     repeated = emitted_events.attributes("plugin_load_failed")
     assert [a["plugin"] for a in repeated] == [missing] * 4
@@ -501,6 +507,6 @@ def test_dot_prefixed_dirs_are_not_discovered(tmp_path: Path, unit_home: Path) -
         "real",
         "ext",
     }
-    discovered = discover_plugins()
+    discovered = discover_plugins(home=unit_home)
     assert "ext" in discovered
     assert ".ghost.staging" not in discovered

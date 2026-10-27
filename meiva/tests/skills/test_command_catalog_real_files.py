@@ -22,7 +22,9 @@ def test_the_catalog_merges_built_ins_user_commands_and_skills(
     _user_command(unit_home, "ship", "---\ndescription: ship it\n---\nShip the release.\n")
     write_skill(fake_skills_dir, "goal", "name: goal\ndescription: set a goal")
 
-    by_name = {c["name"]: c for c in CommandCatalog.system(skills=skills.names).discover()}
+    by_name = {
+        c["name"]: c for c in CommandCatalog.system(skills=skills.names, home=unit_home).discover()
+    }
 
     assert {"recap", "compact", "ship", "goal"} <= set(by_name)
     assert by_name["ship"] == {
@@ -43,7 +45,9 @@ def test_a_user_command_file_overrides_the_skill_of_the_same_name(
     write_skill(fake_skills_dir, "goal", "name: goal\ndescription: set a goal")
     _user_command(unit_home, "goal", "My own goal prompt.\n")
 
-    by_name = {c["name"]: c for c in CommandCatalog.system(skills=skills.names).discover()}
+    by_name = {
+        c["name"]: c for c in CommandCatalog.system(skills=skills.names, home=unit_home).discover()
+    }
 
     assert by_name["goal"]["skill_target"] is None
     assert by_name["goal"]["body"] == "My own goal prompt."
@@ -56,19 +60,21 @@ def test_a_message_expands_the_way_each_kind_of_command_does(
     write_skill(fake_skills_dir, "goal", "name: goal\ndescription: set a goal")
     assert [s["name"] for s in skills.names()] == ["goal"]
 
-    assert CommandCatalog.system(skills=skills.names).expand("/ship now") == (
+    assert CommandCatalog.system(skills=skills.names, home=unit_home).expand("/ship now") == (
         "Command /ship:\nShip the release.\nAdditional message: now"
     )
-    assert CommandCatalog.system(skills=skills.names).expand("/goal write the plan") == (
+    assert CommandCatalog.system(skills=skills.names, home=unit_home).expand(
+        "/goal write the plan"
+    ) == (
         "/goal invokes the goal skill. Load it with meiva.help(meiva.skills.goal) and follow it for "
         "this task.\nAdditional message: write the plan"
     )
-    assert CommandCatalog.system(skills=skills.names).expand("/ship /goal") == (
+    assert CommandCatalog.system(skills=skills.names, home=unit_home).expand("/ship /goal") == (
         "Command /ship:\nShip the release.\n\n"
         "/goal invokes the goal skill. Load it with meiva.help(meiva.skills.goal) and follow it for "
         "this task."
     )
     assert (
-        CommandCatalog.system(skills=skills.names).expand("just chatting /ship")
+        CommandCatalog.system(skills=skills.names, home=unit_home).expand("just chatting /ship")
         == "just chatting /ship"
     )

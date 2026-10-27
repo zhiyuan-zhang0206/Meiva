@@ -130,7 +130,11 @@ def pop_overlay_env() -> tuple[dict[str, object] | None, dict[str, object] | Non
 
 
 def apply_framework_overlay(
-    birth: dict[str, object] | None, overlay: dict[str, object] | None, *, config: _FieldSetter
+    birth: dict[str, object] | None,
+    overlay: dict[str, object] | None,
+    *,
+    config: _FieldSetter,
+    home: Path,
 ) -> bool:
     applied = False
     for value in (birth, overlay):
@@ -140,7 +144,7 @@ def apply_framework_overlay(
             from base.packages.plugins.config_registration import plan_config_overlay
             from base.packages.plugins.plugin_errors import InvalidConfigOverlay
 
-            for field, field_value in plan_config_overlay(value).framework_fields:
+            for field, field_value in plan_config_overlay(value, home=home).framework_fields:
                 try:
                     config.set_field(field, field_value)
                 except ValidationError as error:
@@ -217,9 +221,10 @@ def emit_child_boot_timing(child: ChildContext, *, clients: ClientSet, now: floa
 
 
 class _LazyStateSlot:
-    def __init__(self, payload: RequestPayload, meiva: _Sdk) -> None:
+    def __init__(self, payload: RequestPayload, meiva: _Sdk, home: Path) -> None:
         object.__setattr__(self, "_payload", payload)
         object.__setattr__(self, "_meiva", meiva)
+        object.__setattr__(self, "_home", home)
         object.__setattr__(self, "_real", None)
 
     def materialize(self) -> None:
@@ -233,7 +238,11 @@ class _LazyStateSlot:
         payload: RequestPayload = object.__getattribute__(self, "_payload")
         from base.packages.plugins.loading.registry import build_registry
 
-        state_cls = build_agent_state(build_registry(validate_state=plugin_state_schema))
+        state_cls = build_agent_state(
+            build_registry(
+                validate_state=plugin_state_schema, home=object.__getattribute__(self, "_home")
+            )
+        )
         snapshot = payload.materialize_state()
         real = state_cls.model_validate(snapshot)
         object.__setattr__(self, "_real", real)
@@ -248,10 +257,10 @@ class _LazyStateSlot:
         setattr(object.__getattribute__(self, "_real"), name, value)
 
 
-def build_state_slot(child: ChildContext, payload: RequestPayload) -> None:
+def build_state_slot(child: ChildContext, payload: RequestPayload, *, home: Path) -> None:
     if payload.state_raw is None:
         return
-    child.meiva.state = _LazyStateSlot(payload, child.meiva)
+    child.meiva.state = _LazyStateSlot(payload, child.meiva, home)
     child.meiva.state_update = {}
 
 
@@ -470,7 +479,7 @@ def run_child(
         _request_context(request, home=home, config=config, context=context)
     )
 
-    framework_overlay_applied = apply_framework_overlay(birth, overlay, config=config)
+    framework_overlay_applied = apply_framework_overlay(birth, overlay, config=config, home=home)
     import meiva
 
     init_logger(
@@ -502,7 +511,7 @@ def run_child(
         default_reader=read_agent_default,
         home=home,
     )
-    build_state_slot(child, request)
+    build_state_slot(child, request, home=home)
 
     if request.timeout_s > 0:
         _arm_watchdog(request.timeout_s)

@@ -8,6 +8,7 @@ from pathlib import Path
 import pytest
 
 from base.events.contract import EVENTS, LLM_ERROR_FAMILY, family_events
+from base.paths import meiva_home
 
 pytestmark = pytest.mark.registry
 _ROOT = Path(__file__).resolve().parents[3]
@@ -89,7 +90,9 @@ def _inspector_names() -> set[str]:
     from gateway.inspect._plugin_faces import SHIPPED_PLUGINS_DIR, enabled_plugin_names
 
     names: set[str] = set()
-    for spec in _plugin_metrics.load_plugin_metrics(SHIPPED_PLUGINS_DIR, enabled_plugin_names()):
+    for spec in _plugin_metrics.load_plugin_metrics(
+        SHIPPED_PLUGINS_DIR, enabled_plugin_names(home=meiva_home())
+    ):
         if "inspector" not in spec.output:
             continue
         names.add(spec.event_name)

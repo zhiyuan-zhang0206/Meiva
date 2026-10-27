@@ -292,7 +292,7 @@ def test_gate_applies_to_namespace_top_level(fake_skills_dir: Path) -> None:
         fake_skills_dir / "superpowers", "brainstorming", "name: brainstorming\ndescription: bs"
     )
     assert [s["name"] for s in skills_mod.names()] == ["brainstorming"]
-    install_registry.deregister("superpowers")
+    install_registry.deregister("superpowers", home=meiva_home())
     assert skills_mod.names() == []
 
 

@@ -195,7 +195,7 @@ def _runtime_with_llm(
             ),
             db=Database.from_settings(gate=database_gate),
             bus=EventBus.from_settings(rng=seeded_rng()),
-            catalog=build_model_catalog(),
+            catalog=build_model_catalog(home=home),
             clock_factory=Clock.from_settings,
         )
     )
@@ -235,7 +235,7 @@ def _make_runtime(
         ),
         db=Database.from_settings(gate=database_gate),
         bus=EventBus.from_settings(rng=seeded_rng()),
-        catalog=build_model_catalog(),
+        catalog=build_model_catalog(home=home),
         clock_factory=Clock.from_settings,
     )
     return Runtime(context=ctx)

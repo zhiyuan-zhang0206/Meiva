@@ -24,6 +24,7 @@ from base.config import settings
 from base.host.atomic_io import write_text_atomic
 from base.lm.pricing import cost_usd
 from base.packages.plugin_providers import build_model_catalog
+from base.paths import meiva_home
 from base.sessions.tests.poll_until import poll_until
 from tests.e2e._db import chat_and_wait, checkpoint_values, wait_for_status
 from tests.e2e._ports import GATEWAY_URL
@@ -91,7 +92,9 @@ def test_usage_reminder_preserves_handoff_across_late_checkpoint_and_restart(
     budget_agent: int, budget_world: Path, role: str
 ) -> None:
     owner = budget_agent
-    usd_limit = cost_usd(BUDGET_MODEL, 50, 25, 0, prices=build_model_catalog().prices)
+    usd_limit = cost_usd(
+        BUDGET_MODEL, 50, 25, 0, prices=build_model_catalog(home=meiva_home()).prices
+    )
     assert usd_limit is not None and usd_limit > 0
     root = budget_world
     (root / "role").write_text(role)

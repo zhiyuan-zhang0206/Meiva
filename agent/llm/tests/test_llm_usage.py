@@ -17,6 +17,7 @@ from langchain_core.messages import AIMessage
 from agent.llm.usage import log_llm_usage
 from base.host.proc import run_bounded
 from base.packages.plugin_providers import build_model_catalog
+from base.paths import meiva_home
 
 
 @pytest.fixture(scope="module", autouse=True)
@@ -24,7 +25,7 @@ def _load_provider_plugins() -> None:
     """Provider vendor attribution needs the plugin registry populated; without
     it `vendor_of_model` returns None, the billing span is skipped, and
     order-dependent failures appear when this module runs standalone."""
-    build_model_catalog()
+    build_model_catalog(home=meiva_home())
 
 
 def _msgs(records: list[dict]) -> str:
@@ -42,7 +43,9 @@ def test_deepseek_shape_logs(loguru_records):
             "output_token_details": {"reasoning": 70},
         },
     )
-    log_llm_usage(msg, agent_id=7, model="deepseek-v4-pro", catalog=build_model_catalog())
+    log_llm_usage(
+        msg, agent_id=7, model="deepseek-v4-pro", catalog=build_model_catalog(home=meiva_home())
+    )
     out = _msgs(loguru_records)  # pyright: ignore[reportUnknownArgumentType]
     assert "in=1000 cached=800" in out
     assert "(80%)" in out
@@ -69,7 +72,9 @@ def test_anthropic_shape_logs(loguru_records):
             # no output_token_details
         },
     )
-    log_llm_usage(msg, agent_id=7, model="claude-opus-5", catalog=build_model_catalog())
+    log_llm_usage(
+        msg, agent_id=7, model="claude-opus-5", catalog=build_model_catalog(home=meiva_home())
+    )
     out = _msgs(loguru_records)  # pyright: ignore[reportUnknownArgumentType]
     assert "in=2000 cached=1500" in out
     assert "out=50 reason=0" in out
@@ -84,7 +89,9 @@ def test_zero_input_no_pct(loguru_records):
             "total_tokens": 0,
         },
     )
-    log_llm_usage(msg, agent_id=7, model="claude-opus-5", catalog=build_model_catalog())
+    log_llm_usage(
+        msg, agent_id=7, model="claude-opus-5", catalog=build_model_catalog(home=meiva_home())
+    )
     out = _msgs(loguru_records)  # pyright: ignore[reportUnknownArgumentType]
     assert "in=0" in out
     assert "%" not in out
@@ -98,7 +105,11 @@ def test_latency_ms_rides_payload(loguru_records):
         usage_metadata={"input_tokens": 100, "output_tokens": 10, "total_tokens": 110},
     )
     log_llm_usage(
-        msg, agent_id=7, model="deepseek-v4-pro", latency_ms=1234.5, catalog=build_model_catalog()
+        msg,
+        agent_id=7,
+        model="deepseek-v4-pro",
+        latency_ms=1234.5,
+        catalog=build_model_catalog(home=meiva_home()),
     )
     out = _msgs(loguru_records)  # pyright: ignore[reportUnknownArgumentType]
     assert "in=100" in out
@@ -109,7 +120,9 @@ def test_latency_ms_rides_payload(loguru_records):
         content="",
         usage_metadata={"input_tokens": 100, "output_tokens": 10, "total_tokens": 110},
     )
-    log_llm_usage(second, agent_id=7, model="deepseek-v4-pro", catalog=build_model_catalog())
+    log_llm_usage(
+        second, agent_id=7, model="deepseek-v4-pro", catalog=build_model_catalog(home=meiva_home())
+    )
     assert loguru_records[0]["extra"]["latency_ms"] is None
 
 
@@ -127,7 +140,7 @@ def test_decode_ms_rides_payload(loguru_records):
         model="deepseek-v4-pro",
         latency_ms=1234.5,
         decode_ms=800.0,
-        catalog=build_model_catalog(),
+        catalog=build_model_catalog(home=meiva_home()),
     )
     out = _msgs(loguru_records)  # pyright: ignore[reportUnknownArgumentType]
     assert "in=100" in out
@@ -144,7 +157,7 @@ def test_decode_ms_rides_payload(loguru_records):
         agent_id=7,
         model="deepseek-v4-pro",
         latency_ms=1234.5,
-        catalog=build_model_catalog(),
+        catalog=build_model_catalog(home=meiva_home()),
     )
     assert loguru_records[0]["extra"]["decode_ms"] is None
 
@@ -154,13 +167,17 @@ def test_usage_has_no_task_attribution(loguru_records) -> None:
     msg = AIMessage(
         content="", usage_metadata={"input_tokens": 100, "output_tokens": 10, "total_tokens": 110}
     )
-    log_llm_usage(msg, agent_id=7, model="deepseek-v4-pro", catalog=build_model_catalog())
+    log_llm_usage(
+        msg, agent_id=7, model="deepseek-v4-pro", catalog=build_model_catalog(home=meiva_home())
+    )
     assert "task_id" not in loguru_records[0]["extra"]
 
 
 def test_no_usage_metadata_silent(loguru_records):
     msg = AIMessage(content="")
-    log_llm_usage(msg, agent_id=7, model="claude-opus-5", catalog=build_model_catalog())
+    log_llm_usage(
+        msg, agent_id=7, model="claude-opus-5", catalog=build_model_catalog(home=meiva_home())
+    )
     assert loguru_records == []
 
 
@@ -184,7 +201,7 @@ def test_price_snapshot_rides_payload(loguru_records):
         agent_id=7,
         model="deepseek-v4-pro",
         priced_at=datetime(2026, 8, 17, 0, 0, tzinfo=UTC),
-        catalog=build_model_catalog(),
+        catalog=build_model_catalog(home=meiva_home()),
     )
     extra = loguru_records[0]["extra"]
     assert extra["cost_usd"] == pytest.approx(0.0003476)  # pyright: ignore[reportUnknownMemberType]
@@ -246,7 +263,9 @@ def test_price_snapshot_absent_for_unpriced_model(
         content="",
         usage_metadata={"input_tokens": 100, "output_tokens": 10, "total_tokens": 110},
     )
-    log_llm_usage(msg, agent_id=7, model="no-such-model", catalog=build_model_catalog())
+    log_llm_usage(
+        msg, agent_id=7, model="no-such-model", catalog=build_model_catalog(home=meiva_home())
+    )
     usage_record = next(
         record for record in loguru_records if record["extra"].get("event") == "llm_usage"
     )
@@ -294,7 +313,9 @@ def test_message_is_stamped_with_exactly_the_logged_figures(loguru_records):
             "output_token_details": {"reasoning": 20},
         },
     )
-    log_llm_usage(msg, agent_id=7, model="claude-opus-5", catalog=build_model_catalog())
+    log_llm_usage(
+        msg, agent_id=7, model="claude-opus-5", catalog=build_model_catalog(home=meiva_home())
+    )
     event = cast("dict[str, Any]", loguru_records[0]["extra"])  # pyright: ignore[reportUnknownArgumentType]
     stamped: dict[str, Any] = msg.additional_kwargs["meiva_usage"]
     assert stamped["cost_usd"] > 0
@@ -311,7 +332,9 @@ def test_non_agent_logging_does_not_stamp(loguru_records):
         content="",
         usage_metadata={"input_tokens": 10, "output_tokens": 1, "total_tokens": 11},
     )
-    log_usage_from_message(msg, "claude-opus-5", usage_kind="label", catalog=build_model_catalog())
+    log_usage_from_message(
+        msg, "claude-opus-5", usage_kind="label", catalog=build_model_catalog(home=meiva_home())
+    )
     assert "meiva_usage" not in msg.additional_kwargs
 
 
@@ -320,10 +343,15 @@ def test_main_conversation_usage_refuses_missing_identity() -> None:
         content="", usage_metadata={"input_tokens": 10, "output_tokens": 5, "total_tokens": 15}
     )
     with pytest.raises(TypeError, match="agent_id"):
-        cast(Any, log_llm_usage)(msg, model="deepseek-v4-pro", catalog=build_model_catalog())
+        cast(Any, log_llm_usage)(
+            msg, model="deepseek-v4-pro", catalog=build_model_catalog(home=meiva_home())
+        )
     with pytest.raises(ValueError, match="explicit agent id"):
         cast(Any, log_llm_usage)(
-            msg, model="deepseek-v4-pro", agent_id=None, catalog=build_model_catalog()
+            msg,
+            model="deepseek-v4-pro",
+            agent_id=None,
+            catalog=build_model_catalog(home=meiva_home()),
         )
 
 
@@ -340,7 +368,9 @@ def test_missing_cache_metering_differs_from_a_measured_zero(
             "input_token_details": {} if cached is None else {"cache_read": cached},
         },
     )
-    log_llm_usage(msg, agent_id=7, model="deepseek-v4-pro", catalog=build_model_catalog())
+    log_llm_usage(
+        msg, agent_id=7, model="deepseek-v4-pro", catalog=build_model_catalog(home=meiva_home())
+    )
     record = next(r for r in loguru_records if r["extra"].get("event") == "llm_usage")
     extra = record["extra"]
     assert extra["in_total"] == 1000

@@ -27,15 +27,16 @@ from base.db.code_version_gate import ProcessDbGate
 from base.events.live.bus import EventBus
 from base.lm.catalog import ModelCatalog
 from base.packages.plugin_providers import build_model_catalog
+from base.paths import meiva_home
 
-build_model_catalog()
+build_model_catalog(home=meiva_home())
 
 
 def test_validate_passes_on_end_turn() -> None:
     msg = AIMessage(
         content="ok", response_metadata={"model_provider": "anthropic", "stop_reason": "end_turn"}
     )
-    validate_stop_reason(msg, catalog=build_model_catalog())
+    validate_stop_reason(msg, catalog=build_model_catalog(home=meiva_home()))
 
 
 def test_validate_raises_on_max_tokens() -> None:
@@ -43,7 +44,7 @@ def test_validate_raises_on_max_tokens() -> None:
         content="", response_metadata={"model_provider": "anthropic", "stop_reason": "max_tokens"}
     )
     with pytest.raises(LLMStreamTruncatedError, match=r"max_tokens.*output_tokens=0") as exc_info:
-        validate_stop_reason(msg, catalog=build_model_catalog())
+        validate_stop_reason(msg, catalog=build_model_catalog(home=meiva_home()))
     assert exc_info.value.stop_reason == "max_tokens"
     assert exc_info.value.output_tokens == 0
 
@@ -55,18 +56,18 @@ def test_validate_raises_includes_output_tokens_for_diagnosis() -> None:
         usage_metadata={"input_tokens": 1000, "output_tokens": 4096, "total_tokens": 5096},
     )
     with pytest.raises(LLMStreamTruncatedError, match=r"output_tokens=4096"):
-        validate_stop_reason(msg, catalog=build_model_catalog())
+        validate_stop_reason(msg, catalog=build_model_catalog(home=meiva_home()))
 
 
 def test_validate_raises_on_missing_stop_reason() -> None:
     msg_empty = AIMessage(content="ok", response_metadata={"model_provider": "anthropic"})
     with pytest.raises(LLMStreamCorruptedError):
-        validate_stop_reason(msg_empty, catalog=build_model_catalog())
+        validate_stop_reason(msg_empty, catalog=build_model_catalog(home=meiva_home()))
     msg_missing = AIMessage(
         content="ok", response_metadata={"model_provider": "anthropic", "stop_reason": None}
     )
     with pytest.raises(LLMStreamCorruptedError):
-        validate_stop_reason(msg_missing, catalog=build_model_catalog())
+        validate_stop_reason(msg_missing, catalog=build_model_catalog(home=meiva_home()))
 
 
 def test_validate_raises_on_pause_turn() -> None:
@@ -74,7 +75,7 @@ def test_validate_raises_on_pause_turn() -> None:
         content="", response_metadata={"model_provider": "anthropic", "stop_reason": "pause_turn"}
     )
     with pytest.raises(LLMStreamUnexpectedStopReasonError, match=r"pause_turn"):
-        validate_stop_reason(msg, catalog=build_model_catalog())
+        validate_stop_reason(msg, catalog=build_model_catalog(home=meiva_home()))
 
 
 def test_validate_passes_on_refusal() -> None:
@@ -82,7 +83,7 @@ def test_validate_passes_on_refusal() -> None:
         content="I'm sorry, I can't help with that.",
         response_metadata={"model_provider": "anthropic", "stop_reason": "refusal"},
     )
-    validate_stop_reason(msg, catalog=build_model_catalog())
+    validate_stop_reason(msg, catalog=build_model_catalog(home=meiva_home()))
 
 
 def test_validate_raises_on_tool_use_without_tool_calls() -> None:
@@ -90,7 +91,7 @@ def test_validate_raises_on_tool_use_without_tool_calls() -> None:
         content="", response_metadata={"model_provider": "anthropic", "stop_reason": "tool_use"}
     )
     with pytest.raises(LLMStreamCorruptedError, match=r"tool_use.*tool_calls"):
-        validate_stop_reason(msg, catalog=build_model_catalog())
+        validate_stop_reason(msg, catalog=build_model_catalog(home=meiva_home()))
 
 
 def test_validate_raises_on_openai_tool_calls_without_tool_calls() -> None:
@@ -98,7 +99,7 @@ def test_validate_raises_on_openai_tool_calls_without_tool_calls() -> None:
         content="", response_metadata={"model_provider": "openai", "finish_reason": "tool_calls"}
     )
     with pytest.raises(LLMStreamCorruptedError, match=r"tool_calls.*empty"):
-        validate_stop_reason(msg, catalog=build_model_catalog())
+        validate_stop_reason(msg, catalog=build_model_catalog(home=meiva_home()))
 
 
 def test_validate_passes_on_openai_tool_calls_with_tool_calls() -> None:
@@ -107,7 +108,7 @@ def test_validate_passes_on_openai_tool_calls_with_tool_calls() -> None:
         response_metadata={"model_provider": "openai", "finish_reason": "tool_calls"},
         tool_calls=[{"name": "execute_code", "args": {"code": "x"}, "id": "call_1"}],
     )
-    validate_stop_reason(msg, catalog=build_model_catalog())
+    validate_stop_reason(msg, catalog=build_model_catalog(home=meiva_home()))
 
 
 def test_validate_passes_on_tool_use_with_tool_calls() -> None:
@@ -116,7 +117,7 @@ def test_validate_passes_on_tool_use_with_tool_calls() -> None:
         response_metadata={"model_provider": "anthropic", "stop_reason": "tool_use"},
         tool_calls=[{"name": "execute_code", "args": {"code": "x"}, "id": "call_1"}],
     )
-    validate_stop_reason(msg, catalog=build_model_catalog())
+    validate_stop_reason(msg, catalog=build_model_catalog(home=meiva_home()))
 
 
 def test_validate_raises_on_stop_sequence() -> None:
@@ -125,7 +126,7 @@ def test_validate_raises_on_stop_sequence() -> None:
         response_metadata={"model_provider": "anthropic", "stop_reason": "stop_sequence"},
     )
     with pytest.raises(LLMStreamUnexpectedStopReasonError, match=r"stop_sequence"):
-        validate_stop_reason(msg, catalog=build_model_catalog())
+        validate_stop_reason(msg, catalog=build_model_catalog(home=meiva_home()))
 
 
 def test_validate_raises_on_model_context_window_exceeded() -> None:
@@ -137,7 +138,7 @@ def test_validate_raises_on_model_context_window_exceeded() -> None:
         },
     )
     with pytest.raises(LLMStreamUnexpectedStopReasonError, match=r"model_context_window_exceeded"):
-        validate_stop_reason(msg, catalog=build_model_catalog())
+        validate_stop_reason(msg, catalog=build_model_catalog(home=meiva_home()))
 
 
 def test_validate_raises_on_unknown_stop_reason() -> None:
@@ -146,7 +147,7 @@ def test_validate_raises_on_unknown_stop_reason() -> None:
         response_metadata={"model_provider": "anthropic", "stop_reason": "future_value_xyz"},
     )
     with pytest.raises(LLMStreamUnexpectedStopReasonError, match=r"future_value_xyz"):
-        validate_stop_reason(msg, catalog=build_model_catalog())
+        validate_stop_reason(msg, catalog=build_model_catalog(home=meiva_home()))
 
 
 def test_gemini_stop_passes() -> None:
@@ -155,7 +156,7 @@ def test_gemini_stop_passes() -> None:
         response_metadata={"model_provider": "google_genai", "finish_reason": "STOP"},
         usage_metadata={"input_tokens": 1, "output_tokens": 1, "total_tokens": 2},
     )
-    validate_stop_reason(msg, catalog=build_model_catalog())
+    validate_stop_reason(msg, catalog=build_model_catalog(home=meiva_home()))
 
 
 def test_openai_stop_passes() -> None:
@@ -164,7 +165,7 @@ def test_openai_stop_passes() -> None:
         response_metadata={"model_provider": "openai", "finish_reason": "stop"},
         usage_metadata={"input_tokens": 1, "output_tokens": 1, "total_tokens": 2},
     )
-    validate_stop_reason(msg, catalog=build_model_catalog())
+    validate_stop_reason(msg, catalog=build_model_catalog(home=meiva_home()))
 
 
 def test_anthropic_end_turn_passes() -> None:
@@ -173,7 +174,7 @@ def test_anthropic_end_turn_passes() -> None:
         response_metadata={"model_provider": "anthropic", "stop_reason": "end_turn"},
         usage_metadata={"input_tokens": 1, "output_tokens": 1, "total_tokens": 2},
     )
-    validate_stop_reason(msg, catalog=build_model_catalog())
+    validate_stop_reason(msg, catalog=build_model_catalog(home=meiva_home()))
 
 
 def test_gemini_max_tokens_truncated() -> None:
@@ -183,7 +184,7 @@ def test_gemini_max_tokens_truncated() -> None:
         usage_metadata={"input_tokens": 1, "output_tokens": 1, "total_tokens": 2},
     )
     with pytest.raises(LLMStreamTruncatedError):
-        validate_stop_reason(msg, catalog=build_model_catalog())
+        validate_stop_reason(msg, catalog=build_model_catalog(home=meiva_home()))
 
 
 def test_gemini_missing_corrupted() -> None:
@@ -193,7 +194,7 @@ def test_gemini_missing_corrupted() -> None:
         usage_metadata={"input_tokens": 1, "output_tokens": 1, "total_tokens": 2},
     )
     with pytest.raises(LLMStreamCorruptedError):
-        validate_stop_reason(msg, catalog=build_model_catalog())
+        validate_stop_reason(msg, catalog=build_model_catalog(home=meiva_home()))
 
 
 def test_gemini_safety_unexpected() -> None:
@@ -203,7 +204,7 @@ def test_gemini_safety_unexpected() -> None:
         usage_metadata={"input_tokens": 1, "output_tokens": 1, "total_tokens": 2},
     )
     with pytest.raises(LLMStreamUnexpectedStopReasonError):
-        validate_stop_reason(msg, catalog=build_model_catalog())
+        validate_stop_reason(msg, catalog=build_model_catalog(home=meiva_home()))
 
 
 async def test_llm_node_validator_wired(
@@ -244,6 +245,6 @@ def test_exception_hierarchy() -> None:
         content="", response_metadata={"model_provider": "anthropic", "stop_reason": "max_tokens"}
     )
     with pytest.raises(LLMStreamError):
-        validate_stop_reason(msg, catalog=build_model_catalog())
+        validate_stop_reason(msg, catalog=build_model_catalog(home=meiva_home()))
     with pytest.raises(LLMStreamUnexpectedStopReasonError):
-        validate_stop_reason(msg, catalog=build_model_catalog())
+        validate_stop_reason(msg, catalog=build_model_catalog(home=meiva_home()))

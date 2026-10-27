@@ -31,6 +31,7 @@ from psycopg_pool import ConnectionPool
 import meiva_builtins.plugins as shipped_plugins
 from base.clock.tests.fakes import system_clock
 from base.db import Database
+from base.paths import meiva_home
 from base.telemetry.metrics.plugin_metrics import MetricSpec
 from gateway.inspect import _plugin_metrics
 from gateway.inspect._plugin_faces import SHIPPED_PLUGINS_DIR, enabled_plugin_names
@@ -451,7 +452,9 @@ def test_in_process_loader_imports_shipped_metrics() -> None:
     `contribute()` declaration into a data registry plus the core definition
     modules — plugin metrics first, then core, the old snapshot's two-section
     order. No file involved."""
-    specs = _plugin_metrics.load_plugin_metrics(SHIPPED_PLUGINS_DIR, enabled_plugin_names())
+    specs = _plugin_metrics.load_plugin_metrics(
+        SHIPPED_PLUGINS_DIR, enabled_plugin_names(home=meiva_home())
+    )
 
     plugin_specs = [s for s in specs if s.plugin != "core"]
     core_specs = [s for s in specs if s.plugin == "core"]
@@ -462,7 +465,12 @@ def test_in_process_loader_imports_shipped_metrics() -> None:
     assert [s.plugin for s in specs].index("core") == len(plugin_specs)
     assert len(core_specs) >= 16
     # a second call rebuilds the same registry (no process-global state to double up)
-    assert _plugin_metrics.load_plugin_metrics(SHIPPED_PLUGINS_DIR, enabled_plugin_names()) == specs
+    assert (
+        _plugin_metrics.load_plugin_metrics(
+            SHIPPED_PLUGINS_DIR, enabled_plugin_names(home=meiva_home())
+        )
+        == specs
+    )
 
 
 # meiva:note
@@ -472,12 +480,12 @@ def test_in_process_loader_imports_shipped_metrics() -> None:
 def test_a_disabled_plugins_metrics_are_not_loaded(unit_home: Path) -> None:
     shipped = SHIPPED_PLUGINS_DIR / "meiva_fleet" / "metrics.py"
     assert shipped in _plugin_metrics.plugin_metric_modules(
-        SHIPPED_PLUGINS_DIR, enabled_plugin_names()
+        SHIPPED_PLUGINS_DIR, enabled_plugin_names(home=unit_home)
     )
     (unit_home / "plugins_config.json").write_text(
         json.dumps({"plugins": {"meiva_fleet": {"enabled": False}}}), encoding="utf-8"
     )
-    enabled = enabled_plugin_names()
+    enabled = enabled_plugin_names(home=unit_home)
     assert "meiva_fleet" not in enabled
     assert shipped not in _plugin_metrics.plugin_metric_modules(SHIPPED_PLUGINS_DIR, enabled)
     assert "meiva_fleet" not in {

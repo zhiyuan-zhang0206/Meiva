@@ -64,7 +64,7 @@ from base.host.env.agent_slices import AgentSlices
 from base.native_process.turn_identity import HostedTurnResources
 from base.packages.plugin_providers import build_model_catalog
 from base.packages.plugins.extensions import ExtensionRegistry, PluginContributions
-from base.paths import resolve_meiva_home
+from base.paths import meiva_home, resolve_meiva_home
 from meiva.sdk_surface import process_context
 from meiva.tests.fixtures.pin_agent import snapshot_clients
 
@@ -486,7 +486,7 @@ def make_runtime_and_config(
         bus=EventBus.from_settings(rng=seeded_rng()),
         clients=snapshot_clients(),
         identity=AgentIdentity(agent_id=agent_id, owns_loop=True),
-        catalog=build_model_catalog(),
+        catalog=build_model_catalog(home=meiva_home()),
         clock_factory=Clock.from_settings,
     )
     runtime = Runtime(context=ctx)

@@ -19,6 +19,7 @@ from base.lm.catalog.decide.types import (
 from base.lm.catalog.provider_keys import ProviderKeys
 from base.lm.decision.call import decide
 from base.packages.plugin_providers import build_model_catalog
+from base.paths import meiva_home
 
 _MODEL = "jev-1.13.0"
 _QUESTIONS = {
@@ -72,7 +73,7 @@ _KEYS = ProviderKeys({"TYPESAFE_API_KEY": "ts-test-key"})
 
 @pytest.fixture
 def catalog() -> ModelCatalog:
-    return build_model_catalog()
+    return build_model_catalog(home=meiva_home())
 
 
 async def _decide(catalog: ModelCatalog, server: _Server, keys: ProviderKeys = _KEYS) -> Any:
@@ -136,7 +137,7 @@ async def test_missing_key_fails_before_any_request() -> None:
     server = _Server(httpx.Response(200, json=_body()))
 
     with pytest.raises(DecisionKeyMissingError, match="TYPESAFE_API_KEY not set"):
-        await _decide(build_model_catalog(), server, ProviderKeys({}))
+        await _decide(build_model_catalog(home=meiva_home()), server, ProviderKeys({}))
     assert server.requests == []
 
 

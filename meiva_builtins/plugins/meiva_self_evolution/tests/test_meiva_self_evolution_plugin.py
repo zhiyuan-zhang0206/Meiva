@@ -15,6 +15,7 @@ from base.config.tests.configuration import defaults
 from base.host.env.agent_slices import AgentSlices
 from base.packages.plugin_providers import build_model_catalog
 from base.packages.plugins.extensions import ExtensionRegistry
+from base.paths import meiva_home
 from base.paths.home import resolve_meiva_home
 from meiva_builtins.plugins.meiva_self_evolution import agent_runtime
 from meiva_builtins.plugins.meiva_self_evolution.agent_runtime import TO_DO_BETTER_FILENAME
@@ -36,7 +37,7 @@ def _runtime(slices: AgentSlices) -> Runtime[MeivaContext]:
     return Runtime(
         context=MeivaContext(
             agent=slices,
-            catalog=build_model_catalog(),
+            catalog=build_model_catalog(home=meiva_home()),
             extensions=ExtensionRegistry((("meiva_self_evolution", agent_runtime.contribute()),)),
             clock_factory=Clock.from_settings,
             meiva_home=resolve_meiva_home(),
@@ -45,7 +46,9 @@ def _runtime(slices: AgentSlices) -> Runtime[MeivaContext]:
 
 
 def test_reminder_names_the_file_and_stays_optional() -> None:
-    text = agent_runtime.self_evolution_compact_reminder(_slices(), catalog=build_model_catalog())
+    text = agent_runtime.self_evolution_compact_reminder(
+        _slices(), catalog=build_model_catalog(home=meiva_home())
+    )
 
     lowered = text.lower()
     assert TO_DO_BETTER_FILENAME in text
@@ -56,7 +59,8 @@ def test_reminder_names_the_file_and_stays_optional() -> None:
 
 def test_reminder_is_silent_when_the_workspace_is_not_in_the_prompt() -> None:
     text = agent_runtime.self_evolution_compact_reminder(
-        _slices(agent__workspace_in_system_prompt=False), catalog=build_model_catalog()
+        _slices(agent__workspace_in_system_prompt=False),
+        catalog=build_model_catalog(home=meiva_home()),
     )
 
     assert text == ""

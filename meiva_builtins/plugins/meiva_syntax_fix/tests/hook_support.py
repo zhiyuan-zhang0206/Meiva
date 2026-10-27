@@ -22,6 +22,7 @@ from base.config.tests.configuration import defaults
 from base.host.env.agent_slices import AgentSlices
 from base.packages.plugin_providers import build_model_catalog
 from base.packages.tests.model_catalog import inert_keys
+from base.paths import meiva_home
 
 _MODELS = "meiva_builtins.plugins.meiva_syntax_fix.tests.hook_support"
 
@@ -111,8 +112,8 @@ def make_runtime(*, llm_override: str | None = None, **pins: Any) -> Runtime[Mei
     return Runtime(
         context=MeivaContext(
             agent=agent_slices(llm_override=llm_override, **pins),
-            catalog=build_model_catalog(),
-            provider_keys=inert_keys(build_model_catalog()),
+            catalog=build_model_catalog(home=meiva_home()),
+            provider_keys=inert_keys(build_model_catalog(home=meiva_home())),
             clock_factory=Clock.from_settings,
         )
     )

@@ -24,23 +24,23 @@ def test_mcp_enabled_config_defaults():
 
 
 def test_read_enabled_empty_when_no_file(unit_home: Path):
-    assert not local_config_path().exists()
-    assert read_enabled() == {}
+    assert not local_config_path(home=unit_home).exists()
+    assert read_enabled(home=unit_home) == {}
 
 
 def test_read_enabled_fails_closed_when_malformed(unit_home: Path):
     from base.packages.plugins.mcp_enabled import McpEnabledConfigError
 
-    local_config_path().write_text("{not json")
+    local_config_path(home=unit_home).write_text("{not json")
     with pytest.raises(McpEnabledConfigError):
-        read_enabled()
+        read_enabled(home=unit_home)
 
 
 def test_write_local_is_atomic_and_leaves_no_tmp(unit_home: Path):
     cfg = McpEnabledConfig(mcp_servers={"fs": McpServerEntry(enabled=False)})
-    write_local(cfg)
-    assert read_enabled() == {"fs": False}
-    assert list(local_config_path().parent.glob(".*.tmp")) == []
+    write_local(cfg, home=unit_home)
+    assert read_enabled(home=unit_home) == {"fs": False}
+    assert list(local_config_path(home=unit_home).parent.glob(".*.tmp")) == []
 
 
 def test_read_enabled_returns_explicit_entries(unit_home: Path):
@@ -50,33 +50,34 @@ def test_read_enabled_returns_explicit_entries(unit_home: Path):
                 "fs": McpServerEntry(enabled=False),
                 "github": McpServerEntry(enabled=True),
             }
-        )
+        ),
+        home=unit_home,
     )
-    assert read_enabled() == {"fs": False, "github": True}
+    assert read_enabled(home=unit_home) == {"fs": False, "github": True}
 
 
 def test_set_mcp_enabled_round_trip(unit_home: Path):
-    cfg = set_mcp_enabled("fs", enabled=False)
+    cfg = set_mcp_enabled("fs", enabled=False, home=unit_home)
     assert cfg.mcp_servers["fs"].enabled is False
-    assert read_enabled() == {"fs": False}
+    assert read_enabled(home=unit_home) == {"fs": False}
 
-    on_disk = json.loads(local_config_path().read_text())
+    on_disk = json.loads(local_config_path(home=unit_home).read_text())
     assert on_disk["mcp_servers"]["fs"]["enabled"] is False
 
 
 def test_set_mcp_enabled_disabled_reads_back_false(unit_home: Path):
-    set_mcp_enabled("fs", enabled=False)
-    assert read_enabled()["fs"] is False
+    set_mcp_enabled("fs", enabled=False, home=unit_home)
+    assert read_enabled(home=unit_home)["fs"] is False
 
 
 def test_set_mcp_enabled_preserves_other_entries(unit_home: Path):
-    set_mcp_enabled("fs", enabled=False)
-    set_mcp_enabled("github", enabled=True)
-    assert read_enabled() == {"fs": False, "github": True}
+    set_mcp_enabled("fs", enabled=False, home=unit_home)
+    set_mcp_enabled("github", enabled=True, home=unit_home)
+    assert read_enabled(home=unit_home) == {"fs": False, "github": True}
 
 
 def test_set_mcp_enabled_allows_undefined_server(unit_home: Path):
-    cfg = set_mcp_enabled("never-defined", enabled=False)
+    cfg = set_mcp_enabled("never-defined", enabled=False, home=unit_home)
     assert cfg.mcp_servers["never-defined"].enabled is False
 
 
@@ -85,9 +86,11 @@ def test_schema_invalid_is_config_error():
 
 
 def test_read_enabled_raises_schema_invalid_on_bad_shape(unit_home: Path):
-    local_config_path().write_text(json.dumps({"mcp_servers": {"fs": {"enabled": [1, 2]}}}))
+    local_config_path(home=unit_home).write_text(
+        json.dumps({"mcp_servers": {"fs": {"enabled": [1, 2]}}})
+    )
     with pytest.raises(SchemaInvalid):
-        read_enabled()
+        read_enabled(home=unit_home)
 
 
 @pytest.mark.parametrize(
@@ -96,15 +99,15 @@ def test_read_enabled_raises_schema_invalid_on_bad_shape(unit_home: Path):
 def test_present_invalid_overlay_cannot_default_on_or_be_overwritten(
     unit_home: Path, content: str
 ) -> None:
-    overlay = local_config_path()
+    overlay = local_config_path(home=unit_home)
     overlay.write_text(content)
     with pytest.raises(McpEnabledConfigError):
-        read_enabled()
+        read_enabled(home=unit_home)
     with pytest.raises(McpEnabledConfigError):
-        set_mcp_enabled("fs", enabled=True)
+        set_mcp_enabled("fs", enabled=True, home=unit_home)
     assert overlay.read_text() == content
 
 
 def test_present_empty_object_preserves_default_on_policy(unit_home: Path) -> None:
-    local_config_path().write_text("{}")
-    assert read_enabled() == {}
+    local_config_path(home=unit_home).write_text("{}")
+    assert read_enabled(home=unit_home) == {}

@@ -17,12 +17,13 @@ from base.lm.registry import (
     resolve_setting,
 )
 from base.packages.plugin_providers import build_model_catalog
+from base.paths import meiva_home
 
 
 def _validate_with(overrides: dict[str, ModelSpec]) -> None:
     from base.lm import registry as reg
 
-    catalog = build_model_catalog()
+    catalog = build_model_catalog(home=meiva_home())
     reg.validate_models({**catalog.models, **overrides}, prices=catalog.prices)
 
 

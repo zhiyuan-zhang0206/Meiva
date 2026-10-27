@@ -87,6 +87,7 @@ def preflight_start_readiness(
             all_services=all_services,
             machine=machine,
             host=host,
+            home=home,
         ),
         trees=tuple(_tree_facts(home / name) for name in _TREE_ROOTS),
         not_directories=_not_directories(home),
@@ -120,6 +121,7 @@ def _port_facts(
     all_services: bool,
     machine: MachineIdentityReader,
     host: Host,
+    home: Path,
 ) -> PortFacts:
     import cli.commands._repo as _repo_commands
 
@@ -134,6 +136,7 @@ def _port_facts(
             all_services=all_services,
             machine=machine,
             host=host,
+            home=home,
         )
     # meiva:note
     # a preflight must not fail the update
@@ -150,23 +153,23 @@ def _occupied(
     all_services: bool,
     machine: MachineIdentityReader,
     host: Host,
+    home: Path,
 ) -> tuple[PortOccupant, ...]:
     from base.deploy.lifecycle.service_selection import resolve_selection
     from cli.commands.lifecycle.root_driver import start_roster
     from cli.commands.probe import occupied_health_ports
     from services.supervision.roster.composition import build_services
+    from services.supervision.roster.spec import services_for_capabilities_annotated
 
-    available = {s.session for s in build_services()}
+    available = {s.session for s in build_services(home=home)}
     roster = start_roster(
-        roles,
+        services_for_capabilities_annotated(roles, machine=machine, host=host, home=home),
         resolve_selection(
             available,
             only=only_services,
             excluded=disabled_services,
             all_services=all_services,
         ),
-        machine=machine,
-        host=host,
     )
     return tuple(
         PortOccupant(port.spec.session, port.detail) for port in occupied_health_ports(roster)

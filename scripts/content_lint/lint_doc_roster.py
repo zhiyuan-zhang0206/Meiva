@@ -56,6 +56,7 @@ from base.host.env.boot_actions import enter_scratch_home
 if __name__ == "__main__":
     enter_scratch_home()
 
+from base.paths import meiva_home
 from services.supervision.roster.composition import build_services
 
 _REPO_ROOT = Path(__file__).resolve().parent.parent.parent
@@ -109,12 +110,11 @@ def parse_roster(text: str) -> set[str]:
 
 def check(
     *,
-    services: Sequence[Any] | None = None,
+    services: Sequence[Any],
     service_roster: Path = SERVICE_ROSTER,
 ) -> int:
     """Compare the parsed roster against build_services(); return 0/1 exit code."""
-    svc_list = build_services() if services is None else services
-    registered = {spec.session for spec in svc_list}
+    registered = {spec.session for spec in services}
 
     text = service_roster.read_text(encoding="utf-8")
     try:
@@ -196,7 +196,7 @@ def directory_healthchecks() -> set[str]:
     return {p.stem for p in _HEALTHCHECK_DIR.glob("*.py") if p.name != "__init__.py"}
 
 
-def spec_healthchecks(*, services: Sequence[Any] | None = None) -> set[str]:
+def spec_healthchecks(*, services: Sequence[Any]) -> set[str]:
     """The healthcheck modules registered on ServiceSpec rows inside this
     directory (`services.supervision.healthchecks.<x>`, last segment).
 
@@ -204,7 +204,7 @@ def spec_healthchecks(*, services: Sequence[Any] | None = None) -> set[str]:
     probe), and a plugin service that does keeps it in its own namespace; both are
     out of scope for this table — the roster documents this directory only."""
     names: set[str] = set()
-    for spec in build_services() if services is None else services:
+    for spec in services:
         hm = spec.healthcheck_module
         if hm and hm.startswith("services.supervision.healthchecks."):
             names.add(hm.rsplit(".", 1)[-1])
@@ -241,7 +241,7 @@ def parse_healthcheck_roster(text: str) -> set[str]:
 def check_healthcheck_roster(
     *,
     roster_path: Path = HEALTHCHECK_ROSTER,
-    services: Sequence[Any] | None = None,
+    services: Sequence[Any],
     directory: set[str] | None = None,
     hand_added: set[str] | None = None,
 ) -> int:
@@ -309,8 +309,9 @@ def check_healthcheck_roster(
 
 
 def main() -> int:
-    rc = check()
-    rc2 = check_healthcheck_roster()
+    services = build_services(home=meiva_home())
+    rc = check(services=services)
+    rc2 = check_healthcheck_roster(services=services)
     return rc or rc2
 
 

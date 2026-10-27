@@ -43,10 +43,10 @@ def _declared(plugin: str, face: str, contribute: Callable[[], object]) -> Plugi
 
 # meiva:link base/packages/plugins/docs/runtime-contributions.meiva.okf.md
 def declarations(
-    faces: Sequence[str] = ALL_FACES, report: load_report.Reporter | None = None
+    faces: Sequence[str] = ALL_FACES, report: load_report.Reporter | None = None, *, home: Path
 ) -> list[tuple[str, Path, PluginContributions]]:
     found: list[tuple[str, Path, PluginContributions]] = []
-    for name, plugin_dir in enabled_plugin_dirs(report):
+    for name, plugin_dir in enabled_plugin_dirs(report, home=home):
         merged: PluginContributions | None = None
         try:
             load_manifest(plugin_dir)
@@ -91,10 +91,11 @@ def build_registry(
     report: load_report.Reporter | None = None,
     *,
     validate_state: StateGate | None = None,
+    home: Path,
 ) -> ExtensionRegistry:
     keys = tuple(key for face in faces for key in FACE_KEYS.get(face, ()))
     admitted: list[tuple[str, PluginContributions]] = []
-    for name, plugin_dir, contributions in declarations(faces, report):
+    for name, plugin_dir, contributions in declarations(faces, report, home=home):
         if contributions.state and validate_state is None:
             raise RuntimeError(
                 f"plugin {name!r} declares state classes but this load supplied no state gate "

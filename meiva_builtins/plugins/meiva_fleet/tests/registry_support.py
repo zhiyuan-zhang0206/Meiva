@@ -6,6 +6,7 @@ import pytest
 from base.agents.sdk.tests.sampling_owners import fixed_sampling_owner
 from base.packages.plugin_config_images import DiskPluginConfigImages
 from base.packages.plugins.extensions import ExtensionRegistry
+from base.paths import meiva_home
 from base.paths.home import resolve_meiva_home
 
 
@@ -41,7 +42,7 @@ def set_fleet_configuration(*, reduce_context_switch: bool) -> None:
     from meiva.sdk_surface import install
     from meiva_builtins.plugins.meiva_fleet import agent_runtime, default_config, plugin
 
-    path = disk_image_path("meiva_fleet")
+    path = disk_image_path("meiva_fleet", home=meiva_home())
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(
         default_config.FleetConfig(reduce_context_switch=reduce_context_switch).model_dump_json()

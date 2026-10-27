@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from functools import partial
 from pathlib import Path
 
 import psycopg
@@ -583,7 +584,7 @@ def test_two_apps_isolate_gateway_config_across_auth_cors_mcp_and_webhooks(
     )
 
     with gateway_test_process(machine=machine_identity) as process:
-        catalog = load_model_catalog(build_model_catalog)
+        catalog = load_model_catalog(partial(build_model_catalog, home=process.home))
         app_alpha = create_app(
             config_alpha, process=process, process_ownership="borrowed", catalog=catalog
         )

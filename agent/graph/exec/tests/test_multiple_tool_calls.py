@@ -35,7 +35,7 @@ from base.events.live.tests.live_capture import LiveEvents, idle_publisher
 from base.host.env.agent_slices import AgentSlices
 from base.packages.plugin_providers import build_model_catalog
 from base.packages.plugins.extensions import ExtensionRegistry, PluginContributions
-from base.paths import resolve_meiva_home
+from base.paths import meiva_home, resolve_meiva_home
 from meiva.tests.fixtures.pin_agent import snapshot_clients
 
 
@@ -142,7 +142,7 @@ def _runtime(
             bus=EventBus.from_settings(rng=seeded_rng()),
             clients=snapshot_clients(),
             identity=AgentIdentity(agent_id=7, owns_loop=True),
-            catalog=build_model_catalog(),
+            catalog=build_model_catalog(home=meiva_home()),
             clock_factory=Clock.from_settings,
         )
     )
@@ -157,7 +157,7 @@ def _node_runtime(
             event_publisher=publisher or idle_publisher(),
             agent=agent or AgentSlices.resolve(default_reader=defaults()),
             identity=AgentIdentity(agent_id=7, owns_loop=True),
-            catalog=build_model_catalog(),
+            catalog=build_model_catalog(home=meiva_home()),
             clock_factory=Clock.from_settings,
         )
     )

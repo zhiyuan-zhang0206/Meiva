@@ -21,6 +21,7 @@ from agent.tests.impersonation.external.sample_plugin import ExamplePlugin
 from base.agents.context.external_attachment.plugin_state_codec import load_snapshot
 from base.cluster.machine.configured import ConfiguredMachineIdentity
 from base.config.tests.configuration import snapshot_process_config
+from base.paths import meiva_home
 from meiva import impersonation
 from meiva.sdk_surface import agent_identity, process_context
 from meiva.sdk_surface.installation import installed
@@ -257,7 +258,7 @@ def test_the_native_snapshot_is_the_checkpoint_the_attachment_never_writes(
         handle.update({"seen": {"external"}})
         assert attachment.native_snapshot().sample__seen == {"native"}
     stored, _, _ = load_snapshot(
-        attached_runtime.agent_id, database=attached_runtime.cluster.database
+        attached_runtime.agent_id, database=attached_runtime.cluster.database, home=meiva_home()
     )
     assert stored.sample__seen == {"native"}
 
@@ -273,7 +274,8 @@ def test_external_controls_stay_out_of_the_native_prompt() -> None:
         ExtensionRegistry(()),
         AgentSlices.resolve(default_reader=defaults()),
         agent_id=None,
-        catalog=build_model_catalog(),
+        catalog=build_model_catalog(home=meiva_home()),
+        home=meiva_home(),
     )
     assert "impersonation" not in meiva.__all_for_meiva__
     assert "meiva.impersonation.attach" not in prompt

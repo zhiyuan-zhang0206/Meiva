@@ -9,6 +9,7 @@ from base.packages.plugins.enable_config import (
     load_for_runtime,
     write_local,
 )
+from base.paths import meiva_home
 
 pytestmark = pytest.mark.usefixtures("unit_home")
 
@@ -28,7 +29,8 @@ def test_load_for_runtime_drops_dangling_and_reports_each_name(
                 "zulu": {"enabled": False},
                 "alpha": {"enabled": True},
             }
-        }
+        },
+        home=meiva_home(),
     )
     reported: list[tuple[str, BaseException]] = []
 
@@ -46,7 +48,9 @@ def test_load_for_runtime_drops_dangling_and_reports_each_name(
 def test_load_for_runtime_reports_each_failed_load(
     store: PluginEnableStore,
 ) -> None:
-    write_local({"plugins": {"real": {"enabled": True}, "vanished": {"enabled": False}}})
+    write_local(
+        {"plugins": {"real": {"enabled": True}, "vanished": {"enabled": False}}}, home=meiva_home()
+    )
     reported: list[str] = []
 
     def _capture(name: str, exc: BaseException) -> None:
@@ -59,15 +63,15 @@ def test_load_for_runtime_reports_each_failed_load(
 
 
 def test_load_for_runtime_keeps_enabled_flags() -> None:
-    write_local({"plugins": {"real": {"enabled": False}}})
+    write_local({"plugins": {"real": {"enabled": False}}}, home=meiva_home())
 
-    config = load_for_runtime({"real"})
+    config = load_for_runtime({"real"}, home=meiva_home())
 
     assert config.plugins["real"].enabled is False
 
 
 def test_strict_load_still_raises_on_dangling() -> None:
-    write_local({"plugins": {"vanished": {"enabled": True}}})
+    write_local({"plugins": {"vanished": {"enabled": True}}}, home=meiva_home())
 
     with pytest.raises(DanglingPlugin):
-        load({"real"})
+        load({"real"}, home=meiva_home())

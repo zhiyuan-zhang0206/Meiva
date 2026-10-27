@@ -88,7 +88,7 @@ class MaterializeResult:
         return bool(self.landed or self.updated)
 
 
-def last_written_hash(name: str) -> str | None:
+def last_written_hash(name: str, *, home: Path) -> str | None:
     """The tree hash this machine last wrote for `name`, from the per-machine
     install registry — the "has a person touched it since" reference.
 
@@ -98,7 +98,7 @@ def last_written_hash(name: str) -> str | None:
     """
     from base.packages.extensions import install_registry
 
-    pkg = install_registry.get(name)
+    pkg = install_registry.get(name, home=home)
     return None if pkg is None else pkg.content_hash
 
 
@@ -106,8 +106,8 @@ def materialize_skills(
     conn: psycopg.Connection,
     *,
     dest_root: Path,
+    last_written: Callable[[str], str | None],
     dry_run: bool = False,
-    last_written: Callable[[str], str | None] = last_written_hash,
 ) -> MaterializeResult:
     """Bring `dest_root` in line with the cluster's enabled `kind='skill'` rows.
 
@@ -159,7 +159,7 @@ def _classify(
     row_hash: str,
     dest: Path,
     *,
-    last_written: Callable[[str], str | None] = last_written_hash,
+    last_written: Callable[[str], str | None],
 ) -> str:
     """`absent` | `unchanged` | `stale` | `local-edit` for one extension.
 

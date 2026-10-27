@@ -242,7 +242,7 @@ def cmd_packages_status(
 
     from base.host.git import host_version as host_version_mod
 
-    registry = install_registry.load()
+    registry = install_registry.load(home=home)
     try:
         host_bare: str | None = host_version_mod.host_version()
         host_display: str | None = host_version_mod.host_version_display()
@@ -395,7 +395,7 @@ def cmd_packages_rollback(name: str, *, home: Path, now: datetime) -> int:
     from base.packages.skills.names import match_key
 
     try:
-        registry = install_registry.load()
+        registry = install_registry.load(home=home)
     except install_registry.InstallRegistryError as exc:
         print(f"[meiva packages rollback] registry unreadable: {exc}", file=sys.stderr)
         return 1
@@ -427,7 +427,7 @@ def cmd_packages_rollback(name: str, *, home: Path, now: datetime) -> int:
         )
     dest = _swap_trees_with_prev(skills, row.name, skip)
     stamp = now.isoformat(timespec="seconds")
-    with install_registry.mutate() as reg:
+    with install_registry.mutate(home=home) as reg:
         fresh = next((p for p in reg.packages if match_key(p.name) == match_key(row.name)), None)
         if fresh is not None:
             new_hash = install_registry.tree_hash(dest, skip_subtrees=skip)
@@ -462,7 +462,12 @@ def _policy_interval(update_mode: str | None, check_every: str | None) -> int | 
 
 
 def cmd_packages_policy(
-    name: str, *, config: ConfigBoot, update_mode: str | None = None, check_every: str | None = None
+    name: str,
+    *,
+    config: ConfigBoot,
+    update_mode: str | None = None,
+    check_every: str | None = None,
+    home: Path,
 ) -> int:
     """`meiva packages policy <name> [--update-mode auto|notify|off]
     [--check-every 24h]` — record an explicit policy decision on the row; explicit
@@ -477,7 +482,7 @@ def cmd_packages_policy(
         print(f"[meiva packages policy] {exc}", file=sys.stderr)
         return 1
     try:
-        registry = install_registry.load()
+        registry = install_registry.load(home=home)
     except install_registry.InstallRegistryError as exc:
         print(f"[meiva packages policy] registry unreadable: {exc}", file=sys.stderr)
         return 1
@@ -485,7 +490,7 @@ def cmd_packages_policy(
     if row is None:
         print(f"[meiva packages policy] no tracked package named '{name}'", file=sys.stderr)
         return 1
-    with install_registry.mutate() as reg:
+    with install_registry.mutate(home=home) as reg:
         fresh = next((p for p in reg.packages if match_key(p.name) == match_key(row.name)), None)
         if fresh is None:
             print(
@@ -496,7 +501,7 @@ def cmd_packages_policy(
             fresh.update.mode = parsed_mode
         if interval is not None:
             fresh.update.interval_seconds = interval
-    updated = install_registry.get(row.name)
+    updated = install_registry.get(row.name, home=home)
     if updated is not None:
         _print_policy(updated, config=config)
     return 0

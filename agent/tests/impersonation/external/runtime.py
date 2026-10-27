@@ -42,6 +42,7 @@ from base.native_process.runtime_incarnation import RuntimeIncarnation
 from base.packages.plugin_config_contracts import UnboundPluginConfigImages
 from base.packages.plugins.extensions import ExtensionRegistry
 from base.packages.plugins.loading import registry as plugin_registry
+from base.paths import meiva_home
 from meiva import impersonation
 from meiva.boot import OwnedBoot, derived_clients, own_external_process
 from meiva.sdk_surface import install, process_context
@@ -93,7 +94,9 @@ _DROP_CHECKPOINT = (
 # test that ran earlier in the same worker would add its plugins to the registry. These tests
 # install the one plugin they wrote.
 def sample_registry() -> ExtensionRegistry:
-    discovered = plugin_registry.build_registry(validate_state=plugin_state_schema)
+    discovered = plugin_registry.build_registry(
+        validate_state=plugin_state_schema, home=meiva_home()
+    )
     return ExtensionRegistry(tuple(item for item in discovered.plugins if item[0] == PLUGIN))
 
 

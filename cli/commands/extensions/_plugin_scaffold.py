@@ -49,8 +49,8 @@ def run_plugin_scaffolds(*, machine: MachineIdentityReader, facts: ScaffoldFacts
     from base.packages.plugins import enable_config as plugins_cfg
     from base.packages.plugins import load_report
 
-    discovered = plugins_cfg.discover_plugins()
-    config = plugins_cfg.load_for_runtime(set(discovered))
+    discovered = plugins_cfg.discover_plugins(home=facts.home)
+    config = plugins_cfg.load_for_runtime(set(discovered), home=facts.home)
 
     ran: list[str] = []
     for name, entry in config.plugins.items():

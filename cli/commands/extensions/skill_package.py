@@ -164,6 +164,7 @@ def register_installed(
     content_hash: str | None = None,
     update_mode: str | None = None,
     check_every: int | None = None,
+    home: Path,
 ) -> None:
     """Record a freshly-installed package in the install registry (origin='user',
     so converge leaves it alone).
@@ -203,7 +204,8 @@ def register_installed(
             content_hash=content_hash,
             installed_hash=content_hash,
             update=update,
-        )
+        ),
+        home=home,
     )
 
 
@@ -316,6 +318,7 @@ def install(
             content_hash=tree_hash(dest),
             update_mode=update_mode,
             check_every=check_every,
+            home=home,
         )
         installed.append((dest, report))
     return installed

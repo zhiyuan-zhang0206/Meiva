@@ -40,6 +40,7 @@ from base.host.env.agent_slices import AgentSlices
 from base.native_process.runtime_incarnation import RuntimeIncarnation
 from base.packages.composer_commands import CommandCatalog
 from base.packages.plugin_providers import build_model_catalog
+from base.paths import meiva_home
 
 __all__ = [
     "QUICK_WAIT",
@@ -178,10 +179,10 @@ def native_context(
         bus=cluster.event_bus,
         machine=cluster.machine,
         relays=RelaySupervision(),
-        catalog=build_model_catalog(),
+        catalog=build_model_catalog(home=meiva_home()),
         clock_factory=fixed_clock,
         agent=AgentSlices.resolve(default_reader=defaults()),
-        commands=CommandCatalog.system(skills=list),
+        commands=CommandCatalog.system(skills=list, home=meiva_home()),
         ops_pool=ops_pool,
         original_incarnation=owner,
     )

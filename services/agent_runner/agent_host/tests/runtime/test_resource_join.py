@@ -128,7 +128,7 @@ async def test_original_error_joins_before_clients_and_pools_close(
         bus=EventBus.from_settings(rng=seeded_rng()),
         db=Database.from_settings(gate=database_gate),
         clients=clients,
-        commands=CommandCatalog.system(skills=list),
+        commands=CommandCatalog.system(skills=list, home=meiva_home()),
     )
     scope = await host._resource_service.turn()
     failure = ValueError("original late resource error")
@@ -176,7 +176,7 @@ def exercise_unfinished_main() -> None:
             bus=EventBus.from_settings(rng=seeded_rng()),
             db=database(),
             clients=clients,
-            commands=CommandCatalog.system(skills=list),
+            commands=CommandCatalog.system(skills=list, home=home),
         )
         service = host._resource_service
         await service.turn()

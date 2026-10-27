@@ -20,6 +20,7 @@ from base.cluster.machine import MachineIdentityReader
 from base.packages.extensions import install_registry
 from base.packages.extensions import registry as cluster_registry
 from base.packages.extensions.install_registry import tree_hash
+from base.paths import meiva_home
 from cli.commands.extensions.materialize import (
     adopt_local_extensions,
     materialize_cluster_extensions,
@@ -64,7 +65,9 @@ def test_the_cluster_registry_lands_on_the_machine_and_the_pool_is_closed(
     skills = tmp_path / "skills"
     before = _pool_threads()
 
-    materialize_cluster_extensions(database_factory=operator_database, skills_root=skills)
+    materialize_cluster_extensions(
+        database_factory=operator_database, skills_root=skills, home=meiva_home()
+    )
 
     assert (skills / "alpha" / "SKILL.md").read_text().endswith("alpha body\n")
     assert capsys.readouterr().out.splitlines() == ["    landed: alpha"]
@@ -82,7 +85,9 @@ def test_a_destination_that_cannot_hold_skills_is_reported_and_the_pool_is_close
     not_a_directory.write_text("a file where the skills directory belongs\n")
     before = _pool_threads()
 
-    materialize_cluster_extensions(database_factory=operator_database, skills_root=not_a_directory)
+    materialize_cluster_extensions(
+        database_factory=operator_database, skills_root=not_a_directory, home=meiva_home()
+    )
 
     assert "cluster registry unreachable" in capsys.readouterr().err
     assert _pool_threads() == before
@@ -97,11 +102,16 @@ def test_a_local_install_is_adopted_into_the_cluster_and_the_pool_is_closed(
 ) -> None:
     skills = unit_home / "skills"
     _skill_tree(skills / "local-note", "kept on this machine")
-    install_registry.register(install_registry.InstalledPackage(name="local-note", type="skill"))
+    install_registry.register(
+        install_registry.InstalledPackage(name="local-note", type="skill"), home=unit_home
+    )
     before = _pool_threads()
 
     adopt_local_extensions(
-        database_factory=operator_database, machine=installed_machine_identity, skills_root=skills
+        database_factory=operator_database,
+        machine=installed_machine_identity,
+        skills_root=skills,
+        home=unit_home,
     )
 
     assert capsys.readouterr().out.splitlines() == ["    adopted into the cluster: local-note"]
@@ -124,6 +134,7 @@ def test_an_unreadable_local_registry_stops_the_adoption_and_the_pool_is_closed(
         database_factory=operator_database,
         machine=installed_machine_identity,
         skills_root=unit_home / "skills",
+        home=unit_home,
     )
 
     assert "could not adopt local installs" in capsys.readouterr().err
