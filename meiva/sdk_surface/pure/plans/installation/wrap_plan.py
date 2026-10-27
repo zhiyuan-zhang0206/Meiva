@@ -24,11 +24,9 @@ def is_public_dotted_path(path: str) -> bool:
 
 
 # meiva:note
-# The refusal for a wrap target that resolved to something that cannot be called; None when it
-# can. Wrapping a constant or a namespace is a plugin bug, caught at registration.
-def uncallable_message(target: str, current: object) -> str | None:
-    if callable(current):
-        return None
+# The refusal for a wrap target that resolved to something that cannot be called. Wrapping a
+# constant or a namespace is a plugin bug, caught at registration.
+def uncallable_message(target: str, current: object) -> str:
     return f"meiva.{target} is {type(current).__name__}, not callable — wrap targets are functions."
 
 

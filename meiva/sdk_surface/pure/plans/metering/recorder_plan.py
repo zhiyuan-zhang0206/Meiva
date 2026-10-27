@@ -1,7 +1,7 @@
 # meiva:note
 # What the SDK usage recorder is and where it goes, decided over the callables the installer
-# read: whether a callable is a recorder, whether it belongs to another sampling owner, which
-# targets still need one and what an uninstall puts back. The metering shell (`metering.py`)
+# read: whether a callable is a recorder, whether it belongs to another sampling owner, what
+# stripping the recorders leaves and what an uninstall puts back. The metering shell (`metering.py`)
 # walks the live namespace and writes the recorders; these functions only choose, so the
 # identity rule that tells a recorder from a wrapper that copied its attributes is tested as
 # values.
@@ -37,12 +37,6 @@ def strip_recorders(current: Callable[..., object]) -> Callable[..., object]:
     while is_recorder(current):
         current = vars(current)["__wrapped__"]
     return current
-
-
-# meiva:note
-# Whether a routine found at a target still needs a recorder: it exists and is not one already.
-def needs_recorder(current: object) -> bool:
-    return current is not None and not is_recorder(current)
 
 
 # meiva:note

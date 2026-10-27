@@ -14,7 +14,6 @@ from meiva.sdk_surface.pure.plans.metering.recorder_plan import (
     SAMPLING_MARK,
     foreign_recorder,
     is_recorder,
-    needs_recorder,
     restore_target,
     strip_recorders,
 )
@@ -80,12 +79,6 @@ def test_every_recorder_layer_is_stripped_down_to_the_base_callable() -> None:
 def test_stripping_stops_at_a_plugin_wrapper_over_a_recorder() -> None:
     wrapper = _plugin_wrapper_over(_recorder_over(_base, "owner"))
     assert strip_recorders(wrapper) is wrapper
-
-
-def test_a_target_needs_a_recorder_when_it_exists_and_has_none() -> None:
-    assert needs_recorder(_base)
-    assert not needs_recorder(None)
-    assert not needs_recorder(_recorder_over(_base, "owner"))
 
 
 def test_an_uninstall_restores_what_a_recorder_wraps_and_leaves_the_rest_alone() -> None:

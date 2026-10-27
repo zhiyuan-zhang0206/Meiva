@@ -201,9 +201,8 @@ def apply_wrap(
 ) -> WrapAdded:
     parent, attr = _locate(target, root)
     current = _target_member(parent, attr, target)
-    refusal = uncallable_message(target, current)
-    if refusal is not None:
-        raise WrapTargetError(refusal)
+    if not callable(current):
+        raise WrapTargetError(uncallable_message(target, current))
     current = strip_recorders(current)
 
     @contextmanager

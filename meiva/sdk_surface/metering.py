@@ -55,7 +55,7 @@ from meiva.sdk_surface.pure.plans.metering.recorder_plan import (
     RECORDER_MARK,
     SAMPLING_MARK,
     foreign_recorder,
-    needs_recorder,
+    is_recorder,
     restore_target,
 )
 
@@ -270,12 +270,12 @@ def install(
     wrapped: list[tuple[object, str]] = []
     for parent, attr, fq in surface.routines:
         current = getattr(parent, attr, None)
-        if not needs_recorder(current):
+        if current is None or is_recorder(current):
             continue
         setattr(parent, attr, make_recorder(current, fq, sampling, clients))
         wrapped.append((parent, attr))
 
-    if funnel_mod is not None and callable(funnel) and needs_recorder(funnel):
+    if funnel_mod is not None and callable(funnel) and not is_recorder(funnel):
         setattr(funnel_mod, _MCP_CALL_FUNNEL, make_mcp_recorder(funnel, sampling, clients))
         wrapped.append((funnel_mod, _MCP_CALL_FUNNEL))
     return tuple(wrapped)

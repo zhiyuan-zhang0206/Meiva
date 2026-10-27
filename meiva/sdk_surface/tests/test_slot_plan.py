@@ -159,7 +159,9 @@ def test_an_overlay_replaces_the_configs_with_a_read_only_view() -> None:
     current = _installation()
     configs = {"demo": _Config(marker="agent")}
     after = overlaid(current, configs)
-    assert after.configs["demo"].marker == "agent"
+    config = after.configs["demo"]
+    assert isinstance(config, _Config)
+    assert config.marker == "agent"
     assert after.sampling is current.sampling
     view: Any = after.configs
     with pytest.raises(TypeError):

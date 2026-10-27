@@ -127,11 +127,6 @@ def test_identity_falls_back_to_the_wrapper_and_then_to_a_default_name() -> None
     assert (anonymous.name, anonymous.qualname) == ("wrapped", "wrapped")
 
 
-def test_a_callable_target_is_not_refused() -> None:
-    assert uncallable_message("files.read", _read) is None
-    assert uncallable_message("understand", len) is None
-
-
 def test_a_target_that_is_not_callable_is_refused_by_name_and_type() -> None:
     assert uncallable_message("shell.CONSTANT", 3) == (
         "meiva.shell.CONSTANT is int, not callable — wrap targets are functions."
