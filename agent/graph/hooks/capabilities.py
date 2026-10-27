@@ -116,12 +116,14 @@ class _NewlyInstalledSkillsHook(Hook):
         # compaction is the sibling that matters, and merging with it is NOT
         # safe — hence the defer above, which is why control only reaches here on
         # a turn that keeps its history.
+        now = runtime.context.require_clock().now()
         return {
             "messages": [
                 system_note_message(
                     content=new_skills_note_text(drift.added),
                     tag=NoteTag.NEW_SKILLS,
-                    created_at=runtime.context.require_clock().now(),
+                    picked_up_at=now,
+                    created_at=now,
                 )
             ],
             "capabilities": CapabilitiesState(indexed=drift.identifiers),

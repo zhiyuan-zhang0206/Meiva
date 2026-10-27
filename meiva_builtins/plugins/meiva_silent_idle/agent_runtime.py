@@ -64,12 +64,14 @@ class _SilentIdleContinueHook(Hook):
             )
             return None
 
+        now = runtime.context.require_clock().now()
         return {
             "messages": [
                 system_note_message(
                     content=_NUDGE,
                     tag=NoteTag.SILENT_IDLE_CONTINUE,
-                    created_at=runtime.context.require_clock().now(),
+                    picked_up_at=now,
+                    created_at=now,
                 )
             ]
         }

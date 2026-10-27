@@ -92,6 +92,7 @@ class _ToUserLimitHook(Hook):
             and OVER_LIMIT in reminded
         ):
             return cleared
+        now = runtime.context.require_clock().now()
         return {
             **handle.delta(
                 {
@@ -104,7 +105,8 @@ class _ToUserLimitHook(Hook):
                 system_note_message(
                     content=_reminder_text(count, limit),
                     tag=NoteTag.TO_USER_SOFT_LIMIT,
-                    created_at=runtime.context.require_clock().now(),
+                    picked_up_at=now,
+                    created_at=now,
                 )
             ],
         }

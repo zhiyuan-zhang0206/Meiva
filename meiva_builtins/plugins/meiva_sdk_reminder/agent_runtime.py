@@ -192,11 +192,13 @@ class _SdkReminderAfterExecHook(Hook):
             # the cell's own stdout; a system_note reads as a framework aside, the
             # same surface the agent_reply / compact-reminder notes use. The
             # exec-output message keeps carrying only the agent's real output.
+            now = runtime.context.require_clock().now()
             update["messages"] = [
                 system_note_message(
                     content=hints,
                     tag=NoteTag.SDK_HINT,
-                    created_at=runtime.context.require_clock().now(),
+                    picked_up_at=now,
+                    created_at=now,
                 )
             ]
         return update
@@ -205,7 +207,9 @@ class _SdkReminderAfterExecHook(Hook):
 # meiva:note
 # The system-styled note pointing at `meiva.agents.send_message`, stamped `now`.
 def _agent_reply_note(now: datetime) -> HumanMessage:
-    return system_note_message(content=AGENT_REPLY_HINT, tag=NoteTag.AGENT_REPLY, created_at=now)
+    return system_note_message(
+        content=AGENT_REPLY_HINT, tag=NoteTag.AGENT_REPLY, picked_up_at=now, created_at=now
+    )
 
 
 class _SdkReminderAgentReplyHook(Hook):

@@ -23,6 +23,9 @@ from gateway.tests.history.test_timeline import (
     test_client as test_client,
 )
 
+_PICKED_UP_AT = datetime(2026, 1, 1, tzinfo=UTC)
+
+
 _TIMELINE_INPUTS = TimestampPolicy.from_clock(
     Clock.from_settings(), timestamps_enabled=settings.general.message_timestamps
 )
@@ -309,7 +312,7 @@ class TestTimelineDispatch:
         """
         from langchain_core.messages import AIMessage, ToolMessage
 
-        from agent.messages import inbound_message
+        from agent.messages import InboundTimes, inbound_message
 
         tid = create_agent(db_conn)
         # Real inbound rows as ts anchor (the timeline endpoint uses inbound_messages
@@ -326,7 +329,11 @@ class TestTimelineDispatch:
         # one-to-one with enumeration position
         messages = [
             inbound_message(
-                content="envelope:msg 1", source="user", inbound_id=1, body_start=0
+                content="envelope:msg 1",
+                source="user",
+                inbound_id=1,
+                body_start=0,
+                times=InboundTimes(arrived_at=None, picked_up_at=_PICKED_UP_AT),
             ),  # 0
             AIMessage(  # 1
                 content=[
@@ -350,7 +357,11 @@ class TestTimelineDispatch:
                 additional_kwargs={"meiva_msg_type": "exec_output"},
             ),
             inbound_message(
-                content="envelope:msg 2", source="user", inbound_id=2, body_start=0
+                content="envelope:msg 2",
+                source="user",
+                inbound_id=2,
+                body_start=0,
+                times=InboundTimes(arrived_at=None, picked_up_at=_PICKED_UP_AT),
             ),  # 3
             AIMessage(  # 4
                 content=[
@@ -415,7 +426,7 @@ class TestTimelineDispatch:
         """
         from langchain_core.messages import AIMessage
 
-        from agent.messages import NoteTag, inbound_message, system_note_message
+        from agent.messages import InboundTimes, NoteTag, inbound_message, system_note_message
 
         tid = create_agent(db_conn)
 
@@ -425,10 +436,17 @@ class TestTimelineDispatch:
         db_conn.commit()
 
         messages = [
-            inbound_message(content="before", source="user", inbound_id=1, body_start=0),  # 0
+            inbound_message(
+                content="before",
+                source="user",
+                inbound_id=1,
+                body_start=0,
+                times=InboundTimes(arrived_at=None, picked_up_at=_PICKED_UP_AT),
+            ),  # 0
             system_note_message(  # 1 — system_note branch (lifecycle tag)
                 content="<system_note>\nYou have been restarted\n</system_note>",
                 tag=NoteTag.LIFECYCLE_RESTART,
+                picked_up_at=_PICKED_UP_AT,
             ),
             AIMessage(content="after restart, hello"),  # 2 — must render
         ]
@@ -463,7 +481,7 @@ class TestTimelineDispatch:
         build_timeline_items unit."""
         from langchain_core.messages import AIMessage, SystemMessage
 
-        from agent.messages import inbound_message
+        from agent.messages import InboundTimes, inbound_message
 
         tid = create_agent(db_conn)
         insert_inbound_message(
@@ -473,7 +491,13 @@ class TestTimelineDispatch:
 
         messages = [
             SystemMessage(content="You are Meiva."),  # 0
-            inbound_message(content="envelope:hi", source="user", inbound_id=1, body_start=0),  # 1
+            inbound_message(
+                content="envelope:hi",
+                source="user",
+                inbound_id=1,
+                body_start=0,
+                times=InboundTimes(arrived_at=None, picked_up_at=_PICKED_UP_AT),
+            ),  # 1
             AIMessage(content="hello back"),  # 2
         ]
         self._put_checkpoint(tid, messages)  # pyright: ignore[reportUnknownMemberType]

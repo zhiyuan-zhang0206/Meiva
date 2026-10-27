@@ -8,6 +8,7 @@
 # real install registry in a per-test unit home.
 from __future__ import annotations
 
+from datetime import UTC, datetime
 from pathlib import Path
 
 import pytest
@@ -31,6 +32,8 @@ from base.packages.extensions.install_registry import InstalledPackage
 from base.packages.skills.tree import Skill, identifier
 from base.paths import meiva_home, skills_dir
 from meiva.sdk_surface.tests.context_home import context_over_unit_home as context_over_unit_home
+
+_PICKED_UP_AT = datetime(2026, 1, 1, tzinfo=UTC)
 
 
 def test_resolve_by_bare_name(tmp_path: Path) -> None:
@@ -127,14 +130,21 @@ def _skills(root: Path, wanted: list[str]) -> tuple[Skill, ...]:
 def test_note_none_when_nothing_resolves(tmp_path: Path) -> None:
     write_skill(tmp_path, "real", "real", "r")
 
-    assert preloaded_note(_skills(tmp_path, ["ghost"]), harness=Harness.MEIVA) is None
+    assert (
+        preloaded_note(
+            _skills(tmp_path, ["ghost"]), harness=Harness.MEIVA, created_at=_PICKED_UP_AT
+        )
+        is None
+    )
 
 
 def test_note_carries_full_body_and_tag(tmp_path: Path) -> None:
     body = "# Ultra speed\n\nDo the fast thing. Never dawdle."
     write_skill(tmp_path, "ultra_speed", "ultra_speed", "go fast", body=body)
 
-    note = preloaded_note(_skills(tmp_path, ["ultra_speed"]), harness=Harness.MEIVA)
+    note = preloaded_note(
+        _skills(tmp_path, ["ultra_speed"]), harness=Harness.MEIVA, created_at=_PICKED_UP_AT
+    )
 
     assert note is not None
     assert isinstance(note.content, str)  # pyright: ignore[reportUnknownMemberType]
@@ -152,7 +162,9 @@ def test_note_merges_multiple_skills_in_order(tmp_path: Path) -> None:
     write_skill(tmp_path, "first", "first", "1", body="AAA body")
     write_skill(tmp_path, "second", "second", "2", body="BBB body")
 
-    note = preloaded_note(_skills(tmp_path, ["second", "first"]), harness=Harness.MEIVA)
+    note = preloaded_note(
+        _skills(tmp_path, ["second", "first"]), harness=Harness.MEIVA, created_at=_PICKED_UP_AT
+    )
 
     assert note is not None
     assert isinstance(note.content, str)  # pyright: ignore[reportUnknownMemberType]
@@ -174,7 +186,11 @@ def test_note_heading_uses_dotted_access_path(tmp_path: Path) -> None:
         body="consolidation playbook",
     )
 
-    note = preloaded_note(_skills(tmp_path, ["meiva_memory.consolidation"]), harness=Harness.MEIVA)
+    note = preloaded_note(
+        _skills(tmp_path, ["meiva_memory.consolidation"]),
+        harness=Harness.MEIVA,
+        created_at=_PICKED_UP_AT,
+    )
 
     assert note is not None
     assert isinstance(note.content, str)  # pyright: ignore[reportUnknownMemberType]
@@ -185,7 +201,9 @@ def test_note_heading_uses_dotted_access_path(tmp_path: Path) -> None:
 def test_note_for_an_external_harness_points_at_its_native_file_tool(tmp_path: Path) -> None:
     write_skill(tmp_path, "ultra_speed", "ultra_speed", "go fast", body="body")
 
-    note = preloaded_note(_skills(tmp_path, ["ultra_speed"]), harness=Harness.CLAUDE_CODE)
+    note = preloaded_note(
+        _skills(tmp_path, ["ultra_speed"]), harness=Harness.CLAUDE_CODE, created_at=_PICKED_UP_AT
+    )
 
     assert note is not None
     text = _text(note)
@@ -199,7 +217,7 @@ def test_note_skips_a_skill_whose_body_cannot_be_read(tmp_path: Path) -> None:
     skills = _skills(tmp_path, ["gone", "kept"])
     (tmp_path / "gone" / "SKILL.md").unlink()
 
-    note = preloaded_note(skills, harness=Harness.MEIVA)
+    note = preloaded_note(skills, harness=Harness.MEIVA, created_at=_PICKED_UP_AT)
 
     assert note is not None
     text = _text(note)
@@ -263,7 +281,7 @@ def test_no_note_without_configured_skills() -> None:
 def test_fork_tail_note_grafts_the_named_installed_skills() -> None:
     _install_skill("extra", "the extra skill", "EXTRA body")
 
-    note = fork_tail_skills_note(["extra"], [], home=meiva_home())
+    note = fork_tail_skills_note(["extra"], [], home=meiva_home(), created_at=_PICKED_UP_AT)
 
     assert note is not None
     text = _text(note)
@@ -276,4 +294,7 @@ def test_fork_tail_note_grafts_the_named_installed_skills() -> None:
 def test_fork_tail_note_is_empty_when_the_skills_surface_is_disabled() -> None:
     _install_skill("extra", "the extra skill", "EXTRA body")
 
-    assert fork_tail_skills_note(["extra"], ["skills"], home=meiva_home()) is None
+    assert (
+        fork_tail_skills_note(["extra"], ["skills"], home=meiva_home(), created_at=_PICKED_UP_AT)
+        is None
+    )

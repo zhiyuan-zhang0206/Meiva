@@ -14,6 +14,9 @@ from gateway.tests.history.test_timeline import (
     test_client as test_client,
 )
 
+_PICKED_UP_AT = datetime(2026, 1, 1, tzinfo=UTC)
+
+
 _TIMELINE_INPUTS = TimestampPolicy.from_clock(
     Clock.from_settings(), timestamps_enabled=settings.general.message_timestamps
 )
@@ -175,7 +178,11 @@ class TestAiMessageItems:
     def test_system_note_renders_as_system_marker(self):
         from agent.messages import NoteTag, system_note_message
 
-        msg = system_note_message(content="use meiva.agents.send_message", tag=NoteTag.AGENT_REPLY)
+        msg = system_note_message(
+            content="use meiva.agents.send_message",
+            tag=NoteTag.AGENT_REPLY,
+            picked_up_at=_PICKED_UP_AT,
+        )
         items, _ = build_timeline_items([msg], inputs=_TIMELINE_INPUTS)
         assert len(items) == 1
         assert items[0].kind == "system_marker"
@@ -223,12 +230,14 @@ class TestAiMessageItems:
 
         for tag in shown:
             items, _ = build_timeline_items(
-                [system_note_message(content="x", tag=tag)], inputs=_TIMELINE_INPUTS
+                [system_note_message(content="x", tag=tag, picked_up_at=_PICKED_UP_AT)],
+                inputs=_TIMELINE_INPUTS,
             )
             assert items[0].show_timestamp is True, tag
         for tag in hidden:
             items, _ = build_timeline_items(
-                [system_note_message(content="x", tag=tag)], inputs=_TIMELINE_INPUTS
+                [system_note_message(content="x", tag=tag, picked_up_at=_PICKED_UP_AT)],
+                inputs=_TIMELINE_INPUTS,
             )
             assert items[0].show_timestamp is False, tag
 

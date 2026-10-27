@@ -9,15 +9,23 @@ from datetime import UTC, datetime
 import pytest
 from langgraph.checkpoint.serde.jsonplus import JsonPlusSerializer
 
-from agent.messages import exec_output_message, inbound_message, system_note_message
+from agent.messages import InboundTimes, exec_output_message, inbound_message, system_note_message
 from base.agents.messages.kwargs import ExecStatus, MeivaMsgType, NoteTag, read_meiva_kwargs
+
+_PICKED_UP_AT = datetime(2026, 1, 1, tzinfo=UTC)
 
 
 def test_stored_discriminator_is_plain_str() -> None:
     """Constructors store `meiva_msg_type` / `meiva_note_tag` as plain `str`, never
     the StrEnum member — the serialization-safety invariant."""
-    inbound = inbound_message(content="hi", source="user", inbound_id=1, body_start=0)
-    note = system_note_message(content="n", tag=NoteTag.MEMORY)
+    inbound = inbound_message(
+        content="hi",
+        source="user",
+        inbound_id=1,
+        body_start=0,
+        times=InboundTimes(arrived_at=None, picked_up_at=_PICKED_UP_AT),
+    )
+    note = system_note_message(content="n", tag=NoteTag.MEMORY, picked_up_at=_PICKED_UP_AT)
     exec_out = exec_output_message(
         content="ok",
         tool_call_id="t1",
@@ -38,7 +46,7 @@ def test_checkpoint_roundtrip_no_custom_type() -> None:
     """A tagged message round-trips through the LangGraph checkpoint serializer
     with the discriminator staying a plain `str` (no Enum custom-type path)."""
     serde = JsonPlusSerializer()
-    note = system_note_message(content="n", tag=NoteTag.SECURITY)
+    note = system_note_message(content="n", tag=NoteTag.SECURITY, picked_up_at=_PICKED_UP_AT)
     restored = serde.loads_typed(serde.dumps_typed(note))
     tag = restored.additional_kwargs["meiva_note_tag"]
     assert type(tag) is str
@@ -113,7 +121,11 @@ def test_exec_output_records_status_start_and_body_offset() -> None:
 
 def test_inbound_records_where_its_content_begins() -> None:
     msg = inbound_message(
-        content="Agent 5 [t]:\n\nhi", source="agent:5", inbound_id=1, body_start=14
+        content="Agent 5 [t]:\n\nhi",
+        source="agent:5",
+        inbound_id=1,
+        body_start=14,
+        times=InboundTimes(arrived_at=None, picked_up_at=_PICKED_UP_AT),
     )
     kwargs = read_meiva_kwargs(msg)
     assert msg.text[kwargs.get("meiva_inbound_body_start", -1) :] == "hi"
@@ -125,7 +137,9 @@ def test_inbound_without_a_queue_row_carries_no_inbound_id_and_keeps_its_message
         source="codex",
         inbound_id=None,
         body_start=0,
-        created_at=datetime(2026, 10, 13, tzinfo=UTC),
+        times=InboundTimes(
+            arrived_at=datetime(2026, 10, 13, tzinfo=UTC), picked_up_at=_PICKED_UP_AT
+        ),
     )
     kwargs = read_meiva_kwargs(msg)
     assert "meiva_inbound_id" not in kwargs

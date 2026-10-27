@@ -22,7 +22,7 @@ from langchain_core.messages import (
 from langchain_core.outputs import ChatGeneration, ChatResult
 
 from agent.graph.llm_errors import LlmLedger
-from agent.messages import inbound_message, tail_has_agent_inbound
+from agent.messages import InboundTimes, inbound_message, tail_has_agent_inbound
 from agent.state import CompactState
 from base.agents.messages.kwargs import ExecStatus
 from base.db.code_version_gate import ProcessDbGate
@@ -43,6 +43,8 @@ from meiva_builtins.plugins.tests.test_meiva_sdk_reminder_plugin import (
 from meiva_builtins.plugins.tests.test_meiva_sdk_reminder_plugin import (
     reminder_plugin_loaded as reminder_plugin_loaded,
 )
+
+_PICKED_UP_AT = datetime(2026, 1, 1, tzinfo=UTC)
 
 
 # meiva:note
@@ -97,7 +99,13 @@ async def test_agent_reply_user_inbound_is_noop(reminder_plugin_loaded: Any):
     state = make_state(
         [
             AIMessage(content="prev", id="a0"),
-            inbound_message(content="hi", source="user", inbound_id=2, body_start=0),
+            inbound_message(
+                content="hi",
+                source="user",
+                inbound_id=2,
+                body_start=0,
+                times=InboundTimes(arrived_at=None, picked_up_at=_PICKED_UP_AT),
+            ),
         ]
     )
     result = await hook(state, make_runtime(), make_config())
@@ -179,7 +187,13 @@ async def test_agent_reply_every_time_user_inbound_is_noop(reminder_plugin_loade
     state = make_state(
         [
             AIMessage(content="prev", id="a0"),
-            inbound_message(content="hi", source="user", inbound_id=2, body_start=0),
+            inbound_message(
+                content="hi",
+                source="user",
+                inbound_id=2,
+                body_start=0,
+                times=InboundTimes(arrived_at=None, picked_up_at=_PICKED_UP_AT),
+            ),
         ]
     )
     assert await hook(state, runtime, make_config()) is None
@@ -398,7 +412,13 @@ def test_tail_has_agent_inbound_first_turn_agent_only_true():
 def test_tail_has_agent_inbound_user_only_no_ai_false():
     """Only a user inbound, no AIMessage -> False."""
     msgs: list[AnyMessage] = [
-        inbound_message(content="hi", source="user", inbound_id=2, body_start=0)
+        inbound_message(
+            content="hi",
+            source="user",
+            inbound_id=2,
+            body_start=0,
+            times=InboundTimes(arrived_at=None, picked_up_at=_PICKED_UP_AT),
+        )
     ]
     assert tail_has_agent_inbound(msgs) is False
 
