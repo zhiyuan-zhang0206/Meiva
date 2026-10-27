@@ -134,7 +134,9 @@ async def test_request_preserves_unknown_delivery_error(fail_stage: str) -> None
 
 
 # meiva:note
-# The ReconnectingSocketLink cases below: reconnect on transport errors.
+# The ReconnectingSocketLink cases below: reconnect on transport errors. Each replaces
+# `_connect_once`, so `_SOCK` is never dialed.
+_SOCK = "/nonexistent-wrapper-test.sock"
 
 
 @pytest.mark.usefixtures("retry_waits")
@@ -154,7 +156,7 @@ async def test_reconnecting_link_redials_on_connection_error() -> None:
             agent_id=None,
         )
 
-    rl = ReconnectingSocketLink(timeout_reader=lambda: 1.0, agent_id=None)
+    rl = ReconnectingSocketLink(sock=_SOCK, timeout_reader=lambda: 1.0, agent_id=None)
     rl._connect_once = _connect_once  # type: ignore[method-assign]
     assert await rl.request({"method": "ping"}) == "ok"
     assert attempts == 2
@@ -181,7 +183,7 @@ async def test_reconnecting_link_never_retries_delivered_call() -> None:
         )
         return Link(reader, writer, timeout_reader=lambda: 1.0, agent_id=None)  # type: ignore[arg-type]
 
-    rl = ReconnectingSocketLink(timeout_reader=lambda: 1.0, agent_id=None)
+    rl = ReconnectingSocketLink(sock=_SOCK, timeout_reader=lambda: 1.0, agent_id=None)
     rl._connect_once = _connect_once  # type: ignore[method-assign]
     with pytest.raises(ConnectionError):
         await rl.request({"method": "call_tool", "tool": "click", "args": {}})
@@ -211,7 +213,7 @@ async def test_reconnecting_link_does_not_retry_write_or_drain_failure(fail_stag
             agent_id=None,
         )
 
-    rl = ReconnectingSocketLink(timeout_reader=lambda: 1.0, agent_id=None)
+    rl = ReconnectingSocketLink(sock=_SOCK, timeout_reader=lambda: 1.0, agent_id=None)
     rl._connect_once = _connect_once  # type: ignore[method-assign]
     with pytest.raises(BrokenPipeError, match="socket broke"):
         await rl.request({"method": "call_tool", "tool": "type", "args": {}})
@@ -241,7 +243,7 @@ async def test_reconnecting_link_does_not_retry_bad_response(
         attempts += 1
         return Link(FakeReader([line]), writer, timeout_reader=lambda: 1.0, agent_id=None)  # type: ignore[arg-type]
 
-    rl = ReconnectingSocketLink(timeout_reader=lambda: 1.0, agent_id=None)
+    rl = ReconnectingSocketLink(sock=_SOCK, timeout_reader=lambda: 1.0, agent_id=None)
     rl._connect_once = _connect_once  # type: ignore[method-assign]
     with pytest.raises(error):
         await rl.request({"method": "call_tool", "tool": "click", "args": {}})
@@ -259,7 +261,7 @@ async def test_reconnecting_link_times_out_without_retry(monkeypatch: pytest.Mon
         attempts += 1
         return Link(HangingReader([]), writer, timeout_reader=lambda: 0.01, agent_id=None)  # type: ignore[arg-type]
 
-    rl = ReconnectingSocketLink(timeout_reader=lambda: 0.01, agent_id=None)
+    rl = ReconnectingSocketLink(sock=_SOCK, timeout_reader=lambda: 0.01, agent_id=None)
     rl._connect_once = _connect_once  # type: ignore[method-assign]
     with pytest.raises(TimeoutError):
         await asyncio.wait_for(
