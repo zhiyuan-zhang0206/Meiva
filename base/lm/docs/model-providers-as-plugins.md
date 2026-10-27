@@ -108,7 +108,7 @@ models are installed into parallel catalog tables and are unreachable from any c
 
 ## Provider contract
 
-A `provider.py` declares one `ProviderContribution(binding, models, pricing)` (returned from `contribute()`) and each catalog construction installs it into its own builder:
+A `provider.py` declares one `ProviderContribution(binding, models, pricing)` (returned from `contribute()`) and each catalog construction installs it into its own builder. The literals may live in sibling modules of the same package — `models=MODELS`, `pricing=PRICES`, `with_fast_variants(PROVIDER, FAST_PRICES)` — so a provider whose model list outgrows one file spreads it without changing what it declares; the pricing gate reads the whole package and resolves such names inside it. Each declaration is:
 
 - `ProviderBinding` declares the dispatch prefix, display name, `.env` key,
   builder, provider-wide effort ladder, vision fallback, optional attachment

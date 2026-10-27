@@ -1,5 +1,5 @@
 # meiva:note
-# Which declarations one ``provider.py`` contributes, and how a broken one surfaces. A
+# Which declarations one provider package contributes, and how a broken one surfaces. A
 # decision provider's prices are billed from the same ``PriceBook`` as chat prices, so a
 # declaration the parser skips would keep stale rates silently; a declaration it cannot read
 # must stop the whole pass and write nothing.
@@ -14,7 +14,7 @@ import pytest
 
 from scripts.model_registry import plugin_price_sync as sync
 from scripts.model_registry import update_model_pricing as pricing_updater
-from scripts.model_registry.plugin_price_source import provider_manifest
+from scripts.model_registry.plugin_price_source import provider_manifest, unit_manifest
 
 _URL = "https://example.com/decisions"
 
@@ -97,6 +97,67 @@ DECISION_PROVIDER = DecisionProviderContribution(
 """
 
 
+_SPLIT_FACE = """from base.lm.provider_api import ProviderContribution, with_fast_variants
+from meiva_builtins.plugins.lm_split.models import MODELS
+from meiva_builtins.plugins.lm_split.prices import FAST_PRICES, PRICES
+
+
+def build(ctx):
+    raise NotImplementedError
+
+
+PROVIDER = ProviderContribution(binding=None, models=MODELS, pricing=PRICES)
+
+
+def contribute():
+    return with_fast_variants(PROVIDER, FAST_PRICES)
+"""
+
+_SPLIT_MODELS = """MODELS = {"split-chat": None, "split-fast-base": None}
+"""
+
+_SPLIT_PRICES = """from base.lm.provider_api import PriceRates
+
+PRICES = {
+    "split-chat": PriceRates(
+        cache_miss=1.0, cache_hit=0.1, output=3.0,
+        source_url="https://example.com/decisions",
+        source_checked_at="2026-10-11", vendor="typesafe",
+    ),
+    "split-fast-base": PriceRates(
+        cache_miss=2.0, cache_hit=0.2, output=6.0,
+        source_url="https://example.com/decisions",
+        source_checked_at="2026-10-11", vendor="typesafe",
+    ),
+}
+
+FAST_PRICES = {
+    "split-fast-base": PriceRates(
+        cache_miss=3.0, cache_hit=0.3, output=9.0,
+        source_url="https://example.com/decisions",
+        source_checked_at="2026-10-11", vendor="typesafe",
+    ),
+}
+"""
+
+
+_OTHER_PLUGIN = """from base.lm.provider_api import PriceRates, ProviderContribution
+
+
+PROVIDER = ProviderContribution(
+    binding=None,
+    models={"other-chat": None},
+    pricing={
+        "other-chat": PriceRates(
+            cache_miss=1.0, cache_hit=0.1, output=3.0,
+            source_url="https://example.com/decisions",
+            source_checked_at="2026-10-11", vendor="typesafe",
+        ),
+    },
+)
+"""
+
+
 def _entry(rates: tuple[str, str, str], *, checked_at: str = "2026-10-11") -> dict[str, Any]:
     return {
         "vendor": "typesafe",
@@ -123,13 +184,13 @@ def _entry(rates: tuple[str, str, str], *, checked_at: str = "2026-10-11") -> di
     }
 
 
-def _repo(
-    tmp_path: Path, sources: dict[str, str], models: dict[str, dict[str, Any]]
+def _write_repo(
+    tmp_path: Path, files: dict[str, str], models: dict[str, dict[str, Any]]
 ) -> tuple[Path, Path]:
     root = tmp_path / "repo"
-    for plugin, source in sources.items():
-        path = root / f"meiva_builtins/plugins/{plugin}/provider.py"
-        path.parent.mkdir(parents=True)
+    for relative, source in files.items():
+        path = root / relative
+        path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(source, encoding="utf-8")
     archive = root / "base/lm/pricing/pricing_catalog_archive.json"
     archive.parent.mkdir(parents=True)
@@ -146,6 +207,19 @@ def _repo(
         encoding="utf-8",
     )
     return root, archive
+
+
+def _repo(
+    tmp_path: Path, sources: dict[str, str], models: dict[str, dict[str, Any]]
+) -> tuple[Path, Path]:
+    return _write_repo(
+        tmp_path,
+        {
+            f"meiva_builtins/plugins/{plugin}/provider.py": source
+            for plugin, source in sources.items()
+        },
+        models,
+    )
 
 
 def test_a_decision_provider_contribution_is_synchronized(
@@ -250,3 +324,75 @@ def test_a_lattice_the_module_does_not_import_is_refused(tmp_path: Path) -> None
 
     with pytest.raises(RuntimeError, match="does not import from the provider contract"):
         pricing_updater.sync_plugin_rates(archive, root)
+
+
+# meiva:note
+# A provider's declarations may span sibling modules of its package: the face names the models,
+# the prices and the Fast rows another module assigns. The unit reads all of them, and a
+# synchronization writes the drifted rows into the file that holds them.
+def test_a_declaration_split_across_sibling_modules_is_synchronized(tmp_path: Path) -> None:
+    root, archive = _write_repo(
+        tmp_path,
+        {
+            "meiva_builtins/plugins/lm_split/provider.py": _SPLIT_FACE,
+            "meiva_builtins/plugins/lm_split/models.py": _SPLIT_MODELS,
+            "meiva_builtins/plugins/lm_split/prices.py": _SPLIT_PRICES,
+        },
+        {
+            "split-chat": _entry(("2.0", "0.2", "6.0"), checked_at="2026-10-20"),
+            "split-fast-base": _entry(("4.0", "0.4", "12.0"), checked_at="2026-10-20"),
+            "split-fast-base-fast": _entry(("5.0", "0.5", "15.0"), checked_at="2026-10-20"),
+        },
+    )
+    package = root / "meiva_builtins/plugins/lm_split"
+    face = (package / "provider.py").read_text(encoding="utf-8")
+
+    result = pricing_updater.sync_plugin_rates(archive, root)
+
+    assert result.drifted_models == ("split-chat", "split-fast-base", "split-fast-base-fast")
+    assert tuple(path.name for path in result.changed_files) == ("prices.py",)
+    assert (package / "provider.py").read_text(encoding="utf-8") == face
+    unit = unit_manifest(
+        {path: path.read_text(encoding="utf-8") for path in sorted(package.glob("*.py"))}
+    )
+    assert unit.models == frozenset({"split-chat", "split-fast-base", "split-fast-base-fast"})
+    assert unit.prices["split-fast-base-fast"].rates == sync.FlatRates(
+        Decimal("5.0"), Decimal("0.5"), Decimal("15.0")
+    )
+
+
+# meiva:note
+# Resolution stays inside one package: a face that imports its price table from another
+# provider's module fails the literal check instead of reading a table this unit does not own.
+# That boundary is what makes reading a whole package safe, so it is asserted as a refusal.
+def test_a_declaration_named_from_another_package_is_refused(tmp_path: Path) -> None:
+    face = _SPLIT_FACE.replace(
+        "from meiva_builtins.plugins.lm_split.prices import FAST_PRICES, PRICES",
+        "from meiva_builtins.plugins.lm_other.prices import FAST_PRICES, PRICES",
+    )
+    root, archive = _write_repo(
+        tmp_path,
+        {
+            "meiva_builtins/plugins/lm_split/provider.py": face,
+            "meiva_builtins/plugins/lm_split/models.py": _SPLIT_MODELS,
+            "meiva_builtins/plugins/lm_other/provider.py": _OTHER_PLUGIN,
+            "meiva_builtins/plugins/lm_other/prices.py": _SPLIT_PRICES,
+        },
+        {
+            "split-chat": _entry(("2.0", "0.2", "6.0"), checked_at="2026-10-20"),
+            "split-fast-base": _entry(("4.0", "0.4", "12.0"), checked_at="2026-10-20"),
+            "split-fast-base-fast": _entry(("5.0", "0.5", "15.0"), checked_at="2026-10-20"),
+            # meiva:note
+            # Drifted on purpose: a pass that reached the write step would rewrite this file.
+            "other-chat": _entry(("7.0", "0.7", "21.0"), checked_at="2026-10-20"),
+        },
+    )
+    package = root / "meiva_builtins/plugins"
+    before = {path: path.read_text(encoding="utf-8") for path in sorted(package.glob("*/**/*.py"))}
+
+    with pytest.raises(RuntimeError, match="must have one literal pricing= mapping"):
+        pricing_updater.sync_plugin_rates(archive, root)
+
+    assert {
+        path: path.read_text(encoding="utf-8") for path in sorted(package.glob("*/**/*.py"))
+    } == before

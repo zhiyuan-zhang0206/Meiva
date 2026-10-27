@@ -136,7 +136,7 @@ def test_a_flat_declaration_matching_the_archive_reports_no_drift(tmp_path: Path
         models={"fixture-chat": _entry([_tier(0, None, ("1.0", "0.1", "3.0"))])},
     )
 
-    assert lattice_drift(archive, root) == LatticeDrift(1, 1, ())
+    assert lattice_drift(archive, root) == LatticeDrift(1, 1, 1, ())
 
 
 def test_a_lattice_declaration_ignores_its_flat_summary(tmp_path: Path) -> None:
@@ -153,7 +153,7 @@ def test_a_lattice_declaration_ignores_its_flat_summary(tmp_path: Path) -> None:
         },
     )
 
-    assert lattice_drift(archive, root) == LatticeDrift(1, 1, ())
+    assert lattice_drift(archive, root) == LatticeDrift(1, 1, 1, ())
 
 
 def test_a_tier_rate_the_archive_does_not_state_names_its_period(tmp_path: Path) -> None:
@@ -247,7 +247,10 @@ def test_the_cli_prints_the_counts_it_compared(
     )
 
     assert cli.main(["--repo-root", str(root), "--catalog", str(archive)]) == 0
-    assert "1 provider file(s), 1 priced model(s), 0 drifted" in capsys.readouterr().out
+    assert (
+        "1 provider face(s) / 1 source file(s), 1 priced model(s), 0 drifted"
+        in capsys.readouterr().out
+    )
 
 
 def test_the_cli_fails_on_a_drifted_declaration(

@@ -29,7 +29,7 @@ def main(argv: list[str] | None = None) -> int:
 
     report = lattice_drift(catalog, repo_root)
     print(
-        f"{report.provider_files} provider file(s), "
+        f"{report.provider_faces} provider face(s) / {report.scanned_sources} source file(s), "
         f"{report.priced_models} priced model(s), {len(report.drifted)} drifted"
     )
     for label in report.drifted:
