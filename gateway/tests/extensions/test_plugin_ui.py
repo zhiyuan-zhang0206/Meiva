@@ -8,8 +8,8 @@ from base.packages.plugins.enable_config import write_local
 from gateway.tests.auth.gateway_config import gateway_test_client
 
 
-def _write_plugin(name: str, *, files: dict[str, str] | None = None) -> Path:
-    directory = paths.plugins_dir(home=paths.resolve_meiva_home()) / name
+def _write_plugin(home: Path, name: str, *, files: dict[str, str] | None = None) -> Path:
+    directory = paths.plugins_dir(home=home) / name
     directory.mkdir(parents=True)
     (directory / "plugin.py").write_text('"""A test plugin."""\n', encoding="utf-8")
     for rel, content in (files or {}).items():
@@ -22,8 +22,8 @@ def _write_plugin(name: str, *, files: dict[str, str] | None = None) -> Path:
 _BOARD = "<!doctype html><title>Board</title><h1>Task board</h1>"
 
 
-def test_serves_the_mount_root_index() -> None:
-    _write_plugin("board", files={"index.html": _BOARD})
+def test_serves_the_mount_root_index(unit_home: Path) -> None:
+    _write_plugin(unit_home, "board", files={"index.html": _BOARD})
     write_local({"plugins": {"board": {"enabled": True}}})
 
     with gateway_test_client() as client:
@@ -34,8 +34,8 @@ def test_serves_the_mount_root_index() -> None:
     assert r.headers["x-content-type-options"] == "nosniff"
 
 
-def test_bare_mount_redirects_to_the_trailing_slash() -> None:
-    _write_plugin("board", files={"index.html": _BOARD})
+def test_bare_mount_redirects_to_the_trailing_slash(unit_home: Path) -> None:
+    _write_plugin(unit_home, "board", files={"index.html": _BOARD})
     write_local({"plugins": {"board": {"enabled": True}}})
 
     with gateway_test_client() as client:
@@ -44,8 +44,9 @@ def test_bare_mount_redirects_to_the_trailing_slash() -> None:
     assert r.headers["location"] == "/api/plugin-ui/board/"
 
 
-def test_serves_a_subdirectory_index_and_a_nested_asset() -> None:
+def test_serves_a_subdirectory_index_and_a_nested_asset(unit_home: Path) -> None:
     _write_plugin(
+        unit_home,
         "board",
         files={"board/index.html": _BOARD, "board/app.js": "console.log(1)\n"},
     )
@@ -61,8 +62,8 @@ def test_serves_a_subdirectory_index_and_a_nested_asset() -> None:
     assert asset.headers["content-type"].startswith("text/javascript")
 
 
-def test_directory_without_a_trailing_slash_redirects() -> None:
-    _write_plugin("board", files={"board/index.html": _BOARD, "board/app.js": "1\n"})
+def test_directory_without_a_trailing_slash_redirects(unit_home: Path) -> None:
+    _write_plugin(unit_home, "board", files={"board/index.html": _BOARD, "board/app.js": "1\n"})
     write_local({"plugins": {"board": {"enabled": True}}})
 
     with gateway_test_client() as client:
@@ -71,8 +72,8 @@ def test_directory_without_a_trailing_slash_redirects() -> None:
     assert r.headers["location"] == "/api/plugin-ui/board/board/"
 
 
-def test_dash_spelled_plugin_name_reaches_the_underscore_directory() -> None:
-    _write_plugin("meiva_board", files={"index.html": _BOARD})
+def test_dash_spelled_plugin_name_reaches_the_underscore_directory(unit_home: Path) -> None:
+    _write_plugin(unit_home, "meiva_board", files={"index.html": _BOARD})
     write_local({"plugins": {"meiva_board": {"enabled": True}}})
 
     with gateway_test_client() as client:
@@ -81,8 +82,8 @@ def test_dash_spelled_plugin_name_reaches_the_underscore_directory() -> None:
 
 
 @pytest.mark.parametrize("path", ["", "index.html"])
-def test_disabled_plugin_has_no_mount(path: str) -> None:
-    _write_plugin("board", files={"index.html": _BOARD})
+def test_disabled_plugin_has_no_mount(path: str, unit_home: Path) -> None:
+    _write_plugin(unit_home, "board", files={"index.html": _BOARD})
     write_local({"plugins": {"board": {"enabled": False}}})
 
     with gateway_test_client() as client:
@@ -90,8 +91,8 @@ def test_disabled_plugin_has_no_mount(path: str) -> None:
     assert r.status_code == 404, r.text
 
 
-def test_unknown_plugin_and_a_plugin_without_pages_answer_alike() -> None:
-    _write_plugin("plain")
+def test_unknown_plugin_and_a_plugin_without_pages_answer_alike(unit_home: Path) -> None:
+    _write_plugin(unit_home, "plain")
     write_local({"plugins": {"plain": {"enabled": True}}})
 
     with gateway_test_client() as client:
@@ -104,8 +105,8 @@ def test_unknown_plugin_and_a_plugin_without_pages_answer_alike() -> None:
 
 
 @pytest.mark.parametrize("rest", ["%2e%2e/plugin.py", "board/%2e%2e/%2e%2e/plugin.py", "a\\b"])
-def test_traversal_segments_are_refused(rest: str) -> None:
-    _write_plugin("board", files={"index.html": _BOARD})
+def test_traversal_segments_are_refused(rest: str, unit_home: Path) -> None:
+    _write_plugin(unit_home, "board", files={"index.html": _BOARD})
     write_local({"plugins": {"board": {"enabled": True}}})
 
     with gateway_test_client() as client:
@@ -114,8 +115,8 @@ def test_traversal_segments_are_refused(rest: str) -> None:
     assert "invalid page path segment" in r.text
 
 
-def test_a_symlink_out_of_the_ui_dir_is_refused() -> None:
-    directory = _write_plugin("board", files={"index.html": _BOARD})
+def test_a_symlink_out_of_the_ui_dir_is_refused(unit_home: Path) -> None:
+    directory = _write_plugin(unit_home, "board", files={"index.html": _BOARD})
     secret = directory.parent.parent / "secret.txt"
     secret.write_text("cluster secret\n", encoding="utf-8")
     (directory / "ui" / "escape.txt").symlink_to(secret)
@@ -127,8 +128,8 @@ def test_a_symlink_out_of_the_ui_dir_is_refused() -> None:
     assert "cluster secret" not in r.text
 
 
-def test_missing_file_is_404() -> None:
-    _write_plugin("board", files={"index.html": _BOARD})
+def test_missing_file_is_404(unit_home: Path) -> None:
+    _write_plugin(unit_home, "board", files={"index.html": _BOARD})
     write_local({"plugins": {"board": {"enabled": True}}})
 
     with gateway_test_client() as client:
@@ -136,8 +137,8 @@ def test_missing_file_is_404() -> None:
     assert r.status_code == 404, r.text
 
 
-def test_nav_declarations_reach_the_console_attributed() -> None:
-    directory = _write_plugin("board", files={"board/index.html": _BOARD})
+def test_nav_declarations_reach_the_console_attributed(unit_home: Path) -> None:
+    directory = _write_plugin(unit_home, "board", files={"board/index.html": _BOARD})
     (directory / "meiva-plugin.json").write_text(
         json.dumps(
             {
