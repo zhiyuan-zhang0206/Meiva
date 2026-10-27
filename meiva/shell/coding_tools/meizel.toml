@@ -16,4 +16,5 @@ exports = ["antigravity.py", "claude.py", "codex.py", "plans"]
 
 [debt.ambient-read]
 "_claude_checks.py#clock base.clock.SYSTEM_TIMERS" = 1
+"claude.py#clock time.strftime()" = 1
 "codex.py#clock base.clock.SYSTEM_TIMERS" = 1

@@ -34,6 +34,9 @@ exports = ["agent_identity.py", "attachment_transport.py", "batch.py", "discover
 "skill_sources.py" = "strict"
 "validation.py" = "strict"
 
+[debt.ambient-read]
+"attachment_transport.py#home pathlib.Path.expanduser" = 1
+
 [debt.any-collaborator]
 "settings.py#any _PluginsView.__getattr__.return" = 1
 

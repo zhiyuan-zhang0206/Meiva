@@ -29,3 +29,4 @@ exports = ["metrics.py"]
 "setup.py#home base.paths.gateway_memory_dir" = 1
 "setup.py#home base.paths.memory_dir" = 1
 "written_notes.py#home base.paths.workspace_dir" = 1
+"written_notes.py#home pathlib.Path.expanduser" = 1

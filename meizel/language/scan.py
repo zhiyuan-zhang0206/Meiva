@@ -240,7 +240,7 @@ class Scanner(AmbientAccess):
             purity=self.purity_state.items,
             enum_subsets=self.purity_state.finalize_subsets(),
             input_appends=self.input_appends,
-            ambient=self.ambient.items,
+            ambient=self.ambient.finish(),
             entropy=self.entropy_finish(),
             type_casts=self.type_casts,
             any_collaborators=self.any_collaborators,
@@ -361,7 +361,7 @@ class Scanner(AmbientAccess):
         self.observe_input_parameters(node, inner)
         inner.shadowed.update(parameter_names(args))
         self.fn_depth += 1
-        self.ambient.enter(node)
+        self.ambient.enter(node, top_level=self.fn_depth == 1 and not self.scope.is_class)
         self.qualnames.append(node.name)
         self.entropy_enter()
         self.enter(inner, node.body)
@@ -575,7 +575,7 @@ class Scanner(AmbientAccess):
                 TypeCastSite(node.lineno, node.col_offset, ".".join(self.qualnames) or "<module>")
             )
         if self.records_ambient:
-            self.ambient.called(callee, node)
+            self.ambient.called(callee, node, self.receiver_of(node))
         self.entropy_touch(callee, node)
         self.patch_forms(node, callee)
         self.spawn_call(callee, node)
@@ -589,6 +589,14 @@ class Scanner(AmbientAccess):
             self.purity_state, node, callee, self.dotted, unshadowed_open=unshadowed_open
         )
         self.children(node)
+
+    # meiva:note
+    # The dotted name of the call whose result `node` is a method of (`get_running_loop().time()`).
+    def receiver_of(self, node: ast.Call) -> str | None:
+        func = node.func
+        if isinstance(func, ast.Attribute) and isinstance(func.value, ast.Call):
+            return self.dotted(func.value.func)
+        return None
 
     def spawn_call(self, callee: str | None, node: ast.Call) -> None:
         """A call that starts a process: judge its argument list when that starts a Python interpreter."""

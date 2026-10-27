@@ -9,3 +9,4 @@ exports = ["feed.py"]
 
 [debt.ambient-read]
 "feed.py#home base.paths.home.resolve_meiva_home" = 1
+"feed.py#home pathlib.Path.expanduser" = 1

@@ -27,4 +27,5 @@ exports = ["bringup.py", "cluster_instance.py", "completion.py", "config.py", "h
 "maintenance_stop.py#clock base.clock.SYSTEM_TIMERS" = 1
 "maintenance_stop.py#platform base.host.system.hostport.Host.system" = 1
 "pgbouncer.py#clock base.clock.SYSTEM_TIMERS" = 1
+"pgbouncer.py#clock time.monotonic" = 1
 "stop_waits.py#clock base.clock.SYSTEM_TIMERS" = 1

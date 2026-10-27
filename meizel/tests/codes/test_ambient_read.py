@@ -131,6 +131,108 @@ def test_an_interval_clock_is_a_window_onto_the_world_only_where_the_function_sl
 @pytest.mark.parametrize(
     ("source", "expected"),
     [
+        ("import psutil\n\nx = psutil.Process()\n", [("pid", "psutil.Process()")]),
+        ("import time\n\nx = time.localtime()\n", [("clock", "time.localtime()")]),
+        ("import time\n\nx = time.gmtime()\n", [("clock", "time.gmtime()")]),
+        ("import time\n\nx = time.strftime('%H')\n", [("clock", "time.strftime()")]),
+        ("import os\n\nx = os.urandom(8)\n", [("random", "os.urandom")]),
+        ("import os\n\nx = os.getpgrp()\n", [("pid", "os.getpgrp")]),
+        ("import threading\n\nx = threading.get_ident()\n", [("pid", "threading.get_ident")]),
+        (
+            "from pathlib import Path\n\nx = Path('~/a').expanduser()\n",
+            [("home", "pathlib.Path.expanduser")],
+        ),
+        ("import os\n\nx = os.path.expanduser('~')\n", [("home", "os.path.expanduser")]),
+    ],
+)
+def test_a_call_that_reads_the_process_or_the_clock_when_given_nothing_is_an_acquisition(
+    make_repo: RepoFactory, source: str, expected: list[tuple[str, str]]
+) -> None:
+    assert acquired(make_repo, source) == expected
+
+
+@pytest.mark.parametrize(
+    "source",
+    [
+        "import psutil\n\nx = psutil.Process(7)\n",
+        "from pathlib import Path\n\nx = Path('a')\n",
+        "from pathlib import Path\n\nx = Path(*parts)\n",
+        "from pathlib import Path\n\nx = Path()\n\nwhile d != Path():\n    d = d.parent\n",
+        "import time\n\nx = time.localtime(0)\n",
+        "import time\n\nx = time.gmtime(1.5)\n",
+        "import time\n\nx = time.strftime('%H', parts)\n",
+        "def f(thing):\n    return thing.expand()\n",
+    ],
+)
+def test_the_same_calls_given_a_value_read_nothing(make_repo: RepoFactory, source: str) -> None:
+    assert acquired(make_repo, source) == []
+
+
+@pytest.mark.parametrize(
+    ("source", "expected"),
+    [
+        (
+            "import time\n\ndef _pause():\n    time.sleep(1)\n\n\ndef f():\n    _pause()\n"
+            "    return time.monotonic()\n",
+            [("clock", "time.monotonic")],
+        ),
+        (
+            "import time\n\ndef _inner():\n    time.sleep(1)\n\n\ndef _outer():\n    _inner()\n\n\n"
+            "def f():\n    _outer()\n    return time.monotonic()\n",
+            [("clock", "time.monotonic")],
+        ),
+        (
+            "import time\nfrom lib.backoff import retry_sleep\n\ndef f(n):\n    retry_sleep(n)\n"
+            "    return time.monotonic()\n",
+            [("clock", "time.monotonic")],
+        ),
+        (
+            "import time\n\nasync def f(timers):\n    await timers.asleep(1)\n    return time.monotonic()\n",
+            [("clock", "time.monotonic")],
+        ),
+        (
+            "import time\n\ndef _pause():\n    time.sleep(1)\n\n\ndef f():\n    return time.monotonic()\n",
+            [],
+        ),
+        (
+            "import time\n\ndef _monotonic():\n    return time.monotonic()\n\n\n"
+            "def wait():\n    time.sleep(1)\n    return _monotonic()\n",
+            [("clock", "_monotonic()")],
+        ),
+        (
+            "import time\n\ndef _monotonic():\n    return time.monotonic()\n\n\n"
+            "def elapsed(start):\n    return _monotonic() - start\n",
+            [],
+        ),
+        (
+            "import asyncio\n\nasync def f():\n    await asyncio.sleep(1)\n"
+            "    return asyncio.get_running_loop().time()\n",
+            [("clock", "asyncio.loop.time")],
+        ),
+        (
+            "import asyncio\n\nasync def f(loop):\n    await asyncio.sleep(1)\n    return loop.time()\n",
+            [("clock", "asyncio.loop.time")],
+        ),
+        ("import asyncio\n\nasync def f():\n    return asyncio.get_running_loop().time()\n", []),
+        (
+            "import asyncio\n\nasync def f(loop):\n    await asyncio.sleep(1)\n    return loop.time\n",
+            [],
+        ),
+        (
+            "import time\n\nasync def f(waiter):\n    await waiter(1)\n    return time.monotonic()\n",
+            [],
+        ),
+    ],
+)
+def test_a_wait_behind_a_name_a_helper_or_a_clock_wrapper_is_still_a_wait(
+    make_repo: RepoFactory, source: str, expected: list[tuple[str, str]]
+) -> None:
+    assert acquired(make_repo, source) == expected
+
+
+@pytest.mark.parametrize(
+    ("source", "expected"),
+    [
         ("from cfg import settings\n\nx = settings.a\n", [("settings", "cfg.settings")]),
         ("import cfg\n\nx = cfg.settings.a\n", [("settings", "cfg.settings")]),
         ("from cfg import get_field\n\nx = get_field('a')\n", [("settings", "cfg.get_field")]),
