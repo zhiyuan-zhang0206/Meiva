@@ -157,7 +157,7 @@ def runtime(
     )
 
 
-def test_the_built_in_loop_builds_no_bridge() -> None:
+def test_the_built_in_loop_builds_no_bridge(tmp_path: Path) -> None:
     assert (
         harness_bridge_for(
             1,
@@ -168,12 +168,13 @@ def test_the_built_in_loop_builds_no_bridge() -> None:
             machine="macmini",
             environ={},
             root=bridge_root_values(),
+            home=tmp_path,
         )
         is None
     )
 
 
-def test_an_external_runtime_without_a_registry_is_refused() -> None:
+def test_an_external_runtime_without_a_registry_is_refused(tmp_path: Path) -> None:
     try:
         harness_bridge_for(
             1,
@@ -184,6 +185,7 @@ def test_an_external_runtime_without_a_registry_is_refused() -> None:
             machine="macmini",
             environ={},
             root=bridge_root_values(),
+            home=tmp_path,
         )
     except ValueError as exc:
         assert "session registry" in str(exc)
@@ -191,7 +193,9 @@ def test_an_external_runtime_without_a_registry_is_refused() -> None:
         raise AssertionError("a bridge without a registry would resume nothing")
 
 
-def test_an_external_runtime_carries_a_scoped_bridge() -> None:
+def test_an_external_runtime_carries_a_scoped_bridge(tmp_path: Path, unit_home: Path) -> None:
+    other_home = tmp_path / "other-home"
+
     bridge = harness_bridge_for(
         1,
         Harness.CODEX,
@@ -201,9 +205,13 @@ def test_an_external_runtime_carries_a_scoped_bridge() -> None:
         machine="macmini",
         environ={},
         root=bridge_root_values(),
+        home=other_home,
     )
+
     assert bridge is not None
     assert bridge.harness is Harness.CODEX
+    assert (other_home / "workspaces" / "1").is_dir()
+    assert not (unit_home / "workspaces" / "1").exists()
 
 
 def test_eviction_returns_what_it_removed() -> None:

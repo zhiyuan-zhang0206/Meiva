@@ -40,7 +40,6 @@ from base.events.live.bus import EventBus
 from base.events.live.redis_listener import RedisInboundListener
 from base.host.env.agent_slices import AgentSlices
 from base.native_process.runtime_incarnation import RuntimeIncarnation
-from base.paths import resolve_meiva_home
 from cli.commands.agents import impersonation_relay as relay
 from cli.commands.agents.impersonation_adapters import ClaudeStdout
 from cli.commands.agents.relay.steps import RelayTuning
@@ -269,6 +268,7 @@ async def test_termination_notices_precede_resurrection_in_native_claim(
     mode: str,
     database: Database,
     event_bus: EventBus,
+    unit_home: Path,
     *,
     config_authority: ConfigAuthority,
     database_gate: ProcessDbGate,
@@ -340,7 +340,7 @@ async def test_termination_notices_precede_resurrection_in_native_claim(
             machine_identity.name(),
             rng=_rng(),
             clock=Clock.from_settings(),
-            home=resolve_meiva_home(),
+            home=unit_home,
         ),
     )
     resumed = await claim_node(
