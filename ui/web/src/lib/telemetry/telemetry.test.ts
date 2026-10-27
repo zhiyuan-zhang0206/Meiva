@@ -47,6 +47,18 @@ async function beaconBody(sendBeacon: ReturnType<typeof vi.fn>): Promise<BeaconB
   return JSON.parse(await blob.text()) as BeaconBody;
 }
 
+// meiva:note
+// A wall clock a test steps by hand: the module reads the injected function.
+function steppedClock(start: number): { now: () => number; advance: (ms: number) => void } {
+  let current = start;
+  return {
+    now: () => current,
+    advance: (ms) => {
+      current += ms;
+    },
+  };
+}
+
 beforeEach(() => {
   Object.defineProperty(document, "visibilityState", {
     configurable: true,
@@ -159,16 +171,16 @@ describe("dedupe", () => {
   });
 
   it("tracks again after the dedupe window", () => {
-    vi.useFakeTimers();
-    try {
-      stubBeacon();
-      track("spawn");
-      vi.advanceTimersByTime(2500);
-      track("spawn");
-      expect(telemetryTestControl.bufferSize()).toBe(2);
-    } finally {
-      vi.useRealTimers();
-    }
+    stubBeacon();
+    const clock = steppedClock(1_000_000);
+    telemetryTestControl.setWallNow(clock.now);
+    track("spawn");
+    clock.advance(1_000);
+    track("spawn");
+    expect(telemetryTestControl.bufferSize()).toBe(1);
+    clock.advance(1_500);
+    track("spawn");
+    expect(telemetryTestControl.bufferSize()).toBe(2);
   });
 
   it("keeps repeated samples when dedupe is disabled", () => {
@@ -187,20 +199,17 @@ describe("rate limit", () => {
   });
 
   it("resets the budget after the window elapses", () => {
-    vi.useFakeTimers();
-    try {
-      stubBeacon();
-      for (let i = 0; i < 100; i++) track("page-view", { page: `p${i}` });
-      // flush sends them — budget spent
-      telemetryTestControl.flush();
-      track("page-view", { page: "after" });
-      expect(telemetryTestControl.bufferSize()).toBe(0);
-      vi.advanceTimersByTime(61_000);
-      track("page-view", { page: "later" });
-      expect(telemetryTestControl.bufferSize()).toBe(1);
-    } finally {
-      vi.useRealTimers();
-    }
+    stubBeacon();
+    const clock = steppedClock(1_000_000);
+    telemetryTestControl.setWallNow(clock.now);
+    for (let i = 0; i < 100; i++) track("page-view", { page: `p${i}` });
+    // flush sends them — budget spent
+    telemetryTestControl.flush();
+    track("page-view", { page: "after" });
+    expect(telemetryTestControl.bufferSize()).toBe(0);
+    clock.advance(61_000);
+    track("page-view", { page: "later" });
+    expect(telemetryTestControl.bufferSize()).toBe(1);
   });
 
   it("still caps events when dedupe is disabled", () => {
@@ -280,5 +289,19 @@ describe("disabled / SSR", () => {
     const b = telemetryTestControl.sessionId();
     expect(a).toBe(b);
     expect(a).toMatch(/^[0-9a-f-]{8,64}$/);
+  });
+});
+
+describe("event time", () => {
+  it("stamps each event with the injected wall clock", async () => {
+    const sendBeacon = stubBeacon();
+    const clock = steppedClock(1_700_000_000_000);
+    telemetryTestControl.setWallNow(clock.now);
+    track("spawn");
+    clock.advance(5_000);
+    track("page-view", { page: "control/config" });
+    telemetryTestControl.flush();
+    const body = await beaconBody(sendBeacon);
+    expect(body.events.map((event) => event.ts)).toEqual([1_700_000_000_000, 1_700_000_005_000]);
   });
 });
