@@ -16,4 +16,3 @@ exports = ["default_config.py", "inspector.py", "metrics.py", "plugin.py", "task
 [roots]
 "_task_update.py" = { kinds = ["clock"], why = "Task update helper stamps appended task log entries with current UTC time" }
 "plugin.py" = { kinds = ["clock", "random"], why = "SDK notice entry points compute expiration deadlines against current UTC time and generate idempotency keys" }
-"task_registry.py" = { kinds = ["bus"], why = "Task registry SDK entry points publish live board refresh events after committing task changes" }

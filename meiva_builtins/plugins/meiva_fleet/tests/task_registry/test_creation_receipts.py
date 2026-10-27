@@ -47,7 +47,11 @@ def _facts(db: psycopg.Connection) -> tuple[object, ...]:
 
 
 def test_concurrent_creation_returns_same_original_task(
-    redis_url: str, db_conn: psycopg.Connection, root_task_id: int, *, database_gate: ProcessDbGate
+    db_conn: psycopg.Connection,
+    root_task_id: int,
+    pinned_bus: EventBus,
+    *,
+    database_gate: ProcessDbGate,
 ) -> None:
     actor, owner = seed_agent(db_conn), seed_agent(db_conn)
     barrier = Barrier(2)
@@ -56,7 +60,9 @@ def test_concurrent_creation_returns_same_original_task(
     def create(_index: int) -> task_registry.Task:
         clients = ClientSet(database=lambda: Database.from_settings(gate=database_gate))
         try:
-            context = MeivaContext(identity=AgentIdentity(actor, True), clients=clients)
+            context = MeivaContext(
+                identity=AgentIdentity(actor, True), clients=clients, bus=pinned_bus
+            )
             barrier.wait()
             return task_registry.create_in_context(
                 context,
@@ -111,7 +117,10 @@ def test_lost_response_returns_original_after_mutation_and_title_reuse(
 
 
 def test_publication_emits_the_committed_events_once_and_in_order(
-    redis_url: str, db_conn: psycopg.Connection, root_task_id: int, emitted_events: EmittedEvents
+    pinned_bus: EventBus,
+    db_conn: psycopg.Connection,
+    root_task_id: int,
+    emitted_events: EmittedEvents,
 ) -> None:
     actor, owner = seed_agent(db_conn), seed_agent(db_conn)
     pin_agent(actor)
@@ -129,7 +138,7 @@ def test_publication_emits_the_committed_events_once_and_in_order(
     assert publication is not None
     assert task_registry.publication_events(publication)
 
-    task_registry.publish_creation(publication)
+    task_registry.publish_creation(publication, pinned_bus)
 
     assert emitted_events.names() == [
         event.event_name for event in task_registry.publication_events(publication)
@@ -314,7 +323,7 @@ def test_sdk_result_and_materialized_events_cannot_rewrite_publication(
     )
 
     with recorded_events(event_bus) as messages:
-        task_registry.publish_creation(publication)
+        task_registry.publish_creation(publication, event_bus)
     assert [message["task_id"] for message in messages] == [task_id]
     assert tuple(event_line(event) for event in emitted_events) == retained_lines
 

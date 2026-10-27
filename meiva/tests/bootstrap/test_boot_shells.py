@@ -4,6 +4,7 @@
 # `meiva/sdk_surface/tests/test_identity_plan.py`; these tests drive the steps over a real slot value.
 from __future__ import annotations
 
+import json
 import random
 from pathlib import Path
 
@@ -15,6 +16,7 @@ from base.agents.sdk.tests.sampling_owners import fixed_sampling_owner
 from base.clock import SYSTEM_TIMERS, Clock, ClockConfig
 from base.cluster.machine import MachineIdentityReader
 from base.config.tests.configuration import snapshot_process_config
+from base.events.live.bus import EventBus
 from base.paths.tests.homes import unit_home as unit_home
 from meiva import boot
 from meiva.sdk_surface import install, process_context
@@ -22,6 +24,7 @@ from meiva.sdk_surface.installation import Installation, Loading, installed, slo
 from meiva.sdk_surface.pure.load_plan import LoadStep
 from meiva.sdk_surface.tests.installation_holder import held_installation
 from meiva.self.harness.attachment import attachment_clock
+from meiva.tests.bootstrap.probe_runner import run_probe
 
 _CLOCK = Clock(ClockConfig("UTC", "UTC", False), timers=SYSTEM_TIMERS)
 
@@ -96,6 +99,21 @@ def test_an_attachment_context_carries_the_homes_and_the_system_generator_of_its
 
 
 # meiva:note
+# An attachment's bus is built when its context first needs one, over the boot's configuration, and
+# every context of the boot answers that one bus.
+def test_an_attachment_context_builds_the_boots_one_event_bus_on_first_read() -> None:
+    owned = boot.own_external_process(snapshot_process_config())
+    try:
+        context = owned.new_context()
+        assert context.bus is None
+        bus = context.require_bus()
+        assert isinstance(bus, EventBus)
+        assert owned.new_context().require_bus() is bus
+    finally:
+        owned.clients.close()
+
+
+# meiva:note
 # A launched script's context carries the same values, with a plain generator (nothing it draws
 # is a secret), and the SDK's sampling owner is built over that same generator, so the process has
 # one.
@@ -108,6 +126,8 @@ def test_a_launched_context_carries_the_homes_and_the_generator_its_sampling_own
     assert context.require_user_home() == Path.home()
     assert context.require_meiva_home() == unit_home
     assert not isinstance(context.require_rng(), random.SystemRandom)
+    assert context.bus is None
+    assert isinstance(context.require_bus(), EventBus)
 
     previous = process_context.unbind_context()
     try:
@@ -163,3 +183,23 @@ def test_a_borrowed_context_without_a_clock_fails_before_an_attachment_exists(
         attachment_clock(bound, borrowed)
     with pytest.raises(RuntimeError, match="needs the context it borrows"):
         attachment_clock(None, borrowed)
+
+
+# meiva:note
+# `import meiva` must stay off the Redis, Postgres and full-configuration stacks, and a launched
+# script's context is built there, so building it with a lite configuration loads none of them: the
+# bus waits for the first read. Only a fresh interpreter shows what a build pulled in.
+def test_building_a_launched_context_loads_no_bus_redis_or_full_configuration(
+    tmp_path: Path,
+) -> None:
+    proc = run_probe(
+        "launched_context_stays_cold",
+        env={"MEIVA_HOME": str(tmp_path), "MEIVA_PROCESS_PROFILE": "agent"},
+    )
+
+    assert proc.returncode == 0, proc.stderr
+    assert json.loads(proc.stdout.strip().splitlines()[-1]) == {
+        "eager_bus": False,
+        "bus_factory": True,
+        "loaded": [],
+    }

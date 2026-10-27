@@ -170,6 +170,29 @@ def launched_identity() -> None:
 
 
 # meiva:note
+# The context a launched script builds from a lite configuration carries the bus as a factory: the
+# build itself loads no bus, redis, psycopg or full-configuration module.
+def launched_context_stays_cold() -> None:
+    import json
+
+    from base.config import ConfigBoot
+    from meiva import boot
+
+    context = boot.launched_context(env={"MEIVA_AGENT_ID": "7"}, config=ConfigBoot())
+    assert context is not None
+    heavy = ("base.events.live.bus", "psycopg", "pydantic_settings", "redis")
+    print(
+        json.dumps(
+            {
+                "eager_bus": context.bus is not None,
+                "bus_factory": context.bus_factory is not None,
+                "loaded": sorted(m for m in heavy if m in sys.modules),
+            }
+        )
+    )
+
+
+# meiva:note
 # A process nobody launched as an agent: reads fail fast and no context appears.
 def unestablished_identity() -> None:
     import json
@@ -244,6 +267,7 @@ SCENARIOS = {
     "agent_profile_owner_url_guard": agent_profile_owner_url_guard,
     "non_agent_import_unbound_context": non_agent_import_unbound_context,
     "launched_identity": launched_identity,
+    "launched_context_stays_cold": launched_context_stays_cold,
     "unestablished_identity": unestablished_identity,
     "external_profile_actor": external_profile_actor,
     "unreadable_external_profile": unreadable_external_profile,

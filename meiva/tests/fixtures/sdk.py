@@ -1,6 +1,6 @@
 # meiva:link meiva/tests/fixtures/docs/sdk-composition.meiva.okf.md
 
-from collections.abc import Generator, Iterator
+from collections.abc import Iterator
 from types import ModuleType
 
 import pytest
@@ -8,18 +8,18 @@ import pytest
 import meiva
 from base.agents.context import MeivaContext
 from base.agents.context.identity import AgentIdentity
-from base.agents.sdk.tests.sampling_owners import fixed_sampling_owner
 from base.clock import SYSTEM_TIMERS, Clock
 from base.clock.configuration import clock_config_from_boot
 from base.cluster.machine import MachineIdentityReader
 from base.cluster.machine.tests.identity import machine_identity as machine_identity
 from base.config import ConfigBoot
+from base.events.live.bus import EventBus
 from meiva.boot import derived_clients
 from meiva.sdk_surface import metering, process_context
-from meiva.sdk_surface.installation import Installation, installed
-from meiva.sdk_surface.tests.installation_holder import held_installation
+from meiva.sdk_surface.installation import installed
+from meiva.tests.fixtures.pin_agent import pin_agent
 
-__all__ = ["sdk_environment", "sdk_identity", "sdk_metering", "sdk_root"]
+__all__ = ["pinned_bus", "sdk_environment", "sdk_identity", "sdk_metering"]
 
 
 @pytest.fixture
@@ -70,10 +70,22 @@ def sdk_metering(sdk_environment: MeivaContext) -> Iterator[None]:
 
 
 # meiva:note
-# A bare SDK installation over a fixed sampling owner, for a test that pins an agent without
-# installing a surface but reaches `meiva.sdk_surface.settings.bus()`: the SDK's event bus draws
-# its retry jitter from the generator the installation's sampling owner carries.
+# The event bus of a test that publishes through the SDK: the `event_bus` fixture's, built as a
+# process root builds it over the live settings (so over the test's Redis), drawing its retry
+# jitter from a seeded generator. It binds a context that carries the bus, so every `pin_agent`
+# after it inherits the bus as it inherits the clock. Only a test that publishes asks for it: the
+# contexts the other fixtures build carry no bus, so a root that forgets one still fails its test.
 @pytest.fixture
-def sdk_root() -> Generator[Installation]:
-    with held_installation(Installation.bare(sampling=fixed_sampling_owner())) as installation:
-        yield installation
+def pinned_bus(event_bus: EventBus) -> Iterator[EventBus]:
+    try:
+        previous = meiva.context
+    except AttributeError:
+        previous = None
+    pin_agent(None, bus=event_bus)
+    try:
+        yield event_bus
+    finally:
+        if previous is None:
+            process_context.unbind_context()
+        else:
+            process_context.bind_context(previous)
