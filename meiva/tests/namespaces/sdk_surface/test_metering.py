@@ -49,6 +49,7 @@ from base.telemetry.tests.capture.event_capture import EmittedEvents
 from base.telemetry.tests.capture.event_capture import emitted_events as emitted_events
 from meiva.sdk_surface import install, meiva_module, metering, process_context
 from meiva.sdk_surface.installation import Installation
+from meiva.sdk_surface.pure.plans.metering.recorder_plan import is_recorder
 from meiva.sdk_surface.tests.installation_holder import held_installation
 from meiva.tests.fixtures.pin_agent import pin_agent
 
@@ -307,7 +308,7 @@ def test_recorder_recognized_by_identity_not_copied_dict(
     is_recorder() must key off object identity (the marker points at the recorder itself), not the attribute's presence, or
     it would skip re-wrapping such a wrapper and leave the recorder buried inside."""
     rec = metering.make_recorder(lambda: None, "ns.fn", sampling_owner, None)
-    assert metering.is_recorder(rec)
+    assert is_recorder(rec)
 
     def plugin_wrapper() -> None:
         return rec()
@@ -315,7 +316,7 @@ def test_recorder_recognized_by_identity_not_copied_dict(
     # replicate _install_metadata's `chained.__dict__.setdefault(k, v)` copy.
     for k, v in rec.__dict__.items():
         plugin_wrapper.__dict__.setdefault(k, v)
-    assert not metering.is_recorder(plugin_wrapper)
+    assert not is_recorder(plugin_wrapper)
 
 
 def test_mcp_recorder_derives_fq_from_runtime_args(
@@ -359,7 +360,7 @@ def test_uninstall_restores_from_the_install_record_without_a_namespace_walk(
     ledger = metering.install(sampling_owner, clients=None, surface=surface)
     try:
         assert target.demo is not demo
-        assert metering.is_recorder(target.demo)
+        assert is_recorder(target.demo)
     finally:
         metering.uninstall(ledger)
     assert target.demo is demo
@@ -376,7 +377,7 @@ def test_install_meters_the_funnel_module_it_is_given(
     ledger = metering.install(sampling_owner, clients=None, surface=surface)
     try:
         assert ledger == ((funnel, "call_raw"),)
-        assert metering.is_recorder(funnel.call_raw)
+        assert is_recorder(funnel.call_raw)
     finally:
         metering.uninstall(ledger)
     assert funnel.call_raw is call_raw

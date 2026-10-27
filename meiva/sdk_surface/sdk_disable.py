@@ -19,11 +19,16 @@ from dataclasses import replace
 from typing import Any, Never
 
 from . import meiva_module
-from .installation import SLOT, Loading, installed
+from .installation import SLOT, installed, slot
+from .pure.plans.installation.attempt_plan import load_failure
 
 
-def mark_load_failed(exc: BaseException) -> None:
-    setattr(meiva_module(), SLOT, Loading(installed(), exc))
+# meiva:note
+# Propagate a prior load failure instead of answering as if the surface were ready.
+def raise_load_failure() -> None:
+    failure = load_failure(slot())
+    if failure is not None:
+        raise failure
 
 
 # meiva:note

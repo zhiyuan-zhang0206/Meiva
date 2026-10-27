@@ -45,8 +45,7 @@
 from __future__ import annotations
 
 import atexit
-from collections.abc import Callable
-from dataclasses import dataclass, field, replace
+from dataclasses import dataclass, field
 from types import MappingProxyType
 from typing import Unpack, assert_never
 
@@ -81,7 +80,9 @@ from .installation import (
 from .installation import (
     expansions as expansions,
 )
-from .sdk_disable import mark_load_failed as mark_load_failed
+from .pure.plans.installation.lifecycle_plan import rollback_outcome
+from .pure.plans.installation.slot_plan import faces_loaded, overlaid
+from .pure.plans.installation.wrap_plan import is_public_dotted_path
 from .wraps import (
     clear_load_attempt as clear_load_attempt,
 )
@@ -93,63 +94,24 @@ from .wraps import (
 )
 
 
-def raise_load_failure() -> None:
-    """Propagate a prior load failure instead of answering as if the surface were ready."""
-    value = slot()
-    if isinstance(value, Loading) and value.failure is not None:
-        raise value.failure
+# meiva:note
+# Record a failed load in the slot, where `sdk_disable.raise_load_failure` finds it.
+def mark_load_failed(exc: BaseException) -> None:
+    setattr(meiva_module(), SLOT, Loading(installed(), exc))
 
 
 def mark_faces_loaded() -> None:
     """Record that the registry's agent-runtime faces loaded: build a new value, swap the holder."""
-    current = installed()
-    if current is None or current.faces:
-        return
-    setattr(meiva_module(), SLOT, replace(current, faces=True))
-
-
-def _is_bare_provider_mount(installation: Installation) -> bool:
-    return (
-        not installation.registry.plugins
-        and not installation.expansions
-        and not installation.wrap_layers
-        and not installation.metered
-        and not installation.disabled
-        and not installation.faces
-        and not installation.undo
-    )
-
-
-def mount_skill_provider(provider: SkillProvider) -> Callable[[], None]:
-    prior = slot()
-    mounted = (
-        replace(prior, skill_providers=(*prior.skill_providers, provider))
-        if isinstance(prior, Installation)
-        else Installation.bare_provider_mount(provider)
-    )
-    setattr(meiva_module(), SLOT, mounted)
-
-    def undo() -> None:
-        current = slot()
-        if current is mounted:
-            setattr(meiva_module(), SLOT, prior)
-            return
-        if isinstance(current, Installation):
-            remaining = tuple(p for p in current.skill_providers if p is not provider)
-            if not remaining and _is_bare_provider_mount(current):
-                setattr(meiva_module(), SLOT, None)
-            else:
-                setattr(meiva_module(), SLOT, replace(current, skill_providers=remaining))
-
-    return undo
+    marked = faces_loaded(installed())
+    if marked is not None:
+        setattr(meiva_module(), SLOT, marked)
 
 
 # meiva:note
 # Refuse a dotted SDK path that cannot be promoted into the expanded SDK reference: the path is
 # empty or has an invalid / underscore segment.
 def _check_expansion(path: str) -> None:
-    segments = path.split(".")
-    if not path or not all(s.isidentifier() and not s.startswith("_") for s in segments):
+    if not is_public_dotted_path(path):
         raise _plugins.InvalidNamespaceNameError(
             f"sdk expansion path {path!r} is invalid — dotted identifiers "
             "without underscore prefixes (e.g. 'cwd', 'shell.sessions')."
@@ -253,18 +215,16 @@ class Build:
 # Attempt every reversal, newest first; preserve a primary failure or raise the first cleanup
 # failure.
 def _run(undo: list[Reversal], build: Build, primary: BaseException | None = None) -> None:
-    failure = primary
+    failures: list[BaseException] = []
     while undo:
         record = undo.pop()
         try:
             build.revert(record)
         except BaseException as exc:
-            if failure is None:
-                failure = exc
-            else:
-                failure.add_note(f"SDK rollback also failed: {type(exc).__name__}: {exc}")
-    if primary is None and failure is not None:
-        raise failure
+            failures.append(exc)
+    settled = rollback_outcome(primary, failures)
+    if settled is not None:
+        raise settled
 
 
 # meiva:note
@@ -359,7 +319,7 @@ def apply_config_overlay(overlay: dict[str, object]) -> None:
     if current is None:
         raise RuntimeError("the SDK surface must be installed before applying plugin config")
     configs = config_registration.plan_config_overlay(overlay, current.configs).plugin_configs
-    setattr(meiva_module(), SLOT, replace(current, configs=MappingProxyType(configs)))
+    setattr(meiva_module(), SLOT, overlaid(current, configs))
 
 
 # meiva:note

@@ -7,6 +7,7 @@ from pathlib import Path
 
 from base.agents.sdk.tests.sampling_owners import fixed_sampling_owner
 from meiva.sdk_surface import meiva_module, metering
+from meiva.sdk_surface.pure.plans.metering.recorder_plan import is_recorder
 
 _CHILD = Path(__file__).parent / "bootstrap" / "child_sdk_probes.py"
 
@@ -27,7 +28,7 @@ def test_install_wraps_and_restores_mcp_call_funnel() -> None:
     ledger = metering.install(sampling, clients=None, surface=metering.read_surface(meiva_module()))
     try:
         assert meiva.mcps.call_funnel.call_raw is not before
-        assert metering.is_recorder(meiva.mcps.call_funnel.call_raw)
+        assert is_recorder(meiva.mcps.call_funnel.call_raw)
     finally:
         metering.uninstall(ledger)
         sampling.close()

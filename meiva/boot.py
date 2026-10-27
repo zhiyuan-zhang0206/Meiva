@@ -56,7 +56,7 @@ from base.packages.plugins.loading import StateGate
 from meiva.mcps import McpClients
 from meiva.sdk_surface import meiva_module, process_context
 from meiva.sdk_surface.process_context import ContextOutsideProcessError
-from meiva.sdk_surface.pure.load_plan import (
+from meiva.sdk_surface.pure.plans.load_plan import (
     IdentityFacts,
     LaunchFacts,
     LoadFacts,
@@ -389,10 +389,11 @@ def ensure_plugins_loaded(
 # `LoadInputs` carries and goes through `load_surface`, so asking for it here is a caller bug.
 def settle_installed(step: LoadStep, context: MeivaContext | None) -> None:
     from meiva.sdk_surface import install as _sdk_install
+    from meiva.sdk_surface import sdk_disable
 
     match step:
         case LoadStep.RAISE_FAILURE:
-            _sdk_install.raise_load_failure()
+            sdk_disable.raise_load_failure()
         case LoadStep.BIND_CATALOG:
             _bind_installed_catalog(context)
         case LoadStep.UPGRADE_FACES:
@@ -594,8 +595,7 @@ def is_launched_process() -> bool:
 
 
 def maybe_load_plugins_for_missing(name: str) -> bool:
-    from meiva.sdk_surface import agent_identity
-    from meiva.sdk_surface import install as _sdk_install
+    from meiva.sdk_surface import agent_identity, sdk_disable
 
     def facts(*, launched_child: bool | None) -> MissingNameFacts:
         state = _slot_facts()
@@ -613,7 +613,7 @@ def maybe_load_plugins_for_missing(name: str) -> bool:
         step = plan_missing_name(facts(launched_child=agent_identity.is_launched_child()))
     match step:
         case MissingNameStep.RAISE_FAILURE:
-            _sdk_install.raise_load_failure()
+            sdk_disable.raise_load_failure()
             return False
         case MissingNameStep.LOAD:
             ensure_plugins_loaded()

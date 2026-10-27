@@ -18,7 +18,7 @@ from langchain_core.messages import BaseMessage
 from pydantic import SecretStr
 
 import meiva
-from meiva.sdk_surface.batch import DEFAULT_BATCH_MAX_CONCURRENT
+from meiva.sdk_surface.pure.plans.batch_plan import DEFAULT_BATCH_MAX_CONCURRENT
 from meiva.tests.namespaces.web._web_helpers import Received, Reply, WebHarness
 from meiva.tests.namespaces.web._web_helpers import loopback as loopback
 from meiva.tests.namespaces.web._web_helpers import web_harness as web_harness

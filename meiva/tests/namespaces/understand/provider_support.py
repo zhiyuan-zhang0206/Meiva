@@ -23,8 +23,8 @@ from base.lm.catalog import ModelCatalog
 from base.lm.effort import ReasoningEffort
 from base.packages.tests.model_catalog import inert_keys
 from meiva.sdk_surface import process_context
-from meiva.sdk_surface.batch import DEFAULT_BATCH_MAX_CONCURRENT
 from meiva.sdk_surface.pure.media.finding_plan import FindingDelivery
+from meiva.sdk_surface.pure.plans.batch_plan import DEFAULT_BATCH_MAX_CONCURRENT
 from meiva.tests.fixtures.scripted_chat_model import OVERRIDE, Script, ScriptedModels
 from meiva.understand import answer, plans, wiring
 from meiva.understand.answer import OutputSite, UnderstandDeps

@@ -15,7 +15,7 @@ import pytest
 from langchain_core.exceptions import ModelRateLimitError
 from langchain_core.messages import AIMessage
 
-from meiva.sdk_surface.batch import DEFAULT_BATCH_MAX_CONCURRENT
+from meiva.sdk_surface.pure.plans.batch_plan import DEFAULT_BATCH_MAX_CONCURRENT
 from meiva.tests.namespaces.understand.provider_support import UnderstandHarness
 from meiva.tests.namespaces.understand.provider_support import fake_image as fake_image
 from meiva.tests.namespaces.understand.provider_support import fake_pdf as fake_pdf
