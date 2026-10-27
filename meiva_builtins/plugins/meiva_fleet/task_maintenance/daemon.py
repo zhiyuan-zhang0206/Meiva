@@ -89,7 +89,11 @@ _LIVENESS_BEAT_STEP_S = 30.0
 # within this overdue window (last_reminded_at gates it within
 # max(backoff, remind_interval_seconds) — each task repeats at its own cadence).
 # A task that still has an open direct child is a container, not a work item: its
-# children carry the reminders, and repeating them on the parent adds nothing.
+# children carry the reminders, and repeating them on the parent adds nothing. A task
+# whose owner parked it (`reminders_paused_until` in the future) is skipped here and in
+# the escalation pass; when the deadline passes it is due at once, because the pause
+# never moved `updated_at` and never cleared `reminder_count` — parking is not
+# forgetting (task #5311).
 # A terminated owner stays eligible here: its due reminder is rerouted rather
 # than dropped, and the row lock is what stops a concurrent sweep from accepting
 # the same cadence twice. `FOR NO KEY UPDATE` (not `FOR UPDATE`) keeps that lock
@@ -107,6 +111,7 @@ _REMINDER_SQL = """
       AND t.remind_interval_seconds IS NOT NULL
       AND NOT t.is_root
       AND now() - t.updated_at > make_interval(secs => t.remind_interval_seconds)
+      AND (t.reminders_paused_until IS NULL OR t.reminders_paused_until <= now())
       AND NOT EXISTS (
           SELECT 1 FROM agent_tasks child
           WHERE child.parent_id = t.id AND child.status = 'in_progress'

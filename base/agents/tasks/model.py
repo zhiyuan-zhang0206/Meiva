@@ -9,11 +9,12 @@ from base.agents.tasks.status import TaskStatus
 from base.agents.tasks.timestamps import render_task_timestamps
 
 
+# meiva:note
+# `remind_interval_seconds` is seconds without a change to the work before the owner is reminded.
+# Reminders cannot be turned off, but an owner may silence them until an explicit, policy-capped
+# deadline (`reminders_paused_until`); past the deadline they resume where they stood (task #5311).
 @dataclass
 class Task:
-    """remind_interval_seconds is seconds without updates before the owner is
-    reminded; reminders cannot be disabled."""
-
     id: int
     parent_id: int | None
     title: str
@@ -28,6 +29,7 @@ class Task:
     last_reminded_at: str | None = None
     reminder_count: int = 0
     priority: str = DEFAULT_PRIORITY
+    reminders_paused_until: str | None = None
 
     def __str__(self) -> str:
         owner = f"owner=#{self.owner}" if self.owner is not None else "unowned"
@@ -39,7 +41,6 @@ TASK_COLUMNS = ", ".join(field.name for field in fields(Task))
 
 
 def task_from_row(row: tuple[Any, ...]) -> Task:
-    """Render a task's three timestamps in the established bare cluster-zone form."""
     return Task(*render_task_timestamps(row, TASK_COLUMNS))
 
 

@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import builtins
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from typing import TYPE_CHECKING
 
 from base.agents.tasks import priority as _task_priority
@@ -95,6 +95,43 @@ def validate_status(status: str | None) -> None:
         raise ValueError(f"status must be one of {sorted(TASK_STATUS_VALUES)}, got {status!r}")
 
 
+# meiva:note
+# A pause deadline arrives as an aware instant or an ISO-8601 string and is stored as an instant; the
+# fleet spans timezones, so a naive value is rejected rather than read in the writer's zone. The bound
+# is this home's Fleet decision (`task_reminder_pause_max_seconds`), and unset means the home cannot
+# pause at all — the error names the key so the operator sees what to decide. A deadline at or before
+# now is always accepted: it resumes the reminders, the one direction no bound guards. This lives
+# here, beside the note stamp, because this module is the update helper that owns the clock read.
+# Returns the deadline as an aware UTC instant, rejected when this home cannot honor it.
+def pause_deadline(value: datetime | str, *, max_seconds: int | None) -> datetime:
+    deadline = datetime.fromisoformat(value) if isinstance(value, str) else value
+    if not isinstance(deadline, datetime):
+        raise TypeError(
+            "reminders_paused_until must be a datetime or an ISO-8601 string, "
+            f"got {type(value).__name__}"
+        )
+    if deadline.tzinfo is None:
+        raise ValueError(
+            "reminders_paused_until needs an explicit UTC offset (e.g. 2026-10-30T00:00:00+08:00)"
+        )
+    deadline = deadline.astimezone(UTC)
+    now = datetime.now(UTC)
+    if deadline <= now:
+        return deadline
+    if max_seconds is None:
+        raise ValueError(
+            "this home cannot pause task reminders: set meiva_fleet "
+            "task_reminder_pause_max_seconds to the longest silence it allows, "
+            "or advance or close the task instead"
+        )
+    if deadline > now + timedelta(seconds=max_seconds):
+        raise ValueError(
+            f"reminders_paused_until must be at most {max_seconds} seconds away "
+            f"(meiva_fleet task_reminder_pause_max_seconds), got {deadline.isoformat()}"
+        )
+    return deadline
+
+
 def nothing_to_update(sets: builtins.list[str], note: str | None) -> bool:
     """True when update() received no field to change and no note to append."""
     return not sets and note is None
@@ -126,6 +163,7 @@ def collect_update_fields(
     owner: int | None,
     remind_interval_seconds: int | None,
     priority: str | None,
+    paused_until: datetime | None,
 ) -> tuple[builtins.list[str], builtins.list[object], dict[str, object], bool, builtins.list[str]]:
     """Build the SET clauses, params, event-log payload, owner-changed flag, and
     the human-readable change summary for update(). Collects only fields that
@@ -170,6 +208,15 @@ def collect_update_fields(
         params.append(priority)
         payload["priority"] = priority
         changes.append(f"priority → {priority}")
+    # meiva:note
+    # The pause is not one of the reminder window's kinds: silencing a task is not a change to its
+    # work, so it neither restarts the ladder nor moves `updated_at` (task #5311). It is a write of
+    # its own column, which is why the row UPDATE still runs for a pause-only update.
+    if paused_until is not None:
+        sets.append("reminders_paused_until = %s")
+        params.append(paused_until)
+        payload["reminders_paused_until"] = paused_until.isoformat()
+        changes.append(f"reminders paused until {paused_until.isoformat()}")
     return sets, params, payload, owner_changing, changes
 
 

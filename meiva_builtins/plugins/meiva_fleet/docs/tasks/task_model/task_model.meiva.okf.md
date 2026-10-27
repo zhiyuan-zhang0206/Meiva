@@ -29,6 +29,7 @@ class Task:
     remind_interval_seconds: int | None = None      # seconds without a change to the work after which to remind; cannot be turned off, NULL only on root
     last_reminded_at: datetime | None = None   # last reminder time; cleared by a write that changes the work
     reminder_count: int = 0                     # reminder count; cleared by a write that changes the work
+    reminders_paused_until: datetime | None = None  # owner-set silence deadline; reminders and escalations skip the task until it passes
     priority: str = "P2"                     # "P0".."P3"; added in #663
 ```
 

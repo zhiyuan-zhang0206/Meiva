@@ -33,6 +33,7 @@ class TaskRow(BaseModel):
     remind_interval_seconds: int | None = None
     last_reminded_at: str | None = None  # ISO-8601
     reminder_count: int = 0
+    reminders_paused_until: str | None = None
     ghost: bool = False  # out-of-window ancestor of a kept task (GET /api/tasks with a window) — delivered for tree connectivity and rendered dimmed by the graph
 
 
@@ -53,6 +54,7 @@ class TaskSummaryRow(BaseModel):
     remind_interval_seconds: int | None = None
     last_reminded_at: str | None = None  # ISO-8601
     reminder_count: int = 0
+    reminders_paused_until: str | None = None
     priority: Priority  # P0 (highest) .. P3 (lowest); the board's within-column sort key
     ghost: bool = False  # out-of-window ancestor of a kept task (GET /api/tasks with a window) — delivered for tree connectivity and rendered dimmed by the graph
 

@@ -40,7 +40,8 @@ agent_tasks (table)
 ├── is_root                — BOOLEAN, system root task marker (the only row with owner=NULL)
 ├── created_by             — TEXT (creator agent id string; 'system' for root)
 ├── remind_interval_seconds        — Reminder interval in seconds (cannot be disabled, NULL only appears on root task)
-├── last_reminded_at, reminder_count — Reminder state (cleared on any write)
+├── last_reminded_at, reminder_count — Reminder state (cleared by a write that changes the work)
+├── reminders_paused_until — owner-set deadline that silences reminders (cleared by time, not by a write)
 └── created_at, updated_at
 ```
 

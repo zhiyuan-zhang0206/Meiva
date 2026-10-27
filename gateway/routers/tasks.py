@@ -61,17 +61,20 @@ _TASK_WINDOWS = {
 _TASK_COLS = (
     "t.id, t.parent_id, t.title, t.description, t.results, t.status, t.owner, "
     "t.created_by, t.created_at, t.updated_at, "
-    "t.remind_interval_seconds, t.last_reminded_at, t.reminder_count, t.priority"
+    "t.remind_interval_seconds, t.last_reminded_at, t.reminder_count, t.priority, "
+    "t.reminders_paused_until"
 )
 
 _TASK_GRAPH_COLS = (
     "t.id, t.parent_id, t.title, t.description, t.status, t.owner, t.created_by, t.created_at, "
-    "t.updated_at, t.remind_interval_seconds, t.last_reminded_at, t.reminder_count, t.priority"
+    "t.updated_at, t.remind_interval_seconds, t.last_reminded_at, t.reminder_count, t.priority, "
+    "t.reminders_paused_until"
 )
 
 _TASK_SUMMARY_COLS = (
     "t.id, t.parent_id, t.title, t.status, t.owner, t.created_by, t.created_at, t.updated_at, "
-    "t.remind_interval_seconds, t.last_reminded_at, t.reminder_count, t.priority"
+    "t.remind_interval_seconds, t.last_reminded_at, t.reminder_count, t.priority, "
+    "t.reminders_paused_until"
 )
 
 
@@ -123,6 +126,7 @@ def _row_to_task(
             last_reminded_at=row[10].isoformat() if row[10] else None,
             reminder_count=row[11],
             priority=row[12],
+            reminders_paused_until=row[13].isoformat() if row[13] else None,
         )
     if fields == "summary":
         return TaskSummaryRow(
@@ -139,6 +143,7 @@ def _row_to_task(
             last_reminded_at=row[9].isoformat() if row[9] else None,
             reminder_count=row[10],
             priority=row[11],
+            reminders_paused_until=row[12].isoformat() if row[12] else None,
         )
     return TaskRow(
         id=row[0],
@@ -156,6 +161,7 @@ def _row_to_task(
         last_reminded_at=row[11].isoformat() if row[11] else None,
         reminder_count=row[12],
         priority=row[13],
+        reminders_paused_until=row[14].isoformat() if row[14] else None,
     )
 
 

@@ -153,6 +153,18 @@ def _task_row(db: psycopg.Connection, tid: int) -> tuple[Any, ...] | None:
         return cur.fetchone()
 
 
+# meiva:note
+# Park the task until `now() + seconds_ahead`; a negative value is a deadline that already passed.
+def _pause(db: psycopg.Connection, tid: int, *, seconds_ahead: float) -> None:
+    with db.cursor() as cur:
+        cur.execute(
+            "UPDATE agent_tasks SET reminders_paused_until = now() + make_interval(secs => %s) "
+            "WHERE id = %s",
+            (seconds_ahead, tid),
+        )
+    db.commit()
+
+
 def _open_notices(db: psycopg.Connection, agent_id: int) -> list[tuple[str, str, bool, int]]:
     """Open notices on an agent: (title, priority, require_response, task_id)."""
     db.rollback()  # the daemon committed on its own connection; refresh our view

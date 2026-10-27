@@ -258,6 +258,38 @@ def test_invalid_key_has_no_effect(
     assert _facts(db_conn) == before
 
 
+# meiva:note
+# A receipt written before `reminders_paused_until` existed still replays: the stored copy is upcast
+# at the storage boundary, while a live snapshot that omits a field stays an error (task #5311).
+def test_a_stored_receipt_without_the_pause_field_replays(
+    db_conn: psycopg.Connection, root_task_id: int, pinned_bus: EventBus
+) -> None:
+    actor = seed_agent(db_conn)
+    pin_agent(actor)
+    key = str(uuid4())
+    task_registry.create("replay", "work", parent=root_task_id, operation_key=key)
+    with db_conn.cursor() as cur:
+        cur.execute(
+            "UPDATE task_creation_receipts SET result = result - 'reminders_paused_until' "
+            "WHERE actor_agent_id=%s AND operation_key=%s",
+            (actor, key),
+        )
+        cur.execute(
+            "SELECT request FROM task_creation_receipts "
+            "WHERE actor_agent_id=%s AND operation_key=%s",
+            (actor, key),
+        )
+        row = cur.fetchone()
+    db_conn.commit()
+    assert row is not None
+    with db_conn.cursor() as cur:
+        replayed = _task_creation_receipts.replay_creation(
+            cur, actor, key, row[0], context=meiva.context
+        )
+    assert replayed is not None
+    assert replayed["reminders_paused_until"] is None
+
+
 def test_snapshot_validation_never_defaults_or_accepts_unknown_enum(
     redis_url: str, db_conn: psycopg.Connection, root_task_id: int
 ) -> None:

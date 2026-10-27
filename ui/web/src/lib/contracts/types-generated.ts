@@ -3873,6 +3873,7 @@ export interface components {
             last_reminded_at?: string | null;
             reminder_count: number;
             priority: string;
+            reminders_paused_until?: string | null;
         };
         TaskAssignmentAccepted: {
             task: components["schemas"]["Task"];
@@ -3900,6 +3901,7 @@ export interface components {
             remind_interval_seconds?: number | null;
             last_reminded_at?: string | null;
             reminder_count: number;
+            reminders_paused_until?: string | null;
             priority: components["schemas"]["Priority"];
             ghost: boolean;
             description: string;
@@ -3923,6 +3925,7 @@ export interface components {
             remind_interval_seconds?: number | null;
             last_reminded_at?: string | null;
             reminder_count: number;
+            reminders_paused_until?: string | null;
             ghost: boolean;
         };
         TaskStatus: "in_progress" | "done" | "cancelled";
@@ -3939,6 +3942,7 @@ export interface components {
             remind_interval_seconds?: number | null;
             last_reminded_at?: string | null;
             reminder_count: number;
+            reminders_paused_until?: string | null;
             priority: components["schemas"]["Priority"];
             ghost: boolean;
         };

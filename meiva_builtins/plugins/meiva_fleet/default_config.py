@@ -83,6 +83,25 @@ class FleetConfig(BaseModel):
         },
     )
 
+    task_reminder_pause_max_seconds: int | None = Field(
+        default=None,
+        description=(
+            "Longest silence an owner may ask for with update(reminders_paused_until=...). "
+            "Unset (None) means this home cannot pause reminders at all: a pause request fails "
+            "fast and names this key, so an operator has to choose the bound and write down why. "
+            "The value is a Fleet decision, not a product default — a task's reminder window is "
+            "the only thing standing between a frozen task and the human queue."
+        ),
+        json_schema_extra={
+            "env_var": "MEIVA_TASK_REMINDER_PAUSE_MAX_SECONDS",
+            "restart_required": "",
+            "writable": True,
+            "sensitive": False,
+            "capability": "common",
+            "scope": "host",
+        },
+    )
+
     reduce_context_switch: bool = Field(
         default=True,
         description=(
@@ -110,6 +129,18 @@ class FleetConfig(BaseModel):
     @classmethod
     def _known_reset_kinds(cls, value: tuple[str, ...]) -> tuple[str, ...]:
         return validate_reset_on(value)
+
+    # meiva:note
+    # Zero or negative would make every pause request invalid while reading as "configured"; the
+    # unset value is None, so only a positive bound reaches the write boundary.
+    @field_validator("task_reminder_pause_max_seconds")
+    @classmethod
+    def _positive_pause_bound(cls, value: int | None) -> int | None:
+        if value is not None and value <= 0:
+            raise ValueError(
+                "task_reminder_pause_max_seconds must be positive; unset it to disable pausing"
+            )
+        return value
 
 
 def contribute() -> PluginContributions:
