@@ -8,11 +8,14 @@ import httpx
 import psycopg
 import pytest
 
+from base.clock import SYSTEM_TIMERS
+from base.clock.tests.seeded_rng import seeded_rng
+from base.cluster.machine.ambient import gateway_access_from_settings
 from base.config import settings
 from base.db import Database
 from base.db.code_version_gate import ProcessDbGate
 from base.sessions.tests.poll_until import poll_until
-from ops.cluster.rpc import RpcClient
+from ops.cluster.rpc import RpcClient, RpcConfig
 from tests.e2e._credentials import current_credentials
 from tests.e2e._db import wait_for_status
 from tests.e2e.fixture_environment import E2EEnv
@@ -43,13 +46,17 @@ def test_resurrect_brings_back_terminated_agent(
     assert original is not None and original[0] is not None
     assert command == [("done",)]
     if explicit:
-        base_rpc = RpcClient.system()
-        rpc = replace(
-            base_rpc,
+        rpc = RpcClient(
+            config=RpcConfig(
+                timeout_seconds=settings.gateway.cluster_rpc_timeout_seconds,
+                max_retries=settings.gateway.cluster_rpc_max_retries,
+            ),
             access=lambda: replace(
-                base_rpc.access(),
+                gateway_access_from_settings(),
                 machine_token=current_credentials().gateway_token,
             ),
+            timers=SYSTEM_TIMERS,
+            rng=seeded_rng(),
         )
         with ThreadPoolExecutor(max_workers=1) as executor:
             response = executor.submit(

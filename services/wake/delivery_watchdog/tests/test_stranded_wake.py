@@ -21,6 +21,9 @@ from base.db import Database
 from base.db.code_version_gate import ProcessDbGate
 from base.events.live.bus import EventBus
 from base.lm.catalog import ModelCatalog
+from ops.cluster.rpc import worst_case_dispatch_seconds
+from ops.tests.rpc_support import rpc_client
+from services.wake.delivery_watchdog.daemon import stranded_wake_liveness_timeout_s
 from services.wake.delivery_watchdog.stranded_wake import (
     STRANDED_WAKE_REASON,
     StrandedOwner,
@@ -600,3 +603,22 @@ class TestStrandedWakeRound:
 
         assert (first, second) == (1, 0)
         assert woken == [StrandedOwner(aid, trigger, InboundKind.CHAT)]
+
+
+# meiva:note
+# The loop's staleness ceiling follows the dispatch budget of the client it is handed: two clients
+# with different budgets give ceilings that differ by exactly the two dispatches of each wake,
+# times the wakes of a round.
+def test_the_liveness_ceiling_follows_the_handed_clients_budget() -> None:
+    patient, _ = rpc_client(timeout_seconds=30.0, max_retries=3)
+    hasty, _ = rpc_client(timeout_seconds=7.0, max_retries=0)
+    per_round = max(settings.daemon.delivery_watchdog_stranded_wake_max_per_round, 1)
+
+    gap = stranded_wake_liveness_timeout_s(patient) - stranded_wake_liveness_timeout_s(hasty)
+
+    assert gap == pytest.approx(
+        2
+        * per_round
+        * (worst_case_dispatch_seconds(patient.config) - worst_case_dispatch_seconds(hasty.config))
+    )
+    assert gap > 0

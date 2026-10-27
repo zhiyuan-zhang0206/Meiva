@@ -32,7 +32,7 @@ from base.agents.tasks.rules import first_open_child, is_closed, open_title_hold
 from base.db.transaction import write_transaction
 from gateway.agents.eval_guard import deny_isolated_result_read
 from gateway.http.auth.request_principal import PrincipalScopeError, request_key
-from gateway.http.config import gateway_clock
+from gateway.http.config import gateway_clock, gateway_rpc
 from gateway.routers.receipts.task import existing_task_receipt, save_task_receipt
 from gateway.schemas.tasks import (
     TaskGraphRow,
@@ -500,5 +500,6 @@ async def patch_task(
                 trigger_inbound_id=note.inbound_id,
                 trigger_inbound_kind=InboundKind.SYSTEM_NOTE,
                 local_machine=request.app.state.machine.name(),
+                rpc=gateway_rpc(request),
             )
     return task

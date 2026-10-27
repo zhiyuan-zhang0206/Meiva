@@ -133,6 +133,7 @@ class UploadRecovery:
                 trigger_inbound_id=inbound_id,
                 trigger_inbound_kind=InboundKind.CHAT,
                 local_machine=self.machine.name(),
+                rpc=self.rpc,
             )
         except Exception:
             _log.warning(

@@ -34,10 +34,11 @@ from base.log.tests.log_records import LogRecords
 from base.log.tests.log_records import loguru_records as loguru_records
 from base.paths import resolve_meiva_home
 from ops import lifecycle
-from ops.cluster.rpc import ClusterOpFailed
+from ops.cluster.rpc import ClusterOpFailed, RpcClient
 from ops.lifecycle.tests.loopback.scripted_post import Reply, Route, serve_post
 from ops.lifecycle.tests.resurrection_setup import spawn_agent
 from ops.rpc_schemas import LifecyclePayload
+from ops.tests.rpc_support import rpc_client
 
 _RESURRECT_PATH = "/api/agents/{agent_id}/resurrect-if-pending-work"
 
@@ -200,6 +201,7 @@ class TestPlacement:
         model_catalog: ModelCatalog,
         waitings: Waitings,
         machine_identity: ConfiguredMachineIdentity,
+        rpc: RpcClient,
     ) -> None:
         machine_identity.set(name="gateway-host")
         waiting = waitings.make(home="runner-a")
@@ -215,6 +217,7 @@ class TestPlacement:
                 trigger_inbound_id=waiting.trigger_id,
                 trigger_inbound_kind=InboundKind.CHAT,
                 local_machine=machine_identity.name(),
+                rpc=rpc,
             )
 
         assert status is AgentStatus.IDLING
@@ -231,6 +234,47 @@ class TestPlacement:
         assert _lifecycle_rows(db_conn, waiting.agent_id) == [("resurrect", "system")]
         assert _suppression(db_conn, waiting.agent_id) == (None, None)
 
+    # meiva:note
+    # The dispatch runs on the client it is handed: a transient 5xx from the home's ops server is
+    # retried after a wait on that client's own timers (a manual clock, so the wait costs no time),
+    # not on a client the shell would build itself.
+    async def test_a_transient_failure_is_retried_on_the_handed_clients_timers(
+        self,
+        db_conn: psycopg.Connection,
+        database: Database,
+        event_bus: EventBus,
+        db_pool: ConnectionPool,
+        model_catalog: ModelCatalog,
+        waitings: Waitings,
+        machine_identity: ConfiguredMachineIdentity,
+    ) -> None:
+        machine_identity.set(name="gateway-host")
+        waiting = waitings.make(home="runner-a")
+        _suppress_wakes(db_conn, waiting.agent_id)
+        home_ops = _home_ops_server(database, event_bus, db_pool, model_catalog)
+        answers = iter([Reply({}, status=503)])
+
+        def flaky(envelope: dict[str, object]) -> Reply:
+            return next(answers, None) or home_ops(envelope)
+
+        rpc, timers = rpc_client()
+        with serve_post({"/ops": flaky}) as home:
+            _register(db_conn, "runner-a", home.url)
+
+            status = await lifecycle.resurrect_if_terminated(
+                database,
+                event_bus,
+                waiting.agent_id,
+                trigger_inbound_id=waiting.trigger_id,
+                trigger_inbound_kind=InboundKind.CHAT,
+                local_machine=machine_identity.name(),
+                rpc=rpc,
+            )
+
+        assert status is AgentStatus.IDLING
+        assert len(home.posted) == 2
+        assert len(timers.sleeps) == 1
+
     async def test_a_local_home_without_an_ops_server_resurrects_in_process(
         self,
         db_conn: psycopg.Connection,
@@ -238,6 +282,7 @@ class TestPlacement:
         event_bus: EventBus,
         waitings: Waitings,
         machine_identity: ConfiguredMachineIdentity,
+        rpc: RpcClient,
     ) -> None:
         machine_identity.set(name="home-a")
         waiting = waitings.make(home="home-a")
@@ -250,6 +295,7 @@ class TestPlacement:
             trigger_inbound_id=waiting.trigger_id,
             trigger_inbound_kind=InboundKind.CHAT,
             local_machine=machine_identity.name(),
+            rpc=rpc,
         )
 
         assert status is AgentStatus.IDLING
@@ -267,6 +313,7 @@ class TestPlacement:
         event_bus: EventBus,
         waitings: Waitings,
         machine_identity: ConfiguredMachineIdentity,
+        rpc: RpcClient,
     ) -> None:
         machine_identity.set(name="gateway-host")
         waiting = waitings.make(home="runner-a")
@@ -281,6 +328,7 @@ class TestPlacement:
                 trigger_inbound_id=waiting.trigger_id,
                 trigger_inbound_kind=InboundKind.CHAT,
                 local_machine=machine_identity.name(),
+                rpc=rpc,
             )
 
         assert status is AgentStatus.TERMINATED
@@ -298,6 +346,7 @@ class TestPlacement:
         waitings: Waitings,
         machine_identity: ConfiguredMachineIdentity,
         loguru_records: LogRecords,
+        rpc: RpcClient,
     ) -> None:
         machine_identity.set(name="gateway-host")
         waiting = waitings.make(home="runner-a")
@@ -315,6 +364,7 @@ class TestPlacement:
                     trigger_inbound_id=waiting.trigger_id,
                     trigger_inbound_kind=InboundKind.CHAT,
                     local_machine=machine_identity.name(),
+                    rpc=rpc,
                 )
 
         assert loguru_records.events("auto_resurrect_failed") == []
@@ -328,6 +378,7 @@ class TestPlacement:
         waitings: Waitings,
         machine_identity: ConfiguredMachineIdentity,
         loguru_records: LogRecords,
+        rpc: RpcClient,
     ) -> None:
         machine_identity.set(name="home-a")
         waiting = waitings.make(home="home-a")
@@ -340,6 +391,7 @@ class TestPlacement:
             trigger_inbound_id=waiting.trigger_id,
             trigger_inbound_kind=InboundKind.CHAT,
             local_machine=machine_identity.name(),
+            rpc=rpc,
         )
 
         assert status is AgentStatus.TERMINATED
@@ -357,6 +409,7 @@ class TestGates:
         event_bus: EventBus,
         waitings: Waitings,
         kind: WakeTriggerKind,
+        rpc: RpcClient,
     ) -> None:
         waiting = waitings.make(home="runner-a", status="running")
         with pytest.raises(ValueError, match=r"no-such-kind|cannot trigger resurrection"):
@@ -367,6 +420,7 @@ class TestGates:
                 trigger_inbound_id=waiting.trigger_id,
                 trigger_inbound_kind=kind,
                 local_machine="gateway-host",
+                rpc=rpc,
             )
 
     @pytest.mark.parametrize("kind", ["no-such-kind", InboundKind.TERMINATE])
@@ -375,6 +429,7 @@ class TestGates:
         event_bus: EventBus,
         database_gate: ProcessDbGate,
         kind: WakeTriggerKind,
+        rpc: RpcClient,
     ) -> None:
         database = Database(
             DbConfig(
@@ -395,6 +450,7 @@ class TestGates:
                 trigger_inbound_id=1,
                 trigger_inbound_kind=kind,
                 local_machine="gateway-host",
+                rpc=rpc,
             )
 
     async def test_a_live_agent_ends_the_call_after_its_status_read(
@@ -404,6 +460,7 @@ class TestGates:
         event_bus: EventBus,
         waitings: Waitings,
         machine_identity: ConfiguredMachineIdentity,
+        rpc: RpcClient,
     ) -> None:
         machine_identity.set(name="gateway-host")
         waiting = waitings.make(home="runner-a", status="running")
@@ -417,6 +474,7 @@ class TestGates:
                 trigger_inbound_id=waiting.trigger_id,
                 trigger_inbound_kind=InboundKind.CHAT,
                 local_machine=machine_identity.name(),
+                rpc=rpc,
             )
 
         assert status is AgentStatus.RUNNING
@@ -429,6 +487,7 @@ class TestGates:
         event_bus: EventBus,
         waitings: Waitings,
         machine_identity: ConfiguredMachineIdentity,
+        rpc: RpcClient,
     ) -> None:
         machine_identity.set(name="gateway-host")
         waiting = waitings.make(home="runner-a", kind="heartbeat", source="system")
@@ -448,6 +507,7 @@ class TestGates:
                 trigger_inbound_id=waiting.trigger_id,
                 trigger_inbound_kind=InboundKind.HEARTBEAT,
                 local_machine=machine_identity.name(),
+                rpc=rpc,
             )
 
         assert status is AgentStatus.TERMINATED
@@ -460,6 +520,7 @@ class TestGates:
         event_bus: EventBus,
         waitings: Waitings,
         machine_identity: ConfiguredMachineIdentity,
+        rpc: RpcClient,
     ) -> None:
         machine_identity.set(name="gateway-host")
         waiting = waitings.make(home="runner-a", source="system")
@@ -473,6 +534,7 @@ class TestGates:
                 trigger_inbound_id=waiting.trigger_id,
                 trigger_inbound_kind=InboundKind.CHAT,
                 local_machine=machine_identity.name(),
+                rpc=rpc,
             )
 
         assert status is AgentStatus.TERMINATED
@@ -490,6 +552,7 @@ class TestGates:
         model_catalog: ModelCatalog,
         waitings: Waitings,
         machine_identity: ConfiguredMachineIdentity,
+        rpc: RpcClient,
     ) -> None:
         machine_identity.set(name="gateway-host")
         waiting = waitings.make(home="runner-a")
@@ -504,6 +567,7 @@ class TestGates:
                 trigger_inbound_id=10**9,
                 trigger_inbound_kind=InboundKind.CHAT,
                 local_machine=machine_identity.name(),
+                rpc=rpc,
             )
 
         assert status is AgentStatus.TERMINATED
@@ -522,6 +586,7 @@ class TestGates:
         database: Database,
         event_bus: EventBus,
         machine_identity: MachineIdentityReader,
+        rpc: RpcClient,
     ) -> None:
         with pytest.raises(AgentNotFound):
             await lifecycle.resurrect_if_terminated(
@@ -531,6 +596,7 @@ class TestGates:
                 trigger_inbound_id=1,
                 trigger_inbound_kind=InboundKind.CHAT,
                 local_machine=machine_identity.name(),
+                rpc=rpc,
             )
 
     async def test_a_kind_that_cannot_wake_an_agent_is_refused_before_any_contact(
@@ -540,6 +606,7 @@ class TestGates:
         event_bus: EventBus,
         waitings: Waitings,
         machine_identity: ConfiguredMachineIdentity,
+        rpc: RpcClient,
     ) -> None:
         machine_identity.set(name="gateway-host")
         waiting = waitings.make(home="runner-a", kind="restart", source="user")
@@ -554,6 +621,7 @@ class TestGates:
                     trigger_inbound_id=waiting.trigger_id,
                     trigger_inbound_kind=cast(WakeTriggerKind, InboundKind.RESTART),
                     local_machine=machine_identity.name(),
+                    rpc=rpc,
                 )
 
         assert home.posted == []

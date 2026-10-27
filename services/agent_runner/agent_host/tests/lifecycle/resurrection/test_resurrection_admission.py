@@ -24,7 +24,8 @@ from base.lm.catalog import ModelCatalog
 from base.native_process.runtime_incarnation import RuntimeIncarnation
 from ops import lifecycle
 from ops.agents import wake
-from ops.cluster.rpc import ClusterOpFailed
+from ops.cluster.rpc import ClusterOpFailed, RpcClient
+from ops.tests.rpc_support import rpc_client
 from services.agent_runner.agent_host.tests.lifecycle.resurrection.resurrection_support import (
     force,
     status,
@@ -196,6 +197,7 @@ async def test_unknown_auto_resurrect_failure_propagates(
     model_catalog: ModelCatalog,
     database_gate: ProcessDbGate,
     machine_identity: MachineIdentityReader,
+    rpc: RpcClient,
 ) -> None:
     aid = terminated(
         db_conn,
@@ -241,6 +243,7 @@ async def test_unknown_auto_resurrect_failure_propagates(
                 trigger_inbound_id=trigger,
                 trigger_inbound_kind=InboundKind.CHAT,
                 local_machine=machine_identity.name(),
+                rpc=rpc,
             )
     assert not any(r["extra"].get("event") == "auto_resurrect_failed" for r in loguru_records)
     assert db_conn.execute(
@@ -429,3 +432,11 @@ async def test_a_row_this_runtime_left_and_ended_unowned_resurrects(
     assert await admit_hosted_incarnation(
         aops_pool, aid, database_gate=database_gate, machine_identity=machine_identity
     )
+
+
+# meiva:note
+# The cluster client handed to what dispatches: the test credential and retry waits on a manual
+# clock, so a retried dispatch costs no time.
+@pytest.fixture
+def rpc() -> RpcClient:
+    return rpc_client()[0]

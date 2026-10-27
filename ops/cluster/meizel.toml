@@ -7,8 +7,5 @@ exports = ["operations.py", "rpc.py", "rpc_plans.py"]
 "__init__.py" = "strict"
 "rpc_plans.py" = "strict"
 
-[roots]
-"rpc.py" = { kinds = ["clock", "random", "settings"], why = "Cluster RPC transport root reads gateway timeout/retry settings and draws retry jitter and fallback UUID idempotency keys; builds the process clock from SYSTEM_TIMERS" }
-
 [debt.ambient-read]
 "operations.py#clock ops.cluster_status.cluster_now" = 2

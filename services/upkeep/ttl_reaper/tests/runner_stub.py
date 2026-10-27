@@ -1,7 +1,7 @@
 # meiva:note
 # A runner's `POST /ops` endpoint as a real listener on port 0, registered in `machines`.
 #
-# The reaper reaches a machine only through `ops.cluster.rpc.dispatch_to_machine`: it reads the
+# The reaper reaches a machine only through `RpcClient.dispatch_to_machine`: it reads the
 # machine's `gateway_url` from the registry and POSTs an op envelope there. A test serves the
 # runner's answer from this listener, so the real registry read, the real HTTP client and the real
 # result handling all run. The test asserts on the rows and messages the reaper leaves behind and

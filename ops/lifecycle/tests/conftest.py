@@ -18,7 +18,9 @@ from base.packages.tests.model_catalog import add_models as add_models
 from base.packages.tests.model_catalog import model_catalog as model_catalog
 from base.packages.tests.model_catalog import set_prices as set_prices
 from base.paths.tests.homes import unit_home as unit_home
+from ops.cluster.rpc import RpcClient
 from ops.lifecycle.tests.loopback.agent_host import ServedAgentHost, serve_agent_host
+from ops.tests.rpc_support import rpc_client
 
 
 @pytest.fixture
@@ -52,3 +54,11 @@ def db_pool(db_url: str) -> Iterator[ConnectionPool]:
 def agent_host(unit_home: Path) -> Iterator[ServedAgentHost]:
     with serve_agent_host(unit_home) as served:
         yield served
+
+
+# meiva:note
+# The cluster client a test hands to what dispatches: the test credential, retry waits on a manual
+# clock (they cost no time) and the default retry budget.
+@pytest.fixture
+def rpc() -> RpcClient:
+    return rpc_client()[0]

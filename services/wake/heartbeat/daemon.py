@@ -540,17 +540,20 @@ class HeartbeatDispatch:
 
 
 class AgentLivenessRound:
-    def __init__(self, db: Database, pool: ConnectionPool, bus: EventBus) -> None:
+    def __init__(
+        self, db: Database, pool: ConnectionPool, bus: EventBus, rpc: cluster_rpc.RpcClient
+    ) -> None:
         self._db = db
         self._pool = pool
         self._bus = bus
+        self._rpc = rpc
 
     async def run_round(self) -> None:
         await run_liveness_pass(
             self._db,
             self._pool,
             self._bus,
-            probe=partial(cluster_rpc.dispatch_to_machine, self._db),
+            probe=partial(self._rpc.dispatch_to_machine, self._db),
             config=LivenessConfig(settings.gateway.status_probe_timeout_seconds),
         )
 
@@ -620,9 +623,10 @@ async def run(
             ),
             clock=clock,
         )
-        liveness_round = AgentLivenessRound(db, pool, bus)
+        rpc = cluster_rpc.RpcClient.from_boot(process_config, timers=clock, rng=_new_rng())
+        liveness_round = AgentLivenessRound(db, pool, bus, rpc)
         digest_round = completion_digest.CompletionDigestRound(
-            pool, db, bus, machine, clock, completion_digest.DigestConfig()
+            pool, db, bus, machine, clock, completion_digest.DigestConfig(), rpc
         )
         await run_loops(
             dispatcher,

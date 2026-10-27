@@ -174,21 +174,13 @@ fleet-update compensation and machine probes can use it during a database
 outage.
 
 `RpcClient` owns one dispatch's transport: a timeout and retry `RpcConfig`, the
-retry loop's `Timers` and a credential read. `RpcClient.system()` is the one
-composition entry that reads the process settings (the RPC timeout and retry count,
-and the gateway access); the module-level `dispatch_to_machine` and `dispatch_to_url`
-are its one-shot shorthand for callers that hold no client of their own. Both
-shorthand entries reject an unknown operation kind before constructing the system
-client or reading configuration. A caller that builds a client passes it to
-`RpcClient.dispatch_to_machine` instead.
-The gateway builds its client once, in its lifespan, from the booted configuration
-(`RpcClient.from_boot(config, timers=...)`, kept as `app.state.rpc`), and its handlers
-pass it on (`gateway_rpc(request)`); none of the gateway's own dispatches takes the
-shorthand. `ops.lifecycle.resurrect_if_terminated` still does, because it holds no
-client: the gateway callers of it (`gateway/agents/state.py`,
-`gateway/agents/notice_operations/notices.py`, `gateway/routers/tasks.py` and
-`gateway/upload_delivery/worker.py`) and the services that call it reach the cluster
-with the system client.
+retry loop's `Timers` and a credential read. A process builds its client once, at its
+entry, from the booted configuration (`RpcClient.from_boot(config, timers=...)`) and hands
+it to what dispatches; nothing reads the process settings to make one, and there is no
+module-level shorthand. The gateway keeps its client as `app.state.rpc` and its handlers
+pass it on (`gateway_rpc(request)`). The services that dispatch (the heartbeat, the
+delivery watchdog and the TTL reaper) build theirs in `run()`. `ops.lifecycle.resurrect_if_terminated`
+and `deliver_chat_inbound` take it as a required `rpc` argument, as do their callers.
 The credential read is a required lazy factory, called on every attempt including
 retries, so a credential refreshed between attempts is the one presented;
 authentication therefore retains its existing refresh lifetime. The HTTP client is
@@ -232,6 +224,6 @@ asserted to lie within the jittered backoff. The decisions are asserted on value
 `test_cluster_rpc_plans.py`. Root coverage reads real machine rows and reaches the
 listener; credential rotation checks that each attempt presents the credential read
 for it while the key is preserved. A child process uses the real gateway
-configuration profile and temporary unit `.env` to verify that `RpcClient.system()`
+configuration profile and temporary unit `.env` to verify that `RpcClient.from_boot`
 reads the configured timeout, retry count and credential, and that the client ignores
 a dead system proxy, without replacing settings attributes.

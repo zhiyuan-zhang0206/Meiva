@@ -15,6 +15,7 @@ from fastapi.testclient import TestClient
 from base import paths
 from base.api_contracts.idempotency import PRINCIPAL_SCOPE, SCOPE_HEADER
 from base.clock import SYSTEM_TIMERS
+from base.clock.tests.seeded_rng import seeded_rng
 from base.cluster.machine import MachineIdentityReader
 from base.cluster.machine.configured import ConfiguredMachineIdentity
 from base.config import ConfigBoot
@@ -63,7 +64,7 @@ def gateway_config_fields(**fields: Any) -> Generator[dict[str, Any]]:
 # The cluster RPC client a gateway root builds, over the test process's configuration snapshot and
 # the system timers: its credential and dispatch budget are the ones the stub runners expect.
 def gateway_test_rpc() -> RpcClient:
-    return RpcClient.from_boot(snapshot_process_config(), timers=SYSTEM_TIMERS)
+    return RpcClient.from_boot(snapshot_process_config(), timers=SYSTEM_TIMERS, rng=seeded_rng())
 
 
 # meiva:note

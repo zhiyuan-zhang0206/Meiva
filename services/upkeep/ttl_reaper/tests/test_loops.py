@@ -15,13 +15,15 @@ from psycopg_pool import ConnectionPool
 import base.db
 from base.clock import SYSTEM_TIMERS
 from base.clock.tests.seeded_rng import seeded_rng
-from base.config import ConfigBoot, settings
+from base.config import ConfigBoot
 from base.daemon.endpoints import ServiceEndpoints
 from base.daemon.loop_health import LivenessGroup
 from base.db import Database
 from base.db.code_version_gate import ProcessDbGate
 from base.events.live.bus import EventBus
 from base.native_process.loaded_commit import LoadedCommit
+from ops.cluster.rpc import RpcClient, worst_case_dispatch_seconds
+from ops.tests.rpc_support import rpc_client
 from services.upkeep.ttl_reaper import cadence, daemon, shells
 from services.upkeep.ttl_reaper.tests.slices import reaper_config
 
@@ -74,6 +76,7 @@ async def test_a_crashing_loop_cancels_its_sibling_and_ends_the_service(
     table: str,
     *,
     database_gate: ProcessDbGate,
+    rpc: RpcClient,
 ) -> None:
     liveness = LivenessGroup(timers=SYSTEM_TIMERS)
     before = asyncio.all_tasks()
@@ -86,6 +89,7 @@ async def test_a_crashing_loop_cancels_its_sibling_and_ends_the_service(
                 EventBus.from_settings(rng=seeded_rng()),
                 liveness,
                 reaper_config(),
+                rpc=rpc,
             ),
             timeout=30.0,
         )
@@ -159,8 +163,10 @@ def test_a_claim_survives_a_restart(
     assert row is not None and row[0] == 1
 
 
-def test_the_configuration_is_read_once_from_the_boot_owner(process_config: ConfigBoot) -> None:
-    config = daemon.ttl_reaper_config(process_config)
+def test_the_configuration_is_read_once_from_the_boot_owner(
+    process_config: ConfigBoot, rpc: RpcClient
+) -> None:
+    config = daemon.ttl_reaper_config(process_config, rpc=rpc)
 
     assert config.poll_interval_s == process_config.view.daemon.ttl_reaper_poll_interval_seconds
     assert (
@@ -171,10 +177,14 @@ def test_the_configuration_is_read_once_from_the_boot_owner(process_config: Conf
         config.fire_log_retention_days
         == process_config.view.daemon.schedule_fire_log_retention_days
     )
-    assert config.shell_kill_deadline_s == shells.dispatch_deadline_s()
+    assert config.shell_kill_deadline_s == shells.dispatch_deadline_s(rpc)
 
 
-def test_the_dispatch_deadline_covers_the_clients_full_retry_budget() -> None:
-    attempts = max(settings.gateway.cluster_rpc_max_retries, 0) + 1
-    assert shells.dispatch_deadline_s() >= attempts * 5.0
-    assert shells.dispatch_deadline_s() < attempts * settings.gateway.cluster_rpc_timeout_seconds
+def test_the_dispatch_deadline_covers_the_handed_clients_full_retry_budget() -> None:
+    rpc, _ = rpc_client(timeout_seconds=17.0, max_retries=1)
+
+    deadline = shells.dispatch_deadline_s(rpc)
+
+    assert deadline == worst_case_dispatch_seconds(rpc.config, 5.0)
+    assert deadline >= 2 * 5.0
+    assert deadline < 2 * 17.0

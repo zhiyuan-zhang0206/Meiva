@@ -1,4 +1,4 @@
-exports = ["agents", "alerts.py", "cluster", "cluster_status", "env_audit", "host_config.py", "inventory", "lifecycle", "pages.py", "pty_close_notices", "rpc_schemas", "to_user.py", "upload_delivery"]
+exports = ["agents", "alerts.py", "cluster", "cluster_status", "env_audit", "host_config.py", "inventory", "lifecycle", "pages.py", "pty_close_notices", "rpc_schemas", "tests", "to_user.py", "upload_delivery"]
 
 [uses]
 "agents" = ["rpc_schemas"]

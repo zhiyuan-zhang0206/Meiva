@@ -142,7 +142,7 @@ violations pass, anything new fails, and the debt may only shrink
   `meizel.toml` declares it under `[roots]` with that kind. Pass the value in from the root; a
   decision in the middle becomes a pure function of its inputs. Declare a file a root only when
   it is one, and a root that stops reading a kind fails as `stale-root`. A function that
-  returns what the world decides (`meiva_home()`, `process_environment()`, `RpcClient.system()`)
+  returns what the world decides (`meiva_home()`, `process_environment()`)
   and the process-wide object that does (`SYSTEM_TIMERS`, `Clock`) are listed in
   `meizel.policy.toml` as readers, and using one is a read of its kind; an entry whose
   definition moved fails as `stale-reader`, so a PR that moves or renames one updates the entry

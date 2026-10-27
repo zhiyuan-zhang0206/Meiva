@@ -42,7 +42,7 @@ from gateway.agents.schemas import (
     ResolveNoticeIn,
 )
 from gateway.http.auth.request_principal import PrincipalScopeError, request_key
-from gateway.http.config import gateway_clock, gateway_config
+from gateway.http.config import gateway_clock, gateway_config, gateway_rpc
 from ops import lifecycle as _ops
 from ops.agents import get_agent_status
 
@@ -353,6 +353,7 @@ async def post_notice_resolve(
             trigger_inbound_id=inbound_id,
             trigger_inbound_kind=InboundKind.CHAT,
             local_machine=request.app.state.machine.name(),
+            rpc=gateway_rpc(request),
         )
     else:
         status = await asyncio.to_thread(get_agent_status, request.app.state.db, agent_id)
