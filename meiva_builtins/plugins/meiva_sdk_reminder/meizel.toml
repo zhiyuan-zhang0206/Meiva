@@ -9,6 +9,3 @@ exports = ["agent_runtime.py", "hint_selection.py"]
 "_state.py" = "strict"
 "hint_selection.py" = "strict"
 "plugin.py" = "strict"
-
-[roots]
-"agent_runtime.py" = { kinds = ["clock"], why = "Plugin runtime hooks stamp emitted SDK reminder notes with current UTC time" }

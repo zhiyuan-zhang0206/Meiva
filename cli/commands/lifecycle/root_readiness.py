@@ -5,7 +5,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import assert_never
 
-from base.clock import SYSTEM_TIMERS
+from base.clock import Timers
 from base.deploy import start_trace
 from base.log import logger
 from base.native_process.root_control.client import RootClient
@@ -69,16 +69,17 @@ def wait_for_service_tree(
     *,
     timeout_s: float,
     home: Path,
+    timers: Timers,
     poll_interval_s: float = root_driver.READY_POLL_INTERVAL_S,
 ) -> ReadinessWait:
     client = root_driver.root_client(home)
     by_session = {spec.session: spec for spec in roster}
-    started_at = SYSTEM_TIMERS.monotonic()
+    started_at = timers.monotonic()
     recorded: set[str] = set()
     while True:
         units, verdicts = _fresh_round(client, roster)
         observed = observe_readiness(list(by_session), units, verdicts, frozenset(recorded))
-        elapsed_s = SYSTEM_TIMERS.monotonic() - started_at
+        elapsed_s = timers.monotonic() - started_at
         for session in observed.newly_ready:
             recorded.add(session)
             start_trace.record_service_ready(session, elapsed_s)
@@ -95,7 +96,7 @@ def wait_for_service_tree(
         unmet = unmet_step(elapsed_s=elapsed_s, timeout_s=timeout_s, interval_s=poll_interval_s)
         match unmet:
             case Retry(after_s):
-                SYSTEM_TIMERS.sleep(after_s)
+                timers.sleep(after_s)
             case Expired():
                 return result
             case _:

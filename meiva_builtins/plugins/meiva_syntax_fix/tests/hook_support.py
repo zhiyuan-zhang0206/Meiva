@@ -16,7 +16,8 @@ from pydantic import Field
 
 from agent.state import AgentState
 from base.agents.context import MeivaContext
-from base.clock import Clock
+from base.clock import Clock, ClockConfig
+from base.clock.tests.manual_timers import ManualTimers
 from base.config.tests.configuration import defaults
 from base.host.env.agent_slices import AgentSlices
 from base.packages.plugin_providers import build_model_catalog
@@ -97,6 +98,13 @@ def unavailable(model: str, *, agent_id: int | None = None) -> BaseChatModel:
 def agent_slices(*, llm_override: str | None = None, **pins: Any) -> AgentSlices:
     cluster = {} if llm_override is None else {"lm__llm_override": llm_override}
     return AgentSlices.resolve(pins, default_reader=defaults(**cluster))
+
+
+# meiva:note
+# A clock that stands still at the manual timers' wall start, for the repair attempts a test scripts.
+def manual_clock() -> Clock:
+    timers = ManualTimers()
+    return Clock(ClockConfig("UTC", "UTC", False), timers=timers, now=timers.now)
 
 
 def make_runtime(*, llm_override: str | None = None, **pins: Any) -> Runtime[MeivaContext]:

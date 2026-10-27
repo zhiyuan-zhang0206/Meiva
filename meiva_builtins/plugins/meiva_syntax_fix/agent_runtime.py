@@ -10,7 +10,6 @@ surface module carries only the description (task #3633).
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import UTC, datetime
 from typing import Any
 
 from langchain_core.messages import AIMessage, ToolCall
@@ -249,7 +248,7 @@ async def _handle_compile_failure(
         tool_call_id=tool_call_id,
         status=ExecStatus.FAILED,
         body_start=len(error_header),
-        created_at=datetime.now(UTC),
+        created_at=repair.clock.now(),
     )
     return {
         "goto": "after_exec",
@@ -315,6 +314,7 @@ class _SyntaxFixHook(Hook):
                 keys=runtime.context.require_provider_keys(),
                 overrides=slices.overrides,
                 llm_override=slices.read("lm", "llm_override"),
+                clock=runtime.context.require_clock(),
             ),
         )
         for call in last_msg.tool_calls:

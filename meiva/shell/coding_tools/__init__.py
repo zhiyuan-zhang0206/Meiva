@@ -9,7 +9,7 @@ impersonates the launching agent. The ``meiva-guide.external-agents`` skill's
 """
 
 import argparse
-import datetime as dt
+from datetime import datetime
 
 _PRIORITIES = ("P0", "P1", "P2", "P3")
 
@@ -61,6 +61,7 @@ def require_lineage(
     parser: argparse.ArgumentParser,
     args: argparse.Namespace,
     *,
+    now: datetime,
     takeover: bool = False,
 ) -> str:
     from base.sessions import provenance as provenance_block
@@ -78,7 +79,7 @@ def require_lineage(
         why=why,
         task_label=args.task_label,
         priority=args.priority,
-        now=dt.datetime.now(dt.UTC),
+        now=now,
     )
     return provenance_block.render_takeover(block) if takeover else provenance_block.render(block)
 

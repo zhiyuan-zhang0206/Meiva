@@ -59,6 +59,7 @@ def _converge_ctx(
         host=command_runtime.host,
         session=UserSession(user_home=home, login_shell="/bin/zsh", interactive=False),
         timers=command_runtime.timers,
+        clock=command_runtime.clock,
         services=frozenset(),
     )
 

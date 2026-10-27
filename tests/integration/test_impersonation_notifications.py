@@ -27,7 +27,7 @@ from base.agents.impersonation.maintenance import remind_expiring_impersonations
 from base.agents.impersonation.tests.impersonation_support import recorded_tree
 from base.agents.messages.timestamp_policy import TimestampSource
 from base.api_contracts.caller_identity import CallerIdentity
-from base.clock import Clock
+from base.clock import SYSTEM_TIMERS, Clock, ClockConfig
 from base.clock.tests.seeded_rng import seeded_rng
 from base.cluster.machine import MachineIdentityReader
 from base.cluster.machine.tests.identity import machine_identity as machine_identity
@@ -494,6 +494,7 @@ async def test_terminal_relay_start_delivers_interruption_best_effort(
     transport_dead: bool,
     database: Database,
     redis_url: str,
+    event_bus: EventBus,
     *,
     config_authority: ConfigAuthority,
     database_gate: ProcessDbGate,
@@ -533,6 +534,9 @@ async def test_terminal_relay_start_delivers_interruption_best_effort(
     )
     import asyncio
 
+    real_clock = Clock(
+        ClockConfig("UTC", None, message_timestamp_weekday=False), timers=SYSTEM_TIMERS
+    )
     result = await asyncio.to_thread(
         relay.cmd_relay,
         args,
@@ -542,7 +546,8 @@ async def test_terminal_relay_start_delivers_interruption_best_effort(
             codex_home=None,
             antigravity_server=None,
             stdout=transport,
-            rng=seeded_rng(),
+            bus=event_bus,
+            clock=real_clock,
         ),
         database_factory=lambda: database,
         machine=machine_identity,
@@ -604,6 +609,9 @@ async def test_running_relay_delivers_termination_once_without_reserving_input(
             listener=RedisInboundListener(redis_url, owner.agent_id),
             adapter=ClaudeStdout(transport),
             tuning=RelayTuning(debounce=0.0, max_chars=None, catchup_seconds=0.2),
+            clock=Clock(
+                ClockConfig("UTC", None, message_timestamp_weekday=False), timers=SYSTEM_TIMERS
+            ),
         )
     )
     try:

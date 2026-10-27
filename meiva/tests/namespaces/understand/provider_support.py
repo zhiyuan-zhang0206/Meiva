@@ -9,13 +9,14 @@ from __future__ import annotations
 
 import dataclasses
 from collections.abc import Iterator
-from datetime import UTC
 from pathlib import Path
 from typing import Any
 
 import pytest
 from langchain_core.messages import BaseMessage
 
+from base.clock import Clock, ClockConfig
+from base.clock.tests.manual_timers import ManualTimers
 from base.config.service_read import ConfigAuthority
 from base.config.tests.configuration import model_overrides
 from base.lm.catalog import ModelCatalog
@@ -76,7 +77,13 @@ class UnderstandHarness:
         return update
 
     def save_to(self, directory: Path) -> None:
-        self.configure(output=OutputSite(directory, UTC))
+        timers = ManualTimers()
+        clock = Clock(
+            ClockConfig("UTC", "UTC", message_timestamp_weekday=False),
+            timers=timers,
+            now=timers.now,
+        )
+        self.configure(output=OutputSite(directory, clock))
 
     def understand(
         self,

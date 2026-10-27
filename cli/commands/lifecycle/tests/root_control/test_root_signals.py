@@ -17,6 +17,7 @@ from pathlib import Path
 import psutil
 import pytest
 
+from base.clock import SYSTEM_TIMERS
 from base.host.tests.short_tmp import short_tmp as short_tmp
 from base.native_process.ownership import OwnedProcess
 from cli.commands.lifecycle import root_driver as driver
@@ -63,6 +64,7 @@ def test_the_root_is_terminated_and_the_stop_returns_once_it_has_exited(
         helper=None,
         home=short_tmp,
         interval_s=0.01,
+        timers=SYSTEM_TIMERS,
     )
 
     assert child.wait(timeout=5) == -signal.SIGTERM
@@ -80,6 +82,7 @@ def test_a_root_that_outlives_the_stop_budget_is_reported(short_tmp: Path) -> No
                 helper=None,
                 home=short_tmp,
                 interval_s=0.01,
+                timers=SYSTEM_TIMERS,
             )
     finally:
         ignores_term.kill()
@@ -103,6 +106,7 @@ def test_a_birth_that_only_resembles_a_live_process_is_never_signalled(
             helper=None,
             home=short_tmp,
             interval_s=0.01,
+            timers=SYSTEM_TIMERS,
         )
 
     assert child.poll() is None
@@ -140,6 +144,7 @@ def test_root_signals_use_start_ticks_when_wall_birth_moves(
         helper=None,
         home=short_tmp,
         interval_s=0.01,
+        timers=SYSTEM_TIMERS,
     )
 
     assert child.wait(timeout=5) == -signal.SIGTERM

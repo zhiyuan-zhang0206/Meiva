@@ -13,7 +13,7 @@ import logging
 from pathlib import Path
 from typing import assert_never
 
-from base.clock import SYSTEM_TIMERS
+from base.clock import Timers
 from base.cluster.dataplane.redis_bridge import (
     RedisBridgeUnconfiguredError,
     redis_bridge_endpoint,
@@ -72,17 +72,17 @@ def job_loaded(host: Host) -> bool:
 # meiva:note
 # Unload the job and wait, up to `timeout_s`, for launchd to stop reporting it; False when it
 # stayed loaded.
-def bootout_and_wait(host: Host, *, timeout_s: float = _BOOTOUT_TIMEOUT_S) -> bool:
+def bootout_and_wait(host: Host, *, timers: Timers, timeout_s: float = _BOOTOUT_TIMEOUT_S) -> bool:
     host.run(
         ["launchctl", "bootout", f"gui/{host.uid}/{LABEL}"],
         capture_output=True,
         text=True,
         timeout=_LAUNCHCTL_TIMEOUT_S,
     )
-    started = SYSTEM_TIMERS.monotonic()
+    started = timers.monotonic()
     while job_loaded(host):
         wait = bootout_wait_step(
-            elapsed_s=SYSTEM_TIMERS.monotonic() - started,
+            elapsed_s=timers.monotonic() - started,
             timeout_s=timeout_s,
             interval_s=_BOOTOUT_POLL_INTERVAL_S,
         )
@@ -90,7 +90,7 @@ def bootout_and_wait(host: Host, *, timeout_s: float = _BOOTOUT_TIMEOUT_S) -> bo
             case Expired():
                 return False
             case Retry(after_s):
-                SYSTEM_TIMERS.sleep(after_s)
+                timers.sleep(after_s)
             case _:
                 assert_never(wait)
     return True
@@ -99,7 +99,12 @@ def bootout_and_wait(host: Host, *, timeout_s: float = _BOOTOUT_TIMEOUT_S) -> bo
 # meiva:note
 # Unload and remove the standalone launchd job and installed copy.
 def retire_launchd_bridge(
-    home: Path, *, host: Host, user_home: Path, timeout_s: float = _BOOTOUT_TIMEOUT_S
+    home: Path,
+    *,
+    host: Host,
+    user_home: Path,
+    timers: Timers,
+    timeout_s: float = _BOOTOUT_TIMEOUT_S,
 ) -> None:
     plist_path = launchd_plist_path(user_home)
     installed_path = _installed_path(home)
@@ -110,7 +115,7 @@ def retire_launchd_bridge(
     )
     if isinstance(plan, Leave):
         return
-    if plan.unload and not bootout_and_wait(host, timeout_s=timeout_s):
+    if plan.unload and not bootout_and_wait(host, timers=timers, timeout_s=timeout_s):
         raise RuntimeError(
             still_loaded_message(label=LABEL, timeout_s=timeout_s, plist_path=str(plist_path))
         )
@@ -123,7 +128,9 @@ def retire_launchd_bridge(
 # Leave the relay to the root supervisor: no standalone launchd job may hold its port.
 def retire_launchd_redis_bridge(ctx: ConvergeCtx) -> None:
     if ctx.host.platform.system == "darwin":
-        retire_launchd_bridge(ctx.meiva_home, host=ctx.host, user_home=ctx.session.user_home)
+        retire_launchd_bridge(
+            ctx.meiva_home, host=ctx.host, user_home=ctx.session.user_home, timers=ctx.timers
+        )
 
 
 # meiva:note

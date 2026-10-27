@@ -21,7 +21,3 @@ exports = ["metrics.py"]
 "_repair_text.py" = "strict"
 "_ruff_plan.py" = "strict"
 "plugin.py" = "strict"
-
-[roots]
-"_llm_repair.py" = { kinds = ["clock"], why = "Syntax repair helper records high-resolution duration for repair telemetry" }
-"agent_runtime.py" = { kinds = ["clock"], why = "Plugin runtime hook stamps syntax-repair feedback notes with current UTC time" }
