@@ -30,7 +30,6 @@ from base.db.code_version_gate import ProcessDbGate
 from base.db.config import db_config_from_settings
 from base.native_process.code_version import CodeVersion
 from base.native_process.loaded_commit import LoadedCommit
-from base.paths import meiva_home
 from services.backup.walg import drill
 from services.backup.walg.backups import Backup, parse_backups
 from services.backup.walg.drill import SourceFacts
@@ -190,8 +189,8 @@ def _run(
         lambda _line: None,
         path=sandbox.path,
         database_for_url=_database_factory(),
-        throwaway=ThrowawayConfig(tmp_path, home=meiva_home()),
-        home=meiva_home(),
+        throwaway=ThrowawayConfig(tmp_path, home=sandbox.home),
+        home=sandbox.home,
     )
 
 
@@ -358,8 +357,8 @@ def _run_drill(
         lines.append,
         path=sandbox.path,
         database_for_url=_database_factory(),
-        throwaway=ThrowawayConfig(scratch_base, home=meiva_home()),
-        home=meiva_home(),
+        throwaway=ThrowawayConfig(scratch_base, home=sandbox.home),
+        home=sandbox.home,
         **({} if socket_root is None else {"socket_root": socket_root}),
     )
     return record, lines
