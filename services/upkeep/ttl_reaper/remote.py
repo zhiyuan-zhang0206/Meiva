@@ -1,13 +1,14 @@
-"""The reaper's remote-call loop.
-
-TTL-expired persistent shell sessions are killed on their home machines
-(`shells`). This loop dials other machines, so it runs apart from the
-database-only sweep (`sweep`): a slow or unreachable machine holds up this
-loop's next round, never a page expiry.
-"""
+# meiva:note
+# The reaper's remote-call loop.
+#
+# TTL-expired persistent shell sessions are killed on their home machines (`shells`), and the
+# tracking rows of sessions a machine no longer lists are dropped (`shells` again). This loop dials
+# other machines, so it runs apart from the database-only sweep (`sweep`): a slow or unreachable
+# machine holds up this loop's next round, never a page expiry.
 
 from __future__ import annotations
 
+import itertools
 import logging
 
 from psycopg_pool import ConnectionPool
@@ -22,18 +23,27 @@ from services.upkeep.ttl_reaper.config import TtlReaperConfig
 _log = logging.getLogger(__name__)
 
 
+# meiva:note
+# One pass: reclaim expired shells, then drop the tracking rows of sessions a machine no longer
+# lists. `sweep` is the caller's cadence decision — the loop below sweeps once every
+# `shells.SWEEP_EVERY_ROUNDS` rounds; a direct caller sweeps unless it says otherwise.
 async def remote_round(
     pool: ConnectionPool,
     db: Database,
     bus: EventBus,
     progress: LoopProgress,
     config: TtlReaperConfig,
+    *,
+    sweep: bool = True,
 ) -> None:
-    """One pass: reclaim expired shells."""
     reaped = await shells.reap_expired_shells(pool, db, bus, progress, config)
     progress.beat()
     if reaped:
         _log.info("[ttl-reaper] reclaimed %d shell(s)", len(reaped))
+    if not sweep:
+        return
+    await shells.reap_stale_shells(pool, db, progress, config)
+    progress.beat()
 
 
 async def remote_loop(
@@ -44,8 +54,10 @@ async def remote_loop(
     config: TtlReaperConfig,
 ) -> None:
     """The remote-call phases as a resident sequential loop."""
+    rounds = itertools.count()
 
     async def one_round() -> None:
-        await remote_round(pool, db, bus, progress, config)
+        sweep = next(rounds) % shells.SWEEP_EVERY_ROUNDS == 0
+        await remote_round(pool, db, bus, progress, config, sweep=sweep)
 
     await round_loop.run_rounds("remote", progress, config.poll_interval_s, one_round)

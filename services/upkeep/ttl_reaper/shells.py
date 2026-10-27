@@ -39,6 +39,7 @@ from __future__ import annotations
 import asyncio
 import functools
 import logging
+from datetime import datetime, timedelta
 from typing import Any
 
 import psycopg
@@ -52,7 +53,7 @@ from base.db import Database
 from base.db.transaction import write_transaction
 from base.events.live.bus import EventBus
 from ops.cluster import rpc as cluster_rpc
-from services.upkeep.ttl_reaper import shell_plan
+from services.upkeep.ttl_reaper import shell_plan, stale_plan
 from services.upkeep.ttl_reaper.config import TtlReaperConfig
 from services.upkeep.ttl_reaper.owner_notice import (
     PASS_BATCH,
@@ -60,24 +61,44 @@ from services.upkeep.ttl_reaper.owner_notice import (
     notify_owner,
     wake_owners,
 )
-from services.upkeep.ttl_reaper.shell_plan import ExpiredShell, Settlement
+from services.upkeep.ttl_reaper.shell_plan import Settlement, ShellRow
 
 _log = logging.getLogger(__name__)
 
-# Per-attempt dispatch budget: a reachable runner answers a shell_kill in
-# milliseconds; an unreachable one fails the connect within this bound.
-_SHELL_KILL_TIMEOUT_S = 5.0
-# Machines reclaimed at once within a round.
+# meiva:note
+# Per-attempt dispatch budget: a reachable runner answers a shell op (kill or probe) in
+# milliseconds; an unreachable one fails the connect within this bound. `_MACHINE_CONCURRENCY` is
+# how many machines one round works on at once.
+_SHELL_OP_TIMEOUT_S = 5.0
 _MACHINE_CONCURRENCY = 8
+
+# meiva:note
+# How many remote rounds pass between two stale sweeps.
+#
+# A candidate row is any unexpired row older than `STALE_ROW_GRACE`, so a healthy cluster always
+# has some — every long-lived session contributes one — and one probe per (machine, agent) every
+# round would spend a runner's session listing once a minute on a table that changes rarely (24
+# pairs on 3 machines at the 2026-10-27 reading). One sweep per ten rounds keeps the post-backlog
+# drain at ten minutes per batch of `PASS_BATCH` rows and costs a fortieth of that.
+SWEEP_EVERY_ROUNDS = 10
+
+# meiva:note
+# How long a tracking row is exempt from the stale sweep after its own creation. The probe answer
+# is a listing read at one instant, and a session's row may exist a moment before the host's
+# backend can list the session name, so a young row is never evidence of a dead session. Six hours
+# is far longer than any such gap: a session that dies now is swept within six hours of its row's
+# birth, and any older row is swept on the first round after its session is gone.
+STALE_ROW_GRACE = timedelta(hours=6)
 
 
 # meiva:note
-# Overall deadline for one shell_kill dispatch: the RPC client's worst case at the per-attempt
-# budget, so it only cuts a dispatch the client's own timeout and retry budgets did not. The
-# daemon reads it once into `TtlReaperConfig.shell_kill_deadline_s`.
+# Overall deadline for one shell op dispatch (a kill, or a probe of the stale sweep): the RPC
+# client's worst case at the per-attempt budget, so it only cuts a dispatch the client's own
+# timeout and retry budgets did not. The daemon reads it once into
+# `TtlReaperConfig.shell_kill_deadline_s`.
 def dispatch_deadline_s() -> float:
     return cluster_rpc.worst_case_dispatch_seconds(
-        cluster_rpc.rpc_config_from_settings(), _SHELL_KILL_TIMEOUT_S
+        cluster_rpc.rpc_config_from_settings(), _SHELL_OP_TIMEOUT_S
     )
 
 
@@ -88,7 +109,7 @@ def dispatch_deadline_s() -> float:
 # them, see ``services/wake/schedule_manager/manager.py`` ``_launch``). Each row carries
 # ``expires_at`` and ``created_at`` so the interruption notice can state when the TTL expired
 # and how long it was.
-def expired_shell_rows_blocking(pool: ConnectionPool) -> list[ExpiredShell]:
+def expired_shell_rows_blocking(pool: ConnectionPool) -> list[ShellRow]:
     with pool.connection() as conn, conn.cursor(row_factory=dict_row) as cur:
         cur.execute(
             "SELECT t.agent_id, t.session_id, t.expires_at, t.created_at, m.machine "
@@ -97,7 +118,7 @@ def expired_shell_rows_blocking(pool: ConnectionPool) -> list[ExpiredShell]:
             "ORDER BY t.agent_id, t.session_id LIMIT %s",
             (PASS_BATCH,),
         )
-        return [ExpiredShell(**row) for row in cur.fetchall()]
+        return [ShellRow(**row) for row in cur.fetchall()]
 
 
 def claim_still_expired(cur: psycopg.Cursor[Any], agent_id: int, session_id: int) -> bool:
@@ -165,6 +186,20 @@ def delete_shell_row(
 
 
 # meiva:note
+# The one place a shell op leaves this process: `shell_kill` and `shell_probe` share the per-attempt
+# budget, the dispatch deadline and the transport errors, so both verdicts are read from one call
+# site. Failures travel to the caller unchanged — what an unanswered dial means differs between the
+# two ops and stays with each.
+async def _dispatch_shell_op(
+    db: Database, machine: str, kind: str, payload: dict[str, Any], *, deadline_s: float
+) -> dict[str, Any]:
+    async with asyncio.timeout(deadline_s):
+        return await cluster_rpc.dispatch_to_machine(
+            db, machine, kind, payload, timeout_s=_SHELL_OP_TIMEOUT_S
+        )
+
+
+# meiva:note
 # One ``shell_kill`` dispatch settled into a verdict, or None for "defer to the next round".
 #
 # A machine absent from the machines registry (task #4143) cannot be dialed: the row
@@ -176,14 +211,13 @@ async def dispatch_shell_kill(
     db: Database, machine: str, agent_id: int, session_id: int, *, deadline_s: float
 ) -> Settlement | None:
     try:
-        async with asyncio.timeout(deadline_s):
-            answer = await cluster_rpc.dispatch_to_machine(
-                db,
-                machine,
-                "shell_kill",
-                {"agent_id": agent_id, "session_id": session_id},
-                timeout_s=_SHELL_KILL_TIMEOUT_S,
-            )
+        answer = await _dispatch_shell_op(
+            db,
+            machine,
+            "shell_kill",
+            {"agent_id": agent_id, "session_id": session_id},
+            deadline_s=deadline_s,
+        )
     except cluster_rpc.ClusterOpTargetAbsent:
         _log.info(
             "[ttl-reaper] shell %s of agent %s: machine %r is absent from the "
@@ -220,7 +254,7 @@ async def reclaim_row(
     db: Database,
     bus: EventBus,
     machine: str,
-    shell: ExpiredShell,
+    shell: ShellRow,
     config: TtlReaperConfig,
 ) -> tuple[int, int] | None:
     agent_id = shell.agent_id
@@ -293,3 +327,194 @@ async def reap_expired_shells(
         progress=progress,
     )
     return reaped
+
+
+# meiva:note
+# Unexpired tracking rows old enough for the stale sweep, one batch per sweep, with their owner's
+# home machine.
+#
+# These are the rows no reaper phase reaches by deadline: `expires_at <= now()` belongs to the kill
+# path above, and the sweep is the only reader of the rest. A row whose owner has no usable machine
+# is filtered out here rather than returned for a later round — it cannot be swept at all, and
+# letting it into the batch would fill every sweep with rows that can never settle.
+def stale_shell_rows_blocking(pool: ConnectionPool) -> list[ShellRow]:
+    with pool.connection() as conn, conn.cursor(row_factory=dict_row) as cur:
+        cur.execute(
+            "SELECT t.agent_id, t.session_id, t.expires_at, t.created_at, m.machine "
+            "FROM agent_shell_ttls t LEFT JOIN agents_meta m ON m.id = t.agent_id "
+            "WHERE t.expires_at > clock_timestamp() "
+            "AND t.created_at < clock_timestamp() - %s "
+            "AND m.machine IS NOT NULL AND m.machine <> %s "
+            "ORDER BY t.agent_id, t.session_id LIMIT %s",
+            (STALE_ROW_GRACE, shell_plan.UNKNOWN_MACHINE, PASS_BATCH),
+        )
+        return [ShellRow(**row) for row in cur.fetchall()]
+
+
+# meiva:note
+# When anything last recorded a probe of `machine`, or None when nothing ever did.
+#
+# The registry can lose a live machine (a rebuild, a restore, a rename, a bad bulk update), and
+# deleting a live session's row is irreversible, so a missing registry entry is only half the
+# evidence: this record is the other half. A machine nothing has probed inside the grace window is
+# gone; one probed recently is a registry gap and its rows wait.
+def machine_probe_last_seen_blocking(pool: ConnectionPool, machine: str) -> datetime | None:
+    with pool.connection() as conn, conn.cursor() as cur:
+        cur.execute("SELECT last_probe_at FROM machine_probe WHERE machine_name = %s", (machine,))
+        row = cur.fetchone()
+        return row[0] if row else None
+
+
+# meiva:note
+# The live session ids a machine's runner lists for `agent_id`, or None when the answer proves
+# nothing.
+#
+# An unreachable host, a failed op, a dispatch past `deadline_s` or a malformed answer defers the
+# group — the session may still live. A machine missing from the machines registry is not settled
+# here: `ClusterOpTargetAbsent` travels to the caller, which decides it with the machine's probe
+# record. The probe is authoritative when it answers at all: the host enumerates its session backend
+# and raises rather than reporting a failed listing as an empty one.
+async def dispatch_shell_probe(
+    db: Database, machine: str, agent_id: int, *, deadline_s: float
+) -> frozenset[int] | None:
+    try:
+        answer = await _dispatch_shell_op(
+            db, machine, "shell_probe", {"agent_id": agent_id}, deadline_s=deadline_s
+        )
+    except cluster_rpc.ClusterOpTargetAbsent:
+        raise
+    except (cluster_rpc.ClusterOpUnreachable, cluster_rpc.ClusterOpFailed, TimeoutError) as exc:
+        _log.warning(
+            "[ttl-reaper] stale sweep of agent %s on %r deferred: %r", agent_id, machine, exc
+        )
+        return None
+    live = stale_plan.probe_session_ids(answer)
+    if live is None:
+        _log.warning(
+            "[ttl-reaper] shell_probe for agent %s on %r returned %r", agent_id, machine, answer
+        )
+    return live
+
+
+# meiva:note
+# Drop one tracking row — but only the row this sweep judged. `expires_at` and `created_at` are part
+# of the predicate, so a row renewed, re-created for a new session that reused the id, or otherwise
+# rewritten since the select is left alone; the loser of that race keeps its deadline.
+def delete_stale_row(pool: ConnectionPool, row: ShellRow) -> bool:
+    with write_transaction(pool) as conn, conn.cursor() as cur:
+        cur.execute(
+            "DELETE FROM agent_shell_ttls WHERE agent_id = %s AND session_id = %s "
+            "AND expires_at = %s AND created_at = %s",
+            (row.agent_id, row.session_id, row.expires_at, row.created_at),
+        )
+        return cur.rowcount == 1
+
+
+# meiva:note
+# The sweep's one record of a row it dropped: the row itself is gone, so its identity has to travel
+# with the event — agent, session, machine, the `created_at` / `expires_at` the delete matched on,
+# and `evidence` (`session_gone` for a listing that did not name the session, `machine_absent` for a
+# machine terminalized as gone). Without these the drop cannot be reconstructed from the stream.
+def emit_stale_dropped(row: ShellRow, *, machine: str, evidence: str) -> None:
+    telemetry.emit(
+        "log",
+        "shell_ttl_stale_dropped",
+        level="info",
+        agent_id=row.agent_id,
+        attributes={
+            "agent_id": row.agent_id,
+            "session_id": row.session_id,
+            "machine": machine,
+            "created_at": row.created_at.isoformat(),
+            "expires_at": row.expires_at.isoformat(),
+            "evidence": evidence,
+        },
+    )
+
+
+# meiva:note
+# Drop the tracking rows of sessions that no longer exist on their home machine.
+#
+# One `shell_probe` per (machine, agent), never one per row; machines run concurrently and the
+# agents of one machine in order, up to the first probe that gets no answer. One batch of rows per
+# sweep bounds the pass, so a backlog drains over several sweeps instead of inside one long
+# transaction, and the sweep ends with one summary line stating what it saw and did. All DB work
+# runs via to_thread: the event loop never blocks on psycopg.
+async def reap_stale_shells(
+    pool: ConnectionPool, db: Database, progress: LoopProgress, config: TtlReaperConfig
+) -> list[tuple[int, int]]:
+    plan = stale_plan.plan_stale(await asyncio.to_thread(stale_shell_rows_blocking, pool))
+    candidates = sum(len(agent.rows) for probes in plan.machines for agent in probes.agents)
+    pairs = sum(len(probes.agents) for probes in plan.machines)
+    dropped: list[tuple[int, int]] = []
+    answered = 0
+    deferred = 0
+    absent = 0
+
+    async def drop(row: ShellRow, machine: str, evidence: str) -> None:
+        if await asyncio.to_thread(delete_stale_row, pool, row):
+            dropped.append((row.agent_id, row.session_id))
+            emit_stale_dropped(row, machine=machine, evidence=evidence)
+
+    async def sweep_machine(probes: stale_plan.MachineProbes) -> None:
+        nonlocal answered, deferred, absent
+        try:
+            for index, agent in enumerate(probes.agents):
+                live = await dispatch_shell_probe(
+                    db, probes.machine, agent.agent_id, deadline_s=config.shell_kill_deadline_s
+                )
+                if live is None:
+                    # meiva:note
+                    # The host did not answer for one agent, so it will not answer for the next one
+                    # in this sweep either: its remaining rows wait instead of repeating the
+                    # failure.
+                    deferred += len(probes.agents) - index
+                    return
+                answered += 1
+                for row in stale_plan.stale_rows(agent.rows, live):
+                    await drop(row, probes.machine, "session_gone")
+        except cluster_rpc.ClusterOpTargetAbsent:
+            last_seen = await asyncio.to_thread(
+                machine_probe_last_seen_blocking, pool, probes.machine
+            )
+            rows = sum(len(agent.rows) for agent in probes.agents)
+            if not stale_plan.absence_is_terminal(
+                last_seen, now=config.clock.now(), grace=STALE_ROW_GRACE
+            ):
+                deferred += len(probes.agents)
+                _log.warning(
+                    "[ttl-reaper] stale sweep: machine %r is missing from the registry but was "
+                    "probed at %s — keeping its %d row(s) of %d agent(s)",
+                    probes.machine,
+                    last_seen,
+                    rows,
+                    len(probes.agents),
+                )
+                return
+            absent += 1
+            _log.warning(
+                "[ttl-reaper] stale sweep: machine_absent machine=%s rows=%d agents=%d "
+                "last_probe=%s",
+                probes.machine,
+                rows,
+                len(probes.agents),
+                last_seen if last_seen is not None else "never",
+            )
+            for agent in probes.agents:
+                for row in agent.rows:
+                    await drop(row, probes.machine, "machine_absent")
+
+    await round_loop.fan_out(
+        [functools.partial(sweep_machine, probes) for probes in plan.machines],
+        concurrency=_MACHINE_CONCURRENCY,
+        progress=progress,
+    )
+    _log.info(
+        "[ttl-reaper] stale sweep: candidates=%d pairs=%d dropped=%d deferred=%d machine_absent=%d",
+        candidates,
+        pairs,
+        len(dropped),
+        deferred,
+        absent,
+    )
+    return dropped
