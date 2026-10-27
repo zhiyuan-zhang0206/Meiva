@@ -464,3 +464,15 @@ def test_a_policy_change_that_also_adds_a_call_site_fails(
     capsys.readouterr()
     assert reader_diff(root) == 1
     assert "other.py#environ lib.env.read" in capsys.readouterr().out
+
+
+def test_a_base_that_spells_none_the_old_way_can_still_be_compared(
+    make_repo: RepoFactory, capsys: pytest.CaptureFixture[str]
+) -> None:
+    root = base_repo(make_repo, {"app/meizel.toml": '[purity]\n"x.py" = "none"\n'})
+    rule_change(root)
+    write(root, {"app/meizel.toml": '[purity]\n"x.py" = { mode = "none", why = "the shell" }\n'})
+    record(root)
+    capsys.readouterr()
+    assert diff(root) == 0
+    assert "no content growth" in capsys.readouterr().out
