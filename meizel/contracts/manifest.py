@@ -24,7 +24,6 @@ from meizel.roles import check_table
 
 __all__ = [
     "HELD_KINDS",
-    "PURITY_LEVELS",
     "Manifest",
     "Root",
     "effective_purity",
@@ -34,7 +33,6 @@ __all__ = [
     "within",
 ]
 
-PURITY_LEVELS = ("none", "strict-to-be", "strict")
 _JUDGED = ("strict-to-be", "strict")
 _TOP_KEYS = (
     "exports",
