@@ -9,11 +9,12 @@ from pathlib import Path
 from base.api_contracts.agent_contract import AgentNotFound, AgentStatus, GatewayUnavailable
 from base.host.atomic_io import SYSTEM_FS, AtomicWriter
 from base.log import logger
-from base.paths import meiva_home, workspace_dir
+from base.paths import meiva_home
 from base.sessions import coding_session_owner, tool_capabilities
 from base.sessions import provenance as provenance_block
 from base.sessions.coding_session_owner_record import CodingSessionStatus
 from meiva import agents
+from meiva.files import agent_workspace
 from meiva.sdk_surface import agent_identity, process_context
 from meiva.shell import sessions
 from meiva.shell.coding_tools.plans.lineage import DispatchFacts
@@ -68,7 +69,7 @@ def launch_site() -> LaunchSite:
         shell=shell,
         home=Path.home(),
         cluster=meiva_home(),
-        session_cwd=workspace_dir(shell.agent_id),
+        session_cwd=agent_workspace(shell.agent_id),
         host=sessions.session_host(),
     )
 
