@@ -97,19 +97,13 @@ def canonical_key(
     workspace: str | Path,
     *,
     tool: str,
-    cluster: str | Path | None = None,
+    cluster: str | Path,
 ) -> CodingSessionKey:
     """Build the canonical record key; basename never participates."""
     if not _TOOL_RE.fullmatch(tool):
         raise ValueError("tool must be a lowercase slug")
-    if cluster is None:
-        from base.paths import meiva_home
-
-        cluster_path = meiva_home()
-    else:
-        cluster_path = Path(cluster).expanduser()
     return CodingSessionKey(
-        cluster=str(cluster_path.resolve()),
+        cluster=str(Path(cluster).expanduser().resolve()),
         workspace=str(Path(workspace).expanduser().resolve()),
         tool=tool,
     )
@@ -144,10 +138,8 @@ def full_session_name(owner_agent_id: int, session_id: int, suffix: str) -> str:
     return f"meiva-agent-{owner_agent_id}-shell-{session_id}-{suffix}"
 
 
-def host_owner_dir() -> Path:
-    from base.paths import meiva_home
-
-    root = meiva_home() / "coding-session-owners"
+def host_owner_dir(key: CodingSessionKey) -> Path:
+    root = Path(key.cluster) / "coding-session-owners"
     root.mkdir(parents=True, exist_ok=True)
     with contextlib.suppress(OSError):
         root.chmod(0o700)
@@ -155,7 +147,7 @@ def host_owner_dir() -> Path:
 
 
 def _key_dir(key: CodingSessionKey) -> Path:
-    directory = host_owner_dir() / key_digest(key)
+    directory = host_owner_dir(key) / key_digest(key)
     directory.mkdir(mode=0o700, exist_ok=True)
     return directory
 
@@ -170,7 +162,7 @@ def lock_path(key: CodingSessionKey) -> Path:
 
     Transitions are short file writes (plus a sibling's cleanup).
     """
-    return host_owner_dir() / f"{key_digest(key)}.lock"
+    return host_owner_dir(key) / f"{key_digest(key)}.lock"
 
 
 def generations(key: CodingSessionKey) -> list[str]:

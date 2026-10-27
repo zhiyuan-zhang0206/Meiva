@@ -20,6 +20,7 @@ import psutil
 import psycopg
 import pytest
 
+from base.clock import SYSTEM_TIMERS
 from base.db import create_agent
 from base.native_process.ownership import OwnedProcess
 from base.native_process.process_control import SYSTEM_PROCESS_CONTROL
@@ -230,7 +231,9 @@ def test_the_sweep_closes_the_members_a_dead_shell_left_and_reports_the_busy_ses
     assert ledger.leftovers(path) == [], "a known job alone is not a live shell session"
 
     started = time.monotonic()
-    outcome = ledger.sweep(path, process_control=SYSTEM_PROCESS_CONTROL)
+    outcome = ledger.sweep(
+        path, process_control=SYSTEM_PROCESS_CONTROL, own_pid=os.getpid(), timers=SYSTEM_TIMERS
+    )
 
     assert time.monotonic() - started < ledger.SWEEP_HANGUP_WAIT_S + 3 * ledger.SWEEP_KILL_S
     assert jobs.wait_exit(job_pid, timeout=5), "the sweep left the job running"
@@ -245,17 +248,21 @@ def test_a_surviving_shell_remains_recorded_for_the_next_sweep(tmp_path: Path) -
     path = tmp_path / "ledger.json"
     identity = OwnedProcess.capture(psutil.Process(child.pid))
     target = closure.Target("meiva-agent-1-shell-retry", identity)
-    control = FakeProcessControl(groups={identity.pid: identity.pid})
+    control = FakeProcessControl(groups={identity.pid: identity.pid, os.getpid(): os.getpgrp()})
     try:
         ledger.write(path, [target])
-        first = ledger.sweep(path, process_control=control)
+        first = ledger.sweep(
+            path, process_control=control, own_pid=os.getpid(), timers=SYSTEM_TIMERS
+        )
         assert child.poll() is None
         assert first.survivors == (closure.Survivor(target.name, identity, SurvivorRole.SHELL),)
         assert Signalled("killpg", identity.pid, signal.SIGKILL) in control.signals
         assert ledger.leftovers(path) == [target.name]
         assert ledger.read(path) == [target], "a failed shell cleanup must retain its retry target"
 
-        second = ledger.sweep(path, process_control=SYSTEM_PROCESS_CONTROL)
+        second = ledger.sweep(
+            path, process_control=SYSTEM_PROCESS_CONTROL, own_pid=os.getpid(), timers=SYSTEM_TIMERS
+        )
 
         child.wait(timeout=10)
         assert second.survivors == ()
@@ -276,10 +283,12 @@ def test_a_known_job_only_survivor_does_not_retain_a_shell_session_gate(tmp_path
     shell = _exited_process()
     target = closure.Target("meiva-agent-1-shell-job-only", shell, (job,))
 
-    control = FakeProcessControl(groups={job.pid: job.pid})
+    control = FakeProcessControl(groups={job.pid: job.pid, os.getpid(): os.getpgrp()})
     try:
         ledger.write(path, [target])
-        outcome = ledger.sweep(path, process_control=control)
+        outcome = ledger.sweep(
+            path, process_control=control, own_pid=os.getpid(), timers=SYSTEM_TIMERS
+        )
         assert child.poll() is None
         assert outcome.survivors == (closure.Survivor(target.name, job, SurvivorRole.JOB),)
         assert ledger.leftovers(path) == []
@@ -301,7 +310,9 @@ def test_the_sweep_never_signals_a_pid_that_is_no_longer_the_recorded_process(
         path = tmp_path / "ledger.json"
         ledger.write(path, [closure.Target("meiva-agent-1-shell-2-recycled", stale, ())])
 
-        outcome = ledger.sweep(path, process_control=SYSTEM_PROCESS_CONTROL)
+        outcome = ledger.sweep(
+            path, process_control=SYSTEM_PROCESS_CONTROL, own_pid=os.getpid(), timers=SYSTEM_TIMERS
+        )
 
         assert outcome == closure.Outcome()
         assert bystander.poll() is None, "a recycled pid was signalled"
@@ -313,7 +324,12 @@ def test_the_sweep_never_signals_a_pid_that_is_no_longer_the_recorded_process(
 def test_an_unreadable_ledger_sweeps_nothing(tmp_path: Path) -> None:
     path = tmp_path / "ledger.json"
     path.write_text("{not json")
-    assert ledger.sweep(path, process_control=SYSTEM_PROCESS_CONTROL) == closure.Outcome()
+    assert (
+        ledger.sweep(
+            path, process_control=SYSTEM_PROCESS_CONTROL, own_pid=os.getpid(), timers=SYSTEM_TIMERS
+        )
+        == closure.Outcome()
+    )
     assert json.loads(path.read_text())["sessions"] == {}
     assert path.stat().st_mode & 0o777 == 0o600
 
@@ -340,7 +356,9 @@ def test_the_sweep_reports_a_busy_session_the_crash_ended_whole(tmp_path: Path) 
         ],
     )
 
-    outcome = ledger.sweep(path, process_control=SYSTEM_PROCESS_CONTROL)
+    outcome = ledger.sweep(
+        path, process_control=SYSTEM_PROCESS_CONTROL, own_pid=os.getpid(), timers=SYSTEM_TIMERS
+    )
 
     assert [closed.name for closed in outcome.closed] == ["meiva-agent-1-shell-3-busy"]
     assert outcome.closed[0].shell == busy_shell
@@ -362,7 +380,9 @@ def test_the_sweep_never_reports_a_busy_session_whose_shell_is_still_running(
         )
         ledger.write(path, [closure.Target("meiva-agent-1-shell-5-recycled", stale, (stale, real))])
 
-        outcome = ledger.sweep(path, process_control=SYSTEM_PROCESS_CONTROL)
+        outcome = ledger.sweep(
+            path, process_control=SYSTEM_PROCESS_CONTROL, own_pid=os.getpid(), timers=SYSTEM_TIMERS
+        )
 
         assert [closed.name for closed in outcome.closed] == ["meiva-agent-1-shell-5-recycled"]
     finally:

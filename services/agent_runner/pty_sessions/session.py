@@ -25,6 +25,7 @@ from typing import Any
 
 import psutil
 
+from base.clock import Timers
 from base.log import logger
 from base.native_process.ownership import OwnedProcess, stable_create_time
 from base.native_process.process_control import ProcessControl
@@ -446,6 +447,8 @@ def kill_session(
     *,
     graceful: bool,
     process_control: ProcessControl,
+    own_pid: int,
+    timers: Timers,
     interrupted: bool | None = None,
 ) -> dict[str, Any]:
     """Close the PTY shell and its known foreground group, best effort.
@@ -462,13 +465,25 @@ def kill_session(
     mode = "forced"
     remaining = targets
     if graceful:
-        process_groups.signal(targets, signal.SIGTERM, process_control=process_control)
-        remaining = process_groups.wait(targets, _KILL_WAIT_S)
+        process_groups.signal(
+            targets,
+            signal.SIGTERM,
+            process_control=process_control,
+            own_pid=own_pid,
+            timers=timers,
+        )
+        remaining = process_groups.wait(targets, _KILL_WAIT_S, timers=timers)
         if not remaining:
             mode = "graceful"
     if remaining:
-        process_groups.signal(remaining, signal.SIGKILL, process_control=process_control)
-        remaining = process_groups.wait(remaining, _KILL_FORCE_WAIT_S)
+        process_groups.signal(
+            remaining,
+            signal.SIGKILL,
+            process_control=process_control,
+            own_pid=own_pid,
+            timers=timers,
+        )
+        remaining = process_groups.wait(remaining, _KILL_FORCE_WAIT_S, timers=timers)
     if process_groups.live(shell):
         raise RuntimeError(f"session {session.name}: shell survived the kill")
     if not session.wait_dead(_KILL_FORCE_WAIT_S):

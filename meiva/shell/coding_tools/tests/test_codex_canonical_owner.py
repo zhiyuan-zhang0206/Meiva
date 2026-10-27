@@ -19,6 +19,7 @@ from starlette.responses import JSONResponse
 from starlette.routing import Route
 
 from base.api_contracts.agent_contract import AgentStatus, ErrorReason
+from base.clock.tests.fakes import system_clock
 from base.host.atomic_io import SYSTEM_FS, AtomicWriter
 from base.host.net.tests.local_http import serve_asgi
 from base.lm.harness.codex.auth import SECRET_ENV_NAMES
@@ -401,7 +402,11 @@ def test_a_generation_that_ended_before_publishing_kills_the_codex_session(
     owner = _generation(site.cluster, workspace, supervised=False)
     assert owner.generation is not None
     coding_session_owner.terminate_generation(
-        owner.key, owner.generation, reason="replaced", writer=AtomicWriter(SYSTEM_FS)
+        owner.key,
+        owner.generation,
+        reason="replaced",
+        writer=AtomicWriter(SYSTEM_FS),
+        now=system_clock().now(),
     )
 
     with pytest.raises(coding_session_owner.CodingSessionGenerationChangedError):
@@ -421,7 +426,11 @@ def test_a_supervisor_that_cannot_be_recorded_is_reclaimed_with_the_launch(
     owner = _generation(site.cluster, workspace, supervised=True)
     assert owner.generation is not None
     coding_session_owner.terminate_generation(
-        owner.key, owner.generation, reason="replaced", writer=AtomicWriter(SYSTEM_FS)
+        owner.key,
+        owner.generation,
+        reason="replaced",
+        writer=AtomicWriter(SYSTEM_FS),
+        now=system_clock().now(),
     )
 
     with pytest.raises(coding_session_owner.CodingSessionGenerationChangedError):
