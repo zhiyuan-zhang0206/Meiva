@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import inspect
 from collections.abc import Callable
 from typing import Any, Protocol
@@ -49,6 +50,12 @@ class FakeAppServer:
         self.notifications: list[tuple[str, RequestParams | None]] = []
         self.turn_ids: list[str] = []
         self.on_interrupt: Callable[[], None] | None = None
+        # meiva:note
+        # A gate a test can hold shut to keep `turn/start` unanswered, so it can push a
+        # notification into the window where the turn exists but its name does not.
+        # meiva:link base/lm/harness/docs/attribution.meiva.okf.md
+        self.turn_start_gate: asyncio.Future[None] | None = None
+        self.turn_start_id: str | None = None
         self._notification_handler: NotificationHandler | None = None
         self._request_handler: RequestHandler | None = None
         self._closed_handler: Any = None
@@ -92,7 +99,9 @@ class FakeAppServer:
                 "model": "gpt-fake",
             }
         if method == "turn/start":
-            turn_id = f"codex-turn-{len(self.turn_ids) + 1}"
+            if self.turn_start_gate is not None:
+                await self.turn_start_gate
+            turn_id = self.turn_start_id or f"codex-turn-{len(self.turn_ids) + 1}"
             self.turn_ids.append(turn_id)
             return {"turn": {"id": turn_id, "status": "inProgress"}}
         if method == "turn/interrupt":
