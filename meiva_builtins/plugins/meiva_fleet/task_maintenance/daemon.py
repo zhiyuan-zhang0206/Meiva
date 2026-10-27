@@ -589,12 +589,14 @@ def main() -> None:
             direct_url=ClusterDirectUrl(machine.host),
         )
 
-    pipeline = telemetry.build_pipeline(database=database, machine=machine, home=meiva_home())
+    process_home = meiva_home()
+    pipeline = telemetry.build_pipeline(database=database, machine=machine, home=process_home)
     init_gateway_process(
         name="task_maintenance",
         producer=lambda: pipeline,
         machine_reader=machine.name,
         image=image,
+        home=process_home,
     )
     install_graceful_shutdown("task_maintenance")
     endpoint = task_maintenance_endpoint()

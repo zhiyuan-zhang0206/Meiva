@@ -96,7 +96,9 @@ def run(schedule_id: int, revision: int | None = None) -> int:
             revision,
             engine.RunnerRoot(
                 database=database(),
-                inputs=ScheduleInputs(database, clients.event_pipeline, image, machine=machine),
+                inputs=ScheduleInputs(
+                    database, clients.event_pipeline, image, machine=machine, home=home
+                ),
                 plugins=engine.PluginInputs(config=config, machine=machine, clients=clients),
                 policy=StallPolicy(timeout_s=config.view.gateway.schedule_stall_timeout_seconds),
                 home=home,

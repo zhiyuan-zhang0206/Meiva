@@ -39,13 +39,11 @@ init_done = False
 # Writes `agent-{N}.log`, which every exec subprocess of that agent appends
 # to; `process_role="subprocess"` marks these records.
 #
-# ``home`` is the home whose ``logs/`` directory holds the file; the entry that resolved it
-# passes it, and without it the ambient home is read (a transitional form that goes with its
-# callers).
+# ``home`` is the home whose ``logs/`` directory holds the file: the entry that resolved it passes it.
 #
 # Idempotent — repeat in the same process silent-skips (see
 # ``init_done`` at module top).
-def init_subprocess_logger(*, agent_id: int, home: Path | None = None) -> None:
+def init_subprocess_logger(*, agent_id: int, home: Path) -> None:
     global init_done  # noqa: PLW0603
     if init_done:
         return
@@ -74,16 +72,15 @@ def _add_stderr_sink_before_settings() -> None:
 #
 # The caller (telemetry owns the event pipeline) supplies ``attach_events`` so this
 # module never imports it; ``announce`` runs after the sinks are live (a boot log line).
-# ``home`` is the home whose ``logs/`` directory holds the file; the entry that resolved it
-# passes it, and without it the ambient home is read (a transitional form that goes with its
-# callers). Agent id is the ``-`` sentinel (no agent). Idempotent — a repeat in the same process
+# ``home`` is the home whose ``logs/`` directory holds the file: the entry that resolved it passes
+# it. Agent id is the ``-`` sentinel (no agent). Idempotent — a repeat in the same process
 # silent-skips (see ``init_done``).
 def start_process_logging(
     name: str,
     *,
     attach_events: Callable[[], object],
     announce: Callable[[], None] | None = None,
-    home: Path | None = None,
+    home: Path,
 ) -> None:
     global init_done  # noqa: PLW0603
     if init_done:

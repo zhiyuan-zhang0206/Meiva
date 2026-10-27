@@ -15,9 +15,10 @@ _CHILD = Path(__file__).parent / "children" / "emit_child.py"
 
 
 def test_the_event_is_emitted_once_process_logging_is_open(tmp_path: Path) -> None:
+    entry_home = tmp_path / "entry-home"
     child = run_bounded(
-        [sys.executable, "-I", str(_CHILD), "schedule-probe"],
-        env={**os.environ, "MEIVA_HOME": str(tmp_path), "MEIVA_CONFIG_FETCH": "skip"},
+        [sys.executable, "-I", str(_CHILD), "schedule-probe", str(entry_home)],
+        env={**os.environ, "MEIVA_HOME": str(tmp_path / "ambient"), "MEIVA_CONFIG_FETCH": "skip"},
         cwd=Path(__file__).resolve().parents[2],
         capture_output=True,
         text=True,
@@ -27,6 +28,7 @@ def test_the_event_is_emitted_once_process_logging_is_open(tmp_path: Path) -> No
     assert child.returncode == 0, child.stderr
     result = json.loads(child.stdout)
     assert result["files"] == ["schedule-probe.log"]
+    assert not (tmp_path / "ambient" / "logs").exists()
     names = [event["name"] for event in result["events"]]
     assert names.count("service_started") == 1
     assert names.count("ci_usage_daily") == 2

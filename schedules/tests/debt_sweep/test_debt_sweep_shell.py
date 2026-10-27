@@ -188,6 +188,7 @@ def test_a_failed_sweep_wakes_the_p0_lead_and_the_claim_stays(
         emitted_events.producer,
         LoadedCommit(repo, None),
         machine=machine_identity,
+        home=tmp_path / ".meiva",
     )
     schedule_id = insert_schedule(db_conn, name="debt-sweep-failure", created_at=_SLOT)
     page = DirectoryPage(_LABEL, None, (), None)
@@ -228,6 +229,7 @@ def test_a_p0_lead_that_cannot_be_reached_is_an_error_not_a_silent_failure(
         emitted_events.producer,
         LoadedCommit(tmp_path, None),
         machine=machine_identity,
+        home=tmp_path / ".meiva",
     )
     unreachable = ReportRecipient("debt-sweep-daily", "MEIVA_DEBT_SWEEP_REPORT_AGENT", "lead", None)
     page = DirectoryPage(_LABEL, None, (), None)

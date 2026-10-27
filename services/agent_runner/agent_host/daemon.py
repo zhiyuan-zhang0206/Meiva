@@ -641,7 +641,7 @@ def main() -> None:
         nonlocal clients_handed_off
         clients_handed_off = True
 
-    initialize_logging(clients, machine, process_context.loaded_code_image())
+    initialize_logging(clients, machine, process_context.loaded_code_image(), home)
     code = 0
     # Runner avoids automatic shutdown_default_executor joins of to_thread
     # recorders. Explicit drain reaches run's cleanup; hard exit skips executor teardown.

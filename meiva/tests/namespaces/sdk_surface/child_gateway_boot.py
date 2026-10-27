@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import os
 import sys
 from dataclasses import dataclass
 from pathlib import Path
@@ -44,6 +45,7 @@ with capturing_events() as events:
         producer=producer,
         machine_reader=read_machine,
         image=image,
+        home=Path(os.environ["MEIVA_HOME"]),
     )
     [started] = events.named("service_started")
     print(

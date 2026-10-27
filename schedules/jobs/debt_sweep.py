@@ -141,6 +141,7 @@ def sweep_day(
             producer=inputs.producer,
             machine_reader=inputs.machine.name,
             image=inputs.image,
+            home=inputs.home,
         )
         print(log_line(slot, done.day, done.scan, done.dispatch.action, done.dispatch.agent_id))
     except Exception as exc:

@@ -9,8 +9,10 @@ from __future__ import annotations
 
 import json
 import sys
+import tempfile
 import time
 from collections.abc import Callable
+from pathlib import Path
 from typing import Any
 
 
@@ -49,23 +51,25 @@ def identity_child_record() -> dict[str, Any]:
         writer=writer, export_allowed=lambda: True
     )
     clients = ClientSet(pipeline_factory=lambda: pipeline)
-    exec_child.init_logger(
-        999999,
-        producer=clients.event_pipeline,
-        machine_reader=lambda: "lazy-child-probe",
-        environ={},
-    )  # the real arm path (task #3816 M4b)
-    # The boot clock is all the record reads; the SDK modules stay unimported.
-    child = exec_child.ChildContext(
-        meiva=None,  # pyright: ignore[reportArgumentType]
-        boot_started_at=time.perf_counter(),
-    )
-    exec_child.emit_child_boot_timing(child, clients=clients, now=time.perf_counter())
-    assert pipeline.sync(timeout=5.0).status is DrainStatus.COMPLETED
-    assert backends
-    unfinished = backends[0].flush(timeout=0).status is DrainStatus.UNFINISHED
-    deferred = clients.exports_deferred()
-    pipeline.stop(timeout=5.0)
+    with tempfile.TemporaryDirectory(prefix="lazy-child-") as home:
+        exec_child.init_logger(
+            999999,
+            producer=clients.event_pipeline,
+            machine_reader=lambda: "lazy-child-probe",
+            environ={},
+            home=Path(home),
+        )  # the real arm path (task #3816 M4b)
+        # The boot clock is all the record reads; the SDK modules stay unimported.
+        child = exec_child.ChildContext(
+            meiva=None,  # pyright: ignore[reportArgumentType]
+            boot_started_at=time.perf_counter(),
+        )
+        exec_child.emit_child_boot_timing(child, clients=clients, now=time.perf_counter())
+        assert pipeline.sync(timeout=5.0).status is DrainStatus.COMPLETED
+        assert backends
+        unfinished = backends[0].flush(timeout=0).status is DrainStatus.UNFINISHED
+        deferred = clients.exports_deferred()
+        pipeline.stop(timeout=5.0)
 
     forbidden = (
         "opentelemetry.sdk._logs",

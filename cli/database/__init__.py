@@ -191,7 +191,9 @@ class OperatorEventPipeline:
             return
         from base.telemetry.process_logging import init_cli_process
 
-        init_cli_process(name=name, producer=self, machine_reader=self._machine.name)
+        init_cli_process(
+            name=name, producer=self, machine_reader=self._machine.name, home=self._home
+        )
 
     def close_command(self, *, primary: BaseException | None) -> None:
         """Report unfinished shutdown and preserve the command's primary error."""

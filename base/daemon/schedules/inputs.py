@@ -3,6 +3,7 @@
 from collections.abc import Callable, Generator
 from contextlib import contextmanager
 from dataclasses import dataclass, field
+from pathlib import Path
 
 from base.cluster.machine import MachineIdentityReader
 from base.db import Database
@@ -12,14 +13,15 @@ from base.telemetry import EventPipeline
 __all__ = ["ScheduleInputs", "schedule_entry"]
 
 
+# meiva:note
+# Use the executing entry's builders, the home it resolved and its immutable loaded-code fact.
 @dataclass(frozen=True)
 class ScheduleInputs:
-    """Use the executing entry's builders and immutable loaded-code fact."""
-
     database: Callable[[], Database]
     producer: Callable[[], EventPipeline]
     image: LoadedCommit
     machine: MachineIdentityReader = field(kw_only=True)
+    home: Path = field(kw_only=True)
 
 
 # meiva:note
