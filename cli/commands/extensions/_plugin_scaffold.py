@@ -2,8 +2,10 @@
 # The plugin scaffold hook — how a plugin owns its own host-side state.
 #
 # A plugin opts in by shipping `setup.py` beside `plugin.py` with a required
-# `scaffold(*, machine: MachineIdentityReader)`. The explicit `meiva memory init` command runs it for every enabled
-# plugin, so runtime memory state is never touched by converge or startup.
+# `scaffold(*, machine: MachineIdentityReader, facts: ScaffoldFacts)`. The explicit `meiva memory
+# init` command runs it for every enabled plugin, so runtime memory state is never touched by
+# converge or startup. The command reads the settings once and hands them over as `facts`; a
+# scaffold reads no settings of its own. A scaffold that does not accept both keywords is refused.
 #
 # `setup.py` is loaded on its own, NOT through `plugin.py`: plugin modules import
 # the agent runtime (hooks, graph, the SDK namespace), none of which exists in a
@@ -17,11 +19,13 @@
 from __future__ import annotations
 
 import importlib.util
+import inspect
 from dataclasses import dataclass
 from pathlib import Path
 from types import ModuleType
 
 from base.cluster.machine import MachineIdentityReader
+from base.packages.plugins.loading.scaffold import ScaffoldFacts
 
 
 @dataclass(frozen=True)
@@ -32,17 +36,16 @@ class ScaffoldResult:
     ran: list[str]
 
 
-def run_plugin_scaffolds(*, machine: MachineIdentityReader) -> ScaffoldResult:
-    """Call `scaffold(machine=machine)` on every enabled plugin that defines one.
-
-    Loading a plugin's `setup.py` is fail-soft (user ruling 2026-09-11): a file
-    that fails to import is skipped with a loud report
-    (``base.packages.plugins.load_report``) and the remaining plugins still run — one
-    broken plugin must not block the provisioning command for every other
-    plugin. Running a plugin's `scaffold()` stays fail-fast: this is explicit
-    provisioning, and a scaffold that raises must stop the command rather than
-    let half-provisioned state pass as success.
-    """
+# meiva:note
+# Call `scaffold(machine=machine, facts=facts)` on every enabled plugin that defines one.
+#
+# Loading a plugin's `setup.py` is fail-soft (user ruling 2026-09-11): a file that fails to import
+# is skipped with a loud report (``base.packages.plugins.load_report``) and the remaining plugins
+# still run, because one broken plugin must not block the provisioning command for every other
+# plugin. Running a plugin's `scaffold()` stays fail-fast: this is explicit provisioning, and a
+# scaffold that raises must stop the command rather than let half-provisioned state pass as
+# success.
+def run_plugin_scaffolds(*, machine: MachineIdentityReader, facts: ScaffoldFacts) -> ScaffoldResult:
     from base.packages.plugins import enable_config as plugins_cfg
     from base.packages.plugins import load_report
 
@@ -66,8 +69,14 @@ def run_plugin_scaffolds(*, machine: MachineIdentityReader) -> ScaffoldResult:
         scaffold = getattr(module, "scaffold", None)
         if scaffold is None:
             continue
+        try:
+            inspect.signature(scaffold).bind(machine=machine, facts=facts)
+        except TypeError as exc:
+            raise TypeError(
+                f"plugin {name!r}: scaffold must accept the keywords machine and facts: {exc}"
+            ) from exc
         print(f"  · {name}")
-        scaffold(machine=machine)
+        scaffold(machine=machine, facts=facts)
         ran.append(name)
     return ScaffoldResult(ran=ran)
 

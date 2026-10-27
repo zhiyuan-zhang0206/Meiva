@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import sys
+from pathlib import Path
 
 import httpx
 
@@ -10,8 +11,11 @@ from base.cluster.machine import (
     gateway_api_base,
     gateway_auth_headers,
 )
+from base.cluster.machine.boot import gateway_access_from_boot
+from base.config import ConfigBoot
 from base.deploy.git.memory_repo import MemoryBranchMismatch
 from base.host.net.http_dial import post as dial_post
+from base.packages.plugins.loading.scaffold import ScaffoldFacts
 from cli.commands.extensions._plugin_scaffold import (
     ScaffoldResult as ScaffoldResult,
 )
@@ -24,14 +28,27 @@ _TIMEOUT_S = 30.0
 
 
 # meiva:note
+# The values a plugin scaffold provisions from, read once from the command's configuration owner
+# and its home: the memory provisioning settings and how to reach the gateway.
+def scaffold_facts(config: ConfigBoot, *, home: Path) -> ScaffoldFacts:
+    general = config.view.general
+    return ScaffoldFacts(
+        home=home,
+        memory_keep_local=general.memory_keep_local,
+        memory_remote=general.memory_remote,
+        gateway=gateway_access_from_boot(config),
+    )
+
+
+# meiva:note
 # Explicitly initialize enabled plugin-owned memory resources.
 #
 # Memory repository branch validation belongs to this operator-requested provisioning path,
 # never to converge or service startup.
-def cmd_memory_init(*, machine: MachineIdentityReader) -> int:
+def cmd_memory_init(*, machine: MachineIdentityReader, facts: ScaffoldFacts) -> int:
     print("initializing memory resources...")
     try:
-        result = run_plugin_scaffolds(machine=machine)
+        result = run_plugin_scaffolds(machine=machine, facts=facts)
     except MemoryBranchMismatch as exc:
         print(f"  ✗ {exc}", file=sys.stderr)
         return 1
