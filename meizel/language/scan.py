@@ -226,6 +226,7 @@ class Scanner(AmbientAccess):
         }
 
     def run(self) -> FileScan:
+        self.purity_state.mark_annotations(self.tree)
         self.children(self.tree)
         self.purity_state.record_module(self.tree)
         return FileScan(
