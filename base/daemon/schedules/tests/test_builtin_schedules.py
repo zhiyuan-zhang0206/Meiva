@@ -37,6 +37,7 @@ class TestLoadManifest:
             "sched-dry-import-weekly": "operator",
             "log-cred-mask-monthly": "operator",
             "qa-keepalive": "operator",
+            "agent-watch": "operator",
         }
         assert {name for name, s in by_name.items() if s.default_enabled} == {
             "c9-daily-report",

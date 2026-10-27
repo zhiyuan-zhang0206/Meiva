@@ -28,7 +28,7 @@ from schedules.plans.tracker_report import (
     candidate_message,
     plan_tracker_exit,
 )
-from schedules.tests.gateway_directory import (
+from schedules.tests.support.gateway_directory import (
     AgentRowSpec,
     DirectoryPage,
     GatewayRequest,

@@ -36,8 +36,8 @@ from schedules.plans.c9_window import (
     window_bounds,
 )
 from schedules.plans.directory_plan import ReportRecipient
-from schedules.tests.gateway_directory import AgentRowSpec, DirectoryPage, serve_gateway
-from schedules.tests.schedule_support import claimed_slots, insert_schedule
+from schedules.tests.support.gateway_directory import AgentRowSpec, DirectoryPage, serve_gateway
+from schedules.tests.support.schedule_support import claimed_slots, insert_schedule
 
 _REPO_ROOT = Path(__file__).resolve().parents[2]
 _SLOT = datetime(2026, 9, 6, 21, 0, tzinfo=UTC)

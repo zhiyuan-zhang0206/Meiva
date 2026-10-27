@@ -105,6 +105,14 @@
       "description": "Operator sentinel for one agent's page and inbound watcher on a remote host: the gateway-hosted runner probes an HTTP health URL and a remote process every ten minutes, wakes the owning agent only after two consecutive failed rounds (one bad round is a rollout), then holds a one-hour cool-down and clears the streak on the first healthy round. Ships disabled: the health URL, the probed hosts and the owner are site values in the template.",
       "script": "qa-keepalive-schedule.py",
       "command": "python qa-keepalive-schedule.py"
+    },
+    {
+      "name": "agent-watch",
+      "class": "operator",
+      "default_enabled": false,
+      "description": "Operator sentinel for duties that stop taking their rounds (#5594): every ten minutes it reads, for each agent with a watching duty, the live session count, the age of the last real turn, and whether a schedule that agent owns still fires on its own cadence, then wakes the agent, tells the lead, or escalates to the user along one ladder -- for an hourly duty: detect at 90 minutes, report to the lead at 180, escalate at 240, with every rung moving out with a longer cadence and the interval between repeats widening as the silence outlasts each rung. A declared heartbeat pause is not silence, and only the turn-age condition treats it as rest: a fleet of dead sessions is still a loss. A signal the host cannot read is reported as blind and never counted as healthy, and a terminated agent is finished rather than silent, so the sentinel never resurrects a duty the user ended.",
+      "script": "agent-watch-schedule.py",
+      "command": "python agent-watch-schedule.py"
     }
   ]
 }

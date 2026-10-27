@@ -1,5 +1,6 @@
 [uses]
 "adversarial-eval-weekly-schedule.py" = ["jobs", "plans"]
+"agent-watch-schedule.py" = ["jobs", "plans"]
 "c9-daily-report-schedule.py" = ["jobs", "plans"]
 "db-write-stall-watch-schedule.py" = ["jobs"]
 "debt-sweep-daily-schedule.py" = ["jobs", "plans"]
@@ -18,6 +19,7 @@
 
 [roots]
 "adversarial-eval-weekly-schedule.py" = { kinds = ["clock", "environ", "home"], why = "Schedule process entry reads the home it runs under, its scheduler identity and start instant before composing the weekly batch loop" }
+"agent-watch-schedule.py" = { kinds = ["clock", "environ", "home"], why = "Schedule process entry reads the home it runs under, the report-agent override, scheduler identity and start instant before composing the ten-minute watching loop" }
 "c9-daily-report-schedule.py" = { kinds = ["clock", "environ", "home", "platform"], why = "Schedule process entry reads the home it runs under, its report recipient, scheduler identity and start instant before constructing C9Report; builds the host of this process with Host.system()" }
 "db-write-stall-watch-schedule.py" = { kinds = ["clock", "home"], why = "Schedule process entry reads the home it runs under and supplies the stall watcher with a wall-clock reader" }
 "debt-sweep-daily-schedule.py" = { kinds = ["clock", "environ", "home"], why = "Schedule process entry reads the home it runs under, its worker label, report recipient, scheduler identity and start instant before constructing the debt-sweep job" }

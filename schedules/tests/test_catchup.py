@@ -15,7 +15,7 @@ from base.config import settings
 from base.db import Database
 from base.db.code_version_gate import ProcessDbGate
 from schedules.jobs.catchup import Fired, cluster_timezone, fire_slot_once
-from schedules.tests.schedule_support import claimed_slots, insert_schedule
+from schedules.tests.support.schedule_support import claimed_slots, insert_schedule
 
 _CREATED = datetime(2026, 9, 6, 9, 30, tzinfo=UTC)
 
