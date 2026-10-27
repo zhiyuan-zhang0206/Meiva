@@ -43,6 +43,71 @@ class GeneralSettings(EnvSettings):
         },
     )
 
+    impersonation_event_report_interval_seconds: int = Field(
+        default=86400,
+        alias="MEIVA_IMPERSONATION_EVENT_REPORT_INTERVAL_SECONDS",
+        description=(
+            "Seconds before the same lease and condition is reported again as an incomplete "
+            "event log. A condition that can never clear (a failed capture source never "
+            "completes its lease) has to stay visible for as long as it holds, so it re-reports "
+            "on this cadence without ever going quiet: the default 86400 puts that evidence at "
+            "one event per lease per day. The 900s floor keeps the cadence above the alert "
+            "rule's 3-minute window, so each report is its own firing rather than a continuous "
+            "one."
+        ),
+        ge=900,
+        le=604800,
+        json_schema_extra={
+            "restart_required": "all",
+            "writable": True,
+            "sensitive": False,
+            "scope": "cluster-pinned",
+        },
+    )
+
+    impersonation_event_abandon_grace_seconds: int = Field(
+        default=300,
+        alias="MEIVA_IMPERSONATION_EVENT_ABANDON_GRACE_SECONDS",
+        description=(
+            "Seconds after a lease ends before a source receipt its controller never sealed "
+            "is treated as abandoned: the reaper records the abandonment in the lease's log "
+            "and seals the receipt with the rows it holds, so the log can complete. The "
+            "default 300s follows from the seal path it backstops: a controller's detach "
+            "seals within about 100ms of opening its receipt and waits at most "
+            "MEIVA_IMPERSONATION_EVENT_SEAL_WAIT_SECONDS (10s) to drain, so five minutes "
+            "still leaves a live controller time to notice the ended lease and detach, while "
+            "a larger value only holds a real gap open longer."
+        ),
+        ge=60,
+        le=86400,
+        json_schema_extra={
+            "restart_required": "all",
+            "writable": True,
+            "sensitive": False,
+            "scope": "cluster-pinned",
+        },
+    )
+
+    # meiva:note
+    # The abandon grace must outlive the detach drain wait: a shorter window would reclaim a
+    # receipt while its controller is still inside the documented seal wait, and a reclaim writes
+    # "sealed" over a source that may still have rows to add — the audit chain would then claim a
+    # closed log with rows missing. That is irreversible (the transition is one-way and the log is
+    # permanent), so an out-of-range value refuses the load instead of being clamped into
+    # something plausible.
+    @model_validator(mode="after")
+    def _abandon_grace_outlives_the_seal_wait(self) -> GeneralSettings:
+        grace = self.impersonation_event_abandon_grace_seconds
+        seal_wait = self.impersonation_event_seal_wait_seconds
+        if grace <= seal_wait:
+            raise ValueError(
+                "MEIVA_IMPERSONATION_EVENT_ABANDON_GRACE_SECONDS must exceed "
+                "MEIVA_IMPERSONATION_EVENT_SEAL_WAIT_SECONDS "
+                f"({grace} <= {seal_wait}): a receipt reclaimed inside the detach drain wait "
+                "would close an event log that is still being written"
+            )
+        return self
+
     self_evolution_coverage_alert_floor: float = Field(
         default=0.5,
         ge=0.0,

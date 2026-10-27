@@ -313,6 +313,25 @@ def test_timezone_validated_at_construction() -> None:
     )
 
 
+# meiva:note
+# A grace at or below the detach drain wait would reclaim a receipt while its controller is still
+# sealing it, and a reclaim is irreversible: the log would close claiming rows it does not have.
+# Out-of-range refuses the load instead of being clamped into something plausible.
+def test_abandon_grace_must_exceed_the_seal_wait() -> None:
+    from base.config.domains.general import GeneralSettings
+
+    with pytest.raises(ValidationError, match="must exceed"):
+        GeneralSettings.from_environment(
+            {
+                "MEIVA_IMPERSONATION_EVENT_SEAL_WAIT_SECONDS": "90",
+                "MEIVA_IMPERSONATION_EVENT_ABANDON_GRACE_SECONDS": "90",
+            }
+        )
+    with pytest.raises(ValidationError, match="greater than or equal to 60"):
+        GeneralSettings.from_environment({"MEIVA_IMPERSONATION_EVENT_ABANDON_GRACE_SECONDS": "5"})
+    assert GeneralSettings.from_environment({}).impersonation_event_abandon_grace_seconds == 300
+
+
 def _capture_loguru_warnings() -> tuple[list[str], int]:
     """A loguru sink collecting WARNING+ records; returns (records, sink_id).
 

@@ -303,7 +303,9 @@ def test_a_direct_audit_event_after_close_refuses_and_fails_the_source(
         ]
         is None
     )
-    assert emit_incomplete_event_logs(db_conn) == 1  # the failed source keeps the signal firing
+    # meiva:note
+    # The failed source keeps the signal firing, on its report cadence.
+    assert emit_incomplete_event_logs(db_conn, repeat_interval_seconds=86400) == 1
 
 
 def test_a_transient_failure_stays_sticky_until_the_failed_source_persists(
