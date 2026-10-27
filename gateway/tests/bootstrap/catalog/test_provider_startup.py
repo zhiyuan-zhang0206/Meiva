@@ -14,7 +14,7 @@ from base.packages.plugins.enable_config import discover_plugins, set_local_enab
 from base.packages.tests.lm.providers.provider_plugin_support import (
     provider_plugin as provider_plugin,
 )
-from base.paths import plugins_dir, resolve_meiva_home
+from base.paths import plugins_dir
 from gateway.http.model_catalog import (
     CatalogLoadFailure,
     ModelCatalogUnavailableError,
@@ -68,10 +68,10 @@ def test_zero_provider_keeps_management_available(
 
 
 @pytest.fixture
-def broken_provider(provider_plugin: Callable[..., None]) -> tuple[Path, str]:
+def broken_provider(provider_plugin: Callable[..., None], unit_home: Path) -> tuple[Path, str]:
     provider_plugin(prefix="kept-", model="kept-1", dir_name="a_kept_provider")
     provider_plugin(dir_name="z_broken_provider")
-    provider_path = plugins_dir(home=resolve_meiva_home()) / "z_broken_provider" / "provider.py"
+    provider_path = plugins_dir(home=unit_home) / "z_broken_provider" / "provider.py"
     valid_provider = provider_path.read_text()
     provider_path.write_text('raise RuntimeError("broken provider declaration")\n')
     return provider_path, valid_provider

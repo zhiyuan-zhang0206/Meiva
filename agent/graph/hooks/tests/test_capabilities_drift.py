@@ -74,7 +74,7 @@ def _runtime(
 
 @pytest.fixture
 def skills_dir(unit_home: Path) -> Path:
-    d = paths.skills_dir(paths.meiva_home())
+    d = paths.skills_dir(unit_home)
     d.mkdir()
     return d
 

@@ -105,6 +105,7 @@ def _shell_env_report(name: str) -> str:
 def test_agent_shell_session(
     pty_service: PtyServiceProcess,
     database: Database,
+    unit_home: Path,
     secrets_in_creator_env: None,
 ) -> None:
     """An agent's own persistent shell. The create is a `new` request to the
@@ -113,7 +114,7 @@ def test_agent_shell_session(
     children re-source them at their own boot), so the secret values appear
     NOWHERE in this launch path: not on an argv of the service or the shell, not in
     the shell's environment."""
-    from base.paths import resolve_meiva_home, workspace_dir
+    from base.paths import workspace_dir
     from base.sessions.backend import PtySessionBackend, get_shell_backend
     from base.sessions.pty.client import PtyClientConfig
     from meiva.shell.sessions import ShellSessions, session_host
@@ -124,7 +125,7 @@ def test_agent_shell_session(
         backend=PtySessionBackend(PtyClientConfig(socket_path=service_socket())),
         database=database,
         agent_id=1,
-    ).create("probe", cwd=workspace_dir(1, home=resolve_meiva_home()), ttl=120, host=session_host())
+    ).create("probe", cwd=workspace_dir(1, home=unit_home), ttl=120, host=session_host())
     name = "meiva-agent-1-shell-3-probe"
     assert get_shell_backend().has_session(name)
 
