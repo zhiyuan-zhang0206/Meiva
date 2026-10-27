@@ -24,7 +24,6 @@ exports = ["metrics.py"]
 "inherit.py#home base.paths.workspace_dir_readonly" = 1
 "notes.py#home base.paths.memory_dir" = 1
 "notes.py#home base.paths.workspace_dir" = 1
-"pool_ops.py#home base.paths.home.resolve_meiva_home" = 3
 "sdk.py#home base.paths.workspace_dir" = 1
 "setup.py#home base.paths.gateway_memory_dir" = 1
 "setup.py#home base.paths.memory_dir" = 1
