@@ -4,11 +4,13 @@ from typing import Never
 
 from psycopg_pool import PoolTimeout
 
+from base.clock import Clock, ClockConfig
+from base.clock.tests.manual_timers import ManualTimers
 from base.cluster.machine import MachineIdentityReader
 from base.cluster.machine.tests.identity import machine_identity as machine_identity
 from base.paths import meiva_home
 from gateway.cluster.process_boot import LOADED_IMAGE
-from gateway.tests.auth.gateway_config import gateway_test_client
+from gateway.tests.auth.gateway_config import gateway_test_app, gateway_test_client
 
 
 def _health() -> dict[str, object]:
@@ -49,6 +51,15 @@ def test_health_process_birth_is_stable_between_requests() -> None:
         second = client.get("/api/health").json()["started_at"]
     assert isinstance(first, float)
     assert second == first
+
+
+def test_health_process_birth_is_the_app_clocks_instant_at_startup() -> None:
+    timers = ManualTimers()
+    app = gateway_test_app()
+    app.state.clock = Clock(ClockConfig("UTC", "UTC", False), timers=timers, now=timers.now)
+    with gateway_test_client(app) as client:
+        started_at = client.get("/api/health").json()["started_at"]
+    assert started_at == timers.now().timestamp()
 
 
 def test_health_control_pool_timeout_returns_degraded_with_identity(
