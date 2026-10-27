@@ -245,29 +245,6 @@ def test_an_approval_without_a_reason_is_refused() -> None:
     ]
 
 
-VITEST_SETUP = 'import { vi } from "vitest";\n\nvi.mock("next-intl", () => ({ useTranslations: () => (key: string) => key }));\n'
-VITEST_REPO = {"ui/tests/setup.ts": VITEST_SETUP, "meizel.toml": '[roles]\nfrontend = ["ui"]\n'}
-
-
-@pytest.mark.parametrize(
-    ("policy", "expected"),
-    [("", {"third-party-patch"}), (approving("ui/tests/setup.ts"), set[str]())],
-)
-def test_a_typescript_setup_file_is_approved_like_a_python_one(
-    make_repo: RepoFactory, policy: str, expected: set[str]
-) -> None:
-    root = make_repo({**VITEST_REPO, "meizel.policy.toml": policy})
-    found = analysis_of(root).diagnostics
-    assert {d.code.value for d in found if d.path == "ui/tests/setup.ts"} == expected
-
-
-def test_a_typescript_test_module_cannot_be_approved(make_repo: RepoFactory) -> None:
-    files = {**VITEST_REPO, "ui/tests/view.test.ts": VITEST_SETUP}
-    root = make_repo({**files, "meizel.policy.toml": approving("ui/tests/view.test.ts")})
-    [refused] = [d for d in analysis_of(root).diagnostics if d.code.value == "policy-syntax"]
-    assert "a test module" in refused.message
-
-
 def test_the_listing_counts_the_patches_of_each_approved_file(
     make_repo: RepoFactory, capsys: pytest.CaptureFixture[str]
 ) -> None:
@@ -276,3 +253,24 @@ def test_the_listing_counts_the_patches_of_each_approved_file(
     out = capsys.readouterr().out
     assert "app/tests/guards.py: 1 site -- keeps the suite off the host" in out
     assert "1 patch site in 1 approved file, not recorded as debt" in out
+
+
+def test_a_stale_approval_points_at_its_own_entry_not_at_an_earlier_mention(
+    make_repo: RepoFactory,
+) -> None:
+    policy = (
+        '[external]\n"app/tests/gone.py" = "an earlier mention of the same path"\n\n'
+        + approving("app/tests/gone.py")
+    )
+    _, found = approval_judged(make_repo, policy)
+    [stale] = [d for d in found if d.code.value == "stale-approval"]
+    assert stale.line == 5
+
+
+def test_a_refused_approval_points_at_its_own_entry_too(make_repo: RepoFactory) -> None:
+    policy = '[external]\n"lib/mod.py" = "an earlier mention of the same path"\n\n' + approving(
+        "lib/mod.py"
+    )
+    _, found = approval_judged(make_repo, policy)
+    [refused] = [d for d in found if d.code.value == "policy-syntax"]
+    assert refused.line == 5

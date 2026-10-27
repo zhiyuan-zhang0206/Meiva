@@ -131,17 +131,22 @@ class Policy:
         return dict(self.listed.get((rule, section), {}))
 
     # meiva:note
-    # The line of the first uncommented line that quotes `name`; 1 when none does.
-    def line_of(self, name: str) -> int:
+    # The line of the first uncommented line that quotes `name`, within `[table]` when one is given;
+    # 1 when none does.
+    def line_of(self, name: str, table: str | None = None) -> int:
         quoted = f'"{name}"'
-        return next(
-            (
-                number
-                for number, text in enumerate(self.lines, 1)
-                if quoted in text and not text.lstrip().startswith("#")
-            ),
-            1,
-        )
+        inside = table is None
+        for number, text in enumerate(self.lines, 1):
+            if text.startswith("["):
+                inside = table is None or text.strip() == f"[{table}]"
+            if (
+                inside
+                and quoted in text
+                and not text.lstrip().startswith("#")
+                and not text.startswith("[")
+            ):
+                return number
+        return 1
 
     def names(self, rule: str, section: str) -> tuple[str, ...]:
         """The names of one list section; empty when the file has none."""

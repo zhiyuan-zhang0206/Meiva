@@ -18,4 +18,4 @@ exports = ["nav-timing.ts", "telemetry-page-view.tsx", "telemetry.ts"]
 
 [debt.ambient-read]
 "nav-timing.ts#environ window.location" = 2
-"telemetry.ts#platform navigator" = 1
+"telemetry.ts#platform navigator" = 2

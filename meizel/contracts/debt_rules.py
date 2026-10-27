@@ -26,7 +26,7 @@ from typing import TypeGuard
 
 from meizel.allowances import RETIRED_AMBIENT_SECTIONS, Policy
 from meizel.contracts.analysis import Analysis, analyze, load_policy
-from meizel.contracts.debt import total
+from meizel.contracts.debt import PATCH_CODES, total
 from meizel.contracts.debt_edit import prune as prune_debt
 from meizel.contracts.debt_edit import record
 from meizel.contracts.debt_report import Baselines, changed_under, read_baselines
@@ -128,7 +128,7 @@ def _totals(baselines: Baselines) -> Counter[str]:
 # shows its reads, and recording them is the honest way to remove the entry (the base's roots are
 # kept when it is regenerated, so it never finds them). Only a kind the change took from the entry
 # is let through, for the file of that entry. A file whose approval of patches the change removes
-# is let through whole, for the same reason: its patches are recorded as debt now.
+# is let through for every patch code, for the same reason: its patches are recorded as debt now.
 def _excess(
     tree: Baselines, found: Baselines, unmasked: Mapping[tuple[str, str], frozenset[str]]
 ) -> list[tuple[str, str, str, int, int]]:
@@ -140,7 +140,8 @@ def _excess(
                 file, _, what = key.partition("#")
                 kind = what.split(" ", 1)[0]
                 lifted = unmasked.get((owner, file), frozenset())
-                if have > want and kind not in lifted and _EVERY_KIND not in lifted:
+                every = _EVERY_KIND in lifted and code in PATCH_CODES
+                if have > want and kind not in lifted and not every:
                     out.append((owner or ".", code.value, key, have, want))
     return out
 

@@ -13,9 +13,8 @@ tags:
 
 The gate cannot wait for every violation to be fixed first. A directory can
 record the violations it has today in its own `meizel.toml`; `check` then
-stops new ones at once and the recorded ones are repaid a step at a time. The
-tool supplies the mechanism; how a repository wires it into hooks and CI is
-that repository's policy and is not decided here.
+stops new ones at once and the recorded ones are repaid a step at a time. How a
+repository wires this into hooks and CI is that repository's policy.
 
 ## Two modes, no switch
 
@@ -31,9 +30,8 @@ These are debt states, separate from manifest `purity` modes. An empty baseline
 does not establish semantic purity, effect freedom or test-resource requirements.
 
 There is no lenient mode and no per-directory switch. A violation in a
-strict-to-be directory says so: it names the directory, how many debts it
-carries, and that the fix is to repair the violation, since `debt record` is for
-deliberate exceptions.
+strict-to-be directory names the directory and how many debts it carries; the
+fix is to repair it, since `debt record` is for deliberate exceptions.
 
 ## The baseline is local
 
@@ -60,11 +58,10 @@ Paths are relative to the owning directory. A key carries no line number, so
 moving code inside a file leaves the baseline alone; the count is how many
 occurrences are allowed. Tables are sorted and one debt takes one line, so a
 repayment is a one-line diff. `[debt]` does not count toward the directory
-budget. `cycle-edge` records the facts on the declared edges that close a cycle.
-The edges are the ones some entry projects onto; the declared graph without them
-must be acyclic, or `manifest-cycle` fails. Each fact on such an edge counts
-like any other: a new import file, or another import line, in the pair is a new
-violation, so the recorded facts can only shrink. When an edge closes no cycle
+budget. `cycle-edge` records the facts on the declared edges that close a cycle;
+the declared graph without those edges must be acyclic, or `manifest-cycle` fails.
+Each fact on such an edge counts like any other: a new import file, or another
+import line, in the pair is a new violation, so the recorded facts can only shrink. When an edge closes no cycle
 any more, or is no longer declared, its entries are `debt-paid`. A malformed
 `[debt]` is `manifest-debt`. Unresolved imports, stale declarations and manifest syntax
 errors cannot be recorded.
@@ -75,13 +72,11 @@ errors cannot be recorded.
   Text labels directories with/without recorded debt. JSON adds `basis` describing
   that limit and retains its numeric schema: legacy `directories.strict_to_be`
   and `strict` mean with/without recorded debt, not manifest purity modes.
-  `by_top_level.*.strict_to_be_directories` also counts baseline owners only.
 - `debt record <paths...>` writes the current violations under the paths into
   their owners' manifests, creating a manifest where there is none (stage it:
   `check` reads tracked files). It is the only way a baseline grows: `check`
   and `bootstrap` never write one, and `record` never lowers a count. Cycle
-  back-edges are chosen greedily and thinned to the ones needed, and the facts on
-  them are recorded. Violations
+  back-edges are chosen greedily and thinned to the ones needed. Violations
   that cannot be recorded are printed and the exit code is 1.
 - `debt prune` lowers counts and drops entries to what still occurs.
 - `debt carry [--base ref]` follows a move. A baseline names files, so a
@@ -103,8 +98,9 @@ errors cannot be recorded.
   target, sorted by target. A prefix is dotted (`lib.mod` holds `lib.mod.f`, not
   `lib.mod2`), several are a union, and paths limit the scan. It reads the
   source, not the baseline, so it lists what a codemod has to change whether or
-  not it is recorded. Codemods and design write-ups use it instead of their own
-  scripts.
+  not it is recorded.
+- `debt approved [--json]` lists the files `[approved-patches.files]` approves
+  with the patches each holds now. They are not debt and no baseline counts them.
 - `debt diff --against <ref> --on-growth fail|warn` compares the recorded
   totals per code with those at a git ref. `--by-target` adds the recorded patch
   debt per target group: what the change paid down or added, to paste into a PR
@@ -124,8 +120,10 @@ errors cannot be recorded.
   greater count, so a declaration cannot hide a new violation and a violation cannot ride along.
   A file moved in the same change fails; move files separately. A manifest the checker cannot
   read in the ref stops the comparison. Other changes are judged by totals, with no waiver.
-  Historical snapshots keep the unreadable gate and use only the ref's ambient facts. Head
-  permissions are never copied. Caches refresh after policy replacement. See
+  The ref's own `[approved-patches.files]` is kept when it is regenerated: approving a file is a
+  drop of the record, and a file whose approval is removed may record its patches. Historical
+  snapshots keep the unreadable gate and use only the ref's ambient facts. Head permissions are
+  never copied. See
   [[meizel/docs/checker/policy.meiva.okf.md|historical policy comparisons]].
 
 ## Depths of `check`

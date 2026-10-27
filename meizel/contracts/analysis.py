@@ -331,7 +331,7 @@ def _approval_problems(policy: Policy) -> list[Diagnostic]:
     return [
         Diagnostic(
             POLICY,
-            policy.line_of(path),
+            policy.line_of(path, "approved-patches.files"),
             Code.POLICY_SYNTAX,
             f"[approved-patches.files] {path!r} {refusal}",
             ("approve only fixture infrastructure: a guard, a subprocess entry, a global setup",),
@@ -358,7 +358,7 @@ def _stale_approvals(
         found.append(
             Diagnostic(
                 POLICY,
-                policy.line_of(path),
+                policy.line_of(path, "approved-patches.files"),
                 Code.STALE_APPROVAL,
                 f"[approved-patches.files] {path!r} {problem}",
                 ("remove the entry",),

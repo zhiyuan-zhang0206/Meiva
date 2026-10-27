@@ -103,7 +103,7 @@ recorded or judged. Three purposes qualify: an autouse guard, the entry of a sub
 and the global setup of the test runner. Production code and test modules (`test_*.py`, `*_test.py`,
 `*.test.ts`, `*.spec.ts`) cannot be listed (`policy-syntax`): a test that patches is converted. Approval is
 by file, so a patch added to an approved file is not seen by the baseline; `python -m meizel debt approved`
-lists each file with the patches it holds now, and `policy diff` shows every entry added. An entry whose
+lists each file with the patches it holds now (no gate compares that count with a ref's), and `policy diff` shows every entry added. An entry whose
 file is gone or patches nothing is `stale-approval`. `missing-patch-target` is a hard error even there.
 The rule comparison keeps the base's table: approving a file shows as a drop of the record, and removing an
 approval may record the patches it hid.

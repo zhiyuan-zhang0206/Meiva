@@ -88,8 +88,9 @@ DEFAULT_TS_IMPURE_HOOKS: frozenset[str] = frozenset(
 
 # meiva:note
 # Next.js replaces `process.env.NEXT_PUBLIC_<NAME>` with the value the build saw, in every file it
-# bundles, so there the expression is a constant of the build and the program never reads the
-# environment. A file outside these roots (a config, a script, a test) is not bundled and reads it.
+# bundles, as long as that variable is set when it builds. There the expression is a constant of the
+# build, not a read of the environment. A file outside these roots (a config, a script, a test) is not
+# bundled and reads it.
 INLINED_ENV_PREFIX = "NEXT_PUBLIC_"
 INLINED_ENV_ROOTS: tuple[str, ...] = ("ui/web/src/",)
 

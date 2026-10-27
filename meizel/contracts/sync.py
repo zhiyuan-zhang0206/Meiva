@@ -94,7 +94,10 @@ def with_table(text: str, header: str, entries: Mapping[str, str]) -> str:
             [
                 "",
                 f"[{header}]",
-                *(f"{json.dumps(k)} = {json.dumps(v)}" for k, v in sorted(entries.items())),
+                *(
+                    f"{json.dumps(k, ensure_ascii=False)} = {json.dumps(v, ensure_ascii=False)}"
+                    for k, v in sorted(entries.items())
+                ),
             ]
         )
     return "\n".join(kept) + "\n" if kept else ""

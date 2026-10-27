@@ -592,3 +592,19 @@ def test_taking_an_approval_away_does_not_excuse_a_patch_added_elsewhere(
     out = capsys.readouterr().out
     assert "other.py#monkeypatch.setattr lib.helper" in out
     assert "guards.py" not in out
+
+
+def test_the_file_whose_approval_is_taken_away_is_let_through_for_patches_only(
+    make_repo: RepoFactory, capsys: pytest.CaptureFixture[str]
+) -> None:
+    root = patch_repo(make_repo, APPROVAL)
+    rule_change(root)
+    extra = "\n\ndef more(monkeypatch):\n    monkeypatch.setattr(lib, 'helper', lambda: 3)\n    exec('1')\n"
+    write(root, {"meizel.policy.toml": "", "app/tests/guards.py": GUARD + extra})
+    assert run(root, "debt", "record", ".") == 0
+    write(root, {})
+    capsys.readouterr()
+    assert diff(root) == 1
+    out = capsys.readouterr().out
+    assert "guards.py#exec" in out
+    assert "monkeypatch.setattr" not in out

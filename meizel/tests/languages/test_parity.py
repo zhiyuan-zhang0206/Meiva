@@ -237,3 +237,31 @@ def test_malformed_policy_reports_the_same_diagnostic_for_both_languages(
     [error] = diagnostics(root, "policy-syntax")
     assert error.path == "meizel.policy.toml"
     assert run(root, "check") == 1
+
+
+VITEST_SETUP = 'import { vi } from "vitest";\n\nvi.mock("next-intl", () => ({ useTranslations: () => (key: string) => key }));\n'
+VITEST_REPO = {"ui/tests/setup.ts": VITEST_SETUP, "meizel.toml": '[roles]\nfrontend = ["ui"]\n'}
+
+
+def approving(path: str) -> str:
+    return f'[approved-patches.files]\n"{path}" = "the global setup of the runner"\n'
+
+
+@pytest.mark.parametrize(
+    ("policy", "expected"),
+    [("", {"third-party-patch"}), (approving("ui/tests/setup.ts"), set[str]())],
+)
+def test_a_typescript_setup_file_is_approved_like_a_python_one(
+    make_repo: RepoFactory, policy: str, expected: set[str]
+) -> None:
+    root = make_repo({**VITEST_REPO, "meizel.policy.toml": policy})
+    found = analysis_of(root).diagnostics
+    assert {d.code.value for d in found if d.path == "ui/tests/setup.ts"} == expected
+
+
+@pytest.mark.parametrize("name", ["view.test.ts", "view.spec.ts", "view.test.tsx", "view.spec.tsx"])
+def test_a_typescript_test_module_cannot_be_approved(make_repo: RepoFactory, name: str) -> None:
+    path = f"ui/tests/{name}"
+    root = make_repo({**VITEST_REPO, path: VITEST_SETUP, "meizel.policy.toml": approving(path)})
+    [refused] = [d for d in analysis_of(root).diagnostics if d.code.value == "policy-syntax"]
+    assert "a test module" in refused.message

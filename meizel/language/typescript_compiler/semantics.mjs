@@ -5,8 +5,12 @@ export function semantics(ts, context, tree, out, index, config, test, ambientPo
   const checker = context.checker;
   const impure = new Set(config.impure_calls);
   // meiva:note
-  // The page and the browser the code runs in: its address, the storage it keeps, the cookies and the machine it reports.
-  const browserReads = {'window.location': 'environ', 'document.location': 'environ', 'globalThis.location': 'environ', 'location': 'environ', 'window.localStorage': 'environ', 'globalThis.localStorage': 'environ', 'localStorage': 'environ', 'window.sessionStorage': 'environ', 'globalThis.sessionStorage': 'environ', 'sessionStorage': 'environ', 'document.cookie': 'environ', 'window.navigator': 'platform', 'globalThis.navigator': 'platform', 'navigator': 'platform', 'window.matchMedia': 'platform', 'globalThis.matchMedia': 'platform', 'matchMedia': 'platform'};
+  // The page and the browser the code runs in: its address, the storage it keeps, the cookies and the machine it reports,
+  // bare or behind `window.`, `globalThis.` or `self.`. Only the global counts: a package called `navigator` does not.
+  const browserReads = Object.fromEntries(['', 'window.', 'globalThis.', 'self.'].flatMap(base => Object.entries({
+    location: 'environ', localStorage: 'environ', sessionStorage: 'environ', navigator: 'platform', matchMedia: 'platform',
+    'document.location': 'environ', 'document.cookie': 'environ',
+  }).map(([name, kind]) => [base + name, kind])));
   const hooks = new Set(config.impure_hooks);
   const line = node => tree.getLineAndCharacterOfPosition(node.getStart(tree)).line + 1;
   const column = node => Buffer.byteLength(tree.text.slice(tree.getPositionOfLineAndCharacter(line(node) - 1, 0), node.getStart(tree)), 'utf8');
@@ -66,18 +70,60 @@ export function semantics(ts, context, tree, out, index, config, test, ambientPo
     add(node, 'impure-call', `${owner(node)}#${name}`, `\`${owner(node)}\` performs an effectful operation \`${name}\``, 'move I/O, timers and stateful hooks to an explicit boundary');
   }
   // meiva:note
-  // `process.env.NEXT_PUBLIC_<NAME>` (or the same with a string key) in a file the Next.js build bundles is replaced by a
-  // literal at build time, so it acquires nothing. Only a read counts as inlined: the target of an assignment, `delete`
-  // or `++` stays an environment access, and so does any other way to the environment (`process.env[name]`, a
+  // `process.env.NEXT_PUBLIC_<NAME>` (or the same with a string key, or `process.env?.NEXT_PUBLIC_<NAME>`) in a file the Next.js
+  // build bundles is replaced by the value the build saw, provided that variable is set then: the expression is a
+  // constant of the build, so it acquires nothing. The root must be the global `process` (an imported one is not replaced),
+  // and `process?.env` is not replaced by Turbopack either. Only a read counts as inlined: the target of an assignment,
+  // `delete` or `++` stays an environment access, and so does any other way to the environment (`process.env[name]`, a
   // destructuring of `process.env`, a copy of it) and any file the build does not bundle.
-  function inlinedEnv(node, name) {
+  function inlinedEnv(node) {
     if (!config.inlined_env_roots.some(root => out.path.startsWith(root))) return false;
-    const prefix = 'process.env.' + config.inlined_env_prefix;
-    if (!name.startsWith(prefix) || !/^\w+$/.test(name.slice(prefix.length).split('.')[0])) return false;
+    for (let current = transparent(node); current && (ts.isPropertyAccessExpression(current) || ts.isElementAccessExpression(current)); current = transparent(current.expression)) {
+      const env = transparent(current.expression);
+      if (!env || !ts.isPropertyAccessExpression(env) || env.name.text !== 'env' || env.questionDotToken) continue;
+      const root = transparent(env.expression);
+      const ref = root && ts.isIdentifier(root) ? reference(root) : undefined;
+      if (!ref?.global || ref.canonical !== 'process') continue;
+      const key = ts.isPropertyAccessExpression(current) ? current.name.text : current.argumentExpression && ts.isStringLiteralLike(current.argumentExpression) ? current.argumentExpression.text : undefined;
+      const prefix = config.inlined_env_prefix;
+      if (key === undefined || !key.startsWith(prefix) || key.length === prefix.length || !/^\w+$/.test(key)) return false;
+      return !written(current);
+    }
+    return false;
+  }
+  // meiva:note
+  // The node with the parentheses and assertions around it (`(process.env as X)`): what the code means by the value.
+  function climbed(node) {
+    let top = node;
+    while (top.parent && (ts.isParenthesizedExpression(top.parent) || ts.isAsExpression(top.parent) || ts.isNonNullExpression(top.parent) || ts.isSatisfiesExpression(top.parent) || ts.isTypeAssertionExpression(top.parent))) top = top.parent;
+    return top;
+  }
+  // meiva:note
+  // Whether a longer access chain continues from `node` (`(process.env).KEY`): the outer access is the one that acquires.
+  function insideAccess(node) {
+    const top = climbed(node);
+    const parent = top.parent;
+    return Boolean(parent && (ts.isPropertyAccessExpression(parent) || ts.isElementAccessExpression(parent)) && parent.expression === top);
+  }
+  // meiva:note
+  // Whether the value `node` is written to or removed rather than read: the left side of an assignment (plain or compound),
+  // the operand of `delete`, `++` or `--`, however many parentheses or assertions surround it.
+  function written(node) {
+    const target = climbed(node);
+    const parent = target.parent;
+    if (!parent) return false;
+    if (ts.isBinaryExpression(parent)) return parent.left === target && parent.operatorToken.kind >= ts.SyntaxKind.FirstAssignment && parent.operatorToken.kind <= ts.SyntaxKind.LastAssignment;
+    if (ts.isDeleteExpression(parent)) return true;
+    return (ts.isPrefixUnaryExpression(parent) || ts.isPostfixUnaryExpression(parent)) && [ts.SyntaxKind.PlusPlusToken, ts.SyntaxKind.MinusMinusToken].includes(parent.operator);
+  }
+  // meiva:note
+  // A browser global named on its own as a value (`const store = localStorage`, `f(location)`): the symbol is a variable or a
+  // function of the library, not a property, and the use is neither a feature test (`typeof location`) nor a type.
+  function bareBrowserGlobal(node) {
+    const symbol = checker.getSymbolAtLocation(node);
     const parent = node.parent;
-    const assigned = parent && ts.isBinaryExpression(parent) && parent.left === node && parent.operatorToken.kind >= ts.SyntaxKind.FirstAssignment && parent.operatorToken.kind <= ts.SyntaxKind.LastAssignment;
-    const mutated = parent && (ts.isDeleteExpression(parent) || ((ts.isPrefixUnaryExpression(parent) || ts.isPostfixUnaryExpression(parent)) && [ts.SyntaxKind.PlusPlusToken, ts.SyntaxKind.MinusMinusToken].includes(parent.operator)));
-    return !(assigned || mutated);
+    if (!symbol || !(symbol.flags & (ts.SymbolFlags.Variable | ts.SymbolFlags.Function))) return false;
+    return !(parent && (ts.isTypeOfExpression(parent) || ts.isTypeQueryNode(parent) || (ts.isPropertyAccessExpression(parent) && parent.name === node)));
   }
   function acquisition(node, name, called) {
     if (test) return;
@@ -86,11 +132,11 @@ export function semantics(ts, context, tree, out, index, config, test, ambientPo
     const source = called && ambientPolicy.calls[qualified] ? qualified : Object.keys(ambientPolicy.names).find(target => qualified === target || qualified.startsWith(target + '.'));
     const configured = source && ((called && ambientPolicy.calls[source]) || ambientPolicy.names[source]);
     if (configured) { out.ambient.push([line(node), configured, source]); return; }
-    const reads = {'process.env': 'environ', 'process.pid': 'pid', 'process.ppid': 'pid', 'process.platform': 'platform', 'process.arch': 'platform', ...browserReads};
+    const reads = {'process.env': 'environ', 'process.pid': 'pid', 'process.ppid': 'pid', 'process.platform': 'platform', 'process.arch': 'platform', ...((ref ?? readable(node))?.global ? browserReads : {})};
     const calls = {'Date.now': 'clock', 'Date': 'clock', 'Math.random': 'random', 'crypto.randomUUID': 'random', 'crypto.getRandomValues': 'random', 'crypto.randomBytes': 'random', 'crypto.randomInt': 'random', 'process.cwd': 'cwd', 'os.homedir': 'home', 'os.platform': 'platform', 'os.hostname': 'platform', 'process.getuid': 'pid', 'process.getgid': 'pid'};
     const target = Object.keys(reads).find(key => name === key || name.startsWith(key + '.'));
     const kind = target ? reads[target] : called ? calls[name] : undefined;
-    if (kind && !inlinedEnv(node, name)) out.ambient.push([line(node), kind, target ?? name]);
+    if (kind && !(target === 'process.env' && inlinedEnv(node))) out.ambient.push([line(node), kind, target ?? name]);
   }
   // meiva:note
   // The longest part of an access chain that names a global or an import, for `process.env[name]` and `localStorage[key].x`,
@@ -206,6 +252,7 @@ export function semantics(ts, context, tree, out, index, config, test, ambientPo
     if (ts.isIdentifier(node)) {
       const ref = reference(node);
       if (ref?.binding?.firstParty) acquisition(node, ref.canonical, false);
+      else if (ref?.global && bareBrowserGlobal(node)) acquisition(node, ref.canonical, false);
     }
     if (functionNode(node)) functionRules(node);
     if (ts.isVariableDeclaration(node)) moduleVariable(node);
@@ -223,11 +270,11 @@ export function semantics(ts, context, tree, out, index, config, test, ambientPo
           out.facts.push([ref.binding.target, line(node), 'attribute', [ref.parts[0]], node.getText(tree)]);
         }
         if (ref?.canonical) {
-          acquisition(node, ref.canonical, false);
+          if (!insideAccess(node)) acquisition(node, ref.canonical, false);
           if (ref.global && impure.has(ref.root.text) && !ts.isCallExpression(node.parent)) effect(node, ref.root.text);
         } else {
           const prefix = readable(node);
-          if (prefix) acquisition(node, prefix.canonical, false);
+          if (prefix && !insideAccess(node)) acquisition(node, prefix.canonical, false);
         }
         const access = chain(node);
         const hops = access ? access.parts.length - (ref?.binding?.member === '' ? 1 : 0) : 0;
