@@ -8,6 +8,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import os
+import random
 import signal
 import socket
 import sys
@@ -71,6 +72,13 @@ def bind_socket(path: Path) -> socket.socket:
     return sock
 
 
+# meiva:note
+# The process's random generator, built once at its entry for the timeline reader's snapshot
+# identities. They are not secrets, so it is a plain `random.Random`.
+def _new_rng() -> random.Random:
+    return random.Random()  # noqa: S311
+
+
 async def run(
     *,
     home: Path,
@@ -78,6 +86,7 @@ async def run(
     catalog: ModelCatalog,
     database: Callable[[], Database],
     timestamps: TimestampSource,
+    rng: random.Random,
 ) -> None:
     pidfile = insights_pidfile(home)
     if pidfile_holds_daemon(pidfile, _MODULE) or not acquire_pidfile(pidfile, _MODULE):
@@ -96,6 +105,8 @@ async def run(
                     home=home,
                     catalog=catalog,
                     timestamps=timestamps,
+                    timers=SYSTEM_TIMERS,
+                    rng=rng,
                     pid=os.getpid(),
                 ),
                 log_level="warning",
@@ -148,7 +159,7 @@ def main() -> None:
     try:
         runner.run(
             run(
-                home=meiva_home(),
+                home=process_home,
                 config=config_from_boot(config),
                 catalog=build_model_catalog(),
                 database=database,
@@ -156,6 +167,7 @@ def main() -> None:
                     clock=Clock(clock_config_from_boot(config), timers=SYSTEM_TIMERS),
                     timestamps_enabled=config.view.general.message_timestamps,
                 ),
+                rng=_new_rng(),
             )
         )
     except KeyboardInterrupt:
