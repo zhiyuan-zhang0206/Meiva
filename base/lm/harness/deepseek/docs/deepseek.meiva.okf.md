@@ -47,6 +47,21 @@ A turn's notifications and its `session/prompt` response travel on one wire but
 reach the session through two queues, so settling yields one event-loop turn
 before computing the answer text.
 
+## Who an update belongs to
+
+A turn ends on the `session/prompt` **response**, matched by JSON-RPC id, so an
+update the runtime sends on its own cannot end a turn: the boundary is safe by
+construction. What the protocol does not carry is a turn id inside
+`session/update`, so attribution of *content* is weaker than the boundary: an
+update that arrives while a turn is running is that turn's, and an update that
+arrives with no turn in flight is dropped and counted (`unclaimed_updates`)
+instead of being carried into the next turn. Mid-turn the two cases are
+indistinguishable, and that is the documented residual risk rather than something
+this adapter guesses at.
+
+The rule and the three events are [[base/lm/harness/docs/attribution.meiva.okf.md|Who
+a provider message belongs to]]; `tests/test_unsolicited.py` pins this half.
+
 ## Usage
 
 The wire carries only an aggregate `usage_update` (`used` / `size` are context

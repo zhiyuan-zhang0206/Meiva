@@ -41,3 +41,13 @@ only what Kimi Code decides differently.
   `agents/main/wire.jsonl`, or `session.jsonl`), summing `input_other`,
   `input_cache_read`, and `input_cache_creation` into `Usage.input_tokens` per
   harness invariant 6.
+
+## Who an update belongs to
+
+A turn ends on the `session/prompt` **response**, matched by JSON-RPC id, so an
+update Kimi Code sends on its own cannot end a turn. `session/update` carries no
+turn id, so content attribution is weaker than the boundary: an update that
+arrives while a turn is running is that turn's, and one that arrives with no turn
+in flight is dropped and counted (`unclaimed_updates`) rather than carried into the
+next turn. Mid-turn the two are indistinguishable — the documented residual risk,
+not something this adapter guesses at.

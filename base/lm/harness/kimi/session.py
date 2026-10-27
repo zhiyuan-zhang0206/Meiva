@@ -99,6 +99,7 @@ class KimiSession(BaseHarnessSession[KimiConfig]):
         self._connection: AcpConnection | None = None
         self._agent_pid: int | None = None
         self._permission_denials: list[str] = []
+        self._unclaimed_updates = 0
         self._usage: UsageSnapshot | None = None
         self._context_used: int | None = None
         self._context_size: int | None = None
@@ -194,6 +195,15 @@ class KimiSession(BaseHarnessSession[KimiConfig]):
     @property
     def context_occupancy(self) -> tuple[int | None, int | None]:
         return (self._context_used, self._context_size)
+
+    # meiva:note
+    # Updates the runtime sent while no turn was in flight: dropped at dispatch and
+    # counted here, so a reader can tell "the runtime was busy on its own" from "the
+    # stream was silent" (#5664).
+    # meiva:link base/lm/harness/docs/attribution.meiva.okf.md
+    @property
+    def unclaimed_updates(self) -> int:
+        return self._unclaimed_updates
 
     async def interrupt(self) -> CancelReport:
         connection = self._require_connection()
@@ -359,6 +369,14 @@ class KimiSession(BaseHarnessSession[KimiConfig]):
             return
         ticket = self._active
         if ticket is None:
+            # meiva:note
+            # An update with no turn in flight is the runtime's own work — a background
+            # command it started, a sub-session — and `session/update` carries no turn
+            # id to attribute it with, so it is dropped and counted here instead of
+            # being carried into the next turn (#5664). Mid-turn the two are
+            # indistinguishable; that is the adapter's documented residual risk.
+            # meiva:link base/lm/harness/docs/attribution.meiva.okf.md
+            self._unclaimed_updates += 1
             return
         for event in map_update(update, turn_id=ticket.turn_id):
             if isinstance(event, TextDelta):
