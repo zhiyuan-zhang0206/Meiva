@@ -246,23 +246,25 @@ def test_default_control_endpoint_follows_codex_home(tmp_path: Path) -> None:
 
 
 @pytest.mark.parametrize(
-    ("codex_home", "relative"),
+    ("codex_home", "base"),
     [
-        (None, ".codex"),
-        ("~", ""),
-        ("~/custom-codex", "custom-codex"),
-        ("/opt/codex", None),
+        (None, "{home}/.codex"),
+        ("~", "{home}"),
+        ("~/custom-codex", "{home}/custom-codex"),
+        ("~//custom-codex", "{home}/custom-codex"),
+        ("~bob/codex", "~bob/codex"),
+        ("/opt/codex", "/opt/codex"),
     ],
 )
 def test_the_control_socket_sits_under_the_account_home_the_caller_recorded(
-    tmp_path: Path, codex_home: str | None, relative: str | None
+    tmp_path: Path, codex_home: str | None, base: str
 ) -> None:
     env = {} if codex_home is None else {"CODEX_HOME": codex_home}
-    base = tmp_path / relative if relative is not None else Path("/opt/codex")
 
     socket = codex_app_server.default_control_socket(env=env, user_home=tmp_path)
 
-    assert socket == base / "app-server-control" / "app-server-control.sock"
+    expected = Path(base.format(home=tmp_path)) / "app-server-control" / "app-server-control.sock"
+    assert socket == expected
 
 
 # meiva:note
