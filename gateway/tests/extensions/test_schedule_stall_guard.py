@@ -19,6 +19,7 @@ import time
 from collections.abc import Generator
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import contextmanager, suppress
+from pathlib import Path
 
 import pytest
 
@@ -28,6 +29,19 @@ from services.wake.schedule_manager import engine
 from services.wake.schedule_manager.stall_policy import Signature, StallPolicy
 
 _NEVER_STALLS = StallPolicy(timeout_s=3600.0)
+
+# meiva:note
+# The child of these tests is a small script that imports nothing heavy. The tests used to run this
+# module itself as the child, which imported pytest, the database layer and the schedule engine before
+# the child did anything: half a second on an idle machine, several seconds under CI load, against
+# deadlines of two seconds.
+_CHILD = Path(__file__).parent / "resources" / "stall_child.py"
+
+# meiva:note
+# Bounds a broken run, never a healthy one: every wait in these tests ends on an event (the child's
+# ready byte, the latch's end of stream, the child's exit), so the success path does not depend on
+# how long anything takes. The value only has to outlast any plausible stall of the machine.
+_BACKSTOP_S = 120.0
 
 
 # meiva:note
@@ -118,13 +132,15 @@ def _in_child_wait(child: subprocess.Popen[bytes], thread_id: int) -> bool:
 # meiva:note
 # The real child cannot exit until this observer releases its socket latch, including on failure.
 def _sample_held_child_wait(
-    guard: engine.StallGuard, child: subprocess.Popen[bytes], latch: socket.socket
+    guard: engine.StallGuard,
+    child: subprocess.Popen[bytes],
+    latch: socket.socket,
+    waiter_left: threading.Event,
 ) -> list[Signature | None]:
     try:
-        deadline = time.monotonic() + 2
         while not _in_child_wait(child, guard.main_thread_id):
-            if time.monotonic() >= deadline:
-                raise AssertionError("the main thread never entered its bounded child wait")
+            if waiter_left.is_set():
+                raise AssertionError("the main thread left without entering its bounded child wait")
             time.sleep(0.001)
         assert child.poll() is None
         seen: list[Signature | None] = []
@@ -144,22 +160,19 @@ def _sample_held_child_wait(
 def _held_child(capture_output: bool) -> Generator[tuple[subprocess.Popen[bytes], socket.socket]]:
     latch, child_latch = socket.socketpair()
     with latch, child_latch:
-        latch.settimeout(2)
+        latch.settimeout(_BACKSTOP_S)
         # meiva:note
         # Fixed interpreter/program; the only dynamic argument is this test's inherited socket fd.
         with subprocess.Popen(  # noqa: S603
-            [
-                sys.executable,
-                __file__,
-                "latch",
-                str(child_latch.fileno()),
-            ],
+            [sys.executable, "-I", str(_CHILD), "latch", str(child_latch.fileno())],
             pass_fds=(child_latch.fileno(),),
             stdout=subprocess.PIPE if capture_output else None,
             stderr=subprocess.PIPE if capture_output else None,
         ) as child:
             try:
                 child_latch.close()
+                # meiva:note
+                # The child's ready byte; a child that died first ends the stream instead.
                 assert latch.recv(1) == b"R"
                 yield child, latch
             finally:
@@ -167,7 +180,7 @@ def _held_child(capture_output: bool) -> Generator[tuple[subprocess.Popen[bytes]
                     latch.shutdown(socket.SHUT_WR)
                 if child.poll() is None:
                     child.kill()
-                child.wait(timeout=2)
+                child.wait(timeout=_BACKSTOP_S)
 
 
 # meiva:note
@@ -181,14 +194,16 @@ def test_a_live_child_wait_is_never_observed(
             Database.from_settings(gate=database_gate), 1, None, policy=_NEVER_STALLS
         )
         try:
+            waiter_left = threading.Event()
             with ThreadPoolExecutor(max_workers=1) as observer:
-                samples = observer.submit(_sample_held_child_wait, guard, child, latch)
+                samples = observer.submit(_sample_held_child_wait, guard, child, latch, waiter_left)
                 try:
-                    child.communicate(timeout=2)
+                    child.communicate(timeout=_BACKSTOP_S)
                 finally:
+                    waiter_left.set()
                     with suppress(OSError):
                         latch.shutdown(socket.SHUT_WR)
-                    seen = samples.result(timeout=2)
+                    seen = samples.result(timeout=_BACKSTOP_S)
         finally:
             guard.close()
         assert child.returncode == 0
@@ -219,9 +234,9 @@ def test_subprocess_spawn_is_observed(database_gate: ProcessDbGate) -> None:
 
     with _samples(database_gate, patch_sleep=True) as seen:
         subprocess.run(  # noqa: S603
-            [sys.executable, __file__, "noop"],
+            [sys.executable, "-I", str(_CHILD), "noop"],
             capture_output=True,
-            timeout=2,
+            timeout=_BACKSTOP_S,
             preexec_fn=slow_spawn,
             check=True,
         )
@@ -236,7 +251,7 @@ def test_subprocess_argument_conversion_is_observed(database_gate: ProcessDbGate
 
     reader, writer = socket.socketpair()
     with reader, writer:
-        reader.settimeout(2)
+        reader.settimeout(_BACKSTOP_S)
 
         class SlowExecutable(os.PathLike[str]):
             def __fspath__(self) -> str:
@@ -252,9 +267,9 @@ def test_subprocess_argument_conversion_is_observed(database_gate: ProcessDbGate
                 # meiva:note
                 # test PathLike always resolves to sys.executable.
                 subprocess.run(  # noqa: S603
-                    [SlowExecutable(), __file__, "noop"],
+                    [SlowExecutable(), "-I", str(_CHILD), "noop"],
                     capture_output=True,
-                    timeout=2,
+                    timeout=_BACKSTOP_S,
                     check=True,
                 )
             finally:
@@ -269,7 +284,7 @@ def test_subprocess_stdin_flush_is_observed(database_gate: ProcessDbGate) -> Non
     import os
 
     with subprocess.Popen(  # noqa: S603
-        [sys.executable, __file__, "sleep"],
+        [sys.executable, "-I", str(_CHILD), "sleep"],
         stdin=subprocess.PIPE,
         stdout=subprocess.PIPE,
         bufsize=8192,
@@ -297,7 +312,7 @@ def test_subprocess_stdin_flush_is_observed(database_gate: ProcessDbGate) -> Non
                 wake.cancel()
                 wake.join()
                 child.kill()
-                child.wait(timeout=2)
+                child.wait(timeout=_BACKSTOP_S)
     assert _stood_on(seen, "_communicate"), "stall guard ignored subprocess stdin.flush"
 
 
@@ -314,7 +329,7 @@ def test_a_selector_in_argument_conversion_is_observed(database_gate: ProcessDbG
 
         class SlowExecutable(os.PathLike[str]):
             def __fspath__(self) -> str:
-                selector.select(timeout=2)
+                selector.select(timeout=_BACKSTOP_S)
                 return sys.executable
 
         # meiva:note
@@ -326,30 +341,12 @@ def test_a_selector_in_argument_conversion_is_observed(database_gate: ProcessDbG
                 # meiva:note
                 # test PathLike always resolves to sys.executable.
                 subprocess.run(  # noqa: S603
-                    [SlowExecutable(), __file__, "noop"],
+                    [SlowExecutable(), "-I", str(_CHILD), "noop"],
                     capture_output=True,
-                    timeout=2,
+                    timeout=_BACKSTOP_S,
                     check=True,
                 )
             finally:
                 wake.cancel()
                 wake.join()
     assert _stood_on(seen, "select"), "stall guard ignored a selector in argument conversion"
-
-
-def _child_main() -> None:
-    mode = sys.argv[1]
-    if mode == "latch":
-        with socket.socket(fileno=int(sys.argv[2])) as latch:
-            latch.sendall(b"R")
-            assert latch.recv(1) == b""
-    elif mode == "noop":
-        return
-    elif mode == "sleep":
-        time.sleep(2)
-    else:
-        raise ValueError(f"unknown child mode {mode!r}")
-
-
-if __name__ == "__main__":
-    _child_main()
