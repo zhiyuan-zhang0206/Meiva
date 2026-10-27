@@ -18,6 +18,7 @@ import stat
 import uuid
 from pathlib import Path
 
+from base.agents.context import MeivaContext
 from base.host.atomic_io import write_text_atomic
 from base.log import logger
 from base.paths import workspace_dir
@@ -64,6 +65,19 @@ def workspace_base() -> Path:
     if aid is None:  # pyright: ignore[reportUnnecessaryComparison]
         return _home()
     return agent_workspace(aid)
+
+
+# meiva:note
+# The same base for the agent `context` acts as, over the two homes the context carries: its
+# workspace under the Meiva home once an identity is established, else the invoking user's home.
+# A caller that holds the process context (an agent turn, a self action) takes the base from here
+# and reads no home of its own; `workspace_base()` is the form for a caller with no context in
+# hand.
+def workspace_base_for(context: MeivaContext) -> Path:
+    aid = agent_identity.agent_id(context)
+    if aid is None:
+        return context.require_user_home()
+    return workspace_dir(aid, home=context.require_meiva_home())
 
 
 def resolve(path: str | Path) -> Path:
