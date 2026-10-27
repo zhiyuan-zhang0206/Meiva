@@ -353,6 +353,7 @@ family-modules = [
 "base/native_process/exec_domain.py::KILL_GRACE_S" = "independent: SIGINT/SIGTERM -> SIGKILL grace ladder for the exec child, no lattice neighbour"
 "services/backup/scheduler/operation/staging.py::TERMINATE_GRACE_S" = "independent: bounded TERM grace for a scheduled worker to unwind private cleanup; no family-disappearance proof or lattice neighbour"
 "services/desktop/computer/config.py::_MIN_STALL_S" = "not a clock: a sanity floor on the operator-configured loop-stall window (settings.daemon.computer_use_loop_stall_s) — it only keeps a below-floor misconfiguration from restart-looping a healthy daemon, no lattice neighbour"
+"services/upkeep/ttl_reaper/shells.py::STALE_ROW_GRACE" = "independent: the stale sweep's exemption window for a young tracking row — the host's session listing can lag the row's creation, so a younger row is never judged; not a deadline and no lattice neighbour or ordering depends on it"
 
 # single-owner (meizel/owners/decisions): modules that bypass a decision's one owner, per decision.
 [single-owner]

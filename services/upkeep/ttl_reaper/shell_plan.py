@@ -4,8 +4,9 @@
 # `plan_round` groups the expired rows by home machine and sets aside the rows that have no usable
 # machine. `settle` reads a runner's `shell_kill` answer into the verdict the row is settled with,
 # or says the answer is malformed and the row must wait. `reclaim_notice` is the interruption
-# message the owner reads. The shell dials the machines, deletes the rows and sends the messages;
-# nothing here reads a clock, a registry or a connection.
+# message the owner reads.
+# The shell dials the machines, deletes the rows and sends the messages; nothing here reads a
+# clock, a registry or a connection.
 from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
@@ -22,8 +23,12 @@ from services.upkeep.ttl_reaper.owner_text import human_ttl, wall_clock
 UNKNOWN_MACHINE = "unknown"
 
 
+# meiva:note
+# One `agent_shell_ttls` row: the tracking row a persistent shell session carries. Both phases read
+# this shape — the kill path selects the rows whose deadline passed, the stale sweep selects the
+# unexpired ones whose session is gone — so the name says what the row is, not which phase found it.
 @dataclass(frozen=True)
-class ExpiredShell:
+class ShellRow:
     agent_id: int
     session_id: int
     machine: str | None
@@ -34,13 +39,13 @@ class ExpiredShell:
 @dataclass(frozen=True)
 class MachineBatch:
     machine: str
-    shells: tuple[ExpiredShell, ...]
+    shells: tuple[ShellRow, ...]
 
 
 @dataclass(frozen=True)
 class RoundPlan:
     batches: tuple[MachineBatch, ...]
-    unplaced: tuple[ExpiredShell, ...]
+    unplaced: tuple[ShellRow, ...]
 
 
 # meiva:note
@@ -68,9 +73,9 @@ class Settlement:
 # meiva:note
 # Rows of one machine stay in the order they arrived; machines keep first-seen order. A row whose
 # machine is missing or unknown is returned in `unplaced` and waits for the next round.
-def plan_round(rows: Sequence[ExpiredShell]) -> RoundPlan:
-    placed: dict[str, list[ExpiredShell]] = {}
-    unplaced: list[ExpiredShell] = []
+def plan_round(rows: Sequence[ShellRow]) -> RoundPlan:
+    placed: dict[str, list[ShellRow]] = {}
+    unplaced: list[ShellRow] = []
     for shell in rows:
         if not shell.machine or shell.machine == UNKNOWN_MACHINE:
             unplaced.append(shell)
@@ -109,7 +114,7 @@ def settle(answer: Mapping[str, object]) -> Settlement | None:
 # The message that tells an owner its shell was reclaimed while a job ran, or None when the reap
 # interrupted nothing. It states when the TTL expired and how long it was.
 def reclaim_notice(
-    shell: ExpiredShell, settlement: Settlement, *, zone: ZoneInfo | None, today: date
+    shell: ShellRow, settlement: Settlement, *, zone: ZoneInfo | None, today: date
 ) -> str | None:
     if not settlement.interrupted:
         return None

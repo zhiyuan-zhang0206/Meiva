@@ -7,13 +7,13 @@ import pytest
 
 from base.api_contracts.agent_contract import ShellKillMode
 from services.upkeep.ttl_reaper import owner_text, shell_plan
-from services.upkeep.ttl_reaper.shell_plan import ExpiredShell, Settlement
+from services.upkeep.ttl_reaper.shell_plan import Settlement, ShellRow
 
 _EXPIRED = datetime(2026, 10, 20, 9, 30, tzinfo=UTC)
 
 
-def _shell(agent: int, session: int, machine: str | None) -> ExpiredShell:
-    return ExpiredShell(agent, session, machine, _EXPIRED, _EXPIRED - timedelta(hours=1))
+def _shell(agent: int, session: int, machine: str | None) -> ShellRow:
+    return ShellRow(agent, session, machine, _EXPIRED, _EXPIRED - timedelta(hours=1))
 
 
 def test_rows_group_by_machine_in_arrival_order() -> None:

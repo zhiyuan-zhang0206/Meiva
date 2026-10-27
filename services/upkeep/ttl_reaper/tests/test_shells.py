@@ -5,6 +5,11 @@
 # unknown machines leave the row for the next round. Owners are notified only when the reap
 # interrupted a running job; an idle or already-absent shell's reaping is silent. A renewal between
 # the select and the dispatch wins.
+#
+# The stale sweep takes the rows the deadline path never reaches: one shell_probe per
+# (machine, agent) lists the host's live sessions and the rows of the sessions it did not list are
+# dropped — but only on a definitive answer, never for a row younger than the grace, and never for
+# a row rewritten since the select.
 
 from __future__ import annotations
 
@@ -27,10 +32,17 @@ from base.db.code_version_gate import ProcessDbGate
 from base.events.live.bus import EventBus
 from base.telemetry.tests.capture.event_capture import EmittedEvents
 from base.telemetry.tests.capture.event_capture import emitted_events as emitted_events
-from ops.rpc_schemas import ShellKillResult
+from ops.rpc_schemas import ShellInfo, ShellKillResult, ShellProbeResult
 from services.upkeep.ttl_reaper import shells
 from services.upkeep.ttl_reaper.config import TtlReaperConfig
-from services.upkeep.ttl_reaper.shells import claim_shell_row_still_expired, reap_expired_shells
+from services.upkeep.ttl_reaper.remote import remote_round
+from services.upkeep.ttl_reaper.shells import (
+    claim_shell_row_still_expired,
+    delete_stale_row,
+    reap_expired_shells,
+    reap_stale_shells,
+    stale_shell_rows_blocking,
+)
 from services.upkeep.ttl_reaper.tests.runner_stub import (
     Reply,
     completed,
@@ -108,15 +120,44 @@ def _insert_shell_row(
     *,
     expires_at: datetime,
     lived: timedelta = timedelta(hours=1),
+    created_at: datetime | None = None,
 ) -> None:
     with db_conn.cursor() as cur:
         cur.execute(
             "INSERT INTO agent_shell_ttls (agent_id, session_id, expires_at, created_at) "
             "VALUES (%s, %s, %s, %s) "
             "ON CONFLICT (agent_id, session_id) DO UPDATE SET expires_at = EXCLUDED.expires_at",
-            (agent_id, session_id, expires_at, expires_at - lived),
+            (agent_id, session_id, expires_at, created_at or expires_at - lived),
         )
     db_conn.commit()
+
+
+# meiva:note
+# A deadline far out (the stale sweep's business, never the kill path's) and a birth past the
+# sweep's grace window.
+def _tracked() -> datetime:
+    return datetime.now(UTC) + timedelta(days=365)
+
+
+def _past_the_grace() -> datetime:
+    return datetime.now(UTC) - timedelta(hours=7)
+
+
+async def _sweep(
+    pool: ConnectionPool,
+    *,
+    database_gate: ProcessDbGate,
+    config: TtlReaperConfig | None = None,
+) -> list[tuple[int, int]]:
+    return await reap_stale_shells(
+        pool, Database.from_settings(gate=database_gate), _progress(), config or reaper_config()
+    )
+
+
+def _probed(*session_ids: int) -> Reply:
+    return completed(
+        ShellProbeResult(shells=[ShellInfo(id=sid) for sid in session_ids]).model_dump(mode="json")
+    )
 
 
 def _expired() -> datetime:
@@ -426,6 +467,168 @@ async def test_runner_invalid_mode_preserves_row_without_false_cleanup(
     assert _system_inbounds(db_conn, aid) == []
     assert "shell_ttl_expired" not in emitted_events.names()
     assert "returned" in caplog.text
+
+
+async def test_stale_sweep_drops_the_row_of_a_session_the_host_no_longer_lists(
+    db_conn: psycopg.Connection,
+    reaper_pool: ConnectionPool,
+    *,
+    database_gate: ProcessDbGate,
+) -> None:
+    aid = _running_agent(db_conn, machine="macmini")
+    _insert_shell_row(db_conn, aid, 1, expires_at=_tracked(), created_at=_past_the_grace())
+    _insert_shell_row(db_conn, aid, 2, expires_at=_tracked(), created_at=_past_the_grace())
+
+    with runner(db_conn, "macmini", lambda _call: _probed(1)) as wire:
+        dropped = await _sweep(reaper_pool, database_gate=database_gate)
+
+    assert dropped == [(aid, 2)]
+    # meiva:note
+    # One listing covers every row of that agent — the sweep never asks per row.
+    assert [(call["kind"], call["payload"]) for call in wire.calls] == [
+        ("shell_probe", {"agent_id": aid})
+    ]
+    assert _rows(db_conn, aid) == [1]
+
+
+async def test_stale_sweep_keeps_every_row_when_the_machine_is_unreachable(
+    db_conn: psycopg.Connection,
+    reaper_pool: ConnectionPool,
+    *,
+    database_gate: ProcessDbGate,
+) -> None:
+    aid = _running_agent(db_conn, machine="macmini")
+    _insert_shell_row(db_conn, aid, 1, expires_at=_tracked(), created_at=_past_the_grace())
+
+    with runner(db_conn, "macmini", lambda _call: refused(404)):
+        dropped = await _sweep(reaper_pool, database_gate=database_gate)
+
+    assert dropped == []
+    assert _rows(db_conn, aid) == [1]
+
+
+async def test_stale_sweep_stops_probing_a_machine_at_the_first_answer_it_does_not_get(
+    db_conn: psycopg.Connection,
+    reaper_pool: ConnectionPool,
+    *,
+    database_gate: ProcessDbGate,
+) -> None:
+    first = _running_agent(db_conn, machine="macmini")
+    second = _running_agent(db_conn, machine="macmini")
+    _insert_shell_row(db_conn, first, 1, expires_at=_tracked(), created_at=_past_the_grace())
+    _insert_shell_row(db_conn, second, 2, expires_at=_tracked(), created_at=_past_the_grace())
+
+    with runner(db_conn, "macmini", lambda _call: refused(404)) as wire:
+        dropped = await _sweep(reaper_pool, database_gate=database_gate)
+
+    assert dropped == []
+    # meiva:note
+    # The host did not answer for the first agent: asking about the second would repeat it.
+    assert [call["payload"] for call in wire.calls] == [{"agent_id": first}]
+    assert _rows(db_conn, first) == [1]
+    assert _rows(db_conn, second) == [2]
+
+
+async def test_stale_sweep_keeps_every_row_when_the_answer_has_no_listing(
+    db_conn: psycopg.Connection,
+    reaper_pool: ConnectionPool,
+    *,
+    database_gate: ProcessDbGate,
+) -> None:
+    aid = _running_agent(db_conn, machine="macmini")
+    _insert_shell_row(db_conn, aid, 1, expires_at=_tracked(), created_at=_past_the_grace())
+
+    with runner(db_conn, "macmini", lambda _call: completed({"unexpected": True})):
+        dropped = await _sweep(reaper_pool, database_gate=database_gate)
+
+    assert dropped == []
+    assert _rows(db_conn, aid) == [1]
+
+
+async def test_stale_sweep_ignores_a_row_younger_than_the_grace(
+    db_conn: psycopg.Connection,
+    reaper_pool: ConnectionPool,
+    *,
+    database_gate: ProcessDbGate,
+) -> None:
+    aid = _running_agent(db_conn, machine="macmini")
+    _insert_shell_row(
+        db_conn,
+        aid,
+        1,
+        expires_at=_tracked(),
+        created_at=datetime.now(UTC) - timedelta(hours=1),
+    )
+
+    with runner(db_conn, "macmini", lambda _call: _probed()) as wire:
+        dropped = await _sweep(reaper_pool, database_gate=database_gate)
+
+    assert dropped == []
+    assert _rows(db_conn, aid) == [1]
+    assert wire.calls == []
+
+
+async def test_stale_sweep_drops_rows_of_a_machine_absent_from_the_registry(
+    db_conn: psycopg.Connection,
+    reaper_pool: ConnectionPool,
+    *,
+    database_gate: ProcessDbGate,
+) -> None:
+    aid = _running_agent(db_conn, machine="ghost")
+    _insert_shell_row(db_conn, aid, 1, expires_at=_tracked(), created_at=_past_the_grace())
+
+    dropped = await _sweep(reaper_pool, database_gate=database_gate)
+
+    assert dropped == [(aid, 1)]
+    assert _rows(db_conn, aid) == []
+
+
+async def test_a_remote_round_kills_the_expired_row_and_sweeps_the_dead_sessions_row(
+    db_conn: psycopg.Connection,
+    reaper_pool: ConnectionPool,
+    event_bus: EventBus,
+    *,
+    database_gate: ProcessDbGate,
+) -> None:
+    aid = _running_agent(db_conn, machine="macmini")
+    _insert_shell_row(db_conn, aid, 5, expires_at=_expired())
+    _insert_shell_row(db_conn, aid, 6, expires_at=_tracked(), created_at=_past_the_grace())
+
+    def answer(call: dict[str, Any]) -> Reply:
+        return _killed(interrupted=False) if call["kind"] == "shell_kill" else _probed()
+
+    with runner(db_conn, "macmini", answer) as wire:
+        await remote_round(
+            reaper_pool,
+            Database.from_settings(gate=database_gate),
+            event_bus,
+            _progress(),
+            reaper_config(),
+        )
+
+    assert [call["kind"] for call in wire.calls] == ["shell_kill", "shell_probe"]
+    assert _rows(db_conn, aid) == []
+
+
+def test_delete_stale_row_leaves_a_row_rewritten_since_the_select(
+    db_conn: psycopg.Connection, reaper_pool: ConnectionPool
+) -> None:
+    aid = _running_agent(db_conn, machine="macmini")
+    _insert_shell_row(db_conn, aid, 9, expires_at=_tracked(), created_at=_past_the_grace())
+    [row] = stale_shell_rows_blocking(reaper_pool)
+
+    # meiva:note
+    # The owner renews the session between the select and the delete.
+    with db_conn.cursor() as cur:
+        cur.execute(
+            "UPDATE agent_shell_ttls SET expires_at = expires_at + interval '1 day' "
+            "WHERE agent_id = %s AND session_id = %s",
+            (aid, 9),
+        )
+    db_conn.commit()
+
+    assert not delete_stale_row(reaper_pool, row)
+    assert _rows(db_conn, aid) == [9]
 
 
 def test_claim_still_expired_true_for_expired_row(
