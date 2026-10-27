@@ -161,9 +161,6 @@ bus = [
 "base.host.net.auth.random_bytes()" = "draws secrets.token_bytes"
 "base.host.net.resilience.jittered()" = "draws random jitter"
 
-[ambient-readers.bus]
-"meiva.sdk_surface.settings.bus()" = "builds the event bus from the process settings"
-
 [ambient-readers.settings]
 "base.clock.Clock.from_settings()" = "reads the clock configuration from the process settings; the clock it builds runs on the system timers"
 "base.cluster.machine.ambient.gateway_access_from_settings()" = "reads the gateway credentials from the process settings"
