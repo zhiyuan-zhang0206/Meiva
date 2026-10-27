@@ -9,7 +9,7 @@ import pytest
 from agent.state import build_agent_state
 from base.agents.to_user.models import DOCUMENT_FILENAME
 from base.packages.plugins.extensions import ExtensionRegistry
-from base.paths import workspace_dir
+from base.paths import meiva_home, workspace_dir
 from meiva.sdk_surface import process_context
 from meiva.tests.fixtures.pin_agent import pin_agent
 from meiva_builtins.plugins.meiva_to_user import agent_runtime, plugin
@@ -38,14 +38,24 @@ def state() -> Iterator[Any]:
 
 
 def _panel(agent_id: int) -> Path:
-    return workspace_dir(agent_id) / DOCUMENT_FILENAME
+    return workspace_dir(agent_id, home=meiva_home()) / DOCUMENT_FILENAME
 
 
 def test_only_the_panel_itself_matches(agent: int, unit_home: Path) -> None:
     assert panel_path(_panel(agent), agent_id=agent, home=unit_home) == _panel(agent).resolve()
     assert panel_path(str(_panel(agent)), agent_id=agent, home=unit_home) == _panel(agent).resolve()
-    assert panel_path(workspace_dir(agent) / "report.md", agent_id=agent, home=unit_home) is None
-    assert panel_path(workspace_dir(agent) / "to_user.html", agent_id=agent, home=unit_home) is None
+    assert (
+        panel_path(
+            workspace_dir(agent, home=unit_home) / "report.md", agent_id=agent, home=unit_home
+        )
+        is None
+    )
+    assert (
+        panel_path(
+            workspace_dir(agent, home=unit_home) / "to_user.html", agent_id=agent, home=unit_home
+        )
+        is None
+    )
     assert panel_path(_panel(agent + 1), agent_id=agent, home=unit_home) is None
     assert panel_path(unit_home / DOCUMENT_FILENAME, agent_id=agent, home=unit_home) is None
 
@@ -61,7 +71,7 @@ def test_a_matched_write_marks_the_bound_state(state: Any, agent: int) -> None:
 
 
 def test_an_unmatched_write_records_nothing(state: Any, agent: int) -> None:
-    record_panel_write(workspace_dir(agent) / "report.md")
+    record_panel_write(workspace_dir(agent, home=meiva_home()) / "report.md")
     assert getattr(state, _PANEL_KEY) is False
     assert process_context.get_state_update() == {}
 

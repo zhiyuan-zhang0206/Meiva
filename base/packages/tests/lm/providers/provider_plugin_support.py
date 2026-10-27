@@ -10,6 +10,7 @@ from collections.abc import Callable, Generator
 import pytest
 
 from base import paths
+from base.paths import meiva_home
 
 _PLUGIN_SOURCE = """from langchain_core.language_models.fake_chat_models import FakeListChatModel
 
@@ -67,7 +68,7 @@ def provider_plugin() -> Generator[Callable[..., None], None, None]:
     """Write fixture provider declarations for an explicit catalog build."""
     # Tests share one session MEIVA_HOME — remove anything this test created so
     # a later test's loader scan cannot see leftover plugin dirs.
-    plugin_root = paths.plugins_dir()
+    plugin_root = paths.plugins_dir(home=meiva_home())
     plugin_root.mkdir(parents=True, exist_ok=True)
     original = set(plugin_root.iterdir())
 
@@ -84,7 +85,7 @@ def provider_plugin() -> Generator[Callable[..., None], None, None]:
         superseded_by: str | None = None,
         dir_name: str = "test_provider",
     ) -> None:
-        plugin_dir = paths.plugins_dir() / dir_name
+        plugin_dir = paths.plugins_dir(home=meiva_home()) / dir_name
         plugin_dir.mkdir(parents=True, exist_ok=True)
         models = (
             _MODEL_LINE.format(

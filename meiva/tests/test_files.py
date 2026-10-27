@@ -18,7 +18,7 @@ from pathlib import Path
 import pytest
 
 import meiva
-from meiva.tests.fixtures.pin_agent import pin_no_identity
+from meiva.tests.fixtures.pin_agent import pin_agent, pin_no_identity
 from meiva.tests.fixtures.workspace import workspace as workspace
 
 # Permission tests are ineffective when run as root (root bypasses all fs permissions). CI container
@@ -393,6 +393,21 @@ def test_relative_resolves_to_home_before_identity(no_identity: None, default_ho
     assert meiva.files.read("foo.txt") == "home content"
     meiva.files.write("out.txt", "hi")
     assert (default_home / "out.txt").read_text() == "hi"
+
+
+# meiva:note
+# The relative-path base is the workspace under the home the bound context carries, not the home
+# the process environment names: the two differ here, so reading the environment would fail.
+def test_the_workspace_base_follows_the_home_the_context_carries(
+    unit_home: Path, tmp_path: Path
+) -> None:
+    carried = tmp_path / "carried-home"
+    pin_agent(5, meiva_home=carried)
+    assert unit_home != carried
+    assert meiva.files.workspace_base() == carried / "workspaces" / "5"
+    meiva.files.write("note.txt", "hi")
+    assert (carried / "workspaces" / "5" / "note.txt").read_text() == "hi"
+    assert meiva.files.agent_workspace(7) == carried / "workspaces" / "7"
 
 
 def test_tilde_expanduser(default_home: Path) -> None:

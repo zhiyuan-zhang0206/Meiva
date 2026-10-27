@@ -20,9 +20,10 @@ One explicit database factory serves the logging pipeline and
 supplies the same gate; the daemon passes the resulting handle to action and
 session audits. Logging construction retains its lazy database dial.
 
-`main` also builds the process's `Clock` from the booted configuration and passes it to
-`run(sock, database=..., clock=...)`, which hands it to `ComputerMcpDaemon` and the loop
-watchdog. The daemon takes every time from it: the task-session envelope's epoch seconds
+`main` also builds the process's `Clock` from the booted configuration and passes it, with the
+home it resolved, to `run(sock, database=..., clock=..., home=...)`, which hands the clock to
+`ComputerMcpDaemon` and the loop watchdog and the home to the daemon, so captures and the compiled
+OCR helper land under that home's `logs/computer`. The daemon takes every time from it: the task-session envelope's epoch seconds
 (`first_action_at`, `last_action_at`) and the capture stamp that names a screenshot,
 `logs/computer/snapshots/agent-<id>-<UTC YYYYmmddTHHMMSSffffff>.png`. That name is the shape
 `meiva logs retention` matches, so a capture named any other way is never reclaimed.

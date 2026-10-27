@@ -90,6 +90,7 @@ def test_backend_init_failure_isolated_and_waits_before_retry(tmp_path: Path) ->
         endpoint="http://127.0.0.1:4318",
         providers=(logs, metrics),
         mirror_dir=tmp_path,
+        home=tmp_path,
     )
     try:
         assert backend.export_batch([otlp_test_event()]) is None  # does not raise
@@ -117,6 +118,7 @@ def test_backend_retry_recovers_and_emits_real_status_events(
         retry_interval_s=0.05,
         providers=(logs, metrics),
         mirror_dir=tmp_path,
+        home=tmp_path,
     )
     try:
         assert backend._ensure() is False
@@ -155,6 +157,7 @@ def test_backend_unreachable_probe_emits_specific_disabled_reason(
         enabled=lambda: True,
         endpoint=endpoint,
         mirror_dir=tmp_path,
+        home=tmp_path,
     )
     try:
         assert backend._ensure() is False
@@ -183,6 +186,7 @@ def test_queue_full_sheds_counted_not_blocking(tmp_path: Path) -> None:
         providers=(logger_provider, metric_provider),
         queue_maxsize=1,
         mirror_dir=tmp_path,
+        home=tmp_path,
     )
     try:
         backend.export_batch([otlp_test_event()])
@@ -237,6 +241,7 @@ def test_pipeline_mirror_survives_otlp_failure(database: Database, tmp_path: Pat
             _FailingMetricsProvider(attempts, message="collector unreachable"),
         ),
         mirror_dir=tmp_path,
+        home=tmp_path,
     )
     existing = telemetry.process_state["pipeline"]
     if existing is not None:
@@ -268,9 +273,7 @@ def test_handshake_env_no_longer_gates_export(tmp_path: Path) -> None:
     must no longer disable OTLP — the export flag is the only authority."""
     assert (
         telemetry_otlp.OtlpBackend(
-            export_allowed=lambda: True,
-            enabled=lambda: True,
-            mirror_dir=tmp_path,
+            export_allowed=lambda: True, enabled=lambda: True, mirror_dir=tmp_path, home=tmp_path
         )._enabled()
         is True
     )
@@ -289,6 +292,7 @@ def test_flush_force_flushes_sdk_batch_records(tmp_path: Path) -> None:
         enabled=lambda: True,
         providers=(logger_provider, metric_provider),
         mirror_dir=tmp_path,
+        home=tmp_path,
     )
 
     try:
@@ -315,6 +319,7 @@ def test_warmup_builds_backend_when_enabled(tmp_path: Path) -> None:
             MeterProvider(metric_readers=[InMemoryMetricReader()]),
         ),
         mirror_dir=tmp_path,
+        home=tmp_path,
     )
 
     try:
@@ -338,6 +343,7 @@ def test_queue_loss_metric_survives_full_log_lane(tmp_path: Path) -> None:
         providers=(logger_provider, metric_provider),
         queue_maxsize=1,
         mirror_dir=tmp_path,
+        home=tmp_path,
     )
     try:
         backend.export_batch([otlp_test_event()])

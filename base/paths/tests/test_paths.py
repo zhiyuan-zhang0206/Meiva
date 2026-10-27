@@ -30,21 +30,21 @@ def test_meiva_home_repairs_owner_only_mode(unit_home: Path):
 
 
 def test_plugins_dir_under_meiva_home(unit_home: Path):
-    assert paths.plugins_dir() == unit_home / "plugins"
+    assert paths.plugins_dir(home=unit_home) == unit_home / "plugins"
 
 
 def test_plugins_dir_auto_mkdirs(unit_home: Path):
     target = unit_home / "plugins"
     assert not target.exists()
-    paths.plugins_dir()
+    paths.plugins_dir(home=unit_home)
     assert target.is_dir()
 
 
 def test_workspace_paths_derive_from_the_workspaces_root(unit_home: Path):
-    root = paths.workspaces_root()
+    root = paths.workspaces_root(home=unit_home)
     assert root == unit_home / "workspaces"
-    assert paths.workspace_dir_readonly(7) == root / "7"
-    assert paths.workspace_dir(7) == root / "7"
+    assert paths.workspace_dir_readonly(7, home=unit_home) == root / "7"
+    assert paths.workspace_dir(7, home=unit_home) == root / "7"
 
 
 def test_default_home_is_bare_meiva():

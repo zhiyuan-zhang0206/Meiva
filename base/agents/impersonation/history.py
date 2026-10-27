@@ -26,7 +26,6 @@ from base.agents.impersonation.status import (
 from base.db.protocols import DatabaseLike, SyncConnection
 from base.events.live.bus import EventBus
 from base.host.private_storage import write_private_bytes
-from base.paths import workspace_dir
 
 # A consumed event's durable identity is content parsed from the original log line.
 # Reader-synthesized projections (event id, line_sha256, tier, or future additions)
@@ -450,18 +449,18 @@ def build_document(lease: Mapping[str, Any], rows: list[dict[str, Any]]) -> dict
     }
 
 
+# meiva:note
+# Write one JSON file atomically in `workspace`, before native resumption.
 def export_handoff(
     lease: Mapping[str, Any],
     conn: SyncConnection,
     *,
-    workspace: Path | None = None,
+    workspace: Path,
 ) -> tuple[dict[str, Any], str]:
-    """Write one JSON file atomically in the agent workspace, before native resumption."""
     document = lease["handoff_document"]
     if document is None or document["version"] != 2:
         document = build_document(lease, entries(str(lease["id"]), conn))
-    base_dir = workspace if workspace is not None else workspace_dir(lease["agent_id"])
-    target = base_dir / "impersonation" / f"{lease['session_id']}.json"
+    target = workspace / "impersonation" / f"{lease['session_id']}.json"
     document["session"]["handoff_path"] = str(target)
     encoded = json.dumps(document, ensure_ascii=False, indent=2, default=_json_default) + "\n"
     write_private_bytes(target, encoded.encode("utf-8"))

@@ -77,6 +77,7 @@ async def test_run_serves_until_stopped_then_joins_its_watchdog(
             database=lambda: database,
             helper=PermissionsHelperClient(d / "unserved-helper.sock"),
             clock=system_clock(),
+            home=d,
         )
     )
     try:

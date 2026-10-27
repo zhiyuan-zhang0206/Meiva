@@ -17,7 +17,6 @@ from pathlib import Path
 from uuid import uuid4
 
 import meiva
-from base.paths import workspace_dir
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # 1. EXPLORE — understand the task and define sub-tasks
@@ -50,7 +49,7 @@ CHECKPOINT_COUNT = 0
 # ═══════════════════════════════════════════════════════════════════════════════
 
 orchestrator_id = meiva.self.AGENT_ID
-handoff = workspace_dir(orchestrator_id) / "task_handoff"
+handoff = meiva.files.resolve("task_handoff")
 handoff.mkdir(parents=True, exist_ok=True)
 
 worker_ids: dict[str, int] = {}

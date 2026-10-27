@@ -7,7 +7,7 @@ import os
 import subprocess
 from pathlib import Path
 
-from base.paths import workspace_dir
+from meiva.files import agent_workspace
 from meiva.sdk_surface import agent_identity
 from meiva.sdk_surface.validation import coerce_str, coerce_typed
 from meiva.security import scan_content
@@ -92,7 +92,7 @@ def run(
     if cwd is None:
         aid = agent_identity.agent_id()
         # agent_id() is None until a bootstrap establishes it.
-        cwd = str(workspace_dir(aid)) if aid is not None else str(Path.home())
+        cwd = str(Path.home() if aid is None else agent_workspace(aid))
     completed = subprocess.run(  # noqa: S602
         cmd,
         shell=True,
@@ -143,7 +143,7 @@ def run_background(
     if not cmd.strip():
         raise ValueError("cmd cannot be empty")
     aid = agent_identity.require_agent_id()
-    workspace = workspace_dir(aid)
+    workspace = agent_workspace(aid)
     return background.start(
         sessions.open_sessions(aid),
         background.BackgroundRun(

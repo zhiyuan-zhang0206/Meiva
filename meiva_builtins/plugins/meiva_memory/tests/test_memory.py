@@ -20,6 +20,7 @@ from base.agents.context.gateway_client.memory_search import MemorySearchResult
 from base.agents.sdk.tests.sampling_owners import fixed_sampling_owner
 from base.packages.plugin_config_images import DiskPluginConfigImages
 from base.packages.plugins.extensions import ExtensionRegistry
+from base.paths import meiva_home
 from base.paths.home import resolve_meiva_home
 from meiva.gateway_client import use_client
 from meiva.sdk_surface import install
@@ -69,7 +70,7 @@ def test_personal_path_is_the_memory_folder_of_the_agent_workspace() -> None:
     from meiva.tests.fixtures.pin_agent import pin_agent
 
     pin_agent(17)
-    assert workspace_dir(17) / "memory" == meiva.memory.PERSONAL_PATH
+    assert workspace_dir(17, home=meiva_home()) / "memory" == meiva.memory.PERSONAL_PATH
     assert isinstance(meiva.memory.PERSONAL_PATH, Path)
     assert "PERSONAL_PATH" in meiva.memory.__all_for_meiva__
 

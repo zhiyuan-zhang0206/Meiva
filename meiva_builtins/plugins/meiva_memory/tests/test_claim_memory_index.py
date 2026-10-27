@@ -5,7 +5,7 @@ from base.agents.context import MeivaContext
 from base.clock import Clock
 from base.config.tests.configuration import defaults
 from base.host.env.agent_slices import AgentSlices
-from base.paths import memory_dir
+from base.paths import meiva_home, memory_dir
 from base.paths.home import resolve_meiva_home
 from meiva_builtins.plugins.meiva_memory.notes import memory_index_note
 
@@ -19,7 +19,7 @@ def _context(**pins: Any) -> MeivaContext:
 
 
 def _pool() -> Path:
-    pool = memory_dir()
+    pool = memory_dir(home=meiva_home())
     pool.mkdir(parents=True)
     return pool
 

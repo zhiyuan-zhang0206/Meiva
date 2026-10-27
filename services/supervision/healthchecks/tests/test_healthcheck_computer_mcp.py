@@ -35,6 +35,7 @@ async def daemon_home(database: Database):
             sock=str(sock),
             helper=PermissionsHelperClient("/unused.sock"),
             clock=system_clock(),
+            home=home,
         )
         server = await asyncio.start_unix_server(daemon.handle, path=str(sock))
         try:

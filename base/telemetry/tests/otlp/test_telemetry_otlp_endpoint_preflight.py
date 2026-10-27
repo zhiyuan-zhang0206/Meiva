@@ -91,7 +91,7 @@ def test_production_otlp_provider_construction_contract(tmp_path: Path) -> None:
     assert plan.shutdown_on_exit is False
 
     logs, metrics = telemetry_otlp_metrics.build_providers(
-        "http://127.0.0.1:4318", mirror_dir=tmp_path
+        "http://127.0.0.1:4318", mirror_dir=tmp_path, home=tmp_path
     )
     try:
         # Both providers must NOT register their own atexit shutdown: it would fire

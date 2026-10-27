@@ -37,7 +37,7 @@ def site_for(shell: ShellSessions, home: Path, host: SessionHost) -> LaunchSite:
         shell=shell,
         home=home,
         cluster=home / "cluster",
-        session_cwd=workspace_dir(shell.agent_id),
+        session_cwd=workspace_dir(shell.agent_id, home=home),
         host=host,
     )
 

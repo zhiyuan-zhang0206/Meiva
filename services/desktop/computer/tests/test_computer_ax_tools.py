@@ -17,6 +17,7 @@ from base.clock.tests.fakes import system_clock
 from base.db import Database
 from base.db.code_version_gate import ProcessDbGate
 from base.host.permissions_helper.client import AxNode, AxTreeResult
+from base.paths import meiva_home
 
 from .. import ax_tools as ax
 from ..errors import ComputerUseError
@@ -280,6 +281,7 @@ async def call_ax(
         sock="/nonexistent-test.sock",
         helper=helper if helper is not None else FakeAxHelper(),
         clock=system_clock(),
+        home=meiva_home(),
     )
     resp = await daemon._dispatch(
         {"id": 1, "method": "call_tool", "tool": "ax_tree", "args": args or {}, "agent_id": None}
@@ -346,6 +348,7 @@ async def test_ax_tree_scope_goes_through_the_raw_id_and_widens_the_walk(
         sock="/nonexistent-test.sock",
         helper=fake_ax,
         clock=system_clock(),
+        home=meiva_home(),
     )
     await call_ax({"app": "Mail"}, daemon, database_gate=database_gate, helper=fake_ax)
     await call_ax(
@@ -405,6 +408,7 @@ async def test_ax_tree_is_declared_in_the_tool_list(database: Database) -> None:
         sock="/nonexistent-test.sock",
         helper=FakeAxHelper(),
         clock=system_clock(),
+        home=meiva_home(),
     )
     resp = await daemon._dispatch({"id": 1, "method": "list_tools"})
     assert resp["ok"] is True

@@ -19,6 +19,7 @@ from base.host.permissions_helper.client import (
     AxNode,
     PermissionsHelperError,
 )
+from base.paths import meiva_home
 
 from .. import ax_act as ax_action_tools
 from ..ax_ids import AxIdTable, AxSession
@@ -175,6 +176,7 @@ def daemon(database: Database, app: FakeAxApp) -> ComputerMcpDaemon:
         sock="/nonexistent-test.sock",
         helper=app,
         clock=system_clock(),
+        home=meiva_home(),
     )
 
 
@@ -440,6 +442,7 @@ async def test_ax_act_is_declared_with_its_required_arguments(database: Database
         sock="/nonexistent-test.sock",
         helper=FakeAxApp(),
         clock=system_clock(),
+        home=meiva_home(),
     )
     resp = await daemon._dispatch({"id": 1, "method": "list_tools"})
     assert resp["ok"] is True

@@ -132,10 +132,10 @@ def _mirror_nudged(agent_id: int) -> tuple[str, str, int] | None:
     import json
     from datetime import UTC, datetime
 
-    from base.paths import logs_dir
+    from base.paths import logs_dir, meiva_home
 
     day = datetime.now(UTC).strftime("%Y%m%d")
-    path = logs_dir() / f"events-{day}.jsonl"
+    path = logs_dir(home=meiva_home()) / f"events-{day}.jsonl"
     if not path.exists():
         return None
     for line in reversed(path.read_text(encoding="utf-8").splitlines()):
@@ -159,10 +159,10 @@ def _mirror_event(agent_id: int, event_name: str) -> dict | None:
     import json
     from datetime import UTC, datetime
 
-    from base.paths import logs_dir
+    from base.paths import logs_dir, meiva_home
 
     day = datetime.now(UTC).strftime("%Y%m%d")
-    path = logs_dir() / f"events-{day}.jsonl"
+    path = logs_dir(home=meiva_home()) / f"events-{day}.jsonl"
     if not path.exists():
         return None
     for line in reversed(path.read_text(encoding="utf-8").splitlines()):

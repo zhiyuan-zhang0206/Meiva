@@ -17,6 +17,7 @@ from base.lm.catalog import ModelCatalog
 from base.packages.plugins.extensions import (
     ExtensionRegistry,
 )
+from base.paths import meiva_home
 from meiva.sdk_surface import install, process_context
 from meiva.tests.fixtures.pin_agent import pin_agent
 from meiva.tests.fixtures.scripted_chat_model import OVERRIDE, Script, ScriptedModels
@@ -153,13 +154,17 @@ def test_get_cwd_outside_turn_raises():
         meiva.cwd.get()
 
 
-def test_default_cwd_is_workspace_when_bootstrapped(unit_home: Path):
-    """In bootstrapped process, cwd default = own workspace dir (and already created)."""
+# meiva:note
+# In a bootstrapped process the default cwd is the agent's own workspace dir (already created),
+# under the home the bound context carries - a directory that is not the process's own home.
+def test_default_cwd_is_workspace_when_bootstrapped(unit_home: Path, tmp_path: Path):
     from meiva_builtins.plugins.meiva_code._state import default_cwd
 
-    pin_agent(5, owns_loop=True)
-    assert default_cwd() == str(unit_home / "workspaces" / "5")
-    assert (unit_home / "workspaces" / "5").is_dir()
+    carried = tmp_path / "carried-home"
+    pin_agent(5, owns_loop=True, meiva_home=carried)
+    assert unit_home != carried
+    assert default_cwd() == str(carried / "workspaces" / "5")
+    assert (carried / "workspaces" / "5").is_dir()
 
 
 def test_default_cwd_home_without_bootstrap():
@@ -707,7 +712,7 @@ def test_read_wrap_oversized_agents_md_truncates_and_archives(
     install.uninstall()
     install_code_surface(model_catalog, authority_with(config_authority, exec_output_max_chars=500))
     pin_agent(123)
-    overflow = workspace_dir(123) / ".exec_output"
+    overflow = workspace_dir(123, home=meiva_home()) / ".exec_output"
 
     process_context.set_state(make_state_with_cwd(str(repo)))
     process_context.set_state_update({})

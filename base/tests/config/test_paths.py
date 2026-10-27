@@ -28,15 +28,15 @@ def test_daemon_pidfile_uses_run_directory_only(tmp_path: Path) -> None:
 
 
 def test_workspace_dir_creates_per_agent_dir(unit_home: Path) -> None:
-    p = paths.workspace_dir(42)
+    p = paths.workspace_dir(42, home=unit_home)
     assert p == unit_home / "workspaces" / "42"
     assert p.is_dir()
 
 
 def test_workspace_dir_idempotent_and_per_agent(unit_home: Path) -> None:
-    first = paths.workspace_dir(42)
-    assert paths.workspace_dir(42) == first
-    other = paths.workspace_dir(7)
+    first = paths.workspace_dir(42, home=unit_home)
+    assert paths.workspace_dir(42, home=unit_home) == first
+    other = paths.workspace_dir(7, home=unit_home)
     assert other == unit_home / "workspaces" / "7"
     assert other != first
 
@@ -46,7 +46,7 @@ def test_workspace_dir_none_fails_fast(unit_home: Path) -> None:
     directory — callers that legitimately have no agent id (pre-bootstrap) are
     expected to branch to Path.home() themselves before calling this."""
     with pytest.raises(ValueError, match="workspace_dir"):
-        paths.workspace_dir(None)  # pyright: ignore[reportArgumentType]
+        paths.workspace_dir(None, home=unit_home)  # pyright: ignore[reportArgumentType]
     assert not (unit_home / "workspaces" / "None").exists()
 
 
