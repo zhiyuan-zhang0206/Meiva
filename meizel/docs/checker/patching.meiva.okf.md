@@ -101,12 +101,12 @@ to put a child process in a state no parameter reaches. `[approved-patches.files
 [[meizel/docs/checker/policy.meiva.okf.md|the policy]] lists such a file with its reason, and none of its patches is
 recorded or judged. Three purposes qualify: an autouse guard, the entry of a subprocess a test starts,
 and the global setup of the test runner. Production code and test modules (`test_*.py`, `*_test.py`,
-`*.test.ts`, `*.spec.ts`) cannot be listed (`policy-syntax`): a test that patches is converted. Approval is
-by file, so a patch added to an approved file is not seen by the baseline; `python -m meizel debt approved`
-lists each file with the patches it holds now (no gate compares that count with a ref's), and `policy diff` shows every entry added. An entry whose
-file is gone or patches nothing is `stale-approval`. `missing-patch-target` is a hard error even there.
-The rule comparison keeps the base's table: approving a file shows as a drop of the record, and removing an
-approval may record the patches it hid.
+`*.test.ts`, `*.spec.ts`) cannot be listed (`policy-syntax`): a test that patches is converted. No baseline
+counts an approved file's patches, so `meizel/tests/languages/test_parity.py` pins them (`python -m meizel debt
+approved` prints them): one more patch or file is an edit a reviewer reads, as is every `policy diff` entry. An
+entry whose file is gone or patches nothing is `stale-approval`; `missing-patch-target` is a hard error even there.
+The rule comparison keeps the base's table: approving a file drops the record, and removing an approval
+may record the patches it hid.
 
 ## Recording
 
