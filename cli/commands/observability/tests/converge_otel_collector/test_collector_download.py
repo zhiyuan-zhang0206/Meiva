@@ -13,7 +13,7 @@ from dataclasses import replace
 
 import pytest
 
-from base.deploy.release import collector_artifact
+from base.deploy.release.collector import plan as collector_plan
 from base.paths import otel_collector_config, otel_collector_dir
 from cli.commands.observability.tests.converge_otel_collector.collector_harness import (
     RUNNER,
@@ -26,7 +26,7 @@ from cli.commands.observability.tests.converge_otel_collector.collector_harness 
 from cli.commands.observability.tests.scripted_http import Reply, serve
 from cli.database.tests.command_inputs import command_runtime as command_runtime
 
-ASSET = f"/otelcol-contrib_{collector_artifact.OTELCOL_CONTRIB_VERSION}_linux_amd64.tar.gz"
+ASSET = f"/otelcol-contrib_{collector_plan.OTELCOL_CONTRIB_VERSION}_linux_amd64.tar.gz"
 
 
 def test_a_missing_binary_is_fetched_through_the_units_opener_and_checked_against_the_pin(
@@ -38,8 +38,8 @@ def test_a_missing_binary_is_fetched_through_the_units_opener_and_checked_agains
             unit.ensure(RUNNER)
 
     assert [(request.method, request.path) for request in mirror.received] == [("GET", ASSET)]
-    assert not (otel_collector_dir(unit.home) / collector_artifact.BINARY_NAME).exists()
-    assert not (otel_collector_dir(unit.home) / collector_artifact.VERSION_MARKER).exists()
+    assert not (otel_collector_dir(unit.home) / collector_plan.BINARY_NAME).exists()
+    assert not (otel_collector_dir(unit.home) / collector_plan.VERSION_MARKER).exists()
     assert not otel_collector_config(unit.home).exists()
 
 

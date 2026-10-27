@@ -92,7 +92,7 @@ def _run(home: Path, run: Path, *, default_cwd: Path) -> int:
         home=home,
         base_environ=child_env.inherited_process_env(),
         default_cwd=default_cwd,
-        source_root=editable_install.current_interpreter_source_root(),
+        source_root=editable_install.current_interpreter_source_root(sys.executable),
         pid=os.getpid(),
     )
     path = service_socket_path(run)

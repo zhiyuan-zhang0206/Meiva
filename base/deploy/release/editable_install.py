@@ -17,16 +17,23 @@
 
 from __future__ import annotations
 
-import os
-import sys
 from collections.abc import Iterable
 from pathlib import Path
 
+from base.deploy.release.editable_layout import (
+    console_script_beside,
+    exact_path_key,
+    layout_source_root,
+    pointer_lines,
+    pointers_beside,
+    venv_python_candidates,
+)
 from base.deploy.release.editable_policy import (
     EditableReadings,
     MetadataRecord,
     PointerRecord,
     editable_violations,
+    sorted_paths,
 )
 
 EDITABLE_PTH_NAME = "_editable_impl_meiva.pth"
@@ -58,10 +65,7 @@ __all__ = [
 
 
 def _matches(venv: Path, patterns: tuple[str, ...]) -> tuple[Path, ...]:
-    found: set[Path] = set()
-    for pattern in patterns:
-        found.update(venv.glob(pattern))
-    return tuple(sorted(found, key=str))
+    return sorted_paths(path for pattern in patterns for path in venv.glob(pattern))
 
 
 # meiva:note
@@ -78,9 +82,9 @@ def editable_direct_url_paths(source_root: Path) -> tuple[Path, ...]:
 
 
 # meiva:note
-# Platform-native exact path identity.
+# Platform-native exact path identity of `path` as the filesystem resolves it.
 def _normalized_exact_path(path: Path) -> str:
-    return os.path.normcase(str(path.expanduser().resolve(strict=False)))
+    return exact_path_key(path.resolve(strict=False))
 
 
 def _path_exists(path: Path) -> bool:
@@ -99,7 +103,7 @@ def _read_pointer(path: Path) -> PointerRecord:
     if text is None:
         return PointerRecord(path=path, text=None, targets=None)
     try:
-        targets = tuple(_normalized_exact_path(Path(line)) for line in text.splitlines() if line)
+        targets = tuple(_normalized_exact_path(Path(line)) for line in pointer_lines(text))
     except (OSError, ValueError):
         return PointerRecord(path=path, text=text, targets=None)
     return PointerRecord(path=path, text=text, targets=targets)
@@ -112,22 +116,13 @@ def _read_pointer(path: Path) -> PointerRecord:
 def _read_editable_install(source_root: Path) -> EditableReadings:
     pointer_paths = editable_meiva_pth_paths(source_root)
     metadata_paths = editable_direct_url_paths(source_root)
-    expected = {record.parent.parent / EDITABLE_PTH_NAME for record in metadata_paths}
+    expected = pointers_beside(metadata_paths, EDITABLE_PTH_NAME)
     return EditableReadings(
         pointers=tuple(_read_pointer(path) for path in pointer_paths),
         metadata=tuple(MetadataRecord(path=path, text=_read(path)) for path in metadata_paths),
-        pointers_missing=tuple(
-            sorted((path for path in expected if not _path_exists(path)), key=str)
-        ),
-        pointers_without_metadata=tuple(
-            sorted(
-                (
-                    path
-                    for path in pointer_paths
-                    if not tuple(path.parent.glob(EDITABLE_DIST_INFO_GLOB))
-                ),
-                key=str,
-            )
+        pointers_missing=sorted_paths(path for path in expected if not _path_exists(path)),
+        pointers_without_metadata=sorted_paths(
+            path for path in pointer_paths if not tuple(path.parent.glob(EDITABLE_DIST_INFO_GLOB))
         ),
     )
 
@@ -147,23 +142,19 @@ def editable_install_violations(
     *,
     allowed_roots: Iterable[Path] = (),
 ) -> tuple[str, ...]:
-    resolved_source = source_root.expanduser().resolve(strict=False)
+    resolved_source = source_root.resolve(strict=False)
     roots = [resolved_source, *allowed_roots]
     return editable_violations(
         _read_editable_install(resolved_source),
         allowed_roots=frozenset(_normalized_exact_path(root) for root in roots),
-        allowed_urls=frozenset(root.expanduser().resolve(strict=False).as_uri() for root in roots),
+        allowed_urls=frozenset(root.resolve(strict=False).as_uri() for root in roots),
     )
 
 
 # meiva:note
 # First existing checkout virtualenv interpreter.
 def venv_python(source_root: Path) -> Path | None:
-    venv = source_root / ".venv"
-    for candidate in (
-        venv / "bin" / "python3",
-        venv / "bin" / "python",
-    ):
+    for candidate in venv_python_candidates(source_root):
         if _path_exists(candidate):
             return candidate
     return None
@@ -175,10 +166,10 @@ def editable_console_script_violations(source_root: Path) -> tuple[str, ...]:
     interpreter = venv_python(source_root)
     if interpreter is None:
         return ()
-    console_script = interpreter.with_name("meiva")
+    console_script, violation = console_script_beside(interpreter)
     if _path_exists(console_script):
         return ()
-    return (f"{console_script} editable console script missing",)
+    return (violation,)
 
 
 # meiva:note
@@ -188,13 +179,6 @@ def editable_console_script_violations(source_root: Path) -> tuple[str, ...]:
 # checkout authority, so callers deliberately treat it as a no-op. A virtualenv's Python is
 # normally a symlink to its base interpreter: the lexical executable path carries the `.venv`
 # identity, and resolving it before the layout check would lose that boundary.
-def current_interpreter_source_root(executable: str | Path | None = None) -> Path | None:
-    interpreter = Path(sys.executable if executable is None else executable)
-    try:
-        venv = interpreter.parents[1]
-        source_root = interpreter.parents[2]
-    except IndexError:
-        return None
-    if venv.name != ".venv" or interpreter.parent.name != "bin":
-        return None
-    return source_root.resolve(strict=False)
+def current_interpreter_source_root(executable: str | Path) -> Path | None:
+    source_root = layout_source_root(Path(executable))
+    return None if source_root is None else source_root.resolve(strict=False)

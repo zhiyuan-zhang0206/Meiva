@@ -12,11 +12,12 @@ from pathlib import Path
 import pytest
 
 from base.clock import SYSTEM_TIMERS
-from base.deploy.release import collector_artifact as artifact
+from base.deploy.release.collector import artifact as artifact
+from base.deploy.release.collector import plan as collector_plan
 from base.host.net.ports import SYSTEM_URL_OPENER
 from cli.commands.observability.tests.scripted_http import Reply, serve
 
-LIMITS = artifact.DownloadLimits(
+LIMITS = collector_plan.DownloadLimits(
     total_budget_s=60.0,
     socket_timeout_s=30.0,
     attempts=3,
@@ -25,7 +26,7 @@ LIMITS = artifact.DownloadLimits(
 )
 
 
-def _stream(url: str, dest: Path, limits: artifact.DownloadLimits) -> None:
+def _stream(url: str, dest: Path, limits: collector_plan.DownloadLimits) -> None:
     artifact.stream_download(
         url,
         dest,
@@ -55,7 +56,7 @@ def test_stream_download_writes_all_chunks(
 def test_stream_download_gives_up_on_a_server_that_never_answers_within_the_socket_timeout(
     tmp_path: Path,
 ) -> None:
-    limits = artifact.DownloadLimits(
+    limits = collector_plan.DownloadLimits(
         total_budget_s=60.0,
         socket_timeout_s=0.2,
         attempts=1,

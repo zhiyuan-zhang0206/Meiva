@@ -18,7 +18,7 @@ import yaml
 
 from base.cluster.authority import MONITOR_ROLE
 from base.cluster.dataplane.pg_admin import pg_socket_path
-from base.deploy.release import collector_artifact
+from base.deploy.release.collector import plan as collector_plan
 from base.host.db_authority.unit import telemetry_bearer
 from base.host.env.dotenv_boot import PLACEHOLDER_DB_URL
 from base.host.system.tests.fake_commands import fake_host
@@ -73,7 +73,7 @@ def test_the_collector_settings_are_read_from_the_domains_of_one_owner(
             field.name: getattr(domain, field.name) for field in dataclasses.fields(group)
         }
     limits = view.observability
-    assert values.download == collector_artifact.DownloadLimits(
+    assert values.download == collector_plan.DownloadLimits(
         total_budget_s=limits.otel_collector_download_budget_s,
         socket_timeout_s=limits.otel_collector_download_socket_timeout_s,
         attempts=limits.otel_collector_download_attempts,
@@ -120,7 +120,7 @@ def test_a_version_matching_binary_is_kept_and_the_config_is_written_owner_only(
 
     assert binary.read_bytes() == b"bin"
     assert (
-        f"otelcol-contrib {collector_artifact.OTELCOL_CONTRIB_VERSION} present"
+        f"otelcol-contrib {collector_plan.OTELCOL_CONTRIB_VERSION} present"
         in capsys.readouterr().out
     )
     config = otel_collector_config(collector_unit.home)

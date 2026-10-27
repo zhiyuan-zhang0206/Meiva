@@ -4,7 +4,7 @@ from typing import Literal, cast
 
 import pytest
 
-from base.deploy.release.collector_artifact import platform_tag_for
+from base.deploy.release.collector.plan import platform_tag_for
 
 
 @pytest.mark.parametrize(

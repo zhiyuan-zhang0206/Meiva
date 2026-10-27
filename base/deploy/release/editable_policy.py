@@ -7,6 +7,7 @@
 from __future__ import annotations
 
 import json
+from collections.abc import Iterable
 from dataclasses import dataclass
 from pathlib import Path
 from typing import TypeGuard
@@ -18,6 +19,7 @@ __all__ = [
     "direct_url_is_allowed",
     "editable_violations",
     "pointer_is_allowed",
+    "sorted_paths",
 ]
 
 
@@ -50,6 +52,12 @@ class EditableReadings:
     metadata: tuple[MetadataRecord, ...]
     pointers_missing: tuple[Path, ...]
     pointers_without_metadata: tuple[Path, ...]
+
+
+# meiva:note
+# The distinct paths of a record listing in the order every listing reports them: by their text.
+def sorted_paths(paths: Iterable[Path]) -> tuple[Path, ...]:
+    return tuple(sorted(set(paths), key=str))
 
 
 def _is_str_dict(value: object) -> TypeGuard[dict[str, object]]:

@@ -15,6 +15,7 @@ from base.deploy.release.editable_policy import (
     direct_url_is_allowed,
     editable_violations,
     pointer_is_allowed,
+    sorted_paths,
 )
 
 _ROOT = "/srv/meiva/source"
@@ -130,3 +131,10 @@ def test_an_unreadable_or_empty_record_is_a_violation_not_a_crash() -> None:
         f"{_PTH} names '(empty)'; non-allowlisted source or is inconsistent",
         f"{_DIRECT_URL} records '(empty)'",
     )
+
+
+def test_a_listing_of_paths_is_distinct_and_ordered_by_text() -> None:
+    a, b, c = Path("/s/a.pth"), Path("/s/b.pth"), Path("/s/B.pth")
+
+    assert sorted_paths([b, a, c, a]) == (c, a, b)
+    assert sorted_paths([]) == ()

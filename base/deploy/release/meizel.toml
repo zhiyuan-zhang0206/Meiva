@@ -1,32 +1,16 @@
-exports = ["collector_artifact.py", "editable_install.py", "python_lock.py", "start_inputs.py"]
+exports = ["collector", "editable_install.py", "python_lock.py", "start_inputs.py"]
 
 [uses]
-"editable_install.py" = ["editable_policy.py"]
-"tests" = ["collector_artifact.py", "editable_install.py", "editable_policy.py"]
+"editable_install.py" = ["editable_layout.py", "editable_policy.py"]
+"start_inputs.py" = ["start_digest.py"]
+"tests" = ["collector", "editable_install.py", "editable_layout.py", "editable_policy.py", "start_digest.py"]
 
 [purity]
-"." = "strict-to-be"
+"." = "strict"
 "__init__.py" = "strict"
+"editable_install.py" = { mode = "none", why = "the reader of a checkout's editable install: it globs the virtualenv for the pointer and metadata records, reads and resolves them, probes the interpreters and the console script and resolves an interpreter's checkout root; the lines to resolve, the comparison key, the pointer beside a record, the interpreter candidates, the console script and the layout rule are decided in editable_layout.py and the legality of what it read in editable_policy.py" }
+"editable_layout.py" = "strict"
 "editable_policy.py" = "strict"
 "python_lock.py" = "strict"
-"start_inputs.py" = "strict-to-be"
-
-[debt.ambient-read]
-"editable_install.py#home pathlib.Path.expanduser" = 3
-
-[debt.impure-call]
-"collector_artifact.py#Path.chmod" = 1
-"collector_artifact.py#Path.open" = 1
-"collector_artifact.py#Path.write_text" = 1
-"collector_artifact.py#import shutil" = 1
-"collector_artifact.py#import tempfile" = 1
-"editable_install.py#Path.exists" = 1
-"editable_install.py#Path.glob" = 2
-"editable_install.py#Path.read_text" = 1
-"editable_install.py#Path.resolve" = 4
-"start_inputs.py#Path.glob" = 1
-"start_inputs.py#Path.lstat" = 1
-
-[debt.impure-edge]
-"collector_artifact.py#base/host/net/ports.py" = 1
-"collector_artifact.py#base/host/net/resilience.py" = 1
+"start_digest.py" = "strict"
+"start_inputs.py" = { mode = "none", why = "the reader of the home's startup configuration: it finds the per-agent config files, lstats and reads each file and hands the digests to start_digest.py, which decides which files take part, their keys and how they combine into one digest" }
