@@ -476,3 +476,63 @@ def test_a_base_that_spells_none_the_old_way_can_still_be_compared(
     capsys.readouterr()
     assert diff(root) == 0
     assert "no content growth" in capsys.readouterr().out
+
+
+UNMASK_BASE = {
+    "meizel.toml": '[roles]\napplication = ["app"]\ntooling = ["rules"]\n',
+    "app/__init__.py": "",
+    "app/daemon.py": "import os\n\nvalue = os.environ['A']\n",
+    "app/meizel.toml": '[roots]\n"daemon.py" = { kinds = ["environ"], why = "the process entry" }\n',
+    "rules/engine.py": "RULE = 1\n",
+}
+
+
+def test_removing_a_root_and_recording_the_reads_it_hid_is_not_content_growth(
+    make_repo: RepoFactory, capsys: pytest.CaptureFixture[str]
+) -> None:
+    root = make_repo(UNMASK_BASE)
+    commit(root)
+    rule_change(root)
+    write(root, {"app/meizel.toml": ""})
+    assert run(root, "debt", "record", ".") == 0
+    write(root, {})
+    assert "daemon.py#environ os.environ" in (root / "app" / "meizel.toml").read_text()
+    capsys.readouterr()
+    assert diff(root) == 0
+    out = capsys.readouterr().out
+    assert "no content growth" in out
+    assert "+1" in out
+
+
+def test_a_read_the_removed_root_never_covered_is_still_content_growth(
+    make_repo: RepoFactory, capsys: pytest.CaptureFixture[str]
+) -> None:
+    root = make_repo(UNMASK_BASE)
+    commit(root)
+    rule_change(root)
+    write(
+        root,
+        {"app/meizel.toml": "", "app/daemon.py": "import time\n\nvalue = time.time()\n"},
+    )
+    assert run(root, "debt", "record", ".") == 0
+    write(root, {})
+    capsys.readouterr()
+    assert diff(root) == 1
+    assert "daemon.py#clock time.time" in capsys.readouterr().out
+
+
+def test_the_read_of_another_file_of_the_directory_is_still_content_growth(
+    make_repo: RepoFactory, capsys: pytest.CaptureFixture[str]
+) -> None:
+    root = make_repo({**UNMASK_BASE, "app/other.py": "VALUE = 1\n"})
+    commit(root)
+    rule_change(root)
+    write(
+        root,
+        {"app/meizel.toml": "", "app/other.py": "import os\n\nVALUE = os.environ['B']\n"},
+    )
+    assert run(root, "debt", "record", ".") == 0
+    write(root, {})
+    capsys.readouterr()
+    assert diff(root) == 1
+    assert "other.py#environ os.environ" in capsys.readouterr().out
