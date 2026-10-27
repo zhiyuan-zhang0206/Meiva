@@ -83,8 +83,36 @@ class Roles:
 
 
 # meiva:note
-# One parsed Python file with its declared root kinds, the number of non-root production modules
-# that import it and the lines the change added.
+# Which production modules that are not roots depend on a declared root file: the ones that import it,
+# and, for a root with a single importer, how many modules import that importer (a constant folded out
+# of a root and imported widely reads the world through it as much as the root itself).
+@dataclass(frozen=True)
+class Importers:
+    direct: tuple[str, ...]
+    onward: tuple[tuple[str, int], ...]
+
+
+# meiva:note
+# The size from which a declared root is asked about: this many importers that are not roots, or
+# one importer that this many modules import. The roots audit calibrates both (see the calibration node).
+MIN_IMPORTERS = 2
+MIN_ONWARD = 3
+
+
+# meiva:note
+# A root declared by the change: the file, the manifest that declares it, the kinds, and its importers
+# when the file is Python (None for a file whose imports are not read, a TypeScript root).
+@dataclass(frozen=True)
+class NewRoot:
+    path: str
+    manifest: str
+    kinds: frozenset[AmbientKind]
+    importers: Importers | None
+
+
+# meiva:note
+# One parsed Python file with its declared root kinds, the modules that depend on it
+# and the lines the change added.
 # `names` maps each imported name to its dotted origin (`from time import monotonic` binds
 # `monotonic` to `time.monotonic`). The index is built by one walk of the tree so that
 # a detector looks only at what the change touched: `touched` holds the nodes that
@@ -98,7 +126,7 @@ class Unit:
     kind: FileKind
     roles: Roles
     roots: frozenset[AmbientKind]
-    importers: int
+    importers: Importers
     names: Mapping[str, str]
     touched: tuple[ast.AST, ...]
     functions: tuple[FunctionNode, ...]

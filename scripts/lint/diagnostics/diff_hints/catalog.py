@@ -7,7 +7,7 @@ from __future__ import annotations
 from collections.abc import Callable
 from dataclasses import dataclass
 
-from scripts.lint.diagnostics.diff_hints.model import HintId
+from scripts.lint.diagnostics.diff_hints.model import MIN_IMPORTERS, MIN_ONWARD, HintId
 
 _CONVENTIONS = "docs/conventions/python-conventions.md"
 _FORMS = f"{_CONVENTIONS}#data-in-decisions-out-the-forms-in-order"
@@ -259,16 +259,20 @@ def _spec_spy_assert() -> HintSpec:
 def _spec_root_middle_layer() -> HintSpec:
     return HintSpec(
         why=(
-            "a file declared a root that three or more modules outside the roots import is a "
-            "middle layer: each importer reads the world through it, so the read is not made "
-            "once at the process entry and a test cannot hand the importer a value."
+            f"a file declared a root that {MIN_IMPORTERS} or more modules outside the roots import "
+            f"(or one that {MIN_ONWARD} or more import) is a middle layer: the importers depend on "
+            "a file that reads the world, so the read is not made once at the process entry and a "
+            "test cannot hand the importer a value. A root newly declared in a manifest is always "
+            "asked about: say what it is."
         ),
         instead=(
             "1) read the value in the real root (the daemon, the CLI runtime, the wiring "
-            "module) and pass it down as a required parameter; 2) if the file is a "
-            "factory the process builds once, name its single caller in the PR description; "
-            "3) never widen the declaration to make an importer pass; 4) a module that "
-            "only wraps the read is an `[ambient-readers]` entry, not a root."
+            "module) and pass it down as a required parameter; 2) if the file is a factory the "
+            "process builds once, name its single caller in the Hint-Ack trailer; 3) if the "
+            "importers only take a type or a constant from a file that also reads the world, "
+            "move those out so the root has no importers; 4) never widen the declaration to "
+            "make an importer pass; 5) a module that only wraps the read is an "
+            "`[ambient-readers]` entry, not a root."
         ),
         see=_ROOTS,
     )

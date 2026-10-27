@@ -224,7 +224,10 @@ def test_the_commit_hint_reads_roots_from_the_index(repo: Path) -> None:
     manifest.write_text(ROOT_TABLE, encoding="utf-8")
     git(repo, "add", "cli/x.py", "cli/meizel.toml")
     manifest.write_text("", encoding="utf-8")
-    done = run(repo, "commit-msg", message_file(repo, "Declare the process entry\n"))
+    message = (
+        "Declare the process entry\n\nHint-Ack: root-middle-layer cli/x.py -- the daemon's entry\n"
+    )
+    done = run(repo, "commit-msg", message_file(repo, message))
     assert done.returncode == 0, done.stderr
 
 
@@ -243,7 +246,10 @@ def test_the_branch_hint_uses_roots_at_the_head_revision(repo: Path) -> None:
     (repo / "cli" / "x.py").write_text(LOCATOR, encoding="utf-8")
     manifest = repo / "cli" / "meizel.toml"
     manifest.write_text(ROOT_TABLE, encoding="utf-8")
-    commit(repo, "Declare the process entry")
+    commit(
+        repo,
+        "Declare the process entry\n\nHint-Ack: root-middle-layer cli/x.py -- the daemon's entry",
+    )
     manifest.write_text("", encoding="utf-8")
     done = run(repo, "branch")
     assert done.returncode == 0, done.stderr
@@ -288,16 +294,19 @@ def declare_root(repo: Path, importers: int, *, as_roots: tuple[str, ...] = ()) 
     git(repo, "add", "cli/home.py")
 
 
-def test_a_root_imported_by_three_modules_that_are_not_roots_is_asked_about(repo: Path) -> None:
-    declare_root(repo, 3)
+def test_a_root_imported_by_two_modules_that_are_not_roots_is_asked_about(repo: Path) -> None:
+    declare_root(repo, 2)
     done = run(repo, "commit-msg", message_file(repo, "Change the root\n"))
     assert done.returncode == 1
     assert "cli/home.py:1: hint root-middle-layer" in done.stderr
-    assert "imported by 3 production modules" in done.stderr
+    assert (
+        "imported by 2 production modules that are not roots: `cli/user0.py`, `cli/user1.py`"
+        in done.stderr
+    )
 
 
 def test_a_root_with_fewer_importers_or_importers_that_are_roots_is_not(repo: Path) -> None:
-    declare_root(repo, 3, as_roots=("user0",))
+    declare_root(repo, 3, as_roots=("user0", "user1"))
     assert run(repo, "commit-msg", message_file(repo, "Change the root\n")).returncode == 0
 
 
@@ -305,3 +314,128 @@ def test_the_answer_to_the_middle_layer_question_is_a_trailer(repo: Path) -> Non
     declare_root(repo, 4)
     message = "Change the root\n\nHint-Ack: root-middle-layer cli/home.py -- the process wiring, built once\n"
     assert run(repo, "commit-msg", message_file(repo, message)).returncode == 0
+
+
+# meiva:note
+# A root at `root` whose importers are the given files, committed with the root declared; then the
+# root is edited so that the report of the last commit asks about it.
+def build_root(repo: Path, root: str, importers: dict[str, str], *, kinds: str = '"home"') -> None:
+    root_path = repo / root
+    root_path.parent.mkdir(parents=True, exist_ok=True)
+    root_path.write_text("VALUE = 1\n", encoding="utf-8")
+    manifest = root_path.parent / "meizel.toml"
+    manifest.write_text(
+        f'[roots]\n"{root_path.name}" = {{ kinds = [{kinds}], why = "reads the home" }}\n',
+        encoding="utf-8",
+    )
+    for name, text in importers.items():
+        (repo / name).parent.mkdir(parents=True, exist_ok=True)
+        (repo / name).write_text(text, encoding="utf-8")
+    commit(repo, "A root and its importers")
+    root_path.write_text("VALUE = 2\n", encoding="utf-8")
+    commit(repo, "Change the root")
+
+
+def reported(repo: Path) -> str:
+    done = run(repo, "report", "HEAD~1", "HEAD")
+    assert done.returncode == 0, done.stderr
+    return done.stdout
+
+
+IMPORT_FORMS = {
+    "absolute": ("cli/home.py", "from cli.home import VALUE\n"),
+    "plain": ("cli/home.py", "import cli.home\n"),
+    "package": ("cli/home.py", "from cli import home\n"),
+    "beside": ("cli/home.py", "from .home import VALUE\n"),
+    "beside module": ("cli/home.py", "from . import home\n"),
+    "parent to child": ("cli/sub/home.py", "from .sub.home import VALUE\n"),
+    "child to parent": ("cli/home.py", "from ..home import VALUE\n"),
+}
+
+
+@pytest.mark.parametrize("form", sorted(IMPORT_FORMS))
+def test_every_form_of_import_counts_an_importer(repo: Path, form: str) -> None:
+    root, text = IMPORT_FORMS[form]
+    where = {"parent to child": "cli", "child to parent": "cli/sub"}.get(form, "cli")
+    build_root(repo, root, {f"{where}/user0.py": text, f"{where}/user1.py": text})
+    assert "imported by 2 production modules" in reported(repo)
+
+
+def test_text_that_looks_like_an_import_and_a_test_are_not_importers(repo: Path) -> None:
+    quoted = 'TEMPLATE = """\nfrom cli.home import VALUE\n"""\n'
+    build_root(
+        repo,
+        "cli/home.py",
+        {
+            "cli/user0.py": "from cli.home import VALUE\n",
+            "cli/quoted.py": quoted,
+            "cli/tests/test_home.py": "from cli.home import VALUE\n",
+        },
+    )
+    assert reported(repo) == ""
+
+
+@pytest.mark.parametrize("name", ["main.py", "__main__.py", "runtime.py", "app.py"])
+def test_a_file_with_an_entry_name_is_not_asked(repo: Path, name: str) -> None:
+    build_root(
+        repo,
+        f"cli/{name}",
+        {"cli/user0.py": f"from cli.{name[:-3]} import VALUE\n"}
+        | {"cli/user1.py": f"from cli.{name[:-3]} import VALUE\n"},
+    )
+    assert reported(repo) == ""
+
+
+def test_a_root_with_one_importer_that_many_modules_import_is_asked_about(repo: Path) -> None:
+    importers = {"cli/api_base.py": "from cli.public_env import VALUE\nAPI_BASE = VALUE\n"}
+    importers |= {f"cli/use{index}.py": "from cli.api_base import API_BASE\n" for index in range(3)}
+    build_root(repo, "cli/public_env.py", importers)
+    assert "imported by `cli/api_base.py`, which 3 production modules" in reported(repo)
+
+
+def test_a_root_declared_by_the_manifest_alone_is_asked_about(repo: Path) -> None:
+    (repo / "cli" / "home.py").write_text("VALUE = 1\n", encoding="utf-8")
+    for index in range(5):
+        (repo / "cli" / f"user{index}.py").write_text(
+            "from cli.home import VALUE\n", encoding="utf-8"
+        )
+    commit(repo, "A module and its importers")
+    (repo / "cli" / "meizel.toml").write_text(
+        '[roots]\n"home.py" = { kinds = ["home"], why = "reads the home" }\n', encoding="utf-8"
+    )
+    git(repo, "add", "cli/meizel.toml")
+    done = run(repo, "commit-msg", message_file(repo, "Declare the home reader\n"))
+    assert done.returncode == 1
+    assert (
+        "cli/home.py:1: hint root-middle-layer: declares a root (home) in cli/meizel.toml"
+        in done.stderr
+    )
+    assert "5 production modules that are not roots import it" in done.stderr
+    message = "Declare the home reader\n\nHint-Ack: root-middle-layer cli/home.py -- built once by the daemon\n"
+    assert run(repo, "commit-msg", message_file(repo, message)).returncode == 0
+
+
+def test_a_typescript_root_declared_by_the_manifest_is_asked_about(repo: Path) -> None:
+    (repo / "ui" / "web" / "src").mkdir(parents=True)
+    (repo / "ui" / "web" / "src" / "env.ts").write_text("export const API = ''\n", encoding="utf-8")
+    (repo / "ui" / "web" / "meizel.toml").write_text(
+        '[roots]\n"src/env.ts" = { kinds = ["environ"], why = "reads the public env" }\n',
+        encoding="utf-8",
+    )
+    git(repo, "add", "ui/web")
+    done = run(repo, "commit-msg", message_file(repo, "Declare the public env\n"))
+    assert done.returncode == 1
+    assert "ui/web/src/env.ts:1: hint root-middle-layer" in done.stderr
+    assert "importers are not read for this language" in done.stderr
+
+
+def test_a_root_that_was_already_declared_is_not_asked_when_the_manifest_changes(
+    repo: Path,
+) -> None:
+    build_root(repo, "cli/home.py", {})
+    manifest = repo / "cli" / "meizel.toml"
+    manifest.write_text(
+        manifest.read_text(encoding="utf-8").replace("reads the home", "reads it"), encoding="utf-8"
+    )
+    commit(repo, "Reword the reason")
+    assert reported(repo) == ""
