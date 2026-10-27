@@ -8,7 +8,6 @@ from pathlib import Path
 
 import pytest
 
-from base.paths import meiva_home
 from services.backup.walg import runner
 from services.backup.walg.config import WalgConfigError
 from services.backup.walg.tests.support import Sandbox, make_sandbox
@@ -61,14 +60,14 @@ def test_postgres_connection_variables_name_the_owner_only_socket() -> None:
 
 
 def test_the_call_is_wal_g_with_the_config_file_and_the_given_arguments(sandbox: Sandbox) -> None:
-    runner.run_walg(["st", "ls"], timeout_s=30, path=sandbox.path, home=meiva_home())
+    runner.run_walg(["st", "ls"], timeout_s=30, path=sandbox.path, home=sandbox.home)
 
     assert sandbox.calls() == ["st ls"]
 
 
 def test_json_output_is_parsed(sandbox: Sandbox) -> None:
     assert runner.run_walg(
-        ["backup-list", "--json"], timeout_s=30, as_json=True, path=sandbox.path, home=meiva_home()
+        ["backup-list", "--json"], timeout_s=30, as_json=True, path=sandbox.path, home=sandbox.home
     ) == [{"backup_name": "base_000000010000000000000002"}]
 
 
@@ -78,14 +77,14 @@ def test_a_failing_call_reports_the_exit_code_and_stderr_tail(sandbox: Sandbox) 
     with pytest.raises(
         runner.WalgCommandError, match=r"wal-g st failed \(exit 1\).*simulated failure"
     ):
-        runner.run_walg(["st", "ls"], timeout_s=30, path=sandbox.path, home=meiva_home())
+        runner.run_walg(["st", "ls"], timeout_s=30, path=sandbox.path, home=sandbox.home)
 
 
 def test_a_hung_call_is_cut_off(sandbox: Sandbox) -> None:
     sandbox.set_mode("hang")
 
     with pytest.raises(runner.WalgCommandError, match="did not finish within 1s"):
-        runner.run_walg(["st", "ls"], timeout_s=1, path=sandbox.path, home=meiva_home())
+        runner.run_walg(["st", "ls"], timeout_s=1, path=sandbox.path, home=sandbox.home)
     sandbox.set_mode("ok")
 
 
@@ -93,7 +92,7 @@ def test_off_means_no_call(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> N
     sandbox = make_sandbox(tmp_path, monkeypatch, enabled=False)
 
     with pytest.raises(WalgConfigError, match="MEIVA_WALG_CONFIG_FILE is not set"):
-        runner.run_walg(["st", "ls"], timeout_s=30, path=sandbox.path, home=meiva_home())
+        runner.run_walg(["st", "ls"], timeout_s=30, path=sandbox.path, home=sandbox.home)
 
     assert sandbox.calls() == []
 
@@ -104,7 +103,7 @@ def test_the_logged_variant_returns_both_streams(sandbox: Sandbox) -> None:
     )
 
     output = runner.run_walg_logged(
-        ["delete", "retain", "FULL", "3"], timeout_s=30, path=sandbox.path, home=meiva_home()
+        ["delete", "retain", "FULL", "3"], timeout_s=30, path=sandbox.path, home=sandbox.home
     )
 
     assert output.stdout == ""

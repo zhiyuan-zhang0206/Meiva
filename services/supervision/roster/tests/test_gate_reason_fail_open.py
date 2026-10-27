@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from collections.abc import Callable
+from pathlib import Path
 from typing import Any
 
 import pytest
@@ -24,28 +25,38 @@ def _spec_with_gate(gate: Callable[[], str | None] | None) -> ServiceSpec:
 def test_gate_reason_reports_and_propagates_raising_gate(
     loguru_records: list[dict[str, Any]],
     machine_identity: MachineIdentityReader,
+    unit_home: Path,
 ) -> None:
     def _boom() -> str | None:
         raise RuntimeError("gate exploded")
 
     with pytest.raises(RuntimeError, match="gate exploded"):
-        gate_reason(_spec_with_gate(_boom), machine=machine_identity, host=fake_host())
+        gate_reason(
+            _spec_with_gate(_boom), machine=machine_identity, host=fake_host(), home=unit_home
+        )
     errors = [r["message"] for r in loguru_records if r["level"].name == "ERROR"]
     assert any("faulty-gate" in m and "roster evaluation aborted" in m for m in errors), errors
 
 
 def test_gate_reason_passes_through_normal_gate_result(
-    machine_identity: MachineIdentityReader,
+    machine_identity: MachineIdentityReader, unit_home: Path
 ) -> None:
     def _gated() -> str | None:
         return "disabled (test)"
 
     assert (
-        gate_reason(_spec_with_gate(_gated), machine=machine_identity, host=fake_host())
+        gate_reason(
+            _spec_with_gate(_gated), machine=machine_identity, host=fake_host(), home=unit_home
+        )
         == "disabled (test)"
     )
 
     def _open() -> str | None:
         return None
 
-    assert gate_reason(_spec_with_gate(_open), machine=machine_identity, host=fake_host()) is None
+    assert (
+        gate_reason(
+            _spec_with_gate(_open), machine=machine_identity, host=fake_host(), home=unit_home
+        )
+        is None
+    )

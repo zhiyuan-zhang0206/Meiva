@@ -7,7 +7,6 @@ from typing import Any
 import psycopg
 import pytest
 
-from base.paths import meiva_home
 from services.backup.walg import check, probe
 from services.backup.walg import config as walg_config
 from services.backup.walg.pg_target import PgTarget
@@ -39,7 +38,7 @@ def _run_check(
         token=token,
         binary_problem=binary_problem,
         admin=probe.admin_connection_to(_REFUSED) if admin is None else admin,
-        home=meiva_home(),
+        home=sandbox.home,
     )
 
 
@@ -76,6 +75,15 @@ def test_a_working_setup_passes_every_step_and_leaves_nothing_in_the_store(
     assert sandbox.calls()[2].split()[2] == put[3] + ".lz4", "`st get` takes the stored .lz4 name"
     assert "not pinned yet" in next(s.detail for s in steps if s.name == "configuration")
     assert not any(secret in step.detail for step in steps for secret in SECRETS)
+
+
+def test_the_check_reports_the_key_the_handed_home_pinned(sandbox: Sandbox) -> None:
+    walg_config.load_walg_config(path=sandbox.path, home=sandbox.home)
+
+    steps = _run_check(sandbox)
+
+    detail = next(s.detail for s in steps if s.name == "configuration")
+    assert "(pinned)" in detail and "not pinned yet" not in detail
 
 
 def test_the_stored_object_is_named_by_the_callers_token(sandbox: Sandbox) -> None:

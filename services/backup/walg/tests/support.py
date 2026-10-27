@@ -31,7 +31,6 @@ from base.cluster import postgres as native_postgres
 from base.cluster.dataplane import pg_admin, walg_binary
 from base.cluster.dataplane.pg_tools import pg_shm_args, pg_start_env, pg_tool, pg_tz_args
 from base.host.env import port_lease
-from base.paths import meiva_home
 from base.paths.tests.homes import point_home
 from services.backup.walg.archive import archive_pg_args
 from services.backup.walg.pg_target import PgTarget
@@ -140,7 +139,7 @@ def make_sandbox(
     shutil.copy(FAKE_WALG, binary)
     binary.chmod(0o755)
 
-    point_home(monkeypatch, home)
+    point_home(monkeypatch, tmp_path / "environment-home")
     # meiva:note
     # The fake is not the pinned build; everything else (path, argv, config) is real.
     monkeypatch.setattr(walg_binary, "installed_problem", _always_pinned)
@@ -195,7 +194,9 @@ def _free_port() -> int:
 # The socket directory is short (`/tmp`), the data is disposable (fsync off), and
 # shutdown is immediate: a test never waits for a hung archive command.
 @contextmanager
-def postgres_instance(*extra_args: str, path: Path | None = None) -> Generator[PgInstance]:
+def postgres_instance(
+    *extra_args: str, path: Path | None = None, home: Path
+) -> Generator[PgInstance]:
     root = Path(tempfile.mkdtemp(prefix="meiva-walgpg-", dir="/tmp"))
     data = root / "data"
     socket_dir = pg_admin.pg_socket_dir(home=root)
@@ -206,7 +207,7 @@ def postgres_instance(*extra_args: str, path: Path | None = None) -> Generator[P
         # The argv is the resolved initdb path plus static flags.
         subprocess.run(  # noqa: S603
             [
-                str(pg_tool("initdb", home=meiva_home())),
+                str(pg_tool("initdb", home=home)),
                 "-D",
                 str(data),
                 "-U",
@@ -220,9 +221,9 @@ def postgres_instance(*extra_args: str, path: Path | None = None) -> Generator[P
             check=True,
             capture_output=True,
         )
-        archive_args = archive_pg_args(path=path, home=meiva_home())
+        archive_args = archive_pg_args(path=path, home=home)
         argv = [
-            str(pg_tool("postgres", home=meiva_home())),
+            str(pg_tool("postgres", home=home)),
             "-D",
             str(data),
             "-p",
@@ -277,20 +278,11 @@ def postgres_instance(*extra_args: str, path: Path | None = None) -> Generator[P
         shutil.rmtree(root, ignore_errors=True)
 
 
-def _ambient_sandbox_path() -> Path | None:
-    store = meiva_home() / "secrets" / "walg"
-    return store / "walg.json" if (store / "enabled").exists() else None
-
-
 # meiva:note
-# `postgres_instance` carrying the sandbox's `archive_pg_args()` on its command line.
-#
-# Without a `sandbox` the archive settings come from the active sandbox in `meiva_home()`.
-def archiving_postgres(
-    *extra_args: str, sandbox: Sandbox | None = None
-) -> AbstractContextManager[PgInstance]:
-    path = sandbox.path if sandbox is not None else _ambient_sandbox_path()
-    return postgres_instance(*extra_args, path=path)
+# `postgres_instance` carrying the sandbox's `archive_pg_args()` on its command line, over the
+# Postgres tools of the sandbox's home.
+def archiving_postgres(*extra_args: str, sandbox: Sandbox) -> AbstractContextManager[PgInstance]:
+    return postgres_instance(*extra_args, path=sandbox.path, home=sandbox.home)
 
 
 def wait_for(predicate: Any, *, seconds: float = 60, what: str) -> None:
@@ -329,7 +321,7 @@ def take_basebackup(sandbox: Sandbox, pg: PgInstance, name: str) -> str:
     destination = sandbox.store_dir / "basebackups" / name
     subprocess.run(  # noqa: S603 — the resolved pg_basebackup with static flags
         [
-            str(pg_tool("pg_basebackup", home=meiva_home())),
+            str(pg_tool("pg_basebackup", home=sandbox.home)),
             "-D",
             str(destination),
             "-h",

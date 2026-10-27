@@ -116,7 +116,7 @@ def _roster(
     if roles is None:
         return tuple((spec, None) for spec in build_services(home=command.home))
     return services_for_capabilities_annotated(
-        roles, machine=command.machine, host=command.host, home=command.home
+        roles, machine=command.machine, host=command.host_after_config(), home=command.home
     )
 
 

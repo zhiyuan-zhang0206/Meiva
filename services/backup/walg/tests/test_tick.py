@@ -25,7 +25,6 @@ from base.db.config import db_config_from_settings
 from base.native_process.code_version import CodeVersion
 from base.native_process.loaded_commit import LoadedCommit
 from base.native_process.os_platform import file_lock
-from base.paths import meiva_home
 from services.backup.walg import state, tick
 from services.backup.walg.pg_target import PgTarget
 from services.backup.walg.state import RunRecord
@@ -115,8 +114,8 @@ def _run(sandbox: Sandbox, platform: tick.Platform | None = None) -> tuple[int, 
         platform=_platform() if platform is None else platform,
         path=sandbox.path,
         database_for_url=_database_factory(),
-        throwaway=ThrowawayConfig(None, home=meiva_home()),
-        home=meiva_home(),
+        throwaway=ThrowawayConfig(None, home=sandbox.home),
+        home=sandbox.home,
     )
     return code, lines
 
@@ -376,6 +375,18 @@ def test_a_failed_run_is_replaced_by_the_next_successful_one(sandbox: Sandbox) -
 # ── skips and no-ops are not failures ────────────────────────────────────────
 
 
+def test_a_run_makes_the_private_state_directory_of_the_home_it_is_handed(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    box = make_sandbox(tmp_path, monkeypatch)
+    assert not state.walg_dir(box.home).exists()
+
+    _run(box)
+
+    assert state.walg_dir(box.home).stat().st_mode & 0o777 == 0o700
+    assert not (tmp_path / "environment-home").exists(), "nothing resolved the environment's home"
+
+
 def test_off_does_nothing_and_writes_nothing(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -452,7 +463,7 @@ def test_no_locally_owned_postgres_is_a_recorded_setup_failure(sandbox: Sandbox)
 def test_a_socket_that_is_not_this_homes_postgres_is_a_recorded_failure(
     sandbox: Sandbox, tmp_path: Path, postgres_access: None
 ) -> None:
-    with postgres_instance() as pg:
+    with postgres_instance(home=sandbox.home) as pg:
         foreign = PgTarget(pg.target.admin_url, tmp_path / "another-home" / "pg", "postgres")
         with pytest.raises((RuntimeError, OSError)):
             tick.postgres_accepts_connections(foreign)
@@ -462,9 +473,9 @@ def test_a_socket_that_is_not_this_homes_postgres_is_a_recorded_failure(
 
 
 def test_postgres_reachability_is_a_custody_checked_dial_of_the_admin_socket(
-    postgres_access: None,
+    sandbox: Sandbox, postgres_access: None
 ) -> None:
-    with postgres_instance() as pg:
+    with postgres_instance(home=sandbox.home) as pg:
         assert tick.postgres_accepts_connections(pg.target) is True
 
 
@@ -536,8 +547,8 @@ def _drill_now(sandbox: Sandbox, lines: list[str], platform: tick.Platform | Non
         platform=_platform() if platform is None else platform,
         path=sandbox.path,
         database_for_url=_database_factory(),
-        throwaway=ThrowawayConfig(None, home=meiva_home()),
-        home=meiva_home(),
+        throwaway=ThrowawayConfig(None, home=sandbox.home),
+        home=sandbox.home,
     )
 
 
@@ -578,3 +589,18 @@ def test_drill_now_while_wal_g_is_off_says_so(
 
     assert _drill_now(sandbox, lines) == 1
     assert "WAL-G is off" in lines[0]
+
+
+def test_a_failed_tick_still_makes_the_state_directory_of_the_handed_home_private(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    box = make_sandbox(tmp_path, monkeypatch)
+    directory = state.walg_dir(box.home)
+    directory.mkdir(parents=True)
+    directory.chmod(0o755)
+    state.state_path(box.home).write_text("{broken")
+
+    code, _lines = _run(box)
+
+    assert code != 0
+    assert directory.stat().st_mode & 0o777 == 0o700
