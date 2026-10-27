@@ -73,6 +73,16 @@ _SHELL_OP_TIMEOUT_S = 5.0
 _MACHINE_CONCURRENCY = 8
 
 # meiva:note
+# How many remote rounds pass between two stale sweeps.
+#
+# A candidate row is any unexpired row older than `STALE_ROW_GRACE`, so a healthy cluster always
+# has some — every long-lived session contributes one — and one probe per (machine, agent) every
+# round would spend a runner's session listing once a minute on a table that changes rarely (24
+# pairs on 3 machines at the 2026-10-27 reading). One sweep per ten rounds keeps the post-backlog
+# drain at ten minutes per batch of `PASS_BATCH` rows and costs a fortieth of that.
+SWEEP_EVERY_ROUNDS = 10
+
+# meiva:note
 # How long a tracking row is exempt from the stale sweep after its own creation. The probe answer
 # is a listing read at one instant, and a session's row may exist a moment before the host's
 # backend can list the session name, so a young row is never evidence of a dead session. Six hours

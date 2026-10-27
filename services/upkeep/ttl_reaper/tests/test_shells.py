@@ -610,6 +610,30 @@ async def test_a_remote_round_kills_the_expired_row_and_sweeps_the_dead_sessions
     assert _rows(db_conn, aid) == []
 
 
+async def test_a_remote_round_without_its_sweep_leaves_the_rows_alone(
+    db_conn: psycopg.Connection,
+    reaper_pool: ConnectionPool,
+    event_bus: EventBus,
+    *,
+    database_gate: ProcessDbGate,
+) -> None:
+    aid = _running_agent(db_conn, machine="macmini")
+    _insert_shell_row(db_conn, aid, 1, expires_at=_tracked(), created_at=_past_the_grace())
+
+    with runner(db_conn, "macmini", lambda _call: _probed()) as wire:
+        await remote_round(
+            reaper_pool,
+            Database.from_settings(gate=database_gate),
+            event_bus,
+            _progress(),
+            reaper_config(),
+            sweep=False,
+        )
+
+    assert wire.calls == []
+    assert _rows(db_conn, aid) == [1]
+
+
 def test_delete_stale_row_leaves_a_row_rewritten_since_the_select(
     db_conn: psycopg.Connection, reaper_pool: ConnectionPool
 ) -> None:
