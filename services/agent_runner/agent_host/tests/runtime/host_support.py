@@ -52,7 +52,7 @@ def build_agent_host(
 ) -> AgentHost:
     """An `AgentHost` on this box with the handles the tests share."""
     return AgentHost(
-        runtime_owner=uuid4(),
+        runtime_owner=kwargs.pop("runtime_owner", uuid4()),
         handoff_stamping=handoff_timestamps(),
         home=meiva_home(),
         policy=kwargs.pop("policy", configured_policy()),
