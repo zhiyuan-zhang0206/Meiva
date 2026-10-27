@@ -335,3 +335,13 @@ def test_an_exemption_that_binds_nothing_any_more_is_stale(scan_tmp: Path) -> No
         if "claude_thinking" in m
     ]
     assert len(stale) == 1 and "drop the exemption" in stale[0]
+
+
+def test_a_family_module_that_is_not_utf8_still_exists(scan_tmp: Path) -> None:
+    binary = scan_tmp / "base" / "binary.py"
+    binary.parent.mkdir(parents=True)
+    binary.write_bytes(b"\xff\xfe not utf-8")
+    errs = _lint.stale_allowlist_entries(
+        {}, repo_root=scan_tmp, family_modules=("base/binary.py", "base/gone.py")
+    )
+    assert errs == ["base/gone.py: stale FAMILY_MODULES entry — the file no longer exists"]
