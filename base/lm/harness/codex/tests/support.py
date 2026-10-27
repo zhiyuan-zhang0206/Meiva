@@ -5,6 +5,8 @@ from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
+from base.clock.tests.fakes import system_clock
+from base.lm.harness.base_session import SessionBinding
 from base.lm.harness.codex import CodexConfig, CodexSession
 from base.lm.harness.codex.tests.fake_app_server import CODEX_PID, FakeAppServer
 from base.lm.harness.codex.transport import JsonValue, as_object, as_text
@@ -116,10 +118,10 @@ async def start(
     session = CodexSession(
         config(tmp_path, **config_overrides),
         environ={},
-        agent_id=agent_id,
-        registry=registry,
+        binding=SessionBinding(agent_id, registry),
         transport=fake,
         probe=scripted_probe,
+        clock=system_clock(),
     )
     await session.start(resume=resume, handoff=handoff_doc)
     return Harness(session, fake, scripted_probe)

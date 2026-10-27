@@ -1,8 +1,10 @@
 from __future__ import annotations
 
 import asyncio
+import base64
 import json
 import os
+import random
 from collections.abc import AsyncIterator
 from dataclasses import replace
 from datetime import UTC, datetime, timedelta
@@ -11,6 +13,8 @@ from pathlib import Path
 import pytest
 
 from base.api_contracts.agent_contract import Harness
+from base.clock.tests.fakes import clock_at, system_clock
+from base.clock.tests.seeded_rng import seeded_rng
 from base.lm.harness import (
     AssistantText,
     BridgeEvent,
@@ -32,6 +36,8 @@ from base.lm.harness import (
 )
 from base.lm.harness.antigravity import AgySession
 from base.lm.harness.kimi import KimiSession
+from base.lm.harness.registration import SecureRandom
+from base.lm.harness.tests.roots import bridge_root_values
 from base.lm.harness.wiring import HANDOFF_INSTRUCTION, bridge_for, open_session
 
 
@@ -147,6 +153,9 @@ def make_bridge(
         handoff=handoff,
         registrations=registrations,
         registration_ttl_seconds=3600.0,
+        clock=system_clock(),
+        handle_rng=SecureRandom(random.SystemRandom()),
+        controller_pid=os.getpid(),
     )
 
 
@@ -201,6 +210,9 @@ async def test_a_faulted_turn_retires_its_session_and_the_next_one_starts_fresh(
         machine="macmini",
         handoff=handoff(),
         registration_ttl_seconds=3600.0,
+        clock=system_clock(),
+        handle_rng=SecureRandom(random.SystemRandom()),
+        controller_pid=os.getpid(),
     )
 
     with pytest.raises(HarnessTurnFaultedError, match="cli died"):
@@ -246,6 +258,9 @@ async def test_a_session_that_cannot_start_fails_the_turn_as_a_setup_error() -> 
         refuse,
         machine="macmini",
         registration_ttl_seconds=3600.0,
+        clock=system_clock(),
+        handle_rng=SecureRandom(random.SystemRandom()),
+        controller_pid=os.getpid(),
     )
 
     with pytest.raises(HarnessSetupError, match="could not start"):
@@ -260,6 +275,9 @@ async def test_a_refused_submission_fails_the_turn_and_retires_the_session() -> 
         lambda _handle: session,
         machine="macmini",
         registration_ttl_seconds=3600.0,
+        clock=system_clock(),
+        handle_rng=SecureRandom(random.SystemRandom()),
+        controller_pid=os.getpid(),
     )
 
     with pytest.raises(HarnessSetupError, match="refused the turn"):
@@ -291,6 +309,7 @@ def test_the_built_in_loop_has_no_bridge() -> None:
             registry=FileSessionRegistry(Path("/registry")),
             registration_ttl_seconds=3600.0,
             environ={},
+            root=bridge_root_values(),
         )
         is None
     )
@@ -305,6 +324,7 @@ def test_an_external_harness_builds_its_handoff() -> None:
         registry=FileSessionRegistry(Path("/registry")),
         registration_ttl_seconds=3600.0,
         environ={},
+        root=bridge_root_values(),
     )
     assert bridge is not None
     assert bridge.harness is Harness.CLAUDE_CODE
@@ -325,6 +345,7 @@ def test_the_antigravity_wake_document_carries_its_shell_semantics() -> None:
         registry=FileSessionRegistry(Path("/registry")),
         registration_ttl_seconds=3600.0,
         environ={},
+        root=bridge_root_values(),
     )
     assert bridge is not None
     assert bridge.handoff is not None
@@ -341,6 +362,7 @@ def test_an_antigravity_session_is_built_with_the_skip_flag_it_was_given() -> No
         registry=FileSessionRegistry(Path("/registry")),
         skip_permissions=True,
         environ={},
+        clock=system_clock(),
     )
     assert isinstance(session, AgySession)
     assert session.config.skip_permissions is True
@@ -352,6 +374,7 @@ def test_an_antigravity_session_is_built_with_the_skip_flag_it_was_given() -> No
         registry=FileSessionRegistry(Path("/registry")),
         skip_permissions=False,
         environ={},
+        clock=system_clock(),
     )
     assert isinstance(plain, AgySession)
     assert plain.config.skip_permissions is False
@@ -365,6 +388,7 @@ def test_a_kimi_code_session_is_built_with_the_skip_flag_it_was_given() -> None:
         registry=FileSessionRegistry(Path("/registry")),
         skip_permissions=True,
         environ={},
+        clock=system_clock(),
     )
     assert isinstance(session, KimiSession)
     assert session.config.skip_permissions is True
@@ -377,6 +401,7 @@ def test_a_kimi_code_session_is_built_with_the_skip_flag_it_was_given() -> None:
         registry=FileSessionRegistry(Path("/registry")),
         skip_permissions=False,
         environ={},
+        clock=system_clock(),
     )
     assert isinstance(plain, KimiSession)
     assert plain.config.skip_permissions is False
@@ -450,6 +475,9 @@ def test_a_session_registers_its_handle_digest_and_retires_the_line(tmp_path: Pa
         machine="macmini",
         registrations=store,
         registration_ttl_seconds=3600.0,
+        clock=system_clock(),
+        handle_rng=SecureRandom(random.SystemRandom()),
+        controller_pid=os.getpid(),
     )
 
     asyncio.run(bridge.run_turn("hello", key="inbound-1"))
@@ -464,6 +492,40 @@ def test_a_session_registers_its_handle_digest_and_retires_the_line(tmp_path: Pa
 
     asyncio.run(bridge.close(reason="evicted"))
     assert store.read(6984) is None
+
+
+# meiva:note
+# The three values a bridge reads from outside are injected, and each lands in the row: the clock
+# stamps `created_at` and `expires_at`, the controller pid is written as given, and the handle is
+# drawn from the generator (32 bytes, 43 unpadded characters) whose digest alone is stored.
+def test_the_registration_carries_the_injected_clock_pid_and_handle_generator(
+    tmp_path: Path,
+) -> None:
+    store = RegistrationStore(tmp_path / "registrations")
+    handles: list[str] = []
+    bridge = HarnessBridge(
+        Harness.CLAUDE_CODE,
+        6984,
+        lambda handle: handles.append(handle) or FakeSession(),
+        machine="macmini",
+        registrations=store,
+        registration_ttl_seconds=3600.0,
+        clock=clock_at(datetime(2031, 5, 17, 9, 30, tzinfo=UTC)),
+        handle_rng=SecureRandom(seeded_rng(7)),
+        controller_pid=424242,
+    )
+
+    asyncio.run(bridge.run_turn("hello", key="inbound-1"))
+
+    registration = store.read(6984)
+    assert registration is not None
+    assert registration.controller_pid == 424242
+    assert registration.created_at == "2031-05-17T09:30:00+00:00"
+    assert registration.expires_at == "2031-05-17T10:30:00+00:00"
+    drawn = base64.urlsafe_b64encode(seeded_rng(7).randbytes(32)).rstrip(b"=").decode()
+    assert handles == [drawn]
+    assert len(handles[0]) == 43
+    assert registration.handle_sha256 == handle_digest(drawn)
 
 
 def test_a_registration_expires_within_the_configured_ttl(tmp_path: Path) -> None:
@@ -499,7 +561,7 @@ def test_the_sweep_drops_a_registration_whose_controller_is_gone(tmp_path: Path)
     store.write(registration(controller_pid=999_999_999))
     store.write(registration(agent_id=6985, controller_pid=os.getpid()))
 
-    assert store.sweep() == [6984]
+    assert store.sweep(now=system_clock().now()) == [6984]
     assert store.read(6985) is not None
 
 
@@ -507,7 +569,7 @@ def test_the_sweep_drops_an_expired_registration(tmp_path: Path) -> None:
     store = RegistrationStore(tmp_path / "registrations")
     store.write(registration(expires_at="2000-01-01T00:00:00+00:00"))
 
-    assert store.sweep() == [6984]
+    assert store.sweep(now=system_clock().now()) == [6984]
 
 
 def registration(

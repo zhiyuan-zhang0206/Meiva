@@ -14,9 +14,6 @@
 "config.py" = "strict"
 "mapping.py" = "strict"
 
-[debt.fake-entropy]
-"session.py#interval-wrapper _perf_counter" = 1
-
 [debt.impure-call]
 "session.py#async def _begin" = 1
 "session.py#async def _read_loop" = 1

@@ -5,7 +5,9 @@ from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
+from base.clock.tests.fakes import system_clock
 from base.lm.harness import FileSessionRegistry, Handoff
+from base.lm.harness.base_session import SessionBinding
 from base.lm.harness.kimi import DEFAULT_MODEL, KimiConfig, KimiSession
 from base.lm.harness.kimi.tests.fake_acp import FakeConnection, ScriptedProbe
 from base.lm.pricing import PriceBook
@@ -100,12 +102,12 @@ async def start(
     session = KimiSession(
         config(tmp_path, **config_overrides),
         environ={},
-        agent_id=agent_id,
-        registry=registry,
+        binding=SessionBinding(agent_id, registry),
         probe=scripted_probe,
         connect=lambda: connection,
         kill=lambda pid, _signal_number: scripted_probe.kill(pid),
         prices=prices,
+        clock=system_clock(),
     )
     await session.start(resume=resume, handoff=handoff)
     return Harness(session, connection, scripted_probe)

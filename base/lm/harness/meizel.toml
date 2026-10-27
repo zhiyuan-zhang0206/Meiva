@@ -1,10 +1,10 @@
-exports = ["acp", "antigravity", "bridge.py", "claude", "codex", "deepseek", "engine.py", "handoff.py", "kimi", "process.py", "registration.py", "registry.py", "wiring.py"]
+exports = ["acp", "antigravity", "base_session.py", "bridge.py", "claude", "codex", "deepseek", "engine.py", "handoff.py", "kimi", "process.py", "registration.py", "registry.py", "tests", "wiring.py"]
 
 [uses]
 "__init__.py" = ["bridge.py", "engine.py", "events.py", "handoff.py", "registration.py", "registry.py"]
 "antigravity" = ["base_session.py", "events.py", "handoff.py", "process.py", "registry.py"]
-"base_session.py" = ["events.py", "handoff.py", "process.py", "registration.py", "registry.py"]
-"bridge.py" = ["engine.py", "events.py", "handoff.py", "registration.py", "registry.py"]
+"base_session.py" = ["events.py", "handoff.py", "process.py", "registry.py"]
+"bridge.py" = ["base_session.py", "engine.py", "events.py", "handoff.py", "registration.py", "registry.py"]
 "claude" = ["__init__.py", "base_session.py", "events.py", "handoff.py", "process.py", "registry.py"]
 "codex" = ["base_session.py", "events.py", "handoff.py", "process.py", "registry.py"]
 "deepseek" = ["__init__.py", "acp", "base_session.py", "events.py", "handoff.py", "process.py", "registry.py"]
@@ -15,8 +15,8 @@ exports = ["acp", "antigravity", "bridge.py", "claude", "codex", "deepseek", "en
 "process.py" = []
 "registration.py" = []
 "registry.py" = []
-"wiring.py" = ["antigravity", "bridge.py", "claude", "codex", "handoff.py", "kimi", "registration.py", "registry.py"]
-"tests" = ["__init__.py", "antigravity", "claude", "codex", "handoff.py", "kimi", "registration.py", "registry.py", "wiring.py"]
+"wiring.py" = ["antigravity", "base_session.py", "bridge.py", "claude", "codex", "handoff.py", "kimi", "registration.py", "registry.py"]
+"tests" = ["__init__.py", "antigravity", "base_session.py", "claude", "codex", "handoff.py", "kimi", "registration.py", "registry.py", "wiring.py"]
 
 [purity]
 "engine.py" = "strict"
@@ -24,12 +24,4 @@ exports = ["acp", "antigravity", "bridge.py", "claude", "codex", "deepseek", "en
 "handoff.py" = "strict"
 
 [debt.ambient-read]
-"base_session.py#clock base.lm.harness.registration.current_utc" = 1
-"bridge.py#clock base.lm.harness.registration.current_utc" = 1
-"bridge.py#pid os.getpid" = 1
-"bridge.py#random secrets.token_urlsafe" = 1
-"registration.py#clock datetime.datetime.now" = 1
 "wiring.py#environ base.host.env.registry.process_environment" = 1
-
-[debt.fake-entropy]
-"process.py#interval-wrapper _monotonic" = 1

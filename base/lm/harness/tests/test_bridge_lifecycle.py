@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import asyncio
+import os
+import random
 from collections.abc import Callable
 from dataclasses import replace
 from pathlib import Path
@@ -8,7 +10,9 @@ from pathlib import Path
 import pytest
 
 from base.api_contracts.agent_contract import Harness
+from base.clock.tests.fakes import system_clock
 from base.lm.harness import Handoff, HarnessBridge, HarnessClosedError, HarnessTurnFaultedError
+from base.lm.harness.base_session import SessionBinding
 from base.lm.harness.claude import BridgeConfig, ClaudeSession
 from base.lm.harness.claude.tests.fake_sdk import (
     Block,
@@ -21,6 +25,7 @@ from base.lm.harness.claude.tests.fake_sdk import (
 from base.lm.harness.codex import CodexConfig, CodexSession
 from base.lm.harness.codex.tests.fake_app_server import FakeAppServer
 from base.lm.harness.codex.transport import JsonObject, RequestParams
+from base.lm.harness.registration import SecureRandom
 from base.lm.harness.registry import FileSessionRegistry
 
 
@@ -38,13 +43,23 @@ async def test_claude_cancel_during_first_turn_co_delivers_handoff_and_disconnec
     tmp_path: Path,
 ) -> None:
     sdk = FakeSDK([[Block()], [Say("should not run")]])
-    session = ClaudeSession(BridgeConfig(cwd=tmp_path), environ={}, sdk=sdk, probe=ScriptedProbe())
+    session = ClaudeSession(
+        BridgeConfig(cwd=tmp_path),
+        environ={},
+        sdk=sdk,
+        probe=ScriptedProbe(),
+        binding=SessionBinding(),
+        clock=system_clock(),
+    )
     bridge = HarnessBridge(
         Harness.CLAUDE_CODE,
         7,
         lambda _: session,
         handoff=handoff(tmp_path),
         registration_ttl_seconds=3600,
+        clock=system_clock(),
+        handle_rng=SecureRandom(random.SystemRandom()),
+        controller_pid=os.getpid(),
     )
     task = asyncio.create_task(bridge.run_turn("user work", key="inbound-1"))
     try:
@@ -66,13 +81,22 @@ async def test_claude_cancel_during_first_turn_co_delivers_handoff_and_disconnec
 
 async def test_codex_cancel_during_first_turn_closes_transport(tmp_path: Path) -> None:
     server = FakeAppServer(pid=None)
-    session = CodexSession(CodexConfig(cwd=tmp_path), environ={}, transport=server)
+    session = CodexSession(
+        CodexConfig(cwd=tmp_path),
+        environ={},
+        transport=server,
+        binding=SessionBinding(),
+        clock=system_clock(),
+    )
     bridge = HarnessBridge(
         Harness.CODEX,
         7,
         lambda _: session,
         handoff=handoff(tmp_path),
         registration_ttl_seconds=3600,
+        clock=system_clock(),
+        handle_rng=SecureRandom(random.SystemRandom()),
+        controller_pid=os.getpid(),
     )
     task = asyncio.create_task(bridge.run_turn("user work", key="inbound-1"))
     try:
@@ -99,13 +123,23 @@ async def test_failed_first_turn_retires_the_session(tmp_path: Path) -> None:
             [Say("should not run")],
         ]
     )
-    session = ClaudeSession(BridgeConfig(cwd=tmp_path), environ={}, sdk=sdk, probe=ScriptedProbe())
+    session = ClaudeSession(
+        BridgeConfig(cwd=tmp_path),
+        environ={},
+        sdk=sdk,
+        probe=ScriptedProbe(),
+        binding=SessionBinding(),
+        clock=system_clock(),
+    )
     bridge = HarnessBridge(
         Harness.CLAUDE_CODE,
         7,
         lambda _: session,
         handoff=handoff(tmp_path),
         registration_ttl_seconds=3600,
+        clock=system_clock(),
+        handle_rng=SecureRandom(random.SystemRandom()),
+        controller_pid=os.getpid(),
     )
     try:
         with pytest.raises(HarnessTurnFaultedError, match="failed"):
@@ -118,8 +152,23 @@ async def test_failed_first_turn_retires_the_session(tmp_path: Path) -> None:
 
 async def test_completed_key_replays_without_waiting_for_another_event(tmp_path: Path) -> None:
     sdk = FakeSDK([[Say("first reply")], [Say("next reply")]])
-    session = ClaudeSession(BridgeConfig(cwd=tmp_path), environ={}, sdk=sdk, probe=ScriptedProbe())
-    bridge = HarnessBridge(Harness.CLAUDE_CODE, 7, lambda _: session, registration_ttl_seconds=3600)
+    session = ClaudeSession(
+        BridgeConfig(cwd=tmp_path),
+        environ={},
+        sdk=sdk,
+        probe=ScriptedProbe(),
+        binding=SessionBinding(),
+        clock=system_clock(),
+    )
+    bridge = HarnessBridge(
+        Harness.CLAUDE_CODE,
+        7,
+        lambda _: session,
+        registration_ttl_seconds=3600,
+        clock=system_clock(),
+        handle_rng=SecureRandom(random.SystemRandom()),
+        controller_pid=os.getpid(),
+    )
     try:
         original = await bridge.run_turn("first", key="inbound-1")
         replay = await asyncio.wait_for(bridge.run_turn("first", key="inbound-1"), timeout=2)
@@ -156,8 +205,22 @@ async def test_cancel_while_codex_turn_start_has_no_provider_id_closes_transport
     tmp_path: Path,
 ) -> None:
     server = StartingServer()
-    session = CodexSession(CodexConfig(cwd=tmp_path), environ={}, transport=server)
-    bridge = HarnessBridge(Harness.CODEX, 7, lambda _: session, registration_ttl_seconds=3600)
+    session = CodexSession(
+        CodexConfig(cwd=tmp_path),
+        environ={},
+        transport=server,
+        binding=SessionBinding(),
+        clock=system_clock(),
+    )
+    bridge = HarnessBridge(
+        Harness.CODEX,
+        7,
+        lambda _: session,
+        registration_ttl_seconds=3600,
+        clock=system_clock(),
+        handle_rng=SecureRandom(random.SystemRandom()),
+        controller_pid=os.getpid(),
+    )
     task = asyncio.create_task(bridge.run_turn("user work", key="inbound-1"))
     try:
         await asyncio.wait_for(server.starting.wait(), timeout=2)
@@ -176,8 +239,22 @@ async def test_cancel_while_codex_turn_start_has_no_provider_id_closes_transport
 
 async def test_interrupt_error_still_retires_session(tmp_path: Path) -> None:
     server = FakeAppServer(pid=None)
-    session = CodexSession(CodexConfig(cwd=tmp_path), environ={}, transport=server)
-    bridge = HarnessBridge(Harness.CODEX, 7, lambda _: session, registration_ttl_seconds=3600)
+    session = CodexSession(
+        CodexConfig(cwd=tmp_path),
+        environ={},
+        transport=server,
+        binding=SessionBinding(),
+        clock=system_clock(),
+    )
+    bridge = HarnessBridge(
+        Harness.CODEX,
+        7,
+        lambda _: session,
+        registration_ttl_seconds=3600,
+        clock=system_clock(),
+        handle_rng=SecureRandom(random.SystemRandom()),
+        controller_pid=os.getpid(),
+    )
     task = asyncio.create_task(bridge.run_turn("user work", key="inbound-1"))
     try:
         await until(lambda: bool(server.turn_ids))
@@ -206,10 +283,22 @@ async def test_resumed_turn_never_reuses_the_cancelled_sessions_completion(tmp_p
         server = FakeAppServer(pid=None)
         servers.append(server)
         return CodexSession(
-            CodexConfig(cwd=tmp_path), environ={}, transport=server, agent_id=7, registry=registry
+            CodexConfig(cwd=tmp_path),
+            environ={},
+            transport=server,
+            binding=SessionBinding(7, registry),
+            clock=system_clock(),
         )
 
-    bridge = HarnessBridge(Harness.CODEX, 7, factory, registration_ttl_seconds=3600)
+    bridge = HarnessBridge(
+        Harness.CODEX,
+        7,
+        factory,
+        registration_ttl_seconds=3600,
+        clock=system_clock(),
+        handle_rng=SecureRandom(random.SystemRandom()),
+        controller_pid=os.getpid(),
+    )
     task = asyncio.create_task(bridge.run_turn("old work", key="inbound-1"))
     try:
         await until(lambda: bool(servers and servers[0].turn_ids))
@@ -241,9 +330,22 @@ async def test_observed_process_residue_blocks_subsequent_sessions(tmp_path: Pat
     sdk = FakeSDK([[Say("done")]])
     probe = ScriptedProbe()
     session = ClaudeSession(
-        BridgeConfig(cwd=tmp_path, cancel_settle_seconds=0), environ={}, sdk=sdk, probe=probe
+        BridgeConfig(cwd=tmp_path, cancel_settle_seconds=0),
+        environ={},
+        sdk=sdk,
+        probe=probe,
+        binding=SessionBinding(),
+        clock=system_clock(),
     )
-    bridge = HarnessBridge(Harness.CLAUDE_CODE, 7, lambda _: session, registration_ttl_seconds=3600)
+    bridge = HarnessBridge(
+        Harness.CLAUDE_CODE,
+        7,
+        lambda _: session,
+        registration_ttl_seconds=3600,
+        clock=system_clock(),
+        handle_rng=SecureRandom(random.SystemRandom()),
+        controller_pid=os.getpid(),
+    )
     await bridge.run_turn("work", key="inbound-1")
     probe.spawn(5150, "sleep 40")
     with pytest.raises(RuntimeError, match=r"process.*running"):

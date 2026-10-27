@@ -7,9 +7,11 @@ from collections.abc import Callable, Sequence
 from pathlib import Path
 from typing import Any
 
+from base.clock.tests.fakes import system_clock
 from base.lm.harness.antigravity.config import AntigravityConfig
 from base.lm.harness.antigravity.session import AgySession
 from base.lm.harness.antigravity.transport import AgyTransport, Reaper
+from base.lm.harness.base_session import SessionBinding
 from base.lm.harness.process import ChildProbe
 
 FAKE_CLI = Path(__file__).with_name("fake_agy.py")
@@ -141,15 +143,15 @@ async def start(
     }
 
     def factory() -> AgyTransport:
-        return AgyTransport(settings, environ=environ, probe=probe, reap=reap)
+        return AgyTransport(settings, environ=environ, probe=probe, reap=reap, clock=system_clock())
 
     session = AgySession(
         settings,
         environ=environ,
-        agent_id=agent_id,
-        registry=registry,
+        binding=SessionBinding(agent_id, registry),
         probe=probe,
         transport_factory=factory,
+        clock=system_clock(),
     )
     await session.start(resume=resume, handoff=handoff)
     return Harness(session, received, argv, child)
