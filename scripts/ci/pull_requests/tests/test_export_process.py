@@ -1,4 +1,7 @@
+import ast
+import inspect
 import subprocess
+import textwrap
 from collections.abc import Sequence
 from datetime import UTC, datetime
 from pathlib import Path
@@ -134,6 +137,7 @@ def test_export_entry_captures_before_fetch_or_borrows_the_supplied_writer(
                 producer=lambda: pipeline,
                 run_process=run_process,
                 timers=ManualTimers(),
+                home=tmp_path,
             )
             == 0
         )
@@ -178,3 +182,25 @@ def test_command_type_import_does_not_start_the_exporter(mode: str, tmp_path: Pa
     )
     assert result.returncode == 0, result.stderr
     assert not home.exists()
+
+
+# meiva:note
+# A shape lock, because the writer dials Postgres and the cluster URL it builds cannot be observed
+# without it: the function reads no `meiva_home` and hands its `home` argument to both calls.
+def test_the_owned_writer_takes_the_home_it_is_given_and_reads_none() -> None:
+    source = inspect.getsource(export_process.owned_event_pipeline)
+    function = ast.parse(textwrap.dedent(source)).body[0]
+    assert isinstance(function, ast.FunctionDef)
+    names = {node.id for node in ast.walk(function) if isinstance(node, ast.Name)}
+    assert "meiva_home" not in names
+    homes = [
+        keyword.value
+        for node in ast.walk(function)
+        if isinstance(node, ast.Call)
+        for keyword in node.keywords
+        if keyword.arg == "home"
+    ]
+    assert len(homes) == 2
+    assert all(isinstance(value, ast.Name) and value.id == "home" for value in homes)
+    assert [arg.arg for arg in function.args.kwonlyargs] == ["image", "home"]
+    assert not function.args.kw_defaults[1]
