@@ -16,3 +16,6 @@ exports = ["allocation_freeze.py", "client.py", "closure.py", "keys.py", "paths.
 "allocation_freeze.py#random uuid.uuid4" = 1
 "paths.py#pid os.getuid" = 1
 "process_groups.py#pid os.getpid" = 1
+
+[debt.fake-entropy]
+"process_groups.py#interval-wrapper _monotonic" = 1
