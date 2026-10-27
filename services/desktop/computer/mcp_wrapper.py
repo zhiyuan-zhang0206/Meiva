@@ -66,16 +66,12 @@ class Link(SocketLink):
         )
 
 
-async def _connect() -> tuple[asyncio.StreamReader, asyncio.StreamWriter]:
-    return await dial_unix_socket(
-        str(computer_mcp_socket(meiva_home())), service_label="computer MCP daemon"
-    )
-
-
 class ReconnectingSocketLink(ReconnectingLink):
-    def __init__(self, *, timeout_reader: Callable[[], float], agent_id: int | None) -> None:
+    def __init__(
+        self, *, sock: str, timeout_reader: Callable[[], float], agent_id: int | None
+    ) -> None:
         super().__init__(
-            _connect,
+            lambda: dial_unix_socket(sock, service_label="computer MCP daemon"),
             lambda reader, writer: Link(
                 reader, writer, timeout_reader=timeout_reader, agent_id=agent_id
             ),
@@ -85,8 +81,8 @@ class ReconnectingSocketLink(ReconnectingLink):
         )
 
 
-async def _serve(*, timeout_reader: Callable[[], float]) -> None:
-    link = ReconnectingSocketLink(timeout_reader=timeout_reader, agent_id=_agent_id())
+async def _serve(*, sock: str, timeout_reader: Callable[[], float]) -> None:
+    link = ReconnectingSocketLink(sock=sock, timeout_reader=timeout_reader, agent_id=_agent_id())
 
     async def _list_tools(_ctx: object, _params: object) -> types.ListToolsResult:
         tools: Any = await link.request({"method": "list_tools"})
@@ -110,7 +106,8 @@ def timeout_reader(config: ConfigBoot) -> Callable[[], float]:
 
 
 def main() -> None:
-    asyncio.run(_serve(timeout_reader=timeout_reader(ConfigBoot())))
+    sock = str(computer_mcp_socket(meiva_home()))
+    asyncio.run(_serve(sock=sock, timeout_reader=timeout_reader(ConfigBoot())))
 
 
 if __name__ == "__main__":

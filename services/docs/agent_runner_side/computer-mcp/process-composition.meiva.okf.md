@@ -27,8 +27,8 @@ watchdog. The daemon takes every time from it: the task-session envelope's epoch
 `logs/computer/snapshots/agent-<id>-<UTC YYYYmmddTHHMMSSffffff>.png`. That name is the shape
 `meiva logs retention` matches, so a capture named any other way is never reclaimed.
 
-`run` keeps the existing computer-use configuration, optional socket argument,
-single-instance guard and handler identity. Its shutdown still stops the loop
+`run` keeps the existing computer-use configuration, single-instance guard and handler
+identity; its socket path is a required argument that `main()` builds from the home it read. Its shutdown still stops the loop
 watchdog, closes the listener, joins the watchdog within one second, then drains
 the tracked clients within the configured bound, and unlinks the socket. Errors keep their existing propagation and the
 lock-free Unix `ping` payload remains unchanged.
