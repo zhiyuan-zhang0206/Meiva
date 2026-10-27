@@ -2,7 +2,8 @@
 // interval exists only while a clock is live, and the busy gate stops clocks
 // whose live stamp outlived the turn.
 
-import { act, render, screen } from "@testing-library/react";
+import { act, screen } from "@testing-library/react";
+import { render } from "@/lib/transport/tests/wall-clock-render";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { BackendTimelineItem } from "@/lib/contracts/types";

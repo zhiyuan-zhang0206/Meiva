@@ -1,1 +1,1 @@
-exports = ["api", "stream", "suite"]
+exports = ["api", "stream", "suite", "wall-clock-render.tsx"]

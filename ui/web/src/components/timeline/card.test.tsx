@@ -11,7 +11,8 @@
  * De-quarantined 2026-08-24.
  */
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { fireEvent, render } from "@testing-library/react";
+import { fireEvent } from "@testing-library/react";
+import { render } from "@/lib/transport/tests/wall-clock-render";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 
 import {

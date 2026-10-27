@@ -17,6 +17,7 @@
 import { createContext, useContext, useEffect, useState } from "react";
 
 import type { BackendTimelineItem } from "@/lib/contracts/types";
+import { useWallNow } from "@/lib/transport/transport-context";
 
 export function isLiveReasoning(item: BackendTimelineItem): boolean {
   return (
@@ -58,32 +59,50 @@ export function isLiveExecution(item: BackendTimelineItem): boolean {
 
 const LIVE_CLOCK_INTERVAL_MS = 100;
 
+// meiva:note
 // One shared 100ms ticker for every live timeline clock (block chips, the
 // turn header, the compacting block). Each tick hands the same timestamp to
 // every subscriber inside one timer task, so React batches all live clocks
 // into a single render pass instead of one per independently phased
 // interval. The interval exists only while at least one clock is live.
-const listeners = new Set<(now: number) => void>();
-let tickerId: ReturnType<typeof setInterval> | null = null;
+//
+// The ticker reads the wall clock the page provides (`useWallNow`), one ticker per clock function:
+// every clock of a page shares the one the root hands down, and a test that provides its own gets
+// a ticker of its own.
+interface Ticker {
+  listeners: Set<(now: number) => void>;
+  id: ReturnType<typeof setInterval> | null;
+}
+const tickers = new Map<() => number, Ticker>();
 
-function subscribeTick(listener: (now: number) => void): () => void {
-  listeners.add(listener);
-  tickerId ??= setInterval(() => {
-    const now = Date.now();
-    for (const notify of listeners) notify(now);
+function subscribeTick(wallNow: () => number, listener: (now: number) => void): () => void {
+  let ticker = tickers.get(wallNow);
+  if (ticker === undefined) {
+    ticker = { listeners: new Set(), id: null };
+    tickers.set(wallNow, ticker);
+  }
+  const owned = ticker;
+  owned.listeners.add(listener);
+  owned.id ??= setInterval(() => {
+    const now = wallNow();
+    for (const notify of owned.listeners) notify(now);
   }, LIVE_CLOCK_INTERVAL_MS);
   return () => {
-    listeners.delete(listener);
-    if (listeners.size === 0 && tickerId !== null) {
-      clearInterval(tickerId);
-      tickerId = null;
+    owned.listeners.delete(listener);
+    if (owned.listeners.size === 0 && owned.id !== null) {
+      clearInterval(owned.id);
+      owned.id = null;
+      tickers.delete(wallNow);
     }
   };
 }
 
-/** Number of live clocks currently subscribed to the shared ticker. */
+// meiva:note
+// Number of live clocks currently subscribed to the shared tickers.
 export function liveClockSubscriberCount(): number {
-  return listeners.size;
+  let count = 0;
+  for (const ticker of tickers.values()) count += ticker.listeners.size;
+  return count;
 }
 
 // Whether the agent is busy. TimelineView provides it; a clock outside a busy
@@ -97,11 +116,12 @@ export const LiveClockGate = createContext(true);
 // false and never subscribe.
 export function useNow(active: boolean): number {
   const gate = useContext(LiveClockGate);
+  const wallNow = useWallNow();
   const ticking = active && gate;
-  const [now, setNow] = useState(() => Date.now());
+  const [now, setNow] = useState(() => wallNow());
   useEffect(() => {
     if (!ticking) return;
-    return subscribeTick(setNow);
-  }, [ticking]);
+    return subscribeTick(wallNow, setNow);
+  }, [ticking, wallNow]);
   return now;
 }

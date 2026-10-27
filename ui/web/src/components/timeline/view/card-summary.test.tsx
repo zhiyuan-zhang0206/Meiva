@@ -1,5 +1,6 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { fireEvent, render } from "@testing-library/react";
+import { fireEvent } from "@testing-library/react";
+import { render } from "@/lib/transport/tests/wall-clock-render";
 import { describe, expect, it, vi } from "vitest";
 
 import type { BackendTimelineItem } from "@/lib/contracts/types";
