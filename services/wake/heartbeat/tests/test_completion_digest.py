@@ -21,6 +21,7 @@ from base.daemon.schedules.completion_notices import (
 from base.db import Database, create_agent
 from base.db.code_version_gate import ProcessDbGate
 from base.events.live.bus import EventBus
+from ops.cluster.rpc import RpcClient
 from services.wake.heartbeat import completion_digest
 
 
@@ -41,6 +42,7 @@ def test_flush_once_delivers_one_digest_and_marks_the_authoritative_events(
     *,
     database_gate: ProcessDbGate,
     machine_identity: MachineIdentityReader,
+    rpc: RpcClient,
 ) -> None:
     import base.db
 
@@ -78,6 +80,7 @@ def test_flush_once_delivers_one_digest_and_marks_the_authoritative_events(
                     EventBus.from_settings(rng=seeded_rng()),
                     now=datetime(2026, 9, 22, 12, tzinfo=UTC),
                     machine=machine_identity,
+                    rpc=rpc,
                 )
             )
             == 1
@@ -117,6 +120,7 @@ def test_flush_once_delivers_one_digest_and_marks_the_authoritative_events(
                     EventBus.from_settings(rng=seeded_rng()),
                     now=datetime(2026, 9, 22, 12, tzinfo=UTC),
                     machine=machine_identity,
+                    rpc=rpc,
                 )
             )
             == 0
@@ -135,6 +139,7 @@ def test_unknown_digest_failure_propagates_to_service(
     *,
     database_gate: ProcessDbGate,
     machine_identity: MachineIdentityReader,
+    rpc: RpcClient,
 ) -> None:
     """An unknown failure ends this round rather than deferring poison work."""
     import base.db
@@ -178,6 +183,7 @@ def test_unknown_digest_failure_propagates_to_service(
                     EventBus.from_settings(rng=seeded_rng()),
                     now=datetime(2026, 9, 22, 12, tzinfo=UTC),
                     machine=machine_identity,
+                    rpc=rpc,
                 )
             )
     finally:
@@ -202,6 +208,7 @@ def test_digest_postcommit_failure_keeps_events_unmarked_and_recovers_same_inbou
     *,
     database_gate: ProcessDbGate,
     machine_identity: MachineIdentityReader,
+    rpc: RpcClient,
 ) -> None:
     import base.db
     from base.agents.inbox.chat_delivery import ChatInboundCommittedError
@@ -234,6 +241,7 @@ def test_digest_postcommit_failure_keeps_events_unmarked_and_recovers_same_inbou
                         EventBus.from_settings(rng=seeded_rng()),
                         now=datetime(2026, 9, 22, 12, tzinfo=UTC),
                         machine=machine_identity,
+                        rpc=rpc,
                     )
                 )
             assert failed.value.__cause__ is bug
@@ -249,6 +257,7 @@ def test_digest_postcommit_failure_keeps_events_unmarked_and_recovers_same_inbou
                     EventBus.from_settings(rng=seeded_rng()),
                     now=datetime(2026, 9, 22, 12, tzinfo=UTC),
                     machine=machine_identity,
+                    rpc=rpc,
                 )
             )
             == 1
@@ -269,6 +278,7 @@ def test_owned_digest_round_uses_its_clock_to_close_each_window_once(
     *,
     database_gate: ProcessDbGate,
     machine_identity: MachineIdentityReader,
+    rpc: RpcClient,
 ) -> None:
     import base.db
 
@@ -291,6 +301,7 @@ def test_owned_digest_round_uses_its_clock_to_close_each_window_once(
             machine_identity,
             clock,
             completion_digest.DigestConfig(),
+            rpc=rpc,
         )
         asyncio.run(digest.run_round())
         assert db_conn.execute(

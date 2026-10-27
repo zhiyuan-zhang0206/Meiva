@@ -51,6 +51,7 @@ from base.native_process.loaded_commit import LoadedCommit
 from base.paths import meiva_home
 from base.telemetry.pipeline_build import build_pipeline
 from base.telemetry.process_logging import init_gateway_process
+from ops.cluster.rpc import RpcClient
 from services.pidfile import acquire_pidfile, pidfile_holds_daemon, remove_pidfile
 from services.upkeep.ttl_reaper import remote, shells, sweep
 from services.upkeep.ttl_reaper.config import TtlReaperConfig
@@ -92,14 +93,14 @@ def _is_running(config: ConfigBoot, *, runtime: Path) -> bool:
 # meiva:note
 # The reaper's configuration, read once from the process's `ConfigBoot`. The shell-kill deadline
 # is the RPC client's own worst case, which the loops also size their liveness window from.
-def ttl_reaper_config(config: ConfigBoot) -> TtlReaperConfig:
+def ttl_reaper_config(config: ConfigBoot, *, rpc: RpcClient) -> TtlReaperConfig:
     daemon = config.view.daemon
     clock = Clock(clock_config_from_boot(config), timers=SYSTEM_TIMERS)
     return TtlReaperConfig(
         poll_interval_s=daemon.ttl_reaper_poll_interval_seconds,
         fire_log_cleanup_interval_s=daemon.schedule_fire_log_cleanup_interval_seconds,
         fire_log_retention_days=daemon.schedule_fire_log_retention_days,
-        shell_kill_deadline_s=shells.dispatch_deadline_s(),
+        shell_kill_deadline_s=shells.dispatch_deadline_s(rpc),
         impersonation_event_abandon_grace_s=(
             config.view.general.impersonation_event_abandon_grace_seconds
         ),
@@ -117,13 +118,14 @@ async def run_loops(
     bus: EventBus,
     liveness: LivenessGroup,
     config: TtlReaperConfig,
+    rpc: RpcClient,
 ) -> None:
     """Own the two resident loops; one that raises ends the process."""
     sweep_progress = liveness.register("sweep", _SWEEP_LIVENESS_TIMEOUT_S)
     remote_progress = liveness.register("remote", config.shell_kill_deadline_s + _LIVENESS_SLACK_S)
     async with asyncio.TaskGroup() as loops:
         loops.create_task(sweep.sweep_loop(pool, db, bus, sweep_progress, config))
-        loops.create_task(remote.remote_loop(pool, db, bus, remote_progress, config))
+        loops.create_task(remote.remote_loop(pool, db, bus, remote_progress, config, rpc))
 
 
 async def run(
@@ -155,7 +157,8 @@ async def run(
     pool = db.pool(max_size=_POOL_MAX_SIZE)
     bus = EventBus(event_bus_config_from_config(process_config), rng=_new_rng())
     try:
-        await run_loops(pool, db, bus, liveness, ttl_reaper_config(process_config))
+        rpc = RpcClient.from_boot(process_config, timers=SYSTEM_TIMERS, rng=_new_rng())
+        await run_loops(pool, db, bus, liveness, ttl_reaper_config(process_config, rpc=rpc), rpc)
     finally:
         pool.close()
         await stop_health_server(health)

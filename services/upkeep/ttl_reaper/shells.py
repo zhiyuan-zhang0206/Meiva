@@ -96,10 +96,8 @@ STALE_ROW_GRACE = timedelta(hours=6)
 # client's worst case at the per-attempt budget, so it only cuts a dispatch the client's own
 # timeout and retry budgets did not. The daemon reads it once into
 # `TtlReaperConfig.shell_kill_deadline_s`.
-def dispatch_deadline_s() -> float:
-    return cluster_rpc.worst_case_dispatch_seconds(
-        cluster_rpc.rpc_config_from_settings(), _SHELL_OP_TIMEOUT_S
-    )
+def dispatch_deadline_s(rpc: cluster_rpc.RpcClient) -> float:
+    return cluster_rpc.worst_case_dispatch_seconds(rpc.config, _SHELL_OP_TIMEOUT_S)
 
 
 # meiva:note
@@ -191,10 +189,16 @@ def delete_shell_row(
 # site. Failures travel to the caller unchanged — what an unanswered dial means differs between the
 # two ops and stays with each.
 async def _dispatch_shell_op(
-    db: Database, machine: str, kind: str, payload: dict[str, Any], *, deadline_s: float
+    rpc: cluster_rpc.RpcClient,
+    db: Database,
+    machine: str,
+    kind: str,
+    payload: dict[str, Any],
+    *,
+    deadline_s: float,
 ) -> dict[str, Any]:
     async with asyncio.timeout(deadline_s):
-        return await cluster_rpc.dispatch_to_machine(
+        return await rpc.dispatch_to_machine(
             db, machine, kind, payload, timeout_s=_SHELL_OP_TIMEOUT_S
         )
 
@@ -208,10 +212,17 @@ async def _dispatch_shell_op(
 # at all. Deferring would retry the row forever. An unreachable machine, a failed op, a
 # malformed answer or a dispatch that outlives `deadline_s` defers: the session may still live.
 async def dispatch_shell_kill(
-    db: Database, machine: str, agent_id: int, session_id: int, *, deadline_s: float
+    rpc: cluster_rpc.RpcClient,
+    db: Database,
+    machine: str,
+    agent_id: int,
+    session_id: int,
+    *,
+    deadline_s: float,
 ) -> Settlement | None:
     try:
         answer = await _dispatch_shell_op(
+            rpc,
             db,
             machine,
             "shell_kill",
@@ -256,6 +267,7 @@ async def reclaim_row(
     machine: str,
     shell: ShellRow,
     config: TtlReaperConfig,
+    rpc: cluster_rpc.RpcClient,
 ) -> tuple[int, int] | None:
     agent_id = shell.agent_id
     session_id = shell.session_id
@@ -265,7 +277,7 @@ async def reclaim_row(
         _log.info("[ttl-reaper] shell %s of agent %s was renewed — skipping", session_id, agent_id)
         return None
     settlement = await dispatch_shell_kill(
-        db, machine, agent_id, session_id, deadline_s=config.shell_kill_deadline_s
+        rpc, db, machine, agent_id, session_id, deadline_s=config.shell_kill_deadline_s
     )
     if settlement is None:
         return None
@@ -297,6 +309,7 @@ async def reap_expired_shells(
     bus: EventBus,
     progress: LoopProgress,
     config: TtlReaperConfig,
+    rpc: cluster_rpc.RpcClient,
 ) -> list[tuple[int, int]]:
     """Kill every TTL-expired shell session on its home machine; return the
     (agent, session) pairs whose rows were settled.
@@ -316,7 +329,7 @@ async def reap_expired_shells(
 
     async def reclaim_machine(batch: shell_plan.MachineBatch) -> None:
         for shell in batch.shells:
-            settled = await reclaim_row(pool, db, bus, batch.machine, shell, config)
+            settled = await reclaim_row(pool, db, bus, batch.machine, shell, config, rpc)
             if settled is not None:
                 reaped.append(settled)
             progress.beat()
@@ -375,11 +388,11 @@ def machine_probe_last_seen_blocking(pool: ConnectionPool, machine: str) -> date
 # record. The probe is authoritative when it answers at all: the host enumerates its session backend
 # and raises rather than reporting a failed listing as an empty one.
 async def dispatch_shell_probe(
-    db: Database, machine: str, agent_id: int, *, deadline_s: float
+    rpc: cluster_rpc.RpcClient, db: Database, machine: str, agent_id: int, *, deadline_s: float
 ) -> frozenset[int] | None:
     try:
         answer = await _dispatch_shell_op(
-            db, machine, "shell_probe", {"agent_id": agent_id}, deadline_s=deadline_s
+            rpc, db, machine, "shell_probe", {"agent_id": agent_id}, deadline_s=deadline_s
         )
     except cluster_rpc.ClusterOpTargetAbsent:
         raise
@@ -441,7 +454,11 @@ def emit_stale_dropped(row: ShellRow, *, machine: str, evidence: str) -> None:
 # transaction, and the sweep ends with one summary line stating what it saw and did. All DB work
 # runs via to_thread: the event loop never blocks on psycopg.
 async def reap_stale_shells(
-    pool: ConnectionPool, db: Database, progress: LoopProgress, config: TtlReaperConfig
+    pool: ConnectionPool,
+    db: Database,
+    progress: LoopProgress,
+    config: TtlReaperConfig,
+    rpc: cluster_rpc.RpcClient,
 ) -> list[tuple[int, int]]:
     plan = stale_plan.plan_stale(await asyncio.to_thread(stale_shell_rows_blocking, pool))
     candidates = sum(len(agent.rows) for probes in plan.machines for agent in probes.agents)
@@ -461,7 +478,11 @@ async def reap_stale_shells(
         try:
             for index, agent in enumerate(probes.agents):
                 live = await dispatch_shell_probe(
-                    db, probes.machine, agent.agent_id, deadline_s=config.shell_kill_deadline_s
+                    rpc,
+                    db,
+                    probes.machine,
+                    agent.agent_id,
+                    deadline_s=config.shell_kill_deadline_s,
                 )
                 if live is None:
                     # meiva:note

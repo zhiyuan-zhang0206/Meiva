@@ -7,6 +7,7 @@ import signal
 import sys
 import time
 from collections.abc import Callable
+from functools import partial
 from pathlib import Path
 
 from psycopg_pool import ConnectionPool
@@ -33,6 +34,7 @@ from base.native_process.loaded_commit import LoadedCommit
 from base.paths import meiva_home
 from base.telemetry.pipeline_build import build_pipeline
 from base.telemetry.process_logging import init_gateway_process
+from ops.cluster.rpc import RpcClient
 from services.pidfile import acquire_pidfile, pidfile_holds_daemon, remove_pidfile
 from services.wake.delivery_watchdog.dead_letter import (
     dead_letter_stale_claimed as dead_letter_stale_claimed,
@@ -291,11 +293,10 @@ async def scan_loop(pool: ConnectionPool, progress: LoopProgress) -> None:
 # two cluster dispatches, each bounded by the RPC client's own timeout and retry
 # budget (`worst_case_dispatch_seconds`). A hardcoded ceiling would declare the
 # loop stalled as soon as an operator raised either knob.
-def stranded_wake_liveness_timeout_s() -> float:
-    from ops.cluster.rpc import rpc_config_from_settings
+def stranded_wake_liveness_timeout_s(rpc: RpcClient) -> float:
     from ops.cluster.rpc_plans import worst_case_dispatch_seconds
 
-    per_wake = 2 * worst_case_dispatch_seconds(rpc_config_from_settings())
+    per_wake = 2 * worst_case_dispatch_seconds(rpc.config)
     per_round = max(settings.daemon.delivery_watchdog_stranded_wake_max_per_round, 1)
     return per_wake * per_round + _STRANDED_WAKE_ROUND_MARGIN_S
 
@@ -311,6 +312,7 @@ async def stranded_wake_loop(
     bus: EventBus,
     machine: MachineIdentityReader,
     progress: LoopProgress,
+    rpc: RpcClient,
 ) -> None:
     async def one_round() -> None:
         await stranded_wake_round(
@@ -321,7 +323,7 @@ async def stranded_wake_loop(
             age_bound_s=settings.daemon.delivery_watchdog_stale_claimed_threshold_seconds,
             cooldown_s=settings.daemon.delivery_watchdog_stranded_wake_cooldown_seconds,
             max_per_round=settings.daemon.delivery_watchdog_stranded_wake_max_per_round,
-            wake=wake_stranded,
+            wake=partial(wake_stranded, rpc=rpc),
         )
 
     await round_loop.run_rounds(
@@ -358,6 +360,7 @@ async def run(
     db = database()
     pool = db.pool(max_size=_POOL_MAX_SIZE)
     bus = EventBus.from_settings(rng=_new_rng())
+    rpc = RpcClient.from_boot(process_config, timers=SYSTEM_TIMERS, rng=_new_rng())
     try:
         # meiva:note
         # One TaskGroup owns both resident loops, each with its own progress tracker so
@@ -371,7 +374,8 @@ async def run(
                     db,
                     bus,
                     machine,
-                    liveness.register("stranded_wake", stranded_wake_liveness_timeout_s()),
+                    liveness.register("stranded_wake", stranded_wake_liveness_timeout_s(rpc)),
+                    rpc,
                 )
             )
     finally:

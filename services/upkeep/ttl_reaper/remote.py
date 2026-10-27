@@ -17,6 +17,7 @@ from base.daemon import round_loop
 from base.daemon.loop_health import LoopProgress
 from base.db import Database
 from base.events.live.bus import EventBus
+from ops.cluster.rpc import RpcClient
 from services.upkeep.ttl_reaper import shells
 from services.upkeep.ttl_reaper.config import TtlReaperConfig
 
@@ -33,16 +34,17 @@ async def remote_round(
     bus: EventBus,
     progress: LoopProgress,
     config: TtlReaperConfig,
+    rpc: RpcClient,
     *,
     sweep: bool = True,
 ) -> None:
-    reaped = await shells.reap_expired_shells(pool, db, bus, progress, config)
+    reaped = await shells.reap_expired_shells(pool, db, bus, progress, config, rpc)
     progress.beat()
     if reaped:
         _log.info("[ttl-reaper] reclaimed %d shell(s)", len(reaped))
     if not sweep:
         return
-    await shells.reap_stale_shells(pool, db, progress, config)
+    await shells.reap_stale_shells(pool, db, progress, config, rpc)
     progress.beat()
 
 
@@ -52,12 +54,13 @@ async def remote_loop(
     bus: EventBus,
     progress: LoopProgress,
     config: TtlReaperConfig,
+    rpc: RpcClient,
 ) -> None:
     """The remote-call phases as a resident sequential loop."""
     rounds = itertools.count()
 
     async def one_round() -> None:
         sweep = next(rounds) % shells.SWEEP_EVERY_ROUNDS == 0
-        await remote_round(pool, db, bus, progress, config, sweep=sweep)
+        await remote_round(pool, db, bus, progress, config, rpc, sweep=sweep)
 
     await round_loop.run_rounds("remote", progress, config.poll_interval_s, one_round)

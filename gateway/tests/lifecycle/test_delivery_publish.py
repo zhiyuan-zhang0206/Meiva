@@ -44,8 +44,10 @@ from gateway.tests.support.runner_ops.ops_stub import (
     completed,
     runner_ops,
 )
+from ops.cluster.rpc import RpcClient
 from ops.lifecycle import delivery
 from ops.lifecycle.delivery import deliver_chat_inbound
+from ops.tests.rpc_support import rpc_client
 
 
 def _sync_pool() -> ConnectionPool[psycopg.Connection[TupleRow]]:
@@ -132,6 +134,7 @@ async def test_deliver_survives_publish_failure(
     database_gate: ProcessDbGate,
     *,
     machine_identity: MachineIdentityReader,
+    rpc: RpcClient,
 ) -> None:
     tid = _seed_agent(db_conn, "idling", machine=machine_identity.name())
 
@@ -144,6 +147,7 @@ async def test_deliver_survives_publish_failure(
             prepare=lambda _c: "hello there",
             refresh_badge=True,
             local_machine=machine_identity.name(),
+            rpc=rpc,
         )
 
     rows = db_conn.execute("SELECT content FROM inbound_messages WHERE agent_id = %s", (tid,))
@@ -163,6 +167,7 @@ async def test_unknown_publish_error_exposes_committed_delivery(
     step: str,
     *,
     machine_identity: MachineIdentityReader,
+    rpc: RpcClient,
 ) -> None:
     tid = _seed_agent(db_conn, "idling", machine=machine_identity.name())
     db = Database.from_settings(gate=database_gate)
@@ -176,6 +181,7 @@ async def test_unknown_publish_error_exposes_committed_delivery(
                 prepare=lambda _c: "hi",
                 client_message_id="badge-committed",
                 local_machine=machine_identity.name(),
+                rpc=rpc,
             )
             assert first.inbound_id is not None
         with pytest.raises(ChatInboundCommittedError, match="committed; post-commit work failed"):
@@ -188,6 +194,7 @@ async def test_unknown_publish_error_exposes_committed_delivery(
                 refresh_badge=True,
                 client_message_id="badge-committed",
                 local_machine=machine_identity.name(),
+                rpc=rpc,
             )
     rows = db_conn.execute("SELECT id, content FROM inbound_messages WHERE agent_id = %s", (tid,))
     stored = rows.fetchall()
@@ -203,6 +210,7 @@ async def test_deliver_wakes_a_terminated_agent_with_the_inserted_chat_as_guard(
     database_gate: ProcessDbGate,
     event_bus: EventBus,
     local_home: MachineIdentityReader,
+    rpc: RpcClient,
 ) -> None:
     tid = _seed_agent(db_conn, "terminated", machine=local_home.name())
 
@@ -214,6 +222,7 @@ async def test_deliver_wakes_a_terminated_agent_with_the_inserted_chat_as_guard(
             tid,
             prepare=lambda _c: "guard me",
             local_machine=local_home.name(),
+            rpc=rpc,
         )
 
     chat = db_conn.execute(
@@ -233,6 +242,7 @@ async def test_retried_client_message_resurrects_terminated_agent_once(
     database_gate: ProcessDbGate,
     event_bus: EventBus,
     local_home: MachineIdentityReader,
+    rpc: RpcClient,
 ) -> None:
     tid = _seed_agent(db_conn, "terminated", machine=local_home.name())
 
@@ -246,6 +256,7 @@ async def test_retried_client_message_resurrects_terminated_agent_once(
                 prepare=lambda _c: "wake once",
                 client_message_id="client-wake-once",
                 local_machine=local_home.name(),
+                rpc=rpc,
             )
             for _ in range(2)
         ]
@@ -265,6 +276,7 @@ async def test_fresh_peer_message_wakes_owner_despite_previous_suppression(
     peer_home: str,
     *,
     machine_identity: MachineIdentityReader,
+    rpc: RpcClient,
 ) -> None:
     tid = _seed_agent(db_conn, "terminated", machine=peer_home, suppressed=True)
 
@@ -277,6 +289,7 @@ async def test_fresh_peer_message_wakes_owner_despite_previous_suppression(
             prepare=lambda _conn: "peer work",
             source="agent:42",
             local_machine=machine_identity.name(),
+            rpc=rpc,
         )
 
     assert result.status is AgentStatus.IDLING
@@ -305,6 +318,7 @@ async def test_concurrent_same_key_terminated_delivery_has_one_resurrect_effect(
     database_gate: ProcessDbGate,
     event_bus: EventBus,
     local_home: MachineIdentityReader,
+    rpc: RpcClient,
 ) -> None:
     tid = _seed_agent(db_conn, "terminated", machine=local_home.name())
 
@@ -319,6 +333,7 @@ async def test_concurrent_same_key_terminated_delivery_has_one_resurrect_effect(
                     prepare=lambda _c: "concurrent wake",
                     client_message_id="client-concurrent-wake",
                     local_machine=local_home.name(),
+                    rpc=rpc,
                 )
                 for _ in range(2)
             )
@@ -337,6 +352,7 @@ async def test_badge_publish_happens_after_commit(
     event_bus: EventBus,
     *,
     machine_identity: MachineIdentityReader,
+    rpc: RpcClient,
 ) -> None:
     tid = _seed_agent(db_conn, "idling", machine=machine_identity.name())
 
@@ -360,6 +376,7 @@ async def test_badge_publish_happens_after_commit(
             prepare=_prepare,
             refresh_badge=True,
             local_machine=machine_identity.name(),
+            rpc=rpc,
         )
 
     badges = [
@@ -383,6 +400,7 @@ async def test_cancelled_caller_leaves_the_committed_chat_and_reconciles_same_re
     event_bus: EventBus,
     *,
     machine_identity: MachineIdentityReader,
+    rpc: RpcClient,
 ) -> None:
     tid = _seed_agent(db_conn, "terminated", machine="slow-home")
     wake_arrived = threading.Event()
@@ -404,6 +422,7 @@ async def test_cancelled_caller_leaves_the_committed_chat_and_reconciles_same_re
                 prepare=lambda _c: "cancel after commit",
                 client_message_id="cancel-committed",
                 local_machine=machine_identity.name(),
+                rpc=rpc,
             )
         )
         assert await asyncio.to_thread(wake_arrived.wait, 10), "the wake never reached the home"
@@ -426,8 +445,17 @@ async def test_cancelled_caller_leaves_the_committed_chat_and_reconciles_same_re
             content="cancel after commit",
             source="user",
             payload=None,
+            rpc=rpc,
         )
     assert recovered is not None and recovered.inbound_id == row[0]
     assert db_conn.execute(
         "SELECT count(*) FROM inbound_messages WHERE agent_id=%s", (tid,)
     ).fetchone() == (1,)
+
+
+# meiva:note
+# The cluster client handed to what dispatches: the test credential and retry waits on a manual
+# clock, so a retried dispatch costs no time.
+@pytest.fixture
+def rpc() -> RpcClient:
+    return rpc_client()[0]

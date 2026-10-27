@@ -1,3 +1,5 @@
+import pytest
+
 from base.cluster.machine.tests.identity import machine_identity as machine_identity
 from base.config.tests.config_authority import config_authority as config_authority
 from base.log.tests.log_records import loguru_records as loguru_records
@@ -11,3 +13,13 @@ from meiva.tests.fixtures.model_owner import sdk_model_owner as sdk_model_owner
 from meiva.tests.fixtures.sdk import sdk_environment as sdk_environment
 from meiva.tests.fixtures.sdk import sdk_identity as sdk_identity
 from meiva.tests.fixtures.sdk import sdk_metering as sdk_metering
+from ops.cluster.rpc import RpcClient
+from ops.tests.rpc_support import rpc_client
+
+
+# meiva:note
+# The cluster client handed to what dispatches: the test credential and retry waits on a manual
+# clock, so a retried dispatch costs no time.
+@pytest.fixture
+def rpc() -> RpcClient:
+    return rpc_client()[0]

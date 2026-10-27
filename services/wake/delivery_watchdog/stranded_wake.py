@@ -38,6 +38,7 @@ from base.api_contracts.agent_contract import AgentStatus
 from base.db import Database
 from base.db.transaction import write_transaction
 from base.events.live.bus import EventBus
+from ops.cluster.rpc import RpcClient
 
 _log = logging.getLogger("services.wake.delivery_watchdog.stranded_wake")
 
@@ -173,6 +174,8 @@ async def wake_stranded(
     bus: EventBus,
     owner: StrandedOwner,
     local_machine: str,
+    *,
+    rpc: RpcClient,
 ) -> bool:
     from ops.lifecycle import resurrect_if_terminated
 
@@ -184,6 +187,7 @@ async def wake_stranded(
             trigger_inbound_id=owner.trigger_inbound_id,
             trigger_inbound_kind=owner.trigger_kind,
             local_machine=local_machine,
+            rpc=rpc,
         )
     except Exception:
         _log.warning(

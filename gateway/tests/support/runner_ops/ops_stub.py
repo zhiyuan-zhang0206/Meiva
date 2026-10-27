@@ -1,7 +1,7 @@
 # meiva:note
 # A remote runner's `POST /ops` endpoint as a real listener on port 0, registered in `machines`.
 #
-# The gateway reaches a runner only through `ops.cluster.rpc.dispatch_to_machine`: it reads the
+# The gateway reaches a runner only through `RpcClient.dispatch_to_machine`: it reads the
 # target's `gateway_url` from the registry and POSTs an `OpEnvelope` there. A test that needs a
 # runner's answer serves it from this listener and registers the machine, so the real registry
 # read, the real HTTP client and the real result handling all run. This stands in for another

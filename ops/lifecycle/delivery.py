@@ -32,6 +32,7 @@ from base.events.live.announce import publish_agent_updated_sync
 from base.events.live.bus import EventBus
 from ops import lifecycle as ops
 from ops.agents import get_agent_status
+from ops.cluster.rpc import RpcClient
 
 
 class ChatDelivery(NamedTuple):
@@ -49,6 +50,7 @@ async def deliver_chat_inbound(
     *,
     prepare: Callable[[psycopg.Connection], str | None],
     local_machine: str,
+    rpc: RpcClient,
     source: str = "user",
     refresh_badge: bool = False,
     payload: dict[str, object] | None = None,
@@ -104,6 +106,7 @@ async def deliver_chat_inbound(
         client_message_id,
         refresh_badge=refresh_badge,
         local_machine=local_machine,
+        rpc=rpc,
     )
 
 
@@ -118,6 +121,7 @@ async def _finish_chat_delivery(
     *,
     refresh_badge: bool = False,
     local_machine: str,
+    rpc: RpcClient,
 ) -> ChatDelivery:
     """Await separate wake, UI and resurrection effects after durable commit."""
     try:
@@ -139,6 +143,7 @@ async def _finish_chat_delivery(
                 trigger_inbound_id=receipt.inbound_id,
                 trigger_inbound_kind=InboundKind.CHAT,
                 local_machine=local_machine,
+                rpc=rpc,
             )
         else:
             # Claimed/done work is a receipt lookup, never a stale resurrection.
@@ -159,6 +164,7 @@ async def reconcile_chat_delivery(
     source: str,
     payload: dict[str, object] | None,
     local_machine: str,
+    rpc: RpcClient,
 ) -> ChatDelivery | None:
     """Resolve an uncertain send and heal any still-pending delivery tail.
 
@@ -187,6 +193,7 @@ async def reconcile_chat_delivery(
         source,
         client_message_id,
         local_machine=local_machine,
+        rpc=rpc,
     )
 
 

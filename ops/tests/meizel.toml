@@ -1,4 +1,4 @@
-exports = ["db_faults.py", "pool_support.py"]
+exports = ["db_faults.py", "pool_support.py", "rpc_support.py"]
 
 [uses]
 "test_cluster_rpc.py" = ["_rpc_defaults_child.py", "rpc_support.py"]
