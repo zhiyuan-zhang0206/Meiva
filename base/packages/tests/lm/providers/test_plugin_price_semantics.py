@@ -5,6 +5,8 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, cast
 
+import pytest
+
 from base.lm import pricing
 from base.lm.catalog import ModelCatalog
 from base.lm.pricing import (
@@ -16,6 +18,12 @@ from base.lm.pricing import (
     quote,
     rates_at,
 )
+
+# meiva:note
+# Tree scan: the tables below are the checked-in declarations and the archive they mirror, so
+# the PR selector runs this file in every subset (a provider-only edit selects nothing else).
+# meiva:link base/lm/pricing/docs/pricing.meiva.okf.md
+pytestmark = pytest.mark.registry
 
 _ARCHIVE_PATH = Path(__file__).resolve().parents[5] / "base/lm/pricing/pricing_catalog_archive.json"
 _HISTORICAL = datetime(2026, 8, 1, tzinfo=UTC)

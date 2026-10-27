@@ -209,6 +209,19 @@ repos:
         always_run: true
         pass_filenames: false
 
+      # A built-in provider's price lattice is generated from the reviewed archive, and the flat
+      # trio is only the base tier at the last synchronization instant: this compares the committed
+      # periods, tiers, windows and provenance, so a hand edit to either side fails here instead of
+      # billing from a declaration the nightly bot has to rewrite. The run prints the provider-file
+      # and priced-model counts it compared and fails when that count is zero.
+      - id: plugin-price-lattice
+        name: plugin prices match the archive lattice
+        entry: .venv/bin/python -m scripts.model_registry.check_plugin_price_drift
+        language: system
+        files: ^(base/lm/pricing/pricing_catalog_archive\.json|meiva_builtins/plugins/lm_[^/]+/provider\.py)$
+        pass_filenames: false
+        verbose: true
+
       # Ban building a psycopg pool without TCP keepalives where the structure
       # gate's `postgres-dial` rule cannot see it: scripts/ and the modules that
       # decision allows. See scripts/lint/pool_keepalives.py header.
