@@ -4,6 +4,3 @@ exports = ["process.py", "sinks.py", "tests"]
 "__init__.py" = ["sinks.py"]
 "process.py" = ["__init__.py", "sinks.py"]
 "tests" = ["__init__.py", "sinks.py"]
-
-[debt.ambient-read]
-"process.py#home base.paths.logs_dir" = 2

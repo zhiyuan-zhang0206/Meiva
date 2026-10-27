@@ -43,7 +43,8 @@ def test_plugins_dir_auto_mkdirs(unit_home: Path):
 def test_workspace_paths_derive_from_the_workspaces_root(unit_home: Path):
     root = paths.workspaces_root(home=unit_home)
     assert root == unit_home / "workspaces"
-    assert paths.workspace_dir_readonly(7, home=unit_home) == root / "7"
+    assert paths.workspaces_path(unit_home) == root
+    assert paths.workspace_path(unit_home, 7) == root / "7"
     assert paths.workspace_dir(7, home=unit_home) == root / "7"
 
 
@@ -93,7 +94,6 @@ _DERIVED = [
     (partial(paths.gateway_memory_dir, roles=_GATEWAY), "memory"),
     (paths.workspaces_root, "workspaces"),
     (partial(paths.workspace_dir, 7), "workspaces/7"),
-    (partial(paths.workspace_dir_readonly, 8), "workspaces/8"),
     (paths.harness_sessions_dir, "harness/sessions"),
     (paths.harness_registrations_dir, "harness/registrations"),
 ]
@@ -111,19 +111,22 @@ def test_path_helpers_derive_from_an_explicit_home(
 
 
 # meiva:note
-# The keyword form and the zero-argument form answer the same path when the ambient home is the
-# one handed in.
+# The home is required: a helper called without one is a `TypeError`, not a read of the ambient
+# home.
 @pytest.mark.parametrize(("derive", "relative"), _DERIVED)
-def test_the_keyword_form_equals_the_zero_argument_form_for_the_ambient_home(
+def test_a_helper_called_without_a_home_is_refused(
     derive: Callable[..., Path], relative: str, unit_home: Path
 ):
-    assert derive(home=unit_home) == derive() == unit_home / relative
+    with pytest.raises(TypeError, match="home"):
+        derive()
+
+    assert list(unit_home.iterdir()) == []
 
 
 # meiva:note
-# An explicit home is created owner-only like `meiva_home()` creates the ambient one, the helpers
-# that create their directory still do, the read-only one does not, and the ambient home is not
-# read: its mode stays what the test set, where `meiva_home()` would have repaired it to 0700.
+# The home handed in is created owner-only like `meiva_home()` creates the ambient one, the helpers
+# that create their directory still do, the pure workspace path does not, and the ambient home is
+# not read: its mode stays what the test set, where `meiva_home()` would have repaired it to 0700.
 def test_an_explicit_home_is_created_owner_only_and_the_ambient_home_is_not_read(
     unit_home: Path, tmp_path_factory: pytest.TempPathFactory
 ):
@@ -132,7 +135,7 @@ def test_an_explicit_home_is_created_owner_only_and_the_ambient_home_is_not_read
 
     paths.workspace_dir(7, home=other)
     paths.plugins_dir(home=other)
-    paths.workspace_dir_readonly(8, home=other)
+    assert paths.workspace_path(other, 8) == other / "workspaces" / "8"
 
     assert other.stat().st_mode & 0o777 == 0o700
     assert (other / "plugins").is_dir()

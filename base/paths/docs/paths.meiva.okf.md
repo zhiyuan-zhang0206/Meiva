@@ -29,17 +29,17 @@ and the `otel_collector_*` paths) derives a path from the home it is handed: it 
 environment and creates nothing, so a test hands in `tmp_path` and the process that binds a
 socket, takes a lock or writes a file creates the directory.
 
-The ten helpers that make a directory or sit on the home itself (`plugins_dir`, `logs_dir`,
+The nine helpers that make a directory or sit on the home itself (`plugins_dir`, `logs_dir`,
 `permissions_helper_app_dir`, `memory_dir`, `gateway_memory_dir`, `workspaces_root`,
-`workspace_dir`, `workspace_dir_readonly`, `harness_sessions_dir`, `harness_registrations_dir`)
-take a **keyword form** `H(*, home)`: an explicit absolute home is created owner-only (0700, as
-`meiva_home()` creates the ambient one) and the helper derives from it, reading no environment;
-a relative home is refused. `workspace_dir`, `plugins_dir` and `logs_dir` also create their own
-directory. Without `home=` the same helpers still read `MEIVA_HOME` — a transitional form that
-disappears with its callers, leaving the keyword form as the only one.
+`workspace_dir`, `harness_sessions_dir`, `harness_registrations_dir`) take a required **keyword
+form** `H(*, home)`: the absolute home is created owner-only (0700, as `meiva_home()` creates the
+ambient one) and the helper derives from it, reading no environment; a relative home is refused,
+and a call without `home=` is a `TypeError`. `workspace_dir`, `plugins_dir` and `logs_dir` also
+create their own directory. `workspace_path(home, agent_id)` is the pure form of the workspace
+derivation, for a reader of another agent's workspace.
 
 All three process classes — gateway, agent, exec subprocess — inherit the same
-`MEIVA_HOME` variable, so nothing is passed by hand. **The home is the unit's
+`MEIVA_HOME` variable; each entry resolves it once and hands the home down. **The home is the unit's
 identity**: a co-located gateway unit at `~/.meiva_gateway` and a runner unit at
 `~/.meiva` share no state, because every path below derives from a different root.
 
@@ -81,8 +81,8 @@ only itself.
 ## Notes
 
 - **`.env` / `installed.json` lock discipline** (sibling file locks at every door, leaves stay leaves, atomic save vs lost update): [[base/paths/docs/lock-discipline.meiva.okf.md]].
-- `workspaces_root()` owns the `workspaces` path segment; `workspace_dir`,
-  `workspace_dir_readonly`, `meiva_code`'s fork cwd re-homing and the
+- `workspaces_path()` owns the `workspaces` path segment (`workspaces_root()` and `workspace_path()` derive from it); `workspace_dir`,
+  `meiva_code`'s fork cwd re-homing and the
   agent-runner's to_user watcher all derive from it in both directions (build a
   workspace path, or classify one as belonging to some agent's workspace). Do
   not re-derive the root as `workspace_dir(...).parent` or by composing

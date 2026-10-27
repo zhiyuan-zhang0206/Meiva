@@ -18,7 +18,3 @@ exports = ["db", "execution", "extensions", "graph", "hooks", "impersonation.py"
 "__init__.py" = "strict"
 "nodes.py" = "strict"
 "state_channels.py" = "strict"
-
-[debt.ambient-read]
-"impersonation.py#home base.paths.workspaces_root" = 1
-"process_boot.py#home base.paths.workspace_dir" = 2

@@ -23,6 +23,3 @@ exports = ["daemon.py", "held_settle.py", "host.py", "host_beat.py", "invocation
 
 [debt.ambient-read]
 "dispatcher.py#clock asyncio.loop.time" = 2
-"host.py#home base.paths.harness_registrations_dir" = 1
-"host.py#home base.paths.harness_sessions_dir" = 1
-"runtime.py#home base.paths.workspace_dir" = 1

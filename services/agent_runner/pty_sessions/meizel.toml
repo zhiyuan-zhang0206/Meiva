@@ -14,4 +14,3 @@ exports = ["daemon.py", "ledger.py", "shutdown_budget.py"]
 
 [debt.ambient-read]
 "service.py#environ base.native_process.child_env.inherited_process_env" = 1
-"service.py#home base.paths.logs_dir" = 1
