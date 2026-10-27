@@ -1,13 +1,13 @@
 exports = ["agent_identity.py", "attachment_transport.py", "batch.py", "discovery.py", "extensions.py", "help.py", "injection_check.py", "install.py", "installation.py", "metering.py", "plugins.py", "process_context.py", "pure", "sdk_disable.py", "settings.py", "skill_sources.py", "tests", "validation.py", "wraps.py"]
 
 [uses]
-"pure" = ["installation.py"]
+"pure" = ["installation.py", "validation.py"]
 "agent_identity.py" = ["installation.py", "process_context.py", "pure", "sdk_disable.py", "validation.py"]
-"attachment_transport.py" = ["process_context.py", "pure", "settings.py", "validation.py"]
+"attachment_transport.py" = ["process_context.py", "pure", "settings.py"]
 "batch.py" = ["pure"]
 "discovery.py" = ["pure"]
 "extensions.py" = ["install.py", "installation.py", "pure"]
-"help.py" = ["__init__.py", "attachment_transport.py", "discovery.py", "process_context.py", "pure", "settings.py"]
+"help.py" = ["__init__.py", "discovery.py", "process_context.py", "pure", "settings.py"]
 "injection_check.py" = ["pure"]
 "install.py" = ["__init__.py", "installation.py", "metering.py", "plugins.py", "process_context.py", "pure", "sdk_disable.py", "wraps.py"]
 "installation.py" = ["__init__.py"]
@@ -29,11 +29,12 @@ exports = ["agent_identity.py", "attachment_transport.py", "batch.py", "discover
 "." = "strict-to-be"
 "__init__.py" = "strict"
 "agent_identity.py" = "strict"
+"attachment_transport.py" = { mode = "none", why = "the shell of meiva.self.attach: it reads the agent's model, the catalog, the turn and the state-update slot, resolves the path the pure expansion named and stats the file, and appends the entry to the turn's update; the gate and the type checks, the home expansion, the refusals over the file facts, what a stat means, the model that runs and whether the process registers inside a turn are decided by the pure pure/media/attach/attach_request.py, attach_model.py and attach_plan.py" }
 "batch.py" = { mode = "none", why = "the executor behind the SDK batch APIs: it runs the worker over every item on threads under a semaphore and gathers the results in order; the max_concurrent contract it honours is checked by the pure pure/plans/batch_plan.py" }
 "discovery.py" = "strict-to-be"
 "extensions.py" = { mode = "none", why = "the plugin load: it imports the enabled plugins' faces, uninstalls the replaced surface and runs the install, in that order; what a replacing load carries over is decided by the pure pure/plans/installation/lifecycle_plan.py" }
 "help.py" = "strict"
-"injection_check.py" = { mode = "none", why = "the shell of the model-based injection check: it asks the decision model one question per piece of the page on a worker thread and logs the failures; the gates, the cut points, the piece budget, the fold of the answers and the refusal text are decided by the pure pure/media/injection_plan.py and injection_pieces.py" }
+"injection_check.py" = { mode = "none", why = "the shell of the model-based injection check: it asks the decision model one question per piece of the page on a worker thread and logs the failures; the gates, the cut points, the piece budget, the fold of the answers and the refusal text are decided by the pure pure/media/injection/injection_plan.py and injection_pieces.py" }
 "install.py" = { mode = "none", why = "the one writer of the meiva module: it applies each plugin's declaration, keeps the reversal ledger, rolls back a failed piece and swaps the installation slot; the slot values come from the pure pure/plans/installation/slot_plan.py and the path rule from wrap_plan.py" }
 "metering.py" = { mode = "none", why = "the wrapping half of SDK usage metering: it walks the live namespace, decides from the live attributes whether a target still needs a recorder, writes the recorders over the public routines and runs every call through the telemetry owner with the caller's provenance; what makes a callable a recorder, what stripping or restoring one leaves, how the walk tells members apart, the MCP call name and the identity stamped on a call are decided by the pure pure/plans/metering/recorder_plan.py and meter_plan.py" }
 "plugins.py" = "strict"
@@ -42,15 +43,10 @@ exports = ["agent_identity.py", "attachment_transport.py", "batch.py", "discover
 "validation.py" = "strict"
 "wraps.py" = { mode = "none", why = "the registration primitive behind meiva.extend.wrap: it resolves the target in the live meiva module, writes the chained function over it and reports a firing; the target rule, how the chained function presents itself, the async test and the counting rule are decided by the pure pure/plans/installation/wrap_plan.py" }
 
-[debt.ambient-read]
-"attachment_transport.py#home pathlib.Path.expanduser" = 1
-
 [debt.any-collaborator]
 "settings.py#any _PluginsView.__getattr__.return" = 1
 
 [debt.impure-call]
-"attachment_transport.py#Path.resolve" = 1
-"attachment_transport.py#Path.stat" = 1
 "discovery.py#inspect.getsource" = 1
 
 [debt.impure-edge]

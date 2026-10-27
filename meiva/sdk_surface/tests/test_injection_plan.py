@@ -1,5 +1,5 @@
 # meiva:note
-# `meiva/sdk_surface/pure/media/injection_plan.py` unit tests for the pieces the checker used to
+# `meiva/sdk_surface/pure/media/injection/injection_plan.py` unit tests for the pieces the checker used to
 # decide inline: the token budget of a piece, how the answers of the pieces fold into a verdict,
 # and the refusal for a model that is not a decision model. Asserted by value; the end-to-end
 # checks stay in `meiva/tests/namespaces/sdk_surface/test_injection_check.py`.
@@ -13,13 +13,13 @@ from base.lm.catalog.decide.types import (
     DecisionKeyMissingError,
     DecisionRequestError,
 )
-from meiva.sdk_surface.pure.media.injection_pieces import (
+from meiva.sdk_surface.pure.media.injection.injection_pieces import (
     chunk_budget,
     fold_outcomes,
     pieces_to_judge,
     split_for_model,
 )
-from meiva.sdk_surface.pure.media.injection_plan import unknown_model_message
+from meiva.sdk_surface.pure.media.injection.injection_plan import unknown_model_message
 
 _QID = "page_addresses_ai"
 

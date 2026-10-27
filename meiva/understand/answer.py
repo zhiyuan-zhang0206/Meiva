@@ -24,7 +24,7 @@ from base.lm.effort import ReasoningEffort
 from base.lm.usage.metering import unmeter
 from meiva import security
 from meiva.sdk_surface.batch import run_batch
-from meiva.sdk_surface.pure.media.attach_plan import resolve_in
+from meiva.sdk_surface.pure.media.attach.attach_plan import resolve_in
 from meiva.sdk_surface.pure.media.finding_plan import (
     CarriedFindingsError,
     FindingDelivery,

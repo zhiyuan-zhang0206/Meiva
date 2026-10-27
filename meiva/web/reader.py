@@ -18,7 +18,7 @@ from meiva.sdk_surface.pure.media.finding_plan import (
     findings_of,
     model_finding,
 )
-from meiva.sdk_surface.pure.media.injection_plan import finding_source
+from meiva.sdk_surface.pure.media.injection.injection_plan import finding_source
 from meiva.web import deepseek, transport, wire
 from meiva.web.deps import FetchDeps, ReaderProvider
 from meiva.web.errors import FetchError

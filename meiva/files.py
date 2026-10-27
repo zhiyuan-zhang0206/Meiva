@@ -23,7 +23,7 @@ from base.host.atomic_io import write_text_atomic
 from base.log import logger
 from base.paths import workspace_dir
 from meiva.sdk_surface import agent_identity, process_context
-from meiva.sdk_surface.pure.media.attach_plan import resolve_in
+from meiva.sdk_surface.pure.media.attach.attach_plan import resolve_in
 from meiva.sdk_surface.validation import coerce_str, coerce_typed
 from meiva.security import scan_content
 
