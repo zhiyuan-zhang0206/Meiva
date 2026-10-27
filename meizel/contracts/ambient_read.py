@@ -181,18 +181,6 @@ def stale_roots(
     return found
 
 
-def _policy_line(policy: Policy, name: str) -> int:
-    quoted = f'"{name}"'
-    return next(
-        (
-            number
-            for number, text in enumerate(policy.lines, 1)
-            if quoted in text and not text.lstrip().startswith("#")
-        ),
-        1,
-    )
-
-
 # meiva:note
 # The policy's reader entries as `dotted name -> kind`: the calls (`name()`) or the bare names, which
 # acquire where they are imported or read as an attribute.
@@ -215,7 +203,7 @@ def reader_problems(policy: Policy) -> list[Diagnostic]:
     for kind in AmbientKind:
         for name in policy.reasons(_READERS, kind.value):
             where = f"[{_READERS}.{kind.value}] {name!r}"
-            line = _policy_line(policy, name)
+            line = policy.line_of(name)
             if "." not in name.removesuffix(_CALL_MARK):
                 message = (
                     f"{where} must be qualified, as in `pkg.module.name()` or `pkg.module.NAME`"
@@ -318,7 +306,7 @@ def stale_readers(universe: Universe, policy: Policy) -> list[Diagnostic]:
                 found.append(
                     Diagnostic(
                         POLICY,
-                        _policy_line(policy, name),
+                        policy.line_of(name),
                         Code.STALE_READER,
                         f"[{_READERS}.{kind.value}] {name!r} {problem}",
                         ("remove the entry, or fix the name if the function moved",),

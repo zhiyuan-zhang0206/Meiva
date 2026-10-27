@@ -83,6 +83,7 @@ class Code(StrEnum):
     FAKE_ENTROPY = "fake-entropy"
     STALE_ROOT = "stale-root"
     STALE_READER = "stale-reader"
+    STALE_APPROVAL = "stale-approval"
     IMPURE_EDGE = "impure-edge"
     IMPURE_CALL = "impure-call"
     UNFROZEN_VALUE = "unfrozen-value"

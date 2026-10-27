@@ -19,13 +19,13 @@ from __future__ import annotations
 
 import tomllib
 from collections import Counter
-from collections.abc import Mapping
+from collections.abc import Collection, Mapping
 from dataclasses import replace
 from pathlib import Path
 from typing import TypeGuard
 
 from meizel.allowances import RETIRED_AMBIENT_SECTIONS, Policy
-from meizel.contracts.analysis import Analysis, analyze
+from meizel.contracts.analysis import Analysis, analyze, load_policy
 from meizel.contracts.debt import total
 from meizel.contracts.debt_edit import prune as prune_debt
 from meizel.contracts.debt_edit import record
@@ -33,7 +33,7 @@ from meizel.contracts.debt_report import Baselines, changed_under, read_baseline
 from meizel.contracts.declare import declare
 from meizel.contracts.manifest import Manifest, Root, load_manifests, manifest_path
 from meizel.contracts.manifest_text import set_scope
-from meizel.contracts.sync import prepare_policy_snapshot, prune
+from meizel.contracts.sync import prepare_policy_snapshot, prune, with_table
 from meizel.graph.model import AmbientKind, Code, MeizelError
 from meizel.graph.universe import EditPlan, GitRepo, Universe, load_universe, parent_of
 from meizel.language.scan import invalidate_policy_caches
@@ -54,6 +54,8 @@ _UNREADABLE = frozenset(
     }
 )
 _DEBT_ROWS = 5
+_EVERY_KIND = "*"
+_APPROVED = "approved-patches.files"
 
 
 class RuleDiff:
@@ -125,7 +127,8 @@ def _totals(baselines: Baselines) -> Counter[str]:
 # reads a root declaration of the base was hiding: a file whose `[roots]` entry the change removes
 # shows its reads, and recording them is the honest way to remove the entry (the base's roots are
 # kept when it is regenerated, so it never finds them). Only a kind the change took from the entry
-# is let through, for the file of that entry.
+# is let through, for the file of that entry. A file whose approval of patches the change removes
+# is let through whole, for the same reason: its patches are recorded as debt now.
 def _excess(
     tree: Baselines, found: Baselines, unmasked: Mapping[tuple[str, str], frozenset[str]]
 ) -> list[tuple[str, str, str, int, int]]:
@@ -136,17 +139,21 @@ def _excess(
                 want = found.get(owner, {}).get(code, {}).get(key, 0)
                 file, _, what = key.partition("#")
                 kind = what.split(" ", 1)[0]
-                if have > want and kind not in unmasked.get((owner, file), frozenset()):
+                lifted = unmasked.get((owner, file), frozenset())
+                if have > want and kind not in lifted and _EVERY_KIND not in lifted:
                     out.append((owner or ".", code.value, key, have, want))
     return out
 
 
 # meiva:note
-# The kinds the change takes away from a `[roots]` entry of the base, per (directory, file).
+# The kinds the change takes away from a `[roots]` entry of the base, per (directory, file), and the
+# files whose approval of patches (`lifted`) it removes, for every kind.
 def unmasked_reads(
-    base: Mapping[str, Manifest], tree: Mapping[str, Manifest]
+    base: Mapping[str, Manifest], tree: Mapping[str, Manifest], lifted: Collection[str] = ()
 ) -> dict[tuple[str, str], frozenset[str]]:
-    freed: dict[tuple[str, str], frozenset[str]] = {}
+    freed: dict[tuple[str, str], frozenset[str]] = {
+        (parent_of(path), path.rpartition("/")[2]): frozenset({_EVERY_KIND}) for path in lifted
+    }
     for directory, manifest in base.items():
         now = tree.get(directory)
         for name, root in manifest.roots.items():
@@ -359,6 +366,17 @@ def _sync_rule_files(root: Path, ref: str, base_root: Path) -> set[str]:
     return copied
 
 
+# meiva:note
+# The base's own approvals of patches, over the policy copied from the head: a change that approves
+# a file does not get its patches judged as approved while the base's content is regenerated, so the
+# growth it hides shows (as a decrease of the tree below it, never as a rule change).
+def _keep_approvals(repo: GitRepo, approved: Mapping[str, str]) -> None:
+    old = repo.load_text("meizel.policy.toml", default="")
+    new = with_table(old, _APPROVED, approved)
+    if new != old:
+        EditPlan(writes={repo.root / "meizel.policy.toml": new}).apply()
+
+
 def _scope_text(
     text: str, manifest: Manifest | None, baseline: Manifest, known: frozenset[str]
 ) -> str:
@@ -382,16 +400,21 @@ def _scope_text(
 
 
 # meiva:note
-# Rule code and purity scope use the head. Ambient permissions stay the base's own prepared
+# Rule code and purity scope use the head. The approvals of patches stay the base's. Ambient permissions stay the base's own prepared
 # facts, including when a checker manifest is copied with the rule code. All scope edits use
 # this existing manifest effect loop rather than a second migration writer.
 def _sync_purity_scope(
-    root: Path, ref: str, base_root: Path, original: dict[str, Manifest]
+    root: Path,
+    ref: str,
+    base_root: Path,
+    original: dict[str, Manifest],
+    approved: Mapping[str, str],
 ) -> None:
     tree_manifests, _ = load_manifests(load_universe(root))
     copied = _sync_rule_files(root, ref, base_root)
-    invalidate_policy_caches()
     base_repo = GitRepo(base_root)
+    _keep_approvals(base_repo, approved)
+    invalidate_policy_caches()
     base_repo.stage_all()
     base_universe = load_universe(base_root)
     known = base_universe.files | base_universe.dirs
@@ -427,8 +450,11 @@ def rule_diff(root: Path, ref: str, base: Counter[str], jobs: int | None = None)
             if Path(path).name == "ambient_roots.toml"
         }
         baseline = _ambient_snapshot(universe, historical, manifests, registries)
-        _sync_purity_scope(root, ref, checkout, baseline)
+        approved = historical.reasons("approved-patches", "files")
+        _sync_purity_scope(root, ref, checkout, baseline, approved)
         found = regenerated(checkout, ref, jobs)
     tree_universe = load_universe(root)
-    freed = unmasked_reads(baseline, load_manifests(tree_universe)[0])
+    kept, _ = load_policy(tree_universe)
+    lifted = approved.keys() - kept.reasons("approved-patches", "files").keys()
+    freed = unmasked_reads(baseline, load_manifests(tree_universe)[0], lifted)
     return RuleDiff(base, found, read_baselines(tree_universe), ref, freed)

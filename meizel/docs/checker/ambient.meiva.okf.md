@@ -21,10 +21,11 @@ recording each point where a file reaches the world and asking its directory man
 file is allowed to.
 
 The rule governs the `application`, `templates`, `tooling` and `frontend` roles
-for both Python and TypeScript. Both languages use the same `[state]` and `[roots]`
-manifest entries. TypeScript acquisition uses compiler bindings for imports and
-shadowing; its built-in spellings include `process.env`, `process.cwd()`,
-`Date.now()`, zero-argument `new Date()`, `Math.random()` and Node/DOM crypto calls.
+in Python and TypeScript, with the same `[state]` and `[roots]` entries. TypeScript acquisition uses compiler bindings for imports and
+shadowing; its built-in spellings include `process.env` (also `process.env[name]`), `process.cwd()`,
+`Date.now()`, zero-argument `new Date()`, `Math.random()`, crypto calls and the browser's `location`,
+`localStorage`, `sessionStorage`, `document.cookie`, `navigator`, `matchMedia`. In `ui/web/src`,
+`process.env.NEXT_PUBLIC_<NAME>` is a constant of the build, not a read.
 
 ## Kinds
 
@@ -51,8 +52,8 @@ the helper is named (`_pause()` that sleeps). A function without parameters that
 the reading, recorded as `_monotonic()`. `loop.time()` on `get_running_loop()` or a `loop`,
 `_loop` or `event_loop` is an interval clock. The wall clock is always one.
 
-A call that reads the world only when it is given nothing (`time.localtime()`, `time.strftime(fmt)`,
-`psutil.Process()`) is an acquisition then, and describes a value it was handed otherwise.
+A call that reads the world only when given nothing (`time.localtime()`, `time.strftime(fmt)`,
+`psutil.Process()`) is an acquisition then; given a value it describes that value.
 
 A `random.Random` constructor has an independent seed only when its positional seed or `x=`
 argument is a non-None literal, including zero or an empty string/bytes value. Missing seeds,

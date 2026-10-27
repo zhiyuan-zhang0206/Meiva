@@ -179,6 +179,10 @@ def _add_debt_parser(commands: argparse._SubParsersAction[argparse.ArgumentParse
     )
     listing.add_argument("--json", dest="as_json", action="store_true", help="print JSON")
     listing.add_argument("paths", nargs="*", help="only files under these paths")
+    approving = modes.add_parser(
+        "approved", help="list the files approved to patch, with the patches each holds now"
+    )
+    approving.add_argument("--json", dest="as_json", action="store_true", help="print JSON")
     growth = modes.add_parser("diff", help="compare recorded totals with a git ref")
     growth.add_argument("--against", required=True, metavar="ref")
     growth.add_argument("--on-growth", required=True, choices=["fail", "warn"])

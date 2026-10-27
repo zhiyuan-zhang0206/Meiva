@@ -86,6 +86,14 @@ DEFAULT_TS_IMPURE_HOOKS: frozenset[str] = frozenset(
 )
 
 
+# meiva:note
+# Next.js replaces `process.env.NEXT_PUBLIC_<NAME>` with the value the build saw, in every file it
+# bundles, so there the expression is a constant of the build and the program never reads the
+# environment. A file outside these roots (a config, a script, a test) is not bundled and reads it.
+INLINED_ENV_PREFIX = "NEXT_PUBLIC_"
+INLINED_ENV_ROOTS: tuple[str, ...] = ("ui/web/src/",)
+
+
 @dataclass(frozen=True, slots=True)
 class TsConfig:
     scopes: tuple[str, ...]
@@ -97,6 +105,8 @@ class TsConfig:
     max_public_symbols: int
     max_params: int
     max_attr_hops: int
+    inlined_env_prefix: str
+    inlined_env_roots: tuple[str, ...]
 
 
 def _policy_int(policy: Policy, section: str, default: int) -> int:
@@ -133,4 +143,6 @@ def load_ts_config(policy: Policy) -> TsConfig:
         max_public_symbols=_policy_int(policy, "max-public-symbols", 6),
         max_params=_policy_int(policy, "max-params", 6),
         max_attr_hops=_policy_int(policy, "max-attr-hops", 3),
+        inlined_env_prefix=INLINED_ENV_PREFIX,
+        inlined_env_roots=INLINED_ENV_ROOTS,
     )

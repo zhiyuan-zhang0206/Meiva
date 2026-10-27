@@ -16,7 +16,15 @@ from meizel.contracts.debt import PATCH_CODES
 from meizel.graph.model import Code, MeizelError, Sources
 from meizel.graph.universe import Universe
 
-__all__ = ["Site", "format_sites", "sites", "target_under"]
+__all__ = [
+    "Approval",
+    "Site",
+    "approved",
+    "format_approved",
+    "format_sites",
+    "sites",
+    "target_under",
+]
 
 
 # meiva:note
@@ -84,4 +92,38 @@ def format_sites(found: list[Site], *, as_json: bool) -> str:
     lines = [f"{s.path}:{s.line}: {s.form} {s.target}" for s in found]
     files = len({s.path for s in found})
     lines.append(f"meizel: {_count(len(found), 'site')} in {_count(files, 'file')}")
+    return "\n".join(lines)
+
+
+@dataclass(frozen=True, slots=True)
+class Approval:
+    path: str
+    sites: int
+    why: str
+
+
+# meiva:note
+# The files the policy approves to patch, each with its reason and the patches it holds now. These
+# are not debt and no manifest records them: this is the list a reviewer reads to see them grow.
+def approved(universe: Universe, jobs: int | None = None) -> list[Approval]:
+    policy, problems = load_policy(universe)
+    if problems:
+        raise MeizelError(problems[0].render())
+    listed = policy.reasons("approved-patches", "files")
+    present = [path for path in listed if path in universe.files]
+    scans = scan_all(universe, Sources(), jobs, present, policy=policy)
+    return [
+        Approval(path, len(scans[path].patches) if path in scans else 0, why)
+        for path, why in sorted(listed.items())
+    ]
+
+
+def format_approved(found: list[Approval], *, as_json: bool) -> str:
+    if as_json:
+        return json.dumps([asdict(item) for item in found], indent=2)
+    lines = [f"{item.path}: {_count(item.sites, 'site')} -- {item.why}" for item in found]
+    total = sum(item.sites for item in found)
+    lines.append(
+        f"meizel: {_count(total, 'patch site')} in {_count(len(found), 'approved file')}, not recorded as debt"
+    )
     return "\n".join(lines)

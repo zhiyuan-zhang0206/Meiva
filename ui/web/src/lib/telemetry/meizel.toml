@@ -15,3 +15,7 @@ exports = ["nav-timing.ts", "telemetry-page-view.tsx", "telemetry.ts"]
 "nav-timing-plan.ts" = "strict"
 "telemetry-plan.ts" = "strict"
 "web-vitals-plan.ts" = "strict"
+
+[debt.ambient-read]
+"nav-timing.ts#environ window.location" = 2
+"telemetry.ts#platform navigator" = 1

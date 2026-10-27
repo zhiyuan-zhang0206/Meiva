@@ -4,6 +4,9 @@
 export function semantics(ts, context, tree, out, index, config, test, ambientPolicy) {
   const checker = context.checker;
   const impure = new Set(config.impure_calls);
+  // meiva:note
+  // The page and the browser the code runs in: its address, the storage it keeps, the cookies and the machine it reports.
+  const browserReads = {'window.location': 'environ', 'document.location': 'environ', 'globalThis.location': 'environ', 'location': 'environ', 'window.localStorage': 'environ', 'globalThis.localStorage': 'environ', 'localStorage': 'environ', 'window.sessionStorage': 'environ', 'globalThis.sessionStorage': 'environ', 'sessionStorage': 'environ', 'document.cookie': 'environ', 'window.navigator': 'platform', 'globalThis.navigator': 'platform', 'navigator': 'platform', 'window.matchMedia': 'platform', 'globalThis.matchMedia': 'platform', 'matchMedia': 'platform'};
   const hooks = new Set(config.impure_hooks);
   const line = node => tree.getLineAndCharacterOfPosition(node.getStart(tree)).line + 1;
   const column = node => Buffer.byteLength(tree.text.slice(tree.getPositionOfLineAndCharacter(line(node) - 1, 0), node.getStart(tree)), 'utf8');
@@ -62,6 +65,20 @@ export function semantics(ts, context, tree, out, index, config, test, ambientPo
   function effect(node, name) {
     add(node, 'impure-call', `${owner(node)}#${name}`, `\`${owner(node)}\` performs an effectful operation \`${name}\``, 'move I/O, timers and stateful hooks to an explicit boundary');
   }
+  // meiva:note
+  // `process.env.NEXT_PUBLIC_<NAME>` (or the same with a string key) in a file the Next.js build bundles is replaced by a
+  // literal at build time, so it acquires nothing. Only a read counts as inlined: the target of an assignment, `delete`
+  // or `++` stays an environment access, and so does any other way to the environment (`process.env[name]`, a
+  // destructuring of `process.env`, a copy of it) and any file the build does not bundle.
+  function inlinedEnv(node, name) {
+    if (!config.inlined_env_roots.some(root => out.path.startsWith(root))) return false;
+    const prefix = 'process.env.' + config.inlined_env_prefix;
+    if (!name.startsWith(prefix) || !/^\w+$/.test(name.slice(prefix.length).split('.')[0])) return false;
+    const parent = node.parent;
+    const assigned = parent && ts.isBinaryExpression(parent) && parent.left === node && parent.operatorToken.kind >= ts.SyntaxKind.FirstAssignment && parent.operatorToken.kind <= ts.SyntaxKind.LastAssignment;
+    const mutated = parent && (ts.isDeleteExpression(parent) || ((ts.isPrefixUnaryExpression(parent) || ts.isPostfixUnaryExpression(parent)) && [ts.SyntaxKind.PlusPlusToken, ts.SyntaxKind.MinusMinusToken].includes(parent.operator)));
+    return !(assigned || mutated);
+  }
   function acquisition(node, name, called) {
     if (test) return;
     const ref = reference(node);
@@ -69,11 +86,23 @@ export function semantics(ts, context, tree, out, index, config, test, ambientPo
     const source = called && ambientPolicy.calls[qualified] ? qualified : Object.keys(ambientPolicy.names).find(target => qualified === target || qualified.startsWith(target + '.'));
     const configured = source && ((called && ambientPolicy.calls[source]) || ambientPolicy.names[source]);
     if (configured) { out.ambient.push([line(node), configured, source]); return; }
-    const reads = {'process.env': 'environ', 'process.pid': 'pid', 'process.ppid': 'pid', 'process.platform': 'platform', 'process.arch': 'platform'};
+    const reads = {'process.env': 'environ', 'process.pid': 'pid', 'process.ppid': 'pid', 'process.platform': 'platform', 'process.arch': 'platform', ...browserReads};
     const calls = {'Date.now': 'clock', 'Date': 'clock', 'Math.random': 'random', 'crypto.randomUUID': 'random', 'crypto.getRandomValues': 'random', 'crypto.randomBytes': 'random', 'crypto.randomInt': 'random', 'process.cwd': 'cwd', 'os.homedir': 'home', 'os.platform': 'platform', 'os.hostname': 'platform', 'process.getuid': 'pid', 'process.getgid': 'pid'};
     const target = Object.keys(reads).find(key => name === key || name.startsWith(key + '.'));
     const kind = target ? reads[target] : called ? calls[name] : undefined;
-    if (kind) out.ambient.push([line(node), kind, target ?? name]);
+    if (kind && !inlinedEnv(node, name)) out.ambient.push([line(node), kind, target ?? name]);
+  }
+  // meiva:note
+  // The longest part of an access chain that names a global or an import, for `process.env[name]` and `localStorage[key].x`,
+  // where the chain breaks at a computed key and `reference` finds nothing.
+  function readable(node) {
+    let current = transparent(node);
+    while (current) {
+      const ref = reference(current);
+      if (ref?.canonical) return ref;
+      current = ts.isPropertyAccessExpression(current) || ts.isElementAccessExpression(current) ? transparent(current.expression) : undefined;
+    }
+    return undefined;
   }
   function patch(node, ref) {
     if (!test || !ref?.canonical) return;
@@ -196,6 +225,9 @@ export function semantics(ts, context, tree, out, index, config, test, ambientPo
         if (ref?.canonical) {
           acquisition(node, ref.canonical, false);
           if (ref.global && impure.has(ref.root.text) && !ts.isCallExpression(node.parent)) effect(node, ref.root.text);
+        } else {
+          const prefix = readable(node);
+          if (prefix) acquisition(node, prefix.canonical, false);
         }
         const access = chain(node);
         const hops = access ? access.parts.length - (ref?.binding?.member === '' ? 1 : 0) : 0;

@@ -3,8 +3,9 @@
 from __future__ import annotations
 
 import os
+import re
 from collections import defaultdict
-from collections.abc import Collection, Iterable, Sequence
+from collections.abc import Collection, Iterable, Mapping, Sequence
 from concurrent.futures import ProcessPoolExecutor
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -42,6 +43,7 @@ from meizel.language.scan import (
     scan_typescript_files,
     typescript_files,
 )
+from meizel.lint_common import is_test_path
 from meizel.roles import select_packages
 
 __all__ = [
@@ -299,10 +301,79 @@ def _patch_message(patch: Patch) -> str:
     return f"{patch.form} on {_PATCH_WHAT[patch.code]} {patch.target}{suffix}"
 
 
-def _patch_diagnostics(scans: Iterable[FileScan]) -> list[Diagnostic]:
-    """Patching: the dependency was not injected."""
+_TEST_MODULE = re.compile(r"^test_|_test\.py$|\.(?:test|spec)\.")
+
+
+# meiva:note
+# `[approved-patches.files]`: the files that are allowed to patch, each with the reason. A patch is
+# debt: the code under test should take its collaborator instead. A few test-support files patch on
+# purpose, because their job is to keep the suite off the host or to put a child process in a state no
+# parameter can reach: an autouse guard, the entry of a subprocess the test starts, the global setup of
+# the test runner. The policy lists such a file by its path; none of its patches is then judged. Only
+# fixture infrastructure qualifies: production code and test modules never do, so a test that patches
+# is converted, not approved.
+def _approved(policy: Policy) -> dict[str, str]:
+    return policy.reasons("approved-patches", "files")
+
+
+def _approval_refusal(path: str) -> str | None:
+    if not is_test_path(path):
+        return "is production code: approving a patch there would hide a dependency that should be injected"
+    if _TEST_MODULE.search(path.rpartition("/")[2]):
+        return "is a test module: a test that patches is converted, not approved"
+    return None
+
+
+# meiva:note
+# An entry that cannot be approved (production code, a test module), whether the run is partial or whole.
+def _approval_problems(policy: Policy) -> list[Diagnostic]:
+    refused = {path: _approval_refusal(path) for path in _approved(policy)}
+    return [
+        Diagnostic(
+            POLICY,
+            policy.line_of(path),
+            Code.POLICY_SYNTAX,
+            f"[approved-patches.files] {path!r} {refusal}",
+            ("approve only fixture infrastructure: a guard, a subprocess entry, a global setup",),
+        )
+        for path, refusal in refused.items()
+        if refusal is not None
+    ]
+
+
+# meiva:note
+# An approval that approves nothing fails like any other stale allowance: the file is gone, or it
+# patches nothing any more. Only a whole-repository run knows.
+def _stale_approvals(
+    policy: Policy, files: Collection[str], patching: Mapping[str, int]
+) -> list[Diagnostic]:
+    found: list[Diagnostic] = []
+    for path in _approved(policy):
+        if path not in files:
+            problem = "names no tracked file"
+        elif not patching.get(path):
+            problem = "patches nothing any more"
+        else:
+            continue
+        found.append(
+            Diagnostic(
+                POLICY,
+                policy.line_of(path),
+                Code.STALE_APPROVAL,
+                f"[approved-patches.files] {path!r} {problem}",
+                ("remove the entry",),
+            )
+        )
+    return found
+
+
+# meiva:note
+# Patching: the dependency was not injected. A file the policy approves is not judged.
+def _patch_diagnostics(scans: Iterable[FileScan], approved: Collection[str]) -> list[Diagnostic]:
     found: list[Diagnostic] = []
     for scan in scans:
+        if scan.path in approved:
+            continue
         owner = scan.path.rpartition("/")[0]
         for patch in scan.patches:
             hints = list(_PATCH_REASONING.get(patch.code) or (_PATCH_HINT[patch.code],))
@@ -585,7 +656,7 @@ def diagnose(scan: FileScan, manifests: dict[str, Manifest], *, policy: Policy) 
     _, found, _ = _judge_facts(scan.facts, manifests)
     loaders, externals = _declared_loads(manifests), _declared_externals(manifests)
     found.extend(_source_diagnostics([scan], loaders, externals))
-    found.extend(_patch_diagnostics([scan]))
+    found.extend(_patch_diagnostics([scan], _approved(policy)))
     found.extend(ambient_diagnostics([scan], manifests))
     found.extend(_entropy_diagnostics([scan], manifests))
     found.extend(_type_cast_diagnostics([scan]))
@@ -612,6 +683,7 @@ def analyze(
     diagnostics.extend(policy_problems)
     diagnostics.extend(check_policy(manifests, policy))
     diagnostics.extend(reader_problems(policy))
+    diagnostics.extend(_approval_problems(policy))
     root_manifest = manifests.get("")
     diagnostics.extend(check_roles(universe, root_manifest.roles if root_manifest else {}))
     scope = None if changed is None else frozenset(changed)
@@ -634,7 +706,7 @@ def analyze(
     projections, found, needed = _judge_facts(facts, manifests)
     diagnostics.extend(found)
     diagnostics.extend(_source_diagnostics(judged_scans, loaders, externals))
-    diagnostics.extend(_patch_diagnostics(judged_scans))
+    diagnostics.extend(_patch_diagnostics(judged_scans, _approved(policy)))
     diagnostics.extend(ambient_diagnostics(judged_scans, manifests))
     diagnostics.extend(_entropy_diagnostics(judged_scans, manifests))
     diagnostics.extend(_type_cast_diagnostics(judged_scans))
@@ -654,6 +726,9 @@ def analyze(
         diagnostics.extend(_stale_diagnostics(manifests, stale))
         diagnostics.extend(stale_roots(scans, manifests))
         diagnostics.extend(stale_readers(universe, policy))
+        diagnostics.extend(
+            _stale_approvals(policy, universe.files, {p: len(s.patches) for p, s in scans.items()})
+        )
         diagnostics.extend(paid_strict_to_be(manifests, purity_diags))
     diagnostics.extend(purity_diags)
     diagnostics = _distinct(diagnostics)
