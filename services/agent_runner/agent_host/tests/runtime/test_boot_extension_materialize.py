@@ -56,7 +56,7 @@ def test_boot_lands_a_skill_this_machine_never_installed(
         "this machine must start without it, or the test proves nothing"
     )
 
-    land_cluster_extensions(database)
+    land_cluster_extensions(database, home=unit_home)
 
     assert (paths.skills_dir(paths.meiva_home()) / "boot-demo" / "SKILL.md").read_text(
         encoding="utf-8"
@@ -70,7 +70,7 @@ def test_an_unreadable_registry_does_not_stop_the_boot(unit_home: Path, database
         dataclasses.replace(database._config, db_url="postgresql://127.0.0.1:1/meiva"),
         gate=database._gate,
     )
-    land_cluster_extensions(unreachable)
+    land_cluster_extensions(unreachable, home=unit_home)
 
     assert not (unit_home / "skills").exists()
 
@@ -79,9 +79,9 @@ def test_the_hosted_daemon_lands_them_once_per_process() -> None:
     from services.agent_runner.agent_host.daemon import run
 
     src = inspect.getsource(run)
-    assert src.index("init_process_scope(") < src.index("land_cluster_extensions(db)")
+    assert src.index("init_process_scope(") < src.index("land_cluster_extensions(db, home=home)")
     assert "load_process_extensions" not in src, "the plugin load is `load_extensions` alone"
-    assert src.count("land_cluster_extensions(db)") == 1, (
+    assert src.count("land_cluster_extensions(db, home=home)") == 1, (
         "once per process — a second call would re-hash every skill tree for no gain"
     )
 

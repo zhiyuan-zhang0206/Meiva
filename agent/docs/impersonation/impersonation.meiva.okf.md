@@ -19,7 +19,7 @@ what a supervision pass does, the relay command line) and `notes.py` (the notes 
 takeover writes and their text). `agent/impersonation.py` and
 `agent/impersonation_handoff.py` read the lease, the clocks and the checkpoint,
 call the plan and execute it. A host hands the shells one `TakeoverHost`
-(`agent.impersonation.process_host(machine_name, rng=...)`): its machine name, the root of
+(`agent.impersonation.process_host(local_machine, *, home, rng, clock)`): its machine name, the root of
 the per-agent workspaces, the command that starts a relay, the readiness wait and the
 generator a spawned relay's credential is drawn from (32 bytes, URL-safe base64; the
 agent host's root builds a cryptographically secure one). The shells read neither
