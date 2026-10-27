@@ -92,10 +92,12 @@ from base.paths import workspaces_root
 RELAY_WAIT = RelayWait()
 
 
-def process_host(local_machine: str, *, rng: random.Random, clock: Clock) -> TakeoverHost:
+def process_host(
+    local_machine: str, *, home: Path, rng: random.Random, clock: Clock
+) -> TakeoverHost:
     return TakeoverHost(
         local_machine=local_machine,
-        workspaces_root=workspaces_root(),
+        workspaces_root=workspaces_root(home=home),
         relay_program=(str(Path(sys.executable).with_name("meiva")),),
         rng=rng,
         clock=clock,

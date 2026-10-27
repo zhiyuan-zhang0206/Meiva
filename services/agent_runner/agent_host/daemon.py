@@ -494,7 +494,7 @@ async def run(
             environ=os.environ,
             readiness=PROCESS_RECORDING,
         )
-        land_cluster_extensions(db)
+        land_cluster_extensions(db, home=home)
         local_machine = machine.name()
         await open_host_pools(workload_pool, control_pool)
         if clients is None:
