@@ -23,11 +23,17 @@ repos:
         exclude: ^deploy/otel-collector/otel-collector\.yaml$
       - id: check-toml
       - id: check-merge-conflict
+        # meiva:note
+        # Without --assume-in-merge the hook returns 0 unless the repository is mid-merge,
+        # and a rebase or a cherry-pick leaves no MERGE_HEAD: a file with its conflict markers
+        # still in it was staged and committed (the meiva-cli lane nearly did). Assumed in a
+        # merge, the hook reads the staged files of every commit for the markers.
+        args: [--assume-in-merge]
       # meiva:note
-      # The entry above returns 0 unless the repository is mid-merge, so a conflict
-      # marker that is already committed is invisible to it — that is how #6551
-      # reached CI (task #5494). One rule, one gate: at push time the same hook runs
-      # with --assume-in-merge, so a tree carrying markers cannot leave the machine.
+      # A marker that is already committed is invisible to the entry above, which sees only
+      # the staged files — that is how #6551 reached CI (task #5494). One rule, one gate: at
+      # push time the same hook runs over every file, so a tree carrying markers cannot leave
+      # the machine.
       - id: check-merge-conflict
         alias: check-committed-merge-conflict
         args: [--assume-in-merge]
