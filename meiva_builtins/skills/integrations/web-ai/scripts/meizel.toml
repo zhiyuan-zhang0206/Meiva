@@ -14,3 +14,5 @@
 
 [debt.ambient-read]
 "_utils.py#home base.paths.home.resolve_meiva_home" = 1
+"_utils.py#home pathlib.Path.expanduser" = 1
+"webchat.py#home pathlib.Path.expanduser" = 1

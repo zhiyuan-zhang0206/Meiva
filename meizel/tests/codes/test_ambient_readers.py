@@ -283,9 +283,18 @@ def clock_acquired(make_repo: RepoFactory, source: str, extra: dict[str, str] | 
         ),
         ("from lib.clocks import Clock\n\ndef f(c: Clock) -> Clock:\n    return c\n", []),
         ("def SYSTEM():\n    return 1\n\n\nx = SYSTEM()\n", []),
+        ("from lib.clocks import SYSTEM\n", []),
+        (
+            "from lib.clocks import SYSTEM\n\ndef a(c=SYSTEM):\n    return SYSTEM.now() + SYSTEM.now()\n",
+            [("clock", "lib.clocks.SYSTEM")] * 3,
+        ),
+        (
+            "from lib.clocks import SYSTEM\n\nif __name__ == '__main__':\n    print(SYSTEM.now())\n",
+            [("clock", "lib.clocks.SYSTEM")],
+        ),
     ],
 )
-def test_a_bare_name_acquires_where_it_is_imported_or_read_and_a_class_where_it_is_built(
+def test_a_bare_name_acquires_at_each_use_and_a_class_where_it_is_built(
     make_repo: RepoFactory, source: str, expected: list[tuple[str, str]]
 ) -> None:
     assert clock_acquired(make_repo, source) == expected
@@ -295,6 +304,37 @@ def test_a_bare_name_is_followed_through_a_re_export(make_repo: RepoFactory) -> 
     extra = {"lib/__init__.py": "from lib.clocks import SYSTEM\n"}
     found = clock_acquired(make_repo, "import lib\n\nx = lib.SYSTEM.now()\n", extra)
     assert found == [("clock", "lib.SYSTEM")]
+
+
+def test_a_host_built_in_a_file_that_does_not_declare_the_platform_is_judged(
+    make_repo: RepoFactory,
+) -> None:
+    files = {
+        "lib/host.py": "class Host:\n    @classmethod\n    def system(cls):\n        return cls()\n",
+        "lib/meizel.toml": '[roots]\n"host.py" = { kinds = ["platform"], why = "builds the host" }\n',
+        "app/mod.py": "from lib.host import Host\n\nx = Host.system()\n",
+    }
+    root = repo(make_repo, files, {"platform": ["lib.host.Host.system()"]})
+    found = [d for d in diagnostics(root, "ambient-read") if d.path.startswith("app/")]
+    assert [(d.path, d.debt.key if d.debt else None) for d in found] == [
+        ("app/mod.py", "mod.py#platform lib.host.Host.system")
+    ]
+
+
+def test_a_root_that_declares_the_kind_may_use_the_name_at_every_use(
+    make_repo: RepoFactory,
+) -> None:
+    files = {
+        **CLOCKS,
+        "app/mod.py": "from lib.clocks import SYSTEM\n\ndef f(c=SYSTEM):\n    return SYSTEM.now()\n",
+    }
+    root = repo(
+        make_repo,
+        files,
+        NAMES,
+        '[roots]\n"mod.py" = { kinds = ["clock"], why = "the process entry" }\n',
+    )
+    assert [d for d in diagnostics(root, "ambient-read") if d.path.startswith("app/")] == []
 
 
 def test_a_function_that_moved_and_left_a_re_export_is_stale(make_repo: RepoFactory) -> None:
@@ -358,11 +398,25 @@ def test_a_call_imported_through_several_re_exports_is_still_the_reader(
     assert [a.kind.value for a in scan.ambient] == ["environ"]
 
 
+def test_a_chain_of_twelve_modules_is_followed(make_repo: RepoFactory) -> None:
+    root = repo(make_repo, chain(12), {"environ": ["lib.z00.read()"]})
+    scan = analysis_of(root).scans["app/mod.py"]
+    assert [a.kind.value for a in scan.ambient] == ["environ"]
+
+
+def test_the_first_chain_too_long_to_follow_fails_instead_of_going_unseen(
+    make_repo: RepoFactory,
+) -> None:
+    root = repo(make_repo, chain(13), {"environ": ["lib.z00.read()"]})
+    with pytest.raises(MeizelError, match="more than 12"):
+        analysis_of(root)
+
+
 def test_a_chain_of_re_exports_too_long_to_follow_fails_instead_of_going_unseen(
     make_repo: RepoFactory,
 ) -> None:
     root = repo(make_repo, chain(16), {"environ": ["lib.z00.read()"]})
-    with pytest.raises(MeizelError, match="more than 12 modules"):
+    with pytest.raises(MeizelError, match="more than 12 rounds"):
         analysis_of(root)
 
 

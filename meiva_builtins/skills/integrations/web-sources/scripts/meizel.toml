@@ -10,3 +10,4 @@ exports = ["webscrape.py"]
 
 [debt.ambient-read]
 "webscrape.py#home base.paths.home.resolve_meiva_home" = 1
+"webscrape.py#home pathlib.Path.expanduser" = 1

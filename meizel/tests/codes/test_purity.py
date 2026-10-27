@@ -134,6 +134,144 @@ def test_impure_edge_fails_in_strict_and_records_in_strict_to_be(
         ("from pathlib import Path\n\n_is_file = Path.is_file\n", "a.py#Path.is_file"),
         ("import os\n\nread_info = os.stat\n", "a.py#os.stat"),
         ("import time\n\nnap = time.sleep\n", "a.py#time.sleep"),
+        (
+            "def settle(future: object) -> object:\n    return future.resolve()\n",
+            "a.py#Path.resolve",
+        ),
+        (
+            "def hits(spec: object) -> object:\n    return spec.root().glob('*')\n",
+            "a.py#Path.glob",
+        ),
+        ("def look(handle: object) -> object:\n    return handle.open()\n", "a.py#Path.open"),
+        (
+            "from pathlib import Path\n\ndef each(root: Path) -> None:\n"
+            "    for entry in root.iterdir():\n        entry.replace(root)\n",
+            "a.py#Path.replace",
+        ),
+        (
+            "from pathlib import Path\n\ndef each(root: Path) -> None:\n"
+            "    for entry in sorted(root.rglob('*.py')):\n        entry.replace(root)\n",
+            "a.py#Path.replace",
+        ),
+        (
+            "from pathlib import Path\n\ndef each(root: Path) -> list[Path]:\n"
+            "    return [p.replace(root) for p in root.rglob('*.py')]\n",
+            "a.py#Path.replace",
+        ),
+        (
+            "from pathlib import Path\n\nclass Box:\n"
+            "    def __init__(self, root: Path) -> None:\n        self.root = root\n\n"
+            "    def look(self, target: Path) -> None:\n        self.root.replace(target)\n",
+            "a.py#Path.replace",
+        ),
+        (
+            "from dataclasses import dataclass\nfrom pathlib import Path\n\n"
+            "@dataclass(frozen=True)\nclass Box:\n    root: Path\n\n"
+            "    def look(self, target: Path) -> Path:\n        return self.root.replace(target)\n",
+            "a.py#Path.replace",
+        ),
+        (
+            "from pathlib import Path\n\ndef each(paths: list[Path], to: Path) -> None:\n"
+            "    for path in dict.fromkeys(paths):\n        path.replace(to)\n",
+            "a.py#Path.replace",
+        ),
+        (
+            "from pathlib import Path\n\ndef move(p: Path, q: Path) -> None:\n"
+            "    p.joinpath('x').replace(q)\n",
+            "a.py#Path.replace",
+        ),
+        (
+            "from pathlib import Path\n\ndef move(p: Path, q: Path) -> None:\n"
+            "    (p / 'x').replace(q)\n",
+            "a.py#Path.replace",
+        ),
+        (
+            "from pathlib import Path\n\ndef move(p: Path, q: Path) -> None:\n"
+            "    p.relative_to(q).replace(q)\n",
+            "a.py#Path.replace",
+        ),
+        (
+            "from pathlib import Path\n\ndef move(p: Path, q: Path) -> None:\n"
+            "    p.absolute().replace(q)\n",
+            "a.py#Path.replace",
+        ),
+        (
+            "from pathlib import Path\n\ndef move(p: Path, q: Path) -> None:\n"
+            "    p.parent.replace(q)\n",
+            "a.py#Path.replace",
+        ),
+        (
+            "from pathlib import Path\n\ndef move(p: Path, q: Path) -> None:\n"
+            "    p.with_suffix('.bak').replace(q)\n",
+            "a.py#Path.replace",
+        ),
+        (
+            "from pathlib import Path\n\ndef move(p: Path, q: Path) -> None:\n"
+            "    p.with_name('x').replace(q)\n",
+            "a.py#Path.replace",
+        ),
+        (
+            "from pathlib import Path\n\ndef move(p: Path, q: Path) -> None:\n"
+            "    p.with_stem('x').replace(q)\n",
+            "a.py#Path.replace",
+        ),
+        (
+            "from pathlib import Path\n\ndef move(p: Path, q: Path) -> None:\n"
+            "    p.expanduser().replace(q)\n",
+            "a.py#Path.replace",
+        ),
+        (
+            "from pathlib import Path\n\ndef move(p: Path, q: Path) -> None:\n"
+            "    p.resolve().replace(q)\n",
+            "a.py#Path.replace",
+        ),
+        (
+            "from pathlib import Path\n\ndef move(p: Path, q: Path) -> None:\n"
+            "    p.parents[1].replace(q)\n",
+            "a.py#Path.replace",
+        ),
+        (
+            "from pathlib import Path\n\ndef move(q: Path) -> None:\n    Path.home().replace(q)\n",
+            "a.py#Path.replace",
+        ),
+        (
+            "from pathlib import Path\n\ndef later(root: Path) -> list[object]:\n"
+            "    return [entry.stat for entry in root.iterdir()]\n",
+            "a.py#Path.stat",
+        ),
+        (
+            "from pathlib import Path\n\ndef keep(xs: list[Path]) -> list[bool]:\n"
+            "    return list(map(Path.is_file, xs))\n",
+            "a.py#Path.is_file",
+        ),
+        (
+            "import os\nfrom functools import partial\n\nstat_of = partial(os.stat, '.')\n",
+            "a.py#os.stat",
+        ),
+        ("import os\n\ndef f(read: object = os.stat) -> None:\n    return None\n", "a.py#os.stat"),
+        ("_open = open\n", "a.py#open"),
+        (
+            "from pathlib import Path\n\ndef f(p: Path) -> object:\n    return p.stat\n",
+            "a.py#Path.stat",
+        ),
+        ("import os\n\ndef f(a: str, b: str) -> None:\n    os.replace(a, b)\n", "a.py#os.replace"),
+        ("import os\n\ndef f(a: str) -> None:\n    os.remove(a)\n", "a.py#os.remove"),
+        ("import os\n\ndef f(a: str) -> None:\n    os.makedirs(a)\n", "a.py#os.makedirs"),
+        (
+            "import os\n\ndef f(a: str) -> str:\n    return os.path.abspath(a)\n",
+            "a.py#os.path.abspath",
+        ),
+        ("import os\n\ndef f(a: str) -> bool:\n    return os.access(a, 0)\n", "a.py#os.access"),
+        ("import glob\n\ndef f(a: str) -> list[str]:\n    return glob.glob(a)\n", "a.py#glob.glob"),
+        ("import os\n\ndef f(fd: int) -> None:\n    os.fsync(fd)\n", "a.py#os.fsync"),
+        (
+            "import os\n\ndef f(a: str) -> bool:\n    return os.path.lexists(a)\n",
+            "a.py#os.path.lexists",
+        ),
+        (
+            "from pathlib import Path\n\ndef f(p: Path, q: Path) -> None:\n    p.symlink_to(q)\n",
+            "a.py#Path.symlink_to",
+        ),
     ],
 )
 def test_impure_call_catches_effectful_imports_async_and_calls(
@@ -159,6 +297,29 @@ def test_string_replace_is_allowed_in_strict_module(make_repo: RepoFactory) -> N
         }
     )
     assert analysis_of(root).verdict == []
+
+
+@pytest.mark.parametrize(
+    "source",
+    [
+        "def f(rows: list[str]) -> None:\n    for s in rows:\n        s.replace('a', 'b')\n",
+        "def f() -> None:\n    for s in ['a', 'b']:\n        s.replace('a', 'b')\n",
+        "def f(rows: list[str]) -> list[str]:\n    return [s.replace('a', 'b') for s in rows]\n",
+        "class Box:\n    def __init__(self, name: str) -> None:\n        self.name = name\n\n"
+        "    def clean(self) -> str:\n        return self.name.replace('a', 'b')\n",
+        "from pathlib import Path\n\ndef f(p: Path) -> str:\n    return p.name.replace('a', 'b')\n",
+        "from pathlib import Path\n\ndef f(p: Path) -> str:\n    return str(p).replace('a', 'b')\n",
+        "from pathlib import Path\n\ndef f(p: Path) -> list[str]:\n"
+        "    return [s.replace('a', 'b') for s in str(p).split('/')]\n",
+    ],
+)
+def test_replace_on_something_that_is_not_a_path_is_not_a_filesystem_call(
+    make_repo: RepoFactory, source: str
+) -> None:
+    root = make_repo(
+        {"pkg/__init__.py": "", "pkg/a.py": source, "pkg/meizel.toml": 'purity = "strict-to-be"\n'}
+    )
+    assert diagnostics(root, "impure-call") == []
 
 
 def test_unfrozen_value_requires_frozen_dataclass(make_repo: RepoFactory) -> None:
@@ -515,12 +676,15 @@ def test_deep_attr_chain_flags_train_wrecks_and_ignores_module_or_method_chains(
 @pytest.mark.parametrize(
     "source",
     [
-        "def settle(future: object) -> object:\n    return future.resolve()\n",
         "def pick(pattern: object) -> object:\n    return pattern.glob\n",
         "from pathlib import Path\n\njoin = Path.joinpath\n",
         "import os\n\nsep = os.sep\n",
         "import os\n\ndef split(p: str) -> tuple[str, str]:\n    return os.path.split(p)\n",
         "import inspect\n\ndef signature(f: object) -> object:\n    return inspect.signature(f)\n",
+        "def clean(rows: list[str]) -> None:\n    for line in rows:\n        line.replace('a', 'b')\n",
+        "def first(match: object) -> object:\n    return match.group(1)\n",
+        "from pathlib import Path\n\ndef f(p: Path) -> Path:\n    return p.joinpath('a')\n",
+        "def f(box: object) -> object:\n    return box.stat\n",
     ],
 )
 def test_a_pure_look_alike_is_not_an_impure_call(make_repo: RepoFactory, source: str) -> None:
@@ -549,3 +713,49 @@ def test_a_shell_constructor_the_policy_lists_is_an_impure_call(make_repo: RepoF
     )
     keys = [d.debt.key for d in diagnostics(root, "impure-call") if d.debt is not None]
     assert keys == ["a.py#meizel.graph.universe.GitRepo"]
+
+
+@pytest.mark.parametrize(
+    "source",
+    [
+        "from meizel.graph.universe import GitRepo\n\nmake = GitRepo\n",
+        "from meizel.graph.universe import load_universe\n\nload = load_universe\n",
+        "from meizel.graph.universe import GitRepo\n\nR = GitRepo\n\ndef f(root: str) -> object:\n    return R(root)\n",
+        "from functools import partial\nfrom meizel.graph.universe import GitRepo\n\nmake = partial(GitRepo)\n",
+    ],
+)
+def test_a_policy_listed_constructor_named_without_a_call_is_an_impure_call(
+    make_repo: RepoFactory, source: str
+) -> None:
+    root = make_repo(
+        {
+            "meizel.policy.toml": render_policy({}, {})
+            + '\n[purity]\nimpure-calls = ["meizel.graph.universe.GitRepo", "meizel.graph.universe.load_universe"]\n',
+            "pkg/__init__.py": "",
+            "pkg/a.py": source,
+            "pkg/meizel.toml": 'purity = "strict-to-be"\n',
+        }
+    )
+    found = diagnostics(root, "impure-call")
+    assert found
+    assert all(
+        d.debt is not None and d.debt.key.startswith("a.py#meizel.graph.universe.") for d in found
+    )
+
+
+def test_a_shell_constructor_named_in_an_annotation_is_not_an_impure_call(
+    make_repo: RepoFactory,
+) -> None:
+    root = make_repo(
+        {
+            "meizel.policy.toml": render_policy({}, {})
+            + '\n[purity]\nimpure-calls = ["meizel.graph.universe.GitRepo"]\n',
+            "pkg/__init__.py": "",
+            "pkg/a.py": (
+                "from meizel.graph.universe import GitRepo\n\n"
+                "def root_of(repo: GitRepo) -> object:\n    return repo.root\n"
+            ),
+            "pkg/meizel.toml": 'purity = "strict-to-be"\n',
+        }
+    )
+    assert diagnostics(root, "impure-call") == []

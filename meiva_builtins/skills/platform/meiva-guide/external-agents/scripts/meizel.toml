@@ -7,3 +7,8 @@
 "spawn_codex.py" = { kinds = ["clock"], why = "External-agent launcher script stamps the dispatch provenance block with the current UTC time" }
 "spawn_dsh.py" = { kinds = ["clock"], why = "External-agent launcher script tracks polling deadlines with epoch clock and stamps the dispatch provenance block with the current UTC time" }
 "watch_work.py" = { kinds = ["clock", "random"], why = "External-agent watcher script stamps log output, tracks monotonic deadlines, and generates idempotency keys" }
+
+[debt.ambient-read]
+"spawn_claude.py#home pathlib.Path.expanduser" = 1
+"spawn_codex.py#home pathlib.Path.expanduser" = 1
+"spawn_dsh.py#home pathlib.Path.expanduser" = 2

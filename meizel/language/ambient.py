@@ -16,11 +16,14 @@
 from __future__ import annotations
 
 import ast
-from collections.abc import Iterator
+from collections.abc import Iterator, Mapping
+from dataclasses import dataclass, replace
 
 from meizel.graph.imports import Scope
 from meizel.graph.model import (
     INTERVAL_CLOCKS,
+    LOOP_CLOCK,
+    OPEN_CALLS,
     SEEDABLE_GENERATORS,
     Acquisition,
     AmbientKind,
@@ -45,15 +48,56 @@ def _own_nodes(function: ast.FunctionDef | ast.AsyncFunctionDef) -> Iterator[ast
             pending.extend(ast.iter_child_nodes(node))
 
 
-def _sleeps(function: ast.FunctionDef | ast.AsyncFunctionDef) -> bool:
+# meiva:note
+# What the recorder keeps of one function while the file is scanned: whether its own statements
+# sleep, the module-level names it calls, whether it is a one-line wrapper over an interval clock,
+# and the interval-clock readings it makes. Whether a reading counts is decided
+# when the file is done, because a sleep may be a local helper defined further down.
+@dataclass(frozen=True, slots=True)
+class _Frame:
+    name: str
+    top_level: bool
+    sleeps: bool
+    calls: Mapping[str, int]
+    wrapper: bool
+    reads: tuple[Acquisition, ...] = ()
+
+
+def _called_name(callee: ast.expr) -> str:
+    if isinstance(callee, ast.Name):
+        return callee.id
+    return callee.attr if isinstance(callee, ast.Attribute) else ""
+
+
+# meiva:note
+# A call whose name says it waits (`sleep`, `asleep`, `retry_sleep`) is a sleep; so is a call of a
+# function of this module that sleeps. The names a function calls are kept to follow the second.
+def _own_facts(function: ast.FunctionDef | ast.AsyncFunctionDef) -> tuple[bool, dict[str, int]]:
+    sleeps = False
+    calls: dict[str, int] = {}
     for node in _own_nodes(function):
         if isinstance(node, ast.Call):
-            callee = node.func
-            if (isinstance(callee, ast.Name) and callee.id == "sleep") or (
-                isinstance(callee, ast.Attribute) and callee.attr == "sleep"
-            ):
-                return True
-    return False
+            sleeps = sleeps or "sleep" in _called_name(node.func).lower()
+            if isinstance(node.func, ast.Name):
+                calls.setdefault(node.func.id, node.lineno)
+    return sleeps, calls
+
+
+# meiva:note
+# How many arguments a call gives; an unpacked argument or keyword set counts as more than any limit.
+def _given(call: ast.Call) -> int:
+    unpacked = any(isinstance(arg, ast.Starred) for arg in call.args) or any(
+        keyword.arg is None for keyword in call.keywords
+    )
+    return 99 if unpacked else len(call.args) + len(call.keywords)
+
+
+# meiva:note
+# `expanduser()` on a path (`Path("~").expanduser()`) reads the user's home; `os.path.expanduser`
+# is judged by name where it is read.
+def _expands_home(call: ast.Call, callee: str | None) -> bool:
+    func = call.func
+    return isinstance(func, ast.Attribute) and func.attr == "expanduser" and callee is None
 
 
 # meiva:note
@@ -74,35 +118,57 @@ def _ambient_seed(call: ast.Call) -> bool:
 
 # meiva:note
 # Collects the acquisitions of one file as the scanner visits it.
+#
+# An interval clock is a window onto the world only in a function that waits, because then how long
+# to wait next is decided in a loop; so its readings are held by the function and counted when the
+# file is done and the functions that wait are known: one that calls `sleep` or a name that contains
+# it, and one that calls a function of the module that does. A module-level function that is only
+# `return time.monotonic()` is a clock, and a call of it in a function that waits is a reading.
 class AmbientRecorder:
     def __init__(self, sources: Sources) -> None:
         self.sources = sources
         self.items: list[Acquisition] = []
-        self._waiting: list[bool] = []
+        self._open: list[_Frame] = []
+        self._reads: list[list[Acquisition]] = []
+        self._done: list[_Frame] = []
 
-    def enter(self, function: ast.FunctionDef | ast.AsyncFunctionDef) -> None:
-        self._waiting.append(_sleeps(function))
+    def enter(
+        self, function: ast.FunctionDef | ast.AsyncFunctionDef, *, top_level: bool = False
+    ) -> None:
+        sleeps, calls = _own_facts(function)
+        self._open.append(_Frame(function.name, top_level, sleeps, calls, wrapper=False))
+        self._reads.append([])
 
-    def leave(self) -> None:
-        self._waiting.pop()
+    def leave(self, *, wrapper: bool = False) -> None:
+        frame = replace(self._open.pop(), wrapper=wrapper, reads=tuple(self._reads.pop()))
+        self._done.append(frame)
 
     def _add(self, line: int, kind: AmbientKind, target: str) -> None:
         self.items.append(Acquisition(line, kind, target))
+
+    def _interval(self, line: int, target: str) -> None:
+        if self._reads:
+            self._reads[-1].append(Acquisition(line, AmbientKind.CLOCK, target))
 
     # meiva:note
     # A name imported with `from ... import`: state acquired where it is brought in.
     def imported(self, origin: str, line: int) -> None:
         kind = self.sources.names.get(origin)
-        if kind is not None:
+        if kind is not None and origin not in self.sources.uses:
             self._add(line, kind, origin)
 
     # meiva:note
     # A name or attribute chain read in code. `bound` is the origin of its first name.
     def used(self, dotted: str, bound: str, line: int) -> None:
+        if bound in self.sources.uses:
+            self._add(line, self.sources.names[bound], bound)
+            return
         found = stdlib_kind(dotted)
         if found is not None:
             kind, target = found
-            if target not in INTERVAL_CLOCKS or (self._waiting and self._waiting[-1]):
+            if target in INTERVAL_CLOCKS:
+                self._interval(line, target)
+            else:
                 self._add(line, kind, target)
             return
         parts = dotted.split(".")
@@ -113,12 +179,51 @@ class AmbientRecorder:
                 self._add(line, kind, prefix)
                 return
 
-    def called(self, callee: str | None, call: ast.Call) -> None:
+    def called(self, callee: str | None, call: ast.Call, *, loop_clock: bool = False) -> None:
         if callee is not None and callee in SEEDABLE_GENERATORS and _ambient_seed(call):
             self._add(call.lineno, AmbientKind.RANDOM, callee)
+        if loop_clock:
+            self._interval(call.lineno, LOOP_CLOCK)
+        open_call = None if callee is None else OPEN_CALLS.get(callee)
+        if open_call is not None and callee is not None and _given(call) <= open_call[1]:
+            self._add(call.lineno, open_call[0], f"{callee}()")
+        if _expands_home(call, callee):
+            self._add(call.lineno, AmbientKind.HOME, "pathlib.Path.expanduser")
         kind = None if callee is None else self.sources.calls.get(callee)
         if kind is not None and callee is not None:
             self._add(call.lineno, kind, callee)
+
+    # meiva:note
+    # The acquisitions of the file once every function is known. The functions of the module that
+    # wait are closed under calls: `_pause()` that sleeps makes its callers wait.
+    def finish(self) -> list[Acquisition]:
+        local = {frame.name: frame for frame in self._done if frame.top_level}
+        waiting = _closure_of_waiters(local)
+        clocks = {name for name, frame in local.items() if frame.wrapper and len(frame.reads) == 1}
+        for frame in self._done:
+            if frame.sleeps or waiting.intersection(frame.calls):
+                self.items.extend(frame.reads)
+                self.items.extend(
+                    Acquisition(line, AmbientKind.CLOCK, f"{name}()")
+                    for name, line in frame.calls.items()
+                    if name in clocks
+                )
+        self.items.sort(key=lambda found: (found.line, found.kind.value, found.target))
+        return self.items
+
+
+# meiva:note
+# The module-level functions that wait: those that sleep, and those that call one that waits.
+def _closure_of_waiters(local: Mapping[str, _Frame]) -> set[str]:
+    waiting = {name for name, frame in local.items() if frame.sleeps}
+    grew = True
+    while grew:
+        grew = False
+        for name, frame in local.items():
+            if name not in waiting and waiting.intersection(frame.calls):
+                waiting.add(name)
+                grew = True
+    return waiting
 
 
 def _name_of(target: ast.expr) -> str:
@@ -144,10 +249,32 @@ class AmbientAccess(PatchForms):
     def entropy_enter(self) -> None:
         self.entropy_marked.append(False)
 
+    def record_call(self, callee: str | None, call: ast.Call) -> None:
+        self.ambient.called(callee, call, loop_clock=fake_entropy.is_loop_clock(call, self.dotted))
+
+    # meiva:note
+    # The clock a function is a one-line wrapper over, judged with the names of its own scope. Only a
+    # module-level function or a method can be called by name from the rest of the file.
+    def clock_wrapper(
+        self,
+        function: ast.FunctionDef | ast.AsyncFunctionDef,
+        inner: Scope,
+        *,
+        top_level: bool,
+        method: bool,
+    ) -> str | None:
+        if not (self.records_ambient and (top_level or method)):
+            return None
+        outer, self.scope = self.scope, inner
+        try:
+            return fake_entropy.wrapper_clock(function, self.dotted, method=method)
+        finally:
+            self.scope = outer
+
     def entropy_touch(self, callee: str | None, call: ast.Call) -> None:
         func = call.func
         if (
-            callee in fake_entropy.ENTROPY_CLOCKS
+            callee in INTERVAL_CLOCKS
             or fake_entropy.is_loop_clock(call, self.dotted)
             or (callee is None and isinstance(func, ast.Name) and func.id in ("id", "next"))
         ):
@@ -158,20 +285,15 @@ class AmbientAccess(PatchForms):
         function: ast.FunctionDef | ast.AsyncFunctionDef,
         inner: Scope,
         *,
-        top_level: bool,
-        method: bool,
+        clock: str | None,
     ) -> None:
         marked = self.entropy_marked.pop()
         if not self.records_ambient:
             return
         if marked and function.name not in ("__repr__", "__str__"):
             self.entropy_scopes.append((function.body, inner))
-        if top_level or method:
-            outer, self.scope = self.scope, inner
-            clock = fake_entropy.wrapper_clock(function, self.dotted, method=method)
-            self.scope = outer
-            if clock is not None:
-                self.entropy_wrappers.append((function.name, function.lineno))
+        if clock is not None and function.name.startswith("_"):
+            self.entropy_wrappers.append((function.name, function.lineno))
 
     def _counter_names(self) -> frozenset[str]:
         names: set[str] = set()

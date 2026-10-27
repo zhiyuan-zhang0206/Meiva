@@ -16,3 +16,6 @@ exports = ["__init__.py", "__main__.py", "choices.py", "fleet_gate.py", "fleet_v
 
 [roots]
 "__main__.py" = { kinds = ["clock", "environ"], why = "The executable composition root reads the caller environment and invocation timestamp once and passes them explicitly to main and the command shells" }
+
+[debt.ambient-read]
+"fleet_verify.py#clock time.monotonic" = 2

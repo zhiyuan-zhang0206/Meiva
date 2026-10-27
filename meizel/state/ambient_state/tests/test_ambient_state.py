@@ -8,6 +8,7 @@ import pytest
 
 from meizel.state import ambient_state
 from meizel.state.ambient_state import allowlist as allow
+from meizel.state.ambient_state.module import Module
 
 
 def _write(root: pathlib.Path, name: str, content: str) -> pathlib.Path:
@@ -572,3 +573,14 @@ def test_declared_fields_are_not_shared_state_but_a_classvar_is(tmp_path: pathli
             A = {}
     """
     assert _sites(tmp_path, source) == {"class-level-container:Config.registry": 1}
+
+
+def test_a_repo_module_is_a_python_file_or_a_directory_whatever_it_holds(
+    tmp_path: pathlib.Path,
+) -> None:
+    (tmp_path / "pkg" / "empty").mkdir(parents=True)
+    (tmp_path / "pkg" / "binary.py").write_bytes(b"\xff\xfe not utf-8")
+    module = Module(ast.parse(""), "pkg/here.py", tmp_path)
+    assert module.is_repo_module("pkg.empty")
+    assert module.is_repo_module("pkg.binary")
+    assert not module.is_repo_module("pkg.absent")

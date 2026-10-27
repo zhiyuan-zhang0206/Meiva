@@ -13,3 +13,4 @@ exports = ["daemon.py", "service.py", "shutdown_budget.py"]
 
 [debt.ambient-read]
 "daemon.py#environ base.native_process.child_env.inherited_process_env" = 1
+"service.py#clock asyncio.loop.time" = 4

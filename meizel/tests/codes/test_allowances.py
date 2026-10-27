@@ -68,6 +68,17 @@ def test_the_repository_policy_is_well_formed() -> None:
     assert problems == []
 
 
+# meiva:note
+# `Clock.from_settings()` builds the process clock from the process settings: the read the root
+# declares is `settings`, and the clock it returns runs on the system timers, so it is not a second
+# declaration of `clock`. Taking it out of `settings` would put the declarations of its callers back.
+def test_the_process_clock_constructor_is_a_settings_read() -> None:
+    policy = allowances.load(ROOT)
+    reader = "base.clock.Clock.from_settings()"
+    assert reader in policy.reasons("ambient-readers", "settings")
+    assert reader not in policy.reasons("ambient-readers", "clock")
+
+
 def test_no_rule_code_holds_an_exemption_of_its_own() -> None:
     policy = allowances.load(ROOT)
     exempt = {name for entries in policy.listed.values() for name in entries if "/" in name}

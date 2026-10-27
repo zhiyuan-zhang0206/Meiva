@@ -178,3 +178,22 @@ def test_missing_allowlist_errors_is_clean_for_an_existing_path(tmp_path: pathli
         decisions.missing_allowlist_errors(tmp_path, decisions_map={"fake-decision": decision})
         == []
     )
+
+
+def test_missing_allowlist_errors_counts_an_undecodable_file_as_present(
+    tmp_path: pathlib.Path,
+) -> None:
+    binary = tmp_path / "gateway" / "binary.py"
+    binary.parent.mkdir(parents=True)
+    binary.write_bytes(b"\xff\xfe not utf-8")
+    decision = decisions.Decision(
+        owners=frozenset(),
+        find=lambda _tree, _roots: [],
+        fix="use the owner",
+        allowed={"gateway/binary.py": "historical exemption"},
+    )
+
+    assert (
+        decisions.missing_allowlist_errors(tmp_path, decisions_map={"fake-decision": decision})
+        == []
+    )
