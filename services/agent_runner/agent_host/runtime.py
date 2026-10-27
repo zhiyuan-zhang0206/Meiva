@@ -374,6 +374,7 @@ async def build_runtime(
     keys: ProviderKeys,
     llm_override: str,
     permissions_notice_key: UUID,
+    home: Path,
     harness: Harness = Harness.MEIVA,
     registry: SessionRegistry | None = None,
     registrations: RegistrationStore | None = None,
@@ -392,6 +393,7 @@ async def build_runtime(
         keys=keys,
         llm_override=llm_override,
         permissions_notice_key=permissions_notice_key,
+        home=home,
     )
     return AgentRuntime(
         fingerprint=fingerprint,

@@ -48,6 +48,7 @@ def isolated() -> None:
     apply_per_agent_eval_isolation(
         agent_id=417,
         default_reader=defaults(agent__eval_isolation=True, agent__eval_network_allowlist=[]),
+        home=resolve_meiva_home(),
     )
 
     assert not hasattr(meiva, "web")
@@ -73,6 +74,7 @@ def network_allowlist() -> None:
     apply_per_agent_eval_isolation(
         agent_id=418,
         default_reader=defaults(agent__eval_isolation=True, agent__eval_network_allowlist=["web"]),
+        home=resolve_meiva_home(),
     )
 
     assert hasattr(meiva, "web")
@@ -88,6 +90,7 @@ def missing_agent() -> None:
         apply_per_agent_eval_isolation(
             agent_id=None,
             default_reader=defaults(agent__eval_isolation=True, agent__eval_network_allowlist=[]),
+            home=resolve_meiva_home(),
         )
     except RuntimeError as error:
         assert "agent identity" in str(error)
@@ -101,7 +104,9 @@ def off() -> None:
     process_context.bind_context(MeivaContext(meiva_home=resolve_meiva_home()))
     original_path = meiva.memory.PATH
     apply_per_agent_eval_isolation(
-        agent_id=None, default_reader=defaults(agent__eval_isolation=False)
+        agent_id=None,
+        default_reader=defaults(agent__eval_isolation=False),
+        home=resolve_meiva_home(),
     )
 
     assert hasattr(meiva, "web")

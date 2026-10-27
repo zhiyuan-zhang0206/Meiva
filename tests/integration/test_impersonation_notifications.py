@@ -40,6 +40,7 @@ from base.events.live.bus import EventBus
 from base.events.live.redis_listener import RedisInboundListener
 from base.host.env.agent_slices import AgentSlices
 from base.native_process.runtime_incarnation import RuntimeIncarnation
+from base.paths import resolve_meiva_home
 from cli.commands.agents import impersonation_relay as relay
 from cli.commands.agents.impersonation_adapters import ClaudeStdout
 from cli.commands.agents.relay.steps import RelayTuning
@@ -335,7 +336,12 @@ async def test_termination_notices_precede_resurrection_in_native_claim(
         runtime.context.relays,
         incarnation=successor,
         timestamps=TimestampSource(clock=Clock.from_settings(), timestamps_enabled=False),
-        host=process_host(machine_identity.name(), rng=_rng(), clock=Clock.from_settings()),
+        host=process_host(
+            machine_identity.name(),
+            rng=_rng(),
+            clock=Clock.from_settings(),
+            home=resolve_meiva_home(),
+        ),
     )
     resumed = await claim_node(
         BaseAgentState(), runtime, {"configurable": {"thread_id": str(owner.agent_id)}}
