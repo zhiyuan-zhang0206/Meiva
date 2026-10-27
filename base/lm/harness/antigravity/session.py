@@ -33,8 +33,9 @@ from base.lm.harness.base_session import (
     add_cost,
 )
 from base.lm.harness.events import (
-    SessionFaulted,
+    SessionFailed,
     TurnCompleted,
+    UnsolicitedOutput,
     Usage,
 )
 from base.lm.harness.handoff import Handoff
@@ -81,6 +82,13 @@ class AgySession(BaseHarnessSession[AntigravityConfig]):
         self._transport: AgyTransport | None = None
         self._retired: AgyTransport | None = None
         self._step_text: dict[int, list[str]] = {}
+        # meiva:note
+        # `agy` names no turns, so the only thing that can tell this session's result
+        # from one it never asked for is whether it wrote a turn out and has not seen
+        # that turn end. The name is set before the write, so a `result` that races
+        # the send still has an owner (#5664).
+        # meiva:link base/lm/harness/docs/attribution.meiva.okf.md
+        self._sent_turn: str | None = None
         self._turn_steps: list[Usage] = []
 
     async def start(self, *, resume: str | None = None, handoff: Handoff | None = None) -> None:
@@ -100,6 +108,7 @@ class AgySession(BaseHarnessSession[AntigravityConfig]):
         if self._closed:
             return
         self._closed = True
+        self._sent_turn = None
         self._fail_pending(SessionClosedError("session closed"))
         await self._close_tasks()
         transport, self._transport = self._transport, None
@@ -201,8 +210,10 @@ class AgySession(BaseHarnessSession[AntigravityConfig]):
             transport = await self._ensure_transport()
             self._baseline = snapshot(self._probe, transport.pid)
             self._start_deadline(ticket)
+            self._sent_turn = ticket.turn_id
             await transport.send(ticket.text)
         except (TransportClosedError, OSError, RuntimeError) as exc:
+            self._sent_turn = None
             self._fail_turn(ticket, exc)
 
     async def _read_loop(self, transport: AgyTransport) -> None:
@@ -212,7 +223,7 @@ class AgySession(BaseHarnessSession[AntigravityConfig]):
         except asyncio.CancelledError:
             raise
         except Exception as exc:
-            self._emit(SessionFaulted(turn_id=None, error=f"session stream failed: {exc}"))
+            self._emit(SessionFailed(error=f"session stream failed: {exc}"))
             self._fail_active(exc)
         finally:
             await self._on_stream_end(transport)
@@ -248,9 +259,12 @@ class AgySession(BaseHarnessSession[AntigravityConfig]):
             )
             return
         error = "agy stream ended"
-        self._emit(
-            SessionFaulted(turn_id=ticket.turn_id if ticket is not None else None, error=error)
-        )
+        if ticket is None:
+            # meiva:note
+            # The process ended with nothing waiting on it: that is the session's
+            # failure, and it names no turn (#5664).
+            # meiva:link base/lm/harness/docs/attribution.meiva.okf.md
+            self._emit(SessionFailed(error=error))
         self._fail_active(SessionClosedError(error))
 
     def _handle(self, payload: dict[str, Any]) -> None:
@@ -261,6 +275,9 @@ class AgySession(BaseHarnessSession[AntigravityConfig]):
             self._model = event.model or self._model
             self._emit(event)
             self._bind()
+            return
+        if name == "result":
+            self._handle_result_event(payload)
             return
         ticket = self._active
         if ticket is None:
@@ -285,8 +302,6 @@ class AgySession(BaseHarnessSession[AntigravityConfig]):
                     ticket.parts.append(done.text)
                     self._emit(done)
             return
-        if name == "result":
-            self._handle_result(payload.get("result"), ticket)
 
     def _accumulate(self, update: dict[str, Any]) -> None:
         if update.get("step_type") != "agent_response":
@@ -297,14 +312,43 @@ class AgySession(BaseHarnessSession[AntigravityConfig]):
         if isinstance(delta, str) and delta:
             bucket.append(delta)
 
+    # meiva:note
+    # A step that never reaches DONE — a turn cut short by a result that was not ours —
+    # still streamed text the agent already saw, so it belongs in the reply rather than
+    # in a bucket nobody reads (#5664).
+    # meiva:link base/lm/harness/docs/attribution.meiva.okf.md
+    def _flush_step_text(self) -> str:
+        leftover = "".join("".join(bucket) for _, bucket in sorted(self._step_text.items())).strip()
+        self._step_text.clear()
+        return leftover
+
     def _take_step_text(self, update: dict[str, Any]) -> str:
         index = update.get("step_index", 0)
         bucket = self._step_text.pop(index if isinstance(index, int) else 0, [])
         return "".join(bucket).strip()
 
+    # meiva:note
+    # `agy` prints one `result` per turn it ran, and no frame says which turn: the only
+    # evidence is whether this session wrote a turn out and has not seen it end. A
+    # result without one is the CLI's own work — nobody here asked for it — so it
+    # becomes unsolicited output instead of closing a turn that never ran it. Mid-turn
+    # the two are indistinguishable, which is why the turn's reply text is built from
+    # this ticket's own parts rather than from the frame (#5664).
+    # meiva:link base/lm/harness/docs/attribution.meiva.okf.md
+    def _handle_result_event(self, payload: dict[str, Any]) -> None:
+        ticket = self._active
+        if ticket is not None and self._sent_turn == ticket.turn_id:
+            self._sent_turn = None
+            self._handle_result(payload.get("result"), ticket)
+            return
+        self._sent_turn = None
+        raw: JsonPayload = payload.get("result")
+        fields = parse_result(raw if isinstance(raw, dict) else {})
+        self._unsolicited(UnsolicitedOutput(source="result", text=fields.text.strip()))
+
     def _handle_result(self, payload: JsonPayload, ticket: TurnTicket) -> None:
         fields = parse_result(payload if isinstance(payload, dict) else {})
-        text = fields.text.strip() or "".join(ticket.parts).strip()
+        text = "".join(ticket.parts).strip() or self._flush_step_text() or fields.text.strip()
         outcome = TurnOutcome(
             turn_id=ticket.turn_id,
             text=text,
