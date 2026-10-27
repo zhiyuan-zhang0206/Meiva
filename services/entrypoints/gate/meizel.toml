@@ -8,7 +8,4 @@ exports = ["daemon.py", "tests"]
 "launch_plan.py" = "strict"
 
 [roots]
-"daemon.py" = { kinds = ["pid", "settings"], why = "Service or operator process entry boots configuration before composing its resources" }
-
-[debt.ambient-read]
-"daemon.py#home base.paths.meiva_home" = 2
+"daemon.py" = { kinds = ["home", "pid", "settings"], why = "Service process entry boots configuration and reads its pid and the home it runs under before composing its resources" }

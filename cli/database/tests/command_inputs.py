@@ -32,7 +32,7 @@ def command_runtime(tmp_path: Path) -> CommandRuntime:
     config = snapshot_process_config()
     return CommandRuntime(
         config=config,
-        pid=os.getpid(),
+        pid=os.getppid(),
         home=meiva_home(),
         machine=ConfiguredMachineIdentity(config),
         helper=refuse_helper,

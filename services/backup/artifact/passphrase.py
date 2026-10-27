@@ -126,13 +126,6 @@ def ensure_minted(home: Path) -> None:
     ensure_pinned(home, passphrase=mint(random.SystemRandom()))
 
 
-def logical_backup_passphrase() -> str:
-    """This home's logical-backup passphrase (see the module docstring)."""
-    from base.paths import meiva_home
-
-    return resolve(meiva_home())
-
-
 # meiva:note
 # Write `home`'s logical-backup passphrase to a new private temporary key file.
 #

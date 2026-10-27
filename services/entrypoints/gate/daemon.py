@@ -152,6 +152,7 @@ def classify_probe_error(exc: BaseException) -> str:
 
 @dataclass(frozen=True)
 class GateConfig:
+    home: Path
     probe_timeout_s: float = PROBE_TIMEOUT_S
 
 
@@ -170,6 +171,7 @@ class Gate:
         self.gateway_base = gateway_base.rstrip("/")
         self.app_base = app_base.rstrip("/")
         self._config = config
+        self.home = config.home
         # Every request is answered with one whole page, so a browser never gets
         # a chance to fetch a stylesheet — the shared look and the theme
         # bootstrap have to travel inside the document. Holding them in their
@@ -331,7 +333,9 @@ class Handler(BaseHTTPRequestHandler):
             self.send_header("Content-Length", "0")
             self.end_headers()
             return
-        body = json.dumps({"name": "gate", "home": str(meiva_home()), "pid": os.getpid()}).encode()
+        body = json.dumps(
+            {"name": "gate", "home": str(self.gate.home), "pid": os.getpid()}
+        ).encode()
         self.send_response(200)
         self.send_header("Content-Type", "application/json")
         self.send_header("Cache-Control", "no-store")
@@ -472,13 +476,13 @@ def read_facts(config: ConfigBoot, machine: MachineIdentityReader) -> GateFacts:
 
 # meiva:note
 # Build the gate for one launch plan.
-def build_gate(launch: GateLaunch) -> GateServer:
+def build_gate(launch: GateLaunch, *, home: Path) -> GateServer:
     gate = Gate(
         gateway_base=launch.gateway_base,
         browser_origin=launch.browser_origin,
         app_base=launch.app_base,
         static_dir=launch.static_dir,
-        config=GateConfig(),
+        config=GateConfig(home=home),
     )
     # meiva:note
     # the entry must be reachable off-box, so it binds every interface.
@@ -502,10 +506,11 @@ def main(argv: Sequence[str], *, process_config: ConfigBoot) -> None:
     image = LoadedCommit.capture()
     process_config.boot()
     machine = ConfiguredMachineIdentity(process_config)
+    home = meiva_home()
     pipeline = build_pipeline(
         database=gate_database(image=image, machine=machine, config=process_config),
         machine=machine,
-        home=meiva_home().resolve(),
+        home=home.resolve(),
     )
     primary: BaseException | None = None
     try:
@@ -517,7 +522,7 @@ def main(argv: Sequence[str], *, process_config: ConfigBoot) -> None:
         launch = plan_launch(
             port=args.port, static_dir=args.static_dir, facts=read_facts(process_config, machine)
         )
-        serve(build_gate(launch))
+        serve(build_gate(launch, home=home))
     except BaseException as exc:
         primary = exc
         raise

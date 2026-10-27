@@ -4,11 +4,13 @@ import asyncio
 import logging
 import os
 import sys
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, cast
 
 import pytest
 
+from base.clock import SYSTEM_TIMERS, Clock, ClockConfig
 from base.log.tests.log_records import LogRecords
 from base.log.tests.log_records import loguru_records as loguru_records
 from base.native_process.process_control import SYSTEM_PROCESS_CONTROL, ProcessControl
@@ -437,3 +439,31 @@ async def test_the_stop_that_ends_the_tree_keeps_the_caller(tmp_path: Path) -> N
     assert stored is not None
     assert stored.intent is UnitIntent.STOPPED
     assert stored.caller == caller
+
+
+# meiva:note
+# The supervisor stamps what it records from the clock it was given: with a wall time fixed at
+# 2026-10-27T06:00:00Z, the intent record a stop leaves behind carries that instant, not the moment
+# the test ran.
+async def test_a_stopped_unit_records_the_injected_clocks_instant(tmp_path: Path) -> None:
+    fixed = datetime(2026, 10, 27, 6, 0, 0, tzinfo=UTC)
+    owner = Supervisor(
+        UnitRegistry([_unit(*_SLEEP_FOREVER)]),
+        run_dir=tmp_path,
+        config=SupervisorConfig(stop_timeout_s=0.2),
+        clock=Clock(
+            ClockConfig("UTC", "UTC", message_timestamp_weekday=False),
+            timers=SYSTEM_TIMERS,
+            now=lambda: fixed,
+        ),
+        root_pid=os.getpid(),
+    )
+    await owner.start()
+    try:
+        await owner.down("svc")
+    finally:
+        await owner.shutdown()
+
+    stored = intent_store.read(tmp_path, "svc")
+    assert stored is not None
+    assert stored.updated_at == fixed.timestamp()

@@ -30,3 +30,6 @@ exports = ["acp", "antigravity", "bridge.py", "claude", "codex", "deepseek", "en
 "bridge.py#random secrets.token_urlsafe" = 1
 "registration.py#clock datetime.datetime.now" = 1
 "wiring.py#environ base.host.env.registry.process_environment" = 1
+
+[debt.fake-entropy]
+"process.py#interval-wrapper _monotonic" = 1
