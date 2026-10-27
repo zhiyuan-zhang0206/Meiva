@@ -34,7 +34,7 @@ if __name__ == "__main__":
             ),
             repo=accounting.DEFAULT_REPO,
             ledger=accounting.DEFAULT_LEDGER,
-            host=Host.system(),
+            host=Host.system(environ=os.environ),
         )
         run_loop(
             inputs.database(),

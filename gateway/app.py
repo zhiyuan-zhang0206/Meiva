@@ -627,7 +627,7 @@ def create_app_from_environment() -> FastAPI:
         config=config,
         image=LOADED_IMAGE,
         machine=ConfiguredMachineIdentity(config),
-        host=Host.system(),
+        host=Host.system(environ=config.process_environment()),
     )
     return create_app(
         process_config(process.config, home=home),
@@ -650,7 +650,7 @@ def openapi_schema_of(config: ConfigBoot, *, home: Path) -> dict[str, Any]:
         config=config,
         image=LOADED_IMAGE,
         machine=ConfiguredMachineIdentity(config),
-        host=Host.system(),
+        host=Host.system(environ=config.process_environment()),
     )
     with process.lifetime():
         app = create_app(

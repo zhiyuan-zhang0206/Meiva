@@ -40,7 +40,6 @@ from base.cluster import ownership
 from base.cluster import postgres as owned_postgres
 from base.cluster.dataplane import pooler as pooler_files
 from base.host.db_authority.delivery import read_pooler_admin
-from base.host.system.hostport import Host
 from base.log import logger
 from base.native_process.ownership import OwnedProcess, capture_tree
 from base.telemetry import EventPipeline
@@ -110,9 +109,9 @@ def _locator(process: psutil.Process, name: str) -> str | None:
 # meiva:note
 # One candidate process as the process table shows it now. A process that exits while it is
 # read is not a candidate; one whose uid or attributing path cannot be read is reported as that.
-def look_at(process: psutil.Process, name: str) -> SeenProcess:
+def look_at(process: psutil.Process, name: str, *, uid: int) -> SeenProcess:
     try:
-        if process.uids().real != Host.system().uid:
+        if process.uids().real != uid:
             return SeenProcess(process.pid, name, other_user=True, exiting=False, locator=None)
         exiting = process.status() in (psutil.STATUS_ZOMBIE, psutil.STATUS_DEAD)
     except psutil.AccessDenied:
@@ -124,14 +123,14 @@ def look_at(process: psutil.Process, name: str) -> SeenProcess:
     )
 
 
-def _seen_processes() -> tuple[SeenProcess, ...]:
+def _seen_processes(uid: int) -> tuple[SeenProcess, ...]:
     seen: list[SeenProcess] = []
     for process in psutil.process_iter(["pid", "name"]):
         name = process.info["name"]
         if name not in SCANNED_NAMES:
             continue
         try:
-            seen.append(look_at(process, name))
+            seen.append(look_at(process, name, uid=uid))
         except psutil.NoSuchProcess:
             continue
     return tuple(seen)
@@ -143,14 +142,15 @@ def _seen_processes() -> tuple[SeenProcess, ...]:
 #
 # A missing pidfile or refused port is not evidence of no local process, so the process table
 # is scanned too. `recorded` maps each service to the pids of its captured process and
-# descendants (PostgreSQL worker processes share the postmaster's data directory).
-def require_no_unrecorded(recorded: Mapping[str, frozenset[int]], *, home: Path) -> None:
+# descendants (PostgreSQL worker processes share the postmaster's data directory). A process of
+# another user than `uid` is never this home's, and is reported as that.
+def require_no_unrecorded(recorded: Mapping[str, frozenset[int]], *, home: Path, uid: int) -> None:
     homes = {
         "postgres": str(instance.pg_data_dir(home).resolve()),
         "redis": str(instance.redis_data_dir(home).resolve()),
         "pgbouncer": str(pooler_files.ini_path(home).resolve()),
     }
-    problem = refusal(judge(_seen_processes(), homes=homes, recorded=recorded))
+    problem = refusal(judge(_seen_processes(uid), homes=homes, recorded=recorded))
     if problem is not None:
         raise RuntimeError(problem)
 
@@ -191,10 +191,12 @@ async def _redis_command(client: Redis, deadline: float, *args: str) -> None:
 
 # meiva:note
 # What one maintenance stop needs besides the services it ends: the home whose data directory
-# it acts on, the bounds of the legs after Postgres' graceful stop, and the telemetry producer.
+# it acts on, the uid whose processes it may attribute to that home, the bounds of the legs after
+# Postgres' graceful stop, and the telemetry producer.
 @dataclass(frozen=True)
 class StopContext:
     home: Path
+    uid: int
     legs: StopLegs
     producer: Callable[[], EventPipeline]
 
@@ -292,7 +294,7 @@ async def _release(client: Redis, deadline: float) -> None:
     await asyncio.wait_for(client.aclose(), max(0.001, deadline - time.monotonic()))
 
 
-def _require_nothing_left(port: int, deadline: float, home: Path) -> None:
+def _require_nothing_left(port: int, deadline: float, home: Path, uid: int) -> None:
     remaining(deadline)
     if (
         ownership.postgres(instance.pg_data_dir(home)) is not None
@@ -300,7 +302,7 @@ def _require_nothing_left(port: int, deadline: float, home: Path) -> None:
         is not None
     ):
         raise RuntimeError("data-plane process appeared during held stop")
-    require_no_unrecorded({}, home=home)
+    require_no_unrecorded({}, home=home, uid=uid)
     try:
         with socket.create_connection(("127.0.0.1", port), timeout=remaining(deadline)):
             raise RuntimeError("Redis endpoint still accepts connections after held stop")
@@ -371,6 +373,7 @@ async def _stop(
         require_no_unrecorded(
             {name: frozenset(member.pid for member in tree) for name, tree in trees.items()},
             home=context.home,
+            uid=context.uid,
         )
         # meiva:note
         # Every service is identified before the first stop; no foreign Redis endpoint can be
@@ -384,7 +387,7 @@ async def _stop(
             context,
             retained_children=retained_children,
         )
-        _require_nothing_left(port, deadline, context.home)
+        _require_nothing_left(port, deadline, context.home, context.uid)
         return stopped
     except RedisError as exc:
         raise RuntimeError(f"Redis maintenance stop failed ({type(exc).__name__})") from None
@@ -397,6 +400,7 @@ def stop(
     timeout: float,
     *,
     home: Path,
+    uid: int,
     save: bool = True,
     retained_children: list[subprocess.Popen[bytes]] | None = None,
     producer: Callable[[], EventPipeline],
@@ -409,7 +413,7 @@ def stop(
         _stop(
             config,
             deadline,
-            StopContext(home, legs, producer),
+            StopContext(home, uid, legs, producer),
             save=save,
             retained_children=retained_children,
         )

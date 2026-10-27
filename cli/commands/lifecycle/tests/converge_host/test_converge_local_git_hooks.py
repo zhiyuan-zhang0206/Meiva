@@ -80,9 +80,14 @@ def _checkout_with_checker(ctx: ConvergeCtx, *, stdout: str, code: int) -> Conve
         f"sys.stdout.write({stdout!r})\n"
         f"sys.exit({code})\n"
     )
-    return replace(
-        ctx, host=Host(run=run_bounded, which=shutil.which, platform=LINUX_X86, uid=os.getuid())
+    host = Host(
+        run=run_bounded,
+        which=shutil.which,
+        platform=LINUX_X86,
+        uid=os.getuid(),
+        environ={},
     )
+    return replace(ctx, host=host)
 
 
 def test_step_is_registered_after_brew_pin() -> None:

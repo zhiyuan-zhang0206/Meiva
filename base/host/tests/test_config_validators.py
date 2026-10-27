@@ -1,9 +1,6 @@
 from __future__ import annotations
 
-import os
 from pathlib import Path
-
-import pytest
 
 from base.host.config_validators import ValidationResult, read_time_capability, validate
 from base.host.system.hostport import Host
@@ -12,23 +9,19 @@ from base.host.system.tests.fake_commands import DARWIN_ARM64, LINUX_X86, fake_h
 _CHROME = __file__
 _NPX = "/usr/bin/npx"
 
-needs_no_display = pytest.mark.skipif(
-    bool(os.environ.get("DISPLAY") or os.environ.get("WAYLAND_DISPLAY")),
-    reason="the process has a display",
-)
-
 
 def _mac(*, npx: bool) -> Host:
     return fake_host(platform=DARWIN_ARM64, programs={"npx": _NPX} if npx else {})
 
 
-def _linux(*, chrome: bool, npx: bool) -> Host:
+def _linux(*, chrome: bool, npx: bool, display: str | None = None) -> Host:
     programs: dict[str, str] = {}
     if chrome:
         programs["google-chrome"] = _CHROME
     if npx:
         programs["npx"] = _NPX
-    return fake_host(platform=LINUX_X86, programs=programs)
+    environ = {} if display is None else {"DISPLAY": display}
+    return fake_host(platform=LINUX_X86, programs=programs, environ=environ)
 
 
 def test_browser_enabled_false_always_ok():
@@ -45,7 +38,13 @@ def test_browser_enabled_true_when_capable_ok():
     assert result.reason is None
 
 
-@needs_no_display
+def test_browser_enabled_true_on_linux_with_a_display_ok():
+    host = _linux(chrome=True, npx=True, display=":0")
+    result = validate("browser_enabled", True, chrome_binary=None, host=host)
+    assert result.ok
+    assert result.reason is None
+
+
 def test_browser_enabled_true_without_display_not_ok():
     host = _linux(chrome=True, npx=True)
     result = validate("browser_enabled", True, chrome_binary=None, host=host)
@@ -69,7 +68,6 @@ def test_browser_enabled_true_with_display_and_chrome_but_no_npx_not_ok():
     assert "npx" in result.reason.lower()
 
 
-@needs_no_display
 def test_browser_enabled_fail_safe_uncertain_display():
     result = validate(
         "browser_enabled", True, chrome_binary=None, host=_linux(chrome=True, npx=True)
@@ -150,7 +148,6 @@ def test_read_time_capability_browser_enabled_returns_validation_result():
     assert result.ok
 
 
-@needs_no_display
 def test_read_time_capability_browser_enabled_not_ok_without_display():
     host = _linux(chrome=False, npx=False)
     result = read_time_capability("browser_enabled", chrome_binary=None, host=host)

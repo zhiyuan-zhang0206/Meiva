@@ -534,7 +534,7 @@ def daemon_config_from_process() -> DaemonConfig:
     project_root = settings.services.project_root
     return DaemonConfig(
         connect_timeout_seconds=settings.sandbox.mcp_connect_timeout_seconds,
-        display_available=display_available(host=Host.system()),
+        display_available=display_available(host=Host.system(environ=os.environ)),
         home=meiva_home(),
         project_root=project_root
         if project_root is not None

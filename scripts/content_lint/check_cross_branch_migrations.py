@@ -38,6 +38,7 @@ the same failure mode being fixed here.
 
 from __future__ import annotations
 
+import os
 import subprocess
 import sys
 from pathlib import Path
@@ -67,7 +68,7 @@ def remote_branches(*, host: Host, timeout: float = 60) -> list[str]:
             ["git", "ls-remote", "--heads", "origin"],
             capture_output=True,
             text=True,
-            env=git_env(),
+            env=git_env(host.environ),
             timeout=timeout,
         )
     except subprocess.TimeoutExpired as exc:
@@ -113,4 +114,4 @@ def main(*, host: Host) -> int:
 
 
 if __name__ == "__main__":
-    sys.exit(main(host=Host.system()))
+    sys.exit(main(host=Host.system(environ=os.environ)))

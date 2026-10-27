@@ -25,4 +25,4 @@ exports = ["mcp_daemon.py", "mcp_socket_bridge.py", "mcp_wrapper.py", "orphan.py
 "mcp_wrapper.py" = { kinds = ["home", "settings"], why = "Service or operator process entry boots configuration before composing its resources; reads the home it runs under once, in main()" }
 
 [debt.ambient-read]
-"macos_readiness.py#platform base.host.system.hostport.Host.system" = 1
+"macos_readiness.py#pid base.native_process.root_control.client.current_uid" = 1

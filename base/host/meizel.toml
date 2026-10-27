@@ -19,7 +19,6 @@ exports = ["atomic_io.py", "brew_pin.py", "config_validators.py", "converge", "d
 "verified_file.py" = "strict-to-be"
 
 [debt.ambient-read]
-"config_validators.py#environ base.host.system.probes.display_available" = 1
 "private_storage.py#pid base.paths.private_dir.is_foreign_owned" = 5
 "proc.py#clock time.monotonic" = 1
 "resource_sample.py#clock time.time" = 1

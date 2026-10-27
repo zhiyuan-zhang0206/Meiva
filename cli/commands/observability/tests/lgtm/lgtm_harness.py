@@ -130,7 +130,7 @@ def lgtm_unit(
 # A host on `platform` that runs real commands: the platform only decides which pinned release
 # tag a converge pass installs, so the stub `loki` binary the tests leave behind really runs.
 def host_on(platform: Platform) -> Host:
-    return Host(run=run_bounded, which=shutil.which, platform=platform, uid=os.getuid())
+    return Host(run=run_bounded, which=shutil.which, platform=platform, uid=os.getuid(), environ={})
 
 
 # meiva:note

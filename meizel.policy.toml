@@ -116,7 +116,6 @@ bus = [
 [ambient-readers.environ]
 "base.host.env.registry.process_environment()" = "returns the live os.environ"
 "base.host.git.gitenv.git_env()" = "copies the live os.environ when no mapping is passed"
-"base.host.system.probes.display_available()" = "reads DISPLAY and WAYLAND_DISPLAY from os.environ"
 "base.native_process.child_env.daemon_process_env()" = "filters the live os.environ"
 "base.native_process.child_env.inherited_process_env()" = "copies the live os.environ"
 "base.native_process.os_platform.launchd_job_label()" = "reads XPC_SERVICE_NAME from os.environ"

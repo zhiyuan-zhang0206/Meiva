@@ -63,7 +63,7 @@ def local_plane(command_runtime: CommandRuntime) -> DataPlaneConfig:
 def stop_plane(
     config: DataPlaneConfig, timeout: float, producer: Callable[[], EventPipeline], home: Path
 ) -> tuple[str, ...]:
-    return plane.stop(config, timeout, home=home, producer=producer).stopped
+    return plane.stop(config, timeout, home=home, uid=os.getuid(), producer=producer).stopped
 
 
 # meiva:note
@@ -382,7 +382,7 @@ def test_real_pgbouncer_normal_exit_and_identity_cleanup(
 
     with running_pooler(home) as pooler:
         config = replace(local_plane, redis_url=f"redis://127.0.0.1:{free_port()}")
-        stopped = plane.stop(config, 3, home=home, producer=operator_pipeline)
+        stopped = plane.stop(config, 3, home=home, uid=os.getuid(), producer=operator_pipeline)
         assert stopped.stopped == ("pgbouncer",)
         assert not pooler.identity.live()
         assert not (pooler.directory / "pgbouncer.pid").exists()
@@ -420,7 +420,7 @@ def test_real_pgbouncer_stop_does_not_wait_for_idle_client(
             # Connected and idle from here on: the stop must not wait for this.
             assert connected.execute("SHOW VERSION").fetchone() is not None
             started = time.monotonic()
-            stopped = plane.stop(config, 5, home=home, producer=operator_pipeline)
+            stopped = plane.stop(config, 5, home=home, uid=os.getuid(), producer=operator_pipeline)
         assert stopped.stopped == ("pgbouncer",)
         assert time.monotonic() - started < 4
         assert not pooler.identity.live()

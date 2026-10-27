@@ -28,11 +28,10 @@ from pathlib import Path
 
 import base.host.proc
 from base.clock import Timers
-from base.host.system.hostport import Host
 from base.native_process.os_platform import is_macos
+from base.native_process.root_control.client import current_uid
 
 _log = logging.getLogger("services.desktop.browser.macos_readiness")
-_SYSTEM_HOST = Host.system()
 
 _PROBE_TIMEOUT_S = 5.0
 READINESS_RETRY_S = 5.0
@@ -73,15 +72,13 @@ def run_probe(argv: list[str]) -> ProbeResult:
     )
 
 
-def current_account() -> tuple[str, Path]:
-    """Current process account and its home directory on macOS.
-
-    This is intentionally account-derived rather than inherited from shell
-    environment variables, which may describe the SSH caller rather than the
-    launch context of the detached service.
-    """
-    entry = pwd.getpwuid(_SYSTEM_HOST.uid)
-    return entry.pw_name, Path(entry.pw_dir)
+# meiva:note
+# The current process account on macOS: its uid, name and home directory. Account-derived on
+# purpose, not inherited from shell environment variables, which may describe the SSH caller
+# rather than the launch context of the detached service.
+def current_account() -> tuple[int, str, Path]:
+    entry = pwd.getpwuid(current_uid())
+    return entry.pw_uid, entry.pw_name, Path(entry.pw_dir)
 
 
 # meiva:note
@@ -195,8 +192,7 @@ def probe_startup_readiness() -> StartupReadiness:
     if not is_macos():
         return StartupReadiness(ready=True)
 
-    uid = _SYSTEM_HOST.uid
-    account, home = current_account()
+    uid, account, home = current_account()
     console_cmd, gui_cmd, domain_cmd, keychain_cmd = macos_probe_commands(uid, home)
     console = run_probe(console_cmd)
     console_user = console.stdout.strip()
