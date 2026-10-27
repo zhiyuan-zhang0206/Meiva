@@ -11,7 +11,7 @@ exports = ["app.py", "config.py", "daemon.py", "run_timeline"]
 "config.py" = "strict"
 
 [roots]
-"daemon.py" = { kinds = ["settings", "pid"], why = "process entry point of the insights daemon: builds ConfigBoot and reads its pid" }
+"daemon.py" = { kinds = ["pid", "random", "settings"], why = "process entry point of the insights daemon: builds ConfigBoot, reads its pid and builds the random generator the timeline reader mints snapshot identities from" }
 
 [debt.ambient-read]
 "daemon.py#home base.paths.meiva_home" = 2

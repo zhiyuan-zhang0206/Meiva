@@ -5,8 +5,9 @@ from concurrent.futures import ThreadPoolExecutor
 import pytest
 from fastapi import HTTPException
 
+from base.clock.tests.seeded_rng import seeded_rng
 from base.db.protocols import SyncConnection
-from services.derived.insights.run_timeline.projection.reader import TimelineReader
+from services.derived.insights.run_timeline.projection.reader import ReaderWorld, TimelineReader
 from services.derived.insights.run_timeline.projection.source import Source, capture_source
 from services.derived.insights.run_timeline.tests.test_projection import AGENT, World, messages
 from services.derived.insights.run_timeline.tests.test_projection import world as world
@@ -92,7 +93,7 @@ def test_head_check_cannot_restore_bookkeeping_for_an_evicted_snapshot(
         timestamps=world.timestamps,
         jobs=world.jobs,
         read_segment=world.read_segment,
-        timers=world.timers,
+        world=ReaderWorld(timers=world.timers, rng=seeded_rng()),
     )
     reader.read_source = evict_during_capture
     first = reader.get(1)
@@ -103,3 +104,23 @@ def test_head_check_cannot_restore_bookkeeping_for_an_evicted_snapshot(
     with pytest.raises(HTTPException) as caught:
         reader.get(1, first.id)
     assert caught.value.status_code == 409
+
+
+# meiva:note
+# A snapshot's identity is minted from the generator the root hands in: the same generator state
+# gives the same identities, another gives others, and one reader never repeats one.
+def test_snapshot_identities_are_minted_from_the_generator_the_root_hands_in(world: World) -> None:
+    def minted(seed: int) -> list[str]:
+        reader = TimelineReader(
+            world.db,
+            world.pool,
+            timestamps=world.timestamps,
+            jobs=world.jobs,
+            read_segment=world.read_segment,
+            world=ReaderWorld(timers=world.timers, rng=seeded_rng(seed)),
+        )
+        return [reader.get(agent).id for agent in (1, 2)]
+
+    assert minted(7) == minted(7)
+    assert minted(7) != minted(8)
+    assert len(set(minted(7))) == 2
