@@ -1,7 +1,6 @@
 import asyncio
 import logging
 import secrets
-import time
 from collections.abc import AsyncGenerator, Awaitable, Callable
 from contextlib import AsyncExitStack, asynccontextmanager, nullcontext
 from functools import partial
@@ -226,7 +225,7 @@ async def lifespan(
             )
 
             app.state.rpc = RpcClient.from_boot(config, timers=SYSTEM_TIMERS)
-            app.state.started_at = time.time()
+            app.state.started_at = app.state.clock.now().timestamp()
             if app.state.gateway_config.human_auth == "trusted_network":
                 _log.warning(
                     "gateway human_auth=trusted_network: the API does not authenticate human "
@@ -446,7 +445,11 @@ async def cluster_auth_middleware(
         if _foreign_origin(request, config):
             return _origin_refused()
         touch: SessionTouchThrottle = request.app.state.session_touch
-        if touch.due(cookie_token, time.monotonic(), stale_after_s=config.session_ttl_seconds):
+        if touch.due(
+            cookie_token,
+            request.app.state.clock.monotonic(),
+            stale_after_s=config.session_ttl_seconds,
+        ):
             await asyncio.to_thread(
                 touch_session,
                 request.app.state.db_pool,
@@ -474,7 +477,7 @@ async def cluster_auth_middleware(
         request.state.source_verified_by = TRUSTED_NETWORK_FACT
         return await call_next(request)
 
-    request.app.state.auth401_log.log(request, time.monotonic())
+    request.app.state.auth401_log.log(request, request.app.state.clock.monotonic())
     return error_response(
         request,
         code="authentication_required",
