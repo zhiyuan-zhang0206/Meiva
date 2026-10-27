@@ -90,7 +90,7 @@ def test_non_skill_rows_and_missing_dir_excluded(unit_home: Path) -> None:
 
 
 def test_empty_when_no_load_dir(unit_home: Path) -> None:
-    assert not paths.skills_dir(paths.meiva_home()).exists()
+    assert not paths.skills_dir(unit_home).exists()
     assert get_skills(_request(unit_home)).skills == []
 
 

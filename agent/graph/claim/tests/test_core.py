@@ -29,7 +29,6 @@ from base.db import Database
 from base.db.code_version_gate import ProcessDbGate
 from base.lm.catalog import ModelCatalog
 from base.packages.tests.model_catalog import AddModels
-from base.paths import resolve_meiva_home
 from base.telemetry.tests.capture.event_capture import EmittedEvents
 from meiva.sdk_surface.installation import Installation
 from meiva.sdk_surface.tests.installation_holder import held_installation
@@ -436,7 +435,7 @@ class TestPauseHeartbeat:
         from base.paths import logs_dir
 
         day = _dt.now(_UTC).strftime("%Y%m%d")
-        path = logs_dir(home=resolve_meiva_home()) / f"events-{day}.jsonl"
+        path = logs_dir(home=config_authority.env_path.parent) / f"events-{day}.jsonl"
         assert path.exists(), "mirror file missing"
         event_row = None
         for line in reversed(path.read_text(encoding="utf-8").splitlines()):

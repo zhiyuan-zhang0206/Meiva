@@ -1,4 +1,5 @@
 from collections.abc import Callable, Iterator
+from pathlib import Path
 
 import psycopg
 import pytest
@@ -8,7 +9,7 @@ from base.cluster.machine.tests.identity import machine_identity as machine_iden
 from base.packages.tests.lm.providers.provider_plugin_support import (
     provider_plugin as provider_plugin,
 )
-from base.paths import plugins_dir, resolve_meiva_home
+from base.paths import plugins_dir
 from gateway.tests.auth.gateway_config import GatewayTestClient, gateway_test_client, spawn_via_http
 from gateway.tests.support.runner_ops.ops_stub import RunnerOps
 
@@ -17,6 +18,7 @@ from gateway.tests.support.runner_ops.ops_stub import RunnerOps
 def failed_provider_agent(
     provider_plugin: Callable[..., None],
     gateway_local_runner: RunnerOps,
+    unit_home: Path,
     *,
     machine_identity: MachineIdentityReader,
 ) -> Iterator[tuple[GatewayTestClient, int]]:
@@ -25,7 +27,7 @@ def failed_provider_agent(
         assert born.status_code == 201, born.text
         agent_id = born.json()["id"]
     provider_plugin(dir_name="z_broken_provider")
-    (plugins_dir(home=resolve_meiva_home()) / "z_broken_provider" / "provider.py").write_text(
+    (plugins_dir(home=unit_home) / "z_broken_provider" / "provider.py").write_text(
         'raise RuntimeError("provider private diagnostic")\n'
     )
     with gateway_test_client(machine=machine_identity) as client:

@@ -14,6 +14,7 @@ writes asynchronously). The PG `events` copy was retired at the LGTM cutover
 
 from __future__ import annotations
 
+from pathlib import Path
 from typing import Any
 
 import pytest
@@ -36,7 +37,7 @@ def _one(page: str = PAGE, element: str = ELEMENT, **extra: str) -> dict:
     return {"page": page, "element": element, **extra}
 
 
-def _rows(session: str) -> list[tuple]:  # type: ignore[no-untyped-def]
+def _rows(home: Path, session: str) -> list[tuple]:  # type: ignore[no-untyped-def]
     """This session's `frontend_interaction` mirror lines, oldest first,
     after a sync barrier. Each test uses a fresh session id (the mirror is
     cumulative within a worker — the PG TRUNCATE barrier is gone with the
@@ -45,11 +46,11 @@ def _rows(session: str) -> list[tuple]:  # type: ignore[no-untyped-def]
     import json
     from datetime import UTC, datetime
 
-    from base.paths import logs_dir, resolve_meiva_home
+    from base.paths import logs_dir
 
     telemetry.sync()
     day = datetime.now(UTC).strftime("%Y%m%d")
-    path = logs_dir(home=resolve_meiva_home()) / f"events-{day}.jsonl"
+    path = logs_dir(home=home) / f"events-{day}.jsonl"
     if not path.exists():
         return []
     out: list[tuple[Any, ...]] = []
@@ -81,7 +82,7 @@ def _session() -> str:
 
 
 class TestFrontendTelemetryIngest:
-    def test_valid_batch_lands_events(self) -> None:  # type: ignore[no-untyped-def]
+    def test_valid_batch_lands_events(self, unit_home: Path) -> None:  # type: ignore[no-untyped-def]
         session = _session()
         with gateway_test_client() as client:
             r = client.post(
@@ -101,7 +102,7 @@ class TestFrontendTelemetryIngest:
                 ),
             )
         assert r.status_code == 204
-        rows = _rows(session)
+        rows = _rows(unit_home, session)
         assert len(rows) == 3  # pyright: ignore[reportUnknownArgumentType]
         for row in rows:
             assert row[0] == "frontend_interaction"
@@ -123,7 +124,7 @@ class TestFrontendTelemetryIngest:
             "value": "false",
         }
 
-    def test_missing_key_value_omitted_not_null(self) -> None:  # type: ignore[no-untyped-def]
+    def test_missing_key_value_omitted_not_null(self, unit_home: Path) -> None:  # type: ignore[no-untyped-def]
         """Non-setting events must not carry key/value at all."""
         session = _session()
         with gateway_test_client() as client:
@@ -132,11 +133,11 @@ class TestFrontendTelemetryIngest:
                 json=_payload([_one(element="composer-send")], session=session),
             )
         assert r.status_code == 204
-        attrs = _rows(session)[0][4]
+        attrs = _rows(unit_home, session)[0][4]
         assert "key" not in attrs
         assert "value" not in attrs
 
-    def test_malformed_batch_422(self) -> None:  # type: ignore[no-untyped-def]
+    def test_malformed_batch_422(self, unit_home: Path) -> None:  # type: ignore[no-untyped-def]
         session = _session()
         cases = [
             # empty events list
@@ -158,9 +159,9 @@ class TestFrontendTelemetryIngest:
                 assert r.status_code == 422, body
                 assert r.json()["code"] == "invalid_telemetry_batch"
         # nothing landed
-        assert _rows(session) == []
+        assert _rows(unit_home, session) == []
 
-    def test_oversized_body_413(self) -> None:  # type: ignore[no-untyped-def]
+    def test_oversized_body_413(self, unit_home: Path) -> None:  # type: ignore[no-untyped-def]
         session = _session()
         with gateway_test_client() as client:
             r = client.post(
@@ -170,10 +171,11 @@ class TestFrontendTelemetryIngest:
             )
         assert r.status_code == 413
         assert r.json()["code"] == "telemetry_batch_too_large"
-        assert _rows(session) == []
+        assert _rows(unit_home, session) == []
 
     def test_rate_limit_backstop_drops_excess(
         self,
+        unit_home: Path,
         monkeypatch: pytest.MonkeyPatch,
     ) -> None:  # type: ignore[no-untyped-def]
         """Over the per-session budget: accepted up to the cap, the rest
@@ -183,10 +185,10 @@ class TestFrontendTelemetryIngest:
         with gateway_test_client() as client:
             r = client.post("/api/frontend-telemetry", json=_payload(events, session=session))
         assert r.status_code == 204
-        rows = _rows(session)
+        rows = _rows(unit_home, session)
         assert len(rows) == ft_router.MAX_EVENTS_PER_MINUTE  # pyright: ignore[reportUnknownArgumentType]
 
-    def test_second_session_gets_own_budget(self) -> None:  # type: ignore[no-untyped-def]
+    def test_second_session_gets_own_budget(self, unit_home: Path) -> None:  # type: ignore[no-untyped-def]
         session = _session()
         other = _session()
         with gateway_test_client() as client:
@@ -200,5 +202,5 @@ class TestFrontendTelemetryIngest:
             )
         assert r1.status_code == 204
         assert r2.status_code == 204
-        assert len(_rows(session)) == ft_router.MAX_EVENTS_PER_MINUTE  # pyright: ignore[reportUnknownArgumentType]
-        assert len(_rows(other)) == 3  # pyright: ignore[reportUnknownArgumentType]
+        assert len(_rows(unit_home, session)) == ft_router.MAX_EVENTS_PER_MINUTE  # pyright: ignore[reportUnknownArgumentType]
+        assert len(_rows(unit_home, other)) == 3  # pyright: ignore[reportUnknownArgumentType]
