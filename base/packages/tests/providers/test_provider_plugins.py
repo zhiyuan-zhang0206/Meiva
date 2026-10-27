@@ -82,6 +82,8 @@ _REPO_MODEL_VENDORS = {
     "gpt-6-sol-fast": "openai",
     "gpt-6.1-sol": "openai",
     "gpt-6.1-sol-fast": "openai",
+    "gpt-6.1-terra": "openai",
+    "gpt-6.1-terra-fast": "openai",
     "gpt-6-luna": "openai",
     "gpt-6-luna-decisions": "openai",
     "gpt-6-luna-fast": "openai",

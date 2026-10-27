@@ -1,6 +1,6 @@
 {
   "schema_version": 2,
-  "catalog_version": "2026-10-24-kimi-k3.1-pro",
+  "catalog_version": "2026-10-28-gpt-6.1-terra",
   "currency": "USD",
   "unit_tokens": 1000000,
   "models": {
@@ -786,6 +786,39 @@
         }
       ]
     },
+    "gpt-6.1-terra": {
+      "vendor": "openai",
+      "source_url": "https://developers.openai.com/api/docs/models/gpt-6.1-terra",
+      "source_checked_at": "2026-10-28",
+      "periods": [
+        {
+          "effective_from": null,
+          "effective_until": null,
+          "tiers": [
+            {
+              "input_tokens_min": 0,
+              "input_tokens_max": 272000,
+              "rates": {
+                "input": "1.0",
+                "cache_read": "0.05",
+                "output": "5.0"
+              },
+              "utc_daily_overrides": []
+            },
+            {
+              "input_tokens_min": 272001,
+              "input_tokens_max": null,
+              "rates": {
+                "input": "2.0",
+                "cache_read": "0.10",
+                "output": "7.5"
+              },
+              "utc_daily_overrides": []
+            }
+          ]
+        }
+      ]
+    },
     "gpt-5.6-terra": {
       "vendor": "openai",
       "source_url": "https://developers.openai.com/api/docs/models/gpt-5.6-terra",
@@ -1317,6 +1350,39 @@
                 "input": "8",
                 "cache_read": "0.4",
                 "output": "30"
+              },
+              "utc_daily_overrides": []
+            }
+          ]
+        }
+      ]
+    },
+    "gpt-6.1-terra-fast": {
+      "vendor": "openai",
+      "source_url": "https://developers.openai.com/api/docs/pricing",
+      "source_checked_at": "2026-10-28",
+      "periods": [
+        {
+          "effective_from": null,
+          "effective_until": null,
+          "tiers": [
+            {
+              "input_tokens_min": 0,
+              "input_tokens_max": 272000,
+              "rates": {
+                "input": "2",
+                "cache_read": "0.1",
+                "output": "10"
+              },
+              "utc_daily_overrides": []
+            },
+            {
+              "input_tokens_min": 272001,
+              "input_tokens_max": null,
+              "rates": {
+                "input": "4",
+                "cache_read": "0.2",
+                "output": "15"
               },
               "utc_daily_overrides": []
             }

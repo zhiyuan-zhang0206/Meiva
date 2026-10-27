@@ -96,7 +96,8 @@ def test_gpt6_sol_luna_successors_and_capabilities(*, model_catalog: ModelCatalo
         model_catalog.models["gpt-5.6-sol"].spawnable
         and model_catalog.models["gpt-5.6-luna"].spawnable
     )
-    assert model_catalog.models["gpt-5.6-terra"].superseded_by is None
+    assert model_catalog.models["gpt-5.6-terra"].superseded_by == "gpt-6.1-terra"
+    assert model_catalog.models["gpt-5.6-terra"].spawnable
     for model, cutoff in (("gpt-6-sol", "2026-04"), ("gpt-6-luna", "2026-05")):
         spec = model_catalog.models[model]
         assert spec.spawnable and spec.context_window == 1_050_000
@@ -119,6 +120,25 @@ def test_gpt6_1_sol_capabilities_and_display_successor(*, model_catalog: ModelCa
     assert model_catalog.models["gpt-6-sol"].spawnable
 
 
+# meiva:note
+# GPT-6.1 Terra is the same-series successor of GPT-5.6 Terra; the older row stays
+# spawnable and only the picker hides it.
+# meiva:link base/lm/docs/pricing-model-rates.meiva.okf.md
+def test_gpt6_1_terra_capabilities_and_display_successor(*, model_catalog: ModelCatalog) -> None:
+    terra_61 = model_catalog.models["gpt-6.1-terra"]
+    assert terra_61.spawnable and terra_61.context_window == 1_050_000
+    assert terra_61.max_output_tokens is None
+    assert terra_61.knowledge_cutoff == "2026-06"
+    # meiva:note
+    # The official model page lists none/low/medium (default)/high/xhigh/max.
+    assert terra_61.effort_levels == ("none", "low", "medium", "high", "xhigh", "max")
+    assert terra_61.tuning.reasoning_effort == "medium"
+    assert terra_61.media_types == frozenset({"image"})
+    assert model_catalog.models["gpt-5.6-terra"].superseded_by == "gpt-6.1-terra"
+    assert model_catalog.models["gpt-5.6-terra-fast"].superseded_by == "gpt-6.1-terra-fast"
+    assert model_catalog.models["gpt-6.1-terra-fast"].fast_of == "gpt-6.1-terra"
+
+
 def test_repo_openai_provider_is_enabled_and_registers_complete_contract(
     *, model_catalog: ModelCatalog
 ) -> None:
@@ -133,6 +153,7 @@ def test_repo_openai_provider_is_enabled_and_registers_complete_contract(
         "gpt-5.6-luna",
         "gpt-6-sol",
         "gpt-6.1-sol",
+        "gpt-6.1-terra",
         "gpt-6-luna",
     }
     assert gpt_models <= model_catalog.models.keys()
@@ -149,6 +170,8 @@ def test_repo_openai_provider_is_enabled_and_registers_complete_contract(
         "gpt-6-sol-fast",
         "gpt-6.1-sol",
         "gpt-6.1-sol-fast",
+        "gpt-6.1-terra",
+        "gpt-6.1-terra-fast",
         "gpt-6-luna",
         "gpt-6-luna-fast",
     }
