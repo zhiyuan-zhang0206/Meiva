@@ -18,9 +18,11 @@ from services.desktop.computer import mcp_wrapper as computer_wrapper
 
 
 # meiva:note
-# The browser link is told its socket; the computer link derives its own and stamps an identity.
+# Both links are told their socket; the computer link also stamps an identity.
 def _link_kwargs(side: str) -> dict[str, Any]:
-    return {"socket_path": Path("/unused.sock")} if side == "browser" else {"agent_id": None}
+    if side == "browser":
+        return {"socket_path": Path("/unused.sock")}
+    return {"sock": "/unused.sock", "agent_id": None}
 
 
 # meiva:note
