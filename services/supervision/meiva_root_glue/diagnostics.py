@@ -21,7 +21,7 @@ from typing import Protocol
 from base.agents.context.clients import ClientSet
 from base.clock import Clock
 from base.cluster.machine import MachineIdentityReader
-from base.daemon.health import DaemonProbe, ProbeVerdict
+from base.daemon.health import DaemonProbe
 from base.native_process.loaded_commit import LoadedCommit
 from base.telemetry.delivery.pipeline import EventPipeline
 from services.supervision.meiva_root.health import ProbeRunner
@@ -77,12 +77,22 @@ class _SystemProcessTelemetry:
 SYSTEM_PROCESS_TELEMETRY: ProcessTelemetry = _SystemProcessTelemetry()
 
 
+# meiva:note
+# The wall clock the observer allows one diagnostic sample, above the check's own deadline
+# (`diagnostic_probes.PROBE_DEADLINE_S`): a probe that spends its whole deadline still returns its
+# own verdict — "no verdict" included — before this expires, and the remaining seconds absorb the
+# scheduler's own lateness on a loaded host. A sample that does expire here is the pathological
+# case a reader must still see (a probe worker that never returned), never the busy host that
+# produced the 2026-10-27 false alarms (task #5656).
+DIAGNOSTIC_TIMEOUT_S: float = 25.0
+
+
 @dataclass(frozen=True, slots=True)
 class Diagnostic:
     name: str
     probe: Callable[[], DaemonProbe]
     interval_s: float = 60.0
-    timeout_s: float = 20.0
+    timeout_s: float = DIAGNOSTIC_TIMEOUT_S
     report: Callable[[DaemonProbe], None] | None = None
 
     def __post_init__(self) -> None:
@@ -173,7 +183,7 @@ class DiagnosticMonitor:
 
         def sample_and_report() -> DaemonProbe:
             result = check.probe()
-            if isinstance(result, DaemonProbe) and result.verdict != ProbeVerdict.UNAVAILABLE:
+            if isinstance(result, DaemonProbe) and not result.unknown:
                 with self._report_admission:
                     if self._closed or report_closed.is_set():
                         return DaemonProbe.unavailable("diagnostic report admission closed")
@@ -194,6 +204,11 @@ class DiagnosticMonitor:
 
         return sample_and_report
 
+    # meiva:note
+    # A sample that reached no verdict is neither a failure nor a recovery: it keeps the streak
+    # honest and reports at INFO, because a host too busy to be measured — or one where the check
+    # could not run at all — is no evidence that anything on it is broken. A sustained run of those
+    # samples carries its own quieter rule.
     @staticmethod
     def _report_sample(
         check: Diagnostic, state: _State, result: DaemonProbe, *, recovered: bool
@@ -210,7 +225,7 @@ class DiagnosticMonitor:
         from base.log import logger
 
         logger.log(
-            "INFO" if result.alive else "WARNING",
+            "INFO" if result.alive or result.unknown else "WARNING",
             "root diagnostic {diagnostic}: {verdict} ({detail})",
             event="root_diagnostic",
             diagnostic=check.name,
