@@ -81,6 +81,7 @@ def test_new_model_rates_and_272k_boundary(model_catalog: ModelCatalog) -> None:
     for model, tier1, tier2 in (
         ("gpt-6-sol", Rates(2.0, 0.20, 10.0), Rates(4.0, 0.40, 15.0)),
         ("gpt-6.1-sol", Rates(2.0, 0.10, 10.0), Rates(4.0, 0.20, 15.0)),
+        ("gpt-6.1-terra", Rates(1.0, 0.05, 5.0), Rates(2.0, 0.10, 7.5)),
         ("gpt-6-luna", Rates(0.10, 0.01, 0.50), Rates(0.20, 0.02, 0.75)),
     ):
         assert rates_at(model, _FUTURE, 272_000, prices=model_catalog.prices) == tier1

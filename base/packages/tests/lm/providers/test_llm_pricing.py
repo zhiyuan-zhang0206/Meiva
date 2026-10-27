@@ -148,6 +148,7 @@ def test_openai_catalog_entries_are_in_the_archive() -> None:
         "gpt-6-astra",
         "gpt-5.6-sol",
         "gpt-5.6-terra",
+        "gpt-6.1-terra",
         "gpt-5.6-luna",
     }
 
@@ -270,6 +271,7 @@ def test_parse_catalog_rejects_unknown_schema_version() -> None:
         ("gpt-5.6-sol", 8.0 + 30.0),
         ("gpt-6-astra", 20.0 + 75.0),
         ("gpt-5.6-terra", 4.0 + 18.0),
+        ("gpt-6.1-terra", 2.0 + 7.5),
         ("gpt-5.6-luna", 0.40 + 1.80),
         ("mimo-v2.5-pro", 0.435 + 0.87),
         ("mimo-v2.6-pro", 0.435 + 0.87),
@@ -581,6 +583,7 @@ def test_openai_plugin_prices_equal_archive_current_base_tier(
     model_ids = (
         "gpt-5.6-sol",
         "gpt-5.6-terra",
+        "gpt-6.1-terra",
         "gpt-5.6-luna",
     )
     current_instant = datetime(2026, 9, 5, tzinfo=UTC)
@@ -732,6 +735,7 @@ def test_rates_at_rejects_a_negative_tier_input(prices: pricing.PriceBook) -> No
         ("gpt-6-astra", (10.0, 1.0, 50.0), (20.0, 2.0, 75.0)),
         ("gpt-5.6-sol", (4.0, 0.4, 20.0), (8.0, 0.8, 30.0)),
         ("gpt-5.6-terra", (2.0, 0.2, 12.0), (4.0, 0.4, 18.0)),
+        ("gpt-6.1-terra", (1.0, 0.05, 5.0), (2.0, 0.1, 7.5)),
         ("gpt-5.6-luna", (0.2, 0.02, 1.2), (0.4, 0.04, 1.8)),
     ],
 )
