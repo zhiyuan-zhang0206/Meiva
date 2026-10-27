@@ -20,7 +20,7 @@ from pathlib import Path
 from typing import assert_never
 
 from base.agents.context.clients import DatabaseFactory
-from base.clock import SYSTEM_TIMERS
+from base.clock import SYSTEM_TIMERS, Timers
 from base.events.live.bus import EventBus, event_bus_config_from_config
 from base.native_process.process_control import SYSTEM_PROCESS_CONTROL
 from base.paths import run_dir
@@ -98,7 +98,9 @@ def live_shell_sessions(home: Path) -> list[str]:
 # A service that is down died uncleanly before this stop (the stop never
 # leaves one behind): what its ledger still names was lost to that, not to
 # this stop, and its notices say so (`pty_close_notices.CRASH_REASON`).
-def run_closure(home: Path, grace_s: float, kill_s: float) -> tuple[closure.Outcome, str]:
+def run_closure(
+    home: Path, grace_s: float, kill_s: float, *, own_pid: int, timers: Timers
+) -> tuple[closure.Outcome, str]:
     run = run_dir(home)
     try:
         return client.close_all(
@@ -106,7 +108,10 @@ def run_closure(home: Path, grace_s: float, kill_s: float) -> tuple[closure.Outc
         ), pty_close_notices.STOP_REASON
     except client.ServiceDownError:
         return ledger.sweep(
-            ledger_path(run), process_control=SYSTEM_PROCESS_CONTROL
+            ledger_path(run),
+            process_control=SYSTEM_PROCESS_CONTROL,
+            own_pid=own_pid,
+            timers=timers,
         ), pty_close_notices.CRASH_REASON
 
 
@@ -266,7 +271,13 @@ def close_shell_sessions(
     cleanup_wait_s: float,
 ) -> None:
     grace_s = closure_grace_s(deadline - SYSTEM_TIMERS.monotonic(), cleanup_wait_s)
-    outcome, reason = run_closure(command.home, grace_s, SHELL_SESSION_KILL_WAIT_S)
+    outcome, reason = run_closure(
+        command.home,
+        grace_s,
+        SHELL_SESSION_KILL_WAIT_S,
+        own_pid=command.pid,
+        timers=command.timers,
+    )
     settle_closure(
         outcome,
         reason,
@@ -297,6 +308,12 @@ def settle_forced_closure(outcome: closure.Outcome) -> None:
 #
 # Force skips owner notices and drain guarantees. A surviving shell still fails it; known job
 # leftovers remain diagnostics.
-def force_close_shell_sessions(home: Path) -> None:
-    outcome, _reason = run_closure(home, 0.0, SHELL_SESSION_KILL_WAIT_S)
+def force_close_shell_sessions(command: CommandRuntime) -> None:
+    outcome, _reason = run_closure(
+        command.home,
+        0.0,
+        SHELL_SESSION_KILL_WAIT_S,
+        own_pid=command.pid,
+        timers=command.timers,
+    )
     settle_forced_closure(outcome)
