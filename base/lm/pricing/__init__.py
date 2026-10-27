@@ -1,72 +1,71 @@
-"""Versioned LLM pricing archive + deterministic quote selection.
-
-``pricing_catalog_archive.json`` is the reviewed catalog source. It preserves
-effective intervals, input-token tiers, recurring UTC windows, and provenance;
-provider plugins mirror that complete shape for chat models, while catalog-only
-services such as embeddings continue to price directly from the archive. Both
-sources use the same parser and deterministic selection path.
-``load_archive`` reads the archive.
-``quote`` returns the selected rates with their cost atomically, and
-``cost_usd`` remains the compatibility surface for existing readers. Schema v2
-requires each catalog entry to identify its vendor; the cross-line contract
-lives in ``pricing_catalog_schema.md``.
-
-## Cache hit vs miss must be computed separately
-
-Cache-hit input can be 30-120x cheaper than cache-miss input; in
-multi-turn re-send same prefix the actual cache hit rate can be ~98%.
-Using a 2-tuple (in, out) computes the entire `in` at cache-miss rate
-and overestimates total cost by 30-50x — history: the same bug in
-a batch run once reported $56.38 for a 30-case
-SWE-bench, actual was $0.8; fix in PR #322 / commit 5c85b74. So the
-legacy price tuple is `(cache_miss, cache_hit, out)` USD/M; optional cache-write
-rates separately price creation by TTL without changing that tuple.
-
-Every model entry carries its own official source URL and verification date.
-Providers with machine-readable pricing can be reconciled by adapters; providers
-without one remain reviewed catalog updates. Runtime never scrapes pricing pages.
-
-## DeepSeek reasoning tokens
-
-DeepSeek's reasoning tokens count into output — billed at the merged
-output rate; no separation between reasoning vs answer
-(usage_metadata reports separately but the underlying rate is the
-same).
-
-## Qwen: flat tiers only, and never derive a USD rate
-
-A tier boundary here is an exact token count and the catalog validates gapless
-coverage, but Alibaba's docs express Qwen boundaries only as `Input<=256k` /
-`256k<Input<=1m` — the token value of "256K" is published nowhere. Guessing
-262,144 against 256,000 misprices ~3x in the band between them, so a
-length-tiered Qwen must not be registered off the docs website alone. All
-three registered models sidestep this: an account's own `GET /api/v1/models`
-reports `"range_name": "Default"` for each, i.e. a single flat tier with no
-boundary to guess. That endpoint, not the docs prose, is the authority on
-tiering.
-
-**Do not convert CNY prices.** Alibaba publishes USD per model rather than
-converting at one rate, and the implied rates diverge — qwen3.8-max's USD works
-out to ~7.27 CNY/USD while qwen3.8-27b's is ~7.08. Deriving 27b from its CNY
-figures at max's rate produced 0.4125/1.65/0.0825 against the published
-0.424/1.696/0.085, a ~3% error baked permanently into every cost row. Read the
-model page's own USD column.
-
-Rates are also region-specific, and the endpoint is configurable
-(`MEIVA_DASHSCOPE_BASE_URL`): these entries are Beijing, and Singapore prices the
-same models differently (qwen3.8-max $2.00/$0.25/$6.00 against Beijing's
-$1.65/$0.206/$4.951). Repointing the base URL at another region means
-re-checking this catalog, not just the URL.
-
-## qwen3.8-flash uses published Beijing USD
-
-The Model Studio EN model page for qwen3.8-flash landed (checked 2026-09-02)
-and publishes the Beijing USD column: $0.113 / $0.014 / $0.382. The catalog
-now uses those figures rather than QwenCloud's $0.16 / $0.016 / $0.47, which
-tracked the Singapore column and overstated Beijing cost. This is a published
-USD column, not a CNY conversion, so the no-conversion rule above remains
-intact.
-"""
+# meiva:note
+# Versioned LLM pricing archive + deterministic quote selection.
+#
+# ``pricing_catalog_archive.json`` is the reviewed catalog source. It preserves
+# effective intervals, input-token tiers, recurring UTC windows, and provenance;
+# provider plugins mirror that complete shape for chat models, while catalog-only
+# services such as embeddings continue to price directly from the archive. Both
+# sources use the same parser and deterministic selection path.
+# ``quote`` returns the selected rates with their cost atomically, and
+# ``cost_usd`` remains the compatibility surface for existing readers. Schema v2
+# requires each catalog entry to identify its vendor; the cross-line contract
+# lives in ``pricing_catalog_schema.md``.
+#
+# ## Cache hit vs miss must be computed separately
+#
+# Cache-hit input can be 30-120x cheaper than cache-miss input; in
+# multi-turn re-send same prefix the actual cache hit rate can be ~98%.
+# Using a 2-tuple (in, out) computes the entire `in` at cache-miss rate
+# and overestimates total cost by 30-50x — history: the same bug in
+# a batch run once reported $56.38 for a 30-case
+# SWE-bench, actual was $0.8; fix in PR #322 / commit 5c85b74. So the
+# legacy price tuple is `(cache_miss, cache_hit, out)` USD/M; optional cache-write
+# rates separately price creation by TTL without changing that tuple.
+#
+# Every model entry carries its own official source URL and verification date.
+# Providers with machine-readable pricing can be reconciled by adapters; providers
+# without one remain reviewed catalog updates. Runtime never scrapes pricing pages.
+#
+# ## DeepSeek reasoning tokens
+#
+# DeepSeek's reasoning tokens count into output — billed at the merged
+# output rate; no separation between reasoning vs answer
+# (usage_metadata reports separately but the underlying rate is the
+# same).
+#
+# ## Qwen: flat tiers only, and never derive a USD rate
+#
+# A tier boundary here is an exact token count and the catalog validates gapless
+# coverage, but Alibaba's docs express Qwen boundaries only as `Input<=256k` /
+# `256k<Input<=1m` — the token value of "256K" is published nowhere. Guessing
+# 262,144 against 256,000 misprices ~3x in the band between them, so a
+# length-tiered Qwen must not be registered off the docs website alone. All
+# three registered models sidestep this: an account's own `GET /api/v1/models`
+# reports `"range_name": "Default"` for each, i.e. a single flat tier with no
+# boundary to guess. That endpoint, not the docs prose, is the authority on
+# tiering.
+#
+# **Do not convert CNY prices.** Alibaba publishes USD per model rather than
+# converting at one rate, and the implied rates diverge — qwen3.8-max's USD works
+# out to ~7.27 CNY/USD while qwen3.8-27b's is ~7.08. Deriving 27b from its CNY
+# figures at max's rate produced 0.4125/1.65/0.0825 against the published
+# 0.424/1.696/0.085, a ~3% error baked permanently into every cost row. Read the
+# model page's own USD column.
+#
+# Rates are also region-specific, and the endpoint is configurable
+# (`MEIVA_DASHSCOPE_BASE_URL`): these entries are Beijing, and Singapore prices the
+# same models differently (qwen3.8-max $2.00/$0.25/$6.00 against Beijing's
+# $1.65/$0.206/$4.951). Repointing the base URL at another region means
+# re-checking this catalog, not just the URL.
+#
+# ## qwen3.8-flash uses published Beijing USD
+#
+# The Model Studio EN model page for qwen3.8-flash landed (checked 2026-09-02)
+# and publishes the Beijing USD column: $0.113 / $0.014 / $0.382. The catalog
+# now uses those figures rather than QwenCloud's $0.16 / $0.016 / $0.47, which
+# tracked the Singapore column and overstated Beijing cost. This is a published
+# USD column, not a CNY conversion, so the no-conversion rule above remains
+# intact.
 
 from __future__ import annotations
 
