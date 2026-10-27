@@ -8,16 +8,21 @@ import to read the world.
 
 What is left:
 
-- Every production `MeivaContext` root fills `rng` (`MeivaContext.rng`, `require_rng()`):
-  `meiva/boot.py` (`launched_context`, `OwnedBoot.new_context`), `agent/execution/child.py`,
-  `schedules/jobs/entry.py`, `services/agent_runner/agent_host/lifecycle/configuration.py` and
-  `host.py`, `services/wake/schedule_manager/runner.py`. A root whose identifiers must stay unique
-  across processes hands in a `random.SystemRandom`.
-- `bus()` takes `current_context().require_rng()`; `SamplingPolicyLike.rng` and
-  `InertSamplingPolicy.rng` go away, and `settings.py` leaves `[roots]`. The commit that added the
-  installation-backed lookup answered the `root-middle-layer` hint with this item.
-- An AST test asserts that every non-test `MeivaContext(` call that passes `clock_factory=` also
-  passes `rng=`, so a root that forgets the generator fails in CI instead of at the first
-  `require_rng()`.
+- Every production `MeivaContext` root fills `rng` (`MeivaContext.rng`, `require_rng()`),
+  `meiva_home` and `user_home`. Done: `agent/execution/child.py`, `schedules/jobs/entry.py`,
+  the agent host (`host.py`, with `HostPolicy.user_home`) and
+  `services/wake/schedule_manager/runner.py`. Left: `meiva/boot.py` (`launched_context`,
+  `OwnedBoot.new_context`), which the CLI lane fills in #7282. A root that needs the generator
+  unpredictable and not copied by a fork hands in a `random.SystemRandom`.
+- `require_new_id()` returns the 32-character hex form of `new_uuid(rng)`. Its body repeats that
+  function today; `base/clock/ids.py` (with `CommandRuntime.new_id()`) is not on main until the
+  CLI lane's #7187 lands, and the body becomes that import then.
+- #7282 moves `bus()` to the context's own bus (`current_context().require_bus()`). Once it is on
+  main nothing reads `SamplingPolicyLike.rng` or `InertSamplingPolicy.rng`: they go away here,
+  `settings.py` leaves `[roots]`, and the `root-middle-layer` hint that the jitter change
+  answered for that file is closed.
+- An AST test asserts that every non-test `MeivaContext(` (or `replace(context, ...)`) call that
+  passes `clock_factory=` also passes `rng=`, `user_home=` and `meiva_home=`, so a root that
+  forgets one fails in CI instead of at the first `require_*()`. It lands with the last root.
 
 This document changes no runtime behavior.

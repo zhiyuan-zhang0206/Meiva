@@ -5,6 +5,7 @@
 from __future__ import annotations
 
 import os
+import random
 import sys
 from collections.abc import Callable, Sequence
 from pathlib import Path
@@ -39,6 +40,9 @@ def _bind_schedule_actor(
     clients: ClientSet,
     clock_factory: Callable[[], Clock],
     machine: MachineIdentityReader,
+    home: Path,
+    user_home: Path,
+    rng: random.Random,
 ) -> None:
     process_context.bind_context(
         MeivaContext(
@@ -46,6 +50,9 @@ def _bind_schedule_actor(
             clients=clients,
             machine=machine,
             clock_factory=clock_factory,
+            meiva_home=home,
+            user_home=user_home,
+            rng=rng,
         )
     )
 
@@ -69,13 +76,20 @@ def run(schedule_id: int, revision: int | None = None) -> int:
         return Clock(clock_config_from_boot(config), timers=SYSTEM_TIMERS)
 
     clients = clients_over(config, machine, database)
+    home = meiva_home()
     primary: BaseException | None = None
     try:
         # meiva:note
         # The script's `meiva.agents.*` calls attribute to the schedule: bind its actor before
         # the engine opens any history for it.
         _bind_schedule_actor(
-            schedule_id, clients=clients, clock_factory=clock_factory, machine=machine
+            schedule_id,
+            clients=clients,
+            clock_factory=clock_factory,
+            machine=machine,
+            home=home,
+            user_home=Path.home(),
+            rng=random.SystemRandom(),
         )
         return engine.run(
             schedule_id,
@@ -85,7 +99,7 @@ def run(schedule_id: int, revision: int | None = None) -> int:
                 inputs=ScheduleInputs(database, clients.event_pipeline, image, machine=machine),
                 plugins=engine.PluginInputs(config=config, machine=machine, clients=clients),
                 policy=StallPolicy(timeout_s=config.view.gateway.schedule_stall_timeout_seconds),
-                home=meiva_home(),
+                home=home,
                 pid=os.getpid(),
             ),
         )
