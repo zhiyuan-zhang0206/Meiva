@@ -5,7 +5,6 @@ from pathlib import Path
 
 import pytest
 
-from base.paths import meiva_home
 from services.backup.walg import backups
 from services.backup.walg.backups import Backup, BackupChainError, chain_of, parse_backups
 from services.backup.walg.tests.support import Sandbox, fixture_text, make_sandbox
@@ -89,7 +88,7 @@ def test_listing_asks_wal_g_for_the_detailed_json(
     sandbox: Sandbox = make_sandbox(tmp_path, monkeypatch)
     sandbox.put("backups.json", fixture_text("backup-list.json"))
 
-    listed = backups.list_backups(path=sandbox.path, home=meiva_home())
+    listed = backups.list_backups(path=sandbox.path, home=sandbox.home)
 
     assert sandbox.calls() == ["backup-list --detail --json"]
     assert len(listed) == 4

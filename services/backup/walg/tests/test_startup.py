@@ -6,7 +6,6 @@ from pathlib import Path
 import pytest
 from loguru import logger
 
-from base.paths import meiva_home
 from services.backup.walg import probe, startup
 from services.backup.walg.archive import expected_for
 from services.backup.walg.pg_target import PgTarget
@@ -57,7 +56,7 @@ def test_a_postgres_launched_with_the_configured_settings_is_silent(
             machine="macmini",
             path=sandbox.path,
             admin=probe.admin_connection_to(pg.target),
-            home=meiva_home(),
+            home=sandbox.home,
         )
 
     assert message is None
@@ -75,10 +74,10 @@ def test_a_postgres_launched_with_other_settings_names_the_machine_and_both_valu
             machine="macmini",
             path=sandbox.path,
             admin=probe.admin_connection_to(pg.target),
-            home=meiva_home(),
+            home=sandbox.home,
         )
 
-    expected = expected_for(sandbox.path, home=meiva_home())
+    expected = expected_for(sandbox.path, home=sandbox.home)
     assert expected is not None
     assert message is not None
     assert "macmini" in message
@@ -94,7 +93,7 @@ def test_a_server_that_cannot_be_read_warns_and_never_raises(
         machine="macmini",
         path=sandbox.path,
         admin=probe.admin_connection_to(_refused()),
-        home=meiva_home(),
+        home=sandbox.home,
     )
 
     assert message is None
@@ -119,7 +118,7 @@ def test_walg_off_skips_the_check_entirely(sandbox: Sandbox) -> None:
         machine="macmini",
         path=None,
         admin=_Dial(),  # pyright: ignore[reportArgumentType]
-        home=meiva_home(),
+        home=sandbox.home,
     )
     assert message is None
     assert entered == []

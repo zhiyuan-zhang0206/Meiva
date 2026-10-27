@@ -14,7 +14,6 @@ import pytest
 
 from base.cluster.machine.configured import ConfiguredMachineIdentity
 from base.config import ConfigBoot
-from base.paths.tests.homes import unit_home as unit_home
 from cli.commands.converge import walg as converge_walg_module
 from cli.commands.converge.os_jobs import ensure_walg_job
 from cli.commands.converge.plans.walg_plan import (
@@ -75,8 +74,13 @@ def test_the_step_sits_between_the_postgres_runtime_and_the_pooler_on_gateways()
 # meiva:note
 # A gateway context on a fresh lazy configuration owner, so a test can see what forces it.
 #
-# `home` is the process's home (`unit_home`), where the key pin lives; when WAL-G is on the
-# owner names a valid configuration and key file under it.
+# `home` is the home the converge acts on, which is not the process's (`converge_home`): the key pin
+# lives there, and when WAL-G is on the owner names a valid configuration and key file under it.
+@pytest.fixture
+def converge_home(tmp_path: Path) -> Path:
+    return tmp_path / "converge home"
+
+
 def _walg_ctx(
     ctx: ConvergeCtx, home: Path, *, enabled: bool = True, remote: bool = False
 ) -> ConvergeCtx:
@@ -109,21 +113,21 @@ def _config_file(on: ConvergeCtx) -> Path:
     return path
 
 
-def test_off_installs_and_writes_nothing(ctx: ConvergeCtx, unit_home: Path) -> None:
-    off = _walg_ctx(ctx, unit_home, enabled=False, remote=True)
+def test_off_installs_and_writes_nothing(ctx: ConvergeCtx, converge_home: Path) -> None:
+    off = _walg_ctx(ctx, converge_home, enabled=False, remote=True)
 
     # meiva:note
     # reaching the installer would download wal-g
     converge_walg_module.converge_walg(off)
 
-    assert not (unit_home / "backups").exists()
+    assert not (converge_home / "backups").exists()
     assert not off.config.is_full()
 
 
 def test_on_validates_pins_the_key_and_makes_the_state_directory(
-    ctx: ConvergeCtx, unit_home: Path
+    ctx: ConvergeCtx, converge_home: Path
 ) -> None:
-    on = _walg_ctx(ctx, unit_home)
+    on = _walg_ctx(ctx, converge_home)
 
     # meiva:note
     # The plan's installer step is left out: running it would download the pinned wal-g.
@@ -132,16 +136,18 @@ def test_on_validates_pins_the_key_and_makes_the_state_directory(
     )
 
     assert (
-        walg_config.pinned_key_id(unit_home)
+        walg_config.pinned_key_id(converge_home)
         == walg_config.read_config(_config_file(on)).key_fingerprint
     )
-    state = unit_home / "backups" / "walg"
+    state = converge_home / "backups" / "walg"
     assert state.is_dir() and state.stat().st_mode & 0o777 == 0o700
 
 
-def test_a_bad_configuration_fails_converge_not_postgres(ctx: ConvergeCtx, unit_home: Path) -> None:
-    on = _walg_ctx(ctx, unit_home)
-    key_file = unit_home / "secrets" / "walg" / "libsodium.key"
+def test_a_bad_configuration_fails_converge_not_postgres(
+    ctx: ConvergeCtx, converge_home: Path
+) -> None:
+    on = _walg_ctx(ctx, converge_home)
+    key_file = converge_home / "secrets" / "walg" / "libsodium.key"
     _config_file(on).write_text(
         json.dumps(valid_config(key_file, WALG_PREVENT_WAL_OVERWRITE="false"))
     )
@@ -151,17 +157,19 @@ def test_a_bad_configuration_fails_converge_not_postgres(ctx: ConvergeCtx, unit_
             (LoadWalgConfig(),), on, walg_config_file=_config_file(on)
         )
 
-    assert walg_config.pinned_key_id(unit_home) is None, "an unusable configuration pins nothing"
+    assert walg_config.pinned_key_id(converge_home) is None, (
+        "an unusable configuration pins nothing"
+    )
 
 
 def test_a_different_key_than_the_pinned_one_fails_converge(
-    ctx: ConvergeCtx, unit_home: Path
+    ctx: ConvergeCtx, converge_home: Path
 ) -> None:
-    on = _walg_ctx(ctx, unit_home)
+    on = _walg_ctx(ctx, converge_home)
     converge_walg_module.execute_walg_plan(
         (LoadWalgConfig(),), on, walg_config_file=_config_file(on)
     )
-    (unit_home / "secrets" / "walg" / "libsodium.key").write_text("cd" * 32 + "\n")
+    (converge_home / "secrets" / "walg" / "libsodium.key").write_text("cd" * 32 + "\n")
 
     with pytest.raises(walg_config.WalgConfigError, match="is not the key this home pinned"):
         converge_walg_module.execute_walg_plan(
@@ -169,11 +177,11 @@ def test_a_different_key_than_the_pinned_one_fails_converge(
         )
 
 
-def test_a_remote_managed_data_plane_cannot_archive(ctx: ConvergeCtx, unit_home: Path) -> None:
+def test_a_remote_managed_data_plane_cannot_archive(ctx: ConvergeCtx, converge_home: Path) -> None:
     with pytest.raises(RuntimeError, match="remote-managed"):
-        converge_walg_module.converge_walg(_walg_ctx(ctx, unit_home, remote=True))
+        converge_walg_module.converge_walg(_walg_ctx(ctx, converge_home, remote=True))
 
-    assert not (unit_home / "backups").exists()
+    assert not (converge_home / "backups").exists()
 
 
 # meiva:note
