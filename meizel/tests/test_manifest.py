@@ -45,6 +45,9 @@ def code_for(make_repo: RepoFactory, manifest: str, code: str, extra: dict[str, 
         ('[roots]\n"a.py" = { kinds = ["environ"], why = "x", also = 1 }\n', "manifest-syntax"),
         ('[roots]\n"a.py" = { kinds = ["environ", "environ"], why = "x" }\n', "manifest-duplicate"),
         ("roots = 3\n", "manifest-syntax"),
+        ('[purity]\n"a.py" = "none"\n', "manifest-syntax"),
+        ('[purity]\n"." = "none"\n', "manifest-syntax"),
+        ('purity = "none"\n', "manifest-syntax"),
         ('[purity]\n"a.py" = { mode = "none" }\n', "manifest-syntax"),
         ('[purity]\n"a.py" = { mode = "none", why = " " }\n', "manifest-syntax"),
         ('[purity]\n"a.py" = { mode = "none", why = 3 }\n', "manifest-syntax"),
@@ -65,6 +68,14 @@ def test_malformed_manifests_fail_with_a_located_diagnostic(
     assert found, f"{code} not reported for {manifest!r}"
     assert {d.path for d in found} == {"pkg/meizel.toml"}
     assert all(d.line >= 1 for d in found)
+
+
+@pytest.mark.parametrize("manifest", ['[purity]\n"a.py" = "none"\n', 'purity = "none"\n'])
+def test_the_bare_none_is_refused_with_the_spelling_to_use(
+    make_repo: RepoFactory, manifest: str
+) -> None:
+    [found] = code_for(make_repo, manifest, "manifest-syntax")
+    assert '{ mode = "none", why = "..." }' in found.message
 
 
 def test_an_underscore_child_cannot_be_exported(make_repo: RepoFactory) -> None:
