@@ -101,6 +101,16 @@ def read_mcp_servers(disabled: Sequence[str], *, home: Path) -> tuple[McpServer,
     )
 
 
+# meiva:note
+# The docstring of `meiva.self.compact`, the SDK-owned contract a summary model that cannot call
+# tools is shown. Imported on call so that building a prompt does not make the `self` namespace
+# resident.
+def read_compact_doc() -> str | None:
+    from meiva.self import compact
+
+    return compact.__doc__
+
+
 def read_plugin_expansions() -> tuple[str, ...]:
     from meiva.sdk_surface import install
 
