@@ -3563,11 +3563,14 @@ groups:
           metric: root_diagnostic_venv
           team: meiva-ops
         annotations:
-          summary: "{{ $labels.machine }}: Root venv diagnostic non-alive on consecutive rounds ({{ $values.C }} in 3m)"
+          summary: "{{ $labels.machine }}: Root venv diagnostic measured a broken checkout ({{ $values.C }} in 3m)"
           description: >-
-            The root checkout's dependency/import check returned down or unavailable on at least two samples
-            in three minutes (60s cadence). Two consecutive samples filter single deadline misses under host
-            churn. Inspect the root_diagnostic event detail (venv violations, or uv missing).
+            The root checkout's dependency/import check ran and found it damaged: at least one sample in
+            three minutes (60s cadence) returned down, or found the port taken by something else. A sample
+            that reached no verdict at all — a busy host that never let the check finish, or one where it
+            could not run — is not a finding and is read by meiva-ops-root-diagnostic-no-verdict instead,
+            so a loaded machine can no longer report itself as a broken venv. Inspect the root_diagnostic
+            event detail for the violations.
         data:
           - refId: A
             datasourceUid: loki
@@ -3581,7 +3584,7 @@ groups:
               expr: >-
                 sum by (machine) (count_over_time({service_name="unknown_service", event_name="root_diagnostic"} | json |
                 cluster=".meiva" | category="telemetry" | attributes_diagnostic="venv" |
-                attributes_verdict!="alive" [3m]))
+                attributes_verdict=~"down|port-taken" [3m]))
               instant: true
               queryType: instant
             relativeTimeRange:
@@ -3611,7 +3614,7 @@ groups:
               conditions:
                 - evaluator:
                     type: gt
-                    params: [1]
+                    params: [0]
                   operator:
                     type: and
                   query:
@@ -3632,11 +3635,13 @@ groups:
           metric: root_diagnostic_brew_pin
           team: meiva-ops
         annotations:
-          summary: "{{ $labels.machine }}: Root brew-pin diagnostic non-alive on consecutive rounds ({{ $values.C }} in 3m)"
+          summary: "{{ $labels.machine }}: Root brew-pin diagnostic measured unpinned formulae ({{ $values.C }} in 3m)"
           description: >-
-            Approved Homebrew formulae are unpinned, or the brew inspection was unavailable, on at least two
-            samples in three minutes (60s cadence). Two samples filter a single host-stall deadline miss.
-            Inspect the root_diagnostic event detail for the unpinned formulae.
+            Approved Homebrew formulae are installed and unpinned: at least one sample in three minutes
+            (60s cadence) returned down, or found the query's port taken. A sample that reached no verdict
+            at all — a busy host that never let the query finish, or one where brew could not be inspected
+            — is not a finding and is read by meiva-ops-root-diagnostic-no-verdict instead. Inspect the
+            root_diagnostic event detail for the unpinned formulae.
         data:
           - refId: A
             datasourceUid: loki
@@ -3650,7 +3655,7 @@ groups:
               expr: >-
                 sum by (machine) (count_over_time({service_name="unknown_service", event_name="root_diagnostic"} | json |
                 cluster=".meiva" | category="telemetry" | attributes_diagnostic="brew-pin" |
-                attributes_verdict!="alive" [3m]))
+                attributes_verdict=~"down|port-taken" [3m]))
               instant: true
               queryType: instant
             relativeTimeRange:
@@ -3680,7 +3685,85 @@ groups:
               conditions:
                 - evaluator:
                     type: gt
-                    params: [1]
+                    params: [0]
+                  operator:
+                    type: and
+                  query:
+                    params: [C]
+
+      # ── meiva-ops-root-diagnostic-no-verdict: the diagnostic reached no verdict at all — a host too busy to let it finish, or one where the check could not run. Not evidence about the environment, and not something to swallow either (2026-10-27, #5656) ──
+      # Three rounds: the debounce this family used before the per-class split (two samples) could not
+      # tell a loaded host from a broken one, and one sample of "no verdict" says nothing. Three
+      # samples at the 60s diagnostic cadence is a three-minute window, matched by the query's own
+      # window so a run of misses is what reaches the threshold, not a slow trickle.
+      - uid: meiva-ops-root-diagnostic-no-verdict
+        title: "Root diagnostic reached no verdict (host busy or unmeasurable)"
+        condition: D
+        for: 0m
+        keepFiringFor: *recovery-window
+        missing_series_evals_to_resolve: *fast-missing-evals
+        noDataState: OK
+        execErrState: OK
+        labels:
+          severity: warning
+          ruleUID: meiva-ops-root-diagnostic-no-verdict
+          metric: root_diagnostic_no_verdict
+          team: meiva-ops
+        annotations:
+          summary: "{{ $labels.machine }}: root {{ $labels.attributes_diagnostic }} diagnostic reached no verdict on 3 rounds in 3m ({{ $values.C }} samples)"
+          description: >-
+            The diagnostic ran three rounds in a row without a verdict: inconclusive when its
+            subcommands spent the observation deadline without finishing, unavailable when it could not
+            inspect at all. Nothing was read, so this claims nothing about the environment — that
+            diagnostic's own failure rule stays silent on exactly these samples — but a host busy enough
+            to starve a read-only check for three minutes, or one where the check cannot run, is not
+            noise either. Read the root_diagnostic events at INFO for the legs and deadlines that
+            expired; when they name a missing tool or credential rather than time, fix that. A real
+            finding reports beside this, on the diagnostic's failure rule.
+        data:
+          - refId: A
+            datasourceUid: loki
+            queryType: ""
+            model:
+              refId: A
+              datasource:
+                type: loki
+                uid: loki
+              editorMode: code
+              expr: >-
+                sum by (machine, attributes_diagnostic) (count_over_time({service_name="unknown_service",
+                event_name="root_diagnostic"} | json | cluster=".meiva" | category="telemetry" |
+                attributes_verdict=~"inconclusive|unavailable" [3m]))
+              instant: true
+              queryType: instant
+            relativeTimeRange:
+              from: 180
+              to: 0
+          - refId: C
+            datasourceUid: __expr__
+            queryType: ""
+            model:
+              refId: C
+              datasource:
+                type: __expr__
+                uid: __expr__
+              type: reduce
+              expression: A
+              reducer: mean
+          - refId: D
+            datasourceUid: __expr__
+            queryType: ""
+            model:
+              refId: D
+              datasource:
+                type: __expr__
+                uid: __expr__
+              type: threshold
+              expression: C
+              conditions:
+                - evaluator:
+                    type: gt
+                    params: [2]
                   operator:
                     type: and
                   query:
@@ -4975,7 +5058,7 @@ groups:
           metric: root_diagnostic_browser_reach
           team: meiva-ops
         annotations:
-          summary: "{{ $labels.machine }}: Root browser-reach diagnostic non-alive on 3+ consecutive probes ({{ $values.C }} in 16m)"
+          summary: "{{ $labels.machine }}: Root browser-reach diagnostic failing on 3+ consecutive probes ({{ $values.C }} in 16m)"
           description: >-
             The browser canary (CDP page fetch of the gateway URL) failed while the host baseline succeeded,
             or its prerequisite was unavailable, on at least three samples in sixteen minutes. The sample
@@ -4995,7 +5078,7 @@ groups:
               expr: >-
                 sum by (machine) (count_over_time({service_name="unknown_service", event_name="root_diagnostic"} | json |
                 cluster=".meiva" | category="telemetry" | attributes_diagnostic="browser-reach" |
-                attributes_verdict!="alive" [16m]))
+                attributes_verdict=~"down|unavailable|port-taken" [16m]))
               instant: true
               queryType: instant
             relativeTimeRange:

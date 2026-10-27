@@ -600,7 +600,9 @@ def test_station_resolution_failure_is_unavailable_and_does_not_send(unit_home: 
 
 def test_missing_brew_probe_is_unavailable_not_an_empty_healthy_set(tmp_path: Path) -> None:
     with pytest.raises(FileNotFoundError):
-        probes.brew_pins(brew_binary=str(tmp_path / "missing-brew"))
+        probes.brew_pins(
+            environment={"PATH": "/bin:/usr/bin"}, brew_binary=str(tmp_path / "missing-brew")
+        )
 
 
 def test_redis_acl_uses_runtime_ping_without_native_custody() -> None:
