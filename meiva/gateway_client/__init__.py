@@ -159,7 +159,7 @@ def spawn(
         ),
         idempotency_key,
     )
-    receipt = plans.spawn_receipt(_run(plan, _ctx(None)).json())
+    receipt = plans.spawn_receipt(_transport.json_object(_run(plan, _ctx(None))))
     if receipt.withdrawn_model is not None:
         # The spawner-visible receipt for a withdrawal settlement (task #4306):
         # the gateway stored the registered fallback, but this template still
@@ -217,13 +217,13 @@ def send_system_note(
         content=content, note_tag=note_tag, source=source, task_id=task_id, resurrect=resurrect
     )
     plan = plans.system_note_request(agent_id, note, idempotency_key)
-    return int(_run(plan, _ctx(None)).json()["inbound_id"])
+    return int(_transport.json_object(_run(plan, _ctx(None)))["inbound_id"])
 
 
 def get_last_message(agent_id: int, caller: str) -> str | None:
     """GET /api/agents/{id}/last-message → the agent's most recent AI turn text."""
     plan = Request("GET", f"/api/agents/{agent_id}/last-message", params={"caller": caller})
-    return _run(plan, _ctx(None)).json()["text"]
+    return _transport.json_object(_run(plan, _ctx(None)))["text"]
 
 
 def get_neighbors(agent_id: int, *, depth: int, limit: int) -> list[dict[str, Any]]:
@@ -235,7 +235,7 @@ def get_neighbors(agent_id: int, *, depth: int, limit: int) -> list[dict[str, An
     plan = Request(
         "GET", f"/api/agents/{agent_id}/neighbors", params={"depth": depth, "limit": limit}
     )
-    return _run(plan, _ctx(None)).json()["neighbors"]
+    return _transport.json_object(_run(plan, _ctx(None)))["neighbors"]
 
 
 def get_ancestors(agent_id: int) -> list[dict[str, Any]]:
@@ -244,7 +244,7 @@ def get_ancestors(agent_id: int) -> list[dict[str, Any]]:
     top, so the neighbors `depth`/`limit` params do not apply). Same dict
     shape as get_neighbors."""
     plan = Request("GET", f"/api/agents/{agent_id}/neighbors", params={"depth": 1, "limit": 20})
-    return _run(plan, _ctx(None)).json()["ancestors"]
+    return _transport.json_object(_run(plan, _ctx(None)))["ancestors"]
 
 
 # The born-chain read runs at every context establishment, on the agent
@@ -271,7 +271,7 @@ def get_born_chain(agent_id: int, *, context: MeivaContext | None = None) -> lis
         timeout_seconds=_BORN_CHAIN_TIMEOUT_S,
         max_retries=1,
     )
-    return _run(plan, _ctx(context)).json()["ancestors"]
+    return _transport.json_object(_run(plan, _ctx(context)))["ancestors"]
 
 
 def list_agents(
@@ -283,7 +283,7 @@ def list_agents(
 ) -> dict[str, Any]:
     """Read one bounded directory page; the caller owns cursor traversal."""
     plan = plans.list_agents_request(scope=scope, query=query, before_id=before_id, limit=limit)
-    return _run(plan, _ctx(None)).json()
+    return _transport.json_object(_run(plan, _ctx(None)))
 
 
 def patch_label(agent_id: int, label: str, *, source: Literal["user", "self"] = "self") -> None:
@@ -297,7 +297,7 @@ def patch_label(agent_id: int, label: str, *, source: Literal["user", "self"] = 
 
 def get_agent(agent_id: int) -> dict[str, Any]:
     """Read an agent directly, independently of directory scope or pagination."""
-    return _run(Request("GET", f"/api/agents/{agent_id}"), _ctx(None)).json()
+    return _transport.json_object(_run(Request("GET", f"/api/agents/{agent_id}"), _ctx(None)))
 
 
 def terminate(
@@ -333,7 +333,7 @@ def terminate(
         force=force,
         kill_all_shell_sessions=kill_all_shell_sessions,
     )
-    return _run(plan, _ctx(None)).json()
+    return _transport.json_object(_run(plan, _ctx(None)))
 
 
 def restart(agent_id: int, *, source: str | None = None) -> str:
@@ -343,23 +343,21 @@ def restart(agent_id: int, *, source: str | None = None) -> str:
     an agent or system identity must supply an explicit source.
     """
     plan = agent_plans.restart_request(agent_id, _actor_or(source))
-    return _run(plan, _ctx(None)).json()["status"]
+    return _transport.json_object(_run(plan, _ctx(None)))["status"]
 
 
 # meiva:note
 # POST /api/agents/{id}/cancel → status string (`cancelled` / `not_running`).
 def cancel(agent_id: int) -> str:
-    return _run(Request("POST", f"/api/agents/{agent_id}/cancel", body={}), _ctx(None)).json()[
-        "status"
-    ]
+    response = _run(Request("POST", f"/api/agents/{agent_id}/cancel", body={}), _ctx(None))
+    return _transport.json_object(response)["status"]
 
 
 # meiva:note
 # POST /api/agents/{id}/compact → the queued `compact_request` inbound id.
 def compact(agent_id: int) -> int:
-    return _run(Request("POST", f"/api/agents/{agent_id}/compact", body={}), _ctx(None)).json()[
-        "inbound_id"
-    ]
+    response = _run(Request("POST", f"/api/agents/{agent_id}/compact", body={}), _ctx(None))
+    return _transport.json_object(response)["inbound_id"]
 
 
 def resurrect(agent_id: int, *, prompt: str, resurrected_by: str | None = None) -> str:
@@ -372,7 +370,7 @@ def resurrect(agent_id: int, *, prompt: str, resurrected_by: str | None = None) 
     was woken up and what to do.
     """
     plan = agent_plans.resurrect_request(agent_id, prompt, _actor_or(resurrected_by))
-    return _run(plan, _ctx(None)).json()["status"]
+    return _transport.json_object(_run(plan, _ctx(None)))["status"]
 
 
 def register_page(
@@ -398,7 +396,7 @@ def register_page(
         name=name, port=port, host=host, title=title, serve_dir=serve_dir, ttl_seconds=ttl_seconds
     )
     plan = agent_plans.register_page_request(agent_id, page, uuid.uuid4().hex)
-    return _run(plan, _ctx(None)).json()
+    return _transport.json_object(_run(plan, _ctx(None)))
 
 
 def close_page(agent_id: int, name: str) -> bool:
@@ -418,9 +416,9 @@ def close_page(agent_id: int, name: str) -> bool:
 
 def list_open_pages(agent_id: int) -> list[dict[str, Any]]:
     """GET /api/agents/{id}/pages → the agent's open PageRow dicts."""
-    return list(_run(Request("GET", f"/api/agents/{agent_id}/pages"), _ctx(None)).json())
+    return _transport.json_rows(_run(Request("GET", f"/api/agents/{agent_id}/pages"), _ctx(None)))
 
 
 def list_machines() -> list[dict[str, Any]]:
     """GET /api/cluster/machines → list of {name, description, live} dicts."""
-    return list(_run(Request("GET", "/api/cluster/machines"), _ctx(None)).json())
+    return _transport.json_rows(_run(Request("GET", "/api/cluster/machines"), _ctx(None)))

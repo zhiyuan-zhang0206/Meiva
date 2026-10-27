@@ -78,5 +78,5 @@ def memory_search(
             score=float(r["score"]),
             chunk=r["chunk"],
         )
-        for r in resp.json()["results"]
+        for r in transport.json_object(resp)["results"]
     ]
