@@ -1,6 +1,7 @@
 exports = ["derive.py", "jobs.py", "model.py", "reader.py", "source.py"]
 
 [purity]
+"backfill.py" = { mode = "none", why = "the operator command that prepares the projection of the named agents: it boots the configuration, opens the database and drains index_next for each agent; what it accepts is decided by request_rules.py" }
 "derive.py" = "strict"
 "jobs.py" = "strict"
 "model.py" = "strict"
@@ -19,14 +20,3 @@ exports = ["derive.py", "jobs.py", "model.py", "reader.py", "source.py"]
 
 [roots]
 "backfill.py" = { kinds = ["clock", "settings"], why = "Service or operator process entry boots configuration before composing its resources; builds the process clock from SYSTEM_TIMERS" }
-
-[debt.impure-call]
-"reader.py#import fastapi" = 1
-
-[debt.impure-edge]
-"backfill.py#base/agents/history/checkpoint_segment.py" = 1
-"backfill.py#base/config/__init__.py" = 1
-"backfill.py#base/db/__init__.py" = 1
-"backfill.py#base/db/code_version_gate.py" = 1
-"backfill.py#base/native_process/code_version.py" = 1
-"backfill.py#base/native_process/loaded_commit.py" = 1

@@ -6,6 +6,10 @@ from collections.abc import Awaitable, Callable
 
 from base.api_contracts.agent_contract import DrivenContext
 from services.agent_runner.agent_host import TurnOutcome
+from services.agent_runner.agent_host.invocation.failure_shapes import (
+    cleanup_failure,
+    sole_invocation_error,
+)
 
 
 # meiva:note
@@ -34,22 +38,13 @@ async def drive_context[C: DrivenContext](
                     # draining. Keep the original failure alongside its worker error.
                     raise primary from None
                 except BaseException as cleanup:
-                    raise BaseExceptionGroup(
-                        "invocation and publisher cleanup failed", [primary, cleanup]
-                    ) from None
+                    raise cleanup_failure(primary, cleanup) from None
                 raise
             else:
                 await publisher.aclose()
                 return outcome
     except BaseExceptionGroup as failures:
-        # meiva:note
-        # TaskGroup wraps a body failure even when its worker exits cleanly.
-        # Keep host lifecycle/stall classification on the original exception;
-        # a worker failure or multiple failures still leave as the full group.
-        if (
-            invocation_error is not None
-            and len(failures.exceptions) == 1
-            and failures.exceptions[0] is invocation_error
-        ):
-            raise invocation_error from None
+        original = sole_invocation_error(failures, invocation_error)
+        if original is not None:
+            raise original from None
         raise

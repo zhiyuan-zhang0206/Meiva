@@ -18,6 +18,7 @@ from base.agents.messages.envelope import validate_source
 from base.db.protocols import DatabaseLike as Database
 from base.db.protocols import SyncConnection
 from base.events.reads import AuditFilter, query_audit_rows
+from services.derived.insights.run_timeline.request_rules import TimelineRequestError
 from services.derived.insights.run_timeline.schemas import (
     LinkKind,
     RunTimelineLink,
@@ -176,3 +177,24 @@ def read_content(
             if row is None
             else RunTimelineLinkContent(title=str(row[0]), content=str(row[1] or ""))
         )
+
+
+# meiva:note
+# The agent ids of the comma-separated `agents` filter, distinct and ascending.
+def parse_agent_ids(agents: str) -> list[int]:
+    try:
+        return sorted({int(part) for part in agents.split(",")})
+    except ValueError:
+        raise TimelineRequestError(422, "agents must be comma-separated integers") from None
+
+
+def check_link_window(from_: datetime, to: datetime) -> None:
+    if from_.tzinfo is None or to.tzinfo is None:
+        raise TimelineRequestError(422, "from and to must include a timezone offset")
+    if from_ >= to:
+        raise TimelineRequestError(422, "from must be earlier than to")
+
+
+def check_link_content_selector(inbound_id: int | None, notice_id: int | None) -> None:
+    if (inbound_id is None) == (notice_id is None):
+        raise TimelineRequestError(422, "give exactly one of inbound_id and notice_id")

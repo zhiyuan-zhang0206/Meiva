@@ -2,22 +2,21 @@ exports = ["projection", "router.py", "schemas.py", "tests"]
 
 [uses]
 "context.py" = ["history.py", "schemas.py"]
-"links.py" = ["schemas.py"]
+"links.py" = ["request_rules.py", "schemas.py"]
 "messages.py" = ["history.py", "projection", "schemas.py", "tokens.py"]
-"projection" = ["history.py", "schemas.py", "tokens.py"]
-"router.py" = ["context.py", "links.py", "messages.py", "projection", "schemas.py"]
-"tests" = ["context.py", "history.py", "links.py", "projection", "router.py", "schemas.py", "tokens.py"]
+"projection" = ["history.py", "request_rules.py", "schemas.py", "tokens.py"]
+"router.py" = ["context.py", "links.py", "messages.py", "projection", "request_rules.py", "schemas.py"]
+"tests" = ["context.py", "history.py", "links.py", "projection", "request_rules.py", "router.py", "schemas.py", "tokens.py"]
 "tokens.py" = ["history.py", "schemas.py"]
 
 [purity]
-"." = "strict-to-be"
+"." = "strict"
 "__init__.py" = "strict"
 "context.py" = "strict"
 "history.py" = "strict"
 "links.py" = "strict"
 "messages.py" = "strict"
+"request_rules.py" = "strict"
+"router.py" = { mode = "none", why = "the HTTP shell of the run-timeline API: it binds the routes, reads the snapshot and the slices through the reader and answers; what a request may ask is decided by request_rules.py" }
 "schemas.py" = "strict"
 "tokens.py" = "strict"
-
-[debt.impure-call]
-"router.py#import fastapi" = 1

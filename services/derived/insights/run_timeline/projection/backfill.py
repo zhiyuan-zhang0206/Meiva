@@ -16,16 +16,18 @@ from base.db.protocols import db_config_from_boot
 from base.native_process.code_version import CodeVersion
 from base.native_process.loaded_commit import LoadedCommit
 from services.derived.insights.run_timeline.projection.jobs import index_next
+from services.derived.insights.run_timeline.request_rules import (
+    distinct_in_order,
+    positive_agent_id,
+)
 
 
 def main() -> None:
     parser = argparse.ArgumentParser(
         description="Prepare derived Run Timeline rows for the named agents using the installed generation."
     )
-    parser.add_argument("agent_ids", nargs="+", type=int)
+    parser.add_argument("agent_ids", nargs="+", type=positive_agent_id)
     args = parser.parse_args()
-    if any(agent_id <= 0 for agent_id in args.agent_ids):
-        parser.error("agent ids must be positive")
     config = ConfigBoot()
     config.boot()
     version = CodeVersion(LoadedCommit.capture())
@@ -40,7 +42,7 @@ def main() -> None:
         clock=Clock(clock_config_from_boot(config), timers=SYSTEM_TIMERS),
         timestamps_enabled=config.view.general.message_timestamps,
     )
-    pending = list(dict.fromkeys(args.agent_ids))
+    pending = distinct_in_order(args.agent_ids)
     counts = dict.fromkeys(pending, 0)
     while pending:
         for agent_id in list(pending):
