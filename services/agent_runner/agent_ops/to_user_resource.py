@@ -1,6 +1,7 @@
 import asyncio
 import functools
 from concurrent.futures import ThreadPoolExecutor
+from pathlib import Path
 
 from psycopg_pool import ConnectionPool
 from pydantic import ValidationError
@@ -10,11 +11,13 @@ from ops.to_user import owned_workspace
 from services.agent_runner.agent_ops import in_flight
 
 
-def resource_response(body: bytes, *, pool: ConnectionPool, machine: str) -> tuple[int, bytes, str]:
+def resource_response(
+    body: bytes, *, pool: ConnectionPool, machine: str, home: Path
+) -> tuple[int, bytes, str]:
 
     try:
         request = ToUserReadRequest.model_validate_json(body)
-        workspace = owned_workspace(pool, request.agent_id, machine)
+        workspace = owned_workspace(pool, request.agent_id, machine, home=home)
         content = read_resource(workspace, request.references)
     except FileNotFoundError:
         return 404, b"Referenced file is no longer available", "text/plain"
@@ -28,6 +31,7 @@ async def resource_route(
     *,
     pool: ConnectionPool,
     machine: str,
+    home: Path,
     executor: ThreadPoolExecutor,
     dispatch_sem: asyncio.Semaphore,
     requests: in_flight.RequestTokens,
@@ -38,7 +42,7 @@ async def resource_route(
         async with dispatch_sem:
             future = asyncio.get_running_loop().run_in_executor(
                 executor,
-                functools.partial(resource_response, body, pool=pool, machine=machine),
+                functools.partial(resource_response, body, pool=pool, machine=machine, home=home),
             )
             in_flight.track_worker(future, workers=workers)
             return await asyncio.shield(future)

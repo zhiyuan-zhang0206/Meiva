@@ -13,7 +13,6 @@ CALLERS: dict[str, tuple[str, int]] = {
     "meiva_builtins/plugins/meiva_memory/setup.py": ("B2", 1),
     "cli/commands/_repo.py": ("C", 1),
     "ops/cluster/rpc.py": ("O", 1),
-    "ops/upload_delivery/__init__.py": ("O", 1),
     "scripts/entrypoints/agent.py": ("O", 1),
     "services/agent_runner/agent_ops/boot.py": ("S", 1),
 }

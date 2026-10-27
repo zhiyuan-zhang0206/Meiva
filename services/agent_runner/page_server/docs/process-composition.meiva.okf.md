@@ -17,7 +17,7 @@ unknown image stays unknown and cannot borrow a later checkout's version.
 
 One entry-owned database factory reads `db_config_from_boot` from the prepared
 `ConfigBoot` at each handle creation and passes that gate to each handle. The entry supplies its logging pipeline, validated live
-machine reader, database factory and image explicitly. `run(process_config=..., runtime=..., database=..., image=...)` still publishes its pidfile and health endpoint before creating the
+machine reader, database factory and image explicitly. `run(process_config=..., database=..., image=..., local_machine=..., home=...)` still publishes its pidfile (in `run_dir(home)`) and health endpoint before creating the
 pool, then supplies that same work handle to the dead-page loop.
 
 The existing page-server config and event bus stay at their original run

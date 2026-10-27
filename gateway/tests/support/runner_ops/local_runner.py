@@ -26,20 +26,25 @@ from collections.abc import Generator
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import contextmanager
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Any, cast
 
 import psycopg
 from psycopg_pool import ConnectionPool
 
+from base.agents.upload_delivery.paths import MAX_AGENT_UPLOAD_BYTES, MAX_AGENT_UPLOAD_FILES
 from base.clock.tests.seeded_rng import seeded_rng
-from base.cluster.machine import MachineIdentityReader
+from base.cluster.machine import GatewayAccess, MachineIdentityReader
 from base.config.service_read import ConfigAuthority
 from base.daemon.health import start_health_server, stop_health_server
 from base.db import Database
+from base.host.db_authority.unit import UnitIdentity
 from base.host.system.hostport import Host
 from base.lm.catalog import ModelCatalog
 from base.native_process.loaded_commit import LoadedCommit
+from base.paths import resolve_meiva_home
 from gateway.tests.support.runner_ops.ops_stub import OpsCall, RunnerOps, register_machine
+from ops.upload_delivery import ReceiverConfig
 from services.agent_runner.agent_ops import boot, in_flight
 from services.agent_runner.agent_ops.daemon import ops_route
 
@@ -89,6 +94,26 @@ class _Daemon:
 
 
 # meiva:note
+# The upload receiver of a stack whose tests never receive an upload: its gateway is a closed local
+# port, so a request that did reach it would fail loudly.
+def _unreachable_receiver(machine: str, home: Path) -> ReceiverConfig:
+    return ReceiverConfig(
+        unit=UnitIdentity(machine=machine, home=str(home.resolve())),
+        user_home=home / "user",
+        access=GatewayAccess(
+            gateway_url="http://127.0.0.1:1",
+            cluster_secret="local-runner-secret",  # noqa: S106
+            remote_plane=False,
+            machine_token=None,
+            launcher_profile=None,
+            gateway_home=False,
+        ),
+        quota_bytes=MAX_AGENT_UPLOAD_BYTES,
+        quota_files=MAX_AGENT_UPLOAD_FILES,
+    )
+
+
+# meiva:note
 # Bring up the daemon's serving stack on the running loop; every envelope is recorded on `runner`.
 async def _serve(
     runner: RunnerOps,
@@ -104,6 +129,7 @@ async def _serve(
     workers: in_flight.WorkerFutures = set()
     pool = boot.open_db_pool(database=lambda: database, authority=authority)
     executor = boot.op_thread_pool(authority=authority)
+    home = resolve_meiva_home()
     route = functools.partial(
         ops_route,
         active_ops={},
@@ -119,6 +145,8 @@ async def _serve(
         local_machine=machine,
         host=host,
         rng=seeded_rng(),
+        home=home,
+        receiver=_unreachable_receiver(machine.name(), home),
     )
 
     async def recorded(body: bytes) -> tuple[int, bytes, str]:

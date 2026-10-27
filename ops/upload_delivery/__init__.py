@@ -3,9 +3,8 @@
 # gateway holds, verify the files on disk, then acknowledge. It never overwrites a final.
 #
 # `copy_batch` is the shell: it takes every environmental fact as a value in its
-# `ReceiverConfig` and executes the plan `copy_plan` returns. `receive` is the one place
-# that still reads the process-wide home, settings and quota constants; it builds a config
-# per call and hands it down (the ops daemon's boot is meant to build it once).
+# `ReceiverConfig` and executes the plan `copy_plan` returns. The ops daemon builds the config once
+# at boot, where it reads the home, the OS user's home, the gateway access and the quota constants.
 
 from __future__ import annotations
 
@@ -24,15 +23,11 @@ from base.agents.upload_delivery.models import (
     Manifest,
     ReceiveRequest,
     UploadDeliveryConflictError,
-    current_unit,
 )
 from base.agents.upload_delivery.paths import (
-    MAX_AGENT_UPLOAD_BYTES,
-    MAX_AGENT_UPLOAD_FILES,
     agent_upload_dir,
 )
 from base.cluster.machine import GatewayAccess, gateway_api_base, gateway_auth_headers
-from base.cluster.machine.ambient import gateway_access_from_settings
 from base.db.transaction import ConnectionSource, write_transaction
 from base.host.db_authority.unit import UnitIdentity
 from base.host.net.http_dial import get as http_get
@@ -46,7 +41,7 @@ from ops.upload_delivery.copy_plan import (
     plan_objects,
 )
 
-__all__ = ["ReceiverConfig", "copy_batch", "receive"]
+__all__ = ["ReceiverConfig", "copy_batch"]
 
 
 # meiva:note
@@ -66,20 +61,6 @@ class ReceiverConfig:
     quota_files: int
     fetch_round_s: float = 120.0
     fetch_request_cap_s: float = 30.0
-
-
-# meiva:note
-# The composition entry the ops daemon dispatches `upload-receive-v1` to: it reads this
-# process's home, gateway access and quota constants, then runs the copy.
-def receive(pool: ConnectionSource, request: ReceiveRequest, *, local_machine: str) -> CopyProof:
-    config = ReceiverConfig(
-        unit=current_unit(local_machine=local_machine),
-        user_home=Path.home(),
-        access=gateway_access_from_settings(),  # ambient: O
-        quota_bytes=MAX_AGENT_UPLOAD_BYTES,
-        quota_files=MAX_AGENT_UPLOAD_FILES,
-    )
-    return copy_batch(pool, request, config)
 
 
 # meiva:note

@@ -8,12 +8,14 @@ import pytest
 from psycopg_pool import ConnectionPool
 
 from base.agents.tests.units import spawn_agent
-from base.cluster.machine import MachineIdentityReader
+from base.agents.upload_delivery.paths import MAX_AGENT_UPLOAD_BYTES, MAX_AGENT_UPLOAD_FILES
+from base.cluster.machine import GatewayAccess, MachineIdentityReader
 from base.cluster.machine.tests.identity import machine_identity as machine_identity
 from base.config.service_read import ConfigAuthority
 from base.config.tests.config_authority import config_authority as config_authority
 from base.db import Database
 from base.db.code_version_gate import ProcessDbGate
+from base.host.db_authority.unit import UnitIdentity
 from base.host.system.tests.fake_commands import fake_host
 from base.lm.catalog import ModelCatalog
 from base.native_process.loaded_commit import LoadedCommit
@@ -26,6 +28,7 @@ from base.sessions.pty.tests.pty_service import pty_service as pty_service
 from meiva.tests.fixtures.sdk import sdk_environment as sdk_environment
 from meiva.tests.fixtures.sdk import sdk_identity as sdk_identity
 from meiva.tests.fixtures.sdk import sdk_metering as sdk_metering
+from ops.upload_delivery import ReceiverConfig
 from services.agent_runner.agent_ops import boot
 from services.agent_runner.agent_ops.tests.ops_support import Ops
 
@@ -51,6 +54,10 @@ def ops_image(tmp_path: Path) -> LoadedCommit:
     return LoadedCommit(source_root=tmp_path, sha=None)
 
 
+# meiva:note
+# The ops daemon's request path over the test's Postgres, Redis and home. Its upload receiver is
+# built the way the daemon builds it, with a placeholder gateway credential and a closed local port
+# as the gateway, which the upload tests replace with their stub source.
 @pytest.fixture
 def ops(
     db_url: str,
@@ -61,6 +68,7 @@ def ops(
     ops_database: Callable[[], Database],
     ops_image: LoadedCommit,
     machine_identity: MachineIdentityReader,
+    unit_home: Path,
 ) -> Iterator[Ops]:
     """The ops daemon's request path over the test's Postgres, Redis and home."""
     pool: ConnectionPool = ConnectionPool(db_url, min_size=1, max_size=4, open=True)
@@ -74,6 +82,21 @@ def ops(
             image=ops_image,
             machine=machine_identity,
             host=fake_host(),
+            home=unit_home,
+            receiver=ReceiverConfig(
+                unit=UnitIdentity(machine=machine_identity.name(), home=str(unit_home.resolve())),
+                user_home=unit_home / "user",
+                access=GatewayAccess(
+                    gateway_url="http://127.0.0.1:1",
+                    cluster_secret="ops-test-secret",  # noqa: S106
+                    remote_plane=False,
+                    machine_token=None,
+                    launcher_profile=None,
+                    gateway_home=False,
+                ),
+                quota_bytes=MAX_AGENT_UPLOAD_BYTES,
+                quota_files=MAX_AGENT_UPLOAD_FILES,
+            ),
         )
     finally:
         pool.close()

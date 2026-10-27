@@ -19,4 +19,3 @@ exports = ["schema_mismatch.py"]
 
 [debt.ambient-read]
 "__init__.py#environ base.host.env.registry.process_environment" = 1
-"__init__.py#home base.paths.resolve_meiva_home" = 1
