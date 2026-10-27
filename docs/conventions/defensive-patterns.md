@@ -119,6 +119,20 @@ cancellation never fires — complete the wait with a timer of its own
 resort as the liveness watchdog — dump every thread's stack and exit for a
 restart — instead of waiting longer.
 
+### A stop that removes the message plane needs an outside rescuer
+
+An operation whose stop leg takes down the surface it runs on, reports through and is
+watched by — a drill, a data-plane move, a maintenance window — must name, before the
+first stop leg, an actor outside the blast radius, a progress record on a surviving
+machine, the staged recovery commands with a pre-authorized force tier, and a silence
+bound. The executor is a turn and can be cancelled correctly, seconds after the stop
+succeeds, with the restore still ahead of it; and "the stop exited 0" is one leg of the
+window, not the window, because nothing remembers that the home was meant to be serving
+again by a declared time. Detection is not the gap: an out-of-band alarm that ends at a
+notice channel has found no responder, and a stopped home past its window looks exactly
+like a healthy maintenance stop.
+Evidence: [`docs/postmortems/0012`](../postmortems/0012-a-stop-that-removes-the-message-plane-needs-an-outside-rescuer.md).
+
 ### An editable install is a cross-checkout pointer
 
 An editable install writes its source path into the **active virtualenv**; the
