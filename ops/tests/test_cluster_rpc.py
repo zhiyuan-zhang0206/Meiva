@@ -68,11 +68,13 @@ def test_a_client_built_from_boot_takes_its_budget_and_its_credential_from_that_
     first, second = "boot-first", "boot-second"
     boot.set_field("cluster_secret", first)
     timers = ManualTimers()
+    rng = seeded_rng()
 
-    rpc = RpcClient.from_boot(boot, timers=timers, rng=seeded_rng())
+    rpc = RpcClient.from_boot(boot, timers=timers, rng=rng)
 
     assert rpc.config == RpcConfig(timeout_seconds=7.5, max_retries=4)
     assert rpc.timers is timers
+    assert rpc.rng is rng
     assert rpc.access().cluster_secret == first
     boot.set_field("cluster_secret", second)
     assert rpc.access().cluster_secret == second
