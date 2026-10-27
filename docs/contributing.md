@@ -31,22 +31,19 @@ default home and can target a running deployment.
 ## Change and verify
 
 Implement a focused change with its related tests and current documentation.
-**The change record is the history itself.** The merge queue squashes a PR into
-one commit on `main`, and that commit's message is the entry a reader meets in
-`git log`, in the release notes page generated from a commit range (`gh compare`),
-and in the commit `git blame` lands on. The squash takes the **head commit's
-message**, not the PR title, so the head commit is the one that writes the
-record: `git commit --amend` before you push is how you make it the sentence you
-want months later. Write it for whoever reads it months later — what changed, and
-for whom — and let the diff and the PR description carry the detail. The PR title
-stays the human entry point beside the diff; a deliberate difference between the
-two is fine, as long as the head commit carries the record. There is no changelog
-file to append to and no per-entry file to add.
-
-```bash
-test "$(git log -1 --format=%s)" = "$(gh pr view --json title -q .title)" \
-  || echo "head commit subject differs from the PR title: say why in the PR body"
-```
+**The change record is the history itself.** The merge queue rebases a PR onto `main`
+(the repository allows no other merge method): every commit of the branch lands exactly as
+you pushed it, an empty commit is dropped, and no merge commit is accepted. Each commit's
+message is therefore the entry a reader meets in `git log`, in the release notes page
+generated from a commit range (`gh compare`), and in the commit `git blame` lands on. The PR
+title and description never enter the history, so each commit message has to be accurate and
+complete on its own: what changed, for whom, and the numbers a reader would otherwise have to
+take from the PR. Rewrite a message with `git commit --amend` (or an interactive rebase of
+your own branch) before you push; a figure that was true at the first push and not at the
+last is corrected in the message, not only in the PR body. A branch that tells its story in
+several commits gives each one a self-contained message and keeps every commit green, since
+each one is a point on `main`. There is no changelog file to append to and no per-entry file
+to add.
 
 Keep shared facts in their owning module; use existing third-party capabilities
 rather than creating a second framework or registry. Resolve generated-file
@@ -149,10 +146,10 @@ choice, discuss it with the user before changing that choice.
 ## Submit the PR
 
 Push the branch and open a PR against `main`. Explain the problem, resulting
-behavior, validation and known gaps. Its title becomes the squash commit's
-subject, so it is also the change note later readers and the release notes see;
-write it as one. Use a file tree or control-flow explanation
-when it helps readers understand a larger change; no fixed template is required.
+behavior, validation and known gaps. Its title is the human entry point beside the
+diff; the commits carry the record that stays in `git log`. Use a file tree or
+control-flow explanation when it helps readers understand a larger change; no fixed
+template is required.
 Address relevant CI failures and review feedback. Distinguish successful execution
 from missing, skipped or incomplete verification. Maintainers choose how to merge.
 
