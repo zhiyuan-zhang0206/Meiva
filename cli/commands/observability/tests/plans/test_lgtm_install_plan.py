@@ -4,6 +4,8 @@
 
 from __future__ import annotations
 
+from typing import Literal, cast
+
 import pytest
 
 from cli.commands.observability.plans.lgtm.archive import (
@@ -41,9 +43,17 @@ PINS = {"loki": "3.7.6", "prometheus": "3.13.2", "grafana": "13.2.3"}
     ],
 )
 def test_only_darwin_arm64_and_linux_amd64_have_pinned_assets(
-    system: str, machine: str, tag: str | None
+    system: Literal["darwin", "linux"], machine: str, tag: str | None
 ) -> None:
     assert platform_tag(system, machine) == tag
+
+
+@pytest.mark.parametrize("machine", ["arm64", "x86_64", "riscv64"])
+def test_an_unknown_system_is_refused_whatever_the_machine(machine: str) -> None:
+    system = cast("Literal['darwin', 'linux']", "Darwin")
+
+    with pytest.raises(AssertionError):
+        platform_tag(system, machine)
 
 
 def current(tag: str) -> dict[str, InstalledMarkers]:

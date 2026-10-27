@@ -48,14 +48,13 @@ _ARCH = {"arm64": "arm64", "aarch64": "arm64", "x86_64": "amd64", "amd64": "amd6
 # reports ("arm64", "x86_64", "aarch64"; case does not matter). Tags follow the release assets:
 # darwin_arm64 / darwin_amd64 / linux_amd64 / linux_arm64. Anything else (linux_386, ...) has no
 # pinned binary: the sidecar is skipped and OTLP export auto-disables at the agent preflight.
-# It decides from its two arguments and reads nothing.
+# It decides from its two arguments and reads nothing; a `system` that is neither raises an
+# AssertionError whatever the machine, instead of looking like an unsupported platform.
 def platform_tag_for(system: Literal["darwin", "linux"], machine: str) -> str | None:
-    arch = _ARCH.get(machine.lower())
-    if arch is None:
-        return None
     match system:
         case "darwin" | "linux":
-            return f"{system}_{arch}"
+            arch = _ARCH.get(machine.lower())
+            return None if arch is None else f"{system}_{arch}"
         case _:
             assert_never(system)
 

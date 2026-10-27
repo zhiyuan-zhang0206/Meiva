@@ -9,6 +9,7 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 from dataclasses import dataclass
+from typing import Literal, assert_never
 
 __all__ = [
     "InstallBackend",
@@ -27,14 +28,17 @@ _LEGACY_TAG = "darwin_arm64"
 
 
 # meiva:note
-# The pinned release tag for a platform, or None when native LGTM does not support it.
-def platform_tag(system: str, machine: str) -> str | None:
+# The pinned release tag for a platform, or None when native LGTM does not support it. `system` is
+# `Platform.system`; any other value raises an AssertionError rather than reading as unsupported.
+def platform_tag(system: Literal["darwin", "linux"], machine: str) -> str | None:
     machine = machine.lower()
-    if system == "darwin" and machine in {"arm64", "aarch64"}:
-        return "darwin_arm64"
-    if system == "linux" and machine in {"x86_64", "amd64"}:
-        return "linux_amd64"
-    return None
+    match system:
+        case "darwin":
+            return "darwin_arm64" if machine in {"arm64", "aarch64"} else None
+        case "linux":
+            return "linux_amd64" if machine in {"x86_64", "amd64"} else None
+        case _:
+            assert_never(system)
 
 
 # meiva:note
