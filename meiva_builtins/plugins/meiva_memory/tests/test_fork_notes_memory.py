@@ -31,6 +31,7 @@ from base.db import Database
 from base.db.code_version_gate import ProcessDbGate
 from base.lm.catalog import ModelCatalog
 from base.packages.plugins.extensions import ContextNote, ExtensionRegistry
+from base.paths.home import resolve_meiva_home
 from meiva.tests.fixtures.pin_agent import snapshot_clients_over
 
 
@@ -115,7 +116,9 @@ async def test_fork_end_to_end_keeps_source_notes_and_grafts_own(
         )
         cmd = await claim_node(
             AgentState(messages=list(inherited)),
-            Runtime(context=replace(runtime.context, clients=clients)),
+            Runtime(
+                context=replace(runtime.context, clients=clients, meiva_home=resolve_meiva_home())
+            ),
             thread_config(tid),
         )
 
@@ -176,7 +179,9 @@ async def test_fork_keeps_the_whole_inherited_prefix(
         )
         cmd = await claim_node(
             AgentState(messages=list(inherited)),
-            Runtime(context=replace(runtime.context, clients=clients)),
+            Runtime(
+                context=replace(runtime.context, clients=clients, meiva_home=resolve_meiva_home())
+            ),
             thread_config(tid),
         )
     from agent.messages.guard import guarded_add_messages

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from pathlib import Path
 from typing import Any
 
 from langchain_core.messages import HumanMessage
@@ -41,10 +42,10 @@ def _ancestor_chain(agent_id: int, ctx: MeivaContext) -> tuple[Ancestor, ...] | 
 
 
 # meiva:link meiva_builtins/plugins/meiva_memory/docs/memory-inheritance.meiva.okf.md
-def _read_entries(ancestors: tuple[Ancestor, ...]) -> list[EntryBlocks]:
+def _read_entries(ancestors: tuple[Ancestor, ...], home: Path) -> list[EntryBlocks]:
     entries: list[EntryBlocks] = []
     for ancestor in ancestors:
-        mem_dir = workspace_dir_readonly(ancestor.agent_id) / _PER_AGENT_MEMORY_DIRNAME
+        mem_dir = workspace_dir_readonly(ancestor.agent_id, home=home) / _PER_AGENT_MEMORY_DIRNAME
         if not mem_dir.is_dir():
             continue
         for entry in sorted(mem_dir.glob("*.md")):
@@ -94,7 +95,7 @@ def inherited_memory_note(ctx: MeivaContext) -> HumanMessage | None:
         return None
     split = split_ancestors(chain, depth=depth, this_machine=this_machine)
     rendered = render_inherited(
-        _read_entries(split.local),
+        _read_entries(split.local, ctx.require_meiva_home()),
         split.remote,
         depth=depth,
         caps=SizeCaps(

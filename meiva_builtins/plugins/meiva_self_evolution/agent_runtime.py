@@ -54,7 +54,7 @@ class SeedToDoBetterHook(Hook):
         identity = runtime.context.identity
         agent_id = None if identity is None else identity.agent_id
         if agent_id is not None:
-            ensure_to_do_better(workspace_dir(agent_id))
+            ensure_to_do_better(workspace_dir(agent_id, home=runtime.context.require_meiva_home()))
         return None
 
 
