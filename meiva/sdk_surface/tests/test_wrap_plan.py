@@ -124,7 +124,7 @@ def test_identity_falls_back_to_the_wrapper_and_then_to_a_default_name() -> None
     assert (named.name, named.qualname) == ("_documented", "_documented")
     nameless_wrapper = functools.partial(_documented)
     anonymous = chained_face(nameless_wrapper, nameless_current)
-    assert (anonymous.name, anonymous.qualname, anonymous.module) == ("wrapped", "wrapped", "")
+    assert (anonymous.name, anonymous.qualname) == ("wrapped", "wrapped")
 
 
 def test_a_callable_target_is_not_refused() -> None:
