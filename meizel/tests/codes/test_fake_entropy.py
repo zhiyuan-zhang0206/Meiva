@@ -149,6 +149,13 @@ def test_a_duration_a_deadline_an_identity_set_and_a_sampler_spend_nothing(
     assert entropy(make_repo, source) == []
 
 
+def test_the_loop_clock_spent_as_an_identifier_is_found(make_repo: RepoFactory) -> None:
+    source = (
+        "import asyncio\n\ndef run_id():\n    return f'{asyncio.get_running_loop().time():x}'\n"
+    )
+    assert entropy(make_repo, source) == ["loop.time in an f-string"]
+
+
 def test_a_test_file_records_nothing(make_repo: RepoFactory) -> None:
     source = "import time\n\ndef test_a():\n    assert f'{time.monotonic_ns()}'\n"
     assert entropy(make_repo, source, "tests/test_x.py") == []
@@ -166,6 +173,35 @@ def test_a_test_file_records_nothing(make_repo: RepoFactory) -> None:
             "from time import perf_counter\n\ndef _perf_counter():\n    '''The clock.'''\n"
             "    return perf_counter()\n",
             ["interval-wrapper _perf_counter"],
+        ),
+        (
+            "import time\n\n_monotonic = time.monotonic\n\n\ndef wait(limit):\n"
+            "    return _monotonic() + limit\n",
+            ["interval-wrapper _monotonic"],
+        ),
+        (
+            "import time\n\n_now = lambda: time.monotonic()\n\n\ndef wait(limit):\n    return _now() + limit\n",
+            ["interval-wrapper _now"],
+        ),
+        (
+            "import time\nfrom functools import partial\n\n_now = partial(time.monotonic)\n\n\n"
+            "def wait(limit):\n    return _now() + limit\n",
+            ["interval-wrapper _now"],
+        ),
+        (
+            "import time\n\nclass Gate:\n    def _now(self) -> float:\n        return time.monotonic()\n\n"
+            "    def wait(self, limit):\n        return self._now() + limit\n",
+            ["interval-wrapper _now"],
+        ),
+        (
+            "import asyncio\n\ndef _now() -> float:\n    return asyncio.get_running_loop().time()\n\n\n"
+            "def wait(limit):\n    return _now() + limit\n",
+            ["interval-wrapper _now"],
+        ),
+        (
+            "import time\nfrom time import monotonic as clock\n\n_now = clock\n\n\ndef wait(limit):\n"
+            "    return _now() + limit\n",
+            ["interval-wrapper _now"],
         ),
     ],
 )
@@ -186,6 +222,12 @@ def test_a_private_wrapper_over_an_interval_clock_that_nothing_injects_is_found(
         "import time\n\ndef monotonic() -> float:\n    return time.monotonic()\n",
         "import time\n\ndef _since(start: float) -> float:\n    return time.monotonic() - start\n",
         "import time\n\ndef _stamp() -> float:\n    return time.time()\n",
+        "import time\n\n_now = time.monotonic\n\n\ndef build():\n    return Waiter(now=_now)\n",
+        "import time\n\n_now = lambda: time.monotonic()\n\n\ndef wait(now=_now):\n    return now()\n",
+        "import time\n\nclass Gate:\n    def _now(self) -> float:\n        return time.monotonic()\n\n"
+        "    def build(self):\n        return Waiter(now=self._now)\n",
+        "import time\n\nclass Gate:\n    def _now(self, scale: float) -> float:\n        return time.monotonic() * scale\n",
+        "import asyncio\n\nasync def waited(loop):\n    started = loop.time()\n    return loop.time() - started\n",
     ],
 )
 def test_a_wrapper_the_module_injects_a_public_one_and_other_shapes_are_left_alone(

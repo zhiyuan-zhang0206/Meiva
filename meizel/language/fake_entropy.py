@@ -32,12 +32,22 @@ from collections.abc import Callable, Iterator
 
 from meizel.graph.model import EntropySite
 
-__all__ = ["COUNTER_FACTORIES", "ENTROPY_CLOCKS", "function_sites", "wrapper_clock"]
+__all__ = [
+    "COUNTER_FACTORIES",
+    "ENTROPY_CLOCKS",
+    "function_sites",
+    "is_loop_clock",
+    "value_wrapper",
+    "wrapper_clock",
+]
 
 ENTROPY_CLOCKS = frozenset(
     {"time.monotonic", "time.monotonic_ns", "time.perf_counter", "time.perf_counter_ns"}
 )
 COUNTER_FACTORIES = frozenset({"itertools.count"})
+_LOOP_GETTERS = frozenset({"asyncio.get_running_loop", "asyncio.get_event_loop"})
+_LOOP_NAMES = frozenset({"loop", "_loop", "event_loop"})
+_LOOP = "loop.time"
 _FORMATS = frozenset({"str", "repr", "hex", "oct", "bin", "format", "hash"})
 _DIGESTS = frozenset(
     {
@@ -81,6 +91,19 @@ def _last(expr: ast.expr) -> str:
 
 
 # meiva:note
+# `loop.time()` on `asyncio.get_running_loop()` or on a name that says it is the loop: the event
+# loop's monotonic clock, an interval clock like `time.monotonic`.
+def is_loop_clock(call: ast.Call, dotted: Dotted) -> bool:
+    func = call.func
+    if not (isinstance(func, ast.Attribute) and func.attr == "time" and not call.args):
+        return False
+    holder = func.value
+    if isinstance(holder, ast.Call):
+        return dotted(holder.func) in _LOOP_GETTERS
+    return _last(holder) in _LOOP_NAMES
+
+
+# meiva:note
 # What one scope's readings do, judged with the names the file resolves.
 class _Spend:
     def __init__(self, dotted: Dotted, unbound: Unbound, counters: frozenset[str]) -> None:
@@ -103,6 +126,8 @@ class _Spend:
         callee = self.callee(node.func)
         if callee in ENTROPY_CLOCKS:
             return callee
+        if is_loop_clock(node, self.dotted):
+            return _LOOP
         if not isinstance(node.func, ast.Name) or callee != node.func.id:
             return None
         if node.func.id == _ADDRESS and len(node.args) == 1:
@@ -218,21 +243,61 @@ def _operator(op: ast.operator) -> str:
 
 
 # meiva:note
-# The clock a function is a one-line wrapper over: a private function without parameters whose
-# only statement is `return <interval clock>()`, or None.
-def wrapper_clock(function: ast.FunctionDef | ast.AsyncFunctionDef, dotted: Dotted) -> str | None:
+# The clock an expression reads when it is a call without arguments: an interval clock by name, or
+# the loop's.
+def _clock_call(expr: ast.expr, dotted: Dotted) -> str | None:
+    if not isinstance(expr, ast.Call) or expr.args or expr.keywords:
+        return None
+    callee = dotted(expr.func)
+    if callee in ENTROPY_CLOCKS:
+        return callee
+    return _LOOP if is_loop_clock(expr, dotted) else None
+
+
+# meiva:note
+# The clock a function is a one-line wrapper over: a private function without parameters (a method
+# with only `self` or `cls`) whose only statement is `return <interval clock>()`, or None.
+def wrapper_clock(
+    function: ast.FunctionDef | ast.AsyncFunctionDef, dotted: Dotted, *, method: bool = False
+) -> str | None:
     args = function.args
-    if not function.name.startswith("_") or args.args or args.kwonlyargs or args.vararg:
+    own = [arg.arg for arg in args.args]
+    receiver = method and own in (["self"], ["cls"])
+    if (
+        not function.name.startswith("_")
+        or (own and not receiver)
+        or args.kwonlyargs
+        or args.vararg
+    ):
         return None
     body = [
         statement
         for statement in function.body
         if not (isinstance(statement, ast.Expr) and isinstance(statement.value, ast.Constant))
     ]
-    if len(body) != 1 or not isinstance(body[0], ast.Return):
+    if len(body) != 1 or not isinstance(body[0], ast.Return) or body[0].value is None:
         return None
-    call = body[0].value
-    if not isinstance(call, ast.Call) or call.args or call.keywords:
-        return None
-    callee = dotted(call.func)
-    return callee if callee in ENTROPY_CLOCKS else None
+    return _clock_call(body[0].value, dotted)
+
+
+# meiva:note
+# The clock a module-level value is under another name: `_now = time.monotonic`, `_now = lambda:
+# time.monotonic()` and `_now = functools.partial(time.monotonic)`. A call of it reads the clock
+# and no signature says so.
+def value_wrapper(value: ast.expr, dotted: Dotted) -> str | None:
+    if isinstance(value, ast.Name | ast.Attribute):
+        name = dotted(value)
+        return name if name in ENTROPY_CLOCKS else None
+    if isinstance(value, ast.Lambda):
+        args = value.args
+        bare = not (args.args or args.posonlyargs or args.kwonlyargs or args.vararg or args.kwarg)
+        return _clock_call(value.body, dotted) if bare else None
+    if (
+        isinstance(value, ast.Call)
+        and dotted(value.func) == "functools.partial"
+        and len(value.args) == 1
+        and not value.keywords
+    ):
+        name = dotted(value.args[0])
+        return name if name in ENTROPY_CLOCKS else None
+    return None
