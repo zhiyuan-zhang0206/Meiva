@@ -23,6 +23,7 @@ from cli.commands.converge.plans.walg_plan import (
 )
 from cli.commands.converge.spec import ConvergeCtx
 from services.backup.walg import config as walg_config
+from services.backup.walg import state as walg_state
 
 
 def converge_walg(ctx: ConvergeCtx) -> None:
@@ -59,8 +60,8 @@ def execute_walg_plan(
             case InstallWalgBinary():
                 ensure_walg_binary(home=ctx.meiva_home)
             case LoadWalgConfig():
-                walg_config.load_walg_config(path=walg_config_file)
+                walg_config.load_walg_config(path=walg_config_file, home=ctx.meiva_home)
             case PrepareWalgStateDir():
-                ensure_private_dir(ctx.meiva_home / "backups" / "walg")
+                ensure_private_dir(walg_state.walg_dir(ctx.meiva_home))
             case _:
                 assert_never(step)

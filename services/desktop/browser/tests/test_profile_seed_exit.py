@@ -12,6 +12,7 @@ from typing import Literal
 import psutil
 
 from base.native_process.ownership import OwnedProcess
+from services.desktop.browser.profile import profile_dir
 
 
 # meiva:note
@@ -29,6 +30,7 @@ def _child(
             str(Path(__file__).with_name("_profile_seed_child.py")),
             mode,
             str(source),
+            str(profile_dir(home)),
         ],
         env={**os.environ, "MEIVA_HOME": str(home), "MEIVA_CONFIG_FETCH": "skip"},
         stdin=subprocess.PIPE,
@@ -76,7 +78,7 @@ def test_copy_proceeds_after_chrome_quits(tmp_path: Path) -> None:
     (source / "Default" / "Cookies").write_bytes(b"actual-cookie-jar")
     home = tmp_path / "meiva-home"
     home.mkdir()
-    destination = home / "chrome-profile"
+    destination = profile_dir(home)
     with _child("chrome", home, source) as (chrome, chrome_identity):
         (source / "SingletonLock").symlink_to(f"test-host-{chrome.pid}")
         with _child("seed", home, source) as (seed, seed_identity):

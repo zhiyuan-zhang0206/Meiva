@@ -131,7 +131,10 @@ def test_on_validates_pins_the_key_and_makes_the_state_directory(
         (LoadWalgConfig(), PrepareWalgStateDir()), on, walg_config_file=_config_file(on)
     )
 
-    assert walg_config.pinned_key_id() == walg_config.read_config(_config_file(on)).key_fingerprint
+    assert (
+        walg_config.pinned_key_id(unit_home)
+        == walg_config.read_config(_config_file(on)).key_fingerprint
+    )
     state = unit_home / "backups" / "walg"
     assert state.is_dir() and state.stat().st_mode & 0o777 == 0o700
 
@@ -148,7 +151,7 @@ def test_a_bad_configuration_fails_converge_not_postgres(ctx: ConvergeCtx, unit_
             (LoadWalgConfig(),), on, walg_config_file=_config_file(on)
         )
 
-    assert walg_config.pinned_key_id() is None, "an unusable configuration pins nothing"
+    assert walg_config.pinned_key_id(unit_home) is None, "an unusable configuration pins nothing"
 
 
 def test_a_different_key_than_the_pinned_one_fails_converge(

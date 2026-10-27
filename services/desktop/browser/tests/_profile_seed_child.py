@@ -10,7 +10,10 @@ def main() -> None:
             from services.desktop.browser.profile import Console, ensure_browser_profile
 
             ensure_browser_profile(
-                interactive=True, daily_profile=Path(sys.argv[2]), console=Console.of_process()
+                interactive=True,
+                daily_profile=Path(sys.argv[2]),
+                profile=Path(sys.argv[3]),
+                console=Console.of_process(),
             )
         case _:
             raise ValueError(f"unknown profile child mode: {sys.argv[1]}")

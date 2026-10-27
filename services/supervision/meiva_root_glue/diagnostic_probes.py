@@ -25,9 +25,10 @@ from base.host import brew_pin, proc
 from base.host.db_authority.api import read_telemetry_token
 from base.host.net.ports import SYSTEM_URL_OPENER, UrlOpener
 from base.host.net.url_secret import names_foreign_host
+from base.host.proc import CommandRunner
 from base.telemetry.station_endpoint import StationEndpointConfig
 from services.desktop.browser.probe import probe_browser as _default_probe_browser
-from services.desktop.permissions_helper.launchd_job import BoundedRunner, LaunchdFacts
+from services.desktop.permissions_helper.launchd_job import LaunchdFacts
 from services.supervision.healthchecks.browser_reach import (
     CanaryResult,
     HostResult,
@@ -144,6 +145,8 @@ _ROOT_CHECKOUT = Path(__file__).resolve().parents[3]
 def venv(
     *,
     environment: Mapping[str, str],
+    run: CommandRunner,
+    clock: Clock,
     deadline_s: float = PROBE_DEADLINE_S,
     source_root: Path = _ROOT_CHECKOUT,
 ) -> DaemonProbe:
@@ -157,6 +160,8 @@ def venv(
         uv=uv,
         environment=environment,
         deadline_s=deadline_s,
+        run=run,
+        clock=clock,
     )
     if observation.violations:
         return DaemonProbe.down("; ".join(observation.violations))
@@ -482,7 +487,7 @@ def build_diagnostics(
     clock: Clock,
     macos: bool,
     launchd: LaunchdFacts,
-    run: BoundedRunner,
+    run: CommandRunner,
 ) -> list[Diagnostic]:
     """Host policy is explicit; absent capabilities do not create fake samples."""
     checks: list[Diagnostic] = []
@@ -501,7 +506,13 @@ def build_diagnostics(
     checks.append(
         Diagnostic(
             "venv",
-            partial(venv, environment=config.environment, deadline_s=PROBE_DEADLINE_S),
+            partial(
+                venv,
+                environment=config.environment,
+                run=run,
+                clock=clock,
+                deadline_s=PROBE_DEADLINE_S,
+            ),
             timeout_s=DIAGNOSTIC_TIMEOUT_S,
         )
     )

@@ -138,8 +138,6 @@ bus = [
 "base.paths.workspace_dir_readonly()" = "a directory under meiva_home()"
 "base.paths.workspaces_root()" = "a directory under meiva_home()"
 "meiva.files.workspace_base()" = "the agent's workspace directory, or the home when no agent is bound"
-"services.desktop.permissions_helper.launchd_job.helper_job_agents_dir()" = "falls back to Path.home() for the LaunchAgents directory"
-"services.desktop.permissions_helper.launchd_job.helper_job_label()" = "falls back to meiva_home() for the helper's home"
 
 [ambient-readers.platform]
 "base.host.system.hostport.Host.system()" = "builds the host of this process: its platform, uid and system commands"
@@ -149,7 +147,6 @@ bus = [
 "base.native_process.os_platform.resolve_pid()" = "returns os.getpid() when no pid is passed"
 "base.native_process.root_control.client.current_uid()" = "returns os.getuid()"
 "base.paths.private_dir.is_foreign_owned()" = "compares with os.geteuid() when no euid is passed"
-"services.desktop.permissions_helper.launchd_job.helper_job_domain()" = "names the domain of os.getuid()"
 
 [ambient-readers.clock]
 "base.clock.Clock()" = "builds the clock a root hands down; its Timers decide what time it is"

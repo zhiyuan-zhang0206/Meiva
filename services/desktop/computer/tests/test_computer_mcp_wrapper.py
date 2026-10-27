@@ -67,6 +67,10 @@ class HangingReader(FakeReader):
         raise AssertionError("unreachable")
 
 
+def _one_second() -> float:
+    return 1.0
+
+
 def _line(obj: dict[str, Any]) -> bytes:
     return (json.dumps(obj) + "\n").encode()
 
@@ -270,6 +274,30 @@ async def test_reconnecting_link_times_out_without_retry(monkeypatch: pytest.Mon
     assert attempts == 1
     assert len(writer.written) == 1
     assert writer.closed
+
+
+# meiva:note
+# The link dials the socket path it was told, not one derived from this process's environment: a
+# real listener at a path of the test's own answers the request and sees the stamped identity.
+async def test_the_reconnecting_link_dials_the_socket_it_is_given() -> None:
+    d, sock, cleanup = short_sock_dir()
+    seen: list[dict[str, Any]] = []
+
+    async def answer(reader: asyncio.StreamReader, writer: asyncio.StreamWriter) -> None:
+        seen.append(json.loads(await reader.readline()))
+        writer.write(_line({"id": seen[0]["id"], "ok": True, "result": {"served": True}}))
+        await writer.drain()
+        writer.close()
+
+    server = await asyncio.start_unix_server(answer, path=str(sock))
+    try:
+        link = ReconnectingSocketLink(sock=str(sock), timeout_reader=_one_second, agent_id=7)
+        assert await link.request({"method": "list_tools"}) == {"served": True}
+        assert seen[0]["agent_id"] == 7
+    finally:
+        server.close()
+        await server.wait_closed()
+        cleanup(d)
 
 
 # The computer MCP daemon uses this helper; pin its nested connection budgets here.

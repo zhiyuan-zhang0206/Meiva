@@ -6,13 +6,13 @@ import logging
 import re
 import subprocess
 import tempfile
-import time
 from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
 
+from base.clock import Clock
 from base.deploy.release import editable_install
-from base.host import proc
+from base.host.proc import CommandRunner
 
 _log = logging.getLogger("services.supervision.healthchecks.prod_venv")
 
@@ -54,20 +54,27 @@ class _LegFailure:
 # the whole observation still ends inside the caller's deadline. A leg whose share is already spent
 # is never spawned and reports that it was never read.
 def _probe_within(
-    label: str, argv: list[str], env: dict[str, str], deadline: float, *, legs_left: int
+    label: str,
+    argv: list[str],
+    env: dict[str, str],
+    deadline: float,
+    *,
+    legs_left: int,
+    run: CommandRunner,
+    clock: Clock,
 ) -> _LegFailure | None:
-    share = (deadline - time.monotonic()) / legs_left
+    share = (deadline - clock.monotonic()) / legs_left
     if share <= 0:
         return _LegFailure(f"{label}: the observation deadline was already spent", unmeasured=True)
-    return _probe(label, argv, env, share)
+    return _probe(label, argv, env, share, run=run)
 
 
 def _probe(
-    label: str, argv: list[str], env: dict[str, str], timeout_s: float
+    label: str, argv: list[str], env: dict[str, str], timeout_s: float, *, run: CommandRunner
 ) -> _LegFailure | None:
     """Return a bounded diagnostic for failed execution, including spawn failure."""
     try:
-        result = proc.run_bounded(
+        result = run(
             argv,
             timeout=timeout_s,
             cwd=tempfile.gettempdir(),
@@ -121,13 +128,16 @@ class VenvObservation:
 # skipped), `environment` (the process environment, which is isolated here) and `deadline_s` (the
 # whole deadline for the observation: the legs share it, so a hung metadata check cannot skip the
 # imports — it only spends them, and the import leg then reports that it ran out of time instead of
-# pretending the environment is damaged).
+# pretending the environment is damaged). `run` runs each leg (the host's bounded runner) and
+# `clock` measures the deadline; the diagnostic that owns the observation hands in both.
 def observe_venv(
     *,
     source_root: Path,
     uv: str | None,
     environment: Mapping[str, str],
     deadline_s: float,
+    run: CommandRunner,
+    clock: Clock,
 ) -> VenvObservation:
     interpreter = editable_install.venv_python(source_root)
     if interpreter is None:
@@ -136,7 +146,7 @@ def observe_venv(
     env = isolated_env(environment)
     violations: list[str] = []
     unmeasured: list[str] = []
-    deadline = time.monotonic() + deadline_s
+    deadline = clock.monotonic() + deadline_s
     if uv is None:
         _log.debug("[prod-venv healthcheck] uv not on PATH; skipping dependency check")
     else:
@@ -146,6 +156,8 @@ def observe_venv(
             env,
             deadline,
             legs_left=2,
+            run=run,
+            clock=clock,
         )
         if failure is not None:
             (unmeasured if failure.unmeasured else violations).append(failure.detail)
@@ -158,6 +170,8 @@ def observe_venv(
         env,
         deadline,
         legs_left=1,
+        run=run,
+        clock=clock,
     )
     if failure is not None:
         (unmeasured if failure.unmeasured else violations).append(failure.detail)

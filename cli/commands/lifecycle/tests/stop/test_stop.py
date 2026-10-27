@@ -402,8 +402,8 @@ def test_a_browser_that_is_not_there_costs_a_stop_nothing(
     capsys: pytest.CaptureFixture[str],
     stop_runtime: CommandRuntime,
 ) -> None:
-    browser.stop_browser(time.monotonic() + 5)
-    browser.reap_cluster_chrome()
+    browser.stop_browser(time.monotonic() + 5, home=home)
+    browser.reap_cluster_chrome(home=home)
     assert capsys.readouterr().out == ""
     browser.record_browser_session(stop_runtime, now=datetime(2026, 10, 22, tzinfo=UTC))
     assert "nothing to record (no browser answered)" in capsys.readouterr().out

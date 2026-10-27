@@ -149,7 +149,7 @@ def _preflight(*, path: Path | None, binary_problem: str | None, home: Path) -> 
     if binary_problem is not None:
         raise StepFailedError(STEP_PREFLIGHT, f"{binary_problem} (meiva converge installs it)")
     try:
-        walg_config.load_walg_config(path=path)
+        walg_config.load_walg_config(path=path, home=home)
     except walg_config.WalgConfigError as exc:
         raise StepFailedError(STEP_PREFLIGHT, str(exc)) from None
     return list_backups(path=path, home=home)
@@ -172,13 +172,14 @@ def _backup(
     newest = after[-1]
     kind = "full" if newest.is_full else "delta"
     state.update_state(
+        home,
         backup=BackupRecord(
             name=newest.name,
             kind=kind,
             finished_at=_now(),
             uncompressed_bytes=newest.uncompressed_bytes,
             compressed_bytes=newest.compressed_bytes,
-        )
+        ),
     )
     report(f"backup: {newest.name} ({kind}, {newest.compressed_bytes} bytes stored)")
     return after
@@ -195,7 +196,7 @@ def _drill(
     home: Path,
 ) -> bool:
     """Drill the newest backup now; records the outcome. Returns whether it succeeded."""
-    previous = state.read_state().drill
+    previous = state.read_state(home).drill
     record = drill.run_drill(
         target,
         backups[-1],
@@ -206,7 +207,7 @@ def _drill(
         database_for_url=database_for_url,
         home=home,
     )
-    state.update_state(drill=record)
+    state.update_state(home, drill=record)
     if record.ok:
         report(f"drill: ok in {record.seconds:.0f}s ({record.detail})")
     else:
@@ -225,7 +226,7 @@ def _weekly_drill(
     home: Path,
 ) -> None:
     """The drill when one is due. Its failure is recorded and reported, never raised."""
-    if drill.drill_due(state.read_state().drill, backups, _now()):
+    if drill.drill_due(state.read_state(home).drill, backups, _now()):
         _drill(
             target,
             backups,
@@ -240,7 +241,7 @@ def _weekly_drill(
 def _verify(target: PgTarget, report: Report, *, path: Path | None, home: Path) -> str:
     verdict = verify_chain(target.admin_url, path=path, home=home)
     state.update_state(
-        verify=VerifyRecord(at=_now(), integrity=verdict.integrity, timeline=verdict.timeline)
+        home, verify=VerifyRecord(at=_now(), integrity=verdict.integrity, timeline=verdict.timeline)
     )
     summary = verdict.summary()
     report(f"verify: {summary}")
@@ -252,7 +253,7 @@ def _verify(target: PgTarget, report: Report, *, path: Path | None, home: Path) 
 def _retention(backups: list[Backup], report: Report, *, path: Path | None, home: Path) -> int:
     outcome = apply_retention(backups, report, path=path, home=home)
     state.update_state(
-        retention=RetentionRecord(at=_now(), marked=outcome.marked, deleted=outcome.deleted)
+        home, retention=RetentionRecord(at=_now(), marked=outcome.marked, deleted=outcome.deleted)
     )
     return outcome.deleted
 
@@ -297,15 +298,18 @@ def _run_steps(
     return f"{after[-1].name}; chain {chain}; retention deleted {deleted}"
 
 
-def _record_failure(started: datetime, failure: StepFailedError, report: Report) -> int:
+def _record_failure(
+    started: datetime, failure: StepFailedError, report: Report, *, home: Path
+) -> int:
     state.update_state(
+        home,
         run=RunRecord(
             started_at=started,
             finished_at=_now(),
             status="failed",
             step=failure.step,
             detail=failure.detail,
-        )
+        ),
     )
     report(f"failed at {failure.step}: {failure.detail}")
     return 1
@@ -322,22 +326,22 @@ def _locked_tick(
 ) -> int:
     started = _now()
     try:
-        state.read_state()
+        state.read_state(home)
     except state.StateError as exc:
-        report(f"failed: {exc}; remove {state.state_path()} to reset it")
+        report(f"failed: {exc}; remove {state.state_path(home)} to reset it")
         return 1
 
     target = platform.target
     if platform.setup_error is not None or target is None:
         failure = StepFailedError(STEP_PREFLIGHT, platform.setup_error or "no Postgres target")
-        return _record_failure(started, failure, report)
+        return _record_failure(started, failure, report, home=home)
     if not platform.accepting:
         reason = "postgres is not accepting connections"
-        state.update_state(tick=TickRecord(started_at=started, skipped=reason))
+        state.update_state(home, tick=TickRecord(started_at=started, skipped=reason))
         report(f"skipped: {reason}")
         return 0
 
-    state.update_state(tick=TickRecord(started_at=started))
+    state.update_state(home, tick=TickRecord(started_at=started))
     try:
         summary = _run_steps(
             target,
@@ -349,11 +353,12 @@ def _locked_tick(
             home=home,
         )
     except StepFailedError as failure:
-        return _record_failure(started, failure, report)
+        return _record_failure(started, failure, report, home=home)
     state.update_state(
+        home,
         run=RunRecord(
             started_at=started, finished_at=_now(), status="ok", step=None, detail=summary
-        )
+        ),
     )
     report(f"ok: {summary}")
     return 0
@@ -373,9 +378,9 @@ def run_tick_on(
     if path is None:
         report("WAL-G is off (MEIVA_WALG_CONFIG_FILE is not set); nothing to do")
         return 0
-    ensure_private_dir(state.walg_dir())
+    ensure_private_dir(state.walg_dir(home))
     try:
-        with file_lock(state.lock_path(), timeout_s=0):
+        with file_lock(state.lock_path(home), timeout_s=0):
             return _locked_tick(
                 report,
                 platform,
@@ -423,7 +428,7 @@ def _locked_drill(
 ) -> int:
     target = platform.target
     try:
-        state.read_state()
+        state.read_state(home)
         if platform.setup_error is not None or target is None:
             report(f"failed: {platform.setup_error}")
             return 1
@@ -468,9 +473,9 @@ def run_drill_now_on(
     if path is None:
         report("WAL-G is off (MEIVA_WALG_CONFIG_FILE is not set); nothing to drill")
         return 1
-    ensure_private_dir(state.walg_dir())
+    ensure_private_dir(state.walg_dir(home))
     try:
-        with file_lock(state.lock_path(), timeout_s=0):
+        with file_lock(state.lock_path(home), timeout_s=0):
             return _locked_drill(
                 report,
                 platform,
