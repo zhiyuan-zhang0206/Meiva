@@ -423,10 +423,12 @@ def test_agent_workspace_is_not_exported_to_the_agent() -> None:
 # The base for a context sits under the two homes that context carries, whatever the process
 # environment names: with an identity it is that agent's workspace, before one the user's home.
 def test_the_workspace_base_of_a_context_follows_the_homes_it_carries(tmp_path: Path) -> None:
-    homes = {"meiva_home": tmp_path / "meiva", "user_home": tmp_path / "user"}
-    agent = MeivaContext(identity=AgentIdentity(agent_id=7, owns_loop=True), **homes)
-    assert meiva.files.workspace_base_for(agent) == homes["meiva_home"] / "workspaces" / "7"
-    assert meiva.files.workspace_base_for(MeivaContext(**homes)) == homes["user_home"]
+    meiva_home, user_home = tmp_path / "meiva", tmp_path / "user"
+    identity = AgentIdentity(agent_id=7, owns_loop=True)
+    agent = MeivaContext(identity=identity, meiva_home=meiva_home, user_home=user_home)
+    assert meiva.files.workspace_base_for(agent) == meiva_home / "workspaces" / "7"
+    bare = MeivaContext(meiva_home=meiva_home, user_home=user_home)
+    assert meiva.files.workspace_base_for(bare) == user_home
 
 
 def test_tilde_expanduser(default_home: Path) -> None:
