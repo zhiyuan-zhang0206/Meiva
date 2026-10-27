@@ -1,9 +1,7 @@
 from __future__ import annotations
 
-import asyncio
 import os
-import time
-from collections.abc import Iterable, Mapping
+from collections.abc import Coroutine, Iterable, Mapping
 from dataclasses import dataclass
 from typing import Protocol
 
@@ -124,23 +122,33 @@ def snapshot(probe: ChildProbe, pid: int | None) -> dict[int, str]:
     return probe.descendants(pid)
 
 
-def _monotonic() -> float:
-    return time.monotonic()
+# meiva:note
+# What a wait for processes to exit needs of a clock: the interval to measure and the pause
+# between polls. The session's clock satisfies it.
+class WaitClock(Protocol):
+    def monotonic(self) -> float: ...
+
+    def asleep(self, seconds: float) -> Coroutine[object, object, None]: ...
 
 
 async def wait_gone(
-    probe: ChildProbe, pids: Iterable[int], *, timeout_seconds: float, poll_seconds: float
+    probe: ChildProbe,
+    pids: Iterable[int],
+    *,
+    timeout_seconds: float,
+    poll_seconds: float,
+    clock: WaitClock,
 ) -> tuple[bool, float]:
     watched = list(pids)
-    started = _monotonic()
+    started = clock.monotonic()
     if not watched:
         return (True, 0.0)
     while True:
         if not any(probe.is_alive(pid) for pid in watched):
-            return (True, (_monotonic() - started) * 1000.0)
-        if _monotonic() - started >= timeout_seconds:
-            return (False, (_monotonic() - started) * 1000.0)
-        await asyncio.sleep(poll_seconds)
+            return (True, (clock.monotonic() - started) * 1000.0)
+        if clock.monotonic() - started >= timeout_seconds:
+            return (False, (clock.monotonic() - started) * 1000.0)
+        await clock.asleep(poll_seconds)
 
 
 def describe(observed: Mapping[int, str], pids: Iterable[int]) -> tuple[ProcessObservation, ...]:
@@ -174,6 +182,7 @@ async def settle_close(
     timeout_seconds: float,
     *,
     agent_id: int | None,
+    clock: WaitClock,
     poll_seconds: float = 0.02,
 ) -> bool | None:
     if not observed:
@@ -193,7 +202,7 @@ async def settle_close(
         )
         return None
     gone, waited_ms = await wait_gone(
-        probe, observed, timeout_seconds=timeout_seconds, poll_seconds=poll_seconds
+        probe, observed, timeout_seconds=timeout_seconds, poll_seconds=poll_seconds, clock=clock
     )
     if gone:
         logger.info(

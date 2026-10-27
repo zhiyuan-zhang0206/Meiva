@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import time
 from collections.abc import Mapping
 from dataclasses import dataclass
 
@@ -28,8 +27,9 @@ from base.lm.harness.codex.types import (
     EVENT_STREAM_END,
     BaseHarnessSession,
     InboundQueueFullError,
+    SessionBinding,
+    SessionClock,
     SessionClosedError,
-    SessionRegistry,
     SessionTotals,
     TurnOutcome,
     TurnTicket,
@@ -92,17 +92,17 @@ class CodexSession(BaseHarnessSession[CodexConfig]):
         config: CodexConfig,
         *,
         environ: Mapping[str, str],
-        agent_id: int | None = None,
-        registry: SessionRegistry | None = None,
+        binding: SessionBinding,
         transport: AppServerTransport | None = None,
         probe: ChildProbe | None = None,
+        clock: SessionClock,
     ) -> None:
         super().__init__(
             config,
-            agent_id=agent_id,
-            registry=registry,
+            binding=binding,
             probe=probe,
             totals=SessionTotals(),
+            clock=clock,
         )
         self._transport: AppServerTransport = transport or StdioAppServer(
             config.command(config.resolved_binary(environ)),
@@ -159,6 +159,7 @@ class CodexSession(BaseHarnessSession[CodexConfig]):
             "codex",
             self.config.cancel_settle_seconds,
             agent_id=self.agent_id,
+            clock=self._clock,
         )
         self._exit_code = self._transport.returncode
         self._finish_close(reason)
@@ -176,7 +177,7 @@ class CodexSession(BaseHarnessSession[CodexConfig]):
         spawned = {
             child: command for child, command in observed.items() if child not in self._baseline
         }
-        started = time.perf_counter()
+        started = self._monotonic()
         if ticket is not None and self._session_id:
             codex_turn_id = self._codex_turn_for(ticket.turn_id)
             try:
@@ -189,7 +190,7 @@ class CodexSession(BaseHarnessSession[CodexConfig]):
                 self._emit(
                     SessionFaulted(turn_id=ticket.turn_id, error=f"turn/interrupt failed: {exc}")
                 )
-        interrupt_ms = (time.perf_counter() - started) * 1000.0
+        interrupt_ms = (self._monotonic() - started) * 1000.0
         if pid is None:
             return CancelReport(
                 turn_id=ticket.turn_id if ticket is not None else None,
@@ -206,6 +207,7 @@ class CodexSession(BaseHarnessSession[CodexConfig]):
             spawned,
             timeout_seconds=self.config.cancel_settle_seconds,
             poll_seconds=CANCEL_POLL_SECONDS,
+            clock=self._clock,
         )
         remaining = (
             () if gone else describe(observed, [c for c in spawned if self._probe.is_alive(c)])

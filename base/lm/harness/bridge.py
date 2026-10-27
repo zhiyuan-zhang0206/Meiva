@@ -1,12 +1,12 @@
 from __future__ import annotations
 
-import os
-import secrets
+import base64
 from collections.abc import Callable
 from dataclasses import dataclass, replace
 from datetime import timedelta
 
 from base.api_contracts.agent_contract import Harness
+from base.lm.harness.base_session import SessionClock
 from base.lm.harness.engine import CompletedTurnEvent, HarnessSession, HarnessTurn, SubmittedTurn
 from base.lm.harness.events import (
     AssistantText,
@@ -26,7 +26,7 @@ from base.lm.harness.registration import (
     ATTACHED,
     HarnessRegistration,
     RegistrationStore,
-    current_utc,
+    SecureRandom,
     handle_digest,
 )
 from base.lm.harness.registry import SessionRecord, SessionRegistry
@@ -94,6 +94,9 @@ class HarnessBridge:
         handoff: Handoff | None = None,
         registrations: RegistrationStore | None = None,
         registration_ttl_seconds: float,
+        clock: SessionClock,
+        handle_rng: SecureRandom,
+        controller_pid: int,
     ) -> None:
         self.harness = harness
         self._agent_id = agent_id
@@ -101,6 +104,9 @@ class HarnessBridge:
         self._machine = machine
         self._handoff = handoff
         self._registrations = registrations
+        self._clock = clock
+        self._handle_rng = handle_rng
+        self._controller_pid = controller_pid
         if registration_ttl_seconds <= 0:
             raise ValueError(f"a harness registration must expire, got {registration_ttl_seconds}s")
         self._registration_ttl = timedelta(seconds=registration_ttl_seconds)
@@ -144,7 +150,7 @@ class HarnessBridge:
             return self._session
         if self._closed:
             raise HarnessClosedError("this harness bridge is closed")
-        handle = secrets.token_urlsafe(32)
+        handle = base64.urlsafe_b64encode(self._handle_rng.randbytes(32)).rstrip(b"=").decode()
         self._digest = handle_digest(handle)
         self._register("")
         session = self._factory(handle)
@@ -242,7 +248,7 @@ class HarnessBridge:
     def _register(self, external_session_id: str) -> None:
         if self._registrations is None or self._digest is None:
             return
-        now = current_utc()
+        now = self._clock.now()
         self._created_at = self._created_at or now.isoformat(timespec="seconds")
         self._registrations.write(
             HarnessRegistration(
@@ -250,7 +256,7 @@ class HarnessBridge:
                 harness=self.harness.value,
                 external_session_id=external_session_id,
                 machine=self._machine,
-                controller_pid=os.getpid(),
+                controller_pid=self._controller_pid,
                 handle_sha256=self._digest,
                 created_at=self._created_at,
                 expires_at=(now + self._registration_ttl).isoformat(timespec="seconds"),

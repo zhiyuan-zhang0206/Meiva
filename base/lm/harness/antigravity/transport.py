@@ -4,7 +4,6 @@ import asyncio
 import contextlib
 import json
 import signal
-import time
 from collections import deque
 from collections.abc import AsyncIterator, Callable, Iterable, Mapping
 from dataclasses import dataclass
@@ -17,6 +16,7 @@ from base.lm.harness.process import (
     ChildProbe,
     ProcessObservation,
     PsutilChildProbe,
+    WaitClock,
     describe,
     snapshot,
     wait_gone,
@@ -97,8 +97,10 @@ class AgyTransport:
         environ: Mapping[str, str] | None = None,
         probe: ChildProbe | None = None,
         reap: Reaper | None = None,
+        clock: WaitClock,
     ) -> None:
         self._config = config
+        self._clock = clock
         self._reap: Reaper = reap or kill_orphans
         self._environ = dict(environ) if environ else None
         self._probe: ChildProbe = probe or PsutilChildProbe()
@@ -195,15 +197,16 @@ class AgyTransport:
             for child, command in observed.items()
             if baseline is None or child not in baseline
         }
-        started = time.perf_counter()
+        started = self._clock.monotonic()
         process.send_signal(signal.SIGINT)
         await self._settle_process(process)
-        interrupt_ms = (time.perf_counter() - started) * 1000.0
+        interrupt_ms = (self._clock.monotonic() - started) * 1000.0
         gone, waited_ms = await wait_gone(
             self._probe,
             spawned,
             timeout_seconds=self._config.cancel_settle_seconds,
             poll_seconds=CANCEL_POLL_SECONDS,
+            clock=self._clock,
         )
         killed: tuple[int, ...] = ()
         if not gone:
@@ -215,6 +218,7 @@ class AgyTransport:
                     killed,
                     timeout_seconds=self._config.cancel_settle_seconds,
                     poll_seconds=CANCEL_POLL_SECONDS,
+                    clock=self._clock,
                 )
                 waited_ms += extra_ms
                 gone = reaped

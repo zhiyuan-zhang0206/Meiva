@@ -3,6 +3,7 @@ from __future__ import annotations
 import os
 import sys
 from collections.abc import Iterable, Mapping
+from dataclasses import dataclass
 from pathlib import Path
 
 from base.api_contracts.agent_contract import Harness
@@ -10,12 +11,13 @@ from base.host.env.harness_binaries import resolve_harness_binary, with_harness_
 from base.host.env.registry import process_environment
 from base.lm.harness.antigravity import AgySession, AntigravityConfig
 from base.lm.harness.antigravity import build_handoff as antigravity_handoff
+from base.lm.harness.base_session import SessionBinding, SessionClock
 from base.lm.harness.bridge import HarnessBridge, HarnessSession, ScopedSessionRegistry
 from base.lm.harness.claude import BridgeConfig, ClaudeSession
 from base.lm.harness.codex import CodexConfig, CodexSession
 from base.lm.harness.handoff import ClusterFact, Handoff, HarnessContribution
 from base.lm.harness.kimi import KimiConfig, KimiSession
-from base.lm.harness.registration import HANDLE_ENV, RegistrationStore
+from base.lm.harness.registration import HANDLE_ENV, RegistrationStore, SecureRandom
 from base.lm.harness.registry import SessionRegistry
 
 # meiva:note
@@ -57,6 +59,7 @@ def open_session(
     cwd: Path,
     registry: SessionRegistry,
     environ: Mapping[str, str],
+    clock: SessionClock,
     skip_permissions: bool = True,
 ) -> HarnessSession:
     if harness is Harness.CLAUDE_CODE:
@@ -67,29 +70,29 @@ def open_session(
                 cli_path=resolve_harness_binary("claude", path_env=claude_env.get("PATH")),
             ),
             environ={**dict.fromkeys(process_environment(), ""), **claude_env},
-            agent_id=agent_id,
-            registry=registry,
+            binding=SessionBinding(agent_id, registry),
+            clock=clock,
         )
     if harness is Harness.CODEX:
         return CodexSession(
             CodexConfig(cwd=cwd),
             environ=environ,
-            agent_id=agent_id,
-            registry=registry,
+            binding=SessionBinding(agent_id, registry),
+            clock=clock,
         )
     if harness is Harness.ANTIGRAVITY:
         return AgySession(
             AntigravityConfig(cwd=cwd, skip_permissions=skip_permissions),
             environ=environ,
-            agent_id=agent_id,
-            registry=registry,
+            binding=SessionBinding(agent_id, registry),
+            clock=clock,
         )
     if harness is Harness.KIMI_CODE:
         return KimiSession(
             KimiConfig(cwd=cwd, skip_permissions=skip_permissions),
             environ=environ,
-            agent_id=agent_id,
-            registry=registry,
+            binding=SessionBinding(agent_id, registry),
+            clock=clock,
         )
     raise ValueError(f"no session adapter for harness {harness.value!r}")
 
@@ -136,6 +139,17 @@ _handoff_for = handoff_for
 
 
 # meiva:note
+# What the host root read once for the bridges it builds: the clock their turns and
+# registrations read, the controller pid a registration names, and the generator the session
+# handle (a bearer credential) is drawn from, which the root makes a `random.SystemRandom`.
+@dataclass(frozen=True)
+class BridgeRootValues:
+    clock: SessionClock
+    controller_pid: int
+    handle_rng: SecureRandom
+
+
+# meiva:note
 # The bridge one runtime carries: none for the built-in loop, one per external
 # session otherwise. The handoff is built here from what the host knows — the agent
 # id, the machine it runs on and its workspace — so the waking path has one place to
@@ -151,6 +165,7 @@ def bridge_for(
     registrations: RegistrationStore | None = None,
     registration_ttl_seconds: float,
     environ: Mapping[str, str],
+    root: BridgeRootValues,
     skip_permissions: bool = True,
     contributions: Iterable[HarnessContribution] = (),
 ) -> HarnessBridge | None:
@@ -172,6 +187,7 @@ def bridge_for(
             cwd=workspace,
             registry=scoped,
             environ={**session_environ(environ), HANDLE_ENV: handle},
+            clock=root.clock,
             skip_permissions=skip_permissions,
         )
 
@@ -183,4 +199,7 @@ def bridge_for(
         handoff=handoff,
         registrations=registrations,
         registration_ttl_seconds=registration_ttl_seconds,
+        clock=root.clock,
+        handle_rng=root.handle_rng,
+        controller_pid=root.controller_pid,
     )
