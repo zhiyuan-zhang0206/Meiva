@@ -347,7 +347,12 @@ class Scanner(AmbientAccess):
         self.qualnames.append(node.name)
         self.entropy_enter()
         self.enter(inner, node.body)
-        self.entropy_leave(node, inner, top_level=self.fn_depth == 1 and not self.scope.is_class)
+        self.entropy_leave(
+            node,
+            inner,
+            top_level=self.fn_depth == 1 and not self.scope.is_class,
+            method=self.fn_depth == 1 and self.scope.is_class,
+        )
         self.qualnames.pop()
         self.ambient.leave()
         self.fn_depth -= 1
