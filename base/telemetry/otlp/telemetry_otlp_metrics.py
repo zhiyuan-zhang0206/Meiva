@@ -178,6 +178,7 @@ def build_providers(
     keep_logs: Callable[[Any], None] | None = None,
     keep_reader: Callable[[Any], None] | None = None,
     keep_metrics: Callable[[Any], None] | None = None,
+    mirror_dir: Path,
     home: Path | None = None,
 ) -> tuple[Any, Any]:
     """Build the production (LoggerProvider, MeterProvider) pair exporting
@@ -193,7 +194,7 @@ def build_providers(
 
     from base.telemetry.delivery.loss import install_exporter_drop_observer
 
-    install_exporter_drop_observer()
+    install_exporter_drop_observer(mirror_dir=mirror_dir)
     plan = provider_build_plan(
         endpoint,
         http_timeout_s=OTLP_HTTP_TIMEOUT_S,

@@ -1,7 +1,7 @@
-exports = ["identity_inputs.py"]
+exports = ["fake_sdk_providers.py", "identity_inputs.py"]
 
 [uses]
 "telemetry_otlp" = ["identity_inputs.py", "test_telemetry_otlp.py"]
-"test_otlp_worker_lifecycle.py" = ["test_telemetry_otlp.py"]
+"test_otlp_worker_lifecycle.py" = ["fake_sdk_providers.py", "test_telemetry_otlp.py"]
 "test_telemetry_otlp.py" = ["identity_inputs.py"]
 "test_telemetry_otlp_child_defer.py" = ["test_telemetry_otlp.py"]

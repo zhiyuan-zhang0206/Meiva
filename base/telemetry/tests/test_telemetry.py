@@ -30,6 +30,7 @@ from opentelemetry.trace import NonRecordingSpan, SpanContext
 
 from base import cluster, telemetry
 from base.db import Database
+from base.paths.tests.homes import unit_home as unit_home
 from base.telemetry import emitter, observability
 from base.telemetry.tests.otlp.identity_inputs import machine_identity
 
@@ -68,10 +69,10 @@ def _mirror_last(event_name: str, agent: int | None = None) -> dict[str, Any]:
 
 
 @pytest.fixture(autouse=True)
-def bind_telemetry(database: Database) -> Iterator[None]:
+def bind_telemetry(database: Database, unit_home: Path) -> Iterator[None]:
     """Bind a stable identity to this test's explicit native writer owner."""
     pipeline = telemetry.build_pipeline(
-        database=lambda: database, machine=machine_identity(), home=Path(".meiva")
+        database=lambda: database, machine=machine_identity(), home=unit_home
     )
     try:
         telemetry.init_telemetry(process="test-proc", pipeline=pipeline)

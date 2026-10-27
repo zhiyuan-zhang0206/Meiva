@@ -14,5 +14,4 @@ exports = ["defer_plan.py", "loss.py", "mirror.py", "pipeline.py", "receipts.py"
 [debt.ambient-read]
 "loss.py#clock datetime.datetime.now" = 1
 "mirror.py#clock datetime.datetime.now" = 1
-"mirror.py#home base.paths.logs_dir" = 2
 "state.py#platform socket.gethostname" = 1

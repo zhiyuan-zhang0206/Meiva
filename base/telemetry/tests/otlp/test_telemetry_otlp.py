@@ -56,7 +56,9 @@ def otlp_test_event(
 
 
 @pytest.fixture
-def otlp_backend() -> Iterator[OtlpFixture]:
+def otlp_backend(
+    tmp_path: Path,
+) -> Iterator[OtlpFixture]:
     from opentelemetry.sdk._logs import LoggerProvider
     from opentelemetry.sdk._logs.export import (
         SimpleLogRecordProcessor,
@@ -74,6 +76,7 @@ def otlp_backend() -> Iterator[OtlpFixture]:
         export_allowed=lambda: True,
         enabled=lambda: True,
         providers=(logger_provider, metric_provider),
+        mirror_dir=tmp_path,
     )
 
     telemetry.process_state["pipeline"]._exporter = backend
@@ -583,14 +586,14 @@ def test_export_batch_builds_backend_once(
     assert backend._logs is first
 
 
-def test_flush_without_init_is_noop() -> None:
-    backend = telemetry_otlp.OtlpBackend(export_allowed=lambda: True)
+def test_flush_without_init_is_noop(tmp_path: Path) -> None:
+    backend = telemetry_otlp.OtlpBackend(export_allowed=lambda: True, mirror_dir=tmp_path)
     backend.flush()
     assert backend._thread is None
     assert backend._queue.empty()
 
 
-def test_flag_off_disables_export(emitted_events: EmittedEvents) -> None:
+def test_flag_off_disables_export(emitted_events: EmittedEvents, tmp_path: Path) -> None:
     from opentelemetry.sdk._logs import LoggerProvider
     from opentelemetry.sdk._logs.export import SimpleLogRecordProcessor
     from opentelemetry.sdk.metrics import MeterProvider
@@ -604,6 +607,7 @@ def test_flag_off_disables_export(emitted_events: EmittedEvents) -> None:
         export_allowed=lambda: True,
         enabled=lambda: False,
         providers=(logger_provider, metric_provider),
+        mirror_dir=tmp_path,
     )
 
     backend.export_batch([otlp_test_event()])
@@ -621,9 +625,11 @@ def test_flag_defaults_on_with_standard_endpoint() -> None:
 
 
 @pytest.fixture(autouse=True)
-def bind_telemetry(db_conn: psycopg.Connection, database: Database) -> Iterator[None]:
+def bind_telemetry(
+    db_conn: psycopg.Connection, database: Database, tmp_path: Path
+) -> Iterator[None]:
     pipeline = telemetry.build_pipeline(
-        database=lambda: database, machine=machine_identity(), home=Path(".meiva")
+        database=lambda: database, machine=machine_identity(), home=tmp_path
     )
     try:
         telemetry.init_telemetry(process="test-proc", pipeline=pipeline)

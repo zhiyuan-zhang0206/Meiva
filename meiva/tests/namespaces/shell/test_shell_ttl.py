@@ -3,6 +3,7 @@
 import contextlib
 from collections.abc import Iterator
 from datetime import UTC, datetime, timedelta
+from pathlib import Path
 
 import psycopg
 import pytest
@@ -12,20 +13,22 @@ from base import telemetry
 from base.cluster.machine import MachineIdentityReader
 from base.cluster.machine.tests.identity import machine_identity as machine_identity
 from base.db import Database
-from base.paths import meiva_home
 
 pytestmark = [
     pytest.mark.usefixtures("pty_service", "_isolated_agent"),
 ]
 
 
+# meiva:note
+# Own the process writer used by the operation and its mirror barrier. It is built over the test's
+# own home (`unit_home`, which points `MEIVA_HOME` there first), so the mirror it writes is the one
+# the test reads back through `logs_dir()`.
 @pytest.fixture
 def event_pipeline(
-    database: Database, machine_identity: MachineIdentityReader
+    database: Database, machine_identity: MachineIdentityReader, unit_home: Path
 ) -> Iterator[telemetry.EventPipeline]:
-    """Own the process writer used by the operation and its mirror barrier."""
     pipeline = telemetry.build_pipeline(
-        database=lambda: database, machine=machine_identity, home=meiva_home()
+        database=lambda: database, machine=machine_identity, home=unit_home
     )
     try:
         telemetry.init_telemetry(process="test-sdk-operation", pipeline=pipeline)

@@ -16,6 +16,7 @@ from __future__ import annotations
 import http.server
 import socket
 import threading
+from pathlib import Path
 
 import pytest
 
@@ -76,7 +77,7 @@ def test_endpoint_reachable_non_http_scheme_skips_probe():
     assert telemetry_otlp.OtlpBackend._endpoint_reachable("file:///tmp/x") is True
 
 
-def test_production_otlp_provider_construction_contract() -> None:
+def test_production_otlp_provider_construction_contract(tmp_path: Path) -> None:
     """Log and metric SDK workers receive the same explicit HTTP deadline, and
     both providers leave the process-exit shutdown to the emitter (task #4320)."""
     plan = telemetry_otlp_metrics.provider_build_plan("http://127.0.0.1:4318")
@@ -89,7 +90,9 @@ def test_production_otlp_provider_construction_contract() -> None:
     assert 0 < timeout_s <= 5.0
     assert plan.shutdown_on_exit is False
 
-    logs, metrics = telemetry_otlp_metrics.build_providers("http://127.0.0.1:4318")
+    logs, metrics = telemetry_otlp_metrics.build_providers(
+        "http://127.0.0.1:4318", mirror_dir=tmp_path
+    )
     try:
         # Both providers must NOT register their own atexit shutdown: it would fire
         # ahead of `base.telemetry.drain_on_exit` (LIFO) and strand every tail
