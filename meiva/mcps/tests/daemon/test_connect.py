@@ -164,7 +164,7 @@ async def test_a_url_server_without_headers_sends_none(
 # Start `oauth_connect_child.py` connecting to the server `server` of the home, which is where the
 # child reads the server entries and tokens from.
 async def _start_connect_child(
-    home: Path, server: str, timeout_seconds: float
+    home: Path, server: str, timeout_seconds: float, config_home: Path | None = None
 ) -> asyncio.subprocess.Process:
     env = {key: value for key, value in os.environ.items() if not key.startswith("MEIVA_")}
     env["MEIVA_HOME"] = str(home)
@@ -177,6 +177,7 @@ async def _start_connect_child(
         str(REPO_ROOT),
         server,
         str(timeout_seconds),
+        *([] if config_home is None else [str(config_home)]),
         env=env,
         stdout=asyncio.subprocess.PIPE,
         stderr=asyncio.subprocess.PIPE,
@@ -206,6 +207,29 @@ async def test_an_oauth_url_server_connects_with_the_token_stored_for_it(unit_ho
     assert remote.seen_headers
     assert all(
         headers.get("authorization") == "Bearer at-stored" for headers in remote.seen_headers
+    )
+
+
+# meiva:note
+# The token file is read from the home the daemon configuration names, not from the environment's
+# home: the two differ here, and the token exists only under the configuration's home, so a
+# connect that reads the environment's home would start the authorization flow and fail.
+async def test_an_oauth_connect_reads_the_token_of_the_configurations_home(
+    unit_home: Path, tmp_path: Path
+) -> None:
+    config_home = tmp_path / "config-home"
+    await FileTokenStorage("remote", home=config_home).set_tokens(
+        OAuthToken(access_token="at-config", token_type="Bearer", expires_in=3600)  # noqa: S106
+    )
+    async with http_mcp_server() as remote:
+        write_servers(unit_home, {"remote": {"url": remote.url, "oauth": True}})
+        outcome = await _connect_outcome(
+            await _start_connect_child(unit_home, "remote", 15.0, config_home)
+        )
+    assert outcome == {"outcome": "connected", "tools": ["echo"], "locks": ["remote"]}
+    assert remote.seen_headers
+    assert all(
+        headers.get("authorization") == "Bearer at-config" for headers in remote.seen_headers
     )
 
 

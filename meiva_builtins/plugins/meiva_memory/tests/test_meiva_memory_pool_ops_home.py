@@ -1,19 +1,18 @@
-"""`pool_ops.py` resolves the home the way every other Meiva process does.
-
-`meiva_builtins/plugins/meiva_memory/pool_ops.py` is imported by the consolidation
-scripts under `skills/scripts/` (`consolidate.py`, `steward.py`, `arbiter_merge.py`,
-`gen_indexes.py`, `rebuild_memory_index.py`) as
-`meiva_builtins.plugins.meiva_memory.pool_ops`, so a run needs the checkout's venv
-(`meiva_builtins` importable). Its home is `base.paths.home.resolve_meiva_home`
-(`$MEIVA_HOME`, else `~/.meiva`), which builds no Settings. `pool_dir()` /
-`refresh_index()` are write paths (git commit + push to the pool, `meiva memory
-refresh`), so the default-home cases run under a fake HOME: nothing here can touch
-the operator's real `~/.meiva`.
-
-Runs `pool_ops.py` in a subprocess with a from-scratch environment (like
-`test_meiva_memory_steward_guard.py`'s `env = os.environ.copy()` pattern): the
-scripts run as their own processes, so a real process environment is the seam.
-"""
+# meiva:note
+# `pool_ops.py` takes the Meiva home its caller resolved: `pool_dir(home)`, `machine_name(home)`.
+#
+# `meiva_builtins/plugins/meiva_memory/pool_ops.py` is imported by the consolidation scripts under
+# `skills/scripts/` (`consolidate.py`, `steward.py`, `arbiter_merge.py`, `gen_indexes.py`,
+# `rebuild_memory_index.py`) as `meiva_builtins.plugins.meiva_memory.pool_ops`, so a run needs the
+# checkout's venv (`meiva_builtins` importable). Each script resolves the home at its entry with
+# `base.paths.home.resolve_meiva_home` (`$MEIVA_HOME`, else `~/.meiva`, which builds no Settings);
+# the child process these tests run does the same and hands it to `pool_ops`. `pool_dir()` /
+# `refresh_index()` are write paths (git commit + push to the pool, `meiva memory refresh`), so the
+# default-home cases run under a fake HOME: nothing here can touch the operator's real `~/.meiva`.
+#
+# Runs `pool_ops.py` in a subprocess with a from-scratch environment (like
+# `test_meiva_memory_steward_guard.py`'s `env = os.environ.copy()` pattern): the scripts run as
+# their own processes, so a real process environment is the seam.
 
 from __future__ import annotations
 

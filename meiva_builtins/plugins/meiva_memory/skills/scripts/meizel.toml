@@ -1,7 +1,7 @@
 exports = ["steward.py"]
 
 [uses]
-"tests" = ["rebuild_memory_index.py"]
+"tests" = ["gen_indexes.py", "rebuild_memory_index.py"]
 
 [roots]
 "arbiter_merge.py" = { kinds = ["home"], why = "Process entry of the arbiter merge script: resolves the Meiva home once and hands the pool to the pool helpers" }
