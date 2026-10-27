@@ -6,7 +6,9 @@ import logging
 import re
 import subprocess
 import tempfile
+import time
 from collections.abc import Mapping
+from dataclasses import dataclass
 from pathlib import Path
 
 from base.deploy.release import editable_install
@@ -14,8 +16,6 @@ from base.host import proc
 
 _log = logging.getLogger("services.supervision.healthchecks.prod_venv")
 
-# Each leg has its own deadline, so a hung metadata check cannot skip imports.
-_PROBE_TIMEOUT_S = 5.0
 _STDERR_TAIL_CHARS = 1000
 _IMPORT_SMOKE = """\
 import meiva, pydantic, psycopg, fastapi
@@ -36,7 +36,35 @@ def _stderr_tail(stderr: str | bytes | None) -> str:
     return stderr[-_STDERR_TAIL_CHARS:].strip()
 
 
-def _probe(label: str, argv: list[str], env: dict[str, str], timeout_s: float) -> str | None:
+# meiva:note
+# One subcommand's failure line and whether it says anything about the environment. Only a leg that
+# ran to completion and answered with a violation is evidence; ran out of its deadline, could not
+# start (EAGAIN/ENOMEM/EACCES on a loaded host, a missing interpreter) and killed without a return
+# code (an OOM kill) are all "never read" — the shapes a busy machine produces, and the ones that
+# must not read as damage (2026-10-27, task #5656).
+@dataclass(frozen=True, slots=True)
+class _LegFailure:
+    detail: str
+    unmeasured: bool
+
+
+# meiva:note
+# One subcommand inside the observation's deadline: it may spend an even share of whatever the legs
+# before it left (`legs_left` counts itself), so a hung leg can never starve the ones after it, and
+# the whole observation still ends inside the caller's deadline. A leg whose share is already spent
+# is never spawned and reports that it was never read.
+def _probe_within(
+    label: str, argv: list[str], env: dict[str, str], deadline: float, *, legs_left: int
+) -> _LegFailure | None:
+    share = (deadline - time.monotonic()) / legs_left
+    if share <= 0:
+        return _LegFailure(f"{label}: the observation deadline was already spent", unmeasured=True)
+    return _probe(label, argv, env, share)
+
+
+def _probe(
+    label: str, argv: list[str], env: dict[str, str], timeout_s: float
+) -> _LegFailure | None:
     """Return a bounded diagnostic for failed execution, including spawn failure."""
     try:
         result = proc.run_bounded(
@@ -49,11 +77,24 @@ def _probe(label: str, argv: list[str], env: dict[str, str], timeout_s: float) -
             errors="replace",
         )
     except subprocess.TimeoutExpired as exc:
-        return f"{label} timed out after {timeout_s:g}s; stderr={_stderr_tail(exc.stderr)!r}"
+        return _LegFailure(
+            f"{label} did not finish within its share of the observation deadline; "
+            f"stderr={_stderr_tail(exc.stderr)!r}",
+            unmeasured=True,
+        )
     except OSError as exc:
-        return f"{label} could not start: {exc}"
+        return _LegFailure(f"{label} could not start: {exc}", unmeasured=True)
+    if result.returncode < 0:
+        return _LegFailure(
+            f"{label} was killed by signal {-result.returncode} before answering; "
+            f"stderr={_stderr_tail(result.stderr)!r}",
+            unmeasured=True,
+        )
     if result.returncode:
-        return f"{label} failed (rc={result.returncode}); stderr={_stderr_tail(result.stderr)!r}"
+        return _LegFailure(
+            f"{label} failed (rc={result.returncode}); stderr={_stderr_tail(result.stderr)!r}",
+            unmeasured=False,
+        )
     return None
 
 
@@ -65,37 +106,59 @@ def isolated_env(environment: Mapping[str, str]) -> dict[str, str]:
 
 
 # meiva:note
-# The dependency and import violations of the virtualenv of the checkout at `source_root`. The
-# root hands over what the checks need: `uv` (the resolved uv executable, or None when uv is not
-# installed and the dependency leg is skipped) and `environment` (the process environment, which
-# is isolated here). Each leg has its own `timeout_s`, so a hung metadata check cannot skip the
-# imports.
-def venv_violations(
+# One read of the virtualenv of the checkout at `source_root`: what the legs found wrong, and what
+# they could not read at all. Damage and a missing reading are kept apart because only the first
+# is evidence about the environment — a machine too busy to finish a leg says nothing about it.
+@dataclass(frozen=True, slots=True)
+class VenvObservation:
+    violations: tuple[str, ...]
+    unmeasured: tuple[str, ...]
+
+
+# meiva:note
+# The observation of the virtualenv at `source_root`. The caller hands over what the legs need:
+# `uv` (the resolved uv executable, or None when uv is not installed and the dependency leg is
+# skipped), `environment` (the process environment, which is isolated here) and `deadline_s` (the
+# whole deadline for the observation: the legs share it, so a hung metadata check cannot skip the
+# imports — it only spends them, and the import leg then reports that it ran out of time instead of
+# pretending the environment is damaged).
+def observe_venv(
     *,
     source_root: Path,
     uv: str | None,
     environment: Mapping[str, str],
-    timeout_s: float = _PROBE_TIMEOUT_S,
-) -> tuple[str, ...]:
+    deadline_s: float,
+) -> VenvObservation:
     interpreter = editable_install.venv_python(source_root)
     if interpreter is None:
-        return (f"{source_root}: venv python missing",)
+        return VenvObservation((f"{source_root}: venv python missing",), ())
 
     env = isolated_env(environment)
     violations: list[str] = []
+    unmeasured: list[str] = []
+    deadline = time.monotonic() + deadline_s
     if uv is None:
         _log.debug("[prod-venv healthcheck] uv not on PATH; skipping dependency check")
     else:
-        failure = _probe(
-            "uv pip check", [uv, "pip", "check", "--python", str(interpreter)], env, timeout_s
+        failure = _probe_within(
+            "uv pip check",
+            [uv, "pip", "check", "--python", str(interpreter)],
+            env,
+            deadline,
+            legs_left=2,
         )
         if failure is not None:
-            violations.append(failure)
-    # -I excludes the parent's PYTHON* settings, cwd and user site-packages;
-    # -B prevents this read-only check from writing bytecode into the venv.
-    failure = _probe(
-        "import smoke", [str(interpreter), "-I", "-B", "-c", _IMPORT_SMOKE], env, timeout_s
+            (unmeasured if failure.unmeasured else violations).append(failure.detail)
+    # meiva:note
+    # -I excludes the parent's PYTHON* settings, cwd and user site-packages; -B prevents this
+    # read-only check from writing bytecode into the venv.
+    failure = _probe_within(
+        "import smoke",
+        [str(interpreter), "-I", "-B", "-c", _IMPORT_SMOKE],
+        env,
+        deadline,
+        legs_left=1,
     )
     if failure is not None:
-        violations.append(failure)
-    return tuple(violations)
+        (unmeasured if failure.unmeasured else violations).append(failure.detail)
+    return VenvObservation(tuple(violations), tuple(unmeasured))

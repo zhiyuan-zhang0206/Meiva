@@ -620,8 +620,10 @@ EVENTS: dict[str, EventSpec] = {
     ),
     "root_diagnostic": telemetry_event(
         "root_diagnostic",
-        "root diagnostic sampled non-alive (every sample while it persists, WARNING) or "
-        "recovered (once, INFO); observation only, no recovery authority",
+        "root diagnostic sampled a failing verdict (every sample while it persists, WARNING), "
+        "reached no verdict -- ran out of its observation deadline or could not inspect at all "
+        "(inconclusive / unavailable, INFO) -- or recovered (once, INFO); observation only, no "
+        "recovery authority",
         payload=RootDiagnostic,
         tier="anomaly",
     ),
