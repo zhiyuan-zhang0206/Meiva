@@ -12,9 +12,9 @@ tags:
 ## Why mechanical purity and container budgets
 
 The goal is understandable, changeable code and trustworthy feedback. Bounded interfaces
-and explicit effects can help, but passing AST/graph checks does not establish cohesive
-design. Review actual owners, consumers and meaningful assertions; avoid forwarding layers
-or callback bags created only to satisfy a budget.
+and explicit effects can help, but passing the checks does not establish cohesive design.
+Review actual owners, consumers and assertions; avoid forwarding layers or callback bags
+created only to satisfy a budget.
 
 ## What the evidence means
 
@@ -24,10 +24,10 @@ filter or `--changed` does not turn that scoped result into a whole-repository j
 
 | Dimension | Evidence and limit |
 |---|---|
-| Recognized syntax | `impure-call` and related diagnostics name matched imports, calls or writes. An import or async declaration is a rule observation, not observed runtime execution. A name for an impure call, not called (`_is_file = Path.is_file`, `partial(os.stat, p)`, `_open = open`, `stat = root.stat`), is that call. A name is a path when annotated, built by `Path(...)`, looped from `iterdir`/`glob`/`rglob`, or `self.x` of those. |
-| Unresolved or unmeasured behavior | Unresolved imports/patches are reported where recognized. No diagnostic does not establish absence of callback effects, input mutation or transitive effects; those are not comprehensively analyzed. |
-| Structure | Container budgets and frozen-shape rules bound forms and sizes, not semantic effects. A frozen dataclass can contain a mutable list; a frozen JS holder or Set is not proof against nested mutation. |
-| Test resources | Fixture diagnostics recognize configured requests. They do not measure bootstrap cost or authorize a lightweight runner. Explicit [[tests/fixtures/docs/static-environment.meiva.okf.md|static ownership and refusal canaries]] govern that boundary. |
+| Recognized syntax | `impure-call` and related diagnostics name matched imports, calls or writes. An import or async declaration is a rule observation, not runtime execution. A name for an impure call, not called (`_is_file = Path.is_file`), is that call. A name is a path when annotated, built by `Path(...)`, looped from `iterdir`/`glob`/`rglob`, or `self.x` of those. |
+| Unresolved or unmeasured behavior | Unresolved imports/patches are reported where recognized. No diagnostic does not establish absence of callback effects, input mutation or transitive effects. |
+| Structure | Container budgets and frozen-shape rules bound forms and sizes, not semantic effects: a frozen dataclass can contain a mutable list, and a frozen JS holder or Set does not stop nested mutation. |
+| Test resources | Fixture diagnostics recognize configured requests. They do not measure bootstrap cost or authorize a lightweight runner. [[tests/fixtures/docs/static-environment.meiva.okf.md|Static ownership and refusal canaries]] govern it. |
 
 Passing observed values can separate decisions from effects. Injecting a callable makes
 its operation explicit but does not remove its effects. Use [[meizel/docs/checker/explain.meiva.okf.md|explain source evidence]] to trace
@@ -47,7 +47,9 @@ child under `[purity]`, with `"."` as the directory default:
 
 Every Python or TypeScript file resolves to its nearest enclosing declaration (`none` by default):
 
-- **`none`**: only locality and patch-recording rules apply.
+- **`none`**: only locality and patch-recording rules apply. A manifest that names it writes
+  `{ mode = "none", why = "..." }` (a bare `"none"` is `manifest-syntax`): an effect shell whose pure
+  decisions are extracted and reviewed. A file no manifest mentions is `none`.
 - **`strict-to-be`**: all 15 purity and container-budget rules are evaluated. Existing
   violations may be recorded in `[debt.<code>]` via `python -m meizel debt record` and can
   only shrink (`debt-paid` fires when a recorded violation is fixed, and also when a
@@ -68,7 +70,7 @@ explicitly targeted. Instead, a test file whose first-party targets are all `str
 | Code | Scope | What it catches |
 |---|---|---|
 | `impure-edge` | `strict`, `strict-to-be` module | Importing or reading an attribute from a first-party module whose effective purity is `none` |
-| `impure-call` | `strict`, `strict-to-be` module | `async def`, `global`, `nonlocal`, importing an effectful module (`DEFAULT_IMPURE_IMPORTS` plus policy `impure-imports`), or calling an ambient clock, randomness, environment, I/O or filesystem method (`time.*`, `datetime.now`, `os.environ`, `os.getenv`, `random.*`, `secrets.*`, `uuid.uuid4`, `open`, `print`, `input`, the `os` file and descriptor calls, `Path` I/O methods, `pkgutil.get_data`, `inspect.getsource`; list: `DEFAULT_IMPURE_CALLS` plus policy `impure-calls`) |
+| `impure-call` | `strict`, `strict-to-be` module | `async def`, `global`, `nonlocal`, importing an effectful module (`DEFAULT_IMPURE_IMPORTS` plus policy `impure-imports`), or calling an ambient clock, randomness, environment, I/O or filesystem method (`time.*`, `datetime.now`, `os.environ`, `os.getenv`, `random.*`, `secrets.*`, `uuid.uuid4`, `open`, the `os` file and descriptor calls, `Path` I/O methods; list: `DEFAULT_IMPURE_CALLS` plus policy `impure-calls`) |
 | `unfrozen-value` | `strict`, `strict-to-be` module | A class that is not an Enum, Exception, Protocol, TypedDict, NamedTuple, frozen `BaseModel`, or `@dataclass(frozen=True)`, or a module-level mutable literal/comprehension/call assigned to a binding |
 | `untyped-export` | `strict`, `strict-to-be` module | A public function (or exported symbol) missing parameter or return type annotations, or annotated with `Any` or bare `dict` |
 | `pass-through-function` | `strict`, `strict-to-be` module | A public undecorated function whose body only forwards its exact parameters to another function or module attribute call |
