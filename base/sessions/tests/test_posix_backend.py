@@ -30,13 +30,13 @@ from base.sessions.tests.poll_until import poll_until
 _SLEEP = "/bin/sleep 300"
 
 
-def _backend() -> PosixProcSessionBackend:
-    return PosixProcSessionBackend(SYSTEM_TIMERS)
+def _backend(home: Path) -> PosixProcSessionBackend:
+    return PosixProcSessionBackend(SYSTEM_TIMERS, home)
 
 
-def _pid(name: str) -> int:
+def _pid(name: str, home: Path) -> int:
     """The recorded pid for a live session (asserts the record exists)."""
-    rec = posixproc.read_record(name)
+    rec = posixproc.read_record(name, home=home)
     assert rec is not None
     return rec.pid
 
@@ -82,12 +82,29 @@ def test_new_session_no_login_shell_passthrough() -> None:
     assert cmd == "mycmd --flag"
 
 
-def test_posix_backend_keeps_its_own_log_file():
+def test_the_backend_keeps_its_sessions_under_the_home_it_was_built_with(
+    unit_home: Path, tmp_path: Path
+) -> None:
+    other = tmp_path / "other-home"
+    other.mkdir()
+    backend = _backend(other)
+    name = "meiva-test-posixbe-home"
+    assert backend.new_session(name, _SLEEP, other, env=dict(os.environ)) is True
+    try:
+        assert posixproc.record_path(name, home=other).is_file()
+        assert backend.session_log_path(name) == other / "logs" / f"{name}.out.log"
+        assert backend.has_session(name) is True
+        assert _backend(unit_home).has_session(name) is False
+    finally:
+        backend.kill_session(name, graceful=False)
+
+
+def test_posix_backend_keeps_its_own_log_file(unit_home: Path) -> None:
     """The native supervisor owns a session log file (liveness consumers can
     watch it); the abstract default answers None — a backend without a file."""
     from base.sessions.protocol import SessionBackend
 
-    posix_be = _backend()
+    posix_be = _backend(unit_home)
     assert posix_be.session_log_path("meiva-x") is not None
     assert SessionBackend.session_log_path(posix_be, "meiva-x") is None
 
@@ -97,22 +114,22 @@ def test_posix_backend_keeps_its_own_log_file():
 # ---------------------------------------------------------------------------
 
 
-def test_spawn_and_kill_idempotent(unit_home):
+def test_spawn_and_kill_idempotent(unit_home: Path) -> None:
     """new_session twice on a live name is a no-op (same pid); kill confirms
     the session gone; a second kill is a noop."""
-    backend = _backend()
+    backend = _backend(unit_home)
     name = "meiva-test-posixbe-1"
     assert backend.new_session(name, _SLEEP, unit_home, env=dict(os.environ)) is True  # pyright: ignore[reportUnknownArgumentType]
     try:
-        first_pid = _pid(name)
+        first_pid = _pid(name, unit_home)
         assert backend.has_session(name) is True
         assert backend.new_session(name, _SLEEP, unit_home, env=dict(os.environ)) is True  # pyright: ignore[reportUnknownArgumentType]
-        assert _pid(name) == first_pid  # not relaunched
+        assert _pid(name, unit_home) == first_pid  # not relaunched
 
         ok, mode = backend.kill_session(name, graceful=False)
         assert ok is True and mode == "forced"
         assert backend.has_session(name) is False
-        assert not posixproc.record_path(name).exists()
+        assert not posixproc.record_path(name, home=unit_home).exists()
 
         ok, mode = backend.kill_session(name, graceful=False)
         assert ok is True and mode == "noop"
@@ -120,15 +137,15 @@ def test_spawn_and_kill_idempotent(unit_home):
         backend.kill_session(name, graceful=False)
 
 
-def test_kill_session_accepts_expected_for_interface_parity(unit_home):
+def test_kill_session_accepts_expected_for_interface_parity(unit_home: Path) -> None:
     """kill_session takes the `expected` kwarg callers pass on rollout/stop
     paths (the ABC requires it) and ignores it — the native supervisor has no
     force-kill escalation to quieten."""
-    ok, mode = _backend().kill_session("meiva-test-posixbe-ghost", expected=True)
+    ok, mode = _backend(unit_home).kill_session("meiva-test-posixbe-ghost", expected=True)
     assert ok is True and mode == "noop"
 
 
-def test_tree_kill_leaves_no_orphans(unit_home):
+def test_tree_kill_leaves_no_orphans(unit_home: Path) -> None:
     """A force kill takes down the session's own descendants too, not just the
     top process — the tree kill the legacy SIGKILL escalation used to provide."""
     script = unit_home / "spawn_child.py"
@@ -137,9 +154,9 @@ def test_tree_kill_leaves_no_orphans(unit_home):
     )
     name = "meiva-test-posixbe-tree"
     cmd = f"{sys.executable} {shlex.quote(str(script))}"  # pyright: ignore[reportUnknownArgumentType]
-    backend = _backend()
+    backend = _backend(unit_home)
     assert backend.new_session(name, cmd, unit_home, env=dict(os.environ)) is True  # pyright: ignore[reportUnknownArgumentType]
-    parent_pid = _pid(name)
+    parent_pid = _pid(name, unit_home)
 
     # Find the `sleep` descendant in ONE snapshot, capturing its pid inside the
     # poll. The login shell forks short-lived rc children on the way up, so
@@ -178,11 +195,11 @@ def test_tree_kill_leaves_no_orphans(unit_home):
     )
 
 
-def test_pid_reuse_protection(unit_home):
+def test_pid_reuse_protection(unit_home: Path) -> None:
     """A record whose pid now belongs to a DIFFERENT process (stale
     create_time) is not a live session — the liveness check defeats pid
     recycling by the OS."""
-    backend = _backend()
+    backend = _backend(unit_home)
     name = "meiva-test-posixbe-pidreuse"
     # An unrelated long-lived process we control, standing in for the recycled pid.
     proc = subprocess.Popen(["/bin/sleep", "300"])
@@ -195,7 +212,7 @@ def test_pid_reuse_protection(unit_home):
             cwd=str(unit_home),  # pyright: ignore[reportUnknownArgumentType]
             started_at=1.0,
         )
-        rec.write(posixproc.record_path(name))
+        rec.write(posixproc.record_path(name, home=unit_home))
         assert backend.has_session(name) is False
         assert name not in backend.list_sessions(prefix="meiva-test-posixbe-")
     finally:
@@ -203,20 +220,20 @@ def test_pid_reuse_protection(unit_home):
         proc.wait(timeout=5)
 
 
-def test_session_record_reclaimed(unit_home):
+def test_session_record_reclaimed(unit_home: Path) -> None:
     """A record whose process died out from under it is unlinked as
     list_sessions walks, so the listing reflects reality."""
-    backend = _backend()
+    backend = _backend(unit_home)
     name = "meiva-test-posixbe-reclaim"
     assert backend.new_session(name, _SLEEP, unit_home, env=dict(os.environ)) is True  # pyright: ignore[reportUnknownArgumentType]
-    pid = _pid(name)
+    pid = _pid(name, unit_home)
     # Kill the process WITHOUT going through kill_session, so the record lingers.
     proc = psutil.Process(pid)
     proc.kill()
     proc.wait(timeout=5)
-    assert posixproc.record_path(name).exists()
+    assert posixproc.record_path(name, home=unit_home).exists()
     assert backend.list_sessions(prefix="meiva-test-posixbe-") == []
-    assert not posixproc.record_path(name).exists()
+    assert not posixproc.record_path(name, home=unit_home).exists()
 
 
 # ---------------------------------------------------------------------------
@@ -224,12 +241,12 @@ def test_session_record_reclaimed(unit_home):
 # ---------------------------------------------------------------------------
 
 
-def test_login_shell_rebuilds_path_with_venv_prefix(unit_home):
+def test_login_shell_rebuilds_path_with_venv_prefix(unit_home: Path) -> None:
     """With login_shell=True the command runs under bash -lc: the login
     profile rebuilds PATH (the forwarded PATH is NOT authoritative), and the
     venv bin dir is re-added inside the command — the exact PATH/venv semantics
     the legacy path provided."""
-    backend = _backend()
+    backend = _backend(unit_home)
     out = unit_home / "path-login.txt"
     out.unlink(missing_ok=True)  # pyright: ignore[reportUnknownMemberType]
     env = dict(os.environ)
@@ -258,10 +275,10 @@ def test_login_shell_rebuilds_path_with_venv_prefix(unit_home):
         backend.kill_session(name, graceful=False)
 
 
-def test_no_login_shell_preserves_env_path_exactly(unit_home):
+def test_no_login_shell_preserves_env_path_exactly(unit_home: Path) -> None:
     """With login_shell=False the command runs through plain sh -c with the
     caller's env authoritative — no profile sourcing, no PATH rewrite."""
-    backend = _backend()
+    backend = _backend(unit_home)
     out = unit_home / "path-nologin.txt"
     out.unlink(missing_ok=True)  # pyright: ignore[reportUnknownMemberType]
     env = dict(os.environ)
@@ -295,31 +312,31 @@ def test_no_login_shell_preserves_env_path_exactly(unit_home):
 # ---------------------------------------------------------------------------
 
 
-def test_send_keys_and_capture_pane_raise():
+def test_send_keys_and_capture_pane_raise(unit_home: Path) -> None:
     """No PTY: the interactive methods raise."""
-    backend = _backend()
+    backend = _backend(unit_home)
     with pytest.raises(NotImplementedError):
         backend.send_keys("s", "C-c")
     with pytest.raises(NotImplementedError):
         backend.capture_pane("s")
 
 
-def test_backend_is_a_session_backend():
-    assert isinstance(_backend(), SessionBackend)
+def test_backend_is_a_session_backend(unit_home: Path) -> None:
+    assert isinstance(_backend(unit_home), SessionBackend)
 
 
-def test_has_session_false_for_unknown(unit_home):
-    assert _backend().has_session("meiva-test-posixbe-unknown") is False
+def test_has_session_false_for_unknown(unit_home: Path) -> None:
+    assert _backend(unit_home).has_session("meiva-test-posixbe-unknown") is False
 
 
-def test_get_shell_backend_returns_pty_backend():
+def test_get_shell_backend_returns_pty_backend(unit_home: Path) -> None:
     """get_shell_backend() is the PTY backend for agent shells/watchers —
     the self-hosted PTY supervisor —
     distinct from the get_backend() one (service sessions
     live on the native backend; interactive shells on the PTY one)."""
     from base.sessions.backend import get_backend
 
-    shell = get_shell_backend()
+    shell = get_shell_backend(home=unit_home)
     assert isinstance(shell, PtySessionBackend)
     assert isinstance(shell, SessionBackend)
-    assert not isinstance(get_backend(timers=SYSTEM_TIMERS), PtySessionBackend)
+    assert not isinstance(get_backend(timers=SYSTEM_TIMERS, home=unit_home), PtySessionBackend)

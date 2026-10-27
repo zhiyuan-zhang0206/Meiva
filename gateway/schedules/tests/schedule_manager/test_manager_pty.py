@@ -109,7 +109,7 @@ def _host_is_serving(serving_root: RootBirth, _pty_home: str) -> Iterator[None]:
 def _manager(pool: ConnectionPool, *, repo_root: Path = REPO) -> sm.ScheduleManager:
     return schedule_manager(
         pool,
-        get_shell_backend(),
+        get_shell_backend(home=meiva_home()),
         repo_root=repo_root,
         launch_env=forward_env_dict(process_environment()),
     )
@@ -125,7 +125,7 @@ def _dump_logs(home: Path) -> str:
 
 
 def _wait_session_gone(name: str, timeout_s: float = 20.0) -> None:
-    backend = get_shell_backend()
+    backend = get_shell_backend(home=meiva_home())
     deadline = time.monotonic() + timeout_s
     while time.monotonic() < deadline and backend.has_session(name):
         time.sleep(0.3)
@@ -160,7 +160,7 @@ def test_pty_launch_live_capture(
     mgr.reconcile(now=NOW)
 
     name = session_name(f"schedule-{sid}")
-    backend = get_shell_backend()
+    backend = get_shell_backend(home=meiva_home())
     assert backend.has_session(name)
     assert name in [info.name for info in client.list_sessions(socket_path=service_socket())], (
         "service does not list it"
@@ -176,7 +176,9 @@ def test_pty_launch_live_capture(
     deadline = time.monotonic() + 60.0
     while time.monotonic() < deadline:
         try:
-            captured = session_control.capture_blocking(get_shell_backend(), sid, 50)
+            captured = session_control.capture_blocking(
+                get_shell_backend(home=meiva_home()), sid, 50
+            )
         except Exception as exc:
             raise AssertionError(
                 f"capture failed ({exc}); session logs:\n{_dump_logs(home)}"
@@ -201,7 +203,7 @@ def test_pty_crash_is_not_replayed_after_manager_restart(
     mgr = _manager(pool)
     mgr.reconcile(now=NOW)
     name = session_name(f"schedule-{sid}")
-    backend = get_shell_backend()
+    backend = get_shell_backend(home=meiva_home())
     assert backend.has_session(name)
 
     # The runner exits nonzero immediately → session ends on its own.
@@ -264,14 +266,14 @@ def test_real_pty_revision_is_adopted_after_lost_acknowledgement(
         assert revisions.launched_revision(meiva_home(), sid) == 1, repr(
             client.live_sessions(name, socket_path=service_socket())
         )
-        before = get_shell_backend().session_started_at(name)
+        before = get_shell_backend(home=meiva_home()).session_started_at(name)
         assert before is not None
         assert wait_for(marker.exists)
         assert db_conn.execute(
             "SELECT status, launch_count FROM schedules WHERE id = %s", (sid,)
         ).fetchone() == ("error", 1)
         _manager(pool, repo_root=tmp_path).reconcile(now=NOW)
-        assert get_shell_backend().session_started_at(name) == before
+        assert get_shell_backend(home=meiva_home()).session_started_at(name) == before
         assert db_conn.execute(
             "SELECT status, launch_count, last_error FROM schedules WHERE id = %s", (sid,)
         ).fetchone() == ("running", 1, None)

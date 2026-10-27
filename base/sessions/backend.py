@@ -3,11 +3,12 @@ from __future__ import annotations
 import logging
 import shlex
 from collections.abc import Callable
+from functools import partial
 from pathlib import Path
 
 from base.clock import Timers
 from base.native_process.os_platform import is_macos
-from base.paths import logs_dir, meiva_home, run_dir
+from base.paths import logs_path, run_dir
 from base.sessions.helperproc import (
     HelperProcSessionBackend,
     helper_client,
@@ -23,8 +24,9 @@ _log = logging.getLogger(__name__)
 
 
 class PosixProcSessionBackend(SessionBackend):
-    def __init__(self, timers: Timers) -> None:
+    def __init__(self, timers: Timers, home: Path) -> None:
         self._timers = timers
+        self._home = home
 
     @staticmethod
     def format_command(
@@ -45,7 +47,7 @@ class PosixProcSessionBackend(SessionBackend):
     def has_session(self, name: str) -> bool:
         from base.sessions import posixproc
 
-        return posixproc.has_session(name)
+        return posixproc.has_session(name, home=self._home)
 
     def new_session(
         self,
@@ -63,7 +65,7 @@ class PosixProcSessionBackend(SessionBackend):
         cmd = self.format_command(cmd, cwd, login_shell=login_shell, exec_cmd=exec_cmd)
         from base.sessions import posixproc
 
-        return posixproc.new_session(name, cmd, cwd, env=env)
+        return posixproc.new_session(name, cmd, cwd, env=env, home=self._home)
 
     def kill_session(
         self,
@@ -79,35 +81,38 @@ class PosixProcSessionBackend(SessionBackend):
         del expected
         from base.sessions import posixproc
 
-        return posixproc.kill_session(name, graceful=graceful, timeout=timeout, timers=self._timers)
+        return posixproc.kill_session(
+            name, graceful=graceful, timeout=timeout, timers=self._timers, home=self._home
+        )
 
     def graceful_signal(self, name: str, *, expected: SessionRecord | None = None) -> bool:
         from base.sessions import posixproc
 
         if expected is None:
-            return posixproc.graceful_signal(name)
-        return posixproc.graceful_signal(name, expected=expected)
+            return posixproc.graceful_signal(name, home=self._home)
+        return posixproc.graceful_signal(name, expected=expected, home=self._home)
 
     def list_sessions(self, prefix: str = "") -> list[str]:
         from base.sessions import posixproc
 
-        return posixproc.list_sessions(prefix)
+        return posixproc.list_sessions(prefix, home=self._home)
 
     def session_started_at(self, name: str) -> float | None:
         from base.sessions import posixproc
 
-        return posixproc.session_started_at(name)
+        return posixproc.session_started_at(name, home=self._home)
 
     def session_log_path(self, name: str) -> Path | None:
         from base.sessions import posixproc
 
-        return posixproc.session_log_path(name)
+        return posixproc.session_log_path(name, home=self._home)
 
 
 class PtySessionBackend(SessionBackend):
-    def __init__(self, config: client.PtyClientConfig) -> None:
+    def __init__(self, config: client.PtyClientConfig, home: Path) -> None:
         self._config = config
         self._socket = config.socket_path
+        self._home = home
 
     def has_session(self, name: str) -> bool:
         return client.has_session(name, socket_path=self._config.socket_path)
@@ -225,7 +230,7 @@ class PtySessionBackend(SessionBackend):
         return client.host_generation(socket_path=self._socket)
 
     def session_log_path(self, name: str) -> Path | None:
-        return logs_dir() / f"{name}.out.log"
+        return logs_path(self._home) / f"{name}.out.log"
 
 
 # meiva:link base/sessions/docs/session-backend.meiva.okf.md
@@ -244,18 +249,17 @@ def helper_spawn_enabled(*, macos: bool = is_macos()) -> bool:
 
 
 # meiva:link base/sessions/docs/session-backend.meiva.okf.md
-def get_backend(*, timers: Timers, macos: bool = is_macos()) -> SessionBackend:
+def get_backend(*, timers: Timers, home: Path, macos: bool = is_macos()) -> SessionBackend:
     if helper_spawn_enabled(macos=macos):
-        return HelperProcSessionBackend(helper_client, timers)
-    return PosixProcSessionBackend(timers)
+        return HelperProcSessionBackend(partial(helper_client, home=home), timers, home)
+    return PosixProcSessionBackend(timers, home)
 
 
 # meiva:link base/sessions/docs/session-backend.meiva.okf.md
-def get_shell_backend() -> SessionBackend:
+def get_shell_backend(*, home: Path) -> SessionBackend:
     # meiva:note
-    # The shell backend of this process's own home: the ambient door the composition roots
-    # (the gateway, the agent host, the shell SDK) call; a caller holding a home builds
-    # `PtyClientConfig(socket_path=service_socket_path(run_dir(home)))` itself.
+    # The shell backend of `home`: the PTY service listening under its run directory, and the
+    # transcripts under its logs directory.
     return PtySessionBackend(
-        client.PtyClientConfig(socket_path=service_socket_path(run_dir(meiva_home())))
+        client.PtyClientConfig(socket_path=service_socket_path(run_dir(home))), home
     )

@@ -112,7 +112,7 @@ def test_new_session_preserves_login_shell_env_stderr_and_record(
     prefix = env_forwarding.venv_activation_prefix()
     stderr = unit_home / "logs" / "service.stderr.log"
     with _helper_socket_server(handle_spawn) as fake_client:
-        backend = helperproc.HelperProcSessionBackend(lambda: fake_client, SYSTEM_TIMERS)
+        backend = helperproc.HelperProcSessionBackend(lambda: fake_client, SYSTEM_TIMERS, unit_home)
 
         assert backend.new_session(
             "meiva-service",
@@ -150,6 +150,25 @@ def test_new_session_preserves_login_shell_env_stderr_and_record(
         assert len(calls) == 1
 
 
+def test_the_records_and_transcripts_live_under_the_home_the_backend_was_given(
+    unit_home: Path, tmp_path: Path
+) -> None:
+    other = tmp_path / "other-home"
+    other.mkdir()
+
+    def handle_spawn(_req: dict[str, object]) -> dict[str, object]:
+        return {"ok": True, "result": {"pid": os.getpid(), "reused": False}}
+
+    with _helper_socket_server(handle_spawn) as fake_client:
+        backend = helperproc.HelperProcSessionBackend(lambda: fake_client, SYSTEM_TIMERS, other)
+
+        assert backend.new_session("meiva-service", "true", other, env={})
+
+        assert SessionRecord.read(other / "run" / "sessions" / "meiva-service.json") is not None
+        assert not (unit_home / "run" / "sessions" / "meiva-service.json").exists()
+        assert backend.session_log_path("meiva-service") == other / "logs" / "meiva-service.out.log"
+
+
 def test_new_session_preserves_argv_and_non_login_shell(
     unit_home: Path,
 ) -> None:
@@ -161,7 +180,7 @@ def test_new_session_preserves_argv_and_non_login_shell(
 
     argv = [sys.executable, "-m", "services.agent_runner.agent_host.daemon"]
     with _helper_socket_server(handle_spawn) as fake_client:
-        backend = helperproc.HelperProcSessionBackend(lambda: fake_client, SYSTEM_TIMERS)
+        backend = helperproc.HelperProcSessionBackend(lambda: fake_client, SYSTEM_TIMERS, unit_home)
         assert backend.new_session("meiva-agent", argv, unit_home, env={})
         assert backend.new_session(
             "meiva-shell-command",
@@ -183,9 +202,9 @@ def test_spawn_failure_is_loud_and_has_no_fallback(
         _helper_socket_server(refuse_spawn) as fake_client,
         pytest.raises(RuntimeError, match=r"helper is down or refused.*meiva converge.*helper log"),
     ):
-        helperproc.HelperProcSessionBackend(lambda: fake_client, SYSTEM_TIMERS).new_session(
-            "meiva-service", "echo nope", unit_home, env={}
-        )
+        helperproc.HelperProcSessionBackend(
+            lambda: fake_client, SYSTEM_TIMERS, unit_home
+        ).new_session("meiva-service", "echo nope", unit_home, env={})
 
 
 def test_record_registry_drives_list_timestamps_and_generation(unit_home: Path) -> None:
@@ -201,7 +220,9 @@ def test_record_registry_drives_list_timestamps_and_generation(unit_home: Path) 
     live.write(sessions / "meiva-live.json")
     dead.write(sessions / "meiva-dead.json")
     backend = helperproc.HelperProcSessionBackend(
-        lambda: PermissionsHelperClient("/unused.sock"), SYSTEM_TIMERS
+        lambda: PermissionsHelperClient("/unused.sock"),
+        SYSTEM_TIMERS,
+        unit_home,
     )
 
     assert backend.list_sessions("meiva-") == ["meiva-live"]
@@ -236,7 +257,9 @@ def test_kill_signals_record_pid_and_unlinks_only_after_confirmed_death(
         record.write(path)
 
         assert helperproc.HelperProcSessionBackend(
-            lambda: PermissionsHelperClient("/unused.sock"), SYSTEM_TIMERS
+            lambda: PermissionsHelperClient("/unused.sock"),
+            SYSTEM_TIMERS,
+            unit_home,
         ).kill_session("meiva-live", graceful=True, timeout=10.0) == (True, "graceful")
         assert child.wait(timeout=10) == -signal.SIGTERM
         assert not path.exists()
@@ -263,7 +286,9 @@ def test_graceful_delivery_tolerates_whole_second_create_time_drift(
         drifted.write(unit_home / "run" / "sessions" / "meiva-live.json")
 
         assert helperproc.HelperProcSessionBackend(
-            lambda: PermissionsHelperClient("/unused.sock"), SYSTEM_TIMERS
+            lambda: PermissionsHelperClient("/unused.sock"),
+            SYSTEM_TIMERS,
+            unit_home,
         ).graceful_signal("meiva-live", expected=drifted)
         assert child.wait(timeout=10) == -signal.SIGTERM
     finally:
@@ -288,7 +313,9 @@ def test_graceful_delivery_refuses_a_birth_beyond_the_tolerance(
         replaced.write(unit_home / "run" / "sessions" / "meiva-live.json")
 
         assert not helperproc.HelperProcSessionBackend(
-            lambda: PermissionsHelperClient("/unused.sock"), SYSTEM_TIMERS
+            lambda: PermissionsHelperClient("/unused.sock"),
+            SYSTEM_TIMERS,
+            unit_home,
         ).graceful_signal("meiva-live", expected=replaced)
         assert child.poll() is None
     finally:
@@ -311,6 +338,7 @@ def test_backend_route_matrix(
     enabled: bool,
     spawn: bool,
     expected: str,
+    tmp_path: Path,
 ) -> None:
     from base.config import get_field, set_field
     from base.sessions import backend as session_backend
@@ -320,14 +348,14 @@ def test_backend_route_matrix(
     set_field("permissions_helper_enabled", enabled)
     set_field("permissions_helper_spawn", spawn)
     try:
-        backend = session_backend.get_backend(timers=SYSTEM_TIMERS, macos=is_macos)
+        backend = session_backend.get_backend(timers=SYSTEM_TIMERS, home=tmp_path, macos=is_macos)
     finally:
         set_field("permissions_helper_enabled", previous_enabled)
         set_field("permissions_helper_spawn", previous_spawn)
     assert type(backend).__name__ == expected
 
 
-def test_backend_route_fails_closed_when_settings_are_unreadable() -> None:
+def test_backend_route_fails_closed_when_settings_are_unreadable(tmp_path: Path) -> None:
     from base.config import get_field, set_field
     from base.sessions import backend as session_backend
 
@@ -340,7 +368,7 @@ def test_backend_route_fails_closed_when_settings_are_unreadable() -> None:
     previous_enabled = get_field("permissions_helper_enabled")
     set_field("permissions_helper_enabled", _UnreadableFlag())
     try:
-        backend = session_backend.get_backend(timers=SYSTEM_TIMERS, macos=True)
+        backend = session_backend.get_backend(timers=SYSTEM_TIMERS, home=tmp_path, macos=True)
     finally:
         set_field("permissions_helper_enabled", previous_enabled)
     assert type(backend).__name__ == "PosixProcSessionBackend"

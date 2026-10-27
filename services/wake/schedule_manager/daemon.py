@@ -194,7 +194,7 @@ async def run(
         )
         manager = ScheduleManager(
             pool,
-            backend=get_shell_backend(),
+            backend=get_shell_backend(home=runtime.parent),
             repo_root=REPO_ROOT,
             home=runtime.parent,
             policy=manager_policy(process_config),

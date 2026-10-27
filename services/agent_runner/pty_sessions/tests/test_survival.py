@@ -111,7 +111,9 @@ def test_a_backend_session_outlives_the_process_that_created_it(unit_home: Path)
     host.send_signal(signal.SIGKILL)
     host.wait(timeout=10)
 
-    backend = PtySessionBackend(config=PtyClientConfig(socket_path=service_socket()))
+    backend = PtySessionBackend(
+        config=PtyClientConfig(socket_path=service_socket()), home=unit_home
+    )
     assert backend.has_session(name)
     backend.send(name, "echo reached-through-the-backend")
     backend.send_keys(name, "Enter")

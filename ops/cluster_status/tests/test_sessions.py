@@ -41,7 +41,7 @@ def _now() -> datetime:
 @pytest.fixture
 def service_session(unit_home: Path) -> Iterator[str]:
     name = "meiva-ops-status-test"
-    backend = PosixProcSessionBackend(SYSTEM_TIMERS)
+    backend = PosixProcSessionBackend(SYSTEM_TIMERS, unit_home)
     assert backend.new_session(name, "/bin/sleep 300", unit_home, env=dict(os.environ))
     try:
         yield name
@@ -61,8 +61,8 @@ def test_both_backends_are_listed_for_this_cluster_only(
         new(name, unit_home)
 
     rows = collect_sessions(
-        service_backend=PosixProcSessionBackend(SYSTEM_TIMERS),
-        shell_backend=get_shell_backend(),
+        service_backend=PosixProcSessionBackend(SYSTEM_TIMERS, unit_home),
+        shell_backend=get_shell_backend(home=unit_home),
         now=_now(),
     )
 
@@ -85,7 +85,7 @@ def test_an_agents_shells_are_listed_by_id_with_their_names(unit_home: Path) -> 
     ):
         new(name, unit_home)
 
-    shells = agent_shell_sessions(7, now=_now())
+    shells = agent_shell_sessions(7, now=_now(), home=unit_home)
 
     assert [(shell.id, shell.name) for shell in shells] == [
         (0, None),
@@ -93,7 +93,16 @@ def test_an_agents_shells_are_listed_by_id_with_their_names(unit_home: Path) -> 
         (2, "watcher"),
     ]
     assert all(shell.created_at is not None for shell in shells)
-    assert agent_shell_sessions(99, now=_now()) == []
+    assert agent_shell_sessions(99, now=_now(), home=unit_home) == []
+
+
+def test_the_listing_reads_the_service_of_the_home_it_is_given(
+    unit_home: Path, tmp_path: Path
+) -> None:
+    new("meiva-agent-7-shell-0", unit_home)
+
+    assert [s.id for s in agent_shell_sessions(7, now=_now(), home=unit_home)] == [0]
+    assert agent_shell_sessions(7, now=_now(), home=tmp_path / "elsewhere") == []
 
 
 def test_a_capture_returns_the_output_of_the_resolved_shell(unit_home: Path) -> None:
@@ -101,7 +110,7 @@ def test_a_capture_returns_the_output_of_the_resolved_shell(unit_home: Path) -> 
     type_line("meiva-agent-42-shell-7-build", "echo captured-marker")
     output_until("meiva-agent-42-shell-7-build", "captured-marker")
 
-    name, lines, created_at, uptime = capture_shell(42, 7, 200, now=_now())
+    name, lines, created_at, uptime = capture_shell(42, 7, 200, now=_now(), home=unit_home)
 
     assert name == "meiva-agent-42-shell-7-build"
     assert "captured-marker" in [line.strip() for line in lines]
@@ -114,7 +123,7 @@ def test_a_capture_of_a_shell_that_is_not_there_is_not_found(unit_home: Path) ->
     new("meiva-agent-42-shell-3", unit_home)
 
     with pytest.raises(ShellNotFoundError, match="agent 42 has no live shell 99"):
-        capture_shell(42, 99, now=_now())
+        capture_shell(42, 99, now=_now(), home=unit_home)
 
 
 def test_killing_an_idle_shell_reports_it_was_not_interrupted(unit_home: Path) -> None:
@@ -122,8 +131,8 @@ def test_killing_an_idle_shell_reports_it_was_not_interrupted(unit_home: Path) -
     type_line("meiva-agent-7-shell-3-build", "echo idle-ready")
     output_until("meiva-agent-7-shell-3-build", "idle-ready")
 
-    assert kill_shell(7, 3) == (ShellKillMode.KILLED, False, "build")
-    assert not get_shell_backend().has_session("meiva-agent-7-shell-3-build")
+    assert kill_shell(7, 3, home=unit_home) == (ShellKillMode.KILLED, False, "build")
+    assert not get_shell_backend(home=unit_home).has_session("meiva-agent-7-shell-3-build")
 
 
 def test_killing_a_shell_with_a_running_job_reports_it_was_interrupted(unit_home: Path) -> None:
@@ -134,21 +143,25 @@ def test_killing_a_shell_with_a_running_job_reports_it_was_interrupted(unit_home
     type_line(name, "sleep 300")
     wait_for_job(shell_process(name), ["sleep", "300"])
 
-    assert kill_shell(7, 4) == (ShellKillMode.KILLED, True, None)
-    assert not get_shell_backend().has_session(name)
+    assert kill_shell(7, 4, home=unit_home) == (ShellKillMode.KILLED, True, None)
+    assert not get_shell_backend(home=unit_home).has_session(name)
 
 
-def test_killing_a_shell_that_is_not_there_is_absent() -> None:
-    assert kill_shell(7, 3) == (ShellKillMode.ABSENT, False, None)
+def test_killing_a_shell_that_is_not_there_is_absent(unit_home: Path) -> None:
+    assert kill_shell(7, 3, home=unit_home) == (ShellKillMode.ABSENT, False, None)
 
 
 def test_a_backend_without_kill_verdicts_is_assumed_to_have_cut_work_short(
     unit_home: Path, service_session: str
 ) -> None:
-    ok, interrupted = kill_with_verdict(PosixProcSessionBackend(SYSTEM_TIMERS), service_session)
+    ok, interrupted = kill_with_verdict(
+        PosixProcSessionBackend(SYSTEM_TIMERS, unit_home), service_session
+    )
 
     assert (ok, interrupted) == (True, True)
-    assert service_session not in PosixProcSessionBackend(SYSTEM_TIMERS).list_sessions("meiva-ops-")
+    assert service_session not in PosixProcSessionBackend(SYSTEM_TIMERS, unit_home).list_sessions(
+        "meiva-ops-"
+    )
 
 
 def test_a_kill_all_takes_the_owners_shells_below_the_cutoff_and_nothing_else(
@@ -174,8 +187,8 @@ def test_a_kill_all_takes_the_owners_shells_below_the_cutoff_and_nothing_else(
     for name in (*doomed, *survivors):
         new(name, unit_home)
 
-    assert kill_agent_shells(7, before_session_index=6) == [0, 2, 5]
+    assert kill_agent_shells(7, before_session_index=6, home=unit_home) == [0, 2, 5]
 
-    remaining = get_shell_backend().list_sessions()
+    remaining = get_shell_backend(home=unit_home).list_sessions()
     assert remaining == sorted(survivors)
-    assert kill_agent_shells(99, before_session_index=6) == []
+    assert kill_agent_shells(99, before_session_index=6, home=unit_home) == []

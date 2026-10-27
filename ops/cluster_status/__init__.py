@@ -192,8 +192,8 @@ def status_snapshot(
     )
     supervisor_online = _supervisor_online(home)
     sessions = collect_sessions(
-        service_backend=get_backend(timers=SYSTEM_TIMERS),
-        shell_backend=get_shell_backend(),
+        service_backend=get_backend(timers=SYSTEM_TIMERS, home=home),
+        shell_backend=get_shell_backend(home=home),
         now=cluster_now(),
     )
     # meiva:note

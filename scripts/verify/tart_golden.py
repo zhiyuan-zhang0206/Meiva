@@ -92,7 +92,7 @@ from base.paths import permissions_helper_app_dir
 from base.paths.home import resolve_meiva_home
 from base.sessions.helperproc import helper_client
 
-client = helper_client()
+client = helper_client(home=resolve_meiva_home())
 
 def out(*argv):
     return subprocess.run(argv, capture_output=True, text=True).stdout

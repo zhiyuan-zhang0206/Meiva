@@ -51,7 +51,7 @@ def test_session_backend_new_session(unit_home: Path, secrets_in_creator_env: No
     from base.sessions.env_forwarding import forward_env_dict
     from base.sessions.record import SessionRecord
 
-    backend = PosixProcSessionBackend(SYSTEM_TIMERS)
+    backend = PosixProcSessionBackend(SYSTEM_TIMERS, unit_home)
     backend.new_session(
         "meiva-gateway",
         "sleep 60",
@@ -75,7 +75,7 @@ def test_launch_record_cannot_reach_a_live_process(
     from base.sessions.backend import PosixProcSessionBackend
     from base.sessions.env_forwarding import forward_env_dict
 
-    backend = PosixProcSessionBackend(SYSTEM_TIMERS)
+    backend = PosixProcSessionBackend(SYSTEM_TIMERS, unit_home)
     backend.new_session(
         "meiva-gateway",
         "true",
@@ -84,11 +84,11 @@ def test_launch_record_cannot_reach_a_live_process(
     )
     try:
         poll_until(
-            lambda: not posixproc.has_session("meiva-gateway"),
+            lambda: not posixproc.has_session("meiva-gateway", home=unit_home),
             timeout=5,
             what="exited session record no longer resolves to a live process",
         )
-        assert not posixproc.has_session("meiva-gateway")
+        assert not posixproc.has_session("meiva-gateway", home=unit_home)
     finally:
         backend.kill_session("meiva-gateway")
 
@@ -122,12 +122,12 @@ def test_agent_shell_session(
 
     seed_agent(database, 1, next_index=3)
     ShellSessions(
-        backend=PtySessionBackend(PtyClientConfig(socket_path=service_socket())),
+        backend=PtySessionBackend(PtyClientConfig(socket_path=service_socket()), unit_home),
         database=database,
         agent_id=1,
     ).create("probe", cwd=workspace_dir(1, home=unit_home), ttl=120, host=session_host())
     name = "meiva-agent-1-shell-3-probe"
-    assert get_shell_backend().has_session(name)
+    assert get_shell_backend(home=unit_home).has_session(name)
 
     report = _shell_env_report(name)
     for secret in SECRET_VALUES:

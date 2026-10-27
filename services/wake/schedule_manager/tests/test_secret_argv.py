@@ -47,7 +47,7 @@ def test_schedule_launch(
     try:
         schedule_manager(
             pool,
-            get_shell_backend(),
+            get_shell_backend(home=unit_home),
             repo_root=unit_home,
             launch_env=forward_env_dict(process_environment()),
         )._launch(schedule_id, NOW)

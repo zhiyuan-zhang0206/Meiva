@@ -50,12 +50,14 @@ from base.sessions.pty.tests.pty_shells import (
 _NAME = "meiva-agent-1-shell-2"
 
 
-def _backend() -> PtySessionBackend:
-    return PtySessionBackend(config=PtyClientConfig(socket_path=service_socket()))
+def _backend(home: Path) -> PtySessionBackend:
+    return PtySessionBackend(config=PtyClientConfig(socket_path=service_socket()), home=home)
 
 
-def _new(name: str, cwd: Path, *, cmd: str = "", env: dict[str, str] | None = None) -> None:
-    assert _backend().new_session(name, cmd, cwd, env={} if env is None else env)
+def _new(
+    name: str, cwd: Path, *, home: Path, cmd: str = "", env: dict[str, str] | None = None
+) -> None:
+    assert _backend(home).new_session(name, cmd, cwd, env={} if env is None else env)
 
 
 @contextlib.contextmanager
@@ -94,18 +96,18 @@ def _wedged_service() -> Generator[None]:
 
 @pytest.mark.usefixtures("pty_service")
 def test_has_session_tracks_liveness(unit_home: Path) -> None:
-    assert _backend().has_session(_NAME) is False
-    _new(_NAME, unit_home)
-    assert _backend().has_session(_NAME) is True
-    _backend().kill_session(_NAME)
-    assert _backend().has_session(_NAME) is False
+    assert _backend(unit_home).has_session(_NAME) is False
+    _new(_NAME, unit_home, home=unit_home)
+    assert _backend(unit_home).has_session(_NAME) is True
+    _backend(unit_home).kill_session(_NAME)
+    assert _backend(unit_home).has_session(_NAME) is False
 
 
 @pytest.mark.usefixtures("pty_service")
 def test_new_session_starts_a_login_shell_in_the_cwd(unit_home: Path) -> None:
     cwd = unit_home / "work"
     cwd.mkdir()
-    _new(_NAME, cwd)
+    _new(_NAME, cwd, home=unit_home)
     (info,) = client.list_sessions(socket_path=service_socket())
     assert (info.name, info.cwd, info.cmd) == (_NAME, str(cwd), "/bin/bash -l -i")
     assert shell_process(_NAME).cwd() == str(cwd.resolve())
@@ -113,16 +115,16 @@ def test_new_session_starts_a_login_shell_in_the_cwd(unit_home: Path) -> None:
 
 @pytest.mark.usefixtures("pty_service")
 def test_new_session_submits_the_command_once_the_shell_is_ready(unit_home: Path) -> None:
-    _new(_NAME, unit_home, cmd="echo initial-command-ran")
+    _new(_NAME, unit_home, cmd="echo initial-command-ran", home=unit_home)
     output_until(_NAME, "initial-command-ran")
 
 
 @pytest.mark.usefixtures("pty_service")
 def test_new_session_is_idempotent_for_a_live_session(unit_home: Path) -> None:
     """A second create of a live name succeeds and leaves the shell untouched."""
-    _new(_NAME, unit_home)
+    _new(_NAME, unit_home, home=unit_home)
     (first,) = client.list_sessions(socket_path=service_socket())
-    assert _backend().new_session(_NAME, "", unit_home, env={}) is True
+    assert _backend(unit_home).new_session(_NAME, "", unit_home, env={}) is True
     (second,) = client.list_sessions(socket_path=service_socket())
     assert second == first
 
@@ -132,7 +134,9 @@ def test_new_session_is_idempotent_for_a_live_session(unit_home: Path) -> None:
 @pytest.mark.usefixtures("pty_service")
 def test_new_session_with_the_standard_projection_gets_a_working_shell(unit_home: Path) -> None:
     assert (
-        _backend().new_session(_NAME, "", unit_home, env=forward_env_dict(process_environment()))
+        _backend(unit_home).new_session(
+            _NAME, "", unit_home, env=forward_env_dict(process_environment())
+        )
         is True
     )
     type_line(_NAME, "echo projection-ready")
@@ -143,7 +147,7 @@ def test_the_creator_env_reaches_the_shell_in_the_request_not_on_an_argv(
     pty_service: PtyServiceProcess, unit_home: Path
 ) -> None:
     canary = "argv-canary-0042"  # a sentinel to search argv for
-    _new(_NAME, unit_home, env={"MEIVA_TEST_CANARY": canary})
+    _new(_NAME, unit_home, env={"MEIVA_TEST_CANARY": canary}, home=unit_home)
     type_line(_NAME, "echo value=$MEIVA_TEST_CANARY")
     output_until(_NAME, f"value={canary}")
     service = psutil.Process(pty_service.pid)
@@ -155,12 +159,12 @@ def test_the_creator_env_reaches_the_shell_in_the_request_not_on_an_argv(
 @pytest.mark.usefixtures("pty_service")
 def test_send_types_text_without_enter(unit_home: Path) -> None:
     """`send` types the text only; the caller submits the line separately."""
-    _new(_NAME, unit_home)
-    _backend().send(_NAME, 'echo "hi there"; echo typed-marker')
+    _new(_NAME, unit_home, home=unit_home)
+    _backend(unit_home).send(_NAME, 'echo "hi there"; echo typed-marker')
     # Whitespace-normalized: with a long cwd the echoed text can wrap mid-word.
     assert wait_for(lambda: 'echo"hithere";echotyped-marker' in "".join(screen(_NAME).split()))
     assert "typed-marker" not in [line.strip() for line in screen(_NAME).split("\n")]
-    _backend().send_keys(_NAME, "Enter")
+    _backend(unit_home).send_keys(_NAME, "Enter")
     output_until(_NAME, "typed-marker")
 
 
@@ -173,7 +177,7 @@ def _comm(process: psutil.Process) -> str:
 
 @pytest.mark.usefixtures("pty_service")
 def test_send_keys_names_become_key_presses(unit_home: Path) -> None:
-    _new(_NAME, unit_home)
+    _new(_NAME, unit_home, home=unit_home)
     type_line(_NAME, "cat")
     # `cat` runs with the terminal in its default mode: C-c interrupts it, then the
     # shell takes the next line.
@@ -182,10 +186,10 @@ def test_send_keys_names_become_key_presses(unit_home: Path) -> None:
     # shell instead), so wait for the exec; and the interrupt flushes the terminal's
     # input queue, so type the next line only once `cat` is gone.
     assert wait_for(lambda: any(_comm(child) == "cat" for child in shell.children()))
-    _backend().send_keys(_NAME, "C-c")
+    _backend(unit_home).send_keys(_NAME, "C-c")
     assert wait_for(lambda: not shell.children())
-    _backend().send(_NAME, "echo after-interrupt")
-    _backend().send_keys(_NAME, "Enter")
+    _backend(unit_home).send(_NAME, "echo after-interrupt")
+    _backend(unit_home).send_keys(_NAME, "Enter")
     output_until(_NAME, "after-interrupt")
 
 
@@ -193,21 +197,21 @@ def test_send_keys_names_become_key_presses(unit_home: Path) -> None:
 def test_capture_pane_reads_scrollback_by_default_and_the_screen_on_request(
     unit_home: Path,
 ) -> None:
-    _new(_NAME, unit_home)
+    _new(_NAME, unit_home, home=unit_home)
     type_line(_NAME, "echo first-line")
     output_until(_NAME, "first-line")
     type_line(_NAME, "seq 1 60")
     output_until(_NAME, "60")
-    assert "first-line" in _backend().capture_pane(_NAME)
-    assert "first-line" not in _backend().capture_pane(_NAME, scrollback=False)
-    tail = _backend().capture_pane(_NAME, lines=5)
+    assert "first-line" in _backend(unit_home).capture_pane(_NAME)
+    assert "first-line" not in _backend(unit_home).capture_pane(_NAME, scrollback=False)
+    tail = _backend(unit_home).capture_pane(_NAME, lines=5)
     assert len(tail.splitlines()) <= 5
     assert "60" in tail and "first-line" not in tail
 
 
 @pytest.mark.usefixtures("pty_service")
-def test_send_and_capture_on_an_absent_session_raise_runtime_error() -> None:
-    backend = _backend()
+def test_send_and_capture_on_an_absent_session_raise_runtime_error(unit_home: Path) -> None:
+    backend = _backend(unit_home)
     with pytest.raises(RuntimeError, match=r"pty send 'ghost' failed: no such pty session"):
         backend.send("ghost", "echo x")
     with pytest.raises(RuntimeError, match=r"pty send_keys 'ghost' failed: no such pty session"):
@@ -218,11 +222,11 @@ def test_send_and_capture_on_an_absent_session_raise_runtime_error() -> None:
 
 @pytest.mark.usefixtures("pty_service")
 def test_kill_session_force(unit_home: Path) -> None:
-    _new(_NAME, unit_home)
+    _new(_NAME, unit_home, home=unit_home)
     shell = shell_process(_NAME)
-    assert _backend().kill_session(_NAME, graceful=False) == (True, "forced")
+    assert _backend(unit_home).kill_session(_NAME, graceful=False) == (True, "forced")
     assert wait_for(lambda: gone(shell))
-    assert not _backend().has_session(_NAME)
+    assert not _backend(unit_home).has_session(_NAME)
 
 
 def test_gone_reads_a_process_reaped_between_two_polls_as_gone() -> None:
@@ -242,38 +246,38 @@ def test_gone_reads_a_process_reaped_between_two_polls_as_gone() -> None:
 
 @pytest.mark.usefixtures("pty_service")
 def test_kill_session_graceful(unit_home: Path) -> None:
-    _new(_NAME, unit_home)
-    ok, mode = _backend().kill_session(_NAME, graceful=True, timeout=9.0, expected=True)
+    _new(_NAME, unit_home, home=unit_home)
+    ok, mode = _backend(unit_home).kill_session(_NAME, graceful=True, timeout=9.0, expected=True)
     assert ok is True
     assert mode in ("graceful", "forced")
-    assert wait_for(lambda: not _backend().has_session(_NAME))
+    assert wait_for(lambda: not _backend(unit_home).has_session(_NAME))
 
 
 @pytest.mark.usefixtures("pty_service")
-def test_kill_session_of_an_absent_session_is_a_noop_success() -> None:
+def test_kill_session_of_an_absent_session_is_a_noop_success(unit_home: Path) -> None:
     """Idempotence: killing an absent session confirms it is gone."""
-    assert _backend().kill_session("ghost") == (True, "noop")
-    assert _backend().kill_session_with_verdict("ghost") == (True, "noop", False)
+    assert _backend(unit_home).kill_session("ghost") == (True, "noop")
+    assert _backend(unit_home).kill_session_with_verdict("ghost") == (True, "noop", False)
 
 
 @pytest.mark.usefixtures("pty_service")
 def test_kill_session_with_verdict_reports_whether_work_was_cut_short(unit_home: Path) -> None:
     """The verdict comes from the kill itself: an idle shell is not interrupted, a
     shell running a job is."""
-    _new("meiva-test-idle-1", unit_home)
+    _new("meiva-test-idle-1", unit_home, home=unit_home)
     type_line("meiva-test-idle-1", "echo idle-ready")
     output_until("meiva-test-idle-1", "idle-ready")
-    ok, mode, interrupted = _backend().kill_session_with_verdict("meiva-test-idle-1")
+    ok, mode, interrupted = _backend(unit_home).kill_session_with_verdict("meiva-test-idle-1")
     assert (ok, mode, interrupted) == (True, "forced", False)
 
-    _new("meiva-test-busy-1", unit_home)
+    _new("meiva-test-busy-1", unit_home, home=unit_home)
     type_line("meiva-test-busy-1", "echo busy-ready")
     output_until("meiva-test-busy-1", "busy-ready")
     type_line("meiva-test-busy-1", "sleep 300")
     wait_for_job(shell_process("meiva-test-busy-1"), ["sleep", "300"])
-    ok, mode, interrupted = _backend().kill_session_with_verdict("meiva-test-busy-1")
+    ok, mode, interrupted = _backend(unit_home).kill_session_with_verdict("meiva-test-busy-1")
     assert (ok, mode, interrupted) == (True, "forced", True)
-    assert not _backend().has_session("meiva-test-busy-1")
+    assert not _backend(unit_home).has_session("meiva-test-busy-1")
 
 
 # ---------------------------------------------------------------------------
@@ -284,36 +288,38 @@ def test_kill_session_with_verdict_reports_whether_work_was_cut_short(unit_home:
 @pytest.mark.usefixtures("pty_service")
 def test_list_sessions_is_sorted_and_filtered_by_prefix(unit_home: Path) -> None:
     for name in ("meiva-agent-1-shell-2", "meiva-agent-1-shell-1", "other-1"):
-        _new(name, unit_home)
-    assert _backend().list_sessions() == [
+        _new(name, unit_home, home=unit_home)
+    assert _backend(unit_home).list_sessions() == [
         "meiva-agent-1-shell-1",
         "meiva-agent-1-shell-2",
         "other-1",
     ]
-    assert _backend().list_sessions(prefix="meiva-agent-1") == [
+    assert _backend(unit_home).list_sessions(prefix="meiva-agent-1") == [
         "meiva-agent-1-shell-1",
         "meiva-agent-1-shell-2",
     ]
-    assert _backend().list_sessions(prefix="nothing") == []
+    assert _backend(unit_home).list_sessions(prefix="nothing") == []
 
 
 @pytest.mark.usefixtures("pty_service")
 def test_started_ats_answers_every_name_from_the_service_epochs(unit_home: Path) -> None:
     """A live session maps to the epoch the service recorded, an absent one to None."""
-    _new("meiva-agent-1-shell-1", unit_home)
+    _new("meiva-agent-1-shell-1", unit_home, home=unit_home)
     (info,) = client.list_sessions(socket_path=service_socket())
-    epochs = _backend().session_started_ats(["meiva-agent-1-shell-1", "meiva-agent-1-shell-9"])
+    epochs = _backend(unit_home).session_started_ats(
+        ["meiva-agent-1-shell-1", "meiva-agent-1-shell-9"]
+    )
     assert epochs == {"meiva-agent-1-shell-1": info.started_at, "meiva-agent-1-shell-9": None}
     assert info.started_at > 0
-    assert _backend().session_started_at("meiva-agent-1-shell-1") == info.started_at
-    assert _backend().session_started_at("meiva-agent-1-shell-9") is None
-    assert _backend().session_started_ats([]) == {}
+    assert _backend(unit_home).session_started_at("meiva-agent-1-shell-1") == info.started_at
+    assert _backend(unit_home).session_started_at("meiva-agent-1-shell-9") is None
+    assert _backend(unit_home).session_started_ats([]) == {}
 
 
 @pytest.mark.usefixtures("pty_service")
 def test_session_generation_is_the_one_the_session_was_admitted_under(unit_home: Path) -> None:
-    _new("meiva-agent-1-shell-1", unit_home)
-    assert _backend().session_generation("meiva-agent-1-shell-1") is None
+    _new("meiva-agent-1-shell-1", unit_home, home=unit_home)
+    assert _backend(unit_home).session_generation("meiva-agent-1-shell-1") is None
     frozen = allocation_freeze.freeze(
         holder="operator",
         reason="generation flip",
@@ -326,16 +332,16 @@ def test_session_generation_is_the_one_the_session_was_admitted_under(unit_home:
     assert allocation_freeze.resume(
         frozen.generation, writer=AtomicWriter(SYSTEM_FS), home=meiva_home()
     )
-    _new("meiva-agent-1-shell-2", unit_home)
-    assert _backend().session_generation("meiva-agent-1-shell-2") == frozen.generation
-    assert _backend().session_generation("meiva-agent-1-shell-9") is None
+    _new("meiva-agent-1-shell-2", unit_home, home=unit_home)
+    assert _backend(unit_home).session_generation("meiva-agent-1-shell-2") == frozen.generation
+    assert _backend(unit_home).session_generation("meiva-agent-1-shell-9") is None
 
 
 @pytest.mark.usefixtures("pty_service")
 def test_session_log_path_is_the_transcript_the_service_writes(unit_home: Path) -> None:
     """The service writes a byte transcript per session at $MEIVA_HOME/logs/<name>.out.log."""
-    _new(_NAME, unit_home)
-    transcript = _backend().session_log_path(_NAME)
+    _new(_NAME, unit_home, home=unit_home)
+    transcript = _backend(unit_home).session_log_path(_NAME)
     assert transcript == unit_home / "logs" / f"{_NAME}.out.log"
     assert transcript is not None
     type_line(_NAME, "echo transcript-line")
@@ -349,9 +355,9 @@ def test_session_log_path_is_the_transcript_the_service_writes(unit_home: Path) 
 
 
 @pytest.mark.usefixtures("pty_service")
-def test_new_session_login_shell_false_raises() -> None:
+def test_new_session_login_shell_false_raises(unit_home: Path) -> None:
     with pytest.raises(NotImplementedError):
-        _backend().new_session("s", "cmd", Path("/"), env={}, login_shell=False)
+        _backend(unit_home).new_session("s", "cmd", Path("/"), env={}, login_shell=False)
     assert client.list_sessions(socket_path=service_socket()) == [], "nothing reached the service"
 
 
@@ -360,7 +366,7 @@ def test_new_session_refused_by_the_service_returns_false_and_warns(
     unit_home: Path, caplog: pytest.LogCaptureFixture
 ) -> None:
     """An env the service cannot forward (a NUL byte) is refused in its response."""
-    ok = _backend().new_session("s", "", unit_home, env={"A": "x\0y"})
+    ok = _backend(unit_home).new_session("s", "", unit_home, env={"A": "x\0y"})
     assert ok is False
     assert "pty session allocation failed for s" in caplog.text
     assert "cannot be forwarded" in caplog.text
@@ -380,12 +386,12 @@ def test_new_session_under_an_allocation_freeze_returns_false_and_warns(
         rng=seeded_rng(),
     )
     assert frozen.generation is not None
-    assert _backend().new_session("s", "", unit_home, env={}) is False
+    assert _backend(unit_home).new_session("s", "", unit_home, env={}) is False
     assert "allocation refused" in caplog.text
     assert allocation_freeze.resume(
         frozen.generation, writer=AtomicWriter(SYSTEM_FS), home=meiva_home()
     )
-    assert _backend().new_session("s", "", unit_home, env={}) is True
+    assert _backend(unit_home).new_session("s", "", unit_home, env={}) is True
 
 
 def test_a_home_without_a_service_holds_no_sessions(
@@ -394,7 +400,7 @@ def test_a_home_without_a_service_holds_no_sessions(
     """Nothing is alive in a service that is not there: queries read as empty and `kill`
     as a noop; `new` fails as False with a warning, and `send`/`capture` raise."""
     backend = PtySessionBackend(
-        config=PtyClientConfig(connect_wait_s=0.0, socket_path=service_socket())
+        config=PtyClientConfig(connect_wait_s=0.0, socket_path=service_socket()), home=unit_home
     )
     assert backend.has_session(_NAME) is False
     assert backend.list_sessions() == []
@@ -420,7 +426,7 @@ def test_a_service_that_does_not_answer_fails_loudly_not_as_empty(
 ) -> None:
     """A dialed service that never answers is not a service that holds nothing: the kill
     is NOT confirmed (and counts as interrupting), creation fails, typing raises."""
-    backend = _backend()
+    backend = _backend(unit_home)
     with _wedged_service():
         assert backend.kill_session(_NAME) == (False, "forced")
         assert backend.kill_session(_NAME, graceful=True) == (False, "graceful")
@@ -441,8 +447,8 @@ def test_a_service_that_does_not_answer_fails_loudly_not_as_empty(
 # ---------------------------------------------------------------------------
 
 
-def test_pty_backend_is_a_session_backend() -> None:
-    assert isinstance(_backend(), SessionBackend)
+def test_pty_backend_is_a_session_backend(unit_home: Path) -> None:
+    assert isinstance(_backend(unit_home), SessionBackend)
 
 
 def test_pty_capture_defaults() -> None:
@@ -453,15 +459,17 @@ def test_pty_capture_defaults() -> None:
     assert pty_sig.parameters["scrollback"].default is True
 
 
-def test_non_pty_backends_still_raise_send() -> None:
+def test_non_pty_backends_still_raise_send(tmp_path: Path) -> None:
     """send is PTY-only like send_keys/capture_pane: the process supervisors
     raise, the PTY backend implements."""
     with pytest.raises(NotImplementedError):
-        PosixProcSessionBackend(SYSTEM_TIMERS).send("s", "text")
+        PosixProcSessionBackend(SYSTEM_TIMERS, tmp_path).send("s", "text")
 
 
-def test_get_shell_backend_is_pty() -> None:
+def test_get_shell_backend_is_pty(tmp_path: Path) -> None:
     """get_shell_backend() is PtySessionBackend on POSIX; service sessions live on
     the process-supervisor backend."""
-    assert isinstance(sb.get_shell_backend(), PtySessionBackend)
-    assert sb.get_shell_backend() is not sb.get_backend(timers=SYSTEM_TIMERS)
+    assert isinstance(sb.get_shell_backend(home=tmp_path), PtySessionBackend)
+    assert sb.get_shell_backend(home=tmp_path) is not sb.get_backend(
+        timers=SYSTEM_TIMERS, home=tmp_path
+    )

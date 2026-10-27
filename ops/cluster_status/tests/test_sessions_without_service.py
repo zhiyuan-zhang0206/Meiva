@@ -14,6 +14,7 @@ import threading
 from collections.abc import Callable, Generator
 from contextlib import contextmanager
 from datetime import UTC, datetime
+from pathlib import Path
 
 import pytest
 
@@ -65,52 +66,55 @@ def _wedged_service() -> Generator[None]:
         path.unlink(missing_ok=True)
 
 
-def test_a_host_with_no_service_has_no_sessions() -> None:
+def test_a_host_with_no_service_has_no_sessions(unit_home: Path) -> None:
     rows = collect_sessions(
-        service_backend=PosixProcSessionBackend(SYSTEM_TIMERS),
-        shell_backend=get_shell_backend(),
+        service_backend=PosixProcSessionBackend(SYSTEM_TIMERS, unit_home),
+        shell_backend=get_shell_backend(home=unit_home),
         now=_now(),
     )
 
     assert rows == ()
-    assert agent_shell_sessions(7, now=_now()) == []
+    assert agent_shell_sessions(7, now=_now(), home=unit_home) == []
 
 
-def test_the_operations_on_a_shell_of_a_host_with_no_service_find_nothing() -> None:
-    assert kill_shell(7, 3) == (ShellKillMode.ABSENT, False, None)
-    assert kill_agent_shells(7, before_session_index=10) == []
+def test_the_operations_on_a_shell_of_a_host_with_no_service_find_nothing(unit_home: Path) -> None:
+    assert kill_shell(7, 3, home=unit_home) == (ShellKillMode.ABSENT, False, None)
+    assert kill_agent_shells(7, before_session_index=10, home=unit_home) == []
     with pytest.raises(ShellNotFoundError):
-        capture_shell(7, 3, now=_now())
+        capture_shell(7, 3, now=_now(), home=unit_home)
 
 
 # meiva:note
 # An operation keyed on "is this shell there" must not read a service that did not answer as
 # "no shells": the TTL reaper deletes a shell's deadline on an `absent` verdict, so a wedged
 # service would have a live shell forgotten. The operation fails and is retried instead.
+_SHELL_OPERATIONS: list[Callable[[Path], object]] = [
+    lambda home: agent_shell_sessions(7, now=_now(), home=home),
+    lambda home: kill_shell(7, 3, home=home),
+    lambda home: kill_agent_shells(7, before_session_index=10, home=home),
+    lambda home: capture_shell(7, 3, now=_now(), home=home),
+]
+
+
 @pytest.mark.parametrize(
-    "operation",
-    [
-        lambda: agent_shell_sessions(7, now=_now()),
-        lambda: kill_shell(7, 3),
-        lambda: kill_agent_shells(7, before_session_index=10),
-        lambda: capture_shell(7, 3, now=_now()),
-    ],
-    ids=["probe", "kill", "kill-all", "capture"],
+    "operation", _SHELL_OPERATIONS, ids=["probe", "kill", "kill-all", "capture"]
 )
 def test_a_service_that_does_not_answer_fails_the_shell_operations(
-    operation: Callable[[], object],
+    operation: Callable[[Path], object],
+    unit_home: Path,
 ) -> None:
     with _wedged_service(), pytest.raises(client.ServiceUnavailableError):
-        operation()
+        operation(unit_home)
 
 
 def test_a_service_that_does_not_answer_is_skipped_and_logged(
     caplog: pytest.LogCaptureFixture,
+    unit_home: Path,
 ) -> None:
     with _wedged_service(), caplog.at_level(logging.WARNING, logger="ops.cluster_status.sessions"):
         rows = collect_sessions(
-            service_backend=PosixProcSessionBackend(SYSTEM_TIMERS),
-            shell_backend=get_shell_backend(),
+            service_backend=PosixProcSessionBackend(SYSTEM_TIMERS, unit_home),
+            shell_backend=get_shell_backend(home=unit_home),
             now=_now(),
         )
 

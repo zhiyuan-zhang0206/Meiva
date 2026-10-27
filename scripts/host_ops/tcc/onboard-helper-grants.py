@@ -180,13 +180,14 @@ def fill_request_error(
 
 def helper_client() -> PermissionsHelperClient:
     try:
+        from base.paths import meiva_home
         from base.sessions.helperproc import helper_client as sessions_helper_client
     except ImportError as exc:
         raise OnboardError(
             "run this script with the repository venv "
             "(e.g. .venv/bin/python scripts/host_ops/tcc/onboard-helper-grants.py)"
         ) from exc
-    return sessions_helper_client()
+    return sessions_helper_client(home=meiva_home())
 
 
 def child_env() -> dict[str, str]:

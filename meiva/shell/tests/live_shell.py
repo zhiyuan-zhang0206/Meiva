@@ -32,11 +32,13 @@ def seed_agent(database: Database, agent_id: int, *, next_index: int = 0) -> Non
 
 
 @pytest.fixture
-def live_shell(pty_service: PtyServiceProcess, database: Database) -> ShellSessions:
+def live_shell(
+    pty_service: PtyServiceProcess, database: Database, unit_home: Path
+) -> ShellSessions:
     del pty_service
     seed_agent(database, LIVE_AGENT_ID)
     return ShellSessions(
-        backend=PtySessionBackend(PtyClientConfig(socket_path=service_socket())),
+        backend=PtySessionBackend(PtyClientConfig(socket_path=service_socket()), unit_home),
         database=database,
         agent_id=LIVE_AGENT_ID,
     )

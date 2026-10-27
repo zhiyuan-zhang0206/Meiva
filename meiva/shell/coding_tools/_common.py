@@ -12,7 +12,9 @@ from base.log import logger
 from base.paths import meiva_home
 from base.sessions import coding_session_owner, tool_capabilities
 from base.sessions import provenance as provenance_block
+from base.sessions.backend import get_shell_backend
 from base.sessions.coding_session_owner_record import CodingSessionStatus
+from base.sessions.protocol import SessionBackend
 from meiva import agents
 from meiva.files import agent_workspace
 from meiva.sdk_surface import agent_identity, process_context
@@ -79,6 +81,12 @@ def launch_site() -> LaunchSite:
 # a cancel or a launch of this process reads and writes.
 def cluster_home() -> Path:
     return process_context.current_context().require_meiva_home()
+
+
+# meiva:note
+# The shell sessions of that cluster, for a command that has no agent shell of its own (a cancel).
+def cluster_sessions() -> SessionBackend:
+    return get_shell_backend(home=cluster_home())
 
 
 def resolve_dir(dir_path: str) -> Path:
@@ -195,7 +203,10 @@ def kill_session_after_failed_launch(shell: ShellSessions, session_id: int) -> N
 
 
 def terminate_generation_after_failed_launch(
-    key: coding_session_owner.CodingSessionKey, generation: str
+    key: coding_session_owner.CodingSessionKey,
+    generation: str,
+    *,
+    sessions: coding_session_owner.CodingSessions,
 ) -> None:
     """Roll back the record of a launch that is already failing; the launch's own error stays primary."""
     try:
@@ -205,6 +216,7 @@ def terminate_generation_after_failed_launch(
             reason="launch-failed",
             writer=AtomicWriter(SYSTEM_FS),
             now=process_context.current_context().require_clock().now(),
+            sessions=sessions,
         )
     except Exception:
         logger.opt(exception=True).warning(
@@ -221,6 +233,7 @@ def new_generation(
     tasks_file: Path | None,
     work_file: Path | None,
     ttl_seconds: float,
+    sessions: coding_session_owner.CodingSessions,
 ) -> coding_session_owner.CodingSessionOwner:
     """A fresh generation of our own; dead siblings under ``key`` are reclaimed first."""
     context = process_context.current_context()
@@ -233,6 +246,7 @@ def new_generation(
         writer=AtomicWriter(SYSTEM_FS),
         now=context.require_clock().now(),
         rng=context.require_rng(),
+        sessions=sessions,
         owner_terminated=owner_terminated,
     )
 
@@ -270,7 +284,12 @@ def print_owner(owner: coding_session_owner.CodingSessionOwner, tool: str) -> No
             print(f"{name}={value}")
 
 
-def cancel(key: coding_session_owner.CodingSessionKey, generation: str) -> int:
+def cancel(
+    key: coding_session_owner.CodingSessionKey,
+    generation: str,
+    *,
+    sessions: coding_session_owner.CodingSessions,
+) -> int:
     """Stop and terminalize exactly ``generation``; a stale token is refused."""
     stopped = coding_session_owner.terminate_generation(
         key,
@@ -278,6 +297,7 @@ def cancel(key: coding_session_owner.CodingSessionKey, generation: str) -> int:
         reason="explicit-cancel",
         writer=AtomicWriter(SYSTEM_FS),
         now=process_context.current_context().require_clock().now(),
+        sessions=sessions,
     )
     if not stopped:
         print(f"cancel refused: no generation {generation} is recorded here", file=sys.stderr)

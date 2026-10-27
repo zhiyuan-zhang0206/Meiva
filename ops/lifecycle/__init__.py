@@ -150,7 +150,9 @@ async def terminate_agent_op(
         return TerminateAgentResponse(
             status=TerminateResult.ENQUEUED,
             shell_sessions=await _kill_shell_sessions_now(
-                agent_id, cutoff=cutoff if body.kill_all_shell_sessions else None
+                agent_id,
+                cutoff=cutoff if body.kill_all_shell_sessions else None,
+                home=host.home,
             ),
         )
 
@@ -169,7 +171,7 @@ async def terminate_agent_op(
         # The kill-requesting enqueue found the row terminated under its lock.
         return TerminateAgentResponse(
             status=TerminateResult.ALREADY_TERMINATED,
-            shell_sessions=await _kill_shell_sessions_now(agent_id, cutoff=cutoff),
+            shell_sessions=await _kill_shell_sessions_now(agent_id, cutoff=cutoff, home=host.home),
         )
     await publish_inbound_arrived(bus, agent_id, iid, "terminate", body.source, "")
     return TerminateAgentResponse(
@@ -186,11 +188,13 @@ async def terminate_agent_op(
 # A failed kill propagates: the termination itself is already durable, so the caller sees
 # the failure and a repeat request retries the kill.
 async def _kill_shell_sessions_now(
-    agent_id: int, *, cutoff: int | None
+    agent_id: int, *, cutoff: int | None, home: Path
 ) -> ShellSessionsKill | None:
     if cutoff is None:
         return None
-    killed = await asyncio.to_thread(kill_agent_shells, agent_id, before_session_index=cutoff)
+    killed = await asyncio.to_thread(
+        kill_agent_shells, agent_id, before_session_index=cutoff, home=home
+    )
     _log.info(
         "[gateway] agent %s terminate killed %d shell session(s): %s",
         agent_id,

@@ -15,14 +15,18 @@ from base.sessions.pty.tests.pty_shells import wait_for
 from gateway.schedules import session_control
 
 
-def test_capture_returns_none_without_a_session(pty_service: PtyServiceProcess) -> None:
-    assert session_control.capture_blocking(get_shell_backend(), 123, 200) is None
+def test_capture_returns_none_without_a_session(
+    pty_service: PtyServiceProcess, unit_home: Path
+) -> None:
+    assert session_control.capture_blocking(get_shell_backend(home=unit_home), 123, 200) is None
 
 
 def test_capture_reads_the_live_sessions_pane(
-    pty_service: PtyServiceProcess, tmp_path: Path
+    pty_service: PtyServiceProcess,
+    tmp_path: Path,
+    unit_home: Path,
 ) -> None:
-    backend = get_shell_backend()
+    backend = get_shell_backend(home=unit_home)
     backend.new_session(
         session_name("schedule-123"),
         "echo SCHEDULE_OUTPUT; sleep 30",

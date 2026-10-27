@@ -42,6 +42,7 @@ from ._common import (
     capability_report,
     capture_screen,
     cluster_home,
+    cluster_sessions,
     init_file,
     kill_session_after_failed_launch,
     launch_site,
@@ -362,6 +363,7 @@ def cancel(workspace: Path, generation: str) -> int:
     return _cancel_generation(
         coding_session_owner.canonical_key(workspace, tool="codex", cluster=cluster_home()),
         generation,
+        sessions=cluster_sessions(),
     )
 
 
@@ -456,7 +458,7 @@ def start_generation(
     except BaseException:
         for session_id in opened:
             kill_session_after_failed_launch(site.shell, session_id)
-        terminate_generation_after_failed_launch(key, generation)
+        terminate_generation_after_failed_launch(key, generation, sessions=site.shell.backend)
         raise
     return active, remote, codex_session
 
@@ -506,6 +508,7 @@ def launch(
         tasks_file=tasks_file,
         work_file=work_file,
         ttl_seconds=ttl_seconds,
+        sessions=site.shell.backend,
     )
     active, remote, codex_session = start_generation(site, owner, request, CodexWaits())
     print(f"ready. name={active.expected_suffix} workspace={workspace}")

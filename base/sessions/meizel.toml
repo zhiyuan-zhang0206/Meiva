@@ -2,7 +2,7 @@ exports = ["backend.py", "coding_session_owner.py", "coding_session_owner_record
 
 [uses]
 "backend.py" = ["env_forwarding.py", "helperproc.py", "posixproc.py", "protocol.py", "pty", "record.py"]
-"coding_session_owner.py" = ["backend.py", "coding_session_owner_record.py"]
+"coding_session_owner.py" = ["coding_session_owner_record.py"]
 "helperproc.py" = ["env_forwarding.py", "protocol.py", "record.py"]
 "hosting.py" = ["pty", "record.py"]
 "posixproc.py" = ["record.py"]
@@ -16,18 +16,12 @@ exports = ["backend.py", "coding_session_owner.py", "coding_session_owner_record
 "provenance.py" = "strict"
 
 [debt.ambient-read]
-"backend.py#home base.paths.logs_dir" = 1
-"backend.py#home base.paths.meiva_home" = 1
 "coding_session_owner.py#home pathlib.Path.expanduser" = 2
 "coding_session_owner.py#pid os.getuid" = 1
 "coding_session_owner_record.py#home pathlib.Path.expanduser" = 2
 "env_forwarding.py#home pathlib.Path.expanduser" = 1
-"helperproc.py#home base.paths.logs_dir" = 2
-"helperproc.py#home base.paths.meiva_home" = 2
 "helperproc.py#settings base.config.settings" = 1
 "hosting.py#pid psutil.Process()" = 1
-"posixproc.py#home base.paths.logs_dir" = 2
-"posixproc.py#home base.paths.meiva_home" = 1
 "tool_capabilities.py#home pathlib.Path.expanduser" = 1
 
 [debt.impure-call]

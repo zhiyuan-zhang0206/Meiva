@@ -14,6 +14,7 @@ import psycopg
 import pytest
 
 from base.config import settings
+from base.paths import meiva_home
 from base.sessions.backend import PtySessionBackend
 from base.sessions.pty.client import PtyClientConfig
 from base.sessions.pty.tests.pty_service import service_socket
@@ -168,7 +169,9 @@ def test_session_survives_agent_host_and_gateway_restarts(
     chat_and_wait(agent, "create survivor session")
     sid = int((world.sandbox() / "survivor-id").read_text())
     full_name = f"meiva-agent-{agent}-shell-{sid}-e2e-survivor"
-    backend = PtySessionBackend(config=PtyClientConfig(socket_path=service_socket()))
+    backend = PtySessionBackend(
+        config=PtyClientConfig(socket_path=service_socket()), home=meiva_home()
+    )
 
     def usable(stage: str) -> None:
         assert backend.has_session(full_name), f"session disappeared after {stage}"
