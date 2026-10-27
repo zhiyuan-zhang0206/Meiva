@@ -12,5 +12,5 @@ exports = ["agent_runtime.py", "plugin.py"]
 
 [roots]
 "_state.py" = { kinds = ["home"], why = "Plugin state factory resolves current agent workspace or user home as default logical cwd" }
-"agent_runtime.py" = { kinds = ["home"], why = "ValidateCwdAfterInitHook falls back to the invoking user's home when no agent identity is bound" }
-"plugin.py" = { kinds = ["clock", "home"], why = "SDK surface wrappers resolve home boundary for AGENTS.md walk and stamp context notes with UTC time" }
+"agent_runtime.py" = { kinds = ["home"], why = "ValidateCwdAfterInitHook derives the workspace paths it validates against through the base.paths helpers, which stay acquisition points until their zero-argument forms are removed" }
+"plugin.py" = { kinds = ["clock"], why = "SDK surface wrappers stamp context notes with UTC time" }

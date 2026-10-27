@@ -222,7 +222,9 @@ def _wrapped_read(
     p = (cwd / p).resolve() if not p.is_absolute() else p.resolve()
 
     # 2. Walk up the path collecting context files (AGENTS.md / CLAUDE.md)
-    candidates = find_context_files_along_path(p, home=Path.home())
+    candidates = find_context_files_along_path(
+        p, home=process_context.current_context().require_user_home()
+    )
 
     # 3. Lazy compact reset: each successful compaction bumps compact.version.
     # This wrap entry compares against the bookmark; if the version advanced,

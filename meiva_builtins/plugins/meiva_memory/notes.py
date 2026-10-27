@@ -34,7 +34,7 @@ def memory_index_note(ctx: MeivaContext) -> HumanMessage | None:
     slices = ctx.require_agent()
     if slices.sandbox.eval_isolation or not slices.read("agent", "memory_index_inject_enabled"):
         return None
-    path = memory_dir() / _MEMORY_INDEX_FILE
+    path = memory_dir(home=ctx.require_meiva_home()) / _MEMORY_INDEX_FILE
     if not path.is_file():
         return None
     text = path.read_text(encoding="utf-8").strip()
@@ -102,7 +102,7 @@ def per_agent_memory_note(ctx: MeivaContext) -> HumanMessage | None:
     if aid is None:
         logger.debug("[per-agent-memory] agent id not yet established, skipping")
         return None
-    ws = workspace_dir(aid)
+    ws = workspace_dir(aid, home=ctx.require_meiva_home())
     mem_dir = ws / _PER_AGENT_MEMORY_DIRNAME
     mem_dir.mkdir(parents=True, exist_ok=True)
     path = mem_dir / _MEMORY_INDEX_FILE

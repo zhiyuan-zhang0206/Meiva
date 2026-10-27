@@ -23,6 +23,7 @@ from base.host.env.agent_slices import AgentSlices
 from base.lm.catalog import ModelCatalog
 from base.packages.plugins.extensions import EMPTY
 from base.paths import memory_dir
+from base.paths.home import resolve_meiva_home
 from meiva.tests.fixtures.gateway_wire import GatewayWire, Reply
 from meiva_builtins.plugins.meiva_memory import agent_runtime
 
@@ -57,6 +58,7 @@ def _runtime(catalog: ModelCatalog, wire: GatewayWire, **pins: Any) -> Runtime[M
             catalog=catalog,
             clients=wire.context.clients,
             clock_factory=Clock.from_settings,
+            meiva_home=resolve_meiva_home(),
         )
     )
 

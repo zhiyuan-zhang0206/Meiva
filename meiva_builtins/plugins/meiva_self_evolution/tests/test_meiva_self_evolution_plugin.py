@@ -15,6 +15,7 @@ from base.config.tests.configuration import defaults
 from base.host.env.agent_slices import AgentSlices
 from base.packages.plugin_providers import build_model_catalog
 from base.packages.plugins.extensions import ExtensionRegistry
+from base.paths.home import resolve_meiva_home
 from meiva_builtins.plugins.meiva_self_evolution import agent_runtime
 from meiva_builtins.plugins.meiva_self_evolution.agent_runtime import TO_DO_BETTER_FILENAME
 
@@ -38,6 +39,7 @@ def _runtime(slices: AgentSlices) -> Runtime[MeivaContext]:
             catalog=build_model_catalog(),
             extensions=ExtensionRegistry((("meiva_self_evolution", agent_runtime.contribute()),)),
             clock_factory=Clock.from_settings,
+            meiva_home=resolve_meiva_home(),
         )
     )
 
@@ -85,7 +87,11 @@ async def test_after_init_seeds_a_missing_file_and_keeps_an_existing_one(
     unit_home: Path,
 ) -> None:
     hook = agent_runtime.SeedToDoBetterHook()
-    runtime = Runtime(context=MeivaContext(identity=AgentIdentity(agent_id=11, owns_loop=True)))
+    runtime = Runtime(
+        context=MeivaContext(
+            identity=AgentIdentity(agent_id=11, owns_loop=True), meiva_home=resolve_meiva_home()
+        )
+    )
     path = unit_home / "workspaces" / "11" / TO_DO_BETTER_FILENAME
 
     assert await hook(AgentState(), runtime, {}) is None
@@ -99,5 +105,8 @@ async def test_after_init_seeds_a_missing_file_and_keeps_an_existing_one(
 async def test_after_init_without_an_identity_writes_nothing(unit_home: Path) -> None:
     hook = agent_runtime.SeedToDoBetterHook()
 
-    assert await hook(AgentState(), Runtime(context=MeivaContext()), {}) is None
+    assert (
+        await hook(AgentState(), Runtime(context=MeivaContext(meiva_home=resolve_meiva_home())), {})
+        is None
+    )
     assert not (unit_home / "workspaces").exists()

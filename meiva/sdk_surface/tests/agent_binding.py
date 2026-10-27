@@ -1,11 +1,12 @@
-"""Bind (or unbind) the SDK's agent identity for one test, for the components below the `meiva` facade.
-
-Tests of `meiva.shell`, `meiva.skills` and `meiva.mcps` cannot import the `meiva/tests` SDK fixtures (those import
-`meiva`, which imports them), and they only need to know which agent the code acts for. These fixtures
-bind a context that carries that identity and no live clients, and put the previous binding back.
-"""
+# meiva:note
+# Bind (or unbind) the SDK's agent identity for one test, for the components below the `meiva` facade.
+# Tests of `meiva.shell`, `meiva.skills` and `meiva.mcps` cannot import the `meiva/tests` SDK fixtures
+# (those import `meiva`, which imports them), and they only need to know which agent the code acts for.
+# These fixtures bind a context that carries that identity, the homes the test's environment names and
+# no live clients, and put the previous binding back.
 
 from collections.abc import Callable, Iterator
+from pathlib import Path
 from typing import Protocol
 
 import pytest
@@ -14,6 +15,7 @@ from base.agents.context import MeivaContext
 from base.agents.context.clients import ClientSet
 from base.agents.context.identity import AgentIdentity
 from base.clock import Clock
+from base.paths.home import resolve_meiva_home
 from meiva.sdk_surface import process_context
 
 __all__ = ["BindAgent", "bound_agent", "no_agent"]
@@ -43,10 +45,23 @@ def bound_agent() -> Iterator[BindAgent]:
         clock_factory: Callable[[], Clock] | None = None,
     ) -> None:
         identity = AgentIdentity(agent_id=agent_id, owns_loop=True)
+        user_home = Path.home()
+        meiva_home = resolve_meiva_home()
         process_context.bind_context(
-            MeivaContext(identity=identity, clock_factory=clock_factory)
+            MeivaContext(
+                identity=identity,
+                clock_factory=clock_factory,
+                user_home=user_home,
+                meiva_home=meiva_home,
+            )
             if clients is None
-            else MeivaContext(identity=identity, clients=clients, clock_factory=clock_factory)
+            else MeivaContext(
+                identity=identity,
+                clients=clients,
+                clock_factory=clock_factory,
+                user_home=user_home,
+                meiva_home=meiva_home,
+            )
         )
 
     try:

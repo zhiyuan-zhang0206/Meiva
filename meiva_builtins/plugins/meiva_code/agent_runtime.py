@@ -80,8 +80,7 @@ def _logical_cwd_error(cwd: Path) -> OSError | None:
     return None
 
 
-def _foreign_workspace(cwd: Path, agent_id: int) -> str | None:
-    root = workspaces_root()
+def _foreign_workspace(cwd: Path, agent_id: int, root: Path) -> str | None:
     try:
         relative = cwd.resolve().relative_to(root.resolve())
     except ValueError:
@@ -105,18 +104,21 @@ class ValidateCwdAfterInitHook(Hook):
     ) -> dict[str, str] | None:
         initialized = "meiva_code__cwd" in state.model_fields_set
         cwd = Path(state_handle().view(state).cwd)
+        home = runtime.context.require_meiva_home()
         identity = runtime.context.identity
         aid = None if identity is None else identity.agent_id
         exc = _logical_cwd_error(cwd) if initialized else None
         owner = (
-            _foreign_workspace(cwd, aid)
+            _foreign_workspace(cwd, aid, workspaces_root(home=home))
             if initialized and exc is None and aid is not None
             else None
         )
         if initialized and exc is None and owner is None:
             return None
 
-        fallback = str(Path.home() if aid is None else workspace_dir(aid))
+        fallback = str(
+            runtime.context.require_user_home() if aid is None else workspace_dir(aid, home=home)
+        )
         if exc is not None:
             logger.warning(
                 "[meiva_code] after_init: persisted cwd {cwd!r} failed validation "

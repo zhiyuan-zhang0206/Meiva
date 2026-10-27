@@ -18,6 +18,7 @@ from agent.state import BaseAgentState, build_agent_state
 from base.agents.context import MeivaContext
 from base.agents.context.identity import AgentIdentity
 from base.packages.plugins.extensions import ExtensionRegistry
+from base.paths.home import resolve_meiva_home
 from meiva.sdk_surface import process_context
 from meiva_builtins.plugins.meiva_code import agent_runtime
 from meiva_builtins.plugins.meiva_code.tests.test_meiva_code_plugin import (
@@ -31,7 +32,13 @@ from meiva_builtins.plugins.meiva_code.tests.test_meiva_code_plugin import (
 
 
 def _cwd_runtime(agent_id: int = 11) -> Runtime[MeivaContext]:
-    return Runtime(context=MeivaContext(identity=AgentIdentity(agent_id=agent_id, owns_loop=True)))
+    return Runtime(
+        context=MeivaContext(
+            identity=AgentIdentity(agent_id=agent_id, owns_loop=True),
+            meiva_home=resolve_meiva_home(),
+            user_home=Path.home(),
+        )
+    )
 
 
 @pytest.fixture
@@ -88,7 +95,11 @@ async def test_after_init_initializes_each_host_workspace_without_sdk_slot(
 async def test_after_init_no_agent_initializes_home(has_identity: bool, no_sdk_context: None):
     """An eval context without an agent persists its documented HOME cwd."""
     identity = AgentIdentity(agent_id=None, owns_loop=False) if has_identity else None
-    runtime = Runtime(context=MeivaContext(identity=identity))
+    runtime = Runtime(
+        context=MeivaContext(
+            identity=identity, meiva_home=resolve_meiva_home(), user_home=Path.home()
+        )
+    )
     state_cls = build_agent_state(ExtensionRegistry((("meiva_code", agent_runtime.contribute()),)))
     state = state_cls(messages=[], halted=False)
     assert "meiva_code__cwd" not in state.model_fields_set

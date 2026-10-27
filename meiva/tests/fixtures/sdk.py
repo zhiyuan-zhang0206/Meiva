@@ -1,6 +1,7 @@
 # meiva:link meiva/tests/fixtures/docs/sdk-composition.meiva.okf.md
 
 from collections.abc import Iterator
+from pathlib import Path
 from types import ModuleType
 
 import pytest
@@ -14,6 +15,7 @@ from base.cluster.machine import MachineIdentityReader
 from base.cluster.machine.tests.identity import machine_identity as machine_identity
 from base.config import ConfigBoot
 from base.events.live.bus import EventBus
+from base.paths.home import resolve_meiva_home
 from meiva.boot import derived_clients
 from meiva.sdk_surface import metering, process_context
 from meiva.sdk_surface.installation import installed
@@ -40,6 +42,8 @@ def sdk_environment(
         clients=derived_clients(process_config, machine_identity),
         machine=machine_identity,
         clock_factory=lambda: Clock(clock_config_from_boot(process_config), timers=SYSTEM_TIMERS),
+        user_home=Path.home(),
+        meiva_home=resolve_meiva_home(),
     )
     process_context.bind_context(context)
     try:

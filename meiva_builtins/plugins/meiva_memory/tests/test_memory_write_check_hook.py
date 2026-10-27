@@ -29,6 +29,7 @@ from base.config import settings
 from base.host.env.agent_slices import AgentSlices
 from base.log.tests.log_records import LogRecords
 from base.packages.plugins.extensions import ExtensionRegistry
+from base.paths.home import resolve_meiva_home
 from meiva.tests.fixtures.pin_agent import pin_agent
 
 _SHARED = "meiva_memory__shared_notes"
@@ -148,6 +149,7 @@ def runtime(search: _MemoryGateway, model_catalog: Any) -> Iterator[Runtime[Meiv
         catalog=model_catalog,
         clients=clients,
         clock_factory=_clock,
+        meiva_home=resolve_meiva_home(),
     )
     try:
         yield Runtime(context=context)

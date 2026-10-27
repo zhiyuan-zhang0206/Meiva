@@ -36,7 +36,7 @@ def _absolute(path: str | Path) -> Path:
     return cwd.get() / target if cwd is not None else _meiva_files.resolve(target)
 
 
-def note_location(path: str | Path) -> tuple[str, str] | None:
+def note_location(path: str | Path, *, home: Path) -> tuple[str, str] | None:
     """`(scope, relative posix path)` when `path` is a .md file in the shared pool or in the
     agent's own memory folder, else None. `scope` is "shared" or "personal". Files in hidden
     directories are not notes."""
@@ -45,7 +45,7 @@ def note_location(path: str | Path) -> tuple[str, str] | None:
         return None
     roots = (
         ("shared", sdk.pool_root()),
-        ("personal", base.paths.workspace_dir(require_agent_id()) / "memory"),
+        ("personal", base.paths.workspace_dir(require_agent_id(), home=home) / "memory"),
     )
     for scope, root in roots:
         try:
@@ -80,7 +80,7 @@ def record_written_note(path: str | Path) -> None:
     try:
         if not process_context.in_exec_turn():
             return
-        located = note_location(path)
+        located = note_location(path, home=process_context.current_context().require_meiva_home())
         if located is None:
             return
         scope, relative = located

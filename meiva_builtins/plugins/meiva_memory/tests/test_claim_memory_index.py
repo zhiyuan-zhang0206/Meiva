@@ -6,6 +6,7 @@ from base.clock import Clock
 from base.config.tests.configuration import defaults
 from base.host.env.agent_slices import AgentSlices
 from base.paths import memory_dir
+from base.paths.home import resolve_meiva_home
 from meiva_builtins.plugins.meiva_memory.notes import memory_index_note
 
 
@@ -13,6 +14,7 @@ def _context(**pins: Any) -> MeivaContext:
     return MeivaContext(
         agent=AgentSlices.resolve(pins, default_reader=defaults()),
         clock_factory=Clock.from_settings,
+        meiva_home=resolve_meiva_home(),
     )
 
 
