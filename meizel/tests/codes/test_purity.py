@@ -13,7 +13,7 @@ def test_manifest_purity_accepts_top_level_and_table_forms(make_repo: RepoFactor
             "pkg/__init__.py": "",
             "pkg/pure.py": "def add(x: int, y: int) -> int:\n    return x + y\n",
             "pkg/impure.py": "import subprocess\n",
-            "pkg/meizel.toml": '[purity]\n"." = "none"\n"pure.py" = "strict"\n',
+            "pkg/meizel.toml": '[purity]\n"pure.py" = "strict"\n',
         }
     )
     assert analysis_of(root).verdict == []

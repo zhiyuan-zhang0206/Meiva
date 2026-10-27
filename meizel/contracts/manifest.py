@@ -35,6 +35,7 @@ __all__ = [
 ]
 
 PURITY_LEVELS = ("none", "strict-to-be", "strict")
+_JUDGED = ("strict-to-be", "strict")
 _TOP_KEYS = (
     "exports",
     "uses",
@@ -433,10 +434,9 @@ class _Reader:
     # meiva:note
     # One purity level: `"strict"`, `"strict-to-be"`, or `{ mode = "none", why = "..." }`. A file or a
     # directory that is not judged says why, so that taking it out of the rule is a statement a review
-    # can read. The bare string `"none"` is still read here while the manifests are converted.
+    # can read; the bare string `"none"` has no place for the reason and is refused.
     def purity_level(self, key: str, level: object, line: int) -> tuple[str, str] | None:
-        allowed = ", ".join(PURITY_LEVELS)
-        if isinstance(level, str) and level in PURITY_LEVELS:
+        if isinstance(level, str) and level in _JUDGED:
             return level, ""
         fields = level if _is_table(level) else None
         if fields is not None and set(fields) == {"mode", "why"} and fields["mode"] == "none":
@@ -447,23 +447,26 @@ class _Reader:
                 line, Code.MANIFEST_SYNTAX, f"[purity] {key!r} must say why in a non-empty `why`"
             )
             return None
-        self.report(
-            line,
-            Code.MANIFEST_SYNTAX,
-            f'[purity] {key!r} must be one of {allowed}, or {{ mode = "none", why = "..." }}',
+        hint = (
+            'a file that is not judged is written { mode = "none", why = "..." }'
+            if level == "none"
+            else f'one of {", ".join(_JUDGED)}, or {{ mode = "none", why = "..." }}'
         )
+        self.report(line, Code.MANIFEST_SYNTAX, f"[purity] {key!r} must be {hint}")
         return None
 
     def read_purity(self, value: object) -> None:
         line = self.manifest.line_of("purity")
-        allowed = ", ".join(PURITY_LEVELS)
         if isinstance(value, str):
-            if value not in PURITY_LEVELS:
-                self.report(
-                    line, Code.MANIFEST_SYNTAX, f"purity must be one of {allowed}, got {value!r}"
-                )
-            else:
+            if value in _JUDGED:
                 self.purity_default = value
+            else:
+                self.report(
+                    line,
+                    Code.MANIFEST_SYNTAX,
+                    f"purity must be one of {', '.join(_JUDGED)}, got {value!r}; "
+                    'a directory that is not judged is [purity] "." = { mode = "none", why = "..." }',
+                )
             return
         if not _is_table(value):
             self.report(line, Code.MANIFEST_SYNTAX, "purity must be a string or a table")
