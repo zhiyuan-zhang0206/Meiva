@@ -18,14 +18,21 @@ def home(unit_home: Path) -> Path:
     return unit_home
 
 
+# meiva:note
+# The pid an entry hands the journal: a live process that is not this one, so a journal that read
+# its own pid instead of the one it was given would record a different number.
+_ENTRY_PID = os.getppid()
+
+
 def test_begin_phase_finish_round_trip(home: Path) -> None:
-    assert journal.begin(home, "stop", deadline=time.monotonic() + 30, pid=os.getpid()) is True
-    with journal.phase(home, "drain", pid=os.getpid()):
+    assert journal.begin(home, "stop", deadline=time.monotonic() + 30, pid=_ENTRY_PID) is True
+    with journal.phase(home, "drain", pid=_ENTRY_PID):
         pass
     journal.finish(home, 0)
     op = journal.read(home)
     assert op is not None
     assert op.operation == "stop"
+    assert op.pid == _ENTRY_PID
     assert op.complete is True
     assert op.result == {"rc": 0, "error": None}
     assert [p.name for p in op.phases] == ["drain"]
@@ -34,10 +41,10 @@ def test_begin_phase_finish_round_trip(home: Path) -> None:
 
 
 def test_failed_phase_is_recorded_and_reraised(home: Path) -> None:
-    journal.begin(home, "stop", pid=os.getpid())
+    journal.begin(home, "stop", pid=_ENTRY_PID)
     with (
         pytest.raises(RuntimeError, match="boom"),
-        journal.phase(home, "services", pid=os.getpid()),
+        journal.phase(home, "services", pid=_ENTRY_PID),
     ):
         raise RuntimeError("boom")
     journal.finish(home, 1, error="RuntimeError: boom", extra={"phases": "services 1.2s"})
@@ -51,13 +58,13 @@ def test_failed_phase_is_recorded_and_reraised(home: Path) -> None:
 
 
 def test_inner_stop_leg_never_hijacks_the_restart_journal(home: Path) -> None:
-    assert journal.begin(home, "restart", pid=os.getpid()) is True
-    with journal.phase(home, "preflight", pid=os.getpid()):
+    assert journal.begin(home, "restart", pid=_ENTRY_PID) is True
+    with journal.phase(home, "preflight", pid=_ENTRY_PID):
         pass
-    assert journal.begin(home, "stop", pid=os.getpid()) is False
+    assert journal.begin(home, "stop", pid=_ENTRY_PID) is False
     with (
-        journal.phase(home, "stop", pid=os.getpid()),
-        journal.phase(home, "drain", pid=os.getpid()),
+        journal.phase(home, "stop", pid=_ENTRY_PID),
+        journal.phase(home, "drain", pid=_ENTRY_PID),
     ):
         pass
     op = journal.read(home)
@@ -68,11 +75,12 @@ def test_inner_stop_leg_never_hijacks_the_restart_journal(home: Path) -> None:
 
 
 def test_completed_journal_can_be_replaced(home: Path) -> None:
-    journal.begin(home, "stop", pid=os.getpid())
+    journal.begin(home, "stop", pid=_ENTRY_PID)
     journal.finish(home, 0)
-    assert journal.begin(home, "restart", pid=os.getpid()) is True
+    assert journal.begin(home, "restart", pid=_ENTRY_PID) is True
     op = journal.read(home)
     assert op is not None and op.operation == "restart" and op.complete is False
+    assert op.pid == _ENTRY_PID
 
 
 def test_malformed_journal_reads_as_absent(home: Path) -> None:
@@ -100,10 +108,10 @@ def test_wrong_shape_journal_reads_as_absent(home: Path) -> None:
 
 
 def test_journal_survives_an_unfinished_process(home: Path) -> None:
-    journal.begin(home, "restart", pid=os.getpid())
-    with journal.phase(home, "stop", pid=os.getpid()):
+    journal.begin(home, "restart", pid=_ENTRY_PID)
+    with journal.phase(home, "stop", pid=_ENTRY_PID):
         pass
-    with pytest.raises(SystemExit), journal.phase(home, "start", pid=os.getpid()):
+    with pytest.raises(SystemExit), journal.phase(home, "start", pid=_ENTRY_PID):
         raise SystemExit(1)
     op = journal.read(home)
     assert op is not None
@@ -113,11 +121,12 @@ def test_journal_survives_an_unfinished_process(home: Path) -> None:
 
 
 def test_phase_without_begin_still_journals(home: Path) -> None:
-    with journal.phase(home, "mystery", pid=os.getpid()):
+    with journal.phase(home, "mystery", pid=_ENTRY_PID):
         pass
     op = journal.read(home)
     assert op is not None
     assert op.operation == "unknown"
+    assert op.pid == _ENTRY_PID
     assert [p.name for p in op.phases] == ["mystery"]
 
 
@@ -132,18 +141,18 @@ def _op_with_pid(pid: int) -> journal.LifecycleOp:
 
 
 def test_begin_takes_over_a_dead_writers_journal(home: Path) -> None:
-    journal.begin(home, "restart", pid=os.getpid())
-    with journal.phase(home, "stop", pid=os.getpid()):
+    journal.begin(home, "restart", pid=_ENTRY_PID)
+    with journal.phase(home, "stop", pid=_ENTRY_PID):
         pass
     raw = json.loads(journal.status_path(home).read_text())
     raw["pid"] = _reaped_pid()
     journal.status_path(home).write_text(json.dumps(raw))
 
-    assert journal.begin(home, "restart", pid=os.getpid()) is True
+    assert journal.begin(home, "restart", pid=_ENTRY_PID) is True
     op = journal.read(home)
     assert op is not None
     assert op.operation == "restart" and op.complete is False
-    assert op.pid == os.getpid()
+    assert op.pid == _ENTRY_PID != os.getpid()
     assert op.resumed_from is not None
     assert op.resumed_from.pid == raw["pid"]
     assert op.resumed_from.operation == "restart"
@@ -174,8 +183,8 @@ def test_journal_write_failure_never_breaks_the_operation(
     blocked = journal.journal_path(home)
     blocked.mkdir(parents=True)
 
-    journal.begin(home, "stop", pid=os.getpid())
-    with journal.phase(home, "drain", pid=os.getpid()):
+    journal.begin(home, "stop", pid=_ENTRY_PID)
+    with journal.phase(home, "drain", pid=_ENTRY_PID):
         pass
     journal.finish(home, 0)
 
