@@ -32,6 +32,7 @@ from base.host.proc import run_bounded
 from base.lm.catalog import ModelCatalog
 from base.packages.plugin_providers import build_model_catalog
 from base.packages.tests.model_catalog import inert_keys
+from base.paths import resolve_meiva_home
 from ops import lifecycle
 from ops.lifecycle import launch
 from ops.lifecycle.tests.loopback.agent_host import ServedAgentHost
@@ -233,6 +234,7 @@ async def test_restart_lifecycle_op_validates_overlay_on_the_runner(
             {"config_overlay": {"definitely_not_a_config_field": "x"}},
             db_pool,
             catalog=model_catalog,
+            home=resolve_meiva_home(),
         )
     assert db_conn.execute(
         "SELECT count(*) FROM inbound_messages WHERE agent_id=%s", (lifecycle_agent_id,)
@@ -325,6 +327,7 @@ async def test_lifecycle_op_parses_path_to_terminate(
         {"source": "user"},
         db_pool,
         catalog=model_catalog,
+        home=resolve_meiva_home(),
     )
     assert result.status == "enqueued"
     assert db_conn.execute(
@@ -351,6 +354,7 @@ async def test_lifecycle_op_unparseable_path_raises(
             {},
             db_pool,
             catalog=model_catalog,
+            home=resolve_meiva_home(),
         )
 
 
@@ -372,6 +376,7 @@ async def test_guarded_resurrect_path_requires_trigger(
             {"resurrected_by": "system"},
             db_pool,
             catalog=model_catalog,
+            home=resolve_meiva_home(),
         )
 
 
@@ -394,6 +399,7 @@ async def test_manual_lifecycle_path_rejects_auto_resurrect_trigger(
             trigger_inbound_id=99,
             trigger_inbound_kind=InboundKind.CHAT,
             catalog=model_catalog,
+            home=resolve_meiva_home(),
         )
 
 
@@ -415,6 +421,7 @@ async def test_explicit_resurrect_dispatches_manual_op(
         {"resurrected_by": "user"},
         db_pool,
         catalog=model_catalog,
+        home=resolve_meiva_home(),
     )
     assert result.status == "spawned"
     assert db_conn.execute(

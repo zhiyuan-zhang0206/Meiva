@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import threading
+from pathlib import Path
 from typing import Any
 
 from psycopg_pool import ConnectionPool
@@ -26,6 +27,7 @@ from ops.rpc_schemas import (
     ShellProbePayload,
 )
 from ops.to_user import read_to_user
+from ops.upload_delivery import ReceiverConfig, copy_batch
 from services.agent_runner.agent_ops.ops_plan import unknown_kind
 
 _state_write_lock = threading.Lock()
@@ -41,6 +43,8 @@ def dispatch_sync(
     image: LoadedCommit,
     local_machine: MachineIdentityReader,
     host: Host,
+    home: Path,
+    receiver: ReceiverConfig,
 ) -> tuple[OpStatus, dict[str, object]]:
 
     match kind:
@@ -53,12 +57,13 @@ def dispatch_sync(
                 request.agent_id,
                 local_machine.name(),
                 references=request.references,
+                home=home,
             ).model_dump(mode="json")
         case "upload-receive-v1":
-            return _upload_arm(payload, pool, local_machine=local_machine.name())
+            return _upload_arm(payload, pool, receiver=receiver)
         case "status_probe":
             return OpStatus.COMPLETED, cluster.cluster_status_op(
-                db, pool, image=image, local_machine=local_machine
+                db, pool, image=image, local_machine=local_machine, home=home
             ).model_dump(mode="json")
         case "config_read":
             return OpStatus.COMPLETED, host_config.config_read_op(
@@ -127,7 +132,7 @@ def _agent_arm(
 
 
 def _upload_arm(
-    payload: dict[str, Any], pool: ConnectionPool | None, *, local_machine: str
+    payload: dict[str, Any], pool: ConnectionPool | None, *, receiver: ReceiverConfig
 ) -> tuple[OpStatus, dict[str, object]]:
 
     from httpx import HTTPStatusError
@@ -137,15 +142,12 @@ def _upload_arm(
         UploadDeliveryConflictError,
         UploadQuotaExceededError,
     )
-    from ops.upload_delivery import receive
 
     if pool is None:
         raise RuntimeError("immutable upload receiver requires the native DB pool")
     request = ReceiveRequest.model_validate(payload)
     try:
-        return OpStatus.COMPLETED, receive(pool, request, local_machine=local_machine).model_dump(
-            mode="json"
-        )
+        return OpStatus.COMPLETED, copy_batch(pool, request, receiver).model_dump(mode="json")
     except HTTPStatusError as exc:
         if exc.response.status_code in {401, 403, 404, 409}:
             return OpStatus.FAILED, {

@@ -498,13 +498,13 @@ async def reconcile_loop(
 async def run(
     *,
     process_config: ConfigBoot,
-    runtime: Path,
     database: Callable[[], Database],
     image: LoadedCommit,
     local_machine: MachineIdentityReader,
     home: Path,
 ) -> None:
     """Start the daemon and keep its health endpoint alive while it reconciles."""
+    runtime = run_dir(home.resolve())
     if resources.is_running(process_config, runtime=runtime):
         _log.info(
             "[page-server] daemon already running (pidfile=%s), exiting",
@@ -586,7 +586,6 @@ def main() -> None:
         runner.run(
             run(
                 process_config=machine_config,
-                runtime=process_home / "run",
                 database=database,
                 image=image,
                 local_machine=machine,

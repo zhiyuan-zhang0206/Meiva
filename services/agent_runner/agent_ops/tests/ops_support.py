@@ -35,6 +35,7 @@ from base.native_process.loaded_commit import LoadedCommit
 from base.native_process.os_platform import file_lock
 from ops.env_audit import read_env_write_records
 from ops.rpc_schemas import OpStatus
+from ops.upload_delivery import ReceiverConfig
 from services.agent_runner.agent_ops import daemon, in_flight
 
 __all__ = ["Ops", "Wakes", "config_write", "executions", "held_env_lock", "watching_wakes"]
@@ -73,6 +74,8 @@ class Ops:
     image: LoadedCommit
     machine: MachineIdentityReader
     host: Host
+    home: Path
+    receiver: ReceiverConfig
     active_ops: daemon.ActiveOps = field(default_factory=dict)
     workers: in_flight.WorkerFutures = field(default_factory=set)
     requests: in_flight.RequestTokens = field(default_factory=set)
@@ -94,6 +97,8 @@ class Ops:
             local_machine=self.machine,
             host=self.host,
             rng=seeded_rng(),
+            home=self.home,
+            receiver=self.receiver,
         )
 
     async def run_arm(
@@ -112,6 +117,8 @@ class Ops:
             local_machine=self.machine,
             host=self.host,
             rng=seeded_rng(),
+            home=self.home,
+            receiver=self.receiver,
         )
 
     async def idempotent(
@@ -147,6 +154,8 @@ class Ops:
             local_machine=self.machine,
             host=self.host,
             rng=seeded_rng(),
+            home=self.home,
+            receiver=self.receiver,
             **tunables,
         )
 
@@ -175,6 +184,8 @@ class Ops:
             local_machine=self.machine,
             host=self.host,
             rng=seeded_rng(),
+            home=self.home,
+            receiver=self.receiver,
         )
 
 

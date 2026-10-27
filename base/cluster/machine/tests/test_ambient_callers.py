@@ -14,7 +14,6 @@ CALLERS: dict[str, tuple[str, int]] = {
     "cli/commands/_repo.py": ("C", 1),
     "cli/commands/management/schedules.py": ("C", 2),
     "ops/cluster/rpc.py": ("O", 1),
-    "ops/upload_delivery/__init__.py": ("O", 1),
     "scripts/entrypoints/agent.py": ("O", 1),
     "services/agent_runner/agent_ops/boot.py": ("S", 1),
 }
