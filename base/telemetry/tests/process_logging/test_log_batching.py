@@ -265,7 +265,7 @@ def test_jsonl_mirror_failure_is_reported_not_silent(unit_home: Path) -> None:
     )
     try:
         for index in range(50):
-            telemetry.append_jsonl([_event(index)])
+            telemetry.append_jsonl([_event(index)], target_dir=mirror_dir)
     finally:
         logger.remove(sink_id)
         bad_file.rmdir()

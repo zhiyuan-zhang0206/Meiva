@@ -14,6 +14,7 @@ from pathlib import Path
 from typing import Any
 
 from base.cluster.machine import MachineIdentityReader
+from base.paths import logs_path
 from base.telemetry.delivery.mirror import append_jsonl
 from base.telemetry.delivery.pipeline import EventPipeline
 from base.telemetry.delivery.receipts import DrainStatus, Event
@@ -26,7 +27,7 @@ def write_batch(
     *,
     database: Callable[[], Any],
     export: Callable[[list[Event]], None],
-    target_dir: Path | None = None,
+    target_dir: Path,
 ) -> None:
     """Mirror first, then the telemetry_events record, the compact metric projection
     and OTLP export.
@@ -51,37 +52,46 @@ def write_batch(
     export(events)
 
 
+# meiva:note
+# Own the writer and lazy exporter with the root's database and machine.
+#
+# `flush_interval_s` is how long the drain thread holds a partial batch before it writes it. The
+# mirror and the exporter's loss reports land under `home`, so `home` must be absolute: a relative
+# one would put them under whatever directory the process happens to be in. Raises ValueError when
+# it is not.
 def build_pipeline(
     *,
     database: Callable[[], Any],
     machine: MachineIdentityReader,
     home: Path,
     flush_interval_s: float = 0.5,
-    target_dir: Path | None = None,
 ) -> EventPipeline:
-    """Own the writer and lazy exporter with the root's database and machine.
-
-    `flush_interval_s` is how long the drain thread holds a partial batch before it writes it.
-    """
+    if not home.is_absolute():
+        raise ValueError(f"the event pipeline needs an absolute home, got {str(home)!r}")
     from base.host.env.registry import process_environment
     from base.telemetry.observability import endpoint_override_is_explicit
-    from base.telemetry.otlp.telemetry_otlp import observability_export_allowed
+    from base.telemetry.otlp.telemetry_otlp import default_exporter, observability_export_allowed
     from base.telemetry.otlp.telemetry_otlp_exporting import ExportingEventPipeline
 
     # meiva:note
     # The process environment is read once, here: every daemon builds its pipeline at its
     # composition root, after its boot loaded the `.env` it will run with.
     explicit = endpoint_override_is_explicit("MEIVA_TELEMETRY_OTLP_ENDPOINT", process_environment())
-    return ExportingEventPipeline(
-        writer=lambda events, exporter: write_batch(
-            events,
-            database=database,
-            export=exporter.export_batch,
-            target_dir=target_dir,
-        ),
+    mirror_dir = logs_path(home)
+    exporter = default_exporter(
         export_allowed=lambda: observability_export_allowed(
             machine, home=home, endpoint_explicit=explicit
         ),
+        mirror_dir=mirror_dir,
+    )
+    return ExportingEventPipeline(
+        writer=lambda events, owned: write_batch(
+            events,
+            database=database,
+            export=owned.export_batch,
+            target_dir=mirror_dir,
+        ),
+        exporter=exporter,
         flush_interval_s=flush_interval_s,
     )
 
