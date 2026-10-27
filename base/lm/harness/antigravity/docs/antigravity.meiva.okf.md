@@ -64,6 +64,26 @@ behaviour of the CLI that the adapter cannot change, so they are disclosed in th
 text the agent reads, and `test_handoff.py` pins that the text is present (and
 absent from a plain `Handoff`).
 
+## Who a frame belongs to
+
+`agy` names no turns: `init`, `step_update` and `result` carry no request id, and the
+NDJSON stream is the only channel. A `result` is therefore ours only when this
+session wrote a turn out (`_sent_turn`, set before the write) and has not seen it
+end; anything else is the CLI's own work and becomes
+`UnsolicitedOutput(source="result")`. Mid-turn the two are indistinguishable at the
+protocol level, so the reply is built from the turn's own streamed text — the parts
+already closed plus whatever the in-flight step streamed — and the frame's
+`response` only fills a gap. That is what keeps a foreign `result` from replacing
+the reply it interrupted.
+
+A stream that ends names the turn it was serving when one was running
+(`TurnFaulted`) and the session when none was (`SessionFailed`).
+
+The rule and the three events are [[base/lm/harness/docs/attribution.meiva.okf.md|Who
+a provider message belongs to]]; `tests/test_unsolicited.py` pins this half —
+including the residual risk that a `result` arriving mid-turn is acted on, because
+nothing in the protocol can tell the two apart.
+
 ## Modules
 
 | Module | Owns |

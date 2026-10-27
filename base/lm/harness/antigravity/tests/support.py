@@ -12,6 +12,7 @@ from base.lm.harness.antigravity.config import AntigravityConfig
 from base.lm.harness.antigravity.session import AgySession
 from base.lm.harness.antigravity.transport import AgyTransport, Reaper
 from base.lm.harness.base_session import SessionBinding
+from base.lm.harness.events import UnsolicitedSink
 from base.lm.harness.process import ChildProbe
 
 FAKE_CLI = Path(__file__).with_name("fake_agy.py")
@@ -123,6 +124,7 @@ async def start(
     handoff: Any | None = None,
     agent_id: int | None = None,
     registry: Any | None = None,
+    unsolicited: UnsolicitedSink | None = None,
     conversation_id: str = "conv-fake",
     reap: Reaper | None = None,
     **config_overrides: Any,
@@ -148,7 +150,7 @@ async def start(
     session = AgySession(
         settings,
         environ=environ,
-        binding=SessionBinding(agent_id, registry),
+        binding=SessionBinding(agent_id, registry, unsolicited),
         probe=probe,
         transport_factory=factory,
         clock=system_clock(),
