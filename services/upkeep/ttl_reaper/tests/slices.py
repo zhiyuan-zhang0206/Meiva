@@ -15,6 +15,8 @@ def reaper_config(**overrides: Any) -> TtlReaperConfig:
             fire_log_cleanup_interval_s=86400.0,
             fire_log_retention_days=30,
             shell_kill_deadline_s=10.0,
+            impersonation_event_abandon_grace_s=300,
+            impersonation_event_report_interval_s=86400,
             zone=ZoneInfo("UTC"),
             clock=Clock(ClockConfig("UTC", "UTC", False), timers=SYSTEM_TIMERS),
         ),

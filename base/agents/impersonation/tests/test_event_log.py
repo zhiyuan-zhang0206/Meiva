@@ -35,6 +35,10 @@ from base.native_process.runtime_incarnation import RuntimeIncarnation
 from base.telemetry import Event
 from base.telemetry.audit_events import prepare_event_log
 
+# meiva:note
+# The reaper's default report cadence. The signal tests assert this cadence, not a pass count.
+_REPORT_INTERVAL = 86400
+
 
 @pytest.fixture
 def owner(
@@ -436,10 +440,62 @@ def test_a_capture_failure_keeps_the_lease_pending_for_good(
     ended = history.resolve(database, owner.agent_id, 0, local_machine=local_machine)
     assert ended["events_completed_at"] is None
     assert pending_reason(ended) == "capture_failed"
-    assert emit_incomplete_event_logs(db_conn) == 1
+    assert emit_incomplete_event_logs(db_conn, repeat_interval_seconds=_REPORT_INTERVAL) == 1
+    assert emit_incomplete_event_logs(db_conn, repeat_interval_seconds=_REPORT_INTERVAL) == 0
     failed = _incomplete_events(loguru_records)
     assert [e["condition"] for e in failed] == ["capture_failed"]
     assert failed[0]["pending_reason"] == "capture_failed"
+
+
+def _lifecycle_entries(
+    db_conn: psycopg.Connection[Any], lease_id: object, event: str
+) -> list[dict[str, Any]]:
+    rows = db_conn.execute(
+        "SELECT payload FROM agent_impersonation_entries WHERE lease_id=%s AND kind='lifecycle' "
+        "AND payload->>'event'=%s ORDER BY seq",
+        (lease_id, event),
+    ).fetchall()
+    return [row[0] for row in rows]
+
+
+def _signal_entries(db_conn: psycopg.Connection[Any], lease_id: object) -> list[dict[str, Any]]:
+    return _lifecycle_entries(db_conn, lease_id, "event_log_incomplete")
+
+
+def _abandoned_entries(db_conn: psycopg.Connection[Any], lease_id: object) -> list[dict[str, Any]]:
+    return _lifecycle_entries(db_conn, lease_id, "event_source_abandoned")
+
+
+def test_a_permanent_condition_keeps_reporting_on_its_interval(
+    db_conn: psycopg.Connection[Any],
+    owner: RuntimeIncarnation,
+    lease: dict[str, Any],
+    loguru_records: list[dict[str, Any]],
+    database_gate: ProcessDbGate,
+    *,
+    machine_identity: MachineIdentityReader,
+) -> None:
+    local_machine = machine_identity.name()
+    _participant(owner, lease, "broken", database_gate=database_gate)
+    db_conn.execute(
+        "SELECT seal_impersonation_event_participant(%s,'broken','failed','capture_failed',NULL)",
+        (lease["id"],),
+    )
+    _expire(db_conn, lease, database_gate=database_gate, local_machine=local_machine)
+    # meiva:note
+    # A failed source never completes its lease, so its report must never stop: age the recorded
+    # report past the cadence (entries are immutable, so it is written already aged) and the pass
+    # reports again instead of treating the first report as the last word.
+    history.append(
+        db_conn,
+        str(lease["id"]),
+        "lifecycle",
+        {"event": "event_log_incomplete", "condition": "capture_failed"},
+        created_at=datetime.now(UTC) - timedelta(days=2),
+    )
+    assert emit_incomplete_event_logs(db_conn, repeat_interval_seconds=_REPORT_INTERVAL) == 1
+    assert emit_incomplete_event_logs(db_conn, repeat_interval_seconds=_REPORT_INTERVAL) == 0
+    assert [e["condition"] for e in _incomplete_events(loguru_records)] == ["capture_failed"]
 
 
 def _incomplete_events(records: list[dict[str, Any]]) -> list[dict[str, Any]]:
@@ -450,7 +506,7 @@ def _incomplete_events(records: list[dict[str, Any]]) -> list[dict[str, Any]]:
     ]
 
 
-def test_an_ended_lease_with_an_open_source_signals_by_state_until_it_seals(
+def test_an_ended_lease_with_an_open_source_reports_once_and_records_why(
     db_conn: psycopg.Connection[Any],
     owner: RuntimeIncarnation,
     lease: dict[str, Any],
@@ -461,18 +517,65 @@ def test_an_ended_lease_with_an_open_source_signals_by_state_until_it_seals(
 ) -> None:
     local_machine = machine_identity.name()
     participant = _participant(owner, lease, "stuck", database_gate=database_gate)
-    assert emit_incomplete_event_logs(db_conn) == 0
+    assert emit_incomplete_event_logs(db_conn, repeat_interval_seconds=_REPORT_INTERVAL) == 0
     _expire(db_conn, lease, database_gate=database_gate, local_machine=local_machine)
-    assert emit_incomplete_event_logs(db_conn) == 1
-    assert emit_incomplete_event_logs(db_conn) == 1
+    assert emit_incomplete_event_logs(db_conn, repeat_interval_seconds=_REPORT_INTERVAL) == 1
+    # meiva:note
+    # The report is a record, not a per-pass repeat: the next pass has nothing new to say.
+    assert emit_incomplete_event_logs(db_conn, repeat_interval_seconds=_REPORT_INTERVAL) == 0
     events = _incomplete_events(loguru_records)
-    assert [e["condition"] for e in events] == ["seal_stuck", "seal_stuck"]
+    assert [e["condition"] for e in events] == ["seal_stuck"]
     assert events[0]["lease_id"] == participant.lease_id
     assert events[0]["agent_id"] == owner.agent_id
+    assert events[0]["pending_reason"] == "awaiting_participant_seal"
+    assert events[0]["pending_sources"] == ["stuck"]
+    recorded = _signal_entries(db_conn, participant.lease_id)
+    assert [(row["condition"], row["pending_sources"]) for row in recorded] == [
+        ("seal_stuck", ["stuck"])
+    ]
+    db_conn.commit()
     loguru_records.clear()
     seal_local_participant(LocalCaptureGate(participant))
-    assert emit_incomplete_event_logs(db_conn) == 0
+    assert emit_incomplete_event_logs(db_conn, repeat_interval_seconds=_REPORT_INTERVAL) == 0
     assert _incomplete_events(loguru_records) == []
+
+
+def test_an_abandoned_source_receipt_seals_after_its_grace_and_completes_the_log(
+    db_conn: psycopg.Connection[Any],
+    owner: RuntimeIncarnation,
+    lease: dict[str, Any],
+    database: Database,
+    database_gate: ProcessDbGate,
+    *,
+    machine_identity: MachineIdentityReader,
+) -> None:
+    local_machine = machine_identity.name()
+    participant = _participant(owner, lease, "abandoned", database_gate=database_gate)
+    _capture(participant, [_sdk_event(owner.agent_id, "before-the-controller-died")])
+    _expire(db_conn, lease, database_gate=database_gate, local_machine=local_machine)
+    assert emit_incomplete_event_logs(db_conn, repeat_interval_seconds=_REPORT_INTERVAL) == 1
+    # meiva:note
+    # Inside the grace the receipt still belongs to its controller, which may seal it itself.
+    assert event_log.seal_abandoned_event_sources(db_conn, grace_seconds=300, limit=10) == 0
+    db_conn.execute(
+        "UPDATE agent_impersonations SET ended_at=clock_timestamp()-interval '10 minutes' "
+        "WHERE id=%s",
+        (lease["id"],),
+    )
+    assert event_log.seal_abandoned_event_sources(db_conn, grace_seconds=300, limit=10) == 1
+    db_conn.commit()
+    assert db_conn.execute(
+        "SELECT state,item_count FROM agent_impersonation_event_participants "
+        "WHERE lease_id=%s AND source_key='abandoned'",
+        (lease["id"],),
+    ).fetchone() == ("sealed", 1)
+    done = history.resolve(database, owner.agent_id, 0, local_machine=local_machine)
+    assert done["events_completed_at"] is not None
+    assert pending_reason(done) is None
+    recorded = _abandoned_entries(db_conn, participant.lease_id)
+    assert [(row["source_key"], row["item_count"]) for row in recorded] == [("abandoned", 1)]
+    assert "never sealed" in recorded[0]["reason"]
+    assert emit_incomplete_event_logs(db_conn, repeat_interval_seconds=_REPORT_INTERVAL) == 0
 
 
 def test_agent_termination_completes_a_fully_sealed_lease(
@@ -565,10 +668,11 @@ def test_a_late_seal_rewrites_the_already_delivered_handoff_file(
     assert delivery["sdk_calls"]["consumed_event_count"] == 1
 
 
-def test_the_reaper_pass_signals_a_stuck_source_until_it_seals(
+def test_the_reaper_pass_signals_a_stuck_source_once_and_reclaims_it(
     db_conn: psycopg.Connection[Any],
     owner: RuntimeIncarnation,
     lease: dict[str, Any],
+    database: Database,
     loguru_records: list[dict[str, Any]],
     database_gate: ProcessDbGate,
     *,
@@ -578,15 +682,37 @@ def test_the_reaper_pass_signals_a_stuck_source_until_it_seals(
     from base.agents.impersonation import maintenance
     from base.db import pool
 
-    participant = _participant(owner, lease, "reaper-stuck", database_gate=database_gate)
+    _participant(owner, lease, "reaper-stuck", database_gate=database_gate)
     _expire(db_conn, lease, database_gate=database_gate, local_machine=local_machine)
 
     with pool(max_size=2, gate=database_gate) as reaper_pool:
-        assert maintenance.signal_incomplete_event_logs(reaper_pool) == 1
-        assert maintenance.signal_incomplete_event_logs(reaper_pool) == 1
-        seal_local_participant(LocalCaptureGate(participant))
-        assert maintenance.signal_incomplete_event_logs(reaper_pool) == 0
-    assert [e["condition"] for e in _incomplete_events(loguru_records)] == [
-        "seal_stuck",
-        "seal_stuck",
-    ]
+        assert (
+            maintenance.signal_incomplete_event_logs(
+                reaper_pool, repeat_interval_seconds=_REPORT_INTERVAL
+            )
+            == 1
+        )
+        # meiva:note
+        # One report per lease and condition, then the reaper seals what a gone controller left.
+        assert (
+            maintenance.signal_incomplete_event_logs(
+                reaper_pool, repeat_interval_seconds=_REPORT_INTERVAL
+            )
+            == 0
+        )
+        db_conn.execute(
+            "UPDATE agent_impersonations SET ended_at=clock_timestamp()-interval '10 minutes' "
+            "WHERE id=%s",
+            (lease["id"],),
+        )
+        db_conn.commit()
+        assert maintenance.reclaim_abandoned_event_logs(reaper_pool, grace_seconds=300) == 1
+        assert (
+            maintenance.signal_incomplete_event_logs(
+                reaper_pool, repeat_interval_seconds=_REPORT_INTERVAL
+            )
+            == 0
+        )
+    assert [e["condition"] for e in _incomplete_events(loguru_records)] == ["seal_stuck"]
+    done = history.resolve(database, owner.agent_id, 0, local_machine=local_machine)
+    assert done["events_completed_at"] is not None
