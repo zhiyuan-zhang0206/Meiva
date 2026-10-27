@@ -60,11 +60,20 @@ modules; this package does not restate them.
 | `item/started` / `item/completed` (`fileChange`) | `ToolUse` / `ToolResult` named `patch` |
 | `item/*` (`mcpToolCall`, `dynamicToolCall`, `webSearch`) | `ToolUse` / `ToolResult` |
 | `thread/tokenUsage/updated` | per-turn `Usage`, accumulated into `SessionTotals` |
-| `turn/completed` | `TurnCompleted` (`status` → `subtype`, `interrupted` from the interrupt flag or status) |
-| `error` with `willRetry=false` | `SessionFaulted` |
+| `turn/started` | binds the provider's name for the turn this session is starting (`TurnTicket.provider_turn_id`); any other moment, nothing |
+| `turn/completed` naming our turn | `TurnCompleted` (`status` → `subtype`, `interrupted` from the interrupt flag or status) |
+| `turn/completed` naming any other turn | `UnsolicitedOutput(source="turn/completed")` carrying that turn's reply |
+| `error` with `willRetry=false`, naming our turn | `TurnFaulted` |
+| `error` with `willRetry=false`, naming any other turn | `UnsolicitedOutput(source="error")` |
 
 Everything else (reasoning, plan, image, sub-agent, queue and rate-limit
 events) maps to nothing: the runtime does not model it.
+
+## Who a notification belongs to
+
+[[base/lm/harness/codex/docs/attribution.meiva.okf.md|Who an app-server
+notification belongs to]]: the turn id the adapter binds, and why a name it never
+bound has no owner.
 
 ## Execution policy
 

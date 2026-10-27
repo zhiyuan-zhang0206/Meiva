@@ -10,6 +10,7 @@ from base.lm.harness.base_session import SessionBinding
 from base.lm.harness.codex import CodexConfig, CodexSession
 from base.lm.harness.codex.tests.fake_app_server import CODEX_PID, FakeAppServer
 from base.lm.harness.codex.transport import JsonValue, as_object, as_text
+from base.lm.harness.events import UnsolicitedSink
 from base.lm.harness.handoff import Handoff
 from base.lm.harness.registry import FileSessionRegistry
 
@@ -107,6 +108,7 @@ async def start(
     handoff_doc: Handoff | None = None,
     agent_id: int | None = None,
     registry: FileSessionRegistry | None = None,
+    unsolicited: UnsolicitedSink | None = None,
     observe_pid: bool = True,
     **config_overrides: Any,
 ) -> Harness:
@@ -118,7 +120,7 @@ async def start(
     session = CodexSession(
         config(tmp_path, **config_overrides),
         environ={},
-        binding=SessionBinding(agent_id, registry),
+        binding=SessionBinding(agent_id, registry, unsolicited),
         transport=fake,
         probe=scripted_probe,
         clock=system_clock(),

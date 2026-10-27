@@ -18,6 +18,7 @@ from base.lm.harness.codex.transport import (
     AppServerTransport,
     JsonObject,
     JsonRpcError,
+    JsonValue,
     StdioAppServer,
     TransportClosedError,
     as_object,
@@ -36,9 +37,11 @@ from base.lm.harness.codex.types import (
 )
 from base.lm.harness.events import (
     AssistantText,
-    SessionFaulted,
+    SessionFailed,
     SessionStarted,
     TurnCompleted,
+    TurnFaulted,
+    UnsolicitedOutput,
     Usage,
 )
 from base.lm.harness.handoff import Handoff
@@ -86,6 +89,20 @@ class CancelReport:
     cli_alive: bool | None
 
 
+# meiva:note
+# The reply a completed turn carries, read out for a turn this session did not run:
+# it is content nobody here has read, and the only part of such a turn worth handing
+# on (#5663).
+# meiva:link base/lm/harness/docs/attribution.meiva.okf.md
+def _turn_text(turn: JsonObject) -> str:
+    items: JsonValue = turn.get("items")
+    if not isinstance(items, list):
+        return ""
+    return "\n".join(
+        text for entry in items if (text := assistant_text(as_object(entry))) is not None
+    ).strip()
+
+
 class CodexSession(BaseHarnessSession[CodexConfig]):
     def __init__(
         self,
@@ -110,7 +127,7 @@ class CodexSession(BaseHarnessSession[CodexConfig]):
             environ=build_env(environ, api_key_mode=config.api_key_mode),
             request_timeout=config.startup_timeout_seconds,
         )
-        self._turn_ids: dict[str, str] = {}
+        self._starting = False
         self._turn_usage: dict[str, Usage] = {}
         self._turn_steps: dict[str, list[Usage]] = {}
         self._final_parts: dict[str, list[str]] = {}
@@ -179,7 +196,7 @@ class CodexSession(BaseHarnessSession[CodexConfig]):
         }
         started = self._monotonic()
         if ticket is not None and self._session_id:
-            codex_turn_id = self._codex_turn_for(ticket.turn_id)
+            codex_turn_id = ticket.provider_turn_id or ""
             try:
                 await self._transport.request(
                     "turn/interrupt",
@@ -188,7 +205,7 @@ class CodexSession(BaseHarnessSession[CodexConfig]):
                 )
             except (JsonRpcError, TransportClosedError, TimeoutError) as exc:
                 self._emit(
-                    SessionFaulted(turn_id=ticket.turn_id, error=f"turn/interrupt failed: {exc}")
+                    TurnFaulted(turn_id=ticket.turn_id, error=f"turn/interrupt failed: {exc}")
                 )
         interrupt_ms = (self._monotonic() - started) * 1000.0
         if pid is None:
@@ -262,6 +279,12 @@ class CodexSession(BaseHarnessSession[CodexConfig]):
         self._baseline = snapshot(self._probe, self._transport.pid)
         self._start_deadline(ticket)
         params = {"threadId": self._session_id, "input": [{"type": "text", "text": ticket.text}]}
+        # meiva:note
+        # `turn/started` can beat this response, and the items that follow name the
+        # turn by id: the flag is what lets that notification bind the name first, so
+        # nothing has to guess whose items arrived early (#5663).
+        # meiva:link base/lm/harness/docs/attribution.meiva.okf.md
+        self._starting = True
         try:
             result = await self._transport.request(
                 "turn/start", params, timeout=self.config.startup_timeout_seconds
@@ -269,24 +292,27 @@ class CodexSession(BaseHarnessSession[CodexConfig]):
         except Exception as exc:
             self._fail_turn(ticket, exc)
             return
+        finally:
+            self._starting = False
         if codex_turn_id := as_text(as_object(result.get("turn")).get("id")):
             self._bind_codex_turn(ticket, codex_turn_id)
 
     def _bind_codex_turn(self, ticket: TurnTicket, codex_turn_id: str) -> None:
-        if stale := [
-            cid
-            for cid, tid in self._turn_ids.items()
-            if tid == ticket.turn_id and cid != codex_turn_id
-        ]:
-            for cid in stale:
-                self._turn_ids.pop(cid, None)
+        previous = ticket.provider_turn_id
+        if previous is not None and previous != codex_turn_id:
+            # meiva:note
+            # A name that changed mid-turn is the provider replaying another turn's
+            # transcript: the partial state gathered under the old name is not ours.
+            # meiva:link base/lm/harness/docs/attribution.meiva.okf.md
             self._turn_usage.pop(ticket.turn_id, None)
             self._turn_steps.pop(ticket.turn_id, None)
             self._final_parts.pop(ticket.turn_id, None)
             ticket.parts.clear()
-        self._turn_ids[codex_turn_id] = ticket.turn_id
+        ticket.provider_turn_id = codex_turn_id
 
     def _on_notification(self, method: str, params: JsonObject) -> None:
+        if not self._from_our_thread(params):
+            return
         if method == "item/agentMessage/delta":
             self._on_text_delta(params)
         elif method in {"item/reasoning/summaryTextDelta", "item/reasoning/textDelta"}:
@@ -295,72 +321,106 @@ class CodexSession(BaseHarnessSession[CodexConfig]):
             self._on_item(method, params)
         elif method == "thread/tokenUsage/updated":
             self._on_usage(params)
+        elif method == "turn/started":
+            self._on_turn_started(params)
         elif method == "turn/completed":
             self._handle_turn_completed(params)
         elif method == "error":
             self._on_error(params)
 
+    # meiva:note
+    # One app-server connection serves one thread, and a notification naming another
+    # one belongs to work this session never asked for: a fork, or a thread the CLI
+    # opened for itself. The protocol puts `threadId` on every turn-scoped
+    # notification, so the check is one look-up (#5663).
+    # meiva:link base/lm/harness/docs/attribution.meiva.okf.md
+    def _from_our_thread(self, params: JsonObject) -> bool:
+        thread_id = as_text(params.get("threadId"))
+        return thread_id is None or self._session_id is None or thread_id == self._session_id
+
+    def _claimed(self, params: JsonObject) -> TurnTicket | None:
+        return self._claim(as_text(params.get("turnId")))
+
     def _on_text_delta(self, params: JsonObject) -> None:
-        if (turn_id := self._turn_id_for(params)) is not None:
-            for event in text_delta(params, turn_id):
+        if (ticket := self._claimed(params)) is not None:
+            for event in text_delta(params, turn_id=ticket.turn_id):
                 self._emit(event)
 
     def _on_reasoning_delta(self, params: JsonObject) -> None:
-        if (turn_id := self._turn_id_for(params)) is not None:
-            for event in reasoning_delta(params, turn_id):
+        if (ticket := self._claimed(params)) is not None:
+            for event in reasoning_delta(params, turn_id=ticket.turn_id):
                 self._emit(event)
 
     def _on_item(self, method: str, params: JsonObject) -> None:
-        if (turn_id := self._turn_id_for(params)) is None:
+        ticket = self._claimed(params)
+        if ticket is None:
             return
         item = as_object(params.get("item"))
         if method == "item/completed" and (text := assistant_text(item)) is not None:
-            self._record_text(turn_id, item, text)
-            self._emit(AssistantText(turn_id=turn_id, text=text))
+            self._record_text(ticket, item, text)
+            self._emit(AssistantText(turn_id=ticket.turn_id, text=text))
         phase = "started" if method == "item/started" else "completed"
-        for event in item_event(params, phase=phase, turn_id=turn_id):
+        for event in item_event(params, phase=phase, turn_id=ticket.turn_id):
             self._emit(event)
 
     def _on_usage(self, params: JsonObject) -> None:
-        if (turn_id := self._turn_id_for(params)) is None:
+        ticket = self._claimed(params)
+        if ticket is None:
             return
         step = usage_from(params)
         if step.input_tokens == 0 and step.output_tokens == 0:
             return
-        self._turn_usage[turn_id] = self._turn_usage.get(turn_id, Usage()) + step
-        self._turn_steps.setdefault(turn_id, []).append(step)
+        self._turn_usage[ticket.turn_id] = self._turn_usage.get(ticket.turn_id, Usage()) + step
+        self._turn_steps.setdefault(ticket.turn_id, []).append(step)
 
+    # meiva:note
+    # An error the server will not retry, on a turn this session is not running, is
+    # news about the provider rather than a verdict on our turn. It reaches the sink
+    # instead of ending a wait it has nothing to do with (#5663).
+    # meiva:link base/lm/harness/docs/attribution.meiva.okf.md
     def _on_error(self, params: JsonObject) -> None:
-        if not bool(params.get("willRetry", False)):
-            turn_id = self._turn_id_for(params)
-            error = as_object(params.get("error")).get("message")
-            self._emit(
-                SessionFaulted(turn_id=turn_id, error=str(error or "app-server reported an error"))
-            )
+        if bool(params.get("willRetry", False)):
+            return
+        error = str(as_object(params.get("error")).get("message") or "app-server reported an error")
+        ticket = self._claimed(params)
+        if ticket is None:
+            self._unsolicited(UnsolicitedOutput(source="error", text=error))
+            return
+        self._emit(TurnFaulted(turn_id=ticket.turn_id, error=error))
 
-    def _record_text(self, turn_id: str, item: JsonObject, text: str) -> None:
-        if (ticket := self._ticket_for(turn_id)) is not None:
-            ticket.parts.append(text)
-            if assistant_text(item, final_only=True) is not None:
-                self._final_parts.setdefault(turn_id, []).append(text)
+    def _record_text(self, ticket: TurnTicket, item: JsonObject, text: str) -> None:
+        ticket.parts.append(text)
+        if assistant_text(item, final_only=True) is not None:
+            self._final_parts.setdefault(ticket.turn_id, []).append(text)
+
+    # meiva:note
+    # `turn/started` names the turn the server is about to run, and it can arrive
+    # before `turn/start` has answered. Binding that name here is what lets the items
+    # that follow be attributed without guessing: only a turn this session is in the
+    # middle of starting may take a name, so a name announced at any other moment
+    # belongs to a turn we did not start (#5663).
+    # meiva:link base/lm/harness/docs/attribution.meiva.okf.md
+    def _on_turn_started(self, params: JsonObject) -> None:
+        ticket = self._active
+        if not self._starting or ticket is None:
+            return
+        codex_turn_id = as_text(as_object(params.get("turn")).get("id"))
+        if codex_turn_id:
+            self._bind_codex_turn(ticket, codex_turn_id)
 
     def _handle_turn_completed(self, params: JsonObject) -> None:
         turn = as_object(params.get("turn"))
         codex_turn_id = as_text(turn.get("id")) or ""
-        ticket = self._active
-        bound_codex_id = self._codex_turn_for(ticket.turn_id) if ticket is not None else ""
-        turn_id = self._turn_ids.pop(codex_turn_id, None)
-        if (
-            ticket is None
-            or (turn_id is not None and ticket.turn_id != turn_id)
-            or (turn_id is None and codex_turn_id and bound_codex_id)
-        ):
-            self._emit(
-                SessionFaulted(
-                    turn_id=turn_id,
-                    error=f"turn/completed for no active turn ({codex_turn_id or 'unknown'})",
-                )
-            )
+        ticket = self._claim(codex_turn_id)
+        if ticket is None:
+            # meiva:note
+            # A completion for a turn this session did not run: the server's own work
+            # (a queued, reviewed or compacted turn), or a turn an earlier session ran
+            # and the served transcript replays. It is neither our boundary nor a
+            # failure, and its reply is content the agent has not read — so it goes to
+            # the sink the way any other inbound does (#5663).
+            # meiva:link base/lm/harness/docs/attribution.meiva.okf.md
+            self._unsolicited(UnsolicitedOutput(source="turn/completed", text=_turn_text(turn)))
             return
         fields = TurnFields.parse(turn)
         usage = self._turn_usage.pop(ticket.turn_id, Usage())
@@ -421,29 +481,8 @@ class CodexSession(BaseHarnessSession[CodexConfig]):
     def _on_transport_closed(self, reason: str) -> None:
         if self._closed:
             return
-        self._emit(SessionFaulted(turn_id=None, error=f"app-server: {reason}"))
+        self._emit(SessionFailed(error=f"app-server: {reason}"))
         self._fail_active(TransportClosedError(reason))
-
-    def _turn_id_for(self, params: JsonObject) -> str | None:
-        codex_turn_id = as_text(params.get("turnId"))
-        if codex_turn_id is None:
-            return None
-        known = self._turn_ids.get(codex_turn_id)
-        if known is not None:
-            return known
-        ticket = self._active
-        if ticket is None or ticket.turn_id in self._turn_ids.values():
-            return None
-        self._turn_ids[codex_turn_id] = ticket.turn_id
-        return ticket.turn_id
-
-    def _codex_turn_for(self, turn_id: str) -> str:
-        return next((k for k, v in self._turn_ids.items() if v == turn_id), "")
-
-    def _ticket_for(self, turn_id: str) -> TurnTicket | None:
-        return (
-            self._active if self._active is not None and self._active.turn_id == turn_id else None
-        )
 
 
 __all__ = [
