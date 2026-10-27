@@ -162,6 +162,9 @@ _PATH_IO_METHODS = frozenset(
         "is_dir",
         "stat",
         "lstat",
+        "open",
+        "glob",
+        "resolve",
         "iterdir",
         "rglob",
         "is_symlink",
@@ -174,7 +177,7 @@ _PATH_IO_METHODS = frozenset(
         "hardlink_to",
     }
 )
-_PATH_AMBIGUOUS_METHODS = frozenset({"replace", "open", "glob", "resolve"})
+_PATH_AMBIGUOUS_METHODS = frozenset({"replace"})
 _PATH_CLASSES = frozenset({"pathlib.Path", "pathlib.PosixPath", "pathlib.PurePath"})
 _PATH_METHODS = _PATH_IO_METHODS | _PATH_AMBIGUOUS_METHODS
 _PATH_DERIVED = frozenset(
@@ -280,8 +283,8 @@ class PurityState:
     # A name or attribute that denotes an impure call without calling it (`_is_file = Path.is_file`,
     # `map(Path.is_file, xs)`, `partial(os.stat, p)`, a default argument `read=os.stat`, `_open = open`,
     # `stat = root.stat`): the reference is the call under another name, and every use of it would
-    # otherwise be a call the scanner does not see. Recorded once, where it is named. Only the code's
-    # own list counts: a class the policy lists as a shell constructor is also an annotation.
+    # otherwise be a call the scanner does not see. Recorded once, where it is named, except in an
+    # annotation: a class the policy lists as a shell constructor (`GitRepo`) is also a type.
     def record_reference(
         self,
         node: ast.Name | ast.Attribute,
@@ -290,11 +293,9 @@ class PurityState:
         *,
         unshadowed_open: bool = False,
     ) -> None:
-        if id(node) in self.call_funcs:
+        if id(node) in self.call_funcs or id(node) in self.annotation_ids:
             return
-        what = _referenced_call(
-            node, resolved, dotted, self.path_vars, unshadowed_open=unshadowed_open
-        )
+        what = _referenced_call(node, resolved, dotted, self, unshadowed_open=unshadowed_open)
         if what is not None:
             self.items.append(
                 PurityItem(
@@ -531,7 +532,7 @@ def _referenced_call(
     node: ast.Name | ast.Attribute,
     resolved: str | None,
     dotted: _Dotted,
-    path_vars: set[str],
+    state: PurityState,
     *,
     unshadowed_open: bool,
 ) -> str | None:
@@ -539,14 +540,14 @@ def _referenced_call(
         return "open"
     if resolved is not None:
         norm = _CALL_ALIASES.get(resolved, resolved)
-        if norm in DEFAULT_IMPURE_CALLS and norm != _OS_ENVIRON:
+        if norm in state.impure_calls and norm != _OS_ENVIRON:
             return norm
         owner, _, attr = resolved.rpartition(".")
         return f"Path.{attr}" if owner in _PATH_CLASSES and attr in _PATH_METHODS else None
     if (
         isinstance(node, ast.Attribute)
         and node.attr in _PATH_METHODS
-        and _is_path_expr(node.value, dotted, path_vars)
+        and _is_path_expr(node.value, dotted, state.path_vars)
     ):
         return f"Path.{node.attr}"
     return None

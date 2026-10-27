@@ -135,6 +135,15 @@ def test_impure_edge_fails_in_strict_and_records_in_strict_to_be(
         ("import os\n\nread_info = os.stat\n", "a.py#os.stat"),
         ("import time\n\nnap = time.sleep\n", "a.py#time.sleep"),
         (
+            "def settle(future: object) -> object:\n    return future.resolve()\n",
+            "a.py#Path.resolve",
+        ),
+        (
+            "def hits(spec: object) -> object:\n    return spec.root().glob('*')\n",
+            "a.py#Path.glob",
+        ),
+        ("def look(handle: object) -> object:\n    return handle.open()\n", "a.py#Path.open"),
+        (
             "from pathlib import Path\n\ndef each(root: Path) -> None:\n"
             "    for entry in root.iterdir():\n        entry.resolve()\n",
             "a.py#Path.resolve",
@@ -566,7 +575,6 @@ def test_deep_attr_chain_flags_train_wrecks_and_ignores_module_or_method_chains(
 @pytest.mark.parametrize(
     "source",
     [
-        "def settle(future: object) -> object:\n    return future.resolve()\n",
         "def pick(pattern: object) -> object:\n    return pattern.glob\n",
         "from pathlib import Path\n\njoin = Path.joinpath\n",
         "import os\n\nsep = os.sep\n",
@@ -576,7 +584,6 @@ def test_deep_attr_chain_flags_train_wrecks_and_ignores_module_or_method_chains(
         "def first(match: object) -> object:\n    return match.group(1)\n",
         "from pathlib import Path\n\ndef f(p: Path) -> Path:\n    return p.joinpath('a')\n",
         "def f(box: object) -> object:\n    return box.stat\n",
-        "def f(xs: list[str]) -> list[str]:\n    return [x.resolve() for x in xs]\n",
     ],
 )
 def test_a_pure_look_alike_is_not_an_impure_call(make_repo: RepoFactory, source: str) -> None:
@@ -605,6 +612,34 @@ def test_a_shell_constructor_the_policy_lists_is_an_impure_call(make_repo: RepoF
     )
     keys = [d.debt.key for d in diagnostics(root, "impure-call") if d.debt is not None]
     assert keys == ["a.py#meizel.graph.universe.GitRepo"]
+
+
+@pytest.mark.parametrize(
+    "source",
+    [
+        "from meizel.graph.universe import GitRepo\n\nmake = GitRepo\n",
+        "from meizel.graph.universe import load_universe\n\nload = load_universe\n",
+        "from meizel.graph.universe import GitRepo\n\nR = GitRepo\n\ndef f(root: str) -> object:\n    return R(root)\n",
+        "from functools import partial\nfrom meizel.graph.universe import GitRepo\n\nmake = partial(GitRepo)\n",
+    ],
+)
+def test_a_policy_listed_constructor_named_without_a_call_is_an_impure_call(
+    make_repo: RepoFactory, source: str
+) -> None:
+    root = make_repo(
+        {
+            "meizel.policy.toml": render_policy({}, {})
+            + '\n[purity]\nimpure-calls = ["meizel.graph.universe.GitRepo", "meizel.graph.universe.load_universe"]\n',
+            "pkg/__init__.py": "",
+            "pkg/a.py": source,
+            "pkg/meizel.toml": 'purity = "strict-to-be"\n',
+        }
+    )
+    found = diagnostics(root, "impure-call")
+    assert found
+    assert all(
+        d.debt is not None and d.debt.key.startswith("a.py#meizel.graph.universe.") for d in found
+    )
 
 
 def test_a_shell_constructor_named_in_an_annotation_is_not_an_impure_call(

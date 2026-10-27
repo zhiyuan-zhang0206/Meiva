@@ -20,7 +20,7 @@ exports = ["branch_protection.py", "module_moves.py"]
 [debt.impure-call]
 "branch_protection.py#Path.resolve" = 1
 "branch_protection.py#import subprocess" = 1
-"impact_census.py#Path.resolve" = 1
+"impact_census.py#Path.resolve" = 2
 "module_moves.py#Path.is_symlink" = 1
 "module_moves.py#Path.readlink" = 1
 "module_moves.py#Path.resolve" = 3
