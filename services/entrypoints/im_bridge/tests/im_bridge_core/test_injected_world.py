@@ -12,6 +12,7 @@ from starlette.requests import Request
 from starlette.responses import JSONResponse
 from starlette.routing import Route
 
+from base.clock.ids import new_uuid
 from base.host.net.tests.local_http import serve_asgi
 from services.entrypoints.im_bridge import push_watchdog
 from services.entrypoints.im_bridge.adapters.feishu_poll_cursor import anchor, pending_after
@@ -23,7 +24,7 @@ from services.entrypoints.im_bridge.outbound.retry import retry_backoff_seconds
 from services.entrypoints.im_bridge.outbound.store import IMOutboxStore
 from services.entrypoints.im_bridge.tests.slices import im_bridge_config, seeded_rng
 from services.entrypoints.im_bridge.tests.test_timeline_outbox import candidate
-from services.entrypoints.im_bridge.types import InboundMessage, new_uuid
+from services.entrypoints.im_bridge.types import InboundMessage
 
 
 class _Item:

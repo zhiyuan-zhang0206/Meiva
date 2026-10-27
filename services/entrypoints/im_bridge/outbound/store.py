@@ -9,6 +9,7 @@ from uuid import UUID
 from psycopg import Connection
 from psycopg.types.json import Jsonb
 
+from base.clock.ids import new_uuid
 from base.db.transaction import ConnectionSource, write_transaction
 from base.telemetry.alerts.native import stamp_native_sent
 from services.entrypoints.im_bridge.cursor_store import (
@@ -32,7 +33,6 @@ from services.entrypoints.im_bridge.outbound.types import (
     TimelineAcceptance,
     TimelineCandidate,
 )
-from services.entrypoints.im_bridge.types import new_uuid
 
 
 # meiva:note

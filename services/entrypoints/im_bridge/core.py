@@ -13,6 +13,7 @@ from typing import Any, Literal
 from psycopg_pool import ConnectionPool
 
 from base.clock import Clock
+from base.clock.ids import new_uuid
 from services.entrypoints.im_bridge import copy, notice_bridge, push_watchdog
 from services.entrypoints.im_bridge.config import ImBridgeConfig
 from services.entrypoints.im_bridge.cursor_store import CursorStore, PushWatermark
@@ -45,7 +46,6 @@ from services.entrypoints.im_bridge.types import (
     InboundMessage,
     Reply,
     SendNotStartedError,
-    new_uuid,
     parse_command,
 )
 
