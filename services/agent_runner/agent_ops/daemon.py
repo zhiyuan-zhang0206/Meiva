@@ -469,9 +469,9 @@ async def ops_route(
 
 
 # meiva:note
-# What the upload receiver needs from its environment, read once at boot: this machine and home as
-# the unit identity, the OS user's home (where `Downloads/MeivaAgent-N` lives), the gateway access
-# and the per-agent quota.
+# What the upload receiver needs from its environment, read once by `main()`: this machine and home
+# as the unit identity, the OS user's home (where `Downloads/MeivaAgent-N` lives), the gateway
+# access and the per-agent quota.
 def _receiver_config(config: ConfigBoot, *, machine: str, home: Path) -> ReceiverConfig:
     return ReceiverConfig(
         unit=UnitIdentity(machine=machine, home=str(home.resolve())),
@@ -491,6 +491,7 @@ async def serve_ops_daemon(
     host: Host,
     rng: random.Random,
     home: Path,
+    receiver: ReceiverConfig,
 ) -> None:
     from base.deploy.schema.migrations import assert_schema_current
 
@@ -561,7 +562,7 @@ async def serve_ops_daemon(
                     host=host,
                     rng=rng,
                     home=home,
-                    receiver=_receiver_config(config, machine=our_machine, home=home),
+                    receiver=receiver,
                 ),
                 ("POST", "/to-user/resource"): functools.partial(
                     resource_route,
@@ -663,6 +664,7 @@ def main(*, argv: list[str] | None = None) -> None:
                     host=Host.system(),
                     rng=_new_rng(),
                     home=home,
+                    receiver=_receiver_config(config, machine=machine.name(), home=home),
                 )
             )
         except KeyboardInterrupt as interrupted:
