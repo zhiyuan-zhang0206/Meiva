@@ -42,16 +42,16 @@ def _panel(agent_id: int) -> Path:
 
 
 def test_only_the_panel_itself_matches(agent: int, unit_home: Path) -> None:
-    assert panel_path(_panel(agent), agent_id=agent) == _panel(agent).resolve()
-    assert panel_path(str(_panel(agent)), agent_id=agent) == _panel(agent).resolve()
-    assert panel_path(workspace_dir(agent) / "report.md", agent_id=agent) is None
-    assert panel_path(workspace_dir(agent) / "to_user.html", agent_id=agent) is None
-    assert panel_path(_panel(agent + 1), agent_id=agent) is None
-    assert panel_path(unit_home / DOCUMENT_FILENAME, agent_id=agent) is None
+    assert panel_path(_panel(agent), agent_id=agent, home=unit_home) == _panel(agent).resolve()
+    assert panel_path(str(_panel(agent)), agent_id=agent, home=unit_home) == _panel(agent).resolve()
+    assert panel_path(workspace_dir(agent) / "report.md", agent_id=agent, home=unit_home) is None
+    assert panel_path(workspace_dir(agent) / "to_user.html", agent_id=agent, home=unit_home) is None
+    assert panel_path(_panel(agent + 1), agent_id=agent, home=unit_home) is None
+    assert panel_path(unit_home / DOCUMENT_FILENAME, agent_id=agent, home=unit_home) is None
 
 
-def test_a_relative_panel_path_resolves_like_the_core(agent: int) -> None:
-    assert panel_path(DOCUMENT_FILENAME, agent_id=agent) == _panel(agent).resolve()
+def test_a_relative_panel_path_resolves_like_the_core(agent: int, unit_home: Path) -> None:
+    assert panel_path(DOCUMENT_FILENAME, agent_id=agent, home=unit_home) == _panel(agent).resolve()
 
 
 def test_a_matched_write_marks_the_bound_state(state: Any, agent: int) -> None:

@@ -17,11 +17,16 @@ elif fn == "machine_name":
     print(pool_ops.machine_name())
 elif fn == "follows_variable":
     import os
+    from pathlib import Path
 
+    from base.agents.context import MeivaContext
+    from meiva.sdk_surface import process_context
     from meiva_builtins.plugins.meiva_memory import sdk
 
     for home in sys.argv[2:]:
         os.environ["MEIVA_HOME"] = home
+        process_context.unbind_context()
+        process_context.bind_context(MeivaContext(meiva_home=Path(home)))
         print(pool_ops.pool_dir(), sdk.PATH)
 elif fn == "import_side_effects":
     # Nothing beyond pool_ops itself and its own (stdlib) imports should load as a side effect --

@@ -261,7 +261,7 @@ class _PassiveMemoryRecallHook(Hook):
                     injected_paths=injected,
                     agent=agent,
                     context=runtime.context,
-                    memory_root=memory_dir(),
+                    memory_root=memory_dir(home=runtime.context.require_meiva_home()),
                 ),
                 timeout=deadline,
             )
@@ -318,13 +318,14 @@ class _MemoryWriteCheckHook(Hook):
         if agent_id is None:
             return cleared
         deadline = agent.memory.memory_write_check_deadline_seconds
+        home = runtime.context.require_meiva_home()
         try:
             reports = await asyncio.wait_for(
                 check_written_notes(
                     recorded.shared_notes,
                     recorded.personal_notes,
-                    pool=memory_dir(),
-                    personal_root=workspace_dir(agent_id) / "memory",
+                    pool=memory_dir(home=home),
+                    personal_root=workspace_dir(agent_id, home=home) / "memory",
                     agent=agent,
                     context=runtime.context,
                 ),

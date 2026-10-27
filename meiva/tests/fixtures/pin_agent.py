@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import AsyncGenerator, Callable
+from pathlib import Path
 
 import pytest
 
@@ -80,6 +81,7 @@ def pin_agent(
                 else (None if bound is None else bound.clock_factory)
             ),
             bus=bus if bus is not None else (None if bound is None else bound.bus),
+            user_home=Path.home(),
         )
     )
 
@@ -105,4 +107,5 @@ def exec_context(
         hosted_resources=resources,
         clients=derived_clients(config, machine),
         clock_factory=lambda: Clock(clock_config_from_boot(config), timers=SYSTEM_TIMERS),
+        user_home=Path.home(),
     )

@@ -14,6 +14,7 @@ from base.host.env.agent_slices import AgentSlices
 from base.packages.plugin_providers import build_model_catalog
 from base.packages.plugins.extensions import ContextNote, ExtensionRegistry
 from base.paths import memory_dir, workspace_dir, workspace_dir_readonly
+from base.paths.home import resolve_meiva_home
 from meiva.tests.fixtures.pin_agent import pin_agent, pin_no_identity
 
 
@@ -34,6 +35,7 @@ def _context(machine: MachineIdentityReader, agent_id: int | None = 1, **pins: A
         machine=machine,
         agent=_slices(**pins),
         clock_factory=Clock.from_settings,
+        meiva_home=resolve_meiva_home(),
     )
 
 

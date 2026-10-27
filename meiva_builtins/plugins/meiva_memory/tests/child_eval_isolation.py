@@ -41,8 +41,10 @@ def isolated() -> None:
     _install()
     assert hasattr(meiva, "tasks")
 
+    process_context.bind_context(
+        MeivaContext(identity=AgentIdentity(417, True), meiva_home=resolve_meiva_home())
+    )
     original_path_doc = meiva.memory.PATH.__doc__
-    process_context.bind_context(MeivaContext(identity=AgentIdentity(417, True)))
     apply_per_agent_eval_isolation(
         agent_id=417,
         default_reader=defaults(agent__eval_isolation=True, agent__eval_network_allowlist=[]),
@@ -65,7 +67,9 @@ def isolated() -> None:
 
 def network_allowlist() -> None:
     _install()
-    process_context.bind_context(MeivaContext(identity=AgentIdentity(418, True)))
+    process_context.bind_context(
+        MeivaContext(identity=AgentIdentity(418, True), meiva_home=resolve_meiva_home())
+    )
     apply_per_agent_eval_isolation(
         agent_id=418,
         default_reader=defaults(agent__eval_isolation=True, agent__eval_network_allowlist=["web"]),
@@ -94,6 +98,7 @@ def missing_agent() -> None:
 
 def off() -> None:
     _install()
+    process_context.bind_context(MeivaContext(meiva_home=resolve_meiva_home()))
     original_path = meiva.memory.PATH
     apply_per_agent_eval_isolation(
         agent_id=None, default_reader=defaults(agent__eval_isolation=False)

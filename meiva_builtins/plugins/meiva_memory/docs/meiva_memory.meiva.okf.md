@@ -46,7 +46,7 @@ Skill nodes see [[meiva_builtins/plugins/meiva_memory/skills/docs/skills.meiva.o
 
 This plugin **owns** the `meiva.memory` namespace — `plugin.py` assembles it and declares it as `SdkNamespace("memory", ...)`. There is no core `meiva/memory.py`; disabling the plugin removes the surface entirely.
 
-- `meiva.memory.PATH` — memory pool root path (`$MEIVA_HOME/memory`, computed by `meiva_home()` each time it is read), shared by all agents
+- `meiva.memory.PATH` — memory pool root path (`$MEIVA_HOME/memory`, from the bound context's Meiva home each time it is read, so reading it outside a bound context raises), shared by all agents
 - `meiva.memory.search(query, k=5)` — semantic search, returns `list[MemoryMatch]` (`path`, `description`, `tags`, `score`, `chunk`), most relevant first
   (description empty string when absent; tags include the note's `type/<x>` tag so a caller can weigh a hit by its kind)
 - `meiva.memory.PERSONAL_PATH` — the agent's own memory folder (`<workspace>/memory`), resolved from the SDK identity when read

@@ -20,6 +20,7 @@ from base.host.env.agent_slices import AgentSlices
 from base.log.tests.log_records import LogRecords
 from base.packages.plugins.extensions import ExtensionRegistry
 from base.paths import workspace_dir
+from base.paths.home import resolve_meiva_home
 from meiva.tests.fixtures.pin_agent import pin_agent
 from meiva_builtins.plugins.meiva_to_user import agent_runtime
 from meiva_builtins.plugins.meiva_to_user._state import OVER_LIMIT
@@ -66,6 +67,7 @@ def _runtime(pins: dict[str, Any] | None = None) -> Runtime[MeivaContext]:
         identity=AgentIdentity(agent_id=_AGENT, owns_loop=True),
         agent=AgentSlices.resolve(pins=pins, default_reader=_default_reader),
         clock_factory=_clock,
+        meiva_home=resolve_meiva_home(),
     )
     return Runtime(context=context)
 

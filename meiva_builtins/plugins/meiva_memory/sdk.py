@@ -15,7 +15,7 @@ import base.paths
 import meiva as _meiva
 from base.agents.context.gateway_client import memory_search as _client
 from base.api_contracts.agent_contract import IndexerUnavailable as IndexerUnavailable
-from base.paths import meiva_home as _meiva_home
+from meiva.sdk_surface import process_context
 from meiva.sdk_surface.validation import coerce_str, coerce_typed
 
 __all_for_meiva__ = ["PATH", "PERSONAL_PATH", "MemoryMatch", "search"]
@@ -83,7 +83,7 @@ def __getattr__(name: str) -> Path:
     `agent/process_boot.py`) creates a real attribute that shadows this hook.
     """
     if name == "PATH":
-        return _documented_pool(_meiva_home())
+        return _documented_pool(process_context.current_context().require_meiva_home())
     if name == "PERSONAL_PATH":
         from meiva.sdk_surface.agent_identity import agent_id
 
@@ -92,7 +92,10 @@ def __getattr__(name: str) -> Path:
             # An AttributeError, as for any name the module does not have: `hasattr` and the help
             # renderer ask about it before an identity exists.
             raise AttributeError("meiva.memory.PERSONAL_PATH needs an established agent identity")
-        return _meiva.const(base.paths.workspace_dir(owner) / "memory", doc=_PERSONAL_PATH_DOC)
+        home = process_context.current_context().require_meiva_home()
+        return _meiva.const(
+            base.paths.workspace_dir(owner, home=home) / "memory", doc=_PERSONAL_PATH_DOC
+        )
     raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
 
 

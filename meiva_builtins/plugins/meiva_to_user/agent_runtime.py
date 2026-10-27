@@ -66,7 +66,9 @@ class _ToUserLimitHook(Hook):
         if agent_id is None:
             return cleared
         try:
-            document = await asyncio.to_thread(read_document, workspace_dir(agent_id))
+            document = await asyncio.to_thread(
+                read_document, workspace_dir(agent_id, home=runtime.context.require_meiva_home())
+            )
         except (OSError, ValueError):
             logger.opt(exception=True).warning(
                 "to_user soft limit: the panel could not be read; no reminder"

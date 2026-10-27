@@ -17,6 +17,7 @@ from base.config.tests.configuration import defaults
 from base.host.env.agent_slices import AgentSlices
 from base.packages.plugins.extensions import ExtensionRegistry
 from base.paths import meiva_home
+from base.paths.home import resolve_meiva_home
 from meiva.tests.fixtures.gateway_wire import GatewayStub, GatewayWire
 from meiva_builtins.plugins.meiva_memory import inherit
 from meiva_builtins.plugins.meiva_memory.inherited_blocks import (
@@ -48,6 +49,7 @@ def _context(
         clock_factory=Clock.from_settings,
         machine=machine_identity,
         clients=clients if clients is not None else ClientSet(),
+        meiva_home=resolve_meiva_home(),
     )
 
 
