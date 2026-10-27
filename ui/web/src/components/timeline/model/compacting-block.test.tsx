@@ -3,7 +3,8 @@
 // states: the running clock, the terminal labels, and the self-hide grace.
 
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { act, cleanup, render, screen } from "@testing-library/react";
+import { act, cleanup, screen } from "@testing-library/react";
+import { render } from "@/lib/transport/tests/wall-clock-render";
 import type { ReactElement } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 

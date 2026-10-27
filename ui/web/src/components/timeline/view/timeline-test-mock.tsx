@@ -11,6 +11,7 @@ import { USER_SETTING_DEFAULTS, type BackendTimelineItem } from "@/lib/contracts
 import { useContentToggleReset } from "@/lib/layout/content-toggle-store";
 import { SETTINGS_QUERY_KEY } from "@/lib/state/use-user-settings";
 import { api } from "@/lib/transport/api";
+import { WallClockProvider } from "@/lib/transport/transport-context";
 
 notifyManager.setScheduler((cb) => {
   cb();
@@ -29,8 +30,16 @@ export const timelineQueryClient = new QueryClient({
   },
 });
 
+function realWallNow(): number {
+  return Date.now();
+}
+
 function TimelineQueryWrapper({ children }: { children: ReactNode }) {
-  return <QueryClientProvider client={timelineQueryClient}>{children}</QueryClientProvider>;
+  return (
+    <WallClockProvider wallNow={realWallNow}>
+      <QueryClientProvider client={timelineQueryClient}>{children}</QueryClientProvider>
+    </WallClockProvider>
+  );
 }
 
 export function render(ui: ReactElement, options?: RenderOptions) {

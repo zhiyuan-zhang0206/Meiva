@@ -1,4 +1,5 @@
 import type * as ApiModule from "@/lib/transport/api";
+import { WallClockProvider } from "@/lib/transport/transport-context";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { act, fireEvent, render as rtlRender, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -21,12 +22,15 @@ import { clickAt, drawn, itemX, leave, look, mockCanvas, paintFrame, pointAt } f
 import RunTimelinePage from "./page";
 import Loading from "./loading";
 import { cbdFixture, lifetimeResponse, messagesResponse } from "./run-timeline-test-fixtures-mock";
+const wallNow = () => Date.now();
 function render({ contextSize = true }: { contextSize?: boolean } = {}) {
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   const view = rtlRender(
-    <QueryClientProvider client={queryClient}>
-      <RunTimelinePage params={Promise.resolve({ agents: "42" })} />
-    </QueryClientProvider>,
+    <WallClockProvider wallNow={wallNow}>
+      <QueryClientProvider client={queryClient}>
+        <RunTimelinePage params={Promise.resolve({ agents: "42" })} />
+      </QueryClientProvider>
+    </WallClockProvider>,
   );
   if (contextSize) fireEvent.click(screen.getByTestId("agent-view-context-size"));
   return view;
