@@ -59,7 +59,7 @@ home's `.env`; it fails when neither names the machine). Resolve it once, then
 use `$BRANCH` throughout:
 
 ```bash
-MACHINE="$(python -c 'from meiva_builtins.plugins.meiva_memory.pool_ops import machine_name; print(machine_name())')"
+MACHINE="$(python -c 'from base.paths.home import resolve_meiva_home; from meiva_builtins.plugins.meiva_memory.pool_ops import machine_name; print(machine_name(resolve_meiva_home()))')"
 BRANCH="machine-$MACHINE"
 ```
 

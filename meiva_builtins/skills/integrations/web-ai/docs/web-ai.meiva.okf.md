@@ -26,7 +26,7 @@ Each sub-skill is a self-contained CLI (agent runs via bash, prints JSON to stdo
 - `_pages.py` — what the chrome MCP's text means: the JSON block of an evaluated script, the `[selected]` tab of a page list, a clickable control in the accessibility tree, a sign-in wall, the inject and submit verdicts.
 - `_idle.py` — when a streamed answer is finished (`fold_poll`). `_pacing.py` — `Pacing`, the length of every wait, and `next_poll_delay`, when a wait is over; the shell passes a `Pacing` and sleeps.
 - `_rows.py` — `AskSpec`, the `AskRow`/`FailedRow` an ask reports, whether a tab stays open, and which tabs a panel still has to close.
-- `_landing.py` — the landing directory under `~/Downloads`, the run stamp format and which saved file is the finished download. `_utils.py` reads the home, the Downloads folder and the clock once (`system_places`); each child's entry script is the composition root that calls it.
+- `_landing.py` — the landing directory under `~/Downloads`, the run stamp format and which saved file is the finished download. `_utils.py` reads the Downloads folder and the clock once (`system_places(home)`, `now_stamp`); each child's entry script resolves the Meiva home and is the composition root that calls it.
 
 The shell tests run against a stand-in browser behind a real MCP daemon socket (`meiva_builtins/skills/tests/web_ai/chrome_stand_in.py`); the decisions are tested with plain values (`meiva_builtins/skills/tests/web_ai/test_web_ai_decisions.py`).
 

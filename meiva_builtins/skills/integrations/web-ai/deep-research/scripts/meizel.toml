@@ -1,2 +1,2 @@
 [roots]
-"research.py" = { kinds = ["clock"], why = "Web-AI deep-research driver polls browser progress against monotonic deadlines" }
+"research.py" = { kinds = ["clock", "home"], why = "Web-AI deep-research driver polls browser progress against monotonic deadlines and resolves the Meiva home once for its landing places" }

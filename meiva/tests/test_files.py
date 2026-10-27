@@ -18,6 +18,8 @@ from pathlib import Path
 import pytest
 
 import meiva
+from base.agents.context import MeivaContext
+from base.agents.context.identity import AgentIdentity
 from meiva.tests.fixtures.pin_agent import pin_agent, pin_no_identity
 from meiva.tests.fixtures.workspace import workspace as workspace
 
@@ -415,6 +417,18 @@ def test_the_workspace_base_follows_the_home_the_context_carries(
 # agent: the names `meiva.files` exports to the agent must never include it.
 def test_agent_workspace_is_not_exported_to_the_agent() -> None:
     assert "agent_workspace" not in meiva.files.__all_for_meiva__
+
+
+# meiva:note
+# The base for a context sits under the two homes that context carries, whatever the process
+# environment names: with an identity it is that agent's workspace, before one the user's home.
+def test_the_workspace_base_of_a_context_follows_the_homes_it_carries(tmp_path: Path) -> None:
+    meiva_home, user_home = tmp_path / "meiva", tmp_path / "user"
+    identity = AgentIdentity(agent_id=7, owns_loop=True)
+    agent = MeivaContext(identity=identity, meiva_home=meiva_home, user_home=user_home)
+    assert meiva.files.workspace_base_for(agent) == meiva_home / "workspaces" / "7"
+    bare = MeivaContext(meiva_home=meiva_home, user_home=user_home)
+    assert meiva.files.workspace_base_for(bare) == user_home
 
 
 def test_tilde_expanduser(default_home: Path) -> None:

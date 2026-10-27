@@ -194,3 +194,39 @@ def test_register_reads_the_process_and_records_into_the_turn(
         register(image, label="render result", base=tmp_path)
 
     assert exec_turn["attach"] == [{"path": str(image.resolve()), "label": "render result"}]
+
+
+# meiva:note
+# `meiva.self.attach` resolves a relative path under the workspace of the bound context's Meiva
+# home. The context here names a home that differs from the environment's, so a base read from
+# the environment would look for the file under `unit_home` and not find it.
+def test_attach_resolves_a_relative_path_under_the_workspace_of_the_contexts_home(
+    tmp_path: Path,
+    model_catalog: ModelCatalog,
+    exec_turn: dict[str, Any],
+    unit_home: Path,
+) -> None:
+    from meiva.self import attach
+    from meiva.tests.fixtures.pin_agent import pin_agent
+
+    owner = snapshot_process_config()
+    owner.set_field("llm_model", _MEDIA_MODEL)
+    authority = ConfigAuthority(owner.view, owner.view, unit_home / ".env")
+    context_home = tmp_path / "context-home"
+    image = context_home / "workspaces" / "7" / "result.png"
+    image.parent.mkdir(parents=True)
+    image.write_bytes(b"png")
+    pin_agent(7)
+    bound = process_context.current_context()
+    process_context.unbind_context()
+    process_context.bind_context(replace(bound, meiva_home=context_home))
+    assert context_home != unit_home
+
+    with held_installation(
+        Installation.bare(
+            catalog=model_catalog, authority=authority, sampling=fixed_sampling_owner()
+        )
+    ):
+        attach("result.png")
+
+    assert exec_turn["attach"] == [{"path": str(image.resolve()), "label": None}]

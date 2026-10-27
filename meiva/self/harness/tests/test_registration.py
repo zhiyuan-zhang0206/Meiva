@@ -13,7 +13,7 @@ from meiva.self.harness.registration import (
     decode_registration,
     handle_digest,
 )
-from meiva.self.harness.store import FileRegistrationStore, new_handle
+from meiva.self.harness.store import FileRegistrationStore, new_handle, registration_store
 
 
 def registration(handle: str) -> HarnessRegistration:
@@ -33,6 +33,19 @@ def test_store_round_trips_a_registration(tmp_path: Path) -> None:
     record = registration(new_handle())
     store.save(record)
     assert store.load(record.agent_id) == record
+
+
+# meiva:note
+# The store of a home keeps its rows under `<home>/harness/registrations`, wherever the process
+# environment points: a registration saved through one home is not visible through another.
+def test_the_registration_store_of_a_home_keeps_its_rows_under_that_home(tmp_path: Path) -> None:
+    first, second = tmp_path / "first", tmp_path / "second"
+    record = registration(new_handle())
+    registration_store(first).save(record)
+
+    assert any((first / "harness" / "registrations").glob("*.json"))
+    assert registration_store(first).load(record.agent_id) == record
+    assert registration_store(second).load(record.agent_id) is None
 
 
 def test_store_finds_a_registration_by_its_handle(tmp_path: Path) -> None:

@@ -1,2 +1,2 @@
 [roots]
-"generate.py" = { kinds = ["clock"], why = "Web-AI media generation driver polls browser progress against monotonic deadlines" }
+"generate.py" = { kinds = ["clock", "home"], why = "Web-AI media generation driver polls browser progress against monotonic deadlines and resolves the Meiva home once for its landing places" }

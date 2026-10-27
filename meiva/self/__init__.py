@@ -5,7 +5,7 @@ from typing import LiteralString, NamedTuple, NoReturn, Protocol
 
 from base.agents.lifecycle_signals import AgentRestart, AgentTermination, SystemHalt
 from meiva.boot import maybe_load_plugins_for_missing
-from meiva.files import workspace_base
+from meiva.files import workspace_base_for
 from meiva.sdk_surface import attachment_transport, process_context
 from meiva.sdk_surface import settings as _settings
 from meiva.sdk_surface.help import HARNESS_HIDDEN_SELF_MEMBERS as HARNESS_HIDDEN_SELF_MEMBERS
@@ -149,7 +149,9 @@ def attach(path: str | Path, *, label: str | None = None) -> None:
     turn, with a 20 MiB limit per file. Raises an error outside an agent turn.
     """
     _assert_native_self_action("attach")
-    attachment_transport.register(path, label=label, base=workspace_base())
+    attachment_transport.register(
+        path, label=label, base=workspace_base_for(process_context.current_context())
+    )
 
 
 def _publish_self_inbound_wake() -> None:

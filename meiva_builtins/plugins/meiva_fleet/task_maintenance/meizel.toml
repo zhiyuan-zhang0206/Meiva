@@ -9,8 +9,7 @@ exports = ["daemon.py", "routing.py", "tests"]
 "__init__.py" = "strict"
 
 [roots]
-"daemon.py" = { kinds = ["endpoints", "bus", "pid", "random", "settings"], why = "Service or operator process entry boots configuration and builds the random generator its event bus draws retry jitter from" }
+"daemon.py" = { kinds = ["endpoints", "bus", "home", "pid", "random", "settings"], why = "Service or operator process entry boots configuration, resolves the Meiva home once, and builds the random generator its event bus draws retry jitter from" }
 
 [debt.ambient-read]
-"daemon.py#home base.paths.meiva_home" = 1
 "routing.py#settings base.packages.plugins.flags.read_declared_flag" = 1

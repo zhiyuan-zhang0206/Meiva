@@ -32,7 +32,7 @@ Google's protected-resource metadata advertises `https://accounts.google.com` wh
 Token files are created 0600 from the start via `os.open` mode (umask can only remove bits — no write-then-chmod window): the file holds OAuth tokens, so its mode must never depend on the umask.
 
 ## Entry Points
-- `meiva/mcps/_oauth.py:oauth_http_client(url, server)` — build the authenticated httpx client; the caller owns its lifecycle
+- `meiva/mcps/_oauth.py:oauth_http_client(url, server, locks, home)` — build the authenticated httpx client; the caller owns its lifecycle; token files sit under `<home>/mcp_oauth/` for the daemon's `home`
 - `meiva/mcps/_daemon.py:connect_http(..., oauth=True, server=...)` — daemon connect path
 - `meiva/mcps/config.py:server_url` — config validation (`oauth` must be bool, exclusive with `headers`)
 
