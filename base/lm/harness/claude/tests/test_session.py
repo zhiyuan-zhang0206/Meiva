@@ -5,7 +5,9 @@ from pathlib import Path
 
 import pytest
 
+from base.clock.tests.fakes import system_clock
 from base.lm.harness import ClusterFact, EntryPoint, FileSessionRegistry, Handoff
+from base.lm.harness.base_session import SessionBinding
 from base.lm.harness.claude import (
     DEFAULT_MODEL,
     BridgeConfig,
@@ -245,7 +247,9 @@ def test_a_missing_extra_names_the_install_command(
     # meiva:link base/lm/harness/claude/docs/claude.meiva.okf.md
     monkeypatch.setitem(sys.modules, "claude_agent_sdk", None)
     with pytest.raises(MissingClaudeSdkError, match=r"pip install 'meiva\[harness-claude\]'"):
-        ClaudeSession(BridgeConfig(cwd=tmp_path), environ={})
+        ClaudeSession(
+            BridgeConfig(cwd=tmp_path), environ={}, binding=SessionBinding(), clock=system_clock()
+        )
 
 
 def test_the_shared_package_does_not_reach_into_an_adapter() -> None:

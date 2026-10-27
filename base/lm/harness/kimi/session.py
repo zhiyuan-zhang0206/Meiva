@@ -4,7 +4,6 @@ import asyncio
 import contextlib
 import os
 import signal
-import time
 from collections.abc import Callable, Mapping
 from pathlib import Path
 from typing import Any
@@ -22,8 +21,9 @@ from base.lm.harness.base_session import (
     EVENT_STREAM_END,
     BaseHarnessSession,
     InboundQueueFullError,
+    SessionBinding,
+    SessionClock,
     SessionClosedError,
-    SessionRegistry,
 )
 from base.lm.harness.events import (
     ReasoningDelta,
@@ -72,29 +72,25 @@ CANCEL_POLL_SECONDS = 0.05
 _EVENT_STREAM_END = EVENT_STREAM_END
 
 
-def _perf_counter() -> float:
-    return time.perf_counter()
-
-
 class KimiSession(BaseHarnessSession[KimiConfig]):
     def __init__(
         self,
         config: KimiConfig,
         *,
         environ: Mapping[str, str] | None = None,
-        agent_id: int | None = None,
-        registry: SessionRegistry | None = None,
+        binding: SessionBinding,
         probe: ChildProbe | None = None,
         connect: Callable[..., Any] | None = None,
         kill: Callable[[int, int], None] | None = None,
         prices: PriceBook | None = None,
+        clock: SessionClock,
     ) -> None:
         super().__init__(
             config,
-            agent_id=agent_id,
-            registry=registry,
+            binding=binding,
             probe=probe,
             totals=SessionTotals(),
+            clock=clock,
         )
         self._prices = prices
         self._kill = kill or os.kill
@@ -220,19 +216,20 @@ class KimiSession(BaseHarnessSession[KimiConfig]):
         spawned = {
             child: command for child, command in observed.items() if child not in self._baseline
         }
-        started = _perf_counter()
+        started = self._monotonic()
         if self._session_id is not None:
             await connection.notify("session/cancel", {"sessionId": self._session_id})
         settle_deadline = self._monotonic() + self.config.cancel_settle_seconds
         while ticket is not None and not ticket.settled and self._monotonic() < settle_deadline:
-            await asyncio.sleep(CANCEL_POLL_SECONDS)
-        cancel_ms = (_perf_counter() - started) * 1000.0
+            await self._clock.asleep(CANCEL_POLL_SECONDS)
+        cancel_ms = (self._monotonic() - started) * 1000.0
         reaped = await self._reap(spawned)
         gone, waited_ms = await wait_gone(
             self._probe,
             reaped,
             timeout_seconds=self.config.cancel_settle_seconds,
             poll_seconds=CANCEL_POLL_SECONDS,
+            clock=self._clock,
         )
         remaining = describe(observed, [child for child in reaped if self._probe.is_alive(child)])
         return CancelReport(
@@ -255,7 +252,7 @@ class KimiSession(BaseHarnessSession[KimiConfig]):
                 self._kill(child, signal.SIGTERM)
             reaped.append(child)
         if reaped:
-            await asyncio.sleep(CANCEL_POLL_SECONDS)
+            await self._clock.asleep(CANCEL_POLL_SECONDS)
         for child in reaped:
             if self._probe.is_alive(child):
                 with contextlib.suppress(ProcessLookupError, PermissionError):

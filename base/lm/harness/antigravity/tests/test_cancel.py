@@ -6,6 +6,7 @@ import signal
 from collections.abc import Iterable, Mapping
 from pathlib import Path
 
+from base.clock.tests.fakes import system_clock
 from base.lm.harness.antigravity.tests.support import config, start
 from base.lm.harness.antigravity.transport import AgyTransport
 from base.lm.harness.events import TurnCompleted
@@ -83,7 +84,7 @@ async def test_interrupt_without_an_active_turn_keeps_the_process(tmp_path: Path
 
 
 async def test_a_transport_that_never_started_cannot_pass(tmp_path: Path) -> None:
-    transport = AgyTransport(config(tmp_path))
+    transport = AgyTransport(config(tmp_path), clock=system_clock())
     report = await transport.interrupt(turn_id="turn-x")
     assert report.settled is None
     assert report.cli_pid is None

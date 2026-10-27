@@ -21,6 +21,7 @@ from base.config.tests.configuration import defaults
 from base.db import Database
 from base.host.env.agent_slices import AgentSlices
 from base.lm.harness import FileSessionRegistry, HarnessTurn
+from base.lm.harness.tests.roots import bridge_root_values
 from base.native_process.runtime_incarnation import RuntimeIncarnation
 from base.paths import meiva_home
 from services.agent_runner.agent_host.host import AgentHost
@@ -166,6 +167,7 @@ def test_the_built_in_loop_builds_no_bridge() -> None:
             registration_ttl_seconds=3600.0,
             machine="macmini",
             environ={},
+            root=bridge_root_values(),
         )
         is None
     )
@@ -181,6 +183,7 @@ def test_an_external_runtime_without_a_registry_is_refused() -> None:
             registration_ttl_seconds=3600.0,
             machine="macmini",
             environ={},
+            root=bridge_root_values(),
         )
     except ValueError as exc:
         assert "session registry" in str(exc)
@@ -197,6 +200,7 @@ def test_an_external_runtime_carries_a_scoped_bridge() -> None:
         registration_ttl_seconds=3600.0,
         machine="macmini",
         environ={},
+        root=bridge_root_values(),
     )
     assert bridge is not None
     assert bridge.harness is Harness.CODEX

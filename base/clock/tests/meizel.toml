@@ -1,6 +1,7 @@
 exports = ["fakes.py", "manual_timers.py", "seeded_rng.py"]
 
 [uses]
+"fakes.py" = ["manual_timers.py"]
 "test_cold_import.py" = ["child_cold_import.py"]
 "test_ids.py" = ["seeded_rng.py"]
 "test_timers.py" = ["manual_timers.py"]

@@ -1,3 +1,7 @@
+exports = ["roots.py"]
+
 [uses]
+"test_bridge.py" = ["roots.py"]
+"test_codex_environment.py" = ["roots.py"]
 "test_handoff.py" = []
 "test_registry.py" = []

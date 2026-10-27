@@ -5,7 +5,9 @@ from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
+from base.clock.tests.fakes import system_clock
 from base.lm.harness import Handoff
+from base.lm.harness.base_session import SessionBinding
 from base.lm.harness.deepseek import BridgeConfig, DeepSeekSession
 from base.lm.harness.deepseek.tests.fake_acp import FakeConnection, ScriptedProbe
 from base.lm.harness.registry import FileSessionRegistry
@@ -91,10 +93,10 @@ async def start(
     session = DeepSeekSession(
         config(tmp_path, prices=prices, **config_overrides),
         environ={},
-        agent_id=agent_id,
-        registry=registry,
+        binding=SessionBinding(agent_id, registry),
         probe=scripted_probe,
         connect=lambda: connection,
+        clock=system_clock(),
     )
     await session.start(resume=resume, handoff=handoff)
     return Harness(session, connection, scripted_probe)

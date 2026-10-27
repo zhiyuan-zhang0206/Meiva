@@ -10,7 +10,9 @@ import time
 from pathlib import Path
 from typing import Any
 
+from base.clock import SYSTEM_TIMERS, Clock, ClockConfig
 from base.lm.harness import ClusterFact, EntryPoint, FileSessionRegistry, Handoff
+from base.lm.harness.base_session import SessionBinding
 from base.lm.harness.claude import (
     BridgeConfig,
     ClaudeSession,
@@ -123,6 +125,10 @@ def summarise(label: str, totals: SessionTotals) -> None:
     )
 
 
+def demo_clock() -> Clock:
+    return Clock(ClockConfig("UTC", "UTC", message_timestamp_weekday=False), timers=SYSTEM_TIMERS)
+
+
 async def main() -> int:
     workspace = make_workspace()
     registry = FileSessionRegistry(workspace / "sessions")
@@ -134,7 +140,10 @@ async def main() -> int:
 
     started = time.perf_counter()
     session = ClaudeSession(
-        BridgeConfig(cwd=workspace), environ=os.environ, agent_id=DEMO_AGENT_ID, registry=registry
+        BridgeConfig(cwd=workspace),
+        environ=os.environ,
+        binding=SessionBinding(DEMO_AGENT_ID, registry),
+        clock=demo_clock(),
     )
     await session.start(handoff=handoff)
     pump = asyncio.create_task(drain(session))
@@ -169,7 +178,10 @@ async def main() -> int:
     print(f"[close] cli pid {cli_pid} reaped: {cli_reaped}")
 
     resumed = ClaudeSession(
-        BridgeConfig(cwd=workspace), environ=os.environ, agent_id=DEMO_AGENT_ID, registry=registry
+        BridgeConfig(cwd=workspace),
+        environ=os.environ,
+        binding=SessionBinding(DEMO_AGENT_ID, registry),
+        clock=demo_clock(),
     )
     await resumed.start(handoff=handoff)
     pump = asyncio.create_task(drain(resumed))

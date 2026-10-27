@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import asyncio
-import time
 from collections import OrderedDict, deque
 from collections.abc import AsyncIterator, Coroutine
 from dataclasses import dataclass, replace
@@ -21,7 +20,6 @@ from base.lm.harness.events import (
 )
 from base.lm.harness.handoff import Handoff
 from base.lm.harness.process import ChildProbe, ExitStatus, PsutilChildProbe
-from base.lm.harness.registration import current_utc
 from base.lm.harness.registry import SessionRecord, SessionRegistry
 
 # meiva:note
@@ -46,7 +44,7 @@ class SessionClock(Protocol):
 
     def monotonic(self) -> float: ...
 
-    async def asleep(self, seconds: float) -> None: ...
+    def asleep(self, seconds: float) -> Coroutine[object, object, None]: ...
 
 
 class SessionConfig(Protocol):
@@ -140,13 +138,13 @@ class TurnTicket:
         key: str | None,
         future: asyncio.Future[TurnOutcome],
         deduplicated: bool = False,
-        submitted_at: float | None = None,
+        submitted_at: float,
     ) -> None:
         self.turn_id = turn_id
         self.text = text
         self.key = key
         self.deduplicated = deduplicated
-        self.submitted_at = submitted_at if submitted_at is not None else time.monotonic()
+        self.submitted_at = submitted_at
         self.started_at: float | None = None
         self.interrupt_requested = False
         self.parts: list[str] = []
@@ -178,22 +176,30 @@ class TurnTicket:
         self.fail(exc)
 
 
+# meiva:note
+# Where a harness session is recorded: the agent it serves and the registry that maps that agent
+# to its external session id. Both are absent for a session no agent owns (a demo, a unit test).
+@dataclass(frozen=True)
+class SessionBinding:
+    agent_id: int | None = None
+    registry: SessionRegistry | None = None
+
+
 class BaseHarnessSession[ConfigT: SessionConfig](ExitStatus):
     def __init__(
         self,
         config: ConfigT,
         *,
-        agent_id: int | None = None,
-        registry: SessionRegistry | None = None,
+        binding: SessionBinding,
         probe: ChildProbe | None = None,
         totals: SessionTotals | None = None,
-        clock: SessionClock | None = None,
+        clock: SessionClock,
     ) -> None:
         self.config: ConfigT = config
-        self.agent_id: int | None = agent_id
+        self.agent_id: int | None = binding.agent_id
         self._probe: ChildProbe = probe or PsutilChildProbe()
-        self._registry: SessionRegistry | None = registry
-        self._clock: SessionClock | None = clock
+        self._registry: SessionRegistry | None = binding.registry
+        self._clock: SessionClock = clock
         self._events: asyncio.Queue[BridgeEvent | object] = asyncio.Queue()
         self._pending: deque[TurnTicket] = deque()
         self._completed: OrderedDict[str, TurnOutcome] = OrderedDict()
@@ -313,11 +319,11 @@ class BaseHarnessSession[ConfigT: SessionConfig](ExitStatus):
             yield event
 
     def _now_iso(self) -> str:
-        now = self._clock.now() if self._clock is not None else current_utc()
+        now = self._clock.now()
         return now.isoformat(timespec="seconds")
 
     def _monotonic(self) -> float:
-        return self._clock.monotonic() if self._clock is not None else time.monotonic()
+        return self._clock.monotonic()
 
     def _resolve_resume(self, resume: str | None) -> str | None:
         resolved = resume or self._resume_from_registry()
@@ -379,10 +385,7 @@ class BaseHarnessSession[ConfigT: SessionConfig](ExitStatus):
 
     def _start_deadline(self, ticket: TurnTicket) -> None:
         async def expire() -> None:
-            if self._clock is not None:
-                await self._clock.asleep(self.config.turn_timeout_seconds)
-            else:
-                await asyncio.sleep(self.config.turn_timeout_seconds)
+            await self._clock.asleep(self.config.turn_timeout_seconds)
             if self._active is not ticket:
                 return
             self._emit(
