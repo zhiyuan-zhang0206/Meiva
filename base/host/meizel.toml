@@ -22,7 +22,6 @@ exports = ["atomic_io.py", "brew_pin.py", "config_validators.py", "converge", "d
 "private_storage.py#pid base.paths.private_dir.is_foreign_owned" = 5
 "proc.py#clock time.monotonic" = 1
 "resource_sample.py#clock time.time" = 1
-"runtime_interpreter.py#home base.paths.plugins_dir" = 1
 
 [debt.impure-call]
 "resource_sample.py#import subprocess" = 1

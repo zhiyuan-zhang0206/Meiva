@@ -141,7 +141,6 @@ def test_a_fresh_interpreter_with_no_variable_resolves_to_dot_meiva(tmp_path: Pa
 # test in their own package's tests.
 _CONSUMERS: list[tuple[str, Callable[[], Path], str]] = [
     ("paths.meiva_home", paths.meiva_home, ""),
-    ("paths.logs_dir", paths.logs_dir, "logs"),
     ("config path-field default", unit_home, ""),
 ]
 

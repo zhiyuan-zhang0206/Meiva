@@ -8,6 +8,3 @@ exports = ["compact.py", "framework.py", "node.py", "tests"]
 
 [purity]
 "__init__.py" = "strict"
-
-[debt.ambient-read]
-"compact.py#home base.paths.workspace_dir" = 1

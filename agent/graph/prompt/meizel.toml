@@ -16,6 +16,3 @@ exports = ["capabilities.py", "compaction.py", "context_notes.py", "conversation
 "note_text.py" = "strict"
 "sdk_scope.py" = "strict"
 "skill_selection.py" = "strict"
-
-[roots]
-"context_notes.py" = { kinds = ["home"], why = "agent_id_note creates the agent workspace through base.paths.workspace_dir, whose home argument still defaults to the ambient Meiva home until the base lane makes it required" }

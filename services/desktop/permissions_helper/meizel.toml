@@ -15,8 +15,6 @@ exports = ["launchd_job.py", "lifecycle.py", "onboarding.py", "signing_identity.
 "signing_identity.py" = { kinds = ["random"], why = "names the operating system's generator as the type of the keychain password's source (SigningRandom); the entry that provisions the identity builds the generator and hands it down" }
 
 [debt.ambient-read]
-"lifecycle.py#home base.paths.logs_dir" = 1
-"lifecycle.py#home base.paths.permissions_helper_app_dir" = 1
 "onboarding.py#environ base.host.env.registry.process_environment" = 1
 
 [debt.fake-entropy]

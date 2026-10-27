@@ -24,6 +24,4 @@ exports = ["external_skills.py", "materialize.py", "memory.py", "parsers", "plug
 [debt.ambient-read]
 "_pkg_source.py#home pathlib.Path.expanduser" = 1
 "mcp.py#home pathlib.Path.expanduser" = 1
-"plugins.py#home base.paths.plugins_dir" = 3
 "skill.py#home pathlib.Path.expanduser" = 1
-"skills_sync.py#home base.paths.plugins_dir" = 2

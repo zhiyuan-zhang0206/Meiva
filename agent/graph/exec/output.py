@@ -32,7 +32,7 @@ from langchain_core.messages import BaseMessage
 
 from base.agents.messages.inbound import InterruptReason
 from base.log import logger
-from base.paths import workspace_dir_readonly
+from base.paths import workspace_path
 
 from ._crop import CropLimits, crop_output
 from ._result import StreamCap
@@ -53,7 +53,7 @@ OVERFLOW_KEEP = 20
 
 
 def overflow_dir(agent_id: int, *, home: Path) -> Path:
-    return workspace_dir_readonly(agent_id, home=home) / _OVERFLOW_DIRNAME
+    return workspace_path(home, agent_id) / _OVERFLOW_DIRNAME
 
 
 # meiva:note
