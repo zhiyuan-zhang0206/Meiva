@@ -246,6 +246,7 @@ async def test_a_lost_wake_is_not_repeated(
         machine=machine_identity,
         home=client.app.state.gateway_config.upload_home,
         claim_seconds=CLAIM_SECONDS,
+        rpc=client.app.state.rpc,
     )
     healthy = recovery_for(client, machine_identity)
     with _inbound_wakes(client.app.state.bus, agent) as received:

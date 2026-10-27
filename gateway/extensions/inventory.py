@@ -38,7 +38,7 @@ from gateway.extensions.schemas import (
     InventoryMachineView,
     InventoryWriteResult,
 )
-from gateway.http.config import gateway_clock
+from gateway.http.config import gateway_clock, gateway_rpc
 from ops.cluster import rpc as cluster_rpc
 from ops.rpc_schemas import InventoryReadResult, InventoryWriteOpResult
 
@@ -62,7 +62,12 @@ def _assert_inventory_target(pool: ConnectionPool, target: str) -> None:
 
 
 async def _dispatch_inventory_read(
-    db: Database, target: str, *, timeout_s: float | None = None, retries: int | None = None
+    db: Database,
+    target: str,
+    *,
+    rpc: cluster_rpc.RpcClient,
+    timeout_s: float | None = None,
+    retries: int | None = None,
 ) -> InventoryReadResult:
     """Run inventory_read on agent-runner `target` by POSTing to its ops server.
 
@@ -79,7 +84,7 @@ async def _dispatch_inventory_read(
     view leaves the cluster default.
     """
     return InventoryReadResult.model_validate(
-        await cluster_rpc.dispatch_to_machine(
+        await rpc.dispatch_to_machine(
             db,
             target_machine=target,
             kind="inventory_read",
@@ -91,13 +96,18 @@ async def _dispatch_inventory_read(
 
 
 async def _dispatch_inventory_write(
-    db: Database, target: str, plugins: dict[str, bool], mcp_servers: dict[str, bool]
+    db: Database,
+    target: str,
+    plugins: dict[str, bool],
+    mcp_servers: dict[str, bool],
+    *,
+    rpc: cluster_rpc.RpcClient,
 ) -> InventoryWriteOpResult:
     """Run inventory_write on agent-runner `target` by POSTing to its ops server.
 
     Caller has already verified the target is a registered agent-runner."""
     try:
-        wire = await cluster_rpc.dispatch_to_machine(
+        wire = await rpc.dispatch_to_machine(
             db,
             target_machine=target,
             kind="inventory_write",
@@ -139,11 +149,13 @@ def _agent_runner_rows(pool: ConnectionPool) -> list[tuple[str, bool]]:
 # seconds (task #4127). A host that already carries reachability failures gets the roster's
 # fast-fail budget instead of the default deadline.
 async def _dial_inventory_read(
-    db: Database, target: str, *, budget_s: float
+    db: Database, target: str, *, rpc: cluster_rpc.RpcClient, budget_s: float
 ) -> InventoryReadResult:
     try:
         async with asyncio.timeout(budget_s):
-            return await _dispatch_inventory_read(db, target, timeout_s=budget_s, retries=1)
+            return await _dispatch_inventory_read(
+                db, target, rpc=rpc, timeout_s=budget_s, retries=1
+            )
     except TimeoutError as exc:
         raise cluster_rpc.ClusterOpUnreachable(
             f"inventory_read for machine={target!r} exceeded its {budget_s:.1f}s total budget"
@@ -157,7 +169,12 @@ async def _dial_inventory_read(
 # `plan_dials` decides which hosts are dialed; the rest report `unreachable` directly.
 # Dialed hosts run under a bounded transport policy.
 async def _aggregate(
-    db: Database, pool: ConnectionPool, *, budget_s: float, now: datetime
+    db: Database,
+    pool: ConnectionPool,
+    *,
+    rpc: cluster_rpc.RpcClient,
+    budget_s: float,
+    now: datetime,
 ) -> InventoryAggregate:
     rows = _agent_runner_rows(pool)
     machines = [name for name, _stopped in rows]
@@ -166,7 +183,7 @@ async def _aggregate(
         _log.debug("inventory aggregate: not dialing known-down host(s) %s", sorted(plan.skipped))
 
     results = await asyncio.gather(
-        *(_dial_inventory_read(db, m, budget_s=budget_s) for m in plan.to_dial),
+        *(_dial_inventory_read(db, m, rpc=rpc, budget_s=budget_s) for m in plan.to_dial),
         return_exceptions=True,
     )
     reads: dict[str, InventoryReadResult] = {}
@@ -201,13 +218,16 @@ async def get_inventory(
         return await _aggregate(
             request.app.state.db,
             request.app.state.db_pool,
+            rpc=gateway_rpc(request),
             budget_s=request.app.state.gateway_config.inventory_host_wait_seconds,
             now=gateway_clock(request).now(),
         )
 
     await asyncio.to_thread(_assert_inventory_target, request.app.state.db_pool, machine)
     try:
-        read = await _dispatch_inventory_read(request.app.state.db, machine)
+        read = await _dispatch_inventory_read(
+            request.app.state.db, machine, rpc=gateway_rpc(request)
+        )
     except (cluster_rpc.ClusterOpUnreachable, cluster_rpc.ClusterOpFailed) as exc:
         raise HTTPException(
             status_code=503,
@@ -269,7 +289,7 @@ async def put_inventory(
     await asyncio.to_thread(_assert_inventory_target, request.app.state.db_pool, machine)
 
     result = await _dispatch_inventory_write(
-        request.app.state.db, machine, body.plugins, body.mcp_servers
+        request.app.state.db, machine, body.plugins, body.mcp_servers, rpc=gateway_rpc(request)
     )
     return InventoryWriteResult(
         applied=result.applied,

@@ -15,7 +15,7 @@ from psycopg_pool import ConnectionPool
 
 from base.db import Database, create_agent
 from gateway.agents import lifecycle
-from gateway.tests.auth.gateway_config import gateway_test_config
+from gateway.tests.auth.gateway_config import gateway_test_config, gateway_test_rpc
 from gateway.tests.support.db_faults.missing_table import missing_table
 from gateway.tests.support.runner_ops.ops_stub import (
     OpsCall,
@@ -64,7 +64,12 @@ async def test_a_missing_task_table_never_changes_an_accepted_termination(
         missing_table(db_conn, "agent_tasks"),
     ):
         response = await lifecycle.terminate_agent_with_open_tasks(
-            agent_id, TerminateAgentRequest(), pool, db=database, config=gateway_test_config()
+            agent_id,
+            TerminateAgentRequest(),
+            pool,
+            db=database,
+            config=gateway_test_config(),
+            rpc=gateway_test_rpc(),
         )
     assert response.model_dump() == _ACCEPTED
 
@@ -83,7 +88,12 @@ async def test_a_pool_with_no_connection_left_never_changes_an_accepted_terminat
 
         with runner_ops(db_conn, "hint-runner", {"lifecycle": accept_and_keep_the_connection}):
             response = await lifecycle.terminate_agent_with_open_tasks(
-                agent_id, TerminateAgentRequest(), pool, db=database, config=gateway_test_config()
+                agent_id,
+                TerminateAgentRequest(),
+                pool,
+                db=database,
+                config=gateway_test_config(),
+                rpc=gateway_test_rpc(),
             )
         for conn in held:
             pool.putconn(conn)

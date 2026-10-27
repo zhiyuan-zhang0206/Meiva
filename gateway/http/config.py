@@ -21,6 +21,7 @@ from base.cluster.machine.configured import ConfiguredMachineIdentity
 from base.config import ConfigBoot
 from base.host.env.health_ports import health_port
 from gateway.http.middleware.cors import cors_allowed_origins, trusted_request_hosts
+from ops.cluster.rpc import RpcClient
 
 
 # meiva:note
@@ -439,3 +440,12 @@ def gateway_config(request: Request) -> GatewayConfig:
 # app root builds it once beside the config, so a handler asks for time instead of creating a clock.
 def gateway_clock(request: Request) -> Clock:
     return request.app.state.clock
+
+
+# meiva:note
+# The cluster RPC client the gateway app serves with: its dispatch budget and gateway access come
+# from the booted process configuration, over the system timers. The app's lifespan builds it once
+# after the configuration is booted (a cold app, as the schema document builds, has none), so a
+# handler asks for the client instead of creating one from process settings.
+def gateway_rpc(request: Request) -> RpcClient:
+    return request.app.state.rpc

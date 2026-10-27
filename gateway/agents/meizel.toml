@@ -14,6 +14,3 @@ exports = ["creation.py", "eval_guard.py", "history", "inbound_provenance.py", "
 
 [purity]
 "__init__.py" = "strict"
-
-[debt.ambient-read]
-"launch_retry.py#settings ops.cluster.rpc.dispatch_to_machine" = 1

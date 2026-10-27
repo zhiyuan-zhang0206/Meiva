@@ -16,7 +16,7 @@ from typing import Annotated
 from fastapi import APIRouter, HTTPException, Query, Request
 from psycopg_pool import ConnectionPool
 
-from gateway.http.config import gateway_config
+from gateway.http.config import gateway_config, gateway_rpc
 from gateway.schemas import ShellCaptureResponse
 from ops.cluster import rpc as cluster_rpc
 
@@ -68,7 +68,7 @@ async def get_agent_shell(
     machine = await asyncio.to_thread(_agent_machine_blocking, request.app.state.db_pool, agent_id)
 
     try:
-        result = await cluster_rpc.dispatch_to_machine(
+        result = await gateway_rpc(request).dispatch_to_machine(
             request.app.state.db,
             machine,
             "shell_capture",

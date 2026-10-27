@@ -131,6 +131,7 @@ from gateway.routers.upload import router as uploads_router
 from gateway.schedules import router as schedules_router
 from gateway.upload_delivery import router as upload_delivery_router
 from gateway.upload_delivery.worker import UploadRecovery
+from ops.cluster.rpc import RpcClient
 
 _log = logging.getLogger(__name__)
 
@@ -224,6 +225,7 @@ async def lifespan(
                 env_path=process.home / ".env",
             )
 
+            app.state.rpc = RpcClient.from_boot(config, timers=SYSTEM_TIMERS)
             app.state.started_at = time.time()
             if app.state.gateway_config.human_auth == "trusted_network":
                 _log.warning(
@@ -284,6 +286,7 @@ async def lifespan(
                 machine=process.machine,
                 home=app.state.gateway_config.upload_home,
                 claim_seconds=config.view.gateway.upload_recovery_claim_seconds,
+                rpc=app.state.rpc,
             )
             app.state.upload_recovery = upload_recovery
 

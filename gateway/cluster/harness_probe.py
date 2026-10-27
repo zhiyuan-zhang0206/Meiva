@@ -11,6 +11,7 @@ from base.cluster.machine import MachineIdentityReader
 from base.db import Database
 from gateway.cluster.ops_dispatch import dispatch_op
 from gateway.cluster.schemas import HarnessAvailability
+from ops.cluster.rpc import RpcClient
 from ops.rpc_schemas import HarnessProbeResult
 
 _HARNESS_CACHE_TTL_S = 30.0
@@ -50,7 +51,7 @@ class HarnessProbeCache:
 # `unknown` rather than a `launchable` option that leads nowhere.
 # meiva:link base/agents/docs/harness/harness.meiva.okf.md
 async def probe_harnesses(
-    target: str, *, db: Database, local_machine: MachineIdentityReader
+    target: str, *, db: Database, local_machine: MachineIdentityReader, rpc: RpcClient
 ) -> HarnessProbeResult:
     if target == local_machine.name():
         role = local_machine.role()
@@ -67,4 +68,6 @@ async def probe_harnesses(
                 "it cannot run an agent, so it cannot report which harnesses it can run"
             ),
         )
-    return HarnessProbeResult.model_validate(await dispatch_op(db, target, "harness_probe", {}))
+    return HarnessProbeResult.model_validate(
+        await dispatch_op(db, target, "harness_probe", {}, rpc=rpc)
+    )

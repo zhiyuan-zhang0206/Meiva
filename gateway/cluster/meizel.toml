@@ -22,5 +22,4 @@ exports = ["bootstrap.py", "harness_probe.py", "harness_rows.py", "machine_pause
 "server.py" = { kinds = ["pid", "platform"], why = "gateway process root writes its own OS PID to the gateway pidfile for supervisor healthchecks; builds the host of this process with Host.system()" }
 
 [debt.ambient-read]
-"ops_dispatch.py#settings ops.cluster.rpc.dispatch_to_machine" = 1
 "status.py#environ base.host.env.registry.process_environment" = 1

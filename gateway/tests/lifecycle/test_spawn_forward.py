@@ -30,7 +30,7 @@ from base.packages.plugin_providers import build_model_catalog
 from gateway.agents import creation
 from gateway.agents.launch import forward
 from gateway.agents.launch.launch_plan import LaunchForwardError
-from gateway.tests.auth.gateway_config import gateway_test_client, spawn_via_http
+from gateway.tests.auth.gateway_config import gateway_test_client, gateway_test_rpc, spawn_via_http
 from gateway.tests.support.runner_ops.ops_stub import (
     completed,
     failed,
@@ -211,6 +211,7 @@ async def test_spawn_forward_sends_the_launch_kind_and_classifies_an_unreachable
             Database.from_settings(gate=database_gate),
             "runner",
             LaunchAgentRequest(agent_id=4, launch_attempt_id=attempt_id),
+            rpc=gateway_test_rpc(),
         )
     assert [(call.kind, call.payload) for call in runner.calls] == [
         ("spawn-launch", {"agent_id": 4, "launch_attempt_id": str(attempt_id)})
@@ -237,6 +238,7 @@ async def test_spawn_forward_preserves_runner_rejection_detail(
             Database.from_settings(gate=database_gate),
             "runner",
             LaunchAgentRequest(agent_id=4, launch_attempt_id=uuid4()),
+            rpc=gateway_test_rpc(),
         )
     assert raised.value.reason == AvailabilityReason.LAUNCH_REJECTED
     assert "invalid_model_config: key missing" in str(raised.value)

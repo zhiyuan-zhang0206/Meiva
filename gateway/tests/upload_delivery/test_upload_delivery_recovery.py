@@ -103,6 +103,7 @@ def recovery_for(client: GatewayTestClient, machine: MachineIdentityReader) -> U
         machine=machine,
         home=client.app.state.gateway_config.upload_home,
         claim_seconds=CLAIM_SECONDS,
+        rpc=client.app.state.rpc,
     )
 
 

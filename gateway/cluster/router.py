@@ -33,7 +33,7 @@ from gateway.cluster.schemas import AgentMachineRow, HarnessAvailability, Machin
 from gateway.cluster.status import RosterEnv, gather_cluster_status, read_local_facts, roster_env
 from gateway.events import telemetry_rows
 from gateway.events.schemas import AgentEventRow, AgentEventsResponse
-from gateway.http.config import gateway_clock, gateway_config
+from gateway.http.config import gateway_clock, gateway_config, gateway_rpc
 from ops.cluster import operations as _ops
 from ops.cluster_status import ClusterStatus
 
@@ -124,7 +124,7 @@ async def get_cluster_status(request: Request) -> ClusterStatus:
 
 async def cluster_status_snapshot(env: RosterEnv) -> ClusterStatus:
     if "agent-runner" in env.machine.role():
-        result = await dispatch_op(env.db, env.machine.name(), "status_probe", {})
+        result = await dispatch_op(env.db, env.machine.name(), "status_probe", {}, rpc=env.rpc)
         return ClusterStatus.model_validate(result)
     return await asyncio.to_thread(_local_snapshot_blocking, env)
 
@@ -294,7 +294,10 @@ async def get_machine_harnesses(name: str, request: Request) -> list[HarnessAvai
     if cached is not None:
         return cached
     probed = await probe_harnesses(
-        name, db=request.app.state.db, local_machine=request.app.state.machine
+        name,
+        db=request.app.state.db,
+        local_machine=request.app.state.machine,
+        rpc=gateway_rpc(request),
     )
     rows = availability_rows(probed, LAUNCHABLE_HARNESSES)
     cache.store(name, rows)

@@ -18,7 +18,7 @@ from gateway.http.auth.request_principal import (
     PrincipalScopeError,
     request_key,
 )
-from gateway.http.config import gateway_config
+from gateway.http.config import gateway_config, gateway_rpc
 from ops.agents.launch_retry import RetryLaunchConflictError, accept_retry_launch
 from ops.cluster import rpc
 
@@ -59,7 +59,7 @@ async def retry_launch(
     except RetryLaunchConflictError as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
     try:
-        await rpc.dispatch_to_machine(
+        await gateway_rpc(request).dispatch_to_machine(
             request.app.state.db,
             target_machine=target,
             kind="launch-reconcile",
