@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import re
 import socket
 import subprocess
 import tempfile
@@ -115,7 +116,7 @@ def recorder(loguru_records: LogRecords) -> _Recorder:
     return _Recorder(loguru_records)
 
 
-def test_ping_uses_short_timeout_and_helper_wire_protocol() -> None:
+def test_ping_uses_short_timeout_and_helper_wire_protocol(tmp_path: Path) -> None:
     received: list[bytes] = []
     response = (
         b'{"id":0,"ok":true,"result":{"pong":true,"pid":42,'
@@ -139,6 +140,7 @@ def test_ping_uses_short_timeout_and_helper_wire_protocol() -> None:
             root = cast(OwnedProcess, SimpleNamespace(pid=10, live=lambda: True))
             parent = cast(OwnedProcess, SimpleNamespace(pid=42, live=lambda: True))
             assert hc.ping(
+                home=tmp_path,
                 sock_path=socket_path,
                 root=root,
                 parent=parent,
@@ -243,6 +245,15 @@ def test_probe_is_total_and_non_macos_is_up() -> None:
     assert "probe error" in verdict.detail
 
 
+def test_ping_dials_the_socket_of_the_home_it_is_given(tmp_path: Path) -> None:
+    from base.sessions.helperproc import helper_client
+
+    socket_path = str(helper_client(home=tmp_path).sock_path)
+
+    with pytest.raises(client.PermissionsHelperError, match=re.escape(socket_path)):
+        hc.ping(home=tmp_path)
+
+
 def test_unverifiable_helper_parent_never_reports_protocol_health() -> None:
     assert (
         _probe(
@@ -254,13 +265,14 @@ def test_unverifiable_helper_parent_never_reports_protocol_health() -> None:
     )
 
 
-def test_connected_helper_peer_must_be_root_native_parent() -> None:
+def test_connected_helper_peer_must_be_root_native_parent(tmp_path: Path) -> None:
     root = cast(OwnedProcess, SimpleNamespace(pid=10, live=lambda: True))
     parent = cast(OwnedProcess, SimpleNamespace(pid=20, live=lambda: True))
 
     with pytest.raises(hc.ParentEvidenceError, match="not the captured root parent"):
         hc.helper_parent(
             cast(socket.socket, object()),
+            home=tmp_path,
             root=root,
             parent=parent,
             peer_pid=30,

@@ -211,7 +211,7 @@ class Shells:
 @pytest.fixture
 def shells(pty_service: object, pty_reaper: PtyReaper, unit_home: Path) -> Shells:
     return Shells(
-        PtySessionBackend(config=PtyClientConfig(socket_path=service_socket())),
+        PtySessionBackend(config=PtyClientConfig(socket_path=service_socket()), home=unit_home),
         pty_reaper,
         unit_home,
     )

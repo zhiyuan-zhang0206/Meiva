@@ -42,11 +42,10 @@ class ParentEvidenceError(RuntimeError):
     """The observer cannot bind the helper endpoint to the captured root parent."""
 
 
-def _default_root_process() -> OwnedProcess | None:
+def _default_root_process(home: Path) -> OwnedProcess | None:
     from base.native_process.root_control.client import root_process
-    from base.paths import meiva_home
 
-    return root_process(home=meiva_home())
+    return root_process(home=home)
 
 
 def _default_parent_of(pid: int) -> psutil.Process | None:
@@ -59,13 +58,14 @@ def _default_peer_pid(sock: socket.socket) -> int | None:
     return peer_pid(sock)
 
 
-def _default_sock_path() -> str:
-    return str(helper_client().sock_path)
+def _default_sock_path(home: Path) -> str:
+    return str(helper_client(home=home).sock_path)
 
 
 def helper_parent(
     sock: socket.socket,
     *,
+    home: Path,
     root: OwnedProcess | None = None,
     parent: OwnedProcess | None = None,
     peer_pid: int | None = None,
@@ -73,6 +73,7 @@ def helper_parent(
     try:
         return _read_helper_parent(
             sock,
+            home=home,
             root=root,
             parent=parent,
             peer_pid=peer_pid,
@@ -84,11 +85,12 @@ def helper_parent(
 def _read_helper_parent(
     sock: socket.socket,
     *,
+    home: Path,
     root: OwnedProcess | None = None,
     parent: OwnedProcess | None = None,
     peer_pid: int | None = None,
 ) -> tuple[OwnedProcess, OwnedProcess]:
-    resolved_root = _default_root_process() if root is None else root
+    resolved_root = _default_root_process(home) if root is None else root
     if resolved_root is None:
         raise ParentEvidenceError("no captured root generation")
     if parent is None:
@@ -118,6 +120,7 @@ def parent_still_live(root: OwnedProcess, parent: OwnedProcess, reply_pid: int) 
 
 def ping(
     *,
+    home: Path,
     sock_path: Path | str | None = None,
     root: OwnedProcess | None = None,
     parent: OwnedProcess | None = None,
@@ -125,12 +128,13 @@ def ping(
     parent_live: bool | None = None,
 ) -> bool:
     """Ping the real helper protocol with a watchdog-sized response timeout."""
-    resolved_path = _default_sock_path() if sock_path is None else str(sock_path)
+    resolved_path = _default_sock_path(home) if sock_path is None else str(sock_path)
     sock = client.connect(resolved_path)
     try:
         sock.settimeout(_PING_TIMEOUT_S)
         resolved_root, resolved_parent = helper_parent(
             sock,
+            home=home,
             root=root,
             parent=parent,
             peer_pid=peer_pid,
@@ -230,7 +234,7 @@ def _observe(
         ping_failure = None if resolved_ping_ok else "pong was not true"
     else:
         try:
-            resolved_ping_ok = ping()
+            resolved_ping_ok = ping(home=home)
         except ParentEvidenceError:
             raise
         except Exception as exc:

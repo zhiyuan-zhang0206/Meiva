@@ -730,7 +730,7 @@ def main() -> None:
         run(
             str(computer_mcp_socket(home)),
             database=database,
-            helper=helper_client(),
+            helper=helper_client(home=process_home),
             clock=Clock(clock_config_from_boot(machine_config), timers=SYSTEM_TIMERS),
             home=process_home,
         )

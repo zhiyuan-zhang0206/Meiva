@@ -36,12 +36,12 @@ def test_replaced_name_never_signals_replacement(
     with subprocess.Popen(argv) as old, subprocess.Popen(argv) as replacement:  # noqa: S603
         try:
             expected, new = record_for(old.pid), record_for(replacement.pid)
-            path = tmp_path / "meiva-ops.json"
+            path = posixproc.record_path("meiva-ops", home=tmp_path)
             new.write(path)
             assert not posixproc.graceful_signal(
                 "meiva-ops",
                 expected=expected,
-                sessions_dir=tmp_path,
+                home=tmp_path,
             )
             assert not posixproc.admit_expected_signal(
                 psutil.Process(old.pid),
@@ -108,13 +108,13 @@ def test_expected_identity_uses_stable_ticks_before_epoch_birth(
             expected = replace(
                 original, create_time=original.create_time + birth_delta, starttime=stored_tick
             )
-            path = tmp_path / "meiva-private-ticks.json"
+            path = posixproc.record_path("meiva-private-ticks", home=tmp_path)
             expected.write(path)
             assert (
                 posixproc.graceful_signal(
                     "meiva-private-ticks",
                     expected=expected,
-                    sessions_dir=tmp_path,
+                    home=tmp_path,
                     observed_ticks=observed_ticks,
                 )
                 is should_signal

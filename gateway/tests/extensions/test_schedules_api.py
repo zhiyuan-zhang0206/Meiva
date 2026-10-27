@@ -219,13 +219,17 @@ class TestLogsRuns:
         assert body["lines"] == ["boom", "trace"]
 
     def test_logs_live_session_shows_its_output_without_the_blank_screen_rows(
-        self, db_conn: psycopg.Connection, pty_service: PtyServiceProcess, tmp_path: Path
+        self,
+        db_conn: psycopg.Connection,
+        pty_service: PtyServiceProcess,
+        tmp_path: Path,
+        unit_home: Path,
     ) -> None:
         from base.sessions.backend import get_shell_backend
 
         with schedule_client() as client:
             sid = _create(client, name="l").json()["id"]
-            get_shell_backend().new_session(
+            get_shell_backend(home=unit_home).new_session(
                 session_name(f"schedule-{sid}"),
                 "echo line one; echo line two; sleep 30",
                 tmp_path,
@@ -245,13 +249,17 @@ class TestLogsRuns:
         assert body["source"] == "none"
         assert body["lines"] == []
 
-    def test_logs_reads_pty_transcript_for_dead_session(self, db_conn: psycopg.Connection) -> None:
+    def test_logs_reads_pty_transcript_for_dead_session(
+        self, db_conn: psycopg.Connection, unit_home: Path
+    ) -> None:
         from base.cluster import session_name
         from base.sessions.backend import get_shell_backend
 
         with schedule_client() as client:
             sid = _create(client, name="l").json()["id"]
-            log_path = get_shell_backend().session_log_path(session_name(f"schedule-{sid}"))
+            log_path = get_shell_backend(home=unit_home).session_log_path(
+                session_name(f"schedule-{sid}")
+            )
             assert log_path is not None
             log_path.parent.mkdir(parents=True, exist_ok=True)
             log_path.write_text("line one\nline two\n")

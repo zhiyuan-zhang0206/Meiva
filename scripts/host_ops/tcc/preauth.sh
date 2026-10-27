@@ -133,9 +133,10 @@ verify_helper_ping() {
     if ! output=$(
         cd "$repo_root"
         "$python_bin" - 2>&1 <<'PY'
+from base.paths import meiva_home
 from base.sessions.helperproc import helper_client
 
-reply = helper_client().ping()
+reply = helper_client(home=meiva_home()).ping()
 print(
     int(reply["pong"] is True),
     int(reply["preflight_screen"] is True),

@@ -26,7 +26,8 @@ if __name__ == "__main__":
         )
         _stay_alive()
     elif scenario == "backend_host":
-        assert get_shell_backend().new_session(sys.argv[2], "", Path(sys.argv[3]), env={})
+        home = Path(sys.argv[3])
+        assert get_shell_backend(home=home).new_session(sys.argv[2], "", home, env={})
         _stay_alive()
     elif scenario == "send":
         client.send(sys.argv[2], sys.argv[3].encode() + b"\r", socket_path=service_socket())

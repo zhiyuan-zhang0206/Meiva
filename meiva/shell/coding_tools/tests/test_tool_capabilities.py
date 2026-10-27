@@ -9,6 +9,7 @@ import pytest
 
 from base.sessions import coding_session_owner
 from base.sessions import tool_capabilities as caps
+from base.sessions.backend import get_shell_backend
 from meiva.shell.coding_tools import _common
 
 NOW = dt.datetime(2026, 10, 18, 15, 0, tzinfo=dt.UTC)
@@ -265,12 +266,23 @@ def test_a_tool_with_no_declared_capabilities_reports_nothing(unit_home: Path) -
     assert _common.capability_report("antigravity") == ("", 0)
 
 
+# meiva:note
+# The shell sessions of the test cluster: no PTY service listens there, so none is live and none is stopped.
+def _cluster_sessions(tmp_path: Path) -> coding_session_owner.CodingSessions:
+    return get_shell_backend(home=tmp_path / "cluster")
+
+
 def _launching(tmp_path: Path, tool: str) -> coding_session_owner.CodingSessionOwner:
     workspace = tmp_path / "workspace"
     workspace.mkdir(exist_ok=True)
     key = coding_session_owner.canonical_key(workspace, tool=tool, cluster=tmp_path / "cluster")
     return _common.new_generation(
-        key, owner_agent_id=41, tasks_file=None, work_file=None, ttl_seconds=3600
+        key,
+        owner_agent_id=41,
+        tasks_file=None,
+        work_file=None,
+        ttl_seconds=3600,
+        sessions=_cluster_sessions(tmp_path),
     )
 
 
@@ -301,8 +313,9 @@ def test_cancel_terminalizes_exactly_the_named_generation(
     owner = _launching(tmp_path, "codex")
     assert owner.generation is not None
 
-    assert _common.cancel(owner.key, owner.generation) == 0
+    sessions = _cluster_sessions(tmp_path)
+    assert _common.cancel(owner.key, owner.generation, sessions=sessions) == 0
 
     assert "status=terminal" in capsys.readouterr().out
-    assert _common.cancel(owner.key, "11111111-2222-3333-4444-555555555555") == 1
+    assert _common.cancel(owner.key, "11111111-2222-3333-4444-555555555555", sessions=sessions) == 1
     assert "cancel refused" in capsys.readouterr().err

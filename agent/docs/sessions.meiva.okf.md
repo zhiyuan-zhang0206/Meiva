@@ -10,7 +10,7 @@ tags: []
 Services run in named platform-supervisor sessions. Agent execution belongs to
 one `agent-host` service per runner; an agent has no main-process session.
 Interactive shells and watchers are held by the machine's `pty-sessions`
-service and reached through `get_shell_backend()`. Its socket and ledger are
+service and reached through `get_shell_backend(home=...)`. Its socket and ledger are
 scoped to the local `MEIVA_HOME`.
 
 ## Names and lifetime

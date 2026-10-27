@@ -199,7 +199,7 @@ def test_codex_supervisor_uses_projected_session_environment(
     service.start()
     seed_agent(database, 41, next_index=7)
     shell = ShellSessions(
-        backend=PtySessionBackend(PtyClientConfig(socket_path=service_socket())),
+        backend=PtySessionBackend(PtyClientConfig(socket_path=service_socket()), unit_home),
         database=database,
         agent_id=41,
     )
@@ -275,15 +275,16 @@ def _request(
 
 
 def _generation(
-    site_cluster: Path, workspace: Path, *, supervised: bool
+    site: _common.LaunchSite, workspace: Path, *, supervised: bool
 ) -> coding_session_owner.CodingSessionOwner:
-    key = coding_session_owner.canonical_key(workspace, tool="codex", cluster=site_cluster)
+    key = coding_session_owner.canonical_key(workspace, tool="codex", cluster=site.cluster)
     return _common.new_generation(
         key,
         owner_agent_id=41,
         tasks_file=workspace / "tasks.md" if supervised else None,
         work_file=workspace / "work.md" if supervised else None,
         ttl_seconds=3600,
+        sessions=site.shell.backend,
     )
 
 
@@ -306,7 +307,7 @@ def test_takeover_launch_inlines_the_brief_without_files_or_a_supervisor(
     workspace = short_dir / "ws"
     workspace.mkdir()
     site = site_for(live_shell, short_dir, live_host)
-    owner = _generation(site.cluster, workspace, supervised=False)
+    owner = _generation(site, workspace, supervised=False)
     prompt = "Goal: replace the agent. The briefing is inline; read no files."
 
     active, remote, session = codex.start_generation(
@@ -334,7 +335,7 @@ def test_supervised_launch_runs_a_supervisor_for_exactly_this_generation(
     workspace = short_dir / "ws"
     workspace.mkdir()
     site = site_for(live_shell, short_dir, live_host)
-    owner = _generation(site.cluster, workspace, supervised=True)
+    owner = _generation(site, workspace, supervised=True)
 
     active, _remote, _session = codex.start_generation(
         site, owner, _request(workspace, skill), _WAITS
@@ -371,7 +372,7 @@ def test_a_resumed_worker_reopens_its_session_and_is_told_it_was_interrupted(
     workspace = short_dir / "ws"
     workspace.mkdir()
     site = site_for(live_shell, short_dir, live_host)
-    owner = _generation(site.cluster, workspace, supervised=True)
+    owner = _generation(site, workspace, supervised=True)
     request = _request(workspace, skill, resume=CODEX_SESSION)
 
     if opened != CODEX_SESSION:
@@ -399,7 +400,7 @@ def test_a_generation_that_ended_before_publishing_kills_the_codex_session(
     workspace = short_dir / "ws"
     workspace.mkdir()
     site = site_for(live_shell, short_dir, live_host)
-    owner = _generation(site.cluster, workspace, supervised=False)
+    owner = _generation(site, workspace, supervised=False)
     assert owner.generation is not None
     coding_session_owner.terminate_generation(
         owner.key,
@@ -407,6 +408,7 @@ def test_a_generation_that_ended_before_publishing_kills_the_codex_session(
         reason="replaced",
         writer=AtomicWriter(SYSTEM_FS),
         now=system_clock().now(),
+        sessions=live_shell.backend,
     )
 
     with pytest.raises(coding_session_owner.CodingSessionGenerationChangedError):
@@ -423,7 +425,7 @@ def test_a_supervisor_that_cannot_be_recorded_is_reclaimed_with_the_launch(
     workspace = short_dir / "ws"
     workspace.mkdir()
     site = site_for(live_shell, short_dir, live_host)
-    owner = _generation(site.cluster, workspace, supervised=True)
+    owner = _generation(site, workspace, supervised=True)
     assert owner.generation is not None
     coding_session_owner.terminate_generation(
         owner.key,
@@ -431,6 +433,7 @@ def test_a_supervisor_that_cannot_be_recorded_is_reclaimed_with_the_launch(
         reason="replaced",
         writer=AtomicWriter(SYSTEM_FS),
         now=system_clock().now(),
+        sessions=live_shell.backend,
     )
 
     with pytest.raises(coding_session_owner.CodingSessionGenerationChangedError):
@@ -576,7 +579,12 @@ def _launched(
 ) -> coding_session_owner.CodingSessionOwner:
     key = coding_session_owner.canonical_key(workspace, tool="codex", cluster=cluster)
     owner = _common.new_generation(
-        key, owner_agent_id=_OWNER, tasks_file=None, work_file=None, ttl_seconds=ttl_seconds
+        key,
+        owner_agent_id=_OWNER,
+        tasks_file=None,
+        work_file=None,
+        ttl_seconds=ttl_seconds,
+        sessions=shell.backend,
     )
     assert owner.generation is not None and owner.expected_suffix is not None
     session_id = 99
@@ -613,11 +621,14 @@ def test_canonical_watch_terminalizes_before_exit(
     live_host: SessionHost,
     bound_agent: BindAgent,
     short_dir: Path,
+    unit_home: Path,
 ) -> None:
     workspace = short_dir / "ws"
     workspace.mkdir()
+    # meiva:note
+    # The cluster is the home whose pty-sessions service holds the shell: the watcher reaches the coding session through the cluster its owner record names.
     record = _launched(
-        live_shell, live_host, short_dir / "c", workspace, session_alive=alive, ttl_seconds=ttl
+        live_shell, live_host, unit_home, workspace, session_alive=alive, ttl_seconds=ttl
     )
     assert record.generation is not None
     work_file = workspace / "work.md"

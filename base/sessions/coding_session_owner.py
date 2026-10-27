@@ -24,6 +24,7 @@ import stat
 from collections.abc import Callable
 from dataclasses import replace
 from pathlib import Path
+from typing import Protocol
 
 from base.clock.ids import new_uuid
 from base.host.atomic_io import AtomicWriter
@@ -74,10 +75,21 @@ _LOCK_TIMEOUT_S = 60.0
 _UNPUBLISHED_CLAIM_WINDOW = dt.timedelta(seconds=60)
 _MAX_TTL_SECONDS = 86_400.0
 
-SessionLister = Callable[[], list[str]]
-SessionLiveness = Callable[[str], bool]
-SessionTerminator = Callable[[str], bool]
 OwnerTerminated = Callable[[int], bool]
+
+
+# meiva:note
+# The three questions a generation's cleanup asks of the sessions its coding tool started: which
+# sessions exist, whether one is alive, and a stop of one (not graceful: the owner is over). Any
+# session backend answers them; the production caller hands the shell backend of the key's home.
+class CodingSessions(Protocol):
+    def list_sessions(self, prefix: str = "") -> list[str]: ...
+
+    def has_session(self, name: str) -> bool: ...
+
+    def kill_session(
+        self, name: str, *, graceful: bool = False, timeout: float = 15.0, expected: bool = False
+    ) -> tuple[bool, str]: ...
 
 
 class CodingSessionCleanupError(RuntimeError):
@@ -177,31 +189,14 @@ def list_generations(key: CodingSessionKey) -> list[CodingSessionOwner]:
     return [read_unlocked(key, generation) for generation in generations(key)]
 
 
-def _default_list_sessions() -> list[str]:
-    from base.sessions.backend import get_shell_backend
-
-    return get_shell_backend().list_sessions()
-
-
-def _default_session_live(name: str) -> bool:
-    from base.sessions.backend import get_shell_backend
-
-    return get_shell_backend().has_session(name)
-
-
-def _default_terminate_session(name: str) -> bool:
-    from base.sessions.backend import get_shell_backend
-
-    stopped, _mode = get_shell_backend().kill_session(name, graceful=False, expected=True)
-    return stopped
-
-
-def _candidate_sessions(owner: CodingSessionOwner, list_sessions: SessionLister) -> list[str]:
+def _candidate_sessions(owner: CodingSessionOwner, sessions: CodingSessions) -> list[str]:
     names: set[str] = set()
     if owner.session_name:
         names.add(owner.session_name)
     if owner.expected_suffix:
-        names.update(name for name in list_sessions() if name.endswith(f"-{owner.expected_suffix}"))
+        names.update(
+            name for name in sessions.list_sessions() if name.endswith(f"-{owner.expected_suffix}")
+        )
     return sorted(name for name in names if name)
 
 
@@ -220,14 +215,15 @@ def _remove_generation_state(owner: CodingSessionOwner) -> None:
 def _cleanup_unlocked(
     owner: CodingSessionOwner,
     *,
-    list_sessions: SessionLister,
-    session_live: SessionLiveness,
-    terminate_session: SessionTerminator,
+    sessions: CodingSessions,
 ) -> None:
-    for name in _candidate_sessions(owner, list_sessions):
-        if session_live(name) and not terminate_session(name):
+    for name in _candidate_sessions(owner, sessions):
+        if (
+            sessions.has_session(name)
+            and not sessions.kill_session(name, graceful=False, expected=True)[0]
+        ):
             raise CodingSessionCleanupError(f"could not stop coding session {name!r}")
-        if session_live(name):
+        if sessions.has_session(name):
             raise CodingSessionCleanupError(f"coding session {name!r} remained live after stop")
     try:
         _remove_generation_state(owner)
@@ -241,8 +237,7 @@ def _reclaimable(
     owner: CodingSessionOwner,
     *,
     now: dt.datetime,
-    list_sessions: SessionLister,
-    session_live: SessionLiveness,
+    sessions: CodingSessions,
     owner_terminated: OwnerTerminated,
 ) -> bool:
     """Whether a sibling generation is over and may be cleaned up by another launch."""
@@ -254,16 +249,17 @@ def _reclaimable(
         return True
     if owner.status == CodingSessionStatus.LAUNCHING:
         return launch_is_stale(owner, now=now) and not any(
-            session_live(name) for name in _candidate_sessions(owner, list_sessions)
+            sessions.has_session(name) for name in _candidate_sessions(owner, sessions)
         )
     if owner.expires_at is None or now >= owner.expires_at:
         return True
-    if owner.session_name is None or not session_live(owner.session_name):
+    if owner.session_name is None or not sessions.has_session(owner.session_name):
         return True
     # A supervised generation lives only while its supervisor does; a file-less
     # takeover has none and lives on its coding session alone.
     return owner.work_file is not None and not (
-        owner.supervisor_session_name is not None and session_live(owner.supervisor_session_name)
+        owner.supervisor_session_name is not None
+        and sessions.has_session(owner.supervisor_session_name)
     )
 
 
@@ -271,9 +267,7 @@ def _reclaim_siblings_unlocked(
     key: CodingSessionKey,
     *,
     now: dt.datetime,
-    list_sessions: SessionLister,
-    session_live: SessionLiveness,
-    terminate_session: SessionTerminator,
+    sessions: CodingSessions,
     owner_terminated: OwnerTerminated,
 ) -> None:
     """Clean up and drop every dead generation under ``key``."""
@@ -282,18 +276,12 @@ def _reclaim_siblings_unlocked(
         if not _reclaimable(
             owner,
             now=now,
-            list_sessions=list_sessions,
-            session_live=session_live,
+            sessions=sessions,
             owner_terminated=owner_terminated,
         ):
             continue
         if owner.status != CodingSessionStatus.TERMINAL:
-            _cleanup_unlocked(
-                owner,
-                list_sessions=list_sessions,
-                session_live=session_live,
-                terminate_session=terminate_session,
-            )
+            _cleanup_unlocked(owner, sessions=sessions)
         remove_unlocked(key, generation)
 
 
@@ -311,9 +299,7 @@ def launch_generation(
     writer: AtomicWriter,
     now: dt.datetime,
     rng: random.Random,
-    list_sessions: SessionLister = _default_list_sessions,
-    session_live: SessionLiveness = _default_session_live,
-    terminate_session: SessionTerminator = _default_terminate_session,
+    sessions: CodingSessions,
     owner_terminated: OwnerTerminated = _never_terminated,
 ) -> CodingSessionOwner:
     """Reclaim dead siblings, then publish a fresh ``launching`` generation of our own."""
@@ -328,9 +314,7 @@ def launch_generation(
         _reclaim_siblings_unlocked(
             key,
             now=timestamp,
-            list_sessions=list_sessions,
-            session_live=session_live,
-            terminate_session=terminate_session,
+            sessions=sessions,
             owner_terminated=owner_terminated,
         )
         generation = str(new_uuid(rng))
@@ -425,9 +409,7 @@ def terminate_generation(
     reason: str,
     writer: AtomicWriter,
     now: dt.datetime,
-    list_sessions: SessionLister = _default_list_sessions,
-    session_live: SessionLiveness = _default_session_live,
-    terminate_session: SessionTerminator = _default_terminate_session,
+    sessions: CodingSessions,
 ) -> bool:
     """Stop and terminalize exactly ``generation``; one with no record returns False."""
     if not reason:
@@ -442,12 +424,7 @@ def terminate_generation(
             return False
         if current.status == CodingSessionStatus.TERMINAL:
             return True
-        _cleanup_unlocked(
-            current,
-            list_sessions=list_sessions,
-            session_live=session_live,
-            terminate_session=terminate_session,
-        )
+        _cleanup_unlocked(current, sessions=sessions)
         terminal = replace(
             current,
             status=CodingSessionStatus.TERMINAL,

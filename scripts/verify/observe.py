@@ -309,7 +309,7 @@ def check_helper_chain(home: Path, _source: Path) -> Detail:
     from base.paths import root_run_dir
     from base.sessions.helperproc import helper_client
 
-    helper = helper_client()
+    helper = helper_client(home=home)
 
     ping: Detail = dict(helper.ping())
     seen = {key: ping[key] for key in HELPER_PING}

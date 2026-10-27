@@ -30,6 +30,7 @@ from base.api_contracts.agent_contract import AgentNotFound, AgentStatus, Gatewa
 from base.host.atomic_io import SYSTEM_FS, AtomicWriter
 from base.sessions import coding_session_owner
 from base.sessions.coding_session_owner_record import CodingSessionStatus
+from base.sessions.protocol import SessionBackend
 
 WORK_FILE = "/path/to/work.md"
 POLL_SECONDS = 60
@@ -341,10 +342,16 @@ def _terminalize(
     reason: str,
     *,
     now: dt.datetime,
+    sessions: coding_session_owner.CodingSessions,
 ) -> bool:
     try:
         stopped = coding_session_owner.terminate_generation(
-            key, generation, reason=reason, writer=AtomicWriter(SYSTEM_FS), now=now
+            key,
+            generation,
+            reason=reason,
+            writer=AtomicWriter(SYSTEM_FS),
+            now=now,
+            sessions=sessions,
         )
     except Exception as exc:
         print(f"terminalizing generation {generation} ({reason}) failed: {exc!r}", flush=True)
@@ -380,12 +387,20 @@ def _read_owner(agent_id: int) -> tuple[OwnerRead, str]:
     return (OwnerRead.TERMINATED if status is AgentStatus.TERMINATED else OwnerRead.ALIVE), ""
 
 
-def _session_alive(owner: coding_session_owner.CodingSessionOwner) -> bool | None:
-    if owner.status != CodingSessionStatus.ACTIVE or owner.session_name is None:
-        return None
+# meiva:note
+# The shell sessions of the cluster the generation's record lives in: the watcher reads and stops the coding session where its owner record says it was started.
+def cluster_sessions(key: coding_session_owner.CodingSessionKey) -> SessionBackend:
     from base.sessions.backend import get_shell_backend
 
-    return get_shell_backend().has_session(owner.session_name)
+    return get_shell_backend(home=Path(key.cluster))
+
+
+def _session_alive(
+    owner: coding_session_owner.CodingSessionOwner, sessions: coding_session_owner.CodingSessions
+) -> bool | None:
+    if owner.status != CodingSessionStatus.ACTIVE or owner.session_name is None:
+        return None
+    return sessions.has_session(owner.session_name)
 
 
 # meiva:note
@@ -402,6 +417,9 @@ class _Watch:
         self.path = path
         self.target_agent = target_agent
         self.canonical_context = canonical_context
+        self.sessions = (
+            None if canonical_context is None else cluster_sessions(canonical_context[0])
+        )
         self.cadence = cadence
         self.start_time = now
         self.last_change = now
@@ -441,7 +459,7 @@ class _Watch:
         return owner_terminated(read)
 
     def _canonical_poll(self, beat: Beat, now: float, wall: dt.datetime) -> bool:
-        assert self.canonical_context is not None  # noqa: S101
+        assert self.canonical_context is not None and self.sessions is not None  # noqa: S101
         key, expected_generation, canonical_owner = self.canonical_context
         owner = coding_session_owner.read(key, expected_generation)
         if generation_over(owner.generation == expected_generation, owner.status):
@@ -453,7 +471,7 @@ class _Watch:
                 owner.status,
                 launch_stale=coding_session_owner.launch_is_stale(owner, now=wall),
                 has_session_name=owner.session_name is not None,
-                session_alive=_session_alive(owner),
+                session_alive=_session_alive(owner, self.sessions),
             ),
             expired=owner.expires_at is not None and wall >= owner.expires_at,
         )
@@ -461,7 +479,14 @@ class _Watch:
             beat, facts, self.memory.last_actionable_mtime, self.path, self.cadence
         )
         if isinstance(verdict, Terminalize):
-            return _terminalize(key, expected_generation, canonical_owner, verdict.reason, now=wall)
+            return _terminalize(
+                key,
+                expected_generation,
+                canonical_owner,
+                verdict.reason,
+                now=wall,
+                sessions=self.sessions,
+            )
         if isinstance(verdict, NeedInput):
             _notify(self.target_agent, verdict.message, canonical=True)
             self.memory = Memory(self.memory.first_poll, beat.mtime)

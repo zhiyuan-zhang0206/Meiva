@@ -123,8 +123,8 @@ def harness_probe_op(machine: str) -> HarnessProbeResult:
 # (`agent_shell_sessions` is host-scoped, so a local probe on the gateway would always read empty
 # for a remote agent). The listing's times render in the cluster's zone, so the instant is read
 # here, at the op's entry.
-def shell_probe_op(agent_id: int) -> ShellProbeResult:
-    return ShellProbeResult(shells=agent_shell_sessions(agent_id, now=cluster_now()))
+def shell_probe_op(agent_id: int, *, home: Path) -> ShellProbeResult:
+    return ShellProbeResult(shells=agent_shell_sessions(agent_id, now=cluster_now(), home=home))
 
 
 # meiva:note
@@ -132,8 +132,8 @@ def shell_probe_op(agent_id: int) -> ShellProbeResult:
 #
 # ``interrupted`` reports whether the kill cut short a running job — the gateway notifies the
 # owner only then (an empty shell's reaping is silent).
-def shell_kill_op(agent_id: int, session_id: int) -> ShellKillResult:
-    mode, interrupted, name = kill_shell(agent_id, session_id)
+def shell_kill_op(agent_id: int, session_id: int, *, home: Path) -> ShellKillResult:
+    mode, interrupted, name = kill_shell(agent_id, session_id, home=home)
     if mode is ShellKillMode.ABSENT:
         return ShellKillResult(mode=mode)
     return ShellKillResult(mode=mode, interrupted=interrupted, name=name)
@@ -284,9 +284,11 @@ def agent_skill_view_op(agent_id: int, pool: ConnectionPool) -> AgentSkillViewRe
 # Raises:
 #     ShellNotFoundError: no live shell with `session_id` on this host.
 #     RuntimeError: the session capture failed.
-def shell_capture_op(agent_id: int, session_id: int, lines: int = 200) -> ShellCaptureResult:
+def shell_capture_op(
+    agent_id: int, session_id: int, lines: int = 200, *, home: Path
+) -> ShellCaptureResult:
     full_name, captured, created_at, uptime_seconds = capture_shell(
-        agent_id, session_id, lines, now=cluster_now()
+        agent_id, session_id, lines, now=cluster_now(), home=home
     )
     return ShellCaptureResult(
         session_name=full_name,

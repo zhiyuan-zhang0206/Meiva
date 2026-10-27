@@ -343,6 +343,31 @@ def gateway(sdk_environment: object, gateway_stub: GatewayStub) -> Iterator[Gate
         yield wire
 
 
+# meiva:note
+# The shell sessions of the key's cluster, as the watcher reaches them: no PTY service listens under a test's cluster, so none is live there.
+def _cluster_sessions(key: co.CodingSessionKey) -> Any:
+    return ww.cluster_sessions(key)
+
+
+def test_the_watcher_reads_the_sessions_of_the_cluster_its_record_lives_in(tmp_path: Path) -> None:
+    key = co.canonical_key(tmp_path / "workspace", tool="codex", cluster=tmp_path / "cluster")
+
+    assert _cluster_sessions(key).session_log_path("meiva-x") == (
+        tmp_path / "cluster" / "logs" / "meiva-x.out.log"
+    )
+
+
+def test_the_watch_reaches_the_sessions_of_the_cluster_its_record_lives_in(tmp_path: Path) -> None:
+    key = co.canonical_key(tmp_path / "workspace", tool="codex", cluster=tmp_path / "cluster")
+
+    watch = ww._Watch("work.md", _OWNER, (key, "generation", _OWNER), _CADENCE, 0.0)
+
+    assert watch.sessions is not None
+    assert watch.sessions.session_log_path("meiva-x") == (
+        tmp_path / "cluster" / "logs" / "meiva-x.out.log"
+    )
+
+
 def _launch(
     tmp_path: Path, *, ttl: float = 3600.0
 ) -> tuple[co.CodingSessionKey, CodingSessionOwner]:
@@ -356,6 +381,7 @@ def _launch(
         writer=_WRITER,
         now=system_clock().now(),
         rng=seeded_rng(),
+        sessions=_cluster_sessions(key),
     )
     return key, owner
 
@@ -401,7 +427,12 @@ def _supervise(
 
     def stop() -> None:
         co.terminate_generation(
-            key, generation, reason="test-over", writer=_WRITER, now=system_clock().now()
+            key,
+            generation,
+            reason="test-over",
+            writer=_WRITER,
+            now=system_clock().now(),
+            sessions=_cluster_sessions(key),
         )
 
     timers = [threading.Timer(15.0, stop)]
@@ -545,7 +576,12 @@ def test_an_unreachable_gateway_is_survived_and_reported_once_each_way(
 
     def finish() -> None:
         co.terminate_generation(
-            key, generation, reason="test-over", writer=_WRITER, now=system_clock().now()
+            key,
+            generation,
+            reason="test-over",
+            writer=_WRITER,
+            now=system_clock().now(),
+            sessions=_cluster_sessions(key),
         )
 
     recovering = threading.Timer(0.25, recover)
@@ -593,7 +629,12 @@ def test_a_stalled_canonical_run_wakes_the_owner_at_each_heartbeat(
 
     def finish() -> None:
         co.terminate_generation(
-            key, generation, reason="test-over", writer=_WRITER, now=system_clock().now()
+            key,
+            generation,
+            reason="test-over",
+            writer=_WRITER,
+            now=system_clock().now(),
+            sessions=_cluster_sessions(key),
         )
 
     cadence = ww.Cadence(poll_seconds=0.01, stall_seconds=0.05, heartbeat_seconds=0.1)

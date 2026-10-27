@@ -27,11 +27,11 @@ from services.agent_runner.agent_host.lifecycle.cleanup_failures import (
 #     `apply_lifecycle_command` (after a graceful termination commits). Never
 #     raises: a failed kill must not turn a termination into a crashed turn, so it
 #     is logged at ERROR and the termination still applies.
-def kill_terminating_agent_shells(agent_id: int, cutoff: int) -> None:
+def kill_terminating_agent_shells(agent_id: int, cutoff: int, *, home: Path) -> None:
     from ops.cluster_status import kill_agent_shells
 
     try:
-        killed = kill_agent_shells(agent_id, before_session_index=cutoff)
+        killed = kill_agent_shells(agent_id, before_session_index=cutoff, home=home)
     except Exception:
         logger.opt(exception=True).error(
             "terminate could not kill shell sessions below {cutoff} of agent {agent_id}; "
@@ -68,7 +68,9 @@ async def finish_termination(
         failures.append(CleanupFailure("browser", error))
     if shell_cutoff is not None:
         try:
-            await asyncio.to_thread(kill_terminating_agent_shells, agent_id, shell_cutoff)
+            await asyncio.to_thread(
+                kill_terminating_agent_shells, agent_id, shell_cutoff, home=home
+            )
         except BaseException as error:
             failures.append(CleanupFailure("shell", error))
     summary = summarize(failures)

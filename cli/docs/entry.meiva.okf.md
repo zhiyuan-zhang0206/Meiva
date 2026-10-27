@@ -65,8 +65,8 @@ of a database-capability bundle is the one environment value `main()` takes out 
 (`meiva init` and `meiva cluster db-authority install-unit`, as `args.transport_key`). Dispatch, embedded
 lifecycle legs, logging, database host resolution and telemetry borrow that same
 identity, and with `CommandRuntime.helper`, the one place the real permissions-helper
-factory is chosen: `base.sessions.helperproc.helper_for(host.platform)` returns
-`helper_client` on macOS, which reads the helper's port only when a code path calls it, and `None`
+factory is chosen: `base.sessions.helperproc.helper_for(host.platform, home=home)` returns
+`helper_client` bound to the home on macOS, which reads the helper's port only when a code path calls it, and `None`
 on Linux. `None` means only "this platform has no helper" and is never a switch; macOS always has
 one. `start`, `stop` and `converge` hand that value down to the root driver and the helper
 bring-up (a `None` takes the direct-spawn path); nothing below them builds a helper client. Successful setup

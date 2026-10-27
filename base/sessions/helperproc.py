@@ -11,6 +11,7 @@ from __future__ import annotations
 import contextlib
 import os
 import signal
+from functools import partial
 from pathlib import Path
 
 import psutil
@@ -25,7 +26,7 @@ from base.log import logger
 from base.native_process.kernel_identity import pid_starttime_ticks
 from base.native_process.os_platform import Platform
 from base.native_process.ownership import stable_create_time
-from base.paths import logs_dir, meiva_home, permissions_helper_socket, run_dir
+from base.paths import logs_path, permissions_helper_socket, run_dir
 from base.sessions.protocol import SessionBackend
 from base.sessions.record import SessionRecord
 
@@ -38,23 +39,23 @@ _KILL_POLL_S = 0.05
 _KILL_CONFIRM_TIMEOUT_S = 5.0
 
 
-def _sessions_dir() -> Path:
-    directory = run_dir(meiva_home()) / "sessions"
+def _sessions_dir(home: Path) -> Path:
+    directory = run_dir(home) / "sessions"
     directory.mkdir(parents=True, exist_ok=True)
     return directory
 
 
-def _record_path(name: str) -> Path:
-    return _sessions_dir() / f"{name}.json"
+def _record_path(name: str, home: Path) -> Path:
+    return _sessions_dir(home) / f"{name}.json"
 
 
-def _read_record(name: str) -> SessionRecord | None:
-    return SessionRecord.read(_record_path(name))
+def _read_record(name: str, home: Path) -> SessionRecord | None:
+    return SessionRecord.read(_record_path(name, home))
 
 
-def session_log_path(name: str) -> Path:
+def session_log_path(name: str, *, home: Path) -> Path:
     """The combined stdout/stderr log for a helper-spawned session."""
-    return logs_dir() / f"{name}.out.log"
+    return logs_path(home) / f"{name}.out.log"
 
 
 def _process_is_live(process: psutil.Process) -> bool:
@@ -112,14 +113,14 @@ def helper_spawn_configured() -> bool:
     return spawn_enabled
 
 
-def helper_client() -> PermissionsHelperClient:
-    """The client for this cluster's permissions helper: the composition root's one way to
-    reach it. The socket is keyed by the cluster's helper port, read here once per client."""
+# meiva:note
+# The client for this cluster's permissions helper: the composition root's one way to reach it. The socket is keyed by the cluster's helper port, read here once per client, and sits under `home`.
+def helper_client(*, home: Path) -> PermissionsHelperClient:
     port, _ = _services_config()
-    return PermissionsHelperClient(permissions_helper_socket(meiva_home(), port))
+    return PermissionsHelperClient(permissions_helper_socket(home, port))
 
 
-def helper_for(platform: Platform) -> HelperFactory | None:
+def helper_for(platform: Platform, *, home: Path) -> HelperFactory | None:
     """The permissions-helper factory a platform runs with, or None where it has no helper.
 
     macOS service ancestry is mandatory there, so darwin always gets the real factory: no
@@ -127,7 +128,7 @@ def helper_for(platform: Platform) -> HelperFactory | None:
     composition root calls this once; None means only "this platform has no helper" and is never
     a way to opt out of one."""
     if platform.system == "darwin":
-        return helper_client
+        return partial(helper_client, home=home)
     if platform.system == "linux":
         return None
     raise ValueError(f"no permissions-helper decision for platform {platform.system!r}")
@@ -191,14 +192,15 @@ def _wait_until_dead(process: psutil.Process, timeout: float, timers: Timers) ->
 class HelperProcSessionBackend(SessionBackend):
     """Named sessions whose processes are direct children of the macOS helper."""
 
-    def __init__(self, client_factory: HelperFactory, timers: Timers) -> None:
+    def __init__(self, client_factory: HelperFactory, timers: Timers, home: Path) -> None:
         # A factory, not a client: only a spawn dials the helper, and a process that merely
         # lists sessions (the gateway) must not read the helper port to build one.
         self._client_factory = client_factory
         self._timers = timers
+        self._home = home
 
     def has_session(self, name: str) -> bool:
-        record = _read_record(name)
+        record = _read_record(name, self._home)
         return record is not None and _process_for_record(record) is not None
 
     def new_session(
@@ -230,9 +232,9 @@ class HelperProcSessionBackend(SessionBackend):
             argv = list(cmd)
             command_text = " ".join(cmd)
 
-        stdout_path = session_log_path(name)
+        stdout_path = session_log_path(name, home=self._home)
         stderr_path = stderr_append if stderr_append is not None else stdout_path
-        logs_dir().mkdir(parents=True, exist_ok=True)
+        logs_path(self._home).mkdir(parents=True, exist_ok=True)
         child_pid = spawn_via_helper(
             self._client_factory(),
             name,
@@ -260,7 +262,7 @@ class HelperProcSessionBackend(SessionBackend):
             cwd=str(cwd),
             started_at=started_at,
             starttime=starttime,
-        ).write(_record_path(name))
+        ).write(_record_path(name, self._home))
         return True
 
     def kill_session(
@@ -273,12 +275,12 @@ class HelperProcSessionBackend(SessionBackend):
     ) -> tuple[bool, str]:
         """Signal the recorded pid and forget it only after confirmed death."""
         del expected
-        record = _read_record(name)
+        record = _read_record(name, self._home)
         if record is None:
             return True, "noop"
         process = _process_for_record(record)
         if process is None:
-            _record_path(name).unlink(missing_ok=True)
+            _record_path(name, self._home).unlink(missing_ok=True)
             return True, "noop"
 
         ended_gracefully = False
@@ -301,11 +303,11 @@ class HelperProcSessionBackend(SessionBackend):
                 pid=record.pid,
             )
             return False, mode
-        _record_path(name).unlink(missing_ok=True)
+        _record_path(name, self._home).unlink(missing_ok=True)
         return True, mode
 
     def graceful_signal(self, name: str, *, expected: SessionRecord | None = None) -> bool:
-        record = _read_record(name)
+        record = _read_record(name, self._home)
         if record is None or (expected is not None and record != expected):
             return False
         process = _process_for_record(record)
@@ -317,7 +319,7 @@ class HelperProcSessionBackend(SessionBackend):
             # the process it resolved.
             if expected is not None and (
                 abs(stable_create_time(process) - expected.create_time) > _CREATE_TIME_TOLERANCE_S
-                or _read_record(name) != expected
+                or _read_record(name, self._home) != expected
             ):
                 return False
             os.kill(record.pid, signal.SIGTERM)
@@ -326,7 +328,7 @@ class HelperProcSessionBackend(SessionBackend):
 
     def list_sessions(self, prefix: str = "") -> list[str]:
         live: list[str] = []
-        for record_file in _sessions_dir().glob("*.json"):
+        for record_file in _sessions_dir(self._home).glob("*.json"):
             name = record_file.stem
             if prefix and not name.startswith(prefix):
                 continue
@@ -348,7 +350,7 @@ class HelperProcSessionBackend(SessionBackend):
         return sorted(live)
 
     def session_started_at(self, name: str) -> float | None:
-        record = _read_record(name)
+        record = _read_record(name, self._home)
         if record is None or _process_for_record(record) is None:
             return None
         return record.started_at
@@ -357,10 +359,10 @@ class HelperProcSessionBackend(SessionBackend):
         return {name: self.session_started_at(name) for name in names}
 
     def session_generation(self, name: str) -> str | None:
-        record = _read_record(name)
+        record = _read_record(name, self._home)
         if record is None or _process_for_record(record) is None:
             return None
         return record.generation
 
     def session_log_path(self, name: str) -> Path | None:
-        return session_log_path(name)
+        return session_log_path(name, home=self._home)
