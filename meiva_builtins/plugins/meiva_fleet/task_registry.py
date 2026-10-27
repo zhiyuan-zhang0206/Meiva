@@ -7,6 +7,7 @@ from __future__ import annotations
 import builtins
 from collections.abc import Iterable
 from dataclasses import asdict, dataclass, replace
+from datetime import datetime
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
@@ -29,6 +30,8 @@ if TYPE_CHECKING:
     from base.events.live.bus import EventBus
     from base.telemetry import Event
 
+    from .default_config import FleetConfig
+
 from ._task_assignment import TaskAssignment, create_and_assign_guarded
 from ._task_publication import TaskPublication
 from ._task_requests import creation_request, effective_owner, update_request
@@ -40,6 +43,7 @@ from ._task_update import (
     collect_update_fields,
     nothing_to_update,
     owner_actually_changed,
+    pause_deadline,
     validate_status,
     write_task_update,
 )
@@ -308,6 +312,7 @@ def update(
     priority: str | None = None,
     parent_id: int | None = UNSET_FIELD,  # type: ignore[assignment]
     note: str | None = None,
+    reminders_paused_until: datetime | str | None = None,
     operation_key: str,
 ) -> None:
     """A write that changes the work moves `updated_at` and restarts the task's reminder
@@ -321,6 +326,11 @@ def update(
         owner: agent id to reassign to; a task always has an owner.
         remind_interval_seconds: None = unchanged; reminders cannot be disabled; capped at 24h.
         parent_id: reparent (explicit None = system root; int = set parent).
+        reminders_paused_until: silence this task's reminders until this instant (ISO-8601
+            with an offset, or an aware datetime); at most Fleet
+            `task_reminder_pause_max_seconds` away, and unavailable on a home that never set
+            that policy. None = unchanged. A past instant resumes the reminders, which then
+            pick up where they stood — pausing is not progress.
         operation_key: required stable key for this agent and task; reuse it to
             replay a committed update without another note or notification.
             Different effective fields with the same key raise ValueError.
@@ -337,6 +347,7 @@ def update(
         priority=priority,
         parent_id=parent_id,
         note=note,
+        reminders_paused_until=reminders_paused_until,
         operation_key=operation_key,
     )
 
@@ -347,23 +358,38 @@ def _update_value(value: int | Unset | None) -> int | None:
 
 
 # meiva:note
-# The reminder-window policy is read from this home's `meiva_fleet` image on every write rather than
-# cached for the process: an edit then takes effect at the next write, with no restart. It is
-# `host`-scoped on purpose. A `cluster-pinned` read would overlay the gateway's boot packet, and an
-# agent whose launcher sent a packet from the previous schema would fail every task update with
+# The reminder policy (which writes restart the window, and how long a pause may last) is read from
+# this home's `meiva_fleet` image on every write rather than cached for the process: an edit then
+# takes effect at the next write, with no restart. One read serves both fields. It is `host`-scoped
+# on purpose. A `cluster-pinned` read would overlay the gateway's boot packet, and an agent whose
+# launcher sent a packet from the previous schema would fail every task update with
 # SchemaDriftError — a rollout would break the fleet's reporting path. The imports are deferred so
 # the config stack stays off plugin autoload (task #3816).
-def _reminder_reset_on(*, home: Path) -> frozenset[str]:
-    """Kinds of task update that restart a task's reminder window, per this home's policy."""
+def _fleet_policy(*, home: Path) -> FleetConfig:
+    """This home's `meiva_fleet` policy image: the reminder window and the pause bound."""
     from base.packages.plugins.config_registration import disk_image_path, read_config_image
 
     from .default_config import FleetConfig
 
-    return frozenset(
-        read_config_image(
-            FleetConfig, disk_image_path("meiva_fleet", home=home)
-        ).task_reminder_reset_on
+    return read_config_image(FleetConfig, disk_image_path("meiva_fleet", home=home))
+
+
+# meiva:note
+# This write's reminder policy and pause target in one step: the image is read once, and the deadline
+# is validated against it before a transaction opens, so an over-long request fails without locking a
+# row. `paused_until` is None when the caller did not ask to pause (`_task_update.pause_deadline`).
+def _reminder_target(
+    context: MeivaContext, reminders_paused_until: datetime | str | None
+) -> tuple[frozenset[str], datetime | None]:
+    policy = _fleet_policy(home=context.require_meiva_home())
+    paused_until = (
+        None
+        if reminders_paused_until is None
+        else pause_deadline(
+            reminders_paused_until, max_seconds=policy.task_reminder_pause_max_seconds
+        )
     )
+    return frozenset(policy.task_reminder_reset_on), paused_until
 
 
 def update_in_context(
@@ -379,6 +405,7 @@ def update_in_context(
     priority: str | None = None,
     parent_id: int | Unset | None = UNSET_FIELD,
     note: str | None = None,
+    reminders_paused_until: datetime | str | None = None,
     operation_key: str,
 ) -> None:
     """Apply update with one explicit context, including admission revalidation."""
@@ -396,6 +423,7 @@ def update_in_context(
             priority=priority,
             parent_id=parent_id,
             note=note,
+            reminders_paused_until=reminders_paused_until,
             operation_key=operation_key,
         ),
         bus,
@@ -420,6 +448,7 @@ def commit_update(
     priority: str | None = None,
     parent_id: int | Unset | None = UNSET_FIELD,
     note: str | None = None,
+    reminders_paused_until: datetime | str | None = None,
     operation_key: str,
 ) -> TaskPublication | None:
     task_id = coerce_typed(task_id, "task_id", int)
@@ -439,6 +468,8 @@ def commit_update(
     note = coerce_str(note, "note", allow_none=True)
     validate_status(status)
 
+    reset_on, paused_until = _reminder_target(context, reminders_paused_until)
+
     sets, params, payload, owner_changing, changes = collect_update_fields(
         task_id,
         status,
@@ -448,11 +479,13 @@ def commit_update(
         _update_value(owner),
         _update_value(remind_interval_seconds),
         priority,
+        paused_until,
     )
     if nothing_to_update(sets, note) and parent_id is UNSET_FIELD:
         raise ValueError(
             "update needs at least one of status, title, description, results, "
-            "owner, remind_interval_seconds, priority, parent_id, note to change"
+            "owner, remind_interval_seconds, priority, parent_id, note, "
+            "reminders_paused_until to change"
         )
     # meiva:note
     # A parent-only reparent (no business field changed, no note) is structural tree maintenance,
@@ -477,8 +510,6 @@ def commit_update(
         remind_interval_seconds=_update_value(remind_interval_seconds),
         note=note,
     )
-    reset_on = _reminder_reset_on(home=context.require_meiva_home())
-
     from ._task_receipts import record_update, replay_update, update_identity
 
     actor, operation_key = update_identity(operation_key, context=context)
@@ -493,6 +524,7 @@ def commit_update(
             "priority": priority,
             "parent_id": parent_id,
             "note": note,
+            "reminders_paused_until": (None if paused_until is None else paused_until.isoformat()),
         },
         unchanged=UNSET_FIELD,
     )

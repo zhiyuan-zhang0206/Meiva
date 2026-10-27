@@ -25,7 +25,7 @@ from base.paths import meiva_home
 from base.telemetry.tests.capture.event_capture import EmittedEvents
 from base.telemetry.tests.capture.event_capture import emitted_events as emitted_events
 from meiva_builtins.plugins.meiva_fleet.task_maintenance import daemon
-from meiva_builtins.plugins.meiva_fleet.task_maintenance.daemon import run_escalate
+from meiva_builtins.plugins.meiva_fleet.task_maintenance.daemon import run_escalate, run_reminders
 from meiva_builtins.plugins.meiva_fleet.tests.task_registry.notes import TaskNotes, record_notes
 
 _DAY_S = 86400.0
@@ -119,6 +119,18 @@ def _task_row(db: psycopg.Connection, tid: int) -> tuple[Any, ...] | None:
             (tid,),
         )
         return cur.fetchone()
+
+
+# meiva:note
+# Park the task until `now() + seconds_ahead`; a negative value is a deadline that already passed.
+def _pause(db: psycopg.Connection, tid: int, *, seconds_ahead: float) -> None:
+    with db.cursor() as cur:
+        cur.execute(
+            "UPDATE agent_tasks SET reminders_paused_until = now() + make_interval(secs => %s) "
+            "WHERE id = %s",
+            (seconds_ahead, tid),
+        )
+    db.commit()
 
 
 def _open_notices(db: psycopg.Connection, agent_id: int) -> list[tuple[str, str, bool, int]]:
@@ -476,3 +488,64 @@ def test_service_command_module_is_importable() -> None:
     module = service.cmd.split(" -m ", 1)[1]
     assert importlib.util.find_spec(module) is not None
     assert module.startswith("meiva_builtins.plugins.")
+
+
+# meiva:note
+# A parked task is silenced by both passes, and the deadline is the only thing that stops it: the
+# pause neither clears the counters nor moves `updated_at`, so the same task is due again the moment
+# the deadline passes. The escalation leg honours the same deadline, so a task that already reached
+# the threshold is not escalated to its delegator while it is silenced (task #5311).
+class TestPausedTasks:
+    def test_a_paused_task_is_not_reminded(
+        self,
+        pool: ConnectionPool,
+        db_conn: psycopg.Connection,
+        deliver: TaskNotes,
+        database: Database,
+        event_bus: EventBus,
+    ) -> None:
+        owner = _make_agent(db_conn)
+        tid = _make_task(db_conn, owner=owner, remind_interval_seconds=1800, updated_s_ago=7200)
+        _pause(db_conn, tid, seconds_ahead=3600)
+
+        assert run_reminders(pool, database, event_bus, 3600.0) == 0
+        assert deliver.deliveries() == []
+
+    def test_an_expired_pause_is_due_again(
+        self,
+        pool: ConnectionPool,
+        db_conn: psycopg.Connection,
+        deliver: TaskNotes,
+        database: Database,
+        event_bus: EventBus,
+    ) -> None:
+        owner = _make_agent(db_conn)
+        tid = _make_task(db_conn, owner=owner, remind_interval_seconds=1800, updated_s_ago=7200)
+        _pause(db_conn, tid, seconds_ahead=-60)
+
+        assert run_reminders(pool, database, event_bus, 3600.0) == 1
+        assert deliver.deliveries()[0][0] == owner
+
+    def test_a_paused_task_is_not_escalated(
+        self,
+        pool: ConnectionPool,
+        db_conn: psycopg.Connection,
+        deliver: TaskNotes,
+        database: Database,
+        event_bus: EventBus,
+    ) -> None:
+        parent_owner = _make_agent(db_conn)
+        parent = _make_task(db_conn, owner=parent_owner, remind_interval_seconds=None)
+        owner = _make_agent(db_conn)
+        tid = _make_task(
+            db_conn,
+            owner=owner,
+            parent_id=parent,
+            remind_interval_seconds=1800,
+            updated_s_ago=7200,
+            reminder_count=3,
+        )
+        _pause(db_conn, tid, seconds_ahead=3600)
+
+        assert run_escalate(pool, database, event_bus, 3) == 0
+        assert deliver.deliveries() == []

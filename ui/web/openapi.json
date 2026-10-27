@@ -18216,6 +18216,17 @@
             "type": "string",
             "title": "Priority",
             "default": "P2"
+          },
+          "reminders_paused_until": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reminders Paused Until"
           }
         },
         "type": "object",
@@ -18231,8 +18242,7 @@
           "created_at",
           "updated_at"
         ],
-        "title": "Task",
-        "description": "remind_interval_seconds is seconds without updates before the owner is\nreminded; reminders cannot be disabled."
+        "title": "Task"
       },
       "TaskAssignmentAccepted": {
         "properties": {
@@ -18400,6 +18410,17 @@
             "title": "Reminder Count",
             "default": 0
           },
+          "reminders_paused_until": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reminders Paused Until"
+          },
           "priority": {
             "$ref": "#/components/schemas/Priority"
           },
@@ -18558,6 +18579,17 @@
             "title": "Reminder Count",
             "default": 0
           },
+          "reminders_paused_until": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reminders Paused Until"
+          },
           "ghost": {
             "type": "boolean",
             "title": "Ghost",
@@ -18675,6 +18707,17 @@
             "type": "integer",
             "title": "Reminder Count",
             "default": 0
+          },
+          "reminders_paused_until": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reminders Paused Until"
           },
           "priority": {
             "$ref": "#/components/schemas/Priority"

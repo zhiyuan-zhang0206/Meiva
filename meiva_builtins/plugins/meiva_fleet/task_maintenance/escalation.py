@@ -54,7 +54,8 @@ def _lock_candidates(cur: psycopg.Cursor, threshold: int) -> tuple[list[int], di
     # creator holding the agent identity lock to reference task_id by FK.
     cur.execute(
         "SELECT id,parent_id FROM agent_tasks WHERE status='in_progress' "
-        "AND reminder_count >= %s AND NOT is_root ORDER BY id",
+        "AND reminder_count >= %s AND NOT is_root "
+        "AND (reminders_paused_until IS NULL OR reminders_paused_until <= now()) ORDER BY id",
         (threshold,),
     )
     candidates = cur.fetchall()

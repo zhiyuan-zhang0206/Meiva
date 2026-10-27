@@ -975,6 +975,7 @@ CREATE TABLE agent_tasks (
     last_reminded_at   TIMESTAMPTZ,            -- last time the daemon reminded the owner
     reminder_count      INTEGER NOT NULL DEFAULT 0,  -- reminders sent for the current overdue window
     escalated_at        TIMESTAMPTZ,  -- delegator escalation marker: set by the daemon with the delivered digest; cleared with the counters by a write that changes the work, never by a note-only write (task #5314; the user leg marks itself via its notice)
+    reminders_paused_until TIMESTAMPTZ,  -- deadline until which the reminder and escalation passes skip this task; set through update() under Fleet task_reminder_pause_max_seconds (unset = this home cannot pause). A deadline at or before now() means "not paused": no separate flag (task #5311).
     -- Retired task-cost columns: inactive; retained for expand-contract upgrades.
     token_budget        BIGINT CHECK (token_budget IS NULL OR token_budget > 0),
     usd_budget          DOUBLE PRECISION CHECK (usd_budget IS NULL OR (usd_budget > 0 AND usd_budget < 'Infinity'::double precision)),

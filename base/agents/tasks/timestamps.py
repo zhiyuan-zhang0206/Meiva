@@ -1,13 +1,10 @@
-"""Rendering for the three `agent_tasks` row timestamps — one implementation
-for the SDK task registry (issue #181).
-
-The SDK `Task` object is an agent-facing rendered surface, so its three
-timestamps (created_at / updated_at / last_reminded_at) must carry the bare
-cluster-zone form — the same convention as the `results` notes — never an
-explicit offset. The gateway JSON API and the DB keep the explicit-offset
-forms; only the SDK object is uniform. Lives in `base` so any writer that
-builds a Task from a row cannot drift from the registry.
-"""
+# meiva:note
+# Rendering for the `agent_tasks` row timestamps, one implementation for the SDK task registry
+# (issue #181). The SDK `Task` object is an agent-facing rendered surface, so its timestamps
+# (created_at / updated_at / last_reminded_at / reminders_paused_until) carry the bare cluster-zone
+# form — the same convention as the `results` notes — never an explicit offset. The gateway JSON API
+# and the DB keep the explicit-offset forms; only the SDK object is uniform. Lives in `base` so any
+# writer that builds a Task from a row cannot drift from the registry.
 
 from __future__ import annotations
 
@@ -16,12 +13,13 @@ from typing import Any
 
 from base.clock import Clock
 
-_TS_FIELDS = frozenset({"created_at", "updated_at", "last_reminded_at"})
+_TS_FIELDS = frozenset({"created_at", "updated_at", "last_reminded_at", "reminders_paused_until"})
 
 
+# meiva:note
+# `row`, selected in `col_names` order, with the timestamp columns rendered as bare cluster-zone
+# strings; other columns pass through.
 def render_task_timestamps(row: tuple[Any, ...], col_names: str) -> tuple[Any, ...]:
-    """`row` (selected in `col_names` order) with the three timestamp columns
-    rendered as bare cluster-zone strings; other columns pass through."""
     out: list[Any] = list(row)
     for i, name in enumerate(col_names.split(", ")):
         value = out[i]

@@ -7,11 +7,13 @@
 
 from __future__ import annotations
 
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import cast
 from uuid import uuid4
 
 import psycopg
+import pytest
 
 from base.packages.plugins.config_registration import disk_image_path
 from base.paths.tests.homes import unit_home as unit_home
@@ -159,6 +161,90 @@ def test_reparent_restarts_the_ladder(
     _climb(db_conn, task_id)
     task_registry.update(task_id, parent_id=other_parent.id, operation_key=str(uuid4()))
     _restarted(db_conn, task_id)
+
+
+# meiva:note
+# Parking a task is not progress: `reminders_paused_until` is written to its own column, so it must
+# not touch the ladder it exists to silence, and must not move the due clock either (task #5311).
+def _pause_policy(unit_home: Path, max_seconds: int) -> None:
+    image = disk_image_path("meiva_fleet", home=unit_home)
+    image.parent.mkdir(parents=True, exist_ok=True)
+    image.write_text(
+        FleetConfig(task_reminder_pause_max_seconds=max_seconds).model_dump_json(), encoding="utf-8"
+    )
+
+
+def _paused_until(db: psycopg.Connection, task_id: int) -> datetime | None:
+    with db.cursor() as cur:
+        cur.execute("SELECT reminders_paused_until FROM agent_tasks WHERE id = %s", (task_id,))
+        row = cur.fetchone()
+    assert row is not None
+    return cast("datetime | None", row[0])
+
+
+def test_pause_keeps_the_ladder_and_the_clock(
+    redis_url: str, db_conn: psycopg.Connection, root_task_id: int, unit_home: Path
+) -> None:
+    _pause_policy(unit_home, 2 * 86400)
+    _actor, _owner, task_id = seed_owned_task(db_conn, root_task_id)
+    _age(db_conn, task_id)
+    climbed = _climbed(db_conn, task_id)
+    deadline = datetime.now(UTC) + timedelta(hours=1)
+    task_registry.update(task_id, reminders_paused_until=deadline, operation_key=str(uuid4()))
+    _kept(db_conn, task_id, climbed)
+    assert _age_days(db_conn, task_id) > 29
+    stored = _paused_until(db_conn, task_id)
+    assert stored is not None
+    assert abs((stored - deadline).total_seconds()) < 1
+
+
+def test_pause_past_the_bound_is_rejected(
+    redis_url: str, db_conn: psycopg.Connection, root_task_id: int, unit_home: Path
+) -> None:
+    _pause_policy(unit_home, 3600)
+    _actor, _owner, task_id = seed_owned_task(db_conn, root_task_id)
+    with pytest.raises(ValueError, match="task_reminder_pause_max_seconds"):
+        task_registry.update(
+            task_id,
+            reminders_paused_until=datetime.now(UTC) + timedelta(days=1),
+            operation_key=str(uuid4()),
+        )
+    assert _paused_until(db_conn, task_id) is None
+
+
+# meiva:note
+# A home that never chose a bound cannot park anything: the request fails and names the key, rather
+# than a default nobody decided.
+def test_pause_needs_a_bound_on_this_home(
+    redis_url: str, db_conn: psycopg.Connection, root_task_id: int
+) -> None:
+    _actor, _owner, task_id = seed_owned_task(db_conn, root_task_id)
+    with pytest.raises(ValueError, match="cannot pause task reminders"):
+        task_registry.update(
+            task_id,
+            reminders_paused_until=datetime.now(UTC) + timedelta(hours=1),
+            operation_key=str(uuid4()),
+        )
+
+
+# meiva:note
+# The column is the deadline itself, so a past one means "not paused": resuming needs no second verb
+# and no second flag.
+def test_a_past_deadline_resumes(
+    redis_url: str, db_conn: psycopg.Connection, root_task_id: int, unit_home: Path
+) -> None:
+    _pause_policy(unit_home, 2 * 86400)
+    _actor, _owner, task_id = seed_owned_task(db_conn, root_task_id)
+    climbed = _climbed(db_conn, task_id)
+    task_registry.update(
+        task_id,
+        reminders_paused_until=datetime.now(UTC) - timedelta(minutes=1),
+        operation_key=str(uuid4()),
+    )
+    _kept(db_conn, task_id, climbed)
+    stored = _paused_until(db_conn, task_id)
+    assert stored is not None
+    assert stored < datetime.now(UTC)
 
 
 def test_policy_can_name_the_note_kind(

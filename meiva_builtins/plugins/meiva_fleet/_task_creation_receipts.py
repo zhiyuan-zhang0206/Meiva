@@ -35,7 +35,14 @@ def replay_creation(
         return None
     if row[0] != request:
         raise ValueError("idempotency key identifies a different task creation")
-    return validate_snapshot(row[1])
+    # meiva:note
+    # A receipt written before 2026-10-28 predates `reminders_paused_until`; the column is nullable
+    # and absent means "never paused", so the stored snapshot replays with that field defaulted.
+    # Only the stored copy is upcast — `validate_task_snapshot` stays strict for a live snapshot,
+    # where a missing field is a caller's omission (task #5311).
+    stored = dict(row[1])
+    stored.setdefault("reminders_paused_until", None)
+    return validate_snapshot(stored)
 
 
 def record_creation(
