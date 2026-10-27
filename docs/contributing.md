@@ -31,19 +31,14 @@ default home and can target a running deployment.
 ## Change and verify
 
 Implement a focused change with its related tests and current documentation.
-**The change record is the history itself.** The merge queue rebases a PR onto `main`
-(the repository allows no other merge method): every commit of the branch lands exactly as
-you pushed it, an empty commit is dropped, and no merge commit is accepted. Each commit's
-message is therefore the entry a reader meets in `git log`, in the release notes page
-generated from a commit range (`gh compare`), and in the commit `git blame` lands on. The PR
-title and description never enter the history, so each commit message has to be accurate and
-complete on its own: what changed, for whom, and the numbers a reader would otherwise have to
-take from the PR. Rewrite a message with `git commit --amend` (or an interactive rebase of
-your own branch) before you push; a figure that was true at the first push and not at the
-last is corrected in the message, not only in the PR body. A branch that tells its story in
-several commits gives each one a self-contained message and keeps every commit green, since
-each one is a point on `main`. There is no changelog file to append to and no per-entry file
-to add.
+**The change record is the PR.** The merge queue squashes a PR into one commit on `main`
+whose title is the PR title and whose message is the PR description. That commit is the entry
+a reader meets in `git log`, in the release notes page generated from a commit range
+(`gh compare`), and in the commit `git blame` lands on, so the description is the permanent
+record: write it for whoever reads it months later (what changed, for whom, the accounting of any
+debt, the behavior that changes and how it was verified) and keep it true when the branch
+changes. The commit messages inside the branch do not reach `main`, and a branch holds no
+merge commit. There is no changelog file to append to and no per-entry file to add.
 
 Keep shared facts in their owning module; use existing third-party capabilities
 rather than creating a second framework or registry. Resolve generated-file
@@ -146,12 +141,12 @@ choice, discuss it with the user before changing that choice.
 ## Submit the PR
 
 Push the branch and open a PR against `main`. Explain the problem, resulting
-behavior, validation and known gaps. Its title is the human entry point beside the
-diff; the commits carry the record that stays in `git log`. Use a file tree or
-control-flow explanation when it helps readers understand a larger change; no fixed
-template is required.
+behavior, validation and known gaps; the description becomes the squash commit's message.
+Its title becomes the squash commit's subject, so it is also the change note later readers
+and the release notes see; write it as one. Use a file tree or control-flow explanation
+when it helps readers understand a larger change; no fixed template is required.
 Address relevant CI failures and review feedback. Distinguish successful execution
-from missing, skipped or incomplete verification. The queue lands the PR once the checks pass.
+from missing, skipped or incomplete verification. The queue squashes the PR once the checks pass.
 
 Keep the checkout while it contains needed work. Before removing a worktree,
 check for live sessions or processes anchored there with
