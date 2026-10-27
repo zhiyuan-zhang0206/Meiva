@@ -112,26 +112,39 @@ async def test_gate_native_child_readiness_restart_and_stop(short_tmp: Path) -> 
             set_field("frontend_healthcheck_url", prior_url)
 
 
-async def test_gate_protocol_rejects_another_homes_payload() -> None:
-    async def foreign_health(_body: bytes) -> tuple[int, bytes, str]:
-        return 200, b'{"name":"gate","home":"/foreign"}', "application/json"
+async def _probe_gate_answering_for(answering: Path, *, probing: Path) -> DaemonProbe:
+    payload = json.dumps({"name": "gate", "home": str(answering)}).encode()
 
-    foreign = await start_daemon_http(
+    async def health(_body: bytes) -> tuple[int, bytes, str]:
+        return 200, payload, "application/json"
+
+    server = await start_daemon_http(
         host="127.0.0.1",
         port=0,
         health_response=lambda: (200, b"{}"),
-        extra_routes={("GET", "/__meiva/healthz"): foreign_health},
+        extra_routes={("GET", "/__meiva/healthz"): health},
     )
-    port = foreign.sockets[0].getsockname()[1]
+    port = server.sockets[0].getsockname()[1]
     prior_url = get_field("frontend_healthcheck_url")
     set_field("frontend_healthcheck_url", f"http://127.0.0.1:{port}")
     try:
-        verdict = await asyncio.to_thread(gate.probe)
-        assert verdict.verdict.value == "port-taken"
+        return await asyncio.to_thread(gate.probe, home=probing)
     finally:
         set_field("frontend_healthcheck_url", prior_url)
-        foreign.close()
-        await foreign.wait_closed()
+        server.close()
+        await server.wait_closed()
+
+
+async def test_gate_protocol_rejects_another_homes_payload(tmp_path: Path) -> None:
+    verdict = await _probe_gate_answering_for(Path("/foreign"), probing=tmp_path)
+    assert verdict.verdict.value == "port-taken"
+
+
+async def test_gate_protocol_accepts_the_payload_of_the_home_it_was_handed(
+    tmp_path: Path,
+) -> None:
+    verdict = await _probe_gate_answering_for(tmp_path, probing=tmp_path)
+    assert verdict.alive, verdict.detail
 
 
 def test_gate_health_is_independent_of_auth_and_application(servers: Servers) -> None:

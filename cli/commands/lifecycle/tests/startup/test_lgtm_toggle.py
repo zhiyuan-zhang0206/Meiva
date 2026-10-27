@@ -59,7 +59,7 @@ def test_on_declares_the_station_before_the_start_sees_the_operators_selection(
 ) -> None:
     run = start_run
     run.declare(gateway=True, agent_runner=False)
-    marker = lgtm_host_marker()
+    marker = lgtm_host_marker(run.home)
 
     with pytest.raises(ValueError, match=r"unknown service selection: typo$"):
         _toggle(run, "on", only=(*STATION, "typo"))
@@ -72,7 +72,7 @@ def test_off_retracts_the_station_and_keeps_its_data(start_run: StartRun) -> Non
     run = start_run
     with gateway_listener() as gateway:
         run.declare(gateway=True, agent_runner=False, gateway_url=gateway.url)
-        marker = lgtm_host_marker()
+        marker = lgtm_host_marker(run.home)
         marker.touch()
         data = marker.parent / "loki-data"
         data.write_bytes(b"durable history")
@@ -88,7 +88,7 @@ def test_off_retracts_the_station_and_keeps_its_data(start_run: StartRun) -> Non
 def test_off_hands_the_operators_selection_to_the_start_unchanged(start_run: StartRun) -> None:
     run = start_run
     run.declare(gateway=True, agent_runner=False)
-    marker = lgtm_host_marker()
+    marker = lgtm_host_marker(run.home)
     marker.touch()
 
     with pytest.raises(ValueError, match=r"unknown service selection: typo$"):
@@ -109,7 +109,7 @@ def test_a_selection_that_contradicts_the_toggle_is_refused_before_any_change(
     which: str, selection: dict[str, tuple[str, ...]], message: str, start_run: StartRun
 ) -> None:
     run = start_run
-    marker = lgtm_host_marker()
+    marker = lgtm_host_marker(run.home)
     if which == "off":
         marker.touch()
 

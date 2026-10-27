@@ -20,7 +20,6 @@ from typing import Any, assert_never
 from base.clock import Clock
 from base.cluster.machine import MachineIdentityReader, MachineRoleMissing, MachineRoles
 from base.daemon.health import DaemonProbe
-from base.paths import meiva_home
 from services.supervision.healthchecks.plans.lgtm_plan import (
     NANOSECONDS_PER_SECOND,
     Accepted,
@@ -51,10 +50,11 @@ _WRITE_PROBE_END_LAG_SECONDS = 1
 _WRITE_PROBE_RETRY_BACKOFF_SECONDS = (1, 2)
 
 
-def lgtm_host_marker() -> Path:
-    """The machine-identity marker that designates THIS host as the one running
-    the local LGTM backends (`$MEIVA_HOME/lgtm-host`, operator-created once)."""
-    return meiva_home() / "lgtm-host"
+# meiva:note
+# The machine-identity marker that designates the host of `home` as the one running the local
+# LGTM backends (`<home>/lgtm-host`, operator-created once).
+def lgtm_host_marker(home: Path) -> Path:
+    return home / "lgtm-host"
 
 
 # meiva:note
@@ -75,7 +75,9 @@ def lgtm_roles(machine: MachineIdentityReader) -> MachineRoles | None:
 # `roles` is the unit's capability set, or None while it has no configured role (`lgtm_roles`):
 # then the marker alone decides.
 def is_lgtm_host(home: Path, *, roles: MachineRoles | None) -> bool:
-    return (home / "lgtm-host").exists() or (roles is not None and "observability-station" in roles)
+    return lgtm_host_marker(home).exists() or (
+        roles is not None and "observability-station" in roles
+    )
 
 
 # meiva:note

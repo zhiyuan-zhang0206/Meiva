@@ -130,7 +130,7 @@ def build_services(
             capabilities=GATEWAY,
             requires_db=False,
             curl_url=f"http://127.0.0.1:{entry_port()}/__meiva/healthz",
-            identity_probe=probe_gate,
+            identity_probe=partial(probe_gate, home=home),
             healthcheck_module="services.supervision.healthchecks.gate",
             # meiva:note
             # The gate names its home in /__meiva/healthz, so a foreign gate occupying the
