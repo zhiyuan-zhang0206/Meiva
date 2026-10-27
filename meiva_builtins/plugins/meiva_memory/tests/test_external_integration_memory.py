@@ -27,7 +27,7 @@ from base.events.live.bus import EventBus
 from base.host.env.agent_slices import AgentSlices
 from base.native_process.runtime_incarnation import RuntimeIncarnation
 from base.packages.plugins.extensions import ExtensionRegistry
-from base.paths import workspace_dir_readonly
+from base.paths import workspace_path
 from meiva import impersonation
 from meiva.boot import derived_clients
 from meiva.sdk_surface import install, process_context
@@ -141,8 +141,8 @@ def test_external_personal_path_uses_borrowed_identity(
     with impersonation.attach(lease["id"]):
         personal = meiva.memory.PERSONAL_PATH
 
-    assert personal == workspace_dir_readonly(owner.agent_id, home=unit_home) / "memory"
-    assert not workspace_dir_readonly(stale_id, home=unit_home).exists()
+    assert personal == workspace_path(unit_home, owner.agent_id) / "memory"
+    assert not workspace_path(unit_home, stale_id).exists()
 
 
 # meiva:note

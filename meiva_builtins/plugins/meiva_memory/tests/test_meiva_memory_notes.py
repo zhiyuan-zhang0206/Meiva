@@ -13,7 +13,7 @@ from base.config.tests.configuration import defaults
 from base.host.env.agent_slices import AgentSlices
 from base.packages.plugin_providers import build_model_catalog
 from base.packages.plugins.extensions import ContextNote, ExtensionRegistry
-from base.paths import meiva_home, memory_dir, workspace_dir, workspace_dir_readonly
+from base.paths import meiva_home, memory_dir, workspace_dir, workspace_path
 from base.paths.home import resolve_meiva_home
 from meiva.tests.fixtures.pin_agent import pin_agent, pin_no_identity
 
@@ -240,7 +240,7 @@ def test_personal_index_uses_hosted_turn_identity(
 
     assert note is not None
     assert "Agent 29's own rule" in note.text
-    assert not workspace_dir_readonly(17, home=unit_home).exists()
+    assert not workspace_path(unit_home, 17).exists()
 
 
 def test_personal_index_skips_unestablished_identity(

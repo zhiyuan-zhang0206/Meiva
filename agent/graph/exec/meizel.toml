@@ -20,6 +20,3 @@ exports = ["node.py", "output.py", "process.py", "tests"]
 "_notes.py" = "strict"
 "_poll.py" = "strict"
 "_result.py" = "strict"
-
-[debt.ambient-read]
-"output.py#home base.paths.workspace_dir_readonly" = 1

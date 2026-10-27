@@ -41,9 +41,9 @@ an alias assigned to a variable is not. A reader has one kind, the one a caller 
 A reader returns something the world decides (the environment, a home path, the platform, a process
 id, the current time, a random value, the process settings or a handle built from them), or is the
 process-wide object that decides it (`SYSTEM_TIMERS`, the `Clock` that wraps it). It is listed when
-it is defined in a root, or is a helper over one in the module that holds it (the zero-argument
-`base.paths.logs_dir()` calls `meiva_home()` in its own module, a call the scanner does not count, so
-the helper needs an entry of its own), and files that are not roots use it. A function in a file that
+it is defined in a root, or is a helper over one in the module that holds it (`base.paths.meiva_home()`
+calls `resolve_meiva_home()` in its own module, a call the scanner does not count, so the helper
+needs an entry of its own), and files that are not roots use it. A function in a file that
 is not a root that merely calls a reader needs no entry: the read is recorded there.
 
 ## What is not followed

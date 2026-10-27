@@ -8,7 +8,7 @@ from langchain_core.messages import HumanMessage
 from agent.messages import NoteTag, system_note_message
 from base.agents.context import MeivaContext
 from base.log import logger
-from base.paths import workspace_dir_readonly
+from base.paths import workspace_path
 
 from .inherited_blocks import (
     Ancestor,
@@ -45,7 +45,7 @@ def _ancestor_chain(agent_id: int, ctx: MeivaContext) -> tuple[Ancestor, ...] | 
 def _read_entries(ancestors: tuple[Ancestor, ...], home: Path) -> list[EntryBlocks]:
     entries: list[EntryBlocks] = []
     for ancestor in ancestors:
-        mem_dir = workspace_dir_readonly(ancestor.agent_id, home=home) / _PER_AGENT_MEMORY_DIRNAME
+        mem_dir = workspace_path(home, ancestor.agent_id) / _PER_AGENT_MEMORY_DIRNAME
         if not mem_dir.is_dir():
             continue
         for entry in sorted(mem_dir.glob("*.md")):

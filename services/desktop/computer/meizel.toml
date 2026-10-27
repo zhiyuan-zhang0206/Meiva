@@ -27,5 +27,4 @@ exports = ["config.py", "execute.py", "input.py", "mcp_daemon.py", "mcp_wrapper.
 "mcp_wrapper.py" = { kinds = ["environ", "home", "settings"], why = "_agent_id() reads the ambient MEIVA_AGENT_ID to stamp computer-mcp requests; same identity channel, not Settings-managed; the stdio wrapper process entry reads the home whose daemon socket it dials; Service or operator process entry boots configuration before composing its resources" }
 
 [debt.ambient-read]
-"screen.py#home base.paths.logs_dir" = 1
 "session.py#clock asyncio.loop.time" = 2

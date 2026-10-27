@@ -123,19 +123,9 @@ bus = [
 "meiva.boot.process_disable_entries()" = "reads the SDK disable entries from the live os.environ"
 
 [ambient-readers.home]
-"base.paths.gateway_memory_dir()" = "a directory under meiva_home()"
-"base.paths.harness_registrations_dir()" = "a directory under meiva_home()"
-"base.paths.harness_sessions_dir()" = "a directory under meiva_home()"
 "base.paths.home.resolve_meiva_home()" = "reads MEIVA_HOME from os.environ and falls back to Path.home()"
 "base.paths.home.user_home()" = "returns Path.home()"
-"base.paths.logs_dir()" = "a directory under meiva_home()"
 "base.paths.meiva_home()" = "resolve_meiva_home() plus creating the directory"
-"base.paths.memory_dir()" = "a directory under meiva_home()"
-"base.paths.permissions_helper_app_dir()" = "a directory under meiva_home()"
-"base.paths.plugins_dir()" = "a directory under meiva_home()"
-"base.paths.workspace_dir()" = "a directory under meiva_home()"
-"base.paths.workspace_dir_readonly()" = "a directory under meiva_home()"
-"base.paths.workspaces_root()" = "a directory under meiva_home()"
 "meiva.files.workspace_base()" = "the agent's workspace directory, or the home when no agent is bound"
 
 [ambient-readers.platform]

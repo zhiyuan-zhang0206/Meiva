@@ -64,7 +64,7 @@ home = meiva_home()  # $MEIVA_HOME, else ~/.meiva
 cutoff = (datetime.now(UTC) - timedelta(days=1)).isoformat()
 reg = json.loads((home / "installed.json").read_text())  # install registry
 print([p["name"] for p in reg["packages"] if (p.get("updated_at") or "") >= cutoff])
-for d in plugins_dir().iterdir():                         # hand-cloned plugin repos
+for d in plugins_dir(home=home).iterdir():                # hand-cloned plugin repos
     if (d / ".git").is_dir():
         log = subprocess.run(["git", "-C", str(d), "log", "--since=7 days ago",
                               "--pretty=%h %cI %s"], capture_output=True, text=True).stdout
