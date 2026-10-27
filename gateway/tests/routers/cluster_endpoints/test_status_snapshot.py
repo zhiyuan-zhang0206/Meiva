@@ -35,7 +35,9 @@ from ops import cluster_status
 def _snapshot(
     database: Database, machine: MachineIdentityReader, image: LoadedCommit
 ) -> cluster_status.ClusterStatus:
-    return cluster_status.status_snapshot(database, image=image, local_machine=machine)
+    return cluster_status.status_snapshot(
+        database, image=image, local_machine=machine, home=resolve_meiva_home()
+    )
 
 
 @pytest.mark.usefixtures("serving_gate")

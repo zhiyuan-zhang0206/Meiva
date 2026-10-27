@@ -197,7 +197,7 @@ def test_a_runner_reports_its_agents_shells_daemons_and_resources(
     pidfile.write_text(str(os.getpid()))
 
     status = cluster_status.status_snapshot(
-        database, pool, image=_image(tmp_path), local_machine=machine_identity
+        database, pool, image=_image(tmp_path), local_machine=machine_identity, home=unit_home
     )
 
     assert status.machine_name == "runner-a"
@@ -234,7 +234,7 @@ def test_a_gateway_probes_no_agent_host_and_counts_no_agents(
     pidfile.write_text(str(os.getpid()))
 
     status = cluster_status.status_snapshot(
-        database, image=_image(tmp_path), local_machine=machine_identity
+        database, image=_image(tmp_path), local_machine=machine_identity, home=unit_home
     )
 
     assert status.serve_gateway is True
@@ -253,7 +253,7 @@ def test_a_runner_whose_agent_host_left_no_live_pid_reads_offline(
     machine_identity.set(name="runner-a", role=_RUNNER)
 
     status = cluster_status.status_snapshot(
-        database, image=_image(tmp_path), local_machine=machine_identity
+        database, image=_image(tmp_path), local_machine=machine_identity, home=unit_home
     )
 
     assert status.agent_host_online is False
@@ -271,7 +271,7 @@ def test_a_snapshot_with_an_unreachable_database_still_answers_but_claims_no_rea
     pool.close()
 
     status = cluster_status.status_snapshot(
-        database, pool, image=_image(tmp_path), local_machine=machine_identity
+        database, pool, image=_image(tmp_path), local_machine=machine_identity, home=unit_home
     )
 
     assert (status.paused, status.paused_reason) == (True, "no_state")

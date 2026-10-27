@@ -34,7 +34,6 @@ from base.host.env.registry import process_environment
 from base.host.proc import process_alive
 from base.host.resource_sample import ResourceSample, resource_sample
 from base.native_process.loaded_commit import LoadedCommit
-from base.paths import resolve_meiva_home
 from base.sessions.backend import get_backend, get_shell_backend
 from ops.cluster_status.model import (
     AGENT_SHELL_RE as AGENT_SHELL_RE,
@@ -180,11 +179,11 @@ def status_snapshot(
     *,
     image: LoadedCommit,
     local_machine: MachineIdentityReader,
+    home: Path,
 ) -> ClusterStatus:
     machine_name = local_machine.name()
     roles = local_machine.role()
     runner = "agent-runner" in roles
-    home = resolve_meiva_home()
     head_sha = checkout_head_sha(home / "source", environ=process_environment())
     agent_host_online = (
         check_pidfile(str(ServiceEndpoints.from_settings().of("agent_host").pidfile))[0]

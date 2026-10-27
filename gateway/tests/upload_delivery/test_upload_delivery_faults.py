@@ -21,14 +21,15 @@ from base.agents.upload_delivery.models import (
     CopyProof,
     ReceiveRequest,
     UploadDeliveryConflictError,
+    current_unit,
 )
 from base.cluster.machine import MachineIdentityReader
 from base.cluster.machine.tests.identity import machine_identity as machine_identity
-from base.config import get_field, set_field
 from base.config.service_read import ConfigAuthority
 from base.db.tests.lost_ack import LostAckPool
 from base.host.db_authority.unit import UnitIdentity
 from base.host.system.tests.fake_commands import fake_host
+from base.paths import resolve_meiva_home
 from gateway.app import cluster_auth_middleware
 from gateway.tests.auth.gateway_config import GatewayTestClient, gateway_test_client
 from gateway.tests.support.db_faults.insert_fault import failing_insert
@@ -215,6 +216,8 @@ def test_explicit_native_request_and_proof_versions_fail_fast(
             image=client.app.state.process_image,
             local_machine=machine_identity,
             host=fake_host(),
+            home=resolve_meiva_home(),
+            receiver=_receiver_config(client, request.target),
         )
 
 
@@ -296,7 +299,7 @@ async def test_real_remote_receiver_after_fsync_response_loss_one_inbound(
     machine_identity: MachineIdentityReader,
 ):
     client, agent = uploaded_agent
-    source_unit = receiver.current_unit(local_machine=machine_identity.name())
+    source_unit = current_unit(local_machine=machine_identity.name())
     target = source_unit.model_copy(update={"machine": "remote", "home": "/remote/unit"})
     remote_home = tmp_path / "remote-disk"
     with _source_gateway(client, client.app.state.db_pool, timeout=1.0) as source_url:
@@ -351,7 +354,7 @@ async def test_unknown_remote_kind_holds(
     machine_identity: MachineIdentityReader,
 ):
     client, agent = uploaded_agent
-    unit = receiver.current_unit(local_machine=machine_identity.name())
+    unit = current_unit(local_machine=machine_identity.name())
     # meiva:note
     # A runner of the previous version answers the way its dispatcher does for a kind it lacks.
     old_runner = failed({"error": "unknown kind: 'upload-receive-v1'"})
@@ -491,22 +494,21 @@ def test_receiver_changed_manifest_and_deleted_source_url_fail_without_false_rea
     path = Path(proof.directory) / item.name
     path.unlink()
 
-    previous_url = get_field("gateway_url")
     with _source_gateway(client, client.app.state.db_pool, timeout=5.0) as source_url:
-        set_field("gateway_url", source_url)
-        try:
-            status, result = dispatch_sync(
-                "upload-receive-v1",
-                request.model_dump(),
-                pool=client.app.state.db_pool,
-                db=client.app.state.db,
-                authority=config_authority,
-                image=client.app.state.process_image,
-                local_machine=machine_identity,
-                host=fake_host(),
-            )
-        finally:
-            set_field("gateway_url", previous_url)
+        status, result = dispatch_sync(
+            "upload-receive-v1",
+            request.model_dump(),
+            pool=client.app.state.db_pool,
+            db=client.app.state.db,
+            authority=config_authority,
+            image=client.app.state.process_image,
+            local_machine=machine_identity,
+            host=fake_host(),
+            home=resolve_meiva_home(),
+            receiver=replace(
+                config, access=replace(client.app.state.gateway_access, gateway_url=source_url)
+            ),
+        )
     assert status == OpStatus.FAILED and result["reason"] == "upload-source-unavailable-v1"
     assert not path.exists()
 
@@ -583,7 +585,7 @@ async def test_same_machine_other_home_requires_native_rpc_not_local_shortcut(
     machine_identity: MachineIdentityReader,
 ):
     client, agent = uploaded_agent
-    unit = receiver.current_unit(local_machine=machine_identity.name())
+    unit = current_unit(local_machine=machine_identity.name())
     target = unit.model_copy(update={"home": unit.home + "-second"})
     config = replace(_receiver_config(client, target), quota_bytes=5)
     receive = _receiver_op(client, config)
