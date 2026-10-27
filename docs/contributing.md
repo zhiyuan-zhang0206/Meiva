@@ -148,7 +148,7 @@ diff; the commits carry the record that stays in `git log`. Use a file tree or
 control-flow explanation when it helps readers understand a larger change; no fixed
 template is required.
 Address relevant CI failures and review feedback. Distinguish successful execution
-from missing, skipped or incomplete verification. Maintainers choose how to merge.
+from missing, skipped or incomplete verification. The queue lands the PR once the checks pass.
 
 Keep the checkout while it contains needed work. Before removing a worktree,
 check for live sessions or processes anchored there with
