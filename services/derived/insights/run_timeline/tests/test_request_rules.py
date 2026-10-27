@@ -135,6 +135,12 @@ def test_a_range_past_the_history_names_how_long_the_history_is() -> None:
     assert message_page_stop(3, 4, 50, 5) == 4
 
 
+def test_the_message_just_past_the_end_of_the_history_is_not_found() -> None:
+    error = refusal(message_page_stop, 0, 5, 1, 5)
+
+    assert (error.status, error.detail) == (404, "message 5 not found: history has 5")
+
+
 def test_the_agents_filter_is_distinct_and_ascending() -> None:
     assert parse_agent_ids("6657,405, 405,12") == [12, 405, 6657]
 
@@ -206,3 +212,54 @@ def test_the_router_answers_a_refusal_with_its_status_detail_and_headers() -> No
     assert caught.value.status_code == 503
     assert caught.value.detail == {"code": "timeline_index_queued", "message": "indexing"}
     assert caught.value.headers == {"Retry-After": "2"}
+
+
+def test_a_bad_window_query_is_refused_before_the_snapshot_is_read() -> None:
+    unreachable = TimelineRequestError(503, {"code": "timeline_index_queued", "message": "later"})
+
+    with pytest.raises(HTTPException) as caught:
+        route.get_run_timeline(_request(_Refusing(unreachable)), 7, NOON, None, 3, (None, None))
+
+    assert caught.value.status_code == 422
+    assert caught.value.detail == "recent_hours cannot be combined with from/to"
+
+
+def test_the_links_route_answers_a_bad_agents_filter_before_a_bad_window() -> None:
+    with pytest.raises(HTTPException) as caught:
+        route.get_run_timeline_links(_request(object()), "1,x", NAIVE, NOON)
+
+    assert (caught.value.status_code, caught.value.detail) == (
+        422,
+        "agents must be comma-separated integers",
+    )
+
+
+def test_the_links_route_answers_a_window_without_a_zone() -> None:
+    with pytest.raises(HTTPException) as caught:
+        route.get_run_timeline_links(_request(object()), "1,2", NAIVE, NOON)
+
+    assert (caught.value.status_code, caught.value.detail) == (
+        422,
+        "from and to must include a timezone offset",
+    )
+
+
+def test_the_context_route_answers_a_refusal_of_the_reader_as_http() -> None:
+    class Missing:
+        def get(self, _agent: int, _snapshot: str | None = None) -> object:
+            return SimpleNamespace(sessions=1)
+
+        def request(self, _cut: object, _at: int) -> object:
+            raise TimelineRequestError(404, "the agent has made no LLM request")
+
+    state = _request(Missing()).scope["app"].state
+    state.insights_config = SimpleNamespace(default_model="claude-opus-5")
+    request = Request({"type": "http", "app": SimpleNamespace(state=state)})
+
+    with pytest.raises(HTTPException) as caught:
+        route.get_run_timeline_context(request, 7, 0, None)
+
+    assert (caught.value.status_code, caught.value.detail) == (
+        404,
+        "the agent has made no LLM request",
+    )

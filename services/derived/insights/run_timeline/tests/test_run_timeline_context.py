@@ -34,6 +34,7 @@ from services.derived.insights.config import InsightsConfig
 from services.derived.insights.run_timeline import context, router
 from services.derived.insights.run_timeline.history import HistoryView
 from services.derived.insights.run_timeline.projection.derive import segment_view
+from services.derived.insights.run_timeline.request_rules import TimelineRequestError
 from services.derived.insights.run_timeline.schemas import RunTimelineContext
 from services.derived.insights.run_timeline.tokens import BlockContext, BlockContexts
 
@@ -240,7 +241,7 @@ class Views:
     def request(self, _cut: object, at: int):
         found = context.request_at(context.llm_requests(self.view), at)
         if found is None:
-            raise HTTPException(404, "the agent has made no LLM request")
+            raise TimelineRequestError(404, "the agent has made no LLM request")
         history = self.view.history
         start = history.segment_starts[found.session]
         stop = (

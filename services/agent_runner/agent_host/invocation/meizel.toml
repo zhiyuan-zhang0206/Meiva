@@ -6,8 +6,8 @@ exports = ["checkpoints.py", "completion_decisions.py", "driver.py", "failure_sh
 
 [purity]
 "." = "strict"
-"__init__.py" = { mode = "none", why = "the shell that runs the plans in completion_decisions.py against the database and the graph: it flushes the checkpoint, attaches the trace, settles the handoff and applies the lifecycle command inside the database phase, and decides nothing the plan did not name" }
+"__init__.py" = { mode = "none", why = "the shell that runs the plans in completion_decisions.py against the database and the graph: it flushes the checkpoint, attaches the trace, settles the handoff and applies the lifecycle command inside the database phase; what is left in it is the order of the awaits and the choice to attach a failure report when the aborted turn collected errors" }
 "checkpoints.py" = "strict"
 "completion_decisions.py" = "strict"
-"driver.py" = { mode = "none", why = "the shell that runs one hosted invocation under a task group around its event publisher; which failure leaves it is decided by failure_shapes.py" }
+"driver.py" = { mode = "none", why = "the shell that runs one hosted invocation under a task group around its event publisher; which failure leaves it is decided by failure_shapes.py, and what is left is the order of the awaits and the arm taken for the exception type the publisher close raised" }
 "failure_shapes.py" = "strict"
