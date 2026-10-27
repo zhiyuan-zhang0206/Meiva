@@ -9,8 +9,8 @@ tags: [base, memory, git]
 
 `memory_repo.py` owns Git operations and bundle installation on an explicit
 checkout. The builtin memory plugin setup owns provisioning decisions. Steward and arbiter agents own authoring, push/PR and consolidation;
-this module does not schedule those responsibilities. The provisioning root captures paths from the foundation path layer, avoiding
-a dependency on the SDK's memory facade. Repository operations do not discover
+this module does not schedule those responsibilities. The plugin's scaffold derives its paths from the home in its `ScaffoldFacts`
+through the foundation path layer, avoiding a dependency on the SDK's memory facade. Repository operations do not discover
 a home, global settings or a default working directory.
 
 ## Refresh the reader's checkout
@@ -38,18 +38,16 @@ The fresh checkout is prepared in a temporary directory and moved into place
 after removing pre-init leftovers; that removal and replacement are not one
 atomic transaction.
 Initialization does not select this path for an authored Git checkout. Gateway-capable first boot can initialize locally
-because its gateway need not be serving yet. `# ambient: B2` still identifies
-the existing bootstrap access reader, now at the builtin setup root, for the
-exact caller inventory in `base/cluster/machine/tests/test_ambient_callers.py`.
-The operation receives its `GatewayAccess` explicitly, but the root still uses
-the transitional global authority; this does not complete the CommandRuntime
-configuration/home bridge to external plugin scaffolds.
+because its gateway need not be serving yet. The operation receives its `GatewayAccess`
+explicitly: the builtin scaffold takes it from the `ScaffoldFacts` that `meiva memory init`
+builds from its command runtime, and no `# ambient: B2` caller remains in
+`base/cluster/machine/tests/test_ambient_callers.py`.
 
 `init(root, branch, remote)` performs a selected remote clone, branch selection
 or publication and missing gitignore commit. `reconcile_initialized` checks a
 selected existing checkout; only a caller with the gateway main-switch
-capability may leave its old branch. The root chooses local initialization,
-remote cloning or gateway bootstrap only after checking the captured target.
+capability may leave its old branch. The scaffold chooses local initialization,
+remote cloning or gateway bootstrap only after checking the target derived from its facts.
 `is_initialized(root=...)` retains its `.git` directory test, without extending
 it to Git worktree marker files.
 

@@ -246,7 +246,7 @@ def reconcile_initialized(
 
 def init(*, root: Path, branch: str, remote: str) -> None:
     # meiva:note
-    # Clone the selected remote into the selected checkout, select or publish the requested branch, and seed the shared gitignore only when missing. The provisioning root decides whether a checkout needs initialization before calling this operation.
+    # Clone the selected remote into the selected checkout, select or publish the requested branch, and seed the shared gitignore only when missing. The plugin's scaffold decides whether a checkout needs initialization before calling this operation.
     # meiva:link base/deploy/git/docs/memory-repo.meiva.okf.md
     subprocess.run(  # noqa: S603
         ["git", "clone", remote, str(root)],

@@ -10,12 +10,11 @@ _AMBIENT = "base/cluster/machine/ambient.py"
 
 CALLERS: dict[str, tuple[str, int]] = {
     "meiva_builtins/skills/platform/meiva-self-evolution/scripts/collect.py": ("O", 1),
-    "meiva_builtins/plugins/meiva_memory/setup.py": ("B2", 1),
     "ops/cluster/rpc.py": ("O", 1),
     "scripts/entrypoints/agent.py": ("O", 1),
     "services/agent_runner/agent_ops/boot.py": ("S", 1),
 }
-_BATCHES = {"B2", "S", "O"}
+_BATCHES = {"S", "O"}
 
 
 def _is_test(path: str) -> bool:
