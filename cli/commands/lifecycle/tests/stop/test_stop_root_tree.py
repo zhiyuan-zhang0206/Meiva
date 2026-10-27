@@ -9,6 +9,9 @@
 from __future__ import annotations
 
 import io
+import os
+import plistlib
+import subprocess
 import time
 from collections.abc import Callable, Sequence
 from dataclasses import replace
@@ -18,11 +21,13 @@ import psycopg
 import pytest
 
 from base.daemon.health import DaemonProbe
+from base.host.system.tests.fake_commands import DARWIN_ARM64, FakeCommands, Reply, fake_host
 from base.host.tests.short_tmp import short_tmp as short_tmp
 from base.native_process.root_control.client import RootClientError
 from base.telemetry import EventPipeline
 from cli.commands.lifecycle import root_driver
 from cli.commands.lifecycle.stop import do_stop
+from cli.commands.lifecycle.stop.extras import stop_permissions_helper
 from cli.commands.lifecycle.stop.restart import (
     admit_agent_host_restart,
     cmd_restart_agent_host,
@@ -34,12 +39,13 @@ from cli.commands.lifecycle.tests.stop.stop_support import (
     stop_request,
 )
 from cli.database import OperatorDatabaseFactory
-from cli.database.runtime import CommandRuntime
+from cli.database.runtime import CommandRuntime, UserSession
 from cli.database.tests.cli_tests import operator_database as operator_database
 from cli.database.tests.cli_tests import operator_pipeline as operator_pipeline
 from cli.database.tests.command_inputs import command_runtime as command_runtime
 from cli.database.tests.lifecycle_rows import LifecycleRows
 from cli.database.tests.lifecycle_rows import lifecycle_rows as lifecycle_rows
+from services.desktop.permissions_helper import launchd_job as jobs
 from services.supervision.roster.service_spec import ServiceSpec
 
 # meiva:note
@@ -341,3 +347,56 @@ def test_the_command_without_a_live_root_says_so_and_exits_nonzero(
     )
     assert rc == 1
     assert "no live meiva-root on this unit" in capsys.readouterr().err
+
+
+# meiva:note
+# `meiva stop` retires the home's helper as the process it runs in: a helper whose process is the
+# stopping command itself is not unloaded from under it. The command's process is a real child
+# here, the helper's job points at that child, and launchd's answer comes from the host the test
+# hands in.
+def test_the_stop_refuses_to_retire_the_helper_it_runs_under(
+    command_runtime: CommandRuntime, tmp_path: Path
+) -> None:
+    home, user_home = tmp_path.resolve() / "home", tmp_path.resolve() / "user"
+    sleeper = str(Path("/bin/sleep").resolve())
+    child = subprocess.Popen([sleeper, "120"])
+    try:
+        commands = FakeCommands()
+        commands.on(("launchctl", "print"), Reply(stdout=f"pid = {child.pid}\n"), repeat=True)
+        host = fake_host(commands, platform=DARWIN_ARM64, uid=os.getuid())
+        runtime = replace(
+            command_runtime,
+            home=home,
+            host=host,
+            pid=child.pid,
+            session=UserSession(user_home=user_home, login_shell="", interactive=False),
+        )
+        port = runtime.config.view.services.permissions_helper_port
+        plist = jobs.helper_job_plist_path(
+            home, facts=jobs.LaunchdFacts.of(host, user_home=user_home)
+        )
+        plist.parent.mkdir(parents=True)
+        plist.write_bytes(
+            plistlib.dumps(
+                {
+                    "Label": jobs.helper_job_label(home),
+                    "KeepAlive": {"SuccessfulExit": False},
+                    "ProgramArguments": [sleeper],
+                    "EnvironmentVariables": {
+                        "MEIVA_PERMISSIONS_HELPER_SOCKET": str(
+                            home / f"run/permissions-helper.{port}.sock"
+                        ),
+                        "MEIVA_PERMISSIONS_HELPER_ROOT_SEED": str(
+                            home / "run/meiva-root/seed.json"
+                        ),
+                    },
+                }
+            )
+        )
+
+        with pytest.raises(RuntimeError, match="ancestor"):
+            stop_permissions_helper(runtime, timeout_s=10.0)
+        assert plist.exists()
+    finally:
+        child.kill()
+        child.wait(timeout=5)

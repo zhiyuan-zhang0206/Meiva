@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import json
+import random
 from pathlib import Path
 
 from base.clock import Clock, ClockConfig
@@ -36,6 +37,7 @@ def main() -> None:
     )
     pipeline = operator_event_pipeline(database, machine=machine, home=home)
     context = ConvergeCtx(
+        secure_rng=random.SystemRandom(),
         repo=Path(__file__).resolve().parents[4],
         meiva_home=home,
         roles=None,

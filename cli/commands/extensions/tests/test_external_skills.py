@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import random
 from collections.abc import Callable
 from dataclasses import replace
 from datetime import UTC, datetime
@@ -66,6 +67,7 @@ def _ctx(
     meiva_home = home / ".meiva"
     (meiva_home / "configs").mkdir(parents=True, exist_ok=True)
     return converge_host.ConvergeCtx(
+        secure_rng=random.SystemRandom(),
         repo=repo,
         meiva_home=meiva_home,
         roles=None,

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import random
 import re
 import shutil
 from collections.abc import Callable
@@ -119,6 +120,7 @@ def test_external_guide_preserves_legacy_copies_and_publishes_nested_resources(
         (ledger_root / f"{ledger}.json").write_bytes(legacy_bytes)
 
     context = ConvergeCtx(
+        secure_rng=random.SystemRandom(),
         repo=repo,
         meiva_home=meiva_home,
         roles=None,

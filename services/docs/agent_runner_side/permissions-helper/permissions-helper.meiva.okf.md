@@ -39,7 +39,8 @@ path and what a rebuild does to them moved to their own node: [[authorization.me
   [[launchd-and-stable-signing.meiva.okf.md]]. A loaded changed job is refused
   before any plist write. Isolated preview artifacts never overwrite the normal
   home or production bundle. IPC paths must fit Darwin's 103-byte usable Unix
-  socket name limit before signing or native registration.
+  socket name limit before signing or native registration. The entry builds the `BuildEnv`/`InstallEnv`
+  it runs in ([[launchd-and-stable-signing.meiva.okf.md]]).
 
 
 ## Root seeding

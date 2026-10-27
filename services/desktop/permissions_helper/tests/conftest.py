@@ -1,14 +1,5 @@
-"""Private native-command protection belongs to the helper's own tests."""
-
-import pytest
+# meiva:note
+# The homes the helper's own tests use.
 
 from base.paths.tests.homes import default_home as default_home
 from base.paths.tests.homes import unit_home as unit_home
-from services.desktop.permissions_helper.tests.permissions_helper.native_io_guard import (
-    permissions_helper_native_io as permissions_helper_native_io,
-)
-
-
-@pytest.fixture(autouse=True)
-def _helper_native_commands(permissions_helper_native_io: None) -> None:
-    """Caller tests mock the real command seam after this fail-closed default."""

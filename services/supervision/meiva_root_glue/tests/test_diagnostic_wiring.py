@@ -15,9 +15,12 @@ from base.cluster.machine.tests.identity import machine_identity as machine_iden
 from base.config import get_field
 from base.telemetry.lgtm_local import backend_urls
 from services.desktop.browser.profile import profile_dir
-from services.supervision.meiva_root_glue import diagnostic_probes as probes
 from services.supervision.meiva_root_glue.glue import probe_config_from_settings
-from services.supervision.meiva_root_glue.tests.slices import probe_config, system_clock
+from services.supervision.meiva_root_glue.tests.slices import (
+    checks_for,
+    probe_config,
+    system_clock,
+)
 
 
 def _unused_database() -> NoReturn:
@@ -28,7 +31,7 @@ def test_every_diagnostic_the_roster_builds_has_all_its_required_arguments_bound
     *, machine_identity: ConfiguredMachineIdentity
 ) -> None:
     machine_identity.set(role="gateway")
-    checks = probes.build_diagnostics(
+    checks = checks_for(
         {"browser", "loki"},
         database=_unused_database,
         machine=machine_identity,

@@ -21,7 +21,9 @@ from base.native_process.os_platform import is_macos
 from base.native_process.ownership import OwnedProcess
 from base.sessions.helperproc import helper_client
 from services.desktop.permissions_helper.launchd_job import (
+    BoundedRunner,
     HelperJobState,
+    LaunchdFacts,
     parse_job_state,
     read_helper_job,
 )
@@ -210,6 +212,9 @@ _UNSET_JOB: Final = object()
 
 def _observe(
     *,
+    home: Path,
+    facts: LaunchdFacts,
+    run: BoundedRunner,
     ping_ok: bool | None = None,
     ping_error: Exception | None = None,
     job_text: str | object | None = _UNSET_JOB,
@@ -237,7 +242,7 @@ def _observe(
         return _Observation(HEALTHY, "ping answered")
     job = None
     text = (
-        read_helper_job()
+        read_helper_job(home=home, facts=facts, run=run)
         if job_text is _UNSET_JOB
         else job_text
         if isinstance(job_text, str)
@@ -290,6 +295,9 @@ def _emit_unhealthy(observation: _Observation) -> None:
 
 def probe(
     *,
+    home: Path,
+    facts: LaunchdFacts,
+    run: BoundedRunner,
     macos: bool | None = None,
     ping_ok: bool | None = None,
     ping_error: Exception | None = None,
@@ -304,6 +312,9 @@ def probe(
         return DaemonProbe.unavailable(f"probe error: {type(exc).__name__}: {exc}")
     try:
         observation = _observe(
+            home=home,
+            facts=facts,
+            run=run,
             ping_ok=ping_ok,
             ping_error=ping_error,
             job_text=job_text,

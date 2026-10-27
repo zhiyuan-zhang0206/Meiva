@@ -3,7 +3,7 @@
 "tests" = ["request_grants_evidence.py"]
 
 [roots]
-"helper-signing.py" = { kinds = ["clock", "home"], why = "operator signing CLI resolves the home it operates once and timestamps detached logs and helper backup directories" }
+"helper-signing.py" = { kinds = ["clock", "home", "platform", "random"], why = "operator signing CLI resolves the home it operates once, timestamps detached logs, and builds the one world its commands share (the account home, the host's platform and command runner, the clock and the operating system's random generator the signing keychain password is drawn from)" }
 "onboard-helper-grants.py" = { kinds = ["home", "pid", "platform"], why = "macOS TCC onboarding CLI checks the host platform, resolves guarded folders under $HOME, and stamps the run report with PID and nodename" }
 "request_grants_evidence.py" = { kinds = ["clock", "platform"], why = "macOS TCC grant-request evidence CLI checks the host platform and timestamps the tccd log window" }
 

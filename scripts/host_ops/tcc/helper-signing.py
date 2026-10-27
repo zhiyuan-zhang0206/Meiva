@@ -4,12 +4,16 @@ from __future__ import annotations
 
 import argparse
 import os
+import random
 import re
 import shutil
 import subprocess
 import sys
 from datetime import UTC, datetime
+from functools import partial
 from pathlib import Path
+
+from services.desktop.permissions_helper.lifecycle import BuildEnv
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
 _CERT_ROOT = re.compile(r'certificate root = H"([0-9a-f]{40})"')
@@ -80,12 +84,12 @@ def _codesign(*args: str, app: Path) -> str:
 # meiva:note
 # Report the identity, the installed helper and the requirement it carries; reads
 # `security find-identity` for this home's keychain only.
-def status(cluster_home: Path) -> int:
+def status(env: BuildEnv) -> int:
     from services.desktop.permissions_helper import signing_identity
 
-    keychain = signing_identity.keychain_path()
+    keychain = signing_identity.keychain_path(env.app_dir)
     print(f"identity keychain: {keychain} ({'present' if keychain.exists() else 'MISSING'})")
-    print(f"keychain password: {signing_identity.password_path()}")
+    print(f"keychain password: {signing_identity.password_path(env.app_dir)}")
     identities = subprocess.run(  # noqa: S603
         ["/usr/bin/security", "find-identity", "-p", "codesigning", str(keychain)],
         capture_output=True,
@@ -93,9 +97,7 @@ def status(cluster_home: Path) -> int:
         check=False,
     )
     print((identities.stdout or "").strip() or "(no identities)")
-    from base.paths import permissions_helper_app_dir
-
-    app = permissions_helper_app_dir(home=cluster_home) / "MeivaPermissionsHelper.app"
+    app = env.app_dir / "MeivaPermissionsHelper.app"
     if not app.exists():
         print(f"installed helper: absent ({app})")
         return 0
@@ -112,22 +114,24 @@ def status(cluster_home: Path) -> int:
     return 0
 
 
-def provision(cluster_home: Path) -> int:
+def provision(env: BuildEnv) -> int:
     from services.desktop.permissions_helper import lifecycle, signing_identity
 
-    signing_identity.ensure(lifecycle.run_tool, create=True)
-    print(f"signing identity ready: {signing_identity.keychain_path()}")
-    print(f"record: {signing_identity.readme_path()}")
-    return status(cluster_home)
+    run_tool = partial(lifecycle.run_tool, run=env.run)
+    signing_identity.ensure(run_tool, create=True, app_dir=env.app_dir, rng=env.rng)
+    print(f"signing identity ready: {signing_identity.keychain_path(env.app_dir)}")
+    print(f"record: {signing_identity.readme_path(env.app_dir)}")
+    return status(env)
 
 
-def export(path: str) -> int:
+def export(path: str, env: BuildEnv) -> int:
     from services.desktop.permissions_helper import lifecycle, signing_identity
 
-    signing_identity.ensure(lifecycle.run_tool, create=False)
+    run_tool = partial(lifecycle.run_tool, run=env.run)
+    signing_identity.ensure(run_tool, create=False, app_dir=env.app_dir, rng=env.rng)
     target = Path(path).expanduser().resolve()
-    password = signing_identity.password_path().read_text().strip()
-    lifecycle.run_tool(
+    password = signing_identity.password_path(env.app_dir).read_text().strip()
+    run_tool(
         [
             "/usr/bin/security",
             "export",
@@ -136,7 +140,7 @@ def export(path: str) -> int:
             "-f",
             "pkcs12",
             "-k",
-            str(signing_identity.keychain_path()),
+            str(signing_identity.keychain_path(env.app_dir)),
             "-P",
             password,
             "-o",
@@ -144,27 +148,35 @@ def export(path: str) -> int:
         ]
     )
     target.chmod(0o600)
-    print(f"exported the identity to {target} (password: {signing_identity.password_path()})")
+    print(
+        f"exported the identity to {target} "
+        f"(password: {signing_identity.password_path(env.app_dir)})"
+    )
     return 0
 
 
-def import_identity(path: str, *, password_file: str | None, cluster_home: Path) -> int:
+def import_identity(path: str, *, password_file: str | None, env: BuildEnv) -> int:
     from services.desktop.permissions_helper import lifecycle, signing_identity
 
+    run_tool = partial(lifecycle.run_tool, run=env.run)
     archive = Path(path).expanduser().resolve()
-    source = Path(password_file).expanduser() if password_file else signing_identity.password_path()
+    source = (
+        Path(password_file).expanduser()
+        if password_file
+        else signing_identity.password_path(env.app_dir)
+    )
     if not source.exists():
         raise SystemExit(f"no keychain password at {source}")
     password = source.read_text().strip()
     if password_file:
-        signing_identity.write_secret(signing_identity.password_path(), password)
-    keychain = signing_identity.keychain_path()
+        signing_identity.write_secret(signing_identity.password_path(env.app_dir), password)
+    keychain = signing_identity.keychain_path(env.app_dir)
     if not keychain.exists():
-        signing_identity.directory().mkdir(parents=True, exist_ok=True)
-        lifecycle.run_tool(["/usr/bin/security", "create-keychain", "-p", password, str(keychain)])
-        lifecycle.run_tool(["/usr/bin/security", "set-keychain-settings", str(keychain)])
-    lifecycle.run_tool(["/usr/bin/security", "unlock-keychain", "-p", password, str(keychain)])
-    lifecycle.run_tool(
+        env.app_dir.mkdir(parents=True, exist_ok=True)
+        run_tool(["/usr/bin/security", "create-keychain", "-p", password, str(keychain)])
+        run_tool(["/usr/bin/security", "set-keychain-settings", str(keychain)])
+    run_tool(["/usr/bin/security", "unlock-keychain", "-p", password, str(keychain)])
+    run_tool(
         [
             "/usr/bin/security",
             "import",
@@ -179,7 +191,7 @@ def import_identity(path: str, *, password_file: str | None, cluster_home: Path)
             "/usr/bin/security",
         ]
     )
-    lifecycle.run_tool(
+    run_tool(
         [
             "/usr/bin/security",
             "set-key-partition-list",
@@ -191,19 +203,18 @@ def import_identity(path: str, *, password_file: str | None, cluster_home: Path)
             str(keychain),
         ]
     )
-    signing_identity.require(lifecycle.run_tool)
+    signing_identity.require(run_tool, app_dir=env.app_dir)
     print(f"imported the identity into {keychain}")
-    return status(cluster_home)
+    return status(env)
 
 
-def switch(*, cluster_home: Path, start: bool, now: datetime) -> int:
-    from base.paths import permissions_helper_app_dir
+def switch(*, env: BuildEnv, start: bool) -> int:
     from services.desktop.permissions_helper import lifecycle, signing_identity
 
-    home = permissions_helper_app_dir(home=cluster_home)
+    home = env.app_dir
     app = home / "MeivaPermissionsHelper.app"
     state = home / "build-state.json"
-    backup = home / f"backup-{now.strftime('%Y%m%dT%H%M%SZ')}"
+    backup = home / f"backup-{env.clock.now().strftime('%Y%m%dT%H%M%SZ')}"
     before_dr = _codesign("-d", "-r-", app=app) if app.exists() else ""
     if app.exists():
         backup.mkdir(parents=True, exist_ok=False)
@@ -218,8 +229,10 @@ def switch(*, cluster_home: Path, start: bool, now: datetime) -> int:
     # Every failure of the swap restores the backup: this runs detached on a host
     # whose runtime it just stopped, so nobody is watching the terminal.
     try:
-        signing_identity.ensure(lifecycle.run_tool, create=True)
-        built, rebuilt = lifecycle.build_and_sign()
+        signing_identity.ensure(
+            partial(lifecycle.run_tool, run=env.run), create=True, app_dir=env.app_dir, rng=env.rng
+        )
+        built, rebuilt = lifecycle.build_and_sign(destination=None, env=env)
     except Exception as error:
         print(f"switch failed: {error}", file=sys.stderr)
         _restore(backup, home, app, before_dr)
@@ -286,19 +299,18 @@ def _restore(backup: Path, home: Path, app: Path, before_dr: str) -> None:
 # This host's helper facts, one `key=value` per line, for a caller that compares machines
 # without importing this package: a wave gate reads them as opaque strings, and only this
 # module decides what "stale", "loaded" and the certificate root mean.
-def facts(cluster_home: Path) -> int:
-    from base.paths import permissions_helper_app_dir
+def facts(env: BuildEnv) -> int:
     from services.desktop.permissions_helper import lifecycle
+    from services.desktop.permissions_helper.launchd_job import helper_job_loaded
     from services.desktop.permissions_helper.lifecycle import PermissionsHelperBuildError
 
-    home = permissions_helper_app_dir(home=cluster_home)
-    app = home / "MeivaPermissionsHelper.app"
+    app = env.app_dir / "MeivaPermissionsHelper.app"
     try:
         expected = lifecycle.source_content_hash()
     except OSError:
         expected = "-"
     print(f"expected_hash={expected}")
-    record = lifecycle.installed_build_state()
+    record = lifecycle.installed_build_state(env.app_dir)
     recorded = record["source_hash"] if record is not None else "-"
     signed_at = record["signed_at"] if record is not None else "-"
     print(f"recorded_hash={recorded}")
@@ -307,12 +319,13 @@ def facts(cluster_home: Path) -> int:
         print("helper=absent")
         return 0
     print("helper=present")
-    print(f"valid={'yes' if lifecycle.is_valid_app(app) else 'no'}")
-    print(f"loaded={'yes' if lifecycle.is_loaded() else 'no'}")
+    print(f"valid={'yes' if lifecycle.is_valid_app(app, run=env.run) else 'no'}")
+    loaded = helper_job_loaded(env.home, facts=env.facts, run=env.run, timers=env.timers)
+    print(f"loaded={'yes' if loaded else 'no'}")
     print(f"stale={'no' if record is not None and recorded == expected else 'yes'}")
     root = "-"
     try:
-        match = _CERT_ROOT.search(lifecycle.read_dr(app))
+        match = _CERT_ROOT.search(lifecycle.read_dr(app, run=env.run))
     except PermissionsHelperBuildError as error:
         print(f"facts: {error}", file=sys.stderr)
     else:
@@ -348,18 +361,39 @@ def main(argv: list[str]) -> int:
         return _detach(sys.argv[1:], cluster_home)
     if args.command in {"import", "export"} and not args.path:
         parser.error(f"{args.command} needs a PKCS#12 path")
+    env = _build_env(cluster_home)
     return {
-        "status": lambda: status(cluster_home),
-        "facts": lambda: facts(cluster_home),
-        "provision": lambda: provision(cluster_home),
-        "switch": lambda: switch(
-            cluster_home=cluster_home, start=args.start, now=datetime.now(UTC)
-        ),
-        "export": lambda: export(args.path or ""),
+        "status": lambda: status(env),
+        "facts": lambda: facts(env),
+        "provision": lambda: provision(env),
+        "switch": lambda: switch(env=env, start=args.start),
+        "export": lambda: export(args.path or "", env),
         "import": lambda: import_identity(
-            (args.path or ""), password_file=args.password_file, cluster_home=cluster_home
+            (args.path or ""), password_file=args.password_file, env=env
         ),
     }[args.command]()
+
+
+# meiva:note
+# The one world every command of this script works in, read once here: the home, the installed
+# helper directory, the launchd facts of this account, the command runner, the timers and the
+# clock, and the operating system's random generator the signing password is drawn from.
+def _build_env(cluster_home: Path) -> BuildEnv:
+    from base.clock import SYSTEM_TIMERS, Clock, ClockConfig
+    from base.host.system.hostport import Host
+    from services.desktop.permissions_helper.launchd_job import LaunchdFacts
+
+    host = Host.system()
+    return BuildEnv(
+        home=cluster_home,
+        facts=LaunchdFacts.of(host, user_home=Path.home()),
+        run=host.run,
+        timers=SYSTEM_TIMERS,
+        clock=Clock(
+            ClockConfig("UTC", None, message_timestamp_weekday=False), timers=SYSTEM_TIMERS
+        ),
+        rng=random.SystemRandom(),
+    )
 
 
 if __name__ == "__main__":

@@ -8,6 +8,7 @@
 
 from __future__ import annotations
 
+import random
 from collections.abc import Callable
 from pathlib import Path
 from typing import Any
@@ -44,6 +45,7 @@ def converge_context(
     producer: Callable[[], EventPipeline],
 ) -> ConvergeCtx:
     return ConvergeCtx(
+        secure_rng=random.SystemRandom(),
         repo=repo,
         meiva_home=meiva_home,
         roles=frozenset({"agent-runner"}),

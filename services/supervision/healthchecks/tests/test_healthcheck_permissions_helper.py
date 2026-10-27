@@ -4,18 +4,43 @@ from __future__ import annotations
 
 import json
 import socket
+import subprocess
 import tempfile
 import threading
+from collections.abc import Sequence
+from pathlib import Path
 from types import SimpleNamespace
-from typing import cast
+from typing import Any, cast
 
 import pytest
 
+from base.daemon.health import DaemonProbe
 from base.host.permissions_helper import client
 from base.log.tests.log_records import LogRecords
 from base.log.tests.log_records import loguru_records as loguru_records
 from base.native_process.ownership import OwnedProcess
+from services.desktop.permissions_helper.launchd_job import LaunchdFacts
 from services.supervision.healthchecks import permissions_helper as hc
+
+
+def _refuse_launchctl(
+    cmd: Sequence[str], /, *, timeout: float, capture_output: bool = True
+) -> subprocess.CompletedProcess[bytes]:
+    del timeout, capture_output
+    raise AssertionError(f"this test must not run {list(cmd)}")
+
+
+# meiva:note
+# `hc.probe` over what it reads of the world: a home, the account's launchd facts and a runner.
+# The cases below hand the probe the job text they want classified, so the runner is never asked.
+def _probe(**changes: Any) -> DaemonProbe:
+    return hc.probe(
+        home=Path("/unused/home"),
+        facts=LaunchdFacts(uid=501, platform="darwin", user_home=Path("/unused/user")),
+        run=_refuse_launchctl,
+        **changes,
+    )
+
 
 # Real `launchctl print` excerpts (F5 run-09/10c/11 evidence), shortened. The
 # stuck shape deliberately keeps BOTH the top-level `state = spawn scheduled`
@@ -188,9 +213,9 @@ def test_reporting_is_episode_gated_without_repair(recorder: _Recorder) -> None:
 
 
 def test_probe_alive_and_classified_down() -> None:
-    assert hc.probe(macos=True, ping_ok=True).alive
+    assert _probe(macos=True, ping_ok=True).alive
 
-    verdict = hc.probe(
+    verdict = _probe(
         macos=True,
         ping_error=client.PermissionsHelperError("socket unavailable"),
         job_text=_STUCK_JOB,
@@ -199,7 +224,7 @@ def test_probe_alive_and_classified_down() -> None:
     assert "lwcr-stuck" in verdict.detail
     assert "needs LWCR update" in verdict.detail
 
-    assert hc.probe(
+    assert _probe(
         macos=True,
         ping_error=client.PermissionsHelperError("socket unavailable"),
         job_text=None,
@@ -207,9 +232,9 @@ def test_probe_alive_and_classified_down() -> None:
 
 
 def test_probe_is_total_and_non_macos_is_up() -> None:
-    assert hc.probe(macos=False).alive
+    assert _probe(macos=False).alive
 
-    verdict = hc.probe(
+    verdict = _probe(
         macos=True,
         ping_error=client.PermissionsHelperError("socket unavailable"),
         job_error=RuntimeError("boom"),
@@ -220,7 +245,7 @@ def test_probe_is_total_and_non_macos_is_up() -> None:
 
 def test_unverifiable_helper_parent_never_reports_protocol_health() -> None:
     assert (
-        hc.probe(
+        _probe(
             macos=True,
             ping_error=hc.ParentEvidenceError("root parent is not observable"),
             job_text=_RUNNING_JOB,

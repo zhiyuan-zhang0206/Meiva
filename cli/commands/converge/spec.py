@@ -19,7 +19,7 @@ from base.host.permissions_helper.client import HelperFactory
 from base.host.system.hostport import Host
 from base.host.system.job_values import JobRoots
 from base.telemetry import EventPipeline
-from cli.database.runtime import UserSession
+from cli.database.runtime import OsRandom, UserSession
 
 ALL_ROLES: frozenset[MachineRole] = frozenset({"gateway", "agent-runner", "observability-station"})
 
@@ -45,6 +45,11 @@ class ConvergeCtx:
     host: Host
     session: UserSession
     timers: Timers
+    # meiva:note
+    # The operating system's random generator of the invocation that runs this converge: the
+    # permissions helper's signing keychain password is drawn from it, only when the identity is
+    # first provisioned.
+    secure_rng: OsRandom
     # meiva:note
     # The wall clock of the invocation that runs this converge; a step stamps with `clock.now()`.
     clock: Clock

@@ -12,15 +12,19 @@
 from __future__ import annotations
 
 import io
+import os
+import plistlib
+import subprocess
 from pathlib import Path
 from typing import Protocol
 
 import pytest
 
+from base.clock.tests.manual_timers import ManualTimers
 from base.cluster.dataplane.pg_admin import pg_socket_path
 from base.host.system.hostport import Host
 from base.host.system.job_values import JobRoots
-from base.host.system.tests.fake_commands import FakeCommands, Reply, fake_host
+from base.host.system.tests.fake_commands import DARWIN_ARM64, FakeCommands, Reply, fake_host
 from base.paths.tests.homes import default_home as default_home
 from cli import start_identity
 from cli.commands.cluster.home import (
@@ -32,6 +36,7 @@ from cli.commands.cluster.plans.destroy_plan import STOP_INCOMPLETE, StopMode
 from cli.commands.cluster.plans.destroy_plan import stop_argv as stop_argv
 from cli.database.runtime import Terminal
 from cli.startup.tests.birth_facts import birth_facts
+from services.desktop.permissions_helper import launchd_job as jobs
 
 
 # meiva:note
@@ -123,7 +128,7 @@ def home(tmp_path: Path, checkout: Path, roles: list[str]) -> Path:
 
 
 def _request(
-    home: Path, checkout: Path, *, user_home: Path, drop_db: bool = False
+    home: Path, checkout: Path, *, user_home: Path, drop_db: bool = False, pid: int = 4321
 ) -> DestroyRequest:
     return DestroyRequest(
         home=home,
@@ -133,6 +138,7 @@ def _request(
         checkout=checkout,
         user_home=user_home,
         helper_port=8181,
+        pid=pid,
     )
 
 
@@ -151,6 +157,7 @@ def destroy(home: Path, checkout: Path, tmp_path: Path) -> Destroy:
             _request(home, checkout, user_home=tmp_path / "user", drop_db=drop_db),
             host=fake_host() if host is None else host,
             terminal=session.terminal,
+            timers=ManualTimers(),
         )
 
     return run
@@ -340,6 +347,7 @@ def test_a_failure_to_retire_the_jobs_leaves_the_home_attached_and_a_rerun_compl
         _request(prod, checkout, user_home=default_home),
         host=fake_host(broken),
         terminal=first.terminal,
+        timers=ManualTimers(),
     )
     assert failed == 1
     assert first.stderr.getvalue().startswith("cluster cleanup incomplete: could not remove")
@@ -350,6 +358,7 @@ def test_a_failure_to_retire_the_jobs_leaves_the_home_attached_and_a_rerun_compl
         _request(prod, checkout, user_home=default_home),
         host=fake_host(working),
         terminal=second.terminal,
+        timers=ManualTimers(),
     )
     assert done == 0 and _detached(prod)
     assert working.calls
@@ -380,3 +389,57 @@ def test_the_crontab_is_read_once_per_cron_based_job_on_a_default_home(
     unregister_scheduled_jobs(host=fake_host(working), roots=_default_roots(default_home))
 
     assert working.argvs == [("crontab", "-l")] * 5
+
+
+# meiva:note
+# On macOS the destroy retires the home's helper as the process it runs in: a helper whose process
+# is the destroying command itself is not unloaded from under it. The command's process is a real
+# child here, the helper's job points at that child, and the account and the helper's launchd answer
+# come from the host the test hands in.
+def test_destroy_refuses_to_retire_the_helper_it_runs_under(
+    home: Path, checkout: Path, tmp_path: Path
+) -> None:
+    user_home = tmp_path / "user"
+    sleeper = str(Path("/bin/sleep").resolve())
+    child = subprocess.Popen([sleeper, "120"])
+    try:
+        commands = FakeCommands()
+        commands.on(("launchctl", "print"), Reply(stdout=f"pid = {child.pid}\n"), repeat=True)
+        commands.on(_anything, Reply(), repeat=True)
+        host = fake_host(commands, platform=DARWIN_ARM64, uid=os.getuid())
+        plist = jobs.helper_job_plist_path(
+            home, facts=jobs.LaunchdFacts.of(host, user_home=user_home)
+        )
+        plist.parent.mkdir(parents=True)
+        plist.write_bytes(
+            plistlib.dumps(
+                {
+                    "Label": jobs.helper_job_label(home),
+                    "KeepAlive": {"SuccessfulExit": False},
+                    "ProgramArguments": [sleeper],
+                    "EnvironmentVariables": {
+                        "MEIVA_PERMISSIONS_HELPER_SOCKET": str(
+                            home / "run/permissions-helper.8181.sock"
+                        ),
+                        "MEIVA_PERMISSIONS_HELPER_ROOT_SEED": str(
+                            home / "run/meiva-root/seed.json"
+                        ),
+                    },
+                }
+            )
+        )
+        session = Session(f"{home}\n")
+
+        returncode = cmd_cluster_destroy(
+            _request(home, checkout, user_home=user_home, pid=child.pid),
+            host=host,
+            terminal=session.terminal,
+            timers=ManualTimers(),
+        )
+
+        assert returncode == 1
+        assert "ancestor" in session.stderr.getvalue()
+        assert plist.exists()
+    finally:
+        child.kill()
+        child.wait(timeout=5)

@@ -66,8 +66,11 @@ def _h_cluster_destroy(args: argparse.Namespace) -> int:
         checkout=runtime.checkout,
         user_home=runtime.session.user_home,
         helper_port=runtime.config.view.services.permissions_helper_port,
+        pid=runtime.pid,
     )
-    return cmd_cluster_destroy(request, host=runtime.host, terminal=runtime.terminal)
+    return cmd_cluster_destroy(
+        request, host=runtime.host, terminal=runtime.terminal, timers=runtime.timers
+    )
 
 
 def _h_cluster_health_probe(args: argparse.Namespace) -> int:

@@ -1,5 +1,0 @@
-exports = ["native_io_guard.py"]
-
-[debt.first-party-patch]
-"native_io_guard.py#monkeypatch.setattr services.desktop.permissions_helper.launchd_job.run_bounded" = 1
-"native_io_guard.py#monkeypatch.setattr services.desktop.permissions_helper.lifecycle.run_bounded" = 1
