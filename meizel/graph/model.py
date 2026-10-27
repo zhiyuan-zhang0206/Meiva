@@ -124,10 +124,12 @@ class AmbientKind(StrEnum):
 # that the conventions allow in code no test needs to steer; the read is a decision worth a root
 # only where the same function also waits, because then how long to wait next is decided in
 # a loop. The wall clock is always a window onto the world.
-LOOP_CLOCK = "asyncio.loop.time"
 INTERVAL_CLOCKS = frozenset(
-    {"time.monotonic", "time.monotonic_ns", "time.perf_counter", "time.perf_counter_ns", LOOP_CLOCK}
+    {"time.monotonic", "time.monotonic_ns", "time.perf_counter", "time.perf_counter_ns"}
 )
+# meiva:note
+# The target recorded for `loop.time()` of the running event loop, the interval clock of asyncio.
+LOOP_CLOCK = "asyncio.loop.time"
 
 _STDLIB: dict[str, AmbientKind] = {
     **dict.fromkeys(INTERVAL_CLOCKS, AmbientKind.CLOCK),

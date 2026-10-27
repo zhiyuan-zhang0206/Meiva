@@ -24,7 +24,7 @@ filter or `--changed` does not turn that scoped result into a whole-repository j
 
 | Dimension | Evidence and limit |
 |---|---|
-| Recognized syntax | `impure-call` and related diagnostics name matched imports, calls or writes. An import or async declaration is a rule observation, not runtime execution. A name for an impure call, not called (`_is_file = Path.is_file`), is that call. A name is a path when annotated, built by `Path(...)`, looped over `iterdir`/`glob`/`rglob`, or `self.x` of those. |
+| Recognized syntax | `impure-call` and related diagnostics name matched imports, calls or writes. An import or async declaration is an observation, not execution. A name for an impure call, not called (`_is_file = Path.is_file`), is that call. `resolve`, `glob`, `open` and the other I/O methods count on any receiver (`self.resolve()` too); `replace` only on a path: annotated, built by `Path(...)`, looped over `iterdir`/`glob`/`rglob`, or `self.x` of those. |
 | Unresolved or unmeasured behavior | Unresolved imports/patches are reported where recognized. No diagnostic does not establish absence of callback effects, input mutation or transitive effects. |
 | Structure | Container budgets and frozen-shape rules bound forms and sizes, not semantic effects: a frozen dataclass can contain a mutable list, and a frozen JS holder or Set does not stop nested mutation. |
 | Test resources | Fixture diagnostics recognize configured requests. They do not measure bootstrap cost or authorize a lightweight runner. [[tests/fixtures/docs/static-environment.meiva.okf.md|Static ownership and refusal canaries]] govern it. |
@@ -93,7 +93,7 @@ Repository-specific additions and container budget thresholds live under `[purit
 ```toml
 [purity]
 impure-imports = ["psycopg", "psycopg_pool", "redis", "fastapi", "uvicorn", "aiohttp", "websockets", "starlette", "sqlalchemy", "alembic", " celery", "kombu"]
-impure-calls = ["loguru.logger.debug", "loguru.logger.info", "loguru.logger.warning", "loguru.logger.error", "loguru.logger.exception", "loguru.logger.critical", "logging.debug", "logging.info", "logging.warning", "logging.error", "logging.exception", "logging.critical", "meizel.graph.universe.GitRepo", "meizel.graph.universe.load_universe"]
+impure-calls = ["logging.info", "logging.error", "meizel.graph.universe.GitRepo"]
 impure-fixtures = ["db_session", "postgres_container", "redis_container"]
 max-uses = 8
 max-exports = 4

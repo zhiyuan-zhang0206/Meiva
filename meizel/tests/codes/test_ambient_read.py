@@ -139,6 +139,12 @@ def test_an_interval_clock_is_a_window_onto_the_world_only_where_the_function_sl
         ("import os\n\nx = os.getpgrp()\n", [("pid", "os.getpgrp")]),
         ("import threading\n\nx = threading.get_ident()\n", [("pid", "threading.get_ident")]),
         (
+            "import threading\n\nx = threading.get_native_id()\n",
+            [("pid", "threading.get_native_id")],
+        ),
+        ("import time\n\nx = time.ctime()\n", [("clock", "time.ctime()")]),
+        ("import time\n\nx = time.asctime()\n", [("clock", "time.asctime()")]),
+        (
             "from pathlib import Path\n\nx = Path('~/a').expanduser()\n",
             [("home", "pathlib.Path.expanduser")],
         ),
@@ -220,6 +226,47 @@ def test_the_same_calls_given_a_value_read_nothing(make_repo: RepoFactory, sourc
         ),
         (
             "import time\n\nasync def f(waiter):\n    await waiter(1)\n    return time.monotonic()\n",
+            [],
+        ),
+        (
+            "import time\n\nasync def f(timers):\n    await timers.Sleep(1)\n    return time.monotonic()\n",
+            [("clock", "time.monotonic")],
+        ),
+        (
+            "import time\n\ndef monotonic():\n    return time.monotonic()\n\n\n"
+            "def wait():\n    time.sleep(1)\n    return monotonic()\n",
+            [("clock", "monotonic()")],
+        ),
+        (
+            "import time\n\ndef _scaled(factor):\n    return time.monotonic()\n\n\n"
+            "def wait():\n    time.sleep(1)\n    return _scaled(2)\n",
+            [],
+        ),
+        (
+            "import time\n\ndef _ms():\n    return int(time.monotonic() * 1000)\n\n\n"
+            "def wait():\n    time.sleep(1)\n    return _ms()\n",
+            [],
+        ),
+        (
+            "import time\n\ndef _monotonic():\n    base = 0\n    return time.monotonic()\n\n\n"
+            "def wait():\n    time.sleep(1)\n    return _monotonic()\n",
+            [],
+        ),
+        (
+            "import asyncio\n\nasync def f(event_loop):\n    await asyncio.sleep(1)\n"
+            "    return event_loop.time()\n",
+            [("clock", "asyncio.loop.time")],
+        ),
+        (
+            "import asyncio\n\nasync def f(_loop):\n    await asyncio.sleep(1)\n    return _loop.time()\n",
+            [("clock", "asyncio.loop.time")],
+        ),
+        (
+            "import asyncio\n\nasync def f(loop):\n    await asyncio.sleep(1)\n    return loop.time(1)\n",
+            [],
+        ),
+        (
+            "import asyncio\n\nasync def f(sched):\n    await asyncio.sleep(1)\n    return sched.time()\n",
             [],
         ),
     ],

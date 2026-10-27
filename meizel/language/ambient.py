@@ -48,14 +48,10 @@ def _own_nodes(function: ast.FunctionDef | ast.AsyncFunctionDef) -> Iterator[ast
             pending.extend(ast.iter_child_nodes(node))
 
 
-_LOOP_FACTORIES = frozenset({"asyncio.get_running_loop", "asyncio.get_event_loop"})
-_LOOP_NAMES = frozenset({"loop", "_loop"})
-
-
 # meiva:note
 # What the recorder keeps of one function while the file is scanned: whether its own statements
-# sleep, the module-level names it calls, whether its body is the single `return <call>` of a
-# clock wrapper, and the interval-clock readings it makes. Whether a reading counts is decided
+# sleep, the module-level names it calls, whether it is a one-line wrapper over an interval clock,
+# and the interval-clock readings it makes. Whether a reading counts is decided
 # when the file is done, because a sleep may be a local helper defined further down.
 @dataclass(frozen=True, slots=True)
 class _Frame:
@@ -87,20 +83,6 @@ def _own_facts(function: ast.FunctionDef | ast.AsyncFunctionDef) -> tuple[bool, 
     return sleeps, calls
 
 
-def _wrapper_shape(function: ast.FunctionDef | ast.AsyncFunctionDef) -> bool:
-    args = function.args
-    if args.args or args.posonlyargs or args.kwonlyargs or args.vararg or args.kwarg:
-        return False
-    body = [
-        statement
-        for statement in function.body
-        if not (isinstance(statement, ast.Expr) and isinstance(statement.value, ast.Constant))
-    ]
-    return (
-        len(body) == 1 and isinstance(body[0], ast.Return) and isinstance(body[0].value, ast.Call)
-    )
-
-
 # meiva:note
 # How many arguments a call gives; an unpacked argument or keyword set counts as more than any limit.
 def _given(call: ast.Call) -> int:
@@ -116,17 +98,6 @@ def _given(call: ast.Call) -> int:
 def _expands_home(call: ast.Call, callee: str | None) -> bool:
     func = call.func
     return isinstance(func, ast.Attribute) and func.attr == "expanduser" and callee is None
-
-
-def _loop_time(call: ast.Call, receiver: str | None) -> bool:
-    callee = call.func
-    if not (isinstance(callee, ast.Attribute) and callee.attr == "time" and not call.args):
-        return False
-    holder = callee.value
-    named = (
-        holder.attr if isinstance(holder, ast.Attribute) else getattr(holder, "id", "")
-    ) in _LOOP_NAMES
-    return named or receiver in _LOOP_FACTORIES
 
 
 # meiva:note
@@ -165,11 +136,12 @@ class AmbientRecorder:
         self, function: ast.FunctionDef | ast.AsyncFunctionDef, *, top_level: bool = False
     ) -> None:
         sleeps, calls = _own_facts(function)
-        self._open.append(_Frame(function.name, top_level, sleeps, calls, _wrapper_shape(function)))
+        self._open.append(_Frame(function.name, top_level, sleeps, calls, wrapper=False))
         self._reads.append([])
 
-    def leave(self) -> None:
-        self._done.append(replace(self._open.pop(), reads=tuple(self._reads.pop())))
+    def leave(self, *, wrapper: bool = False) -> None:
+        frame = replace(self._open.pop(), wrapper=wrapper, reads=tuple(self._reads.pop()))
+        self._done.append(frame)
 
     def _add(self, line: int, kind: AmbientKind, target: str) -> None:
         self.items.append(Acquisition(line, kind, target))
@@ -207,10 +179,10 @@ class AmbientRecorder:
                 self._add(line, kind, prefix)
                 return
 
-    def called(self, callee: str | None, call: ast.Call, receiver: str | None = None) -> None:
+    def called(self, callee: str | None, call: ast.Call, *, loop_clock: bool = False) -> None:
         if callee is not None and callee in SEEDABLE_GENERATORS and _ambient_seed(call):
             self._add(call.lineno, AmbientKind.RANDOM, callee)
-        if _loop_time(call, receiver):
+        if loop_clock:
             self._interval(call.lineno, LOOP_CLOCK)
         open_call = None if callee is None else OPEN_CALLS.get(callee)
         if open_call is not None and callee is not None and _given(call) <= open_call[1]:
@@ -277,10 +249,32 @@ class AmbientAccess(PatchForms):
     def entropy_enter(self) -> None:
         self.entropy_marked.append(False)
 
+    def record_call(self, callee: str | None, call: ast.Call) -> None:
+        self.ambient.called(callee, call, loop_clock=fake_entropy.is_loop_clock(call, self.dotted))
+
+    # meiva:note
+    # The clock a function is a one-line wrapper over, judged with the names of its own scope. Only a
+    # module-level function or a method can be called by name from the rest of the file.
+    def clock_wrapper(
+        self,
+        function: ast.FunctionDef | ast.AsyncFunctionDef,
+        inner: Scope,
+        *,
+        top_level: bool,
+        method: bool,
+    ) -> str | None:
+        if not (self.records_ambient and (top_level or method)):
+            return None
+        outer, self.scope = self.scope, inner
+        try:
+            return fake_entropy.wrapper_clock(function, self.dotted, method=method)
+        finally:
+            self.scope = outer
+
     def entropy_touch(self, callee: str | None, call: ast.Call) -> None:
         func = call.func
         if (
-            callee in fake_entropy.ENTROPY_CLOCKS
+            callee in INTERVAL_CLOCKS
             or fake_entropy.is_loop_clock(call, self.dotted)
             or (callee is None and isinstance(func, ast.Name) and func.id in ("id", "next"))
         ):
@@ -291,20 +285,15 @@ class AmbientAccess(PatchForms):
         function: ast.FunctionDef | ast.AsyncFunctionDef,
         inner: Scope,
         *,
-        top_level: bool,
-        method: bool,
+        clock: str | None,
     ) -> None:
         marked = self.entropy_marked.pop()
         if not self.records_ambient:
             return
         if marked and function.name not in ("__repr__", "__str__"):
             self.entropy_scopes.append((function.body, inner))
-        if top_level or method:
-            outer, self.scope = self.scope, inner
-            clock = fake_entropy.wrapper_clock(function, self.dotted, method=method)
-            self.scope = outer
-            if clock is not None:
-                self.entropy_wrappers.append((function.name, function.lineno))
+        if clock is not None and function.name.startswith("_"):
+            self.entropy_wrappers.append((function.name, function.lineno))
 
     def _counter_names(self) -> frozenset[str]:
         names: set[str] = set()

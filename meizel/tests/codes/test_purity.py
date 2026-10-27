@@ -145,30 +145,99 @@ def test_impure_edge_fails_in_strict_and_records_in_strict_to_be(
         ("def look(handle: object) -> object:\n    return handle.open()\n", "a.py#Path.open"),
         (
             "from pathlib import Path\n\ndef each(root: Path) -> None:\n"
-            "    for entry in root.iterdir():\n        entry.resolve()\n",
-            "a.py#Path.resolve",
+            "    for entry in root.iterdir():\n        entry.replace(root)\n",
+            "a.py#Path.replace",
+        ),
+        (
+            "from pathlib import Path\n\ndef each(root: Path) -> None:\n"
+            "    for entry in sorted(root.rglob('*.py')):\n        entry.replace(root)\n",
+            "a.py#Path.replace",
         ),
         (
             "from pathlib import Path\n\ndef each(root: Path) -> list[Path]:\n"
-            "    return [p.resolve() for p in root.rglob('*.py')]\n",
-            "a.py#Path.resolve",
+            "    return [p.replace(root) for p in root.rglob('*.py')]\n",
+            "a.py#Path.replace",
         ),
         (
             "from pathlib import Path\n\nclass Box:\n"
             "    def __init__(self, root: Path) -> None:\n        self.root = root\n\n"
-            "    def look(self) -> None:\n        self.root.glob('*')\n",
-            "a.py#Path.glob",
+            "    def look(self, target: Path) -> None:\n        self.root.replace(target)\n",
+            "a.py#Path.replace",
         ),
         (
             "from dataclasses import dataclass\nfrom pathlib import Path\n\n"
             "@dataclass(frozen=True)\nclass Box:\n    root: Path\n\n"
-            "    def look(self) -> Path:\n        return self.root.resolve()\n",
-            "a.py#Path.resolve",
+            "    def look(self, target: Path) -> Path:\n        return self.root.replace(target)\n",
+            "a.py#Path.replace",
         ),
         (
-            "from pathlib import Path\n\ndef each(paths: list[Path]) -> None:\n"
-            "    for path in dict.fromkeys(paths):\n        path.open()\n",
-            "a.py#Path.open",
+            "from pathlib import Path\n\ndef each(paths: list[Path], to: Path) -> None:\n"
+            "    for path in dict.fromkeys(paths):\n        path.replace(to)\n",
+            "a.py#Path.replace",
+        ),
+        (
+            "from pathlib import Path\n\ndef move(p: Path, q: Path) -> None:\n"
+            "    p.joinpath('x').replace(q)\n",
+            "a.py#Path.replace",
+        ),
+        (
+            "from pathlib import Path\n\ndef move(p: Path, q: Path) -> None:\n"
+            "    (p / 'x').replace(q)\n",
+            "a.py#Path.replace",
+        ),
+        (
+            "from pathlib import Path\n\ndef move(p: Path, q: Path) -> None:\n"
+            "    p.relative_to(q).replace(q)\n",
+            "a.py#Path.replace",
+        ),
+        (
+            "from pathlib import Path\n\ndef move(p: Path, q: Path) -> None:\n"
+            "    p.absolute().replace(q)\n",
+            "a.py#Path.replace",
+        ),
+        (
+            "from pathlib import Path\n\ndef move(p: Path, q: Path) -> None:\n"
+            "    p.parent.replace(q)\n",
+            "a.py#Path.replace",
+        ),
+        (
+            "from pathlib import Path\n\ndef move(p: Path, q: Path) -> None:\n"
+            "    p.with_suffix('.bak').replace(q)\n",
+            "a.py#Path.replace",
+        ),
+        (
+            "from pathlib import Path\n\ndef move(p: Path, q: Path) -> None:\n"
+            "    p.with_name('x').replace(q)\n",
+            "a.py#Path.replace",
+        ),
+        (
+            "from pathlib import Path\n\ndef move(p: Path, q: Path) -> None:\n"
+            "    p.with_stem('x').replace(q)\n",
+            "a.py#Path.replace",
+        ),
+        (
+            "from pathlib import Path\n\ndef move(p: Path, q: Path) -> None:\n"
+            "    p.expanduser().replace(q)\n",
+            "a.py#Path.replace",
+        ),
+        (
+            "from pathlib import Path\n\ndef move(p: Path, q: Path) -> None:\n"
+            "    p.resolve().replace(q)\n",
+            "a.py#Path.replace",
+        ),
+        (
+            "from pathlib import Path\n\ndef move(p: Path, q: Path) -> None:\n"
+            "    p.parents[1].replace(q)\n",
+            "a.py#Path.replace",
+        ),
+        (
+            "from pathlib import Path\n\ndef move(q: Path) -> None:\n    Path.home().replace(q)\n",
+            "a.py#Path.replace",
+        ),
+        (
+            "from pathlib import Path\n\ndef later(root: Path) -> list[object]:\n"
+            "    return [entry.stat for entry in root.iterdir()]\n",
+            "a.py#Path.stat",
         ),
         (
             "from pathlib import Path\n\ndef keep(xs: list[Path]) -> list[bool]:\n"
@@ -194,6 +263,15 @@ def test_impure_edge_fails_in_strict_and_records_in_strict_to_be(
         ),
         ("import os\n\ndef f(a: str) -> bool:\n    return os.access(a, 0)\n", "a.py#os.access"),
         ("import glob\n\ndef f(a: str) -> list[str]:\n    return glob.glob(a)\n", "a.py#glob.glob"),
+        ("import os\n\ndef f(fd: int) -> None:\n    os.fsync(fd)\n", "a.py#os.fsync"),
+        (
+            "import os\n\ndef f(a: str) -> bool:\n    return os.path.lexists(a)\n",
+            "a.py#os.path.lexists",
+        ),
+        (
+            "from pathlib import Path\n\ndef f(p: Path, q: Path) -> None:\n    p.symlink_to(q)\n",
+            "a.py#Path.symlink_to",
+        ),
     ],
 )
 def test_impure_call_catches_effectful_imports_async_and_calls(
@@ -219,6 +297,29 @@ def test_string_replace_is_allowed_in_strict_module(make_repo: RepoFactory) -> N
         }
     )
     assert analysis_of(root).verdict == []
+
+
+@pytest.mark.parametrize(
+    "source",
+    [
+        "def f(rows: list[str]) -> None:\n    for s in rows:\n        s.replace('a', 'b')\n",
+        "def f() -> None:\n    for s in ['a', 'b']:\n        s.replace('a', 'b')\n",
+        "def f(rows: list[str]) -> list[str]:\n    return [s.replace('a', 'b') for s in rows]\n",
+        "class Box:\n    def __init__(self, name: str) -> None:\n        self.name = name\n\n"
+        "    def clean(self) -> str:\n        return self.name.replace('a', 'b')\n",
+        "from pathlib import Path\n\ndef f(p: Path) -> str:\n    return p.name.replace('a', 'b')\n",
+        "from pathlib import Path\n\ndef f(p: Path) -> str:\n    return str(p).replace('a', 'b')\n",
+        "from pathlib import Path\n\ndef f(p: Path) -> list[str]:\n"
+        "    return [s.replace('a', 'b') for s in str(p).split('/')]\n",
+    ],
+)
+def test_replace_on_something_that_is_not_a_path_is_not_a_filesystem_call(
+    make_repo: RepoFactory, source: str
+) -> None:
+    root = make_repo(
+        {"pkg/__init__.py": "", "pkg/a.py": source, "pkg/meizel.toml": 'purity = "strict-to-be"\n'}
+    )
+    assert diagnostics(root, "impure-call") == []
 
 
 def test_unfrozen_value_requires_frozen_dataclass(make_repo: RepoFactory) -> None:
