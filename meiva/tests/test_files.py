@@ -417,6 +417,25 @@ def test_agent_workspace_is_not_exported_to_the_agent() -> None:
     assert "agent_workspace" not in meiva.files.__all_for_meiva__
 
 
+# The base for a context sits under the two homes that context carries, whatever the process
+# environment names: with an identity it is that agent's workspace under the Meiva home, before
+# one it is the invoking user's home.
+def test_the_workspace_base_of_a_context_follows_the_homes_it_carries(tmp_path: Path) -> None:
+    from base.agents.context import MeivaContext
+    from base.agents.context.identity import AgentIdentity
+
+    meiva_home, user_home = tmp_path / "meiva", tmp_path / "user"
+    with_identity = MeivaContext(
+        identity=AgentIdentity(agent_id=7, owns_loop=True),
+        meiva_home=meiva_home,
+        user_home=user_home,
+    )
+    without_identity = MeivaContext(meiva_home=meiva_home, user_home=user_home)
+
+    assert meiva.files.workspace_base_for(with_identity) == meiva_home / "workspaces" / "7"
+    assert meiva.files.workspace_base_for(without_identity) == user_home
+
+
 def test_tilde_expanduser(default_home: Path) -> None:
     """`~/foo.txt` goes through expanduser → `$HOME/foo.txt` — tilde always points to home,
     unaffected by workspace resolution."""
