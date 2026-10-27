@@ -53,7 +53,9 @@ class _DeliverSecurityFindingsHook(Hook):
         now = _runtime.context.require_clock().now()
         return {
             "messages": [
-                security_note_message(source=f.source, triggers=f.triggers, created_at=now)
+                security_note_message(
+                    source=f.source, triggers=f.triggers, picked_up_at=now, created_at=now
+                )
                 for f in findings
             ],
             "security_findings": Overwrite([]),

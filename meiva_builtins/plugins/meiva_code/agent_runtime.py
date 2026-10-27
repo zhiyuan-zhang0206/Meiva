@@ -40,12 +40,14 @@ class _InjectCwdNotesAfterExecHook(Hook):
         notes: list[BaseMessage] = []
         update: dict[str, Any] = {}
 
+        now = runtime.context.require_clock().now()
         if current.cwd_note is not None:
             notes.append(
                 system_note_message(
                     content=current.cwd_note,
                     tag=NoteTag.CONTEXT,
-                    created_at=runtime.context.require_clock().now(),
+                    picked_up_at=now,
+                    created_at=now,
                 )
             )
             update["cwd_note"] = None
@@ -57,7 +59,8 @@ class _InjectCwdNotesAfterExecHook(Hook):
                     system_note_message(
                         content=current.project_skills_note,
                         tag=NoteTag.PROJECT_SKILLS,
-                        created_at=runtime.context.require_clock().now(),
+                        picked_up_at=now,
+                        created_at=now,
                     )
                 )
                 update["project_skills_seen_compact"] = compact_v

@@ -21,7 +21,6 @@ from __future__ import annotations
 import hashlib
 import re
 from dataclasses import dataclass
-from datetime import UTC, datetime
 
 from langchain_core.messages import AIMessage
 from langchain_core.runnables import RunnableConfig
@@ -206,7 +205,7 @@ class _SensitiveOpGateHook(Hook):
     async def __call__(
         self,
         state: AgentState,
-        _runtime: Runtime[MeivaContext],
+        runtime: Runtime[MeivaContext],
         config: RunnableConfig,
         /,
     ) -> dict | None:
@@ -252,12 +251,14 @@ class _SensitiveOpGateHook(Hook):
             ),
         )
 
+        now = runtime.context.require_clock().now()
         return {
             "messages": [
                 system_note_message(
                     content=message,
                     tag=NoteTag.SECURITY,
-                    created_at=datetime.now(UTC),
+                    picked_up_at=now,
+                    created_at=now,
                 )
             ],
             "goto": "after_exec",

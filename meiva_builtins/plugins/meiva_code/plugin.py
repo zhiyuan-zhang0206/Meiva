@@ -42,7 +42,6 @@ outside an exec turn.
 from __future__ import annotations
 
 import hashlib
-from datetime import UTC, datetime
 from typing import Any
 
 __description__ = "Meiva Code conventions — maintains cwd and auto-injects project AGENTS.md / CLAUDE.md (walking up from meiva.files.read paths)"
@@ -169,13 +168,15 @@ def _process_context_file(
             ),
             now=clock.now().astimezone(clock.explicit_zone()),
         )
+    now = sdk_settings.clock().now()
     update_state(
         {
             "messages": [
                 system_note_message(
                     content=f"Project {ctx_file.name} from {ctx_file_str}:\n\n{note_body}",
                     tag=NoteTag.CONTEXT,
-                    created_at=datetime.now(UTC),
+                    picked_up_at=now,
+                    created_at=now,
                 )
             ]
         }

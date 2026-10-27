@@ -88,6 +88,7 @@ class BatchState:
                 security_note_message(
                     source=finding.source,
                     triggers=finding.triggers,
+                    picked_up_at=now,
                     created_at=now,
                 )
             )
@@ -109,9 +110,11 @@ async def _handle_chat(
     st: BatchState,
 ) -> None:
     """CHAT inbound: wrap as HumanMessage, append to state, mark committed."""
+    now = ctx.require_clock().now()
     st.append_scanned(
         *build_chat_inbound(
             item,
+            picked_up_at=now,
             read_security_enabled=lambda: ctx.require_agent().read(
                 "agent", "security_scan_enabled"
             ),
@@ -119,7 +122,7 @@ async def _handle_chat(
             expand_command=ctx.require_commands().expand,
             gateway=lambda: ctx.gateway,
         ),
-        now=ctx.require_clock().now(),
+        now=now,
     )
     st.committed_chat_ids.append(item.id)
 
@@ -171,15 +174,17 @@ async def _handle_system_note(
         enabled=ctx.require_agent().read("agent", "security_scan_enabled"),
     )
     task_id = _task_id_from_system_note(item.payload, _system_note_tag(item.payload))
+    now = ctx.require_clock().now()
     st.append_scanned(
         system_note_message(
             content=f"{_ts_prefix(ctx)}{item.content}",
             tag=_system_note_tag(item.payload),
             task_id=task_id,
+            picked_up_at=now,
             created_at=item.created_at,
         ),
         finding,
-        now=ctx.require_clock().now(),
+        now=now,
     )
 
 
@@ -344,11 +349,13 @@ async def handle_heartbeat(
         )
         st.next_goto = CLAIM
         return
+    now = ctx.require_clock().now()
     st.new_msgs.append(
         system_note_message(
             content=f"{_ts_prefix(ctx)}{item.content}",
             tag=NoteTag.HEARTBEAT,
-            created_at=ctx.require_clock().now(),
+            picked_up_at=now,
+            created_at=now,
         )
     )
 
@@ -363,11 +370,13 @@ async def _handle_terminate(
     Only called when this terminate IS the routing winner (guard in
     dispatch_batch). Vetoed terminates never reach here.
     """
+    now = ctx.require_clock().now()
     st.new_msgs.append(
         system_note_message(
             content=f"{_ts_prefix(ctx)}Termination was accepted from {by_who(item.source)}",
             tag=NoteTag.LIFECYCLE_TERMINATE,
-            created_at=ctx.require_clock().now(),
+            picked_up_at=now,
+            created_at=now,
         )
     )
     st.next_goto = END
@@ -399,11 +408,13 @@ async def handle_restart(
     st.restart_requested = True
     st.restart_preserves_idle = _turn_was_idle(state, item)
     if st.restart_preserves_idle:
+        now = ctx.require_clock().now()
         st.new_msgs.append(
             system_note_message(
                 content=f"{_ts_prefix(ctx)}Restart was accepted from {by_who(item.source)}",
                 tag=NoteTag.LIFECYCLE_RESTART,
-                created_at=ctx.require_clock().now(),
+                picked_up_at=now,
+                created_at=now,
             )
         )
 
@@ -432,11 +443,13 @@ async def _handle_resurrect(
     beats the resurrect it is a consumed no-op — the agent is exiting,
     a 'resurrected' marker right before death would be noise.
     """
+    now = ctx.require_clock().now()
     st.new_msgs.append(
         system_note_message(
             content=f"{_ts_prefix(ctx)}You have been resurrected by {by_who(item.source)}",
             tag=NoteTag.LIFECYCLE_RESURRECT,
-            created_at=ctx.require_clock().now(),
+            picked_up_at=now,
+            created_at=now,
         )
     )
 
@@ -452,6 +465,7 @@ async def _handle_fork(
     extensions: ExtensionRegistry,
     ctx: MeivaContext,
 ) -> None:
+    now = ctx.require_clock().now()
     st.new_msgs.append(
         system_note_message(
             content=(
@@ -463,7 +477,8 @@ async def _handle_fork(
                 f"Continue as agent {agent_id}."
             ),
             tag=NoteTag.LIFECYCLE_FORK,
-            created_at=ctx.require_clock().now(),
+            picked_up_at=now,
+            created_at=now,
         )
     )
     st.new_msgs.extend(context_notes.fork_notes(extensions, ctx))
@@ -481,6 +496,7 @@ async def _handle_fork(
             [s for s in tail_skills if isinstance(s, str)],
             slices.prompt.sdk_disable,
             home=ctx.require_meiva_home(),
+            created_at=now,
         )
         if note is not None:
             st.new_msgs.append(note)

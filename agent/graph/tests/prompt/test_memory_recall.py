@@ -10,6 +10,7 @@ the scores come from the search result.
 
 import json
 from collections.abc import Callable, Iterator
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, NamedTuple
 
@@ -18,7 +19,7 @@ import pytest
 from langchain_core.messages import AnyMessage
 
 import agent.graph.recall.memory_recall as recall
-from agent.messages import inbound_message
+from agent.messages import InboundTimes, inbound_message
 from base.agents.context import MeivaContext
 from base.agents.context.clients import ClientSet
 from base.agents.context.gateway_client.memory_search import MemorySearchResult
@@ -31,6 +32,8 @@ from base.host.env.agent_slices import AgentSlices
 from base.log.tests.log_records import LogRecords
 from base.packages.plugin_providers import build_model_catalog
 from base.paths import meiva_home
+
+_PICKED_UP_AT = datetime(2026, 1, 1, tzinfo=UTC)
 
 
 @pytest.fixture
@@ -132,7 +135,11 @@ def context(search: _MemoryGateway) -> Iterator[MeivaContext]:
 def _conversation() -> list[AnyMessage]:
     return [
         inbound_message(
-            content="how do I deploy the gateway", source="user", inbound_id=1, body_start=0
+            content="how do I deploy the gateway",
+            source="user",
+            inbound_id=1,
+            body_start=0,
+            times=InboundTimes(arrived_at=None, picked_up_at=_PICKED_UP_AT),
         )
     ]
 

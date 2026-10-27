@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from datetime import UTC, datetime
 from types import ModuleType
 from typing import Any
 
@@ -17,6 +18,8 @@ from base.cluster.machine.tests.identity import machine_identity as machine_iden
 from base.config.tests.config_authority import config_authority as config_authority
 from base.packages.tests.model_catalog import model_catalog as model_catalog
 from meiva_builtins.skills.tests.skill_script import load_skill_script
+
+_PICKED_UP_AT = datetime(2026, 1, 1, tzinfo=UTC)
 
 
 @pytest.fixture
@@ -42,10 +45,14 @@ def test_instruction_script_selects_native_prompt_and_preloaded_skills(
 
     messages = [
         SystemMessage(content="Native core and plugin rules\n"),
-        system_note_message(content="Memory index", tag=NoteTag.MEMORY),
-        system_note_message(content="Preloaded skill", tag=NoteTag.PRELOADED_SKILLS),
+        system_note_message(content="Memory index", tag=NoteTag.MEMORY, picked_up_at=_PICKED_UP_AT),
+        system_note_message(
+            content="Preloaded skill", tag=NoteTag.PRELOADED_SKILLS, picked_up_at=_PICKED_UP_AT
+        ),
         HumanMessage(content="Task history"),
-        system_note_message(content="Fork-added skill", tag=NoteTag.PRELOADED_SKILLS),
+        system_note_message(
+            content="Fork-added skill", tag=NoteTag.PRELOADED_SKILLS, picked_up_at=_PICKED_UP_AT
+        ),
     ]
     assert instruction_reader.instruction_text(messages) == (
         "Native core and plugin rules\n\n\n"

@@ -15,9 +15,9 @@
 # Not tested:
 # - Redis pub/sub wake integration for ops_db AsyncConnection (tested in test_db.py)
 # - auto-compact behavior (now a before_llm hook, tests in agent/tests/test_compact.py)
-
 from collections.abc import Callable
 from dataclasses import replace
+from datetime import UTC, datetime
 from typing import cast
 
 import psycopg
@@ -47,6 +47,9 @@ from base.config.service_read import ConfigAuthority
 from base.db.code_version_gate import ProcessDbGate
 from base.lm.catalog import ModelCatalog
 from base.packages.plugins.extensions import ContextNote, ExtensionRegistry, PluginContributions
+
+_PICKED_UP_AT = datetime(2026, 1, 1, tzinfo=UTC)
+
 
 # Almost all claim tests are short-path dispatch: the inbound is INSERTed before
 # claim_node runs, so its first SELECT gets the batch — pure DB side-effect +
@@ -264,11 +267,15 @@ async def test_claim_auto_resurrect_compact_request_batch_compacts_and_wakes(
 
 
 def _agent_id_note(_ctx: MeivaContext) -> HumanMessage:
-    return system_note_message(content="Your Agent ID is N.", tag=NoteTag.AGENT_ID)
+    return system_note_message(
+        content="Your Agent ID is N.", tag=NoteTag.AGENT_ID, picked_up_at=_PICKED_UP_AT
+    )
 
 
 def _agent_memory_note(_ctx: MeivaContext) -> HumanMessage:
-    return system_note_message(content="the new agent's memory", tag=NoteTag.AGENT_MEMORY)
+    return system_note_message(
+        content="the new agent's memory", tag=NoteTag.AGENT_MEMORY, picked_up_at=_PICKED_UP_AT
+    )
 
 
 # meiva:note
