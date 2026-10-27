@@ -44,6 +44,14 @@ class PluginSyncResult(NamedTuple):
     drifted_periods: tuple[str, ...]
 
 
+# meiva:note
+# What one read-only comparison covered, and which declarations disagree with the archive.
+class LatticeDrift(NamedTuple):
+    provider_files: int
+    priced_models: int
+    drifted: tuple[str, ...]
+
+
 def _instant(value: str | None, *, context: str) -> datetime | None:
     if value is None:
         return None
@@ -312,6 +320,20 @@ def _period_label(period: PeriodDeclaration, index: int) -> str:
     return f"period {index} [{period.effective_from!r}, {period.effective_until!r})"
 
 
+def _period_labels(
+    model: str, declared: PriceDeclaration, target: PriceDeclaration
+) -> tuple[str, ...]:
+    if declared.periods == target.periods:
+        return ()
+    labels: list[str] = []
+    for index in range(max(len(declared.periods), len(target.periods))):
+        if index >= len(target.periods):
+            labels.append(f"{model}: extra declared period {index}")
+        elif index >= len(declared.periods) or declared.periods[index] != target.periods[index]:
+            labels.append(f"{model}: {_period_label(target.periods[index], index)}")
+    return tuple(labels)
+
+
 def _drift_labels(
     model: str, declared: PriceDeclaration, target: PriceDeclaration
 ) -> tuple[str, ...]:
@@ -320,12 +342,7 @@ def _drift_labels(
         labels.append(f"{model}: current flat rate")
     if declared.source_checked_at != target.source_checked_at:
         labels.append(f"{model}: source_checked_at")
-    if declared.periods != target.periods:
-        for index in range(max(len(declared.periods), len(target.periods))):
-            if index >= len(target.periods):
-                labels.append(f"{model}: extra declared period {index}")
-            elif index >= len(declared.periods) or declared.periods[index] != target.periods[index]:
-                labels.append(f"{model}: {_period_label(target.periods[index], index)}")
+    labels.extend(_period_labels(model, declared, target))
     return tuple(labels)
 
 
@@ -513,3 +530,53 @@ def sync_plugin_rates(
         changed_files,
         tuple(sorted(drifted_periods)),
     )
+
+
+# meiva:note
+# The committed tree, read without the clock: every declaration's effective periods, tiers, windows
+# and provenance must be what the archive states. The flat trio is the base tier at the last
+# synchronization instant, so comparing it would answer differently on different days while nothing
+# in the tree changed; it is compared only where it is the whole declaration, on a provider that
+# carries no periods. Zero provider files or zero priced models is an error, never a green run.
+# meiva:link base/lm/pricing/docs/pricing.meiva.okf.md
+def lattice_drift(archive_path: Path, repo_root: Path) -> LatticeDrift:
+    root = repo_root.resolve(strict=True)
+    archive = _regular_file(archive_path, root, label="pricing archive")
+    archive_models = _load_archive_models(archive)
+    provider_paths = sorted((root / "meiva_builtins/plugins").glob("lm_*/provider.py"))
+    if not provider_paths:
+        raise RuntimeError(f"no built-in provider.py files found under {root}")
+
+    drifted: list[str] = []
+    priced_models = 0
+    seen_models: set[str] = set()
+    for candidate in provider_paths:
+        path = _regular_file(candidate, root, label="provider source")
+        manifest = provider_manifest(path.read_text(encoding="utf-8"), path)
+        _reject_duplicate_prices(seen_models, manifest, path=path)
+        seen_models.update(manifest.prices)
+        priced_models += len(manifest.prices)
+        for model, declared in sorted(manifest.prices.items()):
+            entry = archive_models.get(model)
+            if entry is None:
+                drifted.append(f"{path.relative_to(root)}: {model} has no archive entry")
+                continue
+            periods = _archive_periods(model, entry["periods"])
+            base = _base_rates(periods[0], context=f"archive {model!r} period 0")
+            source_url, checked_at, vendor = validated_provenance(
+                entry["source_url"],
+                entry["source_checked_at"],
+                entry.get("vendor"),
+                context=f"archive {model!r}",
+            )
+            target = PriceDeclaration(
+                base, source_url, checked_at, vendor, collapse_flat_periods(periods, base)
+            )
+            if (declared.source_url, declared.vendor) != (target.source_url, target.vendor):
+                drifted.append(f"{model}: source_url/vendor")
+            if declared.source_checked_at != target.source_checked_at:
+                drifted.append(f"{model}: source_checked_at")
+            drifted.extend(_period_labels(model, declared, target))
+            if not declared.periods and not target.periods and declared.rates != base:
+                drifted.append(f"{model}: flat rate")
+    return LatticeDrift(len(provider_paths), priced_models, tuple(sorted(drifted)))
