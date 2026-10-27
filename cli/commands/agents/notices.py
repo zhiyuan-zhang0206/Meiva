@@ -2,11 +2,12 @@
 
 from __future__ import annotations
 
+import random
 from typing import Any, TextIO
-from uuid import uuid4
 
 from base.api_contracts.idempotency import keyed_headers
 from base.api_contracts.notice_question import parse_question, question_instructions
+from base.clock.ids import new_uuid
 from base.cluster.machine import GatewayAccess, gateway_api_base, gateway_auth_headers
 from base.host.net import http_dial
 
@@ -14,9 +15,9 @@ _TIMEOUT_S = 15.0
 
 
 # meiva:note
-# Auth headers plus one fresh principal-v1 operation key for a resolve call.
-def _keyed_headers(headers: dict[str, str]) -> dict[str, str]:
-    return {**headers, **keyed_headers(str(uuid4()))}
+# Auth headers plus the principal-v1 operation key of one resolve call.
+def _keyed_headers(headers: dict[str, str], idempotency_key: str) -> dict[str, str]:
+    return {**headers, **keyed_headers(idempotency_key)}
 
 
 def _api(access: GatewayAccess) -> str:
@@ -138,7 +139,13 @@ def cmd_notices_list(
 # meiva:note
 # `meiva notices resolve <id> --agent <id> --action ...` — resolve one notice.
 def cmd_notices_resolve(
-    access: GatewayAccess, *, notice_id: int, agent_id: int, action: str, reply: str | None
+    access: GatewayAccess,
+    *,
+    notice_id: int,
+    agent_id: int,
+    action: str,
+    reply: str | None,
+    idempotency_key: str,
 ) -> int:
     if action not in ("answer", "dismiss"):
         print(f"invalid action {action!r} (answer|dismiss)")
@@ -149,7 +156,7 @@ def cmd_notices_resolve(
     resp = http_dial.post(
         f"{_api(access)}/keyed/v1/agents/{agent_id}/notices/{notice_id}/resolve",
         timeout=_TIMEOUT_S,
-        headers=_keyed_headers(gateway_auth_headers(access)),
+        headers=_keyed_headers(gateway_auth_headers(access), idempotency_key),
         json={"action": action, "reply": reply},
     )
     resp.raise_for_status()
@@ -158,13 +165,13 @@ def cmd_notices_resolve(
 
 
 # meiva:link cli/docs/operator-surfaces/operator-surfaces.meiva.okf.md
-def _resolve_all(access: GatewayAccess, notices: list[dict[str, Any]]) -> int:
+def _resolve_all(access: GatewayAccess, notices: list[dict[str, Any]], rng: random.Random) -> int:
     cleared = 0
     for n in notices:
         r = http_dial.post(
             f"{_api(access)}/keyed/v1/agents/{n['agent_id']}/notices/{n['id']}/resolve",
             timeout=_TIMEOUT_S,
-            headers=_keyed_headers(gateway_auth_headers(access)),
+            headers=_keyed_headers(gateway_auth_headers(access), new_uuid(rng).hex),
             json={"action": "dismiss", "reply": None},
         )
         if r.status_code in (200, 201):
@@ -174,7 +181,13 @@ def _resolve_all(access: GatewayAccess, notices: list[dict[str, Any]]) -> int:
 
 # meiva:link cli/docs/operator-surfaces/operator-surfaces.meiva.okf.md
 def cmd_notices_clear(
-    access: GatewayAccess, *, agent_id: int | None, force: bool, stale: bool = False, stdin: TextIO
+    access: GatewayAccess,
+    *,
+    agent_id: int | None,
+    force: bool,
+    stale: bool = False,
+    stdin: TextIO,
+    rng: random.Random,
 ) -> int:
     if stale and agent_id is not None:
         print("--stale and --agent are mutually exclusive")
@@ -195,7 +208,7 @@ def cmd_notices_clear(
     if not force and not _confirm_clear(notices, stale=stale, agent_id=agent_id, stdin=stdin):
         print("aborted.")
         return 1
-    cleared = _resolve_all(access, notices)
+    cleared = _resolve_all(access, notices, rng)
     target = "stale notices" if stale else f"agent #{agent_id}"
     print(f"cleared {cleared}/{len(notices)} notices: {target}")
     return 0

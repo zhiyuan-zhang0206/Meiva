@@ -26,6 +26,13 @@ from cli.database.tests.cli_tests import operator_database as operator_database
 from cli.database.tests.command_inputs import command_runtime as command_runtime
 from cli.start_runtime import HomeSite
 from cli.startup.service_path import CallerHost
+from cli.startup.tests.birth_facts import (
+    BIRTH_NOW,
+    MINTED_CLUSTER_SECRET,
+    MINTED_REDIS_ADMIN_PASSWORD,
+    MINTED_REDIS_PASSWORD,
+    birth_facts,
+)
 from cli.tests.bootstrap.init_identity import (
     break_env_publication,
     caller_host,
@@ -46,6 +53,7 @@ def inputs(tmp_path: Path) -> identity.IdentityInput:
         frozenset({"gateway", "agent-runner"}),
         {"MEIVA_MACHINE_NAME": "preview"},
         occupied_ports=frozenset(),
+        birth=birth_facts(),
     )
 
 
@@ -245,6 +253,27 @@ def _args(*extra: str):
     from cli.parsers import build_parser
 
     return build_parser().parse_args(["init", *extra])
+
+
+def test_a_home_is_born_with_the_instant_and_secrets_the_entry_chose(
+    inputs: identity.IdentityInput,
+) -> None:
+    identity.prepare_identity(inputs)
+    env = dotenv_values(inputs.home / ".env")
+    rec = cluster.get_record(inputs.home)
+    assert rec is not None and rec.created_at == BIRTH_NOW.isoformat()
+    assert env["MEIVA_CLUSTER_SECRET"] == MINTED_CLUSTER_SECRET
+    assert env["MEIVA_REDIS_ADMIN_PASSWORD"] == MINTED_REDIS_ADMIN_PASSWORD
+    assert env["MEIVA_REDIS_PASSWORD"] == MINTED_REDIS_PASSWORD
+
+
+def test_an_explicit_cluster_secret_wins_over_the_minted_one(
+    inputs: identity.IdentityInput,
+) -> None:
+    chosen = "operator-chosen"
+    given = {**inputs.values, "MEIVA_CLUSTER_SECRET": chosen}
+    identity.prepare_identity(replace(inputs, values=given))
+    assert dotenv_values(inputs.home / ".env")["MEIVA_CLUSTER_SECRET"] == chosen
 
 
 def _single_box(*extra: str):
@@ -570,8 +599,9 @@ def test_remote_input_refuses_local_or_mixed_ownership(
     machine_host: str | None,
 ) -> None:
     args = _remote_config(inputs, host=host, machine_host=machine_host)
+    hosted = replace(caller, local_names=frozenset({socket.gethostname().lower()}))
     with pytest.raises(ValueError, match="foreign"):
-        prepare_init_identity(args, site, caller)
+        prepare_init_identity(args, site, hosted)
     assert identity.read_intent(inputs.home) is None
 
 

@@ -1,4 +1,4 @@
-exports = ["entry_plan.py", "log_sinks.py", "outcome.py", "service_path.py", "settings_failure.py"]
+exports = ["entry_plan.py", "log_sinks.py", "outcome.py", "service_path.py", "settings_failure.py", "tests"]
 
 [uses]
 "tests" = ["entry_plan.py", "log_sinks.py", "outcome.py", "service_path.py", "settings_failure.py"]

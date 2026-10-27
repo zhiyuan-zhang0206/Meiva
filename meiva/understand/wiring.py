@@ -14,7 +14,7 @@ from base.lm.catalog import ModelCatalog
 from base.lm.catalog.provider_keys import ProviderKeys
 from base.paths import workspace_dir
 from meiva import files
-from meiva.sdk_surface import agent_identity
+from meiva.sdk_surface import agent_identity, process_context
 from meiva.sdk_surface import settings as sdk_settings
 from meiva.understand.answer import OVERFLOW_DIRNAME, OutputSite, RetryPolicy, UnderstandDeps
 
@@ -29,7 +29,8 @@ def _output_site() -> OutputSite | None:
     except RuntimeError:
         return None
     return OutputSite(
-        workspace_dir(agent_id) / OVERFLOW_DIRNAME, sdk_settings.clock().explicit_zone()
+        workspace_dir(agent_id) / OVERFLOW_DIRNAME,
+        process_context.current_context().require_clock(),
     )
 
 
