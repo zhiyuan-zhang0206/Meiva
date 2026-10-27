@@ -18,6 +18,7 @@ import zipfile
 from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Literal
 
 import pytest
 import yaml
@@ -106,7 +107,7 @@ class LgtmUnit:
 
     # meiva:note
     # Leave the markers of the pinned release for `system`/`machine`, as a finished install does.
-    def mark_current(self, system: str, machine: str) -> str:
+    def mark_current(self, system: Literal["darwin", "linux"], machine: str) -> str:
         tag = platform_tag(system, machine)
         assert tag is not None
         for name, asset in lgtm_native.native_versions(REPO_ROOT, tag=tag).items():
