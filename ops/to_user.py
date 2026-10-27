@@ -7,16 +7,16 @@ from base.paths import workspace_dir_readonly
 
 
 def read_to_user(
-    pool: ConnectionPool, agent_id: int, machine: str, *, references: list[str]
+    pool: ConnectionPool, agent_id: int, machine: str, *, references: list[str], home: Path
 ) -> ToUserDocument:
-    return read_document(owned_workspace(pool, agent_id, machine), references=references)
+    return read_document(owned_workspace(pool, agent_id, machine, home=home), references=references)
 
 
-def owned_workspace(pool: ConnectionPool, agent_id: int, machine: str) -> Path:
+def owned_workspace(pool: ConnectionPool, agent_id: int, machine: str, *, home: Path) -> Path:
 
     with pool.connection() as conn, conn.cursor() as cur:
         cur.execute("SELECT machine FROM agents_meta WHERE id = %s", (agent_id,))
         row = cur.fetchone()
     if row is None or row[0] != machine:
         raise ValueError("To user can only be read on the agent's home machine")
-    return workspace_dir_readonly(agent_id)
+    return workspace_dir_readonly(agent_id, home=home)

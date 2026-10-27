@@ -6,6 +6,7 @@ import asyncio
 import json
 import logging
 import re
+from pathlib import Path
 from typing import assert_never
 
 from psycopg_pool import ConnectionPool
@@ -32,7 +33,6 @@ from base.events.live.announce import publish_agent_updated_sync
 from base.events.live.bus import EventBus
 from base.lm.catalog import ModelCatalog
 from base.lm.registry import normalize_overlay_llm_model
-from base.paths.home import resolve_meiva_home
 from ops.agents import (
     get_agent_machine,
     get_agent_status,
@@ -552,13 +552,13 @@ _LIFECYCLE_PATH = re.compile(
 
 
 # meiva:note
-# This machine's agent host, from the settings and the home this process runs under.
+# This machine's agent host, from the settings and the home the op entry hands in.
 #
 # `ops/ambient_roots.toml` names this module as the one place of the package that builds the
 # endpoint table, so the op entry reads the port once and hands the value down.
-def _local_agent_host() -> LocalAgentHost:
+def _local_agent_host(home: Path) -> LocalAgentHost:
     return LocalAgentHost(
-        home=resolve_meiva_home(),
+        home=home,
         health_port=ServiceEndpoints.from_settings().of("agent_host").health_port,
     )
 
@@ -576,6 +576,7 @@ async def lifecycle_op(
     db_pool: ConnectionPool,
     *,
     catalog: ModelCatalog,
+    home: Path,
     trigger_inbound_id: int | None = None,
     trigger_inbound_kind: WakeTriggerKind | None = None,
 ) -> TerminateAgentResponse | ResurrectAgentResponse | RestartAgentResponse | CancelAgentResponse:
@@ -591,7 +592,7 @@ async def lifecycle_op(
             f"trigger inbound is only valid for resurrect-if-pending-work, not {action!r}"
         )
     if action == "cancel":
-        return await cancel_agent_op(db, agent_id, host=_local_agent_host())
+        return await cancel_agent_op(db, agent_id, host=_local_agent_host(home))
     if action == "terminate":
         return await terminate_agent_op(
             db,
@@ -599,7 +600,7 @@ async def lifecycle_op(
             agent_id,
             TerminateAgentRequest.model_validate(body),
             db_pool,
-            host=_local_agent_host(),
+            host=_local_agent_host(home),
         )
     if action == "resurrect-explicit":
         return await resurrect_agent_op(

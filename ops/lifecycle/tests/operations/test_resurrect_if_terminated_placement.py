@@ -32,6 +32,7 @@ from base.events.live.bus import EventBus
 from base.lm.catalog import ModelCatalog
 from base.log.tests.log_records import LogRecords
 from base.log.tests.log_records import loguru_records as loguru_records
+from base.paths import resolve_meiva_home
 from ops import lifecycle
 from ops.cluster.rpc import ClusterOpFailed
 from ops.lifecycle.tests.loopback.scripted_post import Reply, Route, serve_post
@@ -146,6 +147,7 @@ def _home_ops_server(
                 trigger_inbound_id=payload.trigger_inbound_id,
                 trigger_inbound_kind=payload.trigger_inbound_kind,
                 catalog=catalog,
+                home=resolve_meiva_home(),
             )
         )
         return Reply({"status": "completed", "result": response.model_dump(mode="json")})

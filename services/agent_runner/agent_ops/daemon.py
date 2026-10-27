@@ -31,10 +31,12 @@ from pydantic import ValidationError
 
 from base import paths
 from base.agents.context.clients import ClientSet
+from base.agents.upload_delivery.paths import MAX_AGENT_UPLOAD_BYTES, MAX_AGENT_UPLOAD_FILES
 from base.api_contracts.agent_contract import MeivaAgentError
 from base.api_contracts.launch_retry import LaunchReconcileRequest
 from base.cluster.dataplane.direct_url import ClusterDirectUrl
 from base.cluster.machine import MachineIdentityReader
+from base.cluster.machine.boot import gateway_access_from_boot
 from base.cluster.machine.configured import ConfiguredMachineIdentity
 from base.cluster.transport_encryption import verify_transport_encryption_declaration
 from base.config import ConfigBoot
@@ -46,6 +48,7 @@ from base.db import Database
 from base.db.code_version_gate import ProcessDbGate
 from base.db.config import db_config_from_boot
 from base.db.transaction import write_transaction
+from base.host.db_authority.unit import UnitIdentity
 from base.host.exit_codes import hard_exit
 from base.host.system.hostport import Host
 from base.lm.catalog import ModelCatalog
@@ -58,6 +61,7 @@ from base.telemetry.process_logging import init_gateway_process
 from ops import lifecycle
 from ops.cluster_status import ShellNotFoundError
 from ops.rpc_schemas import LaunchAgentRequest, LifecyclePayload, OpStatus, is_op_kind
+from ops.upload_delivery import ReceiverConfig
 from services.agent_runner.agent_ops import boot, health, idempotency_plan, in_flight, ops_plan
 from services.agent_runner.agent_ops.dispatch_sync import dispatch_sync
 from services.agent_runner.agent_ops.to_user_resource import resource_route
@@ -98,6 +102,8 @@ async def run_arm(
     local_machine: MachineIdentityReader,
     host: Host,
     rng: random.Random,
+    home: Path,
+    receiver: ReceiverConfig,
 ) -> tuple[OpStatus, dict[str, object]]:
 
     loop = asyncio.get_running_loop()
@@ -117,6 +123,8 @@ async def run_arm(
                 local_machine=local_machine,
                 host=host,
                 rng=rng,
+                home=home,
+                receiver=receiver,
             ),
         )
         in_flight.track_worker(future, workers=workers)
@@ -137,6 +145,8 @@ def _dispatch_in_thread(
     local_machine: MachineIdentityReader,
     host: Host,
     rng: random.Random,
+    home: Path,
+    receiver: ReceiverConfig,
 ) -> tuple[OpStatus, dict[str, object]]:
 
     return dispatch_sync(
@@ -148,6 +158,8 @@ def _dispatch_in_thread(
         image=image,
         local_machine=local_machine,
         host=host,
+        home=home,
+        receiver=receiver,
     )
 
 
@@ -166,6 +178,8 @@ async def dispatch(
     local_machine: MachineIdentityReader,
     host: Host,
     rng: random.Random,
+    home: Path,
+    receiver: ReceiverConfig,
 ) -> tuple[OpStatus, dict[str, object]]:
 
     if not is_op_kind(kind):
@@ -210,6 +224,7 @@ async def dispatch(
                     trigger_inbound_id=lc.trigger_inbound_id,
                     trigger_inbound_kind=lc.trigger_inbound_kind,
                     catalog=catalog,
+                    home=home,
                 )
                 return OpStatus.COMPLETED, resp.model_dump(mode="json")
             case _:
@@ -226,6 +241,8 @@ async def dispatch(
                     local_machine=local_machine,
                     host=host,
                     rng=rng,
+                    home=home,
+                    receiver=receiver,
                 )
     except (
         MeivaAgentError,
@@ -253,6 +270,8 @@ async def dispatch_idempotent(
     local_machine: MachineIdentityReader,
     host: Host,
     rng: random.Random,
+    home: Path,
+    receiver: ReceiverConfig,
     dedup_wait_attempts: int = DEDUP_WAIT_ATTEMPTS,
     dedup_wait_step_s: float = DEDUP_WAIT_STEP_S,
     retry_backoff_s: float = DISPATCH_RETRY_BACKOFF_S,
@@ -278,6 +297,8 @@ async def dispatch_idempotent(
                 local_machine=local_machine,
                 host=host,
                 rng=rng,
+                home=home,
+                receiver=receiver,
                 dedup_wait_attempts=dedup_wait_attempts,
                 dedup_wait_step_s=dedup_wait_step_s,
             )
@@ -309,6 +330,8 @@ async def dispatch_idempotent_pass(
     local_machine: MachineIdentityReader,
     host: Host,
     rng: random.Random,
+    home: Path,
+    receiver: ReceiverConfig,
     dedup_wait_attempts: int = DEDUP_WAIT_ATTEMPTS,
     dedup_wait_step_s: float = DEDUP_WAIT_STEP_S,
 ) -> tuple[OpStatus, dict[str, object]]:
@@ -337,6 +360,8 @@ async def dispatch_idempotent_pass(
             local_machine=local_machine,
             host=host,
             rng=rng,
+            home=home,
+            receiver=receiver,
         )
         status = OpStatus(status)
         with write_transaction(pool) as conn, conn.cursor() as cur:
@@ -384,6 +409,8 @@ async def ops_route(
     local_machine: MachineIdentityReader,
     host: Host,
     rng: random.Random,
+    home: Path,
+    receiver: ReceiverConfig,
 ) -> tuple[int, bytes, str]:
 
     request = ops_plan.read_request(body)
@@ -413,6 +440,8 @@ async def ops_route(
                         local_machine=local_machine,
                         host=host,
                         rng=rng,
+                        home=home,
+                        receiver=receiver,
                     )
                 else:
                     status, result = await dispatch(
@@ -429,12 +458,28 @@ async def ops_route(
                         local_machine=local_machine,
                         host=host,
                         rng=rng,
+                        home=home,
+                        receiver=receiver,
                     )
             except Exception as exc:
                 _log.exception("dispatch refused or crashed for kind=%s", envelope.kind)
                 status, result = ops_plan.failure_result(exc)
     reply = ops_plan.op_reply(OpStatus(status), result)
     return reply.status_code, reply.body, reply.content_type
+
+
+# meiva:note
+# What the upload receiver needs from its environment, read once by `main()`: this machine and home
+# as the unit identity, the OS user's home (where `Downloads/MeivaAgent-N` lives), the gateway
+# access and the per-agent quota.
+def _receiver_config(config: ConfigBoot, *, machine: str, home: Path) -> ReceiverConfig:
+    return ReceiverConfig(
+        unit=UnitIdentity(machine=machine, home=str(home.resolve())),
+        user_home=Path.home(),
+        access=gateway_access_from_boot(config),
+        quota_bytes=MAX_AGENT_UPLOAD_BYTES,
+        quota_files=MAX_AGENT_UPLOAD_FILES,
+    )
 
 
 async def serve_ops_daemon(
@@ -446,6 +491,7 @@ async def serve_ops_daemon(
     host: Host,
     rng: random.Random,
     home: Path,
+    receiver: ReceiverConfig,
 ) -> None:
     from base.deploy.schema.migrations import assert_schema_current
 
@@ -515,11 +561,14 @@ async def serve_ops_daemon(
                     local_machine=local_machine,
                     host=host,
                     rng=rng,
+                    home=home,
+                    receiver=receiver,
                 ),
                 ("POST", "/to-user/resource"): functools.partial(
                     resource_route,
                     pool=pool,
                     machine=our_machine,
+                    home=home,
                     executor=executor,
                     dispatch_sem=dispatch_sem,
                     requests=requests,
@@ -615,6 +664,7 @@ def main(*, argv: list[str] | None = None) -> None:
                     host=Host.system(),
                     rng=_new_rng(),
                     home=home,
+                    receiver=_receiver_config(config, machine=machine.name(), home=home),
                 )
             )
         except KeyboardInterrupt as interrupted:

@@ -13,6 +13,3 @@ exports = ["delivery.py", "events.py", "launch.py", "launch_reconcile.py", "term
 
 [roots]
 "__init__.py" = { kinds = ["endpoints", "settings"], why = "Lifecycle op dispatch root resolves local agent-host endpoint and default model from settings" }
-
-[debt.ambient-read]
-"__init__.py#home base.paths.home.resolve_meiva_home" = 1
