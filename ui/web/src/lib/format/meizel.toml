@@ -18,3 +18,6 @@ exports = ["clipboard.ts", "display-limits.ts", "format-number.ts", "format-pric
 "inbound-source.ts" = "strict"
 "item-summary.ts" = "strict"
 "utils.ts" = "strict"
+
+[debt.ambient-read]
+"clipboard.ts#platform navigator" = 2

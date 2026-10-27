@@ -5,3 +5,6 @@ exports = ["context-panel-open.ts", "reference-url.ts", "use-to-user.ts"]
 
 [purity]
 "reference-url.ts" = "strict"
+
+[debt.ambient-read]
+"context-panel-open.ts#environ localStorage" = 1

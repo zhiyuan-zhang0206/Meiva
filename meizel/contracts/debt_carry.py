@@ -23,7 +23,7 @@ from meizel.contracts.debt_report import (
     totals_at,
 )
 from meizel.contracts.debt_rules import purity_changed, rule_diff
-from meizel.contracts.debt_sites import format_sites, sites
+from meizel.contracts.debt_sites import approved, format_approved, format_sites, sites
 from meizel.contracts.debt_symbol import (
     SymbolMove,
     defines,
@@ -315,9 +315,13 @@ def run_debt(root: Path, targets: list[str], args: argparse.Namespace, jobs: int
         for line in prune_debt(root, jobs):
             print(line)
         return 0
-    if mode == "sites":
-        found = sites(load_universe(root), args.code, args.target_prefix, targets, jobs)
-        print(format_sites(found, as_json=args.as_json))
+    if mode in ("sites", "approved"):
+        universe = load_universe(root)
+        if mode == "sites":
+            found = sites(universe, args.code, args.target_prefix, targets, jobs)
+            print(format_sites(found, as_json=args.as_json))
+        else:
+            print(format_approved(approved(universe, jobs), as_json=args.as_json))
         return 0
     if mode == "diff":
         return _run_diff(root, args.against, args.on_growth, args)

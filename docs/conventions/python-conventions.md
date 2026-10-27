@@ -649,6 +649,12 @@ patched thing injectable, convert the tests of that component in the same change
 `stub_everywhere` in `tests/fixtures/guards.py` reaches aliases that are already frozen;
 it serves the debt that remains and is not a pattern for a new test.
 
+Three kinds of test-support file patch on purpose and are listed under `[approved-patches.files]`
+in `meizel.policy.toml` ([patching](../../meizel/docs/checker/patching.meiva.okf.md)): an autouse guard
+that keeps the suite off the host, the entry of a subprocess a test starts, and the global setup of
+the test runner. A test module is never listed; adding an entry is a decision the reviewer reads in
+`policy diff`.
+
 ### Test seams in another shape
 
 A test that controls code by rewriting something after it was built is a patch with

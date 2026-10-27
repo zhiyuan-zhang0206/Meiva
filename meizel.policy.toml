@@ -445,6 +445,17 @@ rule-inputs = [
 "cli/main.py" = "Settings-free entry: importing cli.main must not import base.log or base.config (the cli/tests/bootstrap defer_logging probe); the producer-factory and database-opener types of run_command are annotation-only here."
 "cli/database/__init__.py" = "`meiva --help` must not load the configuration chain: Database, DbConfig, ProcessDbGate and ClusterDirectUrl are annotation-only in the OpenDatabase alias."
 
+# approved-patches (meizel/contracts/analysis): test-support files that patch on purpose, none of whose
+# patches is recorded. Only fixture infrastructure qualifies: a guard that keeps the suite off the host, the
+# entry of a subprocess the test starts, the global setup of the test runner. Production code and test modules
+# never do; a test that patches is converted. A file that patches nothing any more is `stale-approval`.
+[approved-patches.files]
+"tests/fixtures/guards.py" = "Guards that keep every test off the host: autouse ones refuse process exec, the helper converge and the native Postgres and Redis drivers and keep the suite outside the exec domain, and the port guard a home requests gives it its own ports; stub_everywhere and stub_boundaries take their targets as arguments, so no fixed list of targets exists to inject."
+"tests/e2e/fakes/child_budget_writer.py" = "The entry of a child process the test starts: it holds the handoff snapshot writes of one generated scenario by wrapping Path.open and os.fdopen inside that process, a place no parameter of the code under test reaches."
+"tests/integration/child_schedule_runner.py" = "The entry of a child process the test starts: its missing-module-files mode removes the file attribute of two standard-library modules before the production runner loads, to put the interpreter in a state no parameter reaches."
+"cli/tests/bootstrap/child_main_dispatch.py" = "Fresh-interpreter probes of the CLI entry's import and admission boundaries: each probe must see the import order of a new interpreter, and forbids network there by replacing socket.create_connection and socket.socket.connect."
+"ui/web/tests/vitest.setup.ts" = "The global setup of the vitest suite: it replaces next-intl with a double that reads the English catalog so no component test mounts a provider; a test that needs the real bridge mocks it back."
+
 [path-imports]
 scope = [
     "meiva_builtins/",

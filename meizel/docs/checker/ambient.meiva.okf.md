@@ -24,7 +24,9 @@ The rule governs the `application`, `templates`, `tooling` and `frontend` roles
 for both Python and TypeScript. Both languages use the same `[state]` and `[roots]`
 manifest entries. TypeScript acquisition uses compiler bindings for imports and
 shadowing; its built-in spellings include `process.env`, `process.cwd()`,
-`Date.now()`, zero-argument `new Date()`, `Math.random()` and Node/DOM crypto calls.
+`Date.now()`, zero-argument `new Date()`, `Math.random()` and Node/DOM crypto calls; the browser's
+environment and the variables the Next.js build inlines are in
+[[meizel/docs/checker/typescript.meiva.okf.md|the TypeScript node]].
 
 ## Kinds
 

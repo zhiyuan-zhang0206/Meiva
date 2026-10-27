@@ -1,9 +1,12 @@
 from __future__ import annotations
 
+import tomllib
 from pathlib import Path
 
 import pytest
 
+from meizel.allowances import parse
+from meizel.contracts.sync import with_table
 from meizel.tests.synthetic import RepoFactory, analysis_of, commit, diagnostics, git, run, write
 
 LOADER = {
@@ -190,3 +193,52 @@ def test_historical_policy_diff_keeps_retired_entries_and_surviving_reasons(
     assert "- [ambient-state.db-modules] base#db" in out
     assert "- [ambient-state.db-handles] base:Database" in out
     assert "ambient-state.sites" not in out
+
+
+TABLE = "approved-patches.files"
+
+
+@pytest.mark.parametrize(
+    ("text", "kept"),
+    [
+        ("", "[external]\n"),
+        ("[external]\n", "[external]\n"),
+        ('[external]\n\n[approved-patches.files]\n"old.py" = "x"\n', "[external]\n"),
+        ('[approved-patches.files]\n"old.py" = "x"\n\n[external]\n', "[external]\n"),
+        (
+            '[external]\n# note\n\n[approved-patches.files]\n"old.py" = "x"\n\n[loads]\n',
+            "[external]\n# note\n\n[loads]\n",
+        ),
+    ],
+)
+def test_with_table_replaces_the_table_wherever_it_stands(text: str, kept: str) -> None:
+    entries = {"b.py": 'quote " and backslash \\ and \u00e9 and \U0001f600', "a.py": "first"}
+    written = with_table(text or "[external]\n", TABLE, entries)
+    document = tomllib.loads(written)
+    assert document["approved-patches"]["files"] == entries
+    assert written.index('"a.py"') < written.index('"b.py"')
+    assert tomllib.loads(with_table(written, TABLE, entries)) == document
+    assert written.count("[approved-patches.files]") == 1
+    without = with_table(text or "[external]\n", TABLE, {})
+    assert without == kept
+    assert "approved-patches" not in tomllib.loads(without)
+
+
+def test_with_table_keeps_every_other_table_untouched() -> None:
+    text = '[external]\n"a.py" = "x"\n\n[approved-patches.files]\n"old.py" = "y"\n\n[loads]\n"b.py" = ["lib"]\n'
+    document = tomllib.loads(with_table(text, TABLE, {"new.py": "z"}))
+    assert document["external"] == {"a.py": "x"}
+    assert document["loads"] == {"b.py": ["lib"]}
+    assert document["approved-patches"]["files"] == {"new.py": "z"}
+
+
+def test_a_policy_line_is_found_inside_its_table_only() -> None:
+    text = (
+        '[external]\n"child.py" = "runs it"\n\n'
+        '[approved-patches.files]\n"child.py" = "keeps the suite off the host"\n'
+    )
+    policy, problems = parse(text)
+    assert problems == []
+    assert policy.line_of("child.py") == 2
+    assert policy.line_of("child.py", TABLE) == 5
+    assert policy.line_of("absent.py", TABLE) == 1

@@ -13,15 +13,3 @@ exports = ["collection_guard.py", "env_bootstrap.py", "gateway_config.py", "guar
 [debt.env-patch]
 "provisioning.py#monkeypatch.setitem os.environ.MEIVA_DB_URL" = 1
 "provisioning.py#monkeypatch.setitem os.environ.MEIVA_REDIS_URL" = 1
-
-[debt.first-party-patch]
-"guards.py#monkeypatch.setattr base.cluster.new_home_ports" = 1
-"guards.py#monkeypatch.setattr base.host.proc.hosting_exec_domain" = 1
-
-[debt.stdlib-patch]
-"guards.py#monkeypatch.setattr os" = 1
-
-[debt.unresolved-patch]
-"guards.py#monkeypatch.setattr mod" = 1
-"guards.py#monkeypatch.setattr module" = 1
-"guards.py#monkeypatch.setattr owner" = 2

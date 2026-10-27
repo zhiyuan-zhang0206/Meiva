@@ -1,7 +1,11 @@
 from __future__ import annotations
 
+from pathlib import Path
+
 import pytest
 
+from meizel.allowances import parse
+from meizel.graph.model import Diagnostic
 from meizel.tests.synthetic import RepoFactory, analysis_of, diagnostics, git, run
 
 LIB = {"lib/__init__.py": "", "lib/mod.py": "def helper() -> int:\n    return 1\n"}
@@ -137,3 +141,136 @@ def test_a_new_unresolved_patch_in_a_strict_to_be_directory_fails(make_repo: Rep
     [found] = [d for d in analysis_of(root).verdict if d.code.value == "unresolved-patch"]
     assert "thing.y" in found.message
     assert "app is strict-to-be" in found.render()
+
+
+GUARD = (
+    "import lib.mod\n\n"
+    "def guard(monkeypatch):\n"
+    "    monkeypatch.setattr(lib.mod, 'helper', lambda: 2)\n"
+)
+APPROVAL_REPO = {
+    "lib/__init__.py": "",
+    "lib/mod.py": "def helper() -> int:\n    return 1\n",
+    "app/__init__.py": "",
+    "app/tests/__init__.py": "",
+    "app/tests/guards.py": GUARD,
+    "app/tests/other.py": GUARD,
+}
+
+
+def approving(*paths: str, reason: str = "keeps the suite off the host") -> str:
+    entries = "".join(f'"{path}" = "{reason}"\n' for path in paths)
+    return f"[approved-patches.files]\n{entries}"
+
+
+def approval_judged(
+    make_repo: RepoFactory, policy: str, extra: dict[str, str] | None = None
+) -> tuple[Path, list[Diagnostic]]:
+    root = make_repo({**APPROVAL_REPO, **(extra or {}), "meizel.policy.toml": policy})
+    return root, analysis_of(root).diagnostics
+
+
+def patches_of(found: list[Diagnostic], path: str) -> list[str]:
+    return [d.code.value for d in found if d.path == path and d.code.value.endswith("-patch")]
+
+
+def test_a_file_the_policy_approves_records_no_patch_and_its_neighbours_still_do(
+    make_repo: RepoFactory,
+) -> None:
+    _, found = approval_judged(make_repo, approving("app/tests/guards.py"))
+    assert patches_of(found, "app/tests/guards.py") == []
+    assert patches_of(found, "app/tests/other.py") == ["first-party-patch"]
+
+
+def test_without_the_approval_the_same_file_is_debt(make_repo: RepoFactory) -> None:
+    _, found = approval_judged(make_repo, "")
+    assert patches_of(found, "app/tests/guards.py") == ["first-party-patch"]
+
+
+def test_an_approved_file_may_not_patch_a_name_that_does_not_exist(make_repo: RepoFactory) -> None:
+    source = (
+        "import lib.mod\n\ndef guard(monkeypatch):\n    monkeypatch.setattr(lib.mod, 'gone', 1)\n"
+    )
+    _, found = approval_judged(
+        make_repo, approving("app/tests/guards.py"), {"app/tests/guards.py": source}
+    )
+    assert [d.code.value for d in found if d.path == "app/tests/guards.py"].count(
+        "missing-patch-target"
+    ) == 1
+
+
+@pytest.mark.parametrize(
+    ("path", "why"),
+    [
+        ("lib/mod.py", "production code"),
+        ("app/tests/test_guards.py", "a test module"),
+        ("app/tests/guards_test.py", "a test module"),
+    ],
+)
+def test_production_code_and_test_modules_cannot_be_approved(
+    make_repo: RepoFactory, path: str, why: str
+) -> None:
+    extra = {path: GUARD} if path.startswith("app/tests/") else {}
+    _, found = approval_judged(make_repo, approving(path), extra)
+    [refused] = [d for d in found if d.code.value == "policy-syntax"]
+    assert path in refused.message
+    assert why in refused.message
+
+
+def test_an_approval_of_a_file_that_patches_nothing_is_stale(make_repo: RepoFactory) -> None:
+    quiet = "def guard() -> None:\n    return None\n"
+    _, found = approval_judged(
+        make_repo, approving("app/tests/quiet.py"), {"app/tests/quiet.py": quiet}
+    )
+    [stale] = [d for d in found if d.code.value == "stale-approval"]
+    assert "patches nothing any more" in stale.message
+    assert stale.line == 2
+
+
+def test_an_approval_of_a_file_that_is_gone_is_stale(make_repo: RepoFactory) -> None:
+    _, found = approval_judged(make_repo, approving("app/tests/gone.py"))
+    [stale] = [d for d in found if d.code.value == "stale-approval"]
+    assert "names no tracked file" in stale.message
+
+
+def test_an_approval_that_still_approves_is_not_stale(make_repo: RepoFactory) -> None:
+    root, _ = approval_judged(make_repo, approving("app/tests/guards.py"))
+    assert diagnostics(root, "stale-approval") == []
+
+
+def test_an_approval_without_a_reason_is_refused() -> None:
+    _, problems = parse('[approved-patches.files]\n"app/tests/guards.py" = " "\n')
+    assert problems == [
+        "[approved-patches.files] 'app/tests/guards.py' needs a non-empty reason string"
+    ]
+
+
+def test_the_listing_counts_the_patches_of_each_approved_file(
+    make_repo: RepoFactory, capsys: pytest.CaptureFixture[str]
+) -> None:
+    root = make_repo({**APPROVAL_REPO, "meizel.policy.toml": approving("app/tests/guards.py")})
+    assert run(root, "debt", "approved") == 0
+    out = capsys.readouterr().out
+    assert "app/tests/guards.py: 1 site -- keeps the suite off the host" in out
+    assert "1 patch site in 1 approved file, not recorded as debt" in out
+
+
+def test_a_stale_approval_points_at_its_own_entry_not_at_an_earlier_mention(
+    make_repo: RepoFactory,
+) -> None:
+    policy = (
+        '[external]\n"app/tests/gone.py" = "an earlier mention of the same path"\n\n'
+        + approving("app/tests/gone.py")
+    )
+    _, found = approval_judged(make_repo, policy)
+    [stale] = [d for d in found if d.code.value == "stale-approval"]
+    assert stale.line == 5
+
+
+def test_a_refused_approval_points_at_its_own_entry_too(make_repo: RepoFactory) -> None:
+    policy = '[external]\n"lib/mod.py" = "an earlier mention of the same path"\n\n' + approving(
+        "lib/mod.py"
+    )
+    _, found = approval_judged(make_repo, policy)
+    [refused] = [d for d in found if d.code.value == "policy-syntax"]
+    assert refused.line == 5

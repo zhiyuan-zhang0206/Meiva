@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import re
 from collections.abc import Mapping
 from pathlib import Path
@@ -15,7 +16,14 @@ from meizel.contracts.manifest_text import ENTRY, HEADER, entry_end, items, unqu
 from meizel.graph.model import MeizelError
 from meizel.graph.universe import EditPlan, GitRepo
 
-__all__ = ["plan_removals", "prepare_policy_snapshot", "prune", "remove_entries", "sync_manifests"]
+__all__ = [
+    "plan_removals",
+    "prepare_policy_snapshot",
+    "prune",
+    "remove_entries",
+    "sync_manifests",
+    "with_table",
+]
 
 
 def _rewrite_entry(lines: list[str], start: int, end: int, drop: set[str]) -> list[str]:
@@ -66,6 +74,33 @@ def remove_entries(text: str, removals: dict[str, dict[str, set[str]]]) -> str:
         out.append(lines[index])
         index += 1
     return _drop_empty_sections(out)
+
+
+# meiva:note
+# The policy text with `[header]` holding exactly `entries` (`path = reason`): the table is dropped
+# wherever it stands and written again at the end, or left out when there is no entry.
+def with_table(text: str, header: str, entries: Mapping[str, str]) -> str:
+    kept: list[str] = []
+    skipping = False
+    for line in text.splitlines():
+        if line.startswith("["):
+            skipping = line.strip() == f"[{header}]"
+        if not skipping:
+            kept.append(line)
+    while kept and not kept[-1].strip():
+        kept.pop()
+    if entries:
+        kept.extend(
+            [
+                "",
+                f"[{header}]",
+                *(
+                    f"{json.dumps(k, ensure_ascii=False)} = {json.dumps(v, ensure_ascii=False)}"
+                    for k, v in sorted(entries.items())
+                ),
+            ]
+        )
+    return "\n".join(kept) + "\n" if kept else ""
 
 
 def _drop_empty_sections(lines: list[str]) -> str:

@@ -106,7 +106,7 @@ Reading `sys.modules` is not restricted. A file that owns a dynamic load declare
 ```
 
 Each entry becomes a fact edge from the file to the directory, judged by the
-same rule; the file is then exempt from the restricted-form errors. A loading file does only the loading.
+same rule; the file is then exempt from the restricted-form errors. A loading file only loads.
 
 A file that runs code from outside the repository (user scripts, agent code, a
 module named by operator configuration) declares it under `[external]` with a reason:
@@ -116,12 +116,11 @@ module named by operator configuration) declares it under `[external]` with a re
 "runner.py" = "executes the schedule script the user wrote"
 ```
 
-The file is then exempt from `exec`, `compile` and the dynamic-import forms; none
-makes an edge. Other restricted forms (`sys.modules` writes, python commands,
+The file is then exempt from `exec`, `compile` and the dynamic-import forms; no edge is made. Other restricted forms (`sys.modules` writes, python commands,
 string patches) still apply. The reason must be non-empty; an entry whose file
 has none of the exempt forms is `stale-external`.
 
-Plugin and schedule-script discovery is `[external]`, never `[loads]`.
+Plugin and schedule-script discovery is `[external]`, not `[loads]`.
 
 ## Manifest
 
@@ -137,7 +136,7 @@ a manifest has no local edges and exports its door.
 Diagnostic codes: `undeclared-edge`, `not-exported`, `private-module`, `private-name`,
 `cycle-edge`, `restricted-python`, the patch codes and `missing-patch-target` ([[meizel/docs/checker/patching.meiva.okf.md|patching]]),
 the 15 purity and bounded-container codes ([[meizel/docs/checker/purity.meiva.okf.md|purity]]),
-`ambient-read`, `stale-root`, `stale-reader`, `fake-entropy` ([[meizel/docs/checker/fake-entropy.meiva.okf.md|fake entropy]]),
+`ambient-read`, `stale-root`, `stale-reader`, `stale-approval`, `fake-entropy` ([[meizel/docs/checker/fake-entropy.meiva.okf.md|fake entropy]]),
 `unresolved-import`, `unlisted-allowance`,
 `stale-load`, `stale-external`, `policy-syntax`, `debt-paid`, and the manifest codes
 (`manifest-` + syntax, unknown-key, unknown-child, duplicate, self-edge, cycle, export-private,

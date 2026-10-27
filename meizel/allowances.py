@@ -63,6 +63,7 @@ RULES: dict[str, dict[str, str]] = {
         "plugin-mechanism-files": REASONS,
     },
     "type-checking": {"files": REASONS},
+    "approved-patches": {"files": REASONS},
     "single-owner": {"postgres-dial-owners": NAMES},
     "purity": {
         "impure-imports": NAMES,
@@ -128,6 +129,24 @@ class Policy:
         """The `name -> reason` entries of one section; empty when the file has none."""
         self._known(rule, section, REASONS)
         return dict(self.listed.get((rule, section), {}))
+
+    # meiva:note
+    # The line of the first uncommented line that quotes `name`, within `[table]` when one is given;
+    # 1 when none does.
+    def line_of(self, name: str, table: str | None = None) -> int:
+        quoted = f'"{name}"'
+        inside = table is None
+        for number, text in enumerate(self.lines, 1):
+            if text.startswith("["):
+                inside = table is None or text.strip() == f"[{table}]"
+            if (
+                inside
+                and quoted in text
+                and not text.lstrip().startswith("#")
+                and not text.startswith("[")
+            ):
+                return number
+        return 1
 
     def names(self, rule: str, section: str) -> tuple[str, ...]:
         """The names of one list section; empty when the file has none."""

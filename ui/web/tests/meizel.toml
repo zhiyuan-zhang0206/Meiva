@@ -1,5 +1,2 @@
 [purity]
 "." = "strict"
-
-[debt.third-party-patch]
-"vitest.setup.ts#vi.mock next-intl" = 1
