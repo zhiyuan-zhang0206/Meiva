@@ -17,8 +17,16 @@ from meizel.contracts.debt import file_key
 from meizel.contracts.manifest import Manifest, effective_purity
 from meizel.contracts.policy import POLICY, Policy
 from meizel.graph.imports import Scope, collect_scope
-from meizel.graph.model import Acquisition, AmbientKind, Code, DebtKey, Diagnostic, Sources
-from meizel.graph.universe import Universe
+from meizel.graph.model import (
+    Acquisition,
+    AmbientKind,
+    Code,
+    DebtKey,
+    Diagnostic,
+    MeizelError,
+    Sources,
+)
+from meizel.graph.universe import GitRepo, Universe
 from meizel.language.scan import FileScan, module_bindings
 from meizel.lint_common import is_test_path
 
@@ -90,7 +98,8 @@ def sources_from(manifests: Mapping[str, Manifest], policy: Policy, universe: Un
                         calls[f"{module}.{name.removesuffix(_CALL_MARK)}"] = kind
                     else:
                         names[f"{module}.{name}"] = kind
-    calls.update(_followed(universe, _readers(policy)))
+    calls.update(_followed(universe, _readers(policy, call=True)))
+    names.update(_followed(universe, _readers(policy, call=False)))
     return Sources(names, calls)
 
 
@@ -173,22 +182,32 @@ def stale_roots(
 
 def _policy_line(policy: Policy, name: str) -> int:
     quoted = f'"{name}"'
-    return next((number for number, text in enumerate(policy.lines, 1) if quoted in text), 1)
+    return next(
+        (
+            number
+            for number, text in enumerate(policy.lines, 1)
+            if quoted in text and not text.lstrip().startswith("#")
+        ),
+        1,
+    )
 
 
 # meiva:note
-# The policy's reader entries as `dotted call -> kind`, in the order of the kinds.
-def _readers(policy: Policy) -> dict[str, AmbientKind]:
+# The policy's reader entries as `dotted name -> kind`: the calls (`name()`) or the bare names, which
+# acquire where they are imported or read as an attribute.
+def _readers(policy: Policy, *, call: bool) -> dict[str, AmbientKind]:
     return {
         name.removesuffix(_CALL_MARK): kind
         for kind in AmbientKind
         for name in policy.reasons(_READERS, kind.value)
+        if name.endswith(_CALL_MARK) == call
     }
 
 
 # meiva:note
-# The shape of the policy's `[ambient-readers.<kind>]` entries: a fully qualified function that
-# is called (`pkg.module.name()` or `pkg.module.Class.method()`), listed under exactly one kind.
+# The shape of the policy's `[ambient-readers.<kind>]` entries: a fully qualified call
+# (`pkg.module.name()`, `pkg.module.Class.method()`) or name (`pkg.module.NAME`), listed under
+# exactly one kind.
 def reader_problems(policy: Policy) -> list[Diagnostic]:
     found: list[Diagnostic] = []
     seen: set[str] = set()
@@ -196,8 +215,10 @@ def reader_problems(policy: Policy) -> list[Diagnostic]:
         for name in policy.reasons(_READERS, kind.value):
             where = f"[{_READERS}.{kind.value}] {name!r}"
             line = _policy_line(policy, name)
-            if not name.endswith(_CALL_MARK) or "." not in name.removesuffix(_CALL_MARK):
-                message = f"{where} must be a qualified call such as `pkg.module.name()`"
+            if "." not in name.removesuffix(_CALL_MARK):
+                message = (
+                    f"{where} must be qualified, as in `pkg.module.name()` or `pkg.module.NAME`"
+                )
             elif name in seen:
                 message = f"{where} is listed under more than one kind: a reader has one kind"
             else:
@@ -221,20 +242,66 @@ def _locate(universe: Universe, target: str) -> tuple[str, str, tuple[str, ...]]
 
 
 # meiva:note
-# Why a reader can no longer be found, or None when its module still defines it.
-def _missing_reader(universe: Universe, target: str) -> str | None:
+# How a module defines a top-level name: "function", "class" or "value" (an assignment); None when
+# it does so some other way. The last definition wins, as it does at run time.
+def _definition(universe: Universe, file: str, name: str) -> str | None:
+    found: str | None = None
+    for node in ast.parse(universe.load_text(file)).body:
+        if isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef) and node.name == name:
+            found = "function"
+        elif isinstance(node, ast.ClassDef) and node.name == name:
+            found = "class"
+        elif isinstance(node, ast.Assign | ast.AnnAssign):
+            targets = node.targets if isinstance(node, ast.Assign) else [node.target]
+            if any(isinstance(target, ast.Name) and target.id == name for target in targets):
+                found = "value"
+    return found
+
+
+# meiva:note
+# An entry is written the way its target is used: `name()` for a function, a class or a method (a
+# call), `name` for a value. The other spelling would match nothing, and `stale-reader` is the one
+# place that notices.
+def _spelling_problem(
+    universe: Universe, file: str, member: tuple[str, ...], target: str, *, call: bool
+) -> str | None:
+    if len(member) != 1:
+        return None if call else f"`{'.'.join(member)}` is a method: list it as `{target}()`"
+    (name,) = member
+    kind = _definition(universe, file, name)
+    if call and kind == "value":
+        return f"`{name}` is a value, not a callable: list it as `{target}`, without `()`"
+    if not call and kind == "function":
+        return f"`{name}` is a function: list it as `{target}()`"
+    return None
+
+
+# meiva:note
+# Why a reader can no longer be found, or None when the module that the policy names defines it:
+# a `def`, a class or an assignment there, or a method of a class there, spelled as it is used. A
+# name the module only imports is not a definition: a function that moved leaves a re-export
+# behind, and a call imported from the new place would no longer be seen.
+def _missing_reader(universe: Universe, target: str, *, call: bool) -> str | None:
     located = _locate(universe, target)
     if located is None:
         return "names no tracked module"
-    _, file, member = located
+    module, file, member = located
     bindings = module_bindings(universe.root, file)
-    named = len(member) == 1 and member[0] in bindings.names
-    method = len(member) == 2 and any(
-        facts.name == member[0] and member[1] in facts.methods for facts in bindings.classes
-    )
-    if bindings.dynamic or named or method:
+    head = member[0]
+    if bindings.dynamic:
         return None
-    return f"names no function or method `{'.'.join(member)}` in {file}"
+    if len(member) == 1 and head in bindings.defined:
+        return _spelling_problem(universe, file, member, target, call=call)
+    if len(member) == 1:
+        if head in bindings.imported:
+            return f"`{head}` is imported by {file}, not defined there; list the module that defines it"
+        return f"`{head}` is not defined in {file}"
+    cls = next((facts for facts in bindings.classes if facts.name == head), None)
+    if cls is None:
+        return f"names no module `{module}.{head}` and no class `{head}` in {file}"
+    if len(member) == 2 and member[1] in cls.methods:
+        return _spelling_problem(universe, file, member, target, call=call)
+    return f"class `{head}` in {file} defines no `{'.'.join(member[1:])}`"
 
 
 # meiva:note
@@ -244,7 +311,8 @@ def stale_readers(universe: Universe, policy: Policy) -> list[Diagnostic]:
     found: list[Diagnostic] = []
     for kind in AmbientKind:
         for name in policy.reasons(_READERS, kind.value):
-            problem = _missing_reader(universe, name.removesuffix(_CALL_MARK))
+            call = name.endswith(_CALL_MARK)
+            problem = _missing_reader(universe, name.removesuffix(_CALL_MARK), call=call)
             if problem is not None:
                 found.append(
                     Diagnostic(
@@ -258,7 +326,7 @@ def stale_readers(universe: Universe, policy: Policy) -> list[Diagnostic]:
     return found
 
 
-_REEXPORT_HOPS = 4
+_REEXPORT_HOPS = 12
 
 
 # meiva:note
@@ -293,11 +361,18 @@ def _origins(universe: Universe, readers: Mapping[str, AmbientKind]) -> _Spellin
 # meiva:note
 # One round: every module among `candidates` that imports a known origin spells it under its own
 # name too. Returns whether a new spelling appeared.
-def _spread(universe: Universe, candidates: Iterable[str], exported: _Spellings) -> bool:
+def _spread(
+    universe: Universe,
+    candidates: Iterable[str],
+    exported: _Spellings,
+    parsed: dict[str, dict[str, str]],
+) -> bool:
     grew = False
     for path in sorted(candidates):
         module = _module_of(*path.rpartition("/")[::2])
-        for local, origin in _imports(universe, path).items():
+        if path not in parsed:
+            parsed[path] = _imports(universe, path)
+        for local, origin in parsed[path].items():
             for tail, kind in list(exported.get(origin, {}).items()):
                 spelled = exported.setdefault(f"{module}.{local}", {})
                 if tail not in spelled:
@@ -312,14 +387,21 @@ def _spread(universe: Universe, candidates: Iterable[str], exported: _Spellings)
 # of the names are read, so the cost follows the readers, not the repository.
 def _followed(universe: Universe, readers: Mapping[str, AmbientKind]) -> dict[str, AmbientKind]:
     exported = _origins(universe, readers)
+    repo = GitRepo(universe.root)
     seen: set[str] = set()
     candidates: set[str] = set()
+    parsed: dict[str, dict[str, str]] = {}
     for _ in range(_REEXPORT_HOPS):
         tokens = {origin.rpartition(".")[2] for origin in exported} - seen
         seen |= tokens
-        candidates.update(p for p in universe.grep_words(tokens, ".py") if not is_test_path(p))
-        if not _spread(universe, candidates, exported):
+        candidates.update(p for p in repo.grep_words(tokens, ".py") if not is_test_path(p))
+        if not _spread(universe, candidates, exported, parsed):
             break
+    else:
+        raise MeizelError(
+            f"the re-exports of the listed readers chain through more than {_REEXPORT_HOPS} "
+            "modules; list the module that defines the reader instead"
+        )
     return {
         f"{origin}.{tail}" if tail else origin: kind
         for origin, tails in exported.items()

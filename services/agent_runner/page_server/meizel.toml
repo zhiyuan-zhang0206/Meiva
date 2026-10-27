@@ -14,5 +14,5 @@ exports = ["daemon.py", "resources.py"]
 "page_plan.py" = "strict"
 
 [roots]
-"daemon.py" = { kinds = ["bus", "environ", "home", "random", "settings"], why = "reads the home it runs under; spawns the page-server child with a per-launch PAGE_SERVER_TOKEN overlaid on the inherited env — the token is a fresh secrets.token_hex(16) per spawn, a dynamic child-env handoff Settings (boot-time static) cannot model, same class as base/sessions/env_forwarding" }
+"daemon.py" = { kinds = ["bus", "clock", "environ", "home", "random", "settings"], why = "reads the home it runs under; spawns the page-server child with a per-launch PAGE_SERVER_TOKEN overlaid on the inherited env \u2014 the token is a fresh secrets.token_hex(16) per spawn, a dynamic child-env handoff Settings (boot-time static) cannot model, same class as base/sessions/env_forwarding; builds the process clock from SYSTEM_TIMERS" }
 "server.py" = { kinds = ["environ"], why = "reads the per-launch PAGE_SERVER_TOKEN its daemon parent set in the child env — the token is minted per spawn by the daemon, Settings (boot-time static) cannot model it" }

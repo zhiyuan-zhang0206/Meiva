@@ -104,13 +104,15 @@ bus = [
     "EventBus.from_settings()",
 ]
 
-# ambient-readers (meizel/contracts/ambient_read.py): repository functions that read the world on
-# their caller's behalf, by kind. A call to one is an acquisition of that kind at the call site, so
-# a wrapper around `os.environ`, `Path.home()` or the process settings does not hide the read
-# behind a root that is allowed to make it. Each name is the fully qualified call
-# (`pkg.module.name()`, `pkg.module.Class.method()`) of the module that defines it, with the
-# reason it reads the world; a module that re-exports the function is followed. A listed function
-# that no longer exists fails as stale.
+# ambient-readers (meizel/contracts/ambient_read.py): repository functions and objects that read the
+# world on their caller's behalf, by kind. A call to one (or, without parentheses, an import or
+# attribute read of one) is an acquisition of that kind at the use, so a wrapper around `os.environ`,
+# `Path.home()` or the process settings does not hide the read behind a root that may make it. Each
+# name is fully qualified, in the module that defines it (`pkg.module.name()`,
+# `pkg.module.Class.method()`, `pkg.module.NAME`), with the reason it reads the world; a module that
+# re-exports it is followed. A name that is only imported where it is listed, or is gone, fails as
+# stale. What belongs here, and what is not followed:
+# meizel/docs/checker/ambient-readers.meiva.okf.md. Changing the list is a rule change.
 [ambient-readers.environ]
 "agent.graph.exec.process.read_parent_facts()" = "copies os.environ and reads the working and home directories"
 "base.host.env.registry.process_environment()" = "returns the live os.environ"
@@ -141,6 +143,7 @@ bus = [
 "services.desktop.permissions_helper.launchd_job.helper_job_label()" = "falls back to meiva_home() for the helper's home"
 
 [ambient-readers.platform]
+"base.host.system.hostport.Host.system()" = "builds the host of this process: its platform, uid and system commands"
 "base.native_process.os_platform.Platform.current()" = "reads sys.platform and platform.machine()"
 
 [ambient-readers.pid]
@@ -150,6 +153,9 @@ bus = [
 "services.desktop.permissions_helper.launchd_job.helper_job_domain()" = "names the domain of os.getuid()"
 
 [ambient-readers.clock]
+"base.clock.Clock()" = "builds the clock a root hands down; its Timers decide what time it is"
+"base.clock.Clock.from_settings()" = "builds the clock from the process settings and the system timers"
+"base.clock.SYSTEM_TIMERS" = "the real interval clock, sleep and wall-clock source of the process"
 "base.lm.harness.registration.current_utc()" = "returns the current time"
 "ops.cluster_status.cluster_now()" = "returns the current time"
 

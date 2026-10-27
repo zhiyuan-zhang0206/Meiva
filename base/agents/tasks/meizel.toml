@@ -13,3 +13,6 @@ exports = ["creation.py", "delivery.py", "model.py", "notes.py", "owner_notifica
 "priority.py" = "strict"
 "reminder_window.py" = "strict"
 "status.py" = "strict"
+
+[debt.ambient-read]
+"timestamps.py#clock base.clock.Clock.from_settings" = 1

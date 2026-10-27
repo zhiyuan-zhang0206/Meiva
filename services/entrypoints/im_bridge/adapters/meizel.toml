@@ -12,7 +12,7 @@ exports = ["feishu.py", "feishu_poll_cursor.py", "feishu_ws_proxy.py", "run_plan
 "ws_proxy_plan.py" = "strict"
 
 [roots]
-"weixin_login.py" = { kinds = ["home"], why = "Operator script entry of the Weixin QR login resolves the home whose state directory receives the credentials" }
+"weixin_login.py" = { kinds = ["clock", "home"], why = "Operator script entry of the Weixin QR login resolves the home whose state directory receives the credentials; builds the process clock from SYSTEM_TIMERS" }
 
 [debt.third-party-patch]
 "feishu_ws_proxy.py#setattr lark_oapi.ws.client._ws_connect_kwargs" = 1

@@ -16,7 +16,7 @@ exports = ["backends", "chunking.py", "config.py", "daemon.py", "embeddings", "m
 
 [roots]
 "recall_regression.py" = { kinds = ["settings"], why = "The operator script entry boots configuration and injects it into the recall regression command" }
-"daemon.py" = { kinds = ["settings"], why = "Service or operator process entry boots configuration before composing its resources" }
+"daemon.py" = { kinds = ["clock", "settings"], why = "Service or operator process entry boots configuration before composing its resources; builds the process clock from SYSTEM_TIMERS" }
 "memory_search_reconcile.py" = { kinds = ["settings"], why = "Service or operator process entry boots configuration before composing its resources" }
 
 [debt.ambient-read]

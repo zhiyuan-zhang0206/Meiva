@@ -115,8 +115,8 @@ errors cannot be recorded.
   shows). Totals, not directories, are
   compared, so debt that moves with its file does not count as growth. The
   caller chooses `fail` or `warn`; there is no default.
-- `--waive-if-changed <pathspec>...` marks a change that edits those paths (the
-  rule code) as a rule change, which is judged in two parts
+- `--waive-if-changed <pathspec>...` marks a change that edits those paths (rule
+  code, policy) as a rule change, which is judged in two parts
   (`meizel/contracts/debt_rules.py`). The growth the new rules cause is what this
   checker, run on a checkout of the ref, records for the ref's unchanged code, minus what the ref
   records: reported, never judged. The growth the content causes is what the change records

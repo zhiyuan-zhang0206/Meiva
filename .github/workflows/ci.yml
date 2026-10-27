@@ -815,7 +815,7 @@ jobs:
         run: |
           env -u VIRTUAL_ENV uv run python -m meizel debt diff \
             --against "$LINT_STRUCTURE_BASELINE_BASE" --on-growth=fail \
-            --waive-if-changed ':(glob)meizel/**/*.py' ':(exclude,glob)meizel/**/tests/**' ':(exclude,glob)meizel/state/**' ':(exclude)meizel/language/path_imports.py' ':(exclude)meizel/language/no_script_sibling_imports.py' ':(exclude)meizel/allowances.py'
+            --waive-if-changed ':(glob)meizel/**/*.py' 'meizel.policy.toml' ':(exclude,glob)meizel/**/tests/**' ':(exclude,glob)meizel/state/**' ':(exclude)meizel/language/path_imports.py' ':(exclude)meizel/language/no_script_sibling_imports.py' ':(exclude)meizel/allowances.py'
 
       - name: Allowance policy changes (informational)
         if: ${{ env.LINT_STRUCTURE_BASELINE_BASE != '' }}

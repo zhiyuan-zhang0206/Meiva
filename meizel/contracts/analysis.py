@@ -55,7 +55,6 @@ __all__ = [
     "render_policy",
     "scan_all",
     "set_debt",
-    "sources_from",
     "type_checking_in_scope",
     "type_checking_violations",
 ]
