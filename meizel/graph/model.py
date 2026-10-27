@@ -8,6 +8,8 @@ from enum import StrEnum
 
 __all__ = [
     "INTERVAL_CLOCKS",
+    "LOOP_CLOCK",
+    "OPEN_CALLS",
     "SEEDABLE_GENERATORS",
     "Acquisition",
     "AmbientKind",
@@ -120,10 +122,11 @@ class AmbientKind(StrEnum):
 # meiva:note
 # The interval clocks. Reading one for a deadline, a duration or a TTL is the plain use of `time`
 # that the conventions allow in code no test needs to steer; the read is a decision worth a root
-# only where the same function also sleeps, because then how long to wait next is decided in
+# only where the same function also waits, because then how long to wait next is decided in
 # a loop. The wall clock is always a window onto the world.
+LOOP_CLOCK = "asyncio.loop.time"
 INTERVAL_CLOCKS = frozenset(
-    {"time.monotonic", "time.monotonic_ns", "time.perf_counter", "time.perf_counter_ns"}
+    {"time.monotonic", "time.monotonic_ns", "time.perf_counter", "time.perf_counter_ns", LOOP_CLOCK}
 )
 
 _STDLIB: dict[str, AmbientKind] = {
@@ -149,10 +152,20 @@ _STDLIB: dict[str, AmbientKind] = {
         AmbientKind.PLATFORM,
     ),
     **dict.fromkeys(
-        ("os.getpid", "os.getppid", "os.getuid", "os.geteuid", "os.getgid", "os.getegid"),
+        (
+            "os.getpid",
+            "os.getppid",
+            "os.getpgrp",
+            "os.getuid",
+            "os.geteuid",
+            "os.getgid",
+            "os.getegid",
+            "threading.get_ident",
+            "threading.get_native_id",
+        ),
         AmbientKind.PID,
     ),
-    **dict.fromkeys(("uuid.uuid1", "uuid.uuid4"), AmbientKind.RANDOM),
+    **dict.fromkeys(("uuid.uuid1", "uuid.uuid4", "os.urandom"), AmbientKind.RANDOM),
 }
 # meiva:note
 # Module-wide ambient vocabularies, narrowed by deterministic members below.
@@ -160,6 +173,19 @@ _WHOLE_MODULES = {
     "platform": AmbientKind.PLATFORM,
     "random": AmbientKind.RANDOM,
     "secrets": AmbientKind.RANDOM,
+}
+# meiva:note
+# Calls that read the world only when they are given no argument beyond `arguments`: `Path()` is the
+# working directory, `time.localtime()` and `time.strftime(fmt)` the wall clock, `psutil.Process()`
+# this process. With the argument the call describes a value it was handed and reads nothing.
+OPEN_CALLS: dict[str, tuple[AmbientKind, int]] = {
+    "pathlib.Path": (AmbientKind.CWD, 0),
+    "psutil.Process": (AmbientKind.PID, 0),
+    "time.gmtime": (AmbientKind.CLOCK, 0),
+    "time.localtime": (AmbientKind.CLOCK, 0),
+    "time.ctime": (AmbientKind.CLOCK, 0),
+    "time.asctime": (AmbientKind.CLOCK, 0),
+    "time.strftime": (AmbientKind.CLOCK, 1),
 }
 # meiva:note
 # Constructors whose seed must be inspected at the call, rather than at a class reference.
