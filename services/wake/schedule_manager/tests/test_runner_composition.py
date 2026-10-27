@@ -41,7 +41,8 @@ def test_the_script_runs_as_the_schedule_with_its_history_open_under_the_guard(
         "        open_runs = conn.execute('SELECT ok FROM schedule_runs').fetchall()\n"
         "    guards = [t.name for t in threading.enumerate() if t.name.endswith('-stall-guard')]\n"
         f"    Path({str(marker)!r}).write_text(\n"
-        "        repr((require_actor(), meiva.context.require_clock().timezone, open_runs, guards))\n"
+        "        repr((require_actor(), meiva.context.require_clock().timezone, open_runs, guards,\n"
+        "              type(meiva.context.require_bus()).__name__))\n"
         "    )\n"
     )
     sid = _schedule(db_conn, script)
@@ -50,11 +51,12 @@ def test_the_script_runs_as_the_schedule_with_its_history_open_under_the_guard(
 
     # meiva:note
     # the test's own repr.
-    actor, timezone, open_runs, guards = eval(marker.read_text())  # noqa: S307
+    actor, timezone, open_runs, guards, bus_type = eval(marker.read_text())  # noqa: S307
     assert actor == f"schedule:{sid}"
     assert timezone
     assert open_runs == [(None,)]
     assert guards == [f"schedule-{sid}-stall-guard"]
+    assert bus_type == "EventBus"
     assert db_conn.execute("SELECT ok FROM schedule_runs").fetchall() == [(True,)]
     assert not [t for t in threading.enumerate() if t.name.endswith("-stall-guard")]
 

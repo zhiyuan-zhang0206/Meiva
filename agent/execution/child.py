@@ -24,7 +24,7 @@ from agent.execution.delivery_plan import (
     rewrites_result_after_delivery_failure,
 )
 from agent.execution.protocol import RequestPayload, ResultPayload
-from base.agents.context import MeivaContext
+from base.agents.context import MeivaContext, deferred_event_bus
 from base.agents.context.clients import ClientSet
 from base.host.env.agent_env import AGENT_ID_ENV
 from base.log import logger
@@ -407,6 +407,35 @@ def deliver_run_telemetry(result_path: str, payload: ResultPayload, *, clients: 
             write_crashed_result(result_path, exc, code_reached=payload.code_reached)
 
 
+# meiva:note
+# The context the child binds for its request: the host's description of it, joined with the roots
+# this process reads once at start (clock, homes, generator and bus), none of which crosses the
+# request envelope.
+def _request_context(
+    request: RequestPayload, *, home: Path, config: object, context: MeivaContext
+) -> MeivaContext:
+    from base.clock import SYSTEM_TIMERS, Clock
+    from base.clock.configuration import clock_config_from_boot
+    from base.config import ConfigBoot
+
+    if not isinstance(config, ConfigBoot):
+        raise TypeError("the child's request context needs its booted ConfigBoot")
+    rng = random.SystemRandom()
+    return replace(
+        MeivaContext.from_description(
+            request.context,
+            original_incarnation=request.incarnation,
+            clients=context.clients,
+            machine=context.require_machine(),
+        ),
+        clock_factory=lambda: Clock(clock_config_from_boot(config), timers=SYSTEM_TIMERS),
+        meiva_home=home,
+        user_home=Path.home(),
+        rng=rng,
+        bus_factory=deferred_event_bus(config, rng=rng),
+    )
+
+
 def run_child(
     request_path: str,
     result_path: str,
@@ -435,27 +464,10 @@ def run_child(
     payload = ResultPayload(kind="done")
 
     birth, overlay = pop_overlay_env()
-    from base.clock import SYSTEM_TIMERS, Clock
-    from base.clock.configuration import clock_config_from_boot
-
-    def clock_factory() -> Clock:
-        return Clock(clock_config_from_boot(config), timers=SYSTEM_TIMERS)
-
     from meiva.sdk_surface import process_context
 
     process_context.bind_context(
-        replace(
-            MeivaContext.from_description(
-                request.context,
-                original_incarnation=request.incarnation,
-                clients=context.clients,
-                machine=context.require_machine(),
-            ),
-            clock_factory=clock_factory,
-            meiva_home=home,
-            user_home=Path.home(),
-            rng=random.SystemRandom(),
-        )
+        _request_context(request, home=home, config=config, context=context)
     )
 
     framework_overlay_applied = apply_framework_overlay(birth, overlay, config=config)
