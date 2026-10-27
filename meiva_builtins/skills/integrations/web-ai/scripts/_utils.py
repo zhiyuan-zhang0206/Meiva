@@ -7,13 +7,11 @@ from pathlib import Path
 
 from _landing import Places, capability_dir, format_stamp
 
-from base.paths.home import resolve_meiva_home
-
 
 # meiva:note
-# The home and Downloads folder of this process: `$MEIVA_HOME` through the one resolver every Meiva process uses (still without touching `Settings`, so no database is reached), and `~/Downloads`.
-def system_places() -> Places:
-    return Places(home=resolve_meiva_home(), downloads=Path("~/Downloads").expanduser())
+# The places of this process: the Meiva `home` its entry script resolved (through the one resolver every Meiva process uses, without touching `Settings`, so no database is reached), and `~/Downloads`.
+def system_places(home: Path) -> Places:
+    return Places(home=home, downloads=Path("~/Downloads").expanduser())
 
 
 # meiva:note
