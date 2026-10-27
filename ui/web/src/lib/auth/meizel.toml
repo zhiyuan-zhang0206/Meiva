@@ -7,3 +7,7 @@ exports = ["auth-context.tsx", "content-security-policy.ts", "nonce-context.tsx"
 
 [purity]
 "content-security-policy.ts" = "strict"
+
+[debt.ambient-read]
+"auth-context.tsx#environ window.location" = 1
+"login-ticket.ts#environ window.location" = 1

@@ -16,7 +16,3 @@ exports = [
 
 [loads]
 "_logging_entry_child.py" = ["services/agent_runner/agent_ops"]
-
-[debt.stdlib-patch]
-"child_main_dispatch.py#assignment socket.create_connection" = 1
-"child_main_dispatch.py#assignment socket.socket.connect" = 1

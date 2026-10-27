@@ -78,4 +78,20 @@ architectural quality. Counts from different policies and coverage are not quali
 rankings. The optional [[meizel/docs/checker/typescript-evidence.meiva.okf.md|holder
 receipt]] supplies separate, bounded provenance observations.
 
+## Environment reads
+
+`ambient-read` ([[meizel/docs/checker/ambient.meiva.okf.md|ambient reads]]) counts `process.env` (also `process.env[name]`),
+`process.cwd()`, `Date.now()`, `Math.random()`, crypto calls and the browser's `location`, `localStorage`,
+`sessionStorage`, `document.cookie` (`environ`), `navigator` and `matchMedia` (`platform`), bare or behind
+`window.`, `globalThis.` or `self.`, called, indexed or passed as a value. Only the global counts: a local, a
+property or an imported package of the same name does not, nor does `typeof location` or a type position.
+Not seen: a destructuring of `window` (`const {location} = window`) and `parent.`/`top.` prefixes.
+
+`process.env.NEXT_PUBLIC_<NAME>` read in `ui/web/src` (`INLINED_ENV_ROOTS` in `typescript_compiler/config.py`) is not
+a read: the Next.js build replaces it with the value it saw, in client, server and edge bundles, when the variable is
+set at build time (`define-env.js`, `static-env.js`; an unset one is read at run time on the server). The root must be
+the global `process` and the hop to `env` must not be optional (`process?.env` is not replaced by Turbopack).
+A write (`=`, `+=`, `??=`, `delete`, `++`), a computed key, a destructuring or a copy of `process.env`, other variables
+and any file the build does not bundle still count.
+
 Parent: [[meizel/docs/checker/checker.meiva.okf.md|the checker]].

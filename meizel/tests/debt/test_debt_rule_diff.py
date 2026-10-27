@@ -524,3 +524,87 @@ def test_the_read_of_another_file_of_the_directory_is_still_content_growth(
     capsys.readouterr()
     assert diff(root) == 1
     assert "other.py#environ os.environ" in capsys.readouterr().out
+
+
+GUARD = "import lib\n\ndef guard(monkeypatch):\n    monkeypatch.setattr(lib, 'helper', lambda: 2)\n"
+APPROVAL = '[approved-patches.files]\n"app/tests/guards.py" = "keeps the suite off the host"\n'
+PATCHING = {
+    "lib/__init__.py": "def helper() -> int:\n    return 1\n",
+    "app/__init__.py": "",
+    "app/tests/__init__.py": "",
+    "app/tests/guards.py": GUARD,
+    "rules/engine.py": "RULE = 1\n",
+}
+
+
+def patch_repo(make_repo: RepoFactory, policy: str) -> Path:
+    root = make_repo({**PATCHING, "meizel.policy.toml": policy})
+    run(root, "sync", "--declare", ".")
+    write(root, {})
+    run(root, "debt", "record", ".")
+    write(root, {})
+    commit(root)
+    return root
+
+
+# meiva:note
+# The base's table of approvals is kept while the base is regenerated, so approving a file is a drop
+# of the record (the content column), not a change of the rules.
+def test_approving_a_file_whose_patches_are_recorded_lowers_the_record_and_passes(
+    make_repo: RepoFactory, capsys: pytest.CaptureFixture[str]
+) -> None:
+    root = patch_repo(make_repo, "")
+    rule_change(root)
+    write(root, {"meizel.policy.toml": APPROVAL})
+    assert run(root, "debt", "prune") == 0
+    write(root, {})
+    capsys.readouterr()
+    assert diff(root) == 0
+    out = capsys.readouterr().out
+    [row] = [line.split() for line in out.splitlines() if line.startswith("first-party-patch")]
+    assert row[1:] == ["1", "1", "0", "+0", "-1"]
+    assert "no content growth" in out
+
+
+def test_taking_an_approval_away_and_recording_the_patches_is_not_content_growth(
+    make_repo: RepoFactory, capsys: pytest.CaptureFixture[str]
+) -> None:
+    root = patch_repo(make_repo, APPROVAL)
+    rule_change(root)
+    write(root, {"meizel.policy.toml": ""})
+    assert run(root, "debt", "record", ".") == 0
+    write(root, {})
+    capsys.readouterr()
+    assert diff(root) == 0
+    assert "no content growth" in capsys.readouterr().out
+
+
+def test_taking_an_approval_away_does_not_excuse_a_patch_added_elsewhere(
+    make_repo: RepoFactory, capsys: pytest.CaptureFixture[str]
+) -> None:
+    root = patch_repo(make_repo, APPROVAL)
+    rule_change(root)
+    write(root, {"meizel.policy.toml": "", "app/tests/other.py": GUARD})
+    assert run(root, "debt", "record", ".") == 0
+    write(root, {})
+    capsys.readouterr()
+    assert diff(root) == 1
+    out = capsys.readouterr().out
+    assert "other.py#monkeypatch.setattr lib.helper" in out
+    assert "guards.py" not in out
+
+
+def test_the_file_whose_approval_is_taken_away_is_let_through_for_patches_only(
+    make_repo: RepoFactory, capsys: pytest.CaptureFixture[str]
+) -> None:
+    root = patch_repo(make_repo, APPROVAL)
+    rule_change(root)
+    extra = "\n\ndef more(monkeypatch):\n    monkeypatch.setattr(lib, 'helper', lambda: 3)\n    exec('1')\n"
+    write(root, {"meizel.policy.toml": "", "app/tests/guards.py": GUARD + extra})
+    assert run(root, "debt", "record", ".") == 0
+    write(root, {})
+    capsys.readouterr()
+    assert diff(root) == 1
+    out = capsys.readouterr().out
+    assert "guards.py#exec" in out
+    assert "monkeypatch.setattr" not in out

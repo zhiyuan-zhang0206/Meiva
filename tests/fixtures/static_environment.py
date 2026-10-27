@@ -32,6 +32,7 @@ STATIC_TEST_PATHS = (
 NATIVE_TEST_PATHS = (
     "meizel/language/tests/test_typescript.py",
     "meizel/language/tests/test_typescript_ast.py",
+    "meizel/language/tests/test_typescript_environment.py",
     "meizel/tests/explain/test_typescript.py",
     "meizel/tests/languages/test_parity.py",
 )
