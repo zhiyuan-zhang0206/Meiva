@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import argparse
+from pathlib import Path
 
 import pytest
 
@@ -204,10 +205,17 @@ class _Machine:
         return self.roles
 
 
+class _Config:
+    def process_environment(self) -> dict[str, str]:
+        return {}
+
+
 class _Runtime:
-    def __init__(self, roles: frozenset[str] | None) -> None:
+    def __init__(self, roles: frozenset[str] | None, home: Path) -> None:
         self.machine = _Machine(roles)
         self.helper = None
+        self.config = _Config()
+        self.home = home
 
 
 @pytest.mark.parametrize(
@@ -223,18 +231,19 @@ def test_the_stop_handler_refuses_before_any_command_runs(
     extra: list[str],
     message: str,
     capsys: pytest.CaptureFixture[str],
+    tmp_path: Path,
 ) -> None:
     args = _parsed(["stop", *FULL_STOP, *extra])
-    args.runtime = _Runtime(roles)
+    args.runtime = _Runtime(roles, tmp_path)
     assert host_parsers.h_stop(args) == 2
     assert message in capsys.readouterr().err
 
 
 def test_the_restart_handler_refuses_before_any_command_runs(
-    capsys: pytest.CaptureFixture[str],
+    capsys: pytest.CaptureFixture[str], tmp_path: Path
 ) -> None:
     args = _parsed(["restart", "--all-services", "--keep-browser", "--mode", "smooth"])
-    args.runtime = _Runtime(GATEWAY)
+    args.runtime = _Runtime(GATEWAY, tmp_path)
     assert host_parsers.h_restart(args, retained_children=[]) == 2
     err = capsys.readouterr().err
     for form in (
@@ -245,12 +254,12 @@ def test_the_restart_handler_refuses_before_any_command_runs(
         assert form in err
 
 
-def _refusing_args(argv: list[str]) -> argparse.Namespace:
+def _refusing_args(argv: list[str], home: Path) -> argparse.Namespace:
     # meiva:note
     # A dependency factory that fails loudly: a refusal that reached the database
     # would fail this test with the factory's own error instead of a clean status.
     args = _parsed(argv)
-    args.runtime = _Runtime(RUNNER)
+    args.runtime = _Runtime(RUNNER, home)
 
     def _untouched() -> None:
         raise AssertionError("a refusal must not open the database")
@@ -261,7 +270,7 @@ def _refusing_args(argv: list[str]) -> argparse.Namespace:
 
 
 def test_a_contradictory_stop_answers_the_operator_in_one_line(
-    capsys: pytest.CaptureFixture[str],
+    capsys: pytest.CaptureFixture[str], tmp_path: Path
 ) -> None:
     # meiva:note
     # The guard refuses before any unit stops; the operator reads one line naming the
@@ -278,7 +287,8 @@ def test_a_contradictory_stop_answers_the_operator_in_one_line(
             "--timeout",
             "60",
             "--yes",
-        ]
+        ],
+        tmp_path,
     )
     assert host_parsers.h_stop(args) == 1
     err = capsys.readouterr().err
@@ -289,7 +299,7 @@ def test_a_contradictory_stop_answers_the_operator_in_one_line(
 
 
 def test_a_dedicated_service_kept_by_the_wrong_choice_answers_in_one_line(
-    capsys: pytest.CaptureFixture[str],
+    capsys: pytest.CaptureFixture[str], tmp_path: Path
 ) -> None:
     # meiva:note
     # The same layer answers the other operator-input refusal under the stop kernel:
@@ -307,7 +317,8 @@ def test_a_dedicated_service_kept_by_the_wrong_choice_answers_in_one_line(
             "--yes",
             "--keep-service",
             "browser",
-        ]
+        ],
+        tmp_path,
     )
     assert host_parsers.h_stop(args) == 1
     err = capsys.readouterr().err
@@ -315,7 +326,7 @@ def test_a_dedicated_service_kept_by_the_wrong_choice_answers_in_one_line(
     assert err.startswith("meiva stop: --keep-service ['browser']: choose ")
 
 
-def test_a_caller_contract_error_still_surfaces_as_a_traceback() -> None:
+def test_a_caller_contract_error_still_surfaces_as_a_traceback(tmp_path: Path) -> None:
     # meiva:note
     # Only the operator's own contradictions become one line: a missing caller-owned
     # child list is a programming error, so it keeps raising instead of being dressed
@@ -335,6 +346,6 @@ def test_a_caller_contract_error_still_surfaces_as_a_traceback() -> None:
             "120",
         ]
     )
-    args.runtime = _Runtime(GATEWAY)
+    args.runtime = _Runtime(GATEWAY, tmp_path)
     with pytest.raises(ValueError, match="caller-owned child retention"):
         host_parsers.h_restart(args)

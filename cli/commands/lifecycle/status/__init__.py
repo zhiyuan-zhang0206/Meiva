@@ -35,7 +35,6 @@ from base.cluster.machine import (
 from base.cluster.machine.boot import gateway_access_from_boot
 from base.config import ConfigBoot
 from base.deploy.git import cluster_drift
-from base.host.env.registry import process_environment
 from base.host.resource_sample import resource_sample
 from base.paths import root_manifests_path
 from cli.commands._repo import roles_or_none
@@ -151,7 +150,7 @@ def _execute(
             _emit(
                 source_drift_lines(
                     cluster_drift.prod_source_branch_drift(
-                        command.home, environ=process_environment()
+                        command.home, environ=command.config.process_environment()
                     )
                 )
             )
@@ -160,7 +159,9 @@ def _execute(
                 (
                     release_line(
                         repo,
-                        cluster_drift.checkout_head_sha(Path(repo), environ=process_environment()),
+                        cluster_drift.checkout_head_sha(
+                            Path(repo), environ=command.config.process_environment()
+                        ),
                     ),
                 )
             )

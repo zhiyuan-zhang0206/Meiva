@@ -40,10 +40,10 @@ from __future__ import annotations
 import shutil
 from collections.abc import Mapping
 from dataclasses import dataclass, field
+from datetime import datetime
 from pathlib import Path
 
 from base import paths
-from base.clock import SYSTEM_TIMERS, Clock, ClockConfig
 from base.packages.extensions import install_registry
 from base.packages.extensions.install_registry import (
     IGNORED_NAMES,
@@ -187,7 +187,7 @@ def _repo_skill_dirs(repo_skills: Path) -> list[Path]:
     return found
 
 
-def iter_sources(repo: Path) -> tuple[list[Source], list[str]]:
+def iter_sources(repo: Path, *, home: Path) -> tuple[list[Source], list[str]]:
     """Enumerate sync units in precedence order (repo skills, then built-in
     plugins, then installed plugins). A later source whose name is already
     taken is dropped and reported as a conflict."""
@@ -219,7 +219,7 @@ def iter_sources(repo: Path) -> tuple[list[Source], list[str]]:
     # sees them, never a runtime agent via the fleet-wide load dir.
     builtin_then_installed: tuple[tuple[Path, TrustTier, bool], ...] = (
         (repo / "meiva_builtins" / "plugins", "builtin", True),
-        (paths.plugins_dir(), "unreviewed", False),
+        (paths.plugins_dir(home=home), "unreviewed", False),
     )
     for plugins_root, trust, bootstrap_only in builtin_then_installed:
         if not plugins_root.is_dir():
@@ -382,6 +382,7 @@ def _sync_one(
     registry: install_registry.Registry,
     now: str,
     result: SkillsConvergeResult,
+    plugins_root: Path,
 ) -> None:
     """Bring `skills_root/<s.name>` in line with `s.src` (copy / update /
     leave alone) and upsert its registry row. Appends its outcome to `result`."""
@@ -394,7 +395,7 @@ def _sync_one(
         entry is not None
         and entry.type == "plugin"
         and s.origin == "plugin"
-        and s.src == paths.plugins_dir() / entry.name / "skills"
+        and s.src == plugins_root / entry.name / "skills"
     )
     if entry is not None and entry.origin == "user" and not own_plugin_skills:
         # A user-installed package holds this name; its content is not
@@ -465,26 +466,25 @@ def _cleanup_gone_sources(
                 entry.trust = "unreviewed"
 
 
-def converge_skills(repo: Path, meiva_home: Path, binding: SourceBinding) -> SkillsConvergeResult:
+def converge_skills(
+    repo: Path, meiva_home: Path, binding: SourceBinding, *, now: datetime
+) -> SkillsConvergeResult:
     """Sync all skill sources into `<meiva_home>/skills/` and update the install
     registry. Idempotent; never touches user-origin entries or user-edited
     copies. See the module docstring for the full rules."""
     assert_repo_source_bound(repo, meiva_home, binding)
     skills_root = meiva_home / "skills"
     skills_root.mkdir(parents=True, exist_ok=True)
-    now = (
-        Clock(ClockConfig("UTC", None, message_timestamp_weekday=False), timers=SYSTEM_TIMERS)
-        .now()
-        .isoformat(timespec="seconds")
-    )
+    stamp = now.isoformat(timespec="seconds")
+    plugins_root = paths.plugins_dir(home=meiva_home)
     result = SkillsConvergeResult()
 
     with install_registry.mutate() as registry:
-        sources, conflicts = iter_sources(repo)
+        sources, conflicts = iter_sources(repo, home=meiva_home)
         for c in conflicts:
             result.warnings.append(f"skipped {c}")
         for s in sources:
-            _sync_one(s, skills_root, registry, now, result)
+            _sync_one(s, skills_root, registry, stamp, result, plugins_root)
         _cleanup_gone_sources({s.key for s in sources}, skills_root, registry, result)
 
     tracked = {p.name for p in registry.packages}

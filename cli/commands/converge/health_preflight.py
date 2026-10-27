@@ -33,6 +33,7 @@ from __future__ import annotations
 
 import subprocess
 import sys
+from collections.abc import Mapping
 from pathlib import Path
 from urllib.parse import urlsplit, urlunsplit
 
@@ -112,7 +113,7 @@ def _is_dev_worktree(repo: Path) -> bool:
     return any(marker in path for marker in _WORKTREE_MARKERS)
 
 
-def _git_ro(repo: Path, *args: str) -> str | None:
+def _git_ro(repo: Path, *args: str, environ: Mapping[str, str]) -> str | None:
     """Read-only git command in `repo`, bounded + prompt-proof, returning trimmed
     stdout or None when the checkout is not a git repo / git cannot run."""
     if not (repo / ".git").exists():
@@ -122,7 +123,7 @@ def _git_ro(repo: Path, *args: str) -> str | None:
             ["git", "-C", str(repo), *args],
             capture_output=True,
             text=True,
-            env=git_env(),
+            env=git_env(environ),
             timeout=_GIT_TIMEOUT_S,
         )
     except (OSError, subprocess.SubprocessError):
@@ -170,9 +171,10 @@ def checkout_warnings(ctx: ConvergeCtx) -> list[str]:
     repo, or clean."""
     if _is_dev_worktree(ctx.repo):
         return []
-    if _git_ro(ctx.repo, "rev-parse", "HEAD") is None:
+    environ = ctx.config.process_environment()
+    if _git_ro(ctx.repo, "rev-parse", "HEAD", environ=environ) is None:
         return []  # not a git repo / unreadable — nothing to report
-    dirty = _git_ro(ctx.repo, "status", "--porcelain")
+    dirty = _git_ro(ctx.repo, "status", "--porcelain", environ=environ)
     if not dirty:
         return []
     n = len(dirty.splitlines())

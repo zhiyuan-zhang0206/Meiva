@@ -22,20 +22,5 @@ exports = ["external_skills.py", "materialize.py", "memory.py", "parsers", "plug
 "external_skills.py" = { kinds = ["random"], why = "Mints fresh skill installation and staging generation UUIDs" }
 
 [debt.ambient-read]
-"mcp.py#clock base.clock.Clock" = 2
-"mcp.py#clock base.clock.SYSTEM_TIMERS" = 2
-"mcp.py#home base.paths.meiva_home" = 3
-"plugins.py#clock base.clock.Clock" = 1
-"plugins.py#clock base.clock.SYSTEM_TIMERS" = 1
-"plugins.py#home base.paths.home.resolve_meiva_home" = 1
-"plugins.py#home base.paths.meiva_home" = 3
-"plugins.py#home base.paths.plugins_dir" = 5
-"skill.py#clock base.clock.Clock" = 4
-"skill.py#clock base.clock.SYSTEM_TIMERS" = 1
-"skill.py#home base.paths.meiva_home" = 6
-"skill_package.py#clock base.clock.Clock" = 1
-"skill_package.py#clock base.clock.SYSTEM_TIMERS" = 1
-"skill_package.py#home base.paths.meiva_home" = 1
-"skills_sync.py#clock base.clock.Clock" = 1
-"skills_sync.py#clock base.clock.SYSTEM_TIMERS" = 1
+"plugins.py#home base.paths.plugins_dir" = 3
 "skills_sync.py#home base.paths.plugins_dir" = 2

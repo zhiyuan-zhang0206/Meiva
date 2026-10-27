@@ -49,6 +49,7 @@ import sys
 import tomllib
 from collections.abc import Mapping
 from dataclasses import dataclass
+from datetime import datetime
 from pathlib import Path
 from typing import Any, TypeGuard
 
@@ -388,7 +389,13 @@ def uv_sync(pkg_dir: Path, build: UvBuild) -> None:
 
 
 def _register_mcp(
-    name: str, source: str, path: str | None, ref: str | None, *, content_hash: str | None = None
+    name: str,
+    source: str,
+    path: str | None,
+    ref: str | None,
+    *,
+    now: datetime,
+    content_hash: str | None = None,
 ) -> None:
     """Record a freshly-installed MCP package in the registry (origin='user').
 
@@ -396,14 +403,9 @@ def _register_mcp(
     written (R5): the later `upgrade` path compares the on-disk tree against
     `installed_hash` to report local edits before replacing the copy.
     """
-    from base.clock import SYSTEM_TIMERS, Clock, ClockConfig
     from base.packages.extensions import install_registry
 
-    now = (
-        Clock(ClockConfig("UTC", None, message_timestamp_weekday=False), timers=SYSTEM_TIMERS)
-        .now()
-        .isoformat(timespec="seconds")
-    )
+    stamp = now.isoformat(timespec="seconds")
     install_registry.register(
         install_registry.InstalledPackage(
             name=name,
@@ -412,8 +414,8 @@ def _register_mcp(
             path=path,
             ref=ref,
             enabled=True,
-            installed_at=now,
-            updated_at=now,
+            installed_at=stamp,
+            updated_at=stamp,
             content_hash=content_hash,
             installed_hash=content_hash,
         )
@@ -593,6 +595,8 @@ def cmd_mcp_install(
     env_pairs: list[str] | None = None,
     *,
     uv: UvBuild,
+    home: Path,
+    now: datetime,
 ) -> int:
     """`meiva mcp install <source> [--path SUBDIR] [--ref REF] [--env K=V]...` —
     install a standalone MCP package from a git URL or a local directory.
@@ -628,7 +632,7 @@ def cmd_mcp_install(
         if detected is None:
             return 1
         name, auto_spec = detected
-        dest = paths.mcps_dir(paths.meiva_home()) / name
+        dest = paths.mcps_dir(home) / name
         if _install_name_conflict(name, dest):
             return 1
 
@@ -648,7 +652,9 @@ def cmd_mcp_install(
             print(f"[meiva mcp install] uv sync failed: {e}", file=sys.stderr)
             return 1
 
-        _register_mcp(name, source, path, ref, content_hash=install_registry.tree_hash(dest))
+        _register_mcp(
+            name, source, path, ref, now=now, content_hash=install_registry.tree_hash(dest)
+        )
         print(f"[meiva mcp install] installed MCP server '{name}' -> {dest}")
         if overrides:
             print(f"  env set on the installed copy: {', '.join(sorted(overrides))}")
@@ -658,7 +664,7 @@ def cmd_mcp_install(
         cleanup_temp(acq.cloned)
 
 
-def cmd_mcp_uninstall(name: str) -> int:
+def cmd_mcp_uninstall(name: str, *, home: Path) -> int:
     """`meiva mcp uninstall <name>` — remove an installed MCP package + its entry."""
     from base import paths
     from base.packages.extensions import install_registry
@@ -671,7 +677,7 @@ def cmd_mcp_uninstall(name: str) -> int:
             file=sys.stderr,
         )
         return 1
-    dest = paths.mcps_dir(paths.meiva_home()) / name
+    dest = paths.mcps_dir(home) / name
     if dest.exists():
         shutil.rmtree(dest)
     install_registry.deregister(name)
@@ -679,7 +685,7 @@ def cmd_mcp_uninstall(name: str) -> int:
     return 0
 
 
-def cmd_mcp_upgrade(name: str, *, uv: UvBuild) -> int:
+def cmd_mcp_upgrade(name: str, *, uv: UvBuild, home: Path, now: datetime) -> int:
     """`meiva mcp upgrade <name>` — re-fetch an installed MCP package
     from its source.
 
@@ -699,7 +705,7 @@ def cmd_mcp_upgrade(name: str, *, uv: UvBuild) -> int:
         print(f"[meiva mcp upgrade] '{name}' has no recorded source.", file=sys.stderr)
         return 1
 
-    dest = paths.mcps_dir(paths.meiva_home()) / name
+    dest = paths.mcps_dir(home) / name
     if dest.exists() and install_registry.copy_changed(dest, pkg.installed_hash):
         print(
             f"[meiva mcp upgrade] note: '{name}' was modified locally; "
@@ -761,13 +767,7 @@ def cmd_mcp_upgrade(name: str, *, uv: UvBuild) -> int:
             print(f"[meiva mcp upgrade] uv sync failed: {e}", file=sys.stderr)
             return 1
 
-        from base.clock import SYSTEM_TIMERS, Clock, ClockConfig
-
-        pkg.updated_at = (
-            Clock(ClockConfig("UTC", None, message_timestamp_weekday=False), timers=SYSTEM_TIMERS)
-            .now()
-            .isoformat(timespec="seconds")
-        )
+        pkg.updated_at = now.isoformat(timespec="seconds")
         pkg.installed_hash = install_registry.tree_hash(dest)
         install_registry.register(pkg)
         print(f"[meiva mcp upgrade] re-fetched '{name}' from {pkg.source}.")

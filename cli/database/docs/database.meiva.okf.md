@@ -73,9 +73,10 @@ dependency analysis follows these fixture and helper imports back to this owner.
 
 ## Lifecycle audit scope
 
-`lifecycle_audit.operator_lifecycle_audit(database_factory=...)` is the audit scope of one operator
+`lifecycle_audit.operator_lifecycle_audit(database_factory=..., environ=..., home=...)` is the audit scope of one operator
 lifecycle command ([the caller record](../../../base/native_process/root_control/docs/lifecycle-caller.meiva.okf.md)).
-It reads the caller block and the source commit once, when the scope opens, and writes every request
+It reads the caller block and the source commit once, when the scope opens, from the command's
+environment and home, and writes every request
 and the outcome through the command's own factory. The audit is a write-only sink and never gates
 the command: writing a row stays best-effort (a database that is down is the state `meiva start`
 repairs), and so does opening the scope. A caller that cannot be read (a working directory that no

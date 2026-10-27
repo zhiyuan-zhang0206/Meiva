@@ -25,6 +25,7 @@ from cli.database.lifecycle_audit import (
     operator_result_recorder,
     record_lifecycle_request,
 )
+from cli.database.runtime import CommandRuntime
 from cli.database.tests.cli_tests import operator_database as operator_database
 from cli.database.tests.command_inputs import command_runtime as command_runtime
 from cli.database.tests.lifecycle_rows import caller_block
@@ -151,16 +152,27 @@ def test_an_unreachable_database_never_fails_the_command() -> None:
         command.exited(0)
 
 
-def test_a_boot_start_is_not_attributed_to_an_operator() -> None:
-    with operator_lifecycle_audit(database_factory=refuse_database, enabled=False) as command:
+def test_a_boot_start_is_not_attributed_to_an_operator(command_runtime: CommandRuntime) -> None:
+    with operator_lifecycle_audit(
+        database_factory=refuse_database,
+        environ=command_runtime.config.process_environment(),
+        home=command_runtime.home,
+        enabled=False,
+    ) as command:
         record_lifecycle_request("up", ["gateway"])
         command.exited(0)
 
 
 def test_an_operator_command_audits_itself_as_the_process_that_runs_it(
-    operator_database: OperatorDatabaseFactory, db_conn: psycopg.Connection
+    operator_database: OperatorDatabaseFactory,
+    db_conn: psycopg.Connection,
+    command_runtime: CommandRuntime,
 ) -> None:
-    with operator_lifecycle_audit(database_factory=operator_database) as command:
+    with operator_lifecycle_audit(
+        database_factory=operator_database,
+        environ=command_runtime.config.process_environment(),
+        home=command_runtime.home,
+    ) as command:
         record_lifecycle_request("down", ["gateway"])
         command.exited(0)
 

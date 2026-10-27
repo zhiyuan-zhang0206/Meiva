@@ -29,7 +29,10 @@ def main(argv: list[str]) -> int:
     os.chdir(gone)
     gone.rmdir()
     with operator_lifecycle_audit(
-        database_factory=_refuse_database, enabled=scope == "operator"
+        database_factory=_refuse_database,
+        environ=os.environ,
+        home=Path(os.environ["MEIVA_HOME"]),
+        enabled=scope == "operator",
     ) as command:
         record_lifecycle_request("down", ["gateway"])
         print("command ran")

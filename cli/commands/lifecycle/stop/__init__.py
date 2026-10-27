@@ -193,7 +193,11 @@ def cmd_stop(
     #
     # `keep_infra` is None exactly on a host without the gateway capability (no local data
     # plane); every other choice is a required explicit answer.
-    with operator_lifecycle_audit(database_factory=env.database_factory) as audit:
+    with operator_lifecycle_audit(
+        database_factory=env.database_factory,
+        environ=env.command.config.process_environment(),
+        home=env.command.home,
+    ) as audit:
         code = do_stop(request, env, retained_children)
         audit.exited(code)
         return code

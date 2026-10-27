@@ -229,7 +229,11 @@ def cmd_restart(
         timeout=timeout,
         start_timeout=start_timeout,
     )
-    with operator_lifecycle_audit(database_factory=database_factory) as audit:
+    with operator_lifecycle_audit(
+        database_factory=database_factory,
+        environ=command.config.process_environment(),
+        home=command.home,
+    ) as audit:
         code = _cmd_restart_body(
             request,
             runtime=runtime,
@@ -320,7 +324,11 @@ def cmd_restart_agent_host(
     # meiva:note
     # Stop agent-host within `timeout` (force-killing only with `force`), then bring it up and
     # wait up to `start_timeout` for its readiness.
-    with operator_lifecycle_audit(database_factory=database_factory) as audit:
+    with operator_lifecycle_audit(
+        database_factory=database_factory,
+        environ=command.config.process_environment(),
+        home=command.home,
+    ) as audit:
         try:
             refuse_hosted_stop(command.home)
             client = admit_agent_host_restart(command, timeout=timeout)

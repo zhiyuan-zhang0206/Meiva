@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 from collections.abc import Callable
 from dataclasses import replace
+from datetime import UTC, datetime
 from pathlib import Path
 
 import pytest
@@ -599,11 +600,11 @@ def test_deployment_publication_crash_is_reported_without_changing_operator(
     assert not (home / ".codex" / "skills" / "deploy-meiva-cluster").exists()
 
 
-def test_product_guide_has_one_builtin_source_and_nested_operator_entries() -> None:
+def test_product_guide_has_one_builtin_source_and_nested_operator_entries(unit_home: Path) -> None:
     from cli.commands.extensions.skills_sync import iter_sources
 
     repo = Path(__file__).resolve().parents[4]
-    sources, _ = iter_sources(repo)
+    sources, _ = iter_sources(repo, home=unit_home)
     canonical = repo / "meiva_builtins" / "skills" / "platform" / "meiva-guide"
     assert (repo / ".agents" / "skills" / "meiva-guide").resolve() == canonical
     assert any(source.name == "meiva-guide" and source.src == canonical for source in sources)
@@ -632,7 +633,7 @@ def test_builtin_guide_installs_with_the_core_update_channel(
         shutil.copytree(
             product_repo / "meiva_builtins" / "skills" / "platform" / name, sources / name
         )
-    converge_skills(repo, unit_home, binding=PROD_ELSEWHERE)
+    converge_skills(repo, unit_home, binding=PROD_ELSEWHERE, now=datetime.now(UTC))
     installed_names = {skill["name"] for skill in meiva.skills.names()}
     for name in ("meiva-guide", "impersonator-guide"):
         assert name in installed_names
@@ -642,7 +643,7 @@ def test_builtin_guide_installs_with_the_core_update_channel(
         original = installed.read_bytes()
         source = sources / name / "SKILL.md"
         source.write_bytes(original + b"\nUpdated product guidance.\n")
-        converge_skills(repo, unit_home, binding=PROD_ELSEWHERE)
+        converge_skills(repo, unit_home, binding=PROD_ELSEWHERE, now=datetime.now(UTC))
         assert installed.read_bytes() == original
         policy = install_registry.resolved_policy(
             entry, defaults_reader=lambda: process_config.view.packages
