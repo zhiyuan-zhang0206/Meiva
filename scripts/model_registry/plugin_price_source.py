@@ -1,14 +1,19 @@
 # meiva:note
-# Read one ``provider.py`` module's model and price declarations without executing it. The
-# pricing workflow may resume an existing bot branch, so executing that branch's code would
-# cross the workflow's trusted-main boundary. A declaration participates when its constructor
-# is imported from the provider contract, under whatever local name the module gives it —
-# never because of a class name: matching ``ProviderContribution`` literally is what broke the
-# nightly sync for ten days once a plugin switched to ``DecisionProviderContribution`` (task
-# #5496). Decision models are not chat models, but their prices land in the same ``PriceBook``
-# that bills their calls and the archive carries their ids, so a decision declaration left out
-# would freeze its rates silently. Every declaration in the file participates, not just one
-# named ``PROVIDER``: ``lm_openai`` declares ``DECISION_PROVIDER`` beside it.
+# Read one provider's model and price declarations without executing it. The pricing workflow
+# may resume an existing bot branch, so executing that branch's code would cross the workflow's
+# trusted-main boundary. A declaration participates when its constructor is imported from the
+# provider contract, under whatever local name the module gives it — never because of a class
+# name: matching ``ProviderContribution`` literally is what broke the nightly sync for ten days
+# once a plugin switched to ``DecisionProviderContribution`` (task #5496). Decision models are
+# not chat models, but their prices land in the same ``PriceBook`` that bills their calls and
+# the archive carries their ids, so a decision declaration left out would freeze its rates
+# silently. Every declaration in the unit participates, not just one named ``PROVIDER``:
+# ``lm_openai`` declares ``DECISION_PROVIDER`` beside it.
+#
+# The unit is the provider package, not one file. A declaration may name a literal another
+# module of the same package assigns (``models=MODELS``, ``with_fast_variants(PROVIDER,
+# FAST_PRICES)``), so the reader parses every source of the package and follows a module-level
+# name to the literal it names. Nothing is executed either way.
 # meiva:link base/lm/pricing/docs/pricing.meiva.okf.md
 
 from __future__ import annotations
@@ -49,24 +54,34 @@ class PriceDeclaration(NamedTuple):
     periods: tuple[PeriodDeclaration, ...]
 
 
+class SourceNode(NamedTuple):
+    path: Path
+    node: ast.Call
+
+
 class ProviderManifest(NamedTuple):
     models: frozenset[str]
     prices: dict[str, PriceDeclaration]
-    price_nodes: dict[str, ast.Call]
+    price_nodes: dict[str, SourceNode]
     declarations: tuple[str, ...]
+    sources: Mapping[Path, str]
 
 
 # meiva:note
-# The provider contract a ``provider.py`` imports its contribution types from: ``base/lm/provider_api.py``
-# is the plugin-facing module and ``base/lm/catalog/provider_contract.py`` owns the dataclasses. A
-# declaration is recognized by that origin; a class name proves nothing about where it came from.
+# The provider contract a provider source imports its contribution types from:
+# ``base/lm/provider_api.py`` is the plugin-facing module and
+# ``base/lm/catalog/provider_contract.py`` owns the dataclasses. A declaration is recognized by
+# that origin; a class name proves nothing about where it came from.
 _CONTRACT_MODULES = frozenset({"base.lm.provider_api", "base.lm.catalog.provider_contract"})
 
 
 def _import_bindings(tree: ast.Module) -> dict[str, str]:
     bindings: dict[str, str] = {}
     for statement in tree.body:
-        if isinstance(statement, ast.ImportFrom) and statement.level == 0 and statement.module:
+        if isinstance(statement, ast.ImportFrom) and statement.module:
+            # meiva:note
+            # A relative import keeps only its tail: `from .prices import PRICES` binds
+            # "prices.PRICES", which the unit resolves against its sibling modules.
             for alias in statement.names:
                 bindings[alias.asname or alias.name] = f"{statement.module}.{alias.name}"
         elif isinstance(statement, ast.Import):
@@ -97,19 +112,128 @@ def _contract_symbol(node: ast.expr, bindings: Mapping[str, str]) -> str | None:
     return symbol if module in _CONTRACT_MODULES else None
 
 
-def _string_constants(tree: ast.Module) -> dict[str, str]:
-    constants: dict[str, str] = {}
+def _assignments(tree: ast.Module) -> dict[str, ast.expr]:
+    bound: dict[str, ast.expr] = {}
     for statement in tree.body:
-        if not (
-            isinstance(statement, ast.Assign)
-            and len(statement.targets) == 1
-            and isinstance(statement.targets[0], ast.Name)
+        if isinstance(statement, ast.Assign) and len(statement.targets) == 1:
+            target = statement.targets[0]
+            if isinstance(target, ast.Name):
+                bound[target.id] = statement.value
+        elif (
+            isinstance(statement, ast.AnnAssign)
+            and isinstance(statement.target, ast.Name)
+            and statement.value is not None
         ):
-            continue
-        value = statement.value
+            bound[statement.target.id] = statement.value
+    return bound
+
+
+def _string_constants(assignments: Mapping[str, ast.expr]) -> dict[str, str]:
+    constants: dict[str, str] = {}
+    for name, value in assignments.items():
         if isinstance(value, ast.Constant) and isinstance(value.value, str):
-            constants[statement.targets[0].id] = value.value
+            constants[name] = value.value
     return constants
+
+
+class _Source(NamedTuple):
+    path: Path
+    tree: ast.Module
+    bindings: Mapping[str, str]
+    assignments: Mapping[str, ast.expr]
+    constants: Mapping[str, str]
+
+
+class _Declaration(NamedTuple):
+    name: str
+    source: _Source
+    call: ast.Call
+
+
+# meiva:note
+# One provider is one declaration unit: a declaration may name a literal another module of the
+# same package assigns (``models=MODELS``, ``with_fast_variants(PROVIDER, FAST_PRICES)``), so the
+# reader resolves a name through a module-level assignment in the same file or in a sibling
+# module the package names. A name bound anywhere else is left alone, and the declaration that
+# uses it fails its literal check instead of reading another package's module.
+class _Unit:
+    def __init__(self, files: tuple[_Source, ...]) -> None:
+        self.files = files
+        self.package = files[0].path.parent.name
+        self.label = files[0].path
+        self.declarations = tuple(
+            _Declaration(name, source, value)
+            for source in files
+            for name, value in _declarations_of(source).items()
+        )
+
+    def sibling(self, module: str) -> _Source | None:
+        for source in self.files:
+            stem = source.path.stem
+            if module == stem or module.endswith(f".{self.package}.{stem}"):
+                return source
+        return None
+
+    def resolve(self, node: ast.expr, origin: _Source) -> tuple[ast.expr, _Source]:
+        source = origin
+        seen: set[tuple[Path, str]] = set()
+        while isinstance(node, ast.Name):
+            if (source.path, node.id) in seen:
+                raise RuntimeError(f"{source.path}: {node.id} is defined in terms of itself")
+            seen.add((source.path, node.id))
+            assigned = source.assignments.get(node.id)
+            if assigned is not None:
+                node = assigned
+                continue
+            dotted = source.bindings.get(node.id)
+            module, _, symbol = ("" if dotted is None else dotted).rpartition(".")
+            sibling = None if not module else self.sibling(module)
+            assigned = None if sibling is None else sibling.assignments.get(symbol)
+            if sibling is None or assigned is None:
+                return node, source
+            source = sibling
+            node = assigned
+        return node, source
+
+    def declaration_at(self, node: ast.expr) -> _Declaration | None:
+        return next((declared for declared in self.declarations if declared.call is node), None)
+
+
+def _declarations_of(source: _Source) -> dict[str, ast.Call]:
+    declared: dict[str, ast.Call] = {}
+    for name, value in source.assignments.items():
+        if (
+            isinstance(value, ast.Call)
+            and _contract_symbol(value.func, source.bindings) is not None
+        ):
+            declared[name] = value
+    return declared
+
+
+# meiva:note
+# The provider face is read first so every report lists its declarations before the ones a
+# sibling module adds.
+def _parse_unit(sources: Mapping[Path, str]) -> _Unit:
+    paths = sorted(sources, key=lambda path: (path.stem != "provider", path.name))
+    directories = sorted({str(path.parent) for path in paths})
+    if len(directories) != 1:
+        raise RuntimeError(
+            "a declaration unit is one provider package; got " + ", ".join(directories)
+        )
+    files: list[_Source] = []
+    for path in paths:
+        tree = ast.parse(sources[path], filename=str(path))
+        bound = _assignments(tree)
+        files.append(
+            _Source(
+                path=path,
+                tree=tree,
+                bindings=_import_bindings(tree),
+                assignments=bound,
+                constants=_string_constants(bound),
+            )
+        )
+    return _Unit(tuple(files))
 
 
 def validated_provenance(
@@ -337,11 +461,15 @@ def _price_declaration(call: ast.expr, *, context: str) -> tuple[PriceDeclaratio
     )
 
 
-def _mapping_keyword(call: ast.Call, name: str, *, path: Path, declaration: str) -> ast.Dict:
-    values = [keyword.value for keyword in call.keywords if keyword.arg == name]
-    if len(values) != 1 or not isinstance(values[0], ast.Dict):
-        raise RuntimeError(f"{path}: {declaration}(...) must have one literal {name}= mapping")
-    return values[0]
+def _mapping_keyword(unit: _Unit, declaration: _Declaration, name: str) -> tuple[ast.Dict, _Source]:
+    context = f"{unit.label}: {declaration.name}"
+    values = [keyword.value for keyword in declaration.call.keywords if keyword.arg == name]
+    if len(values) != 1:
+        raise RuntimeError(f"{context}(...) must have one literal {name}= mapping")
+    node, source = unit.resolve(values[0], declaration.source)
+    if isinstance(node, ast.Dict):
+        return node, source
+    raise RuntimeError(f"{context}(...) must have one literal {name}= mapping")
 
 
 def _mapping_keys(
@@ -366,108 +494,126 @@ def _model_key(node: ast.expr, *, constants: Mapping[str, str], context: str) ->
     return _literal(node, str, context=context)
 
 
-def _fast_variant_calls(tree: ast.Module) -> list[ast.Call]:
-    functions = [
-        node
-        for node in tree.body
-        if isinstance(node, ast.FunctionDef) and node.name == "contribute"
-    ]
-    return [
-        node
-        for function in functions
-        for node in ast.walk(function)
-        if isinstance(node, ast.Call)
-        and isinstance(node.func, ast.Name)
-        and node.func.id == "with_fast_variants"
-    ]
+def _fast_variant_calls(unit: _Unit) -> list[tuple[ast.Call, _Source]]:
+    calls: list[tuple[ast.Call, _Source]] = []
+    for source in unit.files:
+        for statement in source.tree.body:
+            if not (isinstance(statement, ast.FunctionDef) and statement.name == "contribute"):
+                continue
+            calls.extend(
+                (node, source)
+                for node in ast.walk(statement)
+                if isinstance(node, ast.Call)
+                and isinstance(node.func, ast.Name)
+                and node.func.id == "with_fast_variants"
+            )
+    return calls
 
 
-def _fast_price_nodes(
-    tree: ast.Module,
-    path: Path,
-    declarations: Mapping[str, ast.Call],
-    constants: Mapping[str, str],
-) -> dict[str, dict[str, ast.expr]]:
-    calls = _fast_variant_calls(tree)
-    if not calls:
-        return {}
-    if len(calls) != 1:
-        raise RuntimeError(f"{path}: expected at most one with_fast_variants declaration")
-    call = calls[0]
+def _fast_variant_declaration(
+    unit: _Unit, call: ast.Call, origin: _Source
+) -> tuple[ast.Dict, _Source]:
+    message = f"{unit.label}: expected literal with_fast_variants(<contribution>, {{...}})"
+    if len(call.args) != 2 or any(keyword.arg != "reference_tps" for keyword in call.keywords):
+        raise RuntimeError(message)
+    references = [unit.resolve(keyword.value, origin)[0] for keyword in call.keywords]
+    standard = unit.declaration_at(unit.resolve(call.args[0], origin)[0])
+    mapping, source = unit.resolve(call.args[1], origin)
     if (
-        len(call.args) != 2
-        or any(
-            keyword.arg != "reference_tps" or not isinstance(keyword.value, ast.Dict)
-            for keyword in call.keywords
-        )
-        or not isinstance(call.args[0], ast.Name)
-        or call.args[0].id not in declarations
-        or not isinstance(call.args[1], ast.Dict)
+        standard is None
+        or not isinstance(mapping, ast.Dict)
+        or not all(isinstance(reference, ast.Dict) for reference in references)
     ):
-        raise RuntimeError(f"{path}: expected literal with_fast_variants(<contribution>, {{...}})")
-    mapping = call.args[1]
-    keys = _mapping_keys(mapping, context=f"{path}: Fast pricing", constants=constants)
-    return {call.args[0].id: dict(zip(keys, mapping.values, strict=True))}
+        raise RuntimeError(message)
+    return mapping, source
 
 
-def _add_fast_prices(
-    nodes: dict[str, ast.expr],
-    path: Path,
+def _fast_prices(
+    unit: _Unit,
     models: set[str],
     prices: dict[str, PriceDeclaration],
-    price_nodes: dict[str, ast.Call],
+    price_nodes: dict[str, SourceNode],
 ) -> None:
-    for standard, value in nodes.items():
-        fast = f"{standard}-fast"
-        if standard not in models or fast in models or fast in prices:
-            raise RuntimeError(f"{path}: invalid or duplicate Fast model {fast!r}")
-        models.add(fast)
-        prices[fast], price_nodes[fast] = _price_declaration(value, context=f"{path}: {fast}")
+    calls = _fast_variant_calls(unit)
+    if not calls:
+        return
+    if len(calls) != 1:
+        raise RuntimeError(f"{unit.label}: expected at most one with_fast_variants declaration")
+    mapping, source = _fast_variant_declaration(unit, *calls[0])
+    keys = _mapping_keys(mapping, context=f"{unit.label}: Fast pricing", constants=source.constants)
+    for model, value in zip(keys, mapping.values, strict=True):
+        node, origin = unit.resolve(value, source)
+        _add_fast_price(unit, model, node, origin, models, prices, price_nodes)
 
 
-def provider_manifest(source: str, path: Path) -> ProviderManifest:
-    tree = ast.parse(source, filename=str(path))
-    bindings = _import_bindings(tree)
-    constants = _string_constants(tree)
-    declarations: dict[str, ast.Call] = {}
-    for statement in tree.body:
-        if not (
-            isinstance(statement, ast.Assign)
-            and len(statement.targets) == 1
-            and isinstance(statement.targets[0], ast.Name)
-            and isinstance(statement.value, ast.Call)
-        ):
-            continue
-        if _contract_symbol(statement.value.func, bindings) is not None:
-            declarations[statement.targets[0].id] = statement.value
-    if not declarations:
+def _add_fast_price(
+    unit: _Unit,
+    model: str,
+    node: ast.expr,
+    origin: _Source,
+    models: set[str],
+    prices: dict[str, PriceDeclaration],
+    price_nodes: dict[str, SourceNode],
+) -> None:
+    fast = f"{model}-fast"
+    if model not in models or fast in models or fast in prices:
+        raise RuntimeError(f"{unit.label}: invalid or duplicate Fast model {fast!r}")
+    prices[fast], price_node = _price_declaration(node, context=f"{origin.path}: {fast}")
+    price_nodes[fast] = SourceNode(origin.path, price_node)
+    models.add(fast)
+
+
+def unit_manifest(sources: Mapping[Path, str]) -> ProviderManifest:
+    unit = _parse_unit(sources)
+    if not unit.declarations:
         raise RuntimeError(
-            f"{path}: expected a top-level <contribution> = ...(models=..., pricing=...) whose "
-            f"type is imported from {' or '.join(sorted(_CONTRACT_MODULES))}"
+            f"{unit.label}: expected a top-level <contribution> = ...(models=..., pricing=...) "
+            "whose type is imported from " + " or ".join(sorted(_CONTRACT_MODULES))
         )
     models: set[str] = set()
     prices: dict[str, PriceDeclaration] = {}
-    price_nodes: dict[str, ast.Call] = {}
-    for name, call in declarations.items():
-        models_node = _mapping_keyword(call, "models", path=path, declaration=name)
-        pricing_node = _mapping_keyword(call, "pricing", path=path, declaration=name)
+    price_nodes: dict[str, SourceNode] = {}
+    for declaration in unit.declarations:
+        models_node, models_source = _mapping_keyword(unit, declaration, "models")
+        pricing_node, pricing_source = _mapping_keyword(unit, declaration, "pricing")
         declared = set(
-            _mapping_keys(models_node, context=f"{path}: {name} models", constants=constants)
+            _mapping_keys(
+                models_node,
+                context=f"{unit.label}: {declaration.name} models",
+                constants=models_source.constants,
+            )
         )
         price_models = _mapping_keys(
-            pricing_node, context=f"{path}: {name} pricing", constants=constants
+            pricing_node,
+            context=f"{unit.label}: {declaration.name} pricing",
+            constants=pricing_source.constants,
         )
         if not set(price_models) <= declared:
-            raise RuntimeError(f"{path}: {name} pricing contains ids absent from models")
+            raise RuntimeError(
+                f"{unit.label}: {declaration.name} pricing contains ids absent from models"
+            )
         repeated = prices.keys() & set(price_models)
         if repeated:
-            raise RuntimeError(f"{path}: {name} repeats model ids {sorted(repeated)}")
+            raise RuntimeError(
+                f"{unit.label}: {declaration.name} repeats model ids {sorted(repeated)}"
+            )
         models |= declared
         for model, value in zip(price_models, pricing_node.values, strict=True):
-            prices[model], price_nodes[model] = _price_declaration(
-                value,
-                context=f"{path}: {model}",
-            )
-    for nodes in _fast_price_nodes(tree, path, declarations, constants).values():
-        _add_fast_prices(nodes, path, models, prices, price_nodes)
-    return ProviderManifest(frozenset(models), prices, price_nodes, tuple(declarations))
+            node, origin = unit.resolve(value, pricing_source)
+            prices[model], price_node = _price_declaration(node, context=f"{origin.path}: {model}")
+            price_nodes[model] = SourceNode(origin.path, price_node)
+    _fast_prices(unit, models, prices, price_nodes)
+    return ProviderManifest(
+        frozenset(models),
+        prices,
+        price_nodes,
+        tuple(declaration.name for declaration in unit.declarations),
+        dict(sources),
+    )
+
+
+# meiva:note
+# One file that carries a whole provider's declarations by itself; a package that spreads them
+# across sibling modules is read with ``unit_manifest``.
+def provider_manifest(source: str, path: Path) -> ProviderManifest:
+    return unit_manifest({path: source})

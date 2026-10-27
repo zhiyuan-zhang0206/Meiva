@@ -218,7 +218,7 @@ repos:
         name: plugin prices match the archive lattice
         entry: .venv/bin/python -m scripts.model_registry.check_plugin_price_drift
         language: system
-        files: ^(base/lm/pricing/pricing_catalog_archive\.json|meiva_builtins/plugins/lm_[^/]+/provider\.py)$
+        files: ^(base/lm/pricing/pricing_catalog_archive\.json|meiva_builtins/plugins/lm_[^/]+/[^/]+\.py)$
         pass_filenames: false
         verbose: true
 

@@ -1,5 +1,5 @@
 [uses]
-"provider.py" = ["decision.py"]
+"provider.py" = ["decision.py", "fast_prices.py", "models.py", "prices.py"]
 
 [purity]
 "plugin.py" = "strict"
