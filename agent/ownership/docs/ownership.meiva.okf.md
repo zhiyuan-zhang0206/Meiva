@@ -45,6 +45,7 @@ matches the original incarnation.
 - `agent/ownership/inbound.py` — the owner lock every inbound queue mutation takes
 - `agent/ownership/hosted.py:apply_hosted_lifecycle` — executes the claimed restart/terminate command and marks it done in one transaction; returns what it applied (`AppliedLifecycle`)
 - `agent/ownership/lifecycle_plan.py` — the pure decisions of that apply and of closing a turn (executable kind, the continuation note, the shell cutoff, what a turn close stamps and settles and whether an inbound row is owned); `agent/ownership/audit_payloads.py` — the audit payloads of an admission, a settle and a corpse reap
+- `hosted.py`, `corpse_reap.py` and `inbound.py` are effect shells, marked `none` in `agent/ownership/meizel.toml` with that reason: each runs the transaction (the SQL, the audit row, the event emit, the log line) and asks `lifecycle_plan.py` or `audit_payloads.py` what to do; the directory's default is `strict`
 - `services/agent_runner/agent_host/lifecycle/shells.py:apply_lifecycle_command` — apply, then the post-commit cleanup a terminate owes
 - `services/agent_runner/agent_host/host_beat.py` — the host beat (liveness and the corpse reaper)
 - `base/native_process/runtime_incarnation.py` — context-bound execution identity
