@@ -17,8 +17,6 @@ from pathlib import Path
 from typing import TextIO, assert_never
 
 from base.agents.context.clients import DatabaseFactory
-from base.clock import Clock
-from base.clock.configuration import clock_config_from_boot
 from base.deploy.lifecycle import start_serving
 from base.deploy.lifecycle.status_journal import phase as journal_phase
 from base.telemetry import EventPipeline
@@ -115,36 +113,33 @@ def execute_plan(
     timed: bool,
 ) -> StopOutcome:
     outcome = StopOutcome((), ())
-    clock = Clock(clock_config_from_boot(env.command.config), timers=env.command.timers)
     for step in plan.steps:
         with timed_phase(
             env.command.home, env.command.pid, run.phases, phase_label(step) if timed else None
         ):
-            reported = _perform(step, env, run, retained_children, clock=clock)
+            reported = _perform(step, env, run, retained_children)
         if reported is not None:
             outcome = reported
     return outcome
 
 
 # meiva:note
-# Perform one step, reading the time from the stop's one `clock`; only the data-plane stop has
+# Perform one step, reading the time from the invocation's clock; only the data-plane stop has
 # something to report.
 def _perform(
     step: StopStep,
     env: StopEnvironment,
     run: StopRun,
     retained_children: list[subprocess.Popen[bytes]] | None,
-    *,
-    clock: Clock,
 ) -> StopOutcome | None:
     command = env.command
     match step:
         case ClearServing():
             start_serving.clear_serving(command.home)
         case Announce(window):
-            announce_stopping(command, window, now=clock.now())
+            announce_stopping(command, window, now=command.clock.now())
         case RecordBrowserSession():
-            browser.record_browser_session(command, now=clock.now())
+            browser.record_browser_session(command, now=command.clock.now())
         case StopServices(preserve, force, _phase):
             root_driver.stop_root_service_tree(
                 preserve=preserve,
