@@ -7,6 +7,10 @@ export function systemKeySource(): KeySource {
   };
 }
 
+export function systemWallNow(): number {
+  return Date.now();
+}
+
 export function systemHttpTransport(): HttpTransport {
   return {
     fetch: (url, init) => fetch(url, init),
@@ -46,7 +50,7 @@ export function systemStreamTransport(): StreamTransport {
     get page() {
       return document;
     },
-    wallNow: () => Date.now(),
+    wallNow: systemWallNow,
     newTabId: () =>
       Array.from(systemKeySource().getRandomValues(new Uint8Array(8)), (b) =>
         b.toString(16).padStart(2, "0"),
