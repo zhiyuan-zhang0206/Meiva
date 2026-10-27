@@ -251,7 +251,7 @@ VITEST_REPO = {"ui/tests/setup.ts": VITEST_SETUP, "meizel.toml": '[roles]\nfront
 
 @pytest.mark.parametrize(
     ("policy", "expected"),
-    [("", {"third-party-patch"}), (approving("ui/tests/setup.ts"), set())],
+    [("", {"third-party-patch"}), (approving("ui/tests/setup.ts"), set[str]())],
 )
 def test_a_typescript_setup_file_is_approved_like_a_python_one(
     make_repo: RepoFactory, policy: str, expected: set[str]
