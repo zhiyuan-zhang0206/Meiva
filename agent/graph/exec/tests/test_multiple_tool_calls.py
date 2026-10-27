@@ -13,9 +13,12 @@ from pydantic import BaseModel, Field
 
 from agent.execution.protocol import ResultPayload
 from agent.graph.exec.node import ExecDone, exec_node_impl
-from agent.graph.exec.parent_facts import read_parent_facts
 from agent.graph.exec.process import ExecProcess, SubprocessExecProcess
-from agent.graph.exec.tests.process_inputs import ReportingExecProcess, ScriptedExecProcess
+from agent.graph.exec.tests.process_inputs import (
+    ReportingExecProcess,
+    ScriptedExecProcess,
+    live_parent_facts,
+)
 from agent.graph.tool_calls import normalize_tool_calls
 from agent.state import AgentState, build_agent_state
 from base.agents.context import MeivaContext
@@ -165,7 +168,7 @@ async def test_real_children_do_not_share_globals(database_gate: ProcessDbGate) 
         _state('shared_name = 42; print("first")', 'print("shared_name" in globals())'),
         _runtime(database_gate),
         {"configurable": {"thread_id": "7"}},
-        process=SubprocessExecProcess(read_parent_facts(), rng=_rng()),
+        process=SubprocessExecProcess(live_parent_facts(), rng=_rng()),
     )
     assert result is not None
     _, first, second = result["messages"]
@@ -180,7 +183,7 @@ async def test_exception_does_not_skip_later_call(database_gate: ProcessDbGate) 
         _state('raise ValueError("first failed")', 'print("second ran")'),
         _runtime(database_gate),
         {"configurable": {"thread_id": "7"}},
-        process=SubprocessExecProcess(read_parent_facts(), rng=_rng()),
+        process=SubprocessExecProcess(live_parent_facts(), rng=_rng()),
     )
     assert result is not None
     _, first, second = result["messages"]
@@ -310,7 +313,7 @@ async def test_findings_of_every_call_in_a_batch_reach_the_state(
         _state(_scan("web.fetch") + "print('first')", _scan("shell.run") + "print('second')"),
         _runtime(database_gate),
         _config(),
-        process=SubprocessExecProcess(read_parent_facts(), rng=_rng()),
+        process=SubprocessExecProcess(live_parent_facts(), rng=_rng()),
     )
 
     assert [f.source for f in result["security_findings"]] == ["web.fetch", "shell.run"]
@@ -327,7 +330,7 @@ async def test_a_compacting_call_discards_the_findings_of_its_batch(
         ),
         _runtime(database_gate),
         _config(),
-        process=SubprocessExecProcess(read_parent_facts(), rng=_rng()),
+        process=SubprocessExecProcess(live_parent_facts(), rng=_rng()),
     )
 
     assert result["security_findings"] == []
@@ -412,7 +415,7 @@ async def test_exec_recovers_missing_content_call_without_syntax_plugin(
         state,
         _runtime(database_gate),
         _config(),
-        process=SubprocessExecProcess(read_parent_facts(), rng=_rng()),
+        process=SubprocessExecProcess(live_parent_facts(), rng=_rng()),
     )
     assert result is not None
     fixed_ai, first, second = result["messages"]
@@ -446,7 +449,7 @@ async def test_exec_node_feeds_back_on_unknown_tool_name(database_gate: ProcessD
         state,
         _runtime(database_gate),
         _config(),
-        process=SubprocessExecProcess(read_parent_facts(), rng=_rng()),
+        process=SubprocessExecProcess(live_parent_facts(), rng=_rng()),
     )
 
     assert result is not None
@@ -471,7 +474,7 @@ async def test_exec_node_feeds_back_when_code_key_missing(database_gate: Process
         state,
         _runtime(database_gate),
         _config(),
-        process=SubprocessExecProcess(read_parent_facts(), rng=_rng()),
+        process=SubprocessExecProcess(live_parent_facts(), rng=_rng()),
     )
 
     assert result is not None

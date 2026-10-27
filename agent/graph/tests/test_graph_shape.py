@@ -18,7 +18,7 @@ from pydantic import BaseModel
 import agent.state as agent_state
 from agent.graph import build_graph
 from agent.graph.claim.node import route_target
-from agent.graph.exec.parent_facts import read_parent_facts
+from agent.graph.exec.tests.process_inputs import live_parent_facts
 from agent.state import AgentState, ContextReset
 from base.agents.context import MeivaContext
 from base.api_contracts.agent_contract import Harness
@@ -44,7 +44,7 @@ class _Counter(BaseModel):
 def test_every_node_receives_the_plugins_state_channels() -> None:
     registry = ExtensionRegistry((("demo", PluginContributions(state=(_Counter,))),))
 
-    graph = build_graph(None, registry, parent=read_parent_facts(), rng=_rng())
+    graph = build_graph(None, registry, parent=live_parent_facts(), rng=_rng())
 
     state_cls = graph.builder.state_schema
     assert state_cls is not agent_state.BaseAgentState
@@ -105,7 +105,7 @@ def make_context(harness: Harness, engine: FakeEngine | None) -> MeivaContext:
 async def executed_nodes(
     harness: Harness, engine: FakeEngine | None, *, stop_at: frozenset[str] = frozenset()
 ) -> list[str]:
-    graph = build_graph(None, EMPTY, parent=read_parent_facts(), rng=_rng())
+    graph = build_graph(None, EMPTY, parent=live_parent_facts(), rng=_rng())
     state = AgentState(
         messages=[
             SystemMessage(content="prompt"),
@@ -177,7 +177,7 @@ async def test_a_context_reset_keeps_an_external_harness_off_the_native_nodes() 
     )
     seen: list[str] = []
     async for chunk in _stream(
-        build_graph(None, EMPTY, parent=read_parent_facts(), rng=_rng()),
+        build_graph(None, EMPTY, parent=live_parent_facts(), rng=_rng()),
         state,
         make_context(Harness.CLAUDE_CODE, engine),
     ):

@@ -12,8 +12,8 @@ from langchain_core.runnables import RunnableConfig
 from langgraph.runtime import Runtime
 
 from agent.graph.exec.node import exec_node_impl
-from agent.graph.exec.parent_facts import read_parent_facts
 from agent.graph.exec.process import SubprocessExecProcess
+from agent.graph.exec.tests.process_inputs import live_parent_facts
 from agent.graph.interrupt import InterruptEvent
 from agent.state import AgentState
 from base.agents.context import MeivaContext
@@ -49,7 +49,7 @@ def _graph(state_cls: type[AgentState], **compile_options: Any) -> Any:
     builder: Any = StateGraph(state_cls, context_schema=MeivaContext)
     builder.add_node(
         "exec",
-        partial(exec_node_impl, process=SubprocessExecProcess(read_parent_facts(), rng=_rng())),
+        partial(exec_node_impl, process=SubprocessExecProcess(live_parent_facts(), rng=_rng())),
         input_schema=state_cls,
     )
     builder.add_node("after_exec", lambda _state: {})
