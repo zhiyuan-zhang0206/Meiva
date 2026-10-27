@@ -2,11 +2,17 @@ from __future__ import annotations
 
 import os
 import stat
+import subprocess
 import venv
+from collections.abc import Sequence
 from pathlib import Path
+from typing import Any
 
 import pytest
 
+from base.clock import Clock, ClockConfig
+from base.clock.tests.manual_timers import ManualTimers
+from base.host.proc import CommandRunner, run_bounded
 from services.supervision.healthchecks import prod_venv as hc
 
 _HEALTHY_ENV = {"PATH": os.environ.get("PATH", "")}
@@ -14,6 +20,31 @@ _HEALTHY_ENV = {"PATH": os.environ.get("PATH", "")}
 # The whole observation deadline the legs share. The caller owns it — nothing in the check falls
 # back to a literal.
 _DEADLINE_S = 5.0
+# meiva:note
+# The clock the observation measures its deadline on: frozen, so the legs' shares are the deadline
+# divided by the legs left and nothing the machine's load does changes them.
+_CLOCK = Clock(ClockConfig("UTC", None, message_timestamp_weekday=False), timers=ManualTimers())
+
+
+# meiva:note
+# A runner that ends the dependency leg as `run_bounded` does once its deadline kills the tree (it
+# raises `TimeoutExpired`, at once and without waiting), and runs every other leg for real.
+def _runner_that_hangs_on(uv: str) -> CommandRunner:
+    def run(
+        argv: Sequence[str],
+        *,
+        timeout: float,
+        capture_output: bool = False,
+        input: bytes | str | None = None,
+        **popen_kwargs: object,
+    ) -> subprocess.CompletedProcess[Any]:
+        if argv[0] == uv:
+            raise subprocess.TimeoutExpired(list(argv), timeout)
+        return run_bounded(
+            argv, timeout=timeout, capture_output=capture_output, input=input, **popen_kwargs
+        )
+
+    return run
 
 
 # meiva:note
@@ -38,10 +69,10 @@ def _package_files(site: Path) -> dict[Path, bytes]:
 
 # meiva:note
 # An executable script that stands in for `uv`: it exits with `code` after writing the
-# environment variables it was given, or sleeps when `hang` is set.
-def _uv(root: Path, *, code: int = 0, hang: bool = False) -> str:
+# environment variables it was given.
+def _uv(root: Path, *, code: int = 0) -> str:
     script = root / "fake-uv"
-    body = "sleep 30" if hang else f"env > {root}/uv-env.txt\nexit {code}"
+    body = f"env > {root}/uv-env.txt\nexit {code}"
     script.write_text(f"#!/bin/sh\n{body}\n")
     script.chmod(script.stat().st_mode | stat.S_IEXEC)
     return str(script)
@@ -64,6 +95,8 @@ def test_the_dependency_check_runs_in_the_isolated_environment(tmp_path: Path) -
         uv=uv,
         environment={**_HEALTHY_ENV, "VIRTUAL_ENV": "/other/.venv", "PYTHONPATH": "/other"},
         deadline_s=_DEADLINE_S,
+        run=run_bounded,
+        clock=_CLOCK,
     )
 
     assert observation == hc.VenvObservation((), ())
@@ -80,6 +113,8 @@ def test_a_failing_dependency_check_is_a_violation(tmp_path: Path) -> None:
         uv=_uv(tmp_path, code=3),
         environment=_HEALTHY_ENV,
         deadline_s=_DEADLINE_S,
+        run=run_bounded,
+        clock=_CLOCK,
     )
 
     (violation,) = observation.violations
@@ -92,9 +127,15 @@ def test_a_failing_dependency_check_is_a_violation(tmp_path: Path) -> None:
 # violation, and the legs after it still run and still report what they find (2026-10-27, #5656).
 def test_dependency_timeout_is_unmeasured_and_does_not_skip_import_check(tmp_path: Path) -> None:
     _checkout(tmp_path, "missing")
+    uv = _uv(tmp_path)
 
     observation = hc.observe_venv(
-        source_root=tmp_path, uv=_uv(tmp_path, hang=True), environment=_HEALTHY_ENV, deadline_s=0.5
+        source_root=tmp_path,
+        uv=uv,
+        environment=_HEALTHY_ENV,
+        deadline_s=_DEADLINE_S,
+        run=_runner_that_hangs_on(uv),
+        clock=_CLOCK,
     )
 
     (unmeasured,) = observation.unmeasured
@@ -118,6 +159,8 @@ def test_an_unstartable_uv_is_unmeasured_not_a_violation(tmp_path: Path) -> None
         uv=str(tmp_path / "no-uv"),
         environment=_HEALTHY_ENV,
         deadline_s=_DEADLINE_S,
+        run=run_bounded,
+        clock=_CLOCK,
     )
 
     (unmeasured,) = observation.unmeasured
@@ -139,6 +182,8 @@ def test_a_killed_leg_is_unmeasured_not_a_violation(tmp_path: Path) -> None:
         uv=str(killer),
         environment=_HEALTHY_ENV,
         deadline_s=_DEADLINE_S,
+        run=run_bounded,
+        clock=_CLOCK,
     )
 
     (unmeasured,) = observation.unmeasured
@@ -150,7 +195,12 @@ def test_missing_python_does_not_spawn_a_diagnostic(tmp_path: Path) -> None:
     uv = _uv(tmp_path)
 
     observation = hc.observe_venv(
-        source_root=tmp_path, uv=uv, environment=_HEALTHY_ENV, deadline_s=_DEADLINE_S
+        source_root=tmp_path,
+        uv=uv,
+        environment=_HEALTHY_ENV,
+        deadline_s=_DEADLINE_S,
+        run=run_bounded,
+        clock=_CLOCK,
     )
 
     assert "venv python missing" in observation.violations[0]
@@ -171,6 +221,8 @@ def test_real_isolated_import_detects_damage_without_writes(tmp_path: Path, dama
         uv=None,
         environment={**_HEALTHY_ENV, "PYTHONPATH": str(shadow)},
         deadline_s=_DEADLINE_S,
+        run=run_bounded,
+        clock=_CLOCK,
     )
 
     assert before == _package_files(site)

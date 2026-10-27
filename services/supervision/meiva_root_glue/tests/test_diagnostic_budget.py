@@ -13,10 +13,15 @@ from pathlib import Path
 from typing import cast
 
 from base.daemon.health import DaemonProbe, ProbeVerdict
+from base.host.proc import run_bounded
 from base.log.tests.log_records import LogRecords
 from services.supervision.meiva_root_glue import diagnostic_probes as probes
 from services.supervision.meiva_root_glue.diagnostics import Diagnostic, DiagnosticMonitor
-from services.supervision.meiva_root_glue.tests.slices import system_clock
+from services.supervision.meiva_root_glue.tests.slices import (
+    frozen_clock,
+    runner_that_hangs_on,
+    system_clock,
+)
 
 
 # meiva:note
@@ -45,7 +50,13 @@ def _fake_uv(root: Path, body: str) -> dict[str, str]:
 def test_a_venv_leg_inside_the_observation_deadline_is_not_a_failure(tmp_path: Path) -> None:
     environment = _fake_uv(_fake_checkout(tmp_path), "sleep 1")
 
-    probe = probes.venv(environment=environment, deadline_s=20.0, source_root=tmp_path)
+    probe = probes.venv(
+        environment=environment,
+        run=run_bounded,
+        clock=system_clock(),
+        deadline_s=20.0,
+        source_root=tmp_path,
+    )
 
     assert probe.alive
 
@@ -54,9 +65,15 @@ def test_a_venv_leg_inside_the_observation_deadline_is_not_a_failure(tmp_path: P
 # Nothing was read by the hung leg, so nothing may be concluded from it — and the leg after it still
 # ran, because each leg may spend only an even share of what the legs before it left (2026-10-27).
 def test_a_venv_leg_that_outlives_the_deadline_is_inconclusive_not_down(tmp_path: Path) -> None:
-    environment = _fake_uv(_fake_checkout(tmp_path), "sleep 30")
+    environment = _fake_uv(_fake_checkout(tmp_path), "exit 0")
 
-    probe = probes.venv(environment=environment, deadline_s=2.0, source_root=tmp_path)
+    probe = probes.venv(
+        environment=environment,
+        run=runner_that_hangs_on(str(tmp_path / "uv")),
+        clock=frozen_clock(),
+        deadline_s=2.0,
+        source_root=tmp_path,
+    )
 
     assert probe.verdict is ProbeVerdict.INCONCLUSIVE
     assert "no verdict within the 2s observation deadline" in probe.detail
@@ -77,7 +94,13 @@ def test_a_venv_leg_the_host_could_not_start_is_no_verdict(tmp_path: Path) -> No
     unstartable.write_text("#!/nonexistent/interpreter\nexit 0\n")
     unstartable.chmod(0o700)
 
-    probe = probes.venv(environment=environment, deadline_s=20.0, source_root=tmp_path)
+    probe = probes.venv(
+        environment=environment,
+        run=run_bounded,
+        clock=system_clock(),
+        deadline_s=20.0,
+        source_root=tmp_path,
+    )
 
     assert probe.verdict is ProbeVerdict.INCONCLUSIVE
     assert "uv pip check could not start" in probe.detail
