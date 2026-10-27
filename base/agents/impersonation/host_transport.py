@@ -79,7 +79,7 @@ def default_control_socket(*, env: Mapping[str, str], user_home: Path) -> Path:
     if not configured:
         base = user_home / ".codex"
     elif configured == "~" or configured.startswith("~/"):
-        base = user_home / configured.removeprefix("~").removeprefix("/")
+        base = user_home / configured.removeprefix("~").lstrip("/")
     else:
         base = Path(configured)
     return base / "app-server-control" / "app-server-control.sock"
