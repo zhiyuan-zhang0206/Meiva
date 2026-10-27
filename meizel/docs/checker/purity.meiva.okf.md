@@ -12,9 +12,9 @@ tags:
 ## Why mechanical purity and container budgets
 
 The goal is understandable, changeable code and trustworthy feedback. Bounded interfaces
-and explicit effects can help, but passing AST/graph checks does not establish cohesive
-design. Review actual owners, consumers and meaningful assertions; avoid forwarding layers
-or callback bags created only to satisfy a budget.
+and explicit effects can help, but passing the checks does not establish cohesive design.
+Review actual owners, consumers and assertions; avoid forwarding layers or callback bags
+created only to satisfy a budget.
 
 ## What the evidence means
 
@@ -25,9 +25,9 @@ filter or `--changed` does not turn that scoped result into a whole-repository j
 | Dimension | Evidence and limit |
 |---|---|
 | Recognized syntax | `impure-call` and related diagnostics name matched imports, calls or writes. An import or async declaration is a rule observation, not observed runtime execution. A name bound to an impure call (`_is_file = Path.is_file`) is that call; the policy also lists the shell constructors `GitRepo` and `load_universe`. |
-| Unresolved or unmeasured behavior | Unresolved imports/patches are reported where recognized. No diagnostic does not establish absence of callback effects, input mutation or transitive effects; those are not comprehensively analyzed. |
+| Unresolved or unmeasured behavior | Unresolved imports/patches are reported where recognized. No diagnostic does not establish absence of callback effects, input mutation or transitive effects. |
 | Structure | Container budgets and frozen-shape rules bound forms and sizes, not semantic effects. A frozen dataclass can contain a mutable list; a frozen JS holder or Set is not proof against nested mutation. |
-| Test resources | Fixture diagnostics recognize configured requests. They do not measure bootstrap cost or authorize a lightweight runner. Explicit [[tests/fixtures/docs/static-environment.meiva.okf.md|static ownership and refusal canaries]] govern that boundary. |
+| Test resources | Fixture diagnostics recognize configured requests. They do not measure bootstrap cost or authorize a lightweight runner. [[tests/fixtures/docs/static-environment.meiva.okf.md|Static ownership and refusal canaries]] govern it. |
 
 Passing observed values can separate decisions from effects. Injecting a callable makes
 its operation explicit but does not remove its effects. Use [[meizel/docs/checker/explain.meiva.okf.md|explain source evidence]] to trace
@@ -47,7 +47,9 @@ child under `[purity]`, with `"."` as the directory default:
 
 Every Python or TypeScript file resolves to its nearest enclosing declaration (`none` by default):
 
-- **`none`**: only locality and patch-recording rules apply.
+- **`none`**: only locality and patch-recording rules apply. A manifest that names it writes
+  `{ mode = "none", why = "..." }`: an effect shell whose pure decisions are extracted and reviewed.
+  A file no manifest mentions is `none`; the bare string `"none"` is read for now and will be refused.
 - **`strict-to-be`**: all 15 purity and container-budget rules are evaluated. Existing
   violations may be recorded in `[debt.<code>]` via `python -m meizel debt record` and can
   only shrink (`debt-paid` fires when a recorded violation is fixed, and also when a
