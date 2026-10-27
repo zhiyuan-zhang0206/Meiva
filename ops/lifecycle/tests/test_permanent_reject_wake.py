@@ -140,3 +140,56 @@ async def test_idling_owner_blocks_background_wake_until_new_chat(
     assert db_conn.execute(
         "SELECT permanent_reject_streak FROM agents_meta WHERE id=%s", (agent,)
     ).fetchone() == (0,)
+
+
+# meiva:note
+# The 2026-10-27 fixed point (#5665): an operator restart waits as a *pending* inbound, so a
+# gate that only admits an already-claimed restart can never open. A human's restart admits the
+# turn; the automatic ones stay blocked, because those are what the breaker exists to stop.
+async def test_an_operator_restart_admits_a_turn_while_the_breaker_is_tripped(
+    db_conn: psycopg.Connection,
+    aops_pool: AsyncConnectionPool,
+    database: Database,
+    event_bus: EventBus,
+    config_authority: ConfigAuthority,
+    model_catalog: ModelCatalog,
+    database_gate: ProcessDbGate,
+    machine_identity: MachineIdentityReader,
+) -> None:
+    from base.agents.recovery.breaker import admit_pending_wake
+
+    agent = terminated(
+        db_conn,
+        config_authority=config_authority,
+        model_catalog=model_catalog,
+        database_gate=database_gate,
+        local_machine=machine_identity,
+    )
+    db_conn.execute(
+        "UPDATE agents_meta SET status='idling',last_turn_fatal_at=clock_timestamp(),"
+        "permanent_reject_streak=1 WHERE id=%s",
+        (agent,),
+    )
+    db_conn.commit()
+
+    insert_inbound_message(
+        db_conn, agent, "", "self", kind="restart", bus=event_bus, database=database
+    )
+    insert_inbound_message(
+        db_conn, agent, "", "system:supervisor", kind="restart", bus=event_bus, database=database
+    )
+    insert_inbound_message(
+        db_conn, agent, "", "self", kind="compact_request", bus=event_bus, database=database
+    )
+    assert not await admit_pending_wake(aops_pool, agent)
+    assert not await admit_pending_wake(aops_pool, agent)
+
+    insert_inbound_message(
+        db_conn, agent, "", "user", kind="restart", bus=event_bus, database=database
+    )
+    assert await admit_pending_wake(aops_pool, agent)
+    # meiva:note
+    # Admission is not absolution: only a turn that makes progress clears the streak.
+    assert db_conn.execute(
+        "SELECT permanent_reject_streak FROM agents_meta WHERE id=%s", (agent,)
+    ).fetchone() == (1,)
