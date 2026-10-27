@@ -9,6 +9,8 @@
 
 from __future__ import annotations
 
+import json
+import os
 from pathlib import Path
 
 import psycopg
@@ -79,6 +81,10 @@ def test_an_identical_live_generation_is_reused_and_the_start_serves(
     assert _entries_besides_the_lifecycle_lock(run.home) == ["run", "running_sha"], (
         "nothing converged beyond the start's own bookmark"
     )
+    lock = home_lifecycle_locks.lifecycle_lock_path(run.home)
+    holder = json.loads(home_lifecycle_locks.holder_path(lock).read_text())
+    assert holder["purpose"] == "cli.cmd_start_body" and holder["state"] == "released"
+    assert holder["pid"] == run.command.pid != os.getpid()
     out = capsys.readouterr().out
     assert "roles = agent-runner, machine = start-test" in out
     assert "probe gateway" in out

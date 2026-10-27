@@ -9,15 +9,10 @@
 
 from __future__ import annotations
 
-import re
-from contextlib import suppress
 from dataclasses import dataclass
-from pathlib import Path
 from typing import Any, TypeGuard
 
 from base.packages.docs.frontmatter import parse_frontmatter_typed
-
-_MD_LINK_RE = re.compile(r"\[([^\]]+)\]\(([^)]+)\)")
 
 
 def _is_object_list(value: object) -> TypeGuard[list[object]]:
@@ -85,27 +80,3 @@ def parse_note(text: str, rel: str) -> Note | None:
         body=body,
         fm=fm,
     )
-
-
-def extract_md_links(
-    body: str,
-    source_dir: Path,
-    root: Path,
-    source_id: str,
-) -> tuple[tuple[str, str], ...]:
-    """Markdown links in `body` → `(source_id, target_id)` edges.
-
-    Links resolve relative to the source file's directory (standard Markdown
-    resolution). `http(s)://`, `#` and empty targets are skipped; a target
-    that resolves outside `root` (`../`, an absolute path) is skipped silently
-    instead of raising — one bad link must not 500 the whole graph.
-    """
-    edges: list[tuple[str, str]] = []
-    for match in _MD_LINK_RE.finditer(body):
-        target = match.group(2)
-        if not target or target.startswith(("http://", "https://", "#")):
-            continue
-        with suppress(ValueError):
-            target_path = (source_dir / target).resolve().relative_to(root.resolve())
-            edges.append((source_id, str(target_path.with_suffix(""))))
-    return tuple(edges)
