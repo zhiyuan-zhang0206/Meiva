@@ -386,6 +386,19 @@ def _write_machine(unit_home: Path, servers: dict[str, dict[str, str]]) -> None:
 
 
 # meiva:note
+# The machine config is the one under the home the loader is handed, not the process's own.
+def test_the_machine_config_is_the_one_under_the_home_it_is_handed(
+    unit_home: Path, tmp_path: Path
+) -> None:
+    other = tmp_path / "other-home"
+    other.mkdir()
+    _write_machine(other, {"only-here": {"command": "x"}})
+
+    assert "only-here" in cfg_mod.load_mcp_config(home=other)
+    assert "only-here" not in cfg_mod.load_mcp_config(home=unit_home)
+
+
+# meiva:note
 # The names of the servers the loader returns that only the machine config declares.
 def _machine_names(unit_home: Path, *, include_disabled: bool = False) -> set[str]:
     repo_declared: set[str] = set()

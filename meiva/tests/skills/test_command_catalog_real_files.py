@@ -78,3 +78,18 @@ def test_a_message_expands_the_way_each_kind_of_command_does(
         CommandCatalog.system(skills=skills.names, home=unit_home).expand("just chatting /ship")
         == "just chatting /ship"
     )
+
+
+# meiva:note
+# The user commands are the ones under the home the catalog is handed, not the process's own.
+def test_the_user_commands_are_the_ones_under_the_home_the_catalog_is_handed(
+    unit_home: Path, tmp_path: Path
+) -> None:
+    other = tmp_path / "other-home"
+    _user_command(other, "only-here", "---\ndescription: here\n---\nBody.\n")
+
+    handed = CommandCatalog.system(skills=list, home=other).discover()
+    process = CommandCatalog.system(skills=list, home=unit_home).discover()
+
+    assert "only-here" in {c["name"] for c in handed}
+    assert "only-here" not in {c["name"] for c in process}

@@ -14,6 +14,7 @@ from base.agents.context.identity import AgentIdentity
 from base.db import Database
 from base.db.code_version_gate import ProcessDbGate
 from base.events.live.bus import EventBus
+from base.paths import meiva_home
 from base.telemetry.tests.capture.event_capture import EmittedEvents
 from base.telemetry.tests.capture.event_capture import emitted_events as emitted_events
 from meiva.tests.fixtures.pin_agent import pin_agent
@@ -54,7 +55,10 @@ def test_concurrent_duplicate_note_has_one_business_effect(
         clients = ClientSet(database=lambda: Database.from_settings(gate=database_gate))
         try:
             context = MeivaContext(
-                identity=AgentIdentity(actor, True), clients=clients, bus=pinned_bus
+                identity=AgentIdentity(actor, True),
+                clients=clients,
+                bus=pinned_bus,
+                meiva_home=meiva_home(),
             )
             barrier.wait()
             task_registry.update_in_context(

@@ -37,6 +37,20 @@ def test_register_save_load_roundtrip(unit_home: Path) -> None:
     assert install_registry_path(meiva_home()).exists()
 
 
+# meiva:note
+# The registry is the one under the home it is handed, not the process's own: a package registered
+# under another home is read there and absent from the home the test points the process at.
+def test_the_registry_is_the_one_under_the_home_it_is_handed(
+    unit_home: Path, tmp_path: Path
+) -> None:
+    other = tmp_path / "other-home"
+    assert other != unit_home
+    reg.register(_pkg("alpha"), home=other)
+
+    assert [p.name for p in reg.load(home=other).packages] == ["alpha"]
+    assert reg.load(home=unit_home).packages == []
+
+
 def test_register_replaces_same_name(unit_home: Path) -> None:
     reg.register(_pkg("dup", ref="v1"), home=unit_home)
     reg.register(_pkg("dup", ref="v2"), home=unit_home)

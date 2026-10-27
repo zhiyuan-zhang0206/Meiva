@@ -358,10 +358,10 @@ def ensure_plugins_loaded(
             launched=launched_process(_launch_facts(context, env)),
         )
     )
-    home = paths.meiva_home()
     if plan.step is not LoadStep.LOAD_SURFACE:
-        settle_installed(plan.step, context, home=home)
+        settle_installed(plan.step, context, home=paths.resolve_meiva_home())
         return
+    home = paths.meiva_home()
     if plan.prepare_launched:
         context, config = _prepare_launched_context(env)
     disabled = process_disable_entries()

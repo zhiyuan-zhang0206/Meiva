@@ -13,6 +13,7 @@ from base.agents.context.identity import AgentIdentity, ExternalLease
 from base.db import Database
 from base.db.code_version_gate import ProcessDbGate
 from base.events.live.bus import EventBus
+from base.paths import meiva_home
 from meiva.tests.fixtures.pin_agent import pin_agent
 from meiva_builtins.plugins.meiva_fleet import task_registry
 from meiva_builtins.plugins.meiva_fleet.tests.task_registry.seeds import (
@@ -94,7 +95,9 @@ def test_lease_expiring_during_operation_lock_wait_cannot_write(
             identity = AgentIdentity(
                 owner, False, lease=ExternalLease(actor, validate, lambda: None)
             )
-            context = MeivaContext(identity=identity, clients=clients, bus=pinned_bus)
+            context = MeivaContext(
+                identity=identity, clients=clients, bus=pinned_bus, meiva_home=meiva_home()
+            )
             task_registry.update_in_context(context, tid, note="stale", operation_key="wait")
         finally:
             clients.close()

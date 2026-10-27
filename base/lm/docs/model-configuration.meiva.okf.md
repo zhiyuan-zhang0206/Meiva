@@ -35,8 +35,10 @@ adds the provider key held in the caller's `ProviderKeys`. Self restart commits 
 and restart inbound together before raising `AgentRestart`.
 
 Catalog membership belongs to admission, using the corresponding Installation or
-request owner. `RestartAgentRequest` validates only structure and numeric/effort
-ranges. Gateway admission retains its 422 refusal before forwarding; runner
+request owner. `RestartAgentRequest` parses structure only: the plugin config classes a
+`config_overlay` is checked against live under the home, which a wire model does not hold, so the
+gateway handler and `restart_blocking` check the overlay with the home before any write.
+Gateway admission retains its 422 refusal before forwarding; runner
 membership and provider validation retain typed `InvalidModelConfig` 400 errors
 before entering the write transaction. Guarded native receipt replay precedes
 fresh validation, preserving the original accepted command. SDK and native

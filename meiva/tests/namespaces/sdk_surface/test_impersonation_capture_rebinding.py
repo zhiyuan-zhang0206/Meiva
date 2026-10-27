@@ -29,6 +29,7 @@ from base.cluster.machine.tests.identity import machine_identity as machine_iden
 from base.db import Database
 from base.db.code_version_gate import ProcessDbGate
 from base.native_process.runtime_incarnation import RuntimeIncarnation
+from base.paths import meiva_home
 from base.telemetry import Event
 from meiva.sdk_surface import metering, process_context, skill_sources
 
@@ -82,6 +83,7 @@ async def test_concurrent_calls_capture_the_original_gate_after_context_rebind(
         identity=AgentIdentity(owner.agent_id, True),
         sdk_calls=tally,
         sdk_capture=_CaptureOwner(previous_gate),
+        meiva_home=meiva_home(),
     )
     process_context.bind_context(context)
     sampling = fixed_sampling_owner()
@@ -144,6 +146,7 @@ def test_sdk_skill_read_captures_borrowed_audit_source_explicitly(
             identity=AgentIdentity(None, True, lease=borrowed),
             sdk_capture=_CaptureOwner(gate),
             clients=clients,
+            meiva_home=meiva_home(),
         )
     )
     try:

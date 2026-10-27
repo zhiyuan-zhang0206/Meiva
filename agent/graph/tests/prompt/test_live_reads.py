@@ -5,6 +5,7 @@
 from __future__ import annotations
 
 import json
+from pathlib import Path
 
 import pytest
 
@@ -81,3 +82,21 @@ def test_configured_servers_are_read_with_their_descriptions() -> None:
     (meiva_home() / "mcp.json").write_text(json.dumps(config), encoding="utf-8")
 
     assert McpServer("alpha", "Alpha server") in read_mcp_servers((), home=meiva_home())
+
+
+# meiva:note
+# The skill and MCP readers look under the home they are handed, not the process's own.
+def test_the_readers_look_under_the_home_they_are_handed(tmp_path: Path) -> None:
+    other = tmp_path / "other-home"
+    write_skill(skills_dir(other), "alpha", "alpha", "alpha desc")
+    install_registry.register(InstalledPackage(name="alpha", type="skill"), home=other)
+    (other / "mcp.json").write_text(
+        json.dumps({"mcpServers": {"fs": {"command": "x", "description": "files"}}}),
+        encoding="utf-8",
+    )
+
+    assert [s["name"] for s in read_skills((), home=other)] == ["alpha"]
+    assert read_skills((), home=meiva_home()) == ()
+    handed = {m.name: m.description for m in read_mcp_servers((), home=other)}
+    assert handed["fs"] == "files"
+    assert "fs" not in {m.name for m in read_mcp_servers((), home=meiva_home())}

@@ -201,7 +201,6 @@ def build_wiring(
     probe_config: ProbeConfig | None = None,
     services: Sequence[ProbeSource] | None = None,
     static_probes: Mapping[str, str] = STATIC_PROBES,
-    home: Path,
 ) -> list[WiringParticipant]:
     """The reference participant set: health monitor + tree self-check."""
     from base.host.runtime_interpreter import capture_loaded_runtime

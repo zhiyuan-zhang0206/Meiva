@@ -40,18 +40,15 @@
 
 from __future__ import annotations
 
-import argparse
 import json
 import re
 import shlex
-import sys
-from collections.abc import Iterable, Mapping, Sequence
+from collections.abc import Iterable, Mapping
 from pathlib import Path
 from typing import Any, get_args
 
 from base.cluster.machine import MachineRole
 from base.native_process.stop_timing import STOP_MARGIN_S
-from base.paths import meiva_home
 from services.supervision.meiva_root.inputs import InputSeal
 from services.supervision.meiva_root.manifest import (
     ManifestError,
@@ -233,42 +230,3 @@ def generate(
     write_manifest(path, manifest)
     load_manifests(path)  # the consumer's own reader must accept what we wrote
     return path
-
-
-def main(argv: Sequence[str] | None = None) -> int:
-    """CLI: `python -m services.supervision.meiva_root_glue.manifests --out FILE [...]`."""
-    parser = argparse.ArgumentParser(
-        prog="meiva-root-manifests",
-        description="Generate a K2 unit manifest JSON from the deployment roster (W1.2e).",
-    )
-    parser.add_argument("--out", required=True, type=Path, help="manifest JSON file to write")
-    parser.add_argument(
-        "--repo-root",
-        type=Path,
-        default=None,
-        help="checkout root the unit commands cd into (default: this checkout)",
-    )
-    parser.add_argument(
-        "--capabilities",
-        required=True,
-        help="comma-separated capability set to filter for (e.g. gateway,agent-runner)",
-    )
-    args = parser.parse_args(argv)
-    caps = [part.strip() for part in args.capabilities.split(",") if part.strip()]
-    try:
-        path = generate(args.out, capabilities=caps, repo_root=args.repo_root, home=meiva_home())
-    except ManifestError as exc:
-        sys.stderr.write(f"error: {exc}\n")
-        return 1
-    raw_manifest = json.loads(path.read_text(encoding="utf-8"))
-    raw_any: Any = raw_manifest
-    units_raw: object = raw_any["units"] if isinstance(raw_manifest, dict) else []
-    units_any: Any = units_raw
-    units_list: list[Any] = units_any if isinstance(units_raw, list) else []
-    count = len(units_list)
-    sys.stdout.write(f"wrote {count} unit(s) to {path}\n")
-    return 0
-
-
-if __name__ == "__main__":
-    raise SystemExit(main())

@@ -115,11 +115,16 @@ def test_repo_provider_plugins_are_the_exact_default_enabled_set() -> None:
     } == _REPO_PROVIDER_PLUGINS
 
 
+def _no_plugins(*, home: Path) -> dict[str, Path]:
+    del home
+    return {}
+
+
 def test_zero_provider_plugins_fail_loud_and_remain_retryable(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     with monkeypatch.context() as isolated:
-        isolated.setattr(enable_config, "discover_plugins", dict)
+        isolated.setattr(enable_config, "discover_plugins", _no_plugins)
 
         with pytest.raises(RuntimeError, match="no provider plugins enabled"):
             build_model_catalog(home=meiva_home())

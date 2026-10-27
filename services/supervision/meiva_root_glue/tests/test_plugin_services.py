@@ -238,6 +238,25 @@ def test_invalid_service_face_propagates_to_roster_operation(
     )
 
 
+# meiva:note
+# The hook of a plugin's `services.py` receives the home the roster was asked for.
+def test_the_services_hook_receives_the_home_it_is_asked_for(tmp_path: Path) -> None:
+    plugin_dir = tmp_path / "homeplugin"
+    plugin_dir.mkdir()
+    (plugin_dir / "services.py").write_text(
+        "from pathlib import Path\n"
+        "def services(*, home):\n"
+        "    Path(__file__).with_name('received').write_text(str(home))\n"
+        "    return ()\n"
+    )
+    asked = tmp_path / "asked-home"
+
+    roster_plugins.plugin_services(plugin_dirs={"homeplugin": plugin_dir}, home=asked)
+
+    assert (plugin_dir / "received").read_text() == str(asked)
+    assert asked != meiva_home()
+
+
 def test_absent_optional_service_face_does_not_fail_discovery(tmp_path: Path) -> None:
     plugin_dir = tmp_path / "no_service_face"
     plugin_dir.mkdir()
