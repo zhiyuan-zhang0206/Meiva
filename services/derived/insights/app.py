@@ -4,7 +4,6 @@ from __future__ import annotations
 import random
 from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
-from functools import partial
 from pathlib import Path
 from typing import Any
 
@@ -18,8 +17,8 @@ from base.db import Database
 from base.lm.catalog import ModelCatalog
 from services.derived.insights.config import InsightsConfig
 from services.derived.insights.run_timeline import router as run_timeline_router
-from services.derived.insights.run_timeline.projection.jobs import IndexJobs, index_next
-from services.derived.insights.run_timeline.projection.reader import ReaderWorld, TimelineReader
+from services.derived.insights.run_timeline.projection.jobs import IndexJobs, SegmentReads
+from services.derived.insights.run_timeline.projection.reader import TimelineReader
 
 
 def build_app(
@@ -34,9 +33,8 @@ def build_app(
     rng: random.Random,
     pid: int = 0,
 ) -> FastAPI:
-    jobs = IndexJobs(
-        partial(index_next, db, timestamps=timestamps, read_segment=read_checkpoint_segment)
-    )
+    reads = SegmentReads(db, timestamps, read_checkpoint_segment)
+    jobs = IndexJobs(reads.index_next)
 
     @asynccontextmanager
     async def lifespan(_app: FastAPI) -> AsyncGenerator[None]:
@@ -53,14 +51,7 @@ def build_app(
     app.state.insights_config = config
     app.state.catalog = catalog
     app.state.timeline_timestamps = timestamps
-    app.state.run_timeline_reader = TimelineReader(
-        db,
-        pool,
-        timestamps=timestamps,
-        jobs=jobs,
-        read_segment=read_checkpoint_segment,
-        world=ReaderWorld(timers=timers, rng=rng),
-    )
+    app.state.run_timeline_reader = TimelineReader(reads, pool, jobs=jobs, timers=timers, rng=rng)
     app.include_router(run_timeline_router.router)
 
     @app.get(

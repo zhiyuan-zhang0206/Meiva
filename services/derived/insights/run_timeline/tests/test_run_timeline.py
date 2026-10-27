@@ -27,9 +27,8 @@ from base.db import Database
 from services.derived.insights.run_timeline import router
 from services.derived.insights.run_timeline.history import HistoryView
 from services.derived.insights.run_timeline.projection.derive import project_segment
-from services.derived.insights.run_timeline.projection.jobs import IndexJobs
+from services.derived.insights.run_timeline.projection.jobs import IndexJobs, SegmentReads
 from services.derived.insights.run_timeline.projection.reader import (
-    ReaderWorld,
     Snapshot,
     TimelineReader,
 )
@@ -145,12 +144,11 @@ def read(
             raise AssertionError("a window query must not read a checkpoint")
 
         reader = TimelineReader(
-            world.db,
+            SegmentReads(world.db, _TIMELINE_SOURCE, no_body),
             pool,
-            timestamps=_TIMELINE_SOURCE,
             jobs=jobs,
-            read_segment=no_body,
-            world=ReaderWorld(timers=ManualTimers(), rng=seeded_rng()),
+            timers=ManualTimers(),
+            rng=seeded_rng(),
         )
 
         def snapshot(_agent: int, _snapshot: str | None) -> Snapshot:

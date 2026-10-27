@@ -8,7 +8,8 @@ from fastapi import HTTPException
 from base.clock.ids import new_uuid
 from base.clock.tests.seeded_rng import seeded_rng
 from base.db.protocols import SyncConnection
-from services.derived.insights.run_timeline.projection.reader import ReaderWorld, TimelineReader
+from services.derived.insights.run_timeline.projection.jobs import SegmentReads
+from services.derived.insights.run_timeline.projection.reader import TimelineReader
 from services.derived.insights.run_timeline.projection.source import Source, capture_source
 from services.derived.insights.run_timeline.tests.test_projection import AGENT, World, messages
 from services.derived.insights.run_timeline.tests.test_projection import world as world
@@ -89,12 +90,11 @@ def test_head_check_cannot_restore_bookkeeping_for_an_evicted_snapshot(
         return source
 
     reader = TimelineReader(
-        world.db,
+        SegmentReads(world.db, world.timestamps, world.read_segment),
         world.pool,
-        timestamps=world.timestamps,
         jobs=world.jobs,
-        read_segment=world.read_segment,
-        world=ReaderWorld(timers=world.timers, rng=seeded_rng()),
+        timers=world.timers,
+        rng=seeded_rng(),
     )
     reader.read_source = evict_during_capture
     first = reader.get(1)
@@ -113,12 +113,11 @@ def test_head_check_cannot_restore_bookkeeping_for_an_evicted_snapshot(
 def test_snapshot_identities_are_minted_from_the_generator_the_root_hands_in(world: World) -> None:
     def minted(seed: int) -> list[str]:
         reader = TimelineReader(
-            world.db,
+            SegmentReads(world.db, world.timestamps, world.read_segment),
             world.pool,
-            timestamps=world.timestamps,
             jobs=world.jobs,
-            read_segment=world.read_segment,
-            world=ReaderWorld(timers=world.timers, rng=seeded_rng(seed)),
+            timers=world.timers,
+            rng=seeded_rng(seed),
         )
         return [reader.get(agent).id for agent in (1, 2)]
 

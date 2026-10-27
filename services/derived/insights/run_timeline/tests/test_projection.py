@@ -27,8 +27,12 @@ from base.clock.tests.manual_timers import ManualTimers
 from base.clock.tests.seeded_rng import seeded_rng
 from base.db import Database
 from services.derived.insights.run_timeline.projection.derive import segment_view
-from services.derived.insights.run_timeline.projection.jobs import IndexJobs, index_next
-from services.derived.insights.run_timeline.projection.reader import ReaderWorld, TimelineReader
+from services.derived.insights.run_timeline.projection.jobs import (
+    IndexJobs,
+    SegmentReads,
+    index_next,
+)
+from services.derived.insights.run_timeline.projection.reader import TimelineReader
 from services.derived.insights.run_timeline.projection.source import capture_source
 from services.derived.insights.run_timeline.tokens import timeline_units
 
@@ -73,13 +77,9 @@ class World:
         self.reader = self.new_reader()
 
     def new_reader(self) -> TimelineReader:
+        reads = SegmentReads(self.db, self.timestamps, self.read_segment)
         return TimelineReader(
-            self.db,
-            self.pool,
-            timestamps=self.timestamps,
-            jobs=self.jobs,
-            read_segment=self.read_segment,
-            world=ReaderWorld(timers=self.timers, rng=seeded_rng()),
+            reads, self.pool, jobs=self.jobs, timers=self.timers, rng=seeded_rng()
         )
 
     # meiva:note

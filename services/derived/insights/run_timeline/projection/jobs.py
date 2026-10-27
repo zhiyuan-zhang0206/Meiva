@@ -39,6 +39,25 @@ def index_next[DbT: DatabaseLike](
     return True
 
 
+# meiva:note
+# What reads a history segment and projects it: the database, the timestamp policy source and the
+# function that reads one checkpoint segment. The indexing job and the timeline reader project
+# through the same reads, so the daemon builds one and hands it to both.
+@dataclass(frozen=True)
+class SegmentReads[DbT: DatabaseLike]:
+    db: DbT
+    timestamps: TimestampSource
+    read_segment: Callable[[DbT, int, str], FullHistory]
+
+    def load(self, agent_id: int, checkpoint_id: str) -> FullHistory:
+        return self.read_segment(self.db, agent_id, checkpoint_id)
+
+    def index_next(self, agent_id: int) -> bool:
+        return index_next(
+            self.db, agent_id, timestamps=self.timestamps, read_segment=self.read_segment
+        )
+
+
 @dataclass(frozen=True)
 class Preparation:
     status: Literal["queued", "indexing", "failed", "busy"]
