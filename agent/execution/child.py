@@ -161,18 +161,26 @@ def apply_plugin_overlay(
             install.apply_config_overlay(value)
 
 
+# meiva:note
+# The agent the spawn named in the environment, or None for an identity-less child.
+def _agent_id_of(environ: Mapping[str, str]) -> int | None:
+    raw = environ.get(AGENT_ID_ENV)
+    return None if raw is None else int(raw)
+
+
 def init_logger(
     agent_id: int | None,
     *,
     producer: Callable[[], Any],
     machine_reader: Callable[[], str],
     environ: Mapping[str, str],
+    home: Path,
 ) -> None:
     if agent_id is None:
         return
     from base.log.process import init_subprocess_logger
 
-    init_subprocess_logger(agent_id=agent_id)
+    init_subprocess_logger(agent_id=agent_id, home=home)
     try:
         from base.telemetry.process_logging import add_event_sink
 
@@ -413,12 +421,15 @@ def run_child(
 
     if not isinstance(config, ConfigBoot):
         raise TypeError("run_child needs the child's booted ConfigBoot")
-    raw_agent_id = os.environ.get(AGENT_ID_ENV)
+    from base.paths.home import resolve_meiva_home
+
+    home = resolve_meiva_home()
     init_logger(
-        None if raw_agent_id is None else int(raw_agent_id),
+        _agent_id_of(os.environ),
         producer=context.clients.event_pipeline,
         machine_reader=context.require_machine().name,
         environ=os.environ,
+        home=home,
     )
     request = read_request(Path(request_path))
     payload = ResultPayload(kind="done")
@@ -426,7 +437,6 @@ def run_child(
     birth, overlay = pop_overlay_env()
     from base.clock import SYSTEM_TIMERS, Clock
     from base.clock.configuration import clock_config_from_boot
-    from base.paths.home import resolve_meiva_home
 
     def clock_factory() -> Clock:
         return Clock(clock_config_from_boot(config), timers=SYSTEM_TIMERS)
@@ -442,7 +452,7 @@ def run_child(
                 machine=context.require_machine(),
             ),
             clock_factory=clock_factory,
-            meiva_home=resolve_meiva_home(),
+            meiva_home=home,
             user_home=Path.home(),
             rng=random.SystemRandom(),
         )
@@ -456,6 +466,7 @@ def run_child(
         producer=meiva.context.clients.event_pipeline,
         machine_reader=context.require_machine().name,
         environ=os.environ,
+        home=home,
     )
     from meiva.boot import initialize_context
 

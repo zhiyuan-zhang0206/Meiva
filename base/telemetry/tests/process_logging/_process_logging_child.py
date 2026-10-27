@@ -18,7 +18,7 @@ from base.telemetry.delivery.receipts import Event
 from base.telemetry.process_logging import init_cli_process, init_gateway_process
 
 
-def main(role: str, home: Path | None) -> None:
+def main(role: str, home: Path) -> None:
     prepare_process_logging()
     events: list[Event] = []
     pipeline = EventPipeline(writer=events.extend)
@@ -72,7 +72,4 @@ def main(role: str, home: Path | None) -> None:
 
 
 if __name__ == "__main__":
-    # meiva:note
-    # An optional second argument is the home the entry hands in; without it the child's ambient
-    # home is used.
-    main(sys.argv[1], Path(sys.argv[2]) if len(sys.argv) > 2 else None)
+    main(sys.argv[1], Path(sys.argv[2]))

@@ -52,5 +52,9 @@ def borrowed_inputs(
     source_root: Path,
 ) -> ScheduleInputs:
     return ScheduleInputs(
-        lambda: database, producer, LoadedCommit(source_root, None), machine=machine
+        lambda: database,
+        producer,
+        LoadedCommit(source_root, None),
+        machine=machine,
+        home=source_root / ".meiva",
     )

@@ -106,7 +106,9 @@ def completion_during_stall(schedule_id: int) -> None:
 
     root = engine.RunnerRoot(
         database=database,
-        inputs=ScheduleInputs(lambda: database, clients.event_pipeline, image, machine=machine),
+        inputs=ScheduleInputs(
+            lambda: database, clients.event_pipeline, image, machine=machine, home=meiva_home()
+        ),
         plugins=engine.PluginInputs(config=config, machine=machine, clients=clients),
         policy=StallPolicy(timeout_s=_BUDGET_S, record_deadline_s=_RECORD_DEADLINE_S),
         home=meiva_home(),

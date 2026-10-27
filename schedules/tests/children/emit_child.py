@@ -19,7 +19,7 @@ from base.telemetry.delivery.receipts import Event
 from schedules.jobs.telemetry_event import emit_system_event
 
 
-def main(process: str) -> None:
+def main(process: str, home: Path) -> None:
     prepare_process_logging()
     events: list[Event] = []
     pipeline = EventPipeline(writer=events.extend)
@@ -32,6 +32,7 @@ def main(process: str) -> None:
                 producer=lambda: pipeline,
                 machine_reader=lambda: "test-host",
                 image=LoadedCommit(Path.cwd(), "test-image"),
+                home=home,
             )
     finally:
         pipeline.stop(timeout=2)
@@ -39,7 +40,7 @@ def main(process: str) -> None:
     sys.stdout.write(
         json.dumps(
             {
-                "files": sorted(path.name for path in logs_dir().glob("*.log")),
+                "files": sorted(path.name for path in logs_dir(home=home).glob("*.log")),
                 "events": [
                     {"name": event.event_name, "attributes": event.attributes} for event in events
                 ],
@@ -49,4 +50,4 @@ def main(process: str) -> None:
 
 
 if __name__ == "__main__":
-    main(sys.argv[1])
+    main(sys.argv[1], Path(sys.argv[2]))

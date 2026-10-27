@@ -1,8 +1,7 @@
-"""Runs a process logging init against an unreachable gateway; never imported by a production entry.
-
-Run as ``python -I -B _log_init_child.py <repo-root> <init_cli_process|init_gateway_process>``.
-"""
-
+# meiva:note
+# Runs a process logging init against an unreachable gateway; never imported by a production entry.
+#
+# Run as ``python -I -B _log_init_child.py <repo-root> <init_cli_process|init_gateway_process> <home>``.
 from __future__ import annotations
 
 import sys
@@ -29,6 +28,7 @@ try:
             name="probe",
             producer=producer,  # type: ignore[arg-type]
             machine_reader=lambda: "probe-host",
+            home=Path(sys.argv[3]),
         )
     else:
         from base.native_process.loaded_commit import LoadedCommit
@@ -38,6 +38,7 @@ try:
             producer=producer,  # type: ignore[arg-type]
             machine_reader=lambda: "probe-host",
             image=LoadedCommit(Path(sys.argv[1]), None),
+            home=Path(sys.argv[3]),
         )
 finally:
     for pipeline in pipelines:

@@ -597,7 +597,11 @@ def main(*, argv: list[str] | None = None) -> None:
 
     try:
         init_gateway_process(
-            name="ops", producer=clients.event_pipeline, machine_reader=machine.name, image=image
+            name="ops",
+            producer=clients.event_pipeline,
+            machine_reader=machine.name,
+            image=image,
+            home=home,
         )
         install_graceful_shutdown("ops")
         runner = asyncio.Runner()

@@ -720,6 +720,7 @@ def main() -> None:
         producer=lambda: pipeline,
         machine_reader=entry.machine.name,
         image=entry.image,
+        home=process_home,
     )
     asyncio.run(
         run(

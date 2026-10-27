@@ -65,7 +65,7 @@ def fresh_schedule_entry(
         )
     )
     try:
-        yield ScheduleInputs(database, clients.event_pipeline, image, machine=machine)
+        yield ScheduleInputs(database, clients.event_pipeline, image, machine=machine, home=home)
     except BaseException as primary:
         try:
             clients.close(pipeline_timeout=2)

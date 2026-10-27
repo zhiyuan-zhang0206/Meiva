@@ -670,6 +670,7 @@ def main() -> None:
         producer=lambda: pipeline,
         machine_reader=machine.name,
         image=image,
+        home=process_home,
     )
     install_graceful_shutdown("heartbeat")
     code = 0
