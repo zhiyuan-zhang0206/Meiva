@@ -100,6 +100,7 @@ class Manifest:
     roles: dict[str, tuple[str, ...]] = field(default_factory=dict[str, tuple[str, ...]])
     purity_default: str | None = None
     purity: dict[str, str] = field(default_factory=dict[str, str])
+    purity_why: dict[str, str] = field(default_factory=dict[str, str])
     state: dict[str, tuple[AmbientKind, ...]] = field(
         default_factory=dict[str, tuple[AmbientKind, ...]]
     )
@@ -187,6 +188,7 @@ class _Reader:
         self.roles: dict[str, tuple[str, ...]] = {}
         self.purity_default: str | None = None
         self.purity: dict[str, str] = {}
+        self.purity_why: dict[str, str] = {}
         self.state: dict[str, tuple[AmbientKind, ...]] = {}
         self.roots: dict[str, Root] = {}
         self.debt: DebtTable = {}
@@ -263,6 +265,7 @@ class _Reader:
             roles=self.roles,
             purity_default=self.purity_default,
             purity=self.purity,
+            purity_why=self.purity_why,
             state=self.state,
             roots=self.roots,
             debt=self.debt,
@@ -427,6 +430,30 @@ class _Reader:
         kinds = self.kinds(fields.get("kinds"), where, line, tuple(AmbientKind))
         return Root(kinds, why.strip()) if kinds else None
 
+    # meiva:note
+    # One purity level: `"strict"`, `"strict-to-be"`, or `{ mode = "none", why = "..." }`. A file or a
+    # directory that is not judged says why, so that taking it out of the rule is a statement a review
+    # can read. The bare string `"none"` is still read here while the manifests are converted.
+    def purity_level(self, key: str, level: object, line: int) -> tuple[str, str] | None:
+        allowed = ", ".join(PURITY_LEVELS)
+        if isinstance(level, str) and level in PURITY_LEVELS:
+            return level, ""
+        fields = level if _is_table(level) else None
+        if fields is not None and set(fields) == {"mode", "why"} and fields["mode"] == "none":
+            why = fields["why"]
+            if isinstance(why, str) and why.strip():
+                return "none", why.strip()
+            self.report(
+                line, Code.MANIFEST_SYNTAX, f"[purity] {key!r} must say why in a non-empty `why`"
+            )
+            return None
+        self.report(
+            line,
+            Code.MANIFEST_SYNTAX,
+            f'[purity] {key!r} must be one of {allowed}, or {{ mode = "none", why = "..." }}',
+        )
+        return None
+
     def read_purity(self, value: object) -> None:
         line = self.manifest.line_of("purity")
         allowed = ", ".join(PURITY_LEVELS)
@@ -441,18 +468,18 @@ class _Reader:
         if not _is_table(value):
             self.report(line, Code.MANIFEST_SYNTAX, "purity must be a string or a table")
             return
-        for key, level in value.items():
+        for key, raw in value.items():
             key_line = self.manifest.line_of(key)
-            if not isinstance(level, str) or level not in PURITY_LEVELS:
-                self.report(
-                    key_line,
-                    Code.MANIFEST_SYNTAX,
-                    f"[purity] {key!r} must be one of {allowed}",
-                )
-            elif key == ".":
+            found = self.purity_level(key, raw, key_line)
+            if found is None:
+                continue
+            level, why = found
+            if key == ".":
                 self.purity_default = level
+                self.purity_why["."] = why
             elif self.child(key, "[purity]", key_line):
                 self.purity[key] = level
+                self.purity_why[key] = why
             else:
                 self.dangling.append(("purity", key, None))
 
