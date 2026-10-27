@@ -21,7 +21,7 @@ exports = ["agent_identity.py", "attachment_transport.py", "batch.py", "discover
 
 [roots]
 "help.py" = { kinds = ["home"], why = "_home_relative reads Path.home() to normalize user home prefixes in rendered SDK constant defaults" }
-"settings.py" = { kinds = ["bus", "settings"], why = "SDK settings facade reads live process settings and event bus when no attached-agent context overrides them" }
+"settings.py" = { kinds = ["settings"], why = "SDK settings facade reads live process settings when no attached-agent context overrides them" }
 
 [purity]
 "." = "strict-to-be"
@@ -55,7 +55,6 @@ exports = ["agent_identity.py", "attachment_transport.py", "batch.py", "discover
 "process_context.py#base/native_process/loaded_commit.py" = 1
 "settings.py#base/agents/context/clients.py" = 1
 "settings.py#base/config/__init__.py" = 1
-"settings.py#base/events/live/bus.py" = 1
 
 [debt.wide-exports]
 "meizel.toml#exports" = 1

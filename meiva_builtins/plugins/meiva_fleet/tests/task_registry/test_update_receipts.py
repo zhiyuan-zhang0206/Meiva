@@ -13,6 +13,7 @@ from base.agents.context.clients import ClientSet
 from base.agents.context.identity import AgentIdentity
 from base.db import Database
 from base.db.code_version_gate import ProcessDbGate
+from base.events.live.bus import EventBus
 from base.telemetry.tests.capture.event_capture import EmittedEvents
 from base.telemetry.tests.capture.event_capture import emitted_events as emitted_events
 from meiva.tests.fixtures.pin_agent import pin_agent
@@ -39,7 +40,11 @@ def _facts(db: psycopg.Connection, tid: int) -> tuple[object, object, object]:
 
 
 def test_concurrent_duplicate_note_has_one_business_effect(
-    redis_url: str, db_conn: psycopg.Connection, root_task_id: int, *, database_gate: ProcessDbGate
+    db_conn: psycopg.Connection,
+    root_task_id: int,
+    pinned_bus: EventBus,
+    *,
+    database_gate: ProcessDbGate,
 ) -> None:
     actor, _owner, tid = seed_owned_task(db_conn, root_task_id)
     before_notes = db_conn.execute("SELECT count(*) FROM inbound_messages").fetchone()
@@ -48,7 +53,9 @@ def test_concurrent_duplicate_note_has_one_business_effect(
     def append(_index: int) -> None:
         clients = ClientSet(database=lambda: Database.from_settings(gate=database_gate))
         try:
-            context = MeivaContext(identity=AgentIdentity(actor, True), clients=clients)
+            context = MeivaContext(
+                identity=AgentIdentity(actor, True), clients=clients, bus=pinned_bus
+            )
             barrier.wait()
             task_registry.update_in_context(
                 context, tid, note="one progress line", operation_key="same"
@@ -89,7 +96,10 @@ def test_post_commit_failure_replay_preserves_intervening_state(
 
 
 def test_publication_emits_the_committed_events_once_and_in_order(
-    redis_url: str, db_conn: psycopg.Connection, root_task_id: int, emitted_events: EmittedEvents
+    pinned_bus: EventBus,
+    db_conn: psycopg.Connection,
+    root_task_id: int,
+    emitted_events: EmittedEvents,
 ) -> None:
     _actor, _owner, tid = seed_owned_task(db_conn, root_task_id)
     emitted_events.clear()
@@ -100,7 +110,7 @@ def test_publication_emits_the_committed_events_once_and_in_order(
     assert committed is not None
     assert task_registry.publication_events(committed)[0].event_name == "task_update"
 
-    task_registry.publish_update(committed)
+    task_registry.publish_update(committed, pinned_bus)
 
     assert emitted_events.names() == [
         event.event_name for event in task_registry.publication_events(committed)

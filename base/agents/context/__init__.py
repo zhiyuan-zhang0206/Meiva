@@ -7,7 +7,8 @@
 # dependencies as `runtime.context.X`:
 #
 # - **handles** the host built and owns: `llm`, `event_publisher`, `ops_pool`, the cluster
-#   `db` (`Database`) and `bus` (`EventBus`) — a node that touches a handle expects it non-None;
+#   `db` (`Database`) and `bus` (`EventBus`, or `bus_factory` for a root that builds its one bus on
+#   first use) — a node that touches a handle expects it non-None;
 #   the eval driver and tests populate only the ones their path needs;
 # - **`agent`**: the agent's resolved per-turn configuration (`AgentSlices`, see
 #   `base.host.env.agent_slices`), built by the host when the turn starts;
@@ -39,6 +40,7 @@
 from __future__ import annotations
 
 import random
+import threading
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -61,7 +63,13 @@ from base.lm.harness.engine import TurnEngine
 from base.native_process.runtime_incarnation import RuntimeIncarnation
 from base.native_process.turn_identity import HostedTurnResources
 
-__all__ = ["ContextCaptureOwner", "MeivaContext", "agent_id_from_config"]
+__all__ = [
+    "BusFactory",
+    "ContextCaptureOwner",
+    "MeivaContext",
+    "agent_id_from_config",
+    "deferred_event_bus",
+]
 
 # The handle types are annotations only: the exec child builds this same type from its request
 # envelope, and its start must not import psycopg / redis / langchain for handles it never holds.
@@ -71,6 +79,7 @@ if TYPE_CHECKING:
     from langchain_core.runnables import RunnableConfig
     from psycopg_pool import AsyncConnectionPool
 
+    from base.config import ConfigBoot
     from base.db import Database
     from base.events.live.bus import EventBus
     from base.events.live.publisher import AgentEventPublisher
@@ -81,9 +90,35 @@ if TYPE_CHECKING:
 
 
 # meiva:note
+# What builds a root's one event bus when the context first needs it (`MeivaContext.bus_factory`).
+# The alias is evaluated lazily, so naming the bus type here does not import the Redis stack.
+type BusFactory = Callable[[], EventBus]
+
+
+# meiva:note
 # The exclusive attachment owning admission and direct local audit capture.
 class ContextCaptureOwner(SdkCaptureOwner, Protocol):
     def capture_local_event(self, event: Event) -> Event: ...
+
+
+# meiva:note
+# The `bus_factory` of a process root that has no bus at start and must not import the Redis stack
+# to get one: the first call builds an `EventBus` over `boot`'s data-plane configuration, drawing
+# its retry jitter from `rng`, and every later call answers that same bus. Nothing connects until
+# the bus is used.
+def deferred_event_bus(boot: ConfigBoot, *, rng: random.Random) -> BusFactory:
+    lock = threading.Lock()
+    built: list[EventBus] = []
+
+    def bus() -> EventBus:
+        with lock:
+            if not built:
+                from base.events.live.bus import EventBus, event_bus_config_from_config
+
+                built.append(EventBus(event_bus_config_from_config(boot), rng=rng))
+            return built[0]
+
+    return bus
 
 
 def agent_id_from_config(
@@ -227,6 +262,13 @@ class MeivaContext:
     bus: EventBus | None = None
     """The cluster Redis / live-events handle, for the same."""
 
+    # meiva:note
+    # The root's one event bus, for a process whose root must not import the Redis stack at start
+    # (an exec child, a script an agent launched): the factory builds the bus on first
+    # `require_bus()` and answers the same one afterwards. A root that already holds a bus passes
+    # `bus` instead.
+    bus_factory: BusFactory | None = None
+
     agent: AgentSlices | None = None
     """This agent's per-turn configuration, resolved by the host when the turn starts."""
 
@@ -360,9 +402,13 @@ class MeivaContext:
 
     def require_bus(self) -> EventBus:
         """The cluster event bus handle; a context built without one fails here."""
-        if self.bus is None:
-            raise RuntimeError("this MeivaContext carries no EventBus (ctx.bus is None)")
-        return self.bus
+        if self.bus is not None:
+            return self.bus
+        if self.bus_factory is None:
+            raise RuntimeError(
+                "this MeivaContext carries no EventBus (ctx.bus and ctx.bus_factory are None)"
+            )
+        return self.bus_factory()
 
     def require_agent(self) -> AgentSlices:
         """The agent's slices; a graph run built without them fails here, not on first read."""

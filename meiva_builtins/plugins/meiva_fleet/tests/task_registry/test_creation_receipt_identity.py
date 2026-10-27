@@ -10,6 +10,7 @@ from base.agents.context.clients import ClientSet
 from base.agents.context.identity import AgentIdentity, ExternalLease
 from base.db import Database
 from base.db.code_version_gate import ProcessDbGate
+from base.events.live.bus import EventBus
 from meiva.tests.fixtures.pin_agent import pin_agent
 from meiva_builtins.plugins.meiva_fleet import task_registry
 from meiva_builtins.plugins.meiva_fleet.tests.task_registry.seeds import (
@@ -46,7 +47,11 @@ def test_borrowed_identity_can_replay_native_operation_until_lease_ends(
 
 
 def test_lease_expiring_during_operation_lock_wait_cannot_write(
-    db_conn: psycopg.Connection, root_task_id: int, *, database_gate: ProcessDbGate
+    db_conn: psycopg.Connection,
+    root_task_id: int,
+    pinned_bus: EventBus,
+    *,
+    database_gate: ProcessDbGate,
 ) -> None:
     actor, owner = seed_agent(db_conn), seed_agent(db_conn)
     pin_agent(actor)
@@ -65,7 +70,7 @@ def test_lease_expiring_during_operation_lock_wait_cannot_write(
             identity = AgentIdentity(
                 owner, False, lease=ExternalLease(actor, validate, lambda: None)
             )
-            context = MeivaContext(identity=identity, clients=clients)
+            context = MeivaContext(identity=identity, clients=clients, bus=pinned_bus)
             task_registry.create_in_context(
                 context, "stale", "work", parent=root_task_id, operation_key="wait"
             )

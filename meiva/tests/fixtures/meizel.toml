@@ -3,3 +3,4 @@ exports = ["gateway_wire.py", "meiva_tests.py", "model_owner.py", "pin_agent.py"
 [uses]
 "meiva_tests.py" = ["pin_agent.py"]
 "workspace.py" = ["pin_agent.py"]
+"sdk.py" = ["pin_agent.py"]

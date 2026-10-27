@@ -46,4 +46,13 @@ ignores it.
 
 A ClientSet closes every client it builds, the gateway client included; its constructors' builders are the only way a client enters it. A with_gateway sibling shares the endpoint and the other builders and builds no event pipeline; it closes the gateway client its builder returns, so use_client — which hands in a caller-owned client — never closes the sibling, and the caller keeps ownership of that client.
 
+## The event bus
+
+The cluster event bus is not a client of the set: a root that already holds one passes it as
+`MeivaContext.bus`; a root that must stay off the Redis stack at start (an exec child, a script an
+agent launched, a schedule runner) passes `bus_factory=deferred_event_bus(config, rng=rng)` (from `base.agents.context`) instead.
+The first `require_bus()` builds one `EventBus` over the root's own data-plane configuration, drawing
+its retry jitter from the root's generator, and every later call answers that bus. A context with
+neither refuses at the call that needed a bus.
+
 Parent: [[../../docs/agents.meiva.okf.md|agent contracts]].

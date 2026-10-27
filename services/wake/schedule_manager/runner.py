@@ -12,7 +12,7 @@ from pathlib import Path
 
 from loguru import logger
 
-from base.agents.context import MeivaContext
+from base.agents.context import MeivaContext, deferred_event_bus
 from base.agents.context.clients import ClientSet
 from base.agents.context.identity import AgentIdentity
 from base.clock import SYSTEM_TIMERS, Clock
@@ -39,6 +39,7 @@ def _bind_schedule_actor(
     *,
     clients: ClientSet,
     clock_factory: Callable[[], Clock],
+    config: ConfigBoot,
     machine: MachineIdentityReader,
     home: Path,
     user_home: Path,
@@ -50,6 +51,7 @@ def _bind_schedule_actor(
             clients=clients,
             machine=machine,
             clock_factory=clock_factory,
+            bus_factory=deferred_event_bus(config, rng=rng),
             meiva_home=home,
             user_home=user_home,
             rng=rng,
@@ -79,6 +81,7 @@ def run(schedule_id: int, revision: int | None = None) -> int:
     home = meiva_home()
     primary: BaseException | None = None
     try:
+        rng = random.SystemRandom()
         # meiva:note
         # The script's `meiva.agents.*` calls attribute to the schedule: bind its actor before
         # the engine opens any history for it.
@@ -86,10 +89,11 @@ def run(schedule_id: int, revision: int | None = None) -> int:
             schedule_id,
             clients=clients,
             clock_factory=clock_factory,
+            config=config,
             machine=machine,
             home=home,
             user_home=Path.home(),
-            rng=random.SystemRandom(),
+            rng=rng,
         )
         return engine.run(
             schedule_id,

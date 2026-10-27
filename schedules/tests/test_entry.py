@@ -17,6 +17,7 @@ import meiva
 from base.cluster.machine import MachineIdentityReader
 from base.daemon.schedules.inputs import ScheduleInputs
 from base.db import Database
+from base.events.live.bus import EventBus
 from base.native_process.loaded_commit import LoadedCommit
 from base.telemetry.tests.capture.event_capture import EmittedEvents
 from base.telemetry.tests.capture.event_capture import emitted_events as emitted_events
@@ -53,6 +54,19 @@ def test_quiet_schedule_exit_never_builds_a_writer(tmp_path: Path) -> None:
         assert callable(inputs.producer)
         assert meiva.context.require_machine() is inputs.machine
         assert _writer_threads() == before
+
+
+def test_a_fresh_entry_binds_a_context_whose_event_bus_is_built_on_first_read(
+    tmp_path: Path,
+) -> None:
+    image = _repo_with_commits(tmp_path, 1)
+
+    with fresh_schedule_entry(image=image, process="schedule-probe", home=tmp_path / "home"):
+        context = meiva.context
+        assert context.bus is None
+        bus = context.require_bus()
+        assert isinstance(bus, EventBus)
+        assert context.require_bus() is bus
 
 
 def test_schedule_closes_constructed_writer_and_preserves_loop_error(tmp_path: Path) -> None:

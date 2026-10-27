@@ -1,3 +1,4 @@
 [uses]
 "test_clients.py" = ["_context_import_child.py"]
 "test_clients_database.py" = ["_client_database_child.py"]
+"test_event_bus.py" = ["_deferred_bus_child.py"]

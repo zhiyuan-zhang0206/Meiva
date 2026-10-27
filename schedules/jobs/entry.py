@@ -7,7 +7,7 @@ from collections.abc import Generator
 from contextlib import AbstractContextManager, contextmanager
 from pathlib import Path
 
-from base.agents.context import MeivaContext
+from base.agents.context import MeivaContext, deferred_event_bus
 from base.agents.context.clients import ClientSet
 from base.clock import SYSTEM_TIMERS, Clock
 from base.clock.configuration import clock_config_from_boot
@@ -54,6 +54,7 @@ def fresh_schedule_entry(
         pipeline_factory=lambda: build_pipeline(database=database, machine=machine, home=home),
     )
     prior = getattr(meiva, "context", None)
+    rng = random.SystemRandom()
     process_context.bind_context(
         MeivaContext(
             clients=clients,
@@ -61,7 +62,8 @@ def fresh_schedule_entry(
             clock_factory=lambda: Clock(clock_config_from_boot(config), timers=SYSTEM_TIMERS),
             meiva_home=home,
             user_home=Path.home(),
-            rng=random.SystemRandom(),
+            rng=rng,
+            bus_factory=deferred_event_bus(config, rng=rng),
         )
     )
     try:
