@@ -20,7 +20,7 @@ from base.agents.sdk.tests.sampling_owners import fixed_sampling_owner, sampling
 from base.cluster.machine import MachineIdentityReader
 from base.cluster.machine.configured import ConfiguredMachineIdentity
 from base.config import ConfigBoot
-from base.paths import logs_dir
+from base.paths import logs_dir, meiva_home
 from base.telemetry import emit
 from base.telemetry.delivery.pipeline import EventPipeline
 from base.telemetry.delivery.receipts import DrainStatus, Event
@@ -207,7 +207,7 @@ def test_first_bound_plugin_load_does_not_lend_attachment_writer_to_bare_calls(
         wrapped = metering.make_recorder(lambda: "done", "probe.detached", sampling, bare)
         assert wrapped() == "done"
         assert bare.sync_events(timeout=5).status is DrainStatus.COMPLETED
-        [record] = _mirrored_calls(logs_dir(), "probe.detached")
+        [record] = _mirrored_calls(logs_dir(home=meiva_home()), "probe.detached")
         assert record["source"] == "system"
         assert record["agent_id"] is None
     finally:

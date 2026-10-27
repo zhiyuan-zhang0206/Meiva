@@ -32,7 +32,7 @@ def spawn_deps() -> SpawnDeps:
         watchers_dir=files.watchers_dir(home, Path(tempfile.gettempdir()), agent_id),
         shell=shell,
         host=session_host(),
-        workspace=workspace_dir(agent_id),
+        workspace=workspace_dir(agent_id, home=home),
         cli=cli_path(),
         runner_env=MappingProxyType(
             project_watcher_runner_env(os.environ, home=home, user_home=Path.home())

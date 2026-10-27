@@ -21,7 +21,7 @@ from pathlib import Path
 from base.host.atomic_io import write_text_atomic
 from base.log import logger
 from base.paths import workspace_dir
-from meiva.sdk_surface import agent_identity
+from meiva.sdk_surface import agent_identity, process_context
 from meiva.sdk_surface.pure.media.attach_plan import resolve_in
 from meiva.sdk_surface.validation import coerce_str, coerce_typed
 from meiva.security import scan_content
@@ -41,6 +41,15 @@ def _home() -> Path:
 
 
 # meiva:note
+# The workspace directory of agent `agent_id` under the Meiva home the bound context carries (the
+# home the process's root resolved once), created when missing. The one place the SDK derives an
+# agent workspace, so the shell, the sessions, the understand overflow site and the code plugin's
+# cwd default all follow the context and none of them reads the process environment.
+def agent_workspace(agent_id: int) -> Path:
+    return workspace_dir(agent_id, home=process_context.current_context().require_meiva_home())
+
+
+# meiva:note
 # The base a relative path resolves against: the agent's workspace, or `$HOME` before a process
 # identity is bound. The workspace is a framework concept, so it lives here in the SDK core -
 # plugins may layer cwd tracking on top, but the no-plugin baseline must not silently fall back
@@ -51,7 +60,9 @@ def _home() -> Path:
 # int but is None until a bootstrap establishes it.
 def workspace_base() -> Path:
     aid = agent_identity.agent_id()
-    return workspace_dir(aid) if aid is not None else _home()  # pyright: ignore[reportUnnecessaryComparison]
+    if aid is None:  # pyright: ignore[reportUnnecessaryComparison]
+        return _home()
+    return agent_workspace(aid)
 
 
 def resolve(path: str | Path) -> Path:

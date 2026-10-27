@@ -24,6 +24,7 @@ from base.db import Database
 from base.db.code_version_gate import ProcessDbGate
 from base.events.live.bus import EventBus
 from base.lm.catalog import ModelCatalog
+from base.paths import meiva_home
 from services.wake.delivery_watchdog.daemon import (
     scan_once,
     select_stale_pending,
@@ -490,7 +491,7 @@ class TestScanOnce:
         def _stalled() -> dict[str, object] | None:
             telemetry.flush()
             day = _dt.now(_UTC).strftime("%Y%m%d")
-            path = logs_dir() / f"events-{day}.jsonl"
+            path = logs_dir(home=meiva_home()) / f"events-{day}.jsonl"
             if not path.exists():
                 return None
             for line in reversed(path.read_text(encoding="utf-8").splitlines()):

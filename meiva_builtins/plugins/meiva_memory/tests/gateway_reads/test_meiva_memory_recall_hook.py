@@ -22,7 +22,7 @@ from base.config.tests.configuration import defaults
 from base.host.env.agent_slices import AgentSlices
 from base.lm.catalog import ModelCatalog
 from base.packages.plugins.extensions import EMPTY
-from base.paths import memory_dir
+from base.paths import meiva_home, memory_dir
 from base.paths.home import resolve_meiva_home
 from meiva.tests.fixtures.gateway_wire import GatewayWire, Reply
 from meiva_builtins.plugins.meiva_memory import agent_runtime
@@ -39,7 +39,7 @@ def _hit(path: str) -> dict[str, object]:
 
 def _answer(wire: GatewayWire, *paths: str) -> None:
     for path in paths:
-        note = memory_dir() / path
+        note = memory_dir(home=meiva_home()) / path
         note.parent.mkdir(parents=True, exist_ok=True)
         note.write_text("note", encoding="utf-8")
     wire.stub.reply("POST", _SEARCH, {"results": [_hit(path) for path in paths]})
@@ -240,8 +240,8 @@ async def test_after_a_compaction_only_notes_injected_since_are_excluded(
     model_catalog: ModelCatalog, wire: GatewayWire
 ) -> None:
     for name in ("a.md", "b.md", "c.md"):
-        (memory_dir() / name).parent.mkdir(parents=True, exist_ok=True)
-        (memory_dir() / name).write_text("note", encoding="utf-8")
+        (memory_dir(home=meiva_home()) / name).parent.mkdir(parents=True, exist_ok=True)
+        (memory_dir(home=meiva_home()) / name).write_text("note", encoding="utf-8")
     wire.stub.reply_in_turn(
         "POST",
         _SEARCH,

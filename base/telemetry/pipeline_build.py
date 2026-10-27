@@ -83,6 +83,7 @@ def build_pipeline(
             machine, home=home, endpoint_explicit=explicit
         ),
         mirror_dir=mirror_dir,
+        home=home,
     )
     return ExportingEventPipeline(
         writer=lambda events, owned: write_batch(

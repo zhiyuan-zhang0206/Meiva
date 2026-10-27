@@ -15,7 +15,7 @@ import pytest
 from base import telemetry
 from base.cluster.machine import MachineIdentityReader
 from base.db import Database
-from base.paths import logs_dir
+from base.paths import logs_dir, meiva_home
 from base.telemetry import process_logging as slog
 
 _AGENT = 8901
@@ -41,7 +41,7 @@ def _mirror_last(event_name: str, agent: int) -> dict[str, Any]:
     day = datetime.now(UTC).strftime("%Y%m%d")
     rows = [
         row
-        for line in (logs_dir() / f"events-{day}.jsonl").read_text().splitlines()
+        for line in (logs_dir(home=meiva_home()) / f"events-{day}.jsonl").read_text().splitlines()
         if (row := json.loads(line)).get("event_name") == event_name
         and row.get("agent_id") == agent
     ]
@@ -100,7 +100,7 @@ def test_add_event_sink_registers_at_most_once(
         from base.paths import logs_dir
 
         day = datetime.now(_UTC).strftime("%Y%m%d")
-        path = logs_dir() / f"events-{day}.jsonl"
+        path = logs_dir(home=unit_home) / f"events-{day}.jsonl"
         rows: list[dict[str, Any]] = []
         if path.exists():
             for line in path.read_text(encoding="utf-8").splitlines():

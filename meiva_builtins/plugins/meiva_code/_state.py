@@ -14,7 +14,7 @@ from langgraph.graph.message import add_messages
 from pydantic import BaseModel, Field
 
 import meiva.sdk_surface.agent_identity as _meiva_identity
-from base.paths import workspace_dir
+from meiva.files import agent_workspace
 
 
 # ── state field declaration ──────────────────────────────────────────────
@@ -29,7 +29,7 @@ def default_cwd() -> str:
     aid = _meiva_identity.agent_id()
     if aid is None:
         return str(Path.home())
-    return str(workspace_dir(aid))
+    return str(agent_workspace(aid))
 
 
 class MeivaCodeState(BaseModel):

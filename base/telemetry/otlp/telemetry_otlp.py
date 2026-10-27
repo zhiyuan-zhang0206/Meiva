@@ -261,7 +261,7 @@ class OtlpBackend:
         endpoint: str | None = None,
         retry_interval_s: float = COLLECTOR_RETRY_INTERVAL_S,
         mirror_dir: Path,
-        home: Path | None = None,
+        home: Path,
     ) -> None:
         self._export_allowed = export_allowed
         self._enabled_flag = enabled
@@ -761,14 +761,16 @@ def bind_exporter(exporter: OtlpBackend) -> Generator[None]:
 
 # meiva:note
 # Return the bound exporter override if active, otherwise construct ``OtlpBackend``.
-def default_exporter(*, export_allowed: Callable[[], bool], mirror_dir: Path) -> OtlpBackend:
+def default_exporter(
+    *, export_allowed: Callable[[], bool], mirror_dir: Path, home: Path
+) -> OtlpBackend:
     bound = OtlpBackend._bound_default
     if bound is not None:
         return bound
-    return OtlpBackend(export_allowed=export_allowed, mirror_dir=mirror_dir)
+    return OtlpBackend(export_allowed=export_allowed, mirror_dir=mirror_dir, home=home)
 
 
 # meiva:note
-# Build the metric resource for ``home`` (or the active cluster home).
-def metrics_resource(*, home: Path | None = None) -> MetricsResource:
+# Build the metric resource for the cluster home ``home``.
+def metrics_resource(*, home: Path) -> MetricsResource:
     return telemetry_otlp_metrics.metrics_resource(home=home)

@@ -15,6 +15,7 @@ filtering, truncation and the quality verdict are tested without a desktop.
 from __future__ import annotations
 
 import re
+from pathlib import Path
 from typing import Any, Literal, NamedTuple
 
 from base.host.permissions_helper.wire import AxNode, AxTreeResult
@@ -415,6 +416,8 @@ def ax_tree_tool(
     scale: float | None,
     session: AxSession,
     stamp: str,
+    *,
+    home: Path,
 ) -> dict[str, Any]:
     """`ax_tree`: read a window's accessibility tree as filtered text."""
     wanted = _args(args)
@@ -460,7 +463,7 @@ def ax_tree_tool(
     factor = current_scale(helper, scale)
     visual_block = ""
     if wanted.ocr_gap:
-        read = ax_gap.read_screen(helper, agent_id, stamp=stamp)
+        read = ax_gap.read_screen(helper, agent_id, stamp=stamp, home=home)
         factor = read.scale  # the capture's measured scale: one space for tree and px:
         visual_block, report = _visual_gap(nodes, read, session)
         out.update(report)

@@ -206,10 +206,11 @@ def _mean(score_dicts: list[dict[str, float]]) -> dict[str, float] | None:
 
 def _leak_paths(agent_id: int) -> LeakPaths:
     """Build host-side result-separation paths for one evaluation agent."""
-    agent_workspace = workspace_dir(agent_id).resolve()
+    home = meiva_home()
+    agent_workspace = workspace_dir(agent_id, home=home).resolve()
     return LeakPaths(
         memory_pool=str(meiva.memory.PATH.resolve()),
-        self_evolution=str((meiva_home() / "self_evolution").resolve()),
+        self_evolution=str((home / "self_evolution").resolve()),
         workspaces_root=str(agent_workspace.parent),
         agent_workspace=str(agent_workspace),
     )

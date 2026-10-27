@@ -16,10 +16,9 @@ from typing import Any
 from uuid import uuid4
 
 import meiva
-from base.paths import workspace_dir
 
 ORCH = meiva.self.AGENT_ID
-HD = workspace_dir(ORCH) / "codebase_sweep_lite"
+HD = meiva.files.resolve("codebase_sweep_lite")
 HD.mkdir(parents=True, exist_ok=True)
 PF = HD / "progress.md"
 SF = HD / "orchestrator_state.json"

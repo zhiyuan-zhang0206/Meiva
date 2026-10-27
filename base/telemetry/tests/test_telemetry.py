@@ -30,6 +30,7 @@ from opentelemetry.trace import NonRecordingSpan, SpanContext
 
 from base import cluster, telemetry
 from base.db import Database
+from base.paths import meiva_home
 from base.paths.tests.homes import unit_home as unit_home
 from base.telemetry import emitter, observability
 from base.telemetry.tests.otlp.identity_inputs import machine_identity
@@ -48,7 +49,7 @@ def _mirror_rows(event_name: str, agent: int | None = None) -> list[dict[str, An
 
     telemetry.flush()
     day = datetime.now(UTC).strftime("%Y%m%d")
-    path = logs_dir() / f"events-{day}.jsonl"
+    path = logs_dir(home=meiva_home()) / f"events-{day}.jsonl"
     if not path.exists():
         return []
     rows: list[dict[str, Any]] = []
@@ -217,7 +218,7 @@ def test_jsonl_mirror_holds_every_event() -> None:
     telemetry.emit("audit", "fork", agent_id=_AGENT, source="system")
     telemetry.flush()
     day = datetime.now(UTC).strftime("%Y%m%d")
-    path = logs_dir() / f"events-{day}.jsonl"
+    path = logs_dir(home=meiva_home()) / f"events-{day}.jsonl"
     assert path.exists(), f"mirror file missing: {path}"
     lines = path.read_text(encoding="utf-8").splitlines()
     assert any('"event_name":"fork"' in line and '"category":"audit"' in line for line in lines)

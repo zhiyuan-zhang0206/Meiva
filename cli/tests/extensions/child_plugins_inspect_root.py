@@ -10,13 +10,14 @@ from pathlib import Path
 
 from base import paths
 from base.packages.plugins.enable_config import discover_plugin_dirs, write_local
+from base.paths import meiva_home
 from cli import parsers
 from cli.database.runtime import CommandRuntime
 from meiva.sdk_surface.installation import installed
 
 
 def main(name: str) -> None:
-    directory = paths.plugins_dir() / "inspect-root"
+    directory = paths.plugins_dir(home=meiva_home()) / "inspect-root"
     directory.mkdir(parents=True)
     (directory / "plugin.py").write_text('"""An inspect-root fixture."""\nLOADED = True\n')
     (directory / "meiva-plugin.json").write_text(

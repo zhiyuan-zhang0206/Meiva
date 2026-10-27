@@ -22,11 +22,12 @@ from pathlib import Path
 import pytest
 
 import meiva
-import meiva.sdk_surface.agent_identity
+from base.paths import meiva_home
 from base.sessions.pty.tests.job_wait import wait_for_foreground, wait_for_job
 from base.sessions.pty.tests.pty_service import service_socket
 from meiva import shell
 from meiva.sdk_surface import process_context
+from meiva.tests.fixtures.pin_agent import pin_agent
 
 pytestmark = [
     # `_isolated_agent` is opt-in (mutates global meiva.self.AGENT_ID); only the
@@ -159,11 +160,16 @@ def test_run_explicit_cwd_overrides_default(tmp_path: Path) -> None:
     assert Path(out.strip()).resolve() == tmp_path.resolve()
 
 
-def test_run_default_cwd_is_workspace(unit_home: Path) -> None:
-    """No cwd → runs in agent workspace (consistent with meiva.files relative path base)."""
-
+# meiva:note
+# With no cwd the command runs in the agent workspace (consistent with the `meiva.files` relative
+# path base), under the home the bound context carries - a directory that is not the process's own
+# home.
+def test_run_default_cwd_is_workspace(unit_home: Path, tmp_path: Path) -> None:
+    carried = tmp_path / "carried-home"
+    pin_agent(5, meiva_home=carried)
+    assert unit_home != carried
     out = meiva.shell.run("pwd")
-    expected = unit_home / "workspaces" / str(meiva.sdk_surface.agent_identity.agent_id())
+    expected = carried / "workspaces" / "5"
     assert Path(out.strip()).resolve() == expected.resolve()
     assert expected.is_dir()  # workspace_dir mkdir on demand
 
@@ -439,7 +445,7 @@ def test_new_default_cwd_is_agent_workspace(_agent_row: int) -> None:
     try:
         _ready(sid)
         shell.sessions.send(sid, "pwd")
-        _capture_until(sid, str(workspace_dir(_agent_row)))  # normalized match
+        _capture_until(sid, str(workspace_dir(_agent_row, home=meiva_home())))  # normalized match
     finally:
         shell.sessions.kill(sid)
 

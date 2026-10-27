@@ -15,6 +15,7 @@ from base.packages.plugins.config_registration import (
 )
 from base.packages.plugins.enable_config import discover_plugins, write_local
 from base.packages.plugins.plugin_errors import InvalidConfigOverlay
+from base.paths import meiva_home
 
 _FACE = (
     "from pydantic import BaseModel, Field\n"
@@ -29,7 +30,7 @@ _FACE = (
 
 @pytest.fixture(autouse=True)
 def _isolate_paths(model_catalog: ModelCatalog, unit_home: Path) -> None:
-    paths.plugins_dir().mkdir(parents=True, exist_ok=True)
+    paths.plugins_dir(home=unit_home).mkdir(parents=True, exist_ok=True)
 
 
 def _write_enabled(raw: dict[str, dict[str, dict[str, bool]]]) -> None:
@@ -38,7 +39,7 @@ def _write_enabled(raw: dict[str, dict[str, dict[str, bool]]]) -> None:
 
 
 def _plugin(name: str, face: str | None) -> Path:
-    plugin_dir = paths.plugins_dir() / name
+    plugin_dir = paths.plugins_dir(home=meiva_home()) / name
     plugin_dir.mkdir()
     (plugin_dir / "plugin.py").write_text(f"__description__ = '{name}'\n")
     if face is not None:

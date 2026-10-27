@@ -13,5 +13,4 @@ exports = ["answer.py", "calls.py", "errors.py", "outputs.py", "plans.py", "wiri
 "plans.py" = "strict"
 
 [debt.ambient-read]
-"wiring.py#home base.paths.workspace_dir" = 1
 "wiring.py#home meiva.files.workspace_base" = 1

@@ -30,6 +30,7 @@ from base.packages.plugins.manifest import ManifestError
 from base.packages.tests.lm.providers.provider_plugin_support import (
     provider_plugin as provider_plugin,
 )
+from base.paths import meiva_home
 
 
 def _manifest(name: str, providers: list[str]) -> str:
@@ -48,7 +49,7 @@ def test_a_manifest_that_matches_the_declared_prefix_installs_the_provider(
     provider_plugin: Callable[..., None],
 ) -> None:
     provider_plugin(prefix="kept-", model="kept-1", dir_name="matching_provider")
-    plugin_dir = paths.plugins_dir() / "matching_provider"
+    plugin_dir = paths.plugins_dir(home=meiva_home()) / "matching_provider"
     (plugin_dir / "meiva-plugin.json").write_text(_manifest("matching_provider", ["kept-"]))
 
     catalog = build_model_catalog()
@@ -61,7 +62,7 @@ def test_a_manifest_that_disagrees_refuses_the_catalog_and_can_be_corrected(
 ) -> None:
     provider_plugin(prefix="kept-", model="kept-1", dir_name="kept_provider")
     provider_plugin(prefix="gated-", model="gated-1", dir_name="gated_provider")
-    gated_dir = paths.plugins_dir() / "gated_provider"
+    gated_dir = paths.plugins_dir(home=meiva_home()) / "gated_provider"
     manifest = gated_dir / "meiva-plugin.json"
     manifest.write_text(_manifest("gated_provider", ["other-"]))
 
@@ -78,7 +79,7 @@ def test_a_provider_plugin_without_a_manifest_refuses_the_catalog(
     provider_plugin: Callable[..., None],
 ) -> None:
     provider_plugin(prefix="bare-", model="bare-1", dir_name="bare_provider")
-    (paths.plugins_dir() / "bare_provider" / "meiva-plugin.json").unlink()
+    (paths.plugins_dir(home=meiva_home()) / "bare_provider" / "meiva-plugin.json").unlink()
 
     with pytest.raises(ManifestError, match=r"bare_provider.*meiva-plugin\.json not found"):
         build_model_catalog()
@@ -88,7 +89,7 @@ def test_a_provider_py_without_contribute_is_a_load_failure(
     provider_plugin: Callable[..., None],
 ) -> None:
     provider_plugin(prefix="kept-", model="kept-1", dir_name="kept_provider")
-    legacy = paths.plugins_dir() / "legacy_provider"
+    legacy = paths.plugins_dir(home=meiva_home()) / "legacy_provider"
     legacy.mkdir(parents=True, exist_ok=True)
     (legacy / "plugin.py").write_text("# provider plugin stub")
     (legacy / "provider.py").write_text("X = 1\n")

@@ -44,6 +44,7 @@ def paused_otlp_record(tmp_path: Path) -> Iterator[tuple[Event, InMemoryLogRecor
         enabled=lambda: True,
         providers=(logger_provider, MeterProvider(metric_readers=[InMemoryMetricReader()])),
         mirror_dir=tmp_path,
+        home=tmp_path,
     )
     backend.export_batch(
         [

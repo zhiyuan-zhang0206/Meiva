@@ -34,6 +34,7 @@ from base.packages.tests.lm.providers.provider_plugin_support import (
     provider_plugin as provider_plugin,
 )
 from base.packages.tests.model_catalog import AddBindings, inert_keys
+from base.paths import meiva_home
 
 _REPO_PROVIDER_PLUGINS = {
     "lm_alibaba",
@@ -754,7 +755,7 @@ def test_broken_provider_plugin_refuses_catalog_and_recovers(
     provider_plugin: Callable[..., None],
 ) -> None:
     provider_plugin(prefix="kept-", model="kept-1", dir_name="enabled_provider")
-    broken = paths.plugins_dir() / "broken_provider"
+    broken = paths.plugins_dir(home=meiva_home()) / "broken_provider"
     broken.mkdir(parents=True, exist_ok=True)
     (broken / "plugin.py").write_text("# broken provider stub")
     (broken / "provider.py").write_text("raise RuntimeError('provider boom')\n")
@@ -769,7 +770,7 @@ def test_broken_provider_plugin_refuses_catalog_and_recovers(
 
 def test_provider_missing_provider_py_is_noop(provider_plugin: Callable[..., None]) -> None:
     provider_plugin(prefix="kept-", model="kept-1", dir_name="enabled_provider")
-    plugin_dir = paths.plugins_dir() / "no_provider"
+    plugin_dir = paths.plugins_dir(home=meiva_home()) / "no_provider"
     plugin_dir.mkdir(parents=True, exist_ok=True)
     (plugin_dir / "plugin.py").write_text("# empty")
     catalog = build_model_catalog()
@@ -779,7 +780,7 @@ def test_provider_missing_provider_py_is_noop(provider_plugin: Callable[..., Non
 
 def test_provider_only_dir_is_not_a_plugin(provider_plugin: Callable[..., None]) -> None:
     provider_plugin(prefix="kept-", model="kept-1", dir_name="enabled_provider")
-    plugin_dir = paths.plugins_dir() / "orphan_provider"
+    plugin_dir = paths.plugins_dir(home=meiva_home()) / "orphan_provider"
     plugin_dir.mkdir(parents=True, exist_ok=True)
     (plugin_dir / "provider.py").write_text("# no plugin.py beside me")
     catalog = build_model_catalog()

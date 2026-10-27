@@ -137,7 +137,7 @@ def metric_views() -> list[Any]:
     return views
 
 
-def metrics_resource(*, home: Path | None = None) -> MetricsResource:
+def metrics_resource(*, home: Path) -> MetricsResource:
     """The metrics-side OTel Resource: `service.name=meiva-<process>` (the
     bounded process dimension) + a per-process-instance `service.instance.id`.
     Without it every series lands as job="unknown_service" and two same-named
@@ -158,7 +158,7 @@ def metrics_resource(*, home: Path | None = None) -> MetricsResource:
 
     from base.telemetry.delivery.state import process_name
 
-    if home is not None and not home.is_dir():
+    if not home.is_dir():
         raise RuntimeError(f"metrics resource home is not a directory: {home}")
 
     return Resource.create(
@@ -179,7 +179,7 @@ def build_providers(
     keep_reader: Callable[[Any], None] | None = None,
     keep_metrics: Callable[[Any], None] | None = None,
     mirror_dir: Path,
-    home: Path | None = None,
+    home: Path,
 ) -> tuple[Any, Any]:
     """Build the production (LoggerProvider, MeterProvider) pair exporting
     OTLP/HTTP to ``endpoint`` (signal paths /v1/logs, /v1/metrics are appended

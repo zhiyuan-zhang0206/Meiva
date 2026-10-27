@@ -61,11 +61,12 @@ def pin_agent(
     machine: MachineIdentityReader | None = None,
     harness: Harness = Harness.MEIVA,
     bus: EventBus | None = None,
+    meiva_home: Path | None = None,
 ) -> None:
     bound = getattr(meiva, "context", None)
     process_context.bind_context(
         MeivaContext(
-            meiva_home=resolve_meiva_home(),
+            meiva_home=resolve_meiva_home() if meiva_home is None else meiva_home,
             identity=AgentIdentity(
                 agent_id=agent_id, owns_loop=owns_loop, actor=actor, lease=lease
             ),

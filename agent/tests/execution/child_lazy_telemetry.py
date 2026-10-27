@@ -51,7 +51,9 @@ def identity_child_record() -> dict[str, Any]:
     with tempfile.TemporaryDirectory(prefix="lazy-child-") as home:
         pipeline = telemetry_otlp_exporting.ExportingEventPipeline(
             writer=writer,
-            exporter=default_exporter(export_allowed=lambda: True, mirror_dir=Path(home)),
+            exporter=default_exporter(
+                export_allowed=lambda: True, mirror_dir=Path(home), home=Path(home)
+            ),
         )
         clients = ClientSet(pipeline_factory=lambda: pipeline)
         exec_child.init_logger(

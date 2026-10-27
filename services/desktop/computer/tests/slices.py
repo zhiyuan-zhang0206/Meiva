@@ -12,6 +12,7 @@ from pathlib import Path
 from typing import Any
 
 from base.db import Database
+from base.paths import meiva_home
 from services.desktop.computer import mcp_daemon
 from services.desktop.computer import ocr as ocr_mod
 from services.desktop.computer.config import ComputerUseConfig
@@ -98,7 +99,7 @@ class FakeOcr:
         *,
         error: str | None = None,
     ) -> None:
-        self._binary = ocr_mod.bin_path()
+        self._binary = ocr_mod.bin_path(home=meiva_home())
         self._binary.parent.mkdir(parents=True, exist_ok=True)
         self._tsv_path = self._binary.with_name("ocr.tsv")
         self._err_path = self._binary.with_name("ocr.err")
