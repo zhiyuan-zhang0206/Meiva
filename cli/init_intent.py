@@ -238,7 +238,7 @@ def initialize_home(args: argparse.Namespace, site: HomeSite, caller: CallerHost
                 f"an earlier `meiva init` was interrupted before it published this home; "
                 f"re-run `meiva init` without flags to finish it (given: {', '.join(flags)})"
             )
-        resume_claim(home)
+        resume_claim(home, backup_passphrase=caller.birth.backup_passphrase)
     else:
         prepare_identity(_inputs(args, site, caller))
     intent = read_intent(home)
