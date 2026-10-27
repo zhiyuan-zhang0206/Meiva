@@ -25,6 +25,8 @@ import pytest
 
 import base.sessions.backend as sb
 from base.clock import SYSTEM_TIMERS
+from base.clock.tests.fakes import system_clock
+from base.clock.tests.seeded_rng import seeded_rng
 from base.host.atomic_io import SYSTEM_FS, AtomicWriter
 from base.host.env.registry import process_environment
 from base.paths import meiva_home
@@ -317,6 +319,8 @@ def test_session_generation_is_the_one_the_session_was_admitted_under(unit_home:
         reason="generation flip",
         writer=AtomicWriter(SYSTEM_FS),
         home=meiva_home(),
+        clock=system_clock(),
+        rng=seeded_rng(),
     )
     assert frozen.generation is not None
     assert allocation_freeze.resume(
@@ -368,7 +372,12 @@ def test_new_session_under_an_allocation_freeze_returns_false_and_warns(
     unit_home: Path, caplog: pytest.LogCaptureFixture
 ) -> None:
     frozen = allocation_freeze.freeze(
-        holder="operator", reason="cleanup", writer=AtomicWriter(SYSTEM_FS), home=meiva_home()
+        holder="operator",
+        reason="cleanup",
+        writer=AtomicWriter(SYSTEM_FS),
+        home=meiva_home(),
+        clock=system_clock(),
+        rng=seeded_rng(),
     )
     assert frozen.generation is not None
     assert _backend().new_session("s", "", unit_home, env={}) is False
