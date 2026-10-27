@@ -322,14 +322,12 @@ class AmbientAccess(PatchForms):
         called = {id(call.func) for call in ast.walk(self.tree) if isinstance(call, ast.Call)}
         names: set[str] = set()
         for node in ast.walk(self.tree):
-            if (
-                isinstance(node.ctx if hasattr(node, "ctx") else None, ast.Load)
-                and id(node) not in called
-            ):
-                if isinstance(node, ast.Name):
-                    names.add(node.id)
-                elif isinstance(node, ast.Attribute):
-                    names.add(node.attr)
+            if id(node) in called:
+                continue
+            if isinstance(node, ast.Name) and isinstance(node.ctx, ast.Load):
+                names.add(node.id)
+            elif isinstance(node, ast.Attribute) and isinstance(node.ctx, ast.Load):
+                names.add(node.attr)
         return frozenset(names)
 
     # meiva:note
