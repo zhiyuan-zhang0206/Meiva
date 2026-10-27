@@ -143,7 +143,7 @@ def cmd_skill_scan(target: str, *, home: Path) -> int:
     """
     from base import paths
     from base.packages.extensions import install_registry
-    from base.packages.skills import scan
+    from base.packages.skills import scan, scan_package
 
     root = Path(target).expanduser()
     if not root.is_dir():
@@ -154,7 +154,7 @@ def cmd_skill_scan(target: str, *, home: Path) -> int:
             file=sys.stderr,
         )
         return 1
-    findings = scan.scan_package(root)
+    findings = scan_package(root)
     entry = install_registry.get(root.name, home=home)
     tier = entry.trust if entry is not None else "untracked"
     print(f"[meiva skill scan] {root} (trust={tier})")
@@ -242,8 +242,8 @@ def cmd_skill_register(name: str, *, accept_risk: bool = False, home: Path, now:
     """
     from base import paths
     from base.packages.extensions import install_registry
-    from base.packages.skills.index import SkillFormatError
-    from base.packages.skills.index import parse_skill_frontmatter as _parse_frontmatter
+    from base.packages.skills import SkillFormatError
+    from base.packages.skills import parse_skill_frontmatter as _parse_frontmatter
     from base.packages.skills.names import find
 
     from .skill_package import SkillScanRefused, scan_report

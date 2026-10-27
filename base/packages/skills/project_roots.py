@@ -6,27 +6,25 @@ skill view, so it lives below both.
 
 from pathlib import Path
 
-
-# meiva:note
-# Return whether `path` is an existing regular file.
-def _is_file(path: Path) -> bool:
-    return path.is_file()
+from base.packages.skills.project_root_plan import (
+    ancestor_chain,
+    git_marker_paths,
+    skill_folder_candidates,
+)
 
 
 def _is_git_root(directory: Path) -> bool:
     """Whether `directory` holds a git repository or worktree: a `.git` file (linked worktree,
     submodule) or a `.git` directory with a `HEAD`. An empty or foreign `.git` is skipped, as git
     itself keeps looking upward past it."""
-    dotgit = directory / ".git"
-    return _is_file(dotgit) or _is_file(dotgit / "HEAD")
+    return any(marker.is_file() for marker in git_marker_paths(directory))
 
 
 def git_root(start: Path) -> Path | None:
     """The nearest ancestor of `start` (itself included, when a directory) that is a git
     repository root, or None. Resolved by walking up for `.git`, so nothing is cached and a repo
     created mid-session (`git init`, a clone landing in a watched dir) surfaces immediately."""
-    resolved = start.resolve()
-    return next((d for d in (resolved, *resolved.parents) if _is_git_root(d)), None)
+    return next((d for d in ancestor_chain(start.resolve()) if _is_git_root(d)), None)
 
 
 def project_skill_roots(cwd: Path) -> list[Path]:
@@ -44,9 +42,4 @@ def project_skill_roots(cwd: Path) -> list[Path]:
     root = git_root(cwd)
     if root is None:
         return []
-    candidates = (
-        root / ".claude" / "skills",
-        root / ".agents" / "skills",
-        root / ".meiva" / "skills",
-    )
-    return [d for d in candidates if d.is_dir()]
+    return [d for d in skill_folder_candidates(root) if d.is_dir()]
