@@ -71,9 +71,11 @@ def test_downloads_root_creates_the_capability_directory(tmp_path: Path) -> None
     assert M.utils.downloads_root("console", places=places) == root
 
 
-def test_system_places_reads_the_home_and_the_downloads_folder(unit_home: Path) -> None:
-    places = M.utils.system_places()
-    assert places.home.resolve() == unit_home.resolve()
+def test_system_places_carry_the_home_they_are_given_and_the_downloads_folder(
+    tmp_path: Path,
+) -> None:
+    places = M.utils.system_places(tmp_path / "given-home")
+    assert places.home == tmp_path / "given-home"
     assert places.downloads == Path("~/Downloads").expanduser()
 
 

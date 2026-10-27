@@ -2,11 +2,12 @@ from __future__ import annotations
 
 import sys
 
+from base.paths.home import resolve_meiva_home
 from meiva_builtins.plugins.meiva_memory.pool_ops import pool_dir, refresh_index, repo_slug, run
 
 
 def main() -> int:
-    pool = pool_dir()
+    pool = pool_dir(resolve_meiva_home())
     slug = repo_slug(pool)
 
     listed = run(

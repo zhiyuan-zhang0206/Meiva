@@ -9,7 +9,6 @@ from __future__ import annotations
 
 import sys
 import types
-from pathlib import Path
 from typing import Any
 
 from base.agents.lifecycle import (
@@ -45,13 +44,6 @@ from meiva.sdk_surface.validation import coerce_str
 call_funnel = _tools
 
 
-def _cache_dir() -> Path:
-    """Disk cache directory for tool metadata. Same `_config_path` route through meiva_home()."""
-    from base.paths import meiva_home
-
-    return meiva_home() / "mcp_cache"
-
-
 # meiva:note
 # What this process's tools run against, read from the bound context once: its daemon client (dialed on the first request; the SDK never starts servers), the request timeout that client holds, the disk cache and the context's agent identity. A proxy keeps the source it was created with.
 def _source() -> _tools.ToolSource:
@@ -60,7 +52,7 @@ def _source() -> _tools.ToolSource:
     return _tools.ToolSource(
         remote=clients,
         timeout_seconds=clients.timeout_seconds,
-        cache=_tools.DiskCache(_cache_dir()),
+        cache=_tools.DiskCache(context.require_meiva_home() / "mcp_cache"),
         identity=context.identity,
         now=context.require_clock().now().timestamp(),
     )

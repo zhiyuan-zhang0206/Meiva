@@ -35,6 +35,8 @@ import time
 from pathlib import Path
 from typing import Any, TypeGuard
 
+from base.paths.home import resolve_meiva_home
+
 # `webchat` lives in the parent skill's scripts/ dir, a sibling tree within
 # this same web-ai skill (not an importable package; PYTHONSAFEPATH=1 keeps a
 # script's own directory off sys.path). Structure Rule 6 recognizes this exact
@@ -545,7 +547,8 @@ def main() -> None:
     p_chk.set_defaults(fn=cmd_check)
 
     args = parser.parse_args()
-    print(json.dumps(args.fn(args, webchat.system_places()), ensure_ascii=False, indent=2))
+    places = webchat.system_places(resolve_meiva_home())
+    print(json.dumps(args.fn(args, places), ensure_ascii=False, indent=2))
 
 
 if __name__ == "__main__":

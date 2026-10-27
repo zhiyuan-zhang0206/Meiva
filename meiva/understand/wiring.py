@@ -8,6 +8,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
+from base.agents.context import MeivaContext
 from base.config.service_read import ConfigAuthority
 from base.host.env.agent_slices import ModelOverrides
 from base.lm.catalog import ModelCatalog
@@ -21,28 +22,30 @@ __all__ = ["understand_deps", "understand_deps_for"]
 
 
 # meiva:note
-# The bound agent's `.exec_output/` site, or None outside an agent process.
-def _output_site() -> OutputSite | None:
+# The bound agent's `.exec_output/` site, under the Meiva home `context` carries, or None outside
+# an agent process.
+def _output_site(context: MeivaContext) -> OutputSite | None:
     try:
-        agent_id = agent_identity.require_agent_id()
+        agent_id = agent_identity.require_agent_id(context)
     except RuntimeError:
         return None
     return OutputSite(
         files.agent_workspace(agent_id) / OVERFLOW_DIRNAME,
-        process_context.current_context().require_clock(),
+        context.require_clock(),
     )
 
 
 # meiva:note
 # The deps for one `meiva.understand` call, read from this process's SDK installation.
 def understand_deps() -> UnderstandDeps:
+    context = process_context.current_context()
     return understand_deps_for(
         sdk_settings.config_authority(),
         catalog=sdk_settings.model_catalog(),
         keys=sdk_settings.provider_keys(),
         overrides=sdk_settings.model_overrides(),
-        base_dir=files.workspace_base(),
-        output=_output_site(),
+        base_dir=files.workspace_base_for(context),
+        output=_output_site(context),
     )
 
 

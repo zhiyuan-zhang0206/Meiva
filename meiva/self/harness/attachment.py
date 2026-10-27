@@ -43,6 +43,7 @@ from base.config import ConfigBoot
 from base.config.agent_pins import resolve_agent_config_pins
 from base.host.env.agent_slices import PluginConfigView
 from base.packages.plugins.config_view import resolve_agent_plugin_pins
+from base.paths.home import resolve_meiva_home
 from meiva.boot import (
     BorrowedBoot,
     ExternalBoot,
@@ -68,7 +69,7 @@ from meiva.self.harness.registration import (
     RegistrationError,
     RegistrationStore,
 )
-from meiva.self.harness.store import default_store
+from meiva.self.harness.store import registration_store
 
 __all_for_meiva__ = []
 
@@ -350,7 +351,10 @@ def open_attachment(
 ) -> HarnessAttachment:
     """Build the attachment for one registration handle; the caller owns its lifetime."""
     registration = resolve_registration(
-        handle, agent_id=agent_id, session_id=session_id, store=default_store()
+        handle,
+        agent_id=agent_id,
+        session_id=session_id,
+        store=registration_store(resolve_meiva_home()),
     )
     bound = attachable_context()
     boot = own_external_process(ConfigBoot()) if bound is None else borrow_external_process(bound)
