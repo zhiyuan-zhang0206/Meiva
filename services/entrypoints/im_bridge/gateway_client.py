@@ -12,13 +12,13 @@ from typing import Any, Literal
 import httpx
 
 from base.api_contracts.idempotency import keyed_headers
+from base.clock.ids import new_uuid
 from services.entrypoints.im_bridge.config import ImBridgeConfig
 from services.entrypoints.im_bridge.types import (
     NETWORK_ERRORS,
     AgentDetail,
     AgentDirectoryPage,
     RetryableTransportError,
-    new_uuid,
     raise_http_failure,
     retryable_http_status,
 )

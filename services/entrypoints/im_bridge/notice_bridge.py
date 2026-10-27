@@ -16,6 +16,7 @@ from psycopg_pool import ConnectionPool, PoolTimeout
 from base.api_contracts.idempotency import keyed_headers
 from base.api_contracts.notice_question import parse_question, question_instructions
 from base.clock import Clock
+from base.clock.ids import new_uuid
 from base.db.transaction import write_transaction
 from base.events.notifications.catalog import core_catalog
 from base.events.notifications.policy import enabled_for
@@ -35,7 +36,6 @@ from services.entrypoints.im_bridge.types import (
     IMAdapter,
     NoticeBridgeOwner,
     SendNotStartedError,
-    new_uuid,
 )
 
 _log = logging.getLogger("services.entrypoints.im_bridge.notice_bridge")
