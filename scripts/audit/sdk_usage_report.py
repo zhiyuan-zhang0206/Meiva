@@ -5,7 +5,7 @@ from __future__ import annotations
 
 import json
 from collections import Counter, defaultdict
-from collections.abc import Iterable
+from collections.abc import Collection, Iterable
 from datetime import datetime
 from typing import Any, TypedDict
 
@@ -115,19 +115,20 @@ def report(
     start: datetime,
     end: datetime,
     coverage: float = 70,
-    agent_ids: set[int] | None = None,
+    agent_ids: Collection[int] | None = None,
 ) -> _SdkUsageReport:
     if start.tzinfo is None or end.tzinfo is None or start > end:
         raise ValueError("window must be timezone-aware and start <= end")
     if not 0 < coverage <= 100:
         raise ValueError("coverage must be greater than 0 and at most 100")
+    wanted = None if agent_ids is None else frozenset(agent_ids)
     counts: Counter[str] = Counter()
     agents: dict[str, set[int]] = defaultdict(set)
     observed = sampled = 0
     for event in events:
         if not start <= event.ts <= end:
             continue
-        if agent_ids is not None and event.agent_id not in agent_ids:
+        if wanted is not None and event.agent_id not in wanted:
             continue
         observed += 1
         sampled += event.attributes.sample_rate > 1

@@ -10,6 +10,7 @@ from __future__ import annotations
 import argparse
 import json
 import sys
+from contextlib import ExitStack
 from pathlib import Path
 
 _REPO = Path(__file__).resolve().parents[2]
@@ -34,17 +35,12 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--agent-id", type=int, action="append", help="repeat to narrow callers")
     args = parser.parse_args(argv)
     try:
-        mirrors = [
-            (str(path), path.read_text(encoding="utf-8").splitlines())
-            for path in dict.fromkeys(args.events)
-        ]
-        data = report(
-            read_calls(mirrors),
-            args.start,
-            args.end,
-            args.coverage,
-            set(args.agent_id) if args.agent_id is not None else None,
-        )
+        with ExitStack() as opened:
+            mirrors = [
+                (str(path), opened.enter_context(path.open(encoding="utf-8")))
+                for path in args.events
+            ]
+            data = report(read_calls(mirrors), args.start, args.end, args.coverage, args.agent_id)
     except (ValueError, OSError) as exc:
         parser.error(str(exc))
     print(json.dumps(data, indent=2))

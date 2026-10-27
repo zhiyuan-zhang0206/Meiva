@@ -660,6 +660,7 @@ def main(
     *,
     run_process: GhProcess,
     timers: Timers,
+    home: Path,
     producer: Callable[[], EventPipeline] | None = None,
 ) -> int:
     """Run the sampler, returning one on authoritative fetch failure."""
@@ -673,9 +674,6 @@ def main(
     tz = cluster_tz()
     now = datetime.now(UTC)
     days = complete_days(now, args.window_days, tz)
-    from base.paths import meiva_home
-
-    home = meiva_home()
     state_dir = home / _STATE_DIR_RELATIVE if args.state_dir is None else args.state_dir
     try:
         collections = [
@@ -711,5 +709,6 @@ def main(
 
 if __name__ == "__main__":
     from base.clock import SYSTEM_TIMERS
+    from base.paths import meiva_home
 
-    sys.exit(main(run_process=subprocess.run, timers=SYSTEM_TIMERS))
+    sys.exit(main(run_process=subprocess.run, timers=SYSTEM_TIMERS, home=meiva_home()))

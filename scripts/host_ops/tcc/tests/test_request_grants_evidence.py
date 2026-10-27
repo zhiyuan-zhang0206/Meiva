@@ -226,3 +226,18 @@ def test_a_dead_helper_is_a_setup_failure(tmp_path: Path) -> None:
 
 if __name__ == "__main__":
     pytest.main([__file__])
+
+
+def test_the_evidence_goes_under_the_home_the_entry_resolved_unless_an_out_is_named(
+    tmp_path: Path,
+) -> None:
+    code = module.run_evidence(
+        [],
+        client=FakeHelper(),
+        platform="darwin",
+        now=NOW,
+        log_output=DECISION_LOG,
+        home=tmp_path,
+    )
+    assert code == 0
+    assert len(list((tmp_path / "tcc-evidence").glob("request-*.json"))) == 1

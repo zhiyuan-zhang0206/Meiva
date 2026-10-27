@@ -626,7 +626,9 @@ def emit_events(snapshot: dict[str, Any], *, pipeline: EventPipeline) -> None:
     telemetry.sync()
 
 
-def main(argv: list[str] | None = None, *, run_process: GhProcess, open_url: UrlOpener) -> int:
+def main(
+    argv: list[str] | None = None, *, run_process: GhProcess, open_url: UrlOpener, home: Path
+) -> int:
     parser = argparse.ArgumentParser(description=(__doc__ or "").splitlines()[0])
     parser.add_argument("--repo", default=DEFAULT_REPO, help="owner/name to sample")
     parser.add_argument(
@@ -670,9 +672,6 @@ def main(argv: list[str] | None = None, *, run_process: GhProcess, open_url: Url
         args.repo, since, stats, run_process=run_process, max_pages=MAX_LIST_PAGES
     )
 
-    from base.paths import meiva_home
-
-    home = meiva_home()
     state_dir = args.state_dir if args.state_dir is not None else home / _STATE_DIR_RELATIVE
     cache = load_cache(state_dir / "cache.json")
 
@@ -730,4 +729,6 @@ def main(argv: list[str] | None = None, *, run_process: GhProcess, open_url: Url
 
 
 if __name__ == "__main__":
-    sys.exit(main(run_process=subprocess.run, open_url=SYSTEM_URL_OPENER))
+    from base.paths import meiva_home
+
+    sys.exit(main(run_process=subprocess.run, open_url=SYSTEM_URL_OPENER, home=meiva_home()))

@@ -214,6 +214,7 @@ def test_dry_run_prints_snapshot_without_writes_or_emission(
                 ["--repo", "owner/repo", "--state-dir", str(tmp_path), "--dry-run"],
                 run_process=_gh_queue(replies),
                 timers=ManualTimers(),
+                home=tmp_path,
                 producer=lambda: pipeline,
             )
             == 0
@@ -236,6 +237,7 @@ def test_failed_authoritative_pr_walk_aborts_before_emission(tmp_path: Path) -> 
                 ["--state-dir", str(tmp_path)],
                 run_process=_gh_queue(replies),
                 timers=ManualTimers(),
+                home=tmp_path,
                 producer=lambda: pipeline,
             )
             == 1
@@ -265,3 +267,22 @@ def test_transient_gh_errors_retry_raw_commands_with_existing_budget() -> None:
     )
     assert timers.sleeps == [2] and replies == []
     assert stats.api_requests == 2 and stats.retries == 1
+
+
+def test_the_state_directory_defaults_to_the_home_the_entry_resolved(tmp_path: Path) -> None:
+    observed: list[object] = []
+    pipeline = EventPipeline(writer=observed.extend)
+    try:
+        assert (
+            runs_export.main(
+                ["--repo", "owner/repo"],
+                run_process=_gh_queue([("actions/runs?", "[]", 0), ("pulls?", "[]", 0)]),
+                timers=ManualTimers(),
+                home=tmp_path,
+                producer=lambda: pipeline,
+            )
+            == 0
+        )
+        assert (tmp_path / "state" / "ci-runs" / "snapshot.json").is_file()
+    finally:
+        pipeline.stop(timeout=2)

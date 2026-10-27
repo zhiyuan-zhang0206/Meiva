@@ -665,3 +665,11 @@ def test_repeated_provider_failure_announces_once_and_never_repeats(
     assert len(calls) == 3
     state = json.loads((tmp_path / "state" / "state.json").read_text())
     assert state["providers"]["gemini"]["status"].startswith("error:")
+
+
+def test_the_state_file_is_under_the_home_the_entry_resolved_unless_a_directory_is_named(
+    tracker: Any, tmp_path: Path
+) -> None:
+    assert tracker._state_path(None, tmp_path) == tmp_path / "model-tracker" / "state.json"
+    named = tmp_path / "elsewhere"
+    assert tracker._state_path(named, tmp_path) == named / "state.json"
