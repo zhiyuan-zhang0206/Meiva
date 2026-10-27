@@ -29,7 +29,7 @@ rewritten; retired fields follow the schema merge's existing removal rule.
 `composer_commands.py` owns the composer `/name` commands: where their files live, the
 merged and sorted catalog, and how a message expands. `load_skill_names` scans the
 converged skills tree (`~/.meiva/skills/` gated by `loadable_skill_names`) plus any
-project-local provider roots through `skills/tree_builder.py`, while every command-discovery
+project-local provider roots through `skills/skill_tree.py` (which hands each root's entries to `skills/tree_builder.py`), while every command-discovery
 function takes the `Skill` list (`skills/tree.py`) as an argument and `CommandCatalog` binds
 one source of it (`load_skill_names` in the gateway and the ops runner, `meiva.skills.names`
 in the agent host). The agent's claim node receives the catalog through

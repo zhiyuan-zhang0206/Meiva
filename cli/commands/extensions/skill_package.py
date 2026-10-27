@@ -40,7 +40,7 @@ from typing import Protocol
 from base.cluster.machine import MachineIdentityReader
 from base.packages.extensions.install_registry import IGNORED_NAMES, tree_hash
 from base.packages.extensions.registry import ExtensionKind
-from base.packages.skills import scan
+from base.packages.skills import scan, scan_package
 
 _COLLECTION_ROOTS = ("skills", ".claude/skills", ".agents/skills", ".meiva/skills")
 
@@ -100,8 +100,8 @@ def _package_at(d: Path) -> SkillPackage | None:
         SkillPackageError: `d/SKILL.md` exists but does not parse / is missing a
             required field.
     """
-    from base.packages.skills.index import SkillFormatError
-    from base.packages.skills.index import parse_skill_frontmatter as _parse_frontmatter
+    from base.packages.skills import SkillFormatError
+    from base.packages.skills import parse_skill_frontmatter as _parse_frontmatter
 
     skill_md = d / "SKILL.md"
     if not skill_md.is_file():
@@ -216,7 +216,7 @@ def scan_report(root: Path, name: str, *, accept_risk: bool) -> tuple[str, list[
     Raises:
         SkillScanRefused: critical findings and `accept_risk` is False.
     """
-    findings = scan.scan_package(root)
+    findings = scan_package(root)
     report = scan.render(findings, package=name)
     critical = scan.criticals(findings)
     if critical and not accept_risk:

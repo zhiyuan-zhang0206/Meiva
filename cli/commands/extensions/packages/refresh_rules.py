@@ -15,7 +15,7 @@ from pathlib import Path
 
 from base.host.git import host_version
 from base.packages.plugins import manifest as manifest_module
-from base.packages.skills import scan
+from base.packages.skills import scan, scan_package
 
 # meiva:note
 # Backoff: failures double the effective interval, capped after this many doublings (so a
@@ -166,7 +166,7 @@ def git_head_from_ls_remote(
 def staged_gate_error(staged: Path, repo: Path) -> str | None:
     if not any(staged.rglob("SKILL.md")):
         return "error: staged tree carries no SKILL.md"
-    critical = scan.criticals(scan.scan_package(staged))
+    critical = scan.criticals(scan_package(staged))
     if critical:
         return f"refused_scan: {', '.join(scan.rule_ids(critical))}"
     try:

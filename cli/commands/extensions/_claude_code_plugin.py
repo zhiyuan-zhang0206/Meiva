@@ -238,8 +238,8 @@ def _shipped_skills(skills_dir: Path) -> list[tuple[Path, str]]:
     Raises:
         ClaudeCodePluginError: a `SKILL.md` is unparseable / missing required fields.
     """
-    from base.packages.skills.index import SkillFormatError
-    from base.packages.skills.index import parse_skill_frontmatter as _parse_frontmatter
+    from base.packages.skills import SkillFormatError
+    from base.packages.skills import parse_skill_frontmatter as _parse_frontmatter
 
     found: list[tuple[Path, str]] = []
     for entry in sorted(skills_dir.iterdir()):

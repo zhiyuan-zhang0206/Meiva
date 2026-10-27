@@ -9,7 +9,8 @@ from base.host.env.boot_actions import enter_scratch_home
 if __name__ == "__main__":
     enter_scratch_home()
 
-from base.packages.skills.index import SkillFile, SkillIndex
+from base.packages.skills import SkillFile
+from base.packages.skills.index import SkillIndex
 from base.packages.skills.names import match_key
 from base.packages.text_budget import count_words
 

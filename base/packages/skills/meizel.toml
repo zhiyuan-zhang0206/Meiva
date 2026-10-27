@@ -1,27 +1,28 @@
 exports = ["index.py", "names.py", "scan.py", "tree.py"]
 
 [uses]
-"__init__.py" = ["project_roots.py", "tree_builder.py"]
-"index.py" = ["names.py", "scan.py"]
-"tests" = ["index.py", "names.py", "project_roots.py", "scan.py"]
+"__init__.py" = ["index_plan.py", "package_scan.py", "project_roots.py", "skill_tree.py"]
+"index.py" = ["index_plan.py", "names.py"]
+"index_plan.py" = ["names.py", "scan.py"]
+"package_scan.py" = ["package_scan_plan.py", "scan.py"]
+"package_scan_plan.py" = ["index_plan.py", "scan.py"]
+"project_roots.py" = ["project_root_plan.py"]
+"skill_tree.py" = ["index.py", "tree.py", "tree_builder.py"]
+"tests" = ["index.py", "index_plan.py", "names.py", "package_scan.py", "package_scan_plan.py", "project_root_plan.py", "project_roots.py", "scan.py"]
 "tree.py" = ["names.py"]
-"tree_builder.py" = ["index.py", "names.py", "tree.py"]
+"tree_builder.py" = ["index_plan.py", "names.py", "tree.py"]
 
 [purity]
-"." = "strict-to-be"
-"__init__.py" = "strict"
+"." = "strict"
+"__init__.py" = { mode = "none", why = "the package door: it re-exports the pure plans and the shells of the skill index, the package scan, the project skill roots and the skill tree mount, so a caller outside imports one name from one place" }
+"index.py" = { mode = "none", why = "the shell that scans the skill roots: it lists every folder under a root, stats and reads each SKILL.md and INDEX.md, keeps the process cache and re-stats the tree to tell whether a cached index is still fresh; what a SKILL.md yields, how a folder's stats and texts assemble into an entry and whether a stat still matches is decided in index_plan.py" }
+"index_plan.py" = "strict"
 "names.py" = "strict"
+"package_scan_plan.py" = "strict"
+"package_scan.py" = { mode = "none", why = "the shell of the install-time package scan: it walks a package tree, lstats each entry and reads each file within the size limit, and hands the bytes to scan.scan_file; which entries are package files and the order of the findings are decided in package_scan_plan.py, whether a file is read and what it yields in scan.py" }
+"project_root_plan.py" = "strict"
+"project_roots.py" = { mode = "none", why = "the shell that probes the filesystem for a git repository root and for the project skill folders that exist; the markers it probes, the directories it climbs and the skill folders it may list are derived in project_root_plan.py" }
+"scan.py" = "strict"
+"skill_tree.py" = { mode = "none", why = "the shell that scans skill roots and mounts what they hold: it takes each root's entries from the mtime-cached SkillIndex and hands them to SkillIndexBuilder; what is mounted, in which namespace and which collisions are refused is decided in tree_builder.py" }
 "tree.py" = "strict"
 "tree_builder.py" = "strict"
-
-[debt.impure-call]
-"index.py#Path.read_text" = 1
-"index.py#Path.rglob" = 1
-"index.py#Path.stat" = 1
-"project_roots.py#Path.is_dir" = 1
-"project_roots.py#Path.is_file" = 1
-"project_roots.py#Path.resolve" = 1
-"scan.py#Path.is_symlink" = 1
-"scan.py#Path.read_bytes" = 1
-"scan.py#Path.rglob" = 1
-"scan.py#Path.stat" = 1
