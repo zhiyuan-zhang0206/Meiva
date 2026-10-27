@@ -487,5 +487,5 @@ async def test_admission_refusal_classifies_the_row_it_reads(
     assert "recovery breaker is tripped" in breaker_text
     assert "permanent_reject_streak=1" in breaker_text
     control_text = (await explain_admission_refusal(aops_pool, healthy, "host-test")).describe()
-    for other in ("terminated", "hosted elsewhere", "breaker"):
+    for other in ("terminated", "hosted elsewhere", "breaker", "streak=", "suppress"):
         assert other not in control_text
