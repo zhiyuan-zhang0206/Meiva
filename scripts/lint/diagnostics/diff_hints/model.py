@@ -30,6 +30,7 @@ class HintId(StrEnum):
     LAMBDA_DEPENDENCY = "lambda-dependency"
     SPY_ASSERT = "spy-assert"
     ROOT_MIDDLE_LAYER = "root-middle-layer"
+    STRICT_PROMOTION = "strict-promotion"
 
 
 FunctionNode = ast.FunctionDef | ast.AsyncFunctionDef
@@ -97,6 +98,32 @@ class Importers:
 # one importer that this many modules import. The roots audit calibrates both (see the calibration node).
 MIN_IMPORTERS = 2
 MIN_ONWARD = 3
+
+
+# meiva:note
+# A file the change promotes to `strict` in a manifest: it was `strict-to-be` or not judged at the base.
+@dataclass(frozen=True)
+class Promotion:
+    path: str
+    manifest: str
+    was: str
+
+
+# meiva:note
+# The shapes that are only counted, never asked: a statistic is a site that blocks nothing and takes no
+# answer. They are read by `hints.py stats`, to learn how often a shape occurs before it becomes a hint.
+class StatId(StrEnum):
+    OPTIONAL_TEST_ONLY = "optional-test-only"
+    OPTIONAL_FALLBACK = "optional-fallback"
+    CLOCK_IN_CALLEE = "clock-in-callee"
+
+
+@dataclass(frozen=True)
+class StatSite:
+    stat: StatId
+    path: str
+    line: int
+    detail: str
 
 
 # meiva:note

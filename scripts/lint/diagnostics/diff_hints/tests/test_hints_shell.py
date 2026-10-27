@@ -439,3 +439,57 @@ def test_a_root_that_was_already_declared_is_not_asked_when_the_manifest_changes
     )
     commit(repo, "Reword the reason")
     assert reported(repo) == ""
+
+
+def promote(repo: Path, shell_text: str) -> None:
+    (repo / "cli" / "plan.py").write_text("VALUE = 1\n", encoding="utf-8")
+    (repo / "cli" / "shell.py").write_text("VALUE = 1\n", encoding="utf-8")
+    (repo / "cli" / "meizel.toml").write_text(
+        '[purity]\n"plan.py" = "strict-to-be"\n', encoding="utf-8"
+    )
+    commit(repo, "A plan and its shell")
+    (repo / "cli" / "meizel.toml").write_text('[purity]\n"plan.py" = "strict"\n', encoding="utf-8")
+    (repo / "cli" / "shell.py").write_text(shell_text, encoding="utf-8")
+    git(repo, "add", "cli")
+
+
+def test_a_promotion_that_adds_a_read_beside_it_is_asked_about_and_answered(repo: Path) -> None:
+    promote(repo, "import os\n\ndef run(path):\n    return os.stat(path)\n")
+    done = run(repo, "commit-msg", message_file(repo, "Promote the plan\n"))
+    assert done.returncode == 1
+    assert (
+        "cli/plan.py:1: hint strict-promotion: promoted to strict (was strict-to-be)" in done.stderr
+    )
+    assert "`cli/shell.py: return os.stat(path)`" in done.stderr
+    message = (
+        "Promote the plan\n\nHint-Ack: strict-promotion cli/plan.py -- shell.run runs the plan\n"
+    )
+    assert run(repo, "commit-msg", message_file(repo, message)).returncode == 0
+
+
+def test_a_promotion_with_no_read_added_beside_it_is_not_asked_about(repo: Path) -> None:
+    promote(repo, "VALUE = 2\n")
+    assert run(repo, "commit-msg", message_file(repo, "Promote the plan\n")).returncode == 0
+
+
+def test_the_statistics_command_counts_and_never_asks(repo: Path) -> None:
+    (repo / "cli" / "tests").mkdir()
+    (repo / "cli" / "tests" / "test_work.py").write_text(
+        "from cli.work import run\n\nrun(1, grace=2)\n", encoding="utf-8"
+    )
+    (repo / "cli" / "work.py").write_text(
+        "from base.clock import Clock\n\ndef run(config, grace=5):\n    return Clock(config)\n",
+        encoding="utf-8",
+    )
+    commit(repo, "A function with an optional parameter only a test passes")
+    done = run(repo, "stats", "HEAD~1", "HEAD", "--sites", "5")
+    assert done.returncode == 0, done.stderr
+    assert "optional-test-only: 1 sites in 1 files" in done.stdout
+    assert "clock-in-callee: 1 sites in 1 files" in done.stdout
+    assert (
+        "cli/work.py:3: optional-test-only: `grace` of `run` is passed by keyword in 1 test"
+        in done.stdout
+    )
+    tree = run(repo, "stats", "--tree", "HEAD")
+    assert tree.returncode == 0, tree.stderr
+    assert "clock-in-callee: 1 sites in 1 files" in tree.stdout

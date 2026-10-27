@@ -8,6 +8,7 @@
 #                                   (origin/main, HEAD)..HEAD must be answered by the
 #                                   trailers of any commit on the branch.
 #   hints.py report BASE HEAD       every site of a diff, answered or not, for calibration.
+#   hints.py stats [BASE HEAD]      the counted shapes (stats.py) of a diff or, with --tree, of the tree.
 #
 # The rule, the catalog and the trailer format are in
 # scripts/lint/docs/diff-hints/diff-hints.meiva.okf.md.
@@ -16,7 +17,9 @@ from __future__ import annotations
 
 import argparse
 import ast
+import collections
 import json
+import re
 import subprocess
 import sys
 import tomllib
@@ -47,15 +50,20 @@ from scripts.lint.diagnostics.diff_hints.model import (  # noqa: E402
     FileKind,
     Importers,
     NewRoot,
+    Promotion,
     Roles,
     Site,
+    StatId,
+    StatSite,
 )
+from scripts.lint.diagnostics.diff_hints.promotion import strict_promotion  # noqa: E402
 from scripts.lint.diagnostics.diff_hints.render import (  # noqa: E402
     render_errors,
     render_open,
     render_summary,
 )
 from scripts.lint.diagnostics.diff_hints.scope import classify, is_test_path  # noqa: E402
+from scripts.lint.diagnostics.diff_hints.stats import statistics  # noqa: E402
 
 # meiva:note
 # The diff the hints read. Prefixes are explicit because `diff.mnemonicPrefix` and
@@ -292,6 +300,48 @@ def _new_roots(spec: Sequence[str], rev: str, roles: Roles) -> list[NewRoot]:
     return found
 
 
+# meiva:note
+# The levels a manifest text gives its children: `strict`, `strict-to-be` or `none` by file, with `"."`
+# for the directory. A malformed table is the manifest checker's finding, not this hint's.
+def _purity_levels(text: str) -> dict[str, str]:
+    raw: object = tomllib.loads(text).get("purity")
+    if isinstance(raw, str):
+        return {".": raw}
+    if not _is_str_dict(raw):
+        return {}
+    levels: dict[str, str] = {}
+    for name, value in raw.items():
+        if isinstance(value, str):
+            levels[name] = value
+        elif _is_str_dict(value) and isinstance(value.get("mode"), str):
+            levels[name] = str(value["mode"])
+    return levels
+
+
+# meiva:note
+# The files the change promotes to `strict` in a manifest: strict at the head and not at the base,
+# where a file the manifest does not name has the level of its directory.
+def _promotions(spec: Sequence[str], rev: str) -> list[Promotion]:
+    names = _git(
+        *_DIFF[:1], "--name-only", "--no-color", "--diff-filter=ACMR", *spec, "--", "*meizel.toml"
+    )
+    manifests = [
+        m for m in names.decode("utf-8", "replace").splitlines() if Path(m).name == "meizel.toml"
+    ]
+    now = _read_blobs(rev, manifests)
+    before = _read_blobs(spec[0] if len(spec) == 2 else "HEAD", manifests)
+    found: list[Promotion] = []
+    for manifest in manifests:
+        after = _purity_levels(now[manifest]) if manifest in now else {}
+        old = _purity_levels(before[manifest]) if manifest in before else {}
+        for name, level in sorted(after.items()):
+            was = old.get(name, old.get(".", "none"))
+            if level == "strict" and was != "strict" and name.endswith(".py"):
+                path = (Path(manifest).parent / name).as_posix()
+                found.append(Promotion(path, manifest, was))
+    return found
+
+
 def _diff(
     spec: Sequence[str], rev: str, roles: Roles
 ) -> tuple[tuple[FileChange, ...], dict[str, str]]:
@@ -309,7 +359,7 @@ def _sites(spec: Sequence[str], rev: str) -> list[Site]:
     roles = _roles()
     changes, texts = _diff(spec, rev, roles)
     roots = _root_kinds(rev, tuple(texts))
-    return analyze(
+    found = analyze(
         changes,
         texts,
         roles,
@@ -317,6 +367,64 @@ def _sites(spec: Sequence[str], rev: str) -> list[Site]:
         _importer_counts(rev, roots, roles),
         _new_roots(spec, rev, roles),
     )
+    found.extend(strict_promotion(_promotions(spec, rev), changes))
+    return sorted(found, key=lambda site: (site.path, site.line, site.hint.value))
+
+
+# meiva:note
+# The `optional-test-only` candidates that only tests pass: a keyword `name=` that no production
+# file other than the definition spells. A statistic, so a spelling inside a string or another
+# call of the same name counts as a caller and the count errs towards fewer sites.
+def _only_tests_pass(sites: list[StatSite], rev: str, roles: Roles) -> list[StatSite]:
+    kept: list[StatSite] = []
+    for site in sites:
+        if site.stat is not StatId.OPTIONAL_TEST_ONLY:
+            kept.append(site)
+            continue
+        function, _, name = site.detail.partition(":")
+        spelled = re.compile(rf"(?<![\w.]){re.escape(name)}=(?!=)")
+        candidates = sorted(_grep(rev, [f"{name}="], "*.py") - {site.path})
+        texts = _read_blobs(rev, candidates)
+        callers = [path for path, text in texts.items() if spelled.search(text)]
+        production = [p for p in callers if classify(p, roles) is FileKind.PRODUCTION]
+        tests = [p for p in callers if classify(p, roles) is FileKind.TEST]
+        if tests and not production:
+            detail = f"`{name}` of `{function}` is passed by keyword in {len(tests)} test file(s), in no other production module"
+            kept.append(StatSite(site.stat, site.path, site.line, detail))
+    return kept
+
+
+def _tree_changes(head: str, roles: Roles) -> tuple[tuple[FileChange, ...], dict[str, str]]:
+    listed = _git("ls-tree", "-r", "--name-only", head).decode("utf-8", "replace").splitlines()
+    paths = [p for p in listed if classify(p, roles) is FileKind.PRODUCTION]
+    texts = _read_blobs(head, paths)
+    changes = tuple(
+        FileChange(path, frozenset(range(1, text.count("\n") + 2)), (), (), deleted=False)
+        for path, text in texts.items()
+    )
+    return changes, texts
+
+
+# meiva:note
+# The statistics of a diff (`BASE HEAD`) or, with `--tree`, of every production file at HEAD: how many
+# sites of each shape, in how many files, the files with the most, and the first sites. Nothing is
+# asked and the exit code is 0.
+def _stats(base: str, head: str, *, tree: bool, shown: int) -> int:
+    roles = _roles()
+    if tree:
+        changes, texts = _tree_changes(head, roles)
+    else:
+        changes, texts = _diff([base, head], head, roles)
+    sites = _only_tests_pass(statistics(changes, texts, roles), head, roles)
+    for stat in StatId:
+        found = [site for site in sites if site.stat is stat]
+        per_file = collections.Counter(site.path for site in found)
+        sys.stdout.write(f"{stat.value}: {len(found)} sites in {len(per_file)} files\n")
+        for path, count in per_file.most_common(10):
+            sys.stdout.write(f"  {count:3d}  {path}\n")
+        for site in found[:shown]:
+            sys.stdout.write(f"{site.path}:{site.line}: {stat.value}: {site.detail}\n")
+    return 0
 
 
 # meiva:note
@@ -404,6 +512,11 @@ def _parser() -> argparse.ArgumentParser:
     branch.add_argument("--head", default="HEAD")
     branch.add_argument("--base", default="origin/main")
     branch.add_argument("--summary", default=None)
+    stats = commands.add_parser("stats")
+    stats.add_argument("base", nargs="?", default="origin/main")
+    stats.add_argument("head", nargs="?", default="HEAD")
+    stats.add_argument("--tree", action="store_true")
+    stats.add_argument("--sites", type=int, default=0)
     report = commands.add_parser("report")
     report.add_argument("base")
     report.add_argument("head")
@@ -418,6 +531,8 @@ def main(argv: Sequence[str] | None = None) -> int:
             return _commit_msg(args.message_file)
         if args.command == "branch":
             return _branch(args.head, args.base, args.summary)
+        if args.command == "stats":
+            return _stats(args.base, args.head, tree=args.tree, shown=args.sites)
         return _report(args.base, args.head, as_json=args.json)
     except (GitError, ValueError) as error:
         sys.stderr.write(f"diff hints: {error}\n")
