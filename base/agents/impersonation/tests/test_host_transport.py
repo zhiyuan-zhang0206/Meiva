@@ -235,11 +235,36 @@ def test_live_submit_reports_an_unsupported_endpoint() -> None:
 
 def test_default_control_endpoint_follows_codex_home(tmp_path: Path) -> None:
     env = {"CODEX_HOME": str(tmp_path)}
-    assert codex_app_server.default_control_endpoint(env=env) is None
+    user_home = tmp_path / "user"
+    assert codex_app_server.default_control_endpoint(env=env, user_home=user_home) is None
     sock = tmp_path / "app-server-control" / "app-server-control.sock"
     sock.parent.mkdir(parents=True)
     sock.touch()
-    assert codex_app_server.default_control_endpoint(env=env) == f"unix://{sock}"
+    assert (
+        codex_app_server.default_control_endpoint(env=env, user_home=user_home) == f"unix://{sock}"
+    )
+
+
+@pytest.mark.parametrize(
+    ("codex_home", "base"),
+    [
+        (None, "{home}/.codex"),
+        ("~", "{home}"),
+        ("~/custom-codex", "{home}/custom-codex"),
+        ("~//custom-codex", "{home}/custom-codex"),
+        ("~bob/codex", "~bob/codex"),
+        ("/opt/codex", "/opt/codex"),
+    ],
+)
+def test_the_control_socket_sits_under_the_account_home_the_caller_recorded(
+    tmp_path: Path, codex_home: str | None, base: str
+) -> None:
+    env = {} if codex_home is None else {"CODEX_HOME": codex_home}
+
+    socket = codex_app_server.default_control_socket(env=env, user_home=tmp_path)
+
+    expected = Path(base.format(home=tmp_path)) / "app-server-control" / "app-server-control.sock"
+    assert socket == expected
 
 
 # meiva:note

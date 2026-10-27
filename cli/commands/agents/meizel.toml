@@ -13,6 +13,3 @@ exports = ["cleanup_after.py", "computer.py", "control.py", "impersonation.py", 
 
 [purity]
 "__init__.py" = "strict"
-
-[debt.ambient-read]
-"impersonation_adapters.py#environ base.agents.impersonation.host_transport.default_control_socket" = 1

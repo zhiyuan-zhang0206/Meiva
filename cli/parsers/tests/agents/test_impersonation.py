@@ -189,6 +189,32 @@ def test_request_uses_external_identity_without_delivering_a_credential(
     assert "starts the codex relay automatically" in output.err
 
 
+def test_request_expands_a_home_relative_codex_home_under_the_sessions_user_home(
+    idle_agent: tuple[int, RuntimeIncarnation],
+    db_conn: psycopg.Connection,
+    operator_database: OperatorDatabaseFactory,
+    *,
+    command_runtime: CommandRuntime,
+) -> None:
+    agent_id, _ = idle_agent
+    socket = (
+        command_runtime.session.user_home / "codex-data" / "app-server-control"
+    ) / "app-server-control.sock"
+    socket.parent.mkdir(parents=True)
+    socket.touch()
+
+    code = _run(
+        *_request_args(agent_id, "--provider", "codex", "--thread-id", "thread-1"),
+        runtime=command_runtime,
+        database=operator_database,
+        env=replace(NO_ENV, codex_home="~/codex-data"),
+    )
+
+    assert code == 0
+    [row] = _lease_rows(db_conn, agent_id)
+    assert row["relay_codex_remote"] == f"unix://{socket}"
+
+
 def test_request_without_steer_endpoint_does_not_acquire_a_lease(
     idle_agent: tuple[int, RuntimeIncarnation],
     codex_home: CodexHome,
