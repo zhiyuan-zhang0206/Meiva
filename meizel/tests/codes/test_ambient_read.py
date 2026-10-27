@@ -277,6 +277,30 @@ def read_sites(make_repo: RepoFactory, source: str, manifest: str = "", path: st
     return root, [d for d in diagnostics(root, "ambient-read") if d.path == path]
 
 
+@pytest.mark.parametrize(
+    "source",
+    [
+        "import random\n\ndef f(rng: random.SystemRandom) -> random.SystemRandom:\n    return rng\n",
+        "from random import SystemRandom\n\ndef f(rng: SystemRandom) -> None:\n    return None\n",
+        "import random\n\nGENERATOR: random.SystemRandom | None = None\n",
+        "import random\n\ndef f(x: object) -> bool:\n    return isinstance(x, random.SystemRandom)\n",
+        "import random\nfrom typing import TypeAlias\n\nRng: TypeAlias = random.SystemRandom\n",
+        "import random\n\ntype Rng = random.SystemRandom\n",
+        "import random\nfrom typing import cast\n\ndef f(x: object):\n    return cast(random.SystemRandom, x)\n",
+        "import os\n\ndef f(env: os._Environ[str]) -> None:\n    return None\n",
+    ],
+)
+def test_a_name_that_only_describes_a_type_is_not_an_acquisition(
+    make_repo: RepoFactory, source: str
+) -> None:
+    assert acquired(make_repo, source) == []
+
+
+def test_the_same_name_read_as_a_value_is_an_acquisition(make_repo: RepoFactory) -> None:
+    source = "import random\n\nrng = random.SystemRandom()\n\ndef f(r: random.SystemRandom) -> None:\n    pass\n"
+    assert acquired(make_repo, source) == [("random", "random.SystemRandom")]
+
+
 def test_a_file_outside_a_root_is_told_where_the_world_is_read(make_repo: RepoFactory) -> None:
     _, sites = read_sites(make_repo, "import os\n\nx = os.environ['A']\n")
     assert [(d.line, d.debt.key if d.debt else None) for d in sites] == [

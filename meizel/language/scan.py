@@ -282,8 +282,14 @@ class Scanner(AmbientAccess):
                 self.dotted,
                 unshadowed_open=node.id == "open" and (origin, shadowed) == (None, False),
             )
-            if self.records_ambient and origin is not None:
+            if self.records_value(node) and origin is not None:
                 self.ambient.used(origin, origin, node.lineno)
+
+    # meiva:note
+    # Whether a name or attribute read is a value the file acquires: not in a test file and not in a
+    # position that only names a type.
+    def records_value(self, node: ast.Name | ast.Attribute) -> bool:
+        return self.records_ambient and id(node) not in self.purity_state.annotation_ids
 
     # --- traversal -----------------------------------------------------------------
 
@@ -322,7 +328,7 @@ class Scanner(AmbientAccess):
         self.module_uses(origin, attrs, node.lineno)
         self.purity_state.record_env_access(".".join([origin, *attrs]), node.lineno)
         self.purity_state.record_reference(node, ".".join([origin, *attrs]), self.dotted)
-        if self.records_ambient:
+        if self.records_value(node):
             self.ambient.used(".".join([origin, *attrs]), origin, node.lineno)
 
     # --- scopes --------------------------------------------------------------------

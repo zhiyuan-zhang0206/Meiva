@@ -270,20 +270,13 @@ class PurityState:
             self.path_vars.add(target.id)
 
     # meiva:note
-    # The nodes that sit in an annotation: a name there describes a type and reads nothing.
+    # The nodes that name a type and not a value: an annotation (parameter, return, variable), the
+    # second argument of `isinstance` and `issubclass`, the first of `cast`, and what a `TypeAlias`
+    # or a `type X = ...` statement is set to. A name there describes something and reads nothing.
     def mark_annotations(self, tree: ast.Module) -> None:
         for node in ast.walk(tree):
-            found: list[ast.expr | None] = []
-            if isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef):
-                args = node.args
-                every = (*args.posonlyargs, *args.args, *args.kwonlyargs, args.vararg, args.kwarg)
-                found = [arg.annotation for arg in every if arg is not None]
-                found.append(node.returns)
-            elif isinstance(node, ast.AnnAssign):
-                found = [node.annotation]
-            for annotation in found:
-                if annotation is not None:
-                    self.annotation_ids.update(id(sub) for sub in ast.walk(annotation))
+            for annotation in _type_positions(node):
+                self.annotation_ids.update(id(sub) for sub in ast.walk(annotation))
 
     # meiva:note
     # A name or attribute that denotes an impure call without calling it (`_is_file = Path.is_file`,
@@ -532,6 +525,37 @@ def _iterates_paths(expr: ast.expr, dotted: _Dotted, path_vars: set[str]) -> boo
     if spelled in {*_PATH_WRAPPERS, "dict.fromkeys"} and expr.args:
         return _iterates_paths(expr.args[0], dotted, path_vars)
     return False
+
+
+def _signature_types(node: ast.FunctionDef | ast.AsyncFunctionDef) -> list[ast.expr]:
+    args = node.args
+    every = (*args.posonlyargs, *args.args, *args.kwonlyargs, args.vararg, args.kwarg)
+    found = [a.annotation for a in every if a is not None and a.annotation is not None]
+    return [*found, *([node.returns] if node.returns is not None else [])]
+
+
+def _call_types(node: ast.Call) -> list[ast.expr]:
+    name = _last_name(node.func)
+    if name in {"isinstance", "issubclass"} and len(node.args) == 2:
+        return [node.args[1]]
+    return [node.args[0]] if name == "cast" and len(node.args) == 2 else []
+
+
+def _type_positions(node: ast.AST) -> list[ast.expr]:
+    if isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef):
+        return _signature_types(node)
+    if isinstance(node, ast.AnnAssign):
+        alias = node.value is not None and _last_name(node.annotation) == "TypeAlias"
+        return [node.annotation, *([node.value] if alias and node.value is not None else [])]
+    if isinstance(node, ast.TypeAlias):
+        return [node.value]
+    return _call_types(node) if isinstance(node, ast.Call) else []
+
+
+def _last_name(expr: ast.expr) -> str:
+    if isinstance(expr, ast.Attribute):
+        return expr.attr
+    return expr.id if isinstance(expr, ast.Name) else ""
 
 
 def _referenced_call(
