@@ -23,19 +23,23 @@ class ImpersonationTerminalNoticeFailed(TypedDict):
     error: str
 
 
+# meiva:note
+# `impersonation_event_log_incomplete` payload, produced by
+# base/agents/impersonation/event_signals.py. At most one event per lease and condition per report
+# cadence (default daily), never one per pass: each report is written as an `event_log_incomplete`
+# entry into that lease's log, and passes inside the cadence stay quiet. A condition that never
+# clears therefore keeps re-reporting for as long as it holds. `seal_stuck` is an ended lease still waiting on an open event
+# source (clears when the source seals, or when the abandoned-receipt pass reclaims it);
+# `capture_failed` a lease with a failed source (permanent — a failed source never completes its
+# lease). The agent is the event's `agent_id`, and `pending_sources` names the receipts behind the
+# condition.
+# meiva:link base/agents/impersonation/docs/event-log.meiva.okf.md
 class ImpersonationEventLogIncomplete(TypedDict):
-    """`impersonation_event_log_incomplete` payload — base/agents/impersonation/event_signals.py.
-
-    One event per lease and condition on every TTL-reaper pass while the row
-    fact holds (state, not edge): `seal_stuck` is an ended lease still waiting
-    on an open event source (clears when it seals), `capture_failed` a lease
-    with a failed source (permanent — a failed source never completes its
-    lease). The agent is the event's `agent_id`."""
-
     condition: Literal["seal_stuck", "capture_failed"]
     lease_id: str
     lease_machine: str
     pending_reason: str
+    pending_sources: list[str]
     session: str
 
 
@@ -43,7 +47,8 @@ EVENTS: dict[str, EventSpec] = {
     "impersonation_event_log_incomplete": telemetry_event(
         "impersonation_event_log_incomplete",
         "an impersonation event log cannot complete on its own (ended lease with an "
-        "open source, or a failed capture source); re-emitted every reaper pass while it holds",
+        "open source, or a failed capture source); reported per lease and condition at "
+        "most once per report cadence, each report recorded in that lease's log",
         payload=ImpersonationEventLogIncomplete,
         tier="anomaly",
     ),
