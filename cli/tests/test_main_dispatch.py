@@ -13,6 +13,7 @@ import argparse
 import functools
 import json
 import os
+import re
 import socket
 import subprocess
 import sys
@@ -406,6 +407,8 @@ def test_init_receives_its_site_and_the_hosts_facts(unit_home: Path) -> None:
     assert birth.now.tzinfo is not None
     assert len({birth.cluster_secret, birth.redis_admin_password, birth.redis_password}) == 3
     assert all(len(secret) >= 32 for secret in (birth.cluster_secret, birth.redis_password))
+    assert re.fullmatch(r"[0-9a-f]{64}", birth.backup_passphrase)
+    assert birth.backup_passphrase != birth.cluster_secret
     assert ns.caller_host.local_names == frozenset()
 
 
