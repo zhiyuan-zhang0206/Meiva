@@ -14,6 +14,7 @@ from psycopg_pool import ConnectionPool
 
 from base.agents.messages.timestamp_policy import TimestampSource
 from base.clock import SYSTEM_TIMERS, Clock, ClockConfig
+from base.clock.tests.seeded_rng import seeded_rng
 from base.db import Database
 from base.lm.catalog import ModelCatalog
 from gateway.routers.proxies import insights as proxy
@@ -160,6 +161,8 @@ def test_the_gateway_declares_exactly_what_the_service_serves(
             clock=Clock(ClockConfig("UTC", "UTC", False), timers=SYSTEM_TIMERS),
             timestamps_enabled=False,
         ),
+        timers=SYSTEM_TIMERS,
+        rng=seeded_rng(),
     ).openapi()
     gateway = _gateway(httpx.MockTransport(lambda _r: httpx.Response(200))).openapi()
 

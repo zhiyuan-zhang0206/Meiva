@@ -24,6 +24,7 @@ from psycopg_pool import ConnectionPool
 
 from base.agents.messages.timestamp_policy import TimestampSource
 from base.clock import SYSTEM_TIMERS, Clock, ClockConfig
+from base.clock.tests.seeded_rng import seeded_rng
 from base.config import ConfigBoot
 from base.db import Database
 from base.host.env import port_lease
@@ -55,6 +56,7 @@ def _app(
     model_catalog: ModelCatalog,
     timestamps: TimestampSource,
     world: World | None = None,
+    seed: int = 0,
 ) -> Any:
     return build_app(
         world.db if world else cast(Database, object()),
@@ -63,6 +65,8 @@ def _app(
         home=home,
         catalog=model_catalog,
         timestamps=timestamps,
+        timers=SYSTEM_TIMERS,
+        rng=seeded_rng(seed),
     )
 
 
@@ -194,8 +198,8 @@ def test_apps_keep_their_rendering_policy_and_cache_separate(
 ) -> None:
     _compact_history(world)
     hidden, shown = _timestamps(enabled=False), _timestamps(enabled=True)
-    first = _app(home=tmp_path, model_catalog=model_catalog, timestamps=hidden, world=world)
-    second = _app(home=tmp_path, model_catalog=model_catalog, timestamps=shown, world=world)
+    first = _app(home=tmp_path, model_catalog=model_catalog, timestamps=hidden, world=world, seed=1)
+    second = _app(home=tmp_path, model_catalog=model_catalog, timestamps=shown, world=world, seed=2)
     assert first.state.timeline_timestamps is hidden
     assert second.state.timeline_timestamps is shown
     path = "/api/agents/9/run-timeline/messages?start=0&end=0&full=true"
