@@ -10,7 +10,6 @@ from base.host.env.agent_slices import AgentSlices
 from base.lm.catalog import ModelCatalog
 from base.packages.plugins import activation
 from base.packages.plugins.extensions import ExtensionRegistry
-from base.paths import workspace_dir
 
 from ._base_prompt import (
     capture_meiva_overview as capture_meiva_overview,
@@ -451,8 +450,6 @@ def _framework_parts(
     *,
     agent_id: int | None,
 ) -> list[str]:
-    if agent_id is not None and inputs.slices.read("agent", "workspace_in_system_prompt"):
-        workspace_dir(agent_id)
     rendered = [section(inputs) for section in sections]
     rendered.append(agent_workspace_pointer(inputs.slices, agent_id=agent_id))
     rendered.append(capabilities_section(inputs.live.view, inputs.live.mcp_servers))

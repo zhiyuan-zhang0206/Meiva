@@ -52,8 +52,8 @@ _OVERFLOW_DIRNAME = ".exec_output"
 OVERFLOW_KEEP = 20
 
 
-def overflow_dir(agent_id: int) -> Path:
-    return workspace_dir_readonly(agent_id) / _OVERFLOW_DIRNAME
+def overflow_dir(agent_id: int, *, home: Path) -> Path:
+    return workspace_dir_readonly(agent_id, home=home) / _OVERFLOW_DIRNAME
 
 
 # meiva:note

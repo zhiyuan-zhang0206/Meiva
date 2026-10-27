@@ -19,7 +19,8 @@ from langgraph.runtime import Runtime
 from langgraph.types import Overwrite
 
 from agent.graph.exec.node import exec_node_impl
-from agent.graph.exec.process import SubprocessExecProcess, read_parent_facts
+from agent.graph.exec.parent_facts import read_parent_facts
+from agent.graph.exec.process import SubprocessExecProcess
 from agent.graph.hooks.framework import framework_hooks
 from agent.hooks.security import deliver_security_findings
 from agent.state import AgentState, build_agent_state
@@ -36,6 +37,7 @@ from base.events.live.bus import EventBus
 from base.host.env.agent_slices import AgentSlices
 from base.packages.plugin_providers import build_model_catalog
 from base.packages.plugins.extensions import ExtensionRegistry
+from base.paths import resolve_meiva_home
 from meiva.tests.fixtures.pin_agent import snapshot_clients
 
 
@@ -53,6 +55,7 @@ _SECOND = SecurityFindingEntry(source="context-file:/repo/AGENTS.md", triggers=[
 async def _run_hook(state: AgentState, *, enabled: bool = True) -> dict[str, Any] | None:
     runtime = Runtime(
         context=MeivaContext(
+            meiva_home=resolve_meiva_home(),
             agent=AgentSlices.resolve(
                 {"security_scan_enabled": enabled}, default_reader=defaults()
             ),
@@ -134,6 +137,7 @@ async def test_a_real_childs_finding_reaches_the_model_through_the_hook(
     channel — the next LLM call sees the warning exactly once."""
     runtime = Runtime(
         context=MeivaContext(
+            meiva_home=resolve_meiva_home(),
             event_publisher=MagicMock(),
             agent=AgentSlices.resolve(default_reader=defaults(agent__security_scan_enabled=True)),
             db=Database.from_settings(gate=database_gate),

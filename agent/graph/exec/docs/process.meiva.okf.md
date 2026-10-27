@@ -25,7 +25,7 @@ are the process's `ParentFacts` and the generator the envelope identities are dr
 The production adapter delegates to the existing subprocess backend. It is a frozen
 value holding the `ParentFacts` of this process (environment, cwd, interpreter,
 checkout, editable roots), which the agent host's root reads once with
-`process.read_parent_facts` and passes to `build_graph`, and the `random.Random` it draws
+`parent_facts.read_parent_facts` and passes to `build_graph`, and the `random.Random` it draws
 each call's request and result envelope identities from (`req-<uuid>.json`,
 `res-<uuid>.json`; the root builds a cryptographically secure one, a test a seeded one).
 Before it writes a request, `run_in_subprocess` prunes the agent's stale result files

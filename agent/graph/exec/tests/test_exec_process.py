@@ -13,7 +13,7 @@ import pytest
 
 from agent.graph.exec import _subprocess
 from agent.graph.exec._result import ExecCrashed, ExecDone
-from agent.graph.exec.process import read_parent_facts
+from agent.graph.exec.parent_facts import read_parent_facts
 from agent.graph.exec.tests.process_inputs import real_parent
 from base.native_process.exec_domain import ExecProcessDomain
 from base.native_process.process_control import SYSTEM_PROCESS_CONTROL

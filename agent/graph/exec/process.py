@@ -1,17 +1,13 @@
 import asyncio
-import os
 import random
-import sys
 from collections.abc import Awaitable
 from dataclasses import dataclass
-from pathlib import Path
 from typing import Any, Protocol
 from uuid import UUID
 
 from agent.execution.protocol import ResultPayload
 from base.agents.context import MeivaContext
-from base.deploy.release import editable_install
-from base.paths import exec_run_dir, meiva_home
+from base.paths import exec_run_dir
 
 from ._child_boundary import ParentFacts, result_from_payload
 from ._result import ExecCrashed, ExecDone, ExecResult
@@ -25,7 +21,6 @@ __all__ = [
     "ExecResult",
     "ParentFacts",
     "SubprocessExecProcess",
-    "read_parent_facts",
     "result_from_payload",
     "run_in_subprocess",
 ]
@@ -42,21 +37,6 @@ class ExecProcess(Protocol):
         state: dict[str, Any],
         config_overlay: dict[str, object],
     ) -> Awaitable[tuple[ExecResult, ResultPayload | None]]: ...
-
-
-# meiva:note
-# What this process looks like at the moment it spawns a child: the environment the child
-# inherits, its working directory, the interpreter it re-executes, the checkout that
-# interpreter belongs to and the one extra checkout its editable install may name. The
-# composition root reads it once and hands it to `SubprocessExecProcess`.
-def read_parent_facts() -> ParentFacts:
-    return ParentFacts(
-        environ=dict(os.environ),
-        cwd=Path.cwd().resolve(),
-        executable=sys.executable,
-        source_root=editable_install.current_interpreter_source_root(),
-        editable_roots=(Path.home() / "Meiva",),
-    )
 
 
 # meiva:note
@@ -92,7 +72,7 @@ class SubprocessExecProcess:
                 "sandbox", "exec_output_accumulation_max_chars"
             ),
             parent=self.parent,
-            exec_dir=exec_run_dir(meiva_home()),
+            exec_dir=exec_run_dir(context.require_meiva_home()),
             request_id=UUID(int=self.rng.getrandbits(128), version=4),
             result_id=UUID(int=self.rng.getrandbits(128), version=4),
             state=state,

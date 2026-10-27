@@ -45,7 +45,7 @@ from base.packages.plugins.extensions import (
     ExtensionRegistry,
     PluginContributions,
 )
-from base.paths import meiva_home, skills_dir
+from base.paths import meiva_home, resolve_meiva_home, skills_dir
 from meiva.tests.fixtures.pin_agent import hosted_resources as hosted_resources
 from meiva.tests.fixtures.pin_agent import snapshot_clients
 
@@ -74,6 +74,8 @@ def _runtime(
     """`ops_pool=None` takes the container path."""
     return Runtime(
         context=MeivaContext(
+            meiva_home=resolve_meiva_home(),
+            user_home=Path.home(),
             identity=AgentIdentity(agent_id=agent_id, owns_loop=True),
             clients=snapshot_clients(),
             harness=harness,

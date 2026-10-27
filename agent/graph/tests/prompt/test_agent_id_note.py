@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import os
 from collections.abc import Iterator
+from dataclasses import replace
 from pathlib import Path
 from typing import Any
 
@@ -33,6 +34,7 @@ from base.config import ConfigBoot
 from base.config.tests.configuration import defaults
 from base.db import Database
 from base.host.env.agent_slices import AgentSlices
+from base.paths import resolve_meiva_home
 from base.paths.tests.homes import point_home
 
 
@@ -48,6 +50,8 @@ def _context(
     workspace: bool = False,
 ) -> MeivaContext:
     return MeivaContext(
+        meiva_home=resolve_meiva_home(),
+        user_home=Path.home(),
         identity=AgentIdentity(agent_id=agent_id, owns_loop=True) if agent_id is not None else None,
         agent=AgentSlices.resolve(
             {"workspace_in_system_prompt": workspace}, default_reader=defaults()
@@ -205,6 +209,27 @@ def test_note_states_the_workspace_when_the_section_is_on(
 
     assert content.startswith("Your Agent ID is 29 (label: memory steward). Your workspace is ")
     assert content.endswith("beside your messages:\nWaiting on a decision")
+
+
+@pytest.mark.usefixtures("labelled_agent")
+@pytest.mark.parametrize(
+    ("meiva_under_user_home", "shown"),
+    [(True, "~/elsewhere/workspaces/29"), (False, None)],
+    ids=["under-the-user-home", "outside-it"],
+)
+def test_note_places_the_workspace_under_the_meiva_home_and_shows_it_relative_to_the_user_home(
+    clients: ClientSet, tmp_path: Path, meiva_under_user_home: bool, shown: str | None
+) -> None:
+    user_home = tmp_path / "user"
+    meiva_home = (user_home if meiva_under_user_home else tmp_path / "srv") / "elsewhere"
+    workspace = meiva_home / "workspaces" / "29"
+    workspace.mkdir(parents=True)
+    (workspace / "to_user.md").write_text("Waiting")
+    context = replace(_context(clients, workspace=True), meiva_home=meiva_home, user_home=user_home)
+
+    content = _content(agent_id_note(context))
+
+    assert f"Your workspace is {shown or workspace}." in content
 
 
 @pytest.mark.usefixtures("labelled_agent")
