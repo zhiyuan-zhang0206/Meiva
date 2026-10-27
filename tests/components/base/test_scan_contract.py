@@ -1,6 +1,6 @@
 from pathlib import Path
 
-from base.packages.skills import scan
+from base.packages.skills import scan, scan_package
 
 
 def test_meiva_own_skills_carry_no_critical_findings() -> None:
@@ -12,7 +12,5 @@ def test_meiva_own_skills_carry_no_critical_findings() -> None:
         if d.is_dir() and (d / "SKILL.md").is_file()
     ]
     assert packages, "expected first-party skill packages to scan"
-    offenders = {
-        d.relative_to(repo).as_posix(): scan.criticals(scan.scan_package(d)) for d in packages
-    }
+    offenders = {d.relative_to(repo).as_posix(): scan.criticals(scan_package(d)) for d in packages}
     assert {k: v for k, v in offenders.items() if v} == {}

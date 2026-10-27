@@ -15,11 +15,8 @@ from pathlib import Path
 
 import pytest
 
-from base.packages.skills.index import (
-    SkillFormatError,
-    SkillIndex,
-    parse_skill_frontmatter,
-)
+from base.packages.skills.index import SkillIndex
+from base.packages.skills.index_plan import SkillFormatError, parse_skill_frontmatter
 
 
 def _write(root: Path, rel: str, content: str) -> None:
