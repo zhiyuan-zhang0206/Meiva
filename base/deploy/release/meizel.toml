@@ -11,6 +11,9 @@ exports = ["collector_artifact.py", "editable_install.py", "python_lock.py", "st
 "python_lock.py" = "strict"
 "start_inputs.py" = "strict-to-be"
 
+[debt.ambient-read]
+"editable_install.py#home pathlib.Path.expanduser" = 3
+
 [debt.impure-call]
 "collector_artifact.py#Path.chmod" = 1
 "collector_artifact.py#Path.open" = 1
@@ -20,7 +23,7 @@ exports = ["collector_artifact.py", "editable_install.py", "python_lock.py", "st
 "editable_install.py#Path.exists" = 1
 "editable_install.py#Path.glob" = 2
 "editable_install.py#Path.read_text" = 1
-"editable_install.py#Path.resolve" = 3
+"editable_install.py#Path.resolve" = 4
 "start_inputs.py#Path.glob" = 1
 "start_inputs.py#Path.lstat" = 1
 

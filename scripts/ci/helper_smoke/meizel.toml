@@ -8,3 +8,6 @@
 [roots]
 "cli.py" = { kinds = ["clock", "home", "pid"], why = "CLI entrypoint for the macOS permissions-helper smoke test" }
 "signing_smoke.py" = { kinds = ["clock", "home", "platform", "random", "settings"], why = "process entry of the signing smoke run: reads the home it works in, the helper port and artifact directory from the process settings, and builds the one world the build and install share (the account home, the host's platform and command runner, the clock and the operating system's random generator the signing keychain password is drawn from)" }
+
+[debt.ambient-read]
+"support.py#clock time.monotonic" = 2

@@ -28,5 +28,6 @@ exports = ["allowances.py", "budgets", "contracts", "graph", "language", "lint_c
 "lint_common.py#Path.resolve" = 1
 "lint_common.py#Path.rglob" = 1
 "lint_common.py#import subprocess" = 1
-"roles.py#Path.resolve" = 1
+"lint_common.py#os.path.lexists" = 1
+"roles.py#Path.resolve" = 2
 "roles.py#meizel.graph.universe.GitRepo" = 1

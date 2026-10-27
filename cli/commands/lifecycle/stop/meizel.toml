@@ -26,4 +26,4 @@ exports = ["__init__.py", "browser.py", "choices.py", "closure_plan.py", "eviden
 "steps.py" = "strict"
 
 [debt.ambient-read]
-"shell_sessions.py#clock base.clock.SYSTEM_TIMERS" = 1
+"shell_sessions.py#clock base.clock.SYSTEM_TIMERS" = 4

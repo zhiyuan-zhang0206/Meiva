@@ -40,7 +40,7 @@ table or section name is `policy-syntax`, not an exemption that silently allows 
 | Table | Rule | Sections |
 |---|---|---|
 | `ambient` | the names through which the repository's own state is reached (`meizel/contracts/ambient_read.py`, [[meizel/docs/checker/ambient.meiva.okf.md|ambient reads]]) | `settings`, `db`, `endpoints`, `bus` (lists; `name()` acquires only when called) |
-| `ambient-readers.<kind>` | functions that read the world on their caller's behalf (`meizel/contracts/ambient_read.py`, [[meizel/docs/checker/ambient-readers.meiva.okf.md|readers]]) | one table per kind of `AmbientKind`: `pkg.module.name()` or `pkg.module.Class.method()` and what it reads |
+| `ambient-readers.<kind>` | functions that read the world on their caller's behalf (`meizel/contracts/ambient_read.py`, [[meizel/docs/checker/ambient-readers.meiva.okf.md|readers]]) | one table per kind of `AmbientKind`: `pkg.module.name()` or `pkg.module.Class.method()`, or `pkg.module.NAME` for an object read at every use, and what it reads |
 | `ambient-state` | module-level state (`meizel/state/ambient_state`) | `sink-callees`, `sink-callee-suffixes`, `wiring-callees`, `pure-callees`, `pure-chain-callees`, `skill-script-patterns`, `config-modules`, `config-readers` (lists); `sink-facades`, `pure-repo-callees`, `sites` |
 | `clock-lattice` | lattice-vocabulary constants | `family-modules` (list); `independent-clocks` (`path::NAME`) |
 | `single-owner.<decision>` | one owner per decision | one table of module paths per decision, e.g. `postgres-dial`, plus `<decision>-owners` lists |

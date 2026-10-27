@@ -8,5 +8,6 @@
 "request_grants_evidence.py" = { kinds = ["clock", "platform"], why = "macOS TCC grant-request evidence CLI checks the host platform and timestamps the tccd log window" }
 
 [debt.ambient-read]
+"onboard-helper-grants.py#clock time.strftime()" = 1
 "onboard-helper-grants.py#environ base.host.env.registry.process_environment" = 1
 "request_grants_evidence.py#home base.paths.meiva_home" = 1

@@ -8,6 +8,8 @@ from enum import StrEnum
 
 __all__ = [
     "INTERVAL_CLOCKS",
+    "LOOP_CLOCK",
+    "OPEN_CALLS",
     "SEEDABLE_GENERATORS",
     "Acquisition",
     "AmbientKind",
@@ -120,11 +122,14 @@ class AmbientKind(StrEnum):
 # meiva:note
 # The interval clocks. Reading one for a deadline, a duration or a TTL is the plain use of `time`
 # that the conventions allow in code no test needs to steer; the read is a decision worth a root
-# only where the same function also sleeps, because then how long to wait next is decided in
+# only where the same function also waits, because then how long to wait next is decided in
 # a loop. The wall clock is always a window onto the world.
 INTERVAL_CLOCKS = frozenset(
     {"time.monotonic", "time.monotonic_ns", "time.perf_counter", "time.perf_counter_ns"}
 )
+# meiva:note
+# The target recorded for `loop.time()` of the running event loop, the interval clock of asyncio.
+LOOP_CLOCK = "asyncio.loop.time"
 
 _STDLIB: dict[str, AmbientKind] = {
     **dict.fromkeys(INTERVAL_CLOCKS, AmbientKind.CLOCK),
@@ -149,10 +154,20 @@ _STDLIB: dict[str, AmbientKind] = {
         AmbientKind.PLATFORM,
     ),
     **dict.fromkeys(
-        ("os.getpid", "os.getppid", "os.getuid", "os.geteuid", "os.getgid", "os.getegid"),
+        (
+            "os.getpid",
+            "os.getppid",
+            "os.getpgrp",
+            "os.getuid",
+            "os.geteuid",
+            "os.getgid",
+            "os.getegid",
+            "threading.get_ident",
+            "threading.get_native_id",
+        ),
         AmbientKind.PID,
     ),
-    **dict.fromkeys(("uuid.uuid1", "uuid.uuid4"), AmbientKind.RANDOM),
+    **dict.fromkeys(("uuid.uuid1", "uuid.uuid4", "os.urandom"), AmbientKind.RANDOM),
 }
 # meiva:note
 # Module-wide ambient vocabularies, narrowed by deterministic members below.
@@ -160,6 +175,19 @@ _WHOLE_MODULES = {
     "platform": AmbientKind.PLATFORM,
     "random": AmbientKind.RANDOM,
     "secrets": AmbientKind.RANDOM,
+}
+# meiva:note
+# Calls that read the world only when they are given no argument beyond `arguments`:
+# `time.localtime()` and `time.strftime(fmt)` the wall clock, `psutil.Process()` this process. With the
+# argument the call describes a value it was handed and reads nothing. `Path()` is not listed: it is
+# the empty path `.`, a value that reads nothing (and the sentinel of a walk up the parents).
+OPEN_CALLS: dict[str, tuple[AmbientKind, int]] = {
+    "psutil.Process": (AmbientKind.PID, 0),
+    "time.gmtime": (AmbientKind.CLOCK, 0),
+    "time.localtime": (AmbientKind.CLOCK, 0),
+    "time.ctime": (AmbientKind.CLOCK, 0),
+    "time.asctime": (AmbientKind.CLOCK, 0),
+    "time.strftime": (AmbientKind.CLOCK, 1),
 }
 # meiva:note
 # Constructors whose seed must be inspected at the call, rather than at a class reference.
@@ -247,11 +275,13 @@ class Acquisition:
 # The state a repository keeps itself: dotted name -> kind.
 #
 # `names` acquire the state when imported or read as an attribute of their module; `calls` only
-# when called, so that importing a class for an annotation acquires nothing.
+# when called, so that importing a class for an annotation acquires nothing. The `uses` among the
+# names (the policy's readers) acquire at each use of the imported name instead of at the import.
 @dataclass(frozen=True, slots=True)
 class Sources:
     names: dict[str, AmbientKind] = field(default_factory=dict[str, AmbientKind])
     calls: dict[str, AmbientKind] = field(default_factory=dict[str, AmbientKind])
+    uses: frozenset[str] = frozenset()
 
 
 # meiva:note

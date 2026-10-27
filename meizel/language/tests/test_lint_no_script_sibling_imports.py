@@ -297,3 +297,12 @@ def test_explicit_missing_target_is_an_error(
     assert _lint.main([str(missing)]) == 1
     assert str(missing) in capsys.readouterr().err
     assert _lint.main([str(good), str(missing)]) == 1
+
+
+def test_a_sibling_file_that_is_not_utf8_is_still_a_sibling(scan_tmp) -> None:
+    binary = scan_tmp / "tools" / "helper.py"
+    binary.parent.mkdir(parents=True)
+    binary.write_bytes(b"\xff\xfe not utf-8")
+    errs = _errors(scan_tmp, "tools/runner.py", _script("import helper"))
+    assert len(errs) == 1
+    assert "helper" in errs[0]

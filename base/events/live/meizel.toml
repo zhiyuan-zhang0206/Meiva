@@ -19,4 +19,6 @@ exports = ["announce.py", "bus.py", "coalescer.py", "projection.py", "publisher.
 
 [debt.ambient-read]
 "bus.py#settings base.config.settings" = 1
+"redis_client.py#clock time.monotonic" = 4
+"redis_listener.py#clock asyncio.loop.time" = 4
 "redis_listener.py#settings base.config.settings" = 1

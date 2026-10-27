@@ -10,7 +10,6 @@ exports = ["harness", "plans.py", "wake.py"]
 "wake.py" = "strict"
 
 [debt.ambient-read]
-"__init__.py#bus meiva.sdk_surface.settings.bus" = 1
 "__init__.py#home meiva.files.workspace_base" = 1
 
 [debt.impure-edge]
