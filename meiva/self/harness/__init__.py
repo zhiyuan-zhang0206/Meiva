@@ -10,7 +10,7 @@ __all_for_meiva__ = ["attach"]
 HANDLE_ENV = "MEIVA_HARNESS_HANDLE"
 
 _REGISTRATION_NAMES = frozenset({"HarnessRegistration", "RegistrationError", "handle_digest"})
-_STORE_NAMES = frozenset({"FileRegistrationStore", "default_store", "new_handle"})
+_STORE_NAMES = frozenset({"FileRegistrationStore", "new_handle", "registration_store"})
 _ATTACHMENT_NAMES = frozenset({"HarnessAttachment", "open_attachment", "resolve_registration"})
 
 
