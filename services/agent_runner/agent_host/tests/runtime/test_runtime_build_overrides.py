@@ -10,6 +10,7 @@ from pathlib import Path
 from types import SimpleNamespace
 from typing import Any, cast
 from unittest.mock import Mock
+from uuid import uuid4
 
 import pytest
 from langchain_core.messages import AIMessage
@@ -233,6 +234,7 @@ def test_eviction_keeps_an_in_flight_runtime() -> None:
 
 async def test_dropping_an_agent_closes_its_session() -> None:
     host = AgentHost(
+        runtime_owner=uuid4(),
         handoff_stamping=handoff_timestamps(),
         home=meiva_home(),
         policy=configured_policy(),
@@ -264,6 +266,7 @@ async def test_dropping_an_agent_closes_its_session() -> None:
 # meiva:link agent/graph/docs/harness-turn.meiva.okf.md
 async def test_the_next_turn_waits_for_the_retired_session_to_close() -> None:
     host = AgentHost(
+        runtime_owner=uuid4(),
         handoff_stamping=handoff_timestamps(),
         home=meiva_home(),
         policy=configured_policy(),

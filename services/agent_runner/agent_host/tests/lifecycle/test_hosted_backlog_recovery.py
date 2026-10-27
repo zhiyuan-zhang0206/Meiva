@@ -56,6 +56,7 @@ async def test_pending_scan_classifies_lifecycle_work_and_impersonation(
     lifecycle = insert_inbound(db_conn, agent, "", "system:test", kind="restart")
     db_conn.commit()
     host = AgentHost(
+        runtime_owner=uuid4(),
         handoff_stamping=handoff_timestamps(),
         home=meiva_home(),
         policy=configured_policy(),
@@ -128,6 +129,7 @@ async def test_old_pending_scan_never_cancels_a_running_turn(
 
     graph, saver = await _graph(aops_pool, agent, work)
     host = AgentHost(
+        runtime_owner=uuid4(),
         handoff_stamping=handoff_timestamps(),
         home=meiva_home(),
         policy=configured_policy(),
@@ -189,6 +191,7 @@ async def test_owner_recovery_scan_excludes_unrelated_rows(
     )
     agent = incarnation.agent_id
     host = AgentHost(
+        runtime_owner=uuid4(),
         handoff_stamping=handoff_timestamps(),
         home=meiva_home(),
         policy=configured_policy(),

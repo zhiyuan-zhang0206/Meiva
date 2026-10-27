@@ -111,6 +111,7 @@ async def test_hosted_applies_only_after_continuation_returns(
         inbound = insert_lifecycle_command(db_conn, agent_id, kind)
         entered, release = asyncio.Event(), asyncio.Event()
         host = AgentHost(
+            runtime_owner=uuid4(),
             handoff_stamping=handoff_timestamps(),
             home=meiva_home(),
             policy=configured_policy(),
@@ -191,6 +192,7 @@ async def test_hosted_terminate_crash_leaves_no_half_applied_command(
             }
         )
         host = AgentHost(
+            runtime_owner=uuid4(),
             handoff_stamping=handoff_timestamps(),
             home=meiva_home(),
             policy=configured_policy(),
@@ -305,6 +307,7 @@ async def test_pending_wake_scan_finds_a_claimed_command_without_pending_rows(
         bus=event_bus,
     )
     host = AgentHost(
+        runtime_owner=uuid4(),
         handoff_stamping=handoff_timestamps(),
         home=meiva_home(),
         policy=configured_policy(),
@@ -409,6 +412,7 @@ async def _run_terminating_turn(
             }
         )
         host = AgentHost(
+            runtime_owner=uuid4(),
             handoff_stamping=handoff_timestamps(),
             home=meiva_home(),
             policy=configured_policy(),

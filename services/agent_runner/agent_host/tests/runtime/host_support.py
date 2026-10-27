@@ -12,7 +12,7 @@ from collections.abc import AsyncGenerator
 from dataclasses import dataclass
 from types import SimpleNamespace
 from typing import Any, Protocol, cast
-from uuid import UUID
+from uuid import UUID, uuid4
 
 import psycopg
 import pytest
@@ -52,6 +52,7 @@ def build_agent_host(
 ) -> AgentHost:
     """An `AgentHost` on this box with the handles the tests share."""
     return AgentHost(
+        runtime_owner=uuid4(),
         handoff_stamping=handoff_timestamps(),
         home=meiva_home(),
         policy=kwargs.pop("policy", configured_policy()),

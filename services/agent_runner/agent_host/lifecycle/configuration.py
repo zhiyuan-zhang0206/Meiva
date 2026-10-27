@@ -6,7 +6,6 @@ import random
 from collections.abc import Callable
 from pathlib import Path
 
-from base import paths
 from base.agents.context.clients import ClientSet
 from base.agents.messages.timestamp_policy import TimestampSource
 from base.clock import SYSTEM_TIMERS, Clock
@@ -92,6 +91,7 @@ def load_installation(
     clients: ClientSet,
     load_extensions: Callable[..., object],
     rng: random.Random,
+    home: Path,
 ) -> Installation:
     from base.agents.sdk.call_policy import process_sampling_owner
     from base.config.service_read import ConfigAuthority
@@ -99,7 +99,7 @@ def load_installation(
     from base.packages.plugin_providers import build_model_catalog
     from meiva.sdk_surface.installation import installed
 
-    env_path = paths.meiva_home() / ".env"
+    env_path = home / ".env"
     if config.view.profile is None:
         authority = ConfigAuthority(runtime=config.view, all_domains=config.view, env_path=env_path)
     else:

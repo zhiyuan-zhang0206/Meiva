@@ -109,6 +109,7 @@ async def test_host_persists_provider_failure_before_releasing_turn(
             wrap_saver_writes_with_nstep_interval(saver, 100)
             graph = builder.compile(checkpointer=saver)  # pyright: ignore[reportUnknownMemberType]
             host = AgentHost(
+                runtime_owner=uuid4(),
                 handoff_stamping=handoff_timestamps(),
                 home=meiva_home(),
                 policy=configured_policy(),
