@@ -56,29 +56,30 @@ edge, so concurrent repayments touch different files:
 
 Paths are relative to the owning directory. A key carries no line number, so
 moving code inside a file leaves the baseline alone; the count is how many
-occurrences are allowed. Tables are sorted and one debt takes one line, so a
-repayment is a one-line diff. `[debt]` does not count toward the directory
-budget. `cycle-edge` records the facts on the declared edges that close a cycle;
+occurrences are allowed. Tables are sorted, one debt a line. `[debt]` does not
+count toward the directory budget. `cycle-edge` records the facts on the declared edges that close a cycle;
 the declared graph without those edges must be acyclic, or `manifest-cycle` fails.
-Each fact on such an edge counts like any other: a new import file, or another
-import line, in the pair is a new violation, so the recorded facts can only shrink. When an edge closes no cycle
-any more, or is no longer declared, its entries are `debt-paid`. A malformed
-`[debt]` is `manifest-debt`. Unresolved imports, stale declarations and manifest syntax
-errors cannot be recorded.
+Each fact on such an edge counts like any other: another import line in the pair
+is a new violation, so the recorded facts can only shrink. When an edge closes no
+cycle any more, or is no longer declared, its entries are `debt-paid`. A malformed
+`[debt]` is `manifest-debt`. Unresolved imports, stale declarations and manifest
+syntax errors cannot be recorded.
 
 ## Commands
 
 - `debt` inventories manifests without source analysis, even for unparsable code.
-  Text labels directories with/without recorded debt. JSON adds `basis` describing
-  that limit and retains its numeric schema: legacy `directories.strict_to_be`
+  JSON adds `basis` describing that limit; its legacy `directories.strict_to_be`
   and `strict` mean with/without recorded debt, not manifest purity modes.
 - `debt record <paths...>` writes the current violations under the paths into
-  their owners' manifests, creating a manifest where there is none (stage it:
-  `check` reads tracked files). It is the only way a baseline grows: `check`
-  and `bootstrap` never write one, and `record` never lowers a count. Cycle
+  their owners' manifests, creating one where there is none (stage it: `check`
+  reads tracked files). It is the only way a baseline grows: `check` and
+  `bootstrap` never write one, and `record` never lowers a count. Cycle
   back-edges are chosen greedily and thinned to the ones needed. Violations
   that cannot be recorded are printed and the exit code is 1.
 - `debt prune` lowers counts and drops entries to what still occurs.
+- `debt resolve <meizel.toml>...` resolves merge conflicts inside `[debt.*]` tables: recorded debt is
+  derived, so both sides' entries are kept, the lower count wins where both changed, and `prune` follows.
+  A conflict outside the debt tables is refused; nothing is written.
 - `debt carry [--base ref]` follows a move. A baseline names files, so a
   `git mv` leaves the old entries paid and the new place unrecorded. For the
   files git detects as renamed since the branch point with `origin/main`
@@ -88,11 +89,11 @@ errors cannot be recorded.
   changes, and a new violation in the moved file stays an error. Run it, then
   `debt prune`. `--rename-target OLD=NEW` rewrites a patch target that was
   renamed. `--move-symbol OLD_FILE::NAME=NEW_FILE` follows a top-level function
-  or class that moved to another file, which git cannot see as a rename (a
-  fixture moved into a helper module). It scans the symbol's lines in the old
-  file at the base and in the new file, and rekeys one for one at most what the
-  symbol cost before, costs now and has recorded, so what it gained on the way
-  stays an error. The old file must no longer define the name.
+  or class that moved to another file, which git cannot see as a rename. It
+  scans the symbol's lines in the old file at the base and in the new file, and
+  rekeys one for one at most what the symbol cost before, costs now and has
+  recorded, so what it gained on the way stays an error. The old file must no
+  longer define the name.
 - `debt sites --code <patch code> [--target-prefix P]... [--json] [paths...]`
   lists where the source holds each patch of a code: file, line, form and
   target, sorted by target. A prefix is dotted (`lib.mod` holds `lib.mod.f`, not
@@ -108,9 +109,8 @@ errors cannot be recorded.
   moves with its file stays in its group. The groups are the first `--depth`
   dotted names of a target (default 3), or the `--target-prefix` values (a target
   counts under the longest one, the rest under `(other)`; a listed prefix always
-  shows). Totals, not directories, are
-  compared, so debt that moves with its file does not count as growth. The
-  caller chooses `fail` or `warn`; there is no default.
+  shows). Totals, not directories, are compared, so moved debt is not growth.
+  The caller chooses `fail` or `warn`; there is no default.
 - `--waive-if-changed <pathspec>...` marks a change that edits those paths (rule
   code, policy) as a rule change, which is judged in two parts
   (`meizel/contracts/debt_rules.py`). The growth the new rules cause is what this
@@ -122,8 +122,7 @@ errors cannot be recorded.
   read in the ref stops the comparison. Other changes are judged by totals, with no waiver.
   The ref's own `[approved-patches.files]` is kept when it is regenerated: approving a file is a
   drop of the record, and a file whose approval is removed may record its patches. Historical
-  snapshots keep the unreadable gate and use only the ref's ambient facts. Head permissions are
-  never copied. See
+  snapshots keep the unreadable gate and use only the ref's ambient facts. See
   [[meizel/docs/checker/policy.meiva.okf.md|historical policy comparisons]].
 
 ## Depths of `check`
