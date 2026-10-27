@@ -256,6 +256,8 @@ def launched_context(*, env: Mapping[str, str], config: ConfigBoot) -> MeivaCont
         return None
     if not config.prepared:
         config.read_process_environment()
+    from base.paths.home import resolve_meiva_home
+
     machine = ConfiguredMachineIdentity(config)
     raw_harness = env.get("MEIVA_HARNESS", "").strip()
     harness = Harness(raw_harness) if raw_harness in set(Harness) else Harness.MEIVA
@@ -265,6 +267,9 @@ def launched_context(*, env: Mapping[str, str], config: ConfigBoot) -> MeivaCont
         clients=derived_clients(config, machine),
         machine=machine,
         clock_factory=lambda: Clock(clock_config_from_boot(config), timers=SYSTEM_TIMERS),
+        user_home=Path.home(),
+        meiva_home=resolve_meiva_home(),
+        rng=_new_rng(),
     )
 
 
@@ -468,7 +473,9 @@ def _load_inputs(
     else:
         clock = Clock(clock_config_from_boot(config), timers=SYSTEM_TIMERS)
     catalog = build_model_catalog()
-    sampling = process_sampling_owner(_new_rng())
+    sampling = process_sampling_owner(
+        context.rng if context is not None and context.rng is not None else _new_rng()
+    )
     return LoadInputs(
         surface=surface,
         disabled=disabled,
@@ -699,7 +706,10 @@ class BorrowedBoot:
 # meiva:note
 # What an external process needs before it can act as an agent, when nothing is bound yet and it
 # owns its roots: the prepared configuration, the machine, the database factory the clients share,
-# the clients themselves and the clock an independent attachment has no process clock to inherit.
+# the clients themselves, the clock an independent attachment has no process clock to inherit, the
+# two homes it reads once (the account's and the Meiva home) and the operating system's random
+# generator. An attachment is a separate process whose identifiers must stay unique across the
+# processes of one agent, so it draws from the system generator rather than a seeded-at-start one.
 @dataclass(frozen=True, slots=True)
 class OwnedBoot:
     config: ConfigBoot
@@ -707,13 +717,23 @@ class OwnedBoot:
     database: DatabaseFactory
     clients: ClientSet
     clock: Clock
+    user_home: Path
+    meiva_home: Path
+    rng: random.SystemRandom
 
     # meiva:note
-    # The context an independent attachment binds before it has any: the owned clients, the clock
-    # and the machine of this boot.
+    # The context an independent attachment binds before it has any: the owned clients, the clock,
+    # the machine, the homes and the random generator of this boot.
     def new_context(self) -> MeivaContext:
         clock = self.clock
-        return MeivaContext(clients=self.clients, clock_factory=lambda: clock, machine=self.machine)
+        return MeivaContext(
+            clients=self.clients,
+            clock_factory=lambda: clock,
+            machine=self.machine,
+            user_home=self.user_home,
+            meiva_home=self.meiva_home,
+            rng=self.rng,
+        )
 
 
 type ExternalBoot = BorrowedBoot | OwnedBoot
@@ -726,6 +746,8 @@ def borrow_external_process(bound: MeivaContext) -> BorrowedBoot:
 def own_external_process(config: ConfigBoot) -> OwnedBoot:
     if not config.prepared:
         config.read_process_environment()
+    from base.paths.home import resolve_meiva_home
+
     machine = ConfiguredMachineIdentity(config)
     database = database_factory(config=config, machine=machine)
     return OwnedBoot(
@@ -734,6 +756,9 @@ def own_external_process(config: ConfigBoot) -> OwnedBoot:
         database=database,
         clients=clients_over(config, machine, database),
         clock=Clock(clock_config_from_boot(config), timers=SYSTEM_TIMERS),
+        user_home=Path.home(),
+        meiva_home=resolve_meiva_home(),
+        rng=random.SystemRandom(),
     )
 
 

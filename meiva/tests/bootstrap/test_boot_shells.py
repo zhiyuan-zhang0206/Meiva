@@ -4,6 +4,9 @@
 # `meiva/sdk_surface/tests/test_identity_plan.py`; these tests drive the steps over a real slot value.
 from __future__ import annotations
 
+import random
+from pathlib import Path
+
 import pytest
 
 from base.agents.context import MeivaContext
@@ -12,13 +15,21 @@ from base.agents.sdk.tests.sampling_owners import fixed_sampling_owner
 from base.clock import SYSTEM_TIMERS, Clock, ClockConfig
 from base.cluster.machine import MachineIdentityReader
 from base.config.tests.configuration import snapshot_process_config
+from base.paths.tests.homes import unit_home as unit_home
 from meiva import boot
-from meiva.sdk_surface.installation import Installation, Loading, slot
+from meiva.sdk_surface import install, process_context
+from meiva.sdk_surface.installation import Installation, Loading, installed, slot
 from meiva.sdk_surface.pure.load_plan import LoadStep
 from meiva.sdk_surface.tests.installation_holder import held_installation
 from meiva.self.harness.attachment import attachment_clock
 
 _CLOCK = Clock(ClockConfig("UTC", "UTC", False), timers=SYSTEM_TIMERS)
+
+
+# meiva:note
+# The state gate of a load that never runs agent code: it admits what plugins declare as it is.
+def _accept_state(declared: object) -> object:
+    return declared
 
 
 @pytest.mark.parametrize("step", [LoadStep.BIND_CATALOG, LoadStep.NOTHING])
@@ -68,6 +79,53 @@ def test_an_owned_boot_carries_the_roots_of_its_configuration() -> None:
         assert owned.new_context().require_clock() is owned.clock
     finally:
         owned.clients.close()
+
+
+# meiva:note
+# An attachment draws its identifiers from the operating system's generator and carries the two
+# homes its boot read once, so nothing it runs reads them again.
+def test_an_attachment_context_carries_the_homes_and_the_system_generator_of_its_boot() -> None:
+    owned = boot.own_external_process(snapshot_process_config())
+    try:
+        context = owned.new_context()
+        assert context.require_user_home() == Path.home()
+        assert context.require_meiva_home() == owned.meiva_home
+        assert isinstance(context.require_rng(), random.SystemRandom)
+    finally:
+        owned.clients.close()
+
+
+# meiva:note
+# A launched script's context carries the same values, with a plain generator (nothing it draws
+# is a secret), and the SDK's sampling owner is built over that same generator, so the process has
+# one.
+def test_a_launched_context_carries_the_homes_and_the_generator_its_sampling_owner_uses(
+    unit_home: Path,
+) -> None:
+    config = snapshot_process_config()
+    context = boot.launched_context(env={"MEIVA_AGENT_ID": "7"}, config=config)
+    assert context is not None
+    assert context.require_user_home() == Path.home()
+    assert context.require_meiva_home() == unit_home
+    assert not isinstance(context.require_rng(), random.SystemRandom)
+
+    previous = process_context.unbind_context()
+    try:
+        boot.ensure_plugins_loaded(
+            surface=False,
+            config=config,
+            context=context,
+            clients=context.clients,
+            validate_state=_accept_state,
+        )
+        installation = installed()
+        assert installation is not None
+        assert installation.sampling.rng is context.require_rng()
+    finally:
+        install.uninstall()
+        process_context.unbind_context()
+        if previous is not None:
+            process_context.bind_context(previous)
 
 
 def test_a_borrowed_boot_takes_the_machine_and_database_of_the_bound_context(
