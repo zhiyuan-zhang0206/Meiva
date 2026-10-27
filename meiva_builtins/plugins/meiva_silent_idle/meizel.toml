@@ -4,6 +4,3 @@
 [purity]
 "__init__.py" = "strict"
 "plugin.py" = "strict"
-
-[roots]
-"agent_runtime.py" = { kinds = ["clock"], why = "Plugin runtime hook stamps emitted silent-idle continue notes with current UTC time" }

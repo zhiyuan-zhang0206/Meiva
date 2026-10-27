@@ -34,6 +34,7 @@ from typing import Any, assert_never
 
 from base import telemetry
 from base.clock import Clock
+from base.clock.configuration import clock_config_from_boot
 from base.cluster.machine import (
     GatewayAccess,
     gateway_api_base,
@@ -252,10 +253,10 @@ def h_schedules_verify(args: argparse.Namespace) -> int:
             source = RowsFromGateway(gateway_access_from_boot(args.runtime.config))
         except Exception as exc:
             source = GatewayUnresolved(type(exc).__name__, str(exc))
-    clock = Clock.from_settings()
+    zone = Clock(clock_config_from_boot(args.runtime.config), timers=args.runtime.timers).zone()
     return cmd_schedules_verify(
         source=source,
         notify=not args.no_notify,
-        now=clock.now().astimezone(clock.zone()),
+        now=args.runtime.clock.now().astimezone(zone),
         producer=args.producer,
     )

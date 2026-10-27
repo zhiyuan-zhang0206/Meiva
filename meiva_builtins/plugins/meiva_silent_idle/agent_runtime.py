@@ -8,7 +8,6 @@ surface module carries only the description (task #3633).
 
 from __future__ import annotations
 
-from datetime import UTC, datetime
 from typing import Any
 
 from langchain_core.messages import AIMessage, AnyMessage
@@ -70,7 +69,7 @@ class _SilentIdleContinueHook(Hook):
                 system_note_message(
                     content=_NUDGE,
                     tag=NoteTag.SILENT_IDLE_CONTINUE,
-                    created_at=datetime.now(UTC),
+                    created_at=runtime.context.require_clock().now(),
                 )
             ]
         }

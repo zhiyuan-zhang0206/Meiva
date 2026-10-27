@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import configparser
 import os
-import sys
 import tomllib
 from collections.abc import Mapping
 from pathlib import Path
@@ -75,9 +74,7 @@ def _uv_index(repo: Path, env: Mapping[str, str], home: Path) -> str | None:
     return _uv_config_index(user) or _uv_config_index(system)
 
 
-def _pip_paths(
-    repo: Path, env: Mapping[str, str], home: Path, *, platform: str = sys.platform
-) -> list[Path]:
+def _pip_paths(repo: Path, env: Mapping[str, str], home: Path, *, platform: str) -> list[Path]:
     explicit = env.get("PIP_CONFIG_FILE")
     if explicit and Path(explicit) == Path(os.devnull):
         return []
@@ -104,9 +101,7 @@ def _pip_paths(
     )
 
 
-def _pip_index(
-    repo: Path, env: Mapping[str, str], home: Path, *, platform: str = sys.platform
-) -> str | None:
+def _pip_index(repo: Path, env: Mapping[str, str], home: Path, *, platform: str) -> str | None:
     if env.get("PIP_EXTRA_INDEX_URL") or _enabled(env.get("PIP_NO_INDEX")):
         raise ValueError(
             "Locked installs require one Python index; PIP_EXTRA_INDEX_URL/PIP_NO_INDEX are unsupported"
@@ -130,7 +125,11 @@ def _pip_index(
     )
 
 
-def python_index(repo: Path, env: Mapping[str, str], *, platform: str = sys.platform) -> str:
+# meiva:note
+# `user_home` is the invoking user's home, which names the machine's config directories unless
+# `env` carries its own `HOME`; `platform` is `sys.platform` of the invoking process. Both are
+# chosen by the process entry.
+def python_index(repo: Path, env: Mapping[str, str], *, user_home: Path, platform: str) -> str:
     """Use explicit uv settings, then pip settings, then canonical PyPI.
 
     An install's explicit mirror profile already supplies UV_DEFAULT_INDEX.
@@ -139,7 +138,7 @@ def python_index(repo: Path, env: Mapping[str, str], *, platform: str = sys.plat
     """
     if env.get("UV_INDEX") or env.get("UV_EXTRA_INDEX_URL") or _enabled(env.get("UV_NO_INDEX")):
         raise ValueError("Locked installs require one default Python index; use UV_DEFAULT_INDEX")
-    home = Path(env.get("HOME", str(Path.home())))
+    home = Path(env.get("HOME", str(user_home)))
     value = env.get("UV_DEFAULT_INDEX") or env.get("UV_INDEX_URL")
     return _checked_index(
         value

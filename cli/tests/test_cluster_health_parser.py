@@ -29,6 +29,7 @@ from cli.database.runtime import CommandRuntime, Terminal
 from cli.database.tests.cli_tests import operator_database as operator_database
 from cli.database.tests.command_inputs import command_runtime as command_runtime
 from cli.parsers import build_parser
+from cli.startup.tests.birth_facts import birth_facts
 
 
 @pytest.mark.parametrize(("flags", "schema_line"), [([], True), (["--no-schema-check"], False)])
@@ -172,6 +173,7 @@ def test_the_destroy_verb_retires_the_jobs_of_the_account_the_command_runs_as(
             frozenset({"gateway"}),
             {"MEIVA_MACHINE_NAME": "destroyed", "MEIVA_GATEWAY_URL": "http://10.0.0.7:8000"},
             occupied_ports=frozenset(),
+            birth=birth_facts(),
         )
     )
     runtime = replace(

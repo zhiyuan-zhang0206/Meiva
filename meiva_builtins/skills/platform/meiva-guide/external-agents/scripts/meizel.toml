@@ -2,6 +2,8 @@
 "context_probe.py" = "strict"
 
 [roots]
-"spawn_antigravity.py" = { kinds = ["environ"], why = "External-agent launcher script entry: the Antigravity CLI injects its language_server endpoint and CSRF token into the commands it runs, and the script reads them from its process environment once" }
-"spawn_dsh.py" = { kinds = ["clock"], why = "External-agent launcher script tracks polling deadlines with epoch clock" }
+"spawn_antigravity.py" = { kinds = ["clock", "environ"], why = "External-agent launcher script entry: the Antigravity CLI injects its language_server endpoint and CSRF token into the commands it runs, which the script reads from its process environment once, and it stamps the dispatch provenance block with the current UTC time" }
+"spawn_claude.py" = { kinds = ["clock"], why = "External-agent launcher script stamps the dispatch provenance block with the current UTC time" }
+"spawn_codex.py" = { kinds = ["clock"], why = "External-agent launcher script stamps the dispatch provenance block with the current UTC time" }
+"spawn_dsh.py" = { kinds = ["clock"], why = "External-agent launcher script tracks polling deadlines with epoch clock and stamps the dispatch provenance block with the current UTC time" }
 "watch_work.py" = { kinds = ["clock", "random"], why = "External-agent watcher script stamps log output, tracks monotonic deadlines, and generates idempotency keys" }

@@ -20,7 +20,7 @@ from pathlib import Path
 from typing import assert_never
 
 from base.agents.context.clients import DatabaseFactory
-from base.clock import SYSTEM_TIMERS, Clock, ClockConfig
+from base.clock import SYSTEM_TIMERS
 from base.events.live.bus import EventBus, event_bus_config_from_config
 from base.native_process.process_control import SYSTEM_PROCESS_CONTROL
 from base.paths import run_dir
@@ -191,11 +191,7 @@ def _write_close_notices(
         closed,
         reason=reason,
         local_machine=command.machine.name(),
-        closed_at=Clock(
-            ClockConfig("UTC", None, message_timestamp_weekday=False), timers=command.timers
-        )
-        .now()
-        .isoformat(),
+        closed_at=command.clock.now().isoformat(),
     )
     if not notices:
         return

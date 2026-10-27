@@ -25,7 +25,10 @@ concrete logger initialization retains its original first-role guard.
 again under its lifecycle lock. `main()` is the composition root of both: after the
 checkout gate it reads the home and the checkout once into a `HomeSite`
 (`cli/start_runtime.py`) and, for `init`, the caller's host facts (`CallerHost`: its
-tool directories, which ports of the fixed table something already holds and the transport key
+tool directories, which ports of the fixed table something already holds, the host names and
+interface addresses by which the host is known (`local_names`, read only when the init carries a
+`--config-file`, for the remote-database refusal), what the home's birth takes from the entry
+(`birth`: the instant and the cluster and Redis secrets minted once per init) and the transport key
 of a database-capability bundle, which leaves the environment there before any step runs), and
 hands them to the handler. `run_init` and `run_start` take those values; neither reads
 the environment, `__file__` or a port, and neither repeats the checkout gate. A test
@@ -53,8 +56,11 @@ hands to `create(home)`, the same value and spelling as the `HomeSite` of init a
 only holds it, and `main()` is where the private home directory is created (a symlinked home is
 refused there) before the runtime is built. Its `session` (`UserSession`: the user's home
 directory, the login shell, whether a person is at the terminal), its `checkout` (the checkout
-whose code runs) and its `terminal` (the three process streams) are read once in `create` too, so
-a command never reads `Path.home()`, `$SHELL`, `repo_root()` or `sys.stdin`. The transport key
+whose code runs), its `terminal` (the three process streams), its `clock` (the UTC instant a
+command stamps with, over the same `timers`) and its `rng` (the one random generator, from which
+`new_id()` derives a gateway request's idempotency key) are read or built once in `create` too, so
+a command never reads `Path.home()`, `$SHELL`, `repo_root()`, `sys.stdin`, the wall clock or
+`uuid`. The transport key
 of a database-capability bundle is the one environment value `main()` takes out for a verb
 (`meiva init` and `meiva cluster db-authority install-unit`, as `args.transport_key`). Dispatch, embedded
 lifecycle legs, logging, database host resolution and telemetry borrow that same

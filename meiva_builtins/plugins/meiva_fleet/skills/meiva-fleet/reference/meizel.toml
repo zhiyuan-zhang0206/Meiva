@@ -1,2 +1,0 @@
-[roots]
-"watch_idle.py" = { kinds = ["settings"], why = "Reference watcher script reads launching agent's data-plane Redis URL and events channel" }

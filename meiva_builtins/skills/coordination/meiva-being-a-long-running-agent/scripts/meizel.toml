@@ -5,4 +5,3 @@ exports = ["agent_usage.py"]
 
 [roots]
 "agent_usage.py" = { kinds = ["clock", "db"], why = "CLI entry constructs cluster DB handle and defaults polling window end to current UTC time" }
-"watch_idle.py" = { kinds = ["settings"], why = "Reference watcher script reads launching agent's data-plane Redis URL and events channel" }
