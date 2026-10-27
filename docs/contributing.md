@@ -41,11 +41,12 @@ changes. The commit messages inside the branch do not reach `main`, and a branch
 merge commit. There is no changelog file to append to and no per-entry file to add.
 
 Since 2026-10-27 the queue squashes — squash is the only merge method now — and the
-landed message is the description re-wrapped at 72 columns, under a subject that is
-the title with ` (#<n>)` appended. Before that date the queue rebased, so each commit
-there is one landed change carrying its own message. Read both when you trace
-history; write for the new one. `git commit --amend` no longer writes the record: it
-only rewrites a local commit that never lands.
+landed message is the description with its prose re-wrapped at 72 columns (a table
+row or another block line keeps its own length), under a subject that is the title
+with ` (#<n>)` appended. Before that date the queue rebased, so each commit there is
+one landed change carrying its own message. Read both when you trace history; write
+for the new one. `git commit --amend` no longer writes the record: it only rewrites a
+local commit that never lands.
 
 A `Co-authored-by: Meiva #<id>` line in the description lands as written. GitHub also
 appends the `Co-Authored-By:` trailers whose value parses as `Name <email>`, taken from
