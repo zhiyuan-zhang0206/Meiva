@@ -66,6 +66,31 @@ def test_snapshot_reflects_the_serving_gate_and_role(
 
 
 # meiva:note
+# The serving gate is read from the home the snapshot is given, not from the environment's: this
+# process's own home is serving, the home handed in has published nothing.
+@pytest.mark.usefixtures("serving_gate")
+def test_snapshot_reads_the_serving_gate_of_the_home_it_is_given(
+    set_machine_identity: MachineIdentitySetter,
+    database: Database,
+    tmp_path: Path,
+    *,
+    machine_identity: MachineIdentityReader,
+) -> None:
+    set_machine_identity(role="agent-runner", name="runner-a")
+    elsewhere = tmp_path / "elsewhere"
+    elsewhere.mkdir()
+
+    snap = cluster_status.status_snapshot(
+        database,
+        image=LoadedCommit(source_root=tmp_path, sha=None),
+        local_machine=machine_identity,
+        home=elsewhere,
+    )
+
+    assert (snap.paused, snap.paused_reason) == (True, "startup")
+
+
+# meiva:note
 # The snapshot threads the prod-source HEAD so the roster can compare it against the cluster
 # pin.
 def test_snapshot_includes_head_sha(

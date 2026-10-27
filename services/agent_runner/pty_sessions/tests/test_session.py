@@ -7,6 +7,7 @@ simulated refusal, which only works inside the test process).
 
 from __future__ import annotations
 
+import asyncio
 import os
 import pty
 import signal
@@ -14,9 +15,12 @@ import socket
 import subprocess
 import sys
 import threading
+import time
 from collections.abc import Callable, Iterator
 from dataclasses import replace
 from pathlib import Path
+from typing import cast
+from unittest.mock import MagicMock
 
 import psutil
 import pytest
@@ -25,6 +29,7 @@ from base.clock import SYSTEM_TIMERS
 from base.log.tests.log_records import LogRecords
 from base.log.tests.log_records import loguru_records as loguru_records
 from base.native_process.ownership import OwnedProcess
+from base.native_process.process_control import SYSTEM_PROCESS_CONTROL
 from base.native_process.tests.fake_process_control import FakeProcessControl
 from base.paths import meiva_home
 from base.sessions.pty import client, protocol
@@ -374,3 +379,22 @@ def test_the_client_reads_survivors_from_a_kill_answer(unit_home: Path) -> None:
         service.close()
 
     assert verdict == client.KillVerdict("forced", True, (4242,))
+
+
+# meiva:note
+# A session's transcript is opened under the logs of the home the service was given: this process's
+# own home gets nothing, the service's home gets the file. The service's loop is a stand-in that
+# takes the session's attach and never runs it.
+def test_a_session_transcript_is_opened_in_the_logs_of_the_service_home(tmp_path: Path) -> None:
+    served_home = tmp_path / "served-home"
+    served_home.mkdir()
+    service = PtyService(home=served_home, process_control=SYSTEM_PROCESS_CONTROL, now=time.time)
+    service._loop = cast(asyncio.AbstractEventLoop, MagicMock())
+
+    created = service._spawn("meiva-test-home-1", str(tmp_path), dict(os.environ), None, None)
+    try:
+        assert (served_home / "logs" / "meiva-test-home-1.out.log").is_file()
+        assert not (meiva_home() / "logs" / "meiva-test-home-1.out.log").exists()
+    finally:
+        os.kill(created.pid, signal.SIGKILL)
+        session_module.finish(created, lambda _ended: None)
