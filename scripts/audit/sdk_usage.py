@@ -10,7 +10,7 @@ from __future__ import annotations
 import argparse
 import json
 import sys
-from contextlib import ExitStack
+from collections.abc import Iterator
 from pathlib import Path
 
 _REPO = Path(__file__).resolve().parents[2]
@@ -26,6 +26,13 @@ _DESCRIPTION = (
 )
 
 
+# meiva:note
+# One mirror's lines, read one at a time and closed when the last is taken.
+def _lines(path: Path) -> Iterator[str]:
+    with path.open(encoding="utf-8") as stream:
+        yield from stream
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=_DESCRIPTION)
     parser.add_argument("events", nargs="+", type=Path, help="JSONL event mirror files")
@@ -35,12 +42,8 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--agent-id", type=int, action="append", help="repeat to narrow callers")
     args = parser.parse_args(argv)
     try:
-        with ExitStack() as opened:
-            mirrors = [
-                (str(path), opened.enter_context(path.open(encoding="utf-8")))
-                for path in args.events
-            ]
-            data = report(read_calls(mirrors), args.start, args.end, args.coverage, args.agent_id)
+        mirrors = [(str(path), _lines(path)) for path in args.events]
+        data = report(read_calls(mirrors), args.start, args.end, args.coverage, args.agent_id)
     except (ValueError, OSError) as exc:
         parser.error(str(exc))
     print(json.dumps(data, indent=2))

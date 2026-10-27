@@ -63,7 +63,7 @@ def test_mirrors_deduplicate_and_reject_conflicting_event_ids() -> None:
         read_calls([mirror(raw, raw, conflicting)])
 
 
-def test_the_entry_reads_a_duplicated_mirror_once_and_reports(
+def test_the_entry_reports_a_duplicated_mirror_once(
     tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
     path = tmp_path / "events.jsonl"

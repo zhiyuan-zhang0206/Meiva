@@ -184,6 +184,9 @@ def test_command_type_import_does_not_start_the_exporter(mode: str, tmp_path: Pa
     assert not home.exists()
 
 
+# meiva:note
+# A shape lock, because the writer dials Postgres and the cluster URL it builds cannot be observed
+# without it: the function reads no `meiva_home` and hands its `home` argument to both calls.
 def test_the_owned_writer_takes_the_home_it_is_given_and_reads_none() -> None:
     source = inspect.getsource(export_process.owned_event_pipeline)
     function = ast.parse(textwrap.dedent(source)).body[0]
