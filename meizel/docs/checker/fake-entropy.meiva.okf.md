@@ -36,16 +36,18 @@ A reading is *spent* when it reaches:
 | a keyword that names an identity | `run_id=x`, `key=x`, `seed=x`, `nonce=x`, `token=x` |
 | a remainder or a bit operation | `x % n`, `x & 0xFFFFFFFF`, `x << k` (the linear-congruential draw) |
 
-The readings are `time.monotonic`, `time.perf_counter` and their `_ns` forms, `id(x)` and
-`next(<name bound to itertools.count()>)`. A name assigned from a reading carries it to the next use in
+The readings are `time.monotonic`, `time.perf_counter` and their `_ns` forms, `loop.time()` on
+`asyncio.get_running_loop()` or on a `loop`, `id(x)` and `next(<name bound to itertools.count()>)`. A name assigned from a reading carries it to the next use in
 the same function. A process-local counter is spent only in the first four rows: `n % period` is how a
 sampler counts.
 
-The second shape is a module's own wrapper over the clock: a private function without parameters whose
-only statement is `return time.monotonic()`, in a module that never uses the name as a value. The
-wrapper hides the clock read from the rule on sleeping functions and is a seam only a patch can reach.
-One the module injects (`now: Callable[[], float] = _monotonic`, `Waiter(now=_monotonic)`) is an injection
-point and is left alone, and so is a public one: another module may inject it.
+The second shape is a module's own wrapper over the clock, in a module that never uses its name as a
+value: a private function without parameters (or a method with only `self`) whose only statement is
+`return time.monotonic()`, or a private module-level name for the clock: `_now = time.monotonic`,
+`_now = lambda: time.monotonic()`, `_now = functools.partial(time.monotonic)`. The wrapper hides the
+clock read from the rule on sleeping functions and is a seam only a patch can reach. One the module
+injects (`now: Callable[[], float] = _monotonic`, `Waiter(now=_monotonic)`, `Waiter(now=self._now)`) is an
+injection point and is left alone, and so is a public one: another module may inject it.
 
 ## What it leaves alone
 
@@ -59,5 +61,23 @@ point and is left alone, and so is a public one: another module may inject it.
 The fix is the one the red line asks for: entropy has one carrier, the process's `random.Random`. Pass it
 down from the composition root and mint identifiers with `new_uuid(rng)`; a module's clock is a required
 `Timers` parameter.
+
+## Known limits
+
+The rule follows names inside one function and one module, so it does not see:
+
+- a wrapper of a wrapper (`_later = lambda: _monotonic() + 5`), a wrapper outside the module's own
+  top level or a class, and one whose injection point nothing ever fills (a default that no caller
+  overrides counts as injected);
+- a reading in a class body, a `default_factory=` or a parameter default, which belong to no function;
+- a reading stored on `self` in one method and spent in another, and a reading inside a container
+  (`hash((id(x), y))`);
+- a reassignment that clears a reading (`stamp = 0` after `stamp = time.monotonic_ns()`): the name
+  keeps it for the rest of the function;
+- what it cannot tell from an identifier: `id(x)` in a `__hash__` or a log line, and a counter that
+  names a thread (`Thread(name=f"worker-{next(count)}")`), which is reported like any other.
+
+A site it misses is not a proof that the value is entropy; a site it reports can be a label. Either way
+the answer is the carrier: the process's `random.Random`, or a clock the module is handed.
 
 Parent: [[meizel/docs/checker/ambient.meiva.okf.md|ambient reads]].
