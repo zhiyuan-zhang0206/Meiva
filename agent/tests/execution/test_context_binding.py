@@ -188,3 +188,18 @@ print("owned writer preserved")
     stdout, payload = _finish(process, result)
     assert payload.kind == "done", payload.exc_msg
     assert "owned writer preserved" in stdout
+
+
+def test_child_context_builds_its_one_event_bus_on_first_read(tmp_path: Path) -> None:
+    code = """
+import meiva
+context = meiva.context
+assert context.bus is None
+bus = context.require_bus()
+assert context.require_bus() is bus
+print("bus:" + type(bus).__name__)
+"""
+    process, result = _start(tmp_path, 516, code)
+    stdout, payload = _finish(process, result)
+    assert payload.kind == "done", payload.exc_msg
+    assert "bus:EventBus" in stdout
