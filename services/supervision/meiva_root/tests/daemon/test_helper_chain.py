@@ -115,6 +115,7 @@ async def main(run_for_s: float, confirm_rounds: int) -> None:
         stop=stop,
         config=HelperChainConfig(interval_s=0.01, confirm_rounds=confirm_rounds),
         root_pid=os.getpid(),
+        environ=os.environ,
     )
     task = asyncio.create_task(watch.run())
     await asyncio.sleep(run_for_s)

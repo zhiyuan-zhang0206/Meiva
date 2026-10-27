@@ -8,7 +8,7 @@ exports = ["backend.py", "coding_session_owner.py", "coding_session_owner_record
 "posixproc.py" = ["record.py"]
 "protocol.py" = ["record.py"]
 "pty" = ["posixproc.py", "record.py"]
-"tests" = ["backend.py", "coding_session_owner.py", "coding_session_owner_record.py", "env_forwarding.py", "helperproc.py", "hosting.py", "log_prefix.py", "posixproc.py", "protocol.py", "pty", "record.py"]
+"tests" = ["backend.py", "coding_session_owner.py", "coding_session_owner_record.py", "env_forwarding.py", "helper_chain_guard.py", "helperproc.py", "hosting.py", "log_prefix.py", "posixproc.py", "protocol.py", "pty", "record.py"]
 
 [purity]
 "__init__.py" = "strict"
@@ -19,7 +19,6 @@ exports = ["backend.py", "coding_session_owner.py", "coding_session_owner_record
 "backend.py#home base.paths.logs_dir" = 1
 "backend.py#home base.paths.meiva_home" = 1
 "coding_session_owner.py#pid os.getuid" = 1
-"helper_chain_guard.py#environ base.native_process.child_env.inherited_process_env" = 1
 "helperproc.py#home base.paths.logs_dir" = 2
 "helperproc.py#home base.paths.meiva_home" = 2
 "helperproc.py#settings base.config.settings" = 1

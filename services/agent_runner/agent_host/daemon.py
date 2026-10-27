@@ -35,7 +35,7 @@ import random
 import secrets
 import signal
 import sys
-from collections.abc import Awaitable, Callable, Collection, Coroutine, Iterable
+from collections.abc import Awaitable, Callable, Collection, Coroutine, Iterable, Mapping
 from functools import partial
 from pathlib import Path
 
@@ -572,7 +572,9 @@ async def run(
                 scheduler,
                 local_machine,
                 bus,
-                require_helper_chain=require_helper_parent_chain,
+                require_helper_chain=partial(
+                    require_helper_parent_chain, pid=os.getpid(), environ=os.environ
+                ),
                 read_alert_seconds=lambda: config.view.daemon.host_admission_wait_alert_seconds,
             ),
             settle_coro=settle_running_rows_at_start(control_pool, local_machine),
@@ -624,16 +626,15 @@ async def run(
             host_log.info("[agent-host] daemon stopped")
 
 
-def require_helper_parent_chain() -> None:
-    pid = os.getpid()
-    if parent_chain_intact(pid):
+def require_helper_parent_chain(*, pid: int, environ: Mapping[str, str]) -> None:
+    if parent_chain_intact(pid, environ=environ):
         return
     logger.warning(
         "[agent-host] permissions helper parent chain broken, self-terminating for helper respawn",
         event="helper_chain_broken",
         process="agent_host",
         detail=f"agent host pid {pid} is no longer under the permissions helper "
-        f"that spawned it (marker pid {helper_marker_pid() or 'absent'})",
+        f"that spawned it (marker pid {helper_marker_pid(environ) or 'absent'})",
     )
     os._exit(HELPER_CHAIN_BROKEN_EXIT_CODE)
 
@@ -644,7 +645,7 @@ def main() -> None:
     from base.deploy.schema.migrations import assert_schema_current
 
     config, home = boot_process()
-    require_helper_parent_chain()
+    require_helper_parent_chain(pid=os.getpid(), environ=os.environ)
     assert_schema_current(config.view.data_plane.db_url)
     machine = ConfiguredMachineIdentity(config)
     version = CodeVersion(process_context.loaded_code_image())
