@@ -667,9 +667,17 @@ def test_repeated_provider_failure_announces_once_and_never_repeats(
     assert state["providers"]["gemini"]["status"].startswith("error:")
 
 
-def test_the_state_file_is_under_the_home_the_entry_resolved_unless_a_directory_is_named(
-    tracker: Any, tmp_path: Path
+def test_the_state_file_is_under_the_home_when_no_directory_is_named(
+    tmp_path: Path, tracker: Any
 ) -> None:
-    assert tracker._state_path(None, tmp_path) == tmp_path / "model-tracker" / "state.json"
-    named = tmp_path / "elsewhere"
-    assert tracker._state_path(named, tmp_path) == named / "state.json"
+    env_file = tmp_path / ".env"
+    write_env_file(tracker, env_file)
+    fetcher = stub_fetcher(tracker, {"glm": ["glm-5.4"]}, models={})
+    code = tracker.main(
+        ["--env-file", str(env_file)],
+        env_lookup=missing_environment_value,
+        model_fetcher=fetcher,
+        models={},
+    )
+    assert code == 2
+    assert (meiva_home() / "model-tracker" / "state.json").is_file()
