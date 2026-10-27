@@ -45,6 +45,13 @@ def code_for(make_repo: RepoFactory, manifest: str, code: str, extra: dict[str, 
         ('[roots]\n"a.py" = { kinds = ["environ"], why = "x", also = 1 }\n', "manifest-syntax"),
         ('[roots]\n"a.py" = { kinds = ["environ", "environ"], why = "x" }\n', "manifest-duplicate"),
         ("roots = 3\n", "manifest-syntax"),
+        ('[purity]\n"a.py" = { mode = "none" }\n', "manifest-syntax"),
+        ('[purity]\n"a.py" = { mode = "none", why = " " }\n', "manifest-syntax"),
+        ('[purity]\n"a.py" = { mode = "none", why = 3 }\n', "manifest-syntax"),
+        ('[purity]\n"a.py" = { mode = "strict", why = "x" }\n', "manifest-syntax"),
+        ('[purity]\n"a.py" = { mode = "none", why = "x", also = 1 }\n', "manifest-syntax"),
+        ('[purity]\n"a.py" = { why = "x" }\n', "manifest-syntax"),
+        ('[purity]\n"ghost.py" = { mode = "none", why = "x" }\n', "manifest-unknown-child"),
         ('[state]\n"a.py" = ["environ"]\n', "manifest-syntax"),
         ('[state]\n"a.py" = "settings"\n', "manifest-syntax"),
         ('[state]\n"ghost.py" = ["settings"]\n', "manifest-unknown-child"),
@@ -101,3 +108,19 @@ def test_state_and_roots_are_read_into_the_manifest(make_repo: RepoFactory) -> N
         "a.py": (["environ"], "reads it"),
         "b.py": (["clock", "pid"], "stamps rows"),
     }
+
+
+def test_a_file_that_is_not_judged_says_why(make_repo: RepoFactory) -> None:
+    manifest = (
+        '[purity]\n"." = { mode = "none", why = "the shell of the directory" }\n'
+        '"a.py" = "strict-to-be"\n"b.py" = { mode = "none", why = "reads what the plan asks for" }\n'
+    )
+    root = make_repo({**BASE, "pkg/meizel.toml": manifest})
+    read = analysis_of(root).manifests["pkg"]
+    assert (read.purity_default, read.purity) == ("none", {"a.py": "strict-to-be", "b.py": "none"})
+    assert read.purity_why == {
+        ".": "the shell of the directory",
+        "a.py": "",
+        "b.py": "reads what the plan asks for",
+    }
+    assert not diagnostics(root, "manifest-syntax")

@@ -340,7 +340,7 @@ def _scope_text(
         levels = (
             {".": manifest.purity_default} if manifest.purity_default is not None else {}
         ) | children
-        text = set_scope(text, "purity", levels, {})
+        text = set_scope(text, "purity", levels, manifest.purity_why)
     text = set_scope(text, "state", baseline.state, {})
     return set_scope(
         text,

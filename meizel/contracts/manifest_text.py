@@ -149,6 +149,21 @@ _RESTORED_WHY = "restored from a historical registry that recorded no reason"
 
 
 # meiva:note
+# One declaration as the manifest spells it: a roots entry carries its kinds and why, a purity `none`
+# its mode and why (a placeholder when the base recorded none), everything else the bare value.
+def _declaration(
+    table: str, name: str, declared: str | tuple[AmbientKind, ...], reasons: Mapping[str, str]
+) -> str:
+    values = json.dumps(declared if isinstance(declared, str) else [k.value for k in declared])
+    why = json.dumps(reasons.get(name) or _RESTORED_WHY)
+    if table == "roots":
+        return f"{{ kinds = {values}, why = {why} }}"
+    if table == "purity" and declared == "none":
+        return f'{{ mode = "none", why = {why} }}'
+    return values
+
+
+# meiva:note
 # Snapshot preparation replaces one finite declaration table while preserving every other table.
 # Purity levels and ambient kinds share this text-edit operation, not their semantic vocabulary;
 # callers supply the already validated base/head facts appropriate to that scope.
@@ -169,11 +184,7 @@ def set_scope(
         del lines[bounds[0] - 1 : bounds[1]]
     block = [f"[{table}]"]
     for name, declared in sorted(declarations.items()):
-        values = json.dumps(declared if isinstance(declared, str) else [k.value for k in declared])
-        if table == "roots":
-            why = reasons.get(name) or _RESTORED_WHY
-            values = f"{{ kinds = {values}, why = {json.dumps(why)} }}"
-        block.append(f"{json.dumps(name)} = {values}")
+        block.append(f"{json.dumps(name)} = {_declaration(table, name, declared, reasons)}")
     if declarations:
         return _append_table(lines, block)
     return "\n".join(lines).rstrip() + "\n" if lines else ""
