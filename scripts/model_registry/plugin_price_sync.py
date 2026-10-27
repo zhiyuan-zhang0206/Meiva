@@ -47,9 +47,13 @@ class PluginSyncResult(NamedTuple):
 
 
 # meiva:note
-# What one read-only comparison covered, and which declarations disagree with the archive.
+# What one read-only comparison covered, and which declarations disagree with the archive. A face
+# is one provider package; the sources are the files behind those faces, because one face may
+# spread its declarations over several. Both are reported: a count that cannot move on its own
+# would hide a sibling module the reader stopped reaching.
 class LatticeDrift(NamedTuple):
-    provider_files: int
+    provider_faces: int
+    scanned_sources: int
     priced_models: int
     drifted: tuple[str, ...]
 
@@ -539,7 +543,7 @@ def sync_plugin_rates(
 
     if failures:
         raise RuntimeError(
-            f"{len(failures)} of {len(units)} provider file(s) could not be "
+            f"{len(failures)} of {len(units)} provider face(s) could not be "
             "synchronized, so no plugin rate was written:\n"
             + "\n".join(f"- {failure}" for failure in failures)
         )
@@ -569,7 +573,8 @@ def sync_plugin_rates(
 # and provenance must be what the archive states. The flat trio is the base tier at the last
 # synchronization instant, so comparing it would answer differently on different days while nothing
 # in the tree changed; it is compared only where it is the whole declaration, on a provider that
-# carries no periods. Zero provider files or zero priced models is an error, never a green run.
+# carries no periods. Zero provider faces, zero scanned sources or zero priced models is an
+# error, never a green run.
 # meiva:link base/lm/pricing/docs/pricing.meiva.okf.md
 def lattice_drift(archive_path: Path, repo_root: Path) -> LatticeDrift:
     root = repo_root.resolve(strict=True)
@@ -580,10 +585,12 @@ def lattice_drift(archive_path: Path, repo_root: Path) -> LatticeDrift:
         raise RuntimeError(f"no built-in provider.py files found under {root}")
 
     drifted: list[str] = []
+    scanned_sources = 0
     priced_models = 0
     seen_models: set[str] = set()
     for package in units:
         sources = _unit_sources(package, root)
+        scanned_sources += len(sources)
         path = next(iter(sources))
         manifest = unit_manifest(sources)
         _reject_duplicate_prices(seen_models, manifest, path=path)
@@ -612,4 +619,4 @@ def lattice_drift(archive_path: Path, repo_root: Path) -> LatticeDrift:
             drifted.extend(_period_labels(model, declared, target))
             if not declared.periods and not target.periods and declared.rates != base:
                 drifted.append(f"{model}: flat rate")
-    return LatticeDrift(len(units), priced_models, tuple(sorted(drifted)))
+    return LatticeDrift(len(units), scanned_sources, priced_models, tuple(sorted(drifted)))

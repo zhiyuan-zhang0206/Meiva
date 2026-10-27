@@ -141,6 +141,23 @@ FAST_PRICES = {
 """
 
 
+_OTHER_PLUGIN = """from base.lm.provider_api import PriceRates, ProviderContribution
+
+
+PROVIDER = ProviderContribution(
+    binding=None,
+    models={"other-chat": None},
+    pricing={
+        "other-chat": PriceRates(
+            cache_miss=1.0, cache_hit=0.1, output=3.0,
+            source_url="https://example.com/decisions",
+            source_checked_at="2026-10-11", vendor="typesafe",
+        ),
+    },
+)
+"""
+
+
 def _entry(rates: tuple[str, str, str], *, checked_at: str = "2026-10-11") -> dict[str, Any]:
     return {
         "vendor": "typesafe",
@@ -342,3 +359,40 @@ def test_a_declaration_split_across_sibling_modules_is_synchronized(tmp_path: Pa
     assert unit.prices["split-fast-base-fast"].rates == sync.FlatRates(
         Decimal("5.0"), Decimal("0.5"), Decimal("15.0")
     )
+
+
+# meiva:note
+# Resolution stays inside one package: a face that imports its price table from another
+# provider's module fails the literal check instead of reading a table this unit does not own.
+# That boundary is what makes reading a whole package safe, so it is asserted as a refusal.
+def test_a_declaration_named_from_another_package_is_refused(tmp_path: Path) -> None:
+    face = _SPLIT_FACE.replace(
+        "from meiva_builtins.plugins.lm_split.prices import FAST_PRICES, PRICES",
+        "from meiva_builtins.plugins.lm_other.prices import FAST_PRICES, PRICES",
+    )
+    root, archive = _write_repo(
+        tmp_path,
+        {
+            "meiva_builtins/plugins/lm_split/provider.py": face,
+            "meiva_builtins/plugins/lm_split/models.py": _SPLIT_MODELS,
+            "meiva_builtins/plugins/lm_other/provider.py": _OTHER_PLUGIN,
+            "meiva_builtins/plugins/lm_other/prices.py": _SPLIT_PRICES,
+        },
+        {
+            "split-chat": _entry(("2.0", "0.2", "6.0"), checked_at="2026-10-20"),
+            "split-fast-base": _entry(("4.0", "0.4", "12.0"), checked_at="2026-10-20"),
+            "split-fast-base-fast": _entry(("5.0", "0.5", "15.0"), checked_at="2026-10-20"),
+            # meiva:note
+            # Drifted on purpose: a pass that reached the write step would rewrite this file.
+            "other-chat": _entry(("7.0", "0.7", "21.0"), checked_at="2026-10-20"),
+        },
+    )
+    package = root / "meiva_builtins/plugins"
+    before = {path: path.read_text(encoding="utf-8") for path in sorted(package.glob("*/**/*.py"))}
+
+    with pytest.raises(RuntimeError, match="must have one literal pricing= mapping"):
+        pricing_updater.sync_plugin_rates(archive, root)
+
+    assert {
+        path: path.read_text(encoding="utf-8") for path in sorted(package.glob("*/**/*.py"))
+    } == before
