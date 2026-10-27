@@ -3,24 +3,22 @@
 #
 # `RpcClient` is the owner of one dispatch's transport — the credential read, the timers for the
 # retry loop and the jitter draw. What a dispatch tries, waits and sends is decided from values in
-# `ops.cluster.rpc_plans`. `RpcClient.system()` is the composition entry that reads the process
-# settings; the module-level `dispatch_to_machine` / `dispatch_to_url` are its one-shot shorthand
-# for callers that hold no client of their own.
+# `ops.cluster.rpc_plans`. A process builds its client once, at its entry, with
+# `RpcClient.from_boot` and hands it to what dispatches.
 
 from __future__ import annotations
 
 import logging
 import random
-import uuid
 from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Any, Self, assert_never
 
 import httpx
 
-from base.clock import SYSTEM_TIMERS, Timers
+from base.clock import Timers
+from base.clock.ids import new_uuid
 from base.cluster.machine import GatewayAccess, gateway_auth_headers
-from base.cluster.machine.ambient import gateway_access_from_settings
 from base.cluster.machine.boot import gateway_access_from_boot
 from base.cluster.machines import (
     MachineGatewayUrlMissing,
@@ -29,7 +27,7 @@ from base.cluster.machines import (
 from base.cluster.machines import (
     lookup as lookup_machine_url,
 )
-from base.config import ConfigBoot, settings
+from base.config import ConfigBoot
 from base.db import Database
 from ops.cluster.rpc_plans import (
     JITTER_HIGH,
@@ -55,9 +53,6 @@ __all__ = [
     "RpcClient",
     "RpcConfig",
     "default_idempotency_key",
-    "dispatch_to_machine",
-    "dispatch_to_url",
-    "rpc_config_from_settings",
     "worst_case_dispatch_seconds",
 ]
 
@@ -66,9 +61,11 @@ _log = logging.getLogger(__name__)
 
 # meiva:note
 # The key a dispatch of `kind` carries when the caller supplied none: the stable business key
-# where the payload has a business id, else a fresh one per dispatch.
-def default_idempotency_key(target_machine: str, kind: OpKind, payload: dict[str, Any]) -> str:
-    return business_idempotency_key(target_machine, kind, payload) or f"{kind}:{uuid.uuid4()}"
+# where the payload has a business id, else a fresh one per dispatch drawn from `rng`.
+def default_idempotency_key(
+    target_machine: str, kind: OpKind, payload: dict[str, Any], rng: random.Random
+) -> str:
+    return business_idempotency_key(target_machine, kind, payload) or f"{kind}:{new_uuid(rng)}"
 
 
 # meiva:note
@@ -107,17 +104,6 @@ class ClusterOpFailed(RuntimeError):  # noqa: N818
         self.result = result
 
 
-def rpc_config_from_settings() -> RpcConfig:
-    return RpcConfig(
-        timeout_seconds=settings.gateway.cluster_rpc_timeout_seconds,
-        max_retries=settings.gateway.cluster_rpc_max_retries,
-    )
-
-
-def _access_from_settings() -> GatewayAccess:
-    return gateway_access_from_settings()  # ambient: O
-
-
 # meiva:note
 # One dispatch's transport owner.
 #
@@ -125,7 +111,8 @@ def _access_from_settings() -> GatewayAccess:
 # the gateway credential is re-read from the process configuration each time, so a credential that
 # was refreshed between attempts is the one presented (authentication keeps its existing refresh
 # lifetime). `timers` is the retry loop's clock: the loop interleaves attempts with waits, so it
-# owns its sleeps. The HTTP client is the real `httpx.AsyncClient`, built per attempt with the
+# owns its sleeps. `rng` draws the retry jitter and the fresh idempotency keys; neither is a
+# secret, so the root hands in a plain `random.Random`. The HTTP client is the real `httpx.AsyncClient`, built per attempt with the
 # system proxy settings ignored (`trust_env=False`) because cluster peers are private-network
 # addresses.
 @dataclass(frozen=True)
@@ -133,20 +120,15 @@ class RpcClient:
     config: RpcConfig
     access: Callable[[], GatewayAccess]
     timers: Timers
-
-    @classmethod
-    def system(cls) -> Self:
-        return cls(
-            config=rpc_config_from_settings(), access=_access_from_settings, timers=SYSTEM_TIMERS
-        )
+    rng: random.Random
 
     # meiva:note
     # The client a root builds from its own configuration: the dispatch budget from the
     # `gateway` fields, and the gateway access read from `config` on every attempt (a credential
-    # refreshed between attempts is the one presented). The root hands in `timers`; nothing here
-    # reads a process singleton.
+    # refreshed between attempts is the one presented). The root hands in `timers` and `rng`; nothing
+    # here reads a process singleton.
     @classmethod
-    def from_boot(cls, config: ConfigBoot, *, timers: Timers) -> Self:
+    def from_boot(cls, config: ConfigBoot, *, timers: Timers, rng: random.Random) -> Self:
         gateway = config.view.gateway
         return cls(
             config=RpcConfig(
@@ -155,6 +137,7 @@ class RpcClient:
             ),
             access=lambda: gateway_access_from_boot(config),
             timers=timers,
+            rng=rng,
         )
 
     async def _dispatch_once(
@@ -256,7 +239,7 @@ class RpcClient:
         budget = dispatch_budget(self.config, timeout_s, retries)
 
         if kind in NON_IDEMPOTENT_KINDS and idempotency_key is None:
-            idempotency_key = default_idempotency_key(target_machine, kind, payload)
+            idempotency_key = default_idempotency_key(target_machine, kind, payload, self.rng)
 
         started = self.timers.monotonic()
         last: _RetryableFailure | None = None
@@ -273,10 +256,7 @@ class RpcClient:
             except _RetryableFailure as exc:
                 last = exc
                 if attempt < budget.retries:
-                    # meiva:note
-                    # The jitter is a scheduling spread, not a secret, so the non-cryptographic
-                    # `random` draw is the right one (S311 is about security tokens).
-                    delay = retry_delay_s(attempt, random.uniform(JITTER_LOW, JITTER_HIGH))  # noqa: S311
+                    delay = retry_delay_s(attempt, self.rng.uniform(JITTER_LOW, JITTER_HIGH))
                     _log.debug(
                         "cluster_rpc %s -> machine=%s attempt %d/%d failed, retrying in %.1fs: %r",
                         kind,
@@ -348,55 +328,3 @@ class RpcClient:
             retries=retries,
             idempotency_key=idempotency_key,
         )
-
-
-# meiva:note
-# `RpcClient.system().dispatch_to_machine(...)` for a caller that holds no client of its own.
-# The kind is checked first; a valid call reads settings once through `RpcClient.system()`.
-async def dispatch_to_machine(
-    db: Database,
-    target_machine: str,
-    kind: str,
-    payload: dict[str, Any],
-    *,
-    timeout_s: float | None = None,
-    retries: int | None = None,
-    idempotency_key: str | None = None,
-) -> dict[str, Any]:
-    if not is_op_kind(kind):
-        raise ValueError(f"unknown op kind: {kind!r}")
-    return await RpcClient.system().dispatch_to_machine(
-        db,
-        target_machine,
-        kind,
-        payload,
-        timeout_s=timeout_s,
-        retries=retries,
-        idempotency_key=idempotency_key,
-    )
-
-
-# meiva:note
-# `RpcClient.system().dispatch_to_url(...)` for a caller that holds no client of its own. The
-# kind is checked first; a valid call reads settings once through `RpcClient.system()`.
-async def dispatch_to_url(
-    target_machine: str,
-    kind: str,
-    payload: dict[str, Any],
-    *,
-    ops_url: str,
-    timeout_s: float | None = None,
-    retries: int | None = None,
-    idempotency_key: str | None = None,
-) -> dict[str, Any]:
-    if not is_op_kind(kind):
-        raise ValueError(f"unknown op kind: {kind!r}")
-    return await RpcClient.system().dispatch_to_url(
-        target_machine,
-        kind,
-        payload,
-        ops_url=ops_url,
-        timeout_s=timeout_s,
-        retries=retries,
-        idempotency_key=idempotency_key,
-    )

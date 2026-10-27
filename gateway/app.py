@@ -224,7 +224,9 @@ async def lifespan(
                 env_path=process.home / ".env",
             )
 
-            app.state.rpc = RpcClient.from_boot(config, timers=SYSTEM_TIMERS)
+            app.state.rpc = RpcClient.from_boot(
+                config, timers=SYSTEM_TIMERS, rng=app.state.gateway_config.rng
+            )
             app.state.started_at = app.state.clock.now().timestamp()
             if app.state.gateway_config.human_auth == "trusted_network":
                 _log.warning(

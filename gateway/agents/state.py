@@ -48,7 +48,7 @@ from gateway.agents.schemas import (
     TraceCheckpointMessagesResponse,
 )
 from gateway.agents.system_note import system_note_blocking as system_note_blocking
-from gateway.http.config import gateway_config
+from gateway.http.config import gateway_config, gateway_rpc
 from gateway.http.model_catalog import request_default_model, require_model_catalog
 from ops import lifecycle as _ops
 from ops.agents import get_agent_status
@@ -208,6 +208,7 @@ async def post_agent_message(
                 source=body.source,
                 payload=normalized_payload,
                 local_machine=request.app.state.machine.name(),
+                rpc=gateway_rpc(request),
             )
         except ClientMessageConflictError as exc:
             raise HTTPException(status_code=409, detail=str(exc)) from exc
@@ -241,6 +242,7 @@ async def post_agent_message(
             client_message_id=idempotency_key,
             provenance=provenance,
             local_machine=request.app.state.machine.name(),
+            rpc=gateway_rpc(request),
         )
     except ClientMessageConflictError as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
@@ -306,6 +308,7 @@ async def post_agent_system_note(
             trigger_inbound_id=inbound_id,
             trigger_inbound_kind=note_kind,
             local_machine=request.app.state.machine.name(),
+            rpc=gateway_rpc(request),
         )
     else:
         status = await asyncio.to_thread(get_agent_status, request.app.state.db, agent_id)
@@ -345,6 +348,7 @@ async def reconcile_agent_message(
             source=body.source,
             payload=payload,
             local_machine=request.app.state.machine.name(),
+            rpc=gateway_rpc(request),
         )
     except ClientMessageConflictError as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc

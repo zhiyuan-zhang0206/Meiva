@@ -16,7 +16,9 @@ from typing import Any
 import psycopg
 import pytest
 
+from base.clock.ids import new_uuid
 from base.clock.tests.manual_timers import ManualTimers
+from base.clock.tests.seeded_rng import seeded_rng
 from base.cluster.machine import GatewayAccess
 from base.config.tests.configuration import snapshot_process_config
 from base.db import Database
@@ -24,6 +26,7 @@ from base.db.code_version_gate import ProcessDbGate
 from base.host.proc import run_bounded
 from ops.cluster import rpc as cluster_rpc
 from ops.cluster.rpc import RpcClient, RpcConfig
+from ops.cluster.rpc_plans import JITTER_HIGH, JITTER_LOW, retry_delay_s
 from ops.rpc_schemas import OpKind
 from ops.tests.rpc_support import (
     RPC_TEST_CREDENTIAL,
@@ -66,7 +69,7 @@ def test_a_client_built_from_boot_takes_its_budget_and_its_credential_from_that_
     boot.set_field("cluster_secret", first)
     timers = ManualTimers()
 
-    rpc = RpcClient.from_boot(boot, timers=timers)
+    rpc = RpcClient.from_boot(boot, timers=timers, rng=seeded_rng())
 
     assert rpc.config == RpcConfig(timeout_seconds=7.5, max_retries=4)
     assert rpc.timers is timers
@@ -253,8 +256,9 @@ async def test_machine_root_uses_the_registered_ops_url(
 
 @pytest.mark.asyncio
 async def test_provided_ops_url_bypasses_machines_lookup() -> None:
+    rpc, _ = rpc_client()
     with scripted_ops_server(completed({"ok": 1})) as server:
-        result = await cluster_rpc.dispatch_to_url(
+        result = await rpc.dispatch_to_url(
             "runner-a", "status_probe", {}, ops_url=server.url, retries=0
         )
 
@@ -411,7 +415,10 @@ async def test_each_attempt_reads_fresh_credentials_without_changing_the_key() -
 
     timers = ManualTimers()
     rpc = RpcClient(
-        config=RpcConfig(timeout_seconds=3.0, max_retries=1), access=access, timers=timers
+        config=RpcConfig(timeout_seconds=3.0, max_retries=1),
+        access=access,
+        timers=timers,
+        rng=seeded_rng(),
     )
     with scripted_ops_server(dropped(), completed({})) as server:
         await rpc.dispatch_to_url("runner-a", "spawn-launch", {"agent_id": 5}, ops_url=server.url)
@@ -455,14 +462,36 @@ async def test_spawn_launch_defaults_to_its_agent_idempotency_key() -> None:
     assert keys[3] != keys[0]
 
 
+@pytest.mark.asyncio
+async def test_a_fresh_idempotency_key_is_drawn_from_the_clients_generator() -> None:
+    rpc, _ = rpc_client()
+    with scripted_ops_server(completed({})) as server:
+        await rpc.dispatch_to_url("runner-a", "lifecycle", {}, retries=0, ops_url=server.url)
+
+    assert _keys(server.received) == [f"lifecycle:{new_uuid(seeded_rng())}"]
+
+
+@pytest.mark.asyncio
+async def test_a_retry_wait_is_drawn_from_the_clients_generator() -> None:
+    rpc, timers = rpc_client()
+    with scripted_ops_server(dropped(), completed({})) as server:
+        await rpc.dispatch_to_url("runner-a", "status_probe", {}, retries=1, ops_url=server.url)
+
+    assert timers.sleeps == [retry_delay_s(0, seeded_rng().uniform(JITTER_LOW, JITTER_HIGH))]
+
+
 def test_launch_key_is_stable_within_attempt_and_rotates_between_attempts() -> None:
     first = {"agent_id": 42, "launch_attempt_id": "00000000-0000-0000-0000-000000000001"}
     second = {"agent_id": 42, "launch_attempt_id": "00000000-0000-0000-0000-000000000002"}
 
-    key = cluster_rpc.default_idempotency_key("runner-a", "spawn-launch", first)
+    key = cluster_rpc.default_idempotency_key("runner-a", "spawn-launch", first, seeded_rng())
 
-    assert key == cluster_rpc.default_idempotency_key("runner-a", "spawn-launch", first)
-    assert key != cluster_rpc.default_idempotency_key("runner-a", "spawn-launch", second)
+    assert key == cluster_rpc.default_idempotency_key(
+        "runner-a", "spawn-launch", first, seeded_rng(1)
+    )
+    assert key != cluster_rpc.default_idempotency_key(
+        "runner-a", "spawn-launch", second, seeded_rng()
+    )
     assert key.startswith("spawn-launch:runner-a:42:")
 
 
@@ -503,8 +532,9 @@ def registered_machines(db_conn: psycopg.Connection) -> None:
 
 # meiva:note
 # The child process is a real gateway-profile process whose unit `.env` carries the RPC timeout
-# and retry settings; `RpcClient.system()` is the one place those settings are read.
-def _system_client_child(
+# and retry settings; it boots its configuration and builds the client with `RpcClient.from_boot`,
+# the way a daemon entry does.
+def _boot_client_child(
     home: Path, case: str, ops_url: str, *, extra_env: dict[str, str] | None = None
 ) -> dict[str, object]:
     (home / ".env").write_text(
@@ -536,11 +566,11 @@ def _system_client_child(
     return json.loads(child.stdout)
 
 
-def test_the_system_client_reads_its_timeout_retries_and_credential_from_the_unit(
+def test_a_boot_client_reads_its_timeout_retries_and_credential_from_the_unit(
     tmp_path: Path,
 ) -> None:
     with scripted_ops_server(completed({})) as server:
-        reported = _system_client_child(tmp_path, "config", server.url)
+        reported = _boot_client_child(tmp_path, "config", server.url)
 
     assert reported == {
         "timeout_seconds": 12.5,
@@ -556,7 +586,7 @@ def test_the_system_client_reads_its_timeout_retries_and_credential_from_the_uni
 def test_the_client_ignores_the_system_proxy(tmp_path: Path) -> None:
     dead_proxy = "http://127.0.0.1:9"
     with scripted_ops_server(completed({"ok": 1})) as server:
-        result = _system_client_child(
+        result = _boot_client_child(
             tmp_path,
             "proxy",
             server.url,
@@ -570,16 +600,3 @@ def test_the_client_ignores_the_system_proxy(tmp_path: Path) -> None:
 
     assert result == {"ok": 1}
     assert len(server.received) == 1
-
-
-@pytest.mark.parametrize("case", ["unknown-machine", "unknown-url"])
-def test_public_dispatch_rejects_unknown_kind_before_invalid_settings(
-    tmp_path: Path, case: str
-) -> None:
-    result = _system_client_child(
-        tmp_path,
-        case,
-        "http://127.0.0.1:1/ops",
-        extra_env={"MEIVA_CLUSTER_RPC_TIMEOUT_SECONDS": "not-a-timeout"},
-    )
-    assert result == {"error": "unknown op kind: 'no-such-op'"}

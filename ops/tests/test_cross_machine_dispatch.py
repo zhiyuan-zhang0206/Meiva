@@ -1,7 +1,7 @@
 # meiva:note
 # `dispatch_to_machine` end to end: the real registry read, the real HTTP client and the real
-# result handling, against a loopback listener registered as a runner in `machines`. The module
-# function builds its client from the process settings, as every caller that holds none does.
+# result handling, against a loopback listener registered as a runner in `machines`. The client is
+# the one the test hands in, as every caller does.
 
 from __future__ import annotations
 
@@ -10,8 +10,8 @@ import pytest
 
 from base.db import Database
 from base.db.code_version_gate import ProcessDbGate
-from ops.cluster.rpc import ClusterOpFailed, dispatch_to_machine
-from ops.tests.rpc_support import completed, failed, http_reply, scripted_ops_server
+from ops.cluster.rpc import ClusterOpFailed
+from ops.tests.rpc_support import completed, failed, http_reply, rpc_client, scripted_ops_server
 
 
 def _register(conn: psycopg.Connection, name: str, ops_url: str) -> None:
@@ -31,7 +31,7 @@ async def test_dispatch_resolves_registered_url_and_round_trips(
     with scripted_ops_server(completed({"ran": True})) as server:
         _register(db_conn, "runner-x", server.url)
 
-        result = await dispatch_to_machine(
+        result = await rpc_client()[0].dispatch_to_machine(
             Database.from_settings(gate=database_gate), "runner-x", "status_probe", {"foo": "bar"}
         )
 
@@ -47,7 +47,7 @@ async def test_dispatch_failed_status_raises_cluster_op_failed(
     with scripted_ops_server(failed({"error": "boom"})) as server:
         _register(db_conn, "runner-y", server.url)
         with pytest.raises(ClusterOpFailed) as failure:
-            await dispatch_to_machine(
+            await rpc_client()[0].dispatch_to_machine(
                 Database.from_settings(gate=database_gate), "runner-y", "status_probe", {}
             )
 
@@ -59,7 +59,7 @@ async def test_dispatch_retries_transient_503_over_real_wire(
 ) -> None:
     with scripted_ops_server(http_reply(503), completed({"ran": True})) as server:
         _register(db_conn, "runner-z", server.url)
-        result = await dispatch_to_machine(
+        result = await rpc_client()[0].dispatch_to_machine(
             Database.from_settings(gate=database_gate),
             "runner-z",
             "status_probe",

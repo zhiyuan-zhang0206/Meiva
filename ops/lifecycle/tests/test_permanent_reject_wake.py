@@ -13,6 +13,7 @@ from base.db.code_version_gate import ProcessDbGate
 from base.events.live.bus import EventBus
 from base.lm.catalog import ModelCatalog
 from ops import lifecycle
+from ops.cluster.rpc import RpcClient
 
 
 async def test_permanent_reject_blocks_heartbeat_but_fresh_chat_can_try_again(
@@ -23,6 +24,7 @@ async def test_permanent_reject_blocks_heartbeat_but_fresh_chat_can_try_again(
     model_catalog: ModelCatalog,
     database_gate: ProcessDbGate,
     machine_identity: MachineIdentityReader,
+    rpc: RpcClient,
 ) -> None:
     agent = terminated(
         db_conn,
@@ -51,6 +53,7 @@ async def test_permanent_reject_blocks_heartbeat_but_fresh_chat_can_try_again(
             local_machine=machine_identity.name(),
             trigger_inbound_id=heartbeat[0],
             trigger_inbound_kind=InboundKind.HEARTBEAT,
+            rpc=rpc,
         )
         is AgentStatus.TERMINATED
     )
@@ -70,6 +73,7 @@ async def test_permanent_reject_blocks_heartbeat_but_fresh_chat_can_try_again(
             local_machine=machine_identity.name(),
             trigger_inbound_id=chat,
             trigger_inbound_kind=InboundKind.CHAT,
+            rpc=rpc,
         )
         is AgentStatus.IDLING
     )

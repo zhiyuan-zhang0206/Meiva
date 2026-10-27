@@ -34,6 +34,7 @@ from base.daemon.schedules.completion_notices import (
 )
 from base.db import Database
 from base.events.live.bus import EventBus
+from ops.cluster.rpc import RpcClient
 from ops.lifecycle.delivery import deliver_chat_inbound
 
 FLUSH_INTERVAL_S = 60.0
@@ -71,6 +72,7 @@ async def flush_once(
     *,
     now: datetime,
     machine: MachineIdentityReader,
+    rpc: RpcClient,
 ) -> int:
     """Deliver each completed hour, then mark its persisted event rows.
 
@@ -94,6 +96,7 @@ async def flush_once(
             source=_SOURCE,
             client_message_id=_digest_key(digest),
             local_machine=machine.name(),
+            rpc=rpc,
         )
         if delivery.inbound_id is None:
             raise RuntimeError("completion-notice digest delivery returned no inbound receipt")
@@ -124,6 +127,7 @@ class CompletionDigestRound:
     machine: MachineIdentityReader
     clock: Clock
     config: DigestConfig
+    rpc: RpcClient
 
     @property
     def interval_s(self) -> float:
@@ -136,6 +140,7 @@ class CompletionDigestRound:
             self.bus,
             machine=self.machine,
             now=self.clock.now(),
+            rpc=self.rpc,
         )
 
 

@@ -18,6 +18,3 @@ exports = ["daemon.py", "shells.py"]
 
 [roots]
 "daemon.py" = { kinds = ["clock", "home", "random", "settings"], why = "Service or operator process entry boots configuration, reads the home it runs under and builds the random generator its event bus draws retry jitter from; builds the process clock from SYSTEM_TIMERS" }
-
-[debt.ambient-read]
-"shells.py#settings ops.cluster.rpc.dispatch_to_machine" = 1

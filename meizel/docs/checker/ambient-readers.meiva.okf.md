@@ -20,7 +20,7 @@ functions, one table per kind of the vocabulary above:
 "base.host.env.registry.process_environment()" = "returns the live os.environ"
 
 [ambient-readers.settings]
-"ops.cluster.rpc.RpcClient.system()" = "builds the client from the process settings"
+"base.cluster.machine.ambient.gateway_access_from_settings()" = "reads the gateway credentials from the process settings"
 ```
 
 A key is the fully qualified call (`pkg.module.name()` or `pkg.module.Class.method()`) of the

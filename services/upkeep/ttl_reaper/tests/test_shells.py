@@ -32,7 +32,9 @@ from base.db.code_version_gate import ProcessDbGate
 from base.events.live.bus import EventBus
 from base.telemetry.tests.capture.event_capture import EmittedEvents
 from base.telemetry.tests.capture.event_capture import emitted_events as emitted_events
+from ops.cluster.rpc import RpcClient
 from ops.rpc_schemas import ShellInfo, ShellKillResult, ShellProbeResult
+from ops.tests.rpc_support import rpc_client
 from services.upkeep.ttl_reaper import shells
 from services.upkeep.ttl_reaper.config import TtlReaperConfig
 from services.upkeep.ttl_reaper.remote import remote_round
@@ -64,6 +66,7 @@ async def _reap(
     database_gate: ProcessDbGate,
     bus: EventBus | None = None,
     config: TtlReaperConfig | None = None,
+    rpc: RpcClient,
 ) -> list[tuple[int, int]]:
     return await reap_expired_shells(
         pool,
@@ -71,6 +74,7 @@ async def _reap(
         bus or EventBus.from_settings(rng=seeded_rng()),
         _progress(),
         config or reaper_config(),
+        rpc=rpc,
     )
 
 
@@ -162,9 +166,14 @@ async def _sweep(
     *,
     database_gate: ProcessDbGate,
     config: TtlReaperConfig | None = None,
+    rpc: RpcClient,
 ) -> list[tuple[int, int]]:
     return await reap_stale_shells(
-        pool, Database.from_settings(gate=database_gate), _progress(), config or reaper_config()
+        pool,
+        Database.from_settings(gate=database_gate),
+        _progress(),
+        config or reaper_config(),
+        rpc=rpc,
     )
 
 
@@ -194,12 +203,13 @@ async def test_reap_expired_shells_deletes_on_killed(
     event_bus: EventBus,
     *,
     database_gate: ProcessDbGate,
+    rpc: RpcClient,
 ) -> None:
     aid = _running_agent(db_conn, machine="macmini")
     _insert_shell_row(db_conn, aid, 3, expires_at=_expired())
 
     with runner(db_conn, "macmini", lambda _call: _killed(interrupted=True, name="build")) as wire:
-        reaped = await _reap(reaper_pool, database_gate=database_gate, bus=event_bus)
+        reaped = await _reap(reaper_pool, database_gate=database_gate, bus=event_bus, rpc=rpc)
 
     assert reaped == [(aid, 3)]
     assert [(call["kind"], call["payload"]) for call in wire.calls] == [
@@ -213,39 +223,76 @@ async def test_reap_expired_shells_deletes_on_killed(
 
 
 async def test_reap_expired_shells_keeps_row_on_unreachable(
-    db_conn: psycopg.Connection, reaper_pool: ConnectionPool, *, database_gate: ProcessDbGate
+    db_conn: psycopg.Connection,
+    reaper_pool: ConnectionPool,
+    *,
+    database_gate: ProcessDbGate,
+    rpc: RpcClient,
 ) -> None:
     aid = _running_agent(db_conn, machine="macmini")
     _insert_shell_row(db_conn, aid, 7, expires_at=_expired())
 
     with runner(db_conn, "macmini", lambda _call: refused(404)):
-        reaped = await _reap(reaper_pool, database_gate=database_gate)
+        reaped = await _reap(reaper_pool, database_gate=database_gate, rpc=rpc)
 
     assert reaped == []
     assert _rows(db_conn, aid) == [7]
 
 
 async def test_reap_expired_shells_keeps_row_when_the_machine_has_no_address(
-    db_conn: psycopg.Connection, reaper_pool: ConnectionPool, *, database_gate: ProcessDbGate
+    db_conn: psycopg.Connection,
+    reaper_pool: ConnectionPool,
+    *,
+    database_gate: ProcessDbGate,
+    rpc: RpcClient,
 ) -> None:
     aid = _running_agent(db_conn, machine="macmini")
     _insert_shell_row(db_conn, aid, 7, expires_at=_expired())
     register_url(db_conn, "macmini", None)
 
-    assert await _reap(reaper_pool, database_gate=database_gate) == []
+    assert await _reap(reaper_pool, database_gate=database_gate, rpc=rpc) == []
     assert _rows(db_conn, aid) == [7]
 
 
 async def test_reap_expired_shells_keeps_row_when_the_op_fails(
-    db_conn: psycopg.Connection, reaper_pool: ConnectionPool, *, database_gate: ProcessDbGate
+    db_conn: psycopg.Connection,
+    reaper_pool: ConnectionPool,
+    *,
+    database_gate: ProcessDbGate,
+    rpc: RpcClient,
 ) -> None:
     aid = _running_agent(db_conn, machine="macmini")
     _insert_shell_row(db_conn, aid, 7, expires_at=_expired())
 
     with runner(db_conn, "macmini", lambda _call: failed({"error": "boom"})):
-        assert await _reap(reaper_pool, database_gate=database_gate) == []
+        assert await _reap(reaper_pool, database_gate=database_gate, rpc=rpc) == []
 
     assert _rows(db_conn, aid) == [7]
+
+
+# meiva:note
+# The kill dispatch runs on the client the round is handed: a transient 5xx from the runner is
+# retried after a wait on that client's own timers (a manual clock, so the wait costs no time).
+async def test_reap_expired_shells_dispatches_on_the_handed_client(
+    db_conn: psycopg.Connection,
+    reaper_pool: ConnectionPool,
+    *,
+    database_gate: ProcessDbGate,
+) -> None:
+    aid = _running_agent(db_conn, machine="macmini")
+    _insert_shell_row(db_conn, aid, 6, expires_at=_expired())
+    rpc, timers = rpc_client()
+    answers = iter([refused(503)])
+
+    def answer(_call: dict[str, Any]) -> Reply:
+        return next(answers, None) or _killed(interrupted=False)
+
+    with runner(db_conn, "macmini", answer) as wire:
+        reaped = await _reap(reaper_pool, database_gate=database_gate, rpc=rpc)
+
+    assert reaped == [(aid, 6)]
+    assert len(wire.calls) == 2
+    assert len(timers.sleeps) == 1
 
 
 # meiva:note
@@ -258,11 +305,12 @@ async def test_reap_expired_shells_absent_machine_terminalizes_row(
     emitted_events: EmittedEvents,
     *,
     database_gate: ProcessDbGate,
+    rpc: RpcClient,
 ) -> None:
     aid = _running_agent(db_conn, machine="ghost")
     _insert_shell_row(db_conn, aid, 8, expires_at=_expired())
 
-    reaped = await _reap(reaper_pool, database_gate=database_gate)
+    reaped = await _reap(reaper_pool, database_gate=database_gate, rpc=rpc)
 
     assert reaped == [(aid, 8)]
     assert _rows(db_conn, aid) == []
@@ -279,12 +327,16 @@ async def test_reap_expired_shells_absent_machine_terminalizes_row(
 
 
 async def test_reap_expired_shells_keeps_row_on_unknown_machine(
-    db_conn: psycopg.Connection, reaper_pool: ConnectionPool, *, database_gate: ProcessDbGate
+    db_conn: psycopg.Connection,
+    reaper_pool: ConnectionPool,
+    *,
+    database_gate: ProcessDbGate,
+    rpc: RpcClient,
 ) -> None:
     aid = _running_agent(db_conn)
     _insert_shell_row(db_conn, aid, 9, expires_at=_expired())
 
-    assert await _reap(reaper_pool, database_gate=database_gate) == []
+    assert await _reap(reaper_pool, database_gate=database_gate, rpc=rpc) == []
     assert _rows(db_conn, aid) == [9]
 
 
@@ -302,12 +354,13 @@ async def test_reap_expired_shells_reaping_without_an_interrupted_job_is_silent(
     reply: Reply,
     *,
     database_gate: ProcessDbGate,
+    rpc: RpcClient,
 ) -> None:
     aid = _running_agent(db_conn, machine="macmini")
     _insert_shell_row(db_conn, aid, 4, expires_at=_expired(), lived=timedelta(minutes=31))
 
     with runner(db_conn, "macmini", lambda _call: reply):
-        reaped = await _reap(reaper_pool, database_gate=database_gate)
+        reaped = await _reap(reaper_pool, database_gate=database_gate, rpc=rpc)
 
     assert reaped == [(aid, 4)]
     assert _rows(db_conn, aid) == []
@@ -318,13 +371,17 @@ async def test_reap_expired_shells_reaping_without_an_interrupted_job_is_silent(
 # A shell_kill result missing `interrupted` is malformed: the row stays for the next round
 # and nothing is notified.
 async def test_reap_expired_shells_result_without_interrupted_is_deferred(
-    db_conn: psycopg.Connection, reaper_pool: ConnectionPool, *, database_gate: ProcessDbGate
+    db_conn: psycopg.Connection,
+    reaper_pool: ConnectionPool,
+    *,
+    database_gate: ProcessDbGate,
+    rpc: RpcClient,
 ) -> None:
     aid = _running_agent(db_conn, machine="macmini")
     _insert_shell_row(db_conn, aid, 6, expires_at=_expired())
 
     with runner(db_conn, "macmini", lambda _call: completed({"mode": "killed"})):
-        reaped = await _reap(reaper_pool, database_gate=database_gate)
+        reaped = await _reap(reaper_pool, database_gate=database_gate, rpc=rpc)
 
     assert reaped == []
     assert _system_inbounds(db_conn, aid) == []
@@ -343,12 +400,13 @@ async def test_reap_expired_shells_notifies_for_a_watcher_shaped_session(
     *,
     database_gate: ProcessDbGate,
     event_bus: EventBus,
+    rpc: RpcClient,
 ) -> None:
     aid = _running_agent(db_conn, machine="macmini")
     _insert_shell_row(db_conn, aid, 7, expires_at=_expired(), lived=timedelta(minutes=31))
 
     with runner(db_conn, "macmini", lambda _call: _killed(interrupted=True, name="test-watcher")):
-        reaped = await _reap(reaper_pool, database_gate=database_gate, bus=event_bus)
+        reaped = await _reap(reaper_pool, database_gate=database_gate, bus=event_bus, rpc=rpc)
 
     assert reaped == [(aid, 7)]
     assert _rows(db_conn, aid) == []
@@ -361,7 +419,11 @@ async def test_reap_expired_shells_notifies_for_a_watcher_shaped_session(
 # owner renewed the second while the first was being killed. The pass must not kill the
 # renewed row: its claim fails and the live row survives.
 async def test_reap_expired_shells_skips_row_renewed_after_select(
-    db_conn: psycopg.Connection, reaper_pool: ConnectionPool, *, database_gate: ProcessDbGate
+    db_conn: psycopg.Connection,
+    reaper_pool: ConnectionPool,
+    *,
+    database_gate: ProcessDbGate,
+    rpc: RpcClient,
 ) -> None:
     aid = _running_agent(db_conn, machine="macmini")
     _insert_shell_row(db_conn, aid, 43, expires_at=_expired())
@@ -378,7 +440,7 @@ async def test_reap_expired_shells_skips_row_renewed_after_select(
         return _killed(interrupted=False)
 
     with runner(db_conn, "macmini", renew_the_second_while_the_first_is_killed) as wire:
-        reaped = await _reap(reaper_pool, database_gate=database_gate)
+        reaped = await _reap(reaper_pool, database_gate=database_gate, rpc=rpc)
 
     assert reaped == [(aid, 43)]
     assert [call["payload"]["session_id"] for call in wire.calls] == [43]
@@ -386,7 +448,11 @@ async def test_reap_expired_shells_skips_row_renewed_after_select(
 
 
 async def test_a_dispatch_past_its_deadline_defers_the_row(
-    db_conn: psycopg.Connection, reaper_pool: ConnectionPool, *, database_gate: ProcessDbGate
+    db_conn: psycopg.Connection,
+    reaper_pool: ConnectionPool,
+    *,
+    database_gate: ProcessDbGate,
+    rpc: RpcClient,
 ) -> None:
     aid = _running_agent(db_conn, machine="macmini")
     _insert_shell_row(db_conn, aid, 5, expires_at=_expired())
@@ -402,6 +468,7 @@ async def test_a_dispatch_past_its_deadline_defers_the_row(
                 reaper_pool,
                 database_gate=database_gate,
                 config=reaper_config(shell_kill_deadline_s=0.2),
+                rpc=rpc,
             )
     finally:
         release.set()
@@ -416,6 +483,7 @@ async def test_machines_are_reclaimed_concurrently_and_one_machines_rows_in_orde
     event_bus: EventBus,
     *,
     database_gate: ProcessDbGate,
+    rpc: RpcClient,
 ) -> None:
     slow = _running_agent(db_conn, machine="slow")
     fast = _running_agent(db_conn, machine="fast")
@@ -436,7 +504,7 @@ async def test_machines_are_reclaimed_concurrently_and_one_machines_rows_in_orde
     try:
         with runner(db_conn, "slow", answering("slow")), runner(db_conn, "fast", answering("fast")):
             task = asyncio.create_task(
-                _reap(reaper_pool, database_gate=database_gate, bus=event_bus)
+                _reap(reaper_pool, database_gate=database_gate, bus=event_bus, rpc=rpc)
             )
             for _ in range(500):
                 if _rows(db_conn, fast) == []:
@@ -470,12 +538,13 @@ async def test_runner_invalid_mode_preserves_row_without_false_cleanup(
     emitted_events: EmittedEvents,
     *,
     database_gate: ProcessDbGate,
+    rpc: RpcClient,
 ) -> None:
     aid = _running_agent(db_conn, machine="macmini")
     _insert_shell_row(db_conn, aid, 3, expires_at=_expired())
 
     with runner(db_conn, "macmini", lambda _call: completed(answer)):
-        assert await _reap(reaper_pool, database_gate=database_gate) == []
+        assert await _reap(reaper_pool, database_gate=database_gate, rpc=rpc) == []
 
     assert _rows(db_conn, aid) == [3]
     assert _system_inbounds(db_conn, aid) == []
@@ -489,13 +558,14 @@ async def test_stale_sweep_drops_the_row_of_a_session_the_host_no_longer_lists(
     emitted_events: EmittedEvents,
     *,
     database_gate: ProcessDbGate,
+    rpc: RpcClient,
 ) -> None:
     aid = _running_agent(db_conn, machine="macmini")
     _insert_shell_row(db_conn, aid, 1, expires_at=_tracked(), created_at=_past_the_grace())
     _insert_shell_row(db_conn, aid, 2, expires_at=_tracked(), created_at=_past_the_grace())
 
     with runner(db_conn, "macmini", lambda _call: _probed(1)) as wire:
-        dropped = await _sweep(reaper_pool, database_gate=database_gate)
+        dropped = await _sweep(reaper_pool, database_gate=database_gate, rpc=rpc)
 
     assert dropped == [(aid, 2)]
     # meiva:note
@@ -519,12 +589,13 @@ async def test_stale_sweep_keeps_every_row_when_the_machine_is_unreachable(
     reaper_pool: ConnectionPool,
     *,
     database_gate: ProcessDbGate,
+    rpc: RpcClient,
 ) -> None:
     aid = _running_agent(db_conn, machine="macmini")
     _insert_shell_row(db_conn, aid, 1, expires_at=_tracked(), created_at=_past_the_grace())
 
     with runner(db_conn, "macmini", lambda _call: refused(404)):
-        dropped = await _sweep(reaper_pool, database_gate=database_gate)
+        dropped = await _sweep(reaper_pool, database_gate=database_gate, rpc=rpc)
 
     assert dropped == []
     assert _rows(db_conn, aid) == [1]
@@ -535,6 +606,7 @@ async def test_stale_sweep_stops_probing_a_machine_at_the_first_answer_it_does_n
     reaper_pool: ConnectionPool,
     *,
     database_gate: ProcessDbGate,
+    rpc: RpcClient,
 ) -> None:
     first = _running_agent(db_conn, machine="macmini")
     second = _running_agent(db_conn, machine="macmini")
@@ -542,7 +614,7 @@ async def test_stale_sweep_stops_probing_a_machine_at_the_first_answer_it_does_n
     _insert_shell_row(db_conn, second, 2, expires_at=_tracked(), created_at=_past_the_grace())
 
     with runner(db_conn, "macmini", lambda _call: refused(404)) as wire:
-        dropped = await _sweep(reaper_pool, database_gate=database_gate)
+        dropped = await _sweep(reaper_pool, database_gate=database_gate, rpc=rpc)
 
     assert dropped == []
     # meiva:note
@@ -557,12 +629,13 @@ async def test_stale_sweep_keeps_every_row_when_the_answer_has_no_listing(
     reaper_pool: ConnectionPool,
     *,
     database_gate: ProcessDbGate,
+    rpc: RpcClient,
 ) -> None:
     aid = _running_agent(db_conn, machine="macmini")
     _insert_shell_row(db_conn, aid, 1, expires_at=_tracked(), created_at=_past_the_grace())
 
     with runner(db_conn, "macmini", lambda _call: completed({"unexpected": True})):
-        dropped = await _sweep(reaper_pool, database_gate=database_gate)
+        dropped = await _sweep(reaper_pool, database_gate=database_gate, rpc=rpc)
 
     assert dropped == []
     assert _rows(db_conn, aid) == [1]
@@ -573,6 +646,7 @@ async def test_stale_sweep_ignores_a_row_younger_than_the_grace(
     reaper_pool: ConnectionPool,
     *,
     database_gate: ProcessDbGate,
+    rpc: RpcClient,
 ) -> None:
     aid = _running_agent(db_conn, machine="macmini")
     _insert_shell_row(
@@ -584,7 +658,7 @@ async def test_stale_sweep_ignores_a_row_younger_than_the_grace(
     )
 
     with runner(db_conn, "macmini", lambda _call: _probed()) as wire:
-        dropped = await _sweep(reaper_pool, database_gate=database_gate)
+        dropped = await _sweep(reaper_pool, database_gate=database_gate, rpc=rpc)
 
     assert dropped == []
     assert _rows(db_conn, aid) == [1]
@@ -598,12 +672,13 @@ async def test_stale_sweep_drops_rows_of_a_machine_gone_and_silent_past_the_grac
     caplog: pytest.LogCaptureFixture,
     *,
     database_gate: ProcessDbGate,
+    rpc: RpcClient,
 ) -> None:
     aid = _running_agent(db_conn, machine="ghost")
     _insert_shell_row(db_conn, aid, 1, expires_at=_tracked(), created_at=_past_the_grace())
     _probe_record(db_conn, "ghost", at=datetime.now(UTC) - timedelta(hours=7))
 
-    dropped = await _sweep(reaper_pool, database_gate=database_gate)
+    dropped = await _sweep(reaper_pool, database_gate=database_gate, rpc=rpc)
 
     assert dropped == [(aid, 1)]
     assert _rows(db_conn, aid) == []
@@ -625,12 +700,13 @@ async def test_stale_sweep_keeps_rows_of_a_machine_missing_from_the_registry_but
     caplog: pytest.LogCaptureFixture,
     *,
     database_gate: ProcessDbGate,
+    rpc: RpcClient,
 ) -> None:
     aid = _running_agent(db_conn, machine="ghost")
     _insert_shell_row(db_conn, aid, 1, expires_at=_tracked(), created_at=_past_the_grace())
     _probe_record(db_conn, "ghost", at=datetime.now(UTC) - timedelta(minutes=10))
 
-    dropped = await _sweep(reaper_pool, database_gate=database_gate)
+    dropped = await _sweep(reaper_pool, database_gate=database_gate, rpc=rpc)
 
     assert dropped == []
     assert _rows(db_conn, aid) == [1]
@@ -646,6 +722,7 @@ async def test_a_remote_round_kills_the_expired_row_and_sweeps_the_dead_sessions
     event_bus: EventBus,
     *,
     database_gate: ProcessDbGate,
+    rpc: RpcClient,
 ) -> None:
     aid = _running_agent(db_conn, machine="macmini")
     _insert_shell_row(db_conn, aid, 5, expires_at=_expired())
@@ -661,6 +738,7 @@ async def test_a_remote_round_kills_the_expired_row_and_sweeps_the_dead_sessions
             event_bus,
             _progress(),
             reaper_config(),
+            rpc=rpc,
         )
 
     assert [call["kind"] for call in wire.calls] == ["shell_kill", "shell_probe"]
@@ -673,6 +751,7 @@ async def test_a_remote_round_without_its_sweep_leaves_the_rows_alone(
     event_bus: EventBus,
     *,
     database_gate: ProcessDbGate,
+    rpc: RpcClient,
 ) -> None:
     aid = _running_agent(db_conn, machine="macmini")
     _insert_shell_row(db_conn, aid, 1, expires_at=_tracked(), created_at=_past_the_grace())
@@ -685,6 +764,7 @@ async def test_a_remote_round_without_its_sweep_leaves_the_rows_alone(
             _progress(),
             reaper_config(),
             sweep=False,
+            rpc=rpc,
         )
 
     assert wire.calls == []

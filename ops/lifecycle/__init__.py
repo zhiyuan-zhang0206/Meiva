@@ -333,6 +333,7 @@ async def resurrect_if_terminated(
     trigger_inbound_id: int,
     trigger_inbound_kind: WakeTriggerKind,
     local_machine: str,
+    rpc: cluster_rpc.RpcClient,
 ) -> AgentStatus:
     trigger_inbound_kind = validate_wake_trigger_kind(trigger_inbound_kind)
     status = await asyncio.to_thread(get_agent_status, db, agent_id)
@@ -359,7 +360,7 @@ async def resurrect_if_terminated(
             )
             return status
         case resurrect_plan.Forward():
-            return await _forward_resurrection(db, bus, agent_id, plan, status=status)
+            return await _forward_resurrection(db, bus, agent_id, plan, status=status, rpc=rpc)
         case _:
             assert_never(plan)
 
@@ -376,11 +377,12 @@ async def _forward_resurrection(
     plan: resurrect_plan.Forward,
     *,
     status: AgentStatus,
+    rpc: cluster_rpc.RpcClient,
 ) -> AgentStatus:
     body = ResurrectAgentRequest(resurrected_by="system")
     try:
         try:
-            forwarded = await cluster_rpc.dispatch_to_machine(
+            forwarded = await rpc.dispatch_to_machine(
                 db,
                 target_machine=plan.home,
                 kind="lifecycle",

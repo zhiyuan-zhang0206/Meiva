@@ -22,6 +22,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from typing import cast
 
 from base.clock.tests.manual_timers import ManualTimers
+from base.clock.tests.seeded_rng import seeded_rng
 from base.cluster.machine import GatewayAccess
 from ops.cluster.rpc import RpcClient, RpcConfig
 
@@ -114,6 +115,7 @@ def rpc_client(
         config=RpcConfig(timeout_seconds=timeout_seconds, max_retries=max_retries),
         access=rpc_access,
         timers=timers,
+        rng=seeded_rng(),
     )
     return client, timers
 
