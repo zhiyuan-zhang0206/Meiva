@@ -1,7 +1,7 @@
 # meiva:link services/derived/insights/run_timeline/docs/range-projection.meiva.okf.md
 from __future__ import annotations
 
-import itertools
+import random
 import threading
 from bisect import bisect_right
 from collections.abc import Callable
@@ -13,6 +13,7 @@ from fastapi import HTTPException
 from base.agents.history.closing_request import FullHistory
 from base.agents.messages.timestamp_policy import TimestampSource
 from base.clock import Timers
+from base.clock.ids import new_uuid
 from base.db.protocols import DatabaseLike, SyncConnection, SyncPool
 from services.derived.insights.run_timeline.history import HistoryView
 from services.derived.insights.run_timeline.projection.derive import project_segment, segment_view
@@ -62,6 +63,16 @@ class Snapshot:
         )
 
 
+# meiva:note
+# What the reader reads from the world: the monotonic readings that age its cache and the generator
+# that mints its snapshot identities. The root hands both in. They travel as one value because the
+# projection directory is strict-to-be and `wide-params` caps a constructor at six parameters.
+@dataclass(frozen=True)
+class ReaderWorld:
+    timers: Timers
+    rng: random.Random
+
+
 class TimelineReader:
     def __init__[DbT: DatabaseLike](
         self,
@@ -71,21 +82,21 @@ class TimelineReader:
         timestamps: TimestampSource,
         jobs: IndexJobs,
         read_segment: Callable[[DbT, int, str], FullHistory],
-        timers: Timers,
+        world: ReaderWorld,
     ) -> None:
         self.db: DatabaseLike = db
         self.pool, self.timestamps, self.jobs = pool, timestamps, jobs
         self._load_segment: Callable[[int, str], FullHistory] = lambda agent_id, checkpoint_id: (
             read_segment(db, agent_id, checkpoint_id)
         )
-        self.timers = timers
+        self.timers = world.timers
+        self._rng = world.rng
         self.read_source: Callable[[SyncConnection, int], Source] = capture_source
         self._lock = threading.Lock()
 
         self._building = [threading.Lock() for _ in range(MAX_ENTRIES)]
         self._entries: dict[int, Snapshot] = {}
         self._checked: dict[int, float] = {}
-        self._ids = itertools.count(1)
 
     def get(self, agent_id: int, snapshot: str | None = None) -> Snapshot:
         with self._lock:
@@ -169,7 +180,7 @@ class TimelineReader:
             lifetime = (lifetime[0], lifetime[1] + timedelta(seconds=1))
         return Snapshot(
             agent_id,
-            f"s-{id(self):x}-{next(self._ids)}",
+            f"s-{new_uuid(self._rng).hex}",
             self.timers.monotonic(),
             source.head,
             source.previous,

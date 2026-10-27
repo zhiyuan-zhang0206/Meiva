@@ -49,7 +49,9 @@ an operator to rebuild the affected projection.
 A snapshot is reused for five seconds, then its source head is checked; its
 absolute lifetime is ten minutes. Unpinned snapshot capture uses fixed lock
 stripes to serialize same-agent capture without an unbounded per-agent lock
-dictionary. Window and detail reads carrying an opaque snapshot identity never
+dictionary. A snapshot's identity (`s-` plus a version-4 UUID in hex) is drawn from the
+generator the daemon hands the reader, so two readers never name the same cut by
+address. Window and detail reads carrying an opaque snapshot identity never
 switch histories. Expired, replaced, evicted or wrong-agent IDs
 return 409; the page reloads its owner and clears selections from the old cut.
 Windows read no historical checkpoints. Raw message pages read only intersecting

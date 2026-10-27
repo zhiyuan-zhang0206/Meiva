@@ -13,7 +13,7 @@ A gateway-side daemon (`ServiceSpec.capabilities=GATEWAY`; no port and no fixed-
 
 ## Shape
 - `daemon.py` — pidfile, the socket and the uvicorn server. Composition root: reads its `ConfigBoot` once into one frozen `InsightsConfig` (`config_from_boot`) and passes that value to the app; it constructs a separate `TimestampSource` resource. Nothing below the root reads a settings view. Its entry captures one `LoadedCommit`, shared by logging and `CodeVersion`. One `ProcessDbGate` admits both logging and service database handles, built from this configuration owner's current dial slice. Unknown capture stays unknown; pidfile, pool and socket are released at exit, which ends with `hard_exit`.
-- `app.py` — `build_app(db, pool, config, *, home, catalog, timestamps)`: the FastAPI app and the state its routers read (`db`, `db_pool`, `insights_config`, `catalog`, `timeline_timestamps`, `run_timeline_reader`). Its `/healthz` reports the same explicit `home` that `run` uses for the socket and pidfile. Mount new routers here.
+- `app.py` — `build_app(db, pool, config, *, home, catalog, timestamps, timers, rng, pid)`: the FastAPI app and the state its routers read (`db`, `db_pool`, `insights_config`, `catalog`, `timeline_timestamps`, `run_timeline_reader`). Its `/healthz` reports the same explicit `home` that `run` uses for the socket and pidfile; `timers` age the timeline reader's cache and `rng` mints its snapshot identities, both handed in by the daemon. Mount new routers here.
 - `config.py` — the frozen configuration value (`InsightsConfig`: message text limit and default model) a request handler reads from `app.state.insights_config`. The clock stays in the separately owned source, which mints a pure timestamp policy for each request and projection job.
 - `run_timeline/` — the per-agent reads behind the agent view, see [[run_timeline.meiva.okf.md|run timeline reads]].
 
@@ -38,7 +38,7 @@ of the configuration; it never reads another process settings facade.
 
 ## Daemon composition
 
-The daemon reads its render policy and ClockConfig from its own boot once, at start, and the cache clock is the `SYSTEM_TIMERS` it hands the timeline reader. Its small pool is for short model/config row lookups; history and audit operations retain their own Database reads. The pidfile-admitted daemon replaces a predecessor's leftover socket. A restrictive umask covers the interval before chmod, and the binding owner creates the socket directory because path helpers are pure.
+The daemon reads its render policy and ClockConfig from its own boot once, at start, and the cache clock is the `SYSTEM_TIMERS` it hands the timeline reader. It also builds the process's one `random.Random` (snapshot identities are not secrets) and passes it to the app, so no module below the entry draws randomness of its own. Its small pool is for short model/config row lookups; history and audit operations retain their own Database reads. The pidfile-admitted daemon replaces a predecessor's leftover socket. A restrictive umask covers the interval before chmod, and the binding owner creates the socket directory because path helpers are pure.
 
 The process checks schema before serving. Its signal path uses an explicit Runner and hard exit rather than waiting for the default executor to finish cold history work; uvicorn reraises the signal after graceful stop. Repeated SIGTERM is ignored during the bounded exit.
 
