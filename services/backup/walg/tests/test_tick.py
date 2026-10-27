@@ -384,6 +384,7 @@ def test_a_run_makes_the_private_state_directory_of_the_home_it_is_handed(
     _run(box)
 
     assert state.walg_dir(box.home).stat().st_mode & 0o777 == 0o700
+    assert not (tmp_path / "environment-home").exists(), "nothing resolved the environment's home"
 
 
 def test_off_does_nothing_and_writes_nothing(
@@ -588,3 +589,18 @@ def test_drill_now_while_wal_g_is_off_says_so(
 
     assert _drill_now(sandbox, lines) == 1
     assert "WAL-G is off" in lines[0]
+
+
+def test_a_failed_tick_still_makes_the_state_directory_of_the_handed_home_private(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    box = make_sandbox(tmp_path, monkeypatch)
+    directory = state.walg_dir(box.home)
+    directory.mkdir(parents=True)
+    directory.chmod(0o755)
+    state.state_path(box.home).write_text("{broken")
+
+    code, _lines = _run(box)
+
+    assert code != 0
+    assert directory.stat().st_mode & 0o777 == 0o700

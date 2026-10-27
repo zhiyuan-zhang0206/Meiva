@@ -5,7 +5,7 @@ from __future__ import annotations
 import os
 import random
 import sys
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import TextIO
 
@@ -140,6 +140,15 @@ class CommandRuntime:
     # other process facts. The entry's checkout gate has already accepted it for `home`.
     checkout: Path
     terminal: Terminal
+
+    # meiva:note
+    # The host as it answers once the configuration has been read: its environment is the launch
+    # environment the configuration owner reads now, `.env` included. `host` is built before any
+    # configuration read and keeps the environment the process started with, and a lite verb loads
+    # the home's `.env` only at its first read, so a decision an `.env` entry can change (the
+    # observability collector's explicit endpoint) asks this host, after that read.
+    def host_after_config(self) -> Host:
+        return replace(self.host, environ=self.config.process_environment())
 
     # meiva:note
     # A fresh identifier for one gateway request's idempotency key: the 32 lowercase hexadecimal

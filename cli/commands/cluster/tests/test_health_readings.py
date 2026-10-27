@@ -19,6 +19,7 @@ import pytest
 from base.cluster.machine import GatewayApiBaseMissing
 from base.db import Database
 from base.host.net.tests.local_http import closed_port_url
+from base.host.system.tests.fake_commands import fake_host
 from base.paths import meiva_home, root_manifests_path
 from cli.commands.cluster.health_readings import (
     HealthOptions,
@@ -415,3 +416,22 @@ def test_a_directory_that_is_not_a_git_checkout_is_a_blind_guard_not_a_clean_tre
     assert read_source_tree(plain) == SourceTreeReading(
         guard_skipped=True, findings=("not a git checkout",)
     )
+
+
+# meiva:note
+# The command's host is built before the configuration is read, so its own environment lacks what
+# the home's `.env` declares in a lite verb; the roster gate must be asked with the environment the
+# configuration reads. A gateway that is not the observability station runs the collector only when
+# an explicit endpoint is declared, so a launched collector is probed (and found down) exactly then.
+def test_a_collector_endpoint_the_configuration_reads_makes_the_collector_a_probed_service(
+    probe_command: CommandRuntime,
+) -> None:
+    command = dataclasses.replace(probe_command, host=fake_host(environ={}))
+    launched = Launched(frozenset({"otel-collector"}))
+
+    unset = read_service_failures(command, launched)
+    command.config.environment = {"MEIVA_TELEMETRY_OTLP_ENDPOINT": "http://collector.invalid:4318"}
+    declared = read_service_failures(command, launched)
+
+    assert not any("otel-collector" in failure for failure in unset)
+    assert any("otel-collector" in failure for failure in declared)

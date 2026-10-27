@@ -14,6 +14,7 @@ import pytest
 
 from base.cluster.machine.configured import ConfiguredMachineIdentity
 from base.config import ConfigBoot
+from base.paths.tests.homes import point_home
 from cli.commands.converge import walg as converge_walg_module
 from cli.commands.converge.os_jobs import ensure_walg_job
 from cli.commands.converge.plans.walg_plan import (
@@ -125,8 +126,9 @@ def test_off_installs_and_writes_nothing(ctx: ConvergeCtx, converge_home: Path) 
 
 
 def test_on_validates_pins_the_key_and_makes_the_state_directory(
-    ctx: ConvergeCtx, converge_home: Path
+    ctx: ConvergeCtx, converge_home: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
+    point_home(monkeypatch, tmp_path / "environment-home")
     on = _walg_ctx(ctx, converge_home)
 
     # meiva:note
@@ -141,6 +143,7 @@ def test_on_validates_pins_the_key_and_makes_the_state_directory(
     )
     state = converge_home / "backups" / "walg"
     assert state.is_dir() and state.stat().st_mode & 0o777 == 0o700
+    assert not (tmp_path / "environment-home").exists(), "nothing resolved the environment's home"
 
 
 def test_a_bad_configuration_fails_converge_not_postgres(
@@ -195,3 +198,20 @@ def test_the_job_step_runs_on_gateways_after_the_other_scheduled_jobs() -> None:
     assert step.apply is ensure_walg_job
     assert step.roles == frozenset({"gateway"})
     assert names.index("PR flow sampler job") < names.index("WAL-G backup job")
+
+
+def test_converge_repairs_an_open_state_directory_of_the_handed_home(
+    ctx: ConvergeCtx, converge_home: Path
+) -> None:
+    on = _walg_ctx(ctx, converge_home)
+    converge_walg_module.execute_walg_plan(
+        (LoadWalgConfig(),), on, walg_config_file=_config_file(on)
+    )
+    state = converge_home / "backups" / "walg"
+    state.chmod(0o755)
+
+    converge_walg_module.execute_walg_plan(
+        (PrepareWalgStateDir(),), on, walg_config_file=_config_file(on)
+    )
+
+    assert state.stat().st_mode & 0o777 == 0o700

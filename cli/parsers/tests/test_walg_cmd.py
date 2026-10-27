@@ -539,3 +539,46 @@ def test_status_shows_the_last_drill_and_the_last_success(
         in out
     )
     assert "last successful drill: never" in out
+
+
+def test_status_shows_the_key_the_handed_home_pinned(
+    plane: DataPlaneConfig, capsys: pytest.CaptureFixture[str], sandbox: Sandbox
+) -> None:
+    walg_config.load_walg_config(path=sandbox.config_file, home=sandbox.home)
+    pinned = walg_config.pinned_key_id(sandbox.home)
+    assert pinned is not None
+
+    assert walg_cmd.cmd_walg_status(plane, home=sandbox.home) == 0
+
+    assert f"(pinned: {pinned})" in capsys.readouterr().out
+
+
+def test_status_flags_a_key_other_than_the_one_the_handed_home_pinned(
+    plane: DataPlaneConfig, capsys: pytest.CaptureFixture[str], sandbox: Sandbox
+) -> None:
+    walg_config.load_walg_config(path=sandbox.config_file, home=sandbox.home)
+    sandbox.key_file.write_text("ef" * 32 + "\n")
+
+    assert walg_cmd.cmd_walg_status(plane, home=sandbox.home) == 0
+
+    assert "KEY MISMATCH" in capsys.readouterr().out
+
+
+def test_restore_refuses_a_key_other_than_the_one_the_handed_home_pinned(
+    sandbox: Sandbox, plane: DataPlaneConfig, capsys: pytest.CaptureFixture[str], tmp_path: Path
+) -> None:
+    walg_config.load_walg_config(path=sandbox.config_file, home=sandbox.home)
+    sandbox.key_file.write_text("ef" * 32 + "\n")
+
+    code = walg_cmd.cmd_walg_restore(
+        plane,
+        directory=str(tmp_path / "out"),
+        backup="LATEST",
+        time=None,
+        lsn=None,
+        clock=_clock(),
+        home=sandbox.home,
+    )
+
+    assert code == 1
+    assert "is not the key this home pinned" in capsys.readouterr().err

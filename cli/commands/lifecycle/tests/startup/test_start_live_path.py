@@ -56,11 +56,10 @@ def _row(
 
 # meiva:note
 # What a start leaves in `home` besides the lifecycle lock and its holder record, which every
-# local start takes under the home it operates, and the plugins directory that reading the roster
-# of that home creates.
+# local start takes under the home it operates.
 def _entries_besides_the_lifecycle_lock(home: Path) -> list[str]:
     lock = home_lifecycle_locks.lifecycle_lock_path(home)
-    held = {lock.name, home_lifecycle_locks.holder_path(lock).name, "plugins"}
+    held = {lock.name, home_lifecycle_locks.holder_path(lock).name}
     return sorted(path.name for path in home.iterdir() if path.name not in held)
 
 
@@ -79,7 +78,7 @@ def test_an_identical_live_generation_is_reused_and_the_start_serves(
     assert run.serving_published
     assert gateway.requests, "a pure runner probes its gateway before launching"
     assert ("up", "pty-sessions") not in root.calls, "a running unit is not launched again"
-    assert _entries_besides_the_lifecycle_lock(run.home) == ["run", "running_sha"], (
+    assert _entries_besides_the_lifecycle_lock(run.home) == ["plugins", "run", "running_sha"], (
         "nothing converged beyond the start's own bookmark"
     )
     lock = home_lifecycle_locks.lifecycle_lock_path(run.home)
@@ -218,7 +217,7 @@ def test_a_changed_live_generation_is_refused_before_anything_is_prepared(
 
     assert "start admission/preparation failed" in capsys.readouterr().err
     assert [call for call in root.calls if call[0] != "status"] == []
-    assert _entries_besides_the_lifecycle_lock(run.home) == ["run"], "nothing converged"
+    assert _entries_besides_the_lifecycle_lock(run.home) == ["plugins", "run"], "nothing converged"
     assert gateway.requests == [], "refused before the gateway probe"
     assert not run.serving_published
 
