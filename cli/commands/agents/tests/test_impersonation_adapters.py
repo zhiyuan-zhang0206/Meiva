@@ -48,6 +48,7 @@ def test_codex_requires_a_control_endpoint_without_queueing(
         bind_adapter(
             CodexThread(THREAD, None),
             codex_home=codex_home.home,
+            user_home=Path(codex_home.home),
             antigravity_server=None,
             stdout=io.StringIO(),
         )
@@ -62,6 +63,7 @@ def test_codex_emitter_delivers_literal_input_to_the_owning_server(
         adapter = bind_adapter(
             CodexThread(THREAD, recorded),
             codex_home=codex_home.home,
+            user_home=Path(codex_home.home),
             antigravity_server=None,
             stdout=io.StringIO(),
         )
@@ -90,7 +92,14 @@ def test_controller_session_adapters_need_no_destination_probe(
     stream = io.StringIO()
     expected = ClaudeStdout(stream) if isinstance(session, ClaudeSession) else DshStdout(stream)
     assert (
-        bind_adapter(session, codex_home=None, antigravity_server=None, stdout=stream) == expected
+        bind_adapter(
+            session,
+            codex_home=None,
+            user_home=Path("/nonexistent-user-home"),
+            antigravity_server=None,
+            stdout=stream,
+        )
+        == expected
     )
 
 
@@ -126,6 +135,7 @@ def test_antigravity_readiness_passes_for_a_resolvable_language_server(
     adapter = bind_adapter(
         AntigravityConversation(THREAD, str(record)),
         codex_home=None,
+        user_home=tmp_path,
         antigravity_server=None,
         stdout=io.StringIO(),
     )
@@ -140,6 +150,7 @@ def test_antigravity_readiness_resolves_the_language_server(
         bind_adapter(
             AntigravityConversation(THREAD, str(absent)),
             codex_home=None,
+            user_home=tmp_path,
             antigravity_server=None,
             stdout=io.StringIO(),
         )
@@ -154,6 +165,7 @@ def test_antigravity_destination_resolves_once_and_every_push_reuses_it(
         adapter = bind_adapter(
             AntigravityConversation(THREAD, str(record)),
             codex_home=None,
+            user_home=tmp_path,
             antigravity_server=None,
             stdout=io.StringIO(),
         )

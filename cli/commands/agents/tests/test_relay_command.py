@@ -44,6 +44,9 @@ from cli.database.tests.cli_tests import operator_database as operator_database
 from cli.database.tests.command_inputs import command_runtime as command_runtime
 
 UNMINTED = "not-the-relay-token"
+# meiva:note
+# The account home a relay is given; none of these relays reads a codex socket under it.
+USER_HOME = Path("/nonexistent-relay-user-home")
 
 
 def _relay_args(lease: dict[str, Any], **overrides: Any) -> argparse.Namespace:
@@ -84,6 +87,7 @@ def test_the_relay_command_runs_a_claude_relay_to_the_leases_expiry(
             token=lease["relay_token"],
             redis_url=redis_url,
             codex_home=None,
+            user_home=USER_HOME,
             antigravity_server=None,
             stdout=stdout,
             bus=event_bus,
@@ -121,6 +125,7 @@ def test_the_relay_command_reports_a_host_that_refuses_to_be_steered(
                 token=lease["relay_token"],
                 redis_url=redis_url,
                 codex_home=None,
+                user_home=USER_HOME,
                 antigravity_server=None,
                 stdout=stdout,
                 bus=event_bus,
@@ -161,6 +166,7 @@ def test_unresolvable_destination_exits_before_any_lease_work(
             token=lease["relay_token"],
             redis_url=redis_url,
             codex_home=None,
+            user_home=USER_HOME,
             antigravity_server=None,
             stdout=stdout,
             bus=event_bus,
@@ -192,6 +198,7 @@ def test_agent_mismatch_refuses_inbox_before_subscription(
             token=lease["relay_token"],
             redis_url=redis_url,
             codex_home=None,
+            user_home=USER_HOME,
             antigravity_server=None,
             stdout=stdout,
             bus=event_bus,
@@ -220,6 +227,7 @@ def test_the_relay_command_refuses_a_credential_the_lease_did_not_mint(
             token=UNMINTED,
             redis_url=redis_url,
             codex_home=None,
+            user_home=USER_HOME,
             antigravity_server=None,
             stdout=io.StringIO(),
             bus=event_bus,
