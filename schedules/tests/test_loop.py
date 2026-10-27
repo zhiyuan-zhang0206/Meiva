@@ -28,7 +28,7 @@ from schedules.plans.loop_plan import (
     plan_step,
     search_base,
 )
-from schedules.tests.schedule_support import claimed_slots, insert_schedule
+from schedules.tests.support.schedule_support import claimed_slots, insert_schedule
 
 _FIVE = datetime(2026, 9, 7, 5, 0, tzinfo=UTC)
 _DAILY = CronSchedule((Trigger("0 5 * * *"),), "UTC")

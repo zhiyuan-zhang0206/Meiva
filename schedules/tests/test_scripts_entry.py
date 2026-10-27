@@ -22,7 +22,7 @@ from pathlib import Path
 import psycopg
 
 from base.host.proc import run_bounded
-from schedules.tests.schedule_support import insert_schedule
+from schedules.tests.support.schedule_support import insert_schedule
 
 _SCHEDULES = Path(__file__).resolve().parents[1]
 _CHILD = Path(__file__).parent / "children" / "run_scripts.py"
@@ -35,7 +35,7 @@ def test_every_builtin_script_imports_from_a_materialized_copy(tmp_path: Path) -
         directory = tmp_path / "schedules" / str(index)
         directory.mkdir(parents=True)
         copies.append(Path(shutil.copy(script, directory / script.name)))
-    assert len(copies) == 13
+    assert len(copies) == 14
 
     child = run_bounded(
         [sys.executable, "-I", str(_CHILD), "imports", *map(str, copies)],

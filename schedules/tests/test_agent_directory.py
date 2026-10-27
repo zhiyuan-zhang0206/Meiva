@@ -33,7 +33,7 @@ from schedules.plans.directory_plan import (
     report_recipient,
 )
 from schedules.plans.schedule_identity import parse_schedule_id
-from schedules.tests.gateway_directory import (
+from schedules.tests.support.gateway_directory import (
     AgentRowSpec,
     DirectoryPage,
     GatewayRequest,

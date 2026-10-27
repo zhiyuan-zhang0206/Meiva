@@ -42,8 +42,8 @@ from schedules.jobs.debt_sweep import (
 )
 from schedules.plans.debt_sweep_scan import ScanExited, ScanUnrunnable
 from schedules.plans.directory_plan import ReportRecipient
-from schedules.tests.gateway_directory import AgentRowSpec, DirectoryPage, serve_gateway
-from schedules.tests.schedule_support import claimed_slots, insert_schedule
+from schedules.tests.support.gateway_directory import AgentRowSpec, DirectoryPage, serve_gateway
+from schedules.tests.support.schedule_support import claimed_slots, insert_schedule
 
 _SCHEDULES = Path(__file__).resolve().parents[2]
 _SCRIPT = _SCHEDULES / "debt-sweep-daily-schedule.py"

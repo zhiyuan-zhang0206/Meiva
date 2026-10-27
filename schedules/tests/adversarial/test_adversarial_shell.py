@@ -36,7 +36,7 @@ from schedules.jobs.adversarial_workers import (
 )
 from schedules.jobs.catchup import Fired, fire_slot_once
 from schedules.plans.adversarial_spawn import COLLEAGUE_LABEL, OWNER_LABEL, PROBE_LABEL
-from schedules.tests.gateway_directory import (
+from schedules.tests.support.gateway_directory import (
     AgentReply,
     AgentRowSpec,
     DirectoryPage,
@@ -44,7 +44,7 @@ from schedules.tests.gateway_directory import (
     ServedGateway,
     serve_gateway,
 )
-from schedules.tests.schedule_support import claimed_slots, insert_schedule
+from schedules.tests.support.schedule_support import claimed_slots, insert_schedule
 
 _EVEN_WEEK = datetime(2026, 8, 31, 4, 0, tzinfo=UTC)
 _FIRST_WORKER = 501

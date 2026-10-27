@@ -27,6 +27,7 @@ directory. The manifest is the single expression of the built-in policy
 | `db-write-stall-watch` | `db-write-stall-watch-schedule.py` | operator | disabled |
 | `sched-dry-import-weekly` | `sched-dry-import-weekly-schedule.py` | operator | disabled |
 | `log-cred-mask-monthly` | `log-cred-mask-monthly-schedule.py` | operator | disabled |
+| `agent-watch` | `agent-watch-schedule.py` | operator | disabled |
 
 `dev-ci-metrics` also watches the timed workflows a pull request never blocks: it
 messages the P0 lead when one of them fails two runs in a row (`_SCHEDULED_WORKFLOWS`), because a red nightly is otherwise silent.
@@ -42,6 +43,15 @@ messages the P0 lead when one of them fails two runs in a row (`_SCHEDULED_WORKF
   root-cause signal an agent-host crash wave follows. It wakes the operator and
   the P0 lead only — never a user notification path — and stops with
   `meiva schedules stop db-write-stall-watch`.
+- `agent-watch` is the other half of the same problem (#5594): a duty that
+  stops taking its rounds looks like a duty with nothing to report. Every ten
+  minutes it reads the signals a stopped duty leaves behind — no live shell
+  session, no real turn for longer than its cadence allows, a schedule the
+  agent owns that stopped firing on its own cadence — and climbs one ladder:
+  wake the agent (the cheapest rebuild), tell the P0 lead with the raw values,
+  then ask for the user. A reading the host cannot take is carried as `blind`
+  and never counted as healthy; a terminated agent is finished, not silent, so
+  the sentinel never resurrects a duty the user ended.
 
 Built-in slots sit in the off-peak trough: the cluster workday peaks at
 09:00-12:00 and 14:00-18:00 cluster time, so every daily and weekly fire lands
