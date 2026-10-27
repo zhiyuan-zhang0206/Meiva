@@ -63,6 +63,7 @@ from base.host.env.agent_slices import AgentSlices
 from base.lm.catalog import ModelCatalog
 from base.lm.harness.registration import RegistrationStore
 from base.lm.harness.registry import FileSessionRegistry
+from base.lm.harness.wiring import BridgeRootValues
 from base.log import logger
 from base.native_process.runtime_incarnation import RuntimeIncarnation
 from base.native_process.turn_identity import HostedServiceResources, HostedTurnResources
@@ -179,6 +180,7 @@ class AgentHost:
         self._sessions = HarnessSessions(
             self._registrations,
             record_exit=partial(record_harness_exit, self._control_pool),
+            clock=policy.clock_factory(),
         )
         self._rejected_configs: dict[int, str] = {}
         self._normalized_configs: dict[int, str] = {}
@@ -496,6 +498,11 @@ class AgentHost:
             registration_ttl_seconds=self._policy.harness_registration_ttl_seconds,
             machine=self._machine,
             harness_environ=self._policy.harness_environ,
+            harness_root=BridgeRootValues(
+                clock=self._policy.clock_factory(),
+                controller_pid=self._policy.pid,
+                handle_rng=self._policy.rng,
+            ),
             contributions=tuple(hc for _, hc in self._extensions.harness_contributions(harness)),
         )
 

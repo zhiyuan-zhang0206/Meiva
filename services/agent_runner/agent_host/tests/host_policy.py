@@ -1,3 +1,4 @@
+import os
 import random
 from dataclasses import replace
 from pathlib import Path
@@ -8,6 +9,7 @@ from base.clock import Clock
 from base.cluster.machine.configured import ConfiguredMachineIdentity
 from base.config import settings
 from base.config.tests.configuration import defaults, snapshot_process_config
+from base.lm.harness.registration import SecureRandom
 from base.native_process.stop_timing import CANCEL_UNWIND_TIMEOUT_S
 from base.packages.plugin_providers import build_model_catalog
 from base.packages.tests.model_catalog import inert_keys
@@ -33,7 +35,10 @@ def configured_policy(**changes: Any) -> HostPolicy:
             clock_factory=Clock.from_settings,
             harness_registration_ttl_seconds=daemon.harness_registration_ttl_seconds,
             harness_environ={"HOME": "/nonexistent/host-policy-home"},
-            rng=random.Random(0),  # noqa: S311
+            # meiva:note
+            # The host's generator draws credentials, so it is a SystemRandom in a test too.
+            rng=SecureRandom(random.SystemRandom()),
+            pid=os.getpid(),
             user_home=Path("/nonexistent/host-policy-user-home"),
             stall=StallTiming(
                 scan_interval_s=daemon.host_turn_progress_scan_interval_seconds,

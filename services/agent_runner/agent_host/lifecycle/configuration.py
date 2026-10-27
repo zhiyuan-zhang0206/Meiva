@@ -14,6 +14,7 @@ from base.cluster.machine import MachineIdentityReader
 from base.config import ConfigBoot, settings
 from base.host.env.registry import child_env
 from base.lm.catalog.provider_keys import ProviderKeys
+from base.lm.harness.registration import SecureRandom
 from base.native_process.loaded_commit import LoadedCommit
 from base.native_process.stop_timing import CANCEL_UNWIND_TIMEOUT_S
 from base.paths.home import resolve_meiva_home
@@ -42,7 +43,7 @@ def boot_process() -> tuple[ConfigBoot, Path]:
 
 
 def host_policy(
-    config: ConfigBoot, *, keys: ProviderKeys, rng: random.Random, user_home: Path
+    config: ConfigBoot, *, keys: ProviderKeys, rng: SecureRandom, pid: int, user_home: Path
 ) -> HostPolicy:
     daemon = config.view.daemon
     return HostPolicy(
@@ -50,6 +51,7 @@ def host_policy(
         provider_keys=keys,
         harness_environ=child_env("runner", config.process_environment()),
         rng=rng,
+        pid=pid,
         user_home=user_home,
         cache=HostCachePolicy(
             idle_ttl_seconds=daemon.host_agent_idle_ttl_seconds, size=daemon.host_agent_cache_size
