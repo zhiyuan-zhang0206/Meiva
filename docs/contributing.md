@@ -100,9 +100,9 @@ violations pass, anything new fails, and the debt may only shrink
   is left.
 - CI fails when the recorded total grows against the base (`debt diff --on-growth=fail`).
   The one exception is a rule change (it edits meizel's own rule code: Python under `meizel/`
-  outside tests, or `meizel.policy.toml`, whose reader tables decide what is an acquisition), whose growth is split in two by the tool, not by a reader. The growth the new
-  rules cause in the base's unchanged code is reported, because widening a rule grows the
-  baselines. The growth the content causes is failed: every debt key the change records must be one
+  outside tests, or `meizel.policy.toml`, whose reader tables decide what is an acquisition),
+  whose growth is split in two by the tool, not by a reader. The growth the new rules cause in
+  the base's unchanged code is reported, because widening a rule grows the baselines. The growth the content causes is failed: every debt key the change records must be one
   the new rules find in the base, so a rule change cannot carry a new violation or a moved file.
   Give a rule change its own PR. A queued comparison that includes it applies the same key check
   to the combined change; comparisons without rule changes are judged by totals as before.

@@ -81,7 +81,8 @@ acquires nothing.
 
 A function that reads the world and hands it on is an acquisition point of its own: the policy
 lists it under `[ambient-readers.<kind>]` by its fully qualified call, and a call to it is a read of
-that kind at the call site ([[meizel/docs/checker/ambient-readers.meiva.okf.md|readers]]).
+that kind at the call site; a process-wide object (`SYSTEM_TIMERS`) is listed without `()` and is
+read at every use of the name ([[meizel/docs/checker/ambient-readers.meiva.okf.md|readers]]).
 
 ## Roots
 

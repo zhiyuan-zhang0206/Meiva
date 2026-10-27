@@ -99,8 +99,9 @@ def sources_from(manifests: Mapping[str, Manifest], policy: Policy, universe: Un
                     else:
                         names[f"{module}.{name}"] = kind
     calls.update(_followed(universe, _readers(policy, call=True)))
-    names.update(_followed(universe, _readers(policy, call=False)))
-    return Sources(names, calls)
+    readers = _followed(universe, _readers(policy, call=False))
+    names.update(readers)
+    return Sources(names, calls, frozenset(readers))
 
 
 # meiva:note
@@ -391,7 +392,7 @@ def _followed(universe: Universe, readers: Mapping[str, AmbientKind]) -> dict[st
     seen: set[str] = set()
     candidates: set[str] = set()
     parsed: dict[str, dict[str, str]] = {}
-    for _ in range(_REEXPORT_HOPS):
+    for _ in range(_REEXPORT_HOPS + 1):
         tokens = {origin.rpartition(".")[2] for origin in exported} - seen
         seen |= tokens
         candidates.update(p for p in repo.grep_words(tokens, ".py") if not is_test_path(p))
@@ -399,8 +400,9 @@ def _followed(universe: Universe, readers: Mapping[str, AmbientKind]) -> dict[st
             break
     else:
         raise MeizelError(
-            f"the re-exports of the listed readers chain through more than {_REEXPORT_HOPS} "
-            "modules; list the module that defines the reader instead"
+            f"the re-exports of the listed readers need more than {_REEXPORT_HOPS} rounds of "
+            "the scan to follow (a chain of 12 modules is always followed); list the module "
+            "that defines the reader instead"
         )
     return {
         f"{origin}.{tail}" if tail else origin: kind
