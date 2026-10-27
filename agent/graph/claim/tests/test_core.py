@@ -13,6 +13,7 @@ from __future__ import annotations
 
 from collections.abc import Iterator
 from dataclasses import replace
+from pathlib import Path
 
 import psycopg
 import pytest
@@ -28,20 +29,23 @@ from base.db import Database
 from base.db.code_version_gate import ProcessDbGate
 from base.lm.catalog import ModelCatalog
 from base.packages.tests.model_catalog import AddModels
-from base.paths import meiva_home, resolve_meiva_home
+from base.paths import resolve_meiva_home
 from base.telemetry.tests.capture.event_capture import EmittedEvents
 from meiva.sdk_surface.installation import Installation
 from meiva.sdk_surface.tests.installation_holder import held_installation
 from meiva.tests.fixtures.pin_agent import pin_agent
 
 
+# meiva:note
+# Own the process writer used by the operation and its mirror barrier. It is built over the test's
+# own home (`unit_home`, which points `MEIVA_HOME` there first), so the mirror it writes is the one
+# the test reads back through `logs_dir()`.
 @pytest.fixture
 def event_pipeline(
-    database: Database, machine_identity: MachineIdentityReader
+    database: Database, machine_identity: MachineIdentityReader, unit_home: Path
 ) -> Iterator[telemetry.EventPipeline]:
-    """Own the process writer used by the operation and its mirror barrier."""
     pipeline = telemetry.build_pipeline(
-        database=lambda: database, machine=machine_identity, home=meiva_home()
+        database=lambda: database, machine=machine_identity, home=unit_home
     )
     try:
         telemetry.init_telemetry(process="test-sdk-operation", pipeline=pipeline)

@@ -3,6 +3,7 @@ from pathlib import Path
 from typing import Any
 
 import psycopg
+import pytest
 from opentelemetry.sdk._logs import LoggerProvider
 from opentelemetry.sdk._logs.export import InMemoryLogRecordExporter, SimpleLogRecordProcessor
 from opentelemetry.sdk.metrics import MeterProvider
@@ -12,6 +13,7 @@ from base import telemetry
 from base.db import Database
 from base.log.tests.log_records import LogRecords
 from base.log.tests.log_records import loguru_records as loguru_records
+from base.paths import logs_path
 from base.telemetry.metrics import observed_metrics as metrics
 from base.telemetry.otlp import telemetry_otlp
 from base.telemetry.tests.capture.event_capture import EmittedEvents
@@ -35,6 +37,7 @@ def test_projection_failure_keeps_jsonl_and_otlp_and_never_emits_recursively(
         export_allowed=lambda: True,
         enabled=lambda: True,
         providers=(logs, metric_provider),
+        mirror_dir=tmp_path,
     )
     event = telemetry.Event(
         ts=datetime(2026, 9, 15, 23, 59, 59, tzinfo=UTC),
@@ -56,8 +59,7 @@ def test_projection_failure_keeps_jsonl_and_otlp_and_never_emits_recursively(
         pipeline = telemetry.build_pipeline(
             database=lambda: database,
             machine=machine_identity(),
-            home=Path(".meiva"),
-            target_dir=tmp_path,
+            home=tmp_path,
         )
     try:
         telemetry.emit_prepared(event, producer=lambda: pipeline)
@@ -66,9 +68,18 @@ def test_projection_failure_keeps_jsonl_and_otlp_and_never_emits_recursively(
         db_conn.rollback()
         assert pipeline.stop(timeout=2).status is telemetry.DrainStatus.COMPLETED
     assert len(log_exporter.get_finished_logs()) == 1
-    assert len(list(tmp_path.glob("events-*.jsonl"))) >= 1
-    assert (
-        str(telemetry.event_row(event)["id"]) in next(tmp_path.glob("events-*.jsonl")).read_text()
-    )
+    mirror = list(logs_path(tmp_path).glob("events-*.jsonl"))
+    assert len(mirror) >= 1
+    assert str(telemetry.event_row(event)["id"]) in mirror[0].read_text()
     assert any("[observed-metrics] projection failed" in msg for msg in loguru_records.messages())
     assert len(emitted_events) == 0, "diagnostics must bypass the emitter"
+
+
+# meiva:note
+# The mirror and the exporter's loss reports land under the home, so a relative home would put
+# them under the working directory: the boundary refuses it before anything is built.
+def test_a_relative_home_is_refused_before_any_sink_is_built() -> None:
+    with pytest.raises(ValueError, match="absolute home"):
+        telemetry.build_pipeline(
+            database=lambda: None, machine=machine_identity(), home=Path(".meiva")
+        )

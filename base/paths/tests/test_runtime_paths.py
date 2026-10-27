@@ -11,6 +11,7 @@ def test_runtime_path_uses_the_explicit_home_without_creating_it(
 ) -> None:
     home = tmp_path / home_name
     derived = [
+        (paths.logs_path(home), "logs"),
         (paths.run_dir(home), "run"),
         (paths.exec_run_dir(home), "run/exec"),
         (paths.root_run_dir(home), "run/meiva-root"),

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from datetime import UTC, datetime
+from pathlib import Path
 from typing import Any
 
 import pytest
@@ -13,7 +14,7 @@ from base.telemetry.otlp import telemetry_otlp
 
 
 @pytest.fixture
-def otlp_backend() -> Any:
+def otlp_backend(tmp_path: Path) -> Any:
     """An in-memory OTLP log exporter for the cross-store byte contract."""
     from opentelemetry.sdk._logs import LoggerProvider
     from opentelemetry.sdk._logs.export import InMemoryLogRecordExporter, SimpleLogRecordProcessor
@@ -28,6 +29,7 @@ def otlp_backend() -> Any:
         export_allowed=lambda: True,
         enabled=lambda: True,
         providers=(logs, MeterProvider(metric_readers=[InMemoryMetricReader()])),
+        mirror_dir=tmp_path,
     )
     yield backend, exporter
     backend.shutdown()

@@ -44,7 +44,7 @@ def _utc_now() -> datetime:
 
 def prune_jsonl_mirror(
     *,
-    target_dir: Path | None = None,
+    target_dir: Path,
     retention_days: int = JSONL_RETENTION_DAYS,
 ) -> None:
     """Delete day-stamped mirror files older than their retention tier.
@@ -53,9 +53,6 @@ def prune_jsonl_mirror(
     durable fallback for audit events; log-stream lines are also held by the
     loguru file sinks, so the mirror's own retention is what bounds its disk
     footprint."""
-    from base.paths import logs_dir
-
-    resolved_dir = logs_dir() if target_dir is None else target_dir
     cutoff = (_utc_now() - timedelta(days=retention_days)).strftime("%Y%m%d")
     # meiva:note
     # Only plain `.jsonl` matches here, and that is deliberate: an older day may be
@@ -65,15 +62,15 @@ def prune_jsonl_mirror(
     #
     # `.rollup.jsonl` is the retired filtered tier; leftovers age out with the full mirror.
     for path in (
-        *resolved_dir.glob("events-????????.jsonl"),
-        *resolved_dir.glob("events-????????.rollup.jsonl"),
+        *target_dir.glob("events-????????.jsonl"),
+        *target_dir.glob("events-????????.rollup.jsonl"),
     ):
         if is_expired_mirror_filename(path.name, cutoff=cutoff):
             with contextlib.suppress(OSError):
                 path.unlink()
 
 
-def append_jsonl(events: list[Event], *, target_dir: Path | None = None) -> None:
+def append_jsonl(events: list[Event], *, target_dir: Path) -> None:
     """Append the batch to today's mirror file, one JSON line per event.
 
     Each row carries the stable surrogate ``id`` derived from its id-free body
@@ -86,16 +83,13 @@ def append_jsonl(events: list[Event], *, target_dir: Path | None = None) -> None
     otherwise degrade it without a trace. Single write() per line with
     O_APPEND semantics (opened in append mode) keeps concurrent processes
     from interleaving."""
-    from base.paths import logs_dir
-
-    resolved_dir = logs_dir() if target_dir is None else target_dir
     day = _utc_now().strftime("%Y%m%d")
     try:
         lines = [
             json.dumps(event_row(e), default=str, separators=(",", ":"), ensure_ascii=False) + "\n"
             for e in events
         ]
-        path = resolved_dir / f"events-{day}.jsonl"
+        path = target_dir / f"events-{day}.jsonl"
         path.parent.mkdir(parents=True, exist_ok=True)
         with path.open("a", encoding="utf-8") as f:
             f.write("".join(lines))
@@ -116,7 +110,7 @@ def append_jsonl(events: list[Event], *, target_dir: Path | None = None) -> None
         if process_state["jsonl_day"] != day:
             process_state["jsonl_day"] = day
             with failure_isolated("jsonl mirror prune"):
-                prune_jsonl_mirror(target_dir=resolved_dir)
+                prune_jsonl_mirror(target_dir=target_dir)
 
 
 # ── drain-thread failure visibility ─────────────────────────────────────────

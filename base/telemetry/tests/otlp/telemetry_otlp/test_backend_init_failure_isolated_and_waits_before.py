@@ -25,6 +25,7 @@ from opentelemetry.sdk.metrics.export import InMemoryMetricReader
 
 from base import telemetry
 from base.db import Database
+from base.paths import logs_path
 from base.telemetry.delivery import loss
 from base.telemetry.otlp import telemetry_otlp
 from base.telemetry.tests.capture.event_capture import EmittedEvents
@@ -77,7 +78,7 @@ class _BlockedLogExporter(LogRecordExporter):
         pass
 
 
-def test_backend_init_failure_isolated_and_waits_before_retry() -> None:
+def test_backend_init_failure_isolated_and_waits_before_retry(tmp_path: Path) -> None:
     """A backend that cannot come up (bad endpoint / missing dep) never raises
     into the emitter and does not retry again inside the five-minute window."""
     attempts: list[int] = []
@@ -88,6 +89,7 @@ def test_backend_init_failure_isolated_and_waits_before_retry() -> None:
         enabled=lambda: True,
         endpoint="http://127.0.0.1:4318",
         providers=(logs, metrics),
+        mirror_dir=tmp_path,
     )
     try:
         assert backend.export_batch([otlp_test_event()]) is None  # does not raise
@@ -101,6 +103,7 @@ def test_backend_init_failure_isolated_and_waits_before_retry() -> None:
 
 def test_backend_retry_recovers_and_emits_real_status_events(
     emitted_events: EmittedEvents,
+    tmp_path: Path,
 ) -> None:
     """A failed init reports into the surviving mirror, then a later retry
     initializes the backend and reports recovery."""
@@ -113,6 +116,7 @@ def test_backend_retry_recovers_and_emits_real_status_events(
         endpoint="http://127.0.0.1:4318",
         retry_interval_s=0.05,
         providers=(logs, metrics),
+        mirror_dir=tmp_path,
     )
     try:
         assert backend._ensure() is False
@@ -140,6 +144,7 @@ def test_backend_retry_recovers_and_emits_real_status_events(
 
 def test_backend_unreachable_probe_emits_specific_disabled_reason(
     emitted_events: EmittedEvents,
+    tmp_path: Path,
 ) -> None:
     with socket.socket() as sock:
         sock.bind(("127.0.0.1", 0))
@@ -149,6 +154,7 @@ def test_backend_unreachable_probe_emits_specific_disabled_reason(
         export_allowed=lambda: True,
         enabled=lambda: True,
         endpoint=endpoint,
+        mirror_dir=tmp_path,
     )
     try:
         assert backend._ensure() is False
@@ -162,7 +168,7 @@ def test_backend_unreachable_probe_emits_specific_disabled_reason(
         backend.shutdown()
 
 
-def test_queue_full_sheds_counted_not_blocking() -> None:
+def test_queue_full_sheds_counted_not_blocking(tmp_path: Path) -> None:
     """The bounded queue sheds instead of blocking the caller when the worker
     cannot keep up — the isolation contract for a hung OTLP endpoint."""
     entered, release = threading.Event(), threading.Event()
@@ -176,6 +182,7 @@ def test_queue_full_sheds_counted_not_blocking() -> None:
         enabled=lambda: True,
         providers=(logger_provider, metric_provider),
         queue_maxsize=1,
+        mirror_dir=tmp_path,
     )
     try:
         backend.export_batch([otlp_test_event()])
@@ -229,6 +236,7 @@ def test_pipeline_mirror_survives_otlp_failure(database: Database, tmp_path: Pat
             _NoopProvider(),
             _FailingMetricsProvider(attempts, message="collector unreachable"),
         ),
+        mirror_dir=tmp_path,
     )
     existing = telemetry.process_state["pipeline"]
     if existing is not None:
@@ -237,8 +245,7 @@ def test_pipeline_mirror_survives_otlp_failure(database: Database, tmp_path: Pat
         pipeline = telemetry.build_pipeline(
             database=lambda: database,
             machine=machine_identity(),
-            home=Path(".meiva"),
-            target_dir=tmp_path,
+            home=tmp_path,
         )
     try:
         telemetry.init_telemetry(process="test-proc", pipeline=pipeline)
@@ -248,7 +255,7 @@ def test_pipeline_mirror_survives_otlp_failure(database: Database, tmp_path: Pat
         pipeline.stop(timeout=2)
 
     day = datetime.now(UTC).strftime("%Y%m%d")
-    path = tmp_path / f"events-{day}.jsonl"
+    path = logs_path(tmp_path) / f"events-{day}.jsonl"
     assert path.exists()
     assert any(
         '"event_name":"log"' in line and '"msg":"boom"' in line
@@ -256,19 +263,20 @@ def test_pipeline_mirror_survives_otlp_failure(database: Database, tmp_path: Pat
     )
 
 
-def test_handshake_env_no_longer_gates_export() -> None:
+def test_handshake_env_no_longer_gates_export(tmp_path: Path) -> None:
     """The MEIVA_EXEC_REQUEST_FILE handshake was the old child-export gate; it
     must no longer disable OTLP — the export flag is the only authority."""
     assert (
         telemetry_otlp.OtlpBackend(
             export_allowed=lambda: True,
             enabled=lambda: True,
+            mirror_dir=tmp_path,
         )._enabled()
         is True
     )
 
 
-def test_flush_force_flushes_sdk_batch_records() -> None:
+def test_flush_force_flushes_sdk_batch_records(tmp_path: Path) -> None:
     """flush() must force-flush the SDK batch processor: a short-lived exec
     child exits before the 5s batch window fires on its own, so without the
     force_flush the app-level queue drain is not enough to reach the wire."""
@@ -280,6 +288,7 @@ def test_flush_force_flushes_sdk_batch_records() -> None:
         export_allowed=lambda: True,
         enabled=lambda: True,
         providers=(logger_provider, metric_provider),
+        mirror_dir=tmp_path,
     )
 
     try:
@@ -292,7 +301,7 @@ def test_flush_force_flushes_sdk_batch_records() -> None:
         backend.shutdown()
 
 
-def test_warmup_builds_backend_when_enabled() -> None:
+def test_warmup_builds_backend_when_enabled(tmp_path: Path) -> None:
     """warmup() constructs the OTel providers so a short-lived child never
     first builds them during interpreter shutdown."""
     log_exporter = InMemoryLogRecordExporter()
@@ -305,6 +314,7 @@ def test_warmup_builds_backend_when_enabled() -> None:
             logger_provider,
             MeterProvider(metric_readers=[InMemoryMetricReader()]),
         ),
+        mirror_dir=tmp_path,
     )
 
     try:

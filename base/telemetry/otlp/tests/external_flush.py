@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from collections.abc import Iterator, Sequence
 from datetime import UTC, datetime
+from pathlib import Path
 from threading import Event
 
 import pytest
@@ -18,7 +19,7 @@ HANDSHAKE_BOUND_S = 30.0
 
 
 @pytest.fixture
-def paused_otlp_record() -> Iterator[tuple[Event, InMemoryLogRecordExporter]]:
+def paused_otlp_record(tmp_path: Path) -> Iterator[tuple[Event, InMemoryLogRecordExporter]]:
     """Pause an already-dequeued real record until the caller releases its flush."""
     from opentelemetry.sdk._logs import LoggerProvider
     from opentelemetry.sdk._logs.export import InMemoryLogRecordExporter, SimpleLogRecordProcessor
@@ -42,6 +43,7 @@ def paused_otlp_record() -> Iterator[tuple[Event, InMemoryLogRecordExporter]]:
         export_allowed=lambda: True,
         enabled=lambda: True,
         providers=(logger_provider, MeterProvider(metric_readers=[InMemoryMetricReader()])),
+        mirror_dir=tmp_path,
     )
     backend.export_batch(
         [

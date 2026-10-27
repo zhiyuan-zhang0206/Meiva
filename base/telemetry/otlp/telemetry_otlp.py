@@ -260,7 +260,7 @@ class OtlpBackend:
         enabled: Callable[[], bool] | None = None,
         endpoint: str | None = None,
         retry_interval_s: float = COLLECTOR_RETRY_INTERVAL_S,
-        mirror_dir: Path | None = None,
+        mirror_dir: Path,
         home: Path | None = None,
     ) -> None:
         self._export_allowed = export_allowed
@@ -587,6 +587,7 @@ class OtlpBackend:
                     keep_logs=keep_logs,
                     keep_reader=keep_reader,
                     keep_metrics=keep_metrics,
+                    mirror_dir=self._mirror_dir,
                     home=self._home,
                 )
             meter = worker.metrics.get_meter("meiva.telemetry")
@@ -760,11 +761,11 @@ def bind_exporter(exporter: OtlpBackend) -> Generator[None]:
 
 # meiva:note
 # Return the bound exporter override if active, otherwise construct ``OtlpBackend``.
-def default_exporter(*, export_allowed: Callable[[], bool]) -> OtlpBackend:
+def default_exporter(*, export_allowed: Callable[[], bool], mirror_dir: Path) -> OtlpBackend:
     bound = OtlpBackend._bound_default
     if bound is not None:
         return bound
-    return OtlpBackend(export_allowed=export_allowed)
+    return OtlpBackend(export_allowed=export_allowed, mirror_dir=mirror_dir)
 
 
 # meiva:note

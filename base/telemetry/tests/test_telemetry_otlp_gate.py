@@ -10,6 +10,7 @@ from base.config import ConfigBoot
 from base.paths.tests.homes import point_home
 from base.telemetry import observability
 from base.telemetry.otlp import telemetry_otlp
+from base.telemetry.otlp.telemetry_otlp import default_exporter
 from base.telemetry.tests.otlp.identity_inputs import machine_identity
 
 
@@ -98,7 +99,7 @@ def test_invalid_roles_propagate_outside_transport_isolation(
             telemetry_otlp.observability_export_allowed(machine, home=home, endpoint_explicit=False)
 
 
-def test_each_backend_freezes_only_its_own_eligibility() -> None:
+def test_each_backend_freezes_only_its_own_eligibility(tmp_path: Path) -> None:
     decision = False
     calls: list[bool] = []
 
@@ -106,11 +107,15 @@ def test_each_backend_freezes_only_its_own_eligibility() -> None:
         calls.append(decision)
         return decision
 
-    first = telemetry_otlp.OtlpBackend(export_allowed=read, enabled=lambda: True)
+    first = telemetry_otlp.OtlpBackend(
+        export_allowed=read, enabled=lambda: True, mirror_dir=tmp_path
+    )
     assert first._enabled() is False
     decision = True
     assert first._enabled() is False
-    second = telemetry_otlp.OtlpBackend(export_allowed=read, enabled=lambda: True)
+    second = telemetry_otlp.OtlpBackend(
+        export_allowed=read, enabled=lambda: True, mirror_dir=tmp_path
+    )
     assert second._enabled() is True
     assert calls == [False, True]
 
@@ -118,23 +123,29 @@ def test_each_backend_freezes_only_its_own_eligibility() -> None:
 @pytest.mark.parametrize("error", [MachineRoleInvalid, RuntimeError])
 def test_backend_does_not_cache_identity_defects_as_disabled(
     error: type[Exception],
+    tmp_path: Path,
 ) -> None:
     def invalid() -> bool:
         raise error("bad identity")
 
-    backend = telemetry_otlp.OtlpBackend(export_allowed=invalid, enabled=lambda: True)
+    backend = telemetry_otlp.OtlpBackend(
+        export_allowed=invalid, enabled=lambda: True, mirror_dir=tmp_path
+    )
     with pytest.raises(error, match="bad identity"):
         backend.warmup()
     assert backend._export_decision is None
     assert backend._worker is None
 
 
-def test_disabled_backend_does_not_read_identity() -> None:
+def test_disabled_backend_does_not_read_identity(tmp_path: Path) -> None:
     def reject() -> bool:
         raise MachineNameMissing("identity remains cold")
 
     assert (
-        telemetry_otlp.OtlpBackend(export_allowed=reject, enabled=lambda: False)._enabled() is False
+        telemetry_otlp.OtlpBackend(
+            export_allowed=reject, enabled=lambda: False, mirror_dir=tmp_path
+        )._enabled()
+        is False
     )
 
 
@@ -145,7 +156,7 @@ def test_disabled_backend_does_not_read_identity() -> None:
 # (#5578). `stop()` therefore marks the backend closing *before* its own drain, which is
 # where that bring-up used to happen.
 # meiva:link base/telemetry/otlp/docs/telemetry-otlp/exit-flush.meiva.okf.md
-def test_stop_marks_the_exporter_closing_before_the_drain() -> None:
+def test_stop_marks_the_exporter_closing_before_the_drain(tmp_path: Path) -> None:
     from datetime import UTC, datetime
 
     from base.telemetry.delivery.receipts import Event
@@ -154,7 +165,7 @@ def test_stop_marks_the_exporter_closing_before_the_drain() -> None:
     seen: list[bool] = []
     pipeline = ExportingEventPipeline(
         writer=lambda _events, exporter: seen.append(exporter._closing),
-        export_allowed=lambda: True,
+        exporter=default_exporter(export_allowed=lambda: True, mirror_dir=tmp_path),
     )
     pipeline.enqueue(
         Event(
