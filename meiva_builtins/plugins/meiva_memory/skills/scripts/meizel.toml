@@ -2,3 +2,10 @@ exports = ["steward.py"]
 
 [uses]
 "tests" = ["rebuild_memory_index.py"]
+
+[roots]
+"arbiter_merge.py" = { kinds = ["home"], why = "Process entry of the arbiter merge script: resolves the Meiva home once and hands the pool to the pool helpers" }
+"consolidate.py" = { kinds = ["home"], why = "Process entry of the single-box consolidation script: resolves the Meiva home once and hands the pool to the pool helpers" }
+"gen_indexes.py" = { kinds = ["home"], why = "Process entry of the directory-index script: resolves the Meiva home once and hands the pool to the index writer" }
+"rebuild_memory_index.py" = { kinds = ["home"], why = "Process entry of the MEMORY.md pointer-rebuild script: resolves the Meiva home once and hands the pool to the rebuild" }
+"steward.py" = { kinds = ["home"], why = "Process entry of the per-machine steward script: resolves the Meiva home once and hands the pool and the branch name to the pool helpers" }
