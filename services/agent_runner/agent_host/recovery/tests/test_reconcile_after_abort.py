@@ -3,6 +3,7 @@ from __future__ import annotations
 from datetime import UTC, datetime, timedelta
 from typing import Any
 from unittest.mock import Mock
+from uuid import uuid4
 
 import psycopg
 from psycopg_pool import AsyncConnectionPool
@@ -190,6 +191,7 @@ async def test_cold_build_consumes_claims_without_reading_checkpoint_history(
     claimed = claimed_row(db_conn, agent, "claimed")
     unusable_saver: Any = object()
     host = AgentHost(
+        runtime_owner=uuid4(),
         handoff_stamping=handoff_timestamps(),
         home=meiva_home(),
         policy=configured_policy(),

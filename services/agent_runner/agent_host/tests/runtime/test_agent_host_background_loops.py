@@ -17,6 +17,7 @@ def test_background_loops_are_the_plugin_watch_the_log_rotator_the_memory_guard_
         installation=model_installation,
         config=snapshot_process_config(),
         plugins_root=tmp_path,
+        stdout_log=tmp_path / "agent-host.out.log",
     )
     try:
         assert set(loops) == {
