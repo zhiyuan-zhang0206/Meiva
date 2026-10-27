@@ -25,6 +25,7 @@ export function registerUseTimelineOwnershipTests(ctx: UseTimelineTestContext): 
     postWindow,
     tlResp,
     composedSnapshot,
+    wallClock,
     wrapper,
   } = ctx;
 
@@ -319,6 +320,22 @@ describe("latest-message refresh lifecycle", () => {
     expect(result.current.items.map((it) => it.item_id)).toEqual(["1.0"]);
     expect(result.current.items[0].codeStartedAt).toBeUndefined();
     expect(result.current.items[0].codeElapsedMs).toEqual(expect.any(Number));
+  });
+
+  it("freezes a live reasoning clock at the provided instant when agentStatus leaves running", async () => {
+    ctx.getQueryClient().setQueryData(["timeline", 7], tlResp([]));
+    const { result, rerender } = renderHook(
+      ({ status }: { status?: string }) => useTimeline(7, vi.fn(), status),
+      { wrapper, initialProps: { status: "running" } },
+    );
+    act(() => {
+      pushEvent({ role: "reasoning_start", agent_id: 7, item_id: "1.0" });
+    });
+    wallClock.advance(3000);
+
+    rerender({ status: "idle" });
+
+    await waitFor(() => expect(result.current.items[0].reasoningElapsedMs).toBe(3000));
   });
 });
 }
