@@ -45,7 +45,6 @@ from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Protocol, Self
-from uuid import UUID
 
 from base.agents.context.clients import ClientSet, LazyConnection
 from base.agents.context.identity import AgentIdentity
@@ -56,6 +55,7 @@ from base.agents.sdk.capture import SdkCaptureOwner
 from base.agents.sdk.tally import SdkCallTally
 from base.api_contracts.agent_contract import Harness
 from base.clock import Clock
+from base.clock.ids import new_uuid
 from base.cluster.machine import MachineIdentityReader
 from base.lm.catalog import ModelCatalog
 from base.lm.catalog.provider_keys import ProviderKeys
@@ -244,11 +244,10 @@ class MeivaContext:
 
     # meiva:note
     # Mint a fresh version-4 identifier from the root's generator, as the 32-character hex form
-    # the CLI runtime and the IM bridge use (`new_uuid(rng).hex`; this body is that function until
-    # `base/clock/ids.py` is on main). A partial context fails at first use, with no fallback to
-    # a generator of its own.
+    # the CLI runtime and the IM bridge use (`new_uuid(rng).hex`). A partial context fails at
+    # first use, with no fallback to a generator of its own.
     def require_new_id(self) -> str:
-        return UUID(int=self.require_rng().getrandbits(128), version=4).hex
+        return new_uuid(self.require_rng()).hex
 
     # meiva:note
     # The message-timestamp policy of the unit of work that asks: this owner's clock and the
