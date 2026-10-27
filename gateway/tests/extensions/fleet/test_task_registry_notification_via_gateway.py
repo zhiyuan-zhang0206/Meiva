@@ -15,9 +15,9 @@ from meiva_builtins.plugins.meiva_fleet.tests.task_registry.seeds import (
 from meiva_builtins.plugins.meiva_fleet.tests.task_registry.seeds import seed_agent
 
 # meiva:note
-# The task registry publishes through the SDK's event bus, which needs the generator the SDK root
-# carries; every test here runs under the bare installation `sdk_root` holds.
-pytestmark = pytest.mark.usefixtures("sdk_root")
+# The task registry publishes through the event bus of the context that commits; every test here
+# pins its agents under a context that carries one.
+pytestmark = pytest.mark.usefixtures("pinned_bus")
 
 
 def test_gateway_enqueue_failure_rolls_back_assignment(

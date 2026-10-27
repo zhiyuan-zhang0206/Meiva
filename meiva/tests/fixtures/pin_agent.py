@@ -16,6 +16,7 @@ from base.clock.configuration import clock_config_from_boot
 from base.cluster.machine import MachineIdentityReader
 from base.cluster.machine.configured import ConfiguredMachineIdentity
 from base.config.tests.configuration import snapshot_process_config
+from base.events.live.bus import EventBus
 from base.native_process.runtime_incarnation import RuntimeIncarnation
 from base.native_process.turn_identity import HostedServiceResources, HostedTurnResources
 from meiva.boot import clients_over, derived_clients
@@ -57,6 +58,7 @@ def pin_agent(
     clients: ClientSet | None = None,
     machine: MachineIdentityReader | None = None,
     harness: Harness = Harness.MEIVA,
+    bus: EventBus | None = None,
 ) -> None:
     bound = getattr(meiva, "context", None)
     process_context.bind_context(
@@ -75,6 +77,7 @@ def pin_agent(
                 if clock_factory is not None
                 else (None if bound is None else bound.clock_factory)
             ),
+            bus=bus if bus is not None else (None if bound is None else bound.bus),
         )
     )
 

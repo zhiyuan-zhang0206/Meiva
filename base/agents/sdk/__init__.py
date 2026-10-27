@@ -61,7 +61,7 @@ class SamplingPolicyLike(Protocol):
 
     # meiva:note
     # The process root's random generator the policy draws from, or None for a policy that
-    # never samples. The SDK's event bus draws its retry jitter from the same one.
+    # never samples.
     @property
     def rng(self) -> random.Random | None: ...
 

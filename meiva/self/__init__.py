@@ -311,8 +311,8 @@ def compact(summary: str) -> NoReturn:
     from base.telemetry.audit_events import prepare_event_log, record_audit
 
     # meiva:note
-    # Taken before the commit: an SDK root without a random generator fails here, not after the
-    # summary is durable and the wake + SystemHalt below have been skipped.
+    # Taken before the commit: a context without an event bus fails here, not after the summary
+    # is durable and the wake + SystemHalt below have been skipped.
     bus = _settings.bus()
     # The inbound and its audit fact commit together.
     db = process_context.current_context().sql

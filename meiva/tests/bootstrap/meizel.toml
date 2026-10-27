@@ -2,6 +2,7 @@ exports = ["child_sdk_probes.py", "probe_runner.py"]
 
 [uses]
 "probe_runner.py" = ["child_sdk_probes.py"]
+"test_boot_shells.py" = ["probe_runner.py"]
 "test_config_boot_lite_meiva.py" = ["child_sdk_probes.py"]
 "test_external_caller_meiva.py" = ["probe_runner.py"]
 "test_mcp_config.py" = ["child_no_display.py"]

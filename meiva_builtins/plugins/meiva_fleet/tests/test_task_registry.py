@@ -31,10 +31,9 @@ from meiva_builtins.plugins.meiva_fleet.tests.task_registry.seeds import (
 )
 
 # meiva:note
-# These tests drive the fleet task registry, whose board refreshes publish through the SDK's event
-# bus; it needs the generator the SDK root carries, so each runs under the bare installation
-# `sdk_root` holds.
-pytestmark = pytest.mark.usefixtures("sdk_root")
+# These tests drive the fleet task registry, whose board refreshes publish through the event
+# bus of the context that commits, so each runs under a context that carries one.
+pytestmark = pytest.mark.usefixtures("pinned_bus")
 
 
 def _persisted_remind_interval_seconds(db: psycopg.Connection, task_id: int) -> int | None:
