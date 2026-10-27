@@ -539,6 +539,7 @@ def compact_reminder_update(
             system_note_message(
                 content=_reminder_content(agent, catalog=catalog, extensions=extensions),
                 tag=NoteTag.COMPACT_REMINDER,
+                picked_up_at=now,
                 created_at=now,
             )
         ],

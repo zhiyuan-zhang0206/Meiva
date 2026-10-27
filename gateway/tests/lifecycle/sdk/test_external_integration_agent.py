@@ -1,4 +1,5 @@
 import importlib.util
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Annotated, Any, cast
 from uuid import uuid4
@@ -35,6 +36,8 @@ from meiva import impersonation
 from meiva.sdk_surface import agent_identity, install, process_context
 from meiva.sdk_surface.installation import Installation
 from meiva.tests.fixtures.pin_agent import pin_agent
+
+_PICKED_UP_AT = datetime(2026, 1, 1, tzinfo=UTC)
 
 
 def _union(left: set[str], right: set[str]) -> set[str]:
@@ -121,7 +124,11 @@ def native_checkpoint(
     checkpoint["channel_values"] = {
         "messages": [
             SystemMessage(content="Native core and plugin rules"),
-            system_note_message(content="Configured skill rules", tag=NoteTag.PRELOADED_SKILLS),
+            system_note_message(
+                content="Configured skill rules",
+                tag=NoteTag.PRELOADED_SKILLS,
+                picked_up_at=_PICKED_UP_AT,
+            ),
             HumanMessage(content="Native task"),
         ],
         "integration__seen": {"native"},

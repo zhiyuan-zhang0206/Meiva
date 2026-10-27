@@ -9,12 +9,13 @@ image upload as a native base64 block the model decodes.
 from __future__ import annotations
 
 from collections.abc import Callable
+from datetime import datetime
 from typing import Any, TypeGuard
 
 from langchain_core.messages import HumanMessage
 
 from agent.db import ClaimedInbound
-from agent.messages import inbound_message
+from agent.messages import InboundTimes, inbound_message
 from base.agents.messages.envelope import inbound_head, inbound_tail
 from base.agents.messages.inbound_images import parse_upload_url
 from base.agents.messages.injection_scan import scan_inbound_content
@@ -35,6 +36,7 @@ def _is_object_dict(value: object) -> TypeGuard[dict[object, object]]:
 def build_chat_inbound(
     item: ClaimedInbound,
     *,
+    picked_up_at: datetime,
     read_security_enabled: Callable[[], bool],
     envelope_inputs: TimestampPolicy,
     expand_command: Callable[[str], str],
@@ -76,7 +78,7 @@ def build_chat_inbound(
             source=item.source,
             inbound_id=item.id,
             body_start=len(head),
-            created_at=item.created_at,
+            times=InboundTimes(arrived_at=item.created_at, picked_up_at=picked_up_at),
         )
         return message, finding
     blocks: list[dict[str, Any]] = [
@@ -121,7 +123,7 @@ def build_chat_inbound(
         source=item.source,
         inbound_id=item.id,
         body_start=len(head),
-        created_at=item.created_at,
+        times=InboundTimes(arrived_at=item.created_at, picked_up_at=picked_up_at),
         image_urls=image_urls,
     )
     return message, finding

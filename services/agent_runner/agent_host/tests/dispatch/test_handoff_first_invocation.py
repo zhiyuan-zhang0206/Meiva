@@ -1,6 +1,7 @@
+from datetime import UTC, datetime
+
 # meiva:note
 # A durable handoff is fresh hosted input without reviving halted work.
-
 from typing import Any
 from unittest.mock import MagicMock
 from uuid import uuid4
@@ -38,6 +39,8 @@ from services.agent_runner.agent_host.tests.host_policy import (
     configured_policy,
 )
 
+_PICKED_UP_AT = datetime(2026, 1, 1, tzinfo=UTC)
+
 
 async def _checkpoint(
     pool: AsyncConnectionPool[Any], agent_id: int, boundary: str, calls: list[states.BaseAgentState]
@@ -58,7 +61,9 @@ async def _checkpoint(
     graph = builder.compile(checkpointer=saver)
     config: RunnableConfig = {"configurable": {"thread_id": str(agent_id)}}
     receipt = f"{agent_id}:0"
-    note = system_note_message(content="Session ended", tag=NoteTag.IMPERSONATION)
+    note = system_note_message(
+        content="Session ended", tag=NoteTag.IMPERSONATION, picked_up_at=_PICKED_UP_AT
+    )
     note.id = f"impersonation-handoff:{receipt}"
     messages: list[AnyMessage] = [note]
     if boundary == "completed":

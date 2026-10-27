@@ -29,6 +29,9 @@ from base.config import settings
 from base.packages.composer_commands import CommandCatalog
 from base.paths import meiva_home
 
+_PICKED_UP_AT = datetime(2026, 1, 1, tzinfo=UTC)
+
+
 _ENVELOPE_INPUTS = TimestampPolicy.from_clock(
     Clock.from_settings(), timestamps_enabled=settings.general.message_timestamps
 )
@@ -93,6 +96,7 @@ def test_plain_text_inbound_is_string_message() -> None:
         envelope_inputs=_ENVELOPE_INPUTS,
         expand_command=CommandCatalog.system(skills=list, home=meiva_home()).expand,
         gateway=_forbidden_gateway,
+        picked_up_at=_PICKED_UP_AT,
     )
     assert isinstance(msg.content, str)  # pyright: ignore[reportUnknownMemberType]
     assert "hello there" in msg.content
@@ -117,6 +121,7 @@ def test_multimodal_inbound_inlines_base64_and_keeps_url(
         envelope_inputs=_ENVELOPE_INPUTS,
         expand_command=CommandCatalog.system(skills=list, home=meiva_home()).expand,
         gateway=lambda: gateway[0],
+        picked_up_at=_PICKED_UP_AT,
     )
     # The image is fetched from the gateway over HTTP — one uniform path,
     # never the claim node's local disk.
@@ -147,6 +152,7 @@ def test_non_image_reference_degrades_without_constructing_gateway() -> None:
         envelope_inputs=_ENVELOPE_INPUTS,
         expand_command=CommandCatalog.system(skills=list, home=meiva_home()).expand,
         gateway=_forbidden_gateway,
+        picked_up_at=_PICKED_UP_AT,
     )
     blocks = _blocks(msg)
     assert all(block["type"] == "text" for block in blocks)
@@ -169,6 +175,7 @@ def test_image_only_message_has_empty_wrapped_text_block(
         envelope_inputs=_ENVELOPE_INPUTS,
         expand_command=CommandCatalog.system(skills=list, home=meiva_home()).expand,
         gateway=lambda: gateway[0],
+        picked_up_at=_PICKED_UP_AT,
     )
     blocks = _blocks(msg)
     # A leading (possibly envelope-only) text block, then the image.
@@ -194,6 +201,7 @@ def test_missing_image_degrades_to_text_note(gateway: tuple[httpx.Client, Upload
         envelope_inputs=_ENVELOPE_INPUTS,
         expand_command=CommandCatalog.system(skills=list, home=meiva_home()).expand,
         gateway=lambda: gateway[0],
+        picked_up_at=_PICKED_UP_AT,
     )
     blocks = _blocks(msg)
     # No image block; the missing image became a text note, delivery survived.
@@ -215,6 +223,7 @@ def test_command_chain_expands_inside_the_one_message(
         envelope_inputs=_ENVELOPE_INPUTS,
         expand_command=CommandCatalog.system(skills=list, home=meiva_home()).expand,
         gateway=lambda: gateway[0],
+        picked_up_at=_PICKED_UP_AT,
     )
     assert isinstance(msg.content, str)  # pyright: ignore[reportUnknownMemberType]
     assert msg.content.index("Command /recap:") < msg.content.index("Command /compact:")
@@ -235,6 +244,7 @@ def test_lifecycle_command_chains_like_any_other(
         envelope_inputs=_ENVELOPE_INPUTS,
         expand_command=CommandCatalog.system(skills=list, home=meiva_home()).expand,
         gateway=lambda: gateway[0],
+        picked_up_at=_PICKED_UP_AT,
     )
     assert isinstance(msg.content, str)  # pyright: ignore[reportUnknownMemberType]
     assert "Command /compact:" in msg.content
@@ -248,6 +258,7 @@ def test_clean_inbound_has_no_finding(gateway: tuple[httpx.Client, UploadGateway
         envelope_inputs=_ENVELOPE_INPUTS,
         expand_command=CommandCatalog.system(skills=list, home=meiva_home()).expand,
         gateway=lambda: gateway[0],
+        picked_up_at=_PICKED_UP_AT,
     )
     assert finding is None
 
@@ -262,6 +273,7 @@ def test_flagged_text_inbound_reports_its_finding_and_leaves_the_message_intact(
         envelope_inputs=_ENVELOPE_INPUTS,
         expand_command=CommandCatalog.system(skills=list, home=meiva_home()).expand,
         gateway=lambda: gateway[0],
+        picked_up_at=_PICKED_UP_AT,
     )
     assert finding is not None
     assert finding.source == "inbound.chat:user"
@@ -286,6 +298,7 @@ def test_flagged_multimodal_text_block_reports_its_finding(
         envelope_inputs=_ENVELOPE_INPUTS,
         expand_command=CommandCatalog.system(skills=list, home=meiva_home()).expand,
         gateway=lambda: gateway[0],
+        picked_up_at=_PICKED_UP_AT,
     )
     assert finding is not None
     assert finding.source == "inbound.chat:user"
@@ -301,25 +314,27 @@ def test_scan_disabled_reports_no_finding(gateway: tuple[httpx.Client, UploadGat
         envelope_inputs=_ENVELOPE_INPUTS,
         expand_command=CommandCatalog.system(skills=list, home=meiva_home()).expand,
         gateway=lambda: gateway[0],
+        picked_up_at=_PICKED_UP_AT,
     )
     assert finding is None
 
 
+# meiva:note
+# `meiva_created_at` stays the row's arrival time; `meiva_picked_up_at` is the instant the claim
+# hands in as the moment the message enters the context.
 def test_inbound_metadata_keeps_arrival_and_adds_pickup_time(
     gateway: tuple[httpx.Client, UploadGateway],
 ) -> None:
-    """`meiva_created_at` stays the row's arrival time; `meiva_picked_up_at` is the
-    claim-time moment the message enters the context (not before 'now')."""
     arrival = _inbound("x").created_at
     assert arrival is not None
-    before = datetime.now(UTC)
     msg, _ = build_chat_inbound(
         _inbound("hello"),
         read_security_enabled=lambda: settings.agent.security_scan_enabled,
         envelope_inputs=_ENVELOPE_INPUTS,
         expand_command=CommandCatalog.system(skills=list, home=meiva_home()).expand,
         gateway=lambda: gateway[0],
+        picked_up_at=_PICKED_UP_AT,
     )
     kw = msg.additional_kwargs  # pyright: ignore[reportUnknownMemberType]
     assert kw["meiva_created_at"] == arrival.isoformat()
-    assert datetime.fromisoformat(kw["meiva_picked_up_at"]) >= before
+    assert kw["meiva_picked_up_at"] == _PICKED_UP_AT.isoformat()

@@ -5,6 +5,7 @@ with per-compaction cadence; agent-reply hints on agent-sourced inbound.
 import inspect
 from collections.abc import Iterator
 from dataclasses import replace
+from datetime import UTC, datetime
 from typing import Any
 
 import pytest
@@ -17,7 +18,7 @@ from langchain_core.messages import (
 from langchain_core.runnables import RunnableConfig
 from langgraph.runtime import Runtime
 
-from agent.messages import inbound_message, tail_has_agent_inbound
+from agent.messages import InboundTimes, inbound_message, tail_has_agent_inbound
 from agent.state import CompactState, build_agent_state
 from base.agents.context import MeivaContext
 from base.agents.sdk.tests.sampling_owners import fixed_sampling_owner
@@ -43,6 +44,8 @@ from meiva_builtins.plugins.meiva_sdk_reminder.hint_selection import (
     rearmed_reminded,
     select_hints,
 )
+
+_PICKED_UP_AT = datetime(2026, 1, 1, tzinfo=UTC)
 
 
 # meiva:note
@@ -121,7 +124,13 @@ def nameerror_output(name: str) -> str:
 
 
 def agent_inbound(content: str = "ping", source: str = "agent:7") -> AnyMessage:
-    return inbound_message(content=content, source=source, inbound_id=1, body_start=0)
+    return inbound_message(
+        content=content,
+        source=source,
+        inbound_id=1,
+        body_start=0,
+        times=InboundTimes(arrived_at=None, picked_up_at=_PICKED_UP_AT),
+    )
 
 
 # ── the pure matcher ───────────────────────────────────────────────────────
@@ -693,7 +702,13 @@ def test_tail_has_agent_inbound_true():
 def test_tail_has_agent_inbound_user_only_false():
     msgs: list[AnyMessage] = [
         AIMessage(content="prev", id="a0"),
-        inbound_message(content="hi", source="user", inbound_id=2, body_start=0),
+        inbound_message(
+            content="hi",
+            source="user",
+            inbound_id=2,
+            body_start=0,
+            times=InboundTimes(arrived_at=None, picked_up_at=_PICKED_UP_AT),
+        ),
     ]
     assert tail_has_agent_inbound(msgs) is False
 
@@ -704,7 +719,13 @@ def test_tail_has_agent_inbound_stops_at_prior_ai():
     msgs: list[AnyMessage] = [
         agent_inbound(source="agent:3"),
         AIMessage(content="already answered", id="a1"),
-        inbound_message(content="hi", source="user", inbound_id=2, body_start=0),
+        inbound_message(
+            content="hi",
+            source="user",
+            inbound_id=2,
+            body_start=0,
+            times=InboundTimes(arrived_at=None, picked_up_at=_PICKED_UP_AT),
+        ),
     ]
     assert tail_has_agent_inbound(msgs) is False
 
@@ -712,7 +733,13 @@ def test_tail_has_agent_inbound_stops_at_prior_ai():
 def test_tail_has_agent_inbound_ui_source_false():
     msgs: list[AnyMessage] = [
         AIMessage(content="prev", id="a0"),
-        inbound_message(content="x", source="user", inbound_id=3, body_start=0),
+        inbound_message(
+            content="x",
+            source="user",
+            inbound_id=3,
+            body_start=0,
+            times=InboundTimes(arrived_at=None, picked_up_at=_PICKED_UP_AT),
+        ),
     ]
     assert tail_has_agent_inbound(msgs) is False
 

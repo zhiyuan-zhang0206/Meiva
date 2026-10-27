@@ -6,6 +6,7 @@
 from __future__ import annotations
 
 import threading
+from datetime import UTC, datetime
 from typing import Any
 
 import pytest
@@ -14,7 +15,7 @@ from langchain_core.runnables import RunnableConfig
 from langgraph.graph import END, START, StateGraph
 from langgraph.runtime import Runtime
 
-from agent.messages import inbound_message
+from agent.messages import InboundTimes, inbound_message
 from agent.state import CompactState, MemoryState, build_agent_state
 from base.agents.context import MeivaContext
 from base.clock import Clock
@@ -26,6 +27,9 @@ from base.paths import meiva_home, memory_dir
 from base.paths.home import resolve_meiva_home
 from meiva.tests.fixtures.gateway_wire import GatewayWire, Reply
 from meiva_builtins.plugins.meiva_memory import agent_runtime
+
+_PICKED_UP_AT = datetime(2026, 1, 1, tzinfo=UTC)
+
 
 pytestmark = pytest.mark.usefixtures("unit_home")
 
@@ -64,7 +68,13 @@ def _runtime(catalog: ModelCatalog, wire: GatewayWire, **pins: Any) -> Runtime[M
 
 
 def _inbound(source: str) -> AnyMessage:
-    return inbound_message(content="hello", source=source, inbound_id=1, body_start=0)
+    return inbound_message(
+        content="hello",
+        source=source,
+        inbound_id=1,
+        body_start=0,
+        times=InboundTimes(arrived_at=None, picked_up_at=_PICKED_UP_AT),
+    )
 
 
 def _excluded(wire: GatewayWire) -> list[set[str]]:

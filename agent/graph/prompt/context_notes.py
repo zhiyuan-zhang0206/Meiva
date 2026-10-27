@@ -85,10 +85,12 @@ def exec_timeout_note(ctx: MeivaContext) -> HumanMessage | None:
         return None
     if _established_agent_id(ctx, "exec-timeout") is None:
         return None
+    now = ctx.require_clock().now()
     return system_note_message(
         content=exec_timeout_text(ctx.require_agent().read("sandbox", "exec_timeout_seconds")),
         tag=NoteTag.EXEC_TIMEOUT,
-        created_at=ctx.require_clock().now(),
+        picked_up_at=now,
+        created_at=now,
     )
 
 
@@ -101,6 +103,7 @@ def timezone_note(ctx: MeivaContext) -> HumanMessage | None:
     return system_note_message(
         content=timezone_text(clock.timezone, now.astimezone(clock.explicit_zone())),
         tag=NoteTag.TIMEZONE,
+        picked_up_at=now,
         created_at=now,
     )
 
@@ -147,10 +150,12 @@ def agent_id_note(ctx: MeivaContext) -> HumanMessage | None:
         if ctx.require_agent().read("agent", "workspace_in_system_prompt")
         else None
     )
+    now = ctx.require_clock().now()
     return system_note_message(
         content=agent_id_text(aid, label=label, machine=machine, workspace=workspace),
         tag=NoteTag.AGENT_ID,
-        created_at=ctx.require_clock().now(),
+        picked_up_at=now,
+        created_at=now,
     )
 
 
@@ -199,7 +204,7 @@ def _skill_bodies_note(
     *,
     framing: str,
     label: str,
-    created_at: datetime | None = None,
+    created_at: datetime,
 ) -> HumanMessage | None:
     rendered = _render_skill_bodies(skills, label=label)
     if rendered is None:
@@ -208,6 +213,7 @@ def _skill_bodies_note(
     return system_note_message(
         content=framing + "\n\n" + "\n\n---\n\n".join(sections),
         tag=NoteTag.PRELOADED_SKILLS,
+        picked_up_at=created_at,
         created_at=created_at,
     )
 
@@ -216,7 +222,7 @@ def preloaded_note(
     skills: Sequence[Skill],
     *,
     harness: Harness,
-    created_at: datetime | None = None,
+    created_at: datetime,
 ) -> HumanMessage | None:
 
     framing = _PRELOADED_SKILLS_FRAMING
@@ -250,7 +256,7 @@ def fork_tail_skills_note(
     sdk_disable: Sequence[str],
     *,
     home: Path,
-    created_at: datetime | None = None,
+    created_at: datetime,
 ) -> HumanMessage | None:
 
     if not names:

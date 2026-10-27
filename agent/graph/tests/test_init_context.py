@@ -8,6 +8,7 @@ is what these tests pin down now that there is one owner.
 
 import random
 from collections.abc import Callable, Mapping
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, cast
 from unittest.mock import AsyncMock, MagicMock
@@ -49,6 +50,8 @@ from base.paths import meiva_home, resolve_meiva_home, skills_dir
 from meiva.sdk_surface.tests.context_home import context_over_unit_home as context_over_unit_home
 from meiva.tests.fixtures.pin_agent import hosted_resources as hosted_resources
 from meiva.tests.fixtures.pin_agent import snapshot_clients
+
+_PICKED_UP_AT = datetime(2026, 1, 1, tzinfo=UTC)
 
 
 # meiva:note
@@ -642,7 +645,9 @@ async def test_external_harness_cold_start_establishes_handoff_and_standing_note
         return "# Custom Plugin Section\n\nFollow the cluster workflow."
 
     def custom_note(_ctx: MeivaContext) -> HumanMessage:
-        return system_note_message(content="Custom plugin standing note.", tag=NoteTag.MEMORY)
+        return system_note_message(
+            content="Custom plugin standing note.", tag=NoteTag.MEMORY, picked_up_at=_PICKED_UP_AT
+        )
 
     registry = ExtensionRegistry(
         (

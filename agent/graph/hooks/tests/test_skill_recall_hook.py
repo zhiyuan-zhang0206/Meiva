@@ -10,6 +10,7 @@ from __future__ import annotations
 import asyncio
 from collections.abc import Mapping
 from dataclasses import replace
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
@@ -27,7 +28,7 @@ from agent.graph.recall.skill_recall import (
     STATE_PREAMBLE,
     TRUE_IF,
 )
-from agent.messages import inbound_message
+from agent.messages import InboundTimes, inbound_message
 from agent.state import CompactState, SkillRecallState, build_agent_state
 from base import paths
 from base.agents.context import MeivaContext
@@ -54,6 +55,16 @@ from base.packages.plugins.extensions import EMPTY
 from base.packages.tests.model_catalog import inert_keys
 from base.paths import meiva_home
 from meiva.sdk_surface.tests.context_home import context_over_unit_home as context_over_unit_home
+
+_PICKED_UP_AT = datetime(2026, 1, 1, tzinfo=UTC)
+
+
+def _inbound(content: str, source: str, inbound_id: int) -> HumanMessage:
+    times = InboundTimes(arrived_at=None, picked_up_at=_PICKED_UP_AT)
+    return inbound_message(
+        content=content, source=source, inbound_id=inbound_id, body_start=0, times=times
+    )
+
 
 _CONFIG: Any = {"configurable": {"thread_id": "1042"}}
 _MODEL = "jev-1.13.0"
@@ -157,7 +168,7 @@ def three_skills(skills_dir: Path) -> Path:
 def _tail(source: str, text: str = "please draft the release notes") -> list[AnyMessage]:
     return [
         AIMessage(content="earlier reply", id="a0"),
-        inbound_message(content=text, source=source, inbound_id=1, body_start=0),
+        _inbound(text, source, 1),
     ]
 
 
@@ -236,8 +247,8 @@ async def test_a_person_among_other_inbounds_still_fires(
     scorer = _Scorer({"beta": 0.9})
     messages: list[AnyMessage] = [
         AIMessage(content="earlier reply", id="a0"),
-        inbound_message(content="peer says hi", source="agent:5", inbound_id=1, body_start=0),
-        inbound_message(content="do the thing", source="user", inbound_id=2, body_start=0),
+        _inbound("peer says hi", "agent:5", 1),
+        _inbound("do the thing", "user", 2),
     ]
 
     update = await _run(database, _state(messages), scorer)

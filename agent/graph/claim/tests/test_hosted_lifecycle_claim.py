@@ -5,14 +5,18 @@
 # note, so claim adds no marker for it.
 # meiva:link agent/graph/docs/turn-interrupts.meiva.okf.md
 
+from datetime import UTC, datetime
+
 import pytest
 from langchain_core.messages import HumanMessage, SystemMessage
 
 from agent.db import ClaimedInbound
-from agent.graph.claim._dispatch import BatchState, handle_restart
+from agent.graph.claim._dispatch import BatchState, dispatch_batch, handle_restart
+from agent.graph.claim._routing import Routing
 from agent.state import AgentState
 from base.agents.context import MeivaContext
-from base.clock import Clock
+from base.clock import Clock, ClockConfig
+from base.clock.tests.manual_timers import ManualTimers
 from base.config.tests.configuration import defaults
 from base.host.env.agent_slices import AgentSlices
 from base.packages.plugin_providers import build_model_catalog
@@ -41,6 +45,67 @@ async def _claim_restart(state: AgentState, *, source: str) -> BatchState:
 
 def _history(**fields: object) -> AgentState:
     return AgentState.model_validate({"messages": [HumanMessage(content="hi")], **fields})
+
+
+def _ticking_context(timers: ManualTimers) -> MeivaContext:
+    return MeivaContext(
+        agent=AgentSlices.resolve(default_reader=defaults()),
+        catalog=build_model_catalog(home=meiva_home()),
+        clock_factory=lambda: Clock(
+            ClockConfig("UTC", "UTC", False), timers=timers, now=timers.now
+        ),
+    )
+
+
+async def test_the_acceptance_marker_is_stamped_with_the_contexts_clock() -> None:
+    timers = ManualTimers()
+    batch = BatchState()
+
+    await handle_restart(
+        _ticking_context(timers),
+        _history(halted=True),
+        ClaimedInbound(id=1, agent_id=1, content="", kind="restart", source="user", payload={}),
+        batch,
+    )
+
+    [marker] = batch.new_msgs
+    stamps = marker.model_dump()["additional_kwargs"]
+    assert stamps["meiva_created_at"] == timers.now().isoformat()
+    assert stamps["meiva_picked_up_at"] == timers.now().isoformat()
+
+
+# meiva:note
+# A system-note row is the one production note whose arrival and pickup differ: it keeps the row's
+# creation time as `meiva_created_at` and is picked up at the context clock's instant, not at the
+# arrival stamp.
+async def test_a_system_note_row_keeps_its_arrival_and_is_picked_up_by_the_contexts_clock() -> None:
+    timers = ManualTimers()
+    arrival = datetime(2020, 1, 1, tzinfo=UTC)
+    batch = BatchState()
+
+    await dispatch_batch(
+        _ticking_context(timers),
+        _history(),
+        1,
+        [
+            ClaimedInbound(
+                id=1,
+                agent_id=1,
+                content="a peer's note",
+                kind="system_note",
+                source="system",
+                payload={"note_tag": "context"},
+                created_at=arrival,
+            )
+        ],
+        Routing(exit_kind=None, has_revive=False, terminate_vetoed_by_pending=False),
+        batch,
+    )
+
+    [note] = batch.new_msgs
+    stamps = note.model_dump()["additional_kwargs"]
+    assert stamps["meiva_created_at"] == arrival.isoformat()
+    assert stamps["meiva_picked_up_at"] == timers.now().isoformat()
 
 
 @pytest.mark.parametrize(
