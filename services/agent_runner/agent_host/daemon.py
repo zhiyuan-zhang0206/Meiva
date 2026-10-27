@@ -38,7 +38,6 @@ import sys
 from collections.abc import Awaitable, Callable, Collection, Coroutine, Iterable
 from functools import partial
 from pathlib import Path
-from uuid import uuid4
 
 from base.cluster.dataplane.direct_url import ClusterDirectUrl
 from base.log import logger, prepare_process_logging
@@ -62,6 +61,7 @@ from pydantic import BaseModel
 from agent.llm import execute_code
 from agent.ownership.hosted import settle_running_rows_at_start
 from base.agents.context.clients import ClientSet
+from base.clock.ids import new_uuid
 from base.cluster.machine import MachineIdentityReader
 from base.cluster.machine.configured import ConfiguredMachineIdentity
 from base.config import ConfigBoot
@@ -530,7 +530,7 @@ async def run(
             commands=CommandCatalog.system(skills=meiva_skills.names),
             plugin_configs=installation.configs,
             home=home,
-            runtime_owner=uuid4(),
+            runtime_owner=new_uuid(secure_rng),
         )
         scheduler = TurnScheduler(
             host.run_turn,
