@@ -38,7 +38,7 @@ import inspect
 from collections.abc import Callable
 from dataclasses import dataclass
 from types import ModuleType
-from typing import Any
+from typing import Any, assert_never
 
 from base.agents.sdk.capture import SdkCaptureOwner
 from base.agents.sdk.tally import SdkCallTally
@@ -223,10 +223,15 @@ def _instrument_targets(root: object) -> list[tuple[object, str, str]]:
                 continue
             fq = f"{prefix}{name}"
             kind = member_kind(attr)
-            if kind is MemberKind.ROUTINE:
-                targets.append((container, name, fq))
-            elif kind is MemberKind.NAMESPACE:
-                walk(attr, f"{fq}.")
+            match kind:
+                case MemberKind.ROUTINE:
+                    targets.append((container, name, fq))
+                case MemberKind.NAMESPACE:
+                    walk(attr, f"{fq}.")
+                case MemberKind.OTHER:
+                    continue
+                case _:
+                    assert_never(kind)
 
     walk(root, "")
     return targets

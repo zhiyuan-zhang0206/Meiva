@@ -31,11 +31,11 @@ exports = ["agent_identity.py", "attachment_transport.py", "batch.py", "discover
 "agent_identity.py" = "strict"
 "batch.py" = { mode = "none", why = "the executor behind the SDK batch APIs: it runs the worker over every item on threads under a semaphore and gathers the results in order; the max_concurrent contract it honours is checked by the pure pure/plans/batch_plan.py" }
 "discovery.py" = "strict-to-be"
-"extensions.py" = { mode = "none", why = "the plugin load: it imports the enabled plugins' faces, uninstalls the replaced surface and runs the install, in that order; what a replacing load carries over is decided by the pure pure/plans/installation/extension_plan.py" }
+"extensions.py" = { mode = "none", why = "the plugin load: it imports the enabled plugins' faces, uninstalls the replaced surface and runs the install, in that order; what a replacing load carries over is decided by the pure pure/plans/installation/lifecycle_plan.py" }
 "help.py" = "strict"
 "injection_check.py" = { mode = "none", why = "the shell of the model-based injection check: it asks the decision model one question per piece of the page on a worker thread and logs the failures; the gates, the cut points, the piece budget, the fold of the answers and the refusal text are decided by the pure pure/media/injection_plan.py and injection_pieces.py" }
 "install.py" = { mode = "none", why = "the one writer of the meiva module: it applies each plugin's declaration, keeps the reversal ledger, rolls back a failed piece and swaps the installation slot; the slot values come from the pure pure/plans/installation/slot_plan.py and the path rule from wrap_plan.py" }
-"metering.py" = { mode = "none", why = "the wrapping half of SDK usage metering: it walks the live namespace, writes a recorder over each public routine and runs every call through the telemetry owner with the caller's provenance; which callable is a recorder, which target still needs one, what an uninstall puts back and the MCP call name are decided by the pure pure/plans/installation/meter_plan.py, the identity stamped on a call by pure/caller/usage_plan.py" }
+"metering.py" = { mode = "none", why = "the wrapping half of SDK usage metering: it walks the live namespace, decides from the live attributes whether a target still needs a recorder, writes the recorders over the public routines and runs every call through the telemetry owner with the caller's provenance; what makes a callable a recorder, what stripping or restoring one leaves, how the walk tells members apart, the MCP call name and the identity stamped on a call are decided by the pure pure/plans/metering/recorder_plan.py and meter_plan.py" }
 "plugins.py" = "strict"
 "sdk_disable.py" = "strict"
 "skill_sources.py" = "strict"

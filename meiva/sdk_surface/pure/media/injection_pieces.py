@@ -80,7 +80,8 @@ class PieceVerdicts:
 # Fold the outcomes of the per-piece requests (one entry per piece, in order) into a verdict.
 # A decision failure is kept for the log and costs only its own piece; any other exception stops
 # the fold, so it is not swallowed and the pieces after it are not read. An answer contributes the
-# probability of its `question_id` being "true".
+# probability of its `question_id` being "true"; an answer that lacks it is such an exception,
+# handed back as `hard` with the failures before it still in order.
 def fold_outcomes(
     outcomes: Sequence[Mapping[str, Decision] | BaseException], *, question_id: str
 ) -> PieceVerdicts:
@@ -92,5 +93,8 @@ def fold_outcomes(
         elif isinstance(outcome, BaseException):
             return PieceVerdicts(tuple(probabilities), tuple(failures), outcome)
         else:
-            probabilities.append(outcome[question_id].probability("true"))
+            try:
+                probabilities.append(outcome[question_id].probability("true"))
+            except Exception as exc:
+                return PieceVerdicts(tuple(probabilities), tuple(failures), exc)
     return PieceVerdicts(tuple(probabilities), tuple(failures), None)

@@ -1,7 +1,7 @@
 # meiva:note
 # `meiva/sdk_surface/pure/plans/metering/recorder_plan.py` unit tests: what makes a callable a
-# metering recorder (by identity, not by a copied attribute), which targets still need one and what
-# an uninstall puts back. Asserted by value; the installed recorders are covered by
+# metering recorder (by identity, not by a copied attribute), whether it belongs to another sampling owner, what
+# stripping the recorders leaves and what an uninstall puts back. Asserted by value; the installed recorders are covered by
 # `meiva/tests/namespaces/sdk_surface/test_metering.py`.
 
 from __future__ import annotations

@@ -82,15 +82,24 @@ def test_an_error_that_is_not_a_decision_failure_stops_the_fold_at_its_piece() -
     assert verdicts.failures == (early,)
 
 
-def test_an_answer_without_the_question_is_a_bug_not_a_missing_verdict() -> None:
-    with pytest.raises(KeyError):
-        fold_outcomes(
-            [{"other": Decision(top="true", probabilities={"true": 1.0})}], question_id=_QID
-        )
+def test_an_answer_without_the_question_stops_the_fold_but_keeps_the_failures_before_it() -> None:
+    early = DecisionRequestError("early")
+    malformed: dict[str, Decision] = {"other": Decision(top="true", probabilities={"true": 1.0})}
+    verdicts = fold_outcomes([_answer(0.3), early, malformed, _answer(0.9)], question_id=_QID)
+    assert isinstance(verdicts.hard, KeyError)
+    assert verdicts.probabilities == (0.3,)
+    assert verdicts.failures == (early,)
+
+
+def test_an_answer_that_lacks_the_true_outcome_stops_the_fold_too() -> None:
+    no_true: dict[str, Decision] = {_QID: Decision(top="false", probabilities={"false": 1.0})}
+    verdicts = fold_outcomes([no_true], question_id=_QID)
+    assert isinstance(verdicts.hard, KeyError)
+    assert verdicts.probabilities == ()
 
 
 def test_the_unknown_model_refusal_names_the_model_and_lists_the_decision_models_sorted() -> None:
-    message = unknown_model_message("gpt-x", {"jev-2", "jev-1"})
+    message = unknown_model_message("gpt-x", ["jev-2", "jev-1"])
     assert message == (
         "web_fetch_injection_model 'gpt-x' is not a decision model; available: jev-1, jev-2"
     )

@@ -84,8 +84,18 @@ _documented.__doc__ = "Read a file and label it."
 
 
 def test_the_chained_function_takes_its_identity_from_the_callable_it_replaces() -> None:
-    face = chained_face(_documented, _read)
-    assert (face.name, face.qualname, face.module) == ("_read", "_read", _read.__module__)
+    class Replaced:
+        def read(self, path: str) -> str:
+            return path
+
+    Replaced.read.__module__ = "plugin.files"
+    face = chained_face(_documented, Replaced.read)
+    assert (face.name, face.qualname, face.module) == (
+        "read",
+        f"{Replaced.__qualname__}.read",
+        "plugin.files",
+    )
+    assert _documented.__module__ != "plugin.files"
 
 
 def test_a_wrapper_that_wrote_a_docstring_owns_the_contract() -> None:
