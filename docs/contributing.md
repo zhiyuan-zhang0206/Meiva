@@ -40,6 +40,30 @@ debt, the behavior that changes and how it was verified) and keep it true when t
 changes. The commit messages inside the branch do not reach `main`, and a branch holds no
 merge commit. There is no changelog file to append to and no per-entry file to add.
 
+Since 2026-10-27 the queue squashes — squash is the only merge method now — and the
+landed message is the description re-wrapped at 72 columns, under a subject that is
+the title with ` (#<n>)` appended. Before that date the queue rebased, so each commit
+there is one landed change carrying its own message. Read both when you trace
+history; write for the new one. `git commit --amend` no longer writes the record: it
+only rewrites a local commit that never lands.
+
+A `Co-authored-by: Meiva #<id>` line in the description lands as written. GitHub also
+appends the `Co-Authored-By:` trailers whose value parses as `Name <email>`, taken from
+the branch's commits; a trailer with no email, like the `Meiva #<id>` convention, is
+not synthesized, so write that one in the description or it does not reach `main`.
+
+```bash
+# The description is the body of the landed commit: an empty one leaves no record.
+test -n "$(gh pr view --json body -q .body)" \
+  || echo "the PR description becomes the commit body on main: write it"
+
+# The message the queue will put on `main`: subject, blank line, description.
+gh pr view --json number,title,body -q '"\(.title) (#\(.number))\n\n\(.body)"'
+
+# After it lands, that same text read back from the commit it produced.
+gh pr view --json mergeCommit -q .mergeCommit.oid | xargs -r git log -1 --format=%B
+```
+
 Keep shared facts in their owning module; use existing third-party capabilities
 rather than creating a second framework or registry. Resolve generated-file
 conflicts by regenerating from the source, not editing derived output.
@@ -141,10 +165,11 @@ choice, discuss it with the user before changing that choice.
 ## Submit the PR
 
 Push the branch and open a PR against `main`. Explain the problem, resulting
-behavior, validation and known gaps; the description becomes the squash commit's message.
-Its title becomes the squash commit's subject, so it is also the change note later readers
-and the release notes see; write it as one. Use a file tree or control-flow explanation
-when it helps readers understand a larger change; no fixed template is required.
+behavior, validation and known gaps. The description becomes the squash commit's
+message and the title its subject, so both are the change note later readers and the
+release notes see; write them as one (see [the change record](#change-and-verify)). Use
+a file tree or control-flow explanation when it helps readers understand a larger
+change; no fixed template is required.
 Address relevant CI failures and review feedback. Distinguish successful execution
 from missing, skipped or incomplete verification. The queue squashes the PR once the checks pass.
 
