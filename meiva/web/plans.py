@@ -6,7 +6,7 @@ from dataclasses import dataclass
 from typing import Any
 
 from base.lm.effort import ReasoningEffort, coerce_effort
-from meiva.sdk_surface.batch import validate_max_concurrent
+from meiva.sdk_surface.pure.plans.batch_plan import validate_max_concurrent
 from meiva.sdk_surface.validation import coerce_str, coerce_typed
 
 __all__ = ["FetchPlan", "SearchPlan", "plan_fetch", "plan_search"]

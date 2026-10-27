@@ -3,8 +3,7 @@ from __future__ import annotations
 import os
 
 from meiva import boot
-from meiva.sdk_surface import install as sdk_install
-from meiva.sdk_surface import process_context
+from meiva.sdk_surface import process_context, sdk_disable
 
 __all_for_meiva__ = ["attach"]
 
@@ -46,7 +45,7 @@ def ensure_identity() -> object:
     handle = os.environ.get(HANDLE_ENV)
     if not handle:
         return None
-    sdk_install.raise_load_failure()
+    sdk_disable.raise_load_failure()
     from meiva.self.harness.attachment import open_attachment
 
     try:

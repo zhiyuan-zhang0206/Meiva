@@ -7,7 +7,7 @@ from pathlib import Path
 from typing import TypeGuard
 
 from base.lm.effort import ReasoningEffort, coerce_effort
-from meiva.sdk_surface.batch import validate_max_concurrent
+from meiva.sdk_surface.pure.plans.batch_plan import validate_max_concurrent
 from meiva.sdk_surface.validation import coerce_str
 
 __all__ = ["Plan", "TargetSpec", "normalize"]

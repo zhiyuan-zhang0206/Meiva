@@ -14,14 +14,9 @@ import time
 
 import pytest
 
-from meiva.sdk_surface.batch import DEFAULT_BATCH_MAX_CONCURRENT, run_batch, validate_max_concurrent
+from meiva.sdk_surface.batch import run_batch
 
 # ─── run_batch ────────────────────────────────────────────────────────────
-
-
-def test_default_batch_cap_is_a_safe_configurable_ceiling() -> None:
-    """SDK batch entry points default to a bounded, caller-overridable cap."""
-    assert 8 <= DEFAULT_BATCH_MAX_CONCURRENT <= 16
 
 
 def test_run_batch_preserves_input_order() -> None:
@@ -73,32 +68,3 @@ def test_run_batch_propagates_first_error() -> None:
 
     with pytest.raises(LookupError, match="boom"):
         asyncio.run(run_batch([1, 2, 3], worker, None))
-
-
-# ─── validate_max_concurrent ──────────────────────────────────────────────
-
-
-def test_validate_max_concurrent_accepts_valid_values() -> None:
-    validate_max_concurrent(None, example="x")
-    validate_max_concurrent(1, example="x")
-    validate_max_concurrent(4, example="x")
-
-
-def test_validate_max_concurrent_rejects_bad_values() -> None:
-    """The shared knob keeps the per-API messages: bad values fail fast with
-    the fragments the entry-point tests assert ("at least 1" / "int or None")."""
-    with pytest.raises(ValueError, match="at least 1"):
-        validate_max_concurrent(0, example="x")
-    with pytest.raises(ValueError, match="at least 1"):
-        validate_max_concurrent(-3, example="x")
-    with pytest.raises(TypeError, match="int or None"):
-        validate_max_concurrent(2.5, example="x")  # type: ignore[arg-type]
-    with pytest.raises(TypeError, match="int or None"):
-        validate_max_concurrent("4", example="x")  # type: ignore[arg-type]
-    with pytest.raises(TypeError, match="int or None"):
-        validate_max_concurrent(True, example="x")  # bool is an int subclass
-
-
-def test_validate_max_concurrent_message_names_the_calling_api() -> None:
-    with pytest.raises(TypeError, match=r"meiva\.web\.fetch\(targets, max_concurrent=4\)"):
-        validate_max_concurrent(2.5, example="meiva.web.fetch(targets, max_concurrent=4)")  # type: ignore[arg-type]

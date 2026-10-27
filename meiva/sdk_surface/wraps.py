@@ -70,6 +70,15 @@ from typing import Any
 
 from . import meiva_module
 from .installation import SLOT, Loading, WrapAdded, WrapLayer, installed, slot
+from .pure.plans.installation.attempt_plan import attempt_cleared, attempt_marked
+from .pure.plans.installation.wrap_plan import (
+    activation_due,
+    chained_face,
+    is_public_dotted_path,
+    layer_is_async,
+    uncallable_message,
+)
+from .pure.plans.metering.recorder_plan import strip_recorders
 
 
 def load_attempted() -> bool:
@@ -77,14 +86,15 @@ def load_attempted() -> bool:
 
 
 def mark_load_attempt() -> None:
-    if not load_attempted():
-        setattr(meiva_module(), SLOT, Loading(installed()))
+    write = attempt_marked(slot())
+    if write is not None:
+        setattr(meiva_module(), SLOT, write.value)
 
 
 def clear_load_attempt() -> None:
-    value = slot()
-    if isinstance(value, Loading):
-        setattr(meiva_module(), SLOT, value.installation)
+    write = attempt_cleared(slot())
+    if write is not None:
+        setattr(meiva_module(), SLOT, write.value)
 
 
 class WrapError(Exception):
@@ -125,12 +135,12 @@ def _record_activation(target: str, plugin: str, inner_calls: int) -> None:
 # declared attributes are WrapTargetError. Errors raised by a real attribute descriptor
 # propagate unchanged.
 def _locate(target: str, root: ModuleType) -> tuple[Any, str]:
-    segments = target.split(".")
-    if not target or not all(s.isidentifier() and not s.startswith("_") for s in segments):
+    if not is_public_dotted_path(target):
         raise WrapTargetError(
             f"wrap target {target!r} must be a dotted path of identifiers under `meiva` "
             f"(no leading underscore), e.g. 'files.read' or 'agents.spawn'."
         )
+    segments = target.split(".")
     obj: Any = root
     for seg in segments[:-1]:
         obj = _target_member(obj, seg, target)
@@ -145,57 +155,22 @@ def _target_member(parent: object, attr: str, target: str) -> object:
     return getattr(parent, attr)
 
 
+# meiva:note
+# Make `chained` present as the function it replaces (`chained_face` decides how).
 def _install_metadata(
     chained: Callable[..., object],
     wrapper: Callable[..., object],
     current: Callable[..., object],
 ) -> None:
-    """Make `chained` present as the function it replaces.
-
-    - name / qualname / module come from `current`, so the SDK stub renders
-      `def read(...)` and repr stays `meiva.files`.
-    - doc: the wrapper's own docstring becomes the new agent-facing contract
-      when it wrote one (it is enhancing the surface, like the cwd-aware
-      `files.read`); otherwise inherit `current`'s — a transparent wrap keeps the
-      original contract.
-    - signature: the wrapper's declared parameters minus the leading `inner`, so
-      a wrapper that adds a keyword (fleet's `label`) advertises it and a
-      transparent wrap keeps the original arity. `inspect.signature` honors
-      `__signature__`, which is what `meiva.help()` renders.
-    - `__dict__`: carry function-attached members (e.g.
-      `meiva.understand.UnderstandError`) so the agent's documented attribute
-      access survives the wrap. `setdefault` lets the wrapper keep its own.
-    """
-    chained.__name__ = getattr(current, "__name__", getattr(wrapper, "__name__", "wrapped"))
-    chained.__qualname__ = getattr(current, "__qualname__", chained.__name__)
-    chained.__module__ = getattr(current, "__module__", getattr(wrapper, "__module__", ""))
-    chained.__doc__ = wrapper.__doc__ or getattr(current, "__doc__", None)
-    for key, value in getattr(current, "__dict__", {}).items():
+    face = chained_face(wrapper, current)
+    chained.__name__ = face.name
+    chained.__qualname__ = face.qualname
+    chained.__module__ = face.module
+    chained.__doc__ = face.doc
+    for key, value in face.inherited.items():
         chained.__dict__.setdefault(key, value)
-    try:
-        sig = inspect.signature(wrapper)
-    except (ValueError, TypeError):
-        return
-    params = list(sig.parameters.values())
-    if params:  # drop `inner`
-        chained.__signature__ = sig.replace(parameters=params[1:])  # type: ignore[attr-defined]
-
-
-def _base_callable(current: Callable[..., Any]) -> Callable[..., Any]:
-    """`current` with any SDK-metric recorder layers stripped (task #3427).
-
-    The metering recorder is installed at SDK import, *before* plugins load, so a
-    real target usually carries it when a plugin wraps. The recorder is not a
-    plugin layer: chaining over it would keep a stale recorder alive inside the
-    wrap forever (so the metering `uninstall()` WeakSet never empties and its
-    O(1) early-out dies) and would make `clear_wraps` restore a proxy where the
-    registry promises the base callable. Recorders always carry `__wrapped__`
-    (functools.wraps); the lazy import avoids the meiva <-> submodule cycle."""
-    from meiva.sdk_surface import metering
-
-    while metering.is_recorder(current):
-        current = current.__wrapped__  # pyright: ignore[reportFunctionMemberAccess]
-    return current
+    if face.signature is not None:
+        chained.__signature__ = face.signature  # type: ignore[attr-defined]
 
 
 # meiva:note
@@ -227,10 +202,8 @@ def apply_wrap(
     parent, attr = _locate(target, root)
     current = _target_member(parent, attr, target)
     if not callable(current):
-        raise WrapTargetError(
-            f"meiva.{target} is {type(current).__name__}, not callable — wrap targets are functions."
-        )
-    current = _base_callable(current)
+        raise WrapTargetError(uncallable_message(target, current))
+    current = strip_recorders(current)
 
     @contextmanager
     def invocation() -> Generator[Callable[..., Any], None, None]:
@@ -244,14 +217,14 @@ def apply_wrap(
         try:
             yield counted
         finally:
-            if calls[0] != 1:
+            if activation_due(calls[0]):
                 _record_activation(target, plugin, calls[0])
 
     def chained(*args: object, **kwargs: object) -> object:
         with invocation() as inner:
             return wrapper(inner, *args, **kwargs)
 
-    if inspect.iscoroutinefunction(current) or inspect.iscoroutinefunction(wrapper):
+    if layer_is_async(current, wrapper):
 
         async def async_chained(*args: object, **kwargs: object) -> object:
             with invocation() as inner:

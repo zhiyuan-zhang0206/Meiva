@@ -21,10 +21,11 @@ from typing import assert_never
 from loguru import logger
 
 from base.lm.catalog import ModelCatalog
-from base.lm.catalog.decide.types import DecisionError, YesNo, estimate_tokens, question_text
+from base.lm.catalog.decide.types import YesNo, estimate_tokens, question_text
 from base.lm.catalog.provider_keys import ProviderKeys
 
-from .pure.media.injection_plan import CheckStep, check_text, plan_check, split_for_model
+from .pure.media.injection_pieces import chunk_budget, fold_outcomes, pieces_to_judge
+from .pure.media.injection_plan import CheckStep, check_text, plan_check, unknown_model_message
 
 _QUESTION_ID = "page_addresses_ai"
 
@@ -80,8 +81,12 @@ async def page_probability(
     from base.lm.decision.call import decide
 
     spec = catalog.decision_models[model]
-    budget = spec.context_window - estimate_tokens(question_text(QUESTION)) - _CHUNK_MARGIN_TOKENS
-    chunks = [c for c in split_for_model(text, budget) if c.strip()]
+    budget = chunk_budget(
+        context_window=spec.context_window,
+        question_tokens=estimate_tokens(question_text(QUESTION)),
+        margin_tokens=_CHUNK_MARGIN_TOKENS,
+    )
+    chunks = pieces_to_judge(text, budget)
     outcomes = await asyncio.gather(
         *(
             decide(
@@ -98,24 +103,21 @@ async def page_probability(
         ),
         return_exceptions=True,
     )
-    answers: list[float] = []
-    for outcome in outcomes:
-        if isinstance(outcome, DecisionError):
-            logger.warning(
-                "web.fetch injection check failed for {}: {}: {}; the page is returned "
-                "without a verdict",
-                url,
-                type(outcome).__name__,
-                outcome,
-                event="web_fetch_injection_check_failed",
-                model=model,
-                error_type=type(outcome).__name__,
-            )
-        elif isinstance(outcome, BaseException):
-            raise outcome
-        else:
-            answers.append(outcome[_QUESTION_ID].probability("true"))
-    return max(answers) if answers else None
+    verdicts = fold_outcomes(outcomes, question_id=_QUESTION_ID)
+    for failure in verdicts.failures:
+        logger.warning(
+            "web.fetch injection check failed for {}: {}: {}; the page is returned "
+            "without a verdict",
+            url,
+            type(failure).__name__,
+            failure,
+            event="web_fetch_injection_check_failed",
+            model=model,
+            error_type=type(failure).__name__,
+        )
+    if verdicts.hard is not None:
+        raise verdicts.hard
+    return verdicts.highest()
 
 
 # meiva:note
@@ -174,10 +176,7 @@ def begin_check(
         case CheckStep.SKIP:
             return PendingCheck(None, None)
         case CheckStep.UNKNOWN_MODEL:
-            raise ValueError(
-                f"web_fetch_injection_model {inputs.model!r} is not a decision model; available: "
-                + ", ".join(sorted(inputs.catalog.decision_models))
-            )
+            raise ValueError(unknown_model_message(inputs.model, inputs.catalog.decision_models))
         case CheckStep.RUN:
             worker = ThreadPoolExecutor(max_workers=1, thread_name_prefix="injection-check")
             judged = worker.submit(

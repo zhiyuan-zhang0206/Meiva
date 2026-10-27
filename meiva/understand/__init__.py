@@ -12,7 +12,7 @@ __all_for_meiva__ = [
 from typing import overload
 
 from base.lm.effort import ReasoningEffort
-from meiva.sdk_surface.batch import DEFAULT_BATCH_MAX_CONCURRENT
+from meiva.sdk_surface.pure.plans.batch_plan import DEFAULT_BATCH_MAX_CONCURRENT
 from meiva.understand import plans
 from meiva.understand.errors import UnderstandError
 

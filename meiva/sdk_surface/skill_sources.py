@@ -22,7 +22,9 @@ from collections.abc import Callable, Generator
 from contextlib import contextmanager
 from pathlib import Path
 
-from .installation import SkillProvider, installed
+from . import meiva_module
+from .installation import SLOT, SkillProvider, installed, slot
+from .pure.plans.installation.slot_plan import mounted, unmounted
 
 
 def add(provider: SkillProvider) -> Callable[[], None]:
@@ -31,9 +33,16 @@ def add(provider: SkillProvider) -> Callable[[], None]:
     The install collects a plugin's declared `skill_sources` into the installation it
     is building; this mounts one on the CURRENT value instead (tests and the `scoped`
     context manager). The undo removes exactly that provider."""
-    from . import install as _install
+    prior = slot()
+    mounted_value = mounted(prior, provider)
+    setattr(meiva_module(), SLOT, mounted_value)
 
-    return _install.mount_skill_provider(provider)
+    def undo() -> None:
+        write = unmounted(prior, mounted_value, slot(), provider)
+        if write is not None:
+            setattr(meiva_module(), SLOT, write.value)
+
+    return undo
 
 
 @contextmanager

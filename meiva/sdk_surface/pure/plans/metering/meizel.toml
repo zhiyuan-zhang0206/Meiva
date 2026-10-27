@@ -1,0 +1,4 @@
+exports = ["meter_plan.py", "recorder_plan.py"]
+
+[purity]
+"." = "strict"

@@ -19,6 +19,7 @@ from base.packages.plugins.loading.faces import LoadedExtensions, import_faces
 
 from . import install as sdk_install
 from .installation import InstallOptions, SamplingPolicyOwner, installed
+from .pure.plans.installation.lifecycle_plan import carry_over
 
 
 # meiva:note
@@ -56,23 +57,16 @@ def load_extensions(
     surface: bool = False,
     **options: Unpack[LoadExtensionsOptions],
 ) -> LoadedExtensions:
-    sampling = options.get("sampling")
-    clients = options.get("clients")
-    clock = options.get("clock")
     report = options.get("report")
-    previous = installed() if not surface else None
-    if previous is not None:
-        if sampling is None:
-            sampling = previous.sampling
-        if clients is None:
-            clients = previous.clients
-        if clock is None:
-            clock = previous.clock
-    if sampling is None:
-        raise ValueError("the first plugin load needs the sampling owner its root retains")
+    carried = carry_over(
+        installed() if not surface else None,
+        sampling=options.get("sampling"),
+        clients=options.get("clients"),
+        clock=options.get("clock"),
+    )
 
     if not surface:
-        sdk_install.uninstall(retaining_sampling=sampling)
+        sdk_install.uninstall(retaining_sampling=carried.sampling)
 
     loaded = import_faces(
         surface=surface, report=report, validate_state=options.get("validate_state")
@@ -84,9 +78,9 @@ def load_extensions(
         catalog=options.get("catalog"),
         provider_keys=options.get("provider_keys"),
         authority=options.get("authority"),
-        clients=clients,
-        sampling=sampling,
-        clock=clock,
+        clients=carried.clients,
+        sampling=carried.sampling,
+        clock=carried.clock,
         external_caller=options.get("external_caller"),
         disabled_entries=options.get("disabled_entries", ()),
     )

@@ -12,7 +12,7 @@ def test_a_plugin_load_is_undone_by_the_autouse_teardown(request: pytest.Fixture
     from meiva.sdk_surface import install
     from meiva.sdk_surface.extensions import load_extensions
     from meiva.sdk_surface.installation import installed
-    from meiva.sdk_surface.metering import is_recorder
+    from meiva.sdk_surface.pure.plans.metering.recorder_plan import is_recorder
 
     assert "_restore_metering" in request.fixturenames
 

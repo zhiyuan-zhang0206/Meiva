@@ -8,7 +8,7 @@ __all_for_meiva__ = [
 from dataclasses import dataclass
 
 from base.lm.effort import ReasoningEffort
-from meiva.sdk_surface.batch import DEFAULT_BATCH_MAX_CONCURRENT
+from meiva.sdk_surface.pure.plans.batch_plan import DEFAULT_BATCH_MAX_CONCURRENT
 from meiva.web import plans
 from meiva.web.errors import FetchError as FetchError
 from meiva.web.errors import SearchError as SearchError

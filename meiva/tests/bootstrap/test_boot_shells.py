@@ -21,7 +21,7 @@ from base.paths.tests.homes import unit_home as unit_home
 from meiva import boot
 from meiva.sdk_surface import install, process_context
 from meiva.sdk_surface.installation import Installation, Loading, installed, slot
-from meiva.sdk_surface.pure.load_plan import LoadStep
+from meiva.sdk_surface.pure.plans.load_plan import LoadStep
 from meiva.sdk_surface.tests.installation_holder import held_installation
 from meiva.self.harness.attachment import attachment_clock
 from meiva.tests.bootstrap.probe_runner import run_probe
