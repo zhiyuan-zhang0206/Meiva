@@ -144,6 +144,10 @@ def _add_debt_parser(commands: argparse._SubParsersAction[argparse.ArgumentParse
     )
     recording.add_argument("paths", nargs="+")
     modes.add_parser("prune", help="remove recorded debt that no longer occurs")
+    resolving = modes.add_parser(
+        "resolve", help="resolve merge conflicts inside the [debt] tables of manifests"
+    )
+    resolving.add_argument("paths", nargs="+")
     moving = modes.add_parser(
         "carry", help="move recorded debt to where renamed files, targets and symbols now are"
     )

@@ -118,6 +118,13 @@ violations pass, anything new fails, and the debt may only shrink
 - When a change pays debt down, run `python -m meizel debt prune` in the same
   change so the baseline drops with the fix. `python -m meizel debt` shows what
   is left.
+- Recorded debt is derived from the tree, so a merge conflict in a `[debt.*]` table is not
+  resolved by choosing a side or by hand: run `python -m meizel debt resolve <meizel.toml>...`
+  (the manifests `git diff --name-only --diff-filter=U` lists), then `git add` them. It keeps the
+  entries of both sides (the lower count where both changed) and lowers them to what still occurs.
+  A conflict anywhere else in a manifest (purity, roots, uses, exports, state) is a decision for you:
+  the command refuses it and writes nothing. If a violation is left that neither side recorded, it
+  is a real new one; fix it, or `debt record` it as a discussed exception.
 - CI fails when the recorded total grows against the base (`debt diff --on-growth=fail`).
   The one exception is a rule change (it edits meizel's own rule code: Python under `meizel/`
   outside tests, or `meizel.policy.toml`, whose reader tables decide what is an acquisition),
