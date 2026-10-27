@@ -1,9 +1,11 @@
 # meiva:note
 # Child process for the eval-isolation boot tests: install the memory plugin, then apply boot.
 #
-# Usage: `child_eval_isolation.py <isolated|network_allowlist|missing_agent|off>`; prints `ok` on success.
+# Usage: `child_eval_isolation.py <isolated|isolated_in_other_home|network_allowlist|missing_agent|off> [home]`;
+# prints `ok` on success. `isolated_in_other_home` takes the home to hand to the boot, which is not `MEIVA_HOME`.
 
 import sys
+from pathlib import Path
 from types import SimpleNamespace
 
 import meiva
@@ -66,6 +68,23 @@ def isolated() -> None:
     print("ok")
 
 
+def isolated_in_other_home() -> None:
+    _install()
+    other_home = Path(sys.argv[2])
+    process_context.bind_context(
+        MeivaContext(identity=AgentIdentity(417, True), meiva_home=resolve_meiva_home())
+    )
+    apply_per_agent_eval_isolation(
+        agent_id=417,
+        default_reader=defaults(agent__eval_isolation=True, agent__eval_network_allowlist=[]),
+        home=other_home,
+    )
+
+    assert other_home / "workspaces" / "417" / "memory-pool" == meiva.memory.PATH
+    assert not (resolve_meiva_home() / "workspaces" / "417").exists()
+    print("ok")
+
+
 def network_allowlist() -> None:
     _install()
     process_context.bind_context(
@@ -120,6 +139,7 @@ def off() -> None:
 
 {
     "isolated": isolated,
+    "isolated_in_other_home": isolated_in_other_home,
     "network_allowlist": network_allowlist,
     "missing_agent": missing_agent,
     "off": off,

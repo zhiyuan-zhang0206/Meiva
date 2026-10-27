@@ -11,10 +11,10 @@ from pathlib import Path
 _CHILD = Path(__file__).with_name("child_eval_isolation.py")
 
 
-def _run(scenario: str) -> tuple[int, str, str]:
+def _run(scenario: str, *args: str) -> tuple[int, str, str]:
     with tempfile.TemporaryDirectory() as home:
         proc = subprocess.run(  # noqa: S603 -- fixed argv, sys.executable is trusted
-            [sys.executable, str(_CHILD), scenario],
+            [sys.executable, str(_CHILD), scenario, *args],
             capture_output=True,
             text=True,
             env={
@@ -37,6 +37,13 @@ def _settings_env() -> dict[str, str]:
 
 def test_eval_isolation_disables_network_and_result_sdk_surfaces() -> None:
     code, out, err = _run("isolated")
+    assert code == 0, err
+    assert out.strip() == "ok"
+
+
+def test_eval_isolation_places_the_memory_pool_under_the_home_it_is_given() -> None:
+    with tempfile.TemporaryDirectory() as other_home:
+        code, out, err = _run("isolated_in_other_home", other_home)
     assert code == 0, err
     assert out.strip() == "ok"
 
