@@ -4,8 +4,11 @@ import ast
 import subprocess
 from pathlib import Path
 
+import pytest
+
 from base.events.contract import EVENTS
 
+pytestmark = pytest.mark.registry
 _REPO = Path(__file__).resolve().parents[3]
 _CALLEES = {"emit", "emit_prepared", "prepare_event"}
 _CATEGORIES = {"audit", "telemetry", "log"}

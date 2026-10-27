@@ -433,6 +433,7 @@ markers = [
     # Tests that are timing-sensitive, race-prone, or use real DB LISTEN/NOTIFY —
     # run serial (-n 1) while stable tests run parallel (-n auto).
     "flaky: timing-sensitive or race-prone test that must run serially",
+    "registry: asserts that a whole-repository table equals what the tracked files hold (the callers of a function, the emit sites); the PR selector always runs it, since a call site in any file can change its verdict",
     # e2e fake-LLM scenario selector; registered globally (not only in
     # tests/e2e/conftest.py): tests outside tests/e2e import e2e modules, and
     # --ignore=tests/e2e runs never load that conftest.
