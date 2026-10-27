@@ -515,7 +515,11 @@ def main(argv: Sequence[str], *, process_config: ConfigBoot) -> None:
     primary: BaseException | None = None
     try:
         init_gateway_process(
-            "gate", producer=lambda: pipeline, machine_reader=machine.name, image=image
+            "gate",
+            producer=lambda: pipeline,
+            machine_reader=machine.name,
+            image=image,
+            home=home,
         )
         # Root's signal interrupts serving, then closes HTTP before the writer.
         install_graceful_shutdown("gate")

@@ -108,6 +108,7 @@ def test_runner_inputs_are_borrowed_without_rebuilding_or_closing(
         emitted_events.producer,
         LoadedCommit(Path("/entry"), None),
         machine=machine_identity,
+        home=Path("/entry-home"),
     )
     prior = getattr(meiva, "context", None)
     primary = RuntimeError("borrowed loop failed")

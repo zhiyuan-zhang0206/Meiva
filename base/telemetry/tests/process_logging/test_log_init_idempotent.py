@@ -38,7 +38,7 @@ def test_process_logging_opens_each_sink_once(
     tmp_path: Path, role: str, filename: str, service_started: bool
 ) -> None:
     child = run_bounded(
-        [sys.executable, "-I", str(_PROCESS_LOGGING), role],
+        [sys.executable, "-I", str(_PROCESS_LOGGING), role, str(tmp_path)],
         env={**os.environ, "MEIVA_HOME": str(tmp_path), "MEIVA_CONFIG_FETCH": "skip"},
         capture_output=True,
         text=True,
@@ -172,7 +172,15 @@ def test_a_warning_written_while_the_init_builds_settings_reaches_stderr(
     env = {key: value for key, value in os.environ.items() if not key.startswith("MEIVA_")}
     env.update(MEIVA_HOME=str(home))
     child = subprocess.run(  # noqa: S603 — this interpreter, fixed child script, a private home
-        [sys.executable, "-I", "-B", str(_SETTINGS_BUILD_WARNING), str(_REPO_ROOT), init],
+        [
+            sys.executable,
+            "-I",
+            "-B",
+            str(_SETTINGS_BUILD_WARNING),
+            str(_REPO_ROOT),
+            init,
+            str(home),
+        ],
         cwd=tmp_path,
         env=env,
         capture_output=True,

@@ -175,6 +175,7 @@ def main(*, process_config: ConfigBoot, open_url: UrlOpener) -> None:
         producer=lambda: pipeline,
         machine_reader=machine.name,
         image=image,
+        home=process_home,
     )
     run(
         process_config=process_config,

@@ -62,8 +62,9 @@ class _NoOpTelemetry:
         producer: object,
         machine_reader: object,
         image: LoadedCommit,
+        home: Path,
     ) -> None:
-        del name, producer, machine_reader, image
+        del name, producer, machine_reader, image, home
 
     def sync(self, *, timeout: float) -> object:
         del timeout
@@ -428,6 +429,7 @@ async def test_root_logging_owns_only_the_started_pipeline(
 
     clients = ClientSet(pipeline_factory=producer)
     seen: list[LoadedCommit] = []
+    homes: list[Path] = []
 
     class _RecordingTelemetry(_NoOpTelemetry):
         def start(
@@ -437,11 +439,13 @@ async def test_root_logging_owns_only_the_started_pipeline(
             producer: object,
             machine_reader: object,
             image: LoadedCommit,
+            home: Path,
         ) -> None:
             assert name == "meiva-root"
             assert callable(producer) and callable(machine_reader)
             assert producer() is clients.event_pipeline()
             seen.append(image)
+            homes.append(home)
 
     async with asyncio.TaskGroup() as tasks:
         rounds = RootHealthRounds(
@@ -453,11 +457,12 @@ async def test_root_logging_owns_only_the_started_pipeline(
             machine=machine_identity,
             telemetry=_RecordingTelemetry(),
             clock=system_clock(),
-            home=Path("/unused"),
+            home=tmp_path / "root-home",
         )
         assert made == []
         await rounds.start()
         assert seen == [image] and len(made) == 1
+        assert homes == [(tmp_path / "root-home").resolve()]
         await rounds.stop()
         assert made[0].stopped
 
@@ -483,8 +488,9 @@ async def test_logging_startup_error_stops_its_constructed_writer(
             producer: object,
             machine_reader: object,
             image: LoadedCommit,
+            home: Path,
         ) -> NoReturn:
-            del name, producer, machine_reader, image
+            del name, producer, machine_reader, image, home
             clients.event_pipeline()
             raise error
 

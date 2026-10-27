@@ -556,6 +556,7 @@ def main() -> None:
         producer=lambda: pipeline,
         machine_reader=machine.name,
         image=image,
+        home=process_home,
     )
     gate_httpx_info_logs()
     install_graceful_shutdown("im_bridge")

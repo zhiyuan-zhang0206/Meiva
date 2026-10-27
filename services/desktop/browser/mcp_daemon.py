@@ -764,6 +764,7 @@ def main() -> None:
         producer=lambda: pipeline,
         machine_reader=wiring.machine.name,
         image=wiring.image,
+        home=wiring.process_home,
     )
     asyncio.run(
         run(

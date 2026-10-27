@@ -123,7 +123,7 @@ def load_installation(
 
 
 def initialize_logging(
-    clients: ClientSet, machine: MachineIdentityReader, image: LoadedCommit
+    clients: ClientSet, machine: MachineIdentityReader, image: LoadedCommit, home: Path
 ) -> None:
     try:
         init_gateway_process(
@@ -131,6 +131,7 @@ def initialize_logging(
             producer=clients.event_pipeline,
             machine_reader=machine.name,
             image=image,
+            home=home,
         )
     except BaseException as primary:
         try:

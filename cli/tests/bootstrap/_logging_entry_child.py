@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import importlib.abc
 import json
+import os
 import runpy
 import sys
 from pathlib import Path
@@ -90,18 +91,25 @@ def role_initialization(role: str, root: str) -> None:
         return "entry-test"
 
     image = LoadedCommit(Path(root), None)
+    home = Path(os.environ["MEIVA_HOME"])
     if role == "subprocess":
-        init_subprocess_logger(agent_id=7)
+        init_subprocess_logger(agent_id=7, home=home)
     elif role == "cli":
-        init_cli_process(name="entry-test", producer=producer, machine_reader=machine_reader)
+        init_cli_process(
+            name="entry-test", producer=producer, machine_reader=machine_reader, home=home
+        )
     else:
         init_gateway_process(
-            name="entry-test", image=image, producer=producer, machine_reader=machine_reader
+            name="entry-test",
+            image=image,
+            producer=producer,
+            machine_reader=machine_reader,
+            home=home,
         )
-    init_cli_process(name="ignored", producer=producer, machine_reader=machine_reader)
-    init_subprocess_logger(agent_id=99)
+    init_cli_process(name="ignored", producer=producer, machine_reader=machine_reader, home=home)
+    init_subprocess_logger(agent_id=99, home=home)
     init_gateway_process(
-        name="ignored", image=image, producer=producer, machine_reader=machine_reader
+        name="ignored", image=image, producer=producer, machine_reader=machine_reader, home=home
     )
     base_logger.info("after repeated initialization", event="label_change")
     result = pipeline.stop(timeout=2)

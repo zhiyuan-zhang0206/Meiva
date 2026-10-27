@@ -10,6 +10,7 @@
 from __future__ import annotations
 
 from collections.abc import Callable, Mapping
+from pathlib import Path
 
 from base import telemetry
 from base.native_process.loaded_commit import LoadedCommit
@@ -27,8 +28,9 @@ def emit_system_event(
     producer: Callable[[], EventPipeline],
     machine_reader: Callable[[], str],
     image: LoadedCommit,
+    home: Path,
 ) -> None:
     init_gateway_process(
-        name=process, producer=producer, machine_reader=machine_reader, image=image
+        name=process, producer=producer, machine_reader=machine_reader, image=image, home=home
     )
     telemetry.emit("telemetry", event_name, source="system", attributes=dict(attributes))

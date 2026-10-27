@@ -87,6 +87,7 @@ def report_day(
             producer=inputs.producer,
             machine_reader=inputs.machine.name,
             image=inputs.image,
+            home=inputs.home,
         )
         print(
             f"[{slot_end.isoformat()}] c9-daily-report: {done.day} — "

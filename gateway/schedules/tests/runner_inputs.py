@@ -56,7 +56,9 @@ def run_schedule(
             revision,
             engine.RunnerRoot(
                 database=database(),
-                inputs=ScheduleInputs(database, clients.event_pipeline, image, machine=machine),
+                inputs=ScheduleInputs(
+                    database, clients.event_pipeline, image, machine=machine, home=meiva_home()
+                ),
                 plugins=engine.PluginInputs(
                     config=snapshot_process_config(), machine=machine, clients=clients
                 ),

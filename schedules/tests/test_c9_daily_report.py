@@ -206,6 +206,7 @@ def test_a_failed_reconciliation_wakes_the_p0_lead_and_the_claim_stays(
         emitted_events.producer,
         LoadedCommit(_REPO_ROOT, None),
         machine=machine_identity,
+        home=tmp_path / ".meiva",
     )
     schedule_id = insert_schedule(db_conn, name="c9-failure", created_at=_SLOT)
     pages = (DirectoryPage("lead", None, (AgentRowSpec(17, "lead", "idling"),), None),)

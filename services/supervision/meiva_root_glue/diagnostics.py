@@ -45,6 +45,7 @@ class ProcessTelemetry(Protocol):
         producer: Callable[[], EventPipeline],
         machine_reader: Callable[[], str],
         image: LoadedCommit,
+        home: Path,
     ) -> None: ...
 
     def sync(self, *, timeout: float) -> object: ...
@@ -58,6 +59,7 @@ class _SystemProcessTelemetry:
         producer: Callable[[], EventPipeline],
         machine_reader: Callable[[], str],
         image: LoadedCommit,
+        home: Path,
     ) -> None:
         from base.telemetry.process_logging import init_gateway_process
 
@@ -66,6 +68,7 @@ class _SystemProcessTelemetry:
             producer=producer,
             machine_reader=machine_reader,
             image=image,
+            home=home,
         )
 
     def sync(self, *, timeout: float) -> object:
@@ -268,7 +271,8 @@ class RootHealthRounds:
         if interval_s <= 0:
             raise ValueError("root health interval must be positive")
         self._clock = clock
-        self._home = str(home.resolve())
+        self._home_dir = home.resolve()
+        self._home = str(self._home_dir)
         self._home_id = hashlib.sha256(self._home.encode()).hexdigest()
         self._health = health
         self._diagnostics = diagnostics
@@ -320,6 +324,7 @@ class RootHealthRounds:
                 producer=self._clients.event_pipeline,
                 machine_reader=self._machine.name,
                 image=self._image,
+                home=self._home_dir,
             )
         except BaseException as primary:
             try:

@@ -286,8 +286,7 @@ _event_sink_id: int | None = None
 # file (`<name>.log`) + unified event pipeline. Rows have
 # agent_id NULL (extra agent_id sentinel `-`).
 #
-# `home` is the home whose `logs/` directory holds the file; the entry that resolved it passes it,
-# and without it the ambient home is read (a transitional form that goes with its callers).
+# `home` is the home whose `logs/` directory holds the file: the entry that resolved it passes it.
 #
 # `name` picks the per-daemon log file AND the process dimension of every
 # event the daemon emits. Each daemon writes its own `<name>.log` so its
@@ -307,7 +306,7 @@ def init_gateway_process(
     producer: Callable[[], EventPipeline],
     machine_reader: Callable[[], str],
     image: LoadedImage,
-    home: Path | None = None,
+    home: Path,
 ) -> None:
     def announce() -> None:
         # One structured `service_started` agent_event per gateway-style process
@@ -355,15 +354,13 @@ def init_gateway_process(
 # sink lets ``/api/cluster/admin/events`` surface a stuck supervised
 # CLI child's last logged step without ssh into the host.
 #
-# ``home`` is the home whose ``logs/`` directory holds the file; the entry that resolved it
-# passes it, and without it the ambient home is read (a transitional form that goes with its
-# callers).
+# ``home`` is the home whose ``logs/`` directory holds the file: the entry that resolved it passes it.
 def init_cli_process(
     *,
     name: str,
     producer: Callable[[], EventPipeline],
     machine_reader: Callable[[], str],
-    home: Path | None = None,
+    home: Path,
 ) -> None:
     start_process_logging(
         name,
