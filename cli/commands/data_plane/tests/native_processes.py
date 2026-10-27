@@ -32,6 +32,7 @@ from base.cluster.machine import MachineIdentityReader
 from base.deploy.tests.containers import free_port, wait_port
 from base.host.db_authority.delivery import POOLER_ADMIN
 from base.native_process.ownership import OwnedProcess
+from base.paths import meiva_home
 from cli.commands.data_plane._pooler_stop import OwnedPooler
 from cli.commands.data_plane.pgbouncer import PoolerShape, PoolerSpec, binary_installed
 
@@ -120,6 +121,7 @@ def pooler_spec(
         bind_wait_s=bind_wait_s,
         stop_wait_s=stop_wait_s,
         ready_wait_s=ready_wait_s,
+        home=meiva_home(),
     )
 
 

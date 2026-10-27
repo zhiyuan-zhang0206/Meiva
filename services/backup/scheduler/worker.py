@@ -92,7 +92,9 @@ async def run_job(
         case "restore":
             override = settings.throwaway_base
             request["pg_throwaway_base"] = None if override is None else str(override)
-            operation_kind = restore_drill_kind(tree, throwaway=ThrowawayConfig(override))
+            operation_kind = restore_drill_kind(
+                tree, throwaway=ThrowawayConfig(override, home=tree.home)
+            )
         case "dump":
             operation_kind = dump_kind(tree)
         case _:
@@ -231,7 +233,10 @@ def execute(
                 datetime.fromisoformat(stamp),
                 tree=tree,
                 db_url=dump_source(
-                    database(), is_remote=settings.is_remote, plane_url=settings.plane_url
+                    database(),
+                    is_remote=settings.is_remote,
+                    plane_url=settings.plane_url,
+                    home=tree.home,
                 ),
                 keep=settings.keep,
                 offsite_target=offsite.configured_target(
@@ -250,7 +255,9 @@ def execute(
             raw_base = request["pg_throwaway_base"]
             if raw_base is not None and not isinstance(raw_base, str):
                 raise TypeError("logical restore requires a string or null throwaway base")
-            throwaway = ThrowawayConfig(None if raw_base is None else Path(raw_base))
+            throwaway = ThrowawayConfig(
+                None if raw_base is None else Path(raw_base), home=tree.home
+            )
             artifact = newest_artifact(tree)
             scratch = work / "scratch"
             scratch.mkdir(mode=0o700)
@@ -274,12 +281,13 @@ def worker_database(
     machine: MachineIdentityReader,
     gate: ProcessDbGate,
     *,
+    home: Path,
     url: str | None = None,
 ) -> Database:
     db_config = db_config_from_boot(config)
     if url is not None:
         db_config = dataclasses.replace(db_config, db_url=url)
-    return Database(db_config, gate=gate, direct_url=ClusterDirectUrl(machine.host))
+    return Database(db_config, gate=gate, direct_url=ClusterDirectUrl(machine.host, home=home))
 
 
 def main() -> None:
@@ -296,10 +304,10 @@ def main() -> None:
     gate = ProcessDbGate(version=version.get, process="pg-backup-worker")
 
     def database() -> Database:
-        return worker_database(config, machine, gate)
+        return worker_database(config, machine, gate, home=process_home)
 
     def database_for_url(url: str) -> Database:
-        return worker_database(config, machine, gate, url=url)
+        return worker_database(config, machine, gate, home=process_home, url=url)
 
     pipeline = build_pipeline(database=database, machine=machine, home=process_home)
     init_gateway_process(

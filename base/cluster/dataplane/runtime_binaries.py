@@ -103,26 +103,22 @@ def vendored_pg_supported(*, system: str | None = None, machine: str | None = No
         return False
 
 
-def runtime_root(home: Path | None = None) -> Path:
-    if home is not None:
-        return home / "runtime"
-    from base.paths import meiva_home
-
-    return meiva_home() / "runtime"
+def runtime_root(home: Path) -> Path:
+    return home / "runtime"
 
 
-def vendored_pg_dir(home: Path | None = None, *, pg_version: str = PG_VERSION) -> Path:
+def vendored_pg_dir(home: Path, *, pg_version: str = PG_VERSION) -> Path:
     return runtime_root(home) / "pg" / pg_version
 
 
-def vendored_pg_bin_dir(home: Path | None = None, *, pg_version: str = PG_VERSION) -> Path | None:
+def vendored_pg_bin_dir(home: Path, *, pg_version: str = PG_VERSION) -> Path | None:
     bin_dir = vendored_pg_dir(home, pg_version=pg_version) / "bin"
     return bin_dir if (bin_dir / "initdb").exists() else None
 
 
 def ensure_pg_binaries(
     *,
-    home: Path | None = None,
+    home: Path,
     system: str | None = None,
     machine: str | None = None,
     artifacts: Mapping[str, tuple[str, str]] | None = None,
@@ -259,7 +255,7 @@ def pgvector_platform_key(*, system: str | None = None, machine: str | None = No
 
 def ensure_pgvector(
     *,
-    home: Path | None = None,
+    home: Path,
     system: str | None = None,
     machine: str | None = None,
     artifacts: Mapping[str, tuple[str, str]] | None = None,

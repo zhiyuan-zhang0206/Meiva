@@ -31,6 +31,7 @@ from base.host.db_authority.api import (
     telemetry_token_path,
 )
 from base.host.net.tests.fake_url_opener import Answer, FakeUrlOpener
+from base.paths import meiva_home
 from base.telemetry.delivery.receipts import DrainStatus
 from base.telemetry.pipeline_build import build_pipeline
 from base.telemetry.station_endpoint import StationEndpointConfig
@@ -277,7 +278,7 @@ def test_main_shares_one_captured_gate_with_the_probe_and_log_factory(
         return Database(
             db_config_from_boot(process_config),
             gate=database_gate,
-            direct_url=ClusterDirectUrl(machine_identity.host),
+            direct_url=ClusterDirectUrl(machine_identity.host, home=meiva_home()),
         )
 
     pipeline = build_pipeline(database=database, machine=machine_identity, home=unit_home)

@@ -33,7 +33,7 @@ def main() -> None:
     repo = Path(sys.argv[1])
     command = CommandRuntime.create(resolve_meiva_home().resolve())
     database_factory = operator_database_factory(
-        local_host=command.machine.host, open_database=open_operator_database
+        local_host=command.machine.host, home=command.home, open_database=open_operator_database
     )
     producer = operator_event_pipeline(database_factory, machine=command.machine, home=command.home)
     try:

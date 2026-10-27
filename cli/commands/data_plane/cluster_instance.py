@@ -281,11 +281,11 @@ def require_authenticated_hba(pg_port: int, dial_host: str, *, socket_dir: Path)
 # throwaway_postgres / the brew install convention).
 #
 # The `trust` default is never served: `start_pg` writes the always-auth hba first.
-def initdb(target: Path, *, os_user: str) -> None:
+def initdb(target: Path, *, os_user: str, home: Path) -> None:
     target.parent.mkdir(parents=True, exist_ok=True)
     result = run_bounded(
         [
-            str(pg_tool("initdb")),
+            str(pg_tool("initdb", home=home)),
             "-D",
             str(target),
             "-U",
@@ -312,7 +312,7 @@ def ensure_pg_data(home: Path, *, os_user: str) -> Path:
         return data
     template = pg_template_dir(home)
     if not (template / "PG_VERSION").exists():
-        initdb(template, os_user=os_user)
+        initdb(template, os_user=os_user, home=home)
     shutil.copytree(template, data)
     return data
 
@@ -346,10 +346,10 @@ def _launch_postmaster(
     tuning: StartTuning,
 ) -> None:
     data = pg_data_dir(home)
-    pg_isready = str(pg_tool("pg_isready"))
+    pg_isready = str(pg_tool("pg_isready", home=home))
     argv = pg_plan.pg_launch_argv(
         pg_plan.PgLaunch(
-            postgres_bin=str(pg_tool("postgres")),
+            postgres_bin=str(pg_tool("postgres", home=home)),
             data=data,
             port=pg_port,
             listen_addrs=tuple(port_preflight.bind_addrs(machine=machine)),
@@ -357,7 +357,7 @@ def _launch_postmaster(
             max_connections=_PG_MAX_CONNECTIONS,
             tz_args=tuple(shlex.split(pg_tz_args())),
             shm_args=tuple(shlex.split(pg_shm_args())),
-            archive_args=tuple(archive_pg_args(path=config.walg_config_file)),
+            archive_args=tuple(archive_pg_args(path=config.walg_config_file, home=home)),
         )
     )
     owned_postgres.start(
@@ -424,7 +424,7 @@ def start_pg(
                     f"  ✓ postgres ready ({dial_host}:{pg_port}, password authentication enforced)"
                 )
             case pg_plan.CheckArchive():
-                warn_archive_inactive(config.walg_config_file)
+                warn_archive_inactive(config.walg_config_file, home=home)
             case _:
                 assert_never(step)
     return 0

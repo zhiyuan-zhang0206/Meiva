@@ -442,7 +442,7 @@ def stop_pipeline(
 # application name carries this process's code version, and reads its connection settings from
 # the process's own configuration.
 def gate_database(
-    *, image: LoadedCommit, machine: MachineIdentityReader, config: ConfigBoot
+    *, image: LoadedCommit, machine: MachineIdentityReader, config: ConfigBoot, home: Path
 ) -> Callable[[], Database]:
     from base.db.code_version_gate import ProcessDbGate
     from base.db.config import db_config_from_boot
@@ -452,7 +452,9 @@ def gate_database(
 
     def database() -> Database:
         return Database(
-            db_config_from_boot(config), gate=gate, direct_url=ClusterDirectUrl(machine.host)
+            db_config_from_boot(config),
+            gate=gate,
+            direct_url=ClusterDirectUrl(machine.host, home=home),
         )
 
     return database
@@ -508,7 +510,9 @@ def main(argv: Sequence[str], *, process_config: ConfigBoot) -> None:
     machine = ConfiguredMachineIdentity(process_config)
     home = meiva_home()
     pipeline = build_pipeline(
-        database=gate_database(image=image, machine=machine, config=process_config),
+        database=gate_database(
+            image=image, machine=machine, config=process_config, home=home.resolve()
+        ),
         machine=machine,
         home=home.resolve(),
     )

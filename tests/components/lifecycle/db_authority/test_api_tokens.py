@@ -37,6 +37,7 @@ from base.config import get_field, set_field, settings
 from base.daemon.http_transport import start_daemon_http
 from base.host.db_authority import api, delivery, ledger, model, unit
 from base.host.net.auth import ClusterSecretMissingError, bearer_header, cookie_name
+from base.paths import meiva_home
 from base.paths.tests.homes import point_home
 from cli.commands.data_plane import bringup
 from cli.commands.data_plane.instance.launch_delivery import LaunchDelivery
@@ -390,7 +391,7 @@ async def _ops_status(digests: frozenset[str] | None, bearer: str | None) -> int
 
 def test_gateway_home_ops_accepts_its_generation_never_the_human_secret(gateway: Path) -> None:
     tokens = _tokens(gateway).api
-    acceptance = ops_boot.ops_acceptance()
+    acceptance = ops_boot.ops_acceptance(home=meiva_home())
     assert acceptance == frozenset(api.acceptance(gateway).values())
     for token, status in (
         (tokens.gateway, 200),
@@ -402,7 +403,9 @@ def test_gateway_home_ops_accepts_its_generation_never_the_human_secret(gateway:
     ):
         assert asyncio.run(_ops_status(acceptance, token)) == status
     _unadmit(gateway)
-    assert asyncio.run(_ops_status(ops_boot.ops_acceptance(), tokens.gateway)) == 401
+    assert (
+        asyncio.run(_ops_status(ops_boot.ops_acceptance(home=meiva_home()), tokens.gateway)) == 401
+    )
 
 
 def test_gateway_home_ops_fails_closed_while_no_generation_is_active(gateway: Path) -> None:
@@ -410,7 +413,7 @@ def test_gateway_home_ops_fails_closed_while_no_generation_is_active(gateway: Pa
     then accepts no bearer at all. It never falls back to an open posture."""
     tokens = _tokens(gateway).api
     _unadmit(gateway)
-    acceptance = ops_boot.ops_acceptance()
+    acceptance = ops_boot.ops_acceptance(home=meiva_home())
     assert acceptance == frozenset()
     for token in (tokens.gateway, tokens.runner, _HUMAN, None):
         assert asyncio.run(_ops_status(acceptance, token)) == 401
@@ -433,11 +436,19 @@ def test_ops_bind_follows_the_declared_reachable_address(
 def test_ops_without_a_secret_or_capability_refuses_to_serve(gateway: Path) -> None:
     _ = gateway
     with pytest.raises(ClusterSecretMissingError):
-        daemon_acceptance(_access(secret="", token=None))
+        daemon_acceptance(_access(secret="", token=None), home=meiva_home())
     # A remote-managed plane keeps no generations: its gateway presents the human secret.
     assert daemon_acceptance(
-        replace(_access(secret=_HUMAN, token=None), remote_plane=True)
+        replace(_access(secret=_HUMAN, token=None), remote_plane=True), home=meiva_home()
     ) == frozenset({api.token_digest(_HUMAN)})
+
+
+# meiva:note
+# The acceptance is read from the home it is handed, and a relative one would name whatever
+# directory the daemon happens to run in, so it is refused before anything is read.
+def test_daemon_acceptance_refuses_a_relative_home() -> None:
+    with pytest.raises(ValueError, match="absolute home"):
+        daemon_acceptance(_access(secret=_HUMAN, token=None), home=Path("unit/home"))
 
 
 @pytest.fixture
@@ -488,7 +499,7 @@ def test_remote_unit_ops_accepts_its_generation_never_the_human_secret(
     gateway: Path, runner_home: Path
 ) -> None:
     tokens = _tokens(gateway).api
-    acceptance = ops_boot.ops_acceptance()
+    acceptance = ops_boot.ops_acceptance(home=meiva_home())
     assert acceptance == frozenset(
         {api.token_digest(tokens.gateway), api.token_digest(tokens.runner)}
     )

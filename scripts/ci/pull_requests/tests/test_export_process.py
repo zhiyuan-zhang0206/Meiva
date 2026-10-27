@@ -14,6 +14,7 @@ from base.db.config import db_config_from_settings
 from base.host.proc import run_bounded
 from base.native_process import code_version
 from base.native_process.loaded_commit import LoadedCommit
+from base.paths import meiva_home
 from base.telemetry import Event, EventPipeline
 from scripts.ci.pull_requests import export_process, runs_export
 
@@ -48,7 +49,7 @@ def test_writer_uses_one_captured_gate_and_is_joined(known: bool, tmp_path: Path
     assert machine.name() == "export-owner"
     config.set_field("machine_name", "changed-after-first-read")
     assert machine.name() == "export-owner"
-    direct_url = ClusterDirectUrl(machine.host)
+    direct_url = ClusterDirectUrl(machine.host, home=meiva_home())
     assert direct_url.local_host == machine.host
     db = Database(db_config_from_settings(), gate=gate, direct_url=direct_url)
     assert db is not None

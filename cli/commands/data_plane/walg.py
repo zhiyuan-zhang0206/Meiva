@@ -42,14 +42,16 @@ def walg_plane(config: ConfigBoot) -> DataPlaneConfig:
 
 # meiva:note
 # Where the drill and the daily tick may place scratch Postgres instances, read at the verb's door.
-def walg_throwaway(config: ConfigBoot) -> ThrowawayConfig:
-    return ThrowawayConfig(configured_base(_delivered(config).view.data_plane.pg_throwaway_base))
+def walg_throwaway(config: ConfigBoot, *, home: Path) -> ThrowawayConfig:
+    return ThrowawayConfig(
+        configured_base(_delivered(config).view.data_plane.pg_throwaway_base), home=home
+    )
 
 
 # meiva:note
 # Run the pre-flight steps; the exit code is non-zero when any step failed.
-def cmd_walg_check(plane: DataPlaneConfig, *, token: str) -> int:
-    steps = check.run_check(path=plane.walg_config_file, token=token)
+def cmd_walg_check(plane: DataPlaneConfig, *, token: str, home: Path) -> int:
+    steps = check.run_check(path=plane.walg_config_file, token=token, home=home)
     for step in steps:
         print(f"  {'✓' if step.ok else '✗'} {step.name}: {step.detail}")
     return 0 if all(step.ok for step in steps) else 1
@@ -72,12 +74,14 @@ def cmd_walg_run(
     throwaway: ThrowawayConfig,
     database_for_url: Callable[[str], Database],
     clock: Clock,
+    home: Path,
 ) -> int:
     return tick.run_tick(
         partial(_stamped, clock),
         path=plane.walg_config_file,
         database_for_url=database_for_url,
         throwaway=throwaway,
+        home=home,
     )
 
 
@@ -92,12 +96,14 @@ def cmd_walg_drill(
     throwaway: ThrowawayConfig,
     database_for_url: Callable[[str], Database],
     clock: Clock,
+    home: Path,
 ) -> int:
     return tick.run_drill_now(
         partial(_stamped, clock),
         path=plane.walg_config_file,
         database_for_url=database_for_url,
         throwaway=throwaway,
+        home=home,
     )
 
 
@@ -116,12 +122,13 @@ def cmd_walg_restore(
     lsn: str | None,
     user: str | None = None,
     clock: Clock,
+    home: Path,
 ) -> int:
     path = plane.walg_config_file
     if path is None:
         print("WAL-G is off (MEIVA_WALG_CONFIG_FILE is not set); nothing to restore from")
         return 1
-    binary_problem = walg_binary.installed_problem()
+    binary_problem = walg_binary.installed_problem(home=home)
     if binary_problem is not None:
         print(f"restore failed: {binary_problem} (meiva converge installs it)", file=sys.stderr)
         return 1
@@ -140,6 +147,7 @@ def cmd_walg_restore(
             user=user,
             keep_data=True,
             path=path,
+            home=home,
         ):
             pass
     except RestoreError as exc:
@@ -167,10 +175,10 @@ def _config_lines(path: Path) -> list[str]:
     return lines
 
 
-def _postgres_lines(*, path: Path) -> list[str]:
-    expected = expected_archive(path=path)
+def _postgres_lines(*, path: Path, home: Path) -> list[str]:
+    expected = expected_archive(path=path, home=home)
     try:
-        with probe.admin_connection() as conn:
+        with probe.admin_connection(home=home) as conn:
             state = probe.read_archiver_state(conn)
     except Exception as exc:
         return [f"postgres: archiver state not read ({type(exc).__name__}: {exc})"]
@@ -233,16 +241,16 @@ def _tick_lines() -> list[str]:
 
 # meiva:note
 # Print configuration, binary, key fingerprint, archiver, daily-tick and drill facts; exits 0.
-def cmd_walg_status(plane: DataPlaneConfig) -> int:
+def cmd_walg_status(plane: DataPlaneConfig, *, home: Path) -> int:
     path = plane.walg_config_file
     if path is None:
         print("WAL-G archiving is off (MEIVA_WALG_CONFIG_FILE is not set)")
         return 0
-    binary_problem = walg_binary.installed_problem()
+    binary_problem = walg_binary.installed_problem(home=home)
     print(f"binary: {binary_problem or f'pinned wal-g {walg_binary.WALG_VERSION}'}")
-    for line in (*_config_lines(path), *_postgres_lines(path=path), *_tick_lines()):
+    for line in (*_config_lines(path), *_postgres_lines(path=path, home=home), *_tick_lines()):
         print(line)
-    failure = probe.failure(path=path)
+    failure = probe.failure(path=path, home=home)
     print(f"health: {failure or 'ok'}")
     return 0
 
@@ -256,8 +264,10 @@ def cmd_walg_status(plane: DataPlaneConfig) -> int:
 def warn_archive_inactive_on(
     walg_config_file: Path | None,
     admin: AbstractContextManager[psycopg.Connection[Any]],
+    *,
+    home: Path,
 ) -> None:
-    expected = expected_archive(path=walg_config_file)
+    expected = expected_archive(path=walg_config_file, home=home)
     if expected is None:
         return
     try:
@@ -275,7 +285,7 @@ def warn_archive_inactive_on(
         )
 
 
-def warn_archive_inactive(walg_config_file: Path | None) -> None:
-    if expected_archive(path=walg_config_file) is None:
+def warn_archive_inactive(walg_config_file: Path | None, *, home: Path) -> None:
+    if expected_archive(path=walg_config_file, home=home) is None:
         return
-    warn_archive_inactive_on(walg_config_file, probe.admin_connection())
+    warn_archive_inactive_on(walg_config_file, probe.admin_connection(home=home), home=home)

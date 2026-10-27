@@ -53,8 +53,9 @@ def _artifact(
     raise RuntimeError(f"no pinned wal-g artifact for {sys_name.lower()}/{arch}")
 
 
-def walg_path(home: Path | None = None) -> Path:
-    """The stable installed path, `$MEIVA_HOME/runtime/walg/wal-g`. Pure — never downloads."""
+# meiva:note
+# The stable installed path, `<home>/runtime/walg/wal-g`. Pure: it never downloads.
+def walg_path(home: Path) -> Path:
     return runtime_root(home) / "walg" / "wal-g"
 
 
@@ -71,7 +72,7 @@ def _sha256_of(path: Path) -> str | None:
 
 def installed_problem(
     *,
-    home: Path | None = None,
+    home: Path,
     system: str | None = None,
     machine: str | None = None,
     artifacts: Mapping[str, tuple[str, str]] | None = None,
@@ -110,7 +111,7 @@ def _require_version(binary: Path) -> None:
 
 def ensure_walg_binary(
     *,
-    home: Path | None = None,
+    home: Path,
     system: str | None = None,
     machine: str | None = None,
     artifacts: Mapping[str, tuple[str, str]] | None = None,

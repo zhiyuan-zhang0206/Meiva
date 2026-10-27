@@ -158,10 +158,10 @@ def _prepare_directory(directory: Path) -> None:
     directory.chmod(0o700)
 
 
-def control_settings(directory: Path) -> dict[str, str]:
+def control_settings(directory: Path, *, home: Path) -> dict[str, str]:
     """The capacity settings recorded in `directory`'s control file, as `-c` names and values."""
     result = subprocess.run(  # noqa: S603 — the resolved pg_controldata with one path
-        [str(pg_tool("pg_controldata")), str(directory)],
+        [str(pg_tool("pg_controldata", home=home)), str(directory)],
         capture_output=True,
         text=True,
         check=False,
@@ -192,12 +192,13 @@ def recovery_argv(
     target: RecoveryTarget,
     path: Path | None,
     capacity: Mapping[str, str],
+    home: Path,
 ) -> list[str]:
     capacity_args = [
         arg for name, value in sorted(capacity.items()) for arg in ("-c", f"{name}={value}")
     ]
     return [
-        str(pg_tool("postgres")),
+        str(pg_tool("postgres", home=home)),
         "-D",
         str(directory),
         "-p",
@@ -215,7 +216,7 @@ def recovery_argv(
         "-c",
         "lc_messages=C",
         "-c",
-        f"restore_command={postgres_command('wal-fetch', '%f', '%p', path=path)}",
+        f"restore_command={postgres_command('wal-fetch', '%f', '%p', path=path, home=home)}",
         "-c",
         "recovery_target_action=promote",
         *target.pg_args(),
@@ -277,6 +278,7 @@ def restored_instance(
     path: Path | None,
     timeout_s: float = RESTORE_TIMEOUT_S,
     socket_root: Path = SOCKET_ROOT,
+    home: Path,
 ) -> Generator[RestoredInstance]:
     """Fetch `backup` into `directory`, recover it to `target`, yield the promoted instance.
 
@@ -293,9 +295,7 @@ def restored_instance(
     report(f"fetching backup {backup} into {directory}")
     try:
         run_walg(
-            ["backup-fetch", str(directory), backup],
-            timeout_s=timeout_s,
-            path=path,
+            ["backup-fetch", str(directory), backup], timeout_s=timeout_s, path=path, home=home
         )
     except WalgCommandError as exc:
         raise RestoreError(f"backup-fetch failed: {exc}") from None
@@ -315,7 +315,8 @@ def restored_instance(
             port=instance.port,
             target=target,
             path=path,
-            capacity=control_settings(directory),
+            capacity=control_settings(directory, home=home),
+            home=home,
         )
         process = start_foreground_postgres(argv, log=log, env=pg_start_env())
         timeline = _wait_promoted(process, instance, log, timeout_s)

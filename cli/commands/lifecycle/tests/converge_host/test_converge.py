@@ -246,12 +246,12 @@ def test_a_fresh_unit_converges_every_step_that_needs_no_unit_configuration(
     (repo / "migrations").mkdir()
     # meiva:note
     # Seed installed Postgres binaries; their download has a dedicated contract test.
-    seeded_bin = rb.vendored_pg_dir() / "bin"
+    seeded_bin = rb.vendored_pg_dir(meiva_home) / "bin"
     seeded_bin.mkdir(parents=True)
     (seeded_bin / "initdb").write_text("#!/bin/sh\n")
     # meiva:note
     # Seed pgvector too; its injection is covered by the runtime smoke test.
-    seeded_ext = rb.vendored_pg_dir() / "share/postgresql/extension"
+    seeded_ext = rb.vendored_pg_dir(meiva_home) / "share/postgresql/extension"
     seeded_ext.mkdir(parents=True)
     (seeded_ext / rb.PGVECTOR_SQL).write_text("-- seeded\n")
     steps = tuple(

@@ -69,6 +69,7 @@ def run_walg_logged(
     pg_admin_url: str | None = None,
     extra_env: Mapping[str, str] = _NO_EXTRA,
     path: Path | None,
+    home: Path,
 ) -> WalgOutput:
     """Run `wal-g --config <file> *args` and return both streams.
 
@@ -81,7 +82,7 @@ def run_walg_logged(
     """
     if path is None:
         raise WalgConfigError("MEIVA_WALG_CONFIG_FILE is not set")
-    argv = [str(walg_path()), "--config", str(path), *args]
+    argv = [str(walg_path(home=home)), "--config", str(path), *args]
     try:
         result = subprocess.run(  # noqa: S603 — the pinned wal-g with a fixed argv shape
             argv,
@@ -110,6 +111,7 @@ def run_walg(
     extra_env: Mapping[str, str] = _NO_EXTRA,
     as_json: Literal[False] = False,
     path: Path | None,
+    home: Path,
 ) -> str: ...
 
 
@@ -122,6 +124,7 @@ def run_walg(
     extra_env: Mapping[str, str] = _NO_EXTRA,
     as_json: Literal[True],
     path: Path | None,
+    home: Path,
 ) -> object: ...
 
 
@@ -136,6 +139,7 @@ def run_walg(
     extra_env: Mapping[str, str] = _NO_EXTRA,
     as_json: bool = False,
     path: Path | None,
+    home: Path,
 ) -> object:
     output = run_walg_logged(
         args,
@@ -143,5 +147,6 @@ def run_walg(
         pg_admin_url=pg_admin_url,
         extra_env=extra_env,
         path=path,
+        home=home,
     )
     return json.loads(output.stdout) if as_json else output.stdout

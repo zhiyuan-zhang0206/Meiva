@@ -129,6 +129,7 @@ class PoolerShape:
 @dataclass(frozen=True)
 class PoolerSpec:
     shape: PoolerShape
+    home: Path
     userlist: bytes = field(repr=False)
     admin_password: str = field(repr=False)
     binary: str
@@ -139,12 +140,12 @@ class PoolerSpec:
     ready_wait_s: float = READY_WAIT_S
 
 
-def userlist_path() -> Path:
-    return pooler_files.pooler_dir() / "userlist.txt"
+def userlist_path(home: Path) -> Path:
+    return pooler_files.pooler_dir(home) / "userlist.txt"
 
 
-def _logfile_path() -> Path:
-    return pooler_files.pooler_dir() / "pgbouncer.log"
+def _logfile_path(home: Path) -> Path:
+    return pooler_files.pooler_dir(home) / "pgbouncer.log"
 
 
 # meiva:note
@@ -153,7 +154,7 @@ def _logfile_path() -> Path:
 # alone; the file paths of this home). The statement-ceiling statement is the same constant as
 # the client-side SET, imported lazily because this runs in data-plane bring-up, before any
 # settings or env load is guaranteed.
-def render_ini(shape: PoolerShape) -> str:
+def render_ini(shape: PoolerShape, *, home: Path) -> str:
     from base.db import PG_STATEMENT_TIMEOUT_SET_SQL
 
     return render_ini_text(
@@ -163,9 +164,9 @@ def render_ini(shape: PoolerShape) -> str:
             socket_dir=str(shape.socket_dir),
             listen_addrs=tuple(port_preflight.bind_addrs(machine=shape.machine)),
             listen_port=shape.listen_port,
-            userlist_path=str(userlist_path()),
-            logfile=str(_logfile_path()),
-            pidfile=str(pooler_files.pidfile_path()),
+            userlist_path=str(userlist_path(home)),
+            logfile=str(_logfile_path(home)),
+            pidfile=str(pooler_files.pidfile_path(home)),
             max_client_conn=shape.max_client_conn,
             admin_user=POOLER_ADMIN,
             statement_timeout_sql=PG_STATEMENT_TIMEOUT_SET_SQL,
@@ -175,8 +176,8 @@ def render_ini(shape: PoolerShape) -> str:
 
 def _desired_files(spec: PoolerSpec) -> tuple[tuple[Path, bytes], ...]:
     return (
-        (pooler_files.ini_path(), render_ini(spec.shape).encode()),
-        (userlist_path(), spec.userlist),
+        (pooler_files.ini_path(spec.home), render_ini(spec.shape, home=spec.home).encode()),
+        (userlist_path(spec.home), spec.userlist),
     )
 
 
@@ -225,12 +226,12 @@ def config_of(process: psutil.Process) -> str | None:
 # its executable and exact configuration path before treating it as a candidate; native custody
 # also captures its process birth before any reload or shutdown signal. A process this user
 # cannot introspect counts as NOT ours: a pooler that outlives its stop retains custody.
-def pid_is_our_pooler(pid: int) -> bool:
+def pid_is_our_pooler(pid: int, *, home: Path) -> bool:
     try:
         process = psutil.Process(pid)
         if process.name() != "pgbouncer":
             return False
-        return config_of(process) == str(pooler_files.ini_path().resolve())
+        return config_of(process) == str(pooler_files.ini_path(home).resolve())
     except (psutil.Error, OSError):
         return False
 
@@ -242,13 +243,13 @@ def pid_is_our_pooler(pid: int) -> bool:
 # longer names our pooler, because the process is gone or the number was since recycled onto
 # someone else, reads as None and is removed, so the next bring-up starts from a clean slate
 # instead of re-deciding against the same dead number. A live stranger is reported.
-def running_pid() -> int | None:
-    pidfile = pooler_files.pidfile_path()
+def running_pid(*, home: Path) -> int | None:
+    pidfile = pooler_files.pidfile_path(home)
     try:
         pid = int(pidfile.read_text().strip())
     except (FileNotFoundError, ValueError, OSError):
         return None
-    if pid_is_our_pooler(pid):
+    if pid_is_our_pooler(pid, home=home):
         return pid
     if process_alive(pid):
         print(stale_pidfile(str(pidfile), pid), file=sys.stderr)
@@ -256,12 +257,12 @@ def running_pid() -> int | None:
     return None
 
 
-def _accepting_pooler(listen_port: int) -> OwnedPooler | None:
-    owner = ownership.pooler(pooler_files.ini_path(), pooler_files.pidfile_path())
+def _accepting_pooler(listen_port: int, *, home: Path) -> OwnedPooler | None:
+    owner = ownership.pooler(pooler_files.ini_path(home), pooler_files.pidfile_path(home))
     if owner is None:
         port_preflight.require_listener(None, listen_port, required=False)
         return None
-    custodian = OwnedPooler(owner, listen_port, pooler_files.ini_path())
+    custodian = OwnedPooler(owner, listen_port, pooler_files.ini_path(home))
     custodian.require_accepting()
     return custodian
 
@@ -313,7 +314,7 @@ def _reload(run: _Run) -> int:
 def _launch(run: _Run) -> int:
     spec, text = run.spec, run.text
     result = run_bounded(
-        [spec.binary, "-d", str(pooler_files.ini_path())],
+        [spec.binary, "-d", str(pooler_files.ini_path(spec.home))],
         timeout=_LAUNCH_TIMEOUT_S,
         capture_output=True,
         text=True,
@@ -344,7 +345,7 @@ def _launch(run: _Run) -> int:
         print(text.degraded_after_launch(), file=sys.stderr)
         return 1
     port_preflight.require_listener(
-        ownership.pooler(pooler_files.ini_path(), pooler_files.pidfile_path()),
+        ownership.pooler(pooler_files.ini_path(spec.home), pooler_files.pidfile_path(spec.home)),
         spec.shape.listen_port,
     )
     print(text.started())
@@ -399,7 +400,7 @@ def ensure_pgbouncer(spec: PoolerSpec) -> int:
     if not binary_installed(spec.binary):
         print(not_installed_error(spec.binary, _install_hint(macos=spec.macos)), file=sys.stderr)
         return 1
-    custodian = _accepting_pooler(shape.listen_port)
+    custodian = _accepting_pooler(shape.listen_port, home=spec.home)
     public = custodian is not None and pooler_files.pgbouncer_public_listener_reachable(
         shape.listen_port, POOLER_ADMIN, machine=shape.machine
     )
@@ -412,7 +413,7 @@ def ensure_pgbouncer(spec: PoolerSpec) -> int:
         host=shape.machine.host(),
         bind_wait_s=spec.bind_wait_s,
         listen_port=shape.listen_port,
-        logfile=str(_logfile_path()),
+        logfile=str(_logfile_path(spec.home)),
     )
     run = _Run(spec, text, custodian)
     for step in plan_convergence(observation):
@@ -431,14 +432,14 @@ PoolerStop = Literal["not-running", "stopped", "forced"]
 # only a caller that owns an already-quiescent, already-revoked data plane passes it. Returns
 # how the stop ended: no pooler of this home was running, the safe shutdown completed, or force
 # escalated.
-def stop_pgbouncer(*, force: bool = False) -> PoolerStop:
-    pid = running_pid()
+def stop_pgbouncer(*, home: Path, force: bool = False) -> PoolerStop:
+    pid = running_pid(home=home)
     if pid is None:
         return "not-running"
-    owner = ownership.pooler(pooler_files.ini_path(), pooler_files.pidfile_path())
+    owner = ownership.pooler(pooler_files.ini_path(home), pooler_files.pidfile_path(home))
     if owner is None:
         return "not-running"
-    custodian = OwnedPooler.from_config(owner, pooler_files.ini_path())
+    custodian = OwnedPooler.from_config(owner, pooler_files.ini_path(home))
     deadline = time.monotonic() + RESTART_STOP_WAIT_S
     try:
         if custodian.stop(deadline=deadline):

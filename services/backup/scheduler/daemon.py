@@ -234,12 +234,12 @@ async def run(
 # meiva:note
 # The lazy log-database handle: the config as its owner holds it when the handle is built.
 def scheduler_database(
-    config: ConfigBoot, machine: MachineIdentityReader, gate: ProcessDbGate
+    config: ConfigBoot, machine: MachineIdentityReader, gate: ProcessDbGate, *, home: Path
 ) -> Database:
     return Database(
         db_config_from_boot(config),
         gate=gate,
-        direct_url=ClusterDirectUrl(machine.host),
+        direct_url=ClusterDirectUrl(machine.host, home=home),
     )
 
 
@@ -258,7 +258,7 @@ def main() -> None:
     version = CodeVersion(image)
     gate = ProcessDbGate(version=version.get, process="pg_backup")
     pipeline = build_pipeline(
-        database=lambda: scheduler_database(config, machine, gate),
+        database=lambda: scheduler_database(config, machine, gate, home=process_home),
         machine=machine,
         home=process_home,
     )

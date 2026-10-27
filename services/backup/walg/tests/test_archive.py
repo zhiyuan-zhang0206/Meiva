@@ -5,6 +5,7 @@ from pathlib import Path
 
 import pytest
 
+from base.paths import meiva_home
 from services.backup.walg import archive
 from services.backup.walg.archive_plan import ARCHIVE_TIMEOUT_S
 from services.backup.walg.tests.support import (
@@ -22,8 +23,8 @@ def test_off_by_default_means_no_launch_arguments(
 ) -> None:
     sandbox = make_sandbox(tmp_path, monkeypatch, enabled=False)
 
-    assert archive.expected_archive(path=sandbox.path) is None
-    assert archive.archive_pg_args(path=sandbox.path) == []
+    assert archive.expected_archive(path=sandbox.path, home=meiva_home()) is None
+    assert archive.archive_pg_args(path=sandbox.path, home=meiva_home()) == []
 
 
 def test_the_launch_arguments_are_the_expected_settings(
@@ -31,9 +32,9 @@ def test_the_launch_arguments_are_the_expected_settings(
 ) -> None:
     sandbox = make_sandbox(tmp_path, monkeypatch)
 
-    args = archive.archive_pg_args(path=sandbox.path)
+    args = archive.archive_pg_args(path=sandbox.path, home=meiva_home())
 
-    expected = archive.expected_archive(path=sandbox.path)
+    expected = archive.expected_archive(path=sandbox.path, home=meiva_home())
     assert expected is not None
     assert args == [
         "-c",
@@ -59,7 +60,7 @@ def test_a_percent_in_a_path_is_escaped_for_postgres(
 ) -> None:
     sandbox = make_sandbox(tmp_path, monkeypatch)
 
-    command = archive.archive_pg_args(path=sandbox.path)[-1]
+    command = archive.archive_pg_args(path=sandbox.path, home=meiva_home())[-1]
 
     assert "meiva home%%p" in command
     assert command.count("%p") == 3, "two escaped path occurrences and the one real placeholder"
@@ -69,7 +70,7 @@ def test_a_percent_in_a_path_is_escaped_for_postgres(
 def test_no_argument_carries_a_secret(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     sandbox = make_sandbox(tmp_path, monkeypatch)
 
-    joined = "\n".join(archive.archive_pg_args(path=sandbox.path))
+    joined = "\n".join(archive.archive_pg_args(path=sandbox.path, home=meiva_home()))
 
     assert not any(secret in joined for secret in SECRETS)
 
@@ -82,7 +83,7 @@ def sandbox(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Sandbox:
 def test_postgres_runs_the_archive_command_and_ships_a_closed_segment(
     sandbox: Sandbox, postgres_access: None
 ) -> None:
-    expected = archive.expected_archive(path=sandbox.path)
+    expected = archive.expected_archive(path=sandbox.path, home=meiva_home())
     assert expected is not None
 
     with archiving_postgres(sandbox=sandbox) as pg, pg.connect() as conn:

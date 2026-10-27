@@ -117,6 +117,13 @@ def valid_config(key_file: Path, **overrides: Any) -> dict[str, Any]:
     return {key: value for key, value in payload.items() if value is not None}
 
 
+# meiva:note
+# The stand-in for `walg_binary.installed_problem` while the fake wal-g is installed: no problem,
+# whichever home is asked about.
+def _always_pinned(*, home: Path) -> None:
+    del home
+
+
 def make_sandbox(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, *, enabled: bool = True
 ) -> Sandbox:
@@ -136,7 +143,7 @@ def make_sandbox(
     point_home(monkeypatch, home)
     # meiva:note
     # The fake is not the pinned build; everything else (path, argv, config) is real.
-    monkeypatch.setattr(walg_binary, "installed_problem", lambda: None)
+    monkeypatch.setattr(walg_binary, "installed_problem", _always_pinned)
     sandbox = Sandbox(home, store_dir, config_file, key_file, enabled)
     sandbox.write_config(valid_config(key_file))
     if enabled:
@@ -199,7 +206,7 @@ def postgres_instance(*extra_args: str, path: Path | None = None) -> Generator[P
         # The argv is the resolved initdb path plus static flags.
         subprocess.run(  # noqa: S603
             [
-                str(pg_tool("initdb")),
+                str(pg_tool("initdb", home=meiva_home())),
                 "-D",
                 str(data),
                 "-U",
@@ -213,9 +220,9 @@ def postgres_instance(*extra_args: str, path: Path | None = None) -> Generator[P
             check=True,
             capture_output=True,
         )
-        archive_args = archive_pg_args(path=path)
+        archive_args = archive_pg_args(path=path, home=meiva_home())
         argv = [
-            str(pg_tool("postgres")),
+            str(pg_tool("postgres", home=meiva_home())),
             "-D",
             str(data),
             "-p",
@@ -322,7 +329,7 @@ def take_basebackup(sandbox: Sandbox, pg: PgInstance, name: str) -> str:
     destination = sandbox.store_dir / "basebackups" / name
     subprocess.run(  # noqa: S603 — the resolved pg_basebackup with static flags
         [
-            str(pg_tool("pg_basebackup")),
+            str(pg_tool("pg_basebackup", home=meiva_home())),
             "-D",
             str(destination),
             "-h",

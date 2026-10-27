@@ -25,6 +25,7 @@ from base.db.config import db_config_from_settings
 from base.native_process.code_version import CodeVersion
 from base.native_process.loaded_commit import LoadedCommit
 from base.native_process.os_platform import file_lock
+from base.paths import meiva_home
 from services.backup.walg import state, tick
 from services.backup.walg.pg_target import PgTarget
 from services.backup.walg.state import RunRecord
@@ -114,7 +115,8 @@ def _run(sandbox: Sandbox, platform: tick.Platform | None = None) -> tuple[int, 
         platform=_platform() if platform is None else platform,
         path=sandbox.path,
         database_for_url=_database_factory(),
-        throwaway=ThrowawayConfig(None),
+        throwaway=ThrowawayConfig(None, home=meiva_home()),
+        home=meiva_home(),
     )
     return code, lines
 
@@ -532,7 +534,8 @@ def _drill_now(sandbox: Sandbox, lines: list[str], platform: tick.Platform | Non
         platform=_platform() if platform is None else platform,
         path=sandbox.path,
         database_for_url=_database_factory(),
-        throwaway=ThrowawayConfig(None),
+        throwaway=ThrowawayConfig(None, home=meiva_home()),
+        home=meiva_home(),
     )
 
 

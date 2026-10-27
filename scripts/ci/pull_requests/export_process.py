@@ -47,15 +47,16 @@ def drain_event_pipeline(process: str, pipeline: EventPipeline) -> Generator[Eve
 def owned_event_pipeline(process: str, *, image: LoadedCommit | None) -> Generator[EventPipeline]:
     """Own the sampler's actual writer; a scheduled caller supplies its existing producer."""
     gate = process_gate(process, image=image)
+    process_home = meiva_home()
 
     def database() -> Database:
         return Database.from_settings(
             gate=gate,
-            direct_url=ClusterDirectUrl(machine.host),
+            direct_url=ClusterDirectUrl(machine.host, home=process_home),
         )
 
     config = ConfigBoot()
     machine = ConfiguredMachineIdentity(config)
-    pipeline = build_pipeline(database=database, machine=machine, home=meiva_home())
+    pipeline = build_pipeline(database=database, machine=machine, home=process_home)
     with drain_event_pipeline(process, pipeline):
         yield pipeline

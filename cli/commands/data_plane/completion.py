@@ -81,7 +81,7 @@ READONLY_GRANTEES = ("grafana_ro",)
 def admin_session(
     rec: ClusterRecord, database: str, *, home: Path
 ) -> Generator[psycopg.Connection[Any]]:
-    url = make_conninfo(pg_admin.pg_admin_url(rec.ports["postgres"]), dbname=database)
+    url = make_conninfo(pg_admin.pg_admin_url(rec.ports["postgres"], home=home), dbname=database)
     data = instance.pg_data_dir(home)
     with pg_admin.connect(url, expected_data_dir=data, autocommit=True) as conn:
         yield conn
@@ -102,6 +102,7 @@ def ensure_pooler(
     if not config.pgbouncer_enabled:
         return
     spec = pgbouncer.PoolerSpec(
+        home=home,
         shape=pgbouncer.PoolerShape(
             pg_port=rec.ports["postgres"],
             listen_port=rec.ports["pgbouncer"],
@@ -294,11 +295,15 @@ class _Completion:
             case EnsureExtension():
                 cluster.ensure_pgvector_extension(
                     self._plane().database,
-                    base_admin_url=pg_admin.pg_admin_url(self._record().ports["postgres"]),
+                    base_admin_url=pg_admin.pg_admin_url(
+                        self._record().ports["postgres"], home=self.home
+                    ),
                     expected_data_dir=instance.pg_data_dir(self.home),
                 )
             case PrepareVectors():
-                prepare_memory_vectors(self.config, database_factory=self.database_factory)
+                prepare_memory_vectors(
+                    self.config, home=self.home, database_factory=self.database_factory
+                )
             case RefuseLegacy(message=message):
                 raise RuntimeError(message)
             case _:

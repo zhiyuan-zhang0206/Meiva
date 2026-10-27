@@ -148,7 +148,7 @@ def require_no_unrecorded(recorded: Mapping[str, frozenset[int]], *, home: Path)
     homes = {
         "postgres": str(instance.pg_data_dir(home).resolve()),
         "redis": str(instance.redis_data_dir(home).resolve()),
-        "pgbouncer": str(pooler_files.ini_path().resolve()),
+        "pgbouncer": str(pooler_files.ini_path(home).resolve()),
     }
     problem = refusal(judge(_seen_processes(), homes=homes, recorded=recorded))
     if problem is not None:
@@ -165,7 +165,7 @@ def require_no_unrecorded(recorded: Mapping[str, frozenset[int]], *, home: Path)
 # as that, never as an empty list, whatever made it unreadable.
 def report_pooler_clients(identity: OwnedProcess, *, home: Path) -> str | None:
     try:
-        port = OwnedPooler.from_config(identity, pooler_files.ini_path()).port
+        port = OwnedPooler.from_config(identity, pooler_files.ini_path(home)).port
         found = pooler_files.clients(port, read_pooler_admin(home).password)
     except Exception as exc:
         line = pooler_console_unreadable_line(repr(exc))
@@ -258,7 +258,7 @@ async def request_stop(
             with contextlib.suppress(RedisConnectionError):
                 await _redis_command(client, deadline, "SHUTDOWN", mode.value)
         case StopPooler():
-            custodian = OwnedPooler.from_config(identity, pooler_files.ini_path())
+            custodian = OwnedPooler.from_config(identity, pooler_files.ini_path(context.home))
             if not custodian.stop(deadline=deadline):
                 raise TimeoutError("PgBouncer stop incomplete; custody retained")
         case _:
@@ -296,7 +296,8 @@ def _require_nothing_left(port: int, deadline: float, home: Path) -> None:
     remaining(deadline)
     if (
         ownership.postgres(instance.pg_data_dir(home)) is not None
-        or ownership.pooler(pooler_files.ini_path(), pooler_files.pidfile_path()) is not None
+        or ownership.pooler(pooler_files.ini_path(home), pooler_files.pidfile_path(home))
+        is not None
     ):
         raise RuntimeError("data-plane process appeared during held stop")
     require_no_unrecorded({}, home=home)
@@ -349,7 +350,9 @@ async def _stop(
     retained_children: list[subprocess.Popen[bytes]] | None,
 ) -> MaintenanceStop:
     pg = ownership.postgres(instance.pg_data_dir(context.home))
-    pgb = ownership.pooler(pooler_files.ini_path(), pooler_files.pidfile_path())
+    pgb = ownership.pooler(
+        pooler_files.ini_path(context.home), pooler_files.pidfile_path(context.home)
+    )
     port = ownership.redis_port_of(config.redis_url)
     if port is None:
         raise RuntimeError("maintenance requires this home's explicit Redis endpoint")

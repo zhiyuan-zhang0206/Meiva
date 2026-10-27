@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from pathlib import Path
+
 import pytest
 
 from cli.database import OperatorDatabaseFactory, open_operator_database, operator_database_factory
@@ -11,6 +13,7 @@ _OTHER = "postgresql://meiva_g1_gateway:pw@db.example:5432/meiva"
 def _factory() -> OperatorDatabaseFactory:
     return operator_database_factory(
         local_host=lambda: "localhost",
+        home=Path("/operator/home"),
         open_database=open_operator_database,
     )
 

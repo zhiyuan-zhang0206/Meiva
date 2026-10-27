@@ -254,8 +254,8 @@ def disk_usage_fraction(volume: Path) -> float | None:
 # meiva:note
 # The first broken WAL-archiving condition, or None (also None while WAL-G is off), and whether
 # WAL-G is on. The path is the configuration's WAL-G config file, read once by the root.
-def read_walg(config_file: Path | None) -> tuple[str | None, bool]:
-    return walg_probe.failure(path=config_file), config_file is not None
+def read_walg(config_file: Path | None, *, home: Path) -> tuple[str | None, bool]:
+    return walg_probe.failure(path=config_file, home=home), config_file is not None
 
 
 # meiva:note
@@ -298,7 +298,7 @@ def read_health(
     options: HealthOptions, *, database_factory: DatabaseFactory, command: CommandRuntime
 ) -> HealthReadings:
     launched = read_launch_record(command.home)
-    walg_failure, walg_on = read_walg(options.data_plane.walg_config_file)
+    walg_failure, walg_on = read_walg(options.data_plane.walg_config_file, home=command.home)
     return HealthReadings(
         disk_fraction=disk_usage_fraction(options.data_volume),
         gateway=read_gateway(options, command.config, database_factory, command.rng),

@@ -63,6 +63,7 @@ def _producer(
     return OperatorEventPipeline(
         WatchedDatabase(
             local_host=machine.host,
+            home=home,
             open_database=open_operator_database,
         ),
         machine=machine,

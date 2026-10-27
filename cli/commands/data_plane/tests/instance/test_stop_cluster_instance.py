@@ -20,6 +20,7 @@ import pytest
 from base.cluster import ownership
 from base.cluster.dataplane.pg_tools import pg_tool
 from base.cluster.machine import MachineIdentityReader
+from base.paths import meiva_home
 from base.telemetry import EventPipeline
 from cli.commands.data_plane import bringup, cluster_instance
 from cli.commands.data_plane.config import DataPlaneConfig
@@ -71,7 +72,9 @@ def _stop(cluster: NativeCluster, producer: Callable[[], EventPipeline]) -> int:
 
 
 def _answers(cluster: NativeCluster) -> tuple[bool, bool]:
-    postgres = cluster_instance.pg_running(str(pg_tool("pg_isready")), cluster.pg_port, "127.0.0.1")
+    postgres = cluster_instance.pg_running(
+        str(pg_tool("pg_isready", home=meiva_home())), cluster.pg_port, "127.0.0.1"
+    )
     redis = cluster_instance.redis_reachable(ADMIN_PASSWORD, cluster.redis_port, "127.0.0.1")
     return postgres, redis
 

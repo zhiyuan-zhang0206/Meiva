@@ -709,7 +709,7 @@ class BrowserMcpEntryWiring:
         return db_config_from_boot(self.config)
 
     def direct_url(self) -> ClusterDirectUrl:
-        return ClusterDirectUrl(self.machine.host)
+        return ClusterDirectUrl(self.machine.host, home=self.process_home)
 
     def database(self) -> Database:
         return Database(

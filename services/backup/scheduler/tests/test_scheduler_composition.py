@@ -27,6 +27,7 @@ from base.db import Database
 from base.db.code_version_gate import ProcessDbGate
 from base.host.env import port_lease
 from base.native_process.loaded_commit import LoadedCommit
+from base.paths import meiva_home
 from services.backup.layout import BackupTree
 from services.backup.scheduler import daemon, worker
 from services.backup.scheduler.settings import SchedulerSettings
@@ -58,11 +59,11 @@ def test_the_scheduler_log_database_carries_the_process_gate_and_reads_its_owner
 ) -> None:
     config = _config(db_url)
 
-    first = daemon.scheduler_database(config, machine_identity, database_gate)
+    first = daemon.scheduler_database(config, machine_identity, database_gate, home=meiva_home())
 
     assert _application_name(first) == database_gate.application_name()
     config.view.data_plane.db_url = _refused(db_url)
-    rebuilt = daemon.scheduler_database(config, machine_identity, database_gate)
+    rebuilt = daemon.scheduler_database(config, machine_identity, database_gate, home=meiva_home())
     with pytest.raises(psycopg.OperationalError):
         rebuilt.connect()
 
@@ -72,10 +73,12 @@ def test_every_worker_handle_shares_one_gate_and_the_scratch_url_replaces_only_t
 ) -> None:
     config = _config(_refused(db_url))
 
-    scratch = worker.worker_database(config, machine_identity, database_gate, url=db_url)
+    scratch = worker.worker_database(
+        config, machine_identity, database_gate, url=db_url, home=meiva_home()
+    )
 
     assert _application_name(scratch) == database_gate.application_name()
-    live = worker.worker_database(config, machine_identity, database_gate)
+    live = worker.worker_database(config, machine_identity, database_gate, home=meiva_home())
     with pytest.raises(psycopg.OperationalError):
         live.connect()
 
@@ -86,7 +89,9 @@ def test_a_scratch_handle_reads_the_owners_ssl_policy_when_it_is_built(
     config = _config(db_url)
     config.view.data_plane.db_sslmode = "verify-full"
 
-    strict = worker.worker_database(config, machine_identity, database_gate, url=db_url)
+    strict = worker.worker_database(
+        config, machine_identity, database_gate, url=db_url, home=meiva_home()
+    )
 
     with pytest.raises(psycopg.OperationalError):
         strict.connect()

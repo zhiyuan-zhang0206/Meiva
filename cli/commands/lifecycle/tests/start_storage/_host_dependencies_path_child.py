@@ -12,6 +12,7 @@ import sys
 from pathlib import Path
 
 from base.host.system.tests.fake_commands import DARWIN_ARM64, LINUX_X86, fake_host
+from base.paths import meiva_home
 from cli.commands.data_plane import host_dependencies as hd
 
 _PLATFORMS = {"linux": LINUX_X86, "darwin": DARWIN_ARM64}
@@ -35,7 +36,7 @@ def main() -> int:
         memory_keep_local=False,
         prod_install=True,
     )
-    probing = hd.Probing(host=host, data_plane=None, toolchain_path="")
+    probing = hd.Probing(host=host, data_plane=None, toolchain_path="", home=meiva_home())
     return hd.ensure_host_dependencies(repo=Path(sys.argv[1]), scope=scope, probing=probing)
 
 

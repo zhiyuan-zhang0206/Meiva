@@ -49,6 +49,7 @@ from base.deploy.schema.migration_layout import MIGRATIONS_DIR
 from base.deploy.schema.migrations import apply_pending_migrations
 from base.host.db_authority.ledger import activate, create_ledger, read_secret, require_ledger
 from base.host.db_authority.model import GATEWAY_GROUP, RUNNER_GROUP, GenerationSecret, Groups
+from base.paths import meiva_home
 from base.paths.home import resolve_meiva_home
 
 OWNER = "meiva_test_owner"
@@ -88,7 +89,7 @@ class Instance:
 def _restart(data_dir: Path) -> None:
     subprocess.run(  # noqa: S603 — resolved pg_ctl path + static flags
         [
-            str(pg_tool("pg_ctl")),
+            str(pg_tool("pg_ctl", home=meiva_home())),
             "-D",
             str(data_dir),
             "-l",
@@ -138,7 +139,9 @@ def _authenticate(instance: Instance, tcp: str, data_dir: Path) -> None:
 
 @pytest.fixture(scope="module")
 def _authority_instance(process_config: ConfigBoot) -> Iterator[Instance]:
-    throwaway = ThrowawayConfig(configured_base(process_config.view.data_plane.pg_throwaway_base))
+    throwaway = ThrowawayConfig(
+        configured_base(process_config.view.data_plane.pg_throwaway_base), home=meiva_home()
+    )
     with throwaway_postgres(config=throwaway) as url:
         port = urlsplit(url).port
         assert port is not None

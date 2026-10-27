@@ -24,6 +24,7 @@ from base.log.tests.stdlib_logging import stdlib_logging_isolated
 from base.native_process.code_version import CodeVersion
 from base.native_process.loaded_commit import LoadedCommit
 from base.native_process.os_platform import Platform, raise_fd_limit
+from base.paths import meiva_home
 from scripts.structure.imports.fixture_scopes import (
     SCOPE_FILE,
     Scope,
@@ -53,6 +54,7 @@ __all__ = [
     "discover_scopes",
     "get_field",
     "health_port_env_aliases",
+    "meiva_home",
     "modules_by_path",
     "port_lease",
     "postgres",

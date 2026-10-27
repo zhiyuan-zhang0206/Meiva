@@ -42,6 +42,7 @@ from base.host.env import port_lease
 from base.host.env.registry import process_environment
 from base.host.net.url_secret import url_with_userinfo
 from base.native_process.child_env import daemon_process_env
+from base.paths import meiva_home
 from base.paths.tests.homes import point_home
 from cli.commands.data_plane import bringup, completion
 from cli.commands.data_plane import cluster_instance as ci
@@ -131,10 +132,17 @@ def _intent(home: Path, record: cluster.ClusterRecord, values: dict[str, str]) -
 
 def _teardown(born: Born) -> None:
     try:
-        pooler.stop_pgbouncer(force=True)
+        pooler.stop_pgbouncer(force=True, home=meiva_home())
     finally:
         subprocess.run(
-            [str(pg_tool("pg_ctl")), "-D", str(born.home / "pg"), "-m", "immediate", "stop"],
+            [
+                str(pg_tool("pg_ctl", home=meiva_home())),
+                "-D",
+                str(born.home / "pg"),
+                "-m",
+                "immediate",
+                "stop",
+            ],
             check=False,
             capture_output=True,
         )
@@ -409,7 +417,9 @@ def test_pooler_restart_revokes_a_removed_user_a_reload_would_keep(
     name, password = born.login("gateway")
     with psycopg.connect(born.dsn("gateway"), prepare_threshold=None) as conn:
         conn.execute("SELECT 1")
-    owner_before = ownership.pooler(base_pooler.ini_path(), base_pooler.pidfile_path())
+    owner_before = ownership.pooler(
+        base_pooler.ini_path(meiva_home()), base_pooler.pidfile_path(meiva_home())
+    )
     assert owner_before is not None
     admin = delivery.read_pooler_admin(born.home)
     userlist = delivery.render_userlist(born.home, delivery.active_generation(born.home))
@@ -433,10 +443,13 @@ def test_pooler_restart_revokes_a_removed_user_a_reload_would_keep(
         daemon_env=daemon_process_env(),
         macos=command_runtime.host.platform.system == "darwin",
         bind_wait_s=ci.BIND_WAIT_TIMEOUT_S,
+        home=meiva_home(),
     )
     rc = pooler.ensure_pgbouncer(spec)
     assert rc == 0
-    owner_after = ownership.pooler(base_pooler.ini_path(), base_pooler.pidfile_path())
+    owner_after = ownership.pooler(
+        base_pooler.ini_path(meiva_home()), base_pooler.pidfile_path(meiva_home())
+    )
     assert owner_after is not None and owner_after.pid != owner_before.pid
     assert_refused(
         host="127.0.0.1", port=born.pooler_port, user=name, password=password, dbname="meiva"
@@ -449,7 +462,9 @@ def test_unchanged_userlist_reloads_without_restart(
     *,
     command_runtime: CommandRuntime,
 ) -> None:
-    before = ownership.pooler(base_pooler.ini_path(), base_pooler.pidfile_path())
+    before = ownership.pooler(
+        base_pooler.ini_path(meiva_home()), base_pooler.pidfile_path(meiva_home())
+    )
     completion.complete_gateway_data_plane(
         born.plane,
         home=born.home,
@@ -458,7 +473,9 @@ def test_unchanged_userlist_reloads_without_restart(
         machine=command_runtime.machine,
         macos=command_runtime.host.platform.system == "darwin",
     )
-    after = ownership.pooler(base_pooler.ini_path(), base_pooler.pidfile_path())
+    after = ownership.pooler(
+        base_pooler.ini_path(meiva_home()), base_pooler.pidfile_path(meiva_home())
+    )
     assert before is not None and after is not None and before.pid == after.pid
 
 
@@ -759,7 +776,9 @@ def test_direct_exemption_dials_postgres_as_the_delivered_login(
         return open_operator_database(replace(config, pgbouncer_enabled=True), gate, direct_url)
 
     pooled = operator_database_factory(
-        local_host=command_runtime.machine.host, open_database=open_pooled
+        local_host=command_runtime.machine.host,
+        home=command_runtime.home,
+        open_database=open_pooled,
     )
     pooled.adopt_login(born.dsn("gateway"))
     handle = pooled()

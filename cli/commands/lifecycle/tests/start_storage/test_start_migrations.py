@@ -20,6 +20,7 @@ from base.cluster import ensure_checkpoint_schema, provision_database
 from base.cluster.checkpoint_schema import PostgresCheckpointSchema
 from base.cluster.dataplane.pg_admin import pg_admin_url
 from base.cluster.provision import CheckpointDependencyDriftError
+from base.paths import meiva_home
 from cli.commands.data_plane.config import DataPlaneConfig
 from cli.commands.data_plane.tests.data_plane_records import data_plane_config as data_plane_config
 from cli.commands.data_plane.tests.data_plane_records import (
@@ -42,7 +43,7 @@ def _applied(plane: Plane, identity: str) -> list[str]:
 
 def test_an_owned_plane_converges_over_its_owner_socket(plane: Plane) -> None:
     identity = "meiva_mig"
-    admin = pg_admin_url(plane.port)
+    admin = pg_admin_url(plane.port, home=meiva_home())
     created = provision_database(identity, base_admin_url=admin, expected_data_dir=plane.data_dir)
     ensure_checkpoint_schema(
         identity,

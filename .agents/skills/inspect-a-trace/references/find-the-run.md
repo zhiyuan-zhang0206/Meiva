@@ -16,11 +16,12 @@ from base.cluster.dataplane.direct_url import ClusterDirectUrl
 from base.cluster.machine.configured import ConfiguredMachineIdentity
 from base.config import ConfigBoot
 from base.db.config import db_config_from_boot
+from base.paths import meiva_home
 
 boot = ConfigBoot()
 boot.boot()
 machine = ConfiguredMachineIdentity(boot)
-resolve = ClusterDirectUrl(machine.host, gateway_url_reader=lambda: boot.view.gateway.gateway_url)
+resolve = ClusterDirectUrl(machine.host, home=meiva_home())
 print(resolve(db_config_from_boot(boot)))
 PY
 )"

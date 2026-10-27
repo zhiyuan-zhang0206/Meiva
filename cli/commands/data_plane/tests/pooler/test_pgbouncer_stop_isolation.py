@@ -16,6 +16,7 @@ from pathlib import Path
 
 import pytest
 
+from base.paths import meiva_home
 from cli.commands.data_plane import pgbouncer as pooler
 from cli.commands.data_plane.tests.native_processes import running_pooler
 
@@ -35,7 +36,7 @@ def test_stop_does_not_signal_a_recycled_pid(
 ) -> None:
     pidfile = _write_pidfile(unit_home, os.getpid())
 
-    assert pooler.stop_pgbouncer() == "not-running"
+    assert pooler.stop_pgbouncer(home=meiva_home()) == "not-running"
 
     assert not pidfile.exists(), "the stale pidfile must be repaired, not re-read next time"
     assert f"pid {os.getpid()}, which is not this home's pooler" in capsys.readouterr().err
@@ -46,7 +47,7 @@ def test_a_pidfile_naming_a_process_that_is_gone_is_repaired_silently(
 ) -> None:
     pidfile = _write_pidfile(unit_home, 2**22 + 12345)
 
-    assert pooler.running_pid() is None
+    assert pooler.running_pid(home=meiva_home()) is None
 
     assert not pidfile.exists()
     assert capsys.readouterr().err == ""
@@ -61,10 +62,10 @@ def test_a_pidfile_naming_a_process_that_is_gone_is_repaired_silently(
 @pytest.mark.parametrize("relative_ini", [False, True])
 def test_stop_signals_this_homes_own_pooler(unit_home: Path, relative_ini: bool) -> None:
     with running_pooler(unit_home, relative_ini=relative_ini) as running:
-        assert pooler.pid_is_our_pooler(running.pid)
-        assert pooler.running_pid() == running.pid
+        assert pooler.pid_is_our_pooler(running.pid, home=meiva_home())
+        assert pooler.running_pid(home=meiva_home()) == running.pid
 
-        assert pooler.stop_pgbouncer() == "stopped"
+        assert pooler.stop_pgbouncer(home=meiva_home()) == "stopped"
 
         assert not running.identity.live()
 
@@ -82,8 +83,8 @@ def test_a_sibling_home_sharing_a_path_prefix_is_not_ours(
     with running_pooler(sibling, relative_ini=relative_ini) as theirs:
         pidfile = _write_pidfile(unit_home, theirs.pid)
 
-        assert not pooler.pid_is_our_pooler(theirs.pid)
-        assert pooler.stop_pgbouncer() == "not-running"
+        assert not pooler.pid_is_our_pooler(theirs.pid, home=meiva_home())
+        assert pooler.stop_pgbouncer(home=meiva_home()) == "not-running"
 
         assert not pidfile.exists()
         assert theirs.identity.live(), "the sibling's pooler was not signalled"

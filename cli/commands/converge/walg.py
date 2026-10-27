@@ -57,7 +57,7 @@ def execute_walg_plan(
             case RefuseWalg(message=message):
                 raise RuntimeError(message)
             case InstallWalgBinary():
-                ensure_walg_binary()
+                ensure_walg_binary(home=ctx.meiva_home)
             case LoadWalgConfig():
                 walg_config.load_walg_config(path=walg_config_file)
             case PrepareWalgStateDir():

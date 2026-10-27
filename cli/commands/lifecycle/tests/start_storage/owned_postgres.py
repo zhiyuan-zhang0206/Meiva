@@ -19,6 +19,7 @@ from base.cluster.checkpoint_schema import CheckpointSchema, PostgresCheckpointS
 from base.cluster.dataplane.pg_admin import pg_admin_url
 from base.cluster.dataplane.pg_tools import pg_tool
 from base.host.env import port_lease
+from base.paths import meiva_home
 from cli.commands.data_plane import cluster_instance as ci
 from cli.commands.data_plane.config import DataPlaneConfig
 from cli.commands.lifecycle.start.migrations import cmd_migrations_apply
@@ -69,7 +70,14 @@ def owned_pg(
         yield pg_port
     finally:
         subprocess.run(
-            [str(pg_tool("pg_ctl")), "-D", str(unit_home / "pg"), "-m", "immediate", "stop"],
+            [
+                str(pg_tool("pg_ctl", home=meiva_home())),
+                "-D",
+                str(unit_home / "pg"),
+                "-m",
+                "immediate",
+                "stop",
+            ],
             check=False,
             capture_output=True,
         )
@@ -105,7 +113,7 @@ class Plane:
         )
 
     def admin_on(self, database: str) -> str:
-        return make_conninfo(pg_admin_url(self.port), dbname=database)
+        return make_conninfo(pg_admin_url(self.port, home=meiva_home()), dbname=database)
 
     def migrate(
         self,

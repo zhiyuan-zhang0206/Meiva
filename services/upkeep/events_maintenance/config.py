@@ -50,12 +50,12 @@ class EventsMaintenanceConfig:
 
 
 def events_maintenance_db(
-    config: ConfigBoot, *, gate: ProcessDbGate, local_host: Callable[[], str]
+    config: ConfigBoot, *, gate: ProcessDbGate, local_host: Callable[[], str], home: Path
 ) -> Database:
     """The handle on the cluster database, built where the daemon (or one of its operator
     commands) starts."""
     return Database(
         db_config_from_boot(config),
         gate=gate,
-        direct_url=ClusterDirectUrl(local_host),
+        direct_url=ClusterDirectUrl(local_host, home=home),
     )

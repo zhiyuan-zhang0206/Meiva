@@ -20,7 +20,5 @@ exports = ["authority", "checkpoint_schema.py", "dataplane", "derive.py", "front
 "transport_encryption.py" = "strict"
 
 [debt.ambient-read]
-"derive.py#home base.paths.meiva_home" = 1
-"ownership.py#home base.paths.meiva_home" = 1
 "postgres.py#pid os.getuid" = 1
 "postgres.py#platform base.native_process.os_platform.Platform.current" = 3

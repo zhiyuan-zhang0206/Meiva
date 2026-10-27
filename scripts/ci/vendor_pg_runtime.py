@@ -17,12 +17,14 @@ import sys
 from pathlib import Path
 
 from base.cluster.dataplane import runtime_binaries as rb
+from base.paths import meiva_home
 
 
 def main(github_env: Path) -> int:
-    rb.ensure_pg_binaries()
-    rb.ensure_pgvector()
-    root = rb.runtime_root()
+    home = meiva_home()
+    rb.ensure_pg_binaries(home=home)
+    rb.ensure_pgvector(home=home)
+    root = rb.runtime_root(home)
     with github_env.open("a", encoding="utf-8") as env_file:
         env_file.write(f"CI_VENDORED_RUNTIME_ROOT={root}\n")
     print(f"vendored Postgres runtime ready at {root}")

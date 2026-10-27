@@ -26,7 +26,7 @@ def main(home: Path, checkout: Path) -> None:
     assert not process.init_done, "the refusal starts before any process logger initialization"
     command = CommandRuntime.create(home)
     database = operator_database_factory(
-        local_host=command.machine.host, open_database=open_operator_database
+        local_host=command.machine.host, home=command.home, open_database=open_operator_database
     )
     producer = operator_event_pipeline(database, machine=command.machine, home=home)
     args = build_parser().parse_args(["start", "--all-services"])

@@ -44,6 +44,7 @@ from base.cluster.dataplane.pg_tools import pg_tool
 from base.deploy.schema.migration_layout import MIGRATIONS_DIR
 from base.deploy.schema.migrations import apply_pending_migrations, required_migration_set
 from base.host.db_authority.model import GATEWAY_GROUP, RUNNER_GROUP, Groups
+from base.paths import meiva_home
 from cli.commands.data_plane.bringup import prepare_memory_vectors
 from cli.commands.data_plane.tests.data_plane_records import data_plane_config as data_plane_config
 from cli.commands.lifecycle.tests.start_storage.owned_postgres import Plane, write_record
@@ -179,7 +180,7 @@ def _prepared_state(conninfo: str) -> tuple[set[str], bool]:
 # schema baseline, checkpoint setup, migrations and the indexer's memory
 # table ran over the owner's own login (a LOGIN owner with a password).
 def _provision_by_owner_login(plane: Plane, identity: str) -> None:
-    admin = pg_admin_url(plane.port)
+    admin = pg_admin_url(plane.port, home=meiva_home())
     with psycopg.connect(admin, autocommit=True) as conn:
         conn.execute(
             sql.SQL("CREATE ROLE {} LOGIN NOSUPERUSER PASSWORD {}").format(
@@ -221,14 +222,14 @@ def _grant_groups(plane: Plane, identity: str) -> None:
 # meiva:note
 # Today's start order through the admin authority; returns database creation.
 def _provision_by_authority(plane: Plane, identity: str) -> bool:
-    admin = pg_admin_url(plane.port)
+    admin = pg_admin_url(plane.port, home=meiva_home())
     created = provision_database(identity, base_admin_url=admin, expected_data_dir=plane.data_dir)
     _prepare_by_authority(plane, identity, database_created=created)
     return created
 
 
 def _prepare_by_authority(plane: Plane, identity: str, *, database_created: bool) -> None:
-    admin = pg_admin_url(plane.port)
+    admin = pg_admin_url(plane.port, home=meiva_home())
     ensure_pgvector_extension(identity, base_admin_url=admin, expected_data_dir=plane.data_dir)
 
     ensure_checkpoint_schema(
@@ -240,7 +241,9 @@ def _prepare_by_authority(plane: Plane, identity: str, *, database_created: bool
     )
     plane.migrate(identity)
     ensure_pgvector_extension(identity, base_admin_url=admin, expected_data_dir=plane.data_dir)
-    prepare_memory_vectors(plane.config_for(identity), database_factory=plane.database)
+    prepare_memory_vectors(
+        plane.config_for(identity), database_factory=plane.database, home=meiva_home()
+    )
     _grant_groups(plane, identity)
 
 
@@ -271,7 +274,7 @@ def test_authority_matches_owner_login_privileges_and_is_idempotent(plane: Plane
 # The owner is born NOLOGIN; it still migrates, provisions and dumps.
 def test_owner_without_login_keeps_every_admin_path(plane: Plane, tmp_path: Path) -> None:
     identity = "meiva_nolg"
-    admin = pg_admin_url(plane.port)
+    admin = pg_admin_url(plane.port, home=meiva_home())
     created = provision_database(identity, base_admin_url=admin, expected_data_dir=plane.data_dir)
     with psycopg.connect(admin, autocommit=True) as conn:
         assert conn.execute(
@@ -285,7 +288,7 @@ def test_owner_without_login_keeps_every_admin_path(plane: Plane, tmp_path: Path
 
     _prepare_by_authority(plane, identity, database_created=created)
 
-    authority = local_owner_authority(plane.url(identity), remote_plane=False)
+    authority = local_owner_authority(plane.url(identity), remote_plane=False, home=meiva_home())
     assert authority == OwnerAuthority(
         admin_url=admin, database=identity, owner=identity, data_dir=plane.data_dir
     )
@@ -303,7 +306,7 @@ def test_owner_without_login_keeps_every_admin_path(plane: Plane, tmp_path: Path
     environment = {key: value for key, value in os.environ.items() if not key.startswith("PG")}
     subprocess.run(
         [
-            str(pg_tool("pg_dump")),
+            str(pg_tool("pg_dump", home=meiva_home())),
             "--format=custom",
             "--file",
             str(dump),
@@ -323,7 +326,7 @@ def test_owner_without_login_keeps_every_admin_path(plane: Plane, tmp_path: Path
         )
     subprocess.run(
         [
-            str(pg_tool("pg_restore")),
+            str(pg_tool("pg_restore", home=meiva_home())),
             "--clean",
             "--if-exists",
             "--exit-on-error",
@@ -349,10 +352,12 @@ def test_owner_without_login_keeps_every_admin_path(plane: Plane, tmp_path: Path
 def test_an_authority_bound_to_another_postgres_refuses_before_any_ddl(plane: Plane) -> None:
     identity = "meiva_cust"
     created = provision_database(
-        identity, base_admin_url=pg_admin_url(plane.port), expected_data_dir=plane.data_dir
+        identity,
+        base_admin_url=pg_admin_url(plane.port, home=meiva_home()),
+        expected_data_dir=plane.data_dir,
     )
     assert created is True
-    authority = local_owner_authority(plane.url(identity), remote_plane=False)
+    authority = local_owner_authority(plane.url(identity), remote_plane=False, home=meiva_home())
     foreign = dataclasses.replace(authority, data_dir=plane.home / "another-pg")
 
     with authority.session() as conn:
@@ -386,7 +391,9 @@ def test_local_owner_authority_reads_record_and_url_as_data(unit_home: Path) -> 
     # A delivered generation login replaces the URL's username; the owner is the
     # database's same-named identity.
     authority = local_owner_authority(
-        "postgresql://meiva_g2_gateway:pw@127.0.0.1:6999/meiva_db", remote_plane=False
+        "postgresql://meiva_g2_gateway:pw@127.0.0.1:6999/meiva_db",
+        remote_plane=False,
+        home=meiva_home(),
     )
 
     assert (authority.database, authority.owner) == ("meiva_db", "meiva_db")
@@ -397,4 +404,6 @@ def test_local_owner_authority_reads_record_and_url_as_data(unit_home: Path) -> 
 
 def test_remote_plane_has_no_local_owner_authority() -> None:
     with pytest.raises(RuntimeError, match="remote-managed"):
-        local_owner_authority("postgresql://owner@db.example/meiva", remote_plane=True)
+        local_owner_authority(
+            "postgresql://owner@db.example/meiva", remote_plane=True, home=meiva_home()
+        )

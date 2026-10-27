@@ -18,6 +18,7 @@ from base.cluster import ownership
 from base.cluster.dataplane.pg_tools import pg_tool
 from base.cluster.machine import MachineIdentityReader
 from base.cluster.machine.configured import ConfiguredMachineIdentity
+from base.paths import meiva_home
 from cli.commands.data_plane import cluster_instance as instance
 from cli.commands.data_plane.cluster_instance import StartTuning
 from cli.commands.data_plane.tests.native_cluster import NativeCluster
@@ -161,12 +162,19 @@ def test_a_passwordless_dial_over_tcp_is_asked_for_a_password(
 def test_pg_isready_answers_for_the_running_server_and_not_after_it_stops(
     native_cluster: NativeCluster, command_machine: MachineIdentityReader
 ) -> None:
-    isready = str(pg_tool("pg_isready"))
+    isready = str(pg_tool("pg_isready", home=meiva_home()))
     assert not instance.pg_running(isready, native_cluster.pg_port, "127.0.0.1")
     assert _start(native_cluster, command_machine) == 0
     assert instance.pg_running(isready, native_cluster.pg_port, "127.0.0.1")
     subprocess.run(
-        [str(pg_tool("pg_ctl")), "-D", str(native_cluster.pg_data), "-m", "immediate", "stop"],
+        [
+            str(pg_tool("pg_ctl", home=meiva_home())),
+            "-D",
+            str(native_cluster.pg_data),
+            "-m",
+            "immediate",
+            "stop",
+        ],
         check=True,
         capture_output=True,
     )

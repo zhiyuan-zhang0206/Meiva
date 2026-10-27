@@ -17,7 +17,6 @@ from base.cluster.listener_plan import public_listener_bound
 from base.cluster.machine import MachineIdentityReader
 from base.host.brew_pin import brew_prefix
 from base.host.db_authority.delivery import POOLER_ADMIN
-from base.paths import meiva_home
 
 
 def pgbouncer_bin() -> str:
@@ -35,18 +34,17 @@ def pgbouncer_bin() -> str:
     return "pgbouncer"  # last resort — subprocess will surface a clear error
 
 
-def pooler_dir(home: Path | None = None) -> Path:
-    root = home if home is not None else meiva_home()
-    d = root / "pgbouncer"
+def pooler_dir(home: Path) -> Path:
+    d = home / "pgbouncer"
     d.mkdir(parents=True, exist_ok=True)
     return d
 
 
-def ini_path(home: Path | None = None) -> Path:
+def ini_path(home: Path) -> Path:
     return pooler_dir(home) / "pgbouncer.ini"
 
 
-def pidfile_path(home: Path | None = None) -> Path:
+def pidfile_path(home: Path) -> Path:
     return pooler_dir(home) / "pgbouncer.pid"
 
 

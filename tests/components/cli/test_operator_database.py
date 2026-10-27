@@ -25,6 +25,7 @@ from tests.path_scoped.cli_tests import operator_pipeline as operator_pipeline
 def _factory(command: CommandRuntime, open_database: Callable[..., Any]) -> OperatorDatabaseFactory:
     return operator_database_factory(
         local_host=command.machine.host,
+        home=command.home,
         open_database=open_database,
     )
 
@@ -68,13 +69,16 @@ def test_operator_factory_binds_the_host_reader_without_reading_it() -> None:
         resolvers.append(direct_url)
         return open_operator_database(config, gate, direct_url)
 
-    factory = operator_database_factory(local_host=local_host, open_database=open_database)
+    factory = operator_database_factory(
+        local_host=local_host, home=Path("/operator/home"), open_database=open_database
+    )
     assert reads == []
     factory()
     factory.for_url("postgresql://meiva:pw@db.example:6433/meiva")
     assert reads == []
     assert len(resolvers) == 2
     assert all(resolver.local_host is local_host for resolver in resolvers)
+    assert all(resolver.home == Path("/operator/home") for resolver in resolvers)
     assert resolvers[0].local_host() == "owned-host"
     assert reads == ["host"]
 

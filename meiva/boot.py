@@ -142,6 +142,7 @@ def database_factory(*, config: ConfigBoot, machine: MachineIdentityReader) -> D
         from base.db import Database
         from base.db.code_version_gate import ProcessDbGate
         from base.db.config import db_config_from_boot
+        from base.paths.home import resolve_meiva_home
 
         if not config.view.data_plane.db_url:
             raise RuntimeError(
@@ -153,7 +154,7 @@ def database_factory(*, config: ConfigBoot, machine: MachineIdentityReader) -> D
         return Database(
             db_config_from_boot(config),
             gate=gate,
-            direct_url=ClusterDirectUrl(machine.host),
+            direct_url=ClusterDirectUrl(machine.host, home=resolve_meiva_home()),
         )
 
     return database

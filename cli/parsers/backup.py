@@ -7,7 +7,9 @@ def _h_backup_walg_check(args: argparse.Namespace) -> int:
     from cli.commands.data_plane.walg import cmd_walg_check, walg_plane
 
     return cmd_walg_check(
-        walg_plane(args.runtime.config), token=f"{args.runtime.rng.getrandbits(128):032x}"
+        walg_plane(args.runtime.config),
+        token=f"{args.runtime.rng.getrandbits(128):032x}",
+        home=args.runtime.home,
     )
 
 
@@ -17,9 +19,10 @@ def _h_backup_walg_run(args: argparse.Namespace) -> int:
     config = args.runtime.config
     return cmd_walg_run(
         walg_plane(config),
-        throwaway=walg_throwaway(config),
+        throwaway=walg_throwaway(config, home=args.runtime.home),
         database_for_url=args.database_factory.for_url,
         clock=args.runtime.clock,
+        home=args.runtime.home,
     )
 
 
@@ -29,9 +32,10 @@ def _h_backup_walg_drill(args: argparse.Namespace) -> int:
     config = args.runtime.config
     return cmd_walg_drill(
         walg_plane(config),
-        throwaway=walg_throwaway(config),
+        throwaway=walg_throwaway(config, home=args.runtime.home),
         database_for_url=args.database_factory.for_url,
         clock=args.runtime.clock,
+        home=args.runtime.home,
     )
 
 
@@ -46,13 +50,14 @@ def _h_backup_walg_restore(args: argparse.Namespace) -> int:
         lsn=args.lsn,
         user=args.user,
         clock=args.runtime.clock,
+        home=args.runtime.home,
     )
 
 
 def _h_backup_walg_status(args: argparse.Namespace) -> int:
     from cli.commands.data_plane.walg import cmd_walg_status, walg_plane
 
-    return cmd_walg_status(walg_plane(args.runtime.config))
+    return cmd_walg_status(walg_plane(args.runtime.config), home=args.runtime.home)
 
 
 def add_backup_parser(sub: argparse._SubParsersAction[argparse.ArgumentParser]) -> None:

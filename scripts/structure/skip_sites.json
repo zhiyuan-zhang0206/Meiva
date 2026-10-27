@@ -79,10 +79,10 @@
     "skip('Root can read mode-000 directories')"
   ],
   "services/backup/tests/test_backup.py": [
-    "skipif(not backup.has_pg_tool('pg_dump'))"
+    "skipif(not backup.has_pg_tool('pg_dump', home=meiva_home()))"
   ],
   "services/backup/tests/test_restore_drill.py": [
-    "skipif(not restore_drill.has_pg_tool('pg_dump'))"
+    "skipif(not restore_drill.has_pg_tool('pg_dump', home=meiva_home()))"
   ],
   "services/desktop/permissions_helper/tests/permissions_helper/test_grant_prompt_once.py": [
     "skip('swiftc is unavailable')"

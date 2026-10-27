@@ -15,6 +15,8 @@
 # helpers validate the existing client credential policy independently of identity.
 # meiva:link base/cluster/machine/docs/machine.meiva.okf.md
 
+from pathlib import Path
+
 from base.cluster.machine.gateway_access import (
     GatewayAccess,
     GatewayApiBaseMissing,
@@ -75,12 +77,12 @@ __all__ = [
 # is the exception to "outside the gateway, the CLI and the root, no component holds the
 # cluster secret" (docs/decisions/data/security/2026-10-03-cluster-secret-contraction.md); the live
 # deployment's data plane is local, and this branch only runs when `is_remote`.
-def daemon_acceptance(access: GatewayAccess) -> frozenset[str]:
+def daemon_acceptance(access: GatewayAccess, *, home: Path) -> frozenset[str]:
     from base.host.db_authority.api import acceptance, token_digest
     from base.host.db_authority.unit import load_unit_capability
-    from base.paths import meiva_home
 
-    home = meiva_home().resolve()
+    if not home.is_absolute():
+        raise ValueError(f"the daemon acceptance needs an absolute home, got {str(home)!r}")
     capability = load_unit_capability(home)
     if capability is not None:
         api = capability.api

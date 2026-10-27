@@ -37,9 +37,10 @@ def assert_configured_archive(
     machine: str,
     path: Path | None,
     admin: AbstractContextManager[psycopg.Connection[Any]],
+    home: Path,
 ) -> str | None:
     try:
-        expected = expected_for(path)
+        expected = expected_for(path, home=home)
         if expected is None:
             return None
         with admin as conn:

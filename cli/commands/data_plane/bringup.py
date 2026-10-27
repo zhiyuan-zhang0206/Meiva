@@ -11,10 +11,7 @@
 # This module is the shell of `instance/storage_plan.py` (what the entry and the completion do and
 # in which order), `instance/status_lines.py` and `instance/stop_plan.py` (what status and stop
 # print and do) and `instance/launch_delivery.py` (what a launch is delivered). Every function
-# takes the home it works in, except for the pooler: `stop_cluster_instance` stops it through
-# `pgbouncer.stop_pgbouncer`, which finds the pooler's ini and pidfile under the process's
-# `meiva_home()` because `base/cluster/dataplane/pooler.py` derives them from it. That path follows
-# `home` when base's `pooler.*` functions take it.
+# takes the home it works in, the pooler's `stop_pgbouncer` included.
 
 from __future__ import annotations
 
@@ -136,7 +133,7 @@ def ensure_gateway_data_plane(
                 home=home,
                 pg_port=ports.postgres,
                 redis_port=ports.redis,
-                redis_password=cluster.redis_password_from_env(),
+                redis_password=cluster.redis_password_from_env(home),
                 redis_user=cluster.redis_identity(config.redis_url),
                 retained_children=retained_children,
                 machine=machine,
@@ -240,7 +237,7 @@ def warn_orphaned_local_instance(home: Path) -> None:
             return
         warning = stop_plan.orphan_warning(
             postgres_running=instance.pg_running(
-                str(pg_tool("pg_isready")), rec.ports["postgres"], "127.0.0.1"
+                str(pg_tool("pg_isready", home=home)), rec.ports["postgres"], "127.0.0.1"
             ),
             # meiva:note
             # A plain listener check: the left-behind Redis always requires its admin password,
@@ -263,7 +260,7 @@ def prepare_gateway_schema(config: DataPlaneConfig, *, home: Path) -> None:
     rec = cluster.get_record(home)
     if rec is None:
         raise RuntimeError("initialization lost its port reservation")
-    admin_url = pg_admin.pg_admin_url(rec.ports["postgres"])
+    admin_url = pg_admin.pg_admin_url(rec.ports["postgres"], home=home)
     identity = cluster.db_identity(config.db_url)
     data = instance.pg_data_dir(home)
     created = cluster.provision_database(
@@ -290,7 +287,9 @@ def prepare_gateway_schema(config: DataPlaneConfig, *, home: Path) -> None:
 # only validate it; this start step is its one writer. A local plane writes it acting as the
 # schema owner, before the runner grants refresh; a remote-managed plane uses its provider URL,
 # like its migrations.
-def prepare_memory_vectors(config: DataPlaneConfig, *, database_factory: DatabaseFactory) -> None:
+def prepare_memory_vectors(
+    config: DataPlaneConfig, *, home: Path, database_factory: DatabaseFactory
+) -> None:
     if config.memory_search_backend != "pgvector":
         return
     from services.derived.memory_indexer.backends.pgvector import prepare_table
@@ -301,7 +300,7 @@ def prepare_memory_vectors(config: DataPlaneConfig, *, database_factory: Databas
         with database_factory().connect(direct=True) as conn:
             prepare_table(conn, dim)
         return
-    owner = pg_admin.local_owner_authority(config.db_url, remote_plane=config.is_remote)
+    owner = pg_admin.local_owner_authority(config.db_url, remote_plane=config.is_remote, home=home)
     with owner.session() as conn:
         prepare_table(conn, dim)
 
@@ -426,7 +425,7 @@ def print_data_plane_status(
     pg_host, redis_host = url_host(config.db_url), url_host(config.redis_url)
     pg_port = urlsplit(config.db_url).port or 5432
     redis_port = urlsplit(config.redis_url).port or 6379
-    running = instance.pg_running(str(pg_tool("pg_isready")), pg_port, pg_host)
+    running = instance.pg_running(str(pg_tool("pg_isready", home=home)), pg_port, pg_host)
     connect_error: str | None = None
     if running:
         try:
@@ -493,7 +492,7 @@ def stop_cluster_instance(
                 # meiva:note
                 # Stop the pooler first (best-effort, no-op if it was never enabled) so clients
                 # are disconnected before Postgres goes down.
-                pgbouncer.stop_pgbouncer()
+                pgbouncer.stop_pgbouncer(home=home)
             case stop_plan.StopPostgres():
                 escalation = owned_postgres.stop(
                     instance.pg_data_dir(home),

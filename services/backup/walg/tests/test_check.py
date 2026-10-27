@@ -7,6 +7,7 @@ from typing import Any
 import psycopg
 import pytest
 
+from base.paths import meiva_home
 from services.backup.walg import check, probe
 from services.backup.walg import config as walg_config
 from services.backup.walg.pg_target import PgTarget
@@ -38,6 +39,7 @@ def _run_check(
         token=token,
         binary_problem=binary_problem,
         admin=probe.admin_connection_to(_REFUSED) if admin is None else admin,
+        home=meiva_home(),
     )
 
 

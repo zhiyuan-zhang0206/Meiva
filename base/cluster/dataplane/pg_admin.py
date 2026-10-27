@@ -43,20 +43,13 @@ from base.paths.private_dir import ensure_private_dir
 _PLAIN_ROLE = re.compile(r"[A-Za-z_][A-Za-z0-9_]*")
 
 
-def pg_socket_dir(socket_root: Path | None = None, *, home: Path | None = None) -> Path:
-    """A SHORT, cluster-unique socket directory. The Postgres socket path
-    (`<dir>/.s.PGSQL.<port>`) is capped at 103 bytes, so it cannot live under a
-    deep `$MEIVA_HOME` / pytest-tmp data dir — a short `/tmp/meiva-pg-<home-slug>`
-    (keyed on the cluster home path, never a name) stays well under the cap. The
-    socket serves only the OS user's peer logins — local provisioning and the
-    collector's monitoring role (the runtime connects over TCP); 0700 keeps it
-    owner-only. `home` defaults to `meiva_home()` resolved in THIS module;
-    the cli thin shell passes its own resolution so cli-layer steering (tests
-    patch `cli.commands.data_plane.cluster_instance.meiva_home`) keeps flowing."""
-    if home is None:
-        from base.paths import meiva_home
-
-        home = meiva_home()
+# meiva:note
+# A SHORT, cluster-unique socket directory. The Postgres socket path (`<dir>/.s.PGSQL.<port>`) is
+# capped at 103 bytes, so it cannot live under a deep home / pytest-tmp data dir: a short
+# `/tmp/meiva-pg-<home-slug>` (keyed on the cluster home path, never a name) stays well under the
+# cap. The socket serves only the OS user's peer logins (local provisioning and the collector's
+# monitoring role; the runtime connects over TCP); 0700 keeps it owner-only.
+def pg_socket_dir(socket_root: Path | None = None, *, home: Path) -> Path:
     return ensure_private_dir(pg_socket_path(home, socket_root))
 
 
@@ -67,9 +60,11 @@ def pg_socket_path(home: Path, socket_root: Path | None = None) -> Path:
     return root / f"meiva-pg-{home_slug(home)}"
 
 
-def pg_admin_url(pg_port: int) -> str:
+def pg_admin_url(pg_port: int, *, home: Path) -> str:
     """Dial only this home's canonical owner-only Unix socket directory."""
-    return f"postgresql://{getpass.getuser()}@/postgres?host={pg_socket_dir()}&port={pg_port}"
+    return (
+        f"postgresql://{getpass.getuser()}@/postgres?host={pg_socket_dir(home=home)}&port={pg_port}"
+    )
 
 
 @contextmanager
@@ -203,7 +198,7 @@ class OwnerAuthority:
             yield conn
 
 
-def local_owner_authority(db_url: str, *, remote_plane: bool) -> OwnerAuthority:
+def local_owner_authority(db_url: str, *, remote_plane: bool, home: Path) -> OwnerAuthority:
     """Resolve this home's owner authority for its locally owned Postgres.
 
     The socket port comes from this home's registry record; the owner and
@@ -213,11 +208,8 @@ def local_owner_authority(db_url: str, *, remote_plane: bool) -> OwnerAuthority:
         RuntimeError: the data plane is remote-managed (`remote_plane`; its provider URL is
             the only authority), or this home has no registry record.
     """
-    from base.paths import meiva_home
-
     if remote_plane:
         raise RuntimeError("a remote-managed data plane has no local owner authority")
-    home = meiva_home()
     record = get_record(home)
     if record is None:
         raise RuntimeError(f"no registry record for home {home}; cannot dial its Postgres")
@@ -225,7 +217,7 @@ def local_owner_authority(db_url: str, *, remote_plane: bool) -> OwnerAuthority:
     if not isinstance(database, str) or not database:
         raise RuntimeError("MEIVA_DB_URL names no database")
     return OwnerAuthority(
-        admin_url=pg_admin_url(record.ports["postgres"]),
+        admin_url=pg_admin_url(record.ports["postgres"], home=home),
         database=database,
         owner=db_identity(db_url),
         data_dir=home / "pg",

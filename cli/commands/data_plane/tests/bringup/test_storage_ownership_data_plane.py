@@ -92,7 +92,7 @@ def test_real_owned_postgres_resume_and_fast_stop(
     home, port = native_cluster.home, native_cluster.pg_port
     assert _start(native_cluster, command_machine) == 0
     first, persisted = _assert_pg_birth(native_cluster)
-    with psycopg.connect(pg_admin_url(port), autocommit=True) as conn:
+    with psycopg.connect(pg_admin_url(port, home=home), autocommit=True) as conn:
         ownership.require_postgres_connection(
             conn, native_cluster.pg_data, instance.pg_socket_dir(home)
         )
@@ -124,7 +124,7 @@ def test_real_owned_postgres_resume_and_fast_stop(
 
     second, _receipt = _assert_pg_birth(native_cluster)
     assert not first.same_birth(second)
-    with psycopg.connect(pg_admin_url(port), autocommit=True) as conn:
+    with psycopg.connect(pg_admin_url(port, home=home), autocommit=True) as conn:
         ownership.require_postgres_connection(
             conn, native_cluster.pg_data, instance.pg_socket_dir(home)
         )
