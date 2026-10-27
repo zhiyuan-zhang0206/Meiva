@@ -9,6 +9,7 @@ from base.agents.recovery.breaker import (
     PERMANENT_REJECT_REASON_BILLING,
     RECOVERY_BREAKER_CLEAR,
     SUPPRESS_REASON_PERMANENT_REJECT,
+    clear_permanent_reject_halt,
     halt_automatic_recovery,
     record_permanent_reject_turn,
 )
@@ -108,3 +109,62 @@ def test_billing_reason_literal_matches_the_circuit_reason() -> None:
     from agent.state_channels import CIRCUIT_REASON_BILLING
 
     assert CIRCUIT_REASON_BILLING == PERMANENT_REJECT_REASON_BILLING
+
+
+# meiva:note
+# Clearing the halt takes its own window with it, and only its own (#5667). A cleared streak
+# beside a 3650-day window reads healthy to the breaker and suppressed to every window reader;
+# a stranded-wake cooldown on the same column belongs to another writer and must survive.
+async def test_clearing_the_halt_takes_the_breaker_window_and_leaves_the_cooldown(
+    redis_url: str,
+    db_conn: psycopg.Connection,
+    aops_pool: AsyncConnectionPool,
+    *,
+    model_catalog: ModelCatalog,
+    config_authority: ConfigAuthority,
+    database_gate: ProcessDbGate,
+    machine_identity: MachineIdentityReader,
+) -> None:
+    from base.db.transaction import async_write_transaction
+
+    halted = spawn_agent(
+        spawner="user",
+        catalog=model_catalog,
+        authority=config_authority,
+        database_gate=database_gate,
+        machine=machine_identity,
+    )
+    assert (
+        await record_permanent_reject_turn(aops_pool, halted, PERMANENT_REJECT_REASON_BILLING) == 1
+    )
+    assert await halt_automatic_recovery(aops_pool, halted) is True
+
+    cooling = spawn_agent(
+        spawner="user",
+        catalog=model_catalog,
+        authority=config_authority,
+        database_gate=database_gate,
+        machine=machine_identity,
+    )
+    db_conn.execute(
+        "UPDATE agents_meta SET permanent_reject_streak = 1, "
+        "wake_suppressed_until = now() + interval '5 minutes', "
+        "wake_suppress_reason = 'stranded_wake' WHERE id = %s",
+        (cooling,),
+    )
+    db_conn.commit()
+
+    async with async_write_transaction(aops_pool) as conn, conn.cursor() as cur:
+        await clear_permanent_reject_halt(cur, halted)
+        await clear_permanent_reject_halt(cur, cooling)
+
+    assert db_conn.execute(
+        "SELECT permanent_reject_streak, last_permanent_reject_reason, "
+        "wake_suppressed_until, wake_suppress_reason FROM agents_meta WHERE id = %s",
+        (halted,),
+    ).fetchone() == (0, None, None, None)
+    assert db_conn.execute(
+        "SELECT permanent_reject_streak, wake_suppressed_until > now(), wake_suppress_reason "
+        "FROM agents_meta WHERE id = %s",
+        (cooling,),
+    ).fetchone() == (0, True, "stranded_wake")

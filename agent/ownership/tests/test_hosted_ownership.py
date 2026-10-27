@@ -7,7 +7,9 @@ from psycopg_pool import AsyncConnectionPool
 
 from agent.ownership.corpse_reap import reap_crash_corpses
 from agent.ownership.hosted import (
+    AdmissionRefusal,
     admit_hosted_runtime,
+    explain_admission_refusal,
     settle_hosted_runtime,
     settle_running_rows_at_start,
     stamp_turn_fatal,
@@ -431,3 +433,59 @@ async def test_replacement_admission_submits_the_interrupted_lease_notice_once(
     payload = turns[0]["params"]
     assert payload["threadId"] == thread_id
     assert str(lease_id) in payload["input"][0]["text"]
+
+
+# meiva:note
+# The four answers `explain_admission_refusal` can give, from four row shapes. Before
+# #5666 one log line named two of them, and the day's real refusal — a tripped breaker —
+# read as "terminated or placed elsewhere".
+async def test_admission_refusal_classifies_the_row_it_reads(
+    db_conn: psycopg.Connection,
+    aops_pool: AsyncConnectionPool,
+) -> None:
+    terminated = _agent(db_conn)
+    db_conn.execute("UPDATE agents_meta SET status = 'terminated' WHERE id = %s", (terminated,))
+    elsewhere = _agent(db_conn)
+    db_conn.execute("UPDATE agents_meta SET machine = 'another-host' WHERE id = %s", (elsewhere,))
+    halted = _agent(db_conn)
+    db_conn.execute(
+        "UPDATE agents_meta SET permanent_reject_streak = 1, "
+        "wake_suppress_reason = 'permanent_provider_reject', "
+        "wake_suppressed_until = now() + interval '10 years' WHERE id = %s",
+        (halted,),
+    )
+    healthy = _agent(db_conn)
+    db_conn.commit()
+
+    assert (
+        await explain_admission_refusal(aops_pool, terminated, "host-test")
+    ).reason is AdmissionRefusal.TERMINATED
+    assert (
+        await explain_admission_refusal(aops_pool, elsewhere, "host-test")
+    ).reason is AdmissionRefusal.PLACED_ELSEWHERE
+    refused = await explain_admission_refusal(aops_pool, halted, "host-test")
+    assert refused.reason is AdmissionRefusal.BREAKER
+    assert refused.streak == 1
+    assert refused.suppress_reason == "permanent_provider_reject"
+    assert refused.suppressed_until is not None
+    # meiva:note
+    # The control: an idling row on this host with a clear breaker matches none of the three,
+    # so a race reads as a race instead of borrowing another reason's wording.
+    assert (
+        await explain_admission_refusal(aops_pool, healthy, "host-test")
+    ).reason is AdmissionRefusal.OTHER
+
+    assert (
+        "terminated"
+        in (await explain_admission_refusal(aops_pool, terminated, "host-test")).describe()
+    )
+    assert (
+        "hosted elsewhere"
+        in (await explain_admission_refusal(aops_pool, elsewhere, "host-test")).describe()
+    )
+    breaker_text = refused.describe()
+    assert "recovery breaker is tripped" in breaker_text
+    assert "permanent_reject_streak=1" in breaker_text
+    control_text = (await explain_admission_refusal(aops_pool, healthy, "host-test")).describe()
+    for other in ("terminated", "hosted elsewhere", "breaker"):
+        assert other not in control_text

@@ -78,10 +78,15 @@ class StrandedOwner:
 # wake fence (mandatory — an involuntary death is never woken for leftover work),
 # bounded by `age_bound_s` — the same clock the dead-letter sweep
 # retires the row on, so the fallback stops exactly where retirement takes over.
-# The gates it adds to the fence are its own policy: the recovery breaker and an
-# active suppression window (including its own cooldown) exclude an owner
-# entirely, because an until-human halt is not resumed by a timer, and a system
-# notice queued for a dead owner is read on a later life and never wakes one.
+# The gates it adds to the fence are its own policy: the recovery breaker and its
+# own cooldown exclude an owner, because an until-human halt is not resumed by a
+# timer and a second attempt inside the cooldown is the burst this loop exists to
+# avoid. The two are read separately — the breaker clause judges the halt, this
+# loop's cooldown window judges the backoff — because `wake_suppressed_until` is
+# one column with two writers (2026-10-27, #5667): a breaker window is "until
+# human" and is not this loop's business, so it never suppresses a stranded wake
+# whose own repair already ran. A system notice queued for a dead owner is read on
+# a later life and never wakes one.
 def select_stranded(pool: ConnectionPool, age_bound_s: float) -> list[StrandedOwner]:
     with pool.connection() as conn, conn.cursor() as cur:
         cur.execute(
@@ -96,7 +101,8 @@ def select_stranded(pool: ConnectionPool, age_bound_s: float) -> list[StrandedOw
                 "  AND m.created_at > now() - make_interval(secs => %s) "
                 "  AND NOT {notice} "
                 "  AND (agents_meta.wake_suppressed_until IS NULL "
-                "       OR agents_meta.wake_suppressed_until < now()) "
+                "       OR agents_meta.wake_suppressed_until < now() "
+                "       OR agents_meta.wake_suppress_reason = {breaker_reason}) "
                 "  AND {breaker} "
                 "ORDER BY m.agent_id, m.id"
             ).format(
@@ -104,6 +110,7 @@ def select_stranded(pool: ConnectionPool, age_bound_s: float) -> list[StrandedOw
                 fence=sql.SQL(TRIGGER_AFTER_KILL_COMMAND),
                 notice=sql.SQL(SYSTEM_NOTICE_SOURCE),
                 breaker=sql.SQL(RECOVERY_BREAKER_CLEAR),
+                breaker_reason=sql.Literal(SUPPRESS_REASON_PERMANENT_REJECT),
             ),
             (age_bound_s,),
         )

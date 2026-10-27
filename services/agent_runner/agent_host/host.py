@@ -36,6 +36,7 @@ from agent.impersonation import (
 from agent.impersonation_handoff import flush_checkpoint
 from agent.ownership.hosted import (
     admit_hosted_runtime,
+    explain_admission_refusal,
     settle_hosted_runtime,
 )
 from agent.startup import consume_claimed_inbounds
@@ -291,11 +292,13 @@ class AgentHost:
                 db=self._db,
             )
             if incarnation is None:
+                refused = await explain_admission_refusal(
+                    self._control_pool, agent_id, self._machine
+                )
                 logger.info(
-                    "hosted turn for agent {agent_id} not started — row left {status} "
-                    "(no admission granted: terminated or placed elsewhere); skipping",
+                    "hosted turn for agent {agent_id} not started — {why}; skipping",
                     agent_id=agent_id,
-                    status=stored.status,
+                    why=refused.describe(),
                 )
                 return
             outcome = TurnOutcome(exited=False, crashed=False)
