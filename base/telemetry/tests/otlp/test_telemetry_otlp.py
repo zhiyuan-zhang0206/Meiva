@@ -77,6 +77,7 @@ def otlp_backend(
         enabled=lambda: True,
         providers=(logger_provider, metric_provider),
         mirror_dir=tmp_path,
+        home=tmp_path,
     )
 
     telemetry.process_state["pipeline"]._exporter = backend
@@ -587,7 +588,9 @@ def test_export_batch_builds_backend_once(
 
 
 def test_flush_without_init_is_noop(tmp_path: Path) -> None:
-    backend = telemetry_otlp.OtlpBackend(export_allowed=lambda: True, mirror_dir=tmp_path)
+    backend = telemetry_otlp.OtlpBackend(
+        export_allowed=lambda: True, mirror_dir=tmp_path, home=tmp_path
+    )
     backend.flush()
     assert backend._thread is None
     assert backend._queue.empty()
@@ -608,6 +611,7 @@ def test_flag_off_disables_export(emitted_events: EmittedEvents, tmp_path: Path)
         enabled=lambda: False,
         providers=(logger_provider, metric_provider),
         mirror_dir=tmp_path,
+        home=tmp_path,
     )
 
     backend.export_batch([otlp_test_event()])
@@ -644,3 +648,44 @@ def bind_telemetry(
         yield
     finally:
         pipeline.stop(timeout=2)
+
+
+# meiva:note
+# The providers are built for the home and mirror directory the exporter was constructed with. Both
+# are directories under `tmp_path`, so neither equals the process's own home: an exporter that read
+# the environment, or dropped one of the two, fails here. The endpoint is a non-HTTP URL, which the
+# reachability probe accepts without dialing, so the real SDK providers are built and shut down. The
+# mirror shows up by behaviour: the SDK's queue-overflow warning is recorded under it.
+def test_the_providers_are_built_for_the_exporters_own_home_and_mirror(tmp_path: Path) -> None:
+    import logging
+    from types import SimpleNamespace
+
+    from base.telemetry.observability import cluster_label
+
+    home, mirror = tmp_path / "exporter-home", tmp_path / "exporter-mirror"
+    home.mkdir()
+    sdk_logger = logging.getLogger("opentelemetry.sdk._shared_internal")
+    old_filters = list(sdk_logger.filters)
+    backend = telemetry_otlp.OtlpBackend(
+        export_allowed=lambda: True,
+        endpoint="file:///collector",
+        mirror_dir=mirror,
+        home=home,
+    )
+    worker = SimpleNamespace(logs=None, metrics=None, metric_reader=None)
+
+    assert backend._initialize_worker(worker)  # pyright: ignore[reportArgumentType]
+    try:
+        assert cluster_label(home) != cluster_label()
+        assert worker.metrics._sdk_config.resource.attributes["cluster"] == cluster_label(home)
+        sdk_logger.warning("Queue full, dropping %s.", "logs")
+        day = datetime.now(UTC).strftime("%Y%m%d")
+        rows = [
+            json.loads(line)
+            for line in (mirror / f"events-{day}.jsonl").read_text(encoding="utf-8").splitlines()
+        ]
+        assert [row["event_name"] for row in rows] == ["event_log_drop"]
+    finally:
+        sdk_logger.filters[:] = old_filters
+        worker.logs.shutdown()
+        worker.metrics.shutdown()

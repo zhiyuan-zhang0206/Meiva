@@ -108,13 +108,13 @@ def test_each_backend_freezes_only_its_own_eligibility(tmp_path: Path) -> None:
         return decision
 
     first = telemetry_otlp.OtlpBackend(
-        export_allowed=read, enabled=lambda: True, mirror_dir=tmp_path
+        export_allowed=read, enabled=lambda: True, mirror_dir=tmp_path, home=tmp_path
     )
     assert first._enabled() is False
     decision = True
     assert first._enabled() is False
     second = telemetry_otlp.OtlpBackend(
-        export_allowed=read, enabled=lambda: True, mirror_dir=tmp_path
+        export_allowed=read, enabled=lambda: True, mirror_dir=tmp_path, home=tmp_path
     )
     assert second._enabled() is True
     assert calls == [False, True]
@@ -129,7 +129,7 @@ def test_backend_does_not_cache_identity_defects_as_disabled(
         raise error("bad identity")
 
     backend = telemetry_otlp.OtlpBackend(
-        export_allowed=invalid, enabled=lambda: True, mirror_dir=tmp_path
+        export_allowed=invalid, enabled=lambda: True, mirror_dir=tmp_path, home=tmp_path
     )
     with pytest.raises(error, match="bad identity"):
         backend.warmup()
@@ -143,7 +143,7 @@ def test_disabled_backend_does_not_read_identity(tmp_path: Path) -> None:
 
     assert (
         telemetry_otlp.OtlpBackend(
-            export_allowed=reject, enabled=lambda: False, mirror_dir=tmp_path
+            export_allowed=reject, enabled=lambda: False, mirror_dir=tmp_path, home=tmp_path
         )._enabled()
         is False
     )
@@ -165,7 +165,7 @@ def test_stop_marks_the_exporter_closing_before_the_drain(tmp_path: Path) -> Non
     seen: list[bool] = []
     pipeline = ExportingEventPipeline(
         writer=lambda _events, exporter: seen.append(exporter._closing),
-        exporter=default_exporter(export_allowed=lambda: True, mirror_dir=tmp_path),
+        exporter=default_exporter(export_allowed=lambda: True, mirror_dir=tmp_path, home=tmp_path),
     )
     pipeline.enqueue(
         Event(

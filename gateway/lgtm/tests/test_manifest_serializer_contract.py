@@ -30,6 +30,7 @@ def otlp_backend(tmp_path: Path) -> Any:
         enabled=lambda: True,
         providers=(logs, MeterProvider(metric_readers=[InMemoryMetricReader()])),
         mirror_dir=tmp_path,
+        home=tmp_path,
     )
     yield backend, exporter
     backend.shutdown()

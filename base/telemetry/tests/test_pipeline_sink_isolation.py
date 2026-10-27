@@ -38,6 +38,7 @@ def test_projection_failure_keeps_jsonl_and_otlp_and_never_emits_recursively(
         enabled=lambda: True,
         providers=(logs, metric_provider),
         mirror_dir=tmp_path,
+        home=tmp_path,
     )
     event = telemetry.Event(
         ts=datetime(2026, 9, 15, 23, 59, 59, tzinfo=UTC),
@@ -83,3 +84,20 @@ def test_a_relative_home_is_refused_before_any_sink_is_built() -> None:
         telemetry.build_pipeline(
             database=lambda: None, machine=machine_identity(), home=Path(".meiva")
         )
+
+
+# meiva:note
+# The pipeline's own exporter is built over the home the pipeline was given (and the log directory
+# under it), not the process's: the home here is a directory under `tmp_path`.
+def test_the_pipeline_builds_its_exporter_over_its_own_home(tmp_path: Path) -> None:
+    home = tmp_path / "pipeline-home"
+    home.mkdir()
+    pipeline = telemetry.build_pipeline(
+        database=lambda: None, machine=machine_identity(), home=home
+    )
+    try:
+        exporter = pipeline._exporter  # pyright: ignore[reportAttributeAccessIssue, reportUnknownMemberType]
+        assert exporter._home == home  # pyright: ignore[reportUnknownMemberType]
+        assert exporter._mirror_dir == logs_path(home)  # pyright: ignore[reportUnknownMemberType]
+    finally:
+        pipeline.stop(timeout=2)
