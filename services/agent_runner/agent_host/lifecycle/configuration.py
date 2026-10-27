@@ -50,6 +50,7 @@ def host_policy(
         max_concurrent_turns=daemon.host_max_concurrent_turns,
         provider_keys=keys,
         harness_environ=child_env("runner", config.process_environment()),
+        environ=config.process_environment(),
         rng=rng,
         pid=pid,
         user_home=user_home,

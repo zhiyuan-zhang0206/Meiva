@@ -12,7 +12,7 @@ import base64
 import contextlib
 import random
 import sys
-from collections.abc import Awaitable, Callable
+from collections.abc import Awaitable, Callable, Mapping
 from datetime import datetime
 from pathlib import Path
 from typing import Any
@@ -93,12 +93,18 @@ RELAY_WAIT = RelayWait()
 
 
 def process_host(
-    local_machine: str, *, home: Path, rng: random.Random, clock: Clock
+    local_machine: str,
+    *,
+    home: Path,
+    environ: Mapping[str, str],
+    rng: random.Random,
+    clock: Clock,
 ) -> TakeoverHost:
     return TakeoverHost(
         local_machine=local_machine,
         workspaces_root=workspaces_root(home=home),
         relay_program=(str(Path(sys.executable).with_name("meiva")),),
+        environ=environ,
         rng=rng,
         clock=clock,
     )
@@ -533,7 +539,7 @@ def _establish_spawned_relay(
     )
     child = RelayChild(
         session["id"],
-        spawn_relay(host.relay_program, binding, token=relay_token),
+        spawn_relay(host.relay_program, binding, token=relay_token, environ=host.environ),
         relay_token,
         host.clock.monotonic(),
         minted["relay_generation"],

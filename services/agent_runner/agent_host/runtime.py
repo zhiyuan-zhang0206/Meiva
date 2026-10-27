@@ -91,6 +91,10 @@ class HostPolicy:
     # The environment an external harness session starts from (`child_env("runner", ...)`).
     harness_environ: Mapping[str, str]
     # meiva:note
+    # The host process's own environment, which a spawned takeover relay's session environment is
+    # projected from. The daemon root hands in its configuration's launch environment.
+    environ: Mapping[str, str] = field(repr=False)
+    # meiva:note
     # The generator the host draws identities and credentials from: a runtime's startup notice
     # key and each relay credential. The daemon root builds it once (a CSPRNG).
     rng: SecureRandom

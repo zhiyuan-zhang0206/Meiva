@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import random
 from collections.abc import Collection, Mapping
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from enum import Enum
 from pathlib import Path
 
@@ -26,7 +26,8 @@ class RelayWait:
 # meiva:note
 # The facts a native host reads once and hands to the takeover shells: its own machine
 # name, the root of the per-agent workspaces, the command prefix that starts a bound
-# relay (the `meiva` entry point; `impersonate relay ...` follows it) and the relay
+# relay (the `meiva` entry point; `impersonate relay ...` follows it), the process environment a
+# spawned relay's session environment is projected from and the relay
 # readiness tuning, the generator relay credentials are drawn from (a cryptographically secure
 # one in production: the credential authenticates the relay to the lease) and the clock its waits
 # read and sleep on. A test hands in a temporary root, a small script as the program, a short
@@ -37,6 +38,7 @@ class TakeoverHost:
     local_machine: str
     workspaces_root: Path
     relay_program: tuple[str, ...]
+    environ: Mapping[str, str] = field(repr=False)
     rng: random.Random
     clock: Clock
     wait: RelayWait = RelayWait()

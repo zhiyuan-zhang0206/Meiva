@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import os
 import subprocess
 import threading
 import uuid
@@ -50,6 +51,7 @@ def roster_env(
         probe_timeout_s=probe_timeout_s,
         clock=system_clock(),
         rpc=gateway_test_rpc(),
+        environ=dict(os.environ),
     )
 
 
