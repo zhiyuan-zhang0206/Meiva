@@ -4,15 +4,17 @@ exports = ["daemon.py", "shells.py"]
 "daemon.py" = ["config.py", "remote.py", "shells.py", "sweep.py"]
 "remote.py" = ["config.py", "shells.py"]
 "shell_plan.py" = ["owner_text.py"]
-"shells.py" = ["config.py", "owner_notice.py", "shell_plan.py"]
+"shells.py" = ["config.py", "owner_notice.py", "shell_plan.py", "stale_plan.py"]
+"stale_plan.py" = ["shell_plan.py"]
 "sweep.py" = ["cadence.py", "config.py", "owner_notice.py", "owner_text.py"]
-"tests" = ["cadence.py", "config.py", "daemon.py", "owner_text.py", "shell_plan.py", "shells.py", "sweep.py"]
+"tests" = ["cadence.py", "config.py", "daemon.py", "owner_text.py", "remote.py", "shell_plan.py", "shells.py", "stale_plan.py", "sweep.py"]
 
 [purity]
 "__init__.py" = "strict"
 "config.py" = "strict"
 "owner_text.py" = "strict"
 "shell_plan.py" = "strict"
+"stale_plan.py" = "strict"
 
 [roots]
 "daemon.py" = { kinds = ["clock", "home", "random", "settings"], why = "Service or operator process entry boots configuration, reads the home it runs under and builds the random generator its event bus draws retry jitter from; builds the process clock from SYSTEM_TIMERS" }
