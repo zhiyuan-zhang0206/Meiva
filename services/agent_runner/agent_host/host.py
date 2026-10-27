@@ -118,7 +118,6 @@ from services.agent_runner.agent_host.stall_guard import (
 )
 
 _HostGraph = CompiledStateGraph[BaseAgentState, MeivaContext, BaseAgentState, BaseAgentState]
-_UNSET_OWNER = UUID(int=0)
 
 
 class AgentHost:
@@ -145,7 +144,7 @@ class AgentHost:
         commands: CommandCatalog | None = None,
         plugin_configs: Mapping[str, BaseModel] | None = None,
         home: Path,
-        runtime_owner: UUID = _UNSET_OWNER,
+        runtime_owner: UUID,
     ) -> None:
         self._home = home
         self._bus = bus
@@ -168,15 +167,15 @@ class AgentHost:
         self._machine_identity = machine
         self._machine = machine.name()
         self._wake: Callable[[int], object] | None = None
-        self._owner = UUID(int=id(self)) if runtime_owner == _UNSET_OWNER else runtime_owner
+        self._owner = runtime_owner
         self._runtimes: OrderedDict[int, AgentRuntime] = OrderedDict()
         # meiva:note
         # One registry for every external session this host starts: the agent id ->
         # session id documents a resume reads, shared by all harnesses and scoped per
         # harness at each bridge. File-backed, so it outlives this process.
         # meiva:link agent/graph/docs/harness-turn.meiva.okf.md
-        self._harness_registry = FileSessionRegistry(harness_sessions_dir())
-        self._registrations = RegistrationStore(harness_registrations_dir())
+        self._harness_registry = FileSessionRegistry(harness_sessions_dir(home=home))
+        self._registrations = RegistrationStore(harness_registrations_dir(home=home))
         self._sessions = HarnessSessions(
             self._registrations,
             record_exit=partial(record_harness_exit, self._control_pool),

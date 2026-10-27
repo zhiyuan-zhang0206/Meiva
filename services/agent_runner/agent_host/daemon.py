@@ -79,6 +79,7 @@ from base.host.runtime_interpreter import external_plugin_read_root
 from base.native_process.code_version import CodeVersion
 from base.native_process.stop_timing import CANCEL_UNWIND_TIMEOUT_S
 from base.packages.composer_commands import CommandCatalog
+from base.paths import logs_dir
 from base.sessions.helper_chain_guard import helper_marker_pid, parent_chain_intact
 from meiva import skills as meiva_skills
 from meiva.boot import clients_over
@@ -106,7 +107,7 @@ from .lifecycle.instance import release_instance_lock, take_instance_lock
 from .pooled_checkpoint import PooledPostgresSaver
 from .pools import build_control_pool, build_shared_pool
 from .pools import close_host_pools as close_host_pools
-from .stdout_log import rotate_stdout_log_forever
+from .stdout_log import rotate_stdout_log_forever, stdout_log_path
 
 host_log = logging.getLogger("services.agent_runner.agent_host.daemon")
 
@@ -218,6 +219,7 @@ def background_loops(
     installation: Installation,
     config: ConfigBoot,
     plugins_root: Path,
+    stdout_log: Path,
 ) -> dict[str, Coroutine[object, object, None]]:
     """The daemon's background loops for plugins, logs, exec memory and understanding chunks.
 
@@ -231,7 +233,7 @@ def background_loops(
         "plugins_watch": watch_plugins_for_restart(
             plugins_root, interval_s=PLUGINS_POLL_INTERVAL_S
         ),
-        "stdout_log_rotate": rotate_stdout_log_forever(),
+        "stdout_log_rotate": rotate_stdout_log_forever(stdout_log),
         "exec_memory_guard": run_memory_guard_forever(host_log, os.getpid(), relief_floor_bytes()),
         "understanding_chunks": understanding_loop_forever(
             control_pool,
@@ -497,7 +499,7 @@ async def run(
         if clients is None:
             clients = clients_over(config, machine, lambda: db)
         installation = load_installation(
-            config, clients=clients, load_extensions=_state_gated_loader(), rng=rng
+            config, clients=clients, load_extensions=_state_gated_loader(), rng=rng, home=home
         )
         checkpointer = await build_checkpointer(
             workload_pool,
@@ -562,7 +564,7 @@ async def run(
                 image=process_context.loaded_code_image(),
                 liveness=liveness,
                 extra_routes={
-                    ("GET", "/stats"): stats_route(host, scheduler, pid=os.getpid()),
+                    ("GET", "/stats"): stats_route(host, scheduler, pid=os.getpid(), home=home),
                     ("POST", "/cancel-turn"): cancel_turn_route(scheduler),
                 },
             ),
@@ -573,6 +575,7 @@ async def run(
                     installation=installation,
                     config=config,
                     plugins_root=external_plugin_read_root(),
+                    stdout_log=stdout_log_path(logs_dir=logs_dir(home=home)),
                 ),
                 InboundWakeDispatcher(
                     bus,

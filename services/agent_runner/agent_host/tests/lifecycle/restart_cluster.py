@@ -12,6 +12,7 @@ import dataclasses
 import random
 from functools import partial
 from typing import Any
+from uuid import uuid4
 
 import psycopg
 import pytest
@@ -172,6 +173,7 @@ class Cluster:
     async def host(self, *, drain_s: float = 30, wakes: bool = False) -> Host:
         checkpointer = await build_checkpointer(self.pool, checkpoint_interval=1)
         host = AgentHost(
+            runtime_owner=uuid4(),
             handoff_stamping=handoff_timestamps(),
             home=meiva_home(),
             pool=self.pool,
