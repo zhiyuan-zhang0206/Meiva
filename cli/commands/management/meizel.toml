@@ -24,5 +24,5 @@ exports = ["config.py", "fleet_gateway.py", "fleet_leases.py", "schedules.py", "
 "schedules_verify_read_rows.py#home base.paths.home.resolve_meiva_home" = 1
 
 [debt.impure-call]
-"schedule_verify_child.py#Path.resolve" = 1
+"schedule_verify_child.py#Path.resolve" = 2
 "schedule_verify_child.py#inspect.getsourcefile" = 1

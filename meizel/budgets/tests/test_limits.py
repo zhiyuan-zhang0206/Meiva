@@ -66,3 +66,18 @@ def test_tracked_children_rejects_a_listing_without_a_terminator() -> None:
 def test_tracked_children_lists_every_directory_level() -> None:
     children = directory_budget.tracked_children("a/b/c.py\0a/d.py\0")
     assert children == {"": {"a"}, "a": {"b", "d.py"}, "a/b": {"c.py"}}
+
+
+def test_only_a_migrations_directory_is_skipped_not_a_file_of_that_name(tmp_path: Path) -> None:
+    (tmp_path / "migrations").write_text("x = 1\n", encoding="utf-8")
+    nested = tmp_path / "nested"
+    (nested / "migrations").mkdir(parents=True)
+    (nested / "keep.py").write_text("x = 1\n", encoding="utf-8")
+    assert tmp_path / "migrations" in directory_budget.entries(tmp_path)
+    assert directory_budget.entries(nested) == [nested / "keep.py"]
+
+
+def test_the_file_scope_takes_a_python_file_target_and_ignores_other_files(tmp_path: Path) -> None:
+    repo = _repo(tmp_path, {"base/ok.py": 1, "base/notes.txt": 1})
+    targets = [repo / "base" / "ok.py", repo / "base" / "notes.txt"]
+    assert limits.budget_files(targets, repo, _STRUCTURE) == {repo / "base" / "ok.py"}

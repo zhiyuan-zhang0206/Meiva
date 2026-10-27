@@ -24,9 +24,9 @@ filter or `--changed` does not turn that scoped result into a whole-repository j
 
 | Dimension | Evidence and limit |
 |---|---|
-| Recognized syntax | `impure-call` and related diagnostics name matched imports, calls or writes. An import or async declaration is a rule observation, not observed runtime execution. A name bound to an impure call (`_is_file = Path.is_file`) is that call; the policy also lists the shell constructors `GitRepo` and `load_universe`. |
+| Recognized syntax | `impure-call` and related diagnostics name matched imports, calls or writes. An import or async declaration is a rule observation, not runtime execution. A name for an impure call, not called (`_is_file = Path.is_file`), is that call. A name is a path when annotated, built by `Path(...)`, looped over `iterdir`/`glob`/`rglob`, or `self.x` of those. |
 | Unresolved or unmeasured behavior | Unresolved imports/patches are reported where recognized. No diagnostic does not establish absence of callback effects, input mutation or transitive effects. |
-| Structure | Container budgets and frozen-shape rules bound forms and sizes, not semantic effects. A frozen dataclass can contain a mutable list; a frozen JS holder or Set is not proof against nested mutation. |
+| Structure | Container budgets and frozen-shape rules bound forms and sizes, not semantic effects: a frozen dataclass can contain a mutable list, and a frozen JS holder or Set does not stop nested mutation. |
 | Test resources | Fixture diagnostics recognize configured requests. They do not measure bootstrap cost or authorize a lightweight runner. [[tests/fixtures/docs/static-environment.meiva.okf.md|Static ownership and refusal canaries]] govern it. |
 
 Passing observed values can separate decisions from effects. Injecting a callable makes
@@ -70,7 +70,7 @@ explicitly targeted. Instead, a test file whose first-party targets are all `str
 | Code | Scope | What it catches |
 |---|---|---|
 | `impure-edge` | `strict`, `strict-to-be` module | Importing or reading an attribute from a first-party module whose effective purity is `none` |
-| `impure-call` | `strict`, `strict-to-be` module | `async def`, `global`, `nonlocal`, importing an effectful module (`subprocess`, `socket`, `httpx`, `requests`, `urllib`, `shutil`, `tempfile`, `ctypes`, `multiprocessing`, `signal`, plus policy `impure-imports`), or calling an ambient clock, randomness, environment, I/O or filesystem method (`time.time`, `time.monotonic`, `time.sleep`, `datetime.now`, `datetime.utcnow`, `os.environ`, `os.getenv`, `random.*`, ` secrets.*`, `uuid.uuid4`, `open`, `print`, `input`, `Path.read_text/write_text/open/exists/is_file/mkdir/unlink/iterdir/rglob/resolve/...`, `os.stat/open/scandir/walk`, `pkgutil.get_data`, `inspect.getsource`, plus policy `impure-calls`) |
+| `impure-call` | `strict`, `strict-to-be` module | `async def`, `global`, `nonlocal`, importing an effectful module (`DEFAULT_IMPURE_IMPORTS` plus policy `impure-imports`), or calling an ambient clock, randomness, environment, I/O or filesystem method (`time.*`, `datetime.now`, `os.environ`, `random.*`, `uuid.uuid4`, `open`, the `os` file and descriptor calls, `Path` I/O methods; list: `DEFAULT_IMPURE_CALLS` plus policy `impure-calls`) |
 | `unfrozen-value` | `strict`, `strict-to-be` module | A class that is not an Enum, Exception, Protocol, TypedDict, NamedTuple, frozen `BaseModel`, or `@dataclass(frozen=True)`, or a module-level mutable literal/comprehension/call assigned to a binding |
 | `untyped-export` | `strict`, `strict-to-be` module | A public function (or exported symbol) missing parameter or return type annotations, or annotated with `Any` or bare `dict` |
 | `pass-through-function` | `strict`, `strict-to-be` module | A public undecorated function whose body only forwards its exact parameters to another function or module attribute call |
@@ -79,7 +79,7 @@ explicitly targeted. Instead, a test file whose first-party targets are all `str
 | `stale-export` | `strict`, `strict-to-be` export | An entry in `exports` of a subpackage `meizel.toml` that no external fact edge traverses |
 | `wide-exports` | `strict`, `strict-to-be` manifest | A subpackage `meizel.toml` exporting more than `max-exports` children (default 4) |
 | `wide-fanout` | `strict`, `strict-to-be` child | A `[uses]` entry depending on more than `max-uses` sibling targets (default 8) |
-| `wide-public-surface` | `strict`, `strict-to-be` module | A module defining more than `max-public-symbols` public behavioral symbols (default 6; frozen value classes, Enums, Protocols, TypedDicts, NamedTuples and Exceptions do not count against the behavioral budget) |
+| `wide-public-surface` | `strict`, `strict-to-be` module | A module defining more than `max-public-symbols` public behavioral symbols (default 6; frozen values, Enums, Protocols, TypedDicts, NamedTuples and Exceptions do not count) |
 | `wide-params` | `strict`, `strict-to-be` module | A function or method taking more than `max-params` parameters excluding `self`/`cls` (default 6) |
 | `deep-attr-chain` | `strict`, `strict-to-be` module | An expression chaining more than `max-attr-hops` non-module attribute accesses (`a.b.c.d`, default 3) |
 | `impure-test-fixture` | test of `strict` / `strict-to-be` | Requesting `monkeypatch`, `mocker`, or heavy I/O fixtures configured in policy `impure-fixtures` when all first-party targets under test are `strict` or `strict-to-be` |
@@ -93,7 +93,7 @@ Repository-specific additions and container budget thresholds live under `[purit
 ```toml
 [purity]
 impure-imports = ["psycopg", "psycopg_pool", "redis", "fastapi", "uvicorn", "aiohttp", "websockets", "starlette", "sqlalchemy", "alembic", " celery", "kombu"]
-impure-calls = ["loguru.logger.info", "logging.info", "meizel.graph.universe.GitRepo"]
+impure-calls = ["loguru.logger.debug", "loguru.logger.info", "loguru.logger.warning", "loguru.logger.error", "loguru.logger.exception", "loguru.logger.critical", "logging.debug", "logging.info", "logging.warning", "logging.error", "logging.exception", "logging.critical", "meizel.graph.universe.GitRepo", "meizel.graph.universe.load_universe"]
 impure-fixtures = ["db_session", "postgres_container", "redis_container"]
 max-uses = 8
 max-exports = 4
