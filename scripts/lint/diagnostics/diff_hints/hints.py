@@ -15,8 +15,8 @@
 from __future__ import annotations
 
 import argparse
+import ast
 import json
-import re
 import subprocess
 import sys
 import tomllib
@@ -41,9 +41,12 @@ from scripts.lint.diagnostics.diff_hints.acks import (  # noqa: E402
 from scripts.lint.diagnostics.diff_hints.diff import parse_diff  # noqa: E402
 from scripts.lint.diagnostics.diff_hints.engine import analyze  # noqa: E402
 from scripts.lint.diagnostics.diff_hints.model import (  # noqa: E402
+    MIN_IMPORTERS,
     Ack,
     FileChange,
     FileKind,
+    Importers,
+    NewRoot,
     Roles,
     Site,
 )
@@ -52,7 +55,7 @@ from scripts.lint.diagnostics.diff_hints.render import (  # noqa: E402
     render_open,
     render_summary,
 )
-from scripts.lint.diagnostics.diff_hints.scope import classify  # noqa: E402
+from scripts.lint.diagnostics.diff_hints.scope import classify, is_test_path  # noqa: E402
 
 # meiva:note
 # The diff the hints read. Prefixes are explicit because `diff.mnemonicPrefix` and
@@ -135,24 +138,14 @@ def _is_object_list(value: object) -> TypeGuard[list[object]]:
 
 
 # meiva:note
-# Read roots from the same Git revision as the Python, including the index at commit-msg.
-# The manifest checker validates the full declaration; the hint rejects malformed kind lists.
-def _root_kinds(rev: str, paths: Sequence[str]) -> dict[str, frozenset[AmbientKind]]:
-    manifests = {path: str(Path(path).parent / "meizel.toml") for path in paths}
-    texts = _read_blobs(rev, sorted(set(manifests.values())))
+# The `[roots]` table of one manifest text: each declared file and its kinds. The manifest checker
+# validates the full declaration; the hint rejects a malformed table or kind list.
+def _declared(manifest: str, text: str) -> dict[str, frozenset[AmbientKind]]:
+    raw: object = tomllib.loads(text).get("roots", {})
+    if not _is_str_dict(raw):
+        raise GitError(f"{manifest}: [roots] must be a table")
     found: dict[str, frozenset[AmbientKind]] = {}
-    for path, manifest in manifests.items():
-        text = texts.get(manifest)
-        if text is None:
-            continue
-        raw: object = tomllib.loads(text).get("roots", {})
-        if not _is_str_dict(raw):
-            raise GitError(f"{manifest}: [roots] must be a table")
-        name = Path(path).name
-        if name not in raw:
-            found[path] = frozenset()
-            continue
-        value = raw[name]
+    for name, value in raw.items():
         if not _is_str_dict(value):
             raise GitError(f"{manifest}: [roots] {name!r} must be a table with kinds and why")
         listed = value.get("kinds")
@@ -163,16 +156,30 @@ def _root_kinds(rev: str, paths: Sequence[str]) -> dict[str, frozenset[AmbientKi
             if not isinstance(item, str):
                 raise GitError(f"{manifest}: root kinds must be strings")
             kinds.add(AmbientKind(item))
-        found[path] = frozenset(kinds)
+        found[name] = frozenset(kinds)
+    return found
+
+
+# meiva:note
+# Read roots from the same Git revision as the Python, including the index at commit-msg.
+def _root_kinds(rev: str, paths: Sequence[str]) -> dict[str, frozenset[AmbientKind]]:
+    manifests = {path: str(Path(path).parent / "meizel.toml") for path in paths}
+    texts = _read_blobs(rev, sorted(set(manifests.values())))
+    found: dict[str, frozenset[AmbientKind]] = {}
+    for path, manifest in manifests.items():
+        text = texts.get(manifest)
+        if text is not None:
+            found[path] = _declared(manifest, text).get(Path(path).name, frozenset())
     return found
 
 
 # meiva:note
 # The tracked Python files at `rev` (the index when it is empty) that contain one of the fixed
 # strings. `git grep` exits 1 for no match, which is an answer and not a failure.
-def _grep(rev: str, needles: Sequence[str], pathspec: str) -> set[str]:
+def _grep(rev: str, needles: Sequence[str], pathspec: str, *, every: bool = False) -> set[str]:
     where = ["--cached"] if not rev else [rev]
-    command = ["git", "grep", "-l", "-F", *(a for n in needles for a in ("-e", n)), *where]
+    flags = ["--all-match"] if every else []
+    command = ["git", "grep", "-l", "-F", *flags, *(a for n in needles for a in ("-e", n)), *where]
     done = subprocess.run([*command, "--", pathspec], capture_output=True, check=False)  # noqa: S603
     if done.returncode not in (0, 1):
         raise GitError(f"git grep failed: {done.stderr.decode('utf-8', 'replace').strip()}")
@@ -183,57 +190,106 @@ def _grep(rev: str, needles: Sequence[str], pathspec: str) -> set[str]:
 
 
 # meiva:note
-# Whether `text` imports the module `module` (`a.b.c`): `import a.b.c`, `from a.b.c import x`,
-# `from a.b import c`, and from a file beside it `from .c import x` or `from . import c`.
-def _imports_module(text: str, module: str, *, beside: bool) -> bool:
-    parent, _, leaf = module.rpartition(".")
-    whole = rf"^\s*(?:from|import)\s+{re.escape(module)}(?:\s|$|\.|,)"
-    if re.search(whole, text, re.MULTILINE):
-        return True
-    packages = [*([re.escape(parent)] if parent else []), *([r"\.+"] if beside else [])]
-    for package in packages:
-        listing = rf"^\s*from\s+{package}\s+import\s+(?P<names>\([^)]*\)|[^\n]*)"
-        for found in re.finditer(listing, text, re.MULTILINE):
-            if re.search(rf"\b{re.escape(leaf)}\b", found["names"]):
-                return True
-    relative = rf"^\s*from\s+\.+{re.escape(leaf)}(?:\s|\.)"
-    return beside and re.search(relative, text, re.MULTILINE) is not None
+# The dotted modules a file imports, from its syntax tree: `import a.b.c` imports `a`, `a.b` and
+# `a.b.c`; `from a.b import c` imports `a.b` and, since `c` may be a module, `a.b.c`; a relative
+# import is resolved against the importing file's package. Text that only looks like an import
+# (a string, a comment) is not an import.
+def _imported_modules(path: str, text: str) -> set[str]:
+    try:
+        tree = ast.parse(text)
+    except SyntaxError:
+        return set()
+    package = path.split("/")[:-1]
+    found: set[str] = set()
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Import):
+            for alias in node.names:
+                parts = alias.name.split(".")
+                found.update(".".join(parts[:end]) for end in range(1, len(parts) + 1))
+        elif isinstance(node, ast.ImportFrom):
+            if node.level > len(package) + 1:
+                continue
+            base = package[: len(package) - (node.level - 1)] if node.level else []
+            parts = [*base, *(node.module.split(".") if node.module else [])]
+            found.update(".".join(parts[:end]) for end in range(1, len(parts) + 1))
+            found.update(f"{'.'.join(parts)}.{alias.name}" for alias in node.names if parts)
+    return found
 
 
 # meiva:note
 # The files that import `path` as a module. The candidates are the tracked files that mention the
-# dotted name or the `from <package> import` line; their text decides.
+# dotted name or the `from <package> import` line, and the files of the same top-level package that
+# have a relative import and mention the module's last name; their syntax decides.
 def _importing_files(rev: str, path: str) -> set[str]:
     module = path.removesuffix(".py").removesuffix("/__init__").replace("/", ".")
-    parent = module.rpartition(".")[0]
-    directory = Path(path).parent.as_posix()
-    needles = [module, *([f"from {parent} import"] if parent else [])]
-    candidates = _grep(rev, needles, "*.py")
-    if directory != ".":
-        candidates |= _grep(rev, ["from ."], f"{directory}/*.py")
+    parent, _, leaf = module.rpartition(".")
+    candidates = _grep(rev, [module, *([f"from {parent} import"] if parent else [])], "*.py")
+    top = path.split("/", 1)[0]
+    if top != path:
+        candidates |= _grep(rev, ["from .", leaf], f"{top}/*.py", every=True)
     candidates.discard(path)
     texts = _read_blobs(rev, sorted(candidates))
-    return {
-        found
-        for found, text in texts.items()
-        if _imports_module(text, module, beside=Path(found).parent.as_posix() == directory)
-    }
+    return {found for found, text in texts.items() if module in _imported_modules(found, text)}
 
 
 # meiva:note
-# For each declared root among `roots`, how many production modules that are not roots import it.
+# The production modules that import `path` and are not declared roots themselves.
+def _plain_importers(rev: str, path: str, roles: Roles) -> tuple[str, ...]:
+    importers = sorted(
+        p for p in _importing_files(rev, path) if classify(p, roles) is FileKind.PRODUCTION
+    )
+    also_roots = _root_kinds(rev, importers)
+    return tuple(p for p in importers if not also_roots.get(p))
+
+
+# meiva:note
+# For a declared root: its importers that are not roots, and, when it has fewer than the threshold,
+# how many modules import the one it has.
+def _importers_of(rev: str, path: str, roles: Roles) -> Importers:
+    direct = _plain_importers(rev, path, roles)
+    onward = ()
+    if 0 < len(direct) < MIN_IMPORTERS:
+        onward = tuple((p, len(_plain_importers(rev, p, roles))) for p in direct)
+    return Importers(direct, onward)
+
+
 def _importer_counts(
     rev: str, roots: Mapping[str, frozenset[AmbientKind]], roles: Roles
-) -> dict[str, int]:
-    declared = [path for path, kinds in roots.items() if kinds]
-    counts: dict[str, int] = {}
-    for path in declared:
-        importers = sorted(
-            p for p in _importing_files(rev, path) if classify(p, roles) is FileKind.PRODUCTION
-        )
-        also_roots = _root_kinds(rev, importers)
-        counts[path] = sum(1 for p in importers if not also_roots.get(p))
-    return counts
+) -> dict[str, Importers]:
+    return {path: _importers_of(rev, path, roles) for path, kinds in roots.items() if kinds}
+
+
+_TYPESCRIPT = (".ts", ".tsx", ".mts", ".cts")
+
+
+# meiva:note
+# The roots a change declares in a manifest: the files named in a `[roots]` table now and not in the
+# same manifest at the base. A production Python file and a TypeScript source (not a test) are asked
+# about; their importers are read for Python only.
+def _new_roots(spec: Sequence[str], rev: str, roles: Roles) -> list[NewRoot]:
+    names = _git(
+        *_DIFF[:1], "--name-only", "--no-color", "--diff-filter=ACMR", *spec, "--", "*meizel.toml"
+    )
+    manifests = [
+        m for m in names.decode("utf-8", "replace").splitlines() if Path(m).name == "meizel.toml"
+    ]
+    now = _read_blobs(rev, manifests)
+    before = _read_blobs(spec[0] if len(spec) == 2 else "HEAD", manifests)
+    found: list[NewRoot] = []
+    for manifest in manifests:
+        after = _declared(manifest, now[manifest]) if manifest in now else {}
+        old = _declared(manifest, before[manifest]) if manifest in before else {}
+        for name, kinds in sorted(after.items()):
+            path = (Path(manifest).parent / name).as_posix()
+            python = classify(path, roles) is FileKind.PRODUCTION
+            if name in old or not (
+                python or (path.endswith(_TYPESCRIPT) and not is_test_path(path))
+            ):
+                continue
+            found.append(
+                NewRoot(path, manifest, kinds, _importers_of(rev, path, roles) if python else None)
+            )
+    return found
 
 
 def _diff(
@@ -253,7 +309,14 @@ def _sites(spec: Sequence[str], rev: str) -> list[Site]:
     roles = _roles()
     changes, texts = _diff(spec, rev, roles)
     roots = _root_kinds(rev, tuple(texts))
-    return analyze(changes, texts, roles, roots, _importer_counts(rev, roots, roles))
+    return analyze(
+        changes,
+        texts,
+        roles,
+        roots,
+        _importer_counts(rev, roots, roles),
+        _new_roots(spec, rev, roles),
+    )
 
 
 # meiva:note

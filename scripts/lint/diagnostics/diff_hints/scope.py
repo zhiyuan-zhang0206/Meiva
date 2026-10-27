@@ -9,7 +9,13 @@ import ast
 from bisect import bisect_left
 
 from meizel.graph.model import AmbientKind
-from scripts.lint.diagnostics.diff_hints.model import FileKind, FunctionNode, Roles, Unit
+from scripts.lint.diagnostics.diff_hints.model import (
+    FileKind,
+    FunctionNode,
+    Importers,
+    Roles,
+    Unit,
+)
 from scripts.lint.diagnostics.diff_hints.names import import_names
 
 _ROOT_FILE_NAMES = ("main.py", "__main__.py", "runtime.py", "app.py")
@@ -60,7 +66,7 @@ def parse_unit(
     added: frozenset[int],
     roles: Roles,
     roots: frozenset[AmbientKind],
-    importers: int = 0,
+    importers: Importers,
 ) -> Unit | None:
     kind = classify(path, roles)
     if kind is FileKind.OTHER or not added:
