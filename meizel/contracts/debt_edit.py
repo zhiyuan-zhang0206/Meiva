@@ -10,13 +10,13 @@ from pathlib import Path
 
 from meizel.contracts.analysis import Analysis, analyze
 from meizel.contracts.debt import CYCLE_EDGE, TABLE_KEY, DebtTable, local_edge, set_debt, total
-from meizel.contracts.ledger import tally
+from meizel.contracts.ledger import resolve_debt_conflicts, tally
 from meizel.contracts.manifest import Manifest, manifest_path
 from meizel.graph.graphs import feedback_edges, unneeded_back_edges
 from meizel.graph.model import Code, Diagnostic, MeizelError
 from meizel.graph.universe import EditPlan, GitRepo
 
-__all__ = ["plan_baseline_write", "prune", "record", "write_baseline"]
+__all__ = ["plan_baseline_write", "prune", "record", "resolve", "write_baseline"]
 
 
 def _within(path: str, targets: list[str]) -> bool:
@@ -49,9 +49,13 @@ def plan_baseline_write(
     return EditPlan(deletes=(path,)), rel
 
 
+def _manifest_text(root: Path, owner: str) -> str:
+    return GitRepo(root).load_text(manifest_path(owner), default="")
+
+
 def write_baseline(root: Path, owner: str, table: DebtTable) -> str | None:
     """Rewrite the `[debt]` tables of `owner`'s manifest; the path written, or None if unchanged."""
-    before = GitRepo(root).load_text(manifest_path(owner), default="")
+    before = _manifest_text(root, owner)
     plan, changed = plan_baseline_write(root, owner, before, table)
     plan.apply()
     return changed
@@ -150,3 +154,32 @@ def prune(root: Path, jobs: int | None = None) -> list[str]:
                 f"{manifest_path(owner)}: {total(manifest.debt)} recorded debts lowered to {total(table)}"
             )
     return lines
+
+
+# meiva:note
+# `debt resolve <manifest>...`: resolve the merge conflicts that sit inside the `[debt]` tables of the
+# named manifests (see `resolve_debt_conflicts`), then lower every baseline to what still occurs.
+# Recorded debt is derived from the tree, so a conflict between two recorded numbers is not a choice
+# between two authors: both sides are kept, the lower count wins where both changed, and `prune`
+# settles the rest. A conflict outside the debt tables, or a file that has none, refuses the whole
+# command and writes nothing.
+def resolve(root: Path, paths: list[str], jobs: int | None = None) -> list[str]:
+    plans: dict[Path, str] = {}
+    problems: list[str] = []
+    for rel in paths:
+        if rel.rpartition("/")[2] != "meizel.toml":
+            problems.append(f"{rel}: not a meizel.toml")
+            continue
+        text = _manifest_text(root, rel.removesuffix("meizel.toml").rstrip("/"))
+        resolved, found = resolve_debt_conflicts(text, rel)
+        problems.extend(found)
+        if resolved != text:
+            plans[root / rel] = resolved
+    if problems:
+        raise MeizelError("\n".join(problems))
+    EditPlan(writes=plans).apply()
+    lines = [
+        f"meizel: resolved {rel}"
+        for rel in sorted(path.relative_to(root).as_posix() for path in plans)
+    ]
+    return [*lines, *prune(root, jobs)]

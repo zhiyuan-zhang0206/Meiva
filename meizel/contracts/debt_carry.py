@@ -13,7 +13,7 @@ from pathlib import Path
 
 from meizel.contracts.debt import PATCH_CODES, DebtTable, file_key, total
 from meizel.contracts.debt_edit import prune as prune_debt
-from meizel.contracts.debt_edit import record, write_baseline
+from meizel.contracts.debt_edit import record, resolve, write_baseline
 from meizel.contracts.debt_report import (
     by_target,
     changed_under,
@@ -322,6 +322,10 @@ def run_debt(root: Path, targets: list[str], args: argparse.Namespace, jobs: int
             print(format_sites(found, as_json=args.as_json))
         else:
             print(format_approved(approved(universe, jobs), as_json=args.as_json))
+        return 0
+    if mode == "resolve":
+        for line in resolve(root, targets, jobs):
+            print(line)
         return 0
     if mode == "diff":
         return _run_diff(root, args.against, args.on_growth, args)
