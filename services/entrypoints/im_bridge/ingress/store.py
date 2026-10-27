@@ -9,6 +9,7 @@ from psycopg.types.json import Jsonb
 
 from base import telemetry
 from base.agents.inbox.chat_delivery import insert_chat_inbound_in_transaction
+from base.clock.ids import new_uuid
 from base.db.transaction import ConnectionSource, write_transaction
 from services.entrypoints.im_bridge.ingress.types import (
     IngressBindingState,
@@ -25,7 +26,6 @@ from services.entrypoints.im_bridge.outbound.claim_fence import (
     StalePollBindingError,
     binding_is_current,
 )
-from services.entrypoints.im_bridge.types import new_uuid
 
 _RECEIPT_COLUMNS = "id,namespace,account_id,sender_id,message_id,route,status,attempt_id,inbound_id,outcome_reason,result"
 
