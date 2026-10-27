@@ -28,6 +28,7 @@ import json
 import os
 import webbrowser
 from contextlib import suppress
+from pathlib import Path
 from typing import Any
 
 import httpx2
@@ -36,8 +37,6 @@ from mcp.client.auth import AuthorizationCodeResult
 from mcp.client.auth.oauth2 import OAuthContext
 from mcp.shared.auth import OAuthClientInformationFull, OAuthMetadata, OAuthToken
 from pydantic import AnyUrl
-
-from base.paths import meiva_home
 
 # Loopback callback port for the authorization-code redirect. It is part of the
 # registered redirect_uris (OAuth requires exact-match redirect URIs), so it is
@@ -56,11 +55,11 @@ OAUTH_FLOW_TIMEOUT_S = 600.0
 _CLIENT_NAME = "Meiva MCP Daemon"
 
 
+# meiva:note
+# Persist OAuth tokens + registered client info per server in `<home>/mcp_oauth/`.
 class FileTokenStorage:
-    """Persist OAuth tokens + registered client info per server in `$MEIVA_HOME/mcp_oauth/`."""
-
-    def __init__(self, server: str) -> None:
-        self._path = meiva_home() / "mcp_oauth" / f"{server}.json"
+    def __init__(self, server: str, *, home: Path) -> None:
+        self._path = home / "mcp_oauth" / f"{server}.json"
 
     def _read(self) -> dict[str, Any]:
         if not self._path.is_file():
@@ -286,7 +285,7 @@ def install_token_auth_basic_shim() -> None:
 
 
 async def oauth_http_client(
-    url: str, server: str, locks: dict[str, asyncio.Lock]
+    url: str, server: str, locks: dict[str, asyncio.Lock], home: Path
 ) -> httpx2.AsyncClient:
     """Build an httpx2.AsyncClient whose auth is the MCP OAuth provider.
 
@@ -310,7 +309,7 @@ async def oauth_http_client(
     install_token_auth_basic_shim()
     lock = locks.setdefault(server, asyncio.Lock())
     async with lock:
-        storage = FileTokenStorage(server)
+        storage = FileTokenStorage(server, home=home)
         callback = CallbackServer()
 
         async def _redirect_handler(auth_url: str) -> None:

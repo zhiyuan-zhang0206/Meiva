@@ -196,7 +196,7 @@ async def _connect_outcome(child: asyncio.subprocess.Process) -> dict[str, Any]:
 # a token already stored for the server (no authorization flow, no browser) every request to the
 # real HTTP server carries it, and the per-server flow lock is created for the connect.
 async def test_an_oauth_url_server_connects_with_the_token_stored_for_it(unit_home: Path) -> None:
-    await FileTokenStorage("remote").set_tokens(
+    await FileTokenStorage("remote", home=unit_home).set_tokens(
         OAuthToken(access_token="at-stored", token_type="Bearer", expires_in=3600)  # noqa: S106
     )
     async with http_mcp_server() as remote:
@@ -222,7 +222,7 @@ async def test_an_oauth_connect_is_not_bounded_by_the_connect_timeout(unit_home:
     listener = await asyncio.start_server(never_answers, "127.0.0.1", 0)
     url = f"http://127.0.0.1:{listener.sockets[0].getsockname()[1]}/mcp"
     write_servers(unit_home, {"plain": {"url": url}, "authorized": {"url": url, "oauth": True}})
-    await FileTokenStorage("authorized").set_tokens(
+    await FileTokenStorage("authorized", home=unit_home).set_tokens(
         OAuthToken(access_token="at-stored", token_type="Bearer", expires_in=3600)  # noqa: S106
     )
     authorized = await _start_connect_child(unit_home, "authorized", 0.5)
