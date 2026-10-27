@@ -21,13 +21,18 @@ from base.agents.history.hierarchy.usage import MessageUsage
 from base.agents.messages.timestamp_policy import TimestampSource
 from base.clock import Clock
 from base.clock.tests.manual_timers import ManualTimers
+from base.clock.tests.seeded_rng import seeded_rng
 from base.config import settings
 from base.db import Database
 from services.derived.insights.run_timeline import router
 from services.derived.insights.run_timeline.history import HistoryView
 from services.derived.insights.run_timeline.projection.derive import project_segment
 from services.derived.insights.run_timeline.projection.jobs import IndexJobs
-from services.derived.insights.run_timeline.projection.reader import Snapshot, TimelineReader
+from services.derived.insights.run_timeline.projection.reader import (
+    ReaderWorld,
+    Snapshot,
+    TimelineReader,
+)
 
 _TIMELINE_SOURCE = TimestampSource(
     clock=Clock.from_settings(), timestamps_enabled=settings.general.message_timestamps
@@ -145,7 +150,7 @@ def read(
             timestamps=_TIMELINE_SOURCE,
             jobs=jobs,
             read_segment=no_body,
-            timers=ManualTimers(),
+            world=ReaderWorld(timers=ManualTimers(), rng=seeded_rng()),
         )
 
         def snapshot(_agent: int, _snapshot: str | None) -> Snapshot:

@@ -1,6 +1,7 @@
 # meiva:link services/derived/insights/docs/insights.meiva.okf.md
 from __future__ import annotations
 
+import random
 from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
 from functools import partial
@@ -12,13 +13,13 @@ from psycopg_pool import ConnectionPool
 
 from base.agents.history.checkpoint_segment import read_checkpoint_segment
 from base.agents.messages.timestamp_policy import TimestampSource
-from base.clock import SYSTEM_TIMERS
+from base.clock import Timers
 from base.db import Database
 from base.lm.catalog import ModelCatalog
 from services.derived.insights.config import InsightsConfig
 from services.derived.insights.run_timeline import router as run_timeline_router
 from services.derived.insights.run_timeline.projection.jobs import IndexJobs, index_next
-from services.derived.insights.run_timeline.projection.reader import TimelineReader
+from services.derived.insights.run_timeline.projection.reader import ReaderWorld, TimelineReader
 
 
 def build_app(
@@ -29,6 +30,8 @@ def build_app(
     home: Path,
     catalog: ModelCatalog,
     timestamps: TimestampSource,
+    timers: Timers,
+    rng: random.Random,
     pid: int = 0,
 ) -> FastAPI:
     jobs = IndexJobs(
@@ -56,7 +59,7 @@ def build_app(
         timestamps=timestamps,
         jobs=jobs,
         read_segment=read_checkpoint_segment,
-        timers=SYSTEM_TIMERS,
+        world=ReaderWorld(timers=timers, rng=rng),
     )
     app.include_router(run_timeline_router.router)
 
