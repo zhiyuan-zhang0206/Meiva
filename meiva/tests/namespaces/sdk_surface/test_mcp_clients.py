@@ -9,7 +9,6 @@ from base.clock.tests.fakes import system_clock
 from base.cluster.machine.configured import ConfiguredMachineIdentity
 from base.config import ConfigBoot
 from base.config.tests.configuration import snapshot_process_config
-from base.paths import meiva_home
 from meiva.boot import derived_clients
 from meiva.mcps import McpClients
 from meiva.sdk_surface import process_context
@@ -17,13 +16,11 @@ from meiva.sdk_surface import process_context
 
 # meiva:note
 # A context over a configuration owner of its own, so a timeout set on one owner never reaches another context.
-def context_with_timeout(timeout: float) -> tuple[MeivaContext, ConfigBoot]:
+def context_with_timeout(timeout: float, home: Path) -> tuple[MeivaContext, ConfigBoot]:
     config = snapshot_process_config()
     config.set_field("mcp_connect_timeout_seconds", timeout)
     clients = derived_clients(config, ConfiguredMachineIdentity(config))
-    return MeivaContext(
-        clients=clients, clock_factory=system_clock, meiva_home=meiva_home()
-    ), config
+    return MeivaContext(clients=clients, clock_factory=system_clock, meiva_home=home), config
 
 
 def sdk_timeout(context: MeivaContext) -> float:
@@ -43,8 +40,8 @@ def test_sdk_clients_read_their_own_timeout_once_and_rebuild_after_close(
     unit_home: Path,
 ) -> None:
     (unit_home / "mcp.json").write_text(json.dumps({"mcpServers": {"fs": {"command": "x"}}}))
-    first, first_config = context_with_timeout(7.5)
-    second, _ = context_with_timeout(11.0)
+    first, first_config = context_with_timeout(7.5, unit_home)
+    second, _ = context_with_timeout(11.0, unit_home)
     try:
         first_client = first.clients.get(McpClients)
         second_client = second.clients.get(McpClients)
@@ -79,3 +76,26 @@ def test_mcp_client_construction_waits_for_the_first_call_to_read_configuration(
     assert mcp.timeout_seconds == 3.5
     assert mcp._remote is None
     clients.close()
+
+
+# meiva:note
+# The tool-metadata cache sits under the Meiva home the bound context carries, not under the
+# environment's home: the two differ here.
+def test_the_tool_cache_sits_under_the_home_of_the_bound_context(
+    unit_home: Path, tmp_path: Path
+) -> None:
+    (unit_home / "mcp.json").write_text(json.dumps({"mcpServers": {"fs": {"command": "x"}}}))
+    context_home = tmp_path / "context-home"
+    context, _ = context_with_timeout(7.5, context_home)
+    previous = process_context.unbind_context()
+    try:
+        process_context.bind_context(context)
+        cache_directory = mcps_mod.fs._source.cache.directory
+    finally:
+        process_context.unbind_context()
+        if previous is not None:
+            process_context.bind_context(previous)
+        context.clients.close()
+
+    assert context_home != unit_home
+    assert cache_directory == context_home / "mcp_cache"
