@@ -56,10 +56,11 @@ def _row(
 
 # meiva:note
 # What a start leaves in `home` besides the lifecycle lock and its holder record, which every
-# local start takes under the home it operates.
+# local start takes under the home it operates, and the plugins directory that reading the roster
+# of that home creates.
 def _entries_besides_the_lifecycle_lock(home: Path) -> list[str]:
     lock = home_lifecycle_locks.lifecycle_lock_path(home)
-    held = {lock.name, home_lifecycle_locks.holder_path(lock).name}
+    held = {lock.name, home_lifecycle_locks.holder_path(lock).name, "plugins"}
     return sorted(path.name for path in home.iterdir() if path.name not in held)
 
 

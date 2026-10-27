@@ -18,7 +18,7 @@ from base.config import get_field
 from base.daemon.health import DaemonProbe
 from base.host.net.url_secret import names_foreign_host
 from base.native_process.stop_timing import HOST_STOP_CEILING_S, OPS_STOP_CEILING_S
-from base.paths import meiva_home, otel_collector_binary, otel_collector_config
+from base.paths import otel_collector_binary, otel_collector_config
 from services.supervision.roster import plugin_services
 from services.supervision.roster.healthz import healthz_daemon
 from services.supervision.roster.service_spec import AGENT_RUNNER, BOTH, GATEWAY, ServiceSpec
@@ -108,7 +108,6 @@ def build_services(
     from services.supervision.healthchecks.protocol_probe import probe as probe_protocol
     from services.supervision.healthchecks.redis_bridge import probe_relay
 
-    home = meiva_home()
     _fe_port = app_port()
     _fe_url = f"http://localhost:{_fe_port}"
     _bridge_cmd, _bridge_host, _bridge_port = redis_bridge_command(home)

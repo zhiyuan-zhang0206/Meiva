@@ -20,8 +20,3 @@ exports = ["__main__.py", "composition.py", "healthz.py", "plugin_services.py", 
 "composition.py" = { kinds = ["settings"], why = "assembles the roster at use time: reads the machine host, the database and Redis urls and the gateway settings that the service specs take" }
 "healthz.py" = { kinds = ["endpoints"], why = "builds ServiceEndpoints from the settings to name a daemon's health url and pidfile" }
 "spec.py" = { kinds = ["settings"], why = "reads the enablement settings (browser, helper, heartbeat and others) that gate each roster entry when its spec is asked" }
-
-[debt.ambient-read]
-"composition.py#home base.paths.meiva_home" = 1
-"spec.py#environ base.host.env.registry.process_environment" = 1
-"spec.py#home base.paths.meiva_home" = 3
