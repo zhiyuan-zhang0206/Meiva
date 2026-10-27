@@ -10,6 +10,8 @@ from __future__ import annotations
 from collections.abc import Iterable
 from pathlib import Path
 
+from base.deploy.release.editable_policy import sorted_paths
+
 
 # meiva:note
 # The non-blank lines of an editable pointer: each names a source to resolve.
@@ -32,7 +34,7 @@ def pointers_without_metadata(
     pointer_paths: Iterable[Path], metadata_paths: Iterable[Path]
 ) -> tuple[Path, ...]:
     site_packages = {record.parent.parent for record in metadata_paths}
-    return tuple(sorted({p for p in pointer_paths if p.parent not in site_packages}, key=str))
+    return sorted_paths(p for p in pointer_paths if p.parent not in site_packages)
 
 
 # meiva:note

@@ -102,6 +102,13 @@ def test_a_pointer_without_a_dist_info_in_its_directory_is_without_metadata() ->
     ) == (other / "_editable_impl_meiva.pth",)
 
 
+def test_pointers_without_metadata_are_ordered_by_text() -> None:
+    a = Path("/s/a/_editable_impl_meiva.pth")
+    b = Path("/s/a.x/_editable_impl_meiva.pth")
+
+    assert pointers_without_metadata([a, b], []) == (b, a)
+
+
 def test_with_no_metadata_every_pointer_is_without_it_sorted_and_distinct() -> None:
     a = Path("/s/b/_editable_impl_meiva.pth")
     b = Path("/s/a/_editable_impl_meiva.pth")

@@ -2,13 +2,14 @@ exports = ["collector", "editable_install.py", "python_lock.py", "start_inputs.p
 
 [uses]
 "editable_install.py" = ["editable_layout.py", "editable_policy.py"]
+"editable_layout.py" = ["editable_policy.py"]
 "start_inputs.py" = ["start_digest.py"]
 "tests" = ["collector", "editable_install.py", "editable_layout.py", "editable_policy.py", "start_digest.py"]
 
 [purity]
 "." = "strict"
 "__init__.py" = "strict"
-"editable_install.py" = { mode = "none", why = "the reader of a checkout's editable install: it globs the virtualenv for the pointer and metadata records, reads and resolves them, probes the interpreters and the console script and resolves an interpreter's checkout root; the lines to resolve, the comparison key, the pointer beside a record, the interpreter candidates, the console script and the layout rule are decided in editable_layout.py and the legality of what it read in editable_policy.py" }
+"editable_install.py" = { mode = "none", why = "the reader of a checkout's editable install: it globs the virtualenv for the pointer and metadata records, reads and resolves them, probes the interpreters and the console script and resolves an interpreter's checkout root; the lines to resolve, the pointer beside a record and the pointers without one, the interpreter candidates, the console script and the layout rule are decided in editable_layout.py, and the comparison key, the allowed roots in both spellings and the legality of what it read in editable_policy.py" }
 "editable_layout.py" = "strict"
 "editable_policy.py" = "strict"
 "python_lock.py" = "strict"
