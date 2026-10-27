@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import dataclasses
 import getpass
+import os
 import subprocess
 import time
 from pathlib import Path
@@ -123,6 +124,7 @@ def test_a_hung_archive_command_ends_in_an_immediate_shutdown_inside_the_budget(
             private,
             7,
             home=unit_home,
+            uid=os.getuid(),
             retained_children=retained,
             producer=emitted_events.producer,
             legs=StopLegs(cleanup_wait_s=1.0, kill_wait_s=1.0),

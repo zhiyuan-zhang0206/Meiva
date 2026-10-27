@@ -4,8 +4,6 @@
 from __future__ import annotations
 
 import json
-import os
-import sys
 from pathlib import Path
 
 import pytest
@@ -13,12 +11,10 @@ import pytest
 from base.config import runtime_config
 from base.config.service_read import ConfigAuthority
 from base.host.env.tests.env_files import unit_env_aliases, unit_env_path
-from base.host.proc import run_bounded
-from base.host.system.tests.fake_commands import fake_host
+from base.host.system.tests.fake_commands import LINUX_X86, fake_host
 from base.packages.plugin_config_admin import panel_metadata, panel_overrides
 from base.paths import meiva_home
 from ops.host_config import config_audit_read_op, config_read_op, config_write_op
-from ops.rpc_schemas import ConfigReadResult
 
 # ---------------------------------------------------------------------------
 # Fixtures
@@ -122,31 +118,23 @@ def test_config_read_op_overridden_flag_reflects_local_file(
         assert result.host_fields[name].overridden is False, f"{name} should not be overridden"
 
 
+# meiva:note
+# The browser gate reads the machine it is handed: a Linux host with Chrome and npx is capable
+# exactly when its environment names a display.
 @pytest.mark.parametrize("display", [True, False])
-def test_config_read_op_reports_real_browser_capability(unit_home: Path, display: bool) -> None:
+def test_config_read_op_reports_real_browser_capability(
+    unit_home: Path, config_authority: ConfigAuthority, display: bool
+) -> None:
     chrome = unit_home / "test-chrome"
     chrome.touch()
-    env = {
-        name: value
-        for name, value in os.environ.items()
-        if name not in {"DISPLAY", "WAYLAND_DISPLAY", "MEIVA_PROCESS_PROFILE"}
-    }
-    env["MEIVA_CHROME_BINARY"] = str(chrome)
-    if display:
-        env["DISPLAY"] = ":test"
-    child = run_bounded(
-        [
-            sys.executable,
-            "-I",
-            str(Path(__file__).with_name("_host_capability_child.py")),
-        ],
-        env=env,
-        capture_output=True,
-        text=True,
-        timeout=30,
+    host = fake_host(
+        platform=LINUX_X86,
+        programs={"google-chrome": str(chrome), "npx": "/test/npx"},
+        environ={"DISPLAY": ":test"} if display else {},
     )
-    assert child.returncode == 0, child.stderr
-    result = ConfigReadResult.model_validate_json(child.stdout)
+    result = config_read_op(
+        authority=config_authority, local_machine=_MACHINE, host=host, home=unit_home
+    )
     entry = result.host_fields["browser_enabled"]
     assert entry.can_enable is display
     assert entry.reason == (None if display else "no display detected")

@@ -1,8 +1,9 @@
 from __future__ import annotations
 
+import os
 import sys
 import types
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from pathlib import Path
 from typing import Any
 
@@ -10,6 +11,7 @@ import pytest
 
 from base.clock import Clock, ClockConfig
 from base.clock.tests.manual_timers import ManualTimers
+from base.host.system.hostport import Host
 from base.host.system.tests.fake_commands import fake_host
 from scripts.ci.cli import CIStatus
 from scripts.ci.pull_requests.status import repo_has_workflows
@@ -96,6 +98,12 @@ def _run_watcher(
     )
     host = fake_host()
 
+    def system_host(*, environ: Mapping[str, str]) -> Host:
+        # meiva:note
+        # The template builds its host from the process environment, not from an empty one.
+        assert environ is os.environ
+        return host
+
     def _check_ci(
         _pr: str | int,
         *,
@@ -152,7 +160,7 @@ def _run_watcher(
                 ),
                 "meiva": fake_meiva,
                 "Clock": types.SimpleNamespace(from_settings=lambda: clock),
-                "Host": types.SimpleNamespace(system=lambda: host),
+                "Host": types.SimpleNamespace(system=system_host),
                 "workspace_dir": workspace_for_test,
                 "resolve_meiva_home": lambda: meiva_home,
                 "CIStatus": CIStatus,

@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import os
 from pathlib import Path
 
 from base.host.system.hostport import Host
@@ -52,22 +51,17 @@ def has_display_vars(
     return bool(display or wayland_display)
 
 
+# meiva:note
+# True when a window server a headed browser can use is reachable. macOS: always True; a headless
+# macOS server (SSH-only, no logged-in desktop) cannot be cheaply told from a headed one by
+# environment variables alone. Linux: `DISPLAY` (X11) or `WAYLAND_DISPLAY` must be set and
+# non-empty in `host.environ` (a headless server has neither). `Platform` admits only macOS and
+# Linux, so there is no other case.
 def display_available(*, host: Host) -> bool:
-    """Return True if a window server a headed browser can use is reachable.
-
-    macOS: always True. Known limitation: a headless macOS server (SSH-only, no
-    logged-in desktop) cannot be cheaply distinguished from a headed one via
-    env-vars alone, so macOS is treated as always having a display.
-
-    Linux: ``$DISPLAY`` (X11) or ``$WAYLAND_DISPLAY`` must be set and non-empty
-    (a headless server has neither).
-
-    ``Platform`` admits only macOS and Linux, so there is no other case.
-    """
     return has_display_vars(
         system=host.platform.system,
-        display=os.environ.get("DISPLAY"),
-        wayland_display=os.environ.get("WAYLAND_DISPLAY"),
+        display=host.environ.get("DISPLAY"),
+        wayland_display=host.environ.get("WAYLAND_DISPLAY"),
     )
 
 

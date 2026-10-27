@@ -32,7 +32,9 @@ from base.host.system.hostport import Host
 from base.native_process.os_platform import is_macos
 
 _log = logging.getLogger("services.desktop.browser.macos_readiness")
-_SYSTEM_HOST = Host.system()
+# meiva:note
+# The host is read for its uid only, so its environment is deliberately empty.
+_SYSTEM_HOST = Host.system(environ={})
 
 _PROBE_TIMEOUT_S = 5.0
 READINESS_RETRY_S = 5.0
@@ -73,13 +75,11 @@ def run_probe(argv: list[str]) -> ProbeResult:
     )
 
 
+# meiva:note
+# The current process account on macOS and its home directory. Account-derived on purpose, not
+# inherited from shell environment variables, which may describe the SSH caller rather than the
+# launch context of the detached service.
 def current_account() -> tuple[str, Path]:
-    """Current process account and its home directory on macOS.
-
-    This is intentionally account-derived rather than inherited from shell
-    environment variables, which may describe the SSH caller rather than the
-    launch context of the detached service.
-    """
     entry = pwd.getpwuid(_SYSTEM_HOST.uid)
     return entry.pw_name, Path(entry.pw_dir)
 

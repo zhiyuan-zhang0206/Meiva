@@ -61,6 +61,7 @@ def _host(directory: Path, *, macos: bool = False, uid: int = 1000) -> Host:
         which=partial(shutil.which, path=str(directory)),
         platform=DARWIN_ARM64 if macos else LINUX_X86,
         uid=uid,
+        environ={},
     )
 
 

@@ -26,9 +26,7 @@ from base.cluster.machine import MachineIdentityReader
 from base.cluster.machine.tests.identity import machine_identity as machine_identity
 from base.config import runtime_config
 from base.config.service_read import ConfigAuthority
-from base.host import config_validators
 from base.host.env.tests.env_files import unit_env_aliases, unit_env_path
-from base.host.system.hostport import Host
 from base.host.system.tests.fake_commands import DARWIN_ARM64, fake_host
 from base.paths import meiva_home
 from gateway.tests.auth.gateway_config import gateway_test_client
@@ -166,14 +164,9 @@ def test_get_self_host_fields_carry_capability_hint() -> None:
 
 
 # meiva:note
-# GET self with no display: browser_enabled.can_enable is False + a reason. The display probe
-# reads the ambient environment, so no host value makes a headless machine on every platform;
-# the probe is replaced here, once.
-def test_get_self_browser_disabled_when_no_display(monkeypatch: pytest.MonkeyPatch) -> None:
-    def no_display(*, host: Host) -> bool:
-        return False
-
-    monkeypatch.setattr(config_validators, "display_available", no_display)
+# GET self with no display: browser_enabled.can_enable is False + a reason. The test gateway's
+# default host is a Linux machine whose environment names no display.
+def test_get_self_browser_disabled_when_no_display() -> None:
     with gateway_test_client() as client:
         resp = client.get("/api/config")
     assert resp.status_code == 200, resp.text

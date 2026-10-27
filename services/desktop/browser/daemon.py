@@ -290,7 +290,7 @@ def main() -> None:
     config.boot()
     home = meiva_home()
     run_browser_daemon(
-        host=Host.system(),
+        host=Host.system(environ=config.process_environment()),
         cdp_port=config.view.services.browser_cdp_port,
         chrome_binary=config.view.services.chrome_binary,
         home=home,

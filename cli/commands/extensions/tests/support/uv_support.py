@@ -64,6 +64,12 @@ def fake_uv_build(
 # for the two tests that build a real venv.
 def real_uv_build(caller_environ: dict[str, str]) -> UvBuild:
     return UvBuild(
-        host=Host(run=run_bounded, which=shutil.which, platform=LINUX_X86, uid=os.getuid()),
+        host=Host(
+            run=run_bounded,
+            which=shutil.which,
+            platform=LINUX_X86,
+            uid=os.getuid(),
+            environ={},
+        ),
         caller_environ=caller_environ,
     )

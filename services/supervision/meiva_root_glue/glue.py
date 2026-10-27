@@ -207,7 +207,6 @@ def build_wiring(
     from base.paths import meiva_home
 
     home = meiva_home().resolve(strict=True)
-    host = Host.system()
     identity = capture_loaded_runtime()
     if Path.cwd().resolve() != Path(identity.cwd):
         raise RuntimeError("root cwd differs from its loaded runtime")
@@ -228,6 +227,7 @@ def build_wiring(
     if config is None:
         config = ConfigBoot()
         config.boot()
+    host = Host.system(environ=config.process_environment())
     machine = ConfiguredMachineIdentity(config)
     clock = context.clock
     version = CodeVersion(image)

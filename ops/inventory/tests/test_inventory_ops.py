@@ -1,14 +1,12 @@
 # meiva:note
 # The inventory ops against real files: the unit home holds the machine MCP config, the per-host
 # overlay and the plugin enable file, and the real built-in plugins are discovered from the
-# checkout. The display requirement is tested in a child process whose environment is fixed before
-# import. Nothing is patched.
+# checkout. The display requirement is tested with the environment the host is handed. Nothing is
+# patched.
 
 from __future__ import annotations
 
 import json
-import os
-import sys
 from collections.abc import Mapping
 from pathlib import Path
 
@@ -18,13 +16,12 @@ import base.packages.mcp_config as mcp_cfg_mod
 from base.cluster.machine import MachineIdentityReader
 from base.cluster.machine.configured import ConfiguredMachineIdentity
 from base.cluster.machine.tests.identity import machine_identity as machine_identity
-from base.host.proc import run_bounded
-from base.host.system.tests.fake_commands import fake_host
+from base.host.system.tests.fake_commands import LINUX_X86, fake_host
 from base.packages.plugins import enable_config, mcp_enabled
 from base.paths import meiva_home
 from base.paths.tests.homes import unit_home as unit_home
 from ops.inventory import inventory_read_op, inventory_write_op
-from ops.rpc_schemas import FieldWriteResult, InventoryReadResult, InventoryWriteOpResult
+from ops.rpc_schemas import FieldWriteResult
 
 
 def _write_machine_mcp(unit_home: Path, servers: Mapping[str, Mapping[str, object]]) -> None:
@@ -196,35 +193,55 @@ def test_inventory_write_op_rejects_unknown_mcp_server(
 
 # meiva:note
 # A server requiring a display, on a host with none, cannot be enabled but can always be disabled.
-# The child process has no display in its environment, fixed before application import.
-def test_inventory_write_op_mcp_capability_rejected(runner_home: Path) -> None:
+def test_inventory_write_op_mcp_capability_rejected(
+    runner_home: Path, machine_identity: MachineIdentityReader
+) -> None:
     _write_machine_mcp(runner_home, {"that": {"command": "x", "requires": {"display": True}}})
+    host = fake_host(platform=LINUX_X86, programs={"npx": "/test/npx"}, environ={})
+    home = meiva_home()
 
-    child = run_bounded(
-        [sys.executable, "-I", str(Path(__file__).with_name("_capability_child.py"))],
-        env={
-            name: value
-            for name, value in os.environ.items()
-            if name not in {"DISPLAY", "WAYLAND_DISPLAY", "MEIVA_PROCESS_PROFILE"}
-        },
-        capture_output=True,
-        text=True,
-        timeout=30,
-    )
-
-    assert child.returncode == 0, child.stderr
-    result = json.loads(child.stdout)
-    inventory = InventoryReadResult.model_validate(result["inventory"])
+    inventory = inventory_read_op(local_machine=machine_identity, host=host, home=home)
     assert inventory.mcp_servers["that"].can_enable is False
-    enable = InventoryWriteOpResult.model_validate(result["enable"])
+    enable = inventory_write_op(
+        plugins={}, mcp_servers={"that": True}, local_machine=machine_identity, host=host, home=home
+    )
     assert enable.applied is False
     assert enable.mcp_results["that"].ok is False
     assert enable.mcp_results["that"].reason == "requires a display, but this host has none"
-    assert result["after_enable"] == {}
-    disable = InventoryWriteOpResult.model_validate(result["disable"])
+    assert mcp_enabled.read_enabled(home=home) == {}
+    disable = inventory_write_op(
+        plugins={},
+        mcp_servers={"that": False},
+        local_machine=machine_identity,
+        host=host,
+        home=home,
+    )
     assert disable.applied is True
     assert disable.mcp_results["that"] == FieldWriteResult(ok=True, reason=None)
-    assert mcp_enabled.read_enabled(home=meiva_home()) == {"that": False}
+    assert mcp_enabled.read_enabled(home=home) == {"that": False}
+
+
+# meiva:note
+# The same server on a host whose environment names a display can be enabled.
+def test_inventory_write_op_mcp_capability_accepted_with_a_display(
+    runner_home: Path, machine_identity: MachineIdentityReader
+) -> None:
+    _write_machine_mcp(runner_home, {"that": {"command": "x", "requires": {"display": True}}})
+    host = fake_host(platform=LINUX_X86, environ={"WAYLAND_DISPLAY": "wayland-test"})
+    home = meiva_home()
+
+    assert (
+        inventory_read_op(local_machine=machine_identity, host=host, home=home)
+        .mcp_servers["that"]
+        .can_enable
+        is True
+    )
+    enable = inventory_write_op(
+        plugins={}, mcp_servers={"that": True}, local_machine=machine_identity, host=host, home=home
+    )
+    assert enable.applied is True
+    assert enable.mcp_results["that"] == FieldWriteResult(ok=True, reason=None)
+    assert mcp_enabled.read_enabled(home=home) == {"that": True}
 
 
 # meiva:note

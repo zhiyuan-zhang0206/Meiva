@@ -383,7 +383,7 @@ def _build_env(cluster_home: Path) -> BuildEnv:
     from base.host.system.hostport import Host
     from services.desktop.permissions_helper.launchd_job import LaunchdFacts
 
-    host = Host.system()
+    host = Host.system(environ=os.environ)
     return BuildEnv(
         home=cluster_home,
         facts=LaunchdFacts.of(host, user_home=Path.home()),

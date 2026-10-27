@@ -16,10 +16,9 @@ exports = ["config.py", "tests"]
 "_wire.py" = "strict"
 
 [roots]
-"_daemon.py" = { kinds = ["home", "pid", "platform", "settings"], why = "daemon_config_from_process() is the MCP daemon process entry point composition root, reading settings, the Meiva home and process PID once at startup; builds the host of this process with Host.system()" }
+"_daemon.py" = { kinds = ["environ", "home", "pid", "platform", "settings"], why = "daemon_config_from_process() is the MCP daemon process entry point composition root, reading settings, the Meiva home and process PID once at startup; builds the host of this process with Host.system(), handing it the process environment" }
 
 [debt.ambient-read]
-"_daemon.py#environ base.host.system.probes.display_available" = 1
 "_remote.py#clock base.clock.SYSTEM_TIMERS" = 2
 
 [debt.third-party-patch]

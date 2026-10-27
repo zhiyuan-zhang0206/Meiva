@@ -4,10 +4,9 @@ exports = ["lint_no_cjk.py", "lint_no_tailnet.py"]
 "tests" = ["check_cross_branch_migrations.py", "check_doc_references.py", "lint_audit_record.py", "lint_meiva_okf.py", "lint_core_content_manifests.py", "lint_doc_anchors.py", "lint_doc_roster.py", "lint_doc_symbols.py", "lint_migrations.py", "lint_no_cjk.py", "lint_no_tailnet.py", "lint_skill_descriptions.py", "lint_skill_md_size.py"]
 
 [roots]
+"check_cross_branch_migrations.py" = { kinds = ["environ", "platform"], why = "CLI entry of the single-branch premise check: its __main__ block builds the host of this process with Host.system(), handing it the process environment" }
 "lint_doc_roster.py" = { kinds = ["home"], why = "CLI entry of the roster lint: main() resolves the scratch home the entry just entered and builds the service roster the documents are compared against from it" }
 "lint_meiva_okf.py" = { kinds = ["cwd"], why = "CLI OKF linter defaults to the current checkout directory when invoked from the command line" }
 
 [debt.ambient-read]
-"check_cross_branch_migrations.py#environ base.host.git.gitenv.git_env" = 1
-"check_cross_branch_migrations.py#platform base.host.system.hostport.Host.system" = 1
 "lint_core_content_manifests.py#home pathlib.Path.expanduser" = 1

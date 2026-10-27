@@ -134,7 +134,7 @@ def finish(message: str) -> bool:
 
 
 clock = Clock.from_settings()
-host = Host.system()
+host = Host.system(environ=os.environ)
 workflows = repo_has_workflows(Path(CI_UTILS))
 start = clock.monotonic()
 no_checks_retries = 0

@@ -40,7 +40,7 @@ BASELINE = "scripts/structure/skip_sites.json"
 # meiva:note
 # Allowed skip sites in the test tree: only shrink, never grow. Raising it is a decision
 # someone has to defend in review, which is why it is one line in this file.
-TEST_SKIP_SITES_ALLOWED = 58
+TEST_SKIP_SITES_ALLOWED = 57
 
 
 # meiva:note

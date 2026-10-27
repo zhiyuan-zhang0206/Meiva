@@ -1,6 +1,4 @@
 import json
-import os
-import sys
 from collections.abc import Callable
 from pathlib import Path
 from typing import Any
@@ -8,7 +6,6 @@ from typing import Any
 import pytest
 
 import base.packages.mcp_config as cfg_mod
-from base.host.proc import run_bounded
 from base.host.system.hostport import Platform
 from base.host.system.tests.fake_commands import fake_host
 from base.packages.plugins.mcp_enabled import (
@@ -22,7 +19,6 @@ from meiva.tests.fixtures.pin_agent import pin_agent
 
 _MACOS = Platform("darwin", "arm64", "/usr/bin/python3")
 _LINUX = Platform("linux", "x86_64", "/usr/bin/python3")
-_NO_DISPLAY_CHILD = Path(__file__).with_name("child_no_display.py")
 
 
 def _write(path: Path, servers: dict[str, dict[str, str]]) -> None:
@@ -235,19 +231,24 @@ def test_assert_requirements_display_ok_with_display() -> None:
 
 
 # meiva:note
-# A Linux host reads `$DISPLAY` / `$WAYLAND_DISPLAY` from its process environment, so the
-# headless case runs in a real interpreter whose environment lacks both.
-def test_assert_requirements_display_raises_without_display() -> None:
-    env = {k: v for k, v in os.environ.items() if k not in ("DISPLAY", "WAYLAND_DISPLAY")}
-    result = run_bounded(
-        [sys.executable, "-I", str(_NO_DISPLAY_CHILD)],
-        env=env,
-        capture_output=True,
-        text=True,
-        timeout=60,
-    )
-    assert result.returncode == 0, result.stderr
-    assert "requires a display" in result.stdout
+# A Linux host has a display when its environment names one (`DISPLAY` for X11, `WAYLAND_DISPLAY`
+# for Wayland) and has none otherwise: the host decides, not the environment of the test process.
+@pytest.mark.parametrize("name", ["DISPLAY", "WAYLAND_DISPLAY"])
+def test_assert_requirements_display_ok_on_a_linux_host_whose_environment_names_one(
+    name: str,
+) -> None:
+    host = fake_host(platform=_LINUX, environ={name: ":7"})
+    cfg_mod.assert_requirements({"requires": {"display": True}}, host=host)
+    assert cfg_mod.server_capability({"requires": {"display": True}}, host=host) == (True, None)
+
+
+def test_assert_requirements_display_raises_on_a_linux_host_without_one() -> None:
+    host = fake_host(platform=_LINUX, environ={"DISPLAY": ""})
+    with pytest.raises(cfg_mod.MCPError, match="requires a display"):
+        cfg_mod.assert_requirements({"requires": {"display": True}}, host=host)
+    capable, reason = cfg_mod.server_capability({"requires": {"display": True}}, host=host)
+    assert capable is False
+    assert reason is not None and "display" in reason
 
 
 def test_assert_requirements_unknown_key_fails_fast() -> None:

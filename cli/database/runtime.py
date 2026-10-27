@@ -161,7 +161,7 @@ class CommandRuntime:
     @classmethod
     def create(cls, home: Path) -> CommandRuntime:
         config = ConfigBoot()
-        host = Host.system()
+        host = Host.system(environ=config.process_environment())
         return cls(
             config=config,
             pid=os.getpid(),

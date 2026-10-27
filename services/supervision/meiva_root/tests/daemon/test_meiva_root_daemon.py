@@ -504,7 +504,7 @@ def _assert_failed_adoption(ctx: BootUnitContext, receipt: Path, failure: str) -
     assert receipt.with_suffix(".failure").read_text() == failure
     births = json.loads(receipt.read_text())
     assert set(births) == {"data", "root", "app"}
-    assert boot_unit.manager_properties(host=Host.system())["MainPID"] == "0"
+    assert boot_unit.manager_properties(host=Host.system(environ={}))["MainPID"] == "0"
     # meiva:note
     # Before publication the deliberately stale hint names data; afterwards it
     # names root. Neither becomes MainPID when the ordinary starter fails.
@@ -519,7 +519,7 @@ def _assert_failed_adoption(ctx: BootUnitContext, receipt: Path, failure: str) -
 def _require_native_systemd() -> None:
     from base.host.system import boot_unit
 
-    if sys.platform != "linux" or not boot_unit.systemd_running(host=Host.system()):
+    if sys.platform != "linux" or not boot_unit.systemd_running(host=Host.system(environ={})):
         pytest.skip("native Linux systemd required")
     allowed = subprocess.run(["sudo", "-n", "true"], check=False, timeout=10)
     if allowed.returncode:
@@ -614,7 +614,7 @@ def test_native_systemd_root_lifetime(tmp_path: Path, failure: str) -> None:
 
         owners = {key: OwnedProcess(**value) for key, value in raw.items()}
         root, app, data = owners["root"], owners["app"], owners["data"]
-        manager = boot_unit.manager_properties(host=Host.system())
+        manager = boot_unit.manager_properties(host=Host.system(environ={}))
         assert manager["MainPID"] == str(root.pid)
         assert manager["ActiveState"] == "active"
         assert psutil.Process(root.pid).ppid() == 1, "manager did not adopt root as its child"
