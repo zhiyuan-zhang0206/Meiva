@@ -21,5 +21,4 @@ exports = ["db", "execution", "extensions", "graph", "hooks", "impersonation.py"
 
 [debt.ambient-read]
 "impersonation.py#home base.paths.workspaces_root" = 1
-"process_boot.py#home base.paths.meiva_home" = 2
 "process_boot.py#home base.paths.workspace_dir" = 2
