@@ -222,7 +222,7 @@ async def test_an_oauth_connect_reads_the_token_of_the_configurations_home(
         OAuthToken(access_token="at-config", token_type="Bearer", expires_in=3600)  # noqa: S106
     )
     async with http_mcp_server() as remote:
-        write_servers(unit_home, {"remote": {"url": remote.url, "oauth": True}})
+        write_servers(config_home, {"remote": {"url": remote.url, "oauth": True}})
         outcome = await _connect_outcome(
             await _start_connect_child(unit_home, "remote", 15.0, config_home)
         )

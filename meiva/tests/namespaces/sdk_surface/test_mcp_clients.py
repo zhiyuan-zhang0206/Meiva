@@ -84,8 +84,9 @@ def test_mcp_client_construction_waits_for_the_first_call_to_read_configuration(
 def test_the_tool_cache_sits_under_the_home_of_the_bound_context(
     unit_home: Path, tmp_path: Path
 ) -> None:
-    (unit_home / "mcp.json").write_text(json.dumps({"mcpServers": {"fs": {"command": "x"}}}))
     context_home = tmp_path / "context-home"
+    context_home.mkdir()
+    (context_home / "mcp.json").write_text(json.dumps({"mcpServers": {"fs": {"command": "x"}}}))
     context, _ = context_with_timeout(7.5, context_home)
     previous = process_context.unbind_context()
     try:
