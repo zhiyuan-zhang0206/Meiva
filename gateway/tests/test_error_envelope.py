@@ -22,6 +22,9 @@ from starlette.responses import Response
 
 from base import paths
 from base.api_contracts.agent_contract import AgentNotFound, ErrorReason, MeivaAgentError
+from base.clock import Clock, ClockConfig
+from base.clock.tests.fakes import system_clock
+from base.clock.tests.manual_timers import ManualTimers
 from base.config.tests.configuration import snapshot_process_config
 from base.host.db_authority.api import AcceptanceCache
 from base.telemetry.tests.capture.event_capture import EmittedEvents
@@ -212,6 +215,7 @@ def _request(
 @pytest.fixture(autouse=True)
 def _auth401_state() -> None:
     """Each middleware test gets its own gateway-lifetime counters and served root."""
+    _middleware_app.state.clock = system_clock()
     _middleware_app.state.auth401_log = rejection_log.AuthRejectionLog()
     machine_token_acceptance: AcceptanceCache = {}
     _middleware_app.state.machine_token_acceptance = machine_token_acceptance
@@ -364,6 +368,25 @@ def test_auth_middleware_suppresses_immediate_non_stream_401_repeat(
     assert [record.levelno for record in records] == [logging.DEBUG]
     assert "suppressed" in records[0].getMessage()
     assert _middleware_app.state.auth401_log.suppressed[("127.0.0.1", "/api/agents")] == 1
+
+
+# meiva:note
+# The middleware stamps a rejection with the app clock's monotonic time: after the cooldown elapsed on
+# that clock, a repeat from the same client and path is a WARNING again, not a suppressed DEBUG. The warning cooldown is 300 s.
+def test_auth_middleware_throttles_a_repeat_by_the_app_clock(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    caplog.set_level(logging.DEBUG, logger="gateway.http.auth.rejection_log")
+    timers = ManualTimers(start=100.0)
+    _middleware_app.state.clock = Clock(ClockConfig("UTC", "UTC", False), timers=timers)
+    request = _request()
+
+    _unauthorized_auth_response(request)
+    caplog.clear()
+    timers.advance(301.0)
+    _unauthorized_auth_response(request)
+
+    assert [record.levelno for record in _auth401_records(caplog)] == [logging.WARNING]
 
 
 # meiva:note
