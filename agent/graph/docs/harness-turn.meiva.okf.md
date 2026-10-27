@@ -74,7 +74,13 @@ in `FileSessionRegistry`.
   calls and reasoning already projected during the turn are committed to `state.messages`
   and covered by `harness_cursor` before `claim` settles the termination inbound.
 - A session that faults or closes mid-turn retires itself and raises a fatal stream
-  abort; the next inbound opens a fresh resumed session from the registry.
+  abort; the next inbound opens a fresh resumed session from the registry. Only a
+  failure that names this turn ends it, and a session failure ends it as a closed
+  session rather than as this turn's verdict
+  ([[base/lm/harness/docs/attribution.meiva.okf.md|attribution]]).
+- Work a harness reports after its turn (a background command) becomes a
+  `system:harness` inbound (`base/agents/inbox/harness_notice.py`), so
+  the agent wakes on it through this same path.
 - Retirement is asynchronous (`HarnessSessions.retire`), and the next turn awaits
   `join` before starting a replacement CLI. Cancelling a waiter does not cancel the
   close; close errors remain fenced across later joins, and observed process residue

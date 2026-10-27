@@ -10,6 +10,7 @@ from base.lm.harness import Handoff
 from base.lm.harness.base_session import SessionBinding
 from base.lm.harness.claude import BridgeConfig, ClaudeSession
 from base.lm.harness.claude.tests.fake_sdk import FakeSDK, ScriptedProbe
+from base.lm.harness.events import UnsolicitedSink
 from base.lm.harness.registry import FileSessionRegistry
 
 CLI_PID = 4242
@@ -71,6 +72,7 @@ async def start(
     observe_pid: bool = True,
     environ: dict[str, str] | None = None,
     session_id: str = "session-1",
+    unsolicited: UnsolicitedSink | None = None,
     **config_overrides: Any,
 ) -> Harness:
     sdk = FakeSDK(scripts, cli_pid=CLI_PID)
@@ -91,7 +93,7 @@ async def start(
     session = ClaudeSession(
         config(tmp_path, **config_overrides),
         environ=environ if environ is not None else {},
-        binding=SessionBinding(agent_id, registry),
+        binding=SessionBinding(agent_id, registry, unsolicited),
         sdk=sdk,
         probe=scripted_probe,
         clock=system_clock(),

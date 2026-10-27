@@ -5,7 +5,7 @@ import base64
 import json
 import os
 import random
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Sequence
 from dataclasses import replace
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
@@ -27,10 +27,13 @@ from base.lm.harness import (
     HarnessTurnFaultedError,
     RegistrationStore,
     ScopedSessionRegistry,
+    SessionFailed,
     SessionFaulted,
     SessionRecord,
     SessionStarted,
     TurnCompleted,
+    TurnFaulted,
+    UnsolicitedOutput,
     Usage,
     handle_digest,
 )
@@ -77,7 +80,13 @@ def completion(turn_id: str, text: str, usage: Usage | None = None) -> TurnCompl
 # what it counts.
 # meiva:link agent/graph/docs/harness-turn.meiva.okf.md
 class FakeSession:
-    def __init__(self, *, opening: str | None = None, fault: str | None = None) -> None:
+    def __init__(
+        self,
+        *,
+        opening: str | None = None,
+        fault: str | None = None,
+        during: Sequence[BridgeEvent] = (),
+    ) -> None:
         self.started = 0
         self.closed = False
         self.close_reason: str | None = None
@@ -93,6 +102,11 @@ class FakeSession:
         self._n = 0
         self._opening = opening
         self._fault = fault
+        # meiva:note
+        # Events a provider emits while the turn runs and before its own result: a
+        # message about another turn, a report the provider answered itself.
+        # meiva:link agent/graph/docs/harness-turn.meiva.okf.md
+        self._during = tuple(during)
 
     async def start(self, *, resume: str | None = None, handoff: Handoff | None = None) -> None:
         self.started += 1
@@ -109,6 +123,7 @@ class FakeSession:
         turn_id = f"t{self._n}"
         self.submitted.append((text, key, turn_id))
         self._queue.append(AssistantText(turn_id=turn_id, text=f"partial-{turn_id}"))
+        self._queue.extend(self._during)
         if self._n == 1 and self._opening is not None:
             self._queue.append(
                 completion(turn_id, self._opening, Usage(input_tokens=100, output_tokens=1))
@@ -224,6 +239,58 @@ async def test_a_faulted_turn_retires_its_session_and_the_next_one_starts_fresh(
     assert turn.text == "reply-t1", "the rebuilt session runs its own first turn"
     assert fresh.started == 1
     assert fresh.submitted == [("again", "inbound-2", "t1")]
+
+
+async def test_a_failure_naming_another_turn_does_not_end_this_one() -> None:
+    # meiva:note
+    # The provider's own turn, or a turn an earlier session ran, reports a failure.
+    # It names a turn this wait is not running, so acting on it would fail the wrong
+    # turn — the other half of the boundary bug in #5663.
+    # meiva:link base/lm/harness/docs/harness.meiva.okf.md
+    session = FakeSession(during=[TurnFaulted(turn_id="turn-of-another-session", error="not ours")])
+    bridge = make_bridge(session)
+
+    turn = await bridge.run_turn("hello", key="inbound-1")
+
+    assert turn.text == "reply-t1"
+    assert not session.closed, "a foreign failure does not retire a healthy session"
+
+
+async def test_a_providers_own_terminal_message_does_not_truncate_the_turn() -> None:
+    session = FakeSession(
+        during=[UnsolicitedOutput(source="task-notification", text="its own answer")]
+    )
+    bridge = make_bridge(session)
+
+    turn = await bridge.run_turn("hello", key="inbound-1")
+
+    assert turn.text == "reply-t1", "the provider's own reply is not this turn's text"
+    assert not session.closed
+
+
+async def test_a_session_failure_ends_the_wait_as_a_closed_session() -> None:
+    session = FakeSession(during=[SessionFailed(error="the provider stream died")])
+    bridge = make_bridge(session)
+
+    with pytest.raises(HarnessClosedError, match="provider stream died"):
+        await bridge.run_turn("hello", key="inbound-1")
+
+    assert session.closed, "a dead session is retired, never reused"
+
+
+async def test_a_retired_fault_naming_no_turn_is_not_blamed_on_the_turn() -> None:
+    # meiva:note
+    # The retired shape an adapter that has not migrated still emits. With no turn
+    # named it can only be the session's failure, so it must not settle as this
+    # turn's own verdict (#5663).
+    # meiva:link base/lm/harness/docs/harness.meiva.okf.md
+    session = FakeSession(during=[SessionFaulted(error="stream died")])
+    bridge = make_bridge(session)
+
+    with pytest.raises(HarnessClosedError, match="stream died"):
+        await bridge.run_turn("hello", key="inbound-1")
+
+    assert session.closed
 
 
 async def test_the_handoff_is_injected_once_and_the_session_started_once() -> None:

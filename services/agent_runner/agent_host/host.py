@@ -61,6 +61,7 @@ from base.events.live.bus import EventBus
 from base.events.live.publisher import AgentEventPublisher
 from base.host.env.agent_slices import AgentSlices
 from base.lm.catalog import ModelCatalog
+from base.lm.harness import UnsolicitedOutput
 from base.lm.harness.registration import RegistrationStore
 from base.lm.harness.registry import FileSessionRegistry
 from base.lm.harness.wiring import BridgeRootValues
@@ -507,7 +508,17 @@ class AgentHost:
                 handle_rng=self._policy.rng,
             ),
             contributions=tuple(hc for _, hc in self._extensions.harness_contributions(harness)),
+            unsolicited=partial(self._report_unsolicited, agent_id),
         )
+
+    # meiva:note
+    # The session's sink for output that belonged to no turn (#5663). It runs on the
+    # adapter's read loop, so it only hands the report to the owner that writes it off
+    # the loop; the write is an ordinary inbound, which is what makes the agent take a
+    # turn over it.
+    # meiva:link base/lm/harness/docs/attribution.meiva.okf.md
+    def _report_unsolicited(self, agent_id: int, event: UnsolicitedOutput) -> None:
+        self._sessions.notify(agent_id, event, db=self._db, bus=self._bus)
 
     def _evict(self) -> None:
         """Evict settled runtimes by idle age and least-recent use."""

@@ -15,7 +15,7 @@ exports = ["acp", "antigravity", "base_session.py", "bridge.py", "claude", "code
 "process.py" = []
 "registration.py" = []
 "registry.py" = []
-"wiring.py" = ["antigravity", "base_session.py", "bridge.py", "claude", "codex", "handoff.py", "kimi", "registration.py", "registry.py"]
+"wiring.py" = ["antigravity", "base_session.py", "bridge.py", "claude", "codex", "events.py", "handoff.py", "kimi", "registration.py", "registry.py"]
 "tests" = ["__init__.py", "antigravity", "base_session.py", "claude", "codex", "handoff.py", "kimi", "registration.py", "registry.py", "wiring.py"]
 
 [purity]

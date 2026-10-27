@@ -43,6 +43,32 @@ class SystemMessage:
     data: dict[str, Any]
 
 
+# meiva:note
+# The three task messages the CLI emits about a background command, with the SDK's
+# own field names. `TaskNotificationMessage` and the other two are `SystemMessage`
+# subclasses in the real SDK too, so the adapter's dispatch — by class name, before
+# the `SystemMessage` entry — is exercised exactly as it is against the CLI.
+# meiva:link base/lm/harness/claude/docs/claude.meiva.okf.md
+@dataclass
+class TaskStartedMessage(SystemMessage):
+    task_id: str = "task-1"
+    description: str = ""
+
+
+@dataclass
+class TaskNotificationMessage(SystemMessage):
+    task_id: str = "task-1"
+    status: str = "completed"
+    output_file: str = ""
+    summary: str = ""
+
+
+@dataclass
+class TaskUpdatedMessage(SystemMessage):
+    task_id: str = "task-1"
+    patch: dict[str, Any] = field(default_factory=dict[str, Any])
+
+
 @dataclass
 class StreamEvent:
     event: dict[str, Any]
@@ -87,6 +113,7 @@ class ResultMessage:
     result: str | None = None
     model_usage: dict[str, Any] | None = None
     permission_denials: list[Any] | None = None
+    origin: dict[str, Any] | None = None
 
 
 @dataclass
@@ -142,6 +169,7 @@ class FakeClaudeSDKClient:
         self.queries: list[str] = []
         self.timeline: list[tuple[str, Any]] = []
         self.interrupts = 0
+        self.stopped: list[str] = []
         self.connected = False
         self.disconnected = False
         self.on_interrupt: Any = None
@@ -223,6 +251,14 @@ class FakeClaudeSDKClient:
         self.timeline.append(("result", result.subtype))
         self._emit(result)
 
+    async def stop_task(self, task_id: str) -> None:
+        self.stopped.append(task_id)
+        self._emit(
+            TaskUpdatedMessage(
+                subtype="task_updated", data={}, task_id=task_id, patch={"status": "killed"}
+            )
+        )
+
     async def interrupt(self) -> None:
         self.interrupts += 1
         await self._cancel_turn()
@@ -254,6 +290,13 @@ class FakeClaudeSDKClient:
 
     def _emit(self, message: Any) -> None:
         self._queue.put_nowait(message)
+
+    # meiva:note
+    # Deliver a message the CLI emitted outside any submitted turn — the real client's
+    # notification stream, which a test drives directly instead of a background command.
+    # meiva:link base/lm/harness/claude/docs/background-tasks.meiva.okf.md
+    def push(self, message: Any) -> None:
+        self._emit(message)
 
 
 class FakeSDK:

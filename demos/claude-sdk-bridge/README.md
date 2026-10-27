@@ -17,6 +17,7 @@ a resume from the registry.
 | 2. mapping | the registry record is written | `agent 6984 -> session <id>` exists on disk |
 | 3. cancel | a `Bash` `ping` starts, then `interrupt()` | `settled` is true and `remaining` is empty |
 | 4. resume | a new process resumes from the registry, no handoff re-injection | the model recalls the number from stage 1 |
+| 5. background | the agent starts a background command, answers, and goes idle; the CLI reports the command's end twenty seconds later | a report reaches the session's sink with no turn running, and a turn started afterwards still produces the model's reply |
 
 The demo prints wall-clock time per stage, the interrupt latency, the child
 reaping result, the handoff size in bytes, and the token/cost totals.

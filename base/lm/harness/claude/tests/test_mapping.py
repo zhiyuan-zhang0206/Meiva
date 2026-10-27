@@ -10,6 +10,7 @@ from base.lm.harness.events import (
     TextDelta,
     ToolResult,
     ToolUse,
+    UnsolicitedOutput,
     Usage,
 )
 
@@ -152,3 +153,57 @@ def test_unknown_messages_map_to_nothing() -> None:
         pass
 
     assert map_message(FutureMessage(), turn_id="t1") == []
+
+
+def test_a_finished_background_task_maps_to_unsolicited_output() -> None:
+    # meiva:note
+    # The report the CLI injects when a background command ends. It belongs to no
+    # turn of ours, so it maps to unsolicited output carrying what the agent needs to
+    # read — the task, its status, and where the output went.
+    # meiva:link base/lm/harness/claude/docs/claude.meiva.okf.md
+    message = fake.TaskNotificationMessage(
+        subtype="task_notification",
+        data={},
+        task_id="bhd09i69m",
+        status="completed",
+        output_file="/var/tasks/bhd09i69m.output",
+        summary='Background command "sleep 100; echo BGDONE" completed (exit code 0)',
+    )
+
+    [event] = map_message(message, turn_id=None)
+
+    assert event == UnsolicitedOutput(
+        source="task-notification",
+        text=(
+            "Background task bhd09i69m reported completed.\n"
+            'Background command "sleep 100; echo BGDONE" completed (exit code 0)\n'
+            "Output file: /var/tasks/bhd09i69m.output"
+        ),
+    )
+
+
+def test_a_task_report_without_a_summary_still_names_the_output() -> None:
+    [event] = map_message(
+        fake.TaskNotificationMessage(subtype="task_notification", data={}, task_id="t1"),
+        turn_id=None,
+    )
+
+    assert isinstance(event, UnsolicitedOutput)
+    assert "Background task t1 reported completed." in event.text
+    assert "Output file" not in event.text
+
+
+def test_a_result_carries_the_origin_the_cli_names() -> None:
+    # meiva:note
+    # The origin is what lets the session tell its own turn from the CLI's turn over
+    # a notification; a CLI that names nothing answers None and is read as ours.
+    # meiva:link base/lm/harness/claude/docs/claude.meiva.okf.md
+    own = parse_result(fake.ResultMessage(subtype="success"))
+    foreign = parse_result(
+        fake.ResultMessage(subtype="success", origin={"kind": "task-notification"})
+    )
+    human = parse_result(fake.ResultMessage(subtype="success", origin={"kind": "human"}))
+
+    assert own.origin_kind is None
+    assert foreign.origin_kind == "task-notification"
+    assert human.origin_kind == "human"

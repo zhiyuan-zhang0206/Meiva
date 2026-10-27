@@ -15,6 +15,7 @@ from base.lm.harness.base_session import SessionBinding, SessionClock
 from base.lm.harness.bridge import HarnessBridge, HarnessSession, ScopedSessionRegistry
 from base.lm.harness.claude import BridgeConfig, ClaudeSession
 from base.lm.harness.codex import CodexConfig, CodexSession
+from base.lm.harness.events import UnsolicitedSink
 from base.lm.harness.handoff import ClusterFact, Handoff, HarnessContribution
 from base.lm.harness.kimi import KimiConfig, KimiSession
 from base.lm.harness.registration import HANDLE_ENV, RegistrationStore, SecureRandom
@@ -61,6 +62,7 @@ def open_session(
     environ: Mapping[str, str],
     clock: SessionClock,
     skip_permissions: bool = True,
+    unsolicited: UnsolicitedSink | None = None,
 ) -> HarnessSession:
     if harness is Harness.CLAUDE_CODE:
         claude_env = session_environ(environ)
@@ -70,7 +72,7 @@ def open_session(
                 cli_path=resolve_harness_binary("claude", path_env=claude_env.get("PATH")),
             ),
             environ={**dict.fromkeys(process_environment(), ""), **claude_env},
-            binding=SessionBinding(agent_id, registry),
+            binding=SessionBinding(agent_id, registry, unsolicited),
             clock=clock,
         )
     if harness is Harness.CODEX:
@@ -168,6 +170,7 @@ def bridge_for(
     root: BridgeRootValues,
     skip_permissions: bool = True,
     contributions: Iterable[HarnessContribution] = (),
+    unsolicited: UnsolicitedSink | None = None,
 ) -> HarnessBridge | None:
     if harness is Harness.MEIVA:
         return None
@@ -189,6 +192,7 @@ def bridge_for(
             environ={**session_environ(environ), HANDLE_ENV: handle},
             clock=root.clock,
             skip_permissions=skip_permissions,
+            unsolicited=unsolicited,
         )
 
     return HarnessBridge(

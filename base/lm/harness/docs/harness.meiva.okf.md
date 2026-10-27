@@ -51,7 +51,7 @@ and open questions are recorded in
 
 | Module | Owns |
 |---|---|
-| `base_session.py` | `BaseHarnessSession`, `TurnTicket`, `TurnOutcome`, `SessionTotals`, `InboundQueueFullError`, `SessionClosedError`, and `EVENT_STREAM_END`: the shared session state machine (inbound queue, turn promotion, idempotency deduplication, bounded outbound event queue with delta-dropping backpressure, turn timeout watchdog, background `TaskGroup` management, `SessionRegistry` persistence, and injected `Clock`) |
+| `base_session.py` | `BaseHarnessSession`, `TurnTicket`, `TurnOutcome`, `SessionTotals`, `SessionBinding`, `InboundQueueFullError`, `SessionClosedError`, and `EVENT_STREAM_END`: the shared session state machine (inbound queue, turn promotion, idempotency deduplication, bounded outbound event queue with delta-dropping backpressure, turn timeout watchdog, background `TaskGroup` management, `SessionRegistry` persistence, injected `Clock`) |
 | `events.py` | `BridgeEvent` and its members, plus the droppable (text delta) versus control split |
 | `engine.py` | `HarnessSession` (the adapter contract), `TurnEngine` (what a graph run needs), and `HarnessTurn` (one turn's reply, usage and boundary, plus the `prelude` turns that completed before it) |
 | `handoff.py` | the six-section handoff document, `HANDOFF_VERSION`, and its rendered byte size |
@@ -109,6 +109,11 @@ cost the host reports (`Handoff.size_bytes()`, and a `HandoffInjected` event).
 Section order, the versioned field set, the tests that pin both and
 completed-key replay are defined in
 [[base/lm/harness/docs/handoff.meiva.okf.md|The handoff document]].
+
+## Who a message belongs to
+
+The failure split, the `_claim` entry point and where unowned output goes:
+[[base/lm/harness/docs/attribution.meiva.okf.md|attribution]].
 
 ## Identity
 
