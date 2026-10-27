@@ -29,7 +29,6 @@ from pathlib import Path
 from typing import TextIO
 
 from base.host.proc import process_alive
-from base.paths import meiva_home
 
 # meiva:note
 # Names never worth copying out of a Chrome user-data dir. `Singleton*` are the
@@ -53,12 +52,12 @@ _EXCLUDED_NAMES = frozenset(
 )
 
 
-def profile_dir() -> Path:
-    """The agent's dedicated Chrome profile (`$MEIVA_HOME/chrome-profile`).
-
-    Single source of truth shared by the daemon (which launches Chrome against
-    it) and this module (which may seed it)."""
-    return meiva_home() / "chrome-profile"
+# meiva:note
+# The agent's dedicated Chrome profile (`<home>/chrome-profile`): the single source of
+# truth shared by the daemon (which launches Chrome against it) and this module (which
+# may seed it).
+def profile_dir(home: Path) -> Path:
+    return home / "chrome-profile"
 
 
 def profile_is_populated(path: Path) -> bool:
@@ -215,7 +214,9 @@ def _confirm_copy(src: Path, dst: Path, size_bytes: int, console: Console) -> bo
 # meiva:note
 # Converge passes the daily profile candidate selected from its captured session home and
 # platform. Probe it only after preserving existing destinations and noninteractive starts.
-def ensure_browser_profile(*, interactive: bool, daily_profile: Path, console: Console) -> None:
+def ensure_browser_profile(
+    *, interactive: bool, daily_profile: Path, profile: Path, console: Console
+) -> None:
     """Offer, once, to seed the agent's dedicated Chrome profile from the daily one.
 
     No-ops (leaving the daemon to create a fresh empty profile) when the profile
@@ -223,8 +224,7 @@ def ensure_browser_profile(*, interactive: bool, daily_profile: Path, console: C
     Chrome profile to copy from. Otherwise prompts; on 'copy' it refuses while
     Chrome is still running (retry loop), reports the size, takes a final
     confirmation, then copies."""
-    dst = profile_dir()
-    if dst.exists():
+    if profile.exists():
         return  # never clobber an existing profile
     if not interactive:
         return  # non-interactive default = fresh empty profile
@@ -248,8 +248,8 @@ def ensure_browser_profile(*, interactive: bool, daily_profile: Path, console: C
         ):
             return
 
-    if not _confirm_copy(src, dst, dir_size_bytes(src), console):
+    if not _confirm_copy(src, profile, dir_size_bytes(src), console):
         return
-    console.say(f"  Copying your Chrome profile into {dst} … (this may take a while)")
-    copy_default_profile(src, dst)
+    console.say(f"  Copying your Chrome profile into {profile} … (this may take a while)")
+    copy_default_profile(src, profile)
     console.say("  Done — the agent's browser now shares your logged-in Chrome state.")

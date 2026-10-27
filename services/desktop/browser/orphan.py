@@ -1,65 +1,65 @@
-"""Reach the Chrome that left the supervised process tree.
-
-`meiva stop` and `meiva cluster destroy` are the two paths that mean
-"this cluster's headed Chrome goes down too", and they say it by killing the
-`meiva-browser` session's process tree. That is enough while Chrome is *in* the
-tree. It stops being enough after a `SingletonLock` handoff: Chrome's launched
-process forwards its command line to another browser process and exits, and the
-survivor is no longer a descendant of the session. The session kill then reports
-success while Chrome keeps running and holds this cluster's CDP port, so the
-next launch meets the daemon's port guard and refuses.
-
-A better tree walk cannot fix this. `base.host.proc.kill_process_tree` resolves
-descendants by ppid, and the ppid link to the session is exactly what the handoff
-destroyed — the orphan is not a descendant of anything we hold. What is missing is
-a way to *name* Meiva's Chrome without walking to it. That is this module: naming it
-by the cluster's own profile directory, and only then handing the named root to
-`kill_process_tree` (which does the right thing once the root is correct, since
-Chrome's renderers/GPU/utility children really are its descendants).
-
-## The identification, and why it cannot take the operator's browser
-
-`is_cluster_chrome` selects a process only when ALL of these hold:
-
-1. its argv carries the exact token ``--user-data-dir=<this cluster's profile>``
-   (`profile.profile_dir()`, i.e. `$MEIVA_HOME/chrome-profile`);
-2. its argv carries no ``--type=`` — Chrome tags every child process it spawns
-   with one, so this narrows the match to the *browser* process and leaves the
-   helpers to be reaped as its descendants;
-3. its executable name looks like Chrome/Chromium (`_CHROME_NAME_MARKER`).
-
-(1) is the authorizing signal and it is strictly positive. The profile path is
-minted per cluster under a `$MEIVA_HOME` that belongs to this install alone, so no
-Chrome that is not ours is launched with it: the operator's daily Chrome runs on
-the platform-default profile and passes no `--user-data-dir` at all, and any other
-explicitly-profiled Chrome on the box passes a different one (both shapes measured
-side by side on the dev Mac — a daily Chrome with a flagless 60-character argv, and
-a `chrome-devtools-mcp` Chrome on its own cache profile). The one process that
-*can* satisfy (1) without being the daemon's own child is a Chrome someone started
-by hand against Meiva's profile — which is holding Meiva's profile lock and Meiva's CDP
-port, is precisely the squatter the port guard complains about, and is a thing a
-full teardown is right to take down.
-
-(3) only narrows: it keeps a non-Chrome process that merely mentions the path on
-its command line (a `grep`, an editor) out of the kill. Being a name test it can
-be wrong in one direction only — an unrecognised Chrome build is not selected, so
-the orphan survives, which is today's behaviour and not a new harm.
-
-Nothing here is ever selected by exclusion, and no signal is inferred from the
-absence of evidence. Unreadable argv (another user's process — `AccessDenied`) is
-therefore a **skip, not an error**: the token is the only thing that authorizes a
-kill, so a process whose argv cannot be read has not been identified, and the
-teardown carries on. The asymmetry is deliberate — a missed orphan costs the
-operator one manual kill, and a wrong kill costs them their logged-in browser.
-
-## Platform
-
-POSIX. A `SingletonLock` handoff is Chrome's behaviour. The daemon `os.execvp`s,
-so the pane's process *is* Chrome and there is no launcher left to hand off from —
-but a Chrome that detaches from that exec'd process leaves the identical orphan
-on the identical CDP port, and
-nothing in the identification depends on a particular POSIX host.
-"""
+# meiva:note
+# Reach the Chrome that left the supervised process tree.
+#
+# `meiva stop` and `meiva cluster destroy` are the two paths that mean
+# "this cluster's headed Chrome goes down too", and they say it by killing the
+# `meiva-browser` session's process tree. That is enough while Chrome is *in* the
+# tree. It stops being enough after a `SingletonLock` handoff: Chrome's launched
+# process forwards its command line to another browser process and exits, and the
+# survivor is no longer a descendant of the session. The session kill then reports
+# success while Chrome keeps running and holds this cluster's CDP port, so the
+# next launch meets the daemon's port guard and refuses.
+#
+# A better tree walk cannot fix this. `base.host.proc.kill_process_tree` resolves
+# descendants by ppid, and the ppid link to the session is exactly what the handoff
+# destroyed — the orphan is not a descendant of anything we hold. What is missing is
+# a way to *name* Meiva's Chrome without walking to it. That is this module: naming it
+# by the cluster's own profile directory, and only then handing the named root to
+# `kill_process_tree` (which does the right thing once the root is correct, since
+# Chrome's renderers/GPU/utility children really are its descendants).
+#
+# ## The identification, and why it cannot take the operator's browser
+#
+# `is_cluster_chrome` selects a process only when ALL of these hold:
+#
+# 1. its argv carries the exact token ``--user-data-dir=<this cluster's profile>``
+#    (`profile.profile_dir(home)`, i.e. `$MEIVA_HOME/chrome-profile`);
+# 2. its argv carries no ``--type=`` — Chrome tags every child process it spawns
+#    with one, so this narrows the match to the *browser* process and leaves the
+#    helpers to be reaped as its descendants;
+# 3. its executable name looks like Chrome/Chromium (`_CHROME_NAME_MARKER`).
+#
+# (1) is the authorizing signal and it is strictly positive. The profile path is
+# minted per cluster under a `$MEIVA_HOME` that belongs to this install alone, so no
+# Chrome that is not ours is launched with it: the operator's daily Chrome runs on
+# the platform-default profile and passes no `--user-data-dir` at all, and any other
+# explicitly-profiled Chrome on the box passes a different one (both shapes measured
+# side by side on the dev Mac — a daily Chrome with a flagless 60-character argv, and
+# a `chrome-devtools-mcp` Chrome on its own cache profile). The one process that
+# *can* satisfy (1) without being the daemon's own child is a Chrome someone started
+# by hand against Meiva's profile — which is holding Meiva's profile lock and Meiva's CDP
+# port, is precisely the squatter the port guard complains about, and is a thing a
+# full teardown is right to take down.
+#
+# (3) only narrows: it keeps a non-Chrome process that merely mentions the path on
+# its command line (a `grep`, an editor) out of the kill. Being a name test it can
+# be wrong in one direction only — an unrecognised Chrome build is not selected, so
+# the orphan survives, which is today's behaviour and not a new harm.
+#
+# Nothing here is ever selected by exclusion, and no signal is inferred from the
+# absence of evidence. Unreadable argv (another user's process — `AccessDenied`) is
+# therefore a **skip, not an error**: the token is the only thing that authorizes a
+# kill, so a process whose argv cannot be read has not been identified, and the
+# teardown carries on. The asymmetry is deliberate — a missed orphan costs the
+# operator one manual kill, and a wrong kill costs them their logged-in browser.
+#
+# ## Platform
+#
+# POSIX. A `SingletonLock` handoff is Chrome's behaviour. The daemon `os.execvp`s,
+# so the pane's process *is* Chrome and there is no launcher left to hand off from —
+# but a Chrome that detaches from that exec'd process leaves the identical orphan
+# on the identical CDP port, and
+# nothing in the identification depends on a particular POSIX host.
 
 from __future__ import annotations
 
@@ -70,8 +70,6 @@ import psutil
 
 from base.host.proc import kill_process_tree
 from base.log import logger
-
-from .profile import profile_dir
 
 # meiva:note
 # Exceptions meaning "gone, or not ours to read". `psutil.NoSuchProcess` and
@@ -161,7 +159,7 @@ def select_cluster_chrome_pids(procs: Iterable[psutil.Process], profile: Path) -
     return found
 
 
-def find_cluster_chrome(profile: Path | None = None) -> list[int]:
+def find_cluster_chrome(profile: Path) -> list[int]:
     """Pids of this cluster's Chrome browser processes (usually zero or one).
 
     Walks the whole process table because the orphan is reachable no other way —
@@ -169,8 +167,7 @@ def find_cluster_chrome(profile: Path | None = None) -> list[int]:
     `process_iter`; a process that exits mid-walk is skipped like any other
     unreadable one.
     """
-    target = profile_dir() if profile is None else profile
-    return select_cluster_chrome_pids(psutil.process_iter(), target)
+    return select_cluster_chrome_pids(psutil.process_iter(), profile)
 
 
 # meiva:note
@@ -191,7 +188,7 @@ def reap_cluster_chrome_from(procs: Iterable[psutil.Process], profile: Path) -> 
     return pids
 
 
-def reap_cluster_chrome() -> list[int]:
+def reap_cluster_chrome(profile: Path) -> list[int]:
     """Kill any Chrome running on this cluster's profile. Returns the pids killed.
 
     Two callers:
@@ -213,4 +210,4 @@ def reap_cluster_chrome() -> list[int]:
     for the same reason — a second call finds nothing, and `kill_process_tree` is
     itself a no-op on a pid that has already gone.
     """
-    return reap_cluster_chrome_from(psutil.process_iter(), profile_dir())
+    return reap_cluster_chrome_from(psutil.process_iter(), profile)

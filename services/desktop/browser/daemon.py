@@ -252,7 +252,7 @@ def run_browser_daemon(
         )
         sys.exit(1)
     if occupancy == "reap_and_launch":
-        reap_cluster_chrome()
+        reap_cluster_chrome(profile)
     # meiva:note
     # Consume a pending restore only here, after the port guard refused nothing:
     # a launch that never happens must not eat the one chance to reopen the tabs.
@@ -294,7 +294,7 @@ def main() -> None:
         cdp_port=config.view.services.browser_cdp_port,
         chrome_binary=config.view.services.chrome_binary,
         home=home,
-        profile=profile_dir(),
+        profile=profile_dir(home),
         logs=logs_dir(home=home),
         clock=Clock(clock_config_from_boot(config), timers=SYSTEM_TIMERS),
     )

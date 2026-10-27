@@ -6,6 +6,7 @@ from __future__ import annotations
 import signal
 import sys
 from datetime import datetime
+from pathlib import Path
 
 import psutil
 
@@ -33,11 +34,13 @@ def record_browser_session(command: CommandRuntime, *, now: datetime) -> None:
         print(f"  {line}")
 
 
-def stop_browser(deadline: float) -> None:
+def stop_browser(deadline: float, *, home: Path) -> None:
     from services.desktop.browser.orphan import find_cluster_chrome
+    from services.desktop.browser.profile import profile_dir
 
+    profile = profile_dir(home)
     trees: set[OwnedProcess] = set()
-    for pid in find_cluster_chrome():
+    for pid in find_cluster_chrome(profile):
         try:
             identity = OwnedProcess.capture(psutil.Process(pid))
             retain_processes(trees, capture_tree(identity))
@@ -46,7 +49,7 @@ def stop_browser(deadline: float) -> None:
         except psutil.NoSuchProcess:
             continue
     wait_for_exit(trees, deadline)
-    if find_cluster_chrome():
+    if find_cluster_chrome(profile):
         raise RuntimeError("this unit's browser appeared during stop")
 
 
@@ -65,11 +68,12 @@ def stop_browser(deadline: float) -> None:
 # done, so an extra "nothing found" line would only be noise. Never fails the stop: a teardown
 # that cannot reach the browser must still tear the rest of the cluster down, and the
 # pre-existing manual kill remains the operator's fallback (a decorative degrade, warned).
-def reap_cluster_chrome() -> None:
+def reap_cluster_chrome(*, home: Path) -> None:
     from services.desktop.browser import orphan
+    from services.desktop.browser.profile import profile_dir
 
     try:
-        pids = orphan.reap_cluster_chrome()
+        pids = orphan.reap_cluster_chrome(profile_dir(home))
     except Exception as exc:
         print(f"  ⚠ could not sweep this cluster's Chrome: {exc}", file=sys.stderr)
         return

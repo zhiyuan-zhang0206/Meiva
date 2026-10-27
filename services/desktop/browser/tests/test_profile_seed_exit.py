@@ -29,6 +29,7 @@ def _child(
             str(Path(__file__).with_name("_profile_seed_child.py")),
             mode,
             str(source),
+            str(home / "chrome-profile"),
         ],
         env={**os.environ, "MEIVA_HOME": str(home), "MEIVA_CONFIG_FETCH": "skip"},
         stdin=subprocess.PIPE,
