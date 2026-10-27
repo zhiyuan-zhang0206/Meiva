@@ -84,9 +84,16 @@ def repo_plugins_dir() -> Path:
     return repo_root() / "meiva_builtins" / "plugins"
 
 
+# meiva:note
+# Log directory of a unit home (`<home>/logs`). Pure: the path only; the writer of a file there
+# creates the directory.
+def logs_path(home: Path) -> Path:
+    return home / "logs"
+
+
 def logs_dir(*, home: Path | None = None) -> Path:
     """Per-unit log directory ($MEIVA_HOME/logs); create if missing."""
-    target = _root(home) / "logs"
+    target = logs_path(_root(home))
     target.mkdir(parents=True, exist_ok=True)
     return target
 

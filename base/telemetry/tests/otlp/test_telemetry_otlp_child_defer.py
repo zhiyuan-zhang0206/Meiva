@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import time
 from datetime import UTC, datetime
+from pathlib import Path
 from typing import Any
 
 import pytest
@@ -48,7 +49,7 @@ def _event(**overrides: Any) -> Event:
     return Event(**fields)
 
 
-def _make_backend(*, queue_maxsize: int = 8) -> tuple[Any, Any, Any]:
+def _make_backend(*, mirror_dir: Path, queue_maxsize: int = 8) -> tuple[Any, Any, Any]:
     from opentelemetry.sdk._logs import LoggerProvider
     from opentelemetry.sdk._logs.export import (
         InMemoryLogRecordExporter,
@@ -68,6 +69,7 @@ def _make_backend(*, queue_maxsize: int = 8) -> tuple[Any, Any, Any]:
         enabled=lambda: True,
         providers=(logger_provider, metric_provider),
         queue_maxsize=queue_maxsize,
+        mirror_dir=mirror_dir,
     )
     return backend, log_exporter, metric_reader
 
@@ -85,10 +87,10 @@ def _metrics(metric_reader: Any) -> dict[str, Any]:
 
 
 @pytest.fixture
-def otlp_backend() -> Any:
+def otlp_backend(tmp_path: Path) -> Any:
     """An `OtlpBackend` with in-memory providers, retained by this test
     owner (so module-level wrappers hit it); not yet armed."""
-    backend, log_exporter, metric_reader = _make_backend()
+    backend, log_exporter, metric_reader = _make_backend(mirror_dir=tmp_path)
 
     yield backend, log_exporter, metric_reader
     backend.shutdown()
@@ -146,8 +148,8 @@ def test_finalize_completes_hold_and_replays_metrics_once(deferred_backend: Any)
     assert len(log_exporter.get_finished_logs()) == 2
 
 
-def test_saturation_goes_live_once() -> None:
-    backend, log_exporter, _ = _make_backend(queue_maxsize=4)
+def test_saturation_goes_live_once(tmp_path: Path) -> None:
+    backend, log_exporter, _ = _make_backend(queue_maxsize=4, mirror_dir=tmp_path)
     try:
         backend.defer_until_exit(CHILD_DEFER)
         backend.export_batch([_event() for _ in range(4)])
@@ -261,7 +263,7 @@ def test_deferred_completion_during_finalization_keeps_hold(deferred_backend: An
     assert not log_exporter.get_finished_logs()
 
 
-def test_invalid_eligibility_preserves_deferred_records_and_propagates() -> None:
+def test_invalid_eligibility_preserves_deferred_records_and_propagates(tmp_path: Path) -> None:
     from base.cluster.machine import MachineRoleInvalid
 
     error = MachineRoleInvalid("invalid configured role")
@@ -269,7 +271,9 @@ def test_invalid_eligibility_preserves_deferred_records_and_propagates() -> None
     def invalid() -> bool:
         raise error
 
-    backend = telemetry_otlp.OtlpBackend(export_allowed=invalid, enabled=lambda: True)
+    backend = telemetry_otlp.OtlpBackend(
+        export_allowed=invalid, enabled=lambda: True, mirror_dir=tmp_path
+    )
     backend.defer_until_exit(CHILD_DEFER)
     backend.export_batch([_event()])
     try:

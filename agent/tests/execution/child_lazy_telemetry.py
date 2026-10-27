@@ -40,6 +40,7 @@ def identity_child_record() -> dict[str, Any]:
     from base.agents.context.clients import ClientSet
     from base.telemetry.delivery.receipts import DrainStatus
     from base.telemetry.otlp import telemetry_otlp_exporting
+    from base.telemetry.otlp.telemetry_otlp import default_exporter
 
     backends: list[Any] = []
 
@@ -47,11 +48,12 @@ def identity_child_record() -> dict[str, Any]:
         backends.append(backend)
         backend.export_batch(events)
 
-    pipeline = telemetry_otlp_exporting.ExportingEventPipeline(
-        writer=writer, export_allowed=lambda: True
-    )
-    clients = ClientSet(pipeline_factory=lambda: pipeline)
     with tempfile.TemporaryDirectory(prefix="lazy-child-") as home:
+        pipeline = telemetry_otlp_exporting.ExportingEventPipeline(
+            writer=writer,
+            exporter=default_exporter(export_allowed=lambda: True, mirror_dir=Path(home)),
+        )
+        clients = ClientSet(pipeline_factory=lambda: pipeline)
         exec_child.init_logger(
             999999,
             producer=clients.event_pipeline,
