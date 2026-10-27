@@ -29,7 +29,6 @@ from typing import Any, Literal, TypeGuard
 
 from base.host.private_storage import write_private_bytes
 from base.host.verified_file import RegularFileReadError, regular_bytes
-from base.paths import meiva_home
 
 _VERSION = 1
 _MAX_BYTES = 256 * 1024
@@ -49,16 +48,16 @@ class StateError(RuntimeError):
     """The state file exists but cannot be read as this code writes it."""
 
 
-def walg_dir() -> Path:
-    return meiva_home() / "backups" / "walg"
+def walg_dir(home: Path) -> Path:
+    return home / "backups" / "walg"
 
 
-def state_path() -> Path:
-    return walg_dir() / "state.json"
+def state_path(home: Path) -> Path:
+    return walg_dir(home) / "state.json"
 
 
-def lock_path() -> Path:
-    return walg_dir() / "run.lock"
+def lock_path(home: Path) -> Path:
+    return walg_dir(home) / "run.lock"
 
 
 def _stamp(value: datetime) -> str:
@@ -269,13 +268,13 @@ def from_json(data: bytes) -> State:
         raise StateError("the WAL-G state file is malformed") from None
 
 
-def read_state() -> State:
+def read_state(home: Path) -> State:
     """The recorded state; an empty one before the first tick.
 
     Raises:
         StateError: the file exists but is unreadable or malformed.
     """
-    path = state_path()
+    path = state_path(home)
     try:
         data = regular_bytes(path, max_bytes=_MAX_BYTES)
     except FileNotFoundError:
@@ -285,12 +284,13 @@ def read_state() -> State:
     return from_json(data)
 
 
-def write_state(state: State) -> None:
+def write_state(home: Path, state: State) -> None:
     """Replace the state file atomically (owner-only). Call only under the run lock."""
-    write_private_bytes(state_path(), to_json(state))
+    write_private_bytes(state_path(home), to_json(state))
 
 
 def update_state(
+    home: Path,
     *,
     tick: TickRecord | None = None,
     run: RunRecord | None = None,
@@ -300,7 +300,7 @@ def update_state(
     drill: DrillRecord | None = None,
 ) -> State:
     """Read, replace the named sections, write; returns the new state."""
-    current = read_state()
+    current = read_state(home)
     state = replace(
         current,
         tick=current.tick if tick is None else tick,
@@ -310,5 +310,5 @@ def update_state(
         retention=current.retention if retention is None else retention,
         drill=current.drill if drill is None else drill,
     )
-    write_state(state)
+    write_state(home, state)
     return state

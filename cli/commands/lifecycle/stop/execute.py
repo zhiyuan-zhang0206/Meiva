@@ -153,9 +153,9 @@ def _perform(
                 timers=command.timers,
             )
         case StopBrowser():
-            browser.stop_browser(run.deadline)
+            browser.stop_browser(run.deadline, home=command.home)
         case ReapChrome():
-            browser.reap_cluster_chrome()
+            browser.reap_cluster_chrome(home=command.home)
         case CloseShellSessions(direct_db, force):
             if force:
                 shell_sessions.force_close_shell_sessions(command)

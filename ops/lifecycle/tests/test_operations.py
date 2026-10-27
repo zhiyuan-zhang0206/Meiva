@@ -10,6 +10,8 @@
 
 from __future__ import annotations
 
+import asyncio
+import json
 import sys
 from pathlib import Path
 from typing import cast
@@ -29,10 +31,11 @@ from base.db import Database
 from base.db.code_version_gate import ProcessDbGate
 from base.events.live.bus import EventBus
 from base.host.proc import run_bounded
+from base.host.tests.short_tmp import short_tmp as short_tmp
 from base.lm.catalog import ModelCatalog
 from base.packages.plugin_providers import build_model_catalog
 from base.packages.tests.model_catalog import inert_keys
-from base.paths import resolve_meiva_home
+from base.paths import chrome_mcp_socket, resolve_meiva_home
 from ops import lifecycle
 from ops.lifecycle import launch
 from ops.lifecycle.tests.loopback.agent_host import ServedAgentHost
@@ -431,3 +434,45 @@ async def test_explicit_resurrect_dispatches_manual_op(
         "SELECT source FROM audit_events WHERE agent_id=%s AND event_name='resurrect'",
         (lifecycle_agent_id,),
     ).fetchall() == [("user",)]
+
+
+# meiva:note
+# A force terminate releases the agent's browser pages through the home the op entry was given: a
+# listener on the browser-mcp socket of a home of the test's own (not the process's) receives the
+# release request.
+@pytest.mark.asyncio
+async def test_a_force_terminate_releases_the_pages_of_the_home_it_was_given(
+    lifecycle_agent_id: int,
+    database: Database,
+    event_bus: EventBus,
+    db_pool: ConnectionPool,
+    model_catalog: ModelCatalog,
+    short_tmp: Path,
+) -> None:
+    served_home = short_tmp
+    received: list[dict[str, object]] = []
+
+    async def answer(reader: asyncio.StreamReader, writer: asyncio.StreamWriter) -> None:
+        received.append(json.loads(await reader.readline()))
+        writer.write(b'{"id": 1, "ok": true}\n')
+        await writer.drain()
+        writer.close()
+
+    sock = chrome_mcp_socket(served_home, settings.services.browser_cdp_port)
+    sock.parent.mkdir(parents=True)
+    server = await asyncio.start_unix_server(answer, path=str(sock))
+    try:
+        await lifecycle.lifecycle_op(
+            database,
+            event_bus,
+            f"/api/agents/{lifecycle_agent_id}/terminate",
+            {"source": "user", "force": True},
+            db_pool,
+            catalog=model_catalog,
+            home=served_home,
+        )
+    finally:
+        server.close()
+        await server.wait_closed()
+
+    assert received == [{"id": 1, "method": "release_agent_page", "agent_id": lifecycle_agent_id}]

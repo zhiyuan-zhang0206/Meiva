@@ -192,11 +192,14 @@ def _daily_profile(tmp_path: Path) -> Path:
 
 
 def test_skips_when_profile_path_already_exists(unit_home: Path) -> None:
-    destination = bp.profile_dir()
+    destination = bp.profile_dir(unit_home)
     destination.mkdir()
     console = _console()
     bp.ensure_browser_profile(
-        interactive=True, daily_profile=unit_home / ("x" * 256), console=console
+        interactive=True,
+        daily_profile=unit_home / ("x" * 256),
+        profile=bp.profile_dir(unit_home),
+        console=console,
     )
     assert list(destination.iterdir()) == []
     assert _output(console) == ""
@@ -205,9 +208,12 @@ def test_skips_when_profile_path_already_exists(unit_home: Path) -> None:
 def test_skips_when_not_interactive(unit_home: Path) -> None:
     console = _console()
     bp.ensure_browser_profile(
-        interactive=False, daily_profile=unit_home / ("x" * 256), console=console
+        interactive=False,
+        daily_profile=unit_home / ("x" * 256),
+        profile=bp.profile_dir(unit_home),
+        console=console,
     )
-    assert not bp.profile_dir().exists()
+    assert not bp.profile_dir(unit_home).exists()
     assert _output(console) == ""
 
 
@@ -217,23 +223,32 @@ def test_skips_when_no_daily_chrome(unit_home: Path, ordinary_file: bool) -> Non
     if ordinary_file:
         source.write_text("not a directory")
     console = _console()
-    bp.ensure_browser_profile(interactive=True, daily_profile=source, console=console)
-    assert not bp.profile_dir().exists()
+    bp.ensure_browser_profile(
+        interactive=True, daily_profile=source, profile=bp.profile_dir(unit_home), console=console
+    )
+    assert not bp.profile_dir(unit_home).exists()
     assert _output(console) == ""
 
 
 def test_choice_new_does_not_copy(unit_home: Path) -> None:
     source = _daily_profile(unit_home)
-    bp.ensure_browser_profile(interactive=True, daily_profile=source, console=_console("new"))
-    assert not bp.profile_dir().exists()
+    bp.ensure_browser_profile(
+        interactive=True,
+        daily_profile=source,
+        profile=bp.profile_dir(unit_home),
+        console=_console("new"),
+    )
+    assert not bp.profile_dir(unit_home).exists()
     assert (source / "Default" / "Cookies").read_bytes() == b"cookie-jar"
 
 
 def test_choice_copy_confirmed_copies(unit_home: Path) -> None:
     source = _daily_profile(unit_home)
     console = _console("copy", "yes")
-    bp.ensure_browser_profile(interactive=True, daily_profile=source, console=console)
-    destination = bp.profile_dir()
+    bp.ensure_browser_profile(
+        interactive=True, daily_profile=source, profile=bp.profile_dir(unit_home), console=console
+    )
+    destination = bp.profile_dir(unit_home)
     assert (destination / "Default" / "Cookies").read_bytes() == b"cookie-jar"
     assert (destination / "Local State").read_text() == "{}"
     assert not (destination / "Default" / "Cache").exists()
@@ -246,15 +261,20 @@ def test_choice_copy_confirmed_copies(unit_home: Path) -> None:
 def test_choice_copy_declined_at_confirm(unit_home: Path) -> None:
     source = _daily_profile(unit_home)
     bp.ensure_browser_profile(
-        interactive=True, daily_profile=source, console=_console("copy", "no")
+        interactive=True,
+        daily_profile=source,
+        profile=bp.profile_dir(unit_home),
+        console=_console("copy", "no"),
     )
-    assert not bp.profile_dir().exists()
+    assert not bp.profile_dir(unit_home).exists()
 
 
 def test_copy_aborts_when_chrome_running(unit_home: Path) -> None:
     source = _daily_profile(unit_home)
     (source / "SingletonLock").symlink_to(f"test-host-{os.getpid()}")
     console = _console("copy", "new")
-    bp.ensure_browser_profile(interactive=True, daily_profile=source, console=console)
-    assert not bp.profile_dir().exists()
+    bp.ensure_browser_profile(
+        interactive=True, daily_profile=source, profile=bp.profile_dir(unit_home), console=console
+    )
+    assert not bp.profile_dir(unit_home).exists()
     assert "Chrome is still running" in _output(console)

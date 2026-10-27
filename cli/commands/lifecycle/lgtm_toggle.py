@@ -55,7 +55,7 @@ def cmd_lgtm_on(
         enabled=True, only_services=only_services, disabled_services=disabled_services
     ):
         raise ValueError(problem)
-    marker = lgtm_host_marker()
+    marker = lgtm_host_marker(command.home)
     marker.parent.mkdir(parents=True, exist_ok=True)
     marker.touch(exist_ok=True)
     return start.cmd_start(
@@ -88,7 +88,7 @@ def cmd_lgtm_off(
         enabled=False, only_services=only_services, disabled_services=disabled_services
     ):
         raise ValueError(problem)
-    lgtm_host_marker().unlink(missing_ok=True)
+    lgtm_host_marker(command.home).unlink(missing_ok=True)
     return start.cmd_start(
         only_services=only_services,
         disabled_services=disabled_services,

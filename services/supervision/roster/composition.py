@@ -119,7 +119,7 @@ def build_services(
     gateway_port = int(get_field("gateway_port"))
     browser_origin = str(get_field("browser_origin"))
     browser_cdp_port = int(get_field("browser_cdp_port"))
-    browser_profile = profile_dir()
+    browser_profile = profile_dir(home)
     telemetry_otlp_port = int(get_field("telemetry_otlp_port"))
     probe_protocol_service = partial(probe_protocol, home=home, browser_cdp_port=browser_cdp_port)
 
@@ -130,7 +130,7 @@ def build_services(
             capabilities=GATEWAY,
             requires_db=False,
             curl_url=f"http://127.0.0.1:{entry_port()}/__meiva/healthz",
-            identity_probe=probe_gate,
+            identity_probe=partial(probe_gate, home=home),
             healthcheck_module="services.supervision.healthchecks.gate",
             # meiva:note
             # The gate names its home in /__meiva/healthz, so a foreign gate occupying the

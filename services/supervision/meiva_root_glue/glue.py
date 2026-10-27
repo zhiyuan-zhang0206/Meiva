@@ -175,7 +175,7 @@ def probe_config_from_settings(*, home: Path) -> ProbeConfig:
         observability_otlp_port=int(get_field("observability_otlp_port")),
         gateway_health_url=str(get_field("gateway_health_url")),
         browser_cdp_port=int(get_field("browser_cdp_port")),
-        browser_profile=profile_dir(),
+        browser_profile=profile_dir(home),
         browser_reach_timeout_s=float(get_field("browser_reach_timeout_s")),
         browser_reach_probe_interval_s=float(get_field("browser_reach_probe_interval_s")),
         loki_url=backend_urls()["loki"],

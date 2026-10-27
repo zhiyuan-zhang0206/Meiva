@@ -64,7 +64,7 @@ def test_the_root_reads_each_diagnostic_setting_by_its_registered_name(tmp_path:
     assert config.observability_otlp_port == int(get_field("observability_otlp_port"))
     assert config.gateway_health_url == str(get_field("gateway_health_url"))
     assert config.browser_cdp_port == int(get_field("browser_cdp_port"))
-    assert config.browser_profile == profile_dir()
+    assert config.browser_profile == profile_dir(tmp_path)
     assert config.browser_reach_timeout_s == float(get_field("browser_reach_timeout_s"))
     assert config.browser_reach_probe_interval_s == float(
         get_field("browser_reach_probe_interval_s")

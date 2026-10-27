@@ -50,7 +50,6 @@ from base.cluster.dataplane.pg_foreground import start_foreground_postgres, stop
 from base.cluster.dataplane.pg_tools import pg_shm_args, pg_start_env, pg_tool, pg_tz_args
 from base.db import connect_url
 from base.native_process.child_env import daemon_process_env
-from base.paths import meiva_home
 from services.backup.walg.archive import postgres_command
 from services.backup.walg.runner import WalgCommandError, run_walg
 
@@ -148,8 +147,8 @@ def _log_tail(log: Path) -> str:
     return " | ".join(lines[-6:]) or "(empty postgres log)"
 
 
-def _prepare_directory(directory: Path) -> None:
-    live = meiva_home() / "pg"
+def _prepare_directory(directory: Path, *, home: Path) -> None:
+    live = home / "pg"
     if directory.is_relative_to(live) or live.is_relative_to(directory):
         raise RestoreError(f"{directory} is or contains this home's live data directory {live}")
     if directory.exists() and (not directory.is_dir() or any(directory.iterdir())):
@@ -290,7 +289,7 @@ def restored_instance(
         RestoreError: the directory is not empty or is the live data directory; fetch,
             or recovery failed (Postgres' own FATAL is in the message).
     """
-    _prepare_directory(directory)
+    _prepare_directory(directory, home=home)
     started = time.monotonic()
     report(f"fetching backup {backup} into {directory}")
     try:

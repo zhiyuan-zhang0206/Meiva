@@ -10,14 +10,12 @@ from datetime import datetime, timedelta
 
 from fastapi import HTTPException
 
-from base.agents.history.closing_request import FullHistory
-from base.agents.messages.timestamp_policy import TimestampSource
 from base.clock import Timers
 from base.clock.ids import new_uuid
 from base.db.protocols import DatabaseLike, SyncConnection, SyncPool
 from services.derived.insights.run_timeline.history import HistoryView
 from services.derived.insights.run_timeline.projection.derive import project_segment, segment_view
-from services.derived.insights.run_timeline.projection.jobs import IndexJobs
+from services.derived.insights.run_timeline.projection.jobs import IndexJobs, SegmentReads
 from services.derived.insights.run_timeline.projection.model import VERSION, Projection, Segment
 from services.derived.insights.run_timeline.projection.nodes import node_bounds, window_nodes
 from services.derived.insights.run_timeline.projection.source import Source, capture_source
@@ -63,34 +61,20 @@ class Snapshot:
         )
 
 
-# meiva:note
-# What the reader reads from the world: the monotonic readings that age its cache and the generator
-# that mints its snapshot identities. The root hands both in. They travel as one value because the
-# projection directory is strict-to-be and `wide-params` caps a constructor at six parameters.
-@dataclass(frozen=True)
-class ReaderWorld:
-    timers: Timers
-    rng: random.Random
-
-
 class TimelineReader:
     def __init__[DbT: DatabaseLike](
         self,
-        db: DbT,
+        reads: SegmentReads[DbT],
         pool: SyncPool,
         *,
-        timestamps: TimestampSource,
         jobs: IndexJobs,
-        read_segment: Callable[[DbT, int, str], FullHistory],
-        world: ReaderWorld,
+        timers: Timers,
+        rng: random.Random,
     ) -> None:
-        self.db: DatabaseLike = db
-        self.pool, self.timestamps, self.jobs = pool, timestamps, jobs
-        self._load_segment: Callable[[int, str], FullHistory] = lambda agent_id, checkpoint_id: (
-            read_segment(db, agent_id, checkpoint_id)
-        )
-        self.timers = world.timers
-        self._rng = world.rng
+        self._reads = reads
+        self.pool, self.jobs = pool, jobs
+        self.timers = timers
+        self._rng = rng
         self.read_source: Callable[[SyncConnection, int], Source] = capture_source
         self._lock = threading.Lock()
 
@@ -166,9 +150,9 @@ class TimelineReader:
         if source.head is not None and source.head != source.boundary:
             tail = project_segment(
                 source.head,
-                self._load_segment(agent_id, source.head),
+                self._reads.load(agent_id, source.head),
                 source.previous,
-                inputs=self.timestamps.policy(),
+                inputs=self._reads.timestamps.policy(),
             )
         extents: list[tuple[datetime, datetime]] = []
         if extent and extent[0] is not None and extent[1] is not None:
@@ -221,7 +205,7 @@ class TimelineReader:
                 end,
                 allowance=max_units - len(tail_blocks) if max_units is not None else None,
             )
-        nodes = window_nodes(self.db, snapshot.agent_id, node_rows)
+        nodes = window_nodes(self._reads.db, snapshot.agent_id, node_rows)
         count += len(tail_blocks)
         if max_units is not None and count > max_units:
             return nodes, [], count
@@ -249,9 +233,9 @@ class TimelineReader:
             (
                 segment,
                 segment_view(
-                    self._load_segment(snapshot.agent_id, segment.checkpoint_id),
+                    self._reads.load(snapshot.agent_id, segment.checkpoint_id),
                     segment.read_before,
-                    inputs=self.timestamps.policy(),
+                    inputs=self._reads.timestamps.policy(),
                 ),
             )
             for segment in segments

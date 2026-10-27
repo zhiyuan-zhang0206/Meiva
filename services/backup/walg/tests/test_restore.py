@@ -275,6 +275,27 @@ def test_refuses_the_live_data_directory(tmp_path: Path, monkeypatch: pytest.Mon
     assert not any("backup-fetch" in call for call in sandbox.calls())
 
 
+def test_the_live_data_directory_is_the_one_of_the_home_it_is_handed(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    sandbox = make_sandbox(tmp_path, monkeypatch)
+    elsewhere = tmp_path / "another-home"
+    with (
+        pytest.raises(RestoreError, match="live data directory"),
+        restored_instance(
+            elsewhere / "pg",
+            backup="LATEST",
+            target=RecoveryTarget(),
+            report=lambda _line: None,
+            keep_data=True,
+            path=sandbox.path,
+            home=elsewhere,
+        ),
+    ):
+        pytest.fail("must refuse")
+    assert not any("backup-fetch" in call for call in sandbox.calls())
+
+
 def test_a_failed_fetch_is_a_restore_error(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     sandbox = make_sandbox(tmp_path, monkeypatch)
     sandbox.fail("backup-fetch")

@@ -7,7 +7,6 @@ exports = ["mcp_daemon.py", "mcp_socket_bridge.py", "mcp_wrapper.py", "orphan.py
 "mcp_socket_bridge.py" = ["protocol.py"]
 "mcp_upstream.py" = ["shutdown_budget.py"]
 "mcp_wrapper.py" = ["mcp_socket_bridge.py"]
-"orphan.py" = ["profile.py"]
 "page_lifecycle.py" = ["protocol.py"]
 "probe.py" = ["macos_readiness.py", "orphan.py"]
 "session_restore.py" = ["session.py", "tab_groups"]
@@ -21,14 +20,9 @@ exports = ["mcp_daemon.py", "mcp_socket_bridge.py", "mcp_wrapper.py", "orphan.py
 "shutdown_budget.py" = "strict"
 
 [roots]
-"daemon.py" = { kinds = ["clock", "platform", "settings"], why = "Service or operator process entry boots configuration before composing its resources; builds the process clock from SYSTEM_TIMERS; builds the host of this process with Host.system()" }
-"mcp_daemon.py" = { kinds = ["clock", "settings"], why = "Service or operator process entry boots configuration before composing its resources; builds the process clock from SYSTEM_TIMERS" }
-"mcp_wrapper.py" = { kinds = ["settings"], why = "Service or operator process entry boots configuration before composing its resources" }
+"daemon.py" = { kinds = ["clock", "home", "platform", "settings"], why = "Service or operator process entry boots configuration before composing its resources; builds the process clock from SYSTEM_TIMERS; builds the host of this process with Host.system(); reads the home it runs under once, in main()" }
+"mcp_daemon.py" = { kinds = ["clock", "home", "settings"], why = "Service or operator process entry boots configuration before composing its resources; builds the process clock from SYSTEM_TIMERS; reads the home it runs under once, in main()" }
+"mcp_wrapper.py" = { kinds = ["home", "settings"], why = "Service or operator process entry boots configuration before composing its resources; reads the home it runs under once, in main()" }
 
 [debt.ambient-read]
-"daemon.py#home base.paths.logs_dir" = 1
-"daemon.py#home base.paths.meiva_home" = 1
 "macos_readiness.py#platform base.host.system.hostport.Host.system" = 1
-"mcp_daemon.py#home base.paths.meiva_home" = 1
-"mcp_wrapper.py#home base.paths.meiva_home" = 1
-"profile.py#home base.paths.meiva_home" = 1
