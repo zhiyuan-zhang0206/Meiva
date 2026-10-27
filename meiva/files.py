@@ -44,7 +44,8 @@ def _home() -> Path:
 # The workspace directory of agent `agent_id` under the Meiva home the bound context carries (the
 # home the process's root resolved once), created when missing. The one place the SDK derives an
 # agent workspace, so the shell, the sessions, the understand overflow site and the code plugin's
-# cwd default all follow the context and none of them reads the process environment.
+# cwd default all follow the context and none of them reads the process environment. It is the
+# SDK's internal exit, not an agent capability: it stays out of `__all_for_meiva__`.
 def agent_workspace(agent_id: int) -> Path:
     return workspace_dir(agent_id, home=process_context.current_context().require_meiva_home())
 
