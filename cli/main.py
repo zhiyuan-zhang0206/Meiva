@@ -307,6 +307,7 @@ def dispatch_parsed(
     args.runtime = command
     database_factory = operator_database_factory(
         local_host=command.machine.host,
+        home=command.home,
         open_database=open_database,
     )
     args.database_factory = database_factory

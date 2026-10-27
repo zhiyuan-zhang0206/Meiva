@@ -72,8 +72,8 @@ THROWAWAY_PREFIX = "meiva-pg-"
 def pg_tool(
     name: str,
     *,
+    home: Path,
     bin_dir: Path | None = None,
-    home: Path | None = None,
     platform_bin_dir: Path | None = None,
     path_env: str | None = None,
 ) -> Path:
@@ -81,7 +81,7 @@ def pg_tool(
         return bin_dir / name
     from base.cluster.dataplane.runtime_binaries import vendored_pg_bin_dir
 
-    vendored = vendored_pg_bin_dir() if home is None else vendored_pg_bin_dir(home=home)
+    vendored = vendored_pg_bin_dir(home)
     if vendored is not None and (vendored / name).exists():
         return vendored / name
     if platform_bin_dir is not None:
@@ -105,8 +105,8 @@ def pg_tool(
 def has_pg_tool(
     name: str,
     *,
+    home: Path,
     bin_dir: Path | None = None,
-    home: Path | None = None,
     platform_bin_dir: Path | None = None,
     path_env: str | None = None,
 ) -> bool:
@@ -309,7 +309,14 @@ def _reap_locked(lock: Path, fd: int, *, config: ThrowawayConfig) -> int:
     data = instance_dir / "data"
     if (data / "PG_VERSION").is_file():
         stop = subprocess.run(  # noqa: S603 — argv is the resolved pg_ctl path + a verified data dir
-            [pg_tool("pg_ctl", bin_dir=config.bin_dir), "-D", str(data), "-m", "immediate", "stop"],
+            [
+                pg_tool("pg_ctl", bin_dir=config.bin_dir, home=config.home),
+                "-D",
+                str(data),
+                "-m",
+                "immediate",
+                "stop",
+            ],
             check=False,
             capture_output=True,
         )
@@ -520,6 +527,7 @@ def teardown_throwaway(
     registration: Registration,
     process: subprocess.Popen[bytes] | None = None,
     *,
+    home: Path,
     foreground: bool = False,
     bin_dir: Path | None = None,
 ) -> None:
@@ -527,7 +535,14 @@ def teardown_throwaway(
         stop_foreground_postgres(process)
     elif not foreground:
         subprocess.run(  # noqa: S603 — argv is the resolved pg_ctl path + static flags
-            [pg_tool("pg_ctl", bin_dir=bin_dir), "-D", str(data), "-m", "immediate", "stop"],
+            [
+                pg_tool("pg_ctl", bin_dir=bin_dir, home=home),
+                "-D",
+                str(data),
+                "-m",
+                "immediate",
+                "stop",
+            ],
             check=False,
             capture_output=True,
         )
@@ -571,7 +586,7 @@ def throwaway_postgres(
             try:
                 subprocess.run(  # noqa: S603 — argv is the resolved initdb path + static flags
                     [
-                        pg_tool("initdb", bin_dir=config.bin_dir),
+                        pg_tool("initdb", bin_dir=config.bin_dir, home=config.home),
                         "-D",
                         str(data),
                         "-U",
@@ -588,7 +603,7 @@ def throwaway_postgres(
                 if foreground:
                     process = start_foreground_postgres(
                         [
-                            str(pg_tool("postgres", bin_dir=config.bin_dir)),
+                            str(pg_tool("postgres", bin_dir=config.bin_dir, home=config.home)),
                             "-D",
                             str(data),
                             "-p",
@@ -614,7 +629,7 @@ def throwaway_postgres(
                 else:
                     subprocess.run(  # noqa: S603 — argv is the resolved pg_ctl path + static flags
                         [
-                            pg_tool("pg_ctl", bin_dir=config.bin_dir),
+                            pg_tool("pg_ctl", bin_dir=config.bin_dir, home=config.home),
                             "-D",
                             str(data),
                             "-l",
@@ -642,6 +657,7 @@ def throwaway_postgres(
                         process,
                         foreground=foreground,
                         bin_dir=config.bin_dir,
+                        home=config.home,
                     )
                     process = None
                     continue
@@ -656,6 +672,7 @@ def throwaway_postgres(
                 process,
                 foreground=foreground,
                 bin_dir=config.bin_dir,
+                home=config.home,
             )
             raise
 
@@ -689,4 +706,5 @@ def throwaway_postgres(
             process,
             foreground=foreground,
             bin_dir=config.bin_dir,
+            home=config.home,
         )

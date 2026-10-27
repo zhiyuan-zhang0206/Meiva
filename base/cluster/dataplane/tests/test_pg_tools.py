@@ -40,6 +40,7 @@ from base.cluster.dataplane import pg_plan, pg_tools
 from base.cluster.dataplane import pg_stall_watchdog as guard
 from base.cluster.dataplane.pg_stall_watchdog import StallWatchdogConfig
 from base.cluster.dataplane.pg_throwaway_base import ThrowawayConfig
+from base.paths import meiva_home
 
 _MMAP_ARGS = "-c shared_memory_type=mmap -c dynamic_shared_memory_type=mmap"
 
@@ -69,7 +70,7 @@ def test_has_pg_tool_answers_true_for_a_tool_it_can_find(tmp_path: Path) -> None
     found = tmp_path / "pg_dump"
     found.write_text("")
 
-    assert pg_tools.has_pg_tool("pg_dump", bin_dir=tmp_path) is True
+    assert pg_tools.has_pg_tool("pg_dump", bin_dir=tmp_path, home=meiva_home()) is True
 
 
 def test_pg_shm_args_linux_branch() -> None:
@@ -124,7 +125,14 @@ def scratch_pg_root(postgres_access: None) -> Iterator[Path]:
     for data in root.glob("meiva-pg-*/data"):
         if (data / "PG_VERSION").is_file():
             subprocess.run(  # noqa: S603 — argv is the resolved pg_ctl path + this test's own dir
-                [pg_tools.pg_tool("pg_ctl"), "-D", str(data), "-m", "immediate", "stop"],
+                [
+                    pg_tools.pg_tool("pg_ctl", home=meiva_home()),
+                    "-D",
+                    str(data),
+                    "-m",
+                    "immediate",
+                    "stop",
+                ],
                 check=False,
                 capture_output=True,
             )
@@ -212,7 +220,7 @@ def test_throwaway_pg_ctl_start_is_handed_the_built_start_env(
     """Task #3754: the fixture's `pg_ctl start` receives pg_start_env() — the
     postmaster environment is built explicitly instead of inherited from
     whatever process runs the suite."""
-    real_pg_ctl = pg_tools.pg_tool("pg_ctl")
+    real_pg_ctl = pg_tools.pg_tool("pg_ctl", home=meiva_home())
     env_dump = tmp_path / "pg_ctl_env.json"
     bin_dir = tmp_path / "bin"
     bin_dir.mkdir()
@@ -233,7 +241,7 @@ def test_throwaway_pg_ctl_start_is_handed_the_built_start_env(
         f'exec {shlex.quote(str(real_pg_ctl))} "$@"\n'
     )
     wrapper.chmod(0o755)
-    config = ThrowawayConfig(None, default_root=scratch_pg_root, bin_dir=bin_dir)
+    config = ThrowawayConfig(None, default_root=scratch_pg_root, bin_dir=bin_dir, home=meiva_home())
 
     with (
         pg_tools.throwaway_postgres(config=config) as url,

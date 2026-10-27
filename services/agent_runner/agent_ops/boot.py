@@ -134,9 +134,9 @@ def ops_bind_host(*, machine: MachineIdentityReader) -> str:
 # SHA-256 digests of the bearers /ops accepts: the daemon acceptance of
 # `base.cluster.machine.daemon_acceptance` (the gateway dials /ops with its
 # gateway-class machine API token, a runner-class process of the unit with its runner token).
-def ops_acceptance() -> frozenset[str]:
+def ops_acceptance(*, home: Path) -> frozenset[str]:
     access = gateway_access_from_settings()  # ambient: S
-    return daemon_acceptance(access)
+    return daemon_acceptance(access, home=home)
 
 
 def ops_handles(

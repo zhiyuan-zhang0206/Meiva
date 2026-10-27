@@ -21,6 +21,7 @@ import pytest
 
 from base.cluster.dataplane import pg_tools
 from base.cluster.dataplane.pg_throwaway_base import ThrowawayConfig
+from base.paths import meiva_home
 
 
 @pytest.fixture
@@ -35,7 +36,14 @@ def scratch_tmpfs() -> Iterator[Path]:
     for data in root.glob("meiva-pg-*/data"):
         if (data / "PG_VERSION").is_file():
             subprocess.run(  # noqa: S603 — argv is the resolved pg_ctl path + this test's own dir
-                [pg_tools.pg_tool("pg_ctl"), "-D", str(data), "-m", "immediate", "stop"],
+                [
+                    pg_tools.pg_tool("pg_ctl", home=meiva_home()),
+                    "-D",
+                    str(data),
+                    "-m",
+                    "immediate",
+                    "stop",
+                ],
                 check=False,
                 capture_output=True,
             )
@@ -66,6 +74,7 @@ def test_failed_start_preserves_pg_log_into_artifacts(
             default_root=scratch_tmpfs,
             artifact_dir=artifact_dir,
             candidate_ports=(port, port, port),
+            home=meiva_home(),
         )
         with pytest.raises(subprocess.CalledProcessError) as excinfo:
             # __enter__() runs the generator body — the bare call only builds it.
@@ -99,6 +108,7 @@ def test_failure_before_any_pg_log_still_writes_an_artifact(
         default_root=scratch_tmpfs,
         artifact_dir=artifact_dir,
         bin_dir=bin_dir,
+        home=meiva_home(),
     )
 
     with pytest.raises(subprocess.CalledProcessError) as excinfo:

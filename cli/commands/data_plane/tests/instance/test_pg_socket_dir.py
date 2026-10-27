@@ -15,6 +15,7 @@ import pytest
 
 from base.cluster import home_slug
 from base.cluster.dataplane import pg_admin
+from base.paths import meiva_home
 from cli.commands.data_plane import cluster_instance as instance
 
 
@@ -60,6 +61,9 @@ def test_the_admin_url_dials_the_homes_canonical_socket_not_a_same_port_one_else
     foreign.mkdir()
     (foreign / ".s.PGSQL.5433").write_text("")
 
-    query = parse_qs(urlsplit(pg_admin.pg_admin_url(5433)).query)
+    query = parse_qs(urlsplit(pg_admin.pg_admin_url(5433, home=meiva_home())).query)
 
-    assert query == {"host": [str(instance.pg_socket_dir(unit_home))], "port": ["5433"]}
+    assert query == {
+        "host": [str(instance.pg_socket_dir(unit_home))],
+        "port": ["5433"],
+    }

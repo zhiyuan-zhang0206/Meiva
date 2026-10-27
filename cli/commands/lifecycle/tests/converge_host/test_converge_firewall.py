@@ -176,7 +176,7 @@ def _interpreter() -> Path:
 # meiva:note
 # A vendored Postgres under the fake user's default home, where `pg_tool` looks first.
 def _seed_vendored_postgres(user_home: Path) -> Path:
-    bin_dir = rb.vendored_pg_dir() / "bin"
+    bin_dir = rb.vendored_pg_dir(user_home / ".meiva") / "bin"
     bin_dir.mkdir(parents=True)
     (bin_dir / "initdb").write_text("#!/bin/sh\n")
     postgres = bin_dir / "postgres"

@@ -12,6 +12,7 @@ from base.config.service_read import ConfigAuthority, served_db_endpoint
 from base.host.db_authority import delivery, unit
 from base.packages.plugin_providers import build_model_catalog
 from base.packages.plugins.config_registration import plugin_bootstrap_config
+from base.paths import meiva_home
 from base.paths.tests.homes import point_home
 from cli.commands.data_plane import completion
 from cli.commands.data_plane import pgbouncer as pooler
@@ -64,7 +65,7 @@ def test_a_bundle_whose_login_cannot_be_proven_never_installs(
     runner = (tmp_path / "runner").resolve()
     runner.mkdir(mode=0o700)
     bundle = issue(born.home, runner, endpoint=endpoint)
-    pooler.stop_pgbouncer(force=True)
+    pooler.stop_pgbouncer(force=True, home=meiva_home())
     with pytest.raises(unit.UnitCapabilityError, match="refuses generation 0"):
         unit.install_bundle(
             runner,

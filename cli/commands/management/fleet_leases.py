@@ -44,8 +44,8 @@ def operator_connection() -> psycopg.Connection[Any]:
     from cli.database.runtime import CommandRuntime
 
     # meiva:note
-    # This program is piped to hosts whose installed code predates the checkout it came from, and
-    # `CommandRuntime.create` takes the resolved home only in newer ones.
+    # This program is piped to hosts whose installed code predates the checkout it came from;
+    # `CommandRuntime.create` and the operator factory take the resolved home only in newer ones.
     create: Any = CommandRuntime.create
     if "home" in inspect.signature(create).parameters:
         from base.paths.home import resolve_meiva_home
@@ -53,9 +53,13 @@ def operator_connection() -> psycopg.Connection[Any]:
         command = create(resolve_meiva_home().resolve())
     else:
         command = create()
-    factory = operator_database_factory(
-        local_host=command.machine.host, open_database=open_operator_database
-    )
+    build: Any = operator_database_factory
+    if "home" in inspect.signature(build).parameters:
+        factory = build(
+            local_host=command.machine.host, home=command.home, open_database=open_operator_database
+        )
+    else:
+        factory = build(local_host=command.machine.host, open_database=open_operator_database)
     return factory().connect(autocommit=True)
 
 

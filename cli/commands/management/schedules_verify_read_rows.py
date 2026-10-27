@@ -21,7 +21,16 @@ def read_rows(out: str) -> None:
 
         command: Any = _command_runtime()
         parameters = inspect.signature(operator_database_factory).parameters
-        if "gateway_url_reader" in parameters:
+        if "home" in parameters:
+            from cli.database import open_operator_database
+
+            home_factory: Any = operator_database_factory
+            database_factory = home_factory(
+                local_host=command.machine.host,
+                home=command.home,
+                open_database=open_operator_database,
+            )
+        elif "gateway_url_reader" in parameters:
             from cli.database import open_operator_database
 
             gateway_factory: Any = operator_database_factory

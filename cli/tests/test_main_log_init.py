@@ -442,6 +442,7 @@ def test_quiet_command_does_not_construct_pipeline(
     owner = operator_event_pipeline(
         operator_database_factory(
             local_host=command_runtime.machine.host,
+            home=command_runtime.home,
             open_database=open_operator_database,
         ),
         machine=command_runtime.machine,
@@ -488,6 +489,7 @@ def test_unfinished_command_writer_remains_owned_until_join(
         pipeline,
         database_factory=operator_database_factory(
             local_host=command_runtime.machine.host,
+            home=command_runtime.home,
             open_database=open_operator_database,
         ),
         machine=command_runtime.machine,

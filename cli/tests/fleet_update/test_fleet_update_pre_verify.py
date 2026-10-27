@@ -136,6 +136,32 @@ def test_the_read_step_passes_the_opener_only_when_the_old_factory_needs_it(
     assert json.loads(out.read_text()) == [[1, "digest", "host=gateway"]]
 
 
+# meiva:note
+# The generation whose factory takes the command's home passes that home, and only that
+# generation does: the opener-only factories above are called without it.
+def test_the_read_step_hands_the_runtime_home_to_a_factory_that_takes_one(tmp_path: Path) -> None:
+    checkout = {
+        **_OPENER_CHECKOUT,
+        "cli/database/__init__.py": (
+            "def open_operator_database(config, gate, direct_url):\n    return None\n\n\n"
+            "def operator_database_factory(*, local_host, home, open_database):\n"
+            "    assert open_database is open_operator_database\n"
+            "    return lambda: local_host() + ' home=' + str(home)\n"
+        ),
+        "cli/database/runtime.py": (
+            "class _Machine:\n"
+            "    def host(self):\n        return 'gateway'\n\n\n"
+            "class CommandRuntime:\n    machine = _Machine()\n    home = '/stand-in/home'\n\n"
+            "    @classmethod\n    def create(cls):\n        return cls()\n"
+        ),
+    }
+    _tree(tmp_path / "current", checkout)
+    out = tmp_path / "rows.json"
+    proc = _read_rows(tmp_path / "current", out)
+    assert proc.returncode == 0, proc.stderr
+    assert json.loads(out.read_text()) == [[1, "digest", "host=gateway home=/stand-in/home"]]
+
+
 def test_the_read_step_passes_the_gateway_reader_when_the_factory_requires_it(
     tmp_path: Path,
 ) -> None:

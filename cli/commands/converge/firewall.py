@@ -72,7 +72,7 @@ def serving_binaries(roles: frozenset[str], *, home: Path) -> tuple[Path, ...]:
 
     candidates = [Path(sys.executable)]
     if "gateway" in roles:
-        candidates.append(pg_tool("postgres"))
+        candidates.append(pg_tool("postgres", home=home))
         # A gateway with a cluster secret serves the collector's authenticated
         # remote OTLP receiver on MEIVA_MACHINE_HOST. Auditing it unconditionally
         # for gateway capability is harmless on a loopback-only single box (the

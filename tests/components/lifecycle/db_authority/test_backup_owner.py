@@ -37,6 +37,7 @@ from base.host.db_authority import delivery
 from base.host.net.url_secret import url_with_port
 from base.native_process.code_version import CodeVersion
 from base.native_process.loaded_commit import LoadedCommit
+from base.paths import meiva_home
 from cli.commands.data_plane.tests.data_plane_records import data_plane_config as data_plane_config
 from cli.commands.tests.test_single_box import Born
 from cli.commands.tests.test_single_box import born as born
@@ -90,7 +91,7 @@ def _seed_conversation(born: Born) -> int:
 def _assert_owner_dial(conninfo: str) -> None:
     """The home's administrator over its owner-only socket, acting as the owner."""
     target = conninfo_to_dict(conninfo)
-    assert target["host"] == str(pg_socket_dir())
+    assert target["host"] == str(pg_socket_dir(home=meiva_home()))
     assert target["user"] == getpass.getuser()
     assert target["dbname"] == "meiva"
     assert target["options"] == "-c role=meiva"
@@ -128,7 +129,7 @@ def test_scheduled_backup_dumps_as_the_owner_and_restores(
     tree = BackupTree(maintenance.home)
     settings = DumpSettings.read(config)
     source = dump.dump_source(
-        database(), is_remote=settings.is_remote, plane_url=settings.plane_url
+        database(), is_remote=settings.is_remote, plane_url=settings.plane_url, home=meiva_home()
     )
     conninfo, password = dump.passwordless_conninfo(source)
     _assert_owner_dial(conninfo)

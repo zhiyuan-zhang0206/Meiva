@@ -160,6 +160,7 @@ def probing_for(ctx: ConvergeCtx) -> Probing:
         host=ctx.host,
         data_plane=data_plane_config_from_boot(config) if "gateway" in (ctx.roles or ()) else None,
         toolchain_path=frontend_toolchain_path(config.process_environment().get("PATH", "")),
+        home=ctx.meiva_home,
     )
 
 

@@ -46,7 +46,7 @@ def fresh_schedule_entry(
         return Database(
             db_config_from_boot(config),
             gate=gate,
-            direct_url=ClusterDirectUrl(machine.host),
+            direct_url=ClusterDirectUrl(machine.host, home=home),
         )
 
     clients = ClientSet(

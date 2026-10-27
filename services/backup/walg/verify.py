@@ -148,11 +148,12 @@ def _missing_lost(integrity: Mapping[str, object]) -> tuple[MissingRange, ...]:
 # Postgres for its current segment and timeline, so it is handed the owner-only
 # admin socket rather than libpq's default.
 # meiva:link services/backup/walg/docs/walg-tick.meiva.okf.md
-def verify_chain(pg_admin_url: str, *, path: Path | None) -> ChainVerdict:
+def verify_chain(pg_admin_url: str, *, path: Path | None, home: Path) -> ChainVerdict:
     text = run_walg(
         ["wal-verify", "integrity", "timeline", "--json"],
         timeout_s=QUERY_TIMEOUT_S,
         pg_admin_url=pg_admin_url,
         path=path,
+        home=home,
     )
     return parse_verdict(text, recorded_gaps=load_recorded_gaps())

@@ -193,6 +193,7 @@ def _restore_and_verify(
     path: Path | None,
     database_for_url: Callable[[str], Database],
     socket_root: Path,
+    home: Path,
 ) -> str:
     """Restore `backup` to the newest archived segment and verify it; returns the summary."""
     base = select_throwaway_base(required_bytes(backup, facts), override=throwaway.override)
@@ -211,6 +212,7 @@ def _restore_and_verify(
             keep_data=False,
             path=path,
             socket_root=socket_root,
+            home=home,
         ) as instance:
             summary = _verify(
                 instance.url(target.database), reached, database_for_url=database_for_url
@@ -263,6 +265,7 @@ def run_drill(
     path: Path | None,
     database_for_url: Callable[[str], Database],
     socket_root: Path = SOCKET_ROOT,
+    home: Path,
 ) -> DrillRecord:
     """Run one drill against `backup`; every failure becomes a record with `ok=False`."""
     started = time.monotonic()
@@ -282,6 +285,7 @@ def run_drill(
                 path=path,
                 database_for_url=database_for_url,
                 socket_root=socket_root,
+                home=home,
             ),
         )
     except _EXPECTED_FAILURES as exc:

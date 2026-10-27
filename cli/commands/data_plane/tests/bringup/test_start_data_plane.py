@@ -18,6 +18,7 @@ import psycopg
 import pytest
 
 from base.cluster.machine import MachineIdentityReader
+from base.paths import meiva_home
 from cli.commands.data_plane import bringup, cluster_instance, completion
 from cli.commands.data_plane.config import DataPlaneConfig
 from cli.commands.data_plane.tests.data_plane_records import (
@@ -174,7 +175,7 @@ def test_a_backend_other_than_pgvector_prepares_no_table(
 ) -> None:
     plane = dataclasses.replace(remote_data_plane_config, memory_search_backend="numpy")
 
-    bringup.prepare_memory_vectors(plane, database_factory=operator_database)
+    bringup.prepare_memory_vectors(plane, database_factory=operator_database, home=meiva_home())
 
     with psycopg.connect(memory_table) as conn:
         assert conn.execute("SELECT to_regclass('memory_embeddings')").fetchone() == (None,)
@@ -192,7 +193,7 @@ def test_a_remote_plane_prepares_the_table_through_its_provider_url(
     with psycopg.connect(memory_table, autocommit=True) as conn:
         conn.execute("CREATE EXTENSION IF NOT EXISTS vector")
 
-    bringup.prepare_memory_vectors(plane, database_factory=operator_database)
+    bringup.prepare_memory_vectors(plane, database_factory=operator_database, home=meiva_home())
 
     with psycopg.connect(memory_table) as conn:
         width = conn.execute(_VECTOR_WIDTH).fetchone()
@@ -209,7 +210,7 @@ def test_a_table_of_another_width_is_rebuilt_at_the_providers_width(
         conn.execute("CREATE EXTENSION IF NOT EXISTS vector")
         conn.execute("CREATE TABLE memory_embeddings (pk text PRIMARY KEY, vector vector(3))")
 
-    bringup.prepare_memory_vectors(plane, database_factory=operator_database)
+    bringup.prepare_memory_vectors(plane, database_factory=operator_database, home=meiva_home())
 
     with psycopg.connect(memory_table) as conn:
         width = conn.execute(_VECTOR_WIDTH).fetchone()

@@ -93,10 +93,10 @@ def _ensure_restore_roles(db_url: str) -> None:
 
 # meiva:note
 # Load the custom dump into the disposable target database.
-def restore_dump(raw_dump: Path, db_url: str, *, base: Path) -> None:
+def restore_dump(raw_dump: Path, db_url: str, *, base: Path, home: Path) -> None:
     proc = subprocess.run(  # noqa: S603
         [
-            str(pg_tool("pg_restore")),
+            str(pg_tool("pg_restore", home=home)),
             "--clean",
             "--if-exists",
             "--dbname",
@@ -216,7 +216,7 @@ def run_drill(
             config=throwaway, base=base, foreground=foreground
         ) as scratch_db_url:
             _ensure_restore_roles(scratch_db_url)
-            restore_dump(raw_dump, scratch_db_url, base=base)
+            restore_dump(raw_dump, scratch_db_url, base=base, home=tree.home)
             report = verify_restored_database(scratch_db_url, database_for_url=database_for_url)
     return report, time.monotonic() - started
 
@@ -227,8 +227,11 @@ def main(argv: list[str] | None = None) -> None:
     args = parser.parse_args(argv)
     config = ConfigBoot()
     config.read_process_environment()
-    tree = BackupTree(meiva_home())
-    throwaway = ThrowawayConfig(configured_base(config.view.data_plane.pg_throwaway_base))
+    home = meiva_home()
+    tree = BackupTree(home)
+    throwaway = ThrowawayConfig(
+        configured_base(config.view.data_plane.pg_throwaway_base), home=home
+    )
     image = LoadedCommit.capture()
     version = CodeVersion(image)
     gate = ProcessDbGate(version=version.get, process=process_name())

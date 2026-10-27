@@ -30,10 +30,10 @@ def main() -> None:
     machine = ConfiguredMachineIdentity(config)
     crontab = FakeCrontab()
     host = fake_host(crontab, programs={"crontab": "/usr/bin/crontab"})
-    database = operator_database_factory(
-        local_host=machine.host, open_database=open_operator_database
-    )
     home = meiva_home()
+    database = operator_database_factory(
+        local_host=machine.host, home=home, open_database=open_operator_database
+    )
     pipeline = operator_event_pipeline(database, machine=machine, home=home)
     context = ConvergeCtx(
         repo=Path(__file__).resolve().parents[4],

@@ -19,6 +19,7 @@ from base.cluster.machine import MachineIdentityReader
 from base.host.env import port_lease
 from base.log.tests.log_records import LogRecords, loguru_records
 from base.native_process.loaded_commit import LoadedCommit
+from base.paths import meiva_home
 from base.telemetry.delivery.pipeline import EventPipeline
 from services.entrypoints.gate import daemon
 from services.entrypoints.gate.daemon import Gate, GateConfig, GateServer
@@ -179,7 +180,9 @@ def test_the_database_factory_shares_one_gate_between_opens() -> None:
 
     config = ConfigBoot()
     machine: MachineIdentityReader = ConfiguredMachineIdentity(config)
-    factory = daemon.gate_database(image=LoadedCommit.capture(), machine=machine, config=config)
+    factory = daemon.gate_database(
+        image=LoadedCommit.capture(), machine=machine, config=config, home=meiva_home()
+    )
     first, second = factory(), factory()
     assert first is not second
     assert first._gate is second._gate

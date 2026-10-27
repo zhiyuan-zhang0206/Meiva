@@ -40,13 +40,13 @@ class Step:
     ok: bool = field(default=True, kw_only=True)
 
 
-def _storage_round_trip(*, path: Path | None, token: str) -> str:
+def _storage_round_trip(*, path: Path | None, token: str, home: Path) -> str:
     remote = f"{_CHECK_DIR}/{token}.txt"
     stored = f"{remote}.lz4"
     payload = f"meiva walg check {token}\n".encode()
 
     def call(*args: str) -> str:
-        return str(run_walg(list(args), timeout_s=_STORAGE_CALL_TIMEOUT_S, path=path))
+        return str(run_walg(list(args), timeout_s=_STORAGE_CALL_TIMEOUT_S, path=path, home=home))
 
     with tempfile.TemporaryDirectory(prefix="meiva-walg-check-") as scratch:
         source, fetched = Path(scratch, "put"), Path(scratch, "get")
@@ -75,11 +75,9 @@ def _storage_round_trip(*, path: Path | None, token: str) -> str:
 
 
 def _postgres_facts(
-    *,
-    path: Path | None,
-    admin: AbstractContextManager[psycopg.Connection[Any]],
+    *, path: Path | None, admin: AbstractContextManager[psycopg.Connection[Any]], home: Path
 ) -> str:
-    expected = expected_archive(path=path)
+    expected = expected_archive(path=path, home=home)
     try:
         with admin as conn:
             state = probe.read_archiver_state(conn)
@@ -99,12 +97,13 @@ def _postgres_facts(
 # Run the checks in order, stopping at the first failure; the last step is the verdict. `token` names
 # the object the storage round trip writes; the caller draws a fresh one per run, so two runs (or a
 # run and a leftover of an earlier one) never address the same object.
-def run_check(*, path: Path | None, token: str) -> list[Step]:
+def run_check(*, path: Path | None, token: str, home: Path) -> list[Step]:
     return run_check_on(
         path=path,
         token=token,
-        binary_problem=walg_binary.installed_problem(),
-        admin=probe.admin_connection(),
+        binary_problem=walg_binary.installed_problem(home=home),
+        admin=probe.admin_connection(home=home),
+        home=home,
     )
 
 
@@ -117,6 +116,7 @@ def run_check_on(
     token: str,
     binary_problem: str | None,
     admin: AbstractContextManager[psycopg.Connection[Any]],
+    home: Path,
 ) -> list[Step]:
     if not token:
         raise ValueError("the check names its probe object by a non-empty token")
@@ -149,8 +149,8 @@ def run_check_on(
     )
 
     try:
-        steps.append(Step("storage", _storage_round_trip(path=path, token=token)))
+        steps.append(Step("storage", _storage_round_trip(path=path, token=token, home=home)))
     except WalgCommandError as exc:
         return [*steps, Step("storage", str(exc), ok=False)]
 
-    return [*steps, Step("postgres", _postgres_facts(path=path, admin=admin))]
+    return [*steps, Step("postgres", _postgres_facts(path=path, admin=admin, home=home))]

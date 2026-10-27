@@ -110,7 +110,9 @@ def _connect_backends(
     return True
 
 
-def _reconcile_database(boot: ConfigBoot, *, machine: MachineIdentityReader) -> Database:
+def _reconcile_database(
+    boot: ConfigBoot, *, machine: MachineIdentityReader, home: Path
+) -> Database:
     """Capture this standalone entry's gated database at its original dial boundary."""
     image = LoadedCommit.capture()
     version = CodeVersion(image)
@@ -118,7 +120,7 @@ def _reconcile_database(boot: ConfigBoot, *, machine: MachineIdentityReader) -> 
     return Database(
         db_config_from_boot(boot),
         gate=gate,
-        direct_url=ClusterDirectUrl(machine.host),
+        direct_url=ClusterDirectUrl(machine.host, home=home),
     )
 
 
@@ -228,7 +230,7 @@ def main(argv: Sequence[str], *, out: TextIO, err: TextIO) -> int:
         timeout_s=inputs.embed_timeout_s,
         api_key=inputs.api_key,
     )
-    database = _reconcile_database(boot, machine=machine)
+    database = _reconcile_database(boot, machine=machine, home=meiva_home())
     backend_a, backend_b = build_backends(
         args, database=database, provider=provider, uri=inputs.search_uri
     )

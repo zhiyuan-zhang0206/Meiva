@@ -16,12 +16,12 @@ Its component nodes describe the current contracts and implementation.
 
 ## Direct (admin-plane) dials
 
-The URL a `direct=True` dial uses is derived from the home's cluster record, which sits above
+The URL a `direct=True` dial uses is derived from the home's cluster record (the root hands the resolver the home it runs under), which sits above
 this layer. A composition root therefore hands its `Database` a resolver from
 `base/cluster/dataplane/direct_url.py`:
 
 ```python
-resolver = ClusterDirectUrl(machine.host)
+resolver = ClusterDirectUrl(machine.host, home=home)
 database = Database(config, gate=gate, direct_url=resolver)
 ```
 

@@ -688,7 +688,7 @@ class DaemonEntry:
     direct_url: ClusterDirectUrl
 
 
-def prepare_entry(image: LoadedCommit, machine_config: ConfigBoot) -> DaemonEntry:
+def prepare_entry(image: LoadedCommit, machine_config: ConfigBoot, *, home: Path) -> DaemonEntry:
     machine = ConfiguredMachineIdentity(machine_config)
     version = CodeVersion(image)
     gate = ProcessDbGate(version=version.get, process="computer-mcp")
@@ -696,7 +696,7 @@ def prepare_entry(image: LoadedCommit, machine_config: ConfigBoot) -> DaemonEntr
         image=image,
         machine=machine,
         gate=gate,
-        direct_url=ClusterDirectUrl(machine.host),
+        direct_url=ClusterDirectUrl(machine.host, home=home),
     )
 
 
@@ -704,9 +704,9 @@ def main() -> None:
     image = LoadedCommit.capture()
     machine_config = ConfigBoot()
     machine_config.boot()
-    entry = prepare_entry(image, machine_config)
     home = meiva_home()
     process_home = home.resolve()
+    entry = prepare_entry(image, machine_config, home=process_home)
 
     def database() -> Database:
         return Database.from_settings(

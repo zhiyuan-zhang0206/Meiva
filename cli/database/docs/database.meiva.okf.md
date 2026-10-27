@@ -12,6 +12,7 @@ tags: [cli, database]
 ```python
 factory = operator_database_factory(
     local_host=command.machine.host,
+    home=command.home,
     open_database=open_operator_database,
 )
 ```

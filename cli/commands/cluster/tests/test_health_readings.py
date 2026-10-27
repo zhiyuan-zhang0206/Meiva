@@ -19,7 +19,7 @@ import pytest
 from base.cluster.machine import GatewayApiBaseMissing
 from base.db import Database
 from base.host.net.tests.local_http import closed_port_url
-from base.paths import root_manifests_path
+from base.paths import meiva_home, root_manifests_path
 from cli.commands.cluster.health_readings import (
     HealthOptions,
     data_plane_abnormal,
@@ -336,13 +336,13 @@ def test_a_volume_that_cannot_be_measured_is_none_never_a_full_disk(tmp_path: Pa
 
 
 def test_wal_archiving_that_is_off_is_neither_failing_nor_enabled() -> None:
-    assert read_walg(None) == (None, False)
+    assert read_walg(None, home=meiva_home()) == (None, False)
 
 
 def test_a_wal_g_configuration_that_does_not_exist_is_a_failure_without_dialing_postgres(
     tmp_path: Path,
 ) -> None:
-    failure, enabled = read_walg(tmp_path / "walg.json")
+    failure, enabled = read_walg(tmp_path / "walg.json", home=meiva_home())
 
     assert enabled is True
     assert failure == "WAL archiving: the WAL-G configuration is unusable"

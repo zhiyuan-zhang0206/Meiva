@@ -24,6 +24,7 @@ from base.db.code_version_gate import ProcessDbGate
 from base.db.config import db_config_from_boot
 from base.host.env import port_lease
 from base.native_process.loaded_commit import LoadedCommit
+from base.paths import meiva_home
 from base.telemetry.delivery.receipts import DrainStatus
 from base.telemetry.pipeline_build import build_pipeline
 from services.derived.memory_indexer import daemon as memory_indexer_daemon
@@ -95,7 +96,7 @@ def test_memory_entries_share_gate_with_pipeline_and_read_config_owner_when_buil
         return Database(
             db_config_from_boot(config),
             gate=database_gate,
-            direct_url=ClusterDirectUrl(machine_identity.host),
+            direct_url=ClusterDirectUrl(machine_identity.host, home=meiva_home()),
         )
 
     pipeline = build_pipeline(database=database, machine=machine_identity, home=tmp_path)
@@ -146,7 +147,7 @@ async def test_memory_search_and_indexer_serve_and_clean_up_when_stopped(
             return Database(
                 db_config_from_boot(config),
                 gate=database_gate,
-                direct_url=ClusterDirectUrl(machine_identity.host),
+                direct_url=ClusterDirectUrl(machine_identity.host, home=meiva_home()),
             )
 
         indexer_task = asyncio.create_task(

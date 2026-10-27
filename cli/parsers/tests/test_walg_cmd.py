@@ -13,6 +13,7 @@ import pytest
 
 from base.clock import Clock, ClockConfig
 from base.clock.tests.manual_timers import ManualTimers
+from base.paths import meiva_home
 from cli.commands.data_plane import walg as walg_cmd
 from cli.commands.data_plane.config import DataPlaneConfig
 from cli.commands.data_plane.tests.data_plane_records import data_plane_config as data_plane_config
@@ -127,7 +128,7 @@ def test_run_prints_timestamped_lines_and_returns_the_ticks_exit_code(
 def test_status_says_when_the_tick_never_ran(
     plane: DataPlaneConfig, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    assert walg_cmd.cmd_walg_status(plane) == 0
+    assert walg_cmd.cmd_walg_status(plane, home=meiva_home()) == 0
 
     assert "daily tick: never ran" in capsys.readouterr().out
 
@@ -150,7 +151,7 @@ def test_status_shows_the_last_run_and_its_failed_step(
         )
     )
 
-    assert walg_cmd.cmd_walg_status(plane) == 0
+    assert walg_cmd.cmd_walg_status(plane, home=meiva_home()) == 0
 
     out = capsys.readouterr().out
     assert "daily tick: last started 2026-10-02T06:25:00+00:00" in out
@@ -164,7 +165,7 @@ def test_status_reports_an_unreadable_state_file(
     state.state_path().parent.mkdir(parents=True)
     state.state_path().write_text("{broken")
 
-    assert walg_cmd.cmd_walg_status(plane) == 0
+    assert walg_cmd.cmd_walg_status(plane, home=meiva_home()) == 0
 
     assert "daily tick: state UNREADABLE" in capsys.readouterr().out
 
@@ -172,7 +173,7 @@ def test_status_reports_an_unreadable_state_file(
 def test_check_prints_a_mark_per_step_and_exits_zero_when_all_pass(
     plane: DataPlaneConfig, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    assert walg_cmd.cmd_walg_check(plane, token="e" * 32) == 0
+    assert walg_cmd.cmd_walg_check(plane, token="e" * 32, home=meiva_home()) == 0
 
     out = capsys.readouterr().out
     assert [line.split(":")[0] for line in out.splitlines()] == [
@@ -190,7 +191,7 @@ def test_check_exits_non_zero_and_names_the_failing_step(
 ) -> None:
     sandbox.set_mode("nodelete")
 
-    assert walg_cmd.cmd_walg_check(plane, token="f" * 32) == 1
+    assert walg_cmd.cmd_walg_check(plane, token="f" * 32, home=meiva_home()) == 1
 
     assert "  ✗ storage: cannot delete" in capsys.readouterr().out
 
@@ -216,7 +217,7 @@ def test_check_at_the_door_names_each_run_by_a_token_it_draws(
 def test_status_when_off_says_so(
     plane_off: DataPlaneConfig, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    assert walg_cmd.cmd_walg_status(plane_off) == 0
+    assert walg_cmd.cmd_walg_status(plane_off, home=meiva_home()) == 0
 
     assert capsys.readouterr().out == "WAL-G archiving is off (MEIVA_WALG_CONFIG_FILE is not set)\n"
 
@@ -260,7 +261,7 @@ def test_status_shows_the_fingerprint_not_the_key(
 ) -> None:
     fingerprint = walg_config.read_config(sandbox.config_file).key_fingerprint
 
-    assert walg_cmd.cmd_walg_status(plane) == 0
+    assert walg_cmd.cmd_walg_status(plane, home=meiva_home()) == 0
 
     out = capsys.readouterr().out
     assert f"key fingerprint: {fingerprint} (pinned: not yet)" in out
@@ -275,7 +276,7 @@ def test_status_reports_an_unusable_configuration_instead_of_raising(
 ) -> None:
     sandbox.config_file.write_text("{broken")
 
-    assert walg_cmd.cmd_walg_status(plane) == 0
+    assert walg_cmd.cmd_walg_status(plane, home=meiva_home()) == 0
 
     out = capsys.readouterr().out
     assert "configuration: UNUSABLE" in out
@@ -292,7 +293,9 @@ def test_a_postgres_that_kept_its_old_launch_arguments_is_flagged_at_start(
 ) -> None:
     sandbox = make_sandbox(tmp_path, monkeypatch, enabled=False)
     with archiving_postgres() as pg:
-        walg_cmd.warn_archive_inactive_on(sandbox.config_file, probe.admin_connection_to(pg.target))
+        walg_cmd.warn_archive_inactive_on(
+            sandbox.config_file, probe.admin_connection_to(pg.target), home=meiva_home()
+        )
 
     err = capsys.readouterr().err
     assert "this Postgres is not running with the configured archive settings" in err
@@ -307,7 +310,9 @@ def test_a_postgres_launched_with_the_arguments_is_not_flagged(
 ) -> None:
     sandbox = make_sandbox(tmp_path, monkeypatch)
     with archiving_postgres() as pg:
-        walg_cmd.warn_archive_inactive_on(sandbox.config_file, probe.admin_connection_to(pg.target))
+        walg_cmd.warn_archive_inactive_on(
+            sandbox.config_file, probe.admin_connection_to(pg.target), home=meiva_home()
+        )
 
     assert capsys.readouterr().err == ""
 
@@ -317,7 +322,7 @@ def test_nothing_is_dialed_while_wal_g_is_off(
 ) -> None:
     make_sandbox(tmp_path, monkeypatch, enabled=False)
 
-    walg_cmd.warn_archive_inactive(None)
+    walg_cmd.warn_archive_inactive(None, home=meiva_home())
 
     assert capsys.readouterr().err == ""
 
@@ -328,7 +333,7 @@ def test_nothing_is_dialed_while_wal_g_is_off(
 def test_an_unreadable_postgres_is_a_warning_not_a_failure(
     sandbox: Sandbox, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    walg_cmd.warn_archive_inactive(sandbox.config_file)
+    walg_cmd.warn_archive_inactive(sandbox.config_file, home=meiva_home())
 
     err = capsys.readouterr().err
     assert "WAL archiving state not read (RuntimeError: no registry record for home" in err
@@ -371,6 +376,7 @@ def test_restore_recovers_to_the_target_and_keeps_the_data_directory(
             lsn=target,
             user="meiva",
             clock=_clock(),
+            home=meiva_home(),
         )
 
     assert code == 0
@@ -400,7 +406,12 @@ def test_restore_rejects_a_bad_target_before_fetching(
     message: str,
 ) -> None:
     code = walg_cmd.cmd_walg_restore(
-        plane, directory=str(tmp_path / "out"), backup="LATEST", clock=_clock(), **kwargs
+        plane,
+        directory=str(tmp_path / "out"),
+        backup="LATEST",
+        clock=_clock(),
+        home=meiva_home(),
+        **kwargs,
     )
 
     assert code == 1
@@ -420,6 +431,7 @@ def test_restore_reports_a_failed_fetch_and_exits_non_zero(
         time=None,
         lsn=None,
         clock=_clock(),
+        home=meiva_home(),
     )
 
     assert code == 1
@@ -436,7 +448,13 @@ def test_restore_refuses_a_directory_that_holds_something(
     (occupied / "keep.txt").write_text("mine")
 
     code = walg_cmd.cmd_walg_restore(
-        plane, directory=str(occupied), backup="LATEST", time=None, lsn=None, clock=_clock()
+        plane,
+        directory=str(occupied),
+        backup="LATEST",
+        time=None,
+        lsn=None,
+        clock=_clock(),
+        home=meiva_home(),
     )
 
     assert code == 1
@@ -449,7 +467,13 @@ def test_restore_while_wal_g_is_off_says_so(
     plane_off: DataPlaneConfig, capsys: pytest.CaptureFixture[str]
 ) -> None:
     code = walg_cmd.cmd_walg_restore(
-        plane_off, directory="/x", backup="LATEST", time=None, lsn=None, clock=_clock()
+        plane_off,
+        directory="/x",
+        backup="LATEST",
+        time=None,
+        lsn=None,
+        clock=_clock(),
+        home=meiva_home(),
     )
 
     assert code == 1
@@ -496,7 +520,7 @@ def test_status_shows_the_last_drill_and_the_last_success(
         )
     )
 
-    assert walg_cmd.cmd_walg_status(plane) == 0
+    assert walg_cmd.cmd_walg_status(plane, home=meiva_home()) == 0
 
     out = capsys.readouterr().out
     assert (

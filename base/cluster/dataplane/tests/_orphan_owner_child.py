@@ -8,6 +8,7 @@ from pathlib import Path
 
 from base.cluster.dataplane import pg_tools
 from base.cluster.dataplane.pg_throwaway_base import ThrowawayConfig
+from base.paths import meiva_home
 
 if sys.argv[1] == "--hold-lock":
     fd = os.open(sys.argv[2], os.O_RDWR | os.O_CREAT, 0o600)
@@ -16,7 +17,7 @@ if sys.argv[1] == "--hold-lock":
     Path(sys.argv[3]).write_text("")
     time.sleep(600)
 else:
-    cm = pg_tools.throwaway_postgres(config=ThrowawayConfig(Path(sys.argv[1])))
+    cm = pg_tools.throwaway_postgres(config=ThrowawayConfig(Path(sys.argv[1]), home=meiva_home()))
     url = cm.__enter__()
     target = Path(sys.argv[2])
     part = Path(sys.argv[2] + ".part")

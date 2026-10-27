@@ -155,10 +155,10 @@ def prune(directory: Path, *, keep: int) -> list[Path]:
 # (`Database.direct_url`) is its only authority; `passwordless_conninfo` keeps its
 # password off argv. Both bypass PgBouncer: pg_dump holds one snapshot across
 # many statements, which a transaction pooler cannot keep.
-def dump_source(db: Database, *, is_remote: bool, plane_url: str) -> str:
+def dump_source(db: Database, *, is_remote: bool, plane_url: str, home: Path) -> str:
     if is_remote:
         return db.direct_url()
-    return local_owner_authority(plane_url, remote_plane=False).verified_conninfo()
+    return local_owner_authority(plane_url, remote_plane=False, home=home).verified_conninfo()
 
 
 # meiva:note
@@ -434,7 +434,7 @@ def _dump_and_encrypt(
     # cannot delay watchdog supervision. Expiry kills the child and
     # TimeoutExpired lets the scheduler schedule its retry.
     proc = run_with_progress(
-        pg_dump_argv(str(pg_tool("pg_dump")), files.dump_partial, db_conninfo),
+        pg_dump_argv(str(pg_tool("pg_dump", home=tree.home)), files.dump_partial, db_conninfo),
         timeout_s=bound.timeout_s,
         label="pg_dump",
         progress=bound.progress,

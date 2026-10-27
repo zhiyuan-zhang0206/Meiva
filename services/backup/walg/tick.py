@@ -120,10 +120,10 @@ class Platform:
 
 # meiva:note
 # Resolve the platform from this process's home and settings (the composition root's read).
-def ambient_platform() -> Platform:
-    binary_problem = walg_binary.installed_problem()
+def ambient_platform(*, home: Path) -> Platform:
+    binary_problem = walg_binary.installed_problem(home=home)
     try:
-        target = pg_target()
+        target = pg_target(home=home)
         accepting = postgres_accepts_connections(target)
     # meiva:note
     # no locally owned Postgres, or a socket that is not this home's
@@ -145,22 +145,18 @@ def _now() -> datetime:
     return datetime.now(UTC)
 
 
-def _preflight(*, path: Path | None, binary_problem: str | None) -> list[Backup]:
+def _preflight(*, path: Path | None, binary_problem: str | None, home: Path) -> list[Backup]:
     if binary_problem is not None:
         raise StepFailedError(STEP_PREFLIGHT, f"{binary_problem} (meiva converge installs it)")
     try:
         walg_config.load_walg_config(path=path)
     except walg_config.WalgConfigError as exc:
         raise StepFailedError(STEP_PREFLIGHT, str(exc)) from None
-    return list_backups(path=path)
+    return list_backups(path=path, home=home)
 
 
 def _backup(
-    target: PgTarget,
-    before: list[Backup],
-    report: Report,
-    *,
-    path: Path | None,
+    target: PgTarget, before: list[Backup], report: Report, *, path: Path | None, home: Path
 ) -> list[Backup]:
     run_walg(
         ["backup-push", str(target.data_dir)],
@@ -168,8 +164,9 @@ def _backup(
         pg_admin_url=target.admin_url,
         extra_env={"WALG_DELTA_MAX_STEPS": DELTA_MAX_STEPS},
         path=path,
+        home=home,
     )
-    after = list_backups(path=path)
+    after = list_backups(path=path, home=home)
     if not after or (before and after[-1].name == before[-1].name):
         raise StepFailedError(STEP_BACKUP, "backup-push finished but no new backup is listed")
     newest = after[-1]
@@ -195,6 +192,7 @@ def _drill(
     throwaway: ThrowawayConfig,
     database_for_url: Callable[[str], Database],
     path: Path | None,
+    home: Path,
 ) -> bool:
     """Drill the newest backup now; records the outcome. Returns whether it succeeded."""
     previous = state.read_state().drill
@@ -206,6 +204,7 @@ def _drill(
         throwaway=throwaway,
         path=path,
         database_for_url=database_for_url,
+        home=home,
     )
     state.update_state(drill=record)
     if record.ok:
@@ -223,6 +222,7 @@ def _weekly_drill(
     throwaway: ThrowawayConfig,
     database_for_url: Callable[[str], Database],
     path: Path | None,
+    home: Path,
 ) -> None:
     """The drill when one is due. Its failure is recorded and reported, never raised."""
     if drill.drill_due(state.read_state().drill, backups, _now()):
@@ -233,11 +233,12 @@ def _weekly_drill(
             path=path,
             database_for_url=database_for_url,
             throwaway=throwaway,
+            home=home,
         )
 
 
-def _verify(target: PgTarget, report: Report, *, path: Path | None) -> str:
-    verdict = verify_chain(target.admin_url, path=path)
+def _verify(target: PgTarget, report: Report, *, path: Path | None, home: Path) -> str:
+    verdict = verify_chain(target.admin_url, path=path, home=home)
     state.update_state(
         verify=VerifyRecord(at=_now(), integrity=verdict.integrity, timeline=verdict.timeline)
     )
@@ -248,8 +249,8 @@ def _verify(target: PgTarget, report: Report, *, path: Path | None) -> str:
     return summary
 
 
-def _retention(backups: list[Backup], report: Report, *, path: Path | None) -> int:
-    outcome = apply_retention(backups, report, path=path)
+def _retention(backups: list[Backup], report: Report, *, path: Path | None, home: Path) -> int:
+    outcome = apply_retention(backups, report, path=path, home=home)
     state.update_state(
         retention=RetentionRecord(at=_now(), marked=outcome.marked, deleted=outcome.deleted)
     )
@@ -264,11 +265,12 @@ def _run_steps(
     throwaway: ThrowawayConfig,
     database_for_url: Callable[[str], Database],
     path: Path | None,
+    home: Path,
 ) -> str:
     """The steps in order; returns the one-line summary of a successful run."""
     current = STEP_PREFLIGHT
     try:
-        before = _preflight(path=path, binary_problem=binary_problem)
+        before = _preflight(path=path, binary_problem=binary_problem, home=home)
         report(f"preflight: ok, {len(before)} backups listed")
         _weekly_drill(
             target,
@@ -277,13 +279,14 @@ def _run_steps(
             path=path,
             database_for_url=database_for_url,
             throwaway=throwaway,
+            home=home,
         )
         current = STEP_BACKUP
-        after = _backup(target, before, report, path=path)
+        after = _backup(target, before, report, path=path, home=home)
         current = STEP_VERIFY
-        chain = _verify(target, report, path=path)
+        chain = _verify(target, report, path=path, home=home)
         current = STEP_RETENTION
-        deleted = _retention(after, report, path=path)
+        deleted = _retention(after, report, path=path, home=home)
     except StepFailedError:
         raise
     except _EXPECTED_FAILURES as exc:
@@ -315,6 +318,7 @@ def _locked_tick(
     throwaway: ThrowawayConfig,
     database_for_url: Callable[[str], Database],
     path: Path | None,
+    home: Path,
 ) -> int:
     started = _now()
     try:
@@ -342,6 +346,7 @@ def _locked_tick(
             path=path,
             database_for_url=database_for_url,
             throwaway=throwaway,
+            home=home,
         )
     except StepFailedError as failure:
         return _record_failure(started, failure, report)
@@ -363,6 +368,7 @@ def run_tick_on(
     throwaway: ThrowawayConfig,
     database_for_url: Callable[[str], Database],
     path: Path | None,
+    home: Path,
 ) -> int:
     if path is None:
         report("WAL-G is off (MEIVA_WALG_CONFIG_FILE is not set); nothing to do")
@@ -376,6 +382,7 @@ def run_tick_on(
                 path=path,
                 database_for_url=database_for_url,
                 throwaway=throwaway,
+                home=home,
             )
     except LockTimeoutError:
         report("another WAL-G tick is still running; nothing to do")
@@ -390,16 +397,18 @@ def run_tick(
     throwaway: ThrowawayConfig,
     database_for_url: Callable[[str], Database],
     path: Path | None,
+    home: Path,
 ) -> int:
     if path is None:
         report("WAL-G is off (MEIVA_WALG_CONFIG_FILE is not set); nothing to do")
         return 0
     return run_tick_on(
         report,
-        platform=ambient_platform(),
+        platform=ambient_platform(home=home),
         throwaway=throwaway,
         database_for_url=database_for_url,
         path=path,
+        home=home,
     )
 
 
@@ -410,6 +419,7 @@ def _locked_drill(
     throwaway: ThrowawayConfig,
     database_for_url: Callable[[str], Database],
     path: Path | None,
+    home: Path,
 ) -> int:
     target = platform.target
     try:
@@ -420,7 +430,7 @@ def _locked_drill(
         if not platform.accepting:
             report("failed: postgres is not accepting connections")
             return 1
-        backups = _preflight(path=path, binary_problem=platform.binary_problem)
+        backups = _preflight(path=path, binary_problem=platform.binary_problem, home=home)
     except (state.StateError, RuntimeError, StepFailedError, *_EXPECTED_FAILURES) as exc:
         report(f"failed: {exc}")
         return 1
@@ -436,6 +446,7 @@ def _locked_drill(
             path=path,
             database_for_url=database_for_url,
             throwaway=throwaway,
+            home=home,
         )
         else 1
     )
@@ -452,6 +463,7 @@ def run_drill_now_on(
     throwaway: ThrowawayConfig,
     database_for_url: Callable[[str], Database],
     path: Path | None,
+    home: Path,
 ) -> int:
     if path is None:
         report("WAL-G is off (MEIVA_WALG_CONFIG_FILE is not set); nothing to drill")
@@ -465,6 +477,7 @@ def run_drill_now_on(
                 path=path,
                 database_for_url=database_for_url,
                 throwaway=throwaway,
+                home=home,
             )
     except LockTimeoutError:
         report("failed: a WAL-G tick or drill is still running")
@@ -481,14 +494,16 @@ def run_drill_now(
     throwaway: ThrowawayConfig,
     database_for_url: Callable[[str], Database],
     path: Path | None,
+    home: Path,
 ) -> int:
     if path is None:
         report("WAL-G is off (MEIVA_WALG_CONFIG_FILE is not set); nothing to drill")
         return 1
     return run_drill_now_on(
         report,
-        platform=ambient_platform(),
+        platform=ambient_platform(home=home),
         throwaway=throwaway,
         database_for_url=database_for_url,
         path=path,
+        home=home,
     )

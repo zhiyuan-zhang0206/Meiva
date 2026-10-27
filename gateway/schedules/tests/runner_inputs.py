@@ -38,7 +38,7 @@ def run_schedule(
     database = partial(
         Database.from_settings,
         gate=gate,
-        direct_url=ClusterDirectUrl(machine.host),
+        direct_url=ClusterDirectUrl(machine.host, home=meiva_home()),
     )
     with closing(clients_over(snapshot_process_config(), machine, database)) as clients:
         process_context.bind_context(

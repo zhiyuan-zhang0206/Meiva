@@ -57,7 +57,7 @@ class GatewayProcess:
         return Database(
             db_config_from_boot(self.config),
             gate=self.gate,
-            direct_url=ClusterDirectUrl(self.machine.host),
+            direct_url=ClusterDirectUrl(self.machine.host, home=self.home.resolve()),
         )
 
     def event_pipeline(self) -> EventPipeline:
