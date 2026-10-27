@@ -225,7 +225,7 @@ def notify(
         context=meiva.context,
     )
     _raise_as_value_error(resp)
-    data = resp.json()
+    data = transport.json_object(resp)
     pending_rows: list[PendingNoticeRow] = [
         PendingNoticeRow(
             id=int(r["id"]),
@@ -333,7 +333,7 @@ def _observe_open_notice_id(agent_id: int) -> int | None:
         context=meiva.context,
     )
     transport.raise_from_response(resp)
-    rows = resp.json()
+    rows = transport.json_rows(resp)
     return int(rows[0]["id"]) if rows else None
 
 

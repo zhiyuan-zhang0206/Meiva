@@ -68,7 +68,7 @@ def create_and_assign_guarded(
         context=process_context.current_context(),
     )
     transport.raise_from_response(response)
-    result = response.json()
+    result = transport.json_object(response)
     snapshot = validate_task_snapshot(result["task"])
     agent_id = result["agent_id"]
     if isinstance(agent_id, bool) or not isinstance(agent_id, int):
