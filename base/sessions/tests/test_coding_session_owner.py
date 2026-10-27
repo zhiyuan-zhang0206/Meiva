@@ -24,6 +24,28 @@ WRITER = AtomicWriter(SYSTEM_FS)
 RNG = seeded_rng()
 
 
+# meiva:note
+# The coding sessions a cleanup sees: a set of live names, and a record of what was stopped. A stop is always the hard one the owner makes (not graceful, marked expected): the fake refuses any other, so every cleanup test also pins how the owner stops a session.
+class _FakeSessions:
+    def __init__(self, live: set[str] | None = None, stopped: list[str] | None = None) -> None:
+        self.live: set[str] = live if live is not None else set()
+        self.stopped: list[str] = stopped if stopped is not None else []
+
+    def list_sessions(self, prefix: str = "") -> list[str]:
+        return sorted(name for name in self.live if name.startswith(prefix))
+
+    def has_session(self, name: str) -> bool:
+        return name in self.live
+
+    def kill_session(
+        self, name: str, *, graceful: bool = False, timeout: float = 15.0, expected: bool = False
+    ) -> tuple[bool, str]:
+        assert not graceful and expected, "the owner stops a session hard, as an expected stop"
+        self.stopped.append(name)
+        self.live.discard(name)
+        return True, "forced"
+
+
 def _key(tmp_path: Path, workspace: str = "workspace") -> owner.CodingSessionKey:
     path = tmp_path / workspace
     path.mkdir(parents=True, exist_ok=True)
@@ -41,21 +63,7 @@ def _launch(
     takeover: bool = False,
     rng: random.Random = RNG,
 ) -> owner.CodingSessionOwner:
-    live_names: set[str] = live if live is not None else set()
-    stopped_names = stopped if stopped is not None else []
-    terminated_agents = terminated if terminated is not None else set()
-
-    def _list_sessions() -> list[str]:
-        return sorted(live_names)
-
-    def _is_live(name: str) -> bool:
-        return name in live_names
-
-    def _stop(name: str) -> bool:
-        stopped_names.append(name)
-        live_names.discard(name)
-        return True
-
+    terminated_agents: set[int] = terminated if terminated is not None else set()
     workspace = Path(key.workspace)
     return owner.launch_generation(
         key,
@@ -66,9 +74,7 @@ def _launch(
         writer=WRITER,
         now=now,
         rng=rng,
-        list_sessions=_list_sessions,
-        session_live=_is_live,
-        terminate_session=_stop,
+        sessions=_FakeSessions(live, stopped),
         owner_terminated=lambda agent: agent in terminated_agents,
     )
 
@@ -149,9 +155,7 @@ def test_a_terminal_record_carries_the_instant_it_was_given(tmp_path: Path) -> N
         reason="explicit-cancel",
         writer=WRITER,
         now=later,
-        list_sessions=list,
-        session_live=lambda _name: False,
-        terminate_session=lambda _name: True,
+        sessions=_FakeSessions(),
     )
 
     assert owner.read(key, _generation(launched)).terminalized_at == later
@@ -357,16 +361,8 @@ def test_terminal_cleanup_is_generation_scoped_and_removes_state(tmp_path: Path)
     active = _publish(_launch(key, agent_id=41), 0)
     assert active.session_name is not None and active.state_dir is not None
     active.state_dir.mkdir(parents=True)
-    live = _live(active)
     stopped: list[str] = []
-
-    def _stop(name: str) -> bool:
-        stopped.append(name)
-        live.discard(name)
-        return True
-
-    def _unexpected_stop(_name: str) -> bool:
-        raise AssertionError("an unrecorded generation must not stop a session")
+    sessions = _FakeSessions(_live(active), stopped)
 
     assert not owner.terminate_generation(
         key,
@@ -374,19 +370,16 @@ def test_terminal_cleanup_is_generation_scoped_and_removes_state(tmp_path: Path)
         reason="explicit-cancel",
         writer=WRITER,
         now=NOW,
-        list_sessions=lambda: sorted(live),
-        session_live=live.__contains__,
-        terminate_session=_unexpected_stop,
+        sessions=sessions,
     )
+    assert stopped == [], "an unrecorded generation must not stop a session"
     assert owner.terminate_generation(
         key,
         _generation(active),
         reason="explicit-cancel",
         writer=WRITER,
         now=NOW + dt.timedelta(minutes=1),
-        list_sessions=lambda: sorted(live),
-        session_live=live.__contains__,
-        terminate_session=_stop,
+        sessions=sessions,
     )
 
     terminal = owner.read(key, _generation(active))
@@ -399,16 +392,13 @@ def test_terminal_cleanup_is_generation_scoped_and_removes_state(tmp_path: Path)
 def test_a_terminal_generation_is_dropped_by_the_next_launch(tmp_path: Path) -> None:
     key = _key(tmp_path)
     first = _publish(_launch(key, agent_id=41), 0)
-    live = _live(first)
     assert owner.terminate_generation(
         key,
         _generation(first),
         reason="collaboration-handoff",
         writer=WRITER,
         now=NOW,
-        list_sessions=lambda: sorted(live),
-        session_live=live.__contains__,
-        terminate_session=lambda name: live.discard(name) is None,
+        sessions=_FakeSessions(_live(first)),
     )
 
     second = _publish(_launch(key, agent_id=42, now=NOW + dt.timedelta(minutes=1)), 7)
@@ -451,7 +441,12 @@ def test_a_corrupt_record_fails_closed_without_blocking_other_launches(tmp_path:
     assert owner.read(key, _generation(second)).status == "launching"
     with pytest.raises(owner.InvalidCodingSessionOwnerError):
         owner.terminate_generation(
-            key, _generation(corrupt), reason="explicit-cancel", writer=WRITER, now=NOW
+            key,
+            _generation(corrupt),
+            reason="explicit-cancel",
+            writer=WRITER,
+            now=NOW,
+            sessions=_FakeSessions(),
         )
 
 

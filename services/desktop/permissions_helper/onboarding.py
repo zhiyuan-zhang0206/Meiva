@@ -40,7 +40,7 @@ def child_env() -> dict[str, str]:
 def helper_client() -> HelperChannel:
     from base.sessions.helperproc import helper_client as sessions_helper_client
 
-    return sessions_helper_client()
+    return sessions_helper_client(home=meiva_home())
 
 
 def local_host() -> GateHost:

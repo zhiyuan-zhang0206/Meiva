@@ -38,6 +38,10 @@ class ShellSessions:
     def agent_id(self) -> int:
         return self._agent_id
 
+    @property
+    def backend(self) -> PtySessionBackend:
+        return self._backend
+
     # meiva:note
     # Every shell session of this agent, watchers included, is named `meiva-agent-<agent_id>-shell-<session_id>[-<name>]`; kill_all and `list` filter on this prefix.
     def shell_prefix(self) -> str:
@@ -163,9 +167,10 @@ def session_host() -> SessionHost:
 # meiva:note
 # The sessions of one agent on this process's session backend and cluster database (the same SDK root as `database()` and `bus()`). The backend is the pty-sessions service; `get_shell_backend` answers its client typed as the abstract backend, and the shell operations live on the concrete one.
 def open_sessions(agent_id: int) -> ShellSessions:
+    from meiva.sdk_surface import process_context
     from meiva.sdk_surface.settings import database
 
-    backend = get_shell_backend()
+    backend = get_shell_backend(home=process_context.current_context().require_meiva_home())
     if not isinstance(backend, PtySessionBackend):
         raise TypeError(f"shell sessions require PtySessionBackend, got {type(backend).__name__}")
     return ShellSessions(

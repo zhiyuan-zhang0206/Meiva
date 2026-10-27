@@ -39,14 +39,15 @@ _SLEEP = ["/bin/sleep", "300"]
 _CHILD = Path(__file__).with_name("process_evidence.py")
 
 
-def _new(name: str, argv: list[str], cwd: Path) -> bool:
-    """Launch via posixproc with the inherited env (children need PATH etc.)."""
-    return posixproc.new_session(name, argv, cwd, env=dict(os.environ))
+# meiva:note
+# Launch via posixproc in `home` with the inherited env (children need PATH etc.).
+def _new(name: str, argv: list[str], home: Path) -> bool:
+    return posixproc.new_session(name, argv, home, env=dict(os.environ), home=home)
 
 
-def _pid(name: str) -> int:
+def _pid(name: str, home: Path) -> int:
     """The recorded pid for a live session (asserts the record exists)."""
-    rec = posixproc.read_record(name)
+    rec = posixproc.read_record(name, home=home)
     assert rec is not None
     return rec.pid
 
@@ -105,7 +106,7 @@ def test_process_is_live_treats_zombie_as_dead() -> None:
 
 
 def test_new_session_reparents_to_init_no_zombie(
-    unit_home,
+    unit_home: Path,
     record_property: Callable[[str, object], None],
 ) -> None:
     """The launched child double-forks to init or an ancestor subreaper,
@@ -120,7 +121,7 @@ def test_new_session_reparents_to_init_no_zombie(
 
     assert _new(name, list(_SLEEP), unit_home) is True  # pyright: ignore[reportUnknownArgumentType]
     try:
-        rec = posixproc.read_record(name)
+        rec = posixproc.read_record(name, home=unit_home)
         assert rec is not None
         assert rec.starttime == pid_starttime_ticks(rec.pid)
         child = psutil.Process(rec.pid)
@@ -152,11 +153,11 @@ def test_new_session_reparents_to_init_no_zombie(
         # /proc visibility), so read it with a bounded poll instead of sampling
         # once — a one-shot read races the update on a loaded runner.
         poll_until(
-            lambda: posixproc.has_session(name) is True,
+            lambda: posixproc.has_session(name, home=unit_home) is True,
             what="new session is reported live",
         )
         poll_until(
-            lambda: name in posixproc.list_sessions(prefix="meiva-test-agent-"),
+            lambda: name in posixproc.list_sessions(prefix="meiva-test-agent-", home=unit_home),
             what="new session appears in the session list",
         )
 
@@ -172,7 +173,7 @@ def test_new_session_reparents_to_init_no_zombie(
             what="spawner has no zombie descendants",
         )
     finally:
-        posixproc.kill_session(name, graceful=False, timers=SYSTEM_TIMERS)
+        posixproc.kill_session(name, graceful=False, timers=SYSTEM_TIMERS, home=unit_home)
 
 
 def test_zombie_check_ignores_a_zombie_an_earlier_test_left() -> None:
@@ -195,19 +196,37 @@ def test_zombie_check_ignores_a_zombie_an_earlier_test_left() -> None:
         leftover.wait()
 
 
-def test_graceful_signal_terminates(unit_home) -> None:
+# meiva:note
+# The record, the log and every query live under the home given, not the process's own.
+def test_a_session_belongs_to_the_home_it_was_launched_with(
+    unit_home: Path, tmp_path: Path
+) -> None:
+    other = tmp_path / "other-home"
+    other.mkdir()
+    name = "meiva-test-agent-homes"
+    assert _new(name, list(_SLEEP), other) is True
+    try:
+        assert posixproc.record_path(name, home=other).is_file()
+        assert posixproc.session_log_path(name, home=other).parent == other / "logs"
+        assert not posixproc.record_path(name, home=unit_home).exists()
+        assert posixproc.has_session(name, home=unit_home) is False
+    finally:
+        posixproc.kill_session(name, graceful=False, timers=SYSTEM_TIMERS, home=other)
+
+
+def test_graceful_signal_terminates(unit_home: Path) -> None:
     """graceful_signal sends SIGTERM; a default-disposition child dies, so the
     session goes away (the reap's O(slowest-agent) shared-deadline path)."""
     name = "meiva-test-agent-2"
     _new(name, list(_SLEEP), unit_home)  # pyright: ignore[reportUnknownArgumentType]
     try:
-        assert posixproc.graceful_signal(name) is True
+        assert posixproc.graceful_signal(name, home=unit_home) is True
         poll_until(
-            lambda: not posixproc.has_session(name),
+            lambda: not posixproc.has_session(name, home=unit_home),
             what="gracefully signaled session disappears",
         )
     finally:
-        posixproc.kill_session(name, graceful=False, timers=SYSTEM_TIMERS)
+        posixproc.kill_session(name, graceful=False, timers=SYSTEM_TIMERS, home=unit_home)
 
 
 def test_kill_session_force_kills_sigterm_ignoring_survivor(unit_home: Path) -> None:
@@ -222,10 +241,12 @@ def test_kill_session_force_kills_sigterm_ignoring_survivor(unit_home: Path) -> 
     marker = unit_home / "sigign-ready"
     argv = [sys.executable, "-I", str(_CHILD), "sigign_sleep", str(marker)]
     _new(name, argv, unit_home)
-    pid = _pid(name)
+    pid = _pid(name, unit_home)
     poll_until(lambda: psutil.pid_exists(pid), what="SIGTERM-ignoring child process appears")
     poll_until(marker.exists, what="child installs SIG_IGN")
-    ok, mode = posixproc.kill_session(name, graceful=True, timeout=0.5, timers=SYSTEM_TIMERS)
+    ok, mode = posixproc.kill_session(
+        name, graceful=True, timeout=0.5, timers=SYSTEM_TIMERS, home=unit_home
+    )
     # The child ignores SIGTERM, so the graceful signal alone cannot end it —
     # the force floor must fire, which is exactly what `forced` reports.
     assert ok is True and mode == "forced"
@@ -233,7 +254,7 @@ def test_kill_session_force_kills_sigterm_ignoring_survivor(unit_home: Path) -> 
         lambda: _pid_gone_or_zombie(pid),
         what="SIGTERM-ignoring child process exits",
     )
-    assert not posixproc.record_path(name).exists()
+    assert not posixproc.record_path(name, home=unit_home).exists()
 
 
 # meiva:note
@@ -246,24 +267,26 @@ def test_a_graceful_stop_the_process_ignores_escalates_once_the_timers_say_its_t
     marker = unit_home / "sigign-timers-ready"
     argv = [sys.executable, "-I", str(_CHILD), "sigign_sleep", str(marker)]
     _new(name, argv, unit_home)
-    pid = _pid(name)
+    pid = _pid(name, unit_home)
     poll_until(marker.exists, what="child installs SIG_IGN")
     timers = ManualTimers()
-    ok, mode = posixproc.kill_session(name, graceful=True, timeout=30.0, timers=timers)
+    ok, mode = posixproc.kill_session(
+        name, graceful=True, timeout=30.0, timers=timers, home=unit_home
+    )
     assert ok is True and mode == "forced"
     assert timers.monotonic() >= 30.0
     poll_until(lambda: _pid_gone_or_zombie(pid), what="SIGTERM-ignoring child process exits")
-    assert not posixproc.record_path(name).exists()
+    assert not posixproc.record_path(name, home=unit_home).exists()
 
 
-def test_kill_session_reaps_process_tree(unit_home) -> None:
+def test_kill_session_reaps_process_tree(unit_home: Path) -> None:
     """A force kill takes down the child's own descendants too (Claude Code /
     subprocesses an agent spawns), not just the top process."""
     name = "meiva-test-agent-4"
     # Parent python spawns a child `sleep` and prints its pid, then idles.
     argv = [sys.executable, "-I", str(_CHILD), "spawn_sleep"]
     _new(name, argv, unit_home)  # pyright: ignore[reportUnknownArgumentType]
-    parent_pid = _pid(name)
+    parent_pid = _pid(name, unit_home)
     # Give the parent a moment to spawn its child, then find it.
     poll_until(
         lambda: bool(psutil.pid_exists(parent_pid) and psutil.Process(parent_pid).children()),
@@ -271,7 +294,7 @@ def test_kill_session_reaps_process_tree(unit_home) -> None:
     )
     child_pid = psutil.Process(parent_pid).children()[0].pid
 
-    posixproc.kill_session(name, graceful=False, timers=SYSTEM_TIMERS)
+    posixproc.kill_session(name, graceful=False, timers=SYSTEM_TIMERS, home=unit_home)
     poll_until(
         lambda: _pid_gone_or_zombie(parent_pid),
         what="parent process is reaped with its tree",
@@ -282,11 +305,11 @@ def test_kill_session_reaps_process_tree(unit_home) -> None:
     )
 
 
-def test_has_session_false_when_process_gone(unit_home) -> None:
+def test_has_session_false_when_process_gone(unit_home: Path) -> None:
     name = "meiva-test-agent-5"
     _new(name, list(_SLEEP), unit_home)  # pyright: ignore[reportUnknownArgumentType]
-    pid = _pid(name)
-    posixproc.kill_session(name, graceful=False, timers=SYSTEM_TIMERS)
+    pid = _pid(name, unit_home)
+    posixproc.kill_session(name, graceful=False, timers=SYSTEM_TIMERS, home=unit_home)
     # The SIGKILLed child lingers as a zombie until init reaps it — poll with a
     # zombie counted as gone instead of asserting on the one-shot pid_exists.
     poll_until(
@@ -294,15 +317,15 @@ def test_has_session_false_when_process_gone(unit_home) -> None:
         what="killed session process is gone or a zombie",
     )
     # Record is gone after kill, so has_session is False.
-    assert posixproc.has_session(name) is False
+    assert posixproc.has_session(name, home=unit_home) is False
 
 
-def test_list_sessions_reaps_dead_record(unit_home) -> None:
+def test_list_sessions_reaps_dead_record(unit_home: Path) -> None:
     """A record whose process is gone is unlinked as list_sessions walks it, so the
     listing reflects reality."""
     name = "meiva-test-agent-6"
     _new(name, list(_SLEEP), unit_home)  # pyright: ignore[reportUnknownArgumentType]
-    pid = _pid(name)
+    pid = _pid(name, unit_home)
     # Kill the process out from under the record WITHOUT going through kill_session,
     # so the record file lingers until list_sessions reaps it.
     # The child is reparented to init, which reaps it asynchronously — wait for
@@ -314,9 +337,9 @@ def test_list_sessions_reaps_dead_record(unit_home) -> None:
         lambda: not psutil.pid_exists(pid),
         what="externally killed process disappears",
     )
-    assert posixproc.record_path(name).exists()
-    assert posixproc.list_sessions(prefix="meiva-test-agent-") == []
-    assert not posixproc.record_path(name).exists()
+    assert posixproc.record_path(name, home=unit_home).exists()
+    assert posixproc.list_sessions(prefix="meiva-test-agent-", home=unit_home) == []
+    assert not posixproc.record_path(name, home=unit_home).exists()
 
 
 @pytest.mark.requires_host("linux")
@@ -339,18 +362,20 @@ def test_starttime_identity_survives_wall_clock_drift(unit_home: Path) -> None:
             started_at=time.time(),
             starttime=starttime,
         )
-        rec.write(posixproc.record_path(name))
+        rec.write(posixproc.record_path(name, home=unit_home))
 
         assert rec.identifies(child.pid) is True
-        assert posixproc.has_session(name) is True
-        assert posixproc.list_sessions(prefix="meiva-test-agent-starttime-") == [name]
-        assert posixproc.record_path(name).exists()
+        assert posixproc.has_session(name, home=unit_home) is True
+        assert posixproc.list_sessions(prefix="meiva-test-agent-starttime-", home=unit_home) == [
+            name
+        ]
+        assert posixproc.record_path(name, home=unit_home).exists()
     finally:
         try:
             child.kill()
             child.wait(timeout=5)
         finally:
-            posixproc.record_path(name).unlink(missing_ok=True)
+            posixproc.record_path(name, home=unit_home).unlink(missing_ok=True)
 
 
 @pytest.mark.requires_host("darwin")
@@ -366,15 +391,15 @@ def test_session_record_spans_import_epochs(unit_home: Path) -> None:
     try:
         # meiva:note
         # psutil's Darwin backend exposes monotonic create_time on the private _proc handle.
-        rec = posixproc.read_record(name)
+        rec = posixproc.read_record(name, home=unit_home)
         assert rec is not None
         proc = psutil.Process(rec.pid)
         assert rec.create_time == float(
             proc._proc.create_time(monotonic=True)  # pyright: ignore[reportAttributeAccessIssue, reportUnknownMemberType, reportUnknownArgumentType]
         )
-        assert posixproc.has_session(name)
+        assert posixproc.has_session(name, home=unit_home)
     finally:
-        posixproc.kill_session(name, graceful=False, timers=SYSTEM_TIMERS)
+        posixproc.kill_session(name, graceful=False, timers=SYSTEM_TIMERS, home=unit_home)
 
 
 @pytest.mark.requires_host("linux")
@@ -389,12 +414,12 @@ def test_list_sessions_reaps_starttime_pid_reuse(unit_home: Path) -> None:
         started_at=time.time(),
         starttime=0,
     )
-    rec.write(posixproc.record_path(name))
+    rec.write(posixproc.record_path(name, home=unit_home))
 
     assert rec.identifies(os.getpid()) is False
-    assert posixproc.has_session(name) is False
-    assert posixproc.list_sessions(prefix="meiva-test-agent-starttime-") == []
-    assert not posixproc.record_path(name).exists()
+    assert posixproc.has_session(name, home=unit_home) is False
+    assert posixproc.list_sessions(prefix="meiva-test-agent-starttime-", home=unit_home) == []
+    assert not posixproc.record_path(name, home=unit_home).exists()
 
 
 def test_list_sessions_keeps_live_legacy_record_with_clock_drift(
@@ -409,11 +434,11 @@ def test_list_sessions_keeps_live_legacy_record_with_clock_drift(
         cmd="test",
         cwd=str(unit_home),
         started_at=time.time(),
-    ).write(posixproc.record_path(name))
+    ).write(posixproc.record_path(name, home=unit_home))
 
-    assert posixproc.has_session(name) is False
-    assert posixproc.list_sessions(prefix="meiva-test-agent-legacy-") == []
-    assert posixproc.record_path(name).exists()
+    assert posixproc.has_session(name, home=unit_home) is False
+    assert posixproc.list_sessions(prefix="meiva-test-agent-legacy-", home=unit_home) == []
+    assert posixproc.record_path(name, home=unit_home).exists()
     assert any(
         "retaining live session record" in str(record["message"]) for record in loguru_records
     )
@@ -448,7 +473,7 @@ def test_list_sessions_keeps_recycled_pid_record_while_group_occupied(
             starttime=0,
             pgid=pgid,
         )
-        rec.write(posixproc.record_path(name))
+        rec.write(posixproc.record_path(name, home=unit_home))
         assert posixproc.process_for_record(rec) is None
 
         reapable, why, occupied_group = posixproc.record_reapable(rec)
@@ -456,36 +481,38 @@ def test_list_sessions_keeps_recycled_pid_record_while_group_occupied(
         assert occupied_group == pgid
         # The group gate decided; the reuse criterion never ran.
         assert "process group" in why and "reused" not in why
-        assert posixproc.list_sessions(prefix="meiva-test-agent-reuse-") == [name]
-        assert posixproc.record_path(name).exists()
+        assert posixproc.list_sessions(prefix="meiva-test-agent-reuse-", home=unit_home) == [name]
+        assert posixproc.record_path(name, home=unit_home).exists()
         assert any(
             "retaining live session record" in str(record["message"]) for record in loguru_records
         )
     finally:
         holder.kill()
         holder.wait(timeout=5)
-        posixproc.record_path(name).unlink(missing_ok=True)
+        posixproc.record_path(name, home=unit_home).unlink(missing_ok=True)
 
 
-def test_new_session_idempotent_when_live(unit_home) -> None:
+def test_new_session_idempotent_when_live(unit_home: Path) -> None:
     """A second new_session for a still-live name is a no-op (returns True without
     relaunching) — matching the has-session guard at the call site."""
     name = "meiva-test-agent-7"
     _new(name, list(_SLEEP), unit_home)  # pyright: ignore[reportUnknownArgumentType]
     try:
-        first_pid = _pid(name)
+        first_pid = _pid(name, unit_home)
         assert _new(name, list(_SLEEP), unit_home) is True  # pyright: ignore[reportUnknownArgumentType]
-        assert _pid(name) == first_pid  # not relaunched
+        assert _pid(name, unit_home) == first_pid  # not relaunched
     finally:
-        posixproc.kill_session(name, graceful=False, timers=SYSTEM_TIMERS)
+        posixproc.kill_session(name, graceful=False, timers=SYSTEM_TIMERS, home=unit_home)
 
 
-def test_kill_session_noop_on_absent(unit_home) -> None:
-    assert posixproc.kill_session("meiva-test-agent-does-not-exist", timers=SYSTEM_TIMERS) == (
+def test_kill_session_noop_on_absent(unit_home: Path) -> None:
+    assert posixproc.kill_session(
+        "meiva-test-agent-does-not-exist", timers=SYSTEM_TIMERS, home=unit_home
+    ) == (
         True,
         "noop",
     )
-    assert posixproc.graceful_signal("meiva-test-agent-does-not-exist") is False
+    assert posixproc.graceful_signal("meiva-test-agent-does-not-exist", home=unit_home) is False
 
 
 def test_kill_session_survivor_reports_and_keeps_record(
@@ -498,7 +525,7 @@ def test_kill_session_survivor_reports_and_keeps_record(
     session became a service nothing starts."""
     name = "meiva-test-agent-survivor"
     _new(name, list(_SLEEP), unit_home)
-    pid = _pid(name)
+    pid = _pid(name, unit_home)
     poll_until(
         lambda: psutil.pid_exists(pid),
         what="survivor test process appears",
@@ -513,18 +540,21 @@ def test_kill_session_survivor_reports_and_keeps_record(
         process_control=noop_control,
         wait_timeout=0.0,
         timers=SYSTEM_TIMERS,
+        home=unit_home,
     )
     assert ok is False and mode == "forced"
     assert psutil.pid_exists(pid), "the process must still be alive"
-    assert posixproc.record_path(name).exists(), "record must survive so the reap sees it"
+    assert posixproc.record_path(name, home=unit_home).exists(), (
+        "record must survive so the reap sees it"
+    )
 
-    ok, _mode = posixproc.kill_session(name, graceful=False, timers=SYSTEM_TIMERS)
+    ok, _mode = posixproc.kill_session(name, graceful=False, timers=SYSTEM_TIMERS, home=unit_home)
     assert ok is True
     poll_until(
         lambda: not psutil.pid_exists(pid),
         what="survivor test process disappears during cleanup",
     )
-    assert not posixproc.record_path(name).exists()
+    assert not posixproc.record_path(name, home=unit_home).exists()
 
 
 def test_kill_session_terminate_error_keeps_record(
@@ -534,7 +564,7 @@ def test_kill_session_terminate_error_keeps_record(
     False and keep the record — the raise path is the same lie, one line up."""
     name = "meiva-test-agent-err"
     _new(name, list(_SLEEP), unit_home)
-    pid = _pid(name)
+    pid = _pid(name, unit_home)
     poll_until(
         lambda: psutil.pid_exists(pid),
         what="terminate-error test process appears",
@@ -550,12 +580,13 @@ def test_kill_session_terminate_error_keeps_record(
         process_control=failing_control,
         wait_timeout=0.0,
         timers=SYSTEM_TIMERS,
+        home=unit_home,
     )
     assert ok is False and mode == "forced"
     assert psutil.pid_exists(pid)
-    assert posixproc.record_path(name).exists()
+    assert posixproc.record_path(name, home=unit_home).exists()
 
-    ok, _mode = posixproc.kill_session(name, graceful=False, timers=SYSTEM_TIMERS)
+    ok, _mode = posixproc.kill_session(name, graceful=False, timers=SYSTEM_TIMERS, home=unit_home)
     assert ok is True
     poll_until(
         lambda: not psutil.pid_exists(pid),
@@ -577,18 +608,20 @@ def test_new_session_dead_child_records_sentinel(
     exited = subprocess.Popen([sys.executable, "-I", str(_CHILD), "noop"])  # noqa: S603
     exited.wait(timeout=5)
     rec = posixproc.build_session_record(exited.pid, cmd=_SLEEP, cwd=unit_home)
-    rec.write(posixproc.record_path(name))
+    rec.write(posixproc.record_path(name, home=unit_home))
     try:
-        loaded = posixproc.read_record(name)
+        loaded = posixproc.read_record(name, home=unit_home)
         assert loaded is not None and loaded.create_time == posixproc.DEAD_CHILD_SENTINEL
         assert loaded.starttime is None
-        assert not posixproc.has_session(name), "sentinel record must read as dead from birth"
+        assert not posixproc.has_session(name, home=unit_home), (
+            "sentinel record must read as dead from birth"
+        )
     finally:
-        posixproc.record_path(name).unlink(missing_ok=True)
+        posixproc.record_path(name, home=unit_home).unlink(missing_ok=True)
 
 
 def test_kill_session_group_kill_reaps_late_spawned_child(
-    unit_home,
+    unit_home: Path,
     tmp_path: Path,
     record_property: Callable[[str, object], None],
 ) -> None:
@@ -610,13 +643,15 @@ def test_kill_session_group_kill_reaps_late_spawned_child(
         str(late_file),
     ]
     _new(name, argv, unit_home)  # pyright: ignore[reportUnknownArgumentType]
-    pid = _pid(name)
+    pid = _pid(name, unit_home)
     try:
         poll_until(
             ready_file.exists,
             what="top process arms its SIGTERM handler",
         )
-        ok, mode = posixproc.kill_session(name, graceful=True, timeout=2.0, timers=SYSTEM_TIMERS)
+        ok, mode = posixproc.kill_session(
+            name, graceful=True, timeout=2.0, timers=SYSTEM_TIMERS, home=unit_home
+        )
         assert ok is True and mode == "forced"
         poll_until(
             lambda: not psutil.pid_exists(pid),
@@ -638,11 +673,11 @@ def test_kill_session_group_kill_reaps_late_spawned_child(
             what="late-spawned child exits with the process group",
         )
     finally:
-        posixproc.kill_session(name, graceful=False, timers=SYSTEM_TIMERS)
+        posixproc.kill_session(name, graceful=False, timers=SYSTEM_TIMERS, home=unit_home)
 
 
 def test_kill_session_group_kill_reaps_sigterm_ignoring_wrapper(
-    unit_home,
+    unit_home: Path,
 ) -> None:
     """A bash wrapper that ignores SIGTERM (it waits for its foreground
     command) and its background child are both taken down by the group signals:
@@ -655,14 +690,16 @@ def test_kill_session_group_kill_reaps_sigterm_ignoring_wrapper(
     # SIG_IGN across fork+exec); `& wait` keeps a child alive under it, the
     # shape of a wrapper sitting on a foreground command.
     _new(name, ["/bin/bash", "-c", "trap '' TERM; sleep 300 & wait"], unit_home)  # pyright: ignore[reportUnknownArgumentType]
-    pid = _pid(name)
+    pid = _pid(name, unit_home)
     try:
         poll_until(
             lambda: bool(psutil.pid_exists(pid) and psutil.Process(pid).children()),
             what="SIGTERM-ignoring wrapper spawns a child",
         )
         child_pid = psutil.Process(pid).children()[0].pid
-        ok, mode = posixproc.kill_session(name, graceful=True, timeout=0.5, timers=SYSTEM_TIMERS)
+        ok, mode = posixproc.kill_session(
+            name, graceful=True, timeout=0.5, timers=SYSTEM_TIMERS, home=unit_home
+        )
         assert ok is True and mode == "forced"
         poll_until(
             lambda: not psutil.pid_exists(pid),
@@ -673,7 +710,7 @@ def test_kill_session_group_kill_reaps_sigterm_ignoring_wrapper(
             what="wrapper child dies with the process group",
         )
     finally:
-        posixproc.kill_session(name, graceful=False, timers=SYSTEM_TIMERS)
+        posixproc.kill_session(name, graceful=False, timers=SYSTEM_TIMERS, home=unit_home)
 
 
 def test_kill_session_signals_the_process_group(
@@ -685,23 +722,28 @@ def test_kill_session_signals_the_process_group(
     (task #2249)."""
     name = "meiva-test-agent-grp"
     _new(name, list(_SLEEP), unit_home)
-    pid = _pid(name)
+    pid = _pid(name, unit_home)
     pgid = os.getpgid(pid)
     control = FakeProcessControl(forward_to=SYSTEM_PROCESS_CONTROL)
     try:
         ok, mode = posixproc.kill_session(
-            name, graceful=True, timeout=2.0, process_control=control, timers=SYSTEM_TIMERS
+            name,
+            graceful=True,
+            timeout=2.0,
+            process_control=control,
+            timers=SYSTEM_TIMERS,
+            home=unit_home,
         )
         assert ok is True and mode == "graceful"
         assert Signalled("killpg", pgid, signal.SIGTERM) in control.signals, (
             "graceful kill must signal the group"
         )
     finally:
-        posixproc.kill_session(name, graceful=False, timers=SYSTEM_TIMERS)
+        posixproc.kill_session(name, graceful=False, timers=SYSTEM_TIMERS, home=unit_home)
 
 
 def test_kill_session_group_kill_reaps_detached_descendant(
-    unit_home,
+    unit_home: Path,
     tmp_path: Path,
 ) -> None:
     """A descendant that deliberately left the session's process group (a
@@ -720,7 +762,7 @@ def test_kill_session_group_kill_reaps_detached_descendant(
         str(detached_file),
     ]
     _new(name, argv, unit_home)  # pyright: ignore[reportUnknownArgumentType]
-    pid = _pid(name)
+    pid = _pid(name, unit_home)
     detached_pid = -1
     try:
         poll_until(ready.exists, what="detached descendant pid file appears")
@@ -732,7 +774,9 @@ def test_kill_session_group_kill_reaps_detached_descendant(
         # The descendant must really be outside the session's group, or the
         # test proves nothing (the group signal would cover it).
         assert os.getpgid(detached_pid) != os.getpgid(pid)
-        ok, mode = posixproc.kill_session(name, graceful=True, timeout=1.0, timers=SYSTEM_TIMERS)
+        ok, mode = posixproc.kill_session(
+            name, graceful=True, timeout=1.0, timers=SYSTEM_TIMERS, home=unit_home
+        )
         assert ok is True and mode == "forced"  # the detached survivor forces the hard kill
         poll_until(
             lambda: not psutil.pid_exists(pid),
@@ -743,7 +787,7 @@ def test_kill_session_group_kill_reaps_detached_descendant(
             what="detached descendant dies with the session",
         )
     finally:
-        posixproc.kill_session(name, graceful=False, timers=SYSTEM_TIMERS)
+        posixproc.kill_session(name, graceful=False, timers=SYSTEM_TIMERS, home=unit_home)
         # The detached descendant is outside the group, so a cleanup
         # kill_session cannot reach it — kill it directly if it survived.
         if detached_pid > 0:

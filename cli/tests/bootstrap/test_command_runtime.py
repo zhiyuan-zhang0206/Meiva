@@ -1,10 +1,11 @@
 import sys
+from functools import partial
 from pathlib import Path
 
 from base.cluster.machine import MachineIdentityReader
 from base.host.proc import run_bounded
 from base.paths import repo_root
-from base.sessions.helperproc import helper_for
+from base.sessions.helperproc import helper_client, helper_for
 from cli.database.runtime import CommandRuntime
 from cli.database.tests.command_inputs import command_machine as command_machine
 from cli.database.tests.command_inputs import command_runtime as command_runtime
@@ -71,8 +72,13 @@ def test_narrow_machine_fixture_borrows_the_invocation_owner(
 
 def test_the_runtime_runs_with_the_helper_its_hosts_platform_has(tmp_path: Path) -> None:
     runtime = CommandRuntime.create(tmp_path)
-    assert runtime.helper is helper_for(runtime.host.platform)
-    assert (runtime.helper is None) == (runtime.host.platform.system == "linux")
+    helper = runtime.helper
+    assert (helper is None) == (helper_for(runtime.host.platform, home=tmp_path) is None)
+    assert (helper is None) == (runtime.host.platform.system == "linux")
+    if helper is not None:
+        assert isinstance(helper, partial)
+        assert helper.func is helper_client
+        assert helper.keywords == {"home": tmp_path}
 
 
 # meiva:note

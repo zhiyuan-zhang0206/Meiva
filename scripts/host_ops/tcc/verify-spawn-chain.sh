@@ -115,12 +115,13 @@ import os
 import sys
 from pathlib import Path
 
+from base.paths import meiva_home
 from base.sessions.helperproc import helper_client
 
 workdir = Path(sys.argv[1])
 probe = Path(sys.argv[2])
 results_path = workdir / "probe.results.json"
-result = helper_client().spawn_process(
+result = helper_client(home=meiva_home()).spawn_process(
     f"tcc-spawn-chain-verify-{os.getpid()}",
     [sys.executable, str(probe), str(results_path)],
     dict(os.environ),

@@ -10,15 +10,20 @@ tags: [base, process, supervision]
 `base/sessions/protocol.py:SessionBackend` defines the named-session interface.
 `base/sessions/backend.py` provides two entry points:
 
-- `get_backend(timers=...)` selects `PosixProcSessionBackend` or the configured macOS
+- `get_backend(timers=..., home=...)` selects `PosixProcSessionBackend` or the configured macOS
   permissions-helper backend. The caller's `Timers` drive their graceful-stop waits
   (`posixproc.kill_session` takes the same required `timers`). Surviving pause probes
   and cold-maintenance consumers use this native named-session interface. Current
   root-supervised service custody is separate.
-- `get_shell_backend()` selects `PtySessionBackend` for interactive agent shells,
+- `get_shell_backend(home=...)` selects `PtySessionBackend` for interactive agent shells,
   watchers and their session consumers. The pty-sessions service owns these
   shells, so agent exits and agent-host restarts do not end them; stopping the
   owning service does.
+
+Both are bound to the Meiva home they act on: the session records, logs and the service
+socket live under that `home`, which the entry that resolved it hands down (the factories,
+`posixproc` functions and the helper client take it as a required value and never read the
+process environment for it).
 
 `SessionBackend.service_available()` answers the one question a caller asks after a
 failed `new_session`: can this backend admit a session right now? It defaults to

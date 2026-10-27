@@ -167,7 +167,7 @@ class CommandRuntime:
             pid=os.getpid(),
             home=home,
             machine=ConfiguredMachineIdentity(config),
-            helper=helper_for(host.platform),
+            helper=helper_for(host.platform, home=home),
             host=host,
             session=UserSession.current(),
             timers=SYSTEM_TIMERS,

@@ -12,6 +12,7 @@ from base.clock.ids import new_uuid
 from base.clock.tests.fakes import clock_at
 from base.clock.tests.seeded_rng import seeded_rng
 from base.sessions import coding_session_owner
+from base.sessions.backend import get_shell_backend
 from meiva.sdk_surface import process_context
 from meiva.shell.coding_tools import _common, claude, codex
 
@@ -39,9 +40,22 @@ def _launched(
     workspace.mkdir(exist_ok=True)
     key = coding_session_owner.canonical_key(workspace, tool=tool, cluster=home)
     owner = _common.new_generation(
-        key, owner_agent_id=41, tasks_file=None, work_file=None, ttl_seconds=3600
+        key,
+        owner_agent_id=41,
+        tasks_file=None,
+        work_file=None,
+        ttl_seconds=3600,
+        sessions=get_shell_backend(home=home),
     )
     return key, owner
+
+
+def test_the_shell_sessions_of_a_cancel_are_the_bound_contexts_not_the_environments(
+    context_home: Path,
+) -> None:
+    assert _common.cluster_sessions().session_log_path("meiva-x") == (
+        context_home / "logs" / "meiva-x.out.log"
+    )
 
 
 def test_the_cluster_home_is_the_bound_contexts_not_the_environments(

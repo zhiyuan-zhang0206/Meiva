@@ -27,6 +27,7 @@ from ._common import (
     LaunchSite,
     capability_report,
     cluster_home,
+    cluster_sessions,
     init_file,
     kill_session_after_failed_launch,
     launch_site,
@@ -57,6 +58,7 @@ def cancel(workspace: Path, generation: str) -> int:
     return _cancel_generation(
         coding_session_owner.canonical_key(workspace, tool="claude", cluster=cluster_home()),
         generation,
+        sessions=cluster_sessions(),
     )
 
 

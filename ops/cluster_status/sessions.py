@@ -21,6 +21,7 @@ from __future__ import annotations
 import logging
 from concurrent.futures import ThreadPoolExecutor
 from datetime import UTC, datetime
+from pathlib import Path
 
 from base.api_contracts.agent_contract import ShellKillMode
 from base.cluster import session_name
@@ -121,8 +122,8 @@ def _agent_shells(backend: SessionBackend, agent_id: int, now: datetime) -> tupl
 # meiva:note
 # This host's live persistent-shell sessions for one agent, newest id last: the agent's
 # explicitly created shells and its watchers.
-def agent_shell_sessions(agent_id: int, *, now: datetime) -> list[ShellInfo]:
-    return [entry.shell for entry in _agent_shells(get_shell_backend(), agent_id, now)]
+def agent_shell_sessions(agent_id: int, *, now: datetime, home: Path) -> list[ShellInfo]:
+    return [entry.shell for entry in _agent_shells(get_shell_backend(home=home), agent_id, now)]
 
 
 # meiva:note
@@ -139,9 +140,9 @@ def agent_shell_sessions(agent_id: int, *, now: datetime) -> list[ShellInfo]:
 #     ShellNotFoundError: no live shell with `session_id` on this host.
 #     RuntimeError: the capture failed (the session died between the probe and the capture).
 def capture_shell(
-    agent_id: int, session_id: int, lines: int = 200, *, now: datetime
+    agent_id: int, session_id: int, lines: int = 200, *, now: datetime, home: Path
 ) -> tuple[str, list[str], datetime | None, int]:
-    backend = get_shell_backend()
+    backend = get_shell_backend(home=home)
     target = find_shell(_agent_shells(backend, agent_id, now), session_id)
     if target is None:
         raise ShellNotFoundError(f"agent {agent_id} has no live shell {session_id} on this host")
@@ -182,8 +183,10 @@ def kill_with_verdict(backend: SessionBackend, name: str) -> tuple[bool, bool]:
 # or background job) at kill time — the TTL reaper uses it to decide whether the reclamation
 # deserves a notice to the owner (an empty shell's reaping is silent); ``name`` is the shell's
 # optional display name.
-def kill_shell(agent_id: int, session_id: int) -> tuple[ShellKillMode, bool, str | None]:
-    backend = get_shell_backend()
+def kill_shell(
+    agent_id: int, session_id: int, *, home: Path
+) -> tuple[ShellKillMode, bool, str | None]:
+    backend = get_shell_backend(home=home)
     target = find_shell(_agent_shells(backend, agent_id, _EPOCH), session_id)
     if target is None:
         return ShellKillMode.ABSENT, False, None
@@ -206,8 +209,8 @@ def kill_shell(agent_id: int, session_id: int) -> tuple[ShellKillMode, bool, str
 # Enumeration happens once; late creation and crash leftovers require operator cleanup. Every
 # selected session is attempted; a kill the backend could not confirm raises one RuntimeError
 # naming those ids after the others ran.
-def kill_agent_shells(agent_id: int, *, before_session_index: int) -> list[int]:
-    backend = get_shell_backend()
+def kill_agent_shells(agent_id: int, *, before_session_index: int, home: Path) -> list[int]:
+    backend = get_shell_backend(home=home)
     listed = _agent_shells(backend, agent_id, _EPOCH)
     page_ids = frozenset(entry.shell.id for entry in listed if is_page_label(entry.shell.name))
     targets = kill_all_targets(listed, before_session_index, page_ids)

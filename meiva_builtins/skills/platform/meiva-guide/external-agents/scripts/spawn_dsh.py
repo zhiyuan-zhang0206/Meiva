@@ -41,6 +41,7 @@ import meiva
 from base.api_contracts.agent_contract import AgentNotFound, AgentStatus, GatewayUnavailable
 from base.host.atomic_io import SYSTEM_FS, AtomicWriter
 from base.sessions import coding_session_owner
+from base.sessions.backend import get_shell_backend
 from base.sessions.coding_session_owner_record import CodingSessionStatus
 from meiva.shell.coding_tools import (
     add_capability_arguments,
@@ -167,6 +168,12 @@ def _status(key: coding_session_owner.CodingSessionKey) -> int:
     return 1 if any(owner.status == CodingSessionStatus.INVALID for owner in owners) else 0
 
 
+# meiva:note
+# The shell sessions of the bound context's cluster: where this tool's coding sessions are started, listed and stopped.
+def _sessions() -> coding_session_owner.CodingSessions:
+    return get_shell_backend(home=meiva.context.require_meiva_home())
+
+
 def _cancel(key: coding_session_owner.CodingSessionKey, generation: str) -> int:
     if not coding_session_owner.terminate_generation(
         key,
@@ -174,6 +181,7 @@ def _cancel(key: coding_session_owner.CodingSessionKey, generation: str) -> int:
         reason="explicit-cancel",
         writer=AtomicWriter(SYSTEM_FS),
         now=meiva.context.require_clock().now(),
+        sessions=_sessions(),
     ):
         print(f"cancel refused: no generation {generation} is recorded here", file=sys.stderr)
         return 1
@@ -194,6 +202,7 @@ def _new_generation(
         writer=AtomicWriter(SYSTEM_FS),
         now=meiva.context.require_clock().now(),
         rng=meiva.context.require_rng(),
+        sessions=_sessions(),
         owner_terminated=_owner_terminated,
     )
 
@@ -247,6 +256,7 @@ def _launch(workspace: Path, prompt: str, ttl_seconds: float) -> int:
                 reason="launch-failed",
                 writer=AtomicWriter(SYSTEM_FS),
                 now=meiva.context.require_clock().now(),
+                sessions=_sessions(),
             )
         except Exception as term_exc:
             print(f"could not roll back generation {generation}: {term_exc!r}", file=sys.stderr)

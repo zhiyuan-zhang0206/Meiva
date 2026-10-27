@@ -101,22 +101,24 @@ def dispatch_sync(
                 mode="json"
             )
         case "shell_probe" | "shell_kill" | "shell_capture" | "agent_skill_view":
-            return OpStatus.COMPLETED, _agent_arm(kind, payload, pool)
+            return OpStatus.COMPLETED, _agent_arm(kind, payload, pool, home=home)
         case _:
             return unknown_kind(kind)
 
 
 def _agent_arm(
-    kind: str, payload: dict[str, Any], pool: ConnectionPool | None
+    kind: str, payload: dict[str, Any], pool: ConnectionPool | None, *, home: Path
 ) -> dict[str, object]:
 
     match kind:
         case "shell_probe":
             sp = ShellProbePayload.model_validate(payload)
-            return cluster.shell_probe_op(sp.agent_id).model_dump(mode="json")
+            return cluster.shell_probe_op(sp.agent_id, home=home).model_dump(mode="json")
         case "shell_kill":
             sk = ShellKillPayload.model_validate(payload)
-            return cluster.shell_kill_op(sk.agent_id, sk.session_id).model_dump(mode="json")
+            return cluster.shell_kill_op(sk.agent_id, sk.session_id, home=home).model_dump(
+                mode="json"
+            )
         case "agent_skill_view":
             asv = AgentSkillViewPayload.model_validate(payload)
             if pool is None:
@@ -124,9 +126,9 @@ def _agent_arm(
             return cluster.agent_skill_view_op(asv.agent_id, pool).model_dump(mode="json")
         case "shell_capture":
             sc = ShellCapturePayload.model_validate(payload)
-            return cluster.shell_capture_op(sc.agent_id, sc.session_id, sc.lines).model_dump(
-                mode="json"
-            )
+            return cluster.shell_capture_op(
+                sc.agent_id, sc.session_id, sc.lines, home=home
+            ).model_dump(mode="json")
         case _:
             raise ValueError(f"not an agent arm: {kind!r}")
 

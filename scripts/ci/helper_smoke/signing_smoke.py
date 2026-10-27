@@ -4,6 +4,7 @@ import argparse
 import random
 import subprocess
 import sys
+from functools import partial
 from pathlib import Path
 
 from base.clock import SYSTEM_TIMERS, Clock, ClockConfig
@@ -84,8 +85,9 @@ def load_and_ping(app: Path, env: lifecycle.InstallEnv) -> None:
     A bootstrap failure intentionally fails the lane: the hosted runner's user launchd chain is
     part of the production contract being tested.
     """
-    lifecycle.install_and_load(app, rebuilt=True, helper=helper_client, env=env)
-    if helper_client().ping()["pong"] is not True:
+    helper = partial(helper_client, home=env.build.home)
+    lifecycle.install_and_load(app, rebuilt=True, helper=helper, env=env)
+    if helper().ping()["pong"] is not True:
         raise SystemExit("the helper did not answer the ping")
 
 
@@ -108,7 +110,8 @@ def main(argv: list[str]) -> int:
     if args.command == "label":
         print(helper_job_label(meiva_home()))
     elif args.command == "converge":
-        lifecycle.converge(helper=helper_client, env=install_env())
+        env = install_env()
+        lifecycle.converge(helper=partial(helper_client, home=env.build.home), env=env)
     else:
         run()
     return 0

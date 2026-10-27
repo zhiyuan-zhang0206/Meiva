@@ -69,14 +69,17 @@ def test_the_gateway_owns_no_schedule_manager() -> None:
 
 
 async def test_both_loops_run_their_rounds(
-    db_conn: psycopg.Connection, pool: ConnectionPool, pty_service: PtyServiceProcess
+    db_conn: psycopg.Connection,
+    pool: ConnectionPool,
+    pty_service: PtyServiceProcess,
+    unit_home: Path,
 ) -> None:
     # meiva:note
     # a deleted schedule: the request loop reaps its (absent) session
     _queue(db_conn, 4242)
     liveness = LivenessGroup(timers=SYSTEM_TIMERS)
     manager = schedule_manager(
-        pool, get_shell_backend(), launch_env=forward_env_dict(process_environment())
+        pool, get_shell_backend(home=unit_home), launch_env=forward_env_dict(process_environment())
     )
 
     task = asyncio.create_task(daemon.run_loops(pool, manager, liveness))
@@ -93,11 +96,14 @@ async def test_both_loops_run_their_rounds(
 
 
 async def test_a_crashing_loop_cancels_its_sibling_and_ends_the_service(
-    db_conn: psycopg.Connection, pool: ConnectionPool, pty_service: PtyServiceProcess
+    db_conn: psycopg.Connection,
+    pool: ConnectionPool,
+    pty_service: PtyServiceProcess,
+    unit_home: Path,
 ) -> None:
     _queue(db_conn, 4242)
     manager = schedule_manager(
-        pool, get_shell_backend(), launch_env=forward_env_dict(process_environment())
+        pool, get_shell_backend(home=unit_home), launch_env=forward_env_dict(process_environment())
     )
 
     with (

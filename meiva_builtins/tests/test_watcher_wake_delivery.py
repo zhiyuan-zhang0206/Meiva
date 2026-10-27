@@ -285,6 +285,7 @@ def test_watch_work_canonical_need_input_wakes_on_its_first_eligible_poll(
         writer=watch_work.AtomicWriter(watch_work.SYSTEM_FS),
         now=system_clock().now(),
         rng=seeded_rng(),
+        sessions=watch_work.cluster_sessions(key),
     )
     generation = owner.generation
     assert generation is not None
@@ -301,6 +302,7 @@ def test_watch_work_canonical_need_input_wakes_on_its_first_eligible_poll(
             reason="test-over",
             writer=watch_work.AtomicWriter(watch_work.SYSTEM_FS),
             now=system_clock().now(),
+            sessions=watch_work.cluster_sessions(key),
         )
 
     timer = threading.Timer(0.3, end_supervision)

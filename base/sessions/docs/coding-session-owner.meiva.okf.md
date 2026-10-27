@@ -42,7 +42,10 @@ terminating one raises.
   - a generation whose owner agent was terminated;
   - a launch past its bounded spawn grace with no live candidate PTY.
 
-  Reclaiming stops its PTY, removes its private state and drops its record.
+  Reclaiming stops its PTY, removes its private state and drops its record. The PTYs are
+  reached through the `CodingSessions` port, which the caller fills with the shell
+  backend of the cluster's home (`launch_generation` and `terminate_generation` take it as
+  a required `sessions`).
   Live generations, including a file-less takeover alive on its coding session
   alone, are left alone. The launch then publishes a fresh `launching`
   generation.

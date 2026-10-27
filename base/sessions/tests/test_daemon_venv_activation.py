@@ -48,7 +48,7 @@ def test_launch_path_activates_venv(process_config: object, unit_home: Path) -> 
     from base.sessions.env_forwarding import forward_env_dict
 
     raise_fd_limit(65536)
-    backend = get_backend(timers=SYSTEM_TIMERS)
+    backend = get_backend(timers=SYSTEM_TIMERS, home=unit_home)
     out = unit_home / "launch_env.txt"
     assert backend.new_session(
         "venvcheck-launch",

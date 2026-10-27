@@ -23,18 +23,27 @@ from base.sessions.pty.tests.pty_service import PtyServiceProcess, service_socke
 from base.sessions.pty.tests.pty_service import pty_service as pty_service
 
 
-def test_get_backend_returns_platform_appropriate_backend():
-    assert isinstance(get_backend(timers=SYSTEM_TIMERS), PosixProcSessionBackend)
+def test_get_backend_returns_platform_appropriate_backend(tmp_path: Path):
+    assert isinstance(get_backend(timers=SYSTEM_TIMERS, home=tmp_path), PosixProcSessionBackend)
 
 
-def test_get_shell_backend_returns_platform_appropriate_backend():
-    shell = get_shell_backend()
+def test_get_shell_backend_returns_platform_appropriate_backend(tmp_path: Path):
+    shell = get_shell_backend(home=tmp_path)
     assert isinstance(shell, PtySessionBackend)
-    assert not isinstance(get_backend(timers=SYSTEM_TIMERS), PtySessionBackend)
+    assert not isinstance(get_backend(timers=SYSTEM_TIMERS, home=tmp_path), PtySessionBackend)
 
 
-def test_get_backend_is_a_session_backend():
-    backend = get_backend(timers=SYSTEM_TIMERS)
+def test_the_backends_log_under_the_home_they_are_given(tmp_path: Path):
+    assert get_shell_backend(home=tmp_path).session_log_path("meiva-x") == (
+        tmp_path / "logs" / "meiva-x.out.log"
+    )
+    assert get_backend(timers=SYSTEM_TIMERS, home=tmp_path).session_log_path("meiva-x") == (
+        tmp_path / "logs" / "meiva-x.out.log"
+    )
+
+
+def test_get_backend_is_a_session_backend(tmp_path: Path):
+    backend = get_backend(timers=SYSTEM_TIMERS, home=tmp_path)
     assert isinstance(backend, SessionBackend)
 
 
@@ -68,7 +77,9 @@ def test_pty_child_virtual_env_projection(
         },
     )
     service.start()
-    backend = PtySessionBackend(config=PtyClientConfig(socket_path=service_socket()))
+    backend = PtySessionBackend(
+        config=PtyClientConfig(socket_path=service_socket()), home=unit_home
+    )
     name = "meiva-test-venv-projection"
     report = unit_home / "child-env.json"
     code = (

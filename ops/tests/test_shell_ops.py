@@ -40,18 +40,16 @@ def test_rpc_rejects_transport_and_unknown_modes(raw: object) -> None:
         ShellKillResult.model_validate({"mode": raw})
 
 
-@pytest.mark.usefixtures("unit_home")
-def test_host_producer_returns_the_canonical_absent_member() -> None:
-    mode, interrupted, name = cluster_status.kill_shell(7, 3)
+def test_host_producer_returns_the_canonical_absent_member(unit_home: Path) -> None:
+    mode, interrupted, name = cluster_status.kill_shell(7, 3, home=unit_home)
 
     assert mode is ShellKillMode.ABSENT
     assert interrupted is False
     assert name is None
 
 
-@pytest.mark.usefixtures("unit_home")
-def test_the_operation_reports_an_absent_shell_without_detail() -> None:
-    assert cluster.shell_kill_op(7, 3) == ShellKillResult(mode=ShellKillMode.ABSENT)
+def test_the_operation_reports_an_absent_shell_without_detail(unit_home: Path) -> None:
+    assert cluster.shell_kill_op(7, 3, home=unit_home) == ShellKillResult(mode=ShellKillMode.ABSENT)
 
 
 @pytest.mark.usefixtures("pty_service")
@@ -61,10 +59,10 @@ def test_the_operation_reports_the_shell_it_killed(unit_home: Path) -> None:
     type_line(name, "echo ready")
     output_until(name, "ready")
 
-    result = cluster.shell_kill_op(7, 3)
+    result = cluster.shell_kill_op(7, 3, home=unit_home)
 
     assert result == ShellKillResult(mode=ShellKillMode.KILLED, interrupted=False, name="build")
-    assert cluster.shell_kill_op(7, 3).mode is ShellKillMode.ABSENT
+    assert cluster.shell_kill_op(7, 3, home=unit_home).mode is ShellKillMode.ABSENT
 
 
 @pytest.mark.usefixtures("pty_service")
@@ -72,15 +70,14 @@ def test_the_probe_op_lists_the_agents_shells_of_this_host(unit_home: Path) -> N
     for name in ("meiva-agent-7-shell-0", "meiva-agent-7-shell-1-watcher", "meiva-agent-8-shell-0"):
         new(name, unit_home)
 
-    result = cluster.shell_probe_op(7)
+    result = cluster.shell_probe_op(7, home=unit_home)
 
     assert [(shell.id, shell.name) for shell in result.shells] == [(0, None), (1, "watcher")]
     assert all(shell.created_at is not None for shell in result.shells)
 
 
-@pytest.mark.usefixtures("unit_home")
-def test_the_probe_op_of_a_host_without_the_agents_shells_is_empty() -> None:
-    assert cluster.shell_probe_op(7).shells == []
+def test_the_probe_op_of_a_host_without_the_agents_shells_is_empty(unit_home: Path) -> None:
+    assert cluster.shell_probe_op(7, home=unit_home).shells == []
 
 
 @pytest.mark.usefixtures("pty_service")
@@ -90,14 +87,13 @@ def test_the_capture_op_returns_the_tail_of_the_resolved_shell(unit_home: Path) 
     type_line(name, "echo op-captured-marker")
     output_until(name, "op-captured-marker")
 
-    result = cluster.shell_capture_op(7, 2, 100)
+    result = cluster.shell_capture_op(7, 2, 100, home=unit_home)
 
     assert result.session_name == name
     assert "op-captured-marker" in [line.strip() for line in result.lines]
     assert result.created_at is not None
 
 
-@pytest.mark.usefixtures("unit_home")
-def test_the_capture_op_of_a_shell_that_is_not_there_is_not_found() -> None:
+def test_the_capture_op_of_a_shell_that_is_not_there_is_not_found(unit_home: Path) -> None:
     with pytest.raises(ShellNotFoundError):
-        cluster.shell_capture_op(7, 2)
+        cluster.shell_capture_op(7, 2, home=unit_home)

@@ -116,7 +116,7 @@ untouched for operator inspection.
 
 ## Consumers
 
-`base/sessions/backend.PtySessionBackend` (`get_shell_backend()` on POSIX).
+`base/sessions/backend.PtySessionBackend` (`get_shell_backend(home=...)` on POSIX).
 Above it: `meiva.shell.sessions`, `meiva.watcher`, the gateway ScheduleManager, the
 page-server daemon (one `list` per reconcile pass), `ops.cluster_status`
 capture/kill, the worktree-removal guard (`base/deploy/git/worktree_guard.py`,

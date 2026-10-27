@@ -48,15 +48,15 @@ def _wait_for(path: Path, timeout: float = 20.0) -> bool:
     return False
 
 
-def _launch(name: str, script: Path, tmp_path: Path) -> None:
-    ok = PosixProcSessionBackend(SYSTEM_TIMERS).new_session(
+def _launch(name: str, script: Path, tmp_path: Path, home: Path) -> None:
+    ok = PosixProcSessionBackend(SYSTEM_TIMERS, home).new_session(
         name, f"{sys.executable} {script}", tmp_path, env=dict(os.environ)
     )
     assert ok is True
 
 
-def _recorded(name: str) -> psutil.Process:
-    rec = posixproc.read_record(name)
+def _recorded(name: str, home: Path) -> psutil.Process:
+    rec = posixproc.read_record(name, home=home)
     assert rec is not None, f"no session record for {name}"
     return psutil.Process(rec.pid)
 
@@ -64,14 +64,13 @@ def _recorded(name: str) -> psutil.Process:
 def test_login_shell_session_records_the_daemon_not_a_wrapper_shell(
     tmp_path: Path, unit_home: Path
 ) -> None:
-    del unit_home
     started, marker = tmp_path / "started", tmp_path / "clean"
     script = tmp_path / "daemon.py"
     script.write_text(_DAEMON.format(started=str(started), marker=str(marker)))
-    _launch("meiva-test-shape", script, tmp_path)
+    _launch("meiva-test-shape", script, tmp_path, unit_home)
     try:
         assert _wait_for(started), "daemon never started"
-        proc = _recorded("meiva-test-shape")
+        proc = _recorded("meiva-test-shape", unit_home)
         cmdline = " ".join(proc.cmdline())
         assert str(script) in cmdline, f"recorded pid is not the daemon: {cmdline!r}"
         assert "bash" not in proc.name(), (
@@ -80,49 +79,57 @@ def test_login_shell_session_records_the_daemon_not_a_wrapper_shell(
         descendants = [(p.pid, p.name()) for p in proc.children(recursive=True)]
         shells = [d for d in descendants if d[1] in {"sh", "bash", "dash", "zsh"}]
         assert not shells, f"a shell survives under the daemon: {shells} (all: {descendants})"
-        assert posixproc.has_session("meiva-test-shape")
+        assert posixproc.has_session("meiva-test-shape", home=unit_home)
     finally:
-        posixproc.kill_session("meiva-test-shape", graceful=False, timers=SYSTEM_TIMERS)
+        posixproc.kill_session(
+            "meiva-test-shape", graceful=False, timers=SYSTEM_TIMERS, home=unit_home
+        )
 
 
 def test_graceful_signal_reaches_the_daemon_and_runs_its_cleanup(
     tmp_path: Path, unit_home: Path
 ) -> None:
-    del unit_home
     started, marker = tmp_path / "started", tmp_path / "clean"
     script = tmp_path / "daemon.py"
     script.write_text(_DAEMON.format(started=str(started), marker=str(marker)))
-    _launch("meiva-test-graceful", script, tmp_path)
+    _launch("meiva-test-graceful", script, tmp_path, unit_home)
     try:
         assert _wait_for(started), "daemon never started"
         t0 = time.monotonic()
-        assert posixproc.graceful_signal("meiva-test-graceful") is True
+        assert posixproc.graceful_signal("meiva-test-graceful", home=unit_home) is True
         assert _wait_for(marker, timeout=10.0), (
             "the daemon never ran its finally — SIGTERM did not reach it"
         )
         elapsed = time.monotonic() - t0
         assert elapsed < 5.0, f"daemon took {elapsed:.1f}s to react to SIGTERM"
     finally:
-        posixproc.kill_session("meiva-test-graceful", graceful=False, timers=SYSTEM_TIMERS)
+        posixproc.kill_session(
+            "meiva-test-graceful", graceful=False, timers=SYSTEM_TIMERS, home=unit_home
+        )
 
 
 def test_kill_session_reports_forced_when_the_daemon_ignores_sigterm(
     tmp_path: Path, unit_home: Path
 ) -> None:
-    del unit_home
     started = tmp_path / "started"
     script = tmp_path / "deaf.py"
     script.write_text(_DEAF.format(started=str(started)))
-    _launch("meiva-test-deaf", script, tmp_path)
+    _launch("meiva-test-deaf", script, tmp_path, unit_home)
     try:
         assert _wait_for(started), "daemon never started"
         ok, mode = posixproc.kill_session(
-            "meiva-test-deaf", graceful=True, timeout=1.0, timers=SYSTEM_TIMERS
+            "meiva-test-deaf",
+            graceful=True,
+            timeout=1.0,
+            timers=SYSTEM_TIMERS,
+            home=unit_home,
         )
         assert ok is True, "the SIGKILL fallback must still confirm the process is gone"
         assert mode == "forced"
     finally:
-        posixproc.kill_session("meiva-test-deaf", graceful=False, timers=SYSTEM_TIMERS)
+        posixproc.kill_session(
+            "meiva-test-deaf", graceful=False, timers=SYSTEM_TIMERS, home=unit_home
+        )
 
 
 def test_install_graceful_shutdown_raises_keyboardinterrupt():
@@ -196,24 +203,25 @@ def test_exec_into_rejects_a_compound_command_that_never_execs():
 
 
 def test_orchestration_session_keeps_its_wrapper_shell(tmp_path: Path, unit_home: Path) -> None:
-    del unit_home
     started, marker = tmp_path / "started", tmp_path / "clean"
     log = tmp_path / "log"
     script = tmp_path / "daemon.py"
     script.write_text(_DAEMON.format(started=str(started), marker=str(marker)))
-    backend = PosixProcSessionBackend(SYSTEM_TIMERS)
+    backend = PosixProcSessionBackend(SYSTEM_TIMERS, unit_home)
     pipeline = f"{sys.executable} {script} | tee -a {log}"
     assert backend.new_session(
         "meiva-test-orch", pipeline, tmp_path, env=dict(os.environ), exec_cmd=False
     )
     try:
         assert _wait_for(started), "orchestration pipeline never started"
-        proc = _recorded("meiva-test-orch")
+        proc = _recorded("meiva-test-orch", unit_home)
         cmdline = " ".join(proc.cmdline())
         assert pipeline in cmdline
         assert f"exec {pipeline}" not in cmdline
     finally:
-        posixproc.kill_session("meiva-test-orch", graceful=False, timers=SYSTEM_TIMERS)
+        posixproc.kill_session(
+            "meiva-test-orch", graceful=False, timers=SYSTEM_TIMERS, home=unit_home
+        )
 
 
 def test_every_service_spec_command_is_exec_safe():

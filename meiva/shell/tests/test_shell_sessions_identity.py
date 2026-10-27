@@ -6,6 +6,12 @@ import os
 import subprocess
 import sys
 from pathlib import Path
+from typing import cast
+
+from base.agents.context import MeivaContext
+from base.agents.context.clients import ClientSet, DatabaseHandle
+from meiva.sdk_surface import process_context
+from meiva.shell.sessions import open_sessions
 
 _PROBE = Path(__file__).with_name("child_sessions_probe.py")
 
@@ -38,3 +44,21 @@ def test_exec_child_with_the_identity_the_launcher_passes_reaches_the_backend(
     tmp_path: Path,
 ) -> None:
     assert _run_probe(tmp_path, agent_id=41) == "LIST={}"
+
+
+def test_the_sessions_of_an_agent_are_those_of_the_bound_contexts_home_not_the_environments(
+    tmp_path: Path, unit_home: Path
+) -> None:
+    home = tmp_path / "context-home"
+    home.mkdir()
+    assert home != unit_home
+    database = cast(DatabaseHandle, object())
+    process_context.bind_context(
+        MeivaContext(meiva_home=home, clients=ClientSet(database=lambda: database))
+    )
+    try:
+        shells = open_sessions(41)
+    finally:
+        process_context.unbind_context()
+
+    assert shells.backend.session_log_path("meiva-x") == home / "logs" / "meiva-x.out.log"

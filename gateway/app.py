@@ -164,7 +164,7 @@ def _build_request_resources(
     app.state.machine_token_acceptance = machine_token_acceptance
     app.state.telemetry_staleness = TelemetryStaleness()
     app.state.status_cache = StatusCache()
-    app.state.shell_backend = get_shell_backend()
+    app.state.shell_backend = get_shell_backend(home=process.home)
     app.state.harness_cache = HarnessProbeCache()
     app.state.identity_mismatch_log = IdentityMismatchLog()
     app.state.service_endpoints = ServiceEndpoints.from_boot(

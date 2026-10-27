@@ -10,7 +10,7 @@ The runner composes SDK policy inputs from one ConfigBoot and binds the schedule
 
 The manager receives its shell `SessionBackend`, launch checkout, home, session
 environment and `ManagerPolicy` as required constructor inputs; its daemon reads
-them once (`get_shell_backend()`, its repository root, `forward_env_dict()` and
+them once (`get_shell_backend(home=...)`, its repository root, `forward_env_dict()` and
 the gateway configuration) and never reads settings or the environment again. The
 clock is a value: the loop passes a monotonic reading as `now` to `reconcile` and
 `sync_one`. What the manager decides from it is a pure function in a strict

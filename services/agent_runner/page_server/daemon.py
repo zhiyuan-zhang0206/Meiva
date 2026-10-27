@@ -471,7 +471,7 @@ async def reconcile_loop(
     """Run page-shell reconciliation at the configured poll interval."""
     host = local_machine.host()
     managed: dict[PageKey, ServerHandle] = {}
-    backend = get_shell_backend()
+    backend = get_shell_backend(home=home)
     _log.info(
         "[page-server] daemon started, machine=%s, host=%s",
         local_machine.name(),

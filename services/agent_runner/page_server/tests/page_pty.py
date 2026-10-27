@@ -70,9 +70,9 @@ def free_port() -> int:
 # meiva:note
 # The backend the daemon uses, with the client's connect patience set to a value a test can wait
 # out: a service that is down answers at once instead of after the production five seconds.
-def _backend() -> PtySessionBackend:
+def _backend(home: Path) -> PtySessionBackend:
     return PtySessionBackend(
-        client.PtyClientConfig(socket_path=service_socket(), connect_wait_s=0.0)
+        client.PtyClientConfig(socket_path=service_socket(), connect_wait_s=0.0), home
     )
 
 
@@ -126,13 +126,14 @@ def page_state(conn: psycopg.Connection, agent_id: int, name: str) -> PageState:
 # meiva:note
 # One production pass against the pty service of the test home.
 def reconcile(pool: ConnectionPool, managed: dict[PageKey, ServerHandle]) -> None:
+    home = resolve_meiva_home()
     daemon.reconcile_once(
         pool,
         managed,
         HOST,
         EventBus.from_settings(rng=seeded_rng()),
-        _backend(),
-        resolve_meiva_home(),
+        _backend(home),
+        home,
     )
 
 
@@ -141,14 +142,15 @@ def reconcile(pool: ConnectionPool, managed: dict[PageKey, ServerHandle]) -> Non
 def reconcile_snapshot(
     pool: ConnectionPool, managed: dict[PageKey, ServerHandle], rows: list[PageRow]
 ) -> None:
+    home = resolve_meiva_home()
     daemon.reconcile_rows(
         pool,
         managed,
         rows,
         HOST,
         EventBus.from_settings(rng=seeded_rng()),
-        _backend(),
-        resolve_meiva_home(),
+        _backend(home),
+        home,
     )
 
 

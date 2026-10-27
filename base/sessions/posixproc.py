@@ -46,7 +46,7 @@ from base.log import logger
 from base.native_process.kernel_identity import pid_starttime_ticks
 from base.native_process.ownership import stable_create_time
 from base.native_process.process_control import SYSTEM_PROCESS_CONTROL, ProcessControl
-from base.paths import logs_dir, meiva_home, run_dir
+from base.paths import logs_path, run_dir
 from base.sessions.record import SessionRecord
 
 __all__ = [
@@ -85,23 +85,24 @@ _SPAWN_HELPER_TIMEOUT_S = 30.0
 _KILL_POLL_S = 0.05
 
 
-def _sessions_dir(sessions_dir: Path | None = None) -> Path:
-    d = (run_dir(meiva_home()) / "sessions") if sessions_dir is None else sessions_dir
+def _sessions_dir(home: Path) -> Path:
+    d = run_dir(home) / "sessions"
     d.mkdir(parents=True, exist_ok=True)
     return d
 
 
-def record_path(name: str, *, sessions_dir: Path | None = None) -> Path:
-    return _sessions_dir(sessions_dir) / f"{name}.json"
+def record_path(name: str, *, home: Path) -> Path:
+    return _sessions_dir(home) / f"{name}.json"
 
 
-def session_log_path(name: str) -> Path:
-    """The combined stdout+stderr log for a session ($MEIVA_HOME/logs/<name>.out.log)."""
-    return logs_dir() / f"{name}.out.log"
+# meiva:note
+# The combined stdout+stderr log of a session: `<home>/logs/<name>.out.log`. The path only; the launch creates the directory.
+def session_log_path(name: str, *, home: Path) -> Path:
+    return logs_path(home) / f"{name}.out.log"
 
 
-def read_record(name: str, *, sessions_dir: Path | None = None) -> SessionRecord | None:
-    return SessionRecord.read(record_path(name, sessions_dir=sessions_dir))
+def read_record(name: str, *, home: Path) -> SessionRecord | None:
+    return SessionRecord.read(record_path(name, home=home))
 
 
 def process_is_live(proc: psutil.Process) -> bool:
@@ -150,9 +151,9 @@ def process_for_record(
     return proc
 
 
-def has_session(name: str) -> bool:
+def has_session(name: str, *, home: Path) -> bool:
     """True if the named session's process is still alive."""
-    rec = read_record(name)
+    rec = read_record(name, home=home)
     if rec is None:
         return False
     return process_for_record(rec) is not None
@@ -199,6 +200,7 @@ def new_session(
     cwd: Path,
     *,
     env: dict[str, str],
+    home: Path,
     stderr_append: Path | None = None,
 ) -> bool:
     """Launch `cmd` as a detached, named background session.
@@ -220,14 +222,14 @@ def new_session(
     Raises:
         RuntimeError: the reparent helper failed to launch / report a pid.
     """
-    if has_session(name):
+    if has_session(name, home=home):
         return True
     argv = ["/bin/sh", "-c", cmd] if isinstance(cmd, str) else list(cmd)
-    stdout_path = session_log_path(name)
+    stdout_path = session_log_path(name, home=home)
     stderr_path = stderr_append if stderr_append is not None else stdout_path
     # `2>>{path}` / the helper's os.open do not mkdir; guarantee the dir on a
     # fresh machine so the launch cannot fail on a missing $MEIVA_HOME/logs.
-    logs_dir().mkdir(parents=True, exist_ok=True)
+    logs_path(home).mkdir(parents=True, exist_ok=True)
 
     # Run the reparent helper and wait for it (it exits in microseconds after
     # forking the real child). Waiting reaps the helper — the spawner's ONLY
@@ -258,7 +260,7 @@ def new_session(
             f"(exit {result.returncode}): stdout={result.stdout!r} stderr={result.stderr!r}"
         )
     child_pid = int(child_pid_str)
-    build_session_record(child_pid, cmd=cmd, cwd=cwd).write(record_path(name))
+    build_session_record(child_pid, cmd=cmd, cwd=cwd).write(record_path(name, home=home))
     return True
 
 
@@ -293,7 +295,7 @@ def graceful_signal(
     name: str,
     *,
     expected: SessionRecord | None = None,
-    sessions_dir: Path | None = None,
+    home: Path,
     observed_ticks: Sequence[int | None] | None = None,
 ) -> bool:
     """Send the graceful-stop signal (SIGTERM) to the session's process without
@@ -305,7 +307,7 @@ def graceful_signal(
     wait on all of them under one shared deadline before force-killing stragglers
     — so the teardown is O(slowest agent), not O(sum of agents).
     """
-    rec = read_record(name, sessions_dir=sessions_dir)
+    rec = read_record(name, home=home)
     if rec is None or (expected is not None and rec != expected):
         return False
     has_first_tick = observed_ticks is not None and len(observed_ticks) >= 1
@@ -321,7 +323,7 @@ def graceful_signal(
         if expected is not None and not admit_expected_signal(
             proc,
             expected,
-            latest=read_record(name, sessions_dir=sessions_dir),
+            latest=read_record(name, home=home),
             observed_ticks=observed_ticks,
             first_tick=first_tick,
             has_first_tick=has_first_tick,
@@ -484,6 +486,7 @@ def kill_session(
     graceful: bool = False,
     timeout: float = 15.0,
     timers: Timers,
+    home: Path,
     process_control: ProcessControl = SYSTEM_PROCESS_CONTROL,
     wait_timeout: float = 5.0,
 ) -> tuple[bool, str]:
@@ -496,12 +499,12 @@ def kill_session(
 
     Idempotent: an absent/dead session is a noop.
     """
-    rec = read_record(name)
+    rec = read_record(name, home=home)
     if rec is None:
         return True, "noop"
     proc = process_for_record(rec)
     if proc is None:
-        record_path(name).unlink(missing_ok=True)
+        record_path(name, home=home).unlink(missing_ok=True)
         return True, "noop"
     ended_on_signal = False
     try:
@@ -530,18 +533,18 @@ def kill_session(
             pid=proc.pid,
         )
         return False, mode
-    record_path(name).unlink(missing_ok=True)
+    record_path(name, home=home).unlink(missing_ok=True)
     return True, mode
 
 
-def session_started_at(name: str) -> float | None:
+def session_started_at(name: str, *, home: Path) -> float | None:
     """Epoch seconds when the named session was launched, or None when it is
     not alive (no record, or the record's process is gone).
 
     Read off the on-disk record — the same source has_session / list_sessions
     judge — so a liveness consumer can render an uptime without a second probe.
     """
-    rec = read_record(name)
+    rec = read_record(name, home=home)
     if rec is None:
         return None
     if process_for_record(rec) is None:
@@ -597,7 +600,7 @@ def record_reapable(rec: SessionRecord) -> tuple[bool, str, int | None]:
     return False, "live pid did not satisfy the identity check", None
 
 
-def list_sessions(prefix: str = "") -> list[str]:
+def list_sessions(prefix: str = "", *, home: Path) -> list[str]:
     """Names of all live sessions, optionally filtered by `prefix`.
 
     Reaps records whose process is gone so the listing reflects reality —
@@ -609,7 +612,7 @@ def list_sessions(prefix: str = "") -> list[str]:
     boundary that warning can surface.
     """
     out: list[str] = []
-    for rec_file in _sessions_dir().glob("*.json"):
+    for rec_file in _sessions_dir(home).glob("*.json"):
         name = rec_file.stem
         if prefix and not name.startswith(prefix):
             continue
