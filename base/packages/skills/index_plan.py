@@ -10,6 +10,7 @@ from __future__ import annotations
 import hashlib
 import os
 import stat
+from collections.abc import Sequence
 from dataclasses import dataclass
 from enum import Enum
 from pathlib import Path
@@ -19,6 +20,10 @@ from base.packages.skills.names import match_key
 from base.packages.skills.scan import scan_text_critical
 
 _REQUIRED_FIELDS = ("name", "description")
+# meiva:note
+# The two files of a skill-bearing folder.
+SKILL_MD = "SKILL.md"
+INDEX_MD = "INDEX.md"
 
 
 # meiva:note
@@ -110,24 +115,23 @@ def skill_md_facts(raw: str | None, unreadable: OSError | None) -> SkillMdFacts:
 
 
 # meiva:note
-# What a stat says the entry is: a regular file, a directory, something else, or (no stat) missing.
+# What a stat says an entry is: a regular file, a directory, something else (a symlink, a socket),
+# or (no stat) missing. `FileKind.of` reads it off a stat.
 class FileKind(Enum):
     REGULAR = "regular"
     DIRECTORY = "directory"
     OTHER = "other"
     MISSING = "missing"
 
-
-# meiva:note
-# The kind of entry a stat describes.
-def stat_kind(st: os.stat_result | None) -> FileKind:
-    if st is None:
-        return FileKind.MISSING
-    if stat.S_ISREG(st.st_mode):
-        return FileKind.REGULAR
-    if stat.S_ISDIR(st.st_mode):
-        return FileKind.DIRECTORY
-    return FileKind.OTHER
+    @classmethod
+    def of(cls, st: os.stat_result | None) -> FileKind:
+        if st is None:
+            return cls.MISSING
+        if stat.S_ISREG(st.st_mode):
+            return cls.REGULAR
+        if stat.S_ISDIR(st.st_mode):
+            return cls.DIRECTORY
+        return cls.OTHER
 
 
 # meiva:note
@@ -154,8 +158,8 @@ def assemble_skill_file(
     return SkillFile(
         folder=folder,
         rel=folder.relative_to(root).parts,
-        skill_md=folder / "SKILL.md" if skill_stat is not None else None,
-        index_md=folder / "INDEX.md" if index_stat is not None else None,
+        skill_md=folder / SKILL_MD if skill_stat is not None else None,
+        index_md=folder / INDEX_MD if index_stat is not None else None,
         name=facts.name,
         description=facts.description,
         content_hash=facts.content_hash,
@@ -183,3 +187,16 @@ def folder_snapshot(
 # size. A missing stat reads as changed.
 def file_unchanged(st: os.stat_result | None, *, mtime_ns: int, size: int) -> bool:
     return st is not None and st.st_mtime_ns == mtime_ns and st.st_size == size
+
+
+# meiva:note
+# The entries that carry a usable name, keyed by the comparison key of that name. The first entry
+# wins on a collision: the scan order is roots, then sorted folders, the same order the runtime
+# mount converges under.
+def key_index(entries: Sequence[SkillFile]) -> dict[str, SkillFile]:
+    by_key: dict[str, SkillFile] = {}
+    for entry in entries:
+        key = entry.key
+        if key is not None:
+            by_key.setdefault(key, entry)
+    return by_key

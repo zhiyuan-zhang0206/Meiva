@@ -14,12 +14,13 @@ import pytest
 
 from base.packages.skills.index_plan import (
     FileKind,
+    SkillFile,
     SkillMdFacts,
     assemble_skill_file,
     file_unchanged,
     folder_snapshot,
+    key_index,
     skill_md_facts,
-    stat_kind,
 )
 from base.packages.skills.names import match_key
 
@@ -76,21 +77,6 @@ def test_a_critical_rule_in_a_skill_md_is_carried_sorted_and_distinct() -> None:
 
     assert skill_md_facts(text, None).security_rules == ("remote-code-execution",)
     assert skill_md_facts(_GOOD, None).security_rules == ()
-
-
-@pytest.mark.parametrize(
-    ("st", "kind"),
-    [
-        (None, FileKind.MISSING),
-        (_stat(stat.S_IFREG | 0o600), FileKind.REGULAR),
-        (_stat(stat.S_IFDIR | 0o700), FileKind.DIRECTORY),
-        (_stat(stat.S_IFLNK | 0o777), FileKind.OTHER),
-    ],
-)
-def test_a_stat_is_a_regular_file_or_a_directory_by_its_mode(
-    st: os.stat_result | None, kind: FileKind
-) -> None:
-    assert stat_kind(st) is kind
 
 
 def test_a_folder_with_neither_file_is_not_an_entry() -> None:
@@ -213,3 +199,77 @@ def test_a_file_is_unchanged_when_it_has_the_saved_mtime_and_size(
     st: os.stat_result | None, expected: bool
 ) -> None:
     assert file_unchanged(st, mtime_ns=5, size=10) is expected
+
+
+def test_the_critical_rules_of_a_skill_md_are_sorted_by_rule_id() -> None:
+    hidden = "\u200b"
+    text = _GOOD + _DOWNLOAD_AND_RUN + hidden
+
+    assert skill_md_facts(text, None).security_rules == (
+        "hidden-instruction",
+        "remote-code-execution",
+    )
+
+
+def test_a_malformed_skill_md_carries_no_critical_rules() -> None:
+    facts = skill_md_facts("no frontmatter\n" + _DOWNLOAD_AND_RUN, None)
+
+    assert facts.error is not None
+    assert facts.security_rules == ()
+
+
+def test_the_rules_of_the_index_md_follow_those_of_the_skill_md_unsorted() -> None:
+    skill_facts = SkillMdFacts("a", "b", "h", None, ("zeta-rule",))
+
+    entry = assemble_skill_file(
+        _FOLDER,
+        _ROOT,
+        skill_stat=_file(),
+        index_stat=_file(),
+        skill_facts=skill_facts,
+        index_text=_DOWNLOAD_AND_RUN,
+    )
+
+    assert entry is not None
+    assert entry.security_rules == ("zeta-rule", "remote-code-execution")
+
+
+def _entry(rel: str, facts: SkillMdFacts | None) -> SkillFile:
+    folder = _ROOT / rel
+    entry = assemble_skill_file(
+        folder,
+        _ROOT,
+        skill_stat=_file() if facts is not None else None,
+        index_stat=_file() if facts is None else None,
+        skill_facts=facts,
+        index_text="index" if facts is None else None,
+    )
+    assert entry is not None
+    return entry
+
+
+def test_the_first_entry_of_a_name_wins_and_unnamed_entries_are_left_out() -> None:
+    first = _entry("a", SkillMdFacts("same-name", "one", "h1", None, ()))
+    second = _entry("b", SkillMdFacts("same_name", "two", "h2", None, ()))
+    unnamed = _entry("c", None)
+    broken = _entry("d", SkillMdFacts(None, None, "h3", "malformed frontmatter — x", ()))
+
+    by_key = key_index([first, second, unnamed, broken])
+
+    assert by_key == {match_key("same-name"): first}
+
+
+@pytest.mark.parametrize(
+    ("st", "kind"),
+    [
+        (None, FileKind.MISSING),
+        (_stat(stat.S_IFREG | 0o600), FileKind.REGULAR),
+        (_stat(stat.S_IFDIR | 0o700), FileKind.DIRECTORY),
+        (_stat(stat.S_IFLNK | 0o777), FileKind.OTHER),
+        (_stat(stat.S_IFSOCK | 0o600), FileKind.OTHER),
+    ],
+)
+def test_a_stat_is_a_regular_file_or_a_directory_by_its_mode(
+    st: os.stat_result | None, kind: FileKind
+) -> None:
+    assert FileKind.of(st) is kind

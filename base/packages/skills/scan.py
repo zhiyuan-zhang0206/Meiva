@@ -504,13 +504,20 @@ def scan_text_critical(
 
 
 # meiva:note
+# Whether a file of `size` bytes is read for scanning: one past MAX_SCAN_BYTES is reported, never
+# read.
+def needs_bytes(size: int) -> bool:
+    return size <= MAX_SCAN_BYTES
+
+
+# meiva:note
 # Every finding in one package file, from what the caller read of it. `rel` is the path relative
 # to the package root, `size` the file's size in bytes and `raw` its bytes, which a file past the
 # scan limit never needs (the caller passes None for it). Reads the bytes as UTF-8; a file that is
 # not decodable text, or is too large to be instructions, yields its own notice rather than being
 # skipped.
 def scan_file(rel: str, size: int, raw: bytes | None) -> list[Finding]:
-    if size > MAX_SCAN_BYTES:
+    if not needs_bytes(size):
         return [
             Finding(
                 "unscannable-file",

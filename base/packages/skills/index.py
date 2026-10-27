@@ -39,13 +39,15 @@ from collections.abc import Callable
 from pathlib import Path
 
 from base.packages.skills.index_plan import (
+    INDEX_MD,
+    SKILL_MD,
     FileKind,
     SkillFile,
     assemble_skill_file,
     file_unchanged,
     folder_snapshot,
+    key_index,
     skill_md_facts,
-    stat_kind,
 )
 from base.packages.skills.names import match_key
 
@@ -71,7 +73,7 @@ def _regular_file_stat(
         st = stat_of(path)
     except OSError:
         return None
-    return st if stat_kind(st) is FileKind.REGULAR else None
+    return st if FileKind.of(st) is FileKind.REGULAR else None
 
 
 def _folders_in(
@@ -83,7 +85,7 @@ def _folders_in(
             st = stat_of(p)
         except OSError:
             continue
-        if st is not None and stat_kind(st) is FileKind.DIRECTORY:
+        if st is not None and FileKind.of(st) is FileKind.DIRECTORY:
             folders.append((p, st.st_mtime_ns))
     return folders or None
 
@@ -92,8 +94,8 @@ def _skill_file(
     folder: Path, root: Path, stat_of: Callable[[Path], os.stat_result | None]
 ) -> SkillFile | None:
     """Parse one folder's SKILL.md / INDEX.md; None when it holds neither."""
-    skill_md = folder / "SKILL.md"
-    index_md = folder / "INDEX.md"
+    skill_md = folder / SKILL_MD
+    index_md = folder / INDEX_MD
     skill_stat = _regular_file_stat(skill_md, stat_of)
     index_stat = _regular_file_stat(index_md, stat_of)
     skill_facts = skill_md_facts(*_read_utf8(skill_md)) if skill_stat is not None else None
@@ -144,11 +146,7 @@ class SkillIndex:
         self.roots = roots
         self.root_folders = root_folders
         self.entries = entries
-        self._by_key: dict[str, SkillFile] = {}
-        for e in entries:
-            k = e.key
-            if k is not None:
-                self._by_key.setdefault(k, e)
+        self._by_key = key_index(entries)
 
     @classmethod
     def build(

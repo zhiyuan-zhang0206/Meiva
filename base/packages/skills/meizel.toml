@@ -5,7 +5,7 @@ exports = ["index.py", "names.py", "scan.py", "tree.py"]
 "index.py" = ["index_plan.py", "names.py"]
 "index_plan.py" = ["names.py", "scan.py"]
 "package_scan.py" = ["package_scan_plan.py", "scan.py"]
-"package_scan_plan.py" = ["scan.py"]
+"package_scan_plan.py" = ["index_plan.py", "scan.py"]
 "project_roots.py" = ["project_root_plan.py"]
 "skill_tree.py" = ["index.py", "tree.py", "tree_builder.py"]
 "tests" = ["index.py", "index_plan.py", "names.py", "package_scan.py", "package_scan_plan.py", "project_root_plan.py", "project_roots.py", "scan.py"]
@@ -19,7 +19,7 @@ exports = ["index.py", "names.py", "scan.py", "tree.py"]
 "index_plan.py" = "strict"
 "names.py" = "strict"
 "package_scan_plan.py" = "strict"
-"package_scan.py" = { mode = "none", why = "the shell of the install-time package scan: it walks a package tree, stats each entry and reads each file within the size limit, and hands the bytes to scan.scan_file; which paths are package content, what a file yields and the order of the findings are decided in scan.py" }
+"package_scan.py" = { mode = "none", why = "the shell of the install-time package scan: it walks a package tree, lstats each entry and reads each file within the size limit, and hands the bytes to scan.scan_file; which entries are package files and the order of the findings are decided in package_scan_plan.py, whether a file is read and what it yields in scan.py" }
 "project_root_plan.py" = "strict"
 "project_roots.py" = { mode = "none", why = "the shell that probes the filesystem for a git repository root and for the project skill folders that exist; the markers it probes, the directories it climbs and the skill folders it may list are derived in project_root_plan.py" }
 "scan.py" = "strict"

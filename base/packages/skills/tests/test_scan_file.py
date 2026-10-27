@@ -101,3 +101,29 @@ def test_the_markdown_comment_rule_applies_to_markdown_files_only() -> None:
         )
     assert comment_findings("notes.txt") == []
     assert comment_findings("md") == []
+
+
+def test_a_nul_in_the_last_sniffed_byte_marks_a_binary() -> None:
+    raw = b"x" * (scan.BINARY_SNIFF_BYTES - 1) + b"\x00" + _DOWNLOAD_AND_RUN.encode()
+
+    [finding] = scan.scan_file("tail.sh", len(raw), raw)
+
+    assert finding.rule_id == "unscannable-file"
+    assert "binary" in finding.why
+
+
+def test_only_one_leading_bom_is_stripped() -> None:
+    raw = b"\xef\xbb\xbf\xef\xbb\xbfhello\n"
+
+    [finding] = scan.scan_file("two-boms.txt", len(raw), raw)
+
+    assert finding.rule_id == "hidden-instruction"
+    assert finding.line == 1
+
+
+@pytest.mark.parametrize(
+    ("size", "expected"),
+    [(0, True), (scan.MAX_SCAN_BYTES, True), (scan.MAX_SCAN_BYTES + 1, False)],
+)
+def test_a_file_is_read_up_to_the_limit_and_not_past_it(size: int, expected: bool) -> None:
+    assert scan.needs_bytes(size) is expected
