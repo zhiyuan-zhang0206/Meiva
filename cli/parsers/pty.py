@@ -6,7 +6,14 @@ import argparse
 def _h_pty_freeze(args: argparse.Namespace) -> int:
     from cli.commands.agents.pty import cmd_pty_freeze
 
-    return cmd_pty_freeze(holder=args.holder, reason=args.reason, home=args.runtime.home)
+    runtime = args.runtime
+    return cmd_pty_freeze(
+        holder=args.holder,
+        reason=args.reason,
+        home=runtime.home,
+        clock=runtime.clock,
+        rng=runtime.rng,
+    )
 
 
 def _h_pty_status(args: argparse.Namespace) -> int:

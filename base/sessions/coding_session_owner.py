@@ -18,13 +18,14 @@ from __future__ import annotations
 import contextlib
 import datetime as dt
 import os
+import random
 import shutil
 import stat
-import uuid
 from collections.abc import Callable
 from dataclasses import replace
 from pathlib import Path
 
+from base.clock.ids import new_uuid
 from base.host.atomic_io import AtomicWriter
 from base.native_process.os_platform import file_lock, is_macos
 from base.sessions.coding_session_owner_record import (
@@ -87,20 +88,19 @@ class CodingSessionGenerationChangedError(RuntimeError):
     """A launcher's generation ended (or was reclaimed) before it could publish."""
 
 
-def _utc_now(now: dt.datetime | None = None) -> dt.datetime:
-    return (now or dt.datetime.now(dt.UTC)).astimezone(dt.UTC)
+def _utc(instant: dt.datetime) -> dt.datetime:
+    return instant.astimezone(dt.UTC)
 
 
 def launch_is_stale(
     owner: CodingSessionOwner,
     *,
-    now: dt.datetime | None = None,
+    now: dt.datetime,
 ) -> bool:
     """Return whether a claimant died before publishing its active handle."""
     if owner.status != CodingSessionStatus.LAUNCHING or owner.created_at is None:
         return False
-    timestamp = _utc_now(now)
-    return timestamp - owner.created_at >= _UNPUBLISHED_CLAIM_WINDOW
+    return _utc(now) - owner.created_at >= _UNPUBLISHED_CLAIM_WINDOW
 
 
 class CodingSessionSocketError(RuntimeError):
@@ -309,7 +309,8 @@ def launch_generation(
     work_file: Path | None,
     ttl_seconds: float,
     writer: AtomicWriter,
-    now: dt.datetime | None = None,
+    now: dt.datetime,
+    rng: random.Random,
     list_sessions: SessionLister = _default_list_sessions,
     session_live: SessionLiveness = _default_session_live,
     terminate_session: SessionTerminator = _default_terminate_session,
@@ -322,7 +323,7 @@ def launch_generation(
         raise ValueError("ttl_seconds must be greater than zero and at most one day")
     if (tasks_file is None) != (work_file is None):
         raise ValueError("task and work files are given together, or neither for a takeover")
-    timestamp = _utc_now(now)
+    timestamp = _utc(now)
     with file_lock(lock_path(key), timeout_s=_LOCK_TIMEOUT_S):
         _reclaim_siblings_unlocked(
             key,
@@ -332,7 +333,7 @@ def launch_generation(
             terminate_session=terminate_session,
             owner_terminated=owner_terminated,
         )
-        generation = str(uuid.uuid4())
+        generation = str(new_uuid(rng))
         owner = CodingSessionOwner(
             key=key,
             status=CodingSessionStatus.LAUNCHING,
@@ -423,7 +424,7 @@ def terminate_generation(
     *,
     reason: str,
     writer: AtomicWriter,
-    now: dt.datetime | None = None,
+    now: dt.datetime,
     list_sessions: SessionLister = _default_list_sessions,
     session_live: SessionLiveness = _default_session_live,
     terminate_session: SessionTerminator = _default_terminate_session,
@@ -450,7 +451,7 @@ def terminate_generation(
         terminal = replace(
             current,
             status=CodingSessionStatus.TERMINAL,
-            terminalized_at=_utc_now(now),
+            terminalized_at=_utc(now),
             terminal_reason=reason,
         )
         write_unlocked(terminal, writer=writer)

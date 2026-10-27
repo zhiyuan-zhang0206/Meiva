@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import ast
 import contextlib
+import functools
 import inspect
 import json
 import os
@@ -489,7 +490,7 @@ async def test_beat_runs_the_parent_chain_check_before_the_liveness_beat() -> No
 def test_host_boot_checks_the_parent_chain_first() -> None:
     from services.agent_runner.agent_host import daemon
 
-    assert "require_helper_parent_chain()" in inspect.getsource(daemon.main)
+    assert "require_helper_parent_chain(" in inspect.getsource(daemon.main)
 
 
 def _beat_construction(function: Callable[..., object]) -> ast.Call:
@@ -513,11 +514,15 @@ def test_run_hands_the_real_parent_chain_check_to_the_beat() -> None:
     keywords = {keyword.arg: keyword.value for keyword in _beat_construction(daemon.run).keywords}
     [check] = [value for name, value in keywords.items() if name == "require_helper_chain"]
 
-    assert isinstance(check, ast.Name)
+    assert isinstance(check, ast.Call)
+    assert isinstance(check.func, ast.Name)
+    assert daemon.run.__globals__[check.func.id] is functools.partial
+    [target] = check.args
+    assert isinstance(target, ast.Name)
     # meiva:note
-    # `run` resolves that name from the daemon's own globals: the object `main` also checks
+    # `run` resolves the bound function from the daemon's own globals: the object `main` also checks
     # with at boot, never a same-named no-op.
-    assert daemon.run.__globals__[check.id] is daemon.require_helper_parent_chain
+    assert daemon.run.__globals__[target.id] is daemon.require_helper_parent_chain
 
 
 def test_broken_parent_chain_exits_host_with_software_error() -> None:
@@ -544,11 +549,11 @@ def _child_main() -> None:
         spec = json.loads(sys.argv[2])
         pid = os.getpid()
         links = {pid if k == "self" else int(k): int(v) for k, v in spec.items()}
-        sys.stdout.write("1" if parent_chain_intact(pid, links) else "0")
+        sys.stdout.write("1" if parent_chain_intact(pid, environ=os.environ, ppids=links) else "0")
     elif mode == "require-parent-chain":
         from services.agent_runner.agent_host import daemon
 
-        daemon.require_helper_parent_chain()
+        daemon.require_helper_parent_chain(pid=os.getpid(), environ=os.environ)
     else:
         raise ValueError(f"unknown child mode {mode!r}")
 

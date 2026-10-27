@@ -21,6 +21,8 @@ from typing import Any
 import pytest
 
 import meiva
+from base.clock.tests.fakes import system_clock
+from base.clock.tests.seeded_rng import seeded_rng
 from base.paths import workspace_dir
 from meiva.tests.fixtures.gateway_wire import GatewayStub, GatewayWire
 from meiva.tests.fixtures.gateway_wire import gateway_stub as gateway_stub
@@ -281,6 +283,8 @@ def test_watch_work_canonical_need_input_wakes_on_its_first_eligible_poll(
         work_file=work,
         ttl_seconds=3600,
         writer=watch_work.AtomicWriter(watch_work.SYSTEM_FS),
+        now=system_clock().now(),
+        rng=seeded_rng(),
     )
     generation = owner.generation
     assert generation is not None
@@ -296,6 +300,7 @@ def test_watch_work_canonical_need_input_wakes_on_its_first_eligible_poll(
             generation,
             reason="test-over",
             writer=watch_work.AtomicWriter(watch_work.SYSTEM_FS),
+            now=system_clock().now(),
         )
 
     timer = threading.Timer(0.3, end_supervision)
