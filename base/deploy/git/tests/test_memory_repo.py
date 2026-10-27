@@ -10,7 +10,7 @@ from base.cluster.machine.tests.identity import machine_identity as machine_iden
 from base.deploy.git import memory_repo
 from base.deploy.git.tests.memory_checkouts import commit_note
 from base.deploy.git.tests.memory_checkouts import memory_checkout as memory_checkout
-from base.paths import gateway_memory_dir
+from base.paths import gateway_memory_dir, meiva_home
 from base.paths.tests.homes import default_home as default_home
 
 
@@ -62,26 +62,25 @@ def test_pull_main_rejects_divergence(memory_checkout: tuple[Path, Path]) -> Non
 def test_gateway_memory_dir_combined_uses_subdirectory(
     monkeypatch: pytest.MonkeyPatch, *, machine_identity: ConfiguredMachineIdentity
 ) -> None:
-    from base.paths import meiva_home
 
     machine_identity.set(role="gateway,agent-runner", name="test-host")
-    gmd = gateway_memory_dir(roles=machine_identity.role())
+    gmd = gateway_memory_dir(roles=machine_identity.role(), home=meiva_home())
     home = meiva_home()
     assert gmd == home / "gateway" / "memory"
 
     from base.paths import memory_dir
 
-    assert gmd != memory_dir()
+    assert gmd != memory_dir(home=home)
 
 
 def test_gateway_memory_dir_gateway_only_equals_memory_dir(
     *, machine_identity: ConfiguredMachineIdentity
 ) -> None:
-    from base.paths import meiva_home, memory_dir
+    from base.paths import memory_dir
 
     machine_identity.set(role="gateway", name="cloud")
-    gmd = gateway_memory_dir(roles=machine_identity.role())
-    assert gmd == memory_dir()
+    gmd = gateway_memory_dir(roles=machine_identity.role(), home=meiva_home())
+    assert gmd == memory_dir(home=meiva_home())
     assert gmd == meiva_home() / "memory"
 
 

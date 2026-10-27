@@ -19,7 +19,7 @@ from base.db.code_version_gate import ProcessDbGate
 from base.host.permissions_helper.client import PermissionsHelperError
 from base.log.tests.log_records import LogRecords
 from base.log.tests.log_records import loguru_records as loguru_records
-from base.paths import logs_dir
+from base.paths import meiva_home
 
 from ... import mcp_daemon as daemon_mod
 from ...protocol import Response
@@ -411,7 +411,11 @@ async def test_run_raises_stream_limit_for_large_snapshots(
     d, sock, cleanup = short_sock_dir()
     server = asyncio.create_task(
         daemon_mod.run(
-            sock=str(sock), database=lambda: database, helper=FakeHelper(), clock=system_clock()
+            sock=str(sock),
+            database=lambda: database,
+            helper=FakeHelper(),
+            clock=system_clock(),
+            home=meiva_home(),
         )
     )
     try:
@@ -471,6 +475,7 @@ async def test_shutdown_cancels_active_clients(database: Database) -> None:
             sock=str(sock),
             helper=FakeHelper(),
             clock=system_clock(),
+            home=meiva_home(),
         )
         # A client handler that never returns unless cancelled — the persistent
         # SDK connection equivalent (a real client sits in handle()'s readline).
@@ -534,15 +539,17 @@ async def test_snapshot_audit_carries_png_path(
     fake_helper: FakeHelper,
     audit_log: list,
     monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
     *,
     database_gate: ProcessDbGate,
 ) -> None:
     """A snapshot's computer_action row carries the PNG path — the trace
     replay needs it (Phase 3, task #1101)."""
-    d = computer_daemon(database_gate=database_gate, helper=fake_helper)
+    daemon_home = tmp_path / "daemon-home"
+    d = computer_daemon(database_gate=database_gate, helper=fake_helper, home=daemon_home)
     await call(d, "snapshot", {"task_id": 42})
     actions = [ev for ev in audit_log if ev["event_type"] == "computer_action"]
     assert actions[0]["payload"]["action"] == "snapshot"
     traced = Path(cast("str", cast("dict[str, object]", actions[0]["payload"])["path"]))
-    assert traced.parent == logs_dir() / "computer" / "snapshots"
+    assert traced.parent == daemon_home / "logs" / "computer" / "snapshots"
     assert traced.name.startswith("agent-")

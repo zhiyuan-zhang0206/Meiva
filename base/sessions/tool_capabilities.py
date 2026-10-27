@@ -20,7 +20,6 @@ from typing import TypeGuard
 
 from base.host.proc import run_bounded
 from base.log import logger
-from base.paths import meiva_home
 
 PROBE_TTL_SECONDS = 24 * 3600
 PROBE_TIMEOUT_SECONDS = 3.0
@@ -166,8 +165,8 @@ def _resolve(spec: ToolSpec) -> str | None:
     return None
 
 
-def cache_path() -> Path:
-    return meiva_home() / "host" / "tool-probes.json"
+def cache_path(home: Path) -> Path:
+    return home / "host" / "tool-probes.json"
 
 
 def _cache_key(path: str) -> str:
@@ -253,12 +252,10 @@ def probe_tool(
     spec: ToolSpec,
     *,
     run: Runner | None = None,
-    store: Path | None = None,
-    now: dt.datetime | None = None,
+    store: Path,
+    now: dt.datetime,
 ) -> Probe:
     runner = run or _default_run
-    target = store or cache_path()
-    reference = now or dt.datetime.now(dt.UTC)
     resolved = _resolve(spec)
     if resolved is None:
         return Probe(
@@ -267,11 +264,11 @@ def probe_tool(
             version=None,
             version_text=None,
             unknown_reason="not found on PATH or its candidate paths",
-            probed_at=reference,
+            probed_at=now,
         )
     key = _cache_key(resolved)
-    cache = _read_cache(target)
-    cached = _from_cache(cache.get(key), now=reference)
+    cache = _read_cache(store)
+    cached = _from_cache(cache.get(key), now=now)
     if cached is not None and cached.tool == spec.tool:
         return cached
 
@@ -292,10 +289,10 @@ def probe_tool(
         version_text=version_text.strip() or None,
         flags=flags,
         unknown_reason=None if version is not None else "version output was not a version",
-        probed_at=reference,
+        probed_at=now,
     )
-    cache[key] = _to_cache(result, now=reference)
-    _write_cache(target, cache)
+    cache[key] = _to_cache(result, now=now)
+    _write_cache(store, cache)
     return result
 
 
@@ -309,11 +306,8 @@ def decide(
     *,
     requested: str = "auto",
     force: bool = False,
-    probe: Probe | None = None,
-    run: Runner | None = None,
-    store: Path | None = None,
+    probe: Probe,
 ) -> Decision:
-    state = probe or probe_tool(spec, run=run, store=store)
     implemented = {"pty"}
     if requested not in {"auto", *implemented}:
         return Decision(
@@ -322,19 +316,19 @@ def decide(
             reasons=(f"{requested} is not implemented in this build; use --mode pty or auto",),
         )
     reasons: list[str] = []
-    if state.unknown_reason is not None:
-        reasons.append(f"probe unknown ({state.unknown_reason}); using pty")
+    if probe.unknown_reason is not None:
+        reasons.append(f"probe unknown ({probe.unknown_reason}); using pty")
     for feature in spec.features:
-        feature_state = state.state(feature)
+        feature_state = probe.state(feature)
         if feature_state == "verified":
             continue
         if feature_state == "unknown":
             continue
         if force:
-            reasons.append(f"{feature.name}: {feature_state} on {state.version_text}; forced")
+            reasons.append(f"{feature.name}: {feature_state} on {probe.version_text}; forced")
             continue
         reasons.append(
-            f"{feature.name}: {feature_state} on {state.version_text}; {feature.fallback}"
+            f"{feature.name}: {feature_state} on {probe.version_text}; {feature.fallback}"
         )
     return Decision(mode="pty", refused=False, reasons=tuple(reasons))
 

@@ -41,6 +41,7 @@ from ._common import (
     SessionGone,
     capability_report,
     capture_screen,
+    cluster_home,
     init_file,
     kill_session_after_failed_launch,
     launch_site,
@@ -351,7 +352,7 @@ def codex_command(
 def status(workspace: Path, *, mode: str = "auto", force: bool = False) -> int:
     """Print every generation recorded for the workspace."""
     return _owner_status(
-        coding_session_owner.canonical_key(workspace, tool="codex"),
+        coding_session_owner.canonical_key(workspace, tool="codex", cluster=cluster_home()),
         capability=capability_report("codex", mode=mode, force=force),
     )
 
@@ -359,7 +360,8 @@ def status(workspace: Path, *, mode: str = "auto", force: bool = False) -> int:
 def cancel(workspace: Path, generation: str) -> int:
     """Stop and terminalize exactly this generation."""
     return _cancel_generation(
-        coding_session_owner.canonical_key(workspace, tool="codex"), generation
+        coding_session_owner.canonical_key(workspace, tool="codex", cluster=cluster_home()),
+        generation,
     )
 
 

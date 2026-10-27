@@ -9,7 +9,7 @@ import pytest
 
 from base.db import Database
 from base.host.runtime_interpreter import runtime_venv
-from base.paths import workspace_dir
+from base.paths import meiva_home, workspace_dir
 from meiva.shell.session_env import SessionHost
 from meiva.shell.sessions import ShellSessions
 
@@ -45,7 +45,9 @@ def test_a_created_session_carries_its_owners_identity(
 def test_a_session_starts_where_it_is_told_and_is_listed_by_name(
     live_shell: ShellSessions, live_host: SessionHost, tmp_path: Path
 ) -> None:
-    unnamed = _create(live_shell, live_host, None, cwd=workspace_dir(live_shell.agent_id))
+    unnamed = _create(
+        live_shell, live_host, None, cwd=workspace_dir(live_shell.agent_id, home=meiva_home())
+    )
     named = _create(live_shell, live_host, "dev-server", cwd=tmp_path)
 
     assert (unnamed, named) == (0, 1)

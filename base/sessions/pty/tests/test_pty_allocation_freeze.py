@@ -4,14 +4,22 @@ import logging
 import os
 import stat
 from dataclasses import replace
+from datetime import UTC, datetime
 from pathlib import Path
 
 import pytest
 
+from base.clock import Clock, ClockConfig
+from base.clock.ids import new_uuid
+from base.clock.tests.fakes import clock_at
+from base.clock.tests.manual_timers import ManualTimers
+from base.clock.tests.seeded_rng import seeded_rng
 from base.host.atomic_io import SYSTEM_FS, AtomicWriter
+from base.native_process.os_platform import LockTimeoutError, file_lock
 from base.sessions.pty import allocation_freeze
 
 WRITER = AtomicWriter(SYSTEM_FS)
+NOW = datetime(2026, 10, 27, 9, 30, tzinfo=UTC)
 
 
 @pytest.fixture
@@ -24,20 +32,58 @@ def test_freeze_lives_in_the_home_and_records_operator_generation(home: Path) ->
     assert allocation_freeze.lock_path(home) == home / "pty-allocation.lock"
 
     frozen = allocation_freeze.freeze(
-        holder="operator-1818", reason="bounded cleanup", writer=WRITER, home=home
+        holder="operator-1818",
+        reason="bounded cleanup",
+        writer=WRITER,
+        home=home,
+        clock=clock_at(NOW),
+        rng=seeded_rng(5),
     )
 
     assert frozen.status == "frozen"
-    assert frozen.generation
+    assert frozen.generation == str(new_uuid(seeded_rng(5)))
     assert frozen.holder == "operator-1818"
     assert frozen.reason == "bounded cleanup"
-    assert frozen.created_at is not None
+    assert frozen.created_at == NOW
     assert allocation_freeze.read(home=home) == frozen
 
 
+def test_the_instant_is_read_while_the_allocation_lock_is_held(home: Path) -> None:
+    reads: list[datetime] = []
+
+    def read_under_the_lock() -> datetime:
+        with (
+            pytest.raises(LockTimeoutError),
+            file_lock(allocation_freeze.lock_path(home), timeout_s=0),
+        ):
+            pass
+        reads.append(NOW)
+        return NOW
+
+    clock = Clock(ClockConfig("UTC", "UTC", False), timers=ManualTimers(), now=read_under_the_lock)
+
+    frozen = allocation_freeze.freeze(
+        holder="operator",
+        reason="the stamp and the sessions it admits order by the lock",
+        writer=WRITER,
+        home=home,
+        clock=clock,
+        rng=seeded_rng(),
+    )
+
+    assert reads == [NOW]
+    assert frozen.created_at == NOW
+
+
 def test_resume_is_generation_scoped_and_never_clears_a_newer_owner(home: Path) -> None:
+    rng = seeded_rng(6)
     first = allocation_freeze.freeze(
-        holder="first", reason="first cleanup", writer=WRITER, home=home
+        holder="first",
+        reason="first cleanup",
+        writer=WRITER,
+        home=home,
+        clock=clock_at(NOW),
+        rng=rng,
     )
     assert first.generation is not None
 
@@ -50,7 +96,12 @@ def test_resume_is_generation_scoped_and_never_clears_a_newer_owner(home: Path) 
     assert allocation_freeze.current_generation(home=home) == first.generation
 
     second = allocation_freeze.freeze(
-        holder="second", reason="second cleanup", writer=WRITER, home=home
+        holder="second",
+        reason="second cleanup",
+        writer=WRITER,
+        home=home,
+        clock=clock_at(NOW),
+        rng=rng,
     )
     assert second.generation is not None and second.generation != first.generation
     assert not allocation_freeze.resume(first.generation, writer=WRITER, home=home)

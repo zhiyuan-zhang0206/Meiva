@@ -15,6 +15,7 @@ from base.packages.plugins.enable_config import (
     local_config_path,
     write_local,
 )
+from base.paths import meiva_home
 from base.telemetry.tests.capture.event_capture import EmittedEvents
 from base.telemetry.tests.capture.event_capture import emitted_events as emitted_events
 from cli.commands.extensions.plugins_inspect import cmd_plugins_verify
@@ -48,7 +49,7 @@ def _builtin_plugin_names() -> list[str]:
 
 
 def _plugin(name: str, plugin_py: str, **siblings: str) -> None:
-    directory = paths.plugins_dir() / name
+    directory = paths.plugins_dir(home=meiva_home()) / name
     directory.mkdir()
     (directory / "plugin.py").write_text(plugin_py)
     (directory / "meiva-plugin.json").write_text(
@@ -129,7 +130,7 @@ def test_a_plugin_using_a_deleted_framework_api_is_red_and_the_rest_still_count(
 def test_a_plugin_without_a_manifest_is_red(capsys: pytest.CaptureFixture[str]) -> None:
     _plugin("good", "LOADED = True\n")
     _plugin("bare", "LOADED = True\n")
-    (paths.plugins_dir() / "bare" / "meiva-plugin.json").unlink()
+    (paths.plugins_dir(home=meiva_home()) / "bare" / "meiva-plugin.json").unlink()
     _enable("good", "bare")
 
     assert cmd_plugins_verify(rng=seeded_rng()) == 1

@@ -95,7 +95,8 @@ Enablement flags, endpoint defaults and the read topology have their own node:
 ## Entry points
 
 - `base/telemetry/otlp/telemetry_otlp.py:OtlpBackend` — built by the root
-  with its explicit eligibility callback and owned by `ExportingEventPipeline`;
+  with its explicit eligibility callback, mirror directory and cluster home (the home its metrics
+  resource labels the cluster from) and owned by `ExportingEventPipeline`;
   no-op when the flag is off; `flush()` / `shutdown()` observe that owner. `telemetry_otlp_worker.OtlpWorker`
   owns the one writer and each partial SDK resource through teardown.
 - `base/telemetry/otlp/telemetry_otlp_exporting.py:ExportingEventPipeline` — one ordinary

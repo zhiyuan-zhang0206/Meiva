@@ -24,6 +24,7 @@ from base.db.code_version_gate import ProcessDbGate
 from base.events.live.bus import EventBus
 from base.lm.catalog import ModelCatalog
 from base.packages.plugin_providers import build_model_catalog
+from base.paths import meiva_home
 from ops.agents.tests.birth_faults import reject_audit_event
 from ops.agents.tests.test_agents_internals import insert_checkpoint, spawn_agent
 
@@ -229,7 +230,7 @@ class TestSpawnFork:
 
         assert fork_events.sync(timeout=2).status is telemetry.DrainStatus.COMPLETED
         day = datetime.now(UTC).strftime("%Y%m%d")
-        path = logs_dir() / f"events-{day}.jsonl"
+        path = logs_dir(home=meiva_home()) / f"events-{day}.jsonl"
         fork_rows: list[dict[str, Any]] = []
         if path.exists():
             for line in path.read_text(encoding="utf-8").splitlines():
@@ -286,7 +287,7 @@ class TestSpawnFork:
 
         assert fork_events.sync(timeout=2).status is telemetry.DrainStatus.COMPLETED
         day = datetime.now(UTC).strftime("%Y%m%d")
-        path = logs_dir() / f"events-{day}.jsonl"
+        path = logs_dir(home=meiva_home()) / f"events-{day}.jsonl"
         spawn_rows: list[dict[str, Any]] = []
         if path.exists():
             for line in path.read_text(encoding="utf-8").splitlines():
@@ -353,7 +354,7 @@ class TestSpawnFork:
 
         assert fork_events.sync(timeout=2).status is telemetry.DrainStatus.COMPLETED
         day = datetime.now(UTC).strftime("%Y%m%d")
-        path = logs_dir() / f"events-{day}.jsonl"
+        path = logs_dir(home=meiva_home()) / f"events-{day}.jsonl"
         fork_rows: list[dict[str, Any]] = []
         if path.exists():
             for line in path.read_text(encoding="utf-8").splitlines():

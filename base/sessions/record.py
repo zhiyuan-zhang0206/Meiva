@@ -27,19 +27,6 @@ def _is_record_dict(value: object) -> TypeGuard[dict[str, Any]]:
     return isinstance(value, dict)
 
 
-def record_path(name: str) -> Path:
-    """Where the named session's on-disk record lives —
-    ``$MEIVA_HOME/run/sessions/<name>.json``.
-
-    Public so a caller can PRE-write a record before the session process
-    exists (the update chain lands its session record before it lands its
-    pause/checkout work — P2 #2102); the real record written at spawn replaces
-    it atomically."""
-    import base.paths
-
-    return base.paths.run_dir(base.paths.meiva_home()) / "sessions" / f"{name}.json"
-
-
 @dataclass(frozen=True)
 class SessionRecord:
     """A launched background session's identity + provenance.

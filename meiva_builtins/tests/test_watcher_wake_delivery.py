@@ -21,6 +21,8 @@ from typing import Any
 import pytest
 
 import meiva
+from base.clock.tests.fakes import system_clock
+from base.clock.tests.seeded_rng import seeded_rng
 from base.paths import workspace_dir
 from meiva.tests.fixtures.gateway_wire import GatewayStub, GatewayWire
 from meiva.tests.fixtures.gateway_wire import gateway_stub as gateway_stub
@@ -281,6 +283,8 @@ def test_watch_work_canonical_need_input_wakes_on_its_first_eligible_poll(
         work_file=work,
         ttl_seconds=3600,
         writer=watch_work.AtomicWriter(watch_work.SYSTEM_FS),
+        now=system_clock().now(),
+        rng=seeded_rng(),
     )
     generation = owner.generation
     assert generation is not None
@@ -296,6 +300,7 @@ def test_watch_work_canonical_need_input_wakes_on_its_first_eligible_poll(
             generation,
             reason="test-over",
             writer=watch_work.AtomicWriter(watch_work.SYSTEM_FS),
+            now=system_clock().now(),
         )
 
     timer = threading.Timer(0.3, end_supervision)
@@ -379,7 +384,9 @@ def _exec_prefix_through(path: Path, target: str, namespace: dict[str, Any]) -> 
 @pytest.fixture
 def agent_home(sdk_environment: object, unit_home: Path) -> int:
     """The SDK root of a test home, with this process pinned as agent 1: the reference scripts
-    do a top-level `import meiva` and read only `meiva.self.AGENT_ID`."""
+    do a top-level `import meiva` and read only `meiva.self.AGENT_ID`. The context is repinned over
+    the test's home, so the Meiva home it carries is `unit_home`."""
+    pin_agent(1)
     return meiva.self.AGENT_ID
 
 
@@ -391,7 +398,7 @@ def agent_home(sdk_environment: object, unit_home: Path) -> int:
     ],
 )
 def test_lite_script_handoff_dir_uses_workspace_dir(
-    agent_home: int, filename: str, target: str, suffix: str
+    agent_home: int, unit_home: Path, filename: str, target: str, suffix: str
 ) -> None:
     """Importing a lite script only defines functions at module top level
     (unlike the full orchestrators below), so a full exec is safe here."""
@@ -402,7 +409,7 @@ def test_lite_script_handoff_dir_uses_workspace_dir(
         ),
         namespace,
     )
-    assert namespace[target] == workspace_dir(agent_home) / suffix
+    assert namespace[target] == workspace_dir(agent_home, home=unit_home) / suffix
 
 
 @pytest.mark.parametrize(
@@ -413,16 +420,18 @@ def test_lite_script_handoff_dir_uses_workspace_dir(
     ],
 )
 def test_full_orchestrator_handoff_dir_uses_workspace_dir(
-    agent_home: int, filename: str, target: str, task_var: str
+    agent_home: int, unit_home: Path, filename: str, target: str, task_var: str
 ) -> None:
     namespace: dict[str, Any] = {"__name__": f"{filename}_under_test"}
     _exec_prefix_through(_DYNAMIC_WORKFLOW_REFERENCES / filename, target, namespace)
-    assert namespace[target] == workspace_dir(agent_home) / namespace[task_var]
+    assert namespace[target] == workspace_dir(agent_home, home=unit_home) / namespace[task_var]
 
 
-def test_orchestrator_template_handoff_dir_uses_workspace_dir(agent_home: int) -> None:
+def test_orchestrator_template_handoff_dir_uses_workspace_dir(
+    agent_home: int, unit_home: Path
+) -> None:
     namespace: dict[str, Any] = {"__name__": "orchestrator_template_under_test"}
     _exec_prefix_through(
         _DYNAMIC_WORKFLOW_REFERENCES / "orchestrator_template.py", "handoff", namespace
     )
-    assert namespace["handoff"] == workspace_dir(agent_home) / "task_handoff"
+    assert namespace["handoff"] == workspace_dir(agent_home, home=unit_home) / "task_handoff"

@@ -6,10 +6,9 @@ identity can be reported; an empty result says nothing about untracked jobs.
 
 from __future__ import annotations
 
-import os
-import time
 from collections.abc import Iterable
 
+from base.clock import Timers
 from base.native_process.ownership import OwnedProcess
 from base.native_process.process_control import ProcessControl
 
@@ -30,13 +29,15 @@ def signal(
     signum: int,
     *,
     process_control: ProcessControl,
+    own_pid: int,
+    timers: Timers,
 ) -> None:
     sent: set[int] = set()
-    own_group = os.getpgrp()
+    own_group = process_control.getpgid(own_pid)
     for identity in identities:
         if not live(identity):
             continue
-        if identity.pid == os.getpid():
+        if identity.pid == own_pid:
             raise RuntimeError("PTY cleanup cannot signal its own process")
         try:
             group = process_control.getpgid(identity.pid)
@@ -56,24 +57,22 @@ def signal(
             # as if the group were not ours. That is the disappearance this module already
             # treats as normal — a birth that outlives the short wait is the loud one, and only
             # then is the refusal a permission problem worth raising.
-            if not wait((identity,), _REFUSED_SETTLE_S):
+            if not wait((identity,), _REFUSED_SETTLE_S, timers=timers):
                 continue
             raise PermissionError(
                 f"PTY signal {signum} denied for group of known PID {identity.pid}: {exc}"
             ) from exc
 
 
-def _monotonic() -> float:
-    return time.monotonic()
-
-
-def wait(identities: Iterable[OwnedProcess], timeout_s: float) -> tuple[OwnedProcess, ...]:
+def wait(
+    identities: Iterable[OwnedProcess], timeout_s: float, *, timers: Timers
+) -> tuple[OwnedProcess, ...]:
     """Poll only known identities until they exit or the bounded wait ends."""
     known = tuple(dict.fromkeys(identities))
-    deadline = _monotonic() + timeout_s
+    deadline = timers.monotonic() + timeout_s
     while True:
         remaining = tuple(identity for identity in known if live(identity))
-        left = deadline - _monotonic()
+        left = deadline - timers.monotonic()
         if not remaining or left <= 0:
             return remaining
-        time.sleep(min(0.02, left))
+        timers.sleep(min(0.02, left))

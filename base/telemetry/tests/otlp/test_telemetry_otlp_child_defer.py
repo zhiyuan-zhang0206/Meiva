@@ -70,6 +70,7 @@ def _make_backend(*, mirror_dir: Path, queue_maxsize: int = 8) -> tuple[Any, Any
         providers=(logger_provider, metric_provider),
         queue_maxsize=queue_maxsize,
         mirror_dir=mirror_dir,
+        home=mirror_dir,
     )
     return backend, log_exporter, metric_reader
 
@@ -272,7 +273,7 @@ def test_invalid_eligibility_preserves_deferred_records_and_propagates(tmp_path:
         raise error
 
     backend = telemetry_otlp.OtlpBackend(
-        export_allowed=invalid, enabled=lambda: True, mirror_dir=tmp_path
+        export_allowed=invalid, enabled=lambda: True, mirror_dir=tmp_path, home=tmp_path
     )
     backend.defer_until_exit(CHILD_DEFER)
     backend.export_batch([_event()])

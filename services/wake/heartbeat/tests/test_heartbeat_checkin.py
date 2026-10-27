@@ -22,6 +22,7 @@ from base.db.code_version_gate import ProcessDbGate
 from base.events.live.bus import EventBus
 from base.events.live.redis_listener import RedisInboundListener
 from base.lm.catalog import ModelCatalog
+from base.paths import meiva_home
 from services.wake.heartbeat.daemon import (
     backoff_deadlines,
     reconcile_checkin_outcomes,
@@ -74,7 +75,7 @@ def _mirror_nudged(agent_id: int) -> tuple[str, str, int] | None:
     from base.paths import logs_dir
 
     day = datetime.now(UTC).strftime("%Y%m%d")
-    path = logs_dir() / f"events-{day}.jsonl"
+    path = logs_dir(home=meiva_home()) / f"events-{day}.jsonl"
     if not path.exists():
         return None
     for line in reversed(path.read_text(encoding="utf-8").splitlines()):
@@ -534,7 +535,7 @@ def _mirror_event(agent_id: int, event_name: str) -> dict | None:
     from base.paths import logs_dir
 
     day = datetime.now(UTC).strftime("%Y%m%d")
-    path = logs_dir() / f"events-{day}.jsonl"
+    path = logs_dir(home=meiva_home()) / f"events-{day}.jsonl"
     if not path.exists():
         return None
     for line in reversed(path.read_text(encoding="utf-8").splitlines()):

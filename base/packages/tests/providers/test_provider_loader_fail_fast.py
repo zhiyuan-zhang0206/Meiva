@@ -12,6 +12,7 @@ from base.packages.plugin_providers import build_model_catalog
 from base.packages.tests.lm.providers.provider_plugin_support import (
     provider_plugin as provider_plugin,
 )
+from base.paths import meiva_home
 
 
 @pytest.mark.parametrize("phase", ["import", "contribute", "install", "build"])
@@ -26,7 +27,7 @@ def test_unknown_provider_error_preserves_identity_and_traceback_then_recovers(
 ) -> None:
     provider_plugin(prefix="kept-", model="kept-1", dir_name="a_kept_provider")
     provider_plugin(dir_name="z_broken_provider")
-    provider_py = paths.plugins_dir() / "z_broken_provider" / "provider.py"
+    provider_py = paths.plugins_dir(home=meiva_home()) / "z_broken_provider" / "provider.py"
     valid_source = provider_py.read_text()
     original_traceback: list[TracebackType] = []
 

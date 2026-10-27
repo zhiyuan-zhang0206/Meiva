@@ -5,7 +5,8 @@
 # These fixtures bind a context that carries that identity, the homes the test's environment names and
 # no live clients, and put the previous binding back.
 
-from collections.abc import Callable, Iterator
+from collections.abc import Callable, Generator, Iterator
+from contextlib import contextmanager
 from pathlib import Path
 from typing import Protocol
 
@@ -18,7 +19,7 @@ from base.clock import Clock
 from base.paths.home import resolve_meiva_home
 from meiva.sdk_surface import process_context
 
-__all__ = ["BindAgent", "bound_agent", "no_agent"]
+__all__ = ["BindAgent", "agent_binder", "bound_agent", "no_agent"]
 
 
 # meiva:note
@@ -33,9 +34,12 @@ class BindAgent(Protocol):
     ) -> None: ...
 
 
-@pytest.fixture
-def bound_agent() -> Iterator[BindAgent]:
-    """Bind a context acting as the given agent; the previous binding returns after the test."""
+# meiva:note
+# Bind a context acting as the given agent for the length of the block; the previous binding
+# returns after it. `bound_agent` is this as a fixture; a test package that completes the contexts
+# it binds builds its own fixture over it.
+@contextmanager
+def agent_binder() -> Generator[BindAgent]:
     previous = process_context.unbind_context()
 
     def bind(
@@ -70,6 +74,13 @@ def bound_agent() -> Iterator[BindAgent]:
         process_context.unbind_context()
         if previous is not None:
             process_context.bind_context(previous)
+
+
+@pytest.fixture
+def bound_agent() -> Iterator[BindAgent]:
+    """Bind a context acting as the given agent; the previous binding returns after the test."""
+    with agent_binder() as bind:
+        yield bind
 
 
 @pytest.fixture

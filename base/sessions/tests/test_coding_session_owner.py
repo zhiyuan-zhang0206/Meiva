@@ -3,6 +3,7 @@ from __future__ import annotations
 import datetime as dt
 import json
 import os
+import random
 import stat
 import sys
 from concurrent.futures import ThreadPoolExecutor
@@ -12,12 +13,15 @@ from typing import Any, cast
 
 import pytest
 
+from base.clock.ids import new_uuid
+from base.clock.tests.seeded_rng import seeded_rng
 from base.host.atomic_io import SYSTEM_FS, AtomicWriter
 from base.sessions import coding_session_owner as owner
 from base.sessions import coding_session_owner_record as record_codec
 
 NOW = dt.datetime(2026, 9, 2, 0, 0, tzinfo=dt.UTC)
 WRITER = AtomicWriter(SYSTEM_FS)
+RNG = seeded_rng()
 
 
 def _key(tmp_path: Path, workspace: str = "workspace") -> owner.CodingSessionKey:
@@ -35,6 +39,7 @@ def _launch(
     terminated: set[int] | None = None,
     stopped: list[str] | None = None,
     takeover: bool = False,
+    rng: random.Random = RNG,
 ) -> owner.CodingSessionOwner:
     live_names: set[str] = live if live is not None else set()
     stopped_names = stopped if stopped is not None else []
@@ -60,6 +65,7 @@ def _launch(
         ttl_seconds=3600,
         writer=WRITER,
         now=now,
+        rng=rng,
         list_sessions=_list_sessions,
         session_live=_is_live,
         terminate_session=_stop,
@@ -115,6 +121,40 @@ def _rewrite(record: owner.CodingSessionOwner, **fields: object) -> None:
     payload = cast("dict[str, object]", json.loads(path.read_text()))
     payload.update(fields)
     path.write_text(json.dumps(payload))
+
+
+def test_a_launch_draws_its_generation_and_stamps_its_time_from_what_it_is_given(
+    tmp_path: Path,
+) -> None:
+    key = _key(tmp_path)
+
+    launched = _launch(key, agent_id=41, takeover=True, rng=seeded_rng(9))
+
+    assert launched.generation == str(new_uuid(seeded_rng(9)))
+    assert launched.created_at == NOW
+    assert record_codec.host_owner_dir(key) == tmp_path / "cluster" / "coding-session-owners"
+    assert owner.state_path(key, _generation(launched)).parent.parent == (
+        record_codec.host_owner_dir(key)
+    )
+
+
+def test_a_terminal_record_carries_the_instant_it_was_given(tmp_path: Path) -> None:
+    key = _key(tmp_path)
+    launched = _launch(key, agent_id=41, takeover=True)
+    later = NOW + dt.timedelta(minutes=7)
+
+    assert owner.terminate_generation(
+        key,
+        _generation(launched),
+        reason="explicit-cancel",
+        writer=WRITER,
+        now=later,
+        list_sessions=list,
+        session_live=lambda _name: False,
+        terminate_session=lambda _name: True,
+    )
+
+    assert owner.read(key, _generation(launched)).terminalized_at == later
 
 
 def test_concurrent_launches_each_get_a_generation_of_their_own(tmp_path: Path) -> None:
@@ -333,6 +373,7 @@ def test_terminal_cleanup_is_generation_scoped_and_removes_state(tmp_path: Path)
         "7b1f6a0e-0000-4000-8000-000000000000",
         reason="explicit-cancel",
         writer=WRITER,
+        now=NOW,
         list_sessions=lambda: sorted(live),
         session_live=live.__contains__,
         terminate_session=_unexpected_stop,
@@ -364,6 +405,7 @@ def test_a_terminal_generation_is_dropped_by_the_next_launch(tmp_path: Path) -> 
         _generation(first),
         reason="collaboration-handoff",
         writer=WRITER,
+        now=NOW,
         list_sessions=lambda: sorted(live),
         session_live=live.__contains__,
         terminate_session=lambda name: live.discard(name) is None,
@@ -409,7 +451,7 @@ def test_a_corrupt_record_fails_closed_without_blocking_other_launches(tmp_path:
     assert owner.read(key, _generation(second)).status == "launching"
     with pytest.raises(owner.InvalidCodingSessionOwnerError):
         owner.terminate_generation(
-            key, _generation(corrupt), reason="explicit-cancel", writer=WRITER
+            key, _generation(corrupt), reason="explicit-cancel", writer=WRITER, now=NOW
         )
 
 

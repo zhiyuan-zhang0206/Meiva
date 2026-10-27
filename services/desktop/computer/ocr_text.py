@@ -10,7 +10,9 @@ from services.desktop.computer.errors import ComputerUseError
 from services.desktop.computer.screen import DesktopHelper, capture_screen, to_logical
 
 
-def _ocr_screen(path: Path, ocr_cache: dict[str, Any] | None) -> list[dict[str, Any]]:
+def _ocr_screen(
+    path: Path, ocr_cache: dict[str, Any] | None, *, home: Path
+) -> list[dict[str, Any]]:
     """Recognize text in a fresh capture and record it in the OCR cache.
 
     Strict where the snapshot tool is soft: find_text/click_text exist to act
@@ -20,7 +22,7 @@ def _ocr_screen(path: Path, ocr_cache: dict[str, Any] | None) -> list[dict[str, 
     it just saw without paying for a second capture.
     """
     try:
-        items = ocr_mod.ocr_image(path)
+        items = ocr_mod.ocr_image(path, home=home)
     except ocr_mod.OcrError as e:
         raise ComputerUseError(f"ocr failed: {e}") from e
     if ocr_cache is not None:
@@ -82,6 +84,7 @@ def find_text_tool(
     ocr_cache: dict[str, Any] | None,
     *,
     stamp: str,
+    home: Path,
 ) -> dict[str, Any]:
     """find_text: OCR the screen and return the boxes matching ``text``.
 
@@ -99,8 +102,8 @@ def find_text_tool(
         items: list[dict[str, Any]] = cached_items  # the screen the caller last saw
         fresh = False
     else:
-        path, _size, _scale, _pixels = capture_screen(helper, agent_id, stamp=stamp)
-        items = _ocr_screen(path, ocr_cache)
+        path, _size, _scale, _pixels = capture_screen(helper, agent_id, stamp=stamp, home=home)
+        items = _ocr_screen(path, ocr_cache, home=home)
         fresh = True
     matches = match_ocr_boxes(items, query, mode)
     return {
@@ -119,6 +122,7 @@ def click_text_tool(
     ocr_cache: dict[str, Any] | None,
     *,
     stamp: str,
+    home: Path,
 ) -> dict[str, Any]:
     """click_text: OCR -> locate -> click, one audited action.
 
@@ -134,8 +138,8 @@ def click_text_tool(
     validate_text_query(query, mode)
     if index < 0:
         raise ComputerUseError("index must be >= 0")
-    path, _size, scale, _pixels = capture_screen(helper, agent_id, stamp=stamp)
-    matches = match_ocr_boxes(_ocr_screen(path, ocr_cache), query, mode)
+    path, _size, scale, _pixels = capture_screen(helper, agent_id, stamp=stamp, home=home)
+    matches = match_ocr_boxes(_ocr_screen(path, ocr_cache, home=home), query, mode)
     if not matches:
         raise ComputerUseError(f"no on-screen text matching {query!r} (match={mode})")
     if index >= len(matches):

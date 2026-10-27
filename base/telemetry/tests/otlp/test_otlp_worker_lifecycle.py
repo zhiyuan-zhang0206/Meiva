@@ -45,6 +45,7 @@ def _backend(
         providers=(resolved_logs, resolved_metrics),
         queue_maxsize=queue_maxsize,
         mirror_dir=mirror_dir,
+        home=mirror_dir,
     )
     return backend, resolved_logs, resolved_metrics
 
@@ -187,6 +188,7 @@ def test_failed_sdk_build_keeps_partial_resources_until_owned_cleanup(tmp_path: 
         enabled=lambda: True,
         providers=(logs, metrics),
         mirror_dir=tmp_path,
+        home=tmp_path,
     )
     try:
         assert backend._ensure() is False
@@ -440,6 +442,7 @@ def test_failed_teardown_owner_is_not_overwritten_at_retry_deadline(tmp_path: Pa
         retry_interval_s=0.05,
         providers=(logs, metrics),
         mirror_dir=tmp_path,
+        home=tmp_path,
     )
     assert backend._ensure() is False
     worker = backend._worker
@@ -484,7 +487,7 @@ def test_empty_exporting_pipeline_stops_without_reading_identity(tmp_path: Path)
 
     pipeline = telemetry_otlp_exporting.ExportingEventPipeline(
         writer=lambda _events, _exporter: None,
-        exporter=default_exporter(export_allowed=reject, mirror_dir=tmp_path),
+        exporter=default_exporter(export_allowed=reject, mirror_dir=tmp_path, home=tmp_path),
     )
     assert pipeline.stop(timeout=1).status is DrainStatus.COMPLETED
     assert pipeline.stopped
@@ -498,7 +501,7 @@ def test_stop_refuses_non_finite_and_negative_timeout(tmp_path: Path) -> None:
 
     pipeline = telemetry_otlp_exporting.ExportingEventPipeline(
         writer=lambda _events, _exporter: None,
-        exporter=default_exporter(export_allowed=reject, mirror_dir=tmp_path),
+        exporter=default_exporter(export_allowed=reject, mirror_dir=tmp_path, home=tmp_path),
     )
     for bad in (float("nan"), -1.0):
         with pytest.raises(ValueError, match="finite and non-negative"):
@@ -600,7 +603,8 @@ def test_zero_timeout_stage_one_leaves_the_exporter_untouched(tmp_path: Path) ->
         assert release_writer.wait(5)
 
     pipeline = telemetry_otlp_exporting.ExportingEventPipeline(
-        writer=write, exporter=default_exporter(export_allowed=lambda: True, mirror_dir=tmp_path)
+        writer=write,
+        exporter=default_exporter(export_allowed=lambda: True, mirror_dir=tmp_path, home=tmp_path),
     )
     backend = pipeline._exporter
     pipeline.enqueue(otlp_test_event())
@@ -650,7 +654,8 @@ def test_stop_from_the_writer_thread_is_refused(tmp_path: Path) -> None:
         assert "event drain cannot join itself" in str(raised.value)
 
     pipeline = telemetry_otlp_exporting.ExportingEventPipeline(
-        writer=write, exporter=default_exporter(export_allowed=lambda: True, mirror_dir=tmp_path)
+        writer=write,
+        exporter=default_exporter(export_allowed=lambda: True, mirror_dir=tmp_path, home=tmp_path),
     )
     pipeline.enqueue(otlp_test_event())
     assert pipeline.stop(timeout=2).status is DrainStatus.COMPLETED

@@ -22,7 +22,7 @@ from base.clock.tests.manual_timers import ManualTimers
 from base.db import Database
 from base.db.code_version_gate import ProcessDbGate
 from base.host.permissions_helper.client import UserAbortError
-from base.paths import logs_dir
+from base.paths import meiva_home
 
 from .. import ocr_text as ocr_text_mod
 from ..errors import ComputerUseError
@@ -37,6 +37,7 @@ def computer_daemon(
     database_gate: ProcessDbGate,
     helper: DesktopHelper | None = None,
     clock: Clock | None = None,
+    home: Path | None = None,
     **config: Any,
 ) -> ComputerMcpDaemon:
     return ComputerMcpDaemon(
@@ -45,6 +46,7 @@ def computer_daemon(
         sock="/nonexistent-test.sock",
         helper=helper if helper is not None else FakeHelper(),
         clock=clock if clock is not None else system_clock(),
+        home=meiva_home() if home is None else home,
     )
 
 
@@ -295,16 +297,20 @@ async def test_snapshot_file_name_carries_the_daemon_clocks_stamp(
     assert Path(second["path"]).name == "agent-7-20260304T050608123456.png"
 
 
+# meiva:note
+# The captures land under the home the daemon was handed, not the process's own.
 async def test_snapshot_returns_path_and_geometry(
     fake_helper: FakeHelper,
     audit_log: list,
     monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
     *,
     database_gate: ProcessDbGate,
 ) -> None:
-    d = computer_daemon(database_gate=database_gate, helper=fake_helper)
+    daemon_home = tmp_path / "daemon-home"
+    d = computer_daemon(database_gate=database_gate, helper=fake_helper, home=daemon_home)
     result = await ok_result(d, "snapshot", {"include_ax": True})
-    assert Path(result["path"]).parent == logs_dir() / "computer" / "snapshots"
+    assert Path(result["path"]).parent == daemon_home / "logs" / "computer" / "snapshots"
     assert Path(result["path"]).name.startswith("agent-")
     assert result["screen"] == {"width": 1512.0, "height": 982.0, "scale": 2.0}
     assert result["pixels"] == {"width": 3024, "height": 1964}

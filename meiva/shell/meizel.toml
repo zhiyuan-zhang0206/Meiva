@@ -19,4 +19,3 @@ exports = ["background.py", "background_plan.py", "coding_tools", "log_ring.py",
 
 [debt.ambient-read]
 "sessions.py#environ base.host.env.registry.process_environment" = 1
-"sessions.py#home base.paths.workspace_dir" = 2

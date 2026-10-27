@@ -169,7 +169,11 @@ def _status(key: coding_session_owner.CodingSessionKey) -> int:
 
 def _cancel(key: coding_session_owner.CodingSessionKey, generation: str) -> int:
     if not coding_session_owner.terminate_generation(
-        key, generation, reason="explicit-cancel", writer=AtomicWriter(SYSTEM_FS)
+        key,
+        generation,
+        reason="explicit-cancel",
+        writer=AtomicWriter(SYSTEM_FS),
+        now=meiva.context.require_clock().now(),
     ):
         print(f"cancel refused: no generation {generation} is recorded here", file=sys.stderr)
         return 1
@@ -188,6 +192,8 @@ def _new_generation(
         work_file=None,
         ttl_seconds=ttl_seconds,
         writer=AtomicWriter(SYSTEM_FS),
+        now=meiva.context.require_clock().now(),
+        rng=meiva.context.require_rng(),
         owner_terminated=_owner_terminated,
     )
 
@@ -196,7 +202,9 @@ def _launch(workspace: Path, prompt: str, ttl_seconds: float) -> int:
     node, dsh = _executables()
     if not _PLUGIN.is_file():
         raise RuntimeError(f"the dsh relay plugin is missing: {_PLUGIN}")
-    key = coding_session_owner.canonical_key(workspace, tool="dsh")
+    key = coding_session_owner.canonical_key(
+        workspace, tool="dsh", cluster=meiva.context.require_meiva_home()
+    )
     owner = _new_generation(key, ttl_seconds)
     if (
         owner.generation is None
@@ -234,7 +242,11 @@ def _launch(workspace: Path, prompt: str, ttl_seconds: float) -> int:
                 print(f"could not reclaim shell session {sid}: {kill_exc!r}", file=sys.stderr)
         try:
             coding_session_owner.terminate_generation(
-                key, generation, reason="launch-failed", writer=AtomicWriter(SYSTEM_FS)
+                key,
+                generation,
+                reason="launch-failed",
+                writer=AtomicWriter(SYSTEM_FS),
+                now=meiva.context.require_clock().now(),
             )
         except Exception as term_exc:
             print(f"could not roll back generation {generation}: {term_exc!r}", file=sys.stderr)
@@ -277,7 +289,9 @@ def main(argv: list[str]) -> int:
         if args.prompt is not None:
             parser.error("--prompt requires a new launch")
         key = coding_session_owner.canonical_key(
-            Path(args.workspace).expanduser().resolve(), tool="dsh"
+            Path(args.workspace).expanduser().resolve(),
+            tool="dsh",
+            cluster=meiva.context.require_meiva_home(),
         )
         return _status(key) if args.status else _cancel(key, args.cancel_generation)
     if args.prompt is None or not args.prompt.strip():
