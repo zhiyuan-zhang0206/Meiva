@@ -28,7 +28,7 @@ from ._result import (
 
 # meiva:note
 # What the parent process looks like at the moment it spawns a child. The composition root
-# reads these once (`process.read_parent_facts`); the launch plan and the editable-install guard
+# reads these once (`daemon.read_parent_facts`); the launch plan and the editable-install guard
 # decide from the values.
 @dataclass(frozen=True)
 class ParentFacts:

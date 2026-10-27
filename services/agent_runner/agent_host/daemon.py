@@ -58,6 +58,7 @@ from langgraph.checkpoint.postgres.aio import AsyncPostgresSaver
 from psycopg_pool import AsyncConnectionPool
 from pydantic import BaseModel
 
+from agent.graph.exec.process import ParentFacts
 from agent.llm import execute_code
 from agent.ownership.hosted import settle_running_rows_at_start
 from base.agents.context.clients import ClientSet
@@ -71,6 +72,7 @@ from base.daemon.shutdown import cancel_and_drain, install_graceful_shutdown
 from base.db import Database
 from base.db.code_version_gate import ProcessDbGate
 from base.db.config import db_config_from_boot
+from base.deploy.release import editable_install
 from base.deploy.timing import assert_clock_lattice, clock_values
 from base.events.live.bus import EventBus, EventBusConfig
 from base.host.exit_codes import HELPER_CHAIN_BROKEN_EXIT_CODE
@@ -453,6 +455,21 @@ def _new_rng() -> random.Random:
     return random.Random()  # noqa: S311
 
 
+# meiva:note
+# What this process looks like at the moment it spawns an exec child: the environment the child
+# inherits, its working directory, the interpreter it re-executes, the checkout that interpreter
+# belongs to and the one extra checkout its editable install may name. The host reads it once at
+# boot and hands it to `build_graph`, which gives it to the exec process.
+def read_parent_facts() -> ParentFacts:
+    return ParentFacts(
+        environ=dict(os.environ),
+        cwd=Path.cwd().resolve(),
+        executable=sys.executable,
+        source_root=editable_install.current_interpreter_source_root(),
+        editable_roots=(Path.home() / "Meiva",),
+    )
+
+
 async def run(
     *,
     config: ConfigBoot,
@@ -473,7 +490,6 @@ async def run(
     instance_lock = take_instance_lock(home)
     _claim_pidfile()
     from agent.graph import build_graph  # pyright: ignore[reportUnknownVariableType]
-    from agent.graph.exec.parent_facts import read_parent_facts
     from agent.process_boot import init_process_scope, land_cluster_extensions, process_trace_config
     from base.telemetry.otlp.trace_readiness import PROCESS_RECORDING
 

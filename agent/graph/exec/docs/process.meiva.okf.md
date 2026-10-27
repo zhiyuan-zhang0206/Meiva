@@ -25,7 +25,7 @@ are the process's `ParentFacts` and the generator the envelope identities are dr
 The production adapter delegates to the existing subprocess backend. It is a frozen
 value holding the `ParentFacts` of this process (environment, cwd, interpreter,
 checkout, editable roots), which the agent host's root reads once with
-`parent_facts.read_parent_facts` and passes to `build_graph`, and the `random.Random` it draws
+`services.agent_runner.agent_host.daemon.read_parent_facts` and passes to `build_graph`, and the `random.Random` it draws
 each call's request and result envelope identities from (`req-<uuid>.json`,
 `res-<uuid>.json`; the root builds a cryptographically secure one, a test a seeded one).
 Before it writes a request, `run_in_subprocess` prunes the agent's stale result files
@@ -39,7 +39,7 @@ back to spawning `agent.execution.child` directly. Both routes converge on the s
 result-envelope decode, `result_from_payload` mapping, and request/result file
 cleanup. A test that must change what the child inherits
 constructs the adapter with its own `ParentFacts` (a changed copy of
-`read_parent_facts()`) or hands one to the backend; none subclasses the adapter or
+`live_parent_facts()` from `tests/process_inputs.py`) or hands one to the backend; none subclasses the adapter or
 patches the environment. Graph tests can supply scripted
 sum/envelope outcomes without replacing interruption, payload validation, elapsed
 measurement or reducer commits. A plugin's base messages channel still requires

@@ -27,8 +27,8 @@ from psycopg_pool import AsyncConnectionPool
 
 from agent.graph import LlmLedger, exec_node, llm_node
 from agent.graph.exec.output import overflow_dir
-from agent.graph.exec.parent_facts import read_parent_facts
 from agent.graph.exec.process import SubprocessExecProcess
+from agent.graph.exec.tests.process_inputs import live_parent_facts
 from agent.state import AgentState
 from base.agents.context import MeivaContext
 from base.agents.context.identity import AgentIdentity
@@ -477,7 +477,7 @@ async def test_exec_node_publishes_exec_start_and_output(
             database_gate=database_gate,
         ),
         config,
-        process=SubprocessExecProcess(read_parent_facts(), rng=_rng()),
+        process=SubprocessExecProcess(live_parent_facts(), rng=_rng()),
     )
 
     events = await live_events.typed()
@@ -509,7 +509,7 @@ async def test_exec_node_output_uses_wrap_code_output_envelope(
         state,
         _make_runtime(hosted_resources=hosted_resources, database_gate=database_gate),
         config,
-        process=SubprocessExecProcess(read_parent_facts(), rng=_rng()),
+        process=SubprocessExecProcess(live_parent_facts(), rng=_rng()),
     )
 
     assert isinstance(result, Command)
@@ -554,7 +554,7 @@ async def test_exec_node_protects_archives_referenced_by_its_current_state(
         ),
         runtime,
         config,
-        process=SubprocessExecProcess(read_parent_facts(), rng=_rng()),
+        process=SubprocessExecProcess(live_parent_facts(), rng=_rng()),
     )
     prior_output = first.update["messages"][0]
     directory = overflow_dir(7, home=resolve_meiva_home())
@@ -567,7 +567,7 @@ async def test_exec_node_protects_archives_referenced_by_its_current_state(
         halted=False,
     )
     result = await exec_node(
-        state, runtime, config, process=SubprocessExecProcess(read_parent_facts(), rng=_rng())
+        state, runtime, config, process=SubprocessExecProcess(live_parent_facts(), rng=_rng())
     )
 
     assert new_body in result.update["messages"][0].content  # pyright: ignore[reportUnknownMemberType]

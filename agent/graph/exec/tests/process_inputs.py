@@ -1,6 +1,9 @@
 import asyncio
+import os
+import sys
 from collections.abc import Awaitable, Sequence
 from dataclasses import dataclass, replace
+from pathlib import Path
 from typing import Any
 
 from langgraph.runtime import Runtime
@@ -9,13 +12,13 @@ from psycopg_pool import AsyncConnectionPool
 from agent.execution.protocol import ResultPayload
 from agent.graph.exec._child_boundary import ParentFacts
 from agent.graph.exec.node import ExecDone, ExecOutputChunkPublisher, ExecResult
-from agent.graph.exec.parent_facts import read_parent_facts
 from base.agents.context import MeivaContext
 from base.clock import Clock
 from base.clock.tests.seeded_rng import seeded_rng
 from base.config.tests.configuration import defaults
 from base.db import Database
 from base.db.code_version_gate import ProcessDbGate
+from base.deploy.release import editable_install
 from base.events.live.bus import EventBus
 from base.events.live.publisher import AgentEventPublisher
 from base.events.live.tests.live_capture import idle_publisher
@@ -79,10 +82,25 @@ class ReportingExecProcess(ScriptedExecProcess):
 
 
 # meiva:note
+# This process as a spawning parent, read the way the agent host reads itself at boot
+# (`services.agent_runner.agent_host.daemon.read_parent_facts`): the live environment, the working
+# directory, the interpreter, the checkout that interpreter belongs to and the extra checkout its
+# editable install may name.
+def live_parent_facts() -> ParentFacts:
+    return ParentFacts(
+        environ=dict(os.environ),
+        cwd=Path.cwd().resolve(),
+        executable=sys.executable,
+        source_root=editable_install.current_interpreter_source_root(),
+        editable_roots=(Path.home() / "Meiva",),
+    )
+
+
+# meiva:note
 # This process as a spawning parent, minus the editable-install guard: whether the machine's
 # checkout records are healthy is the guard's own tests' subject, not a real child's.
 def real_parent(**changes: Any) -> ParentFacts:
-    return replace(read_parent_facts(), **{"source_root": None, **changes})
+    return replace(live_parent_facts(), **{"source_root": None, **changes})
 
 
 # meiva:note

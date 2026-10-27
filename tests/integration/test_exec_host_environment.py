@@ -18,8 +18,8 @@ from typing import Literal, assert_never
 import pytest
 
 from agent.execution.protocol import ResultPayload
-from agent.graph.exec.parent_facts import read_parent_facts
 from agent.graph.exec.process import ExecOutputChunkPublisher, ExecResult, SubprocessExecProcess
+from agent.graph.exec.tests.process_inputs import live_parent_facts
 from base.config.tests.configuration import defaults
 from base.events.live.tests.live_capture import idle_publisher
 from base.host.env.agent_env import AGENT_BIRTH_CONFIG_ENV, AGENT_CONFIG_OVERLAY_ENV
@@ -111,7 +111,7 @@ async def test_socket_and_direct_children_observe_the_same_checkout_environment(
     location: Location,
     config_overlay: dict[str, object],
 ) -> None:
-    parent = read_parent_facts()
+    parent = live_parent_facts()
     source_root = parent.source_root
     assert source_root is not None
     context = replace(exec_context(424242), agent=AgentSlices.resolve(default_reader=defaults()))

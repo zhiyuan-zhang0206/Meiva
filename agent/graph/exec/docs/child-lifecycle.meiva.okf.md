@@ -35,7 +35,7 @@ after merging the caller environment and preserving its own TCC helper identity.
 ## Entry Points
 
 - `agent/graph/exec/_subprocess.py` — `run_in_subprocess`, the spawn / poll / cleanup driver
-- `agent/graph/exec/_child_boundary.py` — `ParentFacts`, `plan_child_launch` and the pure mapping of the child's outcome onto `ExecResult`; `agent/graph/exec/parent_facts.py` — `read_parent_facts`; `agent/graph/exec/_subprocess.py` — `read_result_envelope`, the shell that reads the envelope file
+- `agent/graph/exec/_child_boundary.py` — `ParentFacts`, `plan_child_launch` and the pure mapping of the child's outcome onto `ExecResult`; `agent/graph/exec/_subprocess.py` — `read_result_envelope`, the shell that reads the envelope file
 - `agent/graph/exec/_guard.py`, `agent/graph/exec/_poll.py` — the editable-install refusal text and the poll-beat plan
 
 Parent: [[agent/graph/exec/docs/exec.meiva.okf.md|Tool Execution]].

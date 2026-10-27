@@ -12,8 +12,8 @@ from langgraph.runtime import Runtime
 from agent.graph.exec._result import ExecDone
 from agent.graph.exec._stream import ExecOutputChunkPublisher
 from agent.graph.exec.node import exec_node, run_agent_code
-from agent.graph.exec.parent_facts import read_parent_facts
 from agent.graph.exec.process import SubprocessExecProcess
+from agent.graph.exec.tests.process_inputs import live_parent_facts
 from agent.state import AgentState
 from base.agents.context import MeivaContext
 from base.agents.context.identity import AgentIdentity
@@ -72,7 +72,7 @@ def _plugin(unit_home: Path) -> None:
 # The parent's environment carries another agent's pins, as an ambient process would: a child
 # may only see the explicit maps of the turn it was launched for.
 def _ambient_pins_process() -> SubprocessExecProcess:
-    facts = read_parent_facts()
+    facts = live_parent_facts()
     ambient = {
         AGENT_CONFIG_OVERLAY_ENV: json.dumps({"llm_model": "deepseek-v4-pro"}),
         AGENT_BIRTH_CONFIG_ENV: json.dumps(
@@ -189,7 +189,7 @@ async def _execution_message(context: MeivaContext, code: str) -> ToolMessage:
         state,
         Runtime(context=context),
         {"configurable": {"thread_id": str(agent_id)}},
-        process=SubprocessExecProcess(read_parent_facts(), rng=_rng()),
+        process=SubprocessExecProcess(live_parent_facts(), rng=_rng()),
     )
     update = cast(dict[str, Any], command.update)
     assert update["halted"] is False

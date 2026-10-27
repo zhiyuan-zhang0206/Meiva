@@ -114,7 +114,6 @@ bus = [
 # stale. What belongs here, and what is not followed:
 # meizel/docs/checker/ambient-readers.meiva.okf.md. Changing the list is a rule change.
 [ambient-readers.environ]
-"agent.graph.exec.parent_facts.read_parent_facts()" = "copies os.environ and reads the working and home directories"
 "base.host.env.registry.process_environment()" = "returns the live os.environ"
 "base.host.git.gitenv.git_env()" = "copies the live os.environ when no mapping is passed"
 "base.host.system.probes.display_available()" = "reads DISPLAY and WAYLAND_DISPLAY from os.environ"

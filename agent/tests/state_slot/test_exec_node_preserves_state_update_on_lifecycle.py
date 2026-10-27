@@ -11,8 +11,8 @@ from langchain_core.messages import HumanMessage
 from langgraph.types import Overwrite
 
 from agent.graph.exec.node import exec_node_impl
-from agent.graph.exec.parent_facts import read_parent_facts
 from agent.graph.exec.process import SubprocessExecProcess
+from agent.graph.exec.tests.process_inputs import live_parent_facts
 from agent.state import AttachEntry, AttachState, BaseAgentState
 from agent.tests.test_state_slot import (
     ai_message_with_code,
@@ -60,7 +60,7 @@ async def test_exec_node_preserves_state_update_on_lifecycle(*, database_gate: P
         cast(BaseAgentState, state),
         runtime,
         config,
-        process=SubprocessExecProcess(read_parent_facts(), rng=_rng()),
+        process=SubprocessExecProcess(live_parent_facts(), rng=_rng()),
     )
 
     update = cast(dict, cmd.update)
@@ -80,7 +80,7 @@ async def test_exec_node_commits_security_finding_to_graph_state(*, database_gat
     runtime, config = make_runtime_and_config(AsyncMock(), database_gate=database_gate)
 
     cmd = await exec_node_impl(
-        state, runtime, config, process=SubprocessExecProcess(read_parent_facts(), rng=_rng())
+        state, runtime, config, process=SubprocessExecProcess(live_parent_facts(), rng=_rng())
     )
 
     update = cast(dict[str, Any], cmd.update)
@@ -109,7 +109,7 @@ async def test_exec_node_keeps_plugin_notes_after_toolmessage_beside_findings(
     runtime, config = make_runtime_and_config(AsyncMock(), database_gate=database_gate)
 
     cmd = await exec_node_impl(
-        state, runtime, config, process=SubprocessExecProcess(read_parent_facts(), rng=_rng())
+        state, runtime, config, process=SubprocessExecProcess(live_parent_facts(), rng=_rng())
     )
 
     update = cast(dict[str, Any], cmd.update)
@@ -147,7 +147,7 @@ async def test_exec_node_checkpoints_child_attachment(
     )
 
     cmd = await exec_node_impl(
-        state, runtime, config, process=SubprocessExecProcess(read_parent_facts(), rng=_rng())
+        state, runtime, config, process=SubprocessExecProcess(live_parent_facts(), rng=_rng())
     )
 
     update = cast(dict[str, Any], cmd.update)
@@ -202,7 +202,7 @@ async def test_exec_node_compact_path_drops_notes_and_findings(
     )
 
     cmd = await exec_node_impl(
-        state, runtime, config, process=SubprocessExecProcess(read_parent_facts(), rng=_rng())
+        state, runtime, config, process=SubprocessExecProcess(live_parent_facts(), rng=_rng())
     )
 
     update = cast(dict, cmd.update)
