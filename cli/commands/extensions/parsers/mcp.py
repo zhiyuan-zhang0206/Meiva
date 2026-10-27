@@ -96,9 +96,12 @@ def _h_memory_refresh(args: argparse.Namespace) -> int:
 
 
 def h_memory_init(args: argparse.Namespace) -> int:
-    from cli.commands.extensions.memory import cmd_memory_init
+    from cli.commands.extensions.memory import cmd_memory_init, scaffold_facts
 
-    return cmd_memory_init(machine=args.runtime.machine)
+    runtime = args.runtime
+    return cmd_memory_init(
+        machine=runtime.machine, facts=scaffold_facts(runtime.config, home=runtime.home)
+    )
 
 
 def h_memory_search(args: argparse.Namespace) -> int:
