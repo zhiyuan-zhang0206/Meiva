@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import argparse
 import sys
+from datetime import UTC, datetime
 from pathlib import Path
 
 from meiva.shell.coding_tools import (
@@ -115,9 +116,9 @@ def main(argv: list[str]) -> int:
     provenance = None
     prompt = None
     if args.prompt is not None:
-        prompt = f"{require_lineage(parser, args, takeover=True)}\n\n{args.prompt}"
+        prompt = f"{require_lineage(parser, args, now=datetime.now(UTC), takeover=True)}\n\n{args.prompt}"
     elif args.resume is None:
-        provenance = require_lineage(parser, args)
+        provenance = require_lineage(parser, args, now=datetime.now(UTC))
     refusal = announce_capability("claude", mode=args.mode, force=args.force_mode)
     if refusal:
         return refusal

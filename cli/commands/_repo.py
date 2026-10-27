@@ -16,7 +16,7 @@ from collections.abc import Mapping
 from pathlib import Path
 from typing import NamedTuple
 
-from base.clock import SYSTEM_TIMERS
+from base.clock import Timers
 from base.cluster.machine import MachineIdentityReader, MachineRoles
 from base.db import Database
 from base.deploy.progress_timeout import GATEWAY_PREFLIGHT_BUDGET_S
@@ -223,6 +223,7 @@ _PREFLIGHT_RETRY_INTERVAL_S = 5.0
 def probe_gateway_or_die(
     gateway_url: str,
     *,
+    timers: Timers,
     budget_s: float = GATEWAY_PREFLIGHT_BUDGET_S,
     retry_interval_s: float = _PREFLIGHT_RETRY_INTERVAL_S,
 ) -> int:
@@ -246,7 +247,7 @@ def probe_gateway_or_die(
     A non-200 the gateway *chose* to send (401/403/404) is terminal on the first dial
     as before: a credential or route mismatch is not a timing problem.
     """
-    deadline = SYSTEM_TIMERS.monotonic() + budget_s
+    deadline = timers.monotonic() + budget_s
     attempt = 0
     while True:
         attempt += 1
@@ -260,7 +261,7 @@ def probe_gateway_or_die(
                 file=sys.stderr,
             )
             return 1
-        remaining = deadline - SYSTEM_TIMERS.monotonic()
+        remaining = deadline - timers.monotonic()
         if remaining <= 0:
             if probe.status is None:
                 print(
@@ -285,7 +286,7 @@ def probe_gateway_or_die(
             f"retrying in {wait_s:.0f}s…",
             file=sys.stderr,
         )
-        SYSTEM_TIMERS.sleep(wait_s)
+        timers.sleep(wait_s)
 
 
 def register_machine_or_die(
@@ -390,7 +391,7 @@ def preflight_probes(db: Database, *, command: CommandRuntime) -> int:
 
     if "agent-runner" in roles and "gateway" not in roles:
         print("\n→ preflight: probe gateway")
-        rc = probe_gateway_or_die(resolved["gateway_url"])
+        rc = probe_gateway_or_die(resolved["gateway_url"], timers=command.timers)
         if rc != 0:
             print("  ✗ preflight failed: gateway unreachable — host still serving", file=sys.stderr)
             return rc

@@ -18,7 +18,8 @@ That import-path bootstrap runs only at the standalone `__main__` entry;
 loading the installer as a library leaves the caller's import path intact.
 
 `cli/_python_index.py` reads one host index from uv settings or the pip settings
-uv does not consume. The installer can pass the existing unit `mirror.env`; real
+uv does not consume; the user's home and the platform are values the process entry
+(`python_install.main()`) gives it, not reads of its own. The installer can pass the existing unit `mirror.env`; real
 environment values win. `base/host/env/dotenv_boot.py` preserves the same precedence
 across both uv single-index aliases when a native command loads the unit files
 before calling the installer. Additional indexes remain separate and are rejected

@@ -2,10 +2,9 @@ from __future__ import annotations
 
 import json
 from dataclasses import dataclass
+from datetime import datetime
 from pathlib import Path
 from typing import TypeGuard
-
-from base.clock import SYSTEM_TIMERS, Clock, ClockConfig
 
 # meiva:note
 # A converge that aborts leaves this marker in the home it was converging. It
@@ -49,12 +48,9 @@ def read_incomplete(meiva_home: Path) -> IncompleteConverge | None:
         return None
 
 
-def record_incomplete(meiva_home: Path, *, step: str, error: str) -> None:
+def record_incomplete(meiva_home: Path, *, step: str, error: str, now: datetime) -> None:
     path = state_path(meiva_home)
     path.parent.mkdir(parents=True, exist_ok=True)
-    now = Clock(
-        ClockConfig("UTC", None, message_timestamp_weekday=False), timers=SYSTEM_TIMERS
-    ).now()
     payload = {
         "at": now.isoformat(timespec="seconds"),
         "step": step,

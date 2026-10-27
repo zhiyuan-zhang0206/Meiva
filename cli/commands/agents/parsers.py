@@ -69,6 +69,7 @@ def h_agents_send(args: argparse.Namespace) -> int:
             args.source,
             args.tail_file,
             completion=args.completion,
+            idempotency_key=args.runtime.new_id(),
         )
     except ProvenanceError as exc:
         print(f"meiva: {exc}", file=sys.stderr)
@@ -173,6 +174,7 @@ def _h_notices_resolve(args: argparse.Namespace) -> int:
         agent_id=args.agent,
         action=args.action,
         reply=args.reply,
+        idempotency_key=args.runtime.new_id(),
     )
 
 
@@ -186,6 +188,7 @@ def _h_notices_clear(args: argparse.Namespace) -> int:
         force=args.force,
         stale=args.stale,
         stdin=args.runtime.terminal.stdin,
+        rng=args.runtime.rng,
     )
 
 

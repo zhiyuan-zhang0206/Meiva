@@ -16,6 +16,7 @@ Covered:
 
 import sys
 from collections.abc import Iterator, Mapping
+from datetime import UTC, datetime
 from types import ModuleType
 from typing import Any
 from unittest.mock import MagicMock
@@ -25,9 +26,11 @@ from langchain_core.messages import AIMessage, AnyMessage, HumanMessage
 from langchain_core.runnables import RunnableConfig
 from langgraph.runtime import Runtime
 
-from agent.messages import NoteTag
+from agent.messages import NoteTag, read_meiva_kwargs
 from agent.state import build_agent_state
 from base.agents.context import MeivaContext
+from base.clock import Clock, ClockConfig
+from base.clock.tests.manual_timers import ManualTimers
 from base.clock.tests.seeded_rng import seeded_rng
 from base.config.tests.configuration import defaults
 from base.db import Database
@@ -58,6 +61,14 @@ def _state(messages: list[AnyMessage]):
     return build_agent_state(EMPTY)(messages=messages)
 
 
+_NOW = datetime(2026, 3, 4, 5, 6, 7, tzinfo=UTC)
+
+
+def _clock() -> Clock:
+    timers = ManualTimers(wall_start=_NOW)
+    return Clock(ClockConfig("UTC", "UTC", False), timers=timers, now=timers.now)
+
+
 def _runtime(
     catalog: ModelCatalog,
     database_gate: ProcessDbGate,
@@ -75,6 +86,7 @@ def _runtime(
         catalog=catalog,
         db=Database.from_settings(gate=database_gate),
         bus=EventBus.from_settings(rng=seeded_rng()),
+        clock_factory=_clock,
     )
     return Runtime(context=ctx)
 
@@ -102,6 +114,7 @@ async def test_injects_nudge_when_tail_is_reasoning_only(
     note = msgs[0]
     assert note.additional_kwargs["meiva_msg_type"] == "system_note"  # pyright: ignore[reportUnknownMemberType]
     assert note.additional_kwargs["meiva_note_tag"] == NoteTag.SILENT_IDLE_CONTINUE  # pyright: ignore[reportUnknownMemberType]
+    assert read_meiva_kwargs(note).get("meiva_created_at") == _NOW.isoformat()
 
 
 async def test_noop_when_tail_has_text(
