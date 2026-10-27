@@ -13,7 +13,8 @@ from cli.commands.data_plane import cluster_instance
 def test_every_host_state_path_follows_meiva_home(unit_home: Path) -> None:
     assert runtime_binaries.runtime_root(meiva_home()) == unit_home / "runtime"
     assert cluster_instance.pg_template_dir(unit_home) == unit_home / "pg-template-17"
-    assert coding_session_owner_record.host_owner_dir() == unit_home / "coding-session-owners"
+    key = coding_session_owner_record.canonical_key(unit_home, tool="codex", cluster=unit_home)
+    assert coding_session_owner_record.host_owner_dir(key) == unit_home / "coding-session-owners"
     assert allocation_freeze.state_path(meiva_home()) == unit_home / "pty-allocation-freeze.json"
     assert allocation_freeze.lock_path(meiva_home()) == unit_home / "pty-allocation.lock"
 

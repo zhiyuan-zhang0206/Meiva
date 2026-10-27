@@ -7,6 +7,8 @@ import pytest
 from psycopg_pool import ConnectionPool
 
 from base.agents.tests.units import spawn_agent
+from base.clock.tests.fakes import system_clock
+from base.clock.tests.seeded_rng import seeded_rng
 from base.cluster.machine import MachineIdentityReader
 from base.config.service_read import ConfigAuthority
 from base.db.code_version_gate import ProcessDbGate
@@ -160,6 +162,8 @@ def test_a_refused_creation_still_closes_the_page(
         reason="page admission test",
         writer=AtomicWriter(SYSTEM_FS),
         home=meiva_home(),
+        clock=system_clock(),
+        rng=seeded_rng(),
     )
 
     try:

@@ -14,7 +14,7 @@ import logging
 import os
 import signal
 import sys
-from collections.abc import Callable, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from contextlib import suppress
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -70,18 +70,20 @@ class HelperChainWatch:
         stop: asyncio.Event,
         config: HelperChainConfig,
         root_pid: int,
+        environ: Mapping[str, str],
     ) -> None:
         self._retire = retire
         self._stop = stop
         self._config = config
         self._root_pid = root_pid
+        self._environ = environ
 
     async def run(self) -> None:
         broken_rounds = 0
         while not self._stop.is_set():
             reading = observe_round(
                 broken_rounds=broken_rounds,
-                intact=parent_chain_intact(self._root_pid),
+                intact=parent_chain_intact(self._root_pid, environ=self._environ),
                 confirm_rounds=self._config.confirm_rounds,
             )
             broken_rounds = reading.broken_rounds
@@ -89,7 +91,7 @@ class HelperChainWatch:
                 self._retire(
                     evidence_line(
                         root_pid=self._root_pid,
-                        marker=helper_marker_pid(),
+                        marker=helper_marker_pid(self._environ),
                         broken_rounds=broken_rounds,
                     )
                 )
@@ -261,6 +263,7 @@ async def run(options: DaemonOptions) -> int:
                     stop=stop,
                     config=options.helper_chain,
                     root_pid=root_pid,
+                    environ=os.environ,
                 ).run()
             )
             await stop.wait()

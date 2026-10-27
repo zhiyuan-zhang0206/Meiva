@@ -458,13 +458,14 @@ def test_force_close_closes_every_session_at_once_without_notices(
     pty_reaper: PtyReaper,
     pty_service: PtyServiceProcess,
     db_conn: psycopg.Connection,
+    stop_runtime: CommandRuntime,
 ) -> None:
     name = "meiva-agent-987-shell-2055-force"
     _, running = busy_session(home, name, jobs.STUBBORN, pty_reaper, ready_line="stubborn-ready")
     assert running, "the stubborn job never started"
 
     started = time.monotonic()
-    shells.force_close_shell_sessions(home)
+    shells.force_close_shell_sessions(stop_runtime)
     assert time.monotonic() - started < 8
     assert not client.has_session(name, socket_path=service_socket())
     assert jobs.wait_exit(running[0].pid, timeout=5), "the job outlived the forced close"
@@ -516,7 +517,7 @@ def test_operational_shell_session_close_failure_is_not_best_effort_success(
 ) -> None:
     with pytest.raises(client.ServiceError, match="known group signal denied"):
         if force:
-            shells.force_close_shell_sessions(stop_runtime.home)
+            shells.force_close_shell_sessions(stop_runtime)
         else:
             shells.close_shell_sessions(
                 time.monotonic() + 1,

@@ -44,7 +44,9 @@ def main() -> None:
         os.environ["MEIVA_PERMISSIONS_HELPER_PID"] = Path(marker_path).read_text()
         from base.sessions.helper_chain_guard import parent_chain_intact
 
-        sys.stdout.write("intact" if parent_chain_intact(os.getpid()) else "broken")
+        sys.stdout.write(
+            "intact" if parent_chain_intact(os.getpid(), environ=os.environ) else "broken"
+        )
 
 
 if __name__ == "__main__":

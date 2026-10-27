@@ -26,7 +26,6 @@ import os
 import re
 import signal
 import threading
-import time
 from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
@@ -34,6 +33,7 @@ from typing import Any, TypeGuard
 
 import psutil
 
+from base.clock import Timers
 from base.log import logger
 from base.native_process import child_env
 from base.native_process.kernel_identity import pid_starttime_ticks
@@ -144,12 +144,14 @@ class PtyService:
         *,
         home: Path,
         process_control: ProcessControl,
+        timers: Timers,
         now: Callable[[], float],
-        pid: int = 0,
+        pid: int,
         host_generation: str = "",
     ) -> None:
         self._home = home
         self._process_control = process_control
+        self._timers = timers
         self._pid = pid
         self._now = now
         self._sessions: dict[str, session.PtySession] = {}
@@ -376,6 +378,8 @@ class PtyService:
                 graceful=bool(req.get("graceful", False)),
                 interrupted=interrupted,
                 process_control=self._process_control,
+                own_pid=self._pid,
+                timers=self._timers,
             )
         except RuntimeError as exc:
             raise RequestError(protocol.ERROR, str(exc)) from exc
@@ -405,19 +409,24 @@ class PtyService:
                 ]
                 self._persist()
             outcome = closure.close_sessions(
-                targets, grace_s=grace_s, kill_s=kill_s, process_control=self._process_control
+                targets,
+                grace_s=grace_s,
+                kill_s=kill_s,
+                process_control=self._process_control,
+                own_pid=self._pid,
+                timers=self._timers,
             )
             assert self._loop is not None  # noqa: S101
             for s in closing:
                 if not process_groups.live(s.shell):
                     self._loop.call_soon_threadsafe(self._end, s)
-            deadline = time.monotonic() + _DRAIN_WAIT_S
+            deadline = self._timers.monotonic() + _DRAIN_WAIT_S
             for s in closing:
                 if process_groups.live(s.shell):
                     # meiva:note
                     # Outcome reports the known shell survivor.
                     continue
-                if not s.wait_dead(max(0.0, deadline - time.monotonic())):
+                if not s.wait_dead(max(0.0, deadline - self._timers.monotonic())):
                     raise RuntimeError(f"session {s.name}: PTY teardown did not finish")
         finally:
             with self._lock:

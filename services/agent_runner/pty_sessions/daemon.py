@@ -16,6 +16,7 @@ import time
 import uuid
 from pathlib import Path
 
+from base.clock import SYSTEM_TIMERS
 from base.log import logger
 from base.log.sinks import add_sink
 from base.native_process.os_platform import LockTimeoutError, file_lock
@@ -72,11 +73,17 @@ def _run(run: Path, home: Path) -> int:
     service = PtyService(
         home=home,
         process_control=SYSTEM_PROCESS_CONTROL,
+        timers=SYSTEM_TIMERS,
         pid=os.getpid(),
         host_generation=uuid.uuid4().hex,
         now=time.time,
     )
-    ledger.sweep(ledger_path(run), process_control=SYSTEM_PROCESS_CONTROL)
+    ledger.sweep(
+        ledger_path(run),
+        process_control=SYSTEM_PROCESS_CONTROL,
+        own_pid=os.getpid(),
+        timers=SYSTEM_TIMERS,
+    )
     path = service_socket_path(run)
     if path.parent == fallback_dir() and not _own_fallback_dir(path.parent):
         return 1
