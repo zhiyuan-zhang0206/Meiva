@@ -11,7 +11,7 @@ from pathlib import Path
 import pytest
 from langchain_core.messages import BaseMessage
 
-from meiva.sdk_surface.batch import DEFAULT_BATCH_MAX_CONCURRENT
+from meiva.sdk_surface.pure.plans.batch_plan import DEFAULT_BATCH_MAX_CONCURRENT
 from meiva.tests.namespaces.understand.provider_support import UnderstandHarness
 from meiva.tests.namespaces.understand.provider_support import (
     understand_harness as understand_harness,

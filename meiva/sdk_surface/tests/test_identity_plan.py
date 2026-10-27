@@ -25,7 +25,7 @@ from meiva.sdk_surface.pure.caller.usage_plan import (
     lease_refusal,
     usage_identity,
 )
-from meiva.sdk_surface.pure.load_plan import (
+from meiva.sdk_surface.pure.plans.load_plan import (
     IdentityFacts,
     LaunchFacts,
     LoadFacts,

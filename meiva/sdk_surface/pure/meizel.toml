@@ -1,4 +1,4 @@
-exports = ["caller", "const.py", "load_plan.py", "media"]
+exports = ["caller", "const.py", "media", "plans"]
 
 [purity]
 "." = "strict"

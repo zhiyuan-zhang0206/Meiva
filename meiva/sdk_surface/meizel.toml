@@ -3,6 +3,7 @@ exports = ["agent_identity.py", "attachment_transport.py", "batch.py", "discover
 [uses]
 "agent_identity.py" = ["install.py", "installation.py", "process_context.py", "pure", "validation.py"]
 "attachment_transport.py" = ["process_context.py", "pure", "settings.py", "validation.py"]
+"batch.py" = ["pure"]
 "discovery.py" = ["pure"]
 "extensions.py" = ["install.py", "installation.py"]
 "help.py" = ["__init__.py", "attachment_transport.py", "discovery.py", "process_context.py", "pure", "settings.py"]

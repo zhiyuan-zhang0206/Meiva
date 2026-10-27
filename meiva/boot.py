@@ -56,7 +56,7 @@ from base.packages.plugins.loading import StateGate
 from meiva.mcps import McpClients
 from meiva.sdk_surface import meiva_module, process_context
 from meiva.sdk_surface.process_context import ContextOutsideProcessError
-from meiva.sdk_surface.pure.load_plan import (
+from meiva.sdk_surface.pure.plans.load_plan import (
     IdentityFacts,
     LaunchFacts,
     LoadFacts,

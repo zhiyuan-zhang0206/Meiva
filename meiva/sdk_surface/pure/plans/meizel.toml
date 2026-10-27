@@ -1,0 +1,4 @@
+exports = ["batch_plan.py", "load_plan.py"]
+
+[purity]
+"." = "strict"
