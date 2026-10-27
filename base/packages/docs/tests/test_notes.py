@@ -3,11 +3,8 @@
 
 from __future__ import annotations
 
-from pathlib import Path
-
 from base.packages.docs.frontmatter import parse_frontmatter_typed
 from base.packages.docs.notes import (
-    extract_md_links,
     normalize_tags,
     parse_note,
 )
@@ -110,31 +107,3 @@ class TestParseNote:
     def test_non_note_returns_none(self) -> None:
         assert parse_note("# no frontmatter\n", "plain") is None
         assert parse_note("---\ntags: [unclosed\n---\nb\n", "bad") is None
-
-
-# ── extract_md_links ──
-
-
-class TestExtractMdLinks:
-    def test_relative_link_resolves(self, tmp_path: Path) -> None:
-        (tmp_path / "sub").mkdir()
-        edges = extract_md_links("See [Beta](sub/beta.md).\n", tmp_path, tmp_path, "alpha")
-        assert edges == (("alpha", "sub/beta"),)
-
-    def test_parent_link_resolves(self, tmp_path: Path) -> None:
-        edges = extract_md_links(
-            "See [Alpha](../alpha.md).\n", tmp_path / "sub", tmp_path, "sub/beta"
-        )
-        assert edges == (("sub/beta", "alpha"),)
-
-    def test_url_anchor_empty_skipped(self, tmp_path: Path) -> None:
-        body = "[Web](https://example.com) [Anchor](#sec) [Empty]() [Rel](x.md)\n"
-        edges = extract_md_links(body, tmp_path, tmp_path, "alpha")
-        assert edges == (("alpha", "x"),)
-
-    def test_out_of_root_link_skipped_not_raised(self, tmp_path: Path) -> None:
-        body = "[Out](../outside.md) [Abs](/etc/passwd)\n"
-        assert extract_md_links(body, tmp_path, tmp_path, "alpha") == ()
-
-    def test_no_links(self, tmp_path: Path) -> None:
-        assert extract_md_links("# nothing\n", tmp_path, tmp_path, "alpha") == ()

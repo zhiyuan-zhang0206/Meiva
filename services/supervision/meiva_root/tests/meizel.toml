@@ -2,7 +2,6 @@ exports = ["daemon"]
 
 [uses]
 "daemon" = ["child_unit.py"]
-"hooks" = ["slices.py"]
 "test_maintenance_late_child.py" = ["child_unit.py", "slices.py"]
 "test_meiva_root_failure_state.py" = ["slices.py"]
 "test_meiva_root_health.py" = ["child_unit.py", "slices.py"]

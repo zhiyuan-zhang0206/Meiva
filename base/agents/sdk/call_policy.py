@@ -23,6 +23,7 @@ from base.agents.sdk import (
     SamplingSource as SamplingSource,
 )
 from base.agents.sdk import (
+    check_ratio,
     keep_sample,
 )
 from base.agents.sdk import (
@@ -113,7 +114,8 @@ class SamplingPolicyOwner:
         self.stopped = False
 
     def should_sample(self, every: int) -> bool:
-        if every <= 1:
+        check_ratio(every)
+        if every == 1:
             return True
         return keep_sample(every, self.rng.random())
 

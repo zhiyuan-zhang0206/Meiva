@@ -18,15 +18,18 @@ from __future__ import annotations
 import ast
 from collections.abc import Iterator
 
+from meizel.graph.imports import Scope
 from meizel.graph.model import (
     INTERVAL_CLOCKS,
     SEEDABLE_GENERATORS,
     Acquisition,
     AmbientKind,
+    EntropySite,
     Sources,
     stdlib_kind,
 )
 from meizel.graph.universe import Universe
+from meizel.language import fake_entropy
 from meizel.language.patching import PatchForms
 from meizel.lint_common import is_test_path
 
@@ -118,8 +121,15 @@ class AmbientRecorder:
             self._add(call.lineno, kind, callee)
 
 
+def _name_of(target: ast.expr) -> str:
+    if isinstance(target, ast.Attribute):
+        return target.attr
+    return target.id if isinstance(target, ast.Name) else ""
+
+
 # meiva:note
-# A scanner that records where its file reaches the ambient world; test files record none.
+# A scanner that records where its file reaches the ambient world, and where it spends a reading
+# that is not entropy as an identifier; test files record neither.
 class AmbientAccess(PatchForms):
     def __init__(
         self, universe: Universe, path: str, tree: ast.Module, *, walrus: bool, sources: Sources
@@ -127,3 +137,77 @@ class AmbientAccess(PatchForms):
         super().__init__(universe, path, tree, walrus=walrus)
         self.ambient = AmbientRecorder(sources)
         self.records_ambient = not (self.test_file or is_test_path(path))
+        self.entropy_scopes: list[tuple[list[ast.stmt], Scope]] = []
+        self.entropy_marked: list[bool] = [False]
+        self.entropy_wrappers: list[tuple[str, int]] = []
+
+    def entropy_enter(self) -> None:
+        self.entropy_marked.append(False)
+
+    def entropy_touch(self, callee: str | None, call: ast.Call) -> None:
+        func = call.func
+        if callee in fake_entropy.ENTROPY_CLOCKS or (
+            callee is None and isinstance(func, ast.Name) and func.id in ("id", "next")
+        ):
+            self.entropy_marked[-1] = True
+
+    def entropy_leave(
+        self, function: ast.FunctionDef | ast.AsyncFunctionDef, inner: Scope, *, top_level: bool
+    ) -> None:
+        marked = self.entropy_marked.pop()
+        if not self.records_ambient:
+            return
+        if marked and function.name not in ("__repr__", "__str__"):
+            self.entropy_scopes.append((function.body, inner))
+        if top_level:
+            outer, self.scope = self.scope, inner
+            clock = fake_entropy.wrapper_clock(function, self.dotted)
+            self.scope = outer
+            if clock is not None:
+                self.entropy_wrappers.append((function.name, function.lineno))
+
+    def _counter_names(self) -> frozenset[str]:
+        names: set[str] = set()
+        for node in ast.walk(self.tree):
+            if (
+                isinstance(node, ast.Assign | ast.AnnAssign)
+                and isinstance(node.value, ast.Call)
+                and self.dotted(node.value.func) in fake_entropy.COUNTER_FACTORIES
+            ):
+                targets = node.targets if isinstance(node, ast.Assign) else [node.target]
+                names.update(_name_of(target) for target in targets)
+        return frozenset(names)
+
+    def _used_as_value(self) -> frozenset[str]:
+        called = {id(call.func) for call in ast.walk(self.tree) if isinstance(call, ast.Call)}
+        return frozenset(
+            node.id
+            for node in ast.walk(self.tree)
+            if isinstance(node, ast.Name)
+            and isinstance(node.ctx, ast.Load)
+            and id(node) not in called
+        )
+
+    def entropy_finish(self) -> list[EntropySite]:
+        if not self.records_ambient:
+            return []
+        if self.entropy_marked[0]:
+            self.entropy_scopes.append((self.tree.body, self.scope))
+        counters = self._counter_names() if self.entropy_scopes else frozenset[str]()
+        found: list[EntropySite] = []
+        for body, scope in self.entropy_scopes:
+            outer, self.scope = self.scope, scope
+            found.extend(
+                fake_entropy.function_sites(
+                    body, self.dotted, lambda name: self.scope.find(name) == (None, False), counters
+                )
+            )
+            self.scope = outer
+        if self.entropy_wrappers:
+            used = self._used_as_value()
+            found.extend(
+                EntropySite(line, f"interval-wrapper {name}")
+                for name, line in self.entropy_wrappers
+                if name not in used
+            )
+        return found

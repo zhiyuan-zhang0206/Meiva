@@ -10,10 +10,8 @@ exports = ["daemon.py", "settings.py", "worker.py"]
 "commit_plan.py" = "strict"
 
 [roots]
-"daemon.py" = { kinds = ["clock", "settings"], why = "Service or operator process entry boots configuration before composing its resources" }
-"worker.py" = { kinds = ["settings"], why = "Service or operator process entry boots configuration before composing its resources" }
+"daemon.py" = { kinds = ["clock", "home", "settings"], why = "Service process entry boots configuration and reads the home it runs under before composing its resources" }
+"worker.py" = { kinds = ["home", "settings"], why = "Worker process entry boots configuration and reads the home it runs under before composing its resources" }
 
 [debt.ambient-read]
 "daemon.py#environ base.native_process.child_env.inherited_process_env" = 1
-"daemon.py#home base.paths.meiva_home" = 1
-"worker.py#home base.paths.meiva_home" = 1

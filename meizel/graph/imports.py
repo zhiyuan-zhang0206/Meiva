@@ -37,7 +37,7 @@ class ImportAccess:
         self.walrus = walrus
         self.facts: list[Fact] = []
         self.problems: list[Problem] = []
-        self.scope = Scope(None)
+        self.scope: Scope = Scope(None)
         collect_scope(self.scope, tree.body, self.package, walrus=walrus)
         self.imported = set(self.scope.imports)
 

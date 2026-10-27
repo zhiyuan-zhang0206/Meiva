@@ -12,8 +12,8 @@ import os
 import signal
 from dataclasses import dataclass
 from pathlib import Path
-from time import monotonic
 
+from base.clock import Clock
 from base.deploy.progress_timeout import STOP_KILL_REAP_S
 from base.log import logger
 from base.native_process.ownership import OwnedProcess
@@ -101,6 +101,7 @@ def signal_owned(
 class StoppingMixin:
     """Stop known direct children, without durable custody or descendant discovery."""
 
+    _clock: Clock
     _config: SupervisorConfig
     _process_control: ProcessControl
 
@@ -121,7 +122,7 @@ class StoppingMixin:
         force: bool = False,
         escalate: bool = True,
     ) -> None:
-        began = monotonic()
+        began = self._clock.monotonic()
         generation.closing = True
         identity = generation.identity
         if identity is not None:
@@ -145,7 +146,7 @@ class StoppingMixin:
                 "root_unit_stop_aborted",
                 runtime,
                 generation,
-                graceful_waited_s=monotonic() - began,
+                graceful_waited_s=self._clock.monotonic() - began,
                 reason="identity_unavailable",
             )
             raise UnitStopTimeoutError(
@@ -159,7 +160,7 @@ class StoppingMixin:
                 "root_unit_stop_aborted",
                 runtime,
                 generation,
-                graceful_waited_s=monotonic() - began,
+                graceful_waited_s=self._clock.monotonic() - began,
                 reason="identity_changed",
             )
             raise UnitStopTimeoutError(
@@ -170,7 +171,7 @@ class StoppingMixin:
             "root_unit_stop_escalated",
             runtime,
             generation,
-            graceful_waited_s=monotonic() - began,
+            graceful_waited_s=self._clock.monotonic() - began,
             reason="escaped_term_window",
         )
         if await self._wait_exit(generation, self._config.stop_kill_reap_s):
@@ -181,14 +182,13 @@ class StoppingMixin:
             f"{self._config.stop_kill_reap_s:g}s reap window (pid {generation.proc.pid})"
         )
 
-    @staticmethod
-    def _log_stopped(runtime: UnitRuntime, generation: Generation, began: float) -> None:
+    def _log_stopped(self, runtime: UnitRuntime, generation: Generation, began: float) -> None:
         logger.info(
             "unit {unit} generation {generation} stopped in {stopped_in_s}s",
             event="root_unit_stopped",
             unit=runtime.manifest.id,
             generation=generation.seq,
-            stopped_in_s=round(monotonic() - began, 3),
+            stopped_in_s=round(self._clock.monotonic() - began, 3),
         )
 
     @staticmethod

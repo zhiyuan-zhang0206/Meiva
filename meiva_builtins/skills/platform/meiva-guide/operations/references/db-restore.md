@@ -67,7 +67,7 @@ For an operator investigating an artifact, the transform it performs is:
 scratch_dir=$(mktemp -d)
 chmod 700 "$scratch_dir"
 key_file="$scratch_dir/backup.key"
-.venv/bin/python -c 'from services.backup.artifact.passphrase import logical_backup_passphrase; print(logical_backup_passphrase())' > "$key_file"
+.venv/bin/python -c 'from base.paths import meiva_home; from services.backup.artifact.passphrase import resolve; print(resolve(meiva_home()))' > "$key_file"
 chmod 600 "$key_file"
 openssl enc -d -aes-256-cbc -pbkdf2 -salt -kfile "$key_file" -in /absolute/path/to/<db>-<utc>.dump.enc -out "$scratch_dir/backup.dump"
 chmod 600 "$scratch_dir/backup.dump"

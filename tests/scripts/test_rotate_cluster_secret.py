@@ -184,7 +184,7 @@ def test_a_home_without_a_pin_has_no_backup_key(home: Path, backups: Callable[[]
     with pytest.raises(passphrase.PassphrasePinError, match="no logical-backup passphrase"):
         backups()
     with pytest.raises(passphrase.PassphrasePinError, match="mints one at birth"):
-        passphrase.logical_backup_passphrase()
+        passphrase.resolve(paths.meiva_home())
     directory = BackupTree(paths.meiva_home()).managed
     assert not list(directory.rglob("*.dump.enc")) and not list(directory.rglob(".backup-key-*"))
 

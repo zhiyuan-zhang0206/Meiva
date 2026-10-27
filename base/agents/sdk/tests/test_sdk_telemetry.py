@@ -322,6 +322,37 @@ def test_live_sampling_keeps_tally_complete(
     assert tally.snapshot() == {"files.read": 41}
 
 
+# meiva:note
+# The symptom the shared counter had: two SDK functions called in turn, sampled 1 in 2, kept one
+# function's events for good and dropped the other's. Each sampled call is independent, so both
+# functions keep about half of theirs.
+def test_two_alternating_functions_are_each_sampled(
+    emitted_events: EmittedEvents,
+    tmp_path: Path,
+) -> None:
+    sampling_owner = sampling_owner_serving(
+        SamplingPolicy(sampling_enabled=True, sample_every=2), tmp_path / "alternating.env"
+    )
+    tally = SdkCallTally()
+    for _ in range(1000):
+        for fn in ("files.read", "files.write"):
+            sdk_usage_telemetry.run_metered(
+                fn,
+                lambda: None,
+                (),
+                {},
+                identity={},
+                tally=tally,
+                sampling_owner=sampling_owner,
+            )
+
+    kept = [str(event.attributes["fn"]) for event in emitted_events]
+
+    assert 400 <= kept.count("files.read") <= 600
+    assert 400 <= kept.count("files.write") <= 600
+    assert tally.snapshot() == {"files.read": 1000, "files.write": 1000}
+
+
 def _invalid_policy_owner(
     failure: str, directory: Path, gateway_url: str
 ) -> call_policy.SamplingPolicyOwner:

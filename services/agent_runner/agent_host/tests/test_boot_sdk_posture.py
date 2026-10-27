@@ -40,12 +40,14 @@ def test_host_root_supplies_model_and_config_owners() -> None:
     try:
         calls, pipeline = _cold_pipeline()
         clients = ClientSet(pipeline_factory=pipeline)
+        rng = seeded_rng()
         installation = load_installation(
             boot,
             clients=clients,
             load_extensions=partial(load_extensions, validate_state=plugin_state_schema),
-            rng=seeded_rng(),
+            rng=rng,
         )
+        assert installation.sampling.rng is rng
         assert installation.require_catalog().models
         assert installation.clients is clients
         assert calls == []

@@ -20,7 +20,8 @@ from psycopg.rows import TupleRow
 from psycopg_pool import ConnectionPool
 
 from base.agents.observation.evidence import AvailabilityReason
-from base.clock import SYSTEM_TIMERS, Clock, ClockConfig
+from base.clock import Clock, ClockConfig
+from base.clock.tests.manual_timers import ManualTimers
 from base.cluster.machine import MachineIdentityReader
 from base.cluster.machine.tests.identity import MachineIdentitySetter
 from base.db import Database
@@ -246,6 +247,8 @@ async def test_spawn_forward_preserves_runner_rejection_detail(
 # `unknown`; it never turns an accepted creation into a failure.
 @pytest.mark.parametrize("fault", ["unopened-pool", "unknown-agent"])
 def test_receipt_read_failure_keeps_accepted_creation(fault: str, database: Database) -> None:
+    timers = ManualTimers()
+    clock = Clock(ClockConfig("UTC", "UTC", False), timers=timers, now=timers.now)
     with database.pool(max_size=1) as pool:
         unreadable = (
             ConnectionPool[Connection[TupleRow]]("postgresql://127.0.0.1:1/none", open=False)
@@ -257,12 +260,10 @@ def test_receipt_read_failure_keeps_accepted_creation(fault: str, database: Data
             987654,
             catalog=build_model_catalog(),
             default_model="model",
-            clock=Clock(
-                ClockConfig("UTC", None, message_timestamp_weekday=False), timers=SYSTEM_TIMERS
-            ),
+            clock=clock,
         )
     assert availability.reason == AvailabilityReason.UNKNOWN
-    assert availability.observed_at
+    assert availability.observed_at == timers.now()
 
 
 @pytest.fixture(autouse=True)

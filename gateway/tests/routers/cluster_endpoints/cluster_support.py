@@ -13,7 +13,7 @@ import psycopg
 import pytest
 from psycopg.types.json import Jsonb
 
-from base.clock import SYSTEM_TIMERS, Clock, ClockConfig
+from base.clock.tests.fakes import system_clock
 from base.cluster.machine import MachineIdentityReader
 from base.config.service_read import ConfigAuthority
 from base.db import Database
@@ -47,9 +47,7 @@ def roster_env(
         home=home,
         machine=machine,
         probe_timeout_s=probe_timeout_s,
-        clock=Clock(
-            ClockConfig("UTC", None, message_timestamp_weekday=False), timers=SYSTEM_TIMERS
-        ),
+        clock=system_clock(),
     )
 
 

@@ -7,9 +7,12 @@ from typing import Any
 
 import psycopg
 import pytest
+from fastapi import FastAPI
 
+from base.clock import Clock, ClockConfig
+from base.clock.tests.manual_timers import ManualTimers
 from gateway.cluster.monitor import ops_monitor
-from gateway.cluster.monitor.ops_series import GRID_ORIGIN, bucket_start_times
+from gateway.cluster.monitor.ops_series import GRID_ORIGIN, bucket_start_times, fetch_ops_series
 from gateway.tests.auth.gateway_config import gateway_test_client, gateway_test_config
 
 
@@ -199,6 +202,33 @@ def test_ops_monitor_grid_alignment(db_conn: psycopg.Connection) -> None:
     assert body["sse"]["series"][i]["queue_full"] == 1
     start = datetime.fromisoformat(meta["bucket_starts"][i])
     assert start.minute % 30 == 0 and start.second == 0
+
+
+def test_ops_monitor_route_reads_the_instant_from_the_app_clock(
+    db_conn: psycopg.Connection,
+) -> None:
+    timers = ManualTimers()
+    instant = datetime(2026, 3, 4, 5, 6, 7, tzinfo=UTC)
+    clock = Clock(ClockConfig("UTC", "UTC", False), timers=timers, now=lambda: instant)
+
+    with gateway_test_client() as client:
+        assert isinstance(client.app, FastAPI)
+        client.app.state.clock = clock
+        meta = client.get("/api/ops/monitor", params={"window": "1h"}).json()["meta"]
+
+    assert meta["generated_at"] == instant.isoformat()
+
+
+def test_ops_monitor_report_is_anchored_at_the_instant_it_is_handed(
+    db_conn: psycopg.Connection,
+) -> None:
+    anchor = datetime(2026, 3, 4, 5, 6, 7, tzinfo=UTC)
+
+    meta = fetch_ops_series(db_conn, "1h", anchor=anchor)["meta"]
+
+    assert meta["generated_at"] == anchor.isoformat()
+    assert meta["bucket_starts"][-1] == datetime(2026, 3, 4, 5, 6, tzinfo=UTC).isoformat()
+    assert meta["bucket_starts"][0] == datetime(2026, 3, 4, 4, 7, tzinfo=UTC).isoformat()
 
 
 # meiva:note
