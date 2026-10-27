@@ -90,7 +90,7 @@ def report_loss(
 class _ExporterDropFilter(logging.Filter):
     """Observe the pinned OTel SDK's queue-overflow warning at the source."""
 
-    def __init__(self, *, mirror_dir: Path | None = None) -> None:
+    def __init__(self, *, mirror_dir: Path) -> None:
         super().__init__()
         self._mirror_dir = mirror_dir
 
@@ -129,13 +129,12 @@ class _ExporterDropFilter(logging.Filter):
         return False
 
 
-def install_exporter_drop_observer(*, mirror_dir: Path | None = None) -> None:
+def install_exporter_drop_observer(*, mirror_dir: Path) -> None:
     """Attach once before constructing providers, including standalone SDK processes."""
     sdk_logger = logging.getLogger("opentelemetry.sdk._shared_internal")
     for item in sdk_logger.filters:
         if isinstance(item, _ExporterDropFilter):
-            if mirror_dir is not None:
-                item._mirror_dir = mirror_dir
+            item._mirror_dir = mirror_dir
             return
     # Run before OTel's DuplicateFilter: every lost record must count.
     sdk_logger.filters.insert(0, _ExporterDropFilter(mirror_dir=mirror_dir))

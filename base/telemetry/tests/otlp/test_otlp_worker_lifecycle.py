@@ -14,95 +14,9 @@ from base.log.tests.log_records import LogRecords
 from base.log.tests.log_records import loguru_records as loguru_records
 from base.telemetry.delivery.receipts import DrainPhase, DrainResult, DrainStatus, Event
 from base.telemetry.otlp import telemetry_otlp, telemetry_otlp_exporting
+from base.telemetry.otlp.telemetry_otlp import default_exporter
+from base.telemetry.tests.otlp.fake_sdk_providers import BlockingProvider, FakeMeter, FakeProvider
 from base.telemetry.tests.otlp.test_telemetry_otlp import CHILD_DEFER, otlp_test_event
-
-
-class _Instrument:
-    def __init__(self, on_metric: Callable[[int | float], None] | None = None) -> None:
-        self._on_metric = on_metric
-
-    def add(self, value: int | float, _attributes: Any = None) -> None:
-        if self._on_metric is not None:
-            self._on_metric(value)
-
-    record = add
-
-
-class _Meter:
-    def __init__(self, on_metric: Callable[[int | float], None] | None = None) -> None:
-        self._on_metric = on_metric
-
-    def create_counter(self, _name: str, *, unit: str = "", description: str = "") -> _Instrument:
-        del unit, description
-        return _Instrument(self._on_metric)
-
-    create_histogram = create_counter
-
-    def create_observable_gauge(
-        self, _name: str, *, callbacks: Any = None, unit: str = "", description: str = ""
-    ) -> object:
-        del callbacks, unit, description
-        return object()
-
-
-class _Logger:
-    def __init__(self, on_emit: Callable[[Any], None] | None = None) -> None:
-        self._on_emit = on_emit
-
-    def emit(self, record: Any) -> None:
-        if self._on_emit is not None:
-            self._on_emit(record)
-
-
-class _Provider:
-    def __init__(
-        self,
-        *,
-        on_emit: Callable[[Any], None] | None = None,
-        on_get_meter: Callable[[], object] | None = None,
-        on_metric: Callable[[int | float], None] | None = None,
-        on_flush: Callable[[int], None] | None = None,
-        on_shutdown: Callable[[], None] | None = None,
-    ) -> None:
-        self.closed = threading.Event()
-        self.flushed = threading.Event()
-        self._on_emit = on_emit
-        self._on_get_meter = on_get_meter
-        self._on_metric = on_metric
-        self._on_flush = on_flush
-        self._on_shutdown = on_shutdown
-
-    def get_logger(self, _name: str) -> _Logger:
-        return _Logger(self._on_emit)
-
-    def get_meter(self, _name: str) -> object:
-        if self._on_get_meter is not None:
-            return self._on_get_meter()
-        return _Meter(self._on_metric)
-
-    def force_flush(self, *, timeout_millis: int) -> None:
-        if self._on_flush is not None:
-            self._on_flush(timeout_millis)
-        self.flushed.set()
-
-    def shutdown(self) -> None:
-        if self._on_shutdown is not None:
-            self._on_shutdown()
-        self.closed.set()
-
-
-class _BlockingProvider(_Provider):
-    def __init__(self) -> None:
-        super().__init__()
-        self.teardown_entered = threading.Event()
-        self.teardown_entered_at = 0.0
-        self.release = threading.Event()
-
-    def shutdown(self) -> None:
-        self.teardown_entered_at = time.monotonic()
-        self.teardown_entered.set()
-        assert self.release.wait(5)
-        self.closed.set()
 
 
 class _OkProbeHandler(http.server.BaseHTTPRequestHandler):
@@ -116,19 +30,21 @@ class _OkProbeHandler(http.server.BaseHTTPRequestHandler):
 
 
 def _backend(
+    mirror_dir: Path,
     *,
-    logs: _Provider | None = None,
-    metrics: _Provider | None = None,
+    logs: FakeProvider | None = None,
+    metrics: FakeProvider | None = None,
     enabled: Callable[[], bool] = lambda: True,
     queue_maxsize: int = 4096,
-) -> tuple[telemetry_otlp.OtlpBackend, _Provider, _Provider]:
-    resolved_logs = _Provider() if logs is None else logs
-    resolved_metrics = _Provider() if metrics is None else metrics
+) -> tuple[telemetry_otlp.OtlpBackend, FakeProvider, FakeProvider]:
+    resolved_logs = FakeProvider() if logs is None else logs
+    resolved_metrics = FakeProvider() if metrics is None else metrics
     backend = telemetry_otlp.OtlpBackend(
         export_allowed=lambda: True,
         enabled=enabled,
         providers=(resolved_logs, resolved_metrics),
         queue_maxsize=queue_maxsize,
+        mirror_dir=mirror_dir,
     )
     return backend, resolved_logs, resolved_metrics
 
@@ -143,15 +59,15 @@ def _logged_exceptions(loguru_records: LogRecords) -> list[BaseException]:
     return [r["exception"].value for r in loguru_records if r["exception"] is not None]
 
 
-def test_blocked_sdk_init_stays_owned_after_finite_stop() -> None:
+def test_blocked_sdk_init_stays_owned_after_finite_stop(tmp_path: Path) -> None:
     entered, release = threading.Event(), threading.Event()
 
     def get_meter() -> object:
         entered.set()
         assert release.wait(5)
-        return _Meter()
+        return FakeMeter()
 
-    backend, logs, metrics = _backend(metrics=_Provider(on_get_meter=get_meter))
+    backend, logs, metrics = _backend(tmp_path, metrics=FakeProvider(on_get_meter=get_meter))
     worker = backend._get_worker()
     assert worker is not None
     try:
@@ -171,14 +87,14 @@ def test_blocked_sdk_init_stays_owned_after_finite_stop() -> None:
     assert logs.closed.is_set() and metrics.closed.is_set()
 
 
-def test_sdk_flush_does_not_block_observing_caller() -> None:
+def test_sdk_flush_does_not_block_observing_caller(tmp_path: Path) -> None:
     entered, release = threading.Event(), threading.Event()
 
     def flush(_timeout_millis: int) -> None:
         entered.set()
         assert release.wait(5)
 
-    backend, logs, _ = _backend(logs=_Provider(on_flush=flush))
+    backend, logs, _ = _backend(tmp_path, logs=FakeProvider(on_flush=flush))
     backend.export_batch([otlp_test_event()])
     try:
         started = time.monotonic()
@@ -195,7 +111,7 @@ def test_sdk_flush_does_not_block_observing_caller() -> None:
     assert logs.closed.is_set()
 
 
-def test_full_queue_stop_uses_same_worker_and_preserves_admitted_records() -> None:
+def test_full_queue_stop_uses_same_worker_and_preserves_admitted_records(tmp_path: Path) -> None:
     entered, release = threading.Event(), threading.Event()
     delivered: list[int] = []
 
@@ -204,7 +120,7 @@ def test_full_queue_stop_uses_same_worker_and_preserves_admitted_records() -> No
         assert release.wait(5)
         delivered.append(json.loads(record.body)["attributes"]["seq"])
 
-    backend, logs, _ = _backend(logs=_Provider(on_emit=emit), queue_maxsize=1)
+    backend, logs, _ = _backend(tmp_path, logs=FakeProvider(on_emit=emit), queue_maxsize=1)
     first = otlp_test_event(attributes={"seq": 1})
     second = otlp_test_event(attributes={"seq": 2})
     after_stop = otlp_test_event(attributes={"seq": 3})
@@ -226,6 +142,7 @@ def test_full_queue_stop_uses_same_worker_and_preserves_admitted_records() -> No
 
 def test_unknown_error_after_stop_is_immediate_and_same_owner_raises(
     loguru_records: LogRecords,
+    tmp_path: Path,
 ) -> None:
     entered, release = threading.Event(), threading.Event()
     error = BaseException("unknown late initialization defect")
@@ -235,7 +152,7 @@ def test_unknown_error_after_stop_is_immediate_and_same_owner_raises(
         assert release.wait(5)
         raise error
 
-    backend, _, _ = _backend(metrics=_Provider(on_get_meter=get_meter))
+    backend, _, _ = _backend(tmp_path, metrics=FakeProvider(on_get_meter=get_meter))
     worker = backend._get_worker()
     assert worker is not None
     try:
@@ -254,7 +171,7 @@ def test_unknown_error_after_stop_is_immediate_and_same_owner_raises(
         assert not worker._thread.is_alive()
 
 
-def test_failed_sdk_build_keeps_partial_resources_until_owned_cleanup() -> None:
+def test_failed_sdk_build_keeps_partial_resources_until_owned_cleanup(tmp_path: Path) -> None:
     cleaning, release = threading.Event(), threading.Event()
 
     def close() -> None:
@@ -264,9 +181,12 @@ def test_failed_sdk_build_keeps_partial_resources_until_owned_cleanup() -> None:
     def fail_meter() -> object:
         raise RuntimeError("named SDK construction failure")
 
-    logs, metrics = _Provider(on_shutdown=close), _Provider(on_get_meter=fail_meter)
+    logs, metrics = FakeProvider(on_shutdown=close), FakeProvider(on_get_meter=fail_meter)
     backend = telemetry_otlp.OtlpBackend(
-        export_allowed=lambda: True, enabled=lambda: True, providers=(logs, metrics)
+        export_allowed=lambda: True,
+        enabled=lambda: True,
+        providers=(logs, metrics),
+        mirror_dir=tmp_path,
     )
     try:
         assert backend._ensure() is False
@@ -283,13 +203,13 @@ def test_failed_sdk_build_keeps_partial_resources_until_owned_cleanup() -> None:
     assert logs.closed.is_set() and metrics.closed.is_set()
 
 
-def test_shutdown_replays_deferred_metrics_before_logs_once() -> None:
+def test_shutdown_replays_deferred_metrics_before_logs_once(tmp_path: Path) -> None:
     calls: list[tuple[str, int]] = []
-    logs = _Provider(
+    logs = FakeProvider(
         on_emit=lambda r: calls.append(("log", int(json.loads(r.body)["attributes"]["in_total"])))
     )
-    metrics = _Provider(on_metric=lambda v: calls.append(("metric", int(v))))
-    backend, _, _ = _backend(logs=logs, metrics=metrics)
+    metrics = FakeProvider(on_metric=lambda v: calls.append(("metric", int(v))))
+    backend, _, _ = _backend(tmp_path, logs=logs, metrics=metrics)
     backend.defer_until_exit(CHILD_DEFER)
     backend.export_batch(
         [otlp_test_event(attributes={"in_total": 1}), otlp_test_event(attributes={"in_total": 2})]
@@ -300,7 +220,7 @@ def test_shutdown_replays_deferred_metrics_before_logs_once() -> None:
     assert len(calls) == 4
 
 
-def test_disabled_nonempty_deferred_shutdown_does_not_start_sdk() -> None:
+def test_disabled_nonempty_deferred_shutdown_does_not_start_sdk(tmp_path: Path) -> None:
     reads: list[bool] = []
     delivered: list[Any] = []
 
@@ -309,7 +229,7 @@ def test_disabled_nonempty_deferred_shutdown_does_not_start_sdk() -> None:
         return False
 
     backend, logs, metrics = _backend(
-        logs=_Provider(on_emit=delivered.append), enabled=enabled_at_bringup
+        tmp_path, logs=FakeProvider(on_emit=delivered.append), enabled=enabled_at_bringup
     )
     backend.defer_until_exit(CHILD_DEFER)
     backend.export_batch([otlp_test_event()])
@@ -321,7 +241,7 @@ def test_disabled_nonempty_deferred_shutdown_does_not_start_sdk() -> None:
     assert not logs.flushed.is_set() and not logs.closed.is_set() and not metrics.closed.is_set()
 
 
-def test_enabled_nonempty_deferred_shutdown_reads_flag_only_at_bringup() -> None:
+def test_enabled_nonempty_deferred_shutdown_reads_flag_only_at_bringup(tmp_path: Path) -> None:
     reads: list[bool] = []
     delivered: list[int] = []
 
@@ -330,7 +250,8 @@ def test_enabled_nonempty_deferred_shutdown_reads_flag_only_at_bringup() -> None
         return True
 
     backend, logs, metrics = _backend(
-        logs=_Provider(
+        tmp_path,
+        logs=FakeProvider(
             on_emit=lambda r: delivered.append(int(json.loads(r.body)["attributes"]["seq"]))
         ),
         enabled=enabled_at_bringup,
@@ -346,6 +267,7 @@ def test_enabled_nonempty_deferred_shutdown_reads_flag_only_at_bringup() -> None
 
 def test_primary_error_survives_blocked_secondary_cleanup(
     loguru_records: LogRecords,
+    tmp_path: Path,
 ) -> None:
     primary = BaseException("original writer defect")
     secondary = BaseException("secondary SDK teardown defect")
@@ -360,7 +282,7 @@ def test_primary_error_survives_blocked_secondary_cleanup(
         raise secondary
 
     backend, _logs, metrics = _backend(
-        logs=_Provider(on_shutdown=close), metrics=_Provider(on_get_meter=get_meter)
+        tmp_path, logs=FakeProvider(on_shutdown=close), metrics=FakeProvider(on_get_meter=get_meter)
     )
     worker = backend._get_worker()
     assert worker is not None
@@ -384,11 +306,12 @@ def test_primary_error_survives_blocked_secondary_cleanup(
 
 def test_known_sdk_shutdown_failure_is_isolated_but_not_claimed_complete(
     loguru_records: LogRecords,
+    tmp_path: Path,
 ) -> None:
     def close() -> None:
         raise RuntimeError("named optional exporter cleanup failure")
 
-    backend, _logs, metrics = _backend(logs=_Provider(on_shutdown=close))
+    backend, _logs, metrics = _backend(tmp_path, logs=FakeProvider(on_shutdown=close))
     assert backend._ensure()
     assert backend.shutdown().status is DrainStatus.UNFINISHED
     assert backend._worker is not None
@@ -399,20 +322,20 @@ def test_known_sdk_shutdown_failure_is_isolated_but_not_claimed_complete(
     assert backend.shutdown().status is DrainStatus.UNFINISHED
 
 
-def test_deferral_completion_in_flight_cannot_close_providers_under_replay() -> None:
+def test_deferral_completion_in_flight_cannot_close_providers_under_replay(tmp_path: Path) -> None:
     entered, release = threading.Event(), threading.Event()
     calls: list[tuple[str, int]] = []
 
     def get_meter() -> object:
         entered.set()
         assert release.wait(5)
-        return _Meter(lambda v: calls.append(("metric", int(v))))
+        return FakeMeter(lambda v: calls.append(("metric", int(v))))
 
-    logs = _Provider(
+    logs = FakeProvider(
         on_emit=lambda r: calls.append(("log", int(json.loads(r.body)["attributes"]["in_total"])))
     )
-    metrics = _Provider(on_get_meter=get_meter)
-    backend, _, _ = _backend(logs=logs, metrics=metrics)
+    metrics = FakeProvider(on_get_meter=get_meter)
+    backend, _, _ = _backend(tmp_path, logs=logs, metrics=metrics)
     backend.defer_until_exit(CHILD_DEFER)
     event = otlp_test_event(attributes={"in_total": 5})
     backend.export_batch([event])
@@ -437,17 +360,17 @@ def test_deferral_completion_in_flight_cannot_close_providers_under_replay() -> 
         assert not caller.is_alive() and not backend._worker._thread.is_alive()
 
 
-def test_admitted_metric_call_retains_provider_until_it_finishes() -> None:
+def test_admitted_metric_call_retains_provider_until_it_finishes(tmp_path: Path) -> None:
     entered, release = threading.Event(), threading.Event()
-    metrics: _Provider
+    metrics: FakeProvider
 
     def record_metric(_value: int | float) -> None:
         entered.set()
         assert release.wait(5)
         assert not metrics.closed.is_set()
 
-    metrics = _Provider(on_metric=record_metric)
-    backend, logs, _ = _backend(metrics=metrics)
+    metrics = FakeProvider(on_metric=record_metric)
+    backend, logs, _ = _backend(tmp_path, metrics=metrics)
     caller = threading.Thread(
         target=backend.export_batch,
         args=([otlp_test_event(attributes={"in_total": 1})],),
@@ -482,6 +405,7 @@ def test_real_sdk_partial_build_threads_are_owned_and_closed(tmp_path: Path) -> 
             enabled=lambda: True,
             endpoint=f"http://127.0.0.1:{port}",
             home=tmp_path / "missing-home",
+            mirror_dir=tmp_path,
         )
         assert backend._ensure() is False
         worker = backend._worker
@@ -498,7 +422,7 @@ def test_real_sdk_partial_build_threads_are_owned_and_closed(tmp_path: Path) -> 
         server.server_close()
 
 
-def test_failed_teardown_owner_is_not_overwritten_at_retry_deadline() -> None:
+def test_failed_teardown_owner_is_not_overwritten_at_retry_deadline(tmp_path: Path) -> None:
     attempts: list[int] = []
 
     def close() -> None:
@@ -508,13 +432,14 @@ def test_failed_teardown_owner_is_not_overwritten_at_retry_deadline() -> None:
         attempts.append(len(attempts) + 1)
         raise RuntimeError("named SDK init failure")
 
-    logs = _Provider(on_shutdown=close)
-    metrics = _Provider(on_get_meter=fail_meter)
+    logs = FakeProvider(on_shutdown=close)
+    metrics = FakeProvider(on_get_meter=fail_meter)
     backend = telemetry_otlp.OtlpBackend(
         export_allowed=lambda: True,
         enabled=lambda: True,
         retry_interval_s=0.05,
         providers=(logs, metrics),
+        mirror_dir=tmp_path,
     )
     assert backend._ensure() is False
     worker = backend._worker
@@ -528,13 +453,13 @@ def test_failed_teardown_owner_is_not_overwritten_at_retry_deadline() -> None:
     assert backend.shutdown().status is DrainStatus.UNFINISHED
 
 
-def test_unknown_failed_attempt_still_closes_deferred_admission_and_clock() -> None:
+def test_unknown_failed_attempt_still_closes_deferred_admission_and_clock(tmp_path: Path) -> None:
     error = BaseException("failed attempt before deferred stop")
 
     def fail_meter() -> object:
         raise error
 
-    backend, _, _ = _backend(metrics=_Provider(on_get_meter=fail_meter))
+    backend, _, _ = _backend(tmp_path, metrics=FakeProvider(on_get_meter=fail_meter))
     backend.defer_until_exit(CHILD_DEFER)
     backend.export_batch([otlp_test_event()])
     worker = backend._get_worker()
@@ -553,12 +478,13 @@ def test_unknown_failed_attempt_still_closes_deferred_admission_and_clock() -> N
         assert not worker._thread.is_alive()
 
 
-def test_empty_exporting_pipeline_stops_without_reading_identity() -> None:
+def test_empty_exporting_pipeline_stops_without_reading_identity(tmp_path: Path) -> None:
     def reject() -> bool:
         raise AssertionError("empty close must not read identity")
 
     pipeline = telemetry_otlp_exporting.ExportingEventPipeline(
-        writer=lambda _events, _exporter: None, export_allowed=reject
+        writer=lambda _events, _exporter: None,
+        exporter=default_exporter(export_allowed=reject, mirror_dir=tmp_path),
     )
     assert pipeline.stop(timeout=1).status is DrainStatus.COMPLETED
     assert pipeline.stopped
@@ -566,12 +492,13 @@ def test_empty_exporting_pipeline_stops_without_reading_identity() -> None:
     assert pipeline._exporter._export_decision is None
 
 
-def test_stop_refuses_non_finite_and_negative_timeout() -> None:
+def test_stop_refuses_non_finite_and_negative_timeout(tmp_path: Path) -> None:
     def reject() -> bool:
         raise AssertionError("a refused budget must not read identity")
 
     pipeline = telemetry_otlp_exporting.ExportingEventPipeline(
-        writer=lambda _events, _exporter: None, export_allowed=reject
+        writer=lambda _events, _exporter: None,
+        exporter=default_exporter(export_allowed=reject, mirror_dir=tmp_path),
     )
     for bad in (float("nan"), -1.0):
         with pytest.raises(ValueError, match="finite and non-negative"):
@@ -581,17 +508,15 @@ def test_stop_refuses_non_finite_and_negative_timeout() -> None:
     assert pipeline.stopped
 
 
-def test_unfinished_ordinary_writer_keeps_its_exporter_alive() -> None:
-    backend, logs, metrics = _backend()
+def test_unfinished_ordinary_writer_keeps_its_exporter_alive(tmp_path: Path) -> None:
+    backend, logs, metrics = _backend(tmp_path)
     entered, release = threading.Event(), threading.Event()
 
     def write(_events: list[Event], _exporter: Any) -> None:
         entered.set()
         assert release.wait(5)
 
-    pipeline = telemetry_otlp_exporting.ExportingEventPipeline(
-        writer=write, export_allowed=lambda: True, exporter=backend
-    )
+    pipeline = telemetry_otlp_exporting.ExportingEventPipeline(writer=write, exporter=backend)
     assert backend._ensure()
     pipeline.enqueue(otlp_test_event())
     assert entered.wait(2)
@@ -608,16 +533,16 @@ def test_unfinished_ordinary_writer_keeps_its_exporter_alive() -> None:
     assert logs.closed.is_set() and metrics.closed.is_set()
 
 
-def test_unfinished_exporter_keeps_pipeline_for_later_observation() -> None:
+def test_unfinished_exporter_keeps_pipeline_for_later_observation(tmp_path: Path) -> None:
     entered, release = threading.Event(), threading.Event()
 
     def close() -> None:
         entered.set()
         assert release.wait(5)
 
-    backend, logs, metrics = _backend(logs=_Provider(on_shutdown=close))
+    backend, logs, metrics = _backend(tmp_path, logs=FakeProvider(on_shutdown=close))
     pipeline = telemetry_otlp_exporting.ExportingEventPipeline(
-        writer=lambda _events, _exporter: None, export_allowed=lambda: True, exporter=backend
+        writer=lambda _events, _exporter: None, exporter=backend
     )
     assert backend._ensure()
     try:
@@ -632,9 +557,9 @@ def test_unfinished_exporter_keeps_pipeline_for_later_observation() -> None:
     assert logs.closed.is_set() and metrics.closed.is_set()
 
 
-def test_two_stage_stop_hands_stage_two_the_real_remaining_time() -> None:
+def test_two_stage_stop_hands_stage_two_the_real_remaining_time(tmp_path: Path) -> None:
     before = {thread.ident for thread in threading.enumerate()}
-    logs, metrics = _BlockingProvider(), _Provider()
+    logs, metrics = BlockingProvider(), FakeProvider()
     writer_started, writer_gate = threading.Event(), threading.Event()
     writer_done: list[float] = []
     stop_timeout = 0.6
@@ -646,10 +571,8 @@ def test_two_stage_stop_hands_stage_two_the_real_remaining_time() -> None:
         time.sleep(writer_sleep)
         writer_done.append(time.monotonic())
 
-    backend, _, _ = _backend(logs=logs, metrics=metrics)
-    pipeline = telemetry_otlp_exporting.ExportingEventPipeline(
-        writer=write, export_allowed=lambda: True, exporter=backend
-    )
+    backend, _, _ = _backend(tmp_path, logs=logs, metrics=metrics)
+    pipeline = telemetry_otlp_exporting.ExportingEventPipeline(writer=write, exporter=backend)
     assert backend._ensure()
     pipeline.enqueue(otlp_test_event())
     assert writer_started.wait(5)
@@ -669,7 +592,7 @@ def test_two_stage_stop_hands_stage_two_the_real_remaining_time() -> None:
     assert {thread.ident for thread in threading.enumerate()} <= before
 
 
-def test_zero_timeout_stage_one_leaves_the_exporter_untouched() -> None:
+def test_zero_timeout_stage_one_leaves_the_exporter_untouched(tmp_path: Path) -> None:
     writer_started, release_writer = threading.Event(), threading.Event()
 
     def write(_events: list[Event], _exporter: Any) -> None:
@@ -677,7 +600,7 @@ def test_zero_timeout_stage_one_leaves_the_exporter_untouched() -> None:
         assert release_writer.wait(5)
 
     pipeline = telemetry_otlp_exporting.ExportingEventPipeline(
-        writer=write, export_allowed=lambda: True
+        writer=write, exporter=default_exporter(export_allowed=lambda: True, mirror_dir=tmp_path)
     )
     backend = pipeline._exporter
     pipeline.enqueue(otlp_test_event())
@@ -693,18 +616,16 @@ def test_zero_timeout_stage_one_leaves_the_exporter_untouched() -> None:
     _assert_release_completes(pipeline, release_writer)
 
 
-def test_blocked_writer_and_blocked_exporter_release_in_stages() -> None:
-    logs, metrics = _BlockingProvider(), _Provider()
+def test_blocked_writer_and_blocked_exporter_release_in_stages(tmp_path: Path) -> None:
+    logs, metrics = BlockingProvider(), FakeProvider()
     writer_started, release_writer = threading.Event(), threading.Event()
 
     def write(_events: list[Event], _exporter: Any) -> None:
         writer_started.set()
         assert release_writer.wait(5)
 
-    backend, _, _ = _backend(logs=logs, metrics=metrics)
-    pipeline = telemetry_otlp_exporting.ExportingEventPipeline(
-        writer=write, export_allowed=lambda: True, exporter=backend
-    )
+    backend, _, _ = _backend(tmp_path, logs=logs, metrics=metrics)
+    pipeline = telemetry_otlp_exporting.ExportingEventPipeline(writer=write, exporter=backend)
     assert backend._ensure()
     pipeline.enqueue(otlp_test_event())
     assert writer_started.wait(5)
@@ -720,7 +641,7 @@ def test_blocked_writer_and_blocked_exporter_release_in_stages() -> None:
     assert not backend._worker._thread.is_alive()
 
 
-def test_stop_from_the_writer_thread_is_refused() -> None:
+def test_stop_from_the_writer_thread_is_refused(tmp_path: Path) -> None:
     pipeline: telemetry_otlp_exporting.ExportingEventPipeline
 
     def write(_events: list[Event], _exporter: Any) -> None:
@@ -729,18 +650,18 @@ def test_stop_from_the_writer_thread_is_refused() -> None:
         assert "event drain cannot join itself" in str(raised.value)
 
     pipeline = telemetry_otlp_exporting.ExportingEventPipeline(
-        writer=write, export_allowed=lambda: True
+        writer=write, exporter=default_exporter(export_allowed=lambda: True, mirror_dir=tmp_path)
     )
     pipeline.enqueue(otlp_test_event())
     assert pipeline.stop(timeout=2).status is DrainStatus.COMPLETED
     assert pipeline.stopped
 
 
-def test_concurrent_stop_calls_share_the_blocked_observation() -> None:
-    logs, metrics = _BlockingProvider(), _Provider()
-    backend, _, _ = _backend(logs=logs, metrics=metrics)
+def test_concurrent_stop_calls_share_the_blocked_observation(tmp_path: Path) -> None:
+    logs, metrics = BlockingProvider(), FakeProvider()
+    backend, _, _ = _backend(tmp_path, logs=logs, metrics=metrics)
     pipeline = telemetry_otlp_exporting.ExportingEventPipeline(
-        writer=lambda _events, _exporter: None, export_allowed=lambda: True, exporter=backend
+        writer=lambda _events, _exporter: None, exporter=backend
     )
     assert backend._ensure()
     results: list[DrainResult] = []
@@ -768,8 +689,8 @@ def test_concurrent_stop_calls_share_the_blocked_observation() -> None:
     assert not backend._worker._thread.is_alive()
 
 
-def test_close_time_gate_fault_raises_after_the_finite_observation() -> None:
-    logs, metrics = _BlockingProvider(), _Provider()
+def test_close_time_gate_fault_raises_after_the_finite_observation(tmp_path: Path) -> None:
+    logs, metrics = BlockingProvider(), FakeProvider()
     fail_on_close = False
 
     def enabled_gate() -> bool:
@@ -777,7 +698,7 @@ def test_close_time_gate_fault_raises_after_the_finite_observation() -> None:
             raise RuntimeError("close-time eligibility read failed")
         return True
 
-    backend, _, _ = _backend(logs=logs, metrics=metrics, enabled=enabled_gate)
+    backend, _, _ = _backend(tmp_path, logs=logs, metrics=metrics, enabled=enabled_gate)
     backend.defer_until_exit(CHILD_DEFER)
     backend.export_batch([otlp_test_event()])
     assert backend._deferral.is_active()
