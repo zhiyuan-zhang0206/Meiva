@@ -4,8 +4,8 @@
 from __future__ import annotations
 
 import random
-from collections.abc import Callable
-from dataclasses import dataclass
+from collections.abc import Callable, Mapping
+from dataclasses import dataclass, field
 from functools import partial
 from pathlib import Path
 
@@ -56,6 +56,7 @@ class HandoffSettlement:
     local_machine: str
     home: Path
     rng: random.Random
+    environ: Mapping[str, str] = field(repr=False)
 
 
 @dataclass(frozen=True)
@@ -88,6 +89,7 @@ async def settle_handoff_before_invocation(
             host=process_host(
                 settlement.local_machine,
                 home=settlement.home,
+                environ=settlement.environ,
                 rng=settlement.rng,
                 clock=settlement.timestamps.clock,
             ),
@@ -172,6 +174,7 @@ async def finish_completed_invocation(
                 host=process_host(
                     hooks.settlement.local_machine,
                     home=hooks.settlement.home,
+                    environ=hooks.settlement.environ,
                     rng=hooks.settlement.rng,
                     clock=hooks.settlement.timestamps.clock,
                 ),

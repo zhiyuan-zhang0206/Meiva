@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 import random
 import subprocess
 import sys
@@ -268,6 +269,7 @@ def stub_host(
         local_machine=cluster.local_machine,
         workspaces_root=tmp_path / "workspaces",
         relay_program=relay_program(tmp_path / "relay", mode),
+        environ=dict(os.environ),
         wait=wait,
         rng=rng,
         clock=fixed_clock(),
@@ -284,7 +286,9 @@ def start_stub(directory: Path, mode: str) -> subprocess.Popen[bytes]:
         antigravity_endpoint_file=None,
         codex_home=None,
     )
-    return spawn_relay(relay_program(directory, mode), binding, token=STUB_CREDENTIAL)
+    return spawn_relay(
+        relay_program(directory, mode), binding, token=STUB_CREDENTIAL, environ=dict(os.environ)
+    )
 
 
 def exited_child(directory: Path) -> subprocess.Popen[bytes]:

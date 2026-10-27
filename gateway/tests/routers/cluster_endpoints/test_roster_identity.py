@@ -6,6 +6,8 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import os
+from dataclasses import replace
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -23,6 +25,7 @@ from gateway.cluster.roster.roster_probe import IdentityMismatchLog
 from gateway.cluster.roster.roster_rows import RosterRowSpec
 from gateway.cluster.status import RosterEnv
 from gateway.tests.auth.gateway_config import gateway_test_rpc
+from gateway.tests.routers.cluster_endpoints.cluster_support import prod_source_checkout
 from gateway.tests.support.runner_ops.ops_stub import OpsCall, OpsReply, completed, runner_ops
 
 
@@ -50,11 +53,27 @@ def _env(
         probe_timeout_s=8.0,
         clock=system_clock(),
         rpc=gateway_test_rpc(),
+        environ=dict(os.environ),
     )
 
 
 def _gather(env: RosterEnv, rows: list[RosterRowSpec]) -> list[MachineStatus]:
     return asyncio.run(status_mod.gather_cluster_status(env, rows, None))
+
+
+# meiva:note
+# The gateway's own checkout sha is read with the environment the roster was built with: git
+# honours `GIT_DIR`, so an environment that points it nowhere reads no sha at all.
+def test_the_local_head_sha_is_read_with_the_environment_the_roster_holds(
+    database: Database, tmp_path: Path, *, machine_identity: MachineIdentityReader
+) -> None:
+    head = prod_source_checkout(tmp_path)
+    env = _env(database, machine_identity, tmp_path, IdentityMismatchLog())
+
+    assert status_mod.read_local_facts(env, with_resource=False).head_sha == head
+
+    blind = replace(env, environ={**os.environ, "GIT_DIR": str(tmp_path / "no-such-git-dir")})
+    assert status_mod.read_local_facts(blind, with_resource=False).head_sha is None
 
 
 def _answer(name: str, **extra: object) -> OpsReply:

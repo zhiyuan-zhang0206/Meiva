@@ -320,9 +320,41 @@ def test_the_spawned_relay_receives_its_credential_over_the_pipe_only(tmp_path: 
         antigravity_endpoint_file=None,
         codex_home=None,
     )
-    child = spawn_relay(relay_program(marker, "record"), binding, token=CREDENTIAL)
+    child = spawn_relay(
+        relay_program(marker, "record"), binding, token=CREDENTIAL, environ=dict(os.environ)
+    )
     child.wait(timeout=10)
     assert (marker / "token").read_bytes() == CREDENTIAL.encode() + b"\n"
     argv = json.loads((marker / "argv.json").read_text())
     assert argv[:2] == ["impersonate", "relay"]
     assert all(CREDENTIAL not in part for part in argv)
+
+
+# meiva:note
+# The relay's environment is projected from the environment the host hands in, not from the live
+# one: the handed-in `MEIVA_HOME` (host-scope, forwarded) reaches the child, the process's own does not.
+def test_the_spawned_relay_environment_is_projected_from_the_environment_it_is_given(
+    tmp_path: Path,
+) -> None:
+    marker = tmp_path / "received"
+    marker.mkdir()
+    binding = RelayBinding(
+        agent_id=1,
+        lease_id="lease",
+        provider="codex",
+        thread_id="thread",
+        codex_remote=None,
+        antigravity_endpoint_file=None,
+        codex_home=None,
+    )
+    given_home = str(tmp_path / "given-home")
+
+    child = spawn_relay(
+        relay_program(marker, "record"),
+        binding,
+        token=CREDENTIAL,
+        environ={**os.environ, "MEIVA_HOME": given_home},
+    )
+    child.wait(timeout=10)
+
+    assert json.loads((marker / "env.json").read_text())["MEIVA_HOME"] == given_home

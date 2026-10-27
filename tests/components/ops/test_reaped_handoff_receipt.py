@@ -1,9 +1,10 @@
+import os
+
 # meiva:note
 # The load-bearing link of the held-path settle ladder (#5468): a row the reaper had to take
 # still owes its handoff receipt, so the resurrected agent's first turn must write it.
 # Nothing else in the suite covers resurrect x handoff, and without this the deadlock would
 # only move from zero seconds to the reap grace.
-
 import random
 from collections.abc import Iterator
 from pathlib import Path
@@ -159,6 +160,7 @@ async def test_a_reaped_handoff_receipt_lands_on_the_resurrected_agents_first_tu
         local_machine=_MACHINE,
         home=meiva_home(),
         rng=_rng(),
+        environ=dict(os.environ),
     )
     await settle_handoff_before_invocation(
         graph, ctx, agent_id, fresh_input=False, settlement=settlement

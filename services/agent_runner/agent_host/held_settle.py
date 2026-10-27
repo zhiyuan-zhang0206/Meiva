@@ -19,8 +19,8 @@ from __future__ import annotations
 
 import asyncio
 import random
-from collections.abc import Awaitable, Callable
-from dataclasses import dataclass
+from collections.abc import Awaitable, Callable, Mapping
+from dataclasses import dataclass, field
 from pathlib import Path
 
 from psycopg_pool import AsyncConnectionPool
@@ -58,6 +58,7 @@ class HeldSettle:
     timestamps: TimestampSource
     machine: str
     home: Path
+    environ: Mapping[str, str] = field(repr=False)
     stats: HostStats
     rng: random.Random
     # meiva:note
@@ -105,7 +106,11 @@ async def _settle_attempts(
                 incarnation=incarnation,
                 timestamps=held.timestamps,
                 host=process_host(
-                    held.machine, home=held.home, rng=held.rng, clock=held.timestamps.clock
+                    held.machine,
+                    home=held.home,
+                    environ=held.environ,
+                    rng=held.rng,
+                    clock=held.timestamps.clock,
                 ),
             )
         except ImpersonationError:

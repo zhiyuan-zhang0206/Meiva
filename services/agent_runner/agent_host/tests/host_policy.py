@@ -35,6 +35,7 @@ def configured_policy(**changes: Any) -> HostPolicy:
             clock_factory=Clock.from_settings,
             harness_registration_ttl_seconds=daemon.harness_registration_ttl_seconds,
             harness_environ={"HOME": "/nonexistent/host-policy-home"},
+            environ=dict(os.environ),
             # meiva:note
             # The host's generator draws credentials, so it is a SystemRandom in a test too.
             rng=SecureRandom(random.SystemRandom()),

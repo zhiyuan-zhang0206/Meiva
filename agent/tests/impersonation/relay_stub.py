@@ -12,6 +12,7 @@ def main() -> None:
     (marker / "argv.json").write_text(json.dumps(command), encoding="utf-8")
     (marker / "token").write_bytes(token)
     (marker / "pid").write_text(str(os.getpid()), encoding="utf-8")
+    (marker / "env.json").write_text(json.dumps(dict(os.environ)), encoding="utf-8")
     kind, _, argument = mode.partition(":")
     if kind == "exit":
         sys.exit(int(argument))

@@ -1,5 +1,6 @@
 import asyncio
 import io
+import os
 import random
 import sys
 from dataclasses import replace
@@ -341,6 +342,7 @@ async def test_termination_notices_precede_resurrection_in_native_claim(
             rng=_rng(),
             clock=Clock.from_settings(),
             home=unit_home,
+            environ=dict(os.environ),
         ),
     )
     resumed = await claim_node(
