@@ -19,6 +19,7 @@ from pathlib import Path
 import psutil
 import pytest
 
+from base.clock import SYSTEM_TIMERS
 from base.host.permissions_helper.client import PermissionsHelperError, RootStatus
 from base.host.system.tests.fake_commands import DARWIN_ARM64, fake_host
 from base.host.tests.short_tmp import short_tmp as short_tmp
@@ -333,6 +334,7 @@ def test_generation_change_refuses_without_signal_or_seed_publication(
             runtime=runtime_at(repo),
             honor_restart_budget=False,
             inputs=launch_inputs(short_tmp),
+            timers=SYSTEM_TIMERS,
         )
 
     assert result.failed == ("meiva-gateway",)
@@ -358,6 +360,7 @@ def test_an_identical_generation_is_reused_and_only_its_stopped_units_are_brough
             runtime=runtime_at(repo),
             honor_restart_budget=False,
             inputs=launch_inputs(short_tmp),
+            timers=SYSTEM_TIMERS,
         )
 
     assert result == driver.LaunchOutcome(roster, ())
@@ -382,6 +385,7 @@ def test_a_core_unit_the_root_refuses_fails_the_whole_launch(
             runtime=runtime_at(repo),
             honor_restart_budget=False,
             inputs=launch_inputs(short_tmp),
+            timers=SYSTEM_TIMERS,
         )
 
     assert result == driver.LaunchOutcome(roster, ("meiva-gateway",))
@@ -411,6 +415,7 @@ def test_a_root_with_an_unreadable_status_fails_the_launch_without_raising(
             runtime=runtime_at(repo),
             honor_restart_budget=False,
             inputs=launch_inputs(short_tmp),
+            timers=SYSTEM_TIMERS,
         )
 
     assert result == driver.LaunchOutcome(roster, ("meiva-gateway",))
@@ -441,6 +446,7 @@ def test_a_unit_that_exits_again_after_up_is_reported_with_the_roots_last_error(
             runtime=runtime_at(repo),
             honor_restart_budget=False,
             inputs=launch_inputs(short_tmp),
+            timers=SYSTEM_TIMERS,
         )
 
     assert result == driver.LaunchOutcome(roster, ("meiva-gateway",))
@@ -550,6 +556,7 @@ def test_mac_helper_protocol_refuses_fallback(short_tmp: Path) -> None:
             {},
             retained_children=[],
             helper=serve(silent),
+            timers=SYSTEM_TIMERS,
         )
 
 
@@ -564,7 +571,9 @@ def test_helper_seed_is_durable_before_wire_start(short_tmp: Path) -> None:
         assert path.stat().st_mode & 0o777 == 0o600
         return {"state": "running", "seeded": True, "restarts": 0, "stop_requested": False}
 
-    driver.seed_via_helper(launch, env, helper=serve(ScriptedHelper(seed_root=seed)))
+    driver.seed_via_helper(
+        launch, env, helper=serve(ScriptedHelper(seed_root=seed)), timers=SYSTEM_TIMERS
+    )
 
 
 def test_seed_wait_follows_the_keeper_until_it_reports_the_root_running(short_tmp: Path) -> None:
@@ -577,7 +586,7 @@ def test_seed_wait_follows_the_keeper_until_it_reports_the_root_running(short_tm
 
     helper = ScriptedHelper(seed_root=reading(), root_status=reading)
 
-    driver.seed_via_helper(launch, {}, helper=serve(helper), interval_s=0.01)
+    driver.seed_via_helper(launch, {}, helper=serve(helper), interval_s=0.01, timers=SYSTEM_TIMERS)
 
     # meiva:note
     # The wait read every scripted answer: it did not stop at the first non-final one.
@@ -596,7 +605,9 @@ def test_seed_wait_reports_a_keeper_that_stopped_restarting_root(short_tmp: Path
     }
 
     with pytest.raises(driver.RootDriverError, match="stopped restarting"):
-        driver.seed_via_helper(launch, {}, helper=serve(ScriptedHelper(seed_root=exited)))
+        driver.seed_via_helper(
+            launch, {}, helper=serve(ScriptedHelper(seed_root=exited)), timers=SYSTEM_TIMERS
+        )
 
 
 def test_seed_wait_gives_up_on_a_keeper_that_never_settles(short_tmp: Path) -> None:
@@ -616,6 +627,7 @@ def test_seed_wait_gives_up_on_a_keeper_that_never_settles(short_tmp: Path) -> N
             helper=serve(ScriptedHelper(seed_root=backoff)),
             timeout_s=0.0,
             interval_s=0.01,
+            timers=SYSTEM_TIMERS,
         )
 
 
@@ -623,7 +635,9 @@ def test_await_root_status_returns_the_snapshot_of_the_serving_root(short_tmp: P
     launch = launch_of(short_tmp, Path(sys.executable))
 
     with scripted_root(short_tmp, [UnitRow("gateway")]):
-        snapshot = driver.await_root_status(driver.root_client(short_tmp), launch)
+        snapshot = driver.await_root_status(
+            driver.root_client(short_tmp), launch, timers=SYSTEM_TIMERS
+        )
 
     assert list(root_units(snapshot)) == ["gateway"]
 
@@ -635,7 +649,11 @@ def test_a_root_that_never_serves_fails_with_the_tail_of_its_log(short_tmp: Path
 
     with pytest.raises(driver.RootDriverError, match="did not become ready within 0s") as failure:
         driver.await_root_status(
-            driver.root_client(short_tmp), launch, timeout_s=0.0, interval_s=0.01
+            driver.root_client(short_tmp),
+            launch,
+            timeout_s=0.0,
+            interval_s=0.01,
+            timers=SYSTEM_TIMERS,
         )
 
     assert "boom: cannot bind" in str(failure.value)
@@ -653,6 +671,7 @@ def test_a_root_that_exits_before_serving_fails_with_its_code_and_log(short_tmp:
             {"PATH": os.environ["PATH"]},
             retained_children=children,
             helper=None,
+            timers=SYSTEM_TIMERS,
         )
 
     assert "no such wiring" in str(failure.value)
@@ -675,6 +694,7 @@ def test_a_direct_launch_retains_its_child_and_cannot_have_it_reaped_by_an_unrel
             {"PATH": os.environ["PATH"]},
             retained_children=children,
             helper=None,
+            timers=SYSTEM_TIMERS,
         )
     assert snapshot["root"]["pid"] == os.getpid()
     assert len(children) == 1

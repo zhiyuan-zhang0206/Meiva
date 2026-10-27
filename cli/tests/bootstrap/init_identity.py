@@ -8,6 +8,7 @@ from base.paths.private_dir import ensure_private_dir
 from cli import init_intent, start_identity
 from cli.start_runtime import HomeSite
 from cli.startup.service_path import CallerHost
+from cli.startup.tests.birth_facts import birth_facts
 
 
 # meiva:note
@@ -19,8 +20,17 @@ def caller_host(
     virtual_env: str | None = None,
     prefix_venv: str | None = None,
     occupied_ports: frozenset[int] = frozenset(),
+    local_names: frozenset[str] = frozenset(),
 ) -> CallerHost:
-    return CallerHost(service_path, path, virtual_env, prefix_venv, occupied_ports)
+    return CallerHost(
+        service_path,
+        path,
+        virtual_env,
+        prefix_venv,
+        occupied_ports,
+        local_names=local_names,
+        birth=birth_facts(),
+    )
 
 
 # meiva:note
@@ -48,6 +58,7 @@ def initialized_runner_home(home: Path, checkout: Path) -> Path:
                 "MEIVA_SERVICE_PATH": str(checkout.parent / "tools"),
             },
             occupied_ports=frozenset(),
+            birth=birth_facts(),
         )
     )
     return home

@@ -12,7 +12,6 @@ from __future__ import annotations
 
 import asyncio
 from collections.abc import Collection
-from datetime import UTC, datetime
 from typing import Any
 
 from langchain_core.runnables import RunnableConfig
@@ -346,7 +345,7 @@ class _MemoryWriteCheckHook(Hook):
         note = system_note_message(
             content=render_reminder(reports),
             tag=NoteTag.MEMORY_WRITE_CHECK,
-            created_at=datetime.now(UTC),
+            created_at=runtime.context.require_clock().now(),
         )
         return {**cleared, "messages": [note]}
 

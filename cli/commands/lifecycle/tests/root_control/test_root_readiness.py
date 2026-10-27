@@ -7,6 +7,7 @@ from pathlib import Path
 
 import pytest
 
+from base.clock import SYSTEM_TIMERS
 from base.daemon.health import DaemonProbe
 from base.host.tests.short_tmp import short_tmp as short_tmp
 from cli.commands.lifecycle import root_readiness as readiness
@@ -38,7 +39,9 @@ def test_readiness_probes_now_instead_of_believing_the_roots_cached_health(
     gateway = service(probe=down)
 
     with scripted_root(short_tmp, [UnitRow("gateway")]):
-        result = readiness.wait_for_service_tree((gateway,), timeout_s=0, home=short_tmp)
+        result = readiness.wait_for_service_tree(
+            (gateway,), timeout_s=0, home=short_tmp, timers=SYSTEM_TIMERS
+        )
 
     assert result.unready == (gateway,)
     assert not result.sessions_gone
@@ -53,7 +56,7 @@ def test_a_root_with_an_unreadable_status_leaves_the_core_unready(short_tmp: Pat
     with scripted_root(short_tmp, [UnitRow("gateway")]) as root:
         root.raw_unit_rows = [{"id": "gateway", "state": "running", "last_error": 5}]
         result = readiness.wait_for_service_tree(
-            (gateway,), timeout_s=0.05, home=short_tmp, poll_interval_s=POLL_S
+            (gateway,), timeout_s=0.05, home=short_tmp, poll_interval_s=POLL_S, timers=SYSTEM_TIMERS
         )
 
     assert result.unready == (gateway,)
@@ -63,7 +66,7 @@ def test_a_root_with_an_unreadable_status_leaves_the_core_unready(short_tmp: Pat
 def test_a_ready_core_settles_on_one_status_observation(short_tmp: Path) -> None:
     with scripted_root(short_tmp, [UnitRow("gateway")]) as root:
         result = readiness.wait_for_service_tree(
-            (service(probe=up),), timeout_s=FAR_S, home=short_tmp
+            (service(probe=up),), timeout_s=FAR_S, home=short_tmp, timers=SYSTEM_TIMERS
         )
 
     assert result.unready == ()
@@ -79,6 +82,7 @@ def test_a_service_that_comes_up_during_the_wait_is_waited_for(short_tmp: Path) 
             timeout_s=FAR_S,
             home=short_tmp,
             poll_interval_s=POLL_S,
+            timers=SYSTEM_TIMERS,
         )
 
     assert result.unready == ()
@@ -94,7 +98,11 @@ def test_optional_failure_does_not_delay_a_ready_core(short_tmp: Path) -> None:
 
     with scripted_root(short_tmp, [UnitRow("gateway"), UnitRow("browser-mcp", state="stopped")]):
         result = readiness.wait_for_service_tree(
-            (core, background), timeout_s=FAR_S, home=short_tmp, poll_interval_s=POLL_S
+            (core, background),
+            timeout_s=FAR_S,
+            home=short_tmp,
+            poll_interval_s=POLL_S,
+            timers=SYSTEM_TIMERS,
         )
 
     assert result.unready == ()
@@ -106,7 +114,9 @@ def test_a_stopped_core_unit_is_not_ready_even_if_its_endpoint_answers(short_tmp
     gateway = service(probe=up)
 
     with scripted_root(short_tmp, [UnitRow("gateway", state="stopped")]):
-        result = readiness.wait_for_service_tree((gateway,), timeout_s=FAR_S, home=short_tmp)
+        result = readiness.wait_for_service_tree(
+            (gateway,), timeout_s=FAR_S, home=short_tmp, timers=SYSTEM_TIMERS
+        )
 
     assert result.unready == (gateway,)
     assert result.sessions_gone
@@ -117,7 +127,7 @@ def test_missing_root_ipc_is_unknown_not_positive_exit(short_tmp: Path) -> None:
     gateway = service(probe=up)
 
     result = readiness.wait_for_service_tree(
-        (gateway,), timeout_s=0.05, home=short_tmp, poll_interval_s=POLL_S
+        (gateway,), timeout_s=0.05, home=short_tmp, poll_interval_s=POLL_S, timers=SYSTEM_TIMERS
     )
 
     assert result.unready == (gateway,)
@@ -127,7 +137,9 @@ def test_missing_root_ipc_is_unknown_not_positive_exit(short_tmp: Path) -> None:
 
 def test_a_spent_budget_still_makes_one_observation(short_tmp: Path) -> None:
     with scripted_root(short_tmp, [UnitRow("gateway")]) as root:
-        result = readiness.wait_for_service_tree((service(probe=up),), timeout_s=0, home=short_tmp)
+        result = readiness.wait_for_service_tree(
+            (service(probe=up),), timeout_s=0, home=short_tmp, timers=SYSTEM_TIMERS
+        )
 
     assert result.unready == ()
     assert len(root.calls) == 1

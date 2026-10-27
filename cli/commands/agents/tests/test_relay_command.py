@@ -18,7 +18,6 @@ import pytest
 from base.agents import impersonation as leases
 from base.agents.impersonation import relay as lease_relay
 from base.agents.impersonation.status import ImpersonationStatus
-from base.clock.tests.seeded_rng import seeded_rng
 from base.cluster.machine import MachineIdentityReader
 from base.cluster.machine.tests.identity import machine_identity as machine_identity
 from base.db import Database
@@ -39,7 +38,7 @@ from cli.commands.agents.tests.lease_support import (
 from cli.commands.agents.tests.lease_support import active as active
 from cli.commands.agents.tests.lease_support import lease_at as lease_at
 from cli.commands.agents.tests.loopback_hosts import codex_app_server, short_socket_path
-from cli.commands.agents.tests.relay_harness import THREAD
+from cli.commands.agents.tests.relay_harness import REAL_CLOCK, THREAD
 from cli.database import OperatorDatabaseFactory
 from cli.database.tests.cli_tests import operator_database as operator_database
 from cli.database.tests.command_inputs import command_runtime as command_runtime
@@ -65,6 +64,7 @@ def test_the_relay_command_runs_a_claude_relay_to_the_leases_expiry(
     active: ActiveSession,
     db_conn: psycopg.Connection,
     redis_url: str,
+    event_bus: EventBus,
     operator_database: OperatorDatabaseFactory,
     capsys: pytest.CaptureFixture[str],
     *,
@@ -86,7 +86,8 @@ def test_the_relay_command_runs_a_claude_relay_to_the_leases_expiry(
             codex_home=None,
             antigravity_server=None,
             stdout=stdout,
-            rng=seeded_rng(),
+            bus=event_bus,
+            clock=REAL_CLOCK,
         ),
         database_factory=operator_database,
         machine=machine_identity,
@@ -105,6 +106,7 @@ def test_the_relay_command_reports_a_host_that_refuses_to_be_steered(
     active: ActiveSession,
     db_conn: psycopg.Connection,
     redis_url: str,
+    event_bus: EventBus,
     operator_database: OperatorDatabaseFactory,
     capsys: pytest.CaptureFixture[str],
     *,
@@ -121,7 +123,8 @@ def test_the_relay_command_reports_a_host_that_refuses_to_be_steered(
                 codex_home=None,
                 antigravity_server=None,
                 stdout=stdout,
-                rng=seeded_rng(),
+                bus=event_bus,
+                clock=REAL_CLOCK,
             ),
             database_factory=operator_database,
             machine=machine_identity,
@@ -138,6 +141,7 @@ def test_unresolvable_destination_exits_before_any_lease_work(
     active: ActiveSession,
     tmp_path: Path,
     redis_url: str,
+    event_bus: EventBus,
     operator_database: OperatorDatabaseFactory,
     capsys: pytest.CaptureFixture[str],
     *,
@@ -159,7 +163,8 @@ def test_unresolvable_destination_exits_before_any_lease_work(
             codex_home=None,
             antigravity_server=None,
             stdout=stdout,
-            rng=seeded_rng(),
+            bus=event_bus,
+            clock=REAL_CLOCK,
         ),
         database_factory=operator_database,
         machine=machine_identity,
@@ -173,6 +178,7 @@ def test_unresolvable_destination_exits_before_any_lease_work(
 def test_agent_mismatch_refuses_inbox_before_subscription(
     active: ActiveSession,
     redis_url: str,
+    event_bus: EventBus,
     operator_database: OperatorDatabaseFactory,
     capsys: pytest.CaptureFixture[str],
     *,
@@ -188,7 +194,8 @@ def test_agent_mismatch_refuses_inbox_before_subscription(
             codex_home=None,
             antigravity_server=None,
             stdout=stdout,
-            rng=seeded_rng(),
+            bus=event_bus,
+            clock=REAL_CLOCK,
         ),
         database_factory=operator_database,
         machine=machine_identity,
@@ -200,6 +207,7 @@ def test_agent_mismatch_refuses_inbox_before_subscription(
 def test_the_relay_command_refuses_a_credential_the_lease_did_not_mint(
     active: ActiveSession,
     redis_url: str,
+    event_bus: EventBus,
     operator_database: OperatorDatabaseFactory,
     capsys: pytest.CaptureFixture[str],
     *,
@@ -214,7 +222,8 @@ def test_the_relay_command_refuses_a_credential_the_lease_did_not_mint(
             codex_home=None,
             antigravity_server=None,
             stdout=io.StringIO(),
-            rng=seeded_rng(),
+            bus=event_bus,
+            clock=REAL_CLOCK,
         ),
         database_factory=operator_database,
         machine=machine_identity,

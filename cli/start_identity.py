@@ -11,9 +11,7 @@ holds a data plane cannot be born again over it; explicit reattachment is requir
 from __future__ import annotations
 
 import json
-import secrets
 from dataclasses import asdict, dataclass, replace
-from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, TypeGuard
 
@@ -25,6 +23,7 @@ from base.host.env.dotenv_file import upsert_env
 from base.host.net.auth import require_cluster_secret
 from base.host.private_storage import ensure_private_file
 from base.paths.private_dir import ensure_private_dir
+from cli.startup.service_path import BirthFacts
 
 INTENT_NAME = cluster.INTENT_NAME
 _CAPS = ("gateway", "agent-runner", "observability-station")
@@ -56,6 +55,9 @@ class IdentityInput:
     # Ports of the fixed table that something already holds: the entry probes them once. Required,
     # so a caller that forgets to probe cannot silently skip the "ports occupied" refusal.
     occupied_ports: frozenset[int]
+    # meiva:note
+    # The instant the home is born and the secrets minted for it; the entry chooses them once.
+    birth: BirthFacts
     config_digest: str | None = None
 
 
@@ -179,7 +181,7 @@ def _new_record(inputs: IdentityInput) -> cluster.ClusterRecord:
     return cluster.ClusterRecord(
         ports=ports,
         gateway_home=str(inputs.home),
-        created_at=datetime.now(UTC).isoformat(),
+        created_at=inputs.birth.now.isoformat(),
         data_plane_host=inputs.values.get("MEIVA_DATA_PLANE_HOST", ""),
     )
 
@@ -188,7 +190,7 @@ def gateway_values(rec: cluster.ClusterRecord, inputs: IdentityInput) -> dict[st
     vals = inputs.values
     # Every cluster is born with a human secret: an explicit input wins, else one
     # is minted. The API is always authenticated.
-    secret = vals.get("MEIVA_CLUSTER_SECRET") or secrets.token_urlsafe(32)
+    secret = vals.get("MEIVA_CLUSTER_SECRET") or inputs.birth.cluster_secret
     db, redis = cluster.per_cluster_base_urls(rec)
     derived = cluster.derive_env(
         rec,
@@ -199,8 +201,8 @@ def gateway_values(rec: cluster.ClusterRecord, inputs: IdentityInput) -> dict[st
         # 2026-09-26-internal-data-plane-always-authenticated.md). Postgres
         # needs no minted password: its owner is NOLOGIN and the first start
         # mints write generation 0 into the home's database authority store.
-        redis_admin_password=secrets.token_urlsafe(32),
-        redis_password=secrets.token_urlsafe(32),
+        redis_admin_password=inputs.birth.redis_admin_password,
+        redis_password=inputs.birth.redis_password,
         pgbouncer_enabled=vals.get("MEIVA_PGBOUNCER_ENABLED", "true").lower()
         in {"1", "true", "yes", "on"},
     )

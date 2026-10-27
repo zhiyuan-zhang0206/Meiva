@@ -9,7 +9,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import TextIO
 
-from base.clock import SYSTEM_TIMERS, Timers
+from base.clock import SYSTEM_TIMERS, Clock, ClockConfig, Timers
+from base.clock.ids import new_uuid
 from base.cluster.machine.configured import ConfiguredMachineIdentity
 from base.config import ConfigBoot
 from base.host.permissions_helper.client import HelperFactory
@@ -17,7 +18,7 @@ from base.host.system.hostport import Host
 from base.paths import repo_root
 from base.sessions.helperproc import helper_for
 
-__all__ = ["CommandRuntime", "Terminal", "UserSession"]
+__all__ = ["CommandRuntime", "Terminal", "UserSession", "delivered_config"]
 
 
 # meiva:note
@@ -76,6 +77,19 @@ class Terminal:
         return cls(sys.stdin, sys.stdout, sys.stderr)
 
 
+# meiva:note
+# The configuration owner with this process's startup delivery captured, once.
+#
+# An owner that was not prepared yet captures the delivery the process already made at startup
+# instead of delivering it a second time (a second gateway fetch on a pure runner); a prepared
+# owner already holds it. A command that hands its owner to code that reads configuration calls
+# this at the verb's door.
+def delivered_config(config: ConfigBoot) -> ConfigBoot:
+    if not config.prepared:
+        config.read_process_environment()
+    return config
+
+
 @dataclass(frozen=True)
 class CommandRuntime:
     """Keep one lazy identity through dispatch and embedded lifecycle legs."""
@@ -105,10 +119,23 @@ class CommandRuntime:
     # builds and never makes a second one.
     rng: random.Random
     # meiva:note
+    # The wall clock of this invocation, over the same `timers`. A command asks it for the instant it
+    # stamps or compares with (`clock.now()`, UTC) and passes that value down; the real one carries
+    # the UTC zone because an instant has none to choose, and a command that formats times for a
+    # person builds a clock from its configuration owner (`clock_config_from_boot`).
+    clock: Clock
+    # meiva:note
     # The checkout whose code runs this invocation (`base.paths.repo_root`), chosen here with the
     # other process facts. The entry's checkout gate has already accepted it for `home`.
     checkout: Path
     terminal: Terminal
+
+    # meiva:note
+    # A fresh identifier for one gateway request's idempotency key: the 32 lowercase hexadecimal
+    # characters of a version 4 UUID drawn from `rng`, so the invocation has one entropy source
+    # and a test that seeds `rng` fixes every key.
+    def new_id(self) -> str:
+        return new_uuid(self.rng).hex
 
     # meiva:note
     # Construct without reading configuration, identity or network inputs, but for the invoking
@@ -116,10 +143,10 @@ class CommandRuntime:
     # resolved home the entry settled on; it is neither created nor checked here.
     #
     # This is the one place the real permissions-helper factory, the real host, the real
-    # timers, the real user session, the real checkout and the real terminal are chosen: the
-    # helper (for the host's platform) only builds a client and reads the helper's port when a
-    # macOS code path asks for one, and the host only answers when a step asks it to find or run
-    # something.
+    # timers and clock, the real user session, the real random generator, the real checkout and the
+    # real terminal are chosen: the helper (for the host's platform) only builds a client and reads
+    # the helper's port when a macOS code path asks for one, and the host only answers when a step
+    # asks it to find or run something.
     @classmethod
     def create(cls, home: Path) -> CommandRuntime:
         config = ConfigBoot()
@@ -134,6 +161,9 @@ class CommandRuntime:
             session=UserSession.current(),
             timers=SYSTEM_TIMERS,
             rng=_new_rng(),
+            clock=Clock(
+                ClockConfig("UTC", None, message_timestamp_weekday=False), timers=SYSTEM_TIMERS
+            ),
             checkout=repo_root(),
             terminal=Terminal.current(),
         )

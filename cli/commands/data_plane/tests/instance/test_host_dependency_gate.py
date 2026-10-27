@@ -292,6 +292,7 @@ def _context(
         host=host,
         session=UserSession(user_home=tmp_path, login_shell="/bin/zsh", interactive=False),
         timers=command_runtime.timers,
+        clock=command_runtime.clock,
         services=services,
     )
 

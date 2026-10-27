@@ -34,6 +34,7 @@ import shlex
 import shutil
 import sys
 import time
+from datetime import UTC, datetime
 from pathlib import Path
 
 import meiva
@@ -285,7 +286,9 @@ def main(argv: list[str]) -> int:
     refusal = announce_capability("dsh", mode=args.mode, force=args.force_mode)
     if refusal:
         return refusal
-    prompt = f"{require_lineage(parser, args, takeover=True)}\n\n{args.prompt}"
+    prompt = (
+        f"{require_lineage(parser, args, now=datetime.now(UTC), takeover=True)}\n\n{args.prompt}"
+    )
     from meiva.sdk_surface.agent_identity import require_agent_id
 
     require_agent_id()

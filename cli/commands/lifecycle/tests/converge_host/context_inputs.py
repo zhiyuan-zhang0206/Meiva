@@ -55,6 +55,7 @@ def converge_context(
         host=command_runtime.host,
         session=UserSession(user_home=user_home, login_shell="/bin/zsh", interactive=False),
         timers=command_runtime.timers,
+        clock=command_runtime.clock,
         services=frozenset(),
     )
 

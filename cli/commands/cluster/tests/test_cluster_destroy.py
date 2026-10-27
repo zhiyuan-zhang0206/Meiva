@@ -31,6 +31,7 @@ from cli.commands.cluster.home import (
 from cli.commands.cluster.plans.destroy_plan import STOP_INCOMPLETE, StopMode
 from cli.commands.cluster.plans.destroy_plan import stop_argv as stop_argv
 from cli.database.runtime import Terminal
+from cli.startup.tests.birth_facts import birth_facts
 
 
 # meiva:note
@@ -115,6 +116,7 @@ def home(tmp_path: Path, checkout: Path, roles: list[str]) -> Path:
             frozenset(roles),
             {"MEIVA_MACHINE_NAME": "destroyed", "MEIVA_GATEWAY_URL": "http://10.0.0.7:8000"},
             occupied_ports=frozenset(),
+            birth=birth_facts(),
         )
     )
     return home
@@ -325,6 +327,7 @@ def test_a_failure_to_retire_the_jobs_leaves_the_home_attached_and_a_rerun_compl
             frozenset({"gateway"}),
             {"MEIVA_MACHINE_NAME": "destroyed", "MEIVA_GATEWAY_URL": "http://10.0.0.7:8000"},
             occupied_ports=frozenset(),
+            birth=birth_facts(),
         )
     )
     broken = FakeCommands()

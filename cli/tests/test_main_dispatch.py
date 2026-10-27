@@ -402,6 +402,11 @@ def test_init_receives_its_site_and_the_hosts_facts(unit_home: Path) -> None:
     ns = captured["args"]
     assert ns.site == HomeSite(unit_home.resolve(), checkout)
     assert isinstance(ns.caller_host, CallerHost)
+    birth = ns.caller_host.birth
+    assert birth.now.tzinfo is not None
+    assert len({birth.cluster_secret, birth.redis_admin_password, birth.redis_password}) == 3
+    assert all(len(secret) >= 32 for secret in (birth.cluster_secret, birth.redis_password))
+    assert ns.caller_host.local_names == frozenset()
 
 
 # meiva:note
