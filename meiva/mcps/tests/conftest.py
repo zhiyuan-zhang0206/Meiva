@@ -8,3 +8,4 @@ from base.packages.tests.model_catalog import set_prices as set_prices
 from base.paths.tests.homes import unit_home as unit_home
 from meiva.sdk_surface.tests.agent_binding import bound_agent as bound_agent
 from meiva.sdk_surface.tests.agent_binding import no_agent as no_agent
+from meiva.sdk_surface.tests.context_home import context_over_unit_home as context_over_unit_home

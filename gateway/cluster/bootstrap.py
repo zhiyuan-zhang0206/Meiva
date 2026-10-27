@@ -32,7 +32,9 @@ def get_bootstrap(
     try:
         return request.app.state.config_authority.bootstrap_config_values(
             provider_key_envs=catalog.key_envs,
-            plugin_cluster_config=plugin_bootstrap_config(),
+            plugin_cluster_config=plugin_bootstrap_config(
+                home=request.app.state.gateway_process.home
+            ),
         )
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc

@@ -236,6 +236,7 @@ async def post_agent_restart(
                 body.config_overlay,
                 models=catalog.models,
                 decision_models=catalog.decision_models,
+                home=request.app.state.gateway_process.home,
             )
         except InvalidConfigOverlay as exc:
             raise HTTPException(status_code=422, detail=str(exc)) from exc

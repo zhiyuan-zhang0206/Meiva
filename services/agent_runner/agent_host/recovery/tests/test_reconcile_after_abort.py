@@ -202,7 +202,7 @@ async def test_cold_build_consumes_claims_without_reading_checkpoint_history(
         db=Database.from_settings(gate=database_gate),
         catalog=model_catalog,
         machine=configured_machine(),
-        commands=CommandCatalog.system(skills=list),
+        commands=CommandCatalog.system(skills=list, home=meiva_home()),
     )
     slices = AgentSlices.resolve(default_reader=defaults())
 

@@ -603,7 +603,9 @@ def main() -> None:
     try:
         config = read_service_config("meiva_fleet", FleetConfig)
         if config is None:
-            config = read_config_image(FleetConfig, disk_image_path("meiva_fleet"))
+            config = read_config_image(
+                FleetConfig, disk_image_path("meiva_fleet", home=process_home)
+            )
         asyncio.run(
             run(
                 config,

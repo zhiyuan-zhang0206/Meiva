@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 from collections.abc import Callable
+from functools import partial
 from pathlib import Path
 from typing import Any
 
@@ -103,7 +104,11 @@ def test_extensions_kept_local_edits_report_converge_file_preserved(
             reg.register_tree(
                 registry_pool, root=version_one, name="edit-demo", kind="skill", source="local:home"
             )
-        assert mat.materialize_skills(db_conn, dest_root=skills_root).landed == ["edit-demo"]
+        assert mat.materialize_skills(
+            db_conn,
+            dest_root=skills_root,
+            last_written=partial(mat.last_written_hash, home=home),
+        ).landed == ["edit-demo"]
         (skills_root / "edit-demo" / "SKILL.md").write_text(
             _SKILL.format(body="MY LOCAL EDIT"), encoding="utf-8"
         )
@@ -112,7 +117,9 @@ def test_extensions_kept_local_edits_report_converge_file_preserved(
                 registry_pool, root=version_two, name="edit-demo", kind="skill", source="local:home"
             )
 
-        materialize_cluster_extensions(database_factory=operator_database, skills_root=skills_root)
+        materialize_cluster_extensions(
+            database_factory=operator_database, skills_root=skills_root, home=home
+        )
 
     assert "MY LOCAL EDIT" in (skills_root / "edit-demo" / "SKILL.md").read_text(encoding="utf-8")
     assert emitted_events.attributes("converge_file_preserved") == [

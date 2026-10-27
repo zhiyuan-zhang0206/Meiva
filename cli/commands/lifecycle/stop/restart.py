@@ -335,7 +335,9 @@ def cmd_restart_agent_host(
             if client is None:
                 code = 1
             else:
-                spec = next(spec for spec in build_services() if spec.session == AGENT_HOST)
+                spec = next(
+                    spec for spec in build_services(home=command.home) if spec.session == AGENT_HOST
+                )
                 code = restart_agent_host(
                     command, client, spec, force=force, timeout=timeout, start_timeout=start_timeout
                 )

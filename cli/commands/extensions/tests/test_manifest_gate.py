@@ -87,7 +87,7 @@ def test_mcp_install_refuses_manifest_beyond_host_engines(
     _write_manifest(pkg, bad)
     assert cmd_mcp_install(str(pkg), None, None, uv=uv, home=unit_home, now=datetime.now(UTC)) == 1
     assert "requires Meiva >=2099" in capsys.readouterr().err  # pyright: ignore[reportUnknownMemberType]
-    assert reg.get("acme") is None
+    assert reg.get("acme", home=unit_home) is None
     assert not (unit_home / "mcps" / "acme").exists()
 
 
@@ -104,7 +104,7 @@ def test_mcp_install_refuses_unbounded_pyproject(
     )
     assert cmd_mcp_install(str(pkg), None, None, uv=uv, home=unit_home, now=datetime.now(UTC)) == 1
     assert "#1198" in capsys.readouterr().err  # pyright: ignore[reportUnknownMemberType]
-    assert reg.get("acme") is None
+    assert reg.get("acme", home=unit_home) is None
 
 
 def test_mcp_install_refuses_pyproject_out_of_declared_range(
@@ -119,7 +119,7 @@ def test_mcp_install_refuses_pyproject_out_of_declared_range(
     )
     assert cmd_mcp_install(str(pkg), None, None, uv=uv, home=unit_home, now=datetime.now(UTC)) == 1
     assert "reaches above" in capsys.readouterr().err  # pyright: ignore[reportUnknownMemberType]
-    assert reg.get("acme") is None
+    assert reg.get("acme", home=unit_home) is None
 
 
 def test_mcp_install_refuses_invalid_manifest(
@@ -129,14 +129,14 @@ def test_mcp_install_refuses_invalid_manifest(
     (pkg / "meiva-plugin.json").write_text("not json", encoding="utf-8")
     assert cmd_mcp_install(str(pkg), None, None, uv=uv, home=unit_home, now=datetime.now(UTC)) == 1
     assert "not valid JSON" in capsys.readouterr().err  # pyright: ignore[reportUnknownMemberType]
-    assert reg.get("acme") is None
+    assert reg.get("acme", home=unit_home) is None
 
 
 def test_mcp_install_accepts_valid_manifest(unit_home: Path, tmp_path: Path, uv: UvBuild) -> None:
     pkg = _make_mcp_package(tmp_path)
     _write_manifest(pkg, GOOD_MANIFEST)
     assert cmd_mcp_install(str(pkg), None, None, uv=uv, home=unit_home, now=datetime.now(UTC)) == 0
-    row = reg.get("acme")
+    row = reg.get("acme", home=unit_home)
     assert row is not None
     assert (unit_home / "mcps" / "acme" / "meiva-plugin.json").is_file()
 
@@ -215,7 +215,7 @@ def test_plugins_install_refuses_invalid_manifest_before_detection(
     err = capsys.readouterr().err  # pyright: ignore[reportUnknownMemberType]
     assert "apiVersion" in err
     assert "unrecognized package" not in err  # the gate runs first
-    assert reg.get("pkg") is None
+    assert reg.get("pkg", home=unit_home) is None
 
 
 def test_plugins_install_accepts_manifest_with_valid_engines(
@@ -270,7 +270,7 @@ def test_skill_install_refuses_invalid_manifest_before_discovery(
     )
     err = capsys.readouterr().err  # pyright: ignore[reportUnknownMemberType]
     assert "engines (or requires_commit) is required" in err
-    assert reg.get("x") is None
+    assert reg.get("x", home=unit_home) is None
 
 
 def test_skill_install_valid_manifest_proceeds(
@@ -298,4 +298,4 @@ def test_skill_install_valid_manifest_proceeds(
         )
         == 0
     )
-    assert reg.get("greet") is not None
+    assert reg.get("greet", home=unit_home) is not None

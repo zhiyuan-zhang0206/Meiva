@@ -13,6 +13,7 @@ import pytest
 
 from base.lm.pricing import cost_usd
 from base.packages.plugin_providers import build_model_catalog
+from base.paths import meiva_home
 from base.paths.tests.homes import point_home
 from base.sessions.tests.poll_until import poll_until
 from tests.e2e.fakes.scenarios import budget_handoff
@@ -82,7 +83,7 @@ def test_readers_keep_the_previous_snapshot_until_publication(
 @pytest.mark.parametrize("model", ["deepseek-flash", budget_handoff.BUDGET_MODEL])
 def test_handoff_budget_across_the_daily_price_boundary(model: str) -> None:
     """Only a fixed-price scenario guarantees four calls below and six above its limit."""
-    prices = build_model_catalog().prices
+    prices = build_model_catalog(home=meiva_home()).prices
     before = datetime(2026, 10, 11, 9, 59, 59, tzinfo=UTC)
     after = datetime(2026, 10, 11, 10, 0, 0, tzinfo=UTC)
     limit = cost_usd(model, 50, 25, 0, prices=prices, at=before)

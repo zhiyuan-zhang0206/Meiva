@@ -11,6 +11,7 @@ from base.config.service_read import ConfigAuthority
 from base.host.system.tests.fake_commands import fake_host
 from base.packages.plugins.config_face import disk_image_path
 from base.packages.plugins.extensions import PluginContributions
+from base.paths import meiva_home
 from gateway.tests.auth.gateway_config import gateway_test_client
 from ops.host_config import config_write_op
 from ops.rpc_schemas import ConfigWriteOpResult
@@ -50,7 +51,7 @@ class ValidatedFleetConfig(BaseModel):
         if self.policy_escalate_n < 1 or self.policy_maintenance_limit < 1:
             raise ValueError("candidate Fleet policy rejected")
         if self.policy_escalate_n == 7 or self.policy_maintenance_limit == 7:
-            image = disk_image_path("validated_policy")
+            image = disk_image_path("validated_policy", home=meiva_home())
             competing = image.with_name("competing.json")
             if competing.exists():
                 image.write_bytes(competing.read_bytes())
@@ -86,7 +87,7 @@ def owned_image(unit_home: Path, owner_names: tuple[str, ...]) -> Path:
             "from gateway.tests.routers.config_api.test_plugin_write_errors import contribute\n",
             encoding="utf-8",
         )
-    image = disk_image_path(owner_names[0])
+    image = disk_image_path(owner_names[0], home=unit_home)
     image.parent.mkdir(parents=True, exist_ok=True)
     image.write_text(ValidatedFleetConfig().model_dump_json(), encoding="utf-8")
     return image
@@ -108,6 +109,7 @@ def write_request(
         authority=config_authority,
         local_machine=local_machine,
         host=fake_host(),
+        home=meiva_home(),
     )
 
 

@@ -445,6 +445,7 @@ def restart_blocking(
     *,
     catalog: ModelCatalog,
     default_model: str,
+    home: Path,
 ) -> int | None:
     from base.db.transaction import write_transaction
     from base.packages.plugins.config_registration import validate_config_overlay
@@ -456,6 +457,7 @@ def restart_blocking(
                 body.config_overlay,
                 models=catalog.models,
                 decision_models=catalog.decision_models,
+                home=home,
             )
         except InvalidConfigOverlay as exc:
             raise InvalidModelConfig(str(exc)) from exc
@@ -532,6 +534,7 @@ async def restart_agent_op(
     *,
     catalog: ModelCatalog,
     default_model: str,
+    home: Path,
 ) -> RestartAgentResponse:
     """Local-target restart — INSERT one kind='restart' inbound."""
     iid = await asyncio.to_thread(
@@ -543,6 +546,7 @@ async def restart_agent_op(
         db_pool,
         catalog=catalog,
         default_model=default_model,
+        home=home,
     )
     if iid is None:
         return RestartAgentResponse(status=RestartResult.ALREADY_TERMINATED)
@@ -634,6 +638,7 @@ async def lifecycle_op(
             db_pool,
             catalog=catalog,
             default_model=settings.lm.llm_model,
+            home=home,
         )
     raise AssertionError(f"unreachable: action={action!r}")
 

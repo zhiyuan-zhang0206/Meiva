@@ -12,6 +12,7 @@ can supply.
 from __future__ import annotations
 
 from dataclasses import replace
+from pathlib import Path
 from typing import Unpack
 
 from base.packages.plugins.loading import StateGate
@@ -55,6 +56,7 @@ class LoadExtensionsOptions(InstallOptions, total=False):
 def load_extensions(
     *,
     surface: bool = False,
+    home: Path,
     **options: Unpack[LoadExtensionsOptions],
 ) -> LoadedExtensions:
     report = options.get("report")
@@ -69,7 +71,7 @@ def load_extensions(
         sdk_install.uninstall(retaining_sampling=carried.sampling)
 
     loaded = import_faces(
-        surface=surface, report=report, validate_state=options.get("validate_state")
+        surface=surface, report=report, validate_state=options.get("validate_state"), home=home
     )
     admitted = sdk_install.install(
         loaded.registry,

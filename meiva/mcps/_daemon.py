@@ -88,9 +88,9 @@ type ManagedSession = DirectSession | SerialSession
 #   stateful servers must stay per-connection.
 
 
-def shared_kind(server: str) -> object:
+def shared_kind(server: str, *, home: Path) -> object:
     """The server's `shared` declaration: `"browser"`, True, or falsy (none)."""
-    spec = load_mcp_config().get(server)
+    spec = load_mcp_config(home=home).get(server)
     return spec.get("shared") if spec else None
 
 
@@ -188,7 +188,7 @@ async def invalidate_session(
     """Remove *server*'s dead cached session and close its resources (under
     the session lock to avoid racing a concurrent reconnect). Resolves the
     shared daemon-wide buckets for shared servers, per-connection otherwise."""
-    buckets = scope.buckets_for(shared_kind(server))
+    buckets = scope.buckets_for(shared_kind(server, home=scope.config.home))
     lock = buckets.locks.get(server)
     if lock is None:
         return
@@ -211,7 +211,7 @@ async def invalidate_session(
 async def connect_server(
     server: str, config: DaemonConfig, oauth_locks: dict[str, asyncio.Lock]
 ) -> tuple[DirectSession, AsyncExitStack]:
-    spec = load_mcp_config()[server]
+    spec = load_mcp_config(home=config.home)[server]
     unmet = unmet_requirement(
         validate_requirements(spec), display_available=config.display_available
     )
@@ -221,7 +221,7 @@ async def connect_server(
     if isinstance(plan, HttpConnect):
         return await connect_http(plan, oauth_locks, config.connect_timeout_seconds)
     if isinstance(plan, StdioConnect):
-        return await connect_stdio(server, plan, config.connect_timeout_seconds)
+        return await connect_stdio(server, plan, config.connect_timeout_seconds, home=config.home)
     if plan.service == "browser":
         return await connect_browser_direct(config.home, config.browser_cdp_port)
     return await connect_computer_direct(str(computer_mcp_socket(config.home)))
@@ -230,14 +230,14 @@ async def connect_server(
 # meiva:note
 # Spawn the stdio child of `plan` and initialize an MCP session over it; the child's stderr is discarded. On failure the local stack is closed so no resources (subprocess, pipes, fds) leak.
 async def connect_stdio(
-    server: str, plan: StdioConnect, timeout_seconds: float
+    server: str, plan: StdioConnect, timeout_seconds: float, *, home: Path
 ) -> tuple[ClientSession, AsyncExitStack]:
     from mcp import StdioServerParameters
     from mcp.client.stdio import stdio_client
 
     # meiva:note
     # Our own servers launch their interpreter by a relative path, which resolves against the child's cwd: installed packages from their own dir (isolated venv), built-ins from the repo root. Plugin and machine entries get None.
-    cwd = server_cwd(server)
+    cwd = server_cwd(server, home=home)
     params = StdioServerParameters(
         command=plan.command,
         args=list(plan.args),
@@ -412,7 +412,7 @@ async def get_session(server: str, scope: Scope) -> ManagedSession:
     buckets and are wrapped in a serializing session, so every connection
     shares one stdio child instead of spawning its own; non-shared servers
     keep the per-connection isolation contract."""
-    cfg = load_mcp_config()
+    cfg = load_mcp_config(home=scope.config.home)
     if server not in cfg:
         raise ValueError(f"Server {server!r} not configured")
     shared = cfg[server].get("shared")
@@ -427,7 +427,7 @@ async def get_session(server: str, scope: Scope) -> ManagedSession:
         buckets.locks[server] = lock
 
     async with lock:
-        cfg = load_mcp_config()
+        cfg = load_mcp_config(home=scope.config.home)
         if server not in cfg:
             raise ValueError(f"Server {server!r} not configured")
         if server in buckets.sessions:

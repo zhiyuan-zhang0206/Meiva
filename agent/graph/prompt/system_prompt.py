@@ -3,6 +3,7 @@
 import hashlib
 import logging
 from collections.abc import Callable, Sequence
+from pathlib import Path
 
 from agent.hooks.history_dump import workspace_section_hint
 from base.agents.to_user import DOCUMENT_FILENAME
@@ -489,6 +490,7 @@ def build_system_prompt(
     *,
     agent_id: int | None,
     catalog: ModelCatalog,
+    home: Path,
 ) -> str:
 
     from ._base_prompt import (
@@ -513,7 +515,7 @@ def build_system_prompt(
     parts.extend(
         _framework_parts(
             FRAMEWORK_SECTIONS,
-            SectionInputs(slices, catalog, read_live_sdk(slices.prompt)),
+            SectionInputs(slices, catalog, read_live_sdk(slices.prompt, home=home)),
             agent_id=agent_id,
         )
     )
@@ -591,10 +593,11 @@ def build_harness_system_prompt(
     *,
     agent_id: int | None,
     catalog: ModelCatalog,
+    home: Path,
 ) -> str:
     parts = _framework_parts(
         HARNESS_FRAMEWORK_SECTIONS,
-        SectionInputs(slices, catalog, read_live_sdk(slices.prompt)),
+        SectionInputs(slices, catalog, read_live_sdk(slices.prompt, home=home)),
         agent_id=agent_id,
     )
     parts.extend(

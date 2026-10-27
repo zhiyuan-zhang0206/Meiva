@@ -186,7 +186,7 @@ class Cluster:
             db=self.database,
             catalog=self.catalog,
             policy=configured_policy(llm_override=scripted_model.OVERRIDE),
-            commands=CommandCatalog.system(skills=list),
+            commands=CommandCatalog.system(skills=list, home=meiva_home()),
             # meiva:note
             # The exec child's request names a gateway; the tests' code never calls it.
             clients=ClientSet(

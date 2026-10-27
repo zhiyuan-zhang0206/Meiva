@@ -51,7 +51,7 @@ def cmd_plugins_update(*, home: Path) -> int:
     from base.packages.plugin_config_admin import update_all_disk_images
     from base.packages.plugins.enable_config import discover_plugins
 
-    result = update_all_disk_images(plugin_dirs=discover_plugins(), home=home)
+    result = update_all_disk_images(plugin_dirs=discover_plugins(home=home), home=home)
     if not result.entries:
         print("[meiva plugins update] no plugins found")
         return 0
@@ -76,22 +76,22 @@ def cmd_plugins_update(*, home: Path) -> int:
     return 1 if any_error else 0
 
 
-def cmd_plugins_enable(name: str) -> int:
+def cmd_plugins_enable(name: str, *, home: Path) -> int:
     """`meiva plugins enable <name>` — enable a plugin in this machine's local config."""
-    return _set_enabled(name, enabled=True)
+    return _set_enabled(name, enabled=True, home=home)
 
 
-def cmd_plugins_disable(name: str) -> int:
+def cmd_plugins_disable(name: str, *, home: Path) -> int:
     """`meiva plugins disable <name>` — disable a plugin in this machine's local config."""
-    return _set_enabled(name, enabled=False)
+    return _set_enabled(name, enabled=False, home=home)
 
 
-def _set_enabled(name: str, *, enabled: bool) -> int:
+def _set_enabled(name: str, *, enabled: bool, home: Path) -> int:
     from base.packages.plugins.enable_config import DanglingPlugin, set_local_enabled
 
     verb = "enable" if enabled else "disable"
     try:
-        set_local_enabled(name, enabled=enabled)
+        set_local_enabled(name, enabled=enabled, home=home)
     except DanglingPlugin as e:
         print(f"[meiva plugins {verb}] {e}", file=sys.stderr)
         return 1
@@ -192,6 +192,7 @@ def _register_plugin_install(
     accepted: list[str],
     dest: Path,
     now: datetime,
+    home: Path,
 ) -> None:
     """Record a freshly materialized plugin in the install registry.
 
@@ -213,6 +214,7 @@ def _register_plugin_install(
             now=now,
             accepted_findings=accepted,
             content_hash=tree_hash(dest),
+            home=home,
         )
     except BaseException:
         shutil.rmtree(dest, ignore_errors=True)
@@ -281,6 +283,7 @@ def _install_claude_code_plugin(
         accepted=accepted,
         dest=plugins_root / result.name,
         now=now,
+        home=home,
     )
     _sync_skills_load_dir(binding, home=home, now=now)
     _print_plugin_install(result, report, home=home)
@@ -419,7 +422,7 @@ def cmd_plugins_uninstall(name: str, *, home: Path) -> int:
     from base import paths
     from base.packages.extensions import install_registry
 
-    pkg = install_registry.get(name)
+    pkg = install_registry.get(name, home=home)
     if pkg is None:
         print(
             f"[meiva plugins uninstall] '{name}' is not tracked in the install registry.",
@@ -439,16 +442,16 @@ def cmd_plugins_uninstall(name: str, *, home: Path) -> int:
         from . import _claude_code_plugin
 
         _claude_code_plugin.sweep_plugin_residue(dest.parent)
-    install_registry.deregister(name)
+    install_registry.deregister(name, home=home)
     print(f"[meiva plugins uninstall] removed '{name}'.")
     return 0
 
 
-def cmd_plugins_installed() -> int:
+def cmd_plugins_installed(*, home: Path) -> int:
     """`meiva plugins installed` — list install-registry entries."""
     from base.packages.extensions import install_registry
 
-    pkgs = install_registry.load().packages
+    pkgs = install_registry.load(home=home).packages
     if not pkgs:
         print("[meiva plugins installed] (none)")
         return 0
@@ -470,7 +473,7 @@ def cmd_plugins_upgrade(name: str, *, binding: SourceBinding, home: Path, now: d
 
     from . import _claude_code_plugin
 
-    pkg = install_registry.get(name)
+    pkg = install_registry.get(name, home=home)
     if pkg is None:
         print(f"[meiva plugins upgrade] '{name}' is not tracked.", file=sys.stderr)
         return 1
@@ -524,7 +527,7 @@ def cmd_plugins_upgrade(name: str, *, binding: SourceBinding, home: Path, now: d
 
         pkg.updated_at = now.isoformat(timespec="seconds")
         pkg.installed_hash = install_registry.tree_hash(dest)
-        install_registry.register(pkg)
+        install_registry.register(pkg, home=home)
         if pkg.type == "plugin":
             # After the registry write — the converge pass updates this
             # entry's content_hash, which a later register(pkg) would clobber.

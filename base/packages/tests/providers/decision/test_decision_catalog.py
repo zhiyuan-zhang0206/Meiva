@@ -18,6 +18,7 @@ from base.lm.provider_api import (
 from base.lm.registry import ModelSpec
 from base.packages.plugin_providers import build_model_catalog
 from base.packages.tests.model_catalog import inert_keys
+from base.paths import meiva_home
 
 
 def _chat_contribution(prefix: str, model_id: str) -> ProviderContribution:
@@ -212,7 +213,7 @@ def test_every_decision_model_needs_a_price_and_the_prefix() -> None:
 
 
 def test_repo_catalog_registers_both_decision_providers() -> None:
-    catalog = build_model_catalog()
+    catalog = build_model_catalog(home=meiva_home())
 
     assert set(catalog.decision_models) == {"jev-1.13.0", "gpt-6-luna-decisions"}
     assert {p.key_env for p in catalog.decision_providers.values()} == {
@@ -229,7 +230,7 @@ def test_repo_catalog_registers_both_decision_providers() -> None:
 
 @pytest.mark.parametrize(("model", "rate"), [("jev-1.13.0", 0.042), ("gpt-6-luna-decisions", 0.10)])
 def test_repo_decision_prices_are_input_only_with_provenance(model: str, rate: float) -> None:
-    catalog = build_model_catalog()
+    catalog = build_model_catalog(home=meiva_home())
 
     rates = catalog.prices.rates_at(model, None, 1_000)
     assert rates is not None

@@ -26,9 +26,9 @@ SHIPPED_PLUGINS_DIR = Path(__file__).resolve().parents[2] / "meiva_builtins" / "
 
 # meiva:note
 # The names of the plugins enabled on this machine right now (read from `plugins_config`).
-def enabled_plugin_names() -> frozenset[str]:
-    installed = enable_config.installed_plugin_dirs()
-    config = enable_config.load_for_runtime(set(installed))
+def enabled_plugin_names(*, home: Path) -> frozenset[str]:
+    installed = enable_config.installed_plugin_dirs(home=home)
+    config = enable_config.load_for_runtime(set(installed), home=home)
     return frozenset(name for name, entry in config.plugins.items() if entry.enabled)
 
 

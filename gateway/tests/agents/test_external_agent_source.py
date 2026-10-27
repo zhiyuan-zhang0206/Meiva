@@ -33,6 +33,7 @@ from base.db import Database, create_agent
 from base.events.live.bus import EventBus
 from base.native_process.runtime_incarnation import RuntimeIncarnation
 from base.packages.composer_commands import CommandCatalog
+from base.paths import meiva_home
 from gateway.tests.agents.gateway_auth import without_credentials
 from gateway.tests.auth.gateway_config import gateway_test_client
 
@@ -95,7 +96,7 @@ async def _claimed_text(
         item,
         read_security_enabled=lambda: settings.agent.security_scan_enabled,
         envelope_inputs=_ENVELOPE_INPUTS,
-        expand_command=CommandCatalog.system(skills=list).expand,
+        expand_command=CommandCatalog.system(skills=list, home=meiva_home()).expand,
         gateway=_forbidden_gateway,
     )
     content = message.model_dump()["content"]

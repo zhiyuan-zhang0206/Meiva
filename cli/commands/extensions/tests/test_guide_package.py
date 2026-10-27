@@ -24,6 +24,7 @@ from cli.database.runtime import CommandRuntime, UserSession
 from cli.database.tests.cli_tests import operator_database as operator_database
 from cli.database.tests.cli_tests import operator_pipeline as operator_pipeline
 from cli.database.tests.command_inputs import command_runtime as command_runtime
+from meiva.sdk_surface.tests.context_home import context_over_unit_home as context_over_unit_home
 
 REPO = Path(__file__).resolve().parents[4]
 GUIDE = REPO / "meiva_builtins" / "skills" / "platform" / "meiva-guide"

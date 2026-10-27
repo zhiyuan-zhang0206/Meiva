@@ -435,7 +435,9 @@ def test_agent_host_launches_under_the_agent_profile(unit_home: Path) -> None:
         "MEIVA_DB_URL=postgresql://owner@db.example:5432/meiva\n"
         "MEIVA_RUNNER_DB_PASSWORD=fixture\n"
     )
-    agent_host = next(spec for spec in build_services() if spec.session == "agent-host")
+    agent_host = next(
+        spec for spec in build_services(home=unit_home) if spec.session == "agent-host"
+    )
     launch = LaunchDelivery(
         home=unit_home,
         remote_data_plane=True,

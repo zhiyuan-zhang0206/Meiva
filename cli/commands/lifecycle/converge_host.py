@@ -110,7 +110,7 @@ def _ensure_plugin_config_images(ctx: ConvergeCtx) -> None:
     from base.packages.plugin_config_admin import update_all_disk_images
     from base.packages.plugins.enable_config import discover_plugins
 
-    update_all_disk_images(plugin_dirs=discover_plugins(), home=ctx.meiva_home)
+    update_all_disk_images(plugin_dirs=discover_plugins(home=ctx.meiva_home), home=ctx.meiva_home)
 
 
 def _converge_skills_step(ctx: ConvergeCtx) -> None:
@@ -687,6 +687,7 @@ def selected_service_names(
     all_services: bool,
     machine: MachineIdentityReader,
     host: Host,
+    home: Path,
 ) -> frozenset[str]:
     # meiva:note
     # The services an explicit selection names on this host, resolved like `meiva start`'s
@@ -696,9 +697,9 @@ def selected_service_names(
     from services.supervision.roster.spec import services_for_capabilities_annotated
 
     specs = (
-        tuple((spec, None) for spec in build_services())
+        tuple((spec, None) for spec in build_services(home=home))
         if roles is None
-        else services_for_capabilities_annotated(roles, machine=machine, host=host)
+        else services_for_capabilities_annotated(roles, machine=machine, host=host, home=home)
     )
     skipped = resolve_selection(
         {spec.session for spec, _gate in specs},
@@ -743,6 +744,7 @@ def cmd_converge(
         all_services=all_services,
         machine=command.machine,
         host=command.host,
+        home=command.home,
     )
     converge_host(
         repo,
@@ -767,6 +769,9 @@ def cmd_converge(
         database_factory=database_factory,
         machine=command.machine,
         skills_root=skills_root,
+        home=command.home,
     )
-    materialize_cluster_extensions(database_factory=database_factory, skills_root=skills_root)
+    materialize_cluster_extensions(
+        database_factory=database_factory, skills_root=skills_root, home=command.home
+    )
     return 0

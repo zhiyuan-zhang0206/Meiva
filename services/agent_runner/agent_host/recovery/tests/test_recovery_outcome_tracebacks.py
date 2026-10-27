@@ -26,6 +26,7 @@ from base.events.live.bus import EventBus
 from base.host.env.agent_slices import AgentSlices
 from base.lm.catalog import ModelCatalog
 from base.packages.plugin_providers import build_model_catalog
+from base.paths import meiva_home
 from services.agent_runner.agent_host.tests.table_faults import refused_write
 
 
@@ -46,7 +47,7 @@ def _context(pool: AsyncConnectionPool, *, database_gate: ProcessDbGate) -> Meiv
         agent=AgentSlices.resolve(default_reader=defaults()),
         db=Database.from_settings(gate=database_gate),
         bus=EventBus.from_settings(rng=seeded_rng()),
-        catalog=build_model_catalog(),
+        catalog=build_model_catalog(home=meiva_home()),
         clock_factory=Clock.from_settings,
     )
 

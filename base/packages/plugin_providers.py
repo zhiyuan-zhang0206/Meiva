@@ -53,15 +53,15 @@ def _load_one(builder: CatalogBuilder, name: str, provider_py: Path, *, is_built
         raise
 
 
-def build_model_catalog() -> ModelCatalog:
+def build_model_catalog(*, home: Path) -> ModelCatalog:
     """Import every enabled plugin's ``provider.py`` into a fresh builder and build it."""
     from base import paths
     from base.packages.plugins import enable_config
 
     builder = CatalogBuilder(load_archive())
-    discovered = enable_config.discover_plugins()
+    discovered = enable_config.discover_plugins(home=home)
     known = set(discovered)
-    config = enable_config.load_for_runtime(known)
+    config = enable_config.load_for_runtime(known, home=home)
     repo_dir = str(paths.repo_plugins_dir())
     for name in sorted(config.plugins):
         if not config.plugins[name].enabled:

@@ -73,7 +73,7 @@ def _host(env: StopEnvironment, *, force: bool) -> StopHost:
     if force:
         roster = None
     else:
-        specs = build_services()
+        specs = build_services(home=env.command.home)
         roster = StopRoster(
             known=frozenset(spec.session for spec in specs),
             requires_db=frozenset(spec.session for spec in specs if spec.requires_db),

@@ -7,6 +7,7 @@ from base.host.env.agent_slices import ModelOverrides
 from base.lm.context_budget import resolve_context_budget
 from base.lm.registry import resolve_available_model
 from base.packages import plugin_providers
+from base.paths import meiva_home
 
 
 def emit(text: object) -> None:
@@ -15,7 +16,7 @@ def emit(text: object) -> None:
 
 def withdrawal() -> None:
     assert not hasattr(plugin_providers, "_STATE")
-    catalog = plugin_providers.build_model_catalog()
+    catalog = plugin_providers.build_model_catalog(home=meiva_home())
     assert resolve_available_model("deepseek-flash", models=catalog.models) == "deepseek-flash"
     withdrawn = replace(
         catalog.models["deepseek-flash"],
@@ -33,7 +34,7 @@ def withdrawal() -> None:
 
 def budget(model: str) -> None:
     assert not hasattr(plugin_providers, "_STATE")
-    catalog = plugin_providers.build_model_catalog()
+    catalog = plugin_providers.build_model_catalog(home=meiva_home())
     result = resolve_context_budget(model, catalog=catalog, overrides=ModelOverrides.from_pins({}))
     emit(result.max_context_tokens)
 

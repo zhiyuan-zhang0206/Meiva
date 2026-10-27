@@ -480,6 +480,7 @@ async def _handle_fork(
         note = fork_tail_skills_note(
             [s for s in tail_skills if isinstance(s, str)],
             slices.prompt.sdk_disable,
+            home=ctx.require_meiva_home(),
         )
         if note is not None:
             st.new_msgs.append(note)

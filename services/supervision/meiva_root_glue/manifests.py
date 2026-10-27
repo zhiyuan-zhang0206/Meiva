@@ -40,12 +40,10 @@
 
 from __future__ import annotations
 
-import argparse
 import json
 import re
 import shlex
-import sys
-from collections.abc import Iterable, Mapping, Sequence
+from collections.abc import Iterable, Mapping
 from pathlib import Path
 from typing import Any, get_args
 
@@ -123,9 +121,12 @@ def build_units(
     repo_root: Path,
     environments: Mapping[str, dict[str, str]] | None = None,
     plugin_dirs: Mapping[str, Path] | None = None,
+    home: Path,
 ) -> list[dict[str, object]]:
     """K2 unit rows for every spec whose capabilities intersect `capabilities`."""
-    chosen = tuple(build_services(plugin_dirs=plugin_dirs)) if specs is None else tuple(specs)
+    chosen = (
+        tuple(build_services(plugin_dirs=plugin_dirs, home=home)) if specs is None else tuple(specs)
+    )
     caps = _validated_capabilities(capabilities)
     units: list[dict[str, object]] = []
     for spec in sorted(chosen, key=lambda spec: spec.session != STOPS_FIRST):
@@ -168,6 +169,7 @@ def build_manifest(
     repo_root: Path | None = None,
     specs: Iterable[ServiceSpec] | None = None,
     environments: Mapping[str, dict[str, str]] | None = None,
+    home: Path,
 ) -> dict[str, object]:
     """Build and validate a K2 manifest document (fail-fast, in memory).
 
@@ -180,10 +182,7 @@ def build_manifest(
     caps = _validated_capabilities(capabilities)
     manifest: dict[str, object] = {
         "units": build_units(
-            specs,
-            capabilities=caps,
-            repo_root=resolved_repo,
-            environments=environments,
+            specs, capabilities=caps, repo_root=resolved_repo, environments=environments, home=home
         )
     }
     _validate(manifest)
@@ -218,50 +217,16 @@ def generate(
     repo_root: Path | None = None,
     specs: Iterable[ServiceSpec] | None = None,
     environments: Mapping[str, dict[str, str]] | None = None,
+    home: Path,
 ) -> Path:
     """Build, validate in memory, write, then re-read with `load_manifests`."""
     manifest = build_manifest(
-        capabilities=capabilities, repo_root=repo_root, specs=specs, environments=environments
+        capabilities=capabilities,
+        repo_root=repo_root,
+        specs=specs,
+        environments=environments,
+        home=home,
     )
     write_manifest(path, manifest)
     load_manifests(path)  # the consumer's own reader must accept what we wrote
     return path
-
-
-def main(argv: Sequence[str] | None = None) -> int:
-    """CLI: `python -m services.supervision.meiva_root_glue.manifests --out FILE [...]`."""
-    parser = argparse.ArgumentParser(
-        prog="meiva-root-manifests",
-        description="Generate a K2 unit manifest JSON from the deployment roster (W1.2e).",
-    )
-    parser.add_argument("--out", required=True, type=Path, help="manifest JSON file to write")
-    parser.add_argument(
-        "--repo-root",
-        type=Path,
-        default=None,
-        help="checkout root the unit commands cd into (default: this checkout)",
-    )
-    parser.add_argument(
-        "--capabilities",
-        required=True,
-        help="comma-separated capability set to filter for (e.g. gateway,agent-runner)",
-    )
-    args = parser.parse_args(argv)
-    caps = [part.strip() for part in args.capabilities.split(",") if part.strip()]
-    try:
-        path = generate(args.out, capabilities=caps, repo_root=args.repo_root)
-    except ManifestError as exc:
-        sys.stderr.write(f"error: {exc}\n")
-        return 1
-    raw_manifest = json.loads(path.read_text(encoding="utf-8"))
-    raw_any: Any = raw_manifest
-    units_raw: object = raw_any["units"] if isinstance(raw_manifest, dict) else []
-    units_any: Any = units_raw
-    units_list: list[Any] = units_any if isinstance(units_raw, list) else []
-    count = len(units_list)
-    sys.stdout.write(f"wrote {count} unit(s) to {path}\n")
-    return 0
-
-
-if __name__ == "__main__":
-    raise SystemExit(main())

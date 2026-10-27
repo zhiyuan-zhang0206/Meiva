@@ -5,6 +5,7 @@ import random
 import sys
 import textwrap
 import traceback
+from pathlib import Path
 
 from agent.extensions.catalog import (
     DECLARATION_ONLY_KEYS,
@@ -194,7 +195,7 @@ def _where(exc: BaseException) -> str:
 
 
 # meiva:link cli/commands/extensions/docs/plugin-inspection.meiva.okf.md
-def cmd_plugins_verify(*, rng: random.Random) -> int:
+def cmd_plugins_verify(*, rng: random.Random, home: Path) -> int:
     from agent.state import plugin_state_schema
     from meiva.sdk_surface.extensions import load_extensions
 
@@ -204,6 +205,7 @@ def cmd_plugins_verify(*, rng: random.Random) -> int:
             report=lambda name, exc: failures.append((name, exc)),
             sampling=_verb_sampling(rng),
             validate_state=plugin_state_schema,
+            home=home,
         )
     except Exception as exc:
         print("RESULT enabled=0 failed=0 rc=2")

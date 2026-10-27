@@ -21,13 +21,14 @@ from base.agents.context import MeivaContext
 from base.agents.context.identity import AgentIdentity
 from base.agents.sdk.tally import SdkCallTally
 from base.packages.plugin_providers import build_model_catalog
+from base.paths import meiva_home
 from meiva.tests.fixtures.pin_agent import snapshot_clients
 
 
 def _start(tmp_path: Path, agent_id: int, code: str) -> tuple[subprocess.Popen[str], Path]:
     context = MeivaContext(
         identity=AgentIdentity(agent_id, True),
-        catalog=build_model_catalog(),
+        catalog=build_model_catalog(home=meiva_home()),
         clients=snapshot_clients(),
     )
     request = make_request_path(tmp_path / "exec", agent_id=agent_id, request_id=UUID(int=1))

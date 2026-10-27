@@ -74,7 +74,7 @@ def load_config() -> dict[str, dict[str, Any]]:
     Raises:
         MCPError: a source file fails to parse / has a non-dict `mcpServers`.
     """
-    return load_mcp_config()
+    return load_mcp_config(home=process_context.current_context().require_meiva_home())
 
 
 def servers() -> list[str]:
@@ -119,8 +119,11 @@ class _McpsModule(types.ModuleType):
 
     @property
     def __all_for_meiva__(self) -> list[str]:
-        """The configured server names and the two helpers, sorted."""
-        return sorted([*servers(), "servers", "description"])
+        """The configured server names and the two helpers, sorted. A process that holds no SDK
+        context (a host building an installation) has no home to read servers from and lists the
+        two helpers alone."""
+        configured = servers() if process_context.ambient_context() is not None else []
+        return sorted([*configured, "servers", "description"])
 
 
 sys.modules[__name__].__class__ = _McpsModule

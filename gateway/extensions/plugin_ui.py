@@ -33,7 +33,7 @@ from __future__ import annotations
 import mimetypes
 from pathlib import Path
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import FileResponse, RedirectResponse, Response
 
 from base.packages.plugins import enable_config
@@ -50,14 +50,14 @@ PLUGIN_UI_DIR = "ui"
 _STATIC_HEADERS = {"X-Content-Type-Options": "nosniff"}
 
 
-def _enabled_plugin_dir(plugin: str) -> Path:
+def _enabled_plugin_dir(plugin: str, *, home: Path) -> Path:
     """The plugin's package directory, once it is enabled and has a `ui/` dir.
 
     404 for every other case — unknown, disabled, or serving no pages — with
     the same detail, so the mount does not report the enable-state of a plugin
     to a caller that could not otherwise see it.
     """
-    installed = enable_config.installed_plugin_dirs()
+    installed = enable_config.installed_plugin_dirs(home=home)
     # Dash/underscore folding, exactly like `plugins_config.load`: the
     # directory is a Python package (`meiva_code`) while the name a human writes
     # in a URL or a manifest is dash-spelled (`meiva-code`).
@@ -65,7 +65,7 @@ def _enabled_plugin_dir(plugin: str) -> Path:
     directory = installed.get(resolved)
     if directory is None:
         raise HTTPException(status_code=404, detail=f"no plugin page mount for {plugin!r}")
-    config = enable_config.load_for_runtime(set(installed))
+    config = enable_config.load_for_runtime(set(installed), home=home)
     entry = config.plugins.get(resolved)
     if entry is None or not entry.enabled:
         raise HTTPException(status_code=404, detail=f"no plugin page mount for {plugin!r}")
@@ -123,7 +123,7 @@ def plugin_ui_root(plugin: str) -> Response:
 
 
 @router.get("/api/plugin-ui/{plugin}/{rest:path}")
-def plugin_ui_get(plugin: str, rest: str) -> Response:
+def plugin_ui_get(plugin: str, rest: str, request: Request) -> Response:
     """Serve one file from an enabled plugin's `ui/` directory.
 
     A directory reached without a trailing slash redirects to the slash form
@@ -131,7 +131,7 @@ def plugin_ui_get(plugin: str, rest: str) -> Response:
     links against the URL it was loaded from, so `…/board` would send
     `app.js` to `…/app.js` — one level above where the plugin put it.
     """
-    ui_dir = _enabled_plugin_dir(plugin)
+    ui_dir = _enabled_plugin_dir(plugin, home=request.app.state.gateway_process.home)
     _validate_segments(rest)
     if rest and not rest.endswith("/") and (ui_dir / rest).is_dir():
         return RedirectResponse(f"/api/plugin-ui/{plugin}/{rest}/", status_code=307)

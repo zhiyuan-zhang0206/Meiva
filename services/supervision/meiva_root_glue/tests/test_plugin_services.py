@@ -27,6 +27,7 @@ from base.cluster.machine import MachineIdentityReader
 from base.cluster.machine.tests.identity import machine_identity as machine_identity
 from base.host.system.tests.fake_commands import fake_host
 from base.log.tests.log_records import LogRecords
+from base.paths import meiva_home
 from services.supervision.roster import composition, service_spec, spec
 from services.supervision.roster import plugin_services as roster_plugins
 
@@ -34,7 +35,7 @@ from services.supervision.roster import plugin_services as roster_plugins
 def test_fleet_plugin_registers_task_maintenance() -> None:
     """task-maintenance is contributed by the meiva_fleet plugin, not hardcoded in
     ops — its entry module lives under the plugin namespace."""
-    by_session = {s.session: s for s in composition.build_services()}
+    by_session = {s.session: s for s in composition.build_services(home=meiva_home())}
     tm = by_session["task-maintenance"]
     # venv-direct launch (no `uv run` wrapper), relative to the source checkout.
     assert (
@@ -61,7 +62,7 @@ def test_ops_spec_has_no_task_maintenance_hardcoded() -> None:
 def test_no_installed_plugins_contributes_nothing() -> None:
     """When no plugin is present, `plugin_services()` contributes nothing and
     task-maintenance is absent from the roster."""
-    names = {s.session for s in composition.build_services(plugin_dirs={})}
+    names = {s.session for s in composition.build_services(plugin_dirs={}, home=meiva_home())}
     assert "task-maintenance" not in names
 
 
@@ -72,12 +73,14 @@ def test_discovery_ignores_agent_enable_state() -> None:
     agent-plugin-registration plane. Its host-owned on/off is the explicit
     Fleet config image gate, exercised in
     `test_plugin_gate_flows_through_annotation`."""
-    config_path = pc.local_config_path()
-    known = set(pc.installed_plugin_dirs())
-    pc.write_local({"plugins": {n: {"enabled": False} for n in sorted(known)}})
+    config_path = pc.local_config_path(home=meiva_home())
+    known = set(pc.installed_plugin_dirs(home=meiva_home()))
+    pc.write_local({"plugins": {n: {"enabled": False} for n in sorted(known)}}, home=meiva_home())
     try:
-        assert not any(entry.enabled for entry in pc.load(known).plugins.values())
-        names = {s.session for s in composition.build_services()}
+        assert not any(
+            entry.enabled for entry in pc.load(known, home=meiva_home()).plugins.values()
+        )
+        names = {s.session for s in composition.build_services(home=meiva_home())}
         assert "task-maintenance" in names
     finally:
         config_path.unlink(missing_ok=True)
@@ -93,7 +96,7 @@ def test_session_collision_fails_fast() -> None:
         requires_db=True,
     )
     with pytest.raises(roster_plugins.PluginServiceError, match="collides"):
-        composition.build_services(plugins=(collider,))
+        composition.build_services(plugins=(collider,), home=meiva_home())
 
 
 def test_services_py_without_declare_reports_and_raises(
@@ -105,7 +108,7 @@ def test_services_py_without_declare_reports_and_raises(
     (plugin_dir / "services.py").write_text("X = 1  # no services() function\n")
 
     with pytest.raises(roster_plugins.PluginServiceError, match="callable services"):
-        roster_plugins.plugin_services(plugin_dirs={"brokenplugin": plugin_dir})
+        roster_plugins.plugin_services(plugin_dirs={"brokenplugin": plugin_dir}, home=meiva_home())
 
     assert any(
         "brokenplugin" in r["message"] and "failed to load" in r["message"] for r in loguru_records
@@ -120,7 +123,7 @@ def test_broken_services_py_reports_and_aborts_roster(
     good_dir.mkdir()
     (good_dir / "services.py").write_text(
         "from services.supervision.roster.service_spec import ServiceSpec\n"
-        "def services():\n"
+        "def services(*, home):\n"
         "    return (ServiceSpec(session='probe-good', cmd='noop',\n"
         "            capabilities=frozenset({'gateway'}), requires_db=False),)\n"
     )
@@ -130,7 +133,7 @@ def test_broken_services_py_reports_and_aborts_roster(
 
     with pytest.raises(RuntimeError, match="services boom"):
         roster_plugins.plugin_services(
-            plugin_dirs={"brokenplugin": bad_dir, "goodplugin": good_dir}
+            plugin_dirs={"brokenplugin": bad_dir, "goodplugin": good_dir}, home=meiva_home()
         )
     assert any(
         "brokenplugin" in r["message"] and "failed to load" in r["message"] for r in loguru_records
@@ -163,12 +166,12 @@ def test_external_service_healthcheck_loads_without_agent_bootstrap(
         "    value: int = 1\n"
         "def main():\n"
         "    return Sample().value\n"
-        "def services():\n"
+        "def services(*, home):\n"
         "    return (ServiceSpec(session='quota-probe', cmd='noop',\n"
         "            capabilities=frozenset({'agent-runner'}), requires_db=True,\n"
         "            healthcheck_module=__name__),)\n"
     )
-    declared = roster_plugins.plugin_services(plugin_dirs={name: plugin_dir})
+    declared = roster_plugins.plugin_services(plugin_dirs={name: plugin_dir}, home=meiva_home())
     assert len(declared) == 1
     assert declared[0].healthcheck_module == dotted
     assert importlib.import_module(dotted).main() == 1
@@ -197,17 +200,22 @@ def test_failed_service_import_does_not_publish_partial_module(
 @pytest.mark.parametrize(
     ("body", "error", "match"),
     [
-        ("def services():\n    return undefined_roster\n", NameError, "undefined_roster"),
+        ("def services(*, home):\n    return undefined_roster\n", NameError, "undefined_roster"),
         (
-            "def services():\n    return [1]\n",
+            "def services(*, home):\n    return [1]\n",
             roster_plugins.PluginServiceError,
             "tuple\\[ServiceSpec",
         ),
         ("services = 3\n", roster_plugins.PluginServiceError, "callable services"),
         (
+            "def services():\n    return ()\n",
+            roster_plugins.PluginServiceError,
+            "must accept the keyword home",
+        ),
+        (
             "from pydantic import BaseModel\n"
             "class Config(BaseModel):\n    enabled: bool\n"
-            "def services():\n    Config(enabled='not-a-bool')\n    return ()\n",
+            "def services(*, home):\n    Config(enabled='not-a-bool')\n    return ()\n",
             ValueError,
             "validation error",
         ),
@@ -224,16 +232,40 @@ def test_invalid_service_face_propagates_to_roster_operation(
     plugin_dir.mkdir()
     (plugin_dir / "services.py").write_text(body)
     with pytest.raises(error, match=match):
-        composition.build_services(plugin_dirs={"brokenplugin": plugin_dir})
+        composition.build_services(plugin_dirs={"brokenplugin": plugin_dir}, home=meiva_home())
     assert any(
         "brokenplugin" in r["message"] and "failed to load" in r["message"] for r in loguru_records
     )
 
 
+# meiva:note
+# The hook of a plugin's `services.py` receives the home the roster was asked for.
+def test_the_services_hook_receives_the_home_it_is_asked_for(tmp_path: Path) -> None:
+    plugin_dir = tmp_path / "homeplugin"
+    plugin_dir.mkdir()
+    (plugin_dir / "services.py").write_text(
+        "from pathlib import Path\n"
+        "def services(*, home):\n"
+        "    Path(__file__).with_name('received').write_text(str(home))\n"
+        "    return ()\n"
+    )
+    asked = tmp_path / "asked-home"
+
+    roster_plugins.plugin_services(plugin_dirs={"homeplugin": plugin_dir}, home=asked)
+
+    assert (plugin_dir / "received").read_text() == str(asked)
+    assert asked != meiva_home()
+
+
 def test_absent_optional_service_face_does_not_fail_discovery(tmp_path: Path) -> None:
     plugin_dir = tmp_path / "no_service_face"
     plugin_dir.mkdir()
-    assert roster_plugins.plugin_services(plugin_dirs={"no_service_face": plugin_dir}) == ()
+    assert (
+        roster_plugins.plugin_services(
+            plugin_dirs={"no_service_face": plugin_dir}, home=meiva_home()
+        )
+        == ()
+    )
 
 
 @pytest.mark.parametrize("diagnostic", [False, True])
@@ -261,6 +293,7 @@ def test_failed_gate_never_produces_a_start_or_status_roster(
             machine=machine_identity,
             host=fake_host(),
             services=(service,),
+            home=meiva_home(),
         )
     assert any("roster evaluation aborted" in r["message"] for r in loguru_records)
 
@@ -273,7 +306,7 @@ def test_invalid_face_aborts_manifest_generation_before_any_unit_is_born(
     plugin_dir = tmp_path / "invalid_config"
     plugin_dir.mkdir()
     (plugin_dir / "services.py").write_text(
-        "def services():\n    raise ValueError('invalid service configuration')\n"
+        "def services(*, home):\n    raise ValueError('invalid service configuration')\n"
     )
     with pytest.raises(ValueError, match="invalid service configuration"):
         build_units(
@@ -281,4 +314,5 @@ def test_invalid_face_aborts_manifest_generation_before_any_unit_is_born(
             capabilities={"gateway"},
             repo_root=tmp_path,
             plugin_dirs={"invalid_config": plugin_dir},
+            home=meiva_home(),
         )

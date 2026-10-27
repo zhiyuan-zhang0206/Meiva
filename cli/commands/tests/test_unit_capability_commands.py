@@ -41,8 +41,10 @@ def test_a_bearer_only_runner_receives_no_database_login(
     bootstrap_authority = _serve_on_loopback(monkeypatch, born)
     served = config.bootstrap_config_values(
         bootstrap_authority,
-        provider_key_envs=(binding.key_env for binding in build_model_catalog().bindings.values()),
-        plugin_cluster_config=plugin_bootstrap_config(),
+        provider_key_envs=(
+            binding.key_env for binding in build_model_catalog(home=meiva_home()).bindings.values()
+        ),
+        plugin_cluster_config=plugin_bootstrap_config(home=meiva_home()),
     )
     payload = "".join(served.values())
     for cls in ("gateway", "runner"):

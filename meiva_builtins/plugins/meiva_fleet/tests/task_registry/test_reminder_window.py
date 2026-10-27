@@ -168,7 +168,7 @@ def test_policy_can_name_the_note_kind(
     # The documented rollback: naming `note` restores the rule that any write restarts. The policy
     # is read from this home's `meiva_fleet` image on every write, so writing the image is the
     # whole switch — no restart, no patched symbol.
-    image = disk_image_path("meiva_fleet")
+    image = disk_image_path("meiva_fleet", home=unit_home)
     image.parent.mkdir(parents=True, exist_ok=True)
     image.write_text(
         FleetConfig(task_reminder_reset_on=("status", "note")).model_dump_json(), encoding="utf-8"

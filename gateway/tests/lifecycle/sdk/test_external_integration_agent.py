@@ -30,6 +30,7 @@ from base.events.live.bus import EventBus
 from base.native_process.runtime_incarnation import RuntimeIncarnation
 from base.packages.plugins import enable_config
 from base.packages.plugins.loading import faces
+from base.paths import meiva_home
 from meiva import impersonation
 from meiva.sdk_surface import agent_identity, install, process_context
 from meiva.sdk_surface.installation import Installation
@@ -75,12 +76,18 @@ def native_checkpoint(
     enable_config.write_local(
         {
             "plugins": {
-                **{name: {"enabled": False} for name in enable_config.discover_plugins()},
+                **{
+                    name: {"enabled": False}
+                    for name in enable_config.discover_plugins(home=unit_home)
+                },
                 "integration": {"enabled": True},
             }
-        }
+        },
+        home=unit_home,
     )
-    registry = faces.import_faces(validate_state=state_module.plugin_state_schema).registry
+    registry = faces.import_faces(
+        validate_state=state_module.plugin_state_schema, home=unit_home
+    ).registry
 
     pin_agent(None, owns_loop=True)
     process_context.unbind_exec_turn()
@@ -191,7 +198,7 @@ def test_external_attach_reads_native_checkpoint_and_only_journals_delta(
         local_machine=machine_identity.name(),
     )
     assert updated["delta_version"] == 1
-    native_snapshot, _, _ = load_snapshot(agent_id, database=database)
+    native_snapshot, _, _ = load_snapshot(agent_id, database=database, home=meiva_home())
     assert decode_plugin_delta(updated["plugin_delta"][0], cast(Any, type(native_snapshot))) == {
         "integration__seen": {"external"}
     }

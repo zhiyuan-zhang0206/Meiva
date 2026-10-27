@@ -302,7 +302,7 @@ def _folding_duplicates(registry: Registry) -> list[tuple[str, str]]:
     return dups
 
 
-def load() -> Registry:
+def load(*, home: Path) -> Registry:
     """Read `$MEIVA_HOME/installed.json`; a missing or empty file is an empty registry.
 
     Raises:
@@ -312,7 +312,7 @@ def load() -> Registry:
             dual-row state that used to crash the skill scanner).
         OSError: filesystem read error.
     """
-    path = paths.install_registry_path(paths.meiva_home())
+    path = paths.install_registry_path(home)
     if not path.exists():
         return Registry()
     raw = path.read_text(encoding="utf-8")
@@ -338,7 +338,7 @@ def load() -> Registry:
     return registry
 
 
-def save(registry: Registry) -> None:
+def save(registry: Registry, *, home: Path) -> None:
     """Full-replace `$MEIVA_HOME/installed.json` with pretty JSON, atomically.
 
     The body is written to a temp sibling and renamed over the real path, so a
@@ -352,7 +352,7 @@ def save(registry: Registry) -> None:
     two savers running at once share it: the second overwrites the first's
     staged body, and whichever unlinks first leaves the other's rename raising
     FileNotFoundError. `mutate`'s lock is what keeps them from overlapping."""
-    path = paths.install_registry_path(paths.meiva_home())
+    path = paths.install_registry_path(home)
     body = json.dumps(json.loads(registry.model_dump_json()), indent=2) + "\n"
     tmp = path.with_name(f"{path.name}.tmp")
     try:
@@ -362,14 +362,14 @@ def save(registry: Registry) -> None:
         tmp.unlink(missing_ok=True)
 
 
-def get(name: str) -> InstalledPackage | None:
+def get(name: str, *, home: Path) -> InstalledPackage | None:
     """Return the tracked package with this name, or None.
 
     Name matching is dash/underscore-insensitive (`base.packages.skills.names`): a row
     written before the dash rename and a caller asking for the dash spelling
     mean one package,
     so a rename does not orphan a registry row mid-upgrade."""
-    return next((p for p in load().packages if match_key(p.name) == match_key(name)), None)
+    return next((p for p in load(home=home).packages if match_key(p.name) == match_key(name)), None)
 
 
 # Bound on the wait for the registry lock, in seconds. Every cycle it protects
@@ -382,7 +382,7 @@ _REGISTRY_LOCK_TIMEOUT_S = 30.0
 
 
 @contextlib.contextmanager
-def registry_lock() -> Generator[None]:
+def registry_lock(*, home: Path) -> Generator[None]:
     """Hold the cross-process lock guarding one `installed.json`.
 
     The lock file is a SIBLING, never the registry itself: `save` publishes by
@@ -391,13 +391,13 @@ def registry_lock() -> Generator[None]:
 
     `mutate` is the way in and takes this for you.
     """
-    path = paths.install_registry_path(paths.meiva_home())
+    path = paths.install_registry_path(home)
     with file_lock(path.with_name(f"{path.name}.lock"), timeout_s=_REGISTRY_LOCK_TIMEOUT_S):
         yield
 
 
 @contextlib.contextmanager
-def mutate() -> Generator[Registry]:
+def mutate(*, home: Path) -> Generator[Registry]:
     """Load the registry, hand it over to be edited, and save it back — the one
     way to change `installed.json`.
 
@@ -421,26 +421,26 @@ def mutate() -> Generator[Registry]:
     An exception inside the body propagates with nothing saved, leaving the
     on-disk registry as it was.
     """
-    with registry_lock():
-        registry = load()
+    with registry_lock(home=home):
+        registry = load(home=home)
         yield registry
-        save(registry)
+        save(registry, home=home)
 
 
-def register(pkg: InstalledPackage) -> None:
+def register(pkg: InstalledPackage, *, home: Path) -> None:
     """Add the package, replacing any existing entry with the same name, then
     persist. Same-name is decided through `match_key`, so re-registering under
     the dash spelling REPLACES the underscore row rather than duplicating it."""
-    with mutate() as registry:
+    with mutate(home=home) as registry:
         key = match_key(pkg.name)
         registry.packages = [p for p in registry.packages if match_key(p.name) != key]
         registry.packages.append(pkg)
 
 
-def deregister(name: str) -> bool:
+def deregister(name: str, *, home: Path) -> bool:
     """Drop the entry with this name (dash/underscore-insensitive); return
     whether one was present."""
-    with mutate() as registry:
+    with mutate(home=home) as registry:
         key = match_key(name)
         kept = [p for p in registry.packages if match_key(p.name) != key]
         existed = len(kept) != len(registry.packages)
@@ -473,7 +473,7 @@ def copy_changed(
     return tree_hash(dest, skip_subtrees=skip_subtrees) != content_hash
 
 
-def enabled_skill_names() -> set[str]:
+def enabled_skill_names(*, home: Path) -> set[str]:
     """Names of enabled packages that may contribute skills.
 
     The skill scanner loads a top-level directory under `~/.meiva/skills/` only
@@ -483,10 +483,10 @@ def enabled_skill_names() -> set[str]:
     converged skills namespace (`~/.meiva/skills/<plugin>/`) gates on the
     plugin's own registry entry rather than a duplicate skill entry.
     """
-    return {p.name for p in load().packages if p.type in ("skill", "plugin") and p.enabled}
+    return {p.name for p in load(home=home).packages if p.type in ("skill", "plugin") and p.enabled}
 
 
-def trust_by_name() -> dict[str, TrustTier]:
+def trust_by_name(*, home: Path) -> dict[str, TrustTier]:
     """Every tracked package's trust tier, keyed by name — one registry read for
     a caller classifying a whole skill tree at once.
 
@@ -495,7 +495,7 @@ def trust_by_name() -> dict[str, TrustTier]:
     one (a runtime provider root registered by a plugin, which never passes
     through the registry) must treat it as `"unreviewed"`, the safe direction.
     """
-    return {p.name: p.trust for p in load().packages}
+    return {p.name: p.trust for p in load(home=home).packages}
 
 
 def host_contract_reason(pkg_dir: Path) -> str | None:
@@ -509,7 +509,7 @@ def host_contract_reason(pkg_dir: Path) -> str | None:
     return "; ".join(errors) if errors else None
 
 
-def loadable_skill_names() -> set[str]:
+def loadable_skill_names(*, home: Path) -> set[str]:
     """`enabled_skill_names()` minus packages whose manifest excludes this host.
 
     The runtime side of the version gate (design §5.5): a skill package whose
@@ -518,13 +518,15 @@ def loadable_skill_names() -> set[str]:
     Packages without a manifest pass unchanged, so the check costs one stat per
     enabled name unless a manifest is actually present.
     """
-    skills_root = paths.skills_dir(paths.meiva_home())
+    skills_root = paths.skills_dir(home)
     return {
-        name for name in enabled_skill_names() if host_contract_reason(skills_root / name) is None
+        name
+        for name in enabled_skill_names(home=home)
+        if host_contract_reason(skills_root / name) is None
     }
 
 
-def installed_mcp_names() -> set[str]:
+def installed_mcp_names(*, home: Path) -> set[str]:
     """Names of `type="mcp"` packages tracked in the registry.
 
     The MCP config loader loads a top-level directory under `~/.meiva/mcps/` only
@@ -535,7 +537,7 @@ def installed_mcp_names() -> set[str]:
     enable/disable`), which the loader applies uniformly to built-in, installed,
     and machine servers — so this stays a pure "is it installed" check.
     """
-    return {p.name for p in load().packages if p.type == "mcp"}
+    return {p.name for p in load(home=home).packages if p.type == "mcp"}
 
 
 @dataclass(frozen=True)

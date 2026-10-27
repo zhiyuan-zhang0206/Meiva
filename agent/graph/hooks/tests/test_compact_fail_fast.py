@@ -12,6 +12,7 @@ from base.config.tests.configuration import defaults
 from base.host.env.agent_slices import AgentSlices
 from base.lm.catalog import ModelCatalog
 from base.packages.plugin_providers import build_model_catalog
+from base.paths import meiva_home
 
 
 @pytest.mark.parametrize("provider_cause", [False, True])
@@ -58,7 +59,7 @@ async def test_compaction_keeps_explicit_empty_and_short_summary_recovery(
     slices = AgentSlices.resolve(default_reader=defaults())
 
     result = await compact.auto_compact_summary(
-        messages, llm, 1, slices, catalog=build_model_catalog()
+        messages, llm, 1, slices, catalog=build_model_catalog(home=meiva_home())
     )
 
     assert result == expected

@@ -16,6 +16,7 @@ exports = ["__main__.py", "composition.py", "healthz.py", "plugin_services.py", 
 "gate_plan.py" = "strict"
 
 [roots]
+"__main__.py" = { kinds = ["home"], why = "`python -m services.supervision.roster` resolves the home whose plugins declare the services it prints" }
 "composition.py" = { kinds = ["settings"], why = "assembles the roster at use time: reads the machine host, the database and Redis urls and the gateway settings that the service specs take" }
 "healthz.py" = { kinds = ["endpoints"], why = "builds ServiceEndpoints from the settings to name a daemon's health url and pidfile" }
 "spec.py" = { kinds = ["settings"], why = "reads the enablement settings (browser, helper, heartbeat and others) that gate each roster entry when its spec is asked" }

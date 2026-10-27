@@ -8,7 +8,7 @@ from pathlib import Path
 from typing import Any, TypeGuard
 
 from base.packages.skills.tree import Skill, flatten, identifier
-from base.paths import meiva_home, skills_dir
+from base.paths import skills_dir
 from meiva.sdk_surface import process_context, skill_sources
 from meiva.skills.skill_proxies import Namespace, SkillProxy, consumed_text, node_to_obj
 
@@ -90,13 +90,27 @@ def _provider_roots() -> list[Path]:
     return skill_sources.roots()
 
 
-def _scan_tree() -> dict[str, Any]:
-    """The full namespace tree: `~/.meiva/skills/` (install-registry gated) plus the provider
-    roots; the scan itself is `skill_index.scan_tree`, which takes all three as arguments."""
+# meiva:note
+# The full namespace tree of `home`: its `skills/` (install-registry gated) plus the provider
+# roots; the scan itself is `skill_index.scan_tree`, which takes all three as arguments. The agent
+# host, which holds no process context, scans with the home its turn context carries.
+def scan_under(home: Path) -> dict[str, Any]:
     from base.packages.extensions.install_registry import loadable_skill_names
     from meiva.skills.skill_index import scan_tree
 
-    return scan_tree(skills_dir(meiva_home()), loadable_skill_names(), _provider_roots())
+    return scan_tree(skills_dir(home), loadable_skill_names(home=home), _provider_roots())
+
+
+# meiva:note
+# Every skill under `home`, flattened (what `names()` returns for the bound context's home).
+def names_under(home: Path) -> list[Skill]:
+    return flatten(scan_under(home))
+
+
+# meiva:note
+# The full namespace tree of the bound context's home.
+def _scan_tree() -> dict[str, Any]:
+    return scan_under(process_context.current_context().require_meiva_home())
 
 
 def skills_in(roots: list[Path]) -> list[Skill]:
@@ -264,8 +278,9 @@ class _SkillsModule(types.ModuleType):
         """Top-level skill and namespace names — the index a bare
         `meiva.help(meiva.skills)` renders, one heading + one-line description per
         entry. Bodies never render from here; `meiva.help(meiva.skills.<name>)`
-        opens one."""
-        return sorted(_scan_tree())
+        opens one. A process that holds no SDK context (a host building an installation) has
+        no home to scan and lists nothing."""
+        return sorted(_scan_tree()) if process_context.ambient_context() is not None else []
 
 
 sys.modules[__name__].__class__ = _SkillsModule

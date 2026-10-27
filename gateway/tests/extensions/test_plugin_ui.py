@@ -24,7 +24,7 @@ _BOARD = "<!doctype html><title>Board</title><h1>Task board</h1>"
 
 def test_serves_the_mount_root_index(unit_home: Path) -> None:
     _write_plugin(unit_home, "board", files={"index.html": _BOARD})
-    write_local({"plugins": {"board": {"enabled": True}}})
+    write_local({"plugins": {"board": {"enabled": True}}}, home=unit_home)
 
     with gateway_test_client() as client:
         r = client.get("/api/plugin-ui/board/")
@@ -36,7 +36,7 @@ def test_serves_the_mount_root_index(unit_home: Path) -> None:
 
 def test_bare_mount_redirects_to_the_trailing_slash(unit_home: Path) -> None:
     _write_plugin(unit_home, "board", files={"index.html": _BOARD})
-    write_local({"plugins": {"board": {"enabled": True}}})
+    write_local({"plugins": {"board": {"enabled": True}}}, home=unit_home)
 
     with gateway_test_client() as client:
         r = client.get("/api/plugin-ui/board", follow_redirects=False)
@@ -50,7 +50,7 @@ def test_serves_a_subdirectory_index_and_a_nested_asset(unit_home: Path) -> None
         "board",
         files={"board/index.html": _BOARD, "board/app.js": "console.log(1)\n"},
     )
-    write_local({"plugins": {"board": {"enabled": True}}})
+    write_local({"plugins": {"board": {"enabled": True}}}, home=unit_home)
 
     with gateway_test_client() as client:
         page = client.get("/api/plugin-ui/board/board/")
@@ -64,7 +64,7 @@ def test_serves_a_subdirectory_index_and_a_nested_asset(unit_home: Path) -> None
 
 def test_directory_without_a_trailing_slash_redirects(unit_home: Path) -> None:
     _write_plugin(unit_home, "board", files={"board/index.html": _BOARD, "board/app.js": "1\n"})
-    write_local({"plugins": {"board": {"enabled": True}}})
+    write_local({"plugins": {"board": {"enabled": True}}}, home=unit_home)
 
     with gateway_test_client() as client:
         r = client.get("/api/plugin-ui/board/board", follow_redirects=False)
@@ -74,7 +74,7 @@ def test_directory_without_a_trailing_slash_redirects(unit_home: Path) -> None:
 
 def test_dash_spelled_plugin_name_reaches_the_underscore_directory(unit_home: Path) -> None:
     _write_plugin(unit_home, "meiva_board", files={"index.html": _BOARD})
-    write_local({"plugins": {"meiva_board": {"enabled": True}}})
+    write_local({"plugins": {"meiva_board": {"enabled": True}}}, home=unit_home)
 
     with gateway_test_client() as client:
         r = client.get("/api/plugin-ui/meiva-board/")
@@ -84,7 +84,7 @@ def test_dash_spelled_plugin_name_reaches_the_underscore_directory(unit_home: Pa
 @pytest.mark.parametrize("path", ["", "index.html"])
 def test_disabled_plugin_has_no_mount(path: str, unit_home: Path) -> None:
     _write_plugin(unit_home, "board", files={"index.html": _BOARD})
-    write_local({"plugins": {"board": {"enabled": False}}})
+    write_local({"plugins": {"board": {"enabled": False}}}, home=unit_home)
 
     with gateway_test_client() as client:
         r = client.get(f"/api/plugin-ui/board/{path}")
@@ -93,7 +93,7 @@ def test_disabled_plugin_has_no_mount(path: str, unit_home: Path) -> None:
 
 def test_unknown_plugin_and_a_plugin_without_pages_answer_alike(unit_home: Path) -> None:
     _write_plugin(unit_home, "plain")
-    write_local({"plugins": {"plain": {"enabled": True}}})
+    write_local({"plugins": {"plain": {"enabled": True}}}, home=unit_home)
 
     with gateway_test_client() as client:
         missing = client.get("/api/plugin-ui/nope/")
@@ -107,7 +107,7 @@ def test_unknown_plugin_and_a_plugin_without_pages_answer_alike(unit_home: Path)
 @pytest.mark.parametrize("rest", ["%2e%2e/plugin.py", "board/%2e%2e/%2e%2e/plugin.py", "a\\b"])
 def test_traversal_segments_are_refused(rest: str, unit_home: Path) -> None:
     _write_plugin(unit_home, "board", files={"index.html": _BOARD})
-    write_local({"plugins": {"board": {"enabled": True}}})
+    write_local({"plugins": {"board": {"enabled": True}}}, home=unit_home)
 
     with gateway_test_client() as client:
         r = client.get(f"/api/plugin-ui/board/{rest}")
@@ -120,7 +120,7 @@ def test_a_symlink_out_of_the_ui_dir_is_refused(unit_home: Path) -> None:
     secret = directory.parent.parent / "secret.txt"
     secret.write_text("cluster secret\n", encoding="utf-8")
     (directory / "ui" / "escape.txt").symlink_to(secret)
-    write_local({"plugins": {"board": {"enabled": True}}})
+    write_local({"plugins": {"board": {"enabled": True}}}, home=unit_home)
 
     with gateway_test_client() as client:
         r = client.get("/api/plugin-ui/board/escape.txt")
@@ -130,7 +130,7 @@ def test_a_symlink_out_of_the_ui_dir_is_refused(unit_home: Path) -> None:
 
 def test_missing_file_is_404(unit_home: Path) -> None:
     _write_plugin(unit_home, "board", files={"index.html": _BOARD})
-    write_local({"plugins": {"board": {"enabled": True}}})
+    write_local({"plugins": {"board": {"enabled": True}}}, home=unit_home)
 
     with gateway_test_client() as client:
         r = client.get("/api/plugin-ui/board/nope.html")
@@ -162,7 +162,7 @@ def test_nav_declarations_reach_the_console_attributed(unit_home: Path) -> None:
         ),
         encoding="utf-8",
     )
-    write_local({"plugins": {"board": {"enabled": True}}})
+    write_local({"plugins": {"board": {"enabled": True}}}, home=unit_home)
 
     with gateway_test_client() as client:
         r = client.get("/api/ui/contributions")

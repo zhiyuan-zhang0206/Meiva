@@ -14,6 +14,7 @@ from base.cluster.machine.tests.identity import machine_identity as machine_iden
 from base.config.service_read import ConfigAuthority
 from base.db import Database
 from base.packages.plugin_providers import build_model_catalog
+from base.paths import meiva_home
 
 
 def _seed_parent(conn: psycopg.Connection) -> int:
@@ -56,7 +57,7 @@ def test_actual_birth_model_effort_failure_rolls_back_every_effect(
             config={"reasoning_effort": "max"},
             prompt="This birth must roll back",
             prompt_source="user",
-            catalog=build_model_catalog(),
+            catalog=build_model_catalog(home=meiva_home()),
             authority=config_authority,
         )
     assert _counts(db_conn) == before
@@ -79,7 +80,7 @@ def test_caller_owns_birth_task_audit_and_inbound_commit(
             actor = insert_agent_birth(
                 cur,
                 machine=machine_identity.name(),
-                catalog=build_model_catalog(),
+                catalog=build_model_catalog(home=meiva_home()),
                 authority=config_authority,
             )
             birth = insert_agent_birth(
@@ -87,7 +88,7 @@ def test_caller_owns_birth_task_audit_and_inbound_commit(
                 machine=machine_identity.name(),
                 prompt="First instruction",
                 prompt_source="user",
-                catalog=build_model_catalog(),
+                catalog=build_model_catalog(home=meiva_home()),
                 authority=config_authority,
             )
             task, event, notes = create_task_in_transaction(
@@ -138,7 +139,7 @@ def test_task_validation_failure_rolls_back_birth_and_prompt(
                 machine=machine_identity.name(),
                 prompt="First instruction",
                 prompt_source="user",
-                catalog=build_model_catalog(),
+                catalog=build_model_catalog(home=meiva_home()),
                 authority=config_authority,
             )
             create_task_in_transaction(
@@ -168,7 +169,7 @@ def test_cursor_birth_replay_returns_original_attempt_without_new_effects(
             prompt_source="user",
             creation_key="transaction-birth",
             creation_request_hash=creation_request_hash({"prompt": "First instruction"}),
-            catalog=build_model_catalog(),
+            catalog=build_model_catalog(home=meiva_home()),
             authority=config_authority,
         )
     before = _counts(db_conn)
@@ -181,7 +182,7 @@ def test_cursor_birth_replay_returns_original_attempt_without_new_effects(
             prompt_source="user",
             creation_key="transaction-birth",
             creation_request_hash=creation_request_hash({"prompt": "First instruction"}),
-            catalog=build_model_catalog(),
+            catalog=build_model_catalog(home=meiva_home()),
             authority=config_authority,
         )
         assert replay.agent_id == original.agent_id

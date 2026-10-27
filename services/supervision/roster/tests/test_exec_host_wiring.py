@@ -3,12 +3,15 @@ from __future__ import annotations
 from base.cluster.machine import MachineIdentityReader
 from base.cluster.machine.tests.identity import machine_identity as machine_identity
 from base.host.system.tests.fake_commands import fake_host
+from base.paths import meiva_home
 from services.agent_runner.exec_host import shutdown_budget
 from services.supervision.roster import composition, service_spec, spec
 
 
 def _spec() -> service_spec.ServiceSpec:
-    return next(s for s in composition.build_services() if s.session == "exec-host")
+    return next(
+        s for s in composition.build_services(home=meiva_home()) if s.session == "exec-host"
+    )
 
 
 def test_only_an_agent_runner_host_runs_exec_host(
@@ -19,13 +22,16 @@ def test_only_an_agent_runner_host_runs_exec_host(
     runner_started = {
         s.session
         for s in spec.services_for_capabilities(
-            frozenset({"agent-runner"}), machine=machine_identity, host=fake_host()
+            frozenset({"agent-runner"}),
+            machine=machine_identity,
+            host=fake_host(),
+            home=meiva_home(),
         )
     }
     gateway_started = {
         s.session
         for s in spec.services_for_capabilities(
-            frozenset({"gateway"}), machine=machine_identity, host=fake_host()
+            frozenset({"gateway"}), machine=machine_identity, host=fake_host(), home=meiva_home()
         )
     }
     assert "exec-host" in runner_started

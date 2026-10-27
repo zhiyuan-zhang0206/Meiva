@@ -7,13 +7,14 @@ from base.lm import pricing
 from base.lm.catalog import ModelCatalog
 from base.lm.compat import stop
 from base.packages.plugins import enable_config
+from base.paths import meiva_home
 
 
 def test_repo_anthropic_provider_is_enabled_and_registers_complete_contract(
     *, model_catalog: ModelCatalog
 ) -> None:
-    discovered = enable_config.discover_plugins()
-    config = enable_config.load_for_runtime(set(discovered))
+    discovered = enable_config.discover_plugins(home=meiva_home())
+    config = enable_config.load_for_runtime(set(discovered), home=meiva_home())
 
     assert config.plugins["lm_anthropic"].enabled
 
@@ -121,8 +122,8 @@ def test_gpt6_1_sol_capabilities_and_display_successor(*, model_catalog: ModelCa
 def test_repo_openai_provider_is_enabled_and_registers_complete_contract(
     *, model_catalog: ModelCatalog
 ) -> None:
-    discovered = enable_config.discover_plugins()
-    config = enable_config.load_for_runtime(set(discovered))
+    discovered = enable_config.discover_plugins(home=meiva_home())
+    config = enable_config.load_for_runtime(set(discovered), home=meiva_home())
 
     assert config.plugins["lm_openai"].enabled
 

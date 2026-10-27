@@ -89,9 +89,10 @@ def counter(unit_home: Path) -> Path:
         {
             "plugins": {
                 name: {"enabled": name == "lazytasks" or name.startswith("lm_")}
-                for name in discover_plugins()
+                for name in discover_plugins(home=unit_home)
             }
-        }
+        },
+        home=unit_home,
     )
     return count_file
 
@@ -173,7 +174,7 @@ def test_ensure_plugins_loaded_idempotent(counter: Path, unit_home: Path) -> Non
 def test_ensure_plugins_loaded_preserves_a_boot_failure_without_retry(
     counter: Path, unit_home: Path
 ) -> None:
-    local_config_path().write_text("{not json", encoding="utf-8")
+    local_config_path(home=unit_home).write_text("{not json", encoding="utf-8")
     report = run("unreadable_plugin_config", counter, unit_home, launched=False)
     assert report["raised"] == 2
     assert report["same_error"] is True
@@ -183,7 +184,7 @@ def test_ensure_plugins_loaded_preserves_a_boot_failure_without_retry(
 
 
 def test_failed_lazy_lookup_repeats_the_original_boot_error(counter: Path, unit_home: Path) -> None:
-    local_config_path().write_text("{not json", encoding="utf-8")
+    local_config_path(home=unit_home).write_text("{not json", encoding="utf-8")
     report = run("unreadable_config_on_lookup", counter, unit_home, launched=True)
     assert report["raised"] == 2
     assert report["same_error"] is True

@@ -14,7 +14,7 @@ from base.packages.plugins.enable_config import discover_plugins, set_local_enab
 from base.packages.tests.lm.providers.provider_plugin_support import (
     provider_plugin as provider_plugin,
 )
-from base.paths import plugins_dir
+from base.paths import meiva_home, plugins_dir
 from gateway.http.model_catalog import (
     CatalogLoadFailure,
     ModelCatalogUnavailableError,
@@ -58,8 +58,8 @@ def test_zero_provider_keeps_management_available(
     provider_plugin: Callable[..., None], *, machine_identity: MachineIdentityReader
 ) -> None:
     del provider_plugin
-    for name in discover_plugins():
-        set_local_enabled(name, enabled=False)
+    for name in discover_plugins(home=meiva_home()):
+        set_local_enabled(name, enabled=False, home=meiva_home())
     with gateway_test_client(machine=machine_identity) as client:
         assert client.get("/api/settings").status_code == 200
         response = client.get("/api/models")

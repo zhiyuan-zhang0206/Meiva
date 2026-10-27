@@ -26,6 +26,7 @@ from cli.database.tests.cli_tests import operator_database as operator_database
 from cli.database.tests.cli_tests import operator_pipeline as operator_pipeline
 from cli.database.tests.command_inputs import command_config_machine as command_config_machine
 from cli.database.tests.command_inputs import command_runtime as command_runtime
+from meiva.sdk_surface.tests.context_home import context_over_unit_home as context_over_unit_home
 
 SKILL_NAME = "operating-meiva-cluster"
 MARKER_NAME = ".meiva-managed.json"
@@ -639,7 +640,7 @@ def test_builtin_guide_installs_with_the_core_update_channel(
     installed_names = {skill["name"] for skill in meiva.skills.names()}
     for name in ("meiva-guide", "impersonator-guide"):
         assert name in installed_names
-        entry = install_registry.get(name)
+        entry = install_registry.get(name, home=unit_home)
         assert entry is not None and entry.enabled and entry.origin == "repo"
         installed = unit_home / "skills" / name / "SKILL.md"
         original = installed.read_bytes()

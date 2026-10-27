@@ -412,7 +412,7 @@ def main() -> None:
     keys = TypeAdapter(dict[str, str]).validate_json(sys.argv[2])
     home = resolve_meiva_home()
     snapshot = settings.lm
-    catalog = build_model_catalog()
+    catalog = build_model_catalog(home=home)
     legacy = case.endswith(("missing_mimo_key_raises", "missing_kimi_key_raises"))
     if legacy:
         assert snapshot.xiaomi_api_key is not None

@@ -35,7 +35,9 @@ def test_meiva_settings_plugins_attribute_access(
 ):
     """`meiva.sdk_surface.settings.plugins.<n>` returns instance; unregistered plugin name raise + lists known plugins."""
     bind_plugin_config(
-        PluginConfigOwner("test_plugin", _FixtureConfig, disk_image_path("test_plugin")),
+        PluginConfigOwner(
+            "test_plugin", _FixtureConfig, disk_image_path("test_plugin", home=unit_home)
+        ),
         isolated_registry,
     )
 

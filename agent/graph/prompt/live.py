@@ -13,6 +13,7 @@ import io
 import logging
 from collections.abc import Sequence
 from dataclasses import dataclass
+from pathlib import Path
 from types import ModuleType, SimpleNamespace
 
 from base.host.env.agent_slices import AgentSlices, Prompt
@@ -55,26 +56,33 @@ def warn_unresolved(config_field: str, names: Sequence[str]) -> None:
         )
 
 
-def read_skills(disabled: Sequence[str]) -> tuple[Skill, ...]:
+def read_skills(disabled: Sequence[str], *, home: Path) -> tuple[Skill, ...]:
     if disabled_by_sdk_config("skills", disabled):
         return ()
-    import meiva
+    from meiva.skills import names_under
 
-    return tuple(meiva.skills.names())
+    return tuple(names_under(home))
 
 
 def read_view(
-    inject: tuple[str, ...], expand: tuple[str, ...], configured_disable: Sequence[str]
+    inject: tuple[str, ...],
+    expand: tuple[str, ...],
+    configured_disable: Sequence[str],
+    *,
+    home: Path,
 ) -> SkillView:
     disabled = effective_sdk_disable(configured_disable)
-    return SkillView(inject, expand, disabled, read_skills(disabled) if inject or expand else ())
+    return SkillView(
+        inject, expand, disabled, read_skills(disabled, home=home) if inject or expand else ()
+    )
 
 
-def skill_view(prompt: Prompt) -> SkillView:
+def skill_view(prompt: Prompt, *, home: Path) -> SkillView:
     view = read_view(
         prompt.skills_to_inject_into_system_prompt,
         prompt.skills_to_expand_at_start,
         prompt.sdk_disable,
+        home=home,
     )
     warn_unresolved(
         "skills_to_inject_into_system_prompt", resolve_prompt_skills(view.inject, view).unresolved
@@ -82,12 +90,15 @@ def skill_view(prompt: Prompt) -> SkillView:
     return view
 
 
-def read_mcp_servers(disabled: Sequence[str]) -> tuple[McpServer, ...]:
+def read_mcp_servers(disabled: Sequence[str], *, home: Path) -> tuple[McpServer, ...]:
     if disabled_by_sdk_config("mcps", disabled):
         return ()
-    import meiva
+    from base.packages.mcp_config import load_mcp_config
 
-    return tuple(McpServer(name, meiva.mcps.description(name)) for name in meiva.mcps.servers())
+    configured = load_mcp_config(home=home)
+    return tuple(
+        McpServer(name, configured[name].get("description")) for name in sorted(configured)
+    )
 
 
 def read_plugin_expansions() -> tuple[str, ...]:
@@ -96,9 +107,9 @@ def read_plugin_expansions() -> tuple[str, ...]:
     return install.expansions()
 
 
-def read_live_sdk(prompt: Prompt) -> LiveSdk:
-    view = skill_view(prompt)
-    return LiveSdk(view, read_mcp_servers(view.disabled), read_plugin_expansions())
+def read_live_sdk(prompt: Prompt, *, home: Path) -> LiveSdk:
+    view = skill_view(prompt, home=home)
+    return LiveSdk(view, read_mcp_servers(view.disabled, home=home), read_plugin_expansions())
 
 
 def discover_all_namespaces(disabled: Sequence[str]) -> list[str]:

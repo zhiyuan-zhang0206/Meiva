@@ -13,14 +13,14 @@ from base.packages.plugins.flags import FlagDomainUnavailable, read_declared_fla
 from base.packages.skills import scan_tree
 from base.packages.skills.names import display_name, match_key
 from base.packages.skills.tree import Skill, flatten, identifier, target
-from base.paths import meiva_home, repo_plugins_dir, repo_root, skills_dir
+from base.paths import repo_plugins_dir, repo_root, skills_dir
 
 
 # meiva:link base/packages/docs/composer-commands.meiva.okf.md
-def load_skill_names(provider_roots: Sequence[Path] = ()) -> list[Skill]:
+def load_skill_names(provider_roots: Sequence[Path] = (), *, home: Path) -> list[Skill]:
     from base.packages.extensions.install_registry import loadable_skill_names
 
-    return flatten(scan_tree(skills_dir(meiva_home()), loadable_skill_names(), provider_roots))
+    return flatten(scan_tree(skills_dir(home), loadable_skill_names(home=home), provider_roots))
 
 
 # meiva:link base/packages/docs/composer-commands.meiva.okf.md
@@ -53,12 +53,12 @@ class CommandSources:
     external_plugins: Path
 
     @classmethod
-    def system(cls) -> Self:
+    def system(cls, *, home: Path) -> Self:
         return cls(
             builtin_commands=repo_root() / "meiva_builtins" / "commands",
-            user_commands=meiva_home() / "commands",
+            user_commands=home / "commands",
             builtin_plugins=repo_plugins_dir(),
-            external_plugins=external_plugin_read_root(),
+            external_plugins=external_plugin_read_root(home=home),
         )
 
 
@@ -69,11 +69,14 @@ class CommandEnvironment(Protocol):
 
 
 class _SystemCommandEnvironment:
+    def __init__(self, home: Path) -> None:
+        self._home = home
+
     def enabled(self) -> bool:
         return _commands_enabled()
 
     def sources(self) -> CommandSources:
-        return CommandSources.system()
+        return CommandSources.system(home=self._home)
 
 
 # meiva:link base/packages/docs/composer-commands.meiva.okf.md
@@ -207,8 +210,8 @@ class CommandCatalog:
     environment: CommandEnvironment
 
     @classmethod
-    def system(cls, *, skills: Callable[[], Sequence[Skill]]) -> Self:
-        return cls(skills=skills, environment=_SystemCommandEnvironment())
+    def system(cls, *, skills: Callable[[], Sequence[Skill]], home: Path) -> Self:
+        return cls(skills=skills, environment=_SystemCommandEnvironment(home))
 
     def discover(self) -> list[Command]:
         if not self.environment.enabled():

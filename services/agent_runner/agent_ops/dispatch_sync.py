@@ -67,7 +67,7 @@ def dispatch_sync(
             ).model_dump(mode="json")
         case "config_read":
             return OpStatus.COMPLETED, host_config.config_read_op(
-                authority=authority, local_machine=local_machine.name(), host=host
+                authority=authority, local_machine=local_machine.name(), host=host, home=home
             ).model_dump(mode="json")
         case "config_audit_read":
             ca = ConfigAuditReadPayload.model_validate(payload)
@@ -85,16 +85,17 @@ def dispatch_sync(
                     trace_id=cw.trace_id,
                     local_machine=local_machine.name(),
                     host=host,
+                    home=home,
                 ).model_dump(mode="json")
         case "inventory_read":
             return OpStatus.COMPLETED, inventory.inventory_read_op(
-                local_machine=local_machine, host=host
+                local_machine=local_machine, host=host, home=home
             ).model_dump(mode="json")
         case "inventory_write":
             iw = InventoryWritePayload.model_validate(payload)
             with _state_write_lock:
                 return OpStatus.COMPLETED, inventory.inventory_write_op(
-                    iw.plugins, iw.mcp_servers, local_machine=local_machine, host=host
+                    iw.plugins, iw.mcp_servers, local_machine=local_machine, host=host, home=home
                 ).model_dump(mode="json")
         case "harness_probe":
             return OpStatus.COMPLETED, cluster.harness_probe_op(local_machine.name()).model_dump(
@@ -123,7 +124,9 @@ def _agent_arm(
             asv = AgentSkillViewPayload.model_validate(payload)
             if pool is None:
                 raise RuntimeError("agent skill view requires the native DB pool")
-            return cluster.agent_skill_view_op(asv.agent_id, pool).model_dump(mode="json")
+            return cluster.agent_skill_view_op(asv.agent_id, pool, home=home).model_dump(
+                mode="json"
+            )
         case "shell_capture":
             sc = ShellCapturePayload.model_validate(payload)
             return cluster.shell_capture_op(

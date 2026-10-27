@@ -54,10 +54,10 @@ def _h_plugins_uninstall(args: argparse.Namespace) -> int:
     return cmd_plugins_uninstall(args.name, home=args.runtime.home)
 
 
-def _h_plugins_installed(_args: argparse.Namespace) -> int:
+def _h_plugins_installed(args: argparse.Namespace) -> int:
     from cli.commands.extensions.plugins import cmd_plugins_installed
 
-    return cmd_plugins_installed()
+    return cmd_plugins_installed(home=args.runtime.home)
 
 
 def _h_plugins_inspect(args: argparse.Namespace) -> int:
@@ -70,14 +70,16 @@ def _h_plugins_inspect(args: argparse.Namespace) -> int:
 
     sampling = process_sampling_owner(args.runtime.rng)
     with sampling.execution():
-        return cmd_plugins_inspect(args.name, catalog=build_catalog(sampling=sampling))
+        return cmd_plugins_inspect(
+            args.name, catalog=build_catalog(sampling=sampling, home=args.runtime.home)
+        )
 
 
 def _h_plugins_verify(args: argparse.Namespace) -> int:
     # Own module for the same reason as `inspect`: it loads the agent layer.
     from cli.commands.extensions.plugins_inspect import cmd_plugins_verify
 
-    return cmd_plugins_verify(rng=args.runtime.rng)
+    return cmd_plugins_verify(rng=args.runtime.rng, home=args.runtime.home)
 
 
 def _h_plugins_upgrade(args: argparse.Namespace) -> int:
@@ -120,13 +122,13 @@ def _h_skill_upgrade(args: argparse.Namespace) -> int:
 def _h_plugins_enable(args: argparse.Namespace) -> int:
     from cli.commands.extensions.plugins import cmd_plugins_enable
 
-    return cmd_plugins_enable(args.name)
+    return cmd_plugins_enable(args.name, home=args.runtime.home)
 
 
 def _h_plugins_disable(args: argparse.Namespace) -> int:
     from cli.commands.extensions.plugins import cmd_plugins_disable
 
-    return cmd_plugins_disable(args.name)
+    return cmd_plugins_disable(args.name, home=args.runtime.home)
 
 
 def _h_skill_install(args: argparse.Namespace) -> int:
@@ -151,13 +153,13 @@ def _h_skill_install(args: argparse.Namespace) -> int:
 def _h_skill_enable(args: argparse.Namespace) -> int:
     from cli.commands.extensions.skill import cmd_skill_enable
 
-    return cmd_skill_enable(args.name)
+    return cmd_skill_enable(args.name, home=args.runtime.home)
 
 
 def _h_skill_disable(args: argparse.Namespace) -> int:
     from cli.commands.extensions.skill import cmd_skill_disable
 
-    return cmd_skill_disable(args.name)
+    return cmd_skill_disable(args.name, home=args.runtime.home)
 
 
 def _h_skill_register(args: argparse.Namespace) -> int:
@@ -180,7 +182,9 @@ def _h_skill_scan(args: argparse.Namespace) -> int:
 def _h_skill_trust(args: argparse.Namespace) -> int:
     from cli.commands.extensions.skill import cmd_skill_trust
 
-    return cmd_skill_trust(args.name, revoke=args.revoke, now=args.runtime.clock.now())
+    return cmd_skill_trust(
+        args.name, revoke=args.revoke, now=args.runtime.clock.now(), home=args.runtime.home
+    )
 
 
 def add_plugins_parser(sub: argparse._SubParsersAction[argparse.ArgumentParser]) -> None:

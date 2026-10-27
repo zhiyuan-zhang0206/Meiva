@@ -10,6 +10,7 @@ from base.config.env_changed import EnvChangedError
 from base.config.service_read import ConfigAuthority
 from base.host.env.config_lite_table import FIELD_DOMAINS
 from base.packages.plugin_config_admin import panel_metadata
+from base.paths import meiva_home
 from gateway.routers.configuration import write_plan
 from gateway.routers.refusal import HttpFailure
 from ops.rpc_schemas import ConfigWriteOpResult, FieldWriteResult
@@ -52,7 +53,9 @@ def test_a_host_only_put_has_an_empty_candidate() -> None:
 def test_a_local_candidate_carries_the_host_fields_of_a_changed_domain(
     config_authority: ConfigAuthority,
 ) -> None:
-    metas = {meta.name: meta for meta in panel_metadata(authority=config_authority)}
+    metas = {
+        meta.name: meta for meta in panel_metadata(authority=config_authority, home=meiva_home())
+    }
     # meiva:note
     # `delivery_watchdog_interval_seconds` and `heartbeat_enabled` share the daemon domain;
     # `ops_concurrency` does not.

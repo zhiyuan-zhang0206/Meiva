@@ -28,7 +28,7 @@ from base.host.env.agent_slices import AgentSlices
 from base.lm.harness import HarnessTurn, Usage
 from base.packages.plugin_providers import build_model_catalog
 from base.packages.plugins.extensions import EMPTY, ExtensionRegistry, PluginContributions
-from base.paths import resolve_meiva_home
+from base.paths import meiva_home, resolve_meiva_home
 
 
 # meiva:note
@@ -97,7 +97,7 @@ def make_context(harness: Harness, engine: FakeEngine | None) -> MeivaContext:
         llm=MagicMock(),
         event_publisher=MagicMock(),
         agent=AgentSlices.resolve(default_reader=defaults()),
-        catalog=build_model_catalog(),
+        catalog=build_model_catalog(home=meiva_home()),
         clock_factory=Clock.from_settings,
     )
 

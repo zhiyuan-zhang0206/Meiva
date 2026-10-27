@@ -92,7 +92,9 @@ class _NewlyInstalledSkillsHook(Hook):
         known = state.capabilities.indexed
         drift = index_drift(
             known if known is not None else set(),
-            skill_view(runtime.context.require_agent().prompt),
+            skill_view(
+                runtime.context.require_agent().prompt, home=runtime.context.require_meiva_home()
+            ),
         )
         if known is None:
             # No snapshot for this window — a checkpoint written before the

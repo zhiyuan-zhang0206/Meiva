@@ -545,7 +545,9 @@ async def run(
             handoff_stamping=stamping,
             clients=clients,
             extensions=installation.registry,
-            commands=CommandCatalog.system(skills=meiva_skills.names),
+            commands=CommandCatalog.system(
+                skills=partial(meiva_skills.names_under, home=home), home=home
+            ),
             plugin_configs=installation.configs,
             home=home,
             runtime_owner=new_uuid(secure_rng),
@@ -594,7 +596,7 @@ async def run(
                     db,
                     installation=installation,
                     config=config,
-                    plugins_root=external_plugin_read_root(),
+                    plugins_root=external_plugin_read_root(home=home),
                     stdout_log=stdout_log_path(logs_dir=logs_dir(home=home)),
                 ),
                 InboundWakeDispatcher(

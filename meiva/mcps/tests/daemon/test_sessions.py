@@ -268,10 +268,10 @@ def test_shared_kind_reads_the_servers_declaration(unit_home: Path) -> None:
             "c": {"command": "x"},
         },
     )
-    assert daemon_mod.shared_kind("a") is True
-    assert daemon_mod.shared_kind("b") == "browser"
-    assert daemon_mod.shared_kind("c") is None
-    assert daemon_mod.shared_kind("nope") is None
+    assert daemon_mod.shared_kind("a", home=unit_home) is True
+    assert daemon_mod.shared_kind("b", home=unit_home) == "browser"
+    assert daemon_mod.shared_kind("c", home=unit_home) is None
+    assert daemon_mod.shared_kind("nope", home=unit_home) is None
 
 
 # meiva:note

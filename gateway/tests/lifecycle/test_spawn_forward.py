@@ -27,6 +27,7 @@ from base.cluster.machine.tests.identity import MachineIdentitySetter
 from base.db import Database
 from base.db.code_version_gate import ProcessDbGate
 from base.packages.plugin_providers import build_model_catalog
+from base.paths import meiva_home
 from gateway.agents import creation
 from gateway.agents.launch import forward
 from gateway.agents.launch.launch_plan import LaunchForwardError
@@ -260,7 +261,7 @@ def test_receipt_read_failure_keeps_accepted_creation(fault: str, database: Data
         availability = creation.creation_availability(
             unreadable,
             987654,
-            catalog=build_model_catalog(),
+            catalog=build_model_catalog(home=meiva_home()),
             default_model="model",
             clock=clock,
         )

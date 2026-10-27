@@ -49,6 +49,7 @@ def run_schedule(
                 clients=clients,
                 machine=machine,
                 clock_factory=Clock.from_settings,
+                meiva_home=meiva_home(),
             )
         )
         return engine.run(

@@ -11,6 +11,7 @@ from base.config.tests.config_authority import config_authority as config_author
 from base.db import Database
 from base.events.live.bus import EventBus
 from base.packages.plugin_providers import build_model_catalog
+from base.paths import meiva_home
 from base.paths.tests.homes import unit_home as unit_home
 from meiva.tests.fixtures.sdk import sdk_environment as sdk_environment
 from meiva.tests.fixtures.sdk import sdk_identity as sdk_identity
@@ -33,7 +34,7 @@ def test_consumed_restart_selects_successor_script_without_claiming_completion(
         event_bus,
         spawner="test",
         machine=machine_identity.name(),
-        catalog=build_model_catalog(),
+        catalog=build_model_catalog(home=meiva_home()),
         authority=config_authority,
     )
     initial = lifecycle_restart.build("diagnostic", agent_id=agent_id)
@@ -74,7 +75,7 @@ def test_pending_request_does_not_select_post_request_script(
         event_bus,
         spawner="test",
         machine=machine_identity.name(),
-        catalog=build_model_catalog(),
+        catalog=build_model_catalog(home=meiva_home()),
         authority=config_authority,
     )
     db_conn.execute(

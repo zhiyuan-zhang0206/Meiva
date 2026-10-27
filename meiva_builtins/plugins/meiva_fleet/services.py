@@ -3,7 +3,7 @@
 #
 # A plugin that runs its own long-lived gateway/agent-runner daemon declares it
 # here instead of hardcoding a ServiceSpec into the core `services/supervision/roster/composition.py`: a
-# plugin ships a `services.py` exposing ``services() -> tuple[ServiceSpec, ...]``,
+# plugin ships a `services.py` exposing ``services(*, home) -> tuple[ServiceSpec, ...]``,
 # and `services.supervision.roster.plugin_services.plugin_services()` discovers + folds it into the single
 # `build_services()` roster (so watchdog keepalive / `meiva start` / `meiva status`
 # all still derive from one place). Discovery keys on this plugin's code being
@@ -21,6 +21,7 @@
 from __future__ import annotations
 
 from functools import partial
+from pathlib import Path
 
 from base.cluster.machine import MachineRole
 from base.packages.plugins.config_registration import disk_image_path, read_config_image
@@ -48,7 +49,7 @@ def _task_maintenance_gate(config: FleetConfig) -> str | None:
     return None
 
 
-def services() -> tuple[ServiceSpec, ...]:
+def services(*, home: Path) -> tuple[ServiceSpec, ...]:
     """The ops services the fleet plugin contributes to the roster.
 
     Currently the gateway-side task-maintenance daemon (cluster-wide task
@@ -57,7 +58,7 @@ def services() -> tuple[ServiceSpec, ...]:
     `gate`. The cmd is a venv-direct launch (`.venv/bin/python`, relative to the
     source checkout the service starts in) — no `uv run` wrapper.
     """
-    config_path = disk_image_path("meiva_fleet")
+    config_path = disk_image_path("meiva_fleet", home=home)
     config = read_config_image(FleetConfig, config_path)
     return (
         healthz_daemon(

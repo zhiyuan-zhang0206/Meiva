@@ -8,6 +8,7 @@ from base.config.tests.configuration import defaults
 from base.host.env.agent_slices import AgentSlices
 from base.packages.plugin_providers import build_model_catalog
 from base.packages.plugins.extensions import EMPTY
+from base.paths import meiva_home
 
 _SENTENCE = "Several tool calls in one response run one at a time, in the order given"
 
@@ -17,7 +18,8 @@ def _prompt(**changes: Any) -> str:
         EMPTY,
         AgentSlices.resolve(default_reader=defaults(**changes)),
         agent_id=1,
-        catalog=build_model_catalog(),
+        catalog=build_model_catalog(home=meiva_home()),
+        home=meiva_home(),
     )
 
 

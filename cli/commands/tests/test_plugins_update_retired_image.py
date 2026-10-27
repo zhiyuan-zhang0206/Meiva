@@ -8,6 +8,7 @@ from pathlib import Path
 import pytest
 
 from base.packages.plugins.config_registration import disk_image_path
+from base.paths import meiva_home
 from base.paths.tests.homes import point_home
 
 
@@ -46,7 +47,7 @@ def test_plugins_update_reconciles_retired_only_image(
         "def contribute() -> PluginContributions:\n"
         "    return PluginContributions(config=SampleConfig)\n"
     )
-    image = disk_image_path("retired_demo")
+    image = disk_image_path("retired_demo", home=meiva_home())
     image.parent.mkdir(parents=True)
     image.write_text('{"agent_standing_directives": []}\n')
 

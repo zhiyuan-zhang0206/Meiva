@@ -17,6 +17,8 @@ from base.packages.plugins.mcp_enabled import (
     McpServerEntry,
     write_local,
 )
+from base.paths import meiva_home
+from meiva.tests.fixtures.pin_agent import pin_agent
 
 _MACOS = Platform("darwin", "arm64", "/usr/bin/python3")
 _LINUX = Platform("linux", "x86_64", "/usr/bin/python3")
@@ -37,7 +39,7 @@ def _write_plugin(home: Path, name: str, servers: dict[str, dict[str, str]]) -> 
 
 
 def test_machine_config_path_uses_meiva_home(unit_home: Path) -> None:
-    assert cfg_mod.machine_config_path() == unit_home / "mcp.json"
+    assert cfg_mod.machine_config_path(home=unit_home) == unit_home / "mcp.json"
 
 
 def test_read_servers_empty_when_no_file(tmp_path: Path) -> None:
@@ -86,39 +88,39 @@ def test_read_servers_empty_when_section_null(tmp_path: Path) -> None:
 def test_plugin_config_paths_finds_installed_plugin(unit_home: Path) -> None:
     mcp_json = unit_home / "plugins" / "myplugin" / ".mcp.json"
     _write(mcp_json, {"fs": {"command": "x"}})
-    assert mcp_json in cfg_mod.plugin_config_paths()
+    assert mcp_json in cfg_mod.plugin_config_paths(home=unit_home)
 
 
 def test_plugin_config_paths_ignores_plugin_without_mcp_json(unit_home: Path) -> None:
     (unit_home / "plugins" / "noplugin").mkdir(parents=True)
-    assert all(p.parent.name != "noplugin" for p in cfg_mod.plugin_config_paths())
+    assert all(p.parent.name != "noplugin" for p in cfg_mod.plugin_config_paths(home=unit_home))
 
 
 def test_load_has_only_the_repo_declared_servers_when_the_home_configures_none(
     unit_home: Path,
 ) -> None:
     repo_declared: dict[str, dict[str, object]] = {}
-    for path in [*cfg_mod.builtin_mcp_paths(), *cfg_mod.plugin_config_paths()]:
+    for path in [*cfg_mod.builtin_mcp_paths(), *cfg_mod.plugin_config_paths(home=unit_home)]:
         repo_declared.update(cfg_mod.read_servers(path))
 
-    assert cfg_mod.load_mcp_config(include_disabled=True) == repo_declared
+    assert cfg_mod.load_mcp_config(include_disabled=True, home=unit_home) == repo_declared
 
 
 def test_load_returns_machine_servers(unit_home: Path) -> None:
     _write(unit_home / "mcp.json", {"fs": {"command": "machine"}})
-    assert cfg_mod.load_mcp_config()["fs"] == {"command": "machine"}
+    assert cfg_mod.load_mcp_config(home=unit_home)["fs"] == {"command": "machine"}
 
 
 def test_load_returns_plugin_servers_when_no_machine_config(unit_home: Path) -> None:
     _write_plugin(unit_home, "plugin", {"fs": {"command": "plugin"}})
-    assert cfg_mod.load_mcp_config()["fs"] == {"command": "plugin"}
+    assert cfg_mod.load_mcp_config(home=unit_home)["fs"] == {"command": "plugin"}
 
 
 def test_machine_overrides_plugin_on_name_collision(unit_home: Path) -> None:
     _write_plugin(unit_home, "plugin", {"fs": {"command": "plugin"}, "extra": {"command": "p"}})
     _write(unit_home / "mcp.json", {"fs": {"command": "machine"}})
 
-    merged = cfg_mod.load_mcp_config()
+    merged = cfg_mod.load_mcp_config(home=unit_home)
     assert merged["fs"] == {"command": "machine"}
     assert merged["extra"] == {"command": "p"}
 
@@ -126,11 +128,11 @@ def test_machine_overrides_plugin_on_name_collision(unit_home: Path) -> None:
 def test_later_plugin_overrides_earlier(unit_home: Path) -> None:
     _write_plugin(unit_home, "a", {"fs": {"command": "first"}})
     _write_plugin(unit_home, "b", {"fs": {"command": "second"}})
-    assert cfg_mod.load_mcp_config()["fs"] == {"command": "second"}
+    assert cfg_mod.load_mcp_config(home=unit_home)["fs"] == {"command": "second"}
 
 
 def test_builtin_mcps_folder_surfaces_chrome(unit_home: Path) -> None:
-    merged = cfg_mod.load_mcp_config()
+    merged = cfg_mod.load_mcp_config(home=unit_home)
     assert "chrome" in merged
     assert merged["chrome"]["command"] == ".venv/bin/python"
     assert "services.desktop.browser.mcp_wrapper" in merged["chrome"]["args"]
@@ -138,13 +140,13 @@ def test_builtin_mcps_folder_surfaces_chrome(unit_home: Path) -> None:
 
 
 def test_builtin_command_is_not_uv(unit_home: Path) -> None:
-    for name, spec in cfg_mod.load_mcp_config().items():
+    for name, spec in cfg_mod.load_mcp_config(home=unit_home).items():
         assert spec["command"] != "uv", f"built-in {name} still launches via uv"
 
 
 def test_machine_config_overrides_builtin(unit_home: Path) -> None:
     _write(unit_home / "mcp.json", {"chrome": {"command": "OVERRIDE"}})
-    assert cfg_mod.load_mcp_config()["chrome"] == {"command": "OVERRIDE"}
+    assert cfg_mod.load_mcp_config(home=unit_home)["chrome"] == {"command": "OVERRIDE"}
 
 
 def _install_mcp(home: Path, name: str, spec: dict[str, Any]) -> Path:
@@ -153,75 +155,75 @@ def _install_mcp(home: Path, name: str, spec: dict[str, Any]) -> Path:
     dest = home / "mcps" / name
     dest.mkdir(parents=True, exist_ok=True)
     (dest / ".mcp.json").write_text(json.dumps({"mcpServers": {name: spec}}), encoding="utf-8")
-    reg.register(reg.InstalledPackage(name=name, type="mcp"))
+    reg.register(reg.InstalledPackage(name=name, type="mcp"), home=home)
     return dest
 
 
 def test_installed_mcp_surfaces_when_registered(unit_home: Path) -> None:
     _install_mcp(unit_home, "acme", {"command": ".venv/bin/python", "args": ["-m", "acme"]})
-    assert "acme" in cfg_mod.load_mcp_config()
+    assert "acme" in cfg_mod.load_mcp_config(home=unit_home)
 
 
 def test_installed_mcp_ignored_without_registry_row(unit_home: Path) -> None:
     _write(unit_home / "mcps" / "stray" / ".mcp.json", {"stray": {"command": "x"}})
-    assert "stray" not in cfg_mod.load_mcp_config()
+    assert "stray" not in cfg_mod.load_mcp_config(home=unit_home)
 
 
 def test_machine_overrides_installed(unit_home: Path) -> None:
     _install_mcp(unit_home, "acme", {"command": "installed"})
     _write(unit_home / "mcp.json", {"acme": {"command": "machine"}})
-    assert cfg_mod.load_mcp_config()["acme"] == {"command": "machine"}
+    assert cfg_mod.load_mcp_config(home=unit_home)["acme"] == {"command": "machine"}
 
 
 def test_installed_overrides_plugin(unit_home: Path) -> None:
     _write_plugin(unit_home, "plugin", {"acme": {"command": "plugin"}})
     _install_mcp(unit_home, "acme", {"command": "installed"})
-    assert cfg_mod.load_mcp_config()["acme"] == {"command": "installed"}
+    assert cfg_mod.load_mcp_config(home=unit_home)["acme"] == {"command": "installed"}
 
 
 def test_installed_mcp_dir_returns_load_dir(unit_home: Path) -> None:
     dest = _install_mcp(unit_home, "acme", {"command": ".venv/bin/python"})
-    assert cfg_mod.installed_mcp_dir("acme") == dest
+    assert cfg_mod.installed_mcp_dir("acme", home=unit_home) == dest
 
 
 def test_installed_mcp_dir_none_for_builtin(unit_home: Path) -> None:
-    assert cfg_mod.installed_mcp_dir("chrome") is None
+    assert cfg_mod.installed_mcp_dir("chrome", home=unit_home) is None
 
 
 def test_installed_mcp_dir_none_when_machine_shadows(unit_home: Path) -> None:
     _install_mcp(unit_home, "acme", {"command": ".venv/bin/python"})
     _write(unit_home / "mcp.json", {"acme": {"command": "machine"}})
-    assert cfg_mod.installed_mcp_dir("acme") is None
+    assert cfg_mod.installed_mcp_dir("acme", home=unit_home) is None
 
 
 def test_server_cwd_builtin_is_repo_root(unit_home: Path) -> None:
     from base.paths import repo_root
 
-    assert cfg_mod.server_cwd("chrome") == repo_root()
+    assert cfg_mod.server_cwd("chrome", home=unit_home) == repo_root()
 
 
 def test_server_cwd_installed_is_package_dir(unit_home: Path) -> None:
     dest = _install_mcp(unit_home, "acme", {"command": ".venv/bin/python"})
-    assert cfg_mod.server_cwd("acme") == dest
+    assert cfg_mod.server_cwd("acme", home=unit_home) == dest
 
 
 def test_server_cwd_machine_entry_is_none(unit_home: Path) -> None:
     _write(unit_home / "mcp.json", {"solo": {"command": "npx"}})
-    assert cfg_mod.server_cwd("solo") is None
+    assert cfg_mod.server_cwd("solo", home=unit_home) is None
 
 
 def test_server_cwd_machine_overriding_builtin_is_none(unit_home: Path) -> None:
     _write(unit_home / "mcp.json", {"chrome": {"command": "/abs/python"}})
-    assert cfg_mod.server_cwd("chrome") is None
+    assert cfg_mod.server_cwd("chrome", home=unit_home) is None
 
 
 def test_server_cwd_plugin_is_none(unit_home: Path) -> None:
     _write_plugin(unit_home, "plugin", {"pserver": {"command": "npx"}})
-    assert cfg_mod.server_cwd("pserver") is None
+    assert cfg_mod.server_cwd("pserver", home=unit_home) is None
 
 
 def test_server_cwd_unknown_is_none(unit_home: Path) -> None:
-    assert cfg_mod.server_cwd("nosuchserver") is None
+    assert cfg_mod.server_cwd("nosuchserver", home=unit_home) is None
 
 
 def test_assert_requirements_noop_without_requires() -> None:
@@ -362,7 +364,7 @@ def test_server_url_rejects_oauth_plus_headers() -> None:
 
 
 def test_builtin_mcps_folder_surfaces_computer_use(unit_home: Path) -> None:
-    merged = cfg_mod.load_mcp_config()
+    merged = cfg_mod.load_mcp_config(home=unit_home)
     assert "computer_use" in merged
     assert merged["computer_use"]["shared"] == "computer_use"
     assert merged["computer_use"]["command"] == ".venv/bin/python"
@@ -384,12 +386,28 @@ def _write_machine(unit_home: Path, servers: dict[str, dict[str, str]]) -> None:
 
 
 # meiva:note
+# The machine config is the one under the home the loader is handed, not the process's own.
+def test_the_machine_config_is_the_one_under_the_home_it_is_handed(
+    unit_home: Path, tmp_path: Path
+) -> None:
+    other = tmp_path / "other-home"
+    other.mkdir()
+    _write_machine(other, {"only-here": {"command": "x"}})
+
+    assert "only-here" in cfg_mod.load_mcp_config(home=other)
+    assert "only-here" not in cfg_mod.load_mcp_config(home=unit_home)
+
+
+# meiva:note
 # The names of the servers the loader returns that only the machine config declares.
 def _machine_names(unit_home: Path, *, include_disabled: bool = False) -> set[str]:
     repo_declared: set[str] = set()
-    for path in [*cfg_mod.builtin_mcp_paths(), *cfg_mod.plugin_config_paths()]:
+    for path in [*cfg_mod.builtin_mcp_paths(), *cfg_mod.plugin_config_paths(home=unit_home)]:
         repo_declared |= set(cfg_mod.read_servers(path))
-    return set(cfg_mod.load_mcp_config(include_disabled=include_disabled)) - repo_declared
+    return (
+        set(cfg_mod.load_mcp_config(include_disabled=include_disabled, home=unit_home))
+        - repo_declared
+    )
 
 
 @pytest.fixture
@@ -408,21 +426,27 @@ def test_no_overlay_keeps_all(_two_servers: Path) -> None:
 # meiva:note
 # Default load() drops a server the overlay marks disabled; the other stays.
 def test_default_drops_disabled(_two_servers: Path) -> None:
-    write_local(McpEnabledConfig(mcp_servers={"fs": McpServerEntry(enabled=False)}))
+    write_local(
+        McpEnabledConfig(mcp_servers={"fs": McpServerEntry(enabled=False)}), home=meiva_home()
+    )
     assert _machine_names(_two_servers) == {"github"}
 
 
 # meiva:note
 # include_disabled=True returns the full merged map regardless of the overlay.
 def test_include_disabled_keeps_both(_two_servers: Path) -> None:
-    write_local(McpEnabledConfig(mcp_servers={"fs": McpServerEntry(enabled=False)}))
+    write_local(
+        McpEnabledConfig(mcp_servers={"fs": McpServerEntry(enabled=False)}), home=meiva_home()
+    )
     assert _machine_names(_two_servers, include_disabled=True) == {"fs", "github"}
 
 
 # meiva:note
 # An explicit enabled=True entry leaves the server in place.
 def test_overlay_enabled_true_keeps_server(_two_servers: Path) -> None:
-    write_local(McpEnabledConfig(mcp_servers={"fs": McpServerEntry(enabled=True)}))
+    write_local(
+        McpEnabledConfig(mcp_servers={"fs": McpServerEntry(enabled=True)}), home=meiva_home()
+    )
     assert _machine_names(_two_servers) == {"fs", "github"}
 
 
@@ -430,7 +454,7 @@ def test_overlay_enabled_true_keeps_server(_two_servers: Path) -> None:
 def test_invalid_overlay_raises_instead_of_hiding_servers(_two_servers: Path, content: str) -> None:
     (_two_servers / "mcp_enabled.json").write_text(content)
     with pytest.raises(McpEnabledConfigError):
-        cfg_mod.load_mcp_config()
+        cfg_mod.load_mcp_config(home=meiva_home())
 
 
 def test_definition_inventory_can_inspect_disabled_entries_with_invalid_overlay(
@@ -443,6 +467,7 @@ def test_definition_inventory_can_inspect_disabled_entries_with_invalid_overlay(
 def test_sdk_servers_surfaces_the_overlay_error(_two_servers: Path) -> None:
     from meiva import mcps
 
+    pin_agent(1, meiva_home=_two_servers)
     (_two_servers / "mcp_enabled.json").write_text("{not json")
     with pytest.raises(McpEnabledConfigError):
         mcps.servers()

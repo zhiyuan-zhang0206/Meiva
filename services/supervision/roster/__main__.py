@@ -4,6 +4,7 @@
 # names with it before touching any host.
 import sys
 
+from base.paths import meiva_home
 from services.supervision.roster.composition import build_services
 
-sys.stdout.write(" ".join(spec.session for spec in build_services()) + "\n")
+sys.stdout.write(" ".join(spec.session for spec in build_services(home=meiva_home())) + "\n")

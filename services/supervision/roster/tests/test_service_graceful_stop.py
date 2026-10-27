@@ -9,6 +9,7 @@ import psutil
 import pytest
 
 from base.clock import SYSTEM_TIMERS
+from base.paths import meiva_home
 from base.sessions import posixproc
 from base.sessions.backend import PosixProcSessionBackend
 from base.sessions.env_forwarding import exec_into
@@ -227,5 +228,5 @@ def test_orchestration_session_keeps_its_wrapper_shell(tmp_path: Path, unit_home
 def test_every_service_spec_command_is_exec_safe():
     from services.supervision.roster.composition import build_services
 
-    for spec in build_services():
+    for spec in build_services(home=meiva_home()):
         exec_into(spec.cmd)

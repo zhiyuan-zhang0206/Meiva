@@ -9,7 +9,7 @@ tags: []
 
 The drift check is `agent/graph/prompt/skill_selection.py:index_drift` plus the
 `before_llm` hook in `agent/graph/hooks/capabilities.py`, which reads the live catalog
-(`agent/graph/prompt/live.py:skill_view`) and hands the resulting `SkillView` to the diff.
+(`agent/graph/prompt/live.py:skill_view(prompt, home=...)`) and hands the resulting `SkillView` to the diff.
 
 - The rendered index is a **snapshot**, built once per window; `meiva.skills.names()` under it is an **uncached filesystem scan**. Nothing reconciles them by itself, so a skill installed mid-window would be reachable by name and absent from the listing the delegation check orders the agent to match every task against — until a compaction happened to rebuild the prompt
 - `init_context` records the full selected catalog membership (including folded descendants) into `state.capabilities.indexed` (see [[../../../docs/state.meiva.okf.md]]). Snapshot taken **before** the render, so a skill landing between the two is named once too many rather than dropped

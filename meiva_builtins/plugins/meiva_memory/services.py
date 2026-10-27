@@ -21,6 +21,7 @@
 from __future__ import annotations
 
 from functools import partial
+from pathlib import Path
 
 from base.cluster.machine import MachineRole
 from base.packages.plugins.config_registration import disk_image_path, read_config_image
@@ -42,14 +43,14 @@ def _memory_indexer_gate(config: MemoryConfig) -> str | None:
     return None
 
 
-def services() -> tuple[ServiceSpec, ...]:
+def services(*, home: Path) -> tuple[ServiceSpec, ...]:
     """The ops services the memory plugin contributes to the roster.
 
     The gateway-side indexing daemon. Ordering against memory-search (which it
     cold-start-connects to) is preserved by `services.supervision.roster.plugin_services.plugin_services()` folding plugin
     services onto the tail of the roster, well after the gateway group.
     """
-    config_path = disk_image_path("meiva_memory")
+    config_path = disk_image_path("meiva_memory", home=home)
     config = read_config_image(MemoryConfig, config_path)
     return (
         healthz_daemon(

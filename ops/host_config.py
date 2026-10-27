@@ -60,14 +60,14 @@ def _chrome_binary(authority: ConfigAuthority) -> str | None:
 #     host fields set in this machine's .env), sensitive keys omitted (the frontend deltas
 #     against this to build a write payload)
 def config_read_op(
-    *, authority: ConfigAuthority, local_machine: str, host: Host
+    *, authority: ConfigAuthority, local_machine: str, host: Host, home: Path
 ) -> ConfigReadResult:
-    metas = panel_metadata(authority=authority)
+    metas = panel_metadata(authority=authority, home=home)
     metas_by_name = {m.name: m for m in metas}
     chrome_binary = _chrome_binary(authority)
     set_fields = set(runtime_config.env_set_field_names(authority.env_path))
-    set_fields.update(panel_overrides(authority=authority))
-    overrides = panel_overrides(authority=authority)
+    set_fields.update(panel_overrides(authority=authority, home=home))
+    overrides = panel_overrides(authority=authority, home=home)
     host_fields: dict[str, HostConfigField] = {}
     for meta in metas:
         if meta.scope != "host":
@@ -264,10 +264,11 @@ def config_write_op(
     trace_id: str | None = None,
     local_machine: str,
     host: Host,
+    home: Path,
 ) -> ConfigWriteOpResult:
-    metas = {m.name: m for m in panel_metadata(authority=authority)}
+    metas = {m.name: m for m in panel_metadata(authority=authority, home=home)}
     try:
-        owner = patch_owner(set(overrides))
+        owner = patch_owner(set(overrides), home=home)
     except InvalidConfigOverlay as exc:
         return ConfigWriteOpResult(
             machine=local_machine,

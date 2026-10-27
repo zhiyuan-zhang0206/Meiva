@@ -135,10 +135,10 @@ def check_source(_home: Path, source: Path) -> Detail:
     return {"commit": commit, "changed_files": []}
 
 
-def check_services(_home: Path, _source: Path) -> Detail:
+def check_services(home: Path, _source: Path) -> Detail:
     from services.supervision.roster.composition import build_services
 
-    specs = [spec for spec in build_services() if spec.session in SERVICES]
+    specs = [spec for spec in build_services(home=home) if spec.session in SERVICES]
     if frozenset(spec.session for spec in specs) != SERVICES:
         raise RuntimeError("the checkout does not implement the verification service roster")
     rows: dict[str, Detail] = {}

@@ -224,10 +224,13 @@ def external_profile_actor() -> None:
 
     from base.agents.context import MeivaContext
     from base.agents.context.identity import AgentIdentity
+    from base.paths.home import resolve_meiva_home
     from meiva import boot
     from meiva.sdk_surface import agent_identity, process_context
 
-    process_context.bind_context(MeivaContext(identity=AgentIdentity(405, True)))
+    process_context.bind_context(
+        MeivaContext(identity=AgentIdentity(405, True), meiva_home=resolve_meiva_home())
+    )
     boot.ensure_plugins_loaded()
     print(
         json.dumps(

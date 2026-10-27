@@ -26,12 +26,15 @@ from base.agents.context.external_attachment.plugin_state_codec import (
     encode_plugin_delta,
     load_snapshot,
 )
+from base.paths import meiva_home
 from meiva import impersonation
 from meiva.sdk_surface import process_context
 
 
 def native_messages(takeover: Takeover) -> list[Any]:
-    snapshot, _, _ = load_snapshot(takeover.agent_id, database=takeover.cluster.database)
+    snapshot, _, _ = load_snapshot(
+        takeover.agent_id, database=takeover.cluster.database, home=meiva_home()
+    )
     return snapshot.messages
 
 

@@ -26,6 +26,7 @@ from base.config.service_read import ConfigAuthority
 from base.host.db_authority import delivery, unit
 from base.packages.plugin_providers import build_model_catalog
 from base.packages.plugins.config_registration import plugin_bootstrap_config
+from base.paths import meiva_home
 from cli.commands.cluster.control import cmd_db_authority_install_unit, cmd_db_authority_issue_unit
 from cli.commands.cluster.tests.gateway_server import Reply, serving
 from cli.commands.data_plane import bringup
@@ -109,8 +110,10 @@ def test_issued_bundle_starts_a_runner_that_connects_as_the_generation_login(
             build_all_domains=command.config.complete_read_model,
             env_path=born.home / ".env",
         ),
-        provider_key_envs=(binding.key_env for binding in build_model_catalog().bindings.values()),
-        plugin_cluster_config=plugin_bootstrap_config(),
+        provider_key_envs=(
+            binding.key_env for binding in build_model_catalog(home=meiva_home()).bindings.values()
+        ),
+        plugin_cluster_config=plugin_bootstrap_config(home=meiva_home()),
     )
     assert urlsplit(served["MEIVA_DB_URL"]).password is None
     checkout = tmp_path / "checkout"

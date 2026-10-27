@@ -201,9 +201,9 @@ class ResurrectAgentRequest(BaseModel):
 # agent) or into the note that resumes its unfinished turn, so the agent
 # knows who restarted it.
 #
-# `config_overlay`, when nonempty, is validated before it reaches either
-# gateway or runner writes, merged into the persistent agent overlay, and
-# carried in the restart inbound payload.
+# `config_overlay`, when nonempty, is validated by the restart operation (which holds the home
+# its plugin config classes come from) before it reaches either gateway or runner writes,
+# merged into the persistent agent overlay, and carried in the restart inbound payload.
 class RestartAgentRequest(BaseModel):
     source: str = Field(default="user", min_length=1, max_length=64)
     config_overlay: dict[str, object] | None = None
@@ -216,21 +216,6 @@ class RestartAgentRequest(BaseModel):
         if is_caller_source(value):
             CallerIdentity.from_source(value)
         return value
-
-    @model_validator(mode="after")
-    def _validate_config_overlay(self) -> "RestartAgentRequest":
-        if self.config_overlay is None:
-            return self
-        from base.packages.plugins.config_registration import validate_config_overlay_shape
-        from base.packages.plugins.plugin_errors import InvalidConfigOverlay
-
-        try:
-            validate_config_overlay_shape(self.config_overlay)
-        except InvalidConfigOverlay as exc:
-            # Pydantic converts ValueError into a boundary validation failure;
-            # propagating InvalidConfigOverlay directly would become a 500.
-            raise ValueError(str(exc)) from exc
-        return self
 
 
 class RestartAgentResponse(BaseModel):

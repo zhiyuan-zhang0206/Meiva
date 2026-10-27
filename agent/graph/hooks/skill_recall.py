@@ -75,7 +75,11 @@ class SkillRecallHook(Hook):
         excluded: set[str],
     ) -> list[RecallCandidate]:
         candidates = [
-            c for c in recall_candidates(skill_view(agent.prompt)) if c.identifier not in excluded
+            c
+            for c in recall_candidates(
+                skill_view(agent.prompt, home=runtime.context.require_meiva_home())
+            )
+            if c.identifier not in excluded
         ]
         if not candidates:
             return []

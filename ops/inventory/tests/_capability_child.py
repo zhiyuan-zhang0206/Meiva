@@ -11,6 +11,7 @@ import sys
 from base.cluster.machine import MachineFacts
 from base.host.system.tests.fake_commands import fake_host
 from base.packages.plugins import mcp_enabled
+from base.paths import meiva_home
 from ops.inventory import inventory_read_op, inventory_write_op
 
 
@@ -22,13 +23,13 @@ def main() -> None:
         host="localhost",
         description=None,
     )
-    inventory = inventory_read_op(local_machine=machine, host=host)
+    inventory = inventory_read_op(local_machine=machine, host=host, home=meiva_home())
     enable = inventory_write_op(
-        plugins={}, mcp_servers={"that": True}, local_machine=machine, host=host
+        plugins={}, mcp_servers={"that": True}, local_machine=machine, host=host, home=meiva_home()
     )
-    after_enable = mcp_enabled.read_enabled()
+    after_enable = mcp_enabled.read_enabled(home=meiva_home())
     disable = inventory_write_op(
-        plugins={}, mcp_servers={"that": False}, local_machine=machine, host=host
+        plugins={}, mcp_servers={"that": False}, local_machine=machine, host=host, home=meiva_home()
     )
     sys.stdout.write(
         json.dumps(

@@ -26,6 +26,7 @@ from base.agents.history.closing_request import ClosingRequest
 from base.clock import SYSTEM_TIMERS
 from base.lm.catalog import ModelCatalog
 from base.packages.plugin_providers import build_model_catalog
+from base.paths import meiva_home
 
 
 async def _checkpoint(pool: AsyncConnectionPool, checkpoint_id: str) -> None:
@@ -119,7 +120,9 @@ async def test_generate_summary_includes_whole_conversation():
     ]
 
     llm = make_fake_llm()
-    await generate_summary(convo, llm, pinned_slices(), catalog=build_model_catalog())
+    await generate_summary(
+        convo, llm, pinned_slices(), catalog=build_model_catalog(home=meiva_home())
+    )
 
     [llm_input] = llm.requests
     assert llm_input[:-1] == convo  # whole conversation, no hold-out
@@ -133,7 +136,9 @@ async def test_generate_summary_reuses_conversation_prefix_for_cache():
     content: list[AnyMessage] = [HumanMessage(content=f"m-{i}") for i in range(5)]
 
     llm = make_fake_llm()
-    await generate_summary([sys_msg, *content], llm, pinned_slices(), catalog=build_model_catalog())
+    await generate_summary(
+        [sys_msg, *content], llm, pinned_slices(), catalog=build_model_catalog(home=meiva_home())
+    )
 
     assert llm.bound_tools == [[execute_code]]
     [llm_input] = llm.requests
@@ -149,7 +154,10 @@ async def test_generate_summary_raises_on_empty_llm_text():
 
     with pytest.raises(RuntimeError, match="no text"):
         await generate_summary(
-            msgs, make_fake_llm(summary_text=""), pinned_slices(), catalog=build_model_catalog()
+            msgs,
+            make_fake_llm(summary_text=""),
+            pinned_slices(),
+            catalog=build_model_catalog(home=meiva_home()),
         )
 
 
@@ -165,7 +173,9 @@ async def test_generate_summary_extracts_text_from_block_content():
     )
 
     llm = make_fake_llm(response=block_response)
-    summary = await generate_summary(msgs, llm, pinned_slices(), catalog=build_model_catalog())
+    summary = await generate_summary(
+        msgs, llm, pinned_slices(), catalog=build_model_catalog(home=meiva_home())
+    )
     assert summary == "the real summary"
 
 
@@ -182,7 +192,7 @@ async def test_generate_summary_raises_on_tool_use_only_block_content():
             msgs,
             make_fake_llm(response=tool_only),
             pinned_slices(),
-            catalog=build_model_catalog(),
+            catalog=build_model_catalog(home=meiva_home()),
         )
 
 
@@ -193,5 +203,5 @@ async def test_generate_summary_raises_on_empty_conversation():
             [SystemMessage(content="<sys>")],
             make_fake_llm(),
             pinned_slices(),
-            catalog=build_model_catalog(),
+            catalog=build_model_catalog(home=meiva_home()),
         )

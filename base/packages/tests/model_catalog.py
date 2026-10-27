@@ -11,6 +11,7 @@ from base.lm.pricing import PriceBook
 from base.lm.provider_api import ProviderBinding
 from base.lm.registry import ModelSpec
 from base.packages.plugin_providers import build_model_catalog
+from base.paths import meiva_home
 
 __all__ = ["inert_keys", "model_catalog"]
 
@@ -28,7 +29,7 @@ def inert_keys(catalog: ModelCatalog) -> ProviderKeys:
 @pytest.fixture
 def model_catalog() -> ModelCatalog:
     """A catalog the test owns and passes to its consumers."""
-    return build_model_catalog()
+    return build_model_catalog(home=meiva_home())
 
 
 @pytest.fixture

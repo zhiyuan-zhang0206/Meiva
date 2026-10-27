@@ -14,6 +14,7 @@ from base.packages.plugins.config_registration import (
     disk_image_path,
     get_plugin_config,
 )
+from base.paths import meiva_home
 
 
 class Config(BaseModel):
@@ -37,7 +38,9 @@ class SynchronizedOwner:
 
 
 configs: dict[str, BaseModel] = {}
-bind_plugin_config(SynchronizedOwner("boot-race", Config, disk_image_path("boot-race")), configs)
+bind_plugin_config(
+    SynchronizedOwner("boot-race", Config, disk_image_path("boot-race", home=meiva_home())), configs
+)
 slices = AgentSlices.resolve(
     plugin_configs=configs,
     default_reader=lambda domain, field: getattr(getattr(settings, domain), field),

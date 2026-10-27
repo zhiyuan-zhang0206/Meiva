@@ -25,6 +25,7 @@ import pytest
 from base.cluster.machine import MachineRoles
 from base.deploy.lifecycle import start_serving
 from base.host.runtime_interpreter import LoadedRuntimeIdentity, source_digest
+from base.paths import meiva_home
 from base.sessions.env_forwarding import managed_service_env
 from base.telemetry import EventPipeline
 from cli.commands.data_plane.bringup import read_launch_delivery
@@ -154,6 +155,7 @@ class StartRun:
             all_services=not only and not disabled,
             machine=self.command.machine,
             host=self.command.host,
+            home=meiva_home(),
         )
 
     # meiva:note

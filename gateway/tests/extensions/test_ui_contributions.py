@@ -46,7 +46,7 @@ def test_declared_theme_reaches_the_console_attributed(unit_home: Path) -> None:
         "skins",
         {"themes": [{"name": "solarized", "tokens": {"--background": "oklch(0.99 0.02 90)"}}]},
     )
-    write_local({"plugins": {"skins": {"enabled": True}}})
+    write_local({"plugins": {"skins": {"enabled": True}}}, home=unit_home)
 
     with gateway_test_client() as client:
         assert _themes(client) == [
@@ -73,7 +73,7 @@ def test_a_packs_dark_half_reaches_the_console(unit_home: Path) -> None:
             ]
         },
     )
-    write_local({"plugins": {"skins": {"enabled": True}}})
+    write_local({"plugins": {"skins": {"enabled": True}}}, home=unit_home)
 
     with gateway_test_client() as client:
         assert _themes(client) == [
@@ -90,7 +90,7 @@ def test_disabled_plugin_contributes_nothing(unit_home: Path) -> None:
     _write_plugin(
         unit_home, "skins", {"themes": [{"name": "solarized", "tokens": {"--primary": "#111111"}}]}
     )
-    write_local({"plugins": {"skins": {"enabled": False}}})
+    write_local({"plugins": {"skins": {"enabled": False}}}, home=unit_home)
 
     with gateway_test_client() as client:
         assert _themes(client) == []
@@ -103,7 +103,9 @@ def test_two_plugins_merge_and_same_name_stays_distinguishable(unit_home: Path) 
     _write_plugin(
         unit_home, "other", {"themes": [{"name": "solarized", "tokens": {"--primary": "#222222"}}]}
     )
-    write_local({"plugins": {"skins": {"enabled": True}, "other": {"enabled": True}}})
+    write_local(
+        {"plugins": {"skins": {"enabled": True}, "other": {"enabled": True}}}, home=unit_home
+    )
 
     with gateway_test_client() as client:
         by_plugin = {t["plugin"]: t for t in _themes(client)}
@@ -116,7 +118,10 @@ def test_two_plugins_merge_and_same_name_stays_distinguishable(unit_home: Path) 
 def test_plugin_without_ui_is_skipped(unit_home: Path) -> None:
     _write_plugin(unit_home, "plain", None)
     _write_plugin(unit_home, "declares_other", {})
-    write_local({"plugins": {"plain": {"enabled": True}, "declares_other": {"enabled": True}}})
+    write_local(
+        {"plugins": {"plain": {"enabled": True}, "declares_other": {"enabled": True}}},
+        home=unit_home,
+    )
 
     with gateway_test_client() as client:
         assert _themes(client) == []
@@ -124,7 +129,7 @@ def test_plugin_without_ui_is_skipped(unit_home: Path) -> None:
 
 def test_plugin_without_a_manifest_fails_the_endpoint_naming_it(unit_home: Path) -> None:
     _write_plugin(unit_home, "plain", None, manifest=False)
-    write_local({"plugins": {"plain": {"enabled": True}}})
+    write_local({"plugins": {"plain": {"enabled": True}}}, home=unit_home)
 
     with gateway_test_client() as client:
         r = client.get("/api/ui/contributions")
@@ -150,7 +155,7 @@ def test_stat_cards_reach_the_console_attributed(unit_home: Path) -> None:
             ]
         },
     )
-    write_local({"plugins": {"usage": {"enabled": True}}})
+    write_local({"plugins": {"usage": {"enabled": True}}}, home=unit_home)
 
     with gateway_test_client() as client:
         assert _stats(client) == [
@@ -164,7 +169,9 @@ def test_stat_cards_from_two_plugins_merge_in_plugin_order(unit_home: Path) -> N
         unit_home, "deepseek", {"stats": [{"id": "balance", "label": "DeepSeek balance"}]}
     )
     _write_plugin(unit_home, "codex", {"stats": [{"id": "codex-a", "label": "Codex A"}]})
-    write_local({"plugins": {"deepseek": {"enabled": True}, "codex": {"enabled": True}}})
+    write_local(
+        {"plugins": {"deepseek": {"enabled": True}, "codex": {"enabled": True}}}, home=unit_home
+    )
 
     with gateway_test_client() as client:
         assert [(s["plugin"], s["id"]) for s in _stats(client)] == [
@@ -177,7 +184,7 @@ def test_plugin_without_stat_cards_yields_an_empty_list(unit_home: Path) -> None
     _write_plugin(
         unit_home, "skins", {"themes": [{"name": "x", "tokens": {"--primary": "#111111"}}]}
     )
-    write_local({"plugins": {"skins": {"enabled": True}}})
+    write_local({"plugins": {"skins": {"enabled": True}}}, home=unit_home)
 
     with gateway_test_client() as client:
         assert _stats(client) == []
@@ -198,7 +205,7 @@ def test_invalid_manifest_names_the_plugin(unit_home: Path) -> None:
             }
         ),
     )
-    write_local({"plugins": {"broken": {"enabled": True}}})
+    write_local({"plugins": {"broken": {"enabled": True}}}, home=unit_home)
 
     with gateway_test_client() as client:
         r = client.get("/api/ui/contributions")

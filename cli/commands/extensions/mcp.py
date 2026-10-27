@@ -63,10 +63,10 @@ from cli.commands.extensions.plans.mcp_server_spec import (
 )
 
 
-def _machine_config_file() -> Path:
+def _machine_config_file(*, home: Path) -> Path:
     from meiva.mcps.config import machine_config_path
 
-    return machine_config_path()
+    return machine_config_path(home=home)
 
 
 def _is_any_dict(value: object) -> TypeGuard[dict[str, Any]]:
@@ -99,9 +99,11 @@ def cmd_mcp_add(
     command: str | None,
     args: list[str],
     env_pairs: list[str],
+    *,
+    home: Path,
 ) -> int:
     """`meiva mcp add <name>` — add/replace a server in the machine MCP config."""
-    path = _machine_config_file()
+    path = _machine_config_file(home=home)
     try:
         spec = build_server_spec(json_spec, command, args, env_pairs)
         config = _read_machine_config(path)
@@ -123,7 +125,7 @@ def cmd_mcp_add(
     return 0
 
 
-def cmd_mcp_list() -> int:
+def cmd_mcp_list(*, home: Path) -> int:
     """`meiva mcp list` — print the merged server set, flagging each server's
     origin (machine / installed / plugin-built-in) and which are disabled."""
     from base.packages.extensions.install_registry import installed_mcp_names
@@ -131,10 +133,10 @@ def cmd_mcp_list() -> int:
     from meiva.mcps.config import MCPError, load_mcp_config, validate_requirements
 
     try:
-        merged = load_mcp_config(include_disabled=True)
-        machine = _read_machine_config(_machine_config_file())
-        enabled = read_enabled()
-        installed = installed_mcp_names()
+        merged = load_mcp_config(include_disabled=True, home=home)
+        machine = _read_machine_config(_machine_config_file(home=home))
+        enabled = read_enabled(home=home)
+        installed = installed_mcp_names(home=home)
         for spec in merged.values():
             validate_requirements(spec)
     except (MCPError, McpEnabledConfigError, ValueError, json.JSONDecodeError, OSError) as e:
@@ -160,7 +162,7 @@ def cmd_mcp_list() -> int:
         disabled = " [disabled]" if not enabled.get(name, True) else ""
         print(f"  {name}  [{origin}]{disabled}")
         print(f"      {server_summary(merged[name])}")
-        if name in installed and _source_is_dead_local_path(name):
+        if name in installed and _source_is_dead_local_path(name, home=home):
             print(
                 f"      ! recorded source path no longer exists — `meiva mcp upgrade {name}` "
                 f"will fail (reinstall from a live git URL to restore upgradeability)",
@@ -169,7 +171,7 @@ def cmd_mcp_list() -> int:
     return 0
 
 
-def _source_is_dead_local_path(name: str) -> bool:
+def _source_is_dead_local_path(name: str, *, home: Path) -> bool:
     """True when the installed package's recorded source is a local path that
     no longer exists on disk (an MCP installed from a git worktree that has
     since been removed — audit round 2, skills-plugins #4). Such a source
@@ -178,38 +180,38 @@ def _source_is_dead_local_path(name: str) -> bool:
 
     from base.packages.extensions import install_registry
 
-    pkg = install_registry.get(name)
+    pkg = install_registry.get(name, home=home)
     if pkg is None or pkg.source is None or "://" in pkg.source or pkg.source.startswith("git@"):
         return False
     return not Path(pkg.source).expanduser().exists()
 
 
-def cmd_mcp_enable(name: str) -> int:
+def cmd_mcp_enable(name: str, *, home: Path) -> int:
     """`meiva mcp enable <name>` — turn an MCP server on for this machine."""
-    return _set_mcp_enabled(name, enabled=True)
+    return _set_mcp_enabled(name, enabled=True, home=home)
 
 
-def cmd_mcp_disable(name: str) -> int:
+def cmd_mcp_disable(name: str, *, home: Path) -> int:
     """`meiva mcp disable <name>` — turn an MCP server off for this machine."""
-    return _set_mcp_enabled(name, enabled=False)
+    return _set_mcp_enabled(name, enabled=False, home=home)
 
 
-def _set_mcp_enabled(name: str, *, enabled: bool) -> int:
+def _set_mcp_enabled(name: str, *, enabled: bool, home: Path) -> int:
     from base.packages.plugins.mcp_enabled import local_config_path, set_mcp_enabled
     from meiva.mcps.config import MCPError, load_mcp_config, validate_requirements
 
-    merged = load_mcp_config(include_disabled=True)
+    merged = load_mcp_config(include_disabled=True, home=home)
     if enabled and name in merged:
         try:
             validate_requirements(merged[name])
         except MCPError as exc:
             print(f"[meiva mcp enable] {exc}", file=sys.stderr)
             return 1
-    set_mcp_enabled(name, enabled=enabled)
+    set_mcp_enabled(name, enabled=enabled, home=home)
     verb = "enabled" if enabled else "disabled"
     print(
         f"[meiva mcp {'enable' if enabled else 'disable'}] {verb} MCP server '{name}' "
-        f"in {local_config_path()}"
+        f"in {local_config_path(home=home)}"
     )
     print("  takes effect on the next tool request; no restart needed.")
     if name not in merged:
@@ -220,9 +222,9 @@ def _set_mcp_enabled(name: str, *, enabled: bool) -> int:
     return 0
 
 
-def cmd_mcp_remove(name: str) -> int:
+def cmd_mcp_remove(name: str, *, home: Path) -> int:
     """`meiva mcp remove <name>` — drop a machine-config MCP entry."""
-    path = _machine_config_file()
+    path = _machine_config_file(home=home)
     try:
         config = _read_machine_config(path)
     except (ValueError, json.JSONDecodeError, OSError) as e:
@@ -396,6 +398,7 @@ def _register_mcp(
     *,
     now: datetime,
     content_hash: str | None = None,
+    home: Path,
 ) -> None:
     """Record a freshly-installed MCP package in the registry (origin='user').
 
@@ -418,7 +421,8 @@ def _register_mcp(
             updated_at=stamp,
             content_hash=content_hash,
             installed_hash=content_hash,
-        )
+        ),
+        home=home,
     )
 
 
@@ -568,7 +572,7 @@ def _detect_server(pkg_dir: Path) -> tuple[str, Any] | None:
         return None
 
 
-def _install_name_conflict(name: str, dest: Path) -> bool:
+def _install_name_conflict(name: str, dest: Path, *, home: Path) -> bool:
     """Whether `name` collides with a built-in server or an existing install (reported)."""
     from base.packages.extensions import install_registry
 
@@ -579,7 +583,7 @@ def _install_name_conflict(name: str, dest: Path) -> bool:
             file=sys.stderr,
         )
         return True
-    if install_registry.get(name) is not None or dest.exists():
+    if install_registry.get(name, home=home) is not None or dest.exists():
         print(
             f"[meiva mcp install] '{name}' already installed; use `meiva mcp upgrade {name}`.",
             file=sys.stderr,
@@ -633,7 +637,7 @@ def cmd_mcp_install(
             return 1
         name, auto_spec = detected
         dest = paths.mcps_dir(home) / name
-        if _install_name_conflict(name, dest):
+        if _install_name_conflict(name, dest, home=home):
             return 1
 
         from cli.commands.extensions._manifest_gate import gate_refuses
@@ -653,7 +657,13 @@ def cmd_mcp_install(
             return 1
 
         _register_mcp(
-            name, source, path, ref, now=now, content_hash=install_registry.tree_hash(dest)
+            name,
+            source,
+            path,
+            ref,
+            now=now,
+            content_hash=install_registry.tree_hash(dest),
+            home=home,
         )
         print(f"[meiva mcp install] installed MCP server '{name}' -> {dest}")
         if overrides:
@@ -669,7 +679,7 @@ def cmd_mcp_uninstall(name: str, *, home: Path) -> int:
     from base import paths
     from base.packages.extensions import install_registry
 
-    pkg = install_registry.get(name)
+    pkg = install_registry.get(name, home=home)
     if pkg is None or pkg.type != "mcp":
         print(
             f"[meiva mcp uninstall] '{name}' is not an installed MCP package "
@@ -680,7 +690,7 @@ def cmd_mcp_uninstall(name: str, *, home: Path) -> int:
     dest = paths.mcps_dir(home) / name
     if dest.exists():
         shutil.rmtree(dest)
-    install_registry.deregister(name)
+    install_registry.deregister(name, home=home)
     print(f"[meiva mcp uninstall] removed MCP server '{name}'.")
     return 0
 
@@ -697,7 +707,7 @@ def cmd_mcp_upgrade(name: str, *, uv: UvBuild, home: Path, now: datetime) -> int
 
     from ._pkg_source import cleanup_temp
 
-    pkg = install_registry.get(name)
+    pkg = install_registry.get(name, home=home)
     if pkg is None or pkg.type != "mcp":
         print(f"[meiva mcp upgrade] '{name}' is not an installed MCP package.", file=sys.stderr)
         return 1
@@ -769,7 +779,7 @@ def cmd_mcp_upgrade(name: str, *, uv: UvBuild, home: Path, now: datetime) -> int
 
         pkg.updated_at = now.isoformat(timespec="seconds")
         pkg.installed_hash = install_registry.tree_hash(dest)
-        install_registry.register(pkg)
+        install_registry.register(pkg, home=home)
         print(f"[meiva mcp upgrade] re-fetched '{name}' from {pkg.source}.")
         print("  connects on next use; no restart needed.")
         return 0

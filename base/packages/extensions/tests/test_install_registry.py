@@ -26,59 +26,73 @@ def _pkg(
 
 def test_load_missing_file_is_empty(unit_home: Path) -> None:
     assert not install_registry_path(meiva_home()).exists()
-    assert reg.load().packages == []
+    assert reg.load(home=unit_home).packages == []
 
 
 def test_register_save_load_roundtrip(unit_home: Path) -> None:
-    reg.register(_pkg("alpha", ref="v1"))
-    reg.register(_pkg("beta", enabled=False))
-    loaded = reg.load()
+    reg.register(_pkg("alpha", ref="v1"), home=unit_home)
+    reg.register(_pkg("beta", enabled=False), home=unit_home)
+    loaded = reg.load(home=unit_home)
     assert {p.name for p in loaded.packages} == {"alpha", "beta"}
     assert install_registry_path(meiva_home()).exists()
 
 
+# meiva:note
+# The registry is the one under the home it is handed, not the process's own: a package registered
+# under another home is read there and absent from the home the test points the process at.
+def test_the_registry_is_the_one_under_the_home_it_is_handed(
+    unit_home: Path, tmp_path: Path
+) -> None:
+    other = tmp_path / "other-home"
+    assert other != unit_home
+    reg.register(_pkg("alpha"), home=other)
+
+    assert [p.name for p in reg.load(home=other).packages] == ["alpha"]
+    assert reg.load(home=unit_home).packages == []
+
+
 def test_register_replaces_same_name(unit_home: Path) -> None:
-    reg.register(_pkg("dup", ref="v1"))
-    reg.register(_pkg("dup", ref="v2"))
-    pkgs = reg.load().packages
+    reg.register(_pkg("dup", ref="v1"), home=unit_home)
+    reg.register(_pkg("dup", ref="v2"), home=unit_home)
+    pkgs = reg.load(home=unit_home).packages
     assert len(pkgs) == 1
     assert pkgs[0].ref == "v2"
 
 
 def test_get_returns_entry_or_none(unit_home: Path) -> None:
-    reg.register(_pkg("here"))
-    found = reg.get("here")
+    reg.register(_pkg("here"), home=unit_home)
+    found = reg.get("here", home=unit_home)
     assert found is not None and found.name == "here"
-    assert reg.get("absent") is None
+    assert reg.get("absent", home=unit_home) is None
 
 
 def test_deregister_reports_presence(unit_home: Path) -> None:
-    reg.register(_pkg("gone"))
-    assert reg.deregister("gone") is True
-    assert reg.deregister("gone") is False
-    assert reg.get("gone") is None
+    reg.register(_pkg("gone"), home=unit_home)
+    assert reg.deregister("gone", home=unit_home) is True
+    assert reg.deregister("gone", home=unit_home) is False
+    assert reg.get("gone", home=unit_home) is None
 
 
 def test_enabled_skill_names_filters_type_and_enabled(unit_home: Path) -> None:
     """Skill AND plugin entries gate the load dir (a plugin's converged skills
     namespace rides the plugin's own entry); mcp entries and disabled ones don't."""
-    reg.register(_pkg("on-skill", type="skill", enabled=True))
-    reg.register(_pkg("off-skill", type="skill", enabled=False))
-    reg.register(_pkg("on-plugin", type="plugin", enabled=True))
-    reg.register(_pkg("off-plugin", type="plugin", enabled=False))
-    reg.register(_pkg("on-mcp", type="mcp", enabled=True))
-    assert reg.enabled_skill_names() == {"on-skill", "on-plugin"}
+    reg.register(_pkg("on-skill", type="skill", enabled=True), home=unit_home)
+    reg.register(_pkg("off-skill", type="skill", enabled=False), home=unit_home)
+    reg.register(_pkg("on-plugin", type="plugin", enabled=True), home=unit_home)
+    reg.register(_pkg("off-plugin", type="plugin", enabled=False), home=unit_home)
+    reg.register(_pkg("on-mcp", type="mcp", enabled=True), home=unit_home)
+    assert reg.enabled_skill_names(home=unit_home) == {"on-skill", "on-plugin"}
 
 
 def test_malformed_json_raises(unit_home: Path) -> None:
     install_registry_path(meiva_home()).write_text("{ not json", encoding="utf-8")
     with pytest.raises(reg.SchemaInvalid):
-        reg.load()
+        reg.load(home=unit_home)
 
 
 def test_empty_file_is_empty_registry(unit_home: Path) -> None:
     install_registry_path(meiva_home()).write_text("   \n", encoding="utf-8")
-    assert reg.load().packages == []
+    assert reg.load(home=unit_home).packages == []
 
 
 def test_save_is_atomic_and_leaves_no_temp(unit_home: Path) -> None:
@@ -87,11 +101,11 @@ def test_save_is_atomic_and_leaves_no_temp(unit_home: Path) -> None:
     stale = install_registry_path(meiva_home()).with_name("installed.json.tmp")
     stale.write_text("{ truncated", encoding="utf-8")
 
-    reg.register(_pkg("alpha"))
-    reg.register(_pkg("beta", enabled=False))
+    reg.register(_pkg("alpha"), home=unit_home)
+    reg.register(_pkg("beta", enabled=False), home=unit_home)
 
     assert not stale.exists()
-    loaded = reg.load()
+    loaded = reg.load(home=unit_home)
     assert {p.name for p in loaded.packages} == {"alpha", "beta"}
     # the on-disk file is complete, parseable JSON
     import json
@@ -117,14 +131,14 @@ def test_load_raises_on_rows_that_fold_to_one_key(unit_home: Path) -> None:
         encoding="utf-8",
     )
     with pytest.raises(reg.DuplicatePackageName):
-        reg.load()
+        reg.load(home=unit_home)
 
 
 def test_load_accepts_spelling_variants_that_do_not_collide(unit_home: Path) -> None:
     """Distinct keys stay distinct — only true folding duplicates refuse."""
-    reg.register(_pkg("meiva-code"))
-    reg.register(_pkg("meiva-fleet"))
-    assert {p.name for p in reg.load().packages} == {"meiva-code", "meiva-fleet"}
+    reg.register(_pkg("meiva-code"), home=unit_home)
+    reg.register(_pkg("meiva-fleet"), home=unit_home)
+    assert {p.name for p in reg.load(home=unit_home).packages} == {"meiva-code", "meiva-fleet"}
 
 
 # ─── the cross-process registry lock ───
@@ -194,7 +208,7 @@ def test_mutate_is_not_reentrant_within_one_process(unit_home: Path) -> None:
     Exercise the public operation's real 30-second bound: a nested cycle
     stalls before the error — bounded, but not fail-fast.
     """
-    with reg.mutate(), pytest.raises(LockTimeoutError), reg.mutate():
+    with reg.mutate(home=unit_home), pytest.raises(LockTimeoutError), reg.mutate(home=unit_home):
         pass
 
 
@@ -224,7 +238,7 @@ def test_v1_file_is_refused(unit_home: Path) -> None:
     )
 
     with pytest.raises(reg.SchemaInvalid, match="different shape"):
-        reg.load()
+        reg.load(home=unit_home)
 
 
 def test_newer_schema_version_is_refused(unit_home: Path) -> None:
@@ -234,7 +248,7 @@ def test_newer_schema_version_is_refused(unit_home: Path) -> None:
         json.dumps({"version": 3, "packages": []}), encoding="utf-8"
     )
     with pytest.raises(reg.SchemaInvalid):
-        reg.load()
+        reg.load(home=unit_home)
 
 
 def test_resolved_policy_resolves_from_source_class(

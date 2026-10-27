@@ -8,7 +8,7 @@ from typing import Any, TypedDict, TypeGuard
 from base.host.runtime_interpreter import external_plugin_read_root
 from base.host.system.hostport import Host
 from base.host.system.probes import display_available
-from base.paths import mcps_dir, meiva_home, repo_root
+from base.paths import mcps_dir, repo_root
 
 
 def _is_object_dict(value: object) -> TypeGuard[dict[object, object]]:
@@ -117,8 +117,8 @@ def server_url(spec: dict[str, Any]) -> str | None:
 
 
 # meiva:link meiva/mcps/docs/mcps.meiva.okf.md
-def machine_config_path() -> Path:
-    return meiva_home() / "mcp.json"
+def machine_config_path(*, home: Path) -> Path:
+    return home / "mcp.json"
 
 
 # meiva:link meiva/mcps/docs/mcps.meiva.okf.md
@@ -152,14 +152,14 @@ def builtin_mcp_paths() -> list[Path]:
     return paths
 
 
-def _installed_mcp_paths() -> list[Path]:
+def _installed_mcp_paths(*, home: Path) -> list[Path]:
     from base.packages.extensions.install_registry import installed_mcp_names
 
-    root = mcps_dir(meiva_home())
+    root = mcps_dir(home)
     if not root.is_dir():
         return []
     paths: list[Path] = []
-    for name in sorted(installed_mcp_names()):
+    for name in sorted(installed_mcp_names(home=home)):
         mcp_json = root / name / ".mcp.json"
         if mcp_json.is_file():
             paths.append(mcp_json)
@@ -167,14 +167,14 @@ def _installed_mcp_paths() -> list[Path]:
 
 
 # meiva:link meiva/mcps/docs/mcps.meiva.okf.md
-def installed_mcp_dir(name: str) -> Path | None:
+def installed_mcp_dir(name: str, *, home: Path) -> Path | None:
     from base.packages.extensions.install_registry import installed_mcp_names
 
-    if name not in installed_mcp_names():
+    if name not in installed_mcp_names(home=home):
         return None
-    if name in read_servers(machine_config_path()):
+    if name in read_servers(machine_config_path(home=home)):
         return None
-    d = mcps_dir(meiva_home()) / name
+    d = mcps_dir(home) / name
     return d if (d / ".mcp.json").is_file() else None
 
 
@@ -183,13 +183,13 @@ def installed_mcp_dir(name: str) -> Path | None:
 # plugin entries return `None` (third-party command line), installed MCPs return
 # `$MEIVA_HOME/mcps/<name>/` (package venv), and built-in MCPs return `repo_root()`.
 # meiva:link meiva/mcps/docs/mcps.meiva.okf.md
-def server_cwd(name: str) -> Path | None:
-    if name in read_servers(machine_config_path()):
+def server_cwd(name: str, *, home: Path) -> Path | None:
+    if name in read_servers(machine_config_path(home=home)):
         return None
-    installed = installed_mcp_dir(name)
+    installed = installed_mcp_dir(name, home=home)
     if installed is not None:
         return installed
-    for path in plugin_config_paths():
+    for path in plugin_config_paths(home=home):
         if name in read_servers(path):
             return None
     for path in builtin_mcp_paths():
@@ -199,10 +199,10 @@ def server_cwd(name: str) -> Path | None:
 
 
 # meiva:link meiva/mcps/docs/mcps.meiva.okf.md
-def plugin_config_paths() -> list[Path]:
+def plugin_config_paths(*, home: Path) -> list[Path]:
     paths: list[Path] = []
     repo_plugins = Path(__file__).resolve().parents[2] / "meiva_builtins" / "plugins"
-    for root in (repo_plugins, external_plugin_read_root()):
+    for root in (repo_plugins, external_plugin_read_root(home=home)):
         if not root.is_dir():
             continue
         for plugin_dir in sorted(root.iterdir()):
@@ -219,20 +219,20 @@ def plugin_config_paths() -> list[Path]:
 # `.mcp.json` < installed `$MEIVA_HOME/mcps/` < `$MEIVA_HOME/mcp.json`) and filters out
 # servers disabled in `mcp_enabled.json` unless `include_disabled=True`.
 # meiva:link meiva/mcps/docs/mcps.meiva.okf.md
-def load_mcp_config(*, include_disabled: bool = False) -> dict[str, dict[str, Any]]:
+def load_mcp_config(*, include_disabled: bool = False, home: Path) -> dict[str, dict[str, Any]]:
     merged: dict[str, dict[str, Any]] = {}
     for path in builtin_mcp_paths():
         merged.update(read_servers(path))
-    for path in plugin_config_paths():
+    for path in plugin_config_paths(home=home):
         merged.update(read_servers(path))
-    for path in _installed_mcp_paths():
+    for path in _installed_mcp_paths(home=home):
         merged.update(read_servers(path))
-    merged.update(read_servers(machine_config_path()))
+    merged.update(read_servers(machine_config_path(home=home)))
     if include_disabled:
         return merged
     from base.packages.plugins.mcp_enabled import read_enabled
 
-    enabled = read_enabled()
+    enabled = read_enabled(home=home)
     return {k: v for k, v in merged.items() if enabled.get(k, True)}
 
 

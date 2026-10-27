@@ -30,6 +30,7 @@ from base.packages.extensions import install_registry
 from base.packages.extensions.install_registry import InstalledPackage
 from base.packages.skills.tree import Skill, identifier
 from base.paths import meiva_home, skills_dir
+from meiva.sdk_surface.tests.context_home import context_over_unit_home as context_over_unit_home
 
 
 def test_resolve_by_bare_name(tmp_path: Path) -> None:
@@ -209,7 +210,7 @@ def test_note_skips_a_skill_whose_body_cannot_be_read(tmp_path: Path) -> None:
 def _install_skill(name: str, description: str, body: str) -> None:
     root = skills_dir(meiva_home())
     write_skill(root, name, name, description, body=body)
-    install_registry.register(InstalledPackage(name=name, type="skill"))
+    install_registry.register(InstalledPackage(name=name, type="skill"), home=meiva_home())
 
 
 def _clock() -> Clock:
@@ -218,6 +219,7 @@ def _clock() -> Clock:
 
 def _context(**pins: object) -> MeivaContext:
     return MeivaContext(
+        meiva_home=meiva_home(),
         agent=AgentSlices.resolve(pins, default_reader=defaults()),
         clock_factory=_clock,
     )
@@ -261,7 +263,7 @@ def test_no_note_without_configured_skills() -> None:
 def test_fork_tail_note_grafts_the_named_installed_skills() -> None:
     _install_skill("extra", "the extra skill", "EXTRA body")
 
-    note = fork_tail_skills_note(["extra"], [])
+    note = fork_tail_skills_note(["extra"], [], home=meiva_home())
 
     assert note is not None
     text = _text(note)
@@ -274,4 +276,4 @@ def test_fork_tail_note_grafts_the_named_installed_skills() -> None:
 def test_fork_tail_note_is_empty_when_the_skills_surface_is_disabled() -> None:
     _install_skill("extra", "the extra skill", "EXTRA body")
 
-    assert fork_tail_skills_note(["extra"], ["skills"]) is None
+    assert fork_tail_skills_note(["extra"], ["skills"], home=meiva_home()) is None

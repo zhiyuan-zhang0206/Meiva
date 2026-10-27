@@ -10,6 +10,7 @@
 
 from base.cluster.machine import MachineIdentityReader
 from base.host.system.tests.fake_commands import fake_host
+from base.paths import meiva_home
 from cli.database.tests.command_inputs import command_machine as command_machine
 from services.supervision.roster import spec
 
@@ -18,7 +19,7 @@ def _annotated_sessions(role: str, *, machine: MachineIdentityReader) -> set[str
     return {
         s.session
         for s, _reason in spec.services_for_capabilities_annotated(
-            frozenset({role}), machine=machine, host=fake_host()
+            frozenset({role}), machine=machine, host=fake_host(), home=meiva_home()
         )
     }
 

@@ -26,31 +26,32 @@ def _h_mcp_add(args: argparse.Namespace) -> int:
         command=args.command,
         args=args.arg,
         env_pairs=args.env,
+        home=args.runtime.home,
     )
 
 
-def _h_mcp_list(_args: argparse.Namespace) -> int:
+def _h_mcp_list(args: argparse.Namespace) -> int:
     from cli.commands.extensions.mcp import cmd_mcp_list
 
-    return cmd_mcp_list()
+    return cmd_mcp_list(home=args.runtime.home)
 
 
 def _h_mcp_remove(args: argparse.Namespace) -> int:
     from cli.commands.extensions.mcp import cmd_mcp_remove
 
-    return cmd_mcp_remove(name=args.name)
+    return cmd_mcp_remove(name=args.name, home=args.runtime.home)
 
 
 def _h_mcp_enable(args: argparse.Namespace) -> int:
     from cli.commands.extensions.mcp import cmd_mcp_enable
 
-    return cmd_mcp_enable(name=args.name)
+    return cmd_mcp_enable(name=args.name, home=args.runtime.home)
 
 
 def _h_mcp_disable(args: argparse.Namespace) -> int:
     from cli.commands.extensions.mcp import cmd_mcp_disable
 
-    return cmd_mcp_disable(name=args.name)
+    return cmd_mcp_disable(name=args.name, home=args.runtime.home)
 
 
 def _h_mcp_install(args: argparse.Namespace) -> int:

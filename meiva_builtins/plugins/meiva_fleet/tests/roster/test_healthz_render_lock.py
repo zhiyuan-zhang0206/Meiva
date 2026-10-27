@@ -28,6 +28,7 @@ from base.daemon.endpoints import ServiceEndpoints
 from base.daemon.health import DaemonProbe, probe_daemon
 from base.native_process.stop_timing import HOST_STOP_CEILING_S, OPS_STOP_CEILING_S
 from base.packages.plugins.config_registration import disk_image_path
+from base.paths import meiva_home
 from meiva_builtins.plugins.meiva_fleet.default_config import FleetConfig
 from services.supervision.meiva_root_glue import manifests as gen
 from services.supervision.roster import composition
@@ -156,9 +157,9 @@ def _legacy_spec(row: _Legacy) -> ServiceSpec:
         db_access=cast("DbAccess | None", row.db_access),
         gate=(lambda: None) if row.gated else None,
         # Plugin ownership adds an image input; the prior launch facts stay fixed.
-        config_inputs=(disk_image_path("meiva_memory"),)
+        config_inputs=(disk_image_path("meiva_memory", home=meiva_home()),)
         if row.session == "memory-indexer"
-        else (disk_image_path("meiva_fleet"),)
+        else (disk_image_path("meiva_fleet", home=meiva_home()),)
         if row.session == "task-maintenance"
         else (),
         plugin_config=("meiva_fleet", FleetConfig()) if row.session == "task-maintenance" else None,
@@ -181,7 +182,7 @@ def _describe(probe: object) -> object:
 
 
 def _live() -> dict[str, ServiceSpec]:
-    return {s.session: s for s in composition.build_services()}
+    return {s.session: s for s in composition.build_services(home=meiva_home())}
 
 
 def test_the_migrated_sessions_are_exactly_the_standard_daemons() -> None:
@@ -195,8 +196,12 @@ def test_the_rendered_unit_is_unchanged(row: _Legacy) -> None:
     live = _live()[row.session]
     # Both sides use their declared protocol probe without an ownership wrapper.
     old = _legacy_spec(row)
-    old_units = gen.build_units([old], capabilities=row.capabilities, repo_root=_REPO)
-    new_units = gen.build_units([live], capabilities=row.capabilities, repo_root=_REPO)
+    old_units = gen.build_units(
+        [old], capabilities=row.capabilities, repo_root=_REPO, home=meiva_home()
+    )
+    new_units = gen.build_units(
+        [live], capabilities=row.capabilities, repo_root=_REPO, home=meiva_home()
+    )
 
     assert new_units == old_units
 

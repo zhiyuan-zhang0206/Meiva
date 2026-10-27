@@ -10,5 +10,4 @@ exports = ["adopt.py", "install_registry.py", "materialize.py", "registry.py"]
 "__init__.py" = "strict"
 
 [debt.ambient-read]
-"install_registry.py#home base.paths.meiva_home" = 4
 "install_registry.py#home pathlib.Path.expanduser" = 1

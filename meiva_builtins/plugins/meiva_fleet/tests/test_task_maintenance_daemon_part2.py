@@ -21,6 +21,7 @@ from psycopg_pool import ConnectionPool
 from base.config import settings
 from base.db import Database
 from base.events.live.bus import EventBus
+from base.paths import meiva_home
 from base.telemetry.tests.capture.event_capture import EmittedEvents
 from base.telemetry.tests.capture.event_capture import emitted_events as emitted_events
 from meiva_builtins.plugins.meiva_fleet.task_maintenance import daemon
@@ -469,7 +470,9 @@ def test_service_command_module_is_importable() -> None:
 
     from meiva_builtins.plugins.meiva_fleet.services import services
 
-    service = next(item for item in services() if item.session == "task-maintenance")
+    service = next(
+        item for item in services(home=meiva_home()) if item.session == "task-maintenance"
+    )
     module = service.cmd.split(" -m ", 1)[1]
     assert importlib.util.find_spec(module) is not None
     assert module.startswith("meiva_builtins.plugins.")

@@ -21,6 +21,7 @@ from base.lm.catalog import ModelCatalog
 from base.packages.extensions import install_registry
 from base.packages.extensions.install_registry import InstalledPackage
 from base.paths import meiva_home, skills_dir
+from meiva.sdk_surface.tests.context_home import context_over_unit_home as context_over_unit_home
 
 
 @pytest.fixture
@@ -53,7 +54,7 @@ async def test_fork_tail_grafts_delta_skills_from_inbound_payload(
         encoding="utf-8",
     )
 
-    install_registry.register(InstalledPackage(name="extra", type="skill"))
+    install_registry.register(InstalledPackage(name="extra", type="skill"), home=meiva_home())
 
     tid = spawn_agent(
         catalog=model_catalog,

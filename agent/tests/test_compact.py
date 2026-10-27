@@ -39,7 +39,7 @@ from base.events.live.tests.live_capture import LiveEvents
 from base.host.env.agent_slices import AgentSlices
 from base.packages.plugin_providers import build_model_catalog
 from base.packages.plugins.extensions import EMPTY
-from base.paths import resolve_meiva_home
+from base.paths import meiva_home, resolve_meiva_home
 
 
 def pinned_slices(pins: Mapping[str, Any] | None = None) -> AgentSlices:
@@ -60,7 +60,7 @@ def compact_slices(
     compact_reminder_tokens: int = 600_000,
 ) -> AgentSlices:
     model = pinned_slices().brain.llm_model
-    window = build_model_catalog().models[model].context_window
+    window = build_model_catalog(home=meiva_home()).models[model].context_window
     assert window is not None
     return pinned_slices(
         {
@@ -102,7 +102,7 @@ def runtime_with_llm(
         agent=slices,
         db=Database.from_settings(gate=database_gate),
         bus=EventBus.from_settings(rng=seeded_rng()),
-        catalog=build_model_catalog(),
+        catalog=build_model_catalog(home=meiva_home()),
         clock_factory=Clock.from_settings,
     )
     return Runtime(context=ctx)
@@ -461,7 +461,7 @@ def make_runtime(
         agent=pinned_slices(),
         db=Database.from_settings(gate=database_gate),
         bus=EventBus.from_settings(rng=seeded_rng()),
-        catalog=build_model_catalog(),
+        catalog=build_model_catalog(home=meiva_home()),
         clock_factory=Clock.from_settings,
     )
     from langgraph.runtime import Runtime

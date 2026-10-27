@@ -102,7 +102,7 @@ class AdoptionResult:
 
 
 def adopt_local_installs(
-    pool: ConnectionPool, *, skills_root: Path, machine_name: str
+    pool: ConnectionPool, *, skills_root: Path, machine_name: str, home: Path
 ) -> AdoptionResult:
     """Upload every unclaimed `origin='user'` skill on this machine.
 
@@ -113,7 +113,7 @@ def adopt_local_installs(
     from base.packages.extensions import install_registry
 
     result = AdoptionResult()
-    for pkg in install_registry.load().packages:
+    for pkg in install_registry.load(home=home).packages:
         if pkg.type != "skill" or pkg.origin != "user":
             continue
         root = skills_root / pkg.name

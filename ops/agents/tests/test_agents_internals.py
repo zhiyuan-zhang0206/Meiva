@@ -44,6 +44,7 @@ from base.events.live.bus import EventBus
 from base.lm.catalog import ModelCatalog
 from base.packages.plugin_providers import build_model_catalog
 from base.packages.tests.model_catalog import AddModels
+from base.paths import meiva_home
 
 
 def _agents_row(db: psycopg.Connection, agent_id: int) -> tuple[int, str, str] | None:
@@ -236,7 +237,7 @@ class TestSpawnAgent:
             model_catalog,
             {
                 model: replace(
-                    build_model_catalog().models["glm-5.3"],
+                    build_model_catalog(home=meiva_home()).models["glm-5.3"],
                     spawnable=False,
                     unavailable_fallback="glm-5.3",
                     media_types=frozenset({"image"}),

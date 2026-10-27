@@ -106,7 +106,7 @@ async def test_concurrent_turn_configs_reach_real_children_without_cross_talk(
                 bus=EventBus.from_settings(rng=seeded_rng()),
                 clients=snapshot_clients_over(lambda: database),
                 identity=AgentIdentity(agent_id=agent_id, owns_loop=True),
-                catalog=build_model_catalog(),
+                catalog=build_model_catalog(home=unit_home),
                 clock_factory=Clock.from_settings,
             ),
             agent_id,

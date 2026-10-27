@@ -13,6 +13,8 @@ from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
+from base.paths import meiva_home
+
 _LANGCHAIN = ("langchain", "langgraph", "langsmith")
 
 
@@ -98,7 +100,7 @@ def provider_registration_surface() -> dict[str, Any]:
 def provider_plugin_load() -> dict[str, Any]:
     from base.packages.plugin_providers import build_model_catalog
 
-    catalog = build_model_catalog()
+    catalog = build_model_catalog(home=meiva_home())
     return {"bindings": len(catalog.bindings), "heavy": _langchain_modules()}
 
 
@@ -199,7 +201,7 @@ def child_state_lazy(req: str, mutate_module_names: str) -> dict[str, Any]:
     payload = read_request(Path(req))
     meiva.ensure_plugins_loaded()
     boot = _snapshot("boot")
-    exec_child.build_state_slot(child, payload)
+    exec_child.build_state_slot(child, payload, home=meiva_home())
     if mutate_module_names == "mutate":
         # Force an import-table change during filtering, without timing or retries.
         sys.modules[_ImportingModuleName("lazy_child_snapshot_trigger")] = None  # pyright: ignore[reportArgumentType]
@@ -221,7 +223,7 @@ def child_cwd_set_first_touch(req: str, arg: str) -> dict[str, Any]:
     child = exec_child.import_runtime(0.0)  # the child boot's step that binds the SDK
     payload = read_request(Path(req))
     meiva.ensure_plugins_loaded()
-    exec_child.build_state_slot(child, payload)
+    exec_child.build_state_slot(child, payload, home=meiva_home())
 
     out: dict[str, Any] = {}
     try:

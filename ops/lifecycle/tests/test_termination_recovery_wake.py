@@ -18,6 +18,7 @@ from base.config.service_read import ConfigAuthority
 from base.db import Database
 from base.events.live.bus import EventBus
 from base.packages.plugin_providers import build_model_catalog
+from base.paths import meiva_home
 from ops.agents import wake
 from ops.agents.resurrection_retry import ResurrectTriggerStaleError
 from ops.lifecycle import termination
@@ -53,7 +54,7 @@ def agent_id(
         event_bus,
         spawner="user",
         machine=machine_identity.name(),
-        catalog=build_model_catalog(),
+        catalog=build_model_catalog(home=meiva_home()),
         authority=config_authority,
     )
     db_conn.commit()

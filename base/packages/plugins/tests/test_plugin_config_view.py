@@ -30,6 +30,7 @@ from base.packages.plugins.config_registration import (
     process_plugin_config,
 )
 from base.packages.plugins.config_view import resolve_agent_plugin_pins
+from base.paths import meiva_home
 
 
 class _AlphaConfig(BaseModel):
@@ -47,8 +48,12 @@ class _BetaConfig(BaseModel):
 def two_plugins(unit_home: Path) -> dict[str, BaseModel]:
     """One root's resolved bindings, with no ambient state."""
     configs: dict[str, BaseModel] = {}
-    bind_plugin_config(PluginConfigOwner("alpha", _AlphaConfig, disk_image_path("alpha")), configs)
-    bind_plugin_config(PluginConfigOwner("beta", _BetaConfig, disk_image_path("beta")), configs)
+    bind_plugin_config(
+        PluginConfigOwner("alpha", _AlphaConfig, disk_image_path("alpha", home=unit_home)), configs
+    )
+    bind_plugin_config(
+        PluginConfigOwner("beta", _BetaConfig, disk_image_path("beta", home=unit_home)), configs
+    )
     return configs
 
 
@@ -162,8 +167,13 @@ def test_independent_roots_bind_the_same_plugin_without_sharing_values(
     two_plugins: dict[str, BaseModel],
 ) -> None:
     second: dict[str, BaseModel] = {}
-    disk_image_path("alpha").write_text(_AlphaConfig(marker="second-root").model_dump_json())
-    bind_plugin_config(PluginConfigOwner("alpha", _AlphaConfig, disk_image_path("alpha")), second)
+    disk_image_path("alpha", home=meiva_home()).write_text(
+        _AlphaConfig(marker="second-root").model_dump_json()
+    )
+    bind_plugin_config(
+        PluginConfigOwner("alpha", _AlphaConfig, disk_image_path("alpha", home=meiva_home())),
+        second,
+    )
 
     first_agent = _slices(two_plugins)
     second_agent = _slices(second)

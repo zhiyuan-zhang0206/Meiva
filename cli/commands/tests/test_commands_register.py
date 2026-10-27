@@ -10,6 +10,7 @@ import cli.commands.probe as _probe_commands
 import services.supervision.roster.service_spec as _service_spec
 from base.daemon.endpoints import ServiceEndpoints
 from base.db import Database
+from base.paths import meiva_home
 from cli.commands._repo import register_machine_or_die
 from cli.commands._setup import SetupValues
 from cli.database.runtime import CommandRuntime
@@ -18,7 +19,7 @@ from services.supervision.roster.composition import build_services
 
 
 def _spec_by_service(service: str) -> _service_spec.ServiceSpec:
-    for spec in build_services():
+    for spec in build_services(home=meiva_home()):
         if spec.session == service:
             return spec
     raise AssertionError(f"no ServiceSpec service={service!r}")

@@ -12,13 +12,14 @@ from langchain_core.messages import AIMessage, AIMessageChunk, UsageMetadata
 
 from agent.graph.llm._chunk import assemble_final_message
 from base.packages.plugin_providers import build_model_catalog
+from base.paths import meiva_home
 
 _STOP = {"model_provider": "google_genai", "finish_reason": "STOP"}
 _USAGE = UsageMetadata(input_tokens=19065, output_tokens=560, total_tokens=19625)
 
 
 def _fold(chunks: list[AIMessageChunk]) -> AIMessage:
-    return assemble_final_message(chunks, catalog=build_model_catalog())
+    return assemble_final_message(chunks, catalog=build_model_catalog(home=meiva_home()))
 
 
 def test_thought_then_text_keeps_the_text() -> None:

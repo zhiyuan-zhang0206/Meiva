@@ -44,6 +44,7 @@ from base.events.live.tests.live_capture import LiveEvents
 from base.host.env.agent_slices import AgentSlices, LlmCallPolicy
 from base.native_process.turn_identity import HostedTurnResources
 from base.packages.plugin_providers import build_model_catalog
+from base.paths import meiva_home
 from meiva.tests.fixtures.pin_agent import hosted_resources as hosted_resources
 
 
@@ -192,7 +193,7 @@ def make_runtime(
         agent=AgentSlices.resolve(pins, default_reader=defaults()),
         db=Database.from_settings(gate=database_gate),
         bus=EventBus.from_settings(rng=seeded_rng()),
-        catalog=build_model_catalog(),
+        catalog=build_model_catalog(home=meiva_home()),
         clock_factory=Clock.from_settings,
     )
     return Runtime(context=ctx, execution_info=execution_info)
@@ -438,7 +439,7 @@ def test_validate_stop_reason_unexpected_carries_stop_reason_and_output_tokens()
         usage_metadata={"input_tokens": 10, "output_tokens": 99, "total_tokens": 109},
     )
     with pytest.raises(LLMStreamUnexpectedStopReasonError) as exc_info:
-        validate_stop_reason(msg, catalog=build_model_catalog())
+        validate_stop_reason(msg, catalog=build_model_catalog(home=meiva_home()))
     assert exc_info.value.stop_reason == "pause_turn", (
         f"stop_reason attribute must be actually set (got {exc_info.value.stop_reason!r}) —— "
         "mutation `stop_reason=None` makes this assertion red"
