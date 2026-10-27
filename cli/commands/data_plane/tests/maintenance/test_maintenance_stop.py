@@ -89,6 +89,25 @@ def test_a_recorded_redis_is_accounted_for(unit_home: Path) -> None:
 
 
 # meiva:note
+# The uid the stop is handed decides whose processes are this machine's own: a process of another
+# uid is reported as that, and a Redis of this home that belongs to another user is not the stop's
+# to refuse over.
+def test_a_process_of_another_uid_is_reported_as_that() -> None:
+    with sleeping_child() as child:
+        process = psutil.Process(child.pid)
+        mine = maintenance_stop.look_at(process, "postgres", uid=os.getuid())
+        other = maintenance_stop.look_at(process, "postgres", uid=os.getuid() + 1)
+
+    assert not mine.other_user
+    assert other.other_user
+
+
+def test_a_redis_of_another_uid_is_not_this_homes(unit_home: Path) -> None:
+    with running_redis(instance.redis_data_dir(unit_home)):
+        maintenance_stop.require_no_unrecorded({}, home=unit_home, uid=os.getuid() + 1)
+
+
+# meiva:note
 # A co-located cluster's processes share the names: a Redis and a pooler of a sibling home,
 # whose path has this home's as a prefix, are none of this stop's business.
 def test_processes_of_a_sibling_home_are_not_unrecorded(unit_home: Path) -> None:

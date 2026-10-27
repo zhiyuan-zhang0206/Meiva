@@ -15,7 +15,8 @@
 # tree. The five fields are the whole port; another capability gets its own port or a reviewed
 # addition here, so the object does not become a bag of everything the machine can do. `environ`
 # is the process environment as a read-only snapshot, so a component asks the host about a display
-# or a variable of the machine and a test builds a machine that has none.
+# or a variable of the machine and a test builds a machine that has none; `run` does not use it, a
+# caller that wants a child to run in it passes `env=` itself.
 
 from __future__ import annotations
 
