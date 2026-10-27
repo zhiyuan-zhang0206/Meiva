@@ -7,6 +7,7 @@ from collections.abc import Iterator
 from dataclasses import replace
 from pathlib import Path
 from typing import Any, cast
+from uuid import uuid4
 
 import psycopg
 import pytest
@@ -148,6 +149,7 @@ def _host(
     model_catalog: ModelCatalog,
 ) -> AgentHost:
     return AgentHost(
+        runtime_owner=uuid4(),
         handoff_stamping=TimestampSource(
             clock=Clock(ClockConfig("UTC", "UTC", False), timers=SYSTEM_TIMERS),
             timestamps_enabled=False,

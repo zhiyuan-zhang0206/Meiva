@@ -4,6 +4,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, cast
 from unittest.mock import MagicMock
+from uuid import uuid4
 
 import pytest
 
@@ -79,6 +80,7 @@ async def test_host_release_runs_and_first_original_failure_remains_primary(
     pipe = EventPipeline(writer=writer, batch_size=1)
     clients = ClientSet(pipeline_factory=lambda: pipe)
     host = AgentHost(
+        runtime_owner=uuid4(),
         handoff_stamping=handoff_timestamps(),
         home=meiva_home(),
         policy=configured_policy(),

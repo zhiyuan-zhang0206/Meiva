@@ -10,6 +10,7 @@ from dataclasses import replace
 from pathlib import Path
 from typing import Any, cast
 from unittest.mock import MagicMock
+from uuid import uuid4
 
 import httpx
 import psycopg
@@ -115,6 +116,7 @@ async def test_original_error_joins_before_clients_and_pools_close(
     clients = ClientSet()
     clients.get(lambda: _ClientRecorder(events))
     host = AgentHost(
+        runtime_owner=uuid4(),
         handoff_stamping=handoff_timestamps(),
         home=meiva_home(),
         policy=configured_policy(),
@@ -162,6 +164,7 @@ def exercise_unfinished_main() -> None:
         marker = Path(os.environ["RESOURCE_JOIN_MARKER"])
         clients.get(lambda: _ClientRecorder(marker=marker.with_suffix(".clients")))
         host = AgentHost(
+            runtime_owner=uuid4(),
             handoff_stamping=handoff_timestamps(),
             home=meiva_home(),
             policy=configured_policy(),
