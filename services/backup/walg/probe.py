@@ -116,8 +116,8 @@ def admin_connection_to(target: PgTarget) -> Generator[psycopg.Connection[Any]]:
 # meiva:note
 # `admin_connection_to` this home's locally owned Postgres, resolved from its settings.
 @contextmanager
-def admin_connection() -> Generator[psycopg.Connection[Any]]:
-    with admin_connection_to(pg_target()) as conn:
+def admin_connection(*, home: Path) -> Generator[psycopg.Connection[Any]]:
+    with admin_connection_to(pg_target(home=home)) as conn:
         yield conn
 
 
@@ -252,8 +252,9 @@ def failure_on(
     *,
     now: datetime,
     rpo_objective_s: float = RPO_OBJECTIVE_S,
+    home: Path,
 ) -> str | None:
-    expected = expected_for(path)
+    expected = expected_for(path, home=home)
     if expected is None:
         return None
     configuration = configuration_failure(path)
@@ -272,7 +273,7 @@ def failure_on(
 
 # meiva:note
 # The first thing wrong with WAL archiving, or None (also None while it is off).
-def failure(*, path: Path | None) -> str | None:
+def failure(*, path: Path | None, home: Path) -> str | None:
     if path is None:
         return None
-    return failure_on(path, admin_connection(), now=datetime.now(UTC))
+    return failure_on(path, admin_connection(home=home), now=datetime.now(UTC), home=home)

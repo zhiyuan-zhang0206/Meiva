@@ -273,6 +273,7 @@ def _help_admission() -> None:
 
     factory = operator_database_factory(
         local_host=command.machine.host,
+        home=command.home,
         open_database=open_database,
     )
     assert not seen

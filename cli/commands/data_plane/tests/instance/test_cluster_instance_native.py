@@ -30,6 +30,7 @@ from base.cluster.checkpoint_schema import PostgresCheckpointSchema
 from base.cluster.dataplane.pg_admin import pg_admin_url
 from base.cluster.dataplane.pg_tools import pg_shm_args, pg_start_env, pg_tool
 from base.cluster.machine import MachineIdentityReader
+from base.paths import meiva_home
 from cli.commands.data_plane import cluster_instance as instance
 from cli.commands.data_plane.bringup import ensure_gateway_data_plane
 from cli.commands.data_plane.tests.native_cluster import (
@@ -84,7 +85,7 @@ def test_per_cluster_instance_bringup(
     native_cluster: NativeCluster, command_machine: MachineIdentityReader
 ) -> None:
     assert _storage(native_cluster, command_machine) == 0
-    admin_url = pg_admin_url(native_cluster.pg_port)
+    admin_url = pg_admin_url(native_cluster.pg_port, home=meiva_home())
 
     # meiva:note
     # Provision the NOLOGIN owner + db + schema against the cluster's own instance, as the
@@ -180,7 +181,7 @@ def test_the_entry_brings_up_the_instance_on_the_recorded_ports_with_the_url_ide
     assert start() == 0
     provision_database(
         "meiva_main",
-        base_admin_url=pg_admin_url(native_cluster.pg_port),
+        base_admin_url=pg_admin_url(native_cluster.pg_port, home=meiva_home()),
         expected_data_dir=native_cluster.pg_data,
     )
     with _admin(native_cluster, "meiva_main") as conn:
@@ -256,10 +257,10 @@ def test_unix_only_foreign_postgres_same_port_cannot_receive_provisioning(
     with tempfile.TemporaryDirectory(prefix="meiva-pg-foreign-", dir="/tmp") as temporary:
         directory = Path(temporary)
         data = directory / "data"
-        instance.initdb(data, os_user=getpass.getuser())
+        instance.initdb(data, os_user=getpass.getuser(), home=native_cluster.home)
         subprocess.run(
             [
-                str(pg_tool("pg_ctl")),
+                str(pg_tool("pg_ctl", home=meiva_home())),
                 "-D",
                 str(data),
                 "-l",
@@ -280,12 +281,12 @@ def test_unix_only_foreign_postgres_same_port_cannot_receive_provisioning(
             )
             canonical_socket = instance.pg_socket_dir(native_cluster.home) / f".s.PGSQL.{pg_port}"
             canonical_socket.unlink()
-            isready = str(pg_tool("pg_isready"))
+            isready = str(pg_tool("pg_isready", home=meiva_home()))
             assert instance.pg_running(isready, pg_port, "127.0.0.1"), "the TCP instance is ready"
             with pytest.raises(psycopg.OperationalError):
                 cluster.ensure_cluster_role(
                     "must_not_create",
-                    base_admin_url=pg_admin_url(pg_port),
+                    base_admin_url=pg_admin_url(pg_port, home=meiva_home()),
                     expected_data_dir=native_cluster.pg_data,
                 )
             with pytest.raises(RuntimeError, match="foreign Unix socket"):
@@ -300,7 +301,7 @@ def test_unix_only_foreign_postgres_same_port_cannot_receive_provisioning(
             with pytest.raises(RuntimeError, match="backend is not owned"):
                 cluster.ensure_cluster_role(
                     "must_not_create",
-                    base_admin_url=pg_admin_url(pg_port),
+                    base_admin_url=pg_admin_url(pg_port, home=meiva_home()),
                     expected_data_dir=native_cluster.pg_data,
                 )
             with psycopg.connect(foreign_url) as conn:
@@ -312,7 +313,14 @@ def test_unix_only_foreign_postgres_same_port_cannot_receive_provisioning(
                 )
         finally:
             subprocess.run(
-                [str(pg_tool("pg_ctl")), "-D", str(data), "-m", "immediate", "stop"],
+                [
+                    str(pg_tool("pg_ctl", home=meiva_home())),
+                    "-D",
+                    str(data),
+                    "-m",
+                    "immediate",
+                    "stop",
+                ],
                 check=True,
                 capture_output=True,
             )
@@ -321,7 +329,7 @@ def test_unix_only_foreign_postgres_same_port_cannot_receive_provisioning(
 # meiva:note
 # (address, auth_method) of the host lines in the loaded hba file, in file order.
 def _active_hba(cluster_: NativeCluster) -> list[tuple[str, str]]:
-    with psycopg.connect(pg_admin_url(cluster_.pg_port)) as conn:
+    with psycopg.connect(pg_admin_url(cluster_.pg_port, home=meiva_home())) as conn:
         rows = conn.execute(
             "SELECT address, auth_method FROM pg_hba_file_rules "
             "WHERE type = 'host' ORDER BY line_number"
@@ -357,7 +365,9 @@ def _legacy_trust_loaded(cluster_: NativeCluster) -> None:
     (cluster_.pg_data / "pg_hba.conf").write_text(
         "local all all trust\nhost all all 127.0.0.1/32 trust\n"
     )
-    with psycopg.connect(pg_admin_url(cluster_.pg_port), autocommit=True) as conn:
+    with psycopg.connect(
+        pg_admin_url(cluster_.pg_port, home=meiva_home()), autocommit=True
+    ) as conn:
         conn.execute("SELECT pg_reload_conf()")
 
 

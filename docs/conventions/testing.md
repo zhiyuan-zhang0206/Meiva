@@ -208,10 +208,13 @@ released. To invoke the supported sweep directly:
 from base.cluster.dataplane.pg_throwaway_base import ThrowawayConfig, configured_base
 from base.cluster.dataplane.pg_tools import sweep_orphaned_throwaway_clusters
 from base.config import ConfigBoot
+from base.paths import meiva_home
 
 config = ConfigBoot()
 config.read_process_environment()
-throwaway = ThrowawayConfig(configured_base(config.view.data_plane.pg_throwaway_base))
+throwaway = ThrowawayConfig(
+    configured_base(config.view.data_plane.pg_throwaway_base), home=meiva_home()
+)
 print(sweep_orphaned_throwaway_clusters(config=throwaway))
 PY
 ```

@@ -66,19 +66,19 @@ def run(schedule_id: int, revision: int | None = None) -> int:
     image = process_context.loaded_code_image()
     version = CodeVersion(image)
     gate = ProcessDbGate(process=process_name(), version=version.get)
+    home = meiva_home()
 
     def database() -> Database:
         return Database(
             db_config_from_boot(config),
             gate=gate,
-            direct_url=ClusterDirectUrl(machine.host),
+            direct_url=ClusterDirectUrl(machine.host, home=home),
         )
 
     def clock_factory() -> Clock:
         return Clock(clock_config_from_boot(config), timers=SYSTEM_TIMERS)
 
     clients = clients_over(config, machine, database)
-    home = meiva_home()
     primary: BaseException | None = None
     try:
         rng = random.SystemRandom()

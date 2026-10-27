@@ -88,13 +88,13 @@ def _toolchain_linux() -> Detail:
     return {"versions": versions, "pgvector": "installed"}
 
 
-def _toolchain_macos() -> Detail:
+def _toolchain_macos(home: Path) -> Detail:
     """The Homebrew kegs, resolved the way the start resolves them."""
     from base.cluster.dataplane.pg_tools import pg_tool
     from base.cluster.dataplane.pooler import pgbouncer_bin
     from base.host.brew_pin import brew_prefix
 
-    postgres = pg_tool("postgres")
+    postgres = pg_tool("postgres", home=home)
     versions = {
         "arch": _out(["uname", "-m"]),
         "macos": _out(["sw_vers", "-productVersion"]),
@@ -107,14 +107,18 @@ def _toolchain_macos() -> Detail:
         )[0],
         "pgbouncer": _out([pgbouncer_bin(), "--version"]).splitlines()[0],
     }
-    control = Path(_out([str(pg_tool("pg_config")), "--sharedir"])) / "extension" / "vector.control"
+    control = (
+        Path(_out([str(pg_tool("pg_config", home=home)), "--sharedir"]))
+        / "extension"
+        / "vector.control"
+    )
     if not control.is_file():
         raise RuntimeError(f"pgvector is not installed for PostgreSQL 17: no {control}")
     return {"versions": versions, "pgvector": str(control)}
 
 
-def check_toolchain(_home: Path, _source: Path) -> Detail:
-    detail = _toolchain_macos() if IS_MACOS else _toolchain_linux()
+def check_toolchain(home: Path, _source: Path) -> Detail:
+    detail = _toolchain_macos(home) if IS_MACOS else _toolchain_linux()
     versions = detail["versions"]
     if not re.search(r"\bv=8\.2\.\d+$", versions["redis"]):
         raise RuntimeError(f"Redis is not on the approved 8.2 series: {versions['redis']}")

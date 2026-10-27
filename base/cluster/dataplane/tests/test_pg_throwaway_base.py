@@ -25,6 +25,7 @@ import pytest
 from base.cluster.dataplane import pg_plan, pg_tools
 from base.cluster.dataplane import pg_throwaway_base as base
 from base.cluster.dataplane.pg_throwaway_base import ThrowawayConfig
+from base.paths import meiva_home
 
 
 @pytest.fixture
@@ -223,7 +224,7 @@ def test_throwaway_postgres_creates_the_instance_under_the_given_base(
     Postgres socket path (`<dir>/.s.PGSQL.<port>`) is capped at 103 bytes, so a
     pytest `tmp_path` is too deep for a real cluster."""
     instances = Path(tempfile.mkdtemp(prefix="meiva-base-", dir="/tmp"))
-    config = ThrowawayConfig(instances)
+    config = ThrowawayConfig(instances, home=meiva_home())
     try:
         abandoned = instances / "meiva-pg-abandoned"
         abandoned.mkdir()

@@ -29,6 +29,7 @@ from base.cluster.dataplane.pg_tools import (
     pg_tool,
 )
 from base.host.net.resilience import ExponentialBackoff, Policy, retry
+from base.paths import meiva_home
 
 
 # meiva:note
@@ -41,7 +42,7 @@ def postmaster(
     data = tmp_path / "pg"
     subprocess.run(  # noqa: S603
         [
-            str(pg_tool("initdb")),
+            str(pg_tool("initdb", home=meiva_home())),
             "-D",
             str(data),
             "-U",
@@ -75,7 +76,15 @@ def postmaster(
 def _ready(port: int) -> bool:
     return (
         subprocess.run(  # noqa: S603
-            [str(pg_tool("pg_isready")), "-h", "127.0.0.1", "-p", str(port), "-t", "1"],
+            [
+                str(pg_tool("pg_isready", home=meiva_home())),
+                "-h",
+                "127.0.0.1",
+                "-p",
+                str(port),
+                "-t",
+                "1",
+            ],
             capture_output=True,
             timeout=2,
             check=False,
@@ -86,7 +95,7 @@ def _ready(port: int) -> bool:
 
 def _argv(data: Path, port: int) -> list[str]:
     return [
-        str(pg_tool("postgres")),
+        str(pg_tool("postgres", home=meiva_home())),
         "-D",
         str(data),
         "-p",

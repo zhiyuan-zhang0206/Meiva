@@ -388,7 +388,8 @@ def _assert_archive_after_readiness(start: _Start, wait: probe.ReadinessWait) ->
     assert_configured_archive(
         machine=start.command.machine.name(),
         path=start.config.data_plane.walg_config_file,
-        admin=probe.admin_connection(),
+        admin=probe.admin_connection(home=start.command.home),
+        home=start.command.home,
     )
 
 

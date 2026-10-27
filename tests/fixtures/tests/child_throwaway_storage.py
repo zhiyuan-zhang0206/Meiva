@@ -16,6 +16,7 @@ from base.cluster.machine.configured import ConfiguredMachineIdentity
 from base.config import refresh_data_plane_settings, settings
 from base.config.tests.configuration import snapshot_process_config
 from base.deploy.tests.containers import postgres
+from base.paths import meiva_home
 
 scratch = Path(sys.argv[1])
 assert settings.data_plane.pg_throwaway_base == str(scratch)
@@ -26,7 +27,7 @@ assert settings.data_plane.pg_throwaway_base == str(scratch)
 
 
 throwaway_config = ThrowawayConfig(
-    configured_base(process_config.view.data_plane.pg_throwaway_base)
+    configured_base(process_config.view.data_plane.pg_throwaway_base), home=meiva_home()
 )
 
 

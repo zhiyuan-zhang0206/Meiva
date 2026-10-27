@@ -33,6 +33,7 @@ from base.cluster.machine.configured import ConfiguredMachineIdentity
 from base.deploy.tests.containers import free_port
 from base.host.db_authority.delivery import POOLER_ADMIN
 from base.native_process.ownership import OwnedProcess
+from base.paths import meiva_home
 from cli.commands.data_plane import pgbouncer
 from cli.commands.data_plane.tests.native_processes import (
     ADMIN_PASSWORD,
@@ -342,7 +343,7 @@ def test_a_pooler_draining_a_held_client_keeps_custody_and_is_not_replaced(
     assert old is not None
     files = (
         (unit_home / "pgbouncer" / "pgbouncer.ini").read_bytes(),
-        pgbouncer.userlist_path().read_bytes(),
+        pgbouncer.userlist_path(meiva_home()).read_bytes(),
     )
     console = f"postgresql://{POOLER_ADMIN}:{ADMIN_PASSWORD}@127.0.0.1:{port}/pgbouncer"
 
@@ -358,8 +359,8 @@ def test_a_pooler_draining_a_held_client_keeps_custody_and_is_not_replaced(
             pgbouncer.ensure_pgbouncer(spec)
 
         assert old.live(), "a normal start must retain a pooler still draining its client"
-        assert pgbouncer.running_pid() == old.pid, "no replacement may be launched"
+        assert pgbouncer.running_pid(home=meiva_home()) == old.pid, "no replacement may be launched"
         assert (
             (unit_home / "pgbouncer" / "pgbouncer.ini").read_bytes(),
-            pgbouncer.userlist_path().read_bytes(),
+            pgbouncer.userlist_path(meiva_home()).read_bytes(),
         ) == files

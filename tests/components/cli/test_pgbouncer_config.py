@@ -23,6 +23,7 @@ from base.cluster.machine.tests.identity import machine_identity as machine_iden
 from base.db import Database, DbConfig, connections
 from base.db.code_version_gate import ProcessDbGate
 from base.host.net.url_secret import url_with_port
+from base.paths import meiva_home
 from cli.commands.data_plane import pgbouncer
 from cli.commands.data_plane.tests.data_plane_records import data_plane_config as data_plane_config
 from cli.commands.lifecycle.tests.start_storage.owned_postgres import (
@@ -48,7 +49,7 @@ def _assert_transaction_pooling_with_scram_clients(ini: str) -> None:
     assert "pool_mode = transaction" in ini
     # Client auth is scram against the userlist of generation verifiers.
     assert "auth_type = scram-sha-256" in ini
-    assert f"auth_file = {pgbouncer.userlist_path()}" in ini
+    assert f"auth_file = {pgbouncer.userlist_path(meiva_home())}" in ini
     assert "listen_port = 6433" in ini
 
 
@@ -105,7 +106,7 @@ def _assert_quiet_connection_logs_and_userlist_only_console(ini: str) -> None:
 def test_render_ini_is_transaction_scram_and_socket_server(
     machine_identity: MachineIdentityReader,
 ) -> None:
-    ini = pgbouncer.render_ini(_shape(machine_identity, "meiva_main"))
+    ini = pgbouncer.render_ini(_shape(machine_identity, "meiva_main"), home=meiva_home())
     _assert_transaction_pooling_with_scram_clients(ini)
     _assert_database_entry_forwards_over_owner_only_socket(ini)
     _assert_backends_born_with_statement_ceiling(ini)
@@ -119,7 +120,7 @@ def test_render_ini_authenticates_and_binds_loopback_on_a_single_box(
     """The internal data plane always authenticates, and a box that declares no
     reachable address (`MEIVA_MACHINE_HOST` unset) binds loopback alone."""
     machine_identity.set(host="localhost")
-    ini = pgbouncer.render_ini(_shape(machine_identity, "meiva"))
+    ini = pgbouncer.render_ini(_shape(machine_identity, "meiva"), home=meiva_home())
     assert "auth_type = scram-sha-256" in ini.splitlines()
     assert "trust" not in ini
     assert "listen_addr = 127.0.0.1" in ini.splitlines()
@@ -129,14 +130,14 @@ def test_render_ini_adds_only_the_declared_reachable_address(
     machine_identity: ConfiguredMachineIdentity,
 ) -> None:
     machine_identity.set(host="10.0.0.5")
-    ini = pgbouncer.render_ini(_shape(machine_identity, "meiva"))
+    ini = pgbouncer.render_ini(_shape(machine_identity, "meiva"), home=meiva_home())
     assert "listen_addr = 127.0.0.1, 10.0.0.5" in ini.splitlines()
 
 
 def test_render_ini_binds_loopback_never_all_interfaces(
     machine_identity: MachineIdentityReader,
 ) -> None:
-    ini = pgbouncer.render_ini(_shape(machine_identity, "meiva_main"))
+    ini = pgbouncer.render_ini(_shape(machine_identity, "meiva_main"), home=meiva_home())
     listen = next(ln for ln in ini.splitlines() if ln.startswith("listen_addr ="))
     assert "127.0.0.1" in listen
     assert "0.0.0.0" not in listen and "*" not in listen  # noqa: S104 — asserting we do NOT bind all interfaces
@@ -153,7 +154,9 @@ def test_backup_defaults_to_a_direct_dump_source(
     from services.backup import dump as backup
 
     provision_database(
-        "meiva", base_admin_url=pg_admin_url(owned_pg), expected_data_dir=unit_home / "pg"
+        "meiva",
+        base_admin_url=pg_admin_url(owned_pg, home=meiva_home()),
+        expected_data_dir=unit_home / "pg",
     )
     plane_url = f"postgresql://meiva@127.0.0.1:{owned_pg}/meiva"
     database = Database(
@@ -170,12 +173,14 @@ def test_backup_defaults_to_a_direct_dump_source(
         ),
     )
 
-    result = backup.dump_source(database, is_remote=remote, plane_url=plane_url)
+    result = backup.dump_source(database, is_remote=remote, plane_url=plane_url, home=meiva_home())
 
     if remote:
         assert result == "postgresql://provider:5432/meiva"
     else:
-        assert result == owner_conninfo(pg_admin_url(owned_pg), database="meiva", owner="meiva")
+        assert result == owner_conninfo(
+            pg_admin_url(owned_pg, home=meiva_home()), database="meiva", owner="meiva"
+        )
 
 
 @pytest.mark.parametrize("direct", [False, True])

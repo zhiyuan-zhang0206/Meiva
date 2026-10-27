@@ -460,7 +460,7 @@ def main() -> None:
         return Database(
             db_config_from_boot(machine_config),
             gate=gate,
-            direct_url=ClusterDirectUrl(machine.host),
+            direct_url=ClusterDirectUrl(machine.host, home=process_home),
         )
 
     pipeline = build_pipeline(database=database, machine=machine, home=process_home)

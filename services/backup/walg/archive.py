@@ -30,7 +30,7 @@ from services.backup.walg.archive_plan import postgres_command as command_text
 from services.backup.walg.config import WalgConfigError
 
 
-def postgres_command(*walg_args: str, path: Path | None) -> str:
+def postgres_command(*walg_args: str, path: Path | None, home: Path) -> str:
     """A shell command Postgres runs: the pinned wal-g, `--config <file>`, then `walg_args`.
 
     `walg_args` are written as given (they hold Postgres' own `%p` / `%f`
@@ -42,21 +42,21 @@ def postgres_command(*walg_args: str, path: Path | None) -> str:
     """
     if path is None:
         raise WalgConfigError("MEIVA_WALG_CONFIG_FILE is not set")
-    return command_text(path, walg_path(), *walg_args)
+    return command_text(path, walg_path(home=home), *walg_args)
 
 
 # meiva:note
 # The archive settings for the WAL-G configured at `path`, or None when WAL-G is off.
-def expected_for(path: Path | None) -> ExpectedArchive | None:
-    return None if path is None else expected_settings(path, walg_path())
+def expected_for(path: Path | None, *, home: Path) -> ExpectedArchive | None:
+    return None if path is None else expected_settings(path, walg_path(home=home))
 
 
-def expected_archive(*, path: Path | None) -> ExpectedArchive | None:
+def expected_archive(*, path: Path | None, home: Path) -> ExpectedArchive | None:
     """The archive settings for the configured WAL-G, or None when WAL-G is off."""
-    return expected_for(path)
+    return expected_for(path, home=home)
 
 
-def archive_pg_args(*, path: Path | None) -> list[str]:
+def archive_pg_args(*, path: Path | None, home: Path) -> list[str]:
     """`postgres` launch arguments for the configured archiving; empty when WAL-G is off."""
-    expected = expected_archive(path=path)
+    expected = expected_archive(path=path, home=home)
     return [] if expected is None else archive_args(expected)

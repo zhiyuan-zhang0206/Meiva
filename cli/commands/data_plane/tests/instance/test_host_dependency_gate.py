@@ -24,6 +24,7 @@ from base.config import ConfigBoot
 from base.host.proc import run_bounded
 from base.host.system.hostport import Host
 from base.host.system.tests.fake_commands import DARWIN_ARM64, LINUX_X86
+from base.paths import meiva_home
 from base.sessions.env_forwarding import frontend_toolchain_path
 from base.sessions.tests.refuse_helper import refuse_helper
 from base.telemetry import EventPipeline
@@ -108,7 +109,9 @@ def _gate(repo: Path, scope: StartScope, host: Host, directory: Path) -> int:
     return ensure_host_dependencies(
         repo=repo,
         scope=scope,
-        probing=Probing(host=host, data_plane=None, toolchain_path=str(directory)),
+        probing=Probing(
+            host=host, data_plane=None, toolchain_path=str(directory), home=meiva_home()
+        ),
     )
 
 
@@ -224,7 +227,9 @@ def test_a_node_toolchain_outside_the_inherited_path_is_found_through_the_toolch
     _program(bin_dir / "curl")
     scope = _scope(services=frozenset({"frontend"}), os_jobs=False)
     host = _host(bin_dir)
-    probing = Probing(host=host, data_plane=None, toolchain_path=f"{toolchain}:{bin_dir}")
+    probing = Probing(
+        host=host, data_plane=None, toolchain_path=f"{toolchain}:{bin_dir}", home=meiva_home()
+    )
 
     assert ensure_host_dependencies(repo=repo, scope=scope, probing=probing) == 0
     assert capsys.readouterr().out == ""
@@ -238,7 +243,7 @@ def test_the_database_tools_are_read_from_the_vendored_tree_and_the_redis_overri
     data_plane_config: DataPlaneConfig,
     capsys: pytest.CaptureFixture[str],
 ) -> None:
-    vendored = runtime_binaries.vendored_pg_dir() / "bin"
+    vendored = runtime_binaries.vendored_pg_dir(meiva_home()) / "bin"
     assert vendored.is_relative_to(unit_home)
     for name in ("initdb", "pg_ctl", "postgres", "pg_isready"):
         _program(vendored / name)
@@ -253,7 +258,9 @@ def test_the_database_tools_are_read_from_the_vendored_tree_and_the_redis_overri
         data_plane=PlaneFacts(is_remote=False, pgbouncer_enabled=False),
         os_jobs=False,
     )
-    probing = Probing(host=_host(bin_dir), data_plane=plane, toolchain_path=str(bin_dir))
+    probing = Probing(
+        host=_host(bin_dir), data_plane=plane, toolchain_path=str(bin_dir), home=meiva_home()
+    )
 
     assert ensure_host_dependencies(repo=repo, scope=scope, probing=probing) == 0
     assert capsys.readouterr().out == ""

@@ -19,6 +19,7 @@ from zoneinfo import ZoneInfo
 import pytest
 from psycopg.conninfo import conninfo_to_dict
 
+from base.paths import meiva_home
 from services.backup import dump as backup
 from services.backup.artifact import names, passphrase
 from services.backup.artifact.offsite_plan import OssTarget
@@ -173,7 +174,9 @@ def test_prune_keep_is_an_argument(tree: BackupTree) -> None:
 # Real pg_dump of the session's Postgres (an explicit dial: not a born home): the dump
 # lands under the managed name, the .partial is gone, old dumps prune, and the artifact
 # reverses to a restorable custom archive.
-@pytest.mark.skipif(not backup.has_pg_tool("pg_dump"), reason="needs a native pg_dump binary")
+@pytest.mark.skipif(
+    not backup.has_pg_tool("pg_dump", home=meiva_home()), reason="needs a native pg_dump binary"
+)
 def test_run_backup_real_dump_and_prune(tree: BackupTree, db_url: str) -> None:
     for i in range(1, _KEEP + 1):
         _touch(tree.managed, f"test-2026060{i}T100000Z.dump")
@@ -194,7 +197,7 @@ def test_run_backup_real_dump_and_prune(tree: BackupTree, db_url: str) -> None:
     backup.decrypt_artifact(path, restored, tree=tree)
     assert restored.read_bytes().startswith(b"PGDMP"), "decrypted artifact is not a custom dump"
     listing = subprocess.run(  # noqa: S603
-        [str(backup.pg_tool("pg_restore")), "--list", str(restored)],
+        [str(backup.pg_tool("pg_restore", home=meiva_home())), "--list", str(restored)],
         capture_output=True,
         text=True,
         check=False,

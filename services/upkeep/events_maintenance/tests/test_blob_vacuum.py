@@ -32,6 +32,7 @@ from base.config import ConfigBoot, settings
 from base.db import Database
 from base.db.code_version_gate import ProcessDbGate
 from base.db.config import db_config_from_settings
+from base.paths import meiva_home
 from base.telemetry.tests.capture.event_capture import EmittedEvents
 from base.telemetry.tests.capture.event_capture import emitted_events as emitted_events
 from services.upkeep.events_maintenance import blob_vacuum
@@ -133,7 +134,7 @@ def vacuum_db(vacuum_url: str, database_gate: ProcessDbGate) -> Database:
     return Database(
         replace(db_config_from_settings(), db_url=vacuum_url),
         gate=database_gate,
-        direct_url=ClusterDirectUrl(lambda: "127.0.0.1"),
+        direct_url=ClusterDirectUrl(lambda: "127.0.0.1", home=meiva_home()),
     )
 
 

@@ -25,6 +25,7 @@ import pytest
 from base.cluster import port_preflight
 from base.cluster.machine import MachineIdentityReader
 from base.native_process.ownership import OwnedProcess
+from base.paths import meiva_home
 from base.telemetry import EventPipeline
 from cli.commands.data_plane import maintenance_stop
 from cli.commands.data_plane import pgbouncer as pooler
@@ -88,7 +89,7 @@ def test_repeated_normal_stop_preserves_waiting_transaction(
             failure: RuntimeError | TimeoutError | None = None
             try:
                 if _attempt and compensation_retry:
-                    pooler.stop_pgbouncer()
+                    pooler.stop_pgbouncer(home=meiva_home())
                 else:
                     maintenance_stop.stop(
                         pooler_plane(data_plane_config),

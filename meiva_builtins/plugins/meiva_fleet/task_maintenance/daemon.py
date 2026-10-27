@@ -581,15 +581,15 @@ def main() -> None:
     assert_schema_current(boot.view.data_plane.db_url)
     version = CodeVersion(image)
     gate = ProcessDbGate(version=version.get, process="task_maintenance", exempt=False)
+    process_home = meiva_home()
 
     def database() -> Database:
         return Database(
             db_config_from_boot(boot),
             gate=gate,
-            direct_url=ClusterDirectUrl(machine.host),
+            direct_url=ClusterDirectUrl(machine.host, home=process_home),
         )
 
-    process_home = meiva_home()
     pipeline = telemetry.build_pipeline(database=database, machine=machine, home=process_home)
     init_gateway_process(
         name="task_maintenance",

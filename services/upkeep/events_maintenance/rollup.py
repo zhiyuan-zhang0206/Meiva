@@ -41,6 +41,7 @@ from base.db.code_version_gate import ProcessDbGate
 from base.events.contract import LLM_USAGE_KEYS, TURN_END_KEYS
 from base.native_process.code_version import CodeVersion
 from base.native_process.loaded_commit import LoadedCommit
+from base.paths import meiva_home
 from base.telemetry import process_name
 from base.telemetry.metrics.aggregate_sql import EXEC_FAILURE_EVENTS
 from base.telemetry.metrics.event_sql import numeric
@@ -219,7 +220,9 @@ def main(argv: list[str] | None = None) -> int:
     version = CodeVersion(image)
     gate = ProcessDbGate(version=version.get, process=process_name())
     clock = Clock(clock_config_from_boot(config), timers=SYSTEM_TIMERS)
-    with events_maintenance_db(config, gate=gate, local_host=machine.host).connect() as conn:
+    with events_maintenance_db(
+        config, gate=gate, local_host=machine.host, home=meiva_home()
+    ).connect() as conn:
         report = roll_range(conn, first, last, today=clock.now().date())
     if report.rebuilt:
         sys.stdout.write("rebuilt agent_model_tokens_total\n")

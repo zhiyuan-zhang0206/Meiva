@@ -22,6 +22,7 @@ from base.db.code_version_gate import ProcessDbGate
 from base.db.config import db_config_from_boot
 from base.host.env import port_lease
 from base.native_process.loaded_commit import LoadedCommit
+from base.paths import meiva_home
 from services.upkeep.events_maintenance import daemon as events_maintenance_daemon
 from services.upkeep.ttl_reaper import daemon as ttl_reaper_daemon
 from services.wake.delivery_watchdog import daemon as delivery_watchdog_daemon
@@ -118,7 +119,7 @@ async def test_entry_retains_one_gate_serves_health_and_cleans_up_when_stopped(
         return Database(
             db_config_from_boot(config),
             gate=database_gate,
-            direct_url=ClusterDirectUrl(machine_identity.host),
+            direct_url=ClusterDirectUrl(machine_identity.host, home=meiva_home()),
         )
 
     assert _application_name(database()) == database_gate.application_name()

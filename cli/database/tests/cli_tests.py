@@ -30,6 +30,7 @@ def operator_database(command_runtime: CommandRuntime) -> OperatorDatabaseFactor
     """Borrow one real operator factory for this case's explicit CLI inputs."""
     return operator_database_factory(
         local_host=command_runtime.machine.host,
+        home=command_runtime.home,
         open_database=open_operator_database,
     )
 

@@ -38,6 +38,7 @@ from base.cluster.dataplane.pg_tools import throwaway_postgres
 from base.config import ConfigBoot
 from base.host.db_authority.model import GATEWAY_GROUP, RUNNER_GROUP, Groups
 from base.host.net.url_secret import url_with_userinfo
+from base.paths import meiva_home
 from base.telemetry.metrics.observed_metrics import MetricObservation, write_observations
 
 _RUNNER_PW = "runner-pw-fixture"
@@ -54,7 +55,9 @@ def _schema_sql() -> str:
 @pytest.fixture()
 def runner_db(postgres_access: None, process_config: ConfigBoot) -> Generator[str, None, None]:
     """A throwaway Postgres with schema.sql + checkpoint tables applied."""
-    throwaway = ThrowawayConfig(configured_base(process_config.view.data_plane.pg_throwaway_base))
+    throwaway = ThrowawayConfig(
+        configured_base(process_config.view.data_plane.pg_throwaway_base), home=meiva_home()
+    )
     with throwaway_postgres(schema_sql=_schema_sql(), config=throwaway) as url:
         yield url
 

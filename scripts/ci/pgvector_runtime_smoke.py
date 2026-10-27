@@ -33,6 +33,7 @@ from base.cluster.dataplane import runtime_binaries as rb
 from base.cluster.dataplane.pg_throwaway_base import ThrowawayConfig, configured_base
 from base.cluster.dataplane.pg_tools import throwaway_postgres
 from base.config import ConfigBoot
+from base.paths import meiva_home
 
 
 def _assert_platform_supported(system: str, machine: str) -> None:
@@ -47,22 +48,25 @@ def _assert_platform_supported(system: str, machine: str) -> None:
 
 def main() -> int:
     _assert_platform_supported(platform.system(), platform.machine())
-    bin_dir = rb.ensure_pg_binaries()
-    rb.ensure_pgvector()
+    home = meiva_home()
+    bin_dir = rb.ensure_pg_binaries(home=home)
+    rb.ensure_pgvector(home=home)
 
-    pg_dir = rb.vendored_pg_dir()
+    pg_dir = rb.vendored_pg_dir(home)
     injected_sql = next((pg_dir / "share/postgresql/extension").glob("vector--*.sql"), None)
     if injected_sql is None:
         raise RuntimeError(f"pgvector injection incomplete at {pg_dir}/share/postgresql/extension")
-    if rb.vendored_pg_bin_dir() != bin_dir:
-        raise RuntimeError(f"vendored bin dir resolution drifted: {rb.vendored_pg_bin_dir()}")
+    if rb.vendored_pg_bin_dir(home) != bin_dir:
+        raise RuntimeError(f"vendored bin dir resolution drifted: {rb.vendored_pg_bin_dir(home)}")
 
     # The throwaway cluster resolves initdb/pg_ctl via pg_tool, which prefers
     # the vendored tree just built — so everything below runs on the vendored
     # binaries, not any host install.
     config = ConfigBoot()
     config.read_process_environment()
-    throwaway = ThrowawayConfig(configured_base(config.view.data_plane.pg_throwaway_base))
+    throwaway = ThrowawayConfig(
+        configured_base(config.view.data_plane.pg_throwaway_base), home=home
+    )
     with throwaway_postgres(config=throwaway) as url:
         port = urlsplit(url).port
         with psycopg.connect(url) as conn:

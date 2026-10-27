@@ -39,7 +39,7 @@ _NODE_VERSION_TIMEOUT_S = 10
 # meiva:note
 # Where the gate looks: the host it runs commands and finds programs through, the data-plane
 # configuration the Redis override comes from (None off a gateway), and the directories Node's
-# toolchain is searched in.
+# toolchain is searched in, and the cluster home the vendored PostgreSQL tools live under.
 #
 # `toolchain_path` is the `PATH`-style string already extended with the provisioned Node
 # locations: a Node installed by nvm or Homebrew may sit outside the PATH the CLI inherited.
@@ -48,6 +48,7 @@ class Probing:
     host: Host
     data_plane: DataPlaneConfig | None
     toolchain_path: str
+    home: Path
 
 
 def _found(host: Host, path: str) -> Found:
@@ -100,7 +101,7 @@ def _read(tool: HostTool, scope: StartScope, probing: Probing) -> Reading:
     match tool.probe:
         case Probe.PG_TOOL:
             try:
-                return _found(host, str(pg_tool(tool.name)))
+                return _found(host, str(pg_tool(tool.name, home=probing.home)))
             except RuntimeError:
                 return Absent()
         case Probe.REDIS_SERVER | Probe.REDIS_CLI:

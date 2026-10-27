@@ -28,18 +28,16 @@ bind that failed at startup); and one that is not running is started after the s
 `pooler/ini.py` renders the configuration, `pooler/text.py` the operator lines,
 `pooler/stop_intent.py` the durable stop intent and `pooler/identity.py` attributes a running
 pgbouncer to a home from its command line. The composition root (`completion.ensure_pooler`)
-hands the shell one `PoolerSpec`: the ini's shape, the userlist and admin credential, the
-resolved binary, the daemon environment (`daemon_process_env`) and the waits, so a test starts
+hands the shell one `PoolerSpec`: the home it lives under, the ini's shape, the userlist and
+admin credential, the resolved binary, the daemon environment (`daemon_process_env`) and the waits, so a test starts
 a real pooler under its own home with small waits instead of replacing the code that looks
 for it.
 
-Where the pooler's files live is the one thing here that still follows the process rather than
-the `home` argument: `ini_path()`, `pidfile_path()` and `pooler_dir()` in
-`base/cluster/dataplane/pooler.py` resolve `meiva_home()`. `completion.ensure_pooler` renders the
-userlist for the `home` it is given, but `pgbouncer.py` writes it (and the ini, the pidfile and
-the log) under the process home, and `stop_pgbouncer` and the maintenance stop look for the
-pooler there. The two agree whenever the process is the home's own, which is every production
-call; they move together when base's `pooler.*` functions take the home.
+Where the pooler's files live follows the `home` argument everywhere: `ini_path(home)`,
+`pidfile_path(home)` and `pooler_dir(home)` in `base/cluster/dataplane/pooler.py` derive from the home
+they are handed, `PoolerSpec.home` carries it to the shell that writes the ini, the userlist, the
+pidfile and the log, and `stop_pgbouncer(home=...)` and the maintenance stop look for the pooler
+under the same home, so a test home keeps a pooler of its own.
 
 A pooler stop signals a recorded birth once (`_pooler_stop.OwnedPooler`): a birth that is already
 gone, or whose pid another process now holds, is reported stopped and never signalled, and an

@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import os
 from collections.abc import Mapping, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 
 PG_SHM_ARGS = "-c shared_memory_type=mmap -c dynamic_shared_memory_type=mmap"
@@ -51,6 +51,10 @@ class ThrowawayConfig:
     artifact_dir: Path | None = None
     candidate_ports: tuple[int, ...] = ()
     bin_dir: Path | None = None
+    # meiva:note
+    # The home whose vendored Postgres runtime serves the throwaway cluster when `bin_dir` names
+    # no directory with the tool.
+    home: Path = field(kw_only=True)
 
 
 def _format_bytes(n: int) -> str:

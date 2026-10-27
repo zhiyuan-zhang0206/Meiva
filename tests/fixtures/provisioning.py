@@ -17,6 +17,7 @@ from base.clock.tests.seeded_rng import seeded_rng
 from base.cluster.dataplane.pg_throwaway_base import ThrowawayConfig, configured_base
 from base.native_process.code_version import CodeVersion
 from base.native_process.loaded_commit import LoadedCommit
+from base.paths import meiva_home
 from tests._os_jobs import host_meiva_os_jobs
 from tests._test_env_file import rewrite_line as _rewrite_test_env_file_line
 from tests.fixtures.env_bootstrap import (
@@ -30,7 +31,9 @@ _PROCESS_IMAGE_KEY = pytest.StashKey[LoadedCommit]()
 
 @pytest.fixture(scope="session")
 def throwaway_config(process_config) -> ThrowawayConfig:
-    return ThrowawayConfig(configured_base(process_config.view.data_plane.pg_throwaway_base))
+    return ThrowawayConfig(
+        configured_base(process_config.view.data_plane.pg_throwaway_base), home=meiva_home()
+    )
 
 
 @pytest.fixture(scope="session")
@@ -429,7 +432,7 @@ def database(db_url: str, database_gate):
 
     return Database.from_settings(
         gate=database_gate,
-        direct_url=ClusterDirectUrl(lambda: "127.0.0.1"),
+        direct_url=ClusterDirectUrl(lambda: "127.0.0.1", home=meiva_home()),
     )
 
 

@@ -634,7 +634,9 @@ def main() -> None:
 
     def database() -> Database:
         return Database(
-            db_config_from_boot(config), gate=gate, direct_url=ClusterDirectUrl(machine.host)
+            db_config_from_boot(config),
+            gate=gate,
+            direct_url=ClusterDirectUrl(machine.host, home=home),
         )
 
     clients = clients_over(config, machine, database)

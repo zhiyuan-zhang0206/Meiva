@@ -23,6 +23,7 @@ import pytest
 from base.cluster import ownership
 from base.cluster.dataplane import pooler as base_pooler
 from base.native_process.ownership import OwnedProcess
+from base.paths import meiva_home
 from base.sessions.pty import client, closure
 from base.sessions.pty.paths import ledger_path
 from base.sessions.pty.tests.pty_service import service_run, service_socket
@@ -227,7 +228,7 @@ def test_real_redis_stops_owned_instance_only(
     import redis
 
     with (
-        running_redis(ownership.redis_data_dir()) as owned,
+        running_redis(ownership.redis_data_dir(home)) as owned,
         running_redis(tmp_path / "sibling-redis") as sibling,
     ):
         with redis.Redis.from_url(owned.url, decode_responses=True) as owned_client:  # pyright: ignore[reportUnknownMemberType] — redis stubs
@@ -317,7 +318,7 @@ def test_redis_admin_credential_is_independent_of_runtime_url(
     operator_pipeline: Callable[[], EventPipeline],
 ) -> None:
     password = "private-maintenance-test"  # noqa: S105 — private ephemeral test
-    with running_redis(ownership.redis_data_dir(), password=password) as owned:
+    with running_redis(ownership.redis_data_dir(home), password=password) as owned:
         config = replace(
             local_plane,
             redis_url=owned.url.replace("redis://", "redis://restricted:wrong@"),
@@ -466,8 +467,8 @@ def _wait_pidfile(timeout: float = 5.0) -> int:
     """
     deadline = time.monotonic() + timeout
     while time.monotonic() < deadline:
-        if base_pooler.pidfile_path().exists():
-            text = base_pooler.pidfile_path().read_text().strip()
+        if base_pooler.pidfile_path(meiva_home()).exists():
+            text = base_pooler.pidfile_path(meiva_home()).read_text().strip()
             if text:
                 return int(text)
         time.sleep(0.05)
@@ -475,7 +476,7 @@ def _wait_pidfile(timeout: float = 5.0) -> int:
 
 
 def test_pidfile_wait_refuses_nonempty_corrupt_publication(home: Path) -> None:
-    record = base_pooler.pidfile_path()
+    record = base_pooler.pidfile_path(home)
     record.write_text("not-a-native-pid\n")
     with pytest.raises(ValueError, match="invalid literal"):
         _wait_pidfile(timeout=1)

@@ -127,7 +127,9 @@ def _seed_conversation(db_conn: psycopg.Connection) -> int:
     return agent_id
 
 
-@pytest.mark.skipif(not restore_drill.has_pg_tool("pg_dump"), reason="needs native pg_dump")
+@pytest.mark.skipif(
+    not restore_drill.has_pg_tool("pg_dump", home=meiva_home()), reason="needs native pg_dump"
+)
 def test_run_drill_restores_an_encrypted_artifact_into_throwaway_postgres(
     db_conn: psycopg.Connection,
     tmp_path: Path,
@@ -231,7 +233,7 @@ def test_a_dump_pg_restore_cannot_read_fails_with_the_base_and_the_capacity_knob
     garbage.write_bytes(b"this is not a custom-format archive")
 
     with pytest.raises(RuntimeError) as failure:
-        restore_drill.restore_dump(garbage, db_url, base=tmp_path)
+        restore_drill.restore_dump(garbage, db_url, base=tmp_path, home=meiva_home())
 
     message = str(failure.value)
     assert "pg_restore exited" in message

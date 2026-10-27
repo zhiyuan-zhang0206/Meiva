@@ -406,7 +406,8 @@ async def _start(
     access = gateway_access_from_boot(process_config)
     # meiva:note
     # The runtime directory is `<home>/run`, so its parent is the Meiva home.
-    state_dir = state_dir_of(runtime.parent)
+    home = runtime.parent
+    state_dir = state_dir_of(home)
     client = gateway_client(
         config, gateway_url=process_config.view.gateway.gateway_url, access=access, rng=rng
     )
@@ -433,7 +434,7 @@ async def _start(
             ("POST", "/send"): await handle_send(core),
             ("POST", "/send/alert-outbound"): alerts.handle,
         },
-        auth_digests=daemon_acceptance(access),
+        auth_digests=daemon_acceptance(access, home=home),
         image=image,
     )
     _log.info("[im_bridge] healthz listening on :%s", endpoint.health_port)
@@ -547,7 +548,7 @@ def main() -> None:
         return Database(
             db_config_from_boot(machine_config),
             gate=gate,
-            direct_url=ClusterDirectUrl(machine.host),
+            direct_url=ClusterDirectUrl(machine.host, home=process_home),
         )
 
     pipeline = build_pipeline(database=database, machine=machine, home=process_home)

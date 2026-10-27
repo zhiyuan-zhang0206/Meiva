@@ -534,7 +534,7 @@ async def serve_ops_daemon(
     liveness = LivenessGroup(timers=SYSTEM_TIMERS)
 
     try:
-        acceptance = boot.ops_acceptance()
+        acceptance = boot.ops_acceptance(home=home)
         bind_host = boot.ops_bind_host(machine=local_machine)
         if bind_host != "127.0.0.1":
             verify_transport_encryption_declaration(
@@ -632,7 +632,7 @@ def main(*, argv: list[str] | None = None) -> None:
         return Database(
             db_config_from_boot(config),
             gate=gate,
-            direct_url=ClusterDirectUrl(machine.host),
+            direct_url=ClusterDirectUrl(machine.host, home=home),
         )
 
     clients = ClientSet(

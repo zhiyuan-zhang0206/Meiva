@@ -49,7 +49,7 @@ def _require_pg17(binary: Path) -> None:
 def _verify_installed_runtime(
     server: Path,
     *,
-    home: Path | None = None,
+    home: Path,
     platform_bin_dir: Path | None = None,
     path_env: str | None = None,
     platform_name: str | None = None,
@@ -91,7 +91,7 @@ def _has_vector_install_script(extension: Path) -> bool:
 
 def ensure_pg_runtime(
     *,
-    home: Path | None = None,
+    home: Path,
     system: str | None = None,
     machine: str | None = None,
     platform_bin_dir: Path | None = None,

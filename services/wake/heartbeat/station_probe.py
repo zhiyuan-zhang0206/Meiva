@@ -166,7 +166,7 @@ def main(*, process_config: ConfigBoot, open_url: UrlOpener) -> None:
         return Database(
             db_config_from_boot(process_config),
             gate=gate,
-            direct_url=ClusterDirectUrl(machine.host),
+            direct_url=ClusterDirectUrl(machine.host, home=process_home),
         )
 
     pipeline = build_pipeline(database=database, machine=machine, home=process_home)

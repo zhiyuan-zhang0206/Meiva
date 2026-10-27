@@ -221,16 +221,14 @@ def redis_admin_url(redis_url: str, admin_password: str) -> str:
     return f"redis://default:{admin_password}@{parts.hostname or '127.0.0.1'}:{port}"
 
 
-def redis_password_from_env() -> str:
+def redis_password_from_env(home: Path) -> str:
     """This gateway home's file-only Redis ACL runtime password.
 
     Empty only on a home born before Redis always authenticated; storage
     bring-up refuses it."""
     from dotenv import dotenv_values
 
-    from base.paths import meiva_home
-
-    return (dotenv_values(meiva_home() / ".env").get(REDIS_PASSWORD_ENV) or "").strip()
+    return (dotenv_values(home / ".env").get(REDIS_PASSWORD_ENV) or "").strip()
 
 
 # meiva:note

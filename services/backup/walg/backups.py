@@ -97,9 +97,11 @@ def parse_backups(text: str) -> list[Backup]:
     return sorted(backups, key=lambda backup: backup.start_time)
 
 
-def list_backups(*, path: Path | None) -> list[Backup]:
+def list_backups(*, path: Path | None, home: Path) -> list[Backup]:
     """Every backup under the configured prefix, oldest first."""
-    text = run_walg(["backup-list", "--detail", "--json"], timeout_s=QUERY_TIMEOUT_S, path=path)
+    text = run_walg(
+        ["backup-list", "--detail", "--json"], timeout_s=QUERY_TIMEOUT_S, path=path, home=home
+    )
     return parse_backups(text)
 
 

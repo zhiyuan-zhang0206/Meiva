@@ -25,6 +25,7 @@ from base.cluster import postgres as pg
 from base.cluster.dataplane.pg_admin import pg_admin_url
 from base.cluster.machine import MachineIdentityReader
 from base.native_process.ownership import capture_tree
+from base.paths import meiva_home
 from base.telemetry.tests.capture.event_capture import EmittedEvents
 from base.telemetry.tests.capture.event_capture import emitted_events as emitted_events
 from cli.commands.data_plane import cluster_instance as instance
@@ -65,7 +66,7 @@ def _wait_for_hung_archive_command(data: Path, port: int) -> list[psutil.Process
     owner = ownership.postgres(data)
     assert owner is not None
     deadline = time.monotonic() + 30
-    with psycopg.connect(pg_admin_url(port), autocommit=True) as conn:
+    with psycopg.connect(pg_admin_url(port, home=meiva_home()), autocommit=True) as conn:
         while time.monotonic() < deadline:
             conn.execute("SELECT pg_logical_emit_message(true, 'x', 'y')")
             conn.execute("SELECT pg_switch_wal()")

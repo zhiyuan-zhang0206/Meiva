@@ -15,6 +15,7 @@ from base.db import Database, DbConfig
 from base.db.code_version_gate import ProcessDbGate
 from base.db.connections import DirectResolution, DirectUnavailableError
 from base.host.env.dotenv_boot import PLACEHOLDER_DB_URL
+from base.paths import meiva_home
 
 _POOLED = "postgresql://meiva_main:sek@127.0.0.1:6433/meiva_main"
 _DIRECT = "postgresql://meiva_main:sek@127.0.0.1:5433/meiva_main"
@@ -124,7 +125,7 @@ def test_pooling_off_makes_the_access_url_direct_without_reading_anything(
 
 def test_host_comparison_requires_an_explicit_reader() -> None:
     with pytest.raises(RuntimeError, match="explicit local_host reader"):
-        resolve_direct_url(_config(_POOLED.replace("127.0.0.1", "owned-host")))
+        resolve_direct_url(_config(_POOLED.replace("127.0.0.1", "owned-host")), home=meiva_home())
 
 
 @pytest.mark.parametrize("url, expected", [(_POOLED, _DIRECT), (_DIRECT, _DIRECT)])

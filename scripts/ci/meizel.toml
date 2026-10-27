@@ -11,8 +11,9 @@ exports = ["cli.py", "pull_requests", "refresh_test_durations.py", "shard_counts
 [roots]
 "coverage_gates.py" = { kinds = ["environ"], why = "BACKEND_COVERAGE_THRESHOLD is a ci.yml workflow knob for the pre-merge gate, not runtime config — Settings models the deployed runtime, and importing base.config would drag the settings singleton into a pure CI report parser" }
 "host_marks_census.py" = { kinds = ["platform"], why = "CLI census entrypoint records the host OS it ran on in the artifact" }
-"migration_smoke.py" = { kinds = ["environ", "settings"], why = "builds a psql subprocess env (PGHOST/PGPORT/... from a throwaway native Postgres); PG* are libpq plumbing, not Meiva runtime config; Tool entry composes its process resources from the launch configuration" }
-"pgvector_runtime_smoke.py" = { kinds = ["platform", "settings"], why = "Tool entry checks supported host OS/arch and composes its process resources from the launch configuration" }
+"migration_smoke.py" = { kinds = ["environ", "home", "settings"], why = "builds a psql subprocess env (PGHOST/PGPORT/... from a throwaway native Postgres); PG* are libpq plumbing, not Meiva runtime config; Tool entry composes its process resources from the launch configuration and resolves the Meiva home its throwaway cluster vendors under" }
+"pgvector_runtime_smoke.py" = { kinds = ["home", "platform", "settings"], why = "Tool entry checks supported host OS/arch, resolves the Meiva home the vendored runtime is built under and composes its process resources from the launch configuration" }
+"vendor_pg_runtime.py" = { kinds = ["home"], why = "CI tool entry resolves the stable Meiva home (MEIVA_HOME) the vendored Postgres runtime is built under before exporting its root" }
 
 [debt.ambient-read]
 "cli.py#clock base.clock.Clock" = 1

@@ -16,7 +16,7 @@ def operator_handles(home: Path) -> tuple[CommandRuntime, OperatorDatabaseFactor
 
     command = CommandRuntime.create(home)
     factory = operator_database_factory(
-        local_host=command.machine.host, open_database=open_operator_database
+        local_host=command.machine.host, home=command.home, open_database=open_operator_database
     )
     return command, factory
 

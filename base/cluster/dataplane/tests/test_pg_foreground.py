@@ -23,6 +23,7 @@ from psycopg.conninfo import conninfo_to_dict
 
 from base.cluster.dataplane import pg_foreground, pg_plan, pg_tools
 from base.cluster.dataplane.pg_throwaway_base import ThrowawayConfig
+from base.paths import meiva_home
 
 
 @pytest.fixture
@@ -38,7 +39,7 @@ def foreground_root(postgres_access: None) -> Iterator[Path]:
                 if (data / "PG_VERSION").is_file():
                     subprocess.run(  # noqa: S603 -- only this test's own temporary PGDATA
                         [
-                            pg_tools.pg_tool("pg_ctl"),
+                            pg_tools.pg_tool("pg_ctl", home=meiva_home()),
                             "-D",
                             str(data),
                             "-m",
@@ -61,7 +62,7 @@ def test_native_foreground_is_direct_child_and_reaped_on_context_exit(
     pid = 0
     instance = foreground_root
     outcome = pytest.raises(KeyboardInterrupt) if interrupted else nullcontext()
-    config = ThrowawayConfig(foreground_root, default_root=foreground_root)
+    config = ThrowawayConfig(foreground_root, default_root=foreground_root, home=meiva_home())
     with (
         outcome,
         pg_tools.throwaway_postgres(base=foreground_root, foreground=True, config=config) as url,
@@ -100,7 +101,7 @@ def test_startup_failure_reaps_the_native_postmaster(
 
     log = tmp_path / "pg.log"
     process = pg_foreground.start_foreground_postgres(
-        [str(pg_tools.pg_tool("postgres")), "--meiva-invalid-start-option"],
+        [str(pg_tools.pg_tool("postgres", home=meiva_home())), "--meiva-invalid-start-option"],
         log=log,
         env=pg_tools.pg_start_env(),
     )
@@ -258,6 +259,7 @@ def test_unreapable_foreground_retains_data_and_registration(
                 process,
                 foreground=True,
                 bin_dir=bin_dir,
+                home=meiva_home(),
             )
 
         assert sentinel.read_text() == "must survive unconfirmed shutdown"
@@ -279,6 +281,7 @@ def test_startup_timeout_keeps_the_child_handle_for_cleanup(
         default_root=foreground_root,
         artifact_dir=tmp_path / "artifacts",
         bin_dir=bin_dir,
+        home=meiva_home(),
     )
     error = subprocess.TimeoutExpired if stop_fails else TimeoutError
     try:
@@ -323,6 +326,7 @@ def test_foreground_start_is_handed_the_built_start_env(
         default_root=foreground_root,
         artifact_dir=tmp_path / "artifacts",
         bin_dir=bin_dir,
+        home=meiva_home(),
     )
 
     with (

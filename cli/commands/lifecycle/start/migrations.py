@@ -68,7 +68,7 @@ def cmd_migrations_apply(
             done = _apply(conn, machine=machine, home=home)
         cluster.assert_checkpoint_schema_current(database_factory.db_url())
     else:
-        authority = pg_admin.local_owner_authority(config.db_url, remote_plane=False)
+        authority = pg_admin.local_owner_authority(config.db_url, remote_plane=False, home=home)
         with authority.session() as conn:
             done = _apply(conn, machine=machine, home=home)
         cluster.assert_checkpoint_schema_current(

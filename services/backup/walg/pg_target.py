@@ -21,7 +21,7 @@ class PgTarget:
     database: str
 
 
-def pg_target() -> PgTarget:
+def pg_target(*, home: Path) -> PgTarget:
     """Resolve this home's locally owned Postgres.
 
     Raises:
@@ -30,7 +30,9 @@ def pg_target() -> PgTarget:
     from base.config import settings
 
     data_plane = settings.data_plane
-    authority = pg_admin.local_owner_authority(data_plane.db_url, remote_plane=data_plane.is_remote)
+    authority = pg_admin.local_owner_authority(
+        data_plane.db_url, remote_plane=data_plane.is_remote, home=home
+    )
     return PgTarget(
         admin_url=authority.admin_url, data_dir=authority.data_dir, database=authority.database
     )

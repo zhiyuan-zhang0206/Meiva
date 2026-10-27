@@ -6,6 +6,7 @@ from typing import Any
 
 from base.config import ConfigBoot
 from base.db.code_version_gate import ProcessDbGate
+from base.paths import meiva_home
 from services.upkeep.events_maintenance import config as maintenance_config
 from services.upkeep.events_maintenance import daemon
 
@@ -61,7 +62,7 @@ def test_database_slice_uses_the_supplied_owner_at_each_factory_call(
 
     def pool_size(owner: ConfigBoot) -> int:
         database = maintenance_config.events_maintenance_db(
-            owner, gate=database_gate, local_host=lambda: "127.0.0.1"
+            owner, gate=database_gate, local_host=lambda: "127.0.0.1", home=meiva_home()
         )
         with database.pool() as pool:
             return pool.max_size
