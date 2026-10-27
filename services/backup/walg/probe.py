@@ -170,13 +170,13 @@ def judge(
     return None
 
 
-def configuration_failure(path: Path | None) -> str | None:
+def configuration_failure(path: Path | None, *, home: Path) -> str | None:
     """A broken configuration or a swapped key, from the files alone."""
     if path is None:
         return None
     try:
         config = walg_config.read_config(path)
-        key_problem = walg_config.pin_problem(config)
+        key_problem = walg_config.pin_problem(config, home=home)
     except walg_config.WalgConfigError as exc:
         logger.warning(f"[walg] probe: {exc}")
         return CONFIG_UNUSABLE
@@ -223,19 +223,19 @@ def drill_judge(
     return None
 
 
-def enabled_since() -> datetime | None:
+def enabled_since(home: Path) -> datetime | None:
     try:
-        return datetime.fromtimestamp(walg_config.key_id_path().stat().st_mtime, tz=UTC)
+        return datetime.fromtimestamp(walg_config.key_id_path(home).stat().st_mtime, tz=UTC)
     except FileNotFoundError:
         return None
 
 
 # meiva:note
 # The daily tick's condition from its state file at `now`; never raises.
-def tick_failure(now: datetime) -> str | None:
+def tick_failure(now: datetime, *, home: Path) -> str | None:
     try:
-        recorded = walg_state.read_state()
-        return tick_judge(recorded, now, enabled_since=enabled_since())
+        recorded = walg_state.read_state(home)
+        return tick_judge(recorded, now, enabled_since=enabled_since(home))
     except Exception as exc:  # the probe must never raise; the cause is logged
         logger.warning(f"[walg] probe: tick state unreadable: {type(exc).__name__}: {exc}")
         return TICK_STATE_UNREADABLE
@@ -257,7 +257,7 @@ def failure_on(
     expected = expected_for(path, home=home)
     if expected is None:
         return None
-    configuration = configuration_failure(path)
+    configuration = configuration_failure(path, home=home)
     if configuration is not None:
         return configuration
     try:
@@ -268,7 +268,7 @@ def failure_on(
     except Exception as exc:
         logger.warning(f"[walg] probe: archiver state unreadable: {type(exc).__name__}: {exc}")
         return UNREADABLE
-    return judge(state, expected, rpo_objective_s=rpo_objective_s) or tick_failure(now)
+    return judge(state, expected, rpo_objective_s=rpo_objective_s) or tick_failure(now, home=home)
 
 
 # meiva:note

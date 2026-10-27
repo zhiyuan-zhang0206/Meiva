@@ -26,7 +26,6 @@ from urllib.parse import urlsplit
 
 from base.host.private_storage import create_private_bytes, private_file_problem
 from base.host.verified_file import RegularFileReadError, regular_bytes
-from base.paths import meiva_home
 from services.backup.artifact.names import REMOTE_ROOT
 
 _CONFIG_MAX_BYTES = 64 * 1024
@@ -64,8 +63,8 @@ class WalgConfig:
     key_fingerprint: str
 
 
-def key_id_path() -> Path:
-    return meiva_home() / "backups" / "walg" / "key-id"
+def key_id_path(home: Path) -> Path:
+    return home / "backups" / "walg" / "key-id"
 
 
 def _owner_only_file(path: Path, what: str) -> None:
@@ -159,9 +158,9 @@ def _key_fingerprint(key_path: Path) -> str:
     return hashlib.sha256(text.encode()).hexdigest()[:_FINGERPRINT_CHARS]
 
 
-def pinned_key_id() -> str | None:
+def pinned_key_id(home: Path) -> str | None:
     """The fingerprint pinned on first use, or None before any load pinned one."""
-    path = key_id_path()
+    path = key_id_path(home)
     try:
         value = regular_bytes(path, max_bytes=256).decode().strip()
     except FileNotFoundError:
@@ -173,9 +172,9 @@ def pinned_key_id() -> str | None:
     return value
 
 
-def pin_problem(config: WalgConfig) -> str | None:
+def pin_problem(config: WalgConfig, *, home: Path) -> str | None:
     """Why `config`'s key is not the pinned one, or None (also None while nothing is pinned)."""
-    pinned = pinned_key_id()
+    pinned = pinned_key_id(home)
     if pinned is None or pinned == config.key_fingerprint:
         return None
     return (
@@ -185,7 +184,7 @@ def pin_problem(config: WalgConfig) -> str | None:
     )
 
 
-def load_walg_config(*, path: Path | None) -> WalgConfig:
+def load_walg_config(*, path: Path | None, home: Path) -> WalgConfig:
     """The validated configuration, pinning the key's fingerprint on first use.
 
     Called by converge, before Postgres starts: a bad configuration fails
@@ -199,15 +198,15 @@ def load_walg_config(*, path: Path | None) -> WalgConfig:
     if path is None:
         raise WalgConfigError("MEIVA_WALG_CONFIG_FILE is not set")
     config = read_config(path)
-    problem = pin_problem(config)
+    problem = pin_problem(config, home=home)
     if problem is not None:
         raise WalgConfigError(problem)
-    if pinned_key_id() is None:
+    if pinned_key_id(home) is None:
         try:
-            create_private_bytes(key_id_path(), (config.key_fingerprint + "\n").encode())
+            create_private_bytes(key_id_path(home), (config.key_fingerprint + "\n").encode())
         except FileExistsError:
             # A concurrent loader pinned first: it must have pinned this very key.
-            raced = pin_problem(config)
+            raced = pin_problem(config, home=home)
             if raced is not None:
                 raise WalgConfigError(raced) from None
     return config

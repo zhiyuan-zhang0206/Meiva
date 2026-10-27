@@ -138,6 +138,7 @@ def test_status_shows_the_last_run_and_its_failed_step(
 ) -> None:
     started = datetime(2026, 10, 2, 6, 25, tzinfo=UTC)
     state.write_state(
+        meiva_home(),
         state.State(
             tick=state.TickRecord(started_at=started),
             run=state.RunRecord(
@@ -148,7 +149,7 @@ def test_status_shows_the_last_run_and_its_failed_step(
                 detail="the archived WAL chain is broken",
             ),
             verify=state.VerifyRecord(at=started, integrity="FAILURE", timeline="OK"),
-        )
+        ),
     )
 
     assert walg_cmd.cmd_walg_status(plane, home=meiva_home()) == 0
@@ -162,8 +163,8 @@ def test_status_shows_the_last_run_and_its_failed_step(
 def test_status_reports_an_unreadable_state_file(
     plane: DataPlaneConfig, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    state.state_path().parent.mkdir(parents=True)
-    state.state_path().write_text("{broken")
+    state.state_path(meiva_home()).parent.mkdir(parents=True)
+    state.state_path(meiva_home()).write_text("{broken")
 
     assert walg_cmd.cmd_walg_status(plane, home=meiva_home()) == 0
 
@@ -506,6 +507,7 @@ def test_status_shows_the_last_drill_and_the_last_success(
 ) -> None:
     stamp = datetime(2026, 10, 2, 6, 25, tzinfo=UTC)
     state.write_state(
+        meiva_home(),
         state.State(
             tick=state.TickRecord(started_at=stamp),
             drill=state.DrillRecord(
@@ -517,7 +519,7 @@ def test_status_shows_the_last_drill_and_the_last_success(
                 detail="recovery failed: no segment",
                 last_ok_at=None,
             ),
-        )
+        ),
     )
 
     assert walg_cmd.cmd_walg_status(plane, home=meiva_home()) == 0

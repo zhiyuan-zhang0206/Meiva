@@ -95,7 +95,7 @@ def test_an_empty_token_is_refused_before_any_storage_call(sandbox: Sandbox) -> 
 def test_the_check_never_pins_the_key(sandbox: Sandbox) -> None:
     _run_check(sandbox)
 
-    assert walg_config.pinned_key_id() is None
+    assert walg_config.pinned_key_id(sandbox.home) is None
 
 
 def test_a_missing_or_edited_binary_stops_at_the_binary(sandbox: Sandbox) -> None:
@@ -117,7 +117,7 @@ def test_an_unusable_configuration_stops_before_any_storage_call(sandbox: Sandbo
 
 
 def test_a_key_that_differs_from_the_pinned_one_fails(sandbox: Sandbox) -> None:
-    walg_config.load_walg_config(path=sandbox.path)
+    walg_config.load_walg_config(path=sandbox.path, home=sandbox.home)
     sandbox.key_file.write_text("cd" * 32 + "\n")
 
     steps = _run_check(sandbox)

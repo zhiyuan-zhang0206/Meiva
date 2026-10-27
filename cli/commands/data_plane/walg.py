@@ -133,7 +133,7 @@ def cmd_walg_restore(
         print(f"restore failed: {binary_problem} (meiva converge installs it)", file=sys.stderr)
         return 1
     try:
-        walg_config.load_walg_config(path=path)
+        walg_config.load_walg_config(path=path, home=home)
         target = RecoveryTarget(time=time, lsn=lsn)
     except (walg_config.WalgConfigError, ValueError) as exc:
         print(f"restore failed: {exc}", file=sys.stderr)
@@ -160,16 +160,16 @@ def cmd_walg_restore(
     return 0
 
 
-def _config_lines(path: Path) -> list[str]:
+def _config_lines(path: Path, *, home: Path) -> list[str]:
     lines = [f"config file: {path}"]
     try:
         config = walg_config.read_config(path)
     except walg_config.WalgConfigError as exc:
         return [*lines, f"configuration: UNUSABLE: {exc}"]
-    pinned = walg_config.pinned_key_id()
+    pinned = walg_config.pinned_key_id(home)
     lines.append(f"prefix: {config.prefix}")
     lines.append(f"key fingerprint: {config.key_fingerprint} (pinned: {pinned or 'not yet'})")
-    problem = walg_config.pin_problem(config)
+    problem = walg_config.pin_problem(config, home=home)
     if problem is not None:
         lines.append(f"KEY MISMATCH: {problem}")
     return lines
@@ -196,9 +196,9 @@ def _postgres_lines(*, path: Path, home: Path) -> list[str]:
     ]
 
 
-def _tick_lines() -> list[str]:
+def _tick_lines(*, home: Path) -> list[str]:
     try:
-        recorded = state.read_state()
+        recorded = state.read_state(home)
     except state.StateError as exc:
         return [f"daily tick: state UNREADABLE: {exc}"]
     if recorded.tick is None:
@@ -248,7 +248,11 @@ def cmd_walg_status(plane: DataPlaneConfig, *, home: Path) -> int:
         return 0
     binary_problem = walg_binary.installed_problem(home=home)
     print(f"binary: {binary_problem or f'pinned wal-g {walg_binary.WALG_VERSION}'}")
-    for line in (*_config_lines(path), *_postgres_lines(path=path, home=home), *_tick_lines()):
+    for line in (
+        *_config_lines(path, home=home),
+        *_postgres_lines(path=path, home=home),
+        *_tick_lines(home=home),
+    ):
         print(line)
     failure = probe.failure(path=path, home=home)
     print(f"health: {failure or 'ok'}")

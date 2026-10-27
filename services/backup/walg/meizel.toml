@@ -25,8 +25,5 @@ exports = ["archive.py", "check.py", "config.py", "probe.py", "restore.py", "sta
 "tick.py" = { kinds = ["clock"], why = "Daily WAL-G tick entrypoint stamps step records with current UTC time" }
 
 [debt.ambient-read]
-"config.py#home base.paths.meiva_home" = 1
 "restore.py#environ base.native_process.child_env.daemon_process_env" = 1
-"restore.py#home base.paths.meiva_home" = 1
 "runner.py#environ base.native_process.child_env.daemon_process_env" = 1
-"state.py#home base.paths.meiva_home" = 1

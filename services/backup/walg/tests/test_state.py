@@ -59,55 +59,71 @@ def _full_state() -> State:
 
 
 def test_no_file_is_an_empty_state(sandbox: Sandbox) -> None:
-    assert state.read_state() == State()
+    assert state.read_state(sandbox.home) == State()
+
+
+def test_the_state_belongs_to_the_home_it_is_handed_not_the_environments(
+    sandbox: Sandbox, tmp_path: Path
+) -> None:
+    elsewhere = tmp_path / "another-home"
+
+    state.write_state(elsewhere, _full_state())
+
+    assert state.state_path(elsewhere).is_file()
+    assert state.lock_path(elsewhere) == elsewhere / "backups" / "walg" / "run.lock"
+    assert not state.state_path(sandbox.home).exists()
+    assert state.read_state(sandbox.home) == State()
+    assert state.read_state(elsewhere) == _full_state()
 
 
 def test_a_written_state_reads_back_exactly(sandbox: Sandbox) -> None:
-    state.write_state(_full_state())
+    state.write_state(sandbox.home, _full_state())
 
-    assert state.read_state() == _full_state()
+    assert state.read_state(sandbox.home) == _full_state()
 
 
 def test_the_file_is_owner_only_and_its_directory_private(sandbox: Sandbox) -> None:
-    state.write_state(_full_state())
+    state.write_state(sandbox.home, _full_state())
 
-    path = state.state_path()
+    path = state.state_path(sandbox.home)
     assert path == sandbox.home / "backups" / "walg" / "state.json"
     assert stat.S_IMODE(path.stat().st_mode) == 0o600
     assert stat.S_IMODE(path.parent.stat().st_mode) == 0o700
 
 
 def test_a_write_leaves_no_temporary_file(sandbox: Sandbox) -> None:
-    state.write_state(_full_state())
-    state.write_state(_full_state())
+    state.write_state(sandbox.home, _full_state())
+    state.write_state(sandbox.home, _full_state())
 
-    assert [p.name for p in state.state_path().parent.iterdir()] == ["state.json"]
+    assert [p.name for p in state.state_path(sandbox.home).parent.iterdir()] == ["state.json"]
 
 
 def test_timestamps_are_utc_text(sandbox: Sandbox) -> None:
-    state.write_state(_full_state())
+    state.write_state(sandbox.home, _full_state())
 
-    raw = json.loads(state.state_path().read_text())
+    raw = json.loads(state.state_path(sandbox.home).read_text())
     assert raw["tick"]["started_at"] == "2026-10-02T06:25:00+00:00"
 
 
 def test_update_replaces_only_the_named_sections(sandbox: Sandbox) -> None:
-    state.write_state(_full_state())
+    state.write_state(sandbox.home, _full_state())
 
-    updated = state.update_state(verify=VerifyRecord(at=T0, integrity="OK", timeline="OK"))
+    updated = state.update_state(
+        sandbox.home, verify=VerifyRecord(at=T0, integrity="OK", timeline="OK")
+    )
 
     assert updated.verify == VerifyRecord(at=T0, integrity="OK", timeline="OK")
     assert updated.run == _full_state().run
     assert updated.drill == _full_state().drill
-    assert state.read_state() == updated
+    assert state.read_state(sandbox.home) == updated
 
 
 def test_the_drill_section_is_carried_through_unchanged(sandbox: Sandbox) -> None:
-    state.write_state(_full_state())
+    state.write_state(sandbox.home, _full_state())
 
-    state.update_state(tick=TickRecord(started_at=T1, skipped="deploy window"))
+    state.update_state(sandbox.home, tick=TickRecord(started_at=T1, skipped="deploy window"))
 
-    assert state.read_state().drill == _full_state().drill
+    assert state.read_state(sandbox.home).drill == _full_state().drill
 
 
 _DROP = object()
@@ -143,33 +159,33 @@ _DROP = object()
 def test_a_malformed_file_is_an_error_never_an_empty_state(
     sandbox: Sandbox, section: str | None, field: str, value: object
 ) -> None:
-    state.write_state(_full_state())
-    raw: dict[str, Any] = json.loads(state.state_path().read_text())
+    state.write_state(sandbox.home, _full_state())
+    raw: dict[str, Any] = json.loads(state.state_path(sandbox.home).read_text())
     target: dict[str, Any] = raw if section is None else raw[section]
     if value is _DROP:
         del target[field]
     else:
         target[field] = value
-    state.state_path().write_text(json.dumps(raw))
+    state.state_path(sandbox.home).write_text(json.dumps(raw))
 
     with pytest.raises(StateError):
-        state.read_state()
+        state.read_state(sandbox.home)
 
 
 @pytest.mark.parametrize("content", ["", "not json", "[]", "null"])
 def test_a_file_that_is_not_a_state_object_is_an_error(sandbox: Sandbox, content: str) -> None:
-    state.state_path().parent.mkdir(parents=True)
-    state.state_path().write_text(content)
+    state.state_path(sandbox.home).parent.mkdir(parents=True)
+    state.state_path(sandbox.home).write_text(content)
 
     with pytest.raises(StateError):
-        state.read_state()
+        state.read_state(sandbox.home)
 
 
 def test_a_naive_timestamp_cannot_be_written(sandbox: Sandbox) -> None:
     naive = State(tick=TickRecord(started_at=datetime(2026, 10, 2, 6, 25)))  # noqa: DTZ001 — naive on purpose
 
     with pytest.raises(ValueError, match="timezone-aware"):
-        state.write_state(naive)
+        state.write_state(sandbox.home, naive)
 
 
 def test_a_drill_without_a_target_or_a_success_round_trips(sandbox: Sandbox) -> None:
@@ -185,5 +201,5 @@ def test_a_drill_without_a_target_or_a_success_round_trips(sandbox: Sandbox) -> 
     never = replace(record, ok=False, last_ok_at=None)
 
     for drill in (record, never):
-        state.write_state(State(drill=drill))
-        assert state.read_state().drill == drill
+        state.write_state(sandbox.home, State(drill=drill))
+        assert state.read_state(sandbox.home).drill == drill

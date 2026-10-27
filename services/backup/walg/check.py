@@ -130,14 +130,14 @@ def run_check_on(
 
     try:
         config = walg_config.read_config(path)
-        key_problem = walg_config.pin_problem(config)
+        key_problem = walg_config.pin_problem(config, home=home)
     except walg_config.WalgConfigError as exc:
         return [*steps, Step("configuration", str(exc), ok=False)]
     if key_problem is not None:
         return [*steps, Step("configuration", key_problem, ok=False)]
     pinned = (
         "pinned"
-        if walg_config.pinned_key_id() == config.key_fingerprint
+        if walg_config.pinned_key_id(home) == config.key_fingerprint
         else "not pinned yet: converge pins it on first use"
     )
     steps.append(

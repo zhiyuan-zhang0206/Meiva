@@ -55,7 +55,7 @@ def _platform(**changes: Any) -> tick.Platform:
 
 # meiva:note
 # A drill that succeeded just now, so the weekly drill is not due.
-def _seed_recent_drill() -> state.DrillRecord:
+def _seed_recent_drill(home: Path) -> state.DrillRecord:
     finished = datetime.now(UTC)
     record = state.DrillRecord(
         finished_at=finished,
@@ -66,7 +66,7 @@ def _seed_recent_drill() -> state.DrillRecord:
         detail="seeded",
         last_ok_at=finished,
     )
-    state.write_state(state.State(drill=record))
+    state.write_state(home, state.State(drill=record))
     return record
 
 
@@ -97,8 +97,8 @@ def sandbox(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Sandbox:
     box.put("wal-verify.json", fixture_text("wal-verify-warning.json"))
     box.put("delete-dry.log", fixture_text("retention-dry-run.log"))
     box.put("delete-confirm.log", _confirm_log())
-    state.walg_dir().mkdir(parents=True, exist_ok=True)
-    _seed_recent_drill()
+    state.walg_dir(box.home).mkdir(parents=True, exist_ok=True)
+    _seed_recent_drill(box.home)
     return box
 
 
@@ -127,8 +127,8 @@ def _verify_report(*, integrity: str) -> str:
     return json.dumps(report)
 
 
-def _assert_no_secret_anywhere(lines: list[str]) -> None:
-    haystack = state.state_path().read_text() + "\n".join(lines)
+def _assert_no_secret_anywhere(home: Path, lines: list[str]) -> None:
+    haystack = state.state_path(home).read_text() + "\n".join(lines)
     for secret in SECRETS:
         assert secret not in haystack
 
@@ -171,13 +171,13 @@ def test_wal_verify_gets_the_owner_only_socket_like_backup_push(sandbox: Sandbox
 
 
 def test_every_step_leaves_its_record_in_the_state_file(sandbox: Sandbox) -> None:
-    seeded = state.read_state().drill
+    seeded = state.read_state(sandbox.home).drill
     before = datetime.now(UTC).replace(microsecond=0)
 
     code, lines = _run(sandbox)
 
     after = datetime.now(UTC)
-    recorded = state.read_state()
+    recorded = state.read_state(sandbox.home)
     assert code == 0
     assert recorded.tick is not None and recorded.tick.skipped is None
     run = recorded.run
@@ -192,7 +192,7 @@ def test_every_step_leaves_its_record_in_the_state_file(sandbox: Sandbox) -> Non
     assert recorded.retention is not None
     assert (recorded.retention.marked, recorded.retention.deleted) == (21, 21)
     assert recorded.drill == seeded, "a drill that is not due leaves its record alone"
-    _assert_no_secret_anywhere(lines)
+    _assert_no_secret_anywhere(sandbox.home, lines)
 
 
 def test_an_increment_is_recorded_as_a_delta(sandbox: Sandbox) -> None:
@@ -207,7 +207,7 @@ def test_an_increment_is_recorded_as_a_delta(sandbox: Sandbox) -> None:
     code, _ = _run(sandbox)
 
     assert code == 0
-    backup = state.read_state().backup
+    backup = state.read_state(sandbox.home).backup
     assert backup is not None and backup.kind == "delta"
 
 
@@ -226,7 +226,7 @@ def test_with_few_full_backups_retention_does_not_ask_wal_g_to_delete(sandbox: S
     assert code == 0
     assert not [call for call in sandbox.calls() if call.startswith("delete")]
     assert "retention: 3 or fewer full backups, nothing expires yet" in lines
-    retention = state.read_state().retention
+    retention = state.read_state(sandbox.home).retention
     assert retention is not None and (retention.marked, retention.deleted) == (0, 0)
 
 
@@ -240,8 +240,8 @@ def test_a_verify_warning_does_not_stop_the_run(sandbox: Sandbox) -> None:
 # ── failures: the first failing step ends the run, named ─────────────────────
 
 
-def _assert_failed_at(step: str) -> RunRecord:
-    run = state.read_state().run
+def _assert_failed_at(home: Path, step: str) -> RunRecord:
+    run = state.read_state(home).run
     assert run is not None
     assert (run.status, run.step) == ("failed", step)
     return run
@@ -253,10 +253,10 @@ def test_a_failing_preflight_stops_before_any_backup(sandbox: Sandbox) -> None:
     code, lines = _run(sandbox)
 
     assert code == 1
-    _assert_failed_at("preflight")
+    _assert_failed_at(sandbox.home, "preflight")
     assert not [call for call in sandbox.calls() if call.startswith("backup-push")]
     assert lines[-1].startswith("failed at preflight: wal-g backup-list failed (exit 1)")
-    _assert_no_secret_anywhere(lines)
+    _assert_no_secret_anywhere(sandbox.home, lines)
 
 
 def test_a_key_that_is_not_the_pinned_one_fails_preflight(sandbox: Sandbox) -> None:
@@ -264,13 +264,13 @@ def test_a_key_that_is_not_the_pinned_one_fails_preflight(sandbox: Sandbox) -> N
 
     # meiva:note
     # pins the key
-    walg_config.load_walg_config(path=sandbox.path)
+    walg_config.load_walg_config(path=sandbox.path, home=sandbox.home)
     sandbox.key_file.write_text("cd" * 32 + "\n")
 
     code, _ = _run(sandbox)
 
     assert code == 1
-    assert "not the key this home pinned" in _assert_failed_at("preflight").detail
+    assert "not the key this home pinned" in _assert_failed_at(sandbox.home, "preflight").detail
     assert sandbox.calls() == []
 
 
@@ -280,9 +280,9 @@ def test_a_failing_backup_push_stops_before_verify(sandbox: Sandbox) -> None:
     code, _ = _run(sandbox)
 
     assert code == 1
-    _assert_failed_at("backup")
+    _assert_failed_at(sandbox.home, "backup")
     assert not [call for call in sandbox.calls() if call.startswith("wal-verify")]
-    assert state.read_state().backup is None
+    assert state.read_state(sandbox.home).backup is None
 
 
 def test_a_backup_that_never_appears_in_the_list_is_a_failure(sandbox: Sandbox) -> None:
@@ -291,7 +291,7 @@ def test_a_backup_that_never_appears_in_the_list_is_a_failure(sandbox: Sandbox) 
     code, _ = _run(sandbox)
 
     assert code == 1
-    assert "no new backup is listed" in _assert_failed_at("backup").detail
+    assert "no new backup is listed" in _assert_failed_at(sandbox.home, "backup").detail
 
 
 def test_the_first_ever_backup_is_a_backup_even_with_an_empty_before_list(
@@ -303,7 +303,7 @@ def test_the_first_ever_backup_is_a_backup_even_with_an_empty_before_list(
     code, _ = _run(sandbox)
 
     assert code == 0
-    assert state.read_state().backup is not None
+    assert state.read_state(sandbox.home).backup is not None
 
 
 def test_a_chain_failure_with_exit_code_zero_stops_before_retention(sandbox: Sandbox) -> None:
@@ -313,12 +313,14 @@ def test_a_chain_failure_with_exit_code_zero_stops_before_retention(sandbox: San
     code, lines = _run(sandbox)
 
     assert code == 1
-    _assert_failed_at("verify")
+    _assert_failed_at(sandbox.home, "verify")
     assert not [call for call in sandbox.calls() if call.startswith("delete")]
-    verify = state.read_state().verify
+    verify = state.read_state(sandbox.home).verify
     assert verify is not None and verify.integrity == "FAILURE"
     assert "the archived WAL chain is broken" in lines[-1]
-    assert state.read_state().backup is not None, "the backup that happened is still recorded"
+    assert state.read_state(sandbox.home).backup is not None, (
+        "the backup that happened is still recorded"
+    )
 
 
 def test_a_failing_verify_command_stops_before_retention(sandbox: Sandbox) -> None:
@@ -327,7 +329,7 @@ def test_a_failing_verify_command_stops_before_retention(sandbox: Sandbox) -> No
     code, _ = _run(sandbox)
 
     assert code == 1
-    _assert_failed_at("verify")
+    _assert_failed_at(sandbox.home, "verify")
     assert not [call for call in sandbox.calls() if call.startswith("delete")]
 
 
@@ -340,10 +342,10 @@ def test_a_retention_invariant_violation_never_confirms(sandbox: Sandbox) -> Non
     code, lines = _run(sandbox)
 
     assert code == 1
-    run = _assert_failed_at("retention")
+    run = _assert_failed_at(sandbox.home, "retention")
     assert "newest backup depends on" in run.detail
     assert sandbox.calls()[-1] == "delete retain FULL 3 --use-sentinel-time"
-    assert state.read_state().retention is None
+    assert state.read_state(sandbox.home).retention is None
     assert any(line.startswith("  basebackups_005/") for line in lines), "the plan was audited"
 
 
@@ -356,7 +358,7 @@ def test_an_unexpected_error_is_still_recorded_against_its_step(sandbox: Sandbox
     code, _ = _run(sandbox, _platform(target=broken))
 
     assert code == 1
-    assert _assert_failed_at("backup").detail == "KeyError: 'host'"
+    assert _assert_failed_at(sandbox.home, "backup").detail == "KeyError: 'host'"
 
 
 def test_a_failed_run_is_replaced_by_the_next_successful_one(sandbox: Sandbox) -> None:
@@ -367,7 +369,7 @@ def test_a_failed_run_is_replaced_by_the_next_successful_one(sandbox: Sandbox) -
     code, _ = _run(sandbox)
 
     assert code == 0
-    run = state.read_state().run
+    run = state.read_state(sandbox.home).run
     assert run is not None and run.status == "ok"
 
 
@@ -382,21 +384,21 @@ def test_off_does_nothing_and_writes_nothing(
     code, lines = _run(box)
 
     assert (code, box.calls()) == (0, [])
-    assert not state.state_path().exists()
+    assert not state.state_path(box.home).exists()
     assert "nothing to do" in lines[0]
 
 
 def test_postgres_not_accepting_connections_skips(sandbox: Sandbox) -> None:
     sandbox.fail("backup-push")
     _run(sandbox)
-    failed = state.read_state().run
+    failed = state.read_state(sandbox.home).run
     calls_before = sandbox.calls()
     before = datetime.now(UTC).replace(microsecond=0)
 
     code, _ = _run(sandbox, _platform(accepting=False))
 
     assert (code, sandbox.calls()) == (0, calls_before)
-    after = state.read_state()
+    after = state.read_state(sandbox.home)
     assert after.tick is not None
     assert after.tick.skipped == "postgres is not accepting connections"
     assert before <= after.tick.started_at <= datetime.now(UTC)
@@ -404,14 +406,14 @@ def test_postgres_not_accepting_connections_skips(sandbox: Sandbox) -> None:
 
 
 def test_a_tick_that_holds_the_lock_makes_a_second_one_stand_down(sandbox: Sandbox) -> None:
-    seeded = state.state_path().read_bytes()
+    seeded = state.state_path(sandbox.home).read_bytes()
 
-    with file_lock(state.lock_path()):
+    with file_lock(state.lock_path(sandbox.home)):
         code, lines = _run(sandbox)
 
     assert (code, sandbox.calls()) == (0, [])
     assert lines == ["another WAL-G tick is still running; nothing to do"]
-    assert state.state_path().read_bytes() == seeded
+    assert state.state_path(sandbox.home).read_bytes() == seeded
 
 
 def test_the_lock_is_released_after_a_run(sandbox: Sandbox) -> None:
@@ -427,12 +429,12 @@ def test_the_lock_is_released_after_a_run(sandbox: Sandbox) -> None:
 
 
 def test_a_corrupt_state_file_fails_the_tick_without_touching_the_bucket(sandbox: Sandbox) -> None:
-    state.state_path().write_text("{broken")
+    state.state_path(sandbox.home).write_text("{broken")
 
     code, lines = _run(sandbox)
 
     assert (code, sandbox.calls()) == (1, [])
-    assert "remove" in lines[0] and str(state.state_path()) in lines[0]
+    assert "remove" in lines[0] and str(state.state_path(sandbox.home)) in lines[0]
 
 
 def test_no_locally_owned_postgres_is_a_recorded_setup_failure(sandbox: Sandbox) -> None:
@@ -444,7 +446,7 @@ def test_no_locally_owned_postgres_is_a_recorded_setup_failure(sandbox: Sandbox)
     code, _ = _run(sandbox, platform)
 
     assert (code, sandbox.calls()) == (1, [])
-    assert "remote-managed" in _assert_failed_at("preflight").detail
+    assert "remote-managed" in _assert_failed_at(sandbox.home, "preflight").detail
 
 
 def test_a_socket_that_is_not_this_homes_postgres_is_a_recorded_failure(
@@ -475,7 +477,7 @@ def test_the_records_are_stamped_in_the_order_the_steps_ran(sandbox: Sandbox) ->
 
     _run(sandbox)
 
-    recorded = state.read_state()
+    recorded = state.read_state(sandbox.home)
     assert recorded.run is not None and recorded.backup is not None
     assert recorded.verify is not None and recorded.retention is not None
     assert before <= recorded.run.started_at <= recorded.backup.finished_at
@@ -493,7 +495,7 @@ def _newest_listed() -> str:
 # meiva:note
 # Forget the seeded drill: none has ever succeeded, so the weekly drill is due.
 def _due(sandbox: Sandbox) -> None:
-    state.write_state(state.State())
+    state.write_state(sandbox.home, state.State())
 
 
 # meiva:note
@@ -507,7 +509,7 @@ def test_a_due_drill_is_attempted_on_yesterdays_backup_before_todays_is_taken(
     code, lines = _run(sandbox)
 
     assert code == 0, "the drill's failure is its own alert, not the run's"
-    recorded = state.read_state()
+    recorded = state.read_state(sandbox.home)
     assert recorded.drill is not None and not recorded.drill.ok
     assert recorded.drill.backup == _newest_listed()
     assert any(line.startswith("drill: FAILED after") for line in lines)
@@ -519,12 +521,12 @@ def test_a_due_drill_is_attempted_on_yesterdays_backup_before_todays_is_taken(
 
 
 def test_a_drill_that_is_not_due_does_not_run(sandbox: Sandbox) -> None:
-    seeded = state.read_state().drill
+    seeded = state.read_state(sandbox.home).drill
 
     code, _ = _run(sandbox)
 
     assert code == 0
-    assert state.read_state().drill == seeded
+    assert state.read_state(sandbox.home).drill == seeded
     assert not [call for call in sandbox.calls() if call.startswith("backup-fetch")]
 
 
@@ -544,7 +546,7 @@ def test_drill_now_runs_the_drill_records_it_and_exits_non_zero_when_it_fails(
 ) -> None:
     assert _drill_now(sandbox, []) == 1
 
-    drill_record = state.read_state().drill
+    drill_record = state.read_state(sandbox.home).drill
     assert drill_record is not None and not drill_record.ok
     assert drill_record.backup == _newest_listed()
     assert not [call for call in sandbox.calls() if call.startswith("backup-push")]
@@ -563,7 +565,7 @@ def test_drill_now_needs_postgres_and_the_run_lock(sandbox: Sandbox) -> None:
     assert _drill_now(sandbox, lines, _platform(accepting=False)) == 1
     assert lines == ["failed: postgres is not accepting connections"]
 
-    with file_lock(state.lock_path(), timeout_s=0):
+    with file_lock(state.lock_path(sandbox.home), timeout_s=0):
         assert _drill_now(sandbox, lines) == 1
     assert lines[-1] == "failed: a WAL-G tick or drill is still running"
 

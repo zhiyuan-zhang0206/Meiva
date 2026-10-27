@@ -132,30 +132,30 @@ def test_off_is_silent_and_never_dials_postgres(
     sandbox = make_sandbox(tmp_path, monkeypatch, enabled=False)
 
     assert probe.failure_on(sandbox.path, NeverDialed(), now=NOW, home=meiva_home()) is None
-    assert probe.configuration_failure(sandbox.path) is None
+    assert probe.configuration_failure(sandbox.path, home=sandbox.home) is None
 
 
 def test_a_valid_configuration_is_fine(sandbox: Sandbox) -> None:
-    assert probe.configuration_failure(sandbox.path) is None
+    assert probe.configuration_failure(sandbox.path, home=sandbox.home) is None
 
 
 def test_an_unusable_configuration_is_reported_without_its_contents(sandbox: Sandbox) -> None:
     sandbox.config_file.write_text("{" + "".join(SECRETS))
 
-    assert probe.configuration_failure(sandbox.path) == probe.CONFIG_UNUSABLE
+    assert probe.configuration_failure(sandbox.path, home=sandbox.home) == probe.CONFIG_UNUSABLE
 
 
 def test_a_swapped_key_is_reported_once_a_key_is_pinned(sandbox: Sandbox) -> None:
     sandbox.key_file.write_text("cd" * 32 + "\n")
-    assert probe.configuration_failure(sandbox.path) is None, (
+    assert probe.configuration_failure(sandbox.path, home=sandbox.home) is None, (
         "nothing is pinned yet: reading never pins"
     )
 
-    walg_config.load_walg_config(path=sandbox.path)
-    assert probe.configuration_failure(sandbox.path) is None
+    walg_config.load_walg_config(path=sandbox.path, home=sandbox.home)
+    assert probe.configuration_failure(sandbox.path, home=sandbox.home) is None
 
     sandbox.key_file.write_text("ef" * 32 + "\n")
-    assert probe.configuration_failure(sandbox.path) == probe.KEY_CHANGED
+    assert probe.configuration_failure(sandbox.path, home=sandbox.home) == probe.KEY_CHANGED
 
 
 def test_the_probe_never_raises_when_postgres_cannot_be_read(
@@ -381,35 +381,46 @@ def test_before_any_tick_the_time_since_enabling_is_what_counts() -> None:
 
 
 def test_the_enabling_time_is_the_key_pins_mtime(sandbox: Sandbox) -> None:
-    walg_config.load_walg_config(path=sandbox.path)
-    assert probe.enabled_since() is not None
+    walg_config.load_walg_config(path=sandbox.path, home=sandbox.home)
+    assert probe.enabled_since(sandbox.home) is not None
     pinned_at = datetime(2026, 10, 1, 0, 0, tzinfo=UTC).timestamp()
-    os.utime(walg_config.key_id_path(), (pinned_at, pinned_at))
+    os.utime(walg_config.key_id_path(sandbox.home), (pinned_at, pinned_at))
 
-    assert probe.tick_failure(now=datetime(2026, 10, 3, 0, 0, tzinfo=UTC)) == probe.TICK_NOT_RUNNING
-    assert probe.tick_failure(now=datetime(2026, 10, 1, 12, 0, tzinfo=UTC)) is None
+    assert (
+        probe.tick_failure(now=datetime(2026, 10, 3, 0, 0, tzinfo=UTC), home=sandbox.home)
+        == probe.TICK_NOT_RUNNING
+    )
+    assert (
+        probe.tick_failure(now=datetime(2026, 10, 1, 12, 0, tzinfo=UTC), home=sandbox.home) is None
+    )
 
 
 def test_without_a_pin_there_is_no_enabling_time(sandbox: Sandbox) -> None:
-    assert probe.enabled_since() is None
-    assert probe.tick_failure(now=NOW) is None
+    assert probe.enabled_since(sandbox.home) is None
+    assert probe.tick_failure(now=NOW, home=sandbox.home) is None
 
 
 def test_tick_failure_reads_the_state_file(sandbox: Sandbox) -> None:
     walg_state.write_state(
-        walg_state.State(tick=_tick(timedelta(hours=1)), run=_run("failed", walg_state.STEP_VERIFY))
+        sandbox.home,
+        walg_state.State(
+            tick=_tick(timedelta(hours=1)), run=_run("failed", walg_state.STEP_VERIFY)
+        ),
     )
 
-    assert probe.tick_failure(now=NOW) == probe.RUN_FAILED_AT[walg_state.STEP_VERIFY]
+    assert (
+        probe.tick_failure(now=NOW, home=sandbox.home)
+        == probe.RUN_FAILED_AT[walg_state.STEP_VERIFY]
+    )
 
 
 def test_an_unreadable_state_file_is_its_own_fixed_failure_not_an_exception(
     sandbox: Sandbox,
 ) -> None:
-    walg_state.state_path().parent.mkdir(parents=True)
-    walg_state.state_path().write_text("{broken " + "".join(SECRETS))
+    walg_state.state_path(sandbox.home).parent.mkdir(parents=True)
+    walg_state.state_path(sandbox.home).write_text("{broken " + "".join(SECRETS))
 
-    assert probe.tick_failure(now=NOW) == probe.TICK_STATE_UNREADABLE
+    assert probe.tick_failure(now=NOW, home=sandbox.home) == probe.TICK_STATE_UNREADABLE
 
 
 def _drill(
@@ -473,6 +484,7 @@ def test_failure_reports_the_tick_when_the_archiver_is_fine(
 ) -> None:
     now = datetime.now(UTC)
     walg_state.write_state(
+        sandbox.home,
         walg_state.State(
             tick=walg_state.TickRecord(started_at=now),
             run=walg_state.RunRecord(
@@ -482,7 +494,7 @@ def test_failure_reports_the_tick_when_the_archiver_is_fine(
                 step=walg_state.STEP_RETENTION,
                 detail="d",
             ),
-        )
+        ),
     )
 
     with archiving_postgres(sandbox=sandbox) as pg:
@@ -494,7 +506,8 @@ def test_an_archiver_failure_outranks_a_tick_failure(
 ) -> None:
     sandbox.set_mode("fail")
     walg_state.write_state(
-        walg_state.State(verify=_verify("FAILURE"), tick=walg_state.TickRecord(started_at=NOW))
+        sandbox.home,
+        walg_state.State(verify=_verify("FAILURE"), tick=walg_state.TickRecord(started_at=NOW)),
     )
 
     with archiving_postgres(sandbox=sandbox) as pg, pg.connect() as conn:
@@ -506,7 +519,7 @@ def test_an_archiver_failure_outranks_a_tick_failure(
 
 def test_off_does_not_read_the_tick_state(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     sandbox = make_sandbox(tmp_path, monkeypatch, enabled=False)
-    walg_state.walg_dir().mkdir(parents=True, exist_ok=True)
-    walg_state.state_path().write_text("{broken")
+    walg_state.walg_dir(sandbox.home).mkdir(parents=True, exist_ok=True)
+    walg_state.state_path(sandbox.home).write_text("{broken")
 
     assert probe.failure_on(sandbox.path, NeverDialed(), now=NOW, home=meiva_home()) is None
