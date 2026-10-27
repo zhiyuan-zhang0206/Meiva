@@ -1,4 +1,4 @@
-exports = ["node.py", "output.py", "process.py", "tests"]
+exports = ["node.py", "output.py", "parent_facts.py", "process.py", "tests"]
 
 [uses]
 "_child_boundary.py" = ["_result.py"]
@@ -10,8 +10,9 @@ exports = ["node.py", "output.py", "process.py", "tests"]
 "_subprocess.py" = ["_child_boundary.py", "_guard.py", "_output_pipe.py", "_poll.py", "_remote.py", "_result.py", "_stream.py"]
 "node.py" = ["_crop.py", "_dispatch.py", "_notes.py", "_result.py", "_stream.py", "output.py", "process.py"]
 "output.py" = ["_crop.py", "_result.py"]
+"parent_facts.py" = ["_child_boundary.py"]
 "process.py" = ["_child_boundary.py", "_result.py", "_stream.py", "_subprocess.py"]
-"tests" = ["_child_boundary.py", "_crop.py", "_dispatch.py", "_guard.py", "_output_pipe.py", "_poll.py", "_remote.py", "_result.py", "_stream.py", "_subprocess.py", "node.py", "output.py", "process.py"]
+"tests" = ["_child_boundary.py", "_crop.py", "_dispatch.py", "_guard.py", "_output_pipe.py", "_poll.py", "_remote.py", "_result.py", "_stream.py", "_subprocess.py", "node.py", "output.py", "parent_facts.py", "process.py"]
 
 [purity]
 "__init__.py" = "strict"
@@ -22,7 +23,7 @@ exports = ["node.py", "output.py", "process.py", "tests"]
 "_result.py" = "strict"
 
 [roots]
-"process.py" = { kinds = ["cwd", "environ", "home"], why = "read_parent_facts copies the LIVE parent env, cwd and home, which plan_child_launch (in _child_boundary.py) layers the exec protocol vars on top of — a whole-environment child handoff (same class as base/sessions/env_forwarding.py / ops/agent_launch.py); Settings cannot enumerate non-modeled keys and the dict must reflect the parent env. The agent host's daemon root calls it once and passes the result to build_graph" }
+"parent_facts.py" = { kinds = ["cwd", "environ", "home"], why = "read_parent_facts copies the LIVE parent env, cwd and home, which plan_child_launch (in _child_boundary.py) layers the exec protocol vars on top of — a whole-environment child handoff (same class as base/sessions/env_forwarding.py / ops/agent_launch.py); Settings cannot enumerate non-modeled keys and the dict must reflect the parent env. The agent host's daemon root is its only production caller: it reads it once and passes the result to build_graph" }
 
 [debt.ambient-read]
 "output.py#home base.paths.workspace_dir_readonly" = 1

@@ -9,7 +9,7 @@ from psycopg_pool import AsyncConnectionPool
 from agent.execution.protocol import ResultPayload
 from agent.graph.exec._child_boundary import ParentFacts
 from agent.graph.exec.node import ExecDone, ExecOutputChunkPublisher, ExecResult
-from agent.graph.exec.process import read_parent_facts
+from agent.graph.exec.parent_facts import read_parent_facts
 from base.agents.context import MeivaContext
 from base.clock import Clock
 from base.clock.tests.seeded_rng import seeded_rng
@@ -22,6 +22,7 @@ from base.events.live.tests.live_capture import idle_publisher
 from base.host.env.agent_slices import AgentSlices
 from base.native_process.turn_identity import HostedTurnResources
 from base.packages.plugin_providers import build_model_catalog
+from base.paths import resolve_meiva_home
 
 
 @dataclass(frozen=True)
@@ -98,6 +99,7 @@ def exec_runtime(
 ) -> Runtime[MeivaContext]:
     return Runtime(
         context=MeivaContext(
+            meiva_home=resolve_meiva_home(),
             hosted_resources=hosted_resources,
             ops_pool=ops_pool,
             event_publisher=event_publisher or idle_publisher(),

@@ -13,7 +13,8 @@ from pydantic import BaseModel, Field
 
 from agent.execution.protocol import ResultPayload
 from agent.graph.exec.node import ExecDone, exec_node_impl
-from agent.graph.exec.process import ExecProcess, SubprocessExecProcess, read_parent_facts
+from agent.graph.exec.parent_facts import read_parent_facts
+from agent.graph.exec.process import ExecProcess, SubprocessExecProcess
 from agent.graph.exec.tests.process_inputs import ReportingExecProcess, ScriptedExecProcess
 from agent.graph.tool_calls import normalize_tool_calls
 from agent.state import AgentState, build_agent_state
@@ -31,6 +32,7 @@ from base.events.live.tests.live_capture import LiveEvents, idle_publisher
 from base.host.env.agent_slices import AgentSlices
 from base.packages.plugin_providers import build_model_catalog
 from base.packages.plugins.extensions import ExtensionRegistry, PluginContributions
+from base.paths import resolve_meiva_home
 from meiva.tests.fixtures.pin_agent import snapshot_clients
 
 
@@ -130,6 +132,7 @@ def _runtime(
 ) -> Runtime[MeivaContext]:
     return Runtime(
         context=MeivaContext(
+            meiva_home=resolve_meiva_home(),
             event_publisher=idle_publisher(),
             agent=agent or AgentSlices.resolve(default_reader=defaults()),
             db=Database.from_settings(gate=database_gate),
@@ -147,6 +150,7 @@ def _node_runtime(
 ) -> Runtime[MeivaContext]:
     return Runtime(
         context=MeivaContext(
+            meiva_home=resolve_meiva_home(),
             event_publisher=publisher or idle_publisher(),
             agent=agent or AgentSlices.resolve(default_reader=defaults()),
             identity=AgentIdentity(agent_id=7, owns_loop=True),

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import replace
+from pathlib import Path
 from typing import Any
 from unittest.mock import AsyncMock
 
@@ -49,6 +50,7 @@ from base.host.env.agent_slices import AgentSlices
 from base.lm.catalog import ModelCatalog
 from base.packages.plugin_providers import build_model_catalog
 from base.packages.plugins.extensions import EMPTY
+from base.paths import resolve_meiva_home
 
 
 async def test_compact_reminder_fires_in_band(
@@ -321,6 +323,8 @@ async def test_compact_summary_emits_compact_done(
         compact=CompactState(reminder_shown=reminded),
     )
     ctx = MeivaContext(
+        meiva_home=resolve_meiva_home(),
+        user_home=Path.home(),
         ops_pool=aops_pool,
         llm=AsyncMock(),
         event_publisher=live_events.publisher,

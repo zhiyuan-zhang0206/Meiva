@@ -24,7 +24,7 @@ tags: []
 - `_temporal_awareness_section` — Time awareness, including the `meiva-workflow.capability-timescale` skill invoke at scheduling, estimation, and feasibility-judgment moments
 - `meiva_memory.memory_discipline_section` — Cross-session durable-knowledge behavior
 - `_invest_in_the_future_section` — Framework's one cross-domain future-signal rule; `MEIVA_SYSTEM_PROMPT_INVEST_FUTURE` defaults on and selects the smallest closing action for a signal that could improve later work
-- `agent_workspace_pointer` — Workspace description (id-free for fork safety; the concrete path is stated by the agent-ID context note). Pure text over the slices; the assembler creates the workspace folder when this section is on.
+- `agent_workspace_pointer` — Workspace description (id-free for fork safety; the concrete path is stated by the agent-ID context note). Pure text over the slices; the assembler touches no file (the host creates the workspace folder at boot and the agent-ID note resolves it).
 
 **Capabilities group** (lives in `capabilities.py`, registered by `system_prompt` so the render order stays the reading order):
 - `capabilities_section(view, servers)` — The skill + MCP index, a function of the `SkillView` and the configured servers the assembler read once. `*` selects the full catalog, but folds descendants under real entry skills with counts and inspection paths. Namespace-only folders retain leaves. Explicit lists render every selected entry; all skills stay reachable through `meiva.help(meiva.skills)`.

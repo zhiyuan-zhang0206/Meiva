@@ -19,6 +19,7 @@ from base.config.tests.configuration import snapshot_process_config
 from base.events.live.bus import EventBus
 from base.native_process.runtime_incarnation import RuntimeIncarnation
 from base.native_process.turn_identity import HostedServiceResources, HostedTurnResources
+from base.paths.home import resolve_meiva_home
 from meiva.boot import clients_over, derived_clients
 from meiva.sdk_surface import process_context
 
@@ -63,6 +64,7 @@ def pin_agent(
     bound = getattr(meiva, "context", None)
     process_context.bind_context(
         MeivaContext(
+            meiva_home=resolve_meiva_home(),
             identity=AgentIdentity(
                 agent_id=agent_id, owns_loop=owns_loop, actor=actor, lease=lease
             ),
@@ -96,6 +98,7 @@ def exec_context(
     config = snapshot_process_config()
     machine = ConfiguredMachineIdentity(config)
     return MeivaContext(
+        meiva_home=resolve_meiva_home(),
         identity=AgentIdentity(agent_id=agent_id, owns_loop=True, actor=actor),
         original_incarnation=incarnation,
         machine=machine,

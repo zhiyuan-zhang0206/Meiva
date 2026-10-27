@@ -143,7 +143,7 @@ def agent_id_note(ctx: MeivaContext) -> HumanMessage | None:
     label = own_label(ctx, aid)
     machine = machine_clause(ctx)
     workspace = (
-        workspace_facts(workspace_dir(aid), Path.home())
+        workspace_facts(workspace_dir(aid, home=ctx.require_meiva_home()), ctx.require_user_home())
         if ctx.require_agent().read("agent", "workspace_in_system_prompt")
         else None
     )

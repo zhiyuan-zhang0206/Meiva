@@ -395,7 +395,7 @@ async def auto_compact_for_llm(
     now = runtime.context.require_clock().now()
     dump_path = dump_history(
         state.messages,
-        workspace_dir(agent_id),
+        workspace_dir(agent_id, home=runtime.context.require_meiva_home()),
         runtime.context.require_agent().history_dump,
         now=now,
     )

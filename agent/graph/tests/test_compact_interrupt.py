@@ -40,6 +40,7 @@ from base.native_process.stop_timing import RESTART_INTERRUPT_GRACE_S
 from base.native_process.turn_identity import HostedTurnResources
 from base.packages.composer_commands import CommandCatalog
 from base.packages.plugin_providers import build_model_catalog
+from base.paths import resolve_meiva_home
 from meiva.tests.fixtures.pin_agent import hosted_resources as hosted_resources
 
 
@@ -65,6 +66,7 @@ def _runtime(
 ) -> Runtime[MeivaContext]:
     return Runtime(
         context=MeivaContext(
+            meiva_home=resolve_meiva_home(),
             hosted_resources=hosted_resources,
             ops_pool=ops_pool,
             llm=cast(BaseChatModel, model),

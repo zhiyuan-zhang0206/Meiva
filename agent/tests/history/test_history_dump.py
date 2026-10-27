@@ -61,7 +61,7 @@ from base.events.live.bus import EventBus
 from base.host.env.agent_slices import AgentSlices, HistoryDump
 from base.lm.catalog import ModelCatalog
 from base.packages.plugin_providers import build_model_catalog
-from base.paths import resolve_meiva_home, workspace_dir
+from base.paths import workspace_dir
 
 # ── helpers ──
 
@@ -94,10 +94,20 @@ def _clear(path: Path) -> None:
 
 
 # meiva:note
-# The workspace of agent 1 under the test home, with no dumps in it: the auto-compact tests run as agent 1 and write where the production code writes.
+# The Meiva home of these tests: a directory of their own, so the context the compaction runs in and the
+# workspace the dump lands in name the same home without it being the session's.
 @pytest.fixture
-def agent_workspace() -> Path:
-    workspace = workspace_dir(1, home=resolve_meiva_home())
+def meiva_test_home(tmp_path: Path) -> Path:
+    home = tmp_path / "meiva-home"
+    home.mkdir()
+    return home
+
+
+# meiva:note
+# The workspace of agent 1 under that home, with no dumps in it: the auto-compact tests run as agent 1 and write where the production code writes.
+@pytest.fixture
+def agent_workspace(meiva_test_home: Path) -> Path:
+    workspace = workspace_dir(1, home=meiva_test_home)
     _clear(workspace / "message-history")
     return workspace
 
@@ -165,10 +175,12 @@ _LONG_SUMMARY = "## Requests\nfollow the template. " * 60
 
 
 def _runtime_with_llm(
-    llm: Any, database_gate: ProcessDbGate, *, enabled: bool = True
+    llm: Any, database_gate: ProcessDbGate, *, home: Path, enabled: bool = True
 ) -> Runtime[MeivaContext]:
     return Runtime(
         context=MeivaContext(
+            meiva_home=home,
+            user_home=home.parent,
             ops_pool=None,
             llm=llm,
             event_publisher=MagicMock(),
@@ -208,9 +220,12 @@ def _make_runtime(
     ops_pool: AsyncConnectionPool | None = None,
     llm: Any | None = None,
     database_gate: ProcessDbGate,
+    home: Path,
     enabled: bool = True,
 ) -> Runtime[MeivaContext]:
     ctx = MeivaContext(
+        meiva_home=home,
+        user_home=home.parent,
         ops_pool=ops_pool,
         llm=llm if llm is not None else _fake_llm("synthetic summary"),
         event_publisher=MagicMock(),
@@ -376,7 +391,7 @@ def test_dump_failure_is_best_effort(tmp_path: Path):
 
 
 async def test_auto_compact_injects_dump_note_after_summary(
-    agent_workspace: Path, database_gate: ProcessDbGate
+    meiva_test_home: Path, agent_workspace: Path, database_gate: ProcessDbGate
 ):
     """Enabled → the auto-compact hook dumps the pre-compact history and parks
     the note in the fresh-context tail AFTER the summary. The live `messages`
@@ -387,7 +402,9 @@ async def test_auto_compact_injects_dump_note_after_summary(
 
     result = await auto_compact_for_llm(
         state,
-        _runtime_with_llm(_fake_llm(_LONG_SUMMARY), database_gate=database_gate),
+        _runtime_with_llm(
+            _fake_llm(_LONG_SUMMARY), database_gate=database_gate, home=meiva_test_home
+        ),
         _fake_config(),
     )
     assert result is not None
@@ -406,7 +423,7 @@ async def test_auto_compact_injects_dump_note_after_summary(
 
 
 async def test_auto_compact_no_note_when_disabled(
-    agent_workspace: Path, database_gate: ProcessDbGate
+    meiva_test_home: Path, agent_workspace: Path, database_gate: ProcessDbGate
 ):
     """Config off → the auto-compact transition is exactly the old shape:
     tail = the summary alone, no note (and no dump file)."""
@@ -414,7 +431,12 @@ async def test_auto_compact_no_note_when_disabled(
 
     result = await auto_compact_for_llm(
         state,
-        _runtime_with_llm(_fake_llm(_LONG_SUMMARY), database_gate=database_gate, enabled=False),
+        _runtime_with_llm(
+            _fake_llm(_LONG_SUMMARY),
+            database_gate=database_gate,
+            home=meiva_test_home,
+            enabled=False,
+        ),
         _fake_config(),
     )
     assert result is not None
@@ -426,7 +448,7 @@ async def test_auto_compact_no_note_when_disabled(
 # meiva:note
 # A dump failure degrades to today's behavior: compaction still applies, no note is injected. The fault is real: the dump directory's place is taken by a file.
 async def test_auto_compact_proceeds_when_dump_fails(
-    agent_workspace: Path, database_gate: ProcessDbGate
+    meiva_test_home: Path, agent_workspace: Path, database_gate: ProcessDbGate
 ):
     agent_workspace.mkdir(parents=True, exist_ok=True)
     (agent_workspace / "message-history").write_text("a file, not a directory")
@@ -434,7 +456,9 @@ async def test_auto_compact_proceeds_when_dump_fails(
 
     result = await auto_compact_for_llm(
         state,
-        _runtime_with_llm(_fake_llm(_LONG_SUMMARY), database_gate=database_gate),
+        _runtime_with_llm(
+            _fake_llm(_LONG_SUMMARY), database_gate=database_gate, home=meiva_test_home
+        ),
         _fake_config(),
     )
     assert result is not None
@@ -446,6 +470,7 @@ async def test_auto_compact_proceeds_when_dump_fails(
 
 
 async def test_claim_compact_summary_parks_dump_note_after_summary(
+    meiva_test_home: Path,
     redis_url: str,
     db_conn: psycopg.Connection,
     aops_pool: AsyncConnectionPool,
@@ -478,6 +503,7 @@ async def test_claim_compact_summary_parks_dump_note_after_summary(
     cmd = await claim_node(
         state,
         _make_runtime(
+            home=meiva_test_home,
             ops_pool=aops_pool,
             llm=_fake_llm("LLM should not be called"),
             database_gate=database_gate,
@@ -499,6 +525,7 @@ async def test_claim_compact_summary_parks_dump_note_after_summary(
 
 
 async def test_claim_compact_summary_no_note_when_disabled(
+    meiva_test_home: Path,
     redis_url: str,
     db_conn: psycopg.Connection,
     aops_pool: AsyncConnectionPool,
@@ -524,6 +551,7 @@ async def test_claim_compact_summary_no_note_when_disabled(
     cmd = await claim_node(
         state,
         _make_runtime(
+            home=meiva_test_home,
             ops_pool=aops_pool,
             llm=_fake_llm("LLM should not be called"),
             database_gate=database_gate,

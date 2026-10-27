@@ -18,7 +18,7 @@ from pydantic import BaseModel
 import agent.state as agent_state
 from agent.graph import build_graph
 from agent.graph.claim.node import route_target
-from agent.graph.exec.process import read_parent_facts
+from agent.graph.exec.parent_facts import read_parent_facts
 from agent.state import AgentState, ContextReset
 from base.agents.context import MeivaContext
 from base.api_contracts.agent_contract import Harness
@@ -28,6 +28,7 @@ from base.host.env.agent_slices import AgentSlices
 from base.lm.harness import HarnessTurn, Usage
 from base.packages.plugin_providers import build_model_catalog
 from base.packages.plugins.extensions import EMPTY, ExtensionRegistry, PluginContributions
+from base.paths import resolve_meiva_home
 
 
 # meiva:note
@@ -90,6 +91,7 @@ class FakeEngine:
 
 def make_context(harness: Harness, engine: FakeEngine | None) -> MeivaContext:
     return MeivaContext(
+        meiva_home=resolve_meiva_home(),
         harness=harness,
         harness_bridge=engine,
         llm=MagicMock(),

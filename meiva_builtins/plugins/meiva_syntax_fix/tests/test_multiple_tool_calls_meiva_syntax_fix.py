@@ -3,6 +3,7 @@ import random
 from collections.abc import Callable, Iterator
 from datetime import UTC, datetime
 from functools import partial
+from pathlib import Path
 from typing import Any
 
 import pytest
@@ -11,7 +12,8 @@ from langchain_core.runnables import RunnableConfig
 from langgraph.runtime import Runtime
 
 from agent.graph.exec.node import exec_node_impl
-from agent.graph.exec.process import SubprocessExecProcess, read_parent_facts
+from agent.graph.exec.parent_facts import read_parent_facts
+from agent.graph.exec.process import SubprocessExecProcess
 from agent.graph.interrupt import InterruptEvent
 from agent.state import AgentState
 from base.agents.context import MeivaContext
@@ -25,6 +27,7 @@ from base.events.live.bus import EventBus
 from base.events.live.tests.live_capture import idle_publisher
 from base.packages.plugin_providers import build_model_catalog
 from base.packages.tests.model_catalog import inert_keys
+from base.paths import resolve_meiva_home
 from meiva.tests.fixtures.pin_agent import snapshot_clients
 from meiva_builtins.plugins.meiva_syntax_fix.agent_runtime import syntax_fix_before_exec
 from meiva_builtins.plugins.meiva_syntax_fix.tests.hook_support import (
@@ -68,6 +71,8 @@ def runtime_for(database_gate: ProcessDbGate) -> Iterator[Callable[..., Runtime[
     def build(*, llm_override: str | None = None, **pins: Any) -> Runtime[MeivaContext]:
         return Runtime(
             context=MeivaContext(
+                meiva_home=resolve_meiva_home(),
+                user_home=Path.home(),
                 event_publisher=idle_publisher(),
                 agent=agent_slices(llm_override=llm_override, **pins),
                 db=Database.from_settings(gate=database_gate),
