@@ -36,8 +36,8 @@ fails, and root teardown preserves its primary and secondary errors.
 
 | Diagnostic | Registration | Evidence |
 |---|---|---|
-| `brew-pin` | macOS | Bounded successful Homebrew installed/pinned queries; missing approved pins are DOWN, failed queries are unavailable. No package changes. |
-| `venv` | POSIX | This executing checkout's dependency metadata and isolated `-I -B` imports of Meiva, Pydantic, Psycopg, and FastAPI. Each command has a 5-second bound; no inherited PYTHONPATH or VIRTUAL_ENV. Missing uv is unavailable. |
+| `brew-pin` | macOS | Bounded Homebrew installed/pinned queries with `HOMEBREW_NO_AUTO_UPDATE` pinned, so the sample measures the pin set, not brew's own maintenance. Missing pins are DOWN; a query that expires or cannot start is INCONCLUSIVE. No package changes. |
+| `venv` | POSIX | This executing checkout's dependency metadata and isolated `-I -B` imports of Meiva, Pydantic, Psycopg, and FastAPI, a heavy import. Both legs share the check's deadline; no inherited PYTHONPATH or VIRTUAL_ENV. Missing uv is unavailable; a leg that expires, cannot start or is killed is INCONCLUSIVE; only a run that finished with a violation is DOWN. |
 | `permissions-helper` | Every macOS root | Connected Unix peer and ping PID must match the live native parent of root, with birth/lineage rechecked after reply; failures retain launchd classification. One `permissions_helper_unhealthy` event per episode; no helper bootout, bootstrap, or upgrade. |
 | `redis-acl` | gateway with local data plane | Runtime-credential authenticated PING. No ACL writes or instance start. |
 | `pgbouncer` | gateway with local enabled pooler | Admin-console authentication and required public listener. It does not mistake a failed Postgres query for a dead pooler. No ensure or restart. |
@@ -54,14 +54,29 @@ protocol observations cannot start resources or repair credentials.
 Status includes expected diagnostics before any sample, with null sample time and
 verdict. Each subsequent sample includes its verdict, detail, and the consecutive
 non-alive count: failures and unknown results both extend the streak, and only a
-healthy sample resets it. Every non-alive sample emits `root_diagnostic` at
-WARNING (the observability rule's pending period carries the debounce) and the
-first healthy sample after a streak logs the recovery at INFO. Alert reporters
-run only on fresh, non-unavailable evidence, inside the same bounded worker pass
-that took the sample they act on — one admission per round, so a reporter never
-races a settling worker. An alert backend that hangs retains that check's single
-worker exactly like a hung probe and cannot create concurrent reports or
-diagnostic workers.
+healthy sample resets it. Every failing sample emits `root_diagnostic` at WARNING,
+every no-verdict sample at INFO (the rules carry the debounce), and the first
+healthy sample after a streak logs the recovery at INFO. Alert reporters run only
+on fresh, non-unavailable evidence, inside the same bounded worker pass that took
+the sample they act on — one admission per round, so a reporter never races a
+settling worker. An alert backend that hangs retains that check's single worker
+exactly like a hung probe and cannot create concurrent reports or diagnostic
+workers.
+
+One deadline bounds a check and every subcommand it runs (`PROBE_DEADLINE_S`,
+18s): each leg may spend an even share of what the legs before it left, so a hung
+leg cannot outlive the check or hide the legs after it. The observer allows the
+sample a longer deadline (`DIAGNOSTIC_TIMEOUT_S`, 25s), so a probe that spends its
+whole deadline still returns its own verdict; only a worker that never returned
+expires there.
+
+A leg that expires, cannot start or is killed without a return code is *never
+read*: the check answers INCONCLUSIVE naming it — a fourth answer, not a quieter
+DOWN, that forbids a respawn like UNAVAILABLE and never resolves an open
+condition. With UNAVAILABLE it forms the *no verdict* class, reported at INFO.
+Venv and brew-pin alert on the first sample that measured damage; three
+no-verdict samples in three minutes are
+`meiva-ops-root-diagnostic-no-verdict`.
 
 Report admission checks the observation's monotonic deadline and shares a short
 lock with monitor stop and cancellation of that round. A late probe cannot

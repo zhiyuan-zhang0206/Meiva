@@ -245,6 +245,12 @@ async def start_health_server(
     )
 
 
+# meiva:note
+# ``INCONCLUSIVE`` is the fourth answer, and not a quieter ``DOWN``: the observation ran out of its
+# own time bound before it could read anything (a host too busy to let a subcommand finish), so it
+# is evidence of neither a missing listener nor a serving one. It forbids a respawn like
+# ``UNAVAILABLE`` and never resolves an open condition, and a caller that grades alerts must not
+# read it as a failure reading — a busy host is reported by its own quieter signal.
 class ProbeVerdict(Enum):
     """What one probe concluded — and, when not alive, whether a respawn can help.
 
@@ -278,6 +284,7 @@ class ProbeVerdict(Enum):
     DOWN = "down"
     PORT_TAKEN = "port-taken"
     UNAVAILABLE = "unavailable"
+    INCONCLUSIVE = "inconclusive"
 
 
 # Exit codes a daemon healthcheck's `main()` uses, so the watchdog's
@@ -316,7 +323,19 @@ class DaemonProbe:
         Nothing is persisted to remember it: the state self-clears, because once
         the occupant goes away the next probe simply reads ``DOWN`` and the
         normal respawn path runs."""
-        return self.verdict in (ProbeVerdict.PORT_TAKEN, ProbeVerdict.UNAVAILABLE)
+        return self.verdict in (
+            ProbeVerdict.PORT_TAKEN,
+            ProbeVerdict.UNAVAILABLE,
+            ProbeVerdict.INCONCLUSIVE,
+        )
+
+    # meiva:note
+    # The observation did not read the thing it watches, either way: "inspection failed" and "ran
+    # out of time" are both silent about what the unit is doing, so neither is evidence of damage
+    # and neither may resolve one. A reporter of a condition acts on this.
+    @property
+    def unknown(self) -> bool:
+        return self.verdict in (ProbeVerdict.UNAVAILABLE, ProbeVerdict.INCONCLUSIVE)
 
     @classmethod
     def up(cls, detail: str) -> DaemonProbe:
@@ -330,6 +349,13 @@ class DaemonProbe:
     def unavailable(cls, detail: str) -> DaemonProbe:
         """Inspection failed; no safe restart decision can be made this round."""
         return cls(verdict=ProbeVerdict.UNAVAILABLE, detail=detail)
+
+    # meiva:note
+    # Built by a check that spent its whole observation budget without reading anything. `terminal`
+    # and `unknown` both hold, so no respawn follows and no open condition resolves.
+    @classmethod
+    def inconclusive(cls, detail: str) -> DaemonProbe:
+        return cls(verdict=ProbeVerdict.INCONCLUSIVE, detail=detail)
 
     @classmethod
     def port_taken(cls, detail: str) -> DaemonProbe:

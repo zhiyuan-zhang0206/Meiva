@@ -92,9 +92,15 @@ SIGNALS: dict[str, Signal] = {
     "meiva-ops-root-unit-left-behind-stuck": Signal(
         "root_unit_left_behind_stuck", "meiva-ops", "0m", "error"
     ),
-    "meiva-ops-root-diagnostic-venv": Signal("root_diagnostic", "meiva-ops", "0m", "warning", 1),
+    "meiva-ops-root-diagnostic-venv": Signal("root_diagnostic", "meiva-ops", "0m", "warning", 0),
     "meiva-ops-root-diagnostic-brew-pin": Signal(
-        "root_diagnostic", "meiva-ops", "0m", "warning", 1
+        "root_diagnostic", "meiva-ops", "0m", "warning", 0
+    ),
+    # meiva:note
+    # The no-verdict debounce: one diagnostic sample per 60s, so three rounds is the three-minute
+    # window the query carries, and a single round of "no verdict" is not worth an alert (2026-10-27).
+    "meiva-ops-root-diagnostic-no-verdict": Signal(
+        "root_diagnostic", "meiva-ops", "0m", "warning", 2
     ),
     "meiva-ops-root-diagnostic-browser-reach": Signal(
         "root_diagnostic", "meiva-ops-slow", "0m", "warning", 2

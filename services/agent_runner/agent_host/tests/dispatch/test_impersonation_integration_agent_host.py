@@ -75,6 +75,7 @@ async def test_replacement_host_admission_ends_the_takeover_without_respawning_i
     leases.activate(database, event_bus, lease["id"], owner)
     graph = _HandoffGraph()
     host = AgentHost(
+        runtime_owner=uuid4(),
         handoff_stamping=handoff_timestamps(),
         home=meiva_home(),
         policy=configured_policy(),
@@ -169,6 +170,7 @@ async def test_restarted_host_settles_the_ended_takeover_without_an_external_mes
     leases.activate(database, event_bus, lease["id"], predecessor)
     graph = _HandoffGraph()
     host = AgentHost(
+        runtime_owner=uuid4(),
         handoff_stamping=handoff_timestamps(),
         home=meiva_home(),
         policy=configured_policy(),
@@ -244,6 +246,7 @@ async def test_lease_controls_settle_the_handoff_of_a_dead_relays_lease(
     db_conn.commit()
     graph = _HandoffGraph()
     host = AgentHost(
+        runtime_owner=uuid4(),
         handoff_stamping=handoff_timestamps(),
         home=meiva_home(),
         policy=configured_policy(),
@@ -359,6 +362,7 @@ def _handoff_host(
     from services.agent_runner.agent_host.host import AgentHost
 
     return AgentHost(
+        runtime_owner=uuid4(),
         handoff_stamping=handoff_timestamps(),
         home=meiva_home(),
         policy=configured_policy(),
