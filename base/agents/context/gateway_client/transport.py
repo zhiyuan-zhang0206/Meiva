@@ -22,6 +22,8 @@ __all__ = [
     "TransportResponse",
     "TransportTimeout",
     "get",
+    "json_object",
+    "json_rows",
     "patch",
     "post",
     "raise_from_response",
@@ -189,6 +191,35 @@ def raise_from_response(resp: TransportResponse) -> None:
 
 def _is_json_object(value: object) -> TypeGuard[dict[str, Any]]:
     return isinstance(value, dict)
+
+
+def _is_json_array(value: object) -> TypeGuard[list[object]]:
+    return isinstance(value, list)
+
+
+# meiva:note
+# The body of a reply whose wire contract is one JSON object. `GatewayResponse.json()` returns
+# `object`, so a caller reads a field only through this check; a body of another shape is a
+# protocol mismatch and raises here instead of failing on an index of whatever arrived.
+def json_object(resp: GatewayResponse) -> dict[str, Any]:
+    raw = resp.json()
+    if not _is_json_object(raw):
+        raise TypeError(f"gateway reply body is not a JSON object: {type(raw).__name__}")
+    return raw
+
+
+# meiva:note
+# The body of a reply whose wire contract is a JSON array of objects (a list of rows).
+def json_rows(resp: GatewayResponse) -> list[dict[str, Any]]:
+    raw = resp.json()
+    if not _is_json_array(raw):
+        raise TypeError(f"gateway reply body is not a JSON array: {type(raw).__name__}")
+    rows: list[dict[str, Any]] = []
+    for row in raw:
+        if not _is_json_object(row):
+            raise TypeError(f"gateway reply row is not a JSON object: {type(row).__name__}")
+        rows.append(row)
+    return rows
 
 
 def _wire_reason(resp: TransportResponse) -> tuple[ErrorReason, dict[str, Any]] | None:
