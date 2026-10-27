@@ -3,7 +3,6 @@ from __future__ import annotations
 from concurrent.futures import ThreadPoolExecutor
 
 import pytest
-from fastapi import HTTPException
 
 from base.clock.ids import new_uuid
 from base.clock.tests.seeded_rng import seeded_rng
@@ -11,6 +10,7 @@ from base.db.protocols import SyncConnection
 from services.derived.insights.run_timeline.projection.jobs import SegmentReads
 from services.derived.insights.run_timeline.projection.reader import TimelineReader
 from services.derived.insights.run_timeline.projection.source import Source, capture_source
+from services.derived.insights.run_timeline.request_rules import TimelineRequestError
 from services.derived.insights.run_timeline.tests.test_projection import AGENT, World, messages
 from services.derived.insights.run_timeline.tests.test_projection import world as world
 
@@ -44,13 +44,13 @@ def test_expired_unknown_and_wrong_agent_snapshots_never_read_bodies(world: Worl
     head = world.put(messages(0), sealed=False)
     first = world.reader.get(AGENT)
     for agent, snapshot in ((AGENT, "unknown"), (AGENT + 1, first.id)):
-        with pytest.raises(HTTPException) as caught:
+        with pytest.raises(TimelineRequestError) as caught:
             world.reader.get(agent, snapshot)
-        assert caught.value.status_code == 409
+        assert caught.value.status == 409
     world.clock = 601
-    with pytest.raises(HTTPException) as caught:
+    with pytest.raises(TimelineRequestError) as caught:
         world.reader.get(AGENT, first.id)
-    assert caught.value.status_code == 409 and world.loads == [head]
+    assert caught.value.status == 409 and world.loads == [head]
     assert world.reader.get(AGENT).id != first.id
     assert world.loads == [head, head]
 
@@ -59,9 +59,9 @@ def test_oldest_snapshot_is_evicted_after_sixteen_agents(world: World) -> None:
     first = world.reader.get(1)
     for agent in range(2, 18):
         world.reader.get(agent)
-    with pytest.raises(HTTPException) as caught:
+    with pytest.raises(TimelineRequestError) as caught:
         world.reader.get(1, first.id)
-    assert caught.value.status_code == 409
+    assert caught.value.status == 409
 
 
 def test_recent_head_check_cannot_revive_an_absolutely_expired_snapshot(world: World) -> None:
@@ -70,9 +70,9 @@ def test_recent_head_check_cannot_revive_an_absolutely_expired_snapshot(world: W
     world.clock = 599
     assert world.reader.get(AGENT) is first
     world.clock = 601
-    with pytest.raises(HTTPException) as caught:
+    with pytest.raises(TimelineRequestError) as caught:
         world.reader.get(AGENT, first.id)
-    assert caught.value.status_code == 409
+    assert caught.value.status == 409
     refreshed = world.reader.get(AGENT)
     assert refreshed.id != first.id
     assert world.reader.get(AGENT, refreshed.id) is refreshed
@@ -102,9 +102,9 @@ def test_head_check_cannot_restore_bookkeeping_for_an_evicted_snapshot(
     assert reader.get(1) is first
     assert len(reader._entries) == 16
     assert reader._checked.keys() == reader._entries.keys()
-    with pytest.raises(HTTPException) as caught:
+    with pytest.raises(TimelineRequestError) as caught:
         reader.get(1, first.id)
-    assert caught.value.status_code == 409
+    assert caught.value.status == 409
 
 
 # meiva:note
