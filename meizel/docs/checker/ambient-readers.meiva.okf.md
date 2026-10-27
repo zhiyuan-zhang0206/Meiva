@@ -27,8 +27,8 @@ A key is the fully qualified call (`pkg.module.name()` or `pkg.module.Class.meth
 module that defines the function, so a function of the same name elsewhere is not the reader. A
 class is listed the same way (`"base.clock.Clock()"` is every place that builds one). A key without
 the parentheses names an object (`"base.clock.SYSTEM_TIMERS"`): like `settings` under `[ambient]`
-it acquires at each `from m import NAME` and at each read of the attribute (`m.NAME`), not at each
-use of an imported name. The value says what it
+it acquires at every use: each read of the imported name (a default argument, a use under
+`__main__`) and each read of the attribute (`m.NAME`); an import that nothing uses acquires nothing. The value says what it
 reads. A call is an acquisition of the listed kind at the call site and is judged like any other: it
 passes in a root that declares the kind and is `ambient-read` anywhere else. A module that imports a
 listed name at its top level is followed, and so is a module that imports it from there
@@ -48,11 +48,13 @@ is not a root that merely calls a reader needs no entry: the read is recorded th
 
 ## What is not followed
 
-An alias assigned to a variable, `partial(reader)`, `field(default_factory=reader)`, a default argument
-(`def f(read=reader)`), a call of a subclass (`Sub.method()`), an import inside `try`/`except ImportError`,
-a star import, and an instance method that falls back to the live environment when it is given none. Those
-calls are seen only if the file that makes them also names the reader. A chain of re-exports longer than
-12 modules fails the run instead of going unseen.
+A call-form entry is not followed through an alias assigned to a variable, `partial(reader)`,
+`field(default_factory=reader)`, a default argument (`def f(read=reader)`), a call of a subclass
+(`Sub.method()`), an import inside `try`/`except ImportError`, a star import, or an instance method
+that falls back to the live environment when it is given none; those calls are seen only if the file
+that makes them also names the reader. A name-form entry (`SYSTEM_TIMERS`) is acquired at each use, so
+its default arguments are. A chain of re-exports that needs more than 12 rounds of the scan (a chain
+of 12 modules is always followed) fails the run instead of going unseen.
 
 ## Changing the list
 

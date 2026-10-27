@@ -273,11 +273,13 @@ class Acquisition:
 # The state a repository keeps itself: dotted name -> kind.
 #
 # `names` acquire the state when imported or read as an attribute of their module; `calls` only
-# when called, so that importing a class for an annotation acquires nothing.
+# when called, so that importing a class for an annotation acquires nothing. The `uses` among the
+# names (the policy's readers) acquire at each use of the imported name instead of at the import.
 @dataclass(frozen=True, slots=True)
 class Sources:
     names: dict[str, AmbientKind] = field(default_factory=dict[str, AmbientKind])
     calls: dict[str, AmbientKind] = field(default_factory=dict[str, AmbientKind])
+    uses: frozenset[str] = frozenset()
 
 
 # meiva:note

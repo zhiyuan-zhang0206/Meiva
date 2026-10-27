@@ -182,12 +182,15 @@ class AmbientRecorder:
     # A name imported with `from ... import`: state acquired where it is brought in.
     def imported(self, origin: str, line: int) -> None:
         kind = self.sources.names.get(origin)
-        if kind is not None:
+        if kind is not None and origin not in self.sources.uses:
             self._add(line, kind, origin)
 
     # meiva:note
     # A name or attribute chain read in code. `bound` is the origin of its first name.
     def used(self, dotted: str, bound: str, line: int) -> None:
+        if bound in self.sources.uses:
+            self._add(line, self.sources.names[bound], bound)
+            return
         found = stdlib_kind(dotted)
         if found is not None:
             kind, target = found
