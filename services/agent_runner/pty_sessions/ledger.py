@@ -18,6 +18,7 @@ from collections.abc import Iterable
 from pathlib import Path
 from typing import Any, TypeGuard
 
+from base.clock import Timers
 from base.host.atomic_io import write_text_atomic
 from base.log import logger
 from base.native_process.ownership import OwnedProcess
@@ -117,7 +118,9 @@ def _has_live_process(target: closure.Target) -> bool:
 # ledger entry. The outcome also names recorded busy sessions whose shells the
 # crash already ended, so their owners can be notified without claiming that
 # unrecorded descendants disappeared.
-def sweep(path: Path, *, process_control: ProcessControl) -> closure.Outcome:
+def sweep(
+    path: Path, *, process_control: ProcessControl, own_pid: int, timers: Timers
+) -> closure.Outcome:
     recorded = read(path)
     targets = [target for target in recorded if _has_live_process(target)]
     outcome = closure.Outcome()
@@ -132,6 +135,8 @@ def sweep(path: Path, *, process_control: ProcessControl) -> closure.Outcome:
             grace_s=SWEEP_HANGUP_WAIT_S,
             kill_s=SWEEP_KILL_S,
             process_control=process_control,
+            own_pid=own_pid,
+            timers=timers,
         )
     write(path, (target for target in recorded if _alive(target.shell)))
     return _with_ended_busy(outcome, recorded)

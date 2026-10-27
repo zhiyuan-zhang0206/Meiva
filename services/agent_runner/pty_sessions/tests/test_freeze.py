@@ -5,6 +5,8 @@ from pathlib import Path
 
 import pytest
 
+from base.clock.tests.fakes import system_clock
+from base.clock.tests.seeded_rng import seeded_rng
 from base.host.atomic_io import SYSTEM_FS, AtomicWriter
 from base.native_process.os_platform import LockTimeoutError, file_lock
 from base.paths import meiva_home
@@ -22,7 +24,12 @@ def test_a_frozen_allocation_reuses_a_live_name_but_refuses_a_missing_one_until_
 ) -> None:
     assert new("meiva-agent-1-shell-0-existing", unit_home) is True
     frozen = allocation_freeze.freeze(
-        holder="operator", reason="manifest and cleanup", writer=WRITER, home=meiva_home()
+        holder="operator",
+        reason="manifest and cleanup",
+        writer=WRITER,
+        home=meiva_home(),
+        clock=system_clock(),
+        rng=seeded_rng(),
     )
     assert frozen.generation is not None
 
@@ -51,7 +58,12 @@ def test_the_active_generation_rejects_a_live_name_from_a_prior_generation(
     (before,) = client.list_sessions(socket_path=service_socket())
     assert before.generation is None
     frozen = allocation_freeze.freeze(
-        holder="operator", reason="generation flip", writer=WRITER, home=meiva_home()
+        holder="operator",
+        reason="generation flip",
+        writer=WRITER,
+        home=meiva_home(),
+        clock=system_clock(),
+        rng=seeded_rng(),
     )
     assert frozen.generation is not None
     assert allocation_freeze.resume(frozen.generation, writer=WRITER, home=meiva_home())
@@ -65,7 +77,12 @@ def test_the_active_generation_rejects_a_live_name_from_a_prior_generation(
 
 def test_a_session_carries_the_generation_it_was_admitted_under(unit_home: Path) -> None:
     frozen = allocation_freeze.freeze(
-        holder="operator", reason="desired-state cleanup", writer=WRITER, home=meiva_home()
+        holder="operator",
+        reason="desired-state cleanup",
+        writer=WRITER,
+        home=meiva_home(),
+        clock=system_clock(),
+        rng=seeded_rng(),
     )
     assert frozen.generation is not None
     assert allocation_freeze.resume(frozen.generation, writer=WRITER, home=meiva_home())
@@ -119,6 +136,8 @@ def test_freeze_acknowledgement_has_no_later_session_start_during_concurrent_all
             reason="prove freeze acknowledgement",
             writer=WRITER,
             home=meiva_home(),
+            clock=system_clock(),
+            rng=seeded_rng(),
         )
         assert frozen.generation is not None and frozen.created_at is not None
         for thread in threads:
@@ -145,7 +164,12 @@ def test_a_frozen_session_still_serves_input(unit_home: Path) -> None:
     name = "meiva-test-frozen-use-1"
     new(name, unit_home)
     frozen = allocation_freeze.freeze(
-        holder="operator", reason="inspection", writer=WRITER, home=meiva_home()
+        holder="operator",
+        reason="inspection",
+        writer=WRITER,
+        home=meiva_home(),
+        clock=system_clock(),
+        rng=seeded_rng(),
     )
     try:
         type_line(name, "echo still-usable")

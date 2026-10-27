@@ -21,6 +21,7 @@ from pathlib import Path
 import psutil
 import pytest
 
+from base.clock import SYSTEM_TIMERS
 from base.log.tests.log_records import LogRecords
 from base.log.tests.log_records import loguru_records as loguru_records
 from base.native_process.ownership import OwnedProcess
@@ -230,20 +231,30 @@ def tty_session(tmp_path: Path) -> Iterator[TtySession]:
 
 def test_a_concrete_group_signal_error_is_not_a_success(live_session: MakeSession) -> None:
     session = live_session("meiva-test-denied", 1024)
-    control = FakeProcessControl(groups={session.pid: session.pid})
+    control = FakeProcessControl(groups={session.pid: session.pid, os.getpid(): os.getpgrp()})
     control.refuse(session.pid, PermissionError("known group signal denied"))
     with pytest.raises(PermissionError, match="known group signal denied"):
         session_module.kill_session(
-            session, graceful=False, interrupted=True, process_control=control
+            session,
+            graceful=False,
+            interrupted=True,
+            process_control=control,
+            own_pid=os.getpid(),
+            timers=SYSTEM_TIMERS,
         )
 
 
 def test_a_live_shell_cannot_be_reported_closed(live_session: MakeSession) -> None:
     session = live_session("meiva-test-live", 1024)
-    control = FakeProcessControl(groups={session.pid: session.pid})
+    control = FakeProcessControl(groups={session.pid: session.pid, os.getpid(): os.getpgrp()})
     with pytest.raises(RuntimeError, match="shell survived"):
         session_module.kill_session(
-            session, graceful=False, interrupted=False, process_control=control
+            session,
+            graceful=False,
+            interrupted=False,
+            process_control=control,
+            own_pid=os.getpid(),
+            timers=SYSTEM_TIMERS,
         )
 
 
@@ -315,9 +326,11 @@ def test_a_failed_callback_and_a_failed_close_keep_the_first_failure_and_log_the
 
 def test_closure_error_releases_the_allocation_fence(live_session: MakeSession) -> None:
     session = live_session("meiva-test-closure-error", 1024)
-    control = FakeProcessControl(groups={session.pid: session.pid})
+    control = FakeProcessControl(groups={session.pid: session.pid, os.getpid(): os.getpgrp()})
     control.refuse(session.pid, PermissionError("group signal denied"))
-    refusing = PtyService(home=meiva_home(), process_control=control, now=float)
+    refusing = PtyService(
+        home=meiva_home(), process_control=control, now=float, timers=SYSTEM_TIMERS, pid=os.getpid()
+    )
     refusing._sessions[session.name] = session
 
     with pytest.raises(PermissionError, match="group signal denied"):

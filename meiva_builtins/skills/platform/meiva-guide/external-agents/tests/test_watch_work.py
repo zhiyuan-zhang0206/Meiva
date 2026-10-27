@@ -13,6 +13,8 @@ from typing import Any
 import httpx
 import pytest
 
+from base.clock.tests.fakes import system_clock
+from base.clock.tests.seeded_rng import seeded_rng
 from base.host.atomic_io import SYSTEM_FS, AtomicWriter
 from base.sessions import coding_session_owner as co
 from base.sessions.coding_session_owner_record import CodingSessionOwner, CodingSessionStatus
@@ -352,6 +354,8 @@ def _launch(
         work_file=tmp_path / "work.md",
         ttl_seconds=ttl,
         writer=_WRITER,
+        now=system_clock().now(),
+        rng=seeded_rng(),
     )
     return key, owner
 
@@ -396,7 +400,9 @@ def _supervise(
     assert generation is not None
 
     def stop() -> None:
-        co.terminate_generation(key, generation, reason="test-over", writer=_WRITER)
+        co.terminate_generation(
+            key, generation, reason="test-over", writer=_WRITER, now=system_clock().now()
+        )
 
     timers = [threading.Timer(15.0, stop)]
     if after is not None:
@@ -538,7 +544,9 @@ def test_an_unreachable_gateway_is_survived_and_reported_once_each_way(
         gateway.stub.reply("GET", f"/api/agents/{_OWNER}", {"status": "idling"})
 
     def finish() -> None:
-        co.terminate_generation(key, generation, reason="test-over", writer=_WRITER)
+        co.terminate_generation(
+            key, generation, reason="test-over", writer=_WRITER, now=system_clock().now()
+        )
 
     recovering = threading.Timer(0.25, recover)
     finishing = threading.Timer(0.6, finish)
@@ -584,7 +592,9 @@ def test_a_stalled_canonical_run_wakes_the_owner_at_each_heartbeat(
     assert generation is not None
 
     def finish() -> None:
-        co.terminate_generation(key, generation, reason="test-over", writer=_WRITER)
+        co.terminate_generation(
+            key, generation, reason="test-over", writer=_WRITER, now=system_clock().now()
+        )
 
     cadence = ww.Cadence(poll_seconds=0.01, stall_seconds=0.05, heartbeat_seconds=0.1)
     _supervise(key, owner, work, cadence=cadence, after=(0.45, finish))

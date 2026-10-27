@@ -5,10 +5,12 @@
 
 from __future__ import annotations
 
+import random
 import sys
 from pathlib import Path
 from typing import TextIO
 
+from base.clock import Clock
 from base.host.atomic_io import SYSTEM_FS, AtomicWriter
 from base.native_process.os_platform import LockTimeoutError
 from base.sessions.pty import allocation_freeze
@@ -31,10 +33,17 @@ def _print_freeze(
     print(f"marker={allocation_freeze.state_path(home)}", file=stream)
 
 
-def cmd_pty_freeze(*, holder: str, reason: str, home: Path) -> int:
+def cmd_pty_freeze(
+    *, holder: str, reason: str, home: Path, clock: Clock, rng: random.Random
+) -> int:
     try:
         snapshot = allocation_freeze.freeze(
-            holder=holder, reason=reason, writer=AtomicWriter(SYSTEM_FS), home=home
+            holder=holder,
+            reason=reason,
+            writer=AtomicWriter(SYSTEM_FS),
+            home=home,
+            clock=clock,
+            rng=rng,
         )
     except (OSError, ValueError, RuntimeError) as exc:
         print(f"PTY allocation freeze refused: {exc}", file=sys.stderr)

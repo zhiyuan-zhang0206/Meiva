@@ -158,7 +158,7 @@ def _perform(
             browser.reap_cluster_chrome()
         case CloseShellSessions(direct_db, force):
             if force:
-                shell_sessions.force_close_shell_sessions(command.home)
+                shell_sessions.force_close_shell_sessions(command)
             else:
                 shell_sessions.close_shell_sessions(
                     run.deadline,
