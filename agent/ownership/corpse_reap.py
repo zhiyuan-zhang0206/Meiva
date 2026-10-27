@@ -5,6 +5,7 @@ from __future__ import annotations
 
 from loguru import logger
 
+from agent.ownership.audit_payloads import reaped_payload
 from agent.ownership.lifecycle_plan import ReapedCorpse as ReapedCorpse
 from base.db.protocols import AsyncPool
 from base.deploy.progress_timeout import CORPSE_REAP_GRACE_S
@@ -63,12 +64,7 @@ async def reap_crash_corpses(
                 event_type="status_change",
                 agent_id=agent_id,
                 source="system",
-                payload={
-                    "from": "idling",
-                    "to": "terminated",
-                    "reason": "corpse_reaper",
-                    "unapplied_handoff_receipt": handoff_unapplied,
-                },
+                payload=reaped_payload(handoff_unapplied=handoff_unapplied),
             )
             recorded.append(await record_audit_async(conn, event))
             reaped.append(

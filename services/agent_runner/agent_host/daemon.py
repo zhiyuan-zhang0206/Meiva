@@ -76,6 +76,7 @@ from base.events.live.bus import EventBus, EventBusConfig
 from base.host.exit_codes import HELPER_CHAIN_BROKEN_EXIT_CODE
 from base.host.exit_codes import hard_exit as _hard_exit
 from base.host.runtime_interpreter import external_plugin_read_root
+from base.lm.harness.registration import SecureRandom
 from base.native_process.code_version import CodeVersion
 from base.native_process.stop_timing import CANCEL_UNWIND_TIMEOUT_S
 from base.packages.composer_commands import CommandCatalog
@@ -521,7 +522,8 @@ async def run(
             policy=host_policy(
                 config,
                 keys=installation.require_provider_keys(),
-                rng=secure_rng,
+                rng=SecureRandom(secure_rng),
+                pid=os.getpid(),
                 user_home=user_home,
             ),
             handoff_stamping=stamping,

@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import asyncio
-import time
 from collections.abc import AsyncIterator, Awaitable, Callable, Mapping
 from dataclasses import dataclass
 from typing import Any, Protocol
@@ -10,8 +9,9 @@ from base.lm.harness.base_session import (
     EVENT_STREAM_END,
     BaseHarnessSession,
     InboundQueueFullError,
+    SessionBinding,
+    SessionClock,
     SessionClosedError,
-    SessionRegistry,
     SessionTotals,
     TurnOutcome,
     TurnTicket,
@@ -117,12 +117,12 @@ class ClaudeSession(BaseHarnessSession[BridgeConfig]):
         config: BridgeConfig,
         *,
         environ: Mapping[str, str],
-        agent_id: int | None = None,
-        registry: SessionRegistry | None = None,
+        binding: SessionBinding,
         sdk: ClaudeSdkProtocol | None = None,
         probe: ChildProbe | None = None,
+        clock: SessionClock,
     ) -> None:
-        super().__init__(config, agent_id=agent_id, registry=registry, probe=probe)
+        super().__init__(config, binding=binding, probe=probe, clock=clock)
         self._sdk: ClaudeSdkProtocol = sdk if sdk is not None else _load_sdk()
         self._environ = dict(environ)
         # meiva:note
@@ -170,6 +170,7 @@ class ClaudeSession(BaseHarnessSession[BridgeConfig]):
             "claude_code",
             self.config.cancel_settle_seconds,
             agent_id=self.agent_id,
+            clock=self._clock,
         )
         self._finish_close(reason)
 
@@ -187,9 +188,9 @@ class ClaudeSession(BaseHarnessSession[BridgeConfig]):
         spawned = {
             child: command for child, command in observed.items() if child not in self._baseline
         }
-        started = time.perf_counter()
+        started = self._monotonic()
         await client.interrupt()
-        interrupt_ms = (time.perf_counter() - started) * 1000.0
+        interrupt_ms = (self._monotonic() - started) * 1000.0
         if pid is None:
             return CancelReport(
                 turn_id=ticket.turn_id if ticket is not None else None,
@@ -206,6 +207,7 @@ class ClaudeSession(BaseHarnessSession[BridgeConfig]):
             spawned,
             timeout_seconds=self.config.cancel_settle_seconds,
             poll_seconds=CANCEL_POLL_SECONDS,
+            clock=self._clock,
         )
         remaining = (
             ()

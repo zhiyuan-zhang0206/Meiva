@@ -15,9 +15,6 @@ What is left:
 - Nothing outside tests reads `SamplingPolicyLike.rng` or `InertSamplingPolicy.rng` any more, so the
   property can go away with the sampling owner's `rng` attribute; the sampling decision draws from
   the owner's own generator.
-- `require_new_id()` returns the 32-character hex form of `new_uuid(rng)`. Its body repeats that
-  function; `base/clock/ids.py` (with `CommandRuntime.new_id()`) is on main, and the body becomes that
-  import.
 - An AST test asserts that every non-test `MeivaContext(` (or `replace(context, ...)`) call that
   passes `clock_factory=` also passes `rng=`, `user_home=`, `meiva_home=` and a `bus=` or
   `bus_factory=`, so a root that forgets one fails in CI instead of at the first `require_*()`.

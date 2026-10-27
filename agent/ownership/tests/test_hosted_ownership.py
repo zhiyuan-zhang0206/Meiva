@@ -83,6 +83,25 @@ async def test_another_owner_takes_over_and_fences_the_old_settlement(
     assert not await settle_hosted_runtime(aops_pool, old, bus=event_bus)
 
 
+async def test_admission_and_settlement_record_the_status_they_moved_from_and_to(
+    db_conn: psycopg.Connection,
+    aops_pool: AsyncConnectionPool,
+    database: Database,
+    event_bus: EventBus,
+) -> None:
+    agent_id = _agent(db_conn)
+    assert await admit_hosted_runtime(aops_pool, agent_id, "host-test", uuid4(), db=database)
+    takeover = await admit_hosted_runtime(aops_pool, agent_id, "host-test", uuid4(), db=database)
+    assert takeover is not None
+    assert await settle_hosted_runtime(aops_pool, takeover, bus=event_bus)
+
+    assert db_conn.execute(
+        "SELECT attributes->>'from', attributes->>'to' FROM audit_events "
+        "WHERE agent_id = %s AND event_name = 'status_change' ORDER BY id",
+        (agent_id,),
+    ).fetchall() == [("idling", "running"), ("running", "running"), ("running", "idling")]
+
+
 async def test_admission_refuses_only_terminated_and_other_machine_rows(
     db_conn: psycopg.Connection,
     aops_pool: AsyncConnectionPool,

@@ -24,8 +24,9 @@ from base.lm.harness.base_session import (
     EVENT_STREAM_END,
     BaseHarnessSession,
     InboundQueueFullError,
+    SessionBinding,
+    SessionClock,
     SessionClosedError,
-    SessionRegistry,
     SessionTotals,
     TurnOutcome,
     TurnTicket,
@@ -63,17 +64,17 @@ class AgySession(BaseHarnessSession[AntigravityConfig]):
         config: AntigravityConfig,
         *,
         environ: Mapping[str, str] | None = None,
-        agent_id: int | None = None,
-        registry: SessionRegistry | None = None,
+        binding: SessionBinding,
         probe: ChildProbe | None = None,
         transport_factory: Callable[[], Any] | None = None,
+        clock: SessionClock,
     ) -> None:
         super().__init__(
             config,
-            agent_id=agent_id,
-            registry=registry,
+            binding=binding,
             probe=probe,
             totals=SessionTotals(cost_usd=None),
+            clock=clock,
         )
         self._environ = dict(environ) if environ else None
         self._factory = transport_factory or self._default_transport
@@ -111,6 +112,7 @@ class AgySession(BaseHarnessSession[AntigravityConfig]):
             "antigravity",
             self.config.cancel_settle_seconds,
             agent_id=self.agent_id,
+            clock=self._clock,
         )
         # meiva:note
         # After the child was reaped: `settle_close` above waited for its tree, and
@@ -172,6 +174,7 @@ class AgySession(BaseHarnessSession[AntigravityConfig]):
             replace(self.config, executable=(resolved, *self.config.executable[1:])),
             environ=self._environ,
             probe=self._probe,
+            clock=self._clock,
         )
 
     async def _ensure_transport(self) -> AgyTransport:

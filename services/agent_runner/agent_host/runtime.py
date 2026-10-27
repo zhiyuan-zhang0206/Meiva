@@ -4,7 +4,6 @@ wake-time admission of an agent's stored model configuration."""
 from __future__ import annotations
 
 import asyncio
-import random
 import time
 from collections import OrderedDict
 from collections.abc import Awaitable, Callable, Iterable, Mapping
@@ -28,9 +27,9 @@ from base.lm.factory import validate_model_launch
 from base.lm.harness.bridge import HarnessBridge
 from base.lm.harness.engine import TurnEngine
 from base.lm.harness.handoff import HarnessContribution
-from base.lm.harness.registration import RegistrationStore
+from base.lm.harness.registration import RegistrationStore, SecureRandom
 from base.lm.harness.registry import SessionRegistry
-from base.lm.harness.wiring import bridge_for
+from base.lm.harness.wiring import BridgeRootValues, bridge_for
 from base.lm.registry import resolve_available_model
 from base.log import logger
 from base.paths import workspace_dir
@@ -94,7 +93,10 @@ class HostPolicy:
     # meiva:note
     # The generator the host draws identities and credentials from: a runtime's startup notice
     # key and each relay credential. The daemon root builds it once (a CSPRNG).
-    rng: random.Random
+    rng: SecureRandom
+    # meiva:note
+    # The host process's pid, which a harness registration names as its controller.
+    pid: int
     # meiva:note
     # The operating-system account's home (`~`), read once by the daemon root and handed to the
     # contexts the host builds.
@@ -378,6 +380,7 @@ async def build_runtime(
     registration_ttl_seconds: float,
     machine: str,
     harness_environ: Mapping[str, str],
+    harness_root: BridgeRootValues,
     contributions: Iterable[HarnessContribution] = (),
 ) -> AgentRuntime:
     """Build the retained model after the host repaired its original admission."""
@@ -402,6 +405,7 @@ async def build_runtime(
             registration_ttl_seconds=registration_ttl_seconds,
             machine=machine,
             environ=harness_environ,
+            root=harness_root,
             skip_permissions=slices.harness_cli.harness_skip_permissions,
             contributions=contributions,
         ),
@@ -417,6 +421,7 @@ def harness_bridge_for(
     registration_ttl_seconds: float,
     machine: str,
     environ: Mapping[str, str],
+    root: BridgeRootValues,
     skip_permissions: bool = True,
     contributions: Iterable[HarnessContribution] = (),
 ) -> HarnessBridge | None:
@@ -435,6 +440,7 @@ def harness_bridge_for(
         registrations=registrations,
         registration_ttl_seconds=registration_ttl_seconds,
         environ=environ,
+        root=root,
         skip_permissions=skip_permissions,
         contributions=contributions,
     )
@@ -472,8 +478,11 @@ class HarnessSessions:
     # session id while the first one is still being reaped. `retire` therefore keeps the
     # close per agent, and `join` is what the next turn waits on before building.
     # meiva:link agent/graph/docs/harness-turn.meiva.okf.md
-    def __init__(self, registrations: RegistrationStore, *, record_exit: ExitRecorder) -> None:
+    def __init__(
+        self, registrations: RegistrationStore, *, record_exit: ExitRecorder, clock: Clock
+    ) -> None:
         self._registrations = registrations
+        self._clock = clock
         # meiva:note
         # How a retired session's exit status reaches the agent row. Required rather
         # than optional: a host that forgets to wire it would silently stop recording
@@ -490,7 +499,7 @@ class HarnessSessions:
             return
         await self._tasks.__aenter__()
         self._started = True
-        self._registrations.sweep()
+        self._registrations.sweep(now=self._clock.now())
 
     def retire(
         self, agent_id: int, runtime: AgentRuntime, *, reason: str = "runtime retired"

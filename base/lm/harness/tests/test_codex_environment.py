@@ -7,11 +7,14 @@ from pathlib import Path
 import pytest
 
 from base.api_contracts.agent_contract import Harness
+from base.clock.tests.fakes import system_clock
+from base.lm.harness.base_session import SessionBinding
 from base.lm.harness.codex import CodexConfig, CodexSession
 from base.lm.harness.codex.auth import SECRET_ENV_NAMES, build_env
 from base.lm.harness.codex.tests import child_environment_server
 from base.lm.harness.registration import HANDLE_ENV
 from base.lm.harness.registry import FileSessionRegistry
+from base.lm.harness.tests.roots import bridge_root_values
 from base.lm.harness.wiring import bridge_for
 
 SAMPLE_KEY = "sk-proj-sample-value"
@@ -55,6 +58,8 @@ async def test_session_snapshots_the_environment_received_by_its_process_tree(
     session = CodexSession(
         CodexConfig(cwd=tmp_path, binary=_stub_codex(tmp_path), api_key_mode=api_key_mode),
         environ=environment,
+        binding=SessionBinding(),
+        clock=system_clock(),
     )
     assert session.cli_pid is None
     assert not receipt.exists(), "cold construction must not spawn the peer"
@@ -102,6 +107,7 @@ async def test_bridge_recaptures_environment_and_registration_when_resuming(tmp_
         registry=FileSessionRegistry(tmp_path / "registry"),
         registration_ttl_seconds=60,
         environ=environment,
+        root=bridge_root_values(),
     )
     assert bridge is not None
     assert not receipt.exists()

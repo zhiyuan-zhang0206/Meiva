@@ -2,11 +2,12 @@ from __future__ import annotations
 
 import json
 import os
+import random
 import tempfile
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any
+from typing import Any, NewType
 
 from base.log import logger
 
@@ -17,6 +18,14 @@ from base.log import logger
 # carries a credential the sandbox would refuse to write.
 # meiva:link base/lm/harness/docs/harness.meiva.okf.md
 HANDLE_ENV = "MEIVA_HARNESS_HANDLE"
+
+# meiva:note
+# The generator a session handle is drawn from. A handle is a bearer credential (it rides
+# `HANDLE_ENV` and is looked up by its digest), so only the root's `SecureRandom(<a
+# random.SystemRandom>)` is accepted where one is minted: a plain `random.Random` is a type
+# error, which a bare `random.SystemRandom` annotation would have said directly, but the
+# scanner reads that spelling as an entropy read outside a root.
+SecureRandom = NewType("SecureRandom", random.Random)
 
 # meiva:note
 # The one status a usable row carries. `meiva.attach()` refuses a row
@@ -81,10 +90,6 @@ def handle_digest(handle: str) -> str:
     import hashlib
 
     return hashlib.sha256(handle.encode("utf-8")).hexdigest()
-
-
-def current_utc() -> datetime:
-    return datetime.now(UTC)
 
 
 # meiva:note
@@ -163,8 +168,7 @@ class RegistrationStore:
             return False
         return True
 
-    def sweep(self, *, now: datetime | None = None) -> list[int]:
-        moment = now or current_utc()
+    def sweep(self, *, now: datetime) -> list[int]:
         removed: list[int] = []
         for path in sorted(self._root.glob("*.json")):
             try:
@@ -183,7 +187,7 @@ class RegistrationStore:
                 continue
             if registration is None:
                 continue
-            if self._stale(registration, moment):
+            if self._stale(registration, now):
                 self.delete(agent_id)
                 removed.append(agent_id)
         return removed

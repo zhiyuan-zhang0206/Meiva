@@ -3,6 +3,7 @@ from __future__ import annotations
 from datetime import datetime
 
 from base.clock import SYSTEM_TIMERS, Clock, ClockConfig
+from base.clock.tests.manual_timers import ManualTimers
 
 
 # meiva:note
@@ -30,3 +31,12 @@ def clock_rejecting_now() -> Clock:
         raise AssertionError("this operation must not observe wall time")
 
     return Clock(ClockConfig("UTC", "UTC", False), timers=SYSTEM_TIMERS, now=rejected)
+
+
+# meiva:note
+# A real Clock over manual timers whose wall time starts at `instant`, for a test that pins what an
+# injected clock stamps. Time moves only when the test advances the timers or something sleeps on
+# the clock, so `now()` is the given instant until then.
+def clock_at(instant: datetime) -> Clock:
+    timers = ManualTimers(wall_start=instant)
+    return Clock(ClockConfig("UTC", "UTC", False), timers=timers, now=timers.now)

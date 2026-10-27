@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
-import time
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from pathlib import Path
@@ -23,8 +22,9 @@ from base.lm.harness.deepseek.types import (
     EVENT_STREAM_END,
     BaseHarnessSession,
     InboundQueueFullError,
+    SessionBinding,
+    SessionClock,
     SessionClosedError,
-    SessionRegistry,
     SessionTotals,
     TurnOutcome,
     TurnTicket,
@@ -73,10 +73,6 @@ CANCEL_POLL_SECONDS = 0.05
 _EVENT_STREAM_END = EVENT_STREAM_END
 
 
-def _perf_counter() -> float:
-    return time.perf_counter()
-
-
 # meiva:note
 # `CancelReport.settled` is None when the runtime pid is unobservable — an
 # unobservable tree is reported as unknown, never as clean — and `remaining` names
@@ -121,18 +117,18 @@ class DeepSeekSession(BaseHarnessSession[BridgeConfig]):
         config: BridgeConfig,
         *,
         environ: Mapping[str, str],
-        agent_id: int | None = None,
-        registry: SessionRegistry | None = None,
+        binding: SessionBinding,
         probe: DeepSeekProbe | None = None,
         connect: Callable[..., Any] | None = None,
+        clock: SessionClock,
     ) -> None:
         resolved_probe: DeepSeekProbe = probe if probe is not None else PsutilChildProbe()
         super().__init__(
             config,
-            agent_id=agent_id,
-            registry=registry,
+            binding=binding,
             probe=resolved_probe,
             totals=SessionTotals(),
+            clock=clock,
         )
         self._deepseek_probe: DeepSeekProbe = resolved_probe
         self._prices: PriceBook | None = config.prices
@@ -222,7 +218,7 @@ class DeepSeekSession(BaseHarnessSession[BridgeConfig]):
         if survivors:
             reaped = self._term_spawned(survivors)
             if reaped:
-                await asyncio.sleep(CANCEL_POLL_SECONDS)
+                await self._clock.asleep(CANCEL_POLL_SECONDS)
                 self._kill_survivors(reaped)
         self._residue = self._record_sweep_survivors(observed, survivors, reason="session closed")
         # meiva:note
@@ -269,22 +265,23 @@ class DeepSeekSession(BaseHarnessSession[BridgeConfig]):
         spawned = {
             child: command for child, command in observed.items() if child not in self._baseline
         }
-        started = _perf_counter()
+        started = self._monotonic()
         if self._session_id is not None:
             await connection.notify("session/cancel", {"sessionId": self._session_id})
         settle_deadline = self._monotonic() + self.config.cancel_settle_seconds
         while ticket is not None and not ticket.settled and self._monotonic() < settle_deadline:
-            await asyncio.sleep(CANCEL_POLL_SECONDS)
-        cancel_ms = (_perf_counter() - started) * 1000.0
+            await self._clock.asleep(CANCEL_POLL_SECONDS)
+        cancel_ms = (self._monotonic() - started) * 1000.0
         reaped = self._term_spawned(spawned)
         if reaped:
-            await asyncio.sleep(CANCEL_POLL_SECONDS)
+            await self._clock.asleep(CANCEL_POLL_SECONDS)
             self._kill_survivors(reaped)
         gone, waited_ms = await wait_gone(
             self._probe,
             reaped,
             timeout_seconds=self.config.cancel_settle_seconds,
             poll_seconds=CANCEL_POLL_SECONDS,
+            clock=self._clock,
         )
         remaining = describe(observed, [child for child in reaped if self._probe.is_alive(child)])
         return CancelReport(

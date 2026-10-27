@@ -1,14 +1,15 @@
 exports = ["corpse_reap.py", "hosted.py", "inbound.py", "tests"]
 
 [uses]
-"corpse_reap.py" = ["lifecycle_plan.py"]
-"hosted.py" = ["lifecycle_plan.py"]
+"corpse_reap.py" = ["audit_payloads.py", "lifecycle_plan.py"]
+"hosted.py" = ["audit_payloads.py", "lifecycle_plan.py"]
 "inbound.py" = ["lifecycle_plan.py"]
-"tests" = ["corpse_reap.py", "hosted.py", "lifecycle_plan.py"]
+"tests" = ["audit_payloads.py", "corpse_reap.py", "hosted.py", "lifecycle_plan.py"]
 
 [purity]
 "." = "strict-to-be"
 "__init__.py" = "strict"
+"audit_payloads.py" = "strict"
 "lifecycle_plan.py" = "strict"
 
 [debt.impure-call]
