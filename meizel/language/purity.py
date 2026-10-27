@@ -161,6 +161,7 @@ class PurityState:
     items: list[PurityItem] = field(default_factory=list[PurityItem])
     env_lines: set[int] = field(default_factory=set[int])
     path_vars: set[str] = field(default_factory=set[str])
+    annotation_ids: set[int] = field(default_factory=set[int])
     enum_subsets: list[EnumSubsetUse] = field(default_factory=list[EnumSubsetUse])
     defined_classes: set[str] = field(default_factory=set[str])
 
@@ -197,6 +198,16 @@ class PurityState:
                         _IMPURE_IMPORT_HINT,
                     )
                 )
+
+    # meiva:note
+    # The nodes that name a type and not a value: an annotation (parameter, return, variable), the second
+    # argument of `isinstance` and `issubclass`, the first of `cast`, and what a `TypeAlias` or a
+    # `type X = ...` statement is set to. A name there describes something and reads nothing; a call
+    # inside such a position (`Annotated[str, os.getenv("A")]`) is a value and stays visible.
+    def mark_annotations(self, tree: ast.Module) -> None:
+        for node in ast.walk(tree):
+            for position in _type_positions(node):
+                self.annotation_ids.update(id(sub) for sub in _type_nodes(position))
 
     def record_env_access(self, dotted_name: str | None, line: int) -> None:
         if (
@@ -492,3 +503,49 @@ def record_call(
                 _IMPURE_CALL_HINT,
             )
         )
+
+
+def _signature_types(node: ast.FunctionDef | ast.AsyncFunctionDef) -> list[ast.expr]:
+    args = node.args
+    every = (*args.posonlyargs, *args.args, *args.kwonlyargs, args.vararg, args.kwarg)
+    found = [a.annotation for a in every if a is not None and a.annotation is not None]
+    return [*found, *([node.returns] if node.returns is not None else [])]
+
+
+def _last_name(expr: ast.expr) -> str:
+    if isinstance(expr, ast.Attribute):
+        return expr.attr
+    return expr.id if isinstance(expr, ast.Name) else ""
+
+
+def _call_types(node: ast.Call) -> list[ast.expr]:
+    name = _last_name(node.func)
+    if name in {"isinstance", "issubclass"} and len(node.args) == 2:
+        return [node.args[1]]
+    return [node.args[0]] if name == "cast" and len(node.args) == 2 else []
+
+
+def _type_positions(node: ast.AST) -> list[ast.expr]:
+    if isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef):
+        return _signature_types(node)
+    if isinstance(node, ast.AnnAssign):
+        alias = node.value is not None and _last_name(node.annotation) == "TypeAlias"
+        return [node.annotation, *([node.value] if alias and node.value is not None else [])]
+    if isinstance(node, ast.TypeAlias):
+        return [node.value]
+    return _call_types(node) if isinstance(node, ast.Call) else []
+
+
+# meiva:note
+# The nodes of a type expression, without entering a call: `Annotated[str, os.getenv("A")]` names a
+# type and also reads the environment, and `cast(os.getcwd(), x)` is not a type at all.
+def _type_nodes(expr: ast.expr) -> list[ast.AST]:
+    found: list[ast.AST] = []
+    pending: list[ast.AST] = [expr]
+    while pending:
+        node = pending.pop()
+        if isinstance(node, ast.Call):
+            continue
+        found.append(node)
+        pending.extend(ast.iter_child_nodes(node))
+    return found

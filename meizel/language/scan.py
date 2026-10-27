@@ -224,6 +224,7 @@ class Scanner(AmbientAccess):
         }
 
     def run(self) -> FileScan:
+        self.purity_state.mark_annotations(self.tree)
         self.children(self.tree)
         self.purity_state.record_module(self.tree)
         return FileScan(
@@ -273,8 +274,14 @@ class Scanner(AmbientAccess):
         if isinstance(node.ctx, ast.Load):
             origin, _ = self.scope.find(node.id)
             self.purity_state.record_env_access(origin, node.lineno)
-            if self.records_ambient and origin is not None:
+            if self.records_value(node) and origin is not None:
                 self.ambient.used(origin, origin, node.lineno)
+
+    # meiva:note
+    # Whether a name or attribute read is a value the file acquires: not in a test file and not in a
+    # position that only names a type.
+    def records_value(self, node: ast.Name | ast.Attribute) -> bool:
+        return self.records_ambient and id(node) not in self.purity_state.annotation_ids
 
     # --- traversal -----------------------------------------------------------------
 
@@ -310,7 +317,7 @@ class Scanner(AmbientAccess):
         self.restricted_attribute(origin, attrs, node.lineno)
         self.module_uses(origin, attrs, node.lineno)
         self.purity_state.record_env_access(".".join([origin, *attrs]), node.lineno)
-        if self.records_ambient:
+        if self.records_value(node):
             self.ambient.used(".".join([origin, *attrs]), origin, node.lineno)
 
     # --- scopes --------------------------------------------------------------------
