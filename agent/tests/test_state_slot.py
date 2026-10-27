@@ -43,7 +43,8 @@ from pydantic import BaseModel, Field
 
 import meiva
 from agent.graph.exec.node import exec_node_impl
-from agent.graph.exec.process import SubprocessExecProcess, read_parent_facts
+from agent.graph.exec.parent_facts import read_parent_facts
+from agent.graph.exec.process import SubprocessExecProcess
 from agent.messages.guard import MessagesMutationError
 from agent.state import (
     BaseAgentState,
@@ -63,6 +64,7 @@ from base.host.env.agent_slices import AgentSlices
 from base.native_process.turn_identity import HostedTurnResources
 from base.packages.plugin_providers import build_model_catalog
 from base.packages.plugins.extensions import ExtensionRegistry, PluginContributions
+from base.paths import resolve_meiva_home
 from meiva.sdk_surface import process_context
 from meiva.tests.fixtures.pin_agent import snapshot_clients
 
@@ -474,6 +476,7 @@ def make_runtime_and_config(
     hosted_resources: HostedTurnResources | None = None,
 ) -> tuple[Runtime[MeivaContext], RunnableConfig]:
     ctx = MeivaContext(
+        meiva_home=resolve_meiva_home(),
         ops_pool=ops_pool,
         hosted_resources=hosted_resources,
         llm=MagicMock(),

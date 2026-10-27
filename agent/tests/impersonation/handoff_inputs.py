@@ -22,7 +22,8 @@ from agent import impersonation
 from agent import state as states
 from agent.graph.claim.node import claim_node
 from agent.graph.exec.node import exec_node
-from agent.graph.exec.process import SubprocessExecProcess, read_parent_facts
+from agent.graph.exec.parent_facts import read_parent_facts
+from agent.graph.exec.process import SubprocessExecProcess
 from agent.impersonation import protect_native_hooks, settle_checkpoint
 from agent.impersonation_handoff import flush_checkpoint
 from agent.ownership.hosted import admit_hosted_runtime

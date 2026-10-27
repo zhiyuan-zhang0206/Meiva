@@ -27,18 +27,20 @@ def pool(db_url: str) -> Iterator[ConnectionPool]:
         yield pool
 
 
-@pytest.mark.usefixtures("unit_home")
 def test_cluster_status_op_returns_this_hosts_snapshot(
     database: Database,
     pool: ConnectionPool,
     tmp_path: Path,
+    unit_home: Path,
     *,
     machine_identity: ConfiguredMachineIdentity,
 ) -> None:
     machine_identity.set(name="runner-a", role=frozenset({"agent-runner"}))
     image = LoadedCommit(source_root=tmp_path, sha="abc1234")
 
-    status = cluster.cluster_status_op(database, pool, image=image, local_machine=machine_identity)
+    status = cluster.cluster_status_op(
+        database, pool, image=image, local_machine=machine_identity, home=unit_home
+    )
 
     assert status.machine_name == "runner-a"
     assert (status.serve_gateway, status.serve_agent_runner) == (False, True)
@@ -48,14 +50,19 @@ def test_cluster_status_op_returns_this_hosts_snapshot(
     assert ClusterStatus.model_validate(status.model_dump(mode="json")) == status
 
 
-@pytest.mark.usefixtures("unit_home")
 def test_cluster_status_op_without_a_pool_reads_through_a_direct_connection(
-    database: Database, tmp_path: Path, *, machine_identity: ConfiguredMachineIdentity
+    database: Database,
+    tmp_path: Path,
+    unit_home: Path,
+    *,
+    machine_identity: ConfiguredMachineIdentity,
 ) -> None:
     machine_identity.set(name="runner-a", role=frozenset({"agent-runner"}))
     image = LoadedCommit(source_root=tmp_path, sha=None)
 
-    status = cluster.cluster_status_op(database, image=image, local_machine=machine_identity)
+    status = cluster.cluster_status_op(
+        database, image=image, local_machine=machine_identity, home=unit_home
+    )
 
     assert (status.machine_name, status.running_sha) == ("runner-a", None)
     assert status.paused_reason == "startup"

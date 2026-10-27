@@ -49,6 +49,7 @@ import time
 from collections.abc import Awaitable, Sequence
 from dataclasses import fields, replace
 from datetime import datetime
+from pathlib import Path
 from typing import Any, Literal
 
 from langchain_core.messages import AIMessage, AnyMessage, ToolCall, ToolMessage
@@ -341,9 +342,9 @@ def dispatch_exec_result(
     return plan, envelope
 
 
-def _output_limits(agent: AgentSlices, agent_id: int) -> OutputLimits:
+def _output_limits(agent: AgentSlices, agent_id: int, *, home: Path) -> OutputLimits:
     return OutputLimits(
-        archive_dir=overflow_dir(agent_id),
+        archive_dir=overflow_dir(agent_id, home=home),
         crop=CropLimits(
             **{field.name: agent.read("sandbox", field.name) for field in fields(CropLimits)}
         ),
@@ -431,7 +432,7 @@ async def _exec_single_call(
         elapsed_seconds=exec_ms / 1000,
         timestamp=clock.now_timestamp() if agent.read("general", "message_timestamps") else None,
         referenced_messages=state.messages,
-        limits=_output_limits(agent, agent_id),
+        limits=_output_limits(agent, agent_id, home=ctx.require_meiva_home()),
         now=clock.now().astimezone(clock.explicit_zone()),
     )
     halted, status = plan.halted, plan.status

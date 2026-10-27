@@ -21,7 +21,7 @@ from langgraph.checkpoint.postgres.aio import AsyncPostgresSaver
 from psycopg_pool import AsyncConnectionPool
 
 from agent.graph import build_graph
-from agent.graph.exec.process import read_parent_facts
+from agent.graph.exec.parent_facts import read_parent_facts
 from base.agents.context.clients import ClientSet
 from base.agents.inbox.insert import insert_inbound_message
 from base.agents.tests.units import spawn_agent

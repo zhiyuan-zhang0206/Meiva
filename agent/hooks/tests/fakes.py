@@ -14,6 +14,7 @@ from base.db.code_version_gate import ProcessDbGate
 from base.events.live.bus import EventBus
 from base.host.env.agent_slices import AgentSlices
 from base.packages.plugin_providers import build_model_catalog
+from base.paths import resolve_meiva_home
 
 
 def make_fake_ops_pool() -> None:
@@ -24,6 +25,7 @@ def placeholder_runtime(
     ops_pool: Any = None, *, database_gate: ProcessDbGate
 ) -> Runtime[MeivaContext]:
     ctx = MeivaContext(
+        meiva_home=resolve_meiva_home(),
         ops_pool=ops_pool,
         llm=MagicMock(),
         event_publisher=MagicMock(),

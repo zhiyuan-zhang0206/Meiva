@@ -22,6 +22,7 @@ import argparse
 import sys
 from collections.abc import Sequence
 from dataclasses import dataclass
+from pathlib import Path
 from typing import TextIO
 
 from base.cluster.dataplane.direct_url import ClusterDirectUrl
@@ -35,7 +36,7 @@ from base.native_process.code_version import CodeVersion
 from base.native_process.loaded_commit import LoadedCommit
 from base.packages.note_files import walk_notes
 from base.packages.plugin_providers import build_model_catalog
-from base.paths import gateway_memory_dir
+from base.paths import gateway_memory_dir, meiva_home
 from base.telemetry.delivery.state import process_name
 from services.derived.memory_indexer.backends.base import MemorySearchBackend
 from services.derived.memory_indexer.backends.factory import get_backend
@@ -64,11 +65,11 @@ class ReconcileArguments:
     allow_write: bool
 
 
-def sample_queries(limit: int, *, roles: MachineRoles) -> list[str]:
+def sample_queries(limit: int, *, roles: MachineRoles, home: Path) -> list[str]:
     """Frontmatter descriptions from the memory pool, newest-first, capped at
     `limit` — the short entity-bearing lines the index exists to find."""
     queries: list[str] = []
-    for _, note in walk_notes(gateway_memory_dir(roles=roles)):
+    for _, note in walk_notes(gateway_memory_dir(roles=roles, home=home)):
         if note.description and note.description.strip():
             queries.append(note.description.strip())
         if len(queries) >= limit:
@@ -213,7 +214,7 @@ def main(argv: Sequence[str], *, out: TextIO, err: TextIO) -> int:
     boot = ConfigBoot()
     boot.read_process_environment()
     machine = ConfiguredMachineIdentity(boot)
-    queries = sample_queries(args.limit, roles=machine.role())
+    queries = sample_queries(args.limit, roles=machine.role(), home=meiva_home())
     if not queries:
         print("no query texts found in the memory pool", file=err)
         return 1

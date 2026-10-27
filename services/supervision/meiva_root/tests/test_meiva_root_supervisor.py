@@ -12,12 +12,13 @@ from typing import Any, cast
 import psutil
 import pytest
 
+from base.clock.tests.manual_timers import ManualTimers
 from base.native_process.ownership import OwnedProcess
 from services.supervision.meiva_root.inputs import InputSeal
 from services.supervision.meiva_root.manifest import RestartPolicy, UnitManifest, UnitRegistry
 from services.supervision.meiva_root.stopping import rotate_unit_log
 from services.supervision.meiva_root.supervisor import Supervisor, SupervisorConfig
-from services.supervision.meiva_root.tests.slices import system_clock
+from services.supervision.meiva_root.tests.slices import clock_over, system_clock
 
 _CHILD = Path(__file__).with_name("child_unit.py")
 
@@ -528,3 +529,27 @@ def test_unit_log_cap_and_backups_are_supervisor_configuration() -> None:
         SupervisorConfig(unit_log_max_bytes=0)
     with pytest.raises(ValueError):
         SupervisorConfig(unit_log_backups=0)
+
+
+# meiva:note
+# The supervisor measures its uptime on the clock it was given: a clock over steered timers shows
+# exactly the seconds the test advanced, which the system's monotonic clock never would.
+async def test_uptime_is_measured_on_the_injected_clock(tmp_path: Path) -> None:
+    timers = ManualTimers()
+    unit = UnitManifest(
+        "worker", (sys.executable, "-u", str(_CHILD), "sleep"), RestartPolicy.ALWAYS, "root"
+    )
+    owner = Supervisor(
+        UnitRegistry([unit]),
+        run_dir=tmp_path,
+        config=SupervisorConfig(stop_timeout_s=0.2),
+        clock=clock_over(timers),
+        root_pid=os.getpid(),
+    )
+    await owner.start()
+    try:
+        timers.advance(5.0)
+        root = cast("dict[str, Any]", (await owner.status())["root"])
+        assert root["uptime_s"] == 5.0
+    finally:
+        await owner.shutdown()

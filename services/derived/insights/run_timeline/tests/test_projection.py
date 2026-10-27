@@ -24,10 +24,11 @@ from base.agents.history.hierarchy.store import load_nodes
 from base.agents.messages.timestamp_policy import TimestampSource
 from base.clock import SYSTEM_TIMERS, Clock, ClockConfig
 from base.clock.tests.manual_timers import ManualTimers
+from base.clock.tests.seeded_rng import seeded_rng
 from base.db import Database
 from services.derived.insights.run_timeline.projection.derive import segment_view
 from services.derived.insights.run_timeline.projection.jobs import IndexJobs, index_next
-from services.derived.insights.run_timeline.projection.reader import TimelineReader
+from services.derived.insights.run_timeline.projection.reader import ReaderWorld, TimelineReader
 from services.derived.insights.run_timeline.projection.source import capture_source
 from services.derived.insights.run_timeline.tokens import timeline_units
 
@@ -78,7 +79,7 @@ class World:
             timestamps=self.timestamps,
             jobs=self.jobs,
             read_segment=self.read_segment,
-            timers=self.timers,
+            world=ReaderWorld(timers=self.timers, rng=seeded_rng()),
         )
 
     # meiva:note

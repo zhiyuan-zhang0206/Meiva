@@ -119,7 +119,7 @@ async def _compact_outcome(
     halted = st.restart_preserves_idle and not st.committed_chat_ids
     dump_path = dump_history(
         state.messages,
-        workspace_dir(agent_id),
+        workspace_dir(agent_id, home=ctx.require_meiva_home()),
         ctx.require_agent().history_dump,
         now=now,
     )

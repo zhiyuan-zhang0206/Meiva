@@ -27,7 +27,8 @@ from psycopg_pool import AsyncConnectionPool
 
 from agent.graph import LlmLedger, exec_node, llm_node
 from agent.graph.exec.output import overflow_dir
-from agent.graph.exec.process import SubprocessExecProcess, read_parent_facts
+from agent.graph.exec.parent_facts import read_parent_facts
+from agent.graph.exec.process import SubprocessExecProcess
 from agent.state import AgentState
 from base.agents.context import MeivaContext
 from base.agents.context.identity import AgentIdentity
@@ -46,6 +47,7 @@ from base.host.env.agent_slices import AgentSlices
 from base.lm.catalog import ModelCatalog
 from base.native_process.turn_identity import HostedTurnResources
 from base.packages.plugin_providers import build_model_catalog
+from base.paths import resolve_meiva_home
 from meiva.tests.fixtures.pin_agent import hosted_resources as hosted_resources
 from meiva.tests.fixtures.pin_agent import snapshot_clients
 
@@ -77,6 +79,7 @@ def _make_runtime(
     if isinstance(llm, MagicMock):
         llm.bind_tools.return_value = llm
     ctx = MeivaContext(
+        meiva_home=resolve_meiva_home(),
         hosted_resources=hosted_resources,
         ops_pool=ops_pool,
         llm=llm,  # pyright: ignore[reportUnknownArgumentType]
@@ -554,7 +557,7 @@ async def test_exec_node_protects_archives_referenced_by_its_current_state(
         process=SubprocessExecProcess(read_parent_facts(), rng=_rng()),
     )
     prior_output = first.update["messages"][0]
-    directory = overflow_dir(7)
+    directory = overflow_dir(7, home=resolve_meiva_home())
     archive = next(directory.glob("crop_*.txt"))
     state = AgentState(
         messages=[

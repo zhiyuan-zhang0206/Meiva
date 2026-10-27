@@ -81,8 +81,9 @@ def cluster_status_op(
     *,
     image: LoadedCommit,
     local_machine: MachineIdentityReader,
+    home: Path,
 ) -> ClusterStatus:
-    return status_snapshot(db, pool=pool, image=image, local_machine=local_machine)
+    return status_snapshot(db, pool=pool, image=image, local_machine=local_machine, home=home)
 
 
 # meiva:note

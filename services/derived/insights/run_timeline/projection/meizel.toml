@@ -20,10 +20,6 @@ exports = ["derive.py", "jobs.py", "model.py", "reader.py", "source.py"]
 [roots]
 "backfill.py" = { kinds = ["clock", "settings"], why = "Service or operator process entry boots configuration before composing its resources; builds the process clock from SYSTEM_TIMERS" }
 
-[debt.fake-entropy]
-"reader.py#id in an f-string" = 1
-"reader.py#itertools.count in an f-string" = 1
-
 [debt.impure-call]
 "reader.py#import fastapi" = 1
 

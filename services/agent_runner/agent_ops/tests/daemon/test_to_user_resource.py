@@ -37,13 +37,14 @@ async def test_authenticated_home_machine_file_roundtrip(
     requests: RequestTokens = set()
     workers: WorkerFutures = set()
     with database.pool() as pool:
-        assert read_to_user(pool, agent_id, "source-host", references=[]).content
+        assert read_to_user(pool, agent_id, "source-host", references=[], home=unit_home).content
         with pytest.raises(ValueError, match="home machine"):
-            read_to_user(pool, agent_id, "wrong-host", references=[])
+            read_to_user(pool, agent_id, "wrong-host", references=[], home=unit_home)
         handler = partial(
             resource_route,
             pool=pool,
             machine="source-host",
+            home=unit_home,
             executor=op_executor,
             dispatch_sem=asyncio.Semaphore(1),
             requests=requests,

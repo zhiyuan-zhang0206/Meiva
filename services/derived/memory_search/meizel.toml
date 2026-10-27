@@ -10,7 +10,4 @@ exports = ["app.py", "daemon.py"]
 "config.py" = "strict"
 
 [roots]
-"daemon.py" = { kinds = ["settings"], why = "process entry point of the memory-search daemon: builds ConfigBoot from the process environment" }
-
-[debt.ambient-read]
-"daemon.py#home base.paths.meiva_home" = 1
+"daemon.py" = { kinds = ["home", "settings"], why = "process entry point of the memory-search daemon: builds ConfigBoot from the process environment and reads the home it runs under" }

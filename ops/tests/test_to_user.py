@@ -33,7 +33,7 @@ def test_the_home_machine_resolves_the_agents_workspace_without_creating_it(
     agent_id = _agent_on(db_conn, "source-host")
 
     with database.pool() as pool:
-        workspace = owned_workspace(pool, agent_id, "source-host")
+        workspace = owned_workspace(pool, agent_id, "source-host", home=unit_home)
 
     assert workspace == unit_home / "workspaces" / str(agent_id)
     assert not workspace.exists()
@@ -49,9 +49,9 @@ def test_another_machine_or_an_unknown_agent_is_refused(
 
     with database.pool() as pool:
         with pytest.raises(ValueError, match="home machine"):
-            owned_workspace(pool, agent_id, "wrong-host")
+            owned_workspace(pool, agent_id, "wrong-host", home=unit_home)
         with pytest.raises(ValueError, match="home machine"):
-            owned_workspace(pool, agent_id + 999, "source-host")
+            owned_workspace(pool, agent_id + 999, "source-host", home=unit_home)
 
 
 # meiva:note
@@ -65,7 +65,7 @@ def test_the_document_is_read_from_the_home_machines_workspace(
     (workspace / DOCUMENT_FILENAME).write_text("# Report\n\nDone.\n", encoding="utf-8")
 
     with database.pool() as pool:
-        document = read_to_user(pool, agent_id, "source-host", references=[])
+        document = read_to_user(pool, agent_id, "source-host", references=[], home=unit_home)
 
     assert document.content == "# Report\n\nDone.\n"
     assert document.version is not None

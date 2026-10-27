@@ -472,7 +472,7 @@ async def run(
     instance_lock = take_instance_lock(home)
     _claim_pidfile()
     from agent.graph import build_graph  # pyright: ignore[reportUnknownVariableType]
-    from agent.graph.exec.process import read_parent_facts
+    from agent.graph.exec.parent_facts import read_parent_facts
     from agent.process_boot import init_process_scope, land_cluster_extensions, process_trace_config
     from base.telemetry.otlp.trace_readiness import PROCESS_RECORDING
 

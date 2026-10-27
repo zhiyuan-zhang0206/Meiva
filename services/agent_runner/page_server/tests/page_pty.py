@@ -25,7 +25,7 @@ from psycopg_pool import ConnectionPool
 from base.clock.tests.seeded_rng import seeded_rng
 from base.events.live.bus import EventBus
 from base.host.env import port_lease
-from base.paths import meiva_home
+from base.paths import resolve_meiva_home
 from base.sessions.backend import PtySessionBackend
 from base.sessions.pty import client
 from base.sessions.pty.tests.pty_service import service_socket
@@ -127,7 +127,12 @@ def page_state(conn: psycopg.Connection, agent_id: int, name: str) -> PageState:
 # One production pass against the pty service of the test home.
 def reconcile(pool: ConnectionPool, managed: dict[PageKey, ServerHandle]) -> None:
     daemon.reconcile_once(
-        pool, managed, HOST, EventBus.from_settings(rng=seeded_rng()), _backend(), meiva_home()
+        pool,
+        managed,
+        HOST,
+        EventBus.from_settings(rng=seeded_rng()),
+        _backend(),
+        resolve_meiva_home(),
     )
 
 
@@ -143,7 +148,7 @@ def reconcile_snapshot(
         HOST,
         EventBus.from_settings(rng=seeded_rng()),
         _backend(),
-        meiva_home(),
+        resolve_meiva_home(),
     )
 
 

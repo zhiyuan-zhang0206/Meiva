@@ -15,6 +15,7 @@ After compact, history = `[RemoveAll, SystemMessage, HumanMessage(header+summary
 summary is complete memory; framework no longer appends any original messages (no tail).
 """
 
+from pathlib import Path
 from typing import Any
 from unittest.mock import AsyncMock, MagicMock
 
@@ -46,6 +47,7 @@ from base.events.live.bus import EventBus
 from base.host.env.agent_slices import AgentSlices
 from base.packages.plugin_providers import build_model_catalog
 from base.packages.plugins.extensions import EMPTY
+from base.paths import resolve_meiva_home
 
 
 def _compact_tail(update: Any) -> list[AnyMessage]:
@@ -104,6 +106,8 @@ def _runtime_with_llm(llm: Any, database_gate: ProcessDbGate) -> Runtime[MeivaCo
     # the post-compact checkpoint trim treats it as a no-op (real-pool trimming is covered by
     # base/agents/history/tests/test_compact_boundary.py and the aops_pool compact tests below).
     ctx = MeivaContext(
+        meiva_home=resolve_meiva_home(),
+        user_home=Path.home(),
         ops_pool=None,
         llm=llm,
         event_publisher=MagicMock(),
@@ -266,6 +270,8 @@ def _make_runtime(ops_pool=None, llm=None, *, database_gate: ProcessDbGate):
     if llm is None:
         llm = AsyncMock()
     ctx = MeivaContext(
+        meiva_home=resolve_meiva_home(),
+        user_home=Path.home(),
         ops_pool=ops_pool,  # pyright: ignore[reportUnknownArgumentType]
         llm=llm,  # pyright: ignore[reportUnknownArgumentType]
         event_publisher=MagicMock(),
