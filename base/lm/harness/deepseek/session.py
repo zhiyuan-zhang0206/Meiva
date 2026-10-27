@@ -29,7 +29,8 @@ from base.lm.harness.deepseek.types import (
     TurnOutcome,
     TurnTicket,
 )
-from base.lm.harness.deepseek.usage import UsageSnapshot, read_usage
+from base.lm.harness.deepseek.usage import UsageSnapshot
+from base.lm.harness.deepseek.usage_files import read_usage
 from base.lm.harness.events import (
     SessionFaulted,
     SessionStarted,

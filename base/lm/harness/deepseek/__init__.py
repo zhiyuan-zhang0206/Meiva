@@ -14,8 +14,6 @@ from base.lm.harness.deepseek.usage import (
     StepUsage,
     UsageSnapshot,
     UsageUnavailableError,
-    read_usage,
-    session_log_path,
 )
 
 __all__ = [
@@ -36,6 +34,4 @@ __all__ = [
     "dsh_home_for",
     "map_update",
     "parse_prompt_result",
-    "read_usage",
-    "session_log_path",
 ]
