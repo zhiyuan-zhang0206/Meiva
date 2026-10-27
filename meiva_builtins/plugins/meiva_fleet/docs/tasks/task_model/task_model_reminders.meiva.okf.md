@@ -25,7 +25,9 @@ tags:
   no counter, clears no `escalated_at`, and does not move `updated_at`. The consequence is
   deliberate — when the deadline passes the task is due at once and its ladder continues from where
   it stood, so a task that had reached one reminder below `task_escalate_n` escalates on its first
-  reminder after the pause. Parking is not forgetting.
+  reminder after the pause. Parking is not forgetting. **The HTTP `PATCH` surface has no field for
+  it**: the bound is this home's Fleet policy and one write boundary owns that check, so pausing is an
+  owner action through the SDK.
 
 A write clears `last_reminded_at`, `reminder_count` and `escalated_at` when it **changes the work**, restarting the overdue window from that write. Fleet `task_reminder_reset_on` (default `status`, `results`, `owner`, `priority`, `parent`) names the kinds that count; recording a note or renaming a task does not, because neither says anything about progress — resetting on the daily note stream is what held every task's counter at zero. The comparison is against the stored row, so restating the current status or results is not a change either. `meiva_builtins/plugins/meiva_fleet/task_maintenance/daemon.py` sees the counter; `base/agents/tasks/reminder_window.py` owns the criterion. The same criterion moves `updated_at` — the column the daemon measures the overdue interval against — so the due clock and the ladder cannot disagree.
 
