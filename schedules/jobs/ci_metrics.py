@@ -75,6 +75,7 @@ def _run_exporter(job: CiMetrics, inputs: ScheduleInputs) -> str:
         ["--repo", runs_export.DEFAULT_REPO, "--state-dir", str(job.state_dir)],
         run_process=job.run_process,
         timers=job.timers,
+        home=inputs.home,
         producer=inputs.producer,
     )
     if exit_code != 0:

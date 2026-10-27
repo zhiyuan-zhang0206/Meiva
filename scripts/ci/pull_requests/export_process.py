@@ -2,6 +2,7 @@
 
 from collections.abc import Generator
 from contextlib import contextmanager
+from pathlib import Path
 
 from base.cluster.dataplane.direct_url import ClusterDirectUrl
 from base.cluster.machine.configured import ConfiguredMachineIdentity
@@ -11,7 +12,6 @@ from base.db.code_version_gate import ProcessDbGate
 from base.log import logger
 from base.native_process.code_version import CodeVersion
 from base.native_process.loaded_commit import LoadedCommit
-from base.paths import meiva_home
 from base.telemetry import DrainStatus, EventPipeline, build_pipeline
 
 __all__ = ["drain_event_pipeline", "owned_event_pipeline", "process_gate"]
@@ -44,19 +44,20 @@ def drain_event_pipeline(process: str, pipeline: EventPipeline) -> Generator[Eve
 
 
 @contextmanager
-def owned_event_pipeline(process: str, *, image: LoadedCommit | None) -> Generator[EventPipeline]:
+def owned_event_pipeline(
+    process: str, *, image: LoadedCommit | None, home: Path
+) -> Generator[EventPipeline]:
     """Own the sampler's actual writer; a scheduled caller supplies its existing producer."""
     gate = process_gate(process, image=image)
-    process_home = meiva_home()
 
     def database() -> Database:
         return Database.from_settings(
             gate=gate,
-            direct_url=ClusterDirectUrl(machine.host, home=process_home),
+            direct_url=ClusterDirectUrl(machine.host, home=home),
         )
 
     config = ConfigBoot()
     machine = ConfiguredMachineIdentity(config)
-    pipeline = build_pipeline(database=database, machine=machine, home=process_home)
+    pipeline = build_pipeline(database=database, machine=machine, home=home)
     with drain_event_pipeline(process, pipeline):
         yield pipeline
