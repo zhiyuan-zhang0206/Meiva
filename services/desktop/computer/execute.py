@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 from collections.abc import Callable
+from pathlib import Path
 from typing import Any
 
 from . import ax_act, ax_tools
@@ -183,6 +184,7 @@ def _snapshot_tool(
     ocr_cache: dict[str, Any] | None,
     *,
     stamp: str,
+    home: Path,
 ) -> dict[str, Any]:
     if "region" in args and "target" in args:
         raise ComputerUseError("snapshot accepts region or target, not both")
@@ -192,13 +194,13 @@ def _snapshot_tool(
         if "region" in args:
             region = CaptureRegion.parse(args["region"])
             path, scale, (pw, ph) = capture_region(
-                helper, region, path=snapshot_path(agent_id, stamp=stamp)
+                helper, region, path=snapshot_path(agent_id, stamp=stamp, home=home)
             )
             frame = CaptureFrame(CoordinateSpace.REGION_PIXELS, region.x, region.y, scale, pw, ph)
             source = "region"
         else:
             target = WindowTarget.parse(args["target"])
-            path = snapshot_path(agent_id, stamp=stamp)
+            path = snapshot_path(agent_id, stamp=stamp, home=home)
             captured = helper.screencapture_window(target.pid, target.window_id, str(path))
             pw, ph = png_size(path)
             if (pw, ph) != (captured["width"], captured["height"]):
@@ -220,7 +222,7 @@ def _snapshot_tool(
             "pixels": {"width": pw, "height": ph},
         }
     else:
-        path, size, scale, (pw, ph) = capture_screen(helper, agent_id, stamp=stamp)
+        path, size, scale, (pw, ph) = capture_screen(helper, agent_id, stamp=stamp, home=home)
         result = {
             "path": str(path),
             "source": "screen",
@@ -243,7 +245,7 @@ def _snapshot_tool(
     if args.get("include_ocr"):
         # Soft failure: snapshot stays usable without text recognition.
         try:
-            result["ocr"] = ocr_mod.ocr_image(path)
+            result["ocr"] = ocr_mod.ocr_image(path, home=home)
             if ocr_cache is not None and "frame" not in result:
                 ocr_cache["items"] = result["ocr"]
         except ocr_mod.OcrError as e:
@@ -414,19 +416,20 @@ def _execute(
     ocr_cache: dict[str, Any] | None = None,
     *,
     stamp: str,
+    home: Path,
 ) -> dict[str, Any]:
     del pointer  # Retain the internal call signature; cursor reads are now live.
     _require(tool, args)
     if tool == "snapshot":
-        return _snapshot_tool(helper, args, agent_id, ocr_cache, stamp=stamp)
+        return _snapshot_tool(helper, args, agent_id, ocr_cache, stamp=stamp, home=home)
     if tool == "find_text":
-        return find_text_tool(helper, args, agent_id, ocr_cache, stamp=stamp)
+        return find_text_tool(helper, args, agent_id, ocr_cache, stamp=stamp, home=home)
     if tool in _SCALED_TOOLS:
         return _SCALED_TOOLS[tool](helper, args, scale)
     if tool in _ARGS_ONLY_TOOLS:
         return _ARGS_ONLY_TOOLS[tool](helper, args)
     if tool == "click_text":
-        return click_text_tool(helper, args, agent_id, ocr_cache, stamp=stamp)
+        return click_text_tool(helper, args, agent_id, ocr_cache, stamp=stamp, home=home)
     if tool == "type_text":
         return {"typed": helper.type_text(str(args["text"]))["typed"]}
     if tool == "cursor_position":
@@ -456,10 +459,11 @@ def execute_tool(
     *,
     ax_session: AxSession,
     stamp: str,
+    home: Path,
 ) -> dict[str, Any]:
     """The daemon's entry: the accessibility tools, else `_execute`."""
     if tool == "ax_tree":
-        return ax_tools.ax_tree_tool(helper, args, agent_id, scale, ax_session, stamp)
+        return ax_tools.ax_tree_tool(helper, args, agent_id, scale, ax_session, stamp, home=home)
     if tool == "ax_act":
         return ax_act.ax_act_tool(helper, args, agent_id, scale, ax_session)
     return _execute(
@@ -471,6 +475,7 @@ def execute_tool(
         scale=scale,
         ocr_cache=ocr_cache,
         stamp=stamp,
+        home=home,
     )
 
 

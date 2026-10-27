@@ -6,7 +6,7 @@ from pathlib import Path
 import pytest
 
 import meiva
-from base.paths import workspace_dir
+from base.paths import meiva_home, workspace_dir
 
 pytestmark = [
     pytest.mark.usefixtures("sdk_model_owner", "pty_service", "_isolated_agent"),
@@ -34,7 +34,7 @@ def test_run_background_runs_in_the_workspace_and_logs_there(_agent_row: int) ->
         "echo facade-ok; pwd", name="test-facade", keep=True, ttl=120
     )
     try:
-        workspace = workspace_dir(_agent_row)
+        workspace = workspace_dir(_agent_row, home=meiva_home())
         log_path = Path(handle.output_path)
         assert log_path == workspace / ".shell_logs" / f"{handle.session_id}_test-facade.log"
         deadline = time.monotonic() + 15

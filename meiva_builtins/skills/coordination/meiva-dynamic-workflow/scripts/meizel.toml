@@ -1,6 +1,3 @@
 [roots]
 "codebase_sweep_lite.py" = { kinds = ["clock", "home", "random"], why = "Workflow script stamps runs with UTC time, resolves workspace home, and generates operation keys" }
 "deep_research_lite.py" = { kinds = ["clock", "random"], why = "Workflow script stamps runs with UTC time and generates operation keys" }
-
-[debt.ambient-read]
-"deep_research_lite.py#home base.paths.workspace_dir" = 1

@@ -276,10 +276,12 @@ class ComputerMcpDaemon:
         *,
         helper: DesktopHelper,
         clock: Clock,
+        home: Path,
     ) -> None:
         self._db = db
         self._helper = helper
         self._clock = clock
+        self._home = home
         self._sock = sock
         # Last legacy pointer position in PHYSICAL pixels, retained for diagnostics.
         # Scroll without x/y reads the actual native cursor.
@@ -436,6 +438,7 @@ class ComputerMcpDaemon:
                     ocr_cache=self._ocr_cache,
                     ax_session=self._ax_session,
                     stamp=snapshot_stamp(self._clock.now()),
+                    home=self._home,
                 )
                 self._track_tool_effects(tool, args, result)
                 self._track_mouse_hold(tool, agent_id, result)
@@ -628,9 +631,10 @@ async def run(
     database: Callable[[], Database],
     helper: DesktopHelper,
     clock: Clock,
+    home: Path,
 ) -> None:
     config = computer_use_config()
-    daemon = ComputerMcpDaemon(config, database(), sock, helper=helper, clock=clock)
+    daemon = ComputerMcpDaemon(config, database(), sock, helper=helper, clock=clock, home=home)
     path = Path(daemon._sock)
     path.parent.mkdir(parents=True, exist_ok=True)
     if await socket_in_use(path):
@@ -728,6 +732,7 @@ def main() -> None:
             database=database,
             helper=helper_client(),
             clock=Clock(clock_config_from_boot(machine_config), timers=SYSTEM_TIMERS),
+            home=process_home,
         )
     )
 

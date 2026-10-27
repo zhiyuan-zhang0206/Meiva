@@ -141,8 +141,8 @@ def test_external_personal_path_uses_borrowed_identity(
     with impersonation.attach(lease["id"]):
         personal = meiva.memory.PERSONAL_PATH
 
-    assert personal == workspace_dir_readonly(owner.agent_id) / "memory"
-    assert not workspace_dir_readonly(stale_id).exists()
+    assert personal == workspace_dir_readonly(owner.agent_id, home=unit_home) / "memory"
+    assert not workspace_dir_readonly(stale_id, home=unit_home).exists()
 
 
 # meiva:note

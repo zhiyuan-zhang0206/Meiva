@@ -176,15 +176,15 @@ def snapshot_stamp(moment: datetime) -> str:
     return moment.astimezone(UTC).strftime("%Y%m%dT%H%M%S%f")
 
 
-def snapshot_path(agent_id: int | None, *, stamp: str) -> Path:
+def snapshot_path(agent_id: int | None, *, stamp: str, home: Path) -> Path:
     """A fresh capture path under $MEIVA_HOME/logs/computer/snapshots/."""
-    directory = logs_dir() / "computer" / "snapshots"
+    directory = logs_dir(home=home) / "computer" / "snapshots"
     directory.mkdir(parents=True, exist_ok=True)
     return directory / f"agent-{agent_id or 0}-{stamp}.png"
 
 
 def capture_screen(
-    helper: ScreenHelper, agent_id: int, *, stamp: str
+    helper: ScreenHelper, agent_id: int, *, stamp: str, home: Path
 ) -> tuple[Path, Mapping[str, Any], float, tuple[int, int]]:
     """One full-screen capture: (PNG path, helper screen report, measured
     scale, physical pixel size).
@@ -195,7 +195,7 @@ def capture_screen(
     the PNG is the ground truth callers click against; the helper's reported
     scale can be stale (see _pixel_scale).
     """
-    path = snapshot_path(agent_id, stamp=stamp)
+    path = snapshot_path(agent_id, stamp=stamp, home=home)
     size = helper.screen_size()
     helper.screencapture_region(0, 0, int(size["w"]), int(size["h"]), str(path))
     pw, ph = png_size(path)

@@ -11,10 +11,11 @@ from base.agents.context.clients import DatabaseHandle
 from base.cluster import session_name
 from base.host.env.registry import process_environment
 from base.log import logger
-from base.paths import repo_root, workspace_dir
+from base.paths import repo_root
 from base.sessions.backend import PtySessionBackend, get_shell_backend
 from base.sessions.env_forwarding import cwd_is_inside_checkout, forward_env_dict
 from base.sessions.page_session import is_page_label
+from meiva.files import agent_workspace
 from meiva.sdk_surface.validation import coerce_str, coerce_typed
 from meiva.security import scan_content
 from meiva.shell import session_env, session_plan
@@ -202,7 +203,7 @@ def create_session(
     env_overrides: dict[str, str] | None = None,
 ) -> tuple[int, str]:
     shell = shell_sessions()
-    start = Path(cwd) if cwd is not None else workspace_dir(shell.agent_id)
+    start = Path(cwd) if cwd is not None else agent_workspace(shell.agent_id)
     return shell.create(
         name, cwd=start, ttl=ttl, system=system, env_overrides=env_overrides, host=session_host()
     )
@@ -222,7 +223,10 @@ def new(name: str, *, ttl: float) -> int:
     ttl = coerce_typed(ttl, "ttl", (int, float))
     shell = shell_sessions()
     session_id, _ = shell.create(
-        name, cwd=workspace_dir(shell.agent_id), ttl=ttl, host=session_host()
+        name,
+        cwd=agent_workspace(shell.agent_id),
+        ttl=ttl,
+        host=session_host(),
     )
     return session_id
 

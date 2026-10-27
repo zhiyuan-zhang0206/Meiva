@@ -288,13 +288,14 @@ def run_browser_daemon(
 def main() -> None:
     config = ConfigBoot()
     config.boot()
+    home = meiva_home()
     run_browser_daemon(
         host=Host.system(),
         cdp_port=config.view.services.browser_cdp_port,
         chrome_binary=config.view.services.chrome_binary,
-        home=meiva_home(),
+        home=home,
         profile=profile_dir(),
-        logs=logs_dir(),
+        logs=logs_dir(home=home),
         clock=Clock(clock_config_from_boot(config), timers=SYSTEM_TIMERS),
     )
 

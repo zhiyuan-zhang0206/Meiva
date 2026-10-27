@@ -170,7 +170,7 @@ def stores(unit_home: Path) -> tuple[Path, Path]:
     from base.paths import memory_dir, workspace_dir
 
     pin_agent(17)
-    return memory_dir(), workspace_dir(17) / "memory"
+    return memory_dir(home=unit_home), workspace_dir(17, home=unit_home) / "memory"
 
 
 def _reminders(result: dict[str, Any] | None) -> list[HumanMessage]:

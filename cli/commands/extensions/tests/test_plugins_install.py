@@ -661,7 +661,7 @@ def test_cmd_enable_then_disable(unit_home: Path) -> None:
     from base import paths
     from base.packages.plugins.enable_config import local_config_path, write_local
 
-    pdir = paths.plugins_dir() / "compact"
+    pdir = paths.plugins_dir(home=unit_home) / "compact"
     pdir.mkdir(parents=True, exist_ok=True)
     (pdir / "plugin.py").write_text("__description__ = 'x'\n")
     write_local({"plugins": {"compact": {"enabled": True}}})
@@ -686,7 +686,7 @@ def test_cmd_enable_accepts_the_dash_spelling_of_an_underscore_plugin(unit_home:
     from base import paths
     from base.packages.plugins.enable_config import local_config_path
 
-    pdir = paths.plugins_dir() / "my_plugin"
+    pdir = paths.plugins_dir(home=unit_home) / "my_plugin"
     pdir.mkdir(parents=True, exist_ok=True)
     (pdir / "plugin.py").write_text("__description__ = 'x'\n")
 
@@ -703,7 +703,7 @@ def test_load_folds_a_dash_config_key_onto_the_plugin_dir(unit_home: Path) -> No
     from base import paths
     from base.packages.plugins.enable_config import load, write_local
 
-    pdir = paths.plugins_dir() / "my_plugin"
+    pdir = paths.plugins_dir(home=unit_home) / "my_plugin"
     pdir.mkdir(parents=True, exist_ok=True)
     (pdir / "plugin.py").write_text("__description__ = 'x'\n")
     write_local({"plugins": {"my-plugin": {"enabled": False}}})

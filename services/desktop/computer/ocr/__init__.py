@@ -30,7 +30,7 @@ import subprocess
 from pathlib import Path
 
 from base.host.proc import run_bounded
-from base.paths import logs_dir
+from base.paths import logs_path
 
 SOURCE = Path(__file__).with_name("ocr.swift")
 # A 4K full-screen run takes ~0.5-2s; 30s is generous but bounded.
@@ -41,20 +41,16 @@ class OcrError(Exception):
     """OCR could not run or produced no parseable output."""
 
 
-def bin_path(home: Path | None = None) -> Path:
+def bin_path(home: Path) -> Path:
     """Where the compiled OCR binary lives, under this home's logs dir."""
-    root = logs_dir() if home is None else home / "logs"
-    return root / "computer" / "ocr-bin" / "ocr"
+    return logs_path(home) / "computer" / "ocr-bin" / "ocr"
 
 
 def _binary(
-    *,
-    binary: Path | None = None,
-    source: Path = SOURCE,
-    swiftc: str | None = None,
+    *, binary: Path | None = None, source: Path = SOURCE, swiftc: str | None = None, home: Path
 ) -> Path:
     """The compiled OCR binary, built on demand (source-newer check)."""
-    resolved = bin_path() if binary is None else binary
+    resolved = bin_path(home) if binary is None else binary
     if not resolved.exists() or source.stat().st_mtime > resolved.stat().st_mtime:
         resolved.parent.mkdir(parents=True, exist_ok=True)
         compiler = shutil.which("swiftc") if swiftc is None else (swiftc or None)
@@ -78,6 +74,7 @@ def ocr_image(
     source: Path = SOURCE,
     swiftc: str | None = None,
     timeout: float = _OCR_TIMEOUT_S,
+    home: Path,
 ) -> list[dict[str, float | str]]:
     """Recognize text in a PNG and return items with physical-pixel boxes.
 
@@ -87,7 +84,7 @@ def ocr_image(
     daemon degrades a failed OCR to `ocr: []` + `ocr_error`, never failing
     the snapshot itself.
     """
-    compiled = _binary(binary=binary, source=source, swiftc=swiftc)
+    compiled = _binary(binary=binary, source=source, swiftc=swiftc, home=home)
     try:
         ran = run_bounded(
             [str(compiled), str(path)], timeout=timeout, capture_output=True, text=True

@@ -33,14 +33,13 @@ from pathlib import Path
 from uuid import uuid4
 
 import meiva
-from base.paths import workspace_dir
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # Config
 # ═══════════════════════════════════════════════════════════════════════════════
 ORCHESTRATOR = meiva.self.AGENT_ID
 TASK = "deep-research"
-HANDOFF = workspace_dir(ORCHESTRATOR) / TASK
+HANDOFF = meiva.files.resolve(TASK)
 HANDOFF.mkdir(parents=True, exist_ok=True)
 PROGRESS_FILE = HANDOFF / "progress.md"
 

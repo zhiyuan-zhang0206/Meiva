@@ -13,6 +13,7 @@ from base import telemetry
 from base.cluster.machine import MachineIdentityReader
 from base.cluster.machine.tests.identity import machine_identity as machine_identity
 from base.db import Database
+from base.paths import meiva_home
 
 pytestmark = [
     pytest.mark.usefixtures("pty_service", "_isolated_agent"),
@@ -176,7 +177,7 @@ def test_renew_event_carries_int_ttl(db_conn: psycopg.Connection, _agent_row: in
         meiva.shell.sessions.renew(session_id, ttl=120.0)  # a float caller
         telemetry.sync()  # the event lands via the unified emitter's drain
         day = datetime.now(UTC).strftime("%Y%m%d")
-        path = logs_dir() / f"events-{day}.jsonl"
+        path = logs_dir(home=meiva_home()) / f"events-{day}.jsonl"
         assert path.exists(), "mirror file missing"
         event_row = None
         for line in reversed(path.read_text(encoding="utf-8").splitlines()):

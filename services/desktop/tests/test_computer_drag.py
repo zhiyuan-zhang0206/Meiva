@@ -14,6 +14,7 @@ import pytest
 from base.clock.tests.fakes import system_clock
 from base.db import Database
 from base.host.permissions_helper.client import PermissionsHelperClient
+from base.paths import meiva_home
 
 from ..computer.config import ComputerUseConfig
 from ..computer.mcp_daemon import ComputerMcpDaemon
@@ -66,6 +67,7 @@ def desktop(database: Database) -> Iterator[Desktop]:
             sock="/unused.sock",
             helper=PermissionsHelperClient(path),
             clock=system_clock(),
+            home=meiva_home(),
         )
         with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as listener:
             listener.bind(str(path))

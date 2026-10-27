@@ -15,6 +15,7 @@ import pytest
 from base.clock.tests.fakes import system_clock
 from base.db import Database
 from base.host.permissions_helper.client import AxNode, AxTreeResult
+from base.paths import meiva_home
 from services.desktop.computer import ax_gap
 from services.desktop.computer.ax_gap import Frame, VisualBox
 from services.desktop.computer.errors import ComputerUseError
@@ -156,7 +157,12 @@ async def test_include_ocr_gap_appends_only_the_text_the_tree_misses(
 ) -> None:
     out = await call(
         ComputerMcpDaemon(
-            computer_use_config(), database, sock="/x.sock", helper=fake_ax, clock=system_clock()
+            computer_use_config(),
+            database,
+            sock="/x.sock",
+            helper=fake_ax,
+            clock=system_clock(),
+            home=meiva_home(),
         ),
         "ax_tree",
         {"include_ocr_gap": True},
@@ -173,7 +179,12 @@ async def test_ocr_failure_is_soft_the_tree_is_still_returned(
     FakeOcr(error="swiftc not found on PATH")
     out = await call(
         ComputerMcpDaemon(
-            computer_use_config(), database, sock="/x.sock", helper=fake_ax, clock=system_clock()
+            computer_use_config(),
+            database,
+            sock="/x.sock",
+            helper=fake_ax,
+            clock=system_clock(),
+            home=meiva_home(),
         ),
         "ax_tree",
         {"include_ocr_gap": True},
@@ -194,6 +205,7 @@ async def test_the_gap_needs_a_whole_window_read(
                 sock="/x.sock",
                 helper=fake_ax,
                 clock=system_clock(),
+                home=meiva_home(),
             ),
             "ax_tree",
             {"include_ocr_gap": True, "scope": "e1"},
@@ -204,7 +216,12 @@ async def test_enable_ax_reaches_the_helper_and_defaults_on(
     fake_ax: FakeAxHelper, database: Database
 ) -> None:
     daemon = ComputerMcpDaemon(
-        computer_use_config(), database, sock="/x.sock", helper=fake_ax, clock=system_clock()
+        computer_use_config(),
+        database,
+        sock="/x.sock",
+        helper=fake_ax,
+        clock=system_clock(),
+        home=meiva_home(),
     )
     await call(daemon, "ax_tree")
     assert fake_ax.calls[-1][1]["enable_ax"] is True
@@ -216,7 +233,12 @@ async def test_a_px_press_clicks_the_text_center_in_logical_points(
     fake_ax: FakeAxHelper, gap: FakeOcr, clicks: FakeAxHelper, database: Database
 ) -> None:
     daemon = ComputerMcpDaemon(
-        computer_use_config(), database, sock="/x.sock", helper=fake_ax, clock=system_clock()
+        computer_use_config(),
+        database,
+        sock="/x.sock",
+        helper=fake_ax,
+        clock=system_clock(),
+        home=meiva_home(),
     )
     await call(daemon, "ax_tree", {"include_ocr_gap": True})
     out = await call(daemon, "ax_act", {"id": "px:1", "action": "press"})
@@ -247,7 +269,12 @@ async def test_px_elements_only_press_and_only_the_latest_ones(
     database: Database,
 ) -> None:
     daemon = ComputerMcpDaemon(
-        computer_use_config(), database, sock="/x.sock", helper=fake_ax, clock=system_clock()
+        computer_use_config(),
+        database,
+        sock="/x.sock",
+        helper=fake_ax,
+        clock=system_clock(),
+        home=meiva_home(),
     )
     await call(daemon, "ax_tree", {"include_ocr_gap": True})
     with pytest.raises(ComputerUseError):
@@ -259,7 +286,12 @@ async def test_a_later_ax_tree_without_the_gap_retires_the_px_ids(
     fake_ax: FakeAxHelper, gap: FakeOcr, clicks: FakeAxHelper, database: Database
 ) -> None:
     daemon = ComputerMcpDaemon(
-        computer_use_config(), database, sock="/x.sock", helper=fake_ax, clock=system_clock()
+        computer_use_config(),
+        database,
+        sock="/x.sock",
+        helper=fake_ax,
+        clock=system_clock(),
+        home=meiva_home(),
     )
     await call(daemon, "ax_tree", {"include_ocr_gap": True})
     await call(daemon, "ax_tree")

@@ -82,7 +82,7 @@ def contribute() -> PluginContributions:
 
 
 def test_duplicate_declaration_is_not_a_request_rejection(unit_home: Path) -> None:
-    second = plugins_dir() / "second_fleet"
+    second = plugins_dir(home=unit_home) / "second_fleet"
     second.mkdir(parents=True)
     (second / "plugin.py").write_text("")
     (second / "default_config.py").write_text(_SECOND_FACE)

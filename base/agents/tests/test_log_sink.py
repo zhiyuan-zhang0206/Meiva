@@ -71,7 +71,7 @@ def _last_event() -> tuple[str, int | None, str, dict]:
 
     telemetry.sync()
     day = datetime.now(UTC).strftime("%Y%m%d")
-    path = logs_dir() / f"events-{day}.jsonl"
+    path = logs_dir(home=meiva_home()) / f"events-{day}.jsonl"
     if not path.exists():
         raise AssertionError("events mirror is empty — test didn't emit any event")
     lines = [ln for ln in path.read_text(encoding="utf-8").splitlines() if ln.strip()]
@@ -367,7 +367,9 @@ def test_sink_delta_read_compat_reconstruction_is_a_registered_event(sink_logger
     day = datetime.now(UTC).strftime("%Y%m%d")
     rows = [
         json.loads(line)
-        for line in (logs_dir() / f"events-{day}.jsonl").read_text(encoding="utf-8").splitlines()
+        for line in (logs_dir(home=meiva_home()) / f"events-{day}.jsonl")
+        .read_text(encoding="utf-8")
+        .splitlines()
         if line.strip()
     ]
     matches = [row for row in rows if row["event_name"] == "delta_read_compat"]

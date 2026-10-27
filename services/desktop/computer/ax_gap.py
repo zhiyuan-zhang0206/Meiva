@@ -16,6 +16,7 @@ still returned, with the error beside it), like `snapshot(include_ocr)`.
 from __future__ import annotations
 
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Any
 
 import services.desktop.computer.ocr as ocr_mod
@@ -44,11 +45,11 @@ class GapRead:
     error: str | None
 
 
-def read_screen(helper: ScreenHelper, agent_id: int, *, stamp: str) -> GapRead:
+def read_screen(helper: ScreenHelper, agent_id: int, *, stamp: str, home: Path) -> GapRead:
     """Capture the screen and OCR it; an OCR failure is reported, not raised."""
-    path, _size, scale, _pixels = capture_screen(helper, agent_id, stamp=stamp)
+    path, _size, scale, _pixels = capture_screen(helper, agent_id, stamp=stamp, home=home)
     try:
-        return GapRead(ocr_mod.ocr_image(path), scale, None)
+        return GapRead(ocr_mod.ocr_image(path, home=home), scale, None)
     except ocr_mod.OcrError as e:
         return GapRead([], scale, str(e))
 

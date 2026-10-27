@@ -12,7 +12,6 @@ from base.config.service_read import ConfigAuthority
 from base.host.env.agent_slices import ModelOverrides
 from base.lm.catalog import ModelCatalog
 from base.lm.catalog.provider_keys import ProviderKeys
-from base.paths import workspace_dir
 from meiva import files
 from meiva.sdk_surface import agent_identity, process_context
 from meiva.sdk_surface import settings as sdk_settings
@@ -29,7 +28,7 @@ def _output_site() -> OutputSite | None:
     except RuntimeError:
         return None
     return OutputSite(
-        workspace_dir(agent_id) / OVERFLOW_DIRNAME,
+        files.agent_workspace(agent_id) / OVERFLOW_DIRNAME,
         process_context.current_context().require_clock(),
     )
 

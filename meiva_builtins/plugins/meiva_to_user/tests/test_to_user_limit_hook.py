@@ -19,7 +19,7 @@ from base.config import settings
 from base.host.env.agent_slices import AgentSlices
 from base.log.tests.log_records import LogRecords
 from base.packages.plugins.extensions import ExtensionRegistry
-from base.paths import workspace_dir
+from base.paths import meiva_home, workspace_dir
 from base.paths.home import resolve_meiva_home
 from meiva.tests.fixtures.pin_agent import pin_agent
 from meiva_builtins.plugins.meiva_to_user import agent_runtime
@@ -73,7 +73,7 @@ def _runtime(pins: dict[str, Any] | None = None) -> Runtime[MeivaContext]:
 
 
 def _write_panel(text: str) -> None:
-    workspace = workspace_dir(_AGENT)
+    workspace = workspace_dir(_AGENT, home=meiva_home())
     workspace.mkdir(parents=True, exist_ok=True)
     (workspace / DOCUMENT_FILENAME).write_text(text, encoding="utf-8")
 
@@ -206,7 +206,7 @@ async def test_eval_isolation_skips_the_check(hook: Any, agent: int) -> None:
 async def test_an_unreadable_panel_logs_and_stays_silent(
     hook: Any, agent: int, tmp_path: Path, loguru_records: LogRecords
 ) -> None:
-    workspace = workspace_dir(_AGENT)
+    workspace = workspace_dir(_AGENT, home=meiva_home())
     workspace.rmdir()
     workspace.symlink_to(tmp_path / "elsewhere")
 
