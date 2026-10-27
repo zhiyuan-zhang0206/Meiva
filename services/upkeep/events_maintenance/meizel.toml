@@ -22,4 +22,3 @@ exports = ["daemon.py", "resolution.py", "rollup.py", "token_totals.py"]
 [debt.ambient-read]
 "alert_reconciler.py#clock base.clock.Clock" = 1
 "alert_reconciler.py#clock base.clock.SYSTEM_TIMERS" = 1
-"daemon.py#home base.paths.meiva_home" = 1

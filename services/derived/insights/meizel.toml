@@ -15,4 +15,3 @@ exports = ["app.py", "config.py", "daemon.py", "run_timeline"]
 
 [debt.ambient-read]
 "app.py#clock base.clock.SYSTEM_TIMERS" = 1
-"daemon.py#home base.paths.meiva_home" = 2
