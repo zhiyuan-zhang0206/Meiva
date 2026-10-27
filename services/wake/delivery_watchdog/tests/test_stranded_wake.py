@@ -421,6 +421,47 @@ class TestSelectStranded:
         db_conn.commit()
         assert select_stranded(pool, _AGE_BOUND_S) == []
 
+    def test_a_breaker_window_does_not_suppress_a_stranded_wake_it_did_not_earn(
+        self,
+        db_conn: psycopg.Connection,
+        pool: ConnectionPool,
+        *,
+        model_catalog: ModelCatalog,
+        config_authority: ConfigAuthority,
+        database_gate: ProcessDbGate,
+        machine_identity: MachineIdentityReader,
+    ) -> None:
+        # meiva:note
+        # The residue #5667 removes: the streak cleared, the breaker's "until human" window
+        # stayed on the shared column. The halt is the breaker's business — the breaker
+        # clause above already says it is clear — so this loop's own cooldown is the only
+        # window that may hold it back.
+        aid, _command, _trigger = _dead_with_stranded_work(
+            db_conn,
+            model_catalog=model_catalog,
+            config_authority=config_authority,
+            database_gate=database_gate,
+            local_machine=machine_identity,
+        )
+        with db_conn.cursor() as cur:
+            cur.execute(
+                "UPDATE agents_meta SET permanent_reject_streak = 0, "
+                "wake_suppressed_until = now() + interval '10 years', "
+                "wake_suppress_reason = 'permanent_provider_reject' WHERE id = %s",
+                (aid,),
+            )
+        db_conn.commit()
+        assert [o.agent_id for o in select_stranded(pool, _AGE_BOUND_S)] == [aid]
+
+        with db_conn.cursor() as cur:
+            cur.execute(
+                "UPDATE agents_meta SET wake_suppressed_until = now() + interval '5 minutes', "
+                "wake_suppress_reason = 'stranded_wake' WHERE id = %s",
+                (aid,),
+            )
+        db_conn.commit()
+        assert select_stranded(pool, _AGE_BOUND_S) == []
+
 
 class TestClaimStranded:
     def test_one_attempt_per_cooldown(
