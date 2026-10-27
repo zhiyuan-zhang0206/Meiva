@@ -134,6 +134,57 @@ def test_impure_edge_fails_in_strict_and_records_in_strict_to_be(
         ("from pathlib import Path\n\n_is_file = Path.is_file\n", "a.py#Path.is_file"),
         ("import os\n\nread_info = os.stat\n", "a.py#os.stat"),
         ("import time\n\nnap = time.sleep\n", "a.py#time.sleep"),
+        (
+            "from pathlib import Path\n\ndef each(root: Path) -> None:\n"
+            "    for entry in root.iterdir():\n        entry.resolve()\n",
+            "a.py#Path.resolve",
+        ),
+        (
+            "from pathlib import Path\n\ndef each(root: Path) -> list[Path]:\n"
+            "    return [p.resolve() for p in root.rglob('*.py')]\n",
+            "a.py#Path.resolve",
+        ),
+        (
+            "from pathlib import Path\n\nclass Box:\n"
+            "    def __init__(self, root: Path) -> None:\n        self.root = root\n\n"
+            "    def look(self) -> None:\n        self.root.glob('*')\n",
+            "a.py#Path.glob",
+        ),
+        (
+            "from dataclasses import dataclass\nfrom pathlib import Path\n\n"
+            "@dataclass(frozen=True)\nclass Box:\n    root: Path\n\n"
+            "    def look(self) -> Path:\n        return self.root.resolve()\n",
+            "a.py#Path.resolve",
+        ),
+        (
+            "from pathlib import Path\n\ndef each(paths: list[Path]) -> None:\n"
+            "    for path in dict.fromkeys(paths):\n        path.open()\n",
+            "a.py#Path.open",
+        ),
+        (
+            "from pathlib import Path\n\ndef keep(xs: list[Path]) -> list[bool]:\n"
+            "    return list(map(Path.is_file, xs))\n",
+            "a.py#Path.is_file",
+        ),
+        (
+            "import os\nfrom functools import partial\n\nstat_of = partial(os.stat, '.')\n",
+            "a.py#os.stat",
+        ),
+        ("import os\n\ndef f(read: object = os.stat) -> None:\n    return None\n", "a.py#os.stat"),
+        ("_open = open\n", "a.py#open"),
+        (
+            "from pathlib import Path\n\ndef f(p: Path) -> object:\n    return p.stat\n",
+            "a.py#Path.stat",
+        ),
+        ("import os\n\ndef f(a: str, b: str) -> None:\n    os.replace(a, b)\n", "a.py#os.replace"),
+        ("import os\n\ndef f(a: str) -> None:\n    os.remove(a)\n", "a.py#os.remove"),
+        ("import os\n\ndef f(a: str) -> None:\n    os.makedirs(a)\n", "a.py#os.makedirs"),
+        (
+            "import os\n\ndef f(a: str) -> str:\n    return os.path.abspath(a)\n",
+            "a.py#os.path.abspath",
+        ),
+        ("import os\n\ndef f(a: str) -> bool:\n    return os.access(a, 0)\n", "a.py#os.access"),
+        ("import glob\n\ndef f(a: str) -> list[str]:\n    return glob.glob(a)\n", "a.py#glob.glob"),
     ],
 )
 def test_impure_call_catches_effectful_imports_async_and_calls(
@@ -521,6 +572,11 @@ def test_deep_attr_chain_flags_train_wrecks_and_ignores_module_or_method_chains(
         "import os\n\nsep = os.sep\n",
         "import os\n\ndef split(p: str) -> tuple[str, str]:\n    return os.path.split(p)\n",
         "import inspect\n\ndef signature(f: object) -> object:\n    return inspect.signature(f)\n",
+        "def clean(rows: list[str]) -> None:\n    for line in rows:\n        line.replace('a', 'b')\n",
+        "def first(match: object) -> object:\n    return match.group(1)\n",
+        "from pathlib import Path\n\ndef f(p: Path) -> Path:\n    return p.joinpath('a')\n",
+        "def f(box: object) -> object:\n    return box.stat\n",
+        "def f(xs: list[str]) -> list[str]:\n    return [x.resolve() for x in xs]\n",
     ],
 )
 def test_a_pure_look_alike_is_not_an_impure_call(make_repo: RepoFactory, source: str) -> None:
@@ -549,3 +605,21 @@ def test_a_shell_constructor_the_policy_lists_is_an_impure_call(make_repo: RepoF
     )
     keys = [d.debt.key for d in diagnostics(root, "impure-call") if d.debt is not None]
     assert keys == ["a.py#meizel.graph.universe.GitRepo"]
+
+
+def test_a_shell_constructor_named_in_an_annotation_is_not_an_impure_call(
+    make_repo: RepoFactory,
+) -> None:
+    root = make_repo(
+        {
+            "meizel.policy.toml": render_policy({}, {})
+            + '\n[purity]\nimpure-calls = ["meizel.graph.universe.GitRepo"]\n',
+            "pkg/__init__.py": "",
+            "pkg/a.py": (
+                "from meizel.graph.universe import GitRepo\n\n"
+                "def root_of(repo: GitRepo) -> object:\n    return repo.root\n"
+            ),
+            "pkg/meizel.toml": 'purity = "strict-to-be"\n',
+        }
+    )
+    assert diagnostics(root, "impure-call") == []

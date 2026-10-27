@@ -99,6 +99,47 @@ DEFAULT_IMPURE_CALLS = frozenset(
         "os.path.getsize",
         "os.path.getmtime",
         "os.path.realpath",
+        "os.path.lexists",
+        "os.path.getatime",
+        "os.path.getctime",
+        "os.path.samefile",
+        "os.path.ismount",
+        "os.path.abspath",
+        "os.path.relpath",
+        "os.path.expanduser",
+        "os.path.expandvars",
+        "os.statvfs",
+        "os.fwalk",
+        "os.getcwdb",
+        "os.access",
+        "os.chdir",
+        "os.umask",
+        "os.fdopen",
+        "os.write",
+        "os.close",
+        "os.fsync",
+        "os.pipe",
+        "os.dup",
+        "os.dup2",
+        "os.truncate",
+        "os.ftruncate",
+        "os.replace",
+        "os.rename",
+        "os.renames",
+        "os.remove",
+        "os.unlink",
+        "os.mkdir",
+        "os.makedirs",
+        "os.rmdir",
+        "os.removedirs",
+        "os.chmod",
+        "os.chown",
+        "os.symlink",
+        "os.link",
+        "os.utime",
+        "os.mkfifo",
+        "glob.glob",
+        "glob.iglob",
         "pkgutil.get_data",
         "inspect.getsource",
         "inspect.getsourcefile",
@@ -127,11 +168,29 @@ _PATH_IO_METHODS = frozenset(
         "readlink",
         "touch",
         "chmod",
+        "lchmod",
         "samefile",
+        "symlink_to",
+        "hardlink_to",
     }
 )
 _PATH_AMBIGUOUS_METHODS = frozenset({"replace", "open", "glob", "resolve"})
 _PATH_CLASSES = frozenset({"pathlib.Path", "pathlib.PosixPath", "pathlib.PurePath"})
+_PATH_METHODS = _PATH_IO_METHODS | _PATH_AMBIGUOUS_METHODS
+_PATH_DERIVED = frozenset(
+    {
+        "resolve",
+        "with_name",
+        "with_suffix",
+        "with_stem",
+        "expanduser",
+        "absolute",
+        "joinpath",
+        "relative_to",
+    }
+)
+_PATH_ITERATORS = frozenset({"iterdir", "glob", "rglob"})
+_PATH_WRAPPERS = frozenset({"sorted", "list", "tuple", "set", "frozenset", "reversed", "iter"})
 _CALL_ALIASES = {
     "datetime.datetime.now": "datetime.now",
     "datetime.datetime.utcnow": "datetime.utcnow",
@@ -161,6 +220,7 @@ class PurityState:
     items: list[PurityItem] = field(default_factory=list[PurityItem])
     env_lines: set[int] = field(default_factory=set[int])
     path_vars: set[str] = field(default_factory=set[str])
+    call_funcs: set[int] = field(default_factory=set[int])
     enum_subsets: list[EnumSubsetUse] = field(default_factory=list[EnumSubsetUse])
     defined_classes: set[str] = field(default_factory=set[str])
 
@@ -197,6 +257,43 @@ class PurityState:
                         _IMPURE_IMPORT_HINT,
                     )
                 )
+
+    # meiva:note
+    # The names a target binds that stand for paths: `for entry in root.iterdir()`, a comprehension
+    # over `root.rglob("*.py")`, and a loop over a name annotated as a collection of paths.
+    def record_loop(self, target: ast.expr, iterable: ast.expr, dotted: _Dotted) -> None:
+        if isinstance(target, ast.Name) and _iterates_paths(iterable, dotted, self.path_vars):
+            self.path_vars.add(target.id)
+
+    # meiva:note
+    # A name or attribute that denotes an impure call without calling it (`_is_file = Path.is_file`,
+    # `map(Path.is_file, xs)`, `partial(os.stat, p)`, a default argument `read=os.stat`, `_open = open`,
+    # `stat = root.stat`): the reference is the call under another name, and every use of it would
+    # otherwise be a call the scanner does not see. Recorded once, where it is named. Only the code's
+    # own list counts: a class the policy lists as a shell constructor is also an annotation.
+    def record_reference(
+        self,
+        node: ast.Name | ast.Attribute,
+        resolved: str | None,
+        dotted: _Dotted,
+        *,
+        unshadowed_open: bool = False,
+    ) -> None:
+        if id(node) in self.call_funcs:
+            return
+        what = _referenced_call(
+            node, resolved, dotted, self.path_vars, unshadowed_open=unshadowed_open
+        )
+        if what is not None:
+            self.items.append(
+                PurityItem(
+                    node.lineno,
+                    Code.IMPURE_CALL,
+                    what,
+                    f"impure call `{what}` named without a call in strict module",
+                    _IMPURE_CALL_HINT,
+                )
+            )
 
     def record_env_access(self, dotted_name: str | None, line: int) -> None:
         if (
@@ -379,62 +476,96 @@ def _is_path_expr(expr: ast.expr, dotted: _Dotted, path_vars: set[str]) -> bool:
         return expr.id in path_vars
     if isinstance(expr, ast.Call):
         target = dotted(expr.func)
-        if target in {"pathlib.Path", "pathlib.PosixPath", "Path"}:
-            return True
-        if isinstance(expr.func, ast.Attribute) and expr.func.attr in {
-            "resolve",
-            "with_name",
-            "with_suffix",
-            "expanduser",
+        if target in {
+            "pathlib.Path",
+            "pathlib.PosixPath",
+            "Path",
+            "pathlib.Path.home",
+            "pathlib.Path.cwd",
         }:
+            return True
+        if isinstance(expr.func, ast.Attribute) and expr.func.attr in _PATH_DERIVED:
             return _is_path_expr(expr.func.value, dotted, path_vars)
     if isinstance(expr, ast.BinOp) and isinstance(expr.op, ast.Div):
         return _is_path_expr(expr.left, dotted, path_vars)
-    if isinstance(expr, ast.Attribute) and expr.attr == "parent":
-        return _is_path_expr(expr.value, dotted, path_vars)
+    if isinstance(expr, ast.Subscript) and isinstance(expr.value, ast.Attribute):
+        return expr.value.attr == "parents" and _is_path_expr(expr.value.value, dotted, path_vars)
+    if isinstance(expr, ast.Attribute):
+        if expr.attr == "parent":
+            return _is_path_expr(expr.value, dotted, path_vars)
+        return isinstance(expr.value, ast.Name) and f"{expr.value.id}.{expr.attr}" in path_vars
     return False
 
 
-# meiva:note
-# The impure call a value names without calling it (`_is_file = Path.is_file`,
-# `read = os.stat`): the alias is the call under another name, and every use of the name would
-# otherwise be a call the scanner does not see. Recorded once, at the assignment.
-def _impure_alias(state: PurityState, value: ast.expr, dotted: _Dotted) -> str | None:
-    if not isinstance(value, ast.Attribute | ast.Name):
-        return None
-    name = dotted(value)
-    if name is None:
-        return None
-    norm = _CALL_ALIASES.get(name, name)
-    if norm in state.impure_calls and norm != _OS_ENVIRON:
-        return norm
-    owner, _, attr = name.rpartition(".")
-    if owner in _PATH_CLASSES and attr in _PATH_IO_METHODS | _PATH_AMBIGUOUS_METHODS:
-        return f"Path.{attr}"
+def _method_spelling(func: ast.expr) -> str:
+    if isinstance(func, ast.Attribute) and isinstance(func.value, ast.Name):
+        return f"{func.value.id}.{func.attr}"
+    return ""
+
+
+def _iterates_paths(expr: ast.expr, dotted: _Dotted, path_vars: set[str]) -> bool:
+    if isinstance(expr, ast.Name):
+        return expr.id in path_vars
+    if not isinstance(expr, ast.Call):
+        return False
+    if isinstance(expr.func, ast.Attribute) and expr.func.attr in _PATH_ITERATORS:
+        return _is_path_expr(expr.func.value, dotted, path_vars)
+    spelled = expr.func.id if isinstance(expr.func, ast.Name) else _method_spelling(expr.func)
+    if spelled in {*_PATH_WRAPPERS, "dict.fromkeys"} and expr.args:
+        return _iterates_paths(expr.args[0], dotted, path_vars)
+    return False
+
+
+def _referenced_call(
+    node: ast.Name | ast.Attribute,
+    resolved: str | None,
+    dotted: _Dotted,
+    path_vars: set[str],
+    *,
+    unshadowed_open: bool,
+) -> str | None:
+    if unshadowed_open:
+        return "open"
+    if resolved is not None:
+        norm = _CALL_ALIASES.get(resolved, resolved)
+        if norm in DEFAULT_IMPURE_CALLS and norm != _OS_ENVIRON:
+            return norm
+        owner, _, attr = resolved.rpartition(".")
+        return f"Path.{attr}" if owner in _PATH_CLASSES and attr in _PATH_METHODS else None
+    if (
+        isinstance(node, ast.Attribute)
+        and node.attr in _PATH_METHODS
+        and _is_path_expr(node.value, dotted, path_vars)
+    ):
+        return f"Path.{node.attr}"
     return None
 
 
-def record_assign(state: PurityState, node: ast.Assign | ast.AnnAssign, dotted: _Dotted) -> None:
-    targets = node.targets if isinstance(node, ast.Assign) else [node.target]
-    if node.value is None:
+def _bind_path_names(
+    state: PurityState,
+    target: ast.expr,
+    value: ast.expr | None,
+    annotation: ast.expr | None,
+    dotted: _Dotted,
+) -> None:
+    if isinstance(target, ast.Name):
+        key = target.id
+    elif isinstance(target, ast.Attribute) and isinstance(target.value, ast.Name):
+        key = f"{target.value.id}.{target.attr}"
+    else:
         return
-    if (
-        len(targets) == 1
-        and isinstance(targets[0], ast.Name)
-        and _is_path_expr(node.value, dotted, state.path_vars)
-    ):
-        state.path_vars.add(targets[0].id)
-    alias = _impure_alias(state, node.value, dotted)
-    if alias is not None:
-        state.items.append(
-            PurityItem(
-                node.lineno,
-                Code.IMPURE_CALL,
-                alias,
-                f"impure call `{alias}` bound to a name in strict module",
-                _IMPURE_CALL_HINT,
-            )
-        )
+    from_annotation = annotation is not None and _is_path_annotation(annotation)
+    if from_annotation or (value is not None and _is_path_expr(value, dotted, state.path_vars)):
+        state.path_vars.add(key)
+        if from_annotation and isinstance(target, ast.Name):
+            state.path_vars.add(f"self.{key}")
+
+
+def record_assign(state: PurityState, node: ast.Assign | ast.AnnAssign, dotted: _Dotted) -> None:
+    annotation = node.annotation if isinstance(node, ast.AnnAssign) else None
+    targets = node.targets if isinstance(node, ast.Assign) else [node.target]
+    if len(targets) == 1:
+        _bind_path_names(state, targets[0], node.value, annotation, dotted)
 
 
 def record_call(
@@ -445,6 +576,7 @@ def record_call(
     *,
     unshadowed_open: bool,
 ) -> None:
+    state.call_funcs.add(id(node.func))
     if unshadowed_open:
         state.items.append(
             PurityItem(
