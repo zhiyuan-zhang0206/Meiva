@@ -19,7 +19,7 @@ commit into it. The plugin as a whole — hooks, SDK surface, configuration — 
 
 ## Host-side scaffolding
 
-**Host-side scaffolding** (`meiva_builtins/plugins/meiva_memory/setup.py:scaffold(*, machine)`, run by explicit `meiva memory init` for every enabled plugin): brings up this cluster's memory pool checkouts and lays the plugin's `template/` down inside the authoring one — `MEMORY.md` (the index every agent reads) and `.githooks/pre-commit` (the character-cap guard), then arms `core.hooksPath`. Idempotent and non-destructive; never overwrites existing pool files. Kept out of `plugin.py`, which imports the agent runtime absent from the `meiva` CLI process. Converge and service startup never touch the memory repository.
+**Host-side scaffolding** (`meiva_builtins/plugins/meiva_memory/setup.py:scaffold(*, machine, facts)`, run by explicit `meiva memory init` for every enabled plugin): brings up this cluster's memory pool checkouts and lays the plugin's `template/` down inside the authoring one — `MEMORY.md` (the index every agent reads) and `.githooks/pre-commit` (the character-cap guard), then arms `core.hooksPath`. Idempotent and non-destructive; never overwrites existing pool files. Kept out of `plugin.py`, which imports the agent runtime absent from the `meiva` CLI process. Converge and service startup never touch the memory repository.
 
 ## Pool validator
 
@@ -35,24 +35,20 @@ Parent: [[meiva_builtins/plugins/meiva_memory/docs/meiva_memory.meiva.okf.md|mei
 
 ## Provisioning targets and configuration stages
 
-The public plugin ABI remains `scaffold(*, machine)`. At each invocation this
-builtin root captures the authoring and consolidated paths through the existing
-foundation path helpers. Every later initialization, template and hook operation
-uses those captured targets; the next invocation captures them again. The two
-helpers still read the ambient home separately: this is not an atomic snapshot
-of a shared explicit home, and no path vocabulary is duplicated here.
+The public plugin ABI is `scaffold(*, machine, facts)`: the explicit `meiva memory init` command reads the
+Meiva home, the two memory provisioning settings (`MEIVA_MEMORY_KEEP_LOCAL`, `MEIVA_MEMORY_REMOTE`) and the
+gateway access once from its configuration owner (`base.packages.plugins.loading.scaffold.ScaffoldFacts`) and hands
+that frozen value to every enabled plugin's scaffold; a scaffold written for `scaffold(*, machine)` is refused
+before it runs. The scaffold reads no settings of its own and has no root. It derives the authoring and
+consolidated paths from `facts.home` through the foundation path helpers, and every later initialization,
+template and hook operation uses those targets; the next invocation of the command reads the facts again.
 
 The outer checkout probe retains its logging and Git error-classification
 boundary. The actual initialization stage probes that same target again; an
 intervening filesystem change is not hidden behind a cached boolean. This is not
 an initialization mutex or a concurrency transaction.
 
-Authoring reads its branch and keep-local setting at its own stage. Existing
-and local-only checkouts do not read a remote or gateway access. A fresh remote
-operation reads the remote only when needed; a split runner without it then
-obtains the existing global gateway access and installs a bundle. Gateway
-provisioning independently reads keep-local and any needed remote at its later
-stage. Credentials and remote configuration are not eagerly frozen with paths.
-The CommandRuntime configuration/home-to-plugin bridge remains incomplete; this
-root deliberately keeps the existing global authority without creating a second
-configuration boot or expanding the external scaffold ABI.
+Existing and local-only checkouts do not need a remote or gateway access. A fresh remote operation uses
+`facts.memory_remote` only when needed; a split runner without it then installs a bundle from
+`facts.gateway`. Both stages (authoring and, on a gateway-capable unit, the consolidated checkout) provision
+from the same facts, so a setting changed while the first stage runs does not reach the second.

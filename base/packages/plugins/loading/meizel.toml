@@ -1,4 +1,4 @@
-exports = ["discovery.py", "faces.py", "plugin_loader.py", "registry.py"]
+exports = ["discovery.py", "faces.py", "plugin_loader.py", "registry.py", "scaffold.py"]
 
 [uses]
 "faces.py" = ["__init__.py", "discovery.py", "plugin_loader.py", "registry.py"]

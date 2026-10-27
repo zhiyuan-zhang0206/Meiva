@@ -11,10 +11,11 @@ import pytest
 
 from base import paths
 from base.packages.plugins.enable_config import write_local
+from base.packages.plugins.loading.scaffold import ScaffoldFacts
 from base.paths.tests.homes import point_home
 from base.telemetry import EventPipeline
 from cli.commands.extensions import memory
-from cli.commands.extensions.memory import run_plugin_scaffolds
+from cli.commands.extensions.memory import run_plugin_scaffolds, scaffold_facts
 from cli.commands.lifecycle import converge_host
 from cli.database import OperatorDatabaseFactory
 from cli.database.runtime import CommandRuntime
@@ -28,6 +29,10 @@ def _isolate(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     home = tmp_path / "meiva"
     home.mkdir()
     point_home(monkeypatch, home)
+
+
+def _facts(command: CommandRuntime) -> ScaffoldFacts:
+    return scaffold_facts(command.config, home=command.home)
 
 
 def _enable_user_plugins(plugins: dict[str, dict[str, object]]) -> None:
@@ -52,13 +57,15 @@ def test_scaffold_runs_despite_dangling_config(*, command_runtime: CommandRuntim
     (pdir / "plugin.py").write_text("__description__ = 'x'\n", encoding="utf-8")
     (pdir / "setup.py").write_text(
         "from pathlib import Path\n"
-        "def scaffold(*, machine):\n"
+        "def scaffold(*, machine, facts):\n"
         "    Path(__file__).with_name('scaffolded.marker').write_text('1')\n",
         encoding="utf-8",
     )
     _enable_user_plugins({"real": {"enabled": True}, "vanished": {"enabled": True}})
 
-    result = run_plugin_scaffolds(machine=command_runtime.machine)  # must not raise
+    result = run_plugin_scaffolds(
+        machine=command_runtime.machine, facts=_facts(command_runtime)
+    )  # must not raise
 
     assert result.ran == ["real"]
     assert (pdir / "scaffolded.marker").exists()
@@ -81,13 +88,15 @@ def test_broken_setup_py_is_skipped_and_other_scaffolds_run(
     (real / "plugin.py").write_text("__description__ = 'x'\n", encoding="utf-8")
     (real / "setup.py").write_text(
         "from pathlib import Path\n"
-        "def scaffold(*, machine):\n"
+        "def scaffold(*, machine, facts):\n"
         "    Path(__file__).with_name('scaffolded.marker').write_text('1')\n",
         encoding="utf-8",
     )
     _enable_user_plugins({"broken": {"enabled": True}, "real": {"enabled": True}})
 
-    result = run_plugin_scaffolds(machine=command_runtime.machine)  # must not raise
+    result = run_plugin_scaffolds(
+        machine=command_runtime.machine, facts=_facts(command_runtime)
+    )  # must not raise
 
     assert result.ran == ["real"]
     assert (real / "scaffolded.marker").exists()
@@ -105,12 +114,13 @@ def test_scaffold_execution_stays_fail_fast(*, command_runtime: CommandRuntime) 
     pdir.mkdir(parents=True)
     (pdir / "plugin.py").write_text("__description__ = 'x'\n", encoding="utf-8")
     (pdir / "setup.py").write_text(
-        "def scaffold(*, machine):\n    raise RuntimeError('scaffold boom')\n", encoding="utf-8"
+        "def scaffold(*, machine, facts):\n    raise RuntimeError('scaffold boom')\n",
+        encoding="utf-8",
     )
     _enable_user_plugins({"real": {"enabled": True}})
 
     with pytest.raises(RuntimeError, match="scaffold boom"):
-        run_plugin_scaffolds(machine=command_runtime.machine)
+        run_plugin_scaffolds(machine=command_runtime.machine, facts=_facts(command_runtime))
 
 
 def test_converge_steps_do_not_scaffold_plugins() -> None:
@@ -222,7 +232,9 @@ def test_memory_init_returns_a_clean_error_for_the_wrong_branch_guard(
     _install_memory_plugin()
     command_runtime.machine.set(role="agent-runner", name="test-runner")
     _make_dirty_memory_repo(paths.memory_dir(), "main")
-    assert memory.cmd_memory_init(machine=command_runtime.machine) == 1
+    assert (
+        memory.cmd_memory_init(machine=command_runtime.machine, facts=_facts(command_runtime)) == 1
+    )
 
     stderr = capsys.readouterr().err
     assert (
@@ -241,7 +253,9 @@ def test_memory_init_seeds_a_dirty_correct_branch_pool(
     pool = paths.memory_dir()
     _make_dirty_memory_repo(pool, "machine-test-runner")
 
-    assert memory.cmd_memory_init(machine=command_runtime.machine) == 0
+    assert (
+        memory.cmd_memory_init(machine=command_runtime.machine, facts=_facts(command_runtime)) == 0
+    )
 
     assert (pool / "MEMORY.md").is_file()
     assert (pool / ".githooks" / "pre-commit").is_file()
@@ -265,13 +279,15 @@ def test_memory_init_reports_scaffolded_plugins(
     (plugin / "plugin.py").write_text("__description__ = 'test scaffold'\n", encoding="utf-8")
     (plugin / "setup.py").write_text(
         "from pathlib import Path\n"
-        "def scaffold(*, machine):\n"
+        "def scaffold(*, machine, facts):\n"
         "    Path(__file__).with_name('scaffolded.marker').write_text('ready')\n",
         encoding="utf-8",
     )
     _enable_user_plugins({"example": {"enabled": True}})
 
-    assert memory.cmd_memory_init(machine=command_runtime.machine) == 0
+    assert (
+        memory.cmd_memory_init(machine=command_runtime.machine, facts=_facts(command_runtime)) == 0
+    )
     assert (plugin / "scaffolded.marker").read_text(encoding="utf-8") == "ready"
     assert "scaffolded: example" in capsys.readouterr().out
 
@@ -292,13 +308,15 @@ def test_scaffolds_borrow_the_same_invocation_machine(command_runtime: CommandRu
         (plugin / "plugin.py").write_text("__description__ = 'same owner'\n", encoding="utf-8")
         (plugin / "setup.py").write_text(
             "from pathlib import Path\n"
-            "def scaffold(*, machine):\n"
+            "def scaffold(*, machine, facts):\n"
             "    Path(__file__).with_name('owner').write_text(f'{id(machine)}:{machine.name()}')\n",
             encoding="utf-8",
         )
     _enable_user_plugins({"first": {"enabled": True}, "second": {"enabled": True}})
 
-    assert run_plugin_scaffolds(machine=command_runtime.machine).ran == ["first", "second"]
+    assert run_plugin_scaffolds(
+        machine=command_runtime.machine, facts=_facts(command_runtime)
+    ).ran == ["first", "second"]
     expected = f"{id(command_runtime.machine)}:scaffold-owner"
     for name in ("first", "second"):
         assert (paths.plugins_dir() / name / "owner").read_text(encoding="utf-8") == expected
@@ -314,4 +332,81 @@ def test_legacy_zero_argument_scaffold_fails_fast(command_runtime: CommandRuntim
     _enable_user_plugins({"legacy": {"enabled": True}})
 
     with pytest.raises(TypeError, match="machine"):
-        run_plugin_scaffolds(machine=command_runtime.machine)
+        run_plugin_scaffolds(machine=command_runtime.machine, facts=_facts(command_runtime))
+
+
+# meiva:note
+# The ABI is `scaffold(*, machine, facts)`: a scaffold written for the previous `scaffold(*, machine)`
+# is refused before anything runs, with a message that names the missing keyword.
+def test_a_scaffold_without_the_facts_keyword_is_refused(command_runtime: CommandRuntime) -> None:
+    plugin = paths.plugins_dir() / "previous"
+    plugin.mkdir(parents=True)
+    (plugin / "plugin.py").write_text("__description__ = 'previous'\n", encoding="utf-8")
+    (plugin / "setup.py").write_text(
+        "def scaffold(*, machine):\n    raise AssertionError('not entered')\n", encoding="utf-8"
+    )
+    _enable_user_plugins({"previous": {"enabled": True}})
+
+    with pytest.raises(TypeError, match=r"plugin 'previous': scaffold must accept .* facts"):
+        run_plugin_scaffolds(machine=command_runtime.machine, facts=_facts(command_runtime))
+
+
+# meiva:note
+# The command reads the memory provisioning settings, the home and the gateway access once, and the
+# scaffold receives exactly those values.
+def test_the_scaffold_receives_the_facts_the_command_read(
+    command_runtime: CommandRuntime, tmp_path: Path
+) -> None:
+    plugin = paths.plugins_dir() / "recorder"
+    plugin.mkdir(parents=True)
+    (plugin / "plugin.py").write_text("__description__ = 'recorder'\n", encoding="utf-8")
+    (plugin / "setup.py").write_text(
+        "from pathlib import Path\n"
+        "def scaffold(*, machine, facts):\n"
+        "    Path(__file__).with_name('facts').write_text(\n"
+        "        f'{facts.home}|{facts.memory_keep_local}|{facts.memory_remote}|{facts.gateway.gateway_url}'\n"
+        "    )\n",
+        encoding="utf-8",
+    )
+    _enable_user_plugins({"recorder": {"enabled": True}})
+    command_runtime.config.set_field("memory_keep_local", True)
+    command_runtime.config.set_field("memory_remote", "git@example.invalid:pool.git")
+    home = tmp_path / "facts-home"
+    facts = scaffold_facts(command_runtime.config, home=home)
+
+    run_plugin_scaffolds(machine=command_runtime.machine, facts=facts)
+
+    recorded = (plugin / "facts").read_text(encoding="utf-8")
+    assert recorded == f"{home}|True|git@example.invalid:pool.git|{facts.gateway.gateway_url}"
+
+
+# meiva:note
+# The handler of `meiva memory init` reads the facts from its runtime: the runtime's home and the
+# memory settings of the runtime's configuration owner reach the scaffold.
+def test_the_memory_init_handler_builds_the_facts_from_its_runtime(
+    command_runtime: CommandRuntime,
+) -> None:
+    from cli import parsers
+    from cli.commands.extensions.parsers import mcp
+
+    plugin = paths.plugins_dir() / "recorder"
+    plugin.mkdir(parents=True)
+    (plugin / "plugin.py").write_text("__description__ = 'recorder'\n", encoding="utf-8")
+    (plugin / "setup.py").write_text(
+        "from pathlib import Path\n"
+        "def scaffold(*, machine, facts):\n"
+        "    Path(__file__).with_name('facts').write_text(\n"
+        "        f'{facts.home}|{facts.memory_keep_local}|{facts.memory_remote}'\n"
+        "    )\n",
+        encoding="utf-8",
+    )
+    _enable_user_plugins({"recorder": {"enabled": True}})
+    command_runtime.config.set_field("memory_keep_local", True)
+    command_runtime.config.set_field("memory_remote", "git@example.invalid:pool.git")
+    args = parsers.parse_args(["memory", "init"])
+    args.runtime = command_runtime
+
+    assert mcp.h_memory_init(args) == 0
+
+    recorded = (plugin / "facts").read_text(encoding="utf-8")
+    assert recorded == f"{command_runtime.home}|True|git@example.invalid:pool.git"
