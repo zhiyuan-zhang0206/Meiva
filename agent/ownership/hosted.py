@@ -6,6 +6,7 @@ from uuid import UUID
 
 from loguru import logger
 
+from agent.ownership.audit_payloads import admitted_payload, settled_payload
 from agent.ownership.lifecycle_plan import (
     AppliedLifecycle as AppliedLifecycle,
 )
@@ -181,7 +182,7 @@ async def admit_hosted_runtime(
             event_type="status_change",
             agent_id=agent_id,
             source="system",
-            payload={"from": previous_status, "to": "running"},
+            payload=admitted_payload(previous_status),
         )
         recorded.append(await record_audit_async(conn, admitted_event))
     for event in recorded:
@@ -234,7 +235,7 @@ async def settle_hosted_runtime(
                     event_type="status_change",
                     agent_id=incarnation.agent_id,
                     source="system",
-                    payload={"from": "running", "to": "idling"},
+                    payload=settled_payload(),
                 ),
             )
             if changed
