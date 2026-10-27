@@ -9,6 +9,7 @@
 
 from __future__ import annotations
 
+import os
 import signal
 import socket
 from collections.abc import Callable
@@ -104,6 +105,7 @@ def test_real_owned_postgres_resume_and_fast_stop(
             native_cluster.plane,
             10,
             home=home,
+            uid=os.getuid(),
             retained_children=native_cluster.retained_children,
             producer=operator_pipeline,
         ).stopped == ("postgres",)
@@ -115,6 +117,7 @@ def test_real_owned_postgres_resume_and_fast_stop(
         native_cluster.plane,
         2,
         home=home,
+        uid=os.getuid(),
         retained_children=native_cluster.retained_children,
         producer=operator_pipeline,
     )

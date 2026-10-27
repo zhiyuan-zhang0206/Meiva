@@ -63,6 +63,9 @@ from base.lm.catalog import ModelCatalog
 from base.packages.plugin_providers import build_model_catalog
 from base.paths import workspace_dir
 
+_PICKED_UP_AT = datetime(2026, 1, 1, tzinfo=UTC)
+
+
 # ── helpers ──
 
 
@@ -150,6 +153,7 @@ def _sample_messages() -> list[AnyMessage]:
             content="a framework note",
             tag=NoteTag.COMPACT_REMINDER,
             created_at=datetime.now(UTC),
+            picked_up_at=_PICKED_UP_AT,
         ),
     ]
 

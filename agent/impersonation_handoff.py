@@ -66,7 +66,10 @@ def note_stamp_of(notes: TimestampPolicy) -> NoteStamp:
 
 def _render(draft: NoteDraft, session: dict[str, Any] | None = None) -> HumanMessage:
     note = system_note_message(
-        content=draft.text, tag=NoteTag.IMPERSONATION, created_at=draft.created_at
+        content=draft.text,
+        tag=NoteTag.IMPERSONATION,
+        picked_up_at=draft.created_at,
+        created_at=draft.created_at,
     )
     note.id = draft.note_id
     if draft.anchors_session and session is not None:

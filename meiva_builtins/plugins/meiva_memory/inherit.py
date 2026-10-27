@@ -127,6 +127,7 @@ def inherited_memory_note(ctx: MeivaContext) -> HumanMessage | None:
         len(split.remote),
         len(content),
     )
+    now = ctx.require_clock().now()
     return system_note_message(
-        content=content, tag=NoteTag.INHERITED_MEMORY, created_at=ctx.require_clock().now()
+        content=content, tag=NoteTag.INHERITED_MEMORY, picked_up_at=now, created_at=now
     )

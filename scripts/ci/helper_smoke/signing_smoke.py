@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import os
 import random
 import subprocess
 import sys
@@ -61,7 +62,7 @@ def verify_signature(app: Path) -> None:
 # and the operating system's random generator.
 def install_env() -> lifecycle.InstallEnv:
     home = meiva_home()
-    host = Host.system()
+    host = Host.system(environ=os.environ)
     build = lifecycle.BuildEnv(
         home=home,
         facts=LaunchdFacts.of(host, user_home=Path.home()),

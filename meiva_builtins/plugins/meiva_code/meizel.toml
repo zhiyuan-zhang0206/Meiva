@@ -13,7 +13,6 @@ exports = ["agent_runtime.py", "plugin.py"]
 [roots]
 "_state.py" = { kinds = ["home"], why = "Plugin state factory resolves current agent workspace or user home as default logical cwd" }
 "agent_runtime.py" = { kinds = ["home"], why = "ValidateCwdAfterInitHook derives the workspace paths it validates against through the base.paths helpers, which stay acquisition points until their zero-argument forms are removed" }
-"plugin.py" = { kinds = ["clock"], why = "SDK surface wrappers stamp context notes with UTC time" }
 
 [debt.ambient-read]
 "_code_namespace.py#home pathlib.Path.expanduser" = 1

@@ -128,6 +128,7 @@ def fake_host(
     platform: Platform = LINUX_X86,
     programs: Mapping[str, str] | None = None,
     uid: int = 1000,
+    environ: Mapping[str, str] | None = None,
 ) -> Host:
     found = dict(programs or {})
     return Host(
@@ -135,4 +136,5 @@ def fake_host(
         which=found.get,
         platform=platform,
         uid=uid,
+        environ={} if environ is None else environ,
     )

@@ -8,6 +8,7 @@ queue or re-run commands. Missing or queued execution cannot be forced green.
 
 from __future__ import annotations
 
+import os
 import sys
 from pathlib import Path
 
@@ -34,7 +35,7 @@ if __name__ == "__main__":
     )
     sys.exit(
         main(
-            host=Host.system(),
+            host=Host.system(environ=os.environ),
             clock=clock,
             open_url=SYSTEM_URL_OPENER,
             workflows=repo_has_workflows(Path(__file__).resolve().parents[2]),

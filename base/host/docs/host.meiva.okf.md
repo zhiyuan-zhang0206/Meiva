@@ -21,13 +21,13 @@ helpers. HTTPX uses its installed import behavior and public entry points.
 - [[base/host/docs/brew_pin.meiva.okf.md]] — Operator-approved tool pins: brew formula manifest, uv release digests, apt-series pins, brew probes.
 
 `base/host/system/hostport.py` is the port to this machine. A component that starts a process,
-looks up a program or branches on the platform takes a required `host: Host` with four fields:
+looks up a program or branches on the platform takes a required `host: Host` with five fields:
 `run` (`proc.run_bounded`, whose timeout bounds the whole process tree), `which`
 (`shutil.which`), `platform` (`base.native_process.os_platform.Platform`: `system` as `linux` or
-`darwin`, `machine`, `executable`; it is defined there once because `native_process` sits below `base.host`) and `uid`. The composition root builds it with `Host.system()`; a test builds the
+`darwin`, `machine`, `executable`; it is defined there once because `native_process` sits below `base.host`), `uid` and `environ` (the process environment, read-only). The composition root builds it with `Host.system(environ=...)`; a test builds the
 `Host` it wants with `base.host.system.tests.fake_commands.FakeCommands` as `run`, which records each
 argv, answers from a script routed by argv prefix and refuses an unscripted command. A test that
-needs a real process uses `Host.system()`. The four fields are the whole port; a new capability
+needs a real process uses `Host.system(environ={})`. The five fields are the whole port; a new capability
 is a reviewed addition, not a field that appears on its own.
 
 `base/host/atomic_io.py` publishes a file by writing a sibling temporary file, syncing it,

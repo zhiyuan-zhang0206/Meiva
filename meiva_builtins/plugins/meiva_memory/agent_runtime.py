@@ -343,10 +343,12 @@ class _MemoryWriteCheckHook(Hook):
             return cleared
         if not reports:
             return cleared
+        now = runtime.context.require_clock().now()
         note = system_note_message(
             content=render_reminder(reports),
             tag=NoteTag.MEMORY_WRITE_CHECK,
-            created_at=runtime.context.require_clock().now(),
+            picked_up_at=now,
+            created_at=now,
         )
         return {**cleared, "messages": [note]}
 

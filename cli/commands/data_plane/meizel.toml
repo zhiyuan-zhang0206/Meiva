@@ -25,7 +25,6 @@ exports = ["bringup.py", "cluster_instance.py", "completion.py", "config.py", "h
 "cluster_instance.py#environ base.native_process.child_env.inherited_process_env" = 1
 "completion.py#environ base.native_process.child_env.daemon_process_env" = 1
 "maintenance_stop.py#clock base.clock.SYSTEM_TIMERS" = 1
-"maintenance_stop.py#platform base.host.system.hostport.Host.system" = 1
 "pgbouncer.py#clock base.clock.SYSTEM_TIMERS" = 3
 "pgbouncer.py#clock time.monotonic" = 1
 "stop_waits.py#clock base.clock.SYSTEM_TIMERS" = 2

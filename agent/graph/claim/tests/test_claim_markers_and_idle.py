@@ -1,3 +1,5 @@
+from datetime import UTC, datetime
+
 import psycopg
 from psycopg_pool import AsyncConnectionPool
 
@@ -11,6 +13,8 @@ from base.config.service_read import ConfigAuthority
 from base.db.code_version_gate import ProcessDbGate
 from base.events.live.tests.live_capture import LiveEvents
 from base.lm.catalog import ModelCatalog
+
+_PICKED_UP_AT = datetime(2026, 1, 1, tzinfo=UTC)
 
 
 def test_by_who_self_returns_yourself():
@@ -101,7 +105,10 @@ def test_claim_will_idle_shares_the_impl_and_wrapper_contract() -> None:
     resume = AgentState()
     resume.impersonation_handoff_id = "7:0"
     note = system_note_message(
-        content="session ended", tag=NoteTag.IMPERSONATION, created_at=datetime.now(UTC)
+        content="session ended",
+        tag=NoteTag.IMPERSONATION,
+        created_at=datetime.now(UTC),
+        picked_up_at=_PICKED_UP_AT,
     )
     note.id = "impersonation-handoff:7:0"
     resume.messages = [SystemMessage(content="prompt"), note]

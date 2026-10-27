@@ -28,7 +28,8 @@ channel reducers enforce). This door does not import it.
 from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
-from datetime import UTC, datetime
+from dataclasses import dataclass
+from datetime import datetime
 from typing import Any, TypedDict, Unpack
 
 from langchain_core.messages import (
@@ -57,6 +58,7 @@ from base.lm.system_note import wrap_system_note
 __all__ = [
     "COMPACT_SUMMARY_HEADER",
     "ExecStatus",
+    "InboundTimes",
     "MeivaMsgType",
     "NoteTag",
     "attach_message",
@@ -73,13 +75,13 @@ __all__ = [
 ]
 
 
-def _stamp_picked_up(kwargs: dict[str, object]) -> dict[str, object]:
-    """Add `meiva_picked_up_at`: the moment this injected message is put into the
-    LLM context (builders run at the injection point). Distinct from
-    `meiva_created_at`, which for an inbound is its arrival time. AIMessage and
-    tool output are produced inside the context, so their `meiva_created_at`
-    already is the read time and they carry no `meiva_picked_up_at`."""
-    kwargs["meiva_picked_up_at"] = datetime.now(UTC).isoformat()
+# meiva:note
+# Add `meiva_picked_up_at`: the moment this injected message is put into the LLM context, which
+# the caller at the injection point reads from its clock. Distinct from `meiva_created_at`, which
+# for an inbound is its arrival time. AIMessage and tool output are produced inside the context,
+# so their `meiva_created_at` already is the read time and they carry no `meiva_picked_up_at`.
+def _stamp_picked_up(kwargs: dict[str, object], picked_up_at: datetime) -> dict[str, object]:
+    kwargs["meiva_picked_up_at"] = picked_up_at.isoformat()
     return kwargs
 
 
@@ -91,13 +93,22 @@ def _stamp_created_at(kwargs: dict[str, object], created_at: datetime | None) ->
     return kwargs
 
 
+# meiva:note
+# The two times an inbound message carries: when its row arrived (`meiva_created_at`, omitted
+# when unknown) and when the claim puts it into the context (`meiva_picked_up_at`).
+@dataclass(frozen=True)
+class InboundTimes:
+    arrived_at: datetime | None
+    picked_up_at: datetime
+
+
 def inbound_message(
     *,
     content: str | Sequence[Mapping[str, object]],
     source: str,
     inbound_id: int | None,
     body_start: int,
-    created_at: datetime | None = None,
+    times: InboundTimes,
     image_urls: list[str] | None = None,
 ) -> HumanMessage:
     # meiva:link agent/messages/docs/message-format.meiva.okf.md
@@ -117,12 +128,19 @@ def inbound_message(
     )
     return HumanMessage(
         content=normalized_content,
-        additional_kwargs=_stamp_created_at(_stamp_picked_up(kwargs), created_at),
+        additional_kwargs=_stamp_created_at(
+            _stamp_picked_up(kwargs, times.picked_up_at), times.arrived_at
+        ),
     )
 
 
 def system_note_message(
-    *, content: str, tag: NoteTag, task_id: int | None = None, created_at: datetime | None = None
+    *,
+    content: str,
+    tag: NoteTag,
+    picked_up_at: datetime,
+    task_id: int | None = None,
+    created_at: datetime | None = None,
 ) -> HumanMessage:
     """A framework-injected, system-styled note added to the conversation.
     Covers one-time guidance notes (SDK-primitive hints, the agent-reply
@@ -152,12 +170,16 @@ def system_note_message(
         kwargs["meiva_task_id"] = task_id
     return HumanMessage(
         content=wrap_system_note(content),
-        additional_kwargs=_stamp_created_at(_stamp_picked_up(kwargs), created_at),
+        additional_kwargs=_stamp_created_at(_stamp_picked_up(kwargs, picked_up_at), created_at),
     )
 
 
 def security_note_message(
-    *, source: str, triggers: Sequence[str], created_at: datetime | None = None
+    *,
+    source: str,
+    triggers: Sequence[str],
+    picked_up_at: datetime,
+    created_at: datetime | None = None,
 ) -> HumanMessage:
     """The SECURITY system note for one prompt-injection scan finding.
 
@@ -173,10 +195,14 @@ def security_note_message(
             f"Triggers: {', '.join(triggers)}. Verify before acting."
         ),
         tag=NoteTag.SECURITY,
+        picked_up_at=picked_up_at,
         created_at=created_at,
     )
 
 
+# meiva:note
+# `created_at` is also the moment the message is put into the context (`meiva_picked_up_at`): the
+# caller builds it at the injection point.
 def attach_message(
     *, blocks: list[dict[str, object]], text: str, created_at: datetime
 ) -> HumanMessage:
@@ -194,7 +220,8 @@ def attach_message(
     return HumanMessage(
         content=content_blocks,
         additional_kwargs=_stamp_created_at(
-            _stamp_picked_up({"meiva_msg_type": MeivaMsgType.ATTACH.value}), created_at
+            _stamp_picked_up({"meiva_msg_type": MeivaMsgType.ATTACH.value}, created_at),
+            created_at,
         ),
     )
 

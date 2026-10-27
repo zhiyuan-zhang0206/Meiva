@@ -113,13 +113,14 @@ def pick_skills(scores: Mapping[str, float], *, threshold: float, limit: int) ->
 def render_note(
     candidates: Sequence[RecallCandidate],
     *,
-    created_at: datetime | None = None,
+    created_at: datetime,
 ) -> HumanMessage:
     """The system-styled note naming `candidates`, one index line each."""
     lines = [index_entry(c.target, c.description) for c in candidates]
     return system_note_message(
         content=f"{_FRAMING}\n\n" + "\n".join(lines),
         tag=NoteTag.SKILL_RECALL,
+        picked_up_at=created_at,
         created_at=created_at,
     )
 
@@ -132,8 +133,8 @@ async def recall_skills(
     catalog: ModelCatalog,
     keys: ProviderKeys,
     agent_id: int,
+    created_at: datetime,
     peer_turn: bool = False,
-    created_at: datetime | None = None,
 ) -> SkillRecall | None:
     """Score `candidates` against the recent conversation and render the best matches as a
     note to inject, or `None` when there is nothing to offer.

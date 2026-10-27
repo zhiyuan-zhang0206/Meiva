@@ -1,16 +1,27 @@
+from datetime import UTC, datetime
+
 import pytest
 from langchain_core.messages import AIMessage, AnyMessage, HumanMessage
 
 from agent.messages import (
+    InboundTimes,
     inbound_message,
     last_agent_inbound_text,
     tail_has_recallable_inbound,
     tail_has_skill_recall_inbound,
 )
 
+_PICKED_UP_AT = datetime(2026, 1, 1, tzinfo=UTC)
+
 
 def _inbound(source: str) -> AnyMessage:
-    return inbound_message(content="hello", source=source, inbound_id=1, body_start=0)
+    return inbound_message(
+        content="hello",
+        source=source,
+        inbound_id=1,
+        body_start=0,
+        times=InboundTimes(arrived_at=None, picked_up_at=_PICKED_UP_AT),
+    )
 
 
 @pytest.mark.parametrize("source", ["user", "ui:page:dashboard", "schedule:7"])
@@ -48,8 +59,20 @@ def test_the_memory_recall_gate_keeps_its_wider_meaning() -> None:
 def test_last_peer_text_is_the_newest_peer_message_in_the_batch() -> None:
     tail: list[AnyMessage] = [
         AIMessage(content="prev", id="a0"),
-        inbound_message(content="first ask", source="agent:5", inbound_id=1, body_start=0),
-        inbound_message(content="second ask", source="agent:6", inbound_id=2, body_start=0),
+        inbound_message(
+            content="first ask",
+            source="agent:5",
+            inbound_id=1,
+            body_start=0,
+            times=InboundTimes(arrived_at=None, picked_up_at=_PICKED_UP_AT),
+        ),
+        inbound_message(
+            content="second ask",
+            source="agent:6",
+            inbound_id=2,
+            body_start=0,
+            times=InboundTimes(arrived_at=None, picked_up_at=_PICKED_UP_AT),
+        ),
     ]
     assert last_agent_inbound_text(tail) == "second ask"
 
@@ -57,8 +80,20 @@ def test_last_peer_text_is_the_newest_peer_message_in_the_batch() -> None:
 def test_last_peer_text_skips_a_newer_person_message() -> None:
     tail: list[AnyMessage] = [
         AIMessage(content="prev", id="a0"),
-        inbound_message(content="peer ask", source="agent:5", inbound_id=1, body_start=0),
-        inbound_message(content="person ask", source="user", inbound_id=2, body_start=0),
+        inbound_message(
+            content="peer ask",
+            source="agent:5",
+            inbound_id=1,
+            body_start=0,
+            times=InboundTimes(arrived_at=None, picked_up_at=_PICKED_UP_AT),
+        ),
+        inbound_message(
+            content="person ask",
+            source="user",
+            inbound_id=2,
+            body_start=0,
+            times=InboundTimes(arrived_at=None, picked_up_at=_PICKED_UP_AT),
+        ),
     ]
     assert last_agent_inbound_text(tail) == "peer ask"
 

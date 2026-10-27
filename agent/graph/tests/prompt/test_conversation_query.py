@@ -1,3 +1,5 @@
+from datetime import UTC, datetime
+
 from langchain_core.messages import AIMessage, HumanMessage
 
 from agent.graph.recall.conversation_query import (
@@ -5,18 +7,28 @@ from agent.graph.recall.conversation_query import (
     QUERY_MESSAGES,
     build_conversation_query,
 )
-from agent.messages import NoteTag, inbound_message, system_note_message
+from agent.messages import InboundTimes, NoteTag, inbound_message, system_note_message
+
+_PICKED_UP_AT = datetime(2026, 1, 1, tzinfo=UTC)
 
 
 def _inbound(text: str, n: int = 1) -> HumanMessage:
-    return inbound_message(content=text, source="user", inbound_id=n, body_start=0)
+    return inbound_message(
+        content=text,
+        source="user",
+        inbound_id=n,
+        body_start=0,
+        times=InboundTimes(arrived_at=None, picked_up_at=_PICKED_UP_AT),
+    )
 
 
 def test_the_query_is_the_genuine_messages_oldest_first() -> None:
     messages = [
         _inbound("first question"),
         AIMessage(content="an answer", id="a1"),
-        system_note_message(content="a framework note", tag=NoteTag.MEMORY),
+        system_note_message(
+            content="a framework note", tag=NoteTag.MEMORY, picked_up_at=_PICKED_UP_AT
+        ),
         _inbound("follow-up", 2),
     ]
 
@@ -48,4 +60,9 @@ def test_multimodal_content_contributes_its_text_blocks() -> None:
 
 
 def test_a_conversation_of_notes_alone_is_an_empty_query() -> None:
-    assert build_conversation_query([system_note_message(content="n", tag=NoteTag.MEMORY)]) == ""
+    assert (
+        build_conversation_query(
+            [system_note_message(content="n", tag=NoteTag.MEMORY, picked_up_at=_PICKED_UP_AT)]
+        )
+        == ""
+    )

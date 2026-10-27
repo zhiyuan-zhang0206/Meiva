@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import contextlib
 from collections.abc import Generator
+from datetime import UTC, datetime
 from uuid import uuid4
 
 import httpx
@@ -36,6 +37,9 @@ from base.packages.composer_commands import CommandCatalog
 from base.paths import meiva_home
 from gateway.tests.agents.gateway_auth import without_credentials
 from gateway.tests.auth.gateway_config import gateway_test_client
+
+_PICKED_UP_AT = datetime(2026, 1, 1, tzinfo=UTC)
+
 
 _ENVELOPE_INPUTS = TimestampPolicy.from_clock(Clock.from_settings(), timestamps_enabled=False)
 _SECRET = "external-agent-source-secret"  # noqa: S105 -- isolated test credential
@@ -98,6 +102,7 @@ async def _claimed_text(
         envelope_inputs=_ENVELOPE_INPUTS,
         expand_command=CommandCatalog.system(skills=list, home=meiva_home()).expand,
         gateway=_forbidden_gateway,
+        picked_up_at=_PICKED_UP_AT,
     )
     content = message.model_dump()["content"]
     assert isinstance(content, str)

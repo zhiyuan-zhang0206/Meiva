@@ -132,6 +132,7 @@ def history_dump_note(path: Path, *, created_at: datetime) -> HumanMessage:
             f"summary dropped; recent dumps are kept in the same folder."
         ),
         tag=NoteTag.HISTORY_DUMP,
+        picked_up_at=created_at,
         created_at=created_at,
     )
 

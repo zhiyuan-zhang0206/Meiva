@@ -188,6 +188,7 @@ def _perform(
                     config,
                     remaining(run.deadline),
                     home=command.home,
+                    uid=command.host.uid,
                     retained_children=retained_children,
                     producer=env.producer,
                 )

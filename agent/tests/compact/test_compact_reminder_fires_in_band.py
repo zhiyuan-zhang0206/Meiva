@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import replace
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 from unittest.mock import AsyncMock
@@ -18,7 +19,7 @@ from agent.graph.hooks.compact import (
     generate_summary,
 )
 from agent.hooks import Hook
-from agent.messages import inbound_message
+from agent.messages import InboundTimes, inbound_message
 from agent.state import AgentState, CompactState, ContextReset
 from agent.tests.test_compact import (
     COMPACT_SECTIONS,
@@ -51,6 +52,8 @@ from base.lm.catalog import ModelCatalog
 from base.packages.plugin_providers import build_model_catalog
 from base.packages.plugins.extensions import EMPTY
 from base.paths import meiva_home, resolve_meiva_home
+
+_PICKED_UP_AT = datetime(2026, 1, 1, tzinfo=UTC)
 
 
 async def test_compact_reminder_fires_in_band(
@@ -152,7 +155,13 @@ async def test_compact_reminder_is_not_starved_by_agent_inbounds(
     msgs = [
         SystemMessage(content="<sys>"),
         *(HumanMessage(content="x" * 1000) for _ in range(5)),
-        inbound_message(content="ping", source="agent:5", inbound_id=1, body_start=0),
+        inbound_message(
+            content="ping",
+            source="agent:5",
+            inbound_id=1,
+            body_start=0,
+            times=InboundTimes(arrived_at=None, picked_up_at=_PICKED_UP_AT),
+        ),
     ]
     state = reminder_state(state_cls, messages=msgs)
     result = await wrap_fn(

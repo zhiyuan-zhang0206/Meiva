@@ -178,9 +178,11 @@ async def passive_memory_recall(
     if not picked:
         return None
 
+    now = context.require_clock().now()
     note = system_note_message(
         content=render_note_text(picked),
         tag=NoteTag.MEMORY,
-        created_at=context.require_clock().now(),
+        picked_up_at=now,
+        created_at=now,
     )
     return PassiveRecall(note=note, paths={item.path for item in picked})

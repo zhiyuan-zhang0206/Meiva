@@ -1,3 +1,4 @@
+from datetime import UTC, datetime
 from typing import Any, cast
 
 import pytest
@@ -10,7 +11,7 @@ from agent.graph.hooks.compact import (
     emit_compaction_monitoring,
 )
 from agent.hooks import Hook, make_hook_runner
-from agent.messages import inbound_message
+from agent.messages import InboundTimes, inbound_message
 from agent.state import AgentState, CompactState
 from base.agents.context import MeivaContext
 from base.clock import Clock
@@ -20,6 +21,8 @@ from base.lm.catalog import ModelCatalog
 from base.packages.plugin_providers import build_model_catalog
 from base.packages.plugins.extensions import EMPTY, ExtensionRegistry, PluginContributions
 from base.paths import meiva_home
+
+_PICKED_UP_AT = datetime(2026, 1, 1, tzinfo=UTC)
 
 
 def _runtime(
@@ -128,7 +131,13 @@ async def test_soft_reminder_composes_with_another_message_writer(compact_first:
     state = AgentState(
         messages=[
             HumanMessage(content="history " * 200),
-            inbound_message(content="progress?", source="agent:7", inbound_id=1, body_start=0),
+            inbound_message(
+                content="progress?",
+                source="agent:7",
+                inbound_id=1,
+                body_start=0,
+                times=InboundTimes(arrived_at=None, picked_up_at=_PICKED_UP_AT),
+            ),
         ]
     )
     command = await runner(state, _runtime(), {})

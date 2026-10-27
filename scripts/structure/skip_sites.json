@@ -11,9 +11,6 @@
   "base/host/converge/tests/test_google_drive.py": [
     "skipif(os.geteuid() == 0)"
   ],
-  "base/host/tests/test_config_validators.py": [
-    "skipif(bool(os.environ.get('DISPLAY') or os.environ.get('WAYLAND_DISPLAY')))"
-  ],
   "base/lm/harness/deepseek/tests/test_usage.py": [
     "importorskip('zstandard')"
   ],

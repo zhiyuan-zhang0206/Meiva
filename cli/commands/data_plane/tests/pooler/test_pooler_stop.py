@@ -12,6 +12,7 @@ from __future__ import annotations
 import contextlib
 import dataclasses
 import json
+import os
 import signal
 import socket
 import time
@@ -95,6 +96,7 @@ def test_repeated_normal_stop_preserves_waiting_transaction(
                         pooler_plane(data_plane_config),
                         _STOP_BUDGET_S,
                         home=unit_home,
+                        uid=os.getuid(),
                         producer=operator_pipeline,
                     )
             except (RuntimeError, TimeoutError) as exc:

@@ -110,7 +110,11 @@ def main(*, home: Path, config: ConfigBoot, build_app: Callable[[GatewayProcess]
     raise_fd_limit(65536)
 
     process = GatewayProcess(
-        home=home, config=config, image=LOADED_IMAGE, machine=machine, host=Host.system()
+        home=home,
+        config=config,
+        image=LOADED_IMAGE,
+        machine=machine,
+        host=Host.system(environ=config.process_environment()),
     )
     with process.lifetime():
         _serve_process(process, plan, build_app)
