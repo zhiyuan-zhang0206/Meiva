@@ -20,9 +20,9 @@ exports = ["mcp_daemon.py", "mcp_socket_bridge.py", "mcp_wrapper.py", "orphan.py
 "shutdown_budget.py" = "strict"
 
 [roots]
-"daemon.py" = { kinds = ["clock", "home", "platform", "settings"], why = "Service or operator process entry boots configuration before composing its resources; builds the process clock from SYSTEM_TIMERS; builds the host of this process with Host.system()" }
-"mcp_daemon.py" = { kinds = ["clock", "home", "settings"], why = "Service or operator process entry boots configuration before composing its resources; builds the process clock from SYSTEM_TIMERS" }
-"mcp_wrapper.py" = { kinds = ["home", "settings"], why = "Service or operator process entry boots configuration before composing its resources" }
+"daemon.py" = { kinds = ["clock", "home", "platform", "settings"], why = "Service or operator process entry boots configuration before composing its resources; builds the process clock from SYSTEM_TIMERS; builds the host of this process with Host.system(); reads the home it runs under once, in main()" }
+"mcp_daemon.py" = { kinds = ["clock", "home", "settings"], why = "Service or operator process entry boots configuration before composing its resources; builds the process clock from SYSTEM_TIMERS; reads the home it runs under once, in main()" }
+"mcp_wrapper.py" = { kinds = ["home", "settings"], why = "Service or operator process entry boots configuration before composing its resources; reads the home it runs under once, in main()" }
 
 [debt.ambient-read]
 "macos_readiness.py#platform base.host.system.hostport.Host.system" = 1

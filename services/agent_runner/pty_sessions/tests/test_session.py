@@ -388,7 +388,13 @@ def test_the_client_reads_survivors_from_a_kill_answer(unit_home: Path) -> None:
 def test_a_session_transcript_is_opened_in_the_logs_of_the_service_home(tmp_path: Path) -> None:
     served_home = tmp_path / "served-home"
     served_home.mkdir()
-    service = PtyService(home=served_home, process_control=SYSTEM_PROCESS_CONTROL, now=time.time)
+    service = PtyService(
+        home=served_home,
+        process_control=SYSTEM_PROCESS_CONTROL,
+        now=time.time,
+        timers=SYSTEM_TIMERS,
+        pid=os.getpid(),
+    )
     service._loop = cast(asyncio.AbstractEventLoop, MagicMock())
 
     created = service._spawn("meiva-test-home-1", str(tmp_path), dict(os.environ), None, None)

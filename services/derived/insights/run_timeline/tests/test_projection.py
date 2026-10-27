@@ -120,10 +120,10 @@ class World:
             )
         return saved.get("configurable", {})["checkpoint_id"]
 
+    # meiva:note
+    # One indexing step as the daemon takes it: through the reads the indexing job is built on.
     def step(self, agent: int = AGENT) -> bool:
-        return index_next(
-            self.db, agent, timestamps=self.timestamps, read_segment=self.read_segment
-        )
+        return SegmentReads(self.db, self.timestamps, self.read_segment).index_next(agent)
 
     def prepare(self) -> None:
         while self.step():

@@ -14,6 +14,7 @@ from base.daemon.tests.health_support import unknown_image
 from base.host.net.tests.local_http import serve_json
 from services.desktop.browser.orphan import is_cluster_chrome
 from services.desktop.browser.profile import profile_dir
+from services.supervision.healthchecks.gate import probe as gate_probe
 from services.supervision.roster import composition
 from services.supervision.roster.service_spec import ServiceSpec
 
@@ -91,3 +92,13 @@ def test_browser_identity_is_the_profile_probe_not_a_curl(unit_home: Path) -> No
     assert isinstance(probe, partial)
     assert probe.func is composition.browser_probe
     assert probe.args == (int(get_field("browser_cdp_port")), profile_dir(unit_home))
+
+
+# meiva:note
+# A Gate that answers for another home holds the port; the probe must be asked about this unit's
+# home or the root would judge its own Gate foreign.
+def test_gate_identity_is_the_gate_probe_of_the_units_home(unit_home: Path) -> None:
+    probe = _service("gate").identity_probe
+    assert isinstance(probe, partial)
+    assert probe.func is gate_probe
+    assert probe.keywords == {"home": unit_home}

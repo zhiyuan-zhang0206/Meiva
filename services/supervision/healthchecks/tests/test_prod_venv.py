@@ -19,7 +19,7 @@ _HEALTHY_ENV = {"PATH": os.environ.get("PATH", "")}
 # meiva:note
 # The whole observation deadline the legs share. The caller owns it — nothing in the check falls
 # back to a literal.
-_DEADLINE_S = 5.0
+_DEADLINE_S = 2000.0
 # meiva:note
 # The clock the observation measures its deadline on: frozen, so the legs' shares are the deadline
 # divided by the legs left and nothing the machine's load does changes them.
@@ -27,9 +27,14 @@ _CLOCK = Clock(ClockConfig("UTC", None, message_timestamp_weekday=False), timers
 
 
 # meiva:note
-# A runner that ends the dependency leg as `run_bounded` does once its deadline kills the tree (it
-# raises `TimeoutExpired`, at once and without waiting), and runs every other leg for real.
-def _runner_that_hangs_on(uv: str) -> CommandRunner:
+# A runner that ends the dependency leg as `run_bounded` does once its deadline kills the tree: the
+# whole allowance it was given passes on `timers`, the test's clock, and `TimeoutExpired` is raised
+# at once, so nothing waits. Every other leg runs for real. The second value records the allowance
+# each leg was given, in order: the hung leg spends its half of the deadline, the import leg gets the
+# other half.
+def _runner_that_hangs_on(uv: str, timers: ManualTimers) -> tuple[CommandRunner, list[float]]:
+    allowances: list[float] = []
+
     def run(
         argv: Sequence[str],
         *,
@@ -38,13 +43,15 @@ def _runner_that_hangs_on(uv: str) -> CommandRunner:
         input: bytes | str | None = None,
         **popen_kwargs: object,
     ) -> subprocess.CompletedProcess[Any]:
+        allowances.append(timeout)
         if argv[0] == uv:
+            timers.advance(timeout)
             raise subprocess.TimeoutExpired(list(argv), timeout)
         return run_bounded(
             argv, timeout=timeout, capture_output=capture_output, input=input, **popen_kwargs
         )
 
-    return run
+    return run, allowances
 
 
 # meiva:note
@@ -128,14 +135,16 @@ def test_a_failing_dependency_check_is_a_violation(tmp_path: Path) -> None:
 def test_dependency_timeout_is_unmeasured_and_does_not_skip_import_check(tmp_path: Path) -> None:
     _checkout(tmp_path, "missing")
     uv = _uv(tmp_path)
+    timers = ManualTimers()
+    run, allowances = _runner_that_hangs_on(uv, timers)
 
     observation = hc.observe_venv(
         source_root=tmp_path,
         uv=uv,
         environment=_HEALTHY_ENV,
         deadline_s=_DEADLINE_S,
-        run=_runner_that_hangs_on(uv),
-        clock=_CLOCK,
+        run=run,
+        clock=Clock(ClockConfig("UTC", None, message_timestamp_weekday=False), timers=timers),
     )
 
     (unmeasured,) = observation.unmeasured
@@ -144,6 +153,7 @@ def test_dependency_timeout_is_unmeasured_and_does_not_skip_import_check(tmp_pat
     )
     (violation,) = observation.violations
     assert "No module named" in violation
+    assert allowances == [_DEADLINE_S / 2, _DEADLINE_S / 2]
 
 
 # meiva:note

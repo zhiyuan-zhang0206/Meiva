@@ -12,13 +12,14 @@ import os
 from pathlib import Path
 from typing import cast
 
+from base.clock import Clock, ClockConfig
+from base.clock.tests.manual_timers import ManualTimers
 from base.daemon.health import DaemonProbe, ProbeVerdict
 from base.host.proc import run_bounded
 from base.log.tests.log_records import LogRecords
 from services.supervision.meiva_root_glue import diagnostic_probes as probes
 from services.supervision.meiva_root_glue.diagnostics import Diagnostic, DiagnosticMonitor
 from services.supervision.meiva_root_glue.tests.slices import (
-    frozen_clock,
     runner_that_hangs_on,
     system_clock,
 )
@@ -64,23 +65,28 @@ def test_a_venv_leg_inside_the_observation_deadline_is_not_a_failure(tmp_path: P
 # meiva:note
 # Nothing was read by the hung leg, so nothing may be concluded from it — and the leg after it still
 # ran, because each leg may spend only an even share of what the legs before it left (2026-10-27).
+# The hung leg uses its whole share on the test's clock, so the import leg is given the other half
+# of the deadline, and the deadline is far longer than the real import leg takes.
 def test_a_venv_leg_that_outlives_the_deadline_is_inconclusive_not_down(tmp_path: Path) -> None:
     environment = _fake_uv(_fake_checkout(tmp_path), "exit 0")
+    timers = ManualTimers()
+    run, allowances = runner_that_hangs_on(str(tmp_path / "uv"), timers)
 
     probe = probes.venv(
         environment=environment,
-        run=runner_that_hangs_on(str(tmp_path / "uv")),
-        clock=frozen_clock(),
-        deadline_s=2.0,
+        run=run,
+        clock=Clock(ClockConfig("UTC", "UTC", message_timestamp_weekday=False), timers=timers),
+        deadline_s=2000.0,
         source_root=tmp_path,
     )
 
     assert probe.verdict is ProbeVerdict.INCONCLUSIVE
-    assert "no verdict within the 2s observation deadline" in probe.detail
+    assert "no verdict within the 2000s observation deadline" in probe.detail
     assert (
         "uv pip check did not finish within its share of the observation deadline" in probe.detail
     )
     assert "import smoke" not in probe.detail
+    assert allowances == [1000.0, 1000.0]
 
 
 # meiva:note

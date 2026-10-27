@@ -16,7 +16,6 @@ from services.supervision.meiva_root_glue.diagnostics import Diagnostic
 
 __all__ = [
     "checks_for",
-    "frozen_clock",
     "probe_config",
     "runner_that_hangs_on",
     "system_clock",
@@ -47,16 +46,13 @@ def checks_for(requested: set[str], **inputs: Any) -> list[Diagnostic]:
 
 
 # meiva:note
-# A clock whose monotonic reading never moves: the legs of an observation get exactly their even
-# share of the deadline, whatever the machine's load does meanwhile.
-def frozen_clock() -> Clock:
-    return Clock(ClockConfig("UTC", "UTC", message_timestamp_weekday=False), timers=ManualTimers())
-
-
-# meiva:note
 # A runner that ends the leg that runs `program` as `run_bounded` does once its deadline kills the
-# tree (`TimeoutExpired`, at once and without waiting), and runs every other leg for real.
-def runner_that_hangs_on(program: str) -> CommandRunner:
+# tree: the whole allowance the leg was given passes on `timers`, the test's clock, and
+# `TimeoutExpired` is raised at once, so nothing waits. Every other leg runs for real. The second
+# value records the allowance each leg was given, in order.
+def runner_that_hangs_on(program: str, timers: ManualTimers) -> tuple[CommandRunner, list[float]]:
+    allowances: list[float] = []
+
     def run(
         argv: Sequence[str],
         *,
@@ -65,13 +61,15 @@ def runner_that_hangs_on(program: str) -> CommandRunner:
         input: bytes | str | None = None,
         **popen_kwargs: object,
     ) -> subprocess.CompletedProcess[Any]:
+        allowances.append(timeout)
         if argv[0] == program:
+            timers.advance(timeout)
             raise subprocess.TimeoutExpired(list(argv), timeout)
         return run_bounded(
             argv, timeout=timeout, capture_output=capture_output, input=input, **popen_kwargs
         )
 
-    return run
+    return run, allowances
 
 
 # meiva:note
