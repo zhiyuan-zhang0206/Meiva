@@ -222,7 +222,7 @@ class TreeSelfCheck:
 
     async def _loop(self) -> None:
         while True:
-            await asyncio.sleep(self._config.interval_s)
+            await self._timers.asleep(self._config.interval_s)
             self.run_once()
 
     def _emit_chain_broken(self, broken: list[str], reasons: dict[str, str], root_pid: int) -> None:

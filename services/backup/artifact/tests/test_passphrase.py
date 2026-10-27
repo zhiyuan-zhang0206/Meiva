@@ -15,14 +15,14 @@ def _minted() -> str:
 
 def test_a_minted_passphrase_is_64_lowercase_hex_characters_of_256_bits() -> None:
     rng = random.SystemRandom()
-    draws = [passphrase.mint(rng) for _ in range(8)]
+    draws = [passphrase.mint(rng) for _ in range(64)]
 
     assert all(re.fullmatch(r"[0-9a-f]{64}", draw) for draw in draws)
     assert len(set(draws)) == len(draws)
     # meiva:note
-    # A narrower draw padded to 64 digits stays below 250 bits; 256 random bits exceed 250 bits
-    # except with probability 2**-6 per draw, so eight draws all missing is 2**-48.
-    assert any(int(draw, 16).bit_length() > 250 for draw in draws)
+    # A generator narrower than 256 bits, padded to 64 digits, never reaches a 256-bit value; a
+    # correct one misses it in all 64 draws with probability 2**-64.
+    assert any(int(draw, 16).bit_length() == 256 for draw in draws)
 
 
 def test_birth_pins_the_value_it_is_given(tmp_path: Path) -> None:
