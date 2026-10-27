@@ -23,6 +23,10 @@ StatusChange = TypedDict(
         # ordinary crash. Absent on the transitions that do not ask the question. (This form is
         # functional because `from` is a keyword; the note still belongs here.)
         "unapplied_handoff_receipt": NotRequired[bool],
+        # meiva:note
+        # Why the system moved the row, when the move is not an agent's own admission or settle:
+        # the corpse reaper writes ``"corpse_reaper"``.
+        "reason": NotRequired[str],
     },
 )
 

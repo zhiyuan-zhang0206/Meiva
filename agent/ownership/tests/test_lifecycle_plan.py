@@ -73,3 +73,8 @@ def test_owns_inbound_row_requires_matching_incarnation_or_unowned_row() -> None
     assert owns_inbound_row((generation, owner, "idling"), incarnation=incarnation)
     assert not owns_inbound_row((generation, owner, "terminated"), incarnation=incarnation)
     assert not owns_inbound_row((UUID(int=3), owner, "running"), incarnation=incarnation)
+
+
+def test_owns_inbound_row_refuses_a_row_of_the_wrong_shape() -> None:
+    with pytest.raises(ValueError, match="got a row of 2 columns"):
+        owns_inbound_row((None, None), incarnation=None)
