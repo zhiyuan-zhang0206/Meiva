@@ -107,6 +107,7 @@ _TEST_FILE_PATTERN = re.compile(r"(?:test_.*|.*_test)\.py$")
 # gate (task #4183: PR #3020's subset passed while the full population was red
 # on tests/contracts/test_lint_event_kinds.py).
 _TREE_SCAN_FILE_PATTERN = re.compile(r"test_lint_.*\.py$")
+_REGISTRY_MARKER = "pytest.mark.registry"
 TREE_SCAN_TESTS = frozenset(
     {
         "scripts/ci/pull_requests/tests/test_ci_job_rerun.py",
@@ -241,18 +242,20 @@ def collectable_test_paths(repo_root: Path) -> set[str]:
     }
 
 
+# meiva:note
+# Repository-wide scan tests that every SELECTED subset must include: the `test_lint_*.py` family (by
+# name, so a new lint test joins automatically), the explicit repo-level checks in `TREE_SCAN_TESTS`,
+# and the registry tests, which carry `pytest.mark.registry` because they assert that a table equals
+# what the tracked files hold (the callers of a function, the emit sites) and so a call site in any
+# file can change their verdict. All resolve against the collectable universe.
 def tree_scan_tests(repo_root: Path) -> set[str]:
-    """Repository-wide scan tests that every SELECTED subset must include.
-
-    Membership is the ``test_lint_*.py`` family (by name, so a new lint test
-    joins automatically) plus the explicit repo-level CI/governance checks in
-    ``TREE_SCAN_TESTS``; both resolve against the collectable universe.
-    """
     collectable = collectable_test_paths(repo_root)
     return {
         path
         for path in collectable
-        if _TREE_SCAN_FILE_PATTERN.fullmatch(Path(path).name) is not None or path in TREE_SCAN_TESTS
+        if _TREE_SCAN_FILE_PATTERN.fullmatch(Path(path).name) is not None
+        or path in TREE_SCAN_TESTS
+        or _REGISTRY_MARKER in (repo_root / path).read_text(encoding="utf-8", errors="replace")
     }
 
 
