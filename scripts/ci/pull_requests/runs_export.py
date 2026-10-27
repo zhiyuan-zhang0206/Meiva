@@ -673,12 +673,10 @@ def main(
     tz = cluster_tz()
     now = datetime.now(UTC)
     days = complete_days(now, args.window_days, tz)
-    if args.state_dir is None:
-        from base.paths import meiva_home
+    from base.paths import meiva_home
 
-        state_dir = meiva_home() / _STATE_DIR_RELATIVE
-    else:
-        state_dir = args.state_dir
+    home = meiva_home()
+    state_dir = home / _STATE_DIR_RELATIVE if args.state_dir is None else args.state_dir
     try:
         collections = [
             collect_repo(repo, days, now, tz, state_dir, run_process=run_process, timers=timers)
@@ -697,7 +695,7 @@ def main(
         lifetime = (
             nullcontext(producer())
             if producer is not None
-            else owned_event_pipeline(PROCESS_NAME, image=image)
+            else owned_event_pipeline(PROCESS_NAME, image=image, home=home)
         )
         with lifetime as pipeline:
             emit_snapshot(snapshot, pipeline=pipeline)

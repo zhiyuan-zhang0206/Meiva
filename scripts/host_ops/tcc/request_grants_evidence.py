@@ -137,6 +137,7 @@ def _request_helper_grants(
 def _write_evidence(
     args: argparse.Namespace,
     *,
+    home: Path,
     started: datetime,
     before: dict[str, Any],
     requested: dict[str, Any],
@@ -144,9 +145,7 @@ def _write_evidence(
     log_output: str,
 ) -> int:
     lines, decided = decision_evidence(log_output)
-    from base.paths import meiva_home
-
-    out = Path(args.out) if args.out else meiva_home() / "tcc-evidence"
+    out = Path(args.out) if args.out else home / "tcc-evidence"
     target = out / f"request-{started.strftime('%Y%m%dT%H%M%SZ')}.json"
     target.parent.mkdir(parents=True, exist_ok=True)
     target.write_text(
@@ -187,6 +186,7 @@ def run_evidence(
     platform: str,
     now: datetime,
     log_output: str,
+    home: Path,
 ) -> int:
     args = _parse_args(argv)
     outcome = _request_helper_grants(client, platform=platform)
@@ -195,6 +195,7 @@ def run_evidence(
     before, requested, after = outcome
     return _write_evidence(
         args,
+        home=home,
         started=now,
         before=before,
         requested=requested,
@@ -208,6 +209,7 @@ def main(argv: list[str] | None = None) -> int:
     if sys.platform != "darwin":
         print("this evidence run needs macOS", file=sys.stderr)
         return 2
+    from base.paths import meiva_home
     from services.desktop.permissions_helper.onboarding import helper_client
 
     started = datetime.now(UTC)
@@ -217,6 +219,7 @@ def main(argv: list[str] | None = None) -> int:
     before, requested, after = outcome
     return _write_evidence(
         args,
+        home=meiva_home(),
         started=started,
         before=before,
         requested=requested,

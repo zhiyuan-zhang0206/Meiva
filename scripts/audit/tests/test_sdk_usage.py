@@ -53,12 +53,16 @@ def test_mirrors_deduplicate_and_reject_conflicting_event_ids(tmp_path: Path) ->
     path = tmp_path / "events.jsonl"
     raw = {**event(1, "files.read").model_dump(mode="json"), "event_name": "sdk_call"}
     path.write_text(json.dumps(raw) + "\n" + json.dumps(raw) + "\n")
-    assert len(read_calls([path, path])) == 1
+    with path.open(encoding="utf-8") as first, path.open(encoding="utf-8") as second:
+        assert len(read_calls([first, second])) == 1
     raw["attributes"] = {"fn": "shell.run", "sample_rate": 1}
     with path.open("a") as stream:
         stream.write(json.dumps(raw) + "\n")
-    with pytest.raises(ValueError, match=r"events\.jsonl:3: conflicting"):
-        read_calls([path])
+    with (
+        path.open(encoding="utf-8") as stream,
+        pytest.raises(ValueError, match=r"events\.jsonl:3: conflicting"),
+    ):
+        read_calls([stream])
 
 
 @pytest.mark.parametrize("weight", [0, -1, True, "5"])
@@ -82,4 +86,10 @@ def test_cli_reports_malformed_input_with_location(tmp_path: Path) -> None:
     path.write_text('{"event_name":"sdk_call"}\n')
     with pytest.raises(SystemExit) as exc:
         main([str(path), "--start", START.isoformat(), "--end", END.isoformat()])
+    assert exc.value.code == 2
+
+
+def test_cli_rejects_a_mirror_it_cannot_open(tmp_path: Path) -> None:
+    with pytest.raises(SystemExit) as exc:
+        main([str(tmp_path / "gone.jsonl"), "--start", START.isoformat(), "--end", END.isoformat()])
     assert exc.value.code == 2

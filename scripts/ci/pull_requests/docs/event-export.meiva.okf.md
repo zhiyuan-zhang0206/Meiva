@@ -10,7 +10,8 @@ tags: []
 Standalone `pr_flow_export.py` and `runs_export.py` capture their source image
 after argument validation and before remote collection. Only actual emission
 constructs their writer through `export_process.owned_event_pipeline`: one
-CodeVersion and nonexempt ProcessDbGate supply its live database factory.
+CodeVersion and nonexempt ProcessDbGate supply its live database factory, and the home the
+entry resolved once in `main()` locates the cluster it dials.
 A missing loaded SHA remains unknown; no dial captures the current checkout.
 
 The writer receives a finite two-second stop/join budget. An unfinished receipt

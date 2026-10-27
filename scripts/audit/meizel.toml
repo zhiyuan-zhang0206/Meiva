@@ -13,7 +13,7 @@ exports = ["branch_protection.py", "module_moves.py"]
 [purity]
 "." = "strict-to-be"
 "module_moves.py" = "strict-to-be"
-"sdk_usage.py" = "strict-to-be"
+"sdk_usage.py" = "strict"
 "where_used.py" = "strict-to-be"
 "where_used_scan.py" = "strict-to-be"
 
@@ -25,7 +25,6 @@ exports = ["branch_protection.py", "module_moves.py"]
 "module_moves.py#Path.readlink" = 1
 "module_moves.py#Path.resolve" = 3
 "schema_drift.py#import psycopg" = 1
-"sdk_usage.py#Path.open" = 1
 "where_used.py#Path.resolve" = 4
 "where_used_scan.py#Path.is_symlink" = 1
 

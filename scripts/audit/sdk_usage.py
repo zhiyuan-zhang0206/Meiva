@@ -9,9 +9,10 @@ from __future__ import annotations
 import argparse
 import json
 from collections import Counter, defaultdict
+from collections.abc import Iterable
+from contextlib import ExitStack
 from datetime import datetime
-from pathlib import Path
-from typing import Any, TypedDict
+from typing import Any, TextIO, TypedDict
 
 from pydantic import AwareDatetime, BaseModel, Field
 
@@ -51,25 +52,28 @@ def timestamp(value: str) -> datetime:
     return result
 
 
-def read_calls(paths: list[Path]) -> list[CallEvent]:
-    """Read recorded call events, deduplicating copied mirrors by event identity."""
+# meiva:note
+# Recorded call events from the JSONL streams the entry opened, deduplicating copied mirrors by event
+# identity. Opening the files is the entry's: argparse opens what the operator names.
+def read_calls(streams: Iterable[TextIO]) -> list[CallEvent]:
     events: dict[str, CallEvent] = {}
-    for path in dict.fromkeys(paths):
-        with path.open(encoding="utf-8") as stream:
-            for line_number, line in enumerate(stream, 1):
-                if not line.strip():
+    for stream in streams:
+        for line_number, line in enumerate(stream, 1):
+            if not line.strip():
+                continue
+            try:
+                raw = json.loads(line)
+                if raw["event_name"] != "sdk_call":
                     continue
-                try:
-                    raw = json.loads(line)
-                    if raw["event_name"] != "sdk_call":
-                        continue
-                    event = CallEvent.model_validate(raw)
-                except (ValueError, KeyError, TypeError) as exc:
-                    raise ValueError(f"{path}:{line_number}: {exc}") from exc
-                key = str(event.id)
-                if key in events and events[key] != event:
-                    raise ValueError(f"{path}:{line_number}: conflicting SDK event identity {key}")
-                events[key] = event
+                event = CallEvent.model_validate(raw)
+            except (ValueError, KeyError, TypeError) as exc:
+                raise ValueError(f"{stream.name}:{line_number}: {exc}") from exc
+            key = str(event.id)
+            if key in events and events[key] != event:
+                raise ValueError(
+                    f"{stream.name}:{line_number}: conflicting SDK event identity {key}"
+                )
+            events[key] = event
     return list(events.values())
 
 
@@ -160,20 +164,28 @@ def report(
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("events", nargs="+", type=Path, help="JSONL event mirror files")
+    parser.add_argument(
+        "events",
+        nargs="+",
+        type=argparse.FileType("r", encoding="utf-8"),
+        help="JSONL event mirror files",
+    )
     parser.add_argument("--start", required=True, type=timestamp)
     parser.add_argument("--end", required=True, type=timestamp)
     parser.add_argument("--coverage", type=float, default=70, help="cumulative call percentage")
     parser.add_argument("--agent-id", type=int, action="append", help="repeat to narrow callers")
     args = parser.parse_args(argv)
     try:
-        data = report(
-            read_calls(args.events),
-            args.start,
-            args.end,
-            args.coverage,
-            set(args.agent_id) if args.agent_id is not None else None,
-        )
+        with ExitStack() as opened:
+            for stream in args.events:
+                opened.enter_context(stream)
+            data = report(
+                read_calls(args.events),
+                args.start,
+                args.end,
+                args.coverage,
+                set(args.agent_id) if args.agent_id is not None else None,
+            )
     except (ValueError, OSError) as exc:
         parser.error(str(exc))
     print(json.dumps(data, indent=2))

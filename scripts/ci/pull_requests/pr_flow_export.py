@@ -670,12 +670,10 @@ def main(argv: list[str] | None = None, *, run_process: GhProcess, open_url: Url
         args.repo, since, stats, run_process=run_process, max_pages=MAX_LIST_PAGES
     )
 
-    if args.state_dir is not None:
-        state_dir = args.state_dir
-    else:
-        from base.paths import meiva_home
+    from base.paths import meiva_home
 
-        state_dir = meiva_home() / _STATE_DIR_RELATIVE
+    home = meiva_home()
+    state_dir = args.state_dir if args.state_dir is not None else home / _STATE_DIR_RELATIVE
     cache = load_cache(state_dir / "cache.json")
 
     records = collect_records(prs, days, tz, args.repo, cache, stats, run_process=run_process)
@@ -713,7 +711,7 @@ def main(argv: list[str] | None = None, *, run_process: GhProcess, open_url: Url
         save_json(state_dir / "snapshot.json", snapshot)
         from scripts.ci.pull_requests.export_process import owned_event_pipeline
 
-        with owned_event_pipeline(PROCESS_NAME, image=image) as pipeline:
+        with owned_event_pipeline(PROCESS_NAME, image=image, home=home) as pipeline:
             emit_snapshot(snapshot, dry_run=False, pipeline=pipeline)
 
     if args.print_snapshot:

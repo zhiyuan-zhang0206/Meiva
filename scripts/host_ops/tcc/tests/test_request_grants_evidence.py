@@ -141,6 +141,7 @@ def test_a_host_that_is_not_macos_is_a_setup_failure(tmp_path: Path) -> None:
             platform="linux",
             now=NOW,
             log_output="",
+            home=tmp_path,
         )
         == 2
     )
@@ -154,6 +155,7 @@ def test_an_old_helper_build_is_a_setup_failure(tmp_path: Path) -> None:
         platform="darwin",
         now=NOW,
         log_output="",
+        home=tmp_path,
     )
     assert code == 2
     assert helper.requests == 0
@@ -167,6 +169,7 @@ def test_the_evidence_names_what_was_requested_and_what_tccd_said(tmp_path: Path
         platform="darwin",
         now=NOW,
         log_output=DECISION_LOG,
+        home=tmp_path,
     )
     assert code == 0
     assert helper.requests == 1
@@ -186,6 +189,7 @@ def test_a_request_without_a_decision_line_is_not_evidence(tmp_path: Path) -> No
         platform="darwin",
         now=NOW,
         log_output="",
+        home=tmp_path,
     )
     assert code == 1
 
@@ -203,6 +207,7 @@ def test_screen_recording_acceptance_needs_its_own_line(tmp_path: Path) -> None:
         platform="darwin",
         now=NOW,
         log_output=access_only,
+        home=tmp_path,
     )
     assert code == 1
 
@@ -214,6 +219,7 @@ def test_a_dead_helper_is_a_setup_failure(tmp_path: Path) -> None:
         platform="darwin",
         now=NOW,
         log_output="",
+        home=tmp_path,
     )
     assert code == 2
 
