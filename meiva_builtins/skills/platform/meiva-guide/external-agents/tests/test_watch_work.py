@@ -357,6 +357,17 @@ def test_the_watcher_reads_the_sessions_of_the_cluster_its_record_lives_in(tmp_p
     )
 
 
+def test_the_watch_reaches_the_sessions_of_the_cluster_its_record_lives_in(tmp_path: Path) -> None:
+    key = co.canonical_key(tmp_path / "workspace", tool="codex", cluster=tmp_path / "cluster")
+
+    watch = ww._Watch("work.md", _OWNER, (key, "generation", _OWNER), _CADENCE, 0.0)
+
+    assert watch.sessions is not None
+    assert watch.sessions.session_log_path("meiva-x") == (
+        tmp_path / "cluster" / "logs" / "meiva-x.out.log"
+    )
+
+
 def _launch(
     tmp_path: Path, *, ttl: float = 3600.0
 ) -> tuple[co.CodingSessionKey, CodingSessionOwner]:

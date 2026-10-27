@@ -101,8 +101,15 @@ def test_the_listing_reads_the_service_of_the_home_it_is_given(
 ) -> None:
     new("meiva-agent-7-shell-0", unit_home)
 
+    elsewhere = tmp_path / "elsewhere"
+
     assert [s.id for s in agent_shell_sessions(7, now=_now(), home=unit_home)] == [0]
-    assert agent_shell_sessions(7, now=_now(), home=tmp_path / "elsewhere") == []
+    assert agent_shell_sessions(7, now=_now(), home=elsewhere) == []
+    assert kill_shell(7, 0, home=elsewhere) == (ShellKillMode.ABSENT, False, None)
+    with pytest.raises(ShellNotFoundError):
+        capture_shell(7, 0, now=_now(), home=elsewhere)
+    assert kill_agent_shells(7, before_session_index=9, home=elsewhere) == []
+    assert get_shell_backend(home=unit_home).has_session("meiva-agent-7-shell-0")
 
 
 def test_a_capture_returns_the_output_of_the_resolved_shell(unit_home: Path) -> None:

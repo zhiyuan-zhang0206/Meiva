@@ -94,9 +94,17 @@ def test_the_backend_keeps_its_sessions_under_the_home_it_was_built_with(
         assert posixproc.record_path(name, home=other).is_file()
         assert backend.session_log_path(name) == other / "logs" / f"{name}.out.log"
         assert backend.has_session(name) is True
-        assert _backend(unit_home).has_session(name) is False
+        assert backend.list_sessions("meiva-test-posixbe-") == [name]
+        assert backend.session_started_at(name) is not None
+        elsewhere = _backend(unit_home)
+        assert elsewhere.has_session(name) is False
+        assert elsewhere.list_sessions("meiva-test-posixbe-") == []
+        assert elsewhere.session_started_at(name) is None
+        assert backend.graceful_signal(name) is True
+        assert elsewhere.graceful_signal(name) is False
     finally:
-        backend.kill_session(name, graceful=False)
+        assert backend.kill_session(name, graceful=False)[0] is True
+    assert not posixproc.record_path(name, home=other).exists()
 
 
 def test_posix_backend_keeps_its_own_log_file(unit_home: Path) -> None:
@@ -329,14 +337,14 @@ def test_has_session_false_for_unknown(unit_home: Path) -> None:
     assert _backend(unit_home).has_session("meiva-test-posixbe-unknown") is False
 
 
-def test_get_shell_backend_returns_pty_backend(unit_home: Path) -> None:
+def test_get_shell_backend_returns_pty_backend(tmp_path: Path) -> None:
     """get_shell_backend() is the PTY backend for agent shells/watchers —
     the self-hosted PTY supervisor —
     distinct from the get_backend() one (service sessions
     live on the native backend; interactive shells on the PTY one)."""
     from base.sessions.backend import get_backend
 
-    shell = get_shell_backend(home=unit_home)
+    shell = get_shell_backend(home=tmp_path)
     assert isinstance(shell, PtySessionBackend)
     assert isinstance(shell, SessionBackend)
-    assert not isinstance(get_backend(timers=SYSTEM_TIMERS, home=unit_home), PtySessionBackend)
+    assert not isinstance(get_backend(timers=SYSTEM_TIMERS, home=tmp_path), PtySessionBackend)
