@@ -4,6 +4,7 @@ import asyncio
 import signal
 import sys
 import time
+from dataclasses import replace
 from pathlib import Path
 from uuid import UUID
 
@@ -12,10 +13,17 @@ import pytest
 
 from agent.graph.exec import _subprocess
 from agent.graph.exec._result import ExecCrashed, ExecDone
+from agent.graph.exec._stream import ExecOutputChunkPublisher
+from agent.graph.exec.process import SubprocessExecProcess
 from agent.graph.exec.tests.process_inputs import real_parent
+from base.clock.tests.seeded_rng import seeded_rng
+from base.config.tests.configuration import defaults
+from base.events.live.tests.live_capture import idle_publisher
+from base.host.env.agent_slices import AgentSlices
 from base.native_process.exec_domain import ExecProcessDomain
 from base.native_process.process_control import SYSTEM_PROCESS_CONTROL
 from base.native_process.tests.fake_process_control import FakeProcessControl
+from base.paths import exec_run_dir
 from base.sessions.posixproc import process_group_has_live_members
 from meiva.tests.fixtures.pin_agent import exec_context
 
@@ -103,6 +111,32 @@ async def test_a_run_ends_with_its_group_dead_and_its_files_removed(tmp_path: Pa
     assert payload is not None and payload.kind == "done"
     await _assert_gone(int(pid_file.read_text()))
     assert not list((tmp_path / "exec" / str(_AGENT_ID)).iterdir())
+
+
+# meiva:note
+# The context's home, a directory apart from the environment's, decides where a run keeps its
+# request and result files: the adapter builds the run directory from `context.meiva_home`.
+async def test_a_run_keeps_its_files_under_the_contexts_home(tmp_path: Path) -> None:
+    other_home = tmp_path / "other-home"
+    other_home.mkdir()
+    context = replace(
+        exec_context(_AGENT_ID),
+        meiva_home=other_home,
+        agent=AgentSlices.resolve(default_reader=defaults()),
+    )
+    process = SubprocessExecProcess(real_parent(), rng=seeded_rng())
+
+    result, _payload = await process.run(
+        "print('ran')",
+        context,
+        asyncio.Event(),
+        ExecOutputChunkPublisher(idle_publisher(), _AGENT_ID, "1.0"),
+        state={},
+        config_overlay={},
+    )
+
+    assert isinstance(result, ExecDone), result.output
+    assert (exec_run_dir(other_home) / str(_AGENT_ID)).is_dir()
 
 
 async def test_a_detached_output_holder_cannot_hold_the_run_past_the_drain_bound(
