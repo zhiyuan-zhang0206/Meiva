@@ -7,8 +7,6 @@ from types import MappingProxyType
 
 import psutil
 
-from base.native_process.child_env import inherited_process_env
-
 HELPER_PID_ENV = "MEIVA_PERMISSIONS_HELPER_PID"
 
 _MAX_ANCESTOR_HOPS = 32
@@ -33,8 +31,8 @@ def _read_ppid(pid: int) -> int | None:
         return None
 
 
-def helper_marker_pid() -> str | None:
-    return inherited_process_env().get(HELPER_PID_ENV)
+def helper_marker_pid(environ: Mapping[str, str]) -> str | None:
+    return environ.get(HELPER_PID_ENV)
 
 
 # meiva:note
@@ -47,8 +45,10 @@ def helper_marker_pid() -> str | None:
 # child daemon) — within `_MAX_ANCESTOR_HOPS` ppid hops; a link that
 # cannot be read (an intermediate process is gone) breaks the chain.
 # `ppids` overrides the process table when tests feed a synthetic chain.
-def parent_chain_intact(pid: int, ppids: Mapping[int, int] = MappingProxyType({})) -> bool:
-    raw_helper_pid = helper_marker_pid()
+def parent_chain_intact(
+    pid: int, *, environ: Mapping[str, str], ppids: Mapping[int, int] = MappingProxyType({})
+) -> bool:
+    raw_helper_pid = helper_marker_pid(environ)
     if raw_helper_pid is None:
         return True
     try:

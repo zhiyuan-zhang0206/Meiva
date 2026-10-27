@@ -15,6 +15,7 @@ from typing import Any
 
 import psutil
 
+from base.clock import Timers
 from base.native_process.ownership import OwnedProcess
 from base.native_process.process_control import ProcessControl
 from base.sessions.pty import process_groups
@@ -139,7 +140,13 @@ def _named(identities: Iterable[OwnedProcess]) -> tuple[tuple[int, str], ...]:
 
 
 def close_sessions(
-    targets: Iterable[Target], *, grace_s: float, kill_s: float, process_control: ProcessControl
+    targets: Iterable[Target],
+    *,
+    grace_s: float,
+    kill_s: float,
+    process_control: ProcessControl,
+    own_pid: int,
+    timers: Timers,
 ) -> Outcome:
     """Attempt closure of known groups within shared grace and kill budgets.
 
@@ -149,17 +156,29 @@ def close_sessions(
     entries = list(targets)
     known = tuple(dict.fromkeys(identity for target in entries for identity in _known(target)))
     process_groups.signal(
-        (target.shell for target in entries), signal.SIGHUP, process_control=process_control
+        (target.shell for target in entries),
+        signal.SIGHUP,
+        process_control=process_control,
+        own_pid=own_pid,
+        timers=timers,
     )
     process_groups.signal(
         (member for target in entries for member in target.members if member != target.shell),
         signal.SIGTERM,
         process_control=process_control,
+        own_pid=own_pid,
+        timers=timers,
     )
-    remaining = process_groups.wait(known, grace_s)
+    remaining = process_groups.wait(known, grace_s, timers=timers)
     if remaining:
-        process_groups.signal(remaining, signal.SIGKILL, process_control=process_control)
-        process_groups.wait(remaining, kill_s)
+        process_groups.signal(
+            remaining,
+            signal.SIGKILL,
+            process_control=process_control,
+            own_pid=own_pid,
+            timers=timers,
+        )
+        process_groups.wait(remaining, kill_s, timers=timers)
     survivors: list[Survivor] = []
     closed: list[ClosedSession] = []
     for target in entries:

@@ -18,12 +18,14 @@ import contextlib
 import datetime as dt
 import json
 import logging
-import uuid
+import random
 from collections.abc import Generator
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Literal, Never, TypeGuard
 
+from base.clock import Clock
+from base.clock.ids import new_uuid
 from base.host.atomic_io import AtomicWriter
 from base.native_process.os_platform import file_lock
 
@@ -174,6 +176,8 @@ def freeze(
     holder: str,
     reason: str,
     writer: AtomicWriter,
+    clock: Clock,
+    rng: random.Random,
 ) -> PtyAllocationFreeze:
     if not holder:
         raise ValueError("holder must be non-empty")
@@ -189,14 +193,14 @@ def freeze(
             raise PtyAllocationAlreadyFrozenError(
                 f"generation {current.generation!r} held by {current.holder!r} is already active"
             )
-        now = dt.datetime.now(dt.UTC)
+        now = clock.now()
         payload: dict[str, object] = {
             "schema_version": SCHEMA_VERSION,
             "state": "frozen",
-            "generation": str(uuid.uuid4()),
+            "generation": str(new_uuid(rng)),
             "holder": holder,
             "reason": reason,
-            "created_at": now.isoformat(),
+            "created_at": now.astimezone(dt.UTC).isoformat(),
         }
         write_atomic(path, payload, writer=writer)
         return _parse(payload)

@@ -339,10 +339,12 @@ def _terminalize(
     generation: str,
     owner_agent_id: int,
     reason: str,
+    *,
+    now: dt.datetime,
 ) -> bool:
     try:
         stopped = coding_session_owner.terminate_generation(
-            key, generation, reason=reason, writer=AtomicWriter(SYSTEM_FS)
+            key, generation, reason=reason, writer=AtomicWriter(SYSTEM_FS), now=now
         )
     except Exception as exc:
         print(f"terminalizing generation {generation} ({reason}) failed: {exc!r}", flush=True)
@@ -459,7 +461,7 @@ class _Watch:
             beat, facts, self.memory.last_actionable_mtime, self.path, self.cadence
         )
         if isinstance(verdict, Terminalize):
-            return _terminalize(key, expected_generation, canonical_owner, verdict.reason)
+            return _terminalize(key, expected_generation, canonical_owner, verdict.reason, now=wall)
         if isinstance(verdict, NeedInput):
             _notify(self.target_agent, verdict.message, canonical=True)
             self.memory = Memory(self.memory.first_poll, beat.mtime)
