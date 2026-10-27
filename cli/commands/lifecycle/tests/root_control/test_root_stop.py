@@ -16,6 +16,7 @@ from base.host.tests.short_tmp import short_tmp as short_tmp
 from base.paths import root_manifests_path, root_run_dir
 from cli.commands.lifecycle import root_driver as driver
 from cli.commands.lifecycle.root_control.launch_plan import RootLaunch, plan_root_launch
+from cli.commands.lifecycle.tests.root_control.support import LAUNCHD_FACTS, refuse_launchctl
 from cli.commands.lifecycle.tests.scripted_root import UnitRow, scripted_root
 
 pytestmark = pytest.mark.real_service_readiness_gate
@@ -46,6 +47,8 @@ def stop_tree(
             force=force,
             helper=None,
             home=home,
+            facts=LAUNCHD_FACTS,
+            run=refuse_launchctl,
             timers=SYSTEM_TIMERS,
         )
     return {unit_id: row.state for unit_id, row in root.units.items()}
@@ -81,6 +84,8 @@ def test_a_forced_stop_force_downs_every_unit(short_tmp: Path) -> None:
             force=True,
             helper=None,
             home=short_tmp,
+            facts=LAUNCHD_FACTS,
+            run=refuse_launchctl,
             timers=SYSTEM_TIMERS,
         )
 
@@ -96,6 +101,8 @@ def test_stopping_a_home_with_no_root_reports_no_custody(
         force=False,
         helper=None,
         home=short_tmp,
+        facts=LAUNCHD_FACTS,
+        run=refuse_launchctl,
         timers=SYSTEM_TIMERS,
     )
 

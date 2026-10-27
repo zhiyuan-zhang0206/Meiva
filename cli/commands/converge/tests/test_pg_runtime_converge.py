@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import random
 import shlex
 import sys
 from collections.abc import Callable
@@ -62,6 +63,7 @@ def test_start_converge_accepts_installed_pg17_where_no_artifact_exists(
             installed.parent,
             installed.parent,
             frozenset({"gateway"}),
+            secure_rng=random.SystemRandom(),
             config=command_runtime.config,
             database_factory=operator_database,
             producer=operator_pipeline,
@@ -106,6 +108,7 @@ def test_remote_managed_gateway_does_not_require_local_server_or_extension(
             tmp_path,
             tmp_path,
             frozenset({"gateway"}),
+            secure_rng=random.SystemRandom(),
             config=config,
             database_factory=operator_database,
             producer=operator_pipeline,
@@ -142,6 +145,7 @@ def test_pg_admission_uses_each_owners_live_remote_verdict(
                 tmp_path,
                 tmp_path,
                 frozenset({"gateway"}),
+                secure_rng=random.SystemRandom(),
                 config=config,
                 database_factory=operator_database,
                 producer=operator_pipeline,

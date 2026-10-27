@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import random
 from collections.abc import Callable
 from pathlib import Path
 from typing import Any
@@ -48,6 +49,7 @@ def _converge_ctx(
     command_runtime: CommandRuntime,
 ) -> ConvergeCtx:
     return ConvergeCtx(
+        secure_rng=random.SystemRandom(),
         repo=repo,
         meiva_home=home / ".meiva",
         roles=None,

@@ -56,6 +56,14 @@ def test_readback_failure_truncates_long_output() -> None:
     assert problem is not None and len(problem) < 600
 
 
+# meiva:note
+# `converge` is a command of the script: the golden-image build runs it in the guest VM.
+def test_converge_is_a_command_of_the_script() -> None:
+    with pytest.raises(SystemExit) as shown:
+        smoke.main(["converge", "-h"])
+    assert shown.value.code == 0
+
+
 def test_a_command_is_required() -> None:
     with pytest.raises(SystemExit) as refused:
         smoke.main([])

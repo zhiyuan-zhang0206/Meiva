@@ -30,6 +30,13 @@ from base.host.permissions_helper.client import (
     UserAbortError,
 )
 from services.desktop.permissions_helper import launchd_job, lifecycle, signing_identity
+from services.desktop.permissions_helper.tests.support import (
+    helper_build_env,
+    helper_install_env,
+    launchctl_reply,
+    launchd_facts,
+    refuse_tools,
+)
 
 
 def read_line(conn: socket.socket) -> bytes:
@@ -167,7 +174,12 @@ def test_socket_path_keyed_on_port(monkeypatch: pytest.MonkeyPatch) -> None:
 def test_permissions_helper_app_dir_is_stable_under_meiva_home(
     tmp_path: Path,
 ) -> None:
-    assert lifecycle.build_directory(None, home=tmp_path / "home") == tmp_path / "home" / "helper"
+    env = helper_build_env(tmp_path / "home", refuse_tools)
+    assert env.app_dir == tmp_path / "home" / "helper"
+    assert (
+        lifecycle.build_directory(None, app_dir=env.app_dir, user_home=env.facts.user_home)
+        == env.app_dir
+    )
 
 
 def test_method_name_mapping(fake_helper) -> None:
@@ -432,23 +444,25 @@ def parse_strings(path: Path) -> dict[str, str]:
 TEST_CDHASH = "0123456789abcdef0123456789abcdef01234567"
 
 
+# meiva:note
+# A helper installed under the test's own home. `loaded` is what launchd answers for its job: an
+# installed executable stands for a job launchd still holds, so replacing it must be refused.
 @dataclass(frozen=True, slots=True)
 class StagedBundle:
     app: Path
-    app_dir: Path
+    home: Path
     sources: lifecycle.HelperSources
-    retirement: launchd_job.RetirementEnv
+    loaded: bool
+
+    @property
+    def app_dir(self) -> Path:
+        return self.home / "helper"
 
     def source_hash(self) -> str:
         return lifecycle.source_content_hash(self.sources)
 
-    def build_env(self, runner: launchd_job.BoundedRunner | None = None) -> lifecycle.BuildEnv:
-        return lifecycle.BuildEnv(
-            app_dir=self.app_dir,
-            sources=self.sources,
-            retirement=self.retirement,
-            runner=runner,
-        )
+    def build_env(self, run: launchd_job.BoundedRunner) -> lifecycle.BuildEnv:
+        return helper_build_env(self.home, run, sources=self.sources)
 
 
 def stage_bundle(tmp_path: Path, *, exe_present: bool, identity: bool = True) -> StagedBundle:
@@ -458,7 +472,8 @@ def stage_bundle(tmp_path: Path, *, exe_present: bool, identity: bool = True) ->
     info.write_bytes(b"<plist/>")
     entitlements = tmp_path / "helper.entitlements"
     entitlements.write_bytes(b"<plist/>")
-    build = tmp_path / "installed-helper"
+    home = tmp_path / "home"
+    build = home / "helper"
     app = build / "MeivaPermissionsHelper.app"
     if exe_present:
         exe = app / "Contents" / "MacOS" / "MeivaPermissionsHelper"
@@ -477,15 +492,9 @@ def stage_bundle(tmp_path: Path, *, exe_present: bool, identity: bool = True) ->
         entitlements=entitlements,
         locales=locales,
     )
-    retirement = launchd_job.RetirementEnv(loaded=exe_present)
     if identity:
         stage_signing_identity(build)
-    return StagedBundle(
-        app=app,
-        app_dir=build,
-        sources=sources,
-        retirement=retirement,
-    )
+    return StagedBundle(app=app, home=home, sources=sources, loaded=exe_present)
 
 
 def sample_dr() -> str:
@@ -503,7 +512,7 @@ def certificate_dr() -> str:
 
 # meiva:note
 # The identity files a host has after `helper-signing.py provision` ran once.
-def stage_signing_identity(app_dir: Path | None = None) -> None:
+def stage_signing_identity(app_dir: Path) -> None:
     signing_identity.keychain_path(app_dir).parent.mkdir(parents=True, exist_ok=True)
     signing_identity.keychain_path(app_dir).write_bytes(b"keychain")
     signing_identity.password_path(app_dir).write_text("test-password\n")
@@ -512,7 +521,7 @@ def stage_signing_identity(app_dir: Path | None = None) -> None:
 def fake_identity_reply(
     cmd: list[str],
     *,
-    app_dir: Path | None = None,
+    app_dir: Path,
     identity_name: str | None = None,
     search_list: Sequence[str] | None = None,
     rival: bool = False,
@@ -576,7 +585,8 @@ class _FakeToolOutputs:
     verify_rc: int
     designated_requirement: str | None
     dr_streams: tuple[bytes, bytes] | None
-    app_dir: Path | None = None
+    app_dir: Path
+    loaded: bool = False
     identity_name: str | None = None
     search_list: Sequence[str] | None = None
     rival: bool = False
@@ -592,6 +602,8 @@ class _FakeToolOutputs:
         )
         if identity is not None:
             return identity
+        if (job := launchctl_reply(cmd, loaded=self.loaded)) is not None:
+            return job
         if cmd[0] == "swiftc":
             Path(cmd[cmd.index("-o") + 1]).write_bytes(b"\x00")
         if cmd[:2] == ["codesign", "--verify"]:
@@ -618,6 +630,7 @@ class _FakeToolOutputs:
 def fake_tools(
     bundle: StagedBundle | None = None,
     *,
+    home: Path | None = None,
     sign_rc: int = 0,
     verify_rc: int = 0,
     designated_requirement: str | None = None,
@@ -632,7 +645,8 @@ def fake_tools(
         verify_rc=verify_rc,
         designated_requirement=designated_requirement,
         dr_streams=dr_streams,
-        app_dir=bundle.app_dir if bundle is not None else None,
+        app_dir=bundle.app_dir if bundle is not None else _home_of(home) / "helper",
+        loaded=bundle.loaded if bundle is not None else False,
         identity_name=identity_name,
         search_list=search_list,
         rival=rival,
@@ -648,8 +662,14 @@ def fake_tools(
             raise subprocess.TimeoutExpired(argv, kwargs["timeout"])
         return outputs.respond(argv)
 
-    env = bundle.build_env(run) if bundle is not None else lifecycle.BuildEnv(runner=run)
+    env = bundle.build_env(run) if bundle is not None else helper_build_env(_home_of(home), run)
     return recorded, env
+
+
+def _home_of(home: Path | None) -> Path:
+    if home is None:
+        raise ValueError("a fake toolchain without a staged bundle needs the home it works in")
+    return home
 
 
 def recorded_argvs(recorded: list[_Call]) -> list[list[str]]:
@@ -665,40 +685,48 @@ def sign_command(recorded: list[_Call]) -> list[str]:
 # --- Install, in-place upgrade, and launchd repair ------------------------
 
 
+# meiva:note
+# A helper installed under `<tmp>/home`, with launchd answering `loaded` for its job. `run_calls`
+# holds every tool call that changes something (`launchctl bootstrap`); the `launchctl print`
+# questions the install asks are in `probe_calls`.
 def install_env(
     tmp_path: Path,
     *,
     loaded: bool,
     matching_plist: bool = True,
 ) -> tuple[Path, list[list[str]], list[list[str]], lifecycle.InstallEnv]:
-    app = tmp_path / "helper" / "MeivaPermissionsHelper.app"
+    home = tmp_path / "home"
+    app = home / "helper" / "MeivaPermissionsHelper.app"
     exe = app / "Contents" / "MacOS" / "MeivaPermissionsHelper"
     exe.parent.mkdir(parents=True)
     exe.write_bytes(b"signed helper")
-    agents = tmp_path / "LaunchAgents"
-    agents.mkdir(parents=True, exist_ok=True)
-    plist_path = agents / "com.meiva.permissions-helper.test.plist"
-    log = tmp_path / "logs" / "permissions-helper.log"
-    socket_path = tmp_path / "run" / "permissions-helper.sock"
     run_calls: list[list[str]] = []
     probe_calls: list[list[str]] = []
 
     def run(cmd: Sequence[str], **_kwargs: object) -> subprocess.CompletedProcess[bytes]:
         argv = list(cmd)
+        if (job := launchctl_reply(argv, loaded=loaded)) is not None:
+            probe_calls.append(argv)
+            return job
         run_calls.append(argv)
         return subprocess.CompletedProcess(argv, 0, b"", b"")
 
+    env = helper_install_env(helper_build_env(home, run))
+    facts = env.build.facts
+    plist_path = launchd_job.helper_job_plist_path(home, facts=facts)
     if matching_plist:
+        log = lifecycle.base.paths.logs_dir(home=home) / "permissions-helper.log"
+        socket_path = lifecycle.base.paths.permissions_helper_socket(home, env.helper_port)
         plist_path.parent.mkdir(parents=True, exist_ok=True)
         plist_path.write_bytes(
             plistlib.dumps(
                 {
-                    "Label": "com.meiva.permissions-helper.test",
+                    "Label": launchd_job.helper_job_label(home),
                     "ProgramArguments": [str(exe)],
                     "EnvironmentVariables": {
                         "MEIVA_PERMISSIONS_HELPER_SOCKET": str(socket_path),
                         "MEIVA_PERMISSIONS_HELPER_ROOT_SEED": str(
-                            lifecycle.base.paths.root_run_dir(tmp_path) / "seed.json"
+                            lifecycle.base.paths.root_run_dir(home) / "seed.json"
                         ),
                     },
                     "RunAtLoad": True,
@@ -708,17 +736,6 @@ def install_env(
                 }
             )
         )
-    env = lifecycle.InstallEnv(
-        home=tmp_path,
-        agents=agents,
-        label="com.meiva.permissions-helper.test",
-        domain="gui/501",
-        plist=plist_path,
-        loaded=loaded,
-        log_dir=log.parent,
-        socket=socket_path,
-        runner=run,
-    )
     return app, run_calls, probe_calls, env
 
 
@@ -747,9 +764,12 @@ def write_agent_plist(
     return p
 
 
+# meiva:note
+# The LaunchAgents directory of the test account and the helper socket of `<tmp>/home` at `port`.
 def retire_env(tmp_path: Path, *, port: int = 9223) -> tuple[Path, Path]:
-    agents = tmp_path / "LaunchAgents"
+    home = tmp_path / "home"
+    agents = launchd_facts(home).agents_dir
     agents.mkdir(parents=True)
-    run = tmp_path / "run"
-    run.mkdir(parents=True)
-    return agents, run / f"permissions-helper.{port}.sock"
+    sock = lifecycle.base.paths.permissions_helper_socket(home, port)
+    sock.parent.mkdir(parents=True)
+    return agents, sock

@@ -10,6 +10,7 @@
 
 from __future__ import annotations
 
+import random
 import re
 import urllib.request
 from contextlib import AbstractContextManager
@@ -192,6 +193,7 @@ class CollectorUnit:
     # The converge context of this unit, for the step that decides whether to install at all.
     def converge_ctx(self, roles: frozenset[str] | None) -> ConvergeCtx:
         return ConvergeCtx(
+            secure_rng=random.SystemRandom(),
             repo=REPO_ROOT,
             meiva_home=self.home,
             roles=roles,

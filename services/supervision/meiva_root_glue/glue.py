@@ -27,12 +27,14 @@ from base.deploy.progress_timeout import (
     NON_CRITICAL_SERVICE_READY_TIMEOUT_S,
     SERVICE_READY_TIMEOUT_S,
 )
+from base.host.system.hostport import Host
 from base.native_process.child_env import inherited_process_env
 from base.native_process.code_version import CodeVersion
 from base.native_process.loaded_commit import LoadedCommit
 from base.native_process.os_platform import Platform
 from base.telemetry import build_pipeline
 from base.telemetry.lgtm_local import backend_urls
+from services.desktop.permissions_helper.launchd_job import LaunchdFacts
 from services.supervision.meiva_root.health import HealthConfig, HealthMonitor, LeaseProbe
 from services.supervision.meiva_root.probes import Probe, ProbeError, ProbeRegistry, ProbeSource
 from services.supervision.meiva_root.selfcheck import SelfCheckConfig, TreeSelfCheck
@@ -205,6 +207,7 @@ def build_wiring(
     from base.paths import meiva_home
 
     home = meiva_home().resolve(strict=True)
+    host = Host.system()
     identity = capture_loaded_runtime()
     if Path.cwd().resolve() != Path(identity.cwd):
         raise RuntimeError("root cwd differs from its loaded runtime")
@@ -264,6 +267,8 @@ def build_wiring(
             config=probe_config_from_settings(home=home) if probe_config is None else probe_config,
             clock=clock,
             macos=Platform.current().system == "darwin",
+            launchd=LaunchdFacts.of(host, user_home=Path.home()),
+            run=host.run,
         )
         if diagnostics is None
         else diagnostics

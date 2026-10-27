@@ -11,20 +11,14 @@ exports = ["launchd_job.py", "lifecycle.py", "onboarding.py", "signing_identity.
 "hardened_runtime.py" = "strict"
 
 [roots]
-"launchd_job.py" = { kinds = ["home", "pid", "platform"], why = "helper LaunchAgent plumbing: falls back to Path.home() for the agents directory, reads the uid and pid of the process and branches on sys.platform" }
-"lifecycle.py" = { kinds = ["clock", "settings"], why = "reads the process settings and stamps the signing time with datetime.now when it builds and installs the helper" }
 "onboarding.py" = { kinds = ["home", "platform"], why = "describes the local host from Path.home() and sys.platform for the permission onboarding" }
-"signing_identity.py" = { kinds = ["random"], why = "draws the password of the helper's signing keychain with secrets" }
+"signing_identity.py" = { kinds = ["random"], why = "names the operating system's generator as the type of the keychain password's source (SigningRandom); the entry that provisions the identity builds the generator and hands it down" }
 
 [debt.ambient-read]
 "lifecycle.py#home base.paths.logs_dir" = 1
-"lifecycle.py#home base.paths.meiva_home" = 3
-"lifecycle.py#home base.paths.permissions_helper_app_dir" = 2
-"lifecycle.py#home services.desktop.permissions_helper.launchd_job.helper_job_agents_dir" = 1
+"lifecycle.py#home base.paths.permissions_helper_app_dir" = 1
 "lifecycle.py#home services.desktop.permissions_helper.launchd_job.helper_job_label" = 1
-"lifecycle.py#pid services.desktop.permissions_helper.launchd_job.helper_job_domain" = 1
 "onboarding.py#environ base.host.env.registry.process_environment" = 1
-"signing_identity.py#home base.paths.permissions_helper_app_dir" = 1
 
 [debt.fake-entropy]
 "onboarding.py#time.monotonic_ns in an f-string" = 2

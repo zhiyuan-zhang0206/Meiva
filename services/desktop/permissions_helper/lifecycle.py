@@ -7,16 +7,13 @@ import re
 import shutil
 import subprocess
 import sys
-import time
 from dataclasses import dataclass
-from datetime import UTC, datetime
 from pathlib import Path
 
 import base.paths
-from base.config import settings
+from base.clock import Clock, Timers
 from base.host.permissions_helper.client import HelperFactory
-from base.host.proc import run_bounded
-from base.paths import logs_dir, meiva_home, permissions_helper_socket
+from base.paths import logs_dir, permissions_helper_socket
 from services.desktop.permissions_helper import activation_plan, hardened_runtime, signing_identity
 from services.desktop.permissions_helper.build_state import (
     BUILD_STATE_NAME,
@@ -27,10 +24,8 @@ from services.desktop.permissions_helper.build_state import (
 from services.desktop.permissions_helper.launchd_job import (
     HELPER_BUNDLE_ID,
     BoundedRunner,
-    RetirementEnv,
+    LaunchdFacts,
     clear_helper_stop_intent,
-    helper_job_agents_dir,
-    helper_job_domain,
     helper_job_label,
     helper_job_loaded,
     helper_job_plist_path,
@@ -88,29 +83,37 @@ class HelperSources:
 _DEFAULT_SOURCES = HelperSources()
 
 
+# meiva:note
+# Everything a helper build reads of the world, handed in by the entry that runs it: the cluster
+# `home`, the launchd identity facts, the command runner, the timers and the clock (the build
+# record is stamped with its instant), and the operating system's random generator (the signing
+# keychain's password, drawn only when the identity is first provisioned). `sources` are the
+# helper's own source files, a constant of this package.
 @dataclass(frozen=True, slots=True)
 class BuildEnv:
-    app_dir: Path | None = None
-    home: Path | None = None
+    home: Path
+    facts: LaunchdFacts
+    run: BoundedRunner
+    timers: Timers
+    clock: Clock
+    rng: signing_identity.SigningRandom
     sources: HelperSources = _DEFAULT_SOURCES
-    source_hash: str | None = None
-    retirement: RetirementEnv | None = None
-    runner: BoundedRunner | None = None
+
+    # meiva:note
+    # The installed helper's directory under this home.
+    @property
+    def app_dir(self) -> Path:
+        return base.paths.permissions_helper_app_dir(home=self.home)
 
 
+# meiva:note
+# A bring-up: the build it starts from, the helper port (it names the socket) and the configured
+# artifact directory (`None` installs into the home's helper directory).
 @dataclass(frozen=True, slots=True)
 class InstallEnv:
-    home: Path | None = None
-    agents: Path | None = None
-    label: str | None = None
-    domain: str | None = None
-    plist: Path | None = None
-    loaded: bool | None = None
-    log_dir: Path | None = None
-    socket: Path | None = None
-    artifact_dir: Path | None = None
-    build: BuildEnv | None = None
-    runner: BoundedRunner | None = None
+    build: BuildEnv
+    helper_port: int
+    artifact_dir: Path | None
 
 
 # meiva:note
@@ -123,11 +126,8 @@ def _bound(cmd: list[str]) -> float:
 
 # meiva:note
 # Run a step that must succeed, raising `PermissionsHelperBuildError` if it does not -- including when it outlived its `TIMEOUTS_S` bound, which is a failure of the same kind and is reported as one so the converge step aborts rather than blocks.
-def run_tool(
-    cmd: list[str], *, runner: BoundedRunner | None = None
-) -> subprocess.CompletedProcess[bytes]:
+def run_tool(cmd: list[str], *, run: BoundedRunner) -> subprocess.CompletedProcess[bytes]:
     timeout = _bound(cmd)
-    run = run_bounded if runner is None else runner
     try:
         proc = run(cmd, timeout=timeout, capture_output=True)
     except subprocess.TimeoutExpired as exc:
@@ -145,11 +145,8 @@ def run_tool(
 # Run a read-only query, folding a timeout into the returned result.
 #
 # Every caller here asks a yes/no question -- is this bundle validly signed, is that job loaded -- and already reads a non-zero exit as "no". A tool that hung is the same "no" with a different cause, so it comes back as `_TIMED_OUT_RC` with the reason on stderr instead of as an exception raised into paths whose whole point is not to raise.
-def run_readonly_query(
-    cmd: list[str], *, timeout: float | None = None, runner: BoundedRunner | None = None
-) -> subprocess.CompletedProcess[bytes]:
-    bound = _bound(cmd) if timeout is None else timeout
-    run = run_bounded if runner is None else runner
+def run_readonly_query(cmd: list[str], *, run: BoundedRunner) -> subprocess.CompletedProcess[bytes]:
+    bound = _bound(cmd)
     try:
         return run(cmd, timeout=bound, capture_output=True)
     except subprocess.TimeoutExpired:
@@ -173,8 +170,8 @@ def source_content_hash(sources: HelperSources = _DEFAULT_SOURCES) -> str:
 
 # meiva:note
 # Return the app's designated requirement, which for ad-hoc code names its hash.
-def read_dr(app: Path, *, runner: BoundedRunner | None = None) -> str:
-    proc = run_tool(["codesign", "-d", "-r-", str(app)], runner=runner)
+def read_dr(app: Path, *, run: BoundedRunner) -> str:
+    proc = run_tool(["codesign", "-d", "-r-", str(app)], run=run)
     # codesign writes the designated-requirement line to stdout on current
     # macOS (stderr carries `Executable=...`); older toolchains have emitted
     # it on stderr, so search both streams rather than pinning one.
@@ -191,10 +188,10 @@ def app_executable(app: Path) -> Path:
     return app / "Contents" / "MacOS" / "MeivaPermissionsHelper"
 
 
-def is_valid_app(app: Path, *, runner: BoundedRunner | None = None) -> bool:
+def is_valid_app(app: Path, *, run: BoundedRunner) -> bool:
     return (
         app_executable(app).exists()
-        and run_readonly_query(["codesign", "--verify", str(app)], runner=runner).returncode == 0
+        and run_readonly_query(["codesign", "--verify", str(app)], run=run).returncode == 0
     )
 
 
@@ -210,42 +207,22 @@ def _installed_build_is_current(
     state: BuildState | None,
     source_hash: str,
     *,
-    runner: BoundedRunner | None = None,
+    run: BoundedRunner,
 ) -> bool:
-    return (
-        state is not None
-        and state["source_hash"] == source_hash
-        and is_valid_app(app, runner=runner)
-    )
+    return state is not None and state["source_hash"] == source_hash and is_valid_app(app, run=run)
 
 
 # meiva:note
 # The build record of the installed helper, or None when this home has none: the one place
 # that knows where the installed artifact keeps it.
-def installed_build_state(app_dir: Path | None = None) -> BuildState | None:
-    from base.paths import permissions_helper_app_dir
-
-    root = permissions_helper_app_dir() if app_dir is None else app_dir
-    return read_build_state(root / BUILD_STATE_NAME)
+def installed_build_state(app_dir: Path) -> BuildState | None:
+    return read_build_state(app_dir / BUILD_STATE_NAME)
 
 
-def build_directory(
-    destination: Path | None,
-    *,
-    home: Path | None = None,
-    app_dir: Path | None = None,
-) -> Path:
+def build_directory(destination: Path | None, *, app_dir: Path, user_home: Path) -> Path:
     """Choose an immutable artifact destination outside the installed bundle tree."""
-    from base.paths.home import default_home
-
-    if app_dir is not None:
-        installed = app_dir
-    elif home is not None:
-        installed = home / "helper"
-    else:
-        installed = base.paths.permissions_helper_app_dir()
-    build_dir = installed if destination is None else destination
-    protected = {installed.resolve(), (default_home() / "helper").resolve()}
+    build_dir = app_dir if destination is None else destination
+    protected = {app_dir.resolve(), (user_home / ".meiva" / "helper").resolve()}
     if destination is not None and (
         not destination.is_absolute()
         or destination.resolve() != destination
@@ -260,16 +237,15 @@ def build_directory(
     return build_dir
 
 
+def _require_retired(exe: Path, env: BuildEnv) -> None:
+    require_retired_helper(exe, home=env.home, facts=env.facts, run=env.run, timers=env.timers)
+
+
 # meiva:note
 # Whether this rebuild replaces an existing stale artifact, refusing when it must not.
 #
 # An isolated destination's artifact is immutable. The installed one is replaced only once `meiva stop` retired this home's helper -- it is meiva-root's parent -- and that is proved before the compile, so a host still running it is turned away before anything is built or written.
-def _replaces_installed(
-    exe: Path,
-    destination: Path | None,
-    *,
-    retirement: RetirementEnv | None = None,
-) -> bool:
+def _replaces_installed(exe: Path, destination: Path | None, *, env: BuildEnv) -> bool:
     if not exe.exists():
         return False
     if destination is not None:
@@ -277,7 +253,7 @@ def _replaces_installed(
             "signed helper artifacts are immutable; prepare a new MEIVA_PERMISSIONS_HELPER_ARTIFACT_DIR "
             "and activate it after the home-specific helper job has been stopped and unregistered"
         )
-    require_retired_helper(exe, env=retirement)
+    _require_retired(exe, env)
     return True
 
 
@@ -288,58 +264,51 @@ def _replaces_installed(
 #
 # The signature this build will carry is settled before anything is removed. A host whose recorded requirement names a certificate has nothing to fall back to, so a missing identity stops the build here rather than after the old artifact is gone.
 # meiva:link services/docs/agent_runner_side/permissions-helper/authorization.meiva.okf.md
-def build_and_sign(
-    *, destination: Path | None = None, env: BuildEnv | None = None
-) -> tuple[Path, bool]:
-    cfg = env or BuildEnv()
-    build_dir = build_directory(destination, home=cfg.home, app_dir=cfg.app_dir)
+def build_and_sign(*, destination: Path | None, env: BuildEnv) -> tuple[Path, bool]:
+    build_dir = build_directory(destination, app_dir=env.app_dir, user_home=env.facts.user_home)
     state_path = build_dir / BUILD_STATE_NAME
     app = build_dir / "MeivaPermissionsHelper.app"
     exe = app_executable(app)
-    source_hash = (
-        cfg.source_hash if cfg.source_hash is not None else source_content_hash(cfg.sources)
-    )
+    source_hash = source_content_hash(env.sources)
     state = read_build_state(state_path)
 
-    if _installed_build_is_current(app, state, source_hash, runner=cfg.runner):
+    if _installed_build_is_current(app, state, source_hash, run=env.run):
         return app, False
-    _require_signing_identity(state, app_dir=cfg.app_dir, runner=cfg.runner)
-    replacing = _replaces_installed(exe, destination, retirement=cfg.retirement)
+    _require_signing_identity(state, env=env)
+    replacing = _replaces_installed(exe, destination, env=env)
 
     build_dir.mkdir(parents=True, exist_ok=True)
     binary = build_dir / "MeivaPermissionsHelper"
     run_tool(
-        ["swiftc", "-O", str(cfg.sources.source), "-o", str(binary)],
-        runner=cfg.runner,
+        ["swiftc", "-O", str(env.sources.source), "-o", str(binary)],
+        run=env.run,
     )
 
     if replacing:
-        require_retired_helper(
-            exe, env=cfg.retirement
-        )  # proved again right before the old artifact goes
+        _require_retired(exe, env)  # proved again right before the old artifact goes
     remove_app(app)
     exe.parent.mkdir(parents=True, exist_ok=True)
-    (app / "Contents" / "Info.plist").write_bytes(cfg.sources.info_plist.read_bytes())
+    (app / "Contents" / "Info.plist").write_bytes(env.sources.info_plist.read_bytes())
     exe.write_bytes(binary.read_bytes())
     exe.chmod(0o755)
-    for lproj in sorted(cfg.sources.locales.glob("*.lproj")):
+    for lproj in sorted(env.sources.locales.glob("*.lproj")):
         shutil.copytree(lproj, app / "Contents" / "Resources" / lproj.name, dirs_exist_ok=True)
 
     run_tool(
         signing_identity.sign_arguments(
             app,
-            entitlements=cfg.sources.entitlements,
+            entitlements=env.sources.entitlements,
             identifier=HELPER_BUNDLE_ID,
-            app_dir=cfg.app_dir,
+            app_dir=env.app_dir,
         ),
-        runner=cfg.runner,
+        run=env.run,
     )
-    actual_dr = read_dr(app, runner=cfg.runner)
+    actual_dr = read_dr(app, run=env.run)
     write_build_state(
         state_path,
         source_hash,
         actual_dr,
-        signed_at=datetime.now(UTC).isoformat(),
+        signed_at=env.clock.now().isoformat(),
     )
     if state is not None and state["dr"] != actual_dr:
         sys.stderr.write(
@@ -357,75 +326,40 @@ def build_and_sign(
 # identity is the ordinary first step. A recorded certificate requirement means
 # the installed helper already has an identity, and a missing keychain then is a
 # deletion, not a first run -- signing anything else would cost every grant.
-def _require_signing_identity(
-    state: BuildState | None,
-    *,
-    app_dir: Path | None = None,
-    runner: BoundedRunner | None = None,
-) -> None:
+def _require_signing_identity(state: BuildState | None, *, env: BuildEnv) -> None:
     create = state is None or "certificate" not in state["dr"]
     try:
         signing_identity.ensure(
-            lambda cmd: run_tool(cmd, runner=runner),
+            lambda cmd: run_tool(cmd, run=env.run),
             create=create,
-            app_dir=app_dir,
+            app_dir=env.app_dir,
+            rng=env.rng,
         )
     except signing_identity.SigningIdentityError as exc:
         raise PermissionsHelperBuildError(str(exc)) from exc
 
 
-def label(home: Path | None = None) -> str:
-    return helper_job_label(home)
-
-
-def agents_dir(agents: Path | None = None) -> Path:
-    return helper_job_agents_dir(agents)
-
-
-def plist_path(home: Path | None = None, *, agents: Path | None = None) -> Path:
-    return helper_job_plist_path(home, agents_dir=agents)
-
-
-def launchd_domain() -> str:
-    return helper_job_domain()
-
-
-def is_loaded(home: Path | None = None, *, runner: BoundedRunner | None = None) -> bool:
-    return helper_job_loaded(home, runner=runner)
-
-
-def foreign_label_plists(
-    *,
-    agents: Path | None = None,
-    socket: Path | None = None,
-    current_label: str | None = None,
-) -> list[Path]:
+def foreign_label_plists(*, facts: LaunchdFacts, socket: Path, current_label: str) -> list[Path]:
     """LaunchAgent plists bound to this cluster's socket under a foreign label.
 
     A job whose plist pins this cluster's socket but carries a label other than
     the current one races this cluster's own job for the same socket; which one
     a client reaches then depends on the last bind. Other
     clusters' jobs are left alone -- they pin their own sockets."""
-    sock = str(helper_socket() if socket is None else socket)
-    current = label() if current_label is None else current_label
+    sock = str(socket)
     foreign: list[Path] = []
-    for plist in agents_dir(agents).glob(f"{HELPER_BUNDLE_ID}.*.plist"):
+    for plist in facts.agents_dir.glob(f"{HELPER_BUNDLE_ID}.*.plist"):
         try:
             data = plistlib.loads(plist.read_bytes())
         except (plistlib.InvalidFileException, OSError):
             continue
-        if activation_plan.is_foreign_label_job(data, label=current, socket=sock):
+        if activation_plan.is_foreign_label_job(data, label=current_label, socket=sock):
             foreign.append(plist)
     return foreign
 
 
-def refuse_foreign_label_jobs(
-    *,
-    agents: Path | None = None,
-    socket: Path | None = None,
-    current_label: str | None = None,
-) -> None:
-    foreign = foreign_label_plists(agents=agents, socket=socket, current_label=current_label)
+def refuse_foreign_label_jobs(*, facts: LaunchdFacts, socket: Path, current_label: str) -> None:
+    foreign = foreign_label_plists(facts=facts, socket=socket, current_label=current_label)
     if foreign:
         raise PermissionsHelperBuildError(
             "foreign helper labels bind this home's socket; reconcile them externally before start: "
@@ -438,19 +372,19 @@ def install_and_load(
     *,
     rebuilt: bool,
     helper: HelperFactory,
+    env: InstallEnv,
     settle_seconds: float = activation_plan.HELPER_PING_SETTLE_S,
-    env: InstallEnv | None = None,
 ) -> None:
     """Write the LaunchAgent plist and ensure launchd is running this binary.
 
     A loaded helper is only observed. Replacement requires an external stop
     and exact-home unregister first, so a descendant cannot unload its parent."""
-    cfg = env or InstallEnv()
-    home = base.paths.meiva_home() if cfg.home is None else cfg.home
-    job_label = label(cfg.home) if cfg.label is None else cfg.label
-    sock = helper_socket(cfg.home) if cfg.socket is None else cfg.socket
-    refuse_foreign_label_jobs(agents=cfg.agents, socket=sock, current_label=job_label)
-    log = (logs_dir() if cfg.log_dir is None else cfg.log_dir) / "permissions-helper.log"
+    build = env.build
+    home, facts = build.home, build.facts
+    job_label = helper_job_label(home)
+    sock = permissions_helper_socket(home, env.helper_port)
+    refuse_foreign_label_jobs(facts=facts, socket=sock, current_label=job_label)
+    log = logs_dir(home=home) / "permissions-helper.log"
     plist = activation_plan.helper_plist(
         label=job_label,
         executable=str(app_executable(app)),
@@ -458,13 +392,13 @@ def install_and_load(
         socket=str(sock),
         root_seed=str(base.paths.root_run_dir(home) / "seed.json"),
     )
-    path = plist_path(cfg.home, agents=cfg.agents) if cfg.plist is None else cfg.plist
+    path = helper_job_plist_path(home, facts=facts)
     path.parent.mkdir(parents=True, exist_ok=True)
     new_bytes = plistlib.dumps(plist)
-    loaded = is_loaded(cfg.home, runner=cfg.runner) if cfg.loaded is None else cfg.loaded
+    loaded = helper_job_loaded(home, facts=facts, run=build.run, timers=build.timers)
     plan = activation_plan.activation_plan(
         loaded=loaded,
-        stop_intent=loaded and helper_stop_intent(home),
+        stop_intent=loaded and helper_stop_intent(home, uid=facts.uid),
         plist_changed=not path.exists() or path.read_bytes() != new_bytes,
         rebuilt=rebuilt,
     )
@@ -472,23 +406,14 @@ def install_and_load(
         raise PermissionsHelperBuildError(plan.refusal)
     if plan.bootstrap:
         base.paths.root_run_dir(home).mkdir(mode=0o700, parents=True, exist_ok=True)
-        clear_helper_stop_intent(home)
+        clear_helper_stop_intent(home, uid=facts.uid)
         path.write_bytes(new_bytes)
-        domain = launchd_domain() if cfg.domain is None else cfg.domain
-        run_tool(["launchctl", "bootstrap", domain, str(path)], runner=cfg.runner)
-    if not helper_answers_ping(helper, settle_seconds=settle_seconds):
+        run_tool(["launchctl", "bootstrap", facts.domain, str(path)], run=build.run)
+    if not helper_answers_ping(helper, timers=build.timers, settle_seconds=settle_seconds):
         raise PermissionsHelperBuildError(
             "permissions helper is unresponsive; custody is unknown. Diagnose the native job "
             "externally; start will not bootout or kickstart its possible ancestor"
         )
-
-
-def helper_socket(home: Path | None = None) -> Path:
-    """This cluster's permissions-helper socket, from its configured helper port."""
-    return permissions_helper_socket(
-        meiva_home() if home is None else home,
-        settings.services.permissions_helper_port,
-    )
 
 
 # meiva:note
@@ -498,6 +423,7 @@ def helper_socket(home: Path | None = None) -> Path:
 def helper_answers_ping(
     helper: HelperFactory,
     *,
+    timers: Timers,
     attempts: int = activation_plan.HELPER_PING_ATTEMPTS,
     settle_seconds: float = activation_plan.HELPER_PING_SETTLE_S,
 ) -> bool:
@@ -517,16 +443,15 @@ def helper_answers_ping(
         if verdict == "answered":
             return True
         if attempt < attempts - 1:
-            time.sleep(settle_seconds)
+            timers.sleep(settle_seconds)
     return False
 
 
-def _require_usable_socket_paths(*, home: Path | None = None, socket: Path | None = None) -> None:
+def _require_usable_socket_paths(*, home: Path, helper_port: int) -> None:
     """Refuse impossible macOS IPC names before signing or registering jobs."""
-    cluster_home = base.paths.meiva_home() if home is None else home
     paths = (
-        helper_socket(home) if socket is None else socket,
-        base.paths.root_run_dir(cluster_home) / "meiva-root.sock",
+        permissions_helper_socket(home, helper_port),
+        base.paths.root_run_dir(home) / "meiva-root.sock",
     )
     for path in paths:
         if activation_plan.socket_path_too_long(os.fsencode(path)):
@@ -537,13 +462,7 @@ def _require_usable_socket_paths(*, home: Path | None = None, socket: Path | Non
 
 # meiva:note
 # Idempotent full bring-up: build+sign, load. Raises on any failure.
-def converge(*, helper: HelperFactory, env: InstallEnv | None = None) -> None:
-    cfg = env or InstallEnv()
-    _require_usable_socket_paths(home=cfg.home, socket=cfg.socket)
-    dest = (
-        settings.services.permissions_helper_artifact_dir
-        if cfg.artifact_dir is None
-        else cfg.artifact_dir
-    )
-    app, rebuilt = build_and_sign(destination=dest, env=cfg.build)
-    install_and_load(app, rebuilt=rebuilt, helper=helper, env=cfg)
+def converge(*, helper: HelperFactory, env: InstallEnv) -> None:
+    _require_usable_socket_paths(home=env.build.home, helper_port=env.helper_port)
+    app, rebuilt = build_and_sign(destination=env.artifact_dir, env=env.build)
+    install_and_load(app, rebuilt=rebuilt, helper=helper, env=env)

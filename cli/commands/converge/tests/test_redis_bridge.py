@@ -8,6 +8,7 @@
 from __future__ import annotations
 
 import json
+import random
 from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
@@ -92,6 +93,7 @@ def _context(
     host: Host,
 ) -> ConvergeCtx:
     return ConvergeCtx(
+        secure_rng=random.SystemRandom(),
         repo=files.home.parent / "repo",
         meiva_home=files.home,
         roles=None,

@@ -96,6 +96,12 @@ def test_the_guest_scripts_pin_the_pieces_the_experiment_found_necessary() -> No
     assert not re.search(r"\b(insert|update|delete)\b", tart_golden.VERIFY, re.I)
 
 
+def test_the_guest_builds_the_helper_through_the_script_that_has_a_converge_command() -> None:
+    script = Path(__file__).resolve().parents[3] / "scripts/ci/helper_smoke/signing_smoke.py"
+    assert script.is_file()
+    assert "scripts/ci/helper_smoke/signing_smoke.py converge" in tart_golden.HELPER
+
+
 # meiva:note
 # `VERIFY_PY` runs inside the guest VM as a string, so meizel and the checks over the repository's AST never see it. This parses it and requires every helper-directory lookup to name the home it resolved itself.
 def test_the_guest_verify_script_names_the_home_of_every_helper_lookup() -> None:

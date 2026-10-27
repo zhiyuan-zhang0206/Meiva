@@ -14,6 +14,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import assert_never
 
+from base.clock import Timers
 from base.cluster.dataplane.pg_admin import pg_socket_path
 from base.host.permissions_helper.client import PermissionsHelperClient
 from base.host.private_storage import write_private_bytes
@@ -47,7 +48,7 @@ from cli.commands.cluster.plans.destroy_plan import (
 )
 from cli.database.runtime import Terminal
 from cli.start_identity import read_intent
-from services.desktop.permissions_helper.launchd_job import unregister_helper
+from services.desktop.permissions_helper.launchd_job import LaunchdFacts, unregister_helper
 
 
 # meiva:note
@@ -65,6 +66,7 @@ class DestroyRequest:
     checkout: Path
     user_home: Path
     helper_port: int
+    pid: int
 
 
 # meiva:note
@@ -87,7 +89,9 @@ def _drop_dirs(home: Path) -> tuple[Path, ...]:
 # of the URLs its data-plane identity is read from. The `detached` destroy intent is what
 # stops the leftover home from starting again (`cli.start_identity.prepare_identity` refuses
 # it); deleting that file by hand is the only way back.
-def cmd_cluster_destroy(request: DestroyRequest, *, host: Host, terminal: Terminal) -> int:
+def cmd_cluster_destroy(
+    request: DestroyRequest, *, host: Host, terminal: Terminal, timers: Timers
+) -> int:
     home = request.home.resolve()
     intent = read_intent(home)
     if intent is None:
@@ -113,11 +117,11 @@ def cmd_cluster_destroy(request: DestroyRequest, *, host: Host, terminal: Termin
     # the first moment of the teardown.
     with file_lock(home / "start-intent.lock", timeout_s=30):
         for step in plan.under_lock:
-            failed = _execute(step, request, home=home, host=host, terminal=terminal)
+            failed = _execute(step, request, home=home, host=host, terminal=terminal, timers=timers)
             if failed is not None:
                 return failed
     for step in plan.afterwards:
-        _execute(step, request, home=home, host=host, terminal=terminal)
+        _execute(step, request, home=home, host=host, terminal=terminal, timers=timers)
     return 0
 
 
@@ -142,7 +146,13 @@ def _confirmed(facts: DestroyFacts, terminal: Terminal) -> bool:
 # meiva:note
 # Perform one step; the exit status to stop with when it failed, else None.
 def _execute(
-    step: DestroyStep, request: DestroyRequest, *, home: Path, host: Host, terminal: Terminal
+    step: DestroyStep,
+    request: DestroyRequest,
+    *,
+    home: Path,
+    host: Host,
+    terminal: Terminal,
+    timers: Timers,
 ) -> int | None:
     match step:
         case PublishIntent():
@@ -165,7 +175,15 @@ def _execute(
                 return 1
         case RetireHelper(helper_port):
             try:
-                unregister_helper(home, helper_port=helper_port, connect=PermissionsHelperClient)
+                unregister_helper(
+                    home,
+                    helper_port=helper_port,
+                    connect=PermissionsHelperClient,
+                    facts=LaunchdFacts.of(host, user_home=request.user_home),
+                    caller_pid=request.pid,
+                    run=host.run,
+                    timers=timers,
+                )
             except (OSError, RuntimeError, ValueError, TypeError) as exc:
                 print(cleanup_incomplete(str(exc)), file=terminal.stderr)
                 return 1
