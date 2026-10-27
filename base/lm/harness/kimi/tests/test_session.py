@@ -27,7 +27,8 @@ from base.lm.harness.kimi import (
 )
 from base.lm.harness.kimi.tests.support import AGENT_PID, start
 from base.lm.harness.kimi.usage import session_log_dir
-from base.lm.pricing import PriceBook, PriceRates, load_archive, plugin_model_price
+from base.lm.pricing import PriceBook, PriceRates, plugin_model_price
+from base.lm.pricing.archive import load_archive
 
 
 def permission_request(

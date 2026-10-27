@@ -1,16 +1,20 @@
-"""Pure packing of registered local files into provider-native media blocks.
-
-``base.lm.factory`` owns tiered media-capability resolution so packing and
-message-endpoint image gating use the same core, plugin, and prefix answers.
-"""
+# meiva:note
+# Pure packing of registered local files into provider-native media blocks.
+#
+# `base.lm.factory` owns tiered media-capability resolution so packing and message-endpoint image
+# gating use the same core, plugin, and prefix answers.
+#
+# The packing never touches a file. `plan_attachments` is a generator that yields the observation
+# it needs next (a stat, an image's dimensions, a file's bytes) and receives what the world
+# answered; `base.lm.attach.files.pack_attachments` runs it against the filesystem.
 
 from __future__ import annotations
 
 import base64
-import os
-import stat
+from collections.abc import Generator
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Literal
 
 from base.lm.attach.constants import (
     ATTACH_MAX_FILE_BYTES,
@@ -47,11 +51,57 @@ class AttachmentPack:
     skipped: list[tuple[str, str]]
 
 
+# meiva:note
+# What the packing asks the world for, one observation at a time. `StatRequest` resolves an
+# entry's path and stats it; the other two name the resolved path the stat answered with.
+@dataclass(frozen=True)
+class StatRequest:
+    entry_path: str
+
+
+@dataclass(frozen=True)
+class DimensionsRequest:
+    path: str
+
+
+@dataclass(frozen=True)
+class ReadRequest:
+    path: str
+
+
+type PackRequest = StatRequest | DimensionsRequest | ReadRequest
+
+
+# meiva:note
+# What the world answered. `outcome` says how far the stat got: the entry's path did not resolve,
+# the file is missing, it could not be stat-ed, or the stat succeeded (`is_regular` and `size`
+# then describe it). `path` is the resolved path text, or the entry's own text when it did not
+# resolve. A dimensions or read answer carries None when the file could not be read.
+@dataclass(frozen=True)
+class StatObserved:
+    outcome: Literal["invalid_path", "missing", "unstatable", "stat"]
+    path: str
+    is_regular: bool = False
+    size: int | None = None
+
+
+@dataclass(frozen=True)
+class DimensionsObserved:
+    dimensions: tuple[int, int] | None
+
+
+@dataclass(frozen=True)
+class ReadObserved:
+    data: bytes | None
+
+
+type Observation = StatObserved | DimensionsObserved | ReadObserved
+
+
 @dataclass(frozen=True)
 class _AttachmentFile:
     """A regular recognized file after its pack-time stat check."""
 
-    path: Path
     path_text: str
     size: int
     mime: str
@@ -146,13 +196,15 @@ class _PackingState:
 #
 # Uses the attach contract (`attach_modalities_for_model`) rather than the raw
 # endpoint matrix so a file `attach()` rejected never slips through as a caption.
-def pack_attachments(
+# The generator yields the observations it needs, in the order the checks need them (a
+# file is read only after the cheaper checks passed), and returns the pack.
+def plan_attachments(
     model: str,
     entries: list[AttachEntry],
     *,
     catalog: ModelCatalog,
     max_files_per_turn: int = ATTACH_MAX_FILES_PER_TURN,
-) -> AttachmentPack | None:
+) -> Generator[PackRequest, Observation, AttachmentPack | None]:
     if not entries:
         return None
 
@@ -164,7 +216,8 @@ def pack_attachments(
     state = _PackingState()
 
     for index, entry in enumerate(entries, start=1):
-        attachment = _attachment_file(entry)
+        stat_answer = yield StatRequest(entry.path)
+        attachment = _attachment_file(_expect_stat(stat_answer))
         if isinstance(attachment, _SkippedAttachment):
             state.skip(index, entry.label, attachment)
             continue
@@ -185,16 +238,22 @@ def pack_attachments(
         ):
             state.skip(index, entry.label, _skip_for(attachment, reason))
             continue
-        if reason := _image_dimension_error(
-            model, state.delivered_images, attachment, catalog=catalog
-        ):
-            state.skip(index, entry.label, _skip_for(attachment, reason))
+        if attachment.media_type == "image":
+            dimensions_answer = yield DimensionsRequest(attachment.path_text)
+            reason = _image_dimension_error(
+                model,
+                state.delivered_images,
+                _expect_dimensions(dimensions_answer),
+                catalog=catalog,
+            )
+            if reason:
+                state.skip(index, entry.label, _skip_for(attachment, reason))
+                continue
+        read_answer = yield ReadRequest(attachment.path_text)
+        data = _expect_read(read_answer).data
+        if data is None:
+            state.skip(index, entry.label, _skip_for(attachment, "cannot read file"))
             continue
-        data, read_error = _read_attachment(attachment)
-        if read_error is not None:
-            state.skip(index, entry.label, _skip_for(attachment, read_error))
-            continue
-        assert data is not None  # noqa: S101
         if reason := _delivery_error(
             model,
             state,
@@ -233,27 +292,51 @@ def pack_attachments(
 
 
 # meiva:note
-# Resolve and stat `entry.path`; an unreadable, non-regular, or unrecognized file becomes a captioned skip.
-def _attachment_file(entry: AttachEntry) -> _AttachmentFile | _SkippedAttachment:
-    try:
-        path = Path(entry.path).resolve()
-    except (OSError, ValueError):
-        return _SkippedAttachment(entry.path, None, None, "invalid file path")
-    try:
-        file_stat = os.stat(path)  # noqa: PTH116
-    except FileNotFoundError:
-        return _SkippedAttachment(str(path), None, None, "file does not exist")
-    except OSError:
-        return _SkippedAttachment(str(path), None, None, "cannot stat file")
-    if not stat.S_ISREG(file_stat.st_mode):
-        return _SkippedAttachment(str(path), None, file_stat.st_size, "not a regular file")
+# The answers arrive typed as the union; a driver that answers a request with another kind of
+# observation is a bug in the driver, not a bad file.
+def _expect_stat(answer: Observation) -> StatObserved:
+    if not isinstance(answer, StatObserved):
+        raise TypeError(f"a stat request was answered with {type(answer).__name__}")
+    return answer
+
+
+def _expect_dimensions(answer: Observation) -> DimensionsObserved:
+    if not isinstance(answer, DimensionsObserved):
+        raise TypeError(f"a dimensions request was answered with {type(answer).__name__}")
+    return answer
+
+
+def _expect_read(answer: Observation) -> ReadObserved:
+    if not isinstance(answer, ReadObserved):
+        raise TypeError(f"a read request was answered with {type(answer).__name__}")
+    return answer
+
+
+# meiva:note
+# Turn what the stat found into the file to pack or the skip to caption: an unresolvable,
+# missing, unstatable, non-regular, or unrecognized file becomes a captioned skip.
+def _attachment_file(observed: StatObserved) -> _AttachmentFile | _SkippedAttachment:
+    match observed.outcome:
+        case "invalid_path":
+            return _SkippedAttachment(observed.path, None, None, "invalid file path")
+        case "missing":
+            return _SkippedAttachment(observed.path, None, None, "file does not exist")
+        case "unstatable":
+            return _SkippedAttachment(observed.path, None, None, "cannot stat file")
+        case "stat":
+            pass
+    size = observed.size
+    if size is None:
+        raise ValueError("a successful stat carries a size")
+    if not observed.is_regular:
+        return _SkippedAttachment(observed.path, None, size, "not a regular file")
+    path = Path(observed.path)
     mime = ATTACH_MEDIA_MIME.get(path.suffix.lower())
     if mime is None:
-        return _SkippedAttachment(str(path), None, file_stat.st_size, "unknown media suffix")
+        return _SkippedAttachment(observed.path, None, size, "unknown media suffix")
     return _AttachmentFile(
-        path=path,
-        path_text=str(path),
-        size=file_stat.st_size,
+        path_text=observed.path,
+        size=size,
         mime=mime,
         media_type=_media_type_for_mime(mime),
     )
@@ -288,32 +371,14 @@ def _delivery_error(
 
 
 def _image_dimension_error(
-    model: str, delivered_images: int, attachment: _AttachmentFile, *, catalog: ModelCatalog
+    model: str, delivered_images: int, observed: DimensionsObserved, *, catalog: ModelCatalog
 ) -> str | None:
-    if attachment.media_type != "image":
-        return None
-    dimensions, read_error = _image_dimensions(attachment.path)
-    if read_error is not None:
-        return read_error
-    assert dimensions is not None  # noqa: S101 — paired result from _image_dimensions
+    if observed.dimensions is None:
+        return "cannot read image dimensions"
     dimension_limit = _image_dimension_limit(model, delivered_images + 1, catalog=catalog)
-    if max(dimensions) > dimension_limit:
+    if max(observed.dimensions) > dimension_limit:
         return f"image exceeds {dimension_limit} px dimension limit"
     return None
-
-
-def _read_attachment(attachment: _AttachmentFile) -> tuple[bytes | None, str | None]:
-    try:
-        fd = os.open(attachment.path, os.O_RDONLY)
-        try:
-            chunks: list[bytes] = []
-            while chunk := os.read(fd, 65536):
-                chunks.append(chunk)
-            return b"".join(chunks), None
-        finally:
-            os.close(fd)
-    except OSError:
-        return None, "cannot read file"
 
 
 def _media_type_for_mime(mime: str) -> str:
@@ -334,17 +399,6 @@ def _attach_policy(model: str, *, catalog: ModelCatalog) -> AttachPolicy | None:
         if model.startswith(prefix):
             return binding.attach
     return None
-
-
-def _image_dimensions(path: Path) -> tuple[tuple[int, int] | None, str | None]:
-    """Read only image metadata; bad image bytes become a captioned skip."""
-    from PIL import Image, UnidentifiedImageError
-
-    try:
-        with Image.open(path) as image:
-            return image.size, None
-    except (Image.DecompressionBombError, OSError, UnidentifiedImageError, ValueError):
-        return None, "cannot read image dimensions"
 
 
 def _image_dimension_limit(model: str, image_count: int, *, catalog: ModelCatalog) -> int:

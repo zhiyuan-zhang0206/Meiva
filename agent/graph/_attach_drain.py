@@ -21,7 +21,8 @@ from langchain_core.messages import HumanMessage
 from agent.messages import attach_message
 from agent.state import AttachState, BaseAgentState
 from base.agents.context import MeivaContext
-from base.lm.attach.packing import AttachEntry, pack_attachments
+from base.lm.attach.files import pack_attachments
+from base.lm.attach.packing import AttachEntry
 from base.lm.catalog import ModelCatalog
 
 

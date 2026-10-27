@@ -46,7 +46,8 @@ class TestAttachItems:
         model_catalog: ModelCatalog,
     ) -> HumanMessage:
         from agent.messages import attach_message
-        from base.lm.attach.packing import AttachEntry, pack_attachments
+        from base.lm.attach.files import pack_attachments
+        from base.lm.attach.packing import AttachEntry
 
         image = tmp_path / "render.png"
         from PIL import Image
@@ -547,7 +548,8 @@ class TestTimelineDispatch:
         from PIL import Image
 
         from agent.messages import attach_message
-        from base.lm.attach.packing import AttachEntry, pack_attachments
+        from base.lm.attach.files import pack_attachments
+        from base.lm.attach.packing import AttachEntry
 
         image = tmp_path / "render.png"
         Image.new("RGB", (2, 2)).save(image)
