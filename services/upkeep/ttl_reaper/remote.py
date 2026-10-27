@@ -42,10 +42,8 @@ async def remote_round(
         _log.info("[ttl-reaper] reclaimed %d shell(s)", len(reaped))
     if not sweep:
         return
-    dropped = await shells.reap_stale_shells(pool, db, progress, config)
+    await shells.reap_stale_shells(pool, db, progress, config)
     progress.beat()
-    if dropped:
-        _log.info("[ttl-reaper] dropped %d stale tracking row(s)", len(dropped))
 
 
 async def remote_loop(

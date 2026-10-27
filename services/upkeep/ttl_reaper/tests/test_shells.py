@@ -133,6 +133,20 @@ def _insert_shell_row(
 
 
 # meiva:note
+# The machine-level probe record the stale sweep reads as the second half of "this machine is gone":
+# no row at all means nothing ever probed it.
+def _probe_record(db_conn: psycopg.Connection, machine: str, *, at: datetime) -> None:
+    with db_conn.cursor() as cur:
+        cur.execute(
+            "INSERT INTO machine_probe (machine_name, online, last_probe_at) VALUES (%s, %s, %s) "
+            "ON CONFLICT (machine_name) DO UPDATE SET "
+            "online = EXCLUDED.online, last_probe_at = EXCLUDED.last_probe_at",
+            (machine, False, at),
+        )
+    db_conn.commit()
+
+
+# meiva:note
 # A deadline far out (the stale sweep's business, never the kill path's) and a birth past the
 # sweep's grace window.
 def _tracked() -> datetime:
@@ -472,6 +486,7 @@ async def test_runner_invalid_mode_preserves_row_without_false_cleanup(
 async def test_stale_sweep_drops_the_row_of_a_session_the_host_no_longer_lists(
     db_conn: psycopg.Connection,
     reaper_pool: ConnectionPool,
+    emitted_events: EmittedEvents,
     *,
     database_gate: ProcessDbGate,
 ) -> None:
@@ -483,6 +498,14 @@ async def test_stale_sweep_drops_the_row_of_a_session_the_host_no_longer_lists(
         dropped = await _sweep(reaper_pool, database_gate=database_gate)
 
     assert dropped == [(aid, 2)]
+    # meiva:note
+    # The row is gone, so the event carries the identity the delete matched on.
+    attributes = emitted_events.attributes("shell_ttl_stale_dropped")[-1]
+    assert attributes["agent_id"] == aid
+    assert attributes["session_id"] == 2
+    assert attributes["machine"] == "macmini"
+    assert attributes["evidence"] == "session_gone"
+    assert attributes["created_at"] and attributes["expires_at"]
     # meiva:note
     # One listing covers every row of that agent — the sweep never asks per row.
     assert [(call["kind"], call["payload"]) for call in wire.calls] == [
@@ -568,19 +591,53 @@ async def test_stale_sweep_ignores_a_row_younger_than_the_grace(
     assert wire.calls == []
 
 
-async def test_stale_sweep_drops_rows_of_a_machine_absent_from_the_registry(
+async def test_stale_sweep_drops_rows_of_a_machine_gone_and_silent_past_the_grace(
     db_conn: psycopg.Connection,
     reaper_pool: ConnectionPool,
+    emitted_events: EmittedEvents,
+    caplog: pytest.LogCaptureFixture,
     *,
     database_gate: ProcessDbGate,
 ) -> None:
     aid = _running_agent(db_conn, machine="ghost")
     _insert_shell_row(db_conn, aid, 1, expires_at=_tracked(), created_at=_past_the_grace())
+    _probe_record(db_conn, "ghost", at=datetime.now(UTC) - timedelta(hours=7))
 
     dropped = await _sweep(reaper_pool, database_gate=database_gate)
 
     assert dropped == [(aid, 1)]
     assert _rows(db_conn, aid) == []
+    # meiva:note
+    # The row is gone, so the event carries the identity the delete matched on.
+    attributes = emitted_events.attributes("shell_ttl_stale_dropped")[-1]
+    assert attributes["agent_id"] == aid
+    assert attributes["session_id"] == 1
+    assert attributes["machine"] == "ghost"
+    assert attributes["evidence"] == "machine_absent"
+    assert attributes["created_at"] and attributes["expires_at"]
+    assert "machine_absent machine=ghost rows=1 agents=1" in caplog.text
+
+
+async def test_stale_sweep_keeps_rows_of_a_machine_missing_from_the_registry_but_just_probed(
+    db_conn: psycopg.Connection,
+    reaper_pool: ConnectionPool,
+    emitted_events: EmittedEvents,
+    caplog: pytest.LogCaptureFixture,
+    *,
+    database_gate: ProcessDbGate,
+) -> None:
+    aid = _running_agent(db_conn, machine="ghost")
+    _insert_shell_row(db_conn, aid, 1, expires_at=_tracked(), created_at=_past_the_grace())
+    _probe_record(db_conn, "ghost", at=datetime.now(UTC) - timedelta(minutes=10))
+
+    dropped = await _sweep(reaper_pool, database_gate=database_gate)
+
+    assert dropped == []
+    assert _rows(db_conn, aid) == [1]
+    assert "shell_ttl_stale_dropped" not in emitted_events.names()
+    # meiva:note
+    # A registry gap, not a dead machine: it is logged as such and the rows wait.
+    assert "missing from the registry but was probed" in caplog.text
 
 
 async def test_a_remote_round_kills_the_expired_row_and_sweeps_the_dead_sessions_row(

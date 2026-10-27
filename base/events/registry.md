@@ -349,7 +349,7 @@ above (or when its name is unregistered); otherwise it stays in the JSONL mirror
 | `page_proxy_502` | the gateway reverse proxy could not reach a registered page server; attributes carry trace_id, agent_id, page, host, port, exc_type, exc_message | anomaly | — | events |
 | `page_proxy_504` | the gateway reverse proxy timed out dialing a registered page server; attributes carry trace_id, agent_id, page, host, port, exc_type, exc_message | anomaly | — | events |
 | `shell_ttl_expired` | the TTL reaper killed a persistent shell whose declared TTL passed; attributes carry agent_id, session_id, mode | observation | — | events |
-| `shell_ttl_stale_dropped` | the TTL reaper dropped the tracking row of a persistent shell session its home machine no longer lists; attributes carry agent_id, session_id, machine | observation | — | events |
+| `shell_ttl_stale_dropped` | the TTL reaper dropped the tracking row of a persistent shell session its home machine no longer lists; attributes carry agent_id, session_id, machine, created_at, expires_at and evidence (session_gone | machine_absent) | observation | — | events |
 | `chrome_page_ttl_expired` | the browser-mcp TTL sweep closed a Chrome page whose hard deadline passed; attributes carry page_id, url, agent_id (None when no affinity slot still named the page) | observation | — | events |
 | `log` | bare log line | noise | msg | events |
 

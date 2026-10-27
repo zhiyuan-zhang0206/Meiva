@@ -4,12 +4,15 @@
 # `plan_stale` groups the unexpired tracking rows whose session may be gone by machine and then by
 # agent (the `shell_probe` op answers for one agent), `probe_session_ids` reads that answer into the
 # session ids the host lists or says it proves nothing, and `stale_rows` keeps the rows the host did
-# not list. The shell dials the machine and deletes the rows; nothing here reads a clock, a registry
-# or a connection.
+# not list. `absence_is_terminal` decides whether a machine's absence from the registry may be read
+# as "the machine is gone", from the last probe anything recorded of it. The shell dials the
+# machine, reads the probe record and deletes the rows; nothing here reads a clock, a registry or a
+# connection.
 from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
+from datetime import datetime, timedelta
 from typing import TypeGuard
 
 from services.upkeep.ttl_reaper.shell_plan import UNKNOWN_MACHINE, ShellRow
@@ -21,7 +24,7 @@ from services.upkeep.ttl_reaper.shell_plan import UNKNOWN_MACHINE, ShellRow
 # ask about, and one listing covers every row of that agent. The machine level is what a round
 # schedules on — one failed probe means the host is not answering, and the machine's remaining
 # agents wait for the next round instead of repeating the failure. Machines and agents keep
-# first-seen order; a row whose machine is missing or unknown waits in `unplaced`.
+# first-seen order.
 @dataclass(frozen=True)
 class AgentRows:
     agent_id: int
@@ -37,15 +40,15 @@ class MachineProbes:
 @dataclass(frozen=True)
 class StalePlan:
     machines: tuple[MachineProbes, ...]
-    unplaced: tuple[ShellRow, ...]
 
 
+# meiva:note
+# The reader's select already excludes rows whose owner has no usable machine, so the guard below is
+# a guard and not a path: such a row has nothing to dial and is left to the deadline path.
 def plan_stale(rows: Sequence[ShellRow]) -> StalePlan:
     grouped: dict[str, dict[int, list[ShellRow]]] = {}
-    unplaced: list[ShellRow] = []
     for row in rows:
         if not row.machine or row.machine == UNKNOWN_MACHINE:
-            unplaced.append(row)
             continue
         grouped.setdefault(row.machine, {}).setdefault(row.agent_id, []).append(row)
     return StalePlan(
@@ -55,8 +58,7 @@ def plan_stale(rows: Sequence[ShellRow]) -> StalePlan:
                 tuple(AgentRows(agent_id, tuple(group)) for agent_id, group in agents.items()),
             )
             for machine, agents in grouped.items()
-        ),
-        unplaced=tuple(unplaced),
+        )
     )
 
 
@@ -97,3 +99,17 @@ def probe_session_ids(answer: Mapping[str, object]) -> frozenset[int] | None:
 # health check reads and would keep the row until its declared deadline, up to a year away.
 def stale_rows(rows: Sequence[ShellRow], live: frozenset[int]) -> tuple[ShellRow, ...]:
     return tuple(row for row in rows if row.session_id not in live)
+
+
+# meiva:note
+# Whether a machine's absence from the machines registry may be read as "that machine is gone".
+#
+# The registry is a table, not the world: a rebuild, a restore, a rename, a rollout that writes it,
+# or one bad bulk update all make a live machine disappear from it for a while. Deleting a live
+# session's tracking row is irreversible — nothing can renew or reclaim that session again, and the
+# "unexpired rows" count a duty's health check reads drops with it — so absence alone is not
+# evidence. It becomes evidence only together with silence: nothing anywhere has recorded a probe of
+# that machine inside the same window a young row is exempt for. A machine that answers no probe for
+# six hours and is missing from the registry is gone, and its rows can never be dialed again.
+def absence_is_terminal(last_probe_at: datetime | None, *, now: datetime, grace: timedelta) -> bool:
+    return last_probe_at is None or last_probe_at < now - grace

@@ -314,7 +314,8 @@ EVENTS: dict[str, EventSpec] = {
         tier="observation",
         doc=(
             "the TTL reaper dropped the tracking row of a persistent shell session its home "
-            "machine no longer lists; attributes carry agent_id, session_id, machine"
+            "machine no longer lists; attributes carry agent_id, session_id, machine, created_at, "
+            "expires_at and evidence (session_gone | machine_absent)"
         ),
     ),
     "chrome_page_ttl_expired": EventSpec(
