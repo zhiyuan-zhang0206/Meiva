@@ -55,7 +55,7 @@ def test_the_isolated_home_is_the_one_every_consumer_resolves(tmp_path: Path) ->
 
 
 def test_scaffold_runs_despite_dangling_config(*, command_runtime: CommandRuntime) -> None:
-    pdir = paths.plugins_dir() / "real"
+    pdir = paths.plugins_dir(home=paths.meiva_home()) / "real"
     pdir.mkdir(parents=True)
     (pdir / "plugin.py").write_text("__description__ = 'x'\n", encoding="utf-8")
     (pdir / "setup.py").write_text(
@@ -82,11 +82,11 @@ def test_broken_setup_py_is_skipped_and_other_scaffolds_run(
     """A `setup.py` that fails to import is skipped loudly; the remaining
     plugins still scaffold (fail-soft, user ruling 2026-09-11) — one broken
     plugin must not block the provisioning command for every other plugin."""
-    broken = paths.plugins_dir() / "broken"
+    broken = paths.plugins_dir(home=paths.meiva_home()) / "broken"
     broken.mkdir(parents=True)
     (broken / "plugin.py").write_text("__description__ = 'x'\n", encoding="utf-8")
     (broken / "setup.py").write_text("raise RuntimeError('setup boom')\n", encoding="utf-8")
-    real = paths.plugins_dir() / "real"
+    real = paths.plugins_dir(home=paths.meiva_home()) / "real"
     real.mkdir(parents=True)
     (real / "plugin.py").write_text("__description__ = 'x'\n", encoding="utf-8")
     (real / "setup.py").write_text(
@@ -113,7 +113,7 @@ def test_scaffold_execution_stays_fail_fast(*, command_runtime: CommandRuntime) 
     while RUNNING stops provisioning — the documented boundary stays pinned so
     a silent per-plugin skip cannot creep in (user ruling 2026-09-11:
     containment is for load failures, not execution)."""
-    pdir = paths.plugins_dir() / "real"
+    pdir = paths.plugins_dir(home=paths.meiva_home()) / "real"
     pdir.mkdir(parents=True)
     (pdir / "plugin.py").write_text("__description__ = 'x'\n", encoding="utf-8")
     (pdir / "setup.py").write_text(
@@ -208,7 +208,7 @@ def test_converge_ignores_a_dirty_wrong_branch_memory_pool(
     """Converge must not invoke Git in runtime memory paths, even when poisoned."""
     _install_memory_plugin()
     command_runtime.machine.set(role="agent-runner", name="test-runner")
-    memory_pool = paths.memory_dir()
+    memory_pool = paths.memory_dir(home=paths.meiva_home())
     _make_dirty_memory_repo(memory_pool, "main")
 
     converge_host.converge_host(
@@ -234,14 +234,14 @@ def test_memory_init_returns_a_clean_error_for_the_wrong_branch_guard(
 ) -> None:
     _install_memory_plugin()
     command_runtime.machine.set(role="agent-runner", name="test-runner")
-    _make_dirty_memory_repo(paths.memory_dir(), "main")
+    _make_dirty_memory_repo(paths.memory_dir(home=paths.meiva_home()), "main")
     assert (
         memory.cmd_memory_init(machine=command_runtime.machine, facts=_facts(command_runtime)) == 1
     )
 
     stderr = capsys.readouterr().err
     assert (
-        f"✗ {paths.memory_dir()} is already a git repo but on branch 'main', "
+        f"✗ {paths.memory_dir(home=paths.meiva_home())} is already a git repo but on branch 'main', "
         "expected 'machine-test-runner'."
     ) in stderr
     assert "Manually switch:" in stderr
@@ -253,7 +253,7 @@ def test_memory_init_seeds_a_dirty_correct_branch_pool(
 ) -> None:
     _install_memory_plugin()
     command_runtime.machine.set(role="agent-runner", name="test-runner")
-    pool = paths.memory_dir()
+    pool = paths.memory_dir(home=paths.meiva_home())
     _make_dirty_memory_repo(pool, "machine-test-runner")
 
     assert (
@@ -277,7 +277,7 @@ def test_memory_init_seeds_a_dirty_correct_branch_pool(
 def test_memory_init_reports_scaffolded_plugins(
     capsys: pytest.CaptureFixture[str], *, command_runtime: CommandRuntime
 ) -> None:
-    plugin = paths.plugins_dir() / "example"
+    plugin = paths.plugins_dir(home=paths.meiva_home()) / "example"
     plugin.mkdir(parents=True)
     (plugin / "plugin.py").write_text("__description__ = 'test scaffold'\n", encoding="utf-8")
     (plugin / "setup.py").write_text(
@@ -306,7 +306,7 @@ def test_memory_init_parser_binds_the_explicit_handler() -> None:
 def test_scaffolds_borrow_the_same_invocation_machine(command_runtime: CommandRuntime) -> None:
     command_runtime.machine.set(name="scaffold-owner", role="agent-runner")
     for name in ("first", "second"):
-        plugin = paths.plugins_dir() / name
+        plugin = paths.plugins_dir(home=paths.meiva_home()) / name
         plugin.mkdir(parents=True)
         (plugin / "plugin.py").write_text("__description__ = 'same owner'\n", encoding="utf-8")
         (plugin / "setup.py").write_text(
@@ -322,11 +322,13 @@ def test_scaffolds_borrow_the_same_invocation_machine(command_runtime: CommandRu
     ).ran == ["first", "second"]
     expected = f"{id(command_runtime.machine)}:scaffold-owner"
     for name in ("first", "second"):
-        assert (paths.plugins_dir() / name / "owner").read_text(encoding="utf-8") == expected
+        assert (paths.plugins_dir(home=paths.meiva_home()) / name / "owner").read_text(
+            encoding="utf-8"
+        ) == expected
 
 
 def test_legacy_zero_argument_scaffold_fails_fast(command_runtime: CommandRuntime) -> None:
-    plugin = paths.plugins_dir() / "legacy"
+    plugin = paths.plugins_dir(home=paths.meiva_home()) / "legacy"
     plugin.mkdir(parents=True)
     (plugin / "plugin.py").write_text("__description__ = 'legacy'\n", encoding="utf-8")
     (plugin / "setup.py").write_text(
@@ -342,7 +344,7 @@ def test_legacy_zero_argument_scaffold_fails_fast(command_runtime: CommandRuntim
 # The ABI is `scaffold(*, machine, facts)`: a scaffold written for the previous `scaffold(*, machine)`
 # is refused before anything runs, with a message that names the missing keyword.
 def test_a_scaffold_without_the_facts_keyword_is_refused(command_runtime: CommandRuntime) -> None:
-    plugin = paths.plugins_dir() / "previous"
+    plugin = paths.plugins_dir(home=paths.meiva_home()) / "previous"
     plugin.mkdir(parents=True)
     (plugin / "plugin.py").write_text("__description__ = 'previous'\n", encoding="utf-8")
     (plugin / "setup.py").write_text(
@@ -394,7 +396,7 @@ def test_the_memory_init_handler_builds_the_facts_from_its_runtime(
     from cli import parsers
     from cli.commands.extensions.parsers import mcp
 
-    plugin = paths.plugins_dir() / "recorder"
+    plugin = paths.plugins_dir(home=paths.meiva_home()) / "recorder"
     plugin.mkdir(parents=True)
     (plugin / "plugin.py").write_text("__description__ = 'recorder'\n", encoding="utf-8")
     (plugin / "setup.py").write_text(
