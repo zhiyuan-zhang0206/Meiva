@@ -30,6 +30,7 @@ Each hint prints the site, then once per id: `why` (the principle in a sentence)
 | `test-subclass` | test file: a class with a method whose base is a production class (resolved through imports to a first-party non-test module) or a `psycopg`, `psycopg_pool` or `redis` class; exception bases are skipped | give the class the value it reads as a constructor field; a real resource for the fault |
 | `lambda-dependency` | a call passing `lambda` for a `*_reader`, `*_fn` or `*_hook` keyword, or for a `*_factory` keyword when the lambda only returns a name, attribute or constant | pass the value; change the lower API and name its owner |
 | `root-middle-layer` | production file declared under `[roots]` (not `main.py`, `app.py`, `runtime.py`, `__main__.py`) that two or more production modules which are not roots import, or one that three or more import; fires on the first added line of the file. Also every root the change newly declares in a manifest, Python or TypeScript, changed file or not | read the value in the real root and pass it down; name the single caller in the `Hint-Ack` if the file is a factory built once; move types and constants out of the file so it has no importers |
+| `strict-promotion` | a file the change makes `strict` while it adds a filesystem read (`os.stat`, `open(`, `.read_text(` ...) to a module beside it | name the shell that runs the plan and the strict function that returns it |
 | `spy-assert` | test file: `assert_called*`, `assert_awaited*`, `assert_not_called`, `assert_has_calls`, `assert_any_call`, `call_args`, `call_count`, `mock_calls` and the await spellings | assert the plan or the real effect's result |
 
 Reading the world itself (the clock, the environment, the platform, randomness, the whole `Settings`)
@@ -41,7 +42,7 @@ The same rules in the order `instead` gives them are "data in, decisions out"
 
 ## Known gaps
 
-`root-middle-layer` counts imports, so it does not see a root that is loaded by name (plugins, skill scripts, a registry), one reached only through a re-export or a constant folded in a module that fewer than three modules import, an importer of a TypeScript file, or a root under `scripts/`; no site is not a proof that the file is a root. Its recall is in the calibration node.
+`root-middle-layer` counts imports, so it does not see a root loaded by name (plugins, skill scripts, a registry), one reached through a constant folded in a module that fewer than three modules import, an importer of a TypeScript file, or a root under `scripts/`; no site is no proof. Its recall is in the calibration node.
 
 The hints see added lines, so they do not see what a change leaves behind in untouched code
 (9 of the 73 reviewed findings were leftovers), and they cannot see behavior (22 were
