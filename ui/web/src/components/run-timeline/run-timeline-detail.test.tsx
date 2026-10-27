@@ -1,5 +1,6 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { cleanup, render, screen } from "@testing-library/react";
+import { cleanup, screen } from "@testing-library/react";
+import { render } from "@/lib/transport/tests/wall-clock-render";
 import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 
 import type { RunTimelineMessages, RunTimelineNode, RunTimelineUnit } from "@/lib/contracts/types";

@@ -17,6 +17,7 @@ import { useEffect, useState } from "react";
 import { formatDuration } from "@/lib/format/item-summary";
 import { FLEX } from "@/lib/layout/layout";
 import { useTimelineStore } from "@/lib/timeline/timeline-store";
+import { useWallNow } from "@/lib/transport/transport-context";
 import type { LiveCompact } from "@/lib/timeline/timeline-store";
 import { useTimelineColors } from "@/lib/timeline/use-timeline-colors";
 import { cn } from "@/lib/format/utils";
@@ -33,12 +34,13 @@ const MAX_RUNNING_MS = 30 * 60_000;
 /** True once `deadline` (epoch ms) has passed; re-renders exactly once, when
  *  it does. A null deadline never expires. */
 function useDeadlinePassed(deadline: number | null): boolean {
-  const [now, setNow] = useState(() => Date.now());
+  const wallNow = useWallNow();
+  const [now, setNow] = useState(() => wallNow());
   useEffect(() => {
     if (deadline === null) return;
-    const id = setTimeout(() => setNow(Date.now()), Math.max(0, deadline - Date.now()) + 1);
+    const id = setTimeout(() => setNow(wallNow()), Math.max(0, deadline - wallNow()) + 1);
     return () => clearTimeout(id);
-  }, [deadline]);
+  }, [deadline, wallNow]);
   return deadline !== null && now > deadline;
 }
 
