@@ -2,6 +2,9 @@
 # Hosted incarnation admission and settlement, replacing status-only writes.
 
 import asyncio
+from dataclasses import dataclass
+from datetime import datetime
+from enum import StrEnum
 from typing import assert_never
 from uuid import UUID
 
@@ -203,6 +206,93 @@ async def admit_hosted_runtime(
         await asyncio.to_thread(deliver_ended_notice, db, agent_id, ended_lease)
     logger.info("hosted runtime admitted", agent_id=agent_id, generation=str(generation))
     return incarnation
+
+
+# meiva:note
+# Why a turn was not admitted.
+#
+# `admit_hosted_runtime` answers None for four different situations, and one log line used
+# to name two of them ("terminated or placed elsewhere"). The 2026-10-27 incident was the
+# third — a tripped recovery breaker — and the message pointed readers at placement instead
+# of at `permanent_reject_streak`, which is what had to be fixed by hand. The readings ride
+# along so the caller can print the breaker's own numbers without a second query.
+class AdmissionRefusal(StrEnum):
+    TERMINATED = "terminated"
+    PLACED_ELSEWHERE = "placed_elsewhere"
+    BREAKER = "breaker"
+    OTHER = "other"
+
+
+@dataclass(frozen=True)
+class AdmissionRefused:
+    reason: AdmissionRefusal
+    status: str | None = None
+    streak: int | None = None
+    suppress_reason: str | None = None
+    suppressed_until: datetime | None = None
+
+    # meiva:note
+    # The one sentence a reader gets, and the numbers the repair needs. Each branch names its
+    # own repair; the leftover branch (`other`) deliberately shares no wording with the other
+    # three, so a reader can never mistake a race for a terminated row, a foreign host or a
+    # tripped breaker.
+    def describe(self) -> str:
+        match self.reason:
+            case AdmissionRefusal.TERMINATED:
+                return f"row is terminated (row left {self.status})"
+            case AdmissionRefusal.PLACED_ELSEWHERE:
+                return f"row is hosted elsewhere (row left {self.status})"
+            case AdmissionRefusal.BREAKER:
+                until = self.suppressed_until.isoformat() if self.suppressed_until else "no window"
+                return (
+                    "the recovery breaker is tripped "
+                    f"(permanent_reject_streak={self.streak}, "
+                    f"wake_suppress_reason={self.suppress_reason}, "
+                    f"wake_suppressed_until={until}): an operator restart or a fresh chat "
+                    "admits the next turn"
+                )
+            case AdmissionRefusal.OTHER:
+                return f"the row changed under this read (row left {self.status})"
+
+
+# meiva:note
+# Classify a refusal by reading the row. Callers use this only after admission returned
+# None, so it costs one extra SELECT on a path that is already idle.
+#
+# Order is the honest one: a terminated row is terminated whatever else is on it, then a row
+# owned elsewhere, then a tripped breaker. `other` is the leftover — the row changed between
+# the admission read and this one, or an idling row on this machine with a clear breaker was
+# refused for a reason none of these describe — and it must never borrow another reason's
+# wording.
+async def explain_admission_refusal(
+    pool: AsyncPool, agent_id: int, machine: str
+) -> AdmissionRefused:
+    from base.agents.recovery.breaker import HALT_AFTER_CONSECUTIVE_PERMANENT_REJECTS
+
+    async with pool.connection() as conn:
+        row = await (
+            await conn.execute(
+                "SELECT status,machine,permanent_reject_streak,wake_suppress_reason,"
+                "wake_suppressed_until FROM agents_meta WHERE id=%s",
+                (agent_id,),
+            )
+        ).fetchone()
+    if row is None:
+        return AdmissionRefused(AdmissionRefusal.OTHER)
+    status, home, streak, suppress_reason, suppressed_until = row
+    if status == "terminated":
+        return AdmissionRefused(AdmissionRefusal.TERMINATED, status=status)
+    if home is not None and home != machine:
+        return AdmissionRefused(AdmissionRefusal.PLACED_ELSEWHERE, status=status)
+    if streak >= HALT_AFTER_CONSECUTIVE_PERMANENT_REJECTS:
+        return AdmissionRefused(
+            AdmissionRefusal.BREAKER,
+            status=status,
+            streak=streak,
+            suppress_reason=suppress_reason,
+            suppressed_until=suppressed_until,
+        )
+    return AdmissionRefused(AdmissionRefusal.OTHER, status=status)
 
 
 # meiva:note
