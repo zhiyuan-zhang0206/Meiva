@@ -14,7 +14,4 @@ exports = ["attachment.py", "registration.py", "store.py"]
 
 [roots]
 "__init__.py" = { kinds = ["environ"], why = "the same one-shot MEIVA_HARNESS_HANDLE handoff read by the public entry, before any Settings exists: `meiva.attach()` is what a bare harness child calls first, and the handle is per-launch IPC, not cluster configuration" }
-"attachment.py" = { kinds = ["pid", "settings"], why = "External controller attachment owns process bootstrap and reads os.getpid() to verify controller process lineage when no SDK context is bound" }
-
-[debt.ambient-read]
-"store.py#home base.paths.home.resolve_meiva_home" = 1
+"attachment.py" = { kinds = ["home", "pid", "settings"], why = "External controller attachment owns process bootstrap: it resolves the Meiva home once to find the registration store and reads os.getpid() to verify controller process lineage when no SDK context is bound" }
