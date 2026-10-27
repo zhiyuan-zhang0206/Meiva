@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Literal
+from typing import Literal, cast
 
 import pytest
 
@@ -32,3 +32,11 @@ def test_a_platform_without_a_pinned_binary_has_no_tag(
     system: Literal["darwin", "linux"], machine: str
 ) -> None:
     assert platform_tag_for(system, machine) is None
+
+
+@pytest.mark.parametrize("machine", ["arm64", "x86_64", "riscv64", ""])
+def test_an_unknown_system_is_refused_whatever_the_machine(machine: str) -> None:
+    system = cast("Literal['darwin', 'linux']", "Darwin")
+
+    with pytest.raises(AssertionError):
+        platform_tag_for(system, machine)
