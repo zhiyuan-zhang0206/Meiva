@@ -27,7 +27,7 @@ from base.events.live.bus import EventBus
 from base.log import logger
 from gateway.agents.launch import forward
 from gateway.cluster.schemas import MachinePauseRequest, MachinePauseResponse, MachineResumeResponse
-from gateway.http.config import gateway_clock
+from gateway.http.config import gateway_clock, gateway_rpc
 from ops.lifecycle import force_mark_terminated
 
 router = APIRouter()
@@ -201,6 +201,7 @@ async def pause_cluster_machine(
                 f"/api/agents/{agent_id}/terminate",
                 {"force": True, "source": "machine-pause"},
                 config=request.app.state.gateway_config,
+                rpc=gateway_rpc(request),
             )
             if was_live:
                 terminated += 1

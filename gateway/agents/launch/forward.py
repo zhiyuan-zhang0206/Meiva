@@ -62,11 +62,12 @@ async def forward_to_home_machine(
     db: Database,
     pool: ConnectionPool,
     config: GatewayConfig,
+    rpc: cluster_rpc.RpcClient,
     idempotency_key: str | None = None,
 ) -> dict[str, Any]:
     target = await asyncio.to_thread(_home_machine_blocking, pool, agent_id)
     return await enqueue_lifecycle(
-        db, target, path, json_body, config=config, idempotency_key=idempotency_key
+        db, target, path, json_body, config=config, rpc=rpc, idempotency_key=idempotency_key
     )
 
 
@@ -89,6 +90,7 @@ async def enqueue_lifecycle(
     json_body: dict[str, Any],
     *,
     config: GatewayConfig,
+    rpc: cluster_rpc.RpcClient,
     idempotency_key: str | None = None,
 ) -> dict[str, Any]:
     op = lifecycle_plan.lifecycle_op(
@@ -100,7 +102,7 @@ async def enqueue_lifecycle(
     )
     try:
         async with asyncio.timeout(config.lifecycle_deadline_seconds):
-            return await cluster_rpc.dispatch_to_machine(
+            return await rpc.dispatch_to_machine(
                 db,
                 target_machine=target,
                 kind=op.kind,
@@ -136,10 +138,10 @@ async def enqueue_lifecycle(
 #         target op rejects the launch. The target's business reason is
 #         included in the error detail.
 async def forward_spawn_to_remote(
-    db: Database, target: str, body: LaunchAgentRequest
+    db: Database, target: str, body: LaunchAgentRequest, *, rpc: cluster_rpc.RpcClient
 ) -> SpawnedAgent:
     try:
-        result = await cluster_rpc.dispatch_to_machine(
+        result = await rpc.dispatch_to_machine(
             db,
             target_machine=target,
             kind="spawn-launch",

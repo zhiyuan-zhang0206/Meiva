@@ -32,7 +32,7 @@ from base.db import Database
 from base.events.live.bus import EventBus
 from gateway.http.middleware.stopping import is_stopping
 from gateway.upload_delivery.failure_plan import CopyFailure, receiver_failure, terminal_failure
-from ops.cluster.rpc import ClusterOpFailed, ClusterOpTargetAbsent, dispatch_to_machine
+from ops.cluster.rpc import ClusterOpFailed, ClusterOpTargetAbsent, RpcClient
 from ops.lifecycle import resurrect_if_terminated
 
 _log = logging.getLogger(__name__)
@@ -50,8 +50,10 @@ class UploadRecovery:
         machine: MachineIdentityReader,
         home: Path,
         claim_seconds: float,
+        rpc: RpcClient,
     ) -> None:
         self.pool, self.db, self.bus = pool, db, bus
+        self.rpc = rpc
         self.machine = machine
         self.home = home
         self.claim_seconds = claim_seconds
@@ -182,7 +184,7 @@ class UploadRecovery:
                 manifest_hash=request.manifest.fingerprint(),
                 directory=str(directory / NAMESPACE / request.manifest.batch_id),
             )
-        result = await dispatch_to_machine(
+        result = await self.rpc.dispatch_to_machine(
             self.db,
             request.target.machine,
             "upload-receive-v1",

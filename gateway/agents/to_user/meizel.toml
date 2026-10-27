@@ -5,6 +5,3 @@ exports = ["document.py"]
 
 [purity]
 "__init__.py" = "strict"
-
-[debt.ambient-read]
-"document.py#settings ops.cluster.rpc.dispatch_to_machine" = 1

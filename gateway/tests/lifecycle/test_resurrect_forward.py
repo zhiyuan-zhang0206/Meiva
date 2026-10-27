@@ -30,6 +30,7 @@ from gateway.http.config import GatewayConfig
 from gateway.tests.auth.gateway_config import (
     gateway_test_client,
     gateway_test_config,
+    gateway_test_rpc,
     spawn_via_http,
 )
 from gateway.tests.support.runner_ops.ops_stub import (
@@ -216,6 +217,7 @@ async def test_lifecycle_forward_retries_a_transient_failure_once_under_one_key(
             "/restart",
             {},
             config=gateway_test_config(),
+            rpc=gateway_test_rpc(),
         )
 
     assert result == {"status": "ok"}
@@ -240,6 +242,7 @@ async def test_lifecycle_forward_gives_up_after_its_retry_budget(
             "/restart",
             {},
             config=gateway_test_config(lifecycle_retries=2),
+            rpc=gateway_test_rpc(),
         )
     assert len(runner.calls_of("lifecycle")) == 3
 
@@ -269,13 +272,15 @@ async def test_lifecycle_forward_deadline_becomes_a_clear_gateway_error(
             "/restart",
             {},
             config=config,
+            rpc=gateway_test_rpc(),
         )
     assert time.monotonic() - started < deadline * 4
 
 
 # meiva:note
 # Home lookup and RPC use the resources on the serving app's state, nothing ambient:
-# an app that carries only a database, its pool and a config can serve the route.
+# an app that carries only a database, its pool, a config and the cluster RPC client can serve the
+# route.
 def test_resurrect_needs_only_the_serving_apps_resources(
     database: Database, db_conn: psycopg.Connection
 ) -> None:
@@ -297,6 +302,7 @@ def test_resurrect_needs_only_the_serving_apps_resources(
         serving_app.state.db = database
         serving_app.state.db_pool = pool
         serving_app.state.gateway_config = gateway_test_config()
+        serving_app.state.rpc = gateway_test_rpc()
         serving_app.include_router(lifecycle_module.router)
         with TestClient(serving_app) as client:
             response = client.post(f"/api/agents/{agent_id}/resurrect")

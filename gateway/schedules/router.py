@@ -16,7 +16,7 @@ from base.cluster import session_name
 from base.db.transaction import write_transaction
 from base.sessions.protocol import SessionBackend
 from gateway.agents.creation import create_and_launch_agent, guarded_draft_key
-from gateway.http.config import GatewayConfig, gateway_clock, gateway_config
+from gateway.http.config import GatewayConfig, gateway_clock, gateway_config, gateway_rpc
 from gateway.http.model_catalog import require_model_catalog
 from gateway.routers.receipts import creation as creation_receipts
 from gateway.schedules import plans, receipts, session_control
@@ -462,6 +462,7 @@ async def guarded_draft_schedule(
         authority=request.app.state.config_authority,
         creation_key=key,
         clock=gateway_clock(request),
+        rpc=gateway_rpc(request),
         creation_identity=body.model_dump(mode="json"),
     )
     return ScheduleDraftResponse(agent_id=spawned.id)

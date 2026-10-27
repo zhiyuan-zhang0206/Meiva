@@ -12,8 +12,8 @@ from base.agents.to_user import ToUserDocument, ToUserReadRequest
 from base.cluster.machine import gateway_auth_headers
 from base.cluster.machines import MachineGatewayUrlMissing, MachineNotRegistered, lookup
 from gateway.agents.eval_guard import deny_isolated_result_read
-from gateway.http.config import gateway_config
-from ops.cluster.rpc import ClusterOpFailed, ClusterOpUnreachable, dispatch_to_machine
+from gateway.http.config import gateway_config, gateway_rpc
+from ops.cluster.rpc import ClusterOpFailed, ClusterOpUnreachable
 
 router = APIRouter()
 
@@ -39,7 +39,7 @@ def resource_request(agent_id: int, references: list[str], *, max_depth: int) ->
 
 async def read_snapshot(request: Request, query: ToUserReadRequest, machine: str) -> ToUserDocument:
     try:
-        result = await dispatch_to_machine(
+        result = await gateway_rpc(request).dispatch_to_machine(
             request.app.state.db,
             target_machine=machine,
             kind="to_user_read",

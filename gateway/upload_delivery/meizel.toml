@@ -7,6 +7,3 @@ exports = ["router.py", "worker.py"]
 [purity]
 "__init__.py" = "strict"
 "failure_plan.py" = "strict"
-
-[debt.ambient-read]
-"worker.py#settings ops.cluster.rpc.dispatch_to_machine" = 1

@@ -28,6 +28,7 @@ from base.paths.home import resolve_meiva_home
 from gateway.cluster.process_boot import LOADED_IMAGE
 from gateway.cluster.roster.roster_probe import IdentityMismatchLog
 from gateway.cluster.status import RosterEnv
+from gateway.tests.auth.gateway_config import gateway_test_rpc
 from services.supervision.meiva_root.server import ControlServer
 
 
@@ -48,6 +49,7 @@ def roster_env(
         machine=machine,
         probe_timeout_s=probe_timeout_s,
         clock=system_clock(),
+        rpc=gateway_test_rpc(),
     )
 
 

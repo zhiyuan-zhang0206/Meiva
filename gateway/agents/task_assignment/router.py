@@ -31,13 +31,14 @@ from gateway.agents.task_assignment.schemas import (
     TaskAssignmentIn,
     TaskAssignmentResult,
 )
-from gateway.http.config import gateway_clock
+from gateway.http.config import gateway_clock, gateway_rpc
 from gateway.http.model_catalog import (
     CatalogLoadFailure,
     request_default_model,
     require_catalog,
     require_model_catalog,
 )
+from ops.cluster.rpc import RpcClient
 from ops.rpc_schemas import SpawnAgentRequest
 
 router = APIRouter()
@@ -128,6 +129,7 @@ async def observe_launch(
     catalog: ModelCatalog | CatalogLoadFailure,
     default_model: str,
     clock: Clock,
+    rpc: RpcClient,
 ) -> TaskAssignmentAccepted:
 
     def current() -> CreationReceipt | None:
@@ -147,6 +149,7 @@ async def observe_launch(
             catalog=require_catalog(catalog),
             default_model=default_model,
             clock=clock,
+            rpc=rpc,
         )
     except AgentLaunchFailed as exc:
         response.launch_failure = str(exc)
@@ -232,4 +235,5 @@ async def post_task_assignment(
         catalog=request.app.state.catalog,
         default_model=request_default_model(request),
         clock=gateway_clock(request),
+        rpc=gateway_rpc(request),
     )

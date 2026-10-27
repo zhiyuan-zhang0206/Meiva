@@ -14,6 +14,7 @@ import logging
 
 from fastapi import APIRouter, Request
 
+from gateway.http.config import gateway_rpc
 from gateway.schemas import CommandItem
 from ops.cluster import rpc as cluster_rpc
 
@@ -68,7 +69,7 @@ async def get_commands(request: Request, agent_id: int | None = None) -> list[Co
         _log.warning("commands: agent %s has no agents_meta row; using local fallback", agent_id)
         return _local_commands(request, harness=harness)
     try:
-        result = await cluster_rpc.dispatch_to_machine(
+        result = await gateway_rpc(request).dispatch_to_machine(
             request.app.state.db,
             machine,
             "agent_skill_view",

@@ -9,6 +9,7 @@ from fastapi import HTTPException
 
 from base.db import Database
 from gateway.cluster.ops_dispatch import dispatch_op
+from gateway.tests.auth.gateway_config import gateway_test_rpc
 from gateway.tests.support.runner_ops.ops_stub import (
     OpsCall,
     OpsReply,
@@ -30,7 +31,9 @@ async def test_a_completed_op_returns_its_result(
     db_conn: psycopg.Connection, database: Database
 ) -> None:
     with runner_ops(db_conn, "runner-a", {"status_probe": _echo}):
-        result = await dispatch_op(database, "runner-a", "status_probe", {"x": 2})
+        result = await dispatch_op(
+            database, "runner-a", "status_probe", {"x": 2}, rpc=gateway_test_rpc()
+        )
 
     assert result == {"ok": 1, "received": {"x": 2}}
 
@@ -43,7 +46,7 @@ async def test_an_unreachable_runner_is_a_503(
         runner_ops(db_conn, "runner-a", {"status_probe": refused(404, "gone")}),
         pytest.raises(HTTPException) as raised,
     ):
-        await dispatch_op(database, "runner-a", "status_probe", {})
+        await dispatch_op(database, "runner-a", "status_probe", {}, rpc=gateway_test_rpc())
 
     assert raised.value.status_code == 503
     assert "runner-a" in str(raised.value.detail) and "status_probe" in str(raised.value.detail)
@@ -58,7 +61,7 @@ async def test_an_op_that_ran_and_failed_is_a_502(
         runner_ops(db_conn, "runner-a", {"status_probe": reply}),
         pytest.raises(HTTPException) as raised,
     ):
-        await dispatch_op(database, "runner-a", "status_probe", {})
+        await dispatch_op(database, "runner-a", "status_probe", {}, rpc=gateway_test_rpc())
 
     assert raised.value.status_code == 502
     assert "UpdateInFlight" in str(raised.value.detail)

@@ -33,12 +33,13 @@ from base.packages.plugin_config_admin import (
 )
 from base.packages.plugin_config_images import PluginConfigChangedError, PluginConfigOwner
 from base.packages.plugins.plugin_errors import InvalidConfigOverlay
-from gateway.http.config import gateway_config
+from gateway.http.config import gateway_config, gateway_rpc
 from gateway.http.model_catalog import require_model_catalog
 from gateway.routers.configuration import write_plan
 from gateway.routers.refusal import HttpFailure
 from ops import host_config
 from ops.cluster import rpc as cluster_rpc
+from ops.cluster.rpc import RpcClient
 from ops.env_audit import EnvWriteAudit, check_env_integrity
 from ops.host_config import SENSITIVE_MASK
 from ops.rpc_schemas import ConfigAuditReadResult, ConfigReadResult, ConfigWriteOpResult
@@ -91,6 +92,7 @@ async def _dispatch_config_read(
     target: str,
     *,
     db: Database,
+    rpc: RpcClient,
     authority: ConfigAuthority,
     local_machine: MachineIdentityReader,
     host: Host,
@@ -102,7 +104,7 @@ async def _dispatch_config_read(
         role = []
     if "agent-runner" in role:
         try:
-            wire = await cluster_rpc.dispatch_to_machine(
+            wire = await rpc.dispatch_to_machine(
                 db,
                 target_machine=target,
                 kind="config_read",
@@ -140,6 +142,7 @@ async def _dispatch_config_audit_read(
     last: int,
     *,
     db: Database,
+    rpc: RpcClient,
     local_machine: MachineIdentityReader,
 ) -> ConfigAuditReadResult:
 
@@ -149,7 +152,7 @@ async def _dispatch_config_audit_read(
         role = []
     if "agent-runner" in role:
         try:
-            wire = await cluster_rpc.dispatch_to_machine(
+            wire = await rpc.dispatch_to_machine(
                 db,
                 target_machine=target,
                 kind="config_audit_read",
@@ -186,6 +189,7 @@ async def _dispatch_config_write(
     overrides: dict[str, Any],
     *,
     db: Database,
+    rpc: RpcClient,
     authority: ConfigAuthority,
     local: bool = False,
     actor: str | None = None,
@@ -200,7 +204,7 @@ async def _dispatch_config_write(
         role = []
     if "agent-runner" in role:
         try:
-            wire = await cluster_rpc.dispatch_to_machine(
+            wire = await rpc.dispatch_to_machine(
                 db,
                 target_machine=target,
                 kind="config_write",
@@ -263,6 +267,7 @@ async def get_config(request: Request, machine: str | None = None) -> ConfigView
     read = await _dispatch_config_read(
         target,
         db=request.app.state.db,
+        rpc=gateway_rpc(request),
         authority=request.app.state.config_authority,
         local_machine=request.app.state.machine,
         host=request.app.state.host,
@@ -363,6 +368,7 @@ async def get_config_audit(
                     name,
                     effective_last,
                     db=request.app.state.db,
+                    rpc=gateway_rpc(request),
                     local_machine=request.app.state.machine,
                 )
                 for name in names
@@ -381,6 +387,7 @@ async def get_config_audit(
                 target,
                 effective_last,
                 db=request.app.state.db,
+                rpc=gateway_rpc(request),
                 local_machine=request.app.state.machine,
             )
         ]
@@ -455,6 +462,7 @@ async def _put_local(
     metas: dict[str, ConfigFieldMeta],
     *,
     db: Database,
+    rpc: RpcClient,
     authority: ConfigAuthority,
     has_cluster_patch: bool,
     actor: str | None,
@@ -467,6 +475,7 @@ async def _put_local(
         target,
         plan.host_body,
         db=db,
+        rpc=rpc,
         authority=authority,
         local=True,
         actor=actor,
@@ -565,6 +574,7 @@ async def put_config(
             plan,
             metas,
             db=request.app.state.db,
+            rpc=gateway_rpc(request),
             authority=request.app.state.config_authority,
             has_cluster_patch=has_cluster_patch,
             actor=actor,
@@ -577,6 +587,7 @@ async def put_config(
             target,
             plan.host_body,
             db=request.app.state.db,
+            rpc=gateway_rpc(request),
             authority=request.app.state.config_authority,
             actor=actor,
             trace_id=trace_id,

@@ -64,9 +64,10 @@ from gateway.cluster.schemas import (
     StatsTokens,
     SystemStatus,
 )
-from gateway.http.config import GatewayConfig, gateway_clock, gateway_config
+from gateway.http.config import GatewayConfig, gateway_clock, gateway_config, gateway_rpc
 from gateway.schemas.stats import StatsWindowHours, window_delta
 from ops.cluster import rpc as cluster_rpc
+from ops.cluster.rpc import RpcClient
 from ops.cluster_status import ClusterStatus, check_pidfile, serving_gate_reason
 from ops.cluster_status.schema_mismatch import status as schema_mismatch_status
 
@@ -221,6 +222,7 @@ class RosterEnv:
     machine: MachineIdentityReader
     probe_timeout_s: float
     clock: Clock
+    rpc: RpcClient
 
 
 def roster_env(request: Request) -> RosterEnv:
@@ -232,6 +234,7 @@ def roster_env(request: Request) -> RosterEnv:
         machine=request.app.state.machine,
         probe_timeout_s=gateway_config(request).status_probe_timeout_seconds,
         clock=gateway_clock(request),
+        rpc=gateway_rpc(request),
     )
 
 
@@ -306,7 +309,7 @@ async def probe_agent_runner(env: RosterEnv, row: RosterRowSpec) -> MachineStatu
         return roster_rows.offline_status(row)
     try:
         result = await roster_probe.dispatch_status_probe(
-            row.name, row.gateway_url, timeout_s=env.probe_timeout_s
+            row.name, row.gateway_url, timeout_s=env.probe_timeout_s, rpc=env.rpc
         )
     except cluster_rpc.ClusterOpUnreachable:
         # Expected when a host is genuinely offline / mid-restart — quiet.
