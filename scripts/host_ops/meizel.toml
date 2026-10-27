@@ -13,3 +13,6 @@ exports = ["admission_floor.py", "check_worktree_remove.py", "onboarding"]
 "guard_editable_venv.py" = { kinds = ["cwd", "environ"], why = "dependency-free pre-uv preflight must inspect inherited VIRTUAL_ENV and default checkout cwd before a project environment can be trusted or Settings can import" }
 "host_memory_sample.py" = { kinds = ["clock", "home", "pid"], why = "host memory sampler CLI reads the current user slice by UID, timestamps the sample, and appends to ~/.meiva/logs/host-memory.jsonl" }
 "update_schedule_script.py" = { kinds = ["db", "environ", "home", "pid"], why = "Operator maintenance CLI entry: it reads its own process environment and home to admit the installed runtime, opens the target home's database pool after verifying the agent host is stopped, and names itself by its pid in the lifecycle lock" }
+
+[debt.ambient-read]
+"guard_editable_venv.py#home pathlib.Path.expanduser" = 1

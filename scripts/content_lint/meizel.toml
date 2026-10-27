@@ -9,3 +9,4 @@ exports = ["lint_no_cjk.py", "lint_no_tailnet.py"]
 [debt.ambient-read]
 "check_cross_branch_migrations.py#environ base.host.git.gitenv.git_env" = 1
 "check_cross_branch_migrations.py#platform base.host.system.hostport.Host.system" = 1
+"lint_core_content_manifests.py#home pathlib.Path.expanduser" = 1

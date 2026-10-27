@@ -17,6 +17,7 @@ exports = ["launchd_job.py", "lifecycle.py", "onboarding.py", "signing_identity.
 "signing_identity.py" = { kinds = ["random"], why = "draws the password of the helper's signing keychain with secrets" }
 
 [debt.ambient-read]
+"launchd_job.py#clock time.monotonic" = 1
 "lifecycle.py#home base.paths.logs_dir" = 1
 "lifecycle.py#home base.paths.meiva_home" = 3
 "lifecycle.py#home base.paths.permissions_helper_app_dir" = 2

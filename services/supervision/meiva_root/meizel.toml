@@ -28,4 +28,5 @@ exports = ["__main__.py", "failure_state.py", "health.py", "inputs.py", "manifes
 "daemon.py" = { kinds = ["clock", "pid"], why = "process entry of the root supervisor: reads its own pid once and hands it to the supervisor and the helper-chain watch; builds the process clock from SYSTEM_TIMERS" }
 
 [debt.ambient-read]
+"stopping.py#pid os.getpgrp" = 1
 "supervisor.py#environ base.native_process.child_env.inherited_process_env" = 1

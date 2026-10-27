@@ -6,3 +6,6 @@ exports = ["async_no_sync_blocking.py", "meiva_root_scope.py", "diagnostics", "f
 
 [roots]
 "code_structure.py" = { kinds = ["environ"], why = "LINT_STRUCTURE_BASELINE_BASE is a live per-invocation CI input; standalone lint must not load deployed Settings." }
+
+[debt.ambient-read]
+"docstring_budget_report.py#cwd pathlib.Path()" = 1

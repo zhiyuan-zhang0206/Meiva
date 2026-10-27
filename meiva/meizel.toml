@@ -24,7 +24,7 @@ exports = ["agents", "boot.py", "files.py", "gateway_client", "impersonation", "
 
 [debt.ambient-read]
 "__init__.py#environ meiva.boot.is_launched_process" = 1
-"ui.py#clock base.clock.SYSTEM_TIMERS" = 1
+"ui.py#clock base.clock.SYSTEM_TIMERS" = 3
 
 [debt.any-collaborator]
 "__init__.py#any __getattr__.return" = 1

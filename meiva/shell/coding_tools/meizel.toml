@@ -15,5 +15,6 @@ exports = ["antigravity.py", "claude.py", "codex.py", "plans"]
 "claude.py" = { kinds = ["random"], why = "launch() mints a fresh UUID for a new Claude Code session when --resume is not given" }
 
 [debt.ambient-read]
-"_claude_checks.py#clock base.clock.SYSTEM_TIMERS" = 1
-"codex.py#clock base.clock.SYSTEM_TIMERS" = 1
+"_claude_checks.py#clock base.clock.SYSTEM_TIMERS" = 4
+"claude.py#clock time.strftime()" = 1
+"codex.py#clock base.clock.SYSTEM_TIMERS" = 14

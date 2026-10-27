@@ -18,3 +18,4 @@ exports = ["attachment.py", "registration.py", "store.py"]
 
 [debt.ambient-read]
 "store.py#home base.paths.home.resolve_meiva_home" = 1
+"store.py#random os.urandom" = 1

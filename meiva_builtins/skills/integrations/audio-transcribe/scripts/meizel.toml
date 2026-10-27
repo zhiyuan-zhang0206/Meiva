@@ -5,3 +5,6 @@ exports = ["transcribe.py"]
 
 [roots]
 "transcribe.py" = { kinds = ["settings"], why = "Audio transcription CLI script reads platform configuration at entry" }
+
+[debt.ambient-read]
+"transcribe.py#home pathlib.Path.expanduser" = 1

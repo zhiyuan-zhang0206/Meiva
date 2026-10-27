@@ -23,5 +23,6 @@ exports = ["__main__.py", "commands", "database", "fleet_update", "main.py", "pa
 "start_intent.py" = { kinds = ["environ"], why = "Identity bootstrap precedes Settings: read the birth inputs and pin the resolved home before config imports." }
 
 [debt.ambient-read]
+"init_intent.py#home pathlib.Path.expanduser" = 1
 "main.py#home base.paths.home.resolve_meiva_home" = 2
 "preflight.py#home base.paths.home.resolve_meiva_home" = 1

@@ -10,6 +10,6 @@ exports = ["chunk_consumer.py", "group_consumer.py", "rebuild.py", "tests"]
 
 [debt.ambient-read]
 "chunk_consumer.py#clock base.clock.Clock" = 2
-"chunk_consumer.py#clock base.clock.SYSTEM_TIMERS" = 1
+"chunk_consumer.py#clock base.clock.SYSTEM_TIMERS" = 2
 "group_consumer.py#clock base.clock.Clock" = 1
 "group_consumer.py#clock base.clock.SYSTEM_TIMERS" = 1

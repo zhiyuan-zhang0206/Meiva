@@ -7,3 +7,6 @@
 
 [roots]
 "cli.py" = { kinds = ["clock", "home", "pid"], why = "CLI entrypoint for the macOS permissions-helper smoke test" }
+
+[debt.ambient-read]
+"support.py#clock time.monotonic" = 2

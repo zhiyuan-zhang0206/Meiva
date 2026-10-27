@@ -22,6 +22,7 @@ exports = ["daemon.py", "held_settle.py", "host.py", "host_beat.py", "invocation
 "daemon.py" = { kinds = ["endpoints", "environ", "home", "pid", "random"], why = "the agent host process entry: it reads the parent environment once at boot to build the exec children's ParentFacts, draws every host identity and credential from one secure generator, and holds the process pid and service endpoints; it reads the account home once and hands it to the contexts the host builds" }
 
 [debt.ambient-read]
+"dispatcher.py#clock asyncio.loop.time" = 2
 "host.py#home base.paths.harness_registrations_dir" = 1
 "host.py#home base.paths.harness_sessions_dir" = 1
 "runtime.py#home base.paths.workspace_dir" = 1

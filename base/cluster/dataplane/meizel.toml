@@ -16,6 +16,7 @@ exports = ["direct_url.py", "pg_admin.py", "pg_foreground.py", "pg_runtime.py", 
 
 [debt.ambient-read]
 "pg_foreground.py#clock base.clock.SYSTEM_TIMERS" = 1
+"pg_tools.py#cwd pathlib.Path()" = 1
 "pg_tools.py#environ base.native_process.child_env.daemon_process_env" = 1
 "runtime_binaries.py#platform base.native_process.os_platform.Platform.current" = 1
 "walg_binary.py#environ base.native_process.child_env.daemon_process_env" = 1
