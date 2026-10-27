@@ -7,7 +7,6 @@ from datetime import UTC, datetime, timedelta
 from typing import Any, cast
 
 import pytest
-from fastapi import HTTPException
 from langchain_core.messages import AIMessage, BaseMessage, HumanMessage, SystemMessage, ToolMessage
 from langgraph.checkpoint.base import CheckpointMetadata, empty_checkpoint
 from langgraph.checkpoint.postgres import PostgresSaver
@@ -34,6 +33,7 @@ from services.derived.insights.run_timeline.projection.jobs import (
 )
 from services.derived.insights.run_timeline.projection.reader import TimelineReader
 from services.derived.insights.run_timeline.projection.source import capture_source
+from services.derived.insights.run_timeline.request_rules import TimelineRequestError
 from services.derived.insights.run_timeline.tokens import timeline_units
 
 T0 = datetime(2026, 10, 1, tzinfo=UTC)
@@ -292,9 +292,9 @@ def test_snapshot_is_pinned_and_expiration_does_not_read_again(world: World) -> 
     world.put(messages(1), sealed=False)
     assert world.reader.get(AGENT, cut.id) is cut and world.loads == [first]
     world.clock = 601
-    with pytest.raises(HTTPException) as caught:
+    with pytest.raises(TimelineRequestError) as caught:
         world.reader.get(AGENT, cut.id)
-    assert caught.value.status_code == 409 and world.loads == [first]
+    assert caught.value.status == 409 and world.loads == [first]
 
 
 def test_next_request_across_a_segment_boundary_fetches_only_its_own_segment(world: World) -> None:

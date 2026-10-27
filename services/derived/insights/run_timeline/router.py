@@ -1,7 +1,9 @@
 # meiva:link services/derived/insights/run_timeline/docs/range-projection.meiva.okf.md
 from __future__ import annotations
 
-from datetime import datetime, timedelta
+from collections.abc import Generator
+from contextlib import contextmanager
+from datetime import datetime
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
@@ -13,6 +15,11 @@ from services.derived.insights.run_timeline.context import (
     ResolvedRequest,
     build_run_timeline_context,
 )
+from services.derived.insights.run_timeline.links import (
+    check_link_content_selector,
+    check_link_window,
+    parse_agent_ids,
+)
 from services.derived.insights.run_timeline.links import read as read_links
 from services.derived.insights.run_timeline.links import read_content as read_link_content
 from services.derived.insights.run_timeline.messages import (
@@ -21,6 +28,13 @@ from services.derived.insights.run_timeline.messages import (
     slice_messages,
 )
 from services.derived.insights.run_timeline.projection.reader import TimelineReader
+from services.derived.insights.run_timeline.request_rules import (
+    TimelineRequestError,
+    check_message_range,
+    check_window_query,
+    message_page_stop,
+    resolve_window,
+)
 from services.derived.insights.run_timeline.schemas import (
     RunTimelineContext,
     RunTimelineLinkContent,
@@ -33,29 +47,14 @@ from services.derived.insights.run_timeline.schemas import (
 router = APIRouter()
 
 
-_EMPTY_WINDOW = timedelta(hours=24)
-
-
-def _window(
-    lifetime: tuple[datetime, datetime] | None,
-    from_: datetime | None,
-    to: datetime | None,
-    now: datetime,
-    recent_hours: int | None = None,
-) -> tuple[datetime, datetime]:
-    for name, value in (("from", from_), ("to", to)):
-        if value is not None and value.tzinfo is None:
-            raise HTTPException(status_code=422, detail=f"{name} must include a timezone offset")
-    default = lifetime or (now - _EMPTY_WINDOW, now)
-    end = to or default[1]
-    start = from_ or (
-        max(default[0], end - timedelta(hours=recent_hours))
-        if recent_hours is not None
-        else default[0]
-    )
-    if start >= end:
-        raise HTTPException(status_code=422, detail="from must be earlier than to")
-    return start, end
+# meiva:note
+# The HTTP face of the pure refusals in `request_rules`: every route body runs inside it.
+@contextmanager
+def _request_errors() -> Generator[None]:
+    try:
+        yield
+    except TimelineRequestError as refusal:
+        raise HTTPException(refusal.status, refusal.detail, headers=refusal.headers) from None
 
 
 def _options(
@@ -89,22 +88,11 @@ def get_run_timeline(
     max_units, snapshot = options
     reader: TimelineReader = request.app.state.run_timeline_reader
     timestamps: TimestampSource = request.app.state.timeline_timestamps
-    if recent_hours is not None and (from_ is not None or to is not None):
-        raise HTTPException(status_code=422, detail="recent_hours cannot be combined with from/to")
-    for name, value in (("from", from_), ("to", to)):
-        if value is not None and value.tzinfo is None:
-            raise HTTPException(422, f"{name} must include a timezone offset")
-    if from_ is not None and to is not None and from_ >= to:
-        raise HTTPException(422, "from must be earlier than to")
-    cut = reader.get(agent_id, snapshot)
-    start, end = _window(
-        cut.lifetime,
-        from_,
-        to,
-        timestamps.clock.now(),
-        recent_hours,
-    )
-    nodes, units, omitted = reader.window(cut, start, end, max_units)
+    with _request_errors():
+        check_window_query(from_, to, recent_hours)
+        cut = reader.get(agent_id, snapshot)
+        start, end = resolve_window(cut.lifetime, from_, to, timestamps.clock.now(), recent_hours)
+        nodes, units, omitted = reader.window(cut, start, end, max_units)
     return RunTimelineResponse(
         agent_id=agent_id,
         window=RunTimelineWindow(from_=start, to=end),
@@ -134,17 +122,16 @@ def get_run_timeline_messages(
     ),
 ) -> RunTimelineMessages:
     limit, full, snapshot = options
-    if end < start:
-        raise HTTPException(status_code=422, detail="end must not be before start")
     config: InsightsConfig = request.app.state.insights_config
     reader: TimelineReader = request.app.state.run_timeline_reader
-    cut = reader.get(agent_id, snapshot)
-    if end >= cut.count:
-        raise HTTPException(404, f"message {end} not found: history has {cut.count}")
-    stop = min(end, start + limit - 1)
     timestamps: TimestampSource = request.app.state.timeline_timestamps
+    with _request_errors():
+        check_message_range(start, end)
+        cut = reader.get(agent_id, snapshot)
+        stop = message_page_stop(start, end, limit, cut.count)
+        span = reader.span(cut, start, stop)
     return slice_messages(
-        reader.span(cut, start, stop),
+        span,
         MessageSliceSpec(
             start=start,
             stop=stop,
@@ -167,8 +154,9 @@ def get_run_timeline_context(
     snapshot: Annotated[str | None, Query(min_length=1, max_length=64)] = None,
 ) -> RunTimelineContext:
     reader: TimelineReader = request.app.state.run_timeline_reader
-    cut = reader.get(agent_id, snapshot)
-    idx, ts, segment, view = reader.request(cut, at)
+    with _request_errors():
+        cut = reader.get(agent_id, snapshot)
+        idx, ts, segment, view = reader.request(cut, at)
     config: InsightsConfig = request.app.state.insights_config
     return build_run_timeline_context(
         request.app.state.db_pool,
@@ -196,16 +184,9 @@ def get_run_timeline_links(
     from_: Annotated[datetime, Query(alias="from")],
     to: Annotated[datetime, Query()],
 ) -> RunTimelineLinks:
-    try:
-        ids = sorted({int(part) for part in agents.split(",")})
-    except ValueError:
-        raise HTTPException(
-            status_code=422, detail="agents must be comma-separated integers"
-        ) from None
-    if from_.tzinfo is None or to.tzinfo is None:
-        raise HTTPException(status_code=422, detail="from and to must include a timezone offset")
-    if from_ >= to:
-        raise HTTPException(status_code=422, detail="from must be earlier than to")
+    with _request_errors():
+        ids = parse_agent_ids(agents)
+        check_link_window(from_, to)
     db: Database = request.app.state.db
     return RunTimelineLinks(links=read_links(db, ids, from_, to))
 
@@ -219,8 +200,8 @@ def get_run_timeline_link_content(
     inbound_id: Annotated[int | None, Query(ge=1)] = None,
     notice_id: Annotated[int | None, Query(ge=1)] = None,
 ) -> RunTimelineLinkContent:
-    if (inbound_id is None) == (notice_id is None):
-        raise HTTPException(status_code=422, detail="give exactly one of inbound_id and notice_id")
+    with _request_errors():
+        check_link_content_selector(inbound_id, notice_id)
     db: Database = request.app.state.db
     found = read_link_content(db, inbound_id=inbound_id, notice_id=notice_id)
     if found is None:

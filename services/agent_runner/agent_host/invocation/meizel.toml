@@ -1,25 +1,13 @@
-exports = ["checkpoints.py", "completion_decisions.py", "driver.py"]
+exports = ["checkpoints.py", "completion_decisions.py", "driver.py", "failure_shapes.py"]
 
 [uses]
 "__init__.py" = ["checkpoints.py", "completion_decisions.py"]
+"driver.py" = ["failure_shapes.py"]
 
 [purity]
-"." = "strict-to-be"
+"." = "strict"
+"__init__.py" = { mode = "none", why = "the shell that runs the plans in completion_decisions.py against the database and the graph: it flushes the checkpoint, attaches the trace, settles the handoff and applies the lifecycle command inside the database phase, and decides nothing the plan did not name" }
 "checkpoints.py" = "strict"
 "completion_decisions.py" = "strict"
-
-[debt.impure-call]
-"__init__.py#async def finish_completed_invocation" = 1
-"__init__.py#async def finish_pending_failure" = 1
-"__init__.py#async def settle_handoff_before_invocation" = 1
-"driver.py#async def drive_context" = 1
-
-[debt.impure-edge]
-"__init__.py#agent/impersonation.py" = 1
-"__init__.py#agent/impersonation_handoff.py" = 1
-"__init__.py#agent/turn/runloop.py" = 1
-"__init__.py#agent/turn/trace_checkpoint.py" = 1
-"__init__.py#base/agents/context/__init__.py" = 1
-"__init__.py#base/events/live/bus.py" = 1
-"__init__.py#services/agent_runner/agent_host/db_recovery.py" = 1
-"__init__.py#services/agent_runner/agent_host/lifecycle/shells.py" = 1
+"driver.py" = { mode = "none", why = "the shell that runs one hosted invocation under a task group around its event publisher; which failure leaves it is decided by failure_shapes.py" }
+"failure_shapes.py" = "strict"

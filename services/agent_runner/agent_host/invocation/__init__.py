@@ -8,6 +8,7 @@ from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field
 from functools import partial
 from pathlib import Path
+from typing import assert_never
 
 from langchain_core.runnables import RunnableConfig
 from loguru import logger
@@ -25,9 +26,12 @@ from services.agent_runner.agent_host import TurnOutcome
 from services.agent_runner.agent_host.db_recovery import database_phase
 from services.agent_runner.agent_host.invocation.checkpoints import TurnCheckpoints
 from services.agent_runner.agent_host.invocation.completion_decisions import (
-    lifecycle_return_requested,
-    restart_resumes_turn,
-    should_wake_resumed,
+    ApplyLifecycle,
+    CarryOn,
+    SettleIdle,
+    handoff_resume_wanted,
+    lifecycle_follow_up,
+    plan_completion,
 )
 from services.agent_runner.agent_host.lifecycle.shells import apply_lifecycle_command
 
@@ -94,7 +98,9 @@ async def settle_handoff_before_invocation(
                 clock=settlement.timestamps.clock,
             ),
         )
-        if not fresh_input or ctx.original_incarnation is None:
+        if not handoff_resume_wanted(
+            fresh_input=fresh_input, has_original_incarnation=ctx.original_incarnation is not None
+        ):
             return False
         return await handoff_resume_pending(graph, agent_id)
 
@@ -133,51 +139,60 @@ async def finish_completed_invocation(
     pending: PendingWorkResult,
     hooks: InvocationHooks,
 ) -> TurnOutcome | None:
+    plan = plan_completion(
+        pending.result,
+        checkpoint_flushed=pending.checkpoint_flushed,
+        trace_attached=pending.trace_attached,
+    )
     async with database_phase():
-        if not pending.checkpoint_flushed:
+        if plan.flush_checkpoint:
             await flush_checkpoint(checkpoints.saver, agent_id)
             pending.checkpoint_flushed = True
-        if not pending.trace_attached:
+        if plan.attach_trace:
             await attach_trace_checkpoint_ref(checkpoints.graph, ctx, agent_id)
             pending.trace_attached = True
-    if lifecycle_return_requested(pending.result):
-        incarnation = ctx.require_original_incarnation(agent_id)
-        hooks.drop_agent(agent_id)
-        resume_turn = restart_resumes_turn(pending.result)
-        async with database_phase():
-            kind = await apply_lifecycle_command(
-                pool,
-                incarnation,
-                bus=hooks.settlement.bus,
-                resume_turn=resume_turn,
-                home=hooks.settlement.home,
-            )
-        logger.info(
-            "hosted lifecycle return settled",
-            agent_id=agent_id,
-            generation=str(incarnation.generation),
-            command_kind=kind,
-        )
-        if should_wake_resumed(kind, resume_turn=resume_turn):
-            hooks.wake_resumed(agent_id)
-        return TurnOutcome(exited=kind == "terminate", crashed=False)
-    if pending.result["turn_idle"]:
-        async with database_phase():
-            await settle_checkpoint(
-                checkpoints.graph,
-                hooks.settlement.db,
-                hooks.settlement.bus,
-                agent_id,
-                hooks.settlement.relays,
-                incarnation=ctx.original_incarnation,
-                timestamps=hooks.settlement.timestamps,
-                host=process_host(
-                    hooks.settlement.local_machine,
+    match plan.then:
+        case ApplyLifecycle(resume_turn=resume_turn):
+            incarnation = ctx.require_original_incarnation(agent_id)
+            hooks.drop_agent(agent_id)
+            async with database_phase():
+                kind = await apply_lifecycle_command(
+                    pool,
+                    incarnation,
+                    bus=hooks.settlement.bus,
+                    resume_turn=resume_turn,
                     home=hooks.settlement.home,
-                    environ=hooks.settlement.environ,
-                    rng=hooks.settlement.rng,
-                    clock=hooks.settlement.timestamps.clock,
-                ),
+                )
+            logger.info(
+                "hosted lifecycle return settled",
+                agent_id=agent_id,
+                generation=str(incarnation.generation),
+                command_kind=kind,
             )
-        return TurnOutcome(exited=False, crashed=False)
-    return None
+            follow_up = lifecycle_follow_up(kind, resume_turn=resume_turn)
+            if follow_up.wake_resumed:
+                hooks.wake_resumed(agent_id)
+            return TurnOutcome(exited=follow_up.exited, crashed=False)
+        case SettleIdle():
+            async with database_phase():
+                await settle_checkpoint(
+                    checkpoints.graph,
+                    hooks.settlement.db,
+                    hooks.settlement.bus,
+                    agent_id,
+                    hooks.settlement.relays,
+                    incarnation=ctx.original_incarnation,
+                    timestamps=hooks.settlement.timestamps,
+                    host=process_host(
+                        hooks.settlement.local_machine,
+                        home=hooks.settlement.home,
+                        environ=hooks.settlement.environ,
+                        rng=hooks.settlement.rng,
+                        clock=hooks.settlement.timestamps.clock,
+                    ),
+                )
+            return TurnOutcome(exited=False, crashed=False)
+        case CarryOn():
+            return None
+        case _:
+            assert_never(plan.then)

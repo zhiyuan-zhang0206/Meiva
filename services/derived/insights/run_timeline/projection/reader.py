@@ -8,8 +8,6 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 
-from fastapi import HTTPException
-
 from base.clock import Timers
 from base.clock.ids import new_uuid
 from base.db.protocols import DatabaseLike, SyncConnection, SyncPool
@@ -25,6 +23,7 @@ from services.derived.insights.run_timeline.projection.store import (
     window_blocks,
     window_node_rows,
 )
+from services.derived.insights.run_timeline.request_rules import TimelineRequestError
 from services.derived.insights.run_timeline.schemas import RunTimelineNode, RunTimelineUnit
 
 MAX_AGE_SECONDS = 600.0
@@ -89,7 +88,7 @@ class TimelineReader:
             if snapshot is not None:
                 if valid and hit is not None and hit.id == snapshot:
                     return hit
-                raise HTTPException(409, "timeline snapshot expired; refresh the timeline")
+                raise TimelineRequestError(409, "timeline snapshot expired; refresh the timeline")
             if (
                 valid
                 and hit is not None
@@ -112,7 +111,7 @@ class TimelineReader:
             source = self.read_source(conn, agent_id)
             if not source.ready:
                 state = self.jobs.request(agent_id)
-                raise HTTPException(
+                raise TimelineRequestError(
                     500 if state.status == "failed" else 503,
                     {"code": "timeline_index_" + state.status, "message": state.detail},
                     headers={"Retry-After": "2"},
@@ -226,7 +225,9 @@ class TimelineReader:
 
     def span(self, snapshot: Snapshot, start: int, end: int) -> list[tuple[Segment, HistoryView]]:
         if end >= snapshot.count:
-            raise HTTPException(404, f"message {end} not found: history has {snapshot.count}")
+            raise TimelineRequestError(
+                404, f"message {end} not found: history has {snapshot.count}"
+            )
         with self.pool.connection() as conn:
             segments = segments_for_span(conn, snapshot.agent_id, snapshot.sealed, start, end)
         result = [
@@ -279,6 +280,6 @@ class TimelineReader:
             else None
         )
         if chosen is None:
-            raise HTTPException(404, "the agent has made no LLM request")
+            raise TimelineRequestError(404, "the agent has made no LLM request")
         segment, view = self.span(snapshot, chosen[0], chosen[0])[0]
         return chosen[0], chosen[1], segment, view
