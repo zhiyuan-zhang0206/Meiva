@@ -10,6 +10,10 @@ import pytest
 from services.supervision.healthchecks import prod_venv as hc
 
 _HEALTHY_ENV = {"PATH": os.environ.get("PATH", "")}
+# meiva:note
+# The whole observation deadline the legs share. The caller owns it — nothing in the check falls
+# back to a literal.
+_DEADLINE_S = 5.0
 
 
 # meiva:note
@@ -55,13 +59,14 @@ def test_the_dependency_check_runs_in_the_isolated_environment(tmp_path: Path) -
     _checkout(tmp_path, "healthy")
     uv = _uv(tmp_path)
 
-    violations = hc.venv_violations(
+    observation = hc.observe_venv(
         source_root=tmp_path,
         uv=uv,
         environment={**_HEALTHY_ENV, "VIRTUAL_ENV": "/other/.venv", "PYTHONPATH": "/other"},
+        deadline_s=_DEADLINE_S,
     )
 
-    assert violations == ()
+    assert observation == hc.VenvObservation((), ())
     seen = (tmp_path / "uv-env.txt").read_text()
     assert "VIRTUAL_ENV" not in seen
     assert "PYTHONPATH" not in seen
@@ -70,42 +75,86 @@ def test_the_dependency_check_runs_in_the_isolated_environment(tmp_path: Path) -
 def test_a_failing_dependency_check_is_a_violation(tmp_path: Path) -> None:
     _checkout(tmp_path, "healthy")
 
-    violations = hc.venv_violations(
-        source_root=tmp_path, uv=_uv(tmp_path, code=3), environment=_HEALTHY_ENV
+    observation = hc.observe_venv(
+        source_root=tmp_path,
+        uv=_uv(tmp_path, code=3),
+        environment=_HEALTHY_ENV,
+        deadline_s=_DEADLINE_S,
     )
 
-    assert len(violations) == 1
-    assert violations[0].startswith("uv pip check failed (rc=3)")
+    (violation,) = observation.violations
+    assert violation.startswith("uv pip check failed (rc=3)")
+    assert observation.unmeasured == ()
 
 
-def test_dependency_timeout_does_not_skip_import_check(tmp_path: Path) -> None:
+# meiva:note
+# The split a busy host needs: a leg that ran out of its deadline is *unmeasured*, never a
+# violation, and the legs after it still run and still report what they find (2026-10-27, #5656).
+def test_dependency_timeout_is_unmeasured_and_does_not_skip_import_check(tmp_path: Path) -> None:
     _checkout(tmp_path, "missing")
 
-    violations = hc.venv_violations(
-        source_root=tmp_path, uv=_uv(tmp_path, hang=True), environment=_HEALTHY_ENV, timeout_s=0.5
+    observation = hc.observe_venv(
+        source_root=tmp_path, uv=_uv(tmp_path, hang=True), environment=_HEALTHY_ENV, deadline_s=0.5
     )
 
-    assert "timed out" in violations[0]
-    assert any("No module named" in violation for violation in violations)
+    (unmeasured,) = observation.unmeasured
+    assert unmeasured.startswith(
+        "uv pip check did not finish within its share of the observation deadline"
+    )
+    (violation,) = observation.violations
+    assert "No module named" in violation
 
 
-def test_an_unstartable_uv_is_reported_not_raised(tmp_path: Path) -> None:
+# meiva:note
+# A leg that could not start says nothing about the environment: a loaded host answers fork/exec with
+# EAGAIN, ENOMEM or EACCES, and a missing interpreter is ENOENT. Reading that as damage is the false
+# alarm this whole change removes, so it is "never read", and only a run that finished with a
+# violation stays in `violations` (2026-10-27, task #5656).
+def test_an_unstartable_uv_is_unmeasured_not_a_violation(tmp_path: Path) -> None:
     _checkout(tmp_path, "healthy")
 
-    violations = hc.venv_violations(
-        source_root=tmp_path, uv=str(tmp_path / "no-uv"), environment=_HEALTHY_ENV
+    observation = hc.observe_venv(
+        source_root=tmp_path,
+        uv=str(tmp_path / "no-uv"),
+        environment=_HEALTHY_ENV,
+        deadline_s=_DEADLINE_S,
     )
 
-    assert len(violations) == 1
-    assert "could not start" in violations[0]
+    (unmeasured,) = observation.unmeasured
+    assert "uv pip check could not start" in unmeasured
+    assert observation.violations == ()
+
+
+# meiva:note
+# The same rule for a leg the kernel ended instead of the work: an OOM kill answers with a negative
+# return code and no verdict, which is what a loaded host does to a heavy import.
+def test_a_killed_leg_is_unmeasured_not_a_violation(tmp_path: Path) -> None:
+    _checkout(tmp_path, "healthy")
+    killer = tmp_path / "killing-uv"
+    killer.write_text("#!/bin/sh\nkill -9 $$\n")
+    killer.chmod(0o700)
+
+    observation = hc.observe_venv(
+        source_root=tmp_path,
+        uv=str(killer),
+        environment=_HEALTHY_ENV,
+        deadline_s=_DEADLINE_S,
+    )
+
+    (unmeasured,) = observation.unmeasured
+    assert "uv pip check was killed by signal 9 before answering" in unmeasured
+    assert observation.violations == ()
 
 
 def test_missing_python_does_not_spawn_a_diagnostic(tmp_path: Path) -> None:
     uv = _uv(tmp_path)
 
-    violations = hc.venv_violations(source_root=tmp_path, uv=uv, environment=_HEALTHY_ENV)
+    observation = hc.observe_venv(
+        source_root=tmp_path, uv=uv, environment=_HEALTHY_ENV, deadline_s=_DEADLINE_S
+    )
 
-    assert "venv python missing" in violations[0]
+    assert "venv python missing" in observation.violations[0]
+    assert observation.unmeasured == ()
     assert not (tmp_path / "uv-env.txt").exists()
 
 
@@ -117,17 +166,19 @@ def test_real_isolated_import_detects_damage_without_writes(tmp_path: Path, dama
     (shadow / "psycopg.py").write_text("")
     before = _package_files(site)
 
-    violations = hc.venv_violations(
+    observation = hc.observe_venv(
         source_root=tmp_path,
         uv=None,
         environment={**_HEALTHY_ENV, "PYTHONPATH": str(shadow)},
+        deadline_s=_DEADLINE_S,
     )
 
     assert before == _package_files(site)
+    assert observation.unmeasured == ()
     if damage == "healthy":
-        assert violations == ()
+        assert observation.violations == ()
     else:
-        message = violations[0]
+        message = observation.violations[0]
         if damage == "missing":
             assert "No module named" in message
             assert "psycopg" in message
