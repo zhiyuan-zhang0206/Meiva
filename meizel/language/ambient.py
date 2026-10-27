@@ -146,22 +146,29 @@ class AmbientAccess(PatchForms):
 
     def entropy_touch(self, callee: str | None, call: ast.Call) -> None:
         func = call.func
-        if callee in fake_entropy.ENTROPY_CLOCKS or (
-            callee is None and isinstance(func, ast.Name) and func.id in ("id", "next")
+        if (
+            callee in fake_entropy.ENTROPY_CLOCKS
+            or fake_entropy.is_loop_clock(call, self.dotted)
+            or (callee is None and isinstance(func, ast.Name) and func.id in ("id", "next"))
         ):
             self.entropy_marked[-1] = True
 
     def entropy_leave(
-        self, function: ast.FunctionDef | ast.AsyncFunctionDef, inner: Scope, *, top_level: bool
+        self,
+        function: ast.FunctionDef | ast.AsyncFunctionDef,
+        inner: Scope,
+        *,
+        top_level: bool,
+        method: bool,
     ) -> None:
         marked = self.entropy_marked.pop()
         if not self.records_ambient:
             return
         if marked and function.name not in ("__repr__", "__str__"):
             self.entropy_scopes.append((function.body, inner))
-        if top_level:
+        if top_level or method:
             outer, self.scope = self.scope, inner
-            clock = fake_entropy.wrapper_clock(function, self.dotted)
+            clock = fake_entropy.wrapper_clock(function, self.dotted, method=method)
             self.scope = outer
             if clock is not None:
                 self.entropy_wrappers.append((function.name, function.lineno))
@@ -180,13 +187,30 @@ class AmbientAccess(PatchForms):
 
     def _used_as_value(self) -> frozenset[str]:
         called = {id(call.func) for call in ast.walk(self.tree) if isinstance(call, ast.Call)}
-        return frozenset(
-            node.id
-            for node in ast.walk(self.tree)
-            if isinstance(node, ast.Name)
-            and isinstance(node.ctx, ast.Load)
-            and id(node) not in called
-        )
+        names: set[str] = set()
+        for node in ast.walk(self.tree):
+            if id(node) in called:
+                continue
+            if isinstance(node, ast.Name) and isinstance(node.ctx, ast.Load):
+                names.add(node.id)
+            elif isinstance(node, ast.Attribute) and isinstance(node.ctx, ast.Load):
+                names.add(node.attr)
+        return frozenset(names)
+
+    # meiva:note
+    # The module-level names that stand for an interval clock without being a function:
+    # `_now = time.monotonic`, `_now = lambda: time.monotonic()`, `_now = partial(time.monotonic)`.
+    def _clock_values(self) -> list[tuple[str, int]]:
+        found: list[tuple[str, int]] = []
+        for node in self.tree.body:
+            if isinstance(node, ast.Assign | ast.AnnAssign) and node.value is not None:
+                targets = node.targets if isinstance(node, ast.Assign) else [node.target]
+                name = (
+                    targets[0].id if len(targets) == 1 and isinstance(targets[0], ast.Name) else ""
+                )
+                if name.startswith("_") and fake_entropy.value_wrapper(node.value, self.dotted):
+                    found.append((name, node.lineno))
+        return found
 
     def entropy_finish(self) -> list[EntropySite]:
         if not self.records_ambient:
@@ -203,6 +227,7 @@ class AmbientAccess(PatchForms):
                 )
             )
             self.scope = outer
+        self.entropy_wrappers.extend(self._clock_values())
         if self.entropy_wrappers:
             used = self._used_as_value()
             found.extend(

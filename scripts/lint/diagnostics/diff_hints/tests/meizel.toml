@@ -1,2 +1,3 @@
 [uses]
 "test_detectors.py" = ["support.py"]
+"test_stats.py" = ["support.py"]

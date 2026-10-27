@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import tomllib
 from collections import Counter
+from collections.abc import Mapping
 from dataclasses import replace
 from pathlib import Path
 from typing import TypeGuard
@@ -59,13 +60,18 @@ class RuleDiff:
     """The two measures for one change, per code, and the keys that make the content measure fail."""
 
     def __init__(
-        self, base: Counter[str], regenerated: Baselines, tree: Baselines, ref: str
+        self,
+        base: Counter[str],
+        regenerated: Baselines,
+        tree: Baselines,
+        ref: str,
+        unmasked: Mapping[tuple[str, str], frozenset[str]],
     ) -> None:
         self.ref = ref
         self.base = base
         self.found = _totals(regenerated)
         self.tree = _totals(tree)
-        self.excess = _excess(tree, regenerated)
+        self.excess = _excess(tree, regenerated, unmasked)
 
     @property
     def content_grew(self) -> bool:
@@ -114,16 +120,41 @@ def _totals(baselines: Baselines) -> Counter[str]:
     return counts
 
 
-def _excess(tree: Baselines, found: Baselines) -> list[tuple[str, str, str, int, int]]:
-    """Every (directory, code, key) the tree records beyond what the regenerated base records."""
+# meiva:note
+# Every (directory, code, key) the tree records beyond what the regenerated base records, except the
+# reads a root declaration of the base was hiding: a file whose `[roots]` entry the change removes
+# shows its reads, and recording them is the honest way to remove the entry (the base's roots are
+# kept when it is regenerated, so it never finds them). Only a kind the change took from the entry
+# is let through, for the file of that entry.
+def _excess(
+    tree: Baselines, found: Baselines, unmasked: Mapping[tuple[str, str], frozenset[str]]
+) -> list[tuple[str, str, str, int, int]]:
     out: list[tuple[str, str, str, int, int]] = []
     for owner, table in sorted(tree.items()):
         for code, rows in table.items():
             for key, have in sorted(rows.items()):
                 want = found.get(owner, {}).get(code, {}).get(key, 0)
-                if have > want:
+                file, _, what = key.partition("#")
+                kind = what.split(" ", 1)[0]
+                if have > want and kind not in unmasked.get((owner, file), frozenset()):
                     out.append((owner or ".", code.value, key, have, want))
     return out
+
+
+# meiva:note
+# The kinds the change takes away from a `[roots]` entry of the base, per (directory, file).
+def unmasked_reads(
+    base: Mapping[str, Manifest], tree: Mapping[str, Manifest]
+) -> dict[tuple[str, str], frozenset[str]]:
+    freed: dict[tuple[str, str], frozenset[str]] = {}
+    for directory, manifest in base.items():
+        now = tree.get(directory)
+        for name, root in manifest.roots.items():
+            kept = now.roots[name].kinds if now is not None and name in now.roots else ()
+            gone = frozenset(kind.value for kind in root.kinds) - frozenset(k.value for k in kept)
+            if gone:
+                freed[(directory, name)] = gone
+    return freed
 
 
 def _refuse_unreadable(analysis: Analysis, ref: str) -> None:
@@ -340,7 +371,7 @@ def _scope_text(
         levels = (
             {".": manifest.purity_default} if manifest.purity_default is not None else {}
         ) | children
-        text = set_scope(text, "purity", levels, {})
+        text = set_scope(text, "purity", levels, manifest.purity_why)
     text = set_scope(text, "state", baseline.state, {})
     return set_scope(
         text,
@@ -398,4 +429,6 @@ def rule_diff(root: Path, ref: str, base: Counter[str], jobs: int | None = None)
         baseline = _ambient_snapshot(universe, historical, manifests, registries)
         _sync_purity_scope(root, ref, checkout, baseline)
         found = regenerated(checkout, ref, jobs)
-    return RuleDiff(base, found, read_baselines(load_universe(root)), ref)
+    tree_universe = load_universe(root)
+    freed = unmasked_reads(baseline, load_manifests(tree_universe)[0])
+    return RuleDiff(base, found, read_baselines(tree_universe), ref, freed)

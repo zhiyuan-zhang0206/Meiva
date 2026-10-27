@@ -1,67 +1,67 @@
-"""Find every reference to a symbol, module or file before you change or move it.
-
-Run: `.venv/bin/python scripts/audit/where_used.py TARGET [TARGET ...] [--all] [--json]`
-
-## Why
-
-The slow part of most changes is not finding the first file to edit, it is
-enumerating the rest of the edit set: importers, tests, string targets, docs and
-registries. This command answers that in one step, in seconds, instead of a chain
-of greps. `module_moves.py` is the complementary check for AFTER a move (no
-reference to the old path may remain); this one is the question BEFORE.
-
-## Targets
-
-- a symbol: `pkg.mod:name`, `pkg.mod.name` or `pkg/mod.py::name` (must be bound at
-  the top level of that module; the name is checked, so a typo fails fast);
-- a module or package: `pkg.mod`, `pkg/mod.py` or `pkg` (a package covers every
-  module below it);
-- any other tracked path: a file (`docs/conventions/runbook.md`) or a directory.
-
-Several targets may be given; the repository is read once.
-
-## Groups
-
-Every hit lands in exactly one group, shown as `path:line  [kind]  context`, one
-entry per file, at most `--limit` files per group (`--all` lifts it; the header
-always carries the full count):
-
-- `IMPORTS`: import statements of production code (absolute, relative, deferred in
-  a function, `from x import y`, wildcard) and, for a symbol, attribute use through
-  an imported module. A symbol that a package `__init__` imports at its top level is
-  also importable from that package: the package is named ("importable through") and
-  its importers are included.
-- `STRINGS`: dotted or path strings that name the target: patch targets
-  (`monkeypatch.setattr("a.b.c", ...)`, `patch("a.b.c")` and, for a symbol, the object
-  form `monkeypatch.setattr(mod, "name", ...)`), dynamic imports, `python -m a.b` entry
-  points, registries and configuration. A patch in a test is listed under `TESTS`.
-- `TESTS`: test files that reference it, plus tests named for the module that do not
-  (`test_<module>.py`). A test beside the code (`<pkg>/tests/`) is told apart from
-  the top-level `tests/`.
-- `DOCS`: markdown (links are resolved relative to the file), docstrings, comments.
-  A symbol also matches inside inline code in markdown (`` `name` ``); an ordinary
-  lowercase word (`run`, `scan`) only in markdown that names its module or sits beside
-  it. A file whose name is unique in the repository matches by that bare name.
-- `STRUCTURE`: the structure baseline shards, `pyproject.toml`, hooks, workflows and
-  the lint registries under `scripts/{structure,lint,content_lint}`.
-- `FROZEN HISTORY`: `docs/decisions/`, `docs/postmortems/` and `CHANGELOG.md`.
-  Historical references, never rewritten.
-
-References from inside the target (its own file, or a package's own modules) are
-counted and hidden: they move with it.
-
-## Limits
-
-Static references only. Names built at runtime (f-strings, `getattr`, joined path
-pieces) and a symbol imported under another local name are invisible; a symbol is
-matched by its bare name only inside markdown inline code, never in code comments;
-members of a class are not tracked, name the class. Treat the output as the starting
-edit set, then verify with the changed code's own tests. Untracked files that are not
-ignored are scanned; `.test_durations` is not (it is regenerated). Exit status is 0
-whenever the target resolves; 2 when it does not.
-The reference finding itself lives in `where_used_scan.py`.
-"""
-
+# meiva:note
+# Find every reference to a symbol, module or file before you change or move it.
+#
+# Run: `.venv/bin/python scripts/audit/where_used.py TARGET [TARGET ...] [--limit N] [--json]`
+#
+# ## Why
+#
+# The slow part of most changes is not finding the first file to edit, it is
+# enumerating the rest of the edit set: importers, tests, string targets, docs and
+# registries. This command answers that in one step, in seconds, instead of a chain
+# of greps. `module_moves.py` is the complementary check for AFTER a move (no
+# reference to the old path may remain); this one is the question BEFORE.
+#
+# ## Targets
+#
+# - a symbol: `pkg.mod:name`, `pkg.mod.name` or `pkg/mod.py::name` (must be bound at
+#   the top level of that module; the name is checked, so a typo fails fast);
+# - a module or package: `pkg.mod`, `pkg/mod.py` or `pkg` (a package covers every
+#   module below it);
+# - any other tracked path: a file (`docs/conventions/runbook.md`) or a directory.
+#
+# Several targets may be given; the repository is read once.
+#
+# ## Groups
+#
+# Every hit lands in exactly one group, shown as `path:line  [kind]  context`, one
+# entry per file, every file of the group unless `--limit N` caps the files listed per
+# group (a capped group says how many it left out, and the header always carries the full
+# count):
+#
+# - `IMPORTS`: import statements of production code (absolute, relative, deferred in
+#   a function, `from x import y`, wildcard) and, for a symbol, attribute use through
+#   an imported module. A symbol that a package `__init__` imports at its top level is
+#   also importable from that package: the package is named ("importable through") and
+#   its importers are included.
+# - `STRINGS`: dotted or path strings that name the target: patch targets
+#   (`monkeypatch.setattr("a.b.c", ...)`, `patch("a.b.c")` and, for a symbol, the object
+#   form `monkeypatch.setattr(mod, "name", ...)`), dynamic imports, `python -m a.b` entry
+#   points, registries and configuration. A patch in a test is listed under `TESTS`.
+# - `TESTS`: test files that reference it, plus tests named for the module that do not
+#   (`test_<module>.py`). A test beside the code (`<pkg>/tests/`) is told apart from
+#   the top-level `tests/`.
+# - `DOCS`: markdown (links are resolved relative to the file), docstrings, comments.
+#   A symbol also matches inside inline code in markdown (`` `name` ``); an ordinary
+#   lowercase word (`run`, `scan`) only in markdown that names its module or sits beside
+#   it. A file whose name is unique in the repository matches by that bare name.
+# - `STRUCTURE`: the structure baseline shards, `pyproject.toml`, hooks, workflows and
+#   the lint registries under `scripts/{structure,lint,content_lint}`.
+# - `FROZEN HISTORY`: `docs/decisions/`, `docs/postmortems/` and `CHANGELOG.md`.
+#   Historical references, never rewritten.
+#
+# References from inside the target (its own file, or a package's own modules) are
+# counted and hidden: they move with it.
+#
+# ## Limits
+#
+# Static references only. Names built at runtime (f-strings, `getattr`, joined path
+# pieces) and a symbol imported under another local name are invisible; a symbol is
+# matched by its bare name only inside markdown inline code, never in code comments;
+# members of a class are not tracked, name the class. Treat the output as the starting
+# edit set, then verify with the changed code's own tests. Untracked files that are not
+# ignored are scanned; `.test_durations` is not (it is regenerated). Exit status is 0
+# whenever the target resolves; 2 when it does not.
+# The reference finding itself lives in `where_used_scan.py`.
 from __future__ import annotations
 
 import argparse
@@ -101,7 +101,11 @@ _TITLES = {
     "structure": "STRUCTURE (baseline, pyproject, hooks, workflows, lint registries)",
     "history": "FROZEN HISTORY (not rewritten)",
 }
-_DEFAULT_FILES_PER_GROUP = 10  # output layout only: the header always shows the full count
+_DESCRIPTION = (
+    "Find every reference to a symbol, module or file before you change or move it: "
+    "importers, tests, string targets, docs and registries. TARGET is a symbol (pkg.mod:name), "
+    "a module or a path; the groups and what each one means are in the note at the top of this file."
+)
 _OMITTED_DIRECTORIES = 6  # how many directories the "more files" line breaks the rest into
 
 _STRUCTURE_FILES = frozenset({"pyproject.toml", ".pre-commit-config.yaml"})
@@ -225,11 +229,13 @@ def _entry(path: str, hits: list[Hit]) -> str:
     return f"  {path}:{first.line}{label}  {first.text}{more}"
 
 
+# meiva:note
+# The line that ends a group a `--limit` cut: `... N MORE FILES HIDDEN by --limit (omit it to list
+# every file): dir N, dir N`.
 def _omitted(paths: Sequence[str]) -> str:
-    """`... N more files (--all lists every file): dir N, dir N`."""
     top = Counter(path.split("/")[0] for path in paths).most_common(_OMITTED_DIRECTORIES)
     where = ", ".join(f"{directory} {count}" for directory, count in top)
-    return f"  ... {len(paths)} more files (--all lists every file): {where}"
+    return f"  ... {len(paths)} MORE FILES HIDDEN by --limit (omit it to list every file): {where}"
 
 
 def _group_lines(group: str, hits: Sequence[Hit], limit: int | None) -> list[str]:
@@ -313,17 +319,16 @@ def main(argv: list[str] | None = None, *, repo_root: Path | None = None) -> int
     paths. Command-line parsing, output groups and exit codes are unchanged.
     """
     parser = argparse.ArgumentParser(
-        description=(__doc__ or "").split("## Targets")[0],
+        description=_DESCRIPTION,
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
     parser.add_argument("targets", nargs="+", metavar="TARGET", help="symbol, module or path")
-    parser.add_argument("--all", action="store_true", dest="every", help="list every file")
     parser.add_argument(
-        "--limit", type=int, default=_DEFAULT_FILES_PER_GROUP, help="files per group"
+        "--limit", type=int, default=None, help="list at most this many files per group"
     )
     parser.add_argument("--json", action="store_true", dest="as_json", help="complete, for scripts")
     args = parser.parse_args(argv)
-    if args.limit < 1:
+    if args.limit is not None and args.limit < 1:
         parser.error("--limit must be at least 1")
     root = _REPO if repo_root is None else repo_root.resolve()
     repo = load_repo(root)
@@ -336,8 +341,7 @@ def main(argv: list[str] | None = None, *, repo_root: Path | None = None) -> int
     if args.as_json:
         print(json.dumps([as_json(report) for report in reports], indent=2))
     else:
-        limit = None if args.every else args.limit
-        print("\n\n".join(render(report, limit) for report in reports))
+        print("\n\n".join(render(report, args.limit) for report in reports))
     return 0
 
 

@@ -5,6 +5,9 @@ import subprocess
 from collections import Counter
 from pathlib import Path
 
+import pytest
+
+pytestmark = pytest.mark.registry
 _REPO = Path(__file__).resolve().parents[4]
 _AMBIENT = "base/cluster/machine/ambient.py"
 

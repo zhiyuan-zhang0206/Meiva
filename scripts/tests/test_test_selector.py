@@ -161,6 +161,36 @@ def test_tree_scan_tests_join_every_selected_subset(tmp_path: Path) -> None:
     )
 
 
+# meiva:note
+# A test that pins a whole-repository table to the tracked files can be broken by a call site in any
+# file, which no import reaches: it is marked `registry` and always selected.
+def test_a_registry_test_joins_every_selected_subset(tmp_path: Path) -> None:
+    repo_root = _selector_repo(tmp_path)
+    _write(
+        repo_root,
+        "tests/unit/test_callers.py",
+        "import pytest\n\npytestmark = pytest.mark.registry\n\n\ndef test_callers(): pass\n",
+    )
+    _write(repo_root, "tests/unit/test_filler.py", "def test_filler(): pass\n")
+    _write(
+        repo_root,
+        ".test_durations",
+        json.dumps(
+            {
+                "tests/unit/test_imports.py::test_imports": 3.0,
+                "tests/unit/test_other.py::test_other": 5.0,
+                "tests/unit/test_filler.py::test_filler": 60.0,
+            }
+        ),
+    )
+
+    result = test_selector.select_tests(["cli/commands.py"], repo_root=repo_root)
+
+    assert result.decision == "SELECTED"
+    assert "tests/unit/test_callers.py" in result.tests
+    assert "tests/unit/test_filler.py" not in result.tests
+
+
 @pytest.mark.parametrize(
     ("changed_path", "reason"),
     [
@@ -636,3 +666,16 @@ def test_okf_test_data_and_operational_markdown_are_not_documentation(tmp_path: 
         kind = test_selector.classify_path(path, checkout)
         assert kind is test_selector.PathClass.PACKAGE, path
         assert test_selector.select_tests([path], repo_root=repo_root).decision != "SKIP", path
+
+
+def test_the_registry_tests_of_the_real_repository_are_pinned() -> None:
+    pinned = test_selector.tree_scan_tests(Path(__file__).resolve().parents[2])
+    assert {
+        "base/cluster/machine/tests/test_ambient_callers.py",
+        "base/events/tests/test_emit_sites_declared.py",
+        "gateway/inspect/tests/test_persisted_events_cover_readers.py",
+        "tests/components/cli/test_main_dispatch_contract.py",
+        "tests/components/base/test_crash_row_writers.py",
+        "tests/integration/test_impersonation_audit_root_inventory.py",
+        "tests/scripts/test_alert_single_path.py",
+    } <= pinned

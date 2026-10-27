@@ -632,7 +632,8 @@ module-level instance, or a function that builds its own client when none is pas
 the dependency back out of sight, and a module entry that calls a factory itself has
 become a second composition root. Defaults are for tuning constants only.
 
-Identifiers and random draws are read in the root as well, with `uuid.uuid4()` or a `random.Random`.
+Entropy has one carrier, the process's `random.Random`, read in the root and passed down; an
+identifier is minted from it with `base.clock.ids.new_uuid(rng)`.
 A `time.monotonic_ns()`, `perf_counter()`, `id(obj)` or `itertools.count()` reading is not a source of
 identity or randomness: two processes started together draw the same value and a restart repeats it.
 Spending one in an f-string, a `uuid5`, a seed, a remainder or a bit mask, and a private
