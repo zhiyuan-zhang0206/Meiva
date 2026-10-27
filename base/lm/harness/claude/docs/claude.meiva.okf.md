@@ -69,6 +69,13 @@ package through the dependency group, so pyright still resolves the import.
 | `max_pending_turns` | 32 | overflow returns the message to its durable owner instead of growing memory |
 | `max_buffered_events` | 256 | text deltas are droppable past this; control events are bounded by tool-call count |
 | `dedupe_window` | 256 | a redelivery inside the window replays the outcome instead of re-running the turn |
+| `injected_turn_timeout_seconds` | 30 | the CLI answers a background-task notification in a turn of its own; dispatch is held until that turn reports, and this bound turns a CLI that never reports into one wait instead of a wedged agent. Observed notification turns are two to three seconds, so 30 is an order above them and still bounds a user's wait |
+
+## Background tasks
+
+A `Bash` command the model starts with `run_in_background=true` outlives its turn,
+and the CLI reports its end on its own:
+[[background-tasks.meiva.okf.md|background tasks in a Claude session]].
 
 ## Claude-specific invariants
 

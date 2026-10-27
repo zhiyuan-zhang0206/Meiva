@@ -14,12 +14,15 @@ from base.lm.harness.events import (
     ReasoningDelta,
     ReasoningText,
     SessionClosed,
+    SessionFailed,
     SessionFaulted,
     SessionStarted,
     TextDelta,
     ToolResult,
     ToolUse,
     TurnCompleted,
+    TurnFaulted,
+    UnsolicitedOutput,
 )
 from base.lm.harness.handoff import Handoff
 from base.lm.harness.registration import (
@@ -304,23 +307,63 @@ class HarnessBridge:
             return None
         if isinstance(event, AssistantText):
             streamed.setdefault(event.turn_id, []).append(event.text)
-        if (
-            isinstance(
-                event,
-                (AssistantText, ReasoningDelta, ReasoningText, TextDelta, ToolUse, ToolResult),
-            )
-            and event.turn_id == turn_id
-            and on_event is not None
-        ):
-            on_event(event)
+        if self._forward(event, turn_id, on_event):
             return None
-        if isinstance(event, SessionFaulted) and event.turn_id in {None, turn_id}:
-            raise HarnessTurnFaultedError(event.error)
+        # meiva:note
+        # Only a failure that names this turn can end it. A session-level failure ends
+        # the turn too, but as what it is — the session is gone — and never as this
+        # turn's own verdict; a failure or a report that names another turn is not
+        # ours to act on, and neither is output the provider produced for a turn we
+        # never ran (#5663).
+        # meiva:link base/lm/harness/docs/harness.meiva.okf.md
+        if isinstance(event, TurnFaulted):
+            if event.turn_id == turn_id:
+                raise HarnessTurnFaultedError(event.error)
+            return None
+        if isinstance(event, SessionFailed):
+            raise HarnessClosedError(f"harness session failed: {event.error}")
+        if isinstance(event, UnsolicitedOutput):
+            return None
+        if isinstance(event, SessionFaulted):
+            # meiva:note
+            # The retired shape, emitted by an adapter that has not migrated yet. It
+            # splits the same way: naming a turn is turn-scoped, naming none is the
+            # session's own failure. It is checked last because the two events above
+            # are also instances of it.
+            # meiva:link base/lm/harness/docs/harness.meiva.okf.md
+            if event.turn_id is None:
+                raise HarnessClosedError(f"harness session failed: {event.error}")
+            if event.turn_id == turn_id:
+                raise HarnessTurnFaultedError(event.error)
+            return None
         if isinstance(event, SessionClosed):
             raise HarnessClosedError(
                 f"harness session closed before turn {turn_id} completed: {event.reason}"
             )
         return None
+
+    def _forward(
+        self,
+        event: BridgeEvent,
+        turn_id: str,
+        on_event: Callable[[BridgeEvent], None] | None,
+    ) -> bool:
+        # meiva:note
+        # Streaming payload reaches the caller as it arrives, but only when the caller
+        # asked to watch and the payload names the turn being run. Anything else is
+        # another turn's speech: this turn neither delivers it nor is blamed for it
+        # (#5663).
+        # meiva:link base/lm/harness/docs/attribution.meiva.okf.md
+        if on_event is None:
+            return False
+        if not isinstance(
+            event, (AssistantText, ReasoningDelta, ReasoningText, TextDelta, ToolUse, ToolResult)
+        ):
+            return False
+        if event.turn_id != turn_id:
+            return False
+        on_event(event)
+        return True
 
 
 def _completed(event: CompletedTurnEvent, streamed: str) -> HarnessTurn:

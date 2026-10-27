@@ -187,4 +187,10 @@ EVENTS: dict[str, EventSpec] = {
         "a harness registration row could not be read during the sweep and is left in place",
         tier="anomaly",
     ),
+    "harness_notice_failed": telemetry_event(
+        "harness_notice_failed",
+        "an unsolicited provider report could not be written as an inbound; the report is lost "
+        "and the agent that was waiting on it is never told",
+        tier="anomaly",
+    ),
 }

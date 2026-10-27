@@ -13,6 +13,7 @@ from base.lm.harness.events import (
     TextDelta,
     ToolResult,
     ToolUse,
+    UnsolicitedOutput,
     Usage,
 )
 
@@ -40,6 +41,13 @@ class ResultFields:
     cost_usd: float | None
     result_text: str | None
     permission_denials: tuple[str, ...]
+    # meiva:note
+    # The CLI names what started the turn a result reports on: `human` for a prompt
+    # this session submitted, `task-notification` for the CLI's own turn over a
+    # background task it finished without us, and nothing at all on a CLI too old to
+    # name it. `_claim` is what decides which of those can be our turn's boundary.
+    # meiva:link base/lm/harness/claude/docs/claude.meiva.okf.md
+    origin_kind: str | None
 
 
 def map_message(message: object, *, turn_id: str | None) -> list[BridgeEvent]:
@@ -61,6 +69,7 @@ def parse_result(message: object) -> ResultFields:
         cost_usd=_float_or_none(getattr(message, "total_cost_usd", None)),
         result_text=_text(getattr(message, "result", None)),
         permission_denials=_denials(getattr(message, "permission_denials", None)),
+        origin_kind=_origin_kind(getattr(message, "origin", None)),
     )
 
 
@@ -159,8 +168,46 @@ def _rate_limit(message: object, turn_id: str | None) -> list[BridgeEvent]:
     ]
 
 
+# meiva:note
+# A background task the CLI finished reports itself with a `task_notification`
+# system message, which is a `SystemMessage` subclass whose class name is its own —
+# the `SystemMessage` entry above therefore never sees it. The report is content
+# that belongs to no turn of ours: the CLI either folded it into the turn that was
+# running (that turn's model already read it) or answered it in a turn of its own.
+# Either way it is the agent's to read, so it maps to `UnsolicitedOutput` and the
+# session decides whether anyone has seen it yet.
+# meiva:link base/lm/harness/claude/docs/claude.meiva.okf.md
+def _task_notification(message: object, turn_id: str | None) -> list[BridgeEvent]:
+    del turn_id
+    task_id = _text(getattr(message, "task_id", None)) or "unknown"
+    status = _text(getattr(message, "status", None)) or "unknown"
+    lines = [f"Background task {task_id} reported {status}."]
+    summary = _text(getattr(message, "summary", None))
+    if summary:
+        lines.append(summary)
+    output_file = _text(getattr(message, "output_file", None))
+    if output_file:
+        lines.append(f"Output file: {output_file}")
+    return [UnsolicitedOutput(source="task-notification", text="\n".join(lines))]
+
+
+# meiva:note
+# The status a `task_updated` message reports, or None when it reports none: the
+# adapter stops tracking the task it names, so a task that never reported `completed`
+# is still stopped by `close()` rather than left running under a dead session.
+# meiva:link base/lm/harness/claude/docs/background-tasks.meiva.okf.md
+def task_update_status(message: object) -> str | None:
+    return _text(_as_dict(getattr(message, "patch", None)).get("status"))
+
+
+def _origin_kind(raw: _Json) -> str | None:
+    kind = _as_dict(raw).get("kind")
+    return kind if isinstance(kind, str) else None
+
+
 _HANDLERS = {
     "SystemMessage": _system,
+    "TaskNotificationMessage": _task_notification,
     "StreamEvent": _stream,
     "AssistantMessage": _assistant,
     "UserMessage": _user,

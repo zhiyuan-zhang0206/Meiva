@@ -18,13 +18,14 @@ from base.lm.harness.base_session import (
 )
 from base.lm.harness.claude.auth import build_env
 from base.lm.harness.claude.config import BridgeConfig
-from base.lm.harness.claude.mapping import map_message, parse_result
+from base.lm.harness.claude.mapping import map_message, parse_result, task_update_status
 from base.lm.harness.events import (
     AssistantText,
-    SessionFaulted,
+    SessionFailed,
     SessionStarted,
     ToolUse,
     TurnCompleted,
+    UnsolicitedOutput,
 )
 from base.lm.harness.handoff import Handoff
 from base.lm.harness.process import (
@@ -54,6 +55,16 @@ from base.lm.harness.process import (
 CANCEL_POLL_SECONDS = 0.02
 _EVENT_STREAM_END = EVENT_STREAM_END
 
+# meiva:note
+# Two vocabularies the CLI speaks that the shared session must not learn. `human`
+# is the origin of a turn this session started by submitting a prompt; every other
+# origin is a turn the CLI began on its own, which is why only `human` can claim
+# the running turn. Terminal task statuses come from the SDK's
+# `TERMINAL_TASK_STATUSES`, spelled out here so the adapter's own fake carries the
+# same rule the real CLI follows.
+HUMAN_ORIGIN = "human"
+TERMINAL_TASK_STATUSES = frozenset({"completed", "failed", "stopped", "killed"})
+
 
 class MissingClaudeSdkError(RuntimeError):
     pass
@@ -64,6 +75,7 @@ class ClaudeClientProtocol(SdkClient, Protocol):
     def disconnect(self) -> Awaitable[None]: ...
     def query(self, prompt: str) -> Awaitable[None]: ...
     def interrupt(self) -> Awaitable[None]: ...
+    def stop_task(self, task_id: str) -> Awaitable[None]: ...
     def receive_messages(self) -> AsyncIterator[object]: ...
 
 
@@ -97,6 +109,17 @@ def _load_sdk() -> ClaudeSdkProtocol:
             "pip install 'meiva[harness-claude]'"
         ) from exc
     return claude_agent_sdk
+
+
+# meiva:note
+# The turn name a result claims, in the session's own claim language. `human` is
+# the answer to a prompt this session submitted, so it claims whatever turn is
+# running — exactly what a CLI that names no origin at all means. Every other origin
+# names a turn the CLI began itself, which this session never started, so it comes
+# back as no claim at all and the result is recorded as unsolicited output (#5663).
+# meiva:link base/lm/harness/claude/docs/claude.meiva.okf.md
+def _claimed_origin(origin_kind: str | None) -> str | None:
+    return None if origin_kind is None or origin_kind == HUMAN_ORIGIN else origin_kind
 
 
 @dataclass(frozen=True, slots=True)
@@ -135,6 +158,10 @@ class ClaudeSession(BaseHarnessSession[BridgeConfig]):
         self._client: ClaudeClientProtocol | None = None
         self._cli_pid: int | None = None
         self._turn_steps_count = 0
+        # meiva:note
+        # The tasks the CLI says are running: started and not yet reported terminal.
+        # `close()` is their one stop caller, and the note there says why.
+        self._background_tasks: set[str] = set()
 
     async def start(self, *, resume: str | None = None, handoff: Handoff | None = None) -> None:
         if self._client is not None:
@@ -156,6 +183,21 @@ class ClaudeSession(BaseHarnessSession[BridgeConfig]):
         self._closed = True
         watched = watch_tree(self._probe, self._cli_pid)
         self._fail_pending(SessionClosedError("session closed"))
+        # meiva:note
+        # A background task outlives the turn that started it by design, so nothing in
+        # `interrupt()` touches it — and a closing session is the moment nobody will ever
+        # read its report. The CLI dies under its running children when `disconnect()`
+        # runs below, and `settle_close` would then report them as residue; asking the
+        # CLI to stop each one first turns that teardown into a provider-managed stop. A
+        # stop that fails is not the close's failure: the residue check that follows is
+        # what reports whatever kept running.
+        # meiva:link base/lm/harness/claude/docs/claude.meiva.okf.md
+        client, live = self._client, sorted(self._background_tasks)
+        self._background_tasks.clear()
+        if client is not None and live:
+            await asyncio.gather(
+                *(client.stop_task(task_id) for task_id in live), return_exceptions=True
+            )
         await self._close_tasks()
         if self._client is not None:
             # meiva:note
@@ -268,29 +310,45 @@ class ClaudeSession(BaseHarnessSession[BridgeConfig]):
         except asyncio.CancelledError:
             raise
         except Exception as exc:
-            self._emit(SessionFaulted(turn_id=None, error=f"session stream failed: {exc}"))
+            self._emit(SessionFailed(error=f"session stream failed: {exc}"))
             self._fail_active(exc)
 
+    # meiva:note
+    # One dispatch table, keyed by the provider's own class name: a result is a turn
+    # boundary, the task messages are reports about work outside the turn, the session
+    # messages are about the session, and everything else is inside the running turn.
+    # meiva:link base/lm/harness/claude/docs/background-tasks.meiva.okf.md
     def _handle(self, message: object) -> None:
         name = type(message).__name__
         if name == "ResultMessage":
             self._handle_result(message)
-            return
-        if name in {"RateLimitEvent", "SystemMessage"}:
-            for event in map_message(message, turn_id=None):
-                if isinstance(event, SessionStarted):
-                    self._session_id = event.session_id or self._session_id
-                    self._model = event.model or self._model
-                    self._emit(event)
-                    self._bind()
-                    continue
+        elif name == "TaskNotificationMessage":
+            self._handle_task_notification(message)
+        elif name == "TaskStartedMessage":
+            self._track_task_started(message)
+        elif name == "TaskUpdatedMessage":
+            self._track_task_update(message)
+        elif name in {"RateLimitEvent", "SystemMessage"}:
+            self._handle_session_message(message)
+        else:
+            self._handle_turn_message(message)
+
+    def _handle_session_message(self, message: object) -> None:
+        for event in map_message(message, turn_id=None):
+            if isinstance(event, SessionStarted):
+                self._session_id = event.session_id or self._session_id
+                self._model = event.model or self._model
                 self._emit(event)
-            return
+                self._bind()
+                continue
+            self._emit(event)
+
+    def _handle_turn_message(self, message: object) -> None:
         ticket = self._active
         if ticket is None:
             return
         mapped = map_message(message, turn_id=ticket.turn_id)
-        if name == "AssistantMessage" and any(
+        if type(message).__name__ == "AssistantMessage" and any(
             isinstance(event, (AssistantText, ToolUse)) for event in mapped
         ):
             self._turn_steps_count += 1
@@ -299,16 +357,64 @@ class ClaudeSession(BaseHarnessSession[BridgeConfig]):
                 ticket.parts.append(event.text)
             self._emit(event)
 
+    # meiva:note
+    # A background task the CLI finished. Two different things arrive under one
+    # message: the report the model should read, and — whenever the CLI answered it
+    # itself — a turn of the CLI's own that streams right behind it. The report goes
+    # to `_unsolicited` when no turn of ours is running (nobody has read it yet), and,
+    # while one is, only into the stream: a running turn received the notification in
+    # its own context, so a second delivery would be a duplicate turn. The CLI's turn
+    # is held off dispatch until its own result arrives, so its text cannot be
+    # collected into ours (#5663).
+    # meiva:link base/lm/harness/claude/docs/claude.meiva.okf.md
+    def _handle_task_notification(self, message: object) -> None:
+        self._background_tasks.discard(str(getattr(message, "task_id", "")))
+        for event in map_message(message, turn_id=None):
+            if not isinstance(event, UnsolicitedOutput):
+                self._emit(event)
+                continue
+            if self._claim() is not None:
+                self._emit(event)
+                continue
+            self._hold_dispatch(self.config.injected_turn_timeout_seconds)
+            self._unsolicited(event)
+
+    def _track_task_started(self, message: object) -> None:
+        task_id = str(getattr(message, "task_id", ""))
+        if task_id:
+            self._background_tasks.add(task_id)
+
+    # meiva:note
+    # A task's terminal state can arrive only as an update, with no notification: a
+    # task stopped through the control request reports `killed` here and the
+    # notification that would have followed is sometimes suppressed. Clearing it
+    # keeps `close()` from asking the CLI to stop work that already ended; the
+    # report the agent would have read is the notification's, so a task that ends
+    # this way is not delivered as unsolicited output.
+    # meiva:link base/lm/harness/claude/docs/claude.meiva.okf.md
+    def _track_task_update(self, message: object) -> None:
+        if task_update_status(message) in TERMINAL_TASK_STATUSES:
+            self._background_tasks.discard(str(getattr(message, "task_id", "")))
+
     def _handle_result(self, message: object) -> None:
-        ticket = self._active
         fields = parse_result(message)
+        ticket = self._claim(_claimed_origin(fields.origin_kind))
         if ticket is None:
+            # meiva:note
+            # A terminal message for a turn this session did not run: the CLI's own
+            # answer to a notification, or a result from a turn it began for some
+            # other reason. It is neither this session's boundary nor a failure; it
+            # is recorded so the stream keeps one entry per turn the provider ran, and
+            # its arrival ends any hold. The agent already read the reply in the
+            # provider's transcript, so it is not delivered as new inbound content —
+            # unlike the report that asked for it.
+            # meiva:link base/lm/harness/claude/docs/claude.meiva.okf.md
             self._emit(
-                SessionFaulted(
-                    turn_id=None,
-                    error=f"result for no active turn (subtype={fields.subtype})",
+                UnsolicitedOutput(
+                    source=fields.origin_kind or "result", text=fields.result_text or ""
                 )
             )
+            self._release_dispatch()
             return
         text = "\n".join(ticket.parts).strip() or (fields.result_text or "")
         outcome = TurnOutcome(

@@ -23,9 +23,9 @@ from base.lm.harness.events import (
     RateLimitObserved,
     SessionBound,
     SessionClosed,
-    SessionFaulted,
     SessionStarted,
     TurnCompleted,
+    TurnFaulted,
 )
 
 
@@ -110,7 +110,7 @@ async def test_turn_deadline_interrupts_a_wedged_turn(tmp_path: Path) -> None:
     try:
         ticket = harness.session.submit("wedge")
         faulted = await harness.wait_for(
-            lambda event: isinstance(event, SessionFaulted) and "interrupting" in event.error
+            lambda event: isinstance(event, TurnFaulted) and "interrupting" in event.error
         )
         assert faulted.turn_id == ticket.turn_id
         assert harness.client.interrupts == 1

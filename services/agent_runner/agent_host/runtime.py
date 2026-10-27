@@ -18,12 +18,16 @@ from psycopg_pool import AsyncConnectionPool
 from pydantic import BaseModel
 
 from agent.process_boot import boot_agent_scope
+from base.agents.inbox.harness_notice import insert_harness_notice
 from base.api_contracts.agent_contract import Harness
 from base.clock import Clock
+from base.db import Database
+from base.events.live.bus import EventBus
 from base.host.env.agent_slices import AgentBrain, AgentSlices
 from base.lm.catalog import ModelCatalog
 from base.lm.catalog.provider_keys import ProviderKeys
 from base.lm.factory import validate_model_launch
+from base.lm.harness import UnsolicitedOutput, UnsolicitedSink
 from base.lm.harness.bridge import HarnessBridge
 from base.lm.harness.engine import TurnEngine
 from base.lm.harness.handoff import HarnessContribution
@@ -387,6 +391,7 @@ async def build_runtime(
     harness_environ: Mapping[str, str],
     harness_root: BridgeRootValues,
     contributions: Iterable[HarnessContribution] = (),
+    unsolicited: UnsolicitedSink | None = None,
 ) -> AgentRuntime:
     """Build the retained model after the host repaired its original admission."""
     llm, _binding = await boot_agent_scope(
@@ -414,6 +419,7 @@ async def build_runtime(
             root=harness_root,
             skip_permissions=slices.harness_cli.harness_skip_permissions,
             contributions=contributions,
+            unsolicited=unsolicited,
             home=home,
         ),
     )
@@ -431,6 +437,7 @@ def harness_bridge_for(
     root: BridgeRootValues,
     skip_permissions: bool = True,
     contributions: Iterable[HarnessContribution] = (),
+    unsolicited: UnsolicitedSink | None = None,
     home: Path,
 ) -> HarnessBridge | None:
     if harness is Harness.MEIVA:
@@ -451,6 +458,7 @@ def harness_bridge_for(
         root=root,
         skip_permissions=skip_permissions,
         contributions=contributions,
+        unsolicited=unsolicited,
     )
 
 
@@ -478,14 +486,23 @@ def refresh_cached_runtime(
 # always before a runtime can be dropped; a retirement without it is a wiring defect
 # and raises rather than silently leaving the session open.
 # meiva:link agent/graph/docs/harness-turn.meiva.okf.md
+# meiva:note
+# The host's owner of the harness I/O a turn must not wait for. Two kinds share it
+# because they share the shape: work a session triggers that outlives the turn asking
+# for it, retained in one task group and joined at shutdown.
+#
+# Closing a session is a child-process teardown, and the same agent can be woken again
+# before it finishes: an evicted runtime is gone from the cache, so the next turn
+# builds a fresh bridge and would start a second CLI on the same resumed session id
+# while the first one is still being reaped. `retire` therefore keeps the close per
+# agent, and `join` is what the next turn waits on before building.
+#
+# A report a session makes about work that ended after its turn — a background command
+# — becomes an inbound. The session's read loop hands it here rather than writing from
+# the loop, and a failed write is logged and dropped: the report is lost, and the
+# session that made it must not die over a database error (#5663).
+# meiva:link agent/graph/docs/harness-turn.meiva.okf.md
 class HarnessSessions:
-    # meiva:note
-    # Closing a session is a child-process teardown, and the same agent can be woken
-    # again before it finishes: an evicted runtime is gone from the cache, so the next
-    # turn builds a fresh bridge and would start a second CLI on the same resumed
-    # session id while the first one is still being reaped. `retire` therefore keeps the
-    # close per agent, and `join` is what the next turn waits on before building.
-    # meiva:link agent/graph/docs/harness-turn.meiva.okf.md
     def __init__(
         self, registrations: RegistrationStore, *, record_exit: ExitRecorder, clock: Clock
     ) -> None:
@@ -544,6 +561,42 @@ class HarnessSessions:
             raise error
         if self._retiring.get(agent_id) is task:
             del self._retiring[agent_id]
+
+    def notify(
+        self, agent_id: int, event: UnsolicitedOutput, *, db: Database, bus: EventBus
+    ) -> None:
+        if not self._started:
+            raise RuntimeError(
+                "a harness notice cannot be written before the host's session owner started"
+            )
+        task = self._tasks.create_task(
+            self._notify(agent_id, event, db=db, bus=bus), name=f"harness-notice-{agent_id}"
+        )
+        self._pending.add(task)
+        task.add_done_callback(self._collect)
+
+    # meiva:note
+    # The write runs in a worker thread: an inbound insert is a database round trip, and
+    # the read loop that reported the event must not wait for one. A failure is logged
+    # here and answered with None, so the shared collector treats it as a settled task
+    # rather than as a session teardown that failed.
+    # meiva:link base/lm/harness/docs/attribution.meiva.okf.md
+    async def _notify(
+        self, agent_id: int, event: UnsolicitedOutput, *, db: Database, bus: EventBus
+    ) -> BaseException | None:
+        try:
+            await asyncio.to_thread(insert_harness_notice, db, bus, agent_id, event.text)
+        except BaseException as error:
+            logger.opt(exception=error).warning(
+                "[{label}] {body}",
+                label="harness",
+                event="harness_notice_failed",
+                body=(
+                    f"agent {agent_id}: could not deliver unsolicited {event.source} "
+                    f"output as an inbound; the report is lost"
+                ),
+            )
+        return None
 
     def _collect(self, task: asyncio.Task[BaseException | None]) -> None:
         self._pending.discard(task)

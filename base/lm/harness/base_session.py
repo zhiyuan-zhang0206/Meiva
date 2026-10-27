@@ -14,7 +14,10 @@ from base.lm.harness.events import (
     HandoffInjected,
     SessionBound,
     SessionClosed,
-    SessionFaulted,
+    SessionFailed,
+    TurnFaulted,
+    UnsolicitedOutput,
+    UnsolicitedSink,
     Usage,
     is_droppable,
 )
@@ -146,6 +149,12 @@ class TurnTicket:
         self.deduplicated = deduplicated
         self.submitted_at = submitted_at
         self.started_at: float | None = None
+        # meiva:note
+        # The name the provider gave the turn this ticket runs, when it gives one.
+        # An adapter sets it as soon as it learns the name; `_claim` is the only
+        # reader, and a ticket whose provider names no turns keeps it None.
+        # meiva:link base/lm/harness/docs/harness.meiva.okf.md
+        self.provider_turn_id: str | None = None
         self.interrupt_requested = False
         self.parts: list[str] = []
         self.thoughts: list[str] = []
@@ -177,12 +186,19 @@ class TurnTicket:
 
 
 # meiva:note
-# Where a harness session is recorded: the agent it serves and the registry that maps that agent
-# to its external session id. Both are absent for a session no agent owns (a demo, a unit test).
+# What one session is bound to: the agent it serves, the registry that maps that agent to its
+# external session id, and the sink that turns provider output the agent has not read into
+# something delivered. All three are absent for a session no agent owns (a demo, a unit test).
+# The sink rides here rather than as another constructor parameter because it answers the same
+# question the other two do — where this session's output goes — and because every adapter
+# builds one binding already, so an adapter that starts mapping unowned output needs no
+# signature change (#5663).
+# meiva:link base/lm/harness/docs/harness.meiva.okf.md
 @dataclass(frozen=True)
 class SessionBinding:
     agent_id: int | None = None
     registry: SessionRegistry | None = None
+    unsolicited: UnsolicitedSink | None = None
 
 
 class BaseHarnessSession[ConfigT: SessionConfig](ExitStatus):
@@ -219,6 +235,10 @@ class BaseHarnessSession[ConfigT: SessionConfig](ExitStatus):
         self._record: SessionRecord | None = None
         self._handoff_ticket: TurnTicket | None = None
         self._turn_seq = 0
+        self._unsolicited_sink = binding.unsolicited
+        self._dispatch_held = False
+        self._release_timer: asyncio.Task[None] | None = None
+        self._unconsumed_events = 0
 
     async def start(self, *, resume: str | None = None, handoff: Handoff | None = None) -> None:
         raise NotImplementedError
@@ -268,12 +288,50 @@ class BaseHarnessSession[ConfigT: SessionConfig](ExitStatus):
             future=asyncio.get_running_loop().create_future(),
             submitted_at=self._monotonic(),
         )
-        if self._active is None:
-            self._active = ticket
-            self._spawn(self._begin(ticket))
+        if self._active is None and not self._dispatch_held:
+            self._start_turn(ticket)
         else:
             self._pending.append(ticket)
         return ticket
+
+    # meiva:note
+    # Every turn starts here, whether it was submitted into an idle session or promoted
+    # from the queue after a hold, and every start discards what nobody consumed. A turn
+    # that begins from a queue the idle period filled would otherwise read an event that
+    # belonged to no turn as its own outcome (#5663).
+    # meiva:link base/lm/harness/docs/harness.meiva.okf.md
+    def _start_turn(self, ticket: TurnTicket) -> None:
+        self._discard_unconsumed_events()
+        self._active = ticket
+        self._spawn(self._begin(ticket))
+
+    # meiva:note
+    # The one place a session decides which of its turns an incoming provider
+    # message belongs to, so no adapter has to invent an owner. `origin_id` is the
+    # provider's own name for the turn the message reports on, or None when the
+    # provider does not name turns. Only a message that names the running turn's
+    # own name — or names nothing at all — can be attributed to it: a name from a
+    # turn this session never started, or already finished, has no owner, and the
+    # caller routes it to `_unsolicited` instead. That is what keeps a provider's
+    # own turn from being read as our turn's boundary (#5663).
+    # meiva:link base/lm/harness/docs/harness.meiva.okf.md
+    def _claim(self, origin_id: str | None = None) -> TurnTicket | None:
+        ticket = self._active
+        if ticket is None or (origin_id is not None and origin_id != ticket.provider_turn_id):
+            return None
+        return ticket
+
+    # meiva:note
+    # Output that belongs to no turn is inbound content, not a failure and not a
+    # boundary: it is recorded in the event stream and handed to the sink, which
+    # delivers it the way any other inbound reaches the agent. A session without a
+    # sink (a demo, a unit test) still records it.
+    # meiva:link base/lm/harness/docs/harness.meiva.okf.md
+    def _unsolicited(self, event: UnsolicitedOutput) -> None:
+        self._emit(event)
+        sink = self._unsolicited_sink
+        if sink is not None:
+            sink(event)
 
     @property
     def active_turn_id(self) -> str | None:
@@ -310,6 +368,14 @@ class BaseHarnessSession[ConfigT: SessionConfig](ExitStatus):
     @property
     def dropped_events(self) -> int:
         return self._dropped_deltas
+
+    # meiva:note
+    # Events dropped because no turn was running when they arrived: the counter a
+    # session's owner reads to see whether an idle provider said something nobody took.
+    # meiva:link base/lm/harness/docs/attribution.meiva.okf.md
+    @property
+    def unconsumed_events(self) -> int:
+        return self._unconsumed_events
 
     async def events(self) -> AsyncIterator[BridgeEvent]:
         while True:
@@ -389,7 +455,7 @@ class BaseHarnessSession[ConfigT: SessionConfig](ExitStatus):
             if self._active is not ticket:
                 return
             self._emit(
-                SessionFaulted(
+                TurnFaulted(
                     turn_id=ticket.turn_id,
                     error=f"turn exceeded {self.config.turn_timeout_seconds:.0f}s; interrupting",
                 )
@@ -397,7 +463,7 @@ class BaseHarnessSession[ConfigT: SessionConfig](ExitStatus):
             try:
                 await self.interrupt()
             except Exception as exc:
-                self._emit(SessionFaulted(turn_id=ticket.turn_id, error=f"interrupt failed: {exc}"))
+                self._emit(TurnFaulted(turn_id=ticket.turn_id, error=f"interrupt failed: {exc}"))
 
         self._deadlines[ticket.turn_id] = self._spawn(expire())
 
@@ -417,15 +483,61 @@ class BaseHarnessSession[ConfigT: SessionConfig](ExitStatus):
         self._promote()
 
     def _promote(self) -> None:
-        if self._closed or self._active is not None or not self._pending:
+        if self._closed or self._dispatch_held or self._active is not None or not self._pending:
             return
-        ticket = self._pending.popleft()
-        self._active = ticket
-        self._spawn(self._begin(ticket))
+        self._start_turn(self._pending.popleft())
+
+    # meiva:note
+    # A provider can run a turn of its own — the CLI answers a background-task
+    # notification it injected without us — and while it does, its messages belong to
+    # that turn. Holding dispatch keeps `_active` empty for its duration, so its text
+    # takes the same path as any other idle message instead of being collected into a
+    # turn of ours and committed as our reply. The bound exists because a provider
+    # that never reports the end of its turn must cost one wait, not a wedged agent.
+    # meiva:link base/lm/harness/docs/harness.meiva.okf.md
+    def _hold_dispatch(self, seconds: float) -> None:
+        if seconds <= 0:
+            raise ValueError(f"a dispatch hold must expire, got {seconds}s")
+        self._dispatch_held = True
+        if self._release_timer is not None:
+            self._release_timer.cancel()
+        self._release_timer = self._spawn(self._release_after(seconds))
+
+    async def _release_after(self, seconds: float) -> None:
+        await self._clock.asleep(seconds)
+        self._release_dispatch()
+
+    def _release_dispatch(self) -> None:
+        if not self._dispatch_held:
+            return
+        self._dispatch_held = False
+        timer, self._release_timer = self._release_timer, None
+        if timer is not None and timer is not asyncio.current_task():
+            timer.cancel()
+        self._promote()
+
+    # meiva:note
+    # A turn sees only what happened during it. Whatever nobody consumed while the
+    # session was idle is dropped here, at the one instant that is atomic with the
+    # ticket becoming active. Left in the queue, an event that belonged to no turn —
+    # a provider's report about its own turn, a leftover completion — is read by the
+    # next turn as its own outcome, which is how an idle session poisoned a turn it
+    # had nothing to do with (#5663). The stream's own end marker is not a leftover.
+    # meiva:link base/lm/harness/docs/harness.meiva.okf.md
+    def _discard_unconsumed_events(self) -> None:
+        while True:
+            try:
+                event = self._events.get_nowait()
+            except asyncio.QueueEmpty:
+                return
+            if not isinstance(event, BridgeEvent):
+                self._events.put_nowait(event)
+                return
+            self._unconsumed_events += 1
 
     def _fail_turn(self, ticket: TurnTicket, exc: BaseException) -> None:
         self._cancel_deadline(ticket)
-        self._emit(SessionFaulted(turn_id=ticket.turn_id, error=f"turn failed: {exc}"))
+        self._emit(TurnFaulted(turn_id=ticket.turn_id, error=f"turn failed: {exc}"))
         ticket.fail(SessionClosedError(f"turn failed: {exc}"))
         if self._active is ticket:
             self._active = None
@@ -496,7 +608,7 @@ class BaseHarnessSession[ConfigT: SessionConfig](ExitStatus):
             return
         error = task.exception()
         if error is not None:
-            self._emit(SessionFaulted(turn_id=None, error=f"background task failed: {error}"))
+            self._emit(SessionFailed(error=f"background task failed: {error}"))
 
     async def _cancel_children(self) -> None:
         children = [task for task in self._children if not task.done()]
@@ -516,7 +628,7 @@ class BaseHarnessSession[ConfigT: SessionConfig](ExitStatus):
             try:
                 await self._tasks.__aexit__(None, None, None)
             except ExceptionGroup as group:
-                self._emit(SessionFaulted(turn_id=None, error=f"session tasks failed: {group!r}"))
+                self._emit(SessionFailed(error=f"session tasks failed: {group!r}"))
 
     def _finish_close(self, reason: str) -> None:
         self._emit(SessionClosed(turn_id=None, reason=reason))

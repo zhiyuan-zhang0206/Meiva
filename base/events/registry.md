@@ -235,6 +235,7 @@ above (or when its name is unregistered); otherwise it stays in the JSONL mirror
 | `harness_exit_record_failed` | a harness session closed cleanly but its child exit status could not be written; the agent row keeps what it had and NULL still means never observed | anomaly | — | — | events | — |
 | `harness_usage_log_failed` | an external harness turn finished but its usage could not be priced; the reply stands and the accounting row for that turn is missing | anomaly | — | — | events | — |
 | `harness_registration_unreadable` | a harness registration row could not be read during the sweep and is left in place | anomaly | — | — | events | — |
+| `harness_notice_failed` | an unsolicited provider report could not be written as an inbound; the report is lost and the agent that was waiting on it is never told | anomaly | — | — | events | — |
 | `llm_usage` | LLM call metering | observation | model, calls, in_total, out_total, cache_read, cache_write_5m, cache_write_1h, reasoning, latency_ms, decode_ms, cost_usd, price_miss, price_hit, price_out, price_write_5m, price_write_1h, unpriced, usage_kind, attribution, source | — | events | ✓ |
 | `turn_end` | one turn finished | observation | ok, duration_seconds | — | events | ✓ |
 | `llm_usage_metering_failed` | direct model call accounting failed (the call ran; its llm_usage row is dropped) | anomaly | model, error_type, failures | — | events | ✓ |

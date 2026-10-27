@@ -11,7 +11,7 @@ from pathlib import Path
 from typing import Any
 
 from base.clock import SYSTEM_TIMERS, Clock, ClockConfig
-from base.lm.harness import ClusterFact, EntryPoint, FileSessionRegistry, Handoff
+from base.lm.harness import ClusterFact, EntryPoint, FileSessionRegistry, Handoff, UnsolicitedOutput
 from base.lm.harness.base_session import SessionBinding
 from base.lm.harness.claude import (
     BridgeConfig,
@@ -113,6 +113,41 @@ async def wait_for_child(
     raise TimeoutError("no tool child process appeared")
 
 
+# meiva:note
+# A background command outlives the turn that started it: the agent answers and
+# goes idle, and the CLI reports the command's end later, on its own. The stage
+# proves the three things that report needs — the session notices it while no turn
+# is running, it becomes content the agent reads (the sink here stands in for the
+# inbound the host writes), and a turn started afterwards still runs normally
+# (#5663).
+# meiva:link demos/claude-sdk-bridge/README.md
+async def stage_background(session: ClaudeSession, reports: list[UnsolicitedOutput]) -> None:
+    outcome, _ = await run_stage(
+        "5 background",
+        session,
+        "Use the Bash tool with run_in_background=true to run exactly "
+        "`sleep 20; echo BGDONE`, then reply with exactly BG-STARTED and nothing else. "
+        "Do not wait for the command and do not poll it.",
+    )
+    if "BG-STARTED" not in outcome.text:
+        raise RuntimeError(f"the model did not start a background task: {outcome.text[:300]}")
+    started = time.perf_counter()
+    deadline = started + 180.0
+    while not reports and time.perf_counter() < deadline:
+        await asyncio.sleep(0.1)
+    if not reports:
+        raise RuntimeError("no background-task report arrived within 180s")
+    print(f"\n[background] reported after {time.perf_counter() - started:.1f}s, agent idle:")
+    print(f"[background] {reports[0].text.splitlines()[0]}")
+    follow_up, _ = await run_stage(
+        "5 follow-up",
+        session,
+        "The background command has finished. In one short sentence: what did it print?",
+    )
+    if not follow_up.text.strip():
+        raise RuntimeError("the turn after the report produced no text")
+
+
 async def drain(session: ClaudeSession) -> None:
     async for _event in session.events():
         pass
@@ -129,22 +164,33 @@ def demo_clock() -> Clock:
     return Clock(ClockConfig("UTC", "UTC", message_timestamp_weekday=False), timers=SYSTEM_TIMERS)
 
 
-async def main() -> int:
-    workspace = make_workspace()
-    registry = FileSessionRegistry(workspace / "sessions")
-    handoff = build_handoff(workspace)
+def make_session(
+    workspace: Path, registry: FileSessionRegistry, reports: list[UnsolicitedOutput]
+) -> ClaudeSession:
+    return ClaudeSession(
+        BridgeConfig(cwd=workspace),
+        environ=os.environ,
+        binding=SessionBinding(DEMO_AGENT_ID, registry, reports.append),
+        clock=demo_clock(),
+    )
+
+
+def announce(workspace: Path, handoff: Handoff) -> None:
     print(f"workspace: {workspace}")
     print(f"model: {BridgeConfig(cwd=workspace).model}   auth: oauth (no API key forwarded)")
     print(f"\n[handoff] {handoff.size_bytes()} bytes injected as the first message:")
     print("\n".join(handoff.render().splitlines()[:8]) + "\n  …")
 
+
+async def main() -> int:
+    workspace = make_workspace()
+    registry = FileSessionRegistry(workspace / "sessions")
+    handoff = build_handoff(workspace)
+    announce(workspace, handoff)
+
     started = time.perf_counter()
-    session = ClaudeSession(
-        BridgeConfig(cwd=workspace),
-        environ=os.environ,
-        binding=SessionBinding(DEMO_AGENT_ID, registry),
-        clock=demo_clock(),
-    )
+    reports: list[UnsolicitedOutput] = []
+    session = make_session(workspace, registry, reports)
     await session.start(handoff=handoff)
     pump = asyncio.create_task(drain(session))
     cancel: dict[str, Any] = {}
@@ -167,6 +213,7 @@ async def main() -> int:
             f"(model={record.model if record else None}, resumes={record.resumes if record else None})"
         )
         cancel = await stage_cancel(session, PsutilChildProbe())
+        await stage_background(session, reports)
         session_id = session.session_id
         cli_pid = session.cli_pid
         summarise("session", session.totals)
@@ -177,12 +224,7 @@ async def main() -> int:
     cli_reaped = cli_pid is not None and (not PsutilChildProbe().is_alive(cli_pid))
     print(f"[close] cli pid {cli_pid} reaped: {cli_reaped}")
 
-    resumed = ClaudeSession(
-        BridgeConfig(cwd=workspace),
-        environ=os.environ,
-        binding=SessionBinding(DEMO_AGENT_ID, registry),
-        clock=demo_clock(),
-    )
+    resumed = make_session(workspace, registry, reports)
     await resumed.start(handoff=handoff)
     pump = asyncio.create_task(drain(resumed))
     try:

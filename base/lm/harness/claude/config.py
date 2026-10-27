@@ -28,3 +28,4 @@ class BridgeConfig:
     max_pending_turns: int = 32
     max_buffered_events: int = 256
     dedupe_window: int = 256
+    injected_turn_timeout_seconds: float = 30.0
