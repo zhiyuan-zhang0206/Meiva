@@ -339,3 +339,8 @@ def test_current_interpreter_source_root_keeps_symlinked_venv_identity(tmp_path:
     interpreter.symlink_to(base_python)
 
     assert editable_install.current_interpreter_source_root(interpreter) == source_root
+
+
+def test_a_relative_checkout_is_refused_not_inspected_as_nothing() -> None:
+    with pytest.raises(ValueError, match="absolute"):
+        editable_install.editable_install_violations(Path("~/chk"))

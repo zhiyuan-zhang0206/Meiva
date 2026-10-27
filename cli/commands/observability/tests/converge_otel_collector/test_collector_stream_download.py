@@ -1,6 +1,6 @@
 # meiva:note
 # The pinned collector's streaming download against a real listener on port 0, through the system
-# URL opener. The function under test is `base.deploy.release.collector_artifact.stream_download`;
+# URL opener. The function under test is `base.deploy.release.collector.artifact.stream_download`;
 # the test belongs to that owner's tests and lives here until it moves.
 
 from __future__ import annotations

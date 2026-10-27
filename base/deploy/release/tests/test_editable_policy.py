@@ -12,8 +12,10 @@ from base.deploy.release.editable_policy import (
     EditableReadings,
     MetadataRecord,
     PointerRecord,
+    allowed_forms,
     direct_url_is_allowed,
     editable_violations,
+    exact_path_key,
     pointer_is_allowed,
     sorted_paths,
 )
@@ -138,3 +140,22 @@ def test_a_listing_of_paths_is_distinct_and_ordered_by_text() -> None:
 
     assert sorted_paths([b, a, c, a]) == (c, a, b)
     assert sorted_paths([]) == ()
+    assert sorted_paths([Path("/s/a/x"), Path("/s/a.x")]) == (Path("/s/a.x"), Path("/s/a/x"))
+
+
+def test_the_comparison_key_is_the_exact_spelling_of_the_resolved_path() -> None:
+    assert exact_path_key(Path("/Work/Meiva")) == "/Work/Meiva"
+
+
+def test_the_checkout_and_the_roots_given_are_allowed_in_both_spellings() -> None:
+    roots, urls = allowed_forms(Path("/srv/meiva/source"), [Path("/home/u/Meiva"), Path("/a b")])
+
+    assert roots == frozenset({"/srv/meiva/source", "/home/u/Meiva", "/a b"})
+    assert urls == frozenset({"file:///srv/meiva/source", "file:///home/u/Meiva", "file:///a%20b"})
+
+
+def test_the_checkout_alone_is_allowed_when_no_other_root_is_given() -> None:
+    assert allowed_forms(Path("/srv/meiva/source"), []) == (
+        frozenset({"/srv/meiva/source"}),
+        frozenset({"file:///srv/meiva/source"}),
+    )

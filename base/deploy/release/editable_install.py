@@ -22,17 +22,19 @@ from pathlib import Path
 
 from base.deploy.release.editable_layout import (
     console_script_beside,
-    exact_path_key,
     layout_source_root,
     pointer_lines,
     pointers_beside,
+    pointers_without_metadata,
     venv_python_candidates,
 )
 from base.deploy.release.editable_policy import (
     EditableReadings,
     MetadataRecord,
     PointerRecord,
+    allowed_forms,
     editable_violations,
+    exact_path_key,
     sorted_paths,
 )
 
@@ -121,9 +123,7 @@ def _read_editable_install(source_root: Path) -> EditableReadings:
         pointers=tuple(_read_pointer(path) for path in pointer_paths),
         metadata=tuple(MetadataRecord(path=path, text=_read(path)) for path in metadata_paths),
         pointers_missing=sorted_paths(path for path in expected if not _path_exists(path)),
-        pointers_without_metadata=sorted_paths(
-            path for path in pointer_paths if not tuple(path.parent.glob(EDITABLE_DIST_INFO_GLOB))
-        ),
+        pointers_without_metadata=pointers_without_metadata(pointer_paths, metadata_paths),
     )
 
 
@@ -142,12 +142,16 @@ def editable_install_violations(
     *,
     allowed_roots: Iterable[Path] = (),
 ) -> tuple[str, ...]:
+    if not source_root.is_absolute():
+        raise ValueError(
+            f"the checkout to inspect must be an absolute path, got {str(source_root)!r}"
+        )
     resolved_source = source_root.resolve(strict=False)
-    roots = [resolved_source, *allowed_roots]
+    roots, urls = allowed_forms(
+        resolved_source, [root.resolve(strict=False) for root in allowed_roots]
+    )
     return editable_violations(
-        _read_editable_install(resolved_source),
-        allowed_roots=frozenset(_normalized_exact_path(root) for root in roots),
-        allowed_urls=frozenset(root.resolve(strict=False).as_uri() for root in roots),
+        _read_editable_install(resolved_source), allowed_roots=roots, allowed_urls=urls
     )
 
 

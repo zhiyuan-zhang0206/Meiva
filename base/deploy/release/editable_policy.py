@@ -7,6 +7,7 @@
 from __future__ import annotations
 
 import json
+import os
 from collections.abc import Iterable
 from dataclasses import dataclass
 from pathlib import Path
@@ -16,8 +17,10 @@ __all__ = [
     "EditableReadings",
     "MetadataRecord",
     "PointerRecord",
+    "allowed_forms",
     "direct_url_is_allowed",
     "editable_violations",
+    "exact_path_key",
     "pointer_is_allowed",
     "sorted_paths",
 ]
@@ -58,6 +61,25 @@ class EditableReadings:
 # The distinct paths of a record listing in the order every listing reports them: by their text.
 def sorted_paths(paths: Iterable[Path]) -> tuple[Path, ...]:
     return tuple(sorted(set(paths), key=str))
+
+
+# meiva:note
+# The key a resolved path is compared by: its platform-native exact spelling.
+def exact_path_key(resolved: Path) -> str:
+    return os.path.normcase(str(resolved))
+
+
+# meiva:note
+# The roots a checkout's editable records may name, in the two spellings they are compared in: the
+# exact path keys of pointer lines and the `file://` URLs of `direct_url.json`. The checkout itself
+# is always allowed, and `extra` adds the roots the caller allows; all are resolved already.
+def allowed_forms(
+    resolved_source: Path, extra: Iterable[Path]
+) -> tuple[frozenset[str], frozenset[str]]:
+    roots = [resolved_source, *extra]
+    return frozenset(exact_path_key(root) for root in roots), frozenset(
+        root.as_uri() for root in roots
+    )
 
 
 def _is_str_dict(value: object) -> TypeGuard[dict[str, object]]:

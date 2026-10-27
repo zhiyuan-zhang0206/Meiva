@@ -33,8 +33,9 @@ Converge has no editable pointer repair, protection, or reinstall step.
 
 `base/deploy/release/editable_install.py` provides read-only inspection of
 editable installations: `editable_install_violations` discovers and reads the pointer and
-every `direct_url.json` record (the reader), and `editable_policy.py` judges the values
-it read against the exact-root allowlist; `editable_console_script_violations` checks the launcher. The exec boundary
+every `direct_url.json` record (the reader), `editable_layout.py` derives where the records and the
+interpreter live from paths alone, and `editable_policy.py` judges the values
+it read against the exact-root allowlist (`editable_install_violations` refuses a relative checkout path); `editable_console_script_violations` checks the launcher. The exec boundary
 refuses a child spawn from a violating interpreter and the health probe reports
 the violation; neither rewrites a record. The fix for a violation is the locked
 dependency sync, run by the operator for the intended checkout and its

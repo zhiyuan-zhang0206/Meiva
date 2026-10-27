@@ -66,6 +66,11 @@ class ReleaseAsset:
     sha256: str
 
     # meiva:note
+    # The line that announces the download of this asset.
+    def download_line(self) -> str:
+        return f"  · otel-collector: downloading {self.url}"
+
+    # meiva:note
     # Why a download with this digest is refused, or None when it is the pinned asset.
     def mismatch_message(self, digest: str) -> str | None:
         if digest == self.sha256:
@@ -176,7 +181,7 @@ class DownloadStatus:
         return (
             f"otel-collector download exceeded its {self.limits.total_budget_s:.0f}s budget "
             f"({self.received} bytes received, "
-            f"{max(-self.remaining_s, 0.0):.1f}s past the deadline)"
+            f"{-self.remaining_s:.1f}s past the deadline)"
         )
 
     # meiva:note

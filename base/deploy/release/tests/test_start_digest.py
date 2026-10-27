@@ -66,3 +66,11 @@ def test_a_missing_file_is_not_an_empty_one_and_each_file_counts() -> None:
     assert combined_digest({".env": None}) != combined_digest({".env": empty})
     assert combined_digest({".env": empty}) != combined_digest({"plugins_config.json": empty})
     assert combined_digest({".env": "1"}) != combined_digest({".env": "2"})
+
+
+def test_the_combined_digest_keeps_the_serialization_the_startup_generation_stores() -> None:
+    files = {".env": "1", "configs/é/config.json": None}
+
+    assert combined_digest(files) == (
+        "9c376d748eff0bce9c2cafec58aadf6a12059305dfd54b2ba862a09b855d8485"
+    )

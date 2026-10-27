@@ -1,13 +1,12 @@
 # meiva:note
 # Where the records of a checkout's editable install and its interpreter live, as paths and
-# values: the pointer lines to resolve, the key a resolved path is compared by, the pointer that
-# sits beside a metadata record, the interpreters and console script of a virtualenv and the
+# values: the pointer lines to resolve, the pointer that sits beside a metadata record, the
+# pointers that have none, the interpreters and console script of a virtualenv and the
 # checkout an interpreter path belongs to. `editable_install.py` lists, reads and resolves them and
 # `editable_policy.py` judges what it read.
 
 from __future__ import annotations
 
-import os
 from collections.abc import Iterable
 from pathlib import Path
 
@@ -19,16 +18,21 @@ def pointer_lines(text: str) -> tuple[str, ...]:
 
 
 # meiva:note
-# The key a resolved path is compared by: its platform-native exact spelling.
-def exact_path_key(resolved: Path) -> str:
-    return os.path.normcase(str(resolved))
-
-
-# meiva:note
 # The editable pointers the metadata records say must exist: uv writes `direct_url.json` in a
 # `*.dist-info` directory beside the pointer, in the same site-packages directory.
 def pointers_beside(metadata_paths: Iterable[Path], pointer_name: str) -> frozenset[Path]:
     return frozenset(record.parent.parent / pointer_name for record in metadata_paths)
+
+
+# meiva:note
+# The pointers whose site-packages directory holds no metadata record: a metadata record sits in a
+# `*.dist-info` directory in the same directory as its pointer, so a pointer is without one when no
+# record's `dist-info` parent is its directory. Sorted and distinct.
+def pointers_without_metadata(
+    pointer_paths: Iterable[Path], metadata_paths: Iterable[Path]
+) -> tuple[Path, ...]:
+    site_packages = {record.parent.parent for record in metadata_paths}
+    return tuple(sorted({p for p in pointer_paths if p.parent not in site_packages}, key=str))
 
 
 # meiva:note

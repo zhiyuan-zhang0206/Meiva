@@ -42,12 +42,30 @@ def test_a_tag_names_its_release_asset_and_pinned_digest() -> None:
     assert asset.sha256 == "d5e11974d2e4adac3cc001a25137aad52f6e77ec3034ba7735cac7c219a5f97a"
 
 
-@pytest.mark.parametrize("tag", ["darwin_arm64", "darwin_amd64", "linux_amd64", "linux_arm64"])
-def test_every_supported_tag_has_a_distinct_asset(tag: str) -> None:
+_PINNED = {
+    "darwin_arm64": "d5e11974d2e4adac3cc001a25137aad52f6e77ec3034ba7735cac7c219a5f97a",
+    "darwin_amd64": "91a6e7a0f5e1981986c897db4535de5ba8d7fc45d4205809aecb9ebebf68c71c",
+    "linux_amd64": "fcc063749f730f8c21fe29f2d340ff174f5f1c5885bd3156fb6c985a3036fcc3",
+    "linux_arm64": "ecf6a917e2b53beb1703b19a84bc4e112a2fcaba549639cf6b0ba58446bfd7d2",
+}
+
+
+@pytest.mark.parametrize(("tag", "digest"), sorted(_PINNED.items()))
+def test_every_supported_tag_has_its_own_asset_and_pinned_digest(tag: str, digest: str) -> None:
     asset = release_asset(tag)
 
     assert asset.url.endswith(f"_{tag}.tar.gz")
-    assert len(asset.sha256) == 64
+    assert asset.sha256 == digest
+
+
+def test_the_pinned_digests_are_distinct() -> None:
+    assert len({release_asset(tag).sha256 for tag in _PINNED}) == len(_PINNED)
+
+
+def test_the_download_is_announced_with_its_url() -> None:
+    asset = release_asset("linux_arm64")
+
+    assert asset.download_line() == f"  · otel-collector: downloading {asset.url}"
 
 
 def test_a_tag_without_a_pinned_asset_is_refused() -> None:
@@ -191,3 +209,11 @@ def test_a_download_status_counts_from_its_own_start() -> None:
     status = DownloadStatus.of_download(_LIMITS, 9, started_s=100.0, now_s=160.0)
 
     assert (status.received, status.used_s, status.remaining_s) == (9, 60.0, 1740.0)
+
+
+def test_a_failed_attempt_past_the_budget_reports_nothing_left_not_a_negative() -> None:
+    line = _status(received=1024, used_s=1803.0, remaining_s=-3.0).attempt_failure_line(
+        1, OSError("x")
+    )
+
+    assert "(0s of the 1800s budget left" in line

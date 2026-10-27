@@ -155,7 +155,7 @@ def download_and_verify(
     asset = release_asset(tag)
     with tempfile.TemporaryDirectory() as tmp:
         tarball = Path(tmp) / "otelcol-contrib.tar.gz"
-        _report(f"  · otel-collector: downloading {asset.url}")
+        _report(asset.download_line())
         digest = download_with_retry(
             asset.url, tarball, timers=timers, open_url=open_url, limits=limits
         )
