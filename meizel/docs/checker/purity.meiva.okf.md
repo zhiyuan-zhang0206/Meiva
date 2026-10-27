@@ -49,7 +49,7 @@ Every Python or TypeScript file resolves to its nearest enclosing declaration (`
 
 - **`none`**: only locality and patch-recording rules apply. A manifest that names it writes
   `{ mode = "none", why = "..." }`: an effect shell whose pure decisions are extracted and reviewed.
-  A file no manifest mentions is `none`; the bare string `"none"` is read for now and will be refused.
+  A file no manifest mentions is `none`; the bare string `"none"` is refused (`manifest-syntax`).
 - **`strict-to-be`**: all 15 purity and container-budget rules are evaluated. Existing
   violations may be recorded in `[debt.<code>]` via `python -m meizel debt record` and can
   only shrink (`debt-paid` fires when a recorded violation is fixed, and also when a
