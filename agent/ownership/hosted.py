@@ -2,6 +2,7 @@
 # Hosted incarnation admission and settlement, replacing status-only writes.
 
 import asyncio
+from typing import assert_never
 from uuid import UUID
 
 from loguru import logger
@@ -89,45 +90,48 @@ async def apply_hosted_lifecycle(
             return None
         command_id, command_kind, command_source = command
         kind = lifecycle_kind(command_kind)
-        if kind == "restart":
-            await conn.execute(
-                "UPDATE agents_meta SET status='idling',runtime_generation=NULL,"
-                "runtime_owner=NULL WHERE id=%s",
-                (incarnation.agent_id,),
-            )
-            # meiva:note
-            # The release marker is the maintenance drain's proof that this restart
-            # executed, as opposed to being closed as failed or superseded.
-            await conn.execute(
-                "UPDATE inbound_messages SET status='done',"
-                "payload=COALESCE(payload,'{}'::jsonb)||jsonb_build_object('lifecycle_release',true) "
-                "WHERE id=%s",
-                (command_id,),
-            )
-            note = resume_note(command_source, resume_turn=resume_turn)
-            if note is not None:
+        match kind:
+            case "restart":
                 await conn.execute(
-                    "INSERT INTO inbound_messages(agent_id,content,kind,source,payload) "
-                    "VALUES(%s,%s,'system_note',%s,jsonb_build_object('note_tag',%s::text))",
-                    (
-                        incarnation.agent_id,
-                        note.content,
-                        note.source,
-                        note.note_tag,
-                    ),
+                    "UPDATE agents_meta SET status='idling',runtime_generation=NULL,"
+                    "runtime_owner=NULL WHERE id=%s",
+                    (incarnation.agent_id,),
                 )
-        else:
-            closed = await conn.execute(
-                "UPDATE inbound_messages SET status='done' WHERE agent_id=%s AND kind='terminate' "
-                "AND status IN ('pending','claimed') RETURNING "
-                "COALESCE((payload -> 'kill_all_shell_sessions') = 'true'::jsonb, false)",
-                (incarnation.agent_id,),
-            )
-            cutoff = shell_cutoff([kill for (kill,) in await closed.fetchall()], row[0])
-            await conn.execute(
-                "UPDATE agents_meta SET status='terminated',termination_source='user' WHERE id=%s",
-                (incarnation.agent_id,),
-            )
+                # meiva:note
+                # The release marker is the maintenance drain's proof that this restart
+                # executed, as opposed to being closed as failed or superseded.
+                await conn.execute(
+                    "UPDATE inbound_messages SET status='done',"
+                    "payload=COALESCE(payload,'{}'::jsonb)||jsonb_build_object('lifecycle_release',true) "
+                    "WHERE id=%s",
+                    (command_id,),
+                )
+                note = resume_note(command_source, resume_turn=resume_turn)
+                if note is not None:
+                    await conn.execute(
+                        "INSERT INTO inbound_messages(agent_id,content,kind,source,payload) "
+                        "VALUES(%s,%s,'system_note',%s,jsonb_build_object('note_tag',%s::text))",
+                        (
+                            incarnation.agent_id,
+                            note.content,
+                            note.source,
+                            note.note_tag,
+                        ),
+                    )
+            case "terminate":
+                closed = await conn.execute(
+                    "UPDATE inbound_messages SET status='done' WHERE agent_id=%s AND kind='terminate' "
+                    "AND status IN ('pending','claimed') RETURNING "
+                    "COALESCE((payload -> 'kill_all_shell_sessions') = 'true'::jsonb, false)",
+                    (incarnation.agent_id,),
+                )
+                cutoff = shell_cutoff([kill for (kill,) in await closed.fetchall()], row[0])
+                await conn.execute(
+                    "UPDATE agents_meta SET status='terminated',termination_source='user' WHERE id=%s",
+                    (incarnation.agent_id,),
+                )
+            case _:
+                assert_never(kind)
     return AppliedLifecycle(kind=kind, agent_id=incarnation.agent_id, shell_cutoff=cutoff)
 
 

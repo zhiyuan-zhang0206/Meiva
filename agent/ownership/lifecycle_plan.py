@@ -116,8 +116,12 @@ def owns_inbound_row(
     *,
     incarnation: RuntimeIncarnation | None,
 ) -> bool:
-    if row is None or len(row) != 3:
+    if row is None:
         return False
+    if len(row) != 3:
+        raise ValueError(
+            f"the owner lock selects (generation, owner, status); got a row of {len(row)} columns"
+        )
     generation, owner, status = row
     if incarnation is None:
         return generation is None and owner is None
