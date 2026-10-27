@@ -410,6 +410,7 @@ async def build_runtime(
             root=harness_root,
             skip_permissions=slices.harness_cli.harness_skip_permissions,
             contributions=contributions,
+            home=home,
         ),
     )
 
@@ -426,6 +427,7 @@ def harness_bridge_for(
     root: BridgeRootValues,
     skip_permissions: bool = True,
     contributions: Iterable[HarnessContribution] = (),
+    home: Path,
 ) -> HarnessBridge | None:
     if harness is Harness.MEIVA:
         return None
@@ -437,7 +439,7 @@ def harness_bridge_for(
         harness,
         agent_id=agent_id,
         machine=machine,
-        workspace=workspace_dir(agent_id),
+        workspace=workspace_dir(agent_id, home=home),
         registry=registry,
         registrations=registrations,
         registration_ttl_seconds=registration_ttl_seconds,

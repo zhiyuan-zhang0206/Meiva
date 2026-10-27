@@ -58,9 +58,34 @@ def test_boot_lands_a_skill_this_machine_never_installed(
 
     land_cluster_extensions(database, home=unit_home)
 
-    assert (paths.skills_dir(paths.meiva_home()) / "boot-demo" / "SKILL.md").read_text(
-        encoding="utf-8"
-    ) == (src / "SKILL.md").read_text(encoding="utf-8")
+    assert (paths.skills_dir(unit_home) / "boot-demo" / "SKILL.md").read_text(encoding="utf-8") == (
+        src / "SKILL.md"
+    ).read_text(encoding="utf-8")
+
+
+def test_boot_lands_skills_under_the_home_it_is_given(
+    tmp_path: Path,
+    unit_home: Path,
+    db_conn: psycopg.Connection,
+    database: Database,
+    *,
+    database_gate: ProcessDbGate,
+) -> None:
+    _ = db_conn
+    other_home = tmp_path / "other-home"
+    src = _write_skill(tmp_path / "src" / "boot-other", "boot-other")
+    reg.register_tree(
+        db.pool(gate=database_gate),
+        root=src,
+        name="boot-other",
+        kind="skill",
+        source="local:some-other-machine",
+    )
+
+    land_cluster_extensions(database, home=other_home)
+
+    assert (paths.skills_dir(other_home) / "boot-other" / "SKILL.md").is_file()
+    assert not (unit_home / "skills" / "boot-other").exists()
 
 
 def test_an_unreadable_registry_does_not_stop_the_boot(unit_home: Path, database: Database) -> None:
