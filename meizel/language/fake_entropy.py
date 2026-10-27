@@ -30,20 +30,16 @@ import ast
 import re
 from collections.abc import Callable, Iterator
 
-from meizel.graph.model import EntropySite
+from meizel.graph.model import INTERVAL_CLOCKS, EntropySite
 
 __all__ = [
     "COUNTER_FACTORIES",
-    "ENTROPY_CLOCKS",
     "function_sites",
     "is_loop_clock",
     "value_wrapper",
     "wrapper_clock",
 ]
 
-ENTROPY_CLOCKS = frozenset(
-    {"time.monotonic", "time.monotonic_ns", "time.perf_counter", "time.perf_counter_ns"}
-)
 COUNTER_FACTORIES = frozenset({"itertools.count"})
 _LOOP_GETTERS = frozenset({"asyncio.get_running_loop", "asyncio.get_event_loop"})
 _LOOP_NAMES = frozenset({"loop", "_loop", "event_loop"})
@@ -124,7 +120,7 @@ class _Spend:
         if not isinstance(node, ast.Call):
             return None
         callee = self.callee(node.func)
-        if callee in ENTROPY_CLOCKS:
+        if callee in INTERVAL_CLOCKS:
             return callee
         if is_loop_clock(node, self.dotted):
             return _LOOP
@@ -249,26 +245,20 @@ def _clock_call(expr: ast.expr, dotted: Dotted) -> str | None:
     if not isinstance(expr, ast.Call) or expr.args or expr.keywords:
         return None
     callee = dotted(expr.func)
-    if callee in ENTROPY_CLOCKS:
+    if callee in INTERVAL_CLOCKS:
         return callee
     return _LOOP if is_loop_clock(expr, dotted) else None
 
 
 # meiva:note
-# The clock a function is a one-line wrapper over: a private function without parameters (a method
-# with only `self` or `cls`) whose only statement is `return <interval clock>()`, or None.
+# The clock a function is a one-line wrapper over: a function without parameters (a method with
+# only `self` or `cls`) whose only statement is `return <interval clock>()`, or None. The name is
+# not judged here: the fake-entropy rule leaves a public wrapper alone because another module may
+# inject it, while ambient-read counts a call of any wrapper as a reading of the clock.
 def wrapper_clock(
     function: ast.FunctionDef | ast.AsyncFunctionDef, dotted: Dotted, *, method: bool = False
 ) -> str | None:
-    args = function.args
-    own = [arg.arg for arg in args.args]
-    receiver = method and own in (["self"], ["cls"])
-    if (
-        not function.name.startswith("_")
-        or (own and not receiver)
-        or args.kwonlyargs
-        or args.vararg
-    ):
+    if not _takes_nothing(function.args, method=method):
         return None
     body = [
         statement
@@ -280,6 +270,14 @@ def wrapper_clock(
     return _clock_call(body[0].value, dotted)
 
 
+def _takes_nothing(args: ast.arguments, *, method: bool) -> bool:
+    own = [arg.arg for arg in args.args]
+    receiver = method and own in (["self"], ["cls"])
+    return not (
+        (own and not receiver) or args.posonlyargs or args.kwonlyargs or args.vararg or args.kwarg
+    )
+
+
 # meiva:note
 # The clock a module-level value is under another name: `_now = time.monotonic`, `_now = lambda:
 # time.monotonic()` and `_now = functools.partial(time.monotonic)`. A call of it reads the clock
@@ -287,7 +285,7 @@ def wrapper_clock(
 def value_wrapper(value: ast.expr, dotted: Dotted) -> str | None:
     if isinstance(value, ast.Name | ast.Attribute):
         name = dotted(value)
-        return name if name in ENTROPY_CLOCKS else None
+        return name if name in INTERVAL_CLOCKS else None
     if isinstance(value, ast.Lambda):
         args = value.args
         bare = not (args.args or args.posonlyargs or args.kwonlyargs or args.vararg or args.kwarg)
@@ -299,5 +297,5 @@ def value_wrapper(value: ast.expr, dotted: Dotted) -> str | None:
         and not value.keywords
     ):
         name = dotted(value.args[0])
-        return name if name in ENTROPY_CLOCKS else None
+        return name if name in INTERVAL_CLOCKS else None
     return None

@@ -11,3 +11,6 @@
 
 [roots]
 "__main__.py" = { kinds = ["home"], why = "Operator entry of the private-files check resolves the home it verifies when no --root is given" }
+
+[debt.ambient-read]
+"__init__.py#home pathlib.Path.expanduser" = 3

@@ -22,4 +22,4 @@ exports = ["configs.py", "deepseek_wire.py", "deps.py", "errors.py", "failures.p
 "wire.py" = "strict"
 
 [debt.ambient-read]
-"transport.py#clock base.clock.SYSTEM_TIMERS" = 1
+"transport.py#clock base.clock.SYSTEM_TIMERS" = 2

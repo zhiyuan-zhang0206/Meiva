@@ -10,4 +10,5 @@ exports = ["document.py", "models.py", "resources.py"]
 
 [debt.ambient-read]
 "document.py#settings base.config.settings" = 1
+"resources.py#home pathlib.Path.expanduser" = 1
 "resources.py#settings base.config.settings" = 1

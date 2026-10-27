@@ -214,6 +214,8 @@ class Scanner(AmbientAccess):
             ast.DictComp: self.visit_comprehension,
             ast.GeneratorExp: self.visit_comprehension,
             ast.Assign: self.visit_assign,
+            ast.For: self.visit_for,
+            ast.AsyncFor: self.visit_for,
             ast.AugAssign: self.visit_store,
             ast.AnnAssign: self.visit_store,
             ast.Delete: self.visit_store,
@@ -238,7 +240,7 @@ class Scanner(AmbientAccess):
             purity=self.purity_state.items,
             enum_subsets=self.purity_state.finalize_subsets(),
             input_appends=self.input_appends,
-            ambient=self.ambient.items,
+            ambient=self.ambient.finish(),
             entropy=self.entropy_finish(),
             type_casts=self.type_casts,
             any_collaborators=self.any_collaborators,
@@ -272,8 +274,14 @@ class Scanner(AmbientAccess):
     def visit_name(self, node: ast.Name) -> None:
         super().visit_name(node)
         if isinstance(node.ctx, ast.Load):
-            origin, _ = self.scope.find(node.id)
+            origin, shadowed = self.scope.find(node.id)
             self.purity_state.record_env_access(origin, node.lineno)
+            self.purity_state.record_reference(
+                node,
+                origin,
+                self.dotted,
+                unshadowed_open=node.id == "open" and (origin, shadowed) == (None, False),
+            )
             if self.records_value(node) and origin is not None:
                 self.ambient.used(origin, origin, node.lineno)
 
@@ -308,15 +316,18 @@ class Scanner(AmbientAccess):
     def visit_attribute(self, node: ast.Attribute) -> None:
         chain = dotted_chain(node)
         if chain is None:
+            self.purity_state.record_reference(node, None, self.dotted)
             self.children(node)
             return
         base, attrs = chain
         origin, _ = self.scope.find(base.id)
         if origin is None:
+            self.purity_state.record_reference(node, None, self.dotted)
             return
         self.restricted_attribute(origin, attrs, node.lineno)
         self.module_uses(origin, attrs, node.lineno)
         self.purity_state.record_env_access(".".join([origin, *attrs]), node.lineno)
+        self.purity_state.record_reference(node, ".".join([origin, *attrs]), self.dotted)
         if self.records_value(node):
             self.ambient.used(".".join([origin, *attrs]), origin, node.lineno)
 
@@ -350,18 +361,17 @@ class Scanner(AmbientAccess):
         self.observe_input_parameters(node, inner)
         inner.shadowed.update(parameter_names(args))
         self.fn_depth += 1
-        self.ambient.enter(node)
+        top_level = self.fn_depth == 1 and not self.scope.is_class
+        self.ambient.enter(node, top_level=top_level)
         self.qualnames.append(node.name)
         self.entropy_enter()
         self.enter(inner, node.body)
-        self.entropy_leave(
-            node,
-            inner,
-            top_level=self.fn_depth == 1 and not self.scope.is_class,
-            method=self.fn_depth == 1 and self.scope.is_class,
+        clock = self.clock_wrapper(
+            node, inner, top_level=top_level, method=self.fn_depth == 1 and self.scope.is_class
         )
+        self.entropy_leave(node, inner, clock=clock)
         self.qualnames.pop()
-        self.ambient.leave()
+        self.ambient.leave(wrapper=top_level and clock is not None)
         self.fn_depth -= 1
         self.fixture_requester = previous_requester
 
@@ -469,6 +479,7 @@ class Scanner(AmbientAccess):
         inner = Scope(self.scope.closure_parent())
         for generator in node.generators:
             bind_target(inner, generator.target)
+            self.purity_state.record_loop(generator.target, generator.iter, self.dotted)
         outer, self.scope = self.scope, inner
         self.qualnames.append(_COMPREHENSION_NAMES[type(node)])
         for index, generator in enumerate(node.generators):
@@ -497,6 +508,10 @@ class Scanner(AmbientAccess):
         if const_str(node.value) is None:
             self.children(node)
 
+    def visit_for(self, node: ast.For | ast.AsyncFor) -> None:
+        self.purity_state.record_loop(node.target, node.iter, self.dotted)
+        self.children(node)
+
     def visit_assign(self, node: ast.Assign) -> None:
         self.stores(node.targets, node.lineno, "assignment")
         purity.record_assign(self.purity_state, node, self.dotted)
@@ -518,8 +533,8 @@ class Scanner(AmbientAccess):
             self.stores(node.targets, node.lineno, "del")
         elif not isinstance(node, ast.AnnAssign) or node.value is not None:
             self.stores([node.target], node.lineno, "assignment")
-            if isinstance(node, ast.AnnAssign):
-                purity.record_assign(self.purity_state, node, self.dotted)
+        if isinstance(node, ast.AnnAssign):
+            purity.record_assign(self.purity_state, node, self.dotted)
         if (
             isinstance(node, ast.AnnAssign)
             and self.scope.is_class
@@ -559,7 +574,7 @@ class Scanner(AmbientAccess):
                 TypeCastSite(node.lineno, node.col_offset, ".".join(self.qualnames) or "<module>")
             )
         if self.records_ambient:
-            self.ambient.called(callee, node)
+            self.record_call(callee, node)
         self.entropy_touch(callee, node)
         self.patch_forms(node, callee)
         self.spawn_call(callee, node)

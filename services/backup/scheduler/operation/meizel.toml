@@ -12,5 +12,8 @@ exports = ["cleanup_plan.py", "staging.py", "worker_bootstrap.py", "worker_proce
 "cleanup_plan.py" = "strict"
 "worker_bootstrap.py" = "strict-to-be"
 
+[debt.ambient-read]
+"worker_process.py#clock asyncio.loop.time" = 2
+
 [debt.impure-call]
 "worker_bootstrap.py#Path.resolve" = 1

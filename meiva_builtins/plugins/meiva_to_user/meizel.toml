@@ -11,3 +11,4 @@
 [debt.ambient-read]
 "agent_runtime.py#home base.paths.workspace_dir" = 1
 "written.py#home base.paths.workspace_dir" = 1
+"written.py#home pathlib.Path.expanduser" = 1

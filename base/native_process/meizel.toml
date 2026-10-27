@@ -22,13 +22,17 @@ exports = ["child_env.py", "code_version.py", "evidence.py", "exec_domain.py", "
 "stop_timing.py" = "strict"
 
 [debt.ambient-read]
+"os_platform.py#clock _monotonic()" = 1
 "os_platform.py#home base.paths.home.user_home" = 1
 "os_platform.py#pid os.getpid" = 1
 "os_platform.py#platform platform.machine" = 1
 "os_platform.py#platform sys.platform" = 1
+"ownership.py#pid psutil.Process()" = 1
 
 [debt.fake-entropy]
 "os_platform.py#interval-wrapper _monotonic" = 1
 
 [debt.impure-call]
+"reparent.py#os.dup2" = 3
 "reparent.py#os.open" = 3
+"reparent.py#os.write" = 1

@@ -24,4 +24,4 @@ exports = ["adversarial_batch.py", "adversarial_scenario.py", "adversarial_worke
 "loop.py" = { kinds = ["clock"], why = "Schedule runner loop polls current UTC time on each iteration" }
 
 [debt.ambient-read]
-"catchup.py#clock base.clock.Clock.from_settings" = 1
+"catchup.py#settings base.clock.Clock.from_settings" = 1

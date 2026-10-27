@@ -28,3 +28,4 @@ exports = ["config.py", "execute.py", "input.py", "mcp_daemon.py", "mcp_wrapper.
 
 [debt.ambient-read]
 "screen.py#home base.paths.logs_dir" = 1
+"session.py#clock asyncio.loop.time" = 2
