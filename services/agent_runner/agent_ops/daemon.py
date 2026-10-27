@@ -661,7 +661,7 @@ def main(*, argv: list[str] | None = None) -> None:
                     image=image,
                     local_machine=machine,
                     config=config,
-                    host=Host.system(),
+                    host=Host.system(environ=config.process_environment()),
                     rng=_new_rng(),
                     home=home,
                     receiver=_receiver_config(config, machine=machine.name(), home=home),

@@ -25,9 +25,6 @@ exports = ["boot_autostart", "backend.py", "boot_policy.py", "boot_unit.py", "cr
 "walg_content.py" = "strict"
 "__init__.py" = "strict"
 
-[roots]
-"probes.py" = { kinds = ["environ"], why = "display_available reads DISPLAY/WAYLAND_DISPLAY to detect X11/Wayland; these are OS display-server vars, not meiva runtime config; no Settings field models them. Single source of truth shared by the browser daemon / MCP loader / host-config validators" }
-
 [debt.ambient-read]
 "boot_unit.py#pid base.native_process.os_platform.resolve_pid" = 2
 "hostport.py#pid base.native_process.root_control.client.current_uid" = 1

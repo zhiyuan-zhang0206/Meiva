@@ -56,6 +56,27 @@ def _ls_remote_host(stdout: str, returncode: int = 0, stderr: str = "") -> Host:
     return fake_host(run)
 
 
+# meiva:note
+# The git command runs in the environment of the host it is handed, plus git's non-interactive
+# knobs, not in the environment of the process that runs the test.
+def test_ls_remote_runs_in_the_environment_of_the_host() -> None:
+    seen: list[object] = []
+
+    def run(
+        argv: Sequence[str], *, timeout: float, **options: object
+    ) -> subprocess.CompletedProcess[str]:
+        seen.append(options["env"])
+        return subprocess.CompletedProcess(list(argv), 0, stdout="", stderr="")
+
+    host = fake_host(run, environ={"ONLY_IN_THE_HOST": "1"})
+    assert mod.remote_branches(host=host) == []
+    [env] = seen
+    assert isinstance(env, dict)
+    assert env["ONLY_IN_THE_HOST"] == "1"
+    assert env["GIT_TERMINAL_PROMPT"] == "0"
+    assert "PATH" not in env
+
+
 def test_passes_on_single_branch_model(capsys: pytest.CaptureFixture[str]) -> None:
     """The premise holding is reported, not silently assumed."""
     host = _ls_remote_host("abc\trefs/heads/main\ndef\trefs/heads/meiva-1-x\n")

@@ -70,6 +70,17 @@ def test_display_true_on_macos() -> None:
     assert pp.display_available(host=fake_host(platform=DARWIN_ARM64)) is True
 
 
+def test_display_linux_reads_the_environment_of_the_host_it_is_given() -> None:
+    assert pp.display_available(host=fake_host(platform=LINUX_X86, environ={})) is False
+    assert (
+        pp.display_available(host=fake_host(platform=LINUX_X86, environ={"DISPLAY": ""})) is False
+    )
+    x11 = fake_host(platform=LINUX_X86, environ={"DISPLAY": ":0"})
+    assert pp.display_available(host=x11) is True
+    wayland = fake_host(platform=LINUX_X86, environ={"WAYLAND_DISPLAY": "wayland-0"})
+    assert pp.display_available(host=wayland) is True
+
+
 def test_display_linux_requires_env() -> None:
     assert pp.has_display_vars(system="linux", display=None, wayland_display=None) is False
     assert pp.has_display_vars(system="linux", display="", wayland_display="") is False

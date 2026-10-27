@@ -78,12 +78,33 @@ def test_a_redis_of_this_home_that_nothing_recorded_refuses_the_stop(unit_home: 
         running_redis(instance.redis_data_dir(unit_home)) as ours,
         pytest.raises(RuntimeError, match=rf"unrecorded or replacement.*redis pid {ours.pid}"),
     ):
-        maintenance_stop.require_no_unrecorded({}, home=unit_home)
+        maintenance_stop.require_no_unrecorded({}, home=unit_home, uid=os.getuid())
 
 
 def test_a_recorded_redis_is_accounted_for(unit_home: Path) -> None:
     with running_redis(instance.redis_data_dir(unit_home)) as ours:
-        maintenance_stop.require_no_unrecorded({"redis": frozenset({ours.pid})}, home=unit_home)
+        maintenance_stop.require_no_unrecorded(
+            {"redis": frozenset({ours.pid})}, home=unit_home, uid=os.getuid()
+        )
+
+
+# meiva:note
+# The uid the stop is handed decides whose processes are this machine's own: a process of another
+# uid is reported as that, and a Redis of this home that belongs to another user is not the stop's
+# to refuse over.
+def test_a_process_of_another_uid_is_reported_as_that() -> None:
+    with sleeping_child() as child:
+        process = psutil.Process(child.pid)
+        mine = maintenance_stop.look_at(process, "postgres", uid=os.getuid())
+        other = maintenance_stop.look_at(process, "postgres", uid=os.getuid() + 1)
+
+    assert not mine.other_user
+    assert other.other_user
+
+
+def test_a_redis_of_another_uid_is_not_this_homes(unit_home: Path) -> None:
+    with running_redis(instance.redis_data_dir(unit_home)):
+        maintenance_stop.require_no_unrecorded({}, home=unit_home, uid=os.getuid() + 1)
 
 
 # meiva:note
@@ -92,7 +113,7 @@ def test_a_recorded_redis_is_accounted_for(unit_home: Path) -> None:
 def test_processes_of_a_sibling_home_are_not_unrecorded(unit_home: Path) -> None:
     sibling = _sibling(unit_home)
     with running_redis(sibling / "redis"), running_pooler(sibling):
-        maintenance_stop.require_no_unrecorded({}, home=unit_home)
+        maintenance_stop.require_no_unrecorded({}, home=unit_home, uid=os.getuid())
 
 
 @pytest.mark.parametrize("relative_ini", [False, True])
@@ -103,9 +124,11 @@ def test_a_pooler_of_this_home_that_nothing_recorded_refuses_the_stop(
         with pytest.raises(
             RuntimeError, match=rf"unrecorded or replacement.*pgbouncer pid {ours.pid}"
         ):
-            maintenance_stop.require_no_unrecorded({}, home=unit_home)
+            maintenance_stop.require_no_unrecorded({}, home=unit_home, uid=os.getuid())
 
-        maintenance_stop.require_no_unrecorded({"pgbouncer": frozenset({ours.pid})}, home=unit_home)
+        maintenance_stop.require_no_unrecorded(
+            {"pgbouncer": frozenset({ours.pid})}, home=unit_home, uid=os.getuid()
+        )
 
 
 # meiva:note
@@ -119,7 +142,7 @@ def test_a_pooler_of_this_home_that_nothing_recorded_refuses_the_stop(
 def test_a_process_whose_directory_cannot_be_read_is_reported_not_raised() -> None:
     assert os.geteuid() != 0, "root reads every working directory; this needs the suite's user"
     with sleeping_child(undumpable=True) as child:
-        seen = maintenance_stop.look_at(psutil.Process(child.pid), "postgres")
+        seen = maintenance_stop.look_at(psutil.Process(child.pid), "postgres", uid=os.getuid())
 
         assert seen.locator is None and not seen.other_user and not seen.exiting
         problem = refusal(judge((seen,), homes={"postgres": "/h/pg"}, recorded={}))
@@ -146,7 +169,9 @@ def test_a_redis_that_never_answers_cannot_hold_the_stop_past_its_deadline(
         started = time.monotonic()
 
         with pytest.raises((TimeoutError, RuntimeError)):
-            maintenance_stop.stop(plane, 0.3, home=unit_home, producer=operator_pipeline)
+            maintenance_stop.stop(
+                plane, 0.3, home=unit_home, uid=os.getuid(), producer=operator_pipeline
+            )
 
         assert time.monotonic() - started < 1.5
 
@@ -160,7 +185,9 @@ def test_a_redis_connection_ended_after_capture_cannot_shut_down_another_connect
     unit_home: Path, redis_access: None, emitted_events: EmittedEvents
 ) -> None:
     del redis_access
-    context = maintenance_stop.StopContext(unit_home, StopLegs(), emitted_events.producer)
+    context = maintenance_stop.StopContext(
+        unit_home, os.getuid(), StopLegs(), emitted_events.producer
+    )
     with running_redis(instance.redis_data_dir(unit_home)) as server:
 
         async def scenario() -> None:
@@ -221,7 +248,9 @@ def test_a_replaced_postmaster_identity_fails_the_leg_and_leaves_postgres_runnin
     plane = _local_plane(data_plane_config, redis_url="redis://127.0.0.1:1", pg_port=port)
     data = instance.pg_data_dir(unit_home)
     retained: list[subprocess.Popen[bytes]] = []
-    context = maintenance_stop.StopContext(unit_home, StopLegs(), emitted_events.producer)
+    context = maintenance_stop.StopContext(
+        unit_home, os.getuid(), StopLegs(), emitted_events.producer
+    )
     try:
         assert (
             instance.start_pg(
@@ -291,6 +320,7 @@ def test_the_stop_ends_a_whole_local_data_plane_in_order(
                 plane,
                 20,
                 home=unit_home,
+                uid=os.getuid(),
                 retained_children=retained,
                 producer=operator_pipeline,
             )
@@ -307,6 +337,6 @@ def test_the_stop_ends_a_whole_local_data_plane_in_order(
                 closing(socket.create_connection(("127.0.0.1", store.port), timeout=2)),
             ):
                 pass
-            maintenance_stop.require_no_unrecorded({}, home=unit_home)
+            maintenance_stop.require_no_unrecorded({}, home=unit_home, uid=os.getuid())
     finally:
         owned_postgres.stop(data, timeout=10, retained_children=retained, timers=SYSTEM_TIMERS)

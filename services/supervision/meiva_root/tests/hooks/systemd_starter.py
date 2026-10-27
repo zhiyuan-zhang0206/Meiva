@@ -52,7 +52,7 @@ def main(params: dict[str, Any]) -> None:
     if failure == "before":
         receipt.with_suffix(".failure").write_text("before")
         raise RuntimeError("failed before publication")
-    publish_root_ready(home, native_identity(status["root"]), host=Host.system())
+    publish_root_ready(home, native_identity(status["root"]), host=Host.system(environ={}))
     if failure == "after":
         receipt.with_suffix(".failure").write_text("after")
         raise RuntimeError("failed after publication")

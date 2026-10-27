@@ -4,6 +4,7 @@ from __future__ import annotations
 import argparse
 import json
 import math
+import os
 import re
 import subprocess
 import sys
@@ -443,4 +444,4 @@ def main(argv: list[str] | None = None, *, host: Host) -> int:
 
 
 if __name__ == "__main__":
-    sys.exit(main(host=Host.system()))
+    sys.exit(main(host=Host.system(environ=os.environ)))
