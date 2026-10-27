@@ -7,6 +7,7 @@ from __future__ import annotations
 import contextlib
 import json
 import os
+import random
 import signal
 import sys
 import threading
@@ -425,6 +426,7 @@ def run_child(
     birth, overlay = pop_overlay_env()
     from base.clock import SYSTEM_TIMERS, Clock
     from base.clock.configuration import clock_config_from_boot
+    from base.paths.home import resolve_meiva_home
 
     def clock_factory() -> Clock:
         return Clock(clock_config_from_boot(config), timers=SYSTEM_TIMERS)
@@ -440,6 +442,9 @@ def run_child(
                 machine=context.require_machine(),
             ),
             clock_factory=clock_factory,
+            meiva_home=resolve_meiva_home(),
+            user_home=Path.home(),
+            rng=random.SystemRandom(),
         )
     )
 

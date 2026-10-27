@@ -19,6 +19,7 @@ export function registerUseTimelineStreamingTests(ctx: UseTimelineTestContext): 
     pushBatch,
     snapshotItem,
     tlResp,
+    wallClock,
     wrapper,
   } = ctx;
 
@@ -35,6 +36,43 @@ describe("useTimeline streamingCode flag", () => {
     expect(result.current.streamingCode).toBe(true);
     pushEvent({ role: "exec_start", item_id: "5.0", agent_id: 42 });
     expect(result.current.streamingCode).toBe(false);
+  });
+});
+
+describe("useTimeline wall clock", () => {
+  // meiva:note
+  // The hook stamps events and settles turns with the wall clock the page provides, not the
+  // process clock: every instant below is one the test chose.
+  it("stamps a streamed event with the provided instant and freezes its clock at the next one", async () => {
+    const { result } = renderHook(() => useTimeline(42, vi.fn()), { wrapper });
+    await waitFor(() => expect(timelineReads.length).toBeGreaterThan(0));
+    await waitFor(() => expect(ctx.getQueryClient().isFetching()).toBe(0));
+    const started = wallClock.now();
+
+    pushEvent({ role: "code_start", item_id: "5.1", agent_id: 42 });
+    expect(result.current.items[0].codeStartedAt).toBe(started);
+
+    wallClock.advance(4200);
+    pushEvent({ role: "exec_start", item_id: "5.2", agent_id: 42 });
+    expect(result.current.items[0].codeElapsedMs).toBe(4200);
+  });
+
+  it("stamps the events of a frame batch with the provided instant", async () => {
+    const { result } = renderHook(() => useTimeline(42, vi.fn()), { wrapper });
+    await waitFor(() => expect(timelineReads.length).toBeGreaterThan(0));
+    await waitFor(() => expect(ctx.getQueryClient().isFetching()).toBe(0));
+    const started = wallClock.now();
+
+    pushBatch([
+      { role: "reasoning_start", item_id: "7.0", agent_id: 42 },
+      { role: "code_start", item_id: "7.1", agent_id: 42 },
+    ]);
+
+    expect(result.current.items.map((it) => it.created_at)).toEqual([
+      new Date(started).toISOString(),
+      new Date(started).toISOString(),
+    ]);
+    expect(result.current.items[1].codeStartedAt).toBe(started);
   });
 });
 

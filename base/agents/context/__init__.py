@@ -175,11 +175,12 @@ class MeivaContext:
     meiva_home: Path | None = None
 
     # meiva:note
-    # The random source of this process, which the root fills with the generator it builds once.
-    # Retry jitter and identifiers draw from it through `require_rng()` / `require_new_id()`
-    # instead of constructing a generator. A root whose identifiers must stay unique across
-    # processes (idempotency keys, credentials) hands in a `random.SystemRandom`; a plain
-    # `random.Random` suffices for jitter alone.
+    # The random source of this process, which the root fills with the generator it builds once:
+    # general entropy for retry jitter, idempotency keys and identifiers no secret rides on.
+    # Minting that is security-relevant (relay tokens, session keys, passphrases) does not draw
+    # from the context; the root passes that code a `random.SystemRandom` argument of its own. A
+    # root that needs this generator unpredictable and not copied by a fork hands in a
+    # `random.SystemRandom` here too.
     rng: random.Random | None = None
 
     # meiva:note
@@ -207,11 +208,12 @@ class MeivaContext:
         return self.rng
 
     # meiva:note
-    # Mint a fresh version-4 identifier from the root's generator: 128 bits drawn from it, so the
-    # identifiers are unique across processes exactly when the root's generator is a
-    # `random.SystemRandom`.
+    # Mint a fresh version-4 identifier from the root's generator, as the 32-character hex form
+    # the CLI runtime and the IM bridge use (`new_uuid(rng).hex`; this body is that function until
+    # `base/clock/ids.py` is on main). A partial context fails at first use, with no fallback to
+    # a generator of its own.
     def require_new_id(self) -> str:
-        return str(UUID(int=self.require_rng().getrandbits(128), version=4))
+        return UUID(int=self.require_rng().getrandbits(128), version=4).hex
 
     # meiva:note
     # The message-timestamp policy of the unit of work that asks: this owner's clock and the
