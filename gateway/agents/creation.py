@@ -38,6 +38,7 @@ from gateway.http.auth.request_principal import (
     PrincipalScopeError,
     request_key,
 )
+from ops.cluster.rpc import RpcClient
 from ops.lifecycle.launch import spawn_prechecks_blocking
 from ops.rpc_schemas import LaunchAgentRequest, SpawnAgentRequest, SpawnedAgent
 
@@ -69,6 +70,7 @@ async def create_and_launch_agent(
     authority: ConfigAuthority,
     creation_key: str,
     clock: Clock,
+    rpc: RpcClient,
     creation_identity: dict[str, object] | None = None,
 ) -> SpawnedAgent:
     """Gateway-side spawn (Task #1236 follow-up): preflight -> create the agent
@@ -105,6 +107,7 @@ async def create_and_launch_agent(
             catalog=catalog,
             default_model=default_model,
             clock=clock,
+            rpc=rpc,
         )
     keys = await asyncio.to_thread(process_provider_keys, catalog)
     tail_skills, model_receipt = await asyncio.to_thread(
@@ -159,6 +162,7 @@ async def create_and_launch_agent(
             catalog=catalog,
             default_model=default_model,
             clock=clock,
+            rpc=rpc,
         )
     target, birth_config, launch_attempt_id = (
         committed.machine,
@@ -177,7 +181,7 @@ async def create_and_launch_agent(
     # equal to new_id in production; the runner answers for the launch). A
     # withdrawal settlement travels as the spawner's receipt (task #4306).
     spawned = await _dispatch_committed_launch(
-        pool, db, bus, target, launch, catalog=catalog, default_model=default_model
+        pool, db, bus, target, launch, catalog=catalog, default_model=default_model, rpc=rpc
     )
     return await _accepted_launch_receipt(
         pool, spawned, model_receipt, catalog=catalog, default_model=default_model, clock=clock
@@ -193,6 +197,7 @@ async def recover_launch(
     catalog: ModelCatalog,
     default_model: str,
     clock: Clock,
+    rpc: RpcClient,
 ) -> SpawnedAgent:
     """Recover only an unadmitted birth; a completed incarnation is never revived."""
     if not existing.launch_pending:
@@ -210,6 +215,7 @@ async def recover_launch(
         ),
         catalog=catalog,
         default_model=default_model,
+        rpc=rpc,
     )
     return await _accepted_launch_receipt(
         pool, spawned, None, catalog=catalog, default_model=default_model, clock=clock
@@ -417,10 +423,11 @@ async def _dispatch_committed_launch(
     *,
     catalog: ModelCatalog,
     default_model: str,
+    rpc: RpcClient,
 ) -> SpawnedAgent:
     attempt_id = launch.launch_attempt_id
     try:
-        spawned = await forward_spawn_to_remote(db, target, launch)
+        spawned = await forward_spawn_to_remote(db, target, launch, rpc=rpc)
     except Exception as exc:
         failure = launch_plan.launch_failure(exc)
         detail = failure.detail

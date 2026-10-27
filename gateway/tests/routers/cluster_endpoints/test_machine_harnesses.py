@@ -13,7 +13,7 @@ from base.cluster.machine.tests.identity import MachineIdentitySetter
 from base.db import Database
 from gateway.cluster.harness_probe import probe_harnesses
 from gateway.cluster.harness_rows import availability_rows
-from gateway.tests.auth.gateway_config import gateway_test_client
+from gateway.tests.auth.gateway_config import gateway_test_client, gateway_test_rpc
 from gateway.tests.support.runner_ops.ops_stub import completed, runner_ops
 from ops.rpc_schemas import HarnessProbeResult, HarnessProbeRow
 
@@ -61,7 +61,9 @@ async def test_a_remote_machine_answers_from_its_own_runner(
     local: MachineIdentityReader = set_machine_identity(role="gateway", name="gw-only")
 
     with runner_ops(db_conn, REMOTE, {"harness_probe": completed(_WIRE)}):
-        probed = await probe_harnesses(REMOTE, db=database, local_machine=local)
+        probed = await probe_harnesses(
+            REMOTE, db=database, local_machine=local, rpc=gateway_test_rpc()
+        )
 
     assert [row.harness for row in probed.harnesses] == list(Harness)
     assert probed.harnesses[2].reason == _WIRE["harnesses"][2]["reason"]
@@ -73,7 +75,9 @@ async def test_unknown_machine_is_404(
 ) -> None:
     local: MachineIdentityReader = set_machine_identity(role="gateway", name="gw-only")
     with pytest.raises(HTTPException) as raised:
-        await probe_harnesses("ghost-host", db=database, local_machine=local)
+        await probe_harnesses(
+            "ghost-host", db=database, local_machine=local, rpc=gateway_test_rpc()
+        )
     assert raised.value.status_code == 404
     assert "unknown machine" in str(raised.value.detail)
 
@@ -90,7 +94,7 @@ async def test_a_remote_box_without_a_runner_cannot_report(
         runner_ops(db_conn, REMOTE, answer, roles=("gateway",)),
         pytest.raises(HTTPException) as raised,
     ):
-        await probe_harnesses(REMOTE, db=database, local_machine=local)
+        await probe_harnesses(REMOTE, db=database, local_machine=local, rpc=gateway_test_rpc())
     assert raised.value.status_code == 503
     assert "no agent-runner ops server" in str(raised.value.detail)
 
@@ -111,7 +115,7 @@ async def test_this_box_without_a_runner_refuses(
         runner_ops(db_conn, "gw-only", answer, roles=("gateway",)),
         pytest.raises(HTTPException) as raised,
     ):
-        await probe_harnesses("gw-only", db=database, local_machine=local)
+        await probe_harnesses("gw-only", db=database, local_machine=local, rpc=gateway_test_rpc())
 
     assert raised.value.status_code == 503
 

@@ -11,6 +11,3 @@ exports = ["inventory.py", "notification_categories.py", "packages.py", "plugin_
 "__init__.py" = "strict"
 "inventory_matrix.py" = "strict"
 "schemas.py" = "strict"
-
-[debt.ambient-read]
-"inventory.py#settings ops.cluster.rpc.dispatch_to_machine" = 2

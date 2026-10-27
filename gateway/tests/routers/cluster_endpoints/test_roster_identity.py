@@ -22,6 +22,7 @@ from gateway.cluster.process_boot import LOADED_IMAGE
 from gateway.cluster.roster.roster_probe import IdentityMismatchLog
 from gateway.cluster.roster.roster_rows import RosterRowSpec
 from gateway.cluster.status import RosterEnv
+from gateway.tests.auth.gateway_config import gateway_test_rpc
 from gateway.tests.support.runner_ops.ops_stub import OpsCall, OpsReply, completed, runner_ops
 
 
@@ -48,6 +49,7 @@ def _env(
         machine=machine,
         probe_timeout_s=8.0,
         clock=system_clock(),
+        rpc=gateway_test_rpc(),
     )
 
 

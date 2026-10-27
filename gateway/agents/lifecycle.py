@@ -18,8 +18,9 @@ from base.db import Database
 from base.db.transaction import write_transaction
 from base.events.live.bus import EventBus
 from gateway.agents.launch.forward import forward_to_home_machine
-from gateway.http.config import GatewayConfig
+from gateway.http.config import GatewayConfig, gateway_rpc
 from gateway.http.model_catalog import require_model_catalog
+from ops.cluster.rpc import RpcClient
 from ops.rpc_schemas import (
     CancelAgentResponse,
     CompactAgentResponse,
@@ -95,6 +96,7 @@ async def post_agent_terminate(
         request.app.state.db_pool,
         db=request.app.state.db,
         config=request.app.state.gateway_config,
+        rpc=gateway_rpc(request),
     )
 
 
@@ -105,6 +107,7 @@ async def terminate_agent_with_open_tasks(
     *,
     db: Database,
     config: GatewayConfig,
+    rpc: RpcClient,
 ) -> TerminateAgentResponse:
 
     forwarded = await forward_to_home_machine(
@@ -114,6 +117,7 @@ async def terminate_agent_with_open_tasks(
         db=db,
         pool=pool,
         config=config,
+        rpc=rpc,
     )
     response = TerminateAgentResponse.model_validate(forwarded)
     if response.shell_sessions is not None and response.shell_sessions.killed:
@@ -190,6 +194,7 @@ async def post_agent_resurrect(
         db=request.app.state.db,
         pool=request.app.state.db_pool,
         config=request.app.state.gateway_config,
+        rpc=gateway_rpc(request),
     )
     return ResurrectAgentResponse.model_validate(forwarded)
 
@@ -241,6 +246,7 @@ async def post_agent_restart(
         db=request.app.state.db,
         pool=request.app.state.db_pool,
         config=request.app.state.gateway_config,
+        rpc=gateway_rpc(request),
     )
     return RestartAgentResponse.model_validate(forwarded)
 
@@ -258,6 +264,7 @@ async def post_agent_cancel(agent_id: int, request: Request) -> CancelAgentRespo
         db=request.app.state.db,
         pool=request.app.state.db_pool,
         config=request.app.state.gateway_config,
+        rpc=gateway_rpc(request),
     )
     return CancelAgentResponse.model_validate(forwarded)
 

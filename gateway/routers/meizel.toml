@@ -9,7 +9,3 @@ exports = ["commands.py", "configuration", "fleet", "frontend_telemetry.py", "gu
 [purity]
 "__init__.py" = "strict"
 "refusal.py" = "strict"
-
-[debt.ambient-read]
-"commands.py#settings ops.cluster.rpc.dispatch_to_machine" = 1
-"shell.py#settings ops.cluster.rpc.dispatch_to_machine" = 1

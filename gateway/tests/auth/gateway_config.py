@@ -14,6 +14,7 @@ from fastapi.testclient import TestClient
 
 from base import paths
 from base.api_contracts.idempotency import PRINCIPAL_SCOPE, SCOPE_HEADER
+from base.clock import SYSTEM_TIMERS
 from base.cluster.machine import MachineIdentityReader
 from base.cluster.machine.configured import ConfiguredMachineIdentity
 from base.config import ConfigBoot
@@ -25,6 +26,7 @@ from gateway.cluster.process_boot import LOADED_IMAGE, GatewayProcess
 from gateway.http.config import GatewayConfig, gateway_config_from_boot
 from gateway.http.model_catalog import load_model_catalog
 from gateway.tests.auth.gateway_auth import gateway_credentials
+from ops.cluster.rpc import RpcClient
 
 __all__ = [
     "SPAWN_PATH",
@@ -36,6 +38,7 @@ __all__ = [
     "gateway_test_client",
     "gateway_test_config",
     "gateway_test_process",
+    "gateway_test_rpc",
     "post_spawn",
     "reconfigure",
     "spawn_headers",
@@ -54,6 +57,13 @@ def gateway_config_fields(**fields: Any) -> Generator[dict[str, Any]]:
         yield layer
     finally:
         _CONFIG_FIELD_OVERRIDES.pop()
+
+
+# meiva:note
+# The cluster RPC client a gateway root builds, over the test process's configuration snapshot and
+# the system timers: its credential and dispatch budget are the ones the stub runners expect.
+def gateway_test_rpc() -> RpcClient:
+    return RpcClient.from_boot(snapshot_process_config(), timers=SYSTEM_TIMERS)
 
 
 # meiva:note

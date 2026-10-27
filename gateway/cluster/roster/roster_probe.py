@@ -26,10 +26,12 @@ _log = logging.getLogger(__name__)
 # per attempt, so retrying without it could double an 8-second roster budget
 # for a blackholed host. ``timeout_s`` is the per-machine budget the caller
 # reads from ``gateway.status_probe_timeout_seconds``.
-async def dispatch_status_probe(name: str, ops_url: str, *, timeout_s: float) -> dict[str, Any]:
+async def dispatch_status_probe(
+    name: str, ops_url: str, *, timeout_s: float, rpc: cluster_rpc.RpcClient
+) -> dict[str, Any]:
     try:
         async with asyncio.timeout(timeout_s):
-            return await cluster_rpc.dispatch_to_url(
+            return await rpc.dispatch_to_url(
                 target_machine=name,
                 kind="status_probe",
                 payload={},

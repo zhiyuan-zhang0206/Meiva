@@ -4,7 +4,7 @@ from fastapi import APIRouter, Depends, Request
 from pydantic import BaseModel, Field
 
 from gateway.agents.creation import create_and_launch_agent, guarded_draft_key
-from gateway.http.config import gateway_clock
+from gateway.http.config import gateway_clock, gateway_rpc
 from gateway.http.model_catalog import require_model_catalog
 from ops.rpc_schemas import SpawnAgentRequest
 
@@ -49,6 +49,7 @@ async def guarded_draft_guide(
         authority=request.app.state.config_authority,
         creation_key=key,
         clock=gateway_clock(request),
+        rpc=gateway_rpc(request),
         creation_identity=body.model_dump(mode="json"),
     )
     return GuideDraftResponse(agent_id=spawned.id)

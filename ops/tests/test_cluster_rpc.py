@@ -18,6 +18,7 @@ import pytest
 
 from base.clock.tests.manual_timers import ManualTimers
 from base.cluster.machine import GatewayAccess
+from base.config.tests.configuration import snapshot_process_config
 from base.db import Database
 from base.db.code_version_gate import ProcessDbGate
 from base.host.proc import run_bounded
@@ -55,6 +56,23 @@ def _assert_waits_follow_the_backoff(timers: ManualTimers, backoffs: list[float]
     assert len(timers.sleeps) == len(backoffs)
     for wait, backoff in zip(timers.sleeps, backoffs, strict=True):
         assert 0.5 * backoff <= wait <= 1.5 * backoff
+
+
+def test_a_client_built_from_boot_takes_its_budget_and_its_credential_from_that_boot() -> None:
+    boot = snapshot_process_config()
+    boot.set_field("cluster_rpc_timeout_seconds", 7.5)
+    boot.set_field("cluster_rpc_max_retries", 4)
+    first, second = "boot-first", "boot-second"
+    boot.set_field("cluster_secret", first)
+    timers = ManualTimers()
+
+    rpc = RpcClient.from_boot(boot, timers=timers)
+
+    assert rpc.config == RpcConfig(timeout_seconds=7.5, max_retries=4)
+    assert rpc.timers is timers
+    assert rpc.access().cluster_secret == first
+    boot.set_field("cluster_secret", second)
+    assert rpc.access().cluster_secret == second
 
 
 @pytest.mark.asyncio

@@ -17,7 +17,7 @@ from psycopg_pool import ConnectionPool, PoolTimeout
 from base.api_contracts.agent_contract import AgentNotFound
 from base.clock import Clock
 from base.db import Database
-from gateway.http.config import gateway_clock, gateway_config
+from gateway.http.config import gateway_clock, gateway_config, gateway_rpc
 from gateway.inspect import _metrics, _plugin_metrics, _plugin_widgets, neighbors
 from gateway.inspect._cache import InspectCacheFullError, InspectQueryCache
 from gateway.inspect._heartbeat import HeartbeatCadence, HeartbeatState
@@ -34,6 +34,7 @@ from gateway.inspect.schemas import (
 )
 from gateway.schemas.stats import StatsWindowHours
 from ops.cluster import rpc as cluster_rpc
+from ops.cluster.rpc import RpcClient
 from ops.rpc_schemas import ShellInfo
 from services.wake.heartbeat import JITTER_SPAN_S
 
@@ -92,7 +93,7 @@ def _shell_ttls_blocking(pool: ConnectionPool, agent_id: int) -> dict[int, datet
 
 
 async def _probe_agent_shells(
-    database: Database, agent_id: int, machine: str, pool: ConnectionPool
+    database: Database, agent_id: int, machine: str, pool: ConnectionPool, *, rpc: RpcClient
 ) -> tuple[list[ShellInfo], bool]:
     """The agent's live persistent shells, probed on the machine it runs on.
 
@@ -112,7 +113,7 @@ async def _probe_agent_shells(
     empty set. Malformed successful responses fail rather than invent data.
     """
     try:
-        result = await cluster_rpc.dispatch_to_machine(
+        result = await rpc.dispatch_to_machine(
             database,
             machine,
             "shell_probe",
@@ -185,7 +186,9 @@ async def get_agent_inspect_live(agent_id: int, request: Request) -> AgentInspec
     db = await asyncio.to_thread(db_rows_blocking, pool, agent_id)
     notice, shells, last_pause = await asyncio.gather(
         asyncio.to_thread(notice_blocking, pool, agent_id),
-        _probe_agent_shells(request.app.state.db, agent_id, db.machine, pool),
+        _probe_agent_shells(
+            request.app.state.db, agent_id, db.machine, pool, rpc=gateway_rpc(request)
+        ),
         asyncio.to_thread(_heartbeat_last_pause, pool, agent_id, now=gateway_clock(request).now()),
     )
     return AgentInspectLive(
