@@ -2539,9 +2539,10 @@ groups:
           summary: "impersonation lease {{ $labels.attributes_lease_id }} (agent {{ $labels.agent_id }}, {{ $labels.attributes_lease_machine }}) ended but its event source is still open ({{ $labels.attributes_pending_reason }})"
           description: >-
             An ended automatic impersonation lease cannot complete its event log until the open source
-            seals. The ttl reaper emits one event per lease every pass (about 60s) while the row fact holds;
-            the 3-minute trailing window tolerates missed passes and the instance resolves itself minutes
-            after the source seals.
+            seals. The reaper reports it at the configured cadence (default daily), recording each report
+            in the lease's own log, and after the configured abandon grace it seals a receipt whose
+            controller never came back (recording the abandonment there too). The 3-minute trailing
+            window resolves this instance once the source seals or is reclaimed.
         data:
           - refId: A
             datasourceUid: loki
@@ -2610,8 +2611,9 @@ groups:
           summary: "impersonation lease {{ $labels.attributes_lease_id }} (agent {{ $labels.agent_id }}, {{ $labels.attributes_lease_machine }}): event capture failed, the lease can never complete"
           description: >-
             A source failed to capture its events, which is permanent: a failed source never completes its
-            lease, so the instance keeps firing for as long as the lease row stays incomplete (the old alert
-            row also stayed unresolved). Notification repeat is the policy's repeat_interval; silence it per
+            lease. The reaper re-reports it once per report cadence (default daily) for as long as the
+            lease stays incomplete, so this instance keeps firing on that cadence — it never goes quiet
+            while the defect holds — and the gap stays readable in the lease's log. Silence it per
             lease_id once the lease has been handled by hand.
         data:
           - refId: A

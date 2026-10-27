@@ -100,6 +100,12 @@ def ttl_reaper_config(config: ConfigBoot) -> TtlReaperConfig:
         fire_log_cleanup_interval_s=daemon.schedule_fire_log_cleanup_interval_seconds,
         fire_log_retention_days=daemon.schedule_fire_log_retention_days,
         shell_kill_deadline_s=shells.dispatch_deadline_s(),
+        impersonation_event_abandon_grace_s=(
+            config.view.general.impersonation_event_abandon_grace_seconds
+        ),
+        impersonation_event_report_interval_s=(
+            config.view.general.impersonation_event_report_interval_seconds
+        ),
         zone=clock.zone(),
         clock=clock,
     )

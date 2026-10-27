@@ -4,10 +4,17 @@ exports = ["delivery.py", "event_signals.py", "history.py", "host_transport.py",
 "__init__.py" = ["_store.py", "history.py", "manifest.py", "relay.py", "status.py", "wake.py"]
 "_store.py" = ["status.py"]
 "delivery.py" = ["_store.py", "status.py", "wake.py"]
-"event_log.py" = ["_store.py", "history.py"]
-"event_signals.py" = ["status.py"]
+"event_log.py" = ["_store.py", "history.py", "status.py"]
+"event_signals.py" = ["history.py", "status.py"]
 "history.py" = ["_store.py", "status.py"]
-"maintenance.py" = ["_store.py", "event_signals.py", "history.py", "status.py", "wake.py"]
+"maintenance.py" = [
+    "_store.py",
+    "event_log.py",
+    "event_signals.py",
+    "history.py",
+    "status.py",
+    "wake.py",
+]
 "manifest.py" = ["_store.py", "event_log.py", "status.py"]
 "relay.py" = ["_store.py", "status.py", "wake.py"]
 "replacement.py" = ["status.py"]
