@@ -306,7 +306,7 @@ def test_output_caps_files_per_group_but_json_and_all_are_complete() -> None:
     full = gate.render(report, None)
 
     assert sum(line.startswith("  user") for line in capped) == 3
-    assert any("12 more files" in line and "user" in line for line in capped)
+    assert any("12 MORE FILES HIDDEN" in line and "user" in line for line in capped)
     assert full.count("use.py:1") == 15
     groups = cast("dict[str, dict[str, Any]]", gate.as_json(report)["groups"])
     assert groups["imports"]["files"] == 15
@@ -351,3 +351,12 @@ def test_an_absolute_target_outside_the_explicit_checkout_fails(
         gate.main([str(outside)], repo_root=audit_checkout)
     assert exit_info.value.code == 2
     assert str(outside) in capsys.readouterr().err
+
+
+def test_main_lists_every_file_unless_a_limit_is_given(
+    audit_checkout: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    assert gate.main(["pkg.engine:run"], repo_root=audit_checkout) == 0
+    out = capsys.readouterr().out
+    assert "HIDDEN" not in out
+    assert gate.main(["pkg.engine:run", "--limit", "1"], repo_root=audit_checkout) == 0
