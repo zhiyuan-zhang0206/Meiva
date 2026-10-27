@@ -137,17 +137,17 @@ a manifest has no local edges and exports its door.
 Diagnostic codes: `undeclared-edge`, `not-exported`, `private-module`, `private-name`,
 `cycle-edge`, `restricted-python`, the patch codes and `missing-patch-target` ([[meizel/docs/checker/patching.meiva.okf.md|patching]]),
 the 15 purity and bounded-container codes ([[meizel/docs/checker/purity.meiva.okf.md|purity]]),
-`ambient-read`, `stale-root`, `stale-reader`, `unresolved-import`, `unlisted-allowance`,
+`ambient-read`, `stale-root`, `stale-reader`, `fake-entropy` ([[meizel/docs/checker/fake-entropy.meiva.okf.md|fake entropy]]),
+`unresolved-import`, `unlisted-allowance`,
 `stale-load`, `stale-external`, `policy-syntax`, `debt-paid`, and the manifest codes
 (`manifest-` + syntax, unknown-key, unknown-child, duplicate, self-edge, cycle, export-private,
 stale-edge, debt, roles). An edge that would close a cycle says so; the way out is a public door or injection.
 
 ## Layout
 
-`cli.py` parses commands; `analysis.py` assembles universe, scans, manifests and
-diagnostics; `universe.py` reads git; `scan.py`, `patching.py`, `ambient.py`, `scopes.py` and
-`fixtures.py` extract facts from one file; `manifest.py` validates manifests; `rule.py`
-projects and judges; `graphs.py` holds components and cycles; `explain.py`, `sync.py`,
-`bootstrap.py` and the debt files implement the other commands.
+`cli.py` parses commands; `analysis.py` assembles universe, scans, manifests and diagnostics;
+`universe.py` reads git; `scan.py` and the files beside it extract facts from one file;
+`manifest.py` validates manifests; `rule.py` projects and judges; `graphs.py` holds components and
+cycles; the rest implement the other commands.
 
 Parent: [[meizel/docs/meizel.meiva.okf.md|meizel]].

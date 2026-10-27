@@ -15,6 +15,7 @@ __all__ = [
     "Code",
     "DebtKey",
     "Diagnostic",
+    "EntropySite",
     "EnumSubsetUse",
     "Fact",
     "FactKind",
@@ -77,6 +78,7 @@ class Code(StrEnum):
     ANY_COLLABORATOR = "any-collaborator"
     TYPE_CHECKING = "type-checking"
     AMBIENT_READ = "ambient-read"
+    FAKE_ENTROPY = "fake-entropy"
     STALE_ROOT = "stale-root"
     STALE_READER = "stale-reader"
     IMPURE_EDGE = "impure-edge"
@@ -250,6 +252,16 @@ class Acquisition:
 class Sources:
     names: dict[str, AmbientKind] = field(default_factory=dict[str, AmbientKind])
     calls: dict[str, AmbientKind] = field(default_factory=dict[str, AmbientKind])
+
+
+# meiva:note
+# Where a file spends a reading that is not entropy as an identifier or a random draw: `what` is
+# the reading and where it went (`time.monotonic_ns in an f-string`), or the wrapper over a clock
+# (`interval-wrapper _monotonic`).
+@dataclass(frozen=True, slots=True)
+class EntropySite:
+    line: int
+    what: str
 
 
 @dataclass(frozen=True, slots=True)

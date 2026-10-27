@@ -20,6 +20,7 @@ from meizel.graph.imports import (
 from meizel.graph.model import (
     Acquisition,
     AnyCollaboratorSite,
+    EntropySite,
     EnumSubsetUse,
     Fact,
     FactKind,
@@ -169,6 +170,7 @@ class FileScan:
     enum_subsets: list[EnumSubsetUse] = field(default_factory=list[EnumSubsetUse])
     input_appends: list[InputListAppend] = field(default_factory=list[InputListAppend])
     ambient: list[Acquisition] = field(default_factory=list[Acquisition])
+    entropy: list[EntropySite] = field(default_factory=list[EntropySite])
     type_casts: list[TypeCastSite] = field(default_factory=list[TypeCastSite])
     any_collaborators: list[AnyCollaboratorSite] = field(default_factory=list[AnyCollaboratorSite])
     type_checking: tuple[int, ...] = ()
@@ -236,6 +238,7 @@ class Scanner(AmbientAccess):
             enum_subsets=self.purity_state.finalize_subsets(),
             input_appends=self.input_appends,
             ambient=self.ambient.items,
+            entropy=self.entropy_finish(),
             type_casts=self.type_casts,
             any_collaborators=self.any_collaborators,
             type_checking=tuple(self.type_checking),
@@ -342,7 +345,9 @@ class Scanner(AmbientAccess):
         self.fn_depth += 1
         self.ambient.enter(node)
         self.qualnames.append(node.name)
+        self.entropy_enter()
         self.enter(inner, node.body)
+        self.entropy_leave(node, inner, top_level=self.fn_depth == 1 and not self.scope.is_class)
         self.qualnames.pop()
         self.ambient.leave()
         self.fn_depth -= 1
@@ -543,6 +548,7 @@ class Scanner(AmbientAccess):
             )
         if self.records_ambient:
             self.ambient.called(callee, node)
+        self.entropy_touch(callee, node)
         self.patch_forms(node, callee)
         self.spawn_call(callee, node)
         fixtures.record_call(self.fixture_state, node, callee, requester=self.fixture_requester)
