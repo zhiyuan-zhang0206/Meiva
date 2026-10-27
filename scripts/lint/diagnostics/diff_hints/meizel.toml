@@ -1,7 +1,7 @@
 exports = ["hints.py"]
 
 [purity]
-"." = "none"
+"." = { mode = "none", why = "hints.py is the shell: it runs git, reads the revision's files and prints what the pure modules listed here return; each of those is strict on its own line" }
 "acks.py" = "strict"
 "ambient.py" = "strict"
 "branches.py" = "strict"
