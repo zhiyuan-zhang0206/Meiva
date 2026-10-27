@@ -1,6 +1,7 @@
 import pytest
 
 from base.lm.catalog import CatalogBuilder, ModelCatalog
+from base.lm.pricing.archive import load_archive
 from base.log.tests.log_records import loguru_records as loguru_records
 
 
@@ -12,4 +13,4 @@ def model_catalog() -> ModelCatalog:
     resolution, so these tests price their rows from the archive and `base.lm`
     keeps no edge into `base.packages`.
     """
-    return CatalogBuilder().build()
+    return CatalogBuilder(load_archive()).build()

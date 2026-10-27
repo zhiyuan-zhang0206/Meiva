@@ -19,6 +19,7 @@ from base.lm.catalog.decide.types import (
 from base.lm.catalog.provider_keys import ProviderKeys
 from base.lm.decision.call import decide
 from base.lm.decision.tests.support import KEYS, MODEL, FakeBinding, catalog_with, provider
+from base.lm.pricing.archive import load_archive
 
 _YES_NO = YesNo("Is it spam?", "it is spam", "it is not spam")
 _CHOICE = Choice("Which team?", {"billing": "payments", "tech": "bugs"})
@@ -259,7 +260,7 @@ async def test_a_provider_failure_without_billing_writes_no_usage(
 
 
 def test_builder_is_reusable_after_a_rejected_install() -> None:
-    builder = CatalogBuilder()
+    builder = CatalogBuilder(load_archive())
     bad = provider(FakeBinding({}), prefix="no_dash")
     with pytest.raises(Exception, match="must end with"):
         builder.install_decision("p", bad)

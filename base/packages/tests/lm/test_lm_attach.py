@@ -11,9 +11,19 @@ from base.lm.attach.constants import (
     ATTACH_MAX_FILES_PER_TURN,
     ATTACH_MAX_TOTAL_BYTES,
 )
+from base.lm.attach.files import pack_attachments
 from base.lm.attach.packing import (
     AttachEntry,
-    pack_attachments,
+    AttachmentPack,
+    DimensionsObserved,
+    DimensionsRequest,
+    Observation,
+    PackRequest,
+    ReadObserved,
+    ReadRequest,
+    StatObserved,
+    StatRequest,
+    plan_attachments,
 )
 from base.lm.catalog import ModelCatalog
 from base.lm.factory import media_types_for_model
@@ -420,3 +430,133 @@ def test_media_types_use_registry_then_plugin_vision_fallback(
         )
         == frozenset()
     )
+
+
+# meiva:note
+# Drive the pure plan with scripted answers instead of a filesystem: `answers` maps a request to
+# the observation the world would give, and the requests the plan made come back in order, so a
+# test can assert what the plan asked for as well as what it packed.
+def _drive(
+    model: str,
+    entries: list[AttachEntry],
+    answers: dict[PackRequest, Observation],
+    *,
+    catalog: ModelCatalog,
+) -> tuple[list[PackRequest], AttachmentPack | None]:
+    plan = plan_attachments(model, entries, catalog=catalog)
+    asked: list[PackRequest] = []
+    try:
+        request = next(plan)
+        while True:
+            asked.append(request)
+            request = plan.send(answers[request])
+    except StopIteration as finished:
+        return asked, finished.value
+
+
+def _stat(path: str, size: int, *, regular: bool = True) -> StatObserved:
+    return StatObserved(outcome="stat", path=path, is_regular=regular, size=size)
+
+
+def test_the_plan_asks_for_dimensions_and_bytes_only_after_the_cheap_checks_pass(
+    *, model_catalog: ModelCatalog
+) -> None:
+    entry = AttachEntry(path="/files/a.png", label=None)
+    asked, pack = _drive(
+        "gemini-3.8-flash",
+        [entry],
+        {
+            StatRequest("/files/a.png"): _stat("/files/a.png", 3),
+            DimensionsRequest("/files/a.png"): DimensionsObserved((2, 2)),
+            ReadRequest("/files/a.png"): ReadObserved(b"png"),
+        },
+        catalog=model_catalog,
+    )
+
+    assert asked == [
+        StatRequest("/files/a.png"),
+        DimensionsRequest("/files/a.png"),
+        ReadRequest("/files/a.png"),
+    ]
+    assert pack is not None and pack.delivered == ["/files/a.png"]
+
+
+def test_a_file_over_the_size_ceiling_is_never_opened(*, model_catalog: ModelCatalog) -> None:
+    entry = AttachEntry(path="/files/big.png", label=None)
+
+    asked, pack = _drive(
+        "gemini-3.8-flash",
+        [entry],
+        {StatRequest("/files/big.png"): _stat("/files/big.png", ATTACH_MAX_FILE_BYTES + 1)},
+        catalog=model_catalog,
+    )
+
+    assert asked == [StatRequest("/files/big.png")]
+    assert pack is not None
+    assert [reason for _, reason in pack.skipped] == ["file exceeds 20 MiB limit"]
+
+
+def test_an_image_whose_dimensions_cannot_be_read_is_skipped_unread(
+    *, model_catalog: ModelCatalog
+) -> None:
+    entry = AttachEntry(path="/files/broken.png", label=None)
+
+    asked, pack = _drive(
+        "gemini-3.8-flash",
+        [entry],
+        {
+            StatRequest("/files/broken.png"): _stat("/files/broken.png", 10),
+            DimensionsRequest("/files/broken.png"): DimensionsObserved(None),
+        },
+        catalog=model_catalog,
+    )
+
+    assert ReadRequest("/files/broken.png") not in asked
+    assert pack is not None
+    assert [reason for _, reason in pack.skipped] == ["cannot read image dimensions"]
+
+
+def test_a_read_that_fails_is_skipped_and_frees_the_turn_for_the_next_entry(
+    *, model_catalog: ModelCatalog
+) -> None:
+    first = AttachEntry(path="/files/a.mp4", label=None)
+    second = AttachEntry(path="/files/b.mp4", label=None)
+
+    _, pack = _drive(
+        "gemini-3.8-flash",
+        [first, second],
+        {
+            StatRequest("/files/a.mp4"): _stat("/files/a.mp4", 5),
+            ReadRequest("/files/a.mp4"): ReadObserved(None),
+            StatRequest("/files/b.mp4"): _stat("/files/b.mp4", 5),
+            ReadRequest("/files/b.mp4"): ReadObserved(b"video"),
+        },
+        catalog=model_catalog,
+    )
+
+    assert pack is not None
+    assert pack.delivered == ["/files/b.mp4"]
+    assert [reason for _, reason in pack.skipped] == ["cannot read file"]
+
+
+def test_stat_outcomes_that_are_not_a_file_become_captioned_skips(
+    *, model_catalog: ModelCatalog
+) -> None:
+    entries = [AttachEntry(path=f"/files/{name}", label=None) for name in ("a", "b", "c", "d")]
+    answers: dict[PackRequest, Observation] = {
+        StatRequest("/files/a"): StatObserved(outcome="invalid_path", path="/files/a"),
+        StatRequest("/files/b"): StatObserved(outcome="missing", path="/files/b"),
+        StatRequest("/files/c"): StatObserved(outcome="unstatable", path="/files/c"),
+        StatRequest("/files/d"): _stat("/files/d", 0, regular=False),
+    }
+
+    asked, pack = _drive("gemini-3.8-flash", entries, answers, catalog=model_catalog)
+
+    assert all(isinstance(request, StatRequest) for request in asked)
+    assert pack is not None
+    assert [reason for _, reason in pack.skipped] == [
+        "invalid file path",
+        "file does not exist",
+        "cannot stat file",
+        "not a regular file",
+    ]
