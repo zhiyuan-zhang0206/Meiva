@@ -219,7 +219,7 @@ async def connect_server(
         raise MCPError(unmet)
     plan = plan_connect(server, spec, url=server_url(spec))
     if isinstance(plan, HttpConnect):
-        return await connect_http(plan, oauth_locks, config.connect_timeout_seconds)
+        return await connect_http(plan, oauth_locks, config.connect_timeout_seconds, config.home)
     if isinstance(plan, StdioConnect):
         return await connect_stdio(server, plan, config.connect_timeout_seconds)
     if plan.service == "browser":
@@ -267,7 +267,7 @@ async def connect_stdio(
 # meiva:note
 # Connect to a remote Streamable HTTP MCP server, with no child process. The 2026-07-28 protocol revision is stateless over HTTP: every request is self-describing (protocol version and client capabilities ride in `_meta`), so one endpoint serves every agent connection with no session state on either side. Static auth (API keys) goes in `plan.headers` via the SDK's own client factory; `plan.oauth` builds an OAuth 2.1 provider instead (authorization code + PKCE, browser flow, see `meiva/mcps/_oauth.py`). An OAuth connect envelope is far more generous than `timeout_seconds`, since the user clicks through a browser. On failure the local stack is closed so no HTTP client leaks; the caller owns the returned stack. `create_mcp_http_client` is re-exported from `mcp.shared._httpx_utils`, which pyright reports as a private import.
 async def connect_http(
-    plan: HttpConnect, oauth_locks: dict[str, asyncio.Lock], timeout_seconds: float
+    plan: HttpConnect, oauth_locks: dict[str, asyncio.Lock], timeout_seconds: float, home: Path
 ) -> tuple[ClientSession, AsyncExitStack]:
     from mcp.client.streamable_http import (
         create_mcp_http_client,  # pyright: ignore[reportPrivateImportUsage]
@@ -280,7 +280,7 @@ async def connect_http(
         if plan.oauth:
             from ._oauth import oauth_http_client
 
-            http_client = await oauth_http_client(plan.url, plan.server, oauth_locks)
+            http_client = await oauth_http_client(plan.url, plan.server, oauth_locks, home)
         else:
             http_client = (
                 create_mcp_http_client(headers=dict(plan.headers)) if plan.headers else None
