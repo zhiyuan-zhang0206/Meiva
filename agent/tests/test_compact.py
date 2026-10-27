@@ -1,4 +1,5 @@
 from collections.abc import Mapping
+from pathlib import Path
 from typing import Any
 from unittest.mock import AsyncMock, MagicMock
 
@@ -38,6 +39,7 @@ from base.events.live.tests.live_capture import LiveEvents
 from base.host.env.agent_slices import AgentSlices
 from base.packages.plugin_providers import build_model_catalog
 from base.packages.plugins.extensions import EMPTY
+from base.paths import resolve_meiva_home
 
 
 def pinned_slices(pins: Mapping[str, Any] | None = None) -> AgentSlices:
@@ -92,6 +94,8 @@ def runtime_with_llm(
     event_publisher: AgentEventPublisher | None = None,
 ) -> Runtime[MeivaContext]:
     ctx = MeivaContext(
+        meiva_home=resolve_meiva_home(),
+        user_home=Path.home(),
         ops_pool=None,
         llm=llm,
         event_publisher=event_publisher if event_publisher is not None else MagicMock(),
@@ -449,6 +453,8 @@ def make_runtime(
     if llm is None:
         llm = AsyncMock()
     ctx = MeivaContext(
+        meiva_home=resolve_meiva_home(),
+        user_home=Path.home(),
         ops_pool=ops_pool,
         llm=llm,
         event_publisher=MagicMock(),

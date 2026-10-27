@@ -11,7 +11,8 @@ from langchain_core.messages import HumanMessage
 from langgraph.types import Overwrite
 
 from agent.graph.exec.node import exec_node_impl
-from agent.graph.exec.process import SubprocessExecProcess, read_parent_facts
+from agent.graph.exec.parent_facts import read_parent_facts
+from agent.graph.exec.process import SubprocessExecProcess
 from agent.state import AttachEntry, AttachState, BaseAgentState
 from agent.tests.test_state_slot import (
     ai_message_with_code,

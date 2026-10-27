@@ -12,7 +12,8 @@ from langgraph.runtime import Runtime
 from agent.graph.exec._result import ExecDone
 from agent.graph.exec._stream import ExecOutputChunkPublisher
 from agent.graph.exec.node import exec_node, run_agent_code
-from agent.graph.exec.process import SubprocessExecProcess, read_parent_facts
+from agent.graph.exec.parent_facts import read_parent_facts
+from agent.graph.exec.process import SubprocessExecProcess
 from agent.state import AgentState
 from base.agents.context import MeivaContext
 from base.agents.context.identity import AgentIdentity
@@ -29,7 +30,7 @@ from base.host.env.agent_env import AGENT_BIRTH_CONFIG_ENV, AGENT_CONFIG_OVERLAY
 from base.host.env.agent_slices import AgentSlices
 from base.lm.catalog import ModelCatalog
 from base.packages.plugin_providers import build_model_catalog
-from base.paths import workspace_dir_readonly
+from base.paths import resolve_meiva_home, workspace_dir_readonly
 from meiva.tests.fixtures.pin_agent import snapshot_clients_over
 
 
@@ -99,6 +100,7 @@ async def test_concurrent_turn_configs_reach_real_children_without_cross_talk(
         result, *_ = await run_agent_code(
             AgentState(),
             MeivaContext(
+                meiva_home=resolve_meiva_home(),
                 agent=slices or AgentSlices.resolve(default_reader=defaults()),
                 db=database,
                 bus=EventBus.from_settings(rng=seeded_rng()),
@@ -152,6 +154,7 @@ def _execution_context(
     request: pytest.FixtureRequest,
 ) -> MeivaContext:
     context = MeivaContext(
+        meiva_home=resolve_meiva_home(),
         agent=agent,
         db=database,
         bus=event_bus,

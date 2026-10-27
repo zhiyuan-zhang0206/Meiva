@@ -14,7 +14,7 @@ from psycopg_pool import AsyncConnectionPool
 from redis.asyncio.client import PubSub
 
 from agent.graph import build_graph
-from agent.graph.exec.process import read_parent_facts
+from agent.graph.exec.parent_facts import read_parent_facts
 from agent.graph.llm_errors import FatalProviderError
 from agent.ownership.hosted import admit_hosted_runtime
 from agent.ownership.tests.ownership_support import PublicationDefectBus
