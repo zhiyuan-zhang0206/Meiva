@@ -21,6 +21,7 @@
 
 import { API_BASE, registerTransportTelemetry } from "../transport/api-base";
 import { newOperationKey } from "../transport/operation-key";
+import { systemWallNow } from "../transport/system-transport";
 import {
   createTelemetryBufferState,
   recordTrackEvent,
@@ -42,18 +43,20 @@ const runtimeState: {
   flushTimer: ReturnType<typeof setInterval> | null;
   warnedOnce: boolean;
   fetchImpl: ((url: string, init: RequestInit) => Promise<unknown>) | undefined;
+  wallNow: () => number;
 } = {
   bufferState: createTelemetryBufferState(typeof window !== "undefined"),
   flushTimer: null,
   warnedOnce: false,
   fetchImpl: undefined,
+  wallNow: systemWallNow,
 };
 
 function flush(): void {
   const { bufferState } = runtimeState;
   if (!bufferState.enabled || bufferState.buffer.length === 0) return;
   if (bufferState.sessionId === "") bufferState.sessionId = newOperationKey();
-  const batch = takeFlushBatch(bufferState, bufferState.sessionId, Date.now(), API_BASE);
+  const batch = takeFlushBatch(bufferState, bufferState.sessionId, runtimeState.wallNow(), API_BASE);
   if (batch === null) return;
   // Beacon first: it survives pagehide/unload and needs no response. When
   // unavailable (or its size limit rejects the batch), fall back to fetch
@@ -121,7 +124,7 @@ export function track(element: TelemetryElement, opts: TrackOptions = {}): void 
     testListeners.onTrack(element, opts);
     return;
   }
-  if (!recordTrackEvent(runtimeState.bufferState, element, opts, Date.now())) {
+  if (!recordTrackEvent(runtimeState.bufferState, element, opts, runtimeState.wallNow())) {
     return;
   }
   ensureTimer();
@@ -147,6 +150,7 @@ function __telemetryResetForTest(): void {
   }
   runtimeState.warnedOnce = false;
   delete runtimeState.fetchImpl;
+  runtimeState.wallNow = systemWallNow;
   delete testListeners.onTrack;
   delete testListeners.onSetPage;
   delete testListeners.onFlush;
@@ -188,6 +192,9 @@ export const telemetryTestControl = Object.freeze({
   setEnabled: __telemetrySetEnabledForTest,
   setFetch(fetchImpl: (url: string, init: RequestInit) => Promise<unknown>): void {
     runtimeState.fetchImpl = fetchImpl;
+  },
+  setWallNow(wallNow: () => number): void {
+    runtimeState.wallNow = wallNow;
   },
   intercept(handlers: {
     onTrack?: (element: TelemetryElement, opts?: TrackOptions) => void;
