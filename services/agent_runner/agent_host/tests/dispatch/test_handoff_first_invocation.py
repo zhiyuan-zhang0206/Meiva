@@ -3,6 +3,7 @@
 
 from typing import Any
 from unittest.mock import MagicMock
+from uuid import uuid4
 
 import psycopg
 import pytest
@@ -94,6 +95,7 @@ async def test_first_hosted_invocation_only_resumes_unhalted_pending_handoff(
     policy = configured_policy()
     machine = configured_machine(name="claim-test")
     host = AgentHost(
+        runtime_owner=uuid4(),
         handoff_stamping=TimestampSource(clock=clock_rejecting_now(), timestamps_enabled=True),
         home=meiva_home(),
         policy=policy,

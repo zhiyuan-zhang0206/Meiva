@@ -20,7 +20,6 @@ import os
 from collections.abc import Callable
 from pathlib import Path
 
-from base import paths
 from base.log import logger
 
 # Same logger name as `daemon.py` uses: splitting the code out must not change
@@ -32,7 +31,7 @@ _STDOUT_LOG_ROTATE_POLL_S = 60.0  # cadence of the size check
 _STDOUT_LOG_NAME = "meiva-agent-host"  # names $MEIVA_HOME/logs/<name>.out.log
 
 
-def stdout_log_path(*, logs_dir: Path | None = None) -> Path:
+def stdout_log_path(*, logs_dir: Path) -> Path:
     """The daemon's raw stdout/stderr transcript.
 
     The launcher opens this file and redirects fd 1/2 onto it before the
@@ -40,8 +39,7 @@ def stdout_log_path(*, logs_dir: Path | None = None) -> Path:
     convention); nothing in the logging stack owns it, which is exactly why it
     needs the size rotation below.
     """
-    base_dir = logs_dir if logs_dir is not None else paths.logs_dir()
-    return base_dir / f"{_STDOUT_LOG_NAME}.out.log"
+    return logs_dir / f"{_STDOUT_LOG_NAME}.out.log"
 
 
 def rotate_stdout_log_files(log_path: Path) -> None:
@@ -64,7 +62,7 @@ def rotate_stdout_log_files(log_path: Path) -> None:
 
 def rotate_stdout_log_if_needed(
     *,
-    log_path: Path | None = None,
+    log_path: Path,
     rotate_bytes: int = STDOUT_LOG_ROTATE_BYTES,
     open_fd: Callable[[Path, int, int], int] = os.open,
 ) -> int | None:
@@ -84,12 +82,11 @@ def rotate_stdout_log_if_needed(
         return None
     if size < rotate_bytes:
         return None
-    target_path = log_path if log_path is not None else stdout_log_path()
     rotated = False
     try:
-        rotate_stdout_log_files(target_path)
+        rotate_stdout_log_files(log_path)
         rotated = True
-        fd = open_fd(target_path, os.O_WRONLY | os.O_CREAT | os.O_APPEND, 0o644)
+        fd = open_fd(log_path, os.O_WRONLY | os.O_CREAT | os.O_APPEND, 0o644)
     except OSError:
         if rotated:
             # fd 1/2 still name the moved chunk; put it back under the
@@ -97,8 +94,8 @@ def rotate_stdout_log_if_needed(
             # failed open (disk full / EMFILE) strands the transcript under
             # `.1` forever, growing past every bound and never self-healing.
             with contextlib.suppress(OSError):
-                one = target_path.with_name(target_path.name + ".1")
-                one.replace(target_path)
+                one = log_path.with_name(log_path.name + ".1")
+                one.replace(log_path)
         _log.exception(
             "[agent-host] stdout log rotation failed — fd 1 still points at the old file"
         )
@@ -112,7 +109,7 @@ def rotate_stdout_log_if_needed(
     return size
 
 
-async def rotate_stdout_log_forever() -> None:
+async def rotate_stdout_log_forever(log_path: Path) -> None:
     """Bound the raw stdout transcript by size for the daemon's whole life.
 
     The first pass runs immediately so a file that already crossed the ceiling
@@ -121,11 +118,11 @@ async def rotate_stdout_log_forever() -> None:
     cadence. Self-protecting like the other daemon loops: a failed pass is
     logged and the loop waits for the next interval.
     """
-    rotate_stdout_log_if_needed()
+    rotate_stdout_log_if_needed(log_path=log_path)
     while True:
         await asyncio.sleep(_STDOUT_LOG_ROTATE_POLL_S)
         try:
-            rotated_at = rotate_stdout_log_if_needed()
+            rotated_at = rotate_stdout_log_if_needed(log_path=log_path)
         except Exception:
             _log.exception("[agent-host] stdout log rotation pass failed — retrying next interval")
             continue

@@ -2,6 +2,7 @@
 
 import asyncio
 from dataclasses import replace
+from uuid import uuid4
 
 import psycopg
 import pytest
@@ -72,6 +73,7 @@ async def test_host_trace_reads_final_messages_after_nstep_flush(
                 )
                 await flush_checkpoint(saver, agent_id)
                 host = host_module.AgentHost(
+                    runtime_owner=uuid4(),
                     handoff_stamping=handoff_timestamps(),
                     home=meiva_home(),
                     policy=configured_policy(),

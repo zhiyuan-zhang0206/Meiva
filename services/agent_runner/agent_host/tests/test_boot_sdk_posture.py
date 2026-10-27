@@ -34,7 +34,7 @@ def test_sdk_posture_precedes_config_boot(unit_home: Path) -> None:
     assert not process_context.is_host_process()
 
 
-def test_host_root_supplies_model_and_config_owners() -> None:
+def test_host_root_supplies_model_and_config_owners(tmp_path: Path) -> None:
     boot = config.ConfigBoot(environment={**os.environ, "MEIVA_CONFIG_FETCH": "skip"})
     boot.boot()
     try:
@@ -46,6 +46,7 @@ def test_host_root_supplies_model_and_config_owners() -> None:
             clients=clients,
             load_extensions=partial(load_extensions, validate_state=plugin_state_schema),
             rng=rng,
+            home=tmp_path,
         )
         assert installation.sampling.rng is rng
         assert installation.require_catalog().models
@@ -59,11 +60,11 @@ def test_host_root_supplies_model_and_config_owners() -> None:
         install.uninstall()
 
 
-def test_profiled_host_defers_complete_model_until_first_service_read() -> None:
-    _assert_profiled_host_defers_complete_model()
+def test_profiled_host_defers_complete_model_until_first_service_read(tmp_path: Path) -> None:
+    _assert_profiled_host_defers_complete_model(tmp_path)
 
 
-def _assert_profiled_host_defers_complete_model() -> None:
+def _assert_profiled_host_defers_complete_model(tmp_path: Path) -> None:
     env = {
         **os.environ,
         "MEIVA_CONFIG_FETCH": "skip",
@@ -80,6 +81,7 @@ def _assert_profiled_host_defers_complete_model() -> None:
             clients=ClientSet(pipeline_factory=pipeline),
             load_extensions=partial(load_extensions, validate_state=plugin_state_schema),
             rng=seeded_rng(),
+            home=tmp_path,
         )
         assert calls == []
         authority = installation.authority
