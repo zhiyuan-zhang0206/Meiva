@@ -72,7 +72,6 @@ from __future__ import annotations
 
 import json
 import math
-import pkgutil
 from collections.abc import Iterator, Mapping, Sequence
 from datetime import UTC, date, datetime
 from types import MappingProxyType
@@ -107,8 +106,8 @@ __all__ = [
     "PriceWindow",
     "Rates",
     "cost_usd",
-    "load_archive",
     "model_vendor",
+    "parse_archive",
     "parse_catalog",
     "plugin_model_price",
     "plugin_price_provenance",
@@ -118,10 +117,7 @@ __all__ = [
 ]
 
 
-def load_archive() -> dict[str, ModelPrice]:
-    data = pkgutil.get_data(__package__ or "base.lm.pricing", "pricing_catalog_archive.json")
-    if data is None:
-        raise FileNotFoundError("pricing_catalog_archive.json is missing from base.lm.pricing")
+def parse_archive(data: bytes) -> dict[str, ModelPrice]:
     raw: Any = json.loads(data.decode("utf-8"))
     return parse_catalog(raw)
 

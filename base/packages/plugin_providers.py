@@ -13,6 +13,7 @@ import sys
 from pathlib import Path
 
 from base.lm.catalog import CatalogBuilder, ModelCatalog
+from base.lm.pricing.archive import load_archive
 
 
 def _load_one(builder: CatalogBuilder, name: str, provider_py: Path, *, is_builtin: bool) -> None:
@@ -57,7 +58,7 @@ def build_model_catalog() -> ModelCatalog:
     from base import paths
     from base.packages.plugins import enable_config
 
-    builder = CatalogBuilder()
+    builder = CatalogBuilder(load_archive())
     discovered = enable_config.discover_plugins()
     known = set(discovered)
     config = enable_config.load_for_runtime(known)

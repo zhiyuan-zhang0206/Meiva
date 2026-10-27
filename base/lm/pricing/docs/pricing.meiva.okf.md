@@ -11,7 +11,7 @@ tags:
 
 # LLM Billing Catalog
 
-`base/lm/pricing/__init__.py` + `pricing_catalog_archive.json` + provider `PriceRates` — how one call becomes one dollar figure. `load_archive` reads `pricing_catalog_archive.json`.
+`base/lm/pricing/__init__.py` + `pricing_catalog_archive.json` + provider `PriceRates` — how one call becomes one dollar figure. `base.lm.pricing.archive.load_archive` reads `pricing_catalog_archive.json` (`parse_archive` is the pure parse the catalog builder is handed).
 
 `billing.py` owns provider-call billing spans beside their price selection. Its
 contracts and cache-write/catalog tests live in `tests/providers/`; usage accounting

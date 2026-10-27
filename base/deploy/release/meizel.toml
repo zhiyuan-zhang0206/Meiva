@@ -1,11 +1,13 @@
 exports = ["collector_artifact.py", "editable_install.py", "python_lock.py", "start_inputs.py"]
 
 [uses]
-"tests" = ["collector_artifact.py", "editable_install.py"]
+"editable_install.py" = ["editable_policy.py"]
+"tests" = ["collector_artifact.py", "editable_install.py", "editable_policy.py"]
 
 [purity]
 "." = "strict-to-be"
 "__init__.py" = "strict"
+"editable_policy.py" = "strict"
 "python_lock.py" = "strict"
 "start_inputs.py" = "strict-to-be"
 

@@ -1,16 +1,12 @@
-exports = ["constants.py", "packing.py"]
+exports = ["constants.py", "files.py", "packing.py"]
 
 [uses]
+"files.py" = ["constants.py", "packing.py"]
 "packing.py" = ["constants.py"]
 
 [purity]
 "." = "strict"
 "__init__.py" = "strict"
 "constants.py" = "strict"
-"packing.py" = "strict-to-be"
-
-[debt.impure-call]
-"packing.py#Path.resolve" = 1
-"packing.py#os.open" = 1
-"packing.py#os.read" = 1
-"packing.py#os.stat" = 1
+"files.py" = "none"
+"packing.py" = "strict"

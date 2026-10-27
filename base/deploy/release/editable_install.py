@@ -1,214 +1,164 @@
-"""Inspect the editable Meiva install in a checkout's virtualenv.
-
-uv writes ``_editable_impl_meiva.pth`` into the active virtualenv, and records
-the editable source URL in the matching ``*.dist-info/direct_url.json``. A
-polluted ``VIRTUAL_ENV`` can therefore make a worktree install repoint a
-long-lived checkout's interpreter at disposable source. This module only reads
-the install: the exec boundary refuses to spawn a child from a violating
-interpreter and the health probe reports the violation. The few file stats are
-negligible beside a process spawn, and deliberately remain uncached so a newly
-poisoned install cannot evade the next execution. Nothing here rewrites an
-install; the fix for a violation is a locked ``uv sync`` run by the operator.
-
-A failed sync that removes either the pointer or its ``direct_url.json``
-metadata is a half-uninstall, not a missing-install no-op, and is reported as a
-violation.
-"""
+# meiva:note
+# Inspect the editable Meiva install in a checkout's virtualenv.
+#
+# uv writes `_editable_impl_meiva.pth` into the active virtualenv, and records the editable
+# source URL in the matching `*.dist-info/direct_url.json`. A polluted `VIRTUAL_ENV` can
+# therefore make a worktree install repoint a long-lived checkout's interpreter at disposable
+# source. This module only reads the install: the exec boundary refuses to spawn a child from a
+# violating interpreter and the health probe reports the violation. The few file stats are
+# negligible beside a process spawn, and deliberately remain uncached so a newly poisoned install
+# cannot evade the next execution. Nothing here rewrites an install; the fix for a violation is a
+# locked `uv sync` run by the operator.
+#
+# The module is the reader: it lists and reads the records and resolves their paths. What the
+# records must say, and how a violation is worded, is `editable_policy.py`, which judges the
+# values read here. A failed sync that removes either the pointer or its `direct_url.json`
+# metadata is a half-uninstall, not a missing-install no-op, and is reported as a violation.
 
 from __future__ import annotations
 
-import json
 import os
 import sys
 from collections.abc import Iterable
 from pathlib import Path
-from typing import TypeGuard
+
+from base.deploy.release.editable_policy import (
+    EditableReadings,
+    MetadataRecord,
+    PointerRecord,
+    editable_violations,
+)
 
 EDITABLE_PTH_NAME = "_editable_impl_meiva.pth"
 EDITABLE_DIST_INFO_GLOB = "meiva-*.dist-info/direct_url.json"
 
+# meiva:note
+# Virtualenvs use `lib/pythonX.Y/site-packages` (or `lib64`). The layouts are scanned explicitly
+# rather than derived from the running interpreter: stale Python-version directories are
+# validated together rather than leaving a dormant poisoned pointer.
+POINTER_PATTERNS = (
+    f"lib/python*/site-packages/{EDITABLE_PTH_NAME}",
+    f"lib64/python*/site-packages/{EDITABLE_PTH_NAME}",
+)
+DIRECT_URL_PATTERNS = (
+    f"lib/python*/site-packages/{EDITABLE_DIST_INFO_GLOB}",
+    f"lib64/python*/site-packages/{EDITABLE_DIST_INFO_GLOB}",
+)
 
-def _is_str_dict(value: object) -> TypeGuard[dict[str, object]]:
-    return isinstance(value, dict)
+__all__ = [
+    "EDITABLE_DIST_INFO_GLOB",
+    "EDITABLE_PTH_NAME",
+    "current_interpreter_source_root",
+    "editable_console_script_violations",
+    "editable_direct_url_paths",
+    "editable_install_violations",
+    "editable_meiva_pth_paths",
+    "venv_python",
+]
+
+
+def _matches(venv: Path, patterns: tuple[str, ...]) -> tuple[Path, ...]:
+    found: set[Path] = set()
+    for pattern in patterns:
+        found.update(venv.glob(pattern))
+    return tuple(sorted(found, key=str))
+
+
+# meiva:note
+# Existing Meiva editable pointers under `source_root/.venv`, across every site-packages layout.
+def editable_meiva_pth_paths(source_root: Path) -> tuple[Path, ...]:
+    return _matches(source_root / ".venv", POINTER_PATTERNS)
+
+
+# meiva:note
+# Existing editable `direct_url.json` records under `source_root/.venv`: uv writes this file beside
+# the editable pointer, so a poisoned install is recorded in both places and both must be asserted.
+def editable_direct_url_paths(source_root: Path) -> tuple[Path, ...]:
+    return _matches(source_root / ".venv", DIRECT_URL_PATTERNS)
+
+
+# meiva:note
+# Platform-native exact path identity.
+def _normalized_exact_path(path: Path) -> str:
+    return os.path.normcase(str(path.expanduser().resolve(strict=False)))
 
 
 def _path_exists(path: Path) -> bool:
     return path.exists()
 
 
-def _read_text(path: Path) -> str:
-    return path.read_text()
-
-
-def editable_meiva_pth_paths(source_root: Path) -> tuple[Path, ...]:
-    """Existing Meiva editable pointers under ``source_root/.venv``.
-
-    Virtualenvs use ``lib/pythonX.Y/site-packages`` (or ``lib64``). Scan those
-    layouts explicitly rather than deriving one from the running interpreter:
-    stale Python-version directories are validated together rather than
-    leaving a dormant poisoned pointer.
-    """
-
-    venv = source_root / ".venv"
-    matches: set[Path] = set()
-    for pattern in (
-        f"lib/python*/site-packages/{EDITABLE_PTH_NAME}",
-        f"lib64/python*/site-packages/{EDITABLE_PTH_NAME}",
-    ):
-        matches.update(venv.glob(pattern))
-    return tuple(sorted(matches, key=str))
-
-
-def editable_direct_url_paths(source_root: Path) -> tuple[Path, ...]:
-    """Existing editable ``direct_url.json`` records under ``source_root/.venv``.
-
-    Same layout scan as :func:`editable_meiva_pth_paths`: uv writes this file
-    beside the editable pointer, so a poisoned install is recorded in both
-    places and both must be asserted.
-    """
-
-    venv = source_root / ".venv"
-    matches: set[Path] = set()
-    for pattern in (
-        f"lib/python*/site-packages/{EDITABLE_DIST_INFO_GLOB}",
-        f"lib64/python*/site-packages/{EDITABLE_DIST_INFO_GLOB}",
-    ):
-        matches.update(venv.glob(pattern))
-    return tuple(sorted(matches, key=str))
-
-
-def _missing_editable_meiva_pth_paths(source_root: Path) -> tuple[Path, ...]:
-    """Pointer paths missing beside existing Meiva editable metadata records."""
-
-    paths = {
-        record.parent.parent / EDITABLE_PTH_NAME
-        for record in editable_direct_url_paths(source_root)
-    }
-    return tuple(sorted((path for path in paths if not _path_exists(path)), key=str))
-
-
-def _pth_paths_without_sibling_direct_url(source_root: Path) -> tuple[Path, ...]:
-    """Pointers whose site-packages directory has no Meiva direct-URL record."""
-
-    missing = (
-        pth_path
-        for pth_path in editable_meiva_pth_paths(source_root)
-        if not tuple(pth_path.parent.glob(EDITABLE_DIST_INFO_GLOB))
-    )
-    return tuple(sorted(missing, key=str))
-
-
-def _normalized_exact_path(path: Path) -> str:
-    """Platform-native exact path identity."""
-
-    return os.path.normcase(str(path.expanduser().resolve(strict=False)))
-
-
-def _pth_content_is_allowed(raw_text: str, allowed_roots: frozenset[str]) -> bool:
-    """Whether every editable-pointer line names an allowlisted exact root.
-
-    uv writes one line for each wheel package, so a healthy project with
-    multiple packages can legitimately repeat the same checkout path. Pointer
-    legality is therefore semantic rather than a particular byte layout.
-    """
-
-    targets = raw_text.splitlines()
-    if not targets or any(not target for target in targets):
-        return False
+def _read(path: Path) -> str | None:
     try:
-        return all(_normalized_exact_path(Path(target)) in allowed_roots for target in targets)
+        return path.read_text()
+    except OSError:
+        return None
+
+
+def _read_pointer(path: Path) -> PointerRecord:
+    text = _read(path)
+    if text is None:
+        return PointerRecord(path=path, text=None, targets=None)
+    try:
+        targets = tuple(_normalized_exact_path(Path(line)) for line in text.splitlines() if line)
     except (OSError, ValueError):
-        return False
+        return PointerRecord(path=path, text=text, targets=None)
+    return PointerRecord(path=path, text=text, targets=targets)
 
 
-def _direct_url_is_allowed(raw_text: str, allowed_urls: frozenset[str]) -> bool:
-    """A ``direct_url.json`` record is legal when it names an allowed root as
-    an editable file URL.
+# meiva:note
+# Observe every editable record of the checkout: the pointers and metadata that exist and are
+# readable or not, the pointer paths missing beside existing metadata, and the pointers that have
+# no metadata record in their site-packages directory.
+def _read_editable_install(source_root: Path) -> EditableReadings:
+    pointer_paths = editable_meiva_pth_paths(source_root)
+    metadata_paths = editable_direct_url_paths(source_root)
+    expected = {record.parent.parent / EDITABLE_PTH_NAME for record in metadata_paths}
+    return EditableReadings(
+        pointers=tuple(_read_pointer(path) for path in pointer_paths),
+        metadata=tuple(MetadataRecord(path=path, text=_read(path)) for path in metadata_paths),
+        pointers_missing=tuple(
+            sorted((path for path in expected if not _path_exists(path)), key=str)
+        ),
+        pointers_without_metadata=tuple(
+            sorted(
+                (
+                    path
+                    for path in pointer_paths
+                    if not tuple(path.parent.glob(EDITABLE_DIST_INFO_GLOB))
+                ),
+                key=str,
+            )
+        ),
+    )
 
-    Anything unparsable, pointing at a non-allowlisted root, or not marked
-    editable is treated as poisoned: the editable pointer in the same venv
-    proves this is an editable install, so a record that disagrees is stale
-    and a later ``uv sync`` could install from it.
-    """
 
-    if not raw_text.strip():
-        return False
-    try:
-        payload = json.loads(raw_text)
-    except json.JSONDecodeError:
-        return False
-    if not _is_str_dict(payload):
-        return False
-    url = payload.get("url")
-    dir_info = payload.get("dir_info")
-    if not isinstance(url, str) or not _is_str_dict(dir_info):
-        return False
-    if dir_info.get("editable") is not True:
-        return False
-    return url.rstrip("/") in allowed_urls
-
-
+# meiva:note
+# Human-readable allowlist violations of a checkout's editable install.
+#
+# Discovers every record (the `.pth` pointer and every `direct_url.json`) and validates them
+# against the exact-root allowlist; it never writes. The health probe and the exec boundary report
+# through this one function. A record that cannot be read is reported as a violation rather than
+# crashing the caller.
+#
+# Returns an empty tuple when every record is legal. Both editable records missing is a no-op,
+# while a missing pointer or metadata beside its existing sibling is a half-uninstall violation.
 def editable_install_violations(
     source_root: Path,
     *,
     allowed_roots: Iterable[Path] = (),
 ) -> tuple[str, ...]:
-    """Human-readable allowlist violations of a checkout's editable install.
-
-    Discovers every record (the ``.pth`` pointer and every ``direct_url.json``)
-    and validates them against the exact-root allowlist; it never writes. The
-    health probe and the exec boundary report through this one function. A record
-    that cannot be read is reported as a violation rather than crashing the
-    caller.
-
-    Returns an empty tuple when every record is legal. Both editable records
-    missing is a no-op, while a missing pointer or metadata beside its existing
-    sibling is a half-uninstall violation.
-    """
-
     resolved_source = source_root.expanduser().resolve(strict=False)
-    normalized_allowed = frozenset(
-        {_normalized_exact_path(resolved_source)}
-        | {_normalized_exact_path(root) for root in allowed_roots}
+    roots = [resolved_source, *allowed_roots]
+    return editable_violations(
+        _read_editable_install(resolved_source),
+        allowed_roots=frozenset(_normalized_exact_path(root) for root in roots),
+        allowed_urls=frozenset(root.expanduser().resolve(strict=False).as_uri() for root in roots),
     )
-    allowed_urls = frozenset(
-        {resolved_source.as_uri()}
-        | {root.expanduser().resolve(strict=False).as_uri() for root in allowed_roots}
-    )
-    violations: list[str] = []
-    for pth_path in _missing_editable_meiva_pth_paths(resolved_source):
-        violations.append(
-            f"{pth_path} editable install metadata present but pointer missing — half-uninstalled"
-        )
-    for pth_path in _pth_paths_without_sibling_direct_url(resolved_source):
-        violations.append(
-            f"{pth_path} editable pointer present but metadata missing — half-uninstalled"
-        )
-    for pth_path in editable_meiva_pth_paths(resolved_source):
-        try:
-            raw_text = _read_text(pth_path)
-        except OSError:
-            violations.append(f"{pth_path} unreadable")
-            continue
-        if not _pth_content_is_allowed(raw_text, normalized_allowed):
-            target = raw_text.strip() or "(empty)"
-            violations.append(
-                f"{pth_path} names {target!r}; non-allowlisted source or is inconsistent"
-            )
-    for record in editable_direct_url_paths(resolved_source):
-        try:
-            raw_text = _read_text(record)
-        except OSError:
-            violations.append(f"{record} unreadable")
-            continue
-        if not _direct_url_is_allowed(raw_text, allowed_urls):
-            violations.append(f"{record} records {raw_text.strip() or '(empty)'!r}")
-    return tuple(sorted(violations))
 
 
+# meiva:note
+# First existing checkout virtualenv interpreter.
 def venv_python(source_root: Path) -> Path | None:
-    """First existing checkout virtualenv interpreter."""
-
     venv = source_root / ".venv"
     for candidate in (
         venv / "bin" / "python3",
@@ -219,9 +169,9 @@ def venv_python(source_root: Path) -> Path | None:
     return None
 
 
+# meiva:note
+# Report a missing Meiva console script beside the virtualenv's interpreter.
 def editable_console_script_violations(source_root: Path) -> tuple[str, ...]:
-    """Report a missing Meiva console script beside the virtualenv's interpreter."""
-
     interpreter = venv_python(source_root)
     if interpreter is None:
         return ()
@@ -231,16 +181,14 @@ def editable_console_script_violations(source_root: Path) -> tuple[str, ...]:
     return (f"{console_script} editable console script missing",)
 
 
+# meiva:note
+# Return this interpreter's checkout root when it is under `.venv`.
+#
+# The supported layout is `<root>/.venv/bin/python`. A system interpreter or shim carries no
+# checkout authority, so callers deliberately treat it as a no-op. A virtualenv's Python is
+# normally a symlink to its base interpreter: the lexical executable path carries the `.venv`
+# identity, and resolving it before the layout check would lose that boundary.
 def current_interpreter_source_root(executable: str | Path | None = None) -> Path | None:
-    """Return this interpreter's checkout root when it is under ``.venv``.
-
-    The supported layout is ``<root>/.venv/bin/python``. A system interpreter or shim carries
-    no checkout authority, so callers deliberately treat it as a no-op.
-    """
-
-    # A virtualenv's Python is normally a symlink to its base interpreter. The
-    # lexical executable path carries the ``.venv`` identity; resolving it
-    # before the layout check would lose that boundary.
     interpreter = Path(sys.executable if executable is None else executable)
     try:
         venv = interpreter.parents[1]

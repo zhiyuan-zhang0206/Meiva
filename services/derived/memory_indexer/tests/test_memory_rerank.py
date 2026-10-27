@@ -27,6 +27,7 @@ from base.lm.catalog.decide.types import (
     YesNo,
 )
 from base.lm.catalog.provider_contract import DecisionProviderContribution, PriceRates
+from base.lm.pricing.archive import load_archive
 from base.log.tests.log_records import LogRecords
 from base.log.tests.log_records import loguru_records as loguru_records
 from base.packages.plugin_providers import build_model_catalog
@@ -107,7 +108,7 @@ class _FakeJudge:
 
 
 def _catalog_for(judge: _FakeJudge) -> ModelCatalog:
-    builder = CatalogBuilder()
+    builder = CatalogBuilder(load_archive())
     builder.install_decision(
         "fake",
         DecisionProviderContribution(
