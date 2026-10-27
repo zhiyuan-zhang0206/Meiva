@@ -72,9 +72,7 @@ def test_summary_reads_manifests_only_and_runs_no_analysis(make_repo: RepoFactor
 def test_no_debt_does_not_imply_a_strict_purity_mode(
     make_repo: RepoFactory, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    root = make_repo(
-        {"pkg/__init__.py": "", "pkg/a.py": "", "pkg/meizel.toml": 'purity = "none"\n'}
-    )
+    root = make_repo({"pkg/__init__.py": "", "pkg/a.py": "", "pkg/meizel.toml": ""})
     assert run(root, "debt", "--json") == 0
     report = json.loads(capsys.readouterr().out)
     assert report["total"] == 0

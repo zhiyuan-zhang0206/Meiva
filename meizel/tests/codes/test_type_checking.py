@@ -132,12 +132,15 @@ def test_policy_is_loaded_from_the_analyzed_repository(
     ]
 
 
-@pytest.mark.parametrize("purity", ["none", "strict-to-be", "strict"])
+@pytest.mark.parametrize(
+    "purity",
+    ['{ mode = "none", why = "not judged" }', '"strict-to-be"', '"strict"'],
+)
 def test_the_guard_is_hard_and_cannot_be_recorded(
     make_repo: RepoFactory, capsys: pytest.CaptureFixture[str], purity: str
 ) -> None:
     root = make_repo(
-        {**HOSTS, "meizel.toml": ROLES + f'\n[purity]\n"." = "{purity}"\n', "pkg/a.py": GUARD}
+        {**HOSTS, "meizel.toml": ROLES + f'\n[purity]\n"." = {purity}\n', "pkg/a.py": GUARD}
     )
     assert any(d.code is Code.TYPE_CHECKING for d in analyze(root, jobs=1).verdict)
     assert run(root, "debt", "record", ".") == 1
