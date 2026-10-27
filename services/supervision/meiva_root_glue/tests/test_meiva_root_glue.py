@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import inspect
 import json
 import os
 import sys
@@ -76,10 +77,7 @@ async def test_reference_wiring_registers_gated_specs(tmp_path: Path) -> None:
         _Spec("svc-c", "services.supervision.healthchecks.fake", None),
     )
     participants = glue.build_wiring(
-        context,
-        config=snapshot_process_config(),
-        diagnostics=(),
-        services=specs,
+        context, config=snapshot_process_config(), diagnostics=(), services=specs
     )
     await context.supervisor.start()
     try:
@@ -266,10 +264,7 @@ async def test_glue_uses_shared_readiness_tiers_for_native_startup(
         _Spec(name, "probe", lambda: DaemonProbe.down("starting")) for name in ("gate", "labeler")
     )
     rounds = glue.build_wiring(
-        context,
-        config=snapshot_process_config(),
-        diagnostics=(),
-        services=specs,
+        context, config=snapshot_process_config(), diagnostics=(), services=specs
     )[0]
     await context.supervisor.start()
     try:
@@ -405,3 +400,11 @@ def test_the_launch_rewrite_wraps_only_the_capped_unit() -> None:
         *argv,
     ]
     assert glue.memory_scoped_argv("gateway", argv, caps=caps) == argv
+
+
+# meiva:note
+# The root loads this factory from the string reference in its launch plan
+# (`services.supervision.meiva_root_glue.glue:build_wiring`) and calls it with the wiring context
+# alone, so the signature must accept exactly that call.
+def test_the_launch_plans_reference_calls_the_factory_with_the_context_alone() -> None:
+    inspect.signature(glue.build_wiring).bind(object())

@@ -74,6 +74,7 @@ def _build_grounded_handoff(ctx: MeivaContext, *, agent_id: int) -> Handoff:
         slices,
         agent_id=agent_id,
         catalog=catalog,
+        home=ctx.require_meiva_home(),
     )
     instruction_parts = [p for p in (prompt_body, HANDOFF_INSTRUCTION) if p]
     instruction = "\n\n".join(instruction_parts)
@@ -182,7 +183,11 @@ async def init_context_node(
         # recorded, so the drift check names it one extra time, where the reverse
         # order would mark it known and drop it silently until the next
         # compaction.
-        indexed = indexed_skill_identifiers(skill_view(runtime.context.require_agent().prompt))
+        indexed = indexed_skill_identifiers(
+            skill_view(
+                runtime.context.require_agent().prompt, home=runtime.context.require_meiva_home()
+            )
+        )
 
         # meiva:link agent/graph/docs/harness-turn.meiva.okf.md
         if runtime.context.harness is not Harness.MEIVA:
@@ -210,6 +215,7 @@ async def init_context_node(
                     agent_id=runtime.context.identity.agent_id
                     if runtime.context.identity is not None
                     else None,
+                    home=runtime.context.require_meiva_home(),
                 )
             ),
             *notes,

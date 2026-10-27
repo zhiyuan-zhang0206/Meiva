@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from collections.abc import Callable, MutableMapping
+from functools import partial
 from pathlib import Path
 from typing import Any
 from uuid import UUID
@@ -89,7 +90,11 @@ def land_cluster_extensions(db: Database, *, home: Path) -> None:
 
     try:
         with db.connect() as conn:
-            result = materialize.materialize_skills(conn, dest_root=paths.skills_dir(home))
+            result = materialize.materialize_skills(
+                conn,
+                dest_root=paths.skills_dir(home),
+                last_written=partial(materialize.last_written_hash, home=home),
+            )
     except Exception as exc:
         logger.warning(
             "[extensions] could not read the cluster registry at boot ({}); this "

@@ -72,7 +72,7 @@ def get_skills(request: Request) -> SkillsView:
     the on-disk copy drifted from what converge last wrote (`modified_locally`).
     A directory with no registry entry is reported as `untracked` (present on
     disk but the scanner won't load it)."""
-    registry = install_registry.load()
+    registry = install_registry.load(home=request.app.state.gateway_process.home)
     # Registry rows are keyed by folded name (design R2-B1): a row written
     # `meiva-code` and a directory still spelled `meiva_code/` are one skill —
     # correlate through the fold, not the raw spelling (audit 02 #4).
@@ -107,7 +107,7 @@ def update_skill_enabled(body: SkillEnableUpdate, request: Request) -> SkillView
     read and then re-saving it would let a concurrent `meiva skill install` or
     `meiva converge` land its rows in between, and this handler's save — built on
     a registry read before those rows existed — would drop them."""
-    with install_registry.mutate() as registry:
+    with install_registry.mutate(home=request.app.state.gateway_process.home) as registry:
         key = match_key(body.name)
         pkg = next((p for p in registry.packages if match_key(p.name) == key), None)
         if pkg is None:

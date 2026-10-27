@@ -336,14 +336,14 @@ def test_loader_filters_widgets_of_disabled_plugins() -> None:
 def test_enabled_modules_skips_a_disabled_plugin(unit_home: Path) -> None:
     module = SHIPPED_PLUGINS_DIR / "meiva_fleet" / "inspector.py"
     assert module in _plugin_widgets.enabled_inspector_modules(
-        SHIPPED_PLUGINS_DIR, enabled_plugin_names()
+        SHIPPED_PLUGINS_DIR, enabled_plugin_names(home=unit_home)
     )
 
     (unit_home / "plugins_config.json").write_text(
         json.dumps({"plugins": {"meiva_fleet": {"enabled": False}}}), encoding="utf-8"
     )
     assert module not in _plugin_widgets.enabled_inspector_modules(
-        SHIPPED_PLUGINS_DIR, enabled_plugin_names()
+        SHIPPED_PLUGINS_DIR, enabled_plugin_names(home=unit_home)
     )
 
 

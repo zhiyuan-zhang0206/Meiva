@@ -12,6 +12,7 @@ from base.daemon.schedules.completion_notices import (
 )
 from base.lm.catalog import ModelCatalog
 from base.packages.tests.model_catalog import AddModels
+from base.paths import meiva_home
 from gateway.tests.auth.gateway_config import gateway_test_client, gateway_test_config
 
 UPLOAD_HEADERS = {"Idempotency-Key": "silent-upload", "Idempotency-Scope": "principal-v1"}
@@ -366,7 +367,7 @@ class TestMultimodalMessage:
         from base.packages.plugin_providers import build_model_catalog
 
         model = "glm-vision-fixture"
-        base = build_model_catalog().models["glm-5.3"]
+        base = build_model_catalog(home=meiva_home()).models["glm-5.3"]
         catalog = add_models(
             model_catalog,
             {

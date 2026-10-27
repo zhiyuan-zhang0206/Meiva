@@ -11,6 +11,7 @@ from base import paths
 from base.config import ConfigBoot
 from base.daemon.endpoints import ServiceEndpoints
 from base.daemon.health import DaemonProbe, probe_daemon
+from base.paths import meiva_home
 from meiva_builtins.plugins.meiva_fleet.task_maintenance import daemon as task_maintenance
 from services.agent_runner.agent_host import daemon as agent_host
 from services.agent_runner.agent_ops import boot as ops_boot
@@ -54,7 +55,7 @@ def _task_maintenance_pidfile() -> Path:
 
 
 def _standard_daemons() -> list[ServiceSpec]:
-    return [s for s in composition.build_services() if s.health_name is not None]
+    return [s for s in composition.build_services(home=meiva_home()) if s.health_name is not None]
 
 
 def _inner_probe(spec: ServiceSpec) -> partial[DaemonProbe]:

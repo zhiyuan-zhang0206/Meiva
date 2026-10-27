@@ -27,6 +27,7 @@ from cli.commands.extensions.plugins import (
 from cli.commands.extensions.tests.support.source_bindings import PROD_ELSEWHERE
 from cli.database.tests.command_inputs import command_machine as command_machine
 from cli.database.tests.command_inputs import command_runtime as command_runtime
+from meiva.sdk_surface.tests.context_home import context_over_unit_home as context_over_unit_home
 
 
 class RecordingGateway:
@@ -165,7 +166,7 @@ def test_install_skill_records_and_surfaces(
     url = _make_skill_repo(tmp_path, "demo")
     assert _install(url, None, None, machine=command_machine, home=unit_home) == 0
 
-    pkg = reg.get("demo")
+    pkg = reg.get("demo", home=unit_home)
     assert pkg is not None and pkg.type == "skill" and pkg.source == url and pkg.enabled
     assert (unit_home / "skills" / "demo" / "SKILL.md").is_file()
     # .git stripped from the installed copy
@@ -184,7 +185,8 @@ def test_install_disabled_skill_hidden_from_scanner(
     url = _make_skill_repo(tmp_path, "demo")
     _install(url, None, None, machine=command_machine, home=unit_home)
     reg.register(
-        reg.InstalledPackage(name="demo", type="skill", source=url, ref=None, enabled=False)
+        reg.InstalledPackage(name="demo", type="skill", source=url, ref=None, enabled=False),
+        home=unit_home,
     )
     assert "demo" not in {s["name"] for s in skills_mod.names()}
 
@@ -213,7 +215,7 @@ def test_install_rejects_unrecognized(
     url = _make_plugin_repo(tmp_path)
     assert _install(url, None, None, machine=command_machine, home=unit_home) == 1
     assert "unrecognized package" in capsys.readouterr().err  # pyright: ignore[reportUnknownMemberType]
-    assert reg.load().packages == []
+    assert reg.load(home=unit_home).packages == []
 
 
 def test_install_bare_mcp_package_signposts_mcp_install(
@@ -237,7 +239,7 @@ def test_install_bare_mcp_package_signposts_mcp_install(
     _git(repo, "commit", "-q", "-m", "init")
     assert _install(f"file://{repo}", None, None, machine=command_machine, home=unit_home) == 1
     assert "meiva mcp install" in capsys.readouterr().err  # pyright: ignore[reportUnknownMemberType]
-    assert reg.load().packages == []
+    assert reg.load(home=unit_home).packages == []
 
 
 def test_uninstall_removes_dir_and_entry(
@@ -250,7 +252,7 @@ def test_uninstall_removes_dir_and_entry(
     url = _make_skill_repo(tmp_path, "demo")
     _install(url, None, None, machine=command_machine, home=unit_home)
     assert cmd_plugins_uninstall("demo", home=unit_home) == 0
-    assert reg.get("demo") is None
+    assert reg.get("demo", home=unit_home) is None
     assert not (unit_home / "skills" / "demo").exists()
 
 
@@ -266,12 +268,12 @@ def test_installed_lists_entries(
     *,
     command_machine: MachineIdentityReader,
 ) -> None:
-    assert cmd_plugins_installed() == 0
+    assert cmd_plugins_installed(home=unit_home) == 0
     assert "(none)" in capsys.readouterr().out  # pyright: ignore[reportUnknownMemberType]
     _install(
         _make_skill_repo(tmp_path, "demo"), None, None, machine=command_machine, home=unit_home
     )
-    assert cmd_plugins_installed() == 0
+    assert cmd_plugins_installed(home=unit_home) == 0
     assert "demo" in capsys.readouterr().out  # pyright: ignore[reportUnknownMemberType]
 
 
@@ -304,7 +306,7 @@ def test_install_claude_code_plugin_from_subdir_surfaces_skill(
     url = _make_claude_code_plugin_repo(tmp_path)
     assert _install(url, None, "plugins/pr-toolkit", machine=command_machine, home=unit_home) == 0
 
-    pkg = reg.get("pr-toolkit")
+    pkg = reg.get("pr-toolkit", home=unit_home)
     assert pkg is not None
     assert pkg.type == "plugin" and pkg.path == "plugins/pr-toolkit" and pkg.enabled
 
@@ -329,7 +331,7 @@ def test_install_claude_code_plugin_without_anything_refused(
     url = _make_claude_code_plugin_repo(tmp_path, agents=False, mcp=False, skills=False)
     assert _install(url, None, "plugins/pr-toolkit", machine=command_machine, home=unit_home) == 1
     assert "nothing to" in capsys.readouterr().err  # pyright: ignore[reportUnknownMemberType]
-    assert reg.load().packages == []
+    assert reg.load(home=unit_home).packages == []
 
 
 def test_install_claude_code_plugin_skills_only_surfaces(
@@ -343,7 +345,7 @@ def test_install_claude_code_plugin_skills_only_surfaces(
     url = _make_claude_code_plugin_repo(tmp_path, agents=False, mcp=False, skills=True)
     assert _install(url, None, "plugins/pr-toolkit", machine=command_machine, home=unit_home) == 0
 
-    pkg = reg.get("pr-toolkit")
+    pkg = reg.get("pr-toolkit", home=unit_home)
     assert pkg is not None and pkg.type == "plugin" and pkg.enabled
     # skills copied verbatim (supporting files too), no generated orchestrator
     base = unit_home / "plugins" / "pr-toolkit" / "skills"
@@ -414,7 +416,7 @@ def test_install_claude_code_plugin_with_bundled_mcp(
     assert (unit_home / "plugins" / "pr-toolkit" / "skills" / "pr-toolkit" / "SKILL.md").is_file()
     # .mcp.json carried into the overlay, where the shared loader merges it
     assert (unit_home / "plugins" / "pr-toolkit" / ".mcp.json").is_file()
-    assert "demo-server" in load_mcp_config()
+    assert "demo-server" in load_mcp_config(home=unit_home)
 
 
 def test_install_claude_code_plugin_mcp_only(
@@ -428,12 +430,12 @@ def test_install_claude_code_plugin_mcp_only(
     url = _make_claude_code_plugin_repo(tmp_path, agents=False, mcp=True)
     assert _install(url, None, "plugins/pr-toolkit", machine=command_machine, home=unit_home) == 0
 
-    pkg = reg.get("pr-toolkit")
+    pkg = reg.get("pr-toolkit", home=unit_home)
     assert pkg is not None and pkg.type == "plugin" and pkg.enabled
     # no skill subtree (no agents), but the MCP is contributed
     assert not (unit_home / "plugins" / "pr-toolkit" / "skills").exists()
     assert (unit_home / "plugins" / "pr-toolkit" / ".mcp.json").is_file()
-    assert "demo-server" in load_mcp_config()
+    assert "demo-server" in load_mcp_config(home=unit_home)
     # nothing for the skill scanner to surface
     assert "pr-toolkit" not in {s["name"] for s in skills_mod.names()}
 
@@ -456,7 +458,9 @@ def test_install_claude_code_plugin_commands_surface(
     # commands/ copied verbatim into the overlay
     assert (unit_home / "plugins" / "pr-toolkit" / "commands" / "deploy.md").is_file()
     # surfaced namespaced under the plugin in the `:`-joined form skill identifiers use
-    cmds = {c["name"]: c for c in CommandCatalog.system(skills=skills.names).discover()}
+    cmds = {
+        c["name"]: c for c in CommandCatalog.system(skills=skills.names, home=unit_home).discover()
+    }
     assert "pr-toolkit:deploy" in cmds
     assert cmds["pr-toolkit:deploy"]["description"] == "Deploy the thing"
     assert cmds["pr-toolkit:deploy"]["instruction_hint"] == "env"
@@ -471,7 +475,7 @@ def test_uninstall_claude_code_plugin_removes_plugin_dir(
     url = _make_claude_code_plugin_repo(tmp_path)
     _install(url, None, "plugins/pr-toolkit", machine=command_machine, home=unit_home)
     assert cmd_plugins_uninstall("pr-toolkit", home=unit_home) == 0
-    assert reg.get("pr-toolkit") is None
+    assert reg.get("pr-toolkit", home=unit_home) is None
     assert not (unit_home / "plugins" / "pr-toolkit").exists()
 
 
@@ -524,7 +528,7 @@ def test_install_failure_mid_materialize_leaves_nothing(
     plugins_root = unit_home / "plugins"
     assert not (plugins_root / "pr-toolkit").exists()
     assert not (plugins_root / ".pr-toolkit.staging").exists()
-    assert reg.get("pr-toolkit") is None
+    assert reg.get("pr-toolkit", home=unit_home) is None
 
 
 def test_upgrade_failure_keeps_previous_version(
@@ -561,7 +565,7 @@ def test_upgrade_failure_keeps_previous_version(
     assert not (plugins_root / ".pr-toolkit.staging").exists()
     assert not list(plugins_root.glob(".pr-toolkit.backup-*"))
     # the registry entry still points at the previous install
-    pkg = reg.get("pr-toolkit")
+    pkg = reg.get("pr-toolkit", home=unit_home)
     assert pkg is not None and pkg.enabled
 
 
@@ -576,7 +580,7 @@ def test_dot_prefixed_plugin_dirs_are_not_mcp_sources(unit_home: Path) -> None:
         '{"mcpServers": {"ghost-server": {"command": "echo", "args": ["hi"]}}}',
         encoding="utf-8",
     )
-    assert "ghost-server" not in load_mcp_config()
+    assert "ghost-server" not in load_mcp_config(home=unit_home)
 
 
 def test_install_refuses_dot_prefixed_plugin_name(
@@ -610,7 +614,7 @@ def test_install_refuses_dot_prefixed_plugin_name(
         == 1
     )
     assert "starts with" in capsys.readouterr().err  # pyright: ignore[reportUnknownMemberType]
-    assert reg.load().packages == []
+    assert reg.load(home=unit_home).packages == []
 
 
 def test_install_sweeps_stale_backup_residue(
@@ -664,17 +668,23 @@ def test_cmd_enable_then_disable(unit_home: Path) -> None:
     pdir = paths.plugins_dir(home=unit_home) / "compact"
     pdir.mkdir(parents=True, exist_ok=True)
     (pdir / "plugin.py").write_text("__description__ = 'x'\n")
-    write_local({"plugins": {"compact": {"enabled": True}}})
+    write_local({"plugins": {"compact": {"enabled": True}}}, home=unit_home)
 
-    assert cmd_plugins_disable("compact") == 0
-    assert json.loads(local_config_path().read_text())["plugins"]["compact"]["enabled"] is False
+    assert cmd_plugins_disable("compact", home=unit_home) == 0
+    assert (
+        json.loads(local_config_path(home=unit_home).read_text())["plugins"]["compact"]["enabled"]
+        is False
+    )
 
-    assert cmd_plugins_enable("compact") == 0
-    assert json.loads(local_config_path().read_text())["plugins"]["compact"]["enabled"] is True
+    assert cmd_plugins_enable("compact", home=unit_home) == 0
+    assert (
+        json.loads(local_config_path(home=unit_home).read_text())["plugins"]["compact"]["enabled"]
+        is True
+    )
 
 
 def test_cmd_enable_unknown_returns_1(unit_home: Path, capsys: pytest.CaptureFixture[str]) -> None:
-    assert cmd_plugins_enable("nonexistent") == 1
+    assert cmd_plugins_enable("nonexistent", home=unit_home) == 1
     assert "not present on this machine" in capsys.readouterr().err
 
 
@@ -690,8 +700,8 @@ def test_cmd_enable_accepts_the_dash_spelling_of_an_underscore_plugin(unit_home:
     pdir.mkdir(parents=True, exist_ok=True)
     (pdir / "plugin.py").write_text("__description__ = 'x'\n")
 
-    assert cmd_plugins_disable("my-plugin") == 0
-    written = json.loads(local_config_path().read_text())["plugins"]
+    assert cmd_plugins_disable("my-plugin", home=unit_home) == 0
+    written = json.loads(local_config_path(home=unit_home).read_text())["plugins"]
     assert written["my_plugin"]["enabled"] is False
     assert "my-plugin" not in written
 
@@ -706,8 +716,8 @@ def test_load_folds_a_dash_config_key_onto_the_plugin_dir(unit_home: Path) -> No
     pdir = paths.plugins_dir(home=unit_home) / "my_plugin"
     pdir.mkdir(parents=True, exist_ok=True)
     (pdir / "plugin.py").write_text("__description__ = 'x'\n")
-    write_local({"plugins": {"my-plugin": {"enabled": False}}})
+    write_local({"plugins": {"my-plugin": {"enabled": False}}}, home=unit_home)
 
-    cfg = load({"my_plugin"})
+    cfg = load({"my_plugin"}, home=unit_home)
     assert set(cfg.plugins) == {"my_plugin"}
     assert cfg.plugins["my_plugin"].enabled is False

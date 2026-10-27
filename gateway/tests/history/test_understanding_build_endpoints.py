@@ -32,6 +32,7 @@ from base.lm.catalog import ModelCatalog
 from base.lm.context_budget import UnknownModelWindowError
 from base.lm.pricing import PriceBook, PriceRates, plugin_model_price
 from base.packages.plugin_providers import build_model_catalog
+from base.paths import meiva_home
 from gateway.agents.history import understanding as module
 from gateway.agents.history.configuration import timeline_read, understanding_read
 from gateway.http.config import GatewayConfig
@@ -63,7 +64,7 @@ def _catalog() -> ModelCatalog:
             source_checked_at="2026-10-05",
         ),
     )
-    return replace(build_model_catalog(), prices=PriceBook({}, {_MODEL: flat}))
+    return replace(build_model_catalog(home=meiva_home()), prices=PriceBook({}, {_MODEL: flat}))
 
 
 def _seed_agent(db_conn: psycopg.Connection) -> int:

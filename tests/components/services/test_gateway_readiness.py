@@ -42,7 +42,6 @@ def test_a_runners_first_join_reaches_the_gateway(
     gateway_data_plane: None,
     db_url: str,
 ) -> None:
-    del unit_home
     from base.host.db_authority import unit
     from cli.commands.cluster import unit_join
 
@@ -66,9 +65,9 @@ def test_a_runners_first_join_reaches_the_gateway(
         endpoint=config.bootstrap_config_values(
             bootstrap_authority,
             provider_key_envs=(
-                binding.key_env for binding in build_model_catalog().bindings.values()
+                binding.key_env for binding in build_model_catalog(home=unit_home).bindings.values()
             ),
-            plugin_cluster_config=plugin_bootstrap_config(),
+            plugin_cluster_config=plugin_bootstrap_config(home=unit_home),
         )["MEIVA_DB_URL"],
         cluster_secret=secret,
         ttl_s=600,

@@ -152,11 +152,14 @@ def _run_step(
                 database_factory=cold.database_factory,
                 machine=command.machine,
                 skills_root=skills_dir(command.home),
+                home=command.home,
             )
             return 0
         case ColdStep.MATERIALIZE_EXTENSIONS:
             materialize.materialize_cluster_extensions(
-                database_factory=cold.database_factory, skills_root=skills_dir(command.home)
+                database_factory=cold.database_factory,
+                skills_root=skills_dir(command.home),
+                home=command.home,
             )
             return 0
         case _:

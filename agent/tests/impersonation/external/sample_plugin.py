@@ -19,6 +19,7 @@ from pydantic import BaseModel, Field
 
 from base.packages.plugins.enable_config import write_local
 from base.packages.plugins.loading.plugin_loader import load_plugin_module
+from base.paths import meiva_home
 
 PLUGIN = "sample"
 FACE_PREFIX = f"plugins.{PLUGIN}"
@@ -62,7 +63,7 @@ def write_sample_plugin(plugins_dir: Path) -> None:
             }
         )
     )
-    write_local({"plugins": {PLUGIN: {"enabled": True}}})
+    write_local({"plugins": {PLUGIN: {"enabled": True}}}, home=meiva_home())
     load_plugin_module(directory / "plugin.py", name=PLUGIN, pkg="plugins")
     load_plugin_module(
         directory / "agent_runtime.py", name=PLUGIN, pkg="plugins", module="agent_runtime"

@@ -51,7 +51,7 @@ class DuplicatePlugin(PluginsConfigError):  # noqa: N818
     """Same plugin name exists in both builtin and external directories."""
 
 
-def discover_plugins() -> dict[str, Path]:
+def discover_plugins(*, home: Path) -> dict[str, Path]:
     """Scan builtin + external plugin directories; return {name: plugin_dir}.
 
     Builtin is scanned first; external plugin matching a builtin name
@@ -65,7 +65,7 @@ def discover_plugins() -> dict[str, Path]:
     from base.host.runtime_interpreter import external_plugin_read_root
 
     return discover_plugin_dirs(
-        repo_dir=paths.repo_plugins_dir(), user_dir=external_plugin_read_root()
+        repo_dir=paths.repo_plugins_dir(), user_dir=external_plugin_read_root(home=home)
     )
 
 
@@ -246,19 +246,21 @@ class PluginEnableStore:
             return self.load(known_plugins, allow_dangling=True)
 
 
-def local_config_path() -> Path:
+def local_config_path(*, home: Path) -> Path:
     """Per-machine plugin-config file path: `~/.meiva/plugins_config.json`."""
-    return paths.meiva_home() / "plugins_config.json"
+    return home / "plugins_config.json"
 
 
-def write_local(raw: dict[str, Any]) -> None:
+def write_local(raw: dict[str, Any], *, home: Path) -> None:
     # meiva:link base/packages/plugins/docs/plugin-config/enable-state.meiva.okf.md
-    PluginEnableStore(local_config_path()).write(raw)
+    PluginEnableStore(local_config_path(home=home)).write(raw)
 
 
-def load(known_plugins: set[str], *, allow_dangling: bool = False) -> PluginsConfig:
+def load(known_plugins: set[str], *, allow_dangling: bool = False, home: Path) -> PluginsConfig:
     # meiva:link base/packages/plugins/docs/plugin-config/enable-state.meiva.okf.md
-    return PluginEnableStore(local_config_path()).load(known_plugins, allow_dangling=allow_dangling)
+    return PluginEnableStore(local_config_path(home=home)).load(
+        known_plugins, allow_dangling=allow_dangling
+    )
 
 
 def report_dangling(exc: DanglingPlugin, report: load_report.Reporter | None = None) -> None:
@@ -279,14 +281,14 @@ def report_dangling(exc: DanglingPlugin, report: load_report.Reporter | None = N
         load_report.reporter(report)(name, exc)
 
 
-def load_for_runtime(known_plugins: set[str]) -> PluginsConfig:
+def load_for_runtime(known_plugins: set[str], *, home: Path) -> PluginsConfig:
     # meiva:link base/packages/plugins/docs/plugin-config/enable-state.meiva.okf.md
-    return PluginEnableStore(local_config_path()).load_for_runtime(
+    return PluginEnableStore(local_config_path(home=home)).load_for_runtime(
         known_plugins, report=load_report.reporter(None)
     )
 
 
-def installed_plugin_dirs() -> dict[str, Path]:
+def installed_plugin_dirs(*, home: Path) -> dict[str, Path]:
     """{name: plugin_dir} for every plugin PRESENT on this machine (builtin +
     external), regardless of enable-state.
 
@@ -298,11 +300,11 @@ def installed_plugin_dirs() -> dict[str, Path]:
     own service via an explicit settings field in `ServiceSpec.gate` (e.g.
     task-maintenance's Fleet `task_maintenance_enabled`).
     """
-    return discover_plugins()
+    return discover_plugins(home=home)
 
 
-def set_local_enabled(name: str, *, enabled: bool) -> PluginsConfig:
+def set_local_enabled(name: str, *, enabled: bool, home: Path) -> PluginsConfig:
     # meiva:link base/packages/plugins/docs/plugin-config/enable-state.meiva.okf.md
-    return PluginEnableStore(local_config_path()).set_enabled(
-        name, enabled=enabled, known=set(discover_plugins())
+    return PluginEnableStore(local_config_path(home=home)).set_enabled(
+        name, enabled=enabled, known=set(discover_plugins(home=home))
     )

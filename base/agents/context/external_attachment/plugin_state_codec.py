@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import base64
 from collections.abc import Mapping
+from pathlib import Path
 from typing import Any, TypeGuard
 
 from langchain_core.messages import RemoveMessage, convert_to_messages
@@ -92,9 +93,9 @@ def apply_plugin_delta(state: BaseModel, delta: Mapping[str, Any]) -> None:
 # or updating a checkpoint.
 # meiva:link meiva/impersonation/docs/attachment.meiva.okf.md
 def load_snapshot(
-    agent_id: int, *, database: Database
+    agent_id: int, *, database: Database, home: Path
 ) -> tuple[Any, dict[str, Any] | None, dict[str, Any] | None]:
-    registry = extensions_registry.build_registry(validate_state=plugin_state_schema)
+    registry = extensions_registry.build_registry(validate_state=plugin_state_schema, home=home)
     state_cls = agent_state.build_agent_state(registry)
     with database.connect(autocommit=True) as conn:
         with conn.cursor(row_factory=dict_row) as cur:

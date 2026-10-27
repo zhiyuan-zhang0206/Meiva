@@ -96,6 +96,7 @@ meiva.ensure_plugins_loaded(
         identity=AgentIdentity(agent_id=1, owns_loop=False),
         machine=machine,
         clients=clients,
+        meiva_home=root,
     ),
 )
 exec(sys.argv[2])

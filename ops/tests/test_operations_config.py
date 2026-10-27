@@ -16,6 +16,7 @@ from base.host.env.tests.env_files import unit_env_aliases, unit_env_path
 from base.host.proc import run_bounded
 from base.host.system.tests.fake_commands import fake_host
 from base.packages.plugin_config_admin import panel_metadata, panel_overrides
+from base.paths import meiva_home
 from ops.host_config import config_audit_read_op, config_read_op, config_write_op
 from ops.rpc_schemas import ConfigReadResult
 
@@ -30,7 +31,11 @@ from ops.rpc_schemas import ConfigReadResult
 
 
 def _host_field_names(*, config_authority: ConfigAuthority) -> list[str]:
-    return [m.name for m in panel_metadata(authority=config_authority) if m.scope == "host"]
+    return [
+        m.name
+        for m in panel_metadata(authority=config_authority, home=meiva_home())
+        if m.scope == "host"
+    ]
 
 
 _SENSITIVE_HOST_FIELD = "test_host_secret"
@@ -71,7 +76,9 @@ def test_config_read_op_returns_all_host_fields(
     config_authority: ConfigAuthority,
 ) -> None:
     """config_read_op returns one entry per host-scope field."""
-    result = config_read_op(authority=config_authority, local_machine=_MACHINE, host=fake_host())
+    result = config_read_op(
+        authority=config_authority, local_machine=_MACHINE, host=fake_host(), home=unit_home
+    )
     host_names = set(_host_field_names(config_authority=config_authority))
     assert host_names == set(result.host_fields.keys())
 
@@ -84,9 +91,13 @@ def test_config_read_op_sensitive_field_masked(
 ) -> None:
     """Sensitive field values are replaced with the mask string."""
     name = sensitive_host_field
-    meta = next(m for m in panel_metadata(authority=config_authority) if m.name == name)
+    meta = next(
+        m for m in panel_metadata(authority=config_authority, home=unit_home) if m.name == name
+    )
     assert meta.current_value == "stored-secret"
-    result = config_read_op(authority=config_authority, local_machine=_MACHINE, host=fake_host())
+    result = config_read_op(
+        authority=config_authority, local_machine=_MACHINE, host=fake_host(), home=unit_home
+    )
     entry = result.host_fields[name]
     assert entry.value == "••••••••", f"{name} should be masked but got {entry.value!r}"
 
@@ -99,7 +110,9 @@ def test_config_read_op_overridden_flag_reflects_local_file(
     """'overridden' is True for a field present in the local runtime_config.json."""
     # Set ops_concurrency in this machine's .env
     runtime_config.write_fields({"ops_concurrency": 7}, set())
-    result = config_read_op(authority=config_authority, local_machine=_MACHINE, host=fake_host())
+    result = config_read_op(
+        authority=config_authority, local_machine=_MACHINE, host=fake_host(), home=unit_home
+    )
     assert result.host_fields["ops_concurrency"].overridden is True
     # A field not in the local file should not be marked overridden
     not_overridden = [
@@ -145,7 +158,9 @@ def test_config_read_op_non_gated_field_has_null_can_enable(
     config_authority: ConfigAuthority,
 ) -> None:
     """Fields with no static read-time gate get can_enable=None, reason=None."""
-    result = config_read_op(authority=config_authority, local_machine=_MACHINE, host=fake_host())
+    result = config_read_op(
+        authority=config_authority, local_machine=_MACHINE, host=fake_host(), home=unit_home
+    )
     # machine_description has no entry in VALIDATORS and no read_time_capability
     entry = result.host_fields["machine_description"]
     assert entry.can_enable is None
@@ -161,8 +176,10 @@ def test_config_read_op_raw_overrides_omits_sensitive(
     """raw_overrides omits keys that are sensitive host fields."""
     name = sensitive_host_field
     runtime_config.write_fields({"ops_concurrency": 3}, set())
-    assert name in panel_overrides(authority=config_authority)
-    result = config_read_op(authority=config_authority, local_machine=_MACHINE, host=fake_host())
+    assert name in panel_overrides(authority=config_authority, home=unit_home)
+    result = config_read_op(
+        authority=config_authority, local_machine=_MACHINE, host=fake_host(), home=unit_home
+    )
     raw = result.raw_overrides
     assert name not in raw, f"sensitive field {name} must be omitted from raw_overrides"
     assert raw.get("ops_concurrency") == 3
@@ -174,7 +191,9 @@ def test_config_read_op_machine_name_in_result(
     config_authority: ConfigAuthority,
 ) -> None:
     """Result includes the explicitly supplied local machine name."""
-    result = config_read_op(authority=config_authority, local_machine="my-host", host=fake_host())
+    result = config_read_op(
+        authority=config_authority, local_machine="my-host", host=fake_host(), home=unit_home
+    )
     assert result.machine == "my-host"
 
 
@@ -194,6 +213,7 @@ def test_config_write_op_rejects_unknown_field(
         authority=config_authority,
         local_machine=_MACHINE,
         host=fake_host(),
+        home=unit_home,
     )
     assert result.applied is False
     assert result.results["totally_unknown_field"].ok is False
@@ -211,6 +231,7 @@ def test_config_write_op_rejects_non_host_field(
         authority=config_authority,
         local_machine=_MACHINE,
         host=fake_host(),
+        home=unit_home,
     )
     assert result.applied is False
     assert result.results["llm_model"].ok is False
@@ -226,7 +247,7 @@ def test_config_write_op_rejects_non_remote_writable(
     # Find a host-scope field that is NOT remote_writable
     non_writable = [
         m.name
-        for m in panel_metadata(authority=config_authority)
+        for m in panel_metadata(authority=config_authority, home=unit_home)
         if m.scope == "host" and not m.remote_writable
     ]
     if not non_writable:
@@ -239,6 +260,7 @@ def test_config_write_op_rejects_non_remote_writable(
         authority=config_authority,
         local_machine=_MACHINE,
         host=fake_host(),
+        home=unit_home,
     )
     assert result.applied is False
     assert result.results[non_writable[0]].ok is False
@@ -258,6 +280,7 @@ def test_config_write_op_local_accepts_writable_host_field(
         authority=config_authority,
         local_machine=_MACHINE,
         host=fake_host(),
+        home=unit_home,
     )
     assert result.applied is True
     assert runtime_config.env_set_field_names(unit_env_path()) == {"cross_machine_transfer_backend"}
@@ -275,6 +298,7 @@ def test_config_write_op_remote_rejects_writable_only_host_field(
         authority=config_authority,
         local_machine=_MACHINE,
         host=fake_host(),
+        home=unit_home,
     )
     assert result.applied is False
     assert "not remotely editable" in (
@@ -294,6 +318,7 @@ def test_config_write_op_rejects_failing_validator(
         authority=config_authority,
         local_machine=_MACHINE,
         host=fake_host(),
+        home=unit_home,
     )
     assert result.applied is False
     assert result.results["ops_concurrency"].ok is False
@@ -313,6 +338,7 @@ def test_config_write_op_rejects_unknown_transfer_backend(
         authority=config_authority,
         local_machine=_MACHINE,
         host=fake_host(),
+        home=unit_home,
     )
     assert result.applied is False
     assert result.results["cross_machine_transfer_backend"].ok is False
@@ -332,6 +358,7 @@ def test_config_write_op_atomic_one_bad_writes_nothing(
         authority=config_authority,
         local_machine=_MACHINE,
         host=fake_host(),
+        home=unit_home,
     )
     assert result.applied is False
     # Nothing should be written to .env
@@ -349,6 +376,7 @@ def test_config_write_op_all_good_writes_file(
         authority=config_authority,
         local_machine=_MACHINE,
         host=fake_host(),
+        home=unit_home,
     )
     assert result.applied is True
     assert runtime_config.env_set_field_names(unit_env_path()) == {
@@ -369,6 +397,7 @@ def test_config_write_op_none_unsets_field(
         authority=config_authority,
         local_machine=_MACHINE,
         host=fake_host(),
+        home=unit_home,
     )
     assert runtime_config.env_set_field_names(unit_env_path()) == {
         "ops_concurrency",
@@ -380,6 +409,7 @@ def test_config_write_op_none_unsets_field(
         authority=config_authority,
         local_machine=_MACHINE,
         host=fake_host(),
+        home=unit_home,
     )
     assert result.applied is True
     assert runtime_config.env_set_field_names(unit_env_path()) == {"ops_concurrency"}
@@ -399,6 +429,7 @@ def test_config_write_op_absent_key_left_untouched(
         authority=config_authority,
         local_machine=_MACHINE,
         host=fake_host(),
+        home=unit_home,
     )
     # A patch touching only ops_concurrency must NOT drop machine_description.
     result = config_write_op(
@@ -406,6 +437,7 @@ def test_config_write_op_absent_key_left_untouched(
         authority=config_authority,
         local_machine=_MACHINE,
         host=fake_host(),
+        home=unit_home,
     )
     assert result.applied is True
     assert runtime_config.env_set_field_names(unit_env_path()) == {
@@ -426,9 +458,10 @@ def test_config_write_op_empty_patch_is_noop(
         authority=config_authority,
         local_machine=_MACHINE,
         host=fake_host(),
+        home=unit_home,
     )
     result = config_write_op(
-        {}, authority=config_authority, local_machine=_MACHINE, host=fake_host()
+        {}, authority=config_authority, local_machine=_MACHINE, host=fake_host(), home=unit_home
     )
     assert result.applied is True
     assert runtime_config.env_set_field_names(unit_env_path()) == {"ops_concurrency"}
@@ -448,12 +481,14 @@ def test_config_write_op_does_not_disturb_non_managed_env(
         authority=config_authority,
         local_machine=_MACHINE,
         host=fake_host(),
+        home=unit_home,
     )
     config_write_op(
         {"ops_concurrency": None},
         authority=config_authority,
         local_machine=_MACHINE,
         host=fake_host(),
+        home=unit_home,
     )  # explicit unset must not touch MEIVA_DB_URL
     assert unit_env_aliases()["MEIVA_DB_URL"] == "postgresql://x@127.0.0.1:1/x"
     assert "MEIVA_OPS_CONCURRENCY" not in unit_env_aliases()
@@ -470,10 +505,11 @@ def test_config_write_op_restart_required_union(
         authority=config_authority,
         local_machine=_MACHINE,
         host=fake_host(),
+        home=unit_home,
     )
     assert result.applied is True
     # ops_concurrency.restart_required + machine_description.restart_required
-    metas = {m.name: m for m in panel_metadata(authority=config_authority)}
+    metas = {m.name: m for m in panel_metadata(authority=config_authority, home=unit_home)}
     expected = sorted(
         {
             v
@@ -492,7 +528,7 @@ def test_config_write_op_empty_overrides_applied_no_write(
 ) -> None:
     """Empty overrides dict -> applied=True, nothing written, restart_required=[]."""
     result = config_write_op(
-        {}, authority=config_authority, local_machine=_MACHINE, host=fake_host()
+        {}, authority=config_authority, local_machine=_MACHINE, host=fake_host(), home=unit_home
     )
     assert result.applied is True
     assert result.restart_required == []
@@ -515,6 +551,7 @@ def test_config_write_op_rejects_an_invalid_candidate_without_writing(
         authority=config_authority,
         local_machine=_MACHINE,
         host=fake_host(),
+        home=unit_home,
     )
 
     assert result.applied is False
@@ -531,7 +568,7 @@ def test_config_write_op_machine_name_in_result(
 ) -> None:
     """Result includes the explicitly supplied local machine name."""
     result = config_write_op(
-        {}, authority=config_authority, local_machine="my-host", host=fake_host()
+        {}, authority=config_authority, local_machine="my-host", host=fake_host(), home=unit_home
     )
     assert result.machine == "my-host"
 

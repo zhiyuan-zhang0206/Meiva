@@ -86,11 +86,12 @@ def _marks(row: str) -> tuple[str, str]:
 # meiva:note
 # The root manifest a `meiva start` of just these services would have written.
 def _write_launch_record(home: Path, *services: str) -> None:
-    chosen = [spec for spec in build_services() if spec.session in services]
+    chosen = [spec for spec in build_services(home=home) if spec.session in services]
     manifest = manifests.build_manifest(
         capabilities=("gateway", "agent-runner"),
         specs=chosen,
         environments={spec.session: {} for spec in chosen},
+        home=home,
     )
     manifests.write_manifest(root_manifests_path(home), manifest)
 
@@ -493,7 +494,7 @@ def test_a_gateway_that_answers_with_something_other_than_json_is_reported_inlin
 def test_a_live_unit_that_is_now_gated_reads_as_live_with_the_skip_reason(
     capsys: pytest.CaptureFixture[str],
 ) -> None:
-    spec = next(s for s in build_services() if s.session == "browser")
+    spec = next(s for s in build_services(home=meiva_home()) if s.session == "browser")
 
     probe.print_service_row(
         spec, 16, "no display (headless)", root_units={"browser": {"state": "running"}}

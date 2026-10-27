@@ -52,6 +52,8 @@ from base.packages.extensions.install_registry import InstalledPackage
 from base.packages.plugin_providers import build_model_catalog
 from base.packages.plugins.extensions import EMPTY
 from base.packages.tests.model_catalog import inert_keys
+from base.paths import meiva_home
+from meiva.sdk_surface.tests.context_home import context_over_unit_home as context_over_unit_home
 
 _CONFIG: Any = {"configurable": {"thread_id": "1042"}}
 _MODEL = "jev-1.13.0"
@@ -93,7 +95,7 @@ class _Scorer:
 
 def _catalog(binding: _Scorer, *, spec: DecisionModelSpec | None = None) -> ModelCatalog:
     """The real catalog with the Jev provider's client swapped for `binding`."""
-    real = build_model_catalog()
+    real = build_model_catalog(home=meiva_home())
     provider = real.decision_provider_of(_MODEL)
     assert provider is not None
     swapped = replace(provider, build=lambda _ctx: binding)
@@ -108,6 +110,7 @@ def _catalog(binding: _Scorer, *, spec: DecisionModelSpec | None = None) -> Mode
 def _runtime(database: Database, catalog: ModelCatalog, **pins: Any) -> Runtime[MeivaContext]:
     return Runtime(
         context=MeivaContext(
+            meiva_home=meiva_home(),
             agent=AgentSlices.resolve(
                 {
                     "skills_to_inject_into_system_prompt": ["*"],
@@ -139,7 +142,9 @@ def _install(root: Path, name: str, desc: str = "", *, skills: Path) -> None:
         encoding="utf-8",
     )
     group = root.relative_to(skills).parts
-    install_registry.register(InstalledPackage(name=group[0] if group else name, type="skill"))
+    install_registry.register(
+        InstalledPackage(name=group[0] if group else name, type="skill"), home=meiva_home()
+    )
 
 
 @pytest.fixture

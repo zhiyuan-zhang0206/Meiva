@@ -14,6 +14,8 @@ from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
+from base.paths import meiva_home
+
 
 def sdk_namespace(module: object, name: str) -> Any:
     return getattr(module, name)
@@ -23,6 +25,17 @@ def _as_exec_entry() -> None:
     import importlib.machinery
 
     sys.modules["__main__"].__spec__ = importlib.machinery.ModuleSpec("agent.execution.child", None)
+
+
+# meiva:note
+# A bare Python process that holds a context carrying its Meiva home, the one thing the SDK
+# reads it from; no identity, no clients.
+def _bind_home() -> None:
+    from base.agents.context import MeivaContext
+    from base.paths.home import resolve_meiva_home
+    from meiva.sdk_surface import process_context
+
+    process_context.bind_context(MeivaContext(meiva_home=resolve_meiva_home()))
 
 
 def _executions(counter: Path) -> int:
@@ -134,6 +147,7 @@ def forwarded_setting(counter: Path) -> dict[str, Any]:
 def ensure_twice(counter: Path) -> dict[str, Any]:
     import meiva
 
+    _bind_home()
     meiva.ensure_plugins_loaded()
     meiva.ensure_plugins_loaded()
     return {"installed": _installed(), "executions": _executions(counter)}
@@ -143,6 +157,7 @@ def unreadable_plugin_config(counter: Path) -> dict[str, Any]:
     import meiva
     from meiva.sdk_surface import install
 
+    _bind_home()
     report = _repeated_failure([meiva.ensure_plugins_loaded, meiva.ensure_plugins_loaded])
     return {
         **report,
@@ -172,10 +187,11 @@ def faces_failure(counter: Path) -> dict[str, Any]:
     from base.packages.plugins.enable_config import local_config_path
     from meiva.sdk_surface.installation import installed
 
+    _bind_home()
     meiva.ensure_plugins_loaded()
     surface = installed()
     assert surface is not None and not surface.faces
-    local_config_path().write_text("{not json", encoding="utf-8")
+    local_config_path(home=meiva_home()).write_text("{not json", encoding="utf-8")
     report = _repeated_failure(
         [
             lambda: meiva.ensure_plugins_loaded(surface=False),

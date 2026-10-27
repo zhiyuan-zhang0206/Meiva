@@ -26,6 +26,7 @@ from base.events.live.bus import EventBus
 from base.lm.catalog import ModelCatalog
 from base.packages.plugin_providers import build_model_catalog
 from base.packages.tests.model_catalog import AddModels
+from base.paths import meiva_home
 from gateway.tests.auth.gateway_config import gateway_test_client, spawn_via_http
 
 
@@ -57,7 +58,7 @@ def _spawn_agent(
         EventBus.from_settings(rng=seeded_rng()),
         spawner=spawner,
         machine=local_machine.name(),
-        catalog=build_model_catalog(),
+        catalog=build_model_catalog(home=meiva_home()),
         authority=config_authority,
     )
     return agent_id

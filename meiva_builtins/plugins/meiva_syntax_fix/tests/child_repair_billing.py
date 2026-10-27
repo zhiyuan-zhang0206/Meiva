@@ -7,6 +7,7 @@ import asyncio
 import json
 
 from base.packages.plugin_providers import build_model_catalog
+from base.paths import meiva_home
 from base.telemetry.tests.capture.armed_tracing import BillingRuntime, armed_billing
 from meiva_builtins.plugins.meiva_syntax_fix._llm_repair import repair_once
 from meiva_builtins.plugins.meiva_syntax_fix.tests.hook_support import (
@@ -18,7 +19,7 @@ from meiva_builtins.plugins.meiva_syntax_fix.tests.hook_support import (
 def repair(model: ScriptedRepairModel, tracer: BillingRuntime) -> dict[str, object]:
     ended = len(tracer.spans)
     repaired = asyncio.run(
-        repair_once(model, [], catalog=build_model_catalog(), clock=manual_clock())
+        repair_once(model, [], catalog=build_model_catalog(home=meiva_home()), clock=manual_clock())
     )
     return {
         "repaired": repaired,

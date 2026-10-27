@@ -10,7 +10,7 @@
 # selects services whose capabilities intersect the host's roles. A service also
 # declares ``requires_db`` so database-dependent readiness remains explicit.
 #
-# Plugins expose ``services() -> tuple[ServiceSpec, ...]`` from their services
+# Plugins expose ``services(*, home) -> tuple[ServiceSpec, ...]`` from their services
 # module. ``plugin_services()`` discovers code-present plugins and appends them
 # to the roster: plugin declares, the roster discovers. Each plugin service's
 # own ``ServiceSpec.gate`` keeps cluster-level enablement out of ``gate_reason``.
@@ -32,6 +32,7 @@
 
 from __future__ import annotations
 
+from pathlib import Path
 from typing import assert_never
 
 from base.cluster.dataplane.redis_bridge import RedisBridgeUnconfiguredError, redis_bridge_endpoint
@@ -212,6 +213,7 @@ def services_for_capabilities_annotated(
     machine: MachineIdentityReader,
     host: Host,
     services: tuple[ServiceSpec, ...] | None = None,
+    home: Path,
 ) -> tuple[tuple[ServiceSpec, str | None], ...]:
     """The union of services this host's capability set runs, each paired with its
     gate reason (None = will start, a string = gated out + why).
@@ -228,7 +230,7 @@ def services_for_capabilities_annotated(
     the roster. ``services_for_capabilities`` is the start-roster view that drops
     them.
     """
-    roster = build_services() if services is None else services
+    roster = build_services(home=home) if services is None else services
     return tuple(
         (s, gate_reason(s, machine=machine, host=host)) for s in roster if s.capabilities & roles
     )
@@ -240,6 +242,7 @@ def services_for_capabilities(
     machine: MachineIdentityReader,
     host: Host,
     services: tuple[ServiceSpec, ...] | None = None,
+    home: Path,
 ) -> tuple[ServiceSpec, ...]:
     """The start roster: the capability-union services that will actually launch
     (config/capability-gated ones dropped). ``services_for_capabilities_annotated``
@@ -247,7 +250,7 @@ def services_for_capabilities(
     return tuple(
         s
         for s, reason in services_for_capabilities_annotated(
-            roles, machine=machine, host=host, services=services
+            roles, machine=machine, host=host, services=services, home=home
         )
         if reason is None
     )

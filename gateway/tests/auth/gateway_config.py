@@ -192,7 +192,9 @@ def gateway_test_app(
         resolved_config,
         process=process,
         process_ownership=ownership,
-        catalog=load_model_catalog(build_model_catalog) if catalog is None else catalog,
+        catalog=load_model_catalog(partial(build_model_catalog, home=process.home))
+        if catalog is None
+        else catalog,
     )
 
 

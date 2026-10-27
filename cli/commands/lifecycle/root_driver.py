@@ -29,7 +29,7 @@ import psutil
 
 from base.clock import Timers
 from base.cluster import session_name
-from base.cluster.machine import MachineIdentityReader, MachineRoles
+from base.cluster.machine import MachineRoles
 from base.deploy import start_trace
 from base.deploy.progress_timeout import CRITICAL_SERVICE_SESSIONS
 from base.host.atomic_io import write_text_atomic
@@ -151,16 +151,13 @@ def service_extra_env(spec: ServiceSpec, *, delivery: LaunchDelivery) -> dict[st
 
 
 # meiva:note
-# The capability/config-selected units this root owns, minus the explicit skips.
+# The capability/config-selected units this root owns, minus the explicit skips: `annotated` is the
+# roster of this host's roles with each gated-out unit's reason.
 def start_roster(
-    roles: MachineRoles, launch_skip: set[str], *, machine: MachineIdentityReader, host: Host
+    annotated: tuple[tuple[ServiceSpec, str | None], ...], launch_skip: set[str]
 ) -> tuple[ServiceSpec, ...]:
-    from services.supervision.roster.spec import services_for_capabilities_annotated
-
     return tuple(
-        spec
-        for spec, reason in services_for_capabilities_annotated(roles, machine=machine, host=host)
-        if reason is None and spec.session not in launch_skip
+        spec for spec, reason in annotated if reason is None and spec.session not in launch_skip
     )
 
 
@@ -242,6 +239,7 @@ def tree_manifest(
     *,
     roles: MachineRoles,
     delivery: LaunchDelivery,
+    home: Path,
 ) -> dict[str, object]:
     """Prepare launch inputs without changing any running generation's seed."""
     from services.supervision.meiva_root_glue.manifests import build_manifest
@@ -251,6 +249,7 @@ def tree_manifest(
         repo_root=repo,
         specs=roster,
         environments={s.session: service_extra_env(s, delivery=delivery) for s in roster},
+        home=home,
     )
 
 
@@ -264,7 +263,7 @@ def launch_manifest(
     env: Mapping[str, str],
     inputs: RootLaunchInputs,
 ) -> dict[str, object]:
-    manifest = tree_manifest(roster, repo, roles=roles, delivery=inputs.delivery)
+    manifest = tree_manifest(roster, repo, roles=roles, delivery=inputs.delivery, home=inputs.home)
     manifest["launch_digest"] = launch_digest(repo, env, home=inputs.home)
     return manifest
 

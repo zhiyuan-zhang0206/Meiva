@@ -233,7 +233,9 @@ def preloaded_note(
 def preloaded_skills_note(ctx: MeivaContext) -> HumanMessage | None:
 
     prompt = ctx.require_agent().prompt
-    view = read_view((), prompt.skills_to_expand_at_start, prompt.sdk_disable)
+    view = read_view(
+        (), prompt.skills_to_expand_at_start, prompt.sdk_disable, home=ctx.require_meiva_home()
+    )
     selection = resolve_prompt_skills(view.expand, view)
     warn_unresolved("skills_to_expand_at_start", selection.unresolved)
     if not selection.skills:
@@ -247,13 +249,16 @@ def fork_tail_skills_note(
     names: list[str],
     sdk_disable: Sequence[str],
     *,
+    home: Path,
     created_at: datetime | None = None,
 ) -> HumanMessage | None:
 
     if not names:
         return None
     disabled = effective_sdk_disable(sdk_disable)
-    selection = resolve_prompt_skills(names, SkillView((), (), disabled, read_skills(disabled)))
+    selection = resolve_prompt_skills(
+        names, SkillView((), (), disabled, read_skills(disabled, home=home))
+    )
     warn_unresolved("fork_tail_skills", selection.unresolved)
     return _skill_bodies_note(
         selection.skills,

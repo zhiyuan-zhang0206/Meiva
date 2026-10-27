@@ -32,6 +32,7 @@ from base.log.tests.log_records import LogRecords
 from base.log.tests.log_records import loguru_records as loguru_records
 from base.packages.plugin_providers import build_model_catalog
 from base.packages.tests.model_catalog import inert_keys
+from base.paths import meiva_home
 from services.derived.memory_indexer import rerank
 from services.derived.memory_indexer.backends.base import KIND_BODY, KIND_DESC, ChunkHit
 from services.derived.memory_indexer.chunking import chunk_text
@@ -54,7 +55,7 @@ Second paragraph about rolling back.
 
 @pytest.fixture
 def catalog() -> ModelCatalog:
-    return build_model_catalog()
+    return build_model_catalog(home=meiva_home())
 
 
 def _write(root: Path, rel: str, text: str) -> Path:

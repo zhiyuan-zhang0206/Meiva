@@ -24,7 +24,5 @@ exports = ["composer_commands.py", "dashboard_supply.py", "docs", "extensions", 
 "plugin_config_contracts.py" = "strict"
 
 [debt.ambient-read]
-"composer_commands.py#home base.paths.meiva_home" = 2
 "composer_commands.py#settings base.packages.plugins.flags.read_declared_flag" = 1
 "mcp_config.py#environ base.host.system.probes.display_available" = 2
-"mcp_config.py#home base.paths.meiva_home" = 3

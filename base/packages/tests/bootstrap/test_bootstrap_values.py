@@ -15,6 +15,7 @@ from base.host.net.predicates import is_loopback_host
 from base.host.net.url_secret import url_with_host
 from base.packages.plugin_providers import build_model_catalog
 from base.packages.plugins.config_registration import plugin_bootstrap_config
+from base.paths import meiva_home
 
 
 @pytest.fixture
@@ -43,8 +44,10 @@ def test_bootstrap_values_use_env_aliases_and_skip_unset(
 ) -> None:
     vals = config.bootstrap_config_values(
         bootstrap_authority,
-        provider_key_envs=(binding.key_env for binding in build_model_catalog().bindings.values()),
-        plugin_cluster_config=plugin_bootstrap_config(),
+        provider_key_envs=(
+            binding.key_env for binding in build_model_catalog(home=meiva_home()).bindings.values()
+        ),
+        plugin_cluster_config=plugin_bootstrap_config(home=meiva_home()),
     )
     # DB/Redis URLs are required (always set in test env) → present, keyed by alias.
     assert "MEIVA_DB_URL" in vals
@@ -69,8 +72,10 @@ def test_bootstrap_excludes_machine_local_fields(bootstrap_authority: ConfigAuth
     # Machine-local / bootstrap / per-host fields must never be relayed.
     vals = config.bootstrap_config_values(
         bootstrap_authority,
-        provider_key_envs=(binding.key_env for binding in build_model_catalog().bindings.values()),
-        plugin_cluster_config=plugin_bootstrap_config(),
+        provider_key_envs=(
+            binding.key_env for binding in build_model_catalog(home=meiva_home()).bindings.values()
+        ),
+        plugin_cluster_config=plugin_bootstrap_config(home=meiva_home()),
     )
     for excluded in (
         "MEIVA_MACHINE_NAME",
@@ -97,8 +102,10 @@ def test_bootstrap_serves_explicit_set_to_empty(
 
     vals = config.bootstrap_config_values(
         bootstrap_authority,
-        provider_key_envs=(binding.key_env for binding in build_model_catalog().bindings.values()),
-        plugin_cluster_config=plugin_bootstrap_config(),
+        provider_key_envs=(
+            binding.key_env for binding in build_model_catalog(home=meiva_home()).bindings.values()
+        ),
+        plugin_cluster_config=plugin_bootstrap_config(home=meiva_home()),
     )
     assert vals["MEIVA_SKILLS_TO_INJECT_INTO_SYSTEM_PROMPT"] == ""
 
@@ -116,8 +123,10 @@ def test_bootstrap_still_skips_none(
 
     vals = config.bootstrap_config_values(
         bootstrap_authority,
-        provider_key_envs=(binding.key_env for binding in build_model_catalog().bindings.values()),
-        plugin_cluster_config=plugin_bootstrap_config(),
+        provider_key_envs=(
+            binding.key_env for binding in build_model_catalog(home=meiva_home()).bindings.values()
+        ),
+        plugin_cluster_config=plugin_bootstrap_config(home=meiva_home()),
     )
     assert "MEIVA_TRACE_RETENTION_DAYS" not in vals
 
@@ -148,9 +157,10 @@ def test_bootstrap_includes_all_required_fields(bootstrap_authority: ConfigAutho
         config.bootstrap_config_values(
             bootstrap_authority,
             provider_key_envs=(
-                binding.key_env for binding in build_model_catalog().bindings.values()
+                binding.key_env
+                for binding in build_model_catalog(home=meiva_home()).bindings.values()
             ),
-            plugin_cluster_config=plugin_bootstrap_config(),
+            plugin_cluster_config=plugin_bootstrap_config(home=meiva_home()),
         )
     )
     missing = required_aliases - bundle
@@ -181,9 +191,10 @@ def test_bootstrap_serves_no_daemon_health_port(bootstrap_authority: ConfigAutho
             config.bootstrap_config_values(
                 bootstrap_authority,
                 provider_key_envs=(
-                    binding.key_env for binding in build_model_catalog().bindings.values()
+                    binding.key_env
+                    for binding in build_model_catalog(home=meiva_home()).bindings.values()
                 ),
-                plugin_cluster_config=plugin_bootstrap_config(),
+                plugin_cluster_config=plugin_bootstrap_config(home=meiva_home()),
             )
         )
     )
@@ -215,8 +226,10 @@ def test_bootstrap_serves_reachable_host_for_loopback_urls(
     redis = str(config.settings.data_plane.redis_url)
     vals = config.bootstrap_config_values(
         bootstrap_authority,
-        provider_key_envs=(binding.key_env for binding in build_model_catalog().bindings.values()),
-        plugin_cluster_config=plugin_bootstrap_config(),
+        provider_key_envs=(
+            binding.key_env for binding in build_model_catalog(home=meiva_home()).bindings.values()
+        ),
+        plugin_cluster_config=plugin_bootstrap_config(home=meiva_home()),
     )
     served_db, served_redis = urlsplit(vals["MEIVA_DB_URL"]), urlsplit(vals["MEIVA_REDIS_URL"])
     # host swapped to the reachable address; port + database kept verbatim
@@ -242,8 +255,10 @@ def test_bootstrap_keeps_loopback_when_gateway_is_single_box(
 
     vals = config.bootstrap_config_values(
         bootstrap_authority,
-        provider_key_envs=(binding.key_env for binding in build_model_catalog().bindings.values()),
-        plugin_cluster_config=plugin_bootstrap_config(),
+        provider_key_envs=(
+            binding.key_env for binding in build_model_catalog(home=meiva_home()).bindings.values()
+        ),
+        plugin_cluster_config=plugin_bootstrap_config(home=meiva_home()),
     )
     served, owner = urlsplit(vals["MEIVA_DB_URL"]), urlsplit(config.settings.data_plane.db_url)
     assert (served.username, served.password) == (owner.username, None)
@@ -270,8 +285,10 @@ def test_bootstrap_keeps_existing_reachable_url_host(
 
     vals = config.bootstrap_config_values(
         bootstrap_authority,
-        provider_key_envs=(binding.key_env for binding in build_model_catalog().bindings.values()),
-        plugin_cluster_config=plugin_bootstrap_config(),
+        provider_key_envs=(
+            binding.key_env for binding in build_model_catalog(home=meiva_home()).bindings.values()
+        ),
+        plugin_cluster_config=plugin_bootstrap_config(home=meiva_home()),
     )
     served, owner = urlsplit(vals["MEIVA_DB_URL"]), urlsplit(host_url)
     assert (served.username, served.password) == ("meiva_main", None)

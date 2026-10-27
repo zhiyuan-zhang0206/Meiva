@@ -15,6 +15,7 @@ import pytest
 
 from base.config import ConfigBoot
 from base.packages.extensions import install_registry as reg
+from base.paths import meiva_home
 from cli.commands.extensions.skill import cmd_skill_update, cmd_skill_upgrade
 from cli.commands.extensions.tests.support.source_bindings import PROD_ELSEWHERE, prod_home_is
 from cli.database.runtime import CommandRuntime
@@ -53,7 +54,7 @@ def repo(tmp_path: Path) -> Path:
 
 
 def _entry(name: str) -> reg.InstalledPackage:
-    pkg = reg.get(name)
+    pkg = reg.get(name, home=meiva_home())
     assert pkg is not None
     return pkg
 
@@ -61,7 +62,7 @@ def _entry(name: str) -> reg.InstalledPackage:
 def _set_mode_off(name: str) -> None:
     """Opt a package out of the content channel — the designed escape hatch
     that keeps `skill update` applying checkout content (design §5.7-1)."""
-    with reg.mutate() as registry:
+    with reg.mutate(home=meiva_home()) as registry:
         row = next(p for p in registry.packages if p.name == name)
         row.update.mode = "off"
 
@@ -88,7 +89,7 @@ def test_update_lands_missing_and_reports(
     assert "project-x" not in out
     assert (unit_home / "skills" / "builtin-a" / "SKILL.md").is_file()
     assert not (unit_home / "skills" / "project-x").exists()
-    assert reg.get("project-x") is None
+    assert reg.get("project-x", home=unit_home) is None
 
 
 def test_update_agents_project_skill_is_not_repo_native(
@@ -256,7 +257,8 @@ def test_update_adopts_matching_user_residue(
     reg.register(
         reg.InstalledPackage(
             name="builtin-a", type="skill", source=".agents/skills/builtin-a", origin="user"
-        )
+        ),
+        home=unit_home,
     )
     assert (
         cmd_skill_update(
@@ -281,7 +283,8 @@ def test_update_converges_a_diverged_user_residue(
     reg.register(
         reg.InstalledPackage(
             name="builtin-a", type="skill", source=".agents/skills/builtin-a", origin="user"
-        )
+        ),
+        home=unit_home,
     )
     assert (
         cmd_skill_update(
@@ -310,7 +313,8 @@ def test_update_leaves_third_party_user_package_alone(
     reg.register(
         reg.InstalledPackage(
             name="builtin-a", type="skill", source="https://example.com/skills.git", origin="user"
-        )
+        ),
+        home=unit_home,
     )
     assert (
         cmd_skill_update(
@@ -380,7 +384,9 @@ def _install_skill(
 
 def test_upgrade_skips_unupdatable(unit_home: Path, capsys) -> None:
     _write_skill(unit_home / "skills", "local-skill")
-    reg.register(reg.InstalledPackage(name="local-skill", type="skill"))  # no source
+    reg.register(
+        reg.InstalledPackage(name="local-skill", type="skill"), home=unit_home
+    )  # no source
     assert cmd_skill_upgrade("local-skill", home=unit_home, now=datetime.now(UTC)) == 1
     assert "no recorded source" in capsys.readouterr().err  # pyright: ignore[reportUnknownMemberType]
 
@@ -506,7 +512,8 @@ def test_update_adopt_sets_builtin_trust(
             source=".agents/skills/builtin-a",
             trust="unreviewed",
             installed_at=datetime.now(UTC).isoformat(),
-        )
+        ),
+        home=unit_home,
     )
     assert (
         cmd_skill_update(
@@ -537,12 +544,12 @@ def test_update_unchanged_reanchors_stale_origin_path(
     )
     e = _entry("builtin-a")
     e.origin_path = "/Users/x/Meiva/.worktrees/meiva-dead/.agents/skills/builtin-a"
-    reg.save(reg.load())  # persist
+    reg.save(reg.load(home=unit_home), home=unit_home)  # persist
     # after reload, update the entry
-    pkg = reg.get("builtin-a")
+    pkg = reg.get("builtin-a", home=unit_home)
     assert pkg is not None
     pkg.origin_path = "/Users/x/Meiva/.worktrees/meiva-dead/.agents/skills/builtin-a"
-    reg.save(reg.load())
+    reg.save(reg.load(home=unit_home), home=unit_home)
     assert (
         cmd_skill_update(
             None,

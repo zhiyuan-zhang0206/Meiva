@@ -25,7 +25,7 @@ from base.host.permissions_helper.client import PermissionsHelperError, RootStat
 from base.host.system.tests.fake_commands import DARWIN_ARM64, fake_host
 from base.host.tests.short_tmp import short_tmp as short_tmp
 from base.native_process.root_control import instance_lock
-from base.paths import root_manifests_path, root_run_dir
+from base.paths import meiva_home, root_manifests_path, root_run_dir
 from base.sessions.env_forwarding import managed_service_env
 from base.sessions.tests.refuse_helper import refuse_helper
 from base.sessions.tests.scripted_helper import ScriptedHelper, serve
@@ -494,22 +494,24 @@ def test_collector_config_bytes_change_the_live_unit_generation(
     config = otel_collector_config(unit_home)
     config.parent.mkdir(parents=True, exist_ok=True)
     config.write_text("receivers: {otlp: {}}\n")
-    collector = next(s for s in composition.build_services() if s.session == "otel-collector")
+    collector = next(
+        s for s in composition.build_services(home=unit_home) if s.session == "otel-collector"
+    )
 
     before = driver.unit_digests(
         driver.tree_manifest(
-            (collector,), tmp_path, roles=ROLES, delivery=launch_delivery(tmp_path)
+            (collector,), tmp_path, roles=ROLES, delivery=launch_delivery(tmp_path), home=unit_home
         )
     )
     unchanged = driver.unit_digests(
         driver.tree_manifest(
-            (collector,), tmp_path, roles=ROLES, delivery=launch_delivery(tmp_path)
+            (collector,), tmp_path, roles=ROLES, delivery=launch_delivery(tmp_path), home=unit_home
         )
     )
     config.write_text("receivers: {otlp: {protocols: {http: {}}}}\n")
     after = driver.unit_digests(
         driver.tree_manifest(
-            (collector,), tmp_path, roles=ROLES, delivery=launch_delivery(tmp_path)
+            (collector,), tmp_path, roles=ROLES, delivery=launch_delivery(tmp_path), home=unit_home
         )
     )
 
@@ -530,7 +532,7 @@ def test_plugin_birth_config_is_part_of_the_existing_unit_generation(tmp_path: P
 
     def unit_of(spec: ServiceSpec) -> UnitManifest:
         manifest = driver.tree_manifest(
-            (spec,), tmp_path, roles=ROLES, delivery=launch_delivery(tmp_path)
+            (spec,), tmp_path, roles=ROLES, delivery=launch_delivery(tmp_path), home=meiva_home()
         )
         from typing import Any
 

@@ -106,7 +106,7 @@ async def test_first_hosted_invocation_only_resumes_unhalted_pending_handoff(
         bus=event_bus,
         db=database,
         catalog=model_catalog,
-        commands=CommandCatalog.system(skills=list),
+        commands=CommandCatalog.system(skills=list, home=meiva_home()),
     )
     ctx = MeivaContext(
         ops_pool=aops_pool,

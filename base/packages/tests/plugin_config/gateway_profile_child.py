@@ -5,6 +5,8 @@ import sys
 
 import pytest
 
+from base.paths import meiva_home
+
 
 def gateway_overlay() -> None:
     from base.config import settings
@@ -13,18 +15,25 @@ def gateway_overlay() -> None:
     from base.packages.plugins.plugin_errors import InvalidConfigOverlay
 
     assert not settings.has_domain("agent")
-    models = build_model_catalog().models
+    models = build_model_catalog(home=meiva_home()).models
     if sys.argv[1] == "declaring-model":
-        validate_config_overlay({"completion_notice_policy": "hourly"}, configs={}, models=models)
+        validate_config_overlay(
+            {"completion_notice_policy": "hourly"}, configs={}, models=models, home=meiva_home()
+        )
         with pytest.raises(InvalidConfigOverlay, match="completion_notice_policy"):
             validate_config_overlay(
-                {"completion_notice_policy": "bogus"}, configs={}, models=models
+                {"completion_notice_policy": "bogus"}, configs={}, models=models, home=meiva_home()
             )
     elif sys.argv[1] == "validators":
-        validate_config_overlay({"skills_to_expand_at_start": "a,b"}, configs={}, models=models)
+        validate_config_overlay(
+            {"skills_to_expand_at_start": "a,b"}, configs={}, models=models, home=meiva_home()
+        )
         with pytest.raises(InvalidConfigOverlay, match="only accepts"):
             validate_config_overlay(
-                {"eval_network_allowlist": ["web", "shell"]}, configs={}, models=models
+                {"eval_network_allowlist": ["web", "shell"]},
+                configs={},
+                models=models,
+                home=meiva_home(),
             )
     else:
         raise ValueError("unknown gateway overlay case")

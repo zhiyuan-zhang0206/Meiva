@@ -19,6 +19,7 @@ from base.host.env.agent_slices import AgentSlices
 from base.lm.catalog import ModelCatalog
 from base.packages.plugin_providers import build_model_catalog
 from base.packages.plugins.extensions import EMPTY, ExtensionRegistry, PluginContributions
+from base.paths import meiva_home
 
 
 def _runtime(
@@ -35,7 +36,7 @@ def _runtime(
                 },
                 default_reader=defaults(),
             ),
-            catalog=build_model_catalog(),
+            catalog=build_model_catalog(home=meiva_home()),
             extensions=extensions,
             clock_factory=Clock.from_settings,
         )

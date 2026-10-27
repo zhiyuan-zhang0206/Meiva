@@ -24,7 +24,7 @@ def pkg_of(plugin_dir: Path) -> str:
 
 
 def discovered_and_config(
-    report: load_report.Reporter | None = None,
+    report: load_report.Reporter | None = None, *, home: Path
 ) -> tuple[dict[str, Path], plugins_cfg.PluginsConfig]:
     """Discover plugins + read the enable config, fail-soft on dangling entries.
 
@@ -34,21 +34,21 @@ def discovered_and_config(
     and treated as disabled (the same contract the loader always had —
     2026-08-28 meiva_ledger incident).
     """
-    discovered = plugins_cfg.discover_plugins()
+    discovered = plugins_cfg.discover_plugins(home=home)
     known = set(discovered)
     try:
-        config = plugins_cfg.load(known)
+        config = plugins_cfg.load(known, home=home)
     except plugins_cfg.DanglingPlugin as exc:
         plugins_cfg.report_dangling(exc, report)
-        config = plugins_cfg.load(known, allow_dangling=True)
+        config = plugins_cfg.load(known, allow_dangling=True, home=home)
     return discovered, config
 
 
 def enabled_plugin_dirs(
-    report: load_report.Reporter | None = None,
+    report: load_report.Reporter | None = None, *, home: Path
 ) -> list[tuple[str, Path]]:
     """(name, plugin_dir) for every enabled discovered plugin, name-sorted."""
-    discovered, config = discovered_and_config(report)
+    discovered, config = discovered_and_config(report, home=home)
     return [
         (name, discovered[name])
         for name in sorted(config.plugins)

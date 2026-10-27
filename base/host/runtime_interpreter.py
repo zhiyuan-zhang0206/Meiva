@@ -26,11 +26,11 @@ def runtime_venv(*, checkout: Path | None = None) -> Path:
     return repo_root() / ".venv"
 
 
-def external_plugin_read_root() -> Path:
+def external_plugin_read_root(*, home: Path) -> Path:
     """Shared discovery source; never use this as an installer destination."""
     from base.paths import plugins_dir
 
-    return plugins_dir()
+    return plugins_dir(home=home)
 
 
 class LoadedRuntimeError(ValueError):

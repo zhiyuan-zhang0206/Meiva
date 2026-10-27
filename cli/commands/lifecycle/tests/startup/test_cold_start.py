@@ -22,6 +22,7 @@ import pytest
 from base.deploy import start_trace
 from base.packages.extensions import install_registry
 from base.packages.extensions import registry as reg
+from base.paths import meiva_home
 from cli.commands.converge.spec import ConvergeStep
 from cli.commands.converge.steps import ensure_meiva_home_dirs
 from cli.commands.lifecycle.start.cold_start import ColdStart, prepare_cold_start
@@ -143,7 +144,8 @@ def test_the_extension_steps_adopt_this_machines_installs_and_land_the_clusters_
     install_registry.register(
         install_registry.InstalledPackage(
             name="pre-registry", type="skill", origin="user", enabled=True, trust="unreviewed"
-        )
+        ),
+        home=meiva_home(),
     )
     elsewhere = _write_skill(tmp_path / "elsewhere", "cluster-skill", "From the cluster.")
     with run.database_factory().pool() as pool:

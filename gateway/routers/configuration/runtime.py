@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+from pathlib import Path
 from typing import Any
 
 from fastapi import APIRouter, HTTPException, Query, Request
@@ -96,6 +97,7 @@ async def _dispatch_config_read(
     authority: ConfigAuthority,
     local_machine: MachineIdentityReader,
     host: Host,
+    home: Path,
 ) -> ConfigReadResult:
 
     try:
@@ -133,6 +135,7 @@ async def _dispatch_config_read(
             authority=authority,
             local_machine=local_machine.name(),
             host=host,
+            home=home,
         )
     )
 
@@ -196,6 +199,7 @@ async def _dispatch_config_write(
     trace_id: str | None = None,
     local_machine: MachineIdentityReader,
     host: Host,
+    home: Path,
 ) -> ConfigWriteOpResult:
 
     try:
@@ -242,6 +246,7 @@ async def _dispatch_config_write(
             trace_id=trace_id,
             local_machine=local_machine.name(),
             host=host,
+            home=home,
         )
     )
 
@@ -271,11 +276,14 @@ async def get_config(request: Request, machine: str | None = None) -> ConfigView
         authority=request.app.state.config_authority,
         local_machine=request.app.state.machine,
         host=request.app.state.host,
+        home=request.app.state.gateway_process.home,
     )
     host_fields = read.host_fields
 
     fields: list[ConfigFieldView] = []
-    for meta in panel_metadata(authority=request.app.state.config_authority):
+    for meta in panel_metadata(
+        authority=request.app.state.config_authority, home=request.app.state.gateway_process.home
+    ):
         if meta.scope == "host":
             hf = host_fields[meta.name]
             fields.append(
@@ -328,7 +336,11 @@ async def get_config(request: Request, machine: str | None = None) -> ConfigView
             )
 
     raw_overrides = (
-        panel_overrides(authority=request.app.state.config_authority, local=True)
+        panel_overrides(
+            authority=request.app.state.config_authority,
+            local=True,
+            home=request.app.state.gateway_process.home,
+        )
         if machine is None
         else read.raw_overrides
     )
@@ -413,7 +425,13 @@ def get_resolved_config(request: Request, model: str | None = None) -> ResolvedC
 
     catalog = require_model_catalog(request)
     target = model or gateway_config(request).models.llm_model
-    metas = {m.name: m for m in panel_metadata(authority=request.app.state.config_authority)}
+    metas = {
+        m.name: m
+        for m in panel_metadata(
+            authority=request.app.state.config_authority,
+            home=request.app.state.gateway_process.home,
+        )
+    }
     per_agent = per_agent_field_names()
 
     fields: list[ResolvedFieldView] = []
@@ -469,6 +487,7 @@ async def _put_local(
     trace_id: str | None,
     local_machine: MachineIdentityReader,
     host: Host,
+    home: Path,
 ) -> tuple[ConfigWriteOpResult, list[str]]:
 
     host_result = await _dispatch_config_write(
@@ -482,6 +501,7 @@ async def _put_local(
         trace_id=trace_id,
         local_machine=local_machine,
         host=host,
+        home=home,
     )
     cluster_changed: set[str] = set()
     if host_result.applied and has_cluster_patch:
@@ -555,11 +575,17 @@ async def put_config(
         local_machine_name=request.app.state.machine.name(),
     )
 
-    metas = {m.name: m for m in panel_metadata(authority=request.app.state.config_authority)}
+    metas = {
+        m.name: m
+        for m in panel_metadata(
+            authority=request.app.state.config_authority,
+            home=request.app.state.gateway_process.home,
+        )
+    }
     plan = ConfigPatchPlan.parse(body, metas, is_remote=machine is not None)
     _refuse(write_plan.plan_rejection(plan))
     try:
-        owner = patch_owner(set(body))
+        owner = patch_owner(set(body), home=request.app.state.gateway_process.home)
     except InvalidConfigOverlay as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from None
     if owner is not None and machine is None:
@@ -581,6 +607,7 @@ async def put_config(
             trace_id=trace_id,
             local_machine=request.app.state.machine,
             host=request.app.state.host,
+            home=request.app.state.gateway_process.home,
         )
     else:
         host_result = await _dispatch_config_write(
@@ -593,6 +620,7 @@ async def put_config(
             trace_id=trace_id,
             local_machine=request.app.state.machine,
             host=request.app.state.host,
+            home=request.app.state.gateway_process.home,
         )
         restart_required = host_result.restart_required
 

@@ -111,7 +111,7 @@ def test_loadable_names_respect_the_host_contract(
         (d / "SKILL.md").write_text(f"---\nname: {name}\ndescription: d\n---\n", encoding="utf-8")
         if manifest is not None:
             (d / "meiva-plugin.json").write_text(json.dumps(manifest), encoding="utf-8")
-        reg.register(reg.InstalledPackage(name=name, type="skill", enabled=True))
+        reg.register(reg.InstalledPackage(name=name, type="skill", enabled=True), home=home)
 
     head = _head(paths.repo_root())
     # meiva:note
@@ -129,7 +129,7 @@ def test_loadable_names_respect_the_host_contract(
     skill("side", _manifest_for("side", requires_commit=side))
     skill("too_new", _manifest_for("too_new", engines={"meiva": ">=2099"}))
 
-    loadable = loadable_skill_names()
+    loadable = loadable_skill_names(home=home)
     assert "plain" in loadable and "ok" in loadable
     assert "future" not in loadable and "side" not in loadable and "too_new" not in loadable
     assert "unresolvable" in (host_contract_reason(home / "skills" / "future") or "")

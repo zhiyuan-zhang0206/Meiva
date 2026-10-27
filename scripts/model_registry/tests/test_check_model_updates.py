@@ -8,6 +8,7 @@ from typing import Any
 
 import pytest
 
+from base.paths import meiva_home
 from scripts.model_registry import check_model_updates
 
 _SCRIPT = Path(check_model_updates.__file__)
@@ -25,7 +26,9 @@ def write_env_file(tracker: Any, path: Path, *, missing: str | None = None) -> N
 
 
 def known_models(tracker: Any, source: Any, *, models: dict[str, Any] | None = None) -> list[str]:
-    catalog_models = tracker.build_model_catalog().models if models is None else models
+    catalog_models = (
+        tracker.build_model_catalog(home=meiva_home()).models if models is None else models
+    )
     return [
         model_id for model_id, spec in catalog_models.items() if spec.provider == source.provider
     ][:1]

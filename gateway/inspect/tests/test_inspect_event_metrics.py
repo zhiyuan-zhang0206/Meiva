@@ -8,6 +8,7 @@ from typing import Any, Literal
 import psycopg
 import pytest
 
+from base.paths import meiva_home
 from gateway.inspect import _event_metrics, _plugin_metrics
 from gateway.inspect._plugin_faces import SHIPPED_PLUGINS_DIR, enabled_plugin_names
 
@@ -165,7 +166,9 @@ def test_anything_outside_the_vocabulary_is_refused(
 def test_every_shipped_inspector_metric_is_evaluable(db_conn: psycopg.Connection) -> None:
     specs = [
         s
-        for s in _plugin_metrics.load_plugin_metrics(SHIPPED_PLUGINS_DIR, enabled_plugin_names())
+        for s in _plugin_metrics.load_plugin_metrics(
+            SHIPPED_PLUGINS_DIR, enabled_plugin_names(home=meiva_home())
+        )
         if "inspector" in s.output
     ]
     assert specs

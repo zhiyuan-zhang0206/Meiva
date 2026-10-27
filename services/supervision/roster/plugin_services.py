@@ -1,7 +1,7 @@
 # meiva:note
 # Plugin-registered ops services — discovery of the ``services.py`` faces present on this machine.
 #
-# Plugins expose ``services() -> tuple[ServiceSpec, ...]`` from their services module;
+# Plugins expose ``services(*, home) -> tuple[ServiceSpec, ...]`` from their services module;
 # ``plugin_services()`` discovers the code-present plugins and returns what they declare, and
 # ``services.supervision.roster.composition.build_services()`` appends it to the core roster: the plugin declares, ops discovers.
 # Each plugin service's own ``ServiceSpec.gate`` keeps cluster-level enablement out of
@@ -11,6 +11,7 @@
 from __future__ import annotations
 
 import importlib.util
+import inspect
 import sys
 from collections.abc import Mapping
 from pathlib import Path
@@ -19,42 +20,42 @@ from typing import Any
 from services.supervision.roster.service_spec import ServiceSpec
 
 
+# meiva:note
+# The services contributed by the plugins PRESENT on this machine.
+#
+# Discovery, not import-of-known-plugins: `base.packages.plugins.enable_config` enumerates the
+# plugins installed on THIS machine (builtin + external), and each that ships a
+# ``services.py`` exposing ``services(*, home) -> tuple[ServiceSpec, ...]`` gets folded
+# into the roster. This keeps the direction "plugin declares, ops discovers" — no
+# reverse edge from ops into any specific plugin's domain code.
+#
+# Discovery keys on plugin **presence**, NOT the agent-facing enable-state
+# (``meiva plugins enable/disable``): the roster is a machine/cluster concern, and
+# coupling it to the agent-plugin-registration plane would be cross-plane
+# semantics. A plugin gates its own service (whether it starts) via an explicit
+# settings field in ``ServiceSpec.gate`` — e.g. task-maintenance's
+# Fleet ``task_maintenance_enabled`` — which is deterministic at daemon-start and
+# unaffected by any per-agent config overlay. start / root / status all
+# follow, since they derive from `build_services()`.
+#
+# The ``services.py`` module is loaded by FILE PATH (like
+# `base.packages.plugin_config_admin.update_all_disk_images` loads `default_config.py`) so an
+# external plugin under ``~/.meiva/plugins/`` — off the ``plugins.`` package path —
+# can register too; it must import only light deps (ops / base), never its
+# own `plugin.py`, so this load does not drag the agent kernel into the ops
+# process.
+#
+# A missing services.py is an optional absent face. Once present, import,
+# declaration and config errors are reported and propagated to the operation
+# owner; an invalid roster is never presented as a successful partial one.
+# Session-name collisions also fail: no rule can pick between two owners.
 def plugin_services(
-    plugin_dirs: Mapping[str, Path] | None = None,
+    plugin_dirs: Mapping[str, Path] | None = None, *, home: Path
 ) -> tuple[ServiceSpec, ...]:
-    """The services contributed by the plugins PRESENT on this machine.
-
-    Discovery, not import-of-known-plugins: `base.packages.plugins.enable_config` enumerates the
-    plugins installed on THIS machine (builtin + external), and each that ships a
-    ``services.py`` exposing ``services() -> tuple[ServiceSpec, ...]`` gets folded
-    into the roster. This keeps the direction "plugin declares, ops discovers" — no
-    reverse edge from ops into any specific plugin's domain code.
-
-    Discovery keys on plugin **presence**, NOT the agent-facing enable-state
-    (``meiva plugins enable/disable``): the roster is a machine/cluster concern, and
-    coupling it to the agent-plugin-registration plane would be cross-plane
-    semantics. A plugin gates its own service (whether it starts) via an explicit
-    settings field in ``ServiceSpec.gate`` — e.g. task-maintenance's
-    Fleet ``task_maintenance_enabled`` — which is deterministic at daemon-start and
-    unaffected by any per-agent config overlay. start / root / status all
-    follow, since they derive from `build_services()`.
-
-    The ``services.py`` module is loaded by FILE PATH (like
-    `base.packages.plugin_config_admin.update_all_disk_images` loads `default_config.py`) so an
-    external plugin under ``~/.meiva/plugins/`` — off the ``plugins.`` package path —
-    can register too; it must import only light deps (ops / base), never its
-    own `plugin.py`, so this load does not drag the agent kernel into the ops
-    process.
-
-    A missing services.py is an optional absent face. Once present, import,
-    declaration and config errors are reported and propagated to the operation
-    owner; an invalid roster is never presented as a successful partial one.
-    Session-name collisions also fail: no rule can pick between two owners.
-    """
     from base.packages.plugins import load_report
     from base.packages.plugins.enable_config import installed_plugin_dirs
 
-    discovered = installed_plugin_dirs() if plugin_dirs is None else plugin_dirs
+    discovered = installed_plugin_dirs(home=home) if plugin_dirs is None else plugin_dirs
     specs: list[ServiceSpec] = []
     for name, plugin_dir in sorted(discovered.items()):
         services_py = plugin_dir / "services.py"
@@ -62,7 +63,7 @@ def plugin_services(
             continue
         try:
             module = load_plugin_module(name, services_py)
-            specs.extend(_declared_plugin_services(name, module))
+            specs.extend(_declared_plugin_services(name, module, home=home))
         except (KeyboardInterrupt, SystemExit):
             raise
         except BaseException as exc:
@@ -71,12 +72,18 @@ def plugin_services(
     return tuple(specs)
 
 
-def _declared_plugin_services(name: str, module: object) -> tuple[ServiceSpec, ...]:
+def _declared_plugin_services(name: str, module: object, *, home: Path) -> tuple[ServiceSpec, ...]:
     """Validate the present services face before accepting any roster entries."""
     declare = getattr(module, "services", None)
     if not callable(declare):
         raise PluginServiceError(f"plugin {name!r} services.py must define callable services()")
-    declared = declare()
+    try:
+        inspect.signature(declare).bind(home=home)
+    except TypeError as exc:
+        raise PluginServiceError(
+            f"plugin {name!r} services() must accept the keyword home: {exc}"
+        ) from exc
+    declared = declare(home=home)
     declared_any: Any = declared
     if not isinstance(declared, tuple):
         raise PluginServiceError(f"plugin {name!r} services() must return tuple[ServiceSpec, ...]")

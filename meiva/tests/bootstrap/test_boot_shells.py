@@ -17,6 +17,7 @@ from base.clock import SYSTEM_TIMERS, Clock, ClockConfig
 from base.cluster.machine import MachineIdentityReader
 from base.config.tests.configuration import snapshot_process_config
 from base.events.live.bus import EventBus
+from base.paths import meiva_home
 from base.paths.tests.homes import unit_home as unit_home
 from meiva import boot
 from meiva.sdk_surface import install, process_context
@@ -39,20 +40,20 @@ def _accept_state(declared: object) -> object:
 def test_steps_that_change_nothing_leave_the_slot_as_it_was(step: LoadStep) -> None:
     held = Installation.bare(sampling=fixed_sampling_owner())
     with held_installation(held):
-        boot.settle_installed(step, None)
+        boot.settle_installed(step, None, home=meiva_home())
         assert slot() is held
 
 
 def test_the_recorded_failure_step_raises_the_recorded_failure() -> None:
     failure = RuntimeError("plugin load failed earlier")
     with held_installation(Loading(failure=failure)), pytest.raises(RuntimeError) as caught:
-        boot.settle_installed(LoadStep.RAISE_FAILURE, None)
+        boot.settle_installed(LoadStep.RAISE_FAILURE, None, home=meiva_home())
     assert caught.value is failure
 
 
 def test_a_surface_load_is_not_a_step_that_settles_an_installed_state() -> None:
     with pytest.raises(ValueError, match="needs its owners"):
-        boot.settle_installed(LoadStep.LOAD_SURFACE, None)
+        boot.settle_installed(LoadStep.LOAD_SURFACE, None, home=meiva_home())
 
 
 def test_a_private_name_never_loads_plugins() -> None:

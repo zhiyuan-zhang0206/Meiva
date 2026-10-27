@@ -11,6 +11,7 @@ from fastapi.testclient import TestClient
 from base.lm.catalog import ModelCatalog
 from base.packages.plugin_providers import build_model_catalog
 from base.packages.tests.model_catalog import AddModels
+from base.paths import meiva_home
 from gateway.tests.auth.gateway_config import gateway_test_client, spawn_via_http
 from gateway.tests.support.runner_ops.ops_stub import OpsReply, RunnerOps, runner_ops
 
@@ -130,7 +131,7 @@ def test_get_models_every_model_has_reasoning_effort_control() -> None:
 def _assert_provider_binding_vocabulary(
     models: dict[str, Any], provider: str, binding: str
 ) -> None:
-    binding_levels = build_model_catalog().bindings[binding].effort_levels
+    binding_levels = build_model_catalog(home=meiva_home()).bindings[binding].effort_levels
     assert binding_levels is not None
     provider_models = [m for m, info in models.items() if info["provider"] == provider]
     assert provider_models, f"no {provider} models registered for the binding check"
@@ -139,7 +140,7 @@ def _assert_provider_binding_vocabulary(
 
 
 def _assert_provider_vocabulary_subset(models: dict[str, Any], provider: str, binding: str) -> None:
-    binding_levels = build_model_catalog().bindings[binding].effort_levels
+    binding_levels = build_model_catalog(home=meiva_home()).bindings[binding].effort_levels
     assert binding_levels is not None
     fallback = set(binding_levels)
     provider_models = [m for m, info in models.items() if info["provider"] == provider]
@@ -155,7 +156,7 @@ def test_get_models_reasoning_effort_options_match_factory_tables() -> None:
     models = resp.json()["models"]
 
     for model, info in models.items():
-        expected_levels = build_model_catalog().models[model].effort_levels
+        expected_levels = build_model_catalog(home=meiva_home()).models[model].effort_levels
         assert expected_levels is not None, model
         assert info["reasoning_effort_options"] == list(expected_levels), model
 
@@ -198,7 +199,7 @@ def test_get_models_reasoning_effort_default_is_the_per_model_tuning_value() -> 
     }
 
     for model, info in models.items():
-        expected = build_model_catalog().models[model].tuning.reasoning_effort
+        expected = build_model_catalog(home=meiva_home()).models[model].tuning.reasoning_effort
         assert info["reasoning_effort_default"] == expected, model
         assert expected, model
         assert expected in info["reasoning_effort_options"], model

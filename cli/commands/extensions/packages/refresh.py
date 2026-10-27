@@ -239,7 +239,7 @@ class Pass:
 
     def run(self) -> RefreshReport:
         try:
-            registry = install_registry.load()
+            registry = install_registry.load(home=self.home)
         except (install_registry.InstallRegistryError, OSError) as exc:
             return RefreshReport(
                 ran=False,
@@ -694,7 +694,7 @@ class Pass:
         name against the freshly-read registry (never a stale full save)."""
         if self.channel is None and not self.deltas:
             return
-        with install_registry.mutate() as registry:
+        with install_registry.mutate(home=self.home) as registry:
             if self.channel is not None:
                 registry.channels["core"] = self.channel
             for key, delta in self.deltas.items():

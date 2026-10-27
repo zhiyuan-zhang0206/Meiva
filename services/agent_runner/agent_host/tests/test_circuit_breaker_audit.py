@@ -23,6 +23,7 @@ from base.events.live.bus import EventBus
 from base.host.env.agent_slices import AgentSlices
 from base.lm.catalog import ModelCatalog
 from base.packages.plugin_providers import build_model_catalog
+from base.paths import meiva_home
 from base.telemetry.tests.capture.event_capture import EmittedEvents
 from base.telemetry.tests.capture.event_capture import emitted_events as emitted_events
 from services.agent_runner.agent_host.tests.table_faults import refused_write
@@ -65,7 +66,7 @@ async def test_the_breaker_open_event_is_recorded_in_audit_events(
             agent=AgentSlices.resolve(default_reader=defaults()),
             db=Database.from_settings(gate=database_gate),
             bus=EventBus.from_settings(rng=seeded_rng()),
-            catalog=build_model_catalog(),
+            catalog=build_model_catalog(home=meiva_home()),
             clock_factory=Clock.from_settings,
         ),
         agent_id=agent_id,
@@ -119,7 +120,7 @@ async def test_a_failed_audit_write_is_reported_and_does_not_undo_the_open_break
                 agent=AgentSlices.resolve(default_reader=defaults()),
                 db=Database.from_settings(gate=database_gate),
                 bus=EventBus.from_settings(rng=seeded_rng()),
-                catalog=build_model_catalog(),
+                catalog=build_model_catalog(home=meiva_home()),
                 clock_factory=Clock.from_settings,
             ),
             agent_id=agent_id,

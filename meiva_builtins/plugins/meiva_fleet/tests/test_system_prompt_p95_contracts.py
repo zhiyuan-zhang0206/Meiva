@@ -19,6 +19,7 @@ from base.packages.tests.model_catalog import add_bindings as add_bindings
 from base.packages.tests.model_catalog import add_models as add_models
 from base.packages.tests.model_catalog import model_catalog as model_catalog
 from base.packages.tests.model_catalog import set_prices as set_prices
+from base.paths import meiva_home
 from base.paths.home import resolve_meiva_home
 from meiva.sdk_surface import install
 from meiva.sdk_surface.installation import installed
@@ -62,7 +63,9 @@ def test_p95_contracts_leave_rare_namespaces_on_demand(
         default_reader=defaults(agent__sdk_expand_in_system_prompt=factory())
     )
 
-    text = sdk_expand_section(SectionInputs(slices, model_catalog, read_live_sdk(slices.prompt)))
+    text = sdk_expand_section(
+        SectionInputs(slices, model_catalog, read_live_sdk(slices.prompt, home=meiva_home()))
+    )
 
     for module in ["shell", "files", "agents", "tasks"]:
         assert f"## meiva.{module}\n" in text

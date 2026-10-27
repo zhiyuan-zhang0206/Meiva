@@ -52,7 +52,7 @@ async def test_run_daemon_replaces_a_leftover_file_and_serves_over_the_socket(
     socket_path = str(short_dir / "d.sock")
     Path(socket_path).write_text("leftover")
 
-    daemon_task = asyncio.create_task(daemon_mod.run_daemon(socket_path, daemon_config(short_dir)))
+    daemon_task = asyncio.create_task(daemon_mod.run_daemon(socket_path, daemon_config(unit_home)))
     reader, writer = await connect_when_listening(daemon_task, socket_path)
     try:
         request = {"id": 42, "method": "list_tools", "params": {"server": "fs"}}
@@ -96,7 +96,7 @@ async def test_a_stopped_daemon_releases_its_shared_children_and_its_socket(
     write_servers(unit_home, {"disc": fixture_entry(shared=True, fixture_spawn_log=spawn_log)})
     socket_path = str(short_dir / "d.sock")
 
-    daemon_task = asyncio.create_task(daemon_mod.run_daemon(socket_path, daemon_config(short_dir)))
+    daemon_task = asyncio.create_task(daemon_mod.run_daemon(socket_path, daemon_config(unit_home)))
     reader, writer = await connect_when_listening(daemon_task, socket_path)
     request = {"id": 1, "method": "call_tool", "params": {"server": "disc", "tool": "pid"}}
     writer.write((json.dumps(request) + "\n").encode())

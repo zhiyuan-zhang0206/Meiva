@@ -44,6 +44,7 @@ from base.packages.plugins.extensions import (
     SdkMember,
     SdkWrap,
 )
+from base.paths import meiva_home
 from base.paths.home import resolve_meiva_home
 from base.telemetry.tests.capture.event_capture import EmittedEvents
 from base.telemetry.tests.capture.event_capture import emitted_events as emitted_events
@@ -66,7 +67,7 @@ def capture(emitted_events: EmittedEvents) -> Iterator[ClientSet]:
     """Bind a context whose clients' event pipeline is the capture, and put the previous one back."""
     clients = ClientSet(pipeline_factory=emitted_events.producer)
     previous = process_context.unbind_context()
-    process_context.bind_context(MeivaContext(clients=clients))
+    process_context.bind_context(MeivaContext(clients=clients, meiva_home=meiva_home()))
     try:
         yield clients
     finally:
@@ -217,7 +218,7 @@ def test_instrument_targets_does_not_evaluate_raising_dynamic_member() -> None:
 
     machine = MachineFacts.of(name="", role=(), host="", description=None)
     prior = process_context.unbind_context()
-    process_context.bind_context(MeivaContext(machine=machine))
+    process_context.bind_context(MeivaContext(machine=machine, meiva_home=meiva_home()))
     try:
         # sanity: normal attribute access really does raise under this condition
         with pytest.raises(base.cluster.machine.MachineNameMissing):

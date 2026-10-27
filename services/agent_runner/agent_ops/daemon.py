@@ -496,7 +496,7 @@ async def serve_ops_daemon(
     from base.deploy.schema.migrations import assert_schema_current
 
     runtime = config.ensure_eager()
-    catalog = build_model_catalog()
+    catalog = build_model_catalog(home=home)
     authority = ConfigAuthority(
         runtime=runtime,
         all_domains=runtime if runtime.profile is None else config.complete_read_model(),

@@ -13,6 +13,7 @@ from base.packages.plugins.enable_config import write_local
 from base.packages.plugins.gate import ContributionMismatch
 from base.packages.plugins.loading.registry import declarations
 from base.packages.plugins.manifest import ManifestError
+from base.paths import meiva_home
 from meiva.sdk_surface.extensions import load_extensions
 
 _PLUGIN_MODULE_PREFIXES = ("meiva_builtins.plugins.", "plugins.")
@@ -119,7 +120,8 @@ def _enable(**plugins: bool) -> None:
                 },
                 **{name: {"enabled": on} for name, on in plugins.items()},
             }
-        }
+        },
+        home=meiva_home(),
     )
 
 
@@ -136,7 +138,7 @@ def test_declarations_are_attributed_to_the_declaring_plugin(unit_home: Path):
     _write_plugin(unit_home, "demo", _DEMO_PLUGIN, runtime=_DEMO_RUNTIME)
     _enable(demo=True)
 
-    catalog = catalog_mod.build_catalog(sampling=fixed_sampling_owner())
+    catalog = catalog_mod.build_catalog(sampling=fixed_sampling_owner(), home=unit_home)
     view = catalog.plugin("demo")
 
     assert view.enabled is True
@@ -159,7 +161,7 @@ def test_a_disabled_plugin_reports_no_declarations(unit_home: Path):
     _write_plugin(unit_home, "demo", _DEMO_PLUGIN, runtime=_DEMO_RUNTIME)
     _enable(demo=False)
 
-    view = catalog_mod.build_catalog(sampling=fixed_sampling_owner()).plugin("demo")
+    view = catalog_mod.build_catalog(sampling=fixed_sampling_owner(), home=unit_home).plugin("demo")
 
     assert view.enabled is False
     assert view.contributions == ()
@@ -169,8 +171,16 @@ def test_a_reload_does_not_accumulate_contributions(unit_home: Path):
     _write_plugin(unit_home, "demo", _DEMO_PLUGIN, runtime=_DEMO_RUNTIME)
     _enable(demo=True)
 
-    first = catalog_mod.build_catalog(sampling=fixed_sampling_owner()).plugin("demo").contributions
-    second = catalog_mod.build_catalog(sampling=fixed_sampling_owner()).plugin("demo").contributions
+    first = (
+        catalog_mod.build_catalog(sampling=fixed_sampling_owner(), home=unit_home)
+        .plugin("demo")
+        .contributions
+    )
+    second = (
+        catalog_mod.build_catalog(sampling=fixed_sampling_owner(), home=unit_home)
+        .plugin("demo")
+        .contributions
+    )
 
     assert len(first) == len(second)
 
@@ -181,7 +191,7 @@ def test_framework_hooks_are_not_reported_as_plugin_contributions(unit_home: Pat
     _write_plugin(unit_home, "demo", _DEMO_PLUGIN, runtime=_DEMO_RUNTIME)
     _enable(demo=True)
 
-    catalog = catalog_mod.build_catalog(sampling=fixed_sampling_owner())
+    catalog = catalog_mod.build_catalog(sampling=fixed_sampling_owner(), home=unit_home)
     reported = {c.detail for view in catalog.plugins for c in view.contributions}
     framework = {
         f"{type(h).__module__}.{type(h).__qualname__}"
@@ -248,7 +258,9 @@ def test_declared_vs_registered_reports_both_directions(unit_home: Path):
     )
     _enable(declared=True)
 
-    view = catalog_mod.build_catalog(sampling=fixed_sampling_owner()).plugin("declared")
+    view = catalog_mod.build_catalog(sampling=fixed_sampling_owner(), home=unit_home).plugin(
+        "declared"
+    )
     assert view.manifest is not None
     statuses = {
         (e.surface, e.identifier): e.status for e in catalog_mod.declared_vs_registered(view)
@@ -266,7 +278,7 @@ def test_a_plugin_without_a_manifest_fails_the_catalog(unit_home: Path):
     _enable(demo=True)
 
     with pytest.raises(ManifestError, match=r"demo.*meiva-plugin\.json not found"):
-        catalog_mod.build_catalog(sampling=fixed_sampling_owner())
+        catalog_mod.build_catalog(sampling=fixed_sampling_owner(), home=unit_home)
 
 
 def test_install_time_manifest_keys_have_no_runtime_registry():
@@ -283,7 +295,7 @@ def test_install_time_manifest_keys_have_no_runtime_registry():
 def test_unknown_plugin_fails_fast_and_names_the_installed_ones(unit_home: Path):
     _write_plugin(unit_home, "demo", _DEMO_PLUGIN, runtime=_DEMO_RUNTIME)
     _enable(demo=True)
-    catalog = catalog_mod.build_catalog(sampling=fixed_sampling_owner())
+    catalog = catalog_mod.build_catalog(sampling=fixed_sampling_owner(), home=unit_home)
 
     with pytest.raises(catalog_mod.UnknownPluginError, match="demo"):
         catalog.plugin("nope")
@@ -294,7 +306,9 @@ def test_a_dashed_name_resolves_to_the_plugin_directory(unit_home: Path):
     _enable(demo_plugin=True)
 
     assert (
-        catalog_mod.build_catalog(sampling=fixed_sampling_owner()).plugin("demo-plugin").name
+        catalog_mod.build_catalog(sampling=fixed_sampling_owner(), home=unit_home)
+        .plugin("demo-plugin")
+        .name
         == "demo_plugin"
     )
 
@@ -361,7 +375,10 @@ def load_failures() -> LoadFailures:
 
 def _registered(load_failures: LoadFailures) -> dict[str, tuple[str, ...]]:
     registry = load_extensions(
-        validate_state=plugin_state_schema, report=load_failures, sampling=fixed_sampling_owner()
+        validate_state=plugin_state_schema,
+        report=load_failures,
+        sampling=fixed_sampling_owner(),
+        home=meiva_home(),
     ).registry
     return {
         name: tuple(point for point in _HOOK_POINTS if contributions.hooks(point))
@@ -431,7 +448,7 @@ def test_a_plugin_whose_manifest_and_contribute_disagree_on_hooks_is_excluded(
     assert name == "gate_bad"
     assert isinstance(exc, ContributionMismatch)
     assert problem in str(exc)
-    assert "gate_bad" in {declared for declared, _dir, _c in declarations()}
+    assert "gate_bad" in {declared for declared, _dir, _c in declarations(home=unit_home)}
 
 
 @pytest.mark.parametrize(
@@ -536,7 +553,10 @@ def test_a_valid_state_declaration_is_admitted(load_failures: LoadFailures, unit
     _enable(gate_state=True)
 
     registry = load_extensions(
-        validate_state=plugin_state_schema, report=load_failures, sampling=fixed_sampling_owner()
+        validate_state=plugin_state_schema,
+        report=load_failures,
+        sampling=fixed_sampling_owner(),
+        home=unit_home,
     ).registry
 
     assert [(plugin, cls.__name__) for plugin, cls in registry.state_classes()] == [

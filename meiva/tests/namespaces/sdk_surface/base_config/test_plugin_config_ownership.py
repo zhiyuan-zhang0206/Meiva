@@ -24,18 +24,25 @@ from base.packages.tests.plugin_config.test_plugin_config import (
 from base.packages.tests.plugin_config.test_plugin_config import (
     isolated_registry as isolated_registry,
 )
+from base.paths import meiva_home
 from base.paths.home import resolve_meiva_home
 
 
 def test_syntax_fix_ruff_format_overlay_is_accepted(model_catalog: ModelCatalog) -> None:
 
-    validate_config_overlay({"syntax_fix_ruff_format": True}, models=model_catalog.models)
-    validate_config_overlay({"syntax_fix_ruff_format": False}, models=model_catalog.models)
+    validate_config_overlay(
+        {"syntax_fix_ruff_format": True}, models=model_catalog.models, home=meiva_home()
+    )
+    validate_config_overlay(
+        {"syntax_fix_ruff_format": False}, models=model_catalog.models, home=meiva_home()
+    )
 
 
-def test_bind_undo_drops_the_binding(isolated_registry: dict[str, BaseModel], unit_home):
+def test_bind_undo_drops_the_binding(isolated_registry: dict[str, BaseModel], unit_home: Path):
     undo = bind_plugin_config(
-        PluginConfigOwner("test_plugin", FixtureConfig, disk_image_path("test_plugin")),
+        PluginConfigOwner(
+            "test_plugin", FixtureConfig, disk_image_path("test_plugin", home=unit_home)
+        ),
         configs=isolated_registry,
     )
     assert is_per_agent_field("test_plugin", "marker", configs=isolated_registry) is True
@@ -44,13 +51,15 @@ def test_bind_undo_drops_the_binding(isolated_registry: dict[str, BaseModel], un
     assert "test_plugin" not in isolated_registry
     assert is_per_agent_field("test_plugin", "marker", configs=isolated_registry) is False
     bind_plugin_config(
-        PluginConfigOwner("test_plugin", FixtureConfig, disk_image_path("test_plugin")),
+        PluginConfigOwner(
+            "test_plugin", FixtureConfig, disk_image_path("test_plugin", home=unit_home)
+        ),
         configs=isolated_registry,
     )
 
 
 def test_install_refuses_a_plugin_whose_config_does_not_bind_and_installs_the_rest(
-    isolated_registry: dict[str, BaseModel], unit_home
+    isolated_registry: dict[str, BaseModel], unit_home: Path
 ):
     from types import SimpleNamespace
 
@@ -63,7 +72,7 @@ def test_install_refuses_a_plugin_whose_config_does_not_bind_and_installs_the_re
     from meiva.sdk_surface import install
     from meiva.sdk_surface.installation import installed
 
-    drifted = disk_image_path("drifted")
+    drifted = disk_image_path("drifted", home=unit_home)
     drifted.parent.mkdir(parents=True)
     drifted.write_text(json.dumps({"flag": True, "marker": ".git", "extra_field": 42}))
 

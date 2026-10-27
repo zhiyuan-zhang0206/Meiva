@@ -45,7 +45,7 @@ def _breaker_ctx(pool: AsyncConnectionPool, *, database_gate: ProcessDbGate) -> 
         agent=AgentSlices.resolve(default_reader=defaults()),
         db=Database.from_settings(gate=database_gate),
         bus=EventBus.from_settings(rng=seeded_rng()),
-        catalog=build_model_catalog(),
+        catalog=build_model_catalog(home=meiva_home()),
         clock_factory=Clock.from_settings,
     )
 
@@ -120,7 +120,7 @@ async def test_host_persists_provider_failure_before_releasing_turn(
                 catalog=model_catalog,
                 bus=EventBus.from_settings(rng=seeded_rng()),
                 db=Database.from_settings(gate=database_gate),
-                commands=CommandCatalog.system(skills=list),
+                commands=CommandCatalog.system(skills=list, home=meiva_home()),
             )
             assert not (
                 await host._invoke_until_done(

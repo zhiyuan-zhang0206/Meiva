@@ -28,6 +28,7 @@ from base.host.env.health_ports import DEFAULT_PORTS
 from base.native_process.stop_timing import HOST_STOP_CEILING_S, OPS_STOP_CEILING_S, STOP_MARGIN_S
 from base.packages.plugin_config_admin import update_all_disk_images
 from base.packages.plugins.enable_config import discover_plugins
+from base.paths import meiva_home
 from services.supervision import roster
 from services.supervision.meiva_root_glue import manifests as gen
 from services.supervision.roster import composition
@@ -48,7 +49,11 @@ _BOTH: frozenset[MachineRole] = _GATEWAY | _RUNNER
 
 
 def _healthz_specs() -> dict[str, ServiceSpec]:
-    return {s.session: s for s in composition.build_services() if s.health_name is not None}
+    return {
+        s.session: s
+        for s in composition.build_services(home=meiva_home())
+        if s.health_name is not None
+    }
 
 
 def _module(spec: ServiceSpec) -> str:
@@ -212,9 +217,11 @@ _DECLARED_STOP_CEILINGS = {"agent-host": HOST_STOP_CEILING_S, "ops": OPS_STOP_CE
 def test_every_standard_daemon_renders_as_exec_python_dash_m_its_module(unit_home: Path) -> None:
     """I4: the unit pid stays a direct child of root, and a declaration cannot smuggle
     undeclared environment, arguments, a stop window or sealed inputs into the rendered unit."""
-    update_all_disk_images(plugin_dirs=discover_plugins(), home=unit_home)
+    update_all_disk_images(plugin_dirs=discover_plugins(home=unit_home), home=unit_home)
     for spec in _healthz_specs().values():
-        (unit,) = gen.build_units([spec], capabilities=spec.capabilities, repo_root=_REPO)
+        (unit,) = gen.build_units(
+            [spec], capabilities=spec.capabilities, repo_root=_REPO, home=unit_home
+        )
         assert unit["exec"] == [
             "/bin/sh",
             "-c",
@@ -235,7 +242,7 @@ def test_every_standard_daemon_renders_as_exec_python_dash_m_its_module(unit_hom
 def test_names_are_unique_across_the_whole_roster() -> None:
     """I5: two entries sharing a session, a health name, a URL or a pidfile would fight
     over one unit, one port or one pid record, and the second would never show up."""
-    specs = composition.build_services()
+    specs = composition.build_services(home=meiva_home())
     sessions = [s.session for s in specs]
     assert len(set(sessions)) == len(sessions), sorted(sessions)
 
@@ -254,11 +261,13 @@ def test_a_healthz_endpoint_is_declared_not_left_to_its_url() -> None:
     standard daemon (`health_name`) or an endpoint that names its home (`home_healthz`).
     `meiva start` decides which ports it can check for a foreign occupant from that
     declaration, so a new `/healthz` entry cannot be silently in or out of the check."""
-    for spec in composition.build_services():
+    for spec in composition.build_services(home=meiva_home()):
         serves_healthz = spec.curl_url is not None and spec.curl_url.endswith("/healthz")
         declared = spec.health_name is not None or spec.home_healthz
         assert serves_healthz == declared, spec.session
-    assert {s.session for s in composition.build_services() if s.home_healthz} == {"gate"}
+    assert {s.session for s in composition.build_services(home=meiva_home()) if s.home_healthz} == {
+        "gate"
+    }
 
 
 def test_a_standard_daemons_session_derives_its_health_name() -> None:

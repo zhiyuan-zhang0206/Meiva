@@ -491,6 +491,7 @@ async def run(
     *,
     config: ConfigBoot,
     runtime: Path,
+    home: Path,
     database: Callable[[], Database],
     image: LoadedCommit,
     root: Path,
@@ -510,7 +511,7 @@ async def run(
     # Fail fast before deriving liveness or binding healthz: an unknown
     # MEIVA_EMBEDDING_BACKEND must produce the clean configuration FATAL.
     try:
-        catalog = build_model_catalog()
+        catalog = build_model_catalog(home=home)
         provider = get_provider(
             inputs.embedding_name,
             catalog=catalog,
@@ -628,6 +629,7 @@ def main() -> None:
                 run(
                     config=config,
                     runtime=process_home / "run",
+                    home=process_home,
                     database=database,
                     image=image,
                     root=memory_root(roles=machine.role(), home=process_home),

@@ -394,7 +394,9 @@ async def get_agent_plugin_metrics(agent_id: int, request: Request) -> list[Plug
     ``gateway/inspect/_plugin_metrics.py``.
     """
     registry = await asyncio.to_thread(
-        _plugin_metrics.load_plugin_metrics, SHIPPED_PLUGINS_DIR, enabled_plugin_names()
+        _plugin_metrics.load_plugin_metrics,
+        SHIPPED_PLUGINS_DIR,
+        enabled_plugin_names(home=request.app.state.gateway_process.home),
     )
     return await asyncio.to_thread(
         _plugin_metrics.metrics_for_agent,
@@ -421,7 +423,9 @@ async def get_agent_inspect_widgets(agent_id: int, request: Request) -> list[Ins
     ``gateway/inspect/_plugin_widgets.py``.
     """
     specs = await asyncio.to_thread(
-        _plugin_widgets.load_inspect_widgets, SHIPPED_PLUGINS_DIR, enabled_plugin_names()
+        _plugin_widgets.load_inspect_widgets,
+        SHIPPED_PLUGINS_DIR,
+        enabled_plugin_names(home=request.app.state.gateway_process.home),
     )
     return await asyncio.to_thread(
         _plugin_widgets.widgets_for_agent, request.app.state.db_pool, agent_id, specs=specs

@@ -27,8 +27,6 @@ from typing import Any, TypeGuard
 
 from pydantic import BaseModel, ValidationError
 
-from base import paths
-
 _log = logging.getLogger(__name__)
 
 
@@ -59,9 +57,9 @@ def _validate_schema(data: dict[str, Any]) -> McpEnabledConfig:
         raise SchemaInvalid(f"mcp_enabled.json schema invalid: {e}") from e
 
 
-def local_config_path() -> Path:
+def local_config_path(*, home: Path) -> Path:
     """Per-machine MCP-enable overlay file path: `~/.meiva/mcp_enabled.json`."""
-    return paths.meiva_home() / "mcp_enabled.json"
+    return home / "mcp_enabled.json"
 
 
 class _MalformedOverlayError(McpEnabledConfigError):
@@ -76,11 +74,11 @@ def _is_str_dict(value: object) -> TypeGuard[dict[str, Any]]:
     return isinstance(value, dict)
 
 
-def _read_local() -> dict[str, Any] | None:
+def _read_local(*, home: Path) -> dict[str, Any] | None:
     """Read the per-machine MCP-enable overlay file. None = absent; a
     present-but-malformed file raises `_MalformedOverlay` — the caller decides
     the fail-closed behavior instead of inheriting fail-open."""
-    p = local_config_path()
+    p = local_config_path(home=home)
     if not p.exists():
         return None
     try:
@@ -93,12 +91,12 @@ def _read_local() -> dict[str, Any] | None:
     return dict(data)
 
 
-def write_local(cfg: McpEnabledConfig) -> None:
+def write_local(cfg: McpEnabledConfig, *, home: Path) -> None:
     """Full-replace the per-machine MCP-enable overlay file. The write path for
     `set_mcp_enabled` (and `meiva mcp enable/disable`). Atomic (temp + replace):
     a crash mid-write must not produce the malformed file that fail-closed
     reads reject (audit 2026-08-08 P2)."""
-    p = local_config_path()
+    p = local_config_path(home=home)
     p.parent.mkdir(parents=True, exist_ok=True)
     fd, tmp = tempfile.mkstemp(dir=p.parent, prefix=f".{p.name}.", suffix=".tmp")
     try:
@@ -111,7 +109,7 @@ def write_local(cfg: McpEnabledConfig) -> None:
         raise
 
 
-def read_enabled() -> dict[str, bool]:
+def read_enabled(*, home: Path) -> dict[str, bool]:
     """Read the per-machine overlay; return {server-name: enabled} for the explicit
     entries only. Absent file -> {}. A present-but-malformed file RAISES
     `McpEnabledConfigError` (fail-closed): a corrupt overlay's intent is
@@ -121,14 +119,14 @@ def read_enabled() -> dict[str, bool]:
     A server NOT present in the returned map means "enabled" (default-on); that
     default is applied by the consumer, not here.
     """
-    raw = _read_local()
+    raw = _read_local(home=home)
     if raw is None:
         return {}
     cfg = _validate_schema(raw)
     return {name: entry.enabled for name, entry in cfg.mcp_servers.items()}
 
 
-def set_mcp_enabled(name: str, *, enabled: bool) -> McpEnabledConfig:
+def set_mcp_enabled(name: str, *, enabled: bool, home: Path) -> McpEnabledConfig:
     """Set one MCP server's enabled flag in the per-machine local overlay file.
 
     Reads the current overlay, sets `mcp_servers[name] = {enabled}`, full-replaces
@@ -136,10 +134,10 @@ def set_mcp_enabled(name: str, *, enabled: bool) -> McpEnabledConfig:
     overlay entry for a server that isn't currently defined is harmless, it just
     filters nothing.
     """
-    raw = _read_local() or {}
+    raw = _read_local(home=home) or {}
     existing = _validate_schema(raw).mcp_servers
     servers = dict(existing)
     servers[name] = McpServerEntry(enabled=enabled)
     cfg = McpEnabledConfig(mcp_servers=servers)
-    write_local(cfg)
+    write_local(cfg, home=home)
     return cfg

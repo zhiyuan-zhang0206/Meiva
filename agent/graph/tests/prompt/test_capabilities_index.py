@@ -21,6 +21,7 @@ from base.packages.plugin_providers import build_model_catalog
 from base.packages.plugins.extensions import EMPTY
 from base.packages.skills.tree import Skill
 from base.paths import meiva_home, skills_dir
+from meiva.sdk_surface.tests.context_home import context_over_unit_home as context_over_unit_home
 
 CHROME = McpServer("chrome", "Drive a browser")
 
@@ -35,7 +36,7 @@ def _delegation_check(root: Path, *, inject: list[str], servers: tuple[McpServer
                     agent__skills_to_inject_into_system_prompt=inject,
                 )
             ),
-            build_model_catalog(),
+            build_model_catalog(home=meiva_home()),
             LiveSdk(view, servers, ()),
         )
     )
@@ -289,7 +290,9 @@ def test_disable_entries_cover_the_entry_and_what_is_under_it(
 def _install_skill(dirname: str, description: str, body: str, *, group: str | None = None) -> None:
     root = skills_dir(meiva_home())
     write_skill(root / group if group else root, dirname, dirname, description, body=body)
-    install_registry.register(InstalledPackage(name=group or dirname, type="skill"))
+    install_registry.register(
+        InstalledPackage(name=group or dirname, type="skill"), home=meiva_home()
+    )
 
 
 @pytest.mark.usefixtures("unit_home")
@@ -303,7 +306,8 @@ def test_building_the_prompt_indexes_installed_skills_and_never_their_bodies() -
             default_reader=defaults(agent__skills_to_inject_into_system_prompt=["*"])
         ),
         agent_id=1,
-        catalog=build_model_catalog(),
+        catalog=build_model_catalog(home=meiva_home()),
+        home=meiva_home(),
     )
 
     assert "## meiva.skills" not in prompt
@@ -321,7 +325,8 @@ def test_a_skill_outside_the_registry_is_not_indexed() -> None:
         EMPTY,
         AgentSlices.resolve(default_reader=defaults()),
         agent_id=1,
-        catalog=build_model_catalog(),
+        catalog=build_model_catalog(home=meiva_home()),
+        home=meiva_home(),
     )
 
     assert "meiva.skills.alpha" in prompt

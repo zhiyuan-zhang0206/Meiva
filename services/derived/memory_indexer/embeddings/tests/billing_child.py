@@ -18,6 +18,7 @@ from opentelemetry.sdk.trace import ReadableSpan
 from base.lm.pricing import PriceBook, quote
 from base.log import logger
 from base.packages.plugin_providers import build_model_catalog
+from base.paths import meiva_home
 from base.telemetry.tests.capture.armed_tracing import armed_billing
 from services.derived.memory_indexer.embeddings.base import EmbeddingAPIError
 from services.derived.memory_indexer.embeddings.gemini import (
@@ -120,7 +121,7 @@ def verify_usage_event(messages: list[loguru.Message], name: str, prices: PriceB
 
 
 def scenario(name: str, directory: Path) -> None:
-    catalog = build_model_catalog()
+    catalog = build_model_catalog(home=meiva_home())
     if name == "unpriced":
         catalog = replace(catalog, prices=PriceBook({}, {}))
     statuses = (503, 503, 200) if name == "retry" else ((503,) if name == "failed" else (200,))

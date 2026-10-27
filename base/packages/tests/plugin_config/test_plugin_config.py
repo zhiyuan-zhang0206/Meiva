@@ -38,6 +38,7 @@ from base.packages.plugins.plugin_errors import (
     SchemaDriftError,
 )
 from base.packages.tests.plugin_config.gateway_profile import run_gateway_profile
+from base.paths import meiva_home
 
 
 class FixtureConfig(BaseModel):
@@ -101,28 +102,40 @@ def test_bind_non_basemodel_raises(isolated_registry: dict[str, BaseModel]):
     with pytest.raises(TypeError, match="BaseModel subclass"):
         bind_plugin_config(
             PluginConfigOwner(
-                "test_plugin", cast(type[BaseModel], _NotBaseModel), disk_image_path("test_plugin")
+                "test_plugin",
+                cast(type[BaseModel], _NotBaseModel),
+                disk_image_path("test_plugin", home=meiva_home()),
             ),
             configs=isolated_registry,
         )
 
 
-def test_bind_duplicate_raises(isolated_registry: dict[str, BaseModel], unit_home):
+# meiva:note
+# The owner of the fixture plugin's config image under `home`.
+def _owner(home: Path) -> PluginConfigOwner:
+    return PluginConfigOwner(
+        "test_plugin", FixtureConfig, disk_image_path("test_plugin", home=home)
+    )
+
+
+def test_bind_duplicate_raises(isolated_registry: dict[str, BaseModel], unit_home: Path):
     bind_plugin_config(
-        PluginConfigOwner("test_plugin", FixtureConfig, disk_image_path("test_plugin")),
+        _owner(unit_home),
         configs=isolated_registry,
     )
     with pytest.raises(DuplicateRegistration, match="test_plugin"):
         bind_plugin_config(
-            PluginConfigOwner("test_plugin", FixtureConfig, disk_image_path("test_plugin")),
+            _owner(unit_home),
             configs=isolated_registry,
         )
 
 
-def test_bind_auto_writes_default_when_missing(isolated_registry: dict[str, BaseModel], unit_home):
+def test_bind_auto_writes_default_when_missing(
+    isolated_registry: dict[str, BaseModel], unit_home: Path
+):
     """disk image missing → bind_plugin_config auto-writes default + instantiation OK."""
     bind_plugin_config(
-        PluginConfigOwner("test_plugin", FixtureConfig, disk_image_path("test_plugin")),
+        _owner(unit_home),
         configs=isolated_registry,
     )
 
@@ -137,12 +150,12 @@ def test_bind_auto_writes_default_when_missing(isolated_registry: dict[str, Base
     assert cfg.flag is True
     assert cfg.marker == ".git"
     # Disk image should have been written
-    img = disk_image_path("test_plugin")
+    img = disk_image_path("test_plugin", home=unit_home)
     assert img.exists()
     assert json.loads(img.read_text()) == {"flag": True, "marker": ".git"}
 
 
-def test_bind_reads_existing_image(isolated_registry: dict[str, BaseModel], unit_home):
+def test_bind_reads_existing_image(isolated_registry: dict[str, BaseModel], unit_home: Path):
     """disk image exists and schema matches → bind uses disk values, not cls defaults."""
     tmp_path = unit_home
     img = tmp_path / "configs" / "test_plugin" / "config.json"
@@ -150,7 +163,7 @@ def test_bind_reads_existing_image(isolated_registry: dict[str, BaseModel], unit
     img.write_text(json.dumps({"flag": False, "marker": ".hg"}))  # pyright: ignore[reportUnknownMemberType]
 
     bind_plugin_config(
-        PluginConfigOwner("test_plugin", FixtureConfig, disk_image_path("test_plugin")),
+        _owner(unit_home),
         configs=isolated_registry,
     )
 
@@ -166,7 +179,7 @@ def test_bind_reads_existing_image(isolated_registry: dict[str, BaseModel], unit
     assert cfg.marker == ".hg"
 
 
-def test_bind_schema_drift_raises(isolated_registry: dict[str, BaseModel], unit_home):
+def test_bind_schema_drift_raises(isolated_registry: dict[str, BaseModel], unit_home: Path):
     """disk image field set doesn't match cls → SchemaDriftError to guide update."""
     tmp_path = unit_home
     img = tmp_path / "configs" / "test_plugin" / "config.json"
@@ -175,13 +188,13 @@ def test_bind_schema_drift_raises(isolated_registry: dict[str, BaseModel], unit_
 
     with pytest.raises(SchemaDriftError, match="schema drift"):
         bind_plugin_config(
-            PluginConfigOwner("test_plugin", FixtureConfig, disk_image_path("test_plugin")),
+            _owner(unit_home),
             configs=isolated_registry,
         )
     assert "test_plugin" not in isolated_registry
 
 
-def test_merge_disk_image_adds_new_field(isolated_registry: dict[str, BaseModel], unit_home):
+def test_merge_disk_image_adds_new_field(isolated_registry: dict[str, BaseModel], unit_home: Path):
     """New field exists in cls but not in disk → merge writes the default value to disk."""
     tmp_path = unit_home
     img = tmp_path / "configs" / "test_plugin" / "config.json"
@@ -190,15 +203,15 @@ def test_merge_disk_image_adds_new_field(isolated_registry: dict[str, BaseModel]
         json.dumps({"flag": True})
     )  # missing marker  # pyright: ignore[reportUnknownMemberType]
 
-    added, removed = merge_disk_image_schema(
-        PluginConfigOwner("test_plugin", FixtureConfig, disk_image_path("test_plugin"))
-    )
+    added, removed = merge_disk_image_schema(_owner(unit_home))
     assert added == {"marker"}
     assert removed == set()
     assert json.loads(img.read_text()) == {"flag": True, "marker": ".git"}  # pyright: ignore[reportUnknownArgumentType, reportUnknownMemberType]
 
 
-def test_merge_disk_image_drops_removed_field(isolated_registry: dict[str, BaseModel], unit_home):
+def test_merge_disk_image_drops_removed_field(
+    isolated_registry: dict[str, BaseModel], unit_home: Path
+):
     """Removed field (disk has, cls doesn't) → drop from disk image + return removed set for CLI display.
 
     Dropping is key: the field-set strict equality check in bind_plugin_config requires disk == cls; keeping leftover fields
@@ -209,9 +222,7 @@ def test_merge_disk_image_drops_removed_field(isolated_registry: dict[str, BaseM
     img.parent.mkdir(parents=True)  # pyright: ignore[reportUnknownMemberType]
     img.write_text(json.dumps({"flag": True, "marker": ".git", "obsolete": "old"}))  # pyright: ignore[reportUnknownMemberType]
 
-    added, removed = merge_disk_image_schema(
-        PluginConfigOwner("test_plugin", FixtureConfig, disk_image_path("test_plugin"))
-    )
+    added, removed = merge_disk_image_schema(_owner(unit_home))
     assert added == set()
     assert removed == {"obsolete"}
     # obsolete has been dropped from disk image → field set now matches cls_keys
@@ -220,7 +231,7 @@ def test_merge_disk_image_drops_removed_field(isolated_registry: dict[str, BaseM
 
 
 def test_merge_then_bind_resolves_removed_field_drift(
-    isolated_registry: dict[str, BaseModel], unit_home
+    isolated_registry: dict[str, BaseModel], unit_home: Path
 ):
     """Regression: after running merge on removed-field drift (= `meiva plugins update` / converge's
     plugin-config-images step), bind_plugin_config does not raise SchemaDriftError.
@@ -233,12 +244,10 @@ def test_merge_then_bind_resolves_removed_field_drift(
     img.parent.mkdir(parents=True)  # pyright: ignore[reportUnknownMemberType]
     img.write_text(json.dumps({"flag": True, "marker": ".git", "obsolete": "old"}))  # pyright: ignore[reportUnknownMemberType]
 
-    merge_disk_image_schema(
-        PluginConfigOwner("test_plugin", FixtureConfig, disk_image_path("test_plugin"))
-    )
+    merge_disk_image_schema(_owner(unit_home))
 
     bind_plugin_config(
-        PluginConfigOwner("test_plugin", FixtureConfig, disk_image_path("test_plugin")),
+        _owner(unit_home),
         configs=isolated_registry,
     )  # before fix, would raise SchemaDriftError here
 
@@ -254,7 +263,9 @@ def test_merge_then_bind_resolves_removed_field_drift(
     assert cfg.marker == ".git"
 
 
-def test_merge_disk_image_noop_when_aligned(isolated_registry: dict[str, BaseModel], unit_home):
+def test_merge_disk_image_noop_when_aligned(
+    isolated_registry: dict[str, BaseModel], unit_home: Path
+):
     """schema aligned → merge no-op (does not write disk)."""
     tmp_path = unit_home
     img = tmp_path / "configs" / "test_plugin" / "config.json"
@@ -262,24 +273,20 @@ def test_merge_disk_image_noop_when_aligned(isolated_registry: dict[str, BaseMod
     img.write_text(json.dumps({"flag": False, "marker": ".hg"}))  # pyright: ignore[reportUnknownMemberType]
     mtime_before = img.stat().st_mtime  # pyright: ignore[reportUnknownMemberType]
 
-    added, removed = merge_disk_image_schema(
-        PluginConfigOwner("test_plugin", FixtureConfig, disk_image_path("test_plugin"))
-    )
+    added, removed = merge_disk_image_schema(_owner(unit_home))
     assert added == set()
     assert removed == set()
     assert img.stat().st_mtime == mtime_before  # pyright: ignore[reportUnknownMemberType]
 
 
 def test_merge_disk_image_writes_default_when_missing(
-    isolated_registry: dict[str, BaseModel], unit_home
+    isolated_registry: dict[str, BaseModel], unit_home: Path
 ):
     """disk missing → merge treats as first write of defaults, returns all-fields added."""
-    added, removed = merge_disk_image_schema(
-        PluginConfigOwner("test_plugin", FixtureConfig, disk_image_path("test_plugin"))
-    )
+    added, removed = merge_disk_image_schema(_owner(unit_home))
     assert added == {"flag", "marker"}
     assert removed == set()
-    assert disk_image_path("test_plugin").exists()
+    assert disk_image_path("test_plugin", home=unit_home).exists()
 
 
 def test_write_default_disk_image_preserves_existing(
@@ -291,7 +298,7 @@ def test_write_default_disk_image_preserves_existing(
     content = json.dumps({"flag": False, "marker": ".old"})
     image.write_text(content)
     with pytest.raises(RuntimeError, match="changed before owned image write"):
-        write_default_disk_image("test_plugin", FixtureConfig)
+        write_default_disk_image("test_plugin", FixtureConfig, home=unit_home)
     assert image.read_text() == content
 
 
@@ -303,14 +310,14 @@ def test_default_initialization_rejects_file_created_after_missing_check(
     image.parent.mkdir(parents=True)
     image.write_text(FixtureConfig(flag=False, marker="concurrent").model_dump_json())
     with pytest.raises(RuntimeError, match="changed before owned image write"):
-        write_default_disk_image("test_plugin", FixtureConfig)
+        write_default_disk_image("test_plugin", FixtureConfig, home=unit_home)
     assert read_config_image(FixtureConfig, image).marker == "concurrent"
 
 
-def test_is_per_agent_field_metadata(isolated_registry: dict[str, BaseModel], unit_home):
+def test_is_per_agent_field_metadata(isolated_registry: dict[str, BaseModel], unit_home: Path):
     """json_schema_extra={"per_agent": True} → is_per_agent_field True; otherwise False."""
     bind_plugin_config(
-        PluginConfigOwner("test_plugin", FixtureConfig, disk_image_path("test_plugin")),
+        _owner(unit_home),
         configs=isolated_registry,
     )
 
@@ -335,44 +342,48 @@ def _setup_overlayable_plugin(isolated_registry: dict[str, BaseModel]):
     not into the shared session home — callers must declare `unit_home`.
     """
     bind_plugin_config(
-        PluginConfigOwner("overlay_test", FixtureConfig, disk_image_path("overlay_test")),
+        PluginConfigOwner(
+            "overlay_test", FixtureConfig, disk_image_path("overlay_test", home=meiva_home())
+        ),
         configs=isolated_registry,
     )
 
 
 def test_resolve_overlay_targets_unknown_key_raises(
-    isolated_registry: dict[str, BaseModel], unit_home
+    isolated_registry: dict[str, BaseModel], unit_home: Path
 ):
     _setup_overlayable_plugin(isolated_registry)
     with pytest.raises(InvalidConfigOverlay, match="typo"):
-        resolve_overlay_targets({"definitely_not_a_field": 1}, configs=isolated_registry)
+        resolve_overlay_targets(
+            {"definitely_not_a_field": 1}, configs=isolated_registry, home=unit_home
+        )
 
 
 def test_resolve_overlay_targets_non_per_agent_raises(
-    isolated_registry: dict[str, BaseModel], unit_home
+    isolated_registry: dict[str, BaseModel], unit_home: Path
 ):
     """`flag` field is not marked per_agent → InvalidConfigOverlay."""
     _setup_overlayable_plugin(isolated_registry)
     with pytest.raises(InvalidConfigOverlay, match="per_agent=True"):
-        resolve_overlay_targets({"flag": False}, configs=isolated_registry)
+        resolve_overlay_targets({"flag": False}, configs=isolated_registry, home=unit_home)
 
 
 def test_resolve_overlay_targets_per_agent_resolves(
-    isolated_registry: dict[str, BaseModel], unit_home
+    isolated_registry: dict[str, BaseModel], unit_home: Path
 ):
     _setup_overlayable_plugin(isolated_registry)
-    targets = resolve_overlay_targets({"marker": ".hg"}, configs=isolated_registry)
+    targets = resolve_overlay_targets({"marker": ".hg"}, configs=isolated_registry, home=unit_home)
     assert targets == {"marker": ("overlay_test", "marker")}
 
 
 def test_validate_config_overlay_type_error_raises(
-    model_catalog: ModelCatalog, isolated_registry: dict[str, BaseModel], unit_home
+    model_catalog: ModelCatalog, isolated_registry: dict[str, BaseModel], unit_home: Path
 ):
     """marker is a str field, passing int triggers Pydantic ValidationError → InvalidConfigOverlay."""
     _setup_overlayable_plugin(isolated_registry)
     with pytest.raises(InvalidConfigOverlay, match="type validation"):
         validate_config_overlay(
-            {"marker": 123}, configs=isolated_registry, models=model_catalog.models
+            {"marker": 123}, configs=isolated_registry, models=model_catalog.models, home=unit_home
         )
 
 
@@ -393,56 +404,75 @@ def test_validate_config_overlay_runs_declaring_model_validators_in_gateway_prof
 
 
 def test_validate_config_overlay_unknown_llm_model_raises(
-    model_catalog: ModelCatalog, isolated_registry: dict[str, BaseModel], unit_home
+    model_catalog: ModelCatalog, isolated_registry: dict[str, BaseModel], unit_home: Path
 ):
     with pytest.raises(InvalidConfigOverlay, match="not a registered model") as exc_info:
         validate_config_overlay(
             {"llm_model": "deepseek-v4-flash-vision"},
             configs=isolated_registry,
             models=model_catalog.models,
+            home=unit_home,
         )
 
     assert "deepseek-flash" in str(exc_info.value)
 
 
 def test_validate_config_overlay_registered_llm_model_passes(
-    model_catalog: ModelCatalog, isolated_registry: dict[str, BaseModel], unit_home
+    model_catalog: ModelCatalog, isolated_registry: dict[str, BaseModel], unit_home: Path
 ):
     validate_config_overlay(
-        {"llm_model": "claude-opus-5"}, configs=isolated_registry, models=model_catalog.models
+        {"llm_model": "claude-opus-5"},
+        configs=isolated_registry,
+        models=model_catalog.models,
+        home=unit_home,
     )
 
 
 def test_validate_config_overlay_unknown_reasoning_effort_raises(
-    model_catalog: ModelCatalog, isolated_registry: dict[str, BaseModel], unit_home
+    model_catalog: ModelCatalog, isolated_registry: dict[str, BaseModel], unit_home: Path
 ):
     with pytest.raises(InvalidConfigOverlay, match="valid values"):
         validate_config_overlay(
-            {"reasoning_effort": "turbo"}, configs=isolated_registry, models=model_catalog.models
+            {"reasoning_effort": "turbo"},
+            configs=isolated_registry,
+            models=model_catalog.models,
+            home=unit_home,
         )
 
 
 @pytest.mark.parametrize("effort", ["", "high"])
 def test_validate_config_overlay_known_reasoning_effort_passes(
-    model_catalog: ModelCatalog, isolated_registry: dict[str, BaseModel], unit_home, effort: str
+    model_catalog: ModelCatalog,
+    isolated_registry: dict[str, BaseModel],
+    unit_home: Path,
+    effort: str,
 ):
     validate_config_overlay(
-        {"reasoning_effort": effort}, configs=isolated_registry, models=model_catalog.models
+        {"reasoning_effort": effort},
+        configs=isolated_registry,
+        models=model_catalog.models,
+        home=unit_home,
     )
 
 
 def test_validate_config_overlay_does_not_range_check_plugin_fields(
-    model_catalog: ModelCatalog, isolated_registry: dict[str, BaseModel], unit_home
+    model_catalog: ModelCatalog, isolated_registry: dict[str, BaseModel], unit_home: Path
 ):
     _setup_overlayable_plugin(isolated_registry)
     validate_config_overlay(
-        {"marker": "any string"}, configs=isolated_registry, models=model_catalog.models
+        {"marker": "any string"},
+        configs=isolated_registry,
+        models=model_catalog.models,
+        home=unit_home,
     )
 
 
 @pytest.mark.parametrize("field", ["llm_model"])
 def test_validate_config_overlay_unknown_model_field_raises(
-    model_catalog: ModelCatalog, isolated_registry: dict[str, BaseModel], unit_home, field: str
+    model_catalog: ModelCatalog,
+    isolated_registry: dict[str, BaseModel],
+    unit_home: Path,
+    field: str,
 ):
     """Every model-name overlay field rejects an unregistered id (the llm_model incident:
     an unregistered model id crashes the next boot at model build)."""
@@ -451,6 +481,7 @@ def test_validate_config_overlay_unknown_model_field_raises(
             {field: "deepseek-v4-flash-vision"},
             configs=isolated_registry,
             models=model_catalog.models,
+            home=unit_home,
         )
 
     assert "deepseek-flash" in str(exc_info.value)
@@ -459,20 +490,29 @@ def test_validate_config_overlay_unknown_model_field_raises(
 
 @pytest.mark.parametrize("field", ["llm_model"])
 def test_validate_config_overlay_registered_model_field_passes(
-    model_catalog: ModelCatalog, isolated_registry: dict[str, BaseModel], unit_home, field: str
+    model_catalog: ModelCatalog,
+    isolated_registry: dict[str, BaseModel],
+    unit_home: Path,
+    field: str,
 ):
     validate_config_overlay(
-        {field: "claude-opus-5"}, configs=isolated_registry, models=model_catalog.models
+        {field: "claude-opus-5"},
+        configs=isolated_registry,
+        models=model_catalog.models,
+        home=unit_home,
     )
 
 
 def test_validate_config_overlay_none_reasoning_effort_passes(
-    model_catalog: ModelCatalog, isolated_registry: dict[str, BaseModel], unit_home
+    model_catalog: ModelCatalog, isolated_registry: dict[str, BaseModel], unit_home: Path
 ):
     """None = unset (field is `str | None`); a None overlay is a legal no-op
     that pre-PR validation accepted — the range check must not regress it."""
     validate_config_overlay(
-        {"reasoning_effort": None}, configs=isolated_registry, models=model_catalog.models
+        {"reasoning_effort": None},
+        configs=isolated_registry,
+        models=model_catalog.models,
+        home=unit_home,
     )
 
 
@@ -515,13 +555,13 @@ def test_validate_config_overlay_none_reasoning_effort_passes(
 def test_validate_config_overlay_out_of_range_rejected(
     model_catalog: ModelCatalog,
     isolated_registry: dict[str, BaseModel],
-    unit_home,
+    unit_home: Path,
     field: str,
     value: object,
 ):
     with pytest.raises(InvalidConfigOverlay, match=field):
         validate_config_overlay(
-            {field: value}, configs=isolated_registry, models=model_catalog.models
+            {field: value}, configs=isolated_registry, models=model_catalog.models, home=unit_home
         )
 
 
@@ -549,15 +589,17 @@ def test_validate_config_overlay_out_of_range_rejected(
 def test_validate_config_overlay_boundary_values_accepted(
     model_catalog: ModelCatalog,
     isolated_registry: dict[str, BaseModel],
-    unit_home,
+    unit_home: Path,
     field: str,
     value: object,
 ):
-    validate_config_overlay({field: value}, configs=isolated_registry, models=model_catalog.models)
+    validate_config_overlay(
+        {field: value}, configs=isolated_registry, models=model_catalog.models, home=unit_home
+    )
 
 
 def test_apply_config_overlay_mutates_plugin_config(
-    isolated_registry: dict[str, BaseModel], unit_home
+    isolated_registry: dict[str, BaseModel], unit_home: Path
 ):
     """After apply, get_plugin_config returns a new instance with marker overlaid."""
     _setup_overlayable_plugin(isolated_registry)
@@ -573,7 +615,7 @@ def test_apply_config_overlay_mutates_plugin_config(
         == ".git"
     )
     isolated_registry.update(
-        plan_config_overlay({"marker": ".hg"}, isolated_registry).plugin_configs
+        plan_config_overlay({"marker": ".hg"}, isolated_registry, home=unit_home).plugin_configs
     )
     assert (
         get_plugin_config(
@@ -614,7 +656,7 @@ def test_apply_config_overlay_framework_scope_only_mutates_settings(
     )
 
     for field, value in plan_config_overlay(
-        {"llm_model": "claude-opus-5", "marker": ".hg"}, isolated_registry
+        {"llm_model": "claude-opus-5", "marker": ".hg"}, isolated_registry, home=unit_home
     ).framework_fields:
         owner.set_field(field, value)
 
@@ -634,7 +676,7 @@ def test_apply_config_overlay_framework_scope_only_mutates_settings(
 
 
 def test_apply_config_overlay_plugin_scope_only_mutates_plugin_configs(
-    isolated_registry: dict[str, BaseModel], unit_home, monkeypatch: pytest.MonkeyPatch
+    isolated_registry: dict[str, BaseModel], unit_home: Path, monkeypatch: pytest.MonkeyPatch
 ):
     """scope='plugin' applies only plugin half; framework Settings untouched."""
     from base.config import settings
@@ -644,7 +686,7 @@ def test_apply_config_overlay_plugin_scope_only_mutates_plugin_configs(
 
     isolated_registry.update(
         plan_config_overlay(
-            {"llm_model": "claude-opus-5", "marker": ".hg"}, isolated_registry
+            {"llm_model": "claude-opus-5", "marker": ".hg"}, isolated_registry, home=unit_home
         ).plugin_configs
     )
 
@@ -663,7 +705,7 @@ def test_apply_config_overlay_plugin_scope_only_mutates_plugin_configs(
 
 
 def test_skills_to_inject_is_per_agent_overlayable(
-    isolated_registry: dict[str, BaseModel], unit_home
+    isolated_registry: dict[str, BaseModel], unit_home: Path
 ) -> None:
     """A spawner overlays a per-worker skill index, so the field must be
     per_agent and resolve to the framework half (not raise like a pinned field)."""
@@ -675,7 +717,9 @@ def test_skills_to_inject_is_per_agent_overlayable(
     assert extra.get("per_agent") is True  # pyright: ignore[reportUnknownMemberType]
 
     targets = resolve_overlay_targets(
-        {"skills_to_inject_into_system_prompt": ["gmail", "*"]}, configs=isolated_registry
+        {"skills_to_inject_into_system_prompt": ["gmail", "*"]},
+        configs=isolated_registry,
+        home=unit_home,
     )
     assert targets == {
         "skills_to_inject_into_system_prompt": (None, "skills_to_inject_into_system_prompt")
@@ -683,11 +727,13 @@ def test_skills_to_inject_is_per_agent_overlayable(
 
 
 def test_eval_isolation_fields_are_per_agent_overlayable(
-    model_catalog: ModelCatalog, isolated_registry: dict[str, BaseModel], unit_home
+    model_catalog: ModelCatalog, isolated_registry: dict[str, BaseModel], unit_home: Path
 ) -> None:
     """The eval boundary is selected at spawn and its network exceptions are explicit."""
     targets = resolve_overlay_targets(
-        {"eval_isolation": True, "eval_network_allowlist": ["web"]}, configs=isolated_registry
+        {"eval_isolation": True, "eval_network_allowlist": ["web"]},
+        configs=isolated_registry,
+        home=unit_home,
     )
     assert targets == {
         "eval_isolation": (None, "eval_isolation"),
@@ -697,17 +743,19 @@ def test_eval_isolation_fields_are_per_agent_overlayable(
         {"eval_isolation": True, "eval_network_allowlist": ["web"]},
         configs=isolated_registry,
         models=model_catalog.models,
+        home=unit_home,
     )
 
 
 def test_eval_network_allowlist_rejects_unknown_capability(
-    model_catalog: ModelCatalog, isolated_registry: dict[str, BaseModel], unit_home
+    model_catalog: ModelCatalog, isolated_registry: dict[str, BaseModel], unit_home: Path
 ) -> None:
     with pytest.raises(InvalidConfigOverlay, match="only accepts"):
         validate_config_overlay(
             {"eval_network_allowlist": ["web", "shell"]},
             configs=isolated_registry,
             models=model_catalog.models,
+            home=unit_home,
         )
 
 
@@ -715,14 +763,14 @@ def test_eval_network_allowlist_rejects_unknown_capability(
 def test_retired_google_cache_overlay_is_rejected(
     model_catalog: ModelCatalog,
     isolated_registry: dict[str, BaseModel],
-    unit_home,
+    unit_home: Path,
     field: str,
 ) -> None:
     with pytest.raises(
         InvalidConfigOverlay, match="is not in framework Settings nor any plugin Config"
     ):
         validate_config_overlay(
-            {field: True}, configs=isolated_registry, models=model_catalog.models
+            {field: True}, configs=isolated_registry, models=model_catalog.models, home=unit_home
         )
 
 
@@ -730,7 +778,9 @@ def test_framework_overlay_targets_its_explicit_owner() -> None:
     first, second = ConfigBoot(), ConfigBoot()
     first.set_field("llm_model", "first")
     second.set_field("llm_model", "second")
-    for field, value in plan_config_overlay({"llm_model": "updated"}).framework_fields:
+    for field, value in plan_config_overlay(
+        {"llm_model": "updated"}, home=meiva_home()
+    ).framework_fields:
         first.set_field(field, value)
     assert first.get_field("llm_model") == "updated"
     assert second.get_field("llm_model") == "second"

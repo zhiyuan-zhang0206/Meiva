@@ -14,6 +14,7 @@ from base.config.service_read import ConfigAuthority
 from base.host.env.dotenv_file import upsert_env
 from base.packages.plugin_providers import build_model_catalog
 from base.packages.plugins.config_registration import plugin_bootstrap_config
+from base.paths import meiva_home
 
 pytest_plugins = ("base.packages.tests.providers.test_provider_plugins",)
 
@@ -61,8 +62,10 @@ def test_bootstrap_serves_an_enabled_plugin_key_from_the_env_file(
 
     payload = config.bootstrap_config_values(
         bootstrap_authority,
-        provider_key_envs=(binding.key_env for binding in build_model_catalog().bindings.values()),
-        plugin_cluster_config=plugin_bootstrap_config(),
+        provider_key_envs=(
+            binding.key_env for binding in build_model_catalog(home=meiva_home()).bindings.values()
+        ),
+        plugin_cluster_config=plugin_bootstrap_config(home=meiva_home()),
     )
     assert payload["TESTP_API_KEY"] == "sk-x"
     valid = {config.field_alias(name) for name in config.BOOTSTRAP_FIELDS}
@@ -80,8 +83,10 @@ def test_bootstrap_omits_an_absent_plugin_key(
 
     assert "TESTP_API_KEY" not in config.bootstrap_config_values(
         bootstrap_authority,
-        provider_key_envs=(binding.key_env for binding in build_model_catalog().bindings.values()),
-        plugin_cluster_config=plugin_bootstrap_config(),
+        provider_key_envs=(
+            binding.key_env for binding in build_model_catalog(home=meiva_home()).bindings.values()
+        ),
+        plugin_cluster_config=plugin_bootstrap_config(home=meiva_home()),
     )
 
 
@@ -99,8 +104,10 @@ def test_bootstrap_omits_a_disabled_plugin_key(
 
     assert "TESTP_API_KEY" not in config.bootstrap_config_values(
         bootstrap_authority,
-        provider_key_envs=(binding.key_env for binding in build_model_catalog().bindings.values()),
-        plugin_cluster_config=plugin_bootstrap_config(),
+        provider_key_envs=(
+            binding.key_env for binding in build_model_catalog(home=meiva_home()).bindings.values()
+        ),
+        plugin_cluster_config=plugin_bootstrap_config(home=meiva_home()),
     )
 
 
@@ -116,8 +123,10 @@ def test_bootstrap_serves_a_duplicate_plugin_key_once(
 
     payload = config.bootstrap_config_values(
         bootstrap_authority,
-        provider_key_envs=(binding.key_env for binding in build_model_catalog().bindings.values()),
-        plugin_cluster_config=plugin_bootstrap_config(),
+        provider_key_envs=(
+            binding.key_env for binding in build_model_catalog(home=meiva_home()).bindings.values()
+        ),
+        plugin_cluster_config=plugin_bootstrap_config(home=meiva_home()),
     )
     assert payload["TESTP_API_KEY"] == "sk-x"
     assert list(payload).count("TESTP_API_KEY") == 1
@@ -141,9 +150,10 @@ def test_bootstrap_keeps_modeled_alias_after_reachable_host_rewrite(
             config.bootstrap_config_values(
                 bootstrap_authority,
                 provider_key_envs=(
-                    binding.key_env for binding in build_model_catalog().bindings.values()
+                    binding.key_env
+                    for binding in build_model_catalog(home=meiva_home()).bindings.values()
                 ),
-                plugin_cluster_config=plugin_bootstrap_config(),
+                plugin_cluster_config=plugin_bootstrap_config(home=meiva_home()),
             )["MEIVA_DB_URL"]
         ).hostname
         == "10.0.0.3"

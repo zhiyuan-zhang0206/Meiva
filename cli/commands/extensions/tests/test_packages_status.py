@@ -14,12 +14,13 @@ import pytest
 
 from base.config import ConfigBoot
 from base.packages.extensions import install_registry as reg
+from base.paths import meiva_home
 from cli.commands.extensions.packages import cmd_packages_status
 
 
 def _register(name: str, **kw: object) -> reg.InstalledPackage:
     pkg = reg.InstalledPackage(name=name, type=kw.pop("type", "skill"), **kw)  # pyright: ignore[reportArgumentType]
-    reg.register(pkg)
+    reg.register(pkg, home=meiva_home())
     return pkg
 
 

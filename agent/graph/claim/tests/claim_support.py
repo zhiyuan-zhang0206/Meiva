@@ -26,7 +26,7 @@ from base.host.env.agent_slices import AgentSlices
 from base.packages.composer_commands import CommandCatalog
 from base.packages.plugin_providers import build_model_catalog
 from base.packages.plugins.extensions import EMPTY, ExtensionRegistry
-from base.paths import resolve_meiva_home
+from base.paths import meiva_home, resolve_meiva_home
 
 __all__ = ["insert_inbound_kind", "make_runtime", "thread_config"]
 
@@ -69,8 +69,8 @@ def make_runtime(
         extensions=extensions,
         db=Database.from_settings(gate=database_gate),
         bus=EventBus.from_settings(rng=seeded_rng()),
-        catalog=build_model_catalog(),
-        commands=CommandCatalog.system(skills=list),
+        catalog=build_model_catalog(home=meiva_home()),
+        commands=CommandCatalog.system(skills=list, home=meiva_home()),
     )
     return Runtime(context=ctx)
 

@@ -9,6 +9,7 @@ from base.clock.tests.fakes import system_clock
 from base.cluster.machine.configured import ConfiguredMachineIdentity
 from base.config import ConfigBoot
 from base.config.tests.configuration import snapshot_process_config
+from base.paths import meiva_home
 from meiva.boot import derived_clients
 from meiva.mcps import McpClients
 from meiva.sdk_surface import process_context
@@ -20,7 +21,9 @@ def context_with_timeout(timeout: float) -> tuple[MeivaContext, ConfigBoot]:
     config = snapshot_process_config()
     config.set_field("mcp_connect_timeout_seconds", timeout)
     clients = derived_clients(config, ConfiguredMachineIdentity(config))
-    return MeivaContext(clients=clients, clock_factory=system_clock), config
+    return MeivaContext(
+        clients=clients, clock_factory=system_clock, meiva_home=meiva_home()
+    ), config
 
 
 def sdk_timeout(context: MeivaContext) -> float:

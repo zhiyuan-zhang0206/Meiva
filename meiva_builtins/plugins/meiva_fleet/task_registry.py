@@ -7,6 +7,7 @@ from __future__ import annotations
 import builtins
 from collections.abc import Iterable
 from dataclasses import asdict, dataclass, replace
+from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 import meiva
@@ -352,14 +353,16 @@ def _update_value(value: int | Unset | None) -> int | None:
 # agent whose launcher sent a packet from the previous schema would fail every task update with
 # SchemaDriftError — a rollout would break the fleet's reporting path. The imports are deferred so
 # the config stack stays off plugin autoload (task #3816).
-def _reminder_reset_on() -> frozenset[str]:
+def _reminder_reset_on(*, home: Path) -> frozenset[str]:
     """Kinds of task update that restart a task's reminder window, per this home's policy."""
     from base.packages.plugins.config_registration import disk_image_path, read_config_image
 
     from .default_config import FleetConfig
 
     return frozenset(
-        read_config_image(FleetConfig, disk_image_path("meiva_fleet")).task_reminder_reset_on
+        read_config_image(
+            FleetConfig, disk_image_path("meiva_fleet", home=home)
+        ).task_reminder_reset_on
     )
 
 
@@ -474,7 +477,7 @@ def commit_update(
         remind_interval_seconds=_update_value(remind_interval_seconds),
         note=note,
     )
-    reset_on = _reminder_reset_on()
+    reset_on = _reminder_reset_on(home=context.require_meiva_home())
 
     from ._task_receipts import record_update, replay_update, update_identity
 

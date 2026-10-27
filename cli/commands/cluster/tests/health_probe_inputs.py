@@ -103,11 +103,12 @@ def healthy_options(
 # meiva:note
 # Write the root manifest a `meiva start` of just these services would have left in `home`.
 def launch_record(home: Path, *sessions: str) -> None:
-    chosen = [spec for spec in build_services() if spec.session in sessions]
+    chosen = [spec for spec in build_services(home=home) if spec.session in sessions]
     manifest = manifests.build_manifest(
         capabilities=("gateway", "agent-runner"),
         specs=chosen,
         environments={spec.session: {} for spec in chosen},
+        home=home,
     )
     manifests.write_manifest(root_manifests_path(home), manifest)
 

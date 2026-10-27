@@ -27,7 +27,7 @@ from base.events.live.bus import EventBus
 from base.events.live.tests.live_capture import idle_publisher
 from base.packages.plugin_providers import build_model_catalog
 from base.packages.tests.model_catalog import inert_keys
-from base.paths import resolve_meiva_home
+from base.paths import meiva_home, resolve_meiva_home
 from meiva.tests.fixtures.pin_agent import snapshot_clients
 from meiva_builtins.plugins.meiva_syntax_fix.agent_runtime import syntax_fix_before_exec
 from meiva_builtins.plugins.meiva_syntax_fix.tests.hook_support import (
@@ -79,8 +79,8 @@ def runtime_for(database_gate: ProcessDbGate) -> Iterator[Callable[..., Runtime[
                 bus=EventBus.from_settings(rng=seeded_rng()),
                 clients=clients,
                 clock_factory=Clock.from_settings,
-                catalog=build_model_catalog(),
-                provider_keys=inert_keys(build_model_catalog()),
+                catalog=build_model_catalog(home=meiva_home()),
+                provider_keys=inert_keys(build_model_catalog(home=meiva_home())),
                 identity=AgentIdentity(agent_id=7, owns_loop=True),
             )
         )

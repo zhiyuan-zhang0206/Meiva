@@ -26,6 +26,7 @@ from base.lm.catalog.provider_contract import BuildContext
 from base.lm.effort import ReasoningEffort
 from base.packages.plugin_providers import build_model_catalog
 from base.packages.plugins.extensions import PluginContributions, SdkNamespace, SdkWrap
+from base.paths import meiva_home
 from meiva.sdk_surface import install, process_context
 from meiva.tests.fixtures.gateway_wire import GatewayStub
 from meiva.tests.fixtures.gateway_wire import gateway_stub as gateway_stub
@@ -344,7 +345,7 @@ def test_coding_tools_section_skips_framework_expanded_modules():
         AgentSlices.resolve(
             default_reader=defaults(agent__sdk_expand_in_system_prompt=["files", "shell.sessions"]),
         ),
-        catalog=build_model_catalog(),
+        catalog=build_model_catalog(home=meiva_home()),
     )
     assert "## meiva.files" not in text  # expanded by the framework -> skipped
     assert "## meiva.shell" in text  # only the child is expanded -> parent stays
@@ -359,7 +360,7 @@ def test_coding_tools_section_all_expanded_keeps_preamble_only():
         AgentSlices.resolve(
             default_reader=defaults(agent__sdk_expand_in_system_prompt=["cwd", "files", "shell"]),
         ),
-        catalog=build_model_catalog(),
+        catalog=build_model_catalog(home=meiva_home()),
     )
     assert text.startswith("# Coding tools")
     assert "Use the Meiva file and shell tools" in text

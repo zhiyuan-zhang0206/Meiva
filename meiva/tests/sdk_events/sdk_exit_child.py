@@ -10,6 +10,8 @@ import os
 import sys
 from typing import assert_never
 
+from base.paths import meiva_home
+
 __all__ = ["main"]
 
 
@@ -32,7 +34,11 @@ def main() -> None:
     config.read_process_environment()
     attachment = ClientSet()
     process_context.bind_context(
-        MeivaContext(clients=attachment, identity=AgentIdentity(agent_id=6111, owns_loop=False))
+        MeivaContext(
+            clients=attachment,
+            identity=AgentIdentity(agent_id=6111, owns_loop=False),
+            meiva_home=meiva_home(),
+        )
     )
     meiva.ensure_plugins_loaded(config=config, machine=ConfiguredMachineIdentity(config))
     installation = installed()

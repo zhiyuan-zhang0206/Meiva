@@ -71,7 +71,7 @@ def test_unknown_provider_error_preserves_identity_and_traceback_then_recovers(
             failing.setattr(CatalogBuilder, "build", fail_build)
 
         with pytest.raises(type(error)) as raised:
-            build_model_catalog()
+            build_model_catalog(home=meiva_home())
 
         assert raised.value is error
         frames: list[TracebackType] = []
@@ -84,5 +84,5 @@ def test_unknown_provider_error_preserves_identity_and_traceback_then_recovers(
             assert "plugins.z_broken_provider.provider" not in sys.modules
 
     provider_py.write_text(valid_source)
-    corrected = build_model_catalog()
+    corrected = build_model_catalog(home=meiva_home())
     assert {"kept-1", "testp-1"} <= corrected.models.keys()

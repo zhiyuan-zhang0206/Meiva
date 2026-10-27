@@ -50,7 +50,7 @@ from base.host.env.agent_slices import AgentSlices
 from base.lm.catalog import ModelCatalog
 from base.packages.plugin_providers import build_model_catalog
 from base.packages.plugins.extensions import EMPTY
-from base.paths import resolve_meiva_home
+from base.paths import meiva_home, resolve_meiva_home
 
 
 async def test_compact_reminder_fires_in_band(
@@ -198,7 +198,8 @@ async def test_compact_contract_reaches_request_without_resident_self(meiva_comp
             )
         ),
         agent_id=1,
-        catalog=build_model_catalog(),
+        catalog=build_model_catalog(home=meiva_home()),
+        home=meiva_home(),
     )
     assert "## meiva.self\n" not in system_prompt
     head = SystemMessage(content=system_prompt)
@@ -211,7 +212,7 @@ async def test_compact_contract_reaches_request_without_resident_self(meiva_comp
                 agent__sdk_expand_in_system_prompt=["shell", "files", "agents", "tasks"]
             )
         ),
-        catalog=build_model_catalog(),
+        catalog=build_model_catalog(home=meiva_home()),
     )
     [request] = llm.requests
     assert request[0] is head
@@ -331,7 +332,7 @@ async def test_compact_summary_emits_compact_done(
         agent=AgentSlices.resolve(default_reader=defaults()),
         db=Database.from_settings(gate=database_gate),
         bus=EventBus.from_settings(rng=seeded_rng()),
-        catalog=build_model_catalog(),
+        catalog=build_model_catalog(home=meiva_home()),
         clock_factory=Clock.from_settings,
     )
     runtime = Runtime(context=ctx)

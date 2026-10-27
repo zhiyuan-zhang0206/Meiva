@@ -21,6 +21,7 @@ from base.cluster.machine.tests.identity import machine_identity as machine_iden
 from base.host.proc import run_bounded
 from base.host.system.tests.fake_commands import fake_host
 from base.packages.plugins import enable_config, mcp_enabled
+from base.paths import meiva_home
 from base.paths.tests.homes import unit_home as unit_home
 from ops.inventory import inventory_read_op, inventory_write_op
 from ops.rpc_schemas import FieldWriteResult, InventoryReadResult, InventoryWriteOpResult
@@ -42,7 +43,7 @@ def runner_home(unit_home: Path, machine_identity: ConfiguredMachineIdentity) ->
 def test_inventory_read_op_lists_real_plugins(
     runner_home: Path, machine_identity: MachineIdentityReader
 ) -> None:
-    result = inventory_read_op(local_machine=machine_identity, host=fake_host())
+    result = inventory_read_op(local_machine=machine_identity, host=fake_host(), home=meiva_home())
 
     assert result.machine == "test-machine"
     assert "meiva_code" in result.plugins
@@ -60,7 +61,9 @@ def test_inventory_read_op_mcp_server_default_on(
 ) -> None:
     _write_machine_mcp(runner_home, {"fs": {"command": "run-fs", "args": ["--root", "/"]}})
 
-    servers = inventory_read_op(local_machine=machine_identity, host=fake_host()).mcp_servers
+    servers = inventory_read_op(
+        local_machine=machine_identity, host=fake_host(), home=meiva_home()
+    ).mcp_servers
 
     assert "fs" in servers
     assert "chrome" in servers
@@ -76,9 +79,9 @@ def test_inventory_read_op_overlay_reflected(
     runner_home: Path, machine_identity: MachineIdentityReader
 ) -> None:
     _write_machine_mcp(runner_home, {"X": {"command": "x"}})
-    mcp_enabled.set_mcp_enabled("X", enabled=False)
+    mcp_enabled.set_mcp_enabled("X", enabled=False, home=meiva_home())
 
-    result = inventory_read_op(local_machine=machine_identity, host=fake_host())
+    result = inventory_read_op(local_machine=machine_identity, host=fake_host(), home=meiva_home())
 
     assert result.mcp_servers["X"].enabled is False
 
@@ -91,21 +94,22 @@ def test_inventory_rejects_invalid_requirements_before_read_or_write(
     # A malformed `requires` fails the read and the write loudly, and the write leaves both the
     # overlay and the plugin file untouched.
     _write_machine_mcp(runner_home, {"broken": {"command": "x", "requires": requires}})
-    mcp_enabled.set_mcp_enabled("broken", enabled=False)
-    before = mcp_enabled.local_config_path().read_bytes()
+    mcp_enabled.set_mcp_enabled("broken", enabled=False, home=meiva_home())
+    before = mcp_enabled.local_config_path(home=meiva_home()).read_bytes()
 
     with pytest.raises(mcp_cfg_mod.MCPError, match="requires"):
-        inventory_read_op(local_machine=machine_identity, host=fake_host())
+        inventory_read_op(local_machine=machine_identity, host=fake_host(), home=meiva_home())
     with pytest.raises(mcp_cfg_mod.MCPError, match="requires"):
         inventory_write_op(
             plugins={"meiva_code": False},
             mcp_servers={"broken": True},
             local_machine=machine_identity,
             host=fake_host(),
+            home=meiva_home(),
         )
 
-    assert mcp_enabled.local_config_path().read_bytes() == before
-    assert not enable_config.local_config_path().exists()
+    assert mcp_enabled.local_config_path(home=meiva_home()).read_bytes() == before
+    assert not enable_config.local_config_path(home=meiva_home()).exists()
 
 
 # meiva:note
@@ -117,12 +121,16 @@ def test_inventory_can_disable_server_with_invalid_requirements(
     _write_machine_mcp(runner_home, {"broken": spec})
 
     result = inventory_write_op(
-        plugins={}, mcp_servers={"broken": False}, local_machine=machine_identity, host=fake_host()
+        plugins={},
+        mcp_servers={"broken": False},
+        local_machine=machine_identity,
+        host=fake_host(),
+        home=meiva_home(),
     )
 
     assert result.applied is True
     assert result.mcp_results["broken"] == FieldWriteResult(ok=True, reason=None)
-    assert mcp_enabled.read_enabled() == {"broken": False}
+    assert mcp_enabled.read_enabled(home=meiva_home()) == {"broken": False}
     assert mcp_cfg_mod.read_servers(runner_home / "mcp.json") == {"broken": spec}
 
 
@@ -136,11 +144,14 @@ def test_inventory_write_op_plugin_happy_path(
         mcp_servers={},
         local_machine=machine_identity,
         host=fake_host(),
+        home=meiva_home(),
     )
 
     assert result.applied is True
     assert result.plugin_results["meiva_code"] == FieldWriteResult(ok=True, reason=None)
-    cfg = enable_config.load(set(enable_config.discover_plugins()))
+    cfg = enable_config.load(
+        set(enable_config.discover_plugins(home=meiva_home())), home=meiva_home()
+    )
     assert cfg.plugins["meiva_code"].enabled is False
 
 
@@ -155,13 +166,14 @@ def test_inventory_write_op_atomic_rejects_unknown_plugin(
         mcp_servers={},
         local_machine=machine_identity,
         host=fake_host(),
+        home=meiva_home(),
     )
 
     assert result.applied is False
     assert result.plugin_results["meiva_code"].ok is True
     assert result.plugin_results["does-not-exist"].ok is False
     assert "not installed" in (result.plugin_results["does-not-exist"].reason or "")
-    assert not enable_config.local_config_path().exists()
+    assert not enable_config.local_config_path(home=meiva_home()).exists()
 
 
 # meiva:note
@@ -170,7 +182,11 @@ def test_inventory_write_op_rejects_unknown_mcp_server(
     runner_home: Path, machine_identity: MachineIdentityReader
 ) -> None:
     result = inventory_write_op(
-        plugins={}, mcp_servers={"ghost": True}, local_machine=machine_identity, host=fake_host()
+        plugins={},
+        mcp_servers={"ghost": True},
+        local_machine=machine_identity,
+        host=fake_host(),
+        home=meiva_home(),
     )
 
     assert result.applied is False
@@ -208,7 +224,7 @@ def test_inventory_write_op_mcp_capability_rejected(runner_home: Path) -> None:
     disable = InventoryWriteOpResult.model_validate(result["disable"])
     assert disable.applied is True
     assert disable.mcp_results["that"] == FieldWriteResult(ok=True, reason=None)
-    assert mcp_enabled.read_enabled() == {"that": False}
+    assert mcp_enabled.read_enabled(home=meiva_home()) == {"that": False}
 
 
 # meiva:note
@@ -217,14 +233,18 @@ def test_inventory_write_op_empty_payload_trivially_applied(
     runner_home: Path, machine_identity: MachineIdentityReader
 ) -> None:
     result = inventory_write_op(
-        plugins={}, mcp_servers={}, local_machine=machine_identity, host=fake_host()
+        plugins={},
+        mcp_servers={},
+        local_machine=machine_identity,
+        host=fake_host(),
+        home=meiva_home(),
     )
 
     assert result.applied is True
     assert result.plugin_results == {}
     assert result.mcp_results == {}
-    assert not enable_config.local_config_path().exists()
-    assert mcp_enabled.read_enabled() == {}
+    assert not enable_config.local_config_path(home=meiva_home()).exists()
+    assert mcp_enabled.read_enabled(home=meiva_home()) == {}
 
 
 # meiva:note
@@ -239,12 +259,15 @@ def test_inventory_write_op_applies_both_plugin_and_mcp(
         mcp_servers={"fs": False},
         local_machine=machine_identity,
         host=fake_host(),
+        home=meiva_home(),
     )
 
     assert result.applied is True
-    cfg = enable_config.load(set(enable_config.discover_plugins()))
+    cfg = enable_config.load(
+        set(enable_config.discover_plugins(home=meiva_home())), home=meiva_home()
+    )
     assert cfg.plugins["meiva_code"].enabled is False
-    assert mcp_enabled.read_enabled() == {"fs": False}
+    assert mcp_enabled.read_enabled(home=meiva_home()) == {"fs": False}
 
 
 # meiva:note
@@ -254,8 +277,12 @@ def test_inventory_ops_reject_gateway(machine_identity: ConfiguredMachineIdentit
     machine_identity.set(role=frozenset({"gateway"}))
 
     with pytest.raises(RuntimeError, match="only on an agent-runner"):
-        inventory_read_op(local_machine=machine_identity, host=fake_host())
+        inventory_read_op(local_machine=machine_identity, host=fake_host(), home=meiva_home())
     with pytest.raises(RuntimeError, match="only on an agent-runner"):
         inventory_write_op(
-            plugins={}, mcp_servers={}, local_machine=machine_identity, host=fake_host()
+            plugins={},
+            mcp_servers={},
+            local_machine=machine_identity,
+            host=fake_host(),
+            home=meiva_home(),
         )

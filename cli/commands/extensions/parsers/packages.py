@@ -70,6 +70,7 @@ def _h_packages_policy(args: argparse.Namespace) -> int:
         config=delivered_config(args.runtime.config),
         update_mode=args.update_mode,
         check_every=args.check_every,
+        home=args.runtime.home,
     )
 
 

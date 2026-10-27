@@ -93,6 +93,7 @@ def build_services(
     *,
     plugins: tuple[ServiceSpec, ...] | None = None,
     plugin_dirs: Mapping[str, Path] | None = None,
+    home: Path,
 ) -> tuple[ServiceSpec, ...]:
 
     from services.agent_runner.exec_host import shutdown_budget as exec_host_budget
@@ -440,7 +441,9 @@ def build_services(
     # Append plugin declarations after core groups. Session-name collisions fail
     # fast because root supervision and status derive their keys from the session.
     plugin = (
-        plugin_services.plugin_services(plugin_dirs=plugin_dirs) if plugins is None else plugins
+        plugin_services.plugin_services(plugin_dirs=plugin_dirs, home=home)
+        if plugins is None
+        else plugins
     )
     plugin_services.assert_unique_sessions(core, plugin)
     return core + plugin

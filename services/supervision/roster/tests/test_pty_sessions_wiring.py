@@ -3,12 +3,15 @@ from __future__ import annotations
 from base.cluster.machine import MachineIdentityReader
 from base.cluster.machine.tests.identity import machine_identity as machine_identity
 from base.host.system.tests.fake_commands import fake_host
+from base.paths import meiva_home
 from services.agent_runner.pty_sessions import shutdown_budget
 from services.supervision.roster import composition, service_spec, spec
 
 
 def _spec() -> service_spec.ServiceSpec:
-    return next(s for s in composition.build_services() if s.session == "pty-sessions")
+    return next(
+        s for s in composition.build_services(home=meiva_home()) if s.session == "pty-sessions"
+    )
 
 
 def test_both_a_gateway_host_and_a_runner_host_run_the_service(
@@ -20,7 +23,7 @@ def test_both_a_gateway_host_and_a_runner_host_run_the_service(
         started = {
             s.session
             for s in spec.services_for_capabilities(
-                frozenset({role}), machine=machine_identity, host=fake_host()
+                frozenset({role}), machine=machine_identity, host=fake_host(), home=meiva_home()
             )
         }
         assert "pty-sessions" in started, role

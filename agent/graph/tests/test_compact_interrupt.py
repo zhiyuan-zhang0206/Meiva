@@ -40,7 +40,7 @@ from base.native_process.stop_timing import RESTART_INTERRUPT_GRACE_S
 from base.native_process.turn_identity import HostedTurnResources
 from base.packages.composer_commands import CommandCatalog
 from base.packages.plugin_providers import build_model_catalog
-from base.paths import resolve_meiva_home
+from base.paths import meiva_home, resolve_meiva_home
 from meiva.tests.fixtures.pin_agent import hosted_resources as hosted_resources
 
 
@@ -77,9 +77,9 @@ def _runtime(
             ),
             db=Database.from_settings(gate=database_gate),
             bus=EventBus.from_settings(rng=seeded_rng()),
-            catalog=build_model_catalog(),
+            catalog=build_model_catalog(home=meiva_home()),
             clock_factory=Clock.from_settings,
-            commands=CommandCatalog.system(skills=list),
+            commands=CommandCatalog.system(skills=list, home=meiva_home()),
         )
     )
 
@@ -210,7 +210,7 @@ async def test_compaction_returns_through_claim_then_generates_before_compacting
     state = state.model_copy(
         update={"messages": serde.loads_typed(serde.dumps_typed(state.messages))}
     )
-    catalog = build_model_catalog()
+    catalog = build_model_catalog(home=meiva_home())
     assert not auto_compact_will_fire(state, runtime.context.require_agent(), catalog=catalog)
     queue_command(db_conn, tid, "cancel")
     cancelled = await claim_node(state, runtime, config)

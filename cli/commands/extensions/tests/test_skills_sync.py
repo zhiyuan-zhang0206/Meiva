@@ -11,9 +11,11 @@ import pytest
 
 import meiva.skills as skills_mod
 from base.packages.extensions import install_registry as reg
+from base.paths import meiva_home
 from cli.commands.extensions.skill import cmd_skill_disable, cmd_skill_enable, cmd_skill_register
 from cli.commands.extensions.skills_sync import converge_skills, iter_sources
 from cli.commands.extensions.tests.support.source_bindings import PROD_ELSEWHERE, prod_home_is
+from meiva.sdk_surface.tests.context_home import context_over_unit_home as context_over_unit_home
 
 
 def _write_skill(root: Path, dirname: str, name: str | None = None, body: str = "# B\n") -> Path:
@@ -39,7 +41,7 @@ def _loaded_names(unit_home: Path) -> set[str]:
 
 
 def _entry(name: str) -> reg.InstalledPackage:
-    pkg = reg.get(name)
+    pkg = reg.get(name, home=meiva_home())
     assert pkg is not None
     return pkg
 
@@ -55,10 +57,10 @@ def test_first_converge_copies_registers_and_surfaces(unit_home: Path, fake_repo
     assert (unit_home / "skills" / "goal" / "SKILL.md").is_file()
     assert (unit_home / "skills" / "superpowers" / "brainstorming" / "SKILL.md").is_file()
 
-    goal = reg.get("goal")
+    goal = reg.get("goal", home=unit_home)
     assert goal is not None and goal.origin == "repo" and goal.enabled
     assert goal.content_hash and goal.installed_at
-    sp = reg.get("superpowers")
+    sp = reg.get("superpowers", home=unit_home)
     assert sp is not None and sp.origin == "plugin" and sp.type == "skill"
 
     assert _loaded_names(unit_home) == {"goal", "brainstorming"}
@@ -66,11 +68,11 @@ def test_first_converge_copies_registers_and_surfaces(unit_home: Path, fake_repo
 
 def test_second_converge_is_noop(unit_home: Path, fake_repo: Path) -> None:
     converge_skills(fake_repo, unit_home, binding=PROD_ELSEWHERE, now=datetime.now(UTC))
-    first = reg.load().model_dump_json()
+    first = reg.load(home=unit_home).model_dump_json()
     result = converge_skills(fake_repo, unit_home, binding=PROD_ELSEWHERE, now=datetime.now(UTC))
     assert result.copied == [] and result.updated == [] and result.removed == []
     assert sorted(result.unchanged) == ["goal", "superpowers"]
-    assert reg.load().model_dump_json() == first  # updated_at untouched on no-op
+    assert reg.load(home=unit_home).model_dump_json() == first  # updated_at untouched on no-op
 
 
 def test_grouped_repo_skill_converges_flat_and_keeps_its_identity(
@@ -142,7 +144,7 @@ def test_source_removed_cleans_untouched_copy(unit_home: Path, fake_repo: Path) 
     result = converge_skills(fake_repo, unit_home, binding=PROD_ELSEWHERE, now=datetime.now(UTC))
     assert result.removed == ["goal"]
     assert not (unit_home / "skills" / "goal").exists()
-    assert reg.get("goal") is None
+    assert reg.get("goal", home=unit_home) is None
 
 
 def test_source_removed_keeps_edited_copy(unit_home: Path, fake_repo: Path) -> None:
@@ -157,7 +159,7 @@ def test_source_removed_keeps_edited_copy(unit_home: Path, fake_repo: Path) -> N
     assert result.removed == []
     assert any("is gone" in w for w in result.warnings)
     assert (unit_home / "skills" / "goal").exists()
-    assert reg.get("goal") is not None
+    assert reg.get("goal", home=unit_home) is not None
 
 
 # ─── untracked / conflicts ──────────────────────────────────────────────────
@@ -181,15 +183,17 @@ def test_lost_registry_row_adopted_when_copy_matches_source(
     adopts them back instead of warning 'untracked shadows' — which left the
     registry empty and the skill scanner gating everything out."""
     converge_skills(fake_repo, unit_home, binding=PROD_ELSEWHERE, now=datetime.now(UTC))
-    assert reg.get("goal") is not None
+    assert reg.get("goal", home=unit_home) is not None
 
     # Simulate the registry loss: keep only a user row.
-    reg.save(reg.Registry(packages=[reg.InstalledPackage(name="mine", type="skill")]))
-    assert reg.get("goal") is None
+    reg.save(
+        reg.Registry(packages=[reg.InstalledPackage(name="mine", type="skill")]), home=unit_home
+    )
+    assert reg.get("goal", home=unit_home) is None
 
     result = converge_skills(fake_repo, unit_home, binding=PROD_ELSEWHERE, now=datetime.now(UTC))
     assert not any("shadows" in w for w in result.warnings)
-    adopted = reg.get("goal")
+    adopted = reg.get("goal", home=unit_home)
     assert adopted is not None
     assert adopted.origin == "repo" and adopted.content_hash
     assert "goal" in _loaded_names(unit_home)
@@ -202,10 +206,10 @@ def test_lost_registry_row_different_copy_still_warned(unit_home: Path, fake_rep
     (unit_home / "skills" / "goal" / "SKILL.md").write_text(
         "---\nname: goal\ndescription: EDITED\n---\n", encoding="utf-8"
     )
-    reg.save(reg.Registry(packages=[]))
+    reg.save(reg.Registry(packages=[]), home=unit_home)
     result = converge_skills(fake_repo, unit_home, binding=PROD_ELSEWHERE, now=datetime.now(UTC))
     assert any("shadows" in w and "content differs" in w for w in result.warnings)
-    assert reg.get("goal") is None
+    assert reg.get("goal", home=unit_home) is None
     assert "goal" not in _loaded_names(unit_home)
 
 
@@ -283,7 +287,9 @@ def test_user_install_shadowing_source_kept(unit_home: Path, fake_repo: Path) ->
     """A user-installed package squatting a repo skill's name wins; the source
     is not synced (never destroy user content)."""
     _write_skill(unit_home / "skills", "goal", body="user version\n")
-    reg.register(reg.InstalledPackage(name="goal", type="skill", source="file:///x"))
+    reg.register(
+        reg.InstalledPackage(name="goal", type="skill", source="file:///x"), home=unit_home
+    )
     result = converge_skills(fake_repo, unit_home, binding=PROD_ELSEWHERE, now=datetime.now(UTC))
     assert any("shadows" in w for w in result.warnings)
     copy = unit_home / "skills" / "goal" / "SKILL.md"
@@ -307,17 +313,19 @@ def test_installed_plugin_skills_gate_on_plugin_entry(unit_home: Path, fake_repo
     """An installed plugin's skills sync under its name and gate on the
     plugin's own registry entry — no duplicate type='skill' row."""
     _write_skill(unit_home / "plugins" / "pr-kit" / "skills", "review")
-    reg.register(reg.InstalledPackage(name="pr-kit", type="plugin", source="file:///y"))
+    reg.register(
+        reg.InstalledPackage(name="pr-kit", type="plugin", source="file:///y"), home=unit_home
+    )
     result = converge_skills(fake_repo, unit_home, binding=PROD_ELSEWHERE, now=datetime.now(UTC))
     assert "pr-kit" in result.copied
     entry = _entry("pr-kit")
     assert entry.type == "plugin" and entry.origin == "plugin" and entry.content_hash
-    assert [p.name for p in reg.load().packages].count("pr-kit") == 1
+    assert [p.name for p in reg.load(home=unit_home).packages].count("pr-kit") == 1
     assert "review" in _loaded_names(unit_home)
 
-    assert cmd_skill_disable("pr-kit") == 0
+    assert cmd_skill_disable("pr-kit", home=unit_home) == 0
     assert "review" not in _loaded_names(unit_home)
-    assert cmd_skill_enable("pr-kit") == 0
+    assert cmd_skill_enable("pr-kit", home=unit_home) == 0
     assert "review" in _loaded_names(unit_home)
 
 
@@ -326,22 +334,22 @@ def test_installed_plugin_skills_gate_on_plugin_entry(unit_home: Path, fake_repo
 
 def test_skill_disable_enable_roundtrip(unit_home: Path, fake_repo: Path) -> None:
     converge_skills(fake_repo, unit_home, binding=PROD_ELSEWHERE, now=datetime.now(UTC))
-    assert cmd_skill_disable("goal") == 0
+    assert cmd_skill_disable("goal", home=unit_home) == 0
     assert _entry("goal").enabled is False
     assert "goal" not in _loaded_names(unit_home)
     assert (unit_home / "skills" / "goal").exists()  # installed ≠ enabled
-    assert cmd_skill_enable("goal") == 0
+    assert cmd_skill_enable("goal", home=unit_home) == 0
     assert "goal" in _loaded_names(unit_home)
 
 
 def test_skill_enable_unknown_errors(unit_home: Path) -> None:
-    assert cmd_skill_enable("nope") == 1
+    assert cmd_skill_enable("nope", home=unit_home) == 1
 
 
 def test_skill_register_tracks_stray_dir(unit_home: Path, fake_repo: Path) -> None:
     _write_skill(unit_home / "skills", "stray")
     assert cmd_skill_register("stray", home=unit_home, now=datetime.now(UTC)) == 0
-    entry = reg.get("stray")
+    entry = reg.get("stray", home=unit_home)
     assert entry is not None and entry.origin == "user" and entry.enabled
     assert "stray" in _loaded_names(unit_home)
     # converge leaves it alone afterwards
@@ -358,7 +366,7 @@ def test_skill_register_bad_skill_md_errors(unit_home: Path) -> None:
     d.mkdir(parents=True)
     (d / "SKILL.md").write_text("no frontmatter", encoding="utf-8")
     assert cmd_skill_register("bad", home=unit_home, now=datetime.now(UTC)) == 1
-    assert reg.get("bad") is None
+    assert reg.get("bad", home=unit_home) is None
 
 
 # ─── atomic copy staging / shared predicate (audit #3, #8) ──────────────────
@@ -370,7 +378,9 @@ def test_copy_staging_dirs_invisible_after_update(unit_home: Path, fake_repo: Pa
     Installed-plugin skills are still synced on change (the repo-native half of
     the load dir is bootstrap-only), so this exercises the update path."""
     _write_skill(unit_home / "plugins" / "pr-kit" / "skills", "review")
-    reg.register(reg.InstalledPackage(name="pr-kit", type="plugin", source="file:///y"))
+    reg.register(
+        reg.InstalledPackage(name="pr-kit", type="plugin", source="file:///y"), home=unit_home
+    )
     converge_skills(fake_repo, unit_home, binding=PROD_ELSEWHERE, now=datetime.now(UTC))
     (unit_home / "plugins" / "pr-kit" / "skills" / "review" / "SKILL.md").write_text(
         "---\nname: review\ndescription: v2\n---\n\n# v2\n", encoding="utf-8"
@@ -433,7 +443,7 @@ def test_agents_project_skills_not_converged(unit_home: Path, tmp_path: Path) ->
     assert result.removed == []
     assert not any("already provided" in w for w in result.warnings)
     assert not (unit_home / "skills" / "project-x").exists()
-    assert reg.get("project-x") is None
+    assert reg.get("project-x", home=unit_home) is None
 
 
 def test_legacy_agents_skill_converge_copy_cleaned_up(unit_home: Path, tmp_path: Path) -> None:
@@ -459,12 +469,13 @@ def test_legacy_agents_skill_converge_copy_cleaned_up(unit_home: Path, tmp_path:
             trust="builtin",
             content_hash=tree_hash(src),
             installed_at="2026-08-20T00:00:00+00:00",
-        )
+        ),
+        home=unit_home,
     )
     result = converge_skills(repo, unit_home, binding=PROD_ELSEWHERE, now=datetime.now(UTC))
     assert result.removed == ["project-x"]
     assert not dest.exists()
-    assert reg.get("project-x") is None
+    assert reg.get("project-x", home=unit_home) is None
     # The real builtin still converges alongside.
     assert (unit_home / "skills" / "builtin-a" / "SKILL.md").is_file()
 
@@ -481,23 +492,23 @@ def test_dash_source_row_matches_underscore_registry_entry(
     comparison in `_sync_one`)."""
     _write_skill(fake_repo / "meiva_builtins" / "skills", "meiva-goal")
     converge_skills(fake_repo, unit_home, binding=PROD_ELSEWHERE, now=datetime.now(UTC))
-    entry = reg.get("meiva-goal")
+    entry = reg.get("meiva-goal", home=unit_home)
     assert entry is not None
     # Hand-rewrite the row to the legacy underscore spelling, then converge
     # again: the row must be found and updated, not duplicated.
-    registry = reg.load()
+    registry = reg.load(home=unit_home)
     for pkg in registry.packages:
         if pkg.name == "meiva-goal":
             pkg.name = "meiva_goal"
-    reg.save(registry)
+    reg.save(registry, home=unit_home)
     result = converge_skills(fake_repo, unit_home, binding=PROD_ELSEWHERE, now=datetime.now(UTC))
     # the legacy-spelled row was FOUND through the fold and kept up to date —
     # no second row was created for the canonical spelling
     assert "meiva-goal" in result.unchanged
     assert result.copied == [] and result.updated == []
-    rows = reg.load().packages
+    rows = reg.load(home=unit_home).packages
     assert len(rows) == 3  # goal + superpowers + meiva-goal — no dual-row state
-    assert reg.get("meiva-goal") is not None  # dash query finds the underscore row
+    assert reg.get("meiva-goal", home=unit_home) is not None  # dash query finds the underscore row
     assert len([p for p in rows if p.name in ("meiva-goal", "meiva_goal")]) == 1
 
 
@@ -511,7 +522,7 @@ def test_cross_source_same_key_conflict_is_reported_not_duplicated(
     _write_skill(fake_repo / "meiva_builtins" / "plugins" / "foo_bar" / "skills", "sub")
     result = converge_skills(fake_repo, unit_home, binding=PROD_ELSEWHERE, now=datetime.now(UTC))
     assert any("already provided" in w for w in result.warnings)
-    rows = reg.load().packages
+    rows = reg.load(home=unit_home).packages
     assert len([p for p in rows if p.name in ("foo-bar", "foo_bar")]) == 1
 
 
@@ -592,7 +603,7 @@ def test_ghost_plugin_skills_not_converged(unit_home: Path, fake_repo: Path) -> 
 
     assert "ghost-skill" not in result.copied
     assert "ghost-skill" not in _loaded_names(unit_home)
-    assert reg.get("ghost-skill") is None
+    assert reg.get("ghost-skill", home=unit_home) is None
 
 
 # meiva:note

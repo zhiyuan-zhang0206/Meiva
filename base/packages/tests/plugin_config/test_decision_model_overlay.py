@@ -4,6 +4,7 @@ from base.config import settings
 from base.lm.catalog import ModelCatalog
 from base.packages.plugins.config_registration import validate_config_overlay
 from base.packages.plugins.plugin_errors import InvalidConfigOverlay
+from base.paths import meiva_home
 
 
 def test_the_default_skill_recall_model_is_a_registered_decision_model(
@@ -14,6 +15,7 @@ def test_the_default_skill_recall_model_is_a_registered_decision_model(
         {"skill_recall_model": settings.agent.skill_recall_model},
         models=model_catalog.models,
         decision_models=model_catalog.decision_models,
+        home=meiva_home(),
     )
 
 
@@ -23,6 +25,7 @@ def test_a_chat_model_is_not_a_decision_model(model_catalog: ModelCatalog) -> No
             {"skill_recall_model": "deepseek-flash"},
             models=model_catalog.models,
             decision_models=model_catalog.decision_models,
+            home=meiva_home(),
         )
 
     assert "skill_recall_model" in str(exc.value)
@@ -35,6 +38,7 @@ def test_an_unknown_id_is_rejected(model_catalog: ModelCatalog) -> None:
             {"skill_recall_model": "jev-0.0"},
             models=model_catalog.models,
             decision_models=model_catalog.decision_models,
+            home=meiva_home(),
         )
 
 
@@ -42,11 +46,15 @@ def test_a_caller_without_the_decision_table_cannot_admit_the_field(
     model_catalog: ModelCatalog,
 ) -> None:
     with pytest.raises(InvalidConfigOverlay, match="no decision-model table"):
-        validate_config_overlay({"skill_recall_model": "jev-1.13.0"}, models=model_catalog.models)
+        validate_config_overlay(
+            {"skill_recall_model": "jev-1.13.0"}, models=model_catalog.models, home=meiva_home()
+        )
 
 
 def test_an_overlay_without_the_field_needs_no_decision_table(model_catalog: ModelCatalog) -> None:
-    validate_config_overlay({"skill_recall_enabled": False}, models=model_catalog.models)
+    validate_config_overlay(
+        {"skill_recall_enabled": False}, models=model_catalog.models, home=meiva_home()
+    )
 
 
 @pytest.mark.parametrize(
@@ -68,6 +76,7 @@ def test_the_numeric_fields_are_range_checked(
             {field: value},
             models=model_catalog.models,
             decision_models=model_catalog.decision_models,
+            home=meiva_home(),
         )
 
 
@@ -82,5 +91,8 @@ def test_the_numeric_fields_are_range_checked(
 )
 def test_sane_values_are_admitted(model_catalog: ModelCatalog, field: str, value: object) -> None:
     validate_config_overlay(
-        {field: value}, models=model_catalog.models, decision_models=model_catalog.decision_models
+        {field: value},
+        models=model_catalog.models,
+        decision_models=model_catalog.decision_models,
+        home=meiva_home(),
     )

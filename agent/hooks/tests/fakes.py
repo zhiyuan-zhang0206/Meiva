@@ -14,7 +14,7 @@ from base.db.code_version_gate import ProcessDbGate
 from base.events.live.bus import EventBus
 from base.host.env.agent_slices import AgentSlices
 from base.packages.plugin_providers import build_model_catalog
-from base.paths import resolve_meiva_home
+from base.paths import meiva_home, resolve_meiva_home
 
 
 def make_fake_ops_pool() -> None:
@@ -32,7 +32,7 @@ def placeholder_runtime(
         agent=AgentSlices.resolve(default_reader=defaults()),
         db=Database.from_settings(gate=database_gate),
         bus=EventBus.from_settings(rng=seeded_rng()),
-        catalog=build_model_catalog(),
+        catalog=build_model_catalog(home=meiva_home()),
         clock_factory=Clock.from_settings,
     )
     return Runtime(context=ctx)

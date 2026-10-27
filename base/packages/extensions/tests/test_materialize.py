@@ -1,12 +1,14 @@
 from __future__ import annotations
 
 from collections.abc import Callable
+from functools import partial
 from pathlib import Path
 
 import psycopg
 
 from base.packages.extensions import materialize as mat
 from base.packages.extensions import registry as reg
+from base.paths import meiva_home
 
 
 def _tree(root: Path, files: dict[str, str]) -> Path:
@@ -15,6 +17,13 @@ def _tree(root: Path, files: dict[str, str]) -> Path:
         p.parent.mkdir(parents=True, exist_ok=True)
         p.write_text(body)
     return root
+
+
+# meiva:note
+# The hash the process home's install registry records for a name: what a materialize pass reads
+# when a test does not stand in a recorded hash of its own.
+def _recorded() -> Callable[[str], str | None]:
+    return partial(mat.last_written_hash, home=meiva_home())
 
 
 def _returns(value: str | None) -> Callable[[str], str | None]:
@@ -41,7 +50,7 @@ class TestTheThreeVerdicts:
         dest_root = tmp_path / "skills"
         with db_conn.transaction(force_rollback=True):
             _register(db_conn, "alpha", src)
-            result = mat.materialize_skills(db_conn, dest_root=dest_root)
+            result = mat.materialize_skills(db_conn, dest_root=dest_root, last_written=_recorded())
         assert result.landed == ["alpha"]
         assert (dest_root / "alpha" / "SKILL.md").read_text() == "body"
         assert (dest_root / "alpha" / "ref/x.md").read_text() == "deep"
@@ -53,8 +62,8 @@ class TestTheThreeVerdicts:
         dest_root = tmp_path / "skills"
         with db_conn.transaction(force_rollback=True):
             _register(db_conn, "alpha", src)
-            mat.materialize_skills(db_conn, dest_root=dest_root)
-            second = mat.materialize_skills(db_conn, dest_root=dest_root)
+            mat.materialize_skills(db_conn, dest_root=dest_root, last_written=_recorded())
+            second = mat.materialize_skills(db_conn, dest_root=dest_root, last_written=_recorded())
         assert second.unchanged == ["alpha"]
         assert second.landed == []
         assert second.updated == []
@@ -65,7 +74,7 @@ class TestTheThreeVerdicts:
         dest_root = tmp_path / "skills"
         with db_conn.transaction(force_rollback=True):
             v1 = _register(db_conn, "alpha", _tree(tmp_path / "v1", {"SKILL.md": "one"}))
-            mat.materialize_skills(db_conn, dest_root=dest_root)
+            mat.materialize_skills(db_conn, dest_root=dest_root, last_written=_recorded())
 
             _register(db_conn, "alpha", _tree(tmp_path / "v2", {"SKILL.md": "two"}))
             result = mat.materialize_skills(db_conn, dest_root=dest_root, last_written=_returns(v1))
@@ -79,7 +88,7 @@ class TestTheThreeVerdicts:
         dest_root = tmp_path / "skills"
         with db_conn.transaction(force_rollback=True):
             v1 = _register(db_conn, "alpha", _tree(tmp_path / "v1", {"SKILL.md": "one"}))
-            mat.materialize_skills(db_conn, dest_root=dest_root)
+            mat.materialize_skills(db_conn, dest_root=dest_root, last_written=_recorded())
 
             (dest_root / "alpha" / "SKILL.md").write_text("MY EDIT")
             _register(db_conn, "alpha", _tree(tmp_path / "v2", {"SKILL.md": "two"}))
@@ -116,7 +125,7 @@ class TestWhatItRefusesToTouch:
                 source=reg.REPO_SOURCE,
                 content_hash=None,
             )
-            result = mat.materialize_skills(db_conn, dest_root=dest_root)
+            result = mat.materialize_skills(db_conn, dest_root=dest_root, last_written=_recorded())
         assert result.landed == []
         assert not (dest_root / "repo-skill").exists()
 
@@ -127,7 +136,7 @@ class TestWhatItRefusesToTouch:
         with db_conn.transaction(force_rollback=True):
             _register(db_conn, "alpha", _tree(tmp_path / "src", {"SKILL.md": "body"}))
             reg.set_default_enabled(db_conn, "alpha", enabled=False)
-            result = mat.materialize_skills(db_conn, dest_root=dest_root)
+            result = mat.materialize_skills(db_conn, dest_root=dest_root, last_written=_recorded())
         assert result.landed == []
         assert not (dest_root / "alpha").exists()
 
@@ -144,7 +153,7 @@ class TestWhatItRefusesToTouch:
             reg.upsert(
                 db_conn, name="p", kind="plugin", source="https://x.inv", content_hash=digest
             )
-            result = mat.materialize_skills(db_conn, dest_root=dest_root)
+            result = mat.materialize_skills(db_conn, dest_root=dest_root, last_written=_recorded())
         assert result.landed == []
         assert not (dest_root / "p").exists()
 
@@ -164,7 +173,7 @@ class TestFailureStates:
                 source="https://x.inv",
                 content_hash="hash-with-no-blob",
             )
-            result = mat.materialize_skills(db_conn, dest_root=dest_root)
+            result = mat.materialize_skills(db_conn, dest_root=dest_root, last_written=_recorded())
 
         assert result.missing_blob == ["broken"]
         assert result.landed == ["good"], "a broken row must not block a healthy one"
@@ -175,7 +184,9 @@ class TestFailureStates:
         dest_root = tmp_path / "skills"
         with db_conn.transaction(force_rollback=True):
             _register(db_conn, "alpha", _tree(tmp_path / "src", {"SKILL.md": "body"}))
-            result = mat.materialize_skills(db_conn, dest_root=dest_root, dry_run=True)
+            result = mat.materialize_skills(
+                db_conn, dest_root=dest_root, dry_run=True, last_written=_recorded()
+            )
         assert result.landed == ["alpha"]
         assert not (dest_root / "alpha").exists()
 
@@ -185,7 +196,7 @@ class TestFailureStates:
         dest_root = tmp_path / "skills"
         with db_conn.transaction(force_rollback=True):
             v1 = _register(db_conn, "alpha", _tree(tmp_path / "v1", {"SKILL.md": "one"}))
-            mat.materialize_skills(db_conn, dest_root=dest_root)
+            mat.materialize_skills(db_conn, dest_root=dest_root, last_written=_recorded())
             _register(db_conn, "alpha", _tree(tmp_path / "v2", {"SKILL.md": "two"}))
             mat.materialize_skills(db_conn, dest_root=dest_root, last_written=_returns(v1))
 
@@ -199,7 +210,7 @@ class TestChangedFlag:
         dest_root = tmp_path / "skills"
         with db_conn.transaction(force_rollback=True):
             _register(db_conn, "alpha", _tree(tmp_path / "src", {"SKILL.md": "body"}))
-            first = mat.materialize_skills(db_conn, dest_root=dest_root)
-            second = mat.materialize_skills(db_conn, dest_root=dest_root)
+            first = mat.materialize_skills(db_conn, dest_root=dest_root, last_written=_recorded())
+            second = mat.materialize_skills(db_conn, dest_root=dest_root, last_written=_recorded())
         assert first.changed is True
         assert second.changed is False

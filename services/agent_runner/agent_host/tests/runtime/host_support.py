@@ -61,7 +61,7 @@ def build_agent_host(
         db=Database.from_settings(gate=database_gate),
         catalog=catalog,
         **kwargs,
-        commands=CommandCatalog.system(skills=list),
+        commands=CommandCatalog.system(skills=list, home=meiva_home()),
     )
 
 

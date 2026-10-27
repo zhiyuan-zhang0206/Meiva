@@ -23,6 +23,7 @@ from pydantic import ValidationError
 from redis.client import PubSub
 
 from base.agents.messages.inbound import InboundKind
+from base.api_contracts.agent_contract import InvalidModelConfig
 from base.cluster.machine import MachineIdentityReader
 from base.cluster.machine.tests.identity import machine_identity as machine_identity
 from base.config import settings
@@ -34,8 +35,10 @@ from base.host.proc import run_bounded
 from base.host.tests.short_tmp import short_tmp as short_tmp
 from base.lm.catalog import ModelCatalog
 from base.packages.plugin_providers import build_model_catalog
+from base.packages.plugins.config_registration import validate_config_overlay_shape
+from base.packages.plugins.plugin_errors import InvalidConfigOverlay
 from base.packages.tests.model_catalog import inert_keys
-from base.paths import chrome_mcp_socket, resolve_meiva_home
+from base.paths import chrome_mcp_socket, meiva_home, resolve_meiva_home
 from ops import lifecycle
 from ops.lifecycle import launch
 from ops.lifecycle.tests.loopback.agent_host import ServedAgentHost
@@ -74,9 +77,10 @@ class TestSpawnAgentRequestSourceValidation:
         assert body.prompt_source is None
 
 
+# meiva:note
+# Restart overlays are checked by the operation, which holds the home their plugin config
+# classes come from, in the gateway and runner process profiles alike.
 class TestRestartAgentRequestConfigOverlay:
-    """Restart overlays fail at both HTTP and runner schema boundaries."""
-
     @pytest.mark.parametrize("profile", ["gateway", "runner"])
     def test_validates_overlay_in_boundary_profile(self, profile: str, tmp_path: Path) -> None:
         child = Path(__file__).with_name("_restart_profile_child.py")
@@ -103,9 +107,11 @@ class TestRestartAgentRequestConfigOverlay:
             {"reasoning_effort": "turbo"},
         ],
     )
-    def test_rejects_invalid_overlay(self, config_overlay: dict[str, object]) -> None:
-        with pytest.raises(ValidationError):
-            RestartAgentRequest(config_overlay=config_overlay)
+    def test_rejects_invalid_overlay(
+        self, config_overlay: dict[str, object], unit_home: Path
+    ) -> None:
+        with pytest.raises(InvalidConfigOverlay):
+            validate_config_overlay_shape(config_overlay, home=unit_home)
 
     @pytest.mark.parametrize("config_overlay", [None, {}])
     def test_accepts_legacy_empty_overlay_forms(
@@ -208,8 +214,9 @@ async def test_restart_agent_op_terminated_short_circuits(
             agent_id,
             RestartAgentRequest(source="user"),
             pool,
-            catalog=build_model_catalog(),
+            catalog=build_model_catalog(home=meiva_home()),
             default_model=settings.lm.llm_model,
+            home=meiva_home(),
         )
         assert received.get_message(timeout=0.1) is None
     assert resp.status == "already_terminated"
@@ -219,7 +226,7 @@ async def test_restart_agent_op_terminated_short_circuits(
 
 
 # meiva:note
-# The runner reparses forwarded restart bodies before any DB write.
+# The runner validates forwarded restart bodies before any DB write.
 @pytest.mark.asyncio
 async def test_restart_lifecycle_op_validates_overlay_on_the_runner(
     lifecycle_agent_id: int,
@@ -229,7 +236,7 @@ async def test_restart_lifecycle_op_validates_overlay_on_the_runner(
     event_bus: EventBus,
     model_catalog: ModelCatalog,
 ) -> None:
-    with pytest.raises(ValidationError):
+    with pytest.raises(InvalidModelConfig):
         await lifecycle.lifecycle_op(
             database,
             event_bus,

@@ -578,6 +578,7 @@ def spawn_impl(
             None if installation is None else installation.configs,
             models=catalog.models,
             decision_models=catalog.decision_models,
+            home=process_context.current_context().require_meiva_home(),
         )
     return gateway_client.spawn(
         spawner=spawner,
@@ -681,7 +682,9 @@ def commands() -> list[CommandInfo]:
         CommandInfo(
             name=c["name"], description=c["description"], instruction_hint=c["instruction_hint"]
         )
-        for c in CommandCatalog.system(skills=skills.names).discover()
+        for c in CommandCatalog.system(
+            skills=skills.names, home=process_context.current_context().require_meiva_home()
+        ).discover()
     ]
 
 

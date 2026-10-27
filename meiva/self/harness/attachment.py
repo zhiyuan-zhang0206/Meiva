@@ -286,7 +286,11 @@ class _RegistrationCodec:
     ) -> tuple[BaseAgentState, Mapping[str, Any] | None, Mapping[str, Any] | None]:
         from base.agents.context.external_attachment import plugin_state_codec
 
-        return plugin_state_codec.load_snapshot(agent_id, database=self._attachment._database())
+        return plugin_state_codec.load_snapshot(
+            agent_id,
+            database=self._attachment._database(),
+            home=process_context.current_context().require_meiva_home(),
+        )
 
     def plugin_state_schema(self, state: BaseAgentState) -> object:
         from base.agents.context.external_attachment import plugin_state_codec

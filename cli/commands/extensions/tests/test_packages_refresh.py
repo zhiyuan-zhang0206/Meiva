@@ -22,6 +22,7 @@ from loguru import logger
 
 from base.config import ConfigBoot
 from base.packages.extensions import install_registry as reg
+from base.paths import meiva_home
 from base.paths.home import resolve_meiva_home
 from cli.commands.duration import parse_duration
 from cli.commands.extensions.packages.refresh import Pass, RefreshReport, run_refresh
@@ -161,19 +162,20 @@ def _seed(
             origin_path=str(src),
             content_hash=reg.tree_hash(dest),
             update=reg.UpdateState(applied_rev=applied_rev, mode=mode, last_check_at=last_check_at),
-        )
+        ),
+        home=meiva_home(),
     )
 
 
 def _mirror_installed_hash(name: str) -> None:
     """Give `name` the row shape `meiva skill install` writes: both edit guards set."""
-    with reg.mutate() as registry:
+    with reg.mutate(home=meiva_home()) as registry:
         row = next(p for p in registry.packages if p.name == name)
         row.installed_hash = row.content_hash
 
 
 def _row(name: str) -> reg.InstalledPackage:
-    row = reg.get(name)
+    row = reg.get(name, home=meiva_home())
     assert row is not None
     return row
 
@@ -229,7 +231,7 @@ def _assert_registry_advanced_to_core_head(c2: str) -> None:
     assert foo.update.mode == "auto" and foo.update.interval_seconds == 86400
     assert foo.update.channel == "core" and foo.update.failures == 0
     assert _row("bar").update.applied_rev == c2
-    assert reg.load().channels["core"].last_seen_sha == c2
+    assert reg.load(home=meiva_home()).channels["core"].last_seen_sha == c2
 
 
 def test_refresh_applies_only_the_changed_package(
@@ -409,7 +411,8 @@ def test_refresh_skips_local_source_rows(
                 enabled=True,
                 content_hash=reg.tree_hash(dest),
                 update=reg.UpdateState(channel=channel),
-            )
+            ),
+            home=meiva_home(),
         )
 
     for source in ("local:testbox", str(tmp_path)):
@@ -479,7 +482,7 @@ def test_refresh_records_error_and_backs_off_when_offline(
         "bar": True,
     }
     assert _row("foo").update.failures == 1
-    assert (reg.load().channels["core"].last_result or "").startswith("error")
+    assert (reg.load(home=meiva_home()).channels["core"].last_result or "").startswith("error")
 
     # the job retries only after the backoff: same run parameters, not due now
     refresh_config.set_field("os_jobs_enabled", True)
@@ -614,14 +617,22 @@ def test_policy_verb_writes_explicit_values(refresh_config: ConfigBoot, core_rep
     c1 = _head(core_repo)
     _seed(core_repo, "foo", applied_rev=c1)
     assert (
-        cmd_packages_policy("foo", config=refresh_config, update_mode="notify", check_every="2h")
+        cmd_packages_policy(
+            "foo", config=refresh_config, update_mode="notify", check_every="2h", home=meiva_home()
+        )
         == 0
     )
     row = _row("foo")
     assert row.update.mode == "notify" and row.update.interval_seconds == 7200
-    assert cmd_packages_policy("foo", config=refresh_config, check_every="soon") == 1
-    assert cmd_packages_policy("foo", config=refresh_config) == 1
-    assert cmd_packages_policy("missing", config=refresh_config, update_mode="auto") == 1
+    assert (
+        cmd_packages_policy("foo", config=refresh_config, check_every="soon", home=meiva_home())
+        == 1
+    )
+    assert cmd_packages_policy("foo", config=refresh_config, home=meiva_home()) == 1
+    assert (
+        cmd_packages_policy("missing", config=refresh_config, update_mode="auto", home=meiva_home())
+        == 1
+    )
 
 
 # ── runtime host-contract filter (design §5.5) ──────────────────────────────

@@ -7,13 +7,18 @@ from base.cluster.dataplane.redis_bridge import RedisBridgeEndpoint, redis_bridg
 from base.cluster.machine import MachineIdentityReader
 from base.cluster.machine.configured import ConfiguredMachineIdentity
 from base.cluster.machine.tests.identity import machine_identity as machine_identity
+from base.paths import meiva_home
 from services.supervision.roster.composition import build_services, redis_bridge_launch
 from services.supervision.roster.gate_plan import BridgeFact, gate_reason
 from services.supervision.roster.service_spec import ServiceSpec
 
 
 def _bridge() -> ServiceSpec:
-    return next(service for service in build_services() if service.session == "redis-bridge")
+    return next(
+        service
+        for service in build_services(home=meiva_home())
+        if service.session == "redis-bridge"
+    )
 
 
 def _remote_data_plane() -> bool:

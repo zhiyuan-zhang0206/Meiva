@@ -15,6 +15,7 @@ from base.cluster.machine import MachineIdentityReader
 from base.config import settings
 from base.events.live.bus import EventBus
 from base.packages.plugin_providers import build_model_catalog
+from base.paths import meiva_home
 from gateway.tests.support.live_events.recorder import recording_live_events
 from meiva.tests.fixtures.pin_agent import pin_agent
 from meiva_builtins.plugins.meiva_fleet.tests.registry_support import (
@@ -128,7 +129,7 @@ def test_notify_defaults_to_response_and_snapshot_lists_question(
     snap = select_one(
         db_conn,
         agent_id,
-        catalog=build_model_catalog(),
+        catalog=build_model_catalog(home=meiva_home()),
         default_model=settings.lm.llm_model,
     )
     assert snap is not None
@@ -164,7 +165,7 @@ def test_notify_require_response_rides_awaiting_worklist(
     snap = select_one(
         db_conn,
         agent_id,
-        catalog=build_model_catalog(),
+        catalog=build_model_catalog(home=meiva_home()),
         default_model=settings.lm.llm_model,
     )
     assert snap is not None
@@ -194,7 +195,7 @@ def test_sdk_question_keeps_number_order_in_snapshot(
     snapshot = select_one(
         db_conn,
         agent_id,
-        catalog=build_model_catalog(),
+        catalog=build_model_catalog(home=meiva_home()),
         default_model=settings.lm.llm_model,
     )
     assert snapshot is not None
@@ -246,7 +247,7 @@ def test_notify_records_task_id_and_rides_snapshot(
     snap = select_one(
         db_conn,
         agent_id,
-        catalog=build_model_catalog(),
+        catalog=build_model_catalog(home=meiva_home()),
         default_model=settings.lm.llm_model,
     )
     assert snap is not None
@@ -349,7 +350,7 @@ def test_response_notice_content_edits_publish_refreshed_snapshot(
     snapshot = select_one(
         db_conn,
         agent_id,
-        catalog=build_model_catalog(),
+        catalog=build_model_catalog(home=meiva_home()),
         default_model=settings.lm.llm_model,
     )
     assert snapshot is not None
@@ -407,7 +408,7 @@ def test_dismiss_notice_withdraws(
     snap = select_one(
         db_conn,
         agent_id,
-        catalog=build_model_catalog(),
+        catalog=build_model_catalog(home=meiva_home()),
         default_model=settings.lm.llm_model,
     )
     assert snap is not None

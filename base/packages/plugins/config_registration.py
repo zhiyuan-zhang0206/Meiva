@@ -173,11 +173,11 @@ def _framework_field_tables() -> tuple[set[str], set[str], Callable[[str], str]]
 
 
 def resolve_overlay_targets(
-    overlay: dict[str, object], configs: Mapping[str, BaseModel] | None = None
+    overlay: dict[str, object], configs: Mapping[str, BaseModel] | None = None, *, home: Path
 ) -> dict[str, tuple[str | None, str]]:
     framework_per_agent, framework_all, _ = _framework_field_tables()
 
-    plugin_classes = overlay_config_classes(configs)
+    plugin_classes = overlay_config_classes(configs, home=home)
     out: dict[str, tuple[str | None, str]] = {}
     for key in overlay:
         matches: list[tuple[str | None, str]] = []
@@ -303,9 +303,9 @@ def _validate_framework_overlay_ranges(updates: dict[str, object]) -> None:
 
 # meiva:link base/packages/plugins/docs/plugin-config/plugin-config.meiva.okf.md
 def validate_config_overlay_shape(
-    overlay: dict[str, object], configs: Mapping[str, BaseModel] | None = None
+    overlay: dict[str, object], configs: Mapping[str, BaseModel] | None = None, *, home: Path
 ) -> None:
-    targets = resolve_overlay_targets(overlay, configs)
+    targets = resolve_overlay_targets(overlay, configs, home=home)
     grouped: dict[str | None, dict[str, object]] = {}
     for key, (plugin, field) in targets.items():
         grouped.setdefault(plugin, {})[field] = overlay[key]
@@ -325,7 +325,7 @@ def validate_config_overlay_shape(
                     sub = cls()
                     cls.model_validate({**sub.model_dump(), **upd})
             else:
-                cls = overlay_config_classes(configs)[plugin]
+                cls = overlay_config_classes(configs, home=home)[plugin]
                 held = None if configs is None else configs.get(plugin)
                 current = (held if held is not None else cls()).model_dump()
                 cls(**{**current, **updates})
@@ -348,8 +348,9 @@ def validate_config_overlay(
     *,
     models: Mapping[str, object],
     decision_models: Mapping[str, object] | None = None,
+    home: Path,
 ) -> None:
-    validate_config_overlay_shape(overlay, configs)
+    validate_config_overlay_shape(overlay, configs, home=home)
     if "llm_model" in overlay:
         error = _validate_model_membership(overlay["llm_model"], models)
         if error is not None:
@@ -382,9 +383,9 @@ class OverlayPlan:
 
 
 def plan_config_overlay(
-    overlay: dict[str, object], configs: Mapping[str, BaseModel] | None = None
+    overlay: dict[str, object], configs: Mapping[str, BaseModel] | None = None, *, home: Path
 ) -> OverlayPlan:
-    targets = resolve_overlay_targets(overlay, configs)
+    targets = resolve_overlay_targets(overlay, configs, home=home)
     framework = tuple(
         (field, overlay[key]) for key, (plugin, field) in targets.items() if plugin is None
     )

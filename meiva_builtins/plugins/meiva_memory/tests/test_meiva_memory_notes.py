@@ -87,7 +87,9 @@ def test_only_the_shared_index_is_grafted_onto_a_fork(memory_plugin: Any) -> Non
 
 
 def test_discipline_names_every_type_in_the_vocabulary(memory_plugin: Any) -> None:
-    section = memory_plugin.memory_discipline_section(_slices(), catalog=build_model_catalog())
+    section = memory_plugin.memory_discipline_section(
+        _slices(), catalog=build_model_catalog(home=meiva_home())
+    )
     for tag in (
         "type/user",
         "type/feedback",
@@ -100,7 +102,9 @@ def test_discipline_names_every_type_in_the_vocabulary(memory_plugin: Any) -> No
 
 
 def test_discipline_carries_the_criteria_triggers_and_source_ranking(memory_plugin: Any) -> None:
-    section = memory_plugin.memory_discipline_section(_slices(), catalog=build_model_catalog())
+    section = memory_plugin.memory_discipline_section(
+        _slices(), catalog=build_model_catalog(home=meiva_home())
+    )
     assert "applicable, durable, legible" in section
     assert "answering is not saving" in section
     assert "not a source of truth" in section
@@ -110,7 +114,9 @@ def test_discipline_carries_the_criteria_triggers_and_source_ranking(memory_plug
 
 
 def test_discipline_prioritizes_memory_maintenance_over_current_work(memory_plugin: Any) -> None:
-    section = memory_plugin.memory_discipline_section(_slices(), catalog=build_model_catalog())
+    section = memory_plugin.memory_discipline_section(
+        _slices(), catalog=build_model_catalog(home=meiva_home())
+    )
     assert "important standing duty" in section
     assert "update it first, before continuing" in section
     assert "Don't \"notice and" in section
@@ -123,7 +129,9 @@ def test_discipline_prioritizes_memory_maintenance_over_current_work(memory_plug
 def test_discipline_keeps_the_shared_pool_restrained_and_personal_verbose(
     memory_plugin: Any,
 ) -> None:
-    section = memory_plugin.memory_discipline_section(_slices(), catalog=build_model_catalog())
+    section = memory_plugin.memory_discipline_section(
+        _slices(), catalog=build_model_catalog(home=meiva_home())
+    )
     assert "Restrained by" in section
     assert "How to apply" in section
     assert "user rulings" in section
@@ -142,9 +150,11 @@ def test_discipline_empty_only_when_both_stores_are_off(
     memory_plugin: Any, index: bool, per_agent: bool, expected: bool
 ) -> None:
     slices = _slices(memory_index_inject_enabled=index, memory_per_agent_inject_enabled=per_agent)
-    assert bool(memory_plugin.memory_discipline_section(slices, catalog=build_model_catalog())) is (
-        expected
-    )
+    assert bool(
+        memory_plugin.memory_discipline_section(
+            slices, catalog=build_model_catalog(home=meiva_home())
+        )
+    ) is (expected)
 
 
 def test_context_notes_skips_the_stores_that_are_off(
@@ -166,8 +176,8 @@ def test_indexer_is_declared_by_the_plugin_not_the_core_roster() -> None:
     from meiva_builtins.plugins.meiva_memory.services import services
     from services.supervision.roster import composition
 
-    assert [s.session for s in services()] == ["memory-indexer"]
-    assert "memory-indexer" in [s.session for s in composition.build_services()]
+    assert [s.session for s in services(home=meiva_home())] == ["memory-indexer"]
+    assert "memory-indexer" in [s.session for s in composition.build_services(home=meiva_home())]
     core_source = _Path(composition.__file__).read_text(encoding="utf-8")
     literals = {
         node.value

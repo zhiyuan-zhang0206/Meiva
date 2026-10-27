@@ -8,12 +8,17 @@ from starlette.routing import Route
 
 from base.config import get_field, set_field
 from base.host.net.tests.local_http import serve_asgi
+from base.paths import meiva_home
 from services.supervision.roster.composition import build_services
 from services.supervision.roster.service_spec import ServiceSpec
 
 
 def _memory_search() -> ServiceSpec:
-    return next(service for service in build_services() if service.session == "memory-search")
+    return next(
+        service
+        for service in build_services(home=meiva_home())
+        if service.session == "memory-search"
+    )
 
 
 async def _search(_request: Request) -> JSONResponse:

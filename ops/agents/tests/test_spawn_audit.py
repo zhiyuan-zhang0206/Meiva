@@ -66,7 +66,7 @@ def test_a_spawn_is_recorded_with_its_machine(
         event_bus,
         spawner="user",
         machine=machine,
-        catalog=build_model_catalog(),
+        catalog=build_model_catalog(home=meiva_home()),
         authority=config_authority,
     )
 
@@ -88,7 +88,7 @@ def test_a_fork_is_recorded_against_its_source_agent(
         event_bus,
         spawner="user",
         machine=machine_identity.name(),
-        catalog=build_model_catalog(),
+        catalog=build_model_catalog(home=meiva_home()),
         authority=config_authority,
     )
     checkpoint = _first_checkpoint(db_conn, parent)
@@ -100,7 +100,7 @@ def test_a_fork_is_recorded_against_its_source_agent(
         fork_from=parent,
         fork_checkpoint=checkpoint,
         machine=machine_identity.name(),
-        catalog=build_model_catalog(),
+        catalog=build_model_catalog(home=meiva_home()),
         authority=config_authority,
     )
 
@@ -125,7 +125,7 @@ def test_an_agent_sourced_first_prompt_is_recorded_as_a_message(
         machine=machine_identity.name(),
         prompt="hello",
         prompt_source="agent:4242",
-        catalog=build_model_catalog(),
+        catalog=build_model_catalog(home=meiva_home()),
         authority=config_authority,
     )
 
@@ -154,7 +154,7 @@ def test_a_spawn_whose_audit_fact_cannot_be_recorded_creates_no_agent(
             event_bus,
             spawner="user",
             machine=machine_identity.name(),
-            catalog=build_model_catalog(),
+            catalog=build_model_catalog(home=meiva_home()),
             authority=config_authority,
         )
 

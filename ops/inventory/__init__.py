@@ -11,6 +11,8 @@
 
 from __future__ import annotations
 
+from pathlib import Path
+
 from base.cluster.machine import MachineIdentityReader
 from base.host.system.hostport import Host
 from base.packages.mcp_config import load_mcp_config, server_capability
@@ -42,10 +44,12 @@ __all__ = ["inventory_read_op", "inventory_write_op"]
 #   - mcp_servers: one entry per server in the full merged map with effective enabled flag (the
 #     per-host overlay default-on), a one-line description, and a read-time capability verdict
 #     (can_enable/reason) for the `requires` precondition
-def inventory_read_op(*, local_machine: MachineIdentityReader, host: Host) -> InventoryReadResult:
+def inventory_read_op(
+    *, local_machine: MachineIdentityReader, host: Host, home: Path
+) -> InventoryReadResult:
     require_agent_runner(local_machine.role())
-    discovered = enable_config.discover_plugins()
-    cfg = enable_config.load_for_runtime(set(discovered))
+    discovered = enable_config.discover_plugins(home=home)
+    cfg = enable_config.load_for_runtime(set(discovered), home=home)
     plugins: dict[str, InventoryReadItem] = {}
     for name, plugin_dir in discovered.items():
         try:
@@ -59,8 +63,8 @@ def inventory_read_op(*, local_machine: MachineIdentityReader, host: Host) -> In
             description=description,
         )
 
-    merged = load_mcp_config(include_disabled=True)
-    overlay = mcp_enabled.read_enabled()
+    merged = load_mcp_config(include_disabled=True, home=home)
+    overlay = mcp_enabled.read_enabled(home=home)
     mcp_servers: dict[str, InventoryReadItem] = {}
     for name, spec in merged.items():
         ok, reason = server_capability(spec, host=host)
@@ -97,9 +101,10 @@ def inventory_write_op(
     *,
     local_machine: MachineIdentityReader,
     host: Host,
+    home: Path,
 ) -> InventoryWriteOpResult:
     require_agent_runner(local_machine.role())
-    merged = load_mcp_config(include_disabled=True)
+    merged = load_mcp_config(include_disabled=True, home=home)
     capabilities = {
         name: Verdict(*server_capability(merged[name], host=host))
         for name in servers_to_probe(mcp_servers, frozenset(merged))
@@ -107,16 +112,16 @@ def inventory_write_op(
     verdicts = plan_toggles(
         plugins,
         mcp_servers,
-        installed_plugins=frozenset(enable_config.discover_plugins()),
+        installed_plugins=frozenset(enable_config.discover_plugins(home=home)),
         known_servers=frozenset(merged),
         capabilities=capabilities,
     )
 
     if verdicts.applied:
         for name, want in plugins.items():
-            enable_config.set_local_enabled(name, enabled=want)
+            enable_config.set_local_enabled(name, enabled=want, home=home)
         for name, want in mcp_servers.items():
-            mcp_enabled.set_mcp_enabled(name, enabled=want)
+            mcp_enabled.set_mcp_enabled(name, enabled=want, home=home)
 
     return InventoryWriteOpResult(
         machine=local_machine.name(),

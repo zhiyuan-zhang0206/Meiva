@@ -148,7 +148,8 @@ def test_actual_mcp_reader_has_bounded_repo_and_opaque_external_domains() -> Non
         fact.target == "meiva_builtins/plugins" and fact.member is None for fact in found.records
     )
     assert any(
-        gap.expression == "external_plugin_read_root()" and gap.reason == facts.UNANCHORED_READ
+        gap.expression == "external_plugin_read_root(home=home)"
+        and gap.reason == facts.UNANCHORED_READ
         for gap in found.unknown
     )
 

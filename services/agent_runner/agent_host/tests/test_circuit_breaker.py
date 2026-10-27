@@ -36,6 +36,7 @@ from base.host.env.agent_slices import AgentSlices
 from base.lm.catalog import ModelCatalog
 from base.packages.composer_commands import CommandCatalog
 from base.packages.plugin_providers import build_model_catalog
+from base.paths import meiva_home
 from services.agent_runner.agent_host.tests.circuit_breaker.helpers import (
     RecordingPublisher,
     breaker_ctx,
@@ -109,9 +110,9 @@ async def test_fatal_provider_error_emits_blocked_recovery_details(
         agent=AgentSlices.resolve(default_reader=defaults()),
         db=Database.from_settings(gate=database_gate),
         bus=EventBus.from_settings(rng=seeded_rng()),
-        catalog=build_model_catalog(),
+        catalog=build_model_catalog(home=meiva_home()),
         clock_factory=Clock.from_settings,
-        commands=CommandCatalog.system(skills=list),
+        commands=CommandCatalog.system(skills=list, home=meiva_home()),
     )
     exc = FatalProviderError(
         "provider permanently rejected (HTTP 400): Content Exists Risk",
@@ -207,7 +208,7 @@ async def test_permanent_provider_error_reports_metadata_to_nearest_alive_ancest
             bus=EventBus.from_settings(rng=seeded_rng()),
             catalog=model_catalog,
             clock_factory=Clock.from_settings,
-            commands=CommandCatalog.system(skills=list),
+            commands=CommandCatalog.system(skills=list, home=meiva_home()),
         ),
         agent_id=child_id,
         circuit=None,
@@ -286,7 +287,7 @@ async def test_context_overflow_halts_background_wakes_and_reports_to_an_ancesto
             bus=EventBus.from_settings(rng=seeded_rng()),
             catalog=model_catalog,
             clock_factory=Clock.from_settings,
-            commands=CommandCatalog.system(skills=list),
+            commands=CommandCatalog.system(skills=list, home=meiva_home()),
         ),
         agent_id=child_id,
         circuit=None,

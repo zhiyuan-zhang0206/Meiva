@@ -158,6 +158,7 @@ async def test_memory_search_and_indexer_serve_and_clean_up_when_stopped(
                 image=LoadedCommit(tmp_path, "captured-memory-indexer"),
                 root=tmp_path / "memory",
                 tuning=MemoryIndexerConfig(loop_interval_s=0.02),
+                home=meiva_home(),
             )
         )
         try:

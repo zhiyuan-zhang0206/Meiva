@@ -34,6 +34,7 @@ from base.lm.catalog import ModelCatalog
 from base.lm.registry import ModelSpec, ModelTuning
 from base.log.tests.log_records import LogRecords
 from base.packages.plugin_providers import build_model_catalog
+from base.paths import meiva_home
 
 
 # meiva:note
@@ -57,7 +58,7 @@ _QUICK = {
 def _policy(agent_id: int = _ZERO_PHASE, **pins: Any):
     agent = AgentSlices.resolve({"llm_model": _MODEL, **pins}, default_reader=defaults())
 
-    return retry_policy(agent, build_model_catalog(), agent_id)
+    return retry_policy(agent, build_model_catalog(home=meiva_home()), agent_id)
 
 
 def _wait(exc: Exception, failed: int = 1) -> float | None:

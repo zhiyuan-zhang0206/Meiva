@@ -12,6 +12,7 @@ import pytest
 from base import paths
 from base.packages.plugins.enable_config import write_local
 from base.packages.plugins.loading.scaffold import ScaffoldFacts
+from base.paths import meiva_home
 from base.paths.tests.homes import point_home
 from base.telemetry import EventPipeline
 from cli.commands.extensions import memory
@@ -36,7 +37,7 @@ def _facts(command: CommandRuntime) -> ScaffoldFacts:
 
 
 def _enable_user_plugins(plugins: dict[str, dict[str, object]]) -> None:
-    write_local({"plugins": {"meiva_memory": {"enabled": False}, **plugins}})
+    write_local({"plugins": {"meiva_memory": {"enabled": False}, **plugins}}, home=meiva_home())
 
 
 # meiva:note
@@ -47,7 +48,9 @@ def test_the_isolated_home_is_the_one_every_consumer_resolves(tmp_path: Path) ->
 
     home = tmp_path / "meiva"
     assert paths.meiva_home() == home
-    collector = next(service for service in build_services() if service.session == "otel-collector")
+    collector = next(
+        service for service in build_services(home=home) if service.session == "otel-collector"
+    )
     assert collector.config_inputs == (paths.otel_collector_config(home),)
 
 
@@ -174,7 +177,7 @@ def _hermetic_converge_steps() -> tuple[converge_host.ConvergeStep, ...]:
 
 
 def _install_memory_plugin() -> None:
-    write_local({"plugins": {"meiva_memory": {"enabled": True}}})
+    write_local({"plugins": {"meiva_memory": {"enabled": True}}}, home=meiva_home())
 
 
 def _make_dirty_memory_repo(pool: Path, branch: str) -> None:
@@ -357,7 +360,8 @@ def test_a_scaffold_without_the_facts_keyword_is_refused(command_runtime: Comman
 def test_the_scaffold_receives_the_facts_the_command_read(
     command_runtime: CommandRuntime, tmp_path: Path
 ) -> None:
-    plugin = paths.plugins_dir() / "recorder"
+    home = tmp_path / "facts-home"
+    plugin = paths.plugins_dir(home=home) / "recorder"
     plugin.mkdir(parents=True)
     (plugin / "plugin.py").write_text("__description__ = 'recorder'\n", encoding="utf-8")
     (plugin / "setup.py").write_text(
@@ -368,10 +372,11 @@ def test_the_scaffold_receives_the_facts_the_command_read(
         "    )\n",
         encoding="utf-8",
     )
-    _enable_user_plugins({"recorder": {"enabled": True}})
+    write_local(
+        {"plugins": {"meiva_memory": {"enabled": False}, "recorder": {"enabled": True}}}, home=home
+    )
     command_runtime.config.set_field("memory_keep_local", True)
     command_runtime.config.set_field("memory_remote", "git@example.invalid:pool.git")
-    home = tmp_path / "facts-home"
     facts = scaffold_facts(command_runtime.config, home=home)
 
     run_plugin_scaffolds(machine=command_runtime.machine, facts=facts)

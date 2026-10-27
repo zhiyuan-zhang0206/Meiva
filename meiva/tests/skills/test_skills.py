@@ -292,7 +292,7 @@ def test_gate_applies_to_namespace_top_level(fake_skills_dir: Path) -> None:
         fake_skills_dir / "superpowers", "brainstorming", "name: brainstorming\ndescription: bs"
     )
     assert [s["name"] for s in skills_mod.names()] == ["brainstorming"]
-    install_registry.deregister("superpowers")
+    install_registry.deregister("superpowers", home=meiva_home())
     assert skills_mod.names() == []
 
 
@@ -530,3 +530,19 @@ def test_a_consumed_body_shortens_the_home_prefix_to_a_tilde() -> None:
     assert consumed_text("/home/user2/skills/alpha", "/home/u", "# A\n") == (
         "/home/user2/skills/alpha\n\n# A\n"
     )
+
+
+# meiva:note
+# The scan follows the home it is handed, not the bound context's: a skill tracked under another
+# home is found under that home and not under the context's.
+def test_names_under_scans_the_home_it_is_handed(unit_home: Path, tmp_path: Path) -> None:
+    other = tmp_path / "other-home"
+    root = skills_dir(other)
+    root.mkdir(parents=True)
+    write_skill(root, "alpha", "name: alpha\ndescription: a", tracked=False)
+    install_registry.register(
+        install_registry.InstalledPackage(name="alpha", type="skill"), home=other
+    )
+
+    assert [s["name"] for s in skills_mod.names_under(other)] == ["alpha"]
+    assert skills_mod.names() == []

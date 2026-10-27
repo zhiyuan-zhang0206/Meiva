@@ -20,6 +20,7 @@ def main() -> None:
         authority=authority,
         local_machine="test-machine",
         host=fake_host(programs={"npx": "/test/npx"}),
+        home=meiva_home(),
     )
     sys.stdout.write(result.model_dump_json())
 

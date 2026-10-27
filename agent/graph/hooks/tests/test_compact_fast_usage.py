@@ -9,6 +9,7 @@ from base.config.tests.configuration import defaults
 from base.host.env.agent_slices import AgentSlices
 from base.log.tests.log_records import LogRecords
 from base.packages.plugin_providers import build_model_catalog
+from base.paths import meiva_home
 
 
 async def test_compaction_preserves_fast_accounting_id(loguru_records: LogRecords) -> None:
@@ -21,7 +22,10 @@ async def test_compaction_preserves_fast_accounting_id(loguru_records: LogRecord
     llm = cast(BaseChatModel, ScriptedModel(response))
 
     summary = await generate_summary(
-        [HumanMessage(content="history")], llm, slices, catalog=build_model_catalog()
+        [HumanMessage(content="history")],
+        llm,
+        slices,
+        catalog=build_model_catalog(home=meiva_home()),
     )
 
     assert summary == "summary"

@@ -52,7 +52,7 @@ def test_a_manifest_that_matches_the_declared_prefix_installs_the_provider(
     plugin_dir = paths.plugins_dir(home=meiva_home()) / "matching_provider"
     (plugin_dir / "meiva-plugin.json").write_text(_manifest("matching_provider", ["kept-"]))
 
-    catalog = build_model_catalog()
+    catalog = build_model_catalog(home=meiva_home())
 
     assert "kept-1" in catalog.models
 
@@ -67,10 +67,10 @@ def test_a_manifest_that_disagrees_refuses_the_catalog_and_can_be_corrected(
     manifest.write_text(_manifest("gated_provider", ["other-"]))
 
     with pytest.raises(ContributionMismatch, match="gated_provider"):
-        build_model_catalog()
+        build_model_catalog(home=meiva_home())
 
     manifest.write_text(_manifest("gated_provider", ["gated-"]))
-    catalog = build_model_catalog()
+    catalog = build_model_catalog(home=meiva_home())
     assert "kept-1" in catalog.models
     assert "gated-1" in catalog.models
 
@@ -82,7 +82,7 @@ def test_a_provider_plugin_without_a_manifest_refuses_the_catalog(
     (paths.plugins_dir(home=meiva_home()) / "bare_provider" / "meiva-plugin.json").unlink()
 
     with pytest.raises(ManifestError, match=r"bare_provider.*meiva-plugin\.json not found"):
-        build_model_catalog()
+        build_model_catalog(home=meiva_home())
 
 
 def test_a_provider_py_without_contribute_is_a_load_failure(
@@ -95,7 +95,7 @@ def test_a_provider_py_without_contribute_is_a_load_failure(
     (legacy / "provider.py").write_text("X = 1\n")
 
     with pytest.raises(AttributeError, match=r"legacy_provider\.provider has no contribute"):
-        build_model_catalog()
+        build_model_catalog(home=meiva_home())
 
 
 def test_the_declaration_is_attributed_by_prefix() -> None:

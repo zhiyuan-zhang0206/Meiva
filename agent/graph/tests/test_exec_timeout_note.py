@@ -17,6 +17,7 @@ from base.clock import Clock
 from base.config.tests.configuration import defaults
 from base.host.env.agent_slices import AgentSlices
 from base.packages.plugin_providers import build_model_catalog
+from base.paths import meiva_home
 
 
 def _context(
@@ -26,7 +27,7 @@ def _context(
     return MeivaContext(
         identity=AgentIdentity(agent_id=agent_id, owns_loop=True) if agent_id is not None else None,
         agent=AgentSlices.resolve(pins, default_reader=defaults()),
-        catalog=build_model_catalog(),
+        catalog=build_model_catalog(home=meiva_home()),
         clock_factory=Clock.from_settings,
     )
 

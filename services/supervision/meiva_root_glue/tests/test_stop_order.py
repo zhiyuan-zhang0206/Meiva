@@ -8,6 +8,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
+from base.paths import meiva_home
 from services.supervision.meiva_root.manifest import UnitManifest, UnitRegistry
 from services.supervision.meiva_root_glue.manifests import STOPS_FIRST, build_units
 from services.supervision.roster.service_spec import ServiceSpec
@@ -29,6 +30,7 @@ def test_root_stops_the_agent_host_before_every_other_unit(tmp_path: Path) -> No
         capabilities={"agent-runner"},
         repo_root=tmp_path,
         environments={session: {} for session in sessions},
+        home=meiva_home(),
     )
     assert [unit["id"] for unit in units] == [STOPS_FIRST, "gateway", "alpha-sidecar", "ops"]
     registry = UnitRegistry([UnitManifest.from_mapping(unit, origin="test") for unit in units])

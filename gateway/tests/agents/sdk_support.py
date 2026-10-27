@@ -19,6 +19,7 @@ from base.db import Database
 from base.db.code_version_gate import ProcessDbGate
 from base.events.live.bus import EventBus
 from base.packages.plugin_providers import build_model_catalog
+from base.paths import meiva_home
 from gateway.tests.auth.gateway_config import gateway_test_app, gateway_test_process
 from gateway.tests.support.runner_ops.ops_stub import RunnerOps
 from meiva.gateway_client import use_client
@@ -40,7 +41,7 @@ def spawn_agent(
         Database.from_settings(gate=database_gate),
         EventBus.from_settings(rng=seeded_rng()),
         machine=local_machine.name(),
-        catalog=build_model_catalog(),
+        catalog=build_model_catalog(home=meiva_home()),
         authority=config_authority,
     )
     return agent_id

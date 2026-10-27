@@ -15,6 +15,7 @@ from base.clock.tests.seeded_rng import seeded_rng
 from base.packages.plugin_config_images import DiskPluginConfigImages
 from base.packages.plugins import enable_config
 from base.packages.plugins.extensions import ExtensionRegistry
+from base.paths import meiva_home
 from base.paths.home import resolve_meiva_home
 from meiva.boot import process_sampling_owner
 from meiva.sdk_surface import install
@@ -61,20 +62,26 @@ install.install(
 )
 if mode in {Mode.RELOAD, Mode.RELOAD_EXPLICIT, Mode.SERVICE_RELOAD, Mode.FAILED_RELOAD}:
     enable_config.write_local(
-        {"plugins": {name: {"enabled": False} for name in enable_config.discover_plugins()}}
+        {
+            "plugins": {
+                name: {"enabled": False}
+                for name in enable_config.discover_plugins(home=meiva_home())
+            }
+        },
+        home=meiva_home(),
     )
     if mode is Mode.FAILED_RELOAD:
-        enable_config.local_config_path().write_text("{")
+        enable_config.local_config_path(home=meiva_home()).write_text("{")
         try:
-            load_extensions()
+            load_extensions(home=meiva_home())
         except json.JSONDecodeError:
             assert installed() is None
         else:
             raise AssertionError("the malformed plugin config did not fail the full reload")
     elif mode is Mode.RELOAD_EXPLICIT:
-        load_extensions(sampling=owner)
+        load_extensions(sampling=owner, home=meiva_home())
     else:
-        load_extensions()
+        load_extensions(home=meiva_home())
     if mode is not Mode.FAILED_RELOAD:
         replacement = installed()
         assert replacement is not None and replacement.sampling is owner

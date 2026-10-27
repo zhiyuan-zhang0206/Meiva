@@ -197,18 +197,19 @@ def launch_roster(
     all_services: bool,
     machine: MachineIdentityReader,
     host: Host,
+    home: Path,
 ) -> tuple[ServiceSpec, ...]:
     # meiva:note
     # The launch roster of the caller's explicit service selection: exactly one selection form
     # (`resolve_selection` refuses anything else), minus the units this host gates out.
-    names = {
-        spec.session
-        for spec, _reason in services_for_capabilities_annotated(roles, machine=machine, host=host)
-    }
+    annotated = services_for_capabilities_annotated(roles, machine=machine, host=host, home=home)
     launch_skip = resolve_selection(
-        names, only=only_services, excluded=disabled_services, all_services=all_services
+        {spec.session for spec, _reason in annotated},
+        only=only_services,
+        excluded=disabled_services,
+        all_services=all_services,
     )
-    return root_driver.start_roster(roles, launch_skip, machine=machine, host=host)
+    return root_driver.start_roster(annotated, launch_skip)
 
 
 def _roster_for(start: _Start) -> tuple[ServiceSpec, ...]:
@@ -219,6 +220,7 @@ def _roster_for(start: _Start) -> tuple[ServiceSpec, ...]:
         all_services=start.selection.all_services,
         machine=start.command.machine,
         host=start.command.host,
+        home=start.command.home,
     )
 
 

@@ -12,6 +12,7 @@ import sys
 from base.cluster.machine.configured import ConfiguredMachineIdentity
 from base.config import ConfigBoot
 from base.host.system.tests.fake_commands import fake_host
+from base.paths import meiva_home
 from services.supervision.roster import spec
 
 
@@ -21,7 +22,7 @@ def main(roles_csv: str) -> None:
     machine = ConfiguredMachineIdentity(config)
     machine.set(role=roles_csv)
     rows = spec.services_for_capabilities_annotated(
-        frozenset(roles_csv.split(",")), machine=machine, host=fake_host()
+        frozenset(roles_csv.split(",")), machine=machine, host=fake_host(), home=meiva_home()
     )
     sys.stdout.write(json.dumps({service.session: reason for service, reason in rows}) + "\n")
 

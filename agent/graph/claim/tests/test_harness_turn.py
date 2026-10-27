@@ -49,6 +49,7 @@ from base.log.tests.log_records import LogRecords
 from base.log.tests.log_records import loguru_records as loguru_records
 from base.native_process.turn_identity import HostedServiceResources
 from base.packages.plugin_providers import build_model_catalog
+from base.paths import meiva_home
 
 
 class FakeEngine:
@@ -114,6 +115,7 @@ def runtime(
 ) -> Runtime[MeivaContext]:
     return Runtime(
         context=MeivaContext(
+            meiva_home=meiva_home(),
             ops_pool=ops_pool,
             hosted_resources=hosted_resources,
             harness=Harness.CLAUDE_CODE if engine is not None else Harness.MEIVA,
@@ -121,7 +123,7 @@ def runtime(
             llm=MagicMock(),
             event_publisher=publisher or MagicMock(),
             agent=AgentSlices.resolve(default_reader=defaults()),
-            catalog=build_model_catalog(),
+            catalog=build_model_catalog(home=meiva_home()),
             clock_factory=Clock.from_settings,
         )
     )
