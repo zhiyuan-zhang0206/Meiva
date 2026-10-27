@@ -410,6 +410,13 @@ def test_the_workspace_base_follows_the_home_the_context_carries(
     assert meiva.files.agent_workspace(7) == carried / "workspaces" / "7"
 
 
+# meiva:note
+# `agent_workspace` is the SDK's internal exit to the workspace directory, not a capability of the
+# agent: the names `meiva.files` exports to the agent must never include it.
+def test_agent_workspace_is_not_exported_to_the_agent() -> None:
+    assert "agent_workspace" not in meiva.files.__all_for_meiva__
+
+
 def test_tilde_expanduser(default_home: Path) -> None:
     """`~/foo.txt` goes through expanduser → `$HOME/foo.txt` — tilde always points to home,
     unaffected by workspace resolution."""
