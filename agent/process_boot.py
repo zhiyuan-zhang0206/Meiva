@@ -14,7 +14,7 @@ from base.lm.catalog import ModelCatalog
 from base.lm.catalog.provider_contract import ProviderBinding
 from base.lm.catalog.provider_keys import ProviderKeys
 from base.log import logger
-from base.paths import meiva_home, workspace_dir
+from base.paths import workspace_dir
 from base.telemetry.observability import endpoint_override_is_explicit
 from base.telemetry.otlp.trace_config import TraceConfig
 from base.telemetry.otlp.trace_readiness import TraceReadiness
@@ -29,7 +29,7 @@ def apply_per_agent_sdk_disable(*, default_reader: Callable[[str, str], Any]) ->
 
 
 def apply_per_agent_eval_isolation(
-    *, agent_id: int | None, default_reader: Callable[[str, str], Any]
+    *, agent_id: int | None, default_reader: Callable[[str, str], Any], home: Path
 ) -> None:
     if not agent_setting("eval_isolation", default_reader=default_reader):
         return
@@ -44,7 +44,7 @@ def apply_per_agent_eval_isolation(
 
     if agent_id is None:
         raise RuntimeError("eval isolation needs the agent identity of the exec it isolates")
-    isolated_pool = workspace_dir(agent_id) / "memory-pool"
+    isolated_pool = workspace_dir(agent_id, home=home) / "memory-pool"
     isolated_pool.mkdir(parents=True, exist_ok=True)
     memory = getattr(meiva, "memory", None)
     if memory is not None:
@@ -83,15 +83,13 @@ def init_process_scope(
     initialize_tracing(machine=machine, home=home, config=trace, readiness=readiness)
 
 
-def land_cluster_extensions(db: Database) -> None:
+def land_cluster_extensions(db: Database, *, home: Path) -> None:
     from base import paths
     from base.packages.extensions import materialize
 
     try:
         with db.connect() as conn:
-            result = materialize.materialize_skills(
-                conn, dest_root=paths.skills_dir(paths.meiva_home())
-            )
+            result = materialize.materialize_skills(conn, dest_root=paths.skills_dir(home))
     except Exception as exc:
         logger.warning(
             "[extensions] could not read the cluster registry at boot ({}); this "
@@ -116,8 +114,9 @@ async def boot_agent_scope(
     keys: ProviderKeys,
     llm_override: str,
     permissions_notice_key: UUID,
+    home: Path,
 ) -> tuple[Any, ProviderBinding | None]:
-    workspace = workspace_dir(agent_id)
+    workspace = workspace_dir(agent_id, home=home)
 
     from base.agents.to_user.document import ensure_document
 
@@ -125,9 +124,7 @@ async def boot_agent_scope(
 
     from .startup import notify_desktop_permissions_at_startup
 
-    await notify_desktop_permissions_at_startup(
-        meiva_home(), idempotency_key=permissions_notice_key
-    )
+    await notify_desktop_permissions_at_startup(home, idempotency_key=permissions_notice_key)
 
     from base.lm.factory import build_chat_model_bound
 
