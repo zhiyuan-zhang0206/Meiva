@@ -27,8 +27,8 @@ from meizel.graph.universe import MANIFEST, GitRepo, Universe, parent_of
 __all__ = [
     "Baselines",
     "by_target",
-    "changed_under",
     "diff",
+    "manifest_texts_at",
     "read_baselines",
     "summarize",
     "totals_at",
@@ -166,13 +166,14 @@ def _totals_in(text: str) -> Counter[str]:
     return counts
 
 
-def _manifest_texts_at(repo: GitRepo, ref: str) -> list[str]:
-    """The text of every `meizel.toml` at a git ref."""
+# meiva:note
+# The text of every `meizel.toml` at a git ref, by repository path.
+def manifest_texts_at(repo: GitRepo, ref: str) -> dict[str, str]:
     if ref.startswith("-"):
         raise MeizelError(f"{ref}: not a git ref")
     listing = repo.run_bytes("ls-tree", "-r", "-z", "--name-only", ref).decode().split("\0")
     paths = [p for p in listing if p.rsplit("/", 1)[-1] == MANIFEST]
-    texts: list[str] = []
+    texts: dict[str, str] = {}
     if not paths:
         return texts
     request = "".join(f"{ref}:{p}\n" for p in paths).encode()
@@ -184,27 +185,16 @@ def _manifest_texts_at(repo: GitRepo, ref: str) -> list[str]:
         if len(header) != 3 or header[1] != b"blob":
             raise MeizelError(f"{ref}:{path}: cannot be read")
         size = int(header[2])
-        texts.append(stream[end + 1 : end + 1 + size].decode())
+        texts[path] = stream[end + 1 : end + 1 + size].decode()
         position = end + 1 + size + 1
     return texts
 
 
 def totals_at(repo: GitRepo, ref: str) -> Counter[str]:
     totals: Counter[str] = Counter()
-    for text in _manifest_texts_at(repo, ref):
+    for text in manifest_texts_at(repo, ref).values():
         totals.update(_totals_in(text))
     return totals
-
-
-def changed_under(repo: GitRepo, ref: str, pathspecs: list[str]) -> list[str]:
-    """The files that differ between `ref` and the working tree under the given git pathspecs.
-
-    No pathspecs lists every changed file.
-    """
-    if ref.startswith("-"):
-        raise MeizelError(f"{ref}: not a git ref")
-    listing = repo.run_bytes("diff", "--name-only", "--no-renames", "-z", ref, "--", *pathspecs)
-    return [p for p in listing.decode().split("\0") if p]
 
 
 def diff(repo: GitRepo, ref: str) -> tuple[list[str], bool]:
@@ -294,7 +284,9 @@ def by_target(repo: GitRepo, ref: str, prefixes: list[str], depth: int) -> list[
     of a target; with them, a target counts under its longest prefix and the rest under `(other)`.
     Unchanged groups are left out, except the listed prefixes, which always show.
     """
-    before = _targets([t for text in _manifest_texts_at(repo, ref) for t in _tables_in(text)])
+    before = _targets(
+        [t for text in manifest_texts_at(repo, ref).values() for t in _tables_in(text)]
+    )
     tree = read_baselines(repo.universe())
     after = _targets(
         [{c.value: dict(rows) for c, rows in table.items()} for table in tree.values()]

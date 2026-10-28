@@ -100,7 +100,7 @@ A commit runs `check --changed` on the staged files, a push and CI run the whole
 
 Directories that still carry recorded debt are strict-to-be: the recorded
 violations pass, anything new fails, and the debt may only shrink
-([recorded debt](../meizel/docs/checker/debt.meiva.okf.md)).
+([recorded debt](../meizel/docs/checker/debt/debt.meiva.okf.md)).
 
 - Fix a violation instead of recording it. Move the code, use the public door,
   inject the collaborator, or declare the edge in the manifest of the directory
