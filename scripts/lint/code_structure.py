@@ -323,6 +323,17 @@ def _governed(
     )
 
 
+# meiva:note
+# What one run admits: the tracked snapshot plus every file it reads off the working tree. A file
+# written but not yet committed is present here, as it was for the disk probe this replaced.
+def _admitted_files(universe: Universe, repo_root: Path, paths: set[Path]) -> set[str]:
+    admitted = set(universe.files)
+    for path in paths:
+        if path.is_relative_to(repo_root):
+            admitted.add(path.relative_to(repo_root).as_posix())
+    return admitted
+
+
 def _check_ast_and_quality(
     argv: list[str],
     targets: list[Path],
@@ -336,11 +347,13 @@ def _check_ast_and_quality(
     type_ctx, type_problems = _load_type_context(argv, repo_root)
     if type_ctx is None:
         return type_problems
-    ambient_tree = ambient_state.Tree(
-        type_ctx.universe.files, type_ctx.universe.load_text, type_ctx.universe.dirs
-    )
     files = limits.budget_files(targets, repo_root, _STRUCTURE_DIRS)
     ast_files = _ast_rule_files(argv, repo_root)
+    ambient_tree = ambient_state.Tree(
+        _admitted_files(type_ctx.universe, repo_root, files | ast_files | type_ctx.files),
+        type_ctx.universe.load_text,
+        type_ctx.universe.dirs,
+    )
     measurements: dict[str, dict[str, int]] = {kind: {} for kind in quality_budget.QUALITY_SECTIONS}
     sites: dict[str, locality.Sites] = {kind: {} for kind in _MEASURED_SECTIONS}
     scanned: set[str] = set()
