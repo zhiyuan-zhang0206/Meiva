@@ -1,9 +1,13 @@
-exports = ["branch_protection.py", "module_moves.py"]
+exports = ["analysis", "branch_protection.py"]
 
 [uses]
+"branch_protection.py" = ["analysis"]
+"impact_census.py" = ["analysis"]
+"module_moves.py" = ["analysis"]
+"schema_drift.py" = ["analysis"]
 "sdk_usage.py" = ["sdk_usage_report.py"]
-"tests" = ["branch_protection.py", "impact_census.py", "module_moves.py", "schema_drift.py", "sdk_usage.py", "sdk_usage_report.py", "where_used.py", "where_used_scan.py"]
-"where_used.py" = ["module_moves.py", "where_used_scan.py"]
+"tests" = ["analysis", "branch_protection.py", "impact_census.py", "module_moves.py", "sdk_usage.py", "sdk_usage_report.py", "where_used.py"]
+"where_used.py" = ["analysis"]
 
 [external]
 "module_moves.py" = "imports the old and new module names the operator passes on the command line"
@@ -12,25 +16,11 @@ exports = ["branch_protection.py", "module_moves.py"]
 "schema_drift.py" = { kinds = ["settings"], why = "CLI schema drift audit falls back to the deployment database URL from settings when --dsn is omitted" }
 
 [purity]
-"." = "strict-to-be"
-"module_moves.py" = "strict-to-be"
+"." = "strict"
+"branch_protection.py" = { mode = "none", why = "the command line shell: it reads .trunk/trunk.yaml and runs the read-only gh API calls the audit needs (naming the branch as a URL segment), then prints the verdict; which checks the gate must carry and how a GitHub payload differs from it are in analysis/protection.py" }
+"impact_census.py" = { mode = "none", why = "the command line shell: it builds the impact graph and the timing model of the checkout the operator names through the CI test-selection loaders, and prints the numbers; which source files every test reaches, which inputs nothing bounds and which tests pull them in are in analysis/reach.py" }
+"module_moves.py" = { mode = "none", why = "the command line shell: it reads the tracked text of the checkout the operator names (skipping frozen history, itself, symlinked contents and binaries), imports the new module to see which names it carries, and prints the findings; which lines still name the old path and which names a caller uses are in analysis/moves.py" }
+"schema_drift.py" = { mode = "none", why = "the command line shell: it reads db/schema.sql and the allowlist the operator names, opens the read-only Postgres connection (falling back to the deployment settings when --dsn is omitted) and writes the report; parsing the DDL, comparing it with the live columns and classifying what is left over are in analysis/schema.py" }
 "sdk_usage.py" = { mode = "none", why = "the command line shell: it reads the mirrors the operator names, hands their lines to the report module and prints the result; every decision is in sdk_usage_report.py" }
 "sdk_usage_report.py" = "strict"
-"where_used.py" = "strict-to-be"
-"where_used_scan.py" = "strict-to-be"
-
-[debt.impure-call]
-"branch_protection.py#Path.resolve" = 1
-"branch_protection.py#import subprocess" = 1
-"impact_census.py#Path.resolve" = 2
-"module_moves.py#Path.is_symlink" = 1
-"module_moves.py#Path.readlink" = 1
-"module_moves.py#Path.resolve" = 3
-"schema_drift.py#import psycopg" = 1
-"where_used.py#Path.resolve" = 4
-"where_used_scan.py#Path.is_symlink" = 1
-
-[debt.impure-edge]
-"impact_census.py#scripts/ci/test_impact.py" = 1
-"impact_census.py#scripts/ci/test_selector.py" = 1
-"schema_drift.py#base/config/__init__.py" = 1
+"where_used.py" = { mode = "none", why = "the command line shell: it reads the checkout the operator names (tracked and unignored untracked text, skipping symlinks and the regenerated .test_durations), normalizes an absolute target to a checkout-relative path and prints the result; which references exist is analysis/references.py and which group each falls in, and how a report reads, is analysis/report.py" }

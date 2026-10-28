@@ -1,0 +1,8 @@
+exports = ["__init__.py", "frozen.py"]
+
+[purity]
+"." = "strict"
+
+[uses]
+"__init__.py" = ["ddl.py", "moves.py", "protection.py", "protection_report.py", "reach.py", "references.py", "report.py", "schema.py"]
+"report.py" = ["frozen.py", "references.py"]

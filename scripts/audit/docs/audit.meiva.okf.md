@@ -15,11 +15,18 @@ the repository, the database or the remote.
 
 `branch_protection.py` compares live GitHub protection with `.trunk/trunk.yaml`.
 Before changes, `where_used.py` groups importers, tests, strings, docs and baseline
-entries of symbols/modules/paths (`--json`); `where_used_scan.py` owns matching.
+entries of symbols/modules/paths (`--json`).
 After moves, `module_moves.py` rejects remaining old references and missing names.
 Both CLI owners expose `main(argv, *, repo_root=None)` with shared diagnostics and
 exit codes, defaulting to their checkout. Move imports use the caller's Python
 environment; validation algorithms stay local.
+
+Each of these tools is an effect shell — it reads the checkout, the GitHub API or the
+database and prints — and `analysis/` owns what it decides: `references.py` finds the
+references behind `where_used.py`, `report.py` groups and renders them, `moves.py` answers
+what a move leaves behind, `protection.py` states the branch-protection contract,
+`schema.py` diffs the DDL against the live columns, `reach.py` measures the impact graph,
+and `frozen.py` names the history axes neither audit rewrites.
 
 `schema_drift.py` diffs a live database's public columns against `db/schema.sql`
 and classifies every difference:

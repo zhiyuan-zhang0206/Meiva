@@ -1,10 +1,12 @@
 from __future__ import annotations
 
-from scripts.audit.schema_drift import (
+from scripts.audit.analysis import (
     Drift,
+    allowlist_entries,
     classify_column,
     classify_table,
     compare,
+    live_columns,
     schema_columns,
     strip_comments,
 )
@@ -134,3 +136,34 @@ def test_render_annotates_every_finding_with_its_class() -> None:
         "extra column  agents_meta.watchers  [historical]",
         "missing column agents_meta.retired",
     ]
+
+
+def test_drift_states_the_allowlist_json_and_dirty_flag_it_owns() -> None:
+    drift = Drift(extra_tables=["legacy"], extra_columns=[("agents", "retired", "NO|")])
+    assert drift.is_dirty()
+    assert drift.to_json(set()) == {
+        "extra_tables": [{"name": "legacy", "class": "historical"}],
+        "extra_columns": [{"table": "agents", "column": "retired", "class": "dangerous"}],
+        "missing_tables": [],
+        "missing_columns": [],
+    }
+    assert drift.allowed_only(frozenset({"legacy", "agents.retired"})) == Drift()
+    assert not Drift().is_dirty()
+
+
+def test_live_columns_encodes_the_metadata_classify_column_decodes() -> None:
+    rows = [
+        ("agents", "id", "NO", None),
+        ("agents", "watchers", "NO", "'[]'::jsonb"),
+        ("events", "at", "YES", None),
+    ]
+    assert live_columns(rows) == {
+        "agents": {"id": "NO|", "watchers": "NO|'[]'::jsonb"},
+        "events": {"at": "YES|"},
+    }
+
+
+def test_allowlist_entries_reads_one_entry_per_line_and_ignores_blanks() -> None:
+    text = "  agents_meta \n\n agents_meta.watchers\n"
+    assert allowlist_entries(text) == frozenset({"agents_meta", "agents_meta.watchers"})
+    assert allowlist_entries("") == frozenset()
