@@ -235,6 +235,7 @@ describe("MessageCard", () => {
     bg: "bg-red-50",
     fixedDefault: true,
     showTimestamp: false,
+    copy: false,
   };
 
   it("marks the kind with a short accent at the header, not a full-height frame", () => {

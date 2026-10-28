@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import json
 import os
+from collections.abc import Mapping, Sequence
 
 from playwright.sync_api import Browser, BrowserContext, Page, Route
 
@@ -238,7 +239,7 @@ API_STUBS: dict[str, object] = {
 }
 
 
-def _timeline_items() -> list[dict]:
+def _timeline_items() -> Sequence[Mapping[str, object]]:
     """A prompt, a user message, a long reply, and a run of follow-ups so
     the surface is tall enough to scroll internally (I6 needs real mass)."""
     items = [
@@ -283,12 +284,11 @@ def _timeline_items() -> list[dict]:
     return items
 
 
-_FAKE_SSE_JS = """
+_FAKE_SSE_TEMPLATE = """
 (() => {
   const SNAPSHOT = __SNAPSHOT_JSON__;
   const RECONNECT = __RECONNECT__;
-  const DELTA = {"role": "chat_delta", "agent_id": 1, "item_id": "1.33",
-    "content": "streaming tail"};
+  const DELTA = __DELTA_JSON__;
   const HB = {"role": "heartbeat"};
   const push = (es, ev, delay) => setTimeout(() => {
     if (es.readyState === 2) return; // closed
@@ -308,7 +308,7 @@ _FAKE_SSE_JS = """
         if (self.onopen) self.onopen({});
         if (all) {
           push(self, SNAPSHOT, 80);
-          push(self, DELTA, 250);
+          if (DELTA) push(self, DELTA, 250);
           // When enabled, close the stream so a fresh instance re-runs
           // the whole script (the frontend's backoff reopen does `new
           // EventSource(...)` again).
@@ -329,12 +329,84 @@ _FAKE_SSE_JS = """
   }
   window.EventSource = FakeEventSource;
 })();
-""".replace(
-    "__SNAPSHOT_JSON__",
-    json.dumps(
-        {"role": "timeline_snapshot", "agent_id": 1, "msg_count": 33, "items": _timeline_items()}
-    ),
-)
+"""
+
+
+# meiva:note
+# A human message, then one work block holding every child family: six adjacent
+# secondary items — thinking, a tool call, its output, twice — so the block is
+# tall and its LAST child is the one whose chrome band sits against the collapse
+# wrapper's clip line. Every item is stamped: the band under the last block is
+# the timestamp this fixture exists to measure.
+# meiva:link tests/e2e/visual/docs/layout-invariants.meiva.okf.md
+def work_block_items() -> Sequence[Mapping[str, object]]:
+    items = [
+        {
+            "item_id": "1.1",
+            "kind": "inbound_chat",
+            "payload": "run the thing and tell me what it printed",
+            "show_timestamp": True,
+            "source": "user",
+            "created_at": "2026-08-07T00:00:00Z",
+            "inbound_id": 1,
+        },
+    ]
+    children = [
+        ("agent_reasoning", "The last block in a work block is where the band gets cut."),
+        ("agent_code", "print(sum(range(10)))"),
+        ("code_output", "exit 0:\n\n45\n"),
+        ("agent_reasoning", "A second thought, so the block scrolls."),
+        ("agent_code", "print('second call')"),
+        ("code_output", "exit 0:\n\nsecond call\n"),
+    ]
+    for index, (kind, payload) in enumerate(children):
+        items.append(
+            {
+                "item_id": f"1.{index + 2}",
+                "kind": kind,
+                "payload": payload,
+                "source": "agent",
+                "show_timestamp": True,
+                "created_at": f"2026-08-07T00:00:{index + 2:02d}Z",
+            }
+        )
+    items.append(
+        {
+            "item_id": "1.90",
+            "kind": "agent_chat",
+            "payload": "done — the block above holds the details.",
+            "source": "agent",
+            "show_timestamp": True,
+            "created_at": "2026-08-07T00:00:30Z",
+        }
+    )
+    return items
+
+
+# meiva:note
+# The pre-app EventSource fake for one snapshot: `items` replaces the default
+# conversation, and a caller that supplies its own rows gets no streamed delta —
+# the delta appends to an item id only the default conversation has.
+# meiva:link tests/e2e/visual/docs/layout-invariants.meiva.okf.md
+def _fake_sse_js(items: Sequence[Mapping[str, object]] | None = None) -> str:
+    snapshot_items = _timeline_items() if items is None else items
+    snapshot = {
+        "role": "timeline_snapshot",
+        "agent_id": 1,
+        "msg_count": len(snapshot_items),
+        "items": snapshot_items,
+    }
+    delta = (
+        {"role": "chat_delta", "agent_id": 1, "item_id": "1.33", "content": "streaming tail"}
+        if items is None
+        else None
+    )
+    return _FAKE_SSE_TEMPLATE.replace("__SNAPSHOT_JSON__", json.dumps(snapshot)).replace(
+        "__DELTA_JSON__", json.dumps(delta)
+    )
+
+
+_FAKE_SSE_JS = _fake_sse_js()
 
 
 def new_context(browser: Browser, width: int) -> BrowserContext:
@@ -358,11 +430,20 @@ def open_page(
     reconnect_sse: bool = True,
     open_inspector: bool = False,
     extra_init_script: str | None = None,
+    timeline_items: Sequence[Mapping[str, object]] | None = None,
+    settings: Sequence[Mapping[str, object]] | None = None,
 ) -> Page:
+    # meiva:note
+    # `timeline_items` replaces the default conversation, and the fake stream and
+    # the `/api/agents/1/timeline` stub agree on it; `settings` replaces the
+    # `/api/settings` rows, which is how a suite picks a Display mode without
+    # clicking through the UI.
+    # meiva:link tests/e2e/visual/docs/layout-invariants.meiva.okf.md
     page = ctx.new_page()
     # The fake EventSource is ALWAYS injected (timeline invariants need the
     # stream even against a deployed bundle; the fleet page ignores it).
-    page.add_init_script(_FAKE_SSE_JS.replace("__RECONNECT__", json.dumps(reconnect_sse)))
+    fake_sse = _fake_sse_js(timeline_items) if timeline_items is not None else _FAKE_SSE_JS
+    page.add_init_script(fake_sse.replace("__RECONNECT__", json.dumps(reconnect_sse)))
     if extra_init_script is not None:
         # Suites that need another pre-app hook (e.g. the mobile-keyboard
         # suite's fake visualViewport) pass it here: init scripts run before
@@ -373,11 +454,17 @@ def open_page(
         def _stub(route: Route) -> None:
             url = route.request.url
             endpoint = "/api/" + url.split("/api/", 1)[1].split("?", 1)[0]
-            body = (
-                {"settings": [{"key": "display.inspector_open", "value": True}]}
-                if open_inspector and endpoint == "/api/settings"
-                else API_STUBS.get(endpoint)
-            )
+            body = API_STUBS.get(endpoint)
+            if timeline_items is not None and endpoint == "/api/agents/1/timeline":
+                body = {
+                    "items": timeline_items,
+                    "msg_count": len(timeline_items),
+                    "has_more": False,
+                }
+            if settings is not None and endpoint == "/api/settings":
+                body = {"settings": settings}
+            elif open_inspector and endpoint == "/api/settings":
+                body = {"settings": [{"key": "display.inspector_open", "value": True}]}
             if body is not None:
                 route.fulfill(
                     status=200,

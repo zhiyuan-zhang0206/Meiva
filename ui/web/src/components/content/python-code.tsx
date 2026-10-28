@@ -73,9 +73,15 @@ const theme: PrismTheme = {
 interface Props {
   code: string;
   streaming?: boolean;
+  // meiva:note
+  // Offer the hover Copy control. A surface that shows code as the agent's
+  // machinery rather than as text to reuse — the timeline's tool-call block —
+  // passes false (user 2026-10-29: Copy marks messages, not tool calls).
+  // meiva:link ui/web/src/docs/frontend-components/code-blocks.meiva.okf.md
+  copy?: boolean;
 }
 
-export const PythonCode = memo(function PythonCode({ code, streaming = false }: Props) {
+export const PythonCode = memo(function PythonCode({ code, streaming = false, copy = true }: Props) {
   const highlighter = usePythonCodeHighlighter();
   const [Highlight, setHighlight] = useState<typeof HighlightComponentType | null>(() =>
     highlighter.peek(),
@@ -96,14 +102,14 @@ export const PythonCode = memo(function PythonCode({ code, streaming = false }: 
   }, [Highlight, highlighter]);
 
   if (Highlight === null) {
-    return <PlainCode code={code} streaming={streaming} />;
+    return <PlainCode code={code} streaming={streaming} copy={copy} />;
   }
 
   return (
     <Highlight theme={theme} code={code} language="python">
       {({ tokens, getLineProps, getTokenProps }) => (
         <div className="group relative">
-          <CopyButton text={code} label="code" streaming={streaming} />
+          {copy ? <CopyButton text={code} label="code" streaming={streaming} /> : null}
           <pre
             data-testid="python-code"
             data-streaming={streaming ? "1" : "0"}
@@ -128,10 +134,15 @@ export const PythonCode = memo(function PythonCode({ code, streaming = false }: 
   );
 });
 
-function PlainCode({ code, streaming }: Props) {
+// meiva:note
+// Rendered while the highlighter chunk is still loading — plain, unhighlighted
+// source rather than a blank body, so the code and, on a surface that offers it,
+// its copy control are available immediately.
+// meiva:link ui/web/src/docs/frontend-components/code-blocks.meiva.okf.md
+function PlainCode({ code, streaming, copy = true }: Props) {
   return (
     <div className="group relative">
-      <CopyButton text={code} label="code" streaming={streaming} />
+      {copy ? <CopyButton text={code} label="code" streaming={streaming} /> : null}
       <pre
         data-testid="python-code"
         data-streaming={streaming ? "1" : "0"}

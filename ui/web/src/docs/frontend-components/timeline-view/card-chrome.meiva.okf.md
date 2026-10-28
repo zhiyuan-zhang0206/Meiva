@@ -15,6 +15,22 @@ block that holds the item timestamp (`components/timeline/timestamp.tsx`,
 `ItemTimestamp`) and Copy; either half can stand alone, and a row with neither
 mounts no band and does not join the hover group.
 
+Copy is **decided per block kind**, in `messageCardConfig`'s `copy` field — a
+whitelist, not "everything except …", so a kind added later has to opt in rather
+than inherit a button. Only the two kinds whose payload is a message a reader can
+quote offer it: `inbound_chat` from a human or an agent (a peer or an external
+agent) and the agent's own reply (`agent_chat`). A system-generated inbound —
+scheduler, watcher, framework — is not text a person or an agent wrote and
+carries none. Thinking, tool calls and their output, the system prompt,
+attachments and system notes are the agent's machinery, not its conversation, and
+mount no copy control anywhere in the block: the band's button and the
+body-level one are the same decision (`PythonCode` gets `copy={false}`, the
+code-output envelope has none), and a body-level button is no longer a way to
+"keep" Copy on a kind the whitelist excludes. A collapsed or still-streaming row
+keeps its stamp but never Copy. A kind that offers neither Copy nor a stamp —
+the system prompt — mounts no band at all, so there is never an empty 12px strip
+under a block (user 2026-10-29).
+
 The band **sits in the gap below the block, outside the card box** (user
 2026-10-21), so the time reads as a separator between two messages instead of
 eating the block's own bottom padding. `.timeline-item` owns that gap: it pads
@@ -25,6 +41,16 @@ drawn inside the row box, which it must be, because `.timeline-item` carries
 A reserved line existed once and made the gap depend on which kinds stamped a
 time (12px between two plain cards, 28px between two stamped ones); a band in the
 existing gap costs no layout height at rest.
+
+That hand-back is a contract on every **clipping ancestor**: a row gives 12px
+back, so a container that clips a row must pad its bottom by the same 12px. The
+work block's collapse wrapper (`overflow: clip`, required to collapse the block
+and to contain wide content) is the one that does, and it padded 8px: its clip
+line fell 4px inside the last child's band and shaved the bottom of that child's
+timestamp (user 2026-10-29 — `pb-3`, the same reservation the top-level list
+makes). The stamp's rect must stay inside every clipping ancestor; jsdom cannot
+measure boxes, so the guard is the Playwright check in
+`tests/e2e/visual/test_work_block_chrome.py`.
 
 The stamp **rides an expanded block only**: a collapsed row is a one-line header,
 and a time under it read as chrome for a message that is not showing (user
@@ -60,9 +86,9 @@ bug). A mouse press does not take that path.
 ```meiva-contract
 id = "card-actions-overlay"
 kind = "invariant"
-statement = "A timeline block's timestamp and Copy stand in the 12px gap below the block, outside the card box and inside the row's own padding, so block-to-block spacing is unchanged: the stamp appears only on an expanded block, the band is invisible and click-through until the pointer hovers the block, focus enters it, or a touch reveals it for a few seconds."
+statement = "A timeline block's timestamp and Copy stand in the 12px gap below the block, outside the card box and inside the row's own padding, so block-to-block spacing is unchanged; every ancestor that clips a row reserves the same 12px, so the last child of a work block keeps its whole band. The stamp appears only on an expanded block, Copy only on an expanded, settled block of a kind whose payload is message text (inbound_chat, agent_chat) — a kind with neither mounts no band — and the band is invisible and click-through until the pointer hovers the block, focus enters it, or a touch reveals it for a few seconds."
 code = ["ui/web/src/components/timeline/row.tsx:TimelineRow", "ui/web/src/components/timeline/card.tsx:CARD_FOOTER_CLS"]
-tests = ["ui/web/src/components/timeline/timeline.test.tsx::card hover footer"]
+tests = ["ui/web/src/components/timeline/view/timeline-copy-and-boundaries.test.tsx::Copy is scoped to message text (per-kind whitelist)", "tests/e2e/visual/test_work_block_chrome.py::test_last_block_timestamp_is_not_clipped"]
 ```
 
 Parent: [[ui/web/src/docs/frontend-components/timeline-view/timeline-view.meiva.okf.md|Timeline View]].

@@ -1,9 +1,11 @@
 import { fireEvent, screen, waitFor } from "@testing-library/react";
+import type { BackendTimelineItem } from "@/lib/contracts/types";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { ChatMarkdownMock, ScrollAreaMock, cleanupTimelineTest, makeItem, render, revealCollapsedCards, setToggleState, setUserSettings } from "./timeline-test-mock";
 vi.mock("@/components/content/markdown", () => ({ ChatMarkdown: ChatMarkdownMock }));
 vi.mock("@/components/ui/scroll-area", () => ({ ScrollArea: ScrollAreaMock }));
 import { TimelineView } from "..";
+import { formatItemTime } from "../timestamp";
 afterEach(cleanupTimelineTest);
 describe("CopyButton feedback state machine", () => {
   beforeEach(() => {
@@ -34,95 +36,107 @@ describe("CopyButton feedback state machine", () => {
 });
 
 // meiva:note
-// The icon-only CopyButton from ./copy-button (aria-label "Copy <label>", no visible text) is separate from the block-level copy button (timeline/buttons.tsx, covered by the "block-level copy actions" describe block below). agent_code (via PythonCode) and code_output (via EnvelopeContent showCopy) render ONLY the icon-only per-block copy — the card-level block copy is skipped for these kinds to avoid duplicate overlapping buttons that copy the same payload. This block only guards the icon-only one; it must not appear under a still-partial agent_chat (no code/output content to speak of) or an ephemeral system_marker (no card).
+// Copy is a PER-KIND whitelist (card.tsx CardConfig.copy): a block offers it only
+// when its payload is a message the reader can quote — the human's message and
+// the agent's own reply. Thinking, tool calls, tool output, the system prompt,
+// attachments and system notes are the agent's machinery, not its conversation,
+// and carry no copy control anywhere in the block: neither the hover band
+// (timeline/buttons.tsx) nor a body-level one (PythonCode / EnvelopeContent).
+// A whitelist, not "everything except …", so a kind added later must opt in
+// instead of inheriting a button (user 2026-10-29).
 // meiva:link ui/web/src/docs/frontend-components/timeline-view/card-chrome.meiva.okf.md
-describe("CopyButton render guard (icon-only, code/output-scoped)", () => {
-  it("agent_code item shows copy button (via PythonCode)", () => {
-    render(
-      <TimelineView
-        items={[makeItem({ kind: "agent_code", payload: "print(1)" })]}
-      />,
+describe("Copy is scoped to message text (per-kind whitelist)", () => {
+  const cases: {
+    label: string;
+    item: BackendTimelineItem;
+    copy: boolean;
+  }[] = [
+    {
+      label: "human inbound_chat (human text)",
+      item: makeItem({ kind: "inbound_chat", source: "user", payload: "hi" }),
+      copy: true,
+    },
+    {
+      label: "agent_chat (agent text)",
+      item: makeItem({ kind: "agent_chat", payload: "done" }),
+      copy: true,
+    },
+    {
+      label: "inbound_chat from a peer agent (agent text)",
+      item: makeItem({ kind: "inbound_chat", source: "agent:42", payload: "peer says hi" }),
+      copy: true,
+    },
+    {
+      label: "inbound_chat from the system (no author to quote)",
+      item: makeItem({ kind: "inbound_chat", source: "scheduler", payload: "wake-up" }),
+      copy: false,
+    },
+    {
+      label: "agent_reasoning (thinking)",
+      item: makeItem({ kind: "agent_reasoning", payload: "thinking" }),
+      copy: false,
+    },
+    {
+      label: "agent_code (tool call)",
+      item: makeItem({ kind: "agent_code", payload: "print(1)" }),
+      copy: false,
+    },
+    {
+      label: "code_output (tool output)",
+      item: makeItem({ kind: "code_output", payload: "stdout" }),
+      copy: false,
+    },
+    {
+      label: "system_marker (system note)",
+      item: makeItem({ kind: "system_marker", source: "memory", payload: "memory updated" }),
+      copy: false,
+    },
+    {
+      label: "system_prompt",
+      item: makeItem({ kind: "system_prompt", payload: "You are a test agent." }),
+      copy: false,
+    },
+    {
+      label: "attach",
+      item: makeItem({ kind: "attach", payload: "attached file" }),
+      copy: false,
+    },
+  ];
+
+  for (const { label, item, copy } of cases) {
+    it(`${label}: ${copy ? "offers" : "offers no"} copy control`, () => {
+      render(<TimelineView items={[item]} />);
+      const copies = screen.queryAllByRole("button", { name: /copy/i });
+      expect(copies).toHaveLength(copy ? 1 : 0);
+      if (copy) expect(screen.getByLabelText("Copy message")).toBeTruthy();
+    });
+  }
+
+  it("a kind with neither Copy nor a stamp mounts no band (no empty hover strip)", () => {
+    const { container } = render(
+      <TimelineView items={[makeItem({ kind: "system_prompt", payload: "prompt" })]} />,
     );
-    expect(screen.getByRole("button", { name: /copy code/i })).toBeTruthy();
+    const row = container.querySelector(".timeline-item");
+    expect(row?.className).not.toContain("group/msgcard");
+    expect(screen.queryByTestId("card-chrome")).toBeNull();
+    expect(screen.getByTestId("card-toggle")).toBeTruthy();
   });
-  it("code_output item shows copy button (via EnvelopeContent showCopy)", () => {
-    render(
-      <TimelineView
-        items={[makeItem({ kind: "code_output", payload: "stdout" })]}
-      />,
-    );
-    expect(screen.getByRole("button", { name: /copy command output/i })).toBeTruthy();
-  });
-  it("system_marker item shows no copy button", () => {
-    render(
-      <TimelineView
-        items={[makeItem({ kind: "system_marker", payload: "exec_start" })]}
-      />,
-    );
-    expect(screen.queryByLabelText("Copy message")).toBeNull();
-  });
-  it("partial agent_chat (in progress) shows no copy button", () => {
-    render(
-      <TimelineView
-        items={[makeItem({ kind: "agent_chat", payload: "streaming", partial: true })]}
-      />,
-    );
-    expect(screen.queryByLabelText("Copy message")).toBeNull();
+
+  it("thinking keeps its timestamp and drops only the button", () => {
+    const item = makeItem({ kind: "agent_reasoning", payload: "thinking" });
+    render(<TimelineView items={[item]} />);
+    const stamp = screen.getByText(formatItemTime(item.created_at!, { showWeekday: true }));
+    expect(stamp.parentElement?.className).toContain("justify-end");
+    expect(stamp.parentElement?.querySelectorAll("button")).toHaveLength(0);
   });
 });
 
 // meiva:note
-// The general block-level copy (text "copy", timeline/buttons.tsx) attaches inside EVERY card's bottom-right corner via MessageCard's `actions` overlay — any kind that renders a card (messageCardConfig !== null), once expanded and no longer partial. It mounts only while eligible — a collapsed card has no copy button in the DOM at all (not just hidden).
+// The hover band itself (position, reveal, focus, touch) is unchanged by the
+// whitelist; these assertions pin that it still exists wherever a kind does
+// offer Copy.
 // meiva:link ui/web/src/docs/frontend-components/timeline-view/card-chrome.meiva.okf.md
-describe("block-level copy actions (MessageCard overlay)", () => {
-  it("human inbound_chat (a user message) shows the copy button", () => {
-    render(
-      <TimelineView
-        items={[makeItem({ kind: "inbound_chat", source: "user", payload: "hi" })]}
-      />,
-    );
-    expect(screen.getByLabelText("Copy message")).toBeTruthy();
-  });
-  it("agent_reasoning shows the block-level copy button once expanded", () => {
-    render(
-      <TimelineView
-        items={[makeItem({ kind: "agent_reasoning", payload: "thinking" })]}
-      />,
-    );
-    expect(screen.getByLabelText("Copy message")).toBeTruthy();
-  });
-  it("agent_code has only the icon-only body copy (card-level duplicate suppressed)", () => {
-    render(
-      <TimelineView
-        items={[makeItem({ kind: "agent_code", payload: "print(1)" })]}
-      />,
-    );
-    expect(screen.getByRole("button", { name: /copy code/i })).toBeTruthy();
-    expect(screen.queryByLabelText("Copy message")).toBeNull();
-  });
-  it("code_output has only the icon-only body copy (card-level duplicate suppressed)", () => {
-    render(
-      <TimelineView items={[makeItem({ kind: "code_output", payload: "stdout" })]} />,
-    );
-    expect(screen.getByRole("button", { name: /copy command output/i })).toBeTruthy();
-    expect(screen.queryByLabelText("Copy message")).toBeNull();
-  });
-  it("collapsed-by-default card (system_prompt) shows no copy button until the turn is expanded", () => {
-    setToggleState({ detailsMode: "none" });
-    render(
-      <TimelineView items={[makeItem({ kind: "system_prompt", payload: "line1\nline2" })]} />,
-    );
-    expect(screen.queryByLabelText("Copy message")).toBeNull();
-    // meiva:note
-    // None mode (#4780): opening the turn keeps the inner card collapsed, and copy attaches to expanded cards only — it appears on the CARD's own click, not the turn's.
-    // meiva:link ui/web/src/docs/frontend-components/timeline-view/card-chrome.meiva.okf.md
-    fireEvent.click(screen.getByTestId("turn-toggle"));
-    expect(screen.queryByLabelText("Copy message")).toBeNull();
-    fireEvent.click(screen.getByTestId("card-toggle"));
-    expect(screen.getByLabelText("Copy message")).toBeTruthy();
-    fireEvent.click(screen.getByTestId("card-toggle"));
-    expect(screen.queryByLabelText("Copy message")).toBeNull();
-  });
+describe("block-level copy actions (hover band)", () => {
   it("the footer holds Copy and no other control", () => {
     render(
       <TimelineView
