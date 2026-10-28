@@ -7,7 +7,15 @@ from base import cluster
 
 def test_home_label_is_basename():
     assert cluster.home_label(Path("/x/y/.meiva-mytask")) == ".meiva-mytask"
-    assert cluster.home_label(Path("~/.meiva")) == ".meiva"
+    assert cluster.home_label(Path("/home/someone/.meiva")) == ".meiva"
+
+
+# meiva:note
+# The entry expands what a person typed (`base.paths.expand`); this reader hashes
+# the path it is given, so a `~` spelling is its own value rather than a second
+# spelling of this process's home.
+def test_home_slug_does_not_expand_a_tilde_against_this_users_home():
+    assert cluster.home_slug(Path("~/x")) != cluster.home_slug(Path.home() / "x")
 
 
 def test_home_slug_strips_leading_dots_and_hashes_path():

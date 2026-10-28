@@ -51,10 +51,14 @@ def swap_db(url: str, db_name: str) -> str:
     return urlunsplit((parts.scheme, parts.netloc, f"/{db_name}", parts.query, parts.fragment))
 
 
+# meiva:note
+# The label of a home that arrives as a value: a `~` spelling stays literal,
+# because naming the user's home directory is the entry's read
+# (`base.paths.home`), not this function's.
 def home_label(home: Path) -> str:
     """The human-facing label for a cluster — its home's basename, computed on
     the fly (pure display; renaming the directory changes only the label)."""
-    return Path(home).expanduser().name
+    return Path(home).name
 
 
 def production_identity(machine: MachineIdentityReader, *, home: Path) -> bool:
@@ -79,10 +83,8 @@ def home_slug(home: Path) -> str:
     (leading dots stripped; the hash disambiguates two homes sharing a
     basename). Used where a per-home token must live outside the home itself: the
     short pg socket dir under /tmp, and the permissions helper's launchd label."""
-    base = Path(home).expanduser().name.lstrip(".") or "home"
-    digest = hashlib.sha1(str(Path(home).expanduser()).encode(), usedforsecurity=False).hexdigest()[
-        :8
-    ]
+    base = Path(home).name.lstrip(".") or "home"
+    digest = hashlib.sha1(str(Path(home)).encode(), usedforsecurity=False).hexdigest()[:8]
     return f"{base}-{digest}"
 
 
