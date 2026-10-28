@@ -59,7 +59,11 @@ def _context(tmp_path: Path, registry: UnitRegistry) -> WiringContext:
     log_dir = tmp_path / "logs"
     return WiringContext(
         supervisor=Supervisor(
-            registry, run_dir=tmp_path, clock=system_clock(), root_pid=os.getpid()
+            registry,
+            environ=dict(os.environ),
+            run_dir=tmp_path,
+            clock=system_clock(),
+            root_pid=os.getpid(),
         ),
         registry=registry,
         run_dir=tmp_path,

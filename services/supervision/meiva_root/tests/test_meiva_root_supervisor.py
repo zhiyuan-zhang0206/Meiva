@@ -34,6 +34,7 @@ def root(tmp_path: Path, *scenario: str, env: tuple[tuple[str, str], ...] = ()) 
     )
     return Supervisor(
         UnitRegistry([unit]),
+        environ=dict(os.environ),
         run_dir=tmp_path,
         config=SupervisorConfig(stop_timeout_s=0.2),
         clock=system_clock(),
@@ -112,7 +113,11 @@ async def test_restart_refuses_changed_inputs_before_native_birth(
         inputs=(InputSeal.capture(config),),
     )
     owner = Supervisor(
-        UnitRegistry([unit]), run_dir=tmp_path / "root", clock=system_clock(), root_pid=os.getpid()
+        UnitRegistry([unit]),
+        environ=dict(os.environ),
+        run_dir=tmp_path / "root",
+        clock=system_clock(),
+        root_pid=os.getpid(),
     )
     await owner.start()
     try:
@@ -153,6 +158,7 @@ async def test_a_child_ignoring_term_is_escalated_at_the_hard_budget(tmp_path: P
     )
     owner = Supervisor(
         UnitRegistry([unit]),
+        environ=dict(os.environ),
         run_dir=tmp_path,
         config=SupervisorConfig(),
         clock=system_clock(),
@@ -295,6 +301,7 @@ def test_the_stop_path_takes_our_group_from_the_port(tmp_path: Path) -> None:
         clock=system_clock(),
         root_pid=4242,
         process_control=FakeProcessControl(groups={4242: 7}),
+        environ=dict(os.environ),
     )
     assert owner._own_group() == 7
 
@@ -391,6 +398,7 @@ def _probe_supervisor(tmp_path: Path, launcher: Any) -> Supervisor:
     )
     return Supervisor(
         UnitRegistry([unit]),
+        environ=dict(os.environ),
         run_dir=tmp_path,
         config=SupervisorConfig(stop_timeout_s=0.2),
         spawn=launcher,
@@ -439,6 +447,7 @@ async def test_a_stopped_unit_keeps_its_rewrite(tmp_path: Path) -> None:
     unit = UnitManifest("worker", plain, RestartPolicy.ALWAYS, "root", ())
     owner = Supervisor(
         UnitRegistry([unit]),
+        environ=dict(os.environ),
         run_dir=tmp_path,
         config=SupervisorConfig(stop_timeout_s=0.2),
         spawn=launcher,
@@ -476,6 +485,7 @@ async def test_an_early_non_zero_exit_retires_the_rewrite(tmp_path: Path) -> Non
     unit = UnitManifest("worker", plain, RestartPolicy.ALWAYS, "root", ())
     owner = Supervisor(
         UnitRegistry([unit]),
+        environ=dict(os.environ),
         run_dir=tmp_path,
         config=SupervisorConfig(stop_timeout_s=0.2),
         spawn=launcher,
@@ -581,6 +591,7 @@ async def test_uptime_is_measured_on_the_injected_clock(tmp_path: Path) -> None:
     )
     owner = Supervisor(
         UnitRegistry([unit]),
+        environ=dict(os.environ),
         run_dir=tmp_path,
         config=SupervisorConfig(stop_timeout_s=0.2),
         clock=clock_over(timers),
@@ -604,7 +615,11 @@ def test_root_identity_is_the_native_birth_of_the_process_the_supervisor_serves(
     sleeper = subprocess.Popen(["/bin/sleep", "60"])
     try:
         owner = Supervisor(
-            UnitRegistry([]), run_dir=tmp_path, clock=system_clock(), root_pid=sleeper.pid
+            UnitRegistry([]),
+            environ=dict(os.environ),
+            run_dir=tmp_path,
+            clock=system_clock(),
+            root_pid=sleeper.pid,
         )
         assert owner.root_identity() == OwnedProcess.capture(psutil.Process(sleeper.pid))
         assert owner.root_identity().pid != os.getpid()

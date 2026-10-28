@@ -216,7 +216,11 @@ async def started(short_tmp: Path) -> AsyncIterator[StartFactory]:
 
     async def factory(units: list[UnitManifest]) -> Supervisor:
         supervisor = Supervisor(
-            UnitRegistry(units), run_dir=short_tmp, clock=system_clock(), root_pid=os.getpid()
+            UnitRegistry(units),
+            environ=dict(os.environ),
+            run_dir=short_tmp,
+            clock=system_clock(),
+            root_pid=os.getpid(),
         )
         created.append(supervisor)
         await supervisor.start()
