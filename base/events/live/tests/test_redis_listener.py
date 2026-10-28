@@ -16,12 +16,14 @@ from __future__ import annotations
 import asyncio
 import time
 from collections.abc import Callable
+from typing import Any
 from urllib.parse import urlsplit, urlunsplit
 
 import pytest
 import redis.asyncio as aredis
 from redis.exceptions import NoPermissionError
 
+from base.clock import SYSTEM_TIMERS
 from base.clock.tests.seeded_rng import seeded_rng
 from base.cluster import inbound_channel, redis_channel_prefix
 from base.config import settings
@@ -78,13 +80,23 @@ def _consuming(listener: RedisInboundListener) -> bool:
     return any(":consume:" in name for name in listener.unfinished_work)
 
 
+# meiva:note
+# A listener on the test cluster's events channel, measured by the process timers: every test in
+# this module used the live channel and the process clock through the listener's own readings, and
+# those two values now arrive as arguments, so they are named once here instead of at each site.
+def _listener(url: str, *args: Any, **kwargs: Any) -> RedisInboundListener:
+    kwargs.setdefault("events_channel", settings.data_plane.events_channel)
+    kwargs.setdefault("timers", SYSTEM_TIMERS)
+    return RedisInboundListener(url, *args, **kwargs)
+
+
 @pytest.mark.usefixtures("redis_url")
 class TestRedisInboundListener:
     """RedisInboundListener basic behavior tests."""
 
     async def test_ensure_listening_idempotent(self) -> None:
         """`ensure_listening` is safe to call repeatedly."""
-        listener = RedisInboundListener(settings.data_plane.redis_url, agent_id=9999)
+        listener = _listener(settings.data_plane.redis_url, agent_id=9999)
         try:
             await listener.ensure_listening()
             await listener.ensure_listening()  # Idempotent — no error
@@ -94,7 +106,7 @@ class TestRedisInboundListener:
     async def test_wait_one_wakes_on_publish(self) -> None:
         """`wait_one` returns immediately after Redis publish."""
         agent_id = 9998
-        listener = RedisInboundListener(settings.data_plane.redis_url, agent_id=agent_id)
+        listener = _listener(settings.data_plane.redis_url, agent_id=agent_id)
         try:
             # Start wait_one in background
             started = time.monotonic()
@@ -114,7 +126,7 @@ class TestRedisInboundListener:
 
     async def test_wait_one_times_out(self) -> None:
         """`wait_one` returns after timeout (no publish)."""
-        listener = RedisInboundListener(settings.data_plane.redis_url, agent_id=9997)
+        listener = _listener(settings.data_plane.redis_url, agent_id=9997)
         try:
             started = time.monotonic()
             await listener.wait_one(timeout=0.5)
@@ -126,7 +138,7 @@ class TestRedisInboundListener:
 
     async def test_wait_one_ignores_other_agent(self) -> None:
         """Agent only receives messages from its own channel."""
-        listener = RedisInboundListener(settings.data_plane.redis_url, agent_id=9996)
+        listener = _listener(settings.data_plane.redis_url, agent_id=9996)
         try:
             wait_task = asyncio.create_task(listener.wait_one(timeout=3.0))
 
@@ -152,7 +164,7 @@ class TestRedisInboundListener:
         """The listener subscribes to `inbound_channel(agent_id)`, not a bare
         `meiva:inbound:*` — the property the per-cluster ACL relies on."""
         agent_id = 9993
-        listener = RedisInboundListener(settings.data_plane.redis_url, agent_id=agent_id)
+        listener = _listener(settings.data_plane.redis_url, agent_id=agent_id)
         try:
             expected = inbound_channel(agent_id, settings.data_plane.events_channel)
             assert listener._channel == expected
@@ -166,7 +178,7 @@ class TestRedisInboundListener:
     async def test_reconnect_after_close(self) -> None:
         """`wait_one` auto-reconnects after connection close."""
         agent_id = 9994
-        listener = RedisInboundListener(settings.data_plane.redis_url, agent_id=agent_id)
+        listener = _listener(settings.data_plane.redis_url, agent_id=agent_id)
         try:
             await listener.ensure_listening()
             # Force close the underlying connection
@@ -183,7 +195,7 @@ class TestRedisInboundListener:
     async def test_close_idempotent(self) -> None:
         """close() called before open / called multiple times does not raise — agent finally + eval cleanup
         relies on it being safely no-op (redis version of pre-migration test_db.py::test_close_is_idempotent)."""
-        listener = RedisInboundListener(settings.data_plane.redis_url, agent_id=9992)
+        listener = _listener(settings.data_plane.redis_url, agent_id=9992)
         # never opened → close is a no-op
         await listener.close()
         await listener.close()
@@ -206,7 +218,7 @@ class TestRedisInboundListener:
         keeping the pubsub connection single-consumer.
         """
         agent_id = 9992
-        listener = RedisInboundListener(settings.data_plane.redis_url, agent_id=agent_id)
+        listener = _listener(settings.data_plane.redis_url, agent_id=agent_id)
         try:
             # First wait_one: let it subscribe and enter the consume phase.
             t1 = asyncio.create_task(listener.wait_one(timeout=5.0))
@@ -241,7 +253,7 @@ class TestRedisInboundListener:
         re-checks the subscription, and re-enters the consume phase cleanly.
         """
         agent_id = 9991
-        listener = RedisInboundListener(settings.data_plane.redis_url, agent_id=agent_id)
+        listener = _listener(settings.data_plane.redis_url, agent_id=agent_id)
         try:
             # Short timeouts to force rapid re-entry.
             for _ in range(5):
@@ -324,7 +336,7 @@ class TestWaitOneBudgetAndCancel:
         def _open_factory(_url: str, **_kw: object) -> object:
             return _WedgedOpenRedis(opened)
 
-        listener = RedisInboundListener(
+        listener = _listener(
             "redis://unused@127.0.0.1:1/0",
             agent_id=7001,
             redis_factory=_open_factory,
@@ -352,7 +364,7 @@ class TestWaitOneBudgetAndCancel:
         def _consume_factory(_url: str, **_kw: object) -> object:
             return _WedgedConsumeRedis(started)
 
-        listener = RedisInboundListener(
+        listener = _listener(
             settings.data_plane.redis_url,
             agent_id=7002,
             redis_factory=_consume_factory,
@@ -385,7 +397,7 @@ class TestWaitOneBudgetAndCancel:
         conn lock; here it's the shared pubsub.) Proof: a fresh wait on the same
         listener still wakes on a publish after the cancel."""
         agent_id = 7003
-        listener = RedisInboundListener(settings.data_plane.redis_url, agent_id)
+        listener = _listener(settings.data_plane.redis_url, agent_id)
         try:
             await listener.ensure_listening()
             waiter = asyncio.create_task(listener.wait_one(timeout=30.0))
@@ -422,7 +434,7 @@ class TestWakeHealth:
         Removing the clean-consume distinction would mark every quiet wait as
         degraded and emit needless wake-health events.
         """
-        listener = RedisInboundListener(settings.data_plane.redis_url, agent_id=6988)
+        listener = _listener(settings.data_plane.redis_url, agent_id=6988)
         try:
             # Open first: `wait_one` spends its budget on connecting too, and under load a
             # 0.3s budget can end before the subscription is up, which is a different
@@ -456,7 +468,7 @@ class TestWakeHealth:
                 return _WedgedConsumeRedis(consuming)
             return aredis.Redis.from_url(url, **kwargs)  # pyright: ignore[reportUnknownMemberType, reportArgumentType]
 
-        listener = RedisInboundListener(
+        listener = _listener(
             settings.data_plane.redis_url,
             agent_id=agent_id,
             redis_factory=_factory,
@@ -503,7 +515,7 @@ class TestWakeHealth:
         def _open_factory(_url: str, **_kw: object) -> object:
             return _WedgedOpenRedis(started)
 
-        listener = RedisInboundListener(
+        listener = _listener(
             "redis://unused@127.0.0.1:1/0",
             agent_id=6985,
             redis_factory=_open_factory,
@@ -601,7 +613,7 @@ class TestAclScopedChannel:
         acl_events_channel = "meiva:acltest:events"
         _make_scoped_user("acl_dev2", "&meiva:acltest:*")
         agent_id = 8123
-        listener = RedisInboundListener(
+        listener = _listener(
             _scoped_user_url("acl_dev2"),
             agent_id,
             events_channel=acl_events_channel,
@@ -626,7 +638,7 @@ class TestAclScopedChannel:
         cadence instead of the agent crashing on idle-wait."""
         # Scoped to a DIFFERENT prefix → inbound_channel (meiva:acltest:*) is denied.
         _make_scoped_user("acl_wrong", "&meiva:other:*")
-        listener = RedisInboundListener(
+        listener = _listener(
             _scoped_user_url("acl_wrong"),
             agent_id=8124,
             events_channel="meiva:acltest:events",
@@ -664,7 +676,7 @@ class TestDeadTransportSurvival:
         """A transport killed under a parked listener must not raise out of
         `wait_one`; the next `wait_one` reconnects and wakes on publish."""
         agent_id = 6998
-        listener = RedisInboundListener(settings.data_plane.redis_url, agent_id=agent_id)
+        listener = _listener(settings.data_plane.redis_url, agent_id=agent_id)
         try:
             await listener.ensure_listening()
             pubsub = listener._pubsub
@@ -726,7 +738,7 @@ class TestDeadTransportSurvival:
         def _flaky_factory(_url: str, **_kw: object) -> object:
             return _FlakyRedis()
 
-        listener = RedisInboundListener(
+        listener = _listener(
             settings.data_plane.redis_url,
             agent_id=agent_id,
             redis_factory=_flaky_factory,

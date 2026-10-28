@@ -13,6 +13,7 @@ from psycopg_pool import ConnectionPool
 
 from base import telemetry
 from base.agents.tests.units import spawn_agent
+from base.clock import SYSTEM_TIMERS
 from base.cluster.machine import MachineIdentityReader
 from base.cluster.machine.tests.identity import machine_identity as machine_identity
 from base.config import settings
@@ -254,7 +255,12 @@ class TestSendHeartbeatCheckin:
             database_gate=database_gate,
             machine=machine_identity,
         )
-        listener = RedisInboundListener(settings.data_plane.redis_url, aid)
+        listener = RedisInboundListener(
+            settings.data_plane.redis_url,
+            aid,
+            events_channel=settings.data_plane.events_channel,
+            timers=SYSTEM_TIMERS,
+        )
         try:
             wait_task = asyncio.create_task(listener.wait_one(timeout=10.0))
             await asyncio.sleep(0.2)  # let the subscribe take effect before the publish
