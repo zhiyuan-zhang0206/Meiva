@@ -153,6 +153,7 @@ def _init_and_start_settings_free() -> None:
         occupied_ports=frozenset(),
         local_names=frozenset(),
         birth=birth_facts(),
+        user_home=Path("/home/operator"),
     )
 
     def configured() -> None:

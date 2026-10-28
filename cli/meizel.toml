@@ -18,9 +18,6 @@ exports = ["__main__.py", "commands", "database", "fleet_update", "main.py", "pa
 
 [roots]
 "fleet_alert_silence.py" = { kinds = ["clock", "settings"], why = "Standalone SSH entrypoint shipped to the gateway over stdin reads its own clock and settings" }
-"main.py" = { kinds = ["clock", "environ", "home", "pid", "platform", "random"], why = "CLI bootstrap sets config/profile/log routing before importing Settings or command modules, resolves the home once for the checkout gate, the lite-config opt-in and the runtime, hands the start timing recorder this process's pid and start time, and reads the instant, host names and fresh secrets `meiva init` is handed." }
+"main.py" = { kinds = ["clock", "environ", "home", "pid", "platform", "random"], why = "CLI bootstrap sets config/profile/log routing before importing Settings or command modules, resolves the home once for the checkout gate, the lite-config opt-in and the runtime, reads the operator's own home for the `~` a typed `--config-file` names, hands the start timing recorder this process's pid and start time, and reads the instant, host names and fresh secrets `meiva init` is handed." }
 "python_install.py" = { kinds = ["cwd", "environ", "home", "platform"], why = "Pre-venv stdlib bootstrap inspects working directory, environment, user home and platform before launching uv" }
 "start_intent.py" = { kinds = ["environ"], why = "Identity bootstrap precedes Settings: read the birth inputs and pin the resolved home before config imports." }
-
-[debt.ambient-read]
-"init_intent.py#home pathlib.Path.expanduser" = 1

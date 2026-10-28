@@ -32,6 +32,9 @@ class BirthFacts:
 # `local_names` are the host names and interface addresses by which this host is known, in
 # lowercase; a remote data-plane config that names one of them is refused. `birth` is what the
 # home's birth takes from the entry.
+# `user_home` is the operator's own home, the one a `~` on the command line names; the entry reads
+# it once, and a path a person typed expands against it rather than against the process's user
+# database.
 # `transport_key` is the key the operator exported to open a database-capability bundle, already
 # taken out of the environment (empty when none was exported); only a join that carries a
 # bundle reads it. It is a secret, so it stays out of the repr.
@@ -44,6 +47,7 @@ class CallerHost:
     occupied_ports: frozenset[int]
     local_names: frozenset[str]
     birth: BirthFacts
+    user_home: Path
     transport_key: str = field(default="", repr=False)
 
 

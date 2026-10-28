@@ -37,6 +37,7 @@ caller = CallerHost(
     occupied_ports=frozenset(),
     local_names=frozenset(),
     birth=birth_facts(),
+    user_home=Path("/home/operator"),
 )
 assert init_intent.run_init(init_args, site, caller) == 0
 
