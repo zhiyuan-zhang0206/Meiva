@@ -19,7 +19,7 @@ not an empty value: the CLI asks whether the variable is present, and an empty s
 is still present (the Claude CLI treats an empty value as absent, which is why that
 adapter blanks instead). `api_key_mode` is the one explicit way to keep the key.
 
-`CodexSession`, `CodexConfig.resolved_binary` and `StdioAppServer` require an
+`CodexSession`, the `resolved_binary` helper in `session.py` and `StdioAppServer` require an
 explicit environment mapping. The host captures the runner environment at its
 existing configuration root; the bridge rebuilds PATH and adds a fresh registration
 handle whenever it constructs a session, including a reconnect. Session construction
