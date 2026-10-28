@@ -1,5 +1,5 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, cleanup, fireEvent, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { AGENTS_QUERY_KEY } from "@/lib/agents/use-agents";
@@ -8,6 +8,13 @@ import type { FleetGraphResult } from "@/lib/fleet/use-fleet-graph";
 import { resetMockSettings } from "@/test-support/user-settings-mock";
 
 import { GraphView } from "../graph-view";
+import { renderWithApi as render } from "@/test-support/render";
+import { resetTransport, transport } from "@/test-support/fake-api";
+beforeEach(() => {
+  resetTransport();
+  transport.getAgentRoster.mockImplementation(getAgentRoster);
+});
+
 
 const push = vi.fn();
 vi.mock("next/navigation", () => ({
@@ -22,7 +29,6 @@ vi.mock("@/lib/fleet/use-fleet-graph", () => ({
 }));
 
 const { getAgentRoster } = vi.hoisted(() => ({ getAgentRoster: vi.fn() }));
-vi.mock("@/lib/transport/api", () => ({ api: { getAgentRoster } }));
 
 function node(agent_id: number, over: Partial<FleetGraphNode> = {}): FleetGraphNode {
   return {

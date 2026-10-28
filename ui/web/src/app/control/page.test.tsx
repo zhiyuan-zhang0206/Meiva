@@ -6,7 +6,7 @@
 // own test file); that also keeps the heavy per-section deps (api) out.
 
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { cleanup, fireEvent, render, screen, within, waitFor } from "@testing-library/react";
+import { cleanup, fireEvent, screen, within, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 vi.mock("@/app/control/guide/page", () => ({ default: () => <div>GUIDE_BODY</div> }));
@@ -18,13 +18,16 @@ vi.mock("@/app/control/inventory/page", () => ({
   PluginsInventory: () => <div>PLUGINS_BODY</div>,
   McpInventory: () => <div>MCP_BODY</div>,
 }));
-vi.mock("@/lib/transport/api", () => ({
-  api: { getUiContributions: vi.fn().mockResolvedValue({ themes: [], nav: [] }) },
-  assetUrl: (p: string) => p,
-}));
 
 import ControlPage from "./page";
 import { CONTROL_SCROLL_ID, CONTROL_SECTIONS } from "./sections";
+import { renderWithApi as render } from "@/test-support/render";
+import { resetTransport, transport } from "@/test-support/fake-api";
+beforeEach(() => {
+  resetTransport();
+  transport.getUiContributions.mockResolvedValue({ themes: [], nav: [] });
+});
+
 
 afterEach(cleanup);
 

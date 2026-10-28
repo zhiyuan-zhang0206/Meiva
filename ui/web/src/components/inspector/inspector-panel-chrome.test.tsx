@@ -6,7 +6,7 @@ import {
   waitFor,
   within,
 } from "@testing-library/react";
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 import { useTimelineStore } from "@/lib/timeline/timeline-store";
 import { BAR_DIVIDER_CLASS, BAR_HEIGHT_CLASS } from "@/lib/layout/layout";
@@ -20,48 +20,23 @@ import {
   cleanupInspectorTest,
   createInspectorQueryClient,
   fixture,
-  getAgent,
   getAgentInspectLive,
   getAgentInspectStatistics,
   getAgentInspectWidgets,
   getAgentRoster,
-  getSettings,
   liveFixture,
   panelState,
   putSetting,
   QueryClientProvider,
   render,
-  resolveNotice,
   rosterFixture,
   setInspectorOpen,
   setupInspectorTest,
   setInspectorPages,
-  streamHandlers,
 } from "./inspector-test-mock";
 
-vi.mock("@/lib/transport/api", () => ({
-  api: {
-    getAgentInspectStatistics,
-    getAgentInspectLive,
-    getAgentInspectWidgets,
-    getAgentRoster,
-    getAgent,
-    resolveNotice,
-    putSetting,
-    getSettings,
-  },
-}));
 
-vi.mock("@/lib/transport/useEventStream", () => ({
-  EventStreamProvider: ({ children }: { children: React.ReactNode }) => children,
-  useEventStream: (
-    onSystemEvent: (event: unknown) => void,
-    onConnectionEvent: (event: { type: string }) => void,
-  ) => {
-    streamHandlers.system = onSystemEvent;
-    streamHandlers.connection = onConnectionEvent;
-  },
-}));
+
 
 import { InspectorPanel } from "./inspector-panel";
 

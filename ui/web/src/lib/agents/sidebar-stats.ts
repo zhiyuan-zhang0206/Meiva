@@ -3,7 +3,7 @@ import { useCallback, useEffect } from "react";
 
 import type { StatsDashboard } from "../contracts/types";
 import { useUserSettings } from "../state/use-user-settings";
-import { api, type Api } from "../transport/api";
+import type { Api } from "../transport/api";
 import { useApi } from "../transport/transport-context";
 
 export const STATS_WINDOWS = [0, 1, 6, 24, 72, 168] as const;
@@ -116,7 +116,7 @@ export function useStatsDashboard(windowHours: StatsWindowHours): {
   isFetching: boolean;
   refetch: UseQueryResult<StatsDashboard>["refetch"];
 } {
-  const client = useApi(api);
+  const client = useApi();
   const queryClient = useQueryClient();
   const { data: stats, error, isFetching, refetch } = useQuery({
     queryKey: ["stats", "dashboard", windowHours],

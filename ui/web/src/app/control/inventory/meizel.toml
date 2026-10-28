@@ -3,11 +3,6 @@ exports = ["page.tsx"]
 [uses]
 "page.test.tsx" = ["page.tsx"]
 
-[debt.first-party-patch]
-"page.test.tsx#vi.spyOn ui/web/src/lib/transport/api.ts.draftPackage" = 2
-"page.test.tsx#vi.spyOn ui/web/src/lib/transport/api.ts.getInventory" = 15
-"page.test.tsx#vi.spyOn ui/web/src/lib/transport/api.ts.putInventory" = 5
-
 [debt.third-party-patch]
 "page.test.tsx#vi.mock next/navigation" = 1
 

@@ -18,7 +18,6 @@ import { useCallback, useEffect, useRef, useState } from "react";
 
 import { errMsg } from "../contracts/errors";
 import { track } from "../telemetry/telemetry";
-import { api } from "../transport/api";
 import { useApi } from "../transport/transport-context";
 import { useStore } from "./store";
 import {
@@ -35,7 +34,7 @@ export function useUserSettings(): {
   setSetting: (key: string, value: unknown) => void;
   isLoading: boolean;
 } {
-  const client = useApi(api);
+  const client = useApi();
   const queryClient = useQueryClient();
 
   const { data, isLoading } = useQuery({

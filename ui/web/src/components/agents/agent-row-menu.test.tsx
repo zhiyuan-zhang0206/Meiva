@@ -1,23 +1,19 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import {
-  cleanup,
-  fireEvent,
-  render as rtlRender,
-  screen,
-} from "@testing-library/react";
-import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
+import { cleanup, fireEvent, screen } from "@testing-library/react";
+import { beforeEach, afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 
 import type { AgentRow as AgentRowType } from "@/lib/contracts/types";
 
 import { AgentRow } from "./agent-row";
+import { renderWithApi as rtlRender } from "@/test-support/render";
+import { resetTransport, transport } from "@/test-support/fake-api";
+beforeEach(() => {
+  resetTransport();
+  transport.getSystemStatus.mockRejectedValue(new Error("no network in tests"));
+  transport.getSettings.mockRejectedValue(new Error("no network in tests"));
+  transport.putSetting.mockRejectedValue(new Error("no network in tests"));
+});
 
-vi.mock("@/lib/transport/api", () => ({
-  api: {
-    getSystemStatus: vi.fn().mockRejectedValue(new Error("no network in tests")),
-    getSettings: vi.fn().mockRejectedValue(new Error("no network in tests")),
-    putSetting: vi.fn().mockRejectedValue(new Error("no network in tests")),
-  },
-}));
 
 afterEach(() => {
   cleanup();

@@ -19,12 +19,12 @@ import { useState } from "react";
 
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { api } from "@/lib/transport/api";
 import { errMsg } from "@/lib/contracts/errors";
 import { useStore } from "@/lib/state/store";
 import type { PackageKind } from "@/lib/contracts/types";
 import { FLEX } from "@/lib/layout/layout";
 import { cn } from "@/lib/format/utils";
+import { useApi } from "@/lib/transport/transport-context";
 
 // All three entries can be mounted at once (the Control page stacks every
 // section), so placeholder + accessible name are distinct per kind.
@@ -44,6 +44,7 @@ const COPY: Record<PackageKind, { label: string; placeholder: string }> = {
 };
 
 export function PackageDraftEntry({ kind }: { kind: PackageKind }) {
+  const client = useApi();
   const showToast = useStore((s) => s.showToast);
   const setActiveId = useStore((s) => s.setActiveId);
   const router = useRouter();
@@ -51,7 +52,7 @@ export function PackageDraftEntry({ kind }: { kind: PackageKind }) {
   const { label, placeholder } = COPY[kind];
 
   const draftMutation = useMutation({
-    mutationFn: (text: string) => api.draftPackage(kind, text),
+    mutationFn: (text: string) => client.draftPackage(kind, text),
     retry: false,
     onSuccess: (res) => {
       setNl("");

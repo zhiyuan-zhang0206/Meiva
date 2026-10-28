@@ -27,7 +27,6 @@ exports = ["anchor-scroll.ts", "nav.tsx", "section.tsx", "sections.ts", "visibil
 "page.test.tsx#vi.mock ui/web/src/app/control/inventory/page.tsx" = 1
 "page.test.tsx#vi.mock ui/web/src/app/control/schedules/page.tsx" = 1
 "page.test.tsx#vi.mock ui/web/src/app/control/skills/page.tsx" = 1
-"page.test.tsx#vi.mock ui/web/src/lib/transport/api.ts" = 1
 
 [debt.stdlib-patch]
 "anchor-scroll.test.tsx#vi.stubGlobal ResizeObserver" = 1

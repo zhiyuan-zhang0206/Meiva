@@ -1,13 +1,18 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { cleanup, render, screen } from "@testing-library/react";
+import { cleanup, screen } from "@testing-library/react";
 import { NextIntlClientProvider } from "next-intl";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { api } from "@/lib/transport/api";
 
 import en from "../../../messages/en";
 import zh from "../../../messages/zh";
 import { ToUserDocumentView } from "./to-user-document";
+import { renderWithApi as render } from "@/test-support/render";
+import { resetTransport, transport } from "@/test-support/fake-api";
+beforeEach(() => {
+  resetTransport();
+});
+
 
 const clients = new Set<QueryClient>();
 const originalUrl = window.location.href;
@@ -15,7 +20,7 @@ const originalHistory: unknown = window.history.state;
 
 beforeEach(() => {
   window.history.replaceState(null, "", "/");
-  vi.spyOn(api, "getToUser").mockImplementation(() => new Promise(() => undefined));
+  transport.getToUser.mockImplementation(() => new Promise(() => undefined));
 });
 
 afterEach(() => {
@@ -59,7 +64,7 @@ describe("To user empty state", () => {
     const removed = vi.spyOn(window, "removeEventListener");
     const view = renderEmpty(zh, "zh");
     expect(screen.getByText("No content")).toBeTruthy();
-    expect(api.getToUser).not.toHaveBeenCalled();
+    expect(transport.getToUser).not.toHaveBeenCalled();
     const listener = added.mock.calls.find(([event]) => event === "popstate")?.[1];
     expect(listener).toBeDefined();
     view.unmount();

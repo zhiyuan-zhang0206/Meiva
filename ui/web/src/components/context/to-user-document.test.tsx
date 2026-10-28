@@ -1,13 +1,19 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { act, cleanup, fireEvent, render, screen, within } from "@testing-library/react";
-import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
+import { act, cleanup, fireEvent, screen, within } from "@testing-library/react";
+import { beforeEach, afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 import type { ToUserDocument } from "@/lib/contracts/types";
-import { ApiError, api } from "@/lib/transport/api";
+import { ApiError } from "@/lib/transport/api";
 
 vi.mock("next-intl", () => ({ useTranslations: () => (key: string) => key }));
 import { preloadChatMarkdown } from "@/components/content/markdown";
 import { BAR_DIVIDER_CLASS, BAR_MIN_HEIGHT_CLASS } from "@/lib/layout/layout";
 import { ToUserDocumentView } from "./to-user-document";
+import { renderWithApi as render } from "@/test-support/render";
+import { resetTransport, transport } from "@/test-support/fake-api";
+beforeEach(() => {
+  resetTransport();
+});
+
 
 beforeAll(async () => {
   await preloadChatMarkdown();
@@ -29,9 +35,11 @@ function show(
   const qc = new QueryClient({ defaultOptions: { queries: { retry: false, staleTime: Infinity } } });
   if (linked !== undefined) {
     if (!(linked instanceof Error)) qc.setQueryData(["to-user", 7, linkId], linked);
-    vi.spyOn(api, "getToUser").mockImplementation(() => linked instanceof Error ? Promise.reject(linked) : Promise.resolve(linked));
+    transport.getToUser.mockImplementation(() =>
+      linked instanceof Error ? Promise.reject(linked) : Promise.resolve(linked),
+    );
   } else {
-    vi.spyOn(api, "getToUser").mockImplementation(() => new Promise(() => undefined));
+    transport.getToUser.mockImplementation(() => new Promise(() => undefined));
   }
   return render(
     <QueryClientProvider client={qc}>
@@ -95,7 +103,7 @@ describe("To user Markdown", () => {
     link.addEventListener("click", (event) => event.preventDefault());
     fireEvent.click(link, { ctrlKey: true });
     expect(chain()).toEqual([]);
-    expect(api.getToUser).not.toHaveBeenCalled();
+    expect(transport.getToUser).not.toHaveBeenCalled();
   });
   it("draws the panel title rule on the shared column title bar", () => {
     show(document("body"));

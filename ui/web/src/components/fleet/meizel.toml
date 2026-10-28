@@ -29,19 +29,15 @@ exports = ["fleet-view.tsx"]
 "fleet-route-jump.test.tsx#vi.mock ui/web/src/lib/agents/use-fleet-agents.ts" = 1
 "fleet-route-jump.test.tsx#vi.mock ui/web/src/lib/notifications/use-notices.ts" = 1
 "fleet-route-jump.test.tsx#vi.mock ui/web/src/lib/notifications/use-tasks.ts" = 1
-"fleet-route-jump.test.tsx#vi.mock ui/web/src/lib/transport/api.ts" = 1
 "fleet-view.test.tsx#vi.mock ui/web/src/components/fleet/graph-view.tsx" = 1
 "fleet-view.test.tsx#vi.mock ui/web/src/lib/agents/use-all-pages.ts" = 1
 "fleet-view.test.tsx#vi.mock ui/web/src/lib/agents/use-fleet-agents.ts" = 1
 "fleet-view.test.tsx#vi.mock ui/web/src/lib/notifications/use-notices.ts" = 1
 "fleet-view.test.tsx#vi.mock ui/web/src/lib/notifications/use-tasks.ts" = 1
-"fleet-view.test.tsx#vi.mock ui/web/src/lib/transport/api.ts" = 1
 "graph-view.test.tsx#vi.mock ui/web/src/lib/fleet/use-fleet-graph.ts" = 1
 "graph-view.test.tsx#vi.mock ui/web/src/lib/state/use-user-settings.ts" = 1
-"graph-view.test.tsx#vi.mock ui/web/src/lib/transport/api.ts" = 1
 "task-graph.test.tsx#vi.mock ui/web/src/lib/notifications/use-tasks.ts" = 1
 "task-graph.test.tsx#vi.mock ui/web/src/lib/state/use-user-settings.ts" = 1
-"task-graph.test.tsx#vi.mock ui/web/src/lib/transport/api.ts" = 1
 
 [debt.third-party-patch]
 "fleet-route-jump.test.tsx#vi.mock next/link" = 1

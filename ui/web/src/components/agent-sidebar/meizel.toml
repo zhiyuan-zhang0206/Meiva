@@ -33,9 +33,6 @@
 "agent-sidebar.test.tsx#vi.mock ui/web/src/lib/plugins/plugin-stats.ts" = 1
 "agent-sidebar.test.tsx#vi.mock ui/web/src/lib/state/store.ts" = 1
 "agent-sidebar.test.tsx#vi.mock ui/web/src/lib/state/use-user-settings.ts" = 1
-"agent-sidebar.test.tsx#vi.mock ui/web/src/lib/transport/api.ts" = 1
-"archive.test.tsx#vi.mock ui/web/src/lib/transport/api.ts" = 1
-"footer.test.tsx#vi.mock ui/web/src/lib/transport/api.ts" = 1
 "sidebar-stats-cards.test.tsx#assignment ui/web/src/components/agent-sidebar/sidebar-test-mock.tsx.agents" = 20
 "sidebar-stats-cards.test.tsx#assignment ui/web/src/components/agent-sidebar/sidebar-test-mock.tsx.pluginStatDeclarations" = 5
 "sidebar-stats-cards.test.tsx#assignment ui/web/src/components/agent-sidebar/sidebar-test-mock.tsx.stats" = 14
@@ -51,7 +48,6 @@
 "sidebar-stats-cards.test.tsx#vi.mock ui/web/src/lib/plugins/plugin-stats.ts" = 1
 "sidebar-stats-cards.test.tsx#vi.mock ui/web/src/lib/state/store.ts" = 1
 "sidebar-stats-cards.test.tsx#vi.mock ui/web/src/lib/state/use-user-settings.ts" = 1
-"sidebar-stats-cards.test.tsx#vi.mock ui/web/src/lib/transport/api.ts" = 1
 "sidebar-tree-and-search.test.tsx#assignment ui/web/src/components/agent-sidebar/sidebar-test-mock.tsx.activeId" = 1
 "sidebar-tree-and-search.test.tsx#assignment ui/web/src/components/agent-sidebar/sidebar-test-mock.tsx.agents" = 34
 "sidebar-tree-and-search.test.tsx#assignment ui/web/src/components/agent-sidebar/sidebar-test-mock.tsx.searchQuery" = 4
@@ -70,7 +66,6 @@
 "sidebar-tree-and-search.test.tsx#vi.mock ui/web/src/lib/plugins/plugin-stats.ts" = 1
 "sidebar-tree-and-search.test.tsx#vi.mock ui/web/src/lib/state/store.ts" = 1
 "sidebar-tree-and-search.test.tsx#vi.mock ui/web/src/lib/state/use-user-settings.ts" = 1
-"sidebar-tree-and-search.test.tsx#vi.mock ui/web/src/lib/transport/api.ts" = 1
 
 [debt.third-party-patch]
 "agent-sidebar.test.tsx#vi.mock next/navigation" = 1

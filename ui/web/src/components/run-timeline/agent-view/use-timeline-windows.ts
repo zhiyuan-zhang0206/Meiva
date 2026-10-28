@@ -4,7 +4,9 @@ import { useQueries, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useMemo, useRef, useState } from "react";
 
 import type { RunTimelineResponse } from "@/lib/contracts/types";
-import { api, ApiError } from "@/lib/transport/api";
+import { ApiError } from "@/lib/transport/api";
+import { useApi } from "@/lib/transport/transport-context";
+import type { Api } from "@/lib/transport/api";
 
 import { viewportOf, type Viewport } from "../model/timeline-model-viewport";
 
@@ -20,12 +22,17 @@ function preparing(error: Error | null): boolean {
     ["timeline_index_queued", "timeline_index_indexing", "timeline_index_busy"].includes(error.code ?? "");
 }
 
-function windowQuery(id: number, snapshot: RunTimelineResponse["snapshot"], range: Viewport | null) {
+function windowQuery(
+  id: number,
+  snapshot: RunTimelineResponse["snapshot"],
+  range: Viewport | null,
+  gateway: Api,
+) {
   return {
     queryKey: ["run-timeline-window", id, snapshot, range?.from, range?.to],
     queryFn: ({ signal }: { signal: AbortSignal }) => {
       if (range === null) throw new Error("a timeline window must have bounds");
-      return api.getRunTimeline(id, {
+      return gateway.getRunTimeline(id, {
         from: new Date(range.from).toISOString(),
         to: new Date(range.to).toISOString(),
         maxUnits: MAX_UNITS,
@@ -101,10 +108,11 @@ function cachedMerge(id: number, responses: readonly (RunTimelineResponse | unde
 // meiva:link ui/web/src/docs/frontend-components/run-timeline/window-reads.meiva.okf.md
 export function useTimelineWindows(ids: readonly number[], viewport: Viewport | null) {
   const client = useQueryClient();
+  const gateway = useApi();
   const requestView = useRequestView(viewport);
   const initialQueries = ids.map((id) => ({
     queryKey: ["run-timeline", id],
-    queryFn: ({ signal }: { signal: AbortSignal }) => api.getRunTimeline(id, { recentHours: 24, maxUnits: MAX_UNITS, signal }),
+    queryFn: ({ signal }: { signal: AbortSignal }) => gateway.getRunTimeline(id, { recentHours: 24, maxUnits: MAX_UNITS, signal }),
     staleTime: Infinity,
     gcTime: 60_000,
     retry: (attempt: number, error: Error) => preparing(error) && attempt < 30,
@@ -117,7 +125,7 @@ export function useTimelineWindows(ids: readonly number[], viewport: Viewport | 
     const first = index < 0 ? undefined : initial[index]?.data;
     return first !== undefined && first.snapshot === item.snapshot;
   }), [requested, ids, initial]);
-  const windows = useQueries({ queries: active.map(({ id, snapshot, range }) => windowQuery(id, snapshot, range)), combine: pickRead });
+  const windows = useQueries({ queries: active.map(({ id, snapshot, range }) => windowQuery(id, snapshot, range, gateway)), combine: pickRead });
   const next = [...active];
   initial.forEach(({ data: first }, i) => {
     if (first === undefined || requestView === null || first.lifetime === null) return;
