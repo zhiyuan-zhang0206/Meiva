@@ -1,0 +1,5 @@
+exports = ["sink.py"]
+
+[uses]
+"__init__.py" = ["sink.py"]
+"tests" = ["__init__.py"]

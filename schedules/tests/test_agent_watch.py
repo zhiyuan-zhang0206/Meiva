@@ -17,13 +17,17 @@ from pathlib import Path
 import psycopg
 import pytest
 
+from base.events.alarms import open_alarms
 from base.sessions.coding_session_owner_record import full_session_name
 from schedules.jobs.agent_watch import (
+    Notice,
     observe,
     read_seat_registries,
     read_seat_state,
     read_state,
+    report_pending_alarms,
     round_line,
+    send_notice,
     write_seat_state,
     write_state,
 )
@@ -57,6 +61,15 @@ _LEAD = 405
 _STAMP = "2026-10-27T08:00:00+00:00"
 _ALIVE = Observation("idling", 3, 10.0)
 _SILENT = Observation("idling", 0, 200.0)
+_NOW = datetime(2026, 10, 28, 7, 53, tzinfo=UTC)
+_NOTICE = Notice(
+    kind="report",
+    subject=f"{_DUTY.agent_id} test duty",
+    judgement="sessions=0; active=200m",
+    reading="sessions=0 active=200m",
+    target=_LEAD,
+    text="4242 has been silent for 200m",
+)
 
 
 def _plan(observation: Observation, state: WatchState, *, now: float):
@@ -503,3 +516,91 @@ def test_a_seat_state_survives_a_round_trip(tmp_path: Path) -> None:
     assert read_seat_state(path) == states
     path.write_text("not json", encoding="utf-8")
     assert read_seat_state(path) == {}
+
+
+# meiva:note
+# The watch's sends are written down before they are made. A transport that refuses -- the
+# `Connection refused` one burn-rate gate met on 2026-10-28 -- leaves the alarm on disk with the
+# reason, which is the whole difference between one log line and a record a later round reads.
+# meiva:link base/events/alarms/docs/alarms.meiva.okf.md
+def test_a_refused_send_leaves_the_alarm_on_disk(tmp_path: Path) -> None:
+    def refuse(_target: int, _text: str) -> None:
+        raise RuntimeError("Connection refused")
+
+    reason = send_notice(tmp_path, _NOTICE, now=_NOW, send=refuse)
+
+    assert reason == "RuntimeError: Connection refused"
+    due = open_alarms(tmp_path, older_than=timedelta(0), now=_NOW)
+    assert [(alarm.kind, alarm.subject) for alarm in due] == [
+        ("report", f"{_DUTY.agent_id} test duty")
+    ]
+    assert due[0].delivery_error == "RuntimeError: Connection refused"
+    assert due[0].source == "schedules/jobs/agent_watch.py"
+
+
+# meiva:note
+# A send the transport accepted is spent: nobody has to tell the lead about it again, and the
+# record keeps the delivery as its last word.
+# meiva:link base/events/alarms/docs/alarms.meiva.okf.md
+def test_an_accepted_send_is_not_a_pending_alarm(tmp_path: Path) -> None:
+    told: list[tuple[int, str]] = []
+
+    reason = send_notice(
+        tmp_path, _NOTICE, now=_NOW, send=lambda target, text: told.append((target, text))
+    )
+
+    assert reason is None
+    assert told == [(_LEAD, _NOTICE.text)]
+    assert open_alarms(tmp_path, older_than=timedelta(0), now=_NOW) == []
+
+
+# meiva:note
+# The next round is the reader: it tells the lead what no transport took, once, and closes it
+# against the round after that.
+# meiva:link base/events/alarms/docs/alarms.meiva.okf.md
+def test_a_round_reports_an_alarm_no_transport_took_once(tmp_path: Path) -> None:
+    def refuse(_target: int, _text: str) -> None:
+        raise RuntimeError("Connection refused")
+
+    send_notice(tmp_path, _NOTICE, now=_NOW, send=refuse)
+    told: list[tuple[int, str]] = []
+
+    first = report_pending_alarms(
+        tmp_path,
+        now=_NOW + timedelta(minutes=20),
+        report_agent=_LEAD,
+        send=lambda target, text: told.append((target, text)),
+    )
+    later = report_pending_alarms(
+        tmp_path,
+        now=_NOW + timedelta(minutes=40),
+        report_agent=_LEAD,
+        send=lambda target, text: told.append((target, text)),
+    )
+
+    assert first == ("alarms-reported=1",)
+    assert later == ()
+    assert len(told) == 1
+    assert told[0][0] == _LEAD
+    assert "test duty" in told[0][1]
+    assert "NOT delivered: RuntimeError: Connection refused" in told[0][1]
+
+
+# meiva:note
+# When the report itself cannot go out, nothing is closed: the alarm stays open, the round says
+# so on its line, and the next round tries again.
+# meiva:link base/events/alarms/docs/alarms.meiva.okf.md
+def test_a_failed_alarm_report_leaves_the_alarm_open(tmp_path: Path) -> None:
+    def refuse(_target: int, _text: str) -> None:
+        raise RuntimeError("Connection refused")
+
+    send_notice(tmp_path, _NOTICE, now=_NOW, send=refuse)
+
+    lines = report_pending_alarms(
+        tmp_path, now=_NOW + timedelta(minutes=20), report_agent=_LEAD, send=refuse
+    )
+
+    assert lines == ("alarms-unreported=1 RuntimeError",)
+    assert (
+        len(open_alarms(tmp_path, older_than=timedelta(0), now=_NOW + timedelta(minutes=20))) == 1
+    )

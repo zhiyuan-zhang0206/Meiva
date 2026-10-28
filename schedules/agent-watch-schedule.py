@@ -22,6 +22,7 @@ from datetime import UTC, datetime
 from functools import partial
 from zoneinfo import ZoneInfo
 
+import meiva
 from base.paths.home import resolve_meiva_home
 from schedules.jobs.agent_watch import EmitTally, run_round
 from schedules.jobs.catchup import cluster_timezone
@@ -62,6 +63,7 @@ def watch_once(
     home,
     state_path,
     tally: EmitTally,
+    send,
 ) -> None:
     line = run_round(
         inputs=inputs,
@@ -71,6 +73,7 @@ def watch_once(
         now=datetime.now(UTC),
         process=_PROCESS_NAME,
         tally=tally,
+        send=send,
     )
     zone = ZoneInfo(cluster_timezone())
     print(f"[{slot.astimezone(zone):%Y-%m-%d %H:%M %Z}] {line}", flush=True)
@@ -89,6 +92,7 @@ if __name__ == "__main__":
             home=home,
             state_path=home / "run" / _STATE_FILE,
             tally=EmitTally(),
+            send=meiva.agents.send_message,
         )
         if "--once" in sys.argv:
             watch(datetime.now(UTC), None)
