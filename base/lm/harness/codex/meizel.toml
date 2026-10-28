@@ -16,6 +16,7 @@ exports = ["auth.py", "frames.py", "session.py", "tests"]
 "." = "strict-to-be"
 "__init__.py" = "strict"
 "auth.py" = "strict"
+"config.py" = "strict"
 "frames.py" = "strict"
 "mapping.py" = "strict"
 "requests.py" = "strict"
@@ -24,5 +25,4 @@ exports = ["auth.py", "frames.py", "session.py", "tests"]
 "turns.py" = "strict"
 
 [debt.impure-edge]
-"config.py#base/host/env/harness_binaries.py" = 1
 "types.py#base/lm/harness/base_session.py" = 1

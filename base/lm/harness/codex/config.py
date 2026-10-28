@@ -1,10 +1,7 @@
 from __future__ import annotations
 
-from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
-
-from base.host.env.harness_binaries import resolve_harness_binary
 
 DEFAULT_BINARY = "codex"
 SANDBOX_MODES = ("read-only", "workspace-write", "danger-full-access")
@@ -60,19 +57,6 @@ class CodexConfig:
             raise ValueError("max_buffered_events must be at least 1")
         if self.dedupe_window < 1:
             raise ValueError("dedupe_window must be at least 1")
-
-    # meiva:note
-    # The CLI this session spawns, resolved through the directories a harness installs
-    # into as well as PATH: the session environment it is handed need not carry a PATH at
-    # all, and a bare name would then resolve against the OS default (#5491).
-    # meiva:link base/lm/harness/docs/harness.meiva.okf.md
-    def resolved_binary(
-        self,
-        environ: Mapping[str, str],
-        *,
-        bin_dirs: Sequence[str] | None = None,
-    ) -> str:
-        return resolve_harness_binary(self.binary, path_env=environ.get("PATH"), bin_dirs=bin_dirs)
 
     def command(self, binary: str | None = None) -> tuple[str, ...]:
         return (binary or self.binary, "app-server", "--listen", "stdio://", *self.extra_args)
