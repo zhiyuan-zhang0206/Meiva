@@ -199,7 +199,26 @@ class UnderstandingBacklog(TypedDict):
     oldest_pending_age_seconds: float
 
 
+# meiva:note
+# One agent-watch round: the duties judged, how many were silent, how many messages the ladder sent,
+# and how many readings the host could not take. `blind` is a reading that was not available, never
+# a duty that was healthy; a round that emitted nothing is indistinguishable from a round that
+# judged nothing, which is why this name is declared rather than left to the round's own log line.
+# meiva:link base/events/docs/maintenance-payloads.meiva.okf.md
+class AgentWatchRound(TypedDict):
+    watched: int
+    silent: int
+    sent: int
+    blind: int
+
+
 EVENTS: dict[str, EventSpec] = {
+    "agent_watch_round": telemetry_event(
+        "agent_watch_round",
+        "one agent-watch round — duties judged, silent, woken, and unreadable",
+        payload=AgentWatchRound,
+        site="schedules/jobs/agent_watch.py:run_round (via emit_system_event)",
+    ),
     "ci_usage_daily": telemetry_event(
         "ci_usage_daily",
         "daily CI-minute reconciliation totals (C9)",

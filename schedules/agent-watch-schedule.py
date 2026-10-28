@@ -23,7 +23,7 @@ from functools import partial
 from zoneinfo import ZoneInfo
 
 from base.paths.home import resolve_meiva_home
-from schedules.jobs.agent_watch import run_round
+from schedules.jobs.agent_watch import EmitTally, run_round
 from schedules.jobs.catchup import cluster_timezone
 from schedules.jobs.entry import open_schedule_entry
 from schedules.jobs.loop import CronSchedule, Trigger, run_loop
@@ -54,7 +54,7 @@ def report_agent_from_environ(environ: Mapping[str, str]) -> int:
 
 
 def watch_once(
-    slot: datetime, _payload: str | None, *, inputs, report_agent: int, state_path
+    slot: datetime, _payload: str | None, *, inputs, report_agent: int, state_path, tally: EmitTally
 ) -> None:
     line = run_round(
         inputs=inputs,
@@ -62,6 +62,7 @@ def watch_once(
         state_path=state_path,
         now=datetime.now(UTC),
         process=_PROCESS_NAME,
+        tally=tally,
     )
     zone = ZoneInfo(cluster_timezone())
     print(f"[{slot.astimezone(zone):%Y-%m-%d %H:%M %Z}] {line}", flush=True)
@@ -78,6 +79,7 @@ if __name__ == "__main__":
             inputs=inputs,
             report_agent=report_agent_from_environ(os.environ),
             state_path=home / "run" / _STATE_FILE,
+            tally=EmitTally(),
         )
         if "--once" in sys.argv:
             watch(datetime.now(UTC), None)

@@ -13,7 +13,7 @@ from __future__ import annotations
 
 import json
 from collections.abc import Sequence
-from dataclasses import asdict
+from dataclasses import asdict, dataclass
 from datetime import datetime
 from pathlib import Path
 
@@ -32,10 +32,31 @@ from schedules.plans.agent_watch_rule import (
     watched_agents,
 )
 
-__all__ = ["EVENT_NAME", "observe", "read_state", "round_line", "run_round", "write_state"]
+__all__ = [
+    "EVENT_NAME",
+    "EmitTally",
+    "observe",
+    "read_state",
+    "round_line",
+    "run_round",
+    "write_state",
+]
 
 EVENT_NAME = "agent_watch_round"
 _FIRE_WINDOW = 20
+
+
+# meiva:note
+# Emit failures since this process started. A declared name is the fix for the failure that
+# shipped; a counter is the fix for it happening again quietly: the round's line carries the count,
+# so a monitor whose telemetry is dead reads as a monitor with a number on its line rather than as
+# a monitor with nothing to say. The composition root owns the tally and hands it in -- a module
+# keeps no state of its own, and the schedule's process is the thing whose lifetime the count
+# describes.
+@dataclass
+class EmitTally:
+    failures: int = 0
+
 
 _STATUS_AND_ACTIVE = (
     "SELECT status, extract(epoch FROM now() - last_active_at) / 60, "
@@ -141,6 +162,8 @@ def round_line(
     entries: Sequence[WatchedAgent],
     plans: Sequence[tuple[WatchedAgent, RoundPlan]],
     observations: dict[int, Observation],
+    *,
+    emit_failures: int = 0,
 ) -> str:
     silent = [entry.agent_id for entry, plan in plans if plan.reasons]
     blind = [agent_id for agent_id, item in observations.items() if item.blind]
@@ -152,6 +175,8 @@ def round_line(
         parts.append("silent_ids=" + ",".join(str(item) for item in silent))
     if blind:
         parts.append("blind_ids=" + ",".join(str(item) for item in blind))
+    if emit_failures:
+        parts.append(f"emit_failures={emit_failures}")
     return " ".join(parts)
 
 
@@ -166,6 +191,7 @@ def run_round(
     state_path: Path,
     now: datetime,
     process: str,
+    tally: EmitTally,
 ) -> str:
     entries = watched_agents()
     states = read_state(state_path)
@@ -193,7 +219,6 @@ def run_round(
             except Exception as exc:
                 notes.append(f"{entry.agent_id}: {action.kind} failed: {type(exc).__name__}: {exc}")
     write_state(state_path, states)
-    line = round_line(entries, plans, observations)
     try:
         emit_system_event(
             EVENT_NAME,
@@ -210,5 +235,9 @@ def run_round(
             home=inputs.home,
         )
     except Exception as exc:
-        notes.append(f"event emit failed: {type(exc).__name__}: {exc}")
+        tally.failures += 1
+        notes.append(
+            f"event emit failed ({tally.failures} since start): {type(exc).__name__}: {exc}"
+        )
+    line = round_line(entries, plans, observations, emit_failures=tally.failures)
     return " | ".join([line, *notes])
