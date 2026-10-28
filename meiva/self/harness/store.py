@@ -6,6 +6,7 @@ import tempfile
 from dataclasses import asdict
 from pathlib import Path
 
+from base.paths import harness_registrations_dir
 from meiva.self.harness.registration import (
     HarnessRegistration,
     RegistrationError,
@@ -88,6 +89,6 @@ class FileRegistrationStore:
 
 # meiva:note
 # The registration store of the Meiva home `home`: one JSON file per harness session under
-# `<home>/harness/registrations`.
+# `base.paths.harness_registrations_dir`, the owner of that path.
 def registration_store(home: Path) -> FileRegistrationStore:
-    return FileRegistrationStore(home / "harness" / "registrations")
+    return FileRegistrationStore(harness_registrations_dir(home=home))

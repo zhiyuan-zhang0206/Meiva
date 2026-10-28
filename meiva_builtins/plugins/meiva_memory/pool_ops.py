@@ -22,11 +22,15 @@ from typing import Any
 import yaml
 from dotenv import dotenv_values
 
+from base.paths import memory_dir
+
 RESERVED = {"MEMORY.md", "AGENTS.md", "index.md", "log.md"}
 
 
+# meiva:note
+# The memory pool of the Meiva home `home`: `base.paths.memory_dir`, the owner of that path.
 def pool_dir(home: Path) -> Path:
-    return home / "memory"
+    return memory_dir(home=home)
 
 
 # meiva:note
