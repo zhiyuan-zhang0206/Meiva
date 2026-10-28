@@ -17,6 +17,3 @@ exports = ["metrics.py"]
 
 [roots]
 "pool_ops.py" = { kinds = ["environ"], why = "Memory pool helper resolves MEIVA_MACHINE_NAME from process environment before falling back to home .env" }
-
-[debt.ambient-read]
-"written_notes.py#home pathlib.Path.expanduser" = 1

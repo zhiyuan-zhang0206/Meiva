@@ -6,4 +6,4 @@ exports = ["catalog.py", "harness_onboarding.py", "hostfs.py", "transport.py"]
 
 [roots]
 "harness_onboarding.py" = { kinds = ["clock", "home"], why = "multi-host harness onboarding CLI timestamps install records and backup directories and shortens local home paths in doctor output" }
-"hostfs.py" = { kinds = ["clock", "environ", "home"], why = "carried to the target machine and executed there before any Meiva settings exist; it expands the path variables ($DSH_HOME) and a `~` the way that machine's shell would, and names a backup with that machine's time, none of which the operator's Settings can know" }
+"hostfs.py" = { kinds = ["clock", "environ"], why = "carried to the target machine and executed there before any Meiva settings exist; it expands the path variables ($DSH_HOME) in that machine's environment and names a backup with that machine's time, neither of which the operator's Settings can know (the `~` it also expands arrives in the path it is handed, so the file does not read the home itself)" }

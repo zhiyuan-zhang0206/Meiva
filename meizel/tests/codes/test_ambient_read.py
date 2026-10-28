@@ -174,6 +174,61 @@ def test_the_same_calls_given_a_value_read_nothing(make_repo: RepoFactory, sourc
     assert acquired(make_repo, source) == []
 
 
+# meiva:note
+# `expanduser()` spends a home read only when the path is the function's own: a `~` inside a value
+# the caller named (a parameter, a local derived from one, a loop variable over one) is the
+# caller's string, and expanding it asks the world for nothing the caller did not already name.
+@pytest.mark.parametrize(
+    "source",
+    [
+        "from pathlib import Path\n\ndef f(path):\n    return Path(path).expanduser()\n",
+        "from pathlib import Path\n\ndef f(path):\n    p = Path(path)\n    return p.expanduser()\n",
+        "from pathlib import Path\n\ndef f(path):\n    return Path(str(path)).expanduser()\n",
+        "from pathlib import Path\n\ndef f(path):\n    return Path(f'{path}~').expanduser()\n",
+        (
+            "from pathlib import Path\n\ndef f(paths):\n"
+            "    return [Path(p).expanduser() for p in paths]\n"
+        ),
+        (
+            "from pathlib import Path\n\ndef f(items):\n    for p in items:\n"
+            "        yield Path(p).expanduser()\n"
+        ),
+    ],
+)
+def test_expanding_a_path_the_caller_named_reads_nothing(
+    make_repo: RepoFactory, source: str
+) -> None:
+    assert acquired(make_repo, source) == []
+
+
+# meiva:note
+# The read is still the function's own when nothing of the caller reaches the path: a literal, a
+# module global, `sys.argv`, or a parameter the function then rebinds from a value it builds.
+@pytest.mark.parametrize(
+    "source",
+    [
+        "from pathlib import Path\n\ndef f():\n    return Path('~/a').expanduser()\n",
+        "from pathlib import Path\n\nROOT = '~'\n\ndef f():\n    return Path(ROOT).expanduser()\n",
+        (
+            "import sys\nfrom pathlib import Path\n\ndef f():\n"
+            "    return Path(sys.argv[1]).expanduser()\n"
+        ),
+        (
+            "from pathlib import Path\n\ndef f(path):\n    p = Path(path)\n    q = p\n"
+            "    return q.expanduser()\n"
+        ),
+        (
+            "from pathlib import Path\n\ndef f(path):\n    path = Path('~')\n"
+            "    return path.expanduser()\n"
+        ),
+    ],
+)
+def test_a_path_the_function_builds_itself_still_reads_the_home(
+    make_repo: RepoFactory, source: str
+) -> None:
+    assert acquired(make_repo, source) == [("home", "pathlib.Path.expanduser")]
+
+
 @pytest.mark.parametrize(
     ("source", "expected"),
     [

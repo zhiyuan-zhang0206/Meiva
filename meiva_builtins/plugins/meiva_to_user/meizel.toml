@@ -7,6 +7,3 @@
 [purity]
 "__init__.py" = "strict"
 "_state.py" = "strict"
-
-[debt.ambient-read]
-"written.py#home pathlib.Path.expanduser" = 1
