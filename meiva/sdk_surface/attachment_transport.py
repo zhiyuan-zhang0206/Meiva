@@ -12,6 +12,7 @@ from pathlib import Path
 from typing import Any
 
 from base.lm.catalog import ModelCatalog
+from base.paths.expand import expand_home
 from meiva.sdk_surface import process_context
 from meiva.sdk_surface.pure.media.attach.attach_model import running_model
 from meiva.sdk_surface.pure.media.attach.attach_plan import (
@@ -22,7 +23,6 @@ from meiva.sdk_surface.pure.media.attach.attach_plan import (
 from meiva.sdk_surface.pure.media.attach.attach_request import (
     FileFacts,
     decide_media,
-    expand_home,
     file_facts,
     prepare_media,
     registers_in_turn,

@@ -1,9 +1,10 @@
 # meiva:note
 # `meiva/sdk_surface/pure/media/attach/{attach_model,attach_request}.py` unit tests: what a model
 # can receive and which members that gates, the steps of one registration around the read the shell
-# makes (the gate and validation, the home expansion, the decision over the file facts), what a
-# stat means and when the process registers inside a turn. Asserted by value over catalogs and facts the test
-# builds; the registration against a real file is covered by `meiva/tests/test_attachment_transport.py`.
+# makes (the gate and validation, the decision over the file facts), what a stat means and when the
+# process registers inside a turn. What a leading `~` means is `base.paths.expand`'s, tested beside
+# it. Asserted by value over catalogs and facts the test builds; the registration against a real
+# file is covered by `meiva/tests/test_attachment_transport.py`.
 
 from __future__ import annotations
 
@@ -28,7 +29,6 @@ from meiva.sdk_surface.pure.media.attach.attach_model import (
 from meiva.sdk_surface.pure.media.attach.attach_request import (
     FileFacts,
     decide_media,
-    expand_home,
     file_facts,
     prepare_media,
     registers_in_turn,
@@ -118,35 +118,6 @@ def test_a_path_that_is_neither_str_nor_path_and_a_label_that_is_not_a_str_are_r
         prepare_media(
             "a.png", label=cast(Any, 1), catalog=model_catalog, model=_MEDIA_MODEL, in_turn=True
         )
-
-
-@pytest.mark.parametrize(
-    ("path", "expected"),
-    [
-        ("~/out/result.png", Path("/home/the-agent/out/result.png")),
-        (Path("~/out/result.png"), Path("/home/the-agent/out/result.png")),
-        ("~//out/result.png", Path("/home/the-agent/out/result.png")),
-        ("~///etc/passwd", Path("/home/the-agent/etc/passwd")),
-        ("~/./out/result.png", Path("/home/the-agent/out/result.png")),
-        ("result.png", Path("result.png")),
-        ("/abs/result.png", Path("/abs/result.png")),
-    ],
-)
-def test_a_leading_tilde_expands_against_the_home_the_caller_read(
-    path: str | Path, expected: Path
-) -> None:
-    assert expand_home(path, user_home=Path("/home/the-agent")) == expected
-
-
-def test_a_bare_tilde_and_a_tilde_slash_are_the_home_itself() -> None:
-    home = Path("/home/the-agent")
-    assert expand_home("~", user_home=home) == home
-    assert expand_home("~/", user_home=home) == home
-
-
-def test_another_users_home_is_refused_rather_than_resolved() -> None:
-    with pytest.raises(ValueError, match="names another user's home"):
-        expand_home("~someone/result.png", user_home=Path("/home/the-agent"))
 
 
 @pytest.mark.parametrize(

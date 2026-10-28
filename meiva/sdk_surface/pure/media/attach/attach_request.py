@@ -1,10 +1,11 @@
 # meiva:note
 # One media registration (`meiva.self.attach`) decided over values, around the one read the shell
 # makes (the file facts): `prepare_media` checks that the model can receive media at all and that
-# the request is well typed; `expand_home` places `~` under the home the caller read; `decide_media`
-# applies the refusals of `attach_plan.refusal` once the file facts are known and yields the entry
-# to record; `registers_in_turn` says whether the process may deliver at all. Nothing here reads or
-# writes the process.
+# the request is well typed; `base.paths.expand.expand_home` (the owner of what a leading `~` means)
+# places it under the home the caller read; `decide_media` applies the refusals of
+# `attach_plan.refusal` once the file facts are known and yields the entry to record;
+# `registers_in_turn` says whether the process may deliver at all. Nothing here reads or writes the
+# process.
 # meiva:link meiva/docs/sdk-surface/sdk-surface.meiva.okf.md
 
 from __future__ import annotations
@@ -59,26 +60,6 @@ def prepare_media(
         modalities=modalities,
         in_turn=in_turn,
     )
-
-
-# meiva:note
-# `path` (a str or a Path) with a leading `~` expanded against the user home its caller read, never
-# against the process's own: `~` and `~/...` become paths under that home (a doubled slash after the
-# tilde does not make the rest absolute), an absolute path is kept as it is and a relative one is
-# left for `resolve_in` to place under the base. A `~user` spelling names another account's home,
-# which a registration does not read, so it is refused.
-def expand_home(path: str | Path, *, user_home: Path) -> Path:
-    raw = path if isinstance(path, str) else str(path)
-    if raw == "~":
-        return user_home
-    if raw.startswith("~/"):
-        return user_home / raw[2:].lstrip("/")
-    if raw.startswith("~"):
-        raise ValueError(
-            f"attachment path {raw!r} names another user's home; "
-            "give an absolute path, or one starting with ~/ or ~"
-        )
-    return Path(raw)
 
 
 # meiva:note

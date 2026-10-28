@@ -38,6 +38,11 @@ and a call without `home=` is a `TypeError`. `workspace_dir`, `plugins_dir` and 
 create their own directory. `workspace_path(home, agent_id)` is the pure form of the workspace
 derivation, for a reader of another agent's workspace.
 
+`base/paths/expand.py` owns what a leading `~` in a path a person typed means: `expand_home(path,
+*, user_home)` turns `~` and `~/...` into paths under a home the caller read, keeps an absolute or
+relative path as written, and refuses `~user` (another account's home is not something an invocation
+reads). It is `strict` and reads no home of its own.
+
 All three process classes — gateway, agent, exec subprocess — inherit the same
 `MEIVA_HOME` variable; each entry resolves it once and hands the home down. **The home is the unit's
 identity**: a co-located gateway unit at `~/.meiva_gateway` and a runner unit at

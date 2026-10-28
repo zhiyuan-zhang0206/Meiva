@@ -558,3 +558,28 @@ def test_plugins_that_failed_to_load_are_named_and_their_panels_are_missing_from
 
 def _never_produced() -> EventPipeline:
     raise AssertionError("a successful render reports no event")
+
+
+# meiva:note
+# The native backends' storage root: a configured directory is this invocation's path, its leading
+# `~` expanded against the home the invocation read; an unset one is this home's own data dir.
+def test_the_configured_storage_root_expands_against_the_invocations_home(tmp_path: Path) -> None:
+    home, user_home = tmp_path / "home", tmp_path / "operator"
+
+    assert (
+        lgtm_native.storage_root("~/lgtm-data", home=home, user_home=user_home)
+        == (user_home / "lgtm-data").resolve()
+    )
+
+
+def test_an_unset_storage_root_is_this_homes_own_data_directory(tmp_path: Path) -> None:
+    home = tmp_path / "home"
+
+    assert lgtm_native.storage_root("", home=home, user_home=tmp_path / "operator") == (
+        home / "lgtm/native/data"
+    )
+
+
+def test_another_users_home_in_the_storage_root_is_refused(tmp_path: Path) -> None:
+    with pytest.raises(ValueError, match="names another user's home"):
+        lgtm_native.storage_root("~someone/lgtm", home=tmp_path, user_home=tmp_path)
