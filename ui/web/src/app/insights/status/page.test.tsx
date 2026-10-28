@@ -8,13 +8,18 @@
 // the api layer.
 
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { act, cleanup, render, screen, waitFor } from "@testing-library/react";
+import { act, cleanup, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { api } from "@/lib/transport/api";
 import type { SystemStatus } from "@/lib/contracts/types";
 
 import StatusPage from "./page";
+import { renderWithApi as render } from "@/test-support/render";
+import { resetTransport, transport } from "@/test-support/fake-api";
+beforeEach(() => {
+  resetTransport();
+});
+
 
 afterEach(cleanup);
 
@@ -126,7 +131,8 @@ const STATUS_OK: SystemStatus = {
 
 beforeEach(() => {
   vi.restoreAllMocks();
-  vi.spyOn(api, "getSystemStatus").mockResolvedValue(STATUS_OK);
+  resetTransport();
+  transport.getSystemStatus.mockResolvedValue(STATUS_OK);
 
 });
 
@@ -138,17 +144,17 @@ describe("StatusPage polling", () => {
       await act(async () => {
         await Promise.resolve();
       });
-      expect(api.getSystemStatus).toHaveBeenCalledTimes(1);
+      expect(transport.getSystemStatus).toHaveBeenCalledTimes(1);
 
       await act(async () => {
         await vi.advanceTimersByTimeAsync(14_999);
       });
-      expect(api.getSystemStatus).toHaveBeenCalledTimes(1);
+      expect(transport.getSystemStatus).toHaveBeenCalledTimes(1);
 
       await act(async () => {
         await vi.advanceTimersByTimeAsync(1);
       });
-      expect(api.getSystemStatus).toHaveBeenCalledTimes(2);
+      expect(transport.getSystemStatus).toHaveBeenCalledTimes(2);
     } finally {
       view.unmount();
       vi.useRealTimers();
@@ -158,7 +164,7 @@ describe("StatusPage polling", () => {
 
 describe("StatusPage states", () => {
   it("loading state shows a spinner (animate-spin)", async () => {
-    vi.spyOn(api, "getSystemStatus").mockReturnValue(
+    transport.getSystemStatus.mockReturnValue(
       new Promise(() => undefined /* never resolves */),
     );
     const { container } = wrap(<StatusPage />);
@@ -167,7 +173,7 @@ describe("StatusPage states", () => {
   });
 
   it("error state shows a quiet retry line, not the raw error", async () => {
-    vi.spyOn(api, "getSystemStatus").mockRejectedValue(new Error("status 500"));
+    transport.getSystemStatus.mockRejectedValue(new Error("status 500"));
     wrap(<StatusPage />);
     await waitFor(() => screen.getByText(/Couldn't reach the gateway/));
     expect(screen.queryByText(/status 500/)).toBeNull();
@@ -198,7 +204,7 @@ describe("StatusPage Services and Gateway sections", () => {
     staged.cluster.machines = staged.cluster.machines.map((m) =>
       m.name === "runner-a" ? { ...m, is_staging: true } : m,
     );
-    vi.spyOn(api, "getSystemStatus").mockResolvedValue(staged);
+    transport.getSystemStatus.mockResolvedValue(staged);
 
     wrap(<StatusPage />);
     await waitFor(() => screen.getByTestId("agent-runners-card"));
@@ -222,7 +228,7 @@ describe("StatusPage Services and Gateway sections", () => {
   });
 
   it("reachable runner with unknown status is amber, never green", async () => {
-    vi.spyOn(api, "getSystemStatus").mockResolvedValue({
+    transport.getSystemStatus.mockResolvedValue({
       ...STATUS_OK,
       cluster: {
         ...STATUS_OK.cluster,
@@ -239,7 +245,7 @@ describe("StatusPage Services and Gateway sections", () => {
   });
 
   it("stopped_at set → deliberate 'stopped', not 'offline'", async () => {
-    vi.spyOn(api, "getSystemStatus").mockResolvedValue({
+    transport.getSystemStatus.mockResolvedValue({
       ...STATUS_OK,
       cluster: {
         ...STATUS_OK.cluster,
@@ -277,7 +283,7 @@ describe("StatusPage Services and Gateway sections", () => {
   it("never renders a historical cluster pin or known-good anchor", async () => {
     // Nothing writes the pin any more; a payload still carrying frozen values
     // (an older gateway) must not present them as the cluster's current target.
-    vi.spyOn(api, "getSystemStatus").mockResolvedValue({
+    transport.getSystemStatus.mockResolvedValue({
       ...STATUS_OK,
       cluster: {
         ...STATUS_OK.cluster,
@@ -297,7 +303,7 @@ describe("StatusPage Services and Gateway sections", () => {
   });
 
   it("code drift renders ⚠ + the running sha", async () => {
-    vi.spyOn(api, "getSystemStatus").mockResolvedValue({
+    transport.getSystemStatus.mockResolvedValue({
       ...STATUS_OK,
       cluster: {
         ...STATUS_OK.cluster,
@@ -316,7 +322,7 @@ describe("StatusPage Services and Gateway sections", () => {
   });
 
   it("gateway daemon probe failure → health 'degraded'", async () => {
-    vi.spyOn(api, "getSystemStatus").mockResolvedValue({
+    transport.getSystemStatus.mockResolvedValue({
       ...STATUS_OK,
       cluster: {
         ...STATUS_OK.cluster,
@@ -331,7 +337,7 @@ describe("StatusPage Services and Gateway sections", () => {
   });
 
   it("current_paused=true → top paused marker", async () => {
-    vi.spyOn(api, "getSystemStatus").mockResolvedValue({
+    transport.getSystemStatus.mockResolvedValue({
       ...STATUS_OK,
       cluster: { ...STATUS_OK.cluster, current_paused: true },
     });
@@ -341,7 +347,7 @@ describe("StatusPage Services and Gateway sections", () => {
   });
 
   it("machines empty → empty-state copy", async () => {
-    vi.spyOn(api, "getSystemStatus").mockResolvedValue({
+    transport.getSystemStatus.mockResolvedValue({
       ...STATUS_OK,
       cluster: { ...STATUS_OK.cluster, machines: [] },
     });
@@ -351,7 +357,7 @@ describe("StatusPage Services and Gateway sections", () => {
   });
 
   it("gateway-only host does not render the no-host or agent-runners states", async () => {
-    vi.spyOn(api, "getSystemStatus").mockResolvedValue({
+    transport.getSystemStatus.mockResolvedValue({
       ...STATUS_OK,
       cluster: {
         ...STATUS_OK.cluster,
@@ -366,7 +372,7 @@ describe("StatusPage Services and Gateway sections", () => {
   });
 
   it("single-box host (both flags) appears as the gateway card AND a runner row", async () => {
-    vi.spyOn(api, "getSystemStatus").mockResolvedValue({
+    transport.getSystemStatus.mockResolvedValue({
       ...STATUS_OK,
       cluster: {
         ...STATUS_OK.cluster,
@@ -411,7 +417,7 @@ describe("StatusPage gateway section", () => {
   });
 
   it("services empty → shows 'No service data'", async () => {
-    vi.spyOn(api, "getSystemStatus").mockResolvedValue({
+    transport.getSystemStatus.mockResolvedValue({
       ...STATUS_OK,
       services: { items: [] },
     });

@@ -1,11 +1,16 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, cleanup, fireEvent, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { AgentArchive } from "./archive";
 import type { InnerProps } from "./types";
 import type { AgentRow } from "@/lib/contracts/types";
-import { api } from "@/lib/transport/api";
-vi.mock("@/lib/transport/api", () => ({ api: { listAgents: vi.fn() } }));
+import { renderWithApi as render } from "@/test-support/render";
+import { resetTransport, transport } from "@/test-support/fake-api";
+beforeEach(() => {
+  resetTransport();
+});
+
+
 vi.mock("next-intl", () => ({ useTranslations: () => (key: string) => key }));
 const props = {
   activeId: null,
@@ -48,7 +53,7 @@ function mount() { return render(<QueryClientProvider client={client}><AgentArch
 
 describe("bounded agent archive", () => {
   it("keeps one page, releases the previous page, and opens an ID directly", async () => {
-    vi.mocked(api.listAgents).mockImplementation(({ beforeId } = {}) => Promise.resolve(beforeId == null ? { agents: [row(10)], next_cursor: 10 } : { agents: [row(9)], next_cursor: null }));
+    transport.listAgents.mockImplementation(({ beforeId } = {}) => Promise.resolve(beforeId == null ? { agents: [row(10)], next_cursor: 10 } : { agents: [row(9)], next_cursor: null }));
     mount();
     await waitFor(() => expect(screen.getByText("#10")).toBeTruthy());
     fireEvent.click(screen.getByText("archiveOlder"));
@@ -57,12 +62,12 @@ describe("bounded agent archive", () => {
     await waitFor(() => expect(client.getQueryCache().findAll({ queryKey: ["agent-directory"] })).toHaveLength(1));
     fireEvent.click(screen.getByText("#9"));
     expect(props.onSelect).toHaveBeenCalledWith(9);
-    expect(api.listAgents).toHaveBeenLastCalledWith(expect.objectContaining({ scope: "terminated", beforeId: 10, limit: 50 }));
+    expect(transport.listAgents).toHaveBeenLastCalledWith(expect.objectContaining({ scope: "terminated", beforeId: 10, limit: 50 }));
   });
   it("changing search cancels the old request and cannot display its late result", async () => {
     let signal: AbortSignal | undefined;
     let finish!: (value: { agents: AgentRow[]; next_cursor: null }) => void;
-    vi.mocked(api.listAgents).mockImplementation(({ query, signal: requestSignal } = {}) => {
+    transport.listAgents.mockImplementation(({ query, signal: requestSignal } = {}) => {
       if (!query) { signal = requestSignal; return new Promise((resolve) => { finish = resolve; }); }
       return Promise.resolve({ agents: [row(22)], next_cursor: null });
     });

@@ -1,7 +1,6 @@
 import { cleanup, fireEvent, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { api } from "@/lib/transport/api";
 import type { ConfigView, ConfigWriteResult } from "@/lib/contracts/types";
 import {
   AGENT_RUNNER,
@@ -14,13 +13,14 @@ import {
   wrap,
 } from "./config-test-fixtures-mock";
 import ConfigPage from "./page";
+import { transport } from "@/test-support/fake-api";
 
 afterEach(cleanup);
 beforeEach(setupConfigTest);
 
 describe("ConfigPage text inline edit", () => {
   it("click edit enters edit mode → input has current value", async () => {
-    vi.spyOn(api, "getConfig").mockResolvedValue(VIEW);
+    transport.getConfig.mockResolvedValue(VIEW);
     wrap(<ConfigPage />);
     await waitFor(() => screen.getByTestId("edit-log_level"));
     fireEvent.click(screen.getByTestId("edit-log_level"));
@@ -29,9 +29,8 @@ describe("ConfigPage text inline edit", () => {
   });
 
   it("Enter commits → putConfig uses new value", async () => {
-    vi.spyOn(api, "getConfig").mockResolvedValue(VIEW);
-    const putSpy = vi
-      .spyOn(api, "putConfig")
+    transport.getConfig.mockResolvedValue(VIEW);
+    const putSpy = transport.putConfig
       .mockResolvedValue(OK_RESULT(["log_level"]));
     wrap(<ConfigPage />);
     await waitFor(() => screen.getByTestId("edit-log_level"));
@@ -48,9 +47,8 @@ describe("ConfigPage text inline edit", () => {
   });
 
   it("Escape cancels → putConfig not called", async () => {
-    vi.spyOn(api, "getConfig").mockResolvedValue(VIEW);
-    const putSpy = vi
-      .spyOn(api, "putConfig")
+    transport.getConfig.mockResolvedValue(VIEW);
+    const putSpy = transport.putConfig
       .mockResolvedValue(OK_RESULT([]));
     wrap(<ConfigPage />);
     await waitFor(() => screen.getByTestId("edit-log_level"));
@@ -65,9 +63,8 @@ describe("ConfigPage text inline edit", () => {
   });
 
   it("unchanged value commit → cancels, putConfig not called", async () => {
-    vi.spyOn(api, "getConfig").mockResolvedValue(VIEW);
-    const putSpy = vi
-      .spyOn(api, "putConfig")
+    transport.getConfig.mockResolvedValue(VIEW);
+    const putSpy = transport.putConfig
       .mockResolvedValue(OK_RESULT([]));
     wrap(<ConfigPage />);
     await waitFor(() => screen.getByTestId("edit-log_level"));
@@ -77,9 +74,8 @@ describe("ConfigPage text inline edit", () => {
   });
 
   it("int field edit → putConfig receives parseInt-converted number", async () => {
-    vi.spyOn(api, "getConfig").mockResolvedValue(VIEW);
-    const putSpy = vi
-      .spyOn(api, "putConfig")
+    transport.getConfig.mockResolvedValue(VIEW);
+    const putSpy = transport.putConfig
       .mockResolvedValue(OK_RESULT(["max_retries"]));
     wrap(<ConfigPage />);
     await waitFor(() => screen.getByTestId("edit-max_retries"));
@@ -100,8 +96,8 @@ describe("ConfigPage text inline edit", () => {
 
 describe("ConfigPage restart banner from write result", () => {
   it("no banner before any write; appears after write with restart targets", async () => {
-    vi.spyOn(api, "getConfig").mockResolvedValue(VIEW);
-    vi.spyOn(api, "putConfig").mockResolvedValue(
+    transport.getConfig.mockResolvedValue(VIEW);
+    transport.putConfig.mockResolvedValue(
       OK_RESULT(["log_level"], ["all"]),
     );
     wrap(<ConfigPage />);
@@ -122,7 +118,7 @@ describe("ConfigPage restart banner from write result", () => {
 
 describe("ConfigPage machine selector", () => {
   it("selector renders Cluster + every online machine, not offline", async () => {
-    vi.spyOn(api, "getConfig").mockResolvedValue(VIEW);
+    transport.getConfig.mockResolvedValue(VIEW);
     wrap(<ConfigPage />);
     const select = await waitFor(() =>
       screen.getByLabelText<HTMLSelectElement>("Machine"),
@@ -134,7 +130,7 @@ describe("ConfigPage machine selector", () => {
   });
 
   it("selecting agent-runner refetches getConfig with machine name", async () => {
-    const getSpy = vi.spyOn(api, "getConfig").mockResolvedValue(VIEW);
+    const getSpy = transport.getConfig.mockResolvedValue(VIEW);
     wrap(<ConfigPage />);
     const select = await waitFor(() =>
       screen.getByLabelText<HTMLSelectElement>("Machine"),
@@ -147,7 +143,7 @@ describe("ConfigPage machine selector", () => {
   });
 
   it("agent-runner view: host remote_writable field editable, cluster field read-only", async () => {
-    vi.spyOn(api, "getConfig").mockResolvedValue(VIEW);
+    transport.getConfig.mockResolvedValue(VIEW);
     wrap(<ConfigPage />);
     const select = await waitFor(() =>
       screen.getByLabelText<HTMLSelectElement>("Machine"),
@@ -158,7 +154,7 @@ describe("ConfigPage machine selector", () => {
   });
 
   it("agent-runner view: can_enable=false bool is disabled with reason", async () => {
-    vi.spyOn(api, "getConfig").mockResolvedValue(VIEW);
+    transport.getConfig.mockResolvedValue(VIEW);
     wrap(<ConfigPage />);
     const select = await waitFor(() =>
       screen.getByLabelText<HTMLSelectElement>("Machine"),
@@ -174,7 +170,7 @@ describe("ConfigPage machine selector", () => {
   });
 
   it("remote view shows edit-on-Cluster hint for non-host fields", async () => {
-    vi.spyOn(api, "getConfig").mockResolvedValue(VIEW);
+    transport.getConfig.mockResolvedValue(VIEW);
     wrap(<ConfigPage />);
     const select = await waitFor(() =>
       screen.getByLabelText<HTMLSelectElement>("Machine"),
@@ -187,8 +183,8 @@ describe("ConfigPage machine selector", () => {
   });
 
   it("PUT result with !ok field shows reason and reverts value", async () => {
-    vi.spyOn(api, "getConfig").mockResolvedValue(VIEW);
-    const putSpy = vi.spyOn(api, "putConfig").mockResolvedValue({
+    transport.getConfig.mockResolvedValue(VIEW);
+    const putSpy = transport.putConfig.mockResolvedValue({
       applied: false,
       results: {
         host_label: { ok: false, reason: "value rejected by host" },
@@ -226,8 +222,8 @@ describe("Fix 1 — onSettled invalidates written machine's query key", () => {
     const putInflight = new Promise<ConfigWriteResult>((res) => {
       resolvePut = res;
     });
-    vi.spyOn(api, "getConfig").mockResolvedValue(VIEW);
-    vi.spyOn(api, "putConfig").mockReturnValue(putInflight);
+    transport.getConfig.mockResolvedValue(VIEW);
+    transport.putConfig.mockReturnValue(putInflight);
 
     const qc = makeQc();
     const invalidateSpy = vi.spyOn(qc, "invalidateQueries");
@@ -298,7 +294,7 @@ describe("Fix 2 — capability reason hidden on non-editable rows", () => {
       raw_overrides: {},
       machine_capabilities: ["agent-runner"],
     };
-    vi.spyOn(api, "getConfig").mockResolvedValue(clusterBoolGated);
+    transport.getConfig.mockResolvedValue(clusterBoolGated);
 
     wrap(<ConfigPage />);
 
@@ -315,7 +311,7 @@ describe("Fix 2 — capability reason hidden on non-editable rows", () => {
 
 describe("ConfigPage per-model resolution view", () => {
   it("labels each row with the layer that produced its value", async () => {
-    vi.spyOn(api, "getConfig").mockResolvedValue(VIEW);
+    transport.getConfig.mockResolvedValue(VIEW);
     wrap(<ConfigPage />);
     await waitFor(() => screen.getByTestId("per-model-source-auto_compact_fraction"));
 
@@ -338,8 +334,8 @@ describe("ConfigPage per-model resolution view", () => {
   });
 
   it("shows a disabled loading placeholder before models resolve", async () => {
-    vi.spyOn(api, "getConfig").mockResolvedValue(VIEW);
-    vi.spyOn(api, "getModels").mockReturnValue(new Promise(() => undefined));
+    transport.getConfig.mockResolvedValue(VIEW);
+    transport.getModels.mockReturnValue(new Promise(() => undefined));
     wrap(<ConfigPage />);
 
     await screen.findByText("LOG LEVEL");
@@ -350,7 +346,7 @@ describe("ConfigPage per-model resolution view", () => {
   });
 
   it("shows the layers a value shadowed, and nothing when the floor itself won", async () => {
-    vi.spyOn(api, "getConfig").mockResolvedValue(VIEW);
+    transport.getConfig.mockResolvedValue(VIEW);
     wrap(<ConfigPage />);
     await waitFor(() => screen.getByTestId("per-model-shadowed-max_retries"));
 
@@ -366,7 +362,7 @@ describe("ConfigPage per-model resolution view", () => {
   });
 
   it("re-resolves when another model is picked", async () => {
-    vi.spyOn(api, "getConfig").mockResolvedValue(VIEW);
+    transport.getConfig.mockResolvedValue(VIEW);
     wrap(<ConfigPage />);
     await waitFor(() => screen.getByTestId("per-model-source-max_retries"));
 
@@ -375,12 +371,12 @@ describe("ConfigPage per-model resolution view", () => {
 
     fireEvent.change(select, { target: { value: "claude-opus-5" } });
     await waitFor(() =>
-      expect(vi.mocked(api.getResolvedConfig)).toHaveBeenCalledWith("claude-opus-5"),
+      expect(transport.getResolvedConfig).toHaveBeenCalledWith("claude-opus-5"),
     );
   });
 
   it("row link reveals its editor even when the filter had it hidden", async () => {
-    vi.spyOn(api, "getConfig").mockResolvedValue(VIEW);
+    transport.getConfig.mockResolvedValue(VIEW);
     wrap(<ConfigPage />);
     await waitFor(() => screen.getByTestId("per-model-goto-max_retries"));
 
@@ -408,7 +404,7 @@ describe("ConfigPage per-model resolution view", () => {
       "control.config.collapsedGroups",
       JSON.stringify(["config-llm"]),
     );
-    vi.spyOn(api, "getConfig").mockResolvedValue(VIEW);
+    transport.getConfig.mockResolvedValue(VIEW);
     wrap(<ConfigPage />);
     await screen.findByTestId("per-model-goto-max_retries");
     await waitFor(() =>
@@ -426,8 +422,8 @@ describe("ConfigPage per-model resolution view", () => {
   });
 
   it("flags a model that is not in the registry", async () => {
-    vi.spyOn(api, "getConfig").mockResolvedValue(VIEW);
-    vi.spyOn(api, "getResolvedConfig").mockResolvedValue({
+    transport.getConfig.mockResolvedValue(VIEW);
+    transport.getResolvedConfig.mockResolvedValue({
       ...RESOLVED,
       model: "some-unknown-model",
       registered: false,
@@ -439,16 +435,16 @@ describe("ConfigPage per-model resolution view", () => {
 
 describe("ConfigPage without a model catalog", () => {
   it("reports model failure while preserving ordinary configuration editing", async () => {
-    vi.spyOn(api, "getConfig").mockResolvedValue(VIEW);
-    vi.spyOn(api, "getModels").mockRejectedValue(new Error("provider private diagnostic"));
-    vi.spyOn(api, "getDefaultModel").mockRejectedValue(new Error("model unavailable"));
-    const put = vi.spyOn(api, "putConfig").mockResolvedValue(OK_RESULT(["log_level"]));
+    transport.getConfig.mockResolvedValue(VIEW);
+    transport.getModels.mockRejectedValue(new Error("provider private diagnostic"));
+    transport.getDefaultModel.mockRejectedValue(new Error("model unavailable"));
+    const put = transport.putConfig.mockResolvedValue(OK_RESULT(["log_level"]));
     wrap(<ConfigPage />);
     await screen.findByText("Model settings are unavailable. Check the gateway configuration and reload.");
     expect(screen.getByLabelText<HTMLSelectElement>("Model").disabled).toBe(true);
     expect(screen.queryByText("Loading…")).toBeNull();
     expect(screen.queryByText(/provider private diagnostic/)).toBeNull();
-    expect(api.getResolvedConfig).not.toHaveBeenCalled();
+    expect(transport.getResolvedConfig).not.toHaveBeenCalled();
     fireEvent.click(await screen.findByTestId("edit-log_level"));
     fireEvent.change(screen.getByTestId("input-log_level"), { target: { value: "DEBUG" } });
     fireEvent.keyDown(screen.getByTestId("input-log_level"), { key: "Enter" });

@@ -13,12 +13,15 @@ export function ApiProvider({ api, children }: { api: Api; children?: ReactNode 
   return <ApiContext.Provider value={api}>{children}</ApiContext.Provider>;
 }
 
-export function useApi(fallback?: Api): Api {
+// meiva:note
+// The one way a component or hook reaches the gateway: the transport is a value the page
+// hands down through <ApiProvider>, so a test renders the same provider with a fake and
+// nothing replaces the transport module. There is no fallback to the app's own client:
+// a missing provider is a composition error, and it says so.
+export function useApi(): Api {
   const api = useContext(ApiContext);
-  if (fallback !== undefined && typeof fallback.head !== "function") return fallback;
-  if (api !== null) return api;
-  if (fallback !== undefined) return fallback;
-  throw new Error("useApi must be used inside <ApiProvider>");
+  if (api === null) throw new Error("useApi must be used inside <ApiProvider>");
+  return api;
 }
 
 export function StreamHubProvider({ hub, children }: { hub: StreamHub; children: ReactNode }) {

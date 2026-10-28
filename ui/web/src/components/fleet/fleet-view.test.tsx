@@ -1,5 +1,5 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { cleanup, fireEvent, screen, waitFor, within } from "@testing-library/react";
 import type { ReactElement, ReactNode } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -63,21 +63,6 @@ const putSettingMock = vi.fn((key: string, value: unknown) => {
 // meiva:note
 // The embedded Inbox queue fetches notice history on mount; empty here.
 // meiva:link ui/web/src/docs/frontend-components/fleet-view.meiva.okf.md
-vi.mock("@/lib/transport/api", () => ({
-  api: {
-    getNotices: () =>
-      Promise.resolve({ open: [], awaiting: [], resolved_page: [], next_cursor: null }),
-    getSettings: () =>
-      Promise.resolve({
-        settings: Object.entries(storedSettings).map(([key, value]) => ({
-          key,
-          value,
-          updated_at: "2026-06-06T00:00:00Z",
-        })),
-      }),
-    putSetting: (key: string, value: unknown) => putSettingMock(key, value),
-  },
-}));
 
 // useInboxFeed needs EventStreamProvider; mock it away for fleet-view tests.
 // useNotices — the queue's single data contract; inject per-test via
@@ -120,6 +105,23 @@ vi.mock("@/lib/agents/use-all-pages", () => ({ useAllPages: () => [] }));
 
 import { BAR_HEIGHT_CLASS } from "@/lib/layout/layout";
 import { FleetView } from "./fleet-view";
+import { renderWithApi as render } from "@/test-support/render";
+import { resetTransport, transport } from "@/test-support/fake-api";
+beforeEach(() => {
+  resetTransport();
+  transport.getNotices.mockImplementation(() =>
+      Promise.resolve({ open: [], awaiting: [], resolved_page: [], next_cursor: null }));
+  transport.getSettings.mockImplementation(() =>
+      Promise.resolve({
+        settings: Object.entries(storedSettings).map(([key, value]) => ({
+          key,
+          value,
+          updated_at: "2026-06-06T00:00:00Z",
+        })),
+      }));
+  transport.putSetting.mockImplementation((key: string, value: unknown) => putSettingMock(key, value));
+});
+
 
 beforeEach(() => {
   storedSettings = {};

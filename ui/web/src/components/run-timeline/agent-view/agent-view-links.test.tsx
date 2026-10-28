@@ -1,6 +1,5 @@
-import type * as ApiModule from "@/lib/transport/api";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { cleanup, fireEvent, render as rtlRender, screen, waitFor, within } from "@testing-library/react";
+import { cleanup, fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { RunTimelineLink, RunTimelineNode, RunTimelineResponse, RunTimelineUnit } from "@/lib/contracts/types";
@@ -17,17 +16,26 @@ const { getRunTimeline, getRunTimelineLinks, getRunTimelineLinkContent, getAgent
     getSettings: vi.fn(),
   }));
 
-vi.mock("@/lib/transport/api", async (importOriginal) => ({
-  ...(await importOriginal<typeof ApiModule>()),
-  api: { getRunTimeline, getRunTimelineLinks, getRunTimelineLinkContent, getAgentRoster, getContextBreakdown, getRunTimelineContext, getRunTimelineMessages, getSettings },
-}));
-
 import AgentViewPage from "@/app/insights/run/[agents]/page";
 import { drawnLinks, itemX, mockCanvas, paintFrame } from "../canvas/run-timeline-test-canvas-mock";
 import { curveOf, curvePoint } from "../model/links/geometry";
 import { MAX_ARROWS } from "../model/links/cluster";
 import { LINK_COLORS } from "../model/links/resolve";
 import { viewportOf } from "../model/timeline-model-viewport";
+import { renderWithApi as rtlRender } from "@/test-support/render";
+import { resetTransport, transport } from "@/test-support/fake-api";
+beforeEach(() => {
+  resetTransport();
+  transport.getRunTimeline.mockImplementation(getRunTimeline);
+  transport.getRunTimelineLinks.mockImplementation(getRunTimelineLinks);
+  transport.getRunTimelineLinkContent.mockImplementation(getRunTimelineLinkContent);
+  transport.getAgentRoster.mockImplementation(getAgentRoster);
+  transport.getContextBreakdown.mockImplementation(getContextBreakdown);
+  transport.getRunTimelineContext.mockImplementation(getRunTimelineContext);
+  transport.getRunTimelineMessages.mockImplementation(getRunTimelineMessages);
+  transport.getSettings.mockImplementation(getSettings);
+});
+
 
 const T0 = Date.parse("2026-10-04T12:00:00.000Z");
 const at = (minutes: number) => new Date(T0 + minutes * 60_000).toISOString();

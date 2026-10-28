@@ -7,20 +7,33 @@
 // warm cache paints the capture in the first commit.
 
 import { notifyManager, QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import {
-  cleanup,
-  fireEvent,
-  render as rtlRender,
-  screen,
-  waitFor,
-} from "@testing-library/react";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { cleanup, fireEvent, screen, waitFor } from "@testing-library/react";
+import { beforeEach, afterEach, describe, expect, it, vi } from "vitest";
 
 import ShellMonitorPage from "@/app/shell/[agentId]/[sessionId]/page";
 import { USER_SETTING_DEFAULTS, type ShellCapture } from "@/lib/contracts/types";
 import { SETTINGS_QUERY_KEY } from "@/lib/state/use-user-settings";
 import { WallClockProvider } from "@/lib/transport/transport-context";
 import { resetMockSettings } from "@/test-support/user-settings-mock";
+import { renderWithApi as rtlRender } from "@/test-support/render";
+import { resetTransport, transport } from "@/test-support/fake-api";
+beforeEach(() => {
+  resetTransport();
+  transport.getAgentShell.mockImplementation(getAgentShell);
+  transport.getSettings.mockImplementation(() =>
+      Promise.resolve({
+        settings: Object.entries(storedSettings).map(([key, value]) => ({
+          key,
+          value,
+          updated_at: "2026-06-14T12:00:00Z",
+        })),
+      }));
+  transport.putSetting.mockImplementation((key: string, value: unknown) => {
+      storedSettings = { ...storedSettings, [key]: value };
+      return Promise.resolve({ key, value, updated_at: "2026-06-14T12:00:00Z" });
+    });
+});
+
 
 notifyManager.setScheduler((cb) => {
   cb();
@@ -30,23 +43,6 @@ let storedSettings: Record<string, unknown> = {};
 
 const { getAgentShell } = vi.hoisted(() => ({
   getAgentShell: vi.fn<(agentId: number, sessionId: number, lines?: number) => Promise<ShellCapture>>(),
-}));
-vi.mock("@/lib/transport/api", () => ({
-  api: {
-    getAgentShell,
-    getSettings: () =>
-      Promise.resolve({
-        settings: Object.entries(storedSettings).map(([key, value]) => ({
-          key,
-          value,
-          updated_at: "2026-06-14T12:00:00Z",
-        })),
-      }),
-    putSetting: (key: string, value: unknown) => {
-      storedSettings = { ...storedSettings, [key]: value };
-      return Promise.resolve({ key, value, updated_at: "2026-06-14T12:00:00Z" });
-    },
-  },
 }));
 
 const nav = vi.hoisted(() => ({

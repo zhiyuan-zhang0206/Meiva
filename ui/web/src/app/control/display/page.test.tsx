@@ -1,22 +1,17 @@
 // Display settings page tests — basic render verification.
 
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { cleanup, fireEvent, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { api } from "@/lib/transport/api";
 import { SETTINGS_QUERY_KEY } from "@/lib/state/use-user-settings";
 import DisplaySettingsPage from "./page";
+import { renderWithApi as render } from "@/test-support/render";
+import { resetTransport, transport } from "@/test-support/fake-api";
+beforeEach(() => {
+  resetTransport();
+});
 
-vi.mock("@/lib/transport/api", () => ({
-  api: {
-    getSettings: vi.fn(),
-    putSetting: vi.fn(),
-    getModels: vi.fn(),
-    getUiContributions: vi.fn(),
-    getNotificationCategories: vi.fn(),
-  },
-}));
 
 beforeEach(() => {
   window.innerWidth = 1024;
@@ -42,10 +37,10 @@ afterEach(cleanup);
 
 beforeEach(() => {
   vi.clearAllMocks();
-  vi.mocked(api.getSettings).mockResolvedValue({ settings: [] });
-  vi.mocked(api.getModels).mockResolvedValue({ providers: {}, models: {}, default: "" });
-  vi.mocked(api.getUiContributions).mockResolvedValue({ themes: [], nav: [], stats: [] });
-  vi.mocked(api.getNotificationCategories).mockResolvedValue({ categories: [] });
+  transport.getSettings.mockResolvedValue({ settings: [] });
+  transport.getModels.mockResolvedValue({ providers: {}, models: {}, default: "" });
+  transport.getUiContributions.mockResolvedValue({ themes: [], nav: [], stats: [] });
+  transport.getNotificationCategories.mockResolvedValue({ categories: [] });
 });
 
 async function replySuggestionsToggle(): Promise<HTMLButtonElement> {
@@ -59,10 +54,10 @@ async function replySuggestionsToggle(): Promise<HTMLButtonElement> {
 
 describe("DisplaySettingsPage", () => {
   it("offers All compact history and persists -1 in the settings cache", async () => {
-    vi.mocked(api.putSetting).mockResolvedValue({
+    transport.putSetting.mockResolvedValue({
       key: "display.compact_history_sessions", value: -1, updated_at: "2026-09-24T00:00:00Z",
     });
-    vi.mocked(api.getSettings).mockResolvedValueOnce({ settings: [] }).mockResolvedValue({
+    transport.getSettings.mockResolvedValueOnce({ settings: [] }).mockResolvedValue({
       settings: [{ key: "display.compact_history_sessions", value: -1, updated_at: "2026-09-24T00:00:00Z" }],
     });
     const { queryClient } = renderPage();
@@ -70,7 +65,7 @@ describe("DisplaySettingsPage", () => {
     expect(all.checked).toBe(false);
 
     fireEvent.click(all);
-    await waitFor(() => expect(api.putSetting).toHaveBeenCalledWith("display.compact_history_sessions", -1));
+    await waitFor(() => expect(transport.putSetting).toHaveBeenCalledWith("display.compact_history_sessions", -1));
     await waitFor(() => {
       expect(queryClient.getQueryData<Record<string, unknown>>(SETTINGS_QUERY_KEY)?.["display.compact_history_sessions"]).toBe(-1);
       expect(all.checked).toBe(true);
@@ -78,7 +73,7 @@ describe("DisplaySettingsPage", () => {
   });
 
   it("persists the clock format under display.clock_format", async () => {
-    vi.mocked(api.getSettings)
+    transport.getSettings
       .mockResolvedValueOnce({ settings: [] })
       .mockResolvedValue({
         settings: [
@@ -91,7 +86,7 @@ describe("DisplaySettingsPage", () => {
     expect(screen.getByLabelText<HTMLInputElement>("24-hour").checked).toBe(true);
 
     fireEvent.click(twelveHour);
-    await waitFor(() => expect(api.putSetting).toHaveBeenCalledWith("display.clock_format", "12h"));
+    await waitFor(() => expect(transport.putSetting).toHaveBeenCalledWith("display.clock_format", "12h"));
     await waitFor(() =>
       expect(
         queryClient.getQueryData<Record<string, unknown>>(SETTINGS_QUERY_KEY)?.[
@@ -102,7 +97,7 @@ describe("DisplaySettingsPage", () => {
   });
 
   it("persists the timezone-name switch under display.show_timezone", async () => {
-    vi.mocked(api.getSettings)
+    transport.getSettings
       .mockResolvedValueOnce({ settings: [] })
       .mockResolvedValue({
         settings: [
@@ -119,7 +114,7 @@ describe("DisplaySettingsPage", () => {
     expect(toggle.getAttribute("aria-checked")).toBe("false");
 
     fireEvent.click(toggle);
-    await waitFor(() => expect(api.putSetting).toHaveBeenCalledWith("display.show_timezone", true));
+    await waitFor(() => expect(transport.putSetting).toHaveBeenCalledWith("display.show_timezone", true));
     await waitFor(() =>
       expect(
         queryClient.getQueryData<Record<string, unknown>>(SETTINGS_QUERY_KEY)?.[
@@ -152,10 +147,10 @@ describe("DisplaySettingsPage", () => {
   });
 
   it("renders one switch per delivered category and writes the whole map", async () => {
-    vi.mocked(api.getSettings).mockResolvedValue({
+    transport.getSettings.mockResolvedValue({
       settings: [{ key: "notifications.categories", value: {}, updated_at: "2026-10-18T00:00:00Z" }],
     });
-    vi.mocked(api.getNotificationCategories).mockResolvedValue({
+    transport.getNotificationCategories.mockResolvedValue({
       categories: [
         {
           id: "core.needs_input",
@@ -166,7 +161,7 @@ describe("DisplaySettingsPage", () => {
         },
       ],
     });
-    vi.mocked(api.putSetting).mockResolvedValue({
+    transport.putSetting.mockResolvedValue({
       key: "notifications.categories", value: {}, updated_at: "2026-10-18T00:00:00Z",
     });
     renderPage();
@@ -180,14 +175,14 @@ describe("DisplaySettingsPage", () => {
 
     fireEvent.click(toggle);
     await waitFor(() =>
-      expect(api.putSetting).toHaveBeenCalledWith("notifications.categories", {
+      expect(transport.putSetting).toHaveBeenCalledWith("notifications.categories", {
         "core.needs_input": true,
       }),
     );
   });
 
   it("reply suggestions are on by default and the toggle persists the opt-out", async () => {
-    vi.mocked(api.putSetting).mockResolvedValue({
+    transport.putSetting.mockResolvedValue({
       key: "behavior.replySuggestions", value: false, updated_at: "2026-10-11T00:00:00Z",
     });
     renderPage();
@@ -196,11 +191,11 @@ describe("DisplaySettingsPage", () => {
     expect(toggle.getAttribute("aria-checked")).toBe("true");
 
     fireEvent.click(toggle);
-    await waitFor(() => expect(api.putSetting).toHaveBeenCalledWith("behavior.replySuggestions", false));
+    await waitFor(() => expect(transport.putSetting).toHaveBeenCalledWith("behavior.replySuggestions", false));
   });
 
   it("shows reply suggestions off when the stored value is false", async () => {
-    vi.mocked(api.getSettings).mockResolvedValue({
+    transport.getSettings.mockResolvedValue({
       settings: [{ key: "behavior.replySuggestions", value: false, updated_at: "2026-10-11T00:00:00Z" }],
     });
     renderPage();
@@ -210,7 +205,7 @@ describe("DisplaySettingsPage", () => {
   });
 
   it("treats a malformed show-terminated setting as opt-out", async () => {
-    vi.mocked(api.getSettings).mockResolvedValue({
+    transport.getSettings.mockResolvedValue({
       settings: [
         {
           key: "display.show_terminated",
@@ -237,7 +232,7 @@ describe("DisplaySettingsPage", () => {
   });
 
   it("renders no details selection while the settings row is still loading", async () => {
-    vi.mocked(api.getSettings).mockReturnValue(new Promise<never>(() => undefined));
+    transport.getSettings.mockReturnValue(new Promise<never>(() => undefined));
     renderPage();
 
     await waitFor(() => {
@@ -247,7 +242,7 @@ describe("DisplaySettingsPage", () => {
   });
 
   it("shows the composer context meter off by default and persists the opt-in", async () => {
-    vi.mocked(api.putSetting).mockResolvedValue({
+    transport.putSetting.mockResolvedValue({
       key: "display.composer_context_meter", value: true, updated_at: "2026-10-17T00:00:00Z",
     });
     renderPage();
@@ -260,7 +255,7 @@ describe("DisplaySettingsPage", () => {
 
     fireEvent.click(toggle!);
     await waitFor(() =>
-      expect(api.putSetting).toHaveBeenCalledWith("display.composer_context_meter", true),
+      expect(transport.putSetting).toHaveBeenCalledWith("display.composer_context_meter", true),
     );
   });
 
@@ -269,7 +264,7 @@ describe("DisplaySettingsPage", () => {
 
     fireEvent.click(await screen.findByRole("radio", { name: "Expand all blocks" }));
     await waitFor(() => {
-      expect(api.putSetting).toHaveBeenCalledWith("display.expand_runs_mode", "all");
+      expect(transport.putSetting).toHaveBeenCalledWith("display.expand_runs_mode", "all");
     });
   });
 
@@ -278,12 +273,12 @@ describe("DisplaySettingsPage", () => {
 
     fireEvent.click(await screen.findByRole("radio", { name: "Collapse all blocks" }));
     await waitFor(() => {
-      expect(api.putSetting).toHaveBeenCalledWith("display.expand_runs_mode", "none");
+      expect(transport.putSetting).toHaveBeenCalledWith("display.expand_runs_mode", "none");
     });
   });
 
   it("reads a stored details mode back into the row", async () => {
-    vi.mocked(api.getSettings).mockResolvedValue({
+    transport.getSettings.mockResolvedValue({
       settings: [
         {
           key: "display.expand_runs_mode",
@@ -316,7 +311,7 @@ describe("DisplaySettingsPage", () => {
     });
     fireEvent.click(screen.getByLabelText("Render thinking as markdown"));
     await waitFor(() => {
-      expect(api.putSetting).toHaveBeenCalledWith("display.render_reasoning_markdown", false);
+      expect(transport.putSetting).toHaveBeenCalledWith("display.render_reasoning_markdown", false);
     });
   });
 
@@ -351,7 +346,7 @@ describe("DisplaySettingsPage", () => {
     expect(slider.disabled).toBe(true);
     // Changing a disabled slider must not persist.
     fireEvent.change(slider, { target: { value: "0.6" } });
-    expect(api.putSetting).not.toHaveBeenCalled();
+    expect(transport.putSetting).not.toHaveBeenCalled();
   });
 
   it("desktop viewport → timeline max-width slider is enabled", async () => {
@@ -376,7 +371,7 @@ describe("DisplaySettingsPage", () => {
     fireEvent.change(slider, { target: { value: "0.6" } });
     expect(slider.value).toBe("0.6");
     await waitFor(() => {
-      expect(api.putSetting).toHaveBeenCalledWith("display.timeline_width_ratio", 0.6);
+      expect(transport.putSetting).toHaveBeenCalledWith("display.timeline_width_ratio", 0.6);
     });
   });
 });

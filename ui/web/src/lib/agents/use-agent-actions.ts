@@ -13,7 +13,7 @@ import type { AgentRoster, AgentRow, SpawnAgentRequest } from "../contracts/type
 import { AGENT_DETAIL_QUERY_KEY, AGENTS_QUERY_KEY } from "../fold/agents";
 import { useStore } from "../state/store";
 import { track } from "../telemetry/telemetry";
-import { ApiError, api } from "../transport/api";
+import { ApiError } from "../transport/api";
 import { useApi } from "../transport/transport-context";
 
 export type PendingAction = "restarting" | "terminating" | "resurrecting" | "compacting" | "expiring";
@@ -66,7 +66,7 @@ export function useAgentActions(
   showError: (msg: string) => void,
   agents: readonly AgentRow[],
 ): AgentActions {
-  const client = useApi(api);
+  const client = useApi();
   const queryClient = useQueryClient();
   const t = useTranslations("agentRow");
   const setActiveId = useStore((s) => s.setActiveId);

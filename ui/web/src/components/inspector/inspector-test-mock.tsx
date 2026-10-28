@@ -21,7 +21,9 @@ import type {
 import { useStore } from "@/lib/state/store";
 import { realNetwork, startGateway, type TestGateway } from "@/lib/transport/tests/api/api-provider";
 import { gatewayRig, type HttpRig } from "@/lib/transport/tests/api/api-provider";
+import type { Api } from "@/lib/transport/api";
 import { ApiProvider, WallClockProvider } from "@/lib/transport/transport-context";
+import { resetStreamHandlers, streamHandlers, TestStreamProvider } from "@/test-support/fake-stream";
 
 const SETTINGS_QUERY_KEY = ["user-settings"] as const;
 
@@ -62,6 +64,7 @@ export const getSettings = vi.fn(() =>
 
 let pageGateway: TestGateway;
 let pageRig: HttpRig;
+let pageApi: Api;
 let pageRows: readonly PageRow[];
 
 export function setInspectorPages(rows: readonly PageRow[]): void {
@@ -79,16 +82,15 @@ export function QueryClientProvider({ client, children }: { client: QueryClient;
   return (
     <TanstackQueryClientProvider client={client}>
       <WallClockProvider wallNow={() => Date.now()}>
-        <ApiProvider api={pageRig.api}>{children}</ApiProvider>
+        <ApiProvider api={pageApi}>
+          <TestStreamProvider>{children}</TestStreamProvider>
+        </ApiProvider>
       </WallClockProvider>
     </TanstackQueryClientProvider>
   );
 }
 
-export const streamHandlers = {
-  system: undefined as ((event: unknown) => void) | undefined,
-  connection: undefined as ((event: { type: string }) => void) | undefined,
-};
+export { streamHandlers };
 
 export const panelState = { open: true, hours: 24 as number | null };
 
@@ -126,6 +128,20 @@ export async function setupInspectorTest() {
       : { kind: "json", body: pageRows.filter((row) => row.agent_id === Number(match[1])) };
   });
   pageRig = gatewayRig(pageGateway);
+  // meiva:note
+  // The panel's own reads stay controllable `vi.fn()`s; the pages read stays on the rig, so
+  // a test can still inspect the requests it made. Both arrive through the provider.
+  pageApi = {
+    ...pageRig.api,
+    getAgentInspectStatistics,
+    getAgentInspectLive,
+    getAgentInspectWidgets,
+    getAgentRoster,
+    getAgent,
+    resolveNotice,
+    putSetting,
+    getSettings,
+  };
   window.innerWidth = 1024;
   setInspectorOpen(true);
   setInspectorHours(24);
@@ -149,8 +165,7 @@ export async function cleanupInspectorTest() {
   window.innerWidth = 1024;
   setInspectorOpen(true);
   setInspectorHours(24);
-  streamHandlers.system = undefined;
-  streamHandlers.connection = undefined;
+  resetStreamHandlers();
   await pageGateway.close();
 }
 

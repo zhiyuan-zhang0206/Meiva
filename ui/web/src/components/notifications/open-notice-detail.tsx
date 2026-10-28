@@ -7,7 +7,6 @@ import { ChatMarkdown } from "@/components/content/markdown";
 import { Button } from "@/components/ui/button";
 import { AutoExpandTextarea } from "@/components/ui/auto-expand-textarea";
 import { SendButton } from "@/components/ui/send-button";
-import { api } from "@/lib/transport/api";
 import { newOperationKey } from "@/lib/transport/operation-key";
 import { errMsg } from "@/lib/contracts/errors";
 import { PRIORITY_BG } from "@/lib/notifications/notices";
@@ -18,6 +17,7 @@ import { cn } from "@/lib/format/utils";
 import { FLEX, FLEX_1 } from "@/lib/layout/layout";
 
 import { NoticeQuestionForm } from "./notice-question-form";
+import { useApi } from "@/lib/transport/transport-context";
 
 export function OpenNoticeDetail({
   agentId,
@@ -36,6 +36,7 @@ export function OpenNoticeDetail({
   showTimestamp?: boolean;
   className?: string;
 }) {
+  const client = useApi();
   const t = useTranslations("noticeDetail");
   const { formatAbsolute } = useTimeFormat();
   const [reply, setReply] = useState("");
@@ -68,7 +69,7 @@ export function OpenNoticeDetail({
       }
       // Retain this intent's key after failure so a manual retry recovers its
       // original reply. A changed action/body/target starts a distinct intent.
-      await api.resolveNotice(agentId, notice.id, body, attempt.current.key);
+      await client.resolveNotice(agentId, notice.id, body, attempt.current.key);
       setReply("");
       onResolved?.();
     } catch (e: unknown) {

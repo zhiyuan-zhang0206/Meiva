@@ -4,7 +4,8 @@
 
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { act, cleanup, screen } from "@testing-library/react";
-import { render } from "@/lib/transport/tests/wall-clock-render";
+import { render as wallClockRender } from "@/lib/transport/tests/wall-clock-render";
+import { ApiTestProvider } from "@/test-support/fake-api";
 import type { ReactElement } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -18,7 +19,9 @@ function renderWithQuery(ui: ReactElement) {
     defaultOptions: { queries: { retry: false } },
   });
   qc.setQueryData(["user-settings"], { "display.show_timestamp_weekday": true });
-  return render(<QueryClientProvider client={qc}>{ui}</QueryClientProvider>);
+  return wallClockRender(<QueryClientProvider client={qc}>{ui}</QueryClientProvider>, {
+    wrapper: ApiTestProvider,
+  });
 }
 
 function setLive(overrides: Partial<LiveCompact> = {}) {

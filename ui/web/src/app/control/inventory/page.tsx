@@ -42,7 +42,6 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
-import { api } from "@/lib/transport/api";
 import { errMsg } from "@/lib/contracts/errors";
 import { useStore } from "@/lib/state/store";
 import type {
@@ -55,6 +54,7 @@ import type {
 import { useSectionVisible } from "../visibility";
 import { FLEX } from "@/lib/layout/layout";
 import { cn } from "@/lib/format/utils";
+import { useApi } from "@/lib/transport/transport-context";
 
 const INVENTORY_QUERY_KEY = ["inventory"] as const;
 
@@ -96,6 +96,7 @@ interface InventoryController {
 // Shared query + write plumbing for both inventory sections. Gated to on-screen
 // time (`enabled: visible`) so an off-screen Plugins/MCP section stops fetching.
 function useInventoryController(): InventoryController {
+  const client = useApi();
   const t = useTranslations("inventory");
   const qc = useQueryClient();
   const showToast = useStore((s) => s.showToast);
@@ -103,7 +104,7 @@ function useInventoryController(): InventoryController {
 
   const { data, isLoading, error } = useQuery({
     queryKey: INVENTORY_QUERY_KEY,
-    queryFn: api.getInventory,
+    queryFn: client.getInventory,
     enabled: visible,
   });
 
@@ -113,7 +114,7 @@ function useInventoryController(): InventoryController {
         kind === "plugin"
           ? { plugins: { [name]: enabled } }
           : { mcp_servers: { [name]: enabled } };
-      return api.putInventory(body, machine);
+      return client.putInventory(body, machine);
     },
     onSuccess: (result: InventoryWriteResult) => {
       if (!result.applied) {

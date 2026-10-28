@@ -7,11 +7,10 @@
 // away from itself.
 
 import { cleanup, render } from "@testing-library/react";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it } from "vitest";
 
 import { PluginPageFrame } from "@/components/plugins/plugin-page-frame";
 
-vi.mock("@/lib/transport/api", () => ({ API_BASE: "http://gateway.test:8000" }));
 
 afterEach(cleanup);
 
@@ -27,13 +26,13 @@ function frame(page: string): HTMLIFrameElement {
 describe("PluginPageFrame", () => {
   it("loads the page from the plugin's own gateway mount", () => {
     expect(frame("board/").getAttribute("src")).toBe(
-      "http://gateway.test:8000/api/plugin-ui/board/board/",
+      "http://localhost:8000/api/plugin-ui/board/board/",
     );
   });
 
   it("percent-encodes each path segment without eating the separators", () => {
     expect(frame("a b/c.html").getAttribute("src")).toBe(
-      "http://gateway.test:8000/api/plugin-ui/board/a%20b/c.html",
+      "http://localhost:8000/api/plugin-ui/board/a%20b/c.html",
     );
   });
 

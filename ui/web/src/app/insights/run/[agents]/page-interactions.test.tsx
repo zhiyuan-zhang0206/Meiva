@@ -1,7 +1,6 @@
-import type * as ApiModule from "@/lib/transport/api";
 import { WallClockProvider } from "@/lib/transport/transport-context";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { act, fireEvent, render as rtlRender, screen, waitFor, within } from "@testing-library/react";
+import { act, fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { ContextBreakdownResponse, RunTimelineContext, RunTimelineLinks, RunTimelineMessages, RunTimelineResponse, UserSettingListResponse } from "@/lib/contracts/types";
 const { getRunTimeline, getRunTimelineMessages, getRunTimelineContext, getRunTimelineLinks, getAgentRoster, getSettings, getContextBreakdown } =
@@ -14,14 +13,24 @@ const { getRunTimeline, getRunTimelineMessages, getRunTimelineContext, getRunTim
     getRunTimelineLinks: vi.fn<(agents: readonly number[], window: { from: string; to: string }) => Promise<RunTimelineLinks>>(),
     getAgentRoster: vi.fn(),
   }));
-vi.mock("@/lib/transport/api", async (importOriginal) => ({
-  ...(await importOriginal<typeof ApiModule>()),
-  api: { getRunTimeline, getRunTimelineMessages, getRunTimelineContext, getRunTimelineLinks, getAgentRoster, getSettings, getContextBreakdown },
-}));
+
 import { clickAt, drawn, itemX, leave, look, mockCanvas, paintFrame, pointAt } from "@/components/run-timeline/canvas/run-timeline-test-canvas-mock";
 import RunTimelinePage from "./page";
 import Loading from "./loading";
 import { cbdFixture, lifetimeResponse, messagesResponse } from "./run-timeline-test-fixtures-mock";
+import { renderWithApi as rtlRender } from "@/test-support/render";
+import { resetTransport, transport } from "@/test-support/fake-api";
+beforeEach(() => {
+  resetTransport();
+  transport.getRunTimeline.mockImplementation(getRunTimeline);
+  transport.getRunTimelineMessages.mockImplementation(getRunTimelineMessages);
+  transport.getRunTimelineContext.mockImplementation(getRunTimelineContext);
+  transport.getRunTimelineLinks.mockImplementation(getRunTimelineLinks);
+  transport.getAgentRoster.mockImplementation(getAgentRoster);
+  transport.getSettings.mockImplementation(getSettings);
+  transport.getContextBreakdown.mockImplementation(getContextBreakdown);
+});
+
 const wallNow = () => Date.now();
 function render({ contextSize = true }: { contextSize?: boolean } = {}) {
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });

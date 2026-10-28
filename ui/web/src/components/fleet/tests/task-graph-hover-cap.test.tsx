@@ -1,5 +1,5 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, cleanup, fireEvent, screen, waitFor } from "@testing-library/react";
 import { type ReactElement } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -8,6 +8,13 @@ import type { TasksResult } from "@/lib/notifications/use-tasks";
 import { resetMockSettings } from "@/test-support/user-settings-mock";
 
 import { TaskGraph } from "../task-graph";
+import { renderWithApi as render } from "@/test-support/render";
+import { resetTransport, transport } from "@/test-support/fake-api";
+beforeEach(() => {
+  resetTransport();
+  transport.getTask.mockImplementation((id: number) => getTask(id));
+});
+
 
 const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
 const wrapGraph = (ui: ReactElement) => (
@@ -21,10 +28,6 @@ vi.mock("next/navigation", () => ({
 }));
 
 const getTask = vi.fn<(id: number) => Promise<TaskRow>>();
-vi.mock("@/lib/transport/api", async (importOriginal) => {
-  const original = await importOriginal<{ api: Record<string, unknown> }>();
-  return { ...original, api: { ...original.api, getTask: (id: number) => getTask(id) } };
-});
 
 const useTasks = vi.fn<(...args: string[]) => TasksResult>();
 vi.mock("@/lib/notifications/use-tasks", () => ({

@@ -26,7 +26,8 @@ import { PendingStrip } from "@/components/conversation/pending-strip";
 import { UploadButton } from "@/components/conversation/upload-button";
 import { TimelineView } from "@/components/timeline";
 import { Button } from "@/components/ui/button";
-import { api, MessageDeliveryUnknownError } from "@/lib/transport/api";
+import { MessageDeliveryUnknownError } from "@/lib/transport/api";
+import { useApi } from "@/lib/transport/transport-context";
 import { errMsg } from "@/lib/contracts/errors";
 import { useInspectorOpen } from "@/lib/inspector/inspector-panel-store";
 import { useBreakpoint } from "@/lib/layout/breakpoint";
@@ -80,6 +81,7 @@ interface HomeShellProps {
 }
 
 function HomeShell({ showError }: HomeShellProps) {
+  const client = useApi();
   const focusComposer = useStore((s) => s.focusComposer);
   const { isNarrow, isLarge } = useBreakpoint();
   const {
@@ -152,7 +154,7 @@ function HomeShell({ showError }: HomeShellProps) {
     queryKey: ["agent-pages", activeId] as const,
     queryFn: () => {
       if (activeId == null) throw new Error("pages preload: activeId is null");
-      return api.listPages(activeId);
+      return client.listPages(activeId);
     },
     enabled: activeId != null,
     staleTime: 10_000,
@@ -235,6 +237,7 @@ function HomeContent({
   contextPanelOpen,
   openContextPanel,
 }: HomeContentProps) {
+  const client = useApi();
   const t = useTranslations("common");
   const timelineText = useTranslations("timeline");
   const composerFocusToken = useStore((s) => s.composerFocusToken);
@@ -265,14 +268,14 @@ function HomeContent({
       setUploadCount(files.length);
       setUploadError(null);
       try {
-        await api.submitUploadedFiles(activeId, files, newOperationKey(), setUploadProgress);
+        await client.submitUploadedFiles(activeId, files, newOperationKey(), setUploadProgress);
       } catch (e: unknown) {
         setUploadError(errMsg(e));
       } finally {
         setUploading(false);
       }
     },
-    [activeId],
+    [activeId, client],
   );
 
   const { items, compactBuffer, streamingCode, turnActive, hasMoreOlder, loadingOlder, loadOlder, isLoading, retainedItemsMax, error: timelineError, isFetching, loadingNewer, retryTimeline } =
@@ -296,12 +299,12 @@ function HomeContent({
       if (activeId == null) return false;
       try {
         if (imageUrls.length === 0) {
-          await api.sendMessage(activeId, content, clientMessageId);
+          await client.sendMessage(activeId, content, clientMessageId);
         } else {
           const blocks: ContentBlock[] = [];
           if (content) blocks.push({ type: "text", text: content });
           for (const u of imageUrls) blocks.push({ type: "image_url", image_url: { url: u } });
-          await api.sendMessage(activeId, blocks, clientMessageId);
+          await client.sendMessage(activeId, blocks, clientMessageId);
         }
         requestScrollToBottom();
         return true;
@@ -314,26 +317,26 @@ function HomeContent({
         return false;
       }
     },
-    [activeId, showError, requestScrollToBottom, t],
+    [activeId, client, showError, requestScrollToBottom, t],
   );
 
   const attachImage = useCallback(
     async (file: File): Promise<string> => {
       if (activeId == null) throw new Error("no active agent");
-      const batch = await api.uploadFiles(activeId, [file]);
+      const batch = await client.uploadFiles(activeId, [file]);
       return batch.files[0].url;
     },
-    [activeId],
+    [activeId, client],
   );
 
   const handleStop = useCallback(async () => {
     if (activeId == null) return;
     try {
-      await api.cancel(activeId);
+      await client.cancel(activeId);
     } catch (e: unknown) {
       showError(`Cancel failed: ${errMsg(e)}`);
     }
-  }, [activeId, showError]);
+  }, [activeId, client, showError]);
 
   // meiva:note
   // The bar names the agent in every mode, Inspector included: the mode changes what the

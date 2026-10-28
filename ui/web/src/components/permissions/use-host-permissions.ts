@@ -2,15 +2,16 @@
 
 import { useQuery } from "@tanstack/react-query";
 
-import { api } from "@/lib/transport/api";
 import type { HostPermissionsPayload } from "@/lib/contracts/types";
+import { useApi } from "@/lib/transport/transport-context";
 
 export const HOST_PERMISSIONS_QUERY_KEY = ["host-permissions"] as const;
 
 export function useHostPermissions() {
+  const client = useApi();
   return useQuery({
     queryKey: HOST_PERMISSIONS_QUERY_KEY,
-    queryFn: ({ signal }) => api.getHostPermissions(signal),
+    queryFn: ({ signal }) => client.getHostPermissions(signal),
     staleTime: 60_000,
     refetchOnWindowFocus: false,
     retry: false,

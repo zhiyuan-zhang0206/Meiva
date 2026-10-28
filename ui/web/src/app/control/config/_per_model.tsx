@@ -4,7 +4,6 @@ import { useQuery } from "@tanstack/react-query";
 import { useTranslations } from "next-intl";
 import { useState } from "react";
 
-import { api } from "@/lib/transport/api";
 import { groupedModels, providerLabel } from "@/lib/contracts/models";
 import type { ResolvedFieldView } from "@/lib/contracts/types";
 
@@ -12,6 +11,7 @@ import { fieldLabel, formatConfigValue } from "../config-groups";
 import { useSectionVisible } from "../visibility";
 import { FLEX, FLEX_1, MIN_W_0 } from "@/lib/layout/layout";
 import { cn } from "@/lib/format/utils";
+import { useApi } from "@/lib/transport/transport-context";
 
 const MODELS_QUERY_KEY = ["models"] as const;
 const resolvedQueryKey = (model: string) => ["config-resolved", model] as const;
@@ -45,13 +45,14 @@ export function PerModelPanel({
 
   onFocusField: (name: string) => void;
 }) {
+  const client = useApi();
   const t = useTranslations("config");
   const visible = useSectionVisible();
   const [picked, setPicked] = useState<string | null>(null);
 
   const models = useQuery({
     queryKey: MODELS_QUERY_KEY,
-    queryFn: () => api.getModels(),
+    queryFn: () => client.getModels(),
     staleTime: Infinity,
     enabled: visible,
   });
@@ -60,7 +61,7 @@ export function PerModelPanel({
 
   const resolved = useQuery({
     queryKey: resolvedQueryKey(model),
-    queryFn: () => api.getResolvedConfig(model),
+    queryFn: () => client.getResolvedConfig(model),
     enabled: visible && !models.error && model !== "",
   });
 
