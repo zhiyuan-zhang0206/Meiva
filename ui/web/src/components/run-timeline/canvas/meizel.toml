@@ -1,10 +1,14 @@
-exports = ["run-timeline-axis.tsx", "run-timeline-canvas.tsx", "run-timeline-links-canvas.tsx", "run-timeline-paint.ts", "run-timeline-test-canvas-mock.ts"]
+exports = ["paint-key.ts", "resolve-color.ts", "run-timeline-axis.tsx", "run-timeline-canvas.tsx", "run-timeline-links-canvas.tsx", "run-timeline-paint.ts", "run-timeline-test-canvas-mock.ts"]
 
 [uses]
-"run-timeline-canvas.tsx" = ["run-timeline-paint.ts"]
+"paint-key.test.ts" = ["paint-key.ts", "run-timeline-paint.ts"]
+"paint-key.ts" = ["run-timeline-paint.ts"]
+"resolve-color.ts" = ["run-timeline-paint.ts"]
+"run-timeline-canvas.tsx" = ["resolve-color.ts", "run-timeline-paint.ts"]
+"run-timeline-links-canvas.tsx" = ["resolve-color.ts"]
 
 [debt.ambient-read]
-"run-timeline-canvas.tsx#platform window.matchMedia" = 1
+"resolve-color.ts#platform window.matchMedia" = 1
 
 [debt.stdlib-patch]
 "run-timeline-test-canvas-mock.ts#vi.spyOn HTMLCanvasElement.prototype.getContext" = 1

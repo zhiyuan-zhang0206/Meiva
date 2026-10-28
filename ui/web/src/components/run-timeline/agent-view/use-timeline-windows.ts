@@ -49,6 +49,11 @@ function sameWindow(a: RequestedWindow, b: RequestedWindow) {
   return a.id === b.id && a.snapshot === b.snapshot && a.range.from === b.range.from && a.range.to === b.range.to;
 }
 
+// meiva:note
+// The page hands down a freshly built viewport object on every render, and this settled the rows onto
+// a new one 80 ms later even when its bounds had not moved: a second full render of every row per
+// keystroke of a zoom, for nothing (task #5712). The bounds are what the rows read, so they are what
+// decides whether there is anything to hand over.
 function useRequestView(viewport: Viewport | null) {
   const [view, setView] = useState(viewport);
   const latest = useRef(viewport);
@@ -58,7 +63,9 @@ function useRequestView(viewport: Viewport | null) {
     if (timer.current !== null) return;
     timer.current = setTimeout(() => {
       timer.current = null;
-      setView(latest.current);
+      const next = latest.current;
+      if (next === null) return;
+      setView((previous) => (previous !== null && previous.from === next.from && previous.to === next.to ? previous : next));
     }, 80);
   }, [viewport]);
   useEffect(() => () => {

@@ -144,6 +144,17 @@ THEME_TOKENS = (
     "--strip-compact",
     "--strip-prompt",
     "--strip-other",
+    # meiva:note
+    # run-timeline arrow kinds (task #5712): one token per kind, drawn over the chart's card, so a skin
+    # that repaints the surfaces repaints these too.
+    "--link-message",
+    "--link-user",
+    "--link-spawn",
+    "--link-fork",
+    "--link-terminate",
+    "--link-restart",
+    "--link-resurrect",
+    "--link-notice",
     "--sidebar",
     "--sidebar-foreground",
     "--sidebar-primary",

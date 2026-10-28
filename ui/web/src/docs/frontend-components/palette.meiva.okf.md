@@ -48,6 +48,18 @@ table): body text 15.6:1 on the canvas, muted text 8.0:1 on the canvas and 6.0:1
 a popover, popover text 11.7:1, sidebar text 14.8:1; ladder steps canvas-to-card
 1.17:1, canvas-to-popover 1.34:1, canvas-to-sidebar 1.06:1.
 
+## The run-timeline arrow tokens
+
+`--link-message`, `--link-user`, `--link-spawn`, `--link-fork`, `--link-terminate`,
+`--link-restart`, `--link-resurrect`, `--link-notice` — one per arrow kind
+(`LINK_COLORS`). Both blocks keep every kind at 4.5:1 or better against that
+theme's `--card`, because an arrow is a 1.6 px line drawn straight over it; the
+fixed hexes these replaced measured 1.4-3.1:1 once the canvas alpha was applied,
+which read as fog (task #5712, user report). The light block uses the 600/700
+shades and the dark block the 300/400 ones: same hue, re-tuned per surface, the
+way `--series-*` already works. `ui/web/src/app/link-palette.test.ts` holds the
+floor and the one-color-per-kind rule.
+
 ## Two component rules that ride along
 
 Neither is cosmetic, and neither is fixed by choosing colours:

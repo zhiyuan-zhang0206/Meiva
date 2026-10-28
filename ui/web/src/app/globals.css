@@ -86,6 +86,17 @@
   --series-3: #1baf7a;
   --series-4: #eda100;
   --series-5: #e34948;
+  /* run-timeline arrow kinds (one token per kind, see LINK_COLORS): drawn as 1.6 px
+     curves over the card, so each one keeps at least 4.5:1 against it. Paired 1:1
+     with the dark block below; keep the two in sync. */
+  --link-message: #1d4ed8;
+  --link-user: #78350f;
+  --link-spawn: #15803d;
+  --link-fork: #0f766e;
+  --link-terminate: #b91c1c;
+  --link-restart: #b45309;
+  --link-resurrect: #7e22ce;
+  --link-notice: #be185d;
   /* raw-context strip part colors (P4-2, task #4023): the demo timeline's
      palette, remapped onto theme variables. Keep the light/dark pair in
      sync. */
@@ -162,6 +173,14 @@
   --series-3: #199e70;
   --series-4: #c98500;
   --series-5: #e66767;
+  --link-message: #60a5fa;
+  --link-user: #d19a5e;
+  --link-spawn: #4ade80;
+  --link-fork: #2dd4bf;
+  --link-terminate: #f87171;
+  --link-restart: #fbbf24;
+  --link-resurrect: #c084fc;
+  --link-notice: #f472b6;
   --strip-think: rgb(96 165 250 / 55%);
   --strip-text: rgb(16 185 129 / 62%);
   --strip-call: rgb(6 182 212 / 75%);

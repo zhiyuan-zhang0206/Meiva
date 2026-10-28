@@ -286,7 +286,10 @@ describe("selecting", () => {
 });
 
 // meiva:link ui/web/src/docs/frontend-components/run-timeline/axis-and-keyboard.meiva.okf.md
-function wheel(target: Element, init: WheelEventInit, count = 1) {
+// meiva:note
+// The chart applies one viewport update per animation frame (task #5712), so a gesture lands on the next
+// frame rather than inside the dispatch: awaiting here is what a browser frame does for a person.
+async function wheel(target: Element, init: WheelEventInit, count = 1) {
   act(() => {
    for (let i = 0; i < count; i++) {
 
@@ -298,6 +301,7 @@ function wheel(target: Element, init: WheelEventInit, count = 1) {
     target.dispatchEvent(event);
    }
   });
+  await paintFrame();
 }
 
 const summaryText = () => screen.getByTestId("run-timeline-window").textContent;
@@ -330,7 +334,7 @@ describe("zoom and pan", () => {
     render();
     const chart = await screen.findByTestId("run-timeline-chart");
     const whole = summaryText();
-    wheel(chart, { deltaY: -400, clientX: 100 });
+    await wheel(chart, { deltaY: -400, clientX: 100 });
     const zoomed = summaryText();
     expect(zoomed).not.toBe(whole);
 
@@ -341,20 +345,20 @@ describe("zoom and pan", () => {
   it("wheel events that arrive before React renders compose instead of repeating the old view", async () => {
     render();
     const chart = await screen.findByTestId("run-timeline-chart");
-    wheel(chart, { deltaY: -300, clientX: 600 });
-    wheel(chart, { deltaY: -300, clientX: 600 });
+    await wheel(chart, { deltaY: -300, clientX: 600 });
+    await wheel(chart, { deltaY: -300, clientX: 600 });
     const sequential = summaryText();
     fireEvent.click(screen.getByRole("button", { name: "Reset zoom" }));
-    wheel(chart, { deltaY: -300, clientX: 600 }, 2);
+    await wheel(chart, { deltaY: -300, clientX: 600 }, 2);
     expect(summaryText()).toBe(sequential);
   });
 
   it("a horizontal scroll pans a zoomed view", async () => {
     render();
     const chart = await screen.findByTestId("run-timeline-chart");
-    wheel(chart, { deltaY: -600, clientX: 100 });
+    await wheel(chart, { deltaY: -600, clientX: 100 });
     const zoomed = summaryText();
-    wheel(chart, { deltaX: 300, deltaY: 0, clientX: 600 });
+    await wheel(chart, { deltaX: 300, deltaY: 0, clientX: 600 });
     expect(summaryText()).not.toBe(zoomed);
   });
 
@@ -371,14 +375,14 @@ describe("zoom and pan", () => {
     const chart = await screen.findByTestId("run-timeline-chart");
     const status = screen.getByTestId("run-timeline-window-status-42");
     expect(status.textContent).toBe("");
-    wheel(chart, { deltaX: -400, clientX: 600 });
+    await wheel(chart, { deltaX: -400, clientX: 600 });
     await screen.findByTestId("run-timeline-row-level-2");
     await waitFor(() => expect(status.textContent).toBe(""));
     await paintFrame();
     const canvas = screen.getByTestId("run-timeline-canvas-level-2");
     expect(drawn("level-2").some((shape) => shape.op === "fill")).toBe(true);
 
-    wheel(chart, { deltaX: -100, clientX: 600 });
+    await wheel(chart, { deltaX: -100, clientX: 600 });
     expect(screen.getByTestId("run-timeline-canvas-level-2")).toBe(canvas);
     expect(screen.getByTestId("run-timeline-window-status-42")).toBe(status);
     expect(status.textContent).toBe("");
@@ -395,12 +399,13 @@ describe("zoom and pan", () => {
     render();
     const chart = await screen.findByTestId("run-timeline-chart");
     chart.setPointerCapture = vi.fn();
-    wheel(chart, { deltaY: -600, clientX: 100 });
+    await wheel(chart, { deltaY: -600, clientX: 100 });
     const zoomed = summaryText();
 
     const unit = screen.getByTestId("run-timeline-canvas-units");
     fireEvent.pointerDown(unit, { clientX: 400, button: 0, pointerId: 1 });
     fireEvent.pointerMove(unit, { clientX: 200, pointerId: 1 });
+    await paintFrame();
     fireEvent.pointerUp(unit, { clientX: 200, pointerId: 1 });
     fireEvent.click(unit, { clientX: 100 });
     expect(summaryText()).not.toBe(zoomed);

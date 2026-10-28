@@ -10,15 +10,19 @@ export type LinkKind = RunTimelineLink["kind"] | "user_message";
 // The kinds in legend order; a kind is told apart by its color alone.
 export const LINK_KINDS: readonly LinkKind[] = ["send_message", "user_message", "spawn", "fork", "terminate", "restart", "resurrect", "notice"];
 
+// meiva:note
+// One token per kind, shared by the arrows, the legend and the event ticks; each theme keeps every kind
+// at 4.5:1 or better against `--card`, which the fixed hexes fell to 1.4-3.1:1 against once drawn.
+// meiva:link ui/web/src/docs/frontend-components/palette.meiva.okf.md
 export const LINK_COLORS: Record<LinkKind, string> = {
-  send_message: "#3b82f6",
-  user_message: "#92400e",
-  spawn: "#22c55e",
-  fork: "#14b8a6",
-  terminate: "#ef4444",
-  restart: "#f59e0b",
-  resurrect: "#a855f7",
-  notice: "#ec4899",
+  send_message: "var(--link-message)",
+  user_message: "var(--link-user)",
+  spawn: "var(--link-spawn)",
+  fork: "var(--link-fork)",
+  terminate: "var(--link-terminate)",
+  restart: "var(--link-restart)",
+  resurrect: "var(--link-resurrect)",
+  notice: "var(--link-notice)",
 };
 
 // meiva:note

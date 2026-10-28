@@ -227,7 +227,11 @@ export function paintUnits(p: PaintCtx, layout: RowLayout, state: PaintState, de
     const primary = deco.primaryKey === key;
     const linked = deco.linkedKeys.has(key);
     const hovered = state.hover?.kind === "unit" && state.hover.i0 === unit.i0 && state.hover.i1 === unit.i1 && state.hover.unitKind === unit.kind;
-    const hoverLight = !primary && !linked && (hovered || state.lit.unitKeys.has(unitKey(unit)));
+    // meiva:note
+    // A block's key is a string, and building one per block per paint is what a zoom over a 5 000-unit
+    // window spent its time on: the lit set is empty unless something is hovered, so ask that first.
+    const lit = state.lit.unitKeys;
+    const hoverLight = !primary && !linked && (hovered || (lit.size > 0 && lit.has(unitKey(unit))));
     const matched = state.highlight !== null && matchesHighlight(unit, state.highlight);
     const faded = state.highlight !== null && !matched && !primary && !linked;
     return { unit, hovered, hoverLight, faded, dim: state.highlight === null && state.selection !== null && !primary && !linked && !hoverLight };

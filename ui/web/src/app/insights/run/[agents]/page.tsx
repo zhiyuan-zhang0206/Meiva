@@ -140,6 +140,32 @@ export default function AgentViewPage({ params }: { params: Promise<{ agents: st
   );
   const selectedLinks = links.filter((l) => linkKeys.includes(l.key));
 
+  const windows = initial.flatMap(({ data }) => data === undefined ? [] : [viewportOf(data.lifetime ?? data.window)]);
+  const initialWindows = initial.flatMap(({ data }) => data === undefined ? [] : [viewportOf(data.window)]);
+  // meiva:note
+  // `base` and `view` keep their identity while their bounds are unchanged: the rows memoize their
+  // layouts on the axis and the view, and a new object per render defeated that on every render that
+  // had nothing to do with the viewport (task #5712).
+  const baseFrom = windows.length === 0 ? null : Math.min(...windows.map((w) => w.from));
+  const baseTo = windows.length === 0 ? null : Math.max(...windows.map((w) => w.to));
+  const base: Viewport | null = useMemo(
+    () => (baseFrom === null || baseTo === null ? null : { from: baseFrom, to: baseTo }),
+    [baseFrom, baseTo],
+  );
+  const firstFrom = initialWindows.length === 0 ? null : Math.min(...initialWindows.map((w) => w.from));
+  const firstTo = initialWindows.length === 0 ? null : Math.max(...initialWindows.map((w) => w.to));
+  const firstView: Viewport | null = useMemo(
+    () => (firstFrom === null || firstTo === null ? null : { from: firstFrom, to: firstTo }),
+    [firstFrom, firstTo],
+  );
+  const view = useMemo(
+    () => (base && viewport ? clampViewport(viewport, base) : firstView),
+    [base, viewport, firstView],
+  );
+
+  // meiva:note
+  // The invalid-URL answer comes after the hooks above: a return before them would render fewer hooks
+  // than the valid page does.
   if (paramsResolved && agentIds === null) {
     return (
       <main id="main-content">
@@ -147,17 +173,6 @@ export default function AgentViewPage({ params }: { params: Promise<{ agents: st
       </main>
     );
   }
-
-  const windows = initial.flatMap(({ data }) => data === undefined ? [] : [viewportOf(data.lifetime ?? data.window)]);
-  const initialWindows = initial.flatMap(({ data }) => data === undefined ? [] : [viewportOf(data.window)]);
-  const base: Viewport | null =
-    windows.length === 0
-      ? null
-      : { from: Math.min(...windows.map((w) => w.from)), to: Math.max(...windows.map((w) => w.to)) };
-  const firstView = initialWindows.length === 0 ? null : {
-    from: Math.min(...initialWindows.map((w) => w.from)), to: Math.max(...initialWindows.map((w) => w.to)),
-  };
-  const view = base && viewport ? clampViewport(viewport, base) : firstView;
 
   const dataOf = (id: number) => loaded.find((agent) => agent.id === id)?.data;
 
