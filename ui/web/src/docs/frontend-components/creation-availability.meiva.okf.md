@@ -72,12 +72,12 @@ Families sort by the Standard input price; a service whose Standard model is
 hidden remains an independent row sorted by its own price. Names do not imply
 family membership, and grouping never restores hidden or superseded entries.
 
-Control > Display lists a switch per provider above its models: switching a
-provider off takes its whole family out of the spawn picker at once and leaves
-the per-model switches non-editable, while each model keeps the state the user
-gave it, so switching the provider back on restores that state. A superseded
-model is not listed at all — the picker refuses it, so a switch there would
-change nothing a spawn reads — instead of appearing disabled with an explanation.
+Control > Display draws the same catalog two levels deep (`_model_picker.tsx`): the
+provider is an uppercase heading on a tinted band carrying its master switch, its models
+start at the band's own text edge under a lighter separator, and each family is a
+`role=group` named by that heading. A provider is named once per family; a model row states itself
+and its prices. Switching a provider off takes its family out of the spawn picker and leaves
+the per-model switches non-editable; each model keeps its state.
 
 The published default uses the same database/config resolution as a new
 agent's birth stamp. Saving the cluster default invalidates both default-model
