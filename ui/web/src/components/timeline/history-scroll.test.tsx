@@ -1,5 +1,6 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { act, cleanup, fireEvent, screen } from "@testing-library/react";
+import { renderWithBrowser } from "@/test-support/render";
 import { StrictMode, type ReactNode } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { USER_SETTING_DEFAULTS, type BackendTimelineItem, type TimelineResponse } from "@/lib/contracts/types";
@@ -93,19 +94,19 @@ afterEach(() => {
 describe("history entry scroll ownership", () => {
   it("restores a returned entry while the real timeline hook seeds an empty live store", () => {
     saveScrollMemory("history-cold-live", { contentKey: "42", scrollTop: 700, followBottom: false });
-    render(conversation(42, "history-cold-live"));
+    renderWithBrowser(conversation(42, "history-cold-live"));
     expect(viewport().scrollTop).toBe(700);
   });
   it("restores a returned entry when live items are already measurable on its first commit", () => {
     useTimelineStore.getState().switchThread(42, items, false);
     saveScrollMemory("history-warm-live", { contentKey: "42", scrollTop: 700, followBottom: false });
-    render(conversation(42, "history-warm-live"));
+    renderWithBrowser(conversation(42, "history-warm-live"));
     expect(viewport().scrollTop).toBe(700);
   });
   it.each([false, true])("waits for a returned reader through partial layout (anchor=%s)", (anchored) => {
     height = 900;
     saveScrollMemory(`history-partial-layout-${anchored}`, { contentKey: "42", scrollTop: 700, followBottom: false, anchor: anchored ? { itemId: "1.0", rank: 0, viewportTop: -700 } : undefined });
-    render(conversation(42, `history-partial-layout-${anchored}`));
+    renderWithBrowser(conversation(42, `history-partial-layout-${anchored}`));
     resize();
     act(() => { height = 5000; resizeCallbacks.forEach((deliver) => deliver()); });
     expect(viewport().scrollTop).toBe(700);
@@ -113,7 +114,7 @@ describe("history entry scroll ownership", () => {
   it("keeps the reading target through strict-mode partial layout", () => {
     height = 900;
     saveScrollMemory("history-partial-strict", { contentKey: "42", scrollTop: 700, followBottom: false });
-    render(<StrictMode>{conversation(42, "history-partial-strict")}</StrictMode>);
+    renderWithBrowser(<StrictMode>{conversation(42, "history-partial-strict")}</StrictMode>);
     resize();
     act(() => { height = 5000; resizeCallbacks.forEach((deliver) => deliver()); });
     expect(viewport().scrollTop).toBe(700);
@@ -121,7 +122,7 @@ describe("history entry scroll ownership", () => {
   it.each([600, 900])("allows a selection to supersede a target at content height %i", (initialHeight) => {
     height = initialHeight;
     saveScrollMemory(`history-short-selection-${initialHeight}`, { contentKey: "42", scrollTop: 700, followBottom: false });
-    const { rerender } = render(conversation(42, `history-short-selection-${initialHeight}`));
+    const { rerender } = renderWithBrowser(conversation(42, `history-short-selection-${initialHeight}`));
     resize();
     rerender(conversation(43, `history-short-selection-${initialHeight}`));
     act(() => { height = 5000; resizeCallbacks.forEach((deliver) => deliver()); });
@@ -130,7 +131,7 @@ describe("history entry scroll ownership", () => {
   it.each([600, 900])("a send leaves a parked reader at their saved position at content height %i", (initialHeight) => {
     height = initialHeight;
     saveScrollMemory(`history-send-${initialHeight}`, { contentKey: "42", scrollTop: 700, followBottom: false });
-    render(conversation(42, `history-send-${initialHeight}`));
+    renderWithBrowser(conversation(42, `history-send-${initialHeight}`));
     resize();
     act(() => { useTimelineStore.getState().requestScrollToBottom(); });
     act(() => { height = 5000; resizeCallbacks.forEach((deliver) => deliver()); });
@@ -139,7 +140,7 @@ describe("history entry scroll ownership", () => {
   it("keeps following when a restored reader scrolls back to the bottom and then sends", () => {
     useTimelineStore.getState().switchThread(42, items, false);
     saveScrollMemory("history-hold-release", { contentKey: "42", scrollTop: 700, followBottom: false });
-    render(conversation(42, "history-hold-release"));
+    renderWithBrowser(conversation(42, "history-hold-release"));
     resize();
     expect(viewport().scrollTop).toBe(700);
     act(() => { viewport().scrollTop = 4400; fireEvent.scroll(viewport()); });
@@ -153,7 +154,7 @@ describe("history entry scroll ownership", () => {
       contentKey: "42", scrollTop: 4400, followBottom: false,
       anchor: { itemId: "1.15", rank: 0, viewportTop: 0 },
     });
-    render(conversation(42, "history-tail-send"));
+    renderWithBrowser(conversation(42, "history-tail-send"));
     expect(viewport().scrollTop).toBe(4400);
     act(() => { useTimelineStore.getState().requestScrollToBottom(); });
     act(() => { height = 6000; resizeCallbacks.forEach((deliver) => deliver()); });
@@ -162,7 +163,7 @@ describe("history entry scroll ownership", () => {
   it("remembers a restored reader's later position across an agent switch", () => {
     useTimelineStore.getState().switchThread(42, items, false);
     saveScrollMemory("history-hold-save", { contentKey: "42", scrollTop: 700, followBottom: false });
-    const { rerender } = render(conversation(42, "history-hold-save"));
+    const { rerender } = renderWithBrowser(conversation(42, "history-hold-save"));
     resize();
     expect(viewport().scrollTop).toBe(700);
     act(() => { viewport().scrollTop = 1200; fireEvent.scroll(viewport()); });
@@ -174,7 +175,7 @@ describe("history entry scroll ownership", () => {
   it("lands on the end when a bookmark sits past a page that stopped growing", () => {
     height = 900;
     saveScrollMemory("history-unreachable", { contentKey: "42", scrollTop: 700, followBottom: false });
-    render(conversation(42, "history-unreachable"));
+    renderWithBrowser(conversation(42, "history-unreachable"));
     resize();
     resize();
     expect(viewport().scrollTop).toBe(300);
@@ -184,7 +185,7 @@ describe("history entry scroll ownership", () => {
   it("lets a reader replace an unreachable saved position by scrolling", () => {
     height = 900;
     saveScrollMemory("history-short-reader", { contentKey: "42", scrollTop: 700, followBottom: false });
-    render(conversation(42, "history-short-reader"));
+    renderWithBrowser(conversation(42, "history-short-reader"));
     resize();
     act(() => { viewport().scrollTop = 100; fireEvent.scroll(viewport()); });
     act(() => { height = 5000; resizeCallbacks.forEach((deliver) => deliver()); });
@@ -193,7 +194,7 @@ describe("history entry scroll ownership", () => {
   it("keeps the saved reader if the entry leaves before its layout can hold it", () => {
     height = 900;
     saveScrollMemory("history-short-leave", { contentKey: "42", scrollTop: 700, followBottom: false });
-    const { rerender } = render(conversation(42, "history-short-leave"));
+    const { rerender } = renderWithBrowser(conversation(42, "history-short-leave"));
     resize();
     act(() => { fireEvent.scroll(viewport()); });
     rerender(<QueryClientProvider client={client}><div>Shell page</div></QueryClientProvider>);
@@ -204,7 +205,7 @@ describe("history entry scroll ownership", () => {
   it.each([-100, 0])("keeps the pending target when the controller absorbs a wheel at the bottom (delta=%s)", (deltaY) => {
     height = 900;
     saveScrollMemory(`history-short-wheel-${deltaY}`, { contentKey: "42", scrollTop: 700, followBottom: false });
-    render(conversation(42, `history-short-wheel-${deltaY}`));
+    renderWithBrowser(conversation(42, `history-short-wheel-${deltaY}`));
     resize();
     viewport().scrollTop = viewport().scrollHeight - viewport().clientHeight;
     act(() => { fireEvent.wheel(viewport(), { deltaY }); });
@@ -214,7 +215,7 @@ describe("history entry scroll ownership", () => {
   it("keeps a restored reader parked when content grows", () => {
     useTimelineStore.getState().switchThread(42, items, false);
     saveScrollMemory("history-growth", { contentKey: "42", scrollTop: 700, followBottom: false });
-    render(conversation(42, "history-growth"));
+    renderWithBrowser(conversation(42, "history-growth"));
     act(() => { height = 6000; resizeCallbacks.forEach((deliver) => deliver()); });
     expect(viewport().scrollTop).toBe(700);
   });
@@ -224,7 +225,7 @@ describe("history entry scroll ownership", () => {
       scrollTop: entry === "returning-follower" ? 4400 : 700,
       followBottom: entry === "returning-follower",
     });
-    render(conversation(42, entry));
+    renderWithBrowser(conversation(42, entry));
     resize();
     expect(viewport().scrollTop).toBe(4400);
     act(() => { height = 6000; resizeCallbacks.forEach((deliver) => deliver()); });
@@ -233,18 +234,18 @@ describe("history entry scroll ownership", () => {
   it("returns a saved follower to messages that arrived while away", () => {
     height = 6000;
     saveScrollMemory("history-away-growth", { contentKey: "42", scrollTop: 4400, followBottom: true });
-    render(conversation(42, "history-away-growth"));
+    renderWithBrowser(conversation(42, "history-away-growth"));
     resize();
     expect(viewport().scrollTop).toBe(5400);
   });
   it("restores through a strict-mode effect re-attach", () => {
     useTimelineStore.getState().switchThread(42, items, false);
     saveScrollMemory("history-strict", { contentKey: "42", scrollTop: 700, followBottom: false });
-    render(<StrictMode>{conversation(42, "history-strict")}</StrictMode>);
+    renderWithBrowser(<StrictMode>{conversation(42, "history-strict")}</StrictMode>);
     expect(viewport().scrollTop).toBe(700);
   });
   it("remembers independent positions across entry unmounts and returns", () => {
-    const { rerender } = render(conversation(42, "history-first"));
+    const { rerender } = renderWithBrowser(conversation(42, "history-first"));
     act(() => { viewport().scrollTop = 700; fireEvent.scroll(viewport()); });
     rerender(conversation(43, "history-second"));
     act(() => { viewport().scrollTop = 1200; fireEvent.scroll(viewport()); });
@@ -259,7 +260,7 @@ describe("history entry scroll ownership", () => {
   });
   it("keeps a selection command after a restore", () => {
     saveScrollMemory("history-select-after-restore", { contentKey: "42", scrollTop: 700, followBottom: false });
-    const { rerender } = render(conversation(42, "history-select-after-restore"));
+    const { rerender } = renderWithBrowser(conversation(42, "history-select-after-restore"));
     expect(viewport().scrollTop).toBe(700);
     act(() => { viewport().scrollTop = 700; fireEvent.scroll(viewport()); });
     rerender(conversation(43, "history-select-after-restore"));
@@ -284,7 +285,7 @@ function tabs(agentId: number, entry: string) {
 
 describe("agent switch reading positions", () => {
   it("restores independent A/B bookmarks inside the same page entry", () => {
-    const { rerender } = render(tabs(42, "agent-tabs"));
+    const { rerender } = renderWithBrowser(tabs(42, "agent-tabs"));
     act(() => { viewport().scrollTop = 700; fireEvent.scroll(viewport()); });
     rerender(tabs(43, "agent-tabs"));
     act(() => { viewport().scrollTop = 1200; fireEvent.scroll(viewport()); });
@@ -294,14 +295,14 @@ describe("agent switch reading positions", () => {
     expect(viewport().scrollTop).toBe(1200);
   });
   it("saves a reader on the tail as following the bottom", () => {
-    render(tabs(42, "agent-tail-save"));
+    renderWithBrowser(tabs(42, "agent-tail-save"));
     act(() => { viewport().scrollTop = 4400; fireEvent.scroll(viewport()); });
     expect(readScrollMemory("agent-tail-save:agent:42")).toEqual({
       contentKey: "42", scrollTop: 4400, followBottom: true,
     });
   });
   it("returns a bottom follower to the newest message after messages arrived while away", () => {
-    const { rerender } = render(tabs(42, "agent-new-tail"));
+    const { rerender } = renderWithBrowser(tabs(42, "agent-new-tail"));
     act(() => { viewport().scrollTop = 4400; fireEvent.scroll(viewport()); });
     rerender(tabs(43, "agent-new-tail"));
     act(() => { height = 6000; });
@@ -312,7 +313,7 @@ describe("agent switch reading positions", () => {
     expect(screen.getByTestId("scroll-to-bottom").className).toContain("opacity-0");
   });
   it("keeps following a returned bottom follower as the thread grows", () => {
-    const { rerender } = render(tabs(42, "agent-new-tail-growth"));
+    const { rerender } = renderWithBrowser(tabs(42, "agent-new-tail-growth"));
     act(() => { viewport().scrollTop = 4400; fireEvent.scroll(viewport()); });
     rerender(tabs(43, "agent-new-tail-growth"));
     act(() => { height = 6000; });
@@ -322,7 +323,7 @@ describe("agent switch reading positions", () => {
     expect(viewport().scrollTop).toBe(6400);
   });
   it("keeps following when the switch lands between a chunk and its pin", () => {
-    const { rerender } = render(tabs(42, "agent-chunk-frame"));
+    const { rerender } = renderWithBrowser(tabs(42, "agent-chunk-frame"));
     act(() => { viewport().scrollTop = 4400; fireEvent.scroll(viewport()); });
     act(() => { height = 6000; });
     rerender(tabs(43, "agent-chunk-frame"));
@@ -339,14 +340,14 @@ describe("agent switch reading positions", () => {
       addEventListener: vi.fn(), removeEventListener: vi.fn(),
       addListener: vi.fn(), removeListener: vi.fn(), dispatchEvent: vi.fn(),
     }));
-    render(tabs(42, "agent-touch-zone"));
+    renderWithBrowser(tabs(42, "agent-touch-zone"));
     act(() => { viewport().scrollTop = 4300; fireEvent.scroll(viewport()); });
     expect(readScrollMemory("agent-touch-zone:agent:42")).toEqual({
       contentKey: "42", scrollTop: 4300, followBottom: true,
     });
   });
   it("returns a parked reader to their item after messages arrived while away", () => {
-    const { rerender } = render(tabs(42, "agent-new-parked"));
+    const { rerender } = renderWithBrowser(tabs(42, "agent-new-parked"));
     act(() => { viewport().scrollTop = 4300; fireEvent.scroll(viewport()); });
     expect(readScrollMemory("agent-new-parked:agent:42")).toEqual({
       contentKey: "42", scrollTop: 4300, followBottom: false,
@@ -361,7 +362,7 @@ describe("agent switch reading positions", () => {
   });
   it("retains scroll-loaded history and keeps it after a newer tail snapshot", () => {
     const older: BackendTimelineItem = { ...items[0], item_id: "s1.old.1.0", payload: "Previously loaded history" };
-    const { rerender } = render(tabs(42, "agent-old-window"));
+    const { rerender } = renderWithBrowser(tabs(42, "agent-old-window"));
     act(() => { useTimelineStore.getState().prependOlder([older], true); });
     act(() => { viewport().scrollTop = 700; fireEvent.scroll(viewport()); });
     rerender(tabs(43, "agent-old-window"));
@@ -375,7 +376,7 @@ describe("agent switch reading positions", () => {
     expect(viewport().scrollTop).toBe(700);
   });
   it("one loading ring at a time: an older-history load keeps the bottom button quiet", () => {
-    render(<TimelineView items={items} threadKey="one-ring" loadingNew loadingOlder />, {
+    renderWithBrowser(<TimelineView items={items} threadKey="one-ring" loadingNew loadingOlder />, {
       wrapper: ({ children }) => <QueryClientProvider client={client}>{children}</QueryClientProvider>,
     });
     // meiva:note
@@ -389,7 +390,7 @@ describe("agent switch reading positions", () => {
     expect(screen.getByTestId("load-older-spinner").dataset.state).toBe("loading");
   });
   it("uses the bottom button's existing footprint for a refresh without moving content", () => {
-    const { rerender } = render(<TimelineView items={items} threadKey="spinner" loadingNew />, {
+    const { rerender } = renderWithBrowser(<TimelineView items={items} threadKey="spinner" loadingNew />, {
       wrapper: ({ children }) => <QueryClientProvider client={client}>{children}</QueryClientProvider>,
     });
     const button = screen.getByTestId("scroll-to-bottom");
@@ -415,7 +416,7 @@ describe("restored position settles", () => {
   it("keeps a restored reading item at its saved offset while the rows above settle", () => {
     const entry = "history-settle";
     saveScrollMemory(entry, { contentKey: "42", scrollTop: 700, followBottom: false, anchor: { itemId: "3.0", rank: 0, viewportTop: -100 } });
-    render(conversation(42, entry));
+    renderWithBrowser(conversation(42, entry));
     expect(viewport().scrollTop).toBe(700);
     act(() => { aboveSettle = -50; resize(); });
     expect(viewport().scrollTop).toBe(650);
@@ -427,7 +428,7 @@ describe("restored position settles", () => {
   it("keeps the saved bookmark while the restored window is still settling", () => {
     const entry = "history-settle-bookmark";
     saveScrollMemory(entry, { contentKey: "42", scrollTop: 700, followBottom: false, anchor: { itemId: "3.0", rank: 0, viewportTop: -100 } });
-    render(conversation(42, entry));
+    renderWithBrowser(conversation(42, entry));
     act(() => { aboveSettle = -50; resize(); });
     act(() => { fireEvent.scroll(viewport()); });
     expect(readScrollMemory(entry)).toEqual({ contentKey: "42", scrollTop: 700, followBottom: false, anchor: { itemId: "3.0", rank: 0, viewportTop: -100 } });
@@ -438,7 +439,7 @@ describe("restored position settles", () => {
   it("keeps the bookmark through a switch away inside the settle", () => {
     const entry = "history-settle-switch";
     saveScrollMemory(entry, { contentKey: "42", scrollTop: 700, followBottom: false, anchor: { itemId: "3.0", rank: 0, viewportTop: -100 } });
-    const { rerender } = render(conversation(42, entry));
+    const { rerender } = renderWithBrowser(conversation(42, entry));
     act(() => { aboveSettle = -50; resize(); });
     act(() => { fireEvent.scroll(viewport()); });
     rerender(conversation(43, "history-settle-other"));
@@ -453,14 +454,14 @@ it("captures the departing reading position before the native pull reserve is re
     const y = this.dataset.itemId ? reserve + (Number.parseInt(this.dataset.itemId) - 1) * 300 - top : 0;
     return { top: y, bottom: y + 300, height: 300, left: 0, right: 400, width: 400 } as DOMRect;
   });
-  const { rerender } = render(tabs(42, "agent-native-reserve"));
+  const { rerender } = renderWithBrowser(tabs(42, "agent-native-reserve"));
   act(() => { viewport().scrollTop = 700; fireEvent.scroll(viewport()); });
   rerender(tabs(43, "agent-native-reserve"));
   rerender(tabs(42, "agent-native-reserve"));
   expect(viewport().scrollTop).toBe(700);
 });
 it("rests on the loading ring while new messages arrive and stays clickable", () => {
-  render(<QueryClientProvider client={client}><TimelineView items={items} threadKey="ring-click" loadingNew /></QueryClientProvider>);
+  renderWithBrowser(<QueryClientProvider client={client}><TimelineView items={items} threadKey="ring-click" loadingNew /></QueryClientProvider>);
   act(() => { viewport().scrollTop = 700; fireEvent.scroll(viewport()); });
   const scrollTo = vi.spyOn(viewport(), "scrollTo");
   fireEvent.click(screen.getByRole("button", { name: "Scroll to bottom" }));
@@ -470,7 +471,7 @@ it("rests on the loading ring while new messages arrive and stays clickable", ()
 });
   it("keeps the reader on their row when the viewport width changes", () => {
     useTimelineStore.getState().switchThread(42, items, false);
-    render(conversation(42, "history-width-change"));
+    renderWithBrowser(conversation(42, "history-width-change"));
     resize();
     act(() => { viewport().scrollTop = 900; fireEvent.scroll(viewport()); });
     expect(readingOffset("4.0")).toBe(0);

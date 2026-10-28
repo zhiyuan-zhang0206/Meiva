@@ -1,10 +1,9 @@
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
-import { beforeEach, expect, it, vi } from "vitest";
+import { fireEvent, screen, waitFor } from "@testing-library/react";
+import { expect, it, vi } from "vitest";
 import type { ReactElement } from "react";
 import type { Highlight as HighlightComponentType } from "prism-react-renderer";
 
-const copy = vi.fn().mockResolvedValue(undefined);
-
+import { renderWithBrowser } from "@/test-support/render";
 import { createLazyChunk, type LazyChunk } from "./lazy-chunk";
 import { PythonCode, PythonCodeHighlighterProvider } from "./python-code";
 
@@ -13,15 +12,10 @@ import { PythonCode, PythonCodeHighlighterProvider } from "./python-code";
 // every test builds its own chunk from the import it wants (a real one, a
 // pending one, a rejecting one) and hands it to the tree. Nothing here resets a
 // cache a later test would inherit, and no production export exists for tests.
+//
+// The copy button inside the block writes through the browser port, so the assertion is what the
+// component asked the page to do, not a stub of `navigator.clipboard`.
 // meiva:link ui/web/src/docs/frontend-components/code-blocks.meiva.okf.md
-beforeEach(() => {
-  copy.mockReset().mockResolvedValue(undefined);
-  Object.defineProperty(navigator, "clipboard", {
-    value: { writeText: copy },
-    writable: true,
-    configurable: true,
-  });
-});
 
 const realImport = () =>
   import("prism-react-renderer").then((module) => module.Highlight);
@@ -31,7 +25,7 @@ function realChunk(): LazyChunk<typeof HighlightComponentType> {
 }
 
 function renderWith(chunk: LazyChunk<typeof HighlightComponentType>, ui: ReactElement) {
-  return render(ui, {
+  return renderWithBrowser(ui, {
     wrapper: ({ children }) => (
       <PythonCodeHighlighterProvider value={chunk}>{children}</PythonCodeHighlighterProvider>
     ),
@@ -44,7 +38,7 @@ it("highlights immediately when the chunk was already prefetched", async () => {
 
   const first = 'print("<pending>")';
   const latest = `${first}\nprint(2)`;
-  const { container, rerender } = renderWith(chunk, <PythonCode code={first} streaming />);
+  const { container, rerender, browser } = renderWith(chunk, <PythonCode code={first} streaming />);
   expect(container.querySelector("pre")?.textContent).toBe(first);
   expect(container.querySelector("pre .token.string")?.textContent).toBe('"<pending>"');
   expect(container.querySelector("pre .animate-pulse")).not.toBeNull();
@@ -54,7 +48,7 @@ it("highlights immediately when the chunk was already prefetched", async () => {
   expect(container.querySelectorAll(".token-line")).toHaveLength(2);
   expect(container.querySelector("pre")?.textContent).toContain("print(2)");
   fireEvent.click(screen.getByRole("button", { name: "Copy code" }));
-  await waitFor(() => expect(copy).toHaveBeenCalledWith(latest));
+  await waitFor(() => expect(browser.actions.copied).toEqual([latest]));
 
   rerender(<PythonCode code={latest} />);
   expect(container.querySelector("pre .animate-pulse")).toBeNull();
@@ -66,7 +60,7 @@ it("falls back to plain text, then highlights once an un-prefetched chunk resolv
   const importModule = vi.fn(realImport);
   const chunk = createLazyChunk({ name: "test-highlighter", importModule });
   const code = 'print("<pending>")';
-  const { container } = renderWith(chunk, <PythonCode code={code} streaming />);
+  const { container, browser } = renderWith(chunk, <PythonCode code={code} streaming />);
 
   expect(container.querySelector("pre")?.textContent).toBe(code);
   expect(container.querySelector("pre .token")).toBeNull();
@@ -80,7 +74,7 @@ it("falls back to plain text, then highlights once an un-prefetched chunk resolv
   expect(container.querySelector("pre .animate-pulse")).not.toBeNull();
 
   fireEvent.click(screen.getByRole("button", { name: "Copy code" }));
-  await waitFor(() => expect(copy).toHaveBeenCalledWith(code));
+  await waitFor(() => expect(browser.actions.copied).toEqual([code]));
 });
 
 it("a rejected import falls back to plain text without an unhandled rejection", async () => {

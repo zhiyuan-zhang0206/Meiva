@@ -2,6 +2,8 @@
 
 import { useCallback, useLayoutEffect, useRef, useState, type RefObject } from "react";
 
+import { useBrowser } from "@/lib/browser/browser-provider";
+
 const PULL_SPACE_PX = 80;
 const PULL_THRESHOLD_PX = 64;
 const AT_TOP_PX = 1;
@@ -29,6 +31,7 @@ export function useOlderHistoryPull(
   loadPage: () => boolean,
   onUpwardIntent: () => void,
 ) {
+  const media = useBrowser().media;
   const latest = useRef({ canLoad, loadPage, onUpwardIntent });
   const gesture = useRef(freshGesture());
   const [visual, setVisual] = useState({ threadKey, offset: 0, returning: false });
@@ -86,9 +89,9 @@ export function useOlderHistoryPull(
     if (!viewport) return;
     current.phase = "returning";
     show(Math.max(0, PULL_SPACE_PX - viewport.scrollTop), true);
-    const reduced = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+    const reduced = media.query("(prefers-reduced-motion: reduce)").matches();
     viewport.scrollTo({ top: PULL_SPACE_PX, behavior: reduced ? "instant" : "smooth" });
-  }, [show]);
+  }, [media, show]);
 
   const release = useCallback((commit: boolean) => {
     const current = gesture.current;

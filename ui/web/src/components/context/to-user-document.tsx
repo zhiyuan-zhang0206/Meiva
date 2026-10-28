@@ -6,6 +6,8 @@ import { useCallback, useEffect, useState } from "react";
 
 import { ChatMarkdown } from "@/components/content/markdown";
 import { ZoomableImage } from "@/components/content/zoomable-image";
+import type { BrowserNavigation } from "@/lib/browser/browser";
+import { useBrowser } from "@/lib/browser/browser-provider";
 import type { ToUserDocument } from "@/lib/contracts/types";
 import { readReferences, withReferences } from "@/lib/context/reference-url";
 import { useToUser } from "@/lib/context/use-to-user";
@@ -16,8 +18,12 @@ import { API_BASE } from "@/lib/transport/api-base";
 
 const PUSHED_ENTRY = "meivaToUserEntry";
 
-function pushedEntry(): boolean {
-  return (window.history.state as Record<string, unknown> | null)?.[PUSHED_ENTRY] === true;
+function asRecord(state: unknown): object {
+  return typeof state === "object" && state !== null ? state : {};
+}
+
+function pushedEntry(navigation: BrowserNavigation): boolean {
+  return Reflect.get(asRecord(navigation.state()), PUSHED_ENTRY) === true;
 }
 
 type RefusalText = "unavailable" | "tooLarge" | "missing" | "unreadable";
@@ -44,6 +50,11 @@ function refusalOf(error: unknown): { text: RefusalText; raw: boolean } {
 // meiva:note
 // The inspector trigger is optional: `onInspect` decides whether the bar renders
 // it at all, and `inspecting` drives its pressed state.
+//
+// The reference chain comes from the page's address, so a frame with no page (a server render)
+// has no chain to read and the panel opens on the document the route itself loaded. A pushed
+// reference entry is marked, so the panel's own Back calls history.back() for it instead of
+// rewriting a deep link that has no in-app entry to return to.
 // meiva:link ui/web/src/docs/frontend-state/navigation-history.meiva.okf.md
 export function ToUserDocumentView({ agentId, document, failure, pending, refresh, mobile, inspecting = false, bodyHidden = false, onInspect, onCollapse, onNavigate }: {
   agentId: number;
@@ -60,9 +71,11 @@ export function ToUserDocumentView({ agentId, document, failure, pending, refres
 }) {
   const t = useTranslations("toUser");
   const tInspector = useTranslations("inspector");
-  const [references, setReferences] = useState<string[]>(() =>
-    typeof window === "undefined" ? [] : readReferences(new URL(window.location.href), agentId),
-  );
+  const navigation = useBrowser().navigation;
+  const [references, setReferences] = useState<string[]>(() => {
+    const where = navigation.location();
+    return where === null ? [] : readReferences(new URL(where.href), agentId);
+  });
   const linked = useToUser(references.length ? agentId : null, references);
   const current = references.length ? linked.data : document;
   const loading = references.length ? linked.isFetching : pending;
@@ -74,22 +87,26 @@ export function ToUserDocumentView({ agentId, document, failure, pending, refres
   const content = current?.content;
   const show = useCallback((next: string[], mode: "push" | "replace") => {
     setReferences(next);
-    const url = withReferences(window.location.href, next);
+    const where = navigation.location();
+    if (where === null) return;
+    const url = withReferences(where.href, next);
     if (mode === "push") {
-      window.history.pushState({ ...(window.history.state ?? {}), [PUSHED_ENTRY]: true }, "", url);
+      navigation.push(url, { ...asRecord(navigation.state()), [PUSHED_ENTRY]: true });
     } else {
-      window.history.replaceState(window.history.state, "", url);
+      navigation.replace(url, navigation.state());
     }
-  }, []);
+  }, [navigation]);
 
   useEffect(() => {
-    const restore = () => setReferences(readReferences(new URL(window.location.href), agentId));
-    window.addEventListener("popstate", restore);
-    return () => window.removeEventListener("popstate", restore);
-  }, [agentId]);
+    const restore = () => {
+      const where = navigation.location();
+      if (where !== null) setReferences(readReferences(new URL(where.href), agentId));
+    };
+    return navigation.onTraverse(restore);
+  }, [agentId, navigation]);
 
   const goBack = () => {
-    if (pushedEntry()) window.history.back();
+    if (pushedEntry(navigation)) navigation.back();
     else show(references.slice(0, -1), "replace");
   };
 

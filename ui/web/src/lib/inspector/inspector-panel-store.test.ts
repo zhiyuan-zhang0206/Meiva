@@ -17,6 +17,8 @@ import { act, renderHook, waitFor } from "@testing-library/react";
 import { createElement, type ReactNode } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
+import { BrowserProvider } from "../browser/browser-provider";
+import { fakeBrowser } from "../browser/testing";
 import { USER_SETTING_DEFAULTS } from "../contracts/types";
 import { BREAKPOINT_LG_PX } from "../layout/breakpoint";
 import { useStore } from "../state/store";
@@ -70,9 +72,13 @@ const testApi: Api = {
 
 function wrapper({ children }: { children: ReactNode }) {
   return createElement(
-    ApiProvider,
-    { api: testApi },
-    createElement(QueryClientProvider, { client: queryClient }, children),
+    BrowserProvider,
+    { browser: fakeBrowser() },
+    createElement(
+      ApiProvider,
+      { api: testApi },
+      createElement(QueryClientProvider, { client: queryClient }, children),
+    ),
   );
 }
 

@@ -3,7 +3,9 @@
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
+import { fakeBrowser } from "../browser/testing";
 import {
+  initTelemetry,
   telemetryTestControl,
   track,
 } from "./telemetry";
@@ -66,8 +68,8 @@ function emit(type: string, entries: PerformanceEntry[]): void {
   observer.callback(list, observer as unknown as PerformanceObserver);
 }
 
-async function beaconBody(call: unknown[]): Promise<BeaconBody> {
-  return JSON.parse(await (call[1] as Blob).text()) as BeaconBody;
+function beaconBody(call: unknown[]): BeaconBody {
+  return JSON.parse(String(call[1])) as BeaconBody;
 }
 
 beforeEach(() => {
@@ -89,11 +91,11 @@ afterEach(() => {
 });
 
 describe("Web Vitals telemetry lifecycle", () => {
-  it("flushes final Vitals even when telemetry registered its hidden listener first", async () => {
-    const sendBeacon = vi.fn(() => true);
-    Object.defineProperty(navigator, "sendBeacon", {
-      configurable: true,
-      value: sendBeacon,
+  it("flushes final Vitals even when telemetry registered its hidden listener first", () => {
+    const sendBeacon = vi.fn((_url: string, _body: string) => true);
+    initTelemetry({
+      ...fakeBrowser(),
+      beacon: { send: (url, body) => sendBeacon(url, body) },
     });
     track("api-timing", { key: "status", value: 900, dedupe: false });
     initWebVitals();
@@ -112,7 +114,7 @@ describe("Web Vitals telemetry lifecycle", () => {
     document.dispatchEvent(new Event("visibilitychange"));
 
     expect(sendBeacon).toHaveBeenCalledTimes(2);
-    const finalBatch = await beaconBody(sendBeacon.mock.calls[1]);
+    const finalBatch = beaconBody(sendBeacon.mock.calls[1]);
     expect(finalBatch.events).toEqual(expect.arrayContaining([
       expect.objectContaining({ element: "web-vitals", key: "lcp", value: "1235" }),
       expect.objectContaining({ element: "web-vitals", key: "cls", value: "0" }),

@@ -2,6 +2,7 @@
 
 import { forwardRef, useEffect, useImperativeHandle, useMemo, useRef, useState } from "react";
 
+import { useBrowser } from "@/lib/browser/browser-provider";
 import type { CommandItem } from "@/lib/contracts/types";
 import { cn } from "@/lib/format/utils";
 import { FLEX, FLEX_COL } from "@/lib/layout/layout";
@@ -109,6 +110,7 @@ export const SlashAutocomplete = forwardRef<SlashAutocompleteHandle, Props>(
     const [active, setActive] = useState(0);
     const [dismissed, setDismissed] = useState(false);
     const listRef = useRef<HTMLDivElement>(null);
+    const view = useBrowser().view;
 
     const matches = useMemo(() => {
       if (query === null) return [];
@@ -144,8 +146,8 @@ export const SlashAutocomplete = forwardRef<SlashAutocompleteHandle, Props>(
     useEffect(() => {
       if (!open) return;
       const el = listRef.current?.children[active];
-      el?.scrollIntoView({ block: "nearest" });
-    }, [active, open]);
+      if (el) view.scrollIntoView(el, "nearest");
+    }, [active, open, view]);
 
     useImperativeHandle(
       ref,

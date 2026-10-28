@@ -1,6 +1,7 @@
 import type * as ApiModule from "@/lib/transport/api";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { cleanup, fireEvent, render as rtlRender, screen, waitFor, within } from "@testing-library/react";
+import { cleanup, fireEvent, screen, waitFor, within } from "@testing-library/react";
+import { renderWithBrowser } from "@/test-support/render";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { RunTimelineNode, RunTimelineResponse, RunTimelineUnit } from "@/lib/contracts/types";
@@ -81,9 +82,9 @@ const BY_AGENT: Record<number, RunTimelineResponse> = {
 };
 const BASE_78 = viewportOf({ from: at(0), to: at(120) });
 
-function render(agents = "7", { contextSize = true }: { contextSize?: boolean } = {}) {
+function renderAgentView(agents = "7", { contextSize = true }: { contextSize?: boolean } = {}) {
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
-  const view = rtlRender(
+  const view = renderWithBrowser(
     <QueryClientProvider client={queryClient}>
       <AgentViewPage params={Promise.resolve({ agents })} />
     </QueryClientProvider>,
@@ -128,7 +129,7 @@ const add = (id: number) => {
 
 describe("agent view", () => {
   it("draws agents named in the URL as groups of rows on one chart", async () => {
-    render("7,8");
+    renderAgentView("7,8");
     await screen.findByTestId("agent-view-agent-8");
     await waitFor(() => expect(within(group(7)).getByTestId("run-timeline-agent").textContent).toBe("Agent #7 · seven"));
     expect(screen.getAllByTestId("run-timeline-chart")).toHaveLength(1);
@@ -143,12 +144,12 @@ describe("agent view", () => {
   });
 
   it("rejects an id list with a bad entry", async () => {
-    render("7,x");
+    renderAgentView("7,x");
     expect(await screen.findByText("The agent id in this URL is invalid.")).toBeTruthy();
   });
 
   it("adds an agent by id, keeps it in the URL, and does not take an id twice", async () => {
-    render("7");
+    renderAgentView("7");
     await screen.findByTestId("run-timeline-chart");
     expect(screen.queryByTestId("agent-view-remove-7")).toBeNull();
     add(8);
@@ -160,7 +161,7 @@ describe("agent view", () => {
   });
 
   it("removes an agent, and never the last one", async () => {
-    render("7,8");
+    renderAgentView("7,8");
     await screen.findByTestId("agent-view-agent-8");
     await waitFor(() => expect(rowIn(8, "run-timeline-row-units")).not.toBeNull());
     fireEvent.click(screen.getByTestId("agent-view-remove-7"));
@@ -170,7 +171,7 @@ describe("agent view", () => {
   });
 
   it("limits the tree to the top levels", async () => {
-    render("7,8");
+    renderAgentView("7,8");
     await waitFor(() => expect(rowIn(8, "run-timeline-row-units")).not.toBeNull());
     fireEvent.change(screen.getByTestId("agent-view-levels"), { target: { value: "1" } });
     expect(rowIn(7, "run-timeline-row-level-2")).not.toBeNull();
@@ -183,7 +184,7 @@ describe("agent view", () => {
   });
 
   it("leaves the Context size row off by default and draws it when switched on; there is no Added context row", async () => {
-    render("7,8", { contextSize: false });
+    renderAgentView("7,8", { contextSize: false });
     await waitFor(() => expect(rowIn(8, "run-timeline-row-units")).not.toBeNull());
     expect(rowIn(7, "run-timeline-row-context")).toBeNull();
     expect(screen.getByTestId<HTMLInputElement>("agent-view-context-size").checked).toBe(false);
@@ -198,7 +199,7 @@ describe("agent view", () => {
   });
 
   it("draws the Messages row by tokens by default, and equal height when asked", async () => {
-    render("7");
+    renderAgentView("7");
     await screen.findByTestId("run-timeline-chart");
     expect(screen.getByTestId<HTMLSelectElement>("agent-view-heights").value).toBe("tokens");
     await paintFrame();
@@ -211,7 +212,7 @@ describe("agent view", () => {
   });
 
   it("walks the arrow keys from one agent's last row into the next agent's first, and back", async () => {
-    render("7,8");
+    renderAgentView("7,8");
     await waitFor(() => expect(rowIn(8, "run-timeline-row-units")).not.toBeNull());
     await paintFrame();
     const live = () => screen.getByTestId("run-timeline-selection-live").textContent;
@@ -234,7 +235,7 @@ describe("agent view", () => {
   });
 
   it("puts the Messages row and the Context size row on the same blocks, to the pixel", async () => {
-    render("7");
+    renderAgentView("7");
     await screen.findByTestId("run-timeline-row-context");
     await paintFrame();
     const units = drawn("units").filter((d) => d.op === "fill").map((d) => [d.x, d.w]);
@@ -244,7 +245,7 @@ describe("agent view", () => {
   });
 
   it("does not name an agent in the readout when the view holds one", async () => {
-    render("7");
+    renderAgentView("7");
     await screen.findByTestId("run-timeline-chart");
     await paintFrame();
     clickAt("units", itemX(BY_AGENT[7], "units", "utext-0-0"));
@@ -255,7 +256,7 @@ describe("agent view", () => {
     getRunTimeline.mockImplementation((agent) =>
       agent === 8 ? Promise.reject(new Error("boom")) : Promise.resolve(BY_AGENT[agent]),
     );
-    render("7,8");
+    renderAgentView("7,8");
     expect(await screen.findByText("Could not load the timeline of agent 8.")).toBeTruthy();
     expect(rowIn(7, "run-timeline-row-units")).not.toBeNull();
     getRunTimeline.mockImplementation((agent) => Promise.resolve(BY_AGENT[agent]));

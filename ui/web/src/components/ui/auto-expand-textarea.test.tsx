@@ -4,7 +4,8 @@
 // Enter as a line break. Each case here fails when that part of the rule is removed.
 // meiva:link ui/web/src/docs/frontend-components/enter-to-send.meiva.okf.md
 
-import { render, fireEvent, screen } from "@testing-library/react";
+import { fireEvent, screen } from "@testing-library/react";
+import { renderWithBrowser } from "@/test-support/render";
 import { useState } from "react";
 import { describe, expect, it, vi } from "vitest";
 
@@ -33,7 +34,7 @@ function Field({
 
 function renderField(props: { coarsePointer?: boolean } = {}) {
   const onSend = vi.fn();
-  render(<Field {...props} onSend={onSend} />);
+  renderWithBrowser(<Field {...props} onSend={onSend} />);
   return { onSend, box: screen.getByRole<HTMLTextAreaElement>("textbox", { name: "Reply" }) };
 }
 

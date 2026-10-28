@@ -8,6 +8,8 @@
 
 import { useEffect, useState, useSyncExternalStore } from "react";
 
+import { useBrowser } from "@/lib/browser/browser-provider";
+
 /** Nothing ever changes — the "store" is the client's own existence. */
 const never = () => () => {
   // No subscription to release.
@@ -75,9 +77,15 @@ function enqueueMount(release: () => void): () => void {
   };
 }
 
+// meiva:note
+// A URL that names a place inside the page (`#section`) mounts its deferred
+// subtrees at once: the reader asked for a target, and the target must exist
+// before the jump. The address comes from the browser port; a frame without a
+// page (a server render) has no fragment, so the subtree waits for its slice.
 export function useDeferredMount(): boolean {
-  const [mounted, setMounted] = useState(() =>
-    typeof window !== "undefined" && window.location.hash.length > 1,
+  const browser = useBrowser();
+  const [mounted, setMounted] = useState(
+    () => (browser.navigation.location()?.hash.length ?? 0) > 1,
   );
   useEffect(() => {
     let cancelled = false;

@@ -3,14 +3,15 @@
 // later, which is what keeps the route transition cheap.
 // meiva:link ui/web/src/docs/frontend-components/control-page-load.meiva.okf.md
 
-import { render, screen, waitFor } from "@testing-library/react";
+import { screen, waitFor } from "@testing-library/react";
+import { renderWithBrowser } from "@/test-support/render";
 import { describe, expect, it } from "vitest";
 
 import { ControlSection } from "./section";
 
 describe("ControlSection deferred body", () => {
   it("paints the heading with the route and mounts the body after it", async () => {
-    render(
+    renderWithBrowser(
       <ControlSection id="config" label="Config">
         <div>CONFIG_BODY</div>
       </ControlSection>,
@@ -21,7 +22,7 @@ describe("ControlSection deferred body", () => {
   });
 
   it("keeps the anchor on the section element while the body is still deferred", () => {
-    const { container } = render(
+    const { container } = renderWithBrowser(
       <ControlSection id="schedules" label="Schedules">
         <div>SCHEDULES_BODY</div>
       </ControlSection>,

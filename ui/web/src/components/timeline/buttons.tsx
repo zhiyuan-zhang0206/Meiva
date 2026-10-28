@@ -9,7 +9,7 @@ import { useTranslations } from "next-intl";
 import { useCallback, useEffect, useRef, useState } from "react";
 
 import { cn } from "@/lib/format/utils";
-import { copyToClipboard } from "@/lib/format/clipboard";
+import { useBrowser } from "@/lib/browser/browser-provider";
 
 const ACTION_BTN_CLS = cn(
   "inline-flex items-center p-0.5 rounded",
@@ -17,18 +17,20 @@ const ACTION_BTN_CLS = cn(
   "hover:bg-muted/50 disabled:opacity-40 disabled:cursor-not-allowed",
 );
 
-// Copy a card's content to the clipboard. After click, the icon flips to the
-// check icon for 1s as feedback, then reverts. The timer ref lets "rapid
-// repeat clicks" reset (a new click refreshes the 1s timer). Copy itself
-// (incl. the execCommand fallback for non-secure contexts) lives in the
-// shared copyToClipboard helper.
+// meiva:note
+// Copy a card's content to the clipboard. After the click the icon flips to the check icon for 1s
+// as feedback, then reverts; the timer ref lets "rapid repeat clicks" reset (a new click refreshes
+// the 1s timer). The copy itself is the browser port's clipboard, which is where the execCommand
+// fallback for non-secure contexts lives.
+// meiva:link ui/web/src/docs/frontend-state/browser-port.meiva.okf.md
 export function CopyButton({ text, compact = false }: { text: string; compact?: boolean }) {
   const t = useTranslations("timeline");
+  const browser = useBrowser();
   const [copied, setCopied] = useState(false);
   const timerRef = useRef<number | null>(null);
 
   const onClick = useCallback(async () => {
-    const ok = await copyToClipboard(text);
+    const ok = await browser.clipboard.write(text);
     if (!ok) {
       return;
     }
@@ -38,7 +40,7 @@ export function CopyButton({ text, compact = false }: { text: string; compact?: 
       setCopied(false);
       timerRef.current = null;
     }, 1000);
-  }, [text]);
+  }, [browser, text]);
 
   useEffect(() => {
     return () => {

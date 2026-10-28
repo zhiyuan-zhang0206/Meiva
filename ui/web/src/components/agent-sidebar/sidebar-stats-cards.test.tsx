@@ -1,4 +1,5 @@
 import { cleanup, fireEvent, screen } from "@testing-library/react";
+import {  } from "@/test-support/render";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type * as SidebarModule from "@/lib/agents/sidebar";
 import type { PluginStat, StatsDashboard } from "@/lib/contracts/types";

@@ -1,6 +1,9 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { act, cleanup, fireEvent, render, screen, within } from "@testing-library/react";
+import { act, cleanup, fireEvent, screen, within } from "@testing-library/react";
+import { renderWithBrowser } from "@/test-support/render";
 import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
+import type { FakeBrowser } from "@/lib/browser/testing";
+import { fakeBrowser } from "@/lib/browser/testing";
 import type { ToUserDocument } from "@/lib/contracts/types";
 import { ApiError, api } from "@/lib/transport/api";
 
@@ -22,9 +25,11 @@ function document(content: string, modifiedAt: string | null = null): ToUserDocu
     "file:///tmp/file.pdf": { id: "c".repeat(64), name: "file.pdf", markdown: false, version: null },
   } };
 }
+const HOME = "http://fake.local/?agent_id=7";
+
 function show(
   value: ToUserDocument,
-  { mobile = false, linked, onInspect, onCollapse, onNavigate, inspecting = false }: { mobile?: boolean; linked?: ToUserDocument | Error; onInspect?: () => void; onCollapse?: () => void; onNavigate?: () => void; inspecting?: boolean } = {},
+  { mobile = false, linked, onInspect, onCollapse, onNavigate, inspecting = false, browser = fakeBrowser({ href: HOME }) }: { mobile?: boolean; linked?: ToUserDocument | Error; onInspect?: () => void; onCollapse?: () => void; onNavigate?: () => void; inspecting?: boolean; browser?: FakeBrowser } = {},
 ) {
   const qc = new QueryClient({ defaultOptions: { queries: { retry: false, staleTime: Infinity } } });
   if (linked !== undefined) {
@@ -33,7 +38,7 @@ function show(
   } else {
     vi.spyOn(api, "getToUser").mockImplementation(() => new Promise(() => undefined));
   }
-  return render(
+  return renderWithBrowser(
     <QueryClientProvider client={qc}>
       <ToUserDocumentView
         agentId={7}
@@ -48,24 +53,23 @@ function show(
         onNavigate={onNavigate}
       />
     </QueryClientProvider>,
+    { browser },
   );
 }
-function url() {
-  return new URL(window.location.href);
+
+function chain(browser: FakeBrowser): string[] {
+  const where = browser.navigation.location();
+  if (where === null) throw new Error("the fake page always has an address");
+  return new URL(where.href).searchParams.getAll("reference");
 }
-function chain() {
-  return url().searchParams.getAll("reference");
+
+function travel(browser: FakeBrowser, to: string): void {
+  act(() => browser.traverse(to));
 }
-function travel(to: string) {
-  act(() => {
-    window.history.replaceState(null, "", to);
-    window.dispatchEvent(new PopStateEvent("popstate"));
-  });
-}
+
 afterEach(() => {
   cleanup();
   vi.clearAllMocks();
-  window.history.replaceState(null, "", "/?agent_id=7");
 });
 
 describe("To user Markdown", () => {
@@ -90,11 +94,11 @@ describe("To user Markdown", () => {
     expect(screen.getByRole("img", { name: "raw plot" }).getAttribute("src")).toContain(`/api/agents/7/to-user/resource?reference=${id}&v=asset-v1`);
   });
   it("keeps modifier clicks as ordinary resource downloads", () => {
-    show(document("[Details](details.md)"));
+    const { browser } = show(document("[Details](details.md)"));
     const link = screen.getByRole("link", { name: "Details" });
     link.addEventListener("click", (event) => event.preventDefault());
     fireEvent.click(link, { ctrlKey: true });
-    expect(chain()).toEqual([]);
+    expect(chain(browser)).toEqual([]);
     expect(api.getToUser).not.toHaveBeenCalled();
   });
   it("draws the panel title rule on the shared column title bar", () => {
@@ -116,48 +120,45 @@ describe("To user navigation history", () => {
 
   it("puts the opened document in the URL and follows Back and Forward to it", () => {
     const onNavigate = vi.fn();
-    show(root(), { linked: nested(), onNavigate });
+    const { browser } = show(root(), { linked: nested(), onNavigate });
     expect(onNavigate).toHaveBeenCalledTimes(1);
     fireEvent.click(screen.getByRole("link", { name: "Details" }));
     expect(onNavigate).toHaveBeenCalledTimes(2);
-    expect(chain()).toEqual([linkId]);
+    expect(chain(browser)).toEqual([linkId]);
     expect(screen.getByRole("heading", { name: "Nested document" })).toBeTruthy();
 
-    travel("/?agent_id=7");
+    travel(browser, "http://fake.local/?agent_id=7");
     expect(onNavigate).toHaveBeenCalledTimes(3);
-    expect(chain()).toEqual([]);
+    expect(chain(browser)).toEqual([]);
     expect(screen.getByRole("link", { name: "Details" })).toBeTruthy();
 
-    travel(`/?agent_id=7&reference=${linkId}`);
+    travel(browser, `http://fake.local/?agent_id=7&reference=${linkId}`);
     expect(onNavigate).toHaveBeenCalledTimes(4);
-    expect(chain()).toEqual([linkId]);
+    expect(chain(browser)).toEqual([linkId]);
     expect(screen.getByRole("heading", { name: "Nested document" })).toBeTruthy();
   });
 
   it("restores a shared link's chain but not a chain left by another agent", () => {
-    window.history.replaceState(null, "", `/?agent_id=7&reference=${linkId}`);
-    show(root(), { linked: nested() });
+    const shared = fakeBrowser({ href: `http://fake.local/?agent_id=7&reference=${linkId}` });
+    show(root(), { linked: nested(), browser: shared });
     expect(screen.getByRole("heading", { name: "Nested document" })).toBeTruthy();
 
-    window.history.replaceState(null, "", `/?agent_id=8&reference=${linkId}`);
-    travel("/?agent_id=8&reference=" + linkId);
+    travel(shared, `http://fake.local/?agent_id=8&reference=${linkId}`);
     expect(screen.queryByRole("heading", { name: "Nested document" })).toBeNull();
   });
 
   it("walks browser history from the panel's back control, falling back to the parent", () => {
-    const back = vi.spyOn(window.history, "back").mockImplementation(() => undefined);
-    show(root(), { linked: nested() });
+    const { browser } = show(root(), { linked: nested() });
     fireEvent.click(screen.getByRole("link", { name: "Details" }));
     fireEvent.click(screen.getByRole("button", { name: "back" }));
-    expect(back).toHaveBeenCalledTimes(1);
+    expect(browser.actions.backs).toBe(1);
 
-    back.mockClear();
-    window.history.replaceState(null, "", `/?agent_id=7&reference=${linkId}`);
     cleanup();
-    show(root(), { linked: nested() });
+    const deep = fakeBrowser({ href: `http://fake.local/?agent_id=7&reference=${linkId}` });
+    show(root(), { linked: nested(), browser: deep });
     fireEvent.click(screen.getByRole("button", { name: "back" }));
-    expect(back).not.toHaveBeenCalled();
-    expect(chain()).toEqual([]);
+    expect(deep.actions.backs).toBe(0);
+    expect(chain(deep)).toEqual([]);
     expect(screen.getByRole("link", { name: "Details" })).toBeTruthy();
   });
 });

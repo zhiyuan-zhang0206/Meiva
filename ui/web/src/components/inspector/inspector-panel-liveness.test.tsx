@@ -1,12 +1,6 @@
 import { useQuery } from "@tanstack/react-query";
-import {
-  act,
-  fireEvent,
-  render as rtlRender,
-  screen,
-  waitFor,
-  within,
-} from "@testing-library/react";
+import { act, fireEvent, screen, waitFor, within } from "@testing-library/react";
+import { renderWithBrowser } from "@/test-support/render";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { useTimelineStore } from "@/lib/timeline/timeline-store";
@@ -317,7 +311,7 @@ describe("InspectorPanel takeover status", () => {
     const panel = (id: number) => (
       <QueryClientProvider client={qc}><InspectorPanel agentId={id} /></QueryClientProvider>
     );
-    const view = rtlRender(panel(2));
+    const view = renderWithBrowser(panel(2));
     await waitFor(() => expect(screen.getByText("Idling")).toBeTruthy());
     expect(screen.queryByText("Impersonated")).toBeNull();
 
@@ -463,7 +457,7 @@ describe("InspectorPanel Context section", () => {
     act(() => {
       useTimelineStore.getState().applyTokenUsage(109_600, 0, 1_000_000, 374_000, 512_000);
     });
-    const view = rtlRender(<QueryClientProvider client={qc}><DetailOwner /></QueryClientProvider>);
+    const view = renderWithBrowser(<QueryClientProvider client={qc}><DetailOwner /></QueryClientProvider>);
     await waitFor(() => expect(qc.getQueryState(key)?.status).toBe("success"));
     view.rerender(<QueryClientProvider client={qc}><DetailOwner /><InspectorPanel agentId={1} /></QueryClientProvider>);
     await screen.findByTestId("inspector-context-used");

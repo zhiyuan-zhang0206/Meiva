@@ -9,7 +9,7 @@ import {
   ResizablePanelGroup,
 } from "@/components/ui/resizable";
 import { FLEX, FLEX_1, MIN_H_0, MIN_W_0 } from "@/lib/layout/layout";
-import { panelLayoutStorage } from "@/lib/layout/panel-layout-storage";
+import { usePanelLayoutStorage } from "@/lib/layout/panel-layout-storage";
 import { useClientReady } from "@/lib/layout/use-client-ready";
 import { cn } from "@/lib/format/utils";
 
@@ -44,9 +44,6 @@ const PANEL_MAIN = "panel-main";
 const PANEL_TIMELINE = "panel-timeline";
 const PANEL_INSPECTOR = "panel-inspector";
 
-// SSR-safe group-split storage (see lib/panel-layout-storage.ts).
-const HOME_SPLIT_STORAGE = panelLayoutStorage();
-
 
 interface Props {
   isNarrow: boolean;
@@ -67,6 +64,7 @@ function HomeDividerHandle() {
 }
 
 function DesktopMain({ main, inspector }: Pick<Props, "main" | "inspector">) {
+  const splitStorage = usePanelLayoutStorage();
   const inspectorVisible = inspector !== null && inspector !== undefined && inspector !== false;
   const mainDefaultSize = inspectorVisible ? INSPECTOR_OPEN_SIZES[0] : "100%";
 
@@ -77,7 +75,7 @@ function DesktopMain({ main, inspector }: Pick<Props, "main" | "inspector">) {
   // inspector never touches the dragged two-panel split.
   const { defaultLayout, onLayoutChanged } = useDefaultLayout({
     id: INSPECTOR_LAYOUT_ID,
-    storage: HOME_SPLIT_STORAGE,
+    storage: splitStorage,
     onlySaveAfterUserInteractions: true,
   });
 
@@ -136,13 +134,14 @@ export function HomeLayout({
   // back/forward into the home page must not paint a blank placeholder frame
   // first. Hydration keeps the old two-phase order (server snapshot → real).
   const clientReady = useClientReady();
+  const splitStorage = usePanelLayoutStorage();
 
   const frame = isLarge ? DESKTOP_COLUMNS : MOBILE_COLUMNS;
   // Only user-driven commits persist (see DesktopMain) — the breakpoint's
   // frame swap must never rewrite the other frame's saved ratios.
   const { defaultLayout, onLayoutChanged } = useDefaultLayout({
     id: frame.layoutId,
-    storage: HOME_SPLIT_STORAGE,
+    storage: splitStorage,
     onlySaveAfterUserInteractions: true,
   });
 

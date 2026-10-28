@@ -18,8 +18,6 @@ exports = ["fleet-view.tsx"]
 "tests" = ["force-controls.tsx", "graph-view.tsx", "presentation", "task-graph-chrome.tsx", "task-graph.tsx", "task-kanban.tsx"]
 
 [debt.ambient-read]
-"fleet-view.tsx#environ localStorage" = 2
-"fleet-view.tsx#environ window.location" = 2
 "task-graph-chrome.tsx#clock Date" = 3
 
 [debt.first-party-patch]

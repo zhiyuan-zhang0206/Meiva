@@ -1,5 +1,6 @@
 import { notifyManager, QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { act, cleanup, fireEvent, render as rtlRender, type RenderOptions, screen } from "@testing-library/react";
+import { act, cleanup, fireEvent, type RenderOptions, screen } from "@testing-library/react";
+import { renderWithBrowser } from "@/test-support/render";
 import type { ReactElement, ReactNode } from "react";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 
@@ -24,8 +25,8 @@ function PanelWrapper({ children }: { children: ReactNode }) {
   return <QueryClientProvider client={qc}>{children}</QueryClientProvider>;
 }
 
-function render(ui: ReactElement, options?: RenderOptions) {
-  return rtlRender(ui, { wrapper: PanelWrapper, ...options });
+function renderPanel(ui: ReactElement, options?: RenderOptions) {
+  return renderWithBrowser(ui, { wrapper: PanelWrapper, ...options });
 }
 
 const snapshot = {
@@ -69,12 +70,12 @@ function notice(): NoticeItem {
   };
 }
 
-function renderPanel({ mobile = false, notices = [], onClose = vi.fn() }: {
+function renderPanelView({ mobile = false, notices = [], onClose = vi.fn() }: {
   mobile?: boolean;
   notices?: NoticeItem[];
   onClose?: () => void;
 } = {}) {
-  return render(
+  return renderPanel(
     <SharedContextPanel
       agentId={7}
       document={documentQuery()}
@@ -101,7 +102,7 @@ afterEach(() => {
 });
 
 it("shows the document as the panel's body without a view switcher", () => {
-  renderPanel();
+  renderPanelView();
   expect(screen.getByText("empty")).toBeTruthy();
   expect(screen.queryByTestId("inspector-view")).toBeNull();
   expect(screen.queryByRole("tablist")).toBeNull();
@@ -114,7 +115,7 @@ it("swaps the body under a bar that stays, instead of laying a sheet over it", a
   // the body below it is replaced. An overlay that covered the bar left the
   // mode with no visible exit (user report 2026-10-20).
   snapshot.inspectorOpen = true;
-  renderPanel();
+  renderPanelView();
   expect(await screen.findByTestId("inspector-view")).toBeTruthy();
   expect(screen.getByTestId("document-bar")).toBeTruthy();
   expect(screen.getByTestId("shared-inspector")).toBeTruthy();
@@ -123,7 +124,7 @@ it("swaps the body under a bar that stays, instead of laying a sheet over it", a
 });
 
 it("keeps the notice and document inside the shared reading area", () => {
-  renderPanel({ notices: [notice()] });
+  renderPanelView({ notices: [notice()] });
   const body = screen.getByTestId("shared-document").querySelector<HTMLDivElement>('[data-slot="scroll-area-viewport"]')!;
   expect(body.contains(screen.getByRole("region", { name: "notification" }))).toBe(true);
   expect(screen.queryByText("needsReply")).toBeNull();
@@ -131,7 +132,7 @@ it("keeps the notice and document inside the shared reading area", () => {
 
 it("hides the mounted question in Inspector mode and restores its reading position", async () => {
   const props = { agentId: 7, document: documentQuery(), notices: [notice()], noticesFailed: false, mobile: false, onClose: vi.fn() };
-  const { rerender } = render(<SharedContextPanel {...props} />);
+  const { rerender } = renderPanel(<SharedContextPanel {...props} />);
   const body = screen.getByTestId("shared-document").querySelector<HTMLDivElement>('[data-slot="scroll-area-viewport"]')!;
   const draft = screen.getByRole<HTMLTextAreaElement>("textbox", { name: "replyTo" });
   fireEvent.change(draft, { target: { value: "Keep this answer" } });
@@ -153,12 +154,11 @@ it("hides the mounted question in Inspector mode and restores its reading positi
 
 it("starts a new agent or referenced document at the top of the shared reading area", () => {
   const props = { agentId: 7, document: documentQuery(), notices: [notice()], noticesFailed: false, mobile: false, onClose: vi.fn() };
-  const { rerender } = render(<SharedContextPanel {...props} />);
+  const { rerender, browser } = renderPanel(<SharedContextPanel {...props} />);
   const body = screen.getByTestId("shared-document").querySelector<HTMLDivElement>('[data-slot="scroll-area-viewport"]')!;
   body.scrollTop = 420;
   act(() => {
-    window.history.replaceState(null, "", `/?agent_id=7&reference=${"a".repeat(64)}`);
-    window.dispatchEvent(new PopStateEvent("popstate"));
+    browser.traverse(`http://fake.local/?agent_id=7&reference=${"a".repeat(64)}`);
   });
   expect(body.scrollTop).toBe(0);
   body.scrollTop = 500;
@@ -168,7 +168,7 @@ it("starts a new agent or referenced document at the top of the shared reading a
 });
 
 it.each([false, true])("keeps the question before and outside the document section, even without content (mobile=%s)", (mobile) => {
-  renderPanel({ notices: [notice()], mobile });
+  renderPanelView({ notices: [notice()], mobile });
   const bar = screen.getByTestId("document-bar");
   const question = screen.getByRole("region", { name: "notification" });
   const document = screen.getByText("empty");
@@ -181,14 +181,14 @@ it.each([false, true])("keeps the question before and outside the document secti
 
 it("closes the reading view from the mobile header", () => {
   const onClose = vi.fn();
-  renderPanel({ mobile: true, onClose });
+  renderPanelView({ mobile: true, onClose });
   fireEvent.click(screen.getByRole("button", { name: "backToMessages" }));
   expect(onClose).toHaveBeenCalledTimes(1);
 });
 
 it("keeps the narrow Inspector toggle beside Back through mode changes", () => {
   const props = { agentId: 7, document: documentQuery(), notices: [notice()], noticesFailed: false, mobile: true, onClose: vi.fn() };
-  const { rerender } = render(<SharedContextPanel {...props} />);
+  const { rerender } = renderPanel(<SharedContextPanel {...props} />);
   const back = screen.getByRole("button", { name: "backToMessages" });
   const toggle = screen.getByRole("button", { name: "openInspector" });
   expect(toggle.parentElement).toBe(back.parentElement);

@@ -5,7 +5,8 @@
 // router is mocked.
 
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, cleanup, fireEvent, screen, waitFor } from "@testing-library/react";
+import { renderWithBrowser } from "@/test-support/render";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import {
@@ -56,7 +57,7 @@ function makeQc() {
 }
 
 function wrap(ui: React.ReactElement) {
-  return render(<QueryClientProvider client={makeQc()}>{ui}</QueryClientProvider>);
+  return renderWithBrowser(<QueryClientProvider client={makeQc()}>{ui}</QueryClientProvider>);
 }
 
 const SCHEDULE: ScheduleSummary = {
@@ -89,7 +90,7 @@ describe("SchedulesPage", () => {
     vi.spyOn(api, "listSchedules").mockResolvedValue([]);
     const draft = vi.spyOn(api, "draftSchedule").mockRejectedValue(new Error("response lost"));
     const client = new QueryClient({ defaultOptions: { mutations: { retry: 3, retryDelay: 0 } } });
-    render(<QueryClientProvider client={client}><SchedulesPage /></QueryClientProvider>);
+    renderWithBrowser(<QueryClientProvider client={client}><SchedulesPage /></QueryClientProvider>);
     const input = await screen.findByPlaceholderText(/Describe a scheduled task/);
     fireEvent.change(input, { target: { value: "run nightly" } });
     fireEvent.keyDown(input, { key: "Enter" });

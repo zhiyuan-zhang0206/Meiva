@@ -1,4 +1,4 @@
-exports = ["clipboard.ts", "display-limits.ts", "format-number.ts", "format-price.ts", "inbound-source.ts", "interaction-timing.ts", "item-summary.ts", "time.ts", "now", "use-time-format.ts", "utils.ts"]
+exports = ["display-limits.ts", "format-number.ts", "format-price.ts", "inbound-source.ts", "interaction-timing.ts", "item-summary.ts", "time.ts", "now", "use-time-format.ts", "utils.ts"]
 
 [uses]
 "display-limits.test.ts" = ["display-limits.ts"]
@@ -18,6 +18,3 @@ exports = ["clipboard.ts", "display-limits.ts", "format-number.ts", "format-pric
 "inbound-source.ts" = "strict"
 "item-summary.ts" = "strict"
 "utils.ts" = "strict"
-
-[debt.ambient-read]
-"clipboard.ts#platform navigator" = 2

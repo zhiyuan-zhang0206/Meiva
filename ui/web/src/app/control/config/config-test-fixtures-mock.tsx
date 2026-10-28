@@ -4,6 +4,9 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { render, screen, within } from "@testing-library/react";
 import { vi } from "vitest";
 
+import { BrowserProvider } from "@/lib/browser/browser-provider";
+import { fakeBrowser } from "@/lib/browser/testing";
+
 import { api } from "@/lib/transport/api";
 import type {
   AgentMachineRow,
@@ -39,7 +42,11 @@ export function makeQc() {
 
 export function wrap(ui: React.ReactElement, qc?: QueryClient) {
   const client = qc ?? makeQc();
-  return render(<QueryClientProvider client={client}>{ui}</QueryClientProvider>);
+  return render(
+    <QueryClientProvider client={client}>
+      <BrowserProvider browser={fakeBrowser()}>{ui}</BrowserProvider>
+    </QueryClientProvider>,
+  );
 }
 
 export async function renderSettled() {

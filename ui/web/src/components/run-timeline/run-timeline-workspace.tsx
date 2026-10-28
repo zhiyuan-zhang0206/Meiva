@@ -14,13 +14,12 @@ import { useDefaultLayout } from "react-resizable-panels";
 import { ResizableHandle, ResizablePanel, ResizablePanelGroup } from "@/components/ui/resizable";
 import { useBreakpoint } from "@/lib/layout/breakpoint";
 import { FLEX_1, MIN_H_0, MIN_W_0 } from "@/lib/layout/layout";
-import { panelLayoutStorage } from "@/lib/layout/panel-layout-storage";
+import { usePanelLayoutStorage } from "@/lib/layout/panel-layout-storage";
 import { cn } from "@/lib/format/utils";
 
 export const RUN_TIMELINE_SPLIT_LAYOUT_ID = "meiva.run-timeline.split";
 const PANEL_MAIN = "panel-run-timeline-main";
 const PANEL_SIDE = "panel-run-timeline-side";
-const RUN_TIMELINE_SPLIT_STORAGE = panelLayoutStorage();
 
 /** The side panel's width bounds, in pixels. */
 export const SIDE_PANEL_DEFAULT = "440px";
@@ -39,9 +38,10 @@ export function RunTimelineWorkspace({ main, side }: { main: ReactNode; side: Re
     // eslint-disable-next-line react-hooks/set-state-in-effect -- SSR-safe: runs once after mount so the first painted frame has the real breakpoint
     setMounted(true);
   }, []);
+  const splitStorage = usePanelLayoutStorage();
   const split = useDefaultLayout({
     id: RUN_TIMELINE_SPLIT_LAYOUT_ID,
-    storage: RUN_TIMELINE_SPLIT_STORAGE,
+    storage: splitStorage,
     onlySaveAfterUserInteractions: true,
   });
 

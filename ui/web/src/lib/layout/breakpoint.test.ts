@@ -2,6 +2,8 @@
 // @vitest-environment happy-dom
 
 import { act, renderHook } from "@testing-library/react";
+
+import { fakeBrowser, pageWrapper } from "@/lib/browser/testing";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 import {
@@ -46,7 +48,7 @@ describe("tierForWidth — 320/390/768/lg boundaries", () => {
 
 describe("useBreakpoint", () => {
   it("defaults to narrow/mobile on a narrow viewport", () => {
-    const { result } = renderHook(() => useBreakpoint());
+    const { result } = renderHook(() => useBreakpoint(), { wrapper: pageWrapper(fakeBrowser()) });
     expect(result.current.isNarrow).toBe(true);
     expect(result.current.isLarge).toBe(false);
     expect(result.current.isWide).toBe(false);
@@ -54,7 +56,7 @@ describe("useBreakpoint", () => {
 
   it("isNarrow = NOT matching the md query; isLarge = matching the lg query", () => {
     resizeViewport(BREAKPOINT_MD_PX);
-    const { result } = renderHook(() => useBreakpoint());
+    const { result } = renderHook(() => useBreakpoint(), { wrapper: pageWrapper(fakeBrowser()) });
     expect(result.current.isNarrow).toBe(false);
     expect(result.current.isLarge).toBe(false);
 
@@ -69,7 +71,7 @@ describe("useBreakpoint", () => {
 
   it("isWide follows the 1280px query without changing the xl tier", () => {
     resizeViewport(BREAKPOINT_LG_PX);
-    const { result } = renderHook(() => useBreakpoint());
+    const { result } = renderHook(() => useBreakpoint(), { wrapper: pageWrapper(fakeBrowser()) });
     expect(result.current.isLarge).toBe(true);
     expect(result.current.isWide).toBe(false);
 
@@ -81,7 +83,7 @@ describe("useBreakpoint", () => {
 
   it("tier follows the real viewport width after mount", () => {
     resizeViewport(BREAKPOINT_SM_PX);
-    const { result } = renderHook(() => useBreakpoint());
+    const { result } = renderHook(() => useBreakpoint(), { wrapper: pageWrapper(fakeBrowser()) });
     expect(result.current.tier).toBe("md");
     expect(result.current.isNarrow).toBe(true);
     expect(result.current.isLarge).toBe(false);

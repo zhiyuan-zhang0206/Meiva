@@ -1,5 +1,6 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, fireEvent, screen, waitFor } from "@testing-library/react";
+import { renderWithBrowser } from "@/test-support/render";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { api } from "@/lib/transport/api";
 import { ComposerMock, cleanupHomePageTest, gatewayWrapper, hooksState, inspectorMockState, makeAgent, resetHomePageTestState, wrap } from "./page-test-mock";
@@ -175,7 +176,7 @@ describe("sidebar app-entry reset", () => {
     const queryClient = new QueryClient({
       defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
     });
-    const view = render(
+    const view = renderWithBrowser(
       <QueryClientProvider client={queryClient}>
         <HomePage />
       </QueryClientProvider>,

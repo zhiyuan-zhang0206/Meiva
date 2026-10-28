@@ -11,6 +11,7 @@
 import { render } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
+import { fakeBrowser } from "@/lib/browser/testing";
 import {
   formatNavTiming,
   markNavIntent,
@@ -52,7 +53,7 @@ describe("nav timing", () => {
     vi.useFakeTimers();
     try {
       const { rerender } = render(<Reporter pathname="/" />);
-      markNavIntent();
+      markNavIntent(fakeBrowser().navigation);
       rerender(<Reporter pathname="/control" />);
       vi.advanceTimersByTime(600);
       const nav = tracked.filter((e) => e.key === "nav");
@@ -67,18 +68,15 @@ describe("nav timing", () => {
 
   it("waits the configured time before falling back", () => {
     vi.useFakeTimers();
-    const assign = vi.fn();
-    const realLocation = window.location;
-    Object.defineProperty(window, "location", { configurable: true, value: { pathname: "/", assign } });
+    const browser = fakeBrowser({ href: "http://fake.local/" });
     try {
       setNavFallbackMs(500);
-      markNavIntent("/control");
+      markNavIntent(browser.navigation, "/control");
       vi.advanceTimersByTime(400);
-      expect(assign).not.toHaveBeenCalled();
+      expect(browser.actions.assigned).toEqual([]);
       vi.advanceTimersByTime(200);
-      expect(assign).toHaveBeenCalledWith("/control");
+      expect(browser.actions.assigned).toEqual(["/control"]);
     } finally {
-      Object.defineProperty(window, "location", { configurable: true, value: realLocation });
       vi.useRealTimers();
       setNavFallbackMs(2000);
     }
@@ -86,24 +84,15 @@ describe("nav timing", () => {
 
   it("performs a real location change when the router never commits", () => {
     vi.useFakeTimers();
-    const assign = vi.fn();
-    const realLocation = window.location;
-    Object.defineProperty(window, "location", {
-      configurable: true,
-      value: { pathname: "/", assign },
-    });
+    const browser = fakeBrowser({ href: "http://fake.local/" });
     try {
-      markNavIntent("/control");
+      markNavIntent(browser.navigation, "/control");
       vi.advanceTimersByTime(2100);
-      expect(assign).toHaveBeenCalledWith("/control");
+      expect(browser.actions.assigned).toEqual(["/control"]);
       const fallback = tracked.find((e) => e.key === "fallback");
       expect(fallback?.value).toMatch(/\|f=1\|fr=\d+\|v=[01]$/);
       expect(tracked.some((e) => e.key === "res")).toBe(true);
     } finally {
-      Object.defineProperty(window, "location", {
-        configurable: true,
-        value: realLocation,
-      });
       vi.useRealTimers();
     }
   });

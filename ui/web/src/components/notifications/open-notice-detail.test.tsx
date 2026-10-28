@@ -3,7 +3,8 @@
 // per notice kind, the empty-reply guard, the 409 message, and onResolved.
 
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { cleanup, fireEvent, render as rtlRender, screen, waitFor } from "@testing-library/react";
+import { cleanup, fireEvent, screen, waitFor } from "@testing-library/react";
+import { renderWithBrowser } from "@/test-support/render";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { OpenNoticeDetail } from "./open-notice-detail";
@@ -20,10 +21,10 @@ vi.mock("@/lib/transport/api", () => ({
   api: { resolveNotice, getSettings: () => Promise.resolve({ settings: [] }) },
 }));
 
-function render(ui: React.ReactElement) {
+function renderNotice(ui: React.ReactElement) {
   const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   qc.setQueryData(SETTINGS_QUERY_KEY, { ...USER_SETTING_DEFAULTS });
-  return rtlRender(<QueryClientProvider client={qc}>{ui}</QueryClientProvider>);
+  return renderWithBrowser(<QueryClientProvider client={qc}>{ui}</QueryClientProvider>);
 }
 
 function ntc(overrides: Partial<OpenNotice> = {}): OpenNotice {
@@ -58,13 +59,13 @@ describe("OpenNoticeDetail — timestamp", () => {
   const timestamp = `${formatRelative(createdAt, new Date())}, ${formatAbsolute(createdAt)}`;
 
   it("hides the created time by default", () => {
-    render(<OpenNoticeDetail agentId={7} notice={ntc({ created_at: createdAt })} />);
+    renderNotice(<OpenNoticeDetail agentId={7} notice={ntc({ created_at: createdAt })} />);
 
     expect(screen.queryByText(timestamp)).toBeNull();
   });
 
   it("shows the created time when requested", () => {
-    render(
+    renderNotice(
       <OpenNoticeDetail
         agentId={7}
         notice={ntc({ created_at: createdAt })}
@@ -77,14 +78,14 @@ describe("OpenNoticeDetail — timestamp", () => {
 
   it("shows expiry time when expire_at is present", () => {
     const expireAt = "2026-06-15T12:00:00Z";
-    render(<OpenNoticeDetail agentId={7} notice={ntc({ expire_at: expireAt })} />);
+    renderNotice(<OpenNoticeDetail agentId={7} notice={ntc({ expire_at: expireAt })} />);
     expect(screen.getByText(new RegExp(formatRelative(expireAt, new Date())))).toBeTruthy();
   });
 });
 
 describe("OpenNoticeDetail — require_response", () => {
   it("uses the same monospace input typography as the page composer", () => {
-    render(<OpenNoticeDetail agentId={7} notice={ntc()} />);
+    renderNotice(<OpenNoticeDetail agentId={7} notice={ntc()} />);
 
     expect(screen.getByRole<HTMLTextAreaElement>("textbox").className).toContain("font-mono");
   });
@@ -92,7 +93,7 @@ describe("OpenNoticeDetail — require_response", () => {
   it("answer: sends action=answer with the typed reply, then calls onResolved", async () => {
     resolveNotice.mockResolvedValue({ status: "ok" });
     const onResolved = vi.fn();
-    render(<OpenNoticeDetail agentId={7} notice={ntc()} onResolved={onResolved} />);
+    renderNotice(<OpenNoticeDetail agentId={7} notice={ntc()} onResolved={onResolved} />);
 
     fireEvent.change(screen.getByRole<HTMLTextAreaElement>("textbox"), { target: { value: "ship it" } });
     fireEvent.click(screen.getByLabelText("Send answer"));
@@ -104,7 +105,7 @@ describe("OpenNoticeDetail — require_response", () => {
   });
 
   it("send stays disabled until a non-empty reply is typed", () => {
-    render(<OpenNoticeDetail agentId={7} notice={ntc()} />);
+    renderNotice(<OpenNoticeDetail agentId={7} notice={ntc()} />);
     const send = screen.getByLabelText("Send answer");
     expect(send.hasAttribute("disabled")).toBe(true);
     fireEvent.change(screen.getByRole<HTMLTextAreaElement>("textbox"), { target: { value: "x" } });
@@ -114,7 +115,7 @@ describe("OpenNoticeDetail — require_response", () => {
   it("dismiss: sends action=dismiss with no reply, then calls onResolved", async () => {
     resolveNotice.mockResolvedValue({ status: "ok" });
     const onResolved = vi.fn();
-    render(<OpenNoticeDetail agentId={7} notice={ntc()} onResolved={onResolved} />);
+    renderNotice(<OpenNoticeDetail agentId={7} notice={ntc()} onResolved={onResolved} />);
 
     fireEvent.click(screen.getByRole("button", { name: "Close without answering" }));
 
@@ -126,7 +127,7 @@ describe("OpenNoticeDetail — require_response", () => {
 
   it("surfaces a friendly message on a 409 (already resolved)", async () => {
     resolveNotice.mockRejectedValue(new Error("HTTP 409 conflict"));
-    render(<OpenNoticeDetail agentId={7} notice={ntc()} />);
+    renderNotice(<OpenNoticeDetail agentId={7} notice={ntc()} />);
 
     fireEvent.change(screen.getByRole<HTMLTextAreaElement>("textbox"), { target: { value: "x" } });
     fireEvent.click(screen.getByLabelText("Send answer"));
@@ -142,7 +143,7 @@ describe("OpenNoticeDetail — reply retries", () => {
     resolveNotice.mockRejectedValueOnce(new TypeError("response lost"))
       .mockResolvedValueOnce({ status: "idling" });
     const onResolved = vi.fn();
-    render(<OpenNoticeDetail agentId={7} notice={ntc()} onResolved={onResolved} />);
+    renderNotice(<OpenNoticeDetail agentId={7} notice={ntc()} onResolved={onResolved} />);
     fireEvent.change(screen.getByRole<HTMLTextAreaElement>("textbox"), { target: { value: "noted" } });
     fireEvent.click(screen.getByLabelText("Send answer"));
     await waitFor(() => expect(screen.getByText(/response lost/)).toBeTruthy());
@@ -156,7 +157,7 @@ describe("OpenNoticeDetail — reply retries", () => {
   it("allocates a new key when the reply changes after a failed submission", async () => {
     resolveNotice.mockRejectedValueOnce(new TypeError("response lost"))
       .mockResolvedValueOnce({ status: "idling" });
-    render(<OpenNoticeDetail agentId={7} notice={ntc()} />);
+    renderNotice(<OpenNoticeDetail agentId={7} notice={ntc()} />);
     fireEvent.change(screen.getByRole<HTMLTextAreaElement>("textbox"), { target: { value: "first" } });
     fireEvent.click(screen.getByLabelText("Send answer"));
     await waitFor(() => expect(screen.getByText(/response lost/)).toBeTruthy());
@@ -172,7 +173,7 @@ describe("OpenNoticeDetail — reply retries", () => {
       // meiva:note
       // Keep the request unresolved while repeated keyboard events arrive.
     }));
-    render(<OpenNoticeDetail agentId={7} notice={ntc()} />);
+    renderNotice(<OpenNoticeDetail agentId={7} notice={ntc()} />);
     fireEvent.change(screen.getByRole<HTMLTextAreaElement>("textbox"), { target: { value: "noted" } });
     fireEvent.keyDown(screen.getByRole<HTMLTextAreaElement>("textbox"), { key: "Enter" });
     fireEvent.keyDown(screen.getByRole<HTMLTextAreaElement>("textbox"), { key: "Enter" });
@@ -180,7 +181,7 @@ describe("OpenNoticeDetail — reply retries", () => {
   });
 
   it("has no mark-read action or FYI label", () => {
-    render(<OpenNoticeDetail agentId={7} notice={ntc()} />);
+    renderNotice(<OpenNoticeDetail agentId={7} notice={ntc()} />);
     expect(screen.queryByText("Mark read")).toBeNull();
     expect(screen.queryByText("FYI")).toBeNull();
   });
@@ -191,7 +192,7 @@ const options = [{ id: "web", label: "Web" }, { id: "desktop", label: "Desktop" 
 describe("OpenNoticeDetail — numbered questions", () => {
   it.each(["single_select", "multi_select"] as const)("renders %s notice Markdown while preserving selection and comment submission", async (type) => {
     resolveNotice.mockResolvedValue({ status: "ok" });
-    const { container } = render(<OpenNoticeDetail agentId={7} notice={ntc({
+    const { container } = renderNotice(<OpenNoticeDetail agentId={7} notice={ntc({
       title: "Choose **coverage** for `preview`",
       content: "Review **scope**:\n\n- Conversation\n- Questions",
       question: { type, options: [{ id: "web", label: "**Web** `app`", description: "Use [docs](https://example.com/docs) and *keyboard*." }], allow_other: false },
@@ -214,7 +215,7 @@ describe("OpenNoticeDetail — numbered questions", () => {
 
   it("does not preselect or submit a single choice until explicit confirmation", async () => {
     resolveNotice.mockResolvedValue({ status: "ok" });
-    render(<OpenNoticeDetail agentId={7} notice={ntc({ question: { type: "single_select", options, allow_other: false } })} />);
+    renderNotice(<OpenNoticeDetail agentId={7} notice={ntc({ question: { type: "single_select", options, allow_other: false } })} />);
     const submit = screen.getByRole("button", { name: "Submit answer" });
     expect(submit.hasAttribute("disabled")).toBe(true);
     fireEvent.click(screen.getByRole<HTMLInputElement>("radio", { name: "1. Web" }));
@@ -232,7 +233,7 @@ describe("OpenNoticeDetail — numbered questions", () => {
     // alone and the payload carries an empty selection.
     // meiva:link meiva_builtins/plugins/meiva_fleet/docs/notice-questions.meiva.okf.md
     resolveNotice.mockResolvedValue({ status: "ok" });
-    render(<OpenNoticeDetail agentId={7} notice={ntc({ question: { type, options, allow_other: false } })} />);
+    renderNotice(<OpenNoticeDetail agentId={7} notice={ntc({ question: { type, options, allow_other: false } })} />);
     const submit = screen.getByRole("button", { name: "Submit answer" });
     expect(submit.hasAttribute("disabled")).toBe(true);
     fireEvent.change(screen.getByRole("textbox", { name: "Comment (optional)" }), { target: { value: "Neither fits — hold until Monday." } });
@@ -245,7 +246,7 @@ describe("OpenNoticeDetail — numbered questions", () => {
 
   it("lets a single choice be cleared by choosing it again", async () => {
     resolveNotice.mockResolvedValue({ status: "ok" });
-    render(<OpenNoticeDetail agentId={7} notice={ntc({ question: { type: "single_select", options, allow_other: false } })} />);
+    renderNotice(<OpenNoticeDetail agentId={7} notice={ntc({ question: { type: "single_select", options, allow_other: false } })} />);
     const first = screen.getByRole<HTMLInputElement>("radio", { name: "1. Web" });
     const submit = screen.getByRole("button", { name: "Submit answer" });
     fireEvent.click(first);
@@ -262,7 +263,7 @@ describe("OpenNoticeDetail — numbered questions", () => {
 
   it.each(["single_select", "multi_select"] as const)("%s preserves comments independently of selections", async (type) => {
     resolveNotice.mockResolvedValue({ status: "ok" });
-    render(<OpenNoticeDetail agentId={7} notice={ntc({ question: { type, options, allow_other: false } })} />);
+    renderNotice(<OpenNoticeDetail agentId={7} notice={ntc({ question: { type, options, allow_other: false } })} />);
     const comment = screen.getByRole<HTMLTextAreaElement>("textbox", { name: "Comment (optional)" });
     fireEvent.change(comment, { target: { value: "Based on 2, defer 1." } });
     const submit = screen.getByRole("button", { name: "Submit answer" });
@@ -284,7 +285,7 @@ describe("OpenNoticeDetail — numbered questions", () => {
 
   it("open questions keep their multiline text when Enter sends them", async () => {
     resolveNotice.mockResolvedValue({ status: "ok" });
-    render(<OpenNoticeDetail agentId={7} notice={ntc({ question: { type: "text" } })} />);
+    renderNotice(<OpenNoticeDetail agentId={7} notice={ntc({ question: { type: "text" } })} />);
     const box = screen.getByRole<HTMLTextAreaElement>("textbox");
     fireEvent.change(box, { target: { value: "Use 2.\nThen 1." } });
     pressEnter(box);
@@ -293,7 +294,7 @@ describe("OpenNoticeDetail — numbered questions", () => {
 
   it("retains a failed answer and reuses its operation key on a manual retry", async () => {
     resolveNotice.mockRejectedValueOnce(new TypeError("response lost")).mockResolvedValueOnce({ status: "ok" });
-    render(<OpenNoticeDetail agentId={7} notice={ntc({ question: { type: "text" } })} />);
+    renderNotice(<OpenNoticeDetail agentId={7} notice={ntc({ question: { type: "text" } })} />);
     fireEvent.change(screen.getByRole<HTMLTextAreaElement>("textbox"), { target: { value: "Keep it readable." } });
     fireEvent.click(screen.getByRole("button", { name: "Submit answer" }));
     await waitFor(() => expect(screen.getByRole("alert").textContent).toContain("response lost"));
@@ -305,7 +306,7 @@ describe("OpenNoticeDetail — numbered questions", () => {
 
   it("disables stale questions after a conflict", async () => {
     resolveNotice.mockRejectedValue(new Error("HTTP 409 expired"));
-    render(<OpenNoticeDetail agentId={7} notice={ntc({ question: { type: "text" } })} />);
+    renderNotice(<OpenNoticeDetail agentId={7} notice={ntc({ question: { type: "text" } })} />);
     fireEvent.change(screen.getByRole<HTMLTextAreaElement>("textbox"), { target: { value: "Yes" } });
     fireEvent.click(screen.getByRole("button", { name: "Submit answer" }));
     await waitFor(() => expect(screen.getByRole("alert").textContent).toContain("no longer available"));
@@ -322,7 +323,7 @@ describe("OpenNoticeDetail — numbered questions", () => {
 describe("OpenNoticeDetail — Enter sends", () => {
   it("Enter in a question's answer box sends the answer", async () => {
     resolveNotice.mockResolvedValue({ status: "ok" });
-    render(<OpenNoticeDetail agentId={7} notice={ntc({ question: { type: "text" } })} />);
+    renderNotice(<OpenNoticeDetail agentId={7} notice={ntc({ question: { type: "text" } })} />);
     fireEvent.change(field(), { target: { value: "Use 2." } });
 
     pressEnter(field());
@@ -334,7 +335,7 @@ describe("OpenNoticeDetail — Enter sends", () => {
 
   it("Enter in the free-text reply box sends the reply", async () => {
     resolveNotice.mockResolvedValue({ status: "ok" });
-    render(<OpenNoticeDetail agentId={7} notice={ntc()} />);
+    renderNotice(<OpenNoticeDetail agentId={7} notice={ntc()} />);
     fireEvent.change(field(), { target: { value: "ship it" } });
 
     pressEnter(field());
@@ -346,7 +347,7 @@ describe("OpenNoticeDetail — Enter sends", () => {
 
   it("Enter in the optional comment of a question sends the answer with it", async () => {
     resolveNotice.mockResolvedValue({ status: "ok" });
-    render(<OpenNoticeDetail agentId={7} notice={ntc({ question: { type: "single_select", options: [{ id: "a", label: "A", description: null }], allow_other: false } })} />);
+    renderNotice(<OpenNoticeDetail agentId={7} notice={ntc({ question: { type: "single_select", options: [{ id: "a", label: "A", description: null }], allow_other: false } })} />);
     fireEvent.change(field(), { target: { value: "second choice is fine too" } });
 
     pressEnter(field());
@@ -360,7 +361,7 @@ describe("OpenNoticeDetail — Enter sends", () => {
   });
 
   it("Shift+Enter breaks the line at the caret and sends nothing", () => {
-    render(<OpenNoticeDetail agentId={7} notice={ntc({ question: { type: "text" } })} />);
+    renderNotice(<OpenNoticeDetail agentId={7} notice={ntc({ question: { type: "text" } })} />);
     fireEvent.change(field(), { target: { value: "firstsecond" } });
     field().setSelectionRange(5, 5);
 
@@ -372,7 +373,7 @@ describe("OpenNoticeDetail — Enter sends", () => {
   });
 
   it("Enter that commits an IME candidate neither sends nor loses the key", () => {
-    render(<OpenNoticeDetail agentId={7} notice={ntc({ question: { type: "text" } })} />);
+    renderNotice(<OpenNoticeDetail agentId={7} notice={ntc({ question: { type: "text" } })} />);
     fireEvent.change(field(), { target: { value: "\u4f60\u597d" } });
 
     expect(fireEvent.keyDown(field(), { key: "Enter", isComposing: true })).toBe(true);
@@ -383,7 +384,7 @@ describe("OpenNoticeDetail — Enter sends", () => {
 
 
   it("Enter in a blank or whitespace-only answer sends nothing", () => {
-    render(<OpenNoticeDetail agentId={7} notice={ntc({ question: { type: "text" } })} />);
+    renderNotice(<OpenNoticeDetail agentId={7} notice={ntc({ question: { type: "text" } })} />);
     fireEvent.change(field(), { target: { value: "   " } });
 
     pressEnter(field());

@@ -21,10 +21,13 @@
 // Fallback: if the App Router transition has not committed within 5s of a
 // sidebar click, record `key: "fallback"` with how many resources started, the
 // worst connection-queue wait and the frames actually painted while stuck, then
-// assign `window.location` so awedged transition still lands on the page.
+// assign the page's address (through the browser port) so a wedged transition
+// still lands on the page.
 
 import { usePathname } from "next/navigation";
 import { useEffect, useRef } from "react";
+
+import type { BrowserNavigation } from "@/lib/browser/browser";
 
 import {
   createNavTimingMetrics,
@@ -112,8 +115,11 @@ export function setNavFallbackMs(ms: number): void {
   if (Number.isFinite(ms) && ms > 0) state.metrics.fallbackMs = ms;
 }
 
-export function markNavIntent(href?: string): void {
-  if (typeof window === "undefined") return;
+// meiva:note
+// A navigation starts here: the caller passes the page's own navigation port, so
+// the fallback below can check where the page actually is and send it there
+// without this module reading the window.
+export function markNavIntent(navigation: BrowserNavigation, href?: string): void {
   state.metrics.intentAt = performance.now();
   state.metrics.intentPath = href ?? null;
   startWatching();
@@ -122,7 +128,7 @@ export function markNavIntent(href?: string): void {
   const target: string = state.metrics.intentPath;
   state.fallbackTimer = setTimeout(() => {
     state.fallbackTimer = null;
-    if (window.location.pathname === target) return;
+    if (navigation.location()?.pathname === target) return;
     const elapsed =
       state.metrics.intentAt === null ? 0 : performance.now() - state.metrics.intentAt;
     stopFrames();
@@ -141,7 +147,7 @@ export function markNavIntent(href?: string): void {
       value: state.metrics.resourceNames.join(","),
       dedupe: false,
     });
-    window.location.assign(target);
+    navigation.assign(target);
   }, state.metrics.fallbackMs);
 }
 

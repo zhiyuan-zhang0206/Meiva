@@ -2,12 +2,8 @@
 // lifecycle action. Tested in isolation (no menu) — submit is gated on a
 // non-empty trimmed value, submit forwards the trimmed text, Cancel closes.
 
-import {
-  cleanup,
-  fireEvent,
-  render,
-  screen,
-} from "@testing-library/react";
+import { cleanup, fireEvent, screen } from "@testing-library/react";
+import { renderWithBrowser } from "@/test-support/render";
 import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 
 import { pressEnter } from "@/test-support/enter-key";
@@ -32,14 +28,14 @@ const baseProps = {
 
 describe("PromptDialog", () => {
   it("renders the title and the submit button", () => {
-    render(<PromptDialog {...baseProps} />);
+    renderWithBrowser(<PromptDialog {...baseProps} />);
     expect(screen.getByText("Fork Agent #5")).toBeTruthy();
     expect(screen.getByRole("button", { name: "Fork" })).toBeTruthy();
   });
 
   it("submit is disabled while the textarea is empty / whitespace-only", () => {
     const onSubmit = vi.fn();
-    render(<PromptDialog {...baseProps} onSubmit={onSubmit} />);
+    renderWithBrowser(<PromptDialog {...baseProps} onSubmit={onSubmit} />);
     const submit = screen.getByRole<HTMLButtonElement>("button", { name: "Fork" });
     expect(submit.disabled).toBe(true);
     fireEvent.change(screen.getByPlaceholderText("Initial prompt…"), {
@@ -54,7 +50,7 @@ describe("PromptDialog", () => {
   it("submit forwards the trimmed text and requests close", () => {
     const onSubmit = vi.fn();
     const onOpenChange = vi.fn();
-    render(
+    renderWithBrowser(
       <PromptDialog {...baseProps} onSubmit={onSubmit} onOpenChange={onOpenChange} />,
     );
     fireEvent.change(screen.getByPlaceholderText("Initial prompt…"), {
@@ -67,7 +63,7 @@ describe("PromptDialog", () => {
 
   it("Enter in the textarea submits — a prompt is a message", () => {
     const onSubmit = vi.fn();
-    render(<PromptDialog {...baseProps} onSubmit={onSubmit} />);
+    renderWithBrowser(<PromptDialog {...baseProps} onSubmit={onSubmit} />);
     const textarea = screen.getByPlaceholderText("Initial prompt…");
     fireEvent.change(textarea, { target: { value: "go" } });
     fireEvent.keyDown(textarea, { key: "Enter" });
@@ -76,7 +72,7 @@ describe("PromptDialog", () => {
 
   it("Shift+Enter breaks the line instead of forking", () => {
     const onSubmit = vi.fn();
-    render(<PromptDialog {...baseProps} onSubmit={onSubmit} />);
+    renderWithBrowser(<PromptDialog {...baseProps} onSubmit={onSubmit} />);
     const textarea = screen.getByPlaceholderText<HTMLTextAreaElement>("Initial prompt…");
     fireEvent.change(textarea, { target: { value: "firstsecond" } });
     textarea.setSelectionRange(5, 5);
@@ -88,7 +84,7 @@ describe("PromptDialog", () => {
 
   it("Enter during IME composition neither submits nor loses the key", () => {
     const onSubmit = vi.fn();
-    render(<PromptDialog {...baseProps} onSubmit={onSubmit} />);
+    renderWithBrowser(<PromptDialog {...baseProps} onSubmit={onSubmit} />);
     const textarea = screen.getByPlaceholderText("Initial prompt…");
     fireEvent.change(textarea, { target: { value: "\u4f60\u597d" } });
     expect(fireEvent.keyDown(textarea, { key: "Enter", isComposing: true })).toBe(true);
@@ -97,7 +93,7 @@ describe("PromptDialog", () => {
 
   it("a whitespace-only prompt never submits on Enter", () => {
     const onSubmit = vi.fn();
-    render(<PromptDialog {...baseProps} onSubmit={onSubmit} />);
+    renderWithBrowser(<PromptDialog {...baseProps} onSubmit={onSubmit} />);
     const textarea = screen.getByPlaceholderText("Initial prompt…");
     fireEvent.change(textarea, { target: { value: "   " } });
     fireEvent.keyDown(textarea, { key: "Enter" });
@@ -107,7 +103,7 @@ describe("PromptDialog", () => {
   it("Cancel closes without submitting", () => {
     const onSubmit = vi.fn();
     const onOpenChange = vi.fn();
-    render(
+    renderWithBrowser(
       <PromptDialog {...baseProps} onSubmit={onSubmit} onOpenChange={onOpenChange} />,
     );
     fireEvent.click(screen.getByRole("button", { name: "Cancel" }));

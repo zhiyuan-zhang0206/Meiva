@@ -1,5 +1,7 @@
 import { notifyManager, QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { act, cleanup, fireEvent, render as rtlRender, type RenderOptions, screen } from "@testing-library/react";
+import { act, cleanup, fireEvent, screen } from "@testing-library/react";
+
+import { renderWithBrowser, type BrowserRenderOptions } from "@/test-support/render";
 import type { ReactElement, ReactNode } from "react";
 import { vi } from "vitest";
 
@@ -42,8 +44,8 @@ function TimelineQueryWrapper({ children }: { children: ReactNode }) {
   );
 }
 
-export function render(ui: ReactElement, options?: RenderOptions) {
-  return rtlRender(ui, { wrapper: TimelineQueryWrapper, ...options });
+export function render(ui: ReactElement, options?: BrowserRenderOptions) {
+  return renderWithBrowser(ui, { wrapper: TimelineQueryWrapper, ...options });
 }
 
 export function historyWheel(viewport: HTMLElement, deltaY: number, momentum: boolean) {

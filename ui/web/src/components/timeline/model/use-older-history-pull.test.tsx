@@ -1,4 +1,5 @@
-import { act, cleanup, render } from "@testing-library/react";
+import { act, cleanup } from "@testing-library/react";
+import { renderWithBrowser } from "@/test-support/render";
 import { StrictMode, useEffect, useLayoutEffect, useRef } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -51,7 +52,7 @@ describe("native release-to-load older history", () => {
   function setup() {
     const loadPage = vi.fn(() => true);
     const intent = vi.fn();
-    const view = render(<Harness loadPage={loadPage} intent={intent} />);
+    const view = renderWithBrowser(<Harness loadPage={loadPage} intent={intent} />);
     const viewport = view.getByTestId("viewport");
     Object.defineProperty(viewport, "clientHeight", { value: 600, configurable: true });
     Object.defineProperty(viewport, "onscrollend", { value: null, configurable: true });
@@ -92,7 +93,7 @@ describe("native release-to-load older history", () => {
   it("keeps unavailable history in natural flow and prepares only when history arrives", () => {
     const loadPage = vi.fn(() => true);
     const intent = vi.fn();
-    const { getByTestId, rerender } = render(<Harness available={false} loadPage={loadPage} intent={intent} />);
+    const { getByTestId, rerender } = renderWithBrowser(<Harness available={false} loadPage={loadPage} intent={intent} />);
     const viewport = getByTestId("viewport");
     const space = getByTestId("space");
     const content = space.nextElementSibling as HTMLElement;
@@ -111,7 +112,7 @@ describe("native release-to-load older history", () => {
   });
 
   it("keeps one reserve across StrictMode re-attachment and restores natural coordinates on cleanup", () => {
-    const view = render(<StrictMode><Harness loadPage={() => true} intent={vi.fn()} /></StrictMode>);
+    const view = renderWithBrowser(<StrictMode><Harness loadPage={() => true} intent={vi.fn()} /></StrictMode>);
     const viewport = view.getByTestId("viewport");
     expect(view.getByTestId("space").style.height).toBe("80px");
     expect(viewport.scrollTop).toBe(80);

@@ -19,6 +19,7 @@
 // ≤64-char scalars. Session id is a random per-tab uuid — it groups one
 // browser session without carrying identity.
 
+import type { Browser } from "@/lib/browser/browser";
 import { API_BASE, registerTransportTelemetry } from "../transport/api-base";
 import { newOperationKey } from "../transport/operation-key";
 import { systemWallNow } from "../transport/system-transport";
@@ -44,31 +45,36 @@ const runtimeState: {
   warnedOnce: boolean;
   fetchImpl: ((url: string, init: RequestInit) => Promise<unknown>) | undefined;
   wallNow: () => number;
+  browser: Browser | null;
 } = {
   bufferState: createTelemetryBufferState(typeof window !== "undefined"),
   flushTimer: null,
   warnedOnce: false,
   fetchImpl: undefined,
   wallNow: systemWallNow,
+  browser: null,
 };
 
+// meiva:note
+// The composition root wires the page in: `Providers` hands the browser port this
+// module sends through. Until it does — a module graph no root mounted, which is
+// a unit test of some other component — a flush has no page to deliver from and
+// sends nothing, so a test never reaches the network by accident. The telemetry
+// tests wire a fake through this same function, not through a backdoor.
+export function initTelemetry(browser: Browser): void {
+  runtimeState.browser = browser;
+}
+
 function flush(): void {
-  const { bufferState } = runtimeState;
-  if (!bufferState.enabled || bufferState.buffer.length === 0) return;
+  const { bufferState, browser } = runtimeState;
+  if (browser === null || !bufferState.enabled || bufferState.buffer.length === 0) return;
   if (bufferState.sessionId === "") bufferState.sessionId = newOperationKey();
   const batch = takeFlushBatch(bufferState, bufferState.sessionId, runtimeState.wallNow(), API_BASE);
   if (batch === null) return;
   // Beacon first: it survives pagehide/unload and needs no response. When
   // unavailable (or its size limit rejects the batch), fall back to fetch
   // with keepalive.
-  let ok = false;
-  try {
-    if ("sendBeacon" in navigator) {
-      ok = navigator.sendBeacon(batch.url, new Blob([batch.body], { type: "application/json" }));
-    }
-  } catch {
-    ok = false;
-  }
+  const ok = browser.beacon.send(batch.url, batch.body);
   if (!ok) {
     try {
       const sendFetch = runtimeState.fetchImpl ?? fetch;
@@ -151,6 +157,7 @@ function __telemetryResetForTest(): void {
   runtimeState.warnedOnce = false;
   delete runtimeState.fetchImpl;
   runtimeState.wallNow = systemWallNow;
+  runtimeState.browser = null;
   delete testListeners.onTrack;
   delete testListeners.onSetPage;
   delete testListeners.onFlush;

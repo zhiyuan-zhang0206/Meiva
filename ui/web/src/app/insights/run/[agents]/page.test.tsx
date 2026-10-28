@@ -2,6 +2,8 @@ import type * as ApiModule from "@/lib/transport/api";
 import { WallClockProvider } from "@/lib/transport/transport-context";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { act, fireEvent, render as rtlRender, screen, waitFor, within } from "@testing-library/react";
+import { BrowserProvider } from "@/lib/browser/browser-provider";
+import { fakeBrowser } from "@/lib/browser/testing";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import type {
@@ -65,13 +67,15 @@ import {
   messagesResponse,
 } from "./run-timeline-test-fixtures-mock";
 const wallNow = () => Date.now();
-function render({ contextSize = true }: { contextSize?: boolean } = {}) {
+function renderPage({ contextSize = true }: { contextSize?: boolean } = {}) {
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   const view = rtlRender(
     <WallClockProvider wallNow={wallNow}>
+      <BrowserProvider browser={fakeBrowser()}>
       <QueryClientProvider client={queryClient}>
         <RunTimelinePage params={Promise.resolve({ agents: "42" })} />
       </QueryClientProvider>
+      </BrowserProvider>
     </WallClockProvider>,
   );
   if (contextSize) fireEvent.click(screen.getByTestId("agent-view-context-size"));
@@ -148,13 +152,13 @@ afterEach(() => {
 
 describe("the default window", () => {
   it("asks for the latest day with bounded message detail", async () => {
-    render();
+    renderPage();
     await waitFor(() => expect(getRunTimeline).toHaveBeenCalledWith(42, { recentHours: 24, maxUnits: 5000, signal: expect.any(AbortSignal) as AbortSignal }));
     expect(getRunTimeline).toHaveBeenCalledTimes(1);
   });
 
   it("draws every tree level, topmost first, with the message units below", async () => {
-    render();
+    renderPage();
     await screen.findByTestId("run-timeline-chart");
     const rows = screen
       .getAllByTestId(/^run-timeline-row-/)
@@ -175,14 +179,14 @@ describe("the default window", () => {
   });
 
   it("has no compare entry and no session switch", async () => {
-    render();
+    renderPage();
     await screen.findByTestId("run-timeline-chart");
     expect(screen.queryByRole("link", { name: "Compare agents" })).toBeNull();
     expect(screen.queryByRole("button", { name: "Compact session" })).toBeNull();
   });
 
   it("shows the context of a selected request, not the agent's current context", async () => {
-    render();
+    renderPage();
     clickItem(await unitOf("thinking"));
     await waitFor(() => expect(getRunTimelineContext).toHaveBeenCalledWith(42, 7));
     expect(getContextBreakdown).not.toHaveBeenCalled();
@@ -192,7 +196,7 @@ describe("the default window", () => {
 
 describe("ancestors", () => {
   it("lights a node and its ancestors, and steps the others back", async () => {
-    render();
+    renderPage();
     clickItem(await nodeOf("1"));
     expect(await ringOf(await nodeOf("1"))).toBe("primary");
     expect(await ringOf(await nodeOf("3"))).toBe("linked");
@@ -200,7 +204,7 @@ describe("ancestors", () => {
   });
 
   it("lights a message block's covering leaf and every ancestor above it", async () => {
-    render();
+    renderPage();
     clickItem(await unitOf("text"));
     expect(await ringOf(await unitOf("text"))).toBe("primary");
     expect(await ringOf(await nodeOf("1"))).toBe("linked");
@@ -212,7 +216,7 @@ describe("ancestors", () => {
 
 describe("selecting", () => {
   it("shows a node's summary, span and both costs in the side panel", async () => {
-    render();
+    renderPage();
     clickItem(await nodeOf("1"));
 
     const detail = await screen.findByTestId("run-timeline-node-detail");
@@ -233,7 +237,7 @@ describe("selecting", () => {
   });
 
   it("names the agent above its rows with no present-state facts", async () => {
-    render();
+    renderPage();
     expect((await screen.findByRole("heading", { level: 1 })).textContent).toBe("Agent view");
     await waitFor(() => expect(screen.getByTestId("run-timeline-agent").textContent).toBe("Agent #42 · planner"));
     expect(screen.queryByTestId("run-timeline-status")).toBeNull();
@@ -254,7 +258,7 @@ describe("selecting", () => {
       ],
       next_start: null,
     });
-    render();
+    renderPage();
     clickItem(await nodeOf("1"));
     const list = await screen.findByTestId("run-timeline-messages");
     expect((await within(list).findByText("bold")).tagName).toBe("STRONG");
@@ -264,7 +268,7 @@ describe("selecting", () => {
   });
 
   it("reads a unit's own raw parts: a text unit shows the text, not the thinking or the call", async () => {
-    render();
+    renderPage();
     clickItem(await unitOf("text"));
 
     const detail = await screen.findByTestId("run-timeline-unit-detail");
@@ -308,7 +312,7 @@ const summaryText = () => screen.getByTestId("run-timeline-window").textContent;
 
 describe("no drill-in", () => {
   it("a double-click neither zooms nor drills, there is no Drill button, no breadcrumb and no sessions panel", async () => {
-    render();
+    renderPage();
     const whole = (await screen.findByTestId("run-timeline-window")).textContent;
     const target = await nodeOf("1");
     clickItem(target);
@@ -331,7 +335,7 @@ describe("zoom and pan", () => {
   afterEach(() => vi.restoreAllMocks());
 
   it("the wheel zooms around the cursor and the loaded data is not read again", async () => {
-    render();
+    renderPage();
     const chart = await screen.findByTestId("run-timeline-chart");
     const whole = summaryText();
     await wheel(chart, { deltaY: -400, clientX: 100 });
@@ -343,7 +347,7 @@ describe("zoom and pan", () => {
   });
 
   it("wheel events that arrive before React renders compose instead of repeating the old view", async () => {
-    render();
+    renderPage();
     const chart = await screen.findByTestId("run-timeline-chart");
     await wheel(chart, { deltaY: -300, clientX: 600 });
     await wheel(chart, { deltaY: -300, clientX: 600 });
@@ -354,7 +358,7 @@ describe("zoom and pan", () => {
   });
 
   it("a horizontal scroll pans a zoomed view", async () => {
-    render();
+    renderPage();
     const chart = await screen.findByTestId("run-timeline-chart");
     await wheel(chart, { deltaY: -600, clientX: 100 });
     const zoomed = summaryText();
@@ -371,7 +375,7 @@ describe("zoom and pan", () => {
       .mockImplementationOnce((_id, options) => Promise.resolve({
         ...lifetimeResponse, snapshot: "stable", window: { from: options!.from!, to: options!.to! },
       }));
-    render();
+    renderPage();
     const chart = await screen.findByTestId("run-timeline-chart");
     const status = screen.getByTestId("run-timeline-window-status-42");
     expect(status.textContent).toBe("");
@@ -396,7 +400,7 @@ describe("zoom and pan", () => {
   });
 
   it("a drag pans and its release does not select the block under the pointer", async () => {
-    render();
+    renderPage();
     const chart = await screen.findByTestId("run-timeline-chart");
     chart.setPointerCapture = vi.fn();
     await wheel(chart, { deltaY: -600, clientX: 100 });
@@ -413,7 +417,7 @@ describe("zoom and pan", () => {
   });
 
   it("a press that barely moves is still a click", async () => {
-    render();
+    renderPage();
     const human = await unitOf("inbound");
     const unit = screen.getByTestId("run-timeline-canvas-units");
     fireEvent.pointerDown(unit, { clientX: 400, button: 0, pointerId: 1 });
@@ -424,7 +428,7 @@ describe("zoom and pan", () => {
   });
 
   it("the buttons zoom and the fit button restores the whole lifetime", async () => {
-    render();
+    renderPage();
     await screen.findByTestId("run-timeline-chart");
     const whole = summaryText();
     expect(screen.getByRole("button", { name: "Reset zoom" }).hasAttribute("disabled")).toBe(true);

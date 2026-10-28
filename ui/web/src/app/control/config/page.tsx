@@ -51,6 +51,7 @@ import { useTranslations } from "next-intl";
 import { useCallback, useEffect, useState } from "react";
 
 import { DeferredMount } from "@/components/app/deferred-mount";
+import { useBrowser } from "@/lib/browser/browser-provider";
 import { api } from "@/lib/transport/api";
 import { errMsg } from "@/lib/contracts/errors";
 import type {
@@ -116,6 +117,7 @@ function hydrateCollapsedGroups(
 
 export default function ConfigPage() {
   const t = useTranslations("config");
+  const view = useBrowser().view;
   const qc = useQueryClient();
   const visible = useSectionVisible();
   const [selection, setSelection] = useState<MachineSelection>(null);
@@ -286,10 +288,9 @@ export default function ConfigPage() {
   }, [data]);
   useEffect(() => {
     if (!focusedField) return;
-    document
-      .getElementById(`config-field-${focusedField}`)
-      ?.scrollIntoView({ block: "center" });
-  }, [focusedField]);
+    const field = document.getElementById(`config-field-${focusedField}`);
+    if (field) view.scrollIntoView(field, "center");
+  }, [focusedField, view]);
 
   const onSelectMachine = useCallback((next: MachineSelection) => {
     setSelection(next);

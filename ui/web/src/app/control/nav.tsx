@@ -9,6 +9,8 @@
 import { useTranslations } from "next-intl";
 import { useCallback, useEffect, useMemo, useState } from "react";
 
+import type { BrowserView } from "@/lib/browser/browser";
+import { useBrowser } from "@/lib/browser/browser-provider";
 import { useBreakpoint } from "@/lib/layout/breakpoint";
 
 import { controlAnchorIds, type ControlSectionDef } from "./sections";
@@ -75,7 +77,7 @@ function useScrollSpy(anchorIds: readonly string[], scrollId: string): string {
   return activeId;
 }
 
-function scrollToAnchor(id: string) {
+function scrollToAnchor(view: BrowserView, id: string) {
   const el = document.getElementById(id);
   if (!el) return;
   // meiva:note
@@ -83,7 +85,7 @@ function scrollToAnchor(id: string) {
   // clicking a table of contents), not a scroll gesture the user should watch
   // ride out — an animated scroll here just adds latency before the target is
   // readable.
-  el.scrollIntoView({ behavior: "auto", block: "start" });
+  view.scrollIntoView(el, "start");
   // meiva:note
   // Reflect the target in the URL without a history entry per click.
   history.replaceState(null, "", `#${id}`);
@@ -99,6 +101,7 @@ export function ControlNav({
   ariaLabel: string;
 }) {
   const t = useTranslations("control.sections");
+  const view = useBrowser().view;
   // meiva:note
   // R4 layer 4: one responsive mechanism — breakpoint + conditional render
   // (the old always-mounted desktop rail + mobile disclosure pair hid one
@@ -114,9 +117,9 @@ export function ControlNav({
   const [open, setOpen] = useState(false);
 
   const onJump = useCallback((id: string) => {
-    scrollToAnchor(id);
+    scrollToAnchor(view, id);
     setOpen(false);
-  }, []);
+  }, [view]);
 
   // meiva:note
   // A section is active if it or one of its subs is the current anchor.

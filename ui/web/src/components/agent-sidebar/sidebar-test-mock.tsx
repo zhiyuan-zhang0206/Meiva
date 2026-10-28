@@ -1,5 +1,5 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { render } from "@testing-library/react";
+import { renderWithBrowser } from "@/test-support/render";
 import { vi } from "vitest";
 
 import type { StatsWindowHours } from "@/lib/agents/sidebar";
@@ -184,7 +184,7 @@ export function wrap(ui: React.ReactElement) {
     defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
   });
   qc.setQueryData(["alerts"], NO_ALERTS);
-  return render(<QueryClientProvider client={qc}>{ui}</QueryClientProvider>, {
+  return renderWithBrowser(<QueryClientProvider client={qc}>{ui}</QueryClientProvider>, {
     wrapper: gatewayWrapper,
   });
 }

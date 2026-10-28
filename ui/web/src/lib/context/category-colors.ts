@@ -1,6 +1,8 @@
-// Fixed, distinguishable colors per context category (a closed set). Mid-tones
-// that read on both the light and dark popover surface. The context breakdown and the run
-// timeline's blocks draw from this one palette, so a kind has the same color in both.
+// meiva:note
+// Fixed, distinguishable colors per context category (a closed set). Mid-tones that read on both
+// the light and dark popover surface. The context breakdown and the run timeline's blocks draw
+// from this one palette, so a kind has the same color in both.
+// meiva:link ui/web/src/docs/frontend-components/context-breakdown.meiva.okf.md
 export const CATEGORY_COLOR: Record<string, string> = {
   system_prompt: "#6366f1",
   compact_summary: "#a855f7",

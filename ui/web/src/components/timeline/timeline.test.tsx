@@ -6,6 +6,7 @@ import { act, fireEvent, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { useTimelineStore } from "@/lib/timeline/timeline-store";
+import { fakeBrowser } from "@/lib/browser/testing";
 import { ChatMarkdownMock, ScrollAreaMock, cleanupTimelineTest, historyWheel, makeItem, pullOlderAtTop, render, toggleState } from "./view/timeline-test-mock";
 
 vi.mock("@/components/content/markdown", () => ({ ChatMarkdown: ChatMarkdownMock }));
@@ -95,58 +96,28 @@ describe("timeline document work", () => {
 });
 
 describe("CopyButton click behavior", () => {
-  beforeEach(() => {
-    Object.defineProperty(navigator, "clipboard", {
-      value: { writeText: vi.fn().mockResolvedValue(undefined) },
-      writable: true,
-      configurable: true,
-    });
-  });
-
-  it("click copy → calls navigator.clipboard.writeText with chat text", async () => {
-    const writeText = vi.fn().mockResolvedValue(undefined);
-    Object.defineProperty(navigator, "clipboard", {
-      value: { writeText },
-      writable: true,
-      configurable: true,
-    });
+  it("click copy → asks the page to copy the chat text", async () => {
+    const browser = fakeBrowser();
     render(
       <TimelineView
         items={[makeItem({ kind: "agent_chat", payload: "to copy" })]}
       />,
+      { browser },
     );
     fireEvent.click(screen.getByLabelText("Copy message"));
-    // microtask: writeText called
-    await Promise.resolve();
-    expect(writeText).toHaveBeenCalledWith("to copy");
+    await waitFor(() => expect(browser.actions.copied).toEqual(["to copy"]));
   });
 
-  it("navigator.clipboard unavailable (http LAN) → fallback uses document.execCommand('copy') + temporary textarea", async () => {
-    // Simulate missing secure context: clipboard undefined
-    Object.defineProperty(navigator, "clipboard", {
-      value: undefined,
-      writable: true,
-      configurable: true,
-    });
-    const execCommand = vi.fn().mockReturnValue(true);
-    // eslint-disable-next-line @typescript-eslint/no-deprecated, @typescript-eslint/unbound-method -- save the legacy execCommand to restore after the spy; never invoked detached
-    const origExec = document.execCommand;
-    // eslint-disable-next-line @typescript-eslint/no-deprecated -- spy on legacy execCommand fallback path
-    document.execCommand = execCommand as typeof document.execCommand;
-    try {
-      render(
-        <TimelineView
-          items={[makeItem({ kind: "agent_chat", payload: "fallback text" })]}
-        />,
-      );
-      fireEvent.click(screen.getByLabelText("Copy message"));
-      await waitFor(() => expect(execCommand).toHaveBeenCalledWith("copy"));
-      // After copy, icon swaps to "Copied" feedback (aria-label changes)
-      await waitFor(() => expect(screen.getByLabelText("Copied")).toBeTruthy());
-    } finally {
-      // eslint-disable-next-line @typescript-eslint/no-deprecated -- restore original execCommand
-      document.execCommand = origExec;
-    }
+  it("shows the Copied feedback once the page accepted the copy", async () => {
+    const browser = fakeBrowser();
+    render(
+      <TimelineView
+        items={[makeItem({ kind: "agent_chat", payload: "fallback text" })]}
+      />,
+      { browser },
+    );
+    fireEvent.click(screen.getByLabelText("Copy message"));
+    await waitFor(() => expect(screen.getByLabelText("Copied")).toBeTruthy());
   });
 });
 

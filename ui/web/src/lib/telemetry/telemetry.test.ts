@@ -3,26 +3,24 @@
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
+import { fakeBrowser } from "../browser/testing";
 import { API_BASE } from "../transport/api-base";
 import {
+  initTelemetry,
   normalizePage,
   setTelemetryPage,
   telemetryTestControl,
   track,
 } from "./telemetry";
 
-// The telemetry module is browser-only: every test runs against happy-dom's
-// window. State is module-global, so each test resets it (and the timers)
-// first; sendBeacon is stubbed so flushes are observable.
-//
 // Note: the module starts enabled because `typeof window !== "undefined"`
 // under happy-dom — the SSR no-op path is exercised via the disable flag.
 
-function stubBeacon(impl?: (url: string, data?: BodyInit) => boolean) {
+function stubBeacon(impl?: (url: string, body: string) => boolean) {
   const sendBeacon = vi.fn(impl ?? (() => true));
-  Object.defineProperty(navigator, "sendBeacon", {
-    configurable: true,
-    value: sendBeacon,
+  initTelemetry({
+    ...fakeBrowser(),
+    beacon: { send: (url, body) => sendBeacon(url, body) },
   });
   return sendBeacon;
 }
@@ -42,9 +40,8 @@ interface BeaconBody {
 }
 
 /** Parse the JSON payload of the first beacon call. */
-async function beaconBody(sendBeacon: ReturnType<typeof vi.fn>): Promise<BeaconBody> {
-  const blob = sendBeacon.mock.calls[0][1] as Blob;
-  return JSON.parse(await blob.text()) as BeaconBody;
+function beaconBody(sendBeacon: ReturnType<typeof vi.fn>): BeaconBody {
+  return JSON.parse(String(sendBeacon.mock.calls[0][1])) as BeaconBody;
 }
 
 // meiva:note
@@ -90,28 +87,28 @@ describe("normalizePage", () => {
 });
 
 describe("track + flush", () => {
-  it("buffers then flushes one batch with the session id", async () => {
+  it("buffers then flushes one batch with the session id", () => {
     const sendBeacon = stubBeacon();
     track("spawn");
     expect(telemetryTestControl.bufferSize()).toBe(1);
     expect(telemetryTestControl.flush()).toBe(1);
     expect(sendBeacon).toHaveBeenCalledTimes(1);
-    const [url, blob] = sendBeacon.mock.calls[0] as [string, Blob];
+    const [url, payload] = sendBeacon.mock.calls[0];
     expect(url).toBe(`${API_BASE}/api/frontend-telemetry`);
-    expect(blob.type).toBe("application/json");
-    const body = await beaconBody(sendBeacon);
+    expect(JSON.parse(payload)).toBeTypeOf("object");
+    const body = beaconBody(sendBeacon);
     expect(body.session_id).toMatch(/^[0-9a-f-]{8,64}$/);
     expect(body.events).toEqual([
       { page: "unknown", element: "spawn", ts: expect.any(Number) as number },
     ]);
   });
 
-  it("inherits the current page from setTelemetryPage", async () => {
+  it("inherits the current page from setTelemetryPage", () => {
     const sendBeacon = stubBeacon();
     setTelemetryPage("fleet");
     track("spawn");
     expect(telemetryTestControl.flush()).toBe(1);
-    const body = await beaconBody(sendBeacon);
+    const body = beaconBody(sendBeacon);
     expect(body.events[0].page).toBe("fleet");
   });
 
@@ -222,14 +219,14 @@ describe("rate limit", () => {
 });
 
 describe("instrumentation vocabulary", () => {
-  it("accepts performance telemetry elements", async () => {
+  it("accepts performance telemetry elements", () => {
     const sendBeacon = stubBeacon();
     track("api-timing", { key: "status", value: 801, dedupe: false });
     track("composer-latency", { key: "send-to-turn-start", value: 120 });
     track("web-vitals", { key: "fcp", value: 450, dedupe: false });
 
     expect(telemetryTestControl.flush()).toBe(3);
-    const body = await beaconBody(sendBeacon);
+    const body = beaconBody(sendBeacon);
     expect(body.events.map((event) => event.element)).toEqual([
       "api-timing",
       "composer-latency",
@@ -239,13 +236,13 @@ describe("instrumentation vocabulary", () => {
 });
 
 describe("value sanitization", () => {
-  it("serializes booleans and numbers", async () => {
+  it("serializes booleans and numbers", () => {
     const sendBeacon = stubBeacon();
     setTelemetryPage("control/config");
     track("setting-change", { key: "display.show_timestamp_weekday", value: false });
     track("setting-change", { key: "display.timeline_width_ratio", value: 0.4 });
     expect(telemetryTestControl.flush()).toBe(2);
-    const body = await beaconBody(sendBeacon);
+    const body = beaconBody(sendBeacon);
     const byKey = Object.fromEntries(
       body.events
         .filter((e): e is BeaconEvent & { key: string; value: string } => e.key !== undefined)
@@ -255,21 +252,21 @@ describe("value sanitization", () => {
     expect(byKey["display.timeline_width_ratio"]).toBe("0.4");
   });
 
-  it("truncates long strings to 64 chars", async () => {
+  it("truncates long strings to 64 chars", () => {
     const sendBeacon = stubBeacon();
     setTelemetryPage("control/config");
     track("setting-change", { key: "display.custom", value: "x".repeat(200) });
     expect(telemetryTestControl.flush()).toBe(1);
-    const body = await beaconBody(sendBeacon);
+    const body = beaconBody(sendBeacon);
     expect(body.events[0].value).toBe("x".repeat(64));
   });
 
-  it("omits the value for non-scalar payloads", async () => {
+  it("omits the value for non-scalar payloads", () => {
     const sendBeacon = stubBeacon();
     setTelemetryPage("control/config");
     track("setting-change", { key: "display.sidebar_sort", value: { key: "id" } });
     expect(telemetryTestControl.flush()).toBe(1);
-    const body = await beaconBody(sendBeacon);
+    const body = beaconBody(sendBeacon);
     expect("value" in body.events[0]).toBe(false);
   });
 });
@@ -293,7 +290,7 @@ describe("disabled / SSR", () => {
 });
 
 describe("event time", () => {
-  it("stamps each event with the injected wall clock", async () => {
+  it("stamps each event with the injected wall clock", () => {
     const sendBeacon = stubBeacon();
     const clock = steppedClock(1_700_000_000_000);
     telemetryTestControl.setWallNow(clock.now);
@@ -301,7 +298,7 @@ describe("event time", () => {
     clock.advance(5_000);
     track("page-view", { page: "control/config" });
     telemetryTestControl.flush();
-    const body = await beaconBody(sendBeacon);
+    const body = beaconBody(sendBeacon);
     expect(body.events.map((event) => event.ts)).toEqual([1_700_000_000_000, 1_700_000_005_000]);
   });
 });

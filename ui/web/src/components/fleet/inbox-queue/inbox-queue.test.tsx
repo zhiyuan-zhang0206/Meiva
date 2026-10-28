@@ -1,5 +1,6 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { act, cleanup, fireEvent, screen, waitFor, within } from "@testing-library/react";
+import { renderWithBrowser } from "@/test-support/render";
 import type { ComponentProps } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
@@ -34,12 +35,6 @@ const useAllPagesMock = vi.fn<() => PageRow[]>(() => []);
 vi.mock("@/lib/agents/use-all-pages", () => ({ useAllPages: () => useAllPagesMock() }));
 
 import { InboxQueue } from "../inbox-queue";
-
-const scrollIntoViewMock = vi.fn();
-Object.defineProperty(HTMLElement.prototype, "scrollIntoView", {
-  configurable: true,
-  value: scrollIntoViewMock,
-});
 
 afterEach(() => {
   cleanup();
@@ -133,7 +128,7 @@ function renderQueue(
   props: Omit<ComponentProps<typeof InboxQueue>, "agents"> = {},
 ) {
   const qc = new QueryClient({ defaultOptions: { queries: { retry: false }, mutations: { retry: false } } });
-  return render(
+  return renderWithBrowser(
     <QueryClientProvider client={qc}>
       <InboxQueue agents={agents} {...props} />
     </QueryClientProvider>,
@@ -222,7 +217,7 @@ describe("InboxQueue — route anchor", () => {
           n({ id: 2, agent_id: 405, title: "target", priority: "P3" }),
         ],
       });
-      renderQueue(
+      const { browser } = renderQueue(
         [agent({ agent_id: 1 }), agent({ agent_id: 405 })],
         { anchorAgentId: 405 },
       );
@@ -231,7 +226,7 @@ describe("InboxQueue — route anchor", () => {
       const target = screen.getByText("target").closest('[data-testid="inbox-row"]');
       expect(target?.getAttribute("data-anchor-highlighted")).toBe("true");
       expect(target?.className).toContain("bg-primary/10");
-      expect(scrollIntoViewMock).toHaveBeenCalledWith({ block: "nearest" });
+      expect(browser.actions.scrolled).toEqual([{ target, block: "nearest" }]);
 
       await act(() => vi.advanceTimersByTime(1_600));
       expect(target?.getAttribute("data-anchor-highlighted")).toBeNull();
@@ -249,7 +244,7 @@ describe("InboxQueue — route anchor", () => {
         n({ id: 2, agent_id: 2, title: "second", priority: "P3" }),
       ],
     });
-    renderQueue(
+    const { browser } = renderQueue(
       [agent({ agent_id: 1 }), agent({ agent_id: 2 })],
       { anchorAgentId: 405 },
     );
@@ -257,7 +252,7 @@ describe("InboxQueue — route anchor", () => {
     expect(listTitles()).toEqual(["first", "second"]);
     expect(screen.getByRole("heading", { name: "first" })).toBeTruthy();
     expect(document.querySelector('[data-anchor-highlighted="true"]')).toBeNull();
-    expect(scrollIntoViewMock).not.toHaveBeenCalled();
+    expect(browser.actions.scrolled).toEqual([]);
   });
 });
 

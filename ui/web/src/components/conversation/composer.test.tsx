@@ -1,5 +1,6 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { cleanup, fireEvent, render as rtlRender, screen, waitFor } from "@testing-library/react";
+import { cleanup, fireEvent, screen, waitFor } from "@testing-library/react";
+import { renderWithBrowser } from "@/test-support/render";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { api } from "@/lib/transport/api";
 import { interactionTimingResetForTest, noteTurnStart } from "@/lib/format/interaction-timing";
@@ -49,15 +50,15 @@ const baseProps = {
   onStop: vi.fn(),
 };
 
-function render(ui: React.ReactElement) {
+function renderComposerTree(ui: React.ReactElement) {
   const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
-  return rtlRender(ui, { wrapper: ({ children }) =>
+  return renderWithBrowser(ui, { wrapper: ({ children }) =>
     <QueryClientProvider client={qc}>{children}</QueryClientProvider> });
 }
 
 describe("Composer placeholder", () => {
   it("explains that messaging a terminated agent resurrects it", () => {
-    const { rerender } = render(<Composer {...baseProps} mode="idle" />);
+    const { rerender } = renderComposerTree(<Composer {...baseProps} mode="idle" />);
     expect(screen.getByTestId("composer-input").getAttribute("placeholder")).toBe(
       "Send a message",
     );
@@ -76,7 +77,7 @@ describe("Composer reply suggestion", () => {
   }
   it("browses numbered candidates in the placeholder and sends only the accepted text", async () => {
     const onSend = vi.fn(() => Promise.resolve(true));
-    render(<Composer {...baseProps} mode="idle" onSend={onSend} suggestions={["Use A.", "Use B.", "Use C.", "Use D."]} />);
+    renderComposerTree(<Composer {...baseProps} mode="idle" onSend={onSend} suggestions={["Use A.", "Use B.", "Use C.", "Use D."]} />);
     expect(input().placeholder).toBe("[1/4] Use A.");
     fireEvent.keyDown(input(), { key: "Enter" });
     expect(onSend).not.toHaveBeenCalled();
@@ -105,7 +106,7 @@ describe("Composer reply suggestion", () => {
     expect(input().value).toBe("");
   });
   it("stops at the first and last candidate instead of wrapping around", () => {
-    render(<Composer {...baseProps} mode="idle" suggestions={["Use A.", "Use B.", "Use C."]} />);
+    renderComposerTree(<Composer {...baseProps} mode="idle" suggestions={["Use A.", "Use B.", "Use C."]} />);
     expect(input().placeholder).toBe("[1/3] Use A.");
     fireEvent.keyDown(input(), { key: "ArrowUp" });
     expect(input().placeholder).toBe("[1/3] Use A.");
@@ -127,7 +128,7 @@ describe("Composer reply suggestion", () => {
     expect(input().placeholder).toBe("[1/3] Use A.");
   });
   it("restores the selected candidate when an accepted or edited draft is cleared", async () => {
-    render(<Composer {...baseProps} mode="idle" suggestions={["Use A.", "Use B.", "Use C."]} />);
+    renderComposerTree(<Composer {...baseProps} mode="idle" suggestions={["Use A.", "Use B.", "Use C."]} />);
     fireEvent.keyDown(input(), { key: "ArrowDown" });
     fireEvent.keyDown(input(), { key: "ArrowRight" });
     await waitFor(() => expect(input().value).toBe("Use B."));
@@ -140,7 +141,7 @@ describe("Composer reply suggestion", () => {
   it("keeps the selected candidate after a failed send and shows new candidates after success", async () => {
     const onSend = vi.fn().mockResolvedValueOnce(false).mockResolvedValueOnce(true);
     const options = ["Use A.", "Use B."];
-    const { rerender } = render(<Composer {...baseProps} mode="idle" onSend={onSend} suggestions={options} />);
+    const { rerender } = renderComposerTree(<Composer {...baseProps} mode="idle" onSend={onSend} suggestions={options} />);
     fireEvent.keyDown(input(), { key: "ArrowDown" });
     fireEvent.keyDown(input(), { key: "ArrowRight" });
     fireEvent.keyDown(input(), { key: "Enter" });
@@ -158,7 +159,7 @@ describe("Composer reply suggestion", () => {
   });
   it("resets to the first candidate for a new response or another agent", () => {
     const options = ["Use A.", "Use B."];
-    const { rerender } = render(<Composer {...baseProps} mode="idle" agentId={7} suggestions={options} />);
+    const { rerender } = renderComposerTree(<Composer {...baseProps} mode="idle" agentId={7} suggestions={options} />);
     fireEvent.keyDown(input(), { key: "ArrowDown" });
     expect(input().placeholder).toBe("[2/2] Use B.");
     rerender(<Composer {...baseProps} mode="idle" agentId={8} suggestions={options} />);
@@ -168,13 +169,13 @@ describe("Composer reply suggestion", () => {
     expect(input().placeholder).toBe("[1/2] Explain X.");
   });
   it.each(["ArrowUp", "ArrowDown", "ArrowRight"])("leaves %s to the input method during composition", (key) => {
-    render(<Composer {...baseProps} mode="idle" suggestions={["Use A.", "Use B."]} />);
+    renderComposerTree(<Composer {...baseProps} mode="idle" suggestions={["Use A.", "Use B."]} />);
     expect(fireEvent.keyDown(input(), { key, isComposing: true })).toBe(true);
     expect(input().placeholder).toBe("[1/2] Use A.");
     expect(input().value).toBe("");
   });
   it.each(["ArrowUp", "ArrowDown"])("leaves modified %s and nonempty drafts alone", (key) => {
-    render(<Composer {...baseProps} mode="idle" suggestions={["Use A.", "Use B."]} />);
+    renderComposerTree(<Composer {...baseProps} mode="idle" suggestions={["Use A.", "Use B."]} />);
     for (const modifier of [{ shiftKey: true }, { ctrlKey: true }, { altKey: true }, { metaKey: true }]) {
       expect(fireEvent.keyDown(input(), { key, ...modifier })).toBe(true);
       expect(input().placeholder).toBe("[1/2] Use A.");
@@ -185,12 +186,12 @@ describe("Composer reply suggestion", () => {
     expect(input().placeholder).toBe("Send a message");
   });
   it("shows the suggestion as the placeholder of the empty input", () => {
-    render(<Composer {...baseProps} mode="idle" suggestions={[SUGGESTION]} />);
+    renderComposerTree(<Composer {...baseProps} mode="idle" suggestions={[SUGGESTION]} />);
     expect(input().getAttribute("placeholder")).toBe(SUGGESTION);
     expect(input().value).toBe("");
   });
   it("ArrowRight accepts it: the input holds the text and the caret is at the end", async () => {
-    render(<Composer {...baseProps} mode="idle" suggestions={[SUGGESTION]} />);
+    renderComposerTree(<Composer {...baseProps} mode="idle" suggestions={[SUGGESTION]} />);
     const notPrevented = fireEvent.keyDown(input(), { key: "ArrowRight" });
     expect(notPrevented).toBe(false);
     await waitFor(() => {
@@ -203,7 +204,7 @@ describe("Composer reply suggestion", () => {
   });
   it("an accepted suggestion is an ordinary draft: Enter sends it", async () => {
     const onSend = vi.fn(() => Promise.resolve(true));
-    render(<Composer {...baseProps} mode="idle" onSend={onSend} suggestions={[SUGGESTION]} />);
+    renderComposerTree(<Composer {...baseProps} mode="idle" onSend={onSend} suggestions={[SUGGESTION]} />);
     fireEvent.keyDown(input(), { key: "ArrowRight" });
     await waitFor(() => {
       expect(input().value).toBe(SUGGESTION);
@@ -214,14 +215,14 @@ describe("Composer reply suggestion", () => {
     });
   });
   it("typing hides it, and emptying the input brings it back", () => {
-    render(<Composer {...baseProps} mode="idle" suggestions={[SUGGESTION]} />);
+    renderComposerTree(<Composer {...baseProps} mode="idle" suggestions={[SUGGESTION]} />);
     fireEvent.change(input(), { target: { value: "n" } });
     expect(input().getAttribute("placeholder")).toBe("Send a message");
     fireEvent.change(input(), { target: { value: "" } });
     expect(input().getAttribute("placeholder")).toBe(SUGGESTION);
   });
   it("ArrowRight in a non-empty input moves the caret as usual", () => {
-    render(<Composer {...baseProps} mode="idle" suggestions={[SUGGESTION]} />);
+    renderComposerTree(<Composer {...baseProps} mode="idle" suggestions={[SUGGESTION]} />);
     fireEvent.change(input(), { target: { value: "draft" } });
     const notPrevented = fireEvent.keyDown(input(), { key: "ArrowRight" });
     expect(notPrevented).toBe(true);
@@ -233,30 +234,30 @@ describe("Composer reply suggestion", () => {
     ["Alt", { altKey: true }],
     ["Meta", { metaKey: true }],
   ])("%s+ArrowRight does not accept it", (_name, modifier) => {
-    render(<Composer {...baseProps} mode="idle" suggestions={[SUGGESTION]} />);
+    renderComposerTree(<Composer {...baseProps} mode="idle" suggestions={[SUGGESTION]} />);
     const notPrevented = fireEvent.keyDown(input(), { key: "ArrowRight", ...modifier });
     expect(notPrevented).toBe(true);
     expect(input().value).toBe("");
   });
   it("ArrowRight during IME composition is left to the input method", () => {
-    render(<Composer {...baseProps} mode="idle" suggestions={[SUGGESTION]} />);
+    renderComposerTree(<Composer {...baseProps} mode="idle" suggestions={[SUGGESTION]} />);
     const notPrevented = fireEvent.keyDown(input(), { key: "ArrowRight", isComposing: true });
     expect(notPrevented).toBe(true);
     expect(input().value).toBe("");
   });
   it("without a suggestion ArrowRight does nothing special", () => {
-    render(<Composer {...baseProps} mode="idle" />);
+    renderComposerTree(<Composer {...baseProps} mode="idle" />);
     const notPrevented = fireEvent.keyDown(input(), { key: "ArrowRight" });
     expect(notPrevented).toBe(true);
     expect(input().value).toBe("");
   });
   it("a suggestion that goes away restores the normal placeholder", () => {
-    const { rerender } = render(<Composer {...baseProps} mode="idle" suggestions={[SUGGESTION]} />);
+    const { rerender } = renderComposerTree(<Composer {...baseProps} mode="idle" suggestions={[SUGGESTION]} />);
     rerender(<Composer {...baseProps} mode="idle" suggestions={null} />);
     expect(input().getAttribute("placeholder")).toBe("Send a message");
   });
   it("works while the agent is busy: the user may queue a reply", async () => {
-    render(<Composer {...baseProps} mode="busy" suggestions={[SUGGESTION]} />);
+    renderComposerTree(<Composer {...baseProps} mode="busy" suggestions={[SUGGESTION]} />);
     fireEvent.keyDown(input(), { key: "ArrowRight" });
     await waitFor(() => {
       expect(input().value).toBe(SUGGESTION);
@@ -266,7 +267,7 @@ describe("Composer reply suggestion", () => {
 
 describe("Composer button mode dispatch", () => {
   it("root is width-capped, centered, aligned with the timeline width", () => {
-    render(<Composer {...baseProps} mode="idle" maxWidthCss="min(40vw, 1280px)" />);
+    renderComposerTree(<Composer {...baseProps} mode="idle" maxWidthCss="min(40vw, 1280px)" />);
     const root = screen.getByTestId("composer");
     expect(root.className).toContain("mx-auto");
     expect(root.className).toContain("w-full");
@@ -274,19 +275,19 @@ describe("Composer button mode dispatch", () => {
     expect(root.style.maxWidth).toBe("min(40vw, 1280px)");
   });
   it("uses the tighter bottom gap without changing the textarea height", () => {
-    render(<Composer {...baseProps} mode="idle" />);
+    renderComposerTree(<Composer {...baseProps} mode="idle" />);
     const root = screen.getByTestId("composer");
     expect(root.className).toContain("pb-3");
     expect(root.className).not.toContain("pb-5");
     expect(screen.getByTestId("composer-input").className).toContain("min-h-9");
   });
   it("root maxWidth follows the maxWidthCss prop (setting-derived)", () => {
-    render(<Composer {...baseProps} mode="idle" maxWidthCss="min(60vw, 1280px)" />);
+    renderComposerTree(<Composer {...baseProps} mode="idle" maxWidthCss="min(60vw, 1280px)" />);
     const root = screen.getByTestId("composer");
     expect(root.style.maxWidth).toBe("min(60vw, 1280px)");
   });
   it("undefined maxWidthCss (mobile) → no inline maxWidth, full-width", () => {
-    render(<Composer {...baseProps} mode="idle" maxWidthCss={undefined} />);
+    renderComposerTree(<Composer {...baseProps} mode="idle" maxWidthCss={undefined} />);
     const root = screen.getByTestId("composer");
     expect(root.style.maxWidth).toBe("");
     expect(root.className).toContain("w-full");
@@ -295,7 +296,7 @@ describe("Composer button mode dispatch", () => {
   it("mode='idle' + non-empty input → click triggers onSend, not onStop", async () => {
     const onSend = vi.fn(() => Promise.resolve(true));
     const onStop = vi.fn();
-    render(<Composer {...baseProps} mode="idle" onSend={onSend} onStop={onStop} />);
+    renderComposerTree(<Composer {...baseProps} mode="idle" onSend={onSend} onStop={onStop} />);
     const ta = screen.getByTestId<HTMLTextAreaElement>("composer-input");
     fireEvent.change(ta, { target: { value: "hello" } });
     fireEvent.click(screen.getByRole("button", { name: "Send message" }));
@@ -315,7 +316,7 @@ describe("Composer button mode dispatch", () => {
       latencyRecordedBeforeSendResolves = telemetryTestControl.bufferSize();
       return new Promise<boolean>(() => undefined);
     });
-    render(<Composer {...baseProps} agentId={42} mode="idle" onSend={onSend} />);
+    renderComposerTree(<Composer {...baseProps} agentId={42} mode="idle" onSend={onSend} />);
     fireEvent.change(screen.getByTestId("composer-input"), { target: { value: "hello" } });
     fireEvent.click(screen.getByRole("button", { name: "Send message" }));
     expect(onSend).toHaveBeenCalledOnce();
@@ -324,7 +325,7 @@ describe("Composer button mode dispatch", () => {
   it("mode='busy' + non-empty input → click triggers onSend (goes through inbound queue, doesn't stop turn)", async () => {
     const onSend = vi.fn(() => Promise.resolve(true));
     const onStop = vi.fn();
-    render(<Composer {...baseProps} mode="busy" onSend={onSend} onStop={onStop} />);
+    renderComposerTree(<Composer {...baseProps} mode="busy" onSend={onSend} onStop={onStop} />);
     const ta = screen.getByTestId<HTMLTextAreaElement>("composer-input");
     fireEvent.change(ta, { target: { value: "draft" } });
     fireEvent.click(screen.getByRole("button", { name: "Send message" }));
@@ -335,12 +336,12 @@ describe("Composer button mode dispatch", () => {
   });
   it("mode='busy' + empty input → click triggers onStop (cancel path)", () => {
     const onStop = vi.fn();
-    render(<Composer {...baseProps} mode="busy" onStop={onStop} />);
+    renderComposerTree(<Composer {...baseProps} mode="busy" onStop={onStop} />);
     fireEvent.click(screen.getByRole("button", { name: "Stop current turn" }));
     expect(onStop).toHaveBeenCalled();
   });
   it("mode='busy' typing a char → aria-label switches from 'Stop current turn' to 'Send message'", () => {
-    render(<Composer {...baseProps} mode="busy" />);
+    renderComposerTree(<Composer {...baseProps} mode="busy" />);
     expect(screen.getByRole("button").getAttribute("aria-label")).toBe("Stop current turn");
     const ta = screen.getByTestId<HTMLTextAreaElement>("composer-input");
     fireEvent.change(ta, { target: { value: "x" } });
@@ -349,7 +350,7 @@ describe("Composer button mode dispatch", () => {
     expect(screen.getByRole("button").getAttribute("aria-label")).toBe("Stop current turn");
   });
   it("mode='busy' + whitespace-only → button still stop (empty after trim; guards against .trim() being silently dropped, flipping to send)", () => {
-    render(<Composer {...baseProps} mode="busy" />);
+    renderComposerTree(<Composer {...baseProps} mode="busy" />);
     const ta = screen.getByTestId<HTMLTextAreaElement>("composer-input");
     fireEvent.change(ta, { target: { value: "   \n  " } });
     expect(screen.getByRole("button").getAttribute("aria-label")).toBe("Stop current turn");
@@ -357,7 +358,7 @@ describe("Composer button mode dispatch", () => {
   it("mode='disabled' → button disabled, neither onSend nor onStop fires", () => {
     const onSend = vi.fn(() => Promise.resolve(true));
     const onStop = vi.fn();
-    render(<Composer {...baseProps} mode="disabled" onSend={onSend} onStop={onStop} />);
+    renderComposerTree(<Composer {...baseProps} mode="disabled" onSend={onSend} onStop={onStop} />);
     const btn = screen.getByRole<HTMLButtonElement>("button");
     expect(btn.disabled).toBe(true);
     fireEvent.click(btn);
@@ -365,12 +366,12 @@ describe("Composer button mode dispatch", () => {
     expect(onStop).not.toHaveBeenCalled();
   });
   it("mode='idle' + empty input → button disabled (empty send is meaningless)", () => {
-    render(<Composer {...baseProps} mode="idle" />);
+    renderComposerTree(<Composer {...baseProps} mode="idle" />);
     const btn = screen.getByRole<HTMLButtonElement>("button", { name: "Send message" });
     expect(btn.disabled).toBe(true);
   });
   it("aria-label follows mode ('Send message' ↔ 'Stop current turn')", () => {
-    const { rerender } = render(<Composer {...baseProps} mode="idle" />);
+    const { rerender } = renderComposerTree(<Composer {...baseProps} mode="idle" />);
     expect(screen.getByRole("button").getAttribute("aria-label")).toBe("Send message");
     rerender(<Composer {...baseProps} mode="busy" />);
     expect(screen.getByRole("button").getAttribute("aria-label")).toBe("Stop current turn");
@@ -380,7 +381,7 @@ describe("Composer button mode dispatch", () => {
 describe("Composer Enter / IME / Shift+Enter", () => {
   it("plain Enter → triggers action (onSend when idle)", async () => {
     const onSend = vi.fn(() => Promise.resolve(true));
-    render(<Composer {...baseProps} mode="idle" onSend={onSend} />);
+    renderComposerTree(<Composer {...baseProps} mode="idle" onSend={onSend} />);
     const ta = screen.getByTestId<HTMLTextAreaElement>("composer-input");
     fireEvent.change(ta, { target: { value: "msg" } });
     fireEvent.keyDown(ta, { key: "Enter" });
@@ -391,7 +392,7 @@ describe("Composer Enter / IME / Shift+Enter", () => {
   it("Enter in mode='busy' goes to onSend, not onStop (stop is click-only)", async () => {
     const onSend = vi.fn(() => Promise.resolve(true));
     const onStop = vi.fn();
-    render(<Composer {...baseProps} mode="busy" onSend={onSend} onStop={onStop} />);
+    renderComposerTree(<Composer {...baseProps} mode="busy" onSend={onSend} onStop={onStop} />);
     const ta = screen.getByTestId<HTMLTextAreaElement>("composer-input");
     fireEvent.change(ta, { target: { value: "draft" } });
     fireEvent.keyDown(ta, { key: "Enter" });
@@ -403,7 +404,7 @@ describe("Composer Enter / IME / Shift+Enter", () => {
   it("mode='busy' + empty input → Enter no-op (nothing to send, also not stop)", async () => {
     const onSend = vi.fn(() => Promise.resolve(true));
     const onStop = vi.fn();
-    render(<Composer {...baseProps} mode="busy" onSend={onSend} onStop={onStop} />);
+    renderComposerTree(<Composer {...baseProps} mode="busy" onSend={onSend} onStop={onStop} />);
     const ta = screen.getByTestId<HTMLTextAreaElement>("composer-input");
     fireEvent.keyDown(ta, { key: "Enter" });
     await Promise.resolve();
@@ -412,7 +413,7 @@ describe("Composer Enter / IME / Shift+Enter", () => {
   });
   it("IME composing (isComposing=true) → Enter does not trigger (CJK pinyin must be protected)", async () => {
     const onSend = vi.fn(() => Promise.resolve(true));
-    render(<Composer {...baseProps} mode="idle" onSend={onSend} />);
+    renderComposerTree(<Composer {...baseProps} mode="idle" onSend={onSend} />);
     const ta = screen.getByTestId<HTMLTextAreaElement>("composer-input");
     fireEvent.change(ta, { target: { value: "\u4f60\u597d" } });
     fireEvent.keyDown(ta, { key: "Enter", isComposing: true });
@@ -421,7 +422,7 @@ describe("Composer Enter / IME / Shift+Enter", () => {
   });
   it("IME Process key fallback → Enter does not trigger (even with isComposing=false)", async () => {
     const onSend = vi.fn(() => Promise.resolve(true));
-    render(<Composer {...baseProps} mode="idle" onSend={onSend} />);
+    renderComposerTree(<Composer {...baseProps} mode="idle" onSend={onSend} />);
     const ta = screen.getByTestId<HTMLTextAreaElement>("composer-input");
     fireEvent.change(ta, { target: { value: "\u4f60\u597d" } });
     fireEvent.keyDown(ta, { key: "Process", isComposing: false });
@@ -430,7 +431,7 @@ describe("Composer Enter / IME / Shift+Enter", () => {
   });
   it("Shift+Enter → does not trigger send (default newline behavior, let textarea handle it)", async () => {
     const onSend = vi.fn(() => Promise.resolve(true));
-    render(<Composer {...baseProps} mode="idle" onSend={onSend} />);
+    renderComposerTree(<Composer {...baseProps} mode="idle" onSend={onSend} />);
     const ta = screen.getByTestId<HTMLTextAreaElement>("composer-input");
     fireEvent.change(ta, { target: { value: "line1" } });
     fireEvent.keyDown(ta, { key: "Enter", shiftKey: true });
@@ -439,7 +440,7 @@ describe("Composer Enter / IME / Shift+Enter", () => {
   });
   it("Shift+Enter breaks the line at the caret and keeps the draft", async () => {
     const onSend = vi.fn(() => Promise.resolve(true));
-    render(<Composer {...baseProps} mode="idle" onSend={onSend} />);
+    renderComposerTree(<Composer {...baseProps} mode="idle" onSend={onSend} />);
     const ta = screen.getByTestId<HTMLTextAreaElement>("composer-input");
     fireEvent.change(ta, { target: { value: "firstsecond" } });
     ta.setSelectionRange(5, 5);
@@ -451,7 +452,7 @@ describe("Composer Enter / IME / Shift+Enter", () => {
   });
   it("the legacy IME key code 229 → Enter does not trigger", async () => {
     const onSend = vi.fn(() => Promise.resolve(true));
-    render(<Composer {...baseProps} mode="idle" onSend={onSend} />);
+    renderComposerTree(<Composer {...baseProps} mode="idle" onSend={onSend} />);
     const ta = screen.getByTestId<HTMLTextAreaElement>("composer-input");
     fireEvent.change(ta, { target: { value: "\u4f60\u597d" } });
     fireEvent.keyDown(ta, { key: "Enter", keyCode: 229 });

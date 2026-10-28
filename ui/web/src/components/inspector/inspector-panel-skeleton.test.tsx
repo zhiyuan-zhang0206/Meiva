@@ -1,4 +1,5 @@
-import { render, screen } from "@testing-library/react";
+import { screen } from "@testing-library/react";
+import { renderWithBrowser } from "@/test-support/render";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 import {
@@ -18,7 +19,7 @@ describe("InspectorPanelSkeleton", () => {
   });
 
   it("mirrors the real panel's sections and draws no header on desktop", () => {
-    const { container } = render(<InspectorPanelSkeleton />);
+    const { container } = renderWithBrowser(<InspectorPanelSkeleton />);
 
     const aside = screen.getByTestId("inspector-panel-skeleton");
     expect(aside).toBeTruthy();
@@ -35,7 +36,7 @@ describe("InspectorPanelSkeleton", () => {
 
   it("renders full-screen overlay container on mobile", () => {
     window.innerWidth = 375;
-    render(<InspectorPanelSkeleton />);
+    renderWithBrowser(<InspectorPanelSkeleton />);
 
     const aside = screen.getByTestId("inspector-panel-skeleton");
     expect(aside.parentElement?.className.split(" ")).toEqual(
@@ -47,7 +48,7 @@ describe("InspectorPanelSkeleton", () => {
 
 describe("Individual Skeletons", () => {
   it("SectionSkeleton renders the given title in aria-label and row count", () => {
-    render(<SectionSkeleton title="Test Section" rows={3} />);
+    renderWithBrowser(<SectionSkeleton title="Test Section" rows={3} />);
     const section = screen.getByLabelText("Test Section loading");
     expect(section).toBeTruthy();
     const rows = section.querySelectorAll(".grid > div");
@@ -55,7 +56,7 @@ describe("Individual Skeletons", () => {
   });
 
   it("LiveSectionsSkeleton renders shells, liveness, config overlay and context", () => {
-    render(<LiveSectionsSkeleton />);
+    renderWithBrowser(<LiveSectionsSkeleton />);
     expect(screen.getByLabelText("Persistent shells loading")).toBeTruthy();
     expect(screen.getByLabelText("Liveness loading")).toBeTruthy();
     expect(screen.getByLabelText("Configuration overlay loading")).toBeTruthy();
@@ -63,7 +64,7 @@ describe("Individual Skeletons", () => {
   });
 
   it("WindowedSectionsSkeleton renders the merged cost and activity section", () => {
-    render(<WindowedSectionsSkeleton />);
+    renderWithBrowser(<WindowedSectionsSkeleton />);
     expect(screen.getByLabelText("Activity loading")).toBeTruthy();
   });
 });
