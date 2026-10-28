@@ -334,7 +334,12 @@ def test_closure_error_releases_the_allocation_fence(live_session: MakeSession) 
     control = FakeProcessControl(groups={session.pid: session.pid, os.getpid(): os.getpgrp()})
     control.refuse(session.pid, PermissionError("group signal denied"))
     refusing = PtyService(
-        home=meiva_home(), process_control=control, now=float, timers=SYSTEM_TIMERS, pid=os.getpid()
+        home=meiva_home(),
+        base_environ=dict(os.environ),
+        process_control=control,
+        now=float,
+        timers=SYSTEM_TIMERS,
+        pid=os.getpid(),
     )
     refusing._sessions[session.name] = session
 
@@ -390,6 +395,7 @@ def test_a_session_transcript_is_opened_in_the_logs_of_the_service_home(tmp_path
     served_home.mkdir()
     service = PtyService(
         home=served_home,
+        base_environ=dict(os.environ),
         process_control=SYSTEM_PROCESS_CONTROL,
         now=time.time,
         timers=SYSTEM_TIMERS,
