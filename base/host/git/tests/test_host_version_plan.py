@@ -1,0 +1,109 @@
+# meiva:note
+# What the host version is made of, asserted as values: the version grammar, how a pyproject text
+# and `git log` output become a version and how a derived version is shown. No git runs and no file
+# is read; `test_host_version.py` derives versions from real checkouts.
+
+from __future__ import annotations
+
+import pytest
+
+from base.host.git.host_version_plan import (
+    PyprojectVersion,
+    Version,
+    derived_from_log,
+    display_form,
+    parse_version,
+    version_from_pyproject,
+)
+
+
+@pytest.mark.parametrize(
+    ("raw", "version"),
+    [
+        ("1", Version(1)),
+        ("1.2", Version(1, 2)),
+        ("2026.3.5", Version(2026, 3, 5)),
+        ("  0.1.5 \n", Version(0, 1, 5)),
+        ("1.2.3-rc1", Version(1, 2, 3, "rc.1")),
+        ("1.2.3-beta", Version(1, 2, 3, "b.0")),
+        ("1.2.3-alpha.4", Version(1, 2, 3, "a.4")),
+        ("1.2.3-Custom", Version(1, 2, 3, "custom")),
+    ],
+)
+def test_a_version_parses_into_three_segments_and_a_normal_prerelease(
+    raw: str, version: Version
+) -> None:
+    assert parse_version(raw) == version
+
+
+@pytest.mark.parametrize("raw", ["", "x", "1.2.3.4", "v1.2.3", "1..2", "1.2.3-"])
+def test_text_that_is_not_a_version_does_not_parse(raw: str) -> None:
+    assert parse_version(raw) is None
+
+
+def test_versions_order_by_segments_and_a_prerelease_sorts_below_its_release() -> None:
+    ordered = ["1.2.3-dev", "1.2.3-a1", "1.2.3-b2", "1.2.3-rc1", "1.2.3", "1.2.4", "1.10.0", "2"]
+    versions = [parse_version(raw) for raw in ordered]
+
+    assert all(v is not None for v in versions)
+    assert sorted(v for v in versions if v is not None) == [v for v in versions if v is not None]
+    release = parse_version("1.2.3")
+    same = parse_version("1.2.3")
+    candidate = parse_version("1.2.3-rc1")
+    assert release is not None and same is not None and candidate is not None
+    assert candidate < release
+    assert not release < same
+
+
+def test_a_pyproject_with_a_version_yields_it() -> None:
+    raw = '[project]\nname = "meiva"\nversion = "0.1.5"\n'
+
+    assert version_from_pyproject(raw, "/r/pyproject.toml") == PyprojectVersion("0.1.5", None)
+
+
+def test_a_pyproject_that_is_not_toml_yields_the_parse_error() -> None:
+    parsed = version_from_pyproject("[project\nversion = ", "/r/pyproject.toml")
+
+    assert parsed.version is None
+    assert parsed.error is not None
+    assert parsed.error.startswith("cannot determine host version: ")
+
+
+@pytest.mark.parametrize(
+    "raw",
+    [
+        "",
+        '[tool.x]\nversion = "1.0"\n',
+        "[project]\nname = 'meiva'\n",
+        '[project]\nversion = "not-a-version"\n',
+        "[project]\nversion = 5\n",
+    ],
+)
+def test_a_pyproject_without_a_usable_version_names_the_file(raw: str) -> None:
+    assert version_from_pyproject(raw, "/r/pyproject.toml") == PyprojectVersion(
+        None, "cannot determine host version: /r/pyproject.toml [project].version invalid"
+    )
+
+
+@pytest.mark.parametrize(
+    ("returncode", "stdout", "derived"),
+    [
+        (0, "2026-03-05|abc1234\n", ("2026.3.5", "abc1234")),
+        (0, "2027-11-30|f00\n", ("2027.11.30", "f00")),
+        (0, "2026-03-05|\n", ("2026.3.5", "")),
+        (0, "  2026-01-02|a1b2c3d  ", ("2026.1.2", "a1b2c3d")),
+        (1, "2026-03-05|abc1234\n", None),
+        (0, "", None),
+        (0, "not-a-date|abc\n", None),
+        (0, "2026-03|abc\n", None),
+        (0, "2026-03-xx|abc\n", None),
+    ],
+)
+def test_git_log_output_becomes_the_derived_version_or_nothing(
+    returncode: int, stdout: str, derived: tuple[str, str] | None
+) -> None:
+    assert derived_from_log(returncode, stdout) == derived
+
+
+def test_a_derived_version_is_shown_with_its_sha() -> None:
+    assert display_form(("2026.3.5", "abc1234")) == "2026.3.5+gabc1234"

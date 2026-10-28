@@ -26,7 +26,7 @@ from base.host.db_authority.unit import (
 from base.host.env.boot_policy import BootstrapFetch
 from base.host.env.bootstrap import fetch_bootstrap_config
 from base.host.net.url_secret import url_host
-from base.host.verified_file import regular_bytes
+from base.host.verified_file.reader import regular_bytes
 from cli.commands.cluster.plans.unit_join_checks import (
     JoinTarget,
     data_plane_urls,
