@@ -86,6 +86,11 @@ deployed; the retired `base/resource_monitor.py` kept a parallel 300-sample
 ring buffer, which meant two drifting answers to "what was the CPU on machine
 X" and lost its history on every process restart.
 
+## Reading a past window
+
+Live, past and per-process readings, and the one metric that survives a starved
+host: [[infra-metrics/reading-a-past-window.meiva.okf.md|reading a past window]].
+
 ## Not gated by the OTLP kill switch
 
 `MEIVA_TELEMETRY_OTLP_ENABLED` is producer-scoped (the event dual-write, trace
@@ -105,9 +110,11 @@ gateway collector writes to loopback Prometheus.
 - **PgBouncer** has no OTel contrib receiver (`SHOW STATS` is not the Postgres
   wire protocol), so pool saturation is watched at Postgres — backends against
   `max_connections`.
-- **Per-process attribution** is absent: the `host_metrics` process scraper is
-  unsupported on macOS (what prod runs) and filters by process NAME, which
-  cannot separate an Meiva agent from any other `python3.12` on the box.
+- **Per-process attribution** is absent from the scrapes: the `host_metrics`
+  process scraper is unsupported on macOS (what prod runs) and filters by process
+  NAME, which cannot separate an Meiva agent from any other `python3.12` on the
+  box. A Linux host covers it with the timer-driven sampler described above; macOS
+  hosts still have no per-process record.
 
 ## Notes
 
