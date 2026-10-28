@@ -61,6 +61,7 @@ class _Frame:
     calls: Mapping[str, int]
     wrapper: bool
     reads: tuple[Acquisition, ...] = ()
+    caller: frozenset[str] = frozenset()
 
 
 def _called_name(callee: ast.expr) -> str:
@@ -72,15 +73,23 @@ def _called_name(callee: ast.expr) -> str:
 # meiva:note
 # A call whose name says it waits (`sleep`, `asleep`, `retry_sleep`) is a sleep; so is a call of a
 # function of this module that sleeps. The names a function calls are kept to follow the second.
-def _own_facts(function: ast.FunctionDef | ast.AsyncFunctionDef) -> tuple[bool, dict[str, int]]:
+# The same walk notes whether the function expands a path at all, which is the only reason to ask
+# which of its names carry the caller's values.
+def _own_facts(
+    function: ast.FunctionDef | ast.AsyncFunctionDef,
+) -> tuple[bool, dict[str, int], bool]:
     sleeps = False
+    expands = False
     calls: dict[str, int] = {}
     for node in _own_nodes(function):
         if isinstance(node, ast.Call):
             sleeps = sleeps or "sleep" in _called_name(node.func).lower()
+            expands = expands or (
+                isinstance(node.func, ast.Attribute) and node.func.attr == "expanduser"
+            )
             if isinstance(node.func, ast.Name):
                 calls.setdefault(node.func.id, node.lineno)
-    return sleeps, calls
+    return sleeps, calls, expands
 
 
 # meiva:note
@@ -98,6 +107,77 @@ def _given(call: ast.Call) -> int:
 def _expands_home(call: ast.Call, callee: str | None) -> bool:
     func = call.func
     return isinstance(func, ast.Attribute) and func.attr == "expanduser" and callee is None
+
+
+# meiva:note
+# The path an `expanduser()` call expands: the receiver of the method call.
+def _expanded_receiver(call: ast.Call) -> ast.expr | None:
+    func = call.func
+    return func.value if isinstance(func, ast.Attribute) else None
+
+
+# meiva:note
+# The names one function holds from its caller: its parameters, and the locals one derivation away
+# from them (`p = Path(path)` from parameter `path`, a loop variable over parameter `parts`). A
+# name a statement binds from anything else stops counting, and so does a name bound twice — once
+# from a parameter and once from elsewhere. One hop, not a chain: a longer derivation is recorded,
+# which keeps the analysis a single pass and its misses on the side of the world.
+def _caller_names(function: ast.FunctionDef | ast.AsyncFunctionDef) -> frozenset[str]:
+    args = function.args
+    owned = {argument.arg for argument in (*args.posonlyargs, *args.args, *args.kwonlyargs)}
+    for extra in (args.vararg, args.kwarg):
+        if extra is not None:
+            owned.add(extra.arg)
+    # meiva:note
+    # The receiver of a method is not followed: attributes are not tracked, so what a constructor
+    # stored on `self` records where it was read, not at the call that expands it.
+    owned -= _RECEIVERS
+    derived: set[str] = set()
+    lost: set[str] = set()
+    for node in _own_nodes(function):
+        for bound, source in _bindings(node):
+            if source is not None and _mentions(source, owned):
+                derived.add(bound)
+            else:
+                lost.add(bound)
+    return frozenset((owned | derived) - lost)
+
+
+# meiva:note
+# The names every method receives as its receiver; the analysis follows no attributes.
+_RECEIVERS = frozenset({"self", "cls"})
+
+
+# meiva:note
+# What one statement binds and the expression it binds it from (`None`: it rebinds from
+# something the analysis does not follow, so the name stops reading as the caller's).
+def _bindings(node: ast.AST) -> Iterator[tuple[str, ast.expr | None]]:
+    if isinstance(node, ast.Assign):
+        for target in node.targets:
+            yield from ((name, node.value) for name in _bound_names(target))
+    elif isinstance(node, ast.AnnAssign | ast.NamedExpr) and node.value is not None:
+        yield from ((name, node.value) for name in _bound_names(node.target))
+    elif isinstance(node, ast.AugAssign):
+        yield from ((name, None) for name in _bound_names(node.target))
+    elif isinstance(node, ast.For | ast.AsyncFor | ast.comprehension):
+        yield from ((name, node.iter) for name in _bound_names(node.target))
+
+
+def _bound_names(target: ast.expr) -> set[str]:
+    if isinstance(target, ast.Name):
+        return {target.id}
+    if isinstance(target, ast.Starred):
+        return _bound_names(target.value)
+    if isinstance(target, ast.Tuple | ast.List):
+        names: set[str] = set()
+        for element in target.elts:
+            names |= _bound_names(element)
+        return names
+    return set()
+
+
+def _mentions(expr: ast.expr, names: set[str] | frozenset[str]) -> bool:
+    return any(isinstance(node, ast.Name) and node.id in names for node in ast.walk(expr))
 
 
 # meiva:note
@@ -135,8 +215,17 @@ class AmbientRecorder:
     def enter(
         self, function: ast.FunctionDef | ast.AsyncFunctionDef, *, top_level: bool = False
     ) -> None:
-        sleeps, calls = _own_facts(function)
-        self._open.append(_Frame(function.name, top_level, sleeps, calls, wrapper=False))
+        sleeps, calls, expands = _own_facts(function)
+        self._open.append(
+            _Frame(
+                function.name,
+                top_level,
+                sleeps,
+                calls,
+                wrapper=False,
+                caller=_caller_names(function) if expands else frozenset(),
+            )
+        )
         self._reads.append([])
 
     def leave(self, *, wrapper: bool = False) -> None:
@@ -149,6 +238,13 @@ class AmbientRecorder:
     def _interval(self, line: int, target: str) -> None:
         if self._reads:
             self._reads[-1].append(Acquisition(line, AmbientKind.CLOCK, target))
+
+    # meiva:note
+    # Whether `expr` is built from values of the function's own caller (its parameters and what is
+    # derived from them). Expanding a `~` in one of those is the read the caller already named by
+    # writing it, so it is allowed and records nothing.
+    def _from_caller(self, expr: ast.expr | None) -> bool:
+        return expr is not None and bool(self._open) and _mentions(expr, self._open[-1].caller)
 
     # meiva:note
     # A name imported with `from ... import`: state acquired where it is brought in.
@@ -187,7 +283,7 @@ class AmbientRecorder:
         open_call = None if callee is None else OPEN_CALLS.get(callee)
         if open_call is not None and callee is not None and _given(call) <= open_call[1]:
             self._add(call.lineno, open_call[0], f"{callee}()")
-        if _expands_home(call, callee):
+        if _expands_home(call, callee) and not self._from_caller(_expanded_receiver(call)):
             self._add(call.lineno, AmbientKind.HOME, "pathlib.Path.expanduser")
         kind = None if callee is None else self.sources.calls.get(callee)
         if kind is not None and callee is not None:

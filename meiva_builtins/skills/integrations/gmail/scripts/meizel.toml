@@ -11,6 +11,3 @@ exports = ["feed.py"]
 "feed.py" = { kinds = ["clock", "environ", "home"], why = "The script entry assembles Process and AuthSources from the process environment, home directory, and clock before invoking the command" }
 "imap.py" = { kinds = ["clock"], why = "IMAP mirror helper stamps fetched messages with current UTC timestamp" }
 "smtp.py" = { kinds = ["clock"], why = "SMTP draft helper stamps IMAP APPEND internaldate with current epoch time" }
-
-[debt.ambient-read]
-"smtp.py#home pathlib.Path.expanduser" = 1
