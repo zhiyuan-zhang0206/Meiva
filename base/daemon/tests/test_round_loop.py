@@ -9,6 +9,11 @@ from base.clock import SYSTEM_TIMERS
 from base.daemon import round_loop
 from base.daemon.loop_health import LoopProgress
 
+# meiva:note
+# Generous ceiling for "the loop made the expected progress": it bounds a genuinely stuck
+# loop without turning the assertion into a measurement of the runner's scheduling latency.
+_ROUND_PROGRESS_TIMEOUT_S = 5.0
+
 
 def _progress() -> LoopProgress:
     return LoopProgress("test", 60.0, timers=SYSTEM_TIMERS)
@@ -26,17 +31,23 @@ async def test_an_unreachable_database_skips_the_round_and_the_loop_goes_on() ->
     progress = _progress()
     outcomes = [psycopg.OperationalError("db down"), None, None]
     seen = 0
+    third_started = asyncio.Event()
 
     async def one_round() -> None:
         nonlocal seen
         seen += 1
+        if seen >= 3:
+            third_started.set()
         outcome = outcomes[seen - 1]
         if outcome is not None:
             raise outcome
 
     task = asyncio.create_task(round_loop.run_rounds("t", progress, 0.01, one_round))
     try:
-        await asyncio.sleep(0.2)
+        # meiva:note
+        # Wait for observable progress rather than a fixed wall-clock window: a loaded
+        # runner can miss 0.2s of scheduling without the loop doing anything wrong.
+        await asyncio.wait_for(third_started.wait(), timeout=_ROUND_PROGRESS_TIMEOUT_S)
         assert seen >= 3
         assert progress.snapshot()["last_error"] is not None
         assert progress.snapshot()["last_success_at"] is not None
@@ -49,6 +60,7 @@ async def test_rounds_are_strictly_sequential() -> None:
     running = 0
     peak = 0
     done = 0
+    three_done = asyncio.Event()
 
     async def one_round() -> None:
         nonlocal running, peak, done
@@ -57,10 +69,15 @@ async def test_rounds_are_strictly_sequential() -> None:
         await asyncio.sleep(0.03)
         running -= 1
         done += 1
+        if done >= 3:
+            three_done.set()
 
     task = asyncio.create_task(round_loop.run_rounds("t", _progress(), 0.0, one_round))
     try:
-        await asyncio.sleep(0.2)
+        # meiva:note
+        # Three rounds cost ~0.09s of work, so a fixed 0.2s sleep made this assertion a
+        # race against the scheduler instead of a statement about sequencing.
+        await asyncio.wait_for(three_done.wait(), timeout=_ROUND_PROGRESS_TIMEOUT_S)
     finally:
         task.cancel()
         await asyncio.gather(task, return_exceptions=True)
