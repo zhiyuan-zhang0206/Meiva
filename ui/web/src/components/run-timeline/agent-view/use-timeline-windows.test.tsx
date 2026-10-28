@@ -1,20 +1,23 @@
-import type * as ApiModule from "@/lib/transport/api";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { act, renderHook, waitFor } from "@testing-library/react";
 import { StrictMode, type ReactNode } from "react";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { beforeEach, afterEach, describe, expect, it, vi } from "vitest";
 
 import type { RunTimelineResponse } from "@/lib/contracts/types";
-import { ApiError, type api } from "@/lib/transport/api";
 
 import type { Viewport } from "../model/timeline-model-viewport";
 import { useTimelineWindows } from "./use-timeline-windows";
+import type { Api } from "@/lib/transport/api";
+import { ApiError } from "@/lib/transport/api";
+import { resetTransport, transport } from "@/test-support/fake-api";
+import { ApiProvider } from "@/lib/transport/transport-context";
+beforeEach(() => {
+  resetTransport();
+  transport.getRunTimeline.mockImplementation(getRunTimeline);
+});
 
-const { getRunTimeline } = vi.hoisted(() => ({ getRunTimeline: vi.fn<typeof api.getRunTimeline>() }));
-vi.mock("@/lib/transport/api", async (importOriginal) => ({
-  ...(await importOriginal<typeof ApiModule>()),
-  api: { getRunTimeline },
-}));
+
+const { getRunTimeline } = vi.hoisted(() => ({ getRunTimeline: vi.fn<Api["getRunTimeline"]>() }));
 
 const DAY = 86_400_000;
 const END = Date.parse("2026-10-16T00:00:00Z");
@@ -31,7 +34,7 @@ const response = (view: Viewport, snapshot = "first"): RunTimelineResponse => ({
 });
 
 const distant = { from: END - 10 * DAY, to: END - 9 * DAY };
-function windowResponse(id: number, options: Parameters<typeof api.getRunTimeline>[1]): RunTimelineResponse {
+function windowResponse(id: number, options: Parameters<Api["getRunTimeline"]>[1]): RunTimelineResponse {
   if (!options?.from || !options.to) throw new Error("expected a bounded window");
   const idx = Math.round((END - Date.parse(options.from)) / DAY);
   return {
@@ -46,7 +49,13 @@ const clients: QueryClient[] = [];
 function mount() {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   clients.push(client);
-  const wrapper = ({ children }: { children: ReactNode }) => <StrictMode><QueryClientProvider client={client}>{children}</QueryClientProvider></StrictMode>;
+  const wrapper = ({ children }: { children: ReactNode }) => (
+    <StrictMode>
+      <QueryClientProvider client={client}>
+        <ApiProvider api={transport}>{children}</ApiProvider>
+      </QueryClientProvider>
+    </StrictMode>
+  );
   return renderHook(({ ids, view }) => useTimelineWindows(ids, view), {
     wrapper, initialProps: { ids: IDS, view: null as Viewport | null },
   });

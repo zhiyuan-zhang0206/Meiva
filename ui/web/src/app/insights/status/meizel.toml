@@ -5,6 +5,3 @@ exports = ["page.tsx"]
 
 [debt.ambient-read]
 "page.tsx#clock Date" = 3
-
-[debt.first-party-patch]
-"page.test.tsx#vi.spyOn ui/web/src/lib/transport/api.ts.getSystemStatus" = 14

@@ -9,13 +9,18 @@
 // router and the Zustand store's toast/selection are mocked.
 
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { cleanup, fireEvent, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { api } from "@/lib/transport/api";
 import { useStore } from "@/lib/state/store";
 
 import { PackageDraftEntry } from "./package-draft-entry";
+import { renderWithApi as render } from "@/test-support/render";
+import { resetTransport, transport } from "@/test-support/fake-api";
+beforeEach(() => {
+  resetTransport();
+});
+
 
 const pushSpy = vi.fn();
 vi.mock("next/navigation", () => ({ useRouter: () => ({ push: pushSpy }) }));
@@ -35,7 +40,7 @@ function wrap(ui: React.ReactElement) {
 
 describe("PackageDraftEntry", () => {
   it("ignores Enter while the draft is pending", async () => {
-    const draft = vi.spyOn(api, "draftPackage").mockReturnValue(new Promise(() => undefined));
+    const draft = transport.draftPackage.mockReturnValue(new Promise(() => undefined));
     wrap(<PackageDraftEntry kind="mcp" />);
     const input = screen.getByPlaceholderText(/Describe a tool you want to reach/);
     fireEvent.change(input, { target: { value: "install tools" } });
@@ -47,7 +52,7 @@ describe("PackageDraftEntry", () => {
 
   it("does not inherit automatic mutation retries", async () => {
     useStore.setState({ toast: null });
-    const draft = vi.spyOn(api, "draftPackage").mockRejectedValue(new Error("response lost"));
+    const draft = transport.draftPackage.mockRejectedValue(new Error("response lost"));
     const client = new QueryClient({ defaultOptions: { mutations: { retry: 3, retryDelay: 0 } } });
     render(<QueryClientProvider client={client}><PackageDraftEntry kind="mcp" /></QueryClientProvider>);
     const input = screen.getByPlaceholderText(/Describe a tool you want to reach/);
@@ -59,7 +64,7 @@ describe("PackageDraftEntry", () => {
   });
 
   it("submit posts the section's kind + the user's words, then opens the conversation", async () => {
-    const draft = vi.spyOn(api, "draftPackage").mockResolvedValue({ agent_id: 42 });
+    const draft = transport.draftPackage.mockResolvedValue({ agent_id: 42 });
     wrap(<PackageDraftEntry kind="mcp" />);
 
     const input = screen.getByPlaceholderText(/Describe a tool you want to reach/);
@@ -71,7 +76,7 @@ describe("PackageDraftEntry", () => {
   });
 
   it("Enter submits too", async () => {
-    const draft = vi.spyOn(api, "draftPackage").mockResolvedValue({ agent_id: 7 });
+    const draft = transport.draftPackage.mockResolvedValue({ agent_id: 7 });
     wrap(<PackageDraftEntry kind="skill" />);
 
     const input = screen.getByPlaceholderText(/Describe a skill you want/);
@@ -82,7 +87,7 @@ describe("PackageDraftEntry", () => {
   });
 
   it("each kind carries its own kind through — a plugin entry never posts 'skill'", async () => {
-    const draft = vi.spyOn(api, "draftPackage").mockResolvedValue({ agent_id: 3 });
+    const draft = transport.draftPackage.mockResolvedValue({ agent_id: 3 });
     wrap(<PackageDraftEntry kind="plugin" />);
 
     fireEvent.change(screen.getByPlaceholderText(/Describe a plugin you want/), {
@@ -94,7 +99,7 @@ describe("PackageDraftEntry", () => {
   });
 
   it("empty / whitespace input cannot submit", () => {
-    const draft = vi.spyOn(api, "draftPackage");
+    const draft = transport.draftPackage;
     wrap(<PackageDraftEntry kind="skill" />);
 
     const button = screen.getByRole("button", { name: "Find and install a skill" });
@@ -118,7 +123,7 @@ describe("PackageDraftEntry", () => {
   });
 
   it("a failed draft surfaces an error and does not navigate", async () => {
-    vi.spyOn(api, "draftPackage").mockRejectedValue(new Error("gateway down"));
+    transport.draftPackage.mockRejectedValue(new Error("gateway down"));
     wrap(<PackageDraftEntry kind="skill" />);
 
     fireEvent.change(screen.getByPlaceholderText(/Describe a skill you want/), {
@@ -126,7 +131,7 @@ describe("PackageDraftEntry", () => {
     });
     fireEvent.click(screen.getByRole("button", { name: "Find and install a skill" }));
 
-    await waitFor(() => expect(api.draftPackage).toHaveBeenCalled());
+    await waitFor(() => expect(transport.draftPackage).toHaveBeenCalled());
     expect(pushSpy).not.toHaveBeenCalled();
   });
 });

@@ -2,7 +2,6 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { act, fireEvent, screen, waitFor } from "@testing-library/react";
 import { renderWithBrowser } from "@/test-support/render";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { api } from "@/lib/transport/api";
 import { ComposerMock, cleanupHomePageTest, gatewayWrapper, hooksState, inspectorMockState, makeAgent, resetHomePageTestState, wrap } from "./page-test-mock";
 vi.mock("@/lib/agents/use-agents", () => ({
   useAgents: () => ({
@@ -49,12 +48,6 @@ vi.mock("@/lib/state/use-user-settings", () => ({
     isLoading: false,
   }),
 }));
-vi.mock("@/lib/transport/useEventStream", () => ({
-  EventStreamProvider: ({ children }: { children: React.ReactNode }) => children,
-  AgentEventStreamProvider: ({ children }: { children: React.ReactNode }) => children,
-  useEventStream: vi.fn(),
-  useAgentEventStream: vi.fn(),
-}));
 vi.mock("@/lib/state/store", () => ({
   useStore: <T,>(selector: (s: unknown) => T): T => {
     const fakeState = {
@@ -84,22 +77,6 @@ vi.mock("@/lib/layout/breakpoint", () => ({
 vi.mock("@/lib/timeline/timeline-store", () => ({
   useTimelineStore: <T,>(selector: (s: unknown) => T): T =>
     selector({ requestScrollToBottom: hooksState.requestScrollToBottom }),
-}));
-vi.mock("@/lib/transport/api", () => ({
-  API_BASE: "",
-  MessageDeliveryUnknownError: class MessageDeliveryUnknownError extends Error {
-    constructor(readonly clientMessageId: string) {
-      super("delivery unconfirmed");
-    }
-  },
-  api: {
-    sendMessage: vi.fn().mockResolvedValue(undefined),
-    cancel: vi.fn().mockResolvedValue(undefined),
-    uploadFiles: vi.fn().mockResolvedValue(undefined),
-    submitUploadedFiles: vi.fn().mockResolvedValue(undefined),
-    listPages: vi.fn().mockResolvedValue([]),
-    getReplySuggestion: vi.fn(),
-  },
 }));
 vi.mock("next/navigation", () => ({
   useRouter: () => ({ bfcacheId: "_b_test_" }),
@@ -157,6 +134,7 @@ vi.mock("@/components/inspector/inspector-panel", async () => {
   };
 });
 import HomePage from "./page";
+import { transport } from "@/test-support/fake-api";
 afterEach(cleanupHomePageTest);
 beforeEach(resetHomePageTestState);
 
@@ -273,7 +251,7 @@ describe("send asks the timeline to stay with the tail", () => {
     wrap(<HomePage />);
     fireEvent.click(screen.getByTestId("composer-send"));
     await waitFor(() =>
-      expect(vi.mocked(api.sendMessage)).toHaveBeenCalledWith(5, "hi", expect.any(String)),
+      expect(transport.sendMessage).toHaveBeenCalledWith(5, "hi", expect.any(String)),
     );
     await act(() => Promise.resolve());
     expect(hooksState.requestScrollToBottom).toHaveBeenCalledTimes(1);
@@ -281,10 +259,10 @@ describe("send asks the timeline to stay with the tail", () => {
   it("send fails → requestScrollToBottom NOT called", async () => {
     hooksState.activeId = 5;
     hooksState.agents = [makeAgent({ agent_id: 5, status: "idling" })];
-    vi.mocked(api.sendMessage).mockRejectedValueOnce(new Error("boom"));
+    transport.sendMessage.mockRejectedValueOnce(new Error("boom"));
     wrap(<HomePage />);
     fireEvent.click(screen.getByTestId("composer-send"));
-    await waitFor(() => expect(vi.mocked(api.sendMessage)).toHaveBeenCalled());
+    await waitFor(() => expect(transport.sendMessage).toHaveBeenCalled());
     await act(() => Promise.resolve());
     expect(hooksState.requestScrollToBottom).not.toHaveBeenCalled();
   });
@@ -321,16 +299,16 @@ describe("pasted image routing", () => {
     expect(screen.getByText("Model capabilities are unavailable. You can still send text or request a stop.")).toBeTruthy();
     expect(screen.getByTestId("composer").getAttribute("data-mode")).toBe("busy");
     fireEvent.click(screen.getByTestId("composer-send-plain"));
-    await waitFor(() => expect(api.sendMessage).toHaveBeenCalled());
+    await waitFor(() => expect(transport.sendMessage).toHaveBeenCalled());
     fireEvent.click(screen.getByTestId("composer-stop"));
-    await waitFor(() => expect(api.cancel).toHaveBeenCalledWith(5));
+    await waitFor(() => expect(transport.cancel).toHaveBeenCalledWith(5));
     expect(hooksState.agents[0].status).toBe("running");
     const image = new File(["png"], "paste.png", { type: "image/png" });
     fireEvent.paste(screen.getByTestId("composer-paste-target"), {
       clipboardData: { files: [image], types: ["Files"] },
     });
-    await waitFor(() => expect(api.submitUploadedFiles).toHaveBeenCalledTimes(1));
-    expect(api.uploadFiles).not.toHaveBeenCalled();
+    await waitFor(() => expect(transport.submitUploadedFiles).toHaveBeenCalledTimes(1));
+    expect(transport.uploadFiles).not.toHaveBeenCalled();
   });
   it("uses file delivery without a native thumbnail for a text-only agent", async () => {
     hooksState.activeId = 5;
@@ -340,14 +318,14 @@ describe("pasted image routing", () => {
     fireEvent.paste(screen.getByTestId("composer-paste-target"), {
       clipboardData: { files: [image], types: ["Files"] },
     });
-    await waitFor(() => expect(vi.mocked(api.submitUploadedFiles)).toHaveBeenCalledTimes(1));
-    expect(vi.mocked(api.submitUploadedFiles)).toHaveBeenCalledWith(
+    await waitFor(() => expect(transport.submitUploadedFiles).toHaveBeenCalledTimes(1));
+    expect(transport.submitUploadedFiles).toHaveBeenCalledWith(
       5,
       [image],
       expect.stringMatching(/^[0-9a-f-]{36}$/),
       expect.any(Function),
     );
-    expect(vi.mocked(api.uploadFiles)).not.toHaveBeenCalled();
+    expect(transport.uploadFiles).not.toHaveBeenCalled();
     expect(screen.queryByTestId("composer-image-thumbnail")).toBeNull();
   });
   it.each(["claude_code", "codex"] as const)("routes images as files and hides native context for %s", async (harness) => {
@@ -360,22 +338,22 @@ describe("pasted image routing", () => {
     fireEvent.paste(screen.getByTestId("composer-paste-target"), {
       clipboardData: { files: [image], types: ["Files"] },
     });
-    await waitFor(() => expect(api.submitUploadedFiles).toHaveBeenCalledTimes(1));
-    expect(api.uploadFiles).not.toHaveBeenCalled();
+    await waitFor(() => expect(transport.submitUploadedFiles).toHaveBeenCalledTimes(1));
+    expect(transport.uploadFiles).not.toHaveBeenCalled();
     expect(screen.queryByTestId("composer-image-thumbnail")).toBeNull();
   });
   it("keeps the native image attachment path for a vision-capable agent", async () => {
     hooksState.activeId = 5;
     hooksState.agents = [makeAgent({ agent_id: 5, supports_vision: true })];
     hooksState.settings["display.composer_context_meter"] = true;
-    vi.mocked(api.uploadFiles).mockResolvedValueOnce(uploadResult);
+    transport.uploadFiles.mockResolvedValueOnce(uploadResult);
     const image = new File(["png"], "paste.png", { type: "image/png" });
     wrap(<HomePage />);
     fireEvent.paste(screen.getByTestId("composer-paste-target"), {
       clipboardData: { files: [image], types: ["Files"] },
     });
     await waitFor(() =>
-      expect(vi.mocked(api.uploadFiles)).toHaveBeenCalledWith(5, [image]),
+      expect(transport.uploadFiles).toHaveBeenCalledWith(5, [image]),
     );
     expect(await screen.findByTestId("composer-image-thumbnail")).toBeTruthy();
     expect(screen.getByTestId("composer").getAttribute("data-context-meter")).toBe("true");
@@ -391,11 +369,11 @@ describe("pasted image routing", () => {
       fireEvent.paste(screen.getByTestId("composer-paste-target"), {
         clipboardData: { files: [image], types: ["Files"] },
       });
-      await waitFor(() => expect(vi.mocked(api.submitUploadedFiles)).toHaveBeenCalledTimes(1));
-      expect(vi.mocked(api.submitUploadedFiles).mock.calls[0][2]).toMatch(
+      await waitFor(() => expect(transport.submitUploadedFiles).toHaveBeenCalledTimes(1));
+      expect(transport.submitUploadedFiles.mock.calls[0][2]).toMatch(
         /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/,
       );
-      expect(vi.mocked(api.uploadFiles)).not.toHaveBeenCalled();
+      expect(transport.uploadFiles).not.toHaveBeenCalled();
     } finally {
       vi.unstubAllGlobals();
     }
@@ -408,8 +386,8 @@ describe("multi-command dispatch", () => {
     hooksState.agents = [makeAgent({ agent_id: 5, status: "idling" })];
     wrap(<HomePage />);
     fireEvent.click(screen.getByTestId("composer-send-multi"));
-    await waitFor(() => expect(vi.mocked(api.sendMessage)).toHaveBeenCalledTimes(1));
-    expect(vi.mocked(api.sendMessage)).toHaveBeenCalledWith(
+    await waitFor(() => expect(transport.sendMessage).toHaveBeenCalledTimes(1));
+    expect(transport.sendMessage).toHaveBeenCalledWith(
       5,
       "/compact /update",
       expect.any(String),
@@ -422,8 +400,8 @@ describe("multi-command dispatch", () => {
     hooksState.agents = [makeAgent({ agent_id: 5, status: "idling" })];
     wrap(<HomePage />);
     fireEvent.click(screen.getByTestId("composer-send-multi-args"));
-    await waitFor(() => expect(vi.mocked(api.sendMessage)).toHaveBeenCalledTimes(1));
-    expect(vi.mocked(api.sendMessage)).toHaveBeenCalledWith(
+    await waitFor(() => expect(transport.sendMessage).toHaveBeenCalledTimes(1));
+    expect(transport.sendMessage).toHaveBeenCalledWith(
       5,
       "/search hello world /compact",
       expect.any(String),
@@ -434,8 +412,8 @@ describe("multi-command dispatch", () => {
     hooksState.agents = [makeAgent({ agent_id: 5, status: "idling" })];
     wrap(<HomePage />);
     fireEvent.click(screen.getByTestId("composer-send-plain"));
-    await waitFor(() => expect(vi.mocked(api.sendMessage)).toHaveBeenCalledTimes(1));
-    expect(vi.mocked(api.sendMessage)).toHaveBeenCalledWith(
+    await waitFor(() => expect(transport.sendMessage).toHaveBeenCalledTimes(1));
+    expect(transport.sendMessage).toHaveBeenCalledWith(
       5,
       "plain text",
       expect.any(String),
@@ -446,8 +424,8 @@ describe("multi-command dispatch", () => {
     hooksState.agents = [makeAgent({ agent_id: 5, status: "idling" })];
     wrap(<HomePage />);
     fireEvent.click(screen.getByTestId("composer-send-multi-image"));
-    await waitFor(() => expect(vi.mocked(api.sendMessage)).toHaveBeenCalledTimes(1));
-    expect(vi.mocked(api.sendMessage)).toHaveBeenCalledWith(
+    await waitFor(() => expect(transport.sendMessage).toHaveBeenCalledTimes(1));
+    expect(transport.sendMessage).toHaveBeenCalledWith(
       5,
       [
         { type: "text", text: "/compact /update" },
@@ -459,10 +437,10 @@ describe("multi-command dispatch", () => {
   it("does not ask for the tail when the send fails", async () => {
     hooksState.activeId = 5;
     hooksState.agents = [makeAgent({ agent_id: 5, status: "idling" })];
-    vi.mocked(api.sendMessage).mockRejectedValueOnce(new Error("boom"));
+    transport.sendMessage.mockRejectedValueOnce(new Error("boom"));
     wrap(<HomePage />);
     fireEvent.click(screen.getByTestId("composer-send-multi"));
-    await waitFor(() => expect(vi.mocked(api.sendMessage)).toHaveBeenCalled());
+    await waitFor(() => expect(transport.sendMessage).toHaveBeenCalled());
     await act(() => Promise.resolve());
     expect(hooksState.requestScrollToBottom).not.toHaveBeenCalled();
   });

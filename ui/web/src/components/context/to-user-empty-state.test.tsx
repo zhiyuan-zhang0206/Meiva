@@ -4,11 +4,14 @@ import { renderWithBrowser } from "@/test-support/render";
 import { NextIntlClientProvider } from "next-intl";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { api } from "@/lib/transport/api";
-
 import en from "../../../messages/en";
 import zh from "../../../messages/zh";
 import { ToUserDocumentView } from "./to-user-document";
+
+import { resetTransport, transport } from "@/test-support/fake-api";
+beforeEach(() => {
+  resetTransport();
+});
 
 const clients = new Set<QueryClient>();
 const originalUrl = window.location.href;
@@ -16,7 +19,7 @@ const originalHistory: unknown = window.history.state;
 
 beforeEach(() => {
   window.history.replaceState(null, "", "/");
-  vi.spyOn(api, "getToUser").mockImplementation(() => new Promise(() => undefined));
+  transport.getToUser.mockImplementation(() => new Promise(() => undefined));
 });
 
 afterEach(() => {
@@ -58,7 +61,7 @@ describe("To user empty state", () => {
     expect(zh.toUser.empty).toBe("No content");
     const view = renderEmpty(zh, "zh");
     expect(screen.getByText("No content")).toBeTruthy();
-    expect(api.getToUser).not.toHaveBeenCalled();
+    expect(transport.getToUser).not.toHaveBeenCalled();
     const { browser } = view;
     expect(browser.actions.traversals).toBe(1);
     view.unmount();

@@ -4,11 +4,11 @@ import { useQuery } from "@tanstack/react-query";
 import { useTranslations } from "next-intl";
 import { useState } from "react";
 import { AgentRow as AgentRowItem } from "@/components/agents/agent-row";
-import { api } from "@/lib/transport/api";
 import { AGENT_DIRECTORY_QUERY_KEY } from "@/lib/fold/agents";
 import { FLEX } from "@/lib/layout/layout";
 import { cn } from "@/lib/format/utils";
 import type { InnerProps } from "./types";
+import { useApi } from "@/lib/transport/transport-context";
 
 /** Only the current archive page is retained. Search restarts at the latest page. */
 export function AgentArchive({ props }: { props: InnerProps & { wide: boolean } }) {
@@ -21,11 +21,12 @@ export function AgentArchive({ props }: { props: InnerProps & { wide: boolean } 
 }
 
 function ArchivePage({ query, props }: { query: string; props: InnerProps & { wide: boolean } }) {
+  const client = useApi();
   const t = useTranslations("sidebar");
   const [beforeId, setBeforeId] = useState<number | undefined>();
   const page = useQuery({
     queryKey: [...AGENT_DIRECTORY_QUERY_KEY, "terminated", query, beforeId],
-    queryFn: ({ signal }) => api.listAgents({ scope: "terminated", query, beforeId, limit: 50, signal }),
+    queryFn: ({ signal }) => client.listAgents({ scope: "terminated", query, beforeId, limit: 50, signal }),
     staleTime: Infinity,
     gcTime: 0,
   });

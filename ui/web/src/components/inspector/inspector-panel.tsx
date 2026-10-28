@@ -26,7 +26,6 @@ import { INSPECT_SECTION_ORDER } from "@/lib/inspector/inspector-widgets";
 import { useBreakpoint } from "@/lib/layout/breakpoint";
 import { BAR_DIVIDER_CLASS, BAR_HEIGHT_CLASS, FLEX, FLEX_1, FLEX_COL, MIN_H_0, MIN_W_0 } from "@/lib/layout/layout";
 import { INSPECTOR_RETENTION_MS } from "@/lib/layout/switch-budget";
-import { api } from "@/lib/transport/api";
 import { useEventStream } from "@/lib/transport/useEventStream";
 
 import {
@@ -41,6 +40,7 @@ import {
   PageSection,
   ShellsSection,
 } from "./inspector-live-sections";
+import { useApi } from "@/lib/transport/transport-context";
 
 function StaleDot() {
   const t = useTranslations("inspector");
@@ -62,6 +62,7 @@ function matchesInspectWindow(
 }
 
 export function InspectorPanel({ agentId, embedded = false }: { agentId: number; embedded?: boolean }) {
+  const client = useApi();
   const t = useTranslations("inspector");
   const { open, toggle } = useInspectorOpen();
   const { inspectorHours: hours, setInspectorHours: setHours } = useInspectorHours();
@@ -70,7 +71,7 @@ export function InspectorPanel({ agentId, embedded = false }: { agentId: number;
 
   const liveQuery = useQuery({
     queryKey: inspectLiveQueryKey(agentId),
-    queryFn: ({ signal }) => api.getAgentInspectLive(agentId, signal),
+    queryFn: ({ signal }) => client.getAgentInspectLive(agentId, signal),
     enabled: open,
     retry: false,
     staleTime: 0,
@@ -82,7 +83,7 @@ export function InspectorPanel({ agentId, embedded = false }: { agentId: number;
   });
   const windowedQuery = useQuery({
     queryKey: inspectWindowedQueryKey(agentId, hours),
-    queryFn: ({ signal }) => fetchWindowedInspect(agentId, hours, signal),
+    queryFn: ({ signal }) => fetchWindowedInspect(client, agentId, hours, signal),
     enabled: open,
     retry: false,
     staleTime: 0,
@@ -94,7 +95,7 @@ export function InspectorPanel({ agentId, embedded = false }: { agentId: number;
   });
   const widgetsQuery = useQuery({
     queryKey: inspectWidgetsQueryKey(agentId),
-    queryFn: ({ signal }) => api.getAgentInspectWidgets(agentId, signal),
+    queryFn: ({ signal }) => client.getAgentInspectWidgets(agentId, signal),
     enabled: open,
     retry: false,
     staleTime: INSPECTOR_RETENTION_MS,

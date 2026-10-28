@@ -1,18 +1,20 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { cleanup, fireEvent, render as rtlRender, screen } from "@testing-library/react";
+import { cleanup, fireEvent, screen } from "@testing-library/react";
 import type { ReactElement } from "react";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { beforeEach, afterEach, describe, expect, it, vi } from "vitest";
 
 import { harnessRows, type HarnessAvailability } from "@/lib/harness/harness";
-import { api } from "@/lib/transport/api";
 import { HarnessPicker } from "./harness-picker";
+import { renderWithApi as rtlRender } from "@/test-support/render";
+import { resetTransport, transport } from "@/test-support/fake-api";
+beforeEach(() => {
+  resetTransport();
+  transport.getHarnessAvailability.mockImplementation(() => new Promise(() => undefined));
+});
+
 
 const clients = new Set<QueryClient>();
 let rows: HarnessAvailability[] = [];
-
-vi.mock("@/lib/transport/api", () => ({
-  api: { getHarnessAvailability: vi.fn(() => new Promise(() => undefined)) },
-}));
 
 function render(ui: ReactElement) {
   const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
@@ -90,7 +92,7 @@ describe("HarnessPicker", () => {
     const codex = (await screen.findByText("Codex")).closest("button");
     expect(codex?.disabled).toBe(true);
     expect(codex?.textContent).toBe("Codexunavailable");
-    expect(api.getHarnessAvailability).not.toHaveBeenCalled();
+    expect(transport.getHarnessAvailability).not.toHaveBeenCalled();
   });
 
   it("selects a harness this machine can start", async () => {
@@ -102,6 +104,6 @@ describe("HarnessPicker", () => {
     fireEvent.click(await screen.findByText("Claude Code"));
 
     expect(onChange).toHaveBeenCalledWith("claude_code");
-    expect(api.getHarnessAvailability).not.toHaveBeenCalled();
+    expect(transport.getHarnessAvailability).not.toHaveBeenCalled();
   });
 });

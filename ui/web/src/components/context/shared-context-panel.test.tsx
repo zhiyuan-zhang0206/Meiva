@@ -6,7 +6,6 @@ import { afterEach, beforeEach, expect, it, vi } from "vitest";
 
 import { USER_SETTING_DEFAULTS, type NoticeItem } from "@/lib/contracts/types";
 import type { useToUser } from "@/lib/context/use-to-user";
-import { api } from "@/lib/transport/api";
 
 notifyManager.setScheduler((cb) => {
   cb();
@@ -18,6 +17,11 @@ vi.mock("@/components/inspector/inspector-panel", () => ({
 }));
 
 import { SharedContextPanel } from "./shared-context-panel";
+
+import { resetTransport, transport } from "@/test-support/fake-api";
+beforeEach(() => {
+  resetTransport();
+});
 
 let qc: QueryClient;
 
@@ -91,9 +95,9 @@ beforeEach(() => {
   window.history.replaceState(null, "", "/?agent_id=7");
   qc = new QueryClient({ defaultOptions: { queries: { retry: false, staleTime: Infinity } } });
   qc.setQueryData(["user-settings"], { ...USER_SETTING_DEFAULTS, "display.inspector_open": false });
-  vi.spyOn(api, "getSettings").mockImplementation(() => new Promise(() => undefined));
-  vi.spyOn(api, "putSetting").mockImplementation(() => new Promise(() => undefined));
-  vi.spyOn(api, "getToUser").mockImplementation(() => new Promise(() => undefined));
+  transport.getSettings.mockImplementation(() => new Promise(() => undefined));
+  transport.putSetting.mockImplementation(() => new Promise(() => undefined));
+  transport.getToUser.mockImplementation(() => new Promise(() => undefined));
 });
 
 afterEach(() => {

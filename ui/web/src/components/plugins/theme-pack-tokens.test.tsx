@@ -5,13 +5,26 @@
 // re-stating what the component was written to do.
 
 import { notifyManager, QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { act, cleanup, render, waitFor } from "@testing-library/react";
+import { act, cleanup, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { ThemePackTokens } from "@/components/plugins/theme-pack-tokens";
 import { USER_SETTING_DEFAULTS } from "@/lib/contracts/types";
 import { SETTINGS_QUERY_KEY } from "@/lib/state/use-user-settings";
-import { api } from "@/lib/transport/api";
+import { renderWithApi as render } from "@/test-support/render";
+import { resetTransport, transport } from "@/test-support/fake-api";
+beforeEach(() => {
+  resetTransport();
+  transport.getSettings.mockImplementation(() =>
+      Promise.resolve({
+        settings: Object.entries(storedSettings).map(([key, value]) => ({
+          key,
+          value,
+          updated_at: "2026-06-14T00:00:00Z",
+        })),
+      }));
+});
+
 
 notifyManager.setScheduler((cb) => {
   cb();
@@ -33,20 +46,6 @@ function setMockSetting(key: string, value: unknown) {
     });
   });
 }
-
-vi.mock("@/lib/transport/api", () => ({
-  api: {
-    getUiContributions: vi.fn(),
-    getSettings: () =>
-      Promise.resolve({
-        settings: Object.entries(storedSettings).map(([key, value]) => ({
-          key,
-          value,
-          updated_at: "2026-06-14T00:00:00Z",
-        })),
-      }),
-  },
-}));
 
 // next-themes resolves "system" to a concrete mode; the component keys the
 // half it applies on that, so the tests drive it directly.
@@ -108,7 +107,7 @@ beforeEach(() => {
   resetMockSettings();
   mockMode = "light";
   document.documentElement.removeAttribute("style");
-  vi.mocked(api.getUiContributions).mockResolvedValue({
+  transport.getUiContributions.mockResolvedValue({
     themes: [SOLARIZED, MIDNIGHT, DUSK, ASYM],
     nav: [],
     stats: [],
@@ -130,7 +129,7 @@ describe("ThemePackTokens", () => {
   it("applies nothing while the choice is the console's own palette", async () => {
     renderApplier();
 
-    await waitFor(() => expect(api.getUiContributions).toHaveBeenCalled());
+    await waitFor(() => expect(transport.getUiContributions).toHaveBeenCalled());
     expect(token("--background")).toBe("");
     expect(token("--primary")).toBe("");
   });
@@ -216,7 +215,7 @@ describe("ThemePackTokens", () => {
 
     renderApplier();
 
-    await waitFor(() => expect(api.getUiContributions).toHaveBeenCalled());
+    await waitFor(() => expect(transport.getUiContributions).toHaveBeenCalled());
     expect(token("--background")).toBe("");
   });
 });

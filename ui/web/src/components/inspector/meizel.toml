@@ -18,18 +18,6 @@ exports = ["context-breakdown-body.tsx", "context-breakdown.tsx", "context-meter
 "inspector-widgets.tsx" = ["inspector-section.tsx"]
 
 [debt.first-party-patch]
-"context-breakdown.test.tsx#vi.mock ui/web/src/lib/transport/api.ts" = 1
-"context-meter.test.tsx#vi.mock ui/web/src/lib/transport/api.ts" = 1
-"inspector-panel-chrome.test.tsx#vi.mock ui/web/src/lib/transport/api.ts" = 1
-"inspector-panel-chrome.test.tsx#vi.mock ui/web/src/lib/transport/useEventStream.tsx" = 1
-"inspector-panel-liveness.test.tsx#vi.mock ui/web/src/lib/transport/api.ts" = 1
-"inspector-panel-liveness.test.tsx#vi.mock ui/web/src/lib/transport/useEventStream.tsx" = 1
-"inspector-panel-metrics.test.tsx#vi.mock ui/web/src/lib/transport/api.ts" = 1
-"inspector-panel-metrics.test.tsx#vi.mock ui/web/src/lib/transport/useEventStream.tsx" = 1
-"inspector-panel-notices.test.tsx#vi.mock ui/web/src/lib/transport/api.ts" = 1
-"inspector-panel-notices.test.tsx#vi.mock ui/web/src/lib/transport/useEventStream.tsx" = 1
-"inspector-panel.test.tsx#vi.mock ui/web/src/lib/transport/api.ts" = 1
-"inspector-panel.test.tsx#vi.mock ui/web/src/lib/transport/useEventStream.tsx" = 1
 
 [debt.third-party-patch]
 "inspector-widgets.test.tsx#vi.mock next/link" = 1

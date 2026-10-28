@@ -13,43 +13,17 @@ import {
   getAgent,
   getAgentInspectLive,
   getAgentInspectStatistics,
-  getAgentInspectWidgets,
   getAgentRoster,
-  getSettings,
   liveFixture,
-  putSetting,
   QueryClientProvider,
   render,
-  resolveNotice,
   rosterFixture,
   setupInspectorTest,
-  streamHandlers,
   useFrozenClock,
 } from "./inspector-test-mock";
 
-vi.mock("@/lib/transport/api", () => ({
-  api: {
-    getAgentInspectStatistics,
-    getAgentInspectLive,
-    getAgentInspectWidgets,
-    getAgentRoster,
-    getAgent,
-    resolveNotice,
-    putSetting,
-    getSettings,
-  },
-}));
 
-vi.mock("@/lib/transport/useEventStream", () => ({
-  EventStreamProvider: ({ children }: { children: React.ReactNode }) => children,
-  useEventStream: (
-    onSystemEvent: (event: unknown) => void,
-    onConnectionEvent: (event: { type: string }) => void,
-  ) => {
-    streamHandlers.system = onSystemEvent;
-    streamHandlers.connection = onConnectionEvent;
-  },
-}));
+
 
 import { InspectorPanel } from "./inspector-panel";
 

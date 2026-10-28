@@ -8,10 +8,6 @@ exports = ["page.tsx"]
 "page.test.tsx" = ["page.tsx"]
 "page.tsx" = ["_model_picker.tsx", "_notification-categories.tsx", "_rows.tsx"]
 
-[debt.first-party-patch]
-"page-models-and-themes.test.tsx#vi.mock ui/web/src/lib/transport/api.ts" = 1
-"page.test.tsx#vi.mock ui/web/src/lib/transport/api.ts" = 1
-
 [debt.type-cast]
 "_notification-categories.tsx#cast NotificationCategoryRows" = 1
 "_notification-categories.tsx#cast NotificationCategoryRows.<lambda>" = 1

@@ -1,1 +1,4 @@
-exports = ["browser.ts", "enter-key.ts", "render.tsx", "user-settings-mock.ts"]
+exports = ["browser.ts", "enter-key.ts", "fake-api.tsx", "fake-stream.tsx", "render.tsx", "user-settings-mock.ts"]
+
+[uses]
+"render.tsx" = ["fake-api.tsx"]

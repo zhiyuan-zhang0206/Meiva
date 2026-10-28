@@ -52,7 +52,7 @@ import { useCallback, useEffect, useState } from "react";
 
 import { DeferredMount } from "@/components/app/deferred-mount";
 import { useBrowser } from "@/lib/browser/browser-provider";
-import { api } from "@/lib/transport/api";
+
 import { errMsg } from "@/lib/contracts/errors";
 import type {
   AgentMachineRow,
@@ -81,6 +81,7 @@ import { DefaultModelPanel } from "./_default_model";
 import { PerModelPanel } from "./_per_model";
 import { FLEX } from "@/lib/layout/layout";
 import { cn } from "@/lib/format/utils";
+import { useApi } from "@/lib/transport/transport-context";
 
 const configQueryKey = (machine: MachineSelection) => ["config", machine] as const;
 const MACHINES_QUERY_KEY = ["machines"] as const;
@@ -116,6 +117,7 @@ function hydrateCollapsedGroups(
 }
 
 export default function ConfigPage() {
+  const client = useApi();
   const t = useTranslations("config");
   const view = useBrowser().view;
   const qc = useQueryClient();
@@ -145,14 +147,14 @@ export default function ConfigPage() {
 
   const { data, isLoading, error } = useQuery({
     queryKey: configQueryKey(selection),
-    queryFn: () => api.getConfig(selection ?? undefined),
+    queryFn: () => client.getConfig(selection ?? undefined),
     enabled: visible,
   });
 
   // Machine list (name + live) drives the selector's agent-runner options.
   const machines = useQuery({
     queryKey: MACHINES_QUERY_KEY,
-    queryFn: () => api.getMachines(),
+    queryFn: () => client.getMachines(),
     enabled: visible,
   });
   // Gateway machine name — labels the Cluster option (which machine owns the
@@ -161,7 +163,7 @@ export default function ConfigPage() {
   // with no single-box special-casing.
   const status = useQuery({
     queryKey: SYSTEM_STATUS_QUERY_KEY,
-    queryFn: () => api.getSystemStatus(),
+    queryFn: () => client.getSystemStatus(),
     enabled: visible,
   });
   const gatewayName = status.data?.cluster.current_machine ?? null;
@@ -220,7 +222,7 @@ export default function ConfigPage() {
       if (!current) throw new Error("config data not loaded");
       const result = await writeConfigOwners(
         applyDelta(current.raw_overrides, name, value), current.fields,
-        (patch) => api.putConfig(patch, machine ?? undefined),
+        (patch) => client.putConfig(patch, machine ?? undefined),
       );
       return { name, result };
     },
@@ -253,7 +255,7 @@ export default function ConfigPage() {
       else if (field.field_type === "float") parsed = parseFloat(value);
       const result = await writeConfigOwners(
         applyDelta(current.raw_overrides, name, parsed), current.fields,
-        (patch) => api.putConfig(patch, machine ?? undefined),
+        (patch) => client.putConfig(patch, machine ?? undefined),
       );
       return { name, result };
     },

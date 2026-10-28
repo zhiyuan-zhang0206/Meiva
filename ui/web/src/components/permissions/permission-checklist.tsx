@@ -12,7 +12,6 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
-import { api } from "@/lib/transport/api";
 import { useStore } from "@/lib/state/store";
 import { errMsg } from "@/lib/contracts/errors";
 import { FLEX } from "@/lib/layout/layout";
@@ -21,6 +20,7 @@ import { useTimeFormat } from "@/lib/format/use-time-format";
 import type { HostPermissionsPayload, PermissionItemRow } from "@/lib/contracts/types";
 
 import { HOST_PERMISSIONS_QUERY_KEY, useHostPermissions } from "./use-host-permissions";
+import { useApi } from "@/lib/transport/transport-context";
 
 const STATE_TONE: Record<string, string> = {
   granted: "text-emerald-600 dark:text-emerald-400",
@@ -31,6 +31,7 @@ const STATE_TONE: Record<string, string> = {
 };
 
 export function PermissionChecklist() {
+  const client = useApi();
   const t = useTranslations("control.permissions");
   const { formatShort } = useTimeFormat();
   const queryClient = useQueryClient();
@@ -40,9 +41,9 @@ export function PermissionChecklist() {
   const apply = (payload: HostPermissionsPayload) =>
     queryClient.setQueryData(HOST_PERMISSIONS_QUERY_KEY, payload);
 
-  const recheck = useMutation({ mutationFn: () => api.recheckHostPermissions(), onSuccess: apply });
+  const recheck = useMutation({ mutationFn: () => client.recheckHostPermissions(), onSuccess: apply });
   const request = useMutation({
-    mutationFn: () => api.requestHostPermissions(),
+    mutationFn: () => client.requestHostPermissions(),
     onSuccess: (payload) => {
       apply(payload);
       showToast(payload.headline);
@@ -50,7 +51,7 @@ export function PermissionChecklist() {
     onError: (err) => showToast(errMsg(err)),
   });
   const defer = useMutation({
-    mutationFn: () => api.deferHostPermissions(),
+    mutationFn: () => client.deferHostPermissions(),
     onSuccess: (payload) => {
       apply(payload);
       showToast(t("deferred"));

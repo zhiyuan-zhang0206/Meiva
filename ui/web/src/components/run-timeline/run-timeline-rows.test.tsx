@@ -1,5 +1,5 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { cleanup, fireEvent, render as rtlRender, screen } from "@testing-library/react";
+import { cleanup, fireEvent, screen } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { RunTimelineNode, RunTimelineResponse, RunTimelineUnit } from "@/lib/contracts/types";
@@ -10,14 +10,14 @@ import { LINK_KINDS } from "./model/links/resolve";
 import { ALL_ROWS } from "./model/timeline-nav-rows";
 import { clickAt, drawn, leave, mockCanvas, paintFrame, pointAt } from "./canvas/run-timeline-test-canvas-mock";
 import type { Selection } from "./model/timeline-model-selection";
+import { renderWithApi as rtlRender } from "@/test-support/render";
+import { resetTransport, transport } from "@/test-support/fake-api";
+beforeEach(() => {
+  resetTransport();
+  transport.getAgentRoster.mockImplementation(() => Promise.resolve({ agents: [], ancestors: [] }));
+  transport.getSettings.mockImplementation(() => Promise.resolve({ settings: [] }));
+});
 
-vi.mock("@/lib/transport/api", () => ({
-  api: {
-    getAgentRoster: vi.fn(() => Promise.resolve({ agents: [], ancestors: [] })),
-    getAgent: vi.fn(),
-    getSettings: vi.fn(() => Promise.resolve({ settings: [] })),
-  },
-}));
 
 function render(ui: React.ReactElement) {
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });

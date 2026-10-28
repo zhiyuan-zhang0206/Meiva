@@ -11,7 +11,6 @@
 import { useQuery } from "@tanstack/react-query";
 
 import type { ConfigFieldView } from "../contracts/types";
-import { api } from "../transport/api";
 import { useApi } from "../transport/transport-context";
 
 const DISPLAY_CONFIG_QUERY_KEY = ["config", null] as const;
@@ -30,7 +29,7 @@ function isDisplayConfigView(value: unknown): value is DisplayConfigView {
  *  Returns `fallback` until the config read lands and whenever the field is
  *  missing, non-numeric, or the read failed. */
 export function useDisplayLimit(envVar: string, fallback: number): number {
-  const client = useApi(api);
+  const client = useApi();
   const { data } = useQuery({
     queryKey: DISPLAY_CONFIG_QUERY_KEY,
     queryFn: () => client.getConfig(),

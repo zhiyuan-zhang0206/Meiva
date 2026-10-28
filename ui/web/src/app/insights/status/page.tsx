@@ -17,7 +17,6 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
-import { api } from "@/lib/transport/api";
 import { formatRelative } from "@/lib/format/time";
 import type { ClusterPanel, MachineStatus, SystemStatus } from "@/lib/contracts/types";
 import { SYSTEM_STATUS_QUERY_KEY } from "@/lib/notifications/use-cluster-health";
@@ -25,8 +24,10 @@ import { SYSTEM_STATUS_QUERY_KEY } from "@/lib/notifications/use-cluster-health"
 import { useSectionVisible } from "@/app/control/visibility";
 import { FLEX } from "@/lib/layout/layout";
 import { cn } from "@/lib/format/utils";
+import { useApi } from "@/lib/transport/transport-context";
 
 export default function StatusPage() {
+  const client = useApi();
   const t = useTranslations("insights.status");
   const visible = useSectionVisible();
   // Shares SYSTEM_STATUS_QUERY_KEY with the other /api/status observers (the
@@ -37,7 +38,7 @@ export default function StatusPage() {
   // on this route.
   const { data, isLoading, error } = useQuery({
     queryKey: SYSTEM_STATUS_QUERY_KEY,
-    queryFn: api.getSystemStatus,
+    queryFn: client.getSystemStatus,
     refetchInterval: 15_000,
     enabled: visible,
   });

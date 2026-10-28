@@ -4,7 +4,8 @@ import { vi } from "vitest";
 
 import type { StatsWindowHours } from "@/lib/agents/sidebar";
 import type { AgentRow, AlertsResponse, StatsDashboard, UiStatContribution } from "@/lib/contracts/types";
-import { apiWrapper, cacheOnlyApi } from "@/lib/transport/tests/api/api-provider";
+import { apiWrapper } from "@/lib/transport/tests/api/api-provider";
+import { resetTransport, transport } from "@/test-support/fake-api";
 
 export const state = {
   agents: [] as AgentRow[],
@@ -177,7 +178,7 @@ export const NO_ALERTS: AlertsResponse = {
   meta: { window: "24h", total: 0, unresolved_count: 0 },
 };
 
-export const gatewayWrapper = apiWrapper(cacheOnlyApi());
+export const gatewayWrapper = apiWrapper(transport);
 
 export function wrap(ui: React.ReactElement) {
   const qc = new QueryClient({
@@ -251,6 +252,18 @@ export const handlers = new Proxy(handlerFns, {
 };
 
 export function resetSidebarTestState(): void {
+  resetTransport();
+  // meiva:note
+  // The sidebar reads its roster and its label writes through the transport; the archive
+  // list is the terminated half of the state the tests push in.
+  transport.patchAgentLabel.mockResolvedValue(undefined);
+  transport.listAgents.mockImplementation(() =>
+    Promise.resolve({
+      agents: state.agents.filter((a) => a.status === "terminated"),
+      next_cursor: null,
+    }),
+  );
+  transport.getSettings.mockImplementation(() => Promise.resolve({ settings: [] }));
   pushSpy.mockReset();
   vi.clearAllMocks();
   installLocalStoragePolyfill();

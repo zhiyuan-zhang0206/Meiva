@@ -20,6 +20,7 @@ import {
   StubSpawnForm,
   wrap,
 } from "./sidebar-test-mock";
+import { transport } from "@/test-support/fake-api";
 
 vi.mock("next/navigation", () => ({
   useRouter: () => ({ push: pushSpy }),
@@ -80,17 +81,7 @@ vi.mock("@/lib/agents/sidebar", async () => {
   };
 });
 
-vi.mock("@/lib/transport/api", () => ({
-  api: {
-    patchAgentLabel: vi.fn().mockResolvedValue(undefined),
-    listAgents: vi.fn(() =>
-      Promise.resolve({
-        agents: state.agents.filter((a) => a.status === "terminated"),
-        next_cursor: null,
-      }),
-    ),
-  },
-}));
+
 
 vi.mock("@/lib/plugins/plugin-stats", async () => {
   const actual = await vi.importActual<typeof PluginStatsModule>("@/lib/plugins/plugin-stats");
@@ -141,7 +132,6 @@ vi.mock("@/components/ui/button", () => ({
 }));
 
 import { AgentSidebar } from "./index";
-import { api } from "@/lib/transport/api";
 
 afterEach(cleanup);
 beforeEach(resetSidebarTestState);
@@ -406,10 +396,10 @@ describe("handleSelect and handleRename forwarding", () => {
     expect(handlers.onFork).toHaveBeenCalledWith(4, undefined);
   });
 
-  it("click row rename → api.patchAgentLabel(id, label) called", async () => {
+  it("click row rename → transport.patchAgentLabel(id, label) called", async () => {
     state.agents = [makeAgent({ agent_id: 9 })];
     wrap(<AgentSidebar {...handlers} />);
     fireEvent.click(screen.getByTestId("rename-9"));
-    await waitFor(() => expect(api.patchAgentLabel).toHaveBeenCalledWith(9, "new-label"));
+    await waitFor(() => expect(transport.patchAgentLabel).toHaveBeenCalledWith(9, "new-label"));
   });
 });

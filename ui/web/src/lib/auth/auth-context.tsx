@@ -16,13 +16,13 @@ import {
   type ReactNode,
 } from "react";
 
-import { ApiError, api } from "../transport/api";
+import { ApiError } from "../transport/api";
+import { useApi } from "../transport/transport-context";
 import {
   notifySessionInvalid,
   registerSseRuntime,
   setSessionInvalidHandler,
 } from "../transport/sse-lifecycle";
-import { useApi } from "../transport/transport-context";
 
 export { notifySessionInvalid, setSessionInvalidHandler };
 
@@ -45,7 +45,7 @@ interface AuthState {
 const AuthContext = createContext<AuthState | null>(null);
 
 export function AuthProvider({ children }: { children: ReactNode }) {
-  const client = useApi(api);
+  const client = useApi();
   const [status, setStatus] = useState<AuthStatus>("loading");
 
   useEffect(() => {
