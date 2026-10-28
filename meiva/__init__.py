@@ -54,7 +54,7 @@ from .sdk_surface.plugins import UnknownNamespaceError as UnknownNamespaceError
 # renderer), and `plugins` (the plugin registration API). The plugin-author
 # entry points are re-exported here; framework controls (the render
 # contextvars, the SDK-disable entries) are imported from their own module.
-from .sdk_surface.pure.const import const as const
+from .sdk_surface.pure.render.const import const as const
 
 # ── The SDK entry's slots ───────────────────────────────────────────────────
 #

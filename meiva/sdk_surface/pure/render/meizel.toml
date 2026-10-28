@@ -1,0 +1,4 @@
+exports = ["const.py", "signature.py"]
+
+[purity]
+"." = "strict"

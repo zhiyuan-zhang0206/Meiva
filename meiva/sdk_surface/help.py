@@ -21,7 +21,6 @@ from base.api_contracts.agent_contract import Harness
 from base.lm.catalog import ModelCatalog
 from meiva.sdk_surface import meiva_module, process_context
 
-from .attachment_transport import format_signature as format_signature
 from .discovery import (
     Constant,
     agent_visible_names,
@@ -30,12 +29,14 @@ from .discovery import (
     is_namespace,
     is_skill_object,
 )
-from .pure.const import (
+from .pure.media.attach.attach_model import media_gated_members, running_model
+from .pure.render.const import (
     format_docstring as format_docstring,
 )
-from .pure.const import (
+from .pure.render.const import (
     is_documented_const,
 )
+from .pure.render.signature import format_signature as format_signature
 
 
 @_dataclasses.dataclass(frozen=True)
@@ -141,8 +142,6 @@ class ModelHelpProfile:
         catalog: ModelCatalog,
         harness: Harness = Harness.MEIVA,
     ) -> "ModelHelpProfile":
-        from meiva.sdk_surface.attachment_transport import media_gated_members
-
         spec: Any = catalog.models.get(model)
         declared: frozenset[str] = spec.sdk_hidden_members if spec is not None else frozenset()
         style: Any = spec.sdk_doc_style if spec is not None else None
@@ -171,11 +170,10 @@ class ModelHelpProfile:
             else (Harness.CLAUDE_CODE if is_external else Harness.MEIVA)
         )
         from meiva.sdk_surface import settings as sdk_settings
-        from meiva.sdk_surface.attachment_transport import current_model
 
         try:
             catalog = sdk_settings.model_catalog()
-            model = current_model()
+            model = running_model(sdk_settings.agent_setting("llm_model"), catalog=catalog)
         except RuntimeError:
             return cls(hidden_members=HARNESS_HIDDEN_SELF_MEMBERS if is_external else frozenset())
         return cls.for_model(model, catalog=catalog, harness=harness)

@@ -24,8 +24,13 @@ from base.lm.catalog import ModelCatalog
 from base.lm.catalog.decide.types import YesNo, estimate_tokens, question_text
 from base.lm.catalog.provider_keys import ProviderKeys
 
-from .pure.media.injection_pieces import chunk_budget, fold_outcomes, pieces_to_judge
-from .pure.media.injection_plan import CheckStep, check_text, plan_check, unknown_model_message
+from .pure.media.injection.injection_pieces import chunk_budget, fold_outcomes, pieces_to_judge
+from .pure.media.injection.injection_plan import (
+    CheckStep,
+    check_text,
+    plan_check,
+    unknown_model_message,
+)
 
 _QUESTION_ID = "page_addresses_ai"
 
