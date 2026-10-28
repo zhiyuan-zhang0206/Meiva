@@ -13,7 +13,8 @@ from base.api_contracts.agent_contract import Harness
 from base.clock.tests.fakes import system_clock
 from base.lm.harness import Handoff, HarnessBridge, HarnessClosedError, HarnessTurnFaultedError
 from base.lm.harness.base_session import SessionBinding
-from base.lm.harness.claude import BridgeConfig, ClaudeSession
+from base.lm.harness.claude import BridgeConfig
+from base.lm.harness.claude.session import ClaudeSession
 from base.lm.harness.claude.tests.fake_sdk import (
     Block,
     Emit,

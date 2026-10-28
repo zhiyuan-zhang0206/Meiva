@@ -5,7 +5,7 @@ from pathlib import Path
 
 import pytest
 
-from base.lm.harness.claude import InboundQueueFullError, SessionClosedError
+from base.lm.harness.claude.session import InboundQueueFullError, SessionClosedError
 from base.lm.harness.claude.tests.fake_sdk import Block, Delay, Say
 from base.lm.harness.claude.tests.support import start
 

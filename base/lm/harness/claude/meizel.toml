@@ -1,26 +1,22 @@
-exports = ["tests"]
+exports = ["session.py", "tests"]
 
 [uses]
-"__init__.py" = ["auth.py", "config.py", "session.py"]
+"__init__.py" = ["auth.py", "config.py"]
 "config.py" = ["auth.py"]
+"inbound.py" = []
 "mapping.py" = []
-"session.py" = ["auth.py", "config.py", "mapping.py"]
-"tests" = ["__init__.py", "auth.py", "mapping.py"]
+"options.py" = ["auth.py", "config.py"]
+"session.py" = ["config.py", "inbound.py", "mapping.py", "options.py", "settle.py"]
+"settle.py" = ["mapping.py"]
+"tests" = ["__init__.py", "auth.py", "config.py", "inbound.py", "mapping.py", "options.py", "session.py", "settle.py"]
 
 [purity]
-"." = "strict-to-be"
+"." = "strict"
 "__init__.py" = "strict"
 "auth.py" = "strict"
 "config.py" = "strict"
+"inbound.py" = "strict"
 "mapping.py" = "strict"
-
-[debt.impure-call]
-"session.py#async def _begin" = 1
-"session.py#async def _read_loop" = 1
-"session.py#async def close" = 1
-"session.py#async def interrupt" = 1
-"session.py#async def start" = 1
-
-[debt.impure-edge]
-"session.py#base/lm/harness/base_session.py" = 1
-"session.py#base/lm/harness/process.py" = 1
+"options.py" = "strict"
+"session.py" = { mode = "none", why = "the effect shell of one Claude session: it opens and closes the SDK client, reads the CLI's message stream, awaits a query, an interrupt and a disconnect, and holds the state those calls change; what each message is, which result may claim the running turn, what a step and a turn's text are, which task report goes to the sink, what the SDK options carry and how a result settles a turn are decided in inbound.py, options.py and settle.py" }
+"settle.py" = "strict"
