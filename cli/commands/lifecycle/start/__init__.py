@@ -450,6 +450,7 @@ def _wait_ready(
             timeout_s=ready_timeout,
             home=start.command.home,
             timers=start.command.timers,
+            environ=start.command.config.process_environment(),
         )
 
 
