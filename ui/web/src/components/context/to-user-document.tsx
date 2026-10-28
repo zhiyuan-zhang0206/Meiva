@@ -12,7 +12,6 @@ import { useToUser } from "@/lib/context/use-to-user";
 import { cn } from "@/lib/format/utils";
 import { formatRelative } from "@/lib/format/time";
 import { COLUMN_TITLE_BAR_WRAP_CLASS, FLEX, FLEX_1, FLEX_COL, MIN_H_0 } from "@/lib/layout/layout";
-import { ApiError } from "@/lib/transport/api";
 import { API_BASE } from "@/lib/transport/api-base";
 
 const PUSHED_ENTRY = "meivaToUserEntry";
@@ -24,17 +23,22 @@ function pushedEntry(): boolean {
 type RefusalText = "unavailable" | "tooLarge" | "missing" | "unreadable";
 
 // meiva:note
-// The panel's words follow the server's failure code, never the status: a read the
-// server refused is permanent for this document version, so only an answer that says
-// the same request may pass is allowed to ask for a retry. A read that fails without
-// an answer (a dropped connection) is the one case worth retrying.
+// The panel's words follow the response's own fields, never the status and never the
+// error's class: a refusal is permanent for this document version, so only an answer
+// the server called retryable may ask for a retry, and a read that never got an answer
+// at all is the one other case where retrying is honest advice.
 // meiva:link ui/web/src/docs/frontend-state/api-requests.meiva.okf.md
 function refusalOf(error: unknown): { text: RefusalText; raw: boolean } {
-  if (!(error instanceof ApiError)) return { text: "unavailable", raw: false };
-  if (error.code === "to_user_document_too_large") return { text: "tooLarge", raw: true };
-  if (error.code === "to_user_reference_gone") return { text: "missing", raw: false };
-  if (error.code === "to_user_document_unreadable") return { text: "unreadable", raw: true };
-  return error.retryable ? { text: "unavailable", raw: false } : { text: "unreadable", raw: true };
+  if (typeof error !== "object" || error === null || !("status" in error) || typeof error.status !== "number") {
+    return { text: "unavailable", raw: false };
+  }
+  const code = "code" in error && typeof error.code === "string" ? error.code : null;
+  if (code === "to_user_document_too_large") return { text: "tooLarge", raw: true };
+  if (code === "to_user_reference_gone") return { text: "missing", raw: false };
+  if (code === "to_user_document_unreadable") return { text: "unreadable", raw: true };
+  return "retryable" in error && error.retryable === true
+    ? { text: "unavailable", raw: false }
+    : { text: "unreadable", raw: true };
 }
 
 // meiva:note
