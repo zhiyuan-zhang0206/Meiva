@@ -16,9 +16,9 @@ Standalone `meiva converge` takes the same explicit service selection as `meiva 
 steps share from the invocation's `CommandRuntime` (its `home` is the home converged and its
 `session` the invoking user's, built once in `CommandRuntime.create` as a `UserSession`: the
 user's home directory, the login shell, whether a person is at the terminal), decides whether the
-home is the host's prod install, and hands both to `run_converge`. Steps read the session and
-the host rather than `Path.home()`, `$SHELL`, `os.getuid()` or the TTY, so a test hands in the
-values it wants.
+home is the host's prod install, and hands both to `run_converge`. Steps read the session, the
+terminal and the host rather than `Path.home()`, `$SHELL`, `os.getuid()` or the process's own
+streams, so a test hands in the values it wants.
 `step_selection.py` (`strict`) holds the pure decision of which steps run and why each other
 step is skipped (consumer service not selected, host-global wiring off the prod install,
 capability roles, unit not configured yet); `run_converge` prints the decisions and runs the
@@ -29,9 +29,11 @@ same lazy event-pipeline owner; LGTM render failures use that writer without
 constructing another pipeline. Its required `database_factory` borrows the
 entry's operator owner across all selected steps. Its required `clock` is the
 invocation's `CommandRuntime.clock`: the incomplete marker, the ownership preflight log and the
-health preflight stamp with it, so a test hands in the instant it wants. Its required `helper` is the
-invocation's `CommandRuntime.helper` factory: the screen-capture, Accessibility and
-helper bring-up steps call it only on a macOS host that can run a helper, and a
+health preflight stamp with it, so a test hands in the instant it wants. Its required `terminal`
+is the invocation's `CommandRuntime.terminal`: the browser step asks the person at it whether to
+seed the browser profile, so the offer speaks over the streams the command entry read once. Its
+required `helper` is the invocation's `CommandRuntime.helper` factory: the screen-capture,
+Accessibility and helper bring-up steps call it only on a macOS host that can run a helper, and a
 test that does not mean to reach one passes `refuse_helper`. Host capability steps and OS
 job registrations read that owner's live view
 at each existing step boundary, including browser, permission helpers, memory,

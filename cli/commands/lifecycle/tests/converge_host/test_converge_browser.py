@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import io
 from dataclasses import replace
 from pathlib import Path
 
@@ -22,6 +23,7 @@ from cli.commands.converge.plans.browser_plan import (
 from cli.commands.converge.spec import ConvergeCtx
 from cli.commands.lifecycle import converge_host as cv
 from cli.commands.lifecycle.tests.converge_host.context_inputs import capable_mac
+from cli.database.runtime import Terminal
 from services.desktop.browser.profile import profile_dir
 
 _NO_DISPLAY = "no display (headless server)"
@@ -84,22 +86,26 @@ def test_a_capable_host_runs_the_preflight_quietly(
 
 
 # meiva:note
-# Pytest's real captured stdin refuses reads. Reaching the prompt proves the production
-# root used this session's daily profile, rather than the process HOME or an inert spy.
+# The offer speaks over the invocation's terminal and names the daily profile of the captured
+# session, not the process HOME: the prompt appears on the terminal the step was handed, and the
+# answer 'new' leaves an empty profile behind.
 def test_profile_offer_uses_the_captured_session_home(
-    ctx: ConvergeCtx, capsys: pytest.CaptureFixture[str], tmp_path: Path, default_home: Path
+    ctx: ConvergeCtx, tmp_path: Path, default_home: Path
 ) -> None:
     source = tmp_path / "captured-session" / "Library/Application Support/Google/Chrome"
     source.mkdir(parents=True)
+    asked = io.StringIO()
     ready = _browser_ctx(ctx, npx=True)
     session = replace(ready.session, user_home=tmp_path / "captured-session", interactive=True)
-    ready = replace(ready, session=session)
+    ready = replace(
+        ready, session=session, terminal=Terminal(io.StringIO("new\n"), asked, io.StringIO())
+    )
     assert session.user_home != default_home
 
-    with pytest.raises(OSError, match="reading from stdin"):
-        cv.ensure_browser(ready)
+    cv.ensure_browser(ready)
 
-    assert str(source) in capsys.readouterr().out
+    assert str(source) in asked.getvalue()
+    assert not profile_dir(ready.meiva_home).exists()
 
 
 # meiva:note
@@ -113,15 +119,21 @@ def test_profile_offer_stands_down_for_the_profile_under_the_context_home(
     session_home = tmp_path / "captured-session"
     (session_home / "Library/Application Support/Google/Chrome").mkdir(parents=True)
     context_home = tmp_path / "context-home"
+    asked = io.StringIO()
     ready = replace(
         _browser_ctx(ctx, npx=True),
         session=replace(ctx.session, user_home=session_home, interactive=True),
         meiva_home=context_home,
+        terminal=Terminal(io.StringIO(), asked, io.StringIO()),
     )
     assert context_home != default_home
     profile_dir(context_home).mkdir(parents=True)
 
     cv.ensure_browser(ready)
+
+    # meiva:note
+    # The terminal is empty: had the step prompted, `ask` would have raised on the first read.
+    assert asked.getvalue() == ""
 
 
 # meiva:note

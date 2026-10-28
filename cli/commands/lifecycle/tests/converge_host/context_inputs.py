@@ -59,6 +59,7 @@ def converge_context(
         timers=command_runtime.timers,
         clock=command_runtime.clock,
         services=frozenset(),
+        terminal=command_runtime.terminal,
     )
 
 

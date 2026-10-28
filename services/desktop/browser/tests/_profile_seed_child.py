@@ -13,7 +13,7 @@ def main() -> None:
                 interactive=True,
                 daily_profile=Path(sys.argv[2]),
                 profile=Path(sys.argv[3]),
-                console=Console.of_process(),
+                console=Console(stdin=sys.stdin, stdout=sys.stdout),
             )
         case _:
             raise ValueError(f"unknown profile child mode: {sys.argv[1]}")

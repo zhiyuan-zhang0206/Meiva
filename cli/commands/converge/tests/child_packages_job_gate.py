@@ -23,6 +23,7 @@ from cli.database import (
     operator_event_pipeline,
 )
 from cli.database.runtime import UserSession
+from cli.database.tests.command_inputs import inert_terminal
 
 
 def main() -> None:
@@ -53,6 +54,7 @@ def main() -> None:
         clock=Clock(
             ClockConfig("UTC", None, message_timestamp_weekday=False), timers=ManualTimers()
         ),
+        terminal=inert_terminal(),
     )
     try:
         ensure_packages_refresh_job(context)

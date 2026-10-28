@@ -209,6 +209,7 @@ class CollectorUnit:
             timers=self.runtime.timers,
             clock=self.runtime.clock,
             services=frozenset(),
+            terminal=self.runtime.terminal,
         )
 
 

@@ -18,7 +18,14 @@ from base.paths import meiva_home, repo_root
 from base.sessions.tests.refuse_helper import refuse_helper
 from cli.database.runtime import CommandRuntime, Terminal, UserSession
 
-__all__ = ["command_config_machine", "command_machine", "command_runtime"]
+__all__ = ["command_config_machine", "command_machine", "command_runtime", "inert_terminal"]
+
+
+# meiva:note
+# A terminal with no person behind it: both streams are buffers the test owns, and neither is a
+# tty, so a command that asks a person a question reads end of input and writes nothing anywhere.
+def inert_terminal() -> Terminal:
+    return Terminal(io.StringIO(), io.StringIO(), io.StringIO())
 
 
 @pytest.fixture
@@ -50,7 +57,7 @@ def command_runtime(tmp_path: Path) -> CommandRuntime:
             now=timers.now,
         ),
         checkout=repo_root(),
-        terminal=Terminal(io.StringIO(), io.StringIO(), io.StringIO()),
+        terminal=inert_terminal(),
     )
 
 
