@@ -72,19 +72,14 @@ _RULE_INPUTS = _POLICY.names("no-os-environ", "rule-inputs")
 
 # meiva:note
 # One file's findings as (line number, stripped line, kind): a judged file is read, and an unreadable
-# entry (a dangling symlink, binary content) keeps the shared lint contract of skipping. The registry
-# is asked through `managed_envs` only here, so a scan that judges nothing never imports it.
-def _scan_file(
-    path: Path, root: Path, managed_envs: Callable[[], frozenset[str]]
-) -> list[tuple[int, str, str]]:
-    if not plan.judges_file(path, root, allowed_files=_ALLOWED_FILES):
-        return []
+# entry (a dangling symlink, binary content) keeps the shared lint contract of skipping.
+def _scan_file(path: Path, managed_envs: frozenset[str]) -> list[tuple[int, str, str]]:
     text = lint_common.read_utf8_text(path)
     if text is None:
         return []
     return plan.setenv_violations(
         text,
-        managed_envs=managed_envs(),
+        managed_envs=managed_envs,
         provider_keys=_PROVIDER_KEY_ENV_VARS,
         live_reads=_LIVE_READ_ENV_VARS,
     )
@@ -112,19 +107,17 @@ def main(
             return 1
     scope = lint_common.changed_scope(only, root, inputs=_RULE_INPUTS)
     py_files = _files_to_scan(resolved, scope, root, explicit=bool(argv))
+    judged = [
+        path for path in py_files if plan.judges_file(path, root, allowed_files=_ALLOWED_FILES)
+    ]
     # meiva:note
-    # Importing the config registry is the slow part, so it is read at the first judged file and
-    # never for a run that judges none.
-    registry_envs: list[frozenset[str]] = []
-
-    def managed_envs() -> frozenset[str]:
-        if not registry_envs:
-            registry_envs.append(managed_aliases())
-        return registry_envs[0]
+    # Importing the config registry is the slow part of a run, so it is read once and only when the
+    # scan has a file to judge.
+    managed_envs = managed_aliases() if judged else frozenset[str]()
 
     total_violations = 0
-    for path in sorted(py_files):
-        for lineno, content, kind in _scan_file(path, root, managed_envs):
+    for path in sorted(judged):
+        for lineno, content, kind in _scan_file(path, managed_envs):
             total_violations += 1
             print(plan.finding(path, root, lineno, kind))
             print(f"    {content}")
