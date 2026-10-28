@@ -9,6 +9,7 @@ from urllib.parse import unquote, urlsplit
 from markdown_it import MarkdownIt
 from mdit_py_plugins.footnote import footnote_plugin
 
+from base.agents.to_user.errors import ToUserFileTooLarge
 from base.agents.to_user.models import DOCUMENT_FILENAME, ToUserResource
 from base.config import settings
 
@@ -114,10 +115,10 @@ def read_regular_file(path: Path, limit: int) -> tuple[bytes, os.stat_result]:
         if not stat.S_ISREG(info.st_mode):
             raise ValueError("To user references must be regular files")
         if info.st_size > limit:
-            raise ValueError(f"To user file exceeds the {limit} byte limit")
+            raise ToUserFileTooLarge(f"To user file exceeds the {limit} byte limit")
         raw = stream.read(limit + 1)
         if len(raw) > limit:
-            raise ValueError(f"To user file exceeds the {limit} byte limit")
+            raise ToUserFileTooLarge(f"To user file exceeds the {limit} byte limit")
     return raw, info
 
 

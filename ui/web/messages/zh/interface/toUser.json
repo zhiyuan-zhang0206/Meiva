@@ -18,5 +18,9 @@
   "openContext": "To user",
   "back": "返回",
   "legacyHtml": "等待 Markdown 文档。",
-  "hideContextPanel": "收起共享上下文"
+  "hideContextPanel": "收起共享上下文",
+  "tooLarge": "这个文件太大，这里显示不下。",
+  "missing": "这条链接已经失效。",
+  "unreadable": "这个文件在这里显示不了。",
+  "openRaw": "直接打开这个文件"
 }

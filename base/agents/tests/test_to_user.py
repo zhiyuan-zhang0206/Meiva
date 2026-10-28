@@ -4,9 +4,12 @@ from pathlib import Path
 import pytest
 
 from base.agents.to_user import (
+    ToUserFileTooLarge,
+    ToUserReadFailure,
     ToUserReadRequest,
     ensure_document,
     read_document,
+    read_failure,
     read_resource,
     resolve_reference,
 )
@@ -178,3 +181,19 @@ def test_ensure_document_seeds_only_a_missing_panel(tmp_path: Path) -> None:
     ensure_document(tmp_path)
     assert panel.read_text() == "# Keep me"
     assert panel.stat().st_mtime_ns == marker
+
+
+def test_every_refused_read_lands_in_one_class(tmp_path: Path) -> None:
+    (tmp_path / "to_user.md").write_text("[big](big.md)\n\n[broken](broken.md)")
+    (tmp_path / "big.md").write_bytes(b"x" * (settings.to_user.max_document_bytes + 1))
+    (tmp_path / "broken.md").write_bytes(b"\xff")
+    resources = read_document(tmp_path).resources
+    with pytest.raises(ToUserFileTooLarge) as too_large:
+        read_document(tmp_path, references=[resources["big.md"].id])
+    assert read_failure(too_large.value) is ToUserReadFailure.TOO_LARGE
+    with pytest.raises(FileNotFoundError) as gone:
+        read_document(tmp_path, references=["0" * 64])
+    assert read_failure(gone.value) is ToUserReadFailure.GONE
+    with pytest.raises(UnicodeError) as unreadable:
+        read_document(tmp_path, references=[resources["broken.md"].id])
+    assert read_failure(unreadable.value) is ToUserReadFailure.UNREADABLE

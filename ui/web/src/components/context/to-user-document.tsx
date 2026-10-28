@@ -20,14 +20,35 @@ function pushedEntry(): boolean {
   return (window.history.state as Record<string, unknown> | null)?.[PUSHED_ENTRY] === true;
 }
 
+type RefusalText = "unavailable" | "tooLarge" | "missing" | "unreadable";
+
+// meiva:note
+// The panel's words follow the response's own fields, never the status and never the
+// error's class: a refusal is permanent for this document version, so only an answer
+// the server called retryable may ask for a retry, and a read that never got an answer
+// at all is the one other case where retrying is honest advice.
+// meiva:link ui/web/src/docs/frontend-state/api-requests.meiva.okf.md
+function refusalOf(error: unknown): { text: RefusalText; raw: boolean } {
+  if (typeof error !== "object" || error === null || !("status" in error) || typeof error.status !== "number") {
+    return { text: "unavailable", raw: false };
+  }
+  const code = "code" in error && typeof error.code === "string" ? error.code : null;
+  if (code === "to_user_document_too_large") return { text: "tooLarge", raw: true };
+  if (code === "to_user_reference_gone") return { text: "missing", raw: false };
+  if (code === "to_user_document_unreadable") return { text: "unreadable", raw: true };
+  return "retryable" in error && error.retryable === true
+    ? { text: "unavailable", raw: false }
+    : { text: "unreadable", raw: true };
+}
+
 // meiva:note
 // The inspector trigger is optional: `onInspect` decides whether the bar renders
 // it at all, and `inspecting` drives its pressed state.
 // meiva:link ui/web/src/docs/frontend-state/navigation-history.meiva.okf.md
-export function ToUserDocumentView({ agentId, document, failed, pending, refresh, mobile, inspecting = false, bodyHidden = false, onInspect, onCollapse, onNavigate }: {
+export function ToUserDocumentView({ agentId, document, failure, pending, refresh, mobile, inspecting = false, bodyHidden = false, onInspect, onCollapse, onNavigate }: {
   agentId: number;
   document: ToUserDocument | undefined;
-  failed: boolean;
+  failure: unknown;
   pending: boolean;
   refresh: () => void;
   mobile: boolean;
@@ -45,7 +66,9 @@ export function ToUserDocumentView({ agentId, document, failed, pending, refresh
   const linked = useToUser(references.length ? agentId : null, references);
   const current = references.length ? linked.data : document;
   const loading = references.length ? linked.isFetching : pending;
-  const error = references.length ? linked.isError : failed;
+  const error = references.length ? linked.error : failure;
+  const failed = error != null;
+  const refusal = failed ? refusalOf(error) : null;
   const referencePath = references.join("/");
   useEffect(() => { onNavigate?.(); }, [referencePath, onNavigate]);
   const content = current?.content;
@@ -78,6 +101,11 @@ export function ToUserDocumentView({ agentId, document, failed, pending, refresh
     return [href, { ...resource, url: `${API_BASE}/api/agents/${agentId}/to-user/resource?${query}${fragment}` }];
   }));
   const byUrl = new Map([...resources.values()].map((resource) => [resource.url, resource]));
+  // meiva:note
+  // The same file the panel could not render, served as bytes: the resource route
+  // bounds it by its own budget, so a document too large to display stays reachable.
+  const rawQuery = new URLSearchParams(references.map((reference) => ["reference", reference]));
+  const rawUrl = `${API_BASE}/api/agents/${agentId}/to-user/resource?${rawQuery}`;
   // meiva:note
   // The caller owns the question and Inspector as siblings of this document,
   // so navigating its keyed body cannot discard an unfinished answer.
@@ -141,10 +169,17 @@ export function ToUserDocumentView({ agentId, document, failed, pending, refresh
       </div>
       {bodyHidden ? null : (
         <>
-          {error && content && <div role="status" className="border-b bg-amber-500/10 px-4 py-2 text-xs text-amber-700 dark:text-amber-300">{t("stale")}</div>}
+          {failed && content && <div role="status" className="border-b bg-amber-500/10 px-4 py-2 text-xs text-amber-700 dark:text-amber-300">{t("stale")}</div>}
           {!content ? (
             <div className={cn("items-center justify-center px-8 text-center text-sm text-muted-foreground", FLEX, FLEX_1)}>
-              {loading ? t("loading") : error ? t("unavailable") : current?.legacy_html ? t("legacyHtml") : t("empty")}
+              {loading ? t("loading") : refusal ? (
+                <div data-testid="document-failure" className="space-y-1">
+                  <p>{t(refusal.text)}</p>
+                  {refusal.raw && references.length > 0 ? (
+                    <a className="underline hover:text-foreground" href={rawUrl} target="_blank" rel="noopener noreferrer">{t("openRaw")}</a>
+                  ) : null}
+                </div>
+              ) : current?.legacy_html ? t("legacyHtml") : t("empty")}
             </div>
           ) : (
         <div key={references.join("/")} data-testid="document-content" className="px-5 py-3 text-[13px] leading-relaxed [&>.chat-md>:first-child]:mt-0">

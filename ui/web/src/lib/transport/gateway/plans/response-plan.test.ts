@@ -28,6 +28,21 @@ describe("server error surfacing", () => {
     );
   });
 
+  it("takes the server's code and retryability from a flat envelope", () => {
+    const refused = errorFromResponse(413, JSON.stringify({
+      code: "to_user_document_too_large",
+      detail: "The file is larger than the panel's document budget",
+      retryable: false,
+    }));
+    expect(refused.code).toBe("to_user_document_too_large");
+    expect(refused.retryable).toBe(false);
+  });
+
+  it("falls back to the status when the body states no retryability", () => {
+    expect(errorFromResponse(503, JSON.stringify({ detail: "unavailable" })).retryable).toBe(true);
+    expect(errorFromResponse(422, JSON.stringify({ detail: "refused" })).retryable).toBe(false);
+  });
+
   it("falls back to the status and the raw text when the body is not an object", () => {
     expect(errorFromResponse(404, "not found").message).toBe("HTTP 404: not found");
     expect(errorFromResponse(500, "").message).toBe("HTTP 500: request failed");

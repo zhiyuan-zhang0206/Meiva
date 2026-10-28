@@ -6,9 +6,24 @@ from pathlib import Path
 from psycopg_pool import ConnectionPool
 from pydantic import ValidationError
 
-from base.agents.to_user import ToUserReadRequest, read_resource
+from base.agents.to_user import (
+    ToUserReadFailure,
+    ToUserReadRequest,
+    read_failure,
+    read_resource,
+)
 from ops.to_user import owned_workspace
 from services.agent_runner.agent_ops import in_flight
+
+# meiva:note
+# One answer per failure class, so a caller can tell "gone" (stop) from "too large"
+# (ask for the file rather than the rendering) without reading the body text.
+# meiva:link gateway/agents/docs/to-user-read-failures.meiva.okf.md
+_STATUS: dict[ToUserReadFailure, tuple[int, bytes]] = {
+    ToUserReadFailure.GONE: (404, b"Referenced file is no longer available"),
+    ToUserReadFailure.TOO_LARGE: (413, b"Referenced file is larger than the resource budget"),
+    ToUserReadFailure.UNREADABLE: (422, b"Referenced file could not be read"),
+}
 
 
 def resource_response(
@@ -19,10 +34,11 @@ def resource_response(
         request = ToUserReadRequest.model_validate_json(body)
         workspace = owned_workspace(pool, request.agent_id, machine, home=home)
         content = read_resource(workspace, request.references)
-    except FileNotFoundError:
-        return 404, b"Referenced file is no longer available", "text/plain"
-    except (ValueError, OSError, ValidationError):
-        return 422, b"Referenced file could not be read", "text/plain"
+    except ValidationError:
+        return 422, b"Invalid resource request", "text/plain"
+    except (OSError, ValueError) as exc:
+        status, text = _STATUS[read_failure(exc)]
+        return status, text, "text/plain"
     return 200, content, "application/octet-stream"
 
 

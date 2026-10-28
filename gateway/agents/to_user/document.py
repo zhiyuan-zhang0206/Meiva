@@ -1,21 +1,58 @@
 import asyncio
+import logging
 import mimetypes
 from typing import Annotated
 from urllib.parse import quote
 
 import httpx
 from fastapi import APIRouter, HTTPException, Query, Request
-from fastapi.responses import Response
+from fastapi.responses import JSONResponse, Response
 from pydantic import ValidationError
 
-from base.agents.to_user import ToUserDocument, ToUserReadRequest
+from base.agents.to_user import ToUserDocument, ToUserReadFailure, ToUserReadRequest
 from base.cluster.machine import gateway_auth_headers
 from base.cluster.machines import MachineGatewayUrlMissing, MachineNotRegistered, lookup
 from gateway.agents.eval_guard import deny_isolated_result_read
 from gateway.http.config import gateway_config, gateway_rpc
+from gateway.http.middleware.error_envelope import error_response
 from ops.cluster.rpc import ClusterOpFailed, ClusterOpUnreachable
 
 router = APIRouter()
+_log = logging.getLogger(__name__)
+
+# meiva:link gateway/agents/docs/to-user-read-failures.meiva.okf.md
+_READ_FAILURES: dict[ToUserReadFailure, tuple[int, str, str]] = {
+    ToUserReadFailure.GONE: (
+        404,
+        "to_user_reference_gone",
+        "The document no longer references this file",
+    ),
+    ToUserReadFailure.TOO_LARGE: (
+        413,
+        "to_user_document_too_large",
+        "The file is larger than the panel's document budget",
+    ),
+    ToUserReadFailure.UNREADABLE: (
+        422,
+        "to_user_document_unreadable",
+        "The workspace document could not be read",
+    ),
+}
+
+
+# meiva:note
+# The route answers a refusal itself: the class names the envelope code, which is
+# what the panel reads, so the status is only how the refusal travels.
+# meiva:link gateway/agents/docs/to-user-read-failures.meiva.okf.md
+class PanelReadFailed(Exception):  # noqa: N818
+    def __init__(self, failure: ToUserReadFailure) -> None:
+        super().__init__(failure.value)
+        self.status, self.code, self.detail = _READ_FAILURES[failure]
+
+    def response(self, request: Request) -> JSONResponse:
+        return error_response(
+            request, code=self.code, status=self.status, detail=self.detail, retryable=False
+        )
 
 
 def home_machine(request: Request, agent_id: int) -> str:
@@ -50,20 +87,28 @@ async def read_snapshot(request: Request, query: ToUserReadRequest, machine: str
     except ClusterOpUnreachable as exc:
         raise HTTPException(503, "The agent's machine is unavailable") from exc
     except ClusterOpFailed as exc:
-        raise HTTPException(422, "The workspace document could not be read") from exc
+        try:
+            failure = ToUserReadFailure(exc.result.get("reason"))
+        except ValueError:
+            _log.warning("to_user_read failed without a known reason: %s", exc.result.get("error"))
+            failure = ToUserReadFailure.UNREADABLE
+        raise PanelReadFailed(failure) from exc
     return ToUserDocument.model_validate(result)
 
 
-@router.get("/api/agents/{agent_id}/to-user")
+@router.get("/api/agents/{agent_id}/to-user", response_model=ToUserDocument)
 async def get_to_user(
     agent_id: int,
     request: Request,
     reference: Annotated[list[str] | None, Query()] = None,
-) -> ToUserDocument:
+) -> ToUserDocument | JSONResponse:
     machine = await asyncio.to_thread(home_machine, request, agent_id)
     max_depth = gateway_config(request).to_user.max_chain_depth
     query = resource_request(agent_id, reference or [], max_depth=max_depth)
-    return await read_snapshot(request, query, machine)
+    try:
+        return await read_snapshot(request, query, machine)
+    except PanelReadFailed as failed:
+        return failed.response(request)
 
 
 _PASSIVE_PREFIXES = ("image/", "audio/", "video/")
@@ -127,7 +172,7 @@ async def fetch_resource(
 
     async with client.stream("POST", url, json=query.model_dump(), headers=headers) as response:
         if response.status_code != 200:
-            status = response.status_code if response.status_code in (404, 422, 503) else 502
+            status = response.status_code if response.status_code in (404, 413, 422, 503) else 502
             raise HTTPException(status, "Referenced file could not be read")
         content = bytearray()
         async for chunk in response.aiter_bytes():
@@ -137,17 +182,20 @@ async def fetch_resource(
         return bytes(content)
 
 
-@router.get("/api/agents/{agent_id}/to-user/resource")
+@router.get("/api/agents/{agent_id}/to-user/resource", response_model=None)
 async def get_resource(
     agent_id: int,
     request: Request,
     reference: Annotated[list[str], Query(min_length=1)],
-) -> Response:
+) -> Response | JSONResponse:
     machine = await asyncio.to_thread(home_machine, request, agent_id)
     to_user = gateway_config(request).to_user
     query = resource_request(agent_id, reference, max_depth=to_user.max_chain_depth)
     parent = resource_request(agent_id, query.references[:-1], max_depth=to_user.max_chain_depth)
-    document = await read_snapshot(request, parent, machine)
+    try:
+        document = await read_snapshot(request, parent, machine)
+    except PanelReadFailed as failed:
+        return failed.response(request)
     resource = next(
         (value for value in document.resources.values() if value.id == reference[-1]), None
     )
