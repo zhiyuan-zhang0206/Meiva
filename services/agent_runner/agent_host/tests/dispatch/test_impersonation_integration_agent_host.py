@@ -450,6 +450,9 @@ async def test_restart_command_releases_the_incarnation_without_ending_the_carri
 # meiva:note
 # A terminate command ends the takeover in its own wake; the handoff still lands before
 # the row leaves 'running', so the receipt never waits for whatever revives the agent.
+# The timestamps state the order #5467 and #5492 require: the admission ends the lease,
+# the settle that follows delivers the handoff to a lease that already ended, and only
+# then does the terminate command apply.
 # meiva:link docs/conventions/agents/agent-impersonation.md
 async def test_terminate_command_settles_the_ended_takeover_before_the_agent_goes_down(
     db_conn: psycopg.Connection[Any],
@@ -487,6 +490,8 @@ async def test_terminate_command_settles_the_ended_takeover_before_the_agent_goe
     assert ended["handoff_applied_at"] is not None
     assert Path(ended["handoff_path"]).is_file()
     assert graph.values["impersonation_handoff_id"] == f"{agent_id}:0"
+    assert ended["ended_at"] is not None
+    assert ended["ended_at"] <= ended["handoff_applied_at"]
     assert db_conn.execute(
         "SELECT status FROM agents_meta WHERE id=%s", (agent_id,)
     ).fetchone() == ("terminated",)

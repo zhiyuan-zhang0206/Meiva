@@ -22,9 +22,10 @@ accepting incarnation to the admitted one and changing nothing else — the cred
 the deadline and the event admission stay, so the controller keeps working and requests
 nothing. The move is recorded in the lease's own log as a `lease_adopted` entry and
 emitted as the `impersonation_lease_adopted` audit event, because the row only ever names
-the incarnation that carries the lease now. A termination is not a restart: while a
-terminate command is pending, admission ends the lease as before, so the handoff still
-lands before the row goes down. An admission that cannot carry the lease falls back to
+the incarnation that carries the lease now. **A restart carries the takeover; a
+termination revokes it.** While a terminate command is pending, admission ends the lease as
+before, so the handoff still lands before the row goes down (`_apply_lease_controls`
+settles the ended lease, then the command applies). An admission that cannot carry the lease falls back to
 that same end (cause `aborted: native runtime restarted`). Administrative restart and
 terminate still reach the native dispatcher; termination revokes control.
 
