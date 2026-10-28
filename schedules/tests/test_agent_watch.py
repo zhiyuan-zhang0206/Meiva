@@ -286,6 +286,17 @@ def test_the_round_line_names_what_was_silent_and_what_was_blind() -> None:
     assert "silent=1" in line
     assert "blind=1" in line
     assert f"silent_ids={_DUTY.agent_id}" in line
+    assert "emit_failures" not in line
+
+
+# meiva:note
+# A round whose event could not be emitted is a round nobody can see, and it used to read exactly
+# like a round with nothing to report. The count rides on the line the round prints, so the failure
+# is visible in the same place as the round's other readings.
+def test_the_round_line_carries_the_count_of_emit_failures() -> None:
+    plans = [(_DUTY, _plan(_ALIVE, WatchState(), now=5000.0))]
+    line = round_line([_DUTY], plans, {_DUTY.agent_id: _ALIVE}, emit_failures=3)
+    assert "emit_failures=3" in line
 
 
 def test_state_survives_a_round_trip_and_an_unreadable_file(
