@@ -1,0 +1,17 @@
+exports = ["alerts-badge.tsx", "connection-notice.tsx", "notice-question-form.tsx", "open-notice-detail.tsx", "open-tasks-notice.tsx", "toast.tsx"]
+
+[uses]
+"alerts-badge.test.tsx" = ["alerts-badge.tsx"]
+"connection-notice.test.tsx" = ["connection-notice.tsx"]
+"open-notice-detail.test.tsx" = ["open-notice-detail.tsx"]
+"open-notice-detail.tsx" = ["notice-question-form.tsx"]
+"open-tasks-notice.test.tsx" = ["open-tasks-notice-dialog.tsx", "open-tasks-notice.tsx"]
+"open-tasks-notice.tsx" = ["open-tasks-notice-dialog.tsx"]
+"toast.test.tsx" = ["toast.tsx"]
+
+[debt.ambient-read]
+"open-notice-detail.tsx#clock Date" = 2
+"open-tasks-notice-dialog.tsx#clock Date" = 1
+
+[debt.first-party-patch]
+"open-notice-detail.test.tsx#vi.mock ui/web/src/lib/transport/api.ts" = 1

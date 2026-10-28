@@ -1,0 +1,40 @@
+exports = ["anchor-scroll.ts", "nav.tsx", "section.tsx", "sections.ts", "visibility.tsx"]
+
+[uses]
+"anchor-scroll.test.tsx" = ["anchor-scroll.ts"]
+"config" = ["config-group-defs.ts", "config-groups.ts", "visibility.tsx"]
+"config-group-defs.ts" = ["sections.ts"]
+"config-groups.test.ts" = ["config-group-defs.ts", "config-groups.ts"]
+"config-groups.ts" = ["config-group-defs.ts"]
+"inventory" = ["visibility.tsx"]
+"nav.test.tsx" = ["nav.tsx"]
+"nav.tsx" = ["sections.ts"]
+"page.test.tsx" = ["config", "display", "guide", "inventory", "page.tsx", "schedules", "sections.ts", "skills"]
+"page.tsx" = ["anchor-scroll.ts", "config", "display", "guide", "inventory", "nav.tsx", "schedules", "section.tsx", "sections.ts", "skills"]
+"schedules" = ["visibility.tsx"]
+"section.test.tsx" = ["section.tsx"]
+"section.tsx" = ["visibility.tsx"]
+"skills" = ["visibility.tsx"]
+"visibility.test.tsx" = ["visibility.tsx"]
+
+[debt.ambient-read]
+"page.tsx#environ window.location" = 1
+
+[debt.first-party-patch]
+"page.test.tsx#vi.mock ui/web/src/app/control/config/page.tsx" = 1
+"page.test.tsx#vi.mock ui/web/src/app/control/display/page.tsx" = 1
+"page.test.tsx#vi.mock ui/web/src/app/control/guide/page.tsx" = 1
+"page.test.tsx#vi.mock ui/web/src/app/control/inventory/page.tsx" = 1
+"page.test.tsx#vi.mock ui/web/src/app/control/schedules/page.tsx" = 1
+"page.test.tsx#vi.mock ui/web/src/app/control/skills/page.tsx" = 1
+"page.test.tsx#vi.mock ui/web/src/lib/transport/api.ts" = 1
+
+[debt.stdlib-patch]
+"anchor-scroll.test.tsx#vi.stubGlobal ResizeObserver" = 1
+
+[debt.type-cast]
+"config-groups.ts#cast displayGroupId" = 1
+"nav.tsx#cast ControlNav.labelOf" = 1
+
+[debt.unresolved-patch]
+"page.test.tsx#vi.spyOn skillsEl as Element.\"scrollIntoView\"" = 1

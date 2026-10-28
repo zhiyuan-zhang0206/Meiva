@@ -1,0 +1,2 @@
+[uses]
+"check-bundle-integrity.test.ts" = ["check-bundle-integrity.mjs"]

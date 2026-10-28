@@ -1,0 +1,11 @@
+[uses]
+"page.test.tsx" = ["page.tsx"]
+
+[debt.ambient-read]
+"page.tsx#platform window.matchMedia" = 2
+
+[debt.first-party-patch]
+"page.test.tsx#vi.mock ui/web/src/lib/transport/api.ts" = 1
+
+[debt.third-party-patch]
+"page.test.tsx#vi.mock next/navigation" = 1

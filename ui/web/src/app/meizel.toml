@@ -1,0 +1,66 @@
+exports = ["insights"]
+
+[uses]
+"insights" = ["control"]
+"layout.tsx" = ["globals.css"]
+"page-dispatch.test.tsx" = ["page-test-mock.tsx", "page.tsx"]
+"page.test.tsx" = ["page-test-mock.tsx", "page.tsx"]
+
+[debt.first-party-patch]
+"page-dispatch.test.tsx#assignment ui/web/src/app/page-test-mock.tsx.activeId" = 19
+"page-dispatch.test.tsx#assignment ui/web/src/app/page-test-mock.tsx.agents" = 18
+"page-dispatch.test.tsx#assignment ui/web/src/app/page-test-mock.tsx.mounts" = 1
+"page-dispatch.test.tsx#assignment ui/web/src/app/page-test-mock.tsx.settings" = 2
+"page-dispatch.test.tsx#assignment ui/web/src/app/page-test-mock.tsx.settings.display.composer_context_meter" = 2
+"page-dispatch.test.tsx#assignment ui/web/src/app/page-test-mock.tsx.spawn" = 1
+"page-dispatch.test.tsx#assignment ui/web/src/app/page-test-mock.tsx.turnActive" = 4
+"page-dispatch.test.tsx#vi.mock ui/web/src/components/agent-sidebar/index.tsx" = 1
+"page-dispatch.test.tsx#vi.mock ui/web/src/components/conversation/composer.tsx" = 1
+"page-dispatch.test.tsx#vi.mock ui/web/src/components/conversation/upload-button.tsx" = 1
+"page-dispatch.test.tsx#vi.mock ui/web/src/components/inspector/inspector-panel.tsx" = 1
+"page-dispatch.test.tsx#vi.mock ui/web/src/components/shell/header-bar.tsx" = 1
+"page-dispatch.test.tsx#vi.mock ui/web/src/components/timeline/index.tsx" = 1
+"page-dispatch.test.tsx#vi.mock ui/web/src/lib/agents/use-agents.ts" = 1
+"page-dispatch.test.tsx#vi.mock ui/web/src/lib/inspector/use-token-usage.ts" = 1
+"page-dispatch.test.tsx#vi.mock ui/web/src/lib/layout/breakpoint.ts" = 1
+"page-dispatch.test.tsx#vi.mock ui/web/src/lib/state/store.ts" = 1
+"page-dispatch.test.tsx#vi.mock ui/web/src/lib/state/use-user-settings.ts" = 1
+"page-dispatch.test.tsx#vi.mock ui/web/src/lib/timeline/timeline-store.ts" = 1
+"page-dispatch.test.tsx#vi.mock ui/web/src/lib/timeline/use-timeline.ts" = 1
+"page-dispatch.test.tsx#vi.mock ui/web/src/lib/transport/api.ts" = 1
+"page-dispatch.test.tsx#vi.mock ui/web/src/lib/transport/useEventStream.tsx" = 1
+"page.test.tsx#assignment ui/web/src/app/page-test-mock.tsx.activeId" = 11
+"page.test.tsx#assignment ui/web/src/app/page-test-mock.tsx.agents" = 10
+"page.test.tsx#assignment ui/web/src/app/page-test-mock.tsx.isDesktop" = 2
+"page.test.tsx#assignment ui/web/src/app/page-test-mock.tsx.isLarge" = 3
+"page.test.tsx#assignment ui/web/src/app/page-test-mock.tsx.mounts" = 1
+"page.test.tsx#assignment ui/web/src/app/page-test-mock.tsx.settings" = 12
+"page.test.tsx#assignment ui/web/src/app/page-test-mock.tsx.shouldThrow" = 3
+"page.test.tsx#assignment ui/web/src/app/page-test-mock.tsx.timelineError" = 3
+"page.test.tsx#assignment ui/web/src/app/page-test-mock.tsx.timelineFetching" = 1
+"page.test.tsx#assignment ui/web/src/app/page-test-mock.tsx.timelineItems" = 3
+"page.test.tsx#assignment ui/web/src/app/page-test-mock.tsx.toast" = 1
+"page.test.tsx#assignment ui/web/src/app/page-test-mock.tsx.turnActive" = 1
+"page.test.tsx#vi.mock ui/web/src/components/agent-sidebar/index.tsx" = 1
+"page.test.tsx#vi.mock ui/web/src/components/conversation/composer.tsx" = 1
+"page.test.tsx#vi.mock ui/web/src/components/conversation/upload-button.tsx" = 1
+"page.test.tsx#vi.mock ui/web/src/components/inspector/inspector-panel.tsx" = 1
+"page.test.tsx#vi.mock ui/web/src/components/shell/header-bar.tsx" = 1
+"page.test.tsx#vi.mock ui/web/src/components/timeline/index.tsx" = 1
+"page.test.tsx#vi.mock ui/web/src/lib/agents/use-agents.ts" = 1
+"page.test.tsx#vi.mock ui/web/src/lib/inspector/use-token-usage.ts" = 1
+"page.test.tsx#vi.mock ui/web/src/lib/layout/breakpoint.ts" = 1
+"page.test.tsx#vi.mock ui/web/src/lib/state/store.ts" = 1
+"page.test.tsx#vi.mock ui/web/src/lib/state/use-user-settings.ts" = 1
+"page.test.tsx#vi.mock ui/web/src/lib/timeline/timeline-store.ts" = 1
+"page.test.tsx#vi.mock ui/web/src/lib/timeline/use-timeline.ts" = 1
+"page.test.tsx#vi.mock ui/web/src/lib/transport/api.ts" = 1
+"page.test.tsx#vi.mock ui/web/src/lib/transport/useEventStream.tsx" = 1
+
+[debt.stdlib-patch]
+"page-dispatch.test.tsx#vi.stubGlobal crypto" = 1
+"page.test.tsx#vi.spyOn console.error" = 2
+
+[debt.third-party-patch]
+"page-dispatch.test.tsx#vi.mock next/navigation" = 1
+"page.test.tsx#vi.mock next/navigation" = 1

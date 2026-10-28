@@ -1,0 +1,18 @@
+exports = ["page.tsx"]
+
+[uses]
+"_notification-categories.tsx" = ["_rows.tsx"]
+"page-models-and-themes.test.tsx" = ["page.tsx"]
+"page.test.tsx" = ["page.tsx"]
+"page.tsx" = ["_notification-categories.tsx", "_rows.tsx"]
+
+[debt.first-party-patch]
+"page-models-and-themes.test.tsx#vi.mock ui/web/src/lib/transport/api.ts" = 1
+"page.test.tsx#vi.mock ui/web/src/lib/transport/api.ts" = 1
+
+[debt.type-cast]
+"_notification-categories.tsx#cast NotificationCategoryRows" = 1
+"_notification-categories.tsx#cast NotificationCategoryRows.<lambda>" = 1
+"_rows.tsx#cast ColorRow.<lambda>" = 1
+"page.tsx#cast DisplaySettingsPage" = 15
+"page.tsx#cast DisplaySettingsPage.<lambda>" = 1

@@ -131,9 +131,6 @@ vi.mock("@/components/conversation/upload-button", () => ({
     <div data-testid="upload-button" data-agent-id={agentId ?? "null"} />
   ),
 }));
-vi.mock("@/components/content/content-toggle", () => ({
-  ContentToggle: () => <div data-testid="content-toggle" />,
-}));
 vi.mock("@/components/inspector/inspector-panel", async () => {
   const React = await import("react");
   return {

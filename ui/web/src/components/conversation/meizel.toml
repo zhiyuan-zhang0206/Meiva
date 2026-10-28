@@ -1,0 +1,37 @@
+exports = ["composer.tsx", "pending-strip.tsx", "upload-button.tsx"]
+
+[uses]
+"composer-attachments.test.tsx" = ["composer.tsx"]
+"composer-commands.test.tsx" = ["composer.tsx"]
+"composer-helpers.tsx" = ["slash-autocomplete.tsx"]
+"composer-lifecycle.test.tsx" = ["composer.tsx"]
+"composer.test.tsx" = ["composer.tsx"]
+"composer.tsx" = ["composer-helpers.tsx", "composer-session.ts", "slash-autocomplete.tsx"]
+"pending-strip.test.tsx" = ["pending-strip.tsx"]
+"slash-autocomplete.test.tsx" = ["slash-autocomplete.tsx"]
+"upload-button.test.tsx" = ["upload-button.tsx"]
+
+[debt.ambient-read]
+"composer-session.ts#environ sessionStorage" = 3
+"composer.tsx#clock Date.now" = 1
+"composer.tsx#random Math.random" = 1
+
+[debt.first-party-patch]
+"composer-attachments.test.tsx#vi.mock ui/web/src/lib/transport/api.ts" = 1
+"composer-commands.test.tsx#vi.mock ui/web/src/lib/transport/api.ts" = 1
+"composer-lifecycle.test.tsx#vi.mock ui/web/src/lib/transport/api.ts" = 1
+"composer.test.tsx#vi.mock ui/web/src/lib/transport/api.ts" = 1
+
+[debt.stdlib-patch]
+"composer-attachments.test.tsx#vi.spyOn URL.revokeObjectURL" = 2
+"composer-attachments.test.tsx#vi.spyOn performance.now" = 1
+"composer-commands.test.tsx#vi.spyOn console.warn" = 1
+"composer-lifecycle.test.tsx#vi.spyOn performance.now" = 1
+"composer-lifecycle.test.tsx#vi.stubGlobal sessionStorage" = 2
+"composer.test.tsx#vi.spyOn performance.now" = 1
+
+[debt.type-cast]
+"composer-session.ts#cast readSendAttempt" = 2
+
+[debt.unresolved-patch]
+"upload-button.test.tsx#vi.spyOn input.\"click\"" = 2

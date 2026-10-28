@@ -1,0 +1,31 @@
+exports = ["agent-row.tsx", "spawn-form.tsx", "window-select.tsx"]
+
+[uses]
+"agent-prompt-dialog.test.tsx" = ["agent-prompt-dialog.tsx"]
+"agent-row-menu.test.tsx" = ["agent-row.tsx"]
+"agent-row.test.tsx" = ["agent-row.tsx"]
+"agent-row.tsx" = ["agent-prompt-dialog.tsx", "row-actions.tsx"]
+"harness-picker.test.tsx" = ["harness-picker.tsx"]
+"spawn-form-layouts.test.tsx" = ["spawn-form.tsx"]
+"spawn-form.test.tsx" = ["spawn-form.tsx"]
+"spawn-form.tsx" = ["spawn-table.tsx"]
+"window-select.test.tsx" = ["window-select.tsx"]
+
+[debt.ambient-read]
+"agent-row.tsx#clock Date" = 1
+
+[debt.first-party-patch]
+"agent-row-menu.test.tsx#vi.mock ui/web/src/lib/transport/api.ts" = 1
+"agent-row.test.tsx#vi.mock ui/web/src/lib/transport/api.ts" = 1
+"harness-picker.test.tsx#vi.mock ui/web/src/lib/transport/api.ts" = 1
+"spawn-form-layouts.test.tsx#vi.mock ui/web/src/lib/transport/api.ts" = 1
+"spawn-form.test.tsx#vi.mock ui/web/src/lib/transport/api.ts" = 1
+
+[debt.stdlib-patch]
+"agent-row-menu.test.tsx#vi.stubGlobal confirm" = 4
+
+[debt.type-cast]
+"spawn-form.tsx#cast SpawnForm" = 5
+
+[debt.undeclared-edge]
+"row-actions.tsx -> agent-row.tsx" = 1

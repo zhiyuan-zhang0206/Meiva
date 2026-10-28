@@ -1,0 +1,10 @@
+exports = ["page.tsx"]
+
+[uses]
+"page.test.tsx" = ["page.tsx"]
+
+[debt.first-party-patch]
+"page.test.tsx#vi.spyOn ui/web/src/lib/transport/api.ts.draftGuide" = 4
+
+[debt.third-party-patch]
+"page.test.tsx#vi.mock next/navigation" = 1

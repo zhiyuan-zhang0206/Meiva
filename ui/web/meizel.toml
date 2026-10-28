@@ -1,0 +1,12 @@
+[uses]
+"src" = ["messages"]
+"tests" = ["messages", "next.config.ts", "src"]
+
+[purity]
+"next.config.ts" = "strict-to-be"
+
+[debt.ambient-read]
+"next.config.ts#environ process.env" = 2
+
+[debt.impure-call]
+"next.config.ts#headers#async" = 1
