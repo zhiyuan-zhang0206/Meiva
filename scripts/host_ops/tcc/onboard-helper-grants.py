@@ -54,6 +54,7 @@ REPO_ROOT = Path(__file__).resolve().parents[3]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
+from base.clock import SYSTEM_TIMERS
 from base.host.permissions_helper.client import PermissionsHelperClient
 from base.host.permissions_helper.grants import probe as permissions_probe
 from base.host.permissions_helper.grants import triggers
@@ -212,6 +213,7 @@ def preflight_matrix(client: PermissionsHelperClient, workdir: Path, run_id: str
         run_id=run_id,
         env=child_env(),
         services=tuple(PREFLIGHT_SERVICES),
+        timers=SYSTEM_TIMERS,
     )
     return {service: _SCRIPT_WORDS[grant] for service, grant in grants.items()}
 

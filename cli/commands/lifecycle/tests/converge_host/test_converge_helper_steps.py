@@ -363,9 +363,14 @@ def test_the_onboarding_step_acts_on_the_context_home_and_clock(
         user_home=mac.session.user_home,
         environ=mac.read_config().process_environment(),
         helper=None,
+        timers=mac.timers,
     ).env
     from_the_hosts_launch = onboarding.gate_host(
-        home=unit_home, user_home=mac.session.user_home, environ=mac.host.environ, helper=None
+        home=unit_home,
+        user_home=mac.session.user_home,
+        environ=mac.host.environ,
+        helper=None,
+        timers=mac.timers,
     ).env
     assert helper.envs[0] == forwarded
     assert forwarded != from_the_hosts_launch
