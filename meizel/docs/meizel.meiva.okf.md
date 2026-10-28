@@ -48,9 +48,12 @@ separate hook. A new package is declared in one place or the check says where.
   framework directory list, test-path detection, scan-root resolution and the
   `--only` changed-files mode. Changed-files runs widen to a full scan when
   `meizel/` itself changes, because that changes the verdict of untouched files.
-- `budgets/` — the 800-line file ceiling and the 20-entry directory cap
-  (`limits.py`) and what counts as a direct entry of a directory
-  (`directory_budget.py`). `scripts/lint/code_structure.py` drives them.
+- - `budgets/` — the 800-line file ceiling and the 20-entry directory cap: every
+  judgment is in `budget_plans.py` (both ceilings, which directory entries are
+  candidates, which of a target and a structure directory is judged, which
+  directories a target selects and the wording of both reports), while `limits.py`
+  walks and reads the checkout and `directory_budget.py` lists a directory and
+  tests a judged path's links. `scripts/lint/code_structure.py` drives them.
 - `owners/` — one owner per external capability: `decisions.py` holds Rule 5
   (`DECISIONS`: each design decision has exactly one owning module, every other
   site is a bypass, and a listed exemption that goes stale fails; the exemptions

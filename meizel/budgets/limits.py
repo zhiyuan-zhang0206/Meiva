@@ -1,34 +1,30 @@
-"""The 800-line file ceiling and the 20-entry directory cap."""
+# meiva:note
+# The effect shell of the two structure ceilings: it walks the checkout the file budget judges and
+# reads every judged file, then asks `meizel.budgets.budget_plans` for the verdict. The ceilings,
+# the exclusions, which directories a target judges and every word of the report are decided in that
+# strict module.
+# meiva:link meizel/docs/meizel.meiva.okf.md
 
 from __future__ import annotations
 
 from pathlib import Path
 
-from meizel.budgets import directory_budget
+from meizel.budgets import budget_plans, directory_budget
+from meizel.budgets.budget_plans import DIRECTORY_CEILING as DIRECTORY_CEILING
+from meizel.budgets.budget_plans import HARD_CEILING as HARD_CEILING
 from meizel.graph.universe import GitRepo
 from meizel.lint_common import read_utf8_text
 
 __all__ = ["DIRECTORY_CEILING", "HARD_CEILING", "budget_files", "check"]
 
-HARD_CEILING = 800
-DIRECTORY_CEILING = 20
-_FILE_CEILING_GUIDANCE = (
-    "the file budget leaves room for cohesive logic behind a small interface; review "
-    "responsibility boundaries, separate pure decisions from I/O orchestration, and move "
-    "related implementation into a cohesive subpackage with a narrow meizel.toml exports "
-    "door; avoid mechanical _part2 or _helpers splits"
-)
-_DIRECTORY_CEILING_GUIDANCE = (
-    "the entry cap bounds the concepts at one directory, not total project size; directory "
-    "depth is unrestricted, so group related behavior into cohesive subpackages with narrow "
-    "meizel.toml exports doors"
-)
 
-
+# meiva:note
+# The existing Python files of the file budget's scope: each target narrowed to the structure
+# directories, walked level by level and never through a link into a directory the budget does not
+# enter.
 def budget_files(
     targets: list[Path], repo_root: Path, structure_dirs: tuple[str, ...]
 ) -> set[Path]:
-    """Collect the existing Python file-budget scope without following links."""
     files: set[Path] = set()
     visited: set[Path] = set()
 
@@ -54,32 +50,25 @@ def budget_files(
     return files
 
 
+# meiva:note
+# Both ceilings' violations for the given targets, read from one directory walk, one read per
+# judged file and one Git listing of the tracked paths; a file that cannot be read keeps the shared
+# lint contract of being skipped. Raises when Git cannot list the tree.
 def check(
     targets: list[Path],
     directory_targets: list[Path],
     repo_root: Path,
     structure_dirs: tuple[str, ...],
 ) -> list[str]:
-    """Violations of both ceilings; raises on an unreadable Git listing."""
-    files = budget_files(targets, repo_root, structure_dirs)
-    errors: list[str] = []
-    for path in sorted(files):
+    lines: dict[str, int] = {}
+    for path in sorted(budget_files(targets, repo_root, structure_dirs)):
         text = read_utf8_text(path)
         if text is None:
-            continue  # Preserve the shared lint contract for unreadable members.
-        count = len(text.splitlines())
-        name = path.relative_to(repo_root).as_posix()
-        if count > HARD_CEILING:
-            errors.append(
-                f"{name}:{count}: file is {count} lines, over the {HARD_CEILING}-line hard ceiling — {_FILE_CEILING_GUIDANCE}"
-            )
-    children = directory_budget.tracked_children(GitRepo(repo_root).run_text("ls-files", "-z"))
-    for name in sorted(
-        directory_budget.selected_directories(children, directory_targets, repo_root)
-    ):
-        count = len(children[name])
-        if count > DIRECTORY_CEILING:
-            errors.append(
-                f"{name}: directory has {count} direct entries, over the {DIRECTORY_CEILING}-entry cap — {_DIRECTORY_CEILING_GUIDANCE}"
-            )
-    return errors
+            continue
+        lines[path.relative_to(repo_root).as_posix()] = len(text.splitlines())
+    children = budget_plans.tracked_children(GitRepo(repo_root).run_text("ls-files", "-z"))
+    judged = budget_plans.selected_directories(children, directory_targets, repo_root)
+    return [
+        *budget_plans.file_violations(lines),
+        *budget_plans.directory_violations({name: len(children[name]) for name in judged}),
+    ]

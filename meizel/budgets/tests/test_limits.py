@@ -58,16 +58,6 @@ def test_the_file_scope_skips_hidden_cache_and_migration_directories(tmp_path: P
     assert limits.budget_files([repo / "base"], repo, _STRUCTURE) == {repo / "base" / "ok.py"}
 
 
-def test_tracked_children_rejects_a_listing_without_a_terminator() -> None:
-    with pytest.raises(ValueError, match="NUL-terminated"):
-        directory_budget.tracked_children("a/b.py")
-
-
-def test_tracked_children_lists_every_directory_level() -> None:
-    children = directory_budget.tracked_children("a/b/c.py\0a/d.py\0")
-    assert children == {"": {"a"}, "a": {"b", "d.py"}, "a/b": {"c.py"}}
-
-
 def test_only_a_migrations_directory_is_skipped_not_a_file_of_that_name(tmp_path: Path) -> None:
     (tmp_path / "migrations").write_text("x = 1\n", encoding="utf-8")
     nested = tmp_path / "nested"
