@@ -29,7 +29,7 @@ from base.clock import Timers
 from base.log import logger
 from base.native_process.ownership import OwnedProcess, stable_create_time
 from base.native_process.process_control import ProcessControl
-from base.sessions import log_prefix
+from base.sessions import log_writer
 from base.sessions.pty import process_groups
 from base.sessions.pty.screen import PtyScreen
 from base.sessions.record import SessionRecord
@@ -143,7 +143,7 @@ class PtySession:
         # Only explicitly captured foreground leaders; no session membership scan.
         self.known_groups: tuple[OwnedProcess, ...] = ()
         self._ring = bytearray()
-        self._log_fd, created = log_prefix.open_session_log(log_path, name, pid=pid)
+        self._log_fd, created = log_writer.open_session_log(log_path, name, pid=pid)
         self._log_written = os.fstat(self._log_fd).st_size if created else 0
         self._log_cap = log_cap
         self._log_write_failures = 0
