@@ -167,7 +167,7 @@ def write_grant(home: Path, cls: GenerationClass) -> WriteGrant:
 
 
 def _intent_checkout(home: Path) -> Path:
-    from base.host.verified_file import regular_bytes
+    from base.host.verified_file.reader import regular_bytes
 
     try:
         data: object = json.loads(regular_bytes(home / "start-intent.json", max_bytes=1 << 20))

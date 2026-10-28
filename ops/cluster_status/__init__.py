@@ -32,7 +32,8 @@ from base.deploy.git.cluster_drift import checkout_head_sha
 from base.deploy.lifecycle import start_serving
 from base.host.env.registry import process_environment
 from base.host.proc import process_alive
-from base.host.resource_sample import ResourceSample, resource_sample
+from base.host.resource.reading import ResourceSample
+from base.host.resource.sample import resource_sample
 from base.native_process.loaded_commit import LoadedCommit
 from base.sessions.backend import get_backend, get_shell_backend
 from ops.cluster_status.model import (

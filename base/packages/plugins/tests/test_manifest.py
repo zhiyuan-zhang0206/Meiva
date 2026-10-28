@@ -9,7 +9,7 @@ from typing import Any, cast
 
 import pytest
 
-from base.host.git.host_version import parse_version
+from base.host.git.host_version_plan import parse_version
 from base.packages.plugins import manifest as pm
 from base.packages.plugins import pyproject_mirror as mirror
 from base.packages.plugins.manifest import ManifestError

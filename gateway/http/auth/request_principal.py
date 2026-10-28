@@ -106,7 +106,7 @@ class SessionKeys:
         Losing the file ends every session; the next login mints a new key.
         """
         from base.host.private_storage import create_private_bytes, private_file_problem
-        from base.host.verified_file import regular_bytes
+        from base.host.verified_file.reader import regular_bytes
 
         path = session_key_path(home)
         if create and not path.exists():

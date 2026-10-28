@@ -46,7 +46,7 @@ from base.host.db_authority.model import (
 )
 from base.host.net.auth import new_session_id
 from base.host.private_storage import create_private_bytes, write_private_bytes
-from base.host.verified_file import RegularFileReadError, regular_bytes
+from base.host.verified_file.reader import RegularFileReadError, regular_bytes
 from base.native_process.os_platform import file_lock
 from base.paths.private_dir import ensure_private_dir, is_foreign_owned
 

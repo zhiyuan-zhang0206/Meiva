@@ -9,7 +9,7 @@ from typing import Any, TypeGuard
 
 from base import paths
 from base.host.git import host_version as host_version_module
-from base.host.git.host_version import Version, parse_version
+from base.host.git.host_version_plan import Version, parse_version
 from base.packages.plugins.surface.notification_contributions import (
     validate_notification_contributions,
 )
