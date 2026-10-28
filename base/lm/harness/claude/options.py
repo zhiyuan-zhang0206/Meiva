@@ -39,8 +39,6 @@ def option_values(
         tools=None if config.tools is None else list(config.tools),
         permission_mode=config.permission_mode,
         max_turns=config.max_turns,
-        setting_sources=[],
-        strict_mcp_config=True,
         include_partial_messages=True,
         env=build_env(environ, config.auth, host=environ),
         resume=resume,
