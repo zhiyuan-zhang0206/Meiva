@@ -11,6 +11,3 @@ exports = ["agent_runner", "backup", "derived", "desktop", "entrypoints", "pidfi
 "tests" = ["agent_runner", "backup", "derived", "desktop", "entrypoints", "pidfile.py", "upkeep", "wake"]
 "upkeep" = ["backup", "pidfile.py"]
 "wake" = ["backup", "pidfile.py"]
-
-[debt.ambient-read]
-"pidfile.py#pid os.getpid" = 1

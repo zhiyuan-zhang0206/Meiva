@@ -8,4 +8,4 @@ exports = ["daemon.py", "dead_letter.py", "stranded_wake.py"]
 "__init__.py" = "strict"
 
 [roots]
-"daemon.py" = { kinds = ["bus", "clock", "home", "random", "settings"], why = "Service or operator process entry boots configuration, reads the home it runs under and builds the random generator its event bus draws retry jitter from; builds the process clock from SYSTEM_TIMERS" }
+"daemon.py" = { kinds = ["bus", "clock", "home", "pid", "random", "settings"], why = "Service or operator process entry boots configuration, reads the home it runs under and builds the random generator its event bus draws retry jitter from; builds the process clock from SYSTEM_TIMERS; it reads its own pid once to claim its pidfile" }

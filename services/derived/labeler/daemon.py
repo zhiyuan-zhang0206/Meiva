@@ -17,6 +17,7 @@ identity probe (`services/supervision/roster/healthz.py`).
 
 import asyncio
 import logging
+import os
 import random
 import signal
 import sys
@@ -161,7 +162,9 @@ def select_unlabeled(cur: psycopg.Cursor, attempted: list[int]) -> list[tuple[in
 
 
 def write_pidfile(config: ConfigBoot, *, runtime: Path) -> None:
-    if not acquire_pidfile(_pidfile(config, runtime=runtime), "services.derived.labeler.daemon"):
+    if not acquire_pidfile(
+        _pidfile(config, runtime=runtime), "services.derived.labeler.daemon", pid=os.getpid()
+    ):
         _log.info(
             "[labeler] daemon already running (pidfile=%s), exiting",
             _pidfile(config, runtime=runtime),

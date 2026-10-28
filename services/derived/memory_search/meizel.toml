@@ -10,4 +10,4 @@ exports = ["app.py", "daemon.py"]
 "config.py" = "strict"
 
 [roots]
-"daemon.py" = { kinds = ["home", "settings"], why = "process entry point of the memory-search daemon: builds ConfigBoot from the process environment and reads the home it runs under" }
+"daemon.py" = { kinds = ["home", "pid", "settings"], why = "process entry point of the memory-search daemon: builds ConfigBoot from the process environment and reads the home it runs under; it reads its own pid once to claim its pidfile" }

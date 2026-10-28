@@ -6,6 +6,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import os
 import signal
 import sys
 import time
@@ -83,7 +84,9 @@ class BackupState:
 
 
 def write_pidfile(config: ConfigBoot, *, runtime: Path) -> None:
-    if not acquire_pidfile(_pidfile(config, runtime=runtime), "services.backup.scheduler.daemon"):
+    if not acquire_pidfile(
+        _pidfile(config, runtime=runtime), "services.backup.scheduler.daemon", pid=os.getpid()
+    ):
         _log.info(
             "[pg-backup] daemon already running (pidfile=%s), exiting",
             _pidfile(config, runtime=runtime),

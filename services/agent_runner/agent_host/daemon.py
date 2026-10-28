@@ -134,7 +134,7 @@ def _claim_pidfile() -> None:
     if is_running():
         host_log.info("[agent-host] daemon already running (pidfile=%s), exiting", _pidfile())
         sys.exit(1)
-    if not acquire_pidfile(_pidfile(), _MODULE):
+    if not acquire_pidfile(_pidfile(), _MODULE, pid=os.getpid()):
         host_log.info("[agent-host] could not acquire pidfile %s, exiting", _pidfile())
         sys.exit(1)
 
