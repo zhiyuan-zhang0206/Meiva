@@ -20,4 +20,4 @@ exports = ["agents", "alerts", "app.py", "cluster", "events", "http", "mcp_serve
 "__init__.py" = "strict"
 
 [roots]
-"app.py" = { kinds = ["clock", "home", "platform", "random", "settings"], why = "Gateway process and cold schema entry compose their configuration, request clock, account home and entropy here; builds the host of this process with Host.system()" }
+"app.py" = { kinds = ["clock", "home", "pid", "platform", "random", "settings"], why = "Gateway process and cold schema entry compose their configuration, request clock, account home, this process and entropy here; builds the host of this process with Host.system() and hands the runtime monitor the psutil process it samples" }

@@ -11,6 +11,3 @@ exports = ["cors.py", "error_envelope.py", "error_handlers.py", "latency.py", "r
 "correlation.py" = "strict"
 "loop_lag.py" = "strict"
 "stopping.py" = "strict"
-
-[debt.ambient-read]
-"runtime_metrics.py#pid psutil.Process()" = 1
