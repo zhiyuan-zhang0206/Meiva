@@ -1,31 +1,28 @@
 
 [uses]
-"__init__.py" = ["config.py", "mapping.py", "session.py", "types.py", "usage.py"]
+"__init__.py" = ["config.py", "mapping.py", "types.py", "usage.py"]
 "config.py" = []
+"environment.py" = []
 "mapping.py" = []
-"session.py" = ["config.py", "mapping.py", "types.py", "usage.py"]
+"requests.py" = []
+"session.py" = ["config.py", "environment.py", "mapping.py", "requests.py", "settle.py", "types.py", "usage.py", "usage_files.py"]
+"settle.py" = ["mapping.py", "usage.py"]
 "types.py" = []
 "usage.py" = []
-"tests" = ["__init__.py", "mapping.py", "usage.py"]
+"usage_files.py" = ["usage.py"]
+"tests" = ["__init__.py", "environment.py", "mapping.py", "requests.py", "session.py", "settle.py", "usage.py", "usage_files.py"]
 
 [purity]
 "." = "strict-to-be"
 "__init__.py" = "strict"
 "config.py" = "strict"
+"environment.py" = "strict"
 "mapping.py" = "strict"
-
-[debt.impure-call]
-"session.py#async def _begin" = 1
-"session.py#async def _read_loop" = 1
-"session.py#async def close" = 1
-"session.py#async def interrupt" = 1
-"session.py#async def start" = 1
-"usage.py#Path.glob" = 1
-"usage.py#Path.is_file" = 1
-"usage.py#Path.open" = 1
-"usage.py#Path.read_bytes" = 1
-"usage.py#import subprocess" = 1
+"requests.py" = "strict"
+"settle.py" = "strict"
+"session.py" = { mode = "none", why = "the shell that runs one DeepSeek ACP session: it opens the connection, awaits the requests requests.py describes, routes what the runtime sends through settle.py route_notification, and assigns the answers to its own state; the settlement, its cost and the running totals are decided in settle.py" }
+"usage.py" = "strict"
+"usage_files.py" = { mode = "none", why = "the shell that finds and decodes one session's usage log: it globs and stats the candidates expected_log_paths orders and missing_log words, decompresses the bytes (zstd, or the CLI when the wheel is absent), and hands them to usage.parse_usage" }
 
 [debt.impure-edge]
-"session.py#base/lm/harness/process.py" = 1
 "types.py#base/lm/harness/base_session.py" = 1

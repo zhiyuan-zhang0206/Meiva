@@ -204,6 +204,20 @@ async def test_context_occupancy_follows_the_usage_update(tmp_path: Path) -> Non
         await harness.stop()
 
 
+async def test_a_usage_update_without_figures_keeps_the_last_context_window(
+    tmp_path: Path,
+) -> None:
+    harness = await start(tmp_path)
+    try:
+        await harness.session.submit("hello").outcome()
+        assert harness.session.context_occupancy == (12, 1000)
+        await harness.connection.emit({"sessionUpdate": "usage_update", "used": "12", "size": None})
+        await harness.settle()
+        assert harness.session.context_occupancy == (12, 1000)
+    finally:
+        await harness.stop()
+
+
 async def test_a_repeated_key_returns_the_settled_turn(tmp_path: Path) -> None:
     harness = await start(tmp_path)
     try:
