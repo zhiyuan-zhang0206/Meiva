@@ -14,7 +14,7 @@ import tempfile
 from dataclasses import dataclass
 from pathlib import Path
 
-from base.packages.extensions.install_registry import looks_like_local_path
+from base.packages.extensions.install_registry import source_is_git_url
 
 _TEMP_PREFIX = "meiva-install-"
 
@@ -67,22 +67,27 @@ class AcquiredSource:
     cloned: Path | None
 
 
+# meiva:note
+# `source` is already placed: the boundary that read it expanded a leading `~` against the home it
+# read (`base.paths.expand.expand_home`), so this takes a path this process can open or a URL it can
+# clone, never a `~` spelling.
 def acquire_source(source: str, ref: str | None) -> AcquiredSource:
     """Resolve `source` (git URL or local dir) to a package tree on disk.
 
     Raises:
         subprocess.CalledProcessError: a git source failed to clone / checkout.
     """
-    if looks_like_local_path(source):
-        return AcquiredSource(root=Path(source).expanduser().resolve(), cloned=None)
-    if "://" not in source and not source.startswith("git@"):
-        # Not a git URL and no such directory on disk: a local-path source
-        # whose directory no longer exists. `git clone` would fail with a
-        # confusing "does not appear to be a git repository"; name the actual
-        # problem instead.
-        raise SourcePathNotFoundError(
-            f"{source!r} is not a git URL and no such local directory exists — "
-            f"a local-path source must still be on disk to re-fetch"
-        )
-    cloned = clone_git(source, ref)
-    return AcquiredSource(root=cloned, cloned=cloned)
+    if source_is_git_url(source):
+        cloned = clone_git(source, ref)
+        return AcquiredSource(root=cloned, cloned=cloned)
+    local = Path(source)
+    if local.is_dir():
+        return AcquiredSource(root=local.resolve(), cloned=None)
+    # meiva:note
+    # Not a git URL and no such directory on disk: a local-path source whose directory no longer
+    # exists. `git clone` would fail with a confusing "does not appear to be a git repository"; name
+    # the actual problem instead.
+    raise SourcePathNotFoundError(
+        f"{source!r} is not a git URL and no such local directory exists — "
+        f"a local-path source must still be on disk to re-fetch"
+    )

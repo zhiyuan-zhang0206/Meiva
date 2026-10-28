@@ -387,7 +387,10 @@ def test_upgrade_skips_unupdatable(unit_home: Path, capsys) -> None:
     reg.register(
         reg.InstalledPackage(name="local-skill", type="skill"), home=unit_home
     )  # no source
-    assert cmd_skill_upgrade("local-skill", home=unit_home, now=datetime.now(UTC)) == 1
+    assert (
+        cmd_skill_upgrade("local-skill", home=unit_home, user_home=unit_home, now=datetime.now(UTC))
+        == 1
+    )
     assert "no recorded source" in capsys.readouterr().err  # pyright: ignore[reportUnknownMemberType]
 
 
@@ -406,7 +409,10 @@ def test_upgrade_refetches_from_source(
     )
     _git(r, "add", ".")
     _git(r, "commit", "-qm", "v2")
-    assert cmd_skill_upgrade("ext-skill", home=unit_home, now=datetime.now(UTC)) == 0
+    assert (
+        cmd_skill_upgrade("ext-skill", home=unit_home, user_home=unit_home, now=datetime.now(UTC))
+        == 0
+    )
     body = (unit_home / "skills" / "ext-skill" / "SKILL.md").read_text(encoding="utf-8")
     assert "# v2" in body
 
@@ -429,7 +435,10 @@ def test_upgrade_local_source_is_copied_never_moved(
     (src_dir / "SKILL.md").write_text(
         "---\nname: ext-skill\ndescription: d\n---\n\n# v2\n", encoding="utf-8"
     )
-    assert cmd_skill_upgrade("ext-skill", home=unit_home, now=datetime.now(UTC)) == 0
+    assert (
+        cmd_skill_upgrade("ext-skill", home=unit_home, user_home=unit_home, now=datetime.now(UTC))
+        == 0
+    )
 
     # The user's source dir is untouched: still there, .git intact.
     assert src_dir.is_dir()
@@ -438,6 +447,52 @@ def test_upgrade_local_source_is_copied_never_moved(
     # And the installed copy carries the new content.
     body = (unit_home / "skills" / "ext-skill" / "SKILL.md").read_text(encoding="utf-8")
     assert "# v2" in body
+
+
+# meiva:note
+# A row recorded as `~/ext-src` (written before sources were recorded absolute) is re-fetched from
+# the directory that spelling names in the caller's home — a home that does not hold it reports the
+# dead source instead of reading some other account's directory.
+def test_upgrade_places_a_recorded_tilde_source_against_the_callers_home(
+    db_url: str,
+    unit_home: Path,
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+    *,
+    command_runtime: CommandRuntime,
+) -> None:
+    src_dir = Path(_skill_git_repo(tmp_path))
+    _install_skill(str(src_dir), command_runtime=command_runtime, home=unit_home)
+    with reg.mutate(home=unit_home) as registry:
+        row = next(p for p in registry.packages if p.name == "ext-skill")
+        row.source = "~/ext-src"
+    (src_dir / "SKILL.md").write_text(
+        "---\nname: ext-skill\ndescription: d\n---\n\n# v2\n", encoding="utf-8"
+    )
+
+    assert (
+        cmd_skill_upgrade(
+            "ext-skill", home=unit_home, user_home=tmp_path / "elsewhere", now=datetime.now(UTC)
+        )
+        == 1
+    )
+    assert (
+        cmd_skill_upgrade("ext-skill", home=unit_home, user_home=tmp_path, now=datetime.now(UTC))
+        == 0
+    )
+    body = (unit_home / "skills" / "ext-skill" / "SKILL.md").read_text(encoding="utf-8")
+    assert "# v2" in body
+
+    # meiva:note
+    # A `~account` spelling names a home no invocation reads: the fetch reports the dead source
+    # instead of raising out of the command.
+    with reg.mutate(home=unit_home) as registry:
+        next(p for p in registry.packages if p.name == "ext-skill").source = "~someone/ext-src"
+    assert (
+        cmd_skill_upgrade("ext-skill", home=unit_home, user_home=tmp_path, now=datetime.now(UTC))
+        == 1
+    )
+    assert "no such local directory" in capsys.readouterr().err
 
 
 def test_upgrade_replaces_a_local_edit(
@@ -459,7 +514,10 @@ def test_upgrade_replaces_a_local_edit(
     _git(r, "add", ".")
     _git(r, "commit", "-qm", "v2")
 
-    assert cmd_skill_upgrade("ext-skill", home=unit_home, now=datetime.now(UTC)) == 0
+    assert (
+        cmd_skill_upgrade("ext-skill", home=unit_home, user_home=unit_home, now=datetime.now(UTC))
+        == 0
+    )
     out = capsys.readouterr().out  # pyright: ignore[reportUnknownMemberType]
     assert "modified locally" in out
     body = copy.read_text(encoding="utf-8")

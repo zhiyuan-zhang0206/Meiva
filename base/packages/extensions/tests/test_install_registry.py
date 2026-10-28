@@ -371,3 +371,49 @@ def test_resolved_policy_preserves_defaults_reader_failure() -> None:
     with pytest.raises(ValueError) as raised:
         reg.resolved_policy(pkg, defaults_reader=invalid_defaults)
     assert raised.value is failure
+
+
+# meiva:note
+# A row recorded before sources were recorded absolute keeps its `~`; the read path places it
+# against the home the caller read and leaves every other spelling alone. Placement never rewrites
+# the registry it was handed.
+def test_place_sources_expands_a_recorded_tilde_against_the_callers_home(
+    tmp_path: Path,
+) -> None:
+    registry = reg.Registry(
+        packages=[
+            reg.InstalledPackage(name="mine", type="skill", source="~/src/mine"),
+            reg.InstalledPackage(name="theirs", type="skill", source="~someone/src/theirs"),
+            reg.InstalledPackage(name="abs", type="skill", source=str(tmp_path / "src" / "abs")),
+            reg.InstalledPackage(name="remote", type="skill", source="https://x/remote"),
+            reg.InstalledPackage(name="none", type="skill"),
+        ]
+    )
+
+    placed = {p.name: p.source for p in reg.place_sources(registry, user_home=tmp_path).packages}
+
+    assert placed["mine"] == str(tmp_path / "src" / "mine")
+    assert placed["theirs"] == "~someone/src/theirs"
+    assert placed["abs"] == str(tmp_path / "src" / "abs")
+    assert placed["remote"] == "https://x/remote"
+    assert placed["none"] is None
+    assert registry.packages[0].source == "~/src/mine"
+    # meiva:note
+    # The string rule is the owner `placed` builds on: same two spellings, no row in hand.
+    assert reg.placed_source("~/src/mine", user_home=tmp_path) == str(tmp_path / "src" / "mine")
+    assert reg.placed_source("~someone/src", user_home=tmp_path) == "~someone/src"
+
+
+# meiva:note
+# `looks_like_local_path` judges the value it is handed. This process's home exists, so an
+# implementation that expanded `~` itself would answer True for `~`; the value is placed by the
+# install boundary or `place_sources` before it arrives.
+def test_a_tilde_spelling_is_not_a_local_path_for_a_caller_that_did_not_expand_it(
+    tmp_path: Path,
+) -> None:
+    (tmp_path / "src").mkdir()
+
+    assert reg.looks_like_local_path(str(tmp_path / "src")) is True
+    assert reg.looks_like_local_path("~") is False
+    assert reg.looks_like_local_path("file:///tmp/src") is False
+    assert reg.looks_like_local_path("git@host:repo") is False

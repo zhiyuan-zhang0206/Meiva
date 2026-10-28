@@ -17,6 +17,7 @@ def _h_packages_status(args: argparse.Namespace) -> int:
     return cmd_packages_status(
         config=delivered_config(args.runtime.config),
         home=args.runtime.home,
+        user_home=args.runtime.session.user_home,
         now=args.runtime.clock.now(),
         json_output=args.json_output,
     )
@@ -30,6 +31,7 @@ def _h_packages_refresh(args: argparse.Namespace) -> int:
         config=delivered_config(args.runtime.config),
         repo=args.runtime.checkout,
         home=args.runtime.home,
+        user_home=args.runtime.session.user_home,
         now=args.runtime.clock.now(),
         check_only=args.check,
         only=args.package,
@@ -71,6 +73,7 @@ def _h_packages_policy(args: argparse.Namespace) -> int:
         update_mode=args.update_mode,
         check_every=args.check_every,
         home=args.runtime.home,
+        user_home=args.runtime.session.user_home,
     )
 
 

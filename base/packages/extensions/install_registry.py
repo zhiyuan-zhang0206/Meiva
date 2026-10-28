@@ -30,6 +30,7 @@ from base import paths
 from base.native_process.os_platform import LockTimeoutError as LockTimeoutError
 from base.native_process.os_platform import file_lock
 from base.packages.skills.names import match_key
+from base.paths.expand import expand_home
 
 # Junk that must affect neither a package's tree hash nor its synced copy —
 # otherwise e.g. a __pycache__ appearing in a source tree would read as a
@@ -550,6 +551,47 @@ class ResolvedPolicy:
     interval_seconds: int | None
 
 
+# meiva:note
+# True when `source` is a URL this machine fetches, never a path: a `scheme://` spelling (including
+# `file://`) or an `scp`-style `git@host:repo`. The one place that rule is spelled.
+def source_is_git_url(source: str) -> bool:
+    return "://" in source or source.startswith("git@")
+
+
+# meiva:note
+# `source` placed: a leading `~` an operator typed at install time expands against `user_home`, the
+# home the caller read. A value recorded absolute, a URL, and a `~account` spelling come back
+# unchanged — no invocation reads another account's home, so nothing can place it.
+def placed_source(source: str, *, user_home: Path) -> str:
+    if not source.startswith("~"):
+        return source
+    try:
+        return str(expand_home(source, user_home=user_home))
+    except ValueError:
+        return source
+
+
+# meiva:note
+# `pkg` with its recorded `source` placed (see `placed_source`); a row with no source is unchanged.
+def placed(pkg: InstalledPackage, *, user_home: Path) -> InstalledPackage:
+    if pkg.source is None:
+        return pkg
+    return pkg.model_copy(update={"source": placed_source(pkg.source, user_home=user_home)})
+
+
+# meiva:note
+# The whole registry with every recorded `source` placed (see `placed`): the one expansion point
+# between a row's text and a path a reader can open.
+def place_sources(registry: Registry, *, user_home: Path) -> Registry:
+    return registry.model_copy(
+        update={"packages": [placed(pkg, user_home=user_home) for pkg in registry.packages]}
+    )
+
+
+# meiva:note
+# `source` is a value already placed: the install boundary expands what a person typed, and
+# `place_sources` expands what a row recorded, so a `~` reaching here names a home this invocation
+# cannot read and is not a local path.
 def looks_like_local_path(source: str) -> bool:
     """True when `source` is an existing local directory rather than a git URL.
 
@@ -559,9 +601,7 @@ def looks_like_local_path(source: str) -> bool:
     classify what they copy) and `derived_channel` below (which must never
     read a remote channel off a local source).
     """
-    if "://" in source or source.startswith("git@"):
-        return False
-    return Path(source).expanduser().is_dir()
+    return not source_is_git_url(source) and Path(source).is_dir()
 
 
 def is_local_source(source: str) -> bool:

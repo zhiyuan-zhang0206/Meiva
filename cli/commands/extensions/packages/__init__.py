@@ -234,7 +234,7 @@ def _print_rows(rows: list[_Row], now: datetime) -> None:
 
 
 def cmd_packages_status(
-    *, config: ConfigBoot, home: Path, now: datetime, json_output: bool = False
+    *, config: ConfigBoot, home: Path, user_home: Path, now: datetime, json_output: bool = False
 ) -> int:
     """`meiva packages status [--json]` — host version, channels, and per-package
     channel/policy/applied-rev/last-result/declared-range. Read-only."""
@@ -242,7 +242,7 @@ def cmd_packages_status(
 
     from base.host.git import host_version as host_version_mod
 
-    registry = install_registry.load(home=home)
+    registry = install_registry.place_sources(install_registry.load(home=home), user_home=user_home)
     try:
         host_bare: str | None = host_version_mod.host_version()
         host_display: str | None = host_version_mod.host_version_display()
@@ -289,6 +289,7 @@ def cmd_packages_refresh(
     config: ConfigBoot,
     repo: Path,
     home: Path,
+    user_home: Path,
     now: datetime,
     check_only: bool = False,
     only: str | None = None,
@@ -309,6 +310,7 @@ def cmd_packages_refresh(
         config=config,
         repo=repo,
         home=home,
+        user_home=user_home,
         now=now,
         check_only=check_only,
         only=only,
@@ -468,6 +470,7 @@ def cmd_packages_policy(
     update_mode: str | None = None,
     check_every: str | None = None,
     home: Path,
+    user_home: Path,
 ) -> int:
     """`meiva packages policy <name> [--update-mode auto|notify|off]
     [--check-every 24h]` — record an explicit policy decision on the row; explicit
@@ -482,7 +485,9 @@ def cmd_packages_policy(
         print(f"[meiva packages policy] {exc}", file=sys.stderr)
         return 1
     try:
-        registry = install_registry.load(home=home)
+        registry = install_registry.place_sources(
+            install_registry.load(home=home), user_home=user_home
+        )
     except install_registry.InstallRegistryError as exc:
         print(f"[meiva packages policy] registry unreadable: {exc}", file=sys.stderr)
         return 1
@@ -503,7 +508,7 @@ def cmd_packages_policy(
             fresh.update.interval_seconds = interval
     updated = install_registry.get(row.name, home=home)
     if updated is not None:
-        _print_policy(updated, config=config)
+        _print_policy(install_registry.placed(updated, user_home=user_home), config=config)
     return 0
 
 
