@@ -14,7 +14,7 @@
 // fleet-graph.test.ts.
 
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { cleanup, fireEvent, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { AgentRow, FleetGraph, FleetGraphEdge, FleetGraphNode } from "@/lib/contracts/types";
@@ -39,8 +39,15 @@ vi.mock("@/lib/fleet/use-fleet-graph", () => ({
 }));
 
 const { getAgentRoster } = vi.hoisted(() => ({ getAgentRoster: vi.fn() }));
-vi.mock("@/lib/transport/api", () => ({ api: { getAgentRoster } }));
+
 import { AGENTS_QUERY_KEY } from "@/lib/agents/use-agents";
+import { renderWithApi as render } from "@/test-support/render";
+import { resetTransport, transport } from "@/test-support/fake-api";
+beforeEach(() => {
+  resetTransport();
+  transport.getAgentRoster.mockImplementation(getAgentRoster);
+});
+
 
 function node(agent_id: number, over: Partial<FleetGraphNode> = {}): FleetGraphNode {
   return {

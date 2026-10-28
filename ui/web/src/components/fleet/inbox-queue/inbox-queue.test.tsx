@@ -2,7 +2,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { act, cleanup, fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { renderWithBrowser } from "@/test-support/render";
 import type { ComponentProps } from "react";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { beforeEach, afterEach, describe, expect, it, vi } from "vitest";
 
 import type { AgentRow, NoticeItem, OpenNotice, PageRow, TaskSummaryRow } from "@/lib/contracts/types";
 import type { NoticesFeed } from "@/lib/notifications/use-notices";
@@ -10,12 +10,6 @@ import type { NoticesFeed } from "@/lib/notifications/use-notices";
 const resolveNotice = vi.fn<
   (agentId: number, noticeId: number, body: { action: string; reply?: string }) => Promise<{ status: string }>
 >();
-vi.mock("@/lib/transport/api", () => ({
-  api: {
-    resolveNotice: (a: number, n: number, b: { action: string; reply?: string }) => resolveNotice(a, n, b),
-    getSettings: () => Promise.resolve({ settings: [] }),
-  },
-}));
 
 const inboxFeedMock = vi.fn<() => NoticesFeed>();
 const dropOpenNotices = vi.fn<(queryClient: unknown, noticeIds: number[]) => void>();
@@ -35,6 +29,13 @@ const useAllPagesMock = vi.fn<() => PageRow[]>(() => []);
 vi.mock("@/lib/agents/use-all-pages", () => ({ useAllPages: () => useAllPagesMock() }));
 
 import { InboxQueue } from "../inbox-queue";
+
+import { resetTransport, transport } from "@/test-support/fake-api";
+beforeEach(() => {
+  resetTransport();
+  transport.resolveNotice.mockImplementation((a: number, n: number, b: { action: string; reply?: string }) => resolveNotice(a, n, b));
+  transport.getSettings.mockImplementation(() => Promise.resolve({ settings: [] }));
+});
 
 afterEach(() => {
   cleanup();

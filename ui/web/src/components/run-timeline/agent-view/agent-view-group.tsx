@@ -11,19 +11,20 @@ import { useTranslations } from "next-intl";
 import { buttonVariants } from "@/components/ui/button";
 import { useAgentRoster } from "@/lib/agents/use-agents";
 import { AGENT_DETAIL_QUERY_KEY } from "@/lib/fold/agents";
-import { api } from "@/lib/transport/api";
 import { FLEX } from "@/lib/layout/layout";
 import { cn } from "@/lib/format/utils";
 
 import { RunTimelineChartSkeleton } from "../run-timeline-skeleton";
+import { useApi } from "@/lib/transport/transport-context";
 
 function useAgentLabel(agentId: number): string | undefined {
+  const client = useApi();
   const roster = useAgentRoster();
   const live = roster.data?.agents.find((agent) => agent.agent_id === agentId);
   // An agent off the live roster (an old, terminated one) is read by id.
   const detail = useQuery({
     queryKey: [...AGENT_DETAIL_QUERY_KEY, agentId],
-    queryFn: ({ signal }) => api.getAgent(agentId, signal),
+    queryFn: ({ signal }) => client.getAgent(agentId, signal),
     enabled: roster.isSuccess && live === undefined,
     staleTime: 30_000,
     retry: false,

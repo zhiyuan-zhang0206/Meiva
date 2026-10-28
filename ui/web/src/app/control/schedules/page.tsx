@@ -29,7 +29,6 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
-import { api } from "@/lib/transport/api";
 import { errMsg } from "@/lib/contracts/errors";
 import { useStore } from "@/lib/state/store";
 import type { ScheduleCreate } from "@/lib/contracts/types";
@@ -38,6 +37,7 @@ import { useSectionVisible } from "../visibility";
 import { FLEX } from "@/lib/layout/layout";
 import { cn } from "@/lib/format/utils";
 import { ScheduleForm, ScheduleRow } from "./_schedule_components";
+import { useApi } from "@/lib/transport/transport-context";
 
 const SCHEDULES_QUERY_KEY = ["schedules"] as const;
 
@@ -50,6 +50,7 @@ const EMPTY_FORM: ScheduleCreate = {
 };
 
 export default function SchedulesPage() {
+  const client = useApi();
   const t = useTranslations("schedules");
   const queryClient = useQueryClient();
   const showToast = useStore((s) => s.showToast);
@@ -59,7 +60,7 @@ export default function SchedulesPage() {
 
   const { data: schedules, isLoading, error } = useQuery({
     queryKey: SCHEDULES_QUERY_KEY,
-    queryFn: api.listSchedules,
+    queryFn: client.listSchedules,
     refetchInterval: 15_000,
     enabled: visible,
   });
@@ -70,22 +71,22 @@ export default function SchedulesPage() {
   const onErr = (verb: string) => (err: unknown) => showToast(`${verb} failed: ${errMsg(err)}`);
 
   const deleteMutation = useMutation({
-    mutationFn: (id: number) => api.deleteSchedule(id),
+    mutationFn: (id: number) => client.deleteSchedule(id),
     onSuccess: invalidate,
     onError: onErr("Delete"),
   });
   const startMutation = useMutation({
-    mutationFn: (id: number) => api.startSchedule(id),
+    mutationFn: (id: number) => client.startSchedule(id),
     onSuccess: invalidate,
     onError: onErr("Start"),
   });
   const stopMutation = useMutation({
-    mutationFn: (id: number) => api.stopSchedule(id),
+    mutationFn: (id: number) => client.stopSchedule(id),
     onSuccess: invalidate,
     onError: onErr("Stop"),
   });
   const restartMutation = useMutation({
-    mutationFn: (id: number) => api.restartSchedule(id),
+    mutationFn: (id: number) => client.restartSchedule(id),
     onSuccess: () => {
       invalidate();
       showToast(t("restarted"));
@@ -96,7 +97,7 @@ export default function SchedulesPage() {
   // --- natural-language create: spawn a writer agent, open its conversation ---
   const [nl, setNl] = useState("");
   const draftMutation = useMutation({
-    mutationFn: (text: string) => api.draftSchedule(text),
+    mutationFn: (text: string) => client.draftSchedule(text),
     retry: false,
     onSuccess: (res) => {
       setNl("");
@@ -111,7 +112,7 @@ export default function SchedulesPage() {
   const [showForm, setShowForm] = useState(false);
   const [form, setForm] = useState<ScheduleCreate>(EMPTY_FORM);
   const createMutation = useMutation({
-    mutationFn: (body: ScheduleCreate) => api.createSchedule(body),
+    mutationFn: (body: ScheduleCreate) => client.createSchedule(body),
     onSuccess: () => {
       invalidate();
       setShowForm(false);

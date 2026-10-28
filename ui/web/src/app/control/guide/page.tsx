@@ -12,13 +12,14 @@ import { useState } from "react";
 
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { api } from "@/lib/transport/api";
 import { errMsg } from "@/lib/contracts/errors";
 import { useStore } from "@/lib/state/store";
 import { FLEX } from "@/lib/layout/layout";
 import { cn } from "@/lib/format/utils";
+import { useApi } from "@/lib/transport/transport-context";
 
 export default function GuidePage() {
+  const client = useApi();
   const t = useTranslations("guide");
   const showToast = useStore((s) => s.showToast);
   const setActiveId = useStore((s) => s.setActiveId);
@@ -26,7 +27,7 @@ export default function GuidePage() {
   const [nl, setNl] = useState("");
 
   const draftMutation = useMutation({
-    mutationFn: (text: string) => api.draftGuide(text),
+    mutationFn: (text: string) => client.draftGuide(text),
     retry: false,
     onSuccess: (res) => {
       setNl("");

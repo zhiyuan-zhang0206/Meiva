@@ -9,12 +9,32 @@
 // meiva:link ui/web/src/docs/frontend-components/creation-availability/creation-availability.meiva.okf.md
 
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { cleanup, fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { SpawnForm } from "./spawn-form";
 import { USER_SETTING_DEFAULTS, type ModelsResponse, type SystemStatus } from "@/lib/contracts/types";
 import { SETTINGS_QUERY_KEY } from "@/lib/state/use-user-settings";
+import { renderWithApi as render } from "@/test-support/render";
+import { resetTransport, transport } from "@/test-support/fake-api";
+beforeEach(() => {
+  resetTransport();
+  transport.getHarnessAvailability.mockResolvedValue([]);
+  transport.getSettings.mockImplementation(() =>
+      Promise.resolve({
+        settings: Object.entries(storedSettings).map(([key, value]) => ({
+          key,
+          value,
+          updated_at: "2026-05-19T00:00:00Z",
+        })),
+      }));
+  transport.putSetting.mockImplementation((key: string, value: unknown) => {
+      storedSettings = { ...storedSettings, [key]: value };
+      setSettingCalls.push({ key, value });
+      return Promise.resolve({ key, value, updated_at: "2026-05-19T00:00:00Z" });
+    });
+});
+
 
 let storedSettings: Record<string, unknown> = {};
 let setSettingCalls: { key: string; value: unknown }[] = [];
@@ -32,28 +52,6 @@ function mockSetSettingCalls(): { key: string; value: unknown }[] {
   return setSettingCalls;
 }
 
-vi.mock("@/lib/transport/api", () => ({
-  api: {
-    getSystemStatus: vi.fn(),
-    getModels: vi.fn(),
-    getHarnessAvailability: vi.fn().mockResolvedValue([]),
-    getSettings: () =>
-      Promise.resolve({
-        settings: Object.entries(storedSettings).map(([key, value]) => ({
-          key,
-          value,
-          updated_at: "2026-05-19T00:00:00Z",
-        })),
-      }),
-    putSetting: (key: string, value: unknown) => {
-      storedSettings = { ...storedSettings, [key]: value };
-      setSettingCalls.push({ key, value });
-      return Promise.resolve({ key, value, updated_at: "2026-05-19T00:00:00Z" });
-    },
-  },
-}));
-
-import { api } from "@/lib/transport/api";
 
 function wrap(layout?: "table" | "stack") {
   const onSpawn = vi.fn();
@@ -205,13 +203,13 @@ afterEach(cleanup);
 beforeEach(() => {
   vi.clearAllMocks();
   resetMockSettings();
-  vi.mocked(api.getModels).mockResolvedValue({ providers: {}, models: {}, default: "" });
-  vi.mocked(api.getHarnessAvailability).mockResolvedValue(harnessAllAvailable());
+  transport.getModels.mockResolvedValue({ providers: {}, models: {}, default: "" });
+  transport.getHarnessAvailability.mockResolvedValue(harnessAllAvailable());
 });
 
 describe("no spawnable agent host", () => {
   it("a reachable runner with a down host says so instead of showing the table", async () => {
-    vi.mocked(api.getSystemStatus).mockResolvedValue(
+    transport.getSystemStatus.mockResolvedValue(
       statusWith([{ name: "cloud", online: true }, { name: "test-host", online: true, agentHostOnline: false }]),
     );
     wrap();
@@ -220,7 +218,7 @@ describe("no spawnable agent host", () => {
   });
 
   it("an absent host verdict reads as unknown", async () => {
-    vi.mocked(api.getSystemStatus).mockResolvedValue(
+    transport.getSystemStatus.mockResolvedValue(
       statusWith([{ name: "cloud", online: true }, { name: "test-host", online: true, agentHostOnline: null }]),
     );
     wrap();
@@ -228,7 +226,7 @@ describe("no spawnable agent host", () => {
   });
 
   it("no agent-runner at all", async () => {
-    vi.mocked(api.getSystemStatus).mockResolvedValue(statusWith([{ name: "cloud", online: true }]));
+    transport.getSystemStatus.mockResolvedValue(statusWith([{ name: "cloud", online: true }]));
     wrap();
     expect(await screen.findByText("No agent runner with an available host")).toBeTruthy();
   });
@@ -236,8 +234,8 @@ describe("no spawnable agent host", () => {
 
 describe("spawn table", () => {
   it("one spawnable runner → the footer spawns there with the resolved config", async () => {
-    vi.mocked(api.getSystemStatus).mockResolvedValue(singleMachineStatus());
-    vi.mocked(api.getModels).mockResolvedValue(modelsWithEffort());
+    transport.getSystemStatus.mockResolvedValue(singleMachineStatus());
+    transport.getModels.mockResolvedValue(modelsWithEffort());
     const { onSpawn, onDone } = wrap();
     const form = await table();
     expect(selected(form, MODEL_COLUMN, /deepseek-v4-pro/)).toBe(true);
@@ -252,8 +250,8 @@ describe("spawn table", () => {
   });
 
   it("one spawnable host is just Spawn: the machine name is not a label", async () => {
-    vi.mocked(api.getSystemStatus).mockResolvedValue(singleMachineStatus());
-    vi.mocked(api.getModels).mockResolvedValue(modelsDefault());
+    transport.getSystemStatus.mockResolvedValue(singleMachineStatus());
+    transport.getModels.mockResolvedValue(modelsDefault());
     wrap();
     await table();
     // meiva:note
@@ -266,8 +264,8 @@ describe("spawn table", () => {
   });
 
   it("opens with the stored spawn config marked selected", async () => {
-    vi.mocked(api.getSystemStatus).mockResolvedValue(singleMachineStatus());
-    vi.mocked(api.getModels).mockResolvedValue(modelsWithEffort());
+    transport.getSystemStatus.mockResolvedValue(singleMachineStatus());
+    transport.getModels.mockResolvedValue(modelsWithEffort());
     setMockSetting("behavior.spawn_harness", "claude_code");
     setMockSetting("behavior.spawn_model", "claude-opus-4-8");
     wrap();
@@ -281,8 +279,8 @@ describe("spawn table", () => {
   });
 
   it.each(["claude_code", "codex"] as const)("names %s execution model and effort choices", async (harness) => {
-    vi.mocked(api.getSystemStatus).mockResolvedValue(singleMachineStatus());
-    vi.mocked(api.getModels).mockResolvedValue(modelsWithTwoLadders());
+    transport.getSystemStatus.mockResolvedValue(singleMachineStatus());
+    transport.getModels.mockResolvedValue(modelsWithTwoLadders());
     setMockSetting("behavior.spawn_harness", harness);
     wrap();
     const form = await table();
@@ -299,8 +297,8 @@ describe("spawn table", () => {
     catalog.models["gpt-5.6"].harness_settings = {
       codex: { reasoning_effort_options: ["low", "ultra"], reasoning_effort_default: "low" },
     };
-    vi.mocked(api.getSystemStatus).mockResolvedValue(singleMachineStatus());
-    vi.mocked(api.getModels).mockResolvedValue(catalog);
+    transport.getSystemStatus.mockResolvedValue(singleMachineStatus());
+    transport.getModels.mockResolvedValue(catalog);
     setMockSetting("behavior.spawn_reasoning_effort", "minimal");
     const { onSpawn } = wrap();
     const form = await table();
@@ -316,8 +314,8 @@ describe("spawn table", () => {
   });
 
   it("a pick that is never spawned does not become the stored config", async () => {
-    vi.mocked(api.getSystemStatus).mockResolvedValue(singleMachineStatus());
-    vi.mocked(api.getModels).mockResolvedValue(modelsDefault());
+    transport.getSystemStatus.mockResolvedValue(singleMachineStatus());
+    transport.getModels.mockResolvedValue(modelsDefault());
     setMockSetting("behavior.spawn_model", "deepseek-v4-pro");
     wrap();
     const form = await table();
@@ -335,8 +333,8 @@ describe("spawn table", () => {
   });
 
   it("a spawn stores the config it used, cascade included", async () => {
-    vi.mocked(api.getSystemStatus).mockResolvedValue(singleMachineStatus());
-    vi.mocked(api.getModels).mockResolvedValue(modelsWithEffort());
+    transport.getSystemStatus.mockResolvedValue(singleMachineStatus());
+    transport.getModels.mockResolvedValue(modelsWithEffort());
     wrap();
     const form = await table();
     pick(form, EFFORT_COLUMN, "high");
@@ -354,8 +352,8 @@ describe("spawn table", () => {
   });
 
   it("changing the harness keeps only the models that harness runs", async () => {
-    vi.mocked(api.getSystemStatus).mockResolvedValue(singleMachineStatus());
-    vi.mocked(api.getModels).mockResolvedValue(modelsWithEffort());
+    transport.getSystemStatus.mockResolvedValue(singleMachineStatus());
+    transport.getModels.mockResolvedValue(modelsWithEffort());
     const { onSpawn } = wrap();
     const form = await table();
     expect(row(form, MODEL_COLUMN, /deepseek-v4-pro/)).toBeTruthy();
@@ -372,14 +370,14 @@ describe("spawn table", () => {
   });
 
   it("follows the registry: a model assigned to another harness shows up there", async () => {
-    vi.mocked(api.getSystemStatus).mockResolvedValue(singleMachineStatus());
+    transport.getSystemStatus.mockResolvedValue(singleMachineStatus());
     // meiva:note
     // The registry - not this frontend - decides which harness runs which model: a
     // model whose published harnesses name an external CLI appears in that CLI's
     // column with no frontend change, and one that does not is absent from it. The
     // DeepSeek model is deliberately not the CLI's own vendor.
     // meiva:link ui/web/src/docs/frontend-components/creation-availability/creation-availability.meiva.okf.md
-    vi.mocked(api.getModels).mockResolvedValue({
+    transport.getModels.mockResolvedValue({
       providers: { deepseek: ["deepseek-v4-pro"], gpt: ["gpt-5.6"] },
       models: {
         "deepseek-v4-pro": {
@@ -401,9 +399,9 @@ describe("spawn table", () => {
   });
 
   it("a harness the machine cannot start is disabled in its column", async () => {
-    vi.mocked(api.getSystemStatus).mockResolvedValue(singleMachineStatus());
-    vi.mocked(api.getModels).mockResolvedValue(modelsWithEffort());
-    vi.mocked(api.getHarnessAvailability).mockResolvedValue([
+    transport.getSystemStatus.mockResolvedValue(singleMachineStatus());
+    transport.getModels.mockResolvedValue(modelsWithEffort());
+    transport.getHarnessAvailability.mockResolvedValue([
       { harness: "meiva", status: "available", reason: "", launchable: true, billing: "api" },
       { harness: "claude_code", status: "unavailable", reason: "not signed in", launchable: false, billing: "subscription" },
     ]);
@@ -415,15 +413,15 @@ describe("spawn table", () => {
   });
 
   it("switching to a machine that cannot start the chosen harness falls back to one it can", async () => {
-    vi.mocked(api.getSystemStatus).mockResolvedValue(
+    transport.getSystemStatus.mockResolvedValue(
       statusWith([
         { name: "cloud", online: true },
         { name: "a-host", online: true },
         { name: "c-host", online: true },
       ]),
     );
-    vi.mocked(api.getModels).mockResolvedValue(modelsDefault());
-    vi.mocked(api.getHarnessAvailability).mockImplementation((machine: string) =>
+    transport.getModels.mockResolvedValue(modelsDefault());
+    transport.getHarnessAvailability.mockImplementation((machine: string) =>
       Promise.resolve(
         machine === "c-host"
           ? [{ harness: "meiva", status: "available", reason: "", launchable: true, billing: "api" },

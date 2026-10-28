@@ -41,11 +41,15 @@ keep request-planning errors inside their existing Promise contract. Uploads
 subscribe to the upload event owner's progress interface instead of replacing its
 handler property. `api.ts` composes the app's one client;
 `components/shell/providers.tsx` hands it to `ApiProvider` and a `StreamHub` (which
-owns the shared-stream objects of the page) to `StreamHubProvider`.
+owns the shared-stream objects of the page) to `StreamHubProvider`. The root takes
+that client and hub as inputs, so a test composes the same tree with its own.
 
-Hooks read the client with `useApi()` and the streams with `useStreamHub()`
-(`transport-context.tsx`); both throw outside their provider. Hooks not yet
-migrated still import `api` from `api.ts`.
+Every reader takes what the root hands down: components and hooks call `useApi()`,
+the global and per-agent streams arrive through `useEventStream.tsx`'s contexts, and
+a module that cannot call a hook takes the client as a required parameter
+(`inspector-queries.ts:fetchWindowedInspect`,
+`use-harness-availability.ts:probeQuery`). All of them throw outside their provider;
+only the composition root itself imports `api.ts`.
 
 ## Test boundary
 
@@ -68,6 +72,19 @@ Only deliberately completing a fetch after abort needs the narrow
 `tests/api/uncancellable-fetch.ts` fault. Presentation tests with complete,
 fresh query-cache state use `cacheOnlyApi`: the real factory over the test setup's
 network guard, so an unexpected cold read fails instead of receiving invented data.
+
+Presentation tests otherwise render the page under real providers with the suite's
+fakes in `test-support/`: `transport` is the real endpoint surface with every call a
+`vi.fn()` (an unanswered call rejects with its own name), `renderWithApi` renders
+under `ApiProvider`, and `TestStreamProvider` publishes the stream contexts with a
+recording `subscribe` over a `StreamHub` built from the transport's own `FakeTab`. A
+test answers the calls it cares about and delivers a frame by hand; no test replaces
+the transport module.
+
+A test wraps what it renders in `ApiTestProvider` (or imports `renderWithApi`). A bare
+`render()` of a component that reads the transport throws `useApi must be used inside
+<ApiProvider>`: that is the design, not a regression -- the message names the missing
+provider, and the fix is to render under one with a fake.
 
 ## Retryability and the panel's words
 

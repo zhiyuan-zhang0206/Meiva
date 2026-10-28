@@ -13,9 +13,9 @@ import { cn } from "@/lib/format/utils";
 import { FLEX, FLEX_1, MIN_W_0, OVERFLOW_HIDDEN } from "@/lib/layout/layout";
 import { PRIORITY_BG } from "@/lib/notifications/notices";
 import type { TaskWindow } from "@/lib/notifications/use-tasks";
-import { api } from "@/lib/transport/api";
 
 import { taskFill } from "./presentation/task-palette";
+import { useApi } from "@/lib/transport/transport-context";
 
 function MetaRow({ label, children }: { label: string; children: ReactNode }) {
   return (
@@ -37,6 +37,7 @@ export function TaskHoverCard({
   ownerLabel: string;
   parentTitle: string | null;
 }) {
+  const client = useApi();
   const t = useTranslations("fleet.task");
   // meiva:note
   // The list carries no text columns; the card fetches the one row it shows and
@@ -45,7 +46,7 @@ export function TaskHoverCard({
   // meiva:link ui/web/src/docs/frontend-components/fleet-view.meiva.okf.md
   const full = useQuery({
     queryKey: ["task", task.id],
-    queryFn: () => api.getTask(task.id),
+    queryFn: () => client.getTask(task.id),
     staleTime: Infinity,
   });
   const statusLabels: Record<string, string> = {

@@ -17,12 +17,12 @@ import { useState } from "react";
 
 import { DEFAULT_HARNESS, harnessRows, type Harness } from "@/lib/harness/harness";
 import { useHarnessAvailabilityByMachine } from "@/lib/harness/use-harness-availability";
-import { api } from "@/lib/transport/api";
 import { SpawnStack, SpawnTable, type SpawnMachine } from "./spawn-table";
 import { groupedModels, isSuperseded, runsOnHarness } from "@/lib/contracts/models";
 import { useUserSettings } from "@/lib/state/use-user-settings";
 import { FLEX, FLEX_1, FLEX_COL, MIN_W_0 } from "@/lib/layout/layout";
 import { cn } from "@/lib/format/utils";
+import { useApi } from "@/lib/transport/transport-context";
 
 interface SpawnOpts {
   machine?: string;
@@ -58,15 +58,16 @@ interface Props {
 }
 
 export function SpawnForm({ onSpawn, onDone, layout = "table" }: Props) {
+  const client = useApi();
   const t = useTranslations("spawn");
   const { data: statusData } = useQuery({
     queryKey: ["status"],
-    queryFn: () => api.getSystemStatus(),
+    queryFn: () => client.getSystemStatus(),
     refetchInterval: 15_000,
   });
   const modelsQuery = useQuery({
     queryKey: ["models"],
-    queryFn: () => api.getModels(),
+    queryFn: () => client.getModels(),
     // meiva:note
     // Config writes invalidate this catalog, including its effective birth default.
     // meiva:link ui/web/src/docs/frontend-components/creation-availability/creation-availability.meiva.okf.md

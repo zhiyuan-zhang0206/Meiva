@@ -10,7 +10,6 @@ import { errMsg } from "../contracts/errors";
 import type { AgentRoster } from "../contracts/types";
 import { AGENT_DETAIL_QUERY_KEY, AGENTS_QUERY_KEY } from "../fold/agents";
 import { useStore } from "../state/store";
-import { api } from "../transport/api";
 import { useApi } from "../transport/transport-context";
 import { useAgentActions } from "./use-agent-actions";
 
@@ -37,7 +36,7 @@ function rememberAgent(id?: number | null): string | null | void {
 }
 
 export function useAgentRoster() {
-  const client = useApi(api);
+  const client = useApi();
   return useQuery({
     queryKey: AGENTS_QUERY_KEY,
     queryFn: ({ signal }) => client.getAgentRoster(signal),
@@ -46,7 +45,7 @@ export function useAgentRoster() {
 }
 
 export function useAgents(showError: (msg: string) => void) {
-  const client = useApi(api);
+  const client = useApi();
   const queryClient = useQueryClient();
   const roster = useAgentRoster();
   const { agents, ancestors } = roster.data ?? EMPTY_ROSTER;

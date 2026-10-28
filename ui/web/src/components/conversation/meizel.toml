@@ -16,12 +16,6 @@ exports = ["composer.tsx", "pending-strip.tsx", "upload-button.tsx"]
 "composer.tsx#clock Date.now" = 1
 "composer.tsx#random Math.random" = 1
 
-[debt.first-party-patch]
-"composer-attachments.test.tsx#vi.mock ui/web/src/lib/transport/api.ts" = 1
-"composer-commands.test.tsx#vi.mock ui/web/src/lib/transport/api.ts" = 1
-"composer-lifecycle.test.tsx#vi.mock ui/web/src/lib/transport/api.ts" = 1
-"composer.test.tsx#vi.mock ui/web/src/lib/transport/api.ts" = 1
-
 [debt.stdlib-patch]
 "composer-attachments.test.tsx#vi.spyOn URL.revokeObjectURL" = 2
 "composer-attachments.test.tsx#vi.spyOn performance.now" = 1

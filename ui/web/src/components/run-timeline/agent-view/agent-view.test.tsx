@@ -1,4 +1,3 @@
-import type * as ApiModule from "@/lib/transport/api";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { cleanup, fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { renderWithBrowser } from "@/test-support/render";
@@ -18,14 +17,22 @@ const { getRunTimeline, getRunTimelineLinks, getRunTimelineLinkContent, getAgent
     getSettings: vi.fn(),
   }));
 
-vi.mock("@/lib/transport/api", async (importOriginal) => ({
-  ...(await importOriginal<typeof ApiModule>()),
-  api: { getRunTimeline, getRunTimelineLinks, getRunTimelineLinkContent, getAgentRoster, getContextBreakdown, getRunTimelineContext, getRunTimelineMessages, getSettings },
-}));
-
 import AgentViewPage from "@/app/insights/run/[agents]/page";
 import { drawn, itemX, mockCanvas, paintFrame, clickAt } from "../canvas/run-timeline-test-canvas-mock";
 import { viewportOf } from "../model/timeline-model-viewport";
+
+import { resetTransport, transport } from "@/test-support/fake-api";
+beforeEach(() => {
+  resetTransport();
+  transport.getRunTimeline.mockImplementation(getRunTimeline);
+  transport.getRunTimelineLinks.mockImplementation(getRunTimelineLinks);
+  transport.getRunTimelineLinkContent.mockImplementation(getRunTimelineLinkContent);
+  transport.getAgentRoster.mockImplementation(getAgentRoster);
+  transport.getContextBreakdown.mockImplementation(getContextBreakdown);
+  transport.getRunTimelineContext.mockImplementation(getRunTimelineContext);
+  transport.getRunTimelineMessages.mockImplementation(getRunTimelineMessages);
+  transport.getSettings.mockImplementation(getSettings);
+});
 
 const T0 = Date.parse("2026-10-04T12:00:00.000Z");
 const at = (minutes: number) => new Date(T0 + minutes * 60_000).toISOString();

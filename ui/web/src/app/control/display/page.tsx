@@ -33,7 +33,6 @@ import { cn } from "@/lib/format/utils";
 import { useQuery } from "@tanstack/react-query";
 import { useTranslations } from "next-intl";
 
-import { api } from "@/lib/transport/api";
 import { groupedModels, isSuperseded } from "@/lib/contracts/models";
 import { useBreakpoint } from "@/lib/layout/breakpoint";
 import {
@@ -49,6 +48,7 @@ import { FLEX } from "@/lib/layout/layout";
 import { ModelPickerSection } from "./_model_picker";
 import { NotificationCategoryRows } from "./_notification-categories";
 import { RadioRow, SettingsSection, SliderRow, TimelineColorsSection, ToggleRow } from "./_rows";
+import { useApi } from "@/lib/transport/transport-context";
 
 // meiva:link ui/web/src/docs/frontend-components/home-shell-chrome/home-shell-chrome.meiva.okf.md
 function resetManualExpansions(): void {
@@ -58,6 +58,7 @@ function resetManualExpansions(): void {
 // ── Page ──
 
 export default function DisplaySettingsPage() {
+  const client = useApi();
   const t = useTranslations("displaySettings");
   const { settings, setSetting, isLoading } = useUserSettings();
   const { detailsMode, setDetailsMode } = useContentToggle();
@@ -81,7 +82,7 @@ export default function DisplaySettingsPage() {
   // Must be called unconditionally (before any early return) — React hook rules.
   const { data: modelsData } = useQuery({
     queryKey: ["models"],
-    queryFn: () => api.getModels(),
+    queryFn: () => client.getModels(),
     staleTime: Infinity,
   });
 

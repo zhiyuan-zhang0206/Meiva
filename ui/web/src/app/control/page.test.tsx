@@ -19,13 +19,15 @@ vi.mock("@/app/control/inventory/page", () => ({
   PluginsInventory: () => <div>PLUGINS_BODY</div>,
   McpInventory: () => <div>MCP_BODY</div>,
 }));
-vi.mock("@/lib/transport/api", () => ({
-  api: { getUiContributions: vi.fn().mockResolvedValue({ themes: [], nav: [] }) },
-  assetUrl: (p: string) => p,
-}));
 
 import ControlPage from "./page";
 import { CONTROL_SCROLL_ID, CONTROL_SECTIONS } from "./sections";
+
+import { resetTransport, transport } from "@/test-support/fake-api";
+beforeEach(() => {
+  resetTransport();
+  transport.getUiContributions.mockResolvedValue({ themes: [], nav: [] });
+});
 
 afterEach(cleanup);
 

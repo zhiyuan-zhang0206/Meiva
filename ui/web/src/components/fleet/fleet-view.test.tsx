@@ -64,21 +64,6 @@ const putSettingMock = vi.fn((key: string, value: unknown) => {
 // meiva:note
 // The embedded Inbox queue fetches notice history on mount; empty here.
 // meiva:link ui/web/src/docs/frontend-components/fleet-view.meiva.okf.md
-vi.mock("@/lib/transport/api", () => ({
-  api: {
-    getNotices: () =>
-      Promise.resolve({ open: [], awaiting: [], resolved_page: [], next_cursor: null }),
-    getSettings: () =>
-      Promise.resolve({
-        settings: Object.entries(storedSettings).map(([key, value]) => ({
-          key,
-          value,
-          updated_at: "2026-06-06T00:00:00Z",
-        })),
-      }),
-    putSetting: (key: string, value: unknown) => putSettingMock(key, value),
-  },
-}));
 
 // useInboxFeed needs EventStreamProvider; mock it away for fleet-view tests.
 // useNotices — the queue's single data contract; inject per-test via
@@ -121,6 +106,22 @@ vi.mock("@/lib/agents/use-all-pages", () => ({ useAllPages: () => [] }));
 
 import { BAR_HEIGHT_CLASS } from "@/lib/layout/layout";
 import { FleetView } from "./fleet-view";
+
+import { resetTransport, transport } from "@/test-support/fake-api";
+beforeEach(() => {
+  resetTransport();
+  transport.getNotices.mockImplementation(() =>
+      Promise.resolve({ open: [], awaiting: [], resolved_page: [], next_cursor: null }));
+  transport.getSettings.mockImplementation(() =>
+      Promise.resolve({
+        settings: Object.entries(storedSettings).map(([key, value]) => ({
+          key,
+          value,
+          updated_at: "2026-06-06T00:00:00Z",
+        })),
+      }));
+  transport.putSetting.mockImplementation((key: string, value: unknown) => putSettingMock(key, value));
+});
 
 beforeEach(() => {
   storedSettings = {};

@@ -8,13 +8,20 @@
 
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { cleanup, screen } from "@testing-library/react";
-import { renderWithBrowser } from "@/test-support/render";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi, beforeEach } from "vitest";
 
 import { ALERTS_QUERY_KEY } from "@/lib/notifications/use-alerts";
-import { apiWrapper, cacheOnlyApi } from "@/lib/transport/tests/api/api-provider";
 
 import { SidebarFooter } from "./footer";
+import { renderWithBrowser as rtlRender } from "@/test-support/render";
+import { resetTransport, transport } from "@/test-support/fake-api";
+beforeEach(() => {
+  resetTransport();
+  transport.getAlerts.mockImplementation(() => new Promise(() => undefined));
+  transport.getStatsDashboard.mockImplementation(() => new Promise(() => undefined));
+  transport.getUiContributions.mockImplementation(() => Promise.resolve({ themes: [], nav: [], stats: [] }));
+});
+
 
 const clients = new Set<QueryClient>();
 
@@ -22,21 +29,11 @@ vi.mock("next/navigation", () => ({
   useRouter: () => ({ push: vi.fn() }),
 }));
 
-vi.mock("@/lib/transport/api", () => ({
-  api: {
-    getAlerts: vi.fn(() => new Promise(() => undefined)),
-    getStatsDashboard: () => new Promise(() => undefined),
-    getUiContributions: () => Promise.resolve({ themes: [], nav: [], stats: [] }),
-  },
-}));
-
 function renderFooter(ui: React.ReactElement) {
   const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   clients.add(qc);
   qc.setQueryData(ALERTS_QUERY_KEY, { alerts: [], meta: { window: "24h", total: 0, unresolved_count: 3 } });
-  return renderWithBrowser(<QueryClientProvider client={qc}>{ui}</QueryClientProvider>, {
-    wrapper: apiWrapper(cacheOnlyApi()),
-  });
+  return rtlRender(<QueryClientProvider client={qc}>{ui}</QueryClientProvider>);
 }
 
 afterEach(() => {

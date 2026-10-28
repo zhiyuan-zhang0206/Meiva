@@ -4,14 +4,15 @@
 "use client";
 
 import { useQuery } from "@tanstack/react-query";
-import { api } from "../transport/api";
+import { useApi } from "../transport/transport-context";
 
 export function useToUser(agentId: number | null, references: string[] = []) {
+  const client = useApi();
   return useQuery({
     queryKey: references.length ? ["to-user", agentId, ...references] : ["to-user", agentId],
     queryFn: ({ signal }) => {
       if (agentId == null) throw new Error("To user requires an agent");
-      return api.getToUser(agentId, signal, references);
+      return client.getToUser(agentId, signal, references);
     },
     enabled: agentId != null,
     staleTime: Infinity,

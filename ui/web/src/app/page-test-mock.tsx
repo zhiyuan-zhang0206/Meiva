@@ -8,8 +8,12 @@ import { vi } from "vitest";
 import type { AgentRow, ReplySuggestionResponse } from "@/lib/contracts/types";
 import type { ConnectionState } from "@/lib/timeline/use-timeline";
 import { realNetwork, startGateway, type TestGateway } from "@/lib/transport/tests/api/api-provider";
+import type { Api } from "@/lib/transport/api";
 import { gatewayRig, type HttpRig } from "@/lib/transport/tests/api/api-provider";
-import { ApiProvider } from "@/lib/transport/transport-context";
+import { resetTransport, transport } from "@/test-support/fake-api";
+import { fakeStreamHub, resetStreamHandlers, TestStreamProvider } from "@/test-support/fake-stream";
+import { AuthProvider } from "@/lib/auth/auth-context";
+import { ApiProvider, StreamHubProvider } from "@/lib/transport/transport-context";
 
 export const hooksState = {
   isLarge: true,
@@ -122,14 +126,27 @@ export function makeAgent(overrides: Partial<AgentRow>): AgentRow {
 
 export let homePageGateway: TestGateway;
 export let homePageRig: HttpRig;
+let homePageApi: Api;
+const { hub } = fakeStreamHub();
 export let replySuggestions: ReplySuggestionResponse;
 
 export function setReplySuggestions(value: ReplySuggestionResponse): void {
   replySuggestions = value;
 }
 
+// meiva:note
+// The page's reads go through the rig's gateway client (a test asserts the requests it made);
+// its writes are the fake's `vi.fn()`s, so a test can answer them and count them.
 export function gatewayWrapper({ children }: { children: React.ReactNode }) {
-  return <ApiProvider api={homePageRig.api}>{children}</ApiProvider>;
+  return (
+    <ApiProvider api={homePageApi}>
+      <StreamHubProvider hub={hub}>
+        <AuthProvider>
+          <TestStreamProvider>{children}</TestStreamProvider>
+        </AuthProvider>
+      </StreamHubProvider>
+    </ApiProvider>
+  );
 }
 
 export async function cleanupHomePageTest(): Promise<void> {
@@ -156,6 +173,21 @@ export async function resetHomePageTestState() {
     return { kind: "text", status: 404, body: "unexpected route" };
   });
   homePageRig = gatewayRig(homePageGateway);
+  resetTransport();
+  resetStreamHandlers();
+  transport.sendMessage.mockResolvedValue(undefined);
+  transport.cancel.mockResolvedValue(undefined);
+  transport.uploadFiles.mockResolvedValue(undefined);
+  transport.submitUploadedFiles.mockResolvedValue(undefined);
+  transport.listPages.mockResolvedValue([]);
+  homePageApi = {
+    ...homePageRig.api,
+    sendMessage: transport.sendMessage,
+    cancel: transport.cancel,
+    uploadFiles: transport.uploadFiles,
+    submitUploadedFiles: transport.submitUploadedFiles,
+    listPages: transport.listPages,
+  };
   vi.clearAllMocks();
   inspectorMockState.shouldThrow = false;
   inspectorMockState.mounts = 0;

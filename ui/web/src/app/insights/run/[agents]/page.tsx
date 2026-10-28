@@ -23,10 +23,10 @@ import { levelsTopFirst } from "@/components/run-timeline/model/timeline-model-s
 import { nodeAncestors, nodeChildren, type Highlight } from "@/components/run-timeline/model/timeline-model-tree";
 import type { UnitHeights } from "@/components/run-timeline/canvas/run-timeline-paint";
 import type { RowOptions } from "@/components/run-timeline/model/timeline-nav-rows";
-import { api } from "@/lib/transport/api";
 import { FLEX, FLEX_1, FLEX_COL, MIN_H_0 } from "@/lib/layout/layout";
 import { useTimeFormat } from "@/lib/format/use-time-format";
 import { cn } from "@/lib/format/utils";
+import { useApi } from "@/lib/transport/transport-context";
 
 function parseAgents(segment: string): number[] | null {
   const ids: number[] = [];
@@ -46,6 +46,7 @@ const pathFor = (ids: readonly number[]) => `/insights/run/${ids.join(",")}`;
 // The URL preserves agents in addition order without duplicates and the last agent cannot be removed. Message indices belong to their snapshot: replacing it invalidates the selection before effects run. Block selection and arrow selection exclude each other. The context card follows only the selected agent and message/node, independently of the viewport. The page owns legend highlighting so zoom and pan retain it.
 // meiva:link ui/web/src/docs/frontend-components/run-timeline/window-reads.meiva.okf.md
 export default function AgentViewPage({ params }: { params: Promise<{ agents: string }> }) {
+  const client = useApi();
   const t = useTranslations("runTimeline");
   const { formatAbsolute } = useTimeFormat();
 
@@ -131,7 +132,7 @@ export default function AgentViewPage({ params }: { params: Promise<{ agents: st
   }, [loaded]);
   const linksRead = useQuery({
     queryKey: ["run-timeline-links", [...ids].sort((a, b) => a - b).join(","), linkWindow?.from, linkWindow?.to],
-    queryFn: () => api.getRunTimelineLinks(ids, linkWindow as { from: string; to: string }),
+    queryFn: () => client.getRunTimelineLinks(ids, linkWindow as { from: string; to: string }),
     enabled: linkWindow !== null,
   });
   const links = useMemo(

@@ -1,23 +1,25 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { cleanup, screen } from "@testing-library/react";
-import { render } from "@/lib/transport/tests/wall-clock-render";
-import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
+import { render as wallClockRender } from "@/lib/transport/tests/wall-clock-render";
+import { ApiTestProvider, resetTransport, transport } from "@/test-support/fake-api";
+import { afterEach, beforeAll, beforeEach, describe, expect, it } from "vitest";
 
 import type { RunTimelineMessages, RunTimelineNode, RunTimelineUnit } from "@/lib/contracts/types";
-import { api } from "@/lib/transport/api";
-
-vi.mock("@/lib/transport/api", () => ({
-  api: {
-    getRunTimelineMessages: vi.fn(() => new Promise<never>(() => undefined)),
-    getRunTimelineLinkContent: vi.fn(),
-    getSettings: vi.fn(() => Promise.resolve({ settings: [] })),
-  },
-}));
 
 import { preloadChatMarkdown } from "@/components/content/markdown";
 import { NodeDetail, UnitDetail } from "./run-timeline-detail";
 import { LinkDetail } from "./run-timeline-link-detail";
 import type { ResolvedLink } from "./model/links/resolve";
+beforeEach(() => {
+  resetTransport();
+  transport.getRunTimelineMessages.mockImplementation(() => new Promise<never>(() => undefined));
+  transport.getSettings.mockImplementation(() => Promise.resolve({ settings: [] }));
+});
+
+
+function render(ui: React.ReactElement) {
+  return wallClockRender(ui, { wrapper: ApiTestProvider });
+}
 
 afterEach(cleanup);
 
@@ -132,23 +134,23 @@ describe("the details of an arrow and of the block it ends on", () => {
   };
 
   it("render the message with the same DOM, through the same row component", async () => {
-    vi.mocked(api.getRunTimelineMessages).mockResolvedValue(message);
+    transport.getRunTimelineMessages.mockResolvedValue(message);
     const viaBlock = await messagesOf(<UnitDetail agentId={6657} unit={block} />);
     const viaArrow = await messagesOf(<LinkDetail resolved={resolved({})} onAddAgent={() => undefined} />);
     expect(viaArrow).toEqual(viaBlock);
     expect(viaBlock[0]).toContain("Plan");
-    expect(api.getRunTimelineMessages).toHaveBeenCalledWith(6657, expect.objectContaining({ start: 4, end: 4 }));
+    expect(transport.getRunTimelineMessages).toHaveBeenCalledWith(6657, expect.objectContaining({ start: 4, end: 4 }));
   });
 
   it("shows an event with no block through the same card and row, as a message", async () => {
-    vi.mocked(api.getRunTimelineMessages).mockClear();
-    vi.mocked(api.getRunTimelineLinkContent).mockResolvedValue({ title: "a title", content: "need **a** decision\n\n" + "long ".repeat(500) });
+    transport.getRunTimelineMessages.mockClear();
+    transport.getRunTimelineLinkContent.mockResolvedValue({ title: "a title", content: "need **a** decision\n\n" + "long ".repeat(500) });
     const none = resolved({ block: null, kind: "notice", link: { ...resolved({}).link, inbound_id: null, notice_id: 3, receiver: null, kind: "notice" } });
     const shown = await messagesOf(<LinkDetail resolved={none} onAddAgent={() => undefined} />);
     expect(shown).toHaveLength(1);
     expect(shown[0]).toContain("<strong");
     expect(shown[0]).toContain("long long long");
-    expect(api.getRunTimelineLinkContent).toHaveBeenCalledWith({ notice_id: 3 });
-    expect(api.getRunTimelineMessages).not.toHaveBeenCalled();
+    expect(transport.getRunTimelineLinkContent).toHaveBeenCalledWith({ notice_id: 3 });
+    expect(transport.getRunTimelineMessages).not.toHaveBeenCalled();
   });
 });

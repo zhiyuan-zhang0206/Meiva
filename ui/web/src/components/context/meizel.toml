@@ -11,11 +11,6 @@ exports = ["shared-context-panel.tsx"]
 
 [debt.first-party-patch]
 "shared-context-panel.test.tsx#vi.mock ui/web/src/components/inspector/inspector-panel.tsx" = 1
-"shared-context-panel.test.tsx#vi.spyOn ui/web/src/lib/transport/api.ts.getSettings" = 1
-"shared-context-panel.test.tsx#vi.spyOn ui/web/src/lib/transport/api.ts.getToUser" = 1
-"shared-context-panel.test.tsx#vi.spyOn ui/web/src/lib/transport/api.ts.putSetting" = 1
-"to-user-document.test.tsx#vi.spyOn ui/web/src/lib/transport/api.ts.getToUser" = 2
-"to-user-empty-state.test.tsx#vi.spyOn ui/web/src/lib/transport/api.ts.getToUser" = 1
 
 [debt.third-party-patch]
 "shared-context-panel.test.tsx#vi.mock next-intl" = 1

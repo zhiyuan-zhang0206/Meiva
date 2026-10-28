@@ -6,7 +6,6 @@ exports = ["app-connection-banner.tsx", "error-boundary.tsx"]
 
 [debt.first-party-patch]
 "app-connection-banner.test.tsx#vi.mock ui/web/src/lib/auth/auth-context.tsx" = 1
-"app-connection-banner.test.tsx#vi.mock ui/web/src/lib/transport/useEventStream.tsx" = 1
 
 [debt.stdlib-patch]
 "error-boundary.test.tsx#vi.spyOn console.error" = 2

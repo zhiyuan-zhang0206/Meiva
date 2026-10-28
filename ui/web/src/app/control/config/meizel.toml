@@ -3,32 +3,17 @@ exports = ["page.tsx"]
 [uses]
 "_default_model.test.tsx" = ["_default_model.tsx"]
 "_owner_writes.test.ts" = ["_owner_writes.ts"]
-"config-test-fixtures-mock.tsx" = ["page.tsx"]
-"page-editing.test.tsx" = ["config-test-fixtures-mock.tsx", "page.tsx"]
-"page.test.tsx" = ["config-test-fixtures-mock.tsx", "page.tsx"]
+"config-test-mock.tsx" = ["page.tsx"]
+"page-editing.test.tsx" = ["config-test-mock.tsx", "page.tsx"]
+"page.test.tsx" = ["config-test-mock.tsx", "page.tsx"]
 "page.tsx" = ["_config_row.tsx", "_default_model.tsx", "_owner_writes.ts", "_per_model.tsx"]
 
 [debt.ambient-read]
 "page.tsx#environ localStorage" = 2
 
-[debt.first-party-patch]
-"_default_model.test.tsx#vi.mock ui/web/src/lib/transport/api.ts" = 1
-"config-test-fixtures-mock.tsx#vi.spyOn ui/web/src/lib/transport/api.ts.getDefaultModel" = 1
-"config-test-fixtures-mock.tsx#vi.spyOn ui/web/src/lib/transport/api.ts.getMachines" = 1
-"config-test-fixtures-mock.tsx#vi.spyOn ui/web/src/lib/transport/api.ts.getModels" = 1
-"config-test-fixtures-mock.tsx#vi.spyOn ui/web/src/lib/transport/api.ts.getResolvedConfig" = 1
-"config-test-fixtures-mock.tsx#vi.spyOn ui/web/src/lib/transport/api.ts.getSystemStatus" = 1
-"page-editing.test.tsx#vi.spyOn ui/web/src/lib/transport/api.ts.getConfig" = 22
-"page-editing.test.tsx#vi.spyOn ui/web/src/lib/transport/api.ts.getDefaultModel" = 1
-"page-editing.test.tsx#vi.spyOn ui/web/src/lib/transport/api.ts.getModels" = 2
-"page-editing.test.tsx#vi.spyOn ui/web/src/lib/transport/api.ts.getResolvedConfig" = 1
-"page-editing.test.tsx#vi.spyOn ui/web/src/lib/transport/api.ts.putConfig" = 8
-"page.test.tsx#vi.spyOn ui/web/src/lib/transport/api.ts.getConfig" = 27
-"page.test.tsx#vi.spyOn ui/web/src/lib/transport/api.ts.putConfig" = 6
-
 [debt.stdlib-patch]
-"config-test-fixtures-mock.tsx#vi.stubGlobal cancelIdleCallback" = 1
-"config-test-fixtures-mock.tsx#vi.stubGlobal requestIdleCallback" = 1
+"config-test-mock.tsx#vi.stubGlobal cancelIdleCallback" = 1
+"config-test-mock.tsx#vi.stubGlobal requestIdleCallback" = 1
 
 [debt.type-cast]
 "page.tsx#cast ConfigPage.<lambda>" = 1
