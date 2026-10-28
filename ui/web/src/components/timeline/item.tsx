@@ -21,7 +21,6 @@ import { useTranslations } from "next-intl";
 import { Fragment, memo, useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 
-import { CopyButton } from "@/components/content/copy-button";
 import { ChatMarkdown } from "@/components/content/markdown";
 import { PythonCode } from "@/components/content/python-code";
 import { assetUrl } from "@/lib/transport/api";
@@ -254,7 +253,6 @@ function AttachContent({
 function EnvelopeContent({
   payload,
   images,
-  showCopy = false,
   attachMode = false,
   plainMessage = false,
   markdown = false,
@@ -264,8 +262,6 @@ function EnvelopeContent({
   // Image reference urls on a multimodal inbound — rendered as thumbnails below
   // the text. Gateway-relative, so each is resolved through assetUrl.
   images?: string[] | null;
-  /** Show a copy button on the body pre block (for code_output). */
-  showCopy?: boolean;
   /** Attach items render their caption lines interleaved with thumbnails. */
   attachMode?: boolean;
   /** Impersonation messages store the original body without an envelope. */
@@ -306,13 +302,8 @@ function EnvelopeContent({
         </div>
       ) : null}
       {showBody ? (
-        plainMessage || markdown ? <ChatMarkdown content={body} /> : showCopy ? (
-          <div className="group relative">
-            <CopyButton text={body} label={t("commandOutput")} />
-            <pre className="whitespace-pre-wrap [overflow-wrap:anywhere] font-mono text-[13px] leading-relaxed text-foreground/90 m-0">
-              {body}
-            </pre>
-          </div>
+        plainMessage || markdown ? (
+          <ChatMarkdown content={body} />
         ) : (
           <pre className="whitespace-pre-wrap [overflow-wrap:anywhere] font-mono text-[13px] leading-relaxed text-foreground/90 m-0">
             {body}
@@ -420,7 +411,7 @@ export const ItemView = memo(function ItemView({
                 {streamingPayload}
               </pre>
             ) : (
-              <PythonCode code={streamingPayload} streaming={streaming} />
+              <PythonCode code={streamingPayload} streaming={streaming} copy={false} />
             )}
           </div>
           {item.interrupted ? <InterruptedNotice /> : null}
@@ -459,7 +450,7 @@ export const ItemView = memo(function ItemView({
       );
 
     case "code_output":
-      return <EnvelopeContent payload={item.payload} showCopy />;
+      return <EnvelopeContent payload={item.payload} />;
 
     case "system_prompt":
       return (

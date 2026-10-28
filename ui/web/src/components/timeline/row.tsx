@@ -69,7 +69,9 @@ export const TimelineRow = memo(function TimelineRow({
   streaming: boolean;
   expanded: boolean;
   // meiva:note
-  // The body is expanded and settled, so Copy joins the timestamp in the card's hover footer.
+  // The body is expanded and settled. Copy joins the timestamp in the card's
+  // hover footer only when the KIND also offers it (config.copy — the whitelist
+  // in card.tsx: a human's or an agent's message, and the agent's own reply).
   // meiva:link ui/web/src/docs/frontend-components/timeline-view/card-chrome.meiva.okf.md
   copyable: boolean;
   /** Where this row's header pins while expanded: `"top"` below the HeaderBar
@@ -129,11 +131,11 @@ export const TimelineRow = memo(function TimelineRow({
   // meiva:link ui/web/src/docs/frontend-components/timeline-view/timeline-view.meiva.okf.md
   //
   // meiva:note
-  // Skip the card-level CopyButton for kinds that already render their own per-block copy button inside the item body (agent_code via PythonCode, code_output via EnvelopeContent showCopy) — the card-level button would copy the same payload and overlap visually with the body-level one.
-  // meiva:link ui/web/src/docs/frontend-components/timeline-view/card-chrome.meiva.okf.md
-  const hasInternalCopy = item.kind === "agent_code" || item.kind === "code_output";
-  // meiva:note
-  // The row's chrome band carries the timestamp when the kind stamps one and Copy when the row is expanded, settled, and has no body-level copy of its own. Either half can stand alone; with neither, no band is mounted and the row takes no hover group.
+  // The row's chrome band carries the timestamp when the kind stamps one and
+  // Copy when the row is expanded, settled AND the kind offers Copy
+  // (config.copy). Both halves are per-kind decisions, so a kind that offers
+  // neither mounts no band at all and the row takes no hover group — an empty
+  // 12px strip under the block would read as a control that failed to load.
   // meiva:link ui/web/src/docs/frontend-components/timeline-view/card-chrome.meiva.okf.md
   // meiva:note
   // The stamp rides only an EXPANDED block: a collapsed row is a one-line header,
@@ -142,7 +144,7 @@ export const TimelineRow = memo(function TimelineRow({
   // meiva:link ui/web/src/docs/frontend-components/timeline-view/card-chrome.meiva.okf.md
   const stamp =
     expanded && config.showTimestamp && item.created_at ? <ItemTimestamp iso={item.created_at} /> : null;
-  const copy = copyable && !hasInternalCopy ? <CopyButton text={item.payload} compact /> : null;
+  const copy = copyable && config.copy ? <CopyButton text={item.payload} compact /> : null;
   const footer = stamp || copy ? <>{stamp}{copy}</> : null;
 
   // Sticky only while expanded — a collapsed row has nothing to scroll under
@@ -187,7 +189,12 @@ export const TimelineRow = memo(function TimelineRow({
         </MessageCard>
       </ItemErrorBoundary>
       {footer ? (
-        <div className={cn(CARD_FOOTER_CLS, touchRevealed && "pointer-events-auto opacity-100")}>{footer}</div>
+        <div
+          data-testid="card-chrome"
+          className={cn(CARD_FOOTER_CLS, touchRevealed && "pointer-events-auto opacity-100")}
+        >
+          {footer}
+        </div>
       ) : null}
     </div>
   );

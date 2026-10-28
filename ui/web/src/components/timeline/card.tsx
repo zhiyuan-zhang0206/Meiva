@@ -73,6 +73,15 @@ export interface CardConfig {
   // Whether the card stamps the item's timestamp in its hover footer (right-aligned under the card, next to Copy).
   // meiva:link ui/web/src/docs/frontend-components/timeline-view/card-chrome.meiva.okf.md
   readonly showTimestamp: boolean;
+  // meiva:note
+  // Whether this KIND offers Copy at all — a whitelist decided here, in the one
+  // per-kind table, so a kind added later must choose instead of inheriting a
+  // button. Copy marks the messages a reader can quote: the human's message and
+  // the agent's own reply. Thinking, tool calls, tool output, the system prompt,
+  // attachments and system notes are the agent's machinery, not its
+  // conversation, and offer none (user 2026-10-29).
+  // meiva:link ui/web/src/docs/frontend-components/timeline-view/card-chrome.meiva.okf.md
+  readonly copy: boolean;
 }
 
 // Pure per-item visual config. null → this item is an ephemeral system marker
@@ -92,6 +101,7 @@ export function messageCardConfig(
         bg: colors.system_prompt.bg ?? "",
         fixedDefault: false,
         showTimestamp: false,
+        copy: false,
       };
     case "agent_reasoning":
       return {
@@ -102,6 +112,7 @@ export function messageCardConfig(
         bg: colors.reasoning.bg ?? "",
         fixedDefault: false,
         showTimestamp: true,
+        copy: false,
       };
     case "agent_code":
       return {
@@ -113,6 +124,7 @@ export function messageCardConfig(
         bg: "bg-card",
         fixedDefault: false,
         showTimestamp: true,
+        copy: false,
       };
     case "code_output":
       return {
@@ -123,6 +135,7 @@ export function messageCardConfig(
         bg: colors.code_output.bg ?? "",
         fixedDefault: false,
         showTimestamp: true,
+        copy: false,
       };
     case "agent_chat": {
       const chatTitle = agentChatTitle(item);
@@ -136,6 +149,7 @@ export function messageCardConfig(
         bg: "bg-card",
         fixedDefault: true,
         showTimestamp: true,
+        copy: true,
       };
     }
     case "attach":
@@ -152,6 +166,7 @@ export function messageCardConfig(
         bg: colors.attach.bg ?? "",
         fixedDefault: true,
         showTimestamp: true,
+        copy: false,
       };
     case "inbound_chat": {
       // Inter-agent + system inbound default collapsed (secondary chatter — the
@@ -168,6 +183,7 @@ export function messageCardConfig(
           bg: colors.inbound_agent.bg ?? "",
           fixedDefault: false,
           showTimestamp: true,
+          copy: true,
         };
       }
       if (kind === "external_agent") {
@@ -182,6 +198,7 @@ export function messageCardConfig(
           bg: colors.inbound_agent.bg ?? "",
           fixedDefault: false,
           showTimestamp: true,
+          copy: true,
         };
       }
       if (kind === "human") {
@@ -194,6 +211,7 @@ export function messageCardConfig(
           bg: colors.inbound_human.bg ?? "",
           fixedDefault: true,
           showTimestamp: true,
+          copy: true,
         };
       }
       return {
@@ -205,6 +223,7 @@ export function messageCardConfig(
         bg: colors.inbound_system.bg ?? "",
         fixedDefault: false,
         showTimestamp: true,
+        copy: false,
       };
     }
     case "inbound_compact_summary":
@@ -217,6 +236,7 @@ export function messageCardConfig(
         bg: colors.inbound_system.bg ?? "",
         fixedDefault: false,
         showTimestamp: true,
+        copy: false,
       };
     case "inbound_compact_request":
       return {
@@ -228,6 +248,7 @@ export function messageCardConfig(
         bg: colors.inbound_system.bg ?? "",
         fixedDefault: false,
         showTimestamp: true,
+        copy: false,
       };
     case "system_marker": {
       const cls = classifyMarker(item.source);
@@ -247,6 +268,7 @@ export function messageCardConfig(
         fixedDefault: false,
         // Events keep their timestamp; standing context / guidance notes drop it.
         showTimestamp: item.show_timestamp,
+        copy: false,
       };
     }
   }

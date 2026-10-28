@@ -286,6 +286,13 @@ export const TurnBlock = memo(function TurnBlock({
     </span>
   ) : null;
 
+  // meiva:note
+  // pb-3 on the children wrapper is the row's own 12px hand-back: a child row pads
+  // its bottom by the gap between blocks and gives that height back with a
+  // negative margin, so the last row's chrome band paints past the wrapper — and
+  // the collapse wrapper above clips. A clipping ancestor that reserves less than
+  // the row hands back cuts the last child's timestamp (user 2026-10-29).
+  // meiva:link ui/web/src/docs/frontend-components/timeline-view/card-chrome.meiva.okf.md
   return (
     <div
       ref={rootRef}
@@ -348,7 +355,7 @@ export const TurnBlock = memo(function TurnBlock({
         )}
       >
         <div className={cn(OVERFLOW_CLIP, MIN_H_0, MIN_W_0)}>
-          <div className="px-2 pb-2 pt-0.5 space-y-3">{children}</div>
+          <div className="px-2 pb-3 pt-0.5 space-y-3">{children}</div>
         </div>
       </div>
     </div>

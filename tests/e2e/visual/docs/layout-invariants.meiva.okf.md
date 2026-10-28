@@ -35,4 +35,19 @@ With the on-screen keyboard up the composer stays inside the visible band: the v
 
 The frosted pinned-header pane fades between stuck and unstuck, so its ::before background is read only after one full live transition-duration plus a bounded stability poll — a mid-fade read was the #3464 CI flake — and a genuine regression still fails at the poll deadline instead of hanging. The sealed pane stays behind its label (z -10, blur 12px, tint, separator) and hover changes nothing but the tint.
 
+One more suite drives the same stubbed page for a chrome measurement rather than a
+shell invariant: `test_work_block_chrome.py` opens `stubbed_home.work_block_items()`
+— a human message plus one work block of six expanded children, all stamped — and
+asserts that the last child's timestamp sits inside every ancestor that clips it
+(`overflow` other than visible, or `content-visibility` paint containment), within
+1px. A timeline row pads its bottom by the 12px gap between blocks and hands that
+height back with a negative margin, so a work block's `overflow: clip` collapse
+wrapper has to reserve the same 12px; when it reserved 8px the clip line fell 4px
+inside the last row's chrome band and shaved the bottom of its stamp (user
+2026-10-29). The same file re-asserts the Copy scope — thinking, tool calls and
+tool output carry no copy control in the real DOM, a human message does — since
+the jsdom suite can only see the component tree. Both tests stub `/api/**` and the
+event stream even when `MEIVA_MOBILE_TEST_BASE_URL` points the suite at a deployed
+bundle: they measure that fixture, not the deployment's own data.
+
 Suite entry points and CI integration: [[tests/docs/tests.meiva.okf.md]].

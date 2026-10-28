@@ -1,2 +1,3 @@
 [uses]
 "test_layout_invariants.py" = ["stubbed_home.py"]
+"test_work_block_chrome.py" = ["stubbed_home.py"]

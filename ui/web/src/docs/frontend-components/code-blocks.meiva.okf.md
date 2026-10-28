@@ -13,10 +13,14 @@ that chunk proactively: `CodeHighlighterPreloader` mounts on every page
 with code blocks (home timeline, `/control/schedules`) and fetches it once
 idle; a code block's own collapsed toggle (`CardHeader`, the schedules row
 expand button) also fetches it on pointer-enter/focus, ahead of the click
-that expands it. Not yet resolved → plain unhighlighted text (copy control
-+ streaming cursor still present, no blank body); already prefetched → the
-first render is already highlighted, no flash. Tokenization still only
-runs when a code block renders or its source changes.
+that expands it. Not yet resolved → plain unhighlighted text (the surface's
+copy control, when it offers one, and the streaming cursor stay present — no
+blank body); already prefetched → the first render is already highlighted, no
+flash. Tokenization still only runs when a code block renders or its source
+changes. `copy` is a caller decision: a code surface that shows the agent's
+machinery rather than text to reuse turns the corner control off — the
+timeline's tool-call block passes `copy={false}`, the schedules page keeps it
+(user 2026-10-29, [[ui/web/src/docs/frontend-components/timeline-view/card-chrome.meiva.okf.md|card chrome]]).
 
 The chunk itself is a value, not module state: `components/content/lazy-chunk.ts`
 holds one deferred module — the cached value, one import attempt shared by every
