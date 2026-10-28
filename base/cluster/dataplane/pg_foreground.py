@@ -65,7 +65,9 @@ def wait_foreground_postgres(
         except psycopg.OperationalError:
             timers.sleep(0.1)
             continue
-        verify_foreground_data_dir(None if row is None else str(row[0]), data)
+        verify_foreground_data_dir(
+            None if row is None else Path(str(row[0])).resolve(), data.resolve()
+        )
         if process.poll() is not None:
             raise RuntimeError(f"foreground Postgres exited {process.returncode}: {log}")
         return
