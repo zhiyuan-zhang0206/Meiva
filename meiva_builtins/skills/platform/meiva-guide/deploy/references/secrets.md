@@ -59,3 +59,19 @@ separate authorized operation; it is not performed by a start retry.
 Runner bootstrap serves the Redis runtime credential and no database login or
 human secret; the gateway's database authority store, human bearer and
 Redis-admin credential remain private to it.
+
+### Manual `.env` copies
+
+The automatic writer snapshots a unit's `.env` into `$MEIVA_HOME/backups/env/`
+and prunes that rolling history itself (`base/host/env/dotenv_file.py`), so that
+history needs no housekeeping from you. A copy you take before opening the file
+by hand is different: nothing reads it, nothing prunes it, and it accumulates.
+
+- Name it after what changed and the day, in the host clock:
+  `cp .env .env.bak-<what>-<YYYYMMDD>`.
+- Keep the **three most recent** copies per home. Older ones are deleted once they
+  pass **90 days**, by name, one file at a time; the single earliest copy is kept
+  as an anchor even then.
+- These files are rollback material, never a working file. No code path reads
+  `.env.bak*` or `.env.pre-*`, so a backlog of them is hygiene rather than risk —
+  and never a reason to schedule a credential rotation.
