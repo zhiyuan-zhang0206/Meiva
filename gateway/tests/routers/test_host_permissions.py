@@ -1,15 +1,23 @@
 from __future__ import annotations
 
 from datetime import UTC, datetime
+from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 from fastapi.testclient import TestClient
 
+from base.clock.tests.fakes import clock_at
+from base.clock.tests.seeded_rng import seeded_rng
+from base.host.permissions_helper.client import PermissionsHelperClient
 from base.host.permissions_helper.grants import gate
 from base.host.permissions_helper.grants.catalog import PING_KEYS, PREFLIGHT_SERVICES, Grant
 from base.host.permissions_helper.grants.probe import ProbeResult
+from base.host.system.tests.fake_commands import DARWIN_ARM64, fake_host
+from base.sessions.helperproc import helper_client
 from gateway.routers import host_permissions
+from services.desktop.permissions_helper.onboarding import gate_host
 
 NOW = datetime(2026, 10, 17, 10, 0, tzinfo=UTC)
 
@@ -102,3 +110,76 @@ def test_request_and_defer_go_through_the_same_domain_call(
     assert gate_stub.requested == 1
     assert client.post("/api/host/permissions/defer").json()["state"] == "action_required"
     assert gate_stub.deferred == 1
+
+
+def _process_state(
+    app: FastAPI, home: Path, *, darwin: bool, environ: dict[str, str] | None = None
+) -> None:
+    host = fake_host(platform=DARWIN_ARM64, environ=environ) if darwin else fake_host()
+    app.state.gateway_process = SimpleNamespace(home=home, host=host)
+    app.state.gateway_config = SimpleNamespace(upload_home=home / "account", rng=seeded_rng())
+    app.state.clock = clock_at(NOW)
+
+
+# meiva:note
+# Without an override the router describes the gate from the gateway process it serves: the
+# process's own home holds the record, and the pass is stamped by the app's clock. A helper that
+# does not answer is `unavailable`, and the record still lands under that home.
+def test_the_gate_of_a_mac_gateway_probes_through_its_process_home(
+    client: TestClient, app: FastAPI, tmp_path: Path
+) -> None:
+    home = tmp_path / "h"
+    home.mkdir()
+    _process_state(app, home, darwin=True)
+
+    body = client.get("/api/host/permissions").json()
+
+    assert body["state"] == "unavailable"
+    stored = gate.read_record(gate.record_path(home))
+    assert stored is not None
+    assert stored.checked_at == NOW
+
+
+def test_the_gate_of_a_gateway_on_a_platform_without_a_helper_has_nothing_to_check(
+    client: TestClient, app: FastAPI, tmp_path: Path
+) -> None:
+    _process_state(app, tmp_path, darwin=False)
+
+    body = client.get("/api/host/permissions").json()
+
+    assert body["state"] == "not_applicable"
+    assert body["checked_at"] == NOW.isoformat()
+    assert not gate.record_path(tmp_path).exists()
+
+
+# meiva:note
+# The service the dependency builds describes its host from the gateway process and the app's
+# configuration: the process's home, the account home the app's configuration holds (not the Meiva
+# home), the launch environment the process was built with, and the helper of the process's
+# platform dialling the socket of that home.
+def test_the_gate_service_describes_its_host_from_the_gateway_process(
+    app: FastAPI, tmp_path: Path
+) -> None:
+    home = tmp_path / "h"
+    _process_state(app, home, darwin=True, environ={"PATH": "/the/gateways/launch/path"})
+
+    service = host_permissions.gate_service(Request({"type": "http", "app": app}))
+
+    assert service.clock is app.state.clock
+    assert service.rng is app.state.gateway_config.rng
+    seat = service.host
+    assert seat.home == tmp_path / "h" / "account"
+    assert seat.workdir == home / "permissions-onboarding"
+    assert seat.record_path == gate.record_path(home)
+    assert (
+        seat.env
+        == gate_host(
+            home=home,
+            user_home=seat.home,
+            environ={"PATH": "/the/gateways/launch/path"},
+            helper=None,
+        ).env
+    )
+    assert seat.env != gate_host(home=home, user_home=seat.home, environ={}, helper=None).env
+    assert isinstance(seat.client, PermissionsHelperClient)
+    assert seat.client.sock_path == helper_client(home=home).sock_path

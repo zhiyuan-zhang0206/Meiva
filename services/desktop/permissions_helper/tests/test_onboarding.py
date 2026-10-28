@@ -5,18 +5,24 @@ import json
 import subprocess
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
+from base.clock.ids import new_uuid
+from base.clock.tests.fakes import clock_at
+from base.clock.tests.seeded_rng import seeded_rng
 from base.host.permissions_helper.client import (
+    PermissionsHelperClient,
     PermissionsHelperError,
     SpawnResult,
 )
 from base.host.permissions_helper.grants import gate
 from base.host.permissions_helper.grants.catalog import PREFLIGHT_SERVICES, Grant
 from base.host.permissions_helper.grants.triggers import FOLDER_PATHS
+from base.sessions.tests.scripted_helper import serve
 from services.desktop.permissions_helper import onboarding
 
 NOW = datetime(2026, 10, 17, 8, 0, tzinfo=UTC)
+RUN = "run-7731"
 
 
 class FakeHelper:
@@ -107,9 +113,7 @@ def _codes(value: int) -> dict[str, int]:
     return dict.fromkeys(PREFLIGHT_SERVICES, value)
 
 
-def host(
-    tmp_path: Path, *, client: FakeHelper | DeadHelper | None = None, platform: str = "darwin"
-) -> onboarding.GateHost:
+def host(tmp_path: Path, *, client: FakeHelper | DeadHelper | None = None) -> onboarding.GateHost:
     for subpath in FOLDER_PATHS.values():
         (tmp_path / subpath).mkdir(parents=True, exist_ok=True)
     return onboarding.GateHost(
@@ -118,13 +122,12 @@ def host(
         workdir=tmp_path / "scratch",
         home=tmp_path,
         record_path=tmp_path / gate.RECORD_NAME,
-        platform=platform,
     )
 
 
 def test_check_probes_and_remembers_what_it_saw(tmp_path: Path) -> None:
     seat = host(tmp_path)
-    report = onboarding.check(host=seat, now=NOW)
+    report = onboarding.check(host=seat, now=NOW, run_id=RUN)
     assert report.state is gate.GateState.COMPLETE
     stored = gate.read_record(seat.record_path)
     assert stored is not None
@@ -134,26 +137,33 @@ def test_check_probes_and_remembers_what_it_saw(tmp_path: Path) -> None:
 
 def test_a_deferred_host_stays_deferred_across_checks(tmp_path: Path) -> None:
     seat = host(tmp_path, client=FakeHelper(_codes(2)))
-    onboarding.defer(now=NOW, host=seat)
-    report = onboarding.check(host=seat, now=NOW)
+    onboarding.defer(host=seat, now=NOW)
+    report = onboarding.check(host=seat, now=NOW, run_id=RUN)
     assert report.state is gate.GateState.DEFERRED
     assert report.restricted
 
 
 def test_an_unreachable_helper_is_reported_as_unavailable(tmp_path: Path) -> None:
-    report = onboarding.check(host=host(tmp_path, client=DeadHelper()), now=NOW)
+    report = onboarding.check(host=host(tmp_path, client=DeadHelper()), now=NOW, run_id=RUN)
     assert report.state is gate.GateState.UNAVAILABLE
 
 
 def test_a_non_darwin_host_has_nothing_to_check(tmp_path: Path) -> None:
-    report = onboarding.check(host=host(tmp_path, client=DeadHelper(), platform="linux"), now=NOW)
+    seat = onboarding.GateHost(
+        client=None,
+        env={},
+        workdir=tmp_path / "scratch",
+        home=tmp_path,
+        record_path=tmp_path / gate.RECORD_NAME,
+    )
+    report = onboarding.check(host=seat, now=NOW, run_id=RUN)
     assert report.state is gate.GateState.NOT_APPLICABLE
     assert not report.restricted
 
 
 def test_the_first_pass_sees_both_desktop_grants_and_each_folder(tmp_path: Path) -> None:
     seat = host(tmp_path, client=FakeHelper(_codes(2), screen=False, ax=False))
-    report = onboarding.check(host=seat, now=NOW)
+    report = onboarding.check(host=seat, now=NOW, run_id=RUN)
     assert [item.id for item in report.prompt_now()] == [
         "screen-recording",
         "accessibility",
@@ -167,7 +177,7 @@ def test_the_first_pass_asks_both_desktop_grants_and_each_folder(tmp_path: Path)
     helper = FakeHelper(_codes(2), screen=False, ax=False)
     seat = host(tmp_path, client=helper)
 
-    onboarding.onboard(host=seat, now=NOW)
+    onboarding.onboard(host=seat, clock=clock_at(NOW), run_id=RUN)
 
     asked = {argv[2] for argv in helper.children}
     assert helper.requests == 1
@@ -179,7 +189,7 @@ def test_each_request_is_narrated_on_the_stream_it_is_given(tmp_path: Path) -> N
     seat = host(tmp_path, client=FakeHelper(_codes(2), screen=False, ax=False))
     progress = io.StringIO()
 
-    onboarding.onboard(host=seat, now=NOW, progress=progress)
+    onboarding.onboard(host=seat, clock=clock_at(NOW), run_id=RUN, progress=progress)
 
     lines = progress.getvalue().splitlines()
     assert lines[0] == "Asking the system for: screen-recording, accessibility"
@@ -191,10 +201,7 @@ def test_each_request_is_narrated_on_the_stream_it_is_given(tmp_path: Path) -> N
 
 def test_the_request_outcome_is_not_its_own_evidence(tmp_path: Path) -> None:
     seat = host(tmp_path, client=FakeHelper(_codes(2), screen=False, ax=False))
-    report = onboarding.onboard(
-        host=seat,
-        now=NOW,
-    )
+    report = onboarding.onboard(host=seat, clock=clock_at(NOW), run_id=RUN)
     assert report.state is gate.GateState.ACTION_REQUIRED
     assert report.grant_for("desktop-folder") is Grant.NOT_DETERMINED
     assert report.grant_for("screen-recording") is Grant.NOT_DETERMINED
@@ -204,12 +211,12 @@ def test_a_denied_grant_is_not_asked_again_until_a_person_asks(tmp_path: Path) -
     codes = _codes(2)
     helper = FakeHelper(codes, screen=False, ax=False)
     seat = host(tmp_path, client=helper)
-    first = onboarding.onboard(host=seat, now=NOW)
+    first = onboarding.onboard(host=seat, clock=clock_at(NOW), run_id=RUN)
     assert helper.requests == 1
     assert first.grant_for("screen-recording") is Grant.NOT_DETERMINED
 
     codes.update(_codes(1))
-    second = onboarding.onboard(host=seat, now=NOW)
+    second = onboarding.onboard(host=seat, clock=clock_at(NOW), run_id=RUN)
     assert helper.requests == 1
     assert second.grant_for("screen-recording") is Grant.DENIED
     assert [item.id for item in second.manual()] == [
@@ -221,13 +228,13 @@ def test_a_denied_grant_is_not_asked_again_until_a_person_asks(tmp_path: Path) -
         "downloads-folder",
     ]
 
-    onboarding.onboard(host=seat, now=NOW, automatic=False)
+    onboarding.onboard(host=seat, clock=clock_at(NOW), run_id=RUN, automatic=False)
     assert helper.requests == 2
 
 
 def test_a_grant_the_record_holds_and_the_helper_has_not_read_is_stale(tmp_path: Path) -> None:
     seat = host(tmp_path, client=FakeHelper(_codes(0), screen=False, ax=False))
-    report = onboarding.check(host=seat, now=NOW)
+    report = onboarding.check(host=seat, now=NOW, run_id=RUN)
     assert report.state is gate.GateState.ACTION_REQUIRED
     assert report.grant_for("screen-recording") is Grant.STALE
     assert report.prompt_now() == ()
@@ -236,7 +243,7 @@ def test_a_grant_the_record_holds_and_the_helper_has_not_read_is_stale(tmp_path:
 def test_a_helper_without_the_request_method_keeps_the_manual_path(tmp_path: Path) -> None:
     helper = FakeHelper(_codes(2), screen=False, ax=False, request_capable=False)
     seat = host(tmp_path, client=helper)
-    report = onboarding.onboard(host=seat, now=NOW)
+    report = onboarding.onboard(host=seat, clock=clock_at(NOW), run_id=RUN)
     assert helper.requests == 0
     assert "request_grants_v1" in report.diagnostic
     assert report.grant_for("screen-recording") is Grant.NOT_DETERMINED
@@ -255,9 +262,7 @@ def test_app_management_is_never_asked_even_as_the_only_missing_desktop_row(
     codes["kTCCServiceSystemPolicyAppBundles"] = 2
     helper = FakeHelper(codes)
     report = onboarding.onboard(
-        host=host(tmp_path, client=helper),
-        now=NOW,
-        automatic=False,
+        host=host(tmp_path, client=helper), clock=clock_at(NOW), run_id=RUN, automatic=False
     )
     assert helper.requests == 0
     assert "app-management" not in {item.id for item in report.requestable()}
@@ -267,7 +272,9 @@ def test_app_management_is_never_asked_even_as_the_only_missing_desktop_row(
 
 
 def test_the_summary_names_what_is_missing(tmp_path: Path) -> None:
-    report = onboarding.check(host=host(tmp_path, client=FakeHelper(_codes(1))), now=NOW)
+    report = onboarding.check(
+        host=host(tmp_path, client=FakeHelper(_codes(1))), now=NOW, run_id=RUN
+    )
     summary = onboarding.missing_summary(report)
     assert summary.startswith("4 permission(s) still missing")
     assert "Screen Recording" not in summary
@@ -277,7 +284,7 @@ def test_the_summary_names_what_is_missing(tmp_path: Path) -> None:
 def test_a_stale_helper_is_never_asked_even_by_the_manual_pass(tmp_path: Path) -> None:
     helper = FakeHelper(_codes(0), screen=False, ax=False)
     seat = host(tmp_path, client=helper)
-    report = onboarding.onboard(host=seat, now=NOW, automatic=False)
+    report = onboarding.onboard(host=seat, clock=clock_at(NOW), run_id=RUN, automatic=False)
     assert helper.requests == 0
     assert report.grant_for("screen-recording") is Grant.STALE
 
@@ -285,7 +292,7 @@ def test_a_stale_helper_is_never_asked_even_by_the_manual_pass(tmp_path: Path) -
 def test_a_failed_request_is_reported_rather_than_crashing_the_start(tmp_path: Path) -> None:
     helper = FakeHelper(_codes(2), screen=False, ax=False, request_fails=True)
     seat = host(tmp_path, client=helper)
-    report = onboarding.onboard(host=seat, now=NOW)
+    report = onboarding.onboard(host=seat, clock=clock_at(NOW), run_id=RUN)
     assert helper.requests == 1
     assert "socket went away mid-call" in report.diagnostic
     assert report.state is gate.GateState.ACTION_REQUIRED
@@ -295,3 +302,116 @@ def test_the_restart_verb_prints_the_custody_path() -> None:
     sentence = onboarding.restart_helper()
     assert "meiva stop" in sentence and "meiva start" in sentence
     assert "kickstart" in sentence
+
+
+# meiva:note
+# A host is described from what the root hands in, and every distinguishing value here is one the
+# process itself would never produce: a Meiva home and an account home under `tmp_path`, an
+# environment with a marker path.
+def test_a_host_is_described_from_the_facts_the_root_hands_in(tmp_path: Path) -> None:
+    home = tmp_path / "meiva-home"
+    user_home = tmp_path / "account"
+    helper = FakeHelper(_codes(0))
+
+    seat = onboarding.gate_host(
+        home=home,
+        user_home=user_home,
+        environ={"PATH": "/marker/bin"},
+        helper=serve(cast("PermissionsHelperClient", helper)),
+    )
+
+    assert seat.client is helper
+    assert seat.home == user_home
+    assert seat.workdir == home / "permissions-onboarding"
+    assert seat.record_path == gate.record_path(home)
+    assert "/marker/bin" in seat.env["PATH"]
+
+
+def test_a_platform_without_a_helper_is_a_host_with_no_client_and_nothing_to_check(
+    tmp_path: Path,
+) -> None:
+    seat = onboarding.gate_host(
+        home=tmp_path / "meiva-home", user_home=tmp_path / "account", environ={}, helper=None
+    )
+
+    assert seat.client is None
+    report = onboarding.check(host=seat, now=NOW, run_id=RUN)
+    assert report.state is gate.GateState.NOT_APPLICABLE
+    assert not seat.record_path.exists()
+
+
+def test_an_onboarding_pass_names_each_of_its_children_from_the_run_it_is_given(
+    tmp_path: Path,
+) -> None:
+    seat = host(tmp_path, client=FakeHelper(_codes(2), screen=False, ax=False))
+
+    onboarding.onboard(host=seat, clock=clock_at(NOW), run_id=RUN)
+
+    left = sorted(path.name for path in seat.workdir.glob("preflight-*"))
+    assert left == [f"preflight-{RUN}-probe.results.json", f"preflight-{RUN}-verify.results.json"]
+    asked = sorted(path.name for path in seat.workdir.glob("*.result"))
+    assert asked == [f"{item}-{RUN}-ask.result" for item in sorted(FOLDER_PATHS)]
+
+
+def test_a_pass_stamps_what_it_records_with_the_clock_it_is_given(tmp_path: Path) -> None:
+    seat = host(tmp_path)
+
+    onboarding.onboard(host=seat, clock=clock_at(NOW), run_id=RUN)
+
+    stored = gate.read_record(seat.record_path)
+    assert stored is not None
+    assert stored.checked_at == NOW
+
+
+def test_the_service_runs_each_pass_on_its_clock_and_names_it_from_its_generator(
+    tmp_path: Path,
+) -> None:
+    seat = host(tmp_path)
+    service = onboarding.GateService(host=seat, clock=clock_at(NOW), rng=seeded_rng(7))
+
+    report = service.check()
+
+    assert report.checked_at == NOW
+    expected = new_uuid(seeded_rng(7)).hex
+    assert (seat.workdir / f"preflight-{expected}.results.json").exists()
+
+
+def test_the_service_defers_on_its_clock(tmp_path: Path) -> None:
+    seat = host(tmp_path, client=FakeHelper(_codes(2)))
+    service = onboarding.GateService(host=seat, clock=clock_at(NOW), rng=seeded_rng(7))
+
+    service.defer()
+
+    stored = gate.read_record(seat.record_path)
+    assert stored is not None
+    assert stored.state is gate.GateState.DEFERRED
+    assert stored.checked_at == NOW
+
+
+# meiva:note
+# The service's manual pass asks what an automatic one leaves alone (a denied grant), on the
+# service's clock and under run ids drawn one per call from its generator.
+def test_the_service_onboards_on_its_clock_under_run_ids_from_its_generator(
+    tmp_path: Path,
+) -> None:
+    helper = FakeHelper(_codes(1), screen=False, ax=False)
+    seat = host(tmp_path, client=helper)
+    service = onboarding.GateService(host=seat, clock=clock_at(NOW), rng=seeded_rng(7))
+
+    service.onboard()
+    assert helper.requests == 0
+    service.onboard(automatic=False)
+
+    assert helper.requests == 1
+    stored = gate.read_record(seat.record_path)
+    assert stored is not None
+    assert stored.checked_at == NOW
+    ids = seeded_rng(7)
+    automatic, manual = new_uuid(ids).hex, new_uuid(ids).hex
+    left = {path.name for path in seat.workdir.glob("preflight-*")}
+    assert left == {
+        f"preflight-{run}-{stage}.results.json"
+        for run in (automatic, manual)
+        for stage in ("probe", "verify")
+        if (run, stage) != (automatic, "verify")
+    }
