@@ -465,7 +465,7 @@ def read_parent_facts() -> ParentFacts:
         environ=dict(os.environ),
         cwd=Path.cwd().resolve(),
         executable=sys.executable,
-        source_root=editable_install.current_interpreter_source_root(),
+        source_root=editable_install.current_interpreter_source_root(sys.executable),
         editable_roots=(Path.home() / "Meiva",),
     )
 

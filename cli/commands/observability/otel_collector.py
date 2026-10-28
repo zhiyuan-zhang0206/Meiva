@@ -30,7 +30,8 @@ from urllib.parse import unquote
 from base.agents.context.clients import DatabaseFactory
 from base.clock import Timers
 from base.cluster.machine import MachineIdentityReader, MachineRoles
-from base.deploy.release import collector_artifact
+from base.deploy.release.collector import artifact as collector_artifact
+from base.deploy.release.collector import plan as collector_plan
 from base.host.net.ports import SYSTEM_URL_OPENER, UrlOpener
 from base.paths import otel_collector_config, otel_collector_dir
 from base.telemetry.observability import collector_allowed_for_home, endpoint_override_is_explicit
@@ -323,19 +324,19 @@ def ensure_otel_collector(
     platform_label: str,
 ) -> None:
     dest_dir = otel_collector_dir(meiva_home)
-    marker = dest_dir / collector_artifact.VERSION_MARKER
+    marker = dest_dir / collector_plan.VERSION_MARKER
     plan = plan_collector_install(
         tag=tag,
         platform_label=platform_label,
-        binary_present=(dest_dir / collector_artifact.BINARY_NAME).exists(),
+        binary_present=(dest_dir / collector_plan.BINARY_NAME).exists(),
         marker=marker.read_text(encoding="utf-8") if marker.exists() else None,
-        pinned_version=collector_artifact.OTELCOL_CONTRIB_VERSION,
+        pinned_version=collector_plan.OTELCOL_CONTRIB_VERSION,
     )
     if isinstance(plan, SkipUnsupportedPlatform):
         print(plan.warning(), file=sys.stderr)
         return
     dest_dir.mkdir(parents=True, exist_ok=True)
-    version = collector_artifact.OTELCOL_CONTRIB_VERSION
+    version = collector_plan.OTELCOL_CONTRIB_VERSION
     match plan:
         case InstallCollector(tag=install_tag):
             collector_artifact.download_and_verify(
@@ -399,7 +400,7 @@ def ensure_otel_collector_step(ctx: ConvergeCtx) -> None:
         machine=ctx.machine,
         timers=ctx.timers,
         open_url=SYSTEM_URL_OPENER,
-        tag=collector_artifact.platform_tag_for(platform.system, platform.machine),
+        tag=collector_plan.platform_tag_for(platform.system, platform.machine),
         platform_label=f"{platform.system} {platform.machine}",
     )
 

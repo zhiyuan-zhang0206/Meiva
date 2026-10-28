@@ -4,6 +4,7 @@ import asyncio
 import contextlib
 import json
 import os
+import sys
 import time
 from collections.abc import AsyncGenerator
 from pathlib import Path
@@ -122,7 +123,7 @@ async def _running_service(home: Path) -> AsyncGenerator[Path]:
         home=home,
         base_environ=base_env,
         default_cwd=home,
-        source_root=editable_install.current_interpreter_source_root(),
+        source_root=editable_install.current_interpreter_source_root(sys.executable),
         pid=os.getpid(),
     )
     async with asyncio.TaskGroup() as tg:
