@@ -58,6 +58,25 @@ describe("DisplaySettingsPage models, themes, language, and colors", () => {
     expect(screen.getByText("claude-haiku-4-5-20251001")).toBeTruthy();
   });
 
+  it("writes the provider switch to models.hidden_providers and the model switch to models.hidden", async () => {
+    vi.mocked(api.getModels).mockResolvedValue({
+      providers: { claude: ["claude-opus-5-5", "claude-sonnet-5-5"] },
+      models: {},
+      default: "claude-opus-5-5",
+    });
+    renderPage();
+
+    fireEvent.click(await screen.findByRole("switch", { name: "Claude" }));
+    await waitFor(() => {
+      expect(api.putSetting).toHaveBeenCalledWith("models.hidden_providers", ["claude"]);
+    });
+
+    fireEvent.click(screen.getByRole("switch", { name: "claude-opus-5-5" }));
+    await waitFor(() => {
+      expect(api.putSetting).toHaveBeenCalledWith("models.hidden", ["claude-opus-5-5"]);
+    });
+  });
+
   it("drops a superseded model instead of showing a switch that changes nothing", async () => {
     vi.mocked(api.getModels).mockResolvedValue({
       providers: { deepseek: ["deepseek-v4-pro", "deepseek-flash"] },

@@ -17,13 +17,11 @@ import {
   CalendarClock,
   CircleDot,
   Clock,
-  Eye,
   EyeOff,
   Gauge,
   Globe,
   History,
   Languages,
-  Layers,
   MessageSquareText,
   MoveHorizontal,
   Palette,
@@ -34,10 +32,9 @@ import {
 import { cn } from "@/lib/format/utils";
 import { useQuery } from "@tanstack/react-query";
 import { useTranslations } from "next-intl";
-import { Fragment } from "react";
 
 import { api } from "@/lib/transport/api";
-import { groupedModels, isSuperseded, providerLabel } from "@/lib/contracts/models";
+import { groupedModels, isSuperseded } from "@/lib/contracts/models";
 import { useBreakpoint } from "@/lib/layout/breakpoint";
 import {
   TIMELINE_NARROW_BREAKPOINT_PX,
@@ -49,6 +46,7 @@ import { themePackId, useThemePacks } from "@/lib/plugins/use-theme-packs";
 import { useDebouncedSetting, useUserSettings } from "@/lib/state/use-user-settings";
 import { type DetailsMode, useContentToggle, useContentToggleReset } from "@/lib/layout/content-toggle-store";
 import { FLEX } from "@/lib/layout/layout";
+import { ModelPickerSection } from "./_model_picker";
 import { NotificationCategoryRows } from "./_notification-categories";
 import { RadioRow, SettingsSection, SliderRow, TimelineColorsSection, ToggleRow } from "./_rows";
 
@@ -360,53 +358,26 @@ export default function DisplaySettingsPage() {
       </SettingsSection>
 
       <SettingsSection id="display-model-picker" title="Model picker">
-        {modelGroups.map(([provider, models]) => {
-          const providerOff = hiddenProviders.includes(provider);
-          return (
-          <Fragment key={provider}>
-            <ToggleRow
-              icon={Layers}
-              label={providerLabel(provider)}
-              description={`All ${models.length} model${models.length === 1 ? "" : "s"} come from this provider — switch it off to take the family out of the spawn picker at once`}
-              value={!providerOff}
-              onChange={(on) =>
-                setSetting(
-                  "models.hidden_providers",
-                  on
-                    ? hiddenProviders.filter((p) => p !== provider)
-                    : [...hiddenProviders, provider],
-                )
-              }
-            />
-            {models.map((modelName) => {
-              const hidden = hiddenModels.includes(modelName);
-              const p = modelsData?.models[modelName]?.pricing;
-              return (
-                <ToggleRow
-                  key={modelName}
-                  icon={Eye}
-                  label={modelName}
-                  description={
-                    p ? (
-                      <span className="tabular-nums">
-                        ${p.input.toFixed(2)} / ${p.cache_read.toFixed(2)} / ${p.output.toFixed(2)}
-                      </span>
-                    ) : null
-                  }
-                  value={!hidden}
-                  disabled={providerOff}
-                  onChange={(v) => {
-                    const next = v
-                      ? hiddenModels.filter((m) => m !== modelName)
-                      : [...hiddenModels, modelName];
-                    setSetting("models.hidden", next);
-                  }}
-                />
-              );
-            })}
-          </Fragment>
-          );
-        })}
+        <ModelPickerSection
+          groups={modelGroups}
+          models={modelsData?.models}
+          hiddenModels={hiddenModels}
+          hiddenProviders={hiddenProviders}
+          onToggleModel={(modelName, on) =>
+            setSetting(
+              "models.hidden",
+              on ? hiddenModels.filter((m) => m !== modelName) : [...hiddenModels, modelName],
+            )
+          }
+          onToggleProvider={(provider, on) =>
+            setSetting(
+              "models.hidden_providers",
+              on
+                ? hiddenProviders.filter((p) => p !== provider)
+                : [...hiddenProviders, provider],
+            )
+          }
+        />
       </SettingsSection>
     </div>
   );
