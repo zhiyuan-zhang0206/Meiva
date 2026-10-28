@@ -9,6 +9,7 @@ exports = ["configs.py", "deepseek_wire.py", "deps.py", "errors.py", "failures.p
 "reader.py" = ["deepseek.py", "deps.py", "errors.py", "transport.py", "wire.py"]
 "runner.py" = ["brave.py", "deepseek.py", "deps.py", "plans.py", "reader.py", "transport.py", "wire.py"]
 "transport.py" = ["errors.py", "failures.py", "pacing.py", "policy.py", "wire.py"]
+"tests" = ["transport.py"]
 "wire.py" = ["configs.py", "errors.py"]
 "wiring.py" = ["configs.py", "deps.py", "errors.py"]
 
@@ -22,4 +23,4 @@ exports = ["configs.py", "deepseek_wire.py", "deps.py", "errors.py", "failures.p
 "wire.py" = "strict"
 
 [debt.ambient-read]
-"transport.py#clock base.clock.SYSTEM_TIMERS" = 2
+"transport.py#clock base.clock.SYSTEM_TIMERS" = 1

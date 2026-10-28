@@ -10,6 +10,7 @@ from __future__ import annotations
 import asyncio
 from typing import assert_never
 
+from base.clock import Timers
 from meiva import security
 from meiva.sdk_surface.batch import run_batch
 from meiva.sdk_surface.pure.media.finding_plan import (
@@ -27,8 +28,14 @@ from meiva.web.wire import Hit
 __all__ = ["run_fetch", "run_search"]
 
 
-def run_search(plan: SearchPlan, deps: SearchDeps, delivery: FindingDelivery) -> list[list[Hit]]:
-    pacer = RateLimiter(deps.deepseek.qps)
+def run_search(
+    plan: SearchPlan,
+    deps: SearchDeps,
+    delivery: FindingDelivery,
+    *,
+    timers: Timers | None = None,
+) -> list[list[Hit]]:
+    pacer = RateLimiter(deps.deepseek.qps, timers=timers)
 
     def search_one(query: str) -> Scanned[list[Hit]]:
         match deps.provider:
@@ -48,8 +55,14 @@ def run_search(plan: SearchPlan, deps: SearchDeps, delivery: FindingDelivery) ->
 # The answer step's per-invoke bound lives in the provider client (the chat model's timeout),
 # see meiva/understand/answer.py for why a batch-layer wait_for would not return early. The
 # page-read step has its own web fetch timeout.
-def run_fetch(plan: FetchPlan, deps: FetchDeps, delivery: FindingDelivery) -> list[str]:
-    pacer = RateLimiter(deps.deepseek.qps)
+def run_fetch(
+    plan: FetchPlan,
+    deps: FetchDeps,
+    delivery: FindingDelivery,
+    *,
+    timers: Timers | None = None,
+) -> list[str]:
+    pacer = RateLimiter(deps.deepseek.qps, timers=timers)
     try:
         run = gather(
             asyncio.run(

@@ -15,7 +15,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, TypeGuard
 
-from base.clock import SYSTEM_TIMERS
+from base.clock import SYSTEM_TIMERS, Timers
 from base.log import logger
 from meiva import boot, gateway_client
 from meiva.sdk_surface import agent_identity, process_context
@@ -146,6 +146,11 @@ class PageHost:
     # under load — long enough to cover the slowest observed pass (~30s,
     # 2026-08-28) while still failing loudly when the daemon is genuinely down.
     ready_timeout_s: float = 60.0
+    # meiva:note
+    # The clock the ready window is measured and its poll sleeps on, handed in by a caller that
+    # owns one (a test drives the wait without real seconds); a host built without one falls back
+    # to the process timers.
+    timers: Timers | None = None
 
     def _page_is_serving(self, port: int) -> bool:
         """Whether an HTTP server answers on (host, port) — the daemon's server
@@ -209,11 +214,12 @@ class PageHost:
 
     def wait_until_serving(self, port: int) -> bool:
         """Poll until the page server answers on (host, port) or the ready timeout passes."""
-        deadline = SYSTEM_TIMERS.monotonic() + self.ready_timeout_s
-        while SYSTEM_TIMERS.monotonic() < deadline:
+        timers = self.timers or SYSTEM_TIMERS
+        deadline = timers.monotonic() + self.ready_timeout_s
+        while timers.monotonic() < deadline:
             if self._page_is_serving(port):
                 return True
-            SYSTEM_TIMERS.sleep(0.2)
+            timers.sleep(0.2)
         return False
 
     def register(
