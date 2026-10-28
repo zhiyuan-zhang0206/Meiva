@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from base import cluster
+from base.clock import SYSTEM_TIMERS
 from base.clock.tests.seeded_rng import seeded_rng
 from base.cluster.dataplane.direct_url import ClusterDirectUrl
 from base.cluster.dataplane.pg_stall_watchdog import StallWatchdogConfig, stall_guard
@@ -35,6 +36,7 @@ from scripts.structure.imports.fixture_scopes import (
 __all__ = [
     "FIXED_PORTS",
     "SCOPE_FILE",
+    "SYSTEM_TIMERS",
     "ClusterDirectUrl",
     "CodeVersion",
     "ConfiguredMachineIdentity",

@@ -10,6 +10,7 @@ import pytest
 
 from base.agents.impersonation.wake import publish_inbound_wake
 from base.agents.inbox.insert import insert_inbound_message
+from base.clock import SYSTEM_TIMERS
 from base.clock.tests.seeded_rng import seeded_rng
 from base.cluster import redis_channel_prefix
 from base.config import settings
@@ -64,7 +65,12 @@ async def test_wake_published_before_subscribe_is_not_replayed(
     subscription is not replayed on (re)subscribe, so `wait_one` sleeps out its
     budget and the caller's durable SELECT recheck is the only recovery."""
     agent_id = 6991
-    listener = RedisInboundListener(settings.data_plane.redis_url, agent_id=agent_id)
+    listener = RedisInboundListener(
+        settings.data_plane.redis_url,
+        agent_id=agent_id,
+        events_channel=settings.data_plane.events_channel,
+        timers=SYSTEM_TIMERS,
+    )
     try:
         # No subscription yet: this publish reaches nobody.
         assert await asyncio.to_thread(publish_inbound_wake, database, event_bus, agent_id, "1")
