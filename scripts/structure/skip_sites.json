@@ -40,7 +40,7 @@
   "cli/commands/tests/test_single_box.py": [
     "skipif(not (Path(base_pooler.pgbouncer_bin()).exists() or shutil.which(base_pooler.pgbouncer_bin())))"
   ],
-  "cli/tests/fleet_update/test_fleet_update.py": [
+  "cli/tests/fleet_update/test_fleet_update_hosts.py": [
     "skip(f'{shell} is not installed')",
     "skip(f'{shell} is not installed')",
     "skip(f'{shell} is not installed')"
