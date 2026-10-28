@@ -23,7 +23,8 @@ __all__ = ["command_config_machine", "command_machine", "command_runtime", "iner
 
 # meiva:note
 # A terminal with no person behind it: both streams are buffers the test owns, and neither is a
-# tty, so a command that asks a person a question reads end of input and writes nothing anywhere.
+# tty, so a command that asks a person a question reads end of input and writes into the buffer
+# the test holds.
 def inert_terminal() -> Terminal:
     return Terminal(io.StringIO(), io.StringIO(), io.StringIO())
 
