@@ -7,6 +7,7 @@ exports = ["check_model_updates.py", "check_plugin_price_drift.py", "update_mode
 "tests" = [
     "check_model_updates.py",
     "check_plugin_price_drift.py",
+    "plugin_price_rates.py",
     "plugin_price_source.py",
     "plugin_price_sync.py",
     "update_model_pricing.py",
