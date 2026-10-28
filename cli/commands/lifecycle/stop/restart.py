@@ -261,7 +261,9 @@ def _require_ok(response: ResponsePayload, what: str) -> None:
 # cannot be loaded still reports the plain refusal: no live root on this unit, a root this unit
 # does not own (`require_root_owner` raises), or a root that runs no agent-host unit.
 def admit_agent_host_restart(command: CommandRuntime, *, timeout: float) -> RootClient | None:
-    client = root_driver.root_client(command.home, timeout=timeout)
+    client = root_driver.root_client(
+        command.home, environ=command.config.process_environment(), timeout=timeout
+    )
     status = root_driver.root_status(client)
     if status is None:
         print(NO_ROOT_REFUSAL, file=sys.stderr)
@@ -301,10 +303,16 @@ def restart_agent_host(
     )
     print(f"  ✓ {AGENT_HOST} stopped")
     record_lifecycle_request("up", [AGENT_HOST])
-    fresh = root_driver.root_client(command.home, timeout=timeout)
+    fresh = root_driver.root_client(
+        command.home, environ=command.config.process_environment(), timeout=timeout
+    )
     _require_ok(fresh.up(AGENT_HOST), f"up {AGENT_HOST}")
     waited = root_readiness.wait_for_service_tree(
-        (spec,), timeout_s=start_timeout, home=command.home, timers=command.timers
+        (spec,),
+        timeout_s=start_timeout,
+        home=command.home,
+        timers=command.timers,
+        environ=command.config.process_environment(),
     )
     if waited.unready:
         print(f"  ✗ {AGENT_HOST} did not become ready after restart", file=sys.stderr)
