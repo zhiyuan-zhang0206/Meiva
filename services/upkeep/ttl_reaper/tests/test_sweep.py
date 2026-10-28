@@ -260,7 +260,9 @@ def test_reap_expired_pages_skips_already_terminal(
     db_conn.commit()
 
     assert (
-        reap_expired_pages_blocking(reaper_pool, database, EventBus.from_settings(rng=seeded_rng()))
+        reap_expired_pages_blocking(
+            reaper_pool, database, EventBus.from_settings(rng=seeded_rng(), timers=SYSTEM_TIMERS)
+        )
         == []
     )
 

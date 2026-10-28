@@ -33,7 +33,7 @@ from agent.state import AgentState
 from base.agents.context import MeivaContext
 from base.agents.context.identity import AgentIdentity
 from base.agents.tests.units import spawn_agent
-from base.clock import Clock
+from base.clock import SYSTEM_TIMERS, Clock
 from base.clock.tests.seeded_rng import seeded_rng
 from base.cluster.machine import MachineIdentityReader
 from base.config.service_read import ConfigAuthority
@@ -86,7 +86,7 @@ def _make_runtime(
         event_publisher=event_publisher if event_publisher is not None else MagicMock(),  # pyright: ignore[reportUnknownArgumentType]
         agent=AgentSlices.resolve(default_reader=defaults(**(config_defaults or {}))),
         db=Database.from_settings(gate=database_gate),
-        bus=EventBus.from_settings(rng=seeded_rng()),
+        bus=EventBus.from_settings(rng=seeded_rng(), timers=SYSTEM_TIMERS),
         clients=snapshot_clients(),
         identity=AgentIdentity(agent_id=agent_id, owns_loop=True),
         catalog=build_model_catalog(home=meiva_home()),

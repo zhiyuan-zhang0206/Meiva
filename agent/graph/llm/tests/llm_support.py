@@ -20,7 +20,7 @@ from redis.asyncio.client import PubSub
 from agent.graph._callbacks import RedisStreamHandler
 from base.agents.context import MeivaContext
 from base.agents.observation.turn_progress import TurnProgress
-from base.clock import Clock
+from base.clock import SYSTEM_TIMERS, Clock
 from base.clock.tests.seeded_rng import seeded_rng
 from base.config.tests.configuration import defaults
 from base.db import Database
@@ -124,7 +124,7 @@ def llm_runtime(
             event_publisher=event_publisher or sink_publisher(),
             agent=AgentSlices.resolve(pins, default_reader=defaults()),
             db=Database.from_settings(gate=database_gate),
-            bus=EventBus.from_settings(rng=seeded_rng()),
+            bus=EventBus.from_settings(rng=seeded_rng(), timers=SYSTEM_TIMERS),
             catalog=model_catalog,
             clock_factory=Clock.from_settings,
         )

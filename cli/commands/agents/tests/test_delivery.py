@@ -13,6 +13,7 @@ import redis
 from base.agents import impersonation as leases
 from base.agents.impersonation import delivery as delivery
 from base.agents.inbox.insert import insert_inbound_message
+from base.clock import SYSTEM_TIMERS
 from base.clock.tests.seeded_rng import seeded_rng
 from base.cluster import inbound_channel
 from base.cluster.machine import MachineIdentityReader
@@ -34,7 +35,7 @@ def reserve(
 ) -> frozenset[int]:
     return delivery.reserve_delivery(
         Database.from_settings(gate=database_gate),
-        EventBus.from_settings(rng=seeded_rng()),
+        EventBus.from_settings(rng=seeded_rng(), timers=SYSTEM_TIMERS),
         lease["id"],
         lease["relay_token"],
         [message_id],

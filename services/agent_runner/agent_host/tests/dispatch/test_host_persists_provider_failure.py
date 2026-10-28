@@ -14,7 +14,7 @@ from agent.ownership.hosted import admit_hosted_runtime
 from agent.state import AgentState, CircuitState
 from base.agents.context import MeivaContext
 from base.agents.tests.units import spawn_agent
-from base.clock import Clock
+from base.clock import SYSTEM_TIMERS, Clock
 from base.clock.tests.seeded_rng import seeded_rng
 from base.cluster.machine import MachineIdentityReader
 from base.cluster.machine.tests.identity import machine_identity as machine_identity
@@ -44,7 +44,7 @@ def _breaker_ctx(pool: AsyncConnectionPool, *, database_gate: ProcessDbGate) -> 
         event_publisher=MagicMock(),
         agent=AgentSlices.resolve(default_reader=defaults()),
         db=Database.from_settings(gate=database_gate),
-        bus=EventBus.from_settings(rng=seeded_rng()),
+        bus=EventBus.from_settings(rng=seeded_rng(), timers=SYSTEM_TIMERS),
         catalog=build_model_catalog(home=meiva_home()),
         clock_factory=Clock.from_settings,
     )
@@ -118,7 +118,7 @@ async def test_host_persists_provider_failure_before_releasing_turn(
                 graph=graph,
                 machine=configured_machine(name="test"),
                 catalog=model_catalog,
-                bus=EventBus.from_settings(rng=seeded_rng()),
+                bus=EventBus.from_settings(rng=seeded_rng(), timers=SYSTEM_TIMERS),
                 db=Database.from_settings(gate=database_gate),
                 commands=CommandCatalog.system(skills=list, home=meiva_home()),
             )

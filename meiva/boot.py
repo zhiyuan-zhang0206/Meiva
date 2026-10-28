@@ -269,7 +269,7 @@ def launched_context(*, env: Mapping[str, str], config: ConfigBoot) -> MeivaCont
         clients=derived_clients(config, machine),
         machine=machine,
         clock_factory=lambda: Clock(clock_config_from_boot(config), timers=SYSTEM_TIMERS),
-        bus_factory=deferred_event_bus(config, rng=rng),
+        bus_factory=deferred_event_bus(config, rng=rng, timers=SYSTEM_TIMERS),
         user_home=Path.home(),
         meiva_home=resolve_meiva_home(),
         rng=rng,
@@ -769,7 +769,7 @@ def own_external_process(config: ConfigBoot) -> OwnedBoot:
         user_home=Path.home(),
         meiva_home=resolve_meiva_home(),
         rng=rng,
-        bus_factory=deferred_event_bus(config, rng=rng),
+        bus_factory=deferred_event_bus(config, rng=rng, timers=SYSTEM_TIMERS),
     )
 
 

@@ -430,7 +430,11 @@ async def run(
             group.create_task(resolution_loop(pool, progress["resolution"], config, tasks=group))
             group.create_task(registry_gauge.registry_gauge_loop(pool, progress["registry_gauge"]))
             if "alert_reconciliation" in progress:
-                bus = EventBus(event_bus_config_from_config(process_config), rng=_new_rng())
+                bus = EventBus(
+                    event_bus_config_from_config(process_config),
+                    rng=_new_rng(),
+                    timers=SYSTEM_TIMERS,
+                )
                 group.create_task(
                     alert_reconciler.reconciliation_loop(
                         pool, bus, progress["alert_reconciliation"], config, clock=clock

@@ -15,6 +15,7 @@ from base import telemetry
 from base.agents.impersonation.wake import publish_inbound_wake
 from base.agents.inbox.insert import insert_inbound_message_in_transaction
 from base.api_contracts.agent_contract import AgentStatus
+from base.clock import SYSTEM_TIMERS
 from base.cluster.dataplane.direct_url import ClusterDirectUrl
 from base.cluster.machine.configured import ConfiguredMachineIdentity
 from base.config import ConfigBoot
@@ -615,7 +616,7 @@ def main() -> None:
             run(
                 config,
                 database=database,
-                bus=EventBus.from_settings(rng=_new_rng()),
+                bus=EventBus.from_settings(rng=_new_rng(), timers=SYSTEM_TIMERS),
                 image=image,
                 endpoint=endpoint,
             )

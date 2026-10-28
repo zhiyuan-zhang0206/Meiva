@@ -621,7 +621,7 @@ async def run(
 
     db = database()
     pool = db.pool()
-    bus = EventBus.from_settings(rng=_new_rng())
+    bus = EventBus.from_settings(rng=_new_rng(), timers=clock)
     try:
         # One TaskGroup owns the resident loops, each with its own progress tracker
         # so a stalled loop cannot be masked by a busy sibling. The liveness pass

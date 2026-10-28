@@ -7,6 +7,7 @@ from pathlib import Path
 import pytest
 
 from base.agents.context import MeivaContext, deferred_event_bus
+from base.clock import SYSTEM_TIMERS
 from base.clock.tests.seeded_rng import seeded_rng
 from base.config.tests.configuration import snapshot_process_config
 from base.events.live.bus import EventBus, EventBusConfig
@@ -14,7 +15,9 @@ from base.events.live.bus import EventBus, EventBusConfig
 
 def _bus() -> EventBus:
     return EventBus(
-        EventBusConfig(redis_url="redis://127.0.0.1:1/0", events_channel="unit"), rng=seeded_rng()
+        EventBusConfig(redis_url="redis://127.0.0.1:1/0", events_channel="unit"),
+        rng=seeded_rng(),
+        timers=SYSTEM_TIMERS,
     )
 
 
@@ -55,7 +58,9 @@ def test_a_factory_is_asked_when_the_bus_is_first_read_not_when_the_context_is_b
 
 def test_a_deferred_bus_is_one_bus_over_the_roots_data_plane_configuration() -> None:
     config = snapshot_process_config()
-    context = MeivaContext(bus_factory=deferred_event_bus(config, rng=seeded_rng()))
+    context = MeivaContext(
+        bus_factory=deferred_event_bus(config, rng=seeded_rng(), timers=SYSTEM_TIMERS)
+    )
 
     bus = context.require_bus()
 

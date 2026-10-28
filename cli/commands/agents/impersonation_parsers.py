@@ -90,7 +90,11 @@ def _h_impersonate_relay(args: argparse.Namespace) -> int:
             args.runtime.config.process_environment()
         ),
         stdout=args.runtime.terminal.stdout,
-        bus=EventBus(event_bus_config_from_config(args.runtime.config), rng=args.runtime.rng),
+        bus=EventBus(
+            event_bus_config_from_config(args.runtime.config),
+            rng=args.runtime.rng,
+            timers=args.runtime.timers,
+        ),
         clock=args.runtime.clock,
         timers=args.runtime.timers,
     )

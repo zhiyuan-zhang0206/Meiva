@@ -39,6 +39,7 @@ from collections.abc import Awaitable, Callable, Collection, Coroutine, Iterable
 from functools import partial
 from pathlib import Path
 
+from base.clock import SYSTEM_TIMERS, Timers
 from base.cluster.dataplane.direct_url import ClusterDirectUrl
 from base.log import logger, prepare_process_logging
 
@@ -349,7 +350,7 @@ def is_running() -> bool:
 
 
 def boot_handles(
-    db: Database, config: ConfigBoot, rng: random.Random
+    db: Database, config: ConfigBoot, rng: random.Random, *, timers: Timers
 ) -> tuple[
     AsyncConnectionPool[psycopg.AsyncConnection],
     AsyncConnectionPool[psycopg.AsyncConnection],
@@ -363,6 +364,7 @@ def boot_handles(
             events_channel=config.view.data_plane.events_channel,
         ),
         rng=rng,
+        timers=timers,
     )
     bounds = pool_bounds(config)
     return build_shared_pool(db, bounds), build_control_pool(db, bounds), bus, db
@@ -500,7 +502,9 @@ async def run(
     from base.telemetry.otlp.trace_readiness import PROCESS_RECORDING
 
     rng = _new_rng()
-    workload_pool, control_pool, bus, db = boot_handles(database(), config, rng)
+    workload_pool, control_pool, bus, db = boot_handles(
+        database(), config, rng, timers=SYSTEM_TIMERS
+    )
     secure_rng = secrets.SystemRandom()
     liveness = Liveness(_LIVENESS_TIMEOUT_S)
     installation: Installation | None = None
