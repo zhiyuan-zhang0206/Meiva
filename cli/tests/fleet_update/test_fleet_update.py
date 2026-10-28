@@ -92,7 +92,10 @@ def test_a_host_that_fails_to_start_does_not_stop_the_others(
     cluster.incomplete = {
         "lin": json.dumps(
             {
-                "at": "2026-10-18T10:02:33+00:00",
+                # meiva:note
+                # Inside this window's own span (the fixture session starts at 12:00:00Z): the
+                # marker counts as evidence only there, so a stamp outside it is dropped.
+                "at": "2026-10-24T12:00:01+00:00",
                 "step": "permissions helper build + sign + load",
                 "error": "the login keychain is not unlocked",
             }

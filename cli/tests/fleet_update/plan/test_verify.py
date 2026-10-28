@@ -7,6 +7,7 @@
 from __future__ import annotations
 
 import json
+from datetime import UTC, datetime
 
 import pytest
 
@@ -193,9 +194,38 @@ _INCOMPLETE = json.dumps(
 )
 
 
+# meiva:note
+# The window an attempt occupied, in the same frame the marker stamps itself (UTC here). A
+# marker inside it is this attempt's; one outside it is an earlier wave's leftover.
+_THIS_ATTEMPT = (
+    datetime(2026, 10, 18, 10, 2, 0, tzinfo=UTC),
+    datetime(2026, 10, 18, 10, 3, 0, tzinfo=UTC),
+)
+_EARLIER_ATTEMPT = (
+    datetime(2026, 10, 18, 10, 10, 0, tzinfo=UTC),
+    datetime(2026, 10, 18, 10, 11, 0, tzinfo=UTC),
+)
+
+
 def test_a_host_whose_converge_aborted_is_named_by_the_step_it_recorded() -> None:
-    assert start_failure("lin", _INCOMPLETE, "lin: exit 1: boom") == HostFailure(
-        "lin", "permissions helper build + sign + load", "the keychain is locked"
+    assert start_failure("lin", _INCOMPLETE, "lin: exit 1: boom", window=_THIS_ATTEMPT) == (
+        HostFailure("lin", "permissions helper build + sign + load", "the keychain is locked")
+    )
+
+
+def test_a_marker_from_an_earlier_wave_does_not_become_this_attempts_cause() -> None:
+    # meiva:note
+    # The marker outlives its wave; attributing this start's failure to the earlier step would
+    # send the reader after a cause that is already stale. It falls back to the start's words.
+    assert start_failure("lin", _INCOMPLETE, "lin: exit 1: boom", window=_EARLIER_ATTEMPT) == (
+        HostFailure("lin", "start", "lin: exit 1: boom")
+    )
+
+
+def test_a_marker_stamped_without_a_zone_is_not_evidence_about_any_window() -> None:
+    naive = json.dumps({"at": "2026-10-18T10:02:33", "step": "s", "error": "e"})
+    assert start_failure("lin", naive, "lin: exit 1: boom", window=_THIS_ATTEMPT) == (
+        HostFailure("lin", "start", "lin: exit 1: boom")
     )
 
 
@@ -203,8 +233,8 @@ def test_a_host_whose_converge_aborted_is_named_by_the_step_it_recorded() -> Non
 def test_a_host_with_no_readable_record_fails_at_its_start_with_the_starts_own_words(
     recorded: str | None,
 ) -> None:
-    assert start_failure("lin", recorded, "lin: exit 1: boom") == HostFailure(
-        "lin", "start", "lin: exit 1: boom"
+    assert start_failure("lin", recorded, "lin: exit 1: boom", window=_THIS_ATTEMPT) == (
+        HostFailure("lin", "start", "lin: exit 1: boom")
     )
 
 
