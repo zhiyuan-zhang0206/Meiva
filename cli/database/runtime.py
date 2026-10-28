@@ -8,8 +8,10 @@ import sys
 from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import TextIO
+from zoneinfo import ZoneInfo
 
 from base.clock import SYSTEM_TIMERS, Clock, ClockConfig, Timers
+from base.clock.configuration import clock_config_from_boot
 from base.clock.ids import new_uuid
 from base.cluster.machine.configured import ConfiguredMachineIdentity
 from base.config import ConfigBoot
@@ -18,7 +20,13 @@ from base.host.system.hostport import Host
 from base.paths import repo_root
 from base.sessions.helperproc import helper_for
 
-__all__ = ["CommandRuntime", "OsRandom", "Terminal", "UserSession", "delivered_config"]
+__all__ = [
+    "CommandRuntime",
+    "OsRandom",
+    "Terminal",
+    "UserSession",
+    "delivered_config",
+]
 
 
 # meiva:note
@@ -149,6 +157,20 @@ class CommandRuntime:
     # observability collector's explicit endpoint) asks this host, after that read.
     def host_after_config(self) -> Host:
         return replace(self.host, environ=self.config.process_environment())
+
+    # meiva:note
+    # The zone a report for a person is formatted in: the timezone the configuration names when the
+    # invocation names one (`MEIVA_TIMEZONE`), and None when it does not. It is the answer a command
+    # used to get by building its own `Clock` from this same configuration, asked here so no command
+    # names a zone of its own. Lazy on purpose: `create` promises not to read the configuration, and
+    # a command that formats nothing never asks.
+    #
+    # Separate from `clock` on purpose: `clock.now()` is the instant (UTC, a fact), this is how a
+    # person reads it (a configuration choice). Downstream `instant.astimezone(zone)` is the one
+    # place the two meet.
+    @property
+    def zone(self) -> ZoneInfo | None:
+        return Clock(clock_config_from_boot(self.config), timers=self.timers).zone()
 
     # meiva:note
     # A fresh identifier for one gateway request's idempotency key: the 32 lowercase hexadecimal
