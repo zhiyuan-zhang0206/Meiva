@@ -4,6 +4,7 @@
 # everything else, so the external controller keeps its credential; the move is recorded
 # in the lease's own log and emitted as `impersonation_lease_adopted`. A termination is not
 # a restart, so a pending terminate still ends the lease at admission.
+import asyncio
 from typing import Any
 from uuid import uuid4
 
@@ -136,7 +137,10 @@ async def test_successor_admission_carries_an_active_lease(
         "WHERE event_name='impersonation_lease_adopted' AND agent_id=%s",
         (agent_id,),
     ).fetchall() == [(str(lease["id"]), str(first.generation), str(successor.generation))]
-    assert leases.native_status(database, event_bus, agent_id, successor)["status"] == "active"
+    carried = await asyncio.to_thread(
+        leases.native_status, database, event_bus, agent_id, successor
+    )
+    assert carried is not None and carried["status"] == "active"
     with pytest.raises(leases.ImpersonationError, match="no longer owns"):
         leases.native_status(database, event_bus, agent_id, first)
     db_conn.commit()
