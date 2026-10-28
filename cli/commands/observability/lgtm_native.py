@@ -29,6 +29,7 @@ from base.cluster.machine import MachineIdentityReader
 from base.host.net.ports import SYSTEM_URL_OPENER
 from base.host.net.resilience import Policy, retry
 from base.host.system.hostport import Host
+from base.paths.expand import expand_home
 from base.telemetry import EventPipeline
 from base.telemetry.lgtm_local import BACKENDS, binary_path
 from base.telemetry.loki_index_labels import validate_loki_deploy_config
@@ -604,6 +605,16 @@ def verify_loki(home: Path, *, host: Host) -> None:
 
 
 # meiva:note
+# The storage root the selected native backends write to: the configured directory with a leading
+# `~` expanded against the home the invocation read, or this home's own data directory when the
+# setting names none.
+def storage_root(configured: str, *, home: Path, user_home: Path) -> Path:
+    if not configured:
+        return home / "lgtm/native/data"
+    return expand_home(configured, user_home=user_home).resolve()
+
+
+# meiva:note
 # Converge the native backends on the observability station.
 #
 # Provider identity is the legacy `lgtm-host` marker or the declarative `observability-station`
@@ -619,11 +630,10 @@ def ensure_lgtm_native_step(ctx: ConvergeCtx) -> None:
     if not selected:
         return
     settings = lgtm_settings_from_boot(ctx.read_config())
-    configured_storage = settings.observability.lgtm_storage_dir.strip()
-    storage_dir = (
-        Path(configured_storage).expanduser().resolve()
-        if configured_storage
-        else ctx.meiva_home / "lgtm/native/data"
+    storage_dir = storage_root(
+        settings.observability.lgtm_storage_dir.strip(),
+        home=ctx.meiva_home,
+        user_home=ctx.session.user_home,
     )
     ensure_lgtm_native(
         ctx.repo,

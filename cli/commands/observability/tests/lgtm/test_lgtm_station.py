@@ -181,3 +181,35 @@ def test_the_native_data_volume_is_the_home_by_default_and_the_configured_direct
     assert (storage / "loki").is_dir()
     assert (storage / "prom").is_dir()
     assert (lgtm_unit.native / "data").exists() is not configured
+
+
+def test_the_storage_root_expands_a_tilde_against_the_home_the_session_read(
+    db_url: str,
+    lgtm_unit: LgtmUnit,
+    command_runtime: CommandRuntime,
+    operator_database: DatabaseFactory,
+    tmp_path: Path,
+) -> None:
+    # meiva:note
+    # The station's data volume is the operator's `~`, not this process's: the session home is a
+    # value the entry carries, so a directory that only the session names must be the one written.
+    lgtm_unit.mark_current("darwin", "arm64")
+    install_loki_stub(lgtm_unit)
+    command_runtime.config.set_field("lgtm_storage_dir", "~/obs-data")
+    session_home = tmp_path / "operator-home"
+    ctx = replace(
+        context(
+            lgtm_unit,
+            command_runtime,
+            roles=frozenset({"observability-station"}),
+            database=operator_database,
+            producer=lgtm_unit.producer,
+        ),
+        session=UserSession(user_home=session_home, login_shell="/bin/zsh", interactive=False),
+    )
+
+    lgtm_native.ensure_lgtm_native_step(ctx)
+
+    assert (session_home / "obs-data" / "loki").is_dir()
+    assert (session_home / "obs-data" / "prom").is_dir()
+    assert not (lgtm_unit.native / "data").exists()

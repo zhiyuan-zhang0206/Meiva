@@ -31,6 +31,7 @@ from base.host.env.bootstrap import BootstrapFetchError, config_source_is_local
 from base.host.env.dotenv_file import env_file_path, read_env_aliases
 from base.host.net.http_dial import get as dial_get
 from base.host.net.http_dial import post as dial_post
+from base.paths.expand import expand_home
 from cli.commands.cluster.plans.db_authority_replies import (
     IssuedReport,
     failure_line,
@@ -254,7 +255,14 @@ def _issuing_home(command: CommandRuntime) -> Path | None:
 def cmd_db_authority_issue_unit(
     *, machine: str, home: str, out: str, ttl_hours: float, command: CommandRuntime
 ) -> int:
-    target = Path(out).expanduser().absolute()
+    # meiva:note
+    # `--out` is the operator's own path: a leading `~` is the home this invocation read, and a
+    # `~someone/...` spelling names another account's home, which this command does not read.
+    try:
+        target = expand_home(out, user_home=command.session.user_home).absolute()
+    except ValueError as exc:
+        print(failure_line("issue-unit", str(exc)), file=sys.stderr)
+        return 1
     gateway_home = _issuing_home(command)
     if gateway_home is None:
         return 1
