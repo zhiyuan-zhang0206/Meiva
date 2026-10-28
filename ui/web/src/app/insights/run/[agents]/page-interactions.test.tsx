@@ -16,10 +16,10 @@ const { getRunTimeline, getRunTimelineMessages, getRunTimelineContext, getRunTim
     getAgentRoster: vi.fn(),
   }));
 
-import { clickAt, drawn, itemX, leave, look, mockCanvas, paintFrame, pointAt } from "@/components/run-timeline/canvas/run-timeline-test-canvas-mock";
+import { clickAt, drawn, itemX, leave, look, mockCanvas, paintFrame, pointAt } from "@/components/run-timeline/canvas/run-timeline-canvas-test-mock";
 import RunTimelinePage from "./page";
 import Loading from "./loading";
-import { cbdFixture, lifetimeResponse, messagesResponse } from "./run-timeline-test-fixtures-mock";
+import { cbdFixture, lifetimeResponse, messagesResponse } from "./run-timeline-test-mock";
 import { renderWithApi as rtlRender } from "@/test-support/render";
 import { resetTransport, transport } from "@/test-support/fake-api";
 beforeEach(() => {

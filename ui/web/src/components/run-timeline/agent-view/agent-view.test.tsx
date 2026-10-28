@@ -18,7 +18,7 @@ const { getRunTimeline, getRunTimelineLinks, getRunTimelineLinkContent, getAgent
   }));
 
 import AgentViewPage from "@/app/insights/run/[agents]/page";
-import { drawn, itemX, mockCanvas, paintFrame, clickAt } from "../canvas/run-timeline-test-canvas-mock";
+import { drawn, itemX, mockCanvas, paintFrame, clickAt } from "../canvas/run-timeline-canvas-test-mock";
 import { viewportOf } from "../model/timeline-model-viewport";
 
 import { resetTransport, transport } from "@/test-support/fake-api";

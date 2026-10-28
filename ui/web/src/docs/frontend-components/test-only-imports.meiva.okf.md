@@ -44,10 +44,13 @@ exempt) or is a near miss that the rule will judge as production code. List the
 near misses in the same change, and rename them rather than widening the
 pattern: exempting `*-mock` or `*-fixtures-mock` would turn "the name contains
 mock" into an opt-out and retire the gate. The 2026-10-29 scan found four near
-misses in `ui/web/src` — `app/control/config/config-test-fixtures-mock.tsx`,
-`app/insights/run/[agents]/run-timeline-test-fixtures-mock.tsx`,
-`components/run-timeline/canvas/run-timeline-test-canvas-mock.ts` and
-`lib/state/user-settings-mock.ts` (not the same file as
-`test-support/user-settings-mock.ts`, which is exempt by its directory).
+misses in `ui/web/src`, and all four now follow the convention:
+`app/insights/run/[agents]/run-timeline-test-mock.tsx`,
+`components/run-timeline/canvas/run-timeline-canvas-test-mock.ts` and
+`lib/state/user-settings-test-mock.ts` were renamed here, and
+`app/control/config/config-test-mock.tsx` in #7548 — that fourth one is the
+double that had already tripped the rule under its old name.
+`test-support/user-settings-mock.ts` is a different file, exempt by its
+directory.
 
 Parent: [[ui/web/src/docs/frontend-components/frontend-components.meiva.okf.md]].
