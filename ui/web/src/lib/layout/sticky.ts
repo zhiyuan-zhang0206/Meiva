@@ -183,6 +183,18 @@ export interface StickyController {
    * (#2311). */
   notifyPinnedToBottom(view: ScrollSnapshot, freshRun?: boolean): void;
   // meiva:note
+  // Records the content height a layout pass left behind, or forgets the
+  // baseline when `view` is null. Pass a snapshot from the ResizeObserver: it
+  // is the only witness of a height that inline styles moved (the pull
+  // reserve, spacer heights, materialized rows) with no commit to announce it,
+  // and a baseline only commits feed goes stale and then reads a real shrink
+  // as growth (#5680: 21 759 -> 21 690 against a stale 21 063, so the 69px
+  // clamp was taken for a gesture and released a follower 107px short). It
+  // never declares: the observer's own pin follows in the same callback and
+  // that pin's scroll event would spend the declaration on its echo.
+  // meiva:link ui/web/src/docs/frontend-components/timeline-view/sticky-scroll.meiva.okf.md
+  recordContentHeight(view: ScrollSnapshot | null): void;
+  // meiva:note
   // Declares that the content got shorter under a reader who is following.
   // The browser clamps scrollTop to the new maximum, and that clamp reaches
   // handleScroll as an upward move — often only after the next commit has
@@ -191,7 +203,8 @@ export interface StickyController {
   // from the commit that caused it keeps the clamp out of the run (#5678: a
   // 254px clamp from the virtual window replacing estimates with measured
   // heights released a reader parked on the tail, and every later growth then
-  // pinned nothing).
+  // pinned nothing). The commit is also the only caller: it is the one pass
+  // that knows a clamp is coming and is not itself about to re-pin.
   // meiva:link ui/web/src/docs/frontend-components/timeline-view/sticky-scroll.meiva.okf.md
   notifyContentShrunk(view: ScrollSnapshot): void;
   /** Report a programmatic restore of a saved position (back/forward
@@ -243,6 +256,15 @@ export function createStickyController(
   // cleared by anything else, so a stale flag cannot swallow a real gesture.
   // meiva:link ui/web/src/docs/frontend-components/timeline-view/sticky-scroll.meiva.okf.md
   let shrinkPending = false;
+  // meiva:note
+  // The content height the last layout pass left behind, or null while nobody
+  // is following. Fed by every measurement the view already pays for - a
+  // performed pin, a layout pass, a commit - because two things move the height
+  // and only one of them commits. Only a follower keeps it: a window that resized while the
+  // reader was parked is never compared against, and the commit that re-sticks
+  // them starts a fresh baseline.
+  // meiva:link ui/web/src/docs/frontend-components/timeline-view/sticky-scroll.meiva.okf.md
+  let contentHeight: number | null = null;
   // Whether the previous observation put the viewport inside the bottom
   // zone. Distinguishes "arrived from outside" (reconcile, fresh run) from
   // "never left" (keep the run through the echoes and pins that land at
@@ -447,10 +469,33 @@ export function createStickyController(
       prevScrollTop = view.scrollTop;
       prevScrollHeight = view.scrollHeight;
       prevNearBottom = true;
+      // meiva:note
+      // A performed pin is a measurement of the content, so the shrink baseline
+      // starts from it. `stick` alone is not: `requestStick` starts following
+      // without reading anything, and a height it invented would let a parked
+      // window predict a shrink that never happens.
+      // meiva:link ui/web/src/docs/frontend-components/timeline-view/sticky-scroll.meiva.okf.md
+      contentHeight = view.scrollHeight;
+    },
+
+    recordContentHeight(view) {
+      contentHeight = view && sticky ? view.scrollHeight : null;
     },
 
     notifyContentShrunk(view) {
-      if (!sticky) return;
+      // meiva:note
+      // A shrink only clamps a reader who was on the tail, and the clamp leaves
+      // the viewport exactly at the new bottom. Anything short of that is a
+      // shrink below a reader parked mid-history - nothing to declare.
+      // meiva:link ui/web/src/docs/frontend-components/timeline-view/sticky-scroll.meiva.okf.md
+      if (!sticky) {
+        contentHeight = null;
+        return;
+      }
+      const previous = contentHeight;
+      contentHeight = view.scrollHeight;
+      if (previous === null || view.scrollHeight >= previous) return;
+      if (view.scrollHeight - view.clientHeight - view.scrollTop > 1) return;
       shrinkPending = true;
       if (lastBottomScrollHeight !== null && view.scrollHeight < lastBottomScrollHeight) {
         lastBottomScrollHeight = view.scrollHeight;
