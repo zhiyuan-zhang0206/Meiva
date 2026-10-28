@@ -8,19 +8,15 @@ surfaces as ``DecisionRequestError`` after exactly one request.
 from __future__ import annotations
 
 from collections.abc import Mapping
-from typing import Any, TypeGuard
+from typing import Any
 
 from base.lm.catalog.decide.types import (
     DecisionBuildContext,
-    DecisionRequestError,
-    DecisionResponseError,
+    not_json_failure,
+    require_json_object,
+    require_success,
+    transport_failure,
 )
-
-_ERROR_BODY_CHARS = 300
-
-
-def _is_str_dict(value: object) -> TypeGuard[dict[str, object]]:
-    return isinstance(value, dict)
 
 
 # meiva:note
@@ -38,18 +34,16 @@ async def post_json(
                 url, json=payload, headers={"Authorization": f"Bearer {api_key}"}
             )
     except httpx.HTTPError as exc:
-        raise DecisionRequestError(
-            f"{ctx.model}: request to {url} failed: {type(exc).__name__}: {exc}"
-        ) from exc
-    if not response.is_success:
-        raise DecisionRequestError(
-            f"{ctx.model}: HTTP {response.status_code} from {url}: "
-            f"{response.text[:_ERROR_BODY_CHARS]}"
-        )
+        raise transport_failure(ctx.model, url, exc) from exc
+    require_success(
+        ctx.model,
+        url,
+        status_code=response.status_code,
+        is_success=response.is_success,
+        text=response.text,
+    )
     try:
         body: object = response.json()
     except ValueError as exc:
-        raise DecisionResponseError(f"{ctx.model}: response from {url} is not JSON") from exc
-    if not _is_str_dict(body):
-        raise DecisionResponseError(f"{ctx.model}: response from {url} is not a JSON object")
-    return body
+        raise not_json_failure(ctx.model, url) from exc
+    return require_json_object(ctx.model, url, body)

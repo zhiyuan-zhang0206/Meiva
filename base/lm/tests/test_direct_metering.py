@@ -26,7 +26,7 @@ from base.config.tests.configuration import model_overrides
 from base.lm.catalog import ModelCatalog
 from base.lm.catalog.provider_keys import ProviderKeys
 from base.lm.factory import build_chat_model
-from base.lm.usage import log_usage_from_message, metering
+from base.lm.usage import log_usage_from_message, metering, reporting
 from base.log.tests.log_records import LogRecords
 from base.telemetry import process_state
 
@@ -246,3 +246,7 @@ def test_a_metering_failure_never_fails_the_call(
     assert failure["extra"]["model"] == _MODEL
     assert failure["extra"]["error_type"] == "RuntimeError"
     assert failure["extra"]["failures"] == 1
+
+
+def test_a_repeated_accounting_failure_is_reported_on_the_first_and_every_fiftieth() -> None:
+    assert [n for n in range(1, 121) if reporting.should_report(n)] == [1, 50, 100]

@@ -11,7 +11,7 @@ from __future__ import annotations
 import math
 from collections.abc import Awaitable, Callable, Mapping
 from dataclasses import dataclass
-from typing import Protocol
+from typing import Protocol, TypeGuard
 
 from base.lm.catalog.provider_keys import ProviderKeys
 
@@ -214,6 +214,43 @@ class DecisionResponseError(DecisionError):
     def __init__(self, message: str, *, input_tokens: int | None = None) -> None:
         super().__init__(message)
         self.input_tokens = input_tokens
+
+
+_ERROR_BODY_CHARS = 300
+
+
+# meiva:note
+# The failure of one attempt that never got a response.
+def transport_failure(model: str, url: str, exc: BaseException) -> DecisionRequestError:
+    return DecisionRequestError(f"{model}: request to {url} failed: {type(exc).__name__}: {exc}")
+
+
+# meiva:note
+# Accept a successful response; any other status is the request's failure, with the head of the
+# body as the provider's own words.
+def require_success(model: str, url: str, *, status_code: int, is_success: bool, text: str) -> None:
+    if not is_success:
+        raise DecisionRequestError(
+            f"{model}: HTTP {status_code} from {url}: {text[:_ERROR_BODY_CHARS]}"
+        )
+
+
+# meiva:note
+# The failure of a response whose body is not JSON.
+def not_json_failure(model: str, url: str) -> DecisionResponseError:
+    return DecisionResponseError(f"{model}: response from {url} is not JSON")
+
+
+def _is_object_dict(value: object) -> TypeGuard[dict[str, object]]:
+    return isinstance(value, dict)
+
+
+# meiva:note
+# The decoded body when it is a JSON object; anything else is a bad response.
+def require_json_object(model: str, url: str, body: object) -> dict[str, object]:
+    if not _is_object_dict(body):
+        raise DecisionResponseError(f"{model}: response from {url} is not a JSON object")
+    return body
 
 
 def estimate_tokens(text: str) -> int:
