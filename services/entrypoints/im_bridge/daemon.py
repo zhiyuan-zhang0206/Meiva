@@ -30,7 +30,7 @@ from psycopg_pool import ConnectionPool, PoolTimeout
 from base.clock import SYSTEM_TIMERS, Clock
 from base.clock.configuration import clock_config_from_boot
 from base.cluster.dataplane.direct_url import ClusterDirectUrl
-from base.cluster.machine import GatewayAccess, daemon_acceptance, gateway_auth_headers
+from base.cluster.machine import GatewayAccess, accepted_digests, gateway_auth_headers
 from base.cluster.machine.boot import gateway_access_from_boot
 from base.cluster.machine.configured import ConfiguredMachineIdentity
 from base.config import ConfigBoot
@@ -40,6 +40,7 @@ from base.daemon.shutdown import cancel_and_drain, install_graceful_shutdown
 from base.db import Database
 from base.db.code_version_gate import ProcessDbGate
 from base.db.config import db_config_from_boot
+from base.host.db_authority.admission import admission_inputs
 from base.host.env.registry import network_proxy_configured
 from base.host.exit_codes import hard_exit as _hard_exit
 from base.native_process.code_version import CodeVersion
@@ -427,6 +428,7 @@ async def _start(
     liveness = Liveness(_LIVENESS_TIMEOUT_S)
     endpoint = _endpoint(process_config, runtime=runtime)
     await asyncio.to_thread(core.notice_bridge.initialize_poll)
+    unit, generation = admission_inputs(home)
     owned.health = await start_health_server(
         "im_bridge",
         endpoint.health_port,
@@ -435,7 +437,7 @@ async def _start(
             ("POST", "/send"): await handle_send(core),
             ("POST", "/send/alert-outbound"): alerts.handle,
         },
-        auth_digests=daemon_acceptance(access, home=home),
+        auth_digests=accepted_digests(access, home=home, unit=unit, generation=generation),
         image=image,
     )
     _log.info("[im_bridge] healthz listening on :%s", endpoint.health_port)

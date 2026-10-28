@@ -17,7 +17,5 @@ exports = ["ambient.py", "boot.py", "configured.py", "tests"]
 "ambient.py#settings base.config.settings" = 1
 
 [debt.impure-edge]
-"__init__.py#base/host/db_authority/api.py" = 1
-"__init__.py#base/host/db_authority/unit.py" = 1
 "ambient.py#base/config/__init__.py" = 1
 "boot.py#base/config/__init__.py" = 1

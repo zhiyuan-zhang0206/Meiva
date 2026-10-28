@@ -24,13 +24,14 @@ import psycopg
 from psycopg.rows import TupleRow
 from psycopg_pool import ConnectionPool
 
-from base.cluster.machine import GatewayAccess, MachineIdentityReader, daemon_acceptance
+from base.cluster.machine import GatewayAccess, MachineIdentityReader, accepted_digests
 from base.cluster.port_preflight import serves_off_box
 from base.config import ConfigBoot
 from base.config.service_read import ConfigAuthority
 from base.daemon.endpoints import ServiceEndpoint, ServiceEndpoints
 from base.db import Database
 from base.events.live.bus import EventBus, EventBusConfig
+from base.host.db_authority.admission import admission_inputs
 from services import pidfile as pidfile_operations
 
 __all__ = [
@@ -131,10 +132,11 @@ def ops_bind_host(*, machine: MachineIdentityReader) -> str:
 
 # meiva:note
 # SHA-256 digests of the bearers /ops accepts: the daemon acceptance of
-# `base.cluster.machine.daemon_acceptance` (the gateway dials /ops with its
+# `base.cluster.machine.accepted_digests` (the gateway dials /ops with its
 # gateway-class machine API token, a runner-class process of the unit with its runner token).
 def ops_acceptance(*, home: Path, access: GatewayAccess) -> frozenset[str]:
-    return daemon_acceptance(access, home=home)
+    unit, generation = admission_inputs(home)
+    return accepted_digests(access, home=home, unit=unit, generation=generation)
 
 
 def ops_handles(

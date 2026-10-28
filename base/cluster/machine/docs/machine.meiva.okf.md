@@ -120,7 +120,9 @@ Gateway access is a value, `GatewayAccess(gateway_url, cluster_secret, remote_pl
 launcher_profile, gateway_home)`, built by a root from its configuration and the launch facts its
 `ConfigBoot` read once (`base/cluster/machine/boot.py:gateway_access_from_boot`).
 `gateway_api_base(gateway_url)`, `gateway_bearer(access)` (in the strict `gateway_access.py`: a pure
-function of the value, token first), `gateway_auth_headers(access)` and `daemon_acceptance(access, home=...)` read
-neither settings nor the environment (the last takes the unit's absolute home as a value).
+function of the value, token first), `gateway_auth_headers(access)` and
+`accepted_digests(access, *, home, unit, generation)` read neither settings nor the environment: the
+last decides from the digests its daemon read for it — the shell that reads them is
+`base/host/db_authority/admission.py:admission_inputs`.
 A caller with no root yet calls `base/cluster/machine/ambient.py:gateway_access_from_settings` and labels it
 `# ambient: <batch>`; the list only shrinks and the module goes with the last call.

@@ -36,6 +36,7 @@ from base.cluster.machine.identity import (
     roles_from_flags,
     validate_machine_name,
 )
+from base.host.db_authority.digests import token_digest
 from base.host.net import bearer_header, require_cluster_secret
 
 __all__ = [
@@ -49,7 +50,7 @@ __all__ = [
     "MachineRoleInvalid",
     "MachineRoleMissing",
     "MachineRoles",
-    "daemon_acceptance",
+    "accepted_digests",
     "format_capabilities",
     "gateway_api_base",
     "gateway_auth_headers",
@@ -60,7 +61,12 @@ __all__ = [
 
 
 # meiva:note
-# SHA-256 digests of the bearers a gateway-side daemon's authenticated endpoint accepts.
+# Which digest a gateway-side daemon's authenticated endpoint accepts, decided from what its root
+# read for it: `unit` (an installed capability's digests, None when none is installed) decides
+# first; with none, a remote-managed plane takes the human secret's digest and a gateway home takes
+# its active write generation's. The read itself is
+# `base.host.db_authority.admission.admission_inputs`, called by the daemon that owns the admission.
+#
 # The acceptor's half of `gateway_bearer(access)`: the daemons that take calls from the
 # gateway (the ops server, im_bridge's `/send`) accept machine API tokens, never the
 # human cluster secret.
@@ -77,20 +83,22 @@ __all__ = [
 # is the exception to "outside the gateway, the CLI and the root, no component holds the
 # cluster secret" (docs/decisions/data/security/2026-10-03-cluster-secret-contraction.md); the live
 # deployment's data plane is local, and this branch only runs when `is_remote`.
-def daemon_acceptance(access: GatewayAccess, *, home: Path) -> frozenset[str]:
-    from base.host.db_authority.api import acceptance, token_digest
-    from base.host.db_authority.unit import load_unit_capability
-
+# meiva:link base/cluster/machine/docs/machine.meiva.okf.md
+def accepted_digests(
+    access: GatewayAccess,
+    *,
+    home: Path,
+    unit: frozenset[str] | None,
+    generation: frozenset[str],
+) -> frozenset[str]:
     if not home.is_absolute():
         raise ValueError(f"the daemon acceptance needs an absolute home, got {str(home)!r}")
-    capability = load_unit_capability(home)
-    if capability is not None:
-        api = capability.api
-        return frozenset({api.gateway, token_digest(api.token)})
+    if unit is not None:
+        return unit
     secret = require_cluster_secret(access.cluster_secret, where=f"home {home}")
     if access.remote_plane:
         return frozenset({token_digest(secret)})
-    return frozenset(acceptance(home).values())
+    return generation
 
 
 def gateway_auth_headers(access: GatewayAccess) -> dict[str, str]:

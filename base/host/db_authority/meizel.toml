@@ -1,7 +1,12 @@
-exports = ["api.py", "delivery.py", "ledger.py", "model.py", "tests", "unit.py"]
+exports = ["admission.py", "api.py", "delivery.py", "digests.py", "ledger.py", "model.py", "tests", "unit.py"]
+
+[purity]
+"digests.py" = "strict"
+"admission.py" = { mode = "none", why = "the shell that reads a daemon admission's inputs: the installed unit capability under a home and the gateway home's active write generation; which digests win is decided by base.cluster.machine.accepted_digests" }
 
 [uses]
-"api.py" = ["delivery.py", "ledger.py", "model.py"]
+"admission.py" = ["api.py", "digests.py", "unit.py"]
+"api.py" = ["delivery.py", "digests.py", "ledger.py", "model.py"]
 "delivery.py" = ["ledger.py", "model.py"]
 "ledger.py" = ["model.py"]
 "tests" = ["api.py", "ledger.py", "model.py"]
