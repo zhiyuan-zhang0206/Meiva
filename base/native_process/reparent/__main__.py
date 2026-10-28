@@ -53,7 +53,7 @@ def _exec_child(table: Redirects, command: tuple[str, ...]) -> None:
     # meiva:note
     # `command[0]` is the absolute interpreter path the spawner built from repository internals,
     # and the child inherits this process's environment on purpose: the spawner already filtered it.
-    os.execv(command[0], list(command))  # noqa: S606
+    os.execv(command[0], command)  # noqa: S606
 
 
 def main(argv: list[str]) -> None:

@@ -146,6 +146,30 @@ def test_readiness_rejects_an_unrelated_postgres_on_the_selected_port(
         process.wait(timeout=5)
 
 
+# meiva:note
+# The readiness check resolves both paths before comparing them, so a symlinked spelling of the
+# server's own data directory still authorizes the answer. Removing either `resolve` makes this
+# fail: the server reports the path it was started with, and the test hands in the link.
+def test_a_symlinked_spelling_of_the_reported_data_directory_is_answered(
+    tmp_path: Path, db_url: str
+) -> None:
+    port = int(str(conninfo_to_dict(db_url)["port"]))
+    with psycopg.connect(db_url, connect_timeout=2) as connection:
+        row = connection.execute("SHOW data_directory").fetchone()
+    assert row is not None and row[0] is not None
+    link = tmp_path / "data-link"
+    link.symlink_to(str(row[0]))
+    log = tmp_path / "pg.log"
+    process = pg_foreground.start_foreground_postgres(
+        ["/bin/sleep", "30"], log=log, env=pg_tools.pg_start_env()
+    )
+    try:
+        pg_foreground.wait_foreground_postgres(process, data=link, log=log, port=port)
+    finally:
+        process.terminate()
+        process.wait(timeout=5)
+
+
 def test_readiness_timeout_is_bounded(tmp_path: Path) -> None:
     bin_dir = _write_stub_pg_bindir(tmp_path / "bin")
     log = tmp_path / "pg.log"
