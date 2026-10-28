@@ -21,14 +21,21 @@ import meiva
 from psycopg import Connection
 
 from base.daemon.schedules.inputs import ScheduleInputs
+from base.native_process.root_control.client import RootClientError, root_process
+from base.sessions.backend import get_shell_backend
 from schedules.jobs.telemetry_event import emit_system_event
 from schedules.plans.agent_watch_rule import (
+    SEAT_COOLDOWN_SECONDS,
+    SEAT_SETTLE_SECONDS,
     Observation,
     RoundPlan,
+    SeatReadings,
+    SeatState,
     WatchedAgent,
     WatchState,
     judge_schedule,
     plan_round,
+    plan_seats,
     watched_agents,
 )
 
@@ -36,14 +43,20 @@ __all__ = [
     "EVENT_NAME",
     "EmitTally",
     "observe",
+    "read_seat_registries",
+    "read_seat_state",
     "read_state",
     "round_line",
     "run_round",
+    "seat_round",
+    "write_seat_state",
     "write_state",
 ]
 
 EVENT_NAME = "agent_watch_round"
 _FIRE_WINDOW = 20
+_SEAT_DIR = Path("state") / "seat-registry"
+_STATUSES = "SELECT id, status FROM agents_meta WHERE id = ANY(%s)"
 
 
 # meiva:note
@@ -158,6 +171,168 @@ def write_state(path: Path, states: dict[int, WatchState]) -> None:
     temporary.replace(path)
 
 
+# meiva:note
+# What one round owes the seats: read each agent's registry, read the sessions this host is running,
+# and ask the owners about the seats that are gone. Nothing here rebuilds a seat -- the script, the
+# cadence, the health rule and the rebuild are the owner's, in the owner's registry.
+#
+# A reading this round could not take is carried as `blind` and wakes nobody: a session service that
+# will not list is not a host with fifteen empty seats. A tree younger than the settle window is the
+# one case where an absence is recorded and not sent, because the start has not finished launching
+# what the owner would re-arm into. Every other moment -- including during a stop or an update --
+# sends: the window in which a wiped fleet is least visible is exactly the window this has to speak.
+def seat_round(
+    *,
+    home: Path,
+    state_path: Path,
+    now: datetime,
+    process: str,
+    inputs: ScheduleInputs,
+    dry_run: bool = False,
+) -> tuple[str, tuple[str, ...]]:
+    registry_dir = home / _SEAT_DIR
+    seat_state_path = state_path.with_suffix(".seats.json")
+    registries, blind = read_seat_registries(registry_dir)
+    notes: list[str] = [f"seats-blind={path}" for path in blind]
+    line = f"seats={len(registries)}"
+    if not registries:
+        return f"{line} seats_absent=0 seats_woke=0", tuple(notes)
+    age = _runtime_age_s(home, now=now)
+    if age is None:
+        notes.append("seats-blind=root-status")
+        return f"{line} seats_absent=0 seats_woke=0 (blind)", tuple(notes)
+    if age < SEAT_SETTLE_SECONDS:
+        notes.append(f"seats-record-only=runtime {age:.0f}s<{SEAT_SETTLE_SECONDS:.0f}s")
+        return f"{line} seats_absent=0 seats_woke=0 (settling)", tuple(notes)
+    try:
+        names = frozenset(get_shell_backend(home=home).list_sessions())
+    except Exception as exc:
+        notes.append(f"seats-blind=sessions:{type(exc).__name__}")
+        return f"{line} seats_absent=0 seats_woke=0 (blind)", tuple(notes)
+    states = read_seat_state(seat_state_path)
+    statuses: dict[int, str] = {}
+    try:
+        with inputs.database().connect(autocommit=True) as conn, conn.cursor() as cur:
+            cur.execute(_STATUSES, ([agent_id for agent_id, _payload in registries],))
+            statuses = {int(row[0]): str(row[1]) for row in cur.fetchall()}
+    except Exception as exc:
+        notes.append(f"seats-blind=status:{type(exc).__name__}")
+        return f"{line} seats_absent=0 seats_woke=0 (blind)", tuple(notes)
+    wakes, next_states, plan_notes = plan_seats(
+        registries,
+        SeatReadings(
+            sessions=names,
+            statuses=statuses,
+            states=states,
+            now=now.timestamp(),
+            cooldown_s=SEAT_COOLDOWN_SECONDS,
+            registry_dir=str(registry_dir),
+        ),
+    )
+    notes.extend(plan_notes)
+    sent = 0
+    for wake in wakes:
+        if dry_run:
+            notes.append(f"{wake.agent_id}: seats dry-run {','.join(wake.absent)}")
+            continue
+        try:
+            meiva.agents.send_message(wake.agent_id, wake.text)
+        except Exception as exc:
+            notes.append(f"{wake.agent_id}: seats wake failed {type(exc).__name__}")
+            continue
+        sent += 1
+        notes.append(f"{wake.agent_id}: seats woke for {','.join(wake.absent)}")
+    merged = {**states, **next_states}
+    if not dry_run:
+        write_seat_state(seat_state_path, merged)
+    absent_total = sum(len(state.absent) for state in merged.values())
+    return f"{line} seats_absent={absent_total} seats_woke={sent}", tuple(notes)
+
+
+# meiva:note
+# How long this tree has been up, asked of the supervisor that owns it: the root's own birth time is
+# the one answer that does not depend on a pid file's mtime or a process name a `ps` column can
+# truncate. A root that will not answer is `None` -- not an old runtime.
+def _runtime_age_s(home: Path, *, now: datetime) -> float | None:
+    try:
+        root = root_process(home=home)
+    except RootClientError:
+        return None
+    if root is None:
+        return None
+    return now.timestamp() - root.birth
+
+
+# meiva:note
+# Every registry file this round could read, as the owner id its file name carries and the raw
+# payload; a file it could not read is blind, never a guess at what the owner meant.
+def read_seat_registries(
+    directory: Path,
+) -> tuple[tuple[tuple[int, object], ...], tuple[Path, ...]]:
+    registries: list[tuple[int, object]] = []
+    blind: list[Path] = []
+    if not directory.is_dir():
+        return (), ()
+    for path in sorted(directory.glob("*.json")):
+        try:
+            agent_id = int(path.stem)
+        except ValueError:
+            blind.append(path)
+            continue
+        if agent_id <= 0:
+            blind.append(path)
+            continue
+        try:
+            payload = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            blind.append(path)
+            continue
+        registries.append((agent_id, payload))
+    return tuple(registries), tuple(blind)
+
+
+def read_seat_state(path: Path) -> dict[int, SeatState]:
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return {}
+    if not isinstance(payload, dict) or payload.get("version") != 1:
+        return {}
+    agents = payload.get("agents")
+    if not isinstance(agents, dict):
+        return {}
+    states: dict[int, SeatState] = {}
+    for key, value in agents.items():
+        if not isinstance(value, dict):
+            continue
+        try:
+            agent_id = int(key)
+        except ValueError:
+            continue
+        raw = value.get("absent")
+        absent = tuple(str(item) for item in raw) if isinstance(raw, list) else ()
+        woke = value.get("woke_at")
+        states[agent_id] = SeatState(
+            absent=absent, woke_at=float(woke) if isinstance(woke, int | float) else None
+        )
+    return states
+
+
+def write_seat_state(path: Path, states: dict[int, SeatState]) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    text = json.dumps(
+        {
+            "version": 1,
+            "agents": {str(agent_id): asdict(state) for agent_id, state in sorted(states.items())},
+        },
+        indent=2,
+        sort_keys=True,
+    )
+    temporary = path.with_suffix(path.suffix + ".tmp")
+    temporary.write_text(text, encoding="utf-8")
+    temporary.replace(path)
+
+
 def round_line(
     entries: Sequence[WatchedAgent],
     plans: Sequence[tuple[WatchedAgent, RoundPlan]],
@@ -188,6 +363,7 @@ def run_round(
     *,
     inputs: ScheduleInputs,
     report_agent: int,
+    home: Path,
     state_path: Path,
     now: datetime,
     process: str,
@@ -219,6 +395,14 @@ def run_round(
             except Exception as exc:
                 notes.append(f"{entry.agent_id}: {action.kind} failed: {type(exc).__name__}: {exc}")
     write_state(state_path, states)
+    seat_line, seat_notes = seat_round(
+        home=home,
+        state_path=state_path,
+        now=now,
+        process=process,
+        inputs=inputs,
+    )
+    notes.extend(seat_notes)
     try:
         emit_system_event(
             EVENT_NAME,
@@ -239,5 +423,10 @@ def run_round(
         notes.append(
             f"event emit failed ({tally.failures} since start): {type(exc).__name__}: {exc}"
         )
-    line = round_line(entries, plans, observations, emit_failures=tally.failures)
+    line = " ".join(
+        [
+            round_line(entries, plans, observations, emit_failures=tally.failures),
+            seat_line,
+        ]
+    )
     return " | ".join([line, *notes])
