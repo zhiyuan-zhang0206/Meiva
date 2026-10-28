@@ -18,7 +18,7 @@ const { getRunTimeline, getRunTimelineLinks, getRunTimelineLinkContent, getAgent
   }));
 
 import AgentViewPage from "@/app/insights/run/[agents]/page";
-import { drawnLinks, itemX, mockCanvas, paintFrame } from "../canvas/run-timeline-test-canvas-mock";
+import { drawnLinks, itemX, mockCanvas, paintFrame } from "../canvas/run-timeline-canvas-test-mock";
 import { curveOf, curvePoint } from "../model/links/geometry";
 import { MAX_ARROWS } from "../model/links/cluster";
 import { LINK_COLORS } from "../model/links/resolve";

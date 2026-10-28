@@ -1,12 +1,6 @@
-// LanguageProvider — the settings→next-intl bridge. Uses the REAL next-intl
-// module (unlike the global test double in vitest.setup.ts, which serves
-// components rendered without a provider): this test verifies the actual
-// provider wiring — locale + messages handed to NextIntlClientProvider, and
-// the <html lang> sync effect.
-//
-// The settings store is the shared mock (user-settings-mock.ts), so flipping
-// display.language re-renders consumers immediately — the same path the
-// production optimistic update takes.
+// meiva:note
+// LanguageProvider is the settings→next-intl bridge. This test uses the real next-intl module (unlike the global test double in vitest.setup.ts, which serves components rendered without a provider) because it verifies the actual provider wiring: locale and messages handed to NextIntlClientProvider, and the <html lang> sync effect. The settings store is the shared mock in test-support/user-settings-mock.ts, so flipping display.language re-renders consumers immediately — the same path the production optimistic update takes.
+// meiva:link ui/web/src/docs/frontend-state/frontend-state.meiva.okf.md
 
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { act, cleanup, render, screen, waitFor } from "@testing-library/react";

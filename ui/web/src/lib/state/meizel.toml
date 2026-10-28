@@ -1,4 +1,4 @@
-exports = ["sse-merge.ts", "store.ts", "use-user-settings.ts", "user-settings-mock.ts"]
+exports = ["sse-merge.ts", "store.ts", "use-user-settings.ts", "user-settings-test-mock.ts"]
 
 [uses]
 "sse-merge.test.ts" = ["sse-merge.ts", "use-user-settings.ts"]

@@ -4,4 +4,4 @@ export {
   setMockSetting,
   useDebouncedSetting,
   useUserSettings,
-} from "@/lib/state/user-settings-mock";
+} from "@/lib/state/user-settings-test-mock";
