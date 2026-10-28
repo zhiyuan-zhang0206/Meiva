@@ -171,6 +171,7 @@ async def test_claim_drops_compact_and_user_restart_for_external_harness(
 
     tid = spawn_agent(
         harness="claude_code",
+        config={"llm_model": "claude-sonnet-5-5", "reasoning_effort": "high"},
         catalog=model_catalog,
         authority=config_authority,
         database_gate=database_gate,

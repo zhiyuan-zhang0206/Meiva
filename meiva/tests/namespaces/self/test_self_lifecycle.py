@@ -56,6 +56,9 @@ def _spawned(
         database_gate=database_gate,
         machine=machine_identity,
         harness=harness,
+        config={"llm_model": "gpt-6.1-sol", "reasoning_effort": "high"}
+        if harness == "codex"
+        else None,
     )
     pin_agent(agent_id)
     return agent_id

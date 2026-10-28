@@ -60,7 +60,13 @@ def _spawn(client: TestClient, body: dict[str, object]) -> int:
 class TestSpawnHarness:
     def test_spawn_records_the_requested_harness(self, db_conn: psycopg.Connection) -> None:
         with gateway_test_client() as client:
-            agent = _spawn(client, {"harness": "antigravity"})
+            agent = _spawn(
+                client,
+                {
+                    "harness": "antigravity",
+                    "config": {"llm_model": "gemini-4-argon", "reasoning_effort": "high"},
+                },
+            )
         assert _harness(db_conn, agent) == "antigravity"
 
     def test_spawn_without_a_harness_runs_the_builtin_runtime(
@@ -93,7 +99,13 @@ class TestSpawnHarness:
         self, db_conn: psycopg.Connection
     ) -> None:
         with gateway_test_client() as client:
-            source = _spawn(client, {"harness": "antigravity"})
+            source = _spawn(
+                client,
+                {
+                    "harness": "antigravity",
+                    "config": {"llm_model": "gemini-4-argon", "reasoning_effort": "high"},
+                },
+            )
             _checkpoint(db_conn, source)
             before = _agent_count(db_conn)
             response = spawn_via_http(client, {"spawner": "user", "fork_from": source})

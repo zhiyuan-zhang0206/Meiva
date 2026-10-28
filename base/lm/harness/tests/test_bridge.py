@@ -383,12 +383,18 @@ def test_execution_selection_reaches_the_adapter(
     model: str,
     effort: str,
 ) -> None:
+    binary_dir = tmp_path / "bin"
+    binary_dir.mkdir()
+    for name in ("claude", "codex"):
+        binary = binary_dir / name
+        binary.write_text("#!/bin/sh\nexit 0\n")
+        binary.chmod(0o755)
     session = open_session(
         harness,
         agent_id=71,
         cwd=tmp_path,
         registry=FileSessionRegistry(tmp_path / "sessions"),
-        environ={},
+        environ={"HOME": str(tmp_path), "PATH": str(binary_dir)},
         clock=system_clock(),
         model=model,
         reasoning_effort=effort,
