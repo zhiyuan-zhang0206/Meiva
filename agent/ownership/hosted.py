@@ -10,7 +10,12 @@ from uuid import UUID
 
 from loguru import logger
 
-from agent.ownership.audit_payloads import admitted_payload, settled_payload
+from agent.ownership.audit_payloads import (
+    AdoptedLease,
+    admitted_payload,
+    adopted_payload,
+    settled_payload,
+)
 from agent.ownership.lifecycle_plan import (
     AppliedLifecycle as AppliedLifecycle,
 )
@@ -29,8 +34,12 @@ from agent.ownership.lifecycle_plan import (
     shell_cutoff,
     turn_close,
 )
-from base.agents.impersonation.replacement import end_for_replacement
-from base.db.protocols import AsyncPool, DatabaseLike
+from base.agents.impersonation.replacement import (
+    Adoption,
+    adopt_for_successor,
+    end_for_replacement,
+)
+from base.db.protocols import AsyncConnectionLike, AsyncPool, DatabaseLike
 from base.db.transaction import async_write_transaction
 from base.events.live.announce import publish_agent_updated
 from base.events.live.bus import EventBus
@@ -139,6 +148,48 @@ async def apply_hosted_lifecycle(
 
 
 # meiva:note
+# Hand the agent's open impersonation lease to the incarnation this admission just wrote.
+#
+# Adoption runs in a savepoint: a lease this successor cannot carry is closed exactly as it
+# was before carry existed, and the admission itself never fails because of a takeover. The
+# two outcomes are exclusive by construction — a failure inside the savepoint rolls its
+# writes back, so the fallback never closes a half-moved lease, and the lease is never left
+# in the intermediate state "closed here, not adopted there".
+async def _termination_pending(conn: AsyncConnectionLike, agent_id: int) -> bool:
+    # meiva:note
+    # Whether this admission is the one that will terminate the agent.
+    #
+    # A takeover is carried across a restart, never across a termination: the termination
+    # trigger ends the lease inside the transaction that writes `terminated`, which is after
+    # this admission, and an ended lease still owes its handoff to the native checkpoint
+    # *before* the row goes down (`_apply_lease_controls` settles it in this wake). Ending it
+    # here keeps that order.
+    row = await (
+        await conn.execute(
+            "SELECT 1 FROM inbound_messages WHERE agent_id=%s AND kind='terminate' "
+            "AND status IN ('pending','claimed') LIMIT 1",
+            (agent_id,),
+        )
+    ).fetchone()
+    return row is not None
+
+
+async def _carry_impersonation(
+    conn: AsyncConnectionLike, agent_id: int, incarnation: RuntimeIncarnation
+) -> tuple[Adoption | None, str | None]:
+    if await _termination_pending(conn, agent_id):
+        return None, await end_for_replacement(conn, agent_id, incarnation)
+    try:
+        async with conn.transaction():
+            return await adopt_for_successor(conn, agent_id, incarnation), None
+    except Exception:
+        logger.exception(
+            "impersonation lease adoption failed; ending the inherited lease", agent_id=agent_id
+        )
+    return None, await end_for_replacement(conn, agent_id, incarnation)
+
+
+# meiva:note
 # Admit one turn: the circuit breaker, then one UPDATE.
 #
 #     Only this machine's running or idling row is claimed; a terminated or foreign
@@ -178,8 +229,38 @@ async def admit_hosted_runtime(
             return None
         generation, previous_status = claimed
         incarnation = RuntimeIncarnation(agent_id, generation, owner)
-        ended_lease = await end_for_replacement(conn, agent_id, incarnation)
-        if ended_lease is not None:
+        adoption, ended_lease = await _carry_impersonation(conn, agent_id, incarnation)
+        if adoption is not None:
+            logger.info(
+                "impersonation lease carried by the replacement runtime's admission",
+                agent_id=agent_id,
+                lease_id=adoption.lease_id,
+                session_id=adoption.session_id,
+                status=adoption.status,
+            )
+            recorded.append(
+                await record_audit_async(
+                    conn,
+                    prepare_event_log(
+                        event_type="impersonation_lease_adopted",
+                        agent_id=agent_id,
+                        source="system",
+                        payload=adopted_payload(
+                            AdoptedLease(
+                                lease_id=adoption.lease_id,
+                                session_id=adoption.session_id,
+                                status=adoption.status,
+                                from_generation=str(adoption.accepted_from[0]),
+                                from_owner=str(adoption.accepted_from[1]),
+                                to_generation=str(adoption.accepted_by[0]),
+                                to_owner=str(adoption.accepted_by[1]),
+                                relay_provider=adoption.relay_provider,
+                            )
+                        ),
+                    ),
+                )
+            )
+        elif ended_lease is not None:
             logger.info(
                 "impersonation lease closed by the replacement runtime's admission",
                 agent_id=agent_id,

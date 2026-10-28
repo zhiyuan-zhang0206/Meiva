@@ -31,6 +31,24 @@ StatusChange = TypedDict(
 )
 
 
+class LeaseAdopted(TypedDict):
+    # meiva:note
+    # `impersonation_lease_adopted` payload — agent/ownership/hosted.py.
+    #
+    # One row per takeover a replacement native incarnation carries instead of ending. The
+    # accepting pair moves from `from_*` to `to_*`; `status` is the lease's status at the
+    # move, so a reader can tell a carried acceptance from a carried takeover. `lease_id` is
+    # `agent_impersonations.id`; `session_id` is the agent-scoped handle operators read.
+    lease_id: str
+    session_id: int
+    status: str
+    from_generation: str
+    from_owner: str
+    to_generation: str
+    to_owner: str
+    relay_provider: str | None
+
+
 class ComputerAction(TypedDict):
     """`computer_action` payload — services/desktop/computer/mcp_daemon.py.
 
@@ -120,6 +138,11 @@ EVENTS: dict[str, EventSpec] = {
         "status_change",
         "agent status transition — both telemetry (loguru) and audit (audit_events) sides emit this name",
         payload=StatusChange,
+    ),
+    "impersonation_lease_adopted": audit_event(
+        "impersonation_lease_adopted",
+        "impersonation takeover carried by the replacement native incarnation's admission",
+        payload=LeaseAdopted,
     ),
     "exit": audit_event("exit", "agent process exited"),
     "label_change": audit_event("label_change", "agent label changed"),

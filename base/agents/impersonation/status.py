@@ -67,6 +67,10 @@ class LeaseRecord(TypedDict):
     max_delivery_attempts: int
     relay_provider: str | None
     relay_generation: int
+    relay_heartbeat_at: datetime | None
+    relay_minted_at: datetime | None
+    relay_minted_generation: UUID | None
+    relay_minted_owner: UUID | None
     relay_degraded_reason: str | None
     relay_token_hash: str | None
     process_metadata: dict[str, Any]

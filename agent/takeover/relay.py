@@ -14,6 +14,10 @@ UNBOUND_REASON = "request has no relay binding"
 SESSION_RELAY_DOWN_REASON = "the controller relay is not running (no fresh heartbeat)"
 CREDENTIAL_RENEWED_REASON = "relay credential was re-provisioned"
 NOT_READY_REASON = "relay did not become ready in time"
+# meiva:note
+# The carrier an earlier incarnation spawned outlived it, but has stopped beating: adoption
+# is only for a live carrier, so this lease is rolled back instead of standing on a corpse.
+ADOPTED_RELAY_DOWN_REASON = "the adopted relay is not beating (no fresh heartbeat)"
 STALE_RELAY_REASON = "relay unavailable; automatic recovery unsupported"
 
 

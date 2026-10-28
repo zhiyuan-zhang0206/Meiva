@@ -76,6 +76,7 @@ Emit sites and consumers: see the comments at each emit point.
 | `resurrect` | terminated agent woken | business | — | events |
 | `compact` | agent context compacted | business | — | events |
 | `circuit_breaker` | heartbeat circuit breaker opened — a permanent provider rejection stopped background model re-fires until the cause is corrected | business | — | events |
+| `impersonation_lease_adopted` | impersonation takeover carried by the replacement native incarnation's admission | business | lease_id, session_id, status, from_generation, from_owner, to_generation, to_owner, relay_provider | events |
 | `exit` | agent process exited | business | — | events |
 | `label_change` | agent label changed | business | — | events |
 | `skill_invoked` | skill invoked by an agent | business | — | events |
