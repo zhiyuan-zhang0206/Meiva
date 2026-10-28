@@ -118,6 +118,12 @@ is gone after the reap. A process that survives (permission, pid reuse, a reaper
 that refuses) leaves `settled=False` and names the survivors in `remaining`;
 `killed` lists what the adapter actually signalled.
 
+Closing an active session uses the same reaping path. The session snapshots its
+tree before cancelling the stream reader, whose finalizer can close and detach
+the transport. This keeps a hosted cancellation or termination from losing its
+observed children and claiming an unobserved close. Remaining children fail the
+close; the final CLI exit status survives transport detachment.
+
 Same live run after reaping:
 
 ```

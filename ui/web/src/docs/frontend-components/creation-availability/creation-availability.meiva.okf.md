@@ -24,8 +24,9 @@ to the first one it can (the pick itself is left alone, so switching back
 restores it). The model column keeps only the models whose published
 `harnesses` name the chosen harness (`GET /api/models`, `ModelInfo.harnesses`;
 the built-in `meiva` runtime runs every spawnable model and is always listed
-first), grouped under a vendor heading, with hidden and superseded catalog
-entries excluded and a provider switched off in Control contributing nothing.
+first), grouped under a vendor heading, excluding superseded catalog entries.
+Hidden models and providers filter native API execution only; external CLI
+choices remain selectable without changing those preferences.
 Which harness runs which model is the registry's declaration, not a frontend
 table. Model and Effort select actual execution settings in both layouts.
 Native uses the model's `reasoning_effort_options` and
@@ -53,42 +54,8 @@ unavailable level is never sent; an explicit model pick is always sent as spawn
 config, even when it equals the cluster default. The backend rejects an
 unsupported explicit effort rather than translating it to another grade.
 
-Rates appear only for a **metered** harness. Billing travels with the harness
-(`HarnessAvailability.billing`: `api` for the built-in runtime, `subscription`
-for the external CLIs), because the same model costs differently depending on
-which loop runs it: a subscription pays nothing per token, so a per-million-token
-price beside the model name would describe a cost the user is not incurring. For
-a metered harness the model row carries the three numbers that decide it —
-non-cached input, cached input (cache read), output, in USD per million tokens —
-on one smaller line under the model name, so the name keeps the column's width
-(user 2026-10-21); the declared 5-minute and 1-hour cache-write rates and the
-vendor reference TPS (with its source and check date) are on hover. Standard and Fast service IDs have separate catalog entries and
-prices. Absent reliable absolute vendor figures say so instead of
-showing a blank column; relative speed multipliers and cluster measurements
-never stand in for the vendor figure.
-
-Declared `fast_of` services appear directly after their visible Standard model.
-Families sort by the Standard input price; a service whose Standard model is
-hidden remains an independent row sorted by its own price. Names do not imply
-family membership, and grouping never restores hidden or superseded entries.
-
-Control > Display draws the same catalog two levels deep (`_model_picker.tsx`): the
-provider is an uppercase heading on a tinted band carrying its master switch, its models
-start at the band's own text edge under a lighter separator, and each family is a
-`role=group` named by that heading. A provider is named once per family; a model row states itself
-and its prices. Switching a provider off takes its family out of the spawn picker and leaves
-the per-model switches non-editable; each model keeps its state.
-
-The published default uses the same database/config resolution as a new
-agent's birth stamp. Saving the cluster default invalidates both default-model
-and model-catalog queries, including the otherwise indefinitely cached picker.
-
-Rates below USD 1 use up to four significant digits, with at least two decimal
-places, so nonzero cache prices such as USD 0.003 never display as USD 0.00.
-The price tooltip labels input/cache-read/output, explains that the displayed
-rates cover the current base tier, and includes declared 5-minute/1-hour
-cache-write rates. Longer contexts and recurring rate windows can select
-different rates for actual billing.
+Catalog grouping, rates, defaults, and Control visibility switches are owned by
+[[ui/web/src/docs/frontend-components/creation-availability/model-presentation.meiva.okf.md|Model Presentation]].
 
 Guide, schedule, and package-draft creation toasts say "created" and
 point to the conversation for progress; they do not claim that a turn started.

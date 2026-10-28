@@ -12,7 +12,8 @@ from typing import Any
 
 import pytest
 
-from base.clock import SYSTEM_TIMERS
+from base.clock import SYSTEM_TIMERS, Timers
+from base.clock.tests.manual_timers import ManualTimers
 from base.config.tests.configuration import defaults
 from base.deploy.release import editable_install
 from base.host.env.agent_env import AGENT_BIRTH_CONFIG_ENV, AGENT_CONFIG_OVERLAY_ENV
@@ -53,7 +54,7 @@ async def test_run_consumes_only_explicit_config_maps(
         "    'word_limit': agent_setting('to_user_soft_limit_words'),\n"
         "}))\n",
     )
-    async with _running_service(tmp_path) as sock_path:
+    async with _running_service(tmp_path, SYSTEM_TIMERS) as sock_path:
         reader, writer = await asyncio.open_unix_connection(str(sock_path))
         try:
             writer.write(
@@ -113,7 +114,7 @@ def _write_request_envelope(
 
 
 @contextlib.asynccontextmanager
-async def _running_service(home: Path) -> AsyncGenerator[Path]:
+async def _running_service(home: Path, timers: Timers) -> AsyncGenerator[Path]:
     sock_path = service_socket_path(run_dir(home))
     base_env = {
         **child_env.inherited_process_env(),
@@ -125,7 +126,7 @@ async def _running_service(home: Path) -> AsyncGenerator[Path]:
         base_environ=base_env,
         default_cwd=home,
         source_root=editable_install.current_interpreter_source_root(sys.executable),
-        timers=SYSTEM_TIMERS,
+        timers=timers,
         pid=os.getpid(),
     )
     async with asyncio.TaskGroup() as tg:
@@ -156,7 +157,7 @@ async def _read_frames(reader: asyncio.StreamReader) -> list[dict[str, Any]]:
 
 @pytest.mark.asyncio
 async def test_ping_returns_ok_and_pid(tmp_path: Path) -> None:
-    async with _running_service(tmp_path) as sock_path:
+    async with _running_service(tmp_path, SYSTEM_TIMERS) as sock_path:
         reader, writer = await asyncio.open_unix_connection(str(sock_path))
         try:
             writer.write(protocol.encode({"id": 1, "method": "ping"}))
@@ -174,7 +175,7 @@ async def test_ping_returns_ok_and_pid(tmp_path: Path) -> None:
 
 @pytest.mark.asyncio
 async def test_run_streams_output_and_writes_result(tmp_path: Path) -> None:
-    async with _running_service(tmp_path) as sock_path:
+    async with _running_service(tmp_path, SYSTEM_TIMERS) as sock_path:
         exec_dir = exec_run_dir(tmp_path)
         req_file = exec_dir / "1" / "req-1.json"
         res_file = exec_dir / "1" / "res-1.json"
@@ -213,7 +214,7 @@ async def test_run_streams_output_and_writes_result(tmp_path: Path) -> None:
 
 @pytest.mark.asyncio
 async def test_cancel_mid_run_kills_process_group(tmp_path: Path) -> None:
-    async with _running_service(tmp_path) as sock_path:
+    async with _running_service(tmp_path, SYSTEM_TIMERS) as sock_path:
         exec_dir = exec_run_dir(tmp_path)
         req_file = exec_dir / "1" / "req-cancel.json"
         res_file = exec_dir / "1" / "res-cancel.json"
@@ -270,8 +271,10 @@ async def test_cancel_mid_run_kills_process_group(tmp_path: Path) -> None:
 
 
 @pytest.mark.asyncio
-async def test_timeout_kills_process_group(tmp_path: Path) -> None:
-    async with _running_service(tmp_path) as sock_path:
+@pytest.mark.parametrize("startup_delay", [0.0, 2.0])
+async def test_timeout_kills_process_group(tmp_path: Path, startup_delay: float) -> None:
+    timers = ManualTimers()
+    async with _running_service(tmp_path, timers) as sock_path:
         exec_dir = exec_run_dir(tmp_path)
         req_file = exec_dir / "1" / "req-timeout.json"
         res_file = exec_dir / "1" / "res-timeout.json"
@@ -279,11 +282,13 @@ async def test_timeout_kills_process_group(tmp_path: Path) -> None:
         code = (
             "import subprocess, sys, time\n"
             "from pathlib import Path\n"
+            f"time.sleep({startup_delay!r})\n"
             "p = subprocess.Popen([sys.executable, '-c', 'import time; time.sleep(60)'])\n"
             f"Path({str(pid_file)!r}).write_text(str(p.pid))\n"
+            "print('TIMEOUT_CHILD_READY', flush=True)\n"
             "time.sleep(60)\n"
         )
-        _write_request_envelope(req_file, code, timeout_s=1.5)
+        _write_request_envelope(req_file, code, timeout_s=60.0)
 
         reader, writer = await asyncio.open_unix_connection(str(sock_path))
         try:
@@ -301,6 +306,16 @@ async def test_timeout_kills_process_group(tmp_path: Path) -> None:
                 )
             )
             await writer.drain()
+            async with asyncio.timeout(15.0):
+                while True:
+                    line = await reader.readline()
+                    assert line
+                    msg = protocol.decode_object(line)
+                    if msg.get("type") == "output" and "TIMEOUT_CHILD_READY" in msg.get("data", ""):
+                        break
+            bg_pid = int(pid_file.read_text(encoding="utf-8").strip())
+            os.kill(bg_pid, 0)
+            timers.advance(1.5)
             frames = await _read_frames(reader)
         finally:
             writer.close()
@@ -310,14 +325,13 @@ async def test_timeout_kills_process_group(tmp_path: Path) -> None:
         assert final["ok"] is True
         assert final["data"]["cancelled"] is False
         assert final["data"]["timed_out"] is True
-        bg_pid = int(pid_file.read_text(encoding="utf-8").strip())
         with pytest.raises(ProcessLookupError):
             os.kill(bg_pid, 0)
 
 
 @pytest.mark.asyncio
 async def test_client_disconnect_kills_process_group(tmp_path: Path) -> None:
-    async with _running_service(tmp_path) as sock_path:
+    async with _running_service(tmp_path, SYSTEM_TIMERS) as sock_path:
         exec_dir = exec_run_dir(tmp_path)
         req_file = exec_dir / "1" / "req-disc.json"
         res_file = exec_dir / "1" / "res-disc.json"

@@ -16,7 +16,7 @@ export {
 
 // meiva:note
 // Display name: the wire value is snake_case, the UI shows the CLI's own name.
-// meiva:link ui/web/src/docs/frontend-components/creation-availability.meiva.okf.md
+// meiva:link ui/web/src/docs/frontend-components/creation-availability/creation-availability.meiva.okf.md
 export function harnessLabel(harness: Harness): string {
   switch (harness) {
     case "meiva":
@@ -34,7 +34,7 @@ export function harnessLabel(harness: Harness): string {
 
 // meiva:note
 // The probe's rows completed to one row per known harness. A harness the gateway did not answer for is `unknown` - never `unavailable` - and the built-in runtime stays selectable because the process that would run it is the one asking.
-// meiva:link ui/web/src/docs/frontend-components/creation-availability.meiva.okf.md
+// meiva:link ui/web/src/docs/frontend-components/creation-availability/creation-availability.meiva.okf.md
 export function harnessRows(rows: HarnessAvailability[]): HarnessAvailability[] {
   const byHarness = new Map(rows.map((row) => [row.harness, row]));
   return HARNESSES.map((harness) => byHarness.get(harness) ?? {
@@ -46,7 +46,7 @@ export function harnessRows(rows: HarnessAvailability[]): HarnessAvailability[] 
     // A row the gateway did not answer for is never launchable, so its billing
     // never reaches the price column; the built-in runtime is the one row this
     // fallback can leave selectable, and it is metered.
-    // meiva:link ui/web/src/docs/frontend-components/creation-availability.meiva.okf.md
+    // meiva:link ui/web/src/docs/frontend-components/creation-availability/creation-availability.meiva.okf.md
     billing: "api",
   });
 }

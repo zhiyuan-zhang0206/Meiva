@@ -56,7 +56,7 @@ export function SpawnPopover({ onSpawn, variant }: Props) {
           // The panel takes its width from the form (`w-fit`): the table sizes every
           // column to its content, so a fixed 660px would only hand the slack to one of
           // them. The stacked phone layout still wants the full width.
-          // meiva:link ui/web/src/docs/frontend-components/creation-availability.meiva.okf.md
+          // meiva:link ui/web/src/docs/frontend-components/creation-availability/creation-availability.meiva.okf.md
           className={cn(
             "z-50 max-w-[94vw] text-popover-foreground outline-none",
             isNarrow ? "w-[94vw]" : "w-fit",

@@ -50,7 +50,7 @@ export function AgentSidebar(props: Props) {
   // One harness probe per page load, taken here so the spawn picker opens on an
   // answer instead of starting the probe the user then waits for (user
   // 2026-10-21). The picker's own hooks read the same cache entries.
-  // meiva:link ui/web/src/docs/frontend-components/creation-availability.meiva.okf.md
+  // meiva:link ui/web/src/docs/frontend-components/creation-availability/creation-availability.meiva.okf.md
   useWarmHarnessAvailability();
   // Show-terminated is a DB-backed user setting (display.show_terminated), the
   // single source of truth shared with the Display settings page — toggling

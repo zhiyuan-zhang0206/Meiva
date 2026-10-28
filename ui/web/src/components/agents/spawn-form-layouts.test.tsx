@@ -204,7 +204,7 @@ describe("spawn table model & effort columns", () => {
     // Rates are the decision only when the harness meters them (user 2026-10-20):
     // input / cache read / output for the built-in runtime, nothing for a
     // subscription harness.
-    // meiva:link ui/web/src/docs/frontend-components/creation-availability.meiva.okf.md
+    // meiva:link ui/web/src/docs/frontend-components/creation-availability/creation-availability.meiva.okf.md
     expect(within(column(form, MODEL_COLUMN)).getByText(/\$[\d.]+ \/ \$[\d.]+ \/ \$[\d.]+/)).toBeTruthy();
     pick(form, HARNESS_COLUMN, "Claude Code");
     form = await table();
@@ -291,7 +291,7 @@ describe("spawn table model & effort columns", () => {
     // The machine is the first column, so several hosts are rows rather than a
     // footer list; the down host keeps its row, disabled and titled with the
     // reason (user 2026-10-20).
-    // meiva:link ui/web/src/docs/frontend-components/creation-availability.meiva.okf.md
+    // meiva:link ui/web/src/docs/frontend-components/creation-availability/creation-availability.meiva.okf.md
     expect(selected(form, MACHINE_COLUMN, "a-host")).toBe(true);
     expect(row(form, MACHINE_COLUMN, /b-host/).hasAttribute("disabled")).toBe(true);
     pick(form, MACHINE_COLUMN, "a-host");
@@ -319,7 +319,57 @@ describe("unavailable model catalog", () => {
 // cases pin the properties the table cases pin - the pick reaches the spawn, a
 // pick that is never spawned is not stored, a refusal is readable - against the
 // layout the phone actually gets.
-// meiva:link ui/web/src/docs/frontend-components/creation-availability.meiva.okf.md
+// meiva:link ui/web/src/docs/frontend-components/creation-availability/creation-availability.meiva.okf.md
+describe.each(["table", "stack"] as const)("%s API model visibility", (layout) => {
+  it.each([
+    { harness: "claude_code", label: "Claude Code", provider: "claude", model: "claude-sonnet-5-5" },
+    { harness: "codex", label: "Codex", provider: "gpt", model: "gpt-6-astra" },
+    { harness: "antigravity", label: "Antigravity", provider: "gemini", model: "gemini-4-argon" },
+    { harness: "kimi_code", label: "Kimi Code", provider: "kimi", model: "kimi-k2.6" },
+  ] as const)("keeps $harness execution selectable while its API model is hidden", async ({ harness, label, provider, model }) => {
+    vi.mocked(api.getSystemStatus).mockResolvedValue(singleMachineStatus());
+    const catalog = modelsWithEffort();
+    catalog.providers[provider] = [model];
+    catalog.models[model] = {
+      provider,
+      harnesses: ["meiva", harness],
+      context_window: 128_000,
+      harness_settings: {
+        [harness]: { reasoning_effort_options: ["low", "medium"], reasoning_effort_default: "medium" },
+      },
+    };
+    vi.mocked(api.getModels).mockResolvedValue(catalog);
+    setMockSetting("behavior.spawn_harness", harness);
+    setMockSetting("models.hidden", [model]);
+    setMockSetting("models.hidden_providers", [provider]);
+    const { onSpawn } = wrap(layout);
+    const form = await screen.findByTestId(`spawn-${layout}`);
+    if (layout === "stack") {
+      expect(within(form).getByRole("button", { name: `Model ${model}` })).toBeTruthy();
+      fireEvent.click(within(form).getByRole("button", { name: "Effort medium" }));
+    } else {
+      expect(selected(form, MODEL_COLUMN, model)).toBe(true);
+    }
+    pick(form, EFFORT_COLUMN, "low");
+    fireEvent.click(screen.getByRole("button", { name: "Spawn" }));
+    expect(onSpawn).toHaveBeenCalledWith({
+      machine: "test-host", harness, model, reasoning_effort: "low",
+    });
+    expect(storedSettings["models.hidden"]).toEqual([model]);
+    expect(storedSettings["models.hidden_providers"]).toEqual([provider]);
+
+    if (layout === "stack") {
+      fireEvent.click(within(form).getByRole("button", { name: `Harness ${label}` }));
+    }
+    pick(form, HARNESS_COLUMN, "Meiva");
+    if (layout === "stack") {
+      fireEvent.click(within(form).getByRole("button", { name: "Model deepseek-v4-pro" }));
+    }
+    expect(within(column(form, MODEL_COLUMN)).queryByRole("button", { name: model })).toBeNull();
+    expect(selected(form, MODEL_COLUMN, /deepseek-v4-pro/)).toBe(true);
+  });
+});
+
 describe("stacked picker", () => {
   async function stack(): Promise<HTMLElement> {
     return await screen.findByTestId("spawn-stack");
@@ -445,7 +495,7 @@ describe("stacked picker", () => {
 // that reading instead of dispatching another probe. The probe is not free — the
 // gateway RPCs the machine and the probe stats binaries and login stores — so a
 // session must not re-ask on every open.
-// meiva:link ui/web/src/docs/frontend-components/creation-availability.meiva.okf.md
+// meiva:link ui/web/src/docs/frontend-components/creation-availability/creation-availability.meiva.okf.md
 describe("harness availability freshness", () => {
   it("a warm page answers the picker without asking again", async () => {
     vi.mocked(api.getSystemStatus).mockResolvedValue(singleMachineStatus());
