@@ -213,7 +213,7 @@ def seat_round(
     statuses: dict[int, str] = {}
     try:
         with inputs.database().connect(autocommit=True) as conn, conn.cursor() as cur:
-            cur.execute(_STATUSES, ([registry.agent_id for registry in registries],))
+            cur.execute(_STATUSES, ([agent_id for agent_id, _payload in registries],))
             statuses = {int(row[0]): str(row[1]) for row in cur.fetchall()}
     except Exception as exc:
         notes.append(f"seats-blind=status:{type(exc).__name__}")
