@@ -137,6 +137,30 @@ def test_profile_offer_stands_down_for_the_profile_under_the_context_home(
 
 
 # meiva:note
+# No person at the terminal, and a daily profile that could be copied: the step asks nothing and
+# leaves no profile behind. The decision is the session's -- the same terminal the prompt would
+# speak over is a live buffer here, so a step that asked would write to it.
+def test_no_one_at_the_terminal_is_never_asked(
+    ctx: ConvergeCtx, tmp_path: Path, default_home: Path
+) -> None:
+    source = tmp_path / "captured-session" / "Library/Application Support/Google/Chrome"
+    source.mkdir(parents=True)
+    asked = io.StringIO()
+    ready = _browser_ctx(ctx, npx=True)
+    ready = replace(
+        ready,
+        session=replace(ready.session, user_home=tmp_path / "captured-session", interactive=False),
+    )
+    ready = replace(ready, terminal=Terminal(io.StringIO("copy\n"), asked, io.StringIO()))
+    assert ready.session.user_home != default_home
+
+    cv.ensure_browser(ready)
+
+    assert asked.getvalue() == ""
+    assert not profile_dir(ready.meiva_home).exists()
+
+
+# meiva:note
 # A repairable dependency gap keeps converge's existing warn-not-raise path.
 def test_enabled_with_missing_npx_prints_the_repair_box_and_does_not_raise(
     ctx: ConvergeCtx, capsys: pytest.CaptureFixture[str]

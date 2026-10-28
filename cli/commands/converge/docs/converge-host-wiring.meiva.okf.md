@@ -31,10 +31,12 @@ entry's operator owner across all selected steps. Its required `clock` is the
 invocation's `CommandRuntime.clock`: the incomplete marker, the ownership preflight log and the
 health preflight stamp with it, so a test hands in the instant it wants. Its required `terminal`
 is the invocation's `CommandRuntime.terminal`: the browser step asks the person at it whether to
-seed the browser profile, so the offer speaks over the streams the command entry read once. Its
-required `helper` is the invocation's `CommandRuntime.helper` factory: the screen-capture,
-Accessibility and helper bring-up steps call it only on a macOS host that can run a helper, and a
-test that does not mean to reach one passes `refuse_helper`. Host capability steps and OS
+seed the browser profile, so the offer speaks over the streams the command entry read once. The
+terminal carries the streams only; whether to ask is `session.interactive`'s decision, and the
+entry reads both from the same process, so they agree. Its required `helper` is the invocation's
+`CommandRuntime.helper` factory: the screen-capture, Accessibility and helper bring-up steps call
+it only on a macOS host that can run a helper, and a test that does not mean to reach one passes
+`refuse_helper`. Host capability steps and OS
 job registrations read that owner's live view
 at each existing step boundary, including browser, permission helpers, memory,
 transfer, GitHub PR checks, the package refresh cadence and WAL-G schedule.
