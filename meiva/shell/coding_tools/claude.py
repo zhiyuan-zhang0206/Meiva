@@ -35,6 +35,7 @@ from ._common import (
     write_task_file_header,
 )
 from ._common import cancel as _cancel_generation
+from ._common import placed_path as placed_path
 from ._common import resolve_dir as resolve_dir
 from ._common import resolve_file as resolve_file
 from ._common import status as _owner_status

@@ -40,6 +40,7 @@ from pathlib import Path
 import meiva
 from base.api_contracts.agent_contract import AgentNotFound, AgentStatus, GatewayUnavailable
 from base.host.atomic_io import SYSTEM_FS, AtomicWriter
+from base.paths.expand import expand_home
 from base.sessions import coding_session_owner
 from base.sessions.backend import get_shell_backend
 from base.sessions.coding_session_owner_record import CodingSessionStatus
@@ -59,8 +60,20 @@ _LAUNCH_FILE = "launch.txt"
 _PATCH_FILE = "meiva-relay.patch.yml"
 
 
-def _resolve_dir(dir_path: str) -> Path:
-    p = Path(dir_path).expanduser().resolve()
+# meiva:note
+# A path a person typed, with its leading `~` expanded against `user_home` — the home the entry read
+# and handed down. A `~someone/...` spelling names another account's home, which this invocation did
+# not read, so it is refused on stderr like a missing workspace instead of raising a traceback.
+def _placed(raw: str, *, user_home: Path) -> Path:
+    try:
+        return expand_home(raw, user_home=user_home)
+    except ValueError as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        sys.exit(1)
+
+
+def _resolve_dir(dir_path: str, *, user_home: Path) -> Path:
+    p = _placed(dir_path, user_home=user_home).resolve()
     if not p.is_dir():
         print(f"error: {p} is not a directory or does not exist", file=sys.stderr)
         sys.exit(1)
@@ -295,18 +308,19 @@ def main(argv: list[str]) -> int:
     add_lineage_arguments(parser)
     add_capability_arguments(parser)
     args = parser.parse_args(argv)
+    user_home = Path.home()
     if args.status or args.cancel_generation:
         if args.prompt is not None:
             parser.error("--prompt requires a new launch")
         key = coding_session_owner.canonical_key(
-            Path(args.workspace).expanduser().resolve(),
+            _placed(args.workspace, user_home=user_home).resolve(),
             tool="dsh",
             cluster=meiva.context.require_meiva_home(),
         )
         return _status(key) if args.status else _cancel(key, args.cancel_generation)
     if args.prompt is None or not args.prompt.strip():
         parser.error("new dsh launch requires a non-empty --prompt")
-    workspace = _resolve_dir(args.workspace)
+    workspace = _resolve_dir(args.workspace, user_home=user_home)
     refusal = announce_capability("dsh", mode=args.mode, force=args.force_mode)
     if refusal:
         return refusal

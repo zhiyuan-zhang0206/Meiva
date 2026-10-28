@@ -22,6 +22,7 @@ from uuid import UUID
 from base.agents.impersonation.host_transport import AntigravityServer, antigravity_rpc
 
 from ._common import init_file, write_task_file_header
+from ._common import placed_path as placed_path
 from ._common import resolve_dir as resolve_dir
 from ._common import resolve_file as resolve_file
 from .plans.launch_request import checked_prompt, contract_file, worker_bootstrap
