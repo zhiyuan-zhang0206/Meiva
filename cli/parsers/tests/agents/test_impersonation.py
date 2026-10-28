@@ -24,6 +24,7 @@ from pydantic import JsonValue
 from base.agents import impersonation as leases
 from base.agents.impersonation.host_transport import AntigravityServer, write_antigravity_endpoint
 from base.agents.impersonation.status import ImpersonationStatus
+from base.clock import SYSTEM_TIMERS
 from base.cluster.machine import MachineIdentityReader
 from base.cluster.machine.tests.identity import machine_identity as machine_identity
 from base.db import Database
@@ -596,6 +597,11 @@ def test_inbox_waits_for_new_input_and_returns_empty_at_the_deadline(
     lease, _, mid = active
     db_conn.execute("UPDATE inbound_messages SET status='done' WHERE id=%s", (mid,))
     db_conn.commit()
+    # meiva:note
+    # The deadline of `--wait` is real seconds: the command measures it on the timers it is handed,
+    # so this case hands the process timers. A manual clock would never reach the deadline, because
+    # nothing in the wait sleeps on it.
+    runtime = replace(command_runtime, timers=SYSTEM_TIMERS)
     code = _run(
         "inbox",
         str(lease["session_id"]),
@@ -603,7 +609,7 @@ def test_inbox_waits_for_new_input_and_returns_empty_at_the_deadline(
         str(lease["agent_id"]),
         "--wait",
         "0.5",
-        runtime=command_runtime,
+        runtime=runtime,
         database=operator_database,
     )
     assert code == 0
