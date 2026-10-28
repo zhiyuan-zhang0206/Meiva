@@ -19,12 +19,14 @@ def pool(db_url: str):
         p.close()
 
 
-def register_machine(db: psycopg.Connection, name: str = MACHINE) -> None:
+def register_machine(
+    db: psycopg.Connection, name: str = MACHINE, *, gateway_url: str = "http://127.0.0.1:1"
+) -> None:
     with db.cursor() as cur:
         cur.execute(
             "INSERT INTO machines (name, gateway_url, role) VALUES (%s, %s, %s) "
             "ON CONFLICT (name) DO NOTHING",
-            (name, "http://127.0.0.1:1", "{agent-runner}"),
+            (name, gateway_url, "{agent-runner}"),
         )
     db.commit()
 

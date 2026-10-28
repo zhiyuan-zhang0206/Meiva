@@ -12,6 +12,7 @@
 
 from __future__ import annotations
 
+import contextlib
 import json
 import os
 import shutil
@@ -407,8 +408,26 @@ def cluster_chrome(profile: Path, *, workdir: Path) -> Generator[subprocess.Pope
         stdin=subprocess.DEVNULL,
     )
     try:
+        _wait_until_it_reads_as_chrome(child)
         yield child
     finally:
         if child.poll() is None:
             child.kill()
         child.wait(timeout=10)
+
+
+# meiva:note
+# The stand-in is useful only once the process table names it as a Chrome: a copy that cannot start
+# (a broken `lib` link) must fail the test here, not let a decoy-free stop pass over nothing.
+def _wait_until_it_reads_as_chrome(child: subprocess.Popen[bytes]) -> None:
+    deadline = time.monotonic() + 10.0
+    while time.monotonic() < deadline:
+        if child.poll() is not None:
+            raise RuntimeError(
+                f"the stand-in Chrome exited ({child.returncode}) before it was named"
+            )
+        with contextlib.suppress(psutil.NoSuchProcess):
+            if "chrom" in psutil.Process(child.pid).name().lower():
+                return
+        time.sleep(0.02)
+    raise RuntimeError("the stand-in Chrome never read as a Chrome in the process table")

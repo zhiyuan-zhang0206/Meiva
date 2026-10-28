@@ -20,6 +20,7 @@ from ops.cluster.rpc import RpcClient
 from ops.tests.rpc_support import RPC_TEST_CREDENTIAL, completed, scripted_ops_server
 from services.wake.heartbeat.daemon import AgentLivenessRound
 from services.wake.heartbeat.tests.machine_probe_setup import pool as pool
+from services.wake.heartbeat.tests.machine_probe_setup import register_machine
 
 _STATUS: dict[str, object] = {
     "machine_name": "runner-1",
@@ -39,11 +40,7 @@ def test_the_liveness_round_probes_each_machine_through_its_own_cluster_client(
     database_gate: ProcessDbGate,
 ) -> None:
     with scripted_ops_server(completed(_STATUS)) as runner:
-        db_conn.execute(
-            "INSERT INTO machines (name, role, gateway_url) VALUES (%s, ARRAY['agent-runner'], %s)",
-            ("runner-1", runner.url),
-        )
-        db_conn.commit()
+        register_machine(db_conn, "runner-1", gateway_url=runner.url)
         round_ = AgentLivenessRound(
             Database.from_settings(gate=database_gate),
             pool,
