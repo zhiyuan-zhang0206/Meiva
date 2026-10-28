@@ -14,7 +14,14 @@ from typing import TypeGuard
 
 import yaml
 
-__all__ = ["drift_report", "encode_branch", "expected_checks", "mapping", "trunk_gate_findings"]
+__all__ = [
+    "audit_target",
+    "drift_report",
+    "encode_branch",
+    "expected_checks",
+    "mapping",
+    "trunk_gate_findings",
+]
 
 # meiva:note
 # P2 ruling (2026-09-02): the branch-protection admission gate is the three
@@ -32,11 +39,34 @@ _ADMISSION_CHECKS = frozenset(
     }
 )
 _MATRIX_TEMPLATE = re.compile(r"\$\{\{ matrix")
+_GITHUB_REPO = re.compile(r"[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+")
+_REMOTE_REPO = re.compile(r"(?:github\.com[:/])([^/]+)/([^/]+?)(?:\.git)?$")
 _REQUIRED_WORKFLOWS = (
     ".github/workflows/ci.yml",
     ".github/workflows/ci-rerun.yml",
 )
 _SAFE_URL_BYTES = frozenset(b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789_.-~")
+
+
+# meiva:note
+# The repository to audit: the one the operator names, or the one this checkout's origin remote
+# names (github.com over https or ssh, with or without `.git`), which the caller reads. A name
+# that is not `owner/repo`, an empty branch, or a remote that names no GitHub repository is an
+# operator error rather than a guess.
+def audit_target(repo: str | None, branch: str, remote_url: str | None) -> str:
+    if not branch:
+        raise ValueError("--branch must not be empty")
+    chosen = repo if repo is not None else _parse_remote(remote_url or "")
+    if _GITHUB_REPO.fullmatch(chosen) is None:
+        raise ValueError("--repo must have the form owner/repo")
+    return chosen
+
+
+def _parse_remote(url: str) -> str:
+    match = _REMOTE_REPO.search(url.strip())
+    if match is None:
+        raise ValueError("origin is not a GitHub repository URL")
+    return f"{match.group(1)}/{match.group(2)}"
 
 
 def encode_branch(branch: str) -> str:

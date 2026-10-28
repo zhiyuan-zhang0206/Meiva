@@ -8,10 +8,14 @@ import pytest
 
 from scripts.audit import branch_protection as audit
 from scripts.audit.analysis import (
+    audit_target,
     drift_report,
     encode_branch,
+    error_detail,
     expected_checks,
     mapping,
+    outcome,
+    report_text,
     trunk_gate_findings,
 )
 
@@ -215,3 +219,38 @@ def test_encode_branch_percent_encodes_everything_outside_the_safe_set() -> None
 def test_mapping_refuses_a_payload_that_is_not_an_object() -> None:
     with pytest.raises(TypeError, match="branch protection response must be a mapping"):
         mapping([], "branch protection response")
+
+
+def test_audit_target_names_the_repository_and_checks_both_inputs() -> None:
+    assert audit_target("owner/repo", "main", None) == "owner/repo"
+    assert audit_target(None, "main", "git@github.com:owner/repo.git") == "owner/repo"
+    assert audit_target(None, "release/1.0", "https://github.com/owner/repo") == "owner/repo"
+    with pytest.raises(ValueError, match="--repo must have the form owner/repo"):
+        audit_target("not-a-repository", "main", None)
+    with pytest.raises(ValueError, match="--branch must not be empty"):
+        audit_target("owner/repo", "", None)
+    with pytest.raises(ValueError, match="origin is not a GitHub repository URL"):
+        audit_target(None, "main", "https://example.com/owner/repo")
+
+
+def test_report_text_says_the_same_thing_as_json_text_and_findings() -> None:
+    assert report_text("ok", [], as_json=False) == (
+        "Branch protection audit: no drift detected.\nAUDIT_RESULT=ok"
+    )
+    assert report_text("drift", ["one", "two"], as_json=False) == (
+        "Branch protection audit: drift.\n- one\n- two\nAUDIT_RESULT=drift"
+    )
+    assert report_text("drift", ["one"], as_json=True) == (
+        '{"findings": ["one"], "result": "drift"}\nAUDIT_RESULT=drift'
+    )
+
+
+def test_outcome_turns_findings_into_the_reported_verdict_and_exit_status() -> None:
+    assert outcome([]) == ("ok", 0)
+    assert outcome(["drift"]) == ("drift", 1)
+
+
+def test_error_detail_prefers_a_child_stderr_over_its_message() -> None:
+    assert error_detail("boom\n", "CalledProcessError: gh") == "boom"
+    assert error_detail(None, "FileNotFoundError: gh") == "FileNotFoundError: gh"
+    assert error_detail("  ", "timed out") == "timed out"

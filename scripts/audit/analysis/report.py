@@ -12,6 +12,7 @@ import posixpath
 from collections import Counter
 from collections.abc import Sequence
 from dataclasses import asdict, dataclass
+from pathlib import Path
 
 from scripts.audit.analysis.frozen import is_frozen
 from scripts.audit.analysis.references import (
@@ -24,7 +25,16 @@ from scripts.audit.analysis.references import (
     is_doc_file,
 )
 
-__all__ = ["GROUPS", "Report", "as_json", "group_of", "render", "scan"]
+__all__ = [
+    "GROUPS",
+    "Report",
+    "as_json",
+    "group_of",
+    "limit_error",
+    "relative_target",
+    "render",
+    "scan",
+]
 
 GROUPS = ("imports", "strings", "tests", "docs", "structure", "history")
 _TITLES = {
@@ -240,3 +250,21 @@ def as_json(report: Report) -> dict[str, object]:
         },
         "hidden_internal": report.hidden,
     }
+
+
+# meiva:note
+# A target as the report names it: an absolute path inside the checkout becomes relative to it, a
+# `:name` suffix is kept. Resolving the path is the shell's.
+def relative_target(raw: str, resolved: Path | None, repo_root: Path) -> str:
+    spec, sep, rest = raw.partition(":")
+    if resolved is not None and resolved.is_relative_to(repo_root):
+        spec = resolved.relative_to(repo_root).as_posix()
+    return spec + sep + rest
+
+
+# meiva:note
+# Why `--limit N` is unusable, or None when it is: a report lists at least one file per group.
+def limit_error(limit: int | None) -> str | None:
+    if limit is not None and limit < 1:
+        return "--limit must be at least 1"
+    return None

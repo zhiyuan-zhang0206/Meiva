@@ -7,8 +7,16 @@
 from __future__ import annotations
 
 import re
+from typing import TypeGuard
 
-__all__ = ["old_references", "referenced_names"]
+__all__ = [
+    "is_text",
+    "module_pair",
+    "old_references",
+    "pair_result",
+    "referenced_names",
+    "verdict_line",
+]
 
 _HISTORY_READ_RE = re.compile(r"""git\s+show\s+(?:"[^"]*"|'[^']*'|\S+)""")
 
@@ -59,3 +67,47 @@ def referenced_names(module: str, text: str) -> set[str]:
     for _, names in _from_imports(module, text):
         refs.update(names)
     return refs
+
+
+# meiva:note
+# The `OLD=NEW` pair an operator names on the command line: two dotted module names, both
+# non-empty, each segment an identifier.
+def module_pair(value: str) -> tuple[str, str]:
+    parts = value.split("=")
+    if len(parts) != 2 or any(
+        not all(part.isidentifier() for part in module.split(".")) for module in parts
+    ):
+        raise ValueError("expected OLD=NEW with dotted Python module names")
+    return parts[0], parts[1]
+
+
+# meiva:note
+# Whether a tracked file's text is content this audit reads: a binary file carries a NUL byte and
+# is skipped, an unreadable one has no text at all.
+def is_text(text: str | None) -> TypeGuard[str]:
+    return text is not None and "\0" not in text
+
+
+# meiva:note
+# What one pair reports: the line naming its old references and missing names, and whether it
+# failed the audit (any old reference, any missing name, any import error).
+def pair_result(
+    old: str,
+    new: str,
+    *,
+    old_count: int,
+    names: int,
+    missing: list[str],
+    import_error: str,
+) -> tuple[str, bool]:
+    line = (
+        f"{old} -> {new}: {old_count} old references; "
+        f"{names} referenced names, missing={missing}{import_error}"
+    )
+    return line, bool(old_count or missing or import_error)
+
+
+# meiva:note
+# The verdict line the audit ends with, and the exit status it stands for.
+def verdict_line(*, failed: bool) -> str:
+    return f"AUDIT: {'FAIL' if failed else 'PASS'}"

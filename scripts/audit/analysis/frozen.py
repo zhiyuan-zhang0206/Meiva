@@ -1,8 +1,8 @@
 # meiva:note
 # Which tracked paths are frozen history: point-in-time records never rewritten.
 #
-# `where_used.py` reports a reference in them as its own group instead of live content,
-# and `module_moves.py` leaves them out of the universe it audits.
+# `where_used.py` reports a reference in them as its own group instead of live content, and
+# `module_moves.py` leaves them out of the universe it audits.
 
 from __future__ import annotations
 

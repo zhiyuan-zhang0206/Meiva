@@ -1,5 +1,5 @@
 # meiva:note
-# How far changes reach: the impact census numbers: how far changes reach through the selection graph.
+# The impact census numbers: how far changes reach through the selection graph.
 #
 # `impact_census.py` builds the impact graph from the checkout and prints; the numbers it reports —
 # source files every test reaches, the inputs nothing bounds, and the tests that pull them in — are

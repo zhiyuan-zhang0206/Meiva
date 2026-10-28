@@ -8,7 +8,14 @@ import pytest
 
 from base.host.proc import run_bounded
 from scripts.audit import module_moves as gate
-from scripts.audit.analysis import old_references, referenced_names
+from scripts.audit.analysis import (
+    is_text,
+    module_pair,
+    old_references,
+    pair_result,
+    referenced_names,
+    verdict_line,
+)
 
 
 @pytest.fixture
@@ -218,3 +225,32 @@ def test_old_references_ignore_a_pinned_history_object_read() -> None:
 def test_referenced_names_collects_attribute_and_from_import_names() -> None:
     text = "pkg.new.Alpha\nfrom pkg.new import Beta, Gamma\n"
     assert referenced_names("pkg.new", text) == {"Alpha", "Beta", "Gamma"}
+
+
+def test_module_pair_accepts_only_two_dotted_module_names() -> None:
+    assert module_pair("pkg.old=pkg.new") == ("pkg.old", "pkg.new")
+    for invalid in ("missing_separator", "pkg.old=new-mod", "pkg.old=", "=pkg.new"):
+        with pytest.raises(ValueError, match="expected OLD=NEW"):
+            module_pair(invalid)
+
+
+def test_is_text_rejects_a_binary_file_and_a_missing_read() -> None:
+    assert is_text("import pkg.old\n")
+    assert not is_text(None)
+    assert not is_text("before\0after")
+
+
+def test_pair_result_names_the_failure_of_one_pair() -> None:
+    line, failed = pair_result(
+        "pkg.old", "pkg.new", old_count=2, names=3, missing=["Gone"], import_error=""
+    )
+    assert line == "pkg.old -> pkg.new: 2 old references; 3 referenced names, missing=['Gone']"
+    assert failed
+    clean, ok = pair_result("pkg.old", "pkg.new", old_count=0, names=1, missing=[], import_error="")
+    assert clean == "pkg.old -> pkg.new: 0 old references; 1 referenced names, missing=[]"
+    assert not ok
+
+
+def test_verdict_line_is_the_audit_result_the_exit_status_stands_for() -> None:
+    assert verdict_line(failed=True) == "AUDIT: FAIL"
+    assert verdict_line(failed=False) == "AUDIT: PASS"

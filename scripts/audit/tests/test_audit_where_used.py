@@ -7,7 +7,7 @@ import pytest
 from base.host.proc import run_bounded
 from scripts.audit import analysis as finder
 from scripts.audit import where_used as shell
-from scripts.audit.analysis import Report, as_json, render, scan
+from scripts.audit.analysis import Report, as_json, limit_error, relative_target, render, scan
 
 FILES = {
     "pkg/__init__.py": "from .engine import run as run\n",
@@ -359,3 +359,21 @@ def test_main_lists_every_file_unless_a_limit_is_given(
     out = capsys.readouterr().out
     assert "HIDDEN" not in out
     assert shell.main(["pkg.engine:run", "--limit", "1"], repo_root=audit_checkout) == 0
+
+
+def test_relative_target_rewrites_only_a_path_inside_the_checkout() -> None:
+    root = Path("/repo")
+    assert relative_target("/repo/pkg/mod.py:name", Path("/repo/pkg/mod.py"), root) == (
+        "pkg/mod.py:name"
+    )
+    assert relative_target("/elsewhere/mod.py", Path("/elsewhere/mod.py"), root) == (
+        "/elsewhere/mod.py"
+    )
+    assert relative_target("pkg/mod.py", None, root) == "pkg/mod.py"
+
+
+def test_limit_error_refuses_a_report_that_lists_nothing() -> None:
+    assert limit_error(None) is None
+    assert limit_error(1) is None
+    assert limit_error(0) == "--limit must be at least 1"
+    assert limit_error(-3) == "--limit must be at least 1"

@@ -13,7 +13,6 @@ from __future__ import annotations
 
 import argparse
 import json
-import re
 import subprocess
 from collections.abc import Callable
 from pathlib import Path
@@ -22,21 +21,25 @@ import yaml
 
 from meizel import lint_common
 from scripts.audit.analysis import (
+    audit_target,
     drift_report,
     encode_branch,
+    error_detail,
     expected_checks,
     mapping,
+    outcome,
+    report_text,
     trunk_gate_findings,
 )
 
 _REPO_ROOT = Path(__file__).resolve().parents[2]
 TRUNK_FILE = _REPO_ROOT / ".trunk" / "trunk.yaml"
-_GITHUB_REPO = re.compile(r"[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+")
-_REMOTE_REPO = re.compile(r"(?:github\.com[:/])([^/]+)/([^/]+?)(?:\.git)?$")
 
 
-def derive_repo() -> str:
-    """Derive ``owner/repo`` from this checkout's origin remote."""
+# meiva:note
+# The origin remote of this checkout, as git prints it; naming the repository is the pure
+# `analysis/protection.audit_target`.
+def _origin_url() -> str:
     completed = subprocess.run(
         ["git", "remote", "get-url", "origin"],
         cwd=_REPO_ROOT,
@@ -44,10 +47,7 @@ def derive_repo() -> str:
         text=True,
         check=True,
     )
-    match = _REMOTE_REPO.search(completed.stdout.strip())
-    if match is None:
-        raise ValueError("origin is not a GitHub repository URL")
-    return f"{match.group(1)}/{match.group(2)}"
+    return completed.stdout
 
 
 def run_gh(args: list[str]) -> str:
@@ -74,11 +74,6 @@ def _audit(
     trunk_file: Path = TRUNK_FILE,
     run_gh_fn: Callable[[list[str]], str] = run_gh,
 ) -> list[str]:
-    if _GITHUB_REPO.fullmatch(repo) is None:
-        raise ValueError("--repo must have the form owner/repo")
-    if not branch:
-        raise ValueError("--branch must not be empty")
-
     trunk_text = lint_common.read_utf8_text(trunk_file)
     if trunk_text is None:
         raise FileNotFoundError(trunk_file)
@@ -111,25 +106,6 @@ def _audit(
     return drift_report(protection, expected, workflows)
 
 
-def _print_report(result: str, findings: list[str], *, as_json: bool) -> None:
-    if as_json:
-        print(json.dumps({"result": result, "findings": findings}, sort_keys=True))
-    elif result == "ok":
-        print("Branch protection audit: no drift detected.")
-    else:
-        print(f"Branch protection audit: {result}.")
-        for finding in findings:
-            print(f"- {finding}")
-    print(f"AUDIT_RESULT={result}")
-
-
-def _error_detail(error: BaseException) -> str:
-    if isinstance(error, subprocess.CalledProcessError):
-        stderr = error.stderr.strip() if isinstance(error.stderr, str) else ""
-        return stderr or str(error)
-    return str(error)
-
-
 def main(
     argv: list[str] | None = None,
     *,
@@ -143,7 +119,8 @@ def main(
     args = parser.parse_args(argv)
 
     try:
-        repo = args.repo if args.repo is not None else derive_repo()
+        remote_url = _origin_url() if args.repo is None else None
+        repo = audit_target(args.repo, args.branch, remote_url)
         findings = _audit(repo, args.branch, trunk_file=trunk_file, run_gh_fn=run_gh_fn)
     except (
         FileNotFoundError,
@@ -155,14 +132,18 @@ def main(
         yaml.YAMLError,
         subprocess.CalledProcessError,
     ) as error:
-        _print_report("error", [_error_detail(error)], as_json=args.as_json)
+        print(
+            report_text(
+                "error",
+                [error_detail(getattr(error, "stderr", None), str(error))],
+                as_json=args.as_json,
+            )
+        )
         return 2
 
-    if findings:
-        _print_report("drift", findings, as_json=args.as_json)
-        return 1
-    _print_report("ok", [], as_json=args.as_json)
-    return 0
+    result, code = outcome(findings)
+    print(report_text(result, findings, as_json=args.as_json))
+    return code
 
 
 if __name__ == "__main__":

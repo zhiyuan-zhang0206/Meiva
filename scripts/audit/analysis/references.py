@@ -17,7 +17,7 @@
 # - A symbol that a package `__init__` imports at its top level is also importable from the
 #   package (`find_doors`): importers of that door count as importers of the symbol.
 #
-# Grouping and presentation are `where_used.py`; this module only finds hits.
+# Grouping and presentation are `analysis/report.py`; this module only finds hits.
 
 from __future__ import annotations
 
@@ -27,6 +27,11 @@ import re
 from bisect import bisect_left, bisect_right
 from collections.abc import Callable, Iterable, Iterator, Sequence
 from dataclasses import dataclass
+
+# meiva:note
+# A tracked file that is regenerated rather than authored: it says nothing about where a name is
+# used, so the reference scan leaves it out.
+GENERATED_FILES = frozenset({".test_durations"})
 
 _CLIP = 110
 _DOC_SUFFIXES = (".md", ".mdx", ".rst")

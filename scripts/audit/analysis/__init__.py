@@ -8,17 +8,27 @@
 
 from __future__ import annotations
 
-from scripts.audit.analysis.frozen import FROZEN_PREFIXES, is_frozen
-from scripts.audit.analysis.moves import old_references, referenced_names
+from scripts.audit.analysis.ddl import schema_columns, strip_comments
+from scripts.audit.analysis.moves import (
+    is_text,
+    module_pair,
+    old_references,
+    pair_result,
+    referenced_names,
+    verdict_line,
+)
 from scripts.audit.analysis.protection import (
+    audit_target,
     drift_report,
     encode_branch,
     expected_checks,
     mapping,
     trunk_gate_findings,
 )
+from scripts.audit.analysis.protection_report import error_detail, outcome, report_text
 from scripts.audit.analysis.reach import Census, Site, census, report_lines
 from scripts.audit.analysis.references import (
+    GENERATED_FILES,
     Door,
     Hit,
     Repo,
@@ -29,18 +39,26 @@ from scripts.audit.analysis.references import (
     is_doc_file,
     resolve,
 )
-from scripts.audit.analysis.report import Report, as_json, group_of, render, scan
+from scripts.audit.analysis.report import (
+    Report,
+    as_json,
+    group_of,
+    limit_error,
+    relative_target,
+    render,
+    scan,
+)
 from scripts.audit.analysis.schema import (
     Drift,
+    allowlist_entries,
     classify_column,
     classify_table,
     compare,
-    schema_columns,
-    strip_comments,
+    live_columns,
 )
 
 __all__ = [
-    "FROZEN_PREFIXES",
+    "GENERATED_FILES",
     "Census",
     "Door",
     "Drift",
@@ -49,7 +67,9 @@ __all__ = [
     "Report",
     "Site",
     "Target",
+    "allowlist_entries",
     "as_json",
+    "audit_target",
     "build_matcher",
     "census",
     "classify_column",
@@ -57,20 +77,29 @@ __all__ = [
     "compare",
     "drift_report",
     "encode_branch",
+    "error_detail",
     "expected_checks",
     "file_hits",
     "group_of",
     "index_repo",
     "is_doc_file",
-    "is_frozen",
+    "is_text",
+    "limit_error",
+    "live_columns",
     "mapping",
+    "module_pair",
     "old_references",
+    "outcome",
+    "pair_result",
     "referenced_names",
+    "relative_target",
     "render",
     "report_lines",
+    "report_text",
     "resolve",
     "scan",
     "schema_columns",
     "strip_comments",
     "trunk_gate_findings",
+    "verdict_line",
 ]

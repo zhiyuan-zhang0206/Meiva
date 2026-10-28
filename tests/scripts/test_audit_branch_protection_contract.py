@@ -1,23 +1,17 @@
 from __future__ import annotations
 
 from pathlib import Path
-from types import ModuleType
 
 import yaml
+
+from scripts.audit.analysis import trunk_gate_findings
 
 _REPO_ROOT = Path(__file__).resolve().parents[2]
 
 
-def _audit() -> ModuleType:
-    from scripts.audit import branch_protection
-
-    return branch_protection
-
-
 def test_trunk_gate_findings_accept_the_real_declaration() -> None:
-    audit = _audit()
     text = (_REPO_ROOT / ".trunk" / "trunk.yaml").read_text()
-    assert audit.trunk_gate_findings(text) == []
+    assert trunk_gate_findings(text) == []
 
 
 def test_real_trunk_yaml_declares_the_full_gate() -> None:

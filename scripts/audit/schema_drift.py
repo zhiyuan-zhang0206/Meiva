@@ -12,19 +12,16 @@ import psycopg
 
 from meizel import lint_common
 from meizel.graph.universe import EditPlan
-from scripts.audit.analysis import compare, schema_columns
+from scripts.audit.analysis import allowlist_entries, compare, live_columns, schema_columns
 
 
-def _live_columns(conn: psycopg.Connection) -> dict[str, dict[str, str]]:
+def _live_rows(conn: psycopg.Connection) -> list[tuple[str, str, str, str | None]]:
     with conn.cursor() as cur:
         cur.execute(
             "SELECT table_name, column_name, is_nullable, column_default "
             "FROM information_schema.columns WHERE table_schema = 'public'"
         )
-        out: dict[str, dict[str, str]] = {}
-        for table, column, nullable, default in cur.fetchall():
-            out.setdefault(table, {})[column] = f"{nullable}|{default or ''}"
-        return out
+        return list(cur.fetchall())
 
 
 def _parse_args(argv: list[str] | None) -> argparse.Namespace:
@@ -43,15 +40,13 @@ def _parse_args(argv: list[str] | None) -> argparse.Namespace:
     return parser.parse_args(argv)
 
 
-def _allowed_entries(allow: Path | None) -> frozenset[str]:
+def _allow_text(allow: Path | None) -> str:
     # meiva:note
-    # The entries the allowlist names; an absent file allows nothing.
+    # The allowlist as read from disk; an absent or unreadable file allows nothing.
     if allow is None:
-        return frozenset()
+        return ""
     allow_text = lint_common.read_utf8_text(allow)
-    if allow_text is None:
-        return frozenset()
-    return frozenset(line.strip() for line in allow_text.splitlines() if line.strip())
+    return allow_text or ""
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -68,12 +63,9 @@ def main(argv: list[str] | None = None) -> int:
     schema = schema_columns(schema_text)
     with psycopg.connect(dsn) as conn:
         conn.read_only = True
-        live = _live_columns(conn)
+        live = live_columns(_live_rows(conn))
     declared = {name.lower() for name in schema}
-    drift = compare(schema, live)
-    allowed = _allowed_entries(args.allow)
-    if allowed:
-        drift = drift.allowed_only(allowed)
+    drift = compare(schema, live).allowed_only(allowlist_entries(_allow_text(args.allow)))
     print(drift.render(declared))
     if args.json is not None:
         EditPlan(writes={args.json: json.dumps(drift.to_json(declared), indent=2)}).apply()

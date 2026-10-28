@@ -4,7 +4,7 @@ import pytest
 import yaml
 
 from base.host.proc import run_bounded
-from scripts.audit.analysis import is_frozen
+from scripts.audit.analysis.frozen import is_frozen
 from scripts.content_lint import (
     check_doc_references,
     lint_doc_anchors,

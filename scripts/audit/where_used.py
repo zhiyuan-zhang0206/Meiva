@@ -76,10 +76,13 @@ if str(_REPO) not in sys.path:
 
 from meizel import lint_common  # noqa: E402
 from scripts.audit.analysis import (  # noqa: E402
+    GENERATED_FILES,
     Repo,
     Report,
     as_json,
     index_repo,
+    limit_error,
+    relative_target,
     render,
     resolve,
     scan,
@@ -92,9 +95,6 @@ _DESCRIPTION = (
     "importers, tests, string targets, docs and registries. TARGET is a symbol (pkg.mod:name), "
     "a module or a path; the groups and what each one means are in the note at the top of this file."
 )
-# meiva:note
-# `.test_durations` is regenerated, so it says nothing about where a name is used.
-_GENERATED = frozenset({".test_durations"})
 
 
 def load_repo(root: Path) -> Repo:
@@ -103,7 +103,7 @@ def load_repo(root: Path) -> Repo:
     texts: dict[str, str] = {}
     for name in lint_common.tracked_files(root, include_untracked=True):
         path = root / name
-        if name in _GENERATED or path.is_symlink():
+        if name in GENERATED_FILES or path.is_symlink():
             continue
         text = lint_common.read_utf8_text(path)
         if text is not None:
@@ -113,12 +113,10 @@ def load_repo(root: Path) -> Repo:
 
 def _relative(raw: str, repo_root: Path) -> str:
     # meiva:note
-    # `/abs/path/in/this/checkout.py:name` -> `path/in/this/checkout.py:name`.
-    spec, sep, rest = raw.partition(":")
-    path = Path(spec)
-    if path.is_absolute() and path.resolve().is_relative_to(repo_root):
-        spec = path.resolve().relative_to(repo_root).as_posix()
-    return spec + sep + rest
+    # `/abs/path/in/this/checkout.py:name` -> `path/in/this/checkout.py:name`; the rewrite itself is
+    # `analysis/report.relative_target`.
+    spec = Path(raw.partition(":")[0])
+    return relative_target(raw, spec.resolve() if spec.is_absolute() else None, repo_root)
 
 
 def main(argv: list[str] | None = None, *, repo_root: Path | None = None) -> int:
@@ -137,8 +135,9 @@ def main(argv: list[str] | None = None, *, repo_root: Path | None = None) -> int
     )
     parser.add_argument("--json", action="store_true", dest="as_json", help="complete, for scripts")
     args = parser.parse_args(argv)
-    if args.limit is not None and args.limit < 1:
-        parser.error("--limit must be at least 1")
+    bad_limit = limit_error(args.limit)
+    if bad_limit is not None:
+        parser.error(bad_limit)
     root = _REPO if repo_root is None else repo_root.resolve()
     repo = load_repo(root)
     reports: list[Report] = []

@@ -37,7 +37,15 @@ import sys
 from pathlib import Path
 
 from meizel import lint_common
-from scripts.audit.analysis import is_frozen, old_references, referenced_names
+from scripts.audit.analysis import (
+    is_text,
+    module_pair,
+    old_references,
+    pair_result,
+    referenced_names,
+    verdict_line,
+)
+from scripts.audit.analysis.frozen import is_frozen
 
 __all__ = ["main"]
 
@@ -60,7 +68,7 @@ def _tracked_text(repo_root: Path) -> list[tuple[str, str]]:
             continue
         # Git tracks a symlink's target path, not the target file's content.
         text = path.readlink().as_posix() if path.is_symlink() else lint_common.read_utf8_text(path)
-        if text is None or "\0" in text:
+        if not is_text(text):
             continue
         texts.append((name, text))
     return texts
@@ -86,15 +94,6 @@ def _missing(module: str, refs: set[str]) -> list[str]:
     return missing
 
 
-def _module_pair(value: str) -> tuple[str, str]:
-    parts = value.split("=")
-    if len(parts) != 2 or any(
-        not all(part.isidentifier() for part in module.split(".")) for module in parts
-    ):
-        raise argparse.ArgumentTypeError("expected OLD=NEW with dotted Python module names")
-    return parts[0], parts[1]
-
-
 def main(argv: list[str], *, repo_root: Path | None = None) -> int:
     """Audit tracked content in an explicit checkout, defaulting to this checkout.
 
@@ -102,7 +101,7 @@ def main(argv: list[str], *, repo_root: Path | None = None) -> int:
     Diagnostics and exit codes are shared by command-line and direct callers.
     """
     parser = argparse.ArgumentParser(description=(__doc__ or "").split("## What it checks")[0])
-    parser.add_argument("pairs", nargs="+", metavar="OLD=NEW", type=_module_pair)
+    parser.add_argument("pairs", nargs="+", metavar="OLD=NEW", type=module_pair)
     args = parser.parse_args(argv)
     texts = _tracked_text(_REPO if repo_root is None else repo_root.resolve())
     failed = False
@@ -122,12 +121,17 @@ def main(argv: list[str], *, repo_root: Path | None = None) -> int:
         except Exception as exc:
             # An import failure is an audit failure; still report the remaining pairs.
             import_error = f"; import failed: {type(exc).__name__}: {exc}"
-        print(
-            f"{old} -> {new}: {old_count} old references; "
-            f"{len(refs)} referenced names, missing={missing}{import_error}"
+        line, pair_failed = pair_result(
+            old,
+            new,
+            old_count=old_count,
+            names=len(refs),
+            missing=missing,
+            import_error=import_error,
         )
-        failed = failed or bool(old_count or missing or import_error)
-    print("AUDIT:", "FAIL" if failed else "PASS")
+        print(line)
+        failed = failed or pair_failed
+    print(verdict_line(failed=failed))
     return 1 if failed else 0
 
 
