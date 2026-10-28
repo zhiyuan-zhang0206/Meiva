@@ -336,6 +336,9 @@ def _check_ast_and_quality(
     type_ctx, type_problems = _load_type_context(argv, repo_root)
     if type_ctx is None:
         return type_problems
+    ambient_tree = ambient_state.Tree(
+        type_ctx.universe.files, type_ctx.universe.load_text, type_ctx.universe.dirs
+    )
     files = limits.budget_files(targets, repo_root, _STRUCTURE_DIRS)
     ast_files = _ast_rule_files(argv, repo_root)
     measurements: dict[str, dict[str, int]] = {kind: {} for kind in quality_budget.QUALITY_SECTIONS}
@@ -361,7 +364,7 @@ def _check_ast_and_quality(
             errors.extend(f"{rel}:{line}: {message}" for line, message in _scan_file(tree, rel))
             _collect_locality(tree, rel, sites, scanned)
         if ambient:
-            errors.extend(ambient_state.collect(tree, rel, repo_root, sites, scanned))
+            errors.extend(ambient_state.collect(tree, rel, ambient_tree, sites, scanned))
         if path in files:
             for kind, values in measure_quality(tree, rel).items():
                 measurements[kind].update(values)
@@ -370,7 +373,7 @@ def _check_ast_and_quality(
         locality.site_errors(sites, baseline, scanned=scanned, repo_root=repo_root, renames=renames)
     )
     errors.extend(decisions.missing_allowlist_errors(repo_root))
-    errors.extend(ambient_state.missing_allowlist_errors(repo_root))
+    errors.extend(ambient_state.missing_allowlist_errors(ambient_tree))
     return errors
 
 

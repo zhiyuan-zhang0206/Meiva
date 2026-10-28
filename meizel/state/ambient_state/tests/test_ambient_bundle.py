@@ -5,7 +5,7 @@ import pathlib
 import textwrap
 
 from meizel.state import ambient_state
-from meizel.state.ambient_state import bundle
+from meizel.state.ambient_state.module import Tree
 
 _BUNDLE_SOURCE = """
     from base.config.wiring import root_bundle
@@ -19,12 +19,11 @@ _BUNDLE_SOURCE = """
 def _sites(
     root: pathlib.Path, source: str, rel: str = "gateway/routers/thing.py"
 ) -> dict[str, int]:
-    bundle.bundles_defined_in.cache_clear()
     path = root / rel
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(textwrap.dedent(source), encoding="utf-8")
     tree = ast.parse(path.read_text(encoding="utf-8"))
-    measured = ambient_state.measure(tree, rel, root)
+    measured = ambient_state.measure(tree, rel, _tree(root))
     return {key.split("::", 1)[1]: len(lines) for key, lines in measured.items()}
 
 
@@ -71,3 +70,11 @@ def test_a_class_without_the_marker_is_not_a_bundle(tmp_path: pathlib.Path) -> N
     path.write_text("class Plain:\n    pass\n", encoding="utf-8")
     source = "from gateway.plain import Plain\n\ndef f(p: Plain) -> None: ...\n"
     assert _sites(tmp_path, source) == {}
+
+
+# meiva:note
+# The files a test wrote under `root`, as the tree the rule is handed.
+def _tree(root: pathlib.Path) -> Tree:
+    files = {path.relative_to(root).as_posix() for path in root.rglob("*.py")}
+    dirs = {path.relative_to(root).as_posix() for path in root.rglob("*") if path.is_dir()}
+    return Tree(files, lambda rel: (root / rel).read_text(encoding="utf-8"), dirs)
