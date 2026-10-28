@@ -6,6 +6,7 @@
 
 from __future__ import annotations
 
+import os
 import time
 from pathlib import Path
 
@@ -50,6 +51,7 @@ def stop_tree(
             facts=LAUNCHD_FACTS,
             run=refuse_launchctl,
             timers=SYSTEM_TIMERS,
+            environ=os.environ,
         )
     return {unit_id: row.state for unit_id, row in root.units.items()}
 
@@ -87,6 +89,7 @@ def test_a_forced_stop_force_downs_every_unit(short_tmp: Path) -> None:
             facts=LAUNCHD_FACTS,
             run=refuse_launchctl,
             timers=SYSTEM_TIMERS,
+            environ=os.environ,
         )
 
     assert [verb for verb, _ in root.calls if verb != "status"] == ["force-down"]
@@ -104,6 +107,7 @@ def test_stopping_a_home_with_no_root_reports_no_custody(
         facts=LAUNCHD_FACTS,
         run=refuse_launchctl,
         timers=SYSTEM_TIMERS,
+        environ=os.environ,
     )
 
     assert "no live owner or retained service custody" in capsys.readouterr().out
@@ -113,13 +117,13 @@ def test_the_stop_plan_names_the_units_the_root_runs_that_are_not_preserved(
     short_tmp: Path,
 ) -> None:
     with scripted_root(short_tmp, [UnitRow("gateway"), UnitRow("ops")]):
-        names = driver.root_tree_plan(frozenset({"ops"}), home=short_tmp)
+        names = driver.root_tree_plan(frozenset({"ops"}), home=short_tmp, environ=os.environ)
 
     assert names == ["meiva-gateway"]
 
 
 def test_the_stop_plan_of_a_home_with_no_root_is_empty(short_tmp: Path) -> None:
-    assert driver.root_tree_plan(frozenset(), home=short_tmp) == []
+    assert driver.root_tree_plan(frozenset(), home=short_tmp, environ=os.environ) == []
 
 
 def test_no_unit_goes_down_before_the_agent_host_has_exited(short_tmp: Path) -> None:
@@ -137,6 +141,7 @@ def test_no_unit_goes_down_before_the_agent_host_has_exited(short_tmp: Path) -> 
             deadline=Deadline(at=time.monotonic() + 30, timers=SYSTEM_TIMERS),
             force=False,
             home=short_tmp,
+            environ=os.environ,
         )
 
     names = [name for name, _ in root.events]
@@ -155,6 +160,7 @@ def test_a_stop_whose_deadline_has_passed_takes_nothing_down(short_tmp: Path) ->
             deadline=Deadline(at=time.monotonic() - 1, timers=SYSTEM_TIMERS),
             force=False,
             home=short_tmp,
+            environ=os.environ,
         )
 
     assert root.units["gateway"].state == "running"

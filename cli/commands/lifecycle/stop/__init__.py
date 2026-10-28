@@ -133,7 +133,15 @@ def do_stop(
 def _admitted(plan: StopPlan, request: StopRequest, env: StopEnvironment) -> bool:
     tree = plan.scope.tree_preserve
     sessions = (
-        () if tree is None else tuple(root_driver.root_tree_plan(tree, home=env.command.home))
+        ()
+        if tree is None
+        else tuple(
+            root_driver.root_tree_plan(
+                tree,
+                home=env.command.home,
+                environ=env.command.config.process_environment(),
+            )
+        )
     )
     for line in preview_lines(plan.scope, sessions, session_name(BROWSER_SESSION)):
         print(line)

@@ -93,6 +93,10 @@ class ScriptedRoot:
     runtime: LoadedRuntimeIdentity | None = None
     calls: list[tuple[str, str | None]] = field(default_factory=list[tuple[str, str | None]])
     # meiva:note
+    # The caller block every state verb carried, in the order the root read them: what a real root
+    # records beside each state it serves.
+    callers: list[dict[str, object]] = field(default_factory=list[dict[str, object]])
+    # meiva:note
     # The wall-clock time each entry of `calls` was received, at the same index.
     asked_at: list[datetime] = field(default_factory=list[datetime])
     # meiva:note
@@ -165,6 +169,9 @@ class _Handler(socketserver.StreamRequestHandler):
         except ProtocolError as exc:
             self.wfile.write(encode(error_response(ErrorCode.INVALID_REQUEST, str(exc))))
             return
+        caller = request.get("caller")
+        if isinstance(caller, dict):
+            tree.callers.append(dict(caller))
         self.wfile.write(encode(tree.serve(request["verb"], request.get("name"))))
 
 

@@ -6,13 +6,9 @@
 # prints, and executes what those plans return. Callers hand it the home as a value, and a
 # launch the values it reads from settings (`RootLaunchInputs`); nothing here reads settings.
 #
-# It is not free of the process environment yet. `managed_service_env` (base) builds the
-# environment of the launched root and of its keeper from the process environment, and is the one
-# ambient read this module triggers. Around it the start and stop shells still reach the
-# process-environment home through base owners that take no home: `start_serving`
-# (`begin_start`, `mark_serving`, `clear_serving`, `state_path`), `launch_failures.record` and
-# `status_journal`. The home those owners resolve and the home handed to this module agree only
-# because both come from the same process environment.
+# It reads no process environment: the caller block's mapping is handed in, and every home path
+# the module touches is derived from the `home` the caller passes. Nothing below it resolves either
+# for itself.
 
 from __future__ import annotations
 
@@ -32,7 +28,6 @@ from base.cluster.machine import MachineRoles
 from base.deploy import start_trace
 from base.deploy.progress_timeout import CRITICAL_SERVICE_SESSIONS
 from base.host.atomic_io import write_text_atomic
-from base.host.env.registry import process_environment
 from base.host.permissions_helper.client import HelperFactory, PermissionsHelperError
 from base.host.system.hostport import Host
 from base.native_process.ownership import OwnedProcess
@@ -110,7 +105,7 @@ def complete_boot_start(
 
     if not in_boot_unit(host=host, proc_root=proc_root):
         return
-    snapshot = root_status(root_client(home))
+    snapshot = root_status(root_client(home, environ=host.environ))
     if snapshot is None:
         raise RootDriverError("cannot hand systemd an unobservable root")
     require_root_owner(snapshot, helper=helper, home=home)
@@ -165,12 +160,11 @@ def start_roster(
 #
 # The client carries the caller block of this process, which the root records beside every
 # state verb it serves (`base/native_process/root_control/docs/lifecycle-caller.meiva.okf.md`):
-# pid, working directory and argv are facts of the process, so this door reads them once per
-# client from the process environment.
-def root_client(home: Path, *, timeout: float = 5.0) -> RootClient:
+# pid, working directory and argv are facts of the process; `environ` is the mapping handed in.
+def root_client(home: Path, *, environ: Mapping[str, str], timeout: float = 5.0) -> RootClient:
     return RootClient(
         root_run_dir(home) / _ROOT_SOCKET_NAME,
-        caller=caller_identity(process_environment()),
+        caller=caller_identity(environ),
         timeout=timeout,
     )
 
@@ -553,7 +547,7 @@ def admit_live_start(
     inputs: RootLaunchInputs,
 ) -> bool:
     """Observe before any converge/schema write; reuse only identical inputs."""
-    snapshot = root_status(root_client(inputs.home))
+    snapshot = root_status(root_client(inputs.home, environ=inputs.environment))
     if snapshot is None:
         require_root_absent(inputs.home)
         return False
@@ -616,7 +610,7 @@ def launch_service_tree(
         run_dir=root_run_dir(home),
         manifests=root_manifests_path(home),
     )
-    client = root_client(home)
+    client = root_client(home, environ=inputs.environment)
     try:
         snapshot = root_status(client)
         if snapshot is not None:
@@ -676,14 +670,17 @@ def require_root_absent(home: Path) -> None:
     instance_lock.release_instance_lock(fd)
 
 
-def root_tree_plan(preserve: frozenset[str], *, home: Path) -> list[str]:
+def root_tree_plan(
+    preserve: frozenset[str], *, home: Path, environ: Mapping[str, str]
+) -> list[str]:
     """Display names for the selected exact root units."""
-    return sorted(name for name, unit in root_tree_selection(home).items() if unit not in preserve)
+    selection = root_tree_selection(home, environ=environ)
+    return sorted(name for name, unit in selection.items() if unit not in preserve)
 
 
-def root_tree_selection(home: Path) -> dict[str, str]:
+def root_tree_selection(home: Path, *, environ: Mapping[str, str]) -> dict[str, str]:
     """Map the home's qualified display names to the root's exact unit IDs."""
-    snapshot = root_status(root_client(home))
+    snapshot = root_status(root_client(home, environ=environ))
     if snapshot is None:
         require_root_absent(home)
         return {}
@@ -729,12 +726,19 @@ def stop_dormant_helper_root(
 # TERM window), so nothing else is stopped while the agent-host drains. Each call dials a
 # client bounded by the time left of the shared deadline.
 # meiva:link services/agent_runner/agent_host/lifecycle/docs/graceful-exit.meiva.okf.md
-def down_units(unit_ids: Iterable[str], *, deadline: Deadline, force: bool, home: Path) -> None:
+def down_units(
+    unit_ids: Iterable[str],
+    *,
+    deadline: Deadline,
+    force: bool,
+    home: Path,
+    environ: Mapping[str, str],
+) -> None:
     for unit_id in unit_ids:
         remaining_s = deadline.left()
         if remaining_s is None:
             raise RootDriverError("service stop deadline expired; custody retained")
-        client = root_client(home, timeout=remaining_s)
+        client = root_client(home, environ=environ, timeout=remaining_s)
         response = client.force_down(unit_id) if force else client.down(unit_id)
         _call_ok(response, f"down {unit_id}")
         print(f"  ✓ meiva-root unit {session_name(unit_id)} stopped")
@@ -750,6 +754,7 @@ def stop_root_service_tree(
     facts: LaunchdFacts,
     run: BoundedRunner,
     timers: Timers,
+    environ: Mapping[str, str],
 ) -> None:
     """Stop the root-owned tree — everything, or only the units not preserved.
 
@@ -759,7 +764,7 @@ def stop_root_service_tree(
     tree cannot be brought down; the caller's phase accounting reports it.
     """
     deadline = Deadline.after(timers, timeout_s)
-    client = root_client(home, timeout=timeout_s)
+    client = root_client(home, environ=environ, timeout=timeout_s)
     snapshot = root_status(client)
     if snapshot is None:
         require_root_absent(home)
@@ -775,7 +780,7 @@ def stop_root_service_tree(
             print("  meiva-root: every unit is preserved — tree left running")
         case StopUnits(unit_ids, stop_root):
             record_lifecycle_request("force-down" if force else "down", unit_ids)
-            down_units(unit_ids, deadline=deadline, force=force, home=home)
+            down_units(unit_ids, deadline=deadline, force=force, home=home, environ=environ)
             if stop_root:
                 print(
                     f"  meiva-root: stopping the whole tree ({len(unit_ids)} unit(s)) and the root"

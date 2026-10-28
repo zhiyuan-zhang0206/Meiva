@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from pathlib import Path
 from typing import assert_never
 
@@ -70,9 +71,10 @@ def wait_for_service_tree(
     timeout_s: float,
     home: Path,
     timers: Timers,
+    environ: Mapping[str, str],
     poll_interval_s: float = root_driver.READY_POLL_INTERVAL_S,
 ) -> ReadinessWait:
-    client = root_driver.root_client(home)
+    client = root_driver.root_client(home, environ=environ)
     by_session = {spec.session: spec for spec in roster}
     started_at = timers.monotonic()
     recorded: set[str] = set()
