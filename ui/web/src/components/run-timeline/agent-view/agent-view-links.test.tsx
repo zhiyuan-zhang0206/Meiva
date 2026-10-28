@@ -26,6 +26,7 @@ import AgentViewPage from "@/app/insights/run/[agents]/page";
 import { drawnLinks, itemX, mockCanvas, paintFrame } from "../canvas/run-timeline-test-canvas-mock";
 import { curveOf, curvePoint } from "../model/links/geometry";
 import { MAX_ARROWS } from "../model/links/cluster";
+import { LINK_COLORS } from "../model/links/resolve";
 import { viewportOf } from "../model/timeline-model-viewport";
 
 const T0 = Date.parse("2026-10-04T12:00:00.000Z");
@@ -115,8 +116,15 @@ describe("arrows between agents", () => {
     link({ kind: "terminate", ts: at(50), sender: 99, receiver: 7 }),
     link({ kind: "fork", ts: at(20), sender: 7, receiver: 98, fork_from: 5 }),
   ];
-  const BLUE = "#3b82f6";
-  const GREEN = "#22c55e";
+  // meiva:note
+  // The palette is one CSS token per kind, shared by the arrows, the legend and the ticks, so a test
+  // compares against the token; `link-palette.test.ts` holds the contrast those tokens must keep.
+  // meiva:link ui/web/src/docs/frontend-components/palette.meiva.okf.md
+  const BLUE = LINK_COLORS.send_message;
+  const GREEN = LINK_COLORS.spawn;
+  const RED = LINK_COLORS.terminate;
+  const TEAL = LINK_COLORS.fork;
+  const BROWN = LINK_COLORS.user_message;
 
   const trackRect = (el: Element) => {
     const index = [...document.querySelectorAll("[data-track]")].indexOf(el);
@@ -168,9 +176,9 @@ describe("arrows between agents", () => {
     expect(spawn.y + spawn.h).toBe(mid(8, "run-timeline-row-units"));
 
     const toOther = strokes().filter((d) => d.y + d.h === mid(null, "run-timeline-row-other"));
-    expect(toOther.map((d) => d.color).sort()).toEqual(["#14b8a6"]);
+    expect(toOther.map((d) => d.color)).toEqual([TEAL]);
     const fromOther = strokes().filter((d) => d.y === mid(null, "run-timeline-row-other"));
-    expect(fromOther.map((d) => d.color)).toEqual(["#ef4444"]);
+    expect(fromOther.map((d) => d.color)).toEqual([RED]);
   });
 
   it("switches a kind on and off from the legend, with how many there are", async () => {
@@ -187,19 +195,21 @@ describe("arrows between agents", () => {
 
   it("highlights the arrow under the pointer, and a block over it wins", async () => {
     await ready();
+    const widthOfMessage = () => strokes().find((d) => d.color === BLUE)?.lineWidth;
+    const plain = widthOfMessage();
     const { x: arrowX, y: middleY } = messageArrowMiddle();
     fireEvent.pointerMove(screen.getByTestId("run-timeline-chart"), { clientX: arrowX, clientY: middleY });
     await paintFrame();
-    expect(strokes().find((d) => d.color === BLUE)?.lineWidth).toBeGreaterThan(1.25);
+    expect(widthOfMessage()).toBeGreaterThan(plain ?? 0);
     expect(screen.queryByTestId("run-timeline-readout")).toBeNull();
     fireEvent.pointerMove(screen.getByTestId("run-timeline-chart"), { clientX: 900, clientY: middleY });
     await paintFrame();
-    expect(strokes().find((d) => d.color === BLUE)?.lineWidth).toBe(1.25);
+    expect(widthOfMessage()).toBe(plain);
 
     fireEvent.pointerMove(canvasOf(7, "units"), { clientX: itemX(BY_AGENT[7], "units", "utext-0-0", 1000, BASE_78) });
     fireEvent.pointerMove(screen.getByTestId("run-timeline-chart"), { clientX: arrowX, clientY: middleY });
     await paintFrame();
-    expect(strokes().find((d) => d.color === BLUE)?.lineWidth).toBe(1.25);
+    expect(widthOfMessage()).toBe(plain);
   });
 
   it("selects an arrow by a click on it and shows the event in the details", async () => {
@@ -405,8 +415,7 @@ describe("arrows between agents", () => {
     await waitFor(() => expect(screen.getByTestId("run-timeline-link-legend-user_message").textContent).toBe("User message 1"));
     expect(screen.getByTestId("run-timeline-link-legend-send_message").textContent).toBe("Message 1");
     await paintFrame();
-    const brown = "#92400e";
-    expect(strokes().map((d) => d.color).sort()).toEqual([BLUE, brown].sort());
+    expect(strokes().map((d) => d.color).sort()).toEqual([BLUE, BROWN].sort());
     fireEvent.click(screen.getByTestId("run-timeline-link-legend-user_message"));
     await paintFrame();
     expect(strokes().map((d) => d.color)).toEqual([BLUE]);

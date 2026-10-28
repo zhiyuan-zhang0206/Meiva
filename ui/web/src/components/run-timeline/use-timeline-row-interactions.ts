@@ -63,6 +63,27 @@ export function useTimelineRowInteractions({
 }) {
   const live = useRef({ base, view, onView, axis });
   const pending = useRef<Viewport | null>(null);
+
+  // meiva:note
+  // One viewport update per animation frame: a wheel spin or a drag delivers several events between two
+  // frames, and each one used to re-render the whole chart and repaint every row.
+  // meiva:link ui/web/src/docs/frontend-components/run-timeline/axis-and-keyboard.meiva.okf.md
+  const viewFrame = useRef<number | null>(null);
+  const waiting = useRef<Viewport | null>(null);
+  const show = (next: Viewport) => {
+    waiting.current = next;
+    if (viewFrame.current !== null) return;
+    viewFrame.current = requestAnimationFrame(() => {
+      viewFrame.current = null;
+      const shown = waiting.current;
+      waiting.current = null;
+      if (shown !== null) live.current.onView(shown);
+    });
+  };
+  useEffect(() => () => {
+    if (viewFrame.current !== null) cancelAnimationFrame(viewFrame.current);
+    viewFrame.current = null;
+  }, []);
   useEffect(() => {
     const wanted = pending.current;
     if (wanted && (view.from !== wanted.from || view.to !== wanted.to)) {
@@ -229,7 +250,7 @@ export function useTimelineRowInteractions({
 
       pending.current = next;
       live.current = { ...live.current, view: next };
-      live.current.onView(next);
+      show(next);
     };
     chart.addEventListener("wheel", onWheel, { passive: false });
     return () => chart.removeEventListener("wheel", onWheel);
@@ -281,7 +302,7 @@ export function useTimelineRowInteractions({
       state.panning = true;
       event.currentTarget.setPointerCapture(state.id);
     }
-    onView(panView(axis, state.view, base, -dx / track.width));
+    show(panView(axis, state.view, base, -dx / track.width));
   };
   const endDrag = () => {
     if (drag.current?.panning) {
