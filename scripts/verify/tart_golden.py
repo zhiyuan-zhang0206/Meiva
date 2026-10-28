@@ -269,14 +269,15 @@ def await_grant(build: Build, vm: str) -> None:
         print("The grant is not in place yet:\n  - " + "\n  - ".join(problems), flush=True)
 
 
-def build_golden(ref: str, evidence_root: Path, *, name: str, repo: Path, tart: Tart) -> int:
+def build_golden(
+    ref: str, evidence_root: Path, *, name: str, repo: Path, tart: Tart, stamp: str
+) -> int:
     dry_run = tart.dry_run
     commit = resolve_commit(repo, ref)
     # Refuse before anything is created: an existing VM is never overwritten, and a third
     # running VM is never booted.
     tart.require_absent(name)
     tart.require_capacity()
-    stamp = time.strftime("%Y%m%d-%H%M%S")
     evidence: Evidence | None = None
     if not dry_run:
         evidence = Evidence(
@@ -342,6 +343,7 @@ def build_golden(ref: str, evidence_root: Path, *, name: str, repo: Path, tart: 
 
 def main() -> int:
     user_home = Path.home()
+    stamp = time.strftime("%Y%m%d-%H%M%S")
     parser = argparse.ArgumentParser(description=DESCRIPTION)
     parser.add_argument("--ref", required=True, help="commit whose helper source is built")
     parser.add_argument("--name", default=NAME, help="name of the golden image to create")
@@ -368,6 +370,7 @@ def main() -> int:
         name=args.name,
         repo=REPO,
         tart=Tart(args.tart, home=user_home, dry_run=args.dry_run),
+        stamp=stamp,
     )
 
 

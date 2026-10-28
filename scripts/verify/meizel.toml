@@ -10,14 +10,9 @@ exports = ["scripted_reply.py", "understanding_replay.py"]
 
 [roots]
 "clean_host_deps.py" = { kinds = ["random"], why = "Verification recipe CLI generates a unique container name per run" }
-"container.py" = { kinds = ["home", "random"], why = "Container verification CLI resolves the host home boundary and generates a unique container name" }
+"container.py" = { kinds = ["clock", "home", "random"], why = "Container verification CLI entry: main() resolves the host home boundary, generates a unique container name and takes the run's one start-time stamp, then hands each value down to run()" }
 "host_dependency_refusal.py" = { kinds = ["random"], why = "Verification recipe CLI generates a unique container name per run" }
 "observe.py" = { kinds = ["clock", "home", "platform", "random"], why = "In-boundary observer CLI records the guest platform, timestamp, home directory and idempotency key" }
-"tart_golden.py" = { kinds = ["home"], why = "Golden VM builder CLI resolves the default Tart binary and host home boundary" }
-"tart_run.py" = { kinds = ["home", "random"], why = "Tart verification CLI resolves the host home boundary and generates a unique run VM name" }
+"tart_golden.py" = { kinds = ["clock", "home"], why = "Golden VM builder CLI entry: main() resolves the default Tart binary and host home boundary and takes the run's one start-time stamp, then hands each value down to build_golden()" }
+"tart_run.py" = { kinds = ["clock", "home", "random"], why = "Tart verification CLI entry: main() resolves the host home boundary, generates a unique run VM name and takes the run's one start-time stamp, then hands each value down to run()" }
 "understanding_replay.py" = { kinds = ["clock", "db", "home", "settings"], why = "Tool entry composes its process resources from the launch configuration, resolves the home the model catalog discovers plugins under, and builds the process clock its replay passes stamp with" }
-
-[debt.ambient-read]
-"container.py#clock time.strftime()" = 1
-"tart_golden.py#clock time.strftime()" = 1
-"tart_run.py#clock time.strftime()" = 1

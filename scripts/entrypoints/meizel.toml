@@ -1,19 +1,12 @@
-purity = "strict-to-be"
-
 [uses]
-"tests" = ["agent.py"]
+"agent.py" = ["spawn_request.py"]
+"tests" = ["spawn_request.py"]
 
 [roots]
-"agent.py" = { kinds = ["random"], why = "CLI bootstrap entrypoint generates a fresh UUID4 idempotency key for the spawn request" }
+"agent.py" = { kinds = ["random", "settings"], why = "CLI bootstrap entrypoint: main() composes the gateway access from settings once and draws the fresh UUID4 idempotency key the spawn request carries" }
 
-[debt.ambient-read]
-"agent.py#settings base.cluster.machine.ambient.gateway_access_from_settings" = 1
-
-[debt.impure-call]
-"agent.py#Path.resolve" = 1
-"agent.py#uuid.uuid4" = 1
-"gateway.py#Path.resolve" = 1
-
-[debt.impure-edge]
-"agent.py#base/host/net/http_dial.py" = 1
-"gateway.py#gateway/app.py" = 1
+[purity]
+"." = "strict"
+"agent.py" = { mode = "none", why = "the command line shell: it puts the checkout on sys.path, reads the gateway access from settings, posts the request the pure module builds, and prints the id the gateway answers with; the route, headers and id parsing are in spawn_request.py" }
+"gateway.py" = { mode = "none", why = "the launch wrapper: it puts the checkout on sys.path and calls gateway.app.main(); it decides nothing of its own" }
+"spawn_request.py" = "strict"
