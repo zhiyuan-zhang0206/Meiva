@@ -1,0 +1,10 @@
+exports = ["plan.py", "reader.py"]
+
+[uses]
+"reader.py" = ["plan.py"]
+
+[purity]
+"." = "strict"
+"__init__.py" = "strict"
+"plan.py" = "strict"
+"reader.py" = { mode = "none", why = "the shell that reads one stable regular file within a budget: it lstats the path, opens it without following links, reads it and stats it again; what the stats refuse (not regular, over budget, swapped while opening, changed while reading) is decided in plan.py" }

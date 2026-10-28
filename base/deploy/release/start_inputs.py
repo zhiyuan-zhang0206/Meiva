@@ -10,7 +10,7 @@ from base.deploy.release.start_digest import (
     combined_digest,
     relative_key,
 )
-from base.host.verified_file import regular_bytes
+from base.host.verified_file.reader import regular_bytes
 
 
 def configuration_digest(home: Path) -> str:

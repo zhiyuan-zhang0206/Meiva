@@ -14,7 +14,7 @@ from datetime import datetime
 from typing import TypedDict
 
 from base.api_contracts.status import MachineStatus, PausedReason, SchemaMismatchStatus
-from base.host.resource_sample import ResourceSample
+from base.host.resource.reading import ResourceSample
 from gateway.cluster.schemas import ServiceItem
 
 __all__ = [
