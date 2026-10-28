@@ -1,0 +1,24 @@
+exports = ["page.tsx"]
+
+[uses]
+"page.test.tsx" = ["page.tsx"]
+"page.tsx" = ["_schedule_components.tsx"]
+
+[debt.ambient-read]
+"_schedule_components.tsx#clock Date" = 2
+
+[debt.first-party-patch]
+"page.test.tsx#vi.spyOn ui/web/src/lib/transport/api.ts.createSchedule" = 1
+"page.test.tsx#vi.spyOn ui/web/src/lib/transport/api.ts.deleteSchedule" = 1
+"page.test.tsx#vi.spyOn ui/web/src/lib/transport/api.ts.draftSchedule" = 3
+"page.test.tsx#vi.spyOn ui/web/src/lib/transport/api.ts.getSchedule" = 4
+"page.test.tsx#vi.spyOn ui/web/src/lib/transport/api.ts.listSchedules" = 19
+"page.test.tsx#vi.spyOn ui/web/src/lib/transport/api.ts.restartSchedule" = 1
+"page.test.tsx#vi.spyOn ui/web/src/lib/transport/api.ts.scheduleLogs" = 4
+"page.test.tsx#vi.spyOn ui/web/src/lib/transport/api.ts.scheduleRuns" = 4
+"page.test.tsx#vi.spyOn ui/web/src/lib/transport/api.ts.startSchedule" = 1
+"page.test.tsx#vi.spyOn ui/web/src/lib/transport/api.ts.stopSchedule" = 1
+"page.test.tsx#vi.spyOn ui/web/src/lib/transport/api.ts.updateSchedule" = 1
+
+[debt.third-party-patch]
+"page.test.tsx#vi.mock next/navigation" = 1

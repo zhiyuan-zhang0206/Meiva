@@ -1,0 +1,4 @@
+exports = ["page.tsx"]
+
+[uses]
+"page.test.tsx" = ["page.tsx"]

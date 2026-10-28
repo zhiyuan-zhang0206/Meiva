@@ -521,9 +521,36 @@ max-params = ["6"]
 max-attr-hops = ["3"]
 
 [typescript]
+# `ui/web/src/components` is enumerated child by child: every subdirectory is judged except
+# `timeline`, whose view tests import the package door and close a local cycle the checker cannot
+# record on first adoption (see the debt-gate note in docs/checker/typescript.meiva.okf.md). Add
+# every new subdirectory here: a file placed directly in `components/` belongs to no scope and is
+# not judged.
 scopes = [
+    "ui/web/messages",
+    "ui/web/next.config.ts",
+    "ui/web/scripts",
+    "ui/web/src/app",
+    "ui/web/src/components/agent-sidebar",
+    "ui/web/src/components/agents",
+    "ui/web/src/components/app",
+    "ui/web/src/components/auth",
+    "ui/web/src/components/connection",
+    "ui/web/src/components/content",
+    "ui/web/src/components/context",
+    "ui/web/src/components/conversation",
+    "ui/web/src/components/fleet",
+    "ui/web/src/components/inspector",
+    "ui/web/src/components/notifications",
+    "ui/web/src/components/ops",
+    "ui/web/src/components/permissions",
+    "ui/web/src/components/plugins",
+    "ui/web/src/components/run-timeline",
+    "ui/web/src/components/shell",
+    "ui/web/src/components/ui",
     "ui/web/src/i18n",
     "ui/web/src/lib",
+    "ui/web/src/proxy.ts",
     "ui/web/src/test-support",
     "ui/web/tests",
 ]

@@ -1,0 +1,18 @@
+exports = ["page.tsx"]
+
+[uses]
+"page.test.tsx" = ["page.tsx"]
+
+[debt.first-party-patch]
+"page.test.tsx#vi.spyOn ui/web/src/lib/transport/api.ts.draftPackage" = 2
+"page.test.tsx#vi.spyOn ui/web/src/lib/transport/api.ts.getInventory" = 15
+"page.test.tsx#vi.spyOn ui/web/src/lib/transport/api.ts.putInventory" = 5
+
+[debt.third-party-patch]
+"page.test.tsx#vi.mock next/navigation" = 1
+
+[debt.type-cast]
+"page.tsx#cast useInventoryController.<lambda>" = 1
+
+[debt.unresolved-patch]
+"page.test.tsx#vi.spyOn qc.\"invalidateQueries\"" = 1

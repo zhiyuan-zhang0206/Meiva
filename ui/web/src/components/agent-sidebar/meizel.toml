@@ -1,0 +1,83 @@
+[uses]
+"agent-sidebar.test.tsx" = ["index.tsx", "sidebar-test-mock.tsx"]
+"archive.test.tsx" = ["archive.tsx", "types.ts"]
+"archive.tsx" = ["types.ts"]
+"body.tsx" = ["archive.tsx", "spawn-popover.tsx", "types.ts"]
+"footer.test.tsx" = ["footer.tsx"]
+"footer.tsx" = ["icon-button.tsx", "links.ts"]
+"index.tsx" = ["body.tsx", "footer.tsx", "header.tsx", "icon-button.tsx", "links.ts", "search-overlay.tsx", "settings-popover.tsx", "spawn-popover.tsx", "types.ts"]
+"settings-popover.tsx" = ["icon-button.tsx"]
+"sidebar-stats-cards.test.tsx" = ["index.tsx", "sidebar-test-mock.tsx"]
+"sidebar-tree-and-search.test.tsx" = ["index.tsx", "sidebar-test-mock.tsx"]
+"spawn-popover.tsx" = ["icon-button.tsx"]
+
+[debt.ambient-read]
+"footer.tsx#clock Date" = 2
+
+[debt.first-party-patch]
+"agent-sidebar.test.tsx#assignment ui/web/src/components/agent-sidebar/sidebar-test-mock.tsx.activeId" = 2
+"agent-sidebar.test.tsx#assignment ui/web/src/components/agent-sidebar/sidebar-test-mock.tsx.agents" = 16
+"agent-sidebar.test.tsx#assignment ui/web/src/components/agent-sidebar/sidebar-test-mock.tsx.isLoading" = 2
+"agent-sidebar.test.tsx#assignment ui/web/src/components/agent-sidebar/sidebar-test-mock.tsx.mobileSidebarOpen" = 4
+"agent-sidebar.test.tsx#assignment ui/web/src/components/agent-sidebar/sidebar-test-mock.tsx.pendingActions" = 1
+"agent-sidebar.test.tsx#assignment ui/web/src/components/agent-sidebar/sidebar-test-mock.tsx.pendingSpawnCount" = 4
+"agent-sidebar.test.tsx#assignment ui/web/src/components/agent-sidebar/sidebar-test-mock.tsx.sidebarCollapsed" = 1
+"agent-sidebar.test.tsx#assignment ui/web/src/components/agent-sidebar/sidebar-test-mock.tsx.sidebarViewMode" = 1
+"agent-sidebar.test.tsx#assignment ui/web/src/components/agent-sidebar/sidebar-test-mock.tsx.userSettings" = 1
+"agent-sidebar.test.tsx#vi.mock ui/web/src/components/agents/agent-row.tsx" = 1
+"agent-sidebar.test.tsx#vi.mock ui/web/src/components/agents/spawn-form.tsx" = 1
+"agent-sidebar.test.tsx#vi.mock ui/web/src/components/ui/button.tsx" = 1
+"agent-sidebar.test.tsx#vi.mock ui/web/src/components/ui/scroll-area.tsx" = 1
+"agent-sidebar.test.tsx#vi.mock ui/web/src/lib/agents/sidebar.ts" = 1
+"agent-sidebar.test.tsx#vi.mock ui/web/src/lib/layout/breakpoint.ts" = 1
+"agent-sidebar.test.tsx#vi.mock ui/web/src/lib/plugins/plugin-stats.ts" = 1
+"agent-sidebar.test.tsx#vi.mock ui/web/src/lib/state/store.ts" = 1
+"agent-sidebar.test.tsx#vi.mock ui/web/src/lib/state/use-user-settings.ts" = 1
+"agent-sidebar.test.tsx#vi.mock ui/web/src/lib/transport/api.ts" = 1
+"archive.test.tsx#vi.mock ui/web/src/lib/transport/api.ts" = 1
+"footer.test.tsx#vi.mock ui/web/src/lib/transport/api.ts" = 1
+"sidebar-stats-cards.test.tsx#assignment ui/web/src/components/agent-sidebar/sidebar-test-mock.tsx.agents" = 20
+"sidebar-stats-cards.test.tsx#assignment ui/web/src/components/agent-sidebar/sidebar-test-mock.tsx.pluginStatDeclarations" = 5
+"sidebar-stats-cards.test.tsx#assignment ui/web/src/components/agent-sidebar/sidebar-test-mock.tsx.stats" = 14
+"sidebar-stats-cards.test.tsx#assignment ui/web/src/components/agent-sidebar/sidebar-test-mock.tsx.statsError" = 2
+"sidebar-stats-cards.test.tsx#assignment ui/web/src/components/agent-sidebar/sidebar-test-mock.tsx.statsFetching" = 1
+"sidebar-stats-cards.test.tsx#assignment ui/web/src/components/agent-sidebar/sidebar-test-mock.tsx.statsWindowHours" = 4
+"sidebar-stats-cards.test.tsx#vi.mock ui/web/src/components/agents/agent-row.tsx" = 1
+"sidebar-stats-cards.test.tsx#vi.mock ui/web/src/components/agents/spawn-form.tsx" = 1
+"sidebar-stats-cards.test.tsx#vi.mock ui/web/src/components/ui/button.tsx" = 1
+"sidebar-stats-cards.test.tsx#vi.mock ui/web/src/components/ui/scroll-area.tsx" = 1
+"sidebar-stats-cards.test.tsx#vi.mock ui/web/src/lib/agents/sidebar.ts" = 1
+"sidebar-stats-cards.test.tsx#vi.mock ui/web/src/lib/layout/breakpoint.ts" = 1
+"sidebar-stats-cards.test.tsx#vi.mock ui/web/src/lib/plugins/plugin-stats.ts" = 1
+"sidebar-stats-cards.test.tsx#vi.mock ui/web/src/lib/state/store.ts" = 1
+"sidebar-stats-cards.test.tsx#vi.mock ui/web/src/lib/state/use-user-settings.ts" = 1
+"sidebar-stats-cards.test.tsx#vi.mock ui/web/src/lib/transport/api.ts" = 1
+"sidebar-tree-and-search.test.tsx#assignment ui/web/src/components/agent-sidebar/sidebar-test-mock.tsx.activeId" = 1
+"sidebar-tree-and-search.test.tsx#assignment ui/web/src/components/agent-sidebar/sidebar-test-mock.tsx.agents" = 34
+"sidebar-tree-and-search.test.tsx#assignment ui/web/src/components/agent-sidebar/sidebar-test-mock.tsx.searchQuery" = 4
+"sidebar-tree-and-search.test.tsx#assignment ui/web/src/components/agent-sidebar/sidebar-test-mock.tsx.setActiveId" = 1
+"sidebar-tree-and-search.test.tsx#assignment ui/web/src/components/agent-sidebar/sidebar-test-mock.tsx.showTerminated" = 7
+"sidebar-tree-and-search.test.tsx#assignment ui/web/src/components/agent-sidebar/sidebar-test-mock.tsx.sidebarCollapsed" = 1
+"sidebar-tree-and-search.test.tsx#assignment ui/web/src/components/agent-sidebar/sidebar-test-mock.tsx.sidebarViewMode" = 5
+"sidebar-tree-and-search.test.tsx#assignment ui/web/src/components/agent-sidebar/sidebar-test-mock.tsx.userSettings" = 3
+"sidebar-tree-and-search.test.tsx#assignment ui/web/src/components/agent-sidebar/sidebar-test-mock.tsx.userSettings.display.show_terminated" = 1
+"sidebar-tree-and-search.test.tsx#vi.mock ui/web/src/components/agents/agent-row.tsx" = 1
+"sidebar-tree-and-search.test.tsx#vi.mock ui/web/src/components/agents/spawn-form.tsx" = 1
+"sidebar-tree-and-search.test.tsx#vi.mock ui/web/src/components/ui/button.tsx" = 1
+"sidebar-tree-and-search.test.tsx#vi.mock ui/web/src/components/ui/scroll-area.tsx" = 1
+"sidebar-tree-and-search.test.tsx#vi.mock ui/web/src/lib/agents/sidebar.ts" = 1
+"sidebar-tree-and-search.test.tsx#vi.mock ui/web/src/lib/layout/breakpoint.ts" = 1
+"sidebar-tree-and-search.test.tsx#vi.mock ui/web/src/lib/plugins/plugin-stats.ts" = 1
+"sidebar-tree-and-search.test.tsx#vi.mock ui/web/src/lib/state/store.ts" = 1
+"sidebar-tree-and-search.test.tsx#vi.mock ui/web/src/lib/state/use-user-settings.ts" = 1
+"sidebar-tree-and-search.test.tsx#vi.mock ui/web/src/lib/transport/api.ts" = 1
+
+[debt.third-party-patch]
+"agent-sidebar.test.tsx#vi.mock next/navigation" = 1
+"archive.test.tsx#vi.mock next-intl" = 1
+"footer.test.tsx#vi.mock next/navigation" = 1
+"sidebar-stats-cards.test.tsx#vi.mock next/navigation" = 1
+"sidebar-tree-and-search.test.tsx#vi.mock next/navigation" = 1
+
+[debt.type-cast]
+"footer.tsx#cast StatsCards.<lambda>" = 1

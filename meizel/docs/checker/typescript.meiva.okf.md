@@ -33,6 +33,18 @@ repository can narrow selection in its tracked `meizel.policy.toml`:
   rule subject, so no scope entry can make it readable.
 - `extensions` can narrow the supported extensions.
 
+## Coverage today
+
+Wave 1 (2026-10-23) judged `src/lib`; Wave 2 (2026-10-28) judges every tracked
+`.ts`/`.tsx` under `ui/web` except `src/components/timeline`: its
+`view/*.test.tsx` import the door `index.tsx` reaches `view/*` through, so its
+local graph is cyclic, which only a code change clears. Adopting it records the
+cycle as `cycle-edge` debt, which the gate refuses — the base has no manifest,
+so it finds none of the eight keys; the `undeclared-edge` records settle at zero
+or below. Taking it in also needs `[uses] "run-timeline" = [..., "timeline"]` in
+`components/meizel.toml`. The `components` children are listed one by one, so a
+new subdirectory is visible.
+
 The nearest `tsconfig.json`, its `extends`, `paths`, module-resolution mode and
 installed package exports govern imports. Project dependencies/config extensions
 must be available in the inspected checkout. No installation is attempted.

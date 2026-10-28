@@ -28,6 +28,19 @@ every allowance, and the only hard-coded one.
 [default-arguments]
 ```
 
+## Narrowing a language's scope
+
+`[typescript].scopes` is the one table that narrows a rule's reach: with no
+scopes every TypeScript source is judged, and listing directories judges only
+those (`import-sources` keeps callers' edges, not their behavior — see
+[[meizel/docs/checker/typescript.meiva.okf.md|the TypeScript node]]). Widening is
+the deliberate direction: a directory that joins the list becomes judged with a
+new manifest of its own, its existing reads turn into recorded debt, and the
+recorded-debt gate reports the growth as the rules' doing rather than the
+change's. Narrowing again is a decision review must see, which is why
+`meizel policy diff --against <ref>` lists every entry a change adds, moves or
+removes.
+
 ## Lint-rule tables
 
 The same file holds the exemptions of the lint rules that live in `meizel/`, one top-level

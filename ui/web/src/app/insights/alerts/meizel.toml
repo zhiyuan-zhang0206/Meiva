@@ -1,0 +1,5 @@
+[uses]
+"page.test.tsx" = ["page.tsx"]
+
+[debt.third-party-patch]
+"page.test.tsx#vi.mock next/navigation" = 1

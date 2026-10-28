@@ -1,0 +1,7 @@
+exports = ["app-settings.tsx", "deferred-mount.tsx"]
+
+[uses]
+"app-settings.test.tsx" = ["app-settings.tsx"]
+
+[debt.type-cast]
+"app-settings.tsx#cast readAppBridge" = 1

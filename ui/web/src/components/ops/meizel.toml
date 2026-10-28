@@ -1,0 +1,8 @@
+exports = ["alerts-section.tsx"]
+
+[uses]
+"alerts-section.test.tsx" = ["alerts-section.tsx"]
+
+[debt.ambient-read]
+"alerts-section.tsx#clock Date" = 1
+"alerts-section.tsx#clock Date.now" = 1

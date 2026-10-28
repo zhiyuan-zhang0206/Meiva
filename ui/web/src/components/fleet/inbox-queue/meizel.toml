@@ -1,0 +1,23 @@
+[uses]
+"detail.tsx" = ["keys.ts", "rows.tsx"]
+"inbox-queue-history.test.tsx" = ["index.tsx"]
+"inbox-queue.test.tsx" = ["index.tsx"]
+"index.tsx" = ["detail.tsx", "keys.ts", "list.tsx"]
+"list.tsx" = ["keys.ts", "rows.tsx"]
+
+[debt.ambient-read]
+"detail.tsx#clock Date" = 1
+"rows.tsx#clock Date" = 2
+
+[debt.first-party-patch]
+"inbox-queue-history.test.tsx#vi.mock ui/web/src/lib/agents/use-all-pages.ts" = 1
+"inbox-queue-history.test.tsx#vi.mock ui/web/src/lib/notifications/use-notices.ts" = 1
+"inbox-queue-history.test.tsx#vi.mock ui/web/src/lib/notifications/use-tasks.ts" = 1
+"inbox-queue-history.test.tsx#vi.mock ui/web/src/lib/transport/api.ts" = 1
+"inbox-queue.test.tsx#vi.mock ui/web/src/lib/agents/use-all-pages.ts" = 1
+"inbox-queue.test.tsx#vi.mock ui/web/src/lib/notifications/use-notices.ts" = 1
+"inbox-queue.test.tsx#vi.mock ui/web/src/lib/notifications/use-tasks.ts" = 1
+"inbox-queue.test.tsx#vi.mock ui/web/src/lib/transport/api.ts" = 1
+
+[debt.stdlib-patch]
+"inbox-queue.test.tsx#vi.spyOn window.requestAnimationFrame" = 1
