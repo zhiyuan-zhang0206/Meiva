@@ -60,6 +60,7 @@ class Session:
         self.repo = repo
         self.env = env
         self.pacing = pacing
+        self.now = now
         self.stamp = f"{now:%Y%m%dT%H%M%S}"
         self.os: dict[str, str] = {}
         log_dir.mkdir(mode=0o700, parents=True, exist_ok=True)
