@@ -630,6 +630,7 @@ from base.agents.impersonation.relay import (  # noqa: E402, I001
     relay_inbox as relay_inbox,
 )
 from base.agents.impersonation.status import (  # noqa: E402
+    RELAY_CONNECTION_RETRY_DELAYS as RELAY_CONNECTION_RETRY_DELAYS,
     RELAY_HEARTBEAT_SECONDS as RELAY_HEARTBEAT_SECONDS,
     RELAY_HEARTBEAT_STALE_SECONDS as RELAY_HEARTBEAT_STALE_SECONDS,
     RELAY_FAILURE_STAMP_SECONDS as RELAY_FAILURE_STAMP_SECONDS,

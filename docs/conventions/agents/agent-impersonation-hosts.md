@@ -348,6 +348,17 @@ seconds — the check is pull-based and never depends on wake delivery.
 - The relay heartbeats every 10 seconds; a beat stale past 45 seconds triggers
   transport recovery, not identity expiry. Same-lease recovery preserves attempt
   budgets and reservations, and cannot overlap an unconfirmed old sender.
+- A database connection the pool cannot provide is retried inside the relay and
+  is never treated as the lease's answer: waits of 1, 2, 4, 8 and 12 seconds
+  (27 seconds in all) before it stops. The budget stays under the 45-second
+  staleness window because a relay that cannot reach the database cannot beat
+  either — past that window every other reader already treats the lease as
+  stale and the host ends it. Every attempt re-reads the lease through the same
+  path, so ownership, status and heartbeat fences are re-checked rather than
+  cached across the outage: a revoked credential or an ended lease ends the
+  relay at once instead of being retried. A spent budget exits with the named
+  failure (what it was doing, attempts, elapsed, the last error) and status 75
+  (`EX_TEMPFAIL`), distinct from a normal end (0) and any other failure (1).
 - The machine host's existing scan delivers newly ended leases' notices using
   immutable recorded Codex endpoint/thread snapshots, including after native
   restoration, replacement takeover or agent termination. Each RPC is bounded;

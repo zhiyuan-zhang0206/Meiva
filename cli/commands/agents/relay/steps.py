@@ -18,6 +18,7 @@ import math
 from dataclasses import dataclass, replace
 from datetime import datetime
 
+from base.clock import Timers
 from cli.commands.agents.relay.inbox import InboxSnapshot, LeaseRef, due_ids
 from cli.commands.agents.relay.push_text import activation_hint, message_push
 
@@ -25,6 +26,7 @@ __all__ = [
     "CATCHUP_SECONDS",
     "PUSH_MAX_CHARS",
     "ClockReading",
+    "ConnectionRetry",
     "Deliver",
     "RelayState",
     "RelayTuning",
@@ -33,6 +35,7 @@ __all__ = [
     "Step",
     "WaitForWake",
     "batch_closed",
+    "connection_retry_delay",
     "emitted",
     "next_step",
     "plan_reservation",
@@ -71,6 +74,29 @@ class RelayTuning:
             raise ValueError("min_wake_seconds must be finite and nonnegative")
         if self.max_chars is not None and self.max_chars <= 0:
             raise ValueError("max_chars must be positive")
+
+
+# meiva:note
+# How long this relay waits between attempts at a database connection the pool could not
+# provide, and the timers it waits on and measures the outage with. `delays` is the whole
+# policy: one entry per retry, so the budget is their sum. The timers are a value, so a test
+# supplies `ManualTimers` and never waits on the wall clock, and nothing here reads one itself.
+# It bounds connection trouble only — the lease's own fences are re-read on every attempt and
+# are never cached across an outage.
+@dataclass(frozen=True)
+class ConnectionRetry:
+    delays: tuple[float, ...]
+    timers: Timers
+
+    def __post_init__(self) -> None:
+        if any(not math.isfinite(delay) or delay < 0 for delay in self.delays):
+            raise ValueError("retry delays must be finite and nonnegative")
+
+
+# meiva:note
+# The wait before retry `attempt` (1 is the first retry), or None once the policy is spent.
+def connection_retry_delay(attempt: int, delays: tuple[float, ...]) -> float | None:
+    return delays[attempt - 1] if 1 <= attempt <= len(delays) else None
 
 
 # meiva:note
