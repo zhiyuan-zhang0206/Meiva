@@ -2,7 +2,7 @@
 "aggregate.py" = { kinds = ["clock"], why = "CLI entry passes current UTC timestamp into main()" }
 "collect.py" = { kinds = ["clock", "db", "home"], why = "CLI entry constructs cluster DB handle, resolves the Meiva home once and passes current UTC timestamp into CollectFacts" }
 "daily_scan.py" = { kinds = ["settings"], why = "CLI entry reads self_evolution_coverage_alert_floor from settings in process_env()" }
-"evaluate.py" = { kinds = ["clock", "random"], why = "Skill evaluation driver stamps evaluation runs with UTC time and generates spawn idempotency keys" }
+"evaluate.py" = { kinds = ["clock", "home", "random"], why = "Skill evaluation driver stamps evaluation runs with UTC time, generates spawn idempotency keys, and resolves the Meiva home for the evaluation dataset root it prepares and reads" }
 "mine.py" = { kinds = ["clock", "home"], why = "CLI entry passes current UTC timestamp and the Meiva home it resolves into main() for default dataset resolution" }
 
 [purity]
@@ -16,7 +16,6 @@
 
 [debt.ambient-read]
 "collect.py#settings base.cluster.machine.ambient.gateway_access_from_settings" = 1
-"evaluate.py#home base.paths.meiva_home" = 2
 
 [debt.impure-call]
 "record.py#Path.resolve" = 1
