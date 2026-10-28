@@ -52,7 +52,11 @@ def _samples(
 ) -> Generator[list[Signature | None]]:
     del patch_sleep
     guard = engine.StallGuard(
-        Database.from_settings(gate=database_gate), 1, None, policy=_NEVER_STALLS
+        Database.from_settings(gate=database_gate),
+        1,
+        None,
+        policy=_NEVER_STALLS,
+        main_thread_id=threading.get_ident(),
     )
     seen: list[Signature | None] = []
     done = threading.Event()
@@ -191,7 +195,11 @@ def test_a_live_child_wait_is_never_observed(
 ) -> None:
     with _held_child(capture_output) as (child, latch):
         guard = engine.StallGuard(
-            Database.from_settings(gate=database_gate), 1, None, policy=_NEVER_STALLS
+            Database.from_settings(gate=database_gate),
+            1,
+            None,
+            policy=_NEVER_STALLS,
+            main_thread_id=threading.get_ident(),
         )
         try:
             waiter_left = threading.Event()
