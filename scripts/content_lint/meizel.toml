@@ -5,6 +5,6 @@ exports = ["lint_no_cjk.py", "lint_no_tailnet.py"]
 
 [roots]
 "check_cross_branch_migrations.py" = { kinds = ["environ", "platform"], why = "CLI entry of the single-branch premise check: its __main__ block builds the host of this process with Host.system(), handing it the process environment" }
-"lint_core_content_manifests.py" = { kinds = ["home"], why = "CLI entry of the core-content manifest gate (CI job and pre-commit hook): it expands a `~` in each --audit-dir path the operator names before checking that it exists" }
+"lint_core_content_manifests.py" = { kinds = ["home"], why = "CLI entry of the core-content manifest gate (CI job and pre-commit hook): main() expands the `~` an operator writes in each --audit-dir before the parser checks that the path exists" }
 "lint_doc_roster.py" = { kinds = ["home"], why = "CLI entry of the roster lint: main() resolves the scratch home the entry just entered and builds the service roster the documents are compared against from it" }
 "lint_meiva_okf.py" = { kinds = ["cwd"], why = "CLI OKF linter defaults to the current checkout directory when invoked from the command line" }

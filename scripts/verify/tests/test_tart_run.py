@@ -27,6 +27,7 @@ from scripts.verify.tart_vm import Tart
 
 _FAKE = Path(__file__).resolve().parent / "fake_tart.py"
 GOLDEN = "meiva-golden"
+STAMP = "20260102-030405"
 EARLIER = ("meiva-control", "meiva-r1", "meiva-r2")
 OBSERVER_PASSED = json.dumps({"result": "passed", "checks": {}})
 
@@ -112,6 +113,7 @@ def _run(
         repo=repo,
         golden=GOLDEN,
         tart=fake.tart(home=home),
+        stamp=STAMP,
     )
     (root,) = (tmp_path / "evidence").iterdir()
     return status, json.loads((root / "result.json").read_text()), root
@@ -226,7 +228,7 @@ def test_a_golden_image_that_is_running_or_missing_is_refused(
     del fake.state["vms"][GOLDEN]
     fake.save()
     status = tart_run.run(
-        "HEAD", tmp_path / "evidence2", repo=repo, golden=GOLDEN, tart=fake.tart()
+        "HEAD", tmp_path / "evidence2", repo=repo, golden=GOLDEN, tart=fake.tart(), stamp=STAMP
     )
     assert status == 1 and not fake.commands("clone")
 

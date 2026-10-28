@@ -108,6 +108,16 @@ def _audit_one(path: Path, derived: str, *, repo_root: Path = _REPO_ROOT) -> Non
     )
 
 
+def _expand_home(value: str, home: Path) -> Path:
+    # meiva:note
+    # Replace a leading `~` with an explicit home, never the process's own: `--audit-dir ~/x`
+    # names the home `main` read once and handed here.
+    path = Path(value)
+    if path.parts[:1] != ("~",):
+        return path
+    return home.joinpath(*path.parts[1:])
+
+
 def _parse_audit_dirs(argv: list[str]) -> tuple[list[Path], int | None]:
     """The `--audit-dir` values, or the exit code of a usage / missing-path error."""
     audit_dirs: list[Path] = []
@@ -116,7 +126,7 @@ def _parse_audit_dirs(argv: list[str]) -> tuple[list[Path], int | None]:
         if not argv:
             print("error: --audit-dir requires a value", file=sys.stderr)
             return [], 2
-        audit_dirs.append(Path(argv.pop(0)).expanduser())
+        audit_dirs.append(Path(argv.pop(0)))
 
     missing = [str(d) for d in audit_dirs if not d.exists()]
     if missing:
@@ -163,9 +173,17 @@ def _core_errors(derived: str, *, repo_root: Path = _REPO_ROOT) -> int:
     return errors
 
 
-def main(argv: list[str] | None = None, *, repo_root: Path | None = None) -> int:
+def main(
+    argv: list[str] | None = None, *, repo_root: Path | None = None, home: Path | None = None
+) -> int:
     root = _REPO_ROOT if repo_root is None else repo_root
-    argv = list(sys.argv[1:] if argv is None else argv)
+    # meiva:note
+    # The entry reads the operator's home once and hands it to the one `~` expansion, so
+    # `_parse_audit_dirs` takes each `--audit-dir` as written and no helper below reads it.
+    operator_home = Path.home() if home is None else home
+    argv = [
+        str(_expand_home(word, operator_home)) for word in (sys.argv[1:] if argv is None else argv)
+    ]
     audit_dirs, failure = _parse_audit_dirs(argv)
     if failure is not None:
         return failure

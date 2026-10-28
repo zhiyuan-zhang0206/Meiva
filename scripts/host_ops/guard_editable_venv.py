@@ -27,7 +27,7 @@ _DIRECT_URL_PATTERNS = (
 
 
 def _resolved(path: Path) -> Path:
-    return path.expanduser().resolve(strict=False)
+    return path.resolve(strict=False)
 
 
 def _same_path(left: Path, right: Path) -> bool:
@@ -127,8 +127,14 @@ def main(argv: Sequence[str] | None = None) -> int:
     if len(args) > 1:
         print("usage: guard_editable_venv.py [checkout-root]", file=sys.stderr)
         return 2
-    checkout = Path(args[0]) if args else Path.cwd()
-    violations = check_checkout(checkout, os.environ)
+    # meiva:note
+    # The guard expands the `~` the operator names exactly once, here: `_resolved` resolves only, so
+    # a path that reaches it with a `~` still in it is a path this process was told to use literally.
+    checkout = Path(args[0]).expanduser() if args else Path.cwd()
+    env = dict(os.environ)
+    if env.get("VIRTUAL_ENV"):
+        env["VIRTUAL_ENV"] = str(Path(env["VIRTUAL_ENV"]).expanduser())
+    violations = check_checkout(checkout, env)
     if not violations:
         return 0
     print("guard_editable_venv: refusing uv sync:", file=sys.stderr)
