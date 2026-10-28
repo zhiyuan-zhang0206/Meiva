@@ -11,7 +11,7 @@ exports = ["direct_url.py", "pg_admin.py", "pg_foreground.py", "pg_runtime.py", 
 
 [purity]
 "__init__.py" = "strict"
-"pg_plan.py" = "strict-to-be"
+"pg_plan.py" = "strict"
 "provision_plan.py" = "strict"
 
 [debt.ambient-read]
@@ -19,6 +19,3 @@ exports = ["direct_url.py", "pg_admin.py", "pg_foreground.py", "pg_runtime.py", 
 "pg_tools.py#environ base.native_process.child_env.daemon_process_env" = 1
 "runtime_binaries.py#platform base.native_process.os_platform.Platform.current" = 1
 "walg_binary.py#environ base.native_process.child_env.daemon_process_env" = 1
-
-[debt.impure-call]
-"pg_plan.py#Path.resolve" = 1
