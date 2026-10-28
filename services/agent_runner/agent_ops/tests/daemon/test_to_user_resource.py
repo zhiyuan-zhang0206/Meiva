@@ -9,10 +9,13 @@ import httpx
 import pytest
 
 from base.agents.to_user import read_document
+from base.config import settings
 from base.daemon.http_transport import start_daemon_http
 from base.db import Database, create_agent
+from base.paths import workspace_path
 from ops.to_user import read_to_user
 from services.agent_runner.agent_ops.in_flight import RequestTokens, WorkerFutures
+from services.agent_runner.agent_ops.tests.ops_support import Ops
 from services.agent_runner.agent_ops.to_user_resource import resource_route
 
 
@@ -78,3 +81,29 @@ async def test_authenticated_home_machine_file_roundtrip(
                 ).status_code == 422
     assert not requests
     assert not workers
+
+
+# meiva:note
+# The document read — what a panel click reaches — answers its class too: a refused
+# `to_user_read` op reports the reason the gateway names, not a bare failure.
+async def test_a_refused_document_read_reports_its_class(
+    ops: Ops, agent_id: int, unit_home: Path
+) -> None:
+    workspace = workspace_path(unit_home, agent_id)
+    workspace.mkdir(parents=True, exist_ok=True)
+    with (workspace / "big.md").open("wb") as stream:
+        stream.truncate(settings.to_user.max_document_bytes + 1)
+    (workspace / "to_user.md").write_text("[big](big.md)")
+    oversized = read_document(workspace).resources["big.md"].id
+
+    _, too_large = await ops.route(
+        {"kind": "to_user_read", "payload": {"agent_id": agent_id, "references": [oversized]}}
+    )
+    assert too_large["status"] == "failed"
+    assert too_large["result"]["reason"] == "too_large"
+
+    _, gone = await ops.route(
+        {"kind": "to_user_read", "payload": {"agent_id": agent_id, "references": ["0" * 64]}}
+    )
+    assert gone["status"] == "failed"
+    assert gone["result"]["reason"] == "gone"

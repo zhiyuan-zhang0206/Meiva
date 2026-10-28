@@ -18,5 +18,9 @@
   "openContext": "To user",
   "back": "Back",
   "legacyHtml": "Awaiting Markdown.",
-  "hideContextPanel": "Hide shared context"
+  "hideContextPanel": "Hide shared context",
+  "tooLarge": "This file is too large to show here.",
+  "missing": "This link is no longer available.",
+  "unreadable": "This file can't be shown here.",
+  "openRaw": "Open the file itself"
 }

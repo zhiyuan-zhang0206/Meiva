@@ -2,7 +2,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { act, cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 import type { ToUserDocument } from "@/lib/contracts/types";
-import { api } from "@/lib/transport/api";
+import { ApiError, api } from "@/lib/transport/api";
 
 vi.mock("next-intl", () => ({ useTranslations: () => (key: string) => key }));
 import { preloadChatMarkdown } from "@/components/content/markdown";
@@ -24,12 +24,12 @@ function document(content: string, modifiedAt: string | null = null): ToUserDocu
 }
 function show(
   value: ToUserDocument,
-  { mobile = false, linked, onInspect, onCollapse, onNavigate, inspecting = false }: { mobile?: boolean; linked?: ToUserDocument; onInspect?: () => void; onCollapse?: () => void; onNavigate?: () => void; inspecting?: boolean } = {},
+  { mobile = false, linked, onInspect, onCollapse, onNavigate, inspecting = false }: { mobile?: boolean; linked?: ToUserDocument | Error; onInspect?: () => void; onCollapse?: () => void; onNavigate?: () => void; inspecting?: boolean } = {},
 ) {
   const qc = new QueryClient({ defaultOptions: { queries: { retry: false, staleTime: Infinity } } });
   if (linked !== undefined) {
-    qc.setQueryData(["to-user", 7, linkId], linked);
-    vi.spyOn(api, "getToUser").mockResolvedValue(linked);
+    if (!(linked instanceof Error)) qc.setQueryData(["to-user", 7, linkId], linked);
+    vi.spyOn(api, "getToUser").mockImplementation(() => linked instanceof Error ? Promise.reject(linked) : Promise.resolve(linked));
   } else {
     vi.spyOn(api, "getToUser").mockImplementation(() => new Promise(() => undefined));
   }
@@ -38,7 +38,7 @@ function show(
       <ToUserDocumentView
         agentId={7}
         document={value}
-        failed={false}
+        failure={null}
         pending={false}
         refresh={vi.fn()}
         mobile={mobile}
@@ -270,5 +270,36 @@ describe("shared-context column collapse", () => {
     cleanup();
     show(document("hello"), { onCollapse: vi.fn(), mobile: true });
     expect(screen.queryByTestId("context-panel-collapse")).toBeNull();
+  });
+});
+
+
+describe("To user refusals", () => {
+  // meiva:note
+  // One test, two classes: a refusal the server called permanent reads differently from
+  // one it called temporary, and only the permanent one hands over the file itself — the
+  // copy follows the response's code, never the status (user 2026-10-28).
+  // meiva:link ui/web/src/docs/frontend-state/shared-context.meiva.okf.md
+  it("tells a permanent refusal from one worth retrying, and hands over the file", async () => {
+    show(document("[Details](details.md)"), {
+      linked: new ApiError(413, "too large", { code: "to_user_document_too_large", retryable: false }),
+    });
+    fireEvent.click(screen.getByRole("link", { name: "Details" }));
+    const refused = (await screen.findByTestId("document-failure")).textContent;
+    expect(refused).toContain("tooLarge");
+    expect(screen.getByRole("link", { name: "openRaw" }).getAttribute("href")).toContain(
+      `/api/agents/7/to-user/resource?reference=${linkId}`,
+    );
+
+    cleanup();
+    window.history.replaceState(null, "", "/?agent_id=7");
+    show(document("[Details](details.md)"), {
+      linked: new ApiError(503, "unavailable", { code: "http_503", retryable: true }),
+    });
+    fireEvent.click(screen.getByRole("link", { name: "Details" }));
+    const retryable = (await screen.findByTestId("document-failure")).textContent;
+    expect(retryable).toContain("unavailable");
+    expect(retryable).not.toContain("tooLarge");
+    expect(screen.queryByRole("link", { name: "openRaw" })).toBeNull();
   });
 });

@@ -2,7 +2,7 @@ from pathlib import Path
 
 from psycopg_pool import ConnectionPool
 
-from base.agents.to_user import ToUserDocument, read_document
+from base.agents.to_user import ToUserDocument, read_document, read_failure
 from base.paths import workspace_path
 
 
@@ -10,6 +10,15 @@ def read_to_user(
     pool: ConnectionPool, agent_id: int, machine: str, *, references: list[str], home: Path
 ) -> ToUserDocument:
     return read_document(owned_workspace(pool, agent_id, machine, home=home), references=references)
+
+
+# meiva:note
+# The gateway owns what the reader sees, so only the class crosses the wire as
+# `reason`; `error` carries the local detail (exception type, budget, relative name)
+# for the gateway's log.
+# meiva:link gateway/agents/docs/to-user-read-failures.meiva.okf.md
+def read_failure_payload(exc: OSError | ValueError) -> dict[str, object]:
+    return {"error": f"{type(exc).__name__}: {exc}", "reason": read_failure(exc).value}
 
 
 def owned_workspace(pool: ConnectionPool, agent_id: int, machine: str, *, home: Path) -> Path:

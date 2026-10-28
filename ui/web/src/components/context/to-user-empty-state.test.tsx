@@ -35,7 +35,7 @@ function renderEmpty(messages: typeof en, locale: "en" | "zh") {
         <ToUserDocumentView
           agentId={7}
           document={{ content: null, version: null, modified_at: null, legacy_html: false, resources: {} }}
-          failed={false}
+          failure={null}
           pending={false}
           refresh={vi.fn()}
           mobile={false}
