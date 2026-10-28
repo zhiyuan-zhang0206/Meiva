@@ -320,6 +320,56 @@ describe("unavailable model catalog", () => {
 // pick that is never spawned is not stored, a refusal is readable - against the
 // layout the phone actually gets.
 // meiva:link ui/web/src/docs/frontend-components/creation-availability.meiva.okf.md
+describe.each(["table", "stack"] as const)("%s API model visibility", (layout) => {
+  it.each([
+    { harness: "claude_code", label: "Claude Code", provider: "claude", model: "claude-sonnet-5-5" },
+    { harness: "codex", label: "Codex", provider: "gpt", model: "gpt-6-astra" },
+    { harness: "antigravity", label: "Antigravity", provider: "gemini", model: "gemini-4-argon" },
+    { harness: "kimi_code", label: "Kimi Code", provider: "kimi", model: "kimi-k2.6" },
+  ] as const)("keeps $harness execution selectable while its API model is hidden", async ({ harness, label, provider, model }) => {
+    vi.mocked(api.getSystemStatus).mockResolvedValue(singleMachineStatus());
+    const catalog = modelsWithEffort();
+    catalog.providers[provider] = [model];
+    catalog.models[model] = {
+      provider,
+      harnesses: ["meiva", harness],
+      context_window: 128_000,
+      harness_settings: {
+        [harness]: { reasoning_effort_options: ["low", "medium"], reasoning_effort_default: "medium" },
+      },
+    };
+    vi.mocked(api.getModels).mockResolvedValue(catalog);
+    setMockSetting("behavior.spawn_harness", harness);
+    setMockSetting("models.hidden", [model]);
+    setMockSetting("models.hidden_providers", [provider]);
+    const { onSpawn } = wrap(layout);
+    const form = await screen.findByTestId(`spawn-${layout}`);
+    if (layout === "stack") {
+      expect(within(form).getByRole("button", { name: `Model ${model}` })).toBeTruthy();
+      fireEvent.click(within(form).getByRole("button", { name: "Effort medium" }));
+    } else {
+      expect(selected(form, MODEL_COLUMN, model)).toBe(true);
+    }
+    pick(form, EFFORT_COLUMN, "low");
+    fireEvent.click(screen.getByRole("button", { name: "Spawn" }));
+    expect(onSpawn).toHaveBeenCalledWith({
+      machine: "test-host", harness, model, reasoning_effort: "low",
+    });
+    expect(storedSettings["models.hidden"]).toEqual([model]);
+    expect(storedSettings["models.hidden_providers"]).toEqual([provider]);
+
+    if (layout === "stack") {
+      fireEvent.click(within(form).getByRole("button", { name: `Harness ${label}` }));
+    }
+    pick(form, HARNESS_COLUMN, "Meiva");
+    if (layout === "stack") {
+      fireEvent.click(within(form).getByRole("button", { name: "Model deepseek-v4-pro" }));
+    }
+    expect(within(column(form, MODEL_COLUMN)).queryByRole("button", { name: model })).toBeNull();
+    expect(selected(form, MODEL_COLUMN, /deepseek-v4-pro/)).toBe(true);
+  });
+});
+
 describe("stacked picker", () => {
   async function stack(): Promise<HTMLElement> {
     return await screen.findByTestId("spawn-stack");
