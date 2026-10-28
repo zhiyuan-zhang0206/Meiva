@@ -35,7 +35,7 @@ class InspectDbRows(NamedTuple):
     last_probe_at: datetime | None
     observation: AgentObservation
     backoff_level: int
-    impersonation_active: bool
+    impersonation_since: datetime | None
 
 
 def db_rows_blocking(pool: ConnectionPool[Any], agent_id: int) -> InspectDbRows:
@@ -53,9 +53,10 @@ def db_rows_blocking(pool: ConnectionPool[Any], agent_id: int) -> InspectDbRows:
             "        WHERE amo.agent_id = agents_meta.id AND amo.model IS NOT NULL "
             "        ORDER BY amo.occurred_at DESC LIMIT 1), "
             "       heartbeat_backoff_level, "
-            "       EXISTS (SELECT 1 FROM agent_impersonations lease "
-            "               WHERE lease.agent_id = agents_meta.id AND lease.status = 'active' "
-            "               AND lease.expires_at > now()) "
+            "       (SELECT COALESCE(lease.activated_at, lease.created_at) "
+            "        FROM agent_impersonations lease "
+            "        WHERE lease.agent_id = agents_meta.id AND lease.status = 'active' "
+            "        AND lease.expires_at > now()) "
             "FROM agents_meta WHERE id = %s",
             (agent_id,),
         )
@@ -86,7 +87,7 @@ def db_rows_blocking(pool: ConnectionPool[Any], agent_id: int) -> InspectDbRows:
             last_probe_at=row[8],
             observation=observation(row[9]),
             backoff_level=int(row[12] or 0),
-            impersonation_active=bool(row[13]),
+            impersonation_since=row[13],
         )
 
 
