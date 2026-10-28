@@ -8,7 +8,7 @@ exports = ["conftest.py", "fakes", "process_support.py", "visual"]
 "lifecycle" = ["_credentials.py", "_db.py", "_ports.py", "fakes", "fixture_environment.py"]
 "plugins" = ["_db.py", "_ports.py", "fakes"]
 "process_support.py" = ["_credentials.py", "_ports.py", "_truncate.py"]
-"state" = ["_db.py", "_settings.py", "fakes", "fixture_environment.py"]
+"state" = ["_db.py", "_settings.py", "_timeline.py", "fakes", "fixture_environment.py"]
 "test_reserved_ports.py" = ["_ports.py"]
 "visual" = ["_ports.py"]
 

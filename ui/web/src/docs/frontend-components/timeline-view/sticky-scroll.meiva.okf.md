@@ -26,7 +26,12 @@ scroll-up escapes — resolved once on mount, with the touch preset as the SSR
 default. The viewport disables Chrome scroll anchoring (`overflow-anchor: none`):
 a net-neutral reflow can move scrollTop on its own, a third hand the follow rule
 cannot attribute; `overscroll-y-contain` keeps an exhausted vertical gesture out
-of page-level scroll without touching scrollTop. A pending bookmark restore
+of page-level scroll without touching scrollTop. The viewport also declares its
+own shrinks (`notifyContentShrunk`): after a commit leaves the content shorter,
+the browser's clamp usually reaches `handleScroll` only once a later commit added
+rows again, so the snapshot carries the grown height and an upward move and the
+height test alone reads a departure (#5678: a 254 px clamp from the window
+replacing estimates with measurements released a follower for good). A pending bookmark restore
 lands before the pin, so the reader never sees the bottom first, and a
 bookmark saved on the tail restores the newest message rather than a row's old
 pixel: a thread that grew while the reader was away returns to its end, not to

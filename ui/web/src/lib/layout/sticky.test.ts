@@ -283,6 +283,55 @@ describe("browser scrollTop clamps observed at the bottom", () => {
   });
 });
 
+describe("a clamp after a shrink the commit declared (#5678)", () => {
+  it("a declared shrink keeps a follower following through its clamp", () => {
+    const ctl = createStickyController(POINTER_STICKY_THRESHOLDS);
+    pin(ctl, 15665);
+    // meiva:note
+    // The window replaced estimates with measured heights, so the browser
+    // clamps scrollTop when it lays out; the commit that caused it declares
+    // the shrink before the clamp's event dispatches.
+    // meiva:link ui/web/src/docs/frontend-components/timeline-view/sticky-scroll.meiva.okf.md
+    ctl.notifyContentShrunk({ scrollTop: 15065, scrollHeight: 15311, clientHeight: 600 });
+    // meiva:note
+    // The clamp's event lands after rows were added again, so it carries the
+    // grown height and the shrink is no longer visible in the snapshot.
+    // meiva:link ui/web/src/docs/frontend-components/timeline-view/sticky-scroll.meiva.okf.md
+    const clamped = { scrollTop: 14811, scrollHeight: 18842, clientHeight: 600 };
+    expect(ctl.handleScroll(clamped)).toBe("none");
+    expect(ctl.isSticky()).toBe(true);
+    // meiva:note
+    // The layout pass that follows asks for the pin, so the tail comes back.
+    // meiva:link ui/web/src/docs/frontend-components/timeline-view/sticky-scroll.meiva.okf.md
+    expect(ctl.handleLayoutChange(clamped)).toBe(true);
+  });
+  it("the same clamp is a departure when the shrink was never declared", () => {
+    const ctl = createStickyController(POINTER_STICKY_THRESHOLDS);
+    pin(ctl, 15665);
+    expect(ctl.handleScroll({ scrollTop: 14811, scrollHeight: 18842, clientHeight: 600 })).toBe("up");
+    expect(ctl.isSticky()).toBe(false);
+  });
+  it("a declared shrink never absorbs a wheel, and does not outlive one event", () => {
+    const ctl = createStickyController(POINTER_STICKY_THRESHOLDS);
+    pin(ctl, 15665);
+    ctl.notifyContentShrunk({ scrollTop: 15065, scrollHeight: 15311, clientHeight: 600 });
+    ctl.handleWheel(-25, { scrollTop: 14000, scrollHeight: 15311, clientHeight: 600 });
+    expect(ctl.isSticky()).toBe(false);
+  });
+  it("a non-follower is unaffected: a clamp cannot re-stick a released reader", () => {
+    const ctl = createStickyController(POINTER_STICKY_THRESHOLDS);
+    pin(ctl, 15665);
+    // meiva:note
+    // The reader leaves the tail on their own, so the shrink must not pull them back.
+    // meiva:link ui/web/src/docs/frontend-components/timeline-view/sticky-scroll.meiva.okf.md
+    ctl.handleScroll({ scrollTop: 14000, scrollHeight: 15665, clientHeight: 600 });
+    expect(ctl.isSticky()).toBe(false);
+    ctl.notifyContentShrunk({ scrollTop: 14000, scrollHeight: 15311, clientHeight: 600 });
+    expect(ctl.handleScroll({ scrollTop: 14000, scrollHeight: 15311, clientHeight: 600 })).toBe("none");
+    expect(ctl.isSticky()).toBe(false);
+  });
+});
+
 describe("layout changes with no scroll event (handleLayoutChange)", () => {
   // A height change moves the bottom without firing a scroll event, so it
   // is the one way the flag and the real position can drift apart. The

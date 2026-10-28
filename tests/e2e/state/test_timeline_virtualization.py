@@ -13,6 +13,7 @@ from playwright.sync_api import Route
 from playwright.sync_api import TimeoutError as PlaywrightTimeoutError
 
 from tests.e2e._settings import pin_expand_runs_all
+from tests.e2e._timeline import move_to_top_and_read_anchor, wait_for_parked_tail
 from tests.e2e.fixture_environment import E2EEnv
 
 ITEM_COUNT = 1200
@@ -99,20 +100,10 @@ def test_parked_deep_history_mounts_a_bounded_window(e2e_env: E2EEnv, kind: str)
         pin_expand_runs_all(e2e_env.gateway_url)
     page.goto(e2e_env.agent_url)
     page.wait_for_selector('[data-testid="sse-ready"]', state="attached", timeout=15_000)
-    page.get_by_text("Deep history reply 1200", exact=False).wait_for(timeout=30_000)
-    anchor = page.evaluate("""() => {
-      const viewport = document.querySelector('[role=log]')?.closest('[data-slot=scroll-area-viewport]');
-      if (!viewport) throw new Error('timeline viewport missing');
-      viewport.scrollTop = Math.max(0, viewport.scrollHeight - viewport.clientHeight - 400);
-      viewport.dispatchEvent(new Event('scroll'));
-      viewport.scrollTop = 0;
-      viewport.dispatchEvent(new Event('scroll'));
-      const viewportTop = viewport.getBoundingClientRect().top;
-      const row = [...viewport.querySelectorAll('.timeline-item')]
-        .find((node) => node.getBoundingClientRect().bottom > viewportTop);
-      if (!row) throw new Error('no visible reading anchor');
-      return { id: row.dataset.itemId, viewportOffsetPx: row.getBoundingClientRect().top - viewportTop };
-    }""")
+    wait_for_parked_tail(
+        page, item_id=f"{ITEM_COUNT}.0", payload=f"Deep history reply {ITEM_COUNT}"
+    )
+    anchor = move_to_top_and_read_anchor(page)
     history_button = page.get_by_test_id("load-older-keyboard")
     history_button.focus()
     history_button.press("Enter")

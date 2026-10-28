@@ -182,6 +182,18 @@ export interface StickyController {
    * run: that is what lets a slow deliberate drag-up escape over and over
    * (#2311). */
   notifyPinnedToBottom(view: ScrollSnapshot, freshRun?: boolean): void;
+  // meiva:note
+  // Declares that the content got shorter under a reader who is following.
+  // The browser clamps scrollTop to the new maximum, and that clamp reaches
+  // handleScroll as an upward move — often only after the next commit has
+  // already added rows again, so `scrollHeight < prevScrollHeight` is false by
+  // then and the move reads as a deliberate departure. Declaring the shrink
+  // from the commit that caused it keeps the clamp out of the run (#5678: a
+  // 254px clamp from the virtual window replacing estimates with measured
+  // heights released a reader parked on the tail, and every later growth then
+  // pinned nothing).
+  // meiva:link ui/web/src/docs/frontend-components/timeline-view/sticky-scroll.meiva.okf.md
+  notifyContentShrunk(view: ScrollSnapshot): void;
   /** Report a programmatic restore of a saved position (back/forward
    *  re-entry of a kept history entry): following resumes exactly when the
    *  restored position sits in the bottom zone. The one non-user position
@@ -225,6 +237,12 @@ export function createStickyController(
   // drag at the bottom forever (user report 2026-09-12: streaming output
   // plus a slow upward drag fought the reader indefinitely).
   let upwardRun = 0;
+  // meiva:note
+  // A commit made the content shorter than the last one, and the clamp it
+  // causes has not been reported yet. Spent by the first upward move and
+  // cleared by anything else, so a stale flag cannot swallow a real gesture.
+  // meiva:link ui/web/src/docs/frontend-components/timeline-view/sticky-scroll.meiva.okf.md
+  let shrinkPending = false;
   // Whether the previous observation put the viewport inside the bottom
   // zone. Distinguishes "arrived from outside" (reconcile, fresh run) from
   // "never left" (keep the run through the echoes and pins that land at
@@ -291,7 +309,14 @@ export function createStickyController(
         // (smaller) height; do not unstick.
         lastBottomScrollHeight = view.scrollHeight;
       } else if (movedUp > WHEEL_NOISE_PX) {
-        if (view.scrollHeight - view.scrollTop - view.clientHeight <= 0) {
+        if (shrinkPending) {
+          // meiva:note
+          // The browser clamp from the shrink declared by the commit that
+          // caused it. Not a gesture, and not the run's to spend.
+          // meiva:link ui/web/src/docs/frontend-components/timeline-view/sticky-scroll.meiva.okf.md
+          shrinkPending = false;
+          if (atBottom) stick(view);
+        } else if (view.scrollHeight - view.scrollTop - view.clientHeight <= 0) {
           // An upward move that lands at the true bottom is a clamp, not
           // a gesture: nothing to depart from. Reconcile and start a
           // fresh run.
@@ -331,6 +356,7 @@ export function createStickyController(
       // else: sub-noise motion away from the bottom — keep state.
       // Downward must not unstick: the button's smooth ride and a user
       // scrolling back toward the bottom both pass through here.
+      if (movedUp <= WHEEL_NOISE_PX) shrinkPending = false;
       prevScrollTop = view.scrollTop;
       prevScrollHeight = view.scrollHeight;
       prevNearBottom = atBottom;
@@ -339,6 +365,11 @@ export function createStickyController(
 
     handleWheel(deltaY, view) {
       if (deltaY >= -WHEEL_NOISE_PX) return; // downward or noise
+      // meiva:note
+      // A wheel is the reader speaking: the clamp it might have been waiting
+      // for is no longer what this signal is about.
+      // meiva:link ui/web/src/docs/frontend-components/timeline-view/sticky-scroll.meiva.okf.md
+      shrinkPending = false;
       // Upward intent. Absorb it while at the bottom (resting-finger
       // twitches during streaming must not break following) or while still
       // at the last known bottom (a chunk grew the content between this
@@ -416,6 +447,14 @@ export function createStickyController(
       prevScrollTop = view.scrollTop;
       prevScrollHeight = view.scrollHeight;
       prevNearBottom = true;
+    },
+
+    notifyContentShrunk(view) {
+      if (!sticky) return;
+      shrinkPending = true;
+      if (lastBottomScrollHeight !== null && view.scrollHeight < lastBottomScrollHeight) {
+        lastBottomScrollHeight = view.scrollHeight;
+      }
     },
 
     notifyRestored(view) {

@@ -177,6 +177,38 @@ export const TimelineView = memo(function TimelineView({
     trimFollowing();
   }, [canonicalItems, retainedItemsMax, trimFollowing]);
 
+  // meiva:note
+  // The commit that shrinks the content is the only place that knows a clamp is
+  // coming: by the time the clamp's scroll event dispatches, a later commit has
+  // usually added rows again, so `scrollHeight < prevScrollHeight` no longer
+  // holds and the move reads as a user scroll-up (#5678).
+  // meiva:link ui/web/src/docs/frontend-components/timeline-view/sticky-scroll.meiva.okf.md
+  const contentHeightRef = useRef<number | null>(null);
+  useLayoutEffect(() => {
+    const viewport = viewportRef.current;
+    // meiva:note
+    // Only a follower can be clamped, and the controller ignores the report from
+    // anyone else: skip the layout read that a parked reader would pay.
+    // meiva:link ui/web/src/docs/frontend-components/timeline-view/sticky-scroll.meiva.okf.md
+    if (!viewport || !controller.isSticky()) return;
+    const height = viewport.scrollHeight;
+    const previous = contentHeightRef.current;
+    contentHeightRef.current = height;
+    // meiva:note
+    // A shrink only clamps a reader who was on the tail, and the clamp leaves
+    // the viewport exactly at the new bottom. Anything short of that is a
+    // shrink below a reader parked mid-history - nothing to declare.
+    // meiva:link ui/web/src/docs/frontend-components/timeline-view/sticky-scroll.meiva.okf.md
+    if (previous === null || height >= previous || height - viewport.clientHeight - viewport.scrollTop > 1) {
+      return;
+    }
+    controller.notifyContentShrunk({
+      scrollTop: viewport.scrollTop,
+      scrollHeight: height,
+      clientHeight: viewport.clientHeight,
+    });
+  });
+
   const [announcedTurnActive, setAnnouncedTurnActive] = useState(turnActive);
   const [turnAnnouncement, setTurnAnnouncement] = useState<string | null>(null);
   if (announcedTurnActive !== turnActive) {
