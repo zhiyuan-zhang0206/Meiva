@@ -84,9 +84,10 @@ from base.native_process.code_version import CodeVersion
 from base.native_process.stop_timing import CANCEL_UNWIND_TIMEOUT_S
 from base.packages.composer_commands import CommandCatalog
 from base.paths import logs_dir
+from base.paths.home import resolve_meiva_home
 from base.sessions.helper_chain_guard import helper_marker_pid, parent_chain_intact
 from meiva import skills as meiva_skills
-from meiva.boot import clients_over
+from meiva.boot import clients_over, process_disable_entries
 from meiva.sdk_surface import process_context
 from meiva.sdk_surface.installation import Installation
 from services.agent_runner.understanding.chunk_consumer import understanding_loop_forever
@@ -480,6 +481,7 @@ async def run(
     machine: MachineIdentityReader,
     home: Path,
     user_home: Path,
+    disabled_entries: tuple[str, ...],
     clients: ClientSet | None = None,
     on_clients_owned: Callable[[], None] | None = None,
 ) -> None:
@@ -519,7 +521,12 @@ async def run(
         if clients is None:
             clients = clients_over(config, machine, lambda: db)
         installation = load_installation(
-            config, clients=clients, load_extensions=_state_gated_loader(), rng=rng, home=home
+            config,
+            clients=clients,
+            load_extensions=_state_gated_loader(),
+            rng=rng,
+            home=home,
+            disabled_entries=disabled_entries,
         )
         checkpointer = await build_checkpointer(
             workload_pool,
@@ -652,7 +659,12 @@ def main() -> None:
     process_context.bind_host_process()
     from base.deploy.schema.migrations import assert_schema_current
 
-    config, home = boot_process()
+    # meiva:note
+    # This process entry resolves its home and reads the operator's process-disable list once,
+    # before it composes the configuration owner or loads a single plugin.
+    home = resolve_meiva_home()
+    config = boot_process()
+    disabled_entries = process_disable_entries()
     require_helper_parent_chain(pid=os.getpid(), environ=os.environ)
     assert_schema_current(config.view.data_plane.db_url)
     machine = ConfiguredMachineIdentity(config)
@@ -687,6 +699,7 @@ def main() -> None:
                 machine=machine,
                 home=home,
                 user_home=Path.home(),
+                disabled_entries=disabled_entries,
                 clients=clients,
                 on_clients_owned=hand_off_clients,
             )

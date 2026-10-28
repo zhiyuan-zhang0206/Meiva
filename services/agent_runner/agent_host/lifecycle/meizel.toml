@@ -9,8 +9,4 @@ exports = ["cleanup_failures.py", "configuration.py", "graceful_exit.py", "insta
 "lease_controls.py" = "strict"
 
 [roots]
-"configuration.py" = { kinds = ["clock", "settings"], why = "Agent host process bootstrap constructs configuration and process home; builds the process clock from SYSTEM_TIMERS" }
-
-[debt.ambient-read]
-"configuration.py#environ meiva.boot.process_disable_entries" = 1
-"configuration.py#home base.paths.home.resolve_meiva_home" = 1
+"configuration.py" = { kinds = ["clock", "settings"], why = "Agent host bootstrap constructs the process configuration owner and the process clock (from SYSTEM_TIMERS) the host stamps handoffs and group checks with; the entry hands it the home and the process-disable list it read" }

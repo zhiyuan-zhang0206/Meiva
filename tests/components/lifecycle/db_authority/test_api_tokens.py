@@ -32,6 +32,7 @@ from base.cluster.machine import (
     daemon_acceptance,
     gateway_auth_headers,
 )
+from base.cluster.machine.ambient import gateway_access_from_settings
 from base.cluster.machine.configured import ConfiguredMachineIdentity
 from base.config import get_field, set_field, settings
 from base.daemon.http_transport import start_daemon_http
@@ -50,6 +51,14 @@ from tests.fixtures.gateway_config import anonymous_gateway_client, gateway_test
 
 _HUMAN = "human-" + "h" * 40
 _ENDPOINT = "postgresql://meiva@10.0.0.7:6433/meiva"
+
+
+# meiva:note
+# A test has no composition root, so it stands in for the ops daemon's root the way that root
+# does: `agent_ops/daemon.py` hands `ops_acceptance` the access it builds from its boot, and here
+# the fixture-patched process settings describe the same gateway and secret.
+def _ops_access() -> GatewayAccess:
+    return gateway_access_from_settings()
 
 
 def _tokens(home: Path) -> model.GenerationSecret:
@@ -391,7 +400,7 @@ async def _ops_status(digests: frozenset[str] | None, bearer: str | None) -> int
 
 def test_gateway_home_ops_accepts_its_generation_never_the_human_secret(gateway: Path) -> None:
     tokens = _tokens(gateway).api
-    acceptance = ops_boot.ops_acceptance(home=meiva_home())
+    acceptance = ops_boot.ops_acceptance(home=meiva_home(), access=_ops_access())
     assert acceptance == frozenset(api.acceptance(gateway).values())
     for token, status in (
         (tokens.gateway, 200),
@@ -404,7 +413,12 @@ def test_gateway_home_ops_accepts_its_generation_never_the_human_secret(gateway:
         assert asyncio.run(_ops_status(acceptance, token)) == status
     _unadmit(gateway)
     assert (
-        asyncio.run(_ops_status(ops_boot.ops_acceptance(home=meiva_home()), tokens.gateway)) == 401
+        asyncio.run(
+            _ops_status(
+                ops_boot.ops_acceptance(home=meiva_home(), access=_ops_access()), tokens.gateway
+            )
+        )
+        == 401
     )
 
 
@@ -413,7 +427,7 @@ def test_gateway_home_ops_fails_closed_while_no_generation_is_active(gateway: Pa
     then accepts no bearer at all. It never falls back to an open posture."""
     tokens = _tokens(gateway).api
     _unadmit(gateway)
-    acceptance = ops_boot.ops_acceptance(home=meiva_home())
+    acceptance = ops_boot.ops_acceptance(home=meiva_home(), access=_ops_access())
     assert acceptance == frozenset()
     for token in (tokens.gateway, tokens.runner, _HUMAN, None):
         assert asyncio.run(_ops_status(acceptance, token)) == 401
@@ -499,7 +513,7 @@ def test_remote_unit_ops_accepts_its_generation_never_the_human_secret(
     gateway: Path, runner_home: Path
 ) -> None:
     tokens = _tokens(gateway).api
-    acceptance = ops_boot.ops_acceptance(home=meiva_home())
+    acceptance = ops_boot.ops_acceptance(home=meiva_home(), access=_ops_access())
     assert acceptance == frozenset(
         {api.token_digest(tokens.gateway), api.token_digest(tokens.runner)}
     )
