@@ -4,6 +4,7 @@ import { Loader2, AlertCircle, Paperclip } from "lucide-react";
 import { useRef, useCallback } from "react";
 
 import { cn } from "@/lib/format/utils";
+import { ICON_SIZE_CLASS } from "@/lib/layout/layout";
 
 interface Props {
   agentId: number | null;
@@ -40,7 +41,7 @@ export function UploadButton({ agentId, onUpload, uploading, progress, count, er
         className="inline-flex h-9 shrink-0 items-center gap-1 px-1 text-[10px] text-muted-foreground"
         aria-label={count > 1 ? `${count} files uploading, ${progress}%` : `Uploading, ${progress}%`}
       >
-        <Loader2 className="size-4 animate-spin" />
+        <Loader2 className={cn(ICON_SIZE_CLASS, "animate-spin")} />
         {count > 1 ? `${count} · ${progress}%` : `${progress}%`}
       </span>
     );
@@ -77,7 +78,11 @@ export function UploadButton({ agentId, onUpload, uploading, progress, count, er
             : "text-muted-foreground hover:bg-accent hover:text-foreground",
         )}
       >
-        {error ? <AlertCircle className="size-4" /> : <Paperclip className="size-4" />}
+        {error ? (
+          <AlertCircle className={ICON_SIZE_CLASS} />
+        ) : (
+          <Paperclip className={ICON_SIZE_CLASS} />
+        )}
       </button>
     </>
   );

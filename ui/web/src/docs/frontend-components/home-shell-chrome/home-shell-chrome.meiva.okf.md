@@ -32,6 +32,43 @@ label read on every glance, so it reads in the Inspector's Liveness section besi
 model
 ([[ui/web/src/docs/frontend-state/shared-context.meiva.okf.md|shared context]]).
 
+## The bottom band
+
+Every home column ends with the same band: a 1px rule, 8px, one 36px control row,
+12px (`BOTTOM_BAND_CLASS` + `BOTTOM_BAND_ROW_CLASS`, `BOTTOM_BAND_HEIGHT_PX` in
+`lib/layout/primitives/bars.ts`). The sidebar footer and the composer both draw
+it, so their rules are one horizontal line across the bottom of the screen
+(user ruling 2026-10-29 — before it, each column tuned its own padding and the
+sidebar's rule sat 16px below the composer's: 41px against 57px of band). The
+bands are bottom-anchored, so equal band heights are what make the rules equal;
+a column may not compose its own padding for this row.
+
+The composer's band is content-sized: a multi-line draft, the context-meter row
+or an upload hint grow it upward. It therefore publishes its measured height as
+`--composer-band-height` on the document root, and the sidebar footer takes that
+as its minimum height — otherwise the two rules would part the moment the reader
+types a second line. The fallback is `BOTTOM_BAND_HEIGHT_PX` (the resting band),
+so a column mounted without a composer (the fleet page) keeps the same rule.
+
+Above the rule, the gap between the last message row and the line is split half
+by the list (`pb-1.5`) and half by the composer (`pt-1`): the 20px the two used
+to add up to became 10px (same ruling, measured 20.5px → 10.5px at 1440×900).
+The list's half is deliberately smaller than the 12px between rows.
+
+## Icon size
+
+One glyph size for the shell's icon-only controls: `ICON_SIZE_CLASS` (16px, the
+composer's upload glyph — the reference the user named on 2026-10-29). The four
+columns' control rows take it — the header bar, the sidebar's title row, the
+sidebar footer and the composer's control row — so a row never mixes two glyph
+sizes. The right panel's toggle and the phone's menu button used to be drawn a
+size larger than their neighbours; they now take the same constant, and the
+toggle's `iconClass` prop is gone with it (one size, one source).
+
+Glyphs that are not controls keep their own optical size: an inline mark inside
+a text row (the pending strip's clock, the send button's filled stop square) is
+an annotation, and 16px would break the line it sits in.
+
 ## Edge-pinned controls
 
 A control that belongs to the viewport's edge belongs to the bar, not to the

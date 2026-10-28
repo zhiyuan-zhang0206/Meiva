@@ -3,7 +3,7 @@
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { BAR_DIVIDER_CLASS, BAR_HEIGHT_CLASS } from "@/lib/layout/layout";
+import { BAR_DIVIDER_CLASS, BAR_HEIGHT_CLASS, ICON_SIZE_CLASS } from "@/lib/layout/layout";
 
 import { HeaderBar } from "./header-bar";
 
@@ -134,6 +134,19 @@ describe("HeaderBar", () => {
     render(<HeaderBar label="x" onOpenSidebar={vi.fn()} sidebarCollapsed={false} onToggleSidebar={vi.fn()} alertCount={2} />);
     expect(screen.getByTestId("mobile-sidebar-alert-count").textContent).toBe("2");
     expect(screen.getByRole("button", { name: /Open sidebar/ }).getAttribute("aria-label")).toContain("2 unresolved alerts");
+  });
+
+  it("draws every bar glyph at the one shell icon size", () => {
+    // meiva:note
+    // User ruling 2026-10-29: the phone's menu glyph was a step larger than the
+    // icon row it opens; the bar and the sidebar footer now share one size.
+    // meiva:link ui/web/src/docs/frontend-components/home-shell-chrome/home-shell-chrome.meiva.okf.md
+    const { container } = render(
+      <HeaderBar label="x" onOpenSidebar={vi.fn()} sidebarCollapsed onToggleSidebar={vi.fn()} />,
+    );
+    const icons = container.querySelectorAll("svg");
+    expect(icons.length).toBeGreaterThan(0);
+    for (const icon of icons) expect(icon.getAttribute("class")).toContain(ICON_SIZE_CLASS);
   });
 
   it("mobile menu button stays quiet with no unresolved alerts", () => {
