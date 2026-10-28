@@ -45,7 +45,6 @@ from meizel.allowances import (  # noqa: E402
 )
 from meizel.checkout import GitRepo, toplevel  # noqa: E402
 from meizel.graph.model import MeizelError  # noqa: E402
-from meizel.checkout import GitRepo, toplevel  # noqa: E402
 from scripts.ci.test_impact import member_numbers  # noqa: E402
 
 _SEPARATOR = " \u2014 "

@@ -12,7 +12,7 @@ exports = ["allowances.py", "budgets", "checkout.py", "contracts", "graph", "lan
 "roles.py" = ["checkout.py", "graph"]
 "source_evidence" = ["graph", "lint_common.py"]
 "state" = ["allowances.py", "lint_common.py", "roles.py"]
-"tests" = ["allowances.py", "checkout.py", "contracts", "graph", "language", "lint_common.py", "owners", "roles.py", "state"]
+"tests" = ["allowances.py", "contracts", "graph", "language", "lint_common.py", "owners", "roles.py", "state"]
 
 [purity]
 "." = "strict-to-be"
@@ -38,6 +38,3 @@ exports = ["allowances.py", "budgets", "checkout.py", "contracts", "graph", "lan
 "allowances.py#meizel/checkout.py" = 1
 "lint_common.py#meizel/checkout.py" = 1
 "roles.py#meizel/checkout.py" = 1
-
-[debt.wide-fanout]
-"tests#uses" = 1

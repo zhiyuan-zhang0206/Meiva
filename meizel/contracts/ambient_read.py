@@ -207,7 +207,7 @@ def _unless(universe: Universe, target: str, parameter: str) -> Unless | str:
         return f"is a method: `unless` is read for a module-level function only, in {file}"
     functions = [
         node
-        for node in ast.parse(universe.load_text(file)).body
+        for node in ast.parse(universe.repo.load_text(file)).body
         if isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef) and node.name == member[0]
     ]
     if not functions:
