@@ -7,6 +7,7 @@ from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from threading import Timer
 from typing import Any
+from uuid import uuid4
 
 import pytest
 
@@ -358,3 +359,106 @@ def test_the_spawned_relay_environment_is_projected_from_the_environment_it_is_g
     child.wait(timeout=10)
 
     assert json.loads((marker / "env.json").read_text())["MEIVA_HOME"] == given_home
+
+
+def _hand_over(cluster: Cluster, predecessor: RuntimeIncarnation) -> RuntimeIncarnation:
+    successor = RuntimeIncarnation(predecessor.agent_id, uuid4(), uuid4())
+    cluster.db_conn.execute(
+        "UPDATE agents_meta SET runtime_generation=%s,runtime_owner=%s WHERE id=%s",
+        (successor.generation, successor.owner, successor.agent_id),
+    )
+    cluster.db_conn.execute(
+        "UPDATE agent_impersonations SET accepted_generation=%s,accepted_owner=%s "
+        "WHERE agent_id=%s AND status IN ('accepted','active')",
+        (successor.generation, successor.owner, successor.agent_id),
+    )
+    cluster.db_conn.commit()
+    return successor
+
+
+def test_a_carried_takeover_adopts_the_predecessor_relay_without_spawning(
+    cluster: Cluster, tmp_path: Path
+) -> None:
+    owner = cluster.native_agent()
+    accepted = cluster.lease(owner, provider="codex")
+    minted = leases.provision_relay(cluster.database, accepted["id"], owner, "predecessor")
+    assert minted is not None
+    cluster.heartbeat(accepted["id"], seconds_ago=0.0)
+    successor = _hand_over(cluster, owner)
+    session = cluster.status(successor)
+    assert session is not None
+    relays = RelaySupervision()
+    assert _establish(cluster, session, successor, relays, tmp_path=tmp_path, mode="serve")
+    assert not relays.children
+    assert cluster.get(accepted["id"])["relay_generation"] == 1
+    assert (
+        leases.relay_get(
+            cluster.database,
+            cluster.event_bus,
+            accepted["id"],
+            "predecessor",
+            local_machine=cluster.local_machine,
+        )["status"]
+        == "accepted"
+    )
+    assert cluster.get(accepted["id"])["status"] == "accepted"
+
+
+def test_a_carried_takeover_remints_when_the_predecessor_relay_stopped_beating(
+    cluster: Cluster, tmp_path: Path
+) -> None:
+    owner = cluster.native_agent()
+    accepted = cluster.lease(owner, provider="codex")
+    assert leases.provision_relay(cluster.database, accepted["id"], owner, "predecessor")
+    cluster.heartbeat(accepted["id"], seconds_ago=600.0)
+    successor = _hand_over(cluster, owner)
+    session = cluster.status(successor)
+    assert session is not None
+    relays = RelaySupervision()
+    marker = tmp_path / "relay"
+    with ThreadPoolExecutor(max_workers=1) as pool:
+        ready = pool.submit(
+            _establish, cluster, session, successor, relays, tmp_path=tmp_path, mode="serve"
+        )
+        try:
+            token = _wait_for(marker / "token", complete=b"\n").decode().strip()
+            leases.relay_heartbeat(
+                cluster.database, accepted["id"], token, local_machine=cluster.local_machine
+            )
+            assert ready.result(timeout=20) is True
+        finally:
+            for child in relays.children.values():
+                terminate_relay(child)
+    assert relays.children[successor.agent_id].generation == 2
+    with pytest.raises(leases.ImpersonationError, match="Invalid relay token"):
+        leases.relay_get(
+            cluster.database,
+            cluster.event_bus,
+            accepted["id"],
+            "predecessor",
+            local_machine=cluster.local_machine,
+        )
+
+
+def test_a_carried_takeover_with_no_usable_carrier_rolls_back_instead_of_activating(
+    cluster: Cluster, tmp_path: Path
+) -> None:
+    owner = cluster.native_agent()
+    accepted = cluster.lease(owner, provider="codex")
+    successor = _hand_over(cluster, owner)
+    session = cluster.status(successor)
+    assert session is not None
+    relays = RelaySupervision()
+    assert not _establish(
+        cluster,
+        session,
+        successor,
+        relays,
+        tmp_path=tmp_path,
+        mode="serve",
+        wait=RelayWait(timeout_s=0.5, poll_s=0.05),
+    )
+    ended = cluster.get(accepted["id"])
+    assert ended["status"] == "rejected"
+    assert ended["rejection_reason"] == NOT_READY_REASON
+    assert not relays.children

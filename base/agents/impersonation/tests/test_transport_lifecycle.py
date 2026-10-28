@@ -91,7 +91,7 @@ def test_generation_claim_is_single_winner_and_stale_token_loses_authority(
     session, owner = active
     tokens = ["first-private-token", "second-private-token"]
 
-    def claim(token: str) -> dict[str, Any] | None:
+    def claim(token: str) -> relay.RelayProvision | None:
         return relay.provision_relay(database, session["id"], owner, token)
 
     with ThreadPoolExecutor(2) as pool:

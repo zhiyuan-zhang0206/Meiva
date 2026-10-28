@@ -1,5 +1,8 @@
 """Relay binding and failure paths for cooperative impersonation leases."""
 
+from collections.abc import Mapping
+from dataclasses import dataclass
+from enum import StrEnum
 from typing import Any
 
 from psycopg.rows import dict_row
@@ -19,12 +22,13 @@ from base.agents.impersonation._store import (
 )
 from base.agents.impersonation.status import (
     RELAY_FAILURE_STAMP_SECONDS,
+    RELAY_HEARTBEAT_STALE_SECONDS,
     ImpersonationStatus,
     parse_lease,
 )
 from base.agents.impersonation.wake import wake_agent
 from base.api_contracts.caller_identity import caller_payload
-from base.db.protocols import DatabaseLike
+from base.db.protocols import DatabaseLike, SyncConnection
 from base.events.live.bus import EventBus
 from base.log import logger
 from base.native_process.runtime_incarnation import RuntimeIncarnation
@@ -119,17 +123,46 @@ def relay_heartbeat(
         )
 
 
+class RelayAction(StrEnum):
+    # meiva:note
+    # What this incarnation did with the lease's spawned relay credential.
+
+    MINTED = "minted"
+    ADOPTED = "adopted"
+
+
+@dataclass(frozen=True)
+class RelayProvision:
+    # meiva:note
+    # One provisioning decision and the lease it left behind. `MINTED` names a credential
+    # this call created: the caller spawns the relay. `ADOPTED` names the credential an
+    # earlier incarnation created and whose carrier is still beating: the caller spawns
+    # nothing and waits for that carrier instead.
+
+    action: RelayAction
+    lease: Mapping[str, Any]
+
+
 def provision_relay(
     db: DatabaseLike,
     lease_id: str,
     incarnation: RuntimeIncarnation,
     relay_token: str,
-) -> dict[str, Any] | None:
-    """Mint the lease's one relay credential; a lease that already has one returns None.
-
-    The locked check prevents two passes from minting different credentials. A loser
-    performs no writes.
-    """
+) -> RelayProvision | None:
+    # meiva:note
+    # Mint the lease's spawned-relay credential, or adopt the one already beating.
+    #
+    # A hosted restart admits a different incarnation while the relay it spawned keeps
+    # running (`start_new_session`), so the credential outlives its minter. This incarnation
+    # adopts it while its heartbeat is fresh and re-mints only when it is not: a carrier
+    # that stopped beating is not adopted silently, and re-minting invalidates the old token
+    # so the stale carrier exits instead of delivering beside the new one.
+    #
+    # None means this call must not write: this incarnation already minted for this lease
+    # (two activation passes raced; the loser performs no writes), or the lease is not in a
+    # mintable state. The decision keys on `relay_minted_generation`, never on
+    # `relay_generation`: a session relay (claude, dsh) is minted by the controller's own
+    # request and leaves `relay_generation` at zero.
     with db.write_transaction() as conn:
         require_native(conn, incarnation)
         lease = lock_lease(conn, lease_id)
@@ -143,11 +176,16 @@ def provision_relay(
             incarnation.owner,
         ):
             raise ImpersonationError("Relay provisioning belongs to the accepting incarnation")
-        if lease["relay_generation"] != 0:
+        if (lease["relay_minted_generation"], lease["relay_minted_owner"]) == (
+            incarnation.generation,
+            incarnation.owner,
+        ):
             return None
         fresh = conn.execute("SELECT %s > clock_timestamp()", (lease["expires_at"],)).fetchone()
         if fresh != (True,):
             return None
+        if lease["relay_minted_generation"] is not None and _carrier_beats(conn, lease):
+            return RelayProvision(RelayAction.ADOPTED, public(lease))
         conn.execute(
             "UPDATE agent_impersonations SET relay_token_hash=%s,relay_generation=relay_generation+1,"
             "relay_heartbeat_at=NULL,"
@@ -155,7 +193,19 @@ def provision_relay(
             "relay_minted_owner=%s WHERE id=%s",
             (token_hash(relay_token), incarnation.generation, incarnation.owner, lease_id),
         )
-        return public(lock_lease(conn, lease_id))
+        return RelayProvision(RelayAction.MINTED, public(lock_lease(conn, lease_id)))
+
+
+def _carrier_beats(conn: SyncConnection, lease: Mapping[str, object]) -> bool:
+    # meiva:note
+    # Whether the credential another incarnation minted still has a beating carrier. The
+    # database clock decides, as it does for every other lease deadline: the row is locked
+    # by the caller, so this reads the heartbeat this decision is made on.
+    row = conn.execute(
+        "SELECT %s IS NOT NULL AND %s >= clock_timestamp() - %s*interval '1 second'",
+        (lease["relay_heartbeat_at"], lease["relay_heartbeat_at"], RELAY_HEARTBEAT_STALE_SECONDS),
+    ).fetchone()
+    return row == (True,)
 
 
 def record_degradation(

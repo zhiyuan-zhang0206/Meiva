@@ -13,6 +13,7 @@ _INVENTORY: dict[str, str] = {
     "agent/ownership/corpse_reap.py::reap_crash_corpses": "ineligible",
     "agent/graph/hooks/compact.py::auto_compact_for_llm": "ineligible",
     "agent/ownership/hosted.py::admit_hosted_runtime": "ineligible",
+    "agent/ownership/hosted.py::admit_hosted_runtime#2": "ineligible",
     "agent/ownership/hosted.py::settle_hosted_runtime": "ineligible",
     "meiva/self/__init__.py::compact": "local",
     "meiva/skills/__init__.py::_record_skill_invoked": "local",

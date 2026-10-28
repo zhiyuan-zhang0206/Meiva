@@ -13,13 +13,21 @@ tags:
 The public state machine is `preparing -> active -> released | expired | rejected`.
 Internally, preparing uses requested/accepted to preserve the drain handshake.
 A trusted controller does not require a native model approval. The native claim
-gate accepts automatically, ends that invocation, drains execution resources,
-repairs and flushes a checkpoint timeline anchor, verifies the relay heartbeat,
-then activates. Only one executor owns decisions. A lease belongs to the native
-incarnation that accepted it: the admission of a replacement incarnation closes an
-accepted or active lease (`base/agents/impersonation/replacement.py`, cause `aborted:
-native runtime restarted`) and the controller must request again. Administrative
-restart/terminate still reach the native dispatcher; termination revokes control.
+gate accepts automatically, ends that invocation, repairs and flushes a checkpoint
+timeline anchor, verifies the relay heartbeat, then activates. Only one executor owns
+decisions. A lease belongs to the agent, not to the process that accepted it: the
+admission of a replacement incarnation carries an accepted or active lease
+(`base/agents/impersonation/replacement.py:adopt_for_successor`), moving the recorded
+accepting incarnation to the admitted one and changing nothing else — the credential,
+the deadline and the event admission stay, so the controller keeps working and requests
+nothing. The move is recorded in the lease's own log as a `lease_adopted` entry and
+emitted as the `impersonation_lease_adopted` audit event, because the row only ever names
+the incarnation that carries the lease now. **A restart carries the takeover; a
+termination revokes it.** While a terminate command is pending, admission ends the lease as
+before, so the handoff still lands before the row goes down (`_apply_lease_controls`
+settles the ended lease, then the command applies). An admission that cannot carry the lease falls back to
+that same end (cause `aborted: native runtime restarted`). Administrative restart and
+terminate still reach the native dispatcher; termination revokes control.
 
 Lease status is owned by `base/agents/impersonation/status.py` (`ImpersonationStatus`):
 requested, accepted, active, released, rejected, expired. Raw lifecycle query rows

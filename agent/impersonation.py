@@ -37,6 +37,7 @@ from agent.takeover.gate import (
 )
 from agent.takeover.process import spawn_relay
 from agent.takeover.relay import (
+    ADOPTED_RELAY_DOWN_REASON,
     CREDENTIAL_RENEWED_REASON,
     NOT_READY_REASON,
     SESSION_RELAY_DOWN_REASON,
@@ -72,6 +73,7 @@ from base.agents.impersonation import (
 )
 from base.agents.impersonation import native_status as read_status
 from base.agents.impersonation.relay import (
+    RelayAction,
     record_degradation,
     stamp_relay_failure,
 )
@@ -450,20 +452,31 @@ def establish_relay(
     """
     route = relay_route(session["relay_provider"], session_providers=SESSION_RELAY_PROVIDERS)
     if route is RelayRoute.SESSION:
-        return _await_session_relay(db, bus, session, incarnation, host)
+        return _await_existing_relay(
+            db, bus, session, incarnation, host, reason=SESSION_RELAY_DOWN_REASON
+        )
     if route is RelayRoute.UNBOUND:
         return _roll_back_relay_failure(db, bus, session, incarnation, UNBOUND_REASON)
     return _establish_spawned_relay(db, bus, session, incarnation, relays, host)
 
 
-def _await_session_relay(
+def _await_existing_relay(
     db: DatabaseLike,
     bus: EventBus,
     session: dict[str, Any],
     incarnation: RuntimeIncarnation,
     host: TakeoverHost,
+    *,
+    reason: str,
 ) -> bool:
-    """claude / dsh: the relay runs in the controller's own session; require a fresh heartbeat."""
+    # meiva:note
+    # Wait for a carrier this host did not spawn; it must beat before the takeover stands.
+    #
+    # Two callers share it: the session relays (claude, dsh), whose carrier runs inside the
+    # controller's own session, and an adopted spawned relay, whose carrier the predecessor
+    # spawned outside this host (`start_new_session`) and which therefore outlived it. This
+    # host holds no child handle in the second case and never terminates it: only the lease's
+    # end does that, from the carrier's own side.
     clock, wait = host.clock, host.wait
     started = clock.monotonic()
     phase = lease_phase(session)
@@ -479,9 +492,7 @@ def _await_session_relay(
         if poll is Poll.ABANDON:
             return False
         if poll is Poll.GIVE_UP:
-            return _roll_back_relay_failure(
-                db, bus, session, incarnation, SESSION_RELAY_DOWN_REASON
-            )
+            return _roll_back_relay_failure(db, bus, session, incarnation, reason)
         clock.sleep(wait.poll_s)
         latest = read_status(db, bus, incarnation.agent_id, incarnation)
         if latest is None or latest["id"] != session["id"]:
@@ -523,11 +534,18 @@ def _establish_spawned_relay(
 
     relay_token = draw_relay_token(host.rng)
     try:
-        minted = provision_relay(db, session["id"], incarnation, relay_token)
+        provision = provision_relay(db, session["id"], incarnation, relay_token)
     except ImpersonationError:
         return False
-    if minted is None:
+    if provision is None:
         return False
+    if provision.action is RelayAction.ADOPTED:
+        # meiva:note
+        # The predecessor's carrier is still beating; the credential the external side
+        # already holds stays valid, so this host spawns nothing and only waits for it.
+        return _await_existing_relay(
+            db, bus, session, incarnation, host, reason=ADOPTED_RELAY_DOWN_REASON
+        )
     binding = RelayBinding(
         agent_id=incarnation.agent_id,
         lease_id=session["id"],
@@ -542,7 +560,7 @@ def _establish_spawned_relay(
         spawn_relay(host.relay_program, binding, token=relay_token, environ=host.environ),
         relay_token,
         host.clock.monotonic(),
-        minted["relay_generation"],
+        provision.lease["relay_generation"],
     )
     relays.children[incarnation.agent_id] = child
     return _await_spawned_relay(db, bus, session, incarnation, relays, child, host)

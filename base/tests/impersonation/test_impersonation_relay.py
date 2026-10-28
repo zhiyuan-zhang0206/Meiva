@@ -289,7 +289,7 @@ def test_provision_relay_only_for_the_accepting_incarnation(
         leases.provision_relay(database, lease["id"], foreign, "relay-credential")
     provisioned = leases.provision_relay(database, lease["id"], owner, "relay-credential")
     assert provisioned is not None
-    assert "relay_token_hash" not in provisioned
+    assert "relay_token_hash" not in provisioned.lease
     assert (
         leases.relay_get(
             database,

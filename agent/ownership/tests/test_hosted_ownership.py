@@ -375,10 +375,11 @@ async def test_replacement_admission_submits_the_interrupted_lease_notice_once(
     machine_identity: MachineIdentityReader,
 ) -> None:
     # meiva:note
-    # A restart is what ends the takeover, so the replacement host owes the notice:
-    # the in-memory relay child does not survive it and there is no retry ledger. The
-    # fake app server speaks the recorded thread's transport, so the assertion is
-    # that the notice arrived rather than that a function was called.
+    # A termination is not a restart: the takeover is not carried, the admission ends it,
+    # and then it owes the notice — the in-memory relay child does not survive the restart
+    # and there is no retry ledger. The fake app server speaks the recorded thread's
+    # transport, so the assertion is that the notice arrived rather than that a function
+    # was called.
     # meiva:link docs/conventions/agents/agent-impersonation-hosts.md
     import shutil
     import tempfile
@@ -390,6 +391,10 @@ async def test_replacement_admission_submits_the_interrupted_lease_notice_once(
     agent_id = _agent(db_conn)
     local_machine = machine_identity.name()
     db_conn.execute("UPDATE agents_meta SET machine=%s WHERE id=%s", (local_machine, agent_id))
+    db_conn.execute(
+        "INSERT INTO inbound_messages(agent_id,content,kind,source) VALUES(%s,'','terminate','user')",
+        (agent_id,),
+    )
     db_conn.commit()
     old = await admit_hosted_runtime(aops_pool, agent_id, local_machine, uuid4(), db=database)
     assert old is not None
