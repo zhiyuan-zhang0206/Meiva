@@ -1,49 +1,49 @@
-"""AST detection behind the ambient-state rule (see meizel/state/ambient_state/__init__.py).
-
-`scan(tree, rel, repo_root)` returns every `Hit` in one module: the state it
-holds, the import-time effects it has, and the background work it starts. It
-knows nothing about baselines or allowlists; the policy lives in
-`allowlist.py`, the gate wiring in `__init__.py`.
-
-Module-level statements (descending into `if`/`try`/`with`/loops, never into an
-`if __name__ == "__main__":` block) are classified by shape:
-
-- `ambient-container` — an empty mutable container (`{}`, `[]`, `set()`,
-  `defaultdict(list)`, `deque(maxlen=n)`), or any container the module mutates
-  somewhere (`_BUILT = [False]` with `_BUILT[0] = True`, a filled table that a
-  function later `.update()`s). A never-mutated, non-empty literal is a constant.
-- `ambient-instance` — `NAME = Foo(...)` or `NAME = make()` whose callee is not a
-  write-only facade, framework wiring, a pure constant constructor, or a repo
-  value class (frozen dataclass / NamedTuple / Enum / TypedDict / stateless
-  class, resolved from its defining file). A holder object (`_State()`) is an
-  instance like any other.
-- `contextvar` — `NAME = ContextVar(...)`.
-- `host-fact` / `import-time-read` — a value that reads the host (`sys.platform`,
-  `os.name`, `platform.*`) or the ambient environment (`settings`, `os.environ`,
-  the clock, the filesystem, random ids) while the module imports.
-- `import-time-call` — a bare call statement at import (`register_x(...)`);
-  declarative wiring (`app.include_router`, `parser.add_argument`) is exempt.
-- `hidden-singleton` / `hidden-cache` — a module-level function wrapped in
-  `lru_cache` / `cache`, with or without parameters.
-
-Anywhere in the module: `global-rebind` (a function that declares `global X` and
-rebinds it, or assigns through `globals()[...]`), `foreign-rebind` (assigning an
-attribute of another first-party module), `class-level-container` (a mutable
-container shared through a class attribute), and the free-floating background
-work rules `asyncio-task` (`asyncio.create_task`, `asyncio.ensure_future`,
-`<loop>.create_task` without the necessary ownership wiring in `task_owner.py`)
-and `thread` (`threading.Thread(...)` without the visible ownership wiring in
-`thread_owner.py`), keyed by the enclosing function. These are structural facts,
-not lifecycle proofs; branch routing, admission, deadlines and root teardown
-require consumer tests. A `<expr>.create_task(...)` whose receiver is not
-`asyncio` or an event loop (a `TaskGroup`'s `tg.create_task`, a component's
-`self._tg.create_task`) is the sanctioned shape; AST cannot prove the receiver is a
-TaskGroup, so any receiver not named like a loop passes (a known gap).
-
-Known gaps, by design of a per-file AST pass: a non-empty container mutated only
-from another module, a `Thread` subclass instantiated elsewhere, and
-`run_coroutine_threadsafe`/executor submits are not seen.
-"""
+# meiva:note
+# AST detection behind the ambient-state rule (see meizel/state/ambient_state/__init__.py).
+#
+# `scan(tree, rel, index)` returns every `Hit` in one module: the state it
+# holds, the import-time effects it has, and the background work it starts. It
+# knows nothing about baselines or allowlists; the policy lives in
+# `allowlist.py`, the gate wiring in `__init__.py`.
+#
+# Module-level statements (descending into `if`/`try`/`with`/loops, never into an
+# `if __name__ == "__main__":` block) are classified by shape:
+#
+# - `ambient-container` — an empty mutable container (`{}`, `[]`, `set()`,
+#   `defaultdict(list)`, `deque(maxlen=n)`), or any container the module mutates
+#   somewhere (`_BUILT = [False]` with `_BUILT[0] = True`, a filled table that a
+#   function later `.update()`s). A never-mutated, non-empty literal is a constant.
+# - `ambient-instance` — `NAME = Foo(...)` or `NAME = make()` whose callee is not a
+#   write-only facade, framework wiring, a pure constant constructor, or a repo
+#   value class (frozen dataclass / NamedTuple / Enum / TypedDict / stateless
+#   class, resolved from its defining file). A holder object (`_State()`) is an
+#   instance like any other.
+# - `contextvar` — `NAME = ContextVar(...)`.
+# - `host-fact` / `import-time-read` — a value that reads the host (`sys.platform`,
+#   `os.name`, `platform.*`) or the ambient environment (`settings`, `os.environ`,
+#   the clock, the filesystem, random ids) while the module imports.
+# - `import-time-call` — a bare call statement at import (`register_x(...)`);
+#   declarative wiring (`app.include_router`, `parser.add_argument`) is exempt.
+# - `hidden-singleton` / `hidden-cache` — a module-level function wrapped in
+#   `lru_cache` / `cache`, with or without parameters.
+#
+# Anywhere in the module: `global-rebind` (a function that declares `global X` and
+# rebinds it, or assigns through `globals()[...]`), `foreign-rebind` (assigning an
+# attribute of another first-party module), `class-level-container` (a mutable
+# container shared through a class attribute), and the free-floating background
+# work rules `asyncio-task` (`asyncio.create_task`, `asyncio.ensure_future`,
+# `<loop>.create_task` without the necessary ownership wiring in `task_owner.py`)
+# and `thread` (`threading.Thread(...)` without the visible ownership wiring in
+# `thread_owner.py`), keyed by the enclosing function. These are structural facts,
+# not lifecycle proofs; branch routing, admission, deadlines and root teardown
+# require consumer tests. A `<expr>.create_task(...)` whose receiver is not
+# `asyncio` or an event loop (a `TaskGroup`'s `tg.create_task`, a component's
+# `self._tg.create_task`) is the sanctioned shape; AST cannot prove the receiver is a
+# TaskGroup, so any receiver not named like a loop passes (a known gap).
+#
+# Known gaps, by design of a per-file AST pass: a non-empty container mutated only
+# from another module, a `Thread` subclass instantiated elsewhere, and
+# `run_coroutine_threadsafe`/executor submits are not seen.
 
 from __future__ import annotations
 
@@ -51,7 +51,6 @@ import ast
 import re
 from collections.abc import Callable
 from dataclasses import dataclass
-from pathlib import Path
 from typing import Any
 
 from meizel.state.ambient_state import allowlist as allow
@@ -66,6 +65,7 @@ from meizel.state.ambient_state.module import (
 )
 from meizel.state.ambient_state.task_owner import owned_calls as owned_task_calls
 from meizel.state.ambient_state.thread_owner import owned_calls
+from meizel.state.ambient_state.tree import Tree
 
 INSTANCE = "ambient-instance"
 CONTAINER = "ambient-container"
@@ -584,9 +584,9 @@ def _is_globals_call(node: ast.expr) -> bool:
 # ── entry point ────────────────────────────────────────────────────────────
 
 
-def scan(tree: ast.Module, rel: str, repo_root: Path) -> list[Hit]:
+def scan(tree: ast.Module, rel: str, index: Tree) -> list[Hit]:
     """Every ambient-state hit in one module, before any allowlist is applied."""
-    module = Module(tree, rel, repo_root)
+    module = Module(tree, rel, index)
     walker = _Walker(module)
     walker.run()
     return [*_module_level_hits(module, walker.mutated), *walker.hits]

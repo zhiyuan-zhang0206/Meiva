@@ -1,12 +1,12 @@
 from __future__ import annotations
 
 import ast
-from pathlib import Path
 
 from meizel import allowances, lint_common
 from meizel.roles import packages
 from meizel.state.ambient_state import allowlist as allow
 from meizel.state.ambient_state import bundle, scan
+from meizel.state.ambient_state.tree import Tree
 
 SECTION = "ambient_state"
 # The rule module path used by integration-test repository fixtures.
@@ -69,19 +69,19 @@ def _site_key(rel: str, hit: scan.Hit) -> str:
     return f"{rel}::{hit.rule}:{hit.name}"
 
 
-def _hits(tree: ast.Module, rel: str, repo_root: Path) -> list[scan.Hit]:
+def _hits(tree: ast.Module, rel: str, index: Tree) -> list[scan.Hit]:
     if not in_scope(rel):
         return []
     return [
-        *scan.scan(tree, rel, repo_root),
-        *bundle.hits(tree, repo_root),
+        *scan.scan(tree, rel, index),
+        *bundle.hits(tree, index),
     ]
 
 
-def measure(tree: ast.Module, rel: str, repo_root: Path) -> Sites:
+def measure(tree: ast.Module, rel: str, index: Tree) -> Sites:
     """The site keys of one module with the closed lists applied, `path::rule:name -> [line]`."""
     sites: Sites = {}
-    for hit in _hits(tree, rel, repo_root):
+    for hit in _hits(tree, rel, index):
         key = _site_key(rel, hit)
         if key not in allow.ALLOWED and not _is_facade_state(rel, hit):
             sites.setdefault(key, []).append(hit.line)
@@ -94,12 +94,12 @@ def _listed_in(rel: str) -> dict[str, str]:
     return {key: why for key, why in allow.ALLOWED.items() if key.startswith(prefix)}
 
 
-def allowlist_errors(tree: ast.Module, rel: str, repo_root: Path) -> list[tuple[int, str]]:
+def allowlist_errors(tree: ast.Module, rel: str, index: Tree) -> list[tuple[int, str]]:
     """A listed exemption whose site is no longer reported is stale."""
     listed = _listed_in(rel)
     if not listed and rel not in allow.SINK_FACADES:
         return []
-    hits = _hits(tree, rel, repo_root)
+    hits = _hits(tree, rel, index)
     present = {_site_key(rel, hit) for hit in hits}
     errors = [
         (1, f"stale ambient_state list entry {key} — the site is gone; remove it from {_LIST_FILE}")
@@ -119,7 +119,7 @@ def allowlist_errors(tree: ast.Module, rel: str, repo_root: Path) -> list[tuple[
 _LIST_FILE = allowances.POLICY
 
 
-def missing_allowlist_errors(repo_root: Path) -> list[str]:
+def missing_allowlist_errors(index: Tree) -> list[str]:
     """A listed file or function that no longer exists is stale too."""
     listed_paths = {
         *allow.SINK_FACADES,
@@ -128,13 +128,12 @@ def missing_allowlist_errors(repo_root: Path) -> list[str]:
     errors = [
         f"{path}:1: stale ambient_state list entry — the file no longer exists; remove it from {_LIST_FILE}"
         for path in sorted(listed_paths)
-        if not (repo_root / path).is_file()
+        if not index.has_file(path)
     ]
     for callee in sorted(allow.PURE_REPO_CALLEES):
         owner, _, name = callee.rpartition(".")
-        source = lint_common.read_utf8_text(
-            repo_root.joinpath(*owner.split(".")).with_suffix(".py")
-        )
+        rel = index.module_path(owner)
+        source = None if rel is None else index.read(rel)
         if source is None or f"def {name}(" not in source:
             errors.append(
                 f"{_LIST_FILE}:1: stale [ambient-state.pure-repo-callees] entry {callee} — no such function; remove it"
@@ -154,12 +153,12 @@ def site_message(target: str) -> str | None:
 def collect(
     tree: ast.Module,
     rel: str,
-    repo_root: Path,
+    index: Tree,
     sites: dict[str, Sites],
     scanned: set[str],
 ) -> list[str]:
     """Add one module's measured sites to `sites` and mark it scanned; return its stale-list
     errors. The one call the gate makes per governed file."""
-    sites[SECTION].update(measure(tree, rel, repo_root))
+    sites[SECTION].update(measure(tree, rel, index))
     scanned.add(rel)
-    return [f"{rel}:{line}: {message}" for line, message in allowlist_errors(tree, rel, repo_root)]
+    return [f"{rel}:{line}: {message}" for line, message in allowlist_errors(tree, rel, index)]

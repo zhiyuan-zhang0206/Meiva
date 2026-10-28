@@ -8,7 +8,7 @@ import pytest
 
 from meizel.state import ambient_state
 from meizel.state.ambient_state import allowlist as allow
-from meizel.state.ambient_state.module import Module
+from meizel.state.ambient_state.module import Module, Tree
 
 
 def _write(root: pathlib.Path, name: str, content: str) -> pathlib.Path:
@@ -28,7 +28,7 @@ def _sites(
         _write(root, name, content)
     path = _write(root, rel, source)
     tree = ast.parse(path.read_text(encoding="utf-8"))
-    measured = ambient_state.measure(tree, rel, root)
+    measured = ambient_state.measure(tree, rel, _tree(root))
     return {key.split("::", 1)[1]: len(lines) for key, lines in measured.items()}
 
 
@@ -580,7 +580,15 @@ def test_a_repo_module_is_a_python_file_or_a_directory_whatever_it_holds(
 ) -> None:
     (tmp_path / "pkg" / "empty").mkdir(parents=True)
     (tmp_path / "pkg" / "binary.py").write_bytes(b"\xff\xfe not utf-8")
-    module = Module(ast.parse(""), "pkg/here.py", tmp_path)
+    module = Module(ast.parse(""), "pkg/here.py", _tree(tmp_path))
     assert module.is_repo_module("pkg.empty")
     assert module.is_repo_module("pkg.binary")
     assert not module.is_repo_module("pkg.absent")
+
+
+# meiva:note
+# The files a test wrote under `root`, as the tree the rule is handed.
+def _tree(root: pathlib.Path) -> Tree:
+    files = {path.relative_to(root).as_posix() for path in root.rglob("*.py")}
+    dirs = {path.relative_to(root).as_posix() for path in root.rglob("*") if path.is_dir()}
+    return Tree(files, lambda rel: (root / rel).read_text(encoding="utf-8"), dirs)

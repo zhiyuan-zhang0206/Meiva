@@ -6,6 +6,7 @@ from pathlib import Path
 import pytest
 
 from meizel.state import ambient_state
+from meizel.state.ambient_state.module import Tree
 
 SCHEDULER = """
 import asyncio
@@ -46,7 +47,7 @@ class Owner:
 
 
 def _sites(source: str, root: Path) -> dict[str, list[int]]:
-    return ambient_state.measure(ast.parse(source), "base/operations.py", root)
+    return ambient_state.measure(ast.parse(source), "base/operations.py", _tree(root))
 
 
 def test_original_snapshot_and_local_join_are_supported(tmp_path: Path) -> None:
@@ -164,7 +165,9 @@ def test_local_evidence_does_not_depend_on_owner_names(tmp_path: Path) -> None:
 def test_current_dispatcher_uses_the_same_general_map_evidence() -> None:
     root = Path(__file__).resolve().parents[4]
     relative = "services/agent_runner/agent_host/dispatcher.py"
-    findings = ambient_state.measure(ast.parse((root / relative).read_text()), relative, root)
+    findings = ambient_state.measure(
+        ast.parse((root / relative).read_text()), relative, _tree(root)
+    )
     assert f"{relative}::asyncio-task:TurnScheduler._start" not in findings
 
 
@@ -215,3 +218,11 @@ def test_unknown_rebound_alias_is_not_the_joined_original_snapshot(
             "        await asyncio.wait(alias.values(), timeout=budget)",
         )
     assert _sites(source, tmp_path)
+
+
+# meiva:note
+# The files a test wrote under `root`, as the tree the rule is handed.
+def _tree(root: Path) -> Tree:
+    files = {path.relative_to(root).as_posix() for path in root.rglob("*.py")}
+    dirs = {path.relative_to(root).as_posix() for path in root.rglob("*") if path.is_dir()}
+    return Tree(files, lambda rel: (root / rel).read_text(encoding="utf-8"), dirs)
