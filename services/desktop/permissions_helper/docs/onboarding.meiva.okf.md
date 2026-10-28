@@ -13,10 +13,12 @@ helper, so there is nothing to check), the child environment, a scratch
 directory, the account home and the record path, carried together as
 `GateHost`. It reads nothing of the process: each root that runs the gate
 (`meiva permissions`, the converge step, the gateway endpoint) describes its host
-with `gate_host(home, user_home, environ, helper)` from the facts it holds, and
-hands the passes a clock (the instant they stamp) and a run id (the name of the
-probe children's files). `GateService` is the gateway's long-lived form: a host,
-a clock and a generator.
+with `gate_host(home, user_home, environ, helper, timers)` from the facts it holds,
+and hands the passes a clock (the instant they stamp) and a run id (the name of the
+probe children's files). Its `timers` are the waits: the monotonic reading each
+deadline is set from and the sleep between polls of a child's result file, so a test
+that passes manual timers spends no real time. `GateService` is the gateway's
+long-lived form: a host, a clock and a generator.
 
 ## Every run asks what is still undetermined
 

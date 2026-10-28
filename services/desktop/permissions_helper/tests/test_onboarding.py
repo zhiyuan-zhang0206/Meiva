@@ -9,6 +9,7 @@ from typing import Any, cast
 
 from base.clock.ids import new_uuid
 from base.clock.tests.fakes import clock_at
+from base.clock.tests.manual_timers import ManualTimers
 from base.clock.tests.seeded_rng import seeded_rng
 from base.host.permissions_helper.client import (
     PermissionsHelperClient,
@@ -122,6 +123,7 @@ def host(tmp_path: Path, *, client: FakeHelper | DeadHelper | None = None) -> on
         workdir=tmp_path / "scratch",
         home=tmp_path,
         record_path=tmp_path / gate.RECORD_NAME,
+        timers=ManualTimers(),
     )
 
 
@@ -155,6 +157,7 @@ def test_a_non_darwin_host_has_nothing_to_check(tmp_path: Path) -> None:
         workdir=tmp_path / "scratch",
         home=tmp_path,
         record_path=tmp_path / gate.RECORD_NAME,
+        timers=ManualTimers(),
     )
     report = onboarding.check(host=seat, now=NOW, run_id=RUN)
     assert report.state is gate.GateState.NOT_APPLICABLE
@@ -318,6 +321,7 @@ def test_a_host_is_described_from_the_facts_the_root_hands_in(tmp_path: Path) ->
         user_home=user_home,
         environ={"PATH": "/marker/bin"},
         helper=serve(cast("PermissionsHelperClient", helper)),
+        timers=ManualTimers(),
     )
 
     assert seat.client is helper
@@ -331,7 +335,11 @@ def test_a_platform_without_a_helper_is_a_host_with_no_client_and_nothing_to_che
     tmp_path: Path,
 ) -> None:
     seat = onboarding.gate_host(
-        home=tmp_path / "meiva-home", user_home=tmp_path / "account", environ={}, helper=None
+        home=tmp_path / "meiva-home",
+        user_home=tmp_path / "account",
+        environ={},
+        helper=None,
+        timers=ManualTimers(),
     )
 
     assert seat.client is None

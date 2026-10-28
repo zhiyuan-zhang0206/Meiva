@@ -7,7 +7,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import TextIO
 
-from base.clock import Clock
+from base.clock import Clock, Timers
 from base.clock.ids import new_uuid
 from base.host.permissions_helper.client import HelperFactory
 from base.host.permissions_helper.grants import gate, probe, triggers
@@ -22,7 +22,8 @@ REQUEST_TIMEOUT_S = 90.0
 # The host the gate runs on, as the process root that runs it describes it. `client` is the helper's
 # channel, None on a platform that has no helper (the gate has nothing to check there); `env` is the
 # environment the probe children are launched with, `workdir` where they write, `home` the account
-# home whose folders the folder rows ask, and `record_path` the file that remembers the last pass.
+# home whose folders the folder rows ask, `record_path` the file that remembers the last pass, and
+# `timers` the monotonic clock and sleep every wait for a child measures with.
 @dataclass(frozen=True)
 class GateHost:
     client: HelperChannel | None
@@ -30,6 +31,7 @@ class GateHost:
     workdir: Path
     home: Path
     record_path: Path
+    timers: Timers
 
 
 # meiva:note
@@ -42,6 +44,7 @@ def gate_host(
     user_home: Path,
     environ: Mapping[str, str],
     helper: HelperFactory | None,
+    timers: Timers,
 ) -> GateHost:
     from base.sessions import env_forwarding
 
@@ -51,6 +54,7 @@ def gate_host(
         workdir=home / "permissions-onboarding",
         home=user_home,
         record_path=gate.record_path(home),
+        timers=timers,
     )
 
 
@@ -62,7 +66,9 @@ def check(*, host: GateHost, now: datetime, run_id: str) -> GateReport:
         return gate.not_applicable(now)
     record = gate.read_record(host.record_path)
     deferred = bool(record.deferred) if record is not None else False
-    result = probe.probe(host.client, workdir=host.workdir, run_id=run_id, env=host.env)
+    result = probe.probe(
+        host.client, workdir=host.workdir, run_id=run_id, env=host.env, timers=host.timers
+    )
     report = gate.evaluate(result, deferred=deferred, now=now)
     gate.remember(report, deferred=deferred, path=host.record_path)
     return report
@@ -119,6 +125,7 @@ def _ask_items(
             env=seat.env,
             home=seat.home,
             timeout_s=timeout_s,
+            timers=seat.timers,
         )
         _say(progress, f"  -> {verdict}")
 

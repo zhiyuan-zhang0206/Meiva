@@ -171,6 +171,7 @@ def test_the_gate_service_describes_its_host_from_the_gateway_process(
     assert seat.home == tmp_path / "h" / "account"
     assert seat.workdir == home / "permissions-onboarding"
     assert seat.record_path == gate.record_path(home)
+    assert seat.timers is app.state.clock
     assert (
         seat.env
         == gate_host(
@@ -178,8 +179,14 @@ def test_the_gate_service_describes_its_host_from_the_gateway_process(
             user_home=seat.home,
             environ={"PATH": "/the/gateways/launch/path"},
             helper=None,
+            timers=app.state.clock,
         ).env
     )
-    assert seat.env != gate_host(home=home, user_home=seat.home, environ={}, helper=None).env
+    assert (
+        seat.env
+        != gate_host(
+            home=home, user_home=seat.home, environ={}, helper=None, timers=app.state.clock
+        ).env
+    )
     assert isinstance(seat.client, PermissionsHelperClient)
     assert seat.client.sock_path == helper_client(home=home).sock_path
