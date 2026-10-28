@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 from collections.abc import Callable
 from dataclasses import replace
 from datetime import UTC, datetime
@@ -155,11 +156,20 @@ def test_run_drill_restores_an_encrypted_artifact_into_throwaway_postgres(
     # home of this test's own, under the passphrase a gateway birth pins there.
     tree = minted_tree(tmp_path)
     artifact = backup.run_backup(
-        datetime.now(UTC), tree=tree, db_url=db_url, keep=7, offsite_target=None
+        datetime.now(UTC),
+        tree=tree,
+        db_url=db_url,
+        keep=7,
+        offsite_target=None,
+        env=dict(os.environ),
     )
 
     report, elapsed = restore_drill.run_drill(
-        artifact, tree=tree, database_for_url=_database_factory(), throwaway=throwaway_config
+        artifact,
+        tree=tree,
+        database_for_url=_database_factory(),
+        throwaway=throwaway_config,
+        env=dict(os.environ),
     )
 
     assert report.agents == 1
@@ -187,6 +197,7 @@ def test_the_command_restores_an_artifact_and_prints_its_verdict(
         keep=7,
         offsite_target=None,
         staging=tmp_path / "staged",
+        env=dict(os.environ),
     )
 
     restore_drill.main([str(artifact)])

@@ -141,6 +141,7 @@ def test_scheduled_backup_dumps_as_the_owner_and_restores(
         tree=tree,
         database=database,
         database_for_url=database_for_url,
+        env=dict(os.environ),
     )
     artifact = worker.commit_scheduled_backup(
         work / "artifact" / str(result["artifact"]),
@@ -160,6 +161,7 @@ def test_scheduled_backup_dumps_as_the_owner_and_restores(
         foreground=True,
         scratch_root=scratch,
         throwaway=throwaway_config,
+        env=dict(os.environ),
     )
     assert report.agents == 1
     assert report.sample_agent_id == agent_id

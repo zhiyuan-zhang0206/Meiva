@@ -16,7 +16,7 @@ import shutil
 import subprocess
 import tempfile
 import time
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -35,6 +35,7 @@ from base.db.code_version_gate import ProcessDbGate
 from base.db.config import db_config_from_boot
 from base.host.db_authority.model import GATEWAY_GROUP, RUNNER_GROUP
 from base.log import logger
+from base.native_process.child_env import inherited_process_env
 from base.native_process.code_version import CodeVersion
 from base.native_process.loaded_commit import LoadedCommit
 from base.paths import meiva_home
@@ -192,6 +193,7 @@ def run_drill(
     throwaway: ThrowawayConfig,
     foreground: bool = False,
     scratch_root: Path | None = None,
+    env: Mapping[str, str],
 ) -> tuple[RestoreReport, float]:
     """Run the complete decrypt, restore, and verification drill.
 
@@ -205,7 +207,7 @@ def run_drill(
     with tempfile.TemporaryDirectory(prefix="meiva-restore-drill-", dir=scratch_root) as tmp:
         scratch = Path(tmp)
         raw_dump = scratch / "backup.dump"
-        backup.decrypt_artifact(artifact, raw_dump, tree=tree)
+        backup.decrypt_artifact(artifact, raw_dump, tree=tree, env=env)
         required = scratch_space_requirement(raw_dump)
         base = select_throwaway_base(required, override=throwaway.override)
         logger.info(
@@ -244,6 +246,7 @@ def main(argv: list[str] | None = None) -> None:
         tree=tree,
         throwaway=throwaway,
         database_for_url=database_for_url,
+        env=inherited_process_env(),
     )
     print(  # noqa: T201 — the operator command's result line, read on stdout
         "restore drill passed: "

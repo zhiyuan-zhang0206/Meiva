@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import itertools
 import json
+import os
 import subprocess
 import sys
 from collections.abc import Callable
@@ -144,6 +145,7 @@ def backups(tmp_path: Path, db_url: str) -> Callable[[], Path]:
             keep=settings.services.backup_keep,
             offsite_target=None,
             staging=staging,
+            env=dict(os.environ),
         )
 
     return take
@@ -153,7 +155,9 @@ def _restored(artifact: Path) -> bytes:
     """The restore path's decryption (`decrypt_artifact`, shared by the snapshot
     verification and the restore drill); a fresh output file per call."""
     out = artifact.parent / f"restored-{next(_RESTORES)}.dump"
-    backup.decrypt_artifact(artifact, out, tree=BackupTree(paths.meiva_home()))
+    backup.decrypt_artifact(
+        artifact, out, tree=BackupTree(paths.meiva_home()), env=dict(os.environ)
+    )
     return out.read_bytes()
 
 
