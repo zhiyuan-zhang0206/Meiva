@@ -17,8 +17,6 @@ exports = ["context-breakdown-body.tsx", "context-breakdown.tsx", "context-meter
 "inspector-widgets.test.tsx" = ["inspector-widgets.tsx"]
 "inspector-widgets.tsx" = ["inspector-section.tsx"]
 
-[debt.first-party-patch]
-
 [debt.third-party-patch]
 "inspector-widgets.test.tsx#vi.mock next/link" = 1
 

@@ -17,9 +17,3 @@ exports = ["agent-sidebar", "app", "auth", "connection", "content", "context", "
 "run-timeline" = ["content", "inspector", "ui"]
 "shell" = ["connection", "notifications", "plugins", "ui"]
 "timeline" = ["content", "notifications", "ui"]
-
-[debt.private-name]
-"timeline/pinned-titles-autofollow.test.tsx -> content/python-code.tsx#__resetHighlighterCacheForTests" = 1
-"timeline/pinned-titles-autofollow.test.tsx -> content/python-code.tsx#__setHighlighterImportForTests" = 1
-"timeline/view/timeline-test-mock.tsx -> content/python-code.tsx#__resetHighlighterCacheForTests" = 1
-"timeline/view/timeline-test-mock.tsx -> content/python-code.tsx#__setHighlighterImportForTests" = 1
