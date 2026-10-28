@@ -160,8 +160,10 @@ violations pass, anything new fails, and the debt may only shrink
   `meizel/` (ambient state, clock lattice, single owners, setenv in tests, per-agent settings,
   `TYPE_CHECKING`) and the names through which the repository's own state is reached
   (`[ambient]`, `[ambient-readers]`). Rule code holds no exemption of its own. Do not edit the
-  file unless the task names the entry; CI prints every change to it
-  ([the policy file](../meizel/docs/checker/policy.meiva.okf.md)).
+  file unless the task names the entry. An added entry is a line the reviewer reads in the diff;
+  a removed one narrows what every gate still reports, so the PR body says why, one line per
+  removal: `Policy-Removal: <table>[.<entry>] — <why it is no longer needed> — <what replaces it,
+  or the gap it leaves>` ([the policy file](../meizel/docs/checker/policy.meiva.okf.md)).
 
 Before submitting, review your own diff with
 [review-contribution](../.agents/skills/review-contribution/SKILL.md). It routes
