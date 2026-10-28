@@ -27,6 +27,7 @@ __all__ = [
     "AMBIENT_CODES",
     "CYCLE_EDGE",
     "DEBTABLE",
+    "EDGE_CODES",
     "ENTROPY_CODES",
     "PATCH_CODES",
     "PATCH_HINT",
@@ -44,7 +45,7 @@ __all__ = [
 ]
 
 CYCLE_EDGE = Code.CYCLE_EDGE
-_EDGE_CODES = frozenset(
+EDGE_CODES = frozenset(
     {Code.UNDECLARED_EDGE, Code.NOT_EXPORTED, Code.PRIVATE_MODULE, Code.PRIVATE_NAME, CYCLE_EDGE}
 )
 # The codes of a patch: the key of an entry is `file#form target`.
@@ -91,7 +92,7 @@ _FILE_CODES = frozenset(
         *ENTROPY_CODES,
     }
 )
-DEBTABLE = _EDGE_CODES | _FILE_CODES
+DEBTABLE = EDGE_CODES | _FILE_CODES
 TABLE_KEY = "debt"
 
 type DebtTable = dict[Code, dict[str, int]]
@@ -113,7 +114,7 @@ def file_key(owner: str, path: str, what: str) -> str:
 
 def source_of(owner: str, code: Code, key: str) -> str:
     """The repository path of the file a debt is about."""
-    head = key.split(_SEPARATOR, 1)[0] if code in _EDGE_CODES else key.split("#", 1)[0]
+    head = key.split(_SEPARATOR, 1)[0] if code in EDGE_CODES else key.split("#", 1)[0]
     return f"{owner}/{head}" if owner else head
 
 
@@ -136,7 +137,7 @@ def _edge_problem(code: Code, key: str) -> str | None:
 
 
 def _key_problem(code: Code, key: str) -> str | None:
-    if code in _EDGE_CODES:
+    if code in EDGE_CODES:
         return _edge_problem(code, key)
     file, _, what = key.partition("#")
     return None if file and what else f"a {code} debt is written `file#form`"

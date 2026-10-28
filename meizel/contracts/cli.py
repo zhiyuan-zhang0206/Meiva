@@ -234,9 +234,10 @@ def _add_debt_parser(commands: argparse._SubParsersAction[argparse.ArgumentParse
         default=[],
         metavar="pathspec",
         help=(
-            "a change touching these git pathspecs (the rule code) is a rule change: the growth the "
-            "new rules cause in the base's unchanged code is reported, never judged; the growth the "
-            "content causes always is"
+            "extra git pathspecs that count as a rule change, on top of the ones debt diff detects by "
+            "itself (the checker's rule code, meizel.policy.toml and every manifest's declarations): "
+            "the change the new rules cause in the base's unchanged code is reported, never judged; "
+            "the change the content causes always is"
         ),
     )
 

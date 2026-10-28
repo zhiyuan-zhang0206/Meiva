@@ -102,28 +102,10 @@ syntax errors cannot be recorded.
   not it is recorded.
 - `debt approved [--json]` lists the files `[approved-patches.files]` approves
   with the patches each holds now. They are not debt and no baseline counts them.
-- `debt diff --against <ref> --on-growth fail|warn` compares the recorded
-  totals per code with those at a git ref. `--by-target` adds the recorded patch
-  debt per target group: what the change paid down or added, to paste into a PR
-  description. Entries are counted by the target in their key, so debt that
-  moves with its file stays in its group. The groups are the first `--depth`
-  dotted names of a target (default 3), or the `--target-prefix` values (a target
-  counts under the longest one, the rest under `(other)`; a listed prefix always
-  shows). Totals, not directories, are compared, so moved debt is not growth.
-  The caller chooses `fail` or `warn`; there is no default.
-- `--waive-if-changed <pathspec>...` marks a change that edits those paths (rule
-  code, policy) as a rule change, which is judged in two parts
-  (`meizel/contracts/debt_rules.py`). The growth the new rules cause is what this
-  checker, run on a checkout of the ref, records for the ref's unchanged code, minus what the ref
-  records: reported, never judged. The growth the content causes is what the change records
-  beyond that: judged. Every recorded key must be one the new rules find in the ref, with no
-  greater count, so a declaration cannot hide a new violation and a violation cannot ride along.
-  A file moved in the same change fails; move files separately. A manifest the checker cannot
-  read in the ref stops the comparison. Other changes are judged by totals, with no waiver.
-  The ref's own `[approved-patches.files]` is kept when it is regenerated: approving a file is a
-  drop of the record, and a file whose approval is removed may record its patches. Historical
-  snapshots keep the unreadable gate and use only the ref's ambient facts. See
-  [[meizel/docs/checker/policy.meiva.okf.md|historical policy comparisons]].
+- `debt diff --against <ref> --on-growth fail|warn` compares the recorded totals per code with those at
+  a git ref, and reports `rules` and `content` apart whenever the change edits what is measured.
+  `--by-target` adds the recorded patch debt per target group. The caller chooses `fail` or `warn`;
+  there is no default. See [[meizel/docs/checker/debt/diff.meiva.okf.md|the two measures of a debt diff]].
 
 ## Depths of `check`
 
