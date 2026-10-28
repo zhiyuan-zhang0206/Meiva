@@ -12,7 +12,7 @@ import random
 from pathlib import Path
 from typing import NoReturn
 
-from base.deploy.release import collector_artifact
+from base.deploy.release.collector import plan as collector_plan
 from base.host.env.dotenv_boot import PLACEHOLDER_DB_URL
 from base.host.tests.short_tmp import short_tmp as short_tmp
 from base.paths import otel_collector_config, otel_collector_dir
@@ -41,9 +41,9 @@ def test_collector_preparation_never_controls_a_running_service_tree(
     command_runtime.config.set_field("db_url", PLACEHOLDER_DB_URL)
     installed = otel_collector_dir(home)
     installed.mkdir(parents=True)
-    (installed / collector_artifact.BINARY_NAME).write_bytes(b"bin")
-    (installed / collector_artifact.VERSION_MARKER).write_text(
-        collector_artifact.OTELCOL_CONTRIB_VERSION, encoding="utf-8"
+    (installed / collector_plan.BINARY_NAME).write_bytes(b"bin")
+    (installed / collector_plan.VERSION_MARKER).write_text(
+        collector_plan.OTELCOL_CONTRIB_VERSION, encoding="utf-8"
     )
     ctx = ConvergeCtx(
         secure_rng=random.SystemRandom(),

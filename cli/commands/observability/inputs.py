@@ -11,7 +11,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 from base.config import ConfigBoot
-from base.deploy.release import collector_artifact
+from base.deploy.release.collector import plan as collector_plan
 from cli.commands.observability.plans.lgtm.download_retry import DownloadLimits
 from cli.commands.observability.plans.observability_config import (
     AlertWebhookInputs,
@@ -47,7 +47,7 @@ class LgtmSettings:
 class CollectorSettings:
     observability: ObservabilityConfig
     data_plane: DataPlaneInputs
-    download: collector_artifact.DownloadLimits
+    download: collector_plan.DownloadLimits
 
 
 # meiva:note
@@ -91,9 +91,9 @@ def _lgtm_download_limits(boot: ConfigBoot) -> DownloadLimits:
 
 # meiva:note
 # The bounds of the pinned collector download, in the shape the release owner takes.
-def _collector_download_limits(boot: ConfigBoot) -> collector_artifact.DownloadLimits:
+def _collector_download_limits(boot: ConfigBoot) -> collector_plan.DownloadLimits:
     domain = boot.view.observability
-    return collector_artifact.DownloadLimits(
+    return collector_plan.DownloadLimits(
         total_budget_s=domain.otel_collector_download_budget_s,
         socket_timeout_s=domain.otel_collector_download_socket_timeout_s,
         attempts=domain.otel_collector_download_attempts,

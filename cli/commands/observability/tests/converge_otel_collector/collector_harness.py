@@ -23,7 +23,7 @@ import yaml
 
 from base.agents.context.clients import DatabaseFactory
 from base.cluster.machine.configured import ConfiguredMachineIdentity
-from base.deploy.release import collector_artifact
+from base.deploy.release.collector import plan as collector_plan
 from base.host.net.ports import SYSTEM_URL_OPENER, UrlOpener
 from base.paths import otel_collector_dir
 from base.telemetry import EventPipeline
@@ -182,10 +182,10 @@ class CollectorUnit:
     def install_pinned_binary(self) -> Path:
         destination = otel_collector_dir(self.home)
         destination.mkdir(parents=True, exist_ok=True)
-        binary = destination / collector_artifact.BINARY_NAME
+        binary = destination / collector_plan.BINARY_NAME
         binary.write_bytes(b"bin")
-        (destination / collector_artifact.VERSION_MARKER).write_text(
-            collector_artifact.OTELCOL_CONTRIB_VERSION, encoding="utf-8"
+        (destination / collector_plan.VERSION_MARKER).write_text(
+            collector_plan.OTELCOL_CONTRIB_VERSION, encoding="utf-8"
         )
         return binary
 

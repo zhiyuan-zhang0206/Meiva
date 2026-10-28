@@ -84,7 +84,7 @@ Enablement flags, endpoint defaults and the read topology have their own node:
   `_emit_log`, so flag-off processes never pay for it.
 - `base/config/domains/observability/settings.py` — the producer-local `telemetry_otlp_*`
   settings plus gateway-local backend URLs.
-- `base/deploy/release/collector_artifact.py` — pinned downloader for release prep and
+- `base/deploy/release/collector/artifact.py` — pinned downloader for release prep and
   `cli/commands/observability/otel_collector.py` converge. Converge and
   `deploy/otel-collector/otel-collector.yaml` implement cluster filtering and
   the credential-free (peer, monitoring role) Postgres receiver. Root health: `services/supervision/roster/spec.py`

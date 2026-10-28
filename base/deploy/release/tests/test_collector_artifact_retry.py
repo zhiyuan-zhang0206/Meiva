@@ -17,13 +17,14 @@ import pytest
 
 from base.clock import SYSTEM_TIMERS
 from base.clock.tests.manual_timers import ManualTimers
-from base.deploy.release import collector_artifact as artifact
+from base.deploy.release.collector import artifact as artifact
+from base.deploy.release.collector import plan as collector_plan
 from base.host.net.ports import SYSTEM_URL_OPENER
 from base.host.net.tests.fake_url_opener import Answer, FakeUrlOpener
 
 URL = "https://example.invalid/t.tar.gz"
 
-LIMITS = artifact.DownloadLimits(
+LIMITS = collector_plan.DownloadLimits(
     total_budget_s=1800.0,
     socket_timeout_s=30.0,
     attempts=3,
@@ -32,8 +33,8 @@ LIMITS = artifact.DownloadLimits(
 )
 
 
-def _limits(**overrides: float | int) -> artifact.DownloadLimits:
-    return artifact.DownloadLimits(
+def _limits(**overrides: float | int) -> collector_plan.DownloadLimits:
+    return collector_plan.DownloadLimits(
         total_budget_s=float(overrides.get("total_budget_s", LIMITS.total_budget_s)),
         socket_timeout_s=float(overrides.get("socket_timeout_s", LIMITS.socket_timeout_s)),
         attempts=int(overrides.get("attempts", LIMITS.attempts)),
