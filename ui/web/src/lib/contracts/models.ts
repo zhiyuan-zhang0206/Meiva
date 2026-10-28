@@ -14,7 +14,7 @@ export type Harness = components["schemas"]["Harness"];
 
 // meiva:note
 // One machine's row: the probe's verdict plus what this build can start.
-// meiva:link ui/web/src/docs/frontend-components/creation-availability.meiva.okf.md
+// meiva:link ui/web/src/docs/frontend-components/creation-availability/creation-availability.meiva.okf.md
 export type HarnessAvailability = components["schemas"]["HarnessAvailability"];
 
 export type HarnessStatus = HarnessAvailability["status"];
@@ -107,7 +107,7 @@ export function groupedModels(
 // harness's column with no frontend change. A catalog entry that predates the
 // field names no harness, so it reads as the built-in runtime alone — the only
 // loop that could ever have run it.
-// meiva:link ui/web/src/docs/frontend-components/creation-availability.meiva.okf.md
+// meiva:link ui/web/src/docs/frontend-components/creation-availability/creation-availability.meiva.okf.md
 export function runsOnHarness(
   modelsData: ModelsResponse | undefined,
   model: string,

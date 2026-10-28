@@ -57,7 +57,7 @@ describe("HarnessPicker", () => {
   // The row answers one question with one word: can this machine start an agent
   // on it here. An installed-but-unlaunchable harness reads `unavailable` like a
   // missing one, and the probe's diagnostic sentence never reaches the screen.
-  // meiva:link ui/web/src/docs/frontend-components/creation-availability.meiva.okf.md
+  // meiva:link ui/web/src/docs/frontend-components/creation-availability/creation-availability.meiva.okf.md
   it("leaves a usable row as plain text and never shows the probe's reason", async () => {
     rows = [
       row("meiva", "available", true, "built-in runtime; needs no external CLI or login"),

@@ -11,7 +11,7 @@
 // on each family is what puts the provider in the accessibility tree above its
 // models: without it the list is one flat run of switches named "Claude",
 // "claude-opus-5-5", ... with no parent to either of them.
-// meiva:link ui/web/src/docs/frontend-components/creation-availability.meiva.okf.md
+// meiva:link ui/web/src/docs/frontend-components/creation-availability/model-presentation.meiva.okf.md
 
 import { Switch } from "@/components/ui/switch";
 import { providerLabel } from "@/lib/contracts/models";

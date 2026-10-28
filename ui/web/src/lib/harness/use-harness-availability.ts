@@ -10,7 +10,7 @@ import { api } from "../transport/api";
 // warm-up below, and the picker reads that answer for the rest of the session
 // instead of asking again on every open — `staleTime: Infinity` is what keeps the
 // form's own mount from re-fetching it. Reloading the page asks again.
-// meiva:link ui/web/src/docs/frontend-components/creation-availability.meiva.okf.md
+// meiva:link ui/web/src/docs/frontend-components/creation-availability/creation-availability.meiva.okf.md
 function probeQuery(machine: string) {
   return {
     queryKey: ["harness-availability", machine],
@@ -23,7 +23,7 @@ function probeQuery(machine: string) {
 
 // meiva:note
 // Harness availability is read per machine because the probe runs where the agent would run, not where the gateway does. A gateway that cannot answer yet (no route) yields an empty list, which the picker renders as unknown instead of unavailable - "not known" must not look like "not installed".
-// meiva:link ui/web/src/docs/frontend-components/creation-availability.meiva.okf.md
+// meiva:link ui/web/src/docs/frontend-components/creation-availability/creation-availability.meiva.okf.md
 export function useHarnessAvailability(machine: string | undefined) {
   return useQuery<HarnessAvailability[]>({
     queryKey: ["harness-availability", machine],
@@ -31,7 +31,7 @@ export function useHarnessAvailability(machine: string | undefined) {
     // `enabled` gates the call, so the "no machine chosen" branch never runs; it
     // exists so the request needs neither a non-null assertion nor a made-up
     // machine name. An unanswered probe renders as unknown, never as unavailable.
-    // meiva:link ui/web/src/docs/frontend-components/creation-availability.meiva.okf.md
+    // meiva:link ui/web/src/docs/frontend-components/creation-availability/creation-availability.meiva.okf.md
     queryFn: ({ signal }) =>
       machine === undefined ? Promise.resolve([]) : api.getHarnessAvailability(machine, signal),
     enabled: machine !== undefined,
@@ -45,7 +45,7 @@ export function useHarnessAvailability(machine: string | undefined) {
 // must answer for itself: a harness installed on one box says nothing about the
 // box the user ends up choosing. Machines with no answer are absent from the map,
 // and their rows read as unknown rather than as unavailable.
-// meiva:link ui/web/src/docs/frontend-components/creation-availability.meiva.okf.md
+// meiva:link ui/web/src/docs/frontend-components/creation-availability/creation-availability.meiva.okf.md
 export function useHarnessAvailabilityByMachine(machines: readonly string[]) {
   const results = useQueries({ queries: machines.map(probeQuery) });
   const answered = new Map<string, HarnessAvailability[]>();
@@ -63,7 +63,7 @@ export function useHarnessAvailabilityByMachine(machines: readonly string[]) {
 // It reads the same ["status"] query the picker uses (deduped), and the machine
 // list is derived exactly as the picker derives it, so a paused or non-runner
 // machine is never asked.
-// meiva:link ui/web/src/docs/frontend-components/creation-availability.meiva.okf.md
+// meiva:link ui/web/src/docs/frontend-components/creation-availability/creation-availability.meiva.okf.md
 export function useWarmHarnessAvailability() {
   const { data } = useQuery({
     queryKey: ["status"],

@@ -5,7 +5,7 @@
 // ones are greyed and carry one lowercase word. No dot, no colour bar, no icon and
 // no diagnostic sentence - the form asks one question and the row answers it with
 // its own state.
-// meiva:link ui/web/src/docs/frontend-components/creation-availability.meiva.okf.md
+// meiva:link ui/web/src/docs/frontend-components/creation-availability/creation-availability.meiva.okf.md
 
 import * as Popover from "@radix-ui/react-popover";
 import { ChevronDown } from "lucide-react";
@@ -31,7 +31,7 @@ export interface HarnessPickerProps {
 // One bit answers the only question the form asks. A harness the build cannot start
 // is unavailable even when the machine has it installed and signed in; the probe's
 // `status` and `reason` stay on the wire for agents and diagnosis.
-// meiva:link ui/web/src/docs/frontend-components/creation-availability.meiva.okf.md
+// meiva:link ui/web/src/docs/frontend-components/creation-availability/creation-availability.meiva.okf.md
 function usable(row: HarnessAvailability): boolean {
   return row.launchable;
 }
