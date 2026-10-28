@@ -19,6 +19,7 @@ from pydantic import BaseModel
 
 from agent.process_boot import boot_agent_scope
 from base.agents.inbox.harness_notice import insert_harness_notice
+from base.agents.model.birth_config import uses_harness_model_selection
 from base.api_contracts.agent_contract import Harness
 from base.clock import Clock
 from base.db import Database
@@ -232,6 +233,12 @@ def admit_stored_model(
     """
     model = pins.get("llm_model") or default_model
     try:
+        if Harness(stored.harness) is not Harness.MEIVA and not uses_harness_model_selection(
+            stored.birth_config
+        ):
+            rejected.pop(agent_id, None)
+            normalized.pop(agent_id, None)
+            return True
         validate_model_launch(
             model=model,
             config=pins,
@@ -395,6 +402,7 @@ async def build_runtime(
     permissions_notice_key: UUID,
     home: Path,
     harness: Harness = Harness.MEIVA,
+    birth_config: Mapping[str, object] | None = None,
     registry: SessionRegistry | None = None,
     registrations: RegistrationStore | None = None,
     registration_ttl_seconds: float,
@@ -418,7 +426,7 @@ async def build_runtime(
     )
     model = None
     effort = None
-    if harness is not Harness.MEIVA:
+    if harness is not Harness.MEIVA and uses_harness_model_selection(birth_config):
         model, effort = catalog.models[slices.brain.llm_model].harness_model(
             slices.brain.llm_model,
             harness,

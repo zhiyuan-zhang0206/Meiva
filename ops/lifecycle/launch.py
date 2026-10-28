@@ -10,6 +10,7 @@ from psycopg_pool import ConnectionPool
 from base.agents.birth.harness import LAUNCHABLE_HARNESSES, resolve_birth_harness
 from base.agents.birth.spawn import latest_checkpoint_id
 from base.agents.impersonation.wake import publish_inbound_wake
+from base.agents.model.birth_config import uses_harness_model_selection
 from base.api_contracts.agent_contract import ForkSourceEmpty, Harness
 from base.config.agent_pins import resolve_agent_config_pins
 from base.config.service_read import ConfigAuthority
@@ -41,15 +42,16 @@ async def launch_agent_op(
     harness = await asyncio.to_thread(
         validate_launch_row, db_pool, body, local_machine=local_machine
     )
-    keys = await asyncio.to_thread(process_provider_keys, catalog)
-    validate_model_launch(
-        catalog=catalog,
-        keys=keys,
-        llm_override=authority.service_field_value("llm_override"),
-        model=authority.service_field_value("llm_model"),
-        config=resolve_agent_config_pins(body.config, body.birth_config),
-        harness=harness,
-    )
+    if harness is Harness.MEIVA or uses_harness_model_selection(body.birth_config):
+        keys = await asyncio.to_thread(process_provider_keys, catalog)
+        validate_model_launch(
+            catalog=catalog,
+            keys=keys,
+            llm_override=authority.service_field_value("llm_override"),
+            model=authority.service_field_value("llm_model"),
+            config=resolve_agent_config_pins(body.config, body.birth_config),
+            harness=harness,
+        )
     publish_inbound_wake(db, bus, body.agent_id, "0")
     return SpawnedAgent(id=body.agent_id)
 

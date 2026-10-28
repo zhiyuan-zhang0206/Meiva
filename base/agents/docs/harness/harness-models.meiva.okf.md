@@ -47,3 +47,11 @@ harnesses own their context, compaction and continuation. Meiva retains their
 basic timeline projection, without a separate history/summary model or native
 compaction controls. Whether a machine can start the chosen harness remains
 the launch probe's independent `launchable` verdict.
+
+
+New external births stamp `harness_model_selection: 1` in `birth_config`. Only
+that version opts `llm_model` and `reasoning_effort` into CLI execution. Older
+external sessions used those pins for native history settings, so they retain
+the adapter/CLI's original defaults when relaunched or resumed. Their stored
+history choices are not reinterpreted as execution settings. Unknown selection
+versions fail explicitly; no existing row is rewritten during deployment.

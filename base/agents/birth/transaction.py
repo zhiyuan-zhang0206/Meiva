@@ -17,7 +17,11 @@ from base.agents.history.checkpoint_copy import copy_checkpoint_chain
 from base.agents.impersonation.manifest import record_central_event
 from base.agents.inbox.insert import insert_spawn_prompt_in_transaction
 from base.agents.labels import spawn_prompt_with_label
-from base.agents.model.birth_config import resolve_birth_config
+from base.agents.model.birth_config import (
+    HARNESS_MODEL_SELECTION_KEY,
+    HARNESS_MODEL_SELECTION_VERSION,
+    resolve_birth_config,
+)
 from base.config.service_read import ConfigAuthority
 from base.db import fetch_one
 from base.lm.catalog import ModelCatalog
@@ -179,6 +183,8 @@ def _resolve_birth_overlay(
         validate_model_config(catalog=catalog, config=pins, harness=Harness(harness))
     except ValueError as exc:
         raise InvalidModelConfig(str(exc)) from exc
+    if Harness(harness) is not Harness.MEIVA:
+        birth_config[HARNESS_MODEL_SELECTION_KEY] = HARNESS_MODEL_SELECTION_VERSION
     return config, birth_config
 
 

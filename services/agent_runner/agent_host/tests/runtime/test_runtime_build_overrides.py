@@ -59,9 +59,17 @@ from services.agent_runner.agent_host.tests.runtime.observation import served_mo
         (Harness.KIMI_CODE, "kimi-k3.1-pro", "max"),
     ],
 )
+@pytest.mark.parametrize("selection", [False, True])
 async def test_external_runtime_needs_no_native_model_or_provider_key(
-    tmp_path: Path, model_catalog: ModelCatalog, harness: Harness, model: str, effort: str
+    tmp_path: Path,
+    model_catalog: ModelCatalog,
+    harness: Harness,
+    model: str,
+    effort: str,
+    selection: bool,
 ) -> None:
+    if not selection:
+        model, effort = "deepseek-flash", "max"
     runtime = await build_runtime(
         71,
         "external-selection",
@@ -74,6 +82,7 @@ async def test_external_runtime_needs_no_native_model_or_provider_key(
         permissions_notice_key=uuid4(),
         home=tmp_path,
         harness=harness,
+        birth_config={"harness_model_selection": 1} if selection else None,
         registry=FileSessionRegistry(tmp_path / "sessions"),
         registrations=None,
         registration_ttl_seconds=60,
