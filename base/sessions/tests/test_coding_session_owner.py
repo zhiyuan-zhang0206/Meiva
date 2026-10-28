@@ -637,3 +637,51 @@ def test_valid_legacy_strings_normalize_without_wire_changes(
     snapshot = record_codec.CodingSessionOwner(key=_key(tmp_path), status=cast(Any, status.value))
     assert snapshot.status is status
     assert json.loads(json.dumps(record_codec.owner_payload(snapshot)))["status"] == status.value
+
+
+# meiva:note
+# A `~` that reaches the record means the entry that read the operator's home skipped its step: the
+# key refuses it instead of expanding it against the process's own user database, so a record can
+# never name a home nobody chose for it. Each side of the key is pinned separately.
+def test_canonical_key_refuses_a_tilde_instead_of_expanding_it(tmp_path: Path) -> None:
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    cluster = tmp_path / "cluster"
+    cluster.mkdir()
+
+    with pytest.raises(ValueError, match="workspace '~/workspace' starts with ~"):
+        owner.canonical_key("~/workspace", tool="codex", cluster=cluster)
+    with pytest.raises(ValueError, match="cluster '~/cluster' starts with ~"):
+        owner.canonical_key(workspace, tool="codex", cluster="~/cluster")
+
+
+# meiva:note
+# The generation stores the task and work files it is handed for the same reason: a tilde here is a
+# step the launcher skipped, and expanding it in the record would answer with whichever home the
+# process happens to run under.
+def test_launch_generation_refuses_a_tilde_instead_of_expanding_it(tmp_path: Path) -> None:
+    key = _key(tmp_path)
+    workspace = Path(key.workspace)
+
+    def launch(*, tasks_file: Path, work_file: Path) -> owner.CodingSessionOwner:
+        return owner.launch_generation(
+            key,
+            owner_agent_id=1,
+            tasks_file=tasks_file,
+            work_file=work_file,
+            ttl_seconds=3600,
+            writer=WRITER,
+            now=NOW,
+            rng=RNG,
+            sessions=_FakeSessions(),
+        )
+
+    with pytest.raises(ValueError, match=r"~/tasks\.md starts with ~"):
+        launch(tasks_file=Path("~/tasks.md"), work_file=workspace / "work.md")
+    with pytest.raises(ValueError, match=r"~/work\.md starts with ~"):
+        launch(tasks_file=workspace / "tasks.md", work_file=Path("~/work.md"))
+
+    # meiva:note
+    # The refusal happens before anything is published: a record that named a home nobody chose
+    # would be worse than no record, so the launch leaves none behind.
+    assert not list(tmp_path.rglob("*.json"))
