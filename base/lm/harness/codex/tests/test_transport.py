@@ -6,12 +6,8 @@ from pathlib import Path
 
 import pytest
 
-from base.lm.harness.codex.transport import (
-    JsonObject,
-    JsonRpcError,
-    StdioAppServer,
-    TransportClosedError,
-)
+from base.lm.harness.codex.frames import JsonObject, JsonRpcError, TransportClosedError
+from base.lm.harness.codex.transport import StdioAppServer
 
 SERVER = Path(__file__).with_name("fake_stdio_server.py")
 

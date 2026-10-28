@@ -1,32 +1,28 @@
-exports = ["auth.py", "tests", "transport.py"]
+exports = ["auth.py", "frames.py", "session.py", "tests"]
 
 [uses]
-"__init__.py" = ["config.py", "session.py", "transport.py", "types.py"]
-"config.py" = []
-"mapping.py" = []
+"__init__.py" = ["config.py", "frames.py", "types.py"]
 "auth.py" = []
-"session.py" = ["auth.py", "config.py", "mapping.py", "transport.py", "types.py"]
-"tests" = ["__init__.py", "auth.py", "mapping.py", "session.py", "transport.py"]
+"config.py" = []
+"frames.py" = []
+"mapping.py" = []
+"requests.py" = ["frames.py", "mapping.py"]
+"session.py" = ["auth.py", "config.py", "frames.py", "mapping.py", "requests.py", "transport.py", "turns.py", "types.py"]
+"tests" = ["__init__.py", "auth.py", "frames.py", "mapping.py", "requests.py", "session.py", "transport.py", "turns.py"]
+"transport.py" = ["frames.py"]
+"turns.py" = ["frames.py", "mapping.py"]
 
 [purity]
 "." = "strict-to-be"
 "__init__.py" = "strict"
 "auth.py" = "strict"
+"frames.py" = "strict"
 "mapping.py" = "strict"
-
-[debt.impure-call]
-"session.py#async def _begin" = 1
-"session.py#async def close" = 1
-"session.py#async def interrupt" = 1
-"session.py#async def start" = 1
-"transport.py#async def _read_loop" = 1
-"transport.py#async def _write" = 1
-"transport.py#async def close" = 1
-"transport.py#async def notify" = 1
-"transport.py#async def request" = 1
-"transport.py#async def start" = 1
+"requests.py" = "strict"
+"session.py" = { mode = "none", why = "the shell that runs one turn against the app-server: it starts the transport, awaits the requests it sends, keeps the one event stream and reaps the process tree on close; what to send and what an approval is answered with are decided in requests.py, what an inbound notification is and what a settled turn is in turns.py, and the per-turn state it applies is turns.TurnRecord" }
+"transport.py" = { mode = "none", why = "the shell that owns the app-server child: it spawns the process, writes lines to its stdin, reads its stdout and correlates replies with the requests that are waiting; the JSON-RPC frames, the classification of one stdin line and the reply-to-result rule are decided in frames.py" }
+"turns.py" = "strict"
 
 [debt.impure-edge]
 "config.py#base/host/env/harness_binaries.py" = 1
-"session.py#base/lm/harness/process.py" = 1
 "types.py#base/lm/harness/base_session.py" = 1
