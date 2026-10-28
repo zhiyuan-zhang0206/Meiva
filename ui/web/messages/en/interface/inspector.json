@@ -42,7 +42,6 @@
   "metricMachine": "Machine",
   "metricHarness": "Harness",
   "metricModel": "Model",
-  "billingApi": "API",
   "billingSubscription": "Subscription",
   "metricStatus": "Status",
   "neverPaused": "never paused",
