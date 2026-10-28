@@ -65,7 +65,11 @@ separate hook. A new package is declared in one place or the check says where.
   [[meizel/docs/ambient-state.meiva.okf.md|ambient state]]),
   `machine_role.py` (Rule 3, the retired ambient machine-role reader),
   `no_os_environ.py` (a test does not set a variable `Settings` models) and
-  `turn_scoped_config.py` (no per-agent config through a process global). The two
+  `turn_scoped_config.py` (no per-agent config through a process global). Both
+  config rules are effect shells: the shell walks the scan directories, reads each
+  file and prints, while `no_os_environ_plan.py` and
+  `turn_scoped_config_plan.py` decide which files the rule judges, which lines of a
+  file are findings and what each finding says. The two
   config rules take the application's config registry as an injected argument;
   their launchers in `scripts/lint/` bind it, because `meizel` imports no
   application package. Where production code reads the world is `ambient-read` in
