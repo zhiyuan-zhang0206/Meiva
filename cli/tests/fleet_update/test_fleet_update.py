@@ -20,6 +20,7 @@ from cli.fleet_update import fleet_verify, oneshot
 from cli.fleet_update.plan.host_commands import CLEAN, PROBE
 from cli.fleet_update.plan.host_failures import PARTIAL_FAILURE_EXIT
 from cli.fleet_update.session import Pacing, Session
+from cli.fleet_update.timers import ProcessTimers
 from cli.tests.fleet_update.fleet_update_cluster import Cluster, git, ssh_on_path
 
 
@@ -678,6 +679,7 @@ def test_the_machine_name_is_asked_through_the_hosts_real_shell(shell: str, tmp_
         env=env,
         now=datetime(2026, 10, 24, 12, 0, 0, tzinfo=UTC),
         pacing=Pacing(),
+        timers=ProcessTimers(),
     )
     try:
         names = fleet_verify.machine_names(session, ("mac",))
