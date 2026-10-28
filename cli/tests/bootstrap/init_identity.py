@@ -12,7 +12,8 @@ from cli.startup.tests.birth_facts import birth_facts
 
 
 # meiva:note
-# A caller that says nothing about its host unless a test names it.
+# A caller that says nothing about its host unless a test names it. `user_home` is the home a `~`
+# a test types points at: name it when a case carries one.
 def caller_host(
     *,
     service_path: str | None = None,
@@ -21,6 +22,7 @@ def caller_host(
     prefix_venv: str | None = None,
     occupied_ports: frozenset[int] = frozenset(),
     local_names: frozenset[str] = frozenset(),
+    user_home: Path = Path("/home/operator"),
 ) -> CallerHost:
     return CallerHost(
         service_path,
@@ -30,6 +32,7 @@ def caller_host(
         occupied_ports,
         local_names=local_names,
         birth=birth_facts(),
+        user_home=user_home,
     )
 
 

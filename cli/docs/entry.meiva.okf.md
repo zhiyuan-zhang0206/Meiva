@@ -24,7 +24,8 @@ concrete logger initialization retains its original first-role guard.
 `require_initialized` before constructing its root, then checks the admitted home
 again under its lifecycle lock. `main()` is the composition root of both: after the
 checkout gate it reads the home and the checkout once into a `HomeSite`
-(`cli/start_runtime.py`) and, for `init`, the caller's host facts (`CallerHost`: its
+(`cli/start_runtime.py`) and, for `init`, the caller's host facts (`CallerHost`: the operator's
+own home, which is the home a `~` on a typed path names (`user_home`), its
 tool directories, which ports of the fixed table something already holds, the host names and
 interface addresses by which the host is known (`local_names`, read only when the init carries a
 `--config-file`, for the remote-database refusal), what the home's birth takes from the entry
