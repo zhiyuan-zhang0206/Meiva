@@ -33,18 +33,27 @@ not a repair and must not look like one.
   code, minus what the ref records. Regenerating the ref writes the change's manifests, minus their
   debt tables, over the ref's content, so declaring a root, a legal edge, an approval or a purity
   mode moves the number into this column: it is reported, never judged, and it is never repayment.
-  **content** is what the change records beyond that: judged. Every recorded key must be one the
-  rules find in the ref, with no greater count, so a declaration cannot hide a new violation and a
-  violation cannot ride along. The reference's content is measured at the change's own paths — a file
+  Where that replay would declare something the ref does not have — an `exports` entry for a file
+  the change adds — the entry is dropped: the ref's baseline is the one this checker would write for
+  the ref, and it would not declare a child that is not there. **content** is what the change
+  records beyond that: judged. Every recorded key must be one the rules find in the ref, with no
+  greater count, so a declaration cannot hide a new violation and a violation cannot ride along.
+  The reference's content is measured at the change's own paths — a file
   git reports as renamed is moved before it is measured — so a rename is neither a rule change nor
   growth, for file keys and edge keys alike, and a declaration that follows the rename lines up. Only
   the rule code and the policy are the change's own in that replay: every other file under `meizel/`
   (tests, the state rules, `allowances.py`) is content and is measured as the reference left it. A
-  manifest the checker cannot read in the ref stops the comparison. Historical snapshots keep the
-  unreadable gate. See [[meizel/docs/checker/policy.meiva.okf.md|historical policy comparisons]].
+  manifest that is malformed rather than merely ahead of the ref's content stops the comparison.
+  Historical snapshots keep the unreadable gate.
+  See [[meizel/docs/checker/policy.meiva.okf.md|historical policy comparisons]].
 - Deleting a whole `[uses]` or `[exports]` entry is **not** a rule change: the reference's replay
   declares the legal edges it finds again, so the debt it uncovers is recorded as **content** growth.
   Adding an entry, or narrowing one, is the direction that splits.
+- A change that adds a file to a declared directory declares it too, so it is a rule change with no
+  rule moved: the new file is content, and it must arrive clean. A rule change that also adds a
+  violation fails, on purpose — letting both through together is the one hole this comparison exists
+  to close, and `test_a_rule_change_that_also_adds_a_violation_fails` owns that rule. A file that
+  would need recorded debt is a file to write clean, or to fix in the change that adds it.
 - `--waive-if-changed <pathspec>...` adds pathspecs that also count as a rule change (CI passes the
   rule-code set). It only adds to the detection above; a change that touches none of them is judged
   by totals, with no waiver.

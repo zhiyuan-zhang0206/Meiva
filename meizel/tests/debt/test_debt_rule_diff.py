@@ -68,6 +68,36 @@ def test_a_pure_rule_change_may_record_what_the_new_rules_find(
     assert "no content growth" in out
 
 
+# meiva:note
+# A manifest that declares a file the change adds: the declaration is written over the base's content
+# too, where that file does not exist, so it names a child the base cannot hold. It is dropped there
+# instead of read as a broken base (pull request 7625: 7600 and 7620 each added a file to a declared
+# directory, and the batch was refused before anything was measured).
+def test_a_file_added_to_a_declared_directory_is_measured_not_refused(
+    make_repo: RepoFactory, capsys: pytest.CaptureFixture[str]
+) -> None:
+    root = base_repo(make_repo, {"app/meizel.toml": 'exports = ["x.py"]\n'})
+    write(root, {"app/z.py": "", "app/meizel.toml": 'exports = ["x.py", "z.py"]\n'})
+    capsys.readouterr()
+    assert diff(root) == 0
+    out = capsys.readouterr().out
+    assert "no content growth" in out
+    assert "app/meizel.toml [exports] * ~" in out
+
+
+# meiva:note
+# The declaration that names nothing stays the change's own violation. Dropping it from the base's
+# baseline is not a way past the gate: `check` fails on the tree that declares it.
+def test_a_manifest_naming_a_file_no_tree_has_stays_a_violation(
+    make_repo: RepoFactory, capsys: pytest.CaptureFixture[str]
+) -> None:
+    root = base_repo(make_repo, {"app/meizel.toml": 'exports = ["x.py"]\n'})
+    write(root, {"app/meizel.toml": 'exports = ["x.py", "ghost.py"]\n'})
+    capsys.readouterr()
+    assert run(root, "check") == 1
+    assert "manifest-unknown-child" in capsys.readouterr().out
+
+
 def test_a_rule_change_that_also_adds_a_violation_fails(
     make_repo: RepoFactory, capsys: pytest.CaptureFixture[str]
 ) -> None:
