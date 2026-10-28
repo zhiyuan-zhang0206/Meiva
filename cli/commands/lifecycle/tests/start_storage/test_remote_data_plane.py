@@ -72,6 +72,8 @@ def test_start_remote_skips_local_instance_and_probes(
         database_factory=operator_database,
         machine=command_runtime.machine,
         macos=command_runtime.host.platform.system == "darwin",
+        timers=command_runtime.timers,
+        environ=command_runtime.config.process_environment(),
     )
 
     assert rc == 0
@@ -100,6 +102,8 @@ def test_start_remote_unreachable_fails_fast_with_dial_detail(
         database_factory=operator_database,
         machine=command_runtime.machine,
         macos=command_runtime.host.platform.system == "darwin",
+        timers=command_runtime.timers,
+        environ=command_runtime.config.process_environment(),
     )
 
     assert rc == 1
@@ -130,6 +134,8 @@ def test_start_remote_redis_unreachable_fails_after_the_database_answers(
         database_factory=operator_database,
         machine=command_runtime.machine,
         macos=command_runtime.host.platform.system == "darwin",
+        timers=command_runtime.timers,
+        environ=command_runtime.config.process_environment(),
     )
 
     assert rc == 1
