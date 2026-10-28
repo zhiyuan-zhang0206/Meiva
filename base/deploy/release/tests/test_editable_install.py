@@ -339,3 +339,36 @@ def test_current_interpreter_source_root_keeps_symlinked_venv_identity(tmp_path:
     interpreter.symlink_to(base_python)
 
     assert editable_install.current_interpreter_source_root(interpreter) == source_root
+
+
+def test_a_relative_checkout_is_refused_not_inspected_as_nothing() -> None:
+    with pytest.raises(ValueError, match="absolute"):
+        editable_install.editable_install_violations(Path("~/chk"))
+
+
+def test_an_allowed_root_given_as_a_symlink_is_resolved_before_it_is_compared(
+    tmp_path: Path,
+) -> None:
+    source_root = tmp_path / "prod" / "source"
+    source_root.mkdir(parents=True)
+    dev_clone = tmp_path / "Meiva"
+    dev_clone.mkdir()
+    link = tmp_path / "clone-link"
+    link.symlink_to(dev_clone, target_is_directory=True)
+    _write_pth(source_root, dev_clone)
+    _write_direct_url(source_root, dev_clone.as_uri())
+
+    assert editable_install.editable_install_violations(source_root, allowed_roots=(link,)) == ()
+
+
+def test_a_checkout_given_as_a_symlink_is_resolved_before_its_records_are_compared(
+    tmp_path: Path,
+) -> None:
+    real = tmp_path / "prod" / "source"
+    real.mkdir(parents=True)
+    link = tmp_path / "source-link"
+    link.symlink_to(real, target_is_directory=True)
+    _write_pth(real, real)
+    _write_direct_url(real, real.as_uri())
+
+    assert editable_install.editable_install_violations(link) == ()

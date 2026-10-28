@@ -7,15 +7,20 @@ tags: [base, deploy]
 
 # Collector artifact download
 
-`base/deploy/release/collector_artifact.py` acquires the pinned otelcol-contrib
+`base/deploy/release/collector/artifact.py` acquires the pinned otelcol-contrib
 tarball on the `meiva start` critical path, verifies its SHA256 and installs the
 binary beside its version marker. The converge step
 (`cli/commands/observability/otel_collector.py:ensure_otel_collector`) is its
 composition root.
 
+The shell is `collector/artifact.py`; what it decides from values (which asset a platform needs and
+its pinned digest, which archive member is the binary, how a spent budget, a progress line or a failed
+attempt reads, how long to wait between attempts) is `collector/plan.py`, asserted as values in
+`tests/test_collector_plan.py`.
+
 ## Which asset
 
-`collector_artifact.platform_tag_for(system, machine)` is the pure decision of the
+`base/deploy/release/collector/plan.py:platform_tag_for(system, machine)` is the pure decision of the
 release asset tag (`darwin_arm64`, `darwin_amd64`, `linux_amd64`, `linux_arm64`, else `None`)
 from a `Platform`'s values (`system` is `"darwin"` or `"linux"`, as `Platform.system` is): the
 function reads nothing, and the converge step hands it `ctx.host.platform`.
@@ -57,7 +62,7 @@ attempt line and in the final `RuntimeError`. A progress heartbeat every
 the response and the destination file close on every exit path.
 
 The numbers are the `otel_collector_download_*` settings (observability domain,
-`MEIVA_OTELCOL_DOWNLOAD_*`), built into `collector_artifact.DownloadLimits` by
+`MEIVA_OTELCOL_DOWNLOAD_*`), built into `base/deploy/release/collector/plan.py:DownloadLimits` by
 the converge composition root (`ensure_otel_collector`); the module itself
 reads no settings.
 

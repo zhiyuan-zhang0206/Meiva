@@ -116,13 +116,13 @@ def lgtm_settings(**changes: Any) -> LgtmSettings:
 # meiva:note
 # Collector settings: default observability values and the single-box data plane.
 def collector_settings(**changes: Any) -> CollectorSettings:
-    from base.deploy.release import collector_artifact
+    from base.deploy.release.collector import plan as collector_plan
 
     return replace(
         CollectorSettings(
             observability=observability(),
             data_plane=data_plane(),
-            download=collector_artifact.DownloadLimits(
+            download=collector_plan.DownloadLimits(
                 total_budget_s=30.0,
                 socket_timeout_s=5.0,
                 attempts=3,

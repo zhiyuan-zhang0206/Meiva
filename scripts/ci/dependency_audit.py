@@ -213,7 +213,7 @@ PINS: tuple[tuple[str, str, str], ...] = (
     ("wal-g", "base/cluster/dataplane/walg_binary.py", r'^WALG_VERSION = "([^"]+)"'),
     (
         "otelcol-contrib",
-        "base/deploy/release/collector_artifact.py",
+        "base/deploy/release/collector/plan.py",
         r'^OTELCOL_CONTRIB_VERSION = "([^"]+)"',
     ),
     _UV_PIN,

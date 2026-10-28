@@ -1,0 +1,10 @@
+exports = ["artifact.py", "plan.py"]
+
+[uses]
+"artifact.py" = ["plan.py"]
+
+[purity]
+"." = "strict"
+"__init__.py" = "strict"
+"artifact.py" = { mode = "none", why = "the shell of the pinned collector acquisition: it streams the release archive over the URL opener the caller hands in, hashes it as it arrives, retries under the budget, extracts the binary and writes the version marker, and reports on stdout and stderr; which asset a platform needs, its digest, the archive member, what a spent budget or a failed attempt says and how long to wait are decided in plan.py" }
+"plan.py" = "strict"
