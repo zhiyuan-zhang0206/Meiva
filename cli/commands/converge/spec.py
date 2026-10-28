@@ -56,7 +56,9 @@ class ConvergeCtx:
     # meiva:note
     # The three streams of the invocation that runs this converge. A step that asks a person
     # something prompts over them (`ensure_browser` offers to seed the browser profile); the
-    # process's own streams are read once by the command entry, never here.
+    # process's own streams are read once by the command entry, never here. Whether to ask at all
+    # is `session.interactive`'s decision, so this field carries the streams only; a real entry
+    # hands in both from the same process, and they agree.
     terminal: Terminal
     services: frozenset[str]
 
