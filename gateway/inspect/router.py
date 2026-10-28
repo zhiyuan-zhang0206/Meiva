@@ -212,7 +212,7 @@ async def get_agent_inspect_live(agent_id: int, request: Request) -> AgentInspec
                 paused_until=db.paused_until,
                 pending_inbound=db.pending_inbound,
                 backoff_level=db.backoff_level,
-                impersonation_active=db.impersonation_active,
+                impersonation_since=db.impersonation_since,
             ),
             HeartbeatCadence(
                 idle_threshold_s=int(heartbeat.idle_threshold_seconds),

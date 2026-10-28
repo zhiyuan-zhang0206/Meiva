@@ -364,14 +364,21 @@ def test_inspect_heartbeat_running_agent_shows_its_active_pause(
     assert _seconds_from_now(hb["paused_until"]) == pytest.approx(3600, abs=5)
 
 
-def _insert_active_lease(db_conn: psycopg.Connection, agent_id: int) -> None:
+def _insert_active_lease(
+    db_conn: psycopg.Connection,
+    agent_id: int,
+    *,
+    activated_s_ago: float = 0,
+    expires_s_ahead: float = 3600,
+) -> None:
     with db_conn.cursor() as cur:
         cur.execute(
             "INSERT INTO agent_impersonations "
             "(id, agent_id, source, machine, status, ttl_seconds, expires_at, activated_at) "
             "VALUES (%s, %s, 'external_agent:codex', 'test-machine', 'active', 3600, "
-            "clock_timestamp() + interval '1 hour', clock_timestamp())",
-            (str(uuid4()), agent_id),
+            "clock_timestamp() + make_interval(secs => %s), "
+            "clock_timestamp() - make_interval(secs => %s))",
+            (str(uuid4()), agent_id, expires_s_ahead, activated_s_ago),
         )
     db_conn.commit()
 
@@ -400,17 +407,50 @@ def test_inspect_heartbeat_backoff_stretches_the_reminder_floor(
 
 # meiva:note
 # The daemon never stretches the reminder floor of an externally driven agent, so the panel
-# must not either.
+# must not either. The lease started long enough ago that the floor, not the lease-clock idle
+# term, is what the projection reports; with level 2 left unclamped it would be 4 hours out.
 def test_inspect_heartbeat_active_lease_holds_the_backoff_at_level_zero(
     db_conn: psycopg.Connection,
 ) -> None:
     aid = _insert_agent(db_conn, status="idling", status_changed_s_ago=600)
-    _insert_active_lease(db_conn, aid)
+    _insert_active_lease(db_conn, aid, activated_s_ago=600)
     _set_reminder_floor(db_conn, aid, backoff_level=2)
     with gateway_test_client() as client:
         hb = client.get(f"/api/agents/{aid}/inspect/live").json()["heartbeat"]
     expected = settings.daemon.heartbeat_interval_seconds - 120
     assert _seconds_from_now(hb["next_at"]) == pytest.approx(expected, abs=5)
+
+
+# meiva:note
+# A running agent under an active impersonation lease IS selected by the daemon
+# (`status='running' AND active.id IS NOT NULL`) and runs its idle clock from the lease start.
+# The panel read the lease only as a boolean and dashed the cell, so "Impersonated" showed no
+# next check-in at all.
+def test_inspect_heartbeat_running_agent_under_a_lease_projects_next_at(
+    db_conn: psycopg.Connection,
+) -> None:
+    aid = _insert_agent(db_conn, status="running")
+    _insert_active_lease(db_conn, aid, activated_s_ago=120)
+    with gateway_test_client() as client:
+        hb = client.get(f"/api/agents/{aid}/inspect/live").json()["heartbeat"]
+    assert hb["paused_until"] is None
+    assert hb["next_at"] is not None
+    expected = settings.daemon.heartbeat_idle_threshold_seconds - 120 + aid % JITTER_SPAN_S
+    assert _seconds_from_now(hb["next_at"]) == pytest.approx(expected, abs=5)
+
+
+# meiva:note
+# The projection is read from the frame it saw: the daemon joins the lease under
+# `expires_at > now()`, so a lease that has run out drives nothing and the running agent keeps
+# its dash until the panel's next read finds the agent idling (or a fresh lease).
+def test_inspect_heartbeat_running_agent_with_an_expired_lease_dashes(
+    db_conn: psycopg.Connection,
+) -> None:
+    aid = _insert_agent(db_conn, status="running")
+    _insert_active_lease(db_conn, aid, activated_s_ago=600, expires_s_ahead=-60)
+    with gateway_test_client() as client:
+        hb = client.get(f"/api/agents/{aid}/inspect/live").json()["heartbeat"]
+    assert (hb["next_at"], hb["paused_until"]) == (None, None)
 
 
 def test_inspect_heartbeat_expired_pause_is_not_paused(db_conn: psycopg.Connection) -> None:

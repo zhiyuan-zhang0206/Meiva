@@ -33,9 +33,10 @@ class HeartbeatCadence:
 #
 # `paused_until` is already narrowed to a *future* value (a NULL or past pause is None).
 # `pending_inbound` is true only for a FRESH pending inbound (created within the daemon's
-# freshness window). `backoff_level` is the agent's persisted nudge-backoff level and
-# `impersonation_active` says whether a live impersonation lease drives it; both feed the
-# daemon's reminder floor.
+# freshness window). `backoff_level` is the agent's persisted nudge-backoff level.
+# `impersonation_since` is the active lease's clock (`activated_at`, else its `created_at`),
+# or None when no lease drives the agent: the daemon runs such an agent's idle clock from
+# that instant instead of `last_active_at`, and holds its backoff level at 0.
 @dataclass(frozen=True)
 class HeartbeatState:
     agent_id: int
@@ -45,7 +46,7 @@ class HeartbeatState:
     paused_until: datetime | None
     pending_inbound: bool
     backoff_level: int
-    impersonation_active: bool
+    impersonation_since: datetime | None
 
 
 # meiva:note
@@ -58,7 +59,8 @@ class HeartbeatPlan:
 
 
 # meiva:note
-# No check-in is scheduled for this agent: its turn is running, or it is dead.
+# No check-in is scheduled for this agent: nothing drives it into the daemon's selection, or it
+# is dead.
 _NO_CHECK_IN = HeartbeatPlan(next_at=None, paused_until=None, heartbeat_pending=False)
 
 
@@ -68,15 +70,21 @@ _NO_CHECK_IN = HeartbeatPlan(next_at=None, paused_until=None, heartbeat_pending=
 #
 # - paused (running or idling) → `paused_until`.
 # - idling, not paused, a wake already queued → `heartbeat_pending`.
-# - idling, not paused, nothing queued → `next_at` (the daemon's projected check-in due time —
-#   the later of the idle clock plus its per-agent jitter and the durable last-reminder cadence
-#   floor, that floor being the interval stretched by the agent's backoff level; the daemon
-#   dispatches at its first poll tick at/after that, at most one 15s dispatch step later. The
-#   frontend renders an overdue one as "due").
-# - running, not paused → all off: a busy agent gets no check-in, and the idle clock that would
-#   time the next one keeps moving with it, so any projected instant would be stale.
+# - not paused, nothing queued → `next_at` (the daemon's projected check-in due time — the later
+#   of the idle clock plus its per-agent jitter and the durable last-reminder cadence floor, that
+#   floor being the interval stretched by the agent's backoff level; the daemon dispatches at its
+#   first poll tick at/after that, at most one 15s dispatch step later. The frontend renders an
+#   overdue one as "due"). The idle clock is the lease activation while an impersonation lease
+#   drives the agent, `last_active_at` otherwise.
+# - running with no lease, not paused → all off: the daemon selects a busy agent only while an
+#   impersonation lease drives it (`status='running' AND active.id IS NOT NULL`), and without one
+#   the idle clock that would time the next check-in keeps moving with the turn.
 # - terminated → all off: a dead agent never gets a check-in, and a pause left on its row is
 #   inert rather than a wake still to come.
+#
+# The value is projected from the state this read saw. A lease that ends before the projected
+# instant does not retroactively invalidate it — the daemon re-judges every tick and the panel
+# re-reads on its next refresh, which turns the cell into the running/idling truth.
 #
 # The pause is the daemon's unconditional floor on its due predicate — the selection SQL reads
 # `now() >= GREATEST(heartbeat_paused_until, ...)` outside its status gate — so it answers "when
@@ -103,7 +111,7 @@ def plan_heartbeat(state: HeartbeatState, cadence: HeartbeatCadence) -> Heartbea
             assert_never(state.status)
     if state.paused_until is not None:
         return HeartbeatPlan(next_at=None, paused_until=state.paused_until, heartbeat_pending=False)
-    if state.status == AgentStatus.RUNNING:
+    if state.status == AgentStatus.RUNNING and state.impersonation_since is None:
         return _NO_CHECK_IN
     if state.pending_inbound:
         return HeartbeatPlan(next_at=None, paused_until=None, heartbeat_pending=True)
@@ -114,13 +122,16 @@ def plan_heartbeat(state: HeartbeatState, cadence: HeartbeatCadence) -> Heartbea
     # (mod never divides by zero).
     #
     # The floor is the interval stretched by the agent's persisted backoff level and capped at
-    # the daemon's 24h ceiling — held at level 0 while an impersonation lease is active, because
+    # the configured ceiling — held at level 0 while an impersonation lease is active, because
     # the selection SQL's `CASE WHEN active.id IS NOT NULL THEN 0` does not stretch it for an
-    # externally driven agent.
+    # externally driven agent. The idle clock likewise switches to the lease's own start, so a
+    # takeover that keeps the agent running (or repeatedly active) still comes due on cadence
+    # instead of waiting for a native turn that never happens.
     span_s = cadence.jitter_span_s
     jitter_s = state.agent_id % span_s if span_s else 0
-    idle_due_at = state.last_active_at + timedelta(seconds=cadence.idle_threshold_s + jitter_s)
-    level = 0 if state.impersonation_active else state.backoff_level
+    idle_clock = state.impersonation_since or state.last_active_at
+    idle_due_at = idle_clock + timedelta(seconds=cadence.idle_threshold_s + jitter_s)
+    level = 0 if state.impersonation_since is not None else state.backoff_level
     reminder_interval_s = min(cadence.interval_s * 2**level, cadence.backoff_max_interval_s)
     reminder_due_at = (
         state.last_heartbeat_at + timedelta(seconds=reminder_interval_s)
