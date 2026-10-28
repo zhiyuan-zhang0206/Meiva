@@ -54,11 +54,19 @@ def report_agent_from_environ(environ: Mapping[str, str]) -> int:
 
 
 def watch_once(
-    slot: datetime, _payload: str | None, *, inputs, report_agent: int, state_path, tally: EmitTally
+    slot: datetime,
+    _payload: str | None,
+    *,
+    inputs,
+    report_agent: int,
+    home,
+    state_path,
+    tally: EmitTally,
 ) -> None:
     line = run_round(
         inputs=inputs,
         report_agent=report_agent,
+        home=home,
         state_path=state_path,
         now=datetime.now(UTC),
         process=_PROCESS_NAME,
@@ -78,6 +86,7 @@ if __name__ == "__main__":
             watch_once,
             inputs=inputs,
             report_agent=report_agent_from_environ(os.environ),
+            home=home,
             state_path=home / "run" / _STATE_FILE,
             tally=EmitTally(),
         )

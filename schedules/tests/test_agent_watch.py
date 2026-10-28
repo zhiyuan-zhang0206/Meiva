@@ -9,6 +9,7 @@
 
 from __future__ import annotations
 
+import json
 from dataclasses import replace
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
@@ -16,17 +17,30 @@ from pathlib import Path
 import psycopg
 import pytest
 
-from schedules.jobs.agent_watch import observe, read_state, round_line, write_state
+from base.sessions.coding_session_owner_record import full_session_name
+from schedules.jobs.agent_watch import (
+    observe,
+    read_seat_registries,
+    read_seat_state,
+    read_state,
+    round_line,
+    write_seat_state,
+    write_state,
+)
 from schedules.plans.agent_watch_rule import (
     ESCALATED_REPEAT_SECONDS,
     FIRST_REPEAT_SECONDS,
     REPORT_REPEAT_SECONDS,
     Observation,
     ScheduleVerdict,
+    SeatReadings,
+    SeatRegistry,
+    SeatState,
     WatchedAgent,
     WatchState,
     judge_schedule,
     plan_round,
+    plan_seats,
     repeat_seconds,
     silent_reasons,
 )
@@ -309,3 +323,183 @@ def test_state_survives_a_round_trip_and_an_unreadable_file(
 
     path.write_text("not json", encoding="utf-8")
     assert read_state(path) == {}
+
+
+# meiva:note
+# The seats a registry names, read against the sessions this host runs. A duty's cadence says
+# whether an owner still takes rounds; it cannot say whether one of the fifteen watchers that owner
+# keeps is gone, because a count of live sessions reads the same at fifteen and at fourteen. The
+# judgement is exercised through its one public call -- the parsers are private to the plan module --
+# so these tests read the way the round reads.
+
+_SEATS = SeatRegistry(312, ("swap-guard", "disk-monitor", "cm-watch"))
+_SEATS_PAYLOAD: dict[str, object] = {
+    "version": 1,
+    "seats": [
+        {"name": "swap-guard", "script": "swap_guard.py", "period_s": 300},
+        {"name": "disk-monitor"},
+        {"name": "cm-watch", "health": {"tick": "x", "progress_field": "rounds"}},
+    ],
+}
+
+
+def _readings(
+    *,
+    sessions: list[str],
+    statuses: dict[int, str],
+    states: dict[int, SeatState] | None = None,
+    now: float = 1000.0,
+) -> SeatReadings:
+    return SeatReadings(
+        sessions=sessions,
+        statuses=statuses,
+        states={} if states is None else states,
+        now=now,
+        cooldown_s=1800.0,
+        registry_dir="/h/state/seat-registry",
+    )
+
+
+def _sessions(agent_id: int, *labels: str) -> list[str]:
+    return [
+        full_session_name(agent_id, index, label) for index, label in enumerate(labels, start=1)
+    ]
+
+
+def test_the_session_name_is_what_names_a_seat() -> None:
+    # meiva:note
+    # The label is the seat name, so a dashed one survives whole; an unnamed shell and the agent's
+    # own process session are not seats; another agent's seat does not count for this one.
+    wakes, _states, notes = plan_seats(
+        ((312, _SEATS_PAYLOAD),),
+        _readings(
+            sessions=[
+                *_sessions(312, "swap-guard", "a-b-c"),
+                "meiva-agent-312-shell-9",
+                "meiva-agent-312",
+                *_sessions(405, "disk-monitor", "cm-watch"),
+            ],
+            statuses={312: "idling"},
+        ),
+    )
+    assert notes == ()
+    assert [wake.absent for wake in wakes] == [("disk-monitor", "cm-watch")]
+
+
+def test_one_missing_seat_among_live_ones_is_the_whole_point() -> None:
+    wakes, _states, _notes = plan_seats(
+        ((312, _SEATS_PAYLOAD),),
+        _readings(
+            sessions=_sessions(312, "swap-guard", "cm-watch"),
+            statuses={312: "idling"},
+        ),
+    )
+    assert [wake.absent for wake in wakes] == [("disk-monitor",)]
+    quiet, _states, _notes = plan_seats(
+        ((312, _SEATS_PAYLOAD),),
+        _readings(
+            sessions=_sessions(312, "swap-guard", "disk-monitor", "cm-watch"),
+            statuses={312: "idling"},
+        ),
+    )
+    assert quiet == ()
+
+
+def test_a_registry_the_plan_cannot_read_is_a_blind_note_not_a_guess() -> None:
+    refusals: list[object] = [
+        {"version": 2, "seats": []},
+        {"seats": []},
+        {"version": 1},
+        {"version": 1, "seats": [{"script": "a.py"}]},
+        {"version": 1, "seats": [{"name": "a"}, {"name": "a"}]},
+        {"version": 1, "seats": ["a"]},
+        [],
+    ]
+    for payload in refusals:
+        wakes, states, notes = plan_seats(
+            ((312, payload),),
+            _readings(sessions=[], statuses={312: "idling"}),
+        )
+        assert wakes == ()
+        assert states == {}
+        assert notes == ("312: seats-blind=registry",)
+
+
+def test_a_different_absent_set_wakes_at_once_and_the_same_one_holds_its_cool_down() -> None:
+    live = _sessions(312, "swap-guard")
+    first, states, _notes = plan_seats(
+        ((312, _SEATS_PAYLOAD),), _readings(sessions=live, statuses={312: "idling"})
+    )
+    assert [wake.absent for wake in first] == [("disk-monitor", "cm-watch")]
+
+    held, _states, _notes = plan_seats(
+        ((312, _SEATS_PAYLOAD),),
+        _readings(sessions=live, statuses={312: "idling"}, states=states, now=1100.0),
+    )
+    assert held == ()
+
+    grew, _states, _notes = plan_seats(
+        ((312, _SEATS_PAYLOAD),),
+        _readings(
+            sessions=_sessions(312, "swap-guard", "cm-watch"),
+            statuses={312: "idling"},
+            states=states,
+            now=1200.0,
+        ),
+    )
+    assert [wake.absent for wake in grew] == [("disk-monitor",)]
+
+    later, _states, _notes = plan_seats(
+        ((312, _SEATS_PAYLOAD),),
+        _readings(sessions=live, statuses={312: "idling"}, states=states, now=1000.0 + 1800.0),
+    )
+    assert [wake.absent for wake in later] == [("disk-monitor", "cm-watch")]
+
+
+def test_the_seat_plan_skips_a_finished_owner_and_an_unreadable_status() -> None:
+    wakes, states, notes = plan_seats(
+        ((312, _SEATS_PAYLOAD),),
+        _readings(sessions=[], statuses={312: "terminated"}),
+    )
+    assert wakes == ()
+    assert states == {}
+    assert notes == ("312: seats=finished",)
+
+    wakes, _states, notes = plan_seats(
+        ((312, _SEATS_PAYLOAD),), _readings(sessions=[], statuses={})
+    )
+    assert wakes == ()
+    assert notes == ("312: seats=status-unknown",)
+
+
+def test_the_wake_names_the_seats_and_the_registry_file() -> None:
+    wakes, states, _notes = plan_seats(
+        ((312, _SEATS_PAYLOAD),),
+        _readings(sessions=_sessions(312, "swap-guard"), statuses={312: "idling"}),
+    )
+    assert [wake.agent_id for wake in wakes] == [312]
+    assert wakes[0].absent == ("disk-monitor", "cm-watch")
+    assert "disk-monitor" in wakes[0].text
+    assert "/h/state/seat-registry/312.json" in wakes[0].text
+    assert states[312] == SeatState(absent=("disk-monitor", "cm-watch"), woke_at=1000.0)
+
+
+def test_a_registry_file_is_read_by_name_and_an_unreadable_one_is_listed(tmp_path: Path) -> None:
+    directory = tmp_path / "seat-registry"
+    directory.mkdir()
+    (directory / "312.json").write_text(json.dumps(_SEATS_PAYLOAD), encoding="utf-8")
+    (directory / "405.json").write_text(json.dumps({"version": 9, "seats": []}), encoding="utf-8")
+    (directory / "unreadable.json").write_text("{", encoding="utf-8")
+    (directory / "notes.txt").write_text("not a registry", encoding="utf-8")
+    registries, blind = read_seat_registries(directory)
+    assert [agent_id for agent_id, _payload in registries] == [312, 405]
+    assert [path.name for path in blind] == ["unreadable.json"]
+
+
+def test_a_seat_state_survives_a_round_trip(tmp_path: Path) -> None:
+    path = tmp_path / "agent-watch.seats.json"
+    states = {312: SeatState(absent=("a", "b"), woke_at=5.0)}
+    write_seat_state(path, states)
+    assert read_seat_state(path) == states
+    path.write_text("not json", encoding="utf-8")
+    assert read_seat_state(path) == {}
