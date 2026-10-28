@@ -7,15 +7,52 @@
 from __future__ import annotations
 
 import json
+from decimal import Decimal
 from pathlib import Path
 from typing import Any
 
 import pytest
 
 from scripts.model_registry import check_plugin_price_drift as cli
-from scripts.model_registry.plugin_price_sync import LatticeDrift, lattice_drift
+from scripts.model_registry.plugin_price_rates import FlatRates
+from scripts.model_registry.plugin_price_source import PeriodDeclaration, TierDeclaration
+from scripts.model_registry.plugin_price_sync import (
+    LatticeDrift,
+    flat_trio_states_a_period_base,
+    lattice_drift,
+)
 
 _URL = "https://example.com/pricing"
+
+_TWO_PERIODS = """            periods=(
+                PricePeriod(
+                    effective_from=None,
+                    effective_until="2027-01-01T00:00:00Z",
+                    tiers=(
+                        PriceTier(
+                            input_tokens_min=0,
+                            input_tokens_max=None,
+                            cache_miss="2.0",
+                            cache_hit="0.2",
+                            output="12.0",
+                        ),
+                    ),
+                ),
+                PricePeriod(
+                    effective_from="2027-01-01T00:00:00Z",
+                    effective_until=None,
+                    tiers=(
+                        PriceTier(
+                            input_tokens_min=0,
+                            input_tokens_max=None,
+                            cache_miss="3.0",
+                            cache_hit="0.3",
+                            output="15.0",
+                        ),
+                    ),
+                ),
+            ),
+"""
 
 _LATTICE = """            periods=(
                 PricePeriod(
@@ -81,6 +118,20 @@ def _tier(minimum: int, maximum: int | None, rates: tuple[str, str, str]) -> dic
     }
 
 
+_TWO_PERIOD_ENTRY = [
+    {
+        "effective_from": None,
+        "effective_until": "2027-01-01T00:00:00Z",
+        "tiers": [_tier(0, None, ("2.0", "0.2", "12.0"))],
+    },
+    {
+        "effective_from": "2027-01-01T00:00:00Z",
+        "effective_until": None,
+        "tiers": [_tier(0, None, ("3.0", "0.3", "15.0"))],
+    },
+]
+
+
 def _entry(
     tiers: list[dict[str, Any]] | None = None,
     *,
@@ -139,28 +190,59 @@ def test_a_flat_declaration_matching_the_archive_reports_no_drift(tmp_path: Path
     assert lattice_drift(archive, root) == LatticeDrift(1, 1, 1, ())
 
 
-def test_a_lattice_declaration_ignores_its_flat_summary(tmp_path: Path) -> None:
+# meiva:note
+# The trio snapshots some period's base and the gate cannot say which, so it asks only that the
+# archive states that base somewhere; the nightly synchronization owns "current".
+def test_a_lattice_declaration_keeps_an_earlier_period_base_as_its_flat_summary(
+    tmp_path: Path,
+) -> None:
     root, archive = _repo(
         tmp_path,
-        source=_source(periods=_LATTICE),
-        models={
-            "fixture-chat": _entry(
-                [
-                    _tier(0, 200000, ("2.0", "0.2", "12.0")),
-                    _tier(200001, None, ("4.0", "0.4", "18.0")),
-                ]
-            )
-        },
+        source=_source(periods=_TWO_PERIODS, flat=("2.0", "0.2", "12.0")),
+        models={"fixture-chat": _entry(periods=_TWO_PERIOD_ENTRY)},
     )
 
     assert lattice_drift(archive, root) == LatticeDrift(1, 1, 1, ())
+
+
+# meiva:note
+# A declaration with no flat trio states nothing that could contradict the archive: requiring a price
+# to exist belongs to the reader, so the rule passes instead of raising when the trio is absent. The
+# state becomes expressible in source only when the trio turns optional, and this holds the rule
+# itself until then.
+def test_a_lattice_without_a_flat_trio_states_no_contradiction() -> None:
+    periods = (
+        PeriodDeclaration(
+            None,
+            None,
+            (
+                TierDeclaration(
+                    0, None, FlatRates(Decimal("2.0"), Decimal("0.2"), Decimal("12.0")), ()
+                ),
+            ),
+        ),
+    )
+
+    assert flat_trio_states_a_period_base("fixture-chat", None, periods)
+
+
+def test_a_flat_summary_no_period_states_is_drift(tmp_path: Path) -> None:
+    root, archive = _repo(
+        tmp_path,
+        source=_source(periods=_TWO_PERIODS, flat=("2.5", "0.2", "12.0")),
+        models={"fixture-chat": _entry(periods=_TWO_PERIOD_ENTRY)},
+    )
+
+    assert lattice_drift(archive, root).drifted == (
+        "fixture-chat: flat trio matches no declared period base",
+    )
 
 
 def test_a_tier_rate_the_archive_does_not_state_names_its_period(tmp_path: Path) -> None:
     drifted = _LATTICE.replace('output="18.0"', 'output="19.0"')
     root, archive = _repo(
         tmp_path,
-        source=_source(periods=drifted),
+        source=_source(periods=drifted, flat=("2.0", "0.2", "12.0")),
         models={
             "fixture-chat": _entry(
                 [
@@ -182,7 +264,7 @@ def test_a_period_the_declaration_omits_is_drift(tmp_path: Path) -> None:
     )
     root, archive = _repo(
         tmp_path,
-        source=_source(periods=declaration),
+        source=_source(periods=declaration, flat=("2.0", "0.2", "12.0")),
         models={
             "fixture-chat": _entry(
                 periods=[

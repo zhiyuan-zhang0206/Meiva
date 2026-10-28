@@ -195,6 +195,27 @@ def _base_rates(period: PeriodDeclaration, *, context: str) -> FlatRates:
     return base[0]
 
 
+# meiva:note
+# The flat trio records one period's base tier at the last synchronization instant, and the tree
+# records no such instant: any date picked here answers differently on the day a boundary takes
+# effect before the nightly run rewrites the declaration. What a committed tree can answer without a
+# clock is weaker and still worth failing on — the three numbers must be a base tier the archive
+# states for this model. Read them from the archive, not from the declaration, so editing both sides
+# cannot agree with itself, and compare the three prices only: the cache-write rates are separate
+# fields, not part of the trio. ``sync_plugin_rates`` keeps the clockful counterpart and rewrites a
+# trio that states an earlier period's base, which this predicate accepts by design. A declaration
+# with no trio states nothing that could contradict the archive — requiring a price to exist at all
+# belongs to the reader — so an absent trio passes rather than raising.
+def flat_trio_states_a_period_base(
+    model: str, rates: FlatRates | None, periods: tuple[PeriodDeclaration, ...]
+) -> bool:
+    if rates is None:
+        return True
+    trio = (rates.cache_miss, rates.cache_hit, rates.output)
+    bases = (_base_rates(period, context=f"archive {model!r}") for period in periods)
+    return any(trio == (base.cache_miss, base.cache_hit, base.output) for base in bases)
+
+
 def archive_price(
     model: str,
     entry: Mapping[str, object],
@@ -573,8 +594,8 @@ def sync_plugin_rates(
 # and provenance must be what the archive states. The flat trio is the base tier at the last
 # synchronization instant, so comparing it would answer differently on different days while nothing
 # in the tree changed; it is compared only where it is the whole declaration, on a provider that
-# carries no periods. Zero provider faces, zero scanned sources or zero priced models is an
-# error, never a green run.
+# carries no periods, and otherwise required to name a base tier this model's archive states.
+# Zero provider faces, zero scanned sources or zero priced models is an error, never a green run.
 # meiva:link base/lm/pricing/docs/pricing.meiva.okf.md
 def lattice_drift(archive_path: Path, repo_root: Path) -> LatticeDrift:
     root = repo_root.resolve(strict=True)
@@ -617,6 +638,10 @@ def lattice_drift(archive_path: Path, repo_root: Path) -> LatticeDrift:
             if declared.source_checked_at != target.source_checked_at:
                 drifted.append(f"{model}: source_checked_at")
             drifted.extend(_period_labels(model, declared, target))
+            if declared.periods and not flat_trio_states_a_period_base(
+                model, declared.rates, periods
+            ):
+                drifted.append(f"{model}: flat trio matches no declared period base")
             if not declared.periods and not target.periods and declared.rates != base:
                 drifted.append(f"{model}: flat rate")
     return LatticeDrift(len(units), scanned_sources, priced_models, tuple(sorted(drifted)))
