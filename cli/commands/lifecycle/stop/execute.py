@@ -152,6 +152,7 @@ def _perform(
                 facts=LaunchdFacts.of(command.host, user_home=command.session.user_home),
                 run=command.host.run,
                 timers=command.timers,
+                environ=command.config.process_environment(),
             )
         case StopBrowser():
             browser.stop_browser(run.deadline, home=command.home)
@@ -179,6 +180,7 @@ def _perform(
                         home=command.home,
                         macos=command.host.platform.system == "darwin",
                         timers=command.timers,
+                        environ=command.config.process_environment(),
                         retained_children=retained_children,
                         producer=env.producer,
                     )

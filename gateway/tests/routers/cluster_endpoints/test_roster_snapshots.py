@@ -321,11 +321,16 @@ def test_a_fresh_read_of_blackhole_hosts_is_bounded_by_one_dial_budget(
 ) -> None:
     """The dials run in parallel under one per-dial deadline, so five hosts that
     never answer cost about one budget, not five."""
+    # meiva:note
+    # The budget the test hands the code under test -- an input, not a copy of a
+    # production default -- so a literal is the honest form here.
     budget_s = 0.3
     release = threading.Event()
+    arrivals: list[float] = []
 
     def never_answers(call: OpsCall) -> OpsReply:
         del call
+        arrivals.append(time.monotonic())
         release.wait(timeout=5.0)
         return completed({})
 
@@ -345,7 +350,16 @@ def test_a_fresh_read_of_blackhole_hosts_is_bounded_by_one_dial_budget(
         elapsed = time.monotonic() - started
 
     assert [m.online for m in machines] == [False] * 5
-    assert elapsed < budget_s * 3
+    # meiva:note
+    # Judge the property by what the five hosts saw, not by how long the read took: dials
+    # dispatched together reach the listeners within milliseconds of each other, while a
+    # serial read cannot start its fifth dial before four budgets (1.2 s) elapse. The bound
+    # sits at two budgets -- far below that serial floor, far above the concurrent case -- so
+    # a loaded runner that stretches the whole read cannot decide the outcome. `elapsed` stays
+    # only as a stuck guard.
+    assert len(arrivals) == 5
+    assert max(arrivals) - min(arrivals) < budget_s * 2
+    assert elapsed < 5.0
 
 
 # --- the endpoints ------------------------------------------------------------
