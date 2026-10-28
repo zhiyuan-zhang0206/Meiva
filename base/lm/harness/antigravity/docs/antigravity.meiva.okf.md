@@ -121,7 +121,7 @@ that refuses) leaves `settled=False` and names the survivors in `remaining`;
 Same live run after reaping:
 
 ```
-InterruptReport(settled=True, remaining=(),
+CancelReport(settled=True, remaining=(),
                 observed=(bash -c sleep 90; echo done, sleep 90),
                 killed=(2615594, 2615595), cli_alive=False, waited_ms=8039)
 turn: interrupted, is_error=True

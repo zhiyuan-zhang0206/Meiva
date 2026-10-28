@@ -10,7 +10,7 @@ from pathlib import Path
 
 import psutil
 
-from base.lm.harness.acp import AcpConnection
+from base.lm.harness.acp.transport import AcpConnection
 from base.native_process.ownership import OwnedProcess
 
 

@@ -5,18 +5,13 @@ from base.lm.harness.antigravity.handoff_rules import SHELL_SEMANTICS, build_han
 from base.lm.harness.antigravity.mapping import ResultFields, parse_result
 from base.lm.harness.antigravity.session import (
     AgySession,
-    CancelReport,
     InboundQueueFullError,
     SessionClosedError,
-    SessionTotals,
-    TurnOutcome,
     TurnTicket,
 )
-from base.lm.harness.antigravity.transport import (
-    AgyTransport,
-    InterruptReport,
-    TransportClosedError,
-)
+from base.lm.harness.antigravity.transport import AgyTransport, TransportClosedError
+from base.lm.harness.cancel import CancelReport
+from base.lm.harness.turn import SessionTotals, TurnOutcome
 
 __all__ = [
     "DEFAULT_MODEL",
@@ -26,7 +21,6 @@ __all__ = [
     "AntigravityConfig",
     "CancelReport",
     "InboundQueueFullError",
-    "InterruptReport",
     "ResultFields",
     "SessionClosedError",
     "SessionTotals",

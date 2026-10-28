@@ -6,21 +6,19 @@ import json
 import signal
 from collections import deque
 from collections.abc import AsyncIterator, Callable, Iterable, Mapping
-from dataclasses import dataclass
 from typing import Any
 
 import psutil
 
 from base.lm.harness.antigravity.config import AntigravityConfig
-from base.lm.harness.process import (
-    ChildProbe,
-    ProcessObservation,
-    PsutilChildProbe,
-    WaitClock,
-    describe,
-    snapshot,
-    wait_gone,
+from base.lm.harness.cancel import (
+    CancelReport,
+    Sweep,
+    observed_cancel,
+    spawned_since,
+    unobserved_cancel,
 )
+from base.lm.harness.process import ChildProbe, PsutilChildProbe, WaitClock, snapshot, wait_gone
 
 # meiva:note
 # A single NDJSON line can carry a whole tool result; the 64 KiB StreamReader
@@ -33,19 +31,6 @@ STREAM_END = object()
 
 class TransportClosedError(RuntimeError):
     pass
-
-
-@dataclass(frozen=True, slots=True)
-class InterruptReport:
-    turn_id: str | None
-    interrupt_ms: float
-    settled: bool | None
-    observed: tuple[ProcessObservation, ...]
-    remaining: tuple[ProcessObservation, ...]
-    waited_ms: float
-    cli_pid: int | None
-    cli_alive: bool | None
-    killed: tuple[int, ...] = ()
 
 
 Reaper = Callable[[Mapping[int, str], "Iterable[int]"], "tuple[int, ...]"]
@@ -177,26 +162,13 @@ class AgyTransport:
         *,
         turn_id: str | None = None,
         baseline: Mapping[int, str] | None = None,
-    ) -> InterruptReport:
+    ) -> CancelReport:
         process = self._process
         if process is None or process.returncode is not None:
-            return InterruptReport(
-                turn_id=turn_id,
-                interrupt_ms=0.0,
-                settled=None,
-                observed=(),
-                remaining=(),
-                waited_ms=0.0,
-                cli_pid=None,
-                cli_alive=None,
-            )
+            return unobserved_cancel(turn_id=turn_id)
         pid = process.pid
         observed = snapshot(self._probe, pid)
-        spawned = {
-            child: command
-            for child, command in observed.items()
-            if baseline is None or child not in baseline
-        }
+        spawned = spawned_since(observed, {} if baseline is None else baseline)
         started = self._clock.monotonic()
         process.send_signal(signal.SIGINT)
         await self._settle_process(process)
@@ -222,20 +194,18 @@ class AgyTransport:
                 )
                 waited_ms += extra_ms
                 gone = reaped
-        remaining = (
-            ()
-            if gone
-            else describe(observed, [child for child in spawned if self._probe.is_alive(child)])
-        )
-        return InterruptReport(
+        return observed_cancel(
             turn_id=turn_id,
             interrupt_ms=interrupt_ms,
-            settled=gone,
-            observed=describe(observed, spawned),
-            remaining=remaining,
-            waited_ms=waited_ms,
-            cli_pid=pid,
+            pid=pid,
             cli_alive=self._probe.is_alive(pid),
+            sweep=Sweep(
+                observed=observed,
+                spawned=spawned,
+                gone=gone,
+                waited_ms=waited_ms,
+                alive=() if gone else [child for child in spawned if self._probe.is_alive(child)],
+            ),
             killed=killed,
         )
 

@@ -8,15 +8,15 @@ from collections.abc import Callable, Mapping
 from pathlib import Path
 from typing import Any
 
-from base.lm.harness.acp.transport import (
+from base.lm.harness.acp import (
     AcpClosedError,
-    AcpConnection,
     AcpError,
     AcpNotification,
     AcpRpcError,
     AcpTimeoutError,
-    PermissionRequest,
 )
+from base.lm.harness.acp.permission import PermissionRequest
+from base.lm.harness.acp.transport import AcpConnection
 from base.lm.harness.base_session import (
     EVENT_STREAM_END,
     BaseHarnessSession,
@@ -24,6 +24,15 @@ from base.lm.harness.base_session import (
     SessionBinding,
     SessionClock,
     SessionClosedError,
+)
+from base.lm.harness.cancel import (
+    CancelReport,
+    ProcessObservation,
+    Sweep,
+    describe,
+    observed_cancel,
+    spawned_since,
+    unobserved_cancel,
 )
 from base.lm.harness.events import (
     ReasoningDelta,
@@ -42,19 +51,12 @@ from base.lm.harness.kimi.mapping import (
     reasoning_text,
 )
 from base.lm.harness.kimi.types import (
-    CancelReport,
     SessionTotals,
     TurnOutcome,
     TurnTicket,
 )
 from base.lm.harness.kimi.usage import UsageSnapshot, read_usage
-from base.lm.harness.process import (
-    ChildProbe,
-    ProcessObservation,
-    describe,
-    snapshot,
-    wait_gone,
-)
+from base.lm.harness.process import ChildProbe, snapshot, wait_gone
 from base.lm.pricing import CacheTokens, PriceBook, quote
 
 # meiva:note
@@ -211,28 +213,18 @@ class KimiSession(BaseHarnessSession[KimiConfig]):
         if ticket is not None:
             ticket.interrupt_requested = True
         pid = self._agent_pid
+        turn_id = ticket.turn_id if ticket is not None else None
         if pid is None:
-            return CancelReport(
-                turn_id=ticket.turn_id if ticket is not None else None,
-                cancel_ms=0.0,
-                settled=None,
-                observed=(),
-                remaining=(),
-                waited_ms=0.0,
-                agent_pid=None,
-                agent_alive=None,
-            )
+            return unobserved_cancel(turn_id=turn_id)
         observed = snapshot(self._probe, pid)
-        spawned = {
-            child: command for child, command in observed.items() if child not in self._baseline
-        }
+        spawned = spawned_since(observed, self._baseline)
         started = self._monotonic()
         if self._session_id is not None:
             await connection.notify("session/cancel", {"sessionId": self._session_id})
         settle_deadline = self._monotonic() + self.config.cancel_settle_seconds
         while ticket is not None and not ticket.settled and self._monotonic() < settle_deadline:
             await self._clock.asleep(CANCEL_POLL_SECONDS)
-        cancel_ms = (self._monotonic() - started) * 1000.0
+        interrupt_ms = (self._monotonic() - started) * 1000.0
         reaped = await self._reap(spawned)
         gone, waited_ms = await wait_gone(
             self._probe,
@@ -241,16 +233,18 @@ class KimiSession(BaseHarnessSession[KimiConfig]):
             poll_seconds=CANCEL_POLL_SECONDS,
             clock=self._clock,
         )
-        remaining = describe(observed, [child for child in reaped if self._probe.is_alive(child)])
-        return CancelReport(
-            turn_id=ticket.turn_id if ticket is not None else None,
-            cancel_ms=cancel_ms,
-            settled=True if not reaped else gone,
-            observed=describe(observed, spawned),
-            remaining=remaining,
-            waited_ms=waited_ms,
-            agent_pid=pid,
-            agent_alive=self._probe.is_alive(pid),
+        return observed_cancel(
+            turn_id=turn_id,
+            interrupt_ms=interrupt_ms,
+            pid=pid,
+            cli_alive=self._probe.is_alive(pid),
+            sweep=Sweep(
+                observed=observed,
+                spawned=spawned,
+                gone=gone,
+                waited_ms=waited_ms,
+                alive=[child for child in reaped if self._probe.is_alive(child)],
+            ),
         )
 
     async def _reap(self, spawned: Mapping[int, str]) -> tuple[int, ...]:

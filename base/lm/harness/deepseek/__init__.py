@@ -1,9 +1,9 @@
 from __future__ import annotations
 
+from base.lm.harness.cancel import CancelReport
 from base.lm.harness.deepseek.config import DEFAULT_MODEL, REASONING_EFFORTS, BridgeConfig
 from base.lm.harness.deepseek.mapping import PromptFields, map_update, parse_prompt_result
 from base.lm.harness.deepseek.session import (
-    CancelReport,
     DeepSeekSession,
     InboundQueueFullError,
     SessionClosedError,
