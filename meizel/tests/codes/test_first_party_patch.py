@@ -132,3 +132,29 @@ def test_a_new_patch_in_a_strict_to_be_directory_fails(make_repo: RepoFactory) -
     [found] = [d for d in analysis_of(root).verdict if d.code.value == "first-party-patch"]
     assert "lib.mod.other" in found.message
     assert "app is strict-to-be" in found.render()
+
+
+TEST_MODULE = {
+    "app/__init__.py": "",
+    "app/test_helper.py": "SEED = 1\n\ndef helper() -> int:\n    return 1\n",
+    "app/test_x.py": "import app.test_helper as helper\n\ndef test_a():\n    helper.SEED = 2\n",
+}
+
+
+def test_a_patch_of_another_test_module_is_not_a_patch_of_the_code_under_test(
+    make_repo: RepoFactory,
+) -> None:
+    root = make_repo(TEST_MODULE)
+    assert diagnostics(root, "first-party-patch") == []
+
+
+def test_a_production_import_of_the_test_module_brings_every_patch_back(
+    make_repo: RepoFactory,
+) -> None:
+    production = (
+        "import app.test_helper\n\ndef value() -> int:\n    return app.test_helper.helper()\n"
+    )
+    root = make_repo({**TEST_MODULE, "app/prod.py": production})
+    [found] = diagnostics(root, "first-party-patch")
+    assert found.path == "app/test_x.py"
+    assert "app.test_helper.SEED" in found.message

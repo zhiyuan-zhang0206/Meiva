@@ -20,26 +20,14 @@ exports = ["context-breakdown-body.tsx", "context-breakdown.tsx", "context-meter
 [debt.first-party-patch]
 "context-breakdown.test.tsx#vi.mock ui/web/src/lib/transport/api.ts" = 1
 "context-meter.test.tsx#vi.mock ui/web/src/lib/transport/api.ts" = 1
-"inspector-panel-chrome.test.tsx#assignment ui/web/src/components/inspector/inspector-test-mock.tsx.connection" = 1
-"inspector-panel-chrome.test.tsx#assignment ui/web/src/components/inspector/inspector-test-mock.tsx.open" = 3
-"inspector-panel-chrome.test.tsx#assignment ui/web/src/components/inspector/inspector-test-mock.tsx.system" = 1
 "inspector-panel-chrome.test.tsx#vi.mock ui/web/src/lib/transport/api.ts" = 1
 "inspector-panel-chrome.test.tsx#vi.mock ui/web/src/lib/transport/useEventStream.tsx" = 1
-"inspector-panel-liveness.test.tsx#assignment ui/web/src/components/inspector/inspector-test-mock.tsx.connection" = 1
-"inspector-panel-liveness.test.tsx#assignment ui/web/src/components/inspector/inspector-test-mock.tsx.system" = 1
 "inspector-panel-liveness.test.tsx#vi.mock ui/web/src/lib/transport/api.ts" = 1
 "inspector-panel-liveness.test.tsx#vi.mock ui/web/src/lib/transport/useEventStream.tsx" = 1
-"inspector-panel-metrics.test.tsx#assignment ui/web/src/components/inspector/inspector-test-mock.tsx.connection" = 1
-"inspector-panel-metrics.test.tsx#assignment ui/web/src/components/inspector/inspector-test-mock.tsx.system" = 1
 "inspector-panel-metrics.test.tsx#vi.mock ui/web/src/lib/transport/api.ts" = 1
 "inspector-panel-metrics.test.tsx#vi.mock ui/web/src/lib/transport/useEventStream.tsx" = 1
-"inspector-panel-notices.test.tsx#assignment ui/web/src/components/inspector/inspector-test-mock.tsx.connection" = 1
-"inspector-panel-notices.test.tsx#assignment ui/web/src/components/inspector/inspector-test-mock.tsx.hours" = 1
-"inspector-panel-notices.test.tsx#assignment ui/web/src/components/inspector/inspector-test-mock.tsx.system" = 1
 "inspector-panel-notices.test.tsx#vi.mock ui/web/src/lib/transport/api.ts" = 1
 "inspector-panel-notices.test.tsx#vi.mock ui/web/src/lib/transport/useEventStream.tsx" = 1
-"inspector-panel.test.tsx#assignment ui/web/src/components/inspector/inspector-test-mock.tsx.connection" = 1
-"inspector-panel.test.tsx#assignment ui/web/src/components/inspector/inspector-test-mock.tsx.system" = 1
 "inspector-panel.test.tsx#vi.mock ui/web/src/lib/transport/api.ts" = 1
 "inspector-panel.test.tsx#vi.mock ui/web/src/lib/transport/useEventStream.tsx" = 1
 

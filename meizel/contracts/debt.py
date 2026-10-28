@@ -29,6 +29,9 @@ __all__ = [
     "DEBTABLE",
     "ENTROPY_CODES",
     "PATCH_CODES",
+    "PATCH_HINT",
+    "PATCH_REASONING",
+    "PATCH_WHAT",
     "PURITY_CODES",
     "TABLE_KEY",
     "DebtTable",
@@ -219,3 +222,58 @@ def set_debt(text: str, table: DebtTable) -> str:
     if not debt:
         return base + "\n" if base else ""
     return f"{base}\n\n{debt}" if base else debt
+
+
+PATCH_WHAT = {
+    Code.FIRST_PARTY_PATCH: "first-party",
+    Code.STDLIB_PATCH: "standard-library",
+    Code.THIRD_PARTY_PATCH: "third-party",
+    Code.ENV_PATCH: "the environment",
+    Code.UNRESOLVED_PATCH: "an unresolved target",
+}
+PATCH_HINT = {
+    Code.FIRST_PARTY_PATCH: (
+        "do not patch first-party code: split the code under test into a public facade and an "
+        "implementation whose dependencies are explicit parameters, and let the test pass the "
+        "fake in directly"
+    ),
+    Code.STDLIB_PATCH: (
+        "do not patch the standard library: the code under test takes the dependency (a clock, a "
+        "sleeper, a file opener) as an explicit parameter, and the test passes the fake in directly"
+    ),
+    Code.THIRD_PARTY_PATCH: (
+        "do not patch a third-party package: wrap it behind a first-party seam whose dependency is "
+        "an explicit parameter, and let the test pass the fake in directly"
+    ),
+    Code.ENV_PATCH: (
+        "do not patch the environment: read the setting once at the boundary and pass the value "
+        "in as an explicit parameter"
+    ),
+    Code.UNRESOLVED_PATCH: (
+        "the target of this patch is not an imported module or object, so what it replaces is "
+        "invisible to the checker: inject the dependency as an explicit parameter instead of "
+        "patching it"
+    ),
+}
+# meiva:note
+# The two codes below carry their principle, recipe and rule as three lines; the target is zero,
+# not a long-term debt.
+PATCH_REASONING = {
+    Code.PATCH_RAISING_FALSE: (
+        "why: `raising=False` turns a patch of a name that no longer exists into a silent no-op, so "
+        "the test keeps passing while it stops testing what it claims",
+        "instead: inject the dependency as a parameter; a name that is optional by design is "
+        "asserted to exist before it is patched, or the test builds the object that lacks it. "
+        "`missing-patch-target` is the same defect on a first-party module and cannot be recorded",
+        "see: docs/conventions/python-conventions.md#test-seams-in-another-shape",
+    ),
+    Code.TEST_SUBCLASS_OVERRIDE: (
+        "why: a test class that overrides one method of production code replaces behavior by "
+        "name, a patch in another spelling; later changes of the base silently stop being tested",
+        "instead: give the production class the value it reads as a constructor field and build "
+        "the real class with it; lift the overridden decision into a pure function; make the "
+        "fault with a real resource; only a fault no real resource can make takes a narrow "
+        "Protocol in base/ with its fake in base's tests/",
+        "see: docs/conventions/python-conventions.md#test-seams-in-another-shape",
+    ),
+}
