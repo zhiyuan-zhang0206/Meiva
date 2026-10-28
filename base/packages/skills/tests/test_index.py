@@ -15,11 +15,8 @@ from pathlib import Path
 
 import pytest
 
-from base.packages.skills.index import (
-    SkillFormatError,
-    SkillIndex,
-    parse_skill_frontmatter,
-)
+from base.packages.skills.index import SkillIndex
+from base.packages.skills.index_plan import SkillFormatError, parse_skill_frontmatter
 
 
 def _write(root: Path, rel: str, content: str) -> None:
@@ -155,6 +152,23 @@ class TestBuild:
         assert index.lookup("foo_bar") is not None  # underscore spelling resolves
         assert index.lookup("foo-bar").name == "foo-bar"  # type: ignore[union-attr]
         assert index.lookup("other") is None
+
+    def test_the_first_folder_in_sorted_order_wins_a_name(self, tmp_path: Path) -> None:
+        _write(tmp_path, "b/SKILL.md", _GOOD)
+        _write(tmp_path, "a/SKILL.md", _GOOD)
+        index = SkillIndex.build([tmp_path])
+        found = index.lookup("test-skill")
+        assert found is not None
+        assert found.rel == ("a",)
+
+    def test_the_first_root_wins_a_name_across_roots(self, tmp_path: Path) -> None:
+        first, second = tmp_path / "first", tmp_path / "second"
+        _write(second, "z/SKILL.md", _GOOD)
+        _write(first, "zz/SKILL.md", _GOOD)
+        index = SkillIndex.build([first, second])
+        found = index.lookup("test-skill")
+        assert found is not None
+        assert found.folder == first / "zz"
 
 
 class TestCached:

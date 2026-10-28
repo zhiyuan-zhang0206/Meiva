@@ -34,83 +34,22 @@ drops `.claude/skills/` into the scan with no user action).
 
 from __future__ import annotations
 
-import hashlib
 import os
-import stat
 from collections.abc import Callable
-from dataclasses import dataclass
 from pathlib import Path
 
-from base.packages.docs.frontmatter import FrontmatterError, parse_frontmatter
+from base.packages.skills.index_plan import (
+    INDEX_MD,
+    SKILL_MD,
+    FileKind,
+    SkillFile,
+    assemble_skill_file,
+    file_unchanged,
+    folder_snapshot,
+    key_index,
+    skill_md_facts,
+)
 from base.packages.skills.names import match_key
-
-_REQUIRED_FIELDS = ("name", "description")
-
-
-class SkillFormatError(ValueError):
-    """SKILL.md failed to parse — missing frontmatter, missing required
-    `name` or `description` field, or a field is not in `key: value` form."""
-
-
-def parse_skill_frontmatter(content: str) -> tuple[dict[str, str], str]:
-    """Parse SKILL.md frontmatter, enforcing the required `name` + `description`
-    fields on top of the shared structural parser.
-
-    The ONE strict parse behind every skill surface: the index (below), the
-    CLI skill tooling (cli/commands/extensions/{skill,plugins,skill_package,_claude_code_plugin}.py
-    import it as `meiva.skills._parse_frontmatter`), and the repo lint. Raises
-    SkillFormatError on malformed frontmatter or a missing required field.
-    """
-    try:
-        fields, body = parse_frontmatter(content)
-    except FrontmatterError as e:
-        raise SkillFormatError(str(e)) from e
-    missing = [r for r in _REQUIRED_FIELDS if r not in fields]
-    if missing:
-        raise SkillFormatError("frontmatter missing required field(s): " + ", ".join(missing))
-    return fields, body
-
-
-@dataclass(frozen=True)
-class SkillFile:
-    """One skill-bearing folder under a scanned root.
-
-    `name` / `description` / `error` are the parsed frontmatter outcome
-    (exactly one of `error is None` and `name is None` holds for a folder with
-    a SKILL.md); `content_hash` is the SHA-256 of the SKILL.md content for
-    cross-root dedup; `index_text` carries a folder INDEX.md body so consumers
-    never re-read it.
-    """
-
-    folder: Path
-    rel: tuple[str, ...]
-    skill_md: Path | None
-    index_md: Path | None
-    name: str | None
-    description: str | None
-    content_hash: str | None
-    error: str | None
-    index_text: str | None
-    security_rules: tuple[str, ...]
-    skill_mtime_ns: int
-    skill_size: int
-    index_mtime_ns: int
-    index_size: int
-
-    @property
-    def key(self) -> str | None:
-        """The comparison key: `match_key` of the frontmatter name. None when
-        the entry carries no usable name (no SKILL.md or a parse error)."""
-        return match_key(self.name) if self.name is not None else None
-
-
-def _scan_critical(text: str) -> tuple[str, ...]:
-    """Distinct critical rule ids matched in one skill text blob (SKILL.md or
-    INDEX.md) — the runtime supply-chain gate. Empty tuple = clean. Sorted for
-    deterministic messages."""
-    from base.packages.skills.scan import scan_text_critical
-
-    return tuple(sorted({f.rule_id for f in scan_text_critical(text)}))
 
 
 def _read_utf8(path: Path) -> tuple[str | None, OSError | None]:
@@ -118,27 +57,6 @@ def _read_utf8(path: Path) -> tuple[str | None, OSError | None]:
         return path.read_text(encoding="utf-8"), None
     except OSError as exc:
         return None, exc
-
-
-def _parse_skill_md(
-    skill_md: Path,
-) -> tuple[str | None, str | None, str | None, str | None, tuple[str, ...]]:
-    """`(name, description, content_hash, error, security_rules)` of one SKILL.md."""
-    raw, err = _read_utf8(skill_md)
-    if raw is None:
-        return None, None, None, f"unreadable: {err}", ()
-    content_hash = hashlib.sha256(raw.encode()).hexdigest()
-    try:
-        fields, _body = parse_skill_frontmatter(raw)
-    except SkillFormatError as e:
-        return None, None, content_hash, f"malformed frontmatter — {e}", ()
-    return fields["name"], fields["description"], content_hash, None, _scan_critical(raw)
-
-
-def _read_index_md(index_md: Path) -> str | None:
-    """The INDEX.md text, or None when unreadable."""
-    text, _ = _read_utf8(index_md)
-    return text
 
 
 def _stat_or_none(path: Path) -> os.stat_result | None:
@@ -155,7 +73,7 @@ def _regular_file_stat(
         st = stat_of(path)
     except OSError:
         return None
-    return st if st is not None and stat.S_ISREG(st.st_mode) else None
+    return st if FileKind.of(st) is FileKind.REGULAR else None
 
 
 def _folders_in(
@@ -167,7 +85,7 @@ def _folders_in(
             st = stat_of(p)
         except OSError:
             continue
-        if st is not None and stat.S_ISDIR(st.st_mode):
+        if st is not None and FileKind.of(st) is FileKind.DIRECTORY:
             folders.append((p, st.st_mtime_ns))
     return folders or None
 
@@ -176,36 +94,19 @@ def _skill_file(
     folder: Path, root: Path, stat_of: Callable[[Path], os.stat_result | None]
 ) -> SkillFile | None:
     """Parse one folder's SKILL.md / INDEX.md; None when it holds neither."""
-    rel = folder.relative_to(root).parts
-    skill_md = folder / "SKILL.md"
-    index_md = folder / "INDEX.md"
-    s_stat = _regular_file_stat(skill_md, stat_of)
-    i_stat = _regular_file_stat(index_md, stat_of)
-    if s_stat is None and i_stat is None:
-        return None
-    name = description = content_hash = error = index_text = None
-    security_rules: tuple[str, ...] = ()
-    if s_stat is not None:
-        name, description, content_hash, error, security_rules = _parse_skill_md(skill_md)
-    if i_stat is not None:
-        index_text = _read_index_md(index_md)
-        if index_text is not None:
-            security_rules += _scan_critical(index_text)
-    return SkillFile(
-        folder=folder,
-        rel=rel,
-        skill_md=skill_md if s_stat is not None else None,
-        index_md=index_md if i_stat is not None else None,
-        name=name,
-        description=description,
-        content_hash=content_hash,
-        error=error,
+    skill_md = folder / SKILL_MD
+    index_md = folder / INDEX_MD
+    skill_stat = _regular_file_stat(skill_md, stat_of)
+    index_stat = _regular_file_stat(index_md, stat_of)
+    skill_facts = skill_md_facts(*_read_utf8(skill_md)) if skill_stat is not None else None
+    index_text = _read_utf8(index_md)[0] if index_stat is not None else None
+    return assemble_skill_file(
+        folder,
+        root,
+        skill_stat=skill_stat,
+        index_stat=index_stat,
+        skill_facts=skill_facts,
         index_text=index_text,
-        security_rules=security_rules,
-        skill_mtime_ns=s_stat.st_mtime_ns if s_stat else 0,
-        skill_size=s_stat.st_size if s_stat else 0,
-        index_mtime_ns=i_stat.st_mtime_ns if i_stat else 0,
-        index_size=i_stat.st_size if i_stat else 0,
     )
 
 
@@ -221,11 +122,10 @@ def _scan_root(
     folders = _folders_in(root, stat_of)
     if folders is None:
         return (), ()
-    folder_stats = [(folder.relative_to(root).parts, mtime) for folder, mtime in folders]
     entries = [
         entry for folder, _ in folders if (entry := _skill_file(folder, root, stat_of)) is not None
     ]
-    return tuple(entries), tuple(folder_stats)
+    return tuple(entries), folder_snapshot(root, folders)
 
 
 class SkillIndex:
@@ -246,11 +146,7 @@ class SkillIndex:
         self.roots = roots
         self.root_folders = root_folders
         self.entries = entries
-        self._by_key: dict[str, SkillFile] = {}
-        for e in entries:
-            k = e.key
-            if k is not None:
-                self._by_key.setdefault(k, e)
+        self._by_key = key_index(entries)
 
     @classmethod
     def build(
@@ -298,22 +194,16 @@ class SkillIndex:
         mtime/size), or a delete (folder set) each read as stale."""
         for root, saved in zip(self.roots, self.root_folders, strict=True):
             folders = _folders_in(root, _stat_or_none)
-            if folders is None:
-                return False
-            stats = [(folder.relative_to(root).parts, mtime) for folder, mtime in folders]
-            if tuple(stats) != saved:
+            if folders is None or folder_snapshot(root, folders) != saved:
                 return False
         for e in self.entries:
             for path, mtime, size in (
                 (e.skill_md, e.skill_mtime_ns, e.skill_size),
                 (e.index_md, e.index_mtime_ns, e.index_size),
             ):
-                if path is None:
-                    continue
-                st = _stat_or_none(path)
-                if st is None:
-                    return False
-                if st.st_mtime_ns != mtime or st.st_size != size:
+                if path is not None and not file_unchanged(
+                    _stat_or_none(path), mtime_ns=mtime, size=size
+                ):
                     return False
         return True
 

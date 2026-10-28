@@ -38,9 +38,8 @@ a yes/no install question. The two tables overlap on hidden-text patterns only.
 from __future__ import annotations
 
 import re
-import stat
 from dataclasses import dataclass
-from pathlib import Path
+from pathlib import PurePosixPath
 from typing import Literal
 
 Severity = Literal["critical", "notice"]
@@ -48,11 +47,8 @@ Severity = Literal["critical", "notice"]
 # Files big enough that scanning them is pointless (a skill is markdown and
 # small scripts) and anything non-text: both are reported, never silently
 # skipped — an unreadable blob inside an instruction pack is itself the finding.
-_MAX_SCAN_BYTES = 1_000_000
-_BINARY_SNIFF_BYTES = 4096
-
-# Directories that are never package content.
-_SKIP_DIRS = frozenset({".git", "__pycache__", ".DS_Store", "node_modules", ".venv"})
+MAX_SCAN_BYTES = 1_000_000
+BINARY_SNIFF_BYTES = 4096
 
 
 @dataclass(frozen=True)
@@ -327,25 +323,6 @@ _NOTICE: tuple[Rule, ...] = (
 )
 
 
-def _iter_files(root: Path) -> list[tuple[Path, int]]:
-    """Every file under `root` worth scanning, sorted, skipping VCS/build junk."""
-    out: list[tuple[Path, int]] = []
-    for p in sorted(root.rglob("*")):
-        if p.is_symlink():
-            continue
-        try:
-            st = p.stat()
-        except OSError:
-            continue
-        if not stat.S_ISREG(st.st_mode):
-            continue
-        rel = p.relative_to(root)
-        if any(part in _SKIP_DIRS for part in rel.parts):
-            continue
-        out.append((p, st.st_size))
-    return out
-
-
 # ── encoded-payload pre-decoding ───────────────────────────────────────────
 # ClawHavoc's primary evasion was wrapping the payload: the visible text is a
 # base64 blob, and only the decoded bytes carry the download-and-execute line.
@@ -526,55 +503,56 @@ def scan_text_critical(
     return findings
 
 
-def scan_package(root: Path) -> list[Finding]:
-    """Every finding in the package tree at `root`, critical first.
+# meiva:note
+# Whether a file of `size` bytes is read for scanning: one past MAX_SCAN_BYTES is reported, never
+# read.
+def needs_bytes(size: int) -> bool:
+    return size <= MAX_SCAN_BYTES
 
-    Reads each file as UTF-8; a file that is not decodable text, or is too large
-    to be instructions, yields its own notice rather than being skipped."""
-    findings: list[Finding] = []
-    for p, size in _iter_files(root):
-        rel = p.relative_to(root).as_posix()
-        if size > _MAX_SCAN_BYTES:
-            findings.append(
-                Finding(
-                    "unscannable-file",
-                    "notice",
-                    f"{size} bytes — too large to read as instructions, not scanned",
-                    rel,
-                    0,
-                    "",
-                )
+
+# meiva:note
+# Every finding in one package file, from what the caller read of it. `rel` is the path relative
+# to the package root, `size` the file's size in bytes and `raw` its bytes, which a file past the
+# scan limit never needs (the caller passes None for it). Reads the bytes as UTF-8; a file that is
+# not decodable text, or is too large to be instructions, yields its own notice rather than being
+# skipped.
+def scan_file(rel: str, size: int, raw: bytes | None) -> list[Finding]:
+    if not needs_bytes(size):
+        return [
+            Finding(
+                "unscannable-file",
+                "notice",
+                f"{size} bytes — too large to read as instructions, not scanned",
+                rel,
+                0,
+                "",
             )
-            continue
-        raw = p.read_bytes()
-        if b"\0" in raw[:_BINARY_SNIFF_BYTES]:
-            findings.append(
-                Finding(
-                    "unscannable-file",
-                    "notice",
-                    "binary file bundled in a skill package — not scanned, read it yourself",
-                    rel,
-                    0,
-                    "",
-                )
+        ]
+    if raw is None:
+        raise ValueError(f"{rel}: the bytes of a file within the scan limit are required")
+    if b"\0" in raw[:BINARY_SNIFF_BYTES]:
+        return [
+            Finding(
+                "unscannable-file",
+                "notice",
+                "binary file bundled in a skill package — not scanned, read it yourself",
+                rel,
+                0,
+                "",
             )
-            continue
-        try:
-            # A leading BOM is an encoding artifact (every skill authored on
-            # Windows carries one), not hidden text — strip it before the
-            # zero-width rule sees it. A BOM anywhere else still counts.
-            text = raw.decode("utf-8").removeprefix("\ufeff")
-        except UnicodeDecodeError:
-            findings.append(
-                Finding("unscannable-file", "notice", "not valid UTF-8 — not scanned", rel, 0, "")
-            )
-            continue
-        rules = _CRITICAL + (_MARKDOWN_CRITICAL if p.suffix.lower() == ".md" else ())
-        findings += _scan_text(text, rel, rules)
-        findings += _scan_decoded(text, rel)
-        findings += _exfiltration(text, rel)
-        findings += _scan_text(text, rel, _NOTICE)
-    findings.sort(key=lambda f: (f.severity != "critical", f.path, f.line, f.rule_id))
+        ]
+    # meiva:note
+    # A leading BOM is an encoding artifact (every skill authored on Windows carries one), not
+    # hidden text — strip it before the zero-width rule sees it. A BOM anywhere else still counts.
+    try:
+        text = raw.decode("utf-8").removeprefix("\ufeff")
+    except UnicodeDecodeError:
+        return [Finding("unscannable-file", "notice", "not valid UTF-8 — not scanned", rel, 0, "")]
+    rules = _CRITICAL + (_MARKDOWN_CRITICAL if PurePosixPath(rel).suffix.lower() == ".md" else ())
+    findings = _scan_text(text, rel, rules)
+    findings += _scan_decoded(text, rel)
+    findings += _exfiltration(text, rel)
+    findings += _scan_text(text, rel, _NOTICE)
     return findings
 
 

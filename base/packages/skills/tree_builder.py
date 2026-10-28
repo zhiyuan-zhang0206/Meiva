@@ -4,18 +4,18 @@ import logging
 from collections.abc import Sequence
 from pathlib import Path
 
-from base.packages.skills.index import SkillFile, SkillIndex
+from base.packages.skills.index_plan import SkillFile
 from base.packages.skills.names import SkillIdentity, match_key
-from base.packages.skills.tree import NS, Leaf, Skill, Tree, claim, descend, flatten
+from base.packages.skills.tree import NS, Leaf, Skill, Tree, claim, descend
 
-__all__ = ["SkillIndexBuilder", "scan_tree", "skills_in"]
+__all__ = ["SkillIndexBuilder"]
 
 _log = logging.getLogger("base.packages.skills.tree_builder")
 
 
 # meiva:note
-# Builds the skill namespace tree from mount roots using `SkillIndex.cached`,
-# resetting `_claimed` per root (so a later provider root can override an earlier
+# Builds the skill namespace tree from the entries of each mount root (the `SkillIndex` entries the
+# caller scanned), resetting `_claimed` per root (so a later provider root can override an earlier
 # one while same-root collisions raise `SkillNameCollision`) and deduplicating
 # identical SKILL.md content across roots via `_seen_hashes`.
 # meiva:link meiva/skills/docs/skills.meiva.okf.md
@@ -26,13 +26,12 @@ class SkillIndexBuilder:
         self._claimed: dict[tuple[str, ...], str] = {}
         self._seen_hashes: set[str] = set()
 
-    def mount(self, root: Path, gate: set[str] | None) -> None:
-        index = SkillIndex.cached([root])
-        if not index.entries:
+    def mount(self, root: Path, gate: set[str] | None, entries: Sequence[SkillFile]) -> None:
+        if not entries:
             return
         self._claimed = {}
         gate_keys = None if gate is None else {match_key(g) for g in gate}
-        for entry in index.entries:
+        for entry in entries:
             self._mount_folder_skill(root, entry, gate_keys)
             self._mount_folder_index(entry, gate_keys)
 
@@ -107,20 +106,3 @@ class SkillIndexBuilder:
                 "path": skill["path"],
                 "namespace": ns[:-1],
             }
-
-
-# meiva:link meiva/skills/docs/skills.meiva.okf.md
-def scan_tree(skills_root: Path, gate: set[str] | None, provider_roots: Sequence[Path]) -> Tree:
-    builder = SkillIndexBuilder()
-    builder.mount(skills_root, gate)
-    for root in provider_roots:
-        builder.mount(root, None)
-    return builder.tree
-
-
-# meiva:link meiva/skills/docs/skills.meiva.okf.md
-def skills_in(roots: list[Path]) -> list[Skill]:
-    builder = SkillIndexBuilder()
-    for root in roots:
-        builder.mount(root, None)
-    return flatten(builder.tree)
