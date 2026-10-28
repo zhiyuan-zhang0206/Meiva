@@ -154,3 +154,24 @@ def test_a_parse_failure_on_either_side_does_not_become_empty_scope(
 def test_an_empty_staged_scope_is_not_a_whole_tree_migration(tmp_path: Path) -> None:
     repo = initialize(tmp_path, "# Old notes\n")
     assert incremental_notes(repo) == {}
+
+
+def test_the_changed_check_reads_only_the_sources_it_selected(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    git_repository(
+        tmp_path,
+        {
+            "core.py": "value = 1\n",
+            "linked.py": note(("Owned elsewhere.",), links=("docs/missing.md",)) + "other = 1\n",
+            "unparsed.py": note(("Broken on purpose.",)) + "def broken(\n",
+        },
+    )
+    (tmp_path / "core.py").write_text("value = 2\n", encoding="utf-8")
+    git(tmp_path, "add", ".")
+    assert main(["--repo", str(tmp_path), "changed"]) == 0
+    assert "0 new or rewritten notes in 1 changed sources" in capsys.readouterr().out
+    assert main(["--repo", str(tmp_path), "validate"]) == 1
+    reported = capsys.readouterr().out
+    assert "linked.py" in reported and "note-link" in reported
+    assert "unparsed.py" in reported and "source-parse" in reported

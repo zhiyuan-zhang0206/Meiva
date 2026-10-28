@@ -61,7 +61,7 @@ def report_result(
     scope = (
         "links only; free-comment migration is not checked"
         if paths is None
-        else f"{sum(map(len, notes.values()))} new or rewritten notes in {len(paths)} changed sources; unchanged prose is not migrated"
+        else f"{sum(map(len, notes.values()))} new or rewritten notes in {len(paths)} changed sources; links and prose outside them are not rechecked"
         if notes is not None
         else f"{len(paths)} source files checked for free comments"
     )
@@ -87,7 +87,8 @@ def main(argv: list[str] | None = None) -> int:
         help="report outstanding migration findings; exit nonzero while any remain",
     )
     changed = commands.add_parser(
-        "changed", help="check new or rewritten notes against Git while validating every link"
+        "changed",
+        help="check new or rewritten notes against Git in the changed sources, links included",
     )
     changed.add_argument("base", nargs="?")
     changed.add_argument("--from-ref")
@@ -118,7 +119,12 @@ def main(argv: list[str] | None = None) -> int:
             if args.command in {"check", "inventory"}
             else None
         )
-        result = check(repo, strict_paths=paths, strict_notes=notes)
+        result = check(
+            repo,
+            scan=frozenset(notes) if notes is not None else None,
+            strict_paths=paths,
+            strict_notes=notes,
+        )
         if args.command == "corpus":
             rows = corpus_module.entries(repo)
             content = (
