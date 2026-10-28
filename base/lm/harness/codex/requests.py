@@ -39,10 +39,10 @@ def initialize_request() -> tuple[str, JsonObject]:
 
 
 # meiva:note
-# The method and payload that open the thread: a recorded thread is resumed by id; a fresh one starts
-# with the sandbox, the approval policy and the model the caller chose, and inherits the whole shell
-# environment so a command the turn runs sees what the bridge sees. `model` is omitted rather than sent empty: an unset model means the
-# account's own default, not a request for no model.
+# The method and payload that open the thread: a recorded thread is resumed by id; a fresh one
+# starts with the sandbox, the approval policy and the model the caller chose, and inherits the
+# whole shell environment so a command the turn runs sees what the bridge sees. `model` is omitted
+# rather than sent empty: an unset model means the account's default, not a request for no model.
 def open_thread_request(
     resume: str | None,
     *,
@@ -83,11 +83,11 @@ class RequestAnswer:
 
 
 # meiva:note
-# The bridge owns no approval surface of its own: it answers with the decision the caller configured
-# and, for the two current approval methods, that decision is the answer verbatim. `applyPatchApproval`
-# keeps the legacy vocabulary (`approved`/`denied`) because the method predates `accept`/`decline`.
-# Permissions are granted empty and user input is answered empty: inventing either would let an agent
-# believe it had widened its sandbox or heard from a person.
+# The bridge owns no approval surface of its own: it answers with the decision the caller
+# configured, and for the two current approval methods that decision is the answer verbatim.
+# `applyPatchApproval` keeps the legacy vocabulary (`approved`/`denied`) because the method
+# predates `accept`/`decline`. Permissions are granted empty and user input is answered empty:
+# inventing either would let an agent believe it had widened its sandbox or heard from a person.
 def answer_request(method: str, params: RequestParams, *, decision: str) -> RequestAnswer:
     if method in _APPROVAL_METHODS:
         denial = approval_denial(method, params) if decision == "decline" else None
@@ -104,9 +104,9 @@ def answer_request(method: str, params: RequestParams, *, decision: str) -> Requ
 
 
 # meiva:note
-# The thread an answered `thread/start` or `thread/resume` opened: its id, and the model and working
-# directory the app-server reports for it. A reply that names no id keeps the id that was resumed, and
-# a fresh thread that names none stays empty rather than borrowing the request's.
+# The thread an answered `thread/start` or `thread/resume` opened: its id, and the model and
+# working directory the app-server reports for it. A reply that names no id keeps the id that was
+# resumed, and a fresh thread that names none stays empty rather than borrowing the request's.
 @dataclass(frozen=True, slots=True)
 class OpenedThread:
     session_id: str

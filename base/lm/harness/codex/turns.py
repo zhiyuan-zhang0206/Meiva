@@ -39,11 +39,11 @@ _KINDS = {
 
 
 # meiva:note
-# A notification this session is going to act on: what it is, which provider turn it reports on, and
-# the completed turn it carries. `turn_id` is the name the message itself gives — `turnId` for a
-# turn-scoped notification, the `turn` object's own id for `turn/completed` — so a message that names
-# a turn this session never bound has an owner of its own and no ticket adopts it (#5663). An empty
-# `turn` is every kind that carries no completed turn.
+# A notification this session is going to act on: what it is, which provider turn it reports on,
+# and the completed turn it carries. `turn_id` is the name the message itself gives — `turnId` for
+# a turn-scoped notification, the `turn` object's own id for `turn/completed` — so a message that
+# names a turn this session never bound has an owner of its own and no ticket adopts it (#5663).
+# An empty `turn` is every kind that carries no completed turn.
 # meiva:link base/lm/harness/docs/attribution.meiva.okf.md
 @dataclass(frozen=True, slots=True)
 class Inbound:
@@ -54,8 +54,8 @@ class Inbound:
 
 # meiva:note
 # What an `item/*` notification asks for: the phase to report it in, and the reply an
-# `item/completed` carries — `final` when the item is the turn's final answer rather than commentary,
-# which is what a settled turn prefers as its text.
+# `item/completed` carries — `final` when the item is the turn's final answer rather than
+# commentary, which is what a settled turn prefers as its text.
 @dataclass(frozen=True, slots=True)
 class ItemStep:
     phase: str
@@ -64,9 +64,10 @@ class ItemStep:
 
 
 # meiva:note
-# A provider turn name this session may adopt: the name itself, and whether adopting it discards the
-# partial state gathered under an older name — a name that changed mid-turn is the provider replaying
-# another turn's transcript, and what was gathered under the old name is not ours (#5663).
+# A provider turn name this session may adopt: the name itself, and whether adopting it discards
+# the partial state gathered under an older name — a name that changed mid-turn is the provider
+# replaying another turn's transcript, and what was gathered under the old name is not ours
+# (#5663).
 # meiva:link base/lm/harness/docs/attribution.meiva.okf.md
 @dataclass(frozen=True, slots=True)
 class Bind:
@@ -83,10 +84,10 @@ class ErrorReport:
 
 
 # meiva:note
-# Everything one turn of this session has produced so far: the usage it reported step by step, the
-# reply parts it streamed and the ones that were its final answer, the denials it collected, and
-# whether an interrupt was asked for. The session holds one of these per running turn and settles the
-# turn from it, so an incoming message changes a value instead of three dictionaries and a list.
+# Everything one turn of this session has produced so far: the usage it reported step by step,
+# the reply parts it streamed and the ones that were its final answer, the denials it collected,
+# and whether an interrupt was asked for. The session holds one of these per running turn and
+# settles the turn from it, so an incoming message changes a value instead of three maps.
 @dataclass(frozen=True, slots=True)
 class TurnRecord:
     usage: Usage = field(default_factory=Usage)
@@ -97,8 +98,8 @@ class TurnRecord:
     interrupt_requested: bool = False
 
     # meiva:note
-    # A token report of nothing says nothing: `thread/tokenUsage/updated` also arrives for a turn that
-    # has not spent tokens yet, and counting it as a step would report a turn that did nothing.
+    # A token report of nothing says nothing: `thread/tokenUsage/updated` also arrives for a turn
+    # that has not spent tokens yet, and counting it as a step would report a turn that did not run.
     def with_usage(self, step: Usage) -> TurnRecord:
         if step.input_tokens == 0 and step.output_tokens == 0:
             return self
@@ -165,10 +166,10 @@ def item(kind: NotificationKind, params: RequestParams) -> ItemStep:
 
 
 # meiva:note
-# `turn/started` names the turn the server is about to run, and it can arrive before `turn/start` has
-# answered. Binding that name is what lets the items that follow be attributed without guessing: only
-# a turn this session is in the middle of starting may take a name, so a name announced at any other
-# moment belongs to a turn we did not start (#5663).
+# `turn/started` names the turn the server is about to run, and it can arrive before `turn/start`
+# has answered. Binding that name is what lets the items that follow be attributed without
+# guessing: only a turn this session is in the middle of starting may take a name, so a name
+# announced at any other moment belongs to a turn we did not start (#5663).
 # meiva:link base/lm/harness/docs/attribution.meiva.okf.md
 def binding(container: RequestParams, *, previous: str | None, starting: bool) -> Bind | None:
     if not starting:
