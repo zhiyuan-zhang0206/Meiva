@@ -11,12 +11,20 @@ import os
 from collections.abc import Mapping
 
 
-def inherited_process_env(overrides: Mapping[str, str] | None = None) -> dict[str, str]:
-    """Copy the live environment and apply explicit child-only overrides."""
-    child = dict(os.environ)
+# meiva:note
+# Copy `environ` and apply explicit child-only overrides.
+def inherit_env(
+    environ: Mapping[str, str], overrides: Mapping[str, str] | None = None
+) -> dict[str, str]:
+    child = dict(environ)
     if overrides is not None:
         child.update(overrides)
     return child
+
+
+def inherited_process_env(overrides: Mapping[str, str] | None = None) -> dict[str, str]:
+    """Copy the live environment and apply explicit child-only overrides."""
+    return inherit_env(os.environ, overrides)
 
 
 # The operator's process mechanics a long-lived native daemon may keep: binary

@@ -10,6 +10,7 @@
 from __future__ import annotations
 
 import dataclasses
+import os
 import socket
 from pathlib import Path
 
@@ -17,6 +18,7 @@ import psycopg
 import pytest
 from psycopg import sql
 
+from base.clock import SYSTEM_TIMERS
 from base.cluster.machine import MachineIdentityReader
 from cli.commands.data_plane import bringup, cluster_instance
 from cli.commands.data_plane.config import DataPlaneConfig
@@ -54,6 +56,8 @@ def _start_storage(cluster: NativeCluster, machine: MachineIdentityReader) -> No
         retained_children=cluster.retained_children,
         machine=machine,
         macos=NATIVE_TEST_MACOS,
+        timers=SYSTEM_TIMERS,
+        environ=os.environ,
     )
     assert rc == 0
 

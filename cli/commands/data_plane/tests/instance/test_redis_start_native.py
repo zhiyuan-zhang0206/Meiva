@@ -8,6 +8,7 @@
 from __future__ import annotations
 
 import dataclasses
+import os
 from pathlib import Path
 from typing import cast
 from urllib.parse import urlsplit
@@ -18,6 +19,7 @@ import redis
 from redis.backoff import NoBackoff
 from redis.retry import Retry
 
+from base.clock import SYSTEM_TIMERS
 from base.cluster import port_preflight
 from base.cluster.machine import MachineIdentityReader
 from base.cluster.machine.configured import ConfiguredMachineIdentity
@@ -65,6 +67,8 @@ def _start(
         machine=machine,
         tuning=StartTuning(bind_wait_s=bind_wait_s),
         macos=NATIVE_TEST_MACOS,
+        timers=SYSTEM_TIMERS,
+        environ=os.environ,
     )
 
 
@@ -194,6 +198,8 @@ def test_a_foreign_redis_keeps_its_acl_and_config(
                 machine=command_machine,
                 tuning=StartTuning(bind_wait_s=0.0),
                 macos=NATIVE_TEST_MACOS,
+                timers=SYSTEM_TIMERS,
+                environ=os.environ,
             )
             assert rc == 1
             assert redis_command(client, "ACL", "LIST") == before

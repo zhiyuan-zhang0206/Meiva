@@ -18,7 +18,7 @@ from __future__ import annotations
 import socket
 import subprocess
 import sys
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from pathlib import Path
 from typing import assert_never
 from urllib.parse import urlsplit
@@ -105,6 +105,8 @@ def ensure_gateway_data_plane(
     retained_children: list[subprocess.Popen[bytes]] | None,
     database_factory: DatabaseFactory,
     machine: MachineIdentityReader,
+    timers: Timers,
+    environ: Mapping[str, str],
 ) -> int:
     if retained_children is None and not config.is_remote:
         raise ValueError("PostgreSQL launch requires its caller-owned child retention")
@@ -138,6 +140,8 @@ def ensure_gateway_data_plane(
                 retained_children=retained_children,
                 machine=machine,
                 macos=macos,
+                timers=timers,
+                environ=environ,
             )
         case _:
             assert_never(admission)
@@ -474,6 +478,7 @@ def stop_cluster_instance(
     home: Path,
     macos: bool,
     timers: Timers,
+    environ: Mapping[str, str],
     retained_children: list[subprocess.Popen[bytes]] | None = None,
     producer: Callable[[], EventPipeline],
 ) -> int:
@@ -485,7 +490,11 @@ def stop_cluster_instance(
     # meiva:note
     # Resolve the admin credential before any stop effect: the runtime URL's ACL user can
     # neither AUTH as `default` nor SHUTDOWN (`-@dangerous`).
-    redis_env = None if port is None else instance.redis_cli_env(config.redis_admin_password)
+    redis_env = (
+        None
+        if port is None
+        else instance.redis_cli_env(config.redis_admin_password, environ=environ)
+    )
     print("\n→ stopping per-cluster data plane")
     for step in stop_plan.plan_stop(redis_port=port):
         match step:

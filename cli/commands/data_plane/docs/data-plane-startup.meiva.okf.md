@@ -25,8 +25,11 @@ converge step (`ensure_pgbouncer_step`). Every function below them takes it as t
 parameter and the home it works in as a keyword (`home=command.home`); `ensure_cluster_storage`,
 `start_pg`, `start_redis` and the three gateway entries derive every path from that home, except
 the pooler's files, which `base/cluster/dataplane/pooler.py` places under the process's
-`meiva_home()` until its functions take the home. The host platform arrives the same way, as the
-`macos` value the gateway entries and `stop_cluster_instance` take. A test
+`meiva_home()` until its functions take the home. The host platform (`macos`), this process's
+clock (`Timers`) and its environment (`config.process_environment()`) arrive the same way, as
+values the shell hands down: no function here reads the clock, and the Redis and pooler children
+take that environment, while the postmaster still builds its own through
+`pg_start_env`. A test
 builds the same value with `data_plane_config_from_boot` and changes a field with
 `dataclasses.replace`. The `meiva backup walg` verbs get theirs from `walg_plane(args.runtime.config)` at the parser
 handler; `walg_config_file` is carried by this value and nowhere else.

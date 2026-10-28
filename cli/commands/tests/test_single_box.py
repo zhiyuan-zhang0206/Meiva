@@ -249,6 +249,8 @@ def _prepare_schema(
             database_factory=operator_database,
             machine=command_runtime.machine,
             macos=command_runtime.host.platform.system == "darwin",
+            timers=command_runtime.timers,
+            environ=command_runtime.config.process_environment(),
         )
         == 0
     )
@@ -533,6 +535,8 @@ def test_ordinary_start_refuses_a_home_without_a_ledger_before_any_effect(
             database_factory=operator_database,
             machine=command_runtime.machine,
             macos=command_runtime.host.platform.system == "darwin",
+            timers=command_runtime.timers,
+            environ=command_runtime.config.process_environment(),
         )
         == 1
     )
