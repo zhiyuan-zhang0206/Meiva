@@ -7,6 +7,7 @@
 from __future__ import annotations
 
 import asyncio
+import os
 import shutil
 import time
 from pathlib import Path
@@ -60,6 +61,7 @@ def test_restore_worker_requires_the_captured_throwaway_base(
             tree=BackupTree(tmp_path),
             database=database,
             database_for_url=database_for_url,
+            env=dict(os.environ),
         )
     assert not (tmp_path / "scratch").exists()
 

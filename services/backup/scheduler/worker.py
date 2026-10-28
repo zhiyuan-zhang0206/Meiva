@@ -8,7 +8,7 @@ import os
 import shutil
 import sys
 import tempfile
-from collections.abc import Callable, Generator
+from collections.abc import Callable, Generator, Mapping
 from contextlib import contextmanager
 from dataclasses import dataclass
 from datetime import datetime
@@ -24,6 +24,7 @@ from base.config import ConfigBoot
 from base.db import Database
 from base.db.code_version_gate import ProcessDbGate
 from base.db.config import db_config_from_boot
+from base.native_process.child_env import inherited_process_env
 from base.native_process.code_version import CodeVersion
 from base.native_process.loaded_commit import LoadedCommit
 from base.paths import meiva_home
@@ -212,6 +213,7 @@ def execute(
     tree: BackupTree,
     database: Callable[[], Database],
     database_for_url: Callable[[str], Database],
+    env: Mapping[str, str],
 ) -> dict[str, object]:
     kind = request.get("kind")
     if kind not in ("dump", "restore"):
@@ -249,6 +251,7 @@ def execute(
                     settings.offsite_credentials_file,
                 ),
                 staging=work / "artifact",
+                env=env,
             )
             return {"artifact": artifact.name, "sha256": _sha256(artifact)}
         case "restore":
@@ -272,6 +275,7 @@ def execute(
                 scratch_root=scratch,
                 database_for_url=database_for_url,
                 throwaway=throwaway,
+                env=env,
             )
             return {"restored": True}
         case _:
@@ -321,6 +325,10 @@ def main() -> None:
         image=image,
         home=process_home,
     )
+    # meiva:note
+    # This worker process reads its own environment once here, at its entry, and hands it to the
+    # dump, the encryption pass and the restore drill: every child they spawn gets that base.
+    environ = inherited_process_env()
     publish_result(
         output,
         execute(
@@ -330,6 +338,7 @@ def main() -> None:
             tree=BackupTree(process_home),
             database=database,
             database_for_url=database_for_url,
+            env=environ,
         ),
     )
 

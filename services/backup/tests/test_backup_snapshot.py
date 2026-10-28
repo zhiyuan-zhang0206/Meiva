@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 import subprocess
 import sys
 from datetime import UTC, datetime
@@ -47,6 +48,7 @@ def test_interrupted_snapshot_dump_leaves_no_plaintext(tree: BackupTree, db_url:
             offsite_target=None,
             progress=interrupt,
             progress_interval_s=0.2,
+            env=dict(os.environ),
         )
 
     leftovers = [
@@ -108,6 +110,7 @@ def test_every_backup_run_sweeps_closed_intermediates_from_the_backup_directory(
         keep=7,
         offsite_target=None,
         staging=staging,
+        env=dict(os.environ),
     )
 
     assert artifact.parent == staging

@@ -16,7 +16,4 @@ exports = ["artifact", "dump.py", "layout.py", "restore_drill.py", "scheduler", 
 
 [roots]
 "dump.py" = { kinds = ["settings"], why = "Service or operator process entry boots configuration before composing its resources" }
-"restore_drill.py" = { kinds = ["home", "settings"], why = "Operator process entry boots configuration and reads the home whose backups it restores before composing its resources" }
-
-[debt.ambient-read]
-"dump.py#environ base.native_process.child_env.inherited_process_env" = 2
+"restore_drill.py" = { kinds = ["environ", "home", "settings"], why = "Operator process entry boots configuration and reads the home whose backups it restores before composing its resources, and reads its own environment once as the base the decrypt and restore children it spawns are given" }
