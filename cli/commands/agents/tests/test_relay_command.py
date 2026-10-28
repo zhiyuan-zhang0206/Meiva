@@ -18,6 +18,7 @@ import pytest
 from base.agents import impersonation as leases
 from base.agents.impersonation import relay as lease_relay
 from base.agents.impersonation.status import ImpersonationStatus
+from base.clock import SYSTEM_TIMERS
 from base.cluster.machine import MachineIdentityReader
 from base.cluster.machine.tests.identity import machine_identity as machine_identity
 from base.db import Database
@@ -92,6 +93,7 @@ def test_the_relay_command_runs_a_claude_relay_to_the_leases_expiry(
             stdout=stdout,
             bus=event_bus,
             clock=REAL_CLOCK,
+            timers=SYSTEM_TIMERS,
         ),
         database_factory=operator_database,
         machine=machine_identity,
@@ -130,6 +132,7 @@ def test_the_relay_command_reports_a_host_that_refuses_to_be_steered(
                 stdout=stdout,
                 bus=event_bus,
                 clock=REAL_CLOCK,
+                timers=SYSTEM_TIMERS,
             ),
             database_factory=operator_database,
             machine=machine_identity,
@@ -171,6 +174,7 @@ def test_unresolvable_destination_exits_before_any_lease_work(
             stdout=stdout,
             bus=event_bus,
             clock=REAL_CLOCK,
+            timers=SYSTEM_TIMERS,
         ),
         database_factory=operator_database,
         machine=machine_identity,
@@ -203,6 +207,7 @@ def test_agent_mismatch_refuses_inbox_before_subscription(
             stdout=stdout,
             bus=event_bus,
             clock=REAL_CLOCK,
+            timers=SYSTEM_TIMERS,
         ),
         database_factory=operator_database,
         machine=machine_identity,
@@ -232,6 +237,7 @@ def test_the_relay_command_refuses_a_credential_the_lease_did_not_mint(
             stdout=io.StringIO(),
             bus=event_bus,
             clock=REAL_CLOCK,
+            timers=SYSTEM_TIMERS,
         ),
         database_factory=operator_database,
         machine=machine_identity,

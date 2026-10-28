@@ -40,7 +40,7 @@ from base.agents.impersonation.history import resolve
 from base.agents.impersonation.host_transport import AntigravityServer
 from base.agents.impersonation.status import OPEN, ImpersonationStatus
 from base.agents.impersonation.terminal_notices import notice_text
-from base.clock import Clock
+from base.clock import Clock, Timers
 from base.cluster.machine import MachineIdentityReader
 from base.db import Database
 from base.events.live.bus import EventBus
@@ -394,6 +394,7 @@ async def _serve(
     adapter: RelayAdapter,
     tuning: RelayTuning,
     clock: Clock,
+    timers: Timers,
 ) -> None:
     if not await asyncio.to_thread(
         write_heartbeat, db, lease.lease_id, lease.token, local_machine=lease.machine
@@ -412,7 +413,9 @@ async def _serve(
         )
         announce_end(ended, lease.ref(), adapter)
         return
-    listener = RedisInboundListener(redis_url, lease.agent_id)
+    listener = RedisInboundListener(
+        redis_url, lease.agent_id, events_channel=bus.channel, timers=timers
+    )
     await run_beside_heartbeat(
         heartbeat_completion(db, lease.lease_id, lease.token, local_machine=lease.machine),
         push_inbox(
@@ -443,6 +446,10 @@ class RelayInputs:
     stdout: TextIO
     bus: EventBus
     clock: Clock
+    # meiva:note
+    # The process timers the inbound listener measures its wait deadlines on: handed in with the
+    # other process values so the listener never reads the clock of the process it runs in.
+    timers: Timers
 
 
 # meiva:note
@@ -498,6 +505,7 @@ def cmd_relay(
                 adapter=adapter,
                 tuning=tuning,
                 clock=inputs.clock,
+                timers=inputs.timers,
             )
         )
     except KeyboardInterrupt:
