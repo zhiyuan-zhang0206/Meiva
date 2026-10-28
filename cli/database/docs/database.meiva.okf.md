@@ -75,12 +75,16 @@ dependency analysis follows these fixture and helper imports back to this owner.
 
 `lifecycle_audit.operator_lifecycle_audit(database_factory=..., environ=..., home=...)` is the audit scope of one operator
 lifecycle command ([the caller record](../../../base/native_process/root_control/docs/lifecycle-caller.meiva.okf.md)).
-It reads the caller block and the source commit once, when the scope opens, from the command's
-environment and home, and writes every request
+It reads the caller block, the spawn evidence and the source commit once, when the scope opens,
+from the command's environment and home, and writes every request
 and the outcome through the command's own factory. The audit is a write-only sink and never gates
 the command: writing a row stays best-effort (a database that is down is the state `meiva start`
 repairs), and so does opening the scope. A caller that cannot be read (a working directory that no
 longer exists) prints one warning line on stderr and the command runs unaudited. A source checkout
-with no readable commit is not a fault; the rows carry `head_sha: null`. The boot job's retried start
+with no readable commit is not a fault; the rows carry `head_sha: null`. The request row carries
+`spawn` beside `caller`: the parent process's command line and the `SSH_CONNECTION` the shell
+arrived on, or `null` for each when it cannot be read. The caller block's `pid`/`ppid` name the
+local chain only while it lives, so attribution of a fleet-wide command needs the parent's argv
+and the peer the connection came from; both are read without touching the target process. The boot job's retried start
 (`enabled=False`) opens no audit. A test reads the rows back from Postgres with
 `cli/database/tests/lifecycle_rows.py:lifecycle_rows`, which opens that scope with the real recorders.
