@@ -20,6 +20,11 @@ tags: []
   - Exceeding `timeout_s` triggers `SIGTERM` to the process group followed by the same grace window and `domain.kill_and_reap()`.
 - **Memory guard**: Runs `run_memory_guard_forever` to monitor OS memory pressure and terminate the largest `execute_code` domain when system memory reaches `critical`, writing a notice next to the child's result file.
 
+The process-group timeout test advances the injected service clock only after
+observing a live tool child. A delayed-start case exceeds the 1.5-second budget
+in wall time before that observation, separating startup load from the timeout
+and preserving the assertion that the whole process group is gone.
+
 ## Envelope ownership across startup
 
 The caller owns its request and result paths and removes those exact files after
