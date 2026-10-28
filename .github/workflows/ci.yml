@@ -817,24 +817,24 @@ jobs:
             --against "$LINT_STRUCTURE_BASELINE_BASE" --on-growth=fail \
             --waive-if-changed ':(glob)meizel/**/*.py' 'meizel.policy.toml' ':(exclude,glob)meizel/**/tests/**' ':(exclude,glob)meizel/state/**' ':(exclude)meizel/language/path_imports.py' ':(exclude)meizel/language/no_script_sibling_imports.py' ':(exclude)meizel/allowances.py'
 
-      - name: Allowance policy changes (informational)
+      - name: Allowance policy removals need a declaration
         if: ${{ env.LINT_STRUCTURE_BASELINE_BASE != '' }}
-        # meizel.policy.toml is the one closed list of allowances. A change to it is listed here and
-        # in the check summary so a reviewer sees it at once; this step reports and never fails.
+        # meizel.policy.toml is the one closed list of allowances, so a removed entry is the one
+        # change in the repository that narrows what the gates report and still passes every one of
+        # them: `check` finds nothing left to say, and `debt diff` sees debt disappear, the one
+        # direction it allows. So a removal declares itself in the pull request body — whose text
+        # is the squash message that lands — with one line per table or entry:
+        #
+        #   Policy-Removal: <table>[.<entry>] — <why it is no longer needed> — <replacement or gap>
+        #
+        # A local run (and the Trunk merge branch, which carries each pull request's landing
+        # message as a commit) reads the commits instead; --record names a file to read. Added
+        # entries are reported in the summary and never asked about: a widening is what the
+        # reviewer reads in the diff, not a declaration to write.
         run: |
-          changes="$(env -u VIRTUAL_ENV uv run python -m meizel policy diff --against "$LINT_STRUCTURE_BASELINE_BASE")"
-          if [ -n "$changes" ]; then
-            echo "::warning title=meizel.policy.toml changed::The allowance list changed. Read the entries in the log or the check summary."
-            echo "meizel.policy.toml changed:"
-            echo "$changes"
-            {
-              echo "### meizel.policy.toml changed"
-              echo
-              echo '```'
-              echo "$changes"
-              echo '```'
-            } >> "$GITHUB_STEP_SUMMARY"
-          fi
+          env -u VIRTUAL_ENV uv run python scripts/lint/policy_removal.py \
+            --against "$LINT_STRUCTURE_BASELINE_BASE" --on-removal=fail \
+            --event "${GITHUB_EVENT_PATH:-}" --summary "$GITHUB_STEP_SUMMARY"
 
       - name: Save pre-commit environments
         if: success() && steps.precommit-cache.outputs.cache-hit != 'true'

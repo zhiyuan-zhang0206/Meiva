@@ -120,3 +120,245 @@ def test_repo_policy_allowance_counts_are_pinned() -> None:
     policy = allowances.load(ROOT)
     assert len(policy.external) == 43
     assert len(policy.loads) == 26
+
+
+# meiva:note
+# The declarations a change takes away, and the `Policy-Removal` line that answers them.
+ALLOWANCES = allowances.Policy(
+    external={"app/runner.py": "executes the schedule script the user wrote"},
+    loads={"schedules/jobs/dry_import_child.py": ("schedules", "meiva")},
+    default_arguments=("clock",),
+    listed={("ambient-readers", "environ"): {"pkg.env.read()": "reads os.environ"}},
+    named={("ambient-state", "sink-callees"): ("sink", "sink_now")},
+)
+_SEPARATOR = " \u2014 "
+
+
+def _without(
+    *,
+    external: dict[str, str] | None = None,
+    loads: dict[str, tuple[str, ...]] | None = None,
+    default_arguments: tuple[str, ...] | None = None,
+    listed: dict[tuple[str, str], dict[str, str]] | None = None,
+    named: dict[tuple[str, str], tuple[str, ...]] | None = None,
+) -> allowances.Policy:
+    return allowances.Policy(
+        external=ALLOWANCES.external if external is None else external,
+        loads=ALLOWANCES.loads if loads is None else loads,
+        default_arguments=ALLOWANCES.default_arguments
+        if default_arguments is None
+        else default_arguments,
+        listed=ALLOWANCES.listed if listed is None else listed,
+        named=ALLOWANCES.named if named is None else named,
+    )
+
+
+def _removal(
+    declared: str,
+    why: str = "the site is gone with its module",
+    gap: str = "nothing reads it now",
+) -> str:
+    return f"Policy-Removal: {declared}{_SEPARATOR}{why}{_SEPARATOR}{gap}"
+
+
+def test_a_removed_entry_is_one_declaration() -> None:
+    report = allowances.removal_report(
+        ALLOWANCES, _without(external={"other.py": "runs external code"}), ""
+    )
+    assert [item.named for item in report.removed] == ["external.app/runner.py"]
+    assert [item.named for item in report.added] == ["external.other.py"]
+
+
+def test_a_shortened_list_loses_exactly_the_names_it_dropped() -> None:
+    after = _without(loads={"schedules/jobs/dry_import_child.py": ("schedules",)})
+    report = allowances.removal_report(ALLOWANCES, after, "")
+    assert [item.named for item in report.removed] == [
+        "loads.schedules/jobs/dry_import_child.py -> meiva"
+    ]
+
+
+def test_a_deleted_section_loses_every_name_it_held() -> None:
+    report = allowances.removal_report(ALLOWANCES, _without(named={}), "")
+    assert [item.named for item in report.removed] == [
+        "ambient-state.sink-callees.sink",
+        "ambient-state.sink-callees.sink_now",
+    ]
+
+
+def test_a_rewritten_reason_is_not_a_removal() -> None:
+    after = _without(external={"app/runner.py": "runs the script the operator names"})
+    report = allowances.removal_report(ALLOWANCES, after, "")
+    assert (report.removed, report.added) == ((), ())
+
+
+def test_a_shortened_default_arguments_list_is_a_removal() -> None:
+    report = allowances.removal_report(ALLOWANCES, _without(default_arguments=()), "")
+    assert [item.named for item in report.removed] == ["default-arguments.clock"]
+
+
+@pytest.mark.parametrize(
+    ("text", "declared"),
+    [
+        (
+            _removal("ambient-readers.environ.pkg.env.read()"),
+            "ambient-readers.environ.pkg.env.read()",
+        ),
+        (_removal("AMBIENT-READERS.ENVIRON"), "AMBIENT-READERS.ENVIRON"),
+        (
+            "policy-removal:ambient-readers.environ"
+            + _SEPARATOR
+            + "no reader is left"
+            + _SEPARATOR
+            + "nothing reads it",
+            "ambient-readers.environ",
+        ),
+    ],
+    ids=["entry", "case", "no-space-after-the-colon"],
+)
+def test_a_declaration_is_read_with_its_three_fields(text: str, declared: str) -> None:
+    report = allowances.removal_report(ALLOWANCES, ALLOWANCES, text)
+    assert report.problems == ()
+    assert [line.declared for line in report.declared] == [declared]
+    assert report.declared[0].why
+    assert report.declared[0].replacement
+
+
+def test_a_line_with_two_fields_is_a_problem() -> None:
+    report = allowances.removal_report(
+        ALLOWANCES,
+        ALLOWANCES,
+        "Policy-Removal: ambient-readers.environ.pkg.env.read()" + _SEPARATOR + "gone",
+    )
+    assert report.declared == ()
+    assert len(report.problems) == 1
+
+
+@pytest.mark.parametrize(
+    "line",
+    [
+        _removal("ambient-readers.environ", why="<why it is no longer needed>"),
+        _removal("ambient-readers.environ", gap="short"),
+        _removal("ambient-readers.environ.pkg.env.read()", gap="<the gap>"),
+    ],
+    ids=["placeholder-why", "too-short", "placeholder-gap"],
+)
+def test_a_field_left_unanswered_is_a_problem_when_the_line_names_a_removal(line: str) -> None:
+    report = allowances.removal_report(ALLOWANCES, _without(listed={}), line)
+    assert report.declared == ()
+    assert len(report.problems) == 1
+    assert len(report.unanswered) == 1
+
+
+def test_a_quoted_template_answers_nothing_and_is_not_a_problem() -> None:
+    template = (
+        "Policy-Removal: <table>[.<entry>] — <why it is no longer needed>"
+        " — <what replaces it, or the gap it leaves>"
+    )
+    report = allowances.removal_report(ALLOWANCES, _without(listed={}), template)
+    assert (report.declared, report.problems) == ((), ())
+    assert len(report.unanswered) == 1
+
+
+def test_other_lines_are_not_declarations() -> None:
+    report = allowances.removal_report(
+        ALLOWANCES, ALLOWANCES, "## Why\nThe policy lost an entry.\n# Policy-Removal: ignored\n"
+    )
+    assert (report.declared, report.problems) == ((), ())
+
+
+@pytest.mark.parametrize(
+    ("declared", "open_"),
+    [
+        ("ambient-readers.environ.pkg.env.read()", False),
+        ("ambient-readers.environ.environ", True),
+        ("ambient-readers.environ", False),
+        ("ambient-readers", False),
+        ("ambient-state", True),
+    ],
+    ids=["entry", "longer-than-the-table", "table", "rule", "another-rule"],
+)
+def test_a_line_answers_the_entry_it_names_or_a_table_that_contains_it(
+    declared: str, open_: bool
+) -> None:
+    report = allowances.removal_report(ALLOWANCES, _without(listed={}), _removal(declared))
+    assert bool(report.unanswered) is open_
+    assert bool(report.unused) is open_
+
+
+def test_a_line_that_names_the_entry_answers_it() -> None:
+    report = allowances.removal_report(
+        ALLOWANCES, _without(external={}), _removal("external.app/runner.py")
+    )
+    assert (report.unanswered, report.unused) == ((), ())
+
+
+def test_a_template_names_the_entry_alone_or_the_table_that_lost_several() -> None:
+    report = allowances.removal_report(ALLOWANCES, _without(named={}, external={}), "")
+    assert [line.split(_SEPARATOR)[0] for line in report.templates()] == [
+        "Policy-Removal: ambient-state.sink-callees",
+        "Policy-Removal: external.app/runner.py",
+    ]
+
+
+def test_a_template_in_the_body_does_not_answer_a_real_removal() -> None:
+    template = (
+        "Policy-Removal: <table>[.<entry>] — <why it is no longer needed>"
+        " — <what replaces it, or the gap it leaves>"
+    )
+    report = allowances.removal_report(ALLOWANCES, _without(listed={}), template)
+    assert report.problems == ()
+    assert len(report.unanswered) == 1
+
+
+@pytest.mark.parametrize(
+    ("line", "missing"),
+    [
+        (
+            "Policy-Removal: external.app/runner.py" + _SEPARATOR + "the module moved away",
+            "<what replaces it, or the gap it leaves>",
+        ),
+        (
+            "Policy-Removal: external.app/runner.py" + _SEPARATOR + "nothing reads it now",
+            "<what replaces it, or the gap it leaves>",
+        ),
+        (
+            "Policy-Removal:"
+            + _SEPARATOR
+            + "the module moved"
+            + _SEPARATOR
+            + "nothing replaces it",
+            "`<table>[.<entry>]` name",
+        ),
+    ],
+    ids=["one-field", "name-and-one-field", "no-name"],
+)
+def test_a_line_that_is_not_three_fields_says_which_field_is_missing(
+    line: str, missing: str
+) -> None:
+    report = allowances.removal_report(ALLOWANCES, ALLOWANCES, line)
+    assert len(report.problems) == 1
+    assert missing in report.problems[0]
+    assert "missing" in report.problems[0]
+
+
+def test_a_table_answer_covers_only_the_leaves_below_it() -> None:
+    other = allowances.Policy(
+        external=ALLOWANCES.external,
+        loads={},
+        default_arguments=ALLOWANCES.default_arguments,
+        listed=ALLOWANCES.listed,
+        named=ALLOWANCES.named,
+    )
+    report = allowances.removal_report(ALLOWANCES, other, _removal("ambient-readers.environ"))
+    assert [item.named for item in report.unanswered] == [
+        "loads.schedules/jobs/dry_import_child.py -> meiva",
+        "loads.schedules/jobs/dry_import_child.py -> schedules",
+    ]
+
+
+def test_a_rule_answer_does_not_cover_another_rule() -> None:
+    report = allowances.removal_report(ALLOWANCES, _without(named={}), _removal("ambient-readers"))
+    assert [item.named for item in report.unanswered] == [
+        "ambient-state.sink-callees.sink",
+        "ambient-state.sink-callees.sink_now",
+    ]
