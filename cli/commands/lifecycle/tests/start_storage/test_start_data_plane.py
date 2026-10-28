@@ -79,6 +79,8 @@ def test_gateway_data_plane_brings_up_own_instance(
             database_factory=operator_database,
             machine=command_runtime.machine,
             macos=NATIVE_TEST_MACOS,
+            timers=command_runtime.timers,
+            environ=command_runtime.config.process_environment(),
         )
         == 0
     )
@@ -117,6 +119,8 @@ def test_gateway_data_plane_refuses_a_home_without_a_ledger_before_any_effect(
             database_factory=operator_database,
             machine=command_runtime.machine,
             macos=command_runtime.host.platform.system == "darwin",
+            timers=command_runtime.timers,
+            environ=command_runtime.config.process_environment(),
         )
         == 1
     )
@@ -143,6 +147,8 @@ def test_gateway_data_plane_no_record_is_error(
             database_factory=operator_database,
             machine=command_runtime.machine,
             macos=command_runtime.host.platform.system == "darwin",
+            timers=command_runtime.timers,
+            environ=command_runtime.config.process_environment(),
         )
         == 1
     )
@@ -166,6 +172,8 @@ def test_local_launch_without_owner_cannot_publish_authority(
             database_factory=operator_database,
             machine=command_runtime.machine,
             macos=command_runtime.host.platform.system == "darwin",
+            timers=command_runtime.timers,
+            environ=command_runtime.config.process_environment(),
         )
 
     assert not telemetry_token_path(unit_home.resolve()).exists()

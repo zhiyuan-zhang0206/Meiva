@@ -87,6 +87,7 @@ def test_a_bundle_whose_login_cannot_be_proven_never_installs(
         machine=command_runtime.machine,
         macos=command_runtime.host.platform.system == "darwin",
         timers=SYSTEM_TIMERS,
+        environ=command_runtime.config.process_environment(),
     )
     installed = unit.install_bundle(
         runner,

@@ -64,6 +64,7 @@ def owned_pg(
                 home=unit_home,
                 retained_children=children,
                 machine=command_runtime.machine,
+                timers=command_runtime.timers,
             )
             == 0
         )
