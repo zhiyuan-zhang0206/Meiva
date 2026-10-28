@@ -62,6 +62,7 @@ from agent.graph.exec.process import ParentFacts
 from agent.llm import execute_code
 from agent.ownership.hosted import settle_running_rows_at_start
 from base.agents.context.clients import ClientSet
+from base.clock import Clock
 from base.clock.ids import new_uuid
 from base.cluster.machine import MachineIdentityReader
 from base.cluster.machine.configured import ConfiguredMachineIdentity
@@ -221,6 +222,7 @@ def background_loops(
     *,
     installation: Installation,
     config: ConfigBoot,
+    clock: Clock,
     plugins_root: Path,
     stdout_log: Path,
 ) -> dict[str, Coroutine[object, object, None]]:
@@ -246,6 +248,7 @@ def background_loops(
             keys=installation.require_provider_keys(),
             llm_override=config.view.lm.llm_override,
             config=config,
+            clock=clock,
         ),
     }
 
@@ -597,6 +600,7 @@ async def run(
                     db,
                     installation=installation,
                     config=config,
+                    clock=stamping.clock,
                     plugins_root=external_plugin_read_root(home=home),
                     stdout_log=stdout_log_path(logs_dir=logs_dir(home=home)),
                 ),

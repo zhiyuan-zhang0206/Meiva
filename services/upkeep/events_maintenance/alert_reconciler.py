@@ -26,7 +26,7 @@ from psycopg.types.json import Jsonb
 from psycopg_pool import ConnectionPool
 from pydantic import TypeAdapter, ValidationError
 
-from base.clock import SYSTEM_TIMERS, Clock, ClockConfig
+from base.clock import Clock
 from base.daemon import round_loop
 from base.daemon.loop_health import LoopProgress
 from base.events.live.bus import EventBus
@@ -155,20 +155,14 @@ async def reconcile_once(
     grafana_client: httpx.AsyncClient,
     bus: EventBus,
     config: EventsMaintenanceConfig,
+    *,
+    clock: Clock,
 ) -> int:
     """Fetch one complete Grafana snapshot, resolve omissions, publish rows."""
 
     password = config.grafana_admin_password
     if password is None or not password.get_secret_value():
         return 0
-    clock = Clock(
-        ClockConfig(
-            timezone=config.timezone,
-            authoritative_timezone=config.timezone,
-            message_timestamp_weekday=False,
-        ),
-        timers=SYSTEM_TIMERS,
-    )
     # This timestamp precedes the upstream read: any webhook racing with or
     # following the snapshot has a newer updated_at and is ineligible.
     snapshot_started_at = clock.now()
@@ -202,12 +196,14 @@ async def reconciliation_round(
     bus: EventBus,
     progress: LoopProgress,
     config: EventsMaintenanceConfig,
+    *,
+    clock: Clock,
 ) -> None:
     """One reconciliation: log and keep every row when Grafana cannot give a
     complete snapshot (fail closed), otherwise resolve the omissions."""
 
     try:
-        resolved = await reconcile_once(db_pool, grafana_client, bus, config)
+        resolved = await reconcile_once(db_pool, grafana_client, bus, config, clock=clock)
     except (httpx.HTTPError, GrafanaSnapshotError) as exc:
         progress.mark_error(str(exc))
         _log.warning("alerts: Grafana reconciliation failed: %r", exc)
@@ -217,7 +213,12 @@ async def reconciliation_round(
 
 
 async def reconciliation_loop(
-    db_pool: ConnectionPool, bus: EventBus, progress: LoopProgress, config: EventsMaintenanceConfig
+    db_pool: ConnectionPool,
+    bus: EventBus,
+    progress: LoopProgress,
+    config: EventsMaintenanceConfig,
+    *,
+    clock: Clock,
 ) -> None:
     """Reconcile immediately at start, then every five minutes, as a resident
     sequential loop. Owns its Grafana client: one connection pool for the loop's
@@ -226,7 +227,7 @@ async def reconciliation_loop(
     async with httpx.AsyncClient(trust_env=False, timeout=_GRAFANA_API_TIMEOUT) as client:
 
         async def one_round() -> None:
-            await reconciliation_round(db_pool, client, bus, progress, config)
+            await reconciliation_round(db_pool, client, bus, progress, config, clock=clock)
 
         await round_loop.run_rounds(
             "alert-reconciliation", progress, RECONCILE_INTERVAL_S, one_round

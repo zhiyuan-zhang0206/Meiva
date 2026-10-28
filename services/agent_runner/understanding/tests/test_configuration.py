@@ -1,12 +1,12 @@
 # meiva:note
 # The real configuration owner stays lazy at the root's earlier gates.
-
 from unittest.mock import MagicMock
 
 import pytest
 from psycopg import AsyncConnection
 from psycopg_pool import AsyncConnectionPool
 
+from base.clock.tests.fakes import system_clock
 from base.config import ConfigBoot
 from base.db import Database
 from base.lm.catalog import ModelCatalog
@@ -56,6 +56,7 @@ async def test_disabled_admission_leaves_unused_policy_and_pool_untouched(
             pool,
             database,
             [],
+            clock=system_clock(),
             catalog=model_catalog,
             keys=inert_keys(model_catalog),
             llm_override="",
@@ -144,7 +145,9 @@ async def test_cadence_is_read_again_under_the_real_lease_and_on_the_next_operat
                 await blocker.execute("LOCK TABLE understanding_group_state IN SHARE MODE")
                 async with asyncio.TaskGroup() as tasks:
                     task = tasks.create_task(
-                        run_group_checks(aops_pool, database, models, 7, config=config)
+                        run_group_checks(
+                            aops_pool, database, models, 7, clock=system_clock(), config=config
+                        )
                     )
                     await asyncio.wait_for(_wait_for_claim_lock(adb_conn), timeout=5)
                     config.set_field("understanding_group_check_open", 60)
@@ -158,8 +161,8 @@ async def test_cadence_is_read_again_under_the_real_lease_and_on_the_next_operat
                 "SELECT last_checked_open, claimed_at FROM understanding_group_state"
             )
             assert await cursor.fetchall() == [(0, None)]
-        await run_group_checks(aops_pool, database, models, 7, config=config)
+        await run_group_checks(aops_pool, database, models, 7, clock=system_clock(), config=config)
         assert wire.requests == []
         config.set_field("understanding_group_check_open", 6)
-        await run_group_checks(aops_pool, database, models, 7, config=config)
+        await run_group_checks(aops_pool, database, models, 7, clock=system_clock(), config=config)
         assert len(wire.requests) == 1 and wire.build_efforts == ["high"]

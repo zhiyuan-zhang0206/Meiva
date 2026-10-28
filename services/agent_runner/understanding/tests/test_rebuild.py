@@ -6,7 +6,6 @@
 # pyright: reportUnknownVariableType = warning
 # meiva:note
 # The upper-level rebuild: its queue (claim order, who blocks whom) and the replay.
-
 from __future__ import annotations
 
 from datetime import UTC, datetime, timedelta
@@ -32,6 +31,7 @@ from base.agents.history.hierarchy.rebuild import (
     rebuild_pending,
     release_rebuild,
 )
+from base.clock.tests.fakes import system_clock
 from base.config import ConfigBoot
 from base.config.service_read import ConfigAuthority
 from base.db import Database
@@ -136,6 +136,7 @@ async def test_the_rebuild_replays_leaves_in_order_and_replaces_the_old_upper_le
             MagicMock(),
             _groups["models"],
             AGENT,
+            clock=system_clock(),
             config=config,
             min_check_open=1,
         )
@@ -169,11 +170,23 @@ async def test_rebuilding_twice_gives_the_same_tree(
     for i in range(12):
         await _leaf(aops_pool, i)
     await run_rebuild(
-        aops_pool, MagicMock(), _groups["models"], AGENT, config=config, min_check_open=1
+        aops_pool,
+        MagicMock(),
+        _groups["models"],
+        AGENT,
+        clock=system_clock(),
+        config=config,
+        min_check_open=1,
     )
     once = await _tree(aops_pool)
     await run_rebuild(
-        aops_pool, MagicMock(), _groups["models"], AGENT, config=config, min_check_open=1
+        aops_pool,
+        MagicMock(),
+        _groups["models"],
+        AGENT,
+        clock=system_clock(),
+        config=config,
+        min_check_open=1,
     )
     assert await _tree(aops_pool) == once and len(once) == 2
 
@@ -191,7 +204,13 @@ async def test_a_rebuild_touches_only_its_own_agent(
         " 'm', 'group-0.1', 'p', 1) RETURNING id",
     )
     await run_rebuild(
-        aops_pool, MagicMock(), _groups["models"], AGENT, config=config, min_check_open=1
+        aops_pool,
+        MagicMock(),
+        _groups["models"],
+        AGENT,
+        clock=system_clock(),
+        config=config,
+        min_check_open=1,
     )
     assert await _rows(aops_pool, "SELECT 1 FROM understanding_nodes WHERE id = %s", other[0][0])
 
@@ -272,6 +291,7 @@ async def test_the_consumer_runs_a_claimed_rebuild_and_settles_it(
         aops_pool,
         MagicMock(),
         [],
+        clock=system_clock(),
         catalog=model_catalog,
         keys=inert_keys(model_catalog),
         llm_override=config_authority.service_field_value("llm_override"),
@@ -299,6 +319,7 @@ async def test_a_failing_rebuild_is_retried_then_failed(
         aops_pool,
         MagicMock(),
         [],
+        clock=system_clock(),
         catalog=model_catalog,
         keys=inert_keys(model_catalog),
         llm_override=config_authority.service_field_value("llm_override"),
@@ -354,7 +375,13 @@ async def test_a_leaf_landing_before_a_grouped_one_is_reported_and_only_a_queued
     for i in range(5, 10):
         await _land(aops_pool, i)
     await gc.run_group_checks(
-        aops_pool, MagicMock(), _groups["models"], AGENT, config=config, min_check_open=1
+        aops_pool,
+        MagicMock(),
+        _groups["models"],
+        AGENT,
+        clock=system_clock(),
+        config=config,
+        min_check_open=1,
     )
     # meiva:note
     # in order so far
@@ -373,7 +400,13 @@ async def test_a_leaf_landing_before_a_grouped_one_is_reported_and_only_a_queued
 
     await _rows(aops_pool, "INSERT INTO understanding_rebuilds (agent_id) VALUES (%s)", AGENT)
     await run_rebuild(
-        aops_pool, MagicMock(), _groups["models"], AGENT, config=config, min_check_open=1
+        aops_pool,
+        MagicMock(),
+        _groups["models"],
+        AGENT,
+        clock=system_clock(),
+        config=config,
+        min_check_open=1,
     )
     assert await _open_before_parented(aops_pool) == []
 
@@ -392,6 +425,7 @@ async def test_leaves_landing_in_order_queue_no_rebuild(
             MagicMock(),
             _groups["models"],
             AGENT,
+            clock=system_clock(),
             config=config,
             min_check_open=1,
         )
@@ -441,7 +475,7 @@ async def test_each_rebuild_horizon_observes_the_same_owners_current_cadence(
         models = loop.ModelCache(catalog, inert_keys(catalog), "")
         async with asyncio.TaskGroup() as tasks:
             rebuild = tasks.create_task(
-                run_rebuild(aops_pool, database, models, AGENT, config=config)
+                run_rebuild(aops_pool, database, models, AGENT, clock=system_clock(), config=config)
             )
             assert await asyncio.to_thread(wire.arrived.wait, 5)
             config.set_field("understanding_group_check_open", 60)

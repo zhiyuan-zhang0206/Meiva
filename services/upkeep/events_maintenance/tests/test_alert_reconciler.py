@@ -14,6 +14,7 @@ from pydantic import SecretStr
 
 import base.db
 from base.clock import SYSTEM_TIMERS
+from base.clock.tests.fakes import system_clock
 from base.config import ConfigBoot
 from base.daemon.loop_health import LoopProgress
 from base.db.code_version_gate import ProcessDbGate
@@ -242,7 +243,9 @@ async def test_reconcile_once_fetches_truth_and_publishes_resolved_rows(
     try:
         with _alerts_published(event_bus) as drain:
             async with httpx.AsyncClient(transport=httpx.MockTransport(_grafana)) as client:
-                resolved = await reconcile_once(db_pool, client, event_bus, config)
+                resolved = await reconcile_once(
+                    db_pool, client, event_bus, config, clock=system_clock()
+                )
             published = drain()
     finally:
         db_pool.close()
@@ -289,7 +292,12 @@ async def test_a_grafana_that_cannot_give_a_snapshot_leaves_every_row_and_the_ro
                 transport=httpx.MockTransport(lambda _r: answer)
             ) as client:
                 await reconciliation_round(
-                    db_pool, client, event_bus, progress, _config(process_config)
+                    db_pool,
+                    client,
+                    event_bus,
+                    progress,
+                    _config(process_config),
+                    clock=system_clock(),
                 )
             published = drain()
     finally:
@@ -328,6 +336,7 @@ async def test_an_unexpected_error_in_a_round_is_not_swallowed(
                     event_bus,
                     LoopProgress("alert-reconciliation", 180.0, timers=SYSTEM_TIMERS),
                     _config(process_config),
+                    clock=system_clock(),
                 )
     finally:
         db_pool.close()

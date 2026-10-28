@@ -61,6 +61,7 @@ live reader and is evaluated only at the existing window-selection points.
 
 Hierarchy `read_times`, `divide_units`, chunk generation, matter filtering, and
 rebuild planning carry those same explicit rendering inputs. Resident consumers
-mint them in the agent-host operation root from its owned clock configuration and
-timestamp switch at the existing phases. The base renderers receive those values,
-never configuration readers.
+mint them from the process clock the agent host built at its entry (the same clock
+its turn scheduler and handoff stamping use) and the timestamp switch read at the
+existing phases. The base renderers receive those values, never configuration
+readers.
