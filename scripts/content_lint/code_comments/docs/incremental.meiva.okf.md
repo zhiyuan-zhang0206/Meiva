@@ -71,8 +71,12 @@ checkout. Symlink targets are not source files; a new regular file replacing one
 has no old note credit.
 
 `changed` reports new/rewritten note count separately from the selected file count.
-`validate` checks every note link, while explicit `check`/`inventory`
-remain full strict audits. None proves semantic truth, rule necessity, test
-execution or that unchanged prose remains accurate after a behavior change.
+It scans only the sources the comparison selected — it parses their Git blobs before
+checking them, so it builds no whole-tree TypeScript index and reads no unchanged file —
+and therefore validates the links those files carry, not every link in the repository.
+`validate` is that whole-tree link sweep and CI runs it on every change, so narrowing
+the commit hook keeps the same coverage one gate later; it reports no prose. Explicit
+`check`/`inventory` remain full strict audits. No mode proves semantic truth, rule
+necessity, test execution or that unchanged prose remains accurate after a behavior change.
 
 Parent: [[scripts/content_lint/code_comments/docs/code_comments.meiva.okf.md]].
