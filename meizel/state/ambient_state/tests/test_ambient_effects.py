@@ -8,6 +8,7 @@ import pytest
 
 from meizel.state import ambient_state
 from meizel.state.ambient_state import allowlist as allow
+from meizel.state.ambient_state.module import Tree
 
 
 def _write(root: pathlib.Path, name: str, content: str) -> pathlib.Path:
@@ -27,7 +28,7 @@ def _sites(
         _write(root, name, content)
     path = _write(root, rel, source)
     tree = ast.parse(path.read_text(encoding="utf-8"))
-    measured = ambient_state.measure(tree, rel, root)
+    measured = ambient_state.measure(tree, rel, _tree(root))
     return {key.split("::", 1)[1]: len(lines) for key, lines in measured.items()}
 
 
@@ -282,7 +283,7 @@ def test_a_sink_facade_file_lets_its_state_through_but_not_its_threads(
 
 def _stale(root: pathlib.Path, rel: str, source: str) -> list[str]:
     path = _write(root, rel, source)
-    errors = ambient_state.allowlist_errors(ast.parse(path.read_text()), rel, root)
+    errors = ambient_state.allowlist_errors(ast.parse(path.read_text()), rel, _tree(root))
     return [message for _, message in errors]
 
 
@@ -314,7 +315,7 @@ def test_a_list_entry_for_a_missing_file_or_function_is_stale(tmp_path: pathlib.
     allow.PURE_REPO_CALLEES.update({"base.keys.derive": "constant", "base.keys.vanished": "x"})
     _write(tmp_path, "base/keys.py", "def derive():\n    return 1\n")
 
-    errors = ambient_state.missing_allowlist_errors(tmp_path)
+    errors = ambient_state.missing_allowlist_errors(_tree(tmp_path))
 
     assert any(error.startswith("base/gone.py:1:") for error in errors)
     assert any(error.startswith("base/also_gone.py:1:") for error in errors)
@@ -352,3 +353,11 @@ def test_the_closed_lists_carry_a_reason_for_every_entry() -> None:
 )
 def test_a_baseline_key_must_name_a_known_rule_and_a_name(target: str, known: bool) -> None:
     assert (ambient_state.site_message(target) is not None) is known
+
+
+# meiva:note
+# The files a test wrote under `root`, as the tree the rule is handed.
+def _tree(root: pathlib.Path) -> Tree:
+    files = {path.relative_to(root).as_posix() for path in root.rglob("*.py")}
+    dirs = {path.relative_to(root).as_posix() for path in root.rglob("*") if path.is_dir()}
+    return Tree(files, lambda rel: (root / rel).read_text(encoding="utf-8"), dirs)

@@ -1,11 +1,9 @@
 from __future__ import annotations
 
 import ast
-from functools import cache
-from pathlib import Path
 
-from meizel.lint_common import read_utf8_text
 from meizel.state.ambient_state.scan import Hit
+from meizel.state.ambient_state.tree import Tree
 
 BUNDLE_LEAK = "bundle-leak"
 FIX = (
@@ -23,10 +21,11 @@ def _is_bundle(node: ast.ClassDef) -> bool:
     )
 
 
-@cache
-def bundles_defined_in(path: Path) -> frozenset[str]:
-    """The `@root_bundle` class names a source file defines."""
-    text = read_utf8_text(path)
+# meiva:note
+# The `@root_bundle` class names a module defines, read through the tree being judged.
+def bundles_defined_in(index: Tree, module: str) -> frozenset[str]:
+    rel = index.module_path(module)
+    text = None if rel is None else index.read(rel)
     if text is None:
         return frozenset()
     try:
@@ -38,24 +37,15 @@ def bundles_defined_in(path: Path) -> frozenset[str]:
     )
 
 
-def _module_file(repo_root: Path, module: str) -> Path | None:
-    base = repo_root.joinpath(*module.split("."))
-    for candidate in (base.with_suffix(".py"), base / "__init__.py"):
-        if candidate.is_file():
-            return candidate
-    return None
-
-
-def _imported_bundles(tree: ast.Module, repo_root: Path) -> set[str]:
+def _imported_bundles(tree: ast.Module, index: Tree) -> set[str]:
     """Local names the module imports that are bundle classes."""
     found: set[str] = set()
     for node in ast.walk(tree):
         if not (isinstance(node, ast.ImportFrom) and node.level == 0 and node.module):
             continue
-        source = _module_file(repo_root, node.module)
-        if source is None:
+        if index.module_path(node.module) is None:
             continue
-        defined = bundles_defined_in(source)
+        defined = bundles_defined_in(index, node.module)
         found.update(a.asname or a.name for a in node.names if a.name in defined)
     return found
 
@@ -74,9 +64,9 @@ def _annotations(tree: ast.Module) -> list[ast.expr]:
     return out
 
 
-def hits(tree: ast.Module, repo_root: Path) -> list[Hit]:
+def hits(tree: ast.Module, index: Tree) -> list[Hit]:
     """Every annotation of a bundle class imported from another module."""
-    bundles = _imported_bundles(tree, repo_root)
+    bundles = _imported_bundles(tree, index)
     if not bundles:
         return []
     return [

@@ -6,6 +6,7 @@ from pathlib import Path
 import pytest
 
 from meizel.state import ambient_state
+from meizel.state.ambient_state.module import Tree
 
 SOURCE = """
 import threading
@@ -59,7 +60,7 @@ class Owner:
 
 
 def sites(source: str, root: Path) -> dict[str, list[int]]:
-    return ambient_state.measure(ast.parse(source), "base/worker.py", root)
+    return ambient_state.measure(ast.parse(source), "base/worker.py", _tree(root))
 
 
 def test_deferred_constructor_has_a_single_locked_admission(tmp_path: Path) -> None:
@@ -236,3 +237,11 @@ def test_unknown_effects_between_guards_and_construction_stay_unproved(
 )
 def test_other_methods_cannot_escape_or_reset_admission(tmp_path: Path, body: str) -> None:
     assert sites(SOURCE + "\n    def reopen(self):\n        " + body + "\n", tmp_path)
+
+
+# meiva:note
+# The files a test wrote under `root`, as the tree the rule is handed.
+def _tree(root: Path) -> Tree:
+    files = {path.relative_to(root).as_posix() for path in root.rglob("*.py")}
+    dirs = {path.relative_to(root).as_posix() for path in root.rglob("*") if path.is_dir()}
+    return Tree(files, lambda rel: (root / rel).read_text(encoding="utf-8"), dirs)
