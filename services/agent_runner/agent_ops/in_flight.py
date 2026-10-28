@@ -12,6 +12,7 @@ from collections.abc import Generator
 from contextlib import contextmanager
 from typing import Any
 
+from base.clock import Timers
 from base.daemon.shutdown import sigterm_requests_exit
 from base.native_process.stop_timing import OPS_DRAIN_S
 
@@ -50,12 +51,15 @@ def track_worker(future: asyncio.Future[Any], *, workers: WorkerFutures) -> None
 #     process. A request that never finished has no result to deliver: its caller sees the
 #     connection close and the operation's own idempotency key decides what a retry does.
 async def drain(
-    *, requests: RequestTokens, workers: WorkerFutures, budget_s: float = OPS_DRAIN_S
+    *,
+    requests: RequestTokens,
+    workers: WorkerFutures,
+    timers: Timers,
+    budget_s: float = OPS_DRAIN_S,
 ) -> None:
-    loop = asyncio.get_running_loop()
-    deadline = loop.time() + budget_s
-    while (requests or workers) and loop.time() < deadline:
-        await asyncio.sleep(_DRAIN_POLL_S)
+    deadline = timers.monotonic() + budget_s
+    while (requests or workers) and timers.monotonic() < deadline:
+        await timers.asleep(_DRAIN_POLL_S)
     if requests or workers:
         _log.error(
             "[ops] stop drain budget of %.0fs spent with %d request(s) and %d worker(s) "
@@ -77,7 +81,7 @@ async def drain(
 #     server that stops serving by itself is a failure, not a stop, and propagates.
 # meiva:link services/agent_runner/agent_host/lifecycle/docs/graceful-exit.meiva.okf.md
 async def serve_until_sigterm(
-    server: asyncio.Server, *, requests: RequestTokens, workers: WorkerFutures
+    server: asyncio.Server, *, requests: RequestTokens, workers: WorkerFutures, timers: Timers
 ) -> None:
     serving = asyncio.current_task()
     if serving is None:
@@ -98,4 +102,4 @@ async def serve_until_sigterm(
             if not requested or serving.uncancel() > 0:
                 raise
     server.close()
-    await drain(requests=requests, workers=workers)
+    await drain(requests=requests, workers=workers, timers=timers)

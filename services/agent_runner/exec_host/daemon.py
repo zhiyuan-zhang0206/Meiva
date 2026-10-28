@@ -15,6 +15,7 @@ import resource
 import sys
 from pathlib import Path
 
+from base.clock import SYSTEM_TIMERS
 from base.config import ConfigBoot, settings
 from base.deploy.release import editable_install
 from base.log import logger
@@ -93,6 +94,7 @@ def _run(home: Path, run: Path, *, default_cwd: Path) -> int:
         base_environ=child_env.inherited_process_env(),
         default_cwd=default_cwd,
         source_root=editable_install.current_interpreter_source_root(sys.executable),
+        timers=SYSTEM_TIMERS,
         pid=os.getpid(),
     )
     path = service_socket_path(run)

@@ -12,6 +12,7 @@ from typing import Any
 
 import pytest
 
+from base.clock import SYSTEM_TIMERS
 from base.config.tests.configuration import defaults
 from base.deploy.release import editable_install
 from base.host.env.agent_env import AGENT_BIRTH_CONFIG_ENV, AGENT_CONFIG_OVERLAY_ENV
@@ -124,6 +125,7 @@ async def _running_service(home: Path) -> AsyncGenerator[Path]:
         base_environ=base_env,
         default_cwd=home,
         source_root=editable_install.current_interpreter_source_root(sys.executable),
+        timers=SYSTEM_TIMERS,
         pid=os.getpid(),
     )
     async with asyncio.TaskGroup() as tg:
