@@ -1,11 +1,18 @@
+# meiva:note
+# The effect shell of the turn-scoped-config rule: it walks the scan directories, resolves and reads
+# each file, then prints the report. Which files the rule skips, which reads are findings and the
+# text of every heading are decided in `meizel.state.turn_scoped_config_plan`.
+# meiva:link meizel/docs/meizel.meiva.okf.md
+
 from __future__ import annotations
 
-import re
 import sys
 from collections.abc import Callable, Iterable
 from pathlib import Path
 
 from meizel import allowances, lint_common
+from meizel.state import lint_paths
+from meizel.state import turn_scoped_config_plan as plan
 
 __all__ = ["main"]
 
@@ -16,21 +23,18 @@ _SCAN_DIRS = _POLICY.names("turn-scoped-config", "scan-dirs")
 _EXTRA_FILES = _POLICY.names("turn-scoped-config", "extra-files")
 _ALLOWED_FILES = frozenset(_POLICY.reasons("turn-scoped-config", "files"))
 
-# The files that ARE the plugin-config mechanism: the registry owns the process-global map, the
-# view layers an agent's overrides over it.
+# meiva:note
+# The files that ARE the plugin-config mechanism: the registry owns the process-global map, the view
+# layers an agent's overrides over it.
 _PLUGIN_MECHANISM_FILES = frozenset(_POLICY.reasons("turn-scoped-config", "plugin-mechanism-files"))
 
-_SETTINGS_ATTR = re.compile(r"\bsettings\.([a-z_]+)\.([a-z_]+)")
-# A per-agent field read through the model layering or `get_field` by its literal name; the first
-# group is the field, the second the rest of the call (to see whether it names `overrides`).
-_LAYERED_READ = re.compile(r"\b(?:resolve_setting|get_field)\(\s*[\"']([a-z_]+)[\"']([^)]*)\)")
-# Subscript only — `name in _PLUGIN_CONFIGS` is a registration probe, not a read.
-_PLUGIN_CONFIGS_READ = re.compile(r"\b_PLUGIN_CONFIGS\[")
 
-
+# meiva:note
+# Every file the rule reads: explicit paths as given, otherwise each scan directory walked plus the
+# policy's extra files.
 def _iter_files(resolved: list[str], root: Path = _REPO_ROOT, *, explicit: bool) -> list[Path]:
     if explicit:
-        return [root / p for p in resolved if p.endswith(".py")]
+        return lint_paths.python_paths(root, resolved)
     files: list[Path] = []
     for d in _SCAN_DIRS:
         files.extend((root / d).rglob("*.py"))
@@ -42,15 +46,6 @@ def _iter_files(resolved: list[str], root: Path = _REPO_ROOT, *, explicit: bool)
 _RULE_INPUTS = _POLICY.names("turn-scoped-config", "rule-inputs")
 
 
-def _layered_reads(text: str, rel: str, per_agent: set[str]) -> list[str]:
-    """`file:line: call` for each per-agent setting read by name without the agent's overrides."""
-    return [
-        f"{rel}:{text.count(chr(10), 0, m.start()) + 1}: {m.group(0).splitlines()[0].strip()}"
-        for m in _LAYERED_READ.finditer(text)
-        if m.group(1) in per_agent and "overrides" not in m.group(2)
-    ]
-
-
 def _report(heading: str, entries: list[str]) -> None:
     if not entries:
         return
@@ -59,6 +54,10 @@ def _report(heading: str, entries: list[str]) -> None:
         print(f"  {entry}", file=sys.stderr)
 
 
+# meiva:note
+# Collect one file's bare, layered and process-global plugin config reads. The label is the resolved
+# path, so a link into the scan scope is judged as what it points at, and the skip decisions are
+# asked of the plan with both that label and the name the scan reached.
 def _scan(
     path: Path,
     per_agent: set[str],
@@ -68,37 +67,25 @@ def _scan(
     *,
     root: Path = _REPO_ROOT,
 ) -> None:
-    """Collect one file's bare, layered and process-global plugin config reads."""
-    resolved = path.resolve()
-    try:
-        rel = resolved.relative_to(root.resolve()).as_posix()
-    except ValueError:
-        rel = resolved.as_posix()
-    if rel in _ALLOWED_FILES or "/tests/" in rel or rel.startswith("tests/"):
-        return
-    if path.name.startswith("test_") or path.name.endswith("_test.py"):
+    rel = lint_paths.label(path.resolve(), root.resolve())
+    if plan.skips(rel, path.name, allowed_files=_ALLOWED_FILES):
         return
     text = lint_common.read_utf8_text(path)
     if text is None:
         return
-    layered_errors.extend(_layered_reads(text, rel, per_agent))
-    for lineno, line in enumerate(text.splitlines(), start=1):
-        if line.lstrip().startswith("#"):
-            continue
-        for m in _SETTINGS_ATTR.finditer(line):
-            if m.group(2) in per_agent:
-                errors.append(f"{rel}:{lineno}: {line.strip()}")
-        if rel not in _PLUGIN_MECHANISM_FILES and _PLUGIN_CONFIGS_READ.search(line):
-            plugin_errors.append(f"{rel}:{lineno}: {line.strip()}")
+    layered_errors.extend(plan.layered_reads(text, rel, per_agent))
+    errors.extend(plan.settings_reads(text, rel, per_agent))
+    plugin_errors.extend(plan.plugin_config_reads(text, rel, _PLUGIN_MECHANISM_FILES))
 
 
+# meiva:note
+# Run the lint; `per_agent_field_names` returns the config fields that are per-agent.
 def main(
     argv: list[str],
     *,
     per_agent_field_names: Callable[[], Iterable[str]],
     repo_root: Path | None = None,
 ) -> int:
-    """Run the lint; `per_agent_field_names` returns the config fields that are per-agent."""
     root = _REPO_ROOT if repo_root is None else repo_root
     argv, only = lint_common.split_only(argv)
     resolved: list[str] = []
@@ -114,22 +101,7 @@ def main(
     plugin_errors: list[str] = []
     for path in lint_common.restrict(_iter_files(resolved, root, explicit=bool(argv)), scope, root):
         _scan(path, per_agent, errors, layered_errors, plugin_errors, root=root)
-    _report(
-        "plugin config read straight out of the process-global _PLUGIN_CONFIGS in turn-scoped "
-        "code — use `get_plugin_config(<plugin>, slices)` (or `process_plugin_config` in the "
-        "exec child); in hosted mode the map holds whichever agent booted the process:",
-        plugin_errors,
-    )
-    _report(
-        "per-agent setting resolved from the cluster value in turn-scoped code — pass the "
-        "agent's `overrides` slice to `resolve_setting`, and read other per-agent fields "
-        "from the slices:",
-        layered_errors,
-    )
-    _report(
-        "per-agent config read through the bare settings singleton in turn-scoped code — read "
-        "it from the agent's slices or `agent_setting`; in hosted mode the singleton holds "
-        "the CLUSTER default, not this agent's overlay:",
-        errors,
-    )
+    _report(plan.PLUGIN_HEADING, plugin_errors)
+    _report(plan.LAYERED_HEADING, layered_errors)
+    _report(plan.SINGLETON_HEADING, errors)
     return 1 if (errors or plugin_errors or layered_errors) else 0

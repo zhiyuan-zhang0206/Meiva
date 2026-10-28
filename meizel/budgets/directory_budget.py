@@ -1,79 +1,43 @@
-"""What counts as a direct entry of a directory for the 20-entry structure budget."""
+# meiva:note
+# The effect shell of the file budget's path reading: it lists one directory of the checkout and
+# walks a judged path's links. Which entries are candidates, and which of a target and a structure
+# directory the budget judges, are decided in `meizel.budgets.budget_plans`.
+# meiva:link meizel/docs/meizel.meiva.okf.md
 
 from __future__ import annotations
 
-from collections.abc import Iterable, Mapping
-from pathlib import Path, PurePosixPath
+import os
+from pathlib import Path
 
-_MANIFEST = "meizel.toml"
+from meizel.budgets import budget_plans
 
-
-def tracked_children(listing: str) -> dict[str, set[str]]:
-    """Every directory's direct children from Git's NUL-delimited tracked paths.
-
-    A `meizel.toml` manifest describes its directory and is not one of its entries.
-    """
-    if listing and not listing.endswith("\0"):
-        raise ValueError("tracked Git paths are not NUL-terminated")
-    children: dict[str, set[str]] = {}
-    for name in listing.split("\0")[:-1]:
-        path = PurePosixPath(name)
-        if not path.parts or path.is_absolute() or ".." in path.parts or path.as_posix() != name:
-            raise ValueError(f"invalid tracked Git path: {name!r}")
-        if path.name == _MANIFEST:
-            continue
-        for depth, child in enumerate(path.parts):
-            directory = "/".join(path.parts[:depth])
-            children.setdefault(directory, set()).add(child)
-    return children
+__all__ = ["entries", "selected_under"]
 
 
-def selected_directories(
-    children: Mapping[str, set[str]], targets: Iterable[Path], repo_root: Path
-) -> set[str]:
-    """Select tracked descendants and ancestors; the repository root alone has no cap."""
-    selected: set[str] = set()
-    for target in targets:
-        try:
-            relative = target.relative_to(repo_root).as_posix()
-        except ValueError:
-            continue
-        if relative == ".":
-            selected.update(children)
-            continue
-        selected.update(
-            directory
-            for directory in children
-            if directory == relative or directory.startswith(f"{relative}/")
-        )
-        parts = PurePosixPath(relative).parts
-        selected.update("/".join(parts[:depth]) for depth in range(1, len(parts)))
-    return selected.intersection(children).difference({""})
-
-
+# meiva:note
+# The candidates of the file budget's Python scope at one directory level, without following a
+# link: `scandir` reports each entry's kind from the directory read itself, so classifying one costs
+# no further call on the filesystem.
 def entries(directory: Path) -> list[Path]:
-    """Candidates for the existing Python file-budget scope, without following links."""
-    return [
-        entry
-        for entry in directory.iterdir()
-        if not entry.is_symlink()
-        and not entry.name.startswith(".")
-        and entry.name != "__pycache__"
-        and not (entry.name == "migrations" and entry.is_dir())
-    ]
+    with os.scandir(directory) as scan:
+        return [
+            directory / entry.name
+            for entry in scan
+            if budget_plans.entry_candidate(
+                entry.name,
+                is_symlink=entry.is_symlink(),
+                is_directory=entry.is_dir(follow_symlinks=False),
+            )
+        ]
 
 
+# meiva:note
+# The judged path for one target and one structure directory, without following a link: the path
+# `judged_path` picks, refused when it or any of its ancestors is a link.
 def selected_under(target: Path, scope: Path, repo_root: Path) -> Path | None:
-    """An existing Python file-budget target within its scope, without following links."""
-    if target == scope or scope in target.parents:
-        selected = target
-    elif target in scope.parents:
-        selected = scope
-    else:
+    selected = budget_plans.judged_path(target, scope, repo_root)
+    if selected is None:
         return None
-    relative = selected.relative_to(repo_root)
-    if any(
-        part.startswith(".") or part in {"__pycache__", "migrations"} for part in relative.parts
-    ) or any(path.is_symlink() for path in (selected, *selected.parents)):
+    if any(path.is_symlink() for path in (selected, *selected.parents)):
         return None
     return selected

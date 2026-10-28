@@ -1,18 +1,13 @@
-exports = ["directory_budget.py", "limits.py"]
+exports = ["budget_plans.py", "directory_budget.py", "limits.py"]
 
 [uses]
-"limits.py" = ["directory_budget.py"]
-"tests" = ["directory_budget.py", "limits.py"]
+"directory_budget.py" = ["budget_plans.py"]
+"limits.py" = ["budget_plans.py", "directory_budget.py"]
+"tests" = ["budget_plans.py", "directory_budget.py", "limits.py"]
 
 [purity]
 "." = "strict"
-"directory_budget.py" = "strict-to-be"
-"limits.py" = "strict-to-be"
+"directory_budget.py" = { mode = "none", why = "the shell that reads the file budget's paths: it lists one directory level with scandir and walks a judged path's ancestors for links; which entries are candidates and which of a target and a structure directory is judged are decided in budget_plans.py" }
+"limits.py" = { mode = "none", why = "the shell that runs both ceilings over the checkout: it walks the directories a target judges, stats each entry, reads each judged file and asks Git for the tracked paths; the ceilings, the exclusions, the directory selection and every word of the report are decided in budget_plans.py" }
 
 [debt.impure-call]
-"directory_budget.py#Path.is_dir" = 1
-"directory_budget.py#Path.is_symlink" = 2
-"directory_budget.py#Path.iterdir" = 1
-"limits.py#Path.is_dir" = 2
-"limits.py#Path.is_file" = 2
-"limits.py#meizel.graph.universe.GitRepo" = 1
