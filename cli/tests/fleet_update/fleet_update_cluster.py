@@ -12,6 +12,7 @@ from cli import fleet_update
 from cli.fleet_update.plan.host_commands import CLEAN
 from cli.fleet_update.programs import ALERT_SILENCE_SCRIPT, VERIFY_SCRIPTS, program_text
 from cli.fleet_update.session import Pacing
+from cli.fleet_update.timers import ProcessTimers
 
 
 def git(repo: Path, *args: str) -> str:
@@ -187,7 +188,12 @@ class Cluster:
         self.invocations += 1
         try:
             code = fleet_update.main(
-                argv, repo=self.repo, env=self.process_env(), now=now, pacing=self.pacing
+                argv,
+                repo=self.repo,
+                env=self.process_env(),
+                now=now,
+                pacing=self.pacing,
+                timers=ProcessTimers(),
             )
         finally:
             self._adopt(json.loads(self.state_path.read_text()))
