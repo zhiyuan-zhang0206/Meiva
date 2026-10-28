@@ -107,6 +107,17 @@ def test_parked_deep_history_mounts_a_bounded_window(e2e_env: E2EEnv, kind: str)
     history_button = page.get_by_test_id("load-older-keyboard")
     history_button.focus()
     history_button.press("Enter")
+    # meiva:note
+    # A fixed sleep stands in for "the prepend landed", and it is not the
+    # signal: the route handler appends to `older_requests` and the assertions
+    # below read the real post-paging height, so this number only sets their
+    # deadline. Do not touch it while this test is green - shortening it turns a
+    # budget miss into a red that names the wrong layer, and lengthening it hides
+    # the regression the assertions exist for. When this test goes red, replace
+    # it with the three-layer shape from `tests/e2e/_timeline.py` (premise,
+    # mounted rank, readable payload, each with its own budget) rather than
+    # retuning the number (#5679).
+    # meiva:link ui/web/src/docs/frontend-components/timeline-view/bounded-window.meiva.okf.md
     page.wait_for_timeout(1500)
     assert older_requests, "keyboard paging did not request older history"
     assert (
