@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import json
 import os
+import signal
 import time
 from collections.abc import Callable
 from dataclasses import replace
@@ -38,6 +39,7 @@ from cli.commands.lifecycle.tests.stop.stop_support import (
     Launcher,
     PtyServiceProcess,
     busy_session,
+    cluster_chrome,
     stop_environment,
     stop_request,
     written_notices,
@@ -51,6 +53,7 @@ from cli.database.runtime import CommandRuntime
 from cli.database.tests.cli_tests import operator_database as operator_database
 from cli.database.tests.cli_tests import operator_pipeline as operator_pipeline
 from cli.database.tests.command_inputs import command_runtime as command_runtime
+from services.desktop.browser.profile import profile_dir
 
 RESTART = RestartRequest(
     only_services=(),
@@ -407,3 +410,34 @@ def test_a_browser_that_is_not_there_costs_a_stop_nothing(
     assert capsys.readouterr().out == ""
     browser.record_browser_session(stop_runtime, now=datetime(2026, 10, 22, tzinfo=UTC))
     assert "nothing to record (no browser answered)" in capsys.readouterr().out
+
+
+# meiva:note
+# The stop's browser legs act on the Chrome of the home they are given. The home here is not the
+# invocation's: the Chrome that must go carries `--user-data-dir=<that home's profile>`, and a
+# decoy on the profile of another home must stay.
+def test_the_stop_signals_the_chrome_on_the_profile_of_the_home_it_stops(tmp_path: Path) -> None:
+    ours, other = tmp_path / "ours", tmp_path / "other"
+    with (
+        cluster_chrome(profile_dir(ours), workdir=tmp_path / "ours-chrome") as chrome,
+        cluster_chrome(profile_dir(other), workdir=tmp_path / "other-chrome") as decoy,
+    ):
+        browser.stop_browser(time.monotonic() + 10, home=ours)
+
+        assert chrome.wait(timeout=10) == -signal.SIGTERM
+        assert decoy.poll() is None
+
+
+def test_the_sweep_kills_the_chrome_on_the_profile_of_the_home_it_sweeps(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    ours, other = tmp_path / "ours", tmp_path / "other"
+    with (
+        cluster_chrome(profile_dir(ours), workdir=tmp_path / "ours-chrome") as chrome,
+        cluster_chrome(profile_dir(other), workdir=tmp_path / "other-chrome") as decoy,
+    ):
+        browser.reap_cluster_chrome(home=ours)
+
+        assert chrome.wait(timeout=10) < 0
+        assert decoy.poll() is None
+    assert str(chrome.pid) in capsys.readouterr().out
