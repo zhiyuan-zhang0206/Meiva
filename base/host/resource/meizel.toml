@@ -1,0 +1,13 @@
+exports = ["reading.py", "sample.py"]
+
+[uses]
+"sample.py" = ["reading.py"]
+
+[purity]
+"." = "strict"
+"__init__.py" = "strict"
+"reading.py" = "strict"
+"sample.py" = { mode = "none", why = "the shell that takes one live machine reading: it asks psutil for the CPU, memory and primary-disk figures, reads the clock and runs `pmset -g batt` on a macOS host; the model, the battery parse and how the figures become the displayed sample are decided in reading.py" }
+
+[debt.ambient-read]
+"sample.py#clock time.time" = 1

@@ -80,7 +80,7 @@ Cardinality is filtered at the source, not in Prometheus: synthetic mounts
 ## One history
 
 Prometheus is the only store that retains these. `meiva status` and the status
-page carry a single LIVE reading per machine (`base/host/resource_sample.py`) so
+page carry a single LIVE reading per machine (`base/host/resource/sample.py`) so
 they still answer on a deployment whose LGTM backend is down or was never
 deployed; the retired `base/resource_monitor.py` kept a parallel 300-sample
 ring buffer, which meant two drifting answers to "what was the CPU on machine

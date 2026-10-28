@@ -28,7 +28,7 @@ from pathlib import Path
 from typing import Any, Literal, TypeGuard
 
 from base.host.private_storage import write_private_bytes
-from base.host.verified_file import RegularFileReadError, regular_bytes
+from base.host.verified_file.reader import RegularFileReadError, regular_bytes
 
 _VERSION = 1
 _MAX_BYTES = 256 * 1024

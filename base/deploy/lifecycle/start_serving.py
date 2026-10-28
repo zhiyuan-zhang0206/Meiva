@@ -21,7 +21,7 @@ from pydantic import model_validator
 
 from base.host.atomic_io import SYSTEM_FS, AtomicWriter
 from base.host.runtime_interpreter import LoadedRuntimeIdentity
-from base.host.verified_file import regular_bytes
+from base.host.verified_file.reader import regular_bytes
 from base.native_process.evidence import Digest, EvidenceModel, ExpectedProcess
 from base.native_process.os_platform import file_lock
 from base.native_process.ownership import OwnedProcess
