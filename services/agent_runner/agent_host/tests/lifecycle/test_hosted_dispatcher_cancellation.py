@@ -21,6 +21,7 @@ import pytest
 import pytest_asyncio
 from psycopg_pool import AsyncConnectionPool
 
+from base.clock import SYSTEM_TIMERS
 from base.clock.tests.seeded_rng import seeded_rng
 from base.db import Database
 from base.events.live.bus import EventBus
@@ -100,6 +101,7 @@ async def test_cancelled_dispatcher_unwinds_after_a_swallowed_pool_check_cancel(
         pending_scan=pending,
         scan_interval_s=0.05,
         subscription_read_timeout_s=5,
+        timers=SYSTEM_TIMERS,
     )
     task = asyncio.create_task(dispatcher.run())
     try:

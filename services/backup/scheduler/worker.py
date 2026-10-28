@@ -15,6 +15,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Literal, assert_never
 
+from base.clock import Timers
 from base.cluster.dataplane.direct_url import ClusterDirectUrl
 from base.cluster.dataplane.pg_throwaway_base import ThrowawayConfig
 from base.cluster.machine import MachineIdentityReader
@@ -84,6 +85,7 @@ async def run_job(
     settings: SchedulerSettings,
     tree: BackupTree,
     launch: WorkerLaunch,
+    timers: Timers,
     now: datetime | None = None,
 ) -> None:
     """Validate and publish a zero-exit worker result."""
@@ -99,7 +101,9 @@ async def run_job(
             operation_kind = dump_kind(tree)
         case _:
             assert_never(kind)
-    completed = await run_operation(launch.module, request, kind=operation_kind, env=launch.env)
+    completed = await run_operation(
+        launch.module, request, kind=operation_kind, env=launch.env, timers=timers
+    )
     match kind:
         case "dump":
             # meiva:note

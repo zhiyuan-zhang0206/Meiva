@@ -2,6 +2,7 @@ import asyncio
 
 import pytest
 
+from base.clock import SYSTEM_TIMERS
 from services.agent_runner.agent_host.dispatcher import TurnScheduler
 
 
@@ -16,7 +17,7 @@ async def test_stop_keeps_the_original_unfinished_turn_slot() -> None:
             except asyncio.CancelledError:
                 continue
 
-    scheduler = TurnScheduler(turn, cancel_unwind_timeout_s=0.01)
+    scheduler = TurnScheduler(turn, cancel_unwind_timeout_s=0.01, timers=SYSTEM_TIMERS)
     original = scheduler.wake(7)
     assert original is not None
     try:
@@ -47,7 +48,7 @@ async def test_turn_unknown_error_survives_until_join_without_stopping_other_age
         sibling_entered.set()
         await release.wait()
 
-    scheduler = TurnScheduler(turn)
+    scheduler = TurnScheduler(turn, timers=SYSTEM_TIMERS)
     original, sibling = scheduler.wake(7), scheduler.wake(8)
     assert original is not None and sibling is not None
     try:

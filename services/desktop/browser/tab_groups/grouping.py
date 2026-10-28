@@ -73,6 +73,7 @@ from typing import Any
 import websockets
 from websockets.asyncio.client import ClientConnection
 
+from base.clock import Timers
 from base.log import logger
 from services.desktop.browser.session import cdp_call, http_json
 
@@ -165,6 +166,7 @@ async def _worker_session(
     ws: ClientConnection,
     ids: Iterator[int],
     *,
+    timers: Timers,
     load: bool = True,
     worker_wait_s: float = WORKER_WAIT_S,
 ) -> str:
@@ -190,17 +192,16 @@ async def _worker_session(
         loaded_id = (
             await cdp_call(ws, ids, "Extensions.loadUnpacked", {"path": str(EXTENSION_DIR)})
         )["id"]
-        loop = asyncio.get_running_loop()
-        deadline = loop.time() + worker_wait_s
+        deadline = timers.monotonic() + worker_wait_s
         while (target_id := await _live_worker(ws, ids, loaded_id)) is None:
-            if loop.time() >= deadline:
+            if timers.monotonic() >= deadline:
                 raise RuntimeError(f"extension {loaded_id} service worker target not found")
-            await asyncio.sleep(_WORKER_POLL_S)
+            await timers.asleep(_WORKER_POLL_S)
     attached = await cdp_call(
         ws, ids, "Target.attachToTarget", {"targetId": target_id, "flatten": True}
     )
     session_id = attached["sessionId"]
-    await _await_worker_script(ws, ids, session_id, worker_wait_s=worker_wait_s)
+    await _await_worker_script(ws, ids, session_id, timers=timers, worker_wait_s=worker_wait_s)
     return session_id
 
 
@@ -209,6 +210,7 @@ async def _await_worker_script(
     ids: Iterator[int],
     session_id: str,
     *,
+    timers: Timers,
     worker_wait_s: float = WORKER_WAIT_S,
 ) -> None:
     """Wait until the worker's script has defined ``meivaGroup``.
@@ -216,8 +218,7 @@ async def _await_worker_script(
     The worker's CDP target can be attachable a moment before its script has
     run (measured on first load: ``meivaGroup is not defined``).
     """
-    loop = asyncio.get_running_loop()
-    deadline = loop.time() + worker_wait_s
+    deadline = timers.monotonic() + worker_wait_s
     while True:
         probe = await cdp_call(
             ws,
@@ -228,9 +229,9 @@ async def _await_worker_script(
         )
         if probe["result"].get("value") == "function":
             return
-        if loop.time() >= deadline:
+        if timers.monotonic() >= deadline:
             raise RuntimeError("extension worker did not define meivaGroup")
-        await asyncio.sleep(_WORKER_POLL_S)
+        await timers.asleep(_WORKER_POLL_S)
 
 
 class AgentTabGroups:
@@ -249,6 +250,7 @@ class AgentTabGroups:
         cdp_port: int,
         tasks: asyncio.TaskGroup,
         *,
+        timers: Timers,
         listing_timeout_s: float = LISTING_TIMEOUT_S,
         group_timeout_s: float = GROUP_TIMEOUT_S,
         ungroup_timeout_s: float = UNGROUP_TIMEOUT_S,
@@ -256,6 +258,7 @@ class AgentTabGroups:
     ) -> None:
         self._cdp_port = cdp_port
         self._task_group = tasks  # the daemon's root group: it owns every task's lifetime
+        self._timers = timers
         self._listing_timeout_s = listing_timeout_s
         self._group_timeout_s = group_timeout_s
         self._ungroup_timeout_s = ungroup_timeout_s
@@ -360,7 +363,7 @@ class AgentTabGroups:
         ids = itertools.count(1)
         async with websockets.connect(str(version["webSocketDebuggerUrl"])) as ws:
             session_id = await _worker_session(
-                ws, ids, load=False, worker_wait_s=self._worker_wait_s
+                ws, ids, timers=self._timers, load=False, worker_wait_s=self._worker_wait_s
             )
             outcome = await cdp_call(
                 ws,
@@ -418,7 +421,9 @@ class AgentTabGroups:
         # meiva:note
         # Closing the websocket detaches the worker session opened below.
         async with websockets.connect(str(version["webSocketDebuggerUrl"])) as ws:
-            session_id = await _worker_session(ws, ids, worker_wait_s=self._worker_wait_s)
+            session_id = await _worker_session(
+                ws, ids, timers=self._timers, worker_wait_s=self._worker_wait_s
+            )
             outcome = await cdp_call(
                 ws,
                 ids,

@@ -4,6 +4,7 @@
 import asyncio
 import json
 
+from base.clock import SYSTEM_TIMERS
 from services.agent_runner.agent_host.dispatcher import TurnScheduler
 from services.agent_runner.agent_host.health_routes import cancel_turn_route
 from services.agent_runner.agent_host.tests.turn_dispatcher.helpers import settle
@@ -26,7 +27,7 @@ async def test_cancels_the_running_turn_and_the_next_wake_starts_a_fresh_one() -
         else:
             second_turn.set()
 
-    scheduler = TurnScheduler(run)
+    scheduler = TurnScheduler(run, timers=SYSTEM_TIMERS)
     try:
         scheduler.wake(4)
         await asyncio.wait_for(entered.wait(), 2)
@@ -44,7 +45,7 @@ async def test_answers_not_cancelled_when_no_turn_is_running() -> None:
     async def run(_agent_id: int) -> None:
         return None
 
-    scheduler = TurnScheduler(run)
+    scheduler = TurnScheduler(run, timers=SYSTEM_TIMERS)
     try:
         assert await _post(scheduler, b'{"agent_id": 9}') == (200, {"cancelled": False})
     finally:
@@ -58,7 +59,7 @@ async def test_a_cancel_never_reaches_another_agents_turn() -> None:
         entered.set()
         await asyncio.Event().wait()
 
-    scheduler = TurnScheduler(run)
+    scheduler = TurnScheduler(run, timers=SYSTEM_TIMERS)
     try:
         scheduler.wake(1)
         await asyncio.wait_for(entered.wait(), 2)
@@ -72,7 +73,7 @@ async def test_rejects_a_body_without_a_positive_integer_agent_id() -> None:
     async def run(_agent_id: int) -> None:
         return None
 
-    scheduler = TurnScheduler(run)
+    scheduler = TurnScheduler(run, timers=SYSTEM_TIMERS)
     try:
         for body in (
             b"",

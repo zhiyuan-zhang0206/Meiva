@@ -305,6 +305,7 @@ class ComputerMcpDaemon:
         self._action_lock = asyncio.Lock()
         # Phase 2 session coordination: who owns the screen + FIFO waiters.
         self._screen = ScreenSession(
+            clock,
             lease_s=config.computer_use_lease_s,
             queue_timeout_s=config.computer_use_queue_timeout_s,
         )

@@ -25,7 +25,7 @@ def _logged_fields(records: LogRecords, level: str) -> list[dict[str, Any]]:
 class TestBasicDispatch:
     async def test_wake_starts_a_turn_and_the_task_ends_when_idle(self) -> None:
         rec = Recorder()
-        sched = TurnScheduler(rec)
+        sched = TurnScheduler(rec, timers=SYSTEM_TIMERS)
 
         assert sched.active_agents == frozenset(), "an idle agent must have no task"
         sched.wake(7)
@@ -36,7 +36,7 @@ class TestBasicDispatch:
 
     async def test_second_wake_after_idle_starts_a_fresh_turn(self) -> None:
         rec = Recorder()
-        sched = TurnScheduler(rec)
+        sched = TurnScheduler(rec, timers=SYSTEM_TIMERS)
 
         sched.wake(7)
         await settle()
@@ -47,7 +47,7 @@ class TestBasicDispatch:
 
     async def test_a_wake_materializes_the_task_without_any_await(self) -> None:
         rec = Recorder()
-        sched = TurnScheduler(rec)
+        sched = TurnScheduler(rec, timers=SYSTEM_TIMERS)
 
         assert sched.active_agents == frozenset()
         sched.wake(7)
@@ -59,7 +59,7 @@ class TestSerializationAndConcurrency:
     async def test_one_agents_turns_never_overlap(self) -> None:
         rec = Recorder()
         rec.gate(7)
-        sched = TurnScheduler(rec)
+        sched = TurnScheduler(rec, timers=SYSTEM_TIMERS)
 
         sched.wake(7)
         await settle()
@@ -78,7 +78,7 @@ class TestSerializationAndConcurrency:
         rec = Recorder()
         rec.gate(1)
         rec.gate(2)
-        sched = TurnScheduler(rec)
+        sched = TurnScheduler(rec, timers=SYSTEM_TIMERS)
 
         sched.wake(1)
         sched.wake(2)
@@ -97,7 +97,7 @@ class TestWakeRace:
     async def test_wake_landing_as_the_turn_winds_down_is_not_lost(self) -> None:
         rec = Recorder()
         rec.gate(7)
-        sched = TurnScheduler(rec)
+        sched = TurnScheduler(rec, timers=SYSTEM_TIMERS)
 
         sched.wake(7)
         await settle()
@@ -111,7 +111,7 @@ class TestWakeRace:
 
     async def test_wake_after_the_task_is_gone_starts_a_new_one(self) -> None:
         rec = Recorder()
-        sched = TurnScheduler(rec)
+        sched = TurnScheduler(rec, timers=SYSTEM_TIMERS)
 
         sched.wake(7)
         await settle()
@@ -124,7 +124,7 @@ class TestWakeRace:
     async def test_two_wakes_during_one_turn_coalesce(self) -> None:
         rec = Recorder()
         rec.gate(7)
-        sched = TurnScheduler(rec)
+        sched = TurnScheduler(rec, timers=SYSTEM_TIMERS)
 
         sched.wake(7)
         await settle()
@@ -146,7 +146,9 @@ class TestFailureIsolation:
             raise ValueError("turn exploded")
 
         sched = TurnScheduler(
-            boom, config_fingerprint=lambda _agent_id: "stored-config-fingerprint"
+            boom,
+            config_fingerprint=lambda _agent_id: "stored-config-fingerprint",
+            timers=SYSTEM_TIMERS,
         )
         sched.wake(7)
         await settle()
@@ -167,7 +169,7 @@ class TestFailureIsolation:
         async def boom(_agent_id: int) -> None:
             raise ValueError("turn exploded")
 
-        sched = TurnScheduler(boom)
+        sched = TurnScheduler(boom, timers=SYSTEM_TIMERS)
         sched.wake(7)
         await settle()
 
@@ -187,7 +189,7 @@ class TestFailureIsolation:
             calls.append(agent_id)
             raise RuntimeError("turn exploded")
 
-        sched = TurnScheduler(boom)
+        sched = TurnScheduler(boom, timers=SYSTEM_TIMERS)
         sched.wake(7)
         await settle()
 
@@ -201,7 +203,7 @@ class TestFailureIsolation:
     async def test_aclose_cancels_running_turns(self) -> None:
         rec = Recorder()
         rec.gate(7)
-        sched = TurnScheduler(rec)
+        sched = TurnScheduler(rec, timers=SYSTEM_TIMERS)
         sched.wake(7)
         await settle()
         assert sched.active_agents == frozenset({7})
@@ -217,7 +219,7 @@ class TestFailureIsolation:
 class TestUncancellableTurn:
     async def test_aclose_returns_even_when_a_turn_refuses_to_unwind(self) -> None:
         stuck = StuckTurn()
-        sched = TurnScheduler(stuck, cancel_unwind_timeout_s=0.05)
+        sched = TurnScheduler(stuck, cancel_unwind_timeout_s=0.05, timers=SYSTEM_TIMERS)
         sched.wake(7)
         await asyncio.wait_for(stuck.entered.wait(), 2)
 
@@ -233,7 +235,7 @@ class TestUncancellableTurn:
         self, loguru_records: LogRecords
     ) -> None:
         turn = StuckTurn()
-        sched = TurnScheduler(turn, cancel_unwind_timeout_s=0.05)
+        sched = TurnScheduler(turn, cancel_unwind_timeout_s=0.05, timers=SYSTEM_TIMERS)
         sched.wake(31)
         await asyncio.wait_for(turn.entered.wait(), 2)
 
@@ -253,7 +255,7 @@ class TestUncancellableTurn:
     ) -> None:
         rec = Recorder()
         rec.gate(7)
-        sched = TurnScheduler(rec, cancel_unwind_timeout_s=0.05)
+        sched = TurnScheduler(rec, cancel_unwind_timeout_s=0.05, timers=SYSTEM_TIMERS)
         sched.wake(7)
         await settle()
         await asyncio.wait_for(sched.aclose(), 5)
@@ -286,6 +288,7 @@ class TestUncancellableTurn:
                 timers=SYSTEM_TIMERS,
                 now=lambda: current,
             ),
+            timers=SYSTEM_TIMERS,
             cancel_unwind_timeout_s=0.05,
         )
         sched.wake(5)
@@ -310,7 +313,9 @@ class TestUncancellableTurn:
             raise RuntimeError("db unreachable")
 
         turn = StuckTurn()
-        sched = TurnScheduler(turn, activity_clock=_broken_clock, cancel_unwind_timeout_s=0.05)
+        sched = TurnScheduler(
+            turn, activity_clock=_broken_clock, cancel_unwind_timeout_s=0.05, timers=SYSTEM_TIMERS
+        )
         sched.wake(9)
         await asyncio.wait_for(turn.entered.wait(), 2)
 
@@ -339,6 +344,7 @@ class TestUncancellableTurn:
             activity_clock=_hanging_clock,
             cancel_unwind_timeout_s=0.05,
             clock_read_timeout_s=0.05,
+            timers=SYSTEM_TIMERS,
         )
         sched.wake(12)
         await asyncio.wait_for(turn.entered.wait(), 2)
