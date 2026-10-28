@@ -1,0 +1,23 @@
+exports = ["package-draft-entry.tsx", "plugin-nav.tsx", "plugin-page-frame.tsx", "theme-pack-tokens.tsx"]
+
+[uses]
+"package-draft-entry.test.tsx" = ["package-draft-entry.tsx"]
+"plugin-nav-icon.test.ts" = ["plugin-nav-icon.ts"]
+"plugin-nav.test.tsx" = ["plugin-nav.tsx"]
+"plugin-nav.tsx" = ["plugin-nav-icon.ts"]
+"plugin-page-frame.test.tsx" = ["plugin-page-frame.tsx"]
+"theme-pack-tokens.test.tsx" = ["theme-pack-tokens.tsx"]
+
+[debt.first-party-patch]
+"package-draft-entry.test.tsx#vi.spyOn ui/web/src/lib/transport/api.ts.draftPackage" = 7
+"plugin-nav.test.tsx#vi.mock ui/web/src/lib/transport/api.ts" = 1
+"plugin-page-frame.test.tsx#vi.mock ui/web/src/lib/transport/api.ts" = 1
+"theme-pack-tokens.test.tsx#vi.mock ui/web/src/lib/transport/api.ts" = 1
+
+[debt.third-party-patch]
+"package-draft-entry.test.tsx#vi.mock next/navigation" = 1
+"theme-pack-tokens.test.tsx#vi.mock next-themes" = 1
+
+[debt.type-cast]
+"theme-pack-tokens.tsx#cast ThemePackTokens" = 1
+"theme-pack-tokens.tsx#cast ThemePackTokens.<lambda>" = 1

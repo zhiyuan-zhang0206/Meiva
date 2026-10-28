@@ -1,0 +1,16 @@
+exports = ["page.tsx"]
+
+[uses]
+"page-interactions.test.tsx" = ["loading.tsx", "page.tsx", "run-timeline-test-fixtures-mock.tsx"]
+"page.test.tsx" = ["page.tsx", "run-timeline-test-fixtures-mock.tsx"]
+
+[debt.first-party-patch]
+"page-interactions.test.tsx#vi.mock ui/web/src/lib/transport/api.ts" = 1
+"page.test.tsx#vi.mock ui/web/src/lib/transport/api.ts" = 1
+
+[debt.stdlib-patch]
+"page-interactions.test.tsx#vi.spyOn Element.prototype.getBoundingClientRect" = 1
+"page.test.tsx#vi.spyOn Element.prototype.getBoundingClientRect" = 1
+
+[debt.type-cast]
+"page.tsx#cast AgentViewPage.queryFn" = 1

@@ -1,0 +1,25 @@
+[debt.first-party-patch]
+"graph-view-lineage-and-hover.test.tsx#vi.mock ui/web/src/lib/fleet/use-fleet-graph.ts" = 1
+"graph-view-lineage-and-hover.test.tsx#vi.mock ui/web/src/lib/state/use-user-settings.ts" = 1
+"graph-view-lineage-and-hover.test.tsx#vi.mock ui/web/src/lib/transport/api.ts" = 1
+"task-graph-hover-cap.test.tsx#vi.mock ui/web/src/lib/notifications/use-tasks.ts" = 1
+"task-graph-hover-cap.test.tsx#vi.mock ui/web/src/lib/state/use-user-settings.ts" = 1
+"task-graph-hover-cap.test.tsx#vi.mock ui/web/src/lib/transport/api.ts" = 1
+"task-graph-mode.test.tsx#vi.mock ui/web/src/lib/notifications/use-tasks.ts" = 1
+"task-graph-mode.test.tsx#vi.mock ui/web/src/lib/state/use-user-settings.ts" = 1
+"task-graph-mode.test.tsx#vi.mock ui/web/src/lib/transport/api.ts" = 1
+"task-graph-selection.test.tsx#vi.mock ui/web/src/lib/notifications/use-tasks.ts" = 1
+"task-graph-selection.test.tsx#vi.mock ui/web/src/lib/state/use-user-settings.ts" = 1
+"task-graph-selection.test.tsx#vi.mock ui/web/src/lib/transport/api.ts" = 1
+
+[debt.third-party-patch]
+"graph-view-lineage-and-hover.test.tsx#vi.mock next/navigation" = 1
+"task-graph-hover-cap.test.tsx#vi.mock next/navigation" = 1
+"task-graph-mode.test.tsx#vi.mock next/navigation" = 1
+"task-graph-selection.test.tsx#vi.mock next/navigation" = 1
+
+[debt.unresolved-patch]
+"graph-view-lineage-and-hover.test.tsx#vi.spyOn canvas.\"getBoundingClientRect\"" = 1
+"graph-view-lineage-and-hover.test.tsx#vi.spyOn group.\"getBoundingClientRect\"" = 1
+"task-graph-hover-cap.test.tsx#vi.spyOn canvas.\"getBoundingClientRect\"" = 3
+"task-graph-hover-cap.test.tsx#vi.spyOn group.\"getBoundingClientRect\"" = 3

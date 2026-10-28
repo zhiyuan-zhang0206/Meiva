@@ -1,0 +1,5 @@
+[uses]
+"page.test.tsx" = ["page.tsx"]
+
+[debt.first-party-patch]
+"page.test.tsx#vi.mock ui/web/src/lib/transport/api.ts" = 1

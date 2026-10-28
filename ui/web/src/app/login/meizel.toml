@@ -1,0 +1,8 @@
+[uses]
+"page.test.tsx" = ["page.tsx"]
+
+[debt.first-party-patch]
+"page.test.tsx#vi.mock ui/web/src/lib/auth/auth-context.tsx" = 1
+
+[debt.third-party-patch]
+"page.test.tsx#vi.mock next/navigation" = 1

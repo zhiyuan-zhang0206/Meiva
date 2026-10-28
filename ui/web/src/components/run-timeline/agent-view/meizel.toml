@@ -1,0 +1,15 @@
+exports = ["agent-view-group.tsx", "agent-view-link-group.tsx", "agent-view-link-labels.ts", "agent-view-nav.ts", "agent-view-toolbar.tsx", "use-timeline-windows.ts"]
+
+[uses]
+"agent-view-link-group.tsx" = ["agent-view-link-labels.ts"]
+"agent-view-nav.test.ts" = ["agent-view-nav.ts"]
+"use-timeline-windows.test.tsx" = ["use-timeline-windows.ts"]
+"use-timeline-windows.ts" = ["timeline-window-cache.ts"]
+
+[debt.first-party-patch]
+"agent-view-links.test.tsx#vi.mock ui/web/src/lib/transport/api.ts" = 1
+"agent-view.test.tsx#vi.mock ui/web/src/lib/transport/api.ts" = 1
+"use-timeline-windows.test.tsx#vi.mock ui/web/src/lib/transport/api.ts" = 1
+
+[debt.stdlib-patch]
+"agent-view-links.test.tsx#vi.spyOn HTMLElement.prototype.getBoundingClientRect" = 1
