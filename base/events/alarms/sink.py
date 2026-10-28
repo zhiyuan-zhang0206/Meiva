@@ -23,6 +23,7 @@ from collections.abc import Iterable, Mapping
 from dataclasses import dataclass, replace
 from datetime import datetime, timedelta
 from pathlib import Path
+from typing import TypeGuard
 
 __all__ = [
     "Alarm",
@@ -191,14 +192,26 @@ def _fold(home: Path, *, now: datetime) -> dict[str, Alarm]:
         except OSError:
             continue
         for raw in text.splitlines():
-            try:
-                row = json.loads(raw)
-            except ValueError:
-                continue
-            if not isinstance(row, dict):
-                continue
-            seen = _apply(seen, row)
+            row = _parsed(raw)
+            if row is not None:
+                seen = _apply(seen, row)
     return seen
+
+
+# meiva:note
+# One line of a day file, as far as the fold is allowed to trust it: a line that is not JSON, or
+# not a JSON object, is nothing rather than an error. The guard is the boundary -- it states the
+# row type the rest of the module reads, instead of leaving the parser's answer unknown.
+def _is_object(value: object) -> TypeGuard[dict[str, object]]:
+    return isinstance(value, dict)
+
+
+def _parsed(raw: str) -> dict[str, object] | None:
+    try:
+        decoded: object = json.loads(raw)
+    except ValueError:
+        return None
+    return decoded if _is_object(decoded) else None
 
 
 # meiva:note
