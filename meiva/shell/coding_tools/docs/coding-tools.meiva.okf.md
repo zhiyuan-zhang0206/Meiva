@@ -57,7 +57,9 @@ skill directory, whose `references/` holds the collaboration contract and whose
   reads the file, backs it up under a caller-given stamp, publishes the merged document
   atomically and keeps its permission bits. An unparsable file is backed up and refused,
   never overwritten.
-- `_common` — shared by the launchers: workspace path resolution; `LaunchSite`, the facts a
+- `_common` — shared by the launchers: workspace path resolution, where a typed path has its
+  leading `~` expanded against the home the launcher entry read and a `~someone` spelling is
+  refused on stderr instead of read from the user database; `LaunchSite`, the facts a
   launch reads from the process once (the agent's shell sessions, the home, the cluster
   home, the directory a new session starts in, the machine facts, and the clock: the timers
   every wait spends and the instant a first-run preset is stamped with); a new owner generation

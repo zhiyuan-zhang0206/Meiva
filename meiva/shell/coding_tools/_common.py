@@ -105,18 +105,31 @@ def cluster_sessions() -> SessionBackend:
     return get_shell_backend(home=cluster_home())
 
 
-def resolve_dir(dir_path: str) -> Path:
+# meiva:note
+# A path a person typed, with its leading `~` expanded against `user_home` — the home the entry read
+# and handed down, never this process's own. A `~someone/...` spelling names another account's home,
+# which the invocation did not read, so it is refused on stderr like a missing workspace: one line,
+# exit 1, rather than a traceback out of a launcher script.
+def placed_path(raw: str, *, user_home: Path) -> Path:
+    try:
+        return expand_home(raw, user_home=user_home)
+    except ValueError as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        raise SystemExit(1) from exc
+
+
+def resolve_dir(dir_path: str, *, user_home: Path) -> Path:
     """The workspace directory, resolved; exit 1 when it does not exist."""
-    path = Path(dir_path).expanduser().resolve()
+    path = placed_path(dir_path, user_home=user_home).resolve()
     if not path.is_dir():
         print(f"error: {path} is not a directory or does not exist", file=sys.stderr)
         raise SystemExit(1)
     return path
 
 
-def resolve_file(workspace: Path, raw: str) -> Path:
+def resolve_file(workspace: Path, raw: str, *, user_home: Path) -> Path:
     """Absolute path stays as given; a relative one is taken against the workspace."""
-    path = Path(raw).expanduser()
+    path = placed_path(raw, user_home=user_home)
     return path.resolve() if path.is_absolute() else (workspace / path).resolve()
 
 

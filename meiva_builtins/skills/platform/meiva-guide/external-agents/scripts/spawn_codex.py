@@ -95,9 +95,10 @@ def main(argv: list[str]) -> int:
     args = parser.parse_args(argv)
     _validate_args(parser, args)
 
-    workspace = Path(args.workspace).expanduser().resolve()
+    user_home = Path.home()
+    workspace = codex.placed_path(args.workspace, user_home=user_home).resolve()
     if not args.status and not args.cancel_generation:
-        workspace = codex.resolve_dir(args.workspace)
+        workspace = codex.resolve_dir(args.workspace, user_home=user_home)
     if args.status:
         return codex.status(workspace, mode=args.mode, force=args.force_mode)
     if args.cancel_generation:
@@ -105,8 +106,10 @@ def main(argv: list[str]) -> int:
     tasks_file = None
     work_file = None
     if args.prompt is None:
-        tasks_file = codex.resolve_file(workspace, args.tasks_file or "tasks.md")
-        work_file = codex.resolve_file(workspace, args.work_file or "work.md")
+        tasks_file = codex.resolve_file(
+            workspace, args.tasks_file or "tasks.md", user_home=user_home
+        )
+        work_file = codex.resolve_file(workspace, args.work_file or "work.md", user_home=user_home)
     provenance = None
     prompt = None
     if args.prompt is not None:

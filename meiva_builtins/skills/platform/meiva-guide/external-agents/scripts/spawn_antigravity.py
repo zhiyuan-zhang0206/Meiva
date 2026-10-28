@@ -127,12 +127,17 @@ def main(argv: list[str]) -> int:
     if args.stop is not None:
         return antigravity.stop(args.stop, antigravity_server=antigravity_server)
 
-    workspace = antigravity.resolve_dir(args.workspace)
+    user_home = Path.home()
+    workspace = antigravity.resolve_dir(args.workspace, user_home=user_home)
     tasks_file = None
     work_file = None
     if args.prompt is None:
-        tasks_file = antigravity.resolve_file(workspace, args.tasks_file or "tasks.md")
-        work_file = antigravity.resolve_file(workspace, args.work_file or "work.md")
+        tasks_file = antigravity.resolve_file(
+            workspace, args.tasks_file or "tasks.md", user_home=user_home
+        )
+        work_file = antigravity.resolve_file(
+            workspace, args.work_file or "work.md", user_home=user_home
+        )
     provenance = None
     prompt = None
     if args.prompt is not None:
