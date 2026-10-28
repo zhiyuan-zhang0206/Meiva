@@ -396,15 +396,11 @@ function HomeContent({
             maxWidthCss={contentColumnMaxWidth}
             pinnedRight={
               isLarge && activeId != null && !contextPanelOpen ? (
-                <ContextPanelToggle
-                  open={false}
-                  iconClass="size-4"
-                  onToggle={openContextPanel}
-                />
+                <ContextPanelToggle open={false} onToggle={openContextPanel} />
               ) : null
             }
           >
-            {contextAvailable && <ContextPanelToggle open={false} onToggle={openContext} iconClass="size-4" />}
+            {contextAvailable && <ContextPanelToggle open={false} onToggle={openContext} />}
           </HeaderBar>
           <div className="relative z-20 bg-background">
             <PendingStrip items={visiblePendingMessages} maxWidthCss={composerMaxWidth} />

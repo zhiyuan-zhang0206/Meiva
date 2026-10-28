@@ -11,6 +11,7 @@ import { cleanup, render as rtlRender, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { ALERTS_QUERY_KEY } from "@/lib/notifications/use-alerts";
+import { BOTTOM_BAND_CLASS, BOTTOM_BAND_ROW_CLASS, ICON_SIZE_CLASS } from "@/lib/layout/layout";
 import { apiWrapper, cacheOnlyApi } from "@/lib/transport/tests/api/api-provider";
 
 import { SidebarFooter } from "./footer";
@@ -50,6 +51,33 @@ describe("SidebarFooter icon row", () => {
     render(<SidebarFooter activeAgentId={7} />);
     const bell = screen.getByTestId("alerts-badge");
     expect(bell.parentElement?.firstElementChild).toBe(bell);
+  });
+
+  it("draws the shared bottom band, not a padding of its own", () => {
+    // meiva:note
+    // The footer's rule is the bottom rule of the screen: it must be the same
+    // band the composer draws, or the two land on different y (user ruling
+    // 2026-10-29 — they were 16px apart). Its padding box is the same 36px
+    // control row the composer's controls sit in.
+    // meiva:link ui/web/src/docs/frontend-components/home-shell-chrome/home-shell-chrome.meiva.okf.md
+    render(<SidebarFooter activeAgentId={7} />);
+    const footer = screen.getByTestId("sidebar-footer");
+    expect(footer.className).toContain(BOTTOM_BAND_CLASS);
+    expect(footer.className.split(" ")).toContain("border-t");
+    expect(footer.className).not.toContain("py-1.5");
+    const row = footer.firstElementChild!;
+    expect(row.className).toContain(BOTTOM_BAND_ROW_CLASS);
+  });
+
+  it("puts every row glyph on the one shell icon size", () => {
+    // meiva:note
+    // User ruling 2026-10-29: the composer's upload glyph (16px) is the
+    // reference for the shell's icon buttons.
+    // meiva:link ui/web/src/docs/frontend-components/home-shell-chrome/home-shell-chrome.meiva.okf.md
+    render(<SidebarFooter activeAgentId={7} />);
+    const icons = screen.getByTestId("sidebar-footer").querySelectorAll("svg");
+    expect(icons.length).toBeGreaterThan(0);
+    for (const icon of icons) expect(icon.getAttribute("class")).toContain(ICON_SIZE_CLASS);
   });
 
   it("puts Fleet, Insights and Control after the bell", () => {

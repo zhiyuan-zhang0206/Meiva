@@ -13,7 +13,7 @@ import { Bell } from "lucide-react";
 import { useTranslations } from "next-intl";
 import Link from "next/link";
 
-import { FLEX } from "@/lib/layout/layout";
+import { FLEX, ICON_SIZE_CLASS } from "@/lib/layout/layout";
 import { useAlerts } from "@/lib/notifications/use-alerts";
 import { cn } from "@/lib/format/utils";
 
@@ -49,7 +49,7 @@ export function AlertsBadge() {
         FLEX,
       )}
     >
-      <Bell className="size-4" aria-hidden />
+      <Bell className={ICON_SIZE_CLASS} aria-hidden />
       <AlertsCountPill count={unresolved} testId="alerts-badge-count" />
     </Link>
   );

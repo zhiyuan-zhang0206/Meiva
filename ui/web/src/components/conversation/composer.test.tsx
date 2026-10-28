@@ -4,6 +4,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { api } from "@/lib/transport/api";
 import { interactionTimingResetForTest, noteTurnStart } from "@/lib/format/interaction-timing";
 import { telemetryTestControl } from "@/lib/telemetry/telemetry";
+import { BOTTOM_BAND_CLASS, BOTTOM_BAND_ROW_CLASS } from "@/lib/layout/layout";
 import { pressEnter } from "@/test-support/enter-key";
 import { Composer } from "./composer";
 let commandList: { name: string; description: string; instruction_hint: string }[] = [];
@@ -273,12 +274,32 @@ describe("Composer button mode dispatch", () => {
     expect(root.className).not.toContain("max-w-[45rem]");
     expect(root.style.maxWidth).toBe("min(40vw, 1280px)");
   });
-  it("uses the tighter bottom gap without changing the textarea height", () => {
+  it("half the gap above the rule, unchanged textarea height", () => {
+    // meiva:note
+    // User ruling 2026-10-29: the message list and the composer used to add up
+    // to a 20px gap above the composer's rule; each side keeps half of it now.
+    // The list's half is the timeline's pb-1.5; this half is the root's pt-1.
+    // meiva:link ui/web/src/docs/frontend-components/home-shell-chrome/home-shell-chrome.meiva.okf.md
     render(<Composer {...baseProps} mode="idle" />);
     const root = screen.getByTestId("composer");
-    expect(root.className).toContain("pb-3");
-    expect(root.className).not.toContain("pb-5");
+    expect(root.className).toContain("pt-1");
+    expect(root.className).not.toContain("pt-2");
     expect(screen.getByTestId("composer-input").className).toContain("min-h-9");
+  });
+  it("draws the shared bottom band: the rule the sidebar footer also draws", () => {
+    // meiva:note
+    // Both columns are bottom-anchored, so the two rules land on the same y only
+    // if both bands are composed the same way — hence one primitive, not two
+    // hand-tuned paddings (user ruling 2026-10-29, before: 16px apart). The band
+    // padding box is the 36px control row, not the composer's root.
+    // meiva:link ui/web/src/docs/frontend-components/home-shell-chrome/home-shell-chrome.meiva.okf.md
+    render(<Composer {...baseProps} mode="idle" />);
+    const band = screen.getByTestId("composer-band");
+    expect(band.className).toContain(BOTTOM_BAND_CLASS);
+    expect(band.className.split(" ")).toContain("border-t");
+    expect(band.className).toContain("pb-3");
+    const row = screen.getByTestId("composer-send").parentElement!;
+    expect(row.className).toContain(BOTTOM_BAND_ROW_CLASS);
   });
   it("root maxWidth follows the maxWidthCss prop (setting-derived)", () => {
     render(<Composer {...baseProps} mode="idle" maxWidthCss="min(60vw, 1280px)" />);
