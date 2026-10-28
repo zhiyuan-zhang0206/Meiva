@@ -84,11 +84,14 @@ bash scripts/content_lint/code_comments/check.sh changed
 bash scripts/content_lint/code_comments/check.sh corpus --format markdown
 ```
 
-`validate` proves every link. `check` also rejects free prose; without paths it
-selects the whole supported tree and reports the outstanding legacy inventory.
-`changed` is the gate: it strictly checks only notes that are new, rewritten,
-copied or moved into another declaration, while still validating every link.
-Unchanged legacy prose does not block an unrelated code edit.
+`validate` proves every link across the repository, and CI runs it on every change.
+`check` also rejects free prose; without paths it selects the whole supported tree
+and reports the outstanding legacy inventory. `changed` is the commit gate: it
+strictly checks only notes that are new, rewritten, copied or moved into another
+declaration, and it scans only the sources its Git comparison selected — so a commit
+costs what it touched, and a link broken by a file the change does not touch is
+caught by CI's `validate` rather than by the commit hook. Unchanged legacy prose does
+not block an unrelated code edit.
 
 `corpus` extracts every note as JSONL, or as a Markdown report with the length
 distribution, repeated text and per-note links. A pull request that adds or
