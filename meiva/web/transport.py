@@ -14,7 +14,7 @@ import urllib.parse
 import urllib.request
 from typing import Any
 
-from base.clock import SYSTEM_TIMERS
+from base.clock import SYSTEM_TIMERS, Timers
 from base.host.net.resilience import retry
 from meiva.web.errors import WebError
 from meiva.web.failures import connection_failed_message, http_failed_message, non_json_message
@@ -33,19 +33,24 @@ _DETAIL_MAX = 200
 # Reserves request slots `1/qps` seconds apart across the threads of one batch; late wake-ups
 # and network scheduling can compress actual request gaps. A qps of zero or below does not pace.
 class RateLimiter:
-    def __init__(self, qps: float) -> None:
+    # meiva:note
+    # `timers` is the clock the slot spacing is measured and waited on, handed in with the deps of
+    # the batch that paces on it; a limiter built without one falls back to the process timers.
+    def __init__(self, qps: float, *, timers: Timers | None = None) -> None:
         self._interval = 1.0 / qps if qps > 0 else 0.0
+        self._timers = timers
         self._lock = threading.Lock()
         self._next_at = 0.0
 
     def acquire(self) -> None:
         if not self._interval:
             return
+        timers = self._timers or SYSTEM_TIMERS
         with self._lock:
-            slot = reserve(self._next_at, SYSTEM_TIMERS.monotonic(), self._interval)
+            slot = reserve(self._next_at, timers.monotonic(), self._interval)
             self._next_at = slot.next_at
         if slot.wait > 0:
-            SYSTEM_TIMERS.sleep(slot.wait)
+            timers.sleep(slot.wait)
 
 
 def _url(request: HttpRequest) -> str:

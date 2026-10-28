@@ -46,11 +46,14 @@ def search(
     # Imported here: `import meiva` loads this module, and the web stack is not needed until a
     # call is made.
     from meiva import security
+    from meiva.sdk_surface import settings as sdk_settings
     from meiva.web import runner, wiring
 
     return [
         [SearchResult(title=h.title, url=h.url, snippet=h.snippet, kind=h.kind) for h in hits]
-        for hits in runner.run_search(plan, wiring.search_deps(), security.current_delivery())
+        for hits in runner.run_search(
+            plan, wiring.search_deps(), security.current_delivery(), timers=sdk_settings.clock()
+        )
     ]
 
 
@@ -78,7 +81,10 @@ def fetch(
     """
     plan = plans.plan_fetch(targets, max_chars, effort, max_concurrent)
     from meiva import security
+    from meiva.sdk_surface import settings as sdk_settings
     from meiva.web import runner, wiring
 
     delivery = security.current_delivery()
-    return runner.run_fetch(plan, wiring.fetch_deps(delivery), delivery)
+    return runner.run_fetch(
+        plan, wiring.fetch_deps(delivery), delivery, timers=sdk_settings.clock()
+    )
