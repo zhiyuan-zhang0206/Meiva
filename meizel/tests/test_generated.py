@@ -9,7 +9,7 @@ from meizel.contracts.cli import main
 from meizel.graph.model import Code, Diagnostic, MeizelError
 from meizel.graph.universe import load_universe
 from meizel.roles import roles
-from meizel.tests.synthetic import RepoFactory, run
+from meizel.tests.synthetic import RepoFactory, run, seat
 
 ROOT_MANIFEST = '[roles]\napplication = ["a", "b", "c"]\ntooling = ["tool"]\ntests = ["t"]\n'
 BASE = {
@@ -44,11 +44,11 @@ def test_a_region_is_generated_and_then_fresh(make_repo: RepoFactory) -> None:
             "generated names region is stale; run `python -m meizel roles write`",
         )
     ]
-    assert generated.write(root) == ["conf.toml"]
+    assert generated.write(seat(root).repo) == ["conf.toml"]
     text = (root / "conf.toml").read_text(encoding="utf-8")
     assert '    "a",\n    "b",\n    "c",\n    "tool",\n    # meizel:roles END' in text
     assert findings(root) == []
-    assert generated.write(root) == []
+    assert generated.write(seat(root).repo) == []
 
 
 def test_the_formats_render_names_test_hosts_and_a_regex_alternation(
@@ -62,7 +62,7 @@ def test_the_formats_render_names_test_hosts_and_a_regex_alternation(
             "    # meizel:roles END\n  )$\n",
         },
     )
-    generated.write(root)
+    generated.write(seat(root).repo)
     hosts = (root / "hosts.toml").read_text(encoding="utf-8")
     assert '    "t",\n    "a/**/tests",\n    "b/**/tests",\n    "c/**/tests",\n' in hosts
     assert "    a|b|c|tool\n" in (root / "re.yaml").read_text(encoding="utf-8")
@@ -73,7 +73,7 @@ def test_the_dirs_format_renders_shell_words(make_repo: RepoFactory) -> None:
         make_repo,
         {"scan.sh": "ROOTS=(\n  # meizel:roles BEGIN dirs application\n  # meizel:roles END\n)\n"},
     )
-    generated.write(root)
+    generated.write(seat(root).repo)
     assert (root / "scan.sh").read_text(encoding="utf-8").splitlines()[2:5] == [
         "  a/",
         "  b/",
@@ -95,7 +95,7 @@ def test_the_dirs_format_renders_shell_words(make_repo: RepoFactory) -> None:
 def test_unbalanced_markers_fail_fast(make_repo: RepoFactory, text: str, fragment: str) -> None:
     root = repo(make_repo, {"conf.toml": text})
     with pytest.raises(MeizelError, match=fragment):
-        generated.regions(root)
+        generated.regions(seat(root))
 
 
 def test_an_unknown_format_or_role_fails_fast(make_repo: RepoFactory) -> None:
@@ -157,7 +157,7 @@ def test_a_toml_array_is_reported_unless_generated(
             "gen.toml": toml_with("names application"),
         },
     )
-    generated.write(root)
+    generated.write(seat(root).repo)
     found = findings(root)
     assert [diagnostic.path for diagnostic in found] == ["copy.toml"]
 

@@ -6,13 +6,13 @@ import pytest
 
 from meizel.contracts.analysis import analyze, diagnose, load_policy
 from meizel.graph.model import Code, Sources
-from meizel.graph.universe import Universe
+from meizel.graph.universe import GitRepo, Universe
 from meizel.language.scan import FileScan, scan_source
-from meizel.tests.synthetic import RepoFactory, analysis_of, commit, git, run, write
+from meizel.tests.synthetic import RepoFactory, analysis_of, commit, git, run, seat, write
 
 
 def scan(tmp_path: Path, source: str, path: str = "app.py") -> FileScan:
-    return scan_source(Universe(tmp_path, [path]), path, source.encode(), Sources())
+    return scan_source(Universe(GitRepo(tmp_path), [path]), path, source.encode(), Sources())
 
 
 @pytest.mark.parametrize(
@@ -155,7 +155,7 @@ def test_type_cast_is_independent_of_purity_and_partial_scan(
             "meizel.toml": f'[purity]\n"." = "{mode}"\n',
         }
     )
-    found = analyze(root, jobs=1, changed=["app.py"])
+    found = analyze(seat(root), jobs=1, changed=["app.py"])
     assert [d.path for d in found.diagnostics if d.code is Code.TYPE_CAST] == ["app.py"]
     assert found.scans["app.py"].type_casts
 
@@ -229,7 +229,7 @@ def test_process_pool_roundtrip_preserves_source_sites(make_repo: RepoFactory) -
     root = make_repo(
         {f"app_{i}.py": "from typing import cast\ncast(int, value)\n" for i in range(200)}
     )
-    found = analyze(root, jobs=2)
+    found = analyze(seat(root), jobs=2)
     assert len(found.scans) == 200
     assert all(len(scanned.type_casts) == 1 for scanned in found.scans.values())
     assert len([d for d in found.diagnostics if d.code is Code.TYPE_CAST]) == 200

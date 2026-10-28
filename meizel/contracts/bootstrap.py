@@ -12,7 +12,7 @@ from meizel.contracts.manifest import manifest_path
 from meizel.contracts.rule import Projection
 from meizel.graph.graphs import cycle_through, strongly_connected, transitive_reduction_size
 from meizel.graph.model import Fact
-from meizel.graph.universe import EditPlan, Universe, is_private_module, parent_of
+from meizel.graph.universe import EditPlan, GitRepo, Universe, is_private_module, parent_of
 
 __all__ = ["bootstrap", "is_test_path", "plan_bootstrap", "render_manifest"]
 
@@ -225,7 +225,7 @@ def plan_bootstrap(analysis: Analysis, out: Path) -> tuple[EditPlan, str]:
     return EditPlan(writes=writes, dirs=(out,)), message
 
 
-def bootstrap(root: Path, out: Path, jobs: int | None = None) -> str:
-    plan, message = plan_bootstrap(analyze(root, jobs=jobs), out)
+def bootstrap(repo: GitRepo, out: Path, jobs: int | None = None) -> str:
+    plan, message = plan_bootstrap(analyze(repo.universe(), jobs=jobs), out)
     plan.apply()
     return message

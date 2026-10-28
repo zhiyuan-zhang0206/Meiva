@@ -14,7 +14,7 @@ from meizel.contracts.policy import changes as policy_changes
 from meizel.contracts.policy import load_policy, policy_at
 from meizel.contracts.sync import sync_manifests
 from meizel.graph.model import Diagnostic, MeizelError
-from meizel.graph.universe import load_universe, toplevel
+from meizel.graph.universe import GitRepo, toplevel
 from meizel.source_evidence import load_report
 
 __all__ = ["main"]
@@ -59,7 +59,7 @@ def _print_verdict(diagnostics: list[Diagnostic], limit: int | None) -> None:
 
 
 def _run_check(
-    root: Path,
+    repo: GitRepo,
     base: Path,
     raw_paths: list[str],
     limit: int | None,
@@ -68,9 +68,10 @@ def _run_check(
 ) -> int:
     if changed is not None and raw_paths:
         raise MeizelError("--changed judges the files it names; it cannot be combined with paths")
+    root = repo.root
     targets = [_relative_target(root, base, p) for p in raw_paths]
     only = None if changed is None else frozenset(_relative_target(root, base, p) for p in changed)
-    analysis = analyze(root, jobs=jobs, changed=only)
+    analysis = analyze(repo.universe(), jobs=jobs, changed=only)
     known = analysis.universe
     for raw, target in zip(raw_paths, targets, strict=True):
         if target and target not in known.files and target not in known.dirs:
@@ -221,13 +222,14 @@ def _add_debt_parser(commands: argparse._SubParsersAction[argparse.ArgumentParse
     )
 
 
-def _run_sync(root: Path, base: Path, args: argparse.Namespace) -> int:
+def _run_sync(repo: GitRepo, base: Path, args: argparse.Namespace) -> int:
     if not (args.prune or args.declare):
         raise MeizelError("sync needs --prune or --declare")
     if args.paths and not args.declare:
         raise MeizelError("paths narrow --declare only")
+    root = repo.root
     targets = [_relative_target(root, base, p) for p in args.paths] if args.paths else None
-    lines, left = sync_manifests(root, targets, args.jobs, do_declare=bool(args.declare))
+    lines, left = sync_manifests(repo, targets, args.jobs, do_declare=bool(args.declare))
     for line in lines:
         print(line)
     for line in left:
@@ -245,29 +247,33 @@ def main(argv: list[str] | None = None) -> int:
     args = _build_parser().parse_args(argv)
     try:
         base = args.repo if args.repo is not None else Path.cwd()
-        root = args.repo if args.repo is not None else toplevel(base)
+        # meiva:note
+        # The one repository seat of the command: this checkout, read through one value that the
+        # commands are handed instead of a path they would build their own from. A command that
+        # judges reads a snapshot of it (`repo.universe()`).
+        repo = GitRepo(args.repo if args.repo is not None else toplevel(base))
+        root = repo.root
         if args.command == "check":
-            return _run_check(root, base, args.paths, args.limit, args.jobs, args.changed)
+            return _run_check(repo, base, args.paths, args.limit, args.jobs, args.changed)
         if args.command == "debt":
             targets = [_relative_target(root, base, p) for p in getattr(args, "paths", ())]
-            return run_debt(root, targets, args, args.jobs)
+            return run_debt(repo, targets, args, args.jobs)
         if args.command == "policy":
-            for line in policy_changes(
-                policy_at(root, args.against), load_policy(load_universe(root))[0]
-            ):
+            universe = repo.universe()
+            for line in policy_changes(policy_at(universe, args.against), load_policy(universe)[0]):
                 print(line)
             return 0
         if args.command == "explain":
-            analysis = analyze(root, jobs=args.jobs)
+            analysis = analyze(repo.universe(), jobs=args.jobs)
             node = _relative_target(root, base, args.path)
             report = load_report(root, set(analysis.universe.files), node, args.typescript_index)
             print(explain(analysis, node, report))
             return 0
         if args.command == "roles":
-            return enumerations.run_roles(root, args.mode, tuple(getattr(args, "role_names", ())))
+            return enumerations.run_roles(repo, args.mode, tuple(getattr(args, "role_names", ())))
         if args.command == "sync":
-            return _run_sync(root, base, args)
-        print(bootstrap(root, args.out, args.jobs))
+            return _run_sync(repo, base, args)
+        print(bootstrap(repo, args.out, args.jobs))
         return 0
     except MeizelError as error:
         print(f"meizel: {error}", file=sys.stderr)

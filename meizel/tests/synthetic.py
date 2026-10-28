@@ -15,6 +15,7 @@ import pytest
 from meizel.contracts.analysis import POLICY, Analysis, analyze, render_policy
 from meizel.contracts.cli import main
 from meizel.graph.model import Diagnostic
+from meizel.graph.universe import Universe, load_universe
 from meizel.owners import decisions
 from meizel.state.ambient_state.tests.conftest import (
     synthetic_ambient_allowlists as synthetic_ambient_allowlists,
@@ -92,8 +93,14 @@ def build_repo(base: Path, files: Mapping[str, str]) -> Path:
     return root
 
 
+# meiva:note
+# The repository seat the checker reads a synthetic checkout through.
+def seat(root: Path) -> Universe:
+    return load_universe(root)
+
+
 def analysis_of(root: Path) -> Analysis:
-    return analyze(root, jobs=1)
+    return analyze(seat(root), jobs=1)
 
 
 def verdict(root: Path) -> set[tuple[str, str]]:

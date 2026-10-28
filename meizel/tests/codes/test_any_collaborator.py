@@ -6,13 +6,13 @@ import pytest
 
 from meizel.contracts.analysis import analyze, diagnose, load_policy, scan_all
 from meizel.graph.model import AnyCollaboratorSite, Code, Sources
-from meizel.graph.universe import Universe
+from meizel.graph.universe import GitRepo, Universe
 from meizel.language.scan import FileScan, scan_source
-from meizel.tests.synthetic import RepoFactory, analysis_of, commit, git, run, write
+from meizel.tests.synthetic import RepoFactory, analysis_of, commit, git, run, seat, write
 
 
 def scan(tmp_path: Path, source: str, path: str = "app.py") -> FileScan:
-    return scan_source(Universe(tmp_path, [path]), path, source.encode("utf-8"), Sources())
+    return scan_source(Universe(GitRepo(tmp_path), [path]), path, source.encode("utf-8"), Sources())
 
 
 def test_canonical_aliases_match_parameter_return_and_class_field(tmp_path: Path) -> None:
@@ -226,7 +226,7 @@ def test_entry_consistency_and_process_pool_across_200_files(make_repo: RepoFact
             for index in range(200)
         }
     )
-    found = analyze(root, jobs=2)
+    found = analyze(seat(root), jobs=2)
     assert len(found.scans) == 200
     assert all(len(scanned.any_collaborators) == 1 for scanned in found.scans.values())
     assert len([d for d in found.diagnostics if d.code is Code.ANY_COLLABORATOR]) == 200
