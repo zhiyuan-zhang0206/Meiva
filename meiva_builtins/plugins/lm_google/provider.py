@@ -275,21 +275,6 @@ PROVIDER = ProviderContribution(
             source_url="https://ai.google.dev/gemini-api/docs/pricing",
             source_checked_at="2026-06-27",
             vendor="google",
-            periods=(
-                PricePeriod(
-                    effective_from=None,
-                    effective_until=None,
-                    tiers=(
-                        PriceTier(
-                            input_tokens_min=0,
-                            input_tokens_max=None,
-                            cache_miss="1.5",
-                            cache_hit="0.15",
-                            output="9.0",
-                        ),
-                    ),
-                ),
-            ),
         ),
         "gemini-flash-lite-latest": PriceRates(
             cache_miss=0.30,
@@ -298,21 +283,6 @@ PROVIDER = ProviderContribution(
             source_url="https://ai.google.dev/gemini-api/docs/pricing",
             source_checked_at="2026-09-10",
             vendor="google",
-            periods=(
-                PricePeriod(
-                    effective_from=None,
-                    effective_until=None,
-                    tiers=(
-                        PriceTier(
-                            input_tokens_min=0,
-                            input_tokens_max=None,
-                            cache_miss="0.30",
-                            cache_hit="0.03",
-                            output="2.50",
-                        ),
-                    ),
-                ),
-            ),
         ),
         "gemini-3.1-pro-preview": PriceRates(
             cache_miss=2.0,

@@ -14,9 +14,7 @@ if TYPE_CHECKING:
 from base.lm.effort import validate_effort
 from base.lm.provider_api import (
     BuildContext,
-    PricePeriod,
     PriceRates,
-    PriceTier,
     ProviderBinding,
     ProviderContribution,
 )
@@ -163,21 +161,6 @@ PROVIDER = ProviderContribution(
             # Xiaomi publishes one unbounded per-1M price row for V2.6 Pro
             # (https://mimo.mi.com/docs/price/pay-as-you-go, checked
             # 2026-09-22), with no promotional period.
-            periods=(
-                PricePeriod(
-                    effective_from=None,
-                    effective_until=None,
-                    tiers=(
-                        PriceTier(
-                            input_tokens_min=0,
-                            input_tokens_max=None,
-                            cache_miss="0.435",
-                            cache_hit="0.0036",
-                            output="0.87",
-                        ),
-                    ),
-                ),
-            ),
         ),
         "mimo-v2.6-pro-ultraspeed": PriceRates(
             cache_miss=4.35,
@@ -189,21 +172,6 @@ PROVIDER = ProviderContribution(
             # Xiaomi publishes one unbounded per-1M price row for V2.6 Pro
             # UltraSpeed (https://mimo.mi.com/docs/price/pay-as-you-go,
             # checked 2026-09-22), with no promotional period.
-            periods=(
-                PricePeriod(
-                    effective_from=None,
-                    effective_until=None,
-                    tiers=(
-                        PriceTier(
-                            input_tokens_min=0,
-                            input_tokens_max=None,
-                            cache_miss="4.35",
-                            cache_hit="0.036",
-                            output="8.70",
-                        ),
-                    ),
-                ),
-            ),
         ),
     },
 )

@@ -246,21 +246,6 @@ PROVIDER = ProviderContribution(
             source_url="https://docs.z.ai/guides/overview/pricing",
             source_checked_at="2026-08-23",
             vendor="zhipu",
-            periods=(
-                PricePeriod(
-                    effective_from=None,
-                    effective_until=None,
-                    tiers=(
-                        PriceTier(
-                            input_tokens_min=0,
-                            input_tokens_max=None,
-                            cache_miss="1.40",
-                            cache_hit="0.26",
-                            output="4.40",
-                        ),
-                    ),
-                ),
-            ),
         ),
         "glm-5.3-flash": PriceRates(
             cache_miss=0.15,
@@ -307,21 +292,6 @@ PROVIDER = ProviderContribution(
             vendor="zhipu",
             # The pricing page lists FlashX with plain per-1M rates and no
             # promotional period (checked 2026-09-19) — one unbounded base tier.
-            periods=(
-                PricePeriod(
-                    effective_from=None,
-                    effective_until=None,
-                    tiers=(
-                        PriceTier(
-                            input_tokens_min=0,
-                            input_tokens_max=None,
-                            cache_miss="0.37",
-                            cache_hit="0.075",
-                            output="1.25",
-                        ),
-                    ),
-                ),
-            ),
         ),
     },
 )
