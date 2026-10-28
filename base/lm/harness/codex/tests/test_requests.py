@@ -22,14 +22,14 @@ def test_the_handshake_names_this_client() -> None:
     assert (CLIENT_NAME, CLIENT_VERSION, INITIALIZED) == ("meiva-codex-bridge", "1", "initialized")
 
 
-def test_a_recorded_thread_is_resumed_by_its_id_alone() -> None:
+def test_a_recorded_thread_resumes_with_the_selected_model() -> None:
     assert open_thread_request(
         "thread-old",
         cwd="/elsewhere",
         model="gpt-5-codex",
         approval_policy="untrusted",
         sandbox="read-only",
-    ) == ("thread/resume", {"threadId": "thread-old"})
+    ) == ("thread/resume", {"threadId": "thread-old", "model": "gpt-5-codex"})
 
 
 def test_a_fresh_thread_carries_the_callers_policy_and_inherits_the_environment() -> None:

@@ -18,6 +18,33 @@ from base.lm.harness.events import (
 from base.lm.harness.registry import FileSessionRegistry, SessionRecord
 
 
+@pytest.mark.parametrize("resume", [None, "previous-thread"])
+async def test_selected_model_and_effort_reach_every_codex_turn(
+    tmp_path: Path, resume: str | None
+) -> None:
+    harness = await start(
+        tmp_path,
+        server=FakeAppServer(thread_id=resume or "thread-1"),
+        resume=resume,
+        model="gpt-6-astra",
+        reasoning_effort="ultra",
+    )
+    try:
+        for index in range(2):
+            ticket = harness.session.submit(f"turn {index}")
+            await harness.turn_started(index + 1)
+            params = [
+                params for method, params in harness.server.requests if method == "turn/start"
+            ][-1]
+            assert params["model"] == "gpt-6-astra"
+            assert params["effort"] == "ultra"
+            harness.server.message("done")
+            harness.server.complete()
+            await asyncio.wait_for(ticket.outcome(), 2)
+    finally:
+        await harness.stop()
+
+
 async def test_start_binds_the_thread_and_handshakes(tmp_path: Path) -> None:
     registry = FileSessionRegistry(tmp_path / "registry")
     harness = await start(tmp_path, registry=registry, agent_id=3)

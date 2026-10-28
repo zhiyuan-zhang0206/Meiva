@@ -141,7 +141,7 @@ class AgentRuntime:
     """
 
     fingerprint: str
-    llm: BaseChatModel
+    llm: BaseChatModel | None
     # meiva:note
     # The turn engine this runtime was built for, and the external session it drives.
     # Both belong to the cached runtime because an external session is expensive to
@@ -232,7 +232,14 @@ def admit_stored_model(
     """
     model = pins.get("llm_model") or default_model
     try:
-        validate_model_launch(model=model, catalog=catalog, keys=keys, llm_override=llm_override)
+        validate_model_launch(
+            model=model,
+            config=pins,
+            catalog=catalog,
+            keys=keys,
+            llm_override=llm_override,
+            harness=Harness(stored.harness),
+        )
     except ValueError as exc:
         stats.config_rejected += 1
         if rejected.get(agent_id) != stored.fingerprint:
@@ -407,7 +414,16 @@ async def build_runtime(
         llm_override=llm_override,
         permissions_notice_key=permissions_notice_key,
         home=home,
+        harness=harness,
     )
+    model = None
+    effort = None
+    if harness is not Harness.MEIVA:
+        model, effort = catalog.models[slices.brain.llm_model].harness_model(
+            slices.brain.llm_model,
+            harness,
+            slices.overrides.reasoning_effort,
+        )
     return AgentRuntime(
         fingerprint=fingerprint,
         llm=llm,
@@ -421,6 +437,8 @@ async def build_runtime(
             machine=machine,
             environ=harness_environ,
             root=harness_root,
+            model=model,
+            reasoning_effort=effort,
             skip_permissions=slices.harness_cli.harness_skip_permissions,
             contributions=contributions,
             unsolicited=unsolicited,
@@ -439,6 +457,8 @@ def harness_bridge_for(
     machine: str,
     environ: Mapping[str, str],
     root: BridgeRootValues,
+    model: str | None = None,
+    reasoning_effort: str | None = None,
     skip_permissions: bool = True,
     contributions: Iterable[HarnessContribution] = (),
     unsolicited: UnsolicitedSink | None = None,
@@ -460,6 +480,8 @@ def harness_bridge_for(
         registration_ttl_seconds=registration_ttl_seconds,
         environ=environ,
         root=root,
+        model=model,
+        reasoning_effort=reasoning_effort,
         skip_permissions=skip_permissions,
         contributions=contributions,
         unsolicited=unsolicited,

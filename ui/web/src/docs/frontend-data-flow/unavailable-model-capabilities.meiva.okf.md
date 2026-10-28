@@ -16,7 +16,7 @@ existing meanings. See [[base/agents/observation/docs/observation.meiva.okf.md]]
 
 For a Meiva harness, the composer explains null capability and enables native
 image attachment only for true. External harness adapters currently accept text,
-so a configured history model with vision never enables native image attachment
+so a selected model with vision never enables native image attachment
 for them. Pasted and dropped images use ordinary file delivery instead, with a
 workspace file receipt rather than a model-image thumbnail. File delivery remains
 a separate upload/receipt operation. Native image attachments belong to the

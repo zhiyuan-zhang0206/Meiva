@@ -37,7 +37,7 @@ def require_current_launch_row(
     launch_attempt_id: UUID,
     local_machine: str,
     launchable: Collection[Harness],
-) -> None:
+) -> Harness:
     if row is None or (row.machine, row.last_launch_attempt_id, row.status) != (
         local_machine,
         launch_attempt_id,
@@ -56,3 +56,4 @@ def require_current_launch_row(
             f"launcher yet; only {sorted(item.value for item in launchable)} can "
             f"start a session today"
         )
+    return harness

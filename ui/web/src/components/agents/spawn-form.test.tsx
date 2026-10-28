@@ -156,6 +156,7 @@ const modelsWithTwoLadders = (): ModelsResponse => ({
     "gpt-5.6": {
       provider: "gpt",
       harnesses: ["meiva", "codex"],
+      harness_settings: { codex: { reasoning_effort_options: ["low", "medium", "high"], reasoning_effort_default: "medium" } },
       context_window: 400_000,
       reasoning_effort_options: ["minimal", "low", "medium", "high"],
       reasoning_effort_default: "medium",
@@ -184,8 +185,7 @@ async function table(): Promise<HTMLElement> {
 
 function column(element: HTMLElement, name: string): HTMLElement {
   return within(element).getByRole("list", {
-    name: name === MODEL_COLUMN ? /^(Model|Meiva history model)$/
-      : name === EFFORT_COLUMN ? /^(Effort|Summary effort)$/ : name,
+    name,
   });
 }
 
@@ -280,17 +280,39 @@ describe("spawn table", () => {
     expect(within(column(form, EFFORT_COLUMN)).queryByRole("button")).toBeNull();
   });
 
-  it.each(["claude_code", "codex"] as const)("names %s model choices as Meiva history settings", async (harness) => {
+  it.each(["claude_code", "codex"] as const)("names %s execution model and effort choices", async (harness) => {
     vi.mocked(api.getSystemStatus).mockResolvedValue(singleMachineStatus());
     vi.mocked(api.getModels).mockResolvedValue(modelsWithTwoLadders());
     setMockSetting("behavior.spawn_harness", harness);
     wrap();
     const form = await table();
-    expect(within(form).getByRole("list", { name: "Meiva history model" })).toBeTruthy();
-    expect(within(form).getByRole("list", { name: "Summary effort" })).toBeTruthy();
-    expect(within(form).queryByRole("list", { name: "Model" })).toBeNull();
+    expect(within(form).getByRole("list", { name: "Model" })).toBeTruthy();
+    expect(within(form).getByRole("list", { name: "Effort" })).toBeTruthy();
+    expect(within(form).queryByText("Meiva history model")).toBeNull();
+    expect(within(form).queryByText("Summary effort")).toBeNull();
     pick(form, HARNESS_COLUMN, "Meiva");
     expect(within(form).getByRole("list", { name: "Model" })).toBeTruthy();
+  });
+
+  it("uses the harness effort ladder and sends the execution selection", async () => {
+    const catalog = modelsWithTwoLadders();
+    catalog.models["gpt-5.6"].harness_settings = {
+      codex: { reasoning_effort_options: ["low", "ultra"], reasoning_effort_default: "low" },
+    };
+    vi.mocked(api.getSystemStatus).mockResolvedValue(singleMachineStatus());
+    vi.mocked(api.getModels).mockResolvedValue(catalog);
+    setMockSetting("behavior.spawn_reasoning_effort", "minimal");
+    const { onSpawn } = wrap();
+    const form = await table();
+    pick(form, HARNESS_COLUMN, "Codex");
+    expect(selected(form, EFFORT_COLUMN, "low")).toBe(true);
+    expect(within(column(form, EFFORT_COLUMN)).queryByRole("button", { name: "minimal" })).toBeNull();
+    expect(within(column(form, EFFORT_COLUMN)).queryByRole("button", { name: "medium" })).toBeNull();
+    pick(form, EFFORT_COLUMN, "ultra");
+    fireEvent.click(screen.getByRole("button", { name: "Spawn" }));
+    expect(onSpawn).toHaveBeenCalledWith({
+      machine: "test-host", harness: "codex", model: "gpt-5.6", reasoning_effort: "ultra",
+    });
   });
 
   it("a pick that is never spawned does not become the stored config", async () => {

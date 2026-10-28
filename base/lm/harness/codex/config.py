@@ -28,6 +28,7 @@ APPROVAL_DECISIONS = ("accept", "decline")
 class CodexConfig:
     cwd: Path
     model: str | None = None
+    reasoning_effort: str | None = None
     sandbox: str = "danger-full-access"
     approval_policy: str = "never"
     approval_decision: str = "accept"

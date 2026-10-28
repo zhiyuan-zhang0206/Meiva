@@ -29,6 +29,10 @@ def option_values(
         values["cli_path"] = cli_path
     if "thinking" in option_fields:
         values["thinking"] = {"type": "adaptive", "display": "summarized"}
+    if config.reasoning_effort is not None:
+        if "effort" not in option_fields:
+            raise ValueError("the installed Claude SDK does not support the selected effort")
+        values["effort"] = config.reasoning_effort
     values.update(
         model=config.model,
         cwd=str(config.cwd),
