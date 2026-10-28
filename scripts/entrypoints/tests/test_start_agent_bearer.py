@@ -1,14 +1,12 @@
-"""`scripts/entrypoints/agent.py` presents the cluster secret on its bootstrap spawn.
-
-The keyed spawn route is authenticated; the bootstrap-spawn script must carry
-`Authorization: Bearer <cluster secret>` or a multi-host gateway 401s it, plus the
-keyed-admission headers.
-"""
+# meiva:note
+# The bootstrap spawn's request must carry `Authorization: Bearer <cluster secret>` or a
+# multi-host gateway 401s it, plus the keyed-admission headers; the request itself is built in
+# `scripts/entrypoints/spawn_request.py`.
 
 from __future__ import annotations
 
 from base.cluster.machine import GatewayAccess
-from scripts.entrypoints import agent as mod
+from scripts.entrypoints import spawn_request as mod
 
 
 def test_start_agent_posts_with_bearer() -> None:
