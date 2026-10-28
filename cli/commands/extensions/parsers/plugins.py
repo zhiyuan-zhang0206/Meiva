@@ -8,6 +8,7 @@ parser building never loads Settings (see ``cli.main`` module docstring)."""
 from __future__ import annotations
 
 import argparse
+import sys
 
 
 def _duration(value: str) -> str:
@@ -116,7 +117,12 @@ def _h_skill_update(args: argparse.Namespace) -> int:
 def _h_skill_upgrade(args: argparse.Namespace) -> int:
     from cli.commands.extensions.skill import cmd_skill_upgrade
 
-    return cmd_skill_upgrade(args.name, home=args.runtime.home, now=args.runtime.clock.now())
+    return cmd_skill_upgrade(
+        args.name,
+        home=args.runtime.home,
+        now=args.runtime.clock.now(),
+        user_home=args.runtime.session.user_home,
+    )
 
 
 def _h_plugins_enable(args: argparse.Namespace) -> int:
@@ -133,11 +139,21 @@ def _h_plugins_disable(args: argparse.Namespace) -> int:
 
 def _h_skill_install(args: argparse.Namespace) -> int:
     from base.cluster.machine.boot import gateway_access_from_boot
+    from base.paths.expand import expand_home
     from cli.commands.extensions.packages.cluster_registry import HttpExtensionGateway
     from cli.commands.extensions.skill import cmd_skill_install
 
+    # meiva:note
+    # `source` is what the person typed: a leading `~` names the home this invocation read, and a
+    # `~someone/...` spelling names another account's home, which this command refuses to guess.
+    try:
+        source = str(expand_home(args.source, user_home=args.runtime.session.user_home))
+    except ValueError as exc:
+        print(f"[meiva skill install] {exc}", file=sys.stderr)
+        return 1
+
     return cmd_skill_install(
-        args.source,
+        source,
         args.ref,
         args.path,
         accept_risk=args.accept_risk,
@@ -174,9 +190,19 @@ def _h_skill_register(args: argparse.Namespace) -> int:
 
 
 def _h_skill_scan(args: argparse.Namespace) -> int:
+    from base.paths.expand import expand_home
     from cli.commands.extensions.skill import cmd_skill_scan
 
-    return cmd_skill_scan(args.target, home=args.runtime.home)
+    # meiva:note
+    # Same rule as the install verbs: `~` is the home this invocation read; `~someone/...` is
+    # refused rather than resolved through the password database.
+    try:
+        target = str(expand_home(args.target, user_home=args.runtime.session.user_home))
+    except ValueError as exc:
+        print(f"[meiva skill scan] {exc}", file=sys.stderr)
+        return 1
+
+    return cmd_skill_scan(target, home=args.runtime.home)
 
 
 def _h_skill_trust(args: argparse.Namespace) -> int:

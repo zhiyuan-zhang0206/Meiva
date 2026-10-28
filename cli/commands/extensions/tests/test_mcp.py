@@ -76,7 +76,7 @@ def test_list_without_machine_config_flags_builtins_readonly(
     unit_home: Path, capsys: pytest.CaptureFixture
 ) -> None:
     # no machine config yet → only built-in / plugin-bundled servers, all read-only here
-    assert cmd_mcp_list(home=unit_home) == 0
+    assert cmd_mcp_list(home=unit_home, user_home=unit_home) == 0
     out = capsys.readouterr().out  # pyright: ignore[reportUnknownMemberType]
     assert "machine" not in out
     assert "read-only here" in out
@@ -84,7 +84,7 @@ def test_list_without_machine_config_flags_builtins_readonly(
 
 def test_list_shows_machine_entry(unit_home: Path, capsys: pytest.CaptureFixture) -> None:
     cmd_mcp_add("foo", None, "npx", ["-y", "server-foo"], [], home=unit_home)
-    assert cmd_mcp_list(home=unit_home) == 0
+    assert cmd_mcp_list(home=unit_home, user_home=unit_home) == 0
     out = capsys.readouterr().out  # pyright: ignore[reportUnknownMemberType]
     assert "foo" in out and "machine" in out
     assert "npx -y server-foo" in out
@@ -97,7 +97,7 @@ def test_list_reports_invalid_overlay_without_successful_disabled_listing(
     assert cmd_mcp_add("foo", None, "npx", ["server-foo"], [], home=unit_home) == 0
     capsys.readouterr()
     (unit_home / "mcp_enabled.json").write_text(content)
-    assert cmd_mcp_list(home=unit_home) == 1
+    assert cmd_mcp_list(home=unit_home, user_home=unit_home) == 1
     output = capsys.readouterr()
     assert "mcp_enabled.json" in output.err
     assert "[disabled]" not in output.out

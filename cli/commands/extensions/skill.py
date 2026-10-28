@@ -145,7 +145,7 @@ def cmd_skill_scan(target: str, *, home: Path) -> int:
     from base.packages.extensions import install_registry
     from base.packages.skills import scan, scan_package
 
-    root = Path(target).expanduser()
+    root = Path(target)
     if not root.is_dir():
         root = paths.skills_dir(home) / target
     if not root.is_dir():
@@ -638,7 +638,7 @@ def cmd_skill_update(
     )
 
 
-def cmd_skill_upgrade(name: str, *, home: Path, now: datetime) -> int:
+def cmd_skill_upgrade(name: str, *, home: Path, now: datetime, user_home: Path) -> int:
     """`meiva skill upgrade <name>` — re-fetch an installed skill package
     from its recorded git source (a private skills repo and other user
     installs).
@@ -662,7 +662,8 @@ def cmd_skill_upgrade(name: str, *, home: Path, now: datetime) -> int:
             file=sys.stderr,
         )
         return 1
-    if pkg.source is None:
+    recorded = pkg.source
+    if recorded is None:
         print(
             f"[meiva skill upgrade] '{name}' has no recorded source "
             f"(a hand-registered local skill is not updatable by design).",
@@ -677,8 +678,13 @@ def cmd_skill_upgrade(name: str, *, home: Path, now: datetime) -> int:
             "replacing it with the fetched source."
         )
 
+    # meiva:note
+    # `acquire_source` takes a value already placed; `pkg` keeps the recorded text, so the
+    # re-registration below does not migrate a legacy `~/...` row to an absolute path.
     try:
-        acquired = acquire_source(pkg.source, pkg.ref)
+        acquired = acquire_source(
+            install_registry.placed_source(recorded, user_home=user_home), pkg.ref
+        )
     except (subprocess.CalledProcessError, SourcePathNotFoundError) as e:
         detail = e.stderr.strip() if isinstance(e, subprocess.CalledProcessError) else str(e)
         print(f"[meiva skill upgrade] {detail}", file=sys.stderr)

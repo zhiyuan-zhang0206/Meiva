@@ -337,7 +337,10 @@ def test_upgrade_preserves_injected_env(unit_home: Path, tmp_path: Path, uv: UvB
         ),
         encoding="utf-8",
     )
-    assert cmd_mcp_upgrade("acme", uv=uv, home=unit_home, now=datetime.now(UTC)) == 0
+    assert (
+        cmd_mcp_upgrade("acme", uv=uv, home=unit_home, now=datetime.now(UTC), user_home=unit_home)
+        == 0
+    )
     assert load_mcp_config(home=unit_home)["acme"]["description"] == "v2"  # code/config refreshed
     assert _landed_env(unit_home)["TOKEN"] == _FAKE_TOKEN  # secret survived
 
@@ -361,7 +364,10 @@ def test_upgrade_refuses_when_the_landed_env_cannot_be_read(
     landed = unit_home / "mcps" / "acme" / ".mcp.json"
     landed.write_text("{not json", encoding="utf-8")
 
-    assert cmd_mcp_upgrade("acme", uv=uv, home=unit_home, now=datetime.now(UTC)) == 1
+    assert (
+        cmd_mcp_upgrade("acme", uv=uv, home=unit_home, now=datetime.now(UTC), user_home=unit_home)
+        == 1
+    )
     err = capsys.readouterr().err
     assert "refusing to re-land" in err
     assert landed.read_text(encoding="utf-8") == "{not json"
@@ -376,7 +382,7 @@ def test_list_flags_installed_origin(
     cmd_mcp_install(
         str(_make_mcp_package(tmp_path)), None, None, uv=uv, home=unit_home, now=datetime.now(UTC)
     )
-    assert cmd_mcp_list(home=unit_home) == 0
+    assert cmd_mcp_list(home=unit_home, user_home=unit_home) == 0
     out = capsys.readouterr().out  # pyright: ignore[reportUnknownMemberType]
     assert "acme" in out and "installed" in out
 
@@ -416,14 +422,20 @@ def test_upgrade_refetches_from_source(unit_home: Path, tmp_path: Path, uv: UvBu
         ),
         encoding="utf-8",
     )
-    assert cmd_mcp_upgrade("acme", uv=uv, home=unit_home, now=datetime.now(UTC)) == 0
+    assert (
+        cmd_mcp_upgrade("acme", uv=uv, home=unit_home, now=datetime.now(UTC), user_home=unit_home)
+        == 0
+    )
     assert load_mcp_config(home=unit_home)["acme"]["description"] == "v2"
 
 
 def test_upgrade_rejects_non_mcp(
     unit_home: Path, capsys: pytest.CaptureFixture, uv: UvBuild
 ) -> None:
-    assert cmd_mcp_upgrade("nope", uv=uv, home=unit_home, now=datetime.now(UTC)) == 1
+    assert (
+        cmd_mcp_upgrade("nope", uv=uv, home=unit_home, now=datetime.now(UTC), user_home=unit_home)
+        == 1
+    )
 
 
 def test_a_failed_build_removes_the_landed_copy_and_registers_nothing(
@@ -464,7 +476,12 @@ def test_a_failed_upgrade_build_is_reported(
     assert cmd_mcp_install(str(pkg), None, None, uv=uv, home=unit_home, now=datetime.now(UTC)) == 0
     failing = fake_uv_build(tmp_path / "bin2", fail_with="network unreachable")
 
-    assert cmd_mcp_upgrade("acme", uv=failing, home=unit_home, now=datetime.now(UTC)) == 1
+    assert (
+        cmd_mcp_upgrade(
+            "acme", uv=failing, home=unit_home, now=datetime.now(UTC), user_home=unit_home
+        )
+        == 1
+    )
 
     assert "[meiva mcp upgrade] uv sync failed: network unreachable" in capsys.readouterr().err
 
@@ -551,7 +568,10 @@ def test_upgrade_dead_source_reports_and_fails(
     pkg = _make_mcp_package(tmp_path, "orphan", module="orphan_mcp")
     assert cmd_mcp_install(str(pkg), None, None, uv=uv, home=unit_home, now=datetime.now(UTC)) == 0
     shutil.rmtree(pkg)  # the source dir vanishes (like a deleted worktree)
-    assert cmd_mcp_upgrade("orphan", uv=uv, home=unit_home, now=datetime.now(UTC)) == 1
+    assert (
+        cmd_mcp_upgrade("orphan", uv=uv, home=unit_home, now=datetime.now(UTC), user_home=unit_home)
+        == 1
+    )
 
 
 def test_mcp_list_flags_dead_source(unit_home: Path, tmp_path: Path, capsys, uv: UvBuild) -> None:
@@ -560,6 +580,81 @@ def test_mcp_list_flags_dead_source(unit_home: Path, tmp_path: Path, capsys, uv:
     pkg = _make_mcp_package(tmp_path, "orphan2", module="orphan2_mcp")
     assert cmd_mcp_install(str(pkg), None, None, uv=uv, home=unit_home, now=datetime.now(UTC)) == 0
     shutil.rmtree(pkg)
-    assert cmd_mcp_list(home=unit_home) == 0
+    assert cmd_mcp_list(home=unit_home, user_home=unit_home) == 0
     err = capsys.readouterr().err  # pyright: ignore[reportUnknownMemberType]
     assert "recorded source path no longer exists" in err
+
+
+# meiva:note
+# A row recorded as `~/mine/orphan3-src` (written before sources were recorded absolute) is alive in
+# the home that holds it and dead in one that does not; a `~account` spelling names a home no
+# invocation reads, so it reads dead.
+def test_mcp_list_places_a_recorded_tilde_source_before_deciding_it_is_dead(
+    unit_home: Path, tmp_path: Path, capsys: pytest.CaptureFixture[str], uv: UvBuild
+) -> None:
+    src = _make_mcp_package(tmp_path / "home" / "mine", "orphan3", module="orphan3_mcp")
+    assert cmd_mcp_install(str(src), None, None, uv=uv, home=unit_home, now=datetime.now(UTC)) == 0
+    _set_source(unit_home, "orphan3", "~/mine/orphan3-src")
+    capsys.readouterr()
+
+    assert cmd_mcp_list(home=unit_home, user_home=tmp_path / "home") == 0
+    assert "recorded source path no longer exists" not in capsys.readouterr().err
+
+    assert cmd_mcp_list(home=unit_home, user_home=tmp_path / "elsewhere") == 0
+    assert "recorded source path no longer exists" in capsys.readouterr().err
+
+    _set_source(unit_home, "orphan3", "~someone/mine/orphan3-src")
+    assert cmd_mcp_list(home=unit_home, user_home=tmp_path / "home") == 0
+    assert "recorded source path no longer exists" in capsys.readouterr().err
+
+
+# meiva:note
+# A row recorded as `~/mine/orphan4-src` (written before sources were recorded absolute) is
+# re-fetched from the directory that spelling names in the caller's home — a home that does not
+# hold it reports the dead source instead of reading some other account's directory.
+def test_upgrade_places_a_recorded_tilde_source_against_the_callers_home(
+    unit_home: Path, tmp_path: Path, capsys: pytest.CaptureFixture[str], uv: UvBuild
+) -> None:
+    home = tmp_path / "home"
+    src = _make_mcp_package(home / "mine", "orphan4", module="orphan4_mcp", desc="v1")
+    assert cmd_mcp_install(str(src), None, None, uv=uv, home=unit_home, now=datetime.now(UTC)) == 0
+    _set_source(unit_home, "orphan4", "~/mine/orphan4-src")
+    (src / ".mcp.json").write_text(
+        json.dumps(
+            {
+                "mcpServers": {
+                    "orphan4": {
+                        "command": ".venv/bin/python",
+                        "args": ["-m", "orphan4_mcp"],
+                        "description": "v2",
+                    }
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    assert (
+        cmd_mcp_upgrade(
+            "orphan4",
+            uv=uv,
+            home=unit_home,
+            now=datetime.now(UTC),
+            user_home=tmp_path / "elsewhere",
+        )
+        == 1
+    )
+    assert "no such local directory" in capsys.readouterr().err
+
+    assert (
+        cmd_mcp_upgrade("orphan4", uv=uv, home=unit_home, now=datetime.now(UTC), user_home=home)
+        == 0
+    )
+    assert load_mcp_config(home=unit_home)["orphan4"]["description"] == "v2"
+
+
+# meiva:note
+# Rewrite a recorded row's source: stands in for a row written before sources were recorded absolute.
+def _set_source(home: Path, name: str, source: str) -> None:
+    with reg.mutate(home=home) as registry:
+        next(p for p in registry.packages if p.name == name).source = source

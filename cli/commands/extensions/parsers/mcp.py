@@ -33,7 +33,7 @@ def _h_mcp_add(args: argparse.Namespace) -> int:
 def _h_mcp_list(args: argparse.Namespace) -> int:
     from cli.commands.extensions.mcp import cmd_mcp_list
 
-    return cmd_mcp_list(home=args.runtime.home)
+    return cmd_mcp_list(home=args.runtime.home, user_home=args.runtime.session.user_home)
 
 
 def _h_mcp_remove(args: argparse.Namespace) -> int:
@@ -55,10 +55,20 @@ def _h_mcp_disable(args: argparse.Namespace) -> int:
 
 
 def _h_mcp_install(args: argparse.Namespace) -> int:
+    from base.paths.expand import expand_home
     from cli.commands.extensions.mcp import UvBuild, cmd_mcp_install
 
+    # meiva:note
+    # `source` is what the person typed: a leading `~` names the home this invocation read, and a
+    # `~someone/...` spelling names another account's home, which this command refuses to guess.
+    try:
+        source = str(expand_home(args.source, user_home=args.runtime.session.user_home))
+    except ValueError as exc:
+        print(f"[meiva mcp install] {exc}", file=sys.stderr)
+        return 1
+
     return cmd_mcp_install(
-        source=args.source,
+        source=source,
         ref=args.ref,
         path=args.path,
         env_pairs=args.env,
@@ -86,6 +96,7 @@ def _h_mcp_upgrade(args: argparse.Namespace) -> int:
         ),
         home=args.runtime.home,
         now=args.runtime.clock.now(),
+        user_home=args.runtime.session.user_home,
     )
 
 
