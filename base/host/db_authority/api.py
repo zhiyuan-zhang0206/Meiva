@@ -31,6 +31,7 @@ from collections.abc import Mapping
 from pathlib import Path
 
 from base.host.db_authority.delivery import active_generation
+from base.host.db_authority.digests import token_digest
 from base.host.db_authority.ledger import authority_dir, ledger_path, load_ledger, read_secret
 from base.host.db_authority.model import CLASSES, GenerationClass
 from base.host.net.auth import API_TOKEN_ENV as API_TOKEN_ENV
@@ -41,11 +42,6 @@ _TELEMETRY_LABEL = b"meiva-telemetry-ingress/1"
 
 # A caller-owned cache follows atomic ledger replacement on the next read.
 type AcceptanceCache = dict[Path, tuple[tuple[int, int, int], dict[GenerationClass, str]]]
-
-
-def token_digest(token: str) -> str:
-    """SHA-256 of a bearer token: the form an accepting side keeps and compares."""
-    return hashlib.sha256(token.encode()).hexdigest()
 
 
 def telemetry_token(cluster_secret: str) -> str:
