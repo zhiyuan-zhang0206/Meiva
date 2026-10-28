@@ -198,8 +198,18 @@ class GitRepo:
             raise MeizelError(f"git grep failed: {done.stderr.strip()}")
         return sorted(done.stdout.splitlines())
 
+    # meiva:note
+    # The file index of this checkout: the tracked regular files and the directories above them.
+    # Built here, where the repository is read, so a caller holds the value instead of a path it
+    # would rebuild the index from.
+    def universe(self) -> Universe:
+        return load_universe(self.root)
+
     @contextmanager
-    def checkout(self, ref: str) -> Generator[Path]:
+    def checkout(self, ref: str) -> Generator[GitRepo]:
+        # meiva:note
+        # The same seat over a detached checkout of `ref`, removed on exit: a caller compares two
+        # trees by holding two seats, never by rebuilding one from a path it made.
         if ref.startswith("-"):
             raise MeizelError(f"{ref}: not a git ref")
         parent = _mkdtemp(self.root, "meizel-base-")
@@ -207,7 +217,7 @@ class GitRepo:
         try:
             self.run_bytes("worktree", "add", "--detach", str(target), ref)
             try:
-                yield target
+                yield GitRepo(target)
             finally:
                 self.run_bytes("worktree", "remove", "--force", str(target))
         finally:
@@ -256,8 +266,9 @@ class Universe:
         {"__init__.py", "index.ts", "index.tsx", "index.mts", "index.cts"}
     )
 
-    def __init__(self, root: Path, tracked: list[str]) -> None:
-        self.root = root
+    def __init__(self, repo: GitRepo, tracked: list[str]) -> None:
+        self.repo = repo
+        self.root = repo.root
         self.files: frozenset[str] = frozenset(tracked)
         children: dict[str, set[str]] = {}
         for path in tracked:
@@ -357,4 +368,6 @@ def tracked_files(repo_root: Path, *, include_untracked: bool = False) -> list[s
 
 
 def load_universe(root: Path) -> Universe:
-    return Universe(root, sorted({path for path in tracked_files(root) if _is_regular(root, path)}))
+    return Universe(
+        GitRepo(root), sorted({path for path in tracked_files(root) if _is_regular(root, path)})
+    )

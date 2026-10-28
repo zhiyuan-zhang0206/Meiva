@@ -26,7 +26,7 @@ from meizel.graph.model import (
     MeizelError,
     Sources,
 )
-from meizel.graph.universe import GitRepo, Universe
+from meizel.graph.universe import Universe
 from meizel.language.scan import FileScan, module_bindings
 from meizel.lint_common import is_test_path
 
@@ -376,7 +376,7 @@ def _spread(
 # of the names are read, so the cost follows the readers, not the repository.
 def _followed(universe: Universe, readers: Mapping[str, AmbientKind]) -> dict[str, AmbientKind]:
     exported = _origins(universe, readers)
-    repo = GitRepo(universe.root)
+    repo = universe.repo
     seen: set[str] = set()
     candidates: set[str] = set()
     parsed: dict[str, dict[str, str]] = {}

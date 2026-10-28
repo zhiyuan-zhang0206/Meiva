@@ -4,12 +4,12 @@ from pathlib import Path
 
 from meizel.allowances import parse
 from meizel.graph.model import Code, FactKind
-from meizel.graph.universe import Universe
+from meizel.graph.universe import GitRepo, Universe
 from meizel.language.typescript import scan_typescript, typescript_files
 
 
 def _make_universe(files: list[str]) -> Universe:
-    return Universe(Path("/repo"), files)
+    return Universe(GitRepo(Path("/repo")), files)
 
 
 def test_typescript_imports_and_aliases() -> None:

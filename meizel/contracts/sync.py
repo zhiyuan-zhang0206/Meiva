@@ -171,31 +171,32 @@ def plan_removals(root: Path, texts: Mapping[str, str], removals: Removals) -> E
     return EditPlan(writes=writes, deletes=tuple(deletes))
 
 
-def _apply(root: Path, removals: Removals) -> None:
-    repo = GitRepo(root)
+def _apply(repo: GitRepo, removals: Removals) -> None:
     texts = {relative: repo.load_text(relative) for relative in removals}
-    plan_removals(root, texts, removals).apply()
+    plan_removals(repo.root, texts, removals).apply()
 
 
-def prune(root: Path, jobs: int | None = None) -> list[str]:
+def prune(repo: GitRepo, jobs: int | None = None) -> list[str]:
     """Remove stale declarations until none remain; returns a line per removal."""
     changes: list[str] = []
     while True:
-        removals, found = _collect(analyze(root, jobs=jobs))
+        # meiva:note
+        # Each round reads the tree the previous round left, not the snapshot it started from.
+        removals, found = _collect(analyze(repo.universe(), jobs=jobs))
         if not removals:
             return changes
         changes.extend(found)
-        _apply(root, {manifest_path(d): sections for d, sections in removals.items()})
+        _apply(repo, {manifest_path(d): sections for d, sections in removals.items()})
 
 
 def sync_manifests(
-    root: Path, targets: list[str] | None, jobs: int | None, *, do_declare: bool
+    repo: GitRepo, targets: list[str] | None, jobs: int | None, *, do_declare: bool
 ) -> tuple[list[str], list[str]]:
-    lines = list(prune(root, jobs))
+    lines = list(prune(repo, jobs))
     if not do_declare:
         return lines, []
-    lines.extend(prune_debt(root, jobs))
-    declared, left = declare(root, targets, jobs)
+    lines.extend(prune_debt(repo, jobs))
+    declared, left = declare(repo, targets, jobs)
     lines.extend(declared)
     return lines, left
 
@@ -204,9 +205,9 @@ def sync_manifests(
 # Normalize only a disposable historical checkout. Decode first, so malformed or unknown input
 # fails before any write. Retired metadata remains in the returned Policy for migration and diff;
 # every surviving policy entry and its reason keeps its original text for the current scanner.
-def prepare_policy_snapshot(root: Path) -> Policy:
+def prepare_policy_snapshot(repo: GitRepo) -> Policy:
     try:
-        policy = load_snapshot(root)
+        policy = load_snapshot(repo.root)
     except ValueError as error:
         raise MeizelError(f"cannot read the manifests of snapshot: {error}") from error
     text = "\n".join(policy.lines) + ("\n" if policy.lines else "")
@@ -216,5 +217,5 @@ def prepare_policy_snapshot(root: Path) -> Policy:
     if remaining:
         raise MeizelError(f"cannot normalize {POLICY} snapshot: {remaining[0]}")
     if current != text:
-        _apply(root, {POLICY: removals})
+        _apply(repo, {POLICY: removals})
     return policy

@@ -8,7 +8,6 @@ from collections import defaultdict
 from collections.abc import Collection, Iterable, Mapping, Sequence
 from concurrent.futures import ProcessPoolExecutor
 from dataclasses import dataclass, field
-from pathlib import Path
 
 from meizel.contracts.ambient_read import (
     ambient_diagnostics,
@@ -33,7 +32,7 @@ from meizel.contracts.rule import (
     stale_exports,
 )
 from meizel.graph.model import Code, DebtKey, Diagnostic, Fact, FactKind, Patch, Sources
-from meizel.graph.universe import Universe, load_universe
+from meizel.graph.universe import Universe
 from meizel.language.fixtures import FixtureIndex, fixture_facts
 from meizel.language.scan import (
     EXTERNAL_FORMS,
@@ -675,9 +674,8 @@ def diagnose(scan: FileScan, manifests: dict[str, Manifest], *, policy: Policy) 
 # Generated role lists and copies are checked globally in both modes, using this universe
 # and the parsed root roles; they do not widen the fact scan.
 def analyze(
-    root: Path, *, jobs: int | None = None, changed: Collection[str] | None = None
+    universe: Universe, *, jobs: int | None = None, changed: Collection[str] | None = None
 ) -> Analysis:
-    universe = load_universe(root)
     manifests, diagnostics = load_manifests(universe)
     policy, policy_problems = load_policy(universe)
     diagnostics.extend(policy_problems)
