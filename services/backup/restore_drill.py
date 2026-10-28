@@ -16,7 +16,7 @@ import shutil
 import subprocess
 import tempfile
 import time
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -35,6 +35,7 @@ from base.db.code_version_gate import ProcessDbGate
 from base.db.config import db_config_from_boot
 from base.host.db_authority.model import GATEWAY_GROUP, RUNNER_GROUP
 from base.log import logger
+from base.native_process.child_env import inherited_process_env
 from base.native_process.code_version import CodeVersion
 from base.native_process.loaded_commit import LoadedCommit
 from base.paths import meiva_home
@@ -93,7 +94,9 @@ def _ensure_restore_roles(db_url: str) -> None:
 
 # meiva:note
 # Load the custom dump into the disposable target database.
-def restore_dump(raw_dump: Path, db_url: str, *, base: Path, home: Path) -> None:
+def restore_dump(
+    raw_dump: Path, db_url: str, *, base: Path, home: Path, env: Mapping[str, str]
+) -> None:
     proc = subprocess.run(  # noqa: S603
         [
             str(pg_tool("pg_restore", home=home)),
@@ -106,6 +109,7 @@ def restore_dump(raw_dump: Path, db_url: str, *, base: Path, home: Path) -> None
         capture_output=True,
         check=False,
         timeout=backup.DUMP_TIMEOUT_S,
+        env=env,
     )
     if proc.returncode != 0:
         raise RuntimeError(
@@ -192,6 +196,7 @@ def run_drill(
     throwaway: ThrowawayConfig,
     foreground: bool = False,
     scratch_root: Path | None = None,
+    env: Mapping[str, str],
 ) -> tuple[RestoreReport, float]:
     """Run the complete decrypt, restore, and verification drill.
 
@@ -205,7 +210,7 @@ def run_drill(
     with tempfile.TemporaryDirectory(prefix="meiva-restore-drill-", dir=scratch_root) as tmp:
         scratch = Path(tmp)
         raw_dump = scratch / "backup.dump"
-        backup.decrypt_artifact(artifact, raw_dump, tree=tree)
+        backup.decrypt_artifact(artifact, raw_dump, tree=tree, env=env)
         required = scratch_space_requirement(raw_dump)
         base = select_throwaway_base(required, override=throwaway.override)
         logger.info(
@@ -216,7 +221,7 @@ def run_drill(
             config=throwaway, base=base, foreground=foreground
         ) as scratch_db_url:
             _ensure_restore_roles(scratch_db_url)
-            restore_dump(raw_dump, scratch_db_url, base=base, home=tree.home)
+            restore_dump(raw_dump, scratch_db_url, base=base, home=tree.home, env=env)
             report = verify_restored_database(scratch_db_url, database_for_url=database_for_url)
     return report, time.monotonic() - started
 
@@ -244,6 +249,7 @@ def main(argv: list[str] | None = None) -> None:
         tree=tree,
         throwaway=throwaway,
         database_for_url=database_for_url,
+        env=inherited_process_env(),
     )
     print(  # noqa: T201 — the operator command's result line, read on stdout
         "restore drill passed: "

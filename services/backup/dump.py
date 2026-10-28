@@ -55,7 +55,6 @@ from base.cluster.dataplane.pg_tools import has_pg_tool as has_pg_tool
 from base.cluster.dataplane.pg_tools import pg_tool
 from base.db import Database, connect_url
 from base.host.private_storage import ensure_private_file
-from base.native_process.child_env import inherited_process_env
 from base.native_process.os_platform import LockTimeoutError, file_lock
 from base.paths.private_dir import ensure_private_dir
 from services.backup.artifact import passphrase as backup_passphrase
@@ -174,7 +173,9 @@ def passwordless_conninfo(db_url: str) -> tuple[str, str]:
     return conninfo, password if isinstance(password, str) else ""
 
 
-def decrypt_artifact(artifact: Path, custom_dump: Path, *, tree: BackupTree) -> None:
+def decrypt_artifact(
+    artifact: Path, custom_dump: Path, *, tree: BackupTree, env: Mapping[str, str]
+) -> None:
     """Decrypt one managed artifact into its raw `pg_dump --format=custom` archive.
 
     The caller owns `custom_dump` and removes it once consumed. The pinned
@@ -188,7 +189,7 @@ def decrypt_artifact(artifact: Path, custom_dump: Path, *, tree: BackupTree) -> 
             decrypt_argv(key_file, artifact, custom_dump),
             capture_output=True,
             check=False,
-            env=inherited_process_env(),
+            env=env,
             timeout=DUMP_TIMEOUT_S,
         )
         if proc.returncode != 0:
@@ -298,6 +299,7 @@ def run_backup(
     timeout_s: float = DUMP_TIMEOUT_S,
     progress: _ProgressSink | None = None,
     progress_interval_s: float = PROGRESS_INTERVAL_S,
+    env: Mapping[str, str],
 ) -> Path:
     with backup_lock(tree):
         directory = tree.managed if staging is None else staging
@@ -312,6 +314,7 @@ def run_backup(
             db_url=db_url,
             directory=directory,
             bound=_Bound(timeout_s, progress, progress_interval_s),
+            env=env,
         )
         if offsite_target is not None:
             # Imported where used: the scheduler daemon imports this module for
@@ -405,6 +408,7 @@ def run_locked_backup(
     db_url: str,
     directory: Path,
     bound: _Bound,
+    env: Mapping[str, str],
 ) -> Path:
     if now.tzinfo is None:
         raise ValueError(f"backup needs a TZ-aware datetime, got naive {now!r}")
@@ -415,7 +419,7 @@ def run_locked_backup(
     files = target_files(directory, dbname, now, {entry.name for entry in directory.iterdir()})
     files.dump_partial.touch(mode=0o600, exist_ok=False)
     try:
-        _dump_and_encrypt(files, db_conninfo, password, tree, bound)
+        _dump_and_encrypt(files, db_conninfo, password, tree, bound, env)
         files.encrypted_partial.rename(files.target)
     finally:
         # Every tool below is a reaped direct child once control returns here,
@@ -427,7 +431,12 @@ def run_locked_backup(
 
 
 def _dump_and_encrypt(
-    files: DumpFiles, db_conninfo: str, password: str, tree: BackupTree, bound: _Bound
+    files: DumpFiles,
+    db_conninfo: str,
+    password: str,
+    tree: BackupTree,
+    bound: _Bound,
+    env: Mapping[str, str],
 ) -> None:
     files.dump_partial.chmod(0o600)
     # The scheduler owns this subprocess in its own process, so its bound
@@ -454,7 +463,7 @@ def _dump_and_encrypt(
             timeout_s=bound.timeout_s,
             label="backup encryption",
             progress=bound.progress,
-            env=inherited_process_env(),
+            env=env,
             size_path=files.encrypted_partial,
             interval_s=bound.interval_s,
         )

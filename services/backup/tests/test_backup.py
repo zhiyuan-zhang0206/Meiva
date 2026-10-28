@@ -55,6 +55,7 @@ def _run(
         keep=_KEEP,
         offsite_target=offsite_target,
         timeout_s=timeout_s,
+        env=dict(os.environ),
     )
 
 
@@ -194,7 +195,7 @@ def test_run_backup_real_dump_and_prune(tree: BackupTree, db_url: str) -> None:
     # meiva:note
     # The fresh dump is restorable input: decrypt, then list its TOC directly.
     restored = tree.root / "listed.dump"
-    backup.decrypt_artifact(path, restored, tree=tree)
+    backup.decrypt_artifact(path, restored, tree=tree, env=dict(os.environ))
     assert restored.read_bytes().startswith(b"PGDMP"), "decrypted artifact is not a custom dump"
     listing = subprocess.run(  # noqa: S603
         [str(backup.pg_tool("pg_restore", home=meiva_home())), "--list", str(restored)],
@@ -309,7 +310,7 @@ def test_a_failed_decrypt_reports_the_exit_and_removes_the_private_key(tree: Bac
     output = tree.root / "backup.dump"
 
     with pytest.raises(RuntimeError, match=r"^backup decrypt exited [1-9]\d*$"):
-        backup.decrypt_artifact(artifact, output, tree=tree)
+        backup.decrypt_artifact(artifact, output, tree=tree, env=dict(os.environ))
 
     assert not list(tree.root.glob(".backup-key-*"))
     assert output.stat().st_mode & 0o777 == 0o600
