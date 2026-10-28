@@ -16,7 +16,7 @@ import { formatTokens } from "@/lib/format/format-number";
 import { cn } from "@/lib/format/utils";
 import { FLEX } from "@/lib/layout/layout";
 import { useTimelineStore } from "@/lib/timeline/timeline-store";
-import { api } from "@/lib/transport/api";
+import { useApi } from "@/lib/transport/transport-context";
 
 const WINDOWS: { labelKey: string; value: number | null }[] = [
   { labelKey: "windowAll", value: null },
@@ -48,10 +48,11 @@ export function InspectReadError({ message, retryLabel, pending, onRetry }: {
 }
 
 export function useAgentHarness(agentId: number) {
+  const client = useApi();
   const { data: roster } = useAgentRoster();
   const selected = useQuery<AgentRow>({
     queryKey: [...AGENT_DETAIL_QUERY_KEY, agentId],
-    queryFn: ({ signal }) => api.getAgent(agentId, signal),
+    queryFn: ({ signal }) => client.getAgent(agentId, signal),
     enabled: false,
     staleTime: Infinity,
     gcTime: 0,

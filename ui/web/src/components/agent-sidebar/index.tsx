@@ -9,7 +9,7 @@ import { PanelLeft, Search, X } from "lucide-react";
 import { useTranslations } from "next-intl";
 import { useCallback, useState } from "react";
 
-import { api } from "@/lib/transport/api";
+import { useApi } from "@/lib/transport/transport-context";
 import { useBreakpoint } from "@/lib/layout/breakpoint";
 import { errMsg } from "@/lib/contracts/errors";
 import { useSidebarCollapsed, useSidebarViewMode } from "@/lib/agents/sidebar";
@@ -31,6 +31,7 @@ import { FLEX, FLEX_COL } from "@/lib/layout/layout";
 import { cn } from "@/lib/format/utils";
 
 export function AgentSidebar(props: Props) {
+  const client = useApi();
   // R4 layer 4: one responsive mechanism — breakpoint + conditional render.
   // The desktop rail and the mobile drawer are mutually exclusive surfaces;
   // only the active one mounts (the old always-mounted pair hid the inactive
@@ -87,7 +88,7 @@ export function AgentSidebar(props: Props) {
   );
 
   const handleRename = (id: number, label: string) => {
-    api
+    client
       .patchAgentLabel(id, label)
       .then(() => queryClient.invalidateQueries({ queryKey: ["agents"] }))
       .catch((err: unknown) => {

@@ -5,7 +5,7 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { cleanup, fireEvent, screen, waitFor } from "@testing-library/react";
 import { renderWithBrowser } from "@/test-support/render";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi, beforeEach } from "vitest";
 
 import { OpenNoticeDetail } from "./open-notice-detail";
 import { pressEnter } from "@/test-support/enter-key";
@@ -13,12 +13,16 @@ import { formatAbsolute, formatRelative } from "@/lib/format/time";
 import { USER_SETTING_DEFAULTS, type OpenNotice } from "@/lib/contracts/types";
 import { SETTINGS_QUERY_KEY } from "@/lib/state/use-user-settings";
 
+import { resetTransport, transport } from "@/test-support/fake-api";
+beforeEach(() => {
+  resetTransport();
+  transport.resolveNotice.mockImplementation(resolveNotice);
+  transport.getSettings.mockImplementation(() => Promise.resolve({ settings: [] }));
+});
+
 const { resolveNotice } = vi.hoisted(() => ({
   resolveNotice:
     vi.fn<(agentId: number, noticeId: number, body: unknown, key?: string) => Promise<{ status: string }>>(),
-}));
-vi.mock("@/lib/transport/api", () => ({
-  api: { resolveNotice, getSettings: () => Promise.resolve({ settings: [] }) },
 }));
 
 function renderNotice(ui: React.ReactElement) {
@@ -381,7 +385,6 @@ describe("OpenNoticeDetail — Enter sends", () => {
     expect(resolveNotice).not.toHaveBeenCalled();
     expect(field().value).toBe("\u4f60\u597d");
   });
-
 
   it("Enter in a blank or whitespace-only answer sends nothing", () => {
     renderNotice(<OpenNoticeDetail agentId={7} notice={ntc({ question: { type: "text" } })} />);

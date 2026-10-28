@@ -23,7 +23,6 @@ import Link from "next/link";
 import { useParams, useRouter } from "next/navigation";
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 
-import { api } from "@/lib/transport/api";
 import { useWallNow } from "@/lib/transport/transport-context";
 import { useDisplayLimit } from "@/lib/format/display-limits";
 import { readScrollMemory, saveScrollMemory, type SavedScroll } from "@/lib/layout/scroll-memory";
@@ -33,6 +32,7 @@ import { formatUptime } from "@/lib/format/time";
 import { useTimeFormat } from "@/lib/format/use-time-format";
 import { FLEX, FLEX_1, FLEX_COL, MIN_H_0, MIN_W_0 } from "@/lib/layout/layout";
 import { cn } from "@/lib/format/utils";
+import { useApi } from "@/lib/transport/transport-context";
 
 const POLL_MS = 3000;
 // Baked fallbacks: the live default comes from
@@ -80,6 +80,7 @@ function useResolvedTheme(theme: TerminalTheme): "light" | "dark" {
 }
 
 export default function ShellMonitorPage() {
+  const client = useApi();
   // Route params via useParams (a client hook — no Suspend): they are
   // available on the FIRST render, so the query enables immediately and the
   // cached capture paints in the first commit. Reading them off the params
@@ -115,7 +116,7 @@ export default function ShellMonitorPage() {
 
   const { data, error, isFetching, refetch } = useQuery({
     queryKey: ["agent-shell", agentId, sessionId, lines],
-    queryFn: () => api.getAgentShell(agentId, sessionId, lines),
+    queryFn: () => client.getAgentShell(agentId, sessionId, lines),
     refetchInterval: POLL_MS,
     retry: false,
     // Fetch on every entry, not just cold: the entry paints its cached

@@ -9,13 +9,13 @@ import { Section } from "@/components/inspector/inspector-section";
 import { cardConfigFor, TimelineRow } from "@/components/timeline/row";
 import { buttonVariants } from "@/components/ui/button";
 import { useTimelineColors } from "@/lib/timeline/use-timeline-colors";
-import { api } from "@/lib/transport/api";
 import { approx, formatTokensCompact } from "@/lib/format/format-number";
 import { FLEX } from "@/lib/layout/layout";
 import type { BackendTimelineItem, RunTimelineMessage, RunTimelineMessagePart, RunTimelineUnit } from "@/lib/contracts/types";
 import { cn } from "@/lib/format/utils";
 
 import { partsForUnit } from "./model/timeline-model-selection";
+import { useApi } from "@/lib/transport/transport-context";
 
 const PAGE = 50;
 
@@ -141,10 +141,11 @@ export function TimelineMessages({
 
   partTokens?: MessageTokens | null;
 }) {
+  const client = useApi();
   const t = useTranslations("runTimeline");
   const query = useInfiniteQuery({
     queryKey: ["run-timeline-messages", agentId, start, end, snapshot],
-    queryFn: ({ pageParam }) => api.getRunTimelineMessages(agentId, { start: pageParam, end, limit: PAGE, full: true, ...(snapshot === undefined ? {} : { snapshot }) }),
+    queryFn: ({ pageParam }) => client.getRunTimelineMessages(agentId, { start: pageParam, end, limit: PAGE, full: true, ...(snapshot === undefined ? {} : { snapshot }) }),
     initialPageParam: start,
     getNextPageParam: (last) => last.next_start ?? undefined,
   });

@@ -13,11 +13,15 @@ import {
   __resetHighlighterCacheForTests,
   __setHighlighterImportForTests,
 } from "@/components/content/python-code";
-import { api } from "@/lib/transport/api";
 import { useStore } from "@/lib/state/store";
 import type { ScheduleSummary, ScheduleView } from "@/lib/contracts/types";
 
 import SchedulesPage from "./page";
+
+import { resetTransport, transport } from "@/test-support/fake-api";
+beforeEach(() => {
+  resetTransport();
+});
 
 const preloadPythonCodeHighlighter = vi.fn(() => new Promise<never>(() => undefined));
 
@@ -74,8 +78,8 @@ const SCHEDULE: ScheduleSummary = {
 
 describe("SchedulesPage", () => {
   it("ignores Enter while the draft is pending", async () => {
-    vi.spyOn(api, "listSchedules").mockResolvedValue([]);
-    const draft = vi.spyOn(api, "draftSchedule").mockReturnValue(new Promise(() => undefined));
+    transport.listSchedules.mockResolvedValue([]);
+    const draft = transport.draftSchedule.mockReturnValue(new Promise(() => undefined));
     wrap(<SchedulesPage />);
     const input = await screen.findByPlaceholderText(/Describe a scheduled task/);
     fireEvent.change(input, { target: { value: "run nightly" } });
@@ -87,8 +91,8 @@ describe("SchedulesPage", () => {
 
   it("does not inherit automatic mutation retries", async () => {
     useStore.setState({ toast: null });
-    vi.spyOn(api, "listSchedules").mockResolvedValue([]);
-    const draft = vi.spyOn(api, "draftSchedule").mockRejectedValue(new Error("response lost"));
+    transport.listSchedules.mockResolvedValue([]);
+    const draft = transport.draftSchedule.mockRejectedValue(new Error("response lost"));
     const client = new QueryClient({ defaultOptions: { mutations: { retry: 3, retryDelay: 0 } } });
     renderWithBrowser(<QueryClientProvider client={client}><SchedulesPage /></QueryClientProvider>);
     const input = await screen.findByPlaceholderText(/Describe a scheduled task/);
@@ -100,40 +104,40 @@ describe("SchedulesPage", () => {
   });
 
   it("shows loading spinner", () => {
-    vi.spyOn(api, "listSchedules").mockReturnValue(new Promise<ScheduleSummary[]>(() => undefined));
+    transport.listSchedules.mockReturnValue(new Promise<ScheduleSummary[]>(() => undefined));
     wrap(<SchedulesPage />);
     expect(document.querySelector(".animate-spin")).toBeTruthy();
   });
 
   it("shows error state", async () => {
-    vi.spyOn(api, "listSchedules").mockRejectedValue(new Error("fail"));
+    transport.listSchedules.mockRejectedValue(new Error("fail"));
     wrap(<SchedulesPage />);
     await waitFor(() => expect(screen.getByText(/Couldn't load schedules/)).toBeTruthy());
   });
 
   it("shows empty state", async () => {
-    vi.spyOn(api, "listSchedules").mockResolvedValue([]);
+    transport.listSchedules.mockResolvedValue([]);
     wrap(<SchedulesPage />);
     await waitFor(() => expect(screen.getByText(/No schedules configured/)).toBeTruthy());
   });
 
   it("renders a schedule with name + status", async () => {
-    vi.spyOn(api, "listSchedules").mockResolvedValue([SCHEDULE]);
+    transport.listSchedules.mockResolvedValue([SCHEDULE]);
     wrap(<SchedulesPage />);
     await waitFor(() => expect(screen.getByText("memory-arbiter")).toBeTruthy());
     expect(screen.getByText("running")).toBeTruthy();
   });
 
   it("description cell carries a title attribute for the truncated full text", async () => {
-    vi.spyOn(api, "listSchedules").mockResolvedValue([SCHEDULE]);
+    transport.listSchedules.mockResolvedValue([SCHEDULE]);
     wrap(<SchedulesPage />);
     const cell = await screen.findByText("consolidate nightly");
     expect(cell.getAttribute("title")).toBe("consolidate nightly");
   });
 
   it("draft: spawns a writer and navigates to the conversation", async () => {
-    vi.spyOn(api, "listSchedules").mockResolvedValue([]);
-    const draft = vi.spyOn(api, "draftSchedule").mockResolvedValue({ agent_id: 42 });
+    transport.listSchedules.mockResolvedValue([]);
+    const draft = transport.draftSchedule.mockResolvedValue({ agent_id: 42 });
     wrap(<SchedulesPage />);
     await waitFor(() => expect(screen.getByText(/No schedules configured/)).toBeTruthy());
 
@@ -146,8 +150,8 @@ describe("SchedulesPage", () => {
   });
 
   it("toggle: a running schedule stops", async () => {
-    vi.spyOn(api, "listSchedules").mockResolvedValue([SCHEDULE]);
-    const stop = vi.spyOn(api, "stopSchedule").mockResolvedValue({ ...SCHEDULE, script: "x", enabled: false });
+    transport.listSchedules.mockResolvedValue([SCHEDULE]);
+    const stop = transport.stopSchedule.mockResolvedValue({ ...SCHEDULE, script: "x", enabled: false });
     wrap(<SchedulesPage />);
     await waitFor(() => expect(screen.getByText("memory-arbiter")).toBeTruthy());
     fireEvent.click(screen.getByRole("button", { name: "Stop" }));
@@ -155,8 +159,8 @@ describe("SchedulesPage", () => {
   });
 
   it("delete: confirms then deletes", async () => {
-    vi.spyOn(api, "listSchedules").mockResolvedValue([SCHEDULE]);
-    const del = vi.spyOn(api, "deleteSchedule").mockResolvedValue({ status: "deleted" });
+    transport.listSchedules.mockResolvedValue([SCHEDULE]);
+    const del = transport.deleteSchedule.mockResolvedValue({ status: "deleted" });
     window.confirm = vi.fn(() => true);
     wrap(<SchedulesPage />);
     await waitFor(() => expect(screen.getByText("memory-arbiter")).toBeTruthy());
@@ -166,8 +170,8 @@ describe("SchedulesPage", () => {
 
   it("toggle: a stopped schedule starts", async () => {
     const stopped: ScheduleSummary = { ...SCHEDULE, enabled: false, status: "stopped" };
-    vi.spyOn(api, "listSchedules").mockResolvedValue([stopped]);
-    const start = vi.spyOn(api, "startSchedule").mockResolvedValue({ ...FULL, enabled: false });
+    transport.listSchedules.mockResolvedValue([stopped]);
+    const start = transport.startSchedule.mockResolvedValue({ ...FULL, enabled: false });
     wrap(<SchedulesPage />);
     await waitFor(() => expect(screen.getByText("memory-arbiter")).toBeTruthy());
     fireEvent.click(screen.getByRole("button", { name: "Start" }));
@@ -175,8 +179,8 @@ describe("SchedulesPage", () => {
   });
 
   it("restart: calls restartSchedule", async () => {
-    vi.spyOn(api, "listSchedules").mockResolvedValue([SCHEDULE]);
-    const restart = vi.spyOn(api, "restartSchedule").mockResolvedValue(FULL);
+    transport.listSchedules.mockResolvedValue([SCHEDULE]);
+    const restart = transport.restartSchedule.mockResolvedValue(FULL);
     wrap(<SchedulesPage />);
     await waitFor(() => expect(screen.getByText("memory-arbiter")).toBeTruthy());
     fireEvent.click(screen.getByRole("button", { name: "Restart" }));
@@ -184,8 +188,8 @@ describe("SchedulesPage", () => {
   });
 
   it("raw form: fills + creates a schedule", async () => {
-    vi.spyOn(api, "listSchedules").mockResolvedValue([]);
-    const create = vi.spyOn(api, "createSchedule").mockResolvedValue(FULL);
+    transport.listSchedules.mockResolvedValue([]);
+    const create = transport.createSchedule.mockResolvedValue(FULL);
     wrap(<SchedulesPage />);
     await waitFor(() => expect(screen.getByText(/No schedules configured/)).toBeTruthy());
 
@@ -205,7 +209,7 @@ describe("SchedulesPage", () => {
     // Regression coverage for the P2 adversarial-review finding on Meiva #3463:
     // this wiring had no assertion that pointer-enter/focus actually invokes
     // the prefetch, only that a mocked no-op didn't blow up.
-    vi.spyOn(api, "listSchedules").mockResolvedValue([SCHEDULE]);
+    transport.listSchedules.mockResolvedValue([SCHEDULE]);
     wrap(<SchedulesPage />);
     await waitFor(() => expect(screen.getByText("memory-arbiter")).toBeTruthy());
 
@@ -222,10 +226,10 @@ describe("SchedulesPage", () => {
   });
 
   it("expand: shows script, last_error, logs, and run history", async () => {
-    vi.spyOn(api, "listSchedules").mockResolvedValue([SCHEDULE]);
-    vi.spyOn(api, "getSchedule").mockResolvedValue(FULL);
-    vi.spyOn(api, "scheduleLogs").mockResolvedValue({ source: "session", lines: ["log-line-1"] });
-    vi.spyOn(api, "scheduleRuns").mockResolvedValue([
+    transport.listSchedules.mockResolvedValue([SCHEDULE]);
+    transport.getSchedule.mockResolvedValue(FULL);
+    transport.scheduleLogs.mockResolvedValue({ source: "session", lines: ["log-line-1"] });
+    transport.scheduleRuns.mockResolvedValue([
       { id: 7, ran_at: "2026-06-29T09:00:00Z", ok: true, agent_id: 5, note: "did the thing" },
     ]);
     wrap(<SchedulesPage />);
@@ -240,10 +244,10 @@ describe("SchedulesPage", () => {
   it("expand: an in-progress run renders as … (ok=null), an interrupted one as ✗", async () => {
     // QA P3-6: the run-history "…" path (ok IS NULL = genuinely in-progress)
     // must render — a regression here would leave the live-run state blank.
-    vi.spyOn(api, "listSchedules").mockResolvedValue([SCHEDULE]);
-    vi.spyOn(api, "getSchedule").mockResolvedValue(FULL);
-    vi.spyOn(api, "scheduleLogs").mockResolvedValue({ source: "none", lines: [] });
-    vi.spyOn(api, "scheduleRuns").mockResolvedValue([
+    transport.listSchedules.mockResolvedValue([SCHEDULE]);
+    transport.getSchedule.mockResolvedValue(FULL);
+    transport.scheduleLogs.mockResolvedValue({ source: "none", lines: [] });
+    transport.scheduleRuns.mockResolvedValue([
       { id: 9, ran_at: "2026-06-30T09:00:00Z", ok: null, agent_id: null, note: null },
       { id: 8, ran_at: "2026-06-29T09:00:00Z", ok: false, agent_id: null, note: "interrupted" },
       { id: 7, ran_at: "2026-06-29T08:00:00Z", ok: true, agent_id: null, note: null },
@@ -256,10 +260,10 @@ describe("SchedulesPage", () => {
   });
 
   it("does not refetch expanded schedule logs before 15 seconds", async () => {
-    vi.spyOn(api, "listSchedules").mockResolvedValue([SCHEDULE]);
-    vi.spyOn(api, "getSchedule").mockResolvedValue(FULL);
-    const logs = vi.spyOn(api, "scheduleLogs").mockResolvedValue({ source: "none", lines: [] });
-    vi.spyOn(api, "scheduleRuns").mockResolvedValue([]);
+    transport.listSchedules.mockResolvedValue([SCHEDULE]);
+    transport.getSchedule.mockResolvedValue(FULL);
+    const logs = transport.scheduleLogs.mockResolvedValue({ source: "none", lines: [] });
+    transport.scheduleRuns.mockResolvedValue([]);
     const view = wrap(<SchedulesPage />);
     await waitFor(() => expect(screen.getByText("memory-arbiter")).toBeTruthy());
 
@@ -287,11 +291,11 @@ describe("SchedulesPage", () => {
   });
 
   it("edit: opens the editor and saves a new script", async () => {
-    vi.spyOn(api, "listSchedules").mockResolvedValue([SCHEDULE]);
-    vi.spyOn(api, "getSchedule").mockResolvedValue(FULL);
-    vi.spyOn(api, "scheduleLogs").mockResolvedValue({ source: "none", lines: [] });
-    vi.spyOn(api, "scheduleRuns").mockResolvedValue([]);
-    const update = vi.spyOn(api, "updateSchedule").mockResolvedValue({ ...FULL, script: "print(2)" });
+    transport.listSchedules.mockResolvedValue([SCHEDULE]);
+    transport.getSchedule.mockResolvedValue(FULL);
+    transport.scheduleLogs.mockResolvedValue({ source: "none", lines: [] });
+    transport.scheduleRuns.mockResolvedValue([]);
+    const update = transport.updateSchedule.mockResolvedValue({ ...FULL, script: "print(2)" });
     wrap(<SchedulesPage />);
     await waitFor(() => expect(screen.getByText("memory-arbiter")).toBeTruthy());
     fireEvent.click(screen.getByRole("button", { name: "Edit" }));
@@ -304,7 +308,7 @@ describe("SchedulesPage", () => {
 
   it("raw form cancel closes it; a disabled schedule shows (off)", async () => {
     const off: ScheduleSummary = { ...SCHEDULE, enabled: false, status: "stopped" };
-    vi.spyOn(api, "listSchedules").mockResolvedValue([off]);
+    transport.listSchedules.mockResolvedValue([off]);
     wrap(<SchedulesPage />);
     await waitFor(() => expect(screen.getByText("(off)")).toBeTruthy());
     fireEvent.click(screen.getByRole("button", { name: /New \(raw\)/ }));

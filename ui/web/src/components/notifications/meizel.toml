@@ -12,6 +12,3 @@ exports = ["alerts-badge.tsx", "connection-notice.tsx", "notice-question-form.ts
 [debt.ambient-read]
 "open-notice-detail.tsx#clock Date" = 2
 "open-tasks-notice-dialog.tsx#clock Date" = 1
-
-[debt.first-party-patch]
-"open-notice-detail.test.tsx#vi.mock ui/web/src/lib/transport/api.ts" = 1

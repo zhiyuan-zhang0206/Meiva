@@ -2,48 +2,29 @@
 // / hides correctly based on depth and ancestorsIsLast.
 
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import {
-  act,
-  cleanup,
-  fireEvent,
-  render as rtlRender,
-  screen,
-} from "@testing-library/react";
-import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
+import { act, cleanup, fireEvent, screen } from "@testing-library/react";
+import { beforeEach, afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 
 import { AgentRow } from "./agent-row";
 import type { AgentRow as AgentRowType } from "@/lib/contracts/types";
+import { renderWithApi as rtlRender } from "@/test-support/render";
+import { resetTransport, transport } from "@/test-support/fake-api";
+beforeEach(() => {
+  resetTransport();
+  transport.getSystemStatus.mockRejectedValue(new Error("no network in tests"));
+  transport.getSettings.mockRejectedValue(new Error("no network in tests"));
+  transport.putSetting.mockRejectedValue(new Error("no network in tests"));
+  transport.getAgentInspectStatistics.mockResolvedValue({});
+  transport.getAgentInspectLive.mockResolvedValue({});
+});
 
-const prefetchMocks = vi.hoisted(() => ({
-  getAgentInspectStatistics: vi
-    .fn<
-      (
-        agentId: number,
-        hours?: number | null,
-        signal?: AbortSignal,
-      ) => Promise<unknown>
-    >()
-    .mockResolvedValue({}),
-  getAgentInspectLive: vi
-    .fn<(agentId: number, signal?: AbortSignal) => Promise<unknown>>()
-    .mockResolvedValue({}),
-}));
-vi.mock("@/lib/transport/api", () => ({
-  api: {
-    getSystemStatus: vi.fn().mockRejectedValue(new Error("no network in tests")),
-    getSettings: vi.fn().mockRejectedValue(new Error("no network in tests")),
-    putSetting: vi.fn().mockRejectedValue(new Error("no network in tests")),
-    getAgentInspectStatistics: prefetchMocks.getAgentInspectStatistics,
-    getAgentInspectLive: prefetchMocks.getAgentInspectLive,
-  },
-}));
 
 afterEach(() => {
   cleanup();
   vi.unstubAllGlobals();
   vi.useRealTimers();
-  prefetchMocks.getAgentInspectStatistics.mockClear();
-  prefetchMocks.getAgentInspectLive.mockClear();
+  transport.getAgentInspectStatistics.mockClear();
+  transport.getAgentInspectLive.mockClear();
 });
 
 // meiva:note
@@ -57,9 +38,10 @@ beforeAll(() => {
   Element.prototype.scrollIntoView = () => undefined;
 });
 
+// meiva:note
 // AgentRow uses useQuery(["status"]) (machine badge) and useUserSettings
-// (opt-in signals) — wrap in QueryClientProvider so the hooks work. The api
-// module is mocked to REJECT: no real network in tests. On CI there is no
+// (opt-in signals) — wrap in QueryClientProvider so the hooks work. The fake
+// transport REJECTS the settings reads: no real network in tests. On CI there is no
 // gateway (fetches would spray ECONNREFUSED); locally a live gateway is
 // worse — real prod settings would leak into the merged settings map and
 // green-wash assertions that depend on the defaults. Tests that need
@@ -286,8 +268,8 @@ describe("AgentRow inspector reads", () => {
     fireEvent.click(row);
     fireEvent.mouseLeave(row);
     expect(onSelect).toHaveBeenCalledOnce();
-    expect(prefetchMocks.getAgentInspectLive).not.toHaveBeenCalled();
-    expect(prefetchMocks.getAgentInspectStatistics).not.toHaveBeenCalled();
+    expect(transport.getAgentInspectLive).not.toHaveBeenCalled();
+    expect(transport.getAgentInspectStatistics).not.toHaveBeenCalled();
   });
 });
 
@@ -307,7 +289,6 @@ describe("AgentRow machine badge (removed, task #3904)", () => {
     expect(queryByText("test-machine")).toBeNull();
   });
 });
-
 
 describe("AgentRow status dot gating (display.show_agent_status)", () => {
   // The status dot is a rounded-full span directly in the row button; when the

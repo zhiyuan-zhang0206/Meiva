@@ -1,7 +1,8 @@
 import { useQueries, useQuery } from "@tanstack/react-query";
 
 import type { HarnessAvailability } from "./harness";
-import { api } from "../transport/api";
+import { useApi } from "../transport/transport-context";
+import type { Api } from "../transport/api";
 
 // meiva:note
 // One reading per page load (user 2026-10-21). The probe is not free: the gateway
@@ -11,11 +12,11 @@ import { api } from "../transport/api";
 // instead of asking again on every open — `staleTime: Infinity` is what keeps the
 // form's own mount from re-fetching it. Reloading the page asks again.
 // meiva:link ui/web/src/docs/frontend-components/creation-availability/creation-availability.meiva.okf.md
-function probeQuery(machine: string) {
+function probeQuery(machine: string, client: Api) {
   return {
     queryKey: ["harness-availability", machine],
     queryFn: ({ signal }: { signal: AbortSignal }) =>
-      api.getHarnessAvailability(machine, signal),
+      client.getHarnessAvailability(machine, signal),
     staleTime: Infinity,
     retry: false,
   };
@@ -25,6 +26,7 @@ function probeQuery(machine: string) {
 // Harness availability is read per machine because the probe runs where the agent would run, not where the gateway does. A gateway that cannot answer yet (no route) yields an empty list, which the picker renders as unknown instead of unavailable - "not known" must not look like "not installed".
 // meiva:link ui/web/src/docs/frontend-components/creation-availability/creation-availability.meiva.okf.md
 export function useHarnessAvailability(machine: string | undefined) {
+  const client = useApi();
   return useQuery<HarnessAvailability[]>({
     queryKey: ["harness-availability", machine],
     // meiva:note
@@ -33,7 +35,7 @@ export function useHarnessAvailability(machine: string | undefined) {
     // machine name. An unanswered probe renders as unknown, never as unavailable.
     // meiva:link ui/web/src/docs/frontend-components/creation-availability/creation-availability.meiva.okf.md
     queryFn: ({ signal }) =>
-      machine === undefined ? Promise.resolve([]) : api.getHarnessAvailability(machine, signal),
+      machine === undefined ? Promise.resolve([]) : client.getHarnessAvailability(machine, signal),
     enabled: machine !== undefined,
     staleTime: Infinity,
     retry: false,
@@ -47,7 +49,8 @@ export function useHarnessAvailability(machine: string | undefined) {
 // and their rows read as unknown rather than as unavailable.
 // meiva:link ui/web/src/docs/frontend-components/creation-availability/creation-availability.meiva.okf.md
 export function useHarnessAvailabilityByMachine(machines: readonly string[]) {
-  const results = useQueries({ queries: machines.map(probeQuery) });
+  const client = useApi();
+  const results = useQueries({ queries: machines.map((machine) => probeQuery(machine, client)) });
   const answered = new Map<string, HarnessAvailability[]>();
   machines.forEach((machine, index) => {
     const data = results[index]?.data;
@@ -65,9 +68,10 @@ export function useHarnessAvailabilityByMachine(machines: readonly string[]) {
 // machine is never asked.
 // meiva:link ui/web/src/docs/frontend-components/creation-availability/creation-availability.meiva.okf.md
 export function useWarmHarnessAvailability() {
+  const client = useApi();
   const { data } = useQuery({
     queryKey: ["status"],
-    queryFn: () => api.getSystemStatus(),
+    queryFn: () => client.getSystemStatus(),
     staleTime: 15_000,
   });
   const machines = (data?.cluster.machines ?? [])
