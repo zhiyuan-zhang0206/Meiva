@@ -194,7 +194,13 @@ async def run(options: DaemonOptions) -> int:
             ClockConfig("UTC", "UTC", message_timestamp_weekday=False), timers=SYSTEM_TIMERS
         )
         root_pid = os.getpid()
-        supervisor = Supervisor(registry, run_dir=options.run_dir, clock=clock, root_pid=root_pid)
+        supervisor = Supervisor(
+            registry,
+            run_dir=options.run_dir,
+            clock=clock,
+            root_pid=root_pid,
+            environ=dict(os.environ),
+        )
         context = WiringContext(
             supervisor=supervisor,
             registry=registry,

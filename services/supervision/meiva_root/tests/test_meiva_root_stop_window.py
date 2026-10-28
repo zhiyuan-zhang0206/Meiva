@@ -41,6 +41,7 @@ def root(
     )
     return Supervisor(
         UnitRegistry([unit]),
+        environ=dict(os.environ),
         run_dir=run_dir,
         config=SupervisorConfig(stop_timeout_s=default_window_s),
         clock=system_clock(),
@@ -119,6 +120,7 @@ async def test_window_expiry_kills_once_and_reports_it(tmp_path: Path, recorder:
     )
     owner = Supervisor(
         UnitRegistry([unit]),
+        environ=dict(os.environ),
         run_dir=tmp_path,
         config=SupervisorConfig(),
         clock=system_clock(),
@@ -201,7 +203,11 @@ async def test_down_over_the_control_socket_succeeds_for_a_unit_closing_past_ten
         stop_timeout_s=20.0,
     )
     owner = Supervisor(
-        UnitRegistry([unit]), run_dir=short_tmp, clock=system_clock(), root_pid=os.getpid()
+        UnitRegistry([unit]),
+        environ=dict(os.environ),
+        run_dir=short_tmp,
+        clock=system_clock(),
+        root_pid=os.getpid(),
     )
     server = ControlServer(short_tmp / "meiva-root.sock", owner.dispatch)
     await server.start()

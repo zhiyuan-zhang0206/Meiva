@@ -93,7 +93,11 @@ async def test_native_worker_error_cannot_skip_other_root_teardowns(short_tmp: P
                 runner.stop(0.2)
 
     owner = Supervisor(
-        UnitRegistry([]), run_dir=short_tmp, clock=system_clock(), root_pid=os.getpid()
+        UnitRegistry([]),
+        environ=dict(os.environ),
+        run_dir=short_tmp,
+        clock=system_clock(),
+        root_pid=os.getpid(),
     )
     server = ControlServer(short_tmp / "control.sock", owner.dispatch)
     await server.start()
@@ -213,6 +217,7 @@ async def test_cross_generation_watch_errors_are_visible_and_collected_without_p
 
     owner = Supervisor(
         UnitRegistry([unit]),
+        environ=dict(os.environ),
         run_dir=tmp_path,
         spawn=spawn_with_post_reap_error,
         clock=system_clock(),
@@ -272,6 +277,7 @@ async def test_failed_watch_never_certifies_an_unreaped_live_child(
 
     owner = Supervisor(
         UnitRegistry([unit]),
+        environ=dict(os.environ),
         run_dir=tmp_path,
         config=SupervisorConfig(stop_timeout_s=0.02, stop_kill_reap_s=0.1),
         spawn=spawn_broken_wait,
@@ -304,7 +310,11 @@ async def test_shutdown_closes_supervisor_birth_admission(tmp_path: Path) -> Non
         "worker", (sys.executable, str(_CHILD), "noop"), RestartPolicy.ALWAYS, "root"
     )
     owner = Supervisor(
-        UnitRegistry([unit]), run_dir=tmp_path, clock=system_clock(), root_pid=os.getpid()
+        UnitRegistry([unit]),
+        environ=dict(os.environ),
+        run_dir=tmp_path,
+        clock=system_clock(),
+        root_pid=os.getpid(),
     )
     await owner.start()
     await owner.shutdown()
@@ -326,7 +336,13 @@ async def test_health_stop_closes_even_unobserved_unit_admission(tmp_path: Path)
 
     registry.register("unobserved", fresh)
     health = HealthMonitor(
-        Supervisor(UnitRegistry([]), run_dir=tmp_path, clock=system_clock(), root_pid=os.getpid()),
+        Supervisor(
+            UnitRegistry([]),
+            environ=dict(os.environ),
+            run_dir=tmp_path,
+            clock=system_clock(),
+            root_pid=os.getpid(),
+        ),
         registry,
         clock=system_clock(),
     )
@@ -370,6 +386,7 @@ async def test_refused_child_keeps_real_reap_and_late_error_at_original_owner(
 
     owner = Supervisor(
         UnitRegistry([unit]),
+        environ=dict(os.environ),
         run_dir=tmp_path,
         config=SupervisorConfig(
             stop_timeout_s=0.02,
@@ -439,6 +456,7 @@ async def test_watch_join_has_independent_bound_when_completed_child_watch_resis
 
     owner = Supervisor(
         UnitRegistry([unit]),
+        environ=dict(os.environ),
         run_dir=tmp_path,
         config=SupervisorConfig(watch_join_timeout_s=0.02),
         spawn=spawn_resistant,

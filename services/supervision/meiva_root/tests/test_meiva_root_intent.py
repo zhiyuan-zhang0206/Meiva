@@ -73,6 +73,7 @@ def _supervisor(
 ) -> Supervisor:
     return Supervisor(
         UnitRegistry(units),
+        environ=dict(os.environ),
         run_dir=run_dir,
         config=SupervisorConfig(stop_timeout_s=0.2),
         process_control=process_control,
@@ -308,6 +309,7 @@ async def test_restart_down_abort_records_stage_down_and_retry_settles(
 
     owner = Supervisor(
         UnitRegistry([unit]),
+        environ=dict(os.environ),
         run_dir=tmp_path,
         config=SupervisorConfig(stop_timeout_s=0.4, stop_kill_reap_s=0.1),
         # meiva:note
@@ -452,6 +454,7 @@ async def test_a_stopped_unit_records_the_injected_clocks_instant(tmp_path: Path
     fixed = datetime(2026, 10, 27, 6, 0, 0, tzinfo=UTC)
     owner = Supervisor(
         UnitRegistry([_unit(*_SLEEP_FOREVER)]),
+        environ=dict(os.environ),
         run_dir=tmp_path,
         config=SupervisorConfig(stop_timeout_s=0.2),
         clock=Clock(

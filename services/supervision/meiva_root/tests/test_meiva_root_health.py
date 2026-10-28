@@ -375,6 +375,7 @@ async def started(short_tmp: Path) -> AsyncIterator[StartFactory]:
     async def factory(units: list[manifest_mod.UnitManifest]) -> Supervisor:
         supervisor = Supervisor(
             manifest_mod.UnitRegistry(units),
+            environ=dict(os.environ),
             run_dir=short_tmp,
             clock=system_clock(),
             root_pid=os.getpid(),
@@ -538,6 +539,7 @@ async def test_initial_down_observation_does_not_replace_starting_generation(
     )
     owner = Supervisor(
         manifest_mod.UnitRegistry([unit]),
+        environ=dict(os.environ),
         run_dir=tmp_path,
         clock=system_clock(),
         root_pid=os.getpid(),
