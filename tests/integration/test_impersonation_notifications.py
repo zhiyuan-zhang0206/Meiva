@@ -43,7 +43,7 @@ from base.host.env.agent_slices import AgentSlices
 from base.native_process.runtime_incarnation import RuntimeIncarnation
 from cli.commands.agents import impersonation_relay as relay
 from cli.commands.agents.impersonation_adapters import ClaudeStdout
-from cli.commands.agents.relay.steps import RelayTuning
+from cli.commands.agents.relay.steps import ConnectionRetry, RelayTuning
 from ops.agents.wake import resurrect_agent
 from ops.lifecycle.termination import enqueue_termination_inbounds, force_terminate_transaction
 
@@ -625,6 +625,7 @@ async def test_running_relay_delivers_termination_once_without_reserving_input(
             clock=Clock(
                 ClockConfig("UTC", None, message_timestamp_weekday=False), timers=SYSTEM_TIMERS
             ),
+            retry=ConnectionRetry((), SYSTEM_TIMERS),
         )
     )
     try:

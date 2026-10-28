@@ -18,7 +18,7 @@ import asyncio
 import contextlib
 import subprocess
 import sys
-from collections.abc import Coroutine
+from collections.abc import Callable, Coroutine
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
@@ -29,6 +29,7 @@ from pydantic import BaseModel
 
 from base.agents.context.clients import DatabaseFactory
 from base.agents.impersonation import (
+    RELAY_CONNECTION_RETRY_DELAYS,
     RELAY_HEARTBEAT_SECONDS,
     ImpersonationError,
     relay_get,
@@ -40,6 +41,7 @@ from base.agents.impersonation.history import resolve
 from base.agents.impersonation.host_transport import AntigravityServer
 from base.agents.impersonation.status import OPEN, ImpersonationStatus
 from base.agents.impersonation.terminal_notices import notice_text
+from base.agents.messages.delivery.retry import retryable_database_error
 from base.clock import Clock, Timers
 from base.cluster.machine import MachineIdentityReader
 from base.db import Database
@@ -67,17 +69,67 @@ from cli.commands.agents.relay.inbox import (
 from cli.commands.agents.relay.steps import (
     PUSH_MAX_CHARS,
     ClockReading,
+    ConnectionRetry,
     Deliver,
     RelayState,
     RelayTuning,
     SendStart,
     WaitForWake,
     batch_closed,
+    connection_retry_delay,
     emitted,
     next_step,
     plan_reservation,
     reserved_push,
 )
+
+# meiva:note
+# The exit status a relay keeps for a connection it could not reach through its whole retry
+# budget: EX_TEMPFAIL, so an operator or supervisor can tell "the database was unreachable"
+# from "the lease ended" (0) and from any other failure (1).
+EXIT_TEMPORARY_FAILURE = 75
+
+
+# meiva:note
+# A relay that could not reach the database through its whole retry budget. It names what the
+# relay was doing, how many attempts it made, how long that took and the failure it last saw,
+# so the exit is loud and readable instead of a bare traceback.
+class RelayConnectionLostError(RuntimeError):
+    def __init__(self, what: str, attempts: int, elapsed: float, last: Exception) -> None:
+        super().__init__(
+            f"The relay could not reach the database while {what}: {attempts} attempt(s) over "
+            f"{elapsed:.1f}s, the last failure was {type(last).__name__}: {last}"
+        )
+        self.what = what
+        self.attempts = attempts
+        self.elapsed = elapsed
+        self.last = last
+
+
+# meiva:note
+# Run one database call, retrying only a connection the pool could not provide.
+#
+# Every other failure leaves at once: a revoked credential, an ended lease and an unusable row
+# are decisions, and retrying them would turn a fence into a delay. Each attempt re-enters
+# `call`, so the lease's ownership, status and freshness checks run again rather than being
+# cached across the outage, and nothing here reads or writes lease state itself.
+def _survive_connection_loss[T](what: str, call: Callable[[], T], retry: ConnectionRetry) -> T:
+    timers: Timers = retry.timers
+    started = timers.monotonic()
+    attempt = 1
+    while True:
+        try:
+            return call()
+        except Exception as error:
+            if not retryable_database_error(error):
+                raise
+            delay = connection_retry_delay(attempt, retry.delays)
+            if delay is None:
+                raise RelayConnectionLostError(
+                    what, attempt, timers.monotonic() - started, error
+                ) from error
+            timers.sleep(delay)
+            attempt += 1
 
 
 # meiva:note
@@ -209,6 +261,7 @@ class _InboxRelay:
         adapter: RelayAdapter,
         tuning: RelayTuning,
         clock: Clock,
+        retry: ConnectionRetry,
     ) -> None:
         self.lease = lease
         self.db = db
@@ -217,6 +270,7 @@ class _InboxRelay:
         self.adapter = adapter
         self.tuning = tuning
         self.clock = clock
+        self.retry = retry
         self.state = RelayState.initial()
 
     def _reading(self) -> ClockReading:
@@ -227,13 +281,17 @@ class _InboxRelay:
     async def _read(self) -> InboxSnapshot | None:
         lease = self.lease
         snapshot = await asyncio.to_thread(
-            read_relay_inbox,
-            self.db,
-            self.bus,
-            lease.agent_id,
-            lease.lease_id,
-            lease.token,
-            local_machine=lease.machine,
+            _survive_connection_loss,
+            "reading the lease and its inbox",
+            lambda: read_relay_inbox(
+                self.db,
+                self.bus,
+                lease.agent_id,
+                lease.lease_id,
+                lease.token,
+                local_machine=lease.machine,
+            ),
+            self.retry,
         )
         return None if announce_end(snapshot, lease.ref(), self.adapter) else snapshot
 
@@ -254,13 +312,17 @@ class _InboxRelay:
         reserved: frozenset[int] = frozenset()
         if plan.ids:
             reserved = await asyncio.to_thread(
-                reserve_delivery,
-                self.db,
-                self.bus,
-                str(lease.lease_id),
-                lease.token,
-                list(plan.ids),
-                local_machine=lease.machine,
+                _survive_connection_loss,
+                "reserving a delivery",
+                lambda: reserve_delivery(
+                    self.db,
+                    self.bus,
+                    str(lease.lease_id),
+                    lease.token,
+                    list(plan.ids),
+                    local_machine=lease.machine,
+                ),
+                self.retry,
             )
         if reserved:
             push = reserved_push(
@@ -315,18 +377,37 @@ async def push_inbox(
     adapter: RelayAdapter,
     tuning: RelayTuning,
     clock: Clock,
+    retry: ConnectionRetry,
 ) -> None:
     await _InboxRelay(
-        lease, db=db, bus=bus, listener=listener, adapter=adapter, tuning=tuning, clock=clock
+        lease,
+        db=db,
+        bus=bus,
+        listener=listener,
+        adapter=adapter,
+        tuning=tuning,
+        clock=clock,
+        retry=retry,
     ).run()
 
 
 # meiva:note
 # One durable liveness beat; False means the lease ended or the relay credential was
 # revoked, and the heartbeat loop stops silently.
-def write_heartbeat(db: Database, lease_id: UUID, token: str, *, local_machine: str) -> bool:
+def write_heartbeat(
+    db: Database,
+    lease_id: UUID,
+    token: str,
+    *,
+    local_machine: str,
+    retry: ConnectionRetry,
+) -> bool:
     try:
-        relay_heartbeat(db, str(lease_id), token, local_machine=local_machine)
+        _survive_connection_loss(
+            "writing a heartbeat",
+            lambda: relay_heartbeat(db, str(lease_id), token, local_machine=local_machine),
+            retry,
+        )
     except ImpersonationError:
         return False
     return True
@@ -339,11 +420,12 @@ async def heartbeat_loop(
     *,
     interval: float = RELAY_HEARTBEAT_SECONDS,
     local_machine: str,
+    retry: ConnectionRetry,
 ) -> None:
     while True:
         await asyncio.sleep(interval)
         if not await asyncio.to_thread(
-            write_heartbeat, db, lease_id, token, local_machine=local_machine
+            write_heartbeat, db, lease_id, token, local_machine=local_machine, retry=retry
         ):
             return
 
@@ -351,10 +433,15 @@ async def heartbeat_loop(
 # meiva:note
 # Retain the original heartbeat failure until the relay stops and joins it.
 async def heartbeat_completion(
-    db: Database, lease_id: UUID, token: str, *, local_machine: str
+    db: Database,
+    lease_id: UUID,
+    token: str,
+    *,
+    local_machine: str,
+    retry: ConnectionRetry,
 ) -> Exception | None:
     try:
-        await heartbeat_loop(db, lease_id, token, local_machine=local_machine)
+        await heartbeat_loop(db, lease_id, token, local_machine=local_machine, retry=retry)
     except Exception as error:
         return error
     return None
@@ -394,22 +481,35 @@ async def _serve(
     adapter: RelayAdapter,
     tuning: RelayTuning,
     clock: Clock,
-    timers: Timers,
+    retry: ConnectionRetry,
 ) -> None:
+    # meiva:note
+    # The connected listener waits on the same timers the retry policy measures its budget with,
+    # so the invocation hands one clock in and no layer here reads one of its own.
+    timers = retry.timers
     if not await asyncio.to_thread(
-        write_heartbeat, db, lease.lease_id, lease.token, local_machine=lease.machine
+        write_heartbeat,
+        db,
+        lease.lease_id,
+        lease.token,
+        local_machine=lease.machine,
+        retry=retry,
     ):
         # meiva:note
         # Termination can win between startup's lease read and beat. Terminal metadata is
         # readable; ordinary inbox authority stays closed.
         ended = await asyncio.to_thread(
-            read_relay_inbox,
-            db,
-            bus,
-            lease.agent_id,
-            lease.lease_id,
-            lease.token,
-            local_machine=lease.machine,
+            _survive_connection_loss,
+            "reading the ended lease",
+            lambda: read_relay_inbox(
+                db,
+                bus,
+                lease.agent_id,
+                lease.lease_id,
+                lease.token,
+                local_machine=lease.machine,
+            ),
+            retry,
         )
         announce_end(ended, lease.ref(), adapter)
         return
@@ -417,7 +517,9 @@ async def _serve(
         redis_url, lease.agent_id, events_channel=bus.channel, timers=timers
     )
     await run_beside_heartbeat(
-        heartbeat_completion(db, lease.lease_id, lease.token, local_machine=lease.machine),
+        heartbeat_completion(
+            db, lease.lease_id, lease.token, local_machine=lease.machine, retry=retry
+        ),
         push_inbox(
             lease,
             db=db,
@@ -426,6 +528,7 @@ async def _serve(
             adapter=adapter,
             tuning=tuning,
             clock=clock,
+            retry=retry,
         ),
     )
 
@@ -448,7 +551,8 @@ class RelayInputs:
     clock: Clock
     # meiva:note
     # The process timers the inbound listener measures its wait deadlines on: handed in with the
-    # other process values so the listener never reads the clock of the process it runs in.
+    # other process values so the listener never reads the clock of the process it runs in. The
+    # relay's connection retry waits on the same timers.
     timers: Timers
 
 
@@ -484,17 +588,28 @@ def cmd_relay(
             stdout=inputs.stdout,
         )
         local_machine = machine.name()
-        db = database_factory()
+        retry = ConnectionRetry(RELAY_CONNECTION_RETRY_DELAYS, inputs.timers)
+        db = _survive_connection_loss("opening the operator database", database_factory, retry)
         bus = inputs.bus
         if args.lease_id is None:
             lease_id = UUID(
-                str(resolve(db, args.agent_id, args.session_id, local_machine=local_machine)["id"])
+                str(
+                    _survive_connection_loss(
+                        "resolving the lease",
+                        lambda: resolve(
+                            db, args.agent_id, args.session_id, local_machine=local_machine
+                        ),
+                        retry,
+                    )["id"]
+                )
             )
         else:
             lease_id = UUID(args.lease_id)
-        session_id = relay_get(db, bus, str(lease_id), token, local_machine=local_machine)[
-            "session_id"
-        ]
+        session_id = _survive_connection_loss(
+            "reading the lease",
+            lambda: relay_get(db, bus, str(lease_id), token, local_machine=local_machine),
+            retry,
+        )["session_id"]
         lease = RelayLease(args.agent_id, lease_id, session_id, token, local_machine)
         asyncio.run(
             _serve(
@@ -505,7 +620,7 @@ def cmd_relay(
                 adapter=adapter,
                 tuning=tuning,
                 clock=inputs.clock,
-                timers=inputs.timers,
+                retry=retry,
             )
         )
     except KeyboardInterrupt:
@@ -514,6 +629,9 @@ def cmd_relay(
             file=sys.stderr,
         )
         return 130
+    except RelayConnectionLostError as exc:
+        print(f"Impersonation relay stopped: {exc}", file=sys.stderr)
+        return EXIT_TEMPORARY_FAILURE
     except (OSError, RuntimeError, ValueError, subprocess.TimeoutExpired) as exc:
         print(f"Impersonation relay stopped: {exc}", file=sys.stderr)
         return 1
