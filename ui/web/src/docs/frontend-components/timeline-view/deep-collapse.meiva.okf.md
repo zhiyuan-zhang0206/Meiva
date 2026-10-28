@@ -25,7 +25,8 @@ reset token so manual expansions under that mode revert too (user ruling
 2026-08-06). Pinned state is scoped per thread — item ids are message indexes
 local to each thread, so an unscoped map would resurrect another conversation's
 choices. Copy joins a block's timestamp in the hover band under it only for
-expanded, settled rows.
+expanded, settled rows of the kinds that offer it (the human's message and the
+agent's reply — see [[ui/web/src/docs/frontend-components/timeline-view/card-chrome.meiva.okf.md|card chrome]]); thinking, tool calls and notes carry none.
 
 ## Relationship to Other Nodes
 
