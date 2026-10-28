@@ -25,7 +25,7 @@ IDLE = HeartbeatState(
     paused_until=None,
     pending_inbound=False,
     backoff_level=0,
-    impersonation_active=False,
+    impersonation_since=None,
 )
 
 
@@ -124,10 +124,72 @@ def test_a_backoff_never_pulls_a_check_in_before_the_idle_clock() -> None:
 def test_an_active_impersonation_lease_holds_the_backoff_at_level_zero() -> None:
     reminded = LAST_ACTIVE + timedelta(minutes=1)
     plan = plan_heartbeat(
-        replace(IDLE, last_heartbeat_at=reminded, backoff_level=2, impersonation_active=True),
+        replace(IDLE, last_heartbeat_at=reminded, backoff_level=2, impersonation_since=LAST_ACTIVE),
         CADENCE,
     )
     assert plan.next_at == reminded + timedelta(seconds=3600)
+
+
+# meiva:note
+# An externally driven agent keeps running between takeover turns, so it is the one running
+# agent the daemon selects (`status='running' AND active.id IS NOT NULL`). Its idle clock is the
+# lease's own start, `COALESCE(activated_at, created_at)`.
+def test_a_running_agent_under_a_lease_projects_its_next_check_in() -> None:
+    plan = plan_heartbeat(
+        replace(IDLE, status=AgentStatus.RUNNING, impersonation_since=LAST_ACTIVE), CADENCE
+    )
+    assert plan.next_at == LAST_ACTIVE + timedelta(seconds=600 + 17)
+
+
+def test_a_lease_clock_times_the_check_in_instead_of_the_last_native_turn() -> None:
+    plan = plan_heartbeat(
+        replace(
+            IDLE,
+            last_active_at=LAST_ACTIVE - timedelta(days=2),
+            impersonation_since=LAST_ACTIVE,
+        ),
+        CADENCE,
+    )
+    assert plan.next_at == LAST_ACTIVE + timedelta(seconds=600 + 17)
+
+
+def test_a_running_agents_pause_outranks_its_lease() -> None:
+    until = LAST_ACTIVE + timedelta(hours=3)
+    plan = plan_heartbeat(
+        replace(
+            IDLE,
+            status=AgentStatus.RUNNING,
+            paused_until=until,
+            impersonation_since=LAST_ACTIVE,
+        ),
+        CADENCE,
+    )
+    assert (plan.next_at, plan.paused_until) == (None, until)
+
+
+def test_a_queued_wake_still_reads_pending_for_a_leased_running_agent() -> None:
+    plan = plan_heartbeat(
+        replace(
+            IDLE,
+            status=AgentStatus.RUNNING,
+            pending_inbound=True,
+            impersonation_since=LAST_ACTIVE,
+        ),
+        CADENCE,
+    )
+    assert (plan.next_at, plan.paused_until, plan.heartbeat_pending) == (None, None, True)
+
+
+def test_a_terminated_agent_under_a_lease_shows_no_check_in() -> None:
+    plan = plan_heartbeat(
+        replace(
+            IDLE,
+            status=AgentStatus.TERMINATED,
+            impersonation_since=LAST_ACTIVE,
+        ),
+        CADENCE,
+    )
+    assert (plan.next_at, plan.paused_until, plan.heartbeat_pending) == (None, None, False)
 
 
 def test_a_status_outside_the_lifecycle_is_not_read_as_not_idling() -> None:
