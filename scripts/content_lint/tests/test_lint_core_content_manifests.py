@@ -183,6 +183,23 @@ def test_explicit_missing_target_is_an_error(
     assert str(missing) in capsys.readouterr().err
 
 
+def test_an_audit_dir_with_a_home_shorthand_lands_under_the_given_home(
+    tmp_path: Path, repo: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    # meiva:note
+    # `--audit-dir ~/aud` names the operator's home: the directory must be found there, so the
+    # expansion happens before the existence check, against the home `main` is given.
+    home = tmp_path / "home"
+    (home / "aud" / "thing").mkdir(parents=True)
+    (home / "aud" / "thing" / "meiva-plugin.json").write_text("{not json", encoding="utf-8")
+
+    assert lint.main(["--audit-dir", "~/aud"], repo_root=repo, home=home) == 0
+
+    printed = capsys.readouterr()
+    assert "audit " in printed.out
+    assert "not found" not in printed.err
+
+
 def test_unrecognized_arguments_are_rejected(capsys: pytest.CaptureFixture[str]) -> None:
     """A positional path is not part of this lint's interface — reject it loudly
     instead of silently running a full scan."""

@@ -14,6 +14,7 @@ from scripts.verify.boundary import RunFailedError
 from scripts.verify.tart_vm import Tart
 
 LEAF = "c6000dcb95407f03ca68d4f3dcb1ae8873ea7ba1"
+STAMP = "20260102-030405"
 GRANTED: dict[str, Any] = {
     "ping": {"preflight_screen": True, "ax_trusted": True},
     "signature": [
@@ -44,7 +45,7 @@ def test_a_dry_run_prints_every_step_in_order_and_touches_nothing(
     tart = Tart(str(tmp_path / "no-tart-here"), home=tmp_path / "home", dry_run=True)
 
     status = tart_golden.build_golden(
-        "HEAD", evidence_root, name="meiva-golden", repo=repo, tart=tart
+        "HEAD", evidence_root, name="meiva-golden", repo=repo, tart=tart, stamp=STAMP
     )
 
     printed = capsys.readouterr().out
@@ -73,7 +74,7 @@ def test_the_golden_build_never_overwrites_a_vm_or_boots_a_third(tmp_path: Path)
     )
     with pytest.raises(RunFailedError, match="delete it yourself"):
         tart_golden.build_golden(
-            "HEAD", tmp_path / "ev", name="meiva-golden", repo=repo, tart=exists
+            "HEAD", tmp_path / "ev", name="meiva-golden", repo=repo, tart=exists, stamp=STAMP
         )
 
     crowded = _listing_tart(
@@ -85,7 +86,7 @@ def test_the_golden_build_never_overwrites_a_vm_or_boots_a_third(tmp_path: Path)
     )
     with pytest.raises(RunFailedError, match="at most 2"):
         tart_golden.build_golden(
-            "HEAD", tmp_path / "ev", name="meiva-golden", repo=repo, tart=crowded
+            "HEAD", tmp_path / "ev", name="meiva-golden", repo=repo, tart=crowded, stamp=STAMP
         )
 
 
