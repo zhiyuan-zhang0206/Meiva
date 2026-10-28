@@ -187,13 +187,16 @@ export function SpawnForm({ onSpawn, onDone, layout = "table" }: Props) {
         : visibleModels[0];
 
   const selectedModelInfo = effectiveModel ? modelsData?.models[effectiveModel] : undefined;
+  const executionSettings = selectedHarness === DEFAULT_HARNESS
+    ? selectedModelInfo
+    : selectedModelInfo?.harness_settings?.[selectedHarness];
   // meiva:note
   // The effort ladder this model offers, with all three "no ladder" shapes
   // collapsed into one empty list: the model carries no effort knob (wire null),
   // the models query has not resolved yet, and the resolved name is absent from
   // the catalog.
   // meiva:link ui/web/src/docs/frontend-components/creation-availability.meiva.okf.md
-  const effortLevels = selectedModelInfo?.reasoning_effort_options ?? [];
+  const effortLevels = executionSettings?.reasoning_effort_options ?? [];
   // meiva:note
   // The model's concrete default effort, published by GET /api/models from the
   // registry's per-model tuning (every catalog model pins one — validated
@@ -202,8 +205,8 @@ export function SpawnForm({ onSpawn, onDone, layout = "table" }: Props) {
   // row.
   // meiva:link ui/web/src/docs/frontend-components/creation-availability.meiva.okf.md
   const modelDefaultEffort =
-    typeof selectedModelInfo?.reasoning_effort_default === "string"
-      ? selectedModelInfo.reasoning_effort_default
+    typeof executionSettings?.reasoning_effort_default === "string"
+      ? executionSettings.reasoning_effort_default
       : null;
   // meiva:note
   // Re-derived from the effective model on every render rather than trusted from

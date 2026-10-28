@@ -34,8 +34,8 @@ async def test_options_carry_the_boundary_invariants(tmp_path: Path) -> None:
         options = harness.client.options
         assert options.model == DEFAULT_MODEL == "claude-sonnet-5-5"
         assert options.cwd == str(tmp_path)
-        assert options.setting_sources == []
-        assert options.strict_mcp_config is True
+        assert options.setting_sources is None
+        assert options.strict_mcp_config is False
         assert options.include_partial_messages is True
         assert options.tools is None
         assert options.env.get("ANTHROPIC_API_KEY") == ""

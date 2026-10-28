@@ -2,11 +2,25 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import pytest
+
 from base.lm.harness.claude.auth import AuthConfig, AuthMode
 from base.lm.harness.claude.config import BridgeConfig
 from base.lm.harness.claude.options import option_values
 
 ENVIRON = {"OPENAI_API_KEY": "must-not-ride", "ANTHROPIC_API_KEY": "must-not-ride-either"}
+
+
+def test_selected_effort_reaches_the_claude_sdk(tmp_path: Path) -> None:
+    config = BridgeConfig(cwd=tmp_path, model="claude-opus-5-5", reasoning_effort="low")
+    values = option_values(
+        config, environ={}, cli_path=None, option_fields=("thinking", "effort"), resume="previous"
+    )
+    assert values["model"] == "claude-opus-5-5"
+    assert values["effort"] == "low"
+    assert values["resume"] == "previous"
+    with pytest.raises(ValueError, match="does not support the selected effort"):
+        option_values(config, environ={}, cli_path=None, option_fields=(), resume=None)
 
 
 def test_the_values_are_the_boundary_the_cli_runs_under(tmp_path: Path) -> None:
@@ -28,9 +42,9 @@ def test_the_values_are_the_boundary_the_cli_runs_under(tmp_path: Path) -> None:
     assert values["cwd"] == str(tmp_path)
     assert values["tools"] == ["Read", "Bash"]
     assert values["permission_mode"] == "plan"
-    assert values["max_turns"] == 24
-    assert values["setting_sources"] == []
-    assert values["strict_mcp_config"] is True
+    assert values["max_turns"] is None
+    assert "setting_sources" not in values
+    assert "strict_mcp_config" not in values
     assert values["include_partial_messages"] is True
     assert values["resume"] == "sess-9"
 

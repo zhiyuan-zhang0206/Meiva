@@ -12,7 +12,7 @@ from loguru import logger
 
 from base.api_contracts.agent_contract import Harness
 from base.lm.compat.stop import StopSpec
-from base.lm.effort import validate_effort
+from base.lm.effort import HarnessModelSpec, validate_effort
 from base.lm.provider_api import (
     BuildContext,
     PricePeriod,
@@ -123,7 +123,17 @@ PROVIDER = ProviderContribution(
     models={
         "gemini-3.8-flash": ModelSpec(
             provider="gemini",
-            external_harnesses=frozenset({Harness.ANTIGRAVITY}),
+            external_harnesses={
+                Harness.ANTIGRAVITY: HarnessModelSpec(
+                    ("low", "medium", "high"),
+                    "medium",
+                    {
+                        "low": "gemini-3.8-flash-low",
+                        "medium": "gemini-3.8-flash-medium",
+                        "high": "gemini-3.8-flash-high",
+                    },
+                )
+            },
             spawnable=True,
             context_window=1_048_576,
             knowledge_cutoff="2026-03",
@@ -135,7 +145,7 @@ PROVIDER = ProviderContribution(
         ),
         "gemini-3.7-flash": ModelSpec(
             provider="gemini",
-            external_harnesses=frozenset({Harness.ANTIGRAVITY}),
+            external_harnesses={},
             spawnable=True,
             superseded_by="gemini-3.8-flash",
             context_window=1_048_576,
@@ -146,7 +156,7 @@ PROVIDER = ProviderContribution(
         ),
         "gemini-3.5-flash": ModelSpec(
             provider="gemini",
-            external_harnesses=frozenset({Harness.ANTIGRAVITY}),
+            external_harnesses={},
             spawnable=True,
             superseded_by="gemini-3.8-flash",
             context_window=1_048_576,
@@ -159,7 +169,7 @@ PROVIDER = ProviderContribution(
         ),
         "gemini-flash-lite-latest": ModelSpec(
             provider="gemini",
-            external_harnesses=frozenset({Harness.ANTIGRAVITY}),
+            external_harnesses={},
             spawnable=True,
             context_window=1_048_576,
             knowledge_cutoff="2026-03",
@@ -169,7 +179,7 @@ PROVIDER = ProviderContribution(
         ),
         "gemini-3.1-pro-preview": ModelSpec(
             provider="gemini",
-            external_harnesses=frozenset({Harness.ANTIGRAVITY}),
+            external_harnesses={},
             spawnable=True,
             context_window=1_048_576,
             knowledge_cutoff="2025-01",
@@ -183,7 +193,17 @@ PROVIDER = ProviderContribution(
         ),
         "gemini-4-argon": ModelSpec(
             provider="gemini",
-            external_harnesses=frozenset({Harness.ANTIGRAVITY}),
+            external_harnesses={
+                Harness.ANTIGRAVITY: HarnessModelSpec(
+                    ("low", "medium", "high"),
+                    "high",
+                    {
+                        "low": "gemini-4-argon-low",
+                        "medium": "gemini-4-argon-medium",
+                        "high": "gemini-4-argon-high",
+                    },
+                )
+            },
             spawnable=True,
             context_window=1_048_576,
             knowledge_cutoff="2026-03",

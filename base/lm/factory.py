@@ -81,6 +81,7 @@ if TYPE_CHECKING:
     from langchain_core.language_models.chat_models import BaseChatModel
 from loguru import logger
 
+from base.api_contracts.agent_contract import Harness
 from base.host.env.agent_slices import ModelOverrides
 from base.lm import provider_api
 from base.lm.catalog import ModelCatalog
@@ -207,6 +208,7 @@ def validate_model_config(
     model: str | None = None,
     config: dict[str, object] | None = None,
     catalog: ModelCatalog,
+    harness: Harness = Harness.MEIVA,
 ) -> str:
     # Resolve effective model: per-agent overlay wins over cluster default.
     effective_model: str | None = None
@@ -232,7 +234,12 @@ def validate_model_config(
             f"unknown model {effective_model!r}. Available models: " + ", ".join(sorted(all_models))
         )
 
-    _validate_model_effort(effective_model, config, catalog=catalog)
+    if harness is Harness.MEIVA:
+        _validate_model_effort(effective_model, config, catalog=catalog)
+    else:
+        catalog.models[effective_model].harness_model(
+            effective_model, harness, config.get("reasoning_effort") if config else None
+        )
     return effective_model
 
 
@@ -242,8 +249,8 @@ def validate_model_config(
 # Called at the spawn boundary (gateway keyed spawn handler) to fail
 # fast before forwarding to the runner — a 400 with a clear message is
 # better than an agent process starting and silently hanging. The model's provider
-# key must be in ``keys``, unless an LLM override is active (e2e tests inject fake
-# chat models via MEIVA_LLM_OVERRIDE and need no real keys).
+# key must be in ``keys`` for native execution, unless an LLM override is active
+# (e2e tests inject fake chat models). External harnesses use their CLI login.
 def validate_model_launch(
     *,
     model: str | None = None,
@@ -251,9 +258,12 @@ def validate_model_launch(
     catalog: ModelCatalog,
     keys: ProviderKeys,
     llm_override: str,
+    harness: Harness = Harness.MEIVA,
 ) -> str:
-    effective_model = validate_model_config(model=model, config=config, catalog=catalog)
-    if not llm_override:
+    effective_model = validate_model_config(
+        model=model, config=config, catalog=catalog, harness=harness
+    )
+    if harness is Harness.MEIVA and not llm_override:
         _ensure_provider_key(effective_model, catalog=catalog, keys=keys)
     return effective_model
 

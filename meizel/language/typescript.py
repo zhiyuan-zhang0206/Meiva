@@ -13,6 +13,7 @@ __all__ = [
     "scan_batch",
     "scan_typescript",
     "typescript_files",
+    "typescript_scopes",
 ]
 
 
@@ -25,6 +26,13 @@ def typescript_files(universe: Universe, policy: Policy) -> tuple[str, ...]:
         if path.endswith(config.extensions)
         and (not active or any(path == p or path.startswith(f"{p}/") for p in active))
     )
+
+
+# meiva:note
+# The directories whose TypeScript behavior this repository judges (`[typescript].scopes`): the
+# caller needs the list, not the whole config.
+def typescript_scopes(policy: Policy) -> tuple[str, ...]:
+    return load_ts_config(policy).scopes
 
 
 def scan_typescript(

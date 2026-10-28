@@ -9,14 +9,25 @@ validation against a plugin's declared levels without remapping the selection.
 
 from __future__ import annotations
 
+from collections.abc import Mapping
+from dataclasses import dataclass, field
 from enum import StrEnum
 
-# The cross-provider MEIVA_REASONING_EFFORT vocabulary, ordered weakest →
-# strongest. Superset of the public `ReasoningEffort` enum — the extra
-# "minimal" is a gemini-only thinking_level that some paths still accept as
-# input. Each model declares the subset it accepts; unsupported values fail
-# rather than being remapped to another effort level.
-EFFORT_VOCAB: tuple[str, ...] = ("none", "minimal", "low", "medium", "high", "xhigh", "max")
+# meiva:note
+# Raw per-agent effort settings include Gemini's minimal and Codex's ultra alongside the public
+# ReasoningEffort enum. Each native model or external harness binding validates its own ladder;
+# adding a harness-only rung does not enable it on native API models.
+# meiva:link base/agents/docs/harness/harness-models.meiva.okf.md
+EFFORT_VOCAB: tuple[str, ...] = (
+    "none",
+    "minimal",
+    "low",
+    "medium",
+    "high",
+    "xhigh",
+    "max",
+    "ultra",
+)
 
 
 class ReasoningEffort(StrEnum):
@@ -76,3 +87,28 @@ def validate_effort(effort: str, allowed: tuple[str, ...], *, target: str) -> st
         f"unsupported reasoning effort {effort!r} for {target} — "
         f"expected one of {'/'.join(allowed)} (or empty for the model default)"
     )
+
+
+@dataclass(frozen=True)
+class HarnessModelSpec:
+    effort_levels: tuple[str, ...]
+    default_effort: str
+    model_by_effort: Mapping[str, str] = field(default_factory=dict[str, str])
+
+    def __post_init__(self) -> None:
+        if not self.effort_levels or self.default_effort not in self.effort_levels:
+            raise ValueError("external harness effort default must belong to its nonempty ladder")
+        if self.model_by_effort and (
+            set(self.model_by_effort) != set(self.effort_levels)
+            or not all(self.model_by_effort.values())
+        ):
+            raise ValueError("external harness CLI model mapping must cover every effort")
+
+    def selection(self, model: str, effort: str | None) -> tuple[str, str]:
+        selected = effort or self.default_effort
+        if selected not in self.effort_levels:
+            raise ValueError(
+                f"unsupported reasoning effort {selected!r} for external model {model!r}; "
+                f"expected one of {self.effort_levels}"
+            )
+        return self.model_by_effort.get(selected, model), selected

@@ -193,6 +193,11 @@ class AgentHost:
         # What the graph and this host share across turns: handed to every turn's context.
         self.turn_progress = TurnProgress()
         self.relays = RelaySupervision()
+        # meiva:note
+        # Handoff invocations share this immutable carrier of the host's injected dependencies.
+        self._handoff_settlement = HandoffSettlement(
+            db, bus, self.relays, handoff_stamping, self._machine, home, policy.rng, policy.environ
+        )
         self.admission = TurnAdmission(policy.max_concurrent_turns)
         self.stats = HostStats()
         self._held_settle = HeldSettle(
@@ -327,6 +332,7 @@ class AgentHost:
                         incarnation=incarnation,
                         checkpoints=checkpoints,
                         harness=Harness(stored.harness),
+                        birth_config=stored.birth_config,
                     )
                     outcome = await self._drive_turns(
                         agent_id,
@@ -452,6 +458,7 @@ class AgentHost:
         incarnation: RuntimeIncarnation,
         checkpoints: TurnCheckpoints | None = None,
         harness: Harness = Harness.MEIVA,
+        birth_config: Mapping[str, object] | None = None,
     ) -> AgentRuntime:
         """Build a cold/stale model from this turn's slices, or retain its cache."""
         checkpoints = checkpoints or TurnCheckpoints(self._checkpointer, self._graph)
@@ -466,6 +473,7 @@ class AgentHost:
                 incarnation=incarnation,
                 checkpoints=checkpoints,
                 harness=harness,
+                birth_config=birth_config,
             ),
             self._evict,
         )
@@ -484,6 +492,7 @@ class AgentHost:
         incarnation: RuntimeIncarnation | None,
         checkpoints: TurnCheckpoints | None = None,
         harness: Harness = Harness.MEIVA,
+        birth_config: Mapping[str, object] | None = None,
     ) -> AgentRuntime:
         """Reconcile claimed inbounds, then prepare the model."""
         checkpoints = checkpoints or TurnCheckpoints(self._checkpointer, self._graph)
@@ -501,6 +510,7 @@ class AgentHost:
             permissions_notice_key=UUID(int=self._policy.rng.getrandbits(128), version=4),
             home=self._home,
             harness=harness,
+            birth_config=birth_config,
             registry=self._harness_registry,
             registrations=self._registrations,
             registration_ttl_seconds=self._policy.harness_registration_ttl_seconds,
@@ -689,16 +699,7 @@ class AgentHost:
                         ctx,
                         PendingWorkResult(prepared),
                         InvocationHooks(
-                            HandoffSettlement(
-                                self._db,
-                                self._bus,
-                                self.relays,
-                                self._handoff_stamping,
-                                self._machine,
-                                self._home,
-                                self._policy.rng,
-                                self._policy.environ,
-                            ),
+                            self._handoff_settlement,
                             self.drop_agent,
                             self._wake_resumed,
                         ),
@@ -736,16 +737,7 @@ class AgentHost:
             ctx,
             agent_id,
             fresh_input=fresh_input,
-            settlement=HandoffSettlement(
-                self._db,
-                self._bus,
-                self.relays,
-                self._handoff_stamping,
-                self._machine,
-                self._home,
-                self._policy.rng,
-                self._policy.environ,
-            ),
+            settlement=self._handoff_settlement,
         )
         return await self._invoke_native_graph(
             agent_id,

@@ -20,7 +20,10 @@ from base.api_contracts.agent_contract import Harness
 from base.config.tests.configuration import defaults
 from base.db import Database
 from base.host.env.agent_slices import AgentSlices
+from base.lm.catalog import ModelCatalog
+from base.lm.catalog.provider_keys import ProviderKeys
 from base.lm.harness import FileSessionRegistry, HarnessTurn
+from base.lm.harness.bridge import HarnessBridge
 from base.lm.harness.tests.roots import bridge_root_values
 from base.native_process.runtime_incarnation import RuntimeIncarnation
 from base.paths import meiva_home
@@ -28,6 +31,7 @@ from services.agent_runner.agent_host.host import AgentHost
 from services.agent_runner.agent_host.runtime import (
     AgentRuntime,
     HostCachePolicy,
+    build_runtime,
     evict_runtimes,
     harness_bridge_for,
 )
@@ -44,6 +48,51 @@ from services.agent_runner.agent_host.tests.runtime.host_support import (
     ScriptedGraph,
 )
 from services.agent_runner.agent_host.tests.runtime.observation import served_model
+
+
+@pytest.mark.parametrize(
+    ("harness", "model", "effort"),
+    [
+        (Harness.CLAUDE_CODE, "claude-opus-5-5", "low"),
+        (Harness.CODEX, "gpt-6-astra", "ultra"),
+        (Harness.ANTIGRAVITY, "gemini-4-argon", "low"),
+        (Harness.KIMI_CODE, "kimi-k3.1-pro", "max"),
+    ],
+)
+@pytest.mark.parametrize("selection", [False, True])
+async def test_external_runtime_needs_no_native_model_or_provider_key(
+    tmp_path: Path,
+    model_catalog: ModelCatalog,
+    harness: Harness,
+    model: str,
+    effort: str,
+    selection: bool,
+) -> None:
+    if not selection:
+        model, effort = "deepseek-flash", "max"
+    runtime = await build_runtime(
+        71,
+        "external-selection",
+        AgentSlices.resolve(
+            {"llm_model": model, "reasoning_effort": effort}, default_reader=defaults()
+        ),
+        catalog=model_catalog,
+        keys=ProviderKeys({}),
+        llm_override="",
+        permissions_notice_key=uuid4(),
+        home=tmp_path,
+        harness=harness,
+        birth_config={"harness_model_selection": 1} if selection else None,
+        registry=FileSessionRegistry(tmp_path / "sessions"),
+        registrations=None,
+        registration_ttl_seconds=60,
+        machine="external-test",
+        harness_environ={},
+        harness_root=bridge_root_values(),
+    )
+    assert runtime.llm is None
+    assert isinstance(runtime.harness_bridge, HarnessBridge)
+    assert runtime.harness_bridge.harness is harness
 
 
 @pytest.fixture

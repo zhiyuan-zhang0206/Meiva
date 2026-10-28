@@ -12081,6 +12081,27 @@
         ],
         "title": "HarnessBilling"
       },
+      "HarnessModelInfo": {
+        "properties": {
+          "reasoning_effort_options": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Reasoning Effort Options"
+          },
+          "reasoning_effort_default": {
+            "type": "string",
+            "title": "Reasoning Effort Default"
+          }
+        },
+        "type": "object",
+        "required": [
+          "reasoning_effort_options",
+          "reasoning_effort_default"
+        ],
+        "title": "HarnessModelInfo"
+      },
       "HeartbeatInfo": {
         "properties": {
           "interval_s": {
@@ -13770,6 +13791,16 @@
             },
             "type": "array",
             "title": "Harnesses"
+          },
+          "harness_settings": {
+            "additionalProperties": {
+              "$ref": "#/components/schemas/HarnessModelInfo"
+            },
+            "propertyNames": {
+              "$ref": "#/components/schemas/Harness"
+            },
+            "type": "object",
+            "title": "Harness Settings"
           }
         },
         "type": "object",

@@ -9,12 +9,52 @@ from base.agents.model.model_config import (
     validate_restart_model_config,
     validate_spawn_model_config,
 )
-from base.api_contracts.agent_contract import InvalidModelConfig
+from base.api_contracts.agent_contract import Harness, InvalidModelConfig
 from base.config import Settings, settings
 from base.config.service_read import ConfigAuthority
 from base.db import create_agent
 from base.lm.catalog import ModelCatalog
+from base.lm.catalog.provider_keys import ProviderKeys
 from base.packages.tests.model_catalog import inert_keys
+
+
+def test_external_spawn_validates_execution_selection_without_native_keys(
+    db_conn: psycopg.Connection, tmp_path: Path, *, model_catalog: ModelCatalog
+) -> None:
+    authority = ConfigAuthority(settings, Settings(profile=None), tmp_path / ".env")
+    with db_conn.cursor() as cur:
+        assert (
+            validate_spawn_model_config(
+                cur,
+                {"llm_model": "gpt-6-astra", "reasoning_effort": "ultra"},
+                catalog=model_catalog,
+                keys=ProviderKeys({}),
+                llm_override="",
+                authority=authority,
+                harness=Harness.CODEX,
+            )
+            == "gpt-6-astra"
+        )
+        with pytest.raises(InvalidModelConfig, match="unsupported reasoning effort"):
+            validate_spawn_model_config(
+                cur,
+                {"llm_model": "gpt-6-astra", "reasoning_effort": "ultra"},
+                catalog=model_catalog,
+                keys=ProviderKeys({}),
+                llm_override="",
+                authority=authority,
+                harness=Harness.MEIVA,
+            )
+        with pytest.raises(InvalidModelConfig, match="not supported by harness"):
+            validate_spawn_model_config(
+                cur,
+                {"llm_model": "claude-opus-5-5", "reasoning_effort": "high"},
+                catalog=model_catalog,
+                keys=ProviderKeys({}),
+                llm_override="",
+                authority=authority,
+                harness=Harness.CODEX,
+            )
 
 
 def test_fork_preflight_keeps_its_birth_model_after_default_changes(

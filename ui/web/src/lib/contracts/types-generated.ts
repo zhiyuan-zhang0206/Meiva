@@ -2917,6 +2917,10 @@ export interface components {
             billing: components["schemas"]["HarnessBilling"];
         };
         HarnessBilling: "api" | "subscription";
+        HarnessModelInfo: {
+            reasoning_effort_options: string[];
+            reasoning_effort_default: string;
+        };
         HeartbeatInfo: {
             interval_s: number;
             next_at?: string | null;
@@ -3188,6 +3192,9 @@ export interface components {
             reasoning_effort_default?: string | null;
             superseded_by?: string | null;
             harnesses: components["schemas"]["Harness"][];
+            harness_settings?: {
+                [key: string]: components["schemas"]["HarnessModelInfo"];
+            };
         };
         ModelPricing: {
             input: number;

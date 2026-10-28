@@ -43,7 +43,7 @@ from meizel.language.bindings import (
 from meizel.language.input_mutations import InputListAppend, input_list_appends
 from meizel.language.mounts import mount_facts
 from meizel.language.restricted import EXTERNAL_FORMS, const_str
-from meizel.language.typescript import typescript_files
+from meizel.language.typescript import typescript_files, typescript_scopes
 from meizel.lint_common import is_test_path
 
 __all__ = [
@@ -58,6 +58,7 @@ __all__ = [
     "scan_tree",
     "scan_typescript_files",
     "typescript_files",
+    "typescript_scopes",
 ]
 
 # The calls that start a process, with where the argument list is: the index of the list argument,

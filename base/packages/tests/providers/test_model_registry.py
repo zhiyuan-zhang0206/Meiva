@@ -8,6 +8,7 @@ import pytest
 from base.api_contracts.agent_contract import Harness
 from base.config import field_names, get_field
 from base.lm.catalog import ModelCatalog
+from base.lm.effort import HarnessModelSpec
 from base.lm.registry import (
     DEFAULT_TUNING,
     ModelSpec,
@@ -506,23 +507,68 @@ def test_harnesses_for_puts_the_builtin_runtime_first() -> None:
         context_window=1,
         knowledge_cutoff="2026-01",
         effort_levels=("low",),
-        external_harnesses=frozenset({Harness.CODEX, Harness.CLAUDE_CODE}),
+        external_harnesses={
+            Harness.CODEX: HarnessModelSpec(("low",), "low"),
+            Harness.CLAUDE_CODE: HarnessModelSpec(("low",), "low"),
+        },
     )
     assert harnesses_for(spec) == (Harness.MEIVA, Harness.CLAUDE_CODE, Harness.CODEX)
 
 
 def test_unknown_harness_values_are_refused() -> None:
-    odd = cast("frozenset[Harness]", frozenset({"claude-code"}))
+    odd = {cast(Harness, "claude-code"): HarnessModelSpec(("low",), "low")}
     with pytest.raises(RuntimeError, match="external_harnesses"):
         _validate_with(
             {"probe": ModelSpec(provider="probe", spawnable=True, external_harnesses=odd)}
         )
 
 
-def test_fast_service_inherits_the_standard_models_harnesses(
+def test_api_fast_service_does_not_claim_external_cli_support(
     *, model_catalog: ModelCatalog
 ) -> None:
     standard = model_catalog.models["claude-opus-5-5"]
     fast = model_catalog.models["claude-opus-5-5-fast"]
-    assert standard.external_harnesses == frozenset({Harness.CLAUDE_CODE})
-    assert fast.external_harnesses == standard.external_harnesses
+    assert set(standard.external_harnesses) == {Harness.CLAUDE_CODE, Harness.ANTIGRAVITY}
+    assert fast.external_harnesses == {}
+
+
+@pytest.mark.parametrize(
+    ("model", "harness", "effort", "wire_model"),
+    [
+        ("claude-opus-5-5", Harness.CLAUDE_CODE, "low", "claude-opus-5-5"),
+        ("gpt-6.1-sol", Harness.CODEX, "xhigh", "gpt-6.1-sol"),
+        ("gpt-6-astra", Harness.CODEX, "ultra", "gpt-6-astra"),
+        ("kimi-k3.1-pro", Harness.KIMI_CODE, "max", "kimi-k3.1-pro"),
+        ("gemini-4-argon", Harness.ANTIGRAVITY, "low", "gemini-4-argon-low"),
+        ("claude-opus-5-5", Harness.ANTIGRAVITY, "high", "claude-opus-5-5-high"),
+        ("gemini-3.8-flash", Harness.ANTIGRAVITY, "medium", "gemini-3.8-flash-medium"),
+    ],
+)
+def test_external_selection_resolves_the_execution_model(
+    model: str, harness: Harness, effort: str, wire_model: str, *, model_catalog: ModelCatalog
+) -> None:
+    assert model_catalog.models[model].harness_model(model, harness, effort) == (wire_model, effort)
+
+
+def test_external_default_is_independent_of_native_tuning(*, model_catalog: ModelCatalog) -> None:
+    model = "gemini-4-argon"
+    spec = model_catalog.models[model]
+    assert spec.tuning.reasoning_effort == "medium"
+    assert spec.harness_model(model, Harness.ANTIGRAVITY, None) == ("gemini-4-argon-high", "high")
+
+
+@pytest.mark.parametrize(
+    ("model", "harness", "effort"),
+    [
+        ("claude-opus-5-5", Harness.CODEX, "high"),
+        ("gemini-4-argon", Harness.ANTIGRAVITY, "max"),
+        ("gpt-6.1-sol-fast", Harness.CODEX, "high"),
+        ("gpt-6.1-sol", Harness.CODEX, 42),
+        ("gpt-6-sol", Harness.CODEX, "none"),
+    ],
+)
+def test_invalid_external_selections_fail_before_execution(
+    model: str, harness: Harness, effort: object, *, model_catalog: ModelCatalog
+) -> None:
+    with pytest.raises(ValueError):
+        model_catalog.models[model].harness_model(model, harness, effort)

@@ -23,7 +23,8 @@ itself for anything else:
 the launchable ones, and the transaction rolls back before the row exists. A fork
 inherits its source's harness, so a source born before this rule — or one whose
 launcher was retired — is refused by the same check instead of copying a value
-nothing can start.
+nothing can start. A missing fork source raises `AgentNotFound` (HTTP 404)
+before its harness or inherited model is read.
 
 ## Rows born before the rule
 
