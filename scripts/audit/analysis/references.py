@@ -1,23 +1,23 @@
-"""The reference finder behind `where_used.py`: what a target is and where it is named.
-
-`load_repo` reads the repository once, `resolve` turns a symbol, module, package or
-path into a `Target`, and `file_hits` lists every reference to it in one file:
-
-- Python files are read as an AST for imports (absolute, relative, deferred in a
-  function, `from x import y`, wildcard) and, for a symbol, for attribute use through an
-  imported module and object-form patches (`monkeypatch.setattr(mod, "name", ...)`); the
-  remaining matches of the textual forms are classified by what surrounds them (patch
-  target, dynamic import, `-m` entry point, string, docstring, comment). Plain code is
-  skipped: an import already accounts for it.
-- Every other file is matched on the textual forms; markdown additionally resolves
-  relative links and matches a symbol inside inline code. A file whose name is unique in
-  the repository is also matched by that bare name (markdown) or quoted name (anywhere:
-  `Path(...) / "scripts" / "x.py"`).
-- A symbol that a package `__init__` imports at its top level is also importable from the
-  package (`find_doors`): importers of that door count as importers of the symbol.
-
-Grouping and presentation are `where_used.py`; this module only finds hits.
-"""
+# meiva:note
+# The reference finder behind `where_used.py`: what a target is and where it is named.
+#
+# `index_repo` indexes the texts the caller read, `resolve` turns a symbol, module, package
+# or path into a `Target`, and `file_hits` lists every reference to it in one file:
+#
+# - Python files are read as an AST for imports (absolute, relative, deferred in a
+#   function, `from x import y`, wildcard) and, for a symbol, for attribute use through an
+#   imported module and object-form patches (`monkeypatch.setattr(mod, "name", ...)`); the
+#   remaining matches of the textual forms are classified by what surrounds them (patch
+#   target, dynamic import, `-m` entry point, string, docstring, comment). Plain code is
+#   skipped: an import already accounts for it.
+# - Every other file is matched on the textual forms; markdown additionally resolves
+#   relative links and matches a symbol inside inline code. A file whose name is unique in
+#   the repository is also matched by that bare name (markdown) or quoted name (anywhere:
+#   `Path(...) / "scripts" / "x.py"`).
+# - A symbol that a package `__init__` imports at its top level is also importable from the
+#   package (`find_doors`): importers of that door count as importers of the symbol.
+#
+# Grouping and presentation are `where_used.py`; this module only finds hits.
 
 from __future__ import annotations
 
@@ -27,12 +27,8 @@ import re
 from bisect import bisect_left, bisect_right
 from collections.abc import Callable, Iterable, Iterator, Sequence
 from dataclasses import dataclass
-from pathlib import Path
-
-from meizel import lint_common
 
 _CLIP = 110
-_GENERATED = frozenset({".test_durations"})
 _DOC_SUFFIXES = (".md", ".mdx", ".rst")
 _DYNAMIC_CALLS = frozenset(
     {"import_module", "importorskip", "__import__", "find_spec", "run_module", "resolve_name"}
@@ -48,31 +44,36 @@ _WORD_DASH = "_-"
 
 @dataclass(frozen=True)
 class Hit:
-    """One reference: where it is, what kind it is, and the line it sits on."""
+    # meiva:note
+    # One reference: where it is, what kind it is, and the line it sits on. A test matched only
+    # by its name for the module has no line: `line` is 0 there.
 
     path: str
-    line: int  # 0 for a test matched by name only
+    line: int
     kind: str
     text: str
 
 
 @dataclass(frozen=True)
 class Door:
-    """A package `__init__` that imports the symbol at its top level, so it is also importable
-    from the package under `name`."""
+    # meiva:note
+    # A package `__init__` that imports the symbol at its top level, so it is also importable
+    # from the package under `name`; `where` is its path and line.
 
     module: str
     name: str
-    where: str  # path:line
+    where: str
 
 
 def _dotted_left(text: str, start: int) -> bool:
-    """A dotted name must not be the tail of a longer one (`x.a.b` is not `a.b`)."""
+    # meiva:note
+    # A dotted name must not be the tail of a longer one (`x.a.b` is not `a.b`).
     return start == 0 or not (text[start - 1].isalnum() or text[start - 1] in "_.")
 
 
 def _path_left(text: str, start: int) -> bool:
-    """A repo-root path must not be the tail of another path (`./a/b.py` still counts)."""
+    # meiva:note
+    # A repo-root path must not be the tail of another path (`./a/b.py` still counts).
     if start == 0:
         return True
     before = text[start - 1]
@@ -84,7 +85,8 @@ def _path_left(text: str, start: int) -> bool:
 
 
 def _name_left(text: str, start: int) -> bool:
-    """A file name must not be part of a longer name or path."""
+    # meiva:note
+    # A file name must not be part of a longer name or path.
     return start == 0 or not (text[start - 1].isalnum() or text[start - 1] in "_-./")
 
 
@@ -94,8 +96,9 @@ def _anywhere(_text: str, _start: int) -> bool:
 
 @dataclass(frozen=True)
 class Form:
-    """A textual form of a reference. The regex starts with a literal so the engine can
-    search for it; `left_ok` then checks what precedes the match."""
+    # meiva:note
+    # A textual form of a reference. The regex starts with a literal so the engine can
+    # search for it; `left_ok` then checks what precedes the match.
 
     regex: re.Pattern[str]
     left_ok: Callable[[str, int], bool]
@@ -103,11 +106,14 @@ class Form:
 
 @dataclass(frozen=True)
 class Repo:
-    """Every readable tracked or unignored text file, and which of them are modules."""
+    # meiva:note
+    # Every readable tracked or unignored text file, and which of them are modules: `modules`
+    # maps a dotted name to its file (a directory for a namespace package) and `by_path` maps a
+    # module file or package directory to its dotted name.
 
     texts: dict[str, str]
-    modules: dict[str, str]  # dotted name -> its file (a directory for a namespace package)
-    by_path: dict[str, str]  # a module file or package directory -> dotted name
+    modules: dict[str, str]
+    by_path: dict[str, str]
 
     # meiva:note
     # Package `__init__` files that import the symbol at their top level, followed in turn.
@@ -129,11 +135,14 @@ class Repo:
 
 @dataclass(frozen=True)
 class Target:
-    """What the caller asked about, resolved against the repository."""
+    # meiva:note
+    # What the caller asked about, resolved against the repository: `kind` is symbol, module,
+    # package, file or directory, and `path` is the defining file, the package directory or the
+    # path itself.
 
     raw: str
-    kind: str  # symbol | module | package | file | directory
-    path: str  # defining file, package directory, or the path itself
+    kind: str
+    path: str
     module: str = ""
     name: str = ""
     defined_at: str = ""
@@ -145,41 +154,32 @@ class Target:
 
 @dataclass(frozen=True)
 class Matcher:
-    """The forms a reference to the target can take, compiled once per target."""
+    # meiva:note
+    # The forms a reference to the target can take, compiled once per target. For a symbol,
+    # `pairs` holds its (module, name) spellings including the doors, `about` holds how a
+    # document names the symbol's module, and `names` holds every name it is bound to; `bare`
+    # is the inline-code mention markdown only gets, `file_mention` the unique file name, and
+    # `needles` the substrings every textual reference contains. `link_path` counts markdown
+    # links to this path, or below it for a directory.
 
     target: Target
-    pairs: tuple[tuple[str, str], ...]  # symbol targets: (module, name), doors included
+    pairs: tuple[tuple[str, str], ...]
     forms: tuple[Form, ...]
-    about: tuple[Form, ...]  # symbol targets: how a document names the symbol's module
-    bare: Form | None  # inline-code mention of a symbol, markdown only
-    file_mention: Form | None  # unique file name, markdown only
-    needles: tuple[str, ...]  # every textual reference contains one of these
-    names: tuple[str, ...]  # symbol targets: the names it is bound to, doors included
-    link_path: str  # markdown links to this path (or below it, for a directory) count
+    about: tuple[Form, ...]
+    bare: Form | None
+    file_mention: Form | None
+    needles: tuple[str, ...]
+    names: tuple[str, ...]
+    link_path: str
 
     @property
     def symbol(self) -> bool:
         return bool(self.target.name)
 
 
-# ---------------------------------------------------------------- repository
-
-
-def load_repo(root: Path) -> Repo:
-    """Read every tracked (and unignored untracked) text file once."""
-    texts: dict[str, str] = {}
-    for name in lint_common.tracked_files(root, include_untracked=True):
-        path = root / name
-        if name in _GENERATED or path.is_symlink():
-            continue
-        text = lint_common.read_utf8_text(path)
-        if text is not None:
-            texts[name] = text
-    return index_repo(texts)
-
-
 def _dotted(path: str) -> str | None:
-    """The dotted name of a path that can be imported, else None."""
+    # meiva:note
+    # The dotted name of a path that can be imported, else None.
     if not path.endswith(".py"):
         return None
     parts = path[:-3].split("/")
@@ -189,7 +189,8 @@ def _dotted(path: str) -> str | None:
 
 
 def index_repo(texts: dict[str, str]) -> Repo:
-    """A `Repo` over the given path -> text mapping: which paths are importable modules."""
+    # meiva:note
+    # A `Repo` over the given path -> text mapping: which paths are importable modules.
     modules: dict[str, str] = {}
     by_path: dict[str, str] = {}
     for name in texts:
@@ -199,7 +200,9 @@ def index_repo(texts: dict[str, str]) -> Repo:
             by_path[name] = dotted
             if name.endswith("/__init__.py"):
                 by_path[posixpath.dirname(name)] = dotted
-    for name in tuple(by_path):  # directories without `__init__.py` are namespace packages
+    # meiva:note
+    # Directories without `__init__.py` are namespace packages.
+    for name in tuple(by_path):
         parent = posixpath.dirname(name)
         while parent and parent not in by_path:
             dotted = _dotted(parent + ".py")
@@ -217,11 +220,9 @@ def _parse(text: str) -> ast.Module | None:
         return None
 
 
-# ------------------------------------------------------------ target resolution
-
-
 def _split(raw: str) -> tuple[str, bool, str]:
-    """`spec`, whether a `:name` / `::name` follows, and the name."""
+    # meiva:note
+    # `spec`, whether a `:name` / `::name` follows, and the name.
     spec, sep, name = raw.partition("::")
     if not sep:
         spec, sep, name = raw.partition(":")
@@ -229,7 +230,8 @@ def _split(raw: str) -> tuple[str, bool, str]:
 
 
 def resolve(raw: str, repo: Repo) -> Target:
-    """Resolve a symbol, module, package, file or directory; ValueError if it is none."""
+    # meiva:note
+    # Resolve a symbol, module, package, file or directory; ValueError if it is none.
     spec, has_name, name = _split(raw)
     module = repo.by_path.get(spec) or (spec if spec in repo.modules else None)
     if has_name:
@@ -240,7 +242,8 @@ def resolve(raw: str, repo: Repo) -> Target:
 
 
 def _other(repo: Repo, spec: str, raw: str) -> Target:
-    """`pkg.mod.name`, a tracked file or a directory."""
+    # meiva:note
+    # `pkg.mod.name`, a tracked file or a directory.
     parent, _, leaf = spec.rpartition(".")
     if parent in repo.modules:
         return _symbol(repo, parent, leaf, raw)
@@ -291,14 +294,16 @@ def _bound_names(node: ast.stmt) -> list[str]:
 
 
 def _bindings(tree: ast.Module) -> Iterator[tuple[str, int]]:
-    """Names bound at the top level of a module: def, class, assignment, import."""
+    # meiva:note
+    # Names bound at the top level of a module: def, class, assignment, import.
     for node, _ in _statements(tree.body, nested=False):
         for name in _bound_names(node):
             yield name, node.lineno
 
 
 def _inner_bodies(stmt: ast.stmt) -> list[Sequence[ast.stmt]]:
-    """The statement lists nested directly in a compound statement."""
+    # meiva:note
+    # The statement lists nested directly in a compound statement.
     bodies: list[Sequence[ast.stmt]] = [
         getattr(stmt, field, ()) for field in ("body", "orelse", "finalbody")
     ]
@@ -310,8 +315,9 @@ def _inner_bodies(stmt: ast.stmt) -> list[Sequence[ast.stmt]]:
 def _statements(
     body: Sequence[ast.stmt], *, nested: bool, depth: int = 0
 ) -> Iterator[tuple[ast.stmt, int]]:
-    """Statements with their function depth. Expressions are never entered, which is what
-    makes this cheap; `nested=False` stays out of function and class bodies."""
+    # meiva:note
+    # Statements with their function depth. Expressions are never entered, which is what
+    # makes this cheap; `nested=False` stays out of function and class bodies.
     for stmt in body:
         yield stmt, depth
         function = isinstance(stmt, ast.FunctionDef | ast.AsyncFunctionDef)
@@ -320,11 +326,9 @@ def _statements(
                 yield from _statements(found, nested=nested, depth=depth + 1 if function else depth)
 
 
-# ----------------------------------------------------------------- doors, matcher
-
-
 def _resolve_from(node: ast.ImportFrom, current: str | None, *, is_pkg: bool) -> str | None:
-    """The dotted module a `from ... import` names, relative imports resolved."""
+    # meiva:note
+    # The dotted module a `from ... import` names, relative imports resolved.
     if node.level == 0:
         return node.module
     if current is None:
@@ -342,7 +346,8 @@ def _resolve_from(node: ast.ImportFrom, current: str | None, *, is_pkg: bool) ->
 
 
 def _reexport(text: str, package: str, origin: str, name: str) -> tuple[int, str] | None:
-    """(line, bound name) of the `from <origin> import <name>` in a package `__init__`."""
+    # meiva:note
+    # (line, bound name) of the `from <origin> import <name>` in a package `__init__`.
     tree = _parse(text) if name in text else None
     if tree is None:
         return None
@@ -372,14 +377,17 @@ def _forms(repo: Repo, target: Target, pairs: Sequence[tuple[str, str]]) -> list
         return forms
     if target.module:
         forms = [_path_form(target.path) if target.is_dir else _path_form(target.path, r"(?!\w)")]
-        if "." in target.module:  # a bare top-level name matches ordinary words
+        # meiva:note
+        # A bare top-level name matches ordinary words.
+        if "." in target.module:
             forms.append(_dotted_form(rf"{re.escape(target.module)}(?!\w)"))
         return forms
     return [_path_form(target.path)]
 
 
 def _module_forms(repo: Repo, target: Target) -> list[Form]:
-    """How a document says it is about the symbol's module: its path or its dotted name."""
+    # meiva:note
+    # How a document says it is about the symbol's module: its path or its dotted name.
     forms = [_path_form(repo.modules[target.module], r"(?!\w)")]
     if "." in target.module:
         forms.append(_dotted_form(rf"{re.escape(target.module)}(?!\w)"))
@@ -387,8 +395,9 @@ def _module_forms(repo: Repo, target: Target) -> list[Form]:
 
 
 def _unique_file_name(repo: Repo, target: Target) -> str | None:
-    """The file's name when no other file in the repository has it, so a bare mention of the
-    name is unambiguous."""
+    # meiva:note
+    # The file's name when no other file in the repository has it, so a bare mention of the
+    # name is unambiguous.
     base = posixpath.basename(target.path)
     if target.kind not in ("module", "file") or base == "__init__.py":
         return None
@@ -397,7 +406,8 @@ def _unique_file_name(repo: Repo, target: Target) -> str | None:
 
 
 def _name_forms(name: str) -> list[Form]:
-    """A quoted file name: how code locates a file (`Path(...) / "scripts" / "x.py"`)."""
+    # meiva:note
+    # A quoted file name: how code locates a file (`Path(...) / "scripts" / "x.py"`).
     return [Form(re.compile(f"{quote}{re.escape(name)}{quote}"), _anywhere) for quote in "\"'"]
 
 
@@ -407,7 +417,9 @@ def build_matcher(repo: Repo, target: Target, doors: Sequence[Door] = ()) -> Mat
     if target.name:
         pairs = ((target.module, target.name), *((d.module, d.name) for d in doors))
         names = tuple(dict.fromkeys(name for _, name in pairs))
-        needles = (*names, "import *")  # a wildcard import may use the symbol
+        # meiva:note
+        # A wildcard import may use the symbol under any of its names.
+        needles = (*names, "import *")
         inline = rf"`[^`\n]*(?<!\w){re.escape(target.name)}(?!\w)[^`\n]*`"
         bare, link_path = Form(re.compile(inline), _anywhere), ""
     else:
@@ -423,15 +435,13 @@ def build_matcher(repo: Repo, target: Target, doors: Sequence[Door] = ()) -> Mat
     return Matcher(target, pairs, tuple(forms), about, bare, mention, needles, names, link_path)
 
 
-# ----------------------------------------------------------- Python scanning
-
-
 def _under(module: str, target: str) -> bool:
     return module == target or module.startswith(target + ".")
 
 
 def _chain(node: ast.Attribute) -> tuple[str, list[str]] | None:
-    """`a.b.c` -> ("a", ["b", "c"]) when the chain is rooted at a plain name."""
+    # meiva:note
+    # `a.b.c` -> ("a", ["b", "c"]) when the chain is rooted at a plain name.
     parts: list[str] = []
     current: ast.expr = node
     while isinstance(current, ast.Attribute):
@@ -441,7 +451,8 @@ def _chain(node: ast.Attribute) -> tuple[str, list[str]] | None:
 
 
 class _Imports:
-    """Import statements that reach the target and, for a symbol, attribute use of it."""
+    # meiva:note
+    # Import statements that reach the target and, for a symbol, attribute use of it.
 
     def __init__(self, matcher: Matcher, repo: Repo, path: str) -> None:
         self.matcher = matcher
@@ -497,7 +508,8 @@ class _Imports:
                 self._hit(node.lineno, kind, deferred=deferred)
 
     def _symbol_kind(self, base: str, imported: str) -> str | None:
-        """What `from <base> import <imported>` does to the symbol, if anything."""
+        # meiva:note
+        # What `from <base> import <imported>` does to the symbol, if anything.
         for module, name in self.matcher.pairs:
             if base != module:
                 continue
@@ -508,7 +520,8 @@ class _Imports:
         return None
 
     def _dotted(self, node: ast.expr) -> str | None:
-        """The dotted module an expression names through the file's imports, if it does."""
+        # meiva:note
+        # The dotted module an expression names through the file's imports, if it does.
         if isinstance(node, ast.Name):
             return self._aliases.get(node.id)
         chain = _chain(node) if isinstance(node, ast.Attribute) else None
@@ -516,8 +529,9 @@ class _Imports:
         return ".".join([base, *chain[1]]) if chain and base else None
 
     def _uses(self, tree: ast.Module) -> None:
-        """Use of the symbol through an imported module: `mod.name`, and the object form of a
-        patch, `monkeypatch.setattr(mod, "name", ...)` / `patch.object(mod, "name")`."""
+        # meiva:note
+        # Use of the symbol through an imported module: `mod.name`, and the object form of a
+        # patch, `monkeypatch.setattr(mod, "name", ...)` / `patch.object(mod, "name")`.
         wanted = [f"{module}.{name}" for module, name in self.matcher.pairs]
         for node in ast.walk(tree):
             if isinstance(node, ast.Attribute):
@@ -539,7 +553,8 @@ class _Imports:
 
 
 def _may_import(matcher: Matcher, text: str) -> bool:
-    """Cheap precheck: could this file's imports reach the target at all?"""
+    # meiva:note
+    # Cheap precheck: could this file's imports reach the target at all?
     if matcher.symbol:
         return any(name in text for name in matcher.needles)
     module = matcher.target.module
@@ -576,12 +591,15 @@ def _mark(contexts: dict[int, str], node: ast.Constant, kind: str) -> None:
 
 
 def _covers(node: ast.AST, lines: Sequence[int]) -> bool:
-    """Whether the node spans any of the (sorted) lines; nodes without a position do."""
+    # meiva:note
+    # Whether the node spans any of the (sorted) lines; nodes without a position do.
     start: int | None = getattr(node, "lineno", None)
     if start is None:
         return True
     decorators: list[ast.expr] = getattr(node, "decorator_list", [])
-    start = min([start, *(d.lineno for d in decorators)])  # a `def` line follows its decorators
+    # meiva:note
+    # A `def` line follows its decorators.
+    start = min([start, *(d.lineno for d in decorators)])
     end: int = getattr(node, "end_lineno", None) or start
     index = bisect_left(lines, start)
     return index < len(lines) and lines[index] <= end
@@ -619,8 +637,9 @@ def _mark_node(contexts: dict[int, str], node: ast.AST) -> None:
 
 
 def _string_contexts(tree: ast.Module, lines: Sequence[int]) -> dict[int, str]:
-    """For the given sorted lines: what string sits there (a patch target, a dynamic import,
-    a docstring, a plain string). Subtrees away from those lines are not entered."""
+    # meiva:note
+    # For the given sorted lines: what string sits there (a patch target, a dynamic import,
+    # a docstring, a plain string). Subtrees away from those lines are not entered.
     contexts: dict[int, str] = {}
     stack: list[ast.AST] = [tree]
     while stack:
@@ -632,8 +651,10 @@ def _string_contexts(tree: ast.Module, lines: Sequence[int]) -> dict[int, str]:
 
 
 def _python_kind(contexts: dict[int, str] | None, row: str, line: int, col: int) -> str | None:
-    """What a textual match on a line of Python is; None for plain code (imports cover it)."""
-    if contexts is None:  # the file does not parse: keep the match, kind unknown
+    # meiva:note
+    # What a textual match on a line of Python is; None for plain code (imports cover it).
+    # The file does not parse: keep the match, kind unknown.
+    if contexts is None:
         return "reference"
     kind = contexts.get(line)
     if kind is None:
@@ -650,7 +671,9 @@ def _python_hits(path: str, text: str, matcher: Matcher, repo: Repo) -> list[Hit
     if tree is not None and importable:
         found = _Imports(matcher, repo, path).run(tree)
         hits.extend(Hit(path, line, kind, _clip(rows[line - 1])) for line, kind in found)
-        imported = {line for line, _ in found}  # the import hit already covers its line
+        # meiva:note
+        # The import hit already covers its line.
+        imported = {line for line, _ in found}
         matches = [(line, col) for line, col in matches if line not in imported]
     return hits + _classified(path, rows, matches, tree)
 
@@ -658,7 +681,8 @@ def _python_hits(path: str, text: str, matcher: Matcher, repo: Repo) -> list[Hit
 def _classified(
     path: str, rows: list[str], matches: list[tuple[int, int]], tree: ast.Module | None
 ) -> list[Hit]:
-    """Textual matches of a Python file, each told apart by what surrounds it."""
+    # meiva:note
+    # Textual matches of a Python file, each told apart by what surrounds it.
     if not matches:
         return []
     wanted = sorted({line for line, _ in matches})
@@ -669,11 +693,9 @@ def _classified(
     return [Hit(path, line, kind, _clip(rows[line - 1], col)) for line, col, kind in kinds if kind]
 
 
-# --------------------------------------------------------------- text scanning
-
-
 def _clip(row: str, col: int = 0) -> str:
-    """The line, stripped; a long one is cut to a window around the match column."""
+    # meiva:note
+    # The line, stripped; a long one is cut to a window around the match column.
     if len(row.strip()) <= _CLIP:
         return row.strip()
     start = max(0, col - _CLIP // 3)
@@ -682,7 +704,8 @@ def _clip(row: str, col: int = 0) -> str:
 
 
 def _find(text: str, forms: Iterable[Form]) -> Iterator[tuple[int, int]]:
-    """(line, column) of every match; lines count from 1, columns from 0."""
+    # meiva:note
+    # (line, column) of every match; lines count from 1, columns from 0.
     starts: list[int] | None = None
     for form in forms:
         for found in form.regex.finditer(text):
@@ -706,7 +729,8 @@ def is_doc_file(path: str) -> bool:
 
 
 def _link_hits(path: str, text: str, rows: list[str], matcher: Matcher) -> list[Hit]:
-    """Markdown links that resolve (relative to the file) to the target."""
+    # meiva:note
+    # Markdown links that resolve (relative to the file) to the target.
     folder = posixpath.dirname(path)
     hits: list[Hit] = []
     for line, link in _links(text):
@@ -719,9 +743,10 @@ def _link_hits(path: str, text: str, rows: list[str], matcher: Matcher) -> list[
 
 
 def _about_symbol(path: str, text: str, matcher: Matcher) -> bool:
-    """Whether a bare symbol name in this markdown file can be taken to mean the symbol: the
-    name is not an ordinary word (it has an underscore or a capital), or the file is about
-    the symbol's module (it names the module, or sits in the module's directory)."""
+    # meiva:note
+    # Whether a bare symbol name in this markdown file can be taken to mean the symbol: the
+    # name is not an ordinary word (it has an underscore or a capital), or the file is about
+    # the symbol's module (it names the module, or sits in the module's directory).
     name = matcher.target.name
     if "_" in name or name != name.lower():
         return True
@@ -732,7 +757,8 @@ def _about_symbol(path: str, text: str, matcher: Matcher) -> bool:
 
 
 def _doc_hits(path: str, text: str, rows: list[str], matcher: Matcher) -> list[Hit]:
-    """Markdown-only forms: inline-code symbol names, unique file names and resolved links."""
+    # meiva:note
+    # Markdown-only forms: inline-code symbol names, unique file names and resolved links.
     bare = matcher.bare if matcher.bare and _about_symbol(path, text, matcher) else None
     extra = ((bare, "mention (bare name)"), (matcher.file_mention, "mention (file name)"))
     hits = [
@@ -756,7 +782,8 @@ def _plain_hits(path: str, text: str, matcher: Matcher) -> list[Hit]:
 
 
 def file_hits(path: str, text: str, matcher: Matcher, repo: Repo) -> list[Hit]:
-    """Every reference to the target in one file."""
+    # meiva:note
+    # Every reference to the target in one file.
     if not any(needle in text for needle in matcher.needles):
         return []
     if path.endswith(".py"):

@@ -33,27 +33,15 @@ from __future__ import annotations
 
 import argparse
 import importlib
-import re
 import sys
 from pathlib import Path
 
 from meizel import lint_common
+from scripts.audit.analysis import is_frozen, old_references, referenced_names
 
-__all__ = ["is_frozen", "main"]
+__all__ = ["main"]
 
 _REPO = Path(__file__).resolve().parent.parent.parent
-_FROZEN = ("docs/decisions/", "docs/postmortems/")
-_HISTORY_READ_RE = re.compile(r"""git\s+show\s+(?:"[^"]*"|'[^']*'|\S+)""")
-
-
-def _mask_history_reads(text: str) -> str:
-    """Blank `git show <rev>:<path>` operands — object reads, never live references."""
-    return _HISTORY_READ_RE.sub(lambda match: " " * len(match.group(0)), text)
-
-
-def is_frozen(name: str) -> bool:
-    """Whether a tracked path is in a frozen history axis: never rewritten."""
-    return name.startswith(_FROZEN)
 
 
 def _is_excluded(name: str) -> bool:
@@ -76,47 +64,6 @@ def _tracked_text(repo_root: Path) -> list[tuple[str, str]]:
             continue
         texts.append((name, text))
     return texts
-
-
-def _from_imports(module: str, text: str) -> list[tuple[int, set[str]]]:
-    """Import names and offsets, including multiline imports in prose snippets."""
-    if module not in text or "from" not in text:
-        return []
-    pattern = re.compile(
-        rf"(?<![\w.])from\s+{re.escape(module)}\s+import\s+"
-        r"(\((?:#[^\n]*|[^)#])*\)|(?:\\\n|[^\n;])+)"
-    )
-    imports: list[tuple[int, set[str]]] = []
-    for match in pattern.finditer(text):
-        body = re.sub(r"#[^\n]*", "", match.group(1)).strip("()")
-        body = body.replace("\\\n", "")
-        names = set(re.findall(r"(?:^|,)\s*([A-Za-z_]\w*|\*)", body))
-        imports.append((match.start(), names))
-    return imports
-
-
-def _old_references(module: str, text: str) -> list[int]:
-    text = _mask_history_reads(text)
-    pattern = re.compile(rf"(?<![\w.]){re.escape(module)}(?!\w)")
-    offsets = [match.start() for match in pattern.finditer(text)] if module in text else []
-    parent, _, leaf = module.rpartition(".")
-    if parent:
-        offsets.extend(offset for offset, names in _from_imports(parent, text) if leaf in names)
-    slash = module.replace(".", "/")
-    if slash in text:
-        slash_pattern = re.compile(rf"(?<![\w.]){re.escape(slash)}\.py(?!\w)")
-        offsets.extend(match.start() for match in slash_pattern.finditer(text))
-    return sorted(text.count("\n", 0, offset) + 1 for offset in offsets)
-
-
-def _referenced_names(module: str, text: str) -> set[str]:
-    text = _mask_history_reads(text)
-    if module not in text:
-        return set()
-    refs = set(re.findall(rf"(?<![\w.]){re.escape(module)}\.([A-Za-z_]\w*)", text))
-    for _, names in _from_imports(module, text):
-        refs.update(names)
-    return refs
 
 
 def _missing(module: str, refs: set[str]) -> list[str]:
@@ -163,11 +110,11 @@ def main(argv: list[str], *, repo_root: Path | None = None) -> int:
         old_count = 0
         refs: set[str] = set()
         for path, text in texts:
-            lines = _old_references(old, text)
+            lines = old_references(old, text)
             old_count += len(lines)
             for line in lines:
                 print(f"{path}:{line}: old reference to {old}")
-            refs.update(_referenced_names(new, text))
+            refs.update(referenced_names(new, text))
         import_error = ""
         missing: list[str] = []
         try:

@@ -8,6 +8,7 @@ import pytest
 
 from base.host.proc import run_bounded
 from scripts.audit import module_moves as gate
+from scripts.audit.analysis import old_references, referenced_names
 
 
 @pytest.fixture
@@ -202,3 +203,18 @@ def test_invalid_move_pair_fails_at_the_cli_boundary(pair: str, tmp_path: Path) 
     with pytest.raises(SystemExit) as exit_info:
         gate.main([pair], repo_root=tmp_path)
     assert exit_info.value.code == 2
+
+
+def test_old_references_counts_dotted_from_import_and_path_forms() -> None:
+    text = "import pkg.old\nfrom pkg import old as later\npkg/old.py\n"
+    assert old_references("pkg.old", text) == [1, 2, 3]
+
+
+def test_old_references_ignore_a_pinned_history_object_read() -> None:
+    text = "git show HEAD:pkg/old.py\nimport pkg.old\n"
+    assert old_references("pkg.old", text) == [2]
+
+
+def test_referenced_names_collects_attribute_and_from_import_names() -> None:
+    text = "pkg.new.Alpha\nfrom pkg.new import Beta, Gamma\n"
+    assert referenced_names("pkg.new", text) == {"Alpha", "Beta", "Gamma"}

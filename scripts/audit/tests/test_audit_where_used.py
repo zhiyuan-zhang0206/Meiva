@@ -5,8 +5,9 @@ from typing import Any, cast
 import pytest
 
 from base.host.proc import run_bounded
-from scripts.audit import where_used as gate
-from scripts.audit import where_used_scan as scan
+from scripts.audit import analysis as finder
+from scripts.audit import where_used as shell
+from scripts.audit.analysis import Report, as_json, render, scan
 
 FILES = {
     "pkg/__init__.py": "from .engine import run as run\n",
@@ -66,16 +67,16 @@ def audit_checkout(tmp_path: Path) -> Path:
     return tmp_path
 
 
-def _report(raw: str, files: dict[str, str] | None = None) -> gate.Report:
-    repo = scan.index_repo(FILES if files is None else files)
-    return gate.scan(repo, scan.resolve(raw, repo))
+def _report(raw: str, files: dict[str, str] | None = None) -> Report:
+    repo = finder.index_repo(FILES if files is None else files)
+    return scan(repo, finder.resolve(raw, repo))
 
 
-def _kinds(report: gate.Report, group: str) -> dict[tuple[str, int], str]:
+def _kinds(report: Report, group: str) -> dict[tuple[str, int], str]:
     return {(hit.path, hit.line): hit.kind for hit in report.groups[group]}
 
 
-def _paths(report: gate.Report, group: str) -> set[str]:
+def _paths(report: Report, group: str) -> set[str]:
     return {hit.path for hit in report.groups[group]}
 
 
@@ -114,8 +115,8 @@ def test_symbol_follows_the_package_door_and_attribute_use_but_not_other_names()
 
 def test_symbol_forms_name_it_in_every_spelling() -> None:
     for raw in ("pkg.engine:run", "pkg.engine.run", "pkg/engine.py::run", "pkg/engine.py:run"):
-        repo = scan.index_repo(FILES)
-        target = scan.resolve(raw, repo)
+        repo = finder.index_repo(FILES)
+        target = finder.resolve(raw, repo)
         assert (target.kind, target.module, target.name, target.defined_at) == (
             "symbol",
             "pkg.engine",
@@ -144,9 +145,7 @@ def test_tests_show_where_they_live_and_which_are_only_named_for_the_module() ->
         ("tests/test_engine.py", 5): "patch target",
         ("tests/test_engine_cli.py", 0): "name match",
     }
-    header = next(
-        line for line in gate.render(report, None).splitlines() if line.startswith("TESTS")
-    )
+    header = next(line for line in render(report, None).splitlines() if line.startswith("TESTS"))
     assert "3 files" in header
     assert "1 beside the code, 2 in top-level tests/" in header
 
@@ -266,17 +265,17 @@ def test_a_deferred_import_in_a_package_init_is_not_a_re_export() -> None:
 
 
 def test_resolution_accepts_modules_packages_files_and_directories() -> None:
-    repo = scan.index_repo(FILES)
+    repo = finder.index_repo(FILES)
 
-    assert scan.resolve("./pkg//engine.py", repo).path == "pkg/engine.py"
-    assert scan.resolve("pkg/", repo).path == "pkg"
+    assert finder.resolve("./pkg//engine.py", repo).path == "pkg/engine.py"
+    assert finder.resolve("pkg/", repo).path == "pkg"
 
-    assert scan.resolve("pkg/engine.py", repo).kind == "module"
-    assert scan.resolve("pkg.sub", repo).kind == "package"
-    assert scan.resolve("pkg", repo).path == "pkg"
-    assert scan.resolve("docs/guide.md", repo).kind == "file"
-    assert scan.resolve("docs", repo).kind == "directory"
-    assert scan.resolve("app", repo).kind == "package"
+    assert finder.resolve("pkg/engine.py", repo).kind == "module"
+    assert finder.resolve("pkg.sub", repo).kind == "package"
+    assert finder.resolve("pkg", repo).path == "pkg"
+    assert finder.resolve("docs/guide.md", repo).kind == "file"
+    assert finder.resolve("docs", repo).kind == "directory"
+    assert finder.resolve("app", repo).kind == "package"
 
 
 @pytest.mark.parametrize(
@@ -291,10 +290,10 @@ def test_resolution_accepts_modules_packages_files_and_directories() -> None:
     ],
 )
 def test_resolution_fails_fast_on_unknown_targets(raw: str, message: str) -> None:
-    repo = scan.index_repo(FILES)
+    repo = finder.index_repo(FILES)
 
     with pytest.raises(ValueError, match=message):
-        scan.resolve(raw, repo)
+        finder.resolve(raw, repo)
 
 
 def test_output_caps_files_per_group_but_json_and_all_are_complete() -> None:
@@ -302,13 +301,13 @@ def test_output_caps_files_per_group_but_json_and_all_are_complete() -> None:
     files.update({f"user{i:02d}/use.py": "import pkg.engine\n" for i in range(15)})
     report = _report("pkg.engine", files)
 
-    capped = gate.render(report, 3).splitlines()
-    full = gate.render(report, None)
+    capped = render(report, 3).splitlines()
+    full = render(report, None)
 
     assert sum(line.startswith("  user") for line in capped) == 3
     assert any("12 MORE FILES HIDDEN" in line and "user" in line for line in capped)
     assert full.count("use.py:1") == 15
-    groups = cast("dict[str, dict[str, Any]]", gate.as_json(report)["groups"])
+    groups = cast("dict[str, dict[str, Any]]", as_json(report)["groups"])
     assert groups["imports"]["files"] == 15
     assert len(groups["imports"]["hits"]) == 15
 
@@ -317,7 +316,7 @@ def test_main_reports_a_real_symbol_as_json_and_exits_2_on_an_unknown_target(
     audit_checkout: Path,
     capsys: pytest.CaptureFixture[str],
 ) -> None:
-    assert gate.main(["pkg.engine:run", "--json"], repo_root=audit_checkout) == 0
+    assert shell.main(["pkg.engine:run", "--json"], repo_root=audit_checkout) == 0
     payload = json.loads(capsys.readouterr().out)
     imports = {hit["path"] for hit in payload[0]["groups"]["imports"]["hits"]}
 
@@ -325,7 +324,7 @@ def test_main_reports_a_real_symbol_as_json_and_exits_2_on_an_unknown_target(
     assert "app/main.py" in imports
 
     with pytest.raises(SystemExit) as exit_info:
-        gate.main(["pkg.engine:no_such_name"], repo_root=audit_checkout)
+        shell.main(["pkg.engine:no_such_name"], repo_root=audit_checkout)
     assert exit_info.value.code == 2
 
 
@@ -334,7 +333,7 @@ def test_an_absolute_path_inside_the_explicit_checkout_is_made_relative(
     audit_checkout: Path, capsys: pytest.CaptureFixture[str], suffix: str
 ) -> None:
     absolute = str(audit_checkout / "pkg" / "engine.py") + suffix
-    assert gate.main([absolute, "--json"], repo_root=audit_checkout) == 0
+    assert shell.main([absolute, "--json"], repo_root=audit_checkout) == 0
     target = json.loads(capsys.readouterr().out)[0]["target"]
     assert target["path"] == "pkg/engine.py"
     assert target["raw"] == "pkg/engine.py" + suffix
@@ -348,7 +347,7 @@ def test_an_absolute_target_outside_the_explicit_checkout_fails(
     outside = tmp_path_factory.mktemp("outside-audit") / "other.py"
     outside.write_text("def run() -> None: ...\n", encoding="utf-8")
     with pytest.raises(SystemExit) as exit_info:
-        gate.main([str(outside)], repo_root=audit_checkout)
+        shell.main([str(outside)], repo_root=audit_checkout)
     assert exit_info.value.code == 2
     assert str(outside) in capsys.readouterr().err
 
@@ -356,7 +355,7 @@ def test_an_absolute_target_outside_the_explicit_checkout_fails(
 def test_main_lists_every_file_unless_a_limit_is_given(
     audit_checkout: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    assert gate.main(["pkg.engine:run"], repo_root=audit_checkout) == 0
+    assert shell.main(["pkg.engine:run"], repo_root=audit_checkout) == 0
     out = capsys.readouterr().out
     assert "HIDDEN" not in out
-    assert gate.main(["pkg.engine:run", "--limit", "1"], repo_root=audit_checkout) == 0
+    assert shell.main(["pkg.engine:run", "--limit", "1"], repo_root=audit_checkout) == 0
