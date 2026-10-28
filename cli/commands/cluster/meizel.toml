@@ -11,6 +11,3 @@ exports = ["control.py", "cron.py", "health.py", "home.py", "plans", "tests", "u
 
 [purity]
 "__init__.py" = "strict"
-
-[debt.ambient-read]
-"control.py#home pathlib.Path.expanduser" = 1

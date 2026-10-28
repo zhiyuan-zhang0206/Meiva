@@ -181,3 +181,36 @@ def test_it_refuses_a_gateway_home_with_no_active_generation(
 
     assert "issue-unit:" in capsys.readouterr().err
     assert not out.exists()
+
+
+# meiva:note
+# `--out` may start with `~`: it names the home the invocation read (the operator's session), not
+# the process's, so the bundle lands under that home even when the process runs elsewhere.
+def test_a_tilde_in_the_output_path_expands_against_the_invocations_home(
+    gateway_home: Path,
+    command_runtime: CommandRuntime,
+    tmp_path: Path,
+) -> None:
+    user_home = tmp_path / "operator"
+    user_home.mkdir()
+    command = _operator(command_runtime, gateway_home, serves_gateway=True)
+    command = replace(command, session=replace(command.session, user_home=user_home))
+
+    assert _issue(command, Path("~/mini.bundle")) == 0
+
+    assert (user_home / "mini.bundle").exists()
+
+
+# meiva:note
+# `~someone/...` names another account's home, which an invocation does not read: the command says
+# so and writes nothing instead of expanding it against the process's user database.
+def test_another_users_home_in_the_output_path_is_refused(
+    gateway_home: Path,
+    command_runtime: CommandRuntime,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    command = _operator(command_runtime, gateway_home, serves_gateway=True)
+
+    assert _issue(command, Path("~someone/mini.bundle")) == 1
+
+    assert "names another user's home" in capsys.readouterr().err
