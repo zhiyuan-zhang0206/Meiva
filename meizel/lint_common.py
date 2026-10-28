@@ -6,8 +6,8 @@ from collections.abc import Iterable
 from pathlib import Path
 
 from meizel import is_repo_test_file, is_test_path, split_only
+from meizel.checkout import tracked_files
 from meizel.graph.model import MeizelError
-from meizel.graph.universe import tracked_files
 from meizel.roles import packages, pytest_test_hosts
 
 __all__ = [

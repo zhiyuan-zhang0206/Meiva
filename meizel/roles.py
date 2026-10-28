@@ -15,8 +15,9 @@ from functools import cache
 from pathlib import Path
 from typing import TypeGuard
 
+from meizel.checkout import GitRepo
 from meizel.graph.model import MeizelError
-from meizel.graph.universe import MANIFEST, GitRepo
+from meizel.graph.universe import MANIFEST
 
 __all__ = [
     "ROLE_NAMES",

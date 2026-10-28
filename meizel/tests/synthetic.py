@@ -12,10 +12,11 @@ from typing import TypeGuard
 
 import pytest
 
+from meizel.checkout import load_universe
 from meizel.contracts.analysis import POLICY, Analysis, DebtEntry, analyze, render_policy
 from meizel.contracts.cli import main
 from meizel.graph.model import Diagnostic
-from meizel.graph.universe import Universe, load_universe
+from meizel.graph.universe import Universe
 from meizel.owners import decisions
 from meizel.state.ambient_state.tests.conftest import (
     synthetic_ambient_allowlists as synthetic_ambient_allowlists,
