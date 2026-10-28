@@ -82,7 +82,9 @@ def assistant_texts(events: Sequence[BridgeEvent]) -> tuple[str, ...]:
 # terminal state can arrive only as an update, with no notification — a task stopped through
 # the control request reports `killed` and the notification that would have followed is
 # sometimes suppressed — so both messages clear it. Clearing is what keeps `close()` from
-# asking the CLI to stop work that already ended.
+# asking the CLI to stop work that already ended. These four values are the SDK's own
+# `TERMINAL_TASK_STATUSES`, spelled out here so the adapter's fake carries the same rule the
+# real CLI follows and a bump of the SDK constant shows up as a diff in this file.
 # meiva:link base/lm/harness/claude/docs/background-tasks.meiva.okf.md
 TERMINAL_TASK_STATUSES = frozenset({"completed", "failed", "stopped", "killed"})
 
