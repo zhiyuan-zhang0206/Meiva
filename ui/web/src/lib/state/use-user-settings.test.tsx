@@ -63,7 +63,7 @@ async function setupSettingsGateway(
       <QueryClientProvider client={qc}>{children}</QueryClientProvider>
     </ApiProvider>
   );
-  return { gateway, rig, wrapper };
+  return { gateway, rig, qc, wrapper };
 }
 
 function putRequests(gateway: TestGateway): { key: string; value: unknown }[] {
@@ -141,17 +141,29 @@ describe("useUserSettings", () => {
   });
 
   // meiva:note
-  // This case drives a real local server: the GET never answers and the PUT is released by
-  // hand. It waits for the PUT to arrive before releasing it, because a whole-suite run can
-  // delay the request past the optimistic flip; the budget is wide for the same reason.
+  // The read never answers, so the rollback can only be seen once the PUT's rejection lands.
+  // Both halves are settled by hand and asserted on the call itself: no `waitFor`, so a
+  // loaded machine cannot turn this into a failure and a real regression cannot hide behind
+  // a longer timeout.
+  // meiva:note
+  // The GET never answers and the PUT is released by hand. Both halves are events the test
+  // waits for (the request reaching the gateway, the query cache taking the rolled-back
+  // value), not clocks: a loaded machine cannot turn this into a failure, and a real
+  // regression cannot hide behind a longer timeout.
   it("rolls back to defaults when the PUT fails before the initial GET resolves", async () => {
     let releasePut: (reply: GatewayReply) => void = () => undefined;
-    const { gateway, wrapper } = await setupSettingsGateway({
+    let putArrived: () => void = () => undefined;
+    const arrived = new Promise<void>((resolve) => {
+      putArrived = resolve;
+    });
+    const { qc, wrapper } = await setupSettingsGateway({
       onGet: () => ({ kind: "hang" }),
-      onPut: () =>
-        new Promise<GatewayReply>((resolve) => {
+      onPut: () => {
+        putArrived();
+        return new Promise<GatewayReply>((resolve) => {
           releasePut = resolve;
-        }),
+        });
+      },
     });
 
     const { result } = renderHook(() => useUserSettings(), { wrapper });
@@ -159,27 +171,35 @@ describe("useUserSettings", () => {
     // Default (quiet) value before the toggle.
     expect(result.current.settings["display.show_agent_status"]).toBe(false);
 
-    result.current.setSetting("display.show_agent_status", true);
-
-    // Optimistic flip lands even with the GET unresolved…
-    await waitFor(() => {
-      expect(result.current.settings["display.show_agent_status"]).toBe(true);
+    await act(async () => {
+      result.current.setSetting("display.show_agent_status", true);
+      await arrived;
+      await Promise.resolve();
     });
 
-    // …and the failed PUT rolls it back to the default, not a stuck true.
-    await waitFor(() => expect(gateway.requests.some((r) => r.method === "PUT")).toBe(true));
-    releasePut({ kind: "json", status: 500, body: { detail: "Server error" } });
     // meiva:note
-    // The GET is deliberately hanging, so the rollback can only be seen once the PUT's
-    // rejection lands. A whole-suite run (hundreds of files on one machine) pushes that
-    // past the default one-second wait; five seconds still fails a real regression.
-    await waitFor(
-      () => {
-        expect(result.current.settings["display.show_agent_status"]).toBe(false);
-      },
-      { timeout: 5_000 },
-    );
-  }, 20_000);
+    // Optimistic flip lands even with the GET unresolved.
+    expect(result.current.settings["display.show_agent_status"]).toBe(true);
+
+    // meiva:note
+    // The failed PUT rolls it back to the default, not a stuck true. The assertion reads the
+    // cache the hook derives `settings` from, and waits for the cache to take that value.
+    const rolledBack = new Promise<void>((resolve) => {
+      const unsubscribe = qc.getQueryCache().subscribe((event) => {
+        if (event.type !== "updated") return;
+        const data = event.query.state.data as Record<string, unknown> | undefined;
+        if (data?.["display.show_agent_status"] === false) {
+          unsubscribe();
+          resolve();
+        }
+      });
+    });
+    await act(async () => {
+      releasePut({ kind: "json", status: 500, body: { detail: "Server error" } });
+      await rolledBack;
+    });
+    expect(qc.getQueryData<Record<string, unknown>>(["user-settings"])?.["display.show_agent_status"]).toBe(false);
+  });
 
   it("caches settings and does not refetch on every call", async () => {
     const { gateway, wrapper } = await setupSettingsGateway();
