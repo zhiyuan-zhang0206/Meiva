@@ -48,7 +48,7 @@ def test_a_cold_start_records_its_units_before_the_manifest_is_published(
             (service(),),
             launch,
             {},
-            driver.root_client(short_tmp),
+            driver.root_client(short_tmp, environ=os.environ),
             {},
             retained_children=children,
             helper=None,
@@ -79,7 +79,7 @@ def test_a_cold_start_records_its_units_and_publishes_the_manifest_before_the_ro
             (service(),),
             launch,
             {"units": []},
-            driver.root_client(short_tmp),
+            driver.root_client(short_tmp, environ=os.environ),
             {"PATH": os.environ["PATH"]},
             retained_children=children,
             helper=None,
@@ -97,7 +97,7 @@ def test_the_driver_records_the_units_before_it_asks_the_root(
     roster = (service(),)
 
     with scripted_root(short_tmp, [UnitRow("gateway", state="stopped")]) as root:
-        client = driver.root_client(short_tmp)
+        client = driver.root_client(short_tmp, environ=os.environ)
         snapshot = driver.root_status(client)
         assert snapshot is not None
 
@@ -125,6 +125,22 @@ def test_a_stop_records_the_units_it_is_about_to_take_down(
             facts=LAUNCHD_FACTS,
             run=refuse_launchctl,
             timers=SYSTEM_TIMERS,
+            environ=os.environ,
         )
 
     assert lifecycle_rows.requests() == [("force-down", ["agent-host"])]
+
+
+# meiva:note
+# The block the root records is the one the caller handed in: a client built with an agent id in
+# its mapping names that agent, so the read is the shell's value and not this process's own.
+def test_the_caller_block_names_the_environment_the_shell_handed_in(short_tmp: Path) -> None:
+    with scripted_root(short_tmp, [UnitRow("gateway")]) as root:
+        client = driver.root_client(
+            short_tmp, environ={"MEIVA_AGENT_ID": "9", "MEIVA_OPERATION_ID": "op"}
+        )
+        client.down("gateway")
+
+    assert root.callers, "the root recorded no caller block"
+    assert root.callers[0]["agent_id"] == "9"
+    assert root.callers[0]["operation_id"] == "op"

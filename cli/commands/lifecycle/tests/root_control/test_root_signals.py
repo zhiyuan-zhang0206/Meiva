@@ -7,6 +7,7 @@
 
 from __future__ import annotations
 
+import os
 import signal
 import subprocess
 import sys
@@ -58,7 +59,7 @@ def test_the_root_is_terminated_and_the_stop_returns_once_it_has_exited(
     root = birth_of(child)
 
     driver.stop_root_process(
-        driver.root_client(short_tmp),
+        driver.root_client(short_tmp, environ=os.environ),
         snapshot_with_root(root),
         timeout_s=10.0,
         helper=None,
@@ -76,7 +77,7 @@ def test_a_root_that_outlives_the_stop_budget_is_reported(short_tmp: Path) -> No
     try:
         with pytest.raises(driver.RootDriverError, match="did not stop within 0s"):
             driver.stop_root_process(
-                driver.root_client(short_tmp),
+                driver.root_client(short_tmp, environ=os.environ),
                 snapshot_with_root(birth_of(ignores_term)),
                 timeout_s=0.0,
                 helper=None,
@@ -100,7 +101,7 @@ def test_a_birth_that_only_resembles_a_live_process_is_never_signalled(
 
     with pytest.raises(driver.RootDriverError, match="no longer live"):
         driver.stop_root_process(
-            driver.root_client(short_tmp),
+            driver.root_client(short_tmp, environ=os.environ),
             snapshot_with_root(reused),
             timeout_s=1.0,
             helper=None,
@@ -138,7 +139,7 @@ def test_root_signals_use_start_ticks_when_wall_birth_moves(
     wall_clock_stepped = replace(real, birth=real.birth + 3600.0)
 
     driver.stop_root_process(
-        driver.root_client(short_tmp),
+        driver.root_client(short_tmp, environ=os.environ),
         snapshot_with_root(wall_clock_stepped),
         timeout_s=10.0,
         helper=None,
