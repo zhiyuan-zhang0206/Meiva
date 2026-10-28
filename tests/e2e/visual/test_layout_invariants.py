@@ -3,9 +3,10 @@ from __future__ import annotations
 import os
 import time
 from pathlib import Path
+from typing import TypedDict, cast
 
 import pytest
-from playwright.sync_api import Browser, Locator, Page, expect
+from playwright.sync_api import Browser, BrowserContext, Locator, Page, expect
 
 from scripts.post_deploy_visual.layout_assertions import (
     all_elements_within_parents,
@@ -520,3 +521,130 @@ def test_pinned_work_detail_seal(
         )
     finally:
         context.close()
+
+
+# meiva:note
+# Both home columns end with the same bottom band, so the sidebar footer's rule
+# and the composer's rule are one horizontal line, and the gap above that line is
+# the list's and the composer's halves of one measurement (user ruling
+# 2026-10-29). The jsdom half of these contracts is in composer.test.tsx /
+# footer.test.tsx / header-bar.test.tsx — those pin the classes, these measure
+# the pixels.
+# meiva:link ui/web/src/docs/frontend-components/home-shell-chrome/home-shell-chrome.meiva.okf.md
+BOTTOM_BAND_VIEWPORTS = [(768, 900), (1024, 900), (1440, 900), (1920, 1080)]
+BOTTOM_RULE_GAP_PX = 10
+SHELL_ICON_PX = 16
+
+
+class IconBox(TypedDict):
+    w: float
+    h: float
+    label: str
+
+
+def _open_stubbed(
+    playwright_browser: Browser, width: int, height: int, base_url: str
+) -> tuple[BrowserContext, Page]:
+    ctx = playwright_browser.new_context(viewport={"width": width, "height": height})
+    page = open_page(ctx, base_url, "/", stub_api=not OVERRIDE_BASE_URL)
+    wait_layout_settled(page)
+    return ctx, page
+
+
+@pytest.mark.parametrize("width,height", BOTTOM_BAND_VIEWPORTS)
+def test_bottom_rule_is_one_line(
+    width: int, height: int, playwright_browser: Browser, frontend_target: str
+) -> None:
+    ctx, page = _open_stubbed(playwright_browser, width, height, frontend_target)
+    try:
+        footer = page.locator('[data-testid="sidebar-footer"]')
+        band = page.locator('[data-testid="composer-band"]')
+        expect(footer).to_be_visible()
+        expect(band).to_be_visible()
+        footer_box = footer.bounding_box()
+        band_box = band.bounding_box()
+        assert footer_box is not None and band_box is not None
+        assert abs(footer_box["y"] - band_box["y"]) <= 1, (
+            f"bottom rules are {abs(footer_box['y'] - band_box['y']):.2f}px apart at {width}px: "
+            f"sidebar footer y={footer_box['y']}, composer band y={band_box['y']} (tolerance 1px: "
+            "a percentage-wide panel can round a half-pixel box edge per column; two distinct "
+            "painted lines are never closer than 1px)"
+        )
+        assert abs(footer_box["height"] - band_box["height"]) <= 1
+        page.locator('[data-testid="composer-input"]').fill("draft line\n" * 10)
+        page.wait_for_timeout(300)
+        grown = page.locator('[data-testid="composer-band"]').bounding_box()
+        followed = footer.bounding_box()
+        assert grown is not None and followed is not None
+        assert grown["height"] > band_box["height"], (
+            "the composer band did not grow with the draft, so the grown-state check proves nothing"
+        )
+        assert abs(grown["y"] - followed["y"]) <= 1, (
+            f"rules parted on a grown composer: footer y={followed['y']}, band y={grown['y']}"
+        )
+    finally:
+        ctx.close()
+
+
+@pytest.mark.parametrize("width,height", [(390, 844), (768, 900), (1440, 900)])
+def test_bottom_rule_gap_is_halved(
+    width: int, height: int, playwright_browser: Browser, frontend_target: str
+) -> None:
+    ctx, page = _open_stubbed(playwright_browser, width, height, frontend_target)
+    try:
+        viewport = page.locator(
+            '[data-testid="timeline-surface"] [data-slot="scroll-area-viewport"]'
+        )
+        viewport.evaluate("el => { el.scrollTop = el.scrollHeight; }")
+        page.wait_for_timeout(400)
+        band_box = page.locator('[data-testid="composer-band"]').bounding_box()
+        row_box = page.locator(".timeline-item").last.bounding_box()
+        assert band_box is not None and row_box is not None
+        gap = band_box["y"] - (row_box["y"] + row_box["height"])
+        assert abs(gap - BOTTOM_RULE_GAP_PX) <= 1, (
+            f"gap between the last row and the composer's rule is {gap:.2f}px at {width}px, "
+            f"expected {BOTTOM_RULE_GAP_PX}px +-1 (the timeline's pb-1.5 plus the composer's "
+            "pt-1; a row's own height is fractional, hence the 1px tolerance)"
+        )
+    finally:
+        ctx.close()
+
+
+@pytest.mark.parametrize("width,height", [(390, 844), (1440, 900)])
+def test_shell_icon_size_is_uniform(
+    width: int, height: int, playwright_browser: Browser, frontend_target: str
+) -> None:
+    ctx, page = _open_stubbed(playwright_browser, width, height, frontend_target)
+    try:
+        rows = [
+            '[data-testid="timeline-surface"] header',
+            "aside header",
+            '[data-testid="sidebar-footer"]',
+            '[data-testid="composer-band"]',
+        ]
+        checked: list[tuple[str, IconBox]] = []
+        for selector in rows:
+            row = page.locator(selector).first
+            if row.count() == 0 or not row.is_visible():
+                continue
+            boxes = cast(
+                "list[IconBox]",
+                row.locator("svg").evaluate_all(
+                    "els => els.map(el => { const b = el.getBoundingClientRect();"
+                    " return {w: +b.width.toFixed(2), h: +b.height.toFixed(2),"
+                    " label: (el.closest('button')?.getAttribute('aria-label')"
+                    " || el.getAttribute('class') || '')}; })"
+                ),
+            )
+            checked.extend((selector, box) for box in boxes if box["w"] and box["h"])
+        assert len(checked) >= 3, (
+            f"only {len(checked)} shell icons were measurable at {width}px: "
+            f"{[selector for selector, _ in checked]}"
+        )
+        for selector, box in checked:
+            assert abs(box["w"] - SHELL_ICON_PX) <= 0.5 and abs(box["h"] - SHELL_ICON_PX) <= 0.5, (
+                f"{selector}: {str(box['label'])[:40]} is {box['w']}x{box['h']}px at {width}px, "
+                f"expected {SHELL_ICON_PX}x{SHELL_ICON_PX} (the composer's upload glyph size)"
+            )
+    finally:
+        ctx.close()

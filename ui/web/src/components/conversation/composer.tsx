@@ -35,7 +35,14 @@ import { track } from "@/lib/telemetry/telemetry";
 import type { CommandItem } from "@/lib/contracts/types";
 import { cn } from "@/lib/format/utils";
 import { useCoarsePointer } from "@/lib/input/use-coarse-pointer";
-import { FLEX, FLEX_1, FLEX_COL, MIN_W_0 } from "@/lib/layout/layout";
+import {
+  BOTTOM_BAND_CLASS,
+  BOTTOM_BAND_ROW_CLASS,
+  FLEX,
+  FLEX_1,
+  FLEX_COL,
+  MIN_W_0,
+} from "@/lib/layout/layout";
 
 export type ComposerMode = "disabled" | "idle" | "busy";
 
@@ -63,6 +70,7 @@ interface Props {
 export function Composer({ mode, onSend, onStop, onUploadFiles, onAttachImage, filesUploading = false, focusToken, contextTokens, contextPending = false, maxContextTokens = 0, softCompactTokens = 0, hardCompactTokens = 0, agentId = null, agentTerminated = false, showContextMeter = false, maxWidthCss, suggestions = null, children }: Props) {
   const t = useTranslations("common");
   const prevAgentIdRef = useRef(agentId);
+  const bandRef = useRef<HTMLDivElement>(null);
   const [value, setValue] = useState(() => {
     if (agentId == null) return '';
     return readSession(draftKey(agentId)) ?? '';
@@ -123,6 +131,30 @@ export function Composer({ mode, onSend, onStop, onUploadFiles, onAttachImage, f
     if (open) setBreakdownOpen(false);
   }, []);
   const pendingCaret = useRef<number | null>(null);
+  // meiva:note
+  // The band is content-sized on this side (the textarea grows, the meta row and
+  // the upload hint come and go), while the sidebar footer's band has no content
+  // of its own to grow with. Publishing the height keeps the two rules on one
+  // line in every state, not only the resting one (user ruling 2026-10-29).
+  // meiva:link ui/web/src/docs/frontend-components/home-shell-chrome/home-shell-chrome.meiva.okf.md
+  useEffect(() => {
+    const band = bandRef.current;
+    if (!band || typeof ResizeObserver === "undefined") return;
+    const root = document.documentElement;
+    const publish = () => {
+      root.style.setProperty(
+        "--composer-band-height",
+        `${Math.round(band.getBoundingClientRect().height)}px`,
+      );
+    };
+    publish();
+    const observer = new ResizeObserver(publish);
+    observer.observe(band);
+    return () => {
+      observer.disconnect();
+      root.style.removeProperty("--composer-band-height");
+    };
+  }, []);
   const syncCaret = (ta: HTMLTextAreaElement) => setCaret(ta.selectionStart);
 
   const query = parseSlash(value, caret)?.query ?? null;
@@ -370,13 +402,22 @@ export function Composer({ mode, onSend, onStop, onUploadFiles, onAttachImage, f
       onDragOver={handleDragOver}
       onDragLeave={() => setDragOver(false)}
       style={maxWidthCss ? { maxWidth: maxWidthCss } : undefined}
+      // meiva:note
+      // pt-1 is the gap between the message list and the band's rule; the
+      // timeline supplies the other half (user ruling 2026-10-29 halved the 20px
+      // the two used to add up to). Everything below the rule is the band.
+      // meiva:link ui/web/src/docs/frontend-components/home-shell-chrome/home-shell-chrome.meiva.okf.md
       className={cn(
-        "mx-auto w-full px-4 pt-2 pb-3 transition-colors",
+        "mx-auto w-full px-4 pt-1 transition-colors",
         MIN_W_0,
         dragOver && "bg-primary/5 ring-1 ring-inset ring-primary/40",
       )}
     >
-      <div className={cn("gap-2 border-t border-border pt-2", FLEX, FLEX_COL)}>
+      <div
+        ref={bandRef}
+        data-testid="composer-band"
+        className={cn("gap-2", BOTTOM_BAND_CLASS, FLEX, FLEX_COL)}
+      >
       <ComposerMetaRow
         commandHint={commandHint}
         showContextMeter={showContextMeter}
@@ -411,7 +452,7 @@ export function Composer({ mode, onSend, onStop, onUploadFiles, onAttachImage, f
           onSelect={runCommand}
           onOpenChange={handleAutocompleteOpenChange}
         />
-        <div className={cn("gap-2 items-end", FLEX)}>
+        <div className={cn("gap-2 items-end", BOTTOM_BAND_ROW_CLASS, FLEX)}>
         {children}
         <Textarea
           ref={taRef}
