@@ -35,7 +35,7 @@ from base.cluster.machine import (
 from base.cluster.machine.boot import gateway_access_from_boot
 from base.config import ConfigBoot
 from base.deploy.git import cluster_drift
-from base.host.resource_sample import resource_sample
+from base.host.resource.sample import resource_sample
 from base.paths import root_manifests_path
 from cli.commands._repo import roles_or_none
 from cli.commands.cluster.control import fetch_gateway_cluster_status

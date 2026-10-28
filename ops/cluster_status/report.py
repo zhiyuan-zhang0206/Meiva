@@ -13,7 +13,7 @@ from dataclasses import dataclass
 from pydantic import BaseModel, ConfigDict
 
 from base.api_contracts.status import PausedReason, SchemaMismatchStatus
-from base.host.resource_sample import ResourceSample
+from base.host.resource.reading import ResourceSample
 from ops.cluster_status.model import count_agent_shells, group_agent_sessions
 from ops.rpc_schemas import SessionInfo
 

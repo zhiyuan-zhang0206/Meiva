@@ -17,7 +17,7 @@ from pydantic import (
     ConfigDict,
 )
 
-from base.host.resource_sample import ResourceSample
+from base.host.resource.reading import ResourceSample
 
 # meiva:note
 # Why a host's status snapshot reads `paused` — the first true clause of the
@@ -129,8 +129,8 @@ class MachineStatus(BaseModel):
     session_count: int = 0
     # Sessions grouped by agent for hierarchical display.
     agent_groups: list[dict[str, object]] = []
-    # This machine's LIVE CPU / memory / disk reading (base.host.resource_sample) —
-    # one sample, not a series: the history lives in Prometheus (issue #46) and
-    # this is the degraded answer for a deployment without the LGTM backend.
-    # None when psutil could not read the machine.
+    # meiva:note
+    # This machine's LIVE CPU / memory / disk reading (base.host.resource.sample) — one sample, not
+    # a series: the history lives in Prometheus (issue #46) and this is the degraded answer for a
+    # deployment without the LGTM backend. None when psutil could not read the machine.
     resource: ResourceSample | None = None

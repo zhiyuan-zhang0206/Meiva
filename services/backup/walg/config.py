@@ -25,7 +25,7 @@ from typing import TypeGuard
 from urllib.parse import urlsplit
 
 from base.host.private_storage import create_private_bytes, private_file_problem
-from base.host.verified_file import RegularFileReadError, regular_bytes
+from base.host.verified_file.reader import RegularFileReadError, regular_bytes
 from services.backup.artifact.names import REMOTE_ROOT
 
 _CONFIG_MAX_BYTES = 64 * 1024
