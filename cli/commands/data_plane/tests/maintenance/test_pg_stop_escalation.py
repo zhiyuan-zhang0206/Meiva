@@ -94,7 +94,14 @@ def _start_with_hung_archive(
         settings.write(f"archive_command = 'sleep {HUNG_SECONDS}'\n")
         settings.write("archive_timeout = '1s'\n")
     assert (
-        instance.start_pg(private, port, home=home, retained_children=retained, machine=machine)
+        instance.start_pg(
+            private,
+            port,
+            home=home,
+            retained_children=retained,
+            machine=machine,
+            timers=SYSTEM_TIMERS,
+        )
         == 0
     )
 

@@ -48,6 +48,7 @@ def _start(
         retained_children=cluster.retained_children,
         machine=machine,
         tuning=tuning,
+        timers=SYSTEM_TIMERS,
     )
 
 
