@@ -497,6 +497,9 @@ def _is_delivered_generation(env: Mapping[str, str], file_url: str | None) -> bo
     return delivered is not None and delivered == _endpoint_key(file_url)
 
 
+# meiva:note
+# `home` is the resolved home the boot entry read; this canonicalizes it and never
+# expands a tilde against the process's own user database.
 def operator_db_delivery(
     env: Mapping[str, str], endpoint: str | None, *, home: Path
 ) -> dict[str, str] | str:
@@ -504,7 +507,7 @@ def operator_db_delivery(
     it holds none (`base.host.db_authority.delivery.operator_environment`). Nothing for
     a home without a ledger, or over a delivery naming this home's `endpoint`
     that the process already carries."""
-    home = home.expanduser().resolve()
+    home = home.resolve()
     if not endpoint or _is_delivered_generation(env, endpoint):
         return {}
     if not (home / "db-authority" / "ledger.json").exists():

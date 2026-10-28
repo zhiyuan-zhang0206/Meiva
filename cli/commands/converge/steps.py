@@ -47,7 +47,7 @@ def ensure_meiva_home_dirs(ctx: ConvergeCtx) -> None:
     for sub in ("configs", "secrets"):
         (ctx.meiva_home / sub).mkdir(parents=True, exist_ok=True)
     for sub in ("logs", "workspaces", "memory"):
-        converge_private_tree(ctx.meiva_home / sub)
+        converge_private_tree(ctx.meiva_home / sub, euid=ctx.host.uid)
     # meiva:note
     # The Spotlight opt-out marker sits at the HOME ROOT, so one file excludes the whole
     # runtime tree: source checkouts, worktrees, workspaces, the memory repo. A marker

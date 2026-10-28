@@ -195,11 +195,17 @@ def test_explicit_machine_reader_defect_propagates() -> None:
         telemetry.prepare_event("log", "log", machine_reader=invalid)
 
 
+# meiva:note
+# A home the caller hands over is labelled as given: naming the user's home
+# directory is the entry's read (`base.paths.home`), not the label's.
 def test_cluster_label_falls_back_without_raising(tmp_path: Path) -> None:
     home = tmp_path / ".meiva-preview"
     assert observability.cluster_label(home) == ".meiva-preview"
     assert observability.cluster_label(Path("/")) == cluster.home_slug(Path("/"))
-    assert observability.cluster_label(Path("~nonexistent_meiva_user_xyz")) == ".unknown"
+    assert (
+        observability.cluster_label(Path("~nonexistent_meiva_user_xyz"))
+        == "~nonexistent_meiva_user_xyz"
+    )
 
 
 def test_category_for_kind_mapping() -> None:

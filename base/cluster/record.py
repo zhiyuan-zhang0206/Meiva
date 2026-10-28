@@ -31,6 +31,9 @@ class ClusterRecord:
     data_plane_host: str = ""
 
 
+# meiva:note
+# `home` is the resolved home the caller read; a `~` spelling stays literal, so no
+# reader answers "which home does this `~` name" from the user database.
 def get_record(home: Path) -> ClusterRecord | None:
     """This home's record, read from its own start intent.
 
@@ -38,7 +41,7 @@ def get_record(home: Path) -> ClusterRecord | None:
     record (a unit without the gateway capability). Nothing outside the home is
     consulted.
     """
-    path = Path(home).expanduser() / INTENT_NAME
+    path = Path(home) / INTENT_NAME
     if not path.exists():
         return None
     record = json.loads(path.read_text())["record"]
