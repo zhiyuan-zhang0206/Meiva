@@ -29,7 +29,12 @@ def context_home(tmp_path: Path, unit_home: Path) -> Iterator[Path]:
     home.mkdir()
     assert home != unit_home
     process_context.bind_context(
-        MeivaContext(meiva_home=home, clock_factory=lambda: clock_at(INSTANT), rng=seeded_rng(11))
+        MeivaContext(
+            meiva_home=home,
+            user_home=Path.home(),
+            clock_factory=lambda: clock_at(INSTANT),
+            rng=seeded_rng(11),
+        )
     )
     yield home
 

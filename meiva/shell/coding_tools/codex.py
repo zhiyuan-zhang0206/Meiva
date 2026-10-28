@@ -33,6 +33,7 @@ from base.clock import SYSTEM_TIMERS
 from base.host.atomic_io import SYSTEM_FS, AtomicWriter
 from base.host.env.agent_env import AGENT_ID_ENV
 from base.lm.harness.codex.auth import SECRET_ENV_NAMES
+from base.paths.expand import expand_home
 from base.sessions import coding_session_owner
 from meiva.shell.sessions import ShellSessions
 
@@ -49,6 +50,7 @@ from ._common import (
     new_generation,
     print_owner,
     terminate_generation_after_failed_launch,
+    user_home,
     write_task_file_header,
 )
 from ._common import cancel as _cancel_generation
@@ -353,7 +355,9 @@ def codex_command(
 def status(workspace: Path, *, mode: str = "auto", force: bool = False) -> int:
     """Print every generation recorded for the workspace."""
     return _owner_status(
-        coding_session_owner.canonical_key(workspace, tool="codex", cluster=cluster_home()),
+        coding_session_owner.canonical_key(
+            expand_home(workspace, user_home=user_home()), tool="codex", cluster=cluster_home()
+        ),
         capability=capability_report("codex", mode=mode, force=force),
     )
 
@@ -361,7 +365,9 @@ def status(workspace: Path, *, mode: str = "auto", force: bool = False) -> int:
 def cancel(workspace: Path, generation: str) -> int:
     """Stop and terminalize exactly this generation."""
     return _cancel_generation(
-        coding_session_owner.canonical_key(workspace, tool="codex", cluster=cluster_home()),
+        coding_session_owner.canonical_key(
+            expand_home(workspace, user_home=user_home()), tool="codex", cluster=cluster_home()
+        ),
         generation,
         sessions=cluster_sessions(),
     )
@@ -501,7 +507,9 @@ def launch(
         init_file(tasks_file, "")
         init_file(work_file, "STATUS: WORKING\n\n## Log\n\n")
         write_task_file_header(tasks_file, provenance or "")
-    key = coding_session_owner.canonical_key(workspace, tool="codex", cluster=site.cluster)
+    key = coding_session_owner.canonical_key(
+        expand_home(workspace, user_home=user_home()), tool="codex", cluster=site.cluster
+    )
     owner = new_generation(
         key,
         owner_agent_id=site.shell.agent_id,

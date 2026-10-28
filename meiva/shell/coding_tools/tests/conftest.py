@@ -21,10 +21,16 @@ from meiva.shell.tests.live_shell import live_shell as live_shell
 
 
 # meiva:note
-# The context a coding tool reads its home, its instant and its generator from: the test's home, a
-# real clock and a seeded generator.
+# The context a coding tool reads its homes, its instant and its generator from: the test's Meiva
+# home, this test process's own user home (what a `~` in an operator's path expands against), a real
+# clock and a seeded generator.
 def _roots_context(home: Path) -> MeivaContext:
-    return MeivaContext(meiva_home=home, clock_factory=system_clock, rng=seeded_rng())
+    return MeivaContext(
+        meiva_home=home,
+        user_home=Path.home(),
+        clock_factory=system_clock,
+        rng=seeded_rng(),
+    )
 
 
 # meiva:note
@@ -59,7 +65,12 @@ def bound_agent(unit_home: Path) -> Iterator[BindAgent]:
         ) -> None:
             shared(agent_id, clients=clients, clock_factory=clock_factory or system_clock)
             process_context.bind_context(
-                replace(process_context.current_context(), meiva_home=unit_home, rng=rng)
+                replace(
+                    process_context.current_context(),
+                    meiva_home=unit_home,
+                    user_home=Path.home(),
+                    rng=rng,
+                )
             )
 
         yield bind
