@@ -19,6 +19,5 @@ exports = ["backend.py", "coding_session_owner.py", "coding_session_owner_record
 
 [debt.ambient-read]
 "coding_session_owner.py#pid os.getuid" = 1
-"env_forwarding.py#home pathlib.Path.expanduser" = 1
 "helperproc.py#settings base.config.settings" = 1
 "hosting.py#pid psutil.Process()" = 1

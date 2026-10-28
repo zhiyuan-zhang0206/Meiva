@@ -14,4 +14,3 @@
 
 [debt.ambient-read]
 "_utils.py#home pathlib.Path.expanduser" = 1
-"webchat.py#home pathlib.Path.expanduser" = 1
