@@ -1,5 +1,14 @@
+# meiva:note
+# `meizel.policy.toml` is the one closed list of allowances, so a declaration that disappears is a
+# narrowing of what the checker still reports, and every comparison against the base stays green
+# while it happens. This module owns the file's format and reader; the declarations a change takes
+# away, and the `Policy-Removal` line that answers them, belong to the same owner for that reason.
+# meiva:link meizel/docs/checker/policy.meiva.okf.md
+
+
 from __future__ import annotations
 
+import re
 import tomllib
 from dataclasses import dataclass, field
 from enum import StrEnum
@@ -14,12 +23,16 @@ __all__ = [
     "POLICY",
     "RETIRED_AMBIENT_SECTIONS",
     "RULES",
+    "Declaration",
     "Policy",
+    "Removal",
+    "RemovalReport",
     "invalidate_cache",
     "load",
     "load_snapshot",
     "parse",
     "parse_snapshot",
+    "removal_report",
 ]
 
 POLICY = "meizel.policy.toml"
@@ -328,3 +341,206 @@ def load_snapshot(root: Path) -> Policy:
 # invalidation belongs to this reader and runs only once the snapshot mutation has completed.
 def invalidate_cache() -> None:
     load.cache_clear()
+
+
+# meiva:note
+# One entry of the policy: the table that holds it, its name, and how the file writes it. `named` is
+# the one string a `Policy-Removal` line names it with.
+@dataclass(frozen=True, slots=True)
+class Declaration:
+    table: str
+    entry: str
+    shown: str
+
+    @property
+    def named(self) -> str:
+        return f"{self.table}.{self.entry}"
+
+
+# meiva:note
+# One `Policy-Removal` line: what it names, why the declaration went, and what covers it now.
+@dataclass(frozen=True, slots=True)
+class Removal:
+    declared: str
+    why: str
+    replacement: str
+
+
+# meiva:note
+# What a change took away from the policy, and what the record says about it. `unanswered` is the
+# failure this exists for; `unused` is a line that names a declaration the change did not remove — a
+# record of something else, never a failure; `problems` is one entry per line of the record that
+# opens with the key and is not three fields, so a typo cannot pass for an answer.
+@dataclass(frozen=True, slots=True)
+class RemovalReport:
+    removed: tuple[Declaration, ...]
+    added: tuple[Declaration, ...]
+    declared: tuple[Removal, ...]
+    unanswered: tuple[Declaration, ...]
+    unused: tuple[Removal, ...]
+    problems: tuple[str, ...]
+
+    # meiva:note
+    # The lines that would answer `unanswered`: the entry alone, or the table that lost several.
+    def templates(self) -> tuple[str, ...]:
+        grouped: dict[str, list[Declaration]] = {}
+        for item in self.unanswered:
+            grouped.setdefault(item.table, []).append(item)
+        lines: list[str] = []
+        for table, items in sorted(grouped.items()):
+            named = table if len(items) > 1 else items[0].named
+            lines.append(
+                f"Policy-Removal: {named}{_SEPARATOR}<why it is no longer needed>"
+                f"{_SEPARATOR}<what replaces it, or the gap it leaves>"
+            )
+        return tuple(lines)
+
+
+_KEY = re.compile(r"^[ \t]*policy-removal[ \t]*:[ \t]*(?P<rest>\S.*?)[ \t]*$", re.IGNORECASE)
+_SEPARATOR = " \u2014 "
+_PLACEHOLDER = re.compile(r"<[^<>]+>")
+_MIN_FIELD = 8
+
+
+# meiva:note
+# Every declaration the policy makes, keyed by the string a line names it with. The four checker
+# tables hold one declaration per entry; a list section holds one per name, so a shortened list loses
+# exactly the names it dropped and a deleted section loses all of them.
+def _declarations(policy: Policy) -> dict[str, Declaration]:
+    found: dict[str, Declaration] = {}
+
+    def keep(table: str, entry: str, shown: str) -> None:
+        item = Declaration(table, entry, shown)
+        found[item.named] = item
+
+    for path, reason in policy.external.items():
+        keep("external", path, f"{path} = {reason}")
+    for path, targets in policy.loads.items():
+        for target in targets:
+            keep("loads", f"{path} -> {target}", f"{path} = [{target}]")
+    for name in policy.default_arguments:
+        keep("default-arguments", name, name)
+    for (rule, section), entries in policy.listed.items():
+        for name, reason in entries.items():
+            keep(f"{rule}.{section}", name, f"{name} = {reason}")
+    for (rule, section), names in policy.named.items():
+        for name in names:
+            keep(f"{rule}.{section}", name, name)
+    return found
+
+
+# meiva:note
+# A line that names something but whose prose fields still hold the template, so it answers nothing.
+@dataclass(frozen=True, slots=True)
+class _Skeleton:
+    declared: str
+    line: str
+
+
+# meiva:note
+# The shape of one answer: `<table>[.<entry>] — <why> — <replacement or gap>`. A line with fewer
+# than three fields is a problem rather than a non-answer, and git's own template comments are
+# skipped as for any trailer. A line whose prose fields are still placeholders is neither: it is the
+# shape quoted, not an attempt to answer (a pull request that explains the format must not fail it),
+# and it answers nothing wherever it appears.
+def _declared_removals(
+    text: str,
+) -> tuple[tuple[Removal, ...], tuple[_Skeleton, ...], tuple[str, ...]]:
+    found: list[Removal] = []
+    skeletons: list[_Skeleton] = []
+    problems: list[str] = []
+    for number, raw in enumerate(text.splitlines(), 1):
+        if raw.lstrip().startswith("#"):
+            continue
+        match = _KEY.match(raw)
+        if match is None:
+            continue
+        body = match.group("rest").strip()
+        declared, first, remainder = body.partition(_SEPARATOR)
+        why, second, replacement = remainder.partition(_SEPARATOR)
+        nameless = not declared.strip() or declared.lstrip().startswith("\u2014")
+        missing = (
+            ["the `<table>[.<entry>]` name"]
+            if nameless
+            else [
+                name
+                for name, part in (
+                    ("the `<table>[.<entry>]` name", declared),
+                    ("the `<why it is no longer needed>` field", first),
+                    ("the `<what replaces it, or the gap it leaves>` field", second),
+                )
+                if not part.strip()
+            ]
+        )
+        if missing:
+            problems.append(
+                f"line {number} is not a declaration: it is missing {_and(missing)}. A "
+                f"`Policy-Removal` line needs three fields, `-`-free and separated by an em dash: "
+                f"`<table>[.<entry>] — <why it is no longer needed> — "
+                f"<what replaces it, or the gap it leaves>`: {raw.strip()}"
+            )
+            continue
+        if not _answered(why) or not _answered(replacement):
+            skeletons.append(_Skeleton(declared.strip(), raw.strip()))
+            continue
+        found.append(Removal(declared.strip(), why.strip(), replacement.strip()))
+    return tuple(found), tuple(skeletons), tuple(problems)
+
+
+# meiva:note
+# One name, two names with "and", three or more with commas and a closing "and".
+def _and(names: list[str]) -> str:
+    if len(names) == 1:
+        return names[0]
+    return f"{', '.join(names[:-1])} and {names[-1]}"
+
+
+# meiva:note
+# A prose field is answered when it says something and is not a placeholder: `<why ...>` is the
+# template, not a reason.
+def _answered(text: str) -> bool:
+    value = text.strip()
+    return len(value) >= _MIN_FIELD and _PLACEHOLDER.search(value) is None
+
+
+# meiva:note
+# A line answers a declaration when it names it, or names a table or rule that contains it: an entry
+# disappears on its own, a section with everything it held, or a rule with all its sections, and one
+# line per name would turn a deleted section into a page of boilerplate.
+def _answers(removal: Removal, declaration: Declaration) -> bool:
+    return declaration.named == removal.declared or declaration.named.startswith(
+        f"{removal.declared}."
+    )
+
+
+# meiva:note
+# The declarations `new` dropped, and which of them the `record` answers, in one pass.
+def removal_report(old: Policy, new: Policy, record: str) -> RemovalReport:
+    before = _declarations(old)
+    after = _declarations(new)
+    removed = tuple(before[key] for key in sorted(before.keys() - after.keys()))
+    added = tuple(after[key] for key in sorted(after.keys() - before.keys()))
+    declared, skeletons, problems = _declared_removals(record)
+    unanswered = tuple(
+        item for item in removed if not any(_answers(line, item) for line in declared)
+    )
+    unused = tuple(line for line in declared if not any(_answers(line, item) for item in removed))
+    named = [
+        skeleton
+        for skeleton in skeletons
+        if any(_answers(Removal(skeleton.declared, "", ""), item) for item in removed)
+    ]
+    return RemovalReport(
+        removed,
+        added,
+        declared,
+        unanswered,
+        unused,
+        problems
+        + tuple(
+            f"a `Policy-Removal` line names {skeleton.declared!r} but leaves a field unanswered: "
+            f"both fields after the name are required, and neither may be a placeholder: "
+            f"{skeleton.line}"
+            for skeleton in named
+        ),
+    )
