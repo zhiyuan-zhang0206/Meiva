@@ -316,9 +316,10 @@ async def test_successor_admission_ends_a_stale_accepted_lease(
     )
     assert successor is not None
     assert db_conn.execute(
-        "SELECT status,ended_at IS NOT NULL,rejection_reason FROM agent_impersonations WHERE id=%s",
+        "SELECT status,ended_at IS NULL,rejection_reason,accepted_generation,accepted_owner "
+        "FROM agent_impersonations WHERE id=%s",
         (lease["id"],),
-    ).fetchone() == ("expired", True, "aborted: native runtime restarted")
+    ).fetchone() == ("accepted", True, None, successor.generation, successor.owner)
     assert db_conn.execute(
         "SELECT runtime_generation,runtime_owner FROM agents_meta WHERE id=%s", (agent_id,)
     ).fetchone() == (successor.generation, successor.owner)

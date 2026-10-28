@@ -6,6 +6,7 @@ from unittest.mock import MagicMock
 from uuid import uuid4
 
 import psycopg
+import pytest
 from psycopg_pool import AsyncConnectionPool
 
 from agent.ownership.hosted import admit_hosted_runtime
@@ -29,7 +30,7 @@ from services.agent_runner.agent_host.tests.host_policy import (
 )
 
 
-async def test_replacement_host_admission_ends_the_takeover_without_respawning_its_relay(
+async def test_replacement_host_admission_carries_the_takeover_without_respawning_its_relay(
     db_conn: psycopg.Connection[Any],
     aops_pool: AsyncConnectionPool[Any],
     database: Database,
@@ -99,8 +100,8 @@ async def test_replacement_host_admission_ends_the_takeover_without_respawning_i
         lease["id"],
         local_machine=machine_identity.name(),
     )
-    assert ended["status"] == "expired"
-    assert ended["rejection_reason"] == "aborted: native runtime restarted"
+    assert ended["status"] == "active"
+    assert ended["rejection_reason"] is None
     assert not host.relays.children
 
 
@@ -124,7 +125,7 @@ class _HandoffGraph:
 # ended lease keeps `handoff_applied_at` NULL and every later request is refused with
 # "unapplied state" — the 18-hour deadlock of #5467.
 # meiva:link docs/conventions/agents/agent-impersonation.md
-async def test_restarted_host_settles_the_ended_takeover_without_an_external_message(
+async def test_restarted_host_leaves_a_carried_takeover_alone_without_an_external_message(
     db_conn: psycopg.Connection[Any],
     aops_pool: AsyncConnectionPool[Any],
     database: Database,
@@ -192,11 +193,9 @@ async def test_restarted_host_settles_the_ended_takeover_without_an_external_mes
         lease["id"],
         local_machine=machine_identity.name(),
     )
-    assert ended["status"] == "expired"
-    assert ended["rejection_reason"] == "aborted: native runtime restarted"
-    assert ended["handoff_applied_at"] is not None
-    assert Path(ended["handoff_path"]).is_file()
-    assert graph.values["impersonation_handoff_id"] == f"{agent_id}:0"
+    assert ended["status"] == "active"
+    assert ended["rejection_reason"] is None
+    assert ended["handoff_applied_at"] is None
     assert host.stats.turns_started == 0
     assert host.stats.cache_misses == 0 and host._runtimes == {}, "the wake built no runtime"
     assert db_conn.execute(
@@ -204,20 +203,26 @@ async def test_restarted_host_settles_the_ended_takeover_without_an_external_mes
     ).fetchone() == ("idling",)
     db_conn.commit()
 
-    replacement = leases.request(
-        database,
-        event_bus,
-        agent_id,
-        caller=CallerIdentity(kind="external_agent", subject="antigravity"),
-        process_metadata=recorded_tree(),
-        relay_provider="antigravity",
-        relay_thread_id=str(uuid4()),
-        authority=config_authority,
-        name="session-1",
-        executor_name="antigravity",
-        local_machine=machine_identity.name(),
+    assert (
+        leases.get(database, event_bus, lease["id"], local_machine=machine_identity.name())[
+            "status"
+        ]
+        == "active"
     )
-    assert replacement["status"] == "requested"
+    with pytest.raises(leases.ImpersonationError, match="already has a request, lease"):
+        leases.request(
+            database,
+            event_bus,
+            agent_id,
+            caller=CallerIdentity(kind="external_agent", subject="antigravity"),
+            process_metadata=recorded_tree(),
+            relay_provider="antigravity",
+            relay_thread_id=str(uuid4()),
+            authority=config_authority,
+            name="session-1",
+            executor_name="antigravity",
+            local_machine=machine_identity.name(),
+        )
 
 
 # meiva:note
@@ -383,7 +388,7 @@ def _handoff_host(
 # there is no ownership to write the checkpoint under, and the unsettled lease refuses
 # every later request. Settling only in the no-command branch left this path (#5492).
 # meiva:link docs/conventions/agents/agent-impersonation.md
-async def test_restart_command_settles_the_ended_takeover_before_releasing_the_incarnation(
+async def test_restart_command_releases_the_incarnation_without_ending_the_carried_takeover(
     db_conn: psycopg.Connection[Any],
     aops_pool: AsyncConnectionPool[Any],
     database: Database,
@@ -415,11 +420,9 @@ async def test_restart_command_settles_the_ended_takeover_before_releasing_the_i
     await host.run_turn(agent_id)
 
     ended = leases.get(database, event_bus, lease_id, local_machine=machine)
-    assert ended["status"] == "expired"
-    assert ended["rejection_reason"] == "aborted: native runtime restarted"
-    assert ended["handoff_applied_at"] is not None
-    assert Path(ended["handoff_path"]).is_file()
-    assert graph.values["impersonation_handoff_id"] == f"{agent_id}:0"
+    assert ended["status"] == "active"
+    assert ended["rejection_reason"] is None
+    assert ended["handoff_applied_at"] is None
     assert db_conn.execute(
         "SELECT status,runtime_generation,runtime_owner FROM agents_meta WHERE id=%s", (agent_id,)
     ).fetchone() == ("idling", None, None)
@@ -428,20 +431,20 @@ async def test_restart_command_settles_the_ended_takeover_before_releasing_the_i
     ).fetchone() == ("done",)
     db_conn.commit()
 
-    replacement = leases.request(
-        database,
-        event_bus,
-        agent_id,
-        caller=CallerIdentity(kind="external_agent", subject="antigravity"),
-        process_metadata=recorded_tree(),
-        relay_provider="antigravity",
-        relay_thread_id=str(uuid4()),
-        authority=config_authority,
-        name="session-1",
-        executor_name="antigravity",
-        local_machine=machine,
-    )
-    assert replacement["status"] == "requested"
+    with pytest.raises(leases.ImpersonationError, match="already has a request, lease"):
+        leases.request(
+            database,
+            event_bus,
+            agent_id,
+            caller=CallerIdentity(kind="external_agent", subject="antigravity"),
+            process_metadata=recorded_tree(),
+            relay_provider="antigravity",
+            relay_thread_id=str(uuid4()),
+            authority=config_authority,
+            name="session-1",
+            executor_name="antigravity",
+            local_machine=machine,
+        )
 
 
 # meiva:note
