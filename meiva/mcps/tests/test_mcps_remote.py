@@ -2,10 +2,11 @@
 # meiva.mcps remote client and proxy detail: the Unix-socket client against a real stub daemon (`stub_daemon.py`), the display-only tool signatures, and the guarantee that a missing daemon never starts a local server. Split from meiva/mcps/tests/test_mcps.py (task #4922).
 import inspect
 import json
+import socket
 import sys
 from collections.abc import Callable
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 import pytest
 
@@ -35,6 +36,43 @@ Start = Callable[[Respond], StubDaemon]
 
 def answering(result: object) -> Respond:
     return lambda request: [ok_line(request, result)]
+
+
+# meiva:note
+# A clock that jumps `step` seconds on every reading, so a budget expires before the socket is
+# touched. Its `sleep` fails: a request whose budget is spent never waits.
+class _JumpingTimers:
+    def __init__(self, step: float) -> None:
+        self._step = step
+        self._now = 0.0
+
+    def monotonic(self) -> float:
+        self._now += self._step
+        return self._now
+
+    def sleep(self, seconds: float) -> None:
+        raise AssertionError("a request whose budget expired must not sleep")
+
+    async def asleep(self, seconds: float) -> None:
+        raise AssertionError("a request whose budget expired must not sleep")
+
+
+# meiva:note
+# A socket whose `recv` fails the test: reaching it means the request read the socket after its
+# budget had already expired on the injected clock.
+class _UnreadSocket:
+    def settimeout(self, seconds: float) -> None:
+        raise AssertionError("a request whose budget expired must not set a socket timeout")
+
+    def recv(self, size: int) -> bytes:
+        raise AssertionError("a request whose budget expired must not read the socket")
+
+
+def test_the_request_budget_is_measured_on_the_clock_the_client_was_given() -> None:
+    client = remote_mod.RemoteMCPClient("/nonexistent", timers=_JumpingTimers(10.0))
+
+    with pytest.raises(mcps_mod.MCPConnectError, match="timeout"):
+        client._read_response(cast("socket.socket", _UnreadSocket()), 1, timeout_seconds=5.0)
 
 
 # meiva:note

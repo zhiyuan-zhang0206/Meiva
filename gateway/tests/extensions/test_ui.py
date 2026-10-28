@@ -748,6 +748,19 @@ class TestServe:
 
         assert ui_mod.PageHost(host="h", agent_id=1).ready_timeout_s >= 60.0
 
+    # meiva:note
+    # The ready window is measured and slept on the timers the host carries: a manual clock
+    # spends the window without real seconds, so a test drives the wait by value.
+    def test_wait_until_serving_measures_its_window_on_the_clock_it_is_given(self) -> None:
+        import meiva.ui as ui_mod
+        from base.clock.tests.manual_timers import ManualTimers
+
+        timers = ManualTimers()
+        host = ui_mod.PageHost(host=_HOST, agent_id=1, ready_timeout_s=0.5, timers=timers)
+
+        assert host.wait_until_serving(_free_port()) is False
+        assert timers.sleeps == [0.2, 0.2, 0.2]
+
     def test_serve_same_name_replaces(
         self,
         db_conn: psycopg.Connection,
