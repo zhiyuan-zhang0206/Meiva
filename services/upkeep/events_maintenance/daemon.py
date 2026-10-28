@@ -389,8 +389,9 @@ async def run(
     # The telemetry mirror lives in the home's logs directory, beside the runtime directory.
     config = events_maintenance_config(process_config, mirror_dir=runtime.parent / "logs")
     # meiva:note
-    # This process entry builds the clock every loop reads: the health component times and the
-    # alert reconciler's snapshot stamps are the same clock, so a test steering time steers both.
+    # The health component times and the alert reconciler's snapshot stamps share this one instance,
+    # so a single clock decides both and a test that steers it steers them together. The dispatch and
+    # resolution loops still build their own from the same configuration.
     clock = _clock(config)
     # Only a unit holding the Grafana credential reconciles alerts; one without it
     # carries no such loop (and no tracker to read as idle).
