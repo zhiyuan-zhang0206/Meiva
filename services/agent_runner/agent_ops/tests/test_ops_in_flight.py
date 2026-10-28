@@ -16,6 +16,8 @@ from dataclasses import replace
 import pytest
 from pydantic import ValidationError
 
+from base.clock import SYSTEM_TIMERS
+from base.clock.tests.manual_timers import ManualTimers
 from base.daemon.health import stop_health_server
 from base.daemon.http_transport import start_daemon_http
 from services.agent_runner.agent_ops import boot, health
@@ -147,9 +149,28 @@ async def test_worker_future_is_retained_until_completion_and_isolated_per_daemo
     assert len(workers) == 0
 
 
+# meiva:note
+# The drain spends the budget of the timers it was given: a manual clock runs the loop to its
+# deadline without real time passing, and a drain that read the loop's own clock instead would
+# leave `sleeps` empty and never reach the deadline inside the test's bound.
+async def test_drain_spends_the_budget_of_the_timers_it_was_given() -> None:
+    timers = ManualTimers()
+    requests: activity.RequestTokens = {asyncio.ensure_future(asyncio.sleep(30))}
+    try:
+        await asyncio.wait_for(
+            activity.drain(requests=requests, workers=set(), timers=timers, budget_s=5),
+            timeout=1,
+        )
+    finally:
+        for task in requests:
+            task.cancel()
+    assert timers.sleeps, "the drain slept on a clock other than the one it was given"
+    assert sum(timers.sleeps) >= 5
+
+
 async def test_drain_returns_at_once_when_nothing_is_in_flight() -> None:
     async with asyncio.timeout(1):
-        await activity.drain(requests=set(), workers=set(), budget_s=5)
+        await activity.drain(requests=set(), workers=set(), timers=SYSTEM_TIMERS, budget_s=5)
 
 
 async def test_drain_waits_for_an_admitted_request_to_finish() -> None:
@@ -163,7 +184,9 @@ async def test_drain_waits_for_an_admitted_request_to_finish() -> None:
 
     task = asyncio.create_task(request())
     await entered.wait()
-    draining = asyncio.create_task(activity.drain(requests=requests, workers=set(), budget_s=5))
+    draining = asyncio.create_task(
+        activity.drain(requests=requests, workers=set(), timers=SYSTEM_TIMERS, budget_s=5)
+    )
     await asyncio.sleep(0.25)
     assert not draining.done(), "the drain returned while a request was still admitted"
     finish.set()
@@ -187,7 +210,7 @@ async def test_drain_names_what_is_left_when_the_budget_is_spent(
     handler = asyncio.create_task(stuck_request())
     await entered.wait()
 
-    await activity.drain(requests=requests, workers=workers, budget_s=0.2)
+    await activity.drain(requests=requests, workers=workers, timers=SYSTEM_TIMERS, budget_s=0.2)
 
     (record,) = [r for r in caplog.records if "stop drain budget" in r.getMessage()]
     assert record.levelname == "ERROR"
@@ -223,7 +246,9 @@ async def test_sigterm_closes_the_server_to_new_connections_and_waits_for_admitt
     peer.setblocking(False)
     previous = signal.getsignal(signal.SIGTERM)
     serving = asyncio.create_task(
-        activity.serve_until_sigterm(server, requests=requests, workers=workers)
+        activity.serve_until_sigterm(
+            server, requests=requests, workers=workers, timers=SYSTEM_TIMERS
+        )
     )
     try:
         await loop.sock_connect(peer, ("127.0.0.1", port))
@@ -265,7 +290,9 @@ async def test_two_sigterms_handled_together_are_one_stop() -> None:
     )
     previous = signal.getsignal(signal.SIGTERM)
     serving = asyncio.create_task(
-        activity.serve_until_sigterm(server, requests=requests, workers=workers)
+        activity.serve_until_sigterm(
+            server, requests=requests, workers=workers, timers=SYSTEM_TIMERS
+        )
     )
     try:
         await asyncio.sleep(0.05)

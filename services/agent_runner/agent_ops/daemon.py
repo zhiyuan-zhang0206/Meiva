@@ -605,7 +605,9 @@ async def serve_ops_daemon(
                     watch_to_user(paths.workspaces_root(home=home), bus)
                 )
                 try:
-                    await in_flight.serve_until_sigterm(server, requests=requests, workers=workers)
+                    await in_flight.serve_until_sigterm(
+                        server, requests=requests, workers=workers, timers=SYSTEM_TIMERS
+                    )
                 finally:
                     watcher.cancel()
         finally:

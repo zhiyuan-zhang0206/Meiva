@@ -16,4 +16,3 @@ exports = ["boot.py", "daemon.py", "dispatch_sync.py", "in_flight.py", "tests"]
 
 [debt.ambient-read]
 "boot.py#settings base.cluster.machine.ambient.gateway_access_from_settings" = 1
-"in_flight.py#clock asyncio.loop.time" = 2
