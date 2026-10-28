@@ -80,7 +80,7 @@ export function SharedContextPanel({ agentId, document, notices, noticesFailed, 
           key={agentId}
           agentId={agentId}
           document={document.data}
-          failed={document.isError}
+          failure={document.error}
           pending={document.isFetching}
           refresh={() => void document.refetch()}
           mobile={mobile}

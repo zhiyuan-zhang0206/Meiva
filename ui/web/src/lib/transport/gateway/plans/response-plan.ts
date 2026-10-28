@@ -19,20 +19,35 @@ function isGuideDraftResponse(value: unknown): value is GuideDraftResponse {
   );
 }
 
+// meiva:note
+// Retryability is what the server said about this exact request, never a guess from the
+// status: a refusal that names a permanent cause must not reach a reader as "try again".
+// A body without the field (a proxy page, an older server) falls back to the statuses
+// that mean the same request may pass later.
+// meiva:link ui/web/src/docs/frontend-state/api-requests.meiva.okf.md
+function retryableFrom(status: number, body: Record<string, unknown> | undefined): boolean {
+  if (typeof body?.retryable === "boolean") return body.retryable;
+  return status === 408 || status === 429 || status >= 500;
+}
+
 export class ApiError extends Error {
   status: number;
   agentId?: number;
   code?: string;
+  retryable: boolean;
   launchState?: { status: string; availability?: { reason: string; evidence_at?: string | null } | null };
   retryLaunchPath?: string;
   constructor(status: number, message: string, body?: Record<string, unknown>) {
     super(message);
     this.name = "ApiError";
     this.status = status;
+    this.retryable = retryableFrom(status, body);
     const detail = body?.detail;
     if (detail && typeof detail === "object" && "code" in detail && typeof detail.code === "string") {
       this.code = detail.code;
       if ("message" in detail && typeof detail.message === "string") this.message = detail.message;
+    } else if (typeof body?.code === "string") {
+      this.code = body.code;
     }
     if (body?.reason === "agent_launch_failed" && typeof body.agent_id === "number") {
       this.agentId = body.agent_id;

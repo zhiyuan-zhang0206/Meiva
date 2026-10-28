@@ -26,7 +26,7 @@ from ops.rpc_schemas import (
     ShellKillPayload,
     ShellProbePayload,
 )
-from ops.to_user import read_to_user
+from ops.to_user import read_failure_payload, read_to_user
 from ops.upload_delivery import ReceiverConfig, copy_batch
 from services.agent_runner.agent_ops.ops_plan import unknown_kind
 
@@ -52,13 +52,21 @@ def dispatch_sync(
             request = ToUserReadRequest.model_validate(payload)
             if pool is None:
                 raise RuntimeError("To user requires the native DB pool")
-            return OpStatus.COMPLETED, read_to_user(
-                pool,
-                request.agent_id,
-                local_machine.name(),
-                references=request.references,
-                home=home,
-            ).model_dump(mode="json")
+            try:
+                document = read_to_user(
+                    pool,
+                    request.agent_id,
+                    local_machine.name(),
+                    references=request.references,
+                    home=home,
+                )
+            except (OSError, ValueError) as exc:
+                # meiva:note
+                # A refused read is the answer, not a crash: the class it carries is
+                # what the gateway turns into the panel's words.
+                # meiva:link gateway/agents/docs/to-user-read-failures.meiva.okf.md
+                return OpStatus.FAILED, read_failure_payload(exc)
+            return OpStatus.COMPLETED, document.model_dump(mode="json")
         case "upload-receive-v1":
             return _upload_arm(payload, pool, receiver=receiver)
         case "status_probe":

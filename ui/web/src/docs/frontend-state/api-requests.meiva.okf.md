@@ -69,6 +69,18 @@ Only deliberately completing a fetch after abort needs the narrow
 fresh query-cache state use `cacheOnlyApi`: the real factory over the test setup's
 network guard, so an unexpected cold read fails instead of receiving invented data.
 
+## Retryability and the panel's words
+
+`ApiError` keeps the envelope's `code` and `retryable`. A reader chooses what to
+say from those, not from the status: a refusal the server named is permanent for
+that request, so only a retryable answer may ask for a retry, and one that fails
+without an answer at all (a dropped connection) keeps that advice. The shared
+context panel is the first reader that does — it names
+`to_user_document_too_large`, `to_user_reference_gone` and
+`to_user_document_unreadable` differently and offers a file too large to render
+as the file itself through the resource endpoint
+([classes](../../../../../gateway/agents/docs/to-user-read-failures.meiva.okf.md)).
+
 Endpoint-shape cases assert the gateway path, method and payload rather than a
 particular test host. These cases do not establish runtime response-schema
 validation: generated OpenAPI types describe success payloads, while the
