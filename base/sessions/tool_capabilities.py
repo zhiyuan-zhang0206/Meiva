@@ -20,6 +20,7 @@ from typing import TypeGuard
 
 from base.host.proc import run_bounded
 from base.log import logger
+from base.paths.expand import expand_home
 
 PROBE_TTL_SECONDS = 24 * 3600
 PROBE_TIMEOUT_SECONDS = 3.0
@@ -154,12 +155,15 @@ def _default_run(argv: list[str]) -> tuple[int, str]:
     return completed.returncode, f"{completed.stdout or ''}{completed.stderr or ''}"
 
 
-def _resolve(spec: ToolSpec) -> str | None:
+# meiva:note
+# The CLI to run for `spec`: PATH first, then the candidate install directories with a leading `~`
+# expanded against the home the caller read.
+def _resolve(spec: ToolSpec, *, user_home: Path) -> str | None:
     found = shutil.which(spec.tool)
     if found:
         return found
     for candidate in spec.candidates:
-        path = Path(candidate).expanduser()
+        path = expand_home(candidate, user_home=user_home)
         if path.is_file() and os.access(path, os.X_OK):
             return str(path)
     return None
@@ -254,9 +258,10 @@ def probe_tool(
     run: Runner | None = None,
     store: Path,
     now: dt.datetime,
+    user_home: Path,
 ) -> Probe:
     runner = run or _default_run
-    resolved = _resolve(spec)
+    resolved = _resolve(spec, user_home=user_home)
     if resolved is None:
         return Probe(
             tool=spec.tool,

@@ -16,13 +16,10 @@ exports = ["backend.py", "coding_session_owner.py", "coding_session_owner_record
 "provenance.py" = "strict"
 
 [debt.ambient-read]
-"coding_session_owner.py#home pathlib.Path.expanduser" = 2
 "coding_session_owner.py#pid os.getuid" = 1
-"coding_session_owner_record.py#home pathlib.Path.expanduser" = 2
 "env_forwarding.py#home pathlib.Path.expanduser" = 1
 "helperproc.py#settings base.config.settings" = 1
 "hosting.py#pid psutil.Process()" = 1
-"tool_capabilities.py#home pathlib.Path.expanduser" = 1
 
 [debt.impure-call]
 "log_prefix.py#os.close" = 1

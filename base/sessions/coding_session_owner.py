@@ -289,6 +289,15 @@ def _never_terminated(_agent_id: int) -> bool:
     return False
 
 
+# meiva:note
+# A task or work file as the record stores it: absolute, because the entry that expanded a leading
+# `~` against the operator's home already placed it. A tilde here is a skipped step, refused.
+def _resolved_file(path: Path) -> Path:
+    if str(path).startswith("~"):
+        raise ValueError(f"{path} starts with ~; expand it where the home was read")
+    return path.resolve()
+
+
 def launch_generation(
     key: CodingSessionKey,
     *,
@@ -326,8 +335,8 @@ def launch_generation(
             display_label=display_label(key.workspace),
             expected_suffix=expected_suffix(key, generation),
             state_dir=generation_state_dir(key, generation),
-            tasks_file=tasks_file.expanduser().resolve() if tasks_file is not None else None,
-            work_file=work_file.expanduser().resolve() if work_file is not None else None,
+            tasks_file=None if tasks_file is None else _resolved_file(tasks_file),
+            work_file=None if work_file is None else _resolved_file(work_file),
             created_at=timestamp,
             expires_at=timestamp + dt.timedelta(seconds=ttl_seconds),
         )

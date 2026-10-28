@@ -93,20 +93,32 @@ def _invalid(message: str) -> Never:
     raise ValueError(message)
 
 
+# meiva:note
+# The canonical record key; basename never participates.
+#
+# `workspace` and `cluster` arrive absolute: a `~` is the invoking entry's to expand, because only
+# that entry read the home it names (`base.paths.expand.expand_home`). A tilde here means the step
+# was skipped, so it is refused instead of expanded against a home this module would have to guess.
 def canonical_key(
     workspace: str | Path,
     *,
     tool: str,
     cluster: str | Path,
 ) -> CodingSessionKey:
-    """Build the canonical record key; basename never participates."""
     if not _TOOL_RE.fullmatch(tool):
         raise ValueError("tool must be a lowercase slug")
     return CodingSessionKey(
-        cluster=str(Path(cluster).expanduser().resolve()),
-        workspace=str(Path(workspace).expanduser().resolve()),
+        cluster=_absolute("cluster", cluster),
+        workspace=_absolute("workspace", workspace),
         tool=tool,
     )
+
+
+def _absolute(what: str, value: str | Path) -> str:
+    text = str(value)
+    if text.startswith("~"):
+        raise ValueError(f"{what} {text!r} starts with ~; expand it where the home was read")
+    return str(Path(text).resolve())
 
 
 def key_digest(key: CodingSessionKey) -> str:
