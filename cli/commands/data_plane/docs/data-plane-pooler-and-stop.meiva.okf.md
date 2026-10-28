@@ -29,7 +29,8 @@ bind that failed at startup); and one that is not running is started after the s
 `pooler/stop_intent.py` the durable stop intent and `pooler/identity.py` attributes a running
 pgbouncer to a home from its command line. The composition root (`completion.ensure_pooler`)
 hands the shell one `PoolerSpec`: the home it lives under, the ini's shape, the userlist and
-admin credential, the resolved binary, the daemon environment (`daemon_process_env`) and the waits, and
+admin credential, the resolved binary, the daemon environment (filtered from the environment the
+pass received) and the waits, and
 `ensure_pgbouncer` takes the completion pass's `Timers` from that same root, so a test starts a
 real pooler under its own home with small waits and a manual clock instead of replacing the code
 that looks for it.
@@ -54,8 +55,8 @@ The fixture captures the daemon's native birth before waiting for its listener;
 cleanup signals and waits for that retained identity even when a refusal test
 removes the pidfile. Deleting that publication never discards test cleanup custody.
 
-Redis and the pooler are spawned with `base.native_process.child_env.daemon_process_env`
-(the pooler's is the one its spec carries),
+Redis and the pooler are spawned with `base.native_process.child_env.filter_daemon_env`
+over the environment the start shell was handed (the pooler's is the one its spec carries),
 and the Postgres postmaster with `base.cluster.dataplane.pg_tools.pg_start_env` (the same set
 plus the macOS locale fallback): the operator's PATH, home, user, temp dir,
 timezone and locale only. The gateway login, write generation and API token

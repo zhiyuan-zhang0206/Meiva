@@ -259,7 +259,12 @@ def test_a_replaced_postmaster_identity_fails_the_leg_and_leaves_postgres_runnin
     try:
         assert (
             instance.start_pg(
-                plane, port, home=unit_home, retained_children=retained, machine=command_machine
+                plane,
+                port,
+                home=unit_home,
+                retained_children=retained,
+                machine=command_machine,
+                timers=SYSTEM_TIMERS,
             )
             == 0
         )
@@ -319,6 +324,7 @@ def test_the_stop_ends_a_whole_local_data_plane_in_order(
                     home=unit_home,
                     retained_children=retained,
                     machine=command_machine,
+                    timers=SYSTEM_TIMERS,
                 )
                 == 0
             )

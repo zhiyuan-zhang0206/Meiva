@@ -180,6 +180,7 @@ def _perform(
                         home=command.home,
                         macos=command.host.platform.system == "darwin",
                         timers=command.timers,
+                        environ=command.config.process_environment(),
                         retained_children=retained_children,
                         producer=env.producer,
                     )

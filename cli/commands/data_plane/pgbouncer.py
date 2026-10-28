@@ -363,7 +363,9 @@ def _perform(step: PoolerStep, run: _Run) -> int:
         case Reload():
             return _reload(run)
         case AwaitReachableBind(context):
-            if not wait_for_reachable_bind(host=text.host, timeout_s=spec.bind_wait_s):
+            if not wait_for_reachable_bind(
+                host=text.host, timeout_s=spec.bind_wait_s, timers=run.timers
+            ):
                 print(text.bind_missing(context), file=sys.stderr)
                 return 1
         case AnnounceChangedRestart():
