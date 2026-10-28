@@ -17,9 +17,7 @@ from base.lm.catalog.provider_keys import ProviderKeys
 from base.lm.harness.registration import SecureRandom
 from base.native_process.loaded_commit import LoadedCommit
 from base.native_process.stop_timing import CANCEL_UNWIND_TIMEOUT_S
-from base.paths.home import resolve_meiva_home
 from base.telemetry.process_logging import init_gateway_process
-from meiva.boot import process_disable_entries
 from meiva.sdk_surface.installation import Installation
 from services.agent_runner.agent_host.pools import PoolBounds
 from services.agent_runner.agent_host.runtime import HostCachePolicy, HostPolicy, StallTiming
@@ -34,12 +32,13 @@ __all__ = [
 ]
 
 
-def boot_process() -> tuple[ConfigBoot, Path]:
+# meiva:note
+# The entry resolves the home it runs under; this module boots the configuration and returns it.
+def boot_process() -> ConfigBoot:
     config = ConfigBoot()
     config.boot()
     config.ensure_eager()
-    home = resolve_meiva_home()
-    return config, home
+    return config
 
 
 def host_policy(
@@ -95,6 +94,7 @@ def load_installation(
     load_extensions: Callable[..., object],
     rng: random.Random,
     home: Path,
+    disabled_entries: tuple[str, ...],
 ) -> Installation:
     from base.agents.sdk.call_policy import process_sampling_owner
     from base.config.service_read import ConfigAuthority
@@ -118,7 +118,7 @@ def load_installation(
         sampling=process_sampling_owner(rng),
         clients=clients,
         clock=Clock(clock_config_from_boot(config), timers=SYSTEM_TIMERS),
-        disabled_entries=process_disable_entries(),
+        disabled_entries=disabled_entries,
     )
     installation = installed()
     if installation is None:

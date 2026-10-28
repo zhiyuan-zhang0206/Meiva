@@ -534,7 +534,7 @@ async def serve_ops_daemon(
     liveness = LivenessGroup(timers=SYSTEM_TIMERS)
 
     try:
-        acceptance = boot.ops_acceptance(home=home)
+        acceptance = boot.ops_acceptance(home=home, access=gateway_access_from_boot(config))
         bind_host = boot.ops_bind_host(machine=local_machine)
         if bind_host != "127.0.0.1":
             verify_transport_encryption_declaration(

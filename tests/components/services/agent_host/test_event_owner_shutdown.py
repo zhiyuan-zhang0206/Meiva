@@ -191,6 +191,7 @@ async def test_boot_primary_survives_a_failed_constructed_writer_cleanup(
                 machine=machine,
                 home=unit_home,
                 user_home=unit_home,
+                disabled_entries=(),
                 clients=clients,
                 on_clients_owned=fail_during_boot,
             )
