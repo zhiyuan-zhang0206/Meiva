@@ -35,6 +35,7 @@ NATIVE_TEST_PATHS = (
     "meizel/language/tests/test_typescript_environment.py",
     "meizel/tests/explain/test_typescript.py",
     "meizel/tests/languages/test_parity.py",
+    "meizel/tests/languages/test_typescript_scopes.py",
 )
 
 
