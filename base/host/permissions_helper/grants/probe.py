@@ -2,8 +2,7 @@ from __future__ import annotations
 
 import json
 import sys
-import time
-from collections.abc import Callable, Mapping
+from collections.abc import Mapping
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Protocol
@@ -29,6 +28,17 @@ _RESULT_WORDS: dict[int, Grant] = {
     1: Grant.DENIED,
     2: Grant.NOT_DETERMINED,
 }
+
+
+# meiva:note
+# The two timer verbs these waits use: a monotonic reading to set a deadline, and a sleep to space
+# the polls. A `base.clock.Timers` satisfies it, and the value always arrives from the root that
+# built it -- this package may not import `base.clock` itself, because that edge would close the
+# cycle `clock -> ... -> host`.
+class Waits(Protocol):
+    def monotonic(self) -> float: ...
+
+    def sleep(self, seconds: float) -> None: ...
 
 
 class HelperChannel(Protocol):
@@ -135,8 +145,8 @@ def run_preflight(
     run_id: str,
     env: dict[str, str],
     services: tuple[str, ...],
+    timers: Waits,
     wait_s: float = PROBE_WAIT_S,
-    sleep: Callable[[float], None] = time.sleep,
 ) -> dict[str, Grant]:
     workdir.mkdir(parents=True, exist_ok=True)
     result_path = workdir / f"preflight-{run_id}.results.json"
@@ -149,9 +159,8 @@ def run_preflight(
         workdir=workdir,
         tag=f"preflight-{run_id}",
     )
-    clock = time.monotonic
-    deadline = clock() + wait_s
-    while clock() < deadline:
+    deadline = timers.monotonic() + wait_s
+    while timers.monotonic() < deadline:
         text = read_result(result_path)
         if text is not None:
             data = json.loads(text)
@@ -159,7 +168,7 @@ def run_preflight(
                 service: _RESULT_WORDS.get(entry["code"], Grant.UNKNOWN)
                 for service, entry in data.items()
             }
-        sleep(POLL_S)
+        timers.sleep(POLL_S)
     raise PermissionsProbeError(
         f"preflight probe produced no result within {wait_s:.0f}s"
         f" (see the child logs under {workdir})"
@@ -172,9 +181,9 @@ def probe(
     workdir: Path,
     run_id: str,
     env: dict[str, str],
+    timers: Waits,
     services: tuple[str, ...] | None = None,
     wait_s: float = PROBE_WAIT_S,
-    sleep: Callable[[float], None] = time.sleep,
 ) -> ProbeResult:
     from base.host.permissions_helper.client import PermissionsHelperError
 
@@ -197,8 +206,8 @@ def probe(
         run_id=run_id,
         env=env,
         services=services or PREFLIGHT_SERVICES,
+        timers=timers,
         wait_s=wait_s,
-        sleep=sleep,
     )
     booleans: dict[str, bool] = {}
     for key in PING_KEYS:

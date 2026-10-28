@@ -1,17 +1,11 @@
-exports = ["harness", "plans.py", "wake.py"]
+exports = ["harness", "lifecycle_plans.py", "plans.py", "wake.py"]
 
 [uses]
-"__init__.py" = ["harness", "plans.py", "wake.py"]
+"__init__.py" = ["harness", "lifecycle_plans.py", "plans.py", "wake.py"]
 "harness" = []
 
 [purity]
-"__init__.py" = "strict-to-be"
+"__init__.py" = { mode = "none", why = "the meiva.self facade: attach, restart, terminate, compact and pause_heartbeat read the bound context, the installation and the database row, run the SQL plans.py returns in a transaction, emit the audit and telemetry events and publish the wake; whether the harness may take the action, the overlay a restart stores, whether the caller is an attached controller and the texts of a compaction are decided by the pure lifecycle_plans.py, the statements by plans.py and the wake channel by wake.py" }
+"lifecycle_plans.py" = "strict"
 "plans.py" = "strict"
 "wake.py" = "strict"
-
-[debt.impure-edge]
-"__init__.py#base/telemetry/__init__.py" = 2
-"__init__.py#base/telemetry/audit_events.py" = 1
-"__init__.py#meiva/boot.py" = 1
-"__init__.py#meiva/files.py" = 1
-"__init__.py#meiva/self/harness/__init__.py" = 1

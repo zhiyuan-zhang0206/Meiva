@@ -3,12 +3,14 @@ from __future__ import annotations
 import io
 import json
 import subprocess
+from dataclasses import replace
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, cast
 
 from base.clock.ids import new_uuid
 from base.clock.tests.fakes import clock_at
+from base.clock.tests.manual_timers import ManualTimers
 from base.clock.tests.seeded_rng import seeded_rng
 from base.host.permissions_helper.client import (
     PermissionsHelperClient,
@@ -113,6 +115,24 @@ def _codes(value: int) -> dict[str, int]:
     return dict.fromkeys(PREFLIGHT_SERVICES, value)
 
 
+# meiva:note
+# The waits a pass spends, recorded instead of slept: every reading of the monotonic deadline is
+# counted, and a poll that gets this far is a failure rather than a silent sleep. A pass that read
+# some other clock -- the process's, the loop's -- leaves `readings` at zero.
+class RecordingWaits:
+    def __init__(self) -> None:
+        self.readings = 0
+
+    def monotonic(self) -> float:
+        self.readings += 1
+        return 0.0
+
+    def sleep(self, seconds: float) -> None:
+        raise AssertionError(
+            f"a probe whose child already wrote its result must not sleep ({seconds})"
+        )
+
+
 def host(tmp_path: Path, *, client: FakeHelper | DeadHelper | None = None) -> onboarding.GateHost:
     for subpath in FOLDER_PATHS.values():
         (tmp_path / subpath).mkdir(parents=True, exist_ok=True)
@@ -122,6 +142,7 @@ def host(tmp_path: Path, *, client: FakeHelper | DeadHelper | None = None) -> on
         workdir=tmp_path / "scratch",
         home=tmp_path,
         record_path=tmp_path / gate.RECORD_NAME,
+        timers=ManualTimers(),
     )
 
 
@@ -148,6 +169,18 @@ def test_an_unreachable_helper_is_reported_as_unavailable(tmp_path: Path) -> Non
     assert report.state is gate.GateState.UNAVAILABLE
 
 
+# meiva:note
+# The pass waits on the timers its host carries: with any other timers the deadline of the probe
+# would be read somewhere else and this count would stay at zero.
+def test_a_pass_waits_on_the_timers_of_the_host_it_is_given(tmp_path: Path) -> None:
+    waits = RecordingWaits()
+    seat = replace(host(tmp_path), timers=waits)
+
+    onboarding.check(host=seat, now=NOW, run_id=RUN)
+
+    assert waits.readings > 0
+
+
 def test_a_non_darwin_host_has_nothing_to_check(tmp_path: Path) -> None:
     seat = onboarding.GateHost(
         client=None,
@@ -155,6 +188,7 @@ def test_a_non_darwin_host_has_nothing_to_check(tmp_path: Path) -> None:
         workdir=tmp_path / "scratch",
         home=tmp_path,
         record_path=tmp_path / gate.RECORD_NAME,
+        timers=ManualTimers(),
     )
     report = onboarding.check(host=seat, now=NOW, run_id=RUN)
     assert report.state is gate.GateState.NOT_APPLICABLE
@@ -318,6 +352,7 @@ def test_a_host_is_described_from_the_facts_the_root_hands_in(tmp_path: Path) ->
         user_home=user_home,
         environ={"PATH": "/marker/bin"},
         helper=serve(cast("PermissionsHelperClient", helper)),
+        timers=ManualTimers(),
     )
 
     assert seat.client is helper
@@ -331,7 +366,11 @@ def test_a_platform_without_a_helper_is_a_host_with_no_client_and_nothing_to_che
     tmp_path: Path,
 ) -> None:
     seat = onboarding.gate_host(
-        home=tmp_path / "meiva-home", user_home=tmp_path / "account", environ={}, helper=None
+        home=tmp_path / "meiva-home",
+        user_home=tmp_path / "account",
+        environ={},
+        helper=None,
+        timers=ManualTimers(),
     )
 
     assert seat.client is None

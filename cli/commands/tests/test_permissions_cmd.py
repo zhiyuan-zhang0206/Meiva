@@ -12,6 +12,7 @@ import pytest
 
 from base.clock.ids import new_uuid
 from base.clock.tests.fakes import clock_at
+from base.clock.tests.manual_timers import ManualTimers
 from base.clock.tests.seeded_rng import seeded_rng
 from base.host.permissions_helper.client import PermissionsHelperClient
 from base.host.permissions_helper.grants import checklist, gate
@@ -110,6 +111,7 @@ def _host(tmp_path: Path, **overrides: Grant) -> tuple[GateHost, FakeHelper]:
         workdir=tmp_path / "scratch",
         home=tmp_path,
         record_path=tmp_path / gate.RECORD_NAME,
+        timers=ManualTimers(),
     )
     return seat, helper
 
@@ -207,9 +209,14 @@ def test_the_verb_describes_the_host_from_the_invocation_runtime(
         user_home=runtime.session.user_home,
         environ=runtime.host_after_config().environ,
         helper=None,
+        timers=runtime.timers,
     ).env
     from_the_hosts_launch = onboarding.gate_host(
-        home=home, user_home=runtime.session.user_home, environ=runtime.host.environ, helper=None
+        home=home,
+        user_home=runtime.session.user_home,
+        environ=runtime.host.environ,
+        helper=None,
+        timers=runtime.timers,
     ).env
     assert env == forwarded
     assert env != from_the_hosts_launch

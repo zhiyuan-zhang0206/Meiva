@@ -20,6 +20,7 @@ import pytest
 from agent.execution.protocol import ResultPayload
 from agent.graph.exec.process import ExecOutputChunkPublisher, ExecResult, SubprocessExecProcess
 from agent.graph.exec.tests.process_inputs import live_parent_facts
+from base.clock import SYSTEM_TIMERS
 from base.config.tests.configuration import defaults
 from base.events.live.tests.live_capture import idle_publisher
 from base.host.env.agent_env import AGENT_BIRTH_CONFIG_ENV, AGENT_CONFIG_OVERLAY_ENV
@@ -140,6 +141,7 @@ async def test_socket_and_direct_children_observe_the_same_checkout_environment(
         },
         default_cwd=unit_home,
         source_root=source_root,
+        timers=SYSTEM_TIMERS,
         executable=parent.executable,
     )
     chunks = ExecOutputChunkPublisher(idle_publisher(), agent_id=424242, item_id="env")

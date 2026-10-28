@@ -342,6 +342,7 @@ def ensure_permissions_onboarding(ctx: ConvergeCtx) -> None:
         user_home=ctx.session.user_home,
         environ=ctx.read_config().process_environment(),
         helper=ctx.helper,
+        timers=ctx.timers,
     )
     first_run = gate.read_record(host.record_path) is None
     # meiva:note

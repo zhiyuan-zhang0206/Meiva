@@ -8,7 +8,8 @@ from typing import Any
 from base.clock.tests.fakes import system_clock
 from base.lm.harness import Handoff
 from base.lm.harness.base_session import SessionBinding
-from base.lm.harness.claude import BridgeConfig, ClaudeSession
+from base.lm.harness.claude import BridgeConfig
+from base.lm.harness.claude.session import ClaudeSession
 from base.lm.harness.claude.tests.fake_sdk import FakeSDK, ScriptedProbe
 from base.lm.harness.events import UnsolicitedSink
 from base.lm.harness.registry import FileSessionRegistry

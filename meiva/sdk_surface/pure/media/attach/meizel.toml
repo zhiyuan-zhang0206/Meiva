@@ -1,0 +1,8 @@
+exports = ["attach_model.py", "attach_plan.py", "attach_request.py"]
+
+[purity]
+"." = "strict"
+
+[uses]
+"attach_model.py" = ["attach_plan.py"]
+"attach_request.py" = ["attach_model.py", "attach_plan.py"]

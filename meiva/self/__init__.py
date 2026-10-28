@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections.abc import Mapping
 from pathlib import Path
 from typing import LiteralString, NamedTuple, NoReturn, Protocol
 
@@ -10,7 +11,7 @@ from meiva.sdk_surface import attachment_transport, process_context
 from meiva.sdk_surface import settings as _settings
 from meiva.sdk_surface.help import HARNESS_HIDDEN_SELF_MEMBERS as HARNESS_HIDDEN_SELF_MEMBERS
 from meiva.sdk_surface.validation import coerce_str, coerce_typed
-from meiva.self import plans
+from meiva.self import lifecycle_plans, plans
 
 HARNESS_SELF_MEMBERS: tuple[str, ...] = (
     "AGENT_ID",
@@ -108,34 +109,32 @@ class _Cursor(Protocol):
     def fetchone(self) -> tuple[object, ...] | None: ...
 
 
+# meiva:note
+# Refuse `action` when the harness this process runs under is not the native one, judged on the
+# bound context, then on an attached capture's registration and, once `cur` is given, on the
+# harness stored for the agent. The decision is `lifecycle_plans`; this reads the three places.
 def _assert_native_self_action(action: str, cur: _Cursor | None = None) -> None:
     from meiva.sdk_surface import agent_identity
-    from meiva.sdk_surface.pure.caller.identity_plan import native_harness_refusal
 
     ctx = process_context.ambient_context()
-    if ctx is not None and ctx.harness.value != "meiva":
-        refused = native_harness_refusal(ctx.harness.value, action)
-        if refused is not None:
-            raise RuntimeError(refused)
-    if (
-        ctx is not None
-        and ctx.sdk_capture is not None
-        and getattr(ctx.sdk_capture, "handle", None) is not None
-    ):
-        reg = getattr(ctx.sdk_capture, "_registration", None)
-        harness_name = str(getattr(reg, "harness", None) or "external")
-        refused = native_harness_refusal(harness_name, action)
-        if refused is not None:
-            raise RuntimeError(refused)
-    if cur is not None:
+    capture = None if ctx is None else ctx.sdk_capture
+    refused = lifecycle_plans.harness_refusal(
+        action,
+        lifecycle_plans.HarnessFacts(
+            context_harness="meiva" if ctx is None else ctx.harness.value,
+            capture_attached=getattr(capture, "handle", None) is not None,
+            capture_registered_harness=getattr(
+                getattr(capture, "_registration", None), "harness", None
+            ),
+        ),
+    )
+    if refused is None and cur is not None:
         agent_id = agent_identity.agent_id()
         if agent_id is not None:
             cur.execute("SELECT harness FROM agents_meta WHERE id = %s", (agent_id,))
-            row = cur.fetchone()
-            if row is not None and row[0] != "meiva":
-                refused = native_harness_refusal(str(row[0]), action)
-                if refused is not None:
-                    raise RuntimeError(refused)
+            refused = lifecycle_plans.stored_harness_refusal(action, cur.fetchone())
+    if refused is not None:
+        raise RuntimeError(refused)
 
 
 def attach(path: str | Path, *, label: str | None = None) -> None:
@@ -149,8 +148,12 @@ def attach(path: str | Path, *, label: str | None = None) -> None:
     turn, with a 20 MiB limit per file. Raises an error outside an agent turn.
     """
     _assert_native_self_action("attach")
+    context = process_context.current_context()
     attachment_transport.register(
-        path, label=label, base=workspace_base_for(process_context.current_context())
+        path,
+        label=label,
+        base=workspace_base_for(context),
+        user_home=context.require_user_home(),
     )
 
 
@@ -183,29 +186,22 @@ def restart(config_overlay: dict[str, object] | None = None) -> NoReturn:
 
     _assert_native_self_action("restart")
     agent_identity.assert_self_action("restart")
+    stored: Mapping[str, object] | None = None
     if config_overlay:
-        from base.packages.plugins.config_registration import validate_config_overlay
         from meiva.sdk_surface.installation import installed
 
         installation = installed()
-        catalog = _settings.model_catalog()
-        validate_config_overlay(
+        prepared = lifecycle_plans.restart_overlay(
             config_overlay,
-            None if installation is None else installation.configs,
-            models=catalog.models,
-            decision_models=catalog.decision_models,
+            configs=None if installation is None else installation.configs,
+            catalog=_settings.model_catalog(),
             home=process_context.current_context().require_meiva_home(),
         )
+        stored = prepared.overlay
         # Settle a withdrawn llm_model before it is stored (task #4306): the
         # rewrite is reported in this agent's own log — the spawner-visible
         # receipt for the self-restart path.
-        from base.lm.registry import normalize_overlay_llm_model
-
-        config_overlay = dict(config_overlay)
-        model_receipt = normalize_overlay_llm_model(
-            config_overlay, models=_settings.model_catalog().models
-        )
-        if model_receipt is not None:
+        if prepared.receipt is not None:
             from loguru import logger
 
             logger.warning(
@@ -213,25 +209,25 @@ def restart(config_overlay: dict[str, object] | None = None) -> NoReturn:
                 "storing the registered fallback {resolved!r} — update the "
                 "template (task #4306)",
                 event="restart_config_normalized",
-                requested=model_receipt[0],
-                resolved=model_receipt[1],
+                requested=prepared.receipt[0],
+                resolved=prepared.receipt[1],
             )
 
     agent_id = agent_identity.require_agent_id()
     with process_context.current_context().sql.cursor() as cur, cur.connection.transaction():
         cur.execute("SET TRANSACTION READ WRITE")
         _assert_native_self_action("restart", cur)
-        if config_overlay:
+        if stored:
             from base.agents.model.restart_config import validate_restart_model_config
 
             validate_restart_model_config(
                 cur,
                 agent_id,
-                config_overlay,
+                stored,
                 catalog=_settings.model_catalog(),
                 default_model=_settings.agent_setting("llm_model"),
             )
-        _run(cur, plans.restart_statements(agent_id, config_overlay))
+        _run(cur, plans.restart_statements(agent_id, stored))
     _publish_self_inbound_wake()
     raise AgentRestart
 
@@ -244,12 +240,7 @@ def terminate() -> NoReturn:
     from meiva.sdk_surface import agent_identity
 
     ctx = process_context.ambient_context()
-    is_attached = (
-        ctx is not None
-        and ctx.identity is not None
-        and ctx.identity.owns_loop
-        and ctx.identity.lease is not None
-    )
+    is_attached = lifecycle_plans.is_attached_controller(None if ctx is None else ctx.identity)
     if not is_attached:
         agent_identity.assert_self_action("terminate")
     target_id = agent_identity.require_agent_id()
@@ -287,8 +278,7 @@ def pause_heartbeat(duration: float) -> None:
             "heartbeat_paused",
             level="info",
             agent_id=agent_id,
-            # int cast stabilizes the emitted metric kind (task #4011).
-            attributes={"duration_s": round(seconds)},
+            attributes=dict(lifecycle_plans.heartbeat_pause_attributes(seconds)),
         )
 
 
@@ -317,6 +307,7 @@ def compact(summary: str) -> NoReturn:
     # Taken before the commit: a context without an event bus fails here, not after the summary
     # is durable and the wake + SystemHalt below have been skipped.
     bus = _settings.bus()
+    notice = lifecycle_plans.compact_notice(summary)
     # The inbound and its audit fact commit together.
     db = process_context.current_context().sql
     with db.transaction(), db.cursor() as cur:
@@ -328,7 +319,7 @@ def compact(summary: str) -> NoReturn:
                 event_type="compact",
                 agent_id=agent_identity.agent_id(),
                 source="self",
-                payload={"compact_kind": "summary", "length": len(summary)},
+                payload=dict(notice.audit_payload),
             ),
         )
     emit_prepared(compact_event)
@@ -343,7 +334,7 @@ def compact(summary: str) -> NoReturn:
     bus.publish_best_effort_sync(
         CompactRequest(
             agent_id=agent_identity.require_agent_id(),
-            content=f"[compact requested, {len(summary)} chars]",
+            content=notice.request_content,
         ).model_dump_json(),
         context="compact_request",
     )

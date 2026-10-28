@@ -1,4 +1,4 @@
-exports = ["caller", "const.py", "media", "plans"]
+exports = ["caller", "media", "plans", "render"]
 
 [uses]
 "plans" = ["caller"]

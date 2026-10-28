@@ -19,6 +19,7 @@ from typing import Any, TypeGuard
 
 import psutil
 
+from base.clock import Timers
 from base.log import logger
 from base.native_process.exec_domain import KILL_GRACE_S, ExecProcessDomain
 from base.native_process.process_control import SYSTEM_PROCESS_CONTROL
@@ -96,16 +97,15 @@ class _OutputPipe:
                 self.loop.remove_reader(self.descriptor)
             self.stdout.close()
 
-    async def finish(self, timeout_s: float) -> None:
-        loop = asyncio.get_running_loop()
-        deadline = loop.time() + timeout_s
+    async def finish(self, timeout_s: float, *, timers: Timers) -> None:
+        deadline = timers.monotonic() + timeout_s
         self.pump()
         while not self.closed:
             self.pump()
-            now = loop.time()
+            now = timers.monotonic()
             if self.closed or now >= deadline:
                 return
-            await asyncio.sleep(min(0.01, max(0.0, deadline - now)))
+            await timers.asleep(min(0.01, max(0.0, deadline - now)))
 
 
 def _validate_envelope_path(raw: object, key: str, allowed_root: Path) -> Path:
@@ -265,11 +265,12 @@ async def _wait_client_control(
     return False
 
 
-async def _await_leader_exit(domain: ExecProcessDomain, leader: psutil.Process) -> None:
-    loop = asyncio.get_running_loop()
-    deadline = loop.time() + KILL_GRACE_S
+async def _await_leader_exit(
+    domain: ExecProcessDomain, leader: psutil.Process, *, timers: Timers
+) -> None:
+    deadline = timers.monotonic() + KILL_GRACE_S
     while not _leader_exited(leader):
-        if loop.time() >= deadline:
+        if timers.monotonic() >= deadline:
             logger.warning(
                 "[{label}] exec child {pid} survived the {grace}s grace period — "
                 "hard-stopping its process group",
@@ -279,7 +280,7 @@ async def _await_leader_exit(domain: ExecProcessDomain, leader: psutil.Process) 
                 event="exec_subprocess_killed",
             )
             return
-        await asyncio.sleep(_POLL_INTERVAL_S)
+        await timers.asleep(_POLL_INTERVAL_S)
 
 
 def _close_domain(domain: ExecProcessDomain) -> None:
@@ -308,9 +309,11 @@ class ExecHostService:
         base_environ: Mapping[str, str],
         default_cwd: Path,
         source_root: Path | None,
+        timers: Timers,
         executable: str = sys.executable,
         pid: int = 0,
     ) -> None:
+        self._timers = timers
         self._home = home
         self._executable = executable
         self._base_environ = dict(base_environ)
@@ -348,8 +351,7 @@ class ExecHostService:
         cancel_event: asyncio.Event,
     ) -> tuple[bool, bool, bool]:
         reader, writer = io_pair
-        loop = asyncio.get_running_loop()
-        deadline = loop.time() + parsed.timeout_s
+        deadline = self._timers.monotonic() + parsed.timeout_s
         disconnected = False
         while not _leader_exited(leader):
             pipe.pump()
@@ -364,7 +366,7 @@ class ExecHostService:
             if cancel_event.is_set():
                 domain.signal(signal.SIGINT)
                 return True, False, disconnected
-            if loop.time() >= deadline:
+            if self._timers.monotonic() >= deadline:
                 domain.signal(signal.SIGTERM)
                 return False, True, disconnected
             if await _wait_client_control(reader, cancel_event, _POLL_INTERVAL_S):
@@ -405,9 +407,9 @@ class ExecHostService:
                 domain, leader, pipe, parsed, (reader, writer), cancel_event
             )
             if cancelled or timed_out:
-                await _await_leader_exit(domain, leader)
+                await _await_leader_exit(domain, leader, timers=self._timers)
             _close_domain(domain)
-            await pipe.finish(_OUTPUT_DRAIN_TIMEOUT_S)
+            await pipe.finish(_OUTPUT_DRAIN_TIMEOUT_S, timers=self._timers)
             _close_output(pipe)
 
             pending = pipe.take_pending()

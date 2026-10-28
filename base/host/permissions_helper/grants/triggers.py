@@ -1,8 +1,6 @@
 from __future__ import annotations
 
 import sys
-import time
-from collections.abc import Callable
 from pathlib import Path
 
 from base.host.permissions_helper.grants.catalog import (
@@ -10,10 +8,17 @@ from base.host.permissions_helper.grants.catalog import (
     FOLDER_ITEMS,
     PermissionItem,
 )
-from base.host.permissions_helper.grants.probe import HelperChannel, read_result, spawn_child
+from base.host.permissions_helper.grants.probe import (
+    HelperChannel,
+    Waits,
+    read_result,
+    spawn_child,
+)
 
 FOLDER_CHILD = Path(__file__).with_name("children") / "folder_touch.py"
 APPLE_EVENT_CHILD = Path(__file__).with_name("children") / "apple_event.py"
+
+POLL_S = 0.5
 
 APPLE_EVENT_SCRIPTS: dict[str, str] = {
     f"automation-{suffix}": f'tell application "{app}" to get version'
@@ -68,7 +73,7 @@ def request_item(
     env: dict[str, str],
     home: Path,
     timeout_s: float,
-    sleep: Callable[[float], None] = time.sleep,
+    timers: Waits,
 ) -> str:
     result_path = workdir / f"{item.id}-{run_id}.result"
     result_path.unlink(missing_ok=True)
@@ -84,10 +89,9 @@ def request_item(
         workdir=workdir,
         tag=f"{item.id}-{run_id}",
     )
-    clock = time.monotonic
-    deadline = clock() + timeout_s
-    while clock() < deadline:
-        sleep(0.5)
+    deadline = timers.monotonic() + timeout_s
+    while timers.monotonic() < deadline:
+        timers.sleep(POLL_S)
         text = read_result(result_path)
         if text is not None:
             return classify(text)

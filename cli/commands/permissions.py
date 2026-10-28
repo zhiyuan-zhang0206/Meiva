@@ -25,6 +25,7 @@ def run(args: argparse.Namespace) -> int:
         user_home=runtime.session.user_home,
         environ=runtime.host_after_config().environ,
         helper=runtime.helper,
+        timers=runtime.timers,
     )
     return dispatch(args, host=host, clock=runtime.clock, run_id=runtime.new_id())
 
