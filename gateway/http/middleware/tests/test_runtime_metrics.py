@@ -16,6 +16,11 @@ from gateway.http.middleware.loop_lag import LagPolicy
 
 _POLICY = LagPolicy(tick_interval_s=0.01, emit_interval_s=0.03, slow_tick_threshold_ms=10_000.0)
 
+# meiva:note
+# An idle `sleep` holds a couple of mebibytes; this interpreter holds hundreds. 64 MiB
+# separates them with two orders of margin, so a sample of the wrong process fails.
+MAX_IDLE_CHILD_RSS = 64 * 1024 * 1024
+
 
 async def _run_monitor_for(process: psutil.Process, seconds: float) -> None:
     monitor = runtime_metrics.GatewayRuntimeMonitor(
@@ -96,7 +101,7 @@ async def test_start_runtime_monitor_samples_the_process_the_entry_hands_it(
     process_event = next(e for e in emitted_events if e.event_name == "gateway_process")
     rss = process_event.attributes["rss_bytes"]
     assert min(before, after) <= rss <= max(before, after)
-    assert rss < psutil.Process().memory_info().rss
+    assert rss < MAX_IDLE_CHILD_RSS
 
 
 def test_sse_metrics_initialize_idle_modes_at_zero(
