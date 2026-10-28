@@ -190,15 +190,21 @@ def check_notes(
     return findings
 
 
+# meiva:note
+# A scan narrows which paths the loop visits; strict scope stays independent of it because a whole-tree
+# audit reports links everywhere and rejects prose only where it was asked to. The changed check walks
+# its own changed set so a commit costs what it touched, which leaves the whole-tree link sweep to
+# `validate` — the mode CI runs on every change.
 def check(
     repo: Repository,
     *,
+    scan: frozenset[str] | None = None,
     strict_paths: frozenset[str] | None = None,
     strict_notes: dict[str, frozenset[int]] | None = None,
 ) -> Result:
     findings: list[Finding] = []
     notes = 0
-    for path in sorted(repo.files):
+    for path in sorted(repo.files if scan is None else scan):
         if not path.endswith(SOURCE_SUFFIXES):
             continue
         strict = strict_paths is not None and path in strict_paths

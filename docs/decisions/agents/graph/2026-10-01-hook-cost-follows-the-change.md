@@ -35,6 +35,13 @@ A commit-stage hook's cost must follow what the commit changes.
   imported only when a test file is judged.
 - **ESLint lints the changed frontend files at commit** (through the CI warning gate;
   the whole project when the lint setup changed) and the whole project at push.
+- **A whole-repository scope a hook cannot keep at commit becomes its own CI step.**
+  `check-code-comments` proved every note link, which cost a whole-tree parser index
+  and a parse of every noted source on each commit. It now scans only the sources its
+  comparison selected (2026-10-29, task #5750) and `.github/workflows/ci.yml` runs
+  `check.sh validate` — the sweep that proves every link and no prose — instead. The
+  `--all-files` step cannot cover it: that hook is in its `SKIP` list, so a narrowed
+  hook needs its own CI step rather than inheriting the merge gate.
 - **At push, a check runs when its inputs moved.** The branch-diff rerun costs about one
   commit, so it takes no load threshold and no lock. The artifact sweep runs only the
   hooks the nested run cannot cover (whole-repository hooks whose inputs the branch only
@@ -61,8 +68,9 @@ A commit-stage hook's cost must follow what the commit changes.
 ## Consequences
 
 - A verdict that depends on a file other than the one changed (time_bomb's
-  clock-threading rule across modules, a type-aware ESLint rule) can reach CI before it is
-  caught locally; the full scan is the merge gate, and ESLint's whole-project run is at
+  clock-threading rule across modules, a type-aware ESLint rule, a note link whose target
+  another change deleted) can reach CI before it is caught locally; the full scan is the
+  merge gate — the `validate` step for note links — and ESLint's whole-project run is at
   push.
 - A new per-file lint joins the pattern by taking `--only` and declaring its rule inputs;
   a new whole-project hook should be filtered by `files:` to its real inputs.
